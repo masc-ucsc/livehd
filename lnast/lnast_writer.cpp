@@ -193,7 +193,7 @@ void Lnast_writer::write_func_return() { write_func_marker("return"); }
 
 void Lnast_writer::write_dp_assign() {}
 
-// Task 1t. store( var, level0..levelN, value ) — the unified write/bind node:
+// store( var, level0..levelN, value ) — the unified write/bind node:
 //   * 0 levels                → `var = value`        (old scalar assign)
 //   * N levels                → `var[l0]…[lN] = value` (old tuple_set path)
 //   * typed bind (exactly 3   → `name = value : type`  (old `assign` signature /
@@ -202,7 +202,7 @@ void Lnast_writer::write_dp_assign() {}
 // be distinguished from a field-path store by arity alone — detect it by a
 // type-node last child.
 void Lnast_writer::write_store() {
-  // Task 1q — an io-entry store may carry a trailing `stages(min,max)`
+  // An io-entry store may carry a trailing `stages(min,max)`
   // annotation (identified by ntype). Exclude it from the value/type walk
   // and print it as a suffix.
   bool has_stages = false;
@@ -257,7 +257,7 @@ void Lnast_writer::write_store() {
   move_to_parent();
 }
 
-// Task 1t. declare( var, type_decl, const(qualifier), [value] ).
+// declare( var, type_decl, const(qualifier), [value] ).
 void Lnast_writer::write_declare() {
   move_to_child();
   write_lnast();  // var
@@ -350,7 +350,7 @@ void Lnast_writer::write_const() {
 
 void Lnast_writer::write_range() { write_n_ary("range"); }
 
-// Task 1q — stages(min, max) pipeline annotation. Unlike the n-ary ops it has
+// stages(min, max) pipeline annotation. Unlike the n-ary ops it has
 // no destination child: both children are payload consts.
 void Lnast_writer::write_stages() {
   print("stages(");
@@ -364,7 +364,7 @@ void Lnast_writer::write_stages() {
   move_to_parent();
 }
 
-// Task 1r — timecheck(ref, min, max): the `x@[N]` flop-free cycle-check
+// timecheck(ref, min, max): the `x@[N]` flop-free cycle-check
 // record. A statement; children are the checked ref + two payload consts.
 void Lnast_writer::write_timecheck() {
   print("timecheck(");
@@ -389,7 +389,7 @@ void Lnast_writer::write_type_spec() {
 
 void Lnast_writer::write_prim_type_none() { print("#none"); }
 
-// Task 1t/typesystem: the canonical integer type node (no-arg overload, invoked
+// The canonical integer type node (no-arg overload, invoked
 // by the dispatch switch). Children are the optional (max, min) range consts;
 // `#int` with none = unbounded, `#int(max)` = max only, `#int(max, min)` = both.
 void Lnast_writer::write_prim_type_int() {

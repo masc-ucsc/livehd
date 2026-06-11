@@ -51,7 +51,7 @@ struct Val {
   return static_cast<int32_t>(std::bit_width(static_cast<uint64_t>(v)));
 }
 
-// Task 1u-A — resolve a func_call callee name against the lnast registry the
+// Resolve a func_call callee name against the lnast registry the
 // same way the runner's lookup_callee does: exact top-module-name match, else
 // a UNIQUE "<module>.<name>" suffix match.
 [[nodiscard]] std::shared_ptr<Lnast> resolve_callee_lnast(std::string_view name,
@@ -81,10 +81,10 @@ struct Val {
   return nullptr;
 }
 
-// Task 1u-C — one pending time obligation: an asserted (min,max) landing
+// One pending time obligation: an asserted (min,max) landing
 // interval on a value's driver pin (`is_sink=false`, from an undischarged
 // `@[N]`) or on a GraphIO output sink (`is_sink=true`, the mod declared
-// cycle / the pipe declared range). The 1u-D checker verifies and REMOVES
+// cycle / the pipe declared range). The combined checker verifies and REMOVES
 // the paired pending_time attr; leftovers are compile errors.
 struct Pending_rec {
   hhds::Pin_class pin;
@@ -111,8 +111,8 @@ struct Io_setup {
 // Builds one hhds::Graph from one post-upass / post-SSA function-tree Lnast.
 class Tolg {
 public:
-  // `registry`/`lib` resolve pipe/mod call sites to Sub instances (1u-A).
-  // `async_default` is the upass.reset_style=async elaboration flag (2d-reg);
+  // `registry`/`lib` resolve pipe/mod call sites to Sub instances.
+  // `async_default` is the upass.reset_style=async elaboration flag;
   // a per-reg `:[sync=…]` attr beats it.
   Tolg(const std::shared_ptr<Lnast>& lnast, hhds::Graph* g, Io_setup io_setup, const uPass_tolg::Registry* registry,
        hhds::GraphLibrary* lib, bool async_default)
@@ -128,7 +128,7 @@ public:
         reset_async_default_(async_default) {}
 
 private:
-  // Task 1u-A — deferred stage-reg creation: a declare(reg)+stages does NOT
+  // Deferred stage-reg creation: a declare(reg)+stages does NOT
   // create the Flop immediately; the din store does, because only there the
   // effective depth is known (a Sub-fed stage reg realizes the DEFICIT
   // stage_N − callee_min; depth 0 = plain wire, no Flop at all). min/max ride
@@ -139,7 +139,7 @@ private:
     Lnast_nid   decl_nid;  // for located diagnostics
   };
 
-  // Task 1u-A — per call-result name: the callee output's declared stages
+  // Per call-result name: the callee output's declared stages
   // interval + kind, recorded when the Sub is created and consumed by the
   // following stage-reg din store for the range check + deficit narrowing.
   struct Sub_out {
@@ -152,7 +152,7 @@ private:
 public:
 
   void build() {
-    // [[1f]] module anchor: io-time cells (the to-positive port masks below)
+    // Module anchor: io-time cells (the to-positive port masks below)
     // are minted outside any statement — anchor them, and the graph io nodes
     // cgen reads for the module header, at the unit's `mod`/`comb` declaration
     // (stamped on the LNAST root by func_extract / the specialize clone).
@@ -211,13 +211,13 @@ public:
     }
     // Walk done: drop the statement anchor so finalize-time diagnostics are
     // unlocated rather than mislocated at whatever statement came last
-    // ([[1f]]; finalize_regs / create_stage_flop re-anchor per entity).
+    // (finalize_regs / create_stage_flop re-anchor per entity).
     cur_srcid_ = hhds::SourceId_invalid;
 
-    // 2d-reg — wire every declared reg's din/enable/reset/initial now that
+    // Wire every declared reg's din/enable/reset/initial now that
     // all stores and per-reg attr overrides have been seen.
     finalize_regs();
-    // 1a-mem — sanity-check the per-memory port allocation.
+    // Sanity-check the per-memory port allocation.
     finalize_mems();
 
     // Outputs: connect each output's bound driver to its graph output sink.
@@ -235,10 +235,10 @@ public:
       sink.connect_driver(it->second);
     }
 
-    // Task 1u-C — lower the declared per-output intervals as pendings.
+    // Lower the declared per-output intervals as pendings.
     stamp_output_pendings();
 
-    // 2d-reg guard — a stage declare whose din store never arrived would
+    // Guard — a stage declare whose din store never arrived would
     // silently drop the delay (and the value): hard error, never nil.
     if (!pending_stage_.empty()) {
       error_at(pending_stage_.begin()->second.decl_nid,
@@ -294,7 +294,7 @@ private:
       return it->second;
     }
     if (mem_map_.contains(key)) {
-      // 1a-mem — a memory name never binds a scalar pin; only indexed
+      // A memory name never binds a scalar pin; only indexed
       // accesses are supported. A warning (not an error): hardware regs may
       // legitimately be observed by other means (scan chain, future regref).
       Pass::warn("upass.tolg: memory '{}' used as a scalar value — whole-array reads are unsupported, wiring nil (0sb?)",
@@ -337,12 +337,12 @@ private:
     }
   }
 
-  // [[1f]]-E: the current statement's SourceId, re-minted into the graph's
+  // The current statement's SourceId, re-minted into the graph's
   // locator. Every cell make_node creates while lowering this statement is
   // stamped with it, so LGraph nodes resolve back to Pyrope source.
   hhds::SourceId cur_srcid_{0};
 
-  // [[1f]]-F: stage a located Diagnostic, then throw (Pass::error semantics —
+  // Stage a located Diagnostic, then throw (Pass::error semantics —
   // the downstream flush seam emits the staged record exactly once, so the
   // error carries a resolved span instead of no location). Anchor priority:
   // the given nid's SourceId, falling back to the current statement's.
@@ -447,30 +447,30 @@ private:
     } else if (N::is_ge(t)) {
       lower_negated(nid, Ntype_op::LT, false);
     } else if (N::is_timecheck(t)) {
-      // Task 1u-C — an `x@[N]` record the LNAST discharge could not decide
+      // An `x@[N]` record the LNAST discharge could not decide
       // ("checked"-marked ones are already done): lower it to a PENDING
-      // time-check attr on the named value's driver pin. The 1u-D checker
+      // time-check attr on the named value's driver pin. The combined checker
       // verifies and removes it; a leftover pending is a compile error.
       lower_timecheck(nid);
     } else if (N::is_func_call(t)) {
-      // Task 1u-A — pipe/mod call sites lower to Ntype_op::Sub instances;
+      // Pipe/mod call sites lower to Ntype_op::Sub instances;
       // anything unresolvable (runtime wrap/sat, comb recursion) stays a
       // HARD error inside lower_func_call.
       lower_func_call(nid);
     } else if (N::is_attr_set(t)) {
-      // 2d-reg — per-reg flop-attr overrides (reset_pin/sync/negreset/
+      // Per-reg flop-attr overrides (reset_pin/sync/negreset/
       // initial); anything else keeps the unhandled warn below.
       lower_attr_set(nid);
     } else if (N::is_tuple_get(t)) {
-      // 1a-mem — an indexed read of a declared memory becomes a read port;
+      // An indexed read of a declared memory becomes a read port;
       // any other surviving tuple_get keeps the unhandled warn inside.
       lower_tuple_get(nid);
     } else if (N::is_tuple_add(t)) {
-      // 1a-mem — an all-const tuple literal is recorded as a potential array
+      // An all-const tuple literal is recorded as a potential array
       // initializer; anything else keeps the unhandled warn inside.
       lower_tuple_add(nid);
     } else if (N::is_for(t)) {
-      // Task 2u — a `for` node reaching tolg means uPass_runner::unroll_for
+      // A `for` node reaching tolg means uPass_runner::unroll_for
       // could NOT unroll it: the iterable resolved to neither a comptime range
       // nor a known tuple shape. Pyrope `for` is comptime-only (must fully
       // unroll), so this is a user error (a runtime/unknown iterable), not a
@@ -483,7 +483,7 @@ private:
     }
   }
 
-  // attr_set(ref(target), const(key), value) — 2d-reg: record the per-reg
+  // attr_set(ref(target), const(key), value) — record the per-reg
   // flop-attr overrides consumed by finalize_regs. `:[reset_pin=…, sync=…,
   // negreset, initial=N]` (04b-attributes.md); a per-reg `sync` beats the
   // upass.reset_style flag; `reset_pin=false` opts out of reset (only valid
@@ -521,7 +521,7 @@ private:
     }
   }
 
-  // 2d-reg — wire each declared reg's din / enable / reset_pin / initial /
+  // Wire each declared reg's din / enable / reset_pin / initial /
   // async / negreset after the whole body has been lowered (stores and attr
   // overrides arrive in any order relative to the declare).
   void finalize_regs() {
@@ -663,7 +663,7 @@ private:
       return;
     }
     auto lhs_name = lnast_->get_name(lhs);
-    // Task 1u-A — deferred stage-reg creation: the din store knows the
+    // Deferred stage-reg creation: the din store knows the
     // effective depth (deficit narrowing against a Sub callee; 0 = wire).
     if (auto pit = pending_stage_.find(lhs_name); pit != pending_stage_.end()) {
       auto pending = pit->second;
@@ -694,7 +694,7 @@ private:
     if (Lnast_ntype::is_ref(lnast_->get_type(rhs))) {
       const std::string rhs_name(lnast_->get_name(rhs));
       // Copy BEFORE inserting: operator[] may rehash and invalidate the
-      // found iterator (the task-1i type_info_map UAF all over again).
+      // found iterator (the type_info_map rehash-invalidation UAF all over again).
       if (auto tit = tuple_recs_.find(rhs_name); tit != tuple_recs_.end()) {
         auto rec_copy                      = tit->second;
         tuple_recs_[std::string(lhs_name)] = std::move(rec_copy);
@@ -710,7 +710,7 @@ private:
     record(lhs_name, v.pin, v.mw);
   }
 
-  // Task 1q — declare(ref(name), type, const("reg")) [+ stages(min,max)]:
+  // declare(ref(name), type, const("reg")) [+ stages(min,max)]:
   // create the Flop cell (the first Flop on the Pyrope->LG path). The name
   // binds to the q pin so subsequent READS see q; the din store above wires
   // the input. Inserted pipeline flops carry the declared stages range on
@@ -743,7 +743,7 @@ private:
       return;
     }
 
-    // stages(min,max) trailing child — Task 1u-A: DEFER the Flop creation to
+    // stages(min,max) trailing child — DEFER the Flop creation to
     // the din store, which knows the effective depth (a Sub-fed stage reg
     // realizes the deficit stage_N − callee_min; depth 0 = wire, no Flop).
     // Safe because every emitted shape stores immediately after the declare
@@ -1603,7 +1603,7 @@ private:
     return {bits, true};
   }
 
-  // Task 1u-A — materialize a deferred stage reg at its din store. Effective
+  // Materialize a deferred stage reg at its din store. Effective
   // depth: plain RHS keeps the declared (min,max); a Sub call result narrows
   // to the DEFICIT against the callee (Phase-1 realization = callee at its
   // declared min, so deficit = stage_N − callee_min; for a mod callee the
@@ -1676,7 +1676,7 @@ private:
         }
         emin = emax = 0;
       }
-      // Task 1u-C — the stage pick pins the REALIZED split: the callee
+      // The stage pick pins the REALIZED split: the callee
       // instance contributes its declared min (Phase-1 realization), the
       // caller-side deficit flop the remaining n − cmin. Stamping the full
       // pick on the instance would double-count the deficit.
@@ -1721,7 +1721,7 @@ private:
     record(name, q, v.mw);
   }
 
-  // Task 1u-A — func_call(dst_tmp, callee_name, args...) → an Ntype_op::Sub
+  // func_call(dst_tmp, callee_name, args...) → an Ntype_op::Sub
   // instance of the callee's graph. Args are positional refs/consts (mapped
   // to the callee's io_meta input order) or named store(argname, value)
   // children. The single output binds the dst name with the same
@@ -1744,7 +1744,7 @@ private:
       return;
     }
 
-    // Task 1m — a resolved `import` call is comptime scaffolding: constprop
+    // A resolved `import` call is comptime scaffolding: constprop
     // bound its namespace bundle / lambda ref and every consumer folded (an
     // UNRESOLVED live import never reaches tolg — pass.upass errors or the
     // kernel defers). Nothing lowers to hardware here.
@@ -1759,7 +1759,7 @@ private:
     std::string_view               kind;             // callee lambda kind ("" for an lg: black box)
     std::shared_ptr<Lnast>         callee;            // kept alive: cio_ptr may point into its io_meta()
 
-    // Task 1m-C — an `import("lg:foo")` binding folds the callee to the string
+    // An `import("lg:foo")` binding folds the callee to the string
     // 'lg:foo'. Instantiate the foreign graph as a BLACK BOX: its GraphIO (the
     // kernel load_merge'd the lg: inputs into lib_) supplies the IO to wire by
     // name; cgen emits the instance by name and the body rides along in the
@@ -1870,7 +1870,7 @@ private:
         if (val.is_invalid()) {
           continue;
         }
-        // Task 1m — namespace receiver marker: `lib.scale(args)` through an
+        // Namespace receiver marker: `lib.scale(args)` through an
         // import tuple carries the receiver in a `__ufcs_arg` store, but the
         // receiver names the NAMESPACE — it is not an argument of a no-self
         // callee. (A true `ref self` mod method splices in the runner and
@@ -1977,7 +1977,7 @@ private:
       set_sign(out_dpin);
       record(dst_name, to_positive(out_dpin, mw), mw);
     }
-    // Task 1u-C — the instance is a timed crossing: stamp its declared
+    // The instance is a timed crossing: stamp its declared
     // latency interval (a following stage[N] re-stamps the pinned pick).
     // Bare-pipe unconstrained max (cmax<cmin) propagates as min (the
     // Phase-1 realization) — the io stages remain the caller-facing truth.
@@ -1993,7 +1993,7 @@ private:
     }
   }
 
-  // Task 1u-C — lower an undischarged timecheck statement to a pending
+  // Lower an undischarged timecheck statement to a pending
   // attr + record for the checker.
   void lower_timecheck(const Lnast_nid& nid) {
     auto ref = lnast_->get_first_child(nid);
@@ -2418,15 +2418,15 @@ private:
   std::vector<std::string>                                      out_names_;
   WriteMap                                                      empty_writes_;
 
-  // Task 1q — reg lowering state. reg_map_ holds each declared reg's Flop
+  // Reg lowering state. reg_map_ holds each declared reg's Flop
   // node (reads resolve to its q via pin_map_; stores rebind the shadow
   // din/enable keys). clock_*/reset_* lazily bind the clock/reset graph
-  // inputs. reg_info_/reg_order_ carry the 2d-reg finalize metadata for
+  // inputs. reg_info_/reg_order_ carry the finalize metadata for
   // PLAIN regs (stage regs live only in reg_map_/flop_depth_).
   absl::flat_hash_map<std::string, hhds::Node_class> reg_map_;
   absl::flat_hash_map<std::string, Reg_info>         reg_info_;
   std::vector<std::string>                           reg_order_;
-  // 1a-mem — declared memories (array-typed regs + mut/const arrays), the
+  // Declared memories (array-typed regs + mut/const arrays), the
   // branch-path stack lower_if maintains for their write enables, the
   // recorded tuple literals (array initializers / __memory configs), and the
   // bound __memory results.
@@ -2453,9 +2453,9 @@ private:
   absl::flat_hash_map<std::string, Pending_stage> pending_stage_;
   absl::flat_hash_map<std::string, Sub_out>       sub_out_stages_;
 
-  // Task 1u-C/D — checker inputs gathered while building: pending records,
+  // Checker inputs gathered while building: pending records,
   // per-Flop effective crossing depth, per-Sub pinned latency interval.
-  // 2d-reg adds plain_reg_flops_ (state/stage classification candidates) and
+  // Also adds plain_reg_flops_ (state/stage classification candidates) and
   // inserted_flops_ (the LN-inserted pipe output flops — narrowing targets).
   std::vector<Pending_rec>                                       pending_checks_;
   absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>     flop_depth_;
@@ -2464,10 +2464,10 @@ private:
   absl::flat_hash_set<uint64_t>                                  inserted_flops_;
 
 public:
-  // Task 1u-C — lower the partition's declared per-output intervals as
+  // Lower the partition's declared per-output intervals as
   // pending checks on the GraphIO output sinks (mod: the @[N] landing cycle;
   // pipe: the declared range — comb bodies must land at exactly that range,
-  // sigma>0 narrowing lights up with 2d). `@[]`-opted-out outputs (nil) are
+  // sigma>0 narrowing lights up here). `@[]`-opted-out outputs (nil) are
   // skipped. Called at the end of build().
   void stamp_output_pendings() {
     const auto kind = lnast_->get_lambda_kind();
@@ -2541,12 +2541,12 @@ public:
   [[nodiscard]] absl::flat_hash_set<uint64_t>&&                              take_inserted_flops() { return std::move(inserted_flops_); }
 };
 
-// Task 1u-D / 2d-reg — the combined pipe/mod LG time checker (ex-1q-D,
+// The combined pipe/mod LG time checker (ex-1q-D,
 // written once for both kinds). Runs at the tolg seam on the just-built
 // graph:
 //   1. Tarjan SCC over the node digraph (flop din->q edges included, i.e.
 //      node-level cycles). A non-trivial SCC must contain a STATE-eligible
-//      flop (a plain reg — 2d-reg); an SCC with only stage/inserted flops is
+//      flop (a plain reg); an SCC with only stage/inserted flops is
 //      a cross-stage register feedback error, one with no flop at all is the
 //      classic combinational-loop error. A plain reg is also STATE when its
 //      `enable` is driven (conditional write = enable-encoded hold feedback,
@@ -3172,7 +3172,7 @@ private:
   absl::flat_hash_map<uint64_t, TR>                          tr_;
 };
 
-// Task 1u-A — transitive clock need. A module needs a clock when its own
+// Transitive clock need. A module needs a clock when its own
 // tree declares a reg (stage decls synthesize reg declares) or when any
 // pipe/mod CALLEE transitively needs one (its instance's minted clock pin
 // must be forwarded). Memoized over the registry; an instantiation cycle
@@ -3442,7 +3442,7 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
     declare(e, /*is_input=*/false);
   }
 
-  // Task 1q/1u — implicit clock: when the tree holds state (own regs OR,
+  // Implicit clock: when the tree holds state (own regs OR,
   // transitively, any pipe/mod callee instance — its minted clock must be
   // forwarded) and the partition has no clk/clock input, mint a 1-bit
   // unsigned "clock" graph input for the flops'/instances' clock_pin.
@@ -3566,7 +3566,7 @@ void uPass_tolg::register_io(const std::shared_ptr<Lnast>& lnast, std::string_vi
   if (!lnast || lnast->io_meta().empty()) {
     return;  // not a lowerable module (e.g. the empty file-root tree)
   }
-  // Task 1p — a deferred template (untyped/var-args/generic signature) emits no
+  // A deferred template (untyped/var-args/generic signature) emits no
   // LGraph: it is realized per call site (comb inlines, pipe/mod/fluid
   // specialize into a concrete clone). Never reserve a GraphIO for it, or a
   // call site could mis-bind to a port-less interface.
@@ -3581,7 +3581,7 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
   if (!lnast || lnast->io_meta().empty()) {
     return nullptr;  // not a lowerable module (e.g. the empty file-root tree)
   }
-  // Task 1p — a deferred template produces no LGraph (see register_io). A
+  // A deferred template produces no LGraph (see register_io). A
   // template selected as a synthesis top simply yields no module; it is never
   // a hard error at definition time (contract decision 3).
   if (lnast->is_template()) {
@@ -3597,7 +3597,7 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
   Tolg builder(lnast, g_shared.get(), std::move(io_setup), &registry, &lib, reset_style == "async");
   builder.build();
 
-  // Task 1u-D — the combined pipe/mod time checker at the tolg seam.
+  // The combined pipe/mod time checker at the tolg seam.
   {
     const auto kind = lnast->get_lambda_kind();
     if (kind == "pipe" || kind == "mod") {

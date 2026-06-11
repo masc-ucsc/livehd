@@ -77,7 +77,7 @@ private:
   std::unordered_map<std::string, Dlop>                                  temp_scalar_value;
   std::unordered_map<std::string, std::unordered_map<std::string, Dlop>> temp_bundle_value;
 
-  // Task 1m — import-binding captures. `fcall(___N, 'import', '<str>')`
+  // Import-binding captures. `fcall(___N, 'import', '<str>')`
   // records ___N → raw import-string const text here; a subsequent
   // unconditional `store NAME ___N` promotes it to latest_outer_import.
   // The capture prelude then REPLICATES the import call at the head of any
@@ -108,7 +108,7 @@ private:
 
   bool emit_io_tuple_from_decl(const std::shared_ptr<Lnast>& dst, const Lnast_nid& io_idx);
 
-  // Task 1p — stamp the deferred-template flag when the extracted signature is
+  // Stamp the deferred-template flag when the extracted signature is
   // not fully typed: an untyped non-`self` input, a `...args` var-arg param
   // (default-slot const "..."), or any generic. Walks the freshly-copied io
   // `inputs` tuple_add directly (io_meta is not populated until the SSA upass

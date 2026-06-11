@@ -233,7 +233,7 @@ void Lnast_prp_writer::write_if() {
 
 // ── declare ─────────────────────────────────────────────────────────────────
 
-// Task 1t — `declare( ref(var), type_decl, const(qualifier), [value] )`.
+// `declare( ref(var), type_decl, const(qualifier), [value] )`.
 // Emitted as a standalone Pyrope declaration `<qualifier> var[:type][ = value]`.
 // In post-uPass LNAST the initial value is a SEPARATE `store` statement, so most
 // declares carry no value child; the following `store(var, value)` then prints a
@@ -337,7 +337,7 @@ std::string Lnast_prp_writer::render_type() {
 
 // ── assign ────────────────────────────────────────────────────────────────────
 
-// Task 1t — `store(var, level0..levelN, value)`. 0 levels → `var = value`
+// `store(var, level0..levelN, value)`. 0 levels → `var = value`
 // (the old assign spelling, decl keyword preserved); ≥1 level →
 // `var[level0]…[levelN] = value` (the old tuple_set spelling). The level-walk
 // loop handles both: with no middle siblings it emits just `var = value`.

@@ -14,7 +14,7 @@ static upass::uPass_plugin plugin_semacheck("semacheck", upass::uPass_wrapper<uP
 
 namespace {
 
-// Task 1t — derived / read-only attributes. These are READ-ONLY views computed
+// Derived / read-only attributes. These are READ-ONLY views computed
 // from the type or bundle (see the LiveHD docs and
 // upass/attributes is_builtin_attr Category A) — an `attr_set` of any is a
 // compile error: read them with `.[attr]` (attr_get), never write them.
@@ -46,7 +46,7 @@ std::string_view derived_attr_violation(std::string_view attr) {
   return {};
 }
 
-// Task 1t — declare-once. The storage kind of a `declare` is the FIRST
+// Declare-once. The storage kind of a `declare` is the FIRST
 // space-separated token of its mode const ("const", "mut", "reg", "type", …).
 // (Kept for parity with the relocated lnastfmt check; all kinds redeclare-error.)
 

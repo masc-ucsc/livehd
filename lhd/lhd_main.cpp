@@ -1,6 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-// lhd — the stateless, hermetic LiveHD CLI kernel (task 1y-bazel).
+// lhd — the stateless, hermetic LiveHD CLI kernel.
 // See lhd.hpp and the LiveHD docs.
 
 #include <exception>
@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
     return res.exit_code;
   }
 
-  // `lhd lsp` — the Pyrope LSP server (task 1n). JSON-RPC owns stdio, so no
+  // `lhd lsp` — the Pyrope LSP server. JSON-RPC owns stdio, so no
   // result envelope is written; run_stdio() reassigns fd 1 internally and
   // drives the front-end passes directly (no engine/registry init needed).
   if (opts.command == "lsp") {

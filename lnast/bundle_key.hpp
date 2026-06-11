@@ -36,15 +36,6 @@ inline std::string_view get_first_level_name(std::string_view key) {
   return get_first_level(key);
 }
 
-inline int get_first_level_pos(std::string_view key) {
-  // Canonical keys: unnamed entries are bare decimals (`"0"`, `"1"`, …).
-  // Returns -1 for empty, named, or attribute keys.
-  if (key.empty() || !std::isdigit(static_cast<unsigned char>(key.front()))) {
-    return -1;
-  }
-  return str_tools::to_i(key);
-}
-
 inline std::string_view get_last_level(std::string_view key) {
   auto n = key.rfind('.');
   if (n == std::string::npos) {

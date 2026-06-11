@@ -62,7 +62,7 @@ Dlop uPass_attributes::narrow_for_lhs(std::string_view type_src, const Dlop& v, 
   return is_signed ? saturate_signed(v, ti->bits) : saturate_unsigned(v, ti->bits);
 }
 
-// Task 1t — `wrap`/`sat` lower to a library call
+// `wrap`/`sat` lower to a library call
 //   func_call(dst, ref("wrap"|"sat"), store(ref("v"), value), store(ref("type"), ref(lhs)))
 // Narrow the value to the lhs's declared type (read via the `type=` arg) and
 // publish it on the call's dst tmp; the following `store(lhs, dst)` then

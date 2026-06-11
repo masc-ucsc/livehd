@@ -17,8 +17,8 @@ namespace {
 // Returns true for LNAST statement types whose first child is the write
 // destination (LHS) and whose remaining children are read operands (RHS).
 // This range covers: dp_assign, declare, store, delay_assign, all arithmetic/
-// logic/comparison/shift/bit-manipulation ops up to `ge` inclusive. (Task 1t —
-// `assign` was deleted; `dp_assign` is now the low anchor. store/declare are in
+// logic/comparison/shift/bit-manipulation ops up to `ge` inclusive.
+// (`assign` was deleted; `dp_assign` is now the low anchor. store/declare are in
 // range; the caller excludes declare + store-as-tuple_set from versioning.)
 // Excluded: if, for, while, func_*, stmts, io, top, ref, const, tuple_*,
 // attr_*, cassert, type_*, and all type-leaf nodes.
@@ -49,7 +49,7 @@ Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid
   }
   if (Lnast_ntype::is_prim_type_int(tty)) {
     ti.kind = Io_kind::integer;
-    // Task 1t — canonical integer: derive bits/signed from the (max,min)
+    // Canonical integer: derive bits/signed from the (max,min)
     // range children ("nil" = unbounded). signed ⇐ min<0; bits ⇐ both known.
     auto                 max_nid = lnast->get_first_child(type_nid);
     std::optional<Dlop> max_v;
@@ -200,7 +200,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   std::vector<Flat_field> flat_inputs;
   std::vector<Flat_field> flat_outputs;
 
-  // Task 1q — read a `stages(min,max)` node's two const children. A `nil`
+  // Read a `stages(min,max)` node's two const children. A `nil`
   // text (the `@[]` explicit no-check opt-out on a mod output) harvests as
   // -1: distinguishable from a declared `@[0]` (which IS a real check that a
   // mod output is a combinational feedthrough).
@@ -246,7 +246,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     auto rhs_nid  = lnast->get_sibling_next(name_nid);
     auto type_nid = rhs_nid.is_invalid() ? rhs_nid : lnast->get_sibling_next(rhs_nid);
 
-    // Task 1q — the trailing stages(min,max) annotation either follows the
+    // The trailing stages(min,max) annotation either follows the
     // optional type child or stands in its place (untyped entry). Identify
     // by ntype, harvest, and drop it from the type slot. A composite entry's
     // stages propagates to every flattened leaf (each leaf is one output
@@ -265,7 +265,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
 
     // Composite tuple type → recurse on each inner assign with a dotted prefix.
     if (!type_nid.is_invalid() && Lnast_ntype::is_tuple_add(lnast->get_type(type_nid))) {
-      // Task 1k — an INLINE tuple type on `self` would flatten it into dotted
+      // An INLINE tuple type on `self` would flatten it into dotted
       // leaves (`self.a`, `self.b`) and break the inliner's `has_self`
       // detection (io.inputs[0].name == "self"). Only named self types are
       // supported; reject with a clean error instead of mis-binding later.
@@ -291,14 +291,14 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
         && lnast->get_name(rhs_nid) == "ref") {
       is_ref = true;
     }
-    // Task 1p — var-arg param: the default-value slot carries the `...`
+    // Var-arg param: the default-value slot carries the `...`
     // sentinel (mirrors the `ref` marker above). Only meaningful on an input.
     bool is_vararg = false;
     if (collect_is_ref && !rhs_nid.is_invalid() && Lnast_ntype::is_const(lnast->get_type(rhs_nid))
         && lnast->get_name(rhs_nid) == "...") {
       is_vararg = true;
     }
-    // Task 1k — a NAMED type annotation (`self:t1`, `x:Point`) arrives as a
+    // A NAMED type annotation (`self:t1`, `x:Point`) arrives as a
     // `ref` type child (prp2lnast emit_type_expr). Record the typename so the
     // inliner's typed-self does-check can resolve the declared fields.
     std::string type_name;
@@ -343,7 +343,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       staging->add_child(a, Lnast_node::create_ref(f.name));
       staging->add_child(a, Lnast_node::create_const(is_input && f.is_varargs ? "..." : is_input && f.is_ref ? "ref" : "nil"));
       if (f.bits > 0) {
-        // Task 1t — re-emit the canonical prim_type_int(max,min) from the
+        // Re-emit the canonical prim_type_int(max,min) from the
         // flat field's (bits, signed).
         auto ty = staging->add_child(a, Lnast_ntype::create_prim_type_int());
         if (f.is_signed) {
@@ -354,7 +354,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
           staging->add_child(ty, Lnast_node::create_const("0"));
         }
       }
-      // Task 1q — re-emit the trailing stages(min,max) annotation so the
+      // Re-emit the trailing stages(min,max) annotation so the
       // post-SSA io tree keeps the pipe contract visible (the LN pipe upass
       // and lnast_to_slop read io_meta, but the dump stays source-of-truth).
       // A mod re-emits EVERY output's slot: `@[0]` (0,0) is a real check the
@@ -408,7 +408,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   for (auto child : lnast->children(stmts_nid)) {
     auto type = lnast->get_type(child);
 
-    // Task 1t — a `store` with ≥3 children is the tuple_set form (an in-place
+    // A `store` with ≥3 children is the tuple_set form (an in-place
     // field write `t.f = v`), which must NOT be SSA-versioned: both `t.x = …`
     // and `t.y = …` mutate the same bundle version. Only a 2-child store (the
     // scalar/wire write) versions like `assign`. (tuple_set itself is excluded
@@ -424,7 +424,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       }
       has_dest = (nchild <= 2);
     }
-    // Task 1t — a `declare(var, type, mode)` introduces a name + type but is
+    // A `declare(var, type, mode)` introduces a name + type but is
     // NOT a value write (the value is a separate `store`). It must not be
     // SSA-versioned, and must not mark the var as "seen" — otherwise the
     // first value store becomes a spurious reassignment (var → var___ssa_1),

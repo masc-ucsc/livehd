@@ -1,4 +1,0 @@
-{
-  %{lib} = !{import}("library.prp")
-  // @{print}("123")
-}

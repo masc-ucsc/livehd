@@ -55,7 +55,7 @@ std::optional<std::vector<Call_actual>> collect_call_actuals(
       }
       Call_actual actual;
       const auto  key = lm.current_text();
-      // __ref_arg (pass-by-ref) and __ufcs_arg (task 1k UFCS receiver) are
+      // __ref_arg (pass-by-ref) and __ufcs_arg (UFCS receiver) are
       // POSITIONAL markers, not named arguments.
       actual.is_named = key != ref_arg_marker && key != ufcs_arg_marker;
       if (actual.is_named) {
@@ -187,7 +187,7 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
   }
   if (text.starts_with("lg:")) {
     // Bind the url itself; the call sites lower to Sub instances at tolg
-    // (task 1m-E wires the GraphLibrary lookup + missing-graph diagnostics).
+    // (wires the GraphLibrary lookup + missing-graph diagnostics).
     store_trivial(dst, str_const(text));
     return;
   }

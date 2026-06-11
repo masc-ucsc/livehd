@@ -44,7 +44,7 @@ public:
     stmts_stack_.pop();
   }
   // True while the cursor is the top-level (file-scope) stmts — nothing has
-  // been pushed. Task 1m uses this to validate `pub` placement.
+  // been pushed. Used to validate `pub` placement.
   bool at_top_stmts() const { return stmts_stack_.empty(); }
 
   // ── naming ───────────────────────────────────────────────────────────────
@@ -69,17 +69,14 @@ public:
   std::string create_red_xor_stmts(std::string_view var_name);
 
   std::string create_sra_stmts(std::string_view a_var, std::string_view b_var);
-  std::string create_pick_bit_stmts(std::string_view a_var, std::string_view pos);
   std::string create_sext_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_bit_and_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_bit_or_stmts(const std::vector<std::string>& var);
   std::string create_bit_xor_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_shl_stmts(std::string_view a_var, std::string_view b_var);
-  void        create_dp_assign_stmts(std::string_view a_var, std::string_view b_var);
   void        create_assign_stmts(std::string_view a_var, std::string_view b_var);
   void        create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits);
   void        create_func_call(std::string_view out_tup, std::string_view fname, std::string_view inp_tup);
-  void        create_named_tuple(std::string_view lhs_var, const std::vector<std::pair<std::string, std::string>>& rhs);
   std::string create_tuple_get(std::string_view fields);
   std::string create_tuple_get(std::string_view tup_var, std::string_view field_var);
 

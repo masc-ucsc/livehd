@@ -293,7 +293,7 @@ void uPass_constprop::process_assign() {
       // replace. Also skip when RHS carries names of its own (full copy).
       auto existing = st().get_bundle(lhs_text);
 
-      // Task 1t — named-type default materialization. When LHS was declared with
+      // Named-type default materialization. When LHS was declared with
       // a named type `ref(NAMED)` and has no value yet, use NAMED's resolved
       // bundle (its default field values + per-field types) as the base, then
       // overlay the init bundle: named init fields override by name; positional
@@ -438,7 +438,7 @@ void uPass_constprop::process_assign() {
     }
   } else if (is_type(Lnast_ntype::Lnast_ntype_const)) {
     Dlop v = current_pyrope_value();
-    // Task 1m-B — named-type skeleton materialization for a `nil` initializer.
+    // Named-type skeleton materialization for a `nil` initializer.
     // `mut w:tn = nil` (tn = (a:u8=nil, b:string="")) should leave w carrying
     // tn's fields — the declaration COPIES the type, the nil overrides nothing.
     // Without this, the const path below stores only field "0"=nil, so a later
@@ -465,14 +465,14 @@ void uPass_constprop::process_assign() {
         }
       }
     }
-    // Task 1t — coerce a known-negative literal to its unsigned N-bit pattern
+    // Coerce a known-negative literal to its unsigned N-bit pattern
     // on the var's FIRST scalar write (the declaration's initializer), so
     // constprop's own folding of later reads sees the unsigned value. The
     // gate mirrors the attributes side: the value must sign-extend a KNOWN 1
     // past the declared width (`bit_test`+!`unknown_bit_test` — `0sb?` keeps
     // its natural width), and `!st().has_trivial` restricts it to the first
     // write so per-statement wrap/sat reassignments stay in control.
-    // Task 1b — reinterpret a known-negative first-write literal to its
+    // Reinterpret a known-negative first-write literal to its
     // unsigned pattern via `v & max` (for uN, max is the N-bit all-ones mask).
     // No width/to_i. `is_negative()` is false for an unknown sign bit (`0sb?`),
     // so that case keeps its natural width (see valid_simple); a known-1 sign
@@ -1084,7 +1084,7 @@ void uPass_constprop::process_if() {
 // process_stmts to any pass, and pops AFTER dispatching process_stmts_post,
 // so the pub harvest below still observes the block scope's depth.
 void uPass_constprop::process_stmts_post() {
-  // Task 1m — when the FILE-scope block is about to pop (stack is exactly
+  // When the FILE-scope block is about to pop (stack is exactly
   // [function, top-block]; nested arms/loops/inline frames sit deeper),
   // capture the folded value of every `pub` value export into the Lnast's
   // pub-values side channel. The kernel synthesizes the `<unit>.__pub`
@@ -1524,7 +1524,7 @@ static bool has_first_level_shape(const std::shared_ptr<Bundle const>& b) {
   return b->has_named_top() || b->has_unnamed_top();
 }
 
-// Task 1g — decode a primitive type token (`u32`/`s8`/`i4`/`int`/`integer`/
+// Decode a primitive type token (`u32`/`s8`/`i4`/`int`/`integer`/
 // `uint`/`unsigned`/`bool`/`string`) in `does`/`equals`/`case` operand
 // position to its kind+envelope. prp2lnast leaves these as a bare ref (no read
 // site) precisely so this decode can run. Returns nullopt for any other name.
@@ -2704,7 +2704,7 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
   return true;
 }
 
-// Task 1m — resolve a live `import("…")` call against the function registry
+// Resolve a live `import("…")` call against the function registry
 // (the LiveHD docs §1/§2). The cursor sits on the const
 // "import" callee; the next sibling is the const import string.
 //
@@ -2715,8 +2715,8 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
 //                           string 'u.tree' (the fcall-ref-const lambda-value
 //                           form; `equals` compares these strings — tree-url
 //                           identity).
-//   import("lg:graph")    — black-box graph ref (task 1m-E lowers the call
-//                           sites at tolg); bound as the string 'lg:graph'.
+//   import("lg:graph")    — black-box graph ref (the call sites are lowered
+//                           at tolg); bound as the string 'lg:graph'.
 //
 // Resolution consults only the registry (completed in-invocation units +
 // loaded ln: forests). A miss records a pending import — pass.upass either
@@ -2748,7 +2748,7 @@ void uPass_constprop::process_func_call() {
     // Dlop-form callee (`import`, `step`, `implies` — see prp2lnast's
     // make_call).
     //
-    // Task 1m — a live `import("…")` resolves here (dead branches never
+    // A live `import("…")` resolves here (dead branches never
     // dispatch, so liveness is exactly "we got here"): the tuple form binds
     // a pub-namespace bundle, the `ln:` url form a lambda tree-name string.
     // Unresolved → recorded for pass.upass (error or kernel defer).
@@ -2799,7 +2799,7 @@ void uPass_constprop::process_func_call() {
     return;
   }
 
-  // Task 1t — `wrap`/`sat` narrowing call: copy the `v=` arg value through to
+  // `wrap`/`sat` narrowing call: copy the `v=` arg value through to
   // the dst tmp. The following `store(lhs, dst)` then carries it to lhs. When
   // narrowing actually changes the value, attributes publishes the narrowed
   // result via runner_fold_fn (which current_prim_value consults first), so
@@ -3237,7 +3237,7 @@ void uPass_constprop::process_tuple_get() {
       st().tget_origin.insert_or_assign(dst, key);  // See the trivial branch
     }
   } else if (named_field_absent) {
-    // Task 1m-B — reading a named field that does not exist on a resolved
+    // Reading a named field that does not exist on a resolved
     // multi-field tuple is a COMPILE ERROR (03-bundle.md; `has` is the sanctioned
     // existence probe, not `field == nil`). `src_bundle` is the authoritative
     // field-set: it carries every declared field — including typed-but-nil ones
@@ -3620,7 +3620,7 @@ upass::Emit_decision uPass_constprop::classify_statement_impl() {
     return upass::Emit_decision::emit_node();
   }
 
-  // Task 2u — keep a comptime init store for a `mut` var. If the mut is later
+  // Keep a comptime init store for a `mut` var. If the mut is later
   // reassigned with a runtime value inside a comptime-eliminated block (an
   // `if true {…}` arm or an unrolled loop iteration), the body is copied
   // verbatim (not SSA-versioned), so the in-block read emits a bare `acc` whose
@@ -3755,7 +3755,7 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
       return classify_vote();
     }
     // mask = ((1 << (end - start + 1)) - 1) << start — all Dlop arithmetic,
-    // no to_i / width / range guards (task 1g; mirrors apply_range_mask).
+    // no to_i / width / range guards (mirrors apply_range_mask).
     auto one   = Dlop::create_integer(1);
     auto width = range_end.sub_op(range_start)->add_op(*one);
     final_mask = *one->shl_op(*width)->sub_op(*one)->shl_op(range_start);

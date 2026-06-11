@@ -8,7 +8,7 @@
 #include "upass_core.hpp"
 
 // uPass_semacheck — semantic-legality checks on the tree closest to user
-// source (goal 1h). These are the user-facing checks formerly embedded in
+// source. These are the user-facing checks formerly embedded in
 // pass/lnastfmt, relocated so lnastfmt can be a pure compiler-internal
 // structural validator (and so the LSP pipeline needs no lnastfmt stage):
 //

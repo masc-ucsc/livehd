@@ -237,7 +237,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 5 : return "negreset";
         case 6 : return "posclk";
         case 7 : return "reset_pin";
-        // Task 1q — pipeline depth range (comptime const pins). Unset =>
+        // Pipeline depth range (comptime const pins). Unset =>
         // depth 1 / don't check (today's behavior bit-for-bit). One Flop
         // cell models the whole N-deep shift register — depth is a cell
         // PARAMETER, never replicated cells. min==max==d => fixed depth-d;

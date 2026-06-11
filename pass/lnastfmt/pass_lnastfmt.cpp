@@ -227,7 +227,7 @@ static void check_unwritten_tmps(const Lnast* ln) {
   }
 }
 
-// Goal 1h — the user-facing semantic checks that used to live here
+// The user-facing semantic checks that used to live here
 // (derived/read-only attr_set rejection, declare-once + shadowing) moved to
 // upass/semacheck, which emits located core/diag records on the source tree.
 // What remains below is purely structural validation — "the compiler built a
@@ -365,7 +365,7 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
                     Lnast_ntype::debug_name(ln->get_type(c1)));
         return;
       }
-      // (Derived/read-only attr_set rejection moved to upass/semacheck — goal 1h.)
+      // (Derived/read-only attr_set rejection moved to upass/semacheck.)
     }
     if (Lnast_ntype::is_attr_get(type)) {
       auto c0 = ln->get_first_child(it);
@@ -403,7 +403,7 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       }
     }
 
-    // Task 1t — store(var, level0..levelN, value): child 0 is the LHS var
+    // store(var, level0..levelN, value): child 0 is the LHS var
     // (a ref), and there is at least one more child (the value). No type slot
     // (a store can never retype — "type only at declaration").
     if (Lnast_ntype::is_store(type)) {
@@ -421,7 +421,7 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       }
     }
 
-    // Task 1t — declare(var, type, const(mode), [value]): child 0 a ref (var),
+    // declare(var, type, const(mode), [value]): child 0 a ref (var),
     // child 1 a type node (prim_type_*/comp_type_*/expr_type/none_type), child
     // 2 a const (the mode). An optional 4th child is the init value.
     if (Lnast_ntype::is_declare(type)) {
@@ -439,7 +439,7 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
                     Lnast_ntype::debug_name(ln->get_type(c0)));
         return;
       }
-      // child 1 is a type node, or a `ref` (a named type — task 1t, the ref
+      // child 1 is a type node, or a `ref` (a named type — the ref
       // resolves to the named type's symbol-table binding).
       if (!Lnast_ntype::is_type(ln->get_type(c1)) && !Lnast_ntype::is_ref(ln->get_type(c1))) {
         Pass::error("lnastfmt: {} declare child 1 {} (type) must be a type node or named-type ref, got {}",
@@ -457,7 +457,7 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       }
     }
 
-    // Task 1t — `assign` was deleted; statement/field/signature writes are all
+    // `assign` was deleted; statement/field/signature writes are all
     // `store` (validated leniently above: child0=ref, ≥2 children, any arity).
     // Only `dp_assign` keeps the strict 2-child (+ legacy 3-child) shape here.
     if (Lnast_ntype::is_dp_assign(type)) {

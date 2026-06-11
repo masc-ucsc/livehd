@@ -118,11 +118,11 @@ struct lut_t {
 };
 inline constexpr lut_t lut{};
 
-// Task 1u-C — per-pin/node TIME interval annotation (cycles from the
+// Per-pin/node TIME interval annotation (cycles from the
 // enclosing partition's inputs; the LG half of the pipe/mod time machinery).
 // On a Sub node: the instance's pinned latency contribution (stage[N] pick
 // or the callee's declared interval). Derived values are computed by the
-// 1u-D checker.
+// time checker.
 struct time_range_t {
   struct value_type {
     int64_t min = 0;
@@ -132,9 +132,9 @@ struct time_range_t {
 };
 inline constexpr time_range_t time_range{};
 
-// Task 1u-C — PENDING time check: an asserted interval (from an LNAST
+// PENDING time check: an asserted interval (from an LNAST
 // timecheck the discharge pass could not decide, or a mod output's declared
-// landing cycle) attached to the checked value's pin. The 1u-D checker
+// landing cycle) attached to the checked value's pin. The time checker
 // verifies computed ⊆ asserted and REMOVES the record (`.del()`); records
 // still present after the checker are a compile error.
 struct pending_time_t {

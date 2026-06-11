@@ -88,7 +88,7 @@ namespace {
 
 bool prp_is_tmp_name(std::string_view n) { return n.size() >= 3 && n[0] == '_' && n[1] == '_' && n[2] == '_'; }
 
-// Task 1k — prp2lnast wraps the UFCS receiver of `obj.method(...)` in a
+// prp2lnast wraps the UFCS receiver of `obj.method(...)` in a
 // `store(__ufcs_arg, obj)` marker (positional, like __ref_arg) so the runner
 // can reject the UFCS form when the callee declares no `self`.
 constexpr std::string_view call_ufcs_arg_marker = "__ufcs_arg";
@@ -563,7 +563,7 @@ upass::uPass::Decl_storage uPass_runner::try_decl_storage(std::string_view name)
 
 void uPass_runner::check_self_does(const livehd::diag::Span& span, std::string_view callee_name, std::string_view decl_tn,
                                    const Lnast_node& receiver) {
-  // Structural `does`-check (task 1k, 07b-structtype.md): every field of the
+  // Structural `does`-check (07b-structtype.md): every field of the
   // declared self type must exist on the receiver with a matching scalar kind;
   // integer fields additionally need receiver-range ⊆ declared-range. Checks
   // run per flat dotted leaf (bundle keys are canonical dotted paths), which
@@ -719,7 +719,7 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
   const auto op_ntype = lm->current_type();
   emit_push(op_ntype);  // carries the SourceId ([[1f]] general carry)
 
-  // Task 1t — a `declare`/`type_spec` whose type slot (child 1) is a named-type
+  // A `declare`/`type_spec` whose type slot (child 1) is a named-type
   // `ref` must NOT be folded: the ref names a TYPE, not a value, so folding it
   // through the symbol table (e.g. `const a = …; const x:a = …`) would replace
   // the type with `a`'s value. Keep child 1 verbatim for these op-nodes.
@@ -1235,7 +1235,7 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
             tuple_dsts.insert(std::string(ln->get_name(fc)));
           }
           // Plain `lhs = rhs` (single ref rhs) — record for alias propagation
-          // so `foo = ___t` inherits ___t's tuple-valued-ness. Task 1t — this is
+          // so `foo = ___t` inherits ___t's tuple-valued-ness. This is
           // a 0-level `store` (exactly ref+value children; `assign` was deleted).
           if (nt == Lnast_ntype::Lnast_ntype_store && ln->get_sibling_next(fc).is_valid()
               && !ln->get_sibling_next(ln->get_sibling_next(fc)).is_valid()) {
@@ -1360,7 +1360,7 @@ void uPass_runner::emit_inline_typespec(const std::string& name, int bits, bool 
   auto root = s->set_root(Lnast_ntype::create_type_spec());
   stamp_scratch_srcid(s, root);
   s->add_child(root, Lnast_node::create_ref(name));
-  // Task 1t — emit the canonical prim_type_int(max,min) from (bits, signed).
+  // Emit the canonical prim_type_int(max,min) from (bits, signed).
   auto pt = s->add_child(root, Lnast_ntype::create_prim_type_int());
   if (bits > 0 && is_signed) {
     s->add_child(pt, Lnast_node::create_const(std::string(Dlop::get_mask_value(static_cast<int>(bits) - 1)->to_pyrope())));
@@ -1476,7 +1476,7 @@ bool uPass_runner::try_inline_func_call() {
   // function, but obj's type bundle carries it as a function-name field.
   // Resolve method → function via obj's typename (the receiver then naturally
   // binds to the function's first `self` param as the leading positional
-  // actual). The receiver rides inside the task-1k UFCS marker store; unwrap
+  // actual). The receiver rides inside the UFCS marker store; unwrap
   // it to read the obj ref (a bare ref sibling is the legacy/direct shape).
   if (!callee) {
     const auto here     = lm->save_cursor();
@@ -1520,7 +1520,7 @@ bool uPass_runner::try_inline_func_call() {
     lm->restore_cursor(here);
   }
 
-  // Task 1m — call through a lambda-ref binding: `const f = b.add1` or
+  // Call through a lambda-ref binding: `const f = b.add1` or
   // `const f = import("ln:u.g")` bind `f` to the callee's TREE NAME as a
   // string (the fcall-ref-const lambda-value form). Resolve it like the
   // bundle-field method path above.
@@ -1545,13 +1545,13 @@ bool uPass_runner::try_inline_func_call() {
     return false;  // not a known comb body → typecast / cell-op / marker path
   }
 
-  // Task 1k — call-form enforcement: the UFCS form `obj.f(...)` is only valid
+  // Call-form enforcement: the UFCS form `obj.f(...)` is only valid
   // when the callee declares `self` (as its first input). The direct form
   // `f(obj, ...)` carries no marker and stays subject to the normal argument
   // rules. Checked here — before the inlinable/fuel gates — so a marked call
   // can never silently fall through to the evaluator path.
   //
-  // Task 1m exemption — namespace access through an import tuple:
+  // Namespace-access exemption through an import tuple:
   // `b.add1(args)` where `b = import("unit")` and b's field `add1` is a
   // lambda ref (a string naming this callee's tree). The receiver is a
   // namespace, not a method receiver: drop it from the actuals instead of
@@ -1715,9 +1715,9 @@ bool uPass_runner::try_inline_func_call() {
         a.is_ref_pass = true;
         a.key.clear();
       }
-      // Task 1k — the UFCS receiver marker is positional too; the receiver
+      // The UFCS receiver marker is positional too; the receiver
       // binds to `self` via the has_self branch below (the no-self UFCS error
-      // already fired right after callee resolution). Task 1m — a namespace
+      // already fired right after callee resolution). A namespace
       // access (`b.add1(...)` through an import tuple) drops the receiver
       // entirely: it names the namespace, it is not an argument.
       if (a.key == call_ufcs_arg_marker) {
@@ -1761,7 +1761,7 @@ bool uPass_runner::try_inline_func_call() {
 
   // ── Match actuals → params (positional + named) ──────────────────────────
   const std::size_t        nparams = io.inputs.size();
-  // Task 1p — a trailing `...args` var-arg param (always the LAST input)
+  // A trailing `...args` var-arg param (always the LAST input)
   // gathers every actual not consumed by a fixed leading param into one
   // synthesized tuple: positional leftovers become positional entries
   // (`args[i]`), named leftovers become named fields (`args.NAME`). Fixed
@@ -1828,7 +1828,7 @@ bool uPass_runner::try_inline_func_call() {
       }
       const auto idx = param_index(a.key);
       if (idx >= nbind) {
-        // Task 1p — a named actual that matches no fixed param is a named
+        // A named actual that matches no fixed param is a named
         // leftover gathered into the var-arg tuple (`args.NAME`).
         if (has_vararg) {
           vararg_named.emplace_back(a.key, a.node);
@@ -1908,7 +1908,7 @@ bool uPass_runner::try_inline_func_call() {
         bind(0);  // self ← UFCS receiver
         continue;
       }
-      // Task 1p — with a var-arg param, fixed leading params bind positionally
+      // With a var-arg param, fixed leading params bind positionally
       // in declaration order; every actual past them is a positional leftover
       // gathered into the var-arg tuple (`args[i]`). The naming-disambiguation
       // exceptions below are for fully-fixed signatures and are skipped here.
@@ -1994,7 +1994,7 @@ bool uPass_runner::try_inline_func_call() {
   // and BEFORE the binding/splice — so a pipe/mod call site is held to the same
   // naming rule as a comb, then routed to its own lowering path.
 
-  // Task 1p — a pipe/mod/fluid TEMPLATE (untyped boundary) is realized per call
+  // A pipe/mod/fluid TEMPLATE (untyped boundary) is realized per call
   // site as a concrete specialized module. Runs BEFORE the pipe/mod declines
   // (which assume a concrete callee) but AFTER arg-naming validation (the same
   // rules apply to every callee kind). A `ref self` method is NOT a standalone
@@ -2011,7 +2011,7 @@ bool uPass_runner::try_inline_func_call() {
     }
   }
 
-  // Task 1q — a `pipe` callee (any output carries a stages annotation) is
+  // A `pipe` callee (any output carries a stages annotation) is
   // never comb-inlined: its outputs are flopped, and a call site must consume
   // it via `stage[N]` (later phase). Decline so the call surfaces unresolved
   // instead of silently dropping the latency.
@@ -2021,8 +2021,8 @@ bool uPass_runner::try_inline_func_call() {
     }
   }
 
-  // Task 1r — a plain `mod` callee is its own module: the call becomes a
-  // Sub instance (1r-D), never a comb splice — even when every declared
+  // A plain `mod` callee is its own module: the call becomes a
+  // Sub instance, never a comb splice — even when every declared
   // output cycle is 0, a mod may hold state. A `ref self` mod METHOD keeps
   // the splice path (mod-init constructors, `y.method(...)`): recognized by
   // its `self` io entry.
@@ -2052,14 +2052,14 @@ bool uPass_runner::try_inline_func_call() {
     }
   }
 
-  // Task 1k — typed `self:T`: the bound receiver must satisfy `receiver does
+  // Typed `self:T`: the bound receiver must satisfy `receiver does
   // T` (structural; both call forms and the tuple-field method dispatch land
   // here). Untyped self skips the check entirely.
   if (has_self && param_set[0] && !io.inputs[0].type_name.empty()) {
     check_self_does(call_span, callee_name, io.inputs[0].type_name, param_val[0]);
   }
 
-  // Task 1k — ref-actual mutability: a `ref` param (incl. `ref self`, whose
+  // Ref-actual mutability: a `ref` param (incl. `ref self`, whose
   // actual is the receiver on either call form) writes back into the caller's
   // variable, so a `const` or `type` binding can never be the actual. Non-ref
   // `self` stays callable on a type binding (read-only over the defaults).
@@ -2139,7 +2139,7 @@ bool uPass_runner::try_inline_func_call() {
   std::vector<std::pair<std::string, std::optional<std::string>>> saved_func_bindings;
   for (std::size_t i = 0; i < nparams; ++i) {
     const auto& e = io.inputs[i];
-    // Task 1p — register the var-arg leftovers for try_resolve_vararg_get.
+    // Register the var-arg leftovers for try_resolve_vararg_get.
     // Positional leftovers take the canonical decimal keys "0","1",… (so the
     // body's `args[i]` reads them — a tuple_get index canonicalizes to that
     // key); named leftovers keep their names (`args.NAME`). No tuple node is
@@ -2238,7 +2238,7 @@ bool uPass_runner::try_inline_func_call() {
   lm->pop_source();
   inline_call_sites_.pop_back();
   active_inline_callees_.pop_back();
-  // Task 1p — drop this frame's var-arg gather (the tag is unique per call
+  // Drop this frame's var-arg gather (the tag is unique per call
   // site, so this only prunes stale state; nested frames used distinct tags).
   if (has_vararg) {
     vararg_bindings_.erase(upass::Lnast_manager::make_inlined_name(tag, io.inputs[nbind].name));
@@ -2353,7 +2353,7 @@ bool uPass_runner::try_resolve_tuple_get() {
   return false;
 }
 
-// ── Task 1p — pipe/mod/fluid template specialization ──────────────────────────
+// ── pipe/mod/fluid template specialization ──────────────────────────
 
 void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid,
                                      const std::shared_ptr<Lnast>& dst, const Lnast_nid& dst_parent) {
@@ -3116,7 +3116,7 @@ bool uPass_runner::walk_loop_iteration(const std::function<void()>& emit_binds, 
 }
 
 void uPass_runner::unroll_for() {
-  // Cursor on the `for` node. Layout (prp2lnast, task 2u):
+  // Cursor on the `for` node. Layout (prp2lnast):
   //   for( value_ref, iterable_ref, stmts(body), const(mode) [, idx_ref [, key_ref]] )
   // iterable_ref is a `range` tmp whose (lo, hi_inclusive) bounds constprop
   // recorded (process_range), a tuple name/tmp resolved by try_tuple_shape, or a
@@ -3532,9 +3532,9 @@ namespace {
 bool dce_is_def_producing(Lnast_ntype::Lnast_ntype_int t) {
   using N = Lnast_ntype;
   switch (t) {
-    case N::Lnast_ntype_store:  // task 1t — store defines its first-child target (the unified write node)
+    case N::Lnast_ntype_store:  // store defines its first-child target (the unified write node)
     case N::Lnast_ntype_dp_assign:
-    case N::Lnast_ntype_range:  // task 1d-D1 — a comptime range whose for-loop unrolled away is dead scaffolding
+    case N::Lnast_ntype_range:  // a comptime range whose for-loop unrolled away is dead scaffolding
     case N::Lnast_ntype_tuple_add:
     case N::Lnast_ntype_tuple_concat:
     case N::Lnast_ntype_tuple_get:
@@ -3901,7 +3901,7 @@ void uPass_runner::process_lnast() {
       emit_leaf(lm->current_node());
       break;
 
-    // Assignment — Task 1t — `store` is the one write/bind node (`assign` was
+    // Assignment — `store` is the one write/bind node (`assign` was
     // deleted). Branch on arity: a 2-child store is a scalar/wire
     // write (route to process_assign, drop-candidate); a ≥3-child store is a
     // tuple-field write (route to process_tuple_set, verbatim — the bundle
@@ -3960,7 +3960,7 @@ void uPass_runner::process_lnast() {
       }
       break;
 
-    // Task 1t — declare carries type/mode metadata downstream passes still
+    // declare carries type/mode metadata downstream passes still
     // need (like type_spec/attr_set); emit verbatim, never drop. child0 is the
     // declared var (LHS, not folded); child1 the type subtree; child2 the mode
     // const; optional child3 an init value (folded if a ref).
@@ -4066,7 +4066,7 @@ void uPass_runner::process_lnast() {
     // Without this, for-loop unrolls leave behind orphan
     // `tuple_add ___N = (i,)` stmts whose tuple_concat / assign-to-c
     // consumers got dropped, producing dead code with dangling tmp refs.
-    // Task 1p — a `tuple_get` on a registered var-arg with a comptime-known
+    // A `tuple_get` on a registered var-arg with a comptime-known
     // index/name is rewritten to a direct copy (so a runtime var-arg pick
     // lowers); anything else folds/emits normally.
     case Ntype::Lnast_ntype_tuple_get:
@@ -4075,7 +4075,7 @@ void uPass_runner::process_lnast() {
       }
       break;
     A_OP(tuple_add)
-    // Task 1t — the tuple_set node was deleted; field writes are now `store`
+    // the tuple_set node was deleted; field writes are now `store`
     // (≥3 children → process_tuple_set, handled in the store case above).
     // tuple_concat folds when every operand is a known scalar (string/int
     // concat via Lconst::concat_op); treat like arithmetic so classify can

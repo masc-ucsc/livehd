@@ -83,7 +83,7 @@ private:
 struct BitwidthEntry {
   int64_t min{0};
   int64_t max{0};
-  bool    unbounded{true};  // no derivable [min,max] (Goal 1n N3: no +inf/-inf)
+  bool    unbounded{true};  // no derivable [min,max] (no +inf/-inf)
 
   bool is_unbounded() const noexcept { return unbounded; }
   bool is_constant() const noexcept { return !unbounded && min == max; }
@@ -107,7 +107,7 @@ struct Lnast_io_entry {
   int32_t     bits      = 0;           // 0 = unknown / infer from context
   bool        is_signed = true;
   bool        is_ref    = false;       // input declared with `ref` → write-back on inline
-  // Task 1p — input declared with `...` (var-args, `comb foo(...rest)`). The
+  // Input declared with `...` (var-args, `comb foo(...rest)`). The
   // marker rides the io store's default-value slot as `const "..."` (mirroring
   // the `ref` sentinel) and is harvested here by the SSA upass. A var-arg
   // param gathers every actual not consumed by a fixed leading param into one
@@ -115,14 +115,14 @@ struct Lnast_io_entry {
   // as a not-fully-typed template (func_extract).
   bool        is_varargs = false;
   Io_kind     kind      = Io_kind::none;  // scalar kind from the param's prim_type
-  // Task 1q — pipe stages annotation (outputs of a `pipe` func_def only).
+  // Pipe stages annotation (outputs of a `pipe` func_def only).
   // From the trailing `stages(min,max)` io node: min 0 = absent (comb/mod),
   // max 0 with min>0 = unconstrained (bare `pipe`). The LN pipe upass keys
   // its output-flop insertion off these; the declared range rides verbatim
   // (LG pass1 narrows by sigma later, never here).
   int32_t     stages_min = 0;
   int32_t     stages_max = 0;
-  // Task 1k — declared NAMED type of the param (`self:t1` → "t1"); empty when
+  // Declared NAMED type of the param (`self:t1` → "t1"); empty when
   // untyped or annotated with a primitive type. The inliner's typed-self
   // `does`-check keys off inputs[0].type_name.
   std::string type_name = {};
@@ -133,7 +133,7 @@ struct Lnast_tree_io {
   bool                        empty() const noexcept { return inputs.empty() && outputs.empty(); }
 };
 
-// Task 1m — one `pub` export of a file unit (the LiveHD docs).
+// One `pub` export of a file unit (the LiveHD docs).
 // kind: "value" (comptime/const declaration) | "comb" | "mod" | "pipe" |
 // "fluid" (exported definition; its tree url is `<unit>.<name>`).
 // srcid ([[1f]]): the pub declaration's SourceId in the unit's locator —
@@ -155,13 +155,13 @@ private:
   std::shared_ptr<hhds::Tree>   tree_;
   std::string                   top_module_name;
   Lnast_nid                     undefined_var_nid;
-  // Task 1r — durable lambda kind ("comb" / "pipe" / "mod" / ...; empty =
+  // Durable lambda kind ("comb" / "pipe" / "mod" / ...; empty =
   // file-level / unknown). Stamped by func_extract when a lambda is
   // extracted into its own tree. Consumers gate on THIS, never on
   // stages_min>0 — a mod output legitimately stamps stages(0,0) or
   // stages(nil,nil) and a mod tree must not be mistaken for a pipe.
   std::string                   lambda_kind_;
-  // Task 1p — durable "deferred template" flag. A not-fully-typed lambda — an
+  // Durable "deferred template" flag. A not-fully-typed lambda — an
   // untyped non-`self` input, a `...args` var-arg param, or an unbound generic
   // `<T>` — is kept as LNAST but emits NO LGraph at definition time; the
   // concrete form is produced per call site (`comb` inlines, `pipe`/`mod`/
@@ -169,18 +169,18 @@ private:
   // signature is not fully typed; cleared on a specialized clone. tolg + the
   // no-LGraph gate read it. In-memory only (sibling to lambda_kind_).
   bool                          template_ = false;
-  // Task 1p — generic type parameters (`<T, U>`) recorded by func_extract from
+  // Generic type parameters (`<T, U>`) recorded by func_extract from
   // the func_def generics child (a seam: the per-`T` body substitution lands
   // in a follow-up goal; this only preserves the names so a template carrying
   // generics is detected and its mangling reserved).
   std::vector<std::string>      generics_;
-  // Task 1m — the file's `pub` export list, recorded by prp2lnast on the
+  // The file's `pub` export list, recorded by prp2lnast on the
   // file-level (top) Lnast. kind is "value" for `pub const`/`pub comptime`
   // declarations or the lambda kind ("comb"/"mod"/"pipe"/"fluid") for
   // exported definitions. In-memory only (like lambda_kind_): the durable
   // forms are the `<unit>.__pub` wrapper tree and the manifest pub index.
   std::vector<Lnast_pub_entry>  pub_list_;
-  // Task 1m — folded comptime leaves of the pub VALUE exports, stamped by
+  // Folded comptime leaves of the pub VALUE exports, stamped by
   // uPass_constprop when the file-scope walk completes: (flat dotted path,
   // pyrope const text) pairs — a scalar contributes ("name", "12"), a bundle
   // one pair per data leaf ("cfg.gain", "2"). The kernel synthesizes the
@@ -271,8 +271,6 @@ public:
   Lnast_nid set_root(const Lnast_node& n);
   Lnast_nid add_child(const Lnast_nid& parent, Lnast_ntype::Lnast_ntype_int type);
   Lnast_nid add_child(const Lnast_nid& parent, const Lnast_node& n);
-  Lnast_nid append_sibling(const Lnast_nid& sibling, Lnast_ntype::Lnast_ntype_int type);
-  Lnast_nid append_sibling(const Lnast_nid& sibling, const Lnast_node& n);
 
   // ── payload accessors ───────────────────────────────────────────────────
   Lnast_ntype::Lnast_ntype_int get_type(const Lnast_nid& nid) const;
@@ -306,19 +304,19 @@ public:
   livehd::diag::Span              span_of(const Lnast_nid& nid) const;
   std::vector<livehd::diag::Note> notes_of(const Lnast_nid& nid, std::string_view message = "related source") const;
 
-  // set_data: write-side helpers used by add_child / set_root /
-  // append_sibling. On the read side, callers go through get_type/get_name.
+  // set_data: write-side helpers used by add_child / set_root. On the
+  // read side, callers go through get_type/get_name.
   void set_data(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int type);
   void set_data(const Lnast_nid& nid, const Lnast_node& n);
 
   // ── module metadata ─────────────────────────────────────────────────────
   std::string_view get_top_module_name() const { return top_module_name; }
 
-  // ── lambda kind (Task 1r; stamped by func_extract on extracted trees) ───
+  // ── lambda kind (stamped by func_extract on extracted trees) ───
   std::string_view get_lambda_kind() const noexcept { return lambda_kind_; }
   void             set_lambda_kind(std::string_view kind) { lambda_kind_ = kind; }
 
-  // ── deferred template (Task 1p; stamped by func_extract; cleared on a
+  // ── deferred template (stamped by func_extract; cleared on a
   //     specialized clone). True ⇒ no LGraph at definition time. ───────────
   bool is_template() const noexcept { return template_; }
   void set_template(bool t) noexcept { template_ = t; }
@@ -326,7 +324,7 @@ public:
   void                            set_generics(std::vector<std::string> g) { generics_ = std::move(g); }
   bool                            has_generics() const noexcept { return !generics_.empty(); }
 
-  // ── pub export list (Task 1m; recorded by prp2lnast on file-level trees) ─
+  // ── pub export list (recorded by prp2lnast on file-level trees) ─
   const std::vector<Lnast_pub_entry>& get_pub_list() const noexcept { return pub_list_; }
   void add_pub(std::string_view name, std::string_view kind, hhds::SourceId srcid = 0) {
     pub_list_.push_back({std::string(name), std::string(kind), srcid});

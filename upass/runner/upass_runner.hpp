@@ -218,18 +218,18 @@ protected:
   // iterable). First pass that provides wins. See uPass::provide_range.
   std::optional<std::pair<Dlop, Dlop>>                    try_range(std::string_view name);
   // Declared kind + range of a dotted field path (`t1.a`). First pass that
-  // provides wins. See uPass::provide_field_type (task 1k).
+  // provides wins. See uPass::provide_field_type.
   std::optional<upass::uPass::Field_decl_type>              try_field_type(std::string_view name);
-  // Task 1g — inferred scalar kind of a variable (bool vs int even when
+  // Inferred scalar kind of a variable (bool vs int even when
   // un-annotated). First pass returning a non-none kind wins (typecheck).
   // See uPass::provide_scalar_kind.
   Io_kind                                                   try_scalar_kind(std::string_view name);
   // Declared storage class (mut/const/reg/type) of a variable. First pass
   // that provides a non-unknown answer wins. See uPass::provide_decl_storage
-  // (task 1k ref-actual mutability).
+  // (ref-actual mutability).
   upass::uPass::Decl_storage                                try_decl_storage(std::string_view name);
 
-  // Task 1k — typed-self `does`-check: the receiver bound to `self:T` must
+  // Typed-self `does`-check: the receiver bound to `self:T` must
   // structurally satisfy T (per declared field: same-name receiver field
   // present, scalar kinds match, integer range receiver ⊆ declared). Extra
   // receiver fields are fine. Emits a fatal `fcall-self-does` diagnostic on
@@ -300,11 +300,11 @@ protected:
   // renamed body is emitted into staging), then emit the epilogue (output +
   // ref-param writeback) — and returns true. Returns false to fall back to
   // the normal func_call emit/dispatch path (typecasts, cell-ops, markers,
-  // or call shapes 1i does not yet handle). The read cursor is left on the
-  // func_call node on every path. See 1i in todo/.
+  // or call shapes this path does not yet handle). The read cursor is left on the
+  // func_call node on every path.
   bool try_inline_func_call();
 
-  // Task 1p — var-arg access resolution. A `comb foo(...args)` call gathers its
+  // Var-arg access resolution. A `comb foo(...args)` call gathers its
   // leftover actuals here, keyed by the FRAME-TAGGED var-arg name (e.g.
   // "inl1_args"): positional leftovers under decimal keys "0","1",…, named
   // leftovers under their names. The body's `args[i]` / `args.NAME` reads are a
@@ -328,7 +328,7 @@ protected:
   // tuple-for unroll. First pass that provides wins. See provide_tuple_shape.
   std::optional<std::vector<std::pair<std::string, bool>>> try_tuple_shape(std::string_view name);
 
-  // ── Task 1p — pipe/mod/fluid template specialization ────────────────────
+  // ── pipe/mod/fluid template specialization ────────────────────
   // Called from try_inline_func_call at the pipe/mod decline point when the
   // resolved callee is a TEMPLATE (untyped boundary). Reads each untyped fixed
   // port's concrete type from the actual's DECLARED type (decision 4: an

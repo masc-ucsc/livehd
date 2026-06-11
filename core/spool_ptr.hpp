@@ -27,19 +27,6 @@ public:
     }
   }
 
-  T* get_ptr() {
-    auto raw_retval = _pointer_queue.dequeue();
-    if (!raw_retval) {
-      T* raw_ptr            = new T();
-      raw_ptr->shared_count = 1;
-      return raw_ptr;
-    }
-    I(raw_retval);
-    I(*raw_retval);
-    (*raw_retval)->shared_count = 1;
-    return *raw_retval;
-  }
-
   void release_ptr(T* to_release) {
     I(to_release->shared_count == 1);
     bool fits = _pointer_queue.enqueue(to_release);

@@ -24,7 +24,7 @@
 extern "C" TSLanguage* tree_sitter_pyrope();
 
 static constexpr std::string_view call_ref_arg_marker  = "__ref_arg";
-// Task 1k — marks the receiver actual of a UFCS method call `obj.method(...)`
+// Marks the receiver actual of a UFCS method call `obj.method(...)`
 // so the runner can reject UFCS onto a self-less callee (the direct call form
 // `method(obj, ...)` lowers without it). Positional, like __ref_arg.
 static constexpr std::string_view call_ufcs_arg_marker = "__ufcs_arg";
@@ -915,7 +915,7 @@ void Prp2lnast::rewrite_decls_to_declare() {
       } else {
         staging->add_child(d, Lnast_ntype::create_prim_type_none());
       }
-      // Task 1r — a `stage[N]` decl lowers to a `reg` declare carrying a
+      // A `stage[N]` decl lowers to a `reg` declare carrying a
       // trailing stages(min,max) node (the upass/pipe insertion shape): tolg
       // lowers it as one depth-N pipeline Flop (pipe_min/pipe_max pins).
       const bool  is_stage = kind == "stage";
@@ -1186,7 +1186,7 @@ void Prp2lnast::process_scope_statement(TSNode n, Lnast_nid /*target_stmts*/) {
 struct Decl_mods {
   std::string_view kind;  // storage kind ("mut"/"const"/"reg"/"stage"/…; empty = none)
   bool             has_comptime{false};
-  bool             has_pub{false};  // task 1m — `pub` export modifier
+  bool             has_pub{false};  // `pub` export modifier
 };
 // Resolve a `var_or_let_or_reg` decl node's modifiers. Defined below with the
 // declaration helpers (needs storage_kind_from_node_type); forward-declared
@@ -1331,7 +1331,7 @@ static std::string_view storage_kind_from_node_type(std::string_view t) {
     return "reg";
   }
   if (t == "stage_decl") {
-    // Task 1r — `stage[N] lhs = rhs` (mod-only): lhs is rhs delivered N
+    // `stage[N] lhs = rhs` (mod-only): lhs is rhs delivered N
     // cycles later. The decl-merge converts the kind to a `reg` declare
     // carrying a trailing stages(min,max) node (the upass/pipe shape).
     return "stage";
@@ -1382,8 +1382,8 @@ std::vector<int64_t> Prp2lnast::extract_array_dims(TSNode type_cast_node) const 
   return out;
 }
 
-// Task 1m — validate a `pub` value declaration (the LiveHD docs
-// §1): only file-scope `const` (optionally `comptime`) declarations are
+// Validate a `pub` value declaration (the LiveHD docs):
+// only file-scope `const` (optionally `comptime`) declarations are
 // exportable. `pub mut`/`pub reg` contradict the read-only export semantics.
 void Prp2lnast::check_pub_value_decl(TSNode decl_node, std::string_view kind) {
   if (!builder.at_top_stmts() || !lambda_kind_stack_.empty() || conditional_depth_ > 0) {
@@ -1425,7 +1425,7 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
   // Decode storage class + comptime/pub modifiers from the decl's structured fields.
   auto [kind, has_comptime, has_pub] = decode_decl(decl_node);
 
-  // Task 1r — a stage decl without an initializer has no value to deliver.
+  // A stage decl without an initializer has no value to deliver.
   if (kind == "stage") {
     report_error(decl_node,
                  "stage-needs-value",
@@ -1434,7 +1434,7 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
                  "write `stage[N] name = value`");
   }
 
-  // Task 1m — `pub` marks a file-scope const value declaration exportable.
+  // `pub` marks a file-scope const value declaration exportable.
   if (has_pub) {
     check_pub_value_decl(decl_node, kind);
   }
@@ -1651,7 +1651,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     return rvalue;
   }
   if (lvt == "timed_identifier") {
-    // Task 1r — `out@[4] = rhs` (with or without a stage decl): the lvalue is
+    // `out@[4] = rhs` (with or without a stage decl): the lvalue is
     // the inner identifier; `@[4]` is a pure landing-cycle check (never a
     // flop), recorded as an inert timecheck statement.
     TSNode inner = child_by_field(lvalue, "identifier");
@@ -1666,7 +1666,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     if (ts_node_is_null(id)) {
       id = lvalue;
     }
-    // Task 1r — `x:u8@[2] = rhs` body form: the timing rides the
+    // `x:u8@[2] = rhs` body form: the timing rides the
     // typed_identifier (or its type_cast) and is a pure check, same as the
     // timed_identifier wrapper above.
     if (lvt == "typed_identifier") {
@@ -1688,7 +1688,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       has_pub  = pr.has_pub;
     }
 
-    // Task 1m — `pub const x = …` marks the value exportable (validated:
+    // `pub const x = …` marks the value exportable (validated:
     // file-scope, const storage). Destructuring (`pub const (a,b) = t`)
     // records each item — decl_node propagates through the recursion.
     if (has_pub) {
@@ -1696,7 +1696,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       lnast->add_pub(trim(get_text(id)), "value", mint_src(id));
     }
 
-    // Task 1r/1q — track compile-time-resolvable integer bindings so a later
+    // Track compile-time-resolvable integer bindings so a later
     // `@[NAME]`, `stage[NAME]`, or `pipe[NAME]` timing slot can resolve them
     // (see resolve_cycle_value / const_int_bindings_). No-shadowing is already
     // enforced, so a fresh binding may safely overwrite an earlier same-name
@@ -1704,7 +1704,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     //
     //   - `const NAME = <int literal>`  → record (immutable, always valid;
     //       no-shadowing + no-reassign make scoping unambiguous, so no depth
-    //       gate — preserves the original Task-1r behavior).
+    //       gate).
     //   - `mut   NAME = <int literal>`  → record with declaration-time-capture:
     //       a later statement-level plain `NAME = <int literal>` UPDATEs it,
     //       and ANY other write ERASEs it. The
@@ -1756,7 +1756,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       // Span → the decl-merge copies this onto the synthesized `declare` so
       // declaration-site diagnostics can point at the `mut/const x` line.
       attach_loc(idx, id);
-      // Task 1r — a stage decl rides its (min,max) as a trailing stages node
+      // A stage decl rides its (min,max) as a trailing stages node
       // on the cluster head; the decl-merge moves it onto the synthesized
       // declare (mode "reg") so tolg lowers it as a depth-N pipeline Flop.
       if (kind_sv == "stage") {
@@ -1819,7 +1819,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       emit_type_spec(ref, tc);
     }
 
-    // Emit assign. Task 1t — a `wrap`/`sat` write lowers the value through a
+    // Emit assign. A `wrap`/`sat` write lowers the value through a
     // `wrap|sat(v=<value>, type=<lhs>)` library call first; the call result
     // then binds the lvalue. attributes narrows the value to the lhs's declared
     // type (read via the `type=` arg), bitwidth exempts the lhs from the
@@ -2139,7 +2139,7 @@ void Prp2lnast::process_assignment(TSNode n) {
   // The grammar attaches a statement-level `wrap`/`sat` prefix as the
   // `overflow` field of the enclosing _statement. Passed to
   // process_lvalue_for_assign, which lowers the scalar write through a
-  // `wrap|sat(v=<value>, type=<lhs>)` library call (Task 1t). Consumed once
+  // `wrap|sat(v=<value>, type=<lhs>)` library call. Consumed once
   // per assignment.
   const std::string_view overflow_kind = pending_overflow_kind;
   pending_overflow_kind                = {};
@@ -2301,7 +2301,7 @@ void Prp2lnast::process_for_statement(TSNode n) {
   // comptime (uPass_runner::unroll_for), beside the comb inliner. Keeping the
   // unroll in one place (the runner) avoids the parse-time/runner duplication
   // and lets `for x in args` / `for x in <runtime tuple>` unroll where the
-  // iterable is bound. (task 2u)
+  // iterable is bound.
   //
   // for-node layout — producer/consumer contract with uPass_runner::unroll_for:
   //   for( value_ref, iterable_ref, stmts(body), const(mode) [, idx_ref [, key_ref]] )
@@ -2670,7 +2670,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   TSNode code = child_by_field(n, "code");
 
   std::string_view kind       = ts_node_is_null(func_type_node) ? std::string_view{"comb"} : trim(get_text(func_type_node));
-  // Task 1q — a pipe lambda's depth attribute (`pipe[3]`, `pipe[2..=5]`,
+  // A pipe lambda's depth attribute (`pipe[3]`, `pipe[2..=5]`,
   // `pipe[1..<4]`, bare `pipe`) resolves to a per-output stages(min,max)
   // annotation stamped on the io list below; the kind const stays the plain
   // string "pipe". The grammar exposes the depth as the pipe_lambda node's
@@ -2683,7 +2683,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
     kind                             = "pipe";
   }
 
-  // Task 1m — `pub comb/mod/pipe/fluid name …` marks the definition
+  // `pub comb/mod/pipe/fluid name …` marks the definition
   // exportable. Only file-scope named definitions may be pub.
   if (TSNode pub_node = child_by_field(n, "pub"); !ts_node_is_null(pub_node)) {
     if (!builder.at_top_stmts() || !lambda_kind_stack_.empty() || conditional_depth_ > 0) {
@@ -2778,7 +2778,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   auto fd_idx = builder.add_child(Lnast_ntype::create_func_def());
   lnast->add_child(fd_idx, lambda_ref);
   lnast->add_child(fd_idx, Lnast_node::create_const(kind));
-  // generics tuple (Task 1p seam): each `<T, U>` name becomes a `ref` child of
+  // generics tuple: each `<T, U>` name becomes a `ref` child of
   // this tuple_add. Empty when absent. func_extract copies these onto the
   // extracted Lnast (Lnast::generics_) so a generic signature is detected as a
   // template; the per-`T` body substitution is a deferred follow-up goal.
@@ -2883,7 +2883,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
         // grammar arg_list `mod` field: choice('...', 'ref', 'reg').
         next_is_ref    = (ct == "ref");
         next_is_reg    = (ct == "reg");
-        next_is_vararg = (ct == "...");  // Task 1p var-args param
+        next_is_vararg = (ct == "...");  // var-args param
         continue;
       }
       if (ct == "typed_identifier") {
@@ -2946,7 +2946,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
 
   inflight_name_scopes_.pop_back();  // signature frame ends here
 
-  // Task 1q — stamp stages(min,max) as the TRAILING child of every OUTPUT io
+  // Stamp stages(min,max) as the TRAILING child of every OUTPUT io
   // store entry (after the optional type subtree; downstream identifies it by
   // ntype, never by position). Inputs never carry the annotation.
   if (is_pipe) {
@@ -3090,7 +3090,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // through every TS child of the lambda node for typed_identifiers.
   capture_param_bits(n);
   param_bits_stack_.push_back(std::move(body_param_bits));
-  // Task 1r — body-processing context: gates `stage[N]` (mod-only) and
+  // Body-processing context: gates `stage[N]` (mod-only) and
   // `x@[N]` timecheck emission (mod/pipe only).
   lambda_kind_stack_.emplace_back(kind);
 
@@ -3167,7 +3167,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   inflight_name_scopes_ = std::move(saved_inflight_scopes);
 }
 
-// Task 1r/1q — resolve a timing-index node to a compile-time integer. A
+// Resolve a timing-index node to a compile-time integer. A
 // `constant` CST node parses through the Pyrope literal parser (so hex/octal/
 // underscore-grouped forms work); an `identifier` looks up a recorded
 // `const NAME = <int literal>` binding (see const_int_bindings_). Anything
@@ -3198,7 +3198,7 @@ std::optional<int64_t> Prp2lnast::resolve_cycle_value(TSNode n) const {
   return std::nullopt;
 }
 
-// Task 1q — resolve the pipe_lambda `depth` field to the (min,max) stages
+// Resolve the pipe_lambda `depth` field to the (min,max) stages
 // pair (see hpp). 06c-pipelining.md admits `pipe[N]`, `pipe[A..=B]`,
 // `pipe[A..<B]` and bare `pipe` — open-ended ranges (`pipe[2..]`) and
 // non-literal depths are rejected.
@@ -3291,7 +3291,7 @@ std::pair<int64_t, int64_t> Prp2lnast::parse_pipe_depth(TSNode pipe_lambda_node)
                "write `pipe[3]`, `pipe[2..=5]`, `pipe[1..<4]`, or bare `pipe`");
 }
 
-// Task 1r — stage_decl timing slot → (min,max) const texts (see hpp).
+// stage_decl timing slot → (min,max) const texts (see hpp).
 std::pair<std::string, std::string> Prp2lnast::parse_stage_slot(TSNode storage_node) {
   TSNode slot{};
   if (!ts_node_is_null(storage_node)) {
@@ -3379,7 +3379,7 @@ std::pair<std::string, std::string> Prp2lnast::parse_stage_slot(TSNode storage_n
                "write `stage[3]`, `stage[2..=5]`, or `stage[]` to let the toolchain pick");
 }
 
-// Task 1r — `x@[N]` → inert timecheck statement (see hpp).
+// `x@[N]` → inert timecheck statement (see hpp).
 void Prp2lnast::maybe_emit_timecheck(TSNode timing_slot, TSNode id_node) {
   if (ts_node_is_null(timing_slot)) {
     return;
@@ -3646,7 +3646,7 @@ void Prp2lnast::process_type_statement(TSNode n) {
   if (ts_node_is_null(name)) {
     return;
   }
-  // Task 1t — `type Foo = …` is a declaration whose mode is `type` (replaces
+  // `type Foo = …` is a declaration whose mode is `type` (replaces
   // the former type_def node). The type slot is `prim_type_none` and the mode
   // const carries "type".
   auto idx = builder.add_child(Lnast_ntype::create_declare());
@@ -3654,7 +3654,7 @@ void Prp2lnast::process_type_statement(TSNode n) {
   lnast->add_child(idx, Lnast_ntype::create_prim_type_none());
   lnast->add_child(idx, Lnast_node::create_const("type"));
 
-  // Task 1t — keep the type's bundle as a VALUE in the symbol table so a later
+  // Keep the type's bundle as a VALUE in the symbol table so a later
   // `mut v:Foo = (…)` can materialize Foo's default fields/values (named-type
   // borrowing — see upass_constprop process_assign). `type Foo = (tuple)` puts
   // the tuple in the `alias` field (the `= _type` form) or `definition` (the
@@ -3691,7 +3691,7 @@ void Prp2lnast::process_type_statement(TSNode n) {
 // import-argument validation.
 static std::string unescape_cooked_string(std::string_view raw);
 
-// Task 1m — the `import` builtin (the LiveHD docs §1).
+// The `import` builtin (the LiveHD docs).
 // Returns the unquoted body when `n` is a plain comptime string literal
 // expression — `'…'` (raw) or `"…"` with no `{…}` interpolation — else nullopt.
 std::optional<std::string> Prp2lnast::plain_string_literal_text(TSNode n) {
@@ -3725,7 +3725,7 @@ std::optional<std::string> Prp2lnast::plain_string_literal_text(TSNode n) {
 // The canonical marked-builtin call shape:
 //   func_call(target, const "import", const '<unit>')
 // — exactly what `lhd scan` (collect_imports) matches and the upass resolver
-// (task 1m phase C) folds. The callee is a CONST (not a ref) so constprop
+// folds. The callee is a CONST (not a ref) so constprop
 // leaves it unfolded and no user `import` definition can capture it.
 void Prp2lnast::emit_import_call(const Lnast_node& target, std::string_view unit, TSNode loc_node) {
   auto idx = builder.add_child(Lnast_ntype::create_func_call());
@@ -3774,7 +3774,7 @@ void Prp2lnast::lower_import_call(TSNode call_node, TSNode arg_tuple, const Lnas
 void Prp2lnast::process_import_statement(TSNode n) {
   TSNode alias = child_by_field(n, "alias");
   TSNode mod   = child_by_field(n, "module");
-  // String-literal-only (task 1m): the old dotted-identifier grammar form
+  // String-literal-only: the old dotted-identifier grammar form
   // (`import a.b.c as x`) is rejected.
   auto text = plain_string_literal_text(mod);
   if (!text || text->empty()) {
@@ -3864,7 +3864,7 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
     return identifier_to_node(n, /*for_lvalue=*/false);
   }
   if (t == "timed_identifier") {
-    // Task 1r — `tmp@[3]` on a RHS: the VALUE is the plain identifier read;
+    // `tmp@[3]` on a RHS: the VALUE is the plain identifier read;
     // `@[3]` is a pure landing-cycle check (never a flop / never a
     // delay_assign), recorded as an inert timecheck statement.
     TSNode inner = child_by_field(n, "identifier");
@@ -4489,7 +4489,7 @@ void Prp2lnast::emit_type_spec(const Lnast_node& target, TSNode type_cast_node) 
   // `attribute` field maps to a wrapping seq whose first child is `:`, so
   // walk children to find the actual attribute_list.
   //
-  // Task 1t — first try the integer type-call form (`int(max=3)`); when it
+  // First try the integer type-call form (`int(max=3)`); when it
   // matches it emits the canonical prim_type_int and we skip straight to the
   // attribute carriers.
   TSNode ty = emit_int_type_call(target, type_cast_node) ? TSNode{} : child_by_field(type_cast_node, "type");
@@ -4556,7 +4556,7 @@ attrs:
 void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
   std::string_view t(ts_node_type(type_node));
   if (t == "uint_type" || t == "sint_type") {
-    // Task 1t — emit the canonical `prim_type_int(max, min)`. The width sugar
+    // Emit the canonical `prim_type_int(max, min)`. The width sugar
     // `uN`/`sN`/`iN` computes its bounds; the unsized spellings (`uint`,
     // `unsigned`, `int`, `integer`) leave both bounds "nil" (unbounded). "nil"
     // marks an unbounded bound (a non-integer the consumers read as unset).
@@ -4593,7 +4593,7 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
       lnast->add_child(idx, expr_to_node(len));
     }
   } else if (t == "expression_type" || t == "dot_expression_type" || t == "function_call_type") {
-    // Task 1t — a named type is a `ref` to its symbol-table binding (resolved
+    // A named type is a `ref` to its symbol-table binding (resolved
     // via that name's bundle); the typename is still tracked by the separate
     // `attr_set(typename,…)` emitted in emit_type_spec. Replaces expr_type.
     lnast->add_child(parent, Lnast_node::create_ref(trim(get_text(type_node))));
@@ -4693,7 +4693,7 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
   auto aidx = lnast->add_child(tuple_parent, Lnast_ntype::create_store());
   lnast->add_child(aidx, Lnast_node::create_ref(get_text(id)));
   // Default-value slot. Encoding choice for the absent case:
-  //   `...` mod          -> const "..."  (Task 1p var-args marker)
+  //   `...` mod          -> const "..."  (var-args marker)
   //   `ref` mod          -> const "ref"  (write-back marker for the inliner)
   //   no default, no mod -> const "nil"
   //   explicit default   -> expr_to_node(definition)
@@ -4773,7 +4773,7 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
     }
   }
 
-  // Task 1r-A — interface timing contract. Only enforced when called from the
+  // Interface timing contract. Only enforced when called from the
   // lambda io driver (lambda_kind set); tuple-literal contexts skip it.
   if (!lambda_kind.empty()) {
     auto   arg_name = trim(get_text(id));
@@ -4803,7 +4803,7 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
           is_pipe ? "a pipe's uniform latency is declared on the keyword (`pipe[N]`); drop the `@[...]`"
                   : "drop the `@[...]` (these outputs land at cycle 0 by definition)");
     }
-    // Task 1p — an untyped non-`self` `pipe`/`mod` input/output is no longer a
+    // An untyped non-`self` `pipe`/`mod` input/output is no longer a
     // definition-time error: the lambda becomes a deferred TEMPLATE (no LGraph
     // until a call site supplies the concrete types). func_extract stamps the
     // template flag; the specializer mints a concrete module per call signature
@@ -6470,7 +6470,7 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
     func_ref = Lnast_node::create_ref(trim(get_text(func)));
   }
 
-  // Task 1m — `import("unit")` is a comptime builtin with its own canonical
+  // `import("unit")` is a comptime builtin with its own canonical
   // lowering (validated string-literal argument; const-form callee).
   if (!has_receiver && func_ref.is_ref() && func_ref.get_name() == "import") {
     auto ref = builder.mint_tmp_ref();
@@ -6482,7 +6482,7 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   if (has_receiver) {
     Call_arg receiver_arg;
     receiver_arg.value   = receiver_ref;
-    receiver_arg.is_ufcs = true;  // task 1k — UFCS receiver marker (no self ⇒ compile error)
+    receiver_arg.is_ufcs = true;  // UFCS receiver marker (no self ⇒ compile error)
     call_args.insert(call_args.begin(), receiver_arg);
   }
 
@@ -6861,7 +6861,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
     //
     // Per-field types: `a:u4` is sugar for `a:int(max=15,min=0)`, so emit the
     // canonical `prim_type_int(max,min)` via a `type_spec` on the field's
-    // tuple_get tmp (Task 1t — was a bare `ubits`/`sbits` attr_set). Downstream
+    // tuple_get tmp (was a bare `ubits`/`sbits` attr_set). Downstream
     // passes only ever see `prim_type_int`; `bits`/`sign` derive from the range.
     // (`type_spec` is in `parent_writes_pos0` so lnastfmt's unwritten-tmp check
     // accepts the tmp once the producing `tuple_get` is DCE'd.)
@@ -6888,7 +6888,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
         if (!ts_node_is_null(ty)) {
           std::string_view tt(ts_node_type(ty));
           if (tt == "uint_type" || tt == "sint_type" || tt == "bool_type" || tt == "string_type") {
-            // Task 1t — `a:u4` is sugar for `a:int(max=15,min=0)`. Emit the
+            // `a:u4` is sugar for `a:int(max=15,min=0)`. Emit the
             // canonical prim_type node via a `type_spec` on the field's
             // tuple_get tmp (was a bare `ubits`/`sbits` attr_set). emit_type_expr
             // maps uint/sint→prim_type_int (bits/sign derive from the range),

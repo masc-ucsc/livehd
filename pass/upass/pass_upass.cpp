@@ -201,7 +201,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   bool do_ssa  = ssa_txt != "false" && ssa_txt != "0";
   run_ssa      = do_ssa;
 
-  // tolg is a terminal LNAST->LGraph step (task 1l), not part of the runner
+  // tolg is a terminal LNAST->LGraph step, not part of the runner
   // order. Default off; enabled with tolg:1. Runs after the main walk so
   // ssa (io_meta) and bitwidth (bw_meta) have populated their side-channels.
   auto tolg_txt = get_label("tolg");
@@ -271,7 +271,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
     upass_order.emplace_back("verifier");
   }
 
-  // semacheck runs first among the semantic passes (goal 1h): its checks
+  // semacheck runs first among the semantic passes: its checks
   // (read-only-attr writes, declare-once/shadowing) want the tree closest to
   // user source and fail fast before the value passes do work. It is a
   // one-shot begin_iteration walk, so its slot in the per-node dispatch order
@@ -311,7 +311,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   if (do_constprop) {
     upass_order.emplace_back("constprop");
   }
-  // Bitwidth is the LAST opt pass in the single runner walk (Goal 1n): it has
+  // Bitwidth is the LAST opt pass in the single runner walk: it has
   // no fold_ref (decoupled from the iterative const-fold), is read-only (votes
   // keep), observes every store PRE-DCE so it can capture overflow even on dead
   // comptime consts, and publishes max/min into bw_meta at end_run for the
@@ -350,11 +350,11 @@ void Pass_upass::work(Eprp_var& var) {
   uPass_verifier::set_aggregate_expected(parse_expected_count(up.pass_options, "verifier_pass"),
                                          parse_expected_count(up.pass_options, "verifier_fail"));
 
-  // Task 1m — fresh unresolved-import slate for this invocation.
+  // Fresh unresolved-import slate for this invocation.
   uPass_constprop::reset_pending_imports();
   var.unresolved_imports.clear();
 
-  // Task 1m §2 — a unit/tree name present in more than one input is ambiguous
+  // A unit/tree name present in more than one input is ambiguous
   // when imported. The registry is name-keyed (last-wins), so detect the
   // duplicates up front from var.lnasts (loaded ln: units + this invocation's
   // sources) and hand the set to constprop, which errors only if an `import`
@@ -430,7 +430,7 @@ void Pass_upass::work(Eprp_var& var) {
   for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
     const auto ln = var.lnasts.at(idx);
 
-    // Task 1p-runner — a not-fully-typed template (var-args / untyped params) is
+    // A not-fully-typed template (var-args / untyped params) is
     // realized ONLY at call sites (comb inline / pipe-mod specialize), never as a
     // standalone unit. Run its walk NON-materializing so its diagnostics +
     // comptime casserts still fire (paths_if's `verifier_include_funcs` body),
@@ -483,7 +483,7 @@ void Pass_upass::work(Eprp_var& var) {
     }
     auto new_lnasts = runner.take_new_lnasts();
     for (const auto& new_ln : new_lnasts) {
-      // Task 1p — a runner-spawned tree (a specialized pipe/mod/fluid template
+      // A runner-spawned tree (a specialized pipe/mod/fluid template
       // clone) is appended AFTER the pre-walk SSA loop, so SSA must run on it
       // here to populate io_meta before the queue walk reaches it
       // (typecheck/bitwidth/pipe/tolg all read io_meta). Dedup by module name:
@@ -506,20 +506,20 @@ void Pass_upass::work(Eprp_var& var) {
     }
   }
 
-  // ── LNAST timecheck discharge (task 1u-B). Verifies + marks-checked every
+  // ── LNAST timecheck discharge. Verifies + marks-checked every
   // statically-derivable `@[N]` obligation (and the mod declared-output /
   // pipe sigma<=min checks) with located diagnostics. Runs BEFORE uPass_pipe
   // so a pipe body's sigma excludes the inserted output flop, and UNGATED by
   // toln so the LSP pipeline gets the errors too. Whatever stays underived
-  // lowers into the LG pending checks (1u-C).
+  // lowers into the LG pending checks.
   for (const auto& ln : var.lnasts) {
     if (ln->is_template()) {
-      continue;  // Task 1p — a template has no concrete timing until specialized
+      continue;  // a template has no concrete timing until specialized
     }
     uPass_timecheck::run(ln, var.lnasts);
   }
 
-  // ── LN pipe upass (task 1q). Inserts the per-output pipeline flop —
+  // ── LN pipe upass. Inserts the per-output pipeline flop —
   // declare(reg)+stages plus the din/q rebind stores — into every `pipe`
   // function tree (io_meta outputs with stages_min >= 1; comb trees no-op).
   // Runs AFTER the main walk so constprop never folds the reg loop away,
@@ -529,17 +529,17 @@ void Pass_upass::work(Eprp_var& var) {
   if (up.run_toln) {
     for (const auto& ln : var.lnasts) {
       if (ln->is_template()) {
-        continue;  // Task 1p — no output flop on a template; specialize first
+        continue;  // no output flop on a template; specialize first
       }
       uPass_pipe::run(ln);
     }
   }
 
-  // ── Terminal LNAST->LGraph lowering (tolg:1, task 1l). Runs last, after
+  // ── Terminal LNAST->LGraph lowering (tolg:1). Runs last, after
   // ssa populated io_meta() and bitwidth populated bw_meta() for every lnast.
   // Each fully-specified function tree becomes one hhds::Graph pushed onto the
   // pass var so a downstream inou.cgen.verilog stage can emit it.
-  // Task 1u-A — two-phase: register every module's GraphIO first so call
+  // Two-phase: register every module's GraphIO first so call
   // sites can bind callee GraphIOs (Sub instances) regardless of build order.
   if (up.run_tolg) {
     for (const auto& ln : var.lnasts) {
@@ -553,7 +553,7 @@ void Pass_upass::work(Eprp_var& var) {
     }
   }
 
-  // ── Task 1m — unresolved live imports. With import_defer:1 the kernel's
+  // ── Unresolved live imports. With import_defer:1 the kernel's
   // iterate loop consumes them via var.unresolved_imports (whole-file retry
   // once the exporter publishes); standalone, they are hard errors listing
   // the import string and the searched inputs.

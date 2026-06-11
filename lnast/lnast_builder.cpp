@@ -198,12 +198,6 @@ std::string Lnast_builder::create_sra_stmts(std::string_view a_var, std::string_
   return emit_binary_result(Lnast_ntype::create_sra(), a_var, b_var);
 }
 
-std::string Lnast_builder::create_pick_bit_stmts(std::string_view a_var, std::string_view pos) {
-  auto v = create_sra_stmts(a_var, pos);
-
-  return create_bit_and_stmts(v, "1");
-}
-
 std::string Lnast_builder::create_sext_stmts(std::string_view a_var, std::string_view b_var) {
   I(!a_var.empty());
   I(!b_var.empty());
@@ -259,15 +253,6 @@ std::string Lnast_builder::create_shl_stmts(std::string_view a_var, std::string_
   I(!b_var.empty());
 
   return emit_binary_result(Lnast_ntype::create_shl(), a_var, b_var);
-}
-
-void Lnast_builder::create_dp_assign_stmts(std::string_view lhs_var, std::string_view rhs_var) {
-  I(lhs_var.size());
-  I(rhs_var.size());
-
-  auto idx_assign = lnast->add_child(idx_stmts, Lnast_ntype::create_dp_assign());
-  add_ref_child(idx_assign, lhs_var);
-  add_value_child(idx_assign, rhs_var);
 }
 
 void Lnast_builder::create_assign_stmts(std::string_view lhs_var, std::string_view rhs_var) {
@@ -338,42 +323,6 @@ void Lnast_builder::create_func_call(std::string_view out_tup, std::string_view 
   add_ref_child(idx_dot, out_tup);
   add_ref_child(idx_dot, fname);
   add_ref_child(idx_dot, inp_tup);
-}
-
-void Lnast_builder::create_named_tuple(std::string_view lhs_var, const std::vector<std::pair<std::string, std::string>>& rhs) {
-#ifdef LNASTOP_DONE
-  auto idx_dot = lnast->add_child(idx_stmts, Lnast_ntype::create_tuple_add());
-
-  add_ref_child(idx_dot, lhs_var);
-
-  for (const auto& it : rhs) {
-    auto idx_assign = lnast->add_child(idx_dot, Lnast_ntype::create_store());
-    add_ref_child(idx_assign, it.first);
-    add_value_child(idx_assign, it.second);
-  }
-#else
-
-  std::vector<std::pair<std::string, std::string>> tup_expanded_rhs;
-
-  for (const auto& it : rhs) {
-    if (!str_tools::is_string(it.second) || bundle_key::is_single_level(it.second)) {
-      tup_expanded_rhs.emplace_back(std::make_pair(it.first, it.second));
-      continue;
-    }
-
-    tup_expanded_rhs.emplace_back(std::make_pair(it.first, create_tuple_get(it.second)));
-  }
-
-  auto idx_dot = lnast->add_child(idx_stmts, Lnast_ntype::create_tuple_add());
-
-  add_ref_child(idx_dot, lhs_var);
-
-  for (const auto& it : tup_expanded_rhs) {
-    auto idx_assign = lnast->add_child(idx_dot, Lnast_ntype::create_store());
-    add_ref_child(idx_assign, it.first);
-    add_value_child(idx_assign, it.second);
-  }
-#endif
 }
 
 std::string Lnast_builder::create_tuple_get(std::string_view var) {

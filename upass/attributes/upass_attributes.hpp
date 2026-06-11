@@ -84,12 +84,12 @@ public:
   // Type info, range bounds, value-derivation hooks (see
   // upass_attributes_read.cpp).
   void process_type_spec() override;
-  // Task 1t — declare(var, TYPE, const(mode)[, value]) unifies the
+  // declare(var, TYPE, const(mode)[, value]) unifies the
   // attr_set(type)+attr_set(comptime)+type_spec declaration cluster.
   void process_declare() override;
   void process_range() override;
 
-  // Task 1t — `wrap`/`sat` lower to a `wrap|sat(v=<value>, type=<lhs>)`
+  // `wrap`/`sat` lower to a `wrap|sat(v=<value>, type=<lhs>)`
   // library call (not an attr_set/policy). Recognize the callee and narrow
   // the value to the lhs's declared type, publishing the result on the call's
   // dst tmp so the following `store(lhs, tmp)` alias-propagates it.
@@ -215,7 +215,7 @@ public:
     // size attrs read as nil per the typesystem redesign) from
     // `const b = 3` (no annotation — legacy value-based fallback).
     bool                 has_type_spec{false};
-    // Task 1t — the integer `(max,min)` range carried by a `prim_type_int`
+    // The integer `(max,min)` range carried by a `prim_type_int`
     // node (`int(max=,min=)` / `uint(bits=)` type-call). When set, these are
     // the single source of truth for max/min/bits/sign derivation. Either
     // may stay unset (unbounded): `int(max=3)` pins only `max`. uN/sN sugar
@@ -247,12 +247,12 @@ public:
   // (max,min) range so it can re-type an untyped inlined parameter from the
   // actual at the call site. See uPass::provide_decl_type.
 
-  // Task 1k — declared field type of a dotted path (`t1.a`) for the inliner's
+  // Declared field type of a dotted path (`t1.a`) for the inliner's
   // typed-self `does`-check. Same lookup_type_info chase as provide_decl_type
   // but surfaces the scalar KIND too (and tolerates a missing range, so bool/
   // string fields still report their kind). See uPass::provide_field_type.
 
-  // Task 1k — declared storage class (mut/const/reg/type) so the inliner can
+  // Declared storage class (mut/const/reg/type) so the inliner can
   // reject const/type bindings as `ref` actuals. See uPass::provide_decl_storage.
 
   // Range bounds previously recorded by process_range, keyed by the range
@@ -372,7 +372,7 @@ private:
   std::optional<Dlop> derive_bits(std::string_view base, std::string_view variant) const;  // "bits"/"ubits"/"sbits"
   std::optional<Dlop> derive_comptime(std::string_view base, std::string_view base_text) const;
 
-  // Task 1t — read a scalar TYPE node at the cursor (prim_type_int/uint/sint/
+  // Read a scalar TYPE node at the cursor (prim_type_int/uint/sint/
   // boolean/string), filling kind/bits and the (max,min) range. The cursor is
   // expected to be positioned AT the type node and is left there (balanced).
   // `is_real_type` is set true for a concrete numeric/string type (so the

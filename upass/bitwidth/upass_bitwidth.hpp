@@ -14,7 +14,7 @@
 
 // uPass_bitwidth — LNAST bitwidth / value-range analysis.
 //
-// Registers as a "bitwidth" uPass_plugin, but (Goal 1n) it is a standalone
+// Registers as a "bitwidth" uPass_plugin, but it is a standalone
 // READ-ONLY FINALIZATION analysis: pass.upass runs it on its own
 // (`uPass_runner(lm, {"bitwidth"})`) *after* the main opt runner + SSA, never
 // interleaved with constprop, and discards the staging tree.

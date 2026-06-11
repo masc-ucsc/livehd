@@ -158,7 +158,7 @@ public:
   using Emit_at_fn = std::function<void(const Lnast_nid&)>;
   void set_runner_emit_at_fn(Emit_at_fn fn) { runner_emit_at_fn = std::move(fn); }
 
-  // Task 1g — runner-supplied combined scalar-type query for a variable name,
+  // Runner-supplied combined scalar-type query for a variable name,
   // aggregating the two shared-ST seams so a single pass (constprop's
   // type-aware `does`/`equals` fold) sees both halves without reaching across
   // passes itself: KIND from uPass_typecheck (`provide_scalar_kind` — infers
@@ -229,7 +229,7 @@ public:
 
   // Assignment
   PROCESS_NODE(assign)
-  // Task 1t — declare(var, type, mode[, value]): replaces the
+  // declare(var, type, mode[, value]): replaces the
   // attr_set(type)+attr_set(comptime)+type_spec declaration cluster. Only the
   // attributes pass overrides it (type_info + decl_kind + comptime); the value
   // (when present) stays a separate `store`.

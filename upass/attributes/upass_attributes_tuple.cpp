@@ -152,7 +152,7 @@ void uPass_attributes::process_tuple_set() {
   // Layout: ref(tuple), field..., value. `tuple_set t p... v` writes through
   // the root `t`, so the const-rebind tally must count this write — otherwise
   // a producer's choice of `tuple_set` for what is structurally `t.p... = v`
-  // bypasses the `assign`-only check in record_assign (todo/ 1e audit).
+  // bypasses the `assign`-only check in record_assign.
   // A `nil` value is an invalidation, not a binding — same policy as assign.
   if (!move_to_child()) {
     return;
@@ -301,7 +301,7 @@ std::optional<Dlop> uPass_attributes::derive_aggregate_bits(std::string_view bas
   // Phase 8 typesystem redesign: aggregates (tuples / arrays) have no
   // `.[bits]`. Only scalars do — per-field queries `t.a.[bits]` are
   // handled by derive_bits, not here. The earlier sum-of-fields rule
-  // is intentionally removed (see todo/ task 1v corpus rewrite).
+  // is intentionally removed.
   (void)base;
   return std::nullopt;
 }
@@ -315,7 +315,7 @@ std::optional<Dlop> uPass_attributes::derive_aggregate_typename(std::string_view
   if (is_uppercase_first(base) || is_uppercase_first(base_text)) {
     return pyrope_string(base);
   }
-  // Task 1t — named-type FIELD typename. A typed field `inn:inner_t` records its
+  // Named-type FIELD typename. A typed field `inn:inner_t` records its
   // typename on a `tuple_get` tmp (see prp2lnast typed-field lowering); resolve
   // base = "X.inn" (or a tuple_get tmp aliasing it) to that tmp and read its
   // typename. The container X is searched directly, through `direct_alias`, and

@@ -1,6 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
@@ -18,58 +18,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core",
-        "//parser",
         "@abseil-cpp//absl/strings",
         "@hhds//hhds:core",
-    ],
-)
-
-filegroup(
-    name = "pyrope_test",
-    srcs = ["tests/synth1.eprp"],
-)
-
-filegroup(
-    name = "verilog_test",
-    srcs = ["tests/hierarchy.v"],
-)
-
-cc_test(
-    name = "ast_test",
-    srcs = [
-        "tests/ast_test.cpp",
-        "tests/elab_test_scanner.hpp",
-    ],
-    deps = [
-        ":lnast",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "ast_test2",
-    srcs = [
-        "tests/ast_test2.cpp",
-        "tests/elab_test_scanner.hpp",
-    ],
-    deps = [
-        ":lnast",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "elab_scanner_test",
-    srcs = [
-        "tests/elab_scanner_test.cpp",
-        "tests/elab_test_scanner.hpp",
-    ],
-    args = ["$(location :pyrope_test)"],
-    data = [
-        ":pyrope_test",
-    ],
-    deps = [
-        ":lnast",
     ],
 )
 
@@ -82,66 +32,3 @@ cc_test(
     ],
 )
 
-cc_test(
-    name = "elab_verilog_test",
-    srcs = [
-        "tests/elab_verilog_test.cpp",
-        "tests/elab_test_scanner.hpp",
-    ],
-    args = ["$(location :verilog_test)"],
-    data = [
-        ":verilog_test",
-    ],
-    deps = [
-        ":lnast",
-    ],
-)
-
-cc_test(
-    name = "elab_xlang_test",
-    srcs = [
-        "tests/elab_xlang_test.cpp",
-        "tests/elab_test_scanner.hpp",
-    ],
-    deps = [
-        ":lnast",
-    ],
-)
-
-cc_test(
-    name = "lexer_test",
-    srcs = [
-        "tests/lexer_test.cpp",
-        "tests/ln_test_utils.hpp",
-    ],
-    deps = [
-        ":lnast",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "parser_writer_test",
-    timeout = "short",  # to avoid infinite loops
-    srcs = [
-        "tests/parser_writer_test.cpp",
-        "tests/ln_test_utils.hpp",
-    ],
-    data = glob(["tests/ln/*.ln"]),
-    deps = [
-        ":lnast",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_binary(
-    name = "bench",
-    srcs = [
-        "tests/bench.cpp",
-        "tests/ln_test_utils.hpp",
-    ],
-    deps = [
-        ":lnast",
-        "@google_benchmark//:benchmark",
-    ],
-)

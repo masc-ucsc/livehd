@@ -1176,7 +1176,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
       reset_initial = get_wire_or_const(initial_dpin);
     }
 
-    // Task 1q — pipeline depth: the pipe_min/pipe_max comptime pins make one
+    // Pipeline depth: the pipe_min/pipe_max comptime pins make one
     // Flop cell model a whole depth-d shift register. Unset pins => depth 1
     // (today's single flop, bit-for-bit). For a ranged depth (min<max) the
     // realization default at Verilog emission is the declared MINIMUM (the

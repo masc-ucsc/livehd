@@ -357,7 +357,7 @@ upass::Vote uPass_func_extract::process_tuple_add(std::string_view dst_name, Bun
   return upass::Vote::keep;
 }
 
-// Task 1m — record `fcall(___N, 'import', '<str>')` so a following
+// Record `fcall(___N, 'import', '<str>')` so a following
 // `store NAME ___N` can promote NAME to an import-binding capture
 // (latest_outer_import). Only the canonical const-callee shape matches.
 void uPass_func_extract::process_func_call() {
@@ -453,7 +453,7 @@ void uPass_func_extract::process_assign() {
       latest_outer_bundle[lhs_name] = bit->second;
       return;
     }
-    // Task 1m — `store b ___N` where ___N is an import-call dst: capture the
+    // `store b ___N` where ___N is an import-call dst: capture the
     // import string so bodies reading `b` get the call replicated.
     auto imit = temp_import_text.find(rhs_text);
     if (imit != temp_import_text.end()) {
@@ -492,10 +492,10 @@ void uPass_func_extract::process_func_def() {
   }
   const auto func_kind = std::string(current_text());
 
-  // Task 1q — `pipe` lambdas extract like `comb`: the spawned io-form LNAST
+  // `pipe` lambdas extract like `comb`: the spawned io-form LNAST
   // carries the per-output stages(min,max) annotation (copied verbatim with
   // the signature below), the LN pipe upass inserts the output flop, and
-  // tolg lowers it. Task 1r — plain `mod` lambdas extract too (each mod is
+  // tolg lowers it. Plain `mod` lambdas extract too (each mod is
   // its own module/partition; calls to it lower to instances in a later
   // phase). A `ref self` mod is DIFFERENT: that is a method / mod-init
   // constructor (`mod mix_tup_init(ref self:Mix_tup)`,
@@ -519,7 +519,7 @@ void uPass_func_extract::process_func_def() {
   extracted_names.insert(extracted_name);
 
   auto new_lnast = std::make_shared<Lnast>(extracted_name);
-  // Task 1r — durable kind: downstream consumers (uPass_pipe, the inliner's
+  // Durable kind: downstream consumers (uPass_pipe, the inliner's
   // mod decline, the future Sub-instance lowering) gate on this, never on
   // stages_min>0. A ref-self mod keeps kind "mod" but is recognized as a
   // method by its `self` io entry.
@@ -549,7 +549,7 @@ void uPass_func_extract::process_func_def() {
   // The func_def shape after the captures-slot removal is:
   //   func_def(name, kind, generics, inputs, outputs, stmts)
   // so from `kind` one sibling step reaches `generics`, a second reaches
-  // `inputs`. Task 1p — copy the generics names (`<T, U>`) onto the extracted
+  // `inputs`. Copy the generics names (`<T, U>`) onto the extracted
   // Lnast (a seam for the deferred per-`T` substitution goal) so a generic
   // signature is detected as a template below.
   std::vector<std::string> generics;
@@ -639,7 +639,7 @@ void uPass_func_extract::process_func_def() {
           new_lnast->add_child(a_idx, Lnast_node::create_const(it->second.to_pyrope()));
           continue;
         }
-        // Task 1m — import bindings replicate as the import CALL itself
+        // Import bindings replicate as the import CALL itself
         // (resolution happens later, in constprop, against the registry):
         // `fcall(ref name, 'import', '<str>')` binds the namespace bundle /
         // lambda ref inside this body exactly like at file scope.
@@ -667,7 +667,7 @@ void uPass_func_extract::process_func_def() {
     copy_current_children(new_lnast, stmts);
   }
 
-  // Task 1p — a not-fully-typed signature (untyped non-self input, `...args`,
+  // A not-fully-typed signature (untyped non-self input, `...args`,
   // or generic) becomes a deferred template: no LGraph at definition time.
   stamp_template_if_untyped(new_lnast);
 

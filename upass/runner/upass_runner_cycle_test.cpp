@@ -160,7 +160,7 @@ TEST(UpassRunnerIfPrune, FalseConditionPrunesIfNodeNoElse) {
   auto staging = runner.take_staging();
   ASSERT_NE(staging, nullptr);
   // No if-node and no store — the entire if was dropped (no else branch).
-  // (Task 1t — the in-branch writes are `store` now; `assign` was deleted.)
+  // (The in-branch writes are `store` now; `assign` was deleted.)
   EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_if), 0U);
   EXPECT_EQ(count_ntype(*staging, Lnast_ntype::Lnast_ntype_store), 0U);
 }

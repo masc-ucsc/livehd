@@ -8,7 +8,7 @@
 
 // ── Lnast_range — signed integer value-range lattice ─────────────────────────
 //
-// (Goal 1n N3) There are NO `+inf`/`-inf` flags: a range is either a concrete
+// There are NO `+inf`/`-inf` flags: a range is either a concrete
 // `[min, max]` or it is `unbounded` (no information). This is the "absent when
 // unbounded" model — there is no half-bounded `(-inf, hi]` / `[lo, +inf)` state,
 // because under the clean type model every declared envelope supplies BOTH
@@ -16,10 +16,10 @@
 // no longer arise.
 //
 // Bounds are int64_t today; any arithmetic that would exceed int64_t collapses
-// to `unbounded` (the conservative top of the lattice). The remaining 1n step
+// to `unbounded` (the conservative top of the lattice). The remaining step
 // is the mechanical swap of these bounds to exact arbitrary-precision `Dlop`
 // (so >64-bit envelopes need no collapse); it is deferred until `lnast_to_lgraph`
-// exists to consume the published ranges — see todo/ 1n N3.
+// exists to consume the published ranges.
 //
 // Invariant: when `unbounded` is false, `min <= max`.
 // Boolean / comparison results use the signed-1-bit lattice point {-1, 0}.
@@ -66,7 +66,7 @@ struct Lnast_range {
 
   // True iff every value representable by `other` is also representable by
   // *this — i.e. set containment *this ⊇ other. This is the type-envelope fit
-  // predicate (task 1b): `envelope.contains(value_range)`. Sign-agnostic
+  // predicate: `envelope.contains(value_range)`. Sign-agnostic
   // (compares the signed bounds directly), so a non-negative 9-bit value like
   // 255 is contained by u8's [0,255] even though its signed width is 9. An
   // unbounded value range is never contained by a bounded envelope.
@@ -237,7 +237,7 @@ struct Lnast_range {
     return bounded(-max, -min);
   }
 
-  // Integer division (Goal 1n N5). For any integer divisor d with |d| >= 1,
+  // Integer division. For any integer divisor d with |d| >= 1,
   // |a / d| <= |a|, so the quotient fits the dividend's magnitude. (d == 0 is
   // undefined; we don't model it.) Non-negative dividend with strictly-positive
   // divisor stays in [0, a.max].
@@ -255,7 +255,7 @@ struct Lnast_range {
     return bounded(-m, m);
   }
 
-  // Integer remainder (Goal 1n N5). |a % d| < |d| and |a % d| <= |a|; the sign
+  // Integer remainder. |a % d| < |d| and |a % d| <= |a|; the sign
   // follows the dividend (truncated semantics). Falls back to the dividend's
   // magnitude when the divisor is unknown.
   Lnast_range mod(const Lnast_range& b) const noexcept {
@@ -284,7 +284,7 @@ struct Lnast_range {
   }
 
   // Sign-extend to a signed value whose sign bit sits at position `sign_bit`
-  // (0-indexed). The result lies in [-2^sign_bit, 2^sign_bit - 1] (Goal 1n N5).
+  // (0-indexed). The result lies in [-2^sign_bit, 2^sign_bit - 1].
   // sign_bit < 0 or too wide → unbounded.
   static Lnast_range sext_to(int64_t sign_bit) noexcept {
     if (sign_bit < 0 || sign_bit >= 63) {

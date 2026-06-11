@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-// lhd — the stateless, hermetic LiveHD CLI kernel (task 1y-bazel).
+// lhd — the stateless, hermetic LiveHD CLI kernel.
 // Contract: the LiveHD docs ("Stateless build-system mode").
 //
 // One invocation = one step: (declared inputs, config) -> (declared outputs,

@@ -62,7 +62,7 @@ public:
   upass::Vote process_set_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
 
   void process_stmts_post() override;
-  // Task 1m — at file-scope completion, fold every `pub` value export into
+  // At file-scope completion, fold every `pub` value export into
   // the Lnast's pub-values side channel (errors when not comptime-foldable).
   void harvest_pub_values();
   void process_declare() override;
@@ -101,7 +101,7 @@ public:
 
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
 
-  // Task 1m — unresolved live imports recorded during the walk: (unit that
+  // Unresolved live imports recorded during the walk: (unit that
   // hit the import, import string as written). pass.upass either surfaces
   // them as errors or hands them to the kernel's iterate loop (import_defer).
   struct Pending_import {
@@ -111,7 +111,7 @@ public:
   static void                               reset_pending_imports() { pending_imports_.clear(); }
   static const std::vector<Pending_import>& pending_imports() { return pending_imports_; }
 
-  // Task 1m — unit/tree names that appear in MORE THAN ONE loaded input
+  // Unit/tree names that appear in MORE THAN ONE loaded input
   // (registry is name-keyed, so a plain lookup would silently pick one).
   // An `import` that resolves to one of these is an ambiguity error (§2);
   // a non-imported collision is tolerated (never consulted). Set by
@@ -122,7 +122,7 @@ protected:
   static inline std::vector<Pending_import>      pending_imports_;
   static inline std::unordered_set<std::string>  ambiguous_units_;
 
-  // Task 1m — resolve a live `import` call (the LiveHD docs):
+  // Resolve a live `import` call (the LiveHD docs):
   // cursor sits on the const "import" callee; binds `dst` (tuple form → pub
   // namespace bundle; `ln:` url → lambda tree-name string) or records a
   // pending import and leaves the call unfolded.
@@ -155,7 +155,7 @@ protected:
   // through `Type`'s bundle when the instance bundle alone doesn't carry
   // the method field.
 
-  // Task 1t — declared UNSIGNED bit-width per var, recorded by process_declare
+  // Declared UNSIGNED bit-width per var, recorded by process_declare
   // from `declare(var, prim_type_uint(N) | prim_type_int(max,min≥0), …)`. Used
   // to coerce a known-negative comptime literal to its unsigned N-bit pattern
   // at the var's FIRST scalar write (`v:u8 = 0sb1001_0111` ⇒ 151), so
@@ -164,10 +164,10 @@ protected:
   // in tmp_fold, but here it lands in constprop's symbol table where its own
   // op-folding reads operands.) Signed/none-typed decls are not recorded.
   // Stores the declared MAX as a Dlop (for uN this is the N-bit all-ones
-  // mask); the first-write coercion is `v & max`. No width/to_i — task 1g.
+  // mask); the first-write coercion is `v & max`. No width/to_i.
   std::optional<std::string>             pending_unsigned_overflow_msg_;
 
-  // Task 1t — named type per var, recorded by process_declare when the declare's
+  // Named type per var, recorded by process_declare when the declare's
   // type slot is a `ref(NAMED)` (a named type, e.g. `mut c:v_type = …`). At the
   // var's init bundle write, process_assign materializes NAMED's resolved bundle
   // (its default field values + per-field types) and overlays the init fields,
@@ -180,7 +180,7 @@ protected:
   // and their stores are next-state din writes (never bound, never dropped):
   // Verilog `<=` semantics — a read after a write still sees the flop's q.
 
-  // Task 2u — names declared `mut`. classify_statement keeps a comptime init
+  // Names declared `mut`. classify_statement keeps a comptime init
   // store (`acc = <const>`) for these (not const/temps): if the mut is later
   // reassigned with a RUNTIME value inside a comptime-eliminated block (an
   // `if true {…}` arm or an unrolled loop iteration), the body is copied
@@ -478,7 +478,7 @@ protected:
   void fold_has(const std::string& dst);
   void fold_case(const std::string& dst);
 
-  // Task 1g — type-aware `does`/`equals`. A resolved operand carries its scalar
+  // Type-aware `does`/`equals`. A resolved operand carries its scalar
   // KIND plus, for integers, a (max,min) ENVELOPE (with explicit unbounded
   // flags) and — when it has a concrete value — the literal/folded Dlop used
   // to coerce a scalar into a single-positional bundle for the structural

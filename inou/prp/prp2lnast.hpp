@@ -164,7 +164,7 @@ protected:
   // define `call` without colliding.
   int hoisted_lambda_count_ = 0;
 
-  // (Removed in task 2u: the parse-time `comptime_tuples_` shape tracker. All
+  // (Removed: the parse-time `comptime_tuples_` shape tracker. All
   // for-loop / tuple-iteration unrolling now happens in the upass runner, which
   // reads tuple shapes from the live constprop bundle — see prp2lnast emits a
   // raw `for` node and uPass_runner::unroll_for / try_tuple_shape.)
@@ -209,8 +209,8 @@ protected:
 
   // Top
   void process_description();
-  // Task 1t — post-build pass: rewrite statement-level assign/tuple_set → store.
-  // Task 1t — post-build pass: merge the declaration cluster
+  // Post-build pass: rewrite statement-level assign/tuple_set → store.
+  // Post-build pass: merge the declaration cluster
   // (attr_set(type)+attr_set(comptime)+type_spec) into one `declare(var, TYPE,
   // const(mode))`. Rebuilds the body into a fresh tree (replace_body) since
   // in-place subtree deletion is avoided on the LNAST tree. The value (if any)
@@ -266,7 +266,7 @@ protected:
   void process_type_statement(TSNode n);
   void process_import_statement(TSNode n);
 
-  // Task 1m — `pub` exports + the `import` builtin (task_1m_plan.md §1).
+  // `pub` exports + the `import` builtin.
   // check_pub_value_decl: a `pub` value declaration must be file-scope `const`.
   void check_pub_value_decl(TSNode decl_node, std::string_view kind);
   // plain_string_literal_text: unquoted body of a plain comptime string
@@ -319,7 +319,7 @@ protected:
   // `clock_pin`) from the valid flag-only classification `clk::[clock]`.
   void reject_common_mistakes_attr_name(TSNode node, std::string_view name, bool has_value) const;
   void emit_type_expr(const Lnast_nid& type_index, TSNode type_node);
-  // Task 1t — the integer type-call `int(max=,min=,bits=)` / `uint(bits=)`.
+  // The integer type-call `int(max=,min=,bits=)` / `uint(bits=)`.
   // Today the grammar lexes `int`/`uint`/`uN` as keyword tokens, so a
   // parenthesized argument list does NOT match `function_call_type`; it lands
   // as an ERROR node wrapping the keyword plus a bare `(…)` tuple. This helper
@@ -346,7 +346,7 @@ protected:
     std::string value;  // empty -> "true"
   };
   // lambda_kind/is_io_output: set only when called from the lambda io driver
-  // (Task 1r-A interface contract — fully-typed pipe/mod ios, per-output
+  // (Interface contract — fully-typed pipe/mod ios, per-output
   // declared landing cycle on mod). Tuple-literal contexts leave them unset
   // and skip every interface check.
   void emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_ident, TSNode definition_or_null, bool is_ref_mod,
@@ -354,31 +354,31 @@ protected:
                        bool is_vararg_mod = false);
   void emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node);
 
-  // Task 1r — current lambda-kind context while processing a body ("comb" /
+  // Current lambda-kind context while processing a body ("comb" /
   // "pipe" / "mod" / ...; empty stack = file scope). Gates `stage[N]`
   // declarations (mod-only) and `x@[N]` timecheck emission (mod/pipe only).
   std::vector<std::string> lambda_kind_stack_;
 
-  // Task 1r — parse a stage_decl's optional timing_slot to the (min,max)
+  // Parse a stage_decl's optional timing_slot to the (min,max)
   // stages const texts: stage[N] -> ("N","N") with N >= 1; stage[A..=B] /
   // stage[A..<B] -> ascending literal range; bare `stage` / `stage[]` ->
   // ("nil","nil") (toolchain picks). Anything else is a compile error.
   std::pair<std::string, std::string> parse_stage_slot(TSNode storage_node);
 
-  // Task 1r — emit `timecheck(ref name, const N, const N)` recording an
+  // Emit `timecheck(ref name, const N, const N)` recording an
   // `x@[N]` cycle check (flop-free, inert — consumed by the future pipe/mod
   // typecheck pass). `x@[]` emits nothing (explicit opt-out). Errors when the
   // enclosing lambda is a comb (every comb value is at cycle 0) or the slot
   // is not a literal N >= 0.
   void maybe_emit_timecheck(TSNode timing_slot, TSNode id_node);
 
-  // Task 1q — resolve a `pipe_lambda` node's `depth` field to the (min,max)
+  // Resolve a `pipe_lambda` node's `depth` field to the (min,max)
   // stages pair: pipe[N] -> (N,N); pipe[A..=B] -> (A,B); pipe[A..<B] ->
   // (A,B-1); bare pipe -> (1,0) (max 0 = unconstrained). pipe[0], zero-min
   // ranges, descending ranges and non-literal depths are compile errors.
   std::pair<int64_t, int64_t> parse_pipe_depth(TSNode pipe_lambda_node);
 
-  // Task 1r/1q — file-/body-scope `const NAME = <int literal>` bindings,
+  // File-/body-scope `const NAME = <int literal>` bindings,
   // recorded as the declaration is lowered (process_lvalue_for_assign scalar
   // branch). Lets `@[NAME]`, `stage[NAME]`, and `pipe[NAME]` timing slots
   // accept a compile-time-resolvable const in place of a bare literal.
@@ -418,7 +418,7 @@ protected:
   struct Call_arg {
     bool        is_assign = false;
     bool        is_ref    = false;
-    bool        is_ufcs   = false;  // task 1k — the receiver of `obj.method(...)`
+    bool        is_ufcs   = false;  // the receiver of `obj.method(...)`
     std::string assign_key;
     Lnast_node  value;
   };
@@ -435,7 +435,7 @@ protected:
   // only context where a type cast on a non-declaring lvalue (`wrap c:u4 = v`)
   // is legal; otherwise a type on a re-assignment is rejected. When set, the
   // scalar leaf lowers the value through a `wrap|sat(v=…, type=<lhs>)` library
-  // call before the store (Task 1t — replaces the old attr_set(wrap) tag).
+  // call before the store (replaces the old attr_set(wrap) tag).
   Lnast_node process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
                                        bool rhs_is_fcall = false, std::string_view rhs_fcall_name = {},
                                        std::string_view overflow_kind = {});

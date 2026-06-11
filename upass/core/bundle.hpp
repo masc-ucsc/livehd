@@ -183,8 +183,6 @@ public:
   bool             is_correct() const { return correct; }
   void             set_issue() const { correct = false; }
 
-  void set_immutable() { immutable = true; }
-
   // Binding-level typed facts (1b/D).
   upass::Mode      get_mode() const { return mode_; }
   void             set_mode(upass::Mode m) { mode_ = m; }
@@ -362,7 +360,6 @@ public:
   static std::string_view get_all_but_first_level(std::string_view key) { return bundle_key::get_all_but_first_level(key); }
   static std::string_view get_first_level(std::string_view key) { return bundle_key::get_first_level(key); }
   static std::string_view get_first_level_name(std::string_view key) { return bundle_key::get_first_level_name(key); }
-  static int              get_first_level_pos(std::string_view key) { return bundle_key::get_first_level_pos(key); }
 
   static bool is_single_level(std::string_view key) { return bundle_key::is_single_level(key); }
 

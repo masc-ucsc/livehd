@@ -1,54 +1,57 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <memory>
+#include <cassert>
+#include <format>
+#include <map>
+#include <stdexcept>
+#include <string_view>
 
-#include "ast.hpp"
-#include "elab_scanner.hpp"
 #include "eprp_method.hpp"
-#include "eprp_pipe.hpp"
 #include "eprp_var.hpp"
 
-class Eprp : public Elab_scanner {
+// Method registry + the compile-diagnostic exception types. The interactive
+// shell that used to parse `cmd label:path |> cmd2 …` text is gone; the lhd
+// CLI drives the registered methods programmatically via run_method_now.
+class Eprp {
 protected:
   std::map<std::string, Eprp_method, eprp_casecmp_str> methods;
 
-  Eprp_pipe pipe;
-
-  std::unique_ptr<Ast_parser> ast;
-
-  enum Eprp_rules : Rule_id {
-    Eprp_invalid = 0,  // zero is not a valid Rule_id
-    Eprp_rule,
-    Eprp_rule_path,
-    Eprp_rule_label_path,
-    Eprp_rule_reg,
-    Eprp_rule_cmd_line,
-    Eprp_rule_cmd_full,
-    Eprp_rule_pipe,
-    Eprp_rule_cmd_or_reg,
-    Eprp_rule_top
-  };
-
-  void elaborate() final;
-
-  void eat_comments();
-
-  std::pair<bool, std::string> rule_path();
-  std::pair<bool, std::string> rule_cmd_line();
-
-  bool rule_label_path(std::string_view cmd_line, Eprp_var& next_var);
-
-  bool rule_reg(bool first);
-  bool rule_cmd_full();
-  bool rule_pipe();
-  bool rule_cmd_or_reg(bool first);
-  bool rule_top();
-
-  void process_ast_handler(const hhds::Tree::Node_class& self, const Ast_parser_node& node);
+  void parser_error_int(std::string_view text) const;
+  void parser_warn_int(std::string_view text) const;
+  void parser_info_int(std::string_view text) const;
 
 public:
   Eprp();
+
+  // Compile-error exception: the constructor flushes the staged diag record
+  // (or a generic one) through the diag sink, then the exception propagates
+  // to the lhd kernel, which reports + exits non-zero.
+  class parser_error : public std::runtime_error {
+  public:
+    template <typename... Args>
+    parser_error(const Eprp& eprp, std::format_string<Args...> format, Args&&... args)
+        : std::runtime_error(std::format(format, args...)) {
+      eprp.parser_error_int(what());
+    };
+    parser_error(const Eprp& eprp, std::string_view txt) : std::runtime_error(std::string(txt)) {
+      eprp.parser_error_int(what());
+    };
+  };
+
+  template <typename... Args>
+  void parser_warn(std::format_string<Args...> format, Args&&... args) const {
+    parser_warn_int(std::format(format, args...));
+  }
+  void parser_warn(std::string_view txt) const { parser_warn_int(txt); }
+
+  template <typename... Args>
+  void parser_info(std::format_string<Args...> format, Args&&... args) const {
+    parser_info_int(std::format(format, args...));
+  }
+  // NOTE: historical behavior — the string_view info overload routes through
+  // the WARNING path (diag sink severity warning), and callers depend on it.
+  void parser_info(std::string_view txt) const { parser_warn_int(txt); }
 
   void register_method(const Eprp_method& method) {
     assert(methods.find(std::string(method.get_name())) == methods.end());
@@ -63,14 +66,9 @@ public:
     return it == methods.end() ? nullptr : &it->second;
   }
 
-  void run_cmd(std::string_view cmd, const Eprp_var& cmd_var_fields);
-
   // Run one registered method synchronously on `var` (no pipe, no text
-  // parsing). Mirrors Pipe_step::run: set the per-stage labels, merge them
-  // into the var, fill in label defaults, check required labels, call the
-  // method. Used by the lhd CLI (task 1y) to drive passes programmatically.
+  // parsing): set the per-stage labels, merge them into the var, fill in
+  // label defaults, check required labels, call the method. Used by the lhd
+  // CLI to drive passes programmatically.
   void run_method_now(std::string_view cmd, Eprp_var& var, const Eprp_var::Eprp_dict& step_labels);
-
-  bool readline(const char* line);
-
 };

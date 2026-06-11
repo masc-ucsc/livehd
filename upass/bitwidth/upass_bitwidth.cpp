@@ -359,13 +359,13 @@ upass::Vote uPass_bitwidth::process_mult(std::string_view dst_name, Bundle& dst,
 }
 
 upass::Vote uPass_bitwidth::process_div(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
-  // |a / d| <= |a| for any integer |d| >= 1 (Goal 1n N5).
+  // |a / d| <= |a| for any integer |d| >= 1.
   if (src.size() < 2) { return stamp(dst_name, dst, Lnast_range::make_unbounded()); }
   return stamp(dst_name, dst, range_of_operand(src[0]).div(range_of_operand(src[1])));
 }
 
 upass::Vote uPass_bitwidth::process_mod(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
-  // |a % d| < |d| and <= |a|; sign follows the dividend (Goal 1n N5).
+  // |a % d| < |d| and <= |a|; sign follows the dividend.
   if (src.size() < 2) { return stamp(dst_name, dst, Lnast_range::make_unbounded()); }
   return stamp(dst_name, dst, range_of_operand(src[0]).mod(range_of_operand(src[1])));
 }
@@ -442,7 +442,7 @@ upass::Vote uPass_bitwidth::process_popcount(std::string_view dst_name, Bundle& 
 
 upass::Vote uPass_bitwidth::process_sext(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   // sext(value, sign_bit_pos): result in [-2^p, 2^p - 1] for a constant
-  // position p (Goal 1n N5). src[1] is the sign-bit POSITION (0-indexed).
+  // position p. src[1] is the sign-bit POSITION (0-indexed).
   if (src.size() < 2) {
     return stamp(dst_name, dst, Lnast_range::make_unbounded());
   }
@@ -454,7 +454,7 @@ upass::Vote uPass_bitwidth::process_sext(std::string_view dst_name, Bundle& dst,
 }
 
 // get_mask(base, mask) — the selected bits packed LSB-first as an UNSIGNED
-// value (task 1b: this is the "force" operator). For a known non-negative mask
+// value (this is the "force" operator). For a known non-negative mask
 // of width w = popcount(mask), the result lies in [0, 2^w − 1]. A single
 // selected bit yields the signed 1-bit value (-1/0), matching Dlop::get_mask_op
 // and the `x#[i]` semantics. Negative (carve-out) or unknown masks stay
@@ -514,7 +514,7 @@ void uPass_bitwidth::process_func_call() {
     return;
   }
 
-  // Task 1t — a `wrap`/`sat` narrowing call. The `type=` arg names the target
+  // A `wrap`/`sat` narrowing call. The `type=` arg names the target
   // var whose declared envelope is intentionally overflowed; exempt it from
   // the does-not-fit check at its next write.
   const auto callee      = current_text();

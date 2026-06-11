@@ -128,7 +128,7 @@ TEST(LnastRangeLattice, NarrowerThan) {
   EXPECT_FALSE(wide.is_narrower_than(narrow));
 }
 
-// ── contains (task 1b type-envelope fit predicate) ───────────────────────────
+// ── contains (type-envelope fit predicate) ───────────────────────────
 
 TEST(LnastRangeLattice, ContainsBounded) {
   Lnast_range u8;  // envelope [0, 255]

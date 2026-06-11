@@ -124,7 +124,7 @@ void uPass_coalescer::handle_op() {
   // current behavior.
   //
   // EXCEPT for `mut`-declared names: constprop's classify_statement keeps
-  // every store to a mut var (the task-2u guard, see upass_constprop.cpp), so
+  // every store to a mut var (the mut-store guard, see upass_constprop.cpp), so
   // there is no drop to defer to. Park comptime mut writes here so the
   // coalescer's own DSE supersedes the dead ones; the surviving last write is
   // emitted at flush (flush_one never comptime-drops a mut store).
@@ -163,8 +163,8 @@ bool uPass_coalescer::flush_one(const std::string& name) {
   // emit — matches what constprop's classify_statement would have voted on
   // the original emit path.
   //
-  // EXCEPT a `mut`-declared name: constprop keeps comptime mut stores (task-2u
-  // guard), and a comptime-eliminated block (`if true{…}`, unrolled loop) may
+  // EXCEPT a `mut`-declared name: constprop keeps comptime mut stores (the
+  // mut-store guard), and a comptime-eliminated block (`if true{…}`, unrolled loop) may
   // read the bare mut ref expecting this store as its driver. So emit the
   // surviving mut store rather than comptime-dropping it — the coalescer's
   // DSE has already removed the superseded ones, leaving just the last write.

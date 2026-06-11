@@ -182,7 +182,7 @@ std::optional<Dlop> uPass_attributes::derive_max(std::string_view base) const {
   // gives a value; bool has its own envelope; everything else (`:int`,
   // `:string`, untyped) reads nil — no value-based fallback.
   if (auto* ti = lookup_type_info(base); ti && ti->has_type_spec) {
-    // Task 1t — prim_type_int range is the single source of truth.
+    // prim_type_int range is the single source of truth.
     if (ti->range_max) {
       return *ti->range_max;
     }
@@ -204,7 +204,7 @@ std::optional<Dlop> uPass_attributes::derive_min(std::string_view base) const {
     return v;
   }
   if (auto* ti = lookup_type_info(base); ti && ti->has_type_spec) {
-    // Task 1t — prim_type_int range is the single source of truth.
+    // prim_type_int range is the single source of truth.
     if (ti->range_min) {
       return *ti->range_min;
     }
@@ -464,7 +464,7 @@ void uPass_attributes::process_type_spec() {
   //     <prim_type_int | prim_type_uint | prim_type_sint | prim_type_boolean |
   //      … | comp_type_array | unknown_type>
   //       [ const(width) ]                // prim_type_uint/sint (legacy)
-  //       [ const(max) const(min) ]       // prim_type_int (task 1t); "nil" = unbounded
+  //       [ const(max) const(min) ]       // prim_type_int; "nil" = unbounded
   //
   // We extract the kind and (when present) the explicit width or range, then
   // merge it into type_info_map for the target.
@@ -501,7 +501,7 @@ void uPass_attributes::read_scalar_type_at_cursor(Numeric_kind& kind, uint32_t& 
                                                   std::optional<Dlop>& range_min, bool& is_real_type) {
   auto t = get_raw_ntype();
   if (Lnast_ntype::is_prim_type_int(t)) {
-    // Task 1t — the canonical integer type carries its `(max,min)` range as
+    // The canonical integer type carries its `(max,min)` range as
     // up to two const children; a "nil" (non-integer) child means that bound
     // is unbounded. (uN/sN now lower to this too — the legacy
     // prim_type_uint/sint width form is gone.)
@@ -545,7 +545,7 @@ void uPass_attributes::read_scalar_type_at_cursor(Numeric_kind& kind, uint32_t& 
 }
 
 void uPass_attributes::process_declare() {
-  // Layout (task 1t): declare( ref(var), TYPE, const(mode) [, value] )
+  // Layout: declare( ref(var), TYPE, const(mode) [, value] )
   //   TYPE  : prim_type_int/uint/sint/boolean/string / comp_type_* /
   //           none_type (no `:type` annotation).
   //   mode  : space-joined tokens, storage first: "mut" | "const" | "reg" |
@@ -586,7 +586,7 @@ void uPass_attributes::process_declare() {
         } else if (tok == "await") {
           decl = Decl_kind::await_kind;
         } else if (tok == "type") {
-          // Task 1k — a `type X = …` binding; the inliner rejects it as a
+          // A `type X = …` binding; the inliner rejects it as a
           // `ref` actual (ref-self methods need a mut value receiver).
           decl = Decl_kind::type_kind;
         } else if (tok == "comptime") {

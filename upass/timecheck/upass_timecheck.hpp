@@ -6,7 +6,7 @@
 
 #include "lnast.hpp"
 
-// Task 1u-B — LNAST timecheck discharge (todo/ #item-1u-B).
+// LNAST timecheck discharge.
 //
 // A time check is discharged at the EARLIEST level that can decide it. This
 // pass handles the LNAST-decidable subset: pure feedforward cycle derivation

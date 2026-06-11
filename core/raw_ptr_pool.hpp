@@ -20,14 +20,6 @@ public:
     }
   }
 
-  void* get_ptr() {
-    auto raw_retval = _pointer_queue.dequeue();
-    if (!raw_retval) {
-      return malloc(size);
-    }
-    return *raw_retval;
-  }
-
   void release_ptr(void* to_release) {
     bool fits = _pointer_queue.enqueue(to_release);
     if (fits) {

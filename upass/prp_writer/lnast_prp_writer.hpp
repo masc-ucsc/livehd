@@ -58,8 +58,8 @@ private:
   void write_top();
   void write_stmts();
   void write_if();
-  void write_declare();  // task 1t — declare(ref, type, qualifier, [value])
-  void write_store();    // task 1t — store(var, level0..levelN, value)
+  void write_declare();  // declare(ref, type, qualifier, [value])
+  void write_store();    // store(var, level0..levelN, value)
   void write_ref();
   void write_const();
   void write_cassert();

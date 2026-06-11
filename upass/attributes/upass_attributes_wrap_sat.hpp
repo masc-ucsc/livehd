@@ -14,7 +14,7 @@
 //     receive at most one non-nil assignment per cycle; a second binding
 //     is a compile error.
 //
-// (`wrap`/`saturate` are no longer attributes — Task 1t lowers them to a
+// (`wrap`/`saturate` are no longer attributes — they lower to a
 // `wrap|sat(v=…, type=…)` library call handled in
 // uPass_attributes::process_func_call.)
 

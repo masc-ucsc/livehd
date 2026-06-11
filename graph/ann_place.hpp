@@ -25,7 +25,5 @@ public:
     return lhs.x == rhs.x && lhs.y == rhs.y && lhs.width == rhs.width && lhs.height == rhs.height;
   }
 
-  float get_x() const { return x; }
-
   bool is_valid() const { return width > 0 && height > 0; }
 };

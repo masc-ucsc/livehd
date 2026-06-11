@@ -35,7 +35,7 @@ public:
   using Kind = upass::Kind;
   using Vote = upass::Vote;
 
-  // Task 1g — expose the inferred scalar kind so constprop's type-aware
+  // Expose the inferred scalar kind so constprop's type-aware
   // `does`/`equals` fold can reject cross-kind comparisons (bool vs int) on
   // variables that carry no `:type` annotation. Reads the shared table.
 

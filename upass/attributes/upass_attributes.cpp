@@ -24,7 +24,7 @@ uPass_attributes::uPass_attributes(std::shared_ptr<upass::Lnast_manager>& _lm) :
   reg.register_sticky_pattern(std::make_shared<upass::attributes::Sticky_handler>());
 
   // Category-A consumption: const single-bind enforcement (type=const).
-  // wrap/sat are no longer attributes — Task 1t lowers them to a
+  // wrap/sat are no longer attributes — they lower to a
   // `wrap|sat(v=…, type=…)` call handled in process_func_call.
   reg.register_exact("type", std::make_shared<upass::attributes::Const_handler>());
 
@@ -58,7 +58,7 @@ std::string uPass_attributes::normalize_name(std::string_view name) { return std
 uPass_attributes::Op_view uPass_attributes::scan_op() {
   Op_view view;
 
-  // Task 1t — a 0-level `store` reaching here (routed through process_assign)
+  // A 0-level `store` reaching here (routed through process_assign)
   // is the scalar-write/alias shape, exactly like `assign`.
   const bool is_assign = is_type(Lnast_ntype::Lnast_ntype_store) || is_type(Lnast_ntype::Lnast_ntype_store);
 
@@ -140,14 +140,14 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   // requires a policy on view.lhs. If no wrap/sat policy is in scope at all,
   // resolving rhs_value through runner_fold_fn is wasted work — skip the
   // Dlop parse / fold lookup on the bulk-arithmetic path.
-  // Task 1t — also materialize the RHS value when the LHS has an unsigned
+  // Also materialize the RHS value when the LHS has an unsigned
   // declared type, so a known-negative comptime literal can be coerced to its
   // unsigned bit pattern (e.g. `v:u8 = 0sb1001_0111` ⇒ 151). Checked via the
   // already-resolved view.lhs; null/typed-tmp LHS keeps the bulk fast path.
   const auto* lhs_ti_for_coerce = is_assign_node ? lookup_type_info(view.lhs) : nullptr;
   const bool  lhs_unsigned      = lhs_ti_for_coerce != nullptr && lhs_ti_for_coerce->has_type_spec
                                   && lhs_ti_for_coerce->kind == Numeric_kind::unsigned_int && lhs_ti_for_coerce->bits != 0;
-  // Task 1b — also materialize the RHS for a SIGNED-int / bounded LHS so the
+  // Also materialize the RHS for a SIGNED-int / bounded LHS so the
   // first-write range-fit check (below) can run on it. An unbounded `int`/
   // `uint` (no concrete width or range) has no envelope, so it stays on the
   // fast path (and a present-but-nil range Dlop must not be treated as a
@@ -204,12 +204,12 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     // wrap/sat attr_set AFTER this store — so coercing here would pre-mask the
     // value out from under sat (e.g. `sat z = <neg>` must clamp to 0, not mask
     // to its low bits). Skipping reassignments leaves wrap/sat in control.
-    // Task 1t — implicit type coercion: a comptime value that sign-extends a
+    // Implicit type coercion: a comptime value that sign-extends a
     // KNOWN 1 past the declared width (i.e. a known-negative bit pattern, even
     // with interior unknowns) stored to an unsigned-typed var reads as its
     // unsigned N-bit pattern. `v:u8 = 0sb1001_0111` ⇒ 151, and
     // `v:u8 = 0sb1?01_?000` ⇒ 0ub1?01?000 (so `v | 0xff == 0xff`). This is the
-    // implicit (sign-dropping) "force"; task 1b prefers the explicit bit-select
+    // implicit (sign-dropping) "force"; prefer the explicit bit-select
     // spelling `v:u8 = e#[0..=7]`.
     //   * `bit_test(bits)` true + `unknown_bit_test(bits)` false = the
     //     sign-extension past width N is a known 1. An unknown sign bit
@@ -228,7 +228,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
         }
       }
     }
-    // (Goal 1n) Overflow capture moved to upass/bitwidth (centralized): bitwidth
+    // Overflow capture moved to upass/bitwidth (centralized): bitwidth
     // checks the value range against the declared envelope at end_run, for both
     // signed and unsigned types. The two former checks here — a positive
     // comptime value exceeding an unsigned width, and a signed value outside its
@@ -481,7 +481,7 @@ void uPass_attributes::process_attr_set() {
       } else if (value_text == "await") {
         kind = Decl_kind::await_kind;
       } else if (value_text == "type") {
-        kind = Decl_kind::type_kind;  // task 1k — see Decl_kind::type_kind
+        kind = Decl_kind::type_kind;  // see Decl_kind::type_kind
       }
       if (kind != Decl_kind::unknown) {
         // Per-field storage class onto the binding (the
@@ -542,7 +542,7 @@ void uPass_attributes::process_attr_set() {
     } else if (attr_name == "bits" && !value_is_ref) {
       // `[bits=N]` — explicit width, no signedness. Recorded as an attr
       // value; lookup_type_info_bundle folds it into the answer (`uN`/`sN`
-      // sugar lowers to `prim_type_int(max,min)` directly since Task 1t).
+      // sugar lowers to `prim_type_int(max,min)` directly).
       auto v = Dlop::from_pyrope(value_text);
       if (v->is_just_i64()) {
         set_binding_attr(target, attr_name, *v);

@@ -3,8 +3,6 @@
 
 #include <format>
 
-#include "elab_scanner.hpp"
-
 Eprp_method::Eprp_method(std::string_view _name, std::string_view _help, const std::function<void(Eprp_var& var)>& _method)
     : name(_name), help(_help), method(_method) {};
 

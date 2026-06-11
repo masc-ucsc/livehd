@@ -46,7 +46,7 @@ public:
 
   // Record `mut`-declared names (mirrors constprop's process_declare). A
   // comptime-known write to a `mut` var is NOT dropped by constprop's
-  // classify_statement (the task-2u guard keeps it), so the coalescer must
+  // classify_statement (the mut-store guard keeps it), so the coalescer must
   // own its dead-store elimination: park comptime mut writes too, drop the
   // superseded ones, and keep (never comptime-drop) the surviving last write.
   void process_declare() override;

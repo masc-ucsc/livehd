@@ -37,7 +37,7 @@ protected:
 public:
   static inline Eprp eprp;
 
-  // The diag record is emitted downstream by Elab_scanner::parser_error_int /
+  // The diag record is emitted downstream by Eprp::parser_error_int /
   // parser_warn_int (the single throw path), so these stay thin.
   static void error(std::string_view msg) { throw Eprp::parser_error(eprp, msg); }
   static void warn(std::string_view msg) { eprp.parser_warn(msg); }

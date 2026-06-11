@@ -28,7 +28,7 @@ namespace upass::call_resolver {
 
 // POSITIONAL marker pseudo-names (not named arguments).
 constexpr std::string_view ref_arg_marker  = "__ref_arg";   // pass-by-ref
-constexpr std::string_view ufcs_arg_marker = "__ufcs_arg";  // task 1k UFCS receiver
+constexpr std::string_view ufcs_arg_marker = "__ufcs_arg";  // UFCS receiver
 
 struct Call_actual {
   bool        is_named = false;

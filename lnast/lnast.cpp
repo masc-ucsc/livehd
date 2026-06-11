@@ -141,18 +141,6 @@ Lnast_nid Lnast::add_child(const Lnast_nid& parent, const Lnast_node& n) {
   return child;
 }
 
-Lnast_nid Lnast::append_sibling(const Lnast_nid& sibling, Lnast_ntype::Lnast_ntype_int type) {
-  auto next = sibling.append_sibling();
-  set_data(next, type);
-  return next;
-}
-
-Lnast_nid Lnast::append_sibling(const Lnast_nid& sibling, const Lnast_node& n) {
-  auto next = sibling.append_sibling();
-  set_data(next, n);
-  return next;
-}
-
 // ─────────────────────────────────────────────────────────────────────────
 // Payload accessors. The Lnast_ntype enum lives in the native HHDS Type
 // slot (uint16_t). Token/text/fname ride on flat-storage attributes.

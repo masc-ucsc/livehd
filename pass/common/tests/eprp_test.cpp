@@ -21,19 +21,6 @@ public:
 
 #include "eprp.hpp"
 
-// Test-local harness: inline parsing used to be Elab_scanner::parse_inline
-// but has no production users.
-class Eprp_harness : public Eprp {
-public:
-  void parse_inline(std::string_view txt) {
-    parse_setup();
-    memblock      = txt.data();
-    memblock_size = txt.size();
-    parse_step();
-  }
-};
-#include "file_utils.hpp"
-
 static bool is_equal_called = false;
 
 class test1 {
@@ -108,7 +95,7 @@ public:
 class Eprp_test : public ::testing::Test {
 public:
 protected:
-  Eprp_harness eprp;
+  Eprp eprp;
   void SetUp() override {
     Eprp_method m1("test1.xyz.generate", "Generate a random test/method call to foo", &test1::foo);
     m1.add_label_required("lgdb", "lgraph directory");
@@ -147,7 +134,7 @@ protected:
 class Eprp_files : public ::testing::Test {
 public:
 protected:
-  Eprp_harness eprp;
+  Eprp eprp;
   void SetUp() override {
     Eprp_method m1("test1.files2", "Generate a random test/method call to foo", &test1::files2);
     m1.add_label_required("nofiles", "list of files");
@@ -156,23 +143,23 @@ protected:
   }
 };
 
-TEST_F(Eprp_files, ParseFiles) {
-  const char* buffer = " test1.files2 match:\"nothing\" nofiles:g3xx,./f1/f1.v,xotato/../bar.prp,potato/bar.v";
-
-  eprp.parse_inline(buffer);
+TEST_F(Eprp_files, RunMethodFiles) {
+  Eprp_var var;
+  eprp.run_method_now("test1.files2", var, {{"nofiles", "g3xx,./f1/f1.v,xotato/../bar.prp,potato/bar.v"}});
 }
 
-TEST_F(Eprp_test, SimpleReadlinePipe) {
+// The old `cmd … |> cmd2 …` pipe text is gone; chain run_method_now calls on
+// a shared var instead, which is exactly what the lhd kernel does.
+TEST_F(Eprp_test, RunMethodPipe) {
   is_equal_called = false;
-  const char* buffer
-      = " test1.xyz.generate lgdb:./lgdb graph_name:chacha |> test1.fff.test check2:jeje    lgdb:potato   check1:potato   ";
-
-  eprp.parse_inline(buffer);
-
+  Eprp_var var;
+  eprp.run_method_now("test1.xyz.generate", var, {{"lgdb", "./lgdb"}, {"graph_name", "chacha"}});
+  eprp.run_method_now("test1.fff.test", var, {{"check2", "jeje"}, {"lgdb", "potato"}, {"check1", "potato"}});
   EXPECT_TRUE(is_equal_called);
-  is_equal_called = false;
 
-  buffer = " test1.pass test1_foo:field1 check2:chacha  check1:lgdb |> test1.fff.test check2:not_used";
-  eprp.parse_inline(buffer);
+  is_equal_called = false;
+  Eprp_var var2;
+  eprp.run_method_now("test1.pass", var2, {{"test1_foo", "field1"}, {"check2", "chacha"}, {"check1", "lgdb"}});
+  eprp.run_method_now("test1.fff.test", var2, {{"check2", "not_used"}});
   EXPECT_TRUE(is_equal_called);
 }

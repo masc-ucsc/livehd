@@ -419,7 +419,7 @@ uint64_t hash_bytes(const std::string& bytes) { return lh::woothash64(bytes.data
 
 std::string json_escape_min(std::string_view s);  // defined with the scan command below
 
-// Task 1m — one `pub` export in a unit's manifest entry. `url` only for
+// One `pub` export in a unit's manifest entry. `url` only for
 // lambda exports (`ln:<unit>.<name>`); values live in the `<unit>.__pub`
 // wrapper tree.
 struct Manifest_pub {
@@ -524,7 +524,7 @@ void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<L
     Manifest_unit u;
     u.name = name;
     u.hash = hash_bytes(oss.str());
-    // Task 1m — durable unit metadata: the lambda kind (an in-memory Lnast
+    // Durable unit metadata: the lambda kind (an in-memory Lnast
     // member, lost across the forest save) and the file unit's pub index.
     if (name.size() > 6 && name.ends_with(".__pub")) {
       u.unit_kind = "pub";
@@ -580,7 +580,7 @@ std::vector<std::shared_ptr<Lnast>> load_ln_dir(const std::string& dir) {
     if (!ln) {
       throw Lhd_error{"config", std::format("unit '{}' listed in manifest but missing from the forest", u["name"].GetString()), ""};
     }
-    // Task 1m — restore the durable unit metadata the forest save doesn't
+    // Restore the durable unit metadata the forest save doesn't
     // carry: the lambda kind (inliner/tolg gate on it) and the pub index.
     if (u.HasMember("unit_kind") && u["unit_kind"].IsString()) {
       std::string_view uk = u["unit_kind"].GetString();
@@ -975,7 +975,7 @@ std::vector<std::shared_ptr<Lnast>> filter_top(const std::vector<std::shared_ptr
   return out;
 }
 
-// Task 1m §4 — synthesize the `<unit>.__pub` wrapper tree: the durable,
+// Synthesize the `<unit>.__pub` wrapper tree: the durable,
 // atomically-published pub list of a file unit. Self-describing body shape
 // (walkable without evaluation; valid plain LNAST):
 //   value leaves: store(ref '<name>[.field]', const <pyrope-text>)
@@ -1026,7 +1026,7 @@ std::shared_ptr<Lnast> synthesize_pub_wrapper(const std::shared_ptr<Lnast>& ln) 
   return w;
 }
 
-// Task 1m — the publishable unit set of the given source units: each source
+// The publishable unit set of the given source units: each source
 // plus every derived tree named "<src>.<entity>" (func_extract naming —
 // extracted lambdas, and the `.__pub` wrapper once synthesized).
 std::vector<std::shared_ptr<Lnast>> collect_source_derived(const std::vector<std::shared_ptr<Lnast>>& all,
@@ -1582,7 +1582,7 @@ void elaborate_command(Options& opts, Result& res) {
     std::vector<std::shared_ptr<Lnast>> source_units(var.lnasts.begin() + static_cast<long>(n_imports), var.lnasts.end());
     emit_lnast_dump_outputs(filter_top(source_units, opts.top), opts, res);  // post-parse dump
     if (ln_out != nullptr || lg_out != nullptr || wants_dump(opts, "lnast") || wants_dump(opts, "lg")) {
-      // Task 1m — elaboration is parse + pass.upass: the `ln:` emit publishes
+      // Elaboration is parse + pass.upass: the `ln:` emit publishes
       // the POST-upass units (pre-elaborated for importers), each file unit's
       // extracted lambdas (`<unit>.<entity>` — the `ln:` url targets), and a
       // synthesized `<unit>.__pub` wrapper per pub-exporting file. A bare
@@ -1618,7 +1618,7 @@ void elaborate_command(Options& opts, Result& res) {
   }
 
   // Aggregation: IR inputs only.
-  // Task 1m-C — linker: merge lg: libraries + lower ln: source units that
+  // Linker: merge lg: libraries + lower ln: source units that
   // reference them (`import("lg:foo")` → a black-box Sub) into a new lg: lib.
   if (!ir.ln_dirs.empty() && !ir.lg_dirs.empty()) {
     setup_diag(opts, "elaborate.merge");
@@ -1740,7 +1740,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   }
   merge_sets(opts, "upass", up);
 
-  // Task 1m §5 — iterate until converged. Units may import each other in any
+  // Iterate until converged. Units may import each other in any
   // order (no topological pre-ordering; liveness needs constprop), so:
   // each round runs pass.upass over everything; a file whose walk hit an
   // unresolved LIVE import retries WHOLESALE next round from its pristine
@@ -1845,7 +1845,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   }
   {
     Stdout_to_log redirect(next_log_path(opts, "lnast.tolg"));
-    // Task 1u-A — two-phase: register every module's GraphIO first so call
+    // Two-phase: register every module's GraphIO first so call
     // sites can bind callee GraphIOs (Sub instances) regardless of order.
     for (const auto& ln : var.lnasts) {
       uPass_tolg::register_io(ln, lib_path, var.lnasts);

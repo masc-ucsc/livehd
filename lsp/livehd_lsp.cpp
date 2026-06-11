@@ -236,7 +236,7 @@ std::vector<livehd::diag::Diagnostic> analyze(std::string_view virtual_path, std
   sink.set_jsonl_path("off");    // in-memory only
   sink.set_step("lsp");
 
-  // Run `inou.prp |> pass.upass` — no lnastfmt stage (goal 1h: its user-facing
+  // Run `inou.prp |> pass.upass` — no lnastfmt stage (its user-facing
   // checks moved into upass/semacheck, so lnastfmt is a compiler-internal
   // structural validator with nothing to tell an end user). Every diagnostic
   // producer (prp2lnast, semacheck, typecheck, constprop, bitwidth, verifier)
@@ -299,7 +299,7 @@ void write_position(Writer& w, uint32_t line0, uint32_t char0) {
 void write_range(Writer& w, const livehd::diag::Span& sp) {
   // diag spans are 1-based line/col with byte columns; LSP wants 0-based. With
   // utf-8 negotiated the byte column is the character offset; with the utf-16
-  // fallback it is an ASCII-correct approximation (see docs/contracts §7).
+  // fallback it is an ASCII-correct approximation.
   uint32_t sl = sp.start_line ? *sp.start_line - 1 : 0;
   uint32_t sc = sp.start_col ? *sp.start_col - 1 : 0;
   uint32_t el = sp.end_line ? *sp.end_line - 1 : sl;

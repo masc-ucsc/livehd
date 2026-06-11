@@ -73,7 +73,7 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
 // directly into an Ntype_op without any shift. Returns Ntype_op::Invalid
 // (== 0) for nodes that were never typed.
 //
-// Task 1u-A gotcha: `Graph::set_subnode` RE-STAMPS the raw type to HHDS's
+// Gotcha: `Graph::set_subnode` RE-STAMPS the raw type to HHDS's
 // own 2/3 loop-last-hint encoding (graph.cpp), silently overwriting the
 // Ntype_op::Sub a caller stored — and 2 collides with Ntype_op::Sum. The
 // authoritative Sub discriminator is therefore the subnode LINK, not the
