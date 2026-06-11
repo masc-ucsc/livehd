@@ -194,7 +194,7 @@ upass::Vote uPass_typecheck::process_store(std::string_view dst_name, Bundle& ds
   // use a new var). `= nil` is a legal copy and neither establishes nor
   // changes the kind. Field-path stores — selector children (src.size() > 1)
   // or a dotted dst ref (`store(CFG.gain, v)`) — pass through: `dst` is the
-  // whole destination bundle there, and per-field checks are later 2b work.
+  // whole destination bundle there, and per-field checks are follow-up work.
   if (dst_name.empty() || src.size() != 1 || dst_name.find('.') != std::string_view::npos) {
     return Vote::keep;
   }
@@ -203,7 +203,7 @@ upass::Vote uPass_typecheck::process_store(std::string_view dst_name, Bundle& ds
     return Vote::keep;  // `= nil` neither establishes nor changes the kind
   }
   const Kind cur = kind_of_bundle(dst);
-  // 2b/C — "an unset/nil scalar destination does not infer a new tuple shape
+  // "an unset/nil scalar destination does not infer a new tuple shape
   // from a tuple RHS": a never-typed dst whose current VALUE is the nil it
   // was initialized with cannot become an aggregate. The runner's inliner
   // marks its own synthesized nil seeds (Symbol_table::nil_seeded) — those
@@ -217,7 +217,7 @@ upass::Vote uPass_typecheck::process_store(std::string_view dst_name, Bundle& ds
       return Vote::keep;
     }
   }
-  // 2b/C — "typecheck rejects RHS fields not present in the destination
+  // "typecheck rejects RHS fields not present in the destination
   // shape": a DECLARED shape (named type on the binding) is closed — a tuple
   // RHS may only re-bind existing fields (subset is fine; untouched fields
   // keep their values). INFERRED shapes stay open (the corpus relies on

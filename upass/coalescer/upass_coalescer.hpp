@@ -309,7 +309,7 @@ public:
   void process_attr_set() override { flush_all(); }
   void process_attr_get() override { flush_all(); }
 
-  // 2b/D — the park decision rides the push VOTE (one-shot flag set by
+  // The park decision rides the push VOTE (one-shot flag set by
   // handle_op, consumed by the dispatching hook's return value).
   upass::Vote consume_park_vote() {
     if (parked_current_stmt) {

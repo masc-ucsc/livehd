@@ -652,7 +652,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
         final_expr = absl::StrCat("{", sel, "}");
       } else {
         std::string a_replaced;
-        Bits_t      value_bits_to_use = static_cast<Bits_t>(range_end - range_begin);
+        int32_t      value_bits_to_use = static_cast<int32_t>(range_end - range_begin);
         if (value_bits_to_use >= bits_of(value_dpin)) {
           a_replaced = value;
         } else if (value_bits_to_use == 1) {
@@ -704,7 +704,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
       }
     } else {
       auto [range_begin, range_end] = mask_v.get_mask_range();
-      Bits_t a_bits_to_use          = static_cast<Bits_t>(range_end - range_begin);
+      int32_t a_bits_to_use          = static_cast<int32_t>(range_end - range_begin);
       if (a_bits_to_use > bits_of(dpin)) {
         range_end = bits_of(dpin) + range_begin;
       }

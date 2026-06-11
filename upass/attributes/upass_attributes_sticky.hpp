@@ -69,7 +69,7 @@ public:
   bool is_inert() const { return !any_marked_ && control_taint_stack.empty(); }
 
 private:
-  // 2b/E — the acquired-set lives ON the bindings as residual attrs under
+  // The acquired-set lives ON the bindings as residual attrs under
   // their canonical leading-`_` names (battr::is_sticky); propagation is
   // "merge each src's sticky_attributes() into dst". The handler holds the
   // runner's shared table (set in begin_iteration) plus a monotonic

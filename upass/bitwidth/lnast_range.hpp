@@ -124,7 +124,7 @@ struct Lnast_range {
     return bounded(lo, hi);
   }
 
-  // ── Bitwise (2b/D soundness fix: these were range-UNIONs, which neither
+  // ── Bitwise (soundness: a naive range-UNION would neither
   //    bound `a&b` from below nor `a|b`/`a^b` from above — `0x55|0xaa=0xff`
   //    escaped [0x55,0xaa]) ─────────────────────────────────────────────────
 

@@ -110,19 +110,19 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
 // Per-pin bit width. `livehd::attrs::bits` holds the value (0 == unspecified).
 // For graph-IO pins, the declared bits live on `GraphIO::get_bits(name)`
 // instead — caller decides which path applies.
-[[nodiscard]] inline Bits_t bits_of(const hhds::Pin_class& pin) {
+[[nodiscard]] inline int32_t bits_of(const hhds::Pin_class& pin) {
   if (pin.is_invalid()) {
     return 0;
   }
   auto a = pin.attr(livehd::attrs::bits);
-  return a.has() ? static_cast<Bits_t>(a.get()) : Bits_t{0};
+  return a.has() ? static_cast<int32_t>(a.get()) : int32_t{0};
 }
 
-[[nodiscard]] inline Bits_t bits_of(const hhds::Pin_class& pin, const hhds::GraphIO& gio, std::string_view io_name) {
+[[nodiscard]] inline int32_t bits_of(const hhds::Pin_class& pin, const hhds::GraphIO& gio, std::string_view io_name) {
   if (auto b = bits_of(pin); b != 0) {
     return b;
   }
-  return static_cast<Bits_t>(gio.get_bits(io_name));
+  return static_cast<int32_t>(gio.get_bits(io_name));
 }
 
 // Per-pin sign hint. Default is unsigned; an explicit pin_signed attr marks
@@ -264,9 +264,9 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
 // the same to subsequent migrated readers as if it had been mutated through
 // the Lgraph wrapper.
 
-// Per-pin bit width. Bits_t == int32_t (graph_sizing.hpp). Storing 0 leaves
+// Per-pin bit width (plain int32). Storing 0 leaves
 // the attribute untouched logically (callers should use clear_bits instead).
-inline void set_bits(const hhds::Pin_class& pin, Bits_t b) {
+inline void set_bits(const hhds::Pin_class& pin, int32_t b) {
   if (pin.is_invalid()) {
     return;
   }
@@ -404,7 +404,7 @@ inline void set_type_const_serialized(const hhds::Node_class& node, std::string_
 }
 
 // Create a new node of `op` in `graph` and stamp port-0 driver bits.
-[[nodiscard]] inline hhds::Node_class create_typed_node(hhds::Graph& graph, Ntype_op op, Bits_t bits) {
+[[nodiscard]] inline hhds::Node_class create_typed_node(hhds::Graph& graph, Ntype_op op, int32_t bits) {
   auto node = graph.create_node();
   set_type_op(node, op);
   if (bits != 0) {
@@ -421,7 +421,7 @@ inline void set_type_const_serialized(const hhds::Node_class& node, std::string_
 }
 
 // Per-pin offset (used by Get_mask / Set_mask / Sext positional ops).
-inline void set_pin_offset(const hhds::Pin_class& pin, Bits_t off) {
+inline void set_pin_offset(const hhds::Pin_class& pin, int32_t off) {
   if (pin.is_invalid()) {
     return;
   }

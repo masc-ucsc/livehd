@@ -88,10 +88,10 @@ public:
   }
 
   bool var(std::string_view key);
-  // 2b/A — declaration pre-step binding: empty bundle, no "0" slot (see impl).
+  // Declaration pre-step binding: empty bundle, no "0" slot (see impl).
   bool declare_bare(std::string_view var);
 
-  // 2b/E3b — declared facts for a DOTTED path whose field entry does not
+  // Declared facts for a DOTTED path whose field entry does not
   // exist yet (`type_spec(inl1_ar.x, u3)` before the argument store). The
   // runner stashes at the bake, applies+erases at the field's first write;
   // readers (lookup_type_info_bundle) consult it for not-yet-applied paths.
@@ -106,20 +106,20 @@ public:
   };
   absl::flat_hash_map<std::string, Pending_decl> pending_decl_facts;
 
-  // 2b/E3b — extraction origin: tuple_get dst tmp → "src.field" path. The
+  // Extraction origin: tuple_get dst tmp → "src.field" path. The
   // runner's declare/type_spec bake back-flows per-field declared facts to
   // the SOURCE field through this (the typed-tuple-literal lowering types
   // the extraction tmp, not the field). Transient; cleared with the stash.
   absl::flat_hash_map<std::string, std::string> tget_origin;
 
-  // 2b/C — names whose nil initializer was SYNTHESIZED by the runner's
+  // Names whose nil initializer was SYNTHESIZED by the runner's
   // inliner (output seeds, untyped-param prologues). The typecheck rule
   // "an unset/nil scalar destination does not infer a tuple shape from a
   // tuple RHS" exempts these — the prologue legally binds a tuple over its
   // own nil seed. Transient; cleared with the other per-run state.
   absl::flat_hash_set<std::string> nil_seeded;
 
-  // 2b/H — the strict comptime-fold read (ex runner_fold_fn / fold_ref):
+  // The strict comptime-fold read (ex runner_fold_fn / fold_ref):
   // a concrete (no-unknowns) value on a TRIVIAL-SCALAR binding. A
   // multi-entry tuple or named 1-tuple never inlines (position-0 truncation),
   // and unknown-carrying values never inline (LEC-breaking).
@@ -133,7 +133,7 @@ public:
     return get_trivial(name);
   }
 
-  // 2b/E4 — runtime tuple-slot refs (loop-migration Step 1): dst tuple →
+  // Runtime tuple-slot refs (loop-migration Step 1): dst tuple →
   // slot → source ref name, for slots whose value is runtime (the bundle
   // stores null there). The runner rewrites `t[slot]` / `for x in t` into a
   // copy from the ref. Erased wholesale when the dst tuple is rebuilt.
@@ -178,7 +178,7 @@ private:
   absl::flat_hash_map<uint64_t, Scope*> block_scope_index;
 
   // Walks the active stack from innermost outward, stopping at and including
-  // the nearest Function scope. 2b/B: this is the WRITE/anchor variant —
+  // the nearest Function scope. This is the WRITE/anchor variant —
   // a callee body cannot mutate caller variables. Reads use
   // find_decl_scope_read, which crosses the Function barrier (closure
   // capture of outer comptime consts).
@@ -187,7 +187,7 @@ private:
   const Scope* find_decl_scope_read(std::string_view var) const;
 
 public:
-  // 2b/B — true when `var` is visible only ACROSS a Function barrier:
+  // True when `var` is visible only ACROSS a Function barrier:
   // readable (closure capture) but not writable. A write to such a name is
   // a compile error at the caller (the runner/passes report it).
   [[nodiscard]] bool is_function_captured(std::string_view var) const;

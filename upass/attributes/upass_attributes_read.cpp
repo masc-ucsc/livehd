@@ -68,7 +68,7 @@ Const min_signed(uint32_t n) {
 }  // namespace
 
 std::optional<Const> uPass_attributes::lookup_attr_value(std::string_view var, std::string_view attr) const {
-  // 2b/E3e — explicit attr values live as residual attrs ON the binding
+  // Explicit attr values live as residual attrs ON the binding
   // (field-scoped for dotted names). A dotted miss falls back to the root's
   // whole-bundle attr: aggregate-level attrs are inherited by every field
   // (`foo::[potato=4]` answers `foo.b.[potato]`) — replaces the legacy
@@ -100,7 +100,7 @@ std::optional<Const> uPass_attributes::lookup_attr_value(std::string_view var, s
 }
 
 const uPass_attributes::Type_info* uPass_attributes::lookup_type_info_bundle(std::string_view var) const {
-  // 2b/H — delegates to the shared derivation (upass/core/decl_facts.hpp);
+  // Delegates to the shared derivation (upass/core/decl_facts.hpp);
   // the runner and constprop consume the same helper directly, replacing the
   // provide_* pull seams. Returns a pointer into a per-call scratch.
   if (runner_st == nullptr) {
@@ -136,7 +136,7 @@ const uPass_attributes::Type_info* uPass_attributes::lookup_type_info_bundle(std
 }
 
 const uPass_attributes::Type_info* uPass_attributes::lookup_type_info(std::string_view var) const {
-  // 2b/E3b — bundle-backed (see lookup_type_info_bundle). The legacy
+  // Bundle-backed (see lookup_type_info_bundle). The legacy
   // type_info_map and its tuple_get_alias/direct_alias chase are gone.
   return lookup_type_info_bundle(var);
 }
@@ -153,7 +153,7 @@ std::optional<std::pair<Const, Const>> uPass_attributes::lookup_range(std::strin
 
 
 std::optional<std::string> uPass_attributes::lookup_attr_ref(std::string_view var, std::string_view attr) const {
-  // 2b/E3e — ref-valued attrs ride the binding as string Consts under
+  // Ref-valued attrs ride the binding as string Consts under
   // "<attr>_refname" (the LGraph wiring pass resolves the text by name).
   if (runner_st == nullptr || var.empty()) {
     return std::nullopt;
@@ -319,7 +319,7 @@ std::optional<Const> uPass_attributes::derive_comptime(std::string_view base, st
   }
   // Aggregate (tuple): comptime iff every field is comptime. This lets
   // `cassert(t.[comptime])` resolve when `t` itself has no scalar, but each
-  // field does. 2b/E3c — the field set comes from the live BUNDLE (the
+  // field does. The field set comes from the live BUNDLE (the
   // legacy tuple_shapes/shape_source side-maps are gone).
   if (runner_st != nullptr && base.find('.') == std::string_view::npos) {
     if (const auto b = runner_st->get_bundle(base); b && (b->has_named_top() || b->unnamed_top_count() > 0)) {
@@ -423,7 +423,7 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       result = derive_aggregate_typename(base, base_text);
     } else if (attr == "key") {
       // `.[key]` on a tuple_get tmp returns the source field's name; on a
-      // bare aggregate it returns the aggregate's own name. 2b/E3c — the
+      // bare aggregate it returns the aggregate's own name. The
       // extraction origin comes from Symbol_table::tget_origin.
       std::string field_seg;
       if (runner_st != nullptr) {
@@ -470,15 +470,15 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
   if (!inserted && !it->second.same_repr(*result)) {
     it->second = *result;
   }
-  // 2b/E4 — the derived value is the attr_get dst's VALUE: write it to the
+  // The derived value is the attr_get dst's VALUE: write it to the
   // binding too, so push-form operand resolution (table-only) sees it
-  // without the runner_fold_fn pull seam (tmp_fold + fold_ref die in 2b/H).
+  // directly off the table (tmp_fold stays attributes-internal).
   if (runner_st != nullptr && dst.find('.') == std::string_view::npos) {
     (void)runner_st->set(std::string(dst), *result);
   }
 }
 
-// (2b/H) fold_ref deleted — cross-pass folds land on the table (known_const_scalar).
+// fold_ref deleted — cross-pass folds land on the table (known_const_scalar).
 
 void uPass_attributes::process_type_spec() {
   // Layout (prp2lnast::emit_type_spec):
@@ -509,7 +509,7 @@ void uPass_attributes::process_type_spec() {
   }
   move_to_parent();
 
-  // 2b/E3b — the runner's declare/type_spec bake writes these facts onto the
+  // The runner's declare/type_spec bake writes these facts onto the
   // binding (Entry kind + decl ranges; pending stash for dotted dsts);
   // lookup_type_info reads them back bundle-backed. Nothing to record here.
   (void)target;
@@ -624,7 +624,7 @@ void uPass_attributes::process_declare() {
   }
   move_to_parent();
 
-  // 2b/E3b — the runner's declare bake writes kind/decl ranges/mode/comptime
+  // The runner's declare bake writes kind/decl ranges/mode/comptime
   // onto the binding; the const single-bind tally lives there too ("vbound"
   // attr — fresh clone scopes need no reset). Only the explicit-comptime
   // attr value remains map-side (E3e migrates attr_set_values).

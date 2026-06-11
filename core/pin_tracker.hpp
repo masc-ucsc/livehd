@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "absl/container/node_hash_map.h"
 #include "const.hpp"
 
@@ -15,7 +17,7 @@ public:
 
   Pin_tracker(Pin zero_pin) : Zero_pin(zero_pin) {}
 
-  void add_input(Pin wname, Bits_t bits) {
+  void add_input(Pin wname, int32_t bits) {
     auto& pv = full_map[wname];
     I(pv.empty());  // Why to double insert inputs??
 
@@ -26,7 +28,7 @@ public:
     }
   }
 
-  void add_get_mask(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Const mask) {
+  void add_get_mask(Pin dst_pin, Pin a_pin, int32_t a_sbits, Const mask) {
     auto& pv = full_map[dst_pin];
     pv.clear();
 
@@ -52,7 +54,7 @@ public:
     }
   }
 
-  void add_set_mask(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Const mask, Pin v_pin) {
+  void add_set_mask(Pin dst_pin, Pin a_pin, int32_t a_sbits, Const mask, Pin v_pin) {
     Pin_vector pv   = get_or_create_pv(a_pin, a_sbits);
     Pin_vector v_pv = get_or_create_pv(v_pin, mask.get_bits());
 
@@ -86,7 +88,7 @@ public:
     full_map.insert_or_assign(dst_pin, pv);
   }
 
-  void add_shl(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Const amount) {
+  void add_shl(Pin dst_pin, Pin a_pin, int32_t a_sbits, Const amount) {
     const auto amount_i = amount.to_i();
     I(amount_i >= 0);
 
@@ -118,7 +120,7 @@ public:
     }
   }
 
-  void add_sra(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Const amount) {
+  void add_sra(Pin dst_pin, Pin a_pin, int32_t a_sbits, Const amount) {
     I(a_sbits > 0);
     const auto amount_i = amount.to_i();
     I(amount_i >= 0);
@@ -148,7 +150,7 @@ public:
     }
   }
 
-  void add_sext(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Const amount) {
+  void add_sext(Pin dst_pin, Pin a_pin, int32_t a_sbits, Const amount) {
     I(a_sbits > 0);
     const auto amount_i = amount.to_i();
     I(amount_i >= 0);
@@ -221,7 +223,7 @@ public:
       if (it->second[i].id == Zero_pin && it->second[i].pos == 0) {
         continue;  // Nothing to do in this bit
       }
-      if (!a_mask.bit_test(static_cast<Bits_t>(i))) {
+      if (!a_mask.bit_test(static_cast<int32_t>(i))) {
         continue;
       }
       if (pv[i].id == Zero_pin && pv[i].pos == 0) {
@@ -253,7 +255,7 @@ public:
   /* LCOV_EXCL_STOP */
 
 protected:
-  Pin_vector get_or_create_pv(Pin a_name, Bits_t a_sbits) const {
+  Pin_vector get_or_create_pv(Pin a_name, int32_t a_sbits) const {
     auto it = full_map.find(a_name);
     if (it != full_map.end()) {
       return it->second;
@@ -262,7 +264,7 @@ protected:
     Pin_vector a_pv;
 
     a_pv.resize(a_sbits, {Zero_pin, -1});
-    Bits_t pos = 0;
+    int32_t pos = 0;
     for (auto& e : a_pv) {
       e.id  = a_name;
       e.pos = pos;

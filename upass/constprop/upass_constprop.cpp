@@ -22,10 +22,6 @@
 // errors when multiple TUs include upass_constprop.hpp.
 static upass::uPass_plugin cprop("constprop", upass::uPass_wrapper<uPass_constprop>::get_upass, {"attributes", "typecheck"});
 
-static constexpr std::string_view call_ref_arg_marker  = "__ref_arg";
-// Task 1k — positional UFCS-receiver marker (see prp2lnast / upass_runner).
-static constexpr std::string_view call_ufcs_arg_marker = "__ufcs_arg";
-
 // Coerce one value to its text-form Const. Mirrors Pyrope's `string()` cast:
 //   nil    → "nil"
 //   string → as-is
@@ -183,7 +179,7 @@ Const uPass_constprop::apply_range_mask(const Const& value, const Const& start, 
 }
 
 uPass_constprop::uPass_constprop(std::shared_ptr<upass::Lnast_manager>& _lm) : uPass(_lm) {
-  // 2b/A — the runner owns the shared symbol table and pushes the per-tree
+  // The runner owns the shared symbol table and pushes the per-tree
   // function scope at run() start; nothing to set up here.
 }
 
@@ -234,7 +230,7 @@ void uPass_constprop::set_function_registry(const std::vector<std::shared_ptr<Ln
 }
 
 upass::Vote uPass_constprop::process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
-  // Same routing as the migration default; the bodies still walk the node
+  // Route by src arity; the bodies walk the node
   // under the cursor (store payloads include subtree initializers that the
   // operand span carries only as placeholders).
   (void)dst_name;
@@ -519,7 +515,7 @@ void uPass_constprop::process_declare() {
   if (!move_to_child()) {
     return;
   }
-  // 2b/E4 — the runner's declare bake already wrote mode/type_name/decl
+  // The runner's declare bake already wrote mode/type_name/decl
   // ranges onto the binding (declare_bare created it); the mode/type/umax
   // readers above consult the binding directly. Nothing to record here.
   move_to_parent();
@@ -907,7 +903,7 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
     Operand o;
     if (!in.name.empty()) {
       const auto name = in.name;
-      // (2b/H) cross-pass folds (wrap/sat narrowing, attr-get results, `is`)
+      // cross-pass folds (wrap/sat narrowing, attr-get results, `is`)
       // land on the table now — no seam read.
       auto b = st().get_bundle(name);
       if (b && !b->is_scalar()) {
@@ -1109,7 +1105,7 @@ void uPass_constprop::process_if() {
 
   move_to_parent();
 }
-// 2b/A — block scope push/pop is RUNNER-owned now: the runner pushes the
+// Block scope push/pop is RUNNER-owned now: the runner pushes the
 // block scope (with the uncertain-arm marking) before dispatching
 // process_stmts to any pass, and pops AFTER dispatching process_stmts_post,
 // so the pub harvest below still observes the block scope's depth.
@@ -1127,7 +1123,7 @@ void uPass_constprop::process_stmts_post() {
   // an unresolved import (it defers wholesale; erroring on a pub value that
   // depends on the missing import would mask the defer).
   if (st().stack.size() == 2) {
-    // 2b/C — "an unset field that is never used is a warning": at the
+    // "an unset field that is never used is a warning": at the
     // file-scope pop, any DECLARED named field that was never set (invalid
     // trivial), never runtime-driven (no bw range — runtime producers
     // always carry one), and never read (field_reads_) is dead weight.
@@ -1369,7 +1365,7 @@ void uPass_constprop::process_attr_set() {
     return;
   }
   move_to_parent();
-  // 2b/E4 — the typename attr value rides the binding (attributes pass
+  // The typename attr value rides the binding (attributes pass
   // set_binding_attr); provide_typename reads it back. Nothing to record.
   (void)var;
 }
@@ -2123,7 +2119,7 @@ void uPass_constprop::fold_case(const std::string& dst) {
   auto resolve_flat = [this](std::shared_ptr<Bundle const>& b,
                              std::string&                   nm) -> std::optional<std::vector<Bundle_flat_entry>> {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
-      nm = std::string(current_text());  // table name for the per-field declared-type query (2b/H)
+      nm = std::string(current_text());  // table name for the per-field declared-type query
       if (auto bun = current_ref_bundle()) {
         b = bun;
         return collect_first_level(bun);
@@ -2260,7 +2256,7 @@ std::optional<Const> uPass_constprop::resolve_current_scalar() const {
 }
 
 std::optional<std::vector<uPass_constprop::Call_actual>> uPass_constprop::collect_call_actuals() {
-  // 2b/F — delegated to the resolver (pure code motion); constprop supplies
+  // Delegated to the resolver (pure code motion); constprop supplies
   // its scalar folding for value operands.
   return upass::call_resolver::collect_call_actuals(*lm, st(), function_registry,
                                                     [this]() { return resolve_current_scalar(); });
@@ -2712,7 +2708,7 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
 // loaded ln: forests). A miss records a pending import — pass.upass either
 // errors (standalone) or defers the file to the kernel's iterate loop.
 void uPass_constprop::process_import_call(const std::string& dst) {
-  // 2b/F — delegated to the resolver; constprop supplies its bookkeeping
+  // Delegated to the resolver; constprop supplies its bookkeeping
   // (pending-import recording for the kernel's whole-file retry, and its
   // store_trivial for scalar url binds).
   upass::call_resolver::process_import_call(
@@ -2795,7 +2791,7 @@ void uPass_constprop::process_func_call() {
   // this copy-through only matters for the no-op-narrowing case. bitwidth
   // exempts lhs from the overflow check. Codegen (T6) emits get_mask / mux.
   if (fname == "wrap" || fname == "sat" || fname == "saturate") {
-    // 2b/H — attributes dispatches FIRST and binds the NARROWED value on the
+    // Attributes dispatches FIRST and binds the NARROWED value on the
     // dst tmp's table slot; never clobber it with the raw `v=` copy-through
     // (the copy only matters for the no-op-narrowing case, where the dst is
     // still unbound here).
@@ -3028,7 +3024,7 @@ void uPass_constprop::process_range() {
     return;  // do not register the bounds — downstream folds would be nonsense
   }
 
-  // 2b/E4 — the folded bounds ride the dst binding ("rng_s"/"rng_e" attrs;
+  // The folded bounds ride the dst binding ("rng_s"/"rng_e" attrs;
   // an open end stores the nil Const). provide_range/tuple_get read back.
   if (!st().has_bundle(dst) && !st().has_trivial(dst)) {
     (void)st().set(dst, std::make_shared<Bundle>(dst));
@@ -3160,7 +3156,7 @@ void uPass_constprop::process_tuple_get() {
   // nested-level checks are a later phase.
   if (first_captured) {
     check_tuple_access(src, first_seg, first_is_index);
-    field_reads_.insert(key);  // 2b/C — feeds the unused-unset warning
+    field_reads_.insert(key);  // Feeds the unused-unset warning
   }
 
   // For a NAMED access, capture src's bundle so we can tell "absent named field
@@ -3187,11 +3183,11 @@ void uPass_constprop::process_tuple_get() {
   // Propagate trivial value if available; fall back to bundle propagation.
   if (st().has_trivial(key)) {
     store_trivial(dst, st().get_trivial(key));
-    // 2b/E3b — remember the extraction origin: a later `type_spec(tmp, T)` /
+    // Remember the extraction origin: a later `type_spec(tmp, T)` /
     // `declare(tmp, …, mode)` (typed tuple-literal field) back-flows its
     // facts to the source field via this (runner bake reads tget_origin).
     st().tget_origin.insert_or_assign(dst, key);
-    // 2b/E3b — extraction rides the field's typed facts onto the read tmp,
+    // Extraction rides the field's typed facts onto the read tmp,
     // mirroring construction's wholesale entry copies, so a bundle-backed
     // lookup_type_info answers for `t.a`-style reads (`.[bits]` derivation).
     if (auto sb = st().get_bundle(src); sb && key.size() > src.size() + 1) {
@@ -3227,7 +3223,7 @@ void uPass_constprop::process_tuple_get() {
       if (local_changed) {
         st().set(dst, sub_bundle);
       }
-      st().tget_origin.insert_or_assign(dst, key);  // 2b/E3b — see the trivial branch
+      st().tget_origin.insert_or_assign(dst, key);  // See the trivial branch
     }
   } else if (named_field_absent) {
     // Task 1m-B — reading a named field that does not exist on a resolved
@@ -3538,7 +3534,7 @@ upass::Vote uPass_constprop::process_popcount(std::string_view dst_name, Bundle&
 //   - LHS (first child) is a ref, and
 //   - the symbol table holds a concrete Const for LHS (known, no unknowns).
 // Otherwise emit.
-upass::Emit_decision uPass_constprop::classify_statement() {
+upass::Emit_decision uPass_constprop::classify_statement_impl() {
   // Peek at the first child (LHS/dst) without disturbing cursor state.
   // cassert is dispatched through the same path but has no dst — its
   // single child is an operand; always emit so it reaches the verifier.
@@ -3628,7 +3624,7 @@ upass::Emit_decision uPass_constprop::classify_statement() {
   return upass::Emit_decision::drop();
 }
 
-// (2b/H) fold_ref deleted — the runner reads Symbol_table::known_const_scalar directly.
+// fold_ref deleted — the runner reads Symbol_table::known_const_scalar directly.
 
 
 

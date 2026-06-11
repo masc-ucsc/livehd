@@ -1,4 +1,4 @@
-// 2b/F — see call_resolver.hpp. Bodies moved verbatim from
+// See call_resolver.hpp. Bodies moved verbatim from
 // uPass_constprop::collect_call_actuals (cursor sugar expanded to the
 // Lnast_manager calls).
 

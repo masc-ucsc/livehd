@@ -127,10 +127,10 @@ void uPass_attributes::process_func_call() {
   if (!inserted && !it->second.same_repr(out)) {
     it->second = out;
   }
-  // 2b/E4 — the narrowed value IS the call dst's value; write it to the
+  // The narrowed value IS the call dst's value; write it to the
   // binding too (the dst is a single-writer tmp constprop never folds for
   // wrap/sat calls), so table-only operand resolution sees it and the
-  // runner_fold_fn pull seam can retire (2b/H).
+  // runner_fold_fn pull seam can retire.
   if (runner_st != nullptr) {
     (void)runner_st->set(dst, out);
   }
@@ -156,7 +156,7 @@ void uPass_attributes::record_assign(std::string_view lhs, bool rhs_is_nil) {
     return;
   }
 
-  // 2b/E — the bind-tracking state lives ON the binding as a NON-STICKY
+  // The bind-tracking state lives ON the binding as a NON-STICKY
   // residual attr ("vbound": assigned a non-nil value at least once). Scope
   // locality replaces the old per-clone counter reset: loop iterations and
   // inliner clones get fresh scopes/names, so their bindings start unmarked.

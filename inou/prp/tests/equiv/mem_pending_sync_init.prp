@@ -1,0 +1,24 @@
+/*
+:name: mem_pending_sync_init
+:type: equiv
+:verilog_top: mem_pending_sync_init.syncinit
+:pyrope_top: mem_pending_sync_init.syncinit
+*/
+
+// Different init but still going thought the memory, so still 1 flop q@[1] between inputs and outputs
+mod syncinit(raddr:u2) -> (q:u4@[1]) {
+  mut mem = (
+    addr      = (raddr),
+    bits      = 4,
+    size      = 4,
+    din       = (0),
+    enable    = (1),
+    fwd       = false,
+    type      = 1,
+    wensize   = 1,
+    rdport    = (1),
+    init      = (1, 2, 3, 4),
+  )
+  mut res = __memory(mem)
+  q = res[0]
+}

@@ -1,5 +1,5 @@
 #pragma once
-// 2b/H — declared-fact derivation over the runner-owned Symbol_table.
+// Declared-fact derivation over the runner-owned Symbol_table.
 //
 // The single source of truth for "what was `name` declared as": typed Entry
 // fields written by the runner's declare/type_spec bake (+ per-field rides
@@ -11,7 +11,7 @@
 // uPass_attributes::lookup_type_info_bundle delegates here, and the runner /
 // constprop consume it directly — replacing the provide_decl_type /
 // provide_field_type / provide_decl_storage / runner_type_query_fn pull
-// seams (deleted in 2b/H).
+// seams (deleted — facts flow through the table, nothing pulls).
 
 #include <cstdint>
 #include <optional>

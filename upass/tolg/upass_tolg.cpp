@@ -39,15 +39,15 @@ using WriteMap = absl::flat_hash_map<std::string, Pin>;
 // `--bits` for unsigned dpins). We track `mw` (the N) and stamp `mw+1` bits.
 struct Val {
   Pin    pin;
-  Bits_t mw{0};
+  int32_t mw{0};
 };
 
 // Bits to represent a non-negative value as unsigned (>=1).
-[[nodiscard]] Bits_t mw_of_val(int64_t v) {
+[[nodiscard]] int32_t mw_of_val(int64_t v) {
   if (v <= 0) {
     return 1;
   }
-  return static_cast<Bits_t>(std::bit_width(static_cast<uint64_t>(v)));
+  return static_cast<int32_t>(std::bit_width(static_cast<uint64_t>(v)));
 }
 
 // Task 1u-A — resolve a func_call callee name against the lnast registry the
@@ -156,7 +156,7 @@ public:
     // a 3-bit `a` = 0b111 reads as 7, not -1) — mirrors lgyosys tposs.
     for (const auto& e : lnast_->io_meta().inputs) {
       auto   raw = g_->get_input_pin(e.name);  // body driver pin for the port
-      Bits_t mw  = io_mw(e);
+      int32_t mw  = io_mw(e);
       if (e.kind == Io_kind::boolean || mw <= 1) {
         set_bits(raw, 1);
         if (e.is_signed) {
@@ -229,11 +229,11 @@ public:
 private:
   // ── width / value helpers ───────────────────────────────────────────────────
 
-  [[nodiscard]] static Bits_t io_mw(const Lnast_io_entry& e) {
+  [[nodiscard]] static int32_t io_mw(const Lnast_io_entry& e) {
     if (e.kind == Io_kind::boolean) {
       return 1;
     }
-    return e.bits > 0 ? static_cast<Bits_t>(e.bits) : Bits_t{1};
+    return e.bits > 0 ? static_cast<int32_t>(e.bits) : int32_t{1};
   }
 
   [[nodiscard]] Pin nil_pin() { return create_const(*g_, *Const::from_pyrope("0sb?")); }
@@ -241,7 +241,7 @@ private:
   // To-positive-signed: Get_mask(x, -1) -> same bits, guaranteed non-negative,
   // marked unsigned with one extra (sign) bit. Lets unsigned values flow
   // through signed LGraph arithmetic correctly.
-  [[nodiscard]] Pin to_positive(const Pin& src, Bits_t mw) {
+  [[nodiscard]] Pin to_positive(const Pin& src, int32_t mw) {
     auto node = create_typed_node(*g_, Ntype_op::Get_mask);
     setup_sink_by_name(node, "a").connect_driver(src);
     setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Const::create_integer(-1)));
@@ -251,7 +251,7 @@ private:
     return drv;
   }
 
-  void record(std::string_view name, const Pin& pin, Bits_t mw) {
+  void record(std::string_view name, const Pin& pin, int32_t mw) {
     std::string key{name};
     pin_map_[key] = pin;
     mw_map_[key]  = mw;
@@ -260,9 +260,9 @@ private:
     }
   }
 
-  [[nodiscard]] Bits_t mw_lookup(std::string_view name) {
+  [[nodiscard]] int32_t mw_lookup(std::string_view name) {
     auto it = mw_map_.find(std::string{name});
-    return it != mw_map_.end() ? it->second : Bits_t{1};
+    return it != mw_map_.end() ? it->second : int32_t{1};
   }
 
   [[nodiscard]] Pin resolve(std::string_view name) {
@@ -292,7 +292,7 @@ private:
   [[nodiscard]] Val leaf(const Lnast_nid& nid) {
     if (Lnast_ntype::is_const(lnast_->get_type(nid))) {
       auto   c  = Const::from_pyrope(lnast_->get_name(nid));
-      Bits_t mw = c->is_i() ? mw_of_val(c->to_i()) : Bits_t{1};
+      int32_t mw = c->is_i() ? mw_of_val(c->to_i()) : int32_t{1};
       return {create_const(*g_, *c), mw};
     }
     auto name = lnast_->get_name(nid);
@@ -300,8 +300,8 @@ private:
   }
 
   // Bind a computed result: stamp mw+1 unsigned bits and record name->(pin,mw).
-  void bind_result(std::string_view name, const Pin& drv, Bits_t mw) {
-    Bits_t m = mw > 0 ? mw : Bits_t{1};
+  void bind_result(std::string_view name, const Pin& drv, int32_t mw) {
+    int32_t m = mw > 0 ? mw : int32_t{1};
     set_bits(drv, m + 1);
     set_unsign(drv);
     record(name, drv, m);
@@ -459,7 +459,7 @@ private:
       // q width: untyped regs take the final din width (mw+1 unsigned).
       if (info.decl_mw == 0) {
         auto dit = mw_map_.find(din_key(name));
-        Bits_t mw = dit != mw_map_.end() ? dit->second : Bits_t{1};
+        int32_t mw = dit != mw_map_.end() ? dit->second : int32_t{1};
         set_bits(q, mw + 1);
         set_unsign(q);
         mw_map_[name] = mw;
@@ -738,7 +738,7 @@ private:
     hhds::Node_class flop;
     Lnast_nid        decl_nid;
     std::string      init_txt;  // declare [value] child; "" = none, "nil" = explicit no-reset
-    Bits_t           decl_mw   = 0;  // declared type width; 0 = untyped
+    int32_t           decl_mw   = 0;  // declared type width; 0 = untyped
     bool             is_signed = false;
     // Per-reg flop-attr overrides (04b-attributes.md): a per-reg `sync` beats
     // the upass.reset_style flag; `reset_pin=false` opts out of reset.
@@ -775,7 +775,7 @@ private:
   struct Mem_info {
     hhds::Node_class node;
     int64_t          size        = 0;
-    Bits_t           elem_mw     = 0;  // element max-value width
+    int32_t           elem_mw     = 0;  // element max-value width
     bool             elem_signed = false;
     bool             is_array    = false;  // type=2: mut/const array (no clock, no persistence)
     bool             is_pub      = false;  // pub reg: a remote regref may attach accesses — no diagnostics
@@ -1040,7 +1040,7 @@ private:
 
   // Pack an all-const positional tuple into the wide `init` value: entry 0
   // in the low `bits`, row-major. Returns null after reporting on error.
-  [[nodiscard]] spool_ptr<Const> pack_tuple_init(const Tuple_rec& rec, std::string_view name, int64_t size, Bits_t bits) {
+  [[nodiscard]] spool_ptr<Const> pack_tuple_init(const Tuple_rec& rec, std::string_view name, int64_t size, int32_t bits) {
     if (static_cast<int64_t>(rec.elems.size()) != size) {
       Pass::error("upass.tolg: '{}' initializer has {} entries but the memory holds {}", name, rec.elems.size(), size);
       return {};
@@ -1070,7 +1070,7 @@ private:
     hhds::Node_class node;
     int              n_wr = 0;
     int              n_rd = 0;
-    Bits_t           bits = 0;
+    int32_t           bits = 0;
   };
 
   // fcall(ref dst, ref __memory, ref cfg) — direct Memory-cell instantiation
@@ -1207,7 +1207,7 @@ private:
       if (Lnast_ntype::is_const(lnast_->get_type(it->second))) {
         init = Const::from_pyrope(lnast_->get_name(it->second));
       } else if (auto lit = tuple_recs_.find(std::string(lnast_->get_name(it->second))); lit != tuple_recs_.end()) {
-        init = pack_tuple_init(lit->second, "__memory init", size, static_cast<Bits_t>(bits));
+        init = pack_tuple_init(lit->second, "__memory init", size, static_cast<int32_t>(bits));
       }
       if (!init) {
         Pass::error("upass.tolg: __memory 'init' must be a comptime constant or tuple literal");
@@ -1248,7 +1248,7 @@ private:
     }
 
     mem_results_[std::string(lnast_->get_name(dst))]
-        = Mem_result{mem, n_wr, n_ports - n_wr, static_cast<Bits_t>(bits)};
+        = Mem_result{mem, n_wr, n_ports - n_wr, static_cast<int32_t>(bits)};
     return true;
   }
 
@@ -1378,7 +1378,7 @@ private:
   // Declared (mw, is_signed) from a declare's type child. prim_type_int(max,
   // min): unsigned iff min ≥ 0, mw mirrors the ssa io harvest (get_bits()-1
   // drops the sign bit when unsigned). prim_type_bool → 1. Unknown → (0,_).
-  [[nodiscard]] std::pair<Bits_t, bool> declared_width(const Lnast_nid& type_nid) {
+  [[nodiscard]] std::pair<int32_t, bool> declared_width(const Lnast_nid& type_nid) {
     using N      = Lnast_ntype;
     const auto t = lnast_->get_type(type_nid);
     if (N::is_prim_type_bool(t)) {
@@ -1398,22 +1398,22 @@ private:
     }
     bool   min_known   = false;
     bool   min_neg     = false;
-    Bits_t min_bits    = 0;
+    int32_t min_bits    = 0;
     if (!mn.is_invalid()) {
       if (auto mn_v = Const::from_pyrope(lnast_->get_name(mn)); mn_v && mn_v->is_integer()) {
         min_known = true;
         min_neg   = mn_v->is_negative();
-        min_bits  = static_cast<Bits_t>(mn_v->get_bits());
+        min_bits  = static_cast<int32_t>(mn_v->get_bits());
       }
     }
     const bool is_signed = !(min_known && !min_neg);
     if (!is_signed) {
-      auto bits = max_v->is_known_zero() ? Bits_t{1} : static_cast<Bits_t>(max_v->get_bits() - 1);
+      auto bits = max_v->is_known_zero() ? int32_t{1} : static_cast<int32_t>(max_v->get_bits() - 1);
       return {bits, false};
     }
     // Signed: the WIDER of the two bounds' signed widths (mirrors the ssa io
     // harvest + io_mw — a min like -100 needs more bits than a max of 3).
-    auto bits = static_cast<Bits_t>(max_v->get_bits());
+    auto bits = static_cast<int32_t>(max_v->get_bits());
     if (min_known) {
       bits = std::max(bits, min_bits);
     }
@@ -1769,7 +1769,7 @@ private:
     // Single output: bind dst like a graph input (external value entering).
     const auto& oe       = cio.outputs.front();
     auto        out_dpin = sub.create_driver_pin(oe.name);
-    Bits_t      mw       = io_mw(oe);
+    int32_t      mw       = io_mw(oe);
     std::string dst_name(lnast_->get_name(dst));
     if (oe.kind == Io_kind::boolean || mw <= 1) {
       set_bits(out_dpin, 1);
@@ -1904,7 +1904,7 @@ private:
     setup_sink_by_name(node, "a").connect_driver(leaf(val).pin);
     setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Const::create_integer(mask)));
     auto   drv = node.create_driver_pin(0);
-    Bits_t mw  = static_cast<Bits_t>(std::popcount(static_cast<uint64_t>(mask)));
+    int32_t mw  = static_cast<int32_t>(std::popcount(static_cast<uint64_t>(mask)));
     bind_result(lnast_->get_name(dst), drv, mw);
   }
 
@@ -1966,9 +1966,9 @@ private:
       return;
     }
     auto   node    = create_typed_node(*g_, op);
-    Bits_t max_mw  = 0;
-    Bits_t sum_mw  = 0;
-    Bits_t first_mw = 0;
+    int32_t max_mw  = 0;
+    int32_t sum_mw  = 0;
+    int32_t first_mw = 0;
     bool   first   = true;
     for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       auto v      = leaf(c);
@@ -1980,10 +1980,10 @@ private:
       setup_sink_by_name(node, (commutative || first) ? "a" : "b").connect_driver(v.pin);
       first = false;
     }
-    Bits_t mw = 1;
+    int32_t mw = 1;
     switch (wmode) {
-      case OpW::add: mw = static_cast<Bits_t>(max_mw + 1); break;
-      case OpW::mul: mw = sum_mw > 0 ? sum_mw : Bits_t{1}; break;
+      case OpW::add: mw = static_cast<int32_t>(max_mw + 1); break;
+      case OpW::mul: mw = sum_mw > 0 ? sum_mw : int32_t{1}; break;
       case OpW::maxw: mw = max_mw; break;
       case OpW::firstw: mw = first_mw; break;
       case OpW::boolw: mw = 1; break;
@@ -2147,7 +2147,7 @@ private:
   hhds::GraphLibrary*         lib_      = nullptr;
 
   absl::flat_hash_map<std::string, Pin>                         pin_map_;
-  absl::flat_hash_map<std::string, Bits_t>                      mw_map_;
+  absl::flat_hash_map<std::string, int32_t>                      mw_map_;
   absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> range_map_;
   std::vector<WriteMap>                                         branch_writes_;
   std::vector<std::string>                                      out_names_;

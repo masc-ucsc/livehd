@@ -1,5 +1,5 @@
 #pragma once
-// 2b/F — Call_resolver: call/return resolution extracted out of the passes
+// Call_resolver: call/return resolution extracted out of the passes
 // (first slice: constprop's actual collection — pure code motion; the
 // runner-side name/arity/vararg resolution + error surface accretes here).
 //
@@ -62,7 +62,7 @@ std::optional<std::vector<Call_actual>> collect_call_actuals(
     const std::function<std::optional<Const>()>&                   resolve_scalar_at_cursor);
 
 
-// 2b/F — callee NAME resolution: the exact-name module plus any unique
+// Callee NAME resolution: the exact-name module plus any unique
 // "<module>.<name>" body; a candidate with a real comb signature (non-empty
 // io) wins over an empty-io top module of the same name (a file's top can
 // share its comb's name — the extracted body must win or the inline bails).
@@ -97,7 +97,7 @@ std::shared_ptr<Lnast> lookup_callee(const Registry& function_registry, std::str
   return suffix_matches == 1 ? suffix_body : nullptr;
 }
 
-// 2b/F — `import("…")` resolution: `ln:` url → lambda tree-name string bind,
+// `import("…")` resolution: `ln:` url → lambda tree-name string bind,
 // `lg:` url → the url itself (Sub instances lower at tolg), tuple form → the
 // unit's pub-namespace bundle on the dest. Ambiguity = permanent error;
 // unknown unit / values-pending = pend_import (kernel whole-file retry).

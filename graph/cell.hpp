@@ -9,7 +9,6 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_cat.h"
-#include "graph_sizing.hpp"
 #include "hhds/graph_sizing.hpp"
 #include "likely.hpp"
 #include "str_tools.hpp"

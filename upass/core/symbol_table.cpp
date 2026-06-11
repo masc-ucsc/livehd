@@ -17,7 +17,7 @@ static void assert_no_prefix(std::string_view key) {
     "symbol_table: variable name carries a legacy $/%/# prefix; upstream pass must normalize");
 }
 
-// 2b/B — Function scopes are WRITE barriers but READ-transparent:
+// Function scopes are WRITE barriers but READ-transparent:
 //   - find_decl_scope (the write/anchor variant) stops at AND INCLUDING the
 //     nearest Function scope: a callee body cannot mutate the caller's
 //     locals (the no-side-effect rule prp2lnast enforces lexically), and a
@@ -96,7 +96,7 @@ bool Symbol_table::var(std::string_view key) {
 static Symbol_table::Scope* anchor_for(Symbol_table::Scope* innermost, std::string_view var);
 
 bool Symbol_table::declare_bare(std::string_view var) {
-  // 2b/A — declaration pre-step binding: install a TRULY EMPTY bundle (no
+  // Declaration pre-step binding: install a TRULY EMPTY bundle (no
   // "0" slot at all, unlike var()'s invalid-trivial entry) in the innermost
   // scope. Keeps `non_attr_entries().empty()` true for declared-but-unwritten
   // names, which constprop's named-type default-materialization and merge
@@ -182,7 +182,7 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
     target->varmap.emplace(std::string(var), var_bundle);
   } else {
     if (var == key) {
-      // 2b — a whole-bundle assignment preserves the DECLARATION-PERSISTENT
+      // A whole-bundle assignment preserves the DECLARATION-PERSISTENT
       // slices of the old binding (mode, nominal type_name, declared Kind and
       // max/min envelope): they ride the NAME, not the value. The incoming
       // bundle is usually shared (it is also some tmp's live binding), so
@@ -482,7 +482,7 @@ bool Symbol_table::is_known_const(std::string_view name) const {
 bool Symbol_table::has_trivial(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
-  const auto* s = find_decl_scope_read(var);  // 2b/B: reads cross the Function barrier
+  const auto* s = find_decl_scope_read(var);  // Reads cross the Function barrier
   if (s == nullptr) {
     return false;
   }
@@ -493,7 +493,7 @@ bool Symbol_table::has_trivial(std::string_view key) const {
 const Const& Symbol_table::get_trivial(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
-  const auto* s = find_decl_scope_read(var);  // 2b/B: reads cross the Function barrier
+  const auto* s = find_decl_scope_read(var);  // Reads cross the Function barrier
   if (s == nullptr) {
     return invalid_lconst;
   }
@@ -504,7 +504,7 @@ const Const& Symbol_table::get_trivial(std::string_view key) const {
 std::shared_ptr<Bundle> Symbol_table::get_bundle(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
-  const auto* s = find_decl_scope_read(var);  // 2b/B: reads cross the Function barrier
+  const auto* s = find_decl_scope_read(var);  // Reads cross the Function barrier
   if (s == nullptr) {
     return nullptr;
   }
@@ -533,7 +533,7 @@ std::shared_ptr<Bundle> Symbol_table::get_bundle_for_write(std::string_view var)
 bool Symbol_table::has_bundle(std::string_view key) const {
   auto [var, field] = get_var_field(key);
 
-  const auto* s = find_decl_scope_read(var);  // 2b/B: reads cross the Function barrier
+  const auto* s = find_decl_scope_read(var);  // Reads cross the Function barrier
   if (s == nullptr) {
     return false;
   }

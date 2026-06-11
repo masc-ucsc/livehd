@@ -10,7 +10,6 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "file_output.hpp"
-#include "graph_sizing.hpp"
 #include "hhds/graph.hpp"
 #include "hhds/index.hpp"
 

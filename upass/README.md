@@ -4,13 +4,10 @@
 is to **propagate compile-time-known values, dead-code-eliminate everything
 those values make redundant, and emit a new LNAST** that replaces the input.
 
-This document is the contract for **how the pipeline works today**. The
-next-generation design — push-based dispatch, one runner-owned scope-aware
-symbol table — lives in [todo/livehd/2b.html](../todo/livehd/2b.html); its
-prerequisite (the 1b Bundle/Entry reshape) landed 2026-06-09, and the 2b doc
-carries that background. This file describes the current implementation 2b
-will replace. When a change lands in this
-area, update this doc in the same change.
+This document is the contract for **how the pipeline works today**: push-based
+dispatch over one runner-owned scope-aware symbol table (the 2b flag-day,
+landed 2026-06-10, on top of the 1b Bundle/Entry reshape landed 2026-06-09).
+When a change lands in this area, update this doc in the same change.
 
 ## 0. Context and scope
 
@@ -39,13 +36,16 @@ A single `pass.upass` invocation processes each LNAST in `var.lnasts`:
                            inliner reads it mid-walk) and renames
                            multi-assigned vars to SSA-unique names
 (2) runner walk          ─ ONE depth-first pre-order walk of the source
-                           tree. For each node, every active pass's
-                           process_<op>() hook runs in resolved order
-                           (§1.1); hooks are nullary today and re-walk the
-                           node's children via the cursor. The runner then
-                           emits 0..N nodes into the staging tree
-                           (Emit_kind: emit | drop_subtree), folding ref
-                           operands through try_fold_ref on the way out.
+                           tree. For each value node the runner resolves the
+                           operands (dst = the live table bundle, src = one
+                           Operand per child) and pushes
+                           process_<op>(dst_name, dst, src) into every
+                           active pass in resolved order (§1.1), collecting
+                           keep/drop votes. Control/structure hooks
+                           (if/stmts/range/attr_set/…) stay cursor-based.
+                           The runner then emits 0..N nodes into the staging
+                           tree, folding ref operands through try_fold_ref
+                           (a direct table read) on the way out.
 (3) post-walk DCE        ─ dead_code_eliminate_staging: liveness backstop
                            over the staging tree (io-root rule; see 1d)
 (4) finishers            ─ verifier, then assert: read-only walks of the
@@ -95,16 +95,12 @@ Current default request order, with each placement's reason:
 | coalescer    | —                    | after constprop so its known-const guard sees an up-to-date `try_fold_ref`; dropped from the default order entirely when `toln:0 && tolg:0` (nothing materializes) |
 | assert       | `{constprop}`        | reads the values constprop populates; last before the final verifier slot |
 
-**Pending wiring (small, pre-2b):** only the two edges above are declared;
-the rest of the relative order rides the builder's registration order. Move
-the placement reasons into declared edges — `constprop {attributes,
-typecheck}`, `bitwidth {constprop}`, `coalescer {constprop, bitwidth}` — so
-`order=` csv users can't silently drop a prerequisite. One policy decision
-rides along: `resolve_order` auto-pulls a declared dependency back in even
-when its label disables it, so the existing warn-and-drop special case
-(`constprop:0` forces `assert:0`, `pass_upass.cpp:236`) must be generalized
-to every new edge: *a disabled pass drops its dependents with a warning*,
-never silently re-enables.
+All placement reasons are declared edges now: `typecheck {attributes}`,
+`constprop {attributes, typecheck}`, `bitwidth {constprop}`,
+`coalescer {constprop, bitwidth}`, `assert {constprop}`. `pass_upass.cpp`
+generalizes warn-and-drop over every edge as a fixed point: *a disabled pass
+drops its dependents with a warning*, never silently re-enables (the
+`toln:0` coalescer drop stays silent — policy, not a dependency).
 
 Rules that matter more than the exact spelling:
 
@@ -117,10 +113,6 @@ Rules that matter more than the exact spelling:
 - `bitwidth` must see every store before DCE.
 - When a new uPass is added or an existing pass starts reading another pass's
   facts, declare the edge — do not extend the builder's implicit order.
-
-For the 2b push-dispatch redesign of this dispatch core, see
-[todo/livehd/2b.html](../todo/livehd/2b.html); update this section when it
-lands.
 
 ## 2. Per-pass responsibilities
 
@@ -138,15 +130,17 @@ anything (located via the declare/attr_set loc-carry chain). Read-only; emits
 
 ### constprop
 
-Owns *value* facts. Keeps the (currently constprop-owned, §3) `Symbol_table`
-and folds scalars/bundles through it; classification decides which writes are
-already-known and droppable. Also owns the import machinery statics
-(`pending_imports_`, `ambiguous_units_`, `function_registry`). After 2b the
-symbol table moves to the runner and constprop reads pushed-in operand
-bundles; its per-name side maps (`range_map`, `typename_of_var`,
-`decl_unsigned_max_`, `decl_named_type_`, `reg_decl_names_`,
-`mut_decl_names_`, `tuple_slot_ref_`) retire onto the Bundle (see the
-`structs.md` inventory at the repo root for the full justified list).
+Owns *value* facts. Folds scalars/bundles through the runner-owned
+`Symbol_table` (push hooks read the resolved operands; every fold lands on
+the table — there is no constprop-private value state). Each value hook's
+return vote decides whether the statement is already-known and droppable
+(`classify_vote()` over the cursor-based `classify_statement_impl()`
+evaluation). Also owns the import machinery statics (`pending_imports_`,
+`ambiguous_units_`, `function_registry`) — the kernel's whole-file-retry
+seam. Declared facts (mode / typename / unsigned envelope) are read from the
+bindings the runner's declare/type_spec bake wrote; range bounds ride the
+range tmp's binding attrs (`rng_s`/`rng_e`); runtime tuple-slot refs live in
+`Symbol_table::tuple_slot_ref`.
 
 ### attributes
 
@@ -173,18 +167,30 @@ implementation with `upass/attributes` is acceptable where simpler.
 
 ### bitwidth (last opt pass in the walk — read-only, no fold_ref)
 
-Runs **last** in the per-node dispatch. No `fold_ref` (never feeds — or
-corrupts — constprop), read-only (never rewrites a node). Running inside the
-walk lets it observe every store **before DCE** — the init value of a typed
-declaration lives in a separate `store` node that DCE removes when the var is
-unused, so a post-DCE pass would miss overflow on a dead comptime const. At
-`end_run` it (a) emits any `bitwidth-overflow` compile error ("does not
-fit"; signedness-aware, wrap/sat-exempt, scalars-only today) and (b)
-publishes `max`/`min` into `lnast->bw_meta()` for `lnast_to_lgraph`. Ranges
-are `[min, max]` + a single `unbounded` flag; `bits`/`sign` are derived on
-demand, never stored. Wrap/sat narrowing math lives here (attributes keeps
-only the policy bit). 2b moves the overflow diag to the offending store
-(deleting the `end_run` throw, `write_site_`, `pending_overflow_msg_`).
+Runs **last** in the per-node dispatch. Never feeds constprop's folding,
+never rewrites a node. Running inside the walk lets it observe every store
+**before DCE** — the init value of a typed declaration lives in a separate
+`store` node that DCE removes when the var is unused, so a post-DCE pass
+would miss overflow on a dead comptime const. The `bitwidth-overflow`
+compile error ("does not fit"; signedness-aware, wrap/sat-exempt,
+scalars-only today) is emitted **at the offending node**. Ranges live on the
+binding's Entry (`bw_max`/`bw_min`) with a write-through to
+`lnast->bw_meta()` for `lnast_to_lgraph`; `bits`/`sign` derive on demand,
+never stored. Wrap/sat narrowing math lives here (attributes keeps only the
+policy bit).
+
+**Range soundness contract** (root-caused 2026-06-10): a derived range is a
+conservative bound on the binding's **current** value — distinct from (and
+usually narrower than) the typesystem's declared envelope. Every stamp
+REPLACES the binding's range (each stamp is a fresh derivation of this
+node's result; reassignments and loop re-walks rebind), a value write
+invalidates the old derivation (`Bundle::value_entry` clears bw), and the
+dispatch post-merge takes the freshest derivation. Bitwise op ranges:
+`a&b ∈ [0, min(maxes)]`, `a|b ∈ [max(mins), ones-cover(max of maxes)]`,
+`a^b ∈ [0, ones-cover]` for non-negatives (single-point ranges fold exactly,
+any sign; possibly-negative non-constant operands go unbounded); `~x` is
+exactly `[-max-1, -min-1]`. The runner enforces the invariant with an `I()`:
+a comptime-known value must lie within its derived range.
 
 ### coalescer
 
@@ -194,7 +200,8 @@ replay seam, DSE on overwrite, drops const-known defs. Comptime `mut` stores
 are parked and never comptime-dropped at flush (see memory
 `comptime_mut_dse_coalescer`). Disabled automatically when nothing
 materializes (`toln:0 && tolg:0`). The remaining lazy-DCE work (sea-of-nodes)
-is [todo/livehd/1d.html](../todo/livehd/1d.html), sequenced after 2b.
+is [todo/livehd/1d.html](../todo/livehd/1d.html). The park decision rides
+the pass's push-hook vote (`consume_park_vote()`).
 
 ### func_extract
 
@@ -202,8 +209,9 @@ Inline-vs-spawn decisions at call sites ride the runner's virtual-splice
 inliner (§4); func_extract owns the spawn side — extracting comb/mod/pipe
 bodies into separate LNASTs in `var.lnasts` for independent `pass.upass`
 walks — plus closure capture of outer comptime scalars/bundles/imports into
-the extracted body. 2b retires the capture maps via `function_scope`
-read-through on the shared table.
+the extracted body. Function scopes on the shared table are read-through
+(closure capture of outer comptime consts) / write-block (an outer write is
+a compile error).
 
 ### SSA (whole-tree pass, before the runner)
 
@@ -236,12 +244,16 @@ literal's implied type), never from the value itself.
   does not read as comptime; only `const`-decl (resolved) or an explicit
   `comptime` marker does.
 
-Implementation today: the type info attaches per variable as
-`Type_info { decl_kind, num_kind, bits, is_comptime, has_type_spec }` in
-`upass/attributes`; `derive_max`/`derive_min`/`derive_bits` are pure
-functions of that info plus explicit attr_sets; per-field types ride the
-`tuple_get_alias`/`direct_alias` chains. After 1b these become typed
-`Entry`/`Bundle` fields; after 2b the side maps retire.
+Implementation: declared facts are typed `Entry`/`Bundle` fields written by
+the runner's declare/type_spec bake (kind, `decl_max`/`decl_min`, comptime,
+mode, type_name; per-field facts ride entry copies through construction and
+back-flow from typed-literal extraction tmps via `Symbol_table::tget_origin`;
+bundle-valued fields carry mode/comptime as `fmode`/`fcomptime` field attrs).
+The single derivation is `upass/core/decl_facts.hpp` (entries + field attrs +
+the pending dotted-decl stash + io_meta ports + the explicit `[bits=N]` attr);
+`uPass_attributes::lookup_type_info` and the runner/constprop type queries all
+delegate to it. `derive_max`/`derive_min`/`derive_bits` are pure functions of
+that answer plus explicit attr values.
 
 ### verifier / assert (read-only finishers)
 
@@ -269,9 +281,12 @@ pending imports remain (§8).
 
 ## 3. Symbol table & scopes (current)
 
-`Symbol_table` (`upass/core/symbol_table.{hpp,cpp}` since the 1b landing)
-is owned by **constprop** today (`uPass_constprop::st`); 2b moves ownership
-to the runner.
+`Symbol_table` (`upass/core/symbol_table.{hpp,cpp}`) is owned by **the
+runner** (`uPass_runner::symbol_table_`) and shared with every pass via
+`set_runner_symbol_table` — one table, one scope stack, per walk. The runner
+owns every scope transition: `function_scope` at `run()`, `block_scope`
+push before dispatching `process_stmts`, pop after `process_stmts_post`,
+uncertain-arm marking at the if dispatch.
 
 - One `shared_ptr<Bundle>` per live name
   (`Scope.varmap: absl::flat_hash_map<string, shared_ptr<Bundle>>`).
@@ -287,14 +302,21 @@ to the runner.
   arm's scope and dies at `}`. A write to a name declared in an enclosing
   scope under a runtime-uncertain condition invalidates that name's value
   fact on arm exit. There is **no frame-per-arm merge** — the
-  both-arms-write-the-same-constant fold is deliberately not attempted. (2b
-  keeps exactly these semantics; decided 2026-06-09.)
-- **Function scopes are hard visibility barriers** today: `find_decl_scope`
-  (`symbol_table.cpp:20-36`) stops at a `Function` scope for reads *and*
-  writes — a callee body cannot reach the caller's locals at all, which is
-  why func_extract carries closure-capture maps. 2b/B splits this into
-  read-through (closure capture of outer comptime consts) / write-block
-  (outer write = compile error).
+  both-arms-write-the-same-constant fold is deliberately not attempted.
+- **Function scopes are WRITE barriers but READ-transparent**:
+  `find_decl_scope` (the write/anchor variant) stops at the nearest
+  `Function` scope — a callee body cannot mutate the caller's locals, and a
+  fresh write anchors inside the function — while `find_decl_scope_read`
+  crosses the barrier, so a callee body walked on the shared table reads
+  outer comptime consts directly (closure capture without side maps).
+  `___N` tmps anchor at the Function scope from EVERY entry point (`set`
+  and `declare_bare` agree — two shadowing bindings in different scopes was
+  a real bug class).
+- **Name facts vs value facts.** Declared identity (mode, type_name, kind,
+  decl envelope, residual attrs incl. bind-tracking) rides the NAME: slot
+  replacement preserves it, with the declared facts WINNING over anything
+  riding in on the incoming value bundle (an s6-typed param bound to an s4
+  actual keeps its declared s6). Values and derived ranges ride the VALUE.
 
 ## 4. Inline (runner virtual-splice)
 
@@ -317,60 +339,75 @@ the comptime value/tuple record threaded through the passes: a data map
 (tuple leaves; the bare-scalar leaf lives in an inline root Entry — zero map
 nodes for scalars, spilled on whole-map views), a residual attrs map (bare
 names, sticky = leading `_`), and typed pass-fact fields on `Entry`
-(`trivial`/`decl_max`/`decl_min`/`bw_max`/`bw_min`/`kind`/`comptime`) and
-`Bundle` (`mode`/`type_name`) per the 2b per-pass table. Point lookups and
-prefix runs are `find`/`lower_bound`-bounded; `non_attr_entries()`/
-`get_attrs()` are zero-copy map references. The full per-pass data-structure
-inventory (what each side map is for, what 2b retires) is `structs.md` at
-the repo root.
+(`trivial`/`decl_max`/`decl_min`/`bw_max`/`bw_min`/`kind`/`mode`/`comptime`)
+and `Bundle` (`mode`/`type_name`/`value_kind`). Point lookups and prefix
+runs are `find`/`lower_bound`-bounded; `non_attr_entries()`/`get_attrs()`
+are zero-copy map references. Bundles carry no name; the table key is the
+identity (the runner passes names to hooks for diagnostics, `dump()` takes
+one). A **fact-only entry is impossible to store safely**: any non-attr
+entry reads downstream as a value claim (an invalid trivial = runtime
+unknown), which is why declared facts for io ports stay in `io_meta`, the
+dotted-decl stash exists, and `declare_bare` creates truly-empty bundles.
 
-## 6. Dispatch (current)
+## 6. Dispatch
 
-Hooks are **nullary** virtuals generated per node kind
-(`upass/core/upass_core.hpp:247-356`, ~35 `PROCESS_NODE` entries): a pass
-overrides `void process_plus()` etc. and re-walks the node's children itself
-via the `Lnast_manager` cursor. Notable fan-outs in the runner
-(`upass_runner.cpp:3554-3584`):
+Value ops dispatch **push-based**:
+`Vote process_<op>(std::string_view dst_name, Bundle& dst, Src_span src)`
+(`upass/core/upass_core.hpp`, `PROCESS_NODE_PUSH`). The runner resolves the
+operands once per node (`resolve_node_operands`): dst = the live table
+bundle (COW-unshared; a throwaway when unbound — the first write installs
+it), src = one `Operand{name, bundle, pattern}` per child in order (const →
+`make_const` with the parsed value and seeded kind; `0sb`/`0ub` bit-pattern
+literals set `pattern` = force semantics; ref → table bundle or an empty
+view; subtree → placeholder). `Vote = keep|drop` is the emit decision
+channel. Control/structure hooks (if/stmts/range/attr_set/attr_get/
+tuple_get/declare/type_spec/func_call/…) remain cursor-based nullary
+virtuals; a push hook may also walk the cursor when its payload includes
+subtrees (named-field stores, does-operands) — `dispatch_push` saves and
+restores the cursor around every call.
 
-- `store` with 2 children dispatches to `process_assign`; 3+ children
-  (field-path store) to `process_tuple_set`. (`assign`/`tuple_set` LNAST
-  nodes were deleted in task 1t — these are dispatch-method names only.)
-- `declare` dispatches to `process_declare`.
+- `store` is part of the push surface; each pass's `process_store` routes
+  ≤1-src to its scalar-assign body and field-path forms to its
+  tuple_set body. (`assign`/`tuple_set` LNAST nodes were deleted in task
+  1t — `store` is the single write node.)
+- `declare`/`type_spec` first run the runner's **bake** pre-step (writes
+  kind/decl envelope/comptime/mode/type_name onto the dst binding; dotted
+  dsts write the root's field entry or the pending stash; extraction tmps
+  back-flow to the source field via `tget_origin`), then dispatch.
 
-Cross-pass facts flow through **pull seams** wired at construction:
+Cross-pass facts flow **through the table** — there are no pull seams. The
+one surviving callback is `runner_emit_at_fn` (the coalescer's
+materialize-at-use replay). `uPass_runner::try_fold_ref` is a direct
+`Symbol_table::known_const_scalar` read (strict gates: no unknowns, and
+only a trivial scalar inlines — a multi-entry tuple or named 1-tuple never
+inlines its position-0 value). Declared-type queries go through
+`upass/core/decl_facts.hpp`; call/import resolution through
+`upass/core/call_resolver.{hpp,cpp}` (callee name lookup, actual
+collection, import → namespace bundle on the dest).
 
-- `runner_fold_fn` → `uPass_runner::try_fold_ref` (first non-nullopt across
-  `fold_capable_passes`; attributes' wrap/sat narrowing beats constprop's
-  raw value).
-- `runner_type_query_fn` → combined KIND (typecheck) + declared envelope
-  (attributes) for constprop's `does`/type folds.
-- `runner_emit_at_fn` → the coalescer's materialize-at-use replay.
-- 9 `provide_*` virtuals / `try_*` runner wrappers (bundle fields, typename,
-  decl type, field type, scalar kind, decl storage, range, tuple slot ref,
-  tuple shape) over `shared_st_passes_`.
-
-2b replaces all of this with push-based dispatch
-(`Vote process_<op>(Bundle& dst, span<const shared_ptr<const Bundle>> src)`,
-`Vote = keep|drop`, runner-resolved operands, emit derived from
-`dst.scalar()`); `runner_emit_at_fn` survives as the coalescer's emit seam.
-See [todo/livehd/2b.html](../todo/livehd/2b.html) — this section describes
-what it deletes.
-
-## 7. Emit model (current)
+## 7. Emit model
 
 The runner emits into a **staging tree** (`staging`, `dest_forest_`) as the
-walk leaves each source node (`emit_push`/`emit_pop`,
-`upass_runner.cpp:286+`). Per node:
+walk leaves each source node (`emit_push`/`emit_pop`). Per node, the drop
+decision combines:
 
-- `classify_statement` across `classify_capable_passes` → `Emit_kind`
-  (`emit` | `drop_subtree`, `upass_core.hpp:31-38`): a pass that proves the
-  node redundant (e.g. constprop on a comptime store) drops it.
-- On `emit`, ref operands are folded through `try_fold_ref`
-  (`emit_ref_or_folded`) so known values materialize as `const`.
-- The coalescer may park the node instead and replay it later at first use
-  (`runner_emit_at_fn`).
-- After the walk, post-walk DCE sweeps the staging tree (io-root liveness
-  rule), and the staging tree replaces the source LNAST.
+- **Push votes** — constprop votes drop when the dst's table state proves
+  the statement redundant (its private `classify_statement_impl`
+  evaluation); the coalescer votes drop when it parked the statement
+  (one-shot flag, replayed later at first use via `runner_emit_at_fn`).
+- **Region verdicts** — the `classify_statement` virtual survives for the
+  two passes whose drops are not per-op-shaped: the verifier (cassert
+  discharge: known-true → drop + tally, known-false → error; func_call
+  classification) and func_extract (statements inside virtualized bodies).
+- **Runner-derived dst-drops** on the legacy drop-candidate ops
+  (func_call/tuple_get): a fully-known trivial-scalar dst that is not
+  reg/mut-declared means every consumer folds the value. cassert has no dst
+  (child 0 is the condition) and always emits.
+
+On emit, ref operands are folded through `try_fold_ref` so known values
+materialize as `const`. After the walk, post-walk DCE sweeps the staging
+tree (io-root liveness rule), and the staging tree replaces the source
+LNAST.
 
 ## 8. Pending imports
 
@@ -428,14 +465,22 @@ These must hold after every walk:
   bind tallies. Canonical example:
   `uPass_attributes::process_tuple_set` calls `record_assign(target,
   rhs_is_nil)` (`upass/attributes/upass_attributes_tuple.cpp:272`).
-- **Cursor discipline.** Hooks re-walk children via `Lnast_manager`
-  (`move_to_child`/`move_to_sibling`) and must restore the cursor before
-  returning — fold helpers (`try_fold_ref`) may move it
-  (`while_nonterm_detection` memory). 2b removes per-pass cursor walking
-  entirely.
-- **Bundle alias chains.** `direct_alias` reads are one hop; chains
-  (`c = b; b = a;` then `c.[size]`) walk multiple hops. Consumers should
-  tolerate one or two hops.
+- **Cursor discipline.** Cursor-based hooks (and push hooks that walk
+  subtree payloads) must restore the cursor before returning — fold helpers
+  may move it. `dispatch_push` saves/restores around every push call as a
+  backstop.
+- **Aliases share table slots.** Whole-bundle assignment shares the
+  `shared_ptr`; attrs, entry facts, and shapes ride the share and survive
+  COW clones — there is no alias chase. The flip side: never mutate a
+  shared bundle without `unshare_for_write` (and copy-before-emplace around
+  `absl::flat_hash_map` rehashes — element moves invalidate references,
+  unlike `std::unordered_map`).
+- **Two poison flavors.** A truly-EMPTY bundle (fresh `declare_bare`) means
+  "declared, no info". An entry with an INVALID trivial means "tracked but
+  runtime-unknown" — storing declared facts as a fact-only entry turns a
+  port into a runtime-unknown VALUE claim (mod varargs became 65-bit
+  unknown constants this way). First-write gates must test
+  `get_trivial(name).is_invalid()`, not entry existence.
 
 ### 10.x Open diagnostics issue
 
@@ -449,20 +494,13 @@ grammar permits but the language prohibits.
 
 ## 11. Where this is headed
 
-The migration steps formerly listed here are subsumed by the two task docs:
-
-- 1b — Bundle/Entry reshape (upass/core move, typed pass-fact fields,
-  residual attrs, inline root, bounded scans) — **LANDED 2026-06-09**; the
-  task doc was deleted, background lives in the 2b doc's "Depends on"
-  section.
-- [todo/livehd/2b.html](../todo/livehd/2b.html) — push-based dispatch
-  flag-day: runner-owned scope-aware symbol table, `(dst, src…)` hooks,
-  emit model (a), `Call_resolver`, pull-seam deletion. Freezes other upass
-  work until it lands.
 - [todo/livehd/1d.html](../todo/livehd/1d.html) — sea-of-nodes demand-driven
-  emit; sequenced **after** 2b.
+  emit (unblocked: the 2b flag-day landed 2026-06-10; the per-name Bundle is
+  the natural home for the "consumed" bit).
 
-Landed milestones formerly tracked here: `Handler_registry` dispatch-vector
-fix, `Cursor_state` lightweight save/restore, and the bitwidth relocation
-(read-only, no-fold, last-opt-pass + centralized overflow — goal 1n; its
-residuals live in todo/ 1n).
+Landed milestones formerly tracked here: the 1b Bundle/Entry reshape
+(2026-06-09) and the 2b push-dispatch flag-day (2026-06-10: runner-owned
+scope-aware symbol table, push hooks + votes, bake, decl_facts,
+Call_resolver, every pull seam and pass-private side map deleted, bw-range
+soundness invariant); earlier: `Handler_registry` dispatch-vector fix,
+`Cursor_state` save/restore, the bitwidth relocation (goal 1n).

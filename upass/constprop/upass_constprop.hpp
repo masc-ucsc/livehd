@@ -23,7 +23,7 @@ public:
   uPass_constprop() = delete;
   virtual ~uPass_constprop() {}
 
-  // 2b/E4 — store routes both arities; the cursor-walking assign/tuple_set
+  // Store routes both arities; the cursor-walking assign/tuple_set
   // bodies stay as private helpers (subtree payloads don't ride the span).
   upass::Vote process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   void        process_assign() override;
@@ -86,13 +86,16 @@ public:
   // non-scalar) — a runtime index or an unresolved/partial base is skipped.
   void check_tuple_access(const std::string& base, const std::string& seg, bool is_index);
 
-  // 2b/D — the emit decision rides the push VOTE: every value-op/store hook
+  // The emit decision rides the push VOTE: every value-op/store hook
   // returns classify_vote() (cursor-based evaluation, now constprop-private —
   // the base classify_statement virtual stays for the verifier/func_extract
   // REGION verdicts only).
-  upass::Emit_decision classify_statement();  // hides the base virtual deliberately
+  // Distinct name: a same-signature redeclaration would implicitly override
+  // the base virtual (overrides_classify_statement() stays false, so the
+  // runner must never see this through the base interface).
+  upass::Emit_decision classify_statement_impl();
   upass::Vote          classify_vote() {
-    return classify_statement().kind == upass::Emit_kind::drop_subtree ? upass::Vote::drop : upass::Vote::keep;
+    return classify_statement_impl().kind == upass::Emit_kind::drop_subtree ? upass::Vote::drop : upass::Vote::keep;
   }
 
 
@@ -125,7 +128,7 @@ protected:
   // pending import and leaves the call unfolded.
   void process_import_call(const std::string& dst);
 
-  // 2b/A — the symbol table is the RUNNER's: one shared scope-aware table,
+  // The symbol table is the RUNNER's: one shared scope-aware table,
   // with every push/pop (function/block scopes, uncertain-arm marking) owned
   // by the runner. These accessors keep the many `st().` call sites short.
   Symbol_table&       st() { return *runner_st; }
@@ -210,7 +213,7 @@ protected:
 
   Const current_pyrope_value() { return *Dlop::from_pyrope(current_text()); }
 
-  // 2b/E4 — declared facts read from the BINDING (the runner bake writes
+  // Declared facts read from the BINDING (the runner bake writes
   // mode/type_name/decl ranges at the declare node, before any store):
   upass::Mode decl_mode_of(std::string_view var) {
     const auto b = st().get_bundle(var);
@@ -237,10 +240,10 @@ protected:
 
   void check_unsigned_positive_overflow(std::string_view lhs, const Const& value);
 
-  // 2b/C — field paths read via tuple_get this walk (unused-unset warning).
+  // Field paths read via tuple_get this walk (unused-unset warning).
   absl::flat_hash_set<std::string> field_reads_;
 
-  // 2b/H — local replacement for the deleted runner_type_query_fn seam:
+  // Local replacement for the deleted runner_type_query_fn seam:
   // inferred scalar KIND off the binding + declared integer ENVELOPE from
   // the shared decl-facts derivation.
   upass::uPass::Scalar_type_query scalar_type_query_of(std::string_view name) {
@@ -278,14 +281,14 @@ protected:
     return q;
   }
 
-  // 2b/E4 — push-form operand value. Mirrors current_prim_value: the
+  // Push-form operand value. Mirrors current_prim_value: the
   // cross-pass fold override wins (wrap/sat narrowed values, attr-derived
-  // tmps — runner_fold_fn dies in 2b/H once those land on dst directly),
+  // tmps — all of which land on the table),
   // then a scalar bundle flattens, then the stored trivial. Const operands
   // carry their parsed value in the resolver's make_const bundle.
   Const operand_value(const upass::Operand& o) {
     if (!o.name.empty()) {
-      // (2b/H probe) cross-pass folds land on the table now — no seam read.
+      // Cross-pass folds land on the table — read it directly.
       if (auto b = st().get_bundle(o.name); b && b->is_scalar()) {
         if (auto bv = b->lone_trivial(); !bv.is_invalid()) {
           return bv;
@@ -297,7 +300,7 @@ protected:
   }
 
   // Push-form fold templates (the cursor-walking originals below die with
-  // the nullary hooks in 2b/H).
+  // the cursor-walking originals).
   template <typename F>
   upass::Vote push_nary(std::string_view dst, upass::Src_span src, F op) {
     if (dst.empty() || src.empty()) {
@@ -369,7 +372,7 @@ protected:
   auto current_prim_value() const {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
       auto name = current_text();
-      // (2b/H) cross-pass folds (wrap/sat narrowing on call-dst tmps,
+      // cross-pass folds (wrap/sat narrowing on call-dst tmps,
       // attr_get results, `is`) land on the table now — no seam read.
       // Single-entry bundle: a parenthesized scalar `(expr)` lowers to a
       // 1-element tuple_add (e.g. `!(p is yy)`); flatten to its lone value so
@@ -477,7 +480,7 @@ protected:
     bool                          has_value = false;
     Const                         value;  // valid when has_value
     std::shared_ptr<Bundle const> bundle;  // set when kind==tuple
-    // 2b/H — the TABLE name the bundle was resolved under (Bundle::name is
+    // The TABLE name the bundle was resolved under (Bundle::name is
     // gone); resolve_field_operand's dotted declared-type query keys on it.
     std::string                   name;
   };
@@ -511,7 +514,7 @@ protected:
   // scalar_does. nullopt = undecidable. `equals` is this both ways.
   std::optional<bool> compute_does(const Does_operand& a, const Does_operand& b);
 
-  // 2b/F — the actual-collection moved to the runner-owned resolver
+  // The actual-collection moved to the runner-owned resolver
   // (upass/core/call_resolver.hpp); the alias keeps every consumer
   // (inliner binding, cell folds, import handling) source-compatible.
   using Call_actual = upass::call_resolver::Call_actual;

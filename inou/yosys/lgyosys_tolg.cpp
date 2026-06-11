@@ -117,7 +117,7 @@ namespace {
   // downstream consumers size derived nodes from bits_of(pin) — e.g. the
   // tposs wrappers below use bits_of(dpin)+1, which read 0 (a 1-bit reg in
   // cgen, truncating the port) when only the GraphIO carried the width.
-  set_bits(pin, static_cast<Bits_t>(bits));
+  set_bits(pin, static_cast<int32_t>(bits));
   return pin;
 }
 
@@ -200,7 +200,7 @@ static void look_for_wire(hhds::Graph* g, const RTLIL::Wire* wire) {
       // The port may have been declared on the GraphIO before this wire was
       // seen; make sure the body pin attr carries the width as well (the
       // tposs wrappers size themselves from bits_of(pin)).
-      set_bits(pin, static_cast<Bits_t>(wire->width));
+      set_bits(pin, static_cast<int32_t>(wire->width));
     } else {
       pin = add_graph_input(g, wname, wire->port_id, wire->width);
     }
@@ -394,7 +394,7 @@ static hhds::Pin_class create_pick_operator(hhds::Graph* g, const RTLIL::Wire* w
   if (auto it = partially_assigned.find(wire); it != partially_assigned.end()) {
     const auto it_bits = partially_assigned_bits.find(wire);
     I(it_bits != partially_assigned_bits.end());
-    Bits_t bits = 0;
+    int32_t bits = 0;
     auto   pos  = 0u;
     for (const auto& b : it_bits->second) {
       if (bits == offset) {
@@ -412,10 +412,10 @@ static hhds::Pin_class create_pick_operator(hhds::Graph* g, const RTLIL::Wire* w
 // bits_of() reads the pin attr, which is 0 for const pins (the value implies
 // the width). Undersizing matters: cprop's replace_node truncates folded
 // constants to the driver-pin bits, so shl(9,4) on a 4-bit pin becomes 0.
-[[nodiscard]] static Bits_t dpin_width(const hhds::Pin_class& dpin) {
+[[nodiscard]] static int32_t dpin_width(const hhds::Pin_class& dpin) {
   auto w = bits_of(dpin);
   if (w == 0 && is_const_pin(dpin)) {
-    w = static_cast<Bits_t>(hydrate_const_pin(dpin).get_bits());
+    w = static_cast<int32_t>(hydrate_const_pin(dpin).get_bits());
   }
   return w;
 }
@@ -1325,7 +1325,7 @@ static uint32_t get_output_size(const RTLIL::Cell* cell) {
   return 0;
 }
 
-static void connect_partial_dpin(hhds::Graph* g, hhds::Node_class& or_node, uint32_t or_offset, Bits_t nbits,
+static void connect_partial_dpin(hhds::Graph* g, hhds::Node_class& or_node, uint32_t or_offset, int32_t nbits,
                                  const hhds::Pin_class& current_dpin) {
   I(type_op_of(or_node) == Ntype_op::Or);
 
@@ -1795,8 +1795,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       }
     } else if (std::strncmp(cell->type.c_str(), "$xnor", 5) == 0) {
       auto s = get_output_size(cell);
-      I(s < Bits_max);
-      auto size = static_cast<Bits_t>(s);
+      auto size = static_cast<int32_t>(s);
 
       auto entry_node = create_typed_node(*g, Ntype_op::Xor, size);
 

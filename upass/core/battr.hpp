@@ -9,7 +9,7 @@
 // comptime; mode/typename at the Bundle level) are typed Entry/Bundle
 // FIELDS — never string-keyed attrs. Only the genuinely rare/dynamic
 // attributes live in the Bundle attr map, under these bare names (no "__").
-// The per-pass attribute table in todo/livehd/2b.html is the authoritative
+// The per-pass attribute responsibilities below are the authoritative
 // registry; keep this header in sync with it.
 namespace battr {
 

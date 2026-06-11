@@ -43,8 +43,8 @@ public:
   void st_set(std::string_view name, const Const& val) { st().set(name, val); }
   void st_set(std::string_view name, const spool_ptr<Dlop>& val) { st().set(name, *val); }
 
-  // Expose classify_statement() for white-box testing.
-  upass::Emit_decision classify() { return classify_statement(); }
+  // Expose classify_statement_impl() for white-box testing.
+  upass::Emit_decision classify() { return classify_statement_impl(); }
 
   // 2b/E4 — drive a PUSH-form hook from the cursor the way the runner's
   // resolve_node_operands would: first ref child = dst name (live bundle or

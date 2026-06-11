@@ -64,7 +64,7 @@ protected:
 
   std::vector<Pass_entry> upasses;
 
-  // 2b/A — THE symbol table: one runner-owned, scope-aware table holding one
+  // THE symbol table: one runner-owned, scope-aware table holding one
   // shared_ptr<Bundle> per live name, shared by every pass (wired via
   // uPass::set_runner_symbol_table). The runner owns all scope transitions:
   // function_scope at run() start, block_scope/leave_scope around every
@@ -114,7 +114,7 @@ protected:
 
   std::vector<std::string> resolve_order(const std::vector<std::string>& requested_names, std::string* error_msg = nullptr) const;
 
-  // ── 2b/C — push-based dispatch ─────────────────────────────────────────
+  // ── Push-based dispatch ────────────────────────────────────────────────
   // Per-node operand resolution: dst = the live symbol-table bundle for the
   // first-child ref (created on first write — see lazy install in
   // dispatch_push), src = the remaining children in order (const →
@@ -137,27 +137,27 @@ protected:
   // when any pass voted drop.
   bool dispatch_push(upass::Push_method fn, Resolved_node& rn);
 
-  // Migration helper: fold the typed fact fields from a throwaway dst onto
-  // the binding an unmigrated pass installed mid-dispatch (see dispatch_push).
+  // Fold the typed fact fields from a resolved dst onto
+  // the live slot bundle (constprop binds values mid-dispatch; see dispatch_push).
   static void merge_fact_fields(Bundle& bound, const Bundle& from);
 
-  // 2b/C drop-candidate path for value-producing ops: resolve operands, push
+  // Drop-candidate path for value-producing ops: resolve operands, push
   // dispatch, combine the votes with the legacy classify_statement, emit.
   void process_drop_candidate_push(upass::Push_method fn, bool fold_all);
 
-  // 2b/A — declaration pre-step: read the TYPE subtree of a `declare`
+  // Declaration pre-step: read the TYPE subtree of a `declare`
   // (is_declare=true) or standalone `type_spec` ONCE and bake the persistent
   // facts into the destination's symbol-table bundle as TYPED fields (Kind +
   // declared max/min + comptime on the "0" Entry; mode/type_name on the
-  // Bundle). End state (2b/E): no pass walks a type subtree; until then the
+  // Bundle). End state: no pass walks a type subtree; until then the
   // passes' own walks coexist.
   void bake_decl_pre_step(bool is_declare);
 
-  // 2b/E3b — drain the dotted-bake stash (Symbol_table::pending_decl_facts):
+  // Drain the dotted-bake stash (Symbol_table::pending_decl_facts):
   // apply declared facts to fields that just received their first value.
   void apply_pending_field_facts();
 
-  // 2b/A — push the block scope for the stmts node under the cursor and mark
+  // Push the block scope for the stmts node under the cursor and mark
   // it uncertain when entering an unresolved if-arm. Pop side: callers run
   // symbol_table_.leave_scope() AFTER dispatching process_stmts_post.
   void enter_block_scope() {

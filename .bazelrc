@@ -1,5 +1,8 @@
 # livehd specific bazel options
 build --output_filter='^//(core|pass|inou)'
+# External-repo headers via -isystem so -Werror (tools/copt_default.bzl) only
+# gates LiveHD code, not warnings emitted inside third-party headers
+build --features=external_include_paths
 build --repo_env=BAZEL_CONLYOPTS="-std=gnu17"
 build --cxxopt="-std=c++23" --cxxopt="-fexceptions" --force_pic --build_tag_filters="-fixme"
 build --action_env=BAZEL_CXXOPTS="-std=c++23"

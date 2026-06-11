@@ -25,32 +25,48 @@
 <ul class="subtasks">
 <li><strong>B2 — 1a-mem follow-ups (small, unscheduled).</strong>
   <ul>
-  <li>Reset does not (yet) RESTORE a <code>reg</code> memory's init contents — a
-    concrete initializer is power-on contents only (decision 2026-06-09: reg and
-    not-reg initialize alike, via the <code>init</code> pin / wrapper INIT param);
-    re-initializing on reset needs the reset-sweep FSM.</li>
-  <li>A <code>type=1</code> (sync) <code>__memory</code> LEC test — type 1 lowers and the
-    wrapper handles it, but only type 0/2 are LEC-pinned so far.</li>
-  <li>Untested edges: partial-entry writes (<code>mem[i]#[r]=…</code> may already work as
-    read-modify-write under fwd — pin or reject), <code>wensize&gt;1</code> write masks via
-    <code>__memory</code> pass-through, non-power-of-2 sizes (spec says OOB is random),
-    per-port clock lists (multiclock wrappers exist; <code>__memory</code> takes one
-    <code>clock_pin</code>).</li>
-  <li>Cosmetic: a <code>type=2</code>-only <code>__memory</code> still mints the implicit
-    clock input (unused); cgen could declare type-2 dout regs lint-cleanly.</li>
-  </ul></li>
+  <li><strong>Failing LEC case:</strong> there are 2 failing tests:
+    <code>equiv/mem_pending_sync_init.prp</code> and
+    <code>equiv/mem_pending_sync_init.prp</code>.
+    <p>Several issues in these tests:</p>
+    <ul>
+    <li>The timecheck is incorrect. It should pass with <code>out@[1]</code> or
+      <code>out@[]</code> (no check), but <code>out@[0]</code> (currently passes
+      with this) is wrong.</li>
+    <li>The output data does not work (even when the timecheck is fixed or
+      disabled). Verilog ref gen verilog has <code>rd_dout_0</code> correctly,
+      and <code>INIT_EN</code> and <code>INIT</code>:
+      <pre><code>./bazel-bin/lhd/lhd compile --reader yosys-verilog inou/prp/tests/equiv/mem_pending_sync_init.v --emit-dir verilog:tmp/</code></pre>
+      <pre><code>cgen_memory_1rd_1wr #( .LATENCY_0(1) ,.BITS(3) ,.SIZE(4) ,.WENSIZE(3) ,.FWD(0)) data(
+.clk(get_mask_80)
+  ,.rd_addr_0(get_mask_76)
+  ,.rd_enable_0(2'sh1)
+  ,.wr_addr_0(1'b0)
+  ,.wr_enable_0(1'b0)
+  ,.wr_din_0(1'b0)
+);</code></pre>
+    </li>
+    <li>The Pyrope gen verilog seems fine, so in this case
+      <code>lgyosys_tolg.cpp</code> seems to have a bug or missing things
+      (<code>INIT</code>, output, and <code>BITS</code>):
+      <pre><code>./bazel-bin/lhd/lhd compile inou/prp/tests/equiv/mem_pending_sync_init.prp --emit-dir verilog:tmp/</code></pre>
+      <p>(once the <code>@[1]</code> issue is patched by hand)</p>
+      <pre><code>cgen_memory_1rd_1wr #( .LATENCY_0(1) ,.BITS(4) ,.SIZE(4) ,.WENSIZE(1) ,.FWD(0) ,.INIT_EN(1) ,.INIT(16'sh4321)) memory_20(
+.clk(clock)
+  ,.rd_addr_0(get_mask_16_u)
+  ,.rd_enable_0(2'sh1)
+  ,.rd_dout_0(memory_20_dout_0)
+  ,.wr_addr_0(1'b0)
+  ,.wr_enable_0(1'b0)
+  ,.wr_din_0(1'b0)
+);</code></pre>
+    </li>
+    <li>The Pyrope gen verilog fails.</li>
+    </ul>
+  </li>
 <li><strong>C — 1a-ops: remaining op / cell mappings.</strong>
   <ul>
-  <li><code>defer</code>/<code>past[n]</code> temporal reads → <code>Flop</code>.</li>
-  <li>High-level op lowering (slice/concat, <code>!=</code>/<code>&lt;=</code>/<code>&gt;=</code>,
-    div/mod → power-of-two <code>SRA</code>/<code>Get_mask</code> + generic <code>Sub</code>
-    fallback / non-synth warning).</li>
-  <li><code>uif</code> chains (HotMux FIXME) + direct <code>__&lt;cell&gt;</code> calls.</li>
-  <li><code>lg:</code> black-box <code>Sub</code> instances (Pyrope-path <code>ln:</code> Subs
-    landed via 1u-A + 1m; <code>tolg</code>
-    hard-errors on any unresolvable callee until <code>lg:</code> lands).</li>
-  <li><code>max</code>/<code>min</code> HHDS attribute reads at node creation (diagnose
-    leftover LNAST-only attrs).</li>
+  <li><code>unique if/match</code> should chaing with hotmux, but cgen.verlog still does not handle hotmux (patch hotmux all across the flow).</li>
   </ul></li>
 </ul>
 

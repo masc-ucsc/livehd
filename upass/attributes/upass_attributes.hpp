@@ -129,7 +129,7 @@ public:
   // dispatch is active.
   const std::string& current_dispatch_bucket() const { return dispatch_bucket; }
 
-  // 2b/E — the runner-owned shared symbol table, for the attribute handlers
+  // The runner-owned shared symbol table, for the attribute handlers
   // (sticky state lives on the bindings now).
   Symbol_table* shared_table() const { return runner_st; }
 
@@ -229,13 +229,13 @@ public:
   // nullopt when no entry exists for that (var, attr) pair.
   std::optional<Const> lookup_attr_value(std::string_view var, std::string_view attr) const;
 
-  // 2b/E3e — write an explicit attr value onto the binding (field-scoped for
+  // Write an explicit attr value onto the binding (field-scoped for
   // dotted targets; creates the binding when absent — set() anchors ___ tmps
   // at the function scope). Also echoes extraction-tmp targets back to their
   // source field via Symbol_table::tget_origin (per-field decl-site attrs).
   void set_binding_attr(std::string_view target, std::string_view attr, const Const& v);
 
-  // Declared-type facts for a name — 2b/E3b: answered from the binding's
+  // Declared-type facts for a name: answered from the binding's
   // typed Entry fields (runner declare/type_spec bake + per-field rides),
   // io_meta (ports), the pending dotted-decl stash, and the explicit
   // `[bits=N]` attr value. Returns nullptr when nothing is known; the
@@ -321,7 +321,7 @@ public:
   // Public so phase4 helpers (and future tests) can drive materialization.
 
   // Was `var` assigned a non-nil value at least once? Gates the unsigned
-  // first-write coercion in on_assign_like. 2b/E — reads the binding's
+  // first-write coercion in on_assign_like. Reads the binding's
   // "vbound" residual attr (set by record_assign).
   bool was_assigned(std::string_view var) const {
     if (runner_st == nullptr) {
@@ -356,7 +356,7 @@ private:
   // string_view lookup and O(1) inserts; assigned_once grows to ~one entry per
   // assignment on bulk workloads, so the std::set's O(log N) per-insert
   // allocator pressure was a visible bottleneck.
-  // 2b/E — assigned_once / const_assign_count retired onto the bindings'
+  // Assigned_once / const_assign_count retired onto the bindings'
   // "vbound" residual attr (see record_assign / was_assigned).
   // >0 while the runner's init-construction window is open (see the
   // notify_init_construction_* overrides) — record_assign skips the const

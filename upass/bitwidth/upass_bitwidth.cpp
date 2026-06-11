@@ -186,7 +186,7 @@ void uPass_bitwidth::clear_range(std::string_view name) {
   lm->get_lnast()->bw_meta().ranges.erase(std::string(name));
 }
 
-// ── Declared envelope + fit check (at the node — 2b/G) ──────────────────────
+// ── Declared envelope + fit check (at the offending node) ───────────────────
 
 std::optional<Lnast_range> uPass_bitwidth::decl_envelope_of(std::string_view name) const {
   const std::string_view base = ssa_base_name(name);
@@ -232,7 +232,7 @@ void uPass_bitwidth::check_declared_fit(std::string_view name, const Lnast_range
 }
 
 void uPass_bitwidth::record_overflow(std::string_view name, const Lnast_range& value, const Lnast_range& env) {
-  // 2b/G — the diagnostic is emitted AT the offending node: the cursor is on
+  // The diagnostic is emitted AT the offending node: the cursor is on
   // the store/op during dispatch, so its loc (when carried) is the span. An
   // error-severity diag fails the compile; no end_run throw, no deferral.
   livehd::diag::Span span;

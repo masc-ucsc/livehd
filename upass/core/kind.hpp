@@ -6,7 +6,7 @@
 namespace upass {
 
 // Shared scalar-kind lattice (1b/D) — one vocabulary for typecheck, the
-// Bundle/Entry typed fields, and (post-2b) every pass reading pushed
+// Bundle/Entry typed fields, and every pass reading pushed
 // operand bundles. `unknown` is the wildcard (skips checks, never errors)
 // — also the kind of a typeless single-unknown-bit literal `0sb?`/`0ub?`.
 // `nil` is poison. Kind is NOT derivable from the value (`true` reads as

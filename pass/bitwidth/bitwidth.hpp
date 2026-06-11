@@ -57,7 +57,7 @@ protected:
   void process_attr_set_dp_assign(hhds::Node_class& node);
   void process_attr_set_bw(hhds::Node_class& node, Bitwidth::Attr attr);
   void process_attr_set(hhds::Node_class& node);
-  void insert_tposs_nodes(hhds::Node_class& node_attr, Bits_t ubits);
+  void insert_tposs_nodes(hhds::Node_class& node_attr, int32_t ubits);
 
   void debug_unconstrained_msg(hhds::Node_class& node, hhds::Pin_class& d_dpin);
   void try_delete_attr_node(hhds::Node_class& node);

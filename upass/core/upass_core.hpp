@@ -29,7 +29,7 @@ namespace upass {
 // ignored so new labels can be added without a whole-stack change.
 using Options_map = std::map<std::string, std::string>;
 
-// 2b/C — push-based dispatch vocabulary. The runner resolves every operand of
+// Push-based dispatch vocabulary. The runner resolves every operand of
 // a value-producing node to a Bundle and PUSHES them into each pass:
 //
 //   Vote process_<op>(std::string_view dst_name, Bundle& dst, Src_span src)
@@ -39,7 +39,7 @@ using Options_map = std::map<std::string, std::string>;
 // literal is a throwaway trivial Bundle (make_const) owned by the runner for
 // the duration of the call, a `ref` is the name's live bundle. Names ride
 // along for diagnostics only. Passes mutate their slice of `dst` and vote
-// keep/drop; the runner derives the emitted node (2b/D).
+// keep/drop; the runner derives the emitted node.
 enum class Vote : uint8_t { keep, drop };
 
 struct Operand {
@@ -98,68 +98,44 @@ public:
   // override fold_ref / classify_statement must also override these.
   virtual bool overrides_classify_statement() const { return false; }
 
-  // ── Shared symbol-table read access (1i Phase E campaign) ────────────────
-  // The runner's comb-call inliner can introspect a scalar via fold_ref, but
-  // some inlinable shapes need more of the symbol-table state than a scalar:
-  //   - tuple actuals / tuple params  → the bundle fields behind a ref
-  //   - method dispatch / setter-init → the declared typename of a var
-  // A pass that owns that state (constprop) overrides these so the runner can
-  // read it without the full shared-ST migration. provide_bundle_fields
-  // returns the flat (field → comptime Const) entries of a bundle, or nullopt
-  // if `name` is not a known bundle. provide_typename returns the var's
-  // declared typename, or "" if none.
+  // ── Declared-type query vocabulary ───────────────────────────────────────
+  // Answered by the shared derivation (upass/core/decl_facts.hpp) through
+  // the runner's try_* helpers — facts flow through the table, nothing pulls
+  // from a pass.
 
   // Declared scalar (integer) type of a variable, as its authoritative
-  // prim_type_int `(max,min)` range. Exposed so the comb-call inliner can
-  // propagate an *untyped* parameter's type from the actual argument at the
-  // call site: `comb reverse(x) { … x.[bits] … }` invoked as `reverse(x0:u6)`
-  // must see `x:u6` inside the inlined body, because `.[bits]`/`.[max]`/
-  // `.[min]` are declared-type-driven (not value-driven) — an untyped param
-  // bound only to a value reads nil for all three. Either bound may be unset
-  // (unbounded). Returns nullopt when `name` has no concrete declared integer
-  // type (untyped / `:int` unbounded / non-numeric). See bitreverse.prp.
+  // prim_type_int `(max,min)` range. The comb-call inliner propagates an
+  // *untyped* parameter's type from the actual argument at the call site:
+  // `comb reverse(x) { … x.[bits] … }` invoked as `reverse(x0:u6)` must see
+  // `x:u6` inside the inlined body, because `.[bits]`/`.[max]`/`.[min]` are
+  // declared-type-driven (not value-driven) — an untyped param bound only to
+  // a value reads nil for all three. Either bound may be unset (unbounded).
+  // See bitreverse.prp.
   struct Decl_scalar_type {
     std::optional<Const> range_max;
     std::optional<Const> range_min;
   };
 
-  // Task 1k — declared type (scalar kind + optional integer range) of a
-  // DOTTED field path such as `t1.a` (per-field types of a type/tuple bundle
-  // live on tuple_get tmps in the attributes pass; lookup_type_info chases
-  // the alias chain). The inliner's typed-self `does`-check uses this to
-  // compare the declared self type's fields against the receiver's. Returns
-  // nullopt when no declared type is recorded for the path.
+  // Declared type (scalar kind + optional integer range) of a DOTTED field
+  // path such as `t1.a`. The inliner's typed-self `does`-check uses this to
+  // compare the declared self type's fields against the receiver's.
   struct Field_decl_type {
     Io_kind              kind{Io_kind::none};
     std::optional<Const> range_max;
     std::optional<Const> range_min;
   };
 
-  // Task 1g — inferred scalar KIND of a variable (integer/boolean/string),
-  // even when it carries no explicit `:type` annotation. uPass_typecheck owns
-  // the kind lattice (it infers `const b = true` as boolean, `mut i = 10` as
-  // integer — a distinction Lconst cannot make, since `true` stores as the
-  // integer 1). constprop's type-aware `does`/`equals` fold consults this to
-  // reject cross-kind comparisons (`int does bool` → false). Returns
-  // `Io_kind::none` when the kind is not (yet) known. See uPass::provide_field_type
-  // for the declared-range half.
-
-  // Task 1k — declared storage class of a variable. The inliner uses this to
-  // reject a `const` or `type` binding as a `ref` actual (incl. the UFCS
-  // receiver of a `ref self` method): a ref param writes back, so the actual
-  // must be a mut value. `unknown` = no declaration seen (temps, expressions).
+  // Declared storage class of a variable. The inliner uses this to reject a
+  // `const` or `type` binding as a `ref` actual (incl. the UFCS receiver of
+  // a `ref self` method): a ref param writes back, so the actual must be a
+  // mut value. `unknown` = no declaration seen (temps, expressions).
   enum class Decl_storage : uint8_t { unknown, mut_storage, const_storage, reg_storage, await_storage, type_storage };
 
-  // Folded `(start, end_inclusive)` bounds of a `range` tmp (the iterable of a
-  // comptime `for i in lo..hi` loop), exposed so the runner's loop unroller can
-  // iterate. nullopt when `name` is not a known range. A bound that has not
-  // folded to a concrete integer is returned as-is (the runner checks).
-
-  // 2b/A — the runner-owned scope-aware symbol table: ONE shared_ptr<Bundle>
+  // The runner-owned scope-aware symbol table: ONE shared_ptr<Bundle>
   // per live name, shared by every pass. The runner owns every scope
   // push/pop (function_scope at run() start, block_scope per `stmts`,
   // mark-uncertain for if-arms); passes only read/write bundles through it.
-  // Wired right after construction, like the fold/emit callbacks below.
+  // Wired right after construction, like the emit callback below.
   void set_runner_symbol_table(Symbol_table* st) { runner_st = st; }
 
   // Runner-supplied helper that delegates to `try_fold_ref` across every
@@ -324,12 +300,13 @@ public:
 
 #undef PROCESS_NODE
 
-  // ── 2b/C — push-based hooks for the value-producing ops ──────────────────
-  // MIGRATION DEFAULT: delegate to the old nullary cursor hook (the cursor is
-  // still on the node when these are called) and vote keep. A migrated pass
-  // overrides the push form and leaves the nullary form alone; once every
-  // pass is migrated the nullary hooks and these delegation bodies are
-  // deleted (2b/H).
+  // ── Push-based hooks for the value-producing ops ──────────────────────
+  // The runner resolves the operands (dst = the live table bundle, src =
+  // one Operand per child) and dispatches these to every pass; the return
+  // vote is the emit decision (any drop wins). The cursor is still ON the
+  // node — a hook whose payload includes subtrees (named-field stores,
+  // does-operands) may walk it; dispatch_push saves/restores around each
+  // call. Default: no-op, keep.
 #define PROCESS_NODE_PUSH(NAME)                                                                   \
   virtual Vote process_##NAME(std::string_view /*dst_name*/, Bundle& /*dst*/, Src_span /*src*/) { \
     return Vote::keep;                                                                            \
@@ -373,7 +350,7 @@ public:
 
 #undef PROCESS_NODE_PUSH
 
-  // 2b/C — `store` is dispatched to the passes in push form for BOTH shapes:
+  // `store` is dispatched to the passes in push form for BOTH shapes:
   // a scalar store has src = {value}; a field-path store has the resolved
   // selector bundles then the value, in LNAST child order, with `dst` the
   // WHOLE destination bundle. Migration default routes to the legacy
@@ -384,7 +361,7 @@ public:
 protected:
   std::shared_ptr<Lnast_manager>& lm;
   Emit_at_fn                      runner_emit_at_fn;
-  Symbol_table*                   runner_st{nullptr};  // 2b/A — see set_runner_symbol_table
+  Symbol_table*                   runner_st{nullptr};  // See set_runner_symbol_table
 
   void move_to_nid(const Lnast_nid& nid) { lm->move_to_nid(nid); }
   auto current_text() const { return lm->current_text(); }
@@ -404,7 +381,7 @@ protected:
   }
 };
 
-// 2b/C — pointer-to-member type for the push-form hooks. The push forms
+// Pointer-to-member type for the push-form hooks. The push forms
 // overload the nullary names, so dispatch sites disambiguate with a
 // static_cast to this type (see the runner's PUSH_FN macro).
 using Push_method = Vote (uPass::*)(std::string_view, Bundle&, Src_span);

@@ -43,7 +43,7 @@ uPass_attributes::uPass_attributes(std::shared_ptr<upass::Lnast_manager>& _lm) :
 void uPass_attributes::begin_iteration() {
   pending_arms.clear();
   active_arm_stack.clear();
-  // 1p-runner/2b-E3b — typed io PORT facts are read straight from io_meta()
+  // Typed io PORT facts are read straight from io_meta()
   // by lookup_type_info_bundle (no per-walk recording; ports are never
   // table-backed values, so their declared kind/bits stay metadata-only).
   reg.for_each_handler([this](upass::attributes::Attribute_handler& h) { h.begin_iteration(*this); });
@@ -249,7 +249,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     // direct_alias.emplace + chained lookups on bulk `assign user_var
     // ___N` workloads where ___N is a pure plus tmp.
     const std::string rhs_s{rhs};
-    // 2b/E3c — shape/attr/alias state rides the shared binding slot; the
+    // Shape/attr/alias state rides the shared binding slot; the
     // only alias bookkeeping left is the range-source chain (h.[size] on a
     // var assigned from a `range` tmp) and the handler notification.
     const bool rhs_has_state = range_bounds.contains(rhs_s) || (!tmp_fold.empty() && tmp_fold.contains(rhs_s));
@@ -289,7 +289,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
 
 void uPass_attributes::process_assign() { on_assign_like(/*is_assign_node=*/true); }
 
-// 2b/E4 — store routes both arities to the cursor-walking legacy bodies
+// Store routes both arities to the cursor-walking legacy bodies
 // (scan_op reads the node; subtree payloads don't ride the operand span).
 upass::Vote uPass_attributes::process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst_name;
@@ -384,7 +384,7 @@ upass::Vote uPass_attributes::process_is(std::string_view dst_name, Bundle& dst,
   if (!inserted && !it->second.same_repr(folded)) {
     it->second = folded;
   }
-  // 2b/E4 — the fold IS the `is` dst's value; write the binding too (dst is
+  // The fold IS the `is` dst's value; write the binding too (dst is
   // a single-writer tmp constprop keeps alive but never folds), so table-only
   // operand resolution sees it without the runner_fold_fn pull seam.
   if (runner_st != nullptr) {
@@ -407,7 +407,7 @@ void uPass_attributes::set_binding_attr(std::string_view target, std::string_vie
       return;
     }
   }
-  // 2b/C — attrs are ADD-ONLY once present: re-setting the SAME value is
+  // Attrs are ADD-ONLY once present: re-setting the SAME value is
   // fine (sticky re-marks, loop re-walks), a DIFFERENT value is a
   // diagnostic — silent overwrite is forbidden.
   const auto& existing = fpath.empty() ? wb->get_attr(attr) : wb->get_attr(fpath, attr);
@@ -484,7 +484,7 @@ void uPass_attributes::process_attr_set() {
         kind = Decl_kind::type_kind;  // task 1k — see Decl_kind::type_kind
       }
       if (kind != Decl_kind::unknown) {
-        // 2b/E3b: per-field storage class onto the binding (the
+        // Per-field storage class onto the binding (the
         // field Entry's mode for dotted targets; bundle mode for bare names).
         // Existing entries only — minting a fact-only entry would read as a
         // value claim downstream.
@@ -518,7 +518,7 @@ void uPass_attributes::process_attr_set() {
       }
     } else if (attr_name == "comptime") {
       if (value_text != "false" && value_text != "0") {
-        // 2b/E3b: comptime onto the binding's entry (existing
+        // Comptime onto the binding's entry (existing
         // scalar entries only — same no-fact-only-entry rule as above).
         if (runner_st != nullptr) {
           const auto root  = Bundle::get_first_level(target);
@@ -559,7 +559,7 @@ void uPass_attributes::process_attr_set() {
         stored = Dlop::from_pyrope(value_text);
       }
       if (!stored.is_invalid()) {
-        // 2b/E3e — onto the binding; the extraction-tmp echo inside
+        // Onto the binding; the extraction-tmp echo inside
         // set_binding_attr covers per-field decl-site attrs, and the
         // field→root fallback in lookup_attr_value covers aggregate→field
         // inheritance (no pre-copies).

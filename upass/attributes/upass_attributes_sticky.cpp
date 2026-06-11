@@ -196,7 +196,7 @@ void Sticky_handler::mark(std::string_view var, std::string_view bucket) {
   if (!b) {
     return;  // unbound name (e.g. a tmp before its producer): nothing to carry
   }
-  // 2b/E3e — explicit attr VALUES share the canonical sticky key
+  // Explicit attr VALUES share the canonical sticky key
   // (`debug="trace"` and the propagation marker are both "_debug"): marking
   // must never clobber a present value; presence IS marked.
   if (field.empty()) {

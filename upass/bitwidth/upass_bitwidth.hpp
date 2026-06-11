@@ -19,7 +19,7 @@
 // (`uPass_runner(lm, {"bitwidth"})`) *after* the main opt runner + SSA, never
 // interleaved with constprop, and discards the staging tree.
 //
-// 2b/E — MIGRATED to push-based dispatch. The per-variable facts live on the
+// MIGRATED to push-based dispatch. The per-variable facts live on the
 // runner symbol table's bundles:
 //   * value range  → Entry.bw_max / bw_min on the dst bundle (was range_map_),
 //     written through to lnast->bw_meta() so lnast_to_lgraph and the LSP read
@@ -28,7 +28,7 @@
 //   * declared envelope → Entry.decl_max / decl_min on the BASE name's
 //     binding (the runner's declare pre-step bakes them; this pass also bakes
 //     standalone type_spec targets in its own runner — was decl_envelope_).
-// The does-not-fit check happens AT THE STORE/OP NODE (2b/G): the diagnostic
+// The does-not-fit check happens AT THE STORE/OP NODE: the diagnostic
 // carries the node's own source span; an error-severity diag already fails
 // the compile, so there is no end_run throw, no write_site_, and no
 // pending_overflow_msg_.
@@ -117,7 +117,7 @@ private:
   std::optional<Lnast_range> decl_envelope_of(std::string_view name) const;
 
   // Check this write against the declared envelope, if any. Emits the
-  // does-not-fit diagnostic AT the current node (2b/G).
+  // does-not-fit diagnostic AT the current node.
   void check_declared_fit(std::string_view name, const Lnast_range& r);
 
   // Emit the common diagnostic at the current node's span.
@@ -125,9 +125,9 @@ private:
 
   // Common body for the value-op hooks.
   Vote stamp(std::string_view dst_name, Bundle& dst, Lnast_range r) {
-    // REPLACE semantics (2b/D root-cause): each stamp is a fresh derivation
+    // REPLACE semantics: each stamp is a fresh derivation
     // of the value this node just produced. The old narrow-only gate
-    // (sound for the pre-2b flat accumulating map) refused non-narrowing
+    // (sound only for a flat accumulating map) refused non-narrowing
     // recomputes, leaving REASSIGNED/loop-rebound bindings with ranges that
     // no longer CONTAIN their value (`mut hit = 0; hit = 30` kept [0,0]).
     write_bw(dst_name, dst, r, /*replace=*/true);

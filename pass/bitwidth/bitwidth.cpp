@@ -6,6 +6,7 @@
 #include <cmath>
 #include <format>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -18,6 +19,10 @@
 #include "node_util.hpp"
 #include "pass_bitwidth.hpp"
 #include "perf_tracing.hpp"
+
+// "sbits not constrained/known" sentinel. Bits are a plain int32 attr now
+// (livehd::attrs::bits); the old packed-format width cap is gone.
+static constexpr int32_t Bits_unknown = std::numeric_limits<int32_t>::max();
 
 using livehd::graph_util::bits_of;
 using livehd::graph_util::const_value_of;
@@ -413,10 +418,10 @@ void Bitwidth::process_sum(hhds::Node_class& node, std::vector<hhds::Edge_class>
 
 void Bitwidth::process_memory(hhds::Node_class& node) {
   int64_t                      mem_size              = 0;
-  Bits_t                       mem_bits              = 0;
-  Bits_t                       mem_din_bits          = 0;
+  int32_t                       mem_bits              = 0;
+  int32_t                       mem_din_bits          = 0;
   bool                         mem_din_bits_missing  = false;
-  Bits_t                       mem_addr_bits         = 0;
+  int32_t                       mem_addr_bits         = 0;
   bool                         mem_addr_bits_missing = false;
   std::vector<hhds::Pin_class> din_drivers;
   std::vector<hhds::Pin_class> addr_drivers;
@@ -453,7 +458,7 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
       auto n_addr = str_tools::ends_with(n, "addr");
       if (n_din || n_addr) {
         auto   it    = bwmap.find(e.driver.get_class_index());
-        Bits_t dbits = 0;
+        int32_t dbits = 0;
         if (it != bwmap.end()) {
           dbits = it->second.get_sbits();
           if (n_addr && it->second.is_always_positive()) {
@@ -781,12 +786,12 @@ void Bitwidth::process_sext(hhds::Node_class& node, std::vector<hhds::Edge_class
 
   bool no_wire = !bwmap.contains(wire_dpin.get_class_index());
 
-  auto sign_max = Bits_max;
+  auto sign_max = Bits_unknown;
   if (is_const_pin(pos_dpin)) {
     sign_max = hydrate_const(pos_dpin).to_i();
   }
 
-  if (sign_max == Bits_max && no_wire) {
+  if (sign_max == Bits_unknown && no_wire) {
     debug_unconstrained_msg(node, pos_dpin);
     not_finished = true;
     return;
@@ -873,7 +878,7 @@ void Bitwidth::process_assignment_or(hhds::Node_class& node, std::vector<hhds::E
 
 void Bitwidth::process_bit_or(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
   I(inp_edges.size() > 1);
-  Bits_t max_bits     = 0;
+  int32_t max_bits     = 0;
   bool   any_negative = false;
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_class_index());
@@ -913,7 +918,7 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, std::vector<hhds::Edge_cla
 
 void Bitwidth::process_bit_xor(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
   I(inp_edges.size() > 1);
-  Bits_t max_bits = 0;
+  int32_t max_bits = 0;
 
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_class_index());
@@ -922,7 +927,7 @@ void Bitwidth::process_bit_xor(hhds::Node_class& node, std::vector<hhds::Edge_cl
       not_finished = true;
       return;
     }
-    Bits_t bits;
+    int32_t bits;
     if (it->second.is_always_positive()) {
       bits = it->second.get_sbits() - 1;
     } else {
@@ -945,17 +950,17 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, std::vector<hhds::Edge_cl
   int mask_pos          = -1;
   int pos_min_sbits_pos = -1;
 
-  Bits_t pos_min_sbits = Bits_max;
-  Bits_t unk_max_sbits = 0;
+  int32_t pos_min_sbits = Bits_unknown;
+  int32_t unk_max_sbits = 0;
 
   for (auto i = 0u; i < inp_edges.size(); ++i) {
     const auto& e  = inp_edges[i];
     auto        it = bwmap.find(e.driver.get_class_index());
     if (it == bwmap.end()) {
-      unk_max_sbits = Bits_max;
+      unk_max_sbits = Bits_unknown;
       continue;
     }
-    Bits_t bw_sbits = it->second.get_sbits();
+    int32_t bw_sbits = it->second.get_sbits();
     if (bw_sbits == 0) {
       auto zero_dpin = create_const(*current_graph, *Dlop::create_integer(0));
       for (auto& e2 : node.out_edges()) {
@@ -985,12 +990,12 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, std::vector<hhds::Edge_cl
   }
   mask_pos = -1;
 
-  if (unk_max_sbits == Bits_max && pos_min_sbits == Bits_max) {
+  if (unk_max_sbits == Bits_unknown && pos_min_sbits == Bits_unknown) {
     Pass::info("could not find constrains for AND node:{}\n", debug_name(node));
     return;
   }
 
-  if (!hier && mask_pos >= 0 && pos_min_sbits != Bits_max && pos_min_sbits_pos != mask_pos) {
+  if (!hier && mask_pos >= 0 && pos_min_sbits != Bits_unknown && pos_min_sbits_pos != mask_pos) {
     auto v = Dlop::create_integer(1)->shl_op(*Dlop::create_integer(pos_min_sbits - 1))->sub_op(hydrate_const(inp_edges[mask_pos].driver));
     if (v->is_i() && v->to_i() == 1) {
       if (inp_edges.size() == 2) {
@@ -1013,7 +1018,7 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, std::vector<hhds::Edge_cl
   Const max_val;
   Const min_val;
 
-  if (pos_min_sbits != Bits_max) {
+  if (pos_min_sbits != Bits_unknown) {
     max_val = Dlop::get_mask_value(pos_min_sbits - 1);
     min_val = Dlop::create_integer(0);
   } else {
@@ -1119,7 +1124,7 @@ void Bitwidth::process_attr_set_bw(hhds::Node_class& node_attr, Bitwidth::Attr a
   auto val = hydrate_const(dpin_val);
 
   if (attr == Attr::Set_ubits) {
-    auto bits = static_cast<Bits_t>(val.to_i());
+    auto bits = static_cast<int32_t>(val.to_i());
 
     if (!parent_pending) {
       Bitwidth_range set_bw;
@@ -1141,7 +1146,7 @@ void Bitwidth::process_attr_set_bw(hhds::Node_class& node_attr, Bitwidth::Attr a
       insert_tposs_nodes(node_attr, bits);
     }
   } else if (attr == Attr::Set_sbits) {
-    auto bits = static_cast<Bits_t>(val.to_i());
+    auto bits = static_cast<int32_t>(val.to_i());
 
     if (!parent_pending) {
       Bitwidth_range set_bw;
@@ -1179,7 +1184,7 @@ void Bitwidth::process_attr_set_bw(hhds::Node_class& node_attr, Bitwidth::Attr a
   }
 }
 
-void Bitwidth::insert_tposs_nodes(hhds::Node_class& node_attr, Bits_t ubits) {
+void Bitwidth::insert_tposs_nodes(hhds::Node_class& node_attr, int32_t ubits) {
   I(absl::StrContains(hydrate_const(get_driver_of_sink_name(node_attr, "field")).to_field(), "__ubits"));
 
   auto name_dpin = get_driver_of_sink_name(node_attr, "parent");
@@ -1271,7 +1276,7 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
         }
         auto b = bits_of(pin);
         if (b == 0) {
-          b = static_cast<Bits_t>(d.bits);
+          b = static_cast<int32_t>(d.bits);
         }
         if (b) {
           Bitwidth_range bw;
@@ -1579,7 +1584,7 @@ void Bitwidth::set_subgraph_boundary_bw(hhds::Node_class& node) {
     auto sub_out  = sub_graph->get_output_pin(d.name);
 
     Bitwidth_range bw;
-    auto           bits = static_cast<Bits_t>(d.bits);
+    auto           bits = static_cast<int32_t>(d.bits);
     if (sub_out.is_invalid() || bits == 0) {
       continue;
     }

@@ -4,6 +4,7 @@
 
 #include <format>
 #include <iostream>
+#include <limits>
 #include <print>
 
 #include "iassert.hpp"
@@ -117,9 +118,7 @@ void Bitwidth_range::set_wider_range(const Bitwidth_range& bw) {
   set_range(l_min, l_max);
 }
 
-void Bitwidth_range::set_sbits_range(Bits_t size) {
-  I(size < Bits_max);
-
+void Bitwidth_range::set_sbits_range(int32_t size) {
   if (size == 0) {
     overflow = true;
     max      = 32768;
@@ -139,9 +138,7 @@ void Bitwidth_range::set_sbits_range(Bits_t size) {
   I(max >= min);
 }
 
-void Bitwidth_range::set_ubits_range(Bits_t size) {
-  I(size < Bits_max);
-
+void Bitwidth_range::set_ubits_range(int32_t size) {
   if (size == 0) {
     overflow = true;
     max      = 32768;
@@ -162,24 +159,22 @@ void Bitwidth_range::set_ubits_range(Bits_t size) {
 }
 
 // we get sbits from the max/min since every thing in lgraph should be initially signed
-Bits_t Bitwidth_range::get_sbits() const {
+int32_t Bitwidth_range::get_sbits() const {
   if (overflow) {
-    Bits_t bits = std::max(max, -min);
+    int64_t bits = std::max(max, -min);
     I(min == 0 || min <= max || max == 0);
     if (min != 0 && max != 0) {
       bits++;
     }
-    if (bits >= Bits_max) {
+    if (bits >= std::numeric_limits<int32_t>::max()) {
       return 0;  // To indicate overflow (unable to compute)
     }
-    return bits;
+    return static_cast<int32_t>(bits);
   }
 
   auto a    = Dlop::create_integer(max)->get_bits();  // 15 -> 5sbits
   auto b    = Dlop::create_integer(min)->get_bits();
   auto bits = std::max(a, b);
-
-  I(bits < Bits_max);
 
   return bits;
 }

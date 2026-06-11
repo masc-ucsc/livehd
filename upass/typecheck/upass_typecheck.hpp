@@ -20,7 +20,7 @@
 // (`true ^ 0` is an error — write `int(true) ^ 0`); a variable's kind cannot
 // change after it is established.
 //
-// 2b/E — MIGRATED to push-based dispatch: the runner resolves every operand
+// MIGRATED to push-based dispatch: the runner resolves every operand
 // to a Bundle and pushes (dst, src) in; kinds live on the bundles' typed
 // Entry.kind field (declared kinds baked by the runner's declare pre-step;
 // established kinds written here). The old per-name `kind_map` is gone — the
@@ -40,10 +40,10 @@ public:
   // variables that carry no `:type` annotation. Reads the shared table.
 
   // 2-child store: establish the dst kind, or reject a kind change.
-  // Field-path stores pass through (per-field checks are later 2b work).
+  // Field-path stores pass through (per-field checks are follow-up work).
   Vote process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
 
-  // 2b/C — the runner's synthesized constructor stores (defaults bind +
+  // The runner's synthesized constructor stores (defaults bind +
   // ref-self write-back) assemble a declared-shape value incrementally; the
   // closed-shape check pauses while the window is open (same contract as
   // the attributes const tally).
@@ -121,7 +121,7 @@ private:
   // unknown/nil (no concrete class — the check is skipped).
   static int eq_class(Kind k);
 
-  // 2b/C — "reading an unset/nil field is an error" (when USED as an
+  // "reading an unset/nil field is an error" (when USED as an
   // operand; copies and ==nil/!=nil stay legal): a ref whose VALUE is the
   // nil it was initialized with reads as Kind::nil — the same poison the
   // literal carries. The runner's inliner seeds are exempt (a body stmt may

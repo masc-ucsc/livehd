@@ -95,6 +95,12 @@ cc_binary(
         ["tests/equiv/*.prp"],
         # accum.prp is the aspirational call-site-phase file (stage[N]/@[N]):
         # no test header, no golden .v — it goes live with the call-site phase.
-        exclude = ["tests/equiv/accum.prp"],
+        #
+        # mem_pending_*.prp are intentionally-red probes for TODO livehd/1a
+        # memory follow-ups. Run manually with tests/pyrope_test.py when working
+        # that queue; do not let them break the default //... suite.
+        exclude = [
+            "tests/equiv/accum.prp",
+        ],
     )
 ]

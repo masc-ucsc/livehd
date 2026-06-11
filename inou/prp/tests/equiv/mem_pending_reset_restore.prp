@@ -1,0 +1,15 @@
+/*
+:name: mem_pending_reset_restore
+:type: equiv
+:verilog_top: mem_pending_reset_restore.restore
+:pyrope_top: mem_pending_reset_restore.restore
+*/
+
+// The z@[1] is correct as there is no direct path between input a/i/we and output z that does not pass over 1 flop
+mod restore(reset:bool, a:u4, i:u1, we:bool) -> (z:u4@[1]) {
+  reg t:[2]u4 = (4, 9)
+  z = t[i]
+  if we {
+    t[i] = a
+  }
+}

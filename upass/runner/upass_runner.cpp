@@ -190,7 +190,7 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
   auto emit_at_fn = [this](const Lnast_nid& src) { emit_op_with_fold_at(src); };
   for (auto& entry : upasses) {
     entry.pass->set_runner_emit_at_fn(emit_at_fn);
-    entry.pass->set_runner_symbol_table(&symbol_table_);  // 2b/A — one shared scope-aware table
+    entry.pass->set_runner_symbol_table(&symbol_table_);  // One shared scope-aware table
     entry.pass->set_options(options);
   }
   set_runner_symbol_table(&symbol_table_);  // the runner's own uPass surface sees it too
@@ -339,7 +339,7 @@ void uPass_runner::emit_subtree_verbatim() {
 }
 
 std::optional<Const> uPass_runner::try_fold_ref(std::string_view name) {
-  // 2b/H — every pass's fold values land on the runner-owned table now
+  // Every pass's fold values land on the runner-owned table now
   // (constprop trivials, attr_get/`is` results, wrap/sat narrowing), so read
   // it directly — with constprop's STRICT inlining gates: is_known_const
   // rejects unknown-carrying values (inlining them broke trivial_if/mem_*
@@ -349,7 +349,7 @@ std::optional<Const> uPass_runner::try_fold_ref(std::string_view name) {
 }
 
 std::optional<std::vector<std::pair<std::string, Const>>> uPass_runner::try_bundle_fields(std::string_view name) {
-  // 2b/H — direct table read (ex constprop::provide_bundle_fields). A
+  // Direct table read (ex constprop::provide_bundle_fields). A
   // binding with no DATA entries (a declare/type_spec bake created it for
   // its typed facts) is "not a known bundle": an empty field list would make
   // the does-fold and the inliner treat it as a resolved empty tuple.
@@ -370,7 +370,7 @@ std::optional<std::vector<std::pair<std::string, Const>>> uPass_runner::try_bund
 }
 
 std::string uPass_runner::try_typename(std::string_view name) {
-  // 2b/H — the typename rides the binding ("typename" residual attr).
+  // The typename rides the binding ("typename" residual attr).
   const auto b = symbol_table_.get_bundle(name);
   if (!b) {
     return {};
@@ -383,7 +383,7 @@ std::string uPass_runner::try_typename(std::string_view name) {
 }
 
 std::optional<upass::uPass::Decl_scalar_type> uPass_runner::try_decl_type(std::string_view name) {
-  // 2b/H — only a real `:type` annotation with a concrete integer range
+  // Only a real `:type` annotation with a concrete integer range
   // qualifies (the inliner leaves the param untyped otherwise).
   const auto f = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), name);
   if (!f || !f->has_type_spec || (!f->range_max && !f->range_min)) {
@@ -393,7 +393,7 @@ std::optional<upass::uPass::Decl_scalar_type> uPass_runner::try_decl_type(std::s
 }
 
 std::optional<std::pair<Const, Const>> uPass_runner::try_range(std::string_view name) {
-  // 2b/H — folded range bounds ride the range tmp's binding attrs.
+  // Folded range bounds ride the range tmp's binding attrs.
   const auto b = symbol_table_.get_bundle(name);
   if (!b) {
     return std::nullopt;
@@ -418,7 +418,7 @@ std::optional<std::string> uPass_runner::try_tuple_slot_ref(std::string_view nam
 }
 
 std::optional<std::vector<std::pair<std::string, bool>>> uPass_runner::try_tuple_shape(std::string_view name) {
-  // 2b/H — merge the bundle's comptime top-level slots with runtime-only
+  // Merge the bundle's comptime top-level slots with runtime-only
   // slots (tuple_slot_ref), dedup, positional (numeric asc) before named
   // (alpha) so `for x in t` iterates a stable, source-like order.
   std::vector<std::pair<std::string, bool>> out;
@@ -457,7 +457,7 @@ std::optional<std::vector<std::pair<std::string, bool>>> uPass_runner::try_tuple
 }
 
 std::optional<upass::uPass::Field_decl_type> uPass_runner::try_field_type(std::string_view name) {
-  // 2b/H — declared kind + range from the shared derivation.
+  // Declared kind + range from the shared derivation.
   const auto f = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), name);
   if (!f || !f->has_type_spec) {
     return std::nullopt;
@@ -479,7 +479,7 @@ std::optional<upass::uPass::Field_decl_type> uPass_runner::try_field_type(std::s
 }
 
 Io_kind uPass_runner::try_scalar_kind(std::string_view name) {
-  // 2b/H — the inferred kind lattice off the binding (ex typecheck's
+  // The inferred kind lattice off the binding (ex typecheck's
   // provide_scalar_kind): multi-shape → none (a tuple), else the producer-
   // stamped value kind, else the "0" Entry's declared kind.
   const auto b = symbol_table_.get_bundle(name);
@@ -794,7 +794,7 @@ void uPass_runner::process_drop_candidate(Pass_method fn, bool fold_all) {
   }
 }
 
-// ── 2b/C — push-based dispatch ──────────────────────────────────────────────
+// ── Push-based dispatch ─────────────────────────────────────────────────────
 
 bool uPass_runner::resolve_node_operands(Resolved_node& out) {
   if (!lm->has_child()) {
@@ -886,19 +886,18 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
     lm->restore_cursor(here);
   }
   // Lazy install: a dst the passes populated becomes the name's live bundle
-  // ("the first write installs the bundle"). MIGRATION SUBTLETY: an
-  // unmigrated pass (constprop) may have bound the name DIRECTLY in the
-  // table mid-dispatch (its nullary handler calls st.set) — its binding wins
-  // the value slice; the typed FACT fields a migrated pass wrote into the
-  // throwaway dst are merged onto it instead of clobbering. Once every pass
-  // is migrated (2b/E end) only the install branch remains.
+  // ("the first write installs the bundle"). VALUE-vs-FACT split: constprop
+  // binds the VALUE directly in the table mid-dispatch (its fold is a table
+  // side-effect) — its binding wins the value slice; the typed FACT fields
+  // the other passes wrote into the resolved dst are merged onto it instead
+  // of clobbering.
   // A dotted dst names a FIELD of the root bundle: the root's binding is what
   // resolve handed out (when bound); never install a fresh root from here.
   //
-  // The re-fetch+merge below also covers BOUND dsts: an unmigrated pass
-  // (constprop) writing the table mid-dispatch goes through the COW unshare,
+  // The re-fetch+merge below also covers BOUND dsts: a pass writing the
+  // table mid-dispatch goes through the COW unshare,
   // which CLONES the slot (the resolved rn.dst still holds a reference) and
-  // orphans rn.dst — facts a migrated pass wrote after that land on the
+  // orphans rn.dst — facts a later pass wrote land on the
   // orphan and must be folded onto the new slot bundle.
   if (!rn.dst_name.empty() && rn.dst_name.find('.') == std::string_view::npos) {
     const auto root = std::string(Bundle::get_first_level(rn.dst_name));
@@ -906,7 +905,7 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
       if (now.get() != rn.dst.get()) {
         merge_fact_fields(*now, *rn.dst);
       }
-      // 2b/D — bw soundness invariant: a comptime-known value must lie
+      // Bw soundness invariant: a comptime-known value must lie
       // WITHIN its derived range (the range is a conservative bound on the
       // CURRENT value; replace-on-stamp + value-write invalidation keep it
       // fresh). A violation is an internal compiler bug, not a user error.
@@ -930,7 +929,7 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
   return any_drop;
 }
 
-// 2b/E3b — drain the dotted-bake stash: any pending field whose root binding
+// Drain the dotted-bake stash: any pending field whose root binding
 // now holds a trivial at that path gets its declared facts written (and the
 // pending entry erased). Called per dispatched node; the map is empty except
 // in the few statements between an inliner type_spec prologue and the
@@ -966,10 +965,12 @@ void uPass_runner::apply_pending_field_facts() {
   }
 }
 
-// 2b/C migration helper — copy the typed pass-fact fields a migrated pass
-// wrote into the throwaway dst onto the binding an unmigrated pass installed
-// mid-dispatch. Facts only (kind / declared + derived ranges / comptime,
-// mode/type_name); the value slice (trivial) stays the binding's.
+// Fold the typed pass-fact fields written into the resolved dst onto the
+// live slot bundle (constprop may have replaced/cloned it mid-dispatch).
+// Facts only (kind / declared envelope / comptime / mode / type_name); the
+// value slice (trivial) stays the binding's, and the DERIVED range REPLACES
+// (it is this node's fresh derivation — a stale pair would no longer
+// contain the new value).
 void uPass_runner::merge_fact_fields(Bundle& bound, const Bundle& from) {
   if (bound.get_mode() == upass::Mode::unknown && from.get_mode() != upass::Mode::unknown) {
     bound.set_mode(from.get_mode());
@@ -1028,8 +1029,8 @@ void uPass_runner::merge_fact_fields(Bundle& bound, const Bundle& from) {
 void uPass_runner::process_drop_candidate_push(upass::Push_method fn, bool fold_all) {
   Resolved_node rn;
   if (!resolve_node_operands(rn)) {
-    // No leading dst ref: still push-dispatch (the migration default
-    // delegates to the nullary hook, which re-walks the cursor itself).
+    // No leading dst ref: still push-dispatch with a throwaway dst (hooks
+    // that need the payload walk the cursor themselves).
     rn.dst = std::make_shared<Bundle>("");
   }
   const bool vote_drop = dispatch_push(fn, rn);
@@ -1269,14 +1270,14 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
 }
 
 std::shared_ptr<Lnast> uPass_runner::lookup_callee(std::string_view name) const {
-  // 2b/F — delegated to the resolver (name resolution is its job).
+  // Delegated to the resolver (name resolution is its job).
   return upass::call_resolver::lookup_callee(function_registry, name);
 }
 
 void uPass_runner::flush_deferred_emits() { dispatch_to_passes(&upass::uPass::flush_deferred); }
 
 void uPass_runner::emit_inline_binding(const std::string& lhs, const Lnast_node& rhs) {
-  // 2b/C — a synthesized `lhs = nil` seed is exempt from typecheck's
+  // A synthesized `lhs = nil` seed is exempt from typecheck's
   // nil-does-not-infer-tuple-shape rule (the body/epilogue legally binds a
   // tuple over it).
   if (rhs.is_const() && rhs.get_name() == "nil") {
@@ -3056,7 +3057,7 @@ bool uPass_runner::walk_loop_iteration(const std::function<void()>& emit_binds, 
 
   flush_deferred_emits();                            // flush outer parked writes before the iteration frame
   lm->push_iteration(iter_salt);                     // fresh salt → fresh tmp namespace + block-scope id; cursor + tag kept
-  enter_block_scope();                               // 2b/A — runner-owned block scope (scope_uid uses iter_salt)
+  enter_block_scope();                               // Runner-owned block scope (scope_uid uses iter_salt)
   dispatch_to_passes(&upass::uPass::process_stmts);  // passes seed per-block state
   emit_push(Lnast_ntype::create_stmts());            // staging block for this iteration
 
@@ -3080,7 +3081,7 @@ bool uPass_runner::walk_loop_iteration(const std::function<void()>& emit_binds, 
   dispatch_to_passes(&upass::uPass::process_stmts_pre_pop);  // coalescer flushes this iteration's writes
   emit_pop();
   dispatch_to_passes(&upass::uPass::process_stmts_post);
-  symbol_table_.leave_scope();  // 2b/A — pop after stmts_post (see process_stmts)
+  symbol_table_.leave_scope();  // Pop after stmts_post (see process_stmts)
   lm->pop_source();             // restore cursor (body stmts), outer salt/stack/tag
   return true;
 }
@@ -3447,7 +3448,7 @@ void uPass_runner::run() {
   };
   fresh_staging();
 
-  // 2b/A — the runner owns the symbol-table lifecycle: the per-tree function
+  // The runner owns the symbol-table lifecycle: the per-tree function
   // scope is pushed here (it used to be constprop's constructor). run() is
   // called once per runner, but guard anyway so a re-run can't double-push.
   if (symbol_table_.stack.empty()) {
@@ -3840,10 +3841,9 @@ void uPass_runner::process_lnast() {
   // clang-format off
   // Category A: drop-candidate op-nodes. First child is the LHS/dst (not
   // folded); subsequent ref children are fed to fold_ref.
-// 2b/C — value-producing ops go through the PUSH path: the runner resolves
-// (dst, src) bundles and calls the push-form hook (whose migration default
-// still delegates to the nullary cursor hook). The push forms overload the
-// nullary names, so the member pointer needs an explicit cast.
+// Value-producing ops go through the PUSH path: the runner resolves
+// (dst, src) bundles and calls the push-form hook. Some passes keep
+// same-named cursor methods, so the member pointer needs an explicit cast.
 #define PUSH_FN(NAME) static_cast<upass::Push_method>(&upass::uPass::process_##NAME)
 #define A_OP(NAME)                                                                              \
   case Ntype::Lnast_ntype_##NAME:                                                               \
@@ -3874,15 +3874,15 @@ void uPass_runner::process_lnast() {
     // tuple-field write (route to process_tuple_set, verbatim — the bundle
     // mutation is the point, never drop). The pass methods walk children by
     // position, not by node type, so they handle a `store` node unchanged.
-    // 2b/C — both arities now dispatch the push-form process_store (whose
-    // migration default routes to the legacy process_assign /
-    // process_tuple_set by src arity). EMIT semantics stay per-arity: the
+    // Both arities dispatch the push-form process_store (each pass routes
+    // by src arity to its scalar-assign / tuple-set body). EMIT semantics
+    // stay per-arity: the
     // scalar store is a drop candidate; the field-path store is verbatim
     // (the bundle mutation is the point — never dropped, classify not
     // consulted, matching the old process_verbatim path).
     case Ntype::Lnast_ntype_store:
       if (lm->current_num_children() <= 2) {
-        // 2b/C — direct self-store `store(c, c)` (`c = c`) is a user-facing
+        // Direct self-store `store(c, c)` (`c = c`) is a user-facing
         // diagnostic: deliberately the EXACT lowered form only (no
         // path-equivalence analysis — `c.a = c.a` is out of scope). SSA
         // rewrites straight-line self-stores into copies, so this survives
@@ -3942,7 +3942,7 @@ void uPass_runner::process_lnast() {
         }
         lm->restore_cursor(here);
       }
-      bake_decl_pre_step(/*is_declare=*/true);  // 2b/A — bake type/mode into the bundle first
+      bake_decl_pre_step(/*is_declare=*/true);  // Bake type/mode into the bundle first
       process_verbatim(&upass::uPass::process_declare);
       break;
 
@@ -4060,7 +4060,7 @@ void uPass_runner::process_lnast() {
     // Type metadata — emit verbatim, but dispatch so the attribute pass
     // observes type_spec for max/min/bits derivation. (type_def was deleted —
     // `type Foo = …` now lowers to `declare(mode=="type")`, handled above.)
-    // 2b/A — a standalone type_spec(tmp, TYPE) is a producer for tmp's
+    // A standalone type_spec(tmp, TYPE) is a producer for tmp's
     // bundle: bake the type facts before the pass dispatch.
     case Ntype::Lnast_ntype_type_spec:
       bake_decl_pre_step(/*is_declare=*/false);
@@ -4107,11 +4107,11 @@ void uPass_runner::process_lnast() {
 
 // ── Structural handlers ───────────────────────────────────────────────────────
 
-// ── 2b/A — declaration pre-step ──────────────────────────────────────────
+// ── Declaration pre-step (the "bake") ────────────────────────────────────
 // Read the TYPE subtree of a `declare` / standalone `type_spec` ONCE and bake
 // the persistent facts into the destination's symbol-table bundle as TYPED
 // fields: Kind + declared max/min (+ comptime) on the "0" Entry,
-// mode/type_name on the Bundle. The 2b end state is that no pass ever walks a
+// mode/type_name on the Bundle. No pass ever walks a
 // type subtree again; until subtask E retires them, the passes' own walks
 // coexist (their maps stay authoritative for their checks).
 void uPass_runner::bake_decl_pre_step(bool is_declare) {
@@ -4159,7 +4159,7 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
       type_name = lm->current_text();  // named type (`x:Point`)
     }
     // prim_type_none / comp_type_*: nothing scalar to bake here (per-field
-    // types stay with the attributes pass until 2b/E).
+    // types of a comp_type_tuple arrive as separate dotted type_specs).
 
     if (is_declare && lm->move_to_sibling() && Lnast_ntype::is_const(lm->get_raw_ntype())) {
       // mode: space-joined tokens, storage first, optional "comptime".
@@ -4231,7 +4231,7 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
     return;
   }
 
-  // 2b contract: "a declaration creates+inserts the first bundle for a name".
+  // Contract: a declaration creates+inserts the first bundle for a name.
   // declare → lexical (innermost) scope; a standalone type_spec dst may be a
   // compiler tmp, and set() anchors ___ tmps at the function scope.
   // (provide_bundle_fields guards against the resulting empty data bundles.)
@@ -4339,7 +4339,7 @@ void uPass_runner::process_top() {
 }
 
 void uPass_runner::process_stmts() {
-  // 2b/A — the runner owns the scope transition: push the block scope (keyed
+  // The runner owns the scope transition: push the block scope (keyed
   // by the scope uid, which folds in the inline/loop iteration salt) BEFORE
   // any pass dispatch, and mark it uncertain when this stmts is the body of
   // an if-arm whose condition didn't fold (next_block_uncertain_ is set at
@@ -4550,7 +4550,7 @@ void uPass_runner::process_if() {
           continue;
         }
         if (uncertain) {
-          next_block_uncertain_ = true;  // 2b/A — the arm's stmts scope gets mark_current_uncertain
+          next_block_uncertain_ = true;  // The arm's stmts scope gets mark_current_uncertain
           dispatch_to_passes(&upass::uPass::notify_uncertain_arm_begin);
         }
         process_lnast();

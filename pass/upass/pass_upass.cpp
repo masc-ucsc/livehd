@@ -226,7 +226,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   auto typecheck_txt = get_label("typecheck");
   bool do_typecheck  = typecheck_txt != "false" && typecheck_txt != "0";
 
-  // 2b/I — generalized warn-and-drop over the DECLARED pass dependency
+  // Generalized warn-and-drop over the DECLARED pass dependency
   // edges (assert→constprop, typecheck→attributes, constprop→{attributes,
   // typecheck}, bitwidth→constprop, coalescer→{constprop,bitwidth}). The
   // runner's resolve_order silently pulls a declared dependency back in even

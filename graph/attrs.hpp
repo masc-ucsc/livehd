@@ -22,15 +22,14 @@
 #include <string>
 
 #include "ann_place.hpp"
-#include "graph_sizing.hpp"
 #include "hhds/attr.hpp"
 
 namespace livehd::attrs {
 
-// Per-pin bitwidth (driver pin).  Bits_t is int32; storage uses uint32_t
+// Per-pin bitwidth (driver pin), plain int32; storage uses uint32_t
 // for the flat_storage value to avoid signed-int hashmap key issues.
 struct bits_t {
-  using value_type = Bits_t;
+  using value_type = int32_t;
   using storage    = hhds::flat_storage;
 };
 inline constexpr bits_t bits{};
@@ -38,7 +37,7 @@ inline constexpr bits_t bits{};
 // Per-pin offset (used by Get_mask / Set_mask / Sext-style ops).
 // Replaces Lgraph_attributes::node_pin_offset_map.
 struct pin_offset_t {
-  using value_type = Bits_t;
+  using value_type = int32_t;
   using storage    = hhds::flat_storage;
 };
 inline constexpr pin_offset_t pin_offset{};

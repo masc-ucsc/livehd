@@ -238,7 +238,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       std::string driver_name{d.name};
       auto        bits = bits_of(pin, *gio, d.name);
       if (bits == 0) {
-        bits = static_cast<Bits_t>(d.bits);
+        bits = static_cast<int32_t>(d.bits);
       }
 
       timer.insert_primary_input(driver_name);
@@ -268,7 +268,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       std::string driver_name{d.name};
       auto        bits = bits_of(driver_dpin);
       if (bits == 0) {
-        bits = static_cast<Bits_t>(d.bits);
+        bits = static_cast<int32_t>(d.bits);
       }
 
       timer.insert_primary_output(driver_name);
@@ -471,7 +471,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       std::string pname{d.name};
       auto        bits = bits_of(pin, *gio, d.name);
       if (bits == 0) {
-        bits = static_cast<Bits_t>(d.bits);
+        bits = static_cast<int32_t>(d.bits);
       }
       set_input_delays(pname);
       for (auto i = 1; i < bits; ++i) {
@@ -484,13 +484,13 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         continue;
       }
       std::string pname{d.name};
-      Bits_t      bits = 0;
+      int32_t      bits = 0;
       auto        inps = pin.inp_edges();
       if (!inps.empty()) {
         bits = bits_of(inps.front().driver);
       }
       if (bits == 0) {
-        bits = static_cast<Bits_t>(d.bits);
+        bits = static_cast<int32_t>(d.bits);
       }
       set_output_delays(pname);
       for (auto i = 1; i < bits; ++i) {

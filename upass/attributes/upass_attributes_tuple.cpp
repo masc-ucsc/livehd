@@ -132,7 +132,7 @@ upass::Vote uPass_attributes::process_tuple_add(std::string_view dst_name, Bundl
   //   tuple_add
   //     ref(dst)
   //     [ assign(ref(name), value) | const(value) | ref(value) ]+
-  // 2b/E3c — no shape recording: the constructed bundle IS the shape
+  // No shape recording: the constructed bundle IS the shape
   // (derive_aggregate_size / derive_comptime walk the binding's top levels).
   return upass::Vote::keep;
 }
@@ -144,7 +144,7 @@ upass::Vote uPass_attributes::process_tuple_concat(std::string_view dst_name, Bu
   // Layout: ref(dst), (const|ref)... — each operand contributes its own
   // entries (a sub-tuple's fields for refs with a known shape; a single
   // positional slot for scalar consts/refs).
-  // 2b/E3c — no shape recording (see process_tuple_add).
+  // No shape recording (see process_tuple_add).
   return upass::Vote::keep;
 }
 
@@ -260,7 +260,7 @@ void uPass_attributes::process_tuple_get() {
     }
   }
 
-  // 2b/E3c — record the resolved (possibly positional→named) origin for
+  // Record the resolved (possibly positional→named) origin for
   // `.[key]` and the typed-fact back-flow (Symbol_table::tget_origin).
   if (runner_st != nullptr && !field_name.empty()) {
     runner_st->tget_origin.insert_or_assign(dst, base + "." + field_name);
@@ -268,7 +268,7 @@ void uPass_attributes::process_tuple_get() {
 }
 
 std::optional<Const> uPass_attributes::derive_aggregate_size(std::string_view base) const {
-  // 2b/E3c — size = the binding's top-level cardinality (aliases share the
+  // Size = the binding's top-level cardinality (aliases share the
   // slot; constprop materializes closed integer ranges as tuple bundles, so
   // ranges resolve here too).
   if (runner_st != nullptr && base.find('.') == std::string_view::npos) {
@@ -340,7 +340,7 @@ std::optional<Const> uPass_attributes::derive_aggregate_typename(std::string_vie
   if (field.empty()) {
     return std::nullopt;
   }
-  // 2b/E3c — the field typename rides the container binding's field attr
+  // The field typename rides the container binding's field attr
   // (set_binding_attr echoes extraction-tmp attr_sets to the source field;
   // aliases share the slot, so no alias hop / sibling-tmp scan).
   auto field_typename = [&](const std::string& container) -> std::optional<Const> {
@@ -373,7 +373,7 @@ std::optional<Const> uPass_attributes::derive_aggregate_key(std::string_view bas
 }
 
 std::optional<Const> uPass_attributes::lookup_attr_with_inheritance(std::string_view base, std::string_view attr) const {
-  // 2b/E3c — attrs ride the bindings (shared slots, value copies, the
+  // Attrs ride the bindings (shared slots, value copies, the
   // name-fact preservation in Symbol_table::set), and lookup_attr_value
   // already does the cat-D field→root fallback. The one chase left is an
   // EXTRACTION TMP base: look on its source field path (which falls back to

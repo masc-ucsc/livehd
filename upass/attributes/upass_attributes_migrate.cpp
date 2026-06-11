@@ -33,9 +33,9 @@
 #include "const.hpp"
 #include "upass_attributes.hpp"
 
-// (2b/E3e) aggregate-attr inheritance is a READ-side fallback now: a dotted
+// aggregate-attr inheritance is a READ-side fallback now: a dotted
 // lookup_attr_value miss falls back to the root's whole-bundle attr, so no
 // pre-copies onto field paths are needed.
 
-// (2b/E3c) migrate_alias deleted: attrs/shape/typed facts ride the shared
+// migrate_alias deleted: attrs/shape/typed facts ride the shared
 // binding slot; handlers are notified directly from on_assign_like.

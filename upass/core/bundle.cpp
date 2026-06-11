@@ -789,7 +789,7 @@ bool Bundle::is_trivial_scalar() const {
 }
 
 void Bundle::dump(std::string_view name) const {
-  // 2b/H — the bundle no longer stores a name; the caller supplies one for
+  // The bundle no longer stores a name; the caller supplies one for
   // the printout (the table knows the binding's name).
   std::print("bundle_name: {}{}\n", name, correct ? "" : " ISSUES");
 

@@ -4,7 +4,6 @@
 #include <cstdint>
 
 #include "const.hpp"
-#include "graph_sizing.hpp"
 
 class __attribute__((packed)) Bitwidth_range {
 protected:
@@ -104,9 +103,9 @@ public:
   void set_range(int64_t min_val, int64_t max_val) { set_range(*Dlop::create_integer(min_val), *Dlop::create_integer(max_val)); }
 
   bool   is_overflow() const { return overflow; };
-  void   set_sbits_range(Bits_t size);
-  void   set_ubits_range(Bits_t size);
-  Bits_t get_sbits() const;
+  void   set_sbits_range(int32_t size);
+  void   set_ubits_range(int32_t size);
+  int32_t get_sbits() const;
   Const  get_range() const {
     if (overflow) {
       return *Dlop::create_integer(1)->shl_op(*Dlop::create_integer(get_sbits()));
