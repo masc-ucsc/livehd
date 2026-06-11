@@ -163,9 +163,6 @@ public:
     active_salt_ = salt;
     // lnast, current_nid, active_tag_ deliberately unchanged.
   }
-  bool             in_inline_frame() const { return !frames_.empty(); }
-  std::size_t      inline_depth() const { return frames_.size(); }
-  std::string_view active_tag() const { return active_tag_; }
 
   // Scope identity for nid-keyed pass state (constprop block scopes). Plain
   // class_index collides across the caller/callee trees during a source
@@ -223,8 +220,6 @@ public:
     current_nid = nid_stack.top();
     nid_stack.pop();
   }
-
-  auto get_ntype() const { return lnast->get_type(current_nid); }
 
   auto get_raw_ntype() const { return lnast->get_type(current_nid); }
 

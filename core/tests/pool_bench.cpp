@@ -96,17 +96,6 @@ public:
   void     reconstruct(int a) { val = a; }
 };
 
-static void BM_make_shared_pool(benchmark::State& state) {
-  for (auto _ : state) {
-    for (int j = 0; j < state.range(0); ++j) {
-      auto ptr = spool_ptr<My_data>::make(j);
-      assert(ptr->val == j);
-    }
-  }
-
-  state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
-}
-
 static void BM_make_shared_ptr(benchmark::State& state) {
   for (auto _ : state) {
     for (int j = 0; j < state.range(0); ++j) {
@@ -139,7 +128,6 @@ BENCHMARK(BM_spmc)->Arg(512);
 // BENCHMARK(BM_spsc)->Arg(512);
 BENCHMARK(BM_spsc256)->Arg(512);
 BENCHMARK(BM_moodycamel)->Arg(512);
-BENCHMARK(BM_make_shared_pool)->Arg(512);
 BENCHMARK(BM_make_shared_ptr)->Arg(512);
 BENCHMARK(BM_make_unique_ptr)->Arg(512);
 #else
@@ -148,7 +136,6 @@ BENCHMARK(BM_spmc)->Arg(512);
 // BENCHMARK(BM_spsc)->Arg(512);
 BENCHMARK(BM_spsc256)->Arg(512);
 BENCHMARK(BM_moodycamel)->Arg(512);
-BENCHMARK(BM_make_shared_pool)->Arg(512);
 BENCHMARK(BM_make_shared_ptr)->Arg(512);
 BENCHMARK(BM_make_unique_ptr)->Arg(512);
 #endif

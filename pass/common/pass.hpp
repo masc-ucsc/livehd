@@ -75,8 +75,6 @@ public:
 #endif
   }
 
-  [[nodiscard]] virtual bool is_done() const { return true; }
-  [[nodiscard]] virtual bool has_made_progress() const { return true; }
 };
 
 class Pass_plugin {

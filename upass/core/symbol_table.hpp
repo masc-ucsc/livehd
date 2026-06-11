@@ -46,8 +46,6 @@ public:
   std::vector<Scope*> stack;
 
   void                    function_scope(std::string_view func_id);
-  void                    always_scope();
-  void                    conditional_scope();
   // Push a block scope keyed by `key` (e.g. an LNAST nid hash). Re-entering
   // the same `key` on a subsequent iteration restores the same Scope object,
   // so per-iteration state (declarations, values) persists across the upass
@@ -139,16 +137,9 @@ public:
   // copy from the ref. Erased wholesale when the dst tuple is rebuilt.
   absl::flat_hash_map<std::string, std::map<std::string, std::string>> tuple_slot_ref;
 
-  bool mut(std::string_view key, std::shared_ptr<Bundle> bundle);
-  bool mut(std::string_view key, const Dlop& trivial);
-  bool mut(std::string_view key, const spool_ptr<Dlop>& trivial) { return mut(key, *trivial); }
-
   bool set(std::string_view key, std::shared_ptr<Bundle> bundle);
   bool set(std::string_view key, const Dlop& trivial);
   bool set(std::string_view key, const spool_ptr<Dlop>& trivial) { return set(key, *trivial); }
-
-  bool let(std::string_view key, std::shared_ptr<Bundle> bundle);
-  bool let(std::string_view key, const Dlop& trivial);
 
   bool has_trivial(std::string_view key) const;
   bool has_bundle(std::string_view key) const;
@@ -190,7 +181,6 @@ public:
   // True when `var` is visible only ACROSS a Function barrier:
   // readable (closure capture) but not writable. A write to such a name is
   // a compile error at the caller (the runner/passes report it).
-  [[nodiscard]] bool is_function_captured(std::string_view var) const;
 
 private:
 

@@ -18,8 +18,7 @@ TEST(UpassCoalescer, PluginRegisters) {
 }
 
 // Construct + set_options round-trip. Confirms `coalescer:0` parses without
-// surprises and the pass becomes inert (parked_total stays zero — there is
-// nothing to drive it without a runner, but the field exists).
+// surprises and the pass becomes inert.
 TEST(UpassCoalescer, SetOptionsDisable) {
   auto ln = std::make_shared<Lnast>("test");
   ln->set_root(Lnast_ntype::create_top());
@@ -29,7 +28,4 @@ TEST(UpassCoalescer, SetOptionsDisable) {
   upass::Options_map opts;
   opts["coalescer"] = "0";
   pass.set_options(opts);
-  EXPECT_EQ(pass.parked_total(), 0u);
-  EXPECT_EQ(pass.dse_dropped_total(), 0u);
-  EXPECT_EQ(pass.flushed_total(), 0u);
 }

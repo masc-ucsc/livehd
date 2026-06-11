@@ -20,6 +20,18 @@ public:
 };
 
 #include "eprp.hpp"
+
+// Test-local harness: inline parsing used to be Elab_scanner::parse_inline
+// but has no production users.
+class Eprp_harness : public Eprp {
+public:
+  void parse_inline(std::string_view txt) {
+    parse_setup();
+    memblock      = txt.data();
+    memblock_size = txt.size();
+    parse_step();
+  }
+};
 #include "file_utils.hpp"
 
 static bool is_equal_called = false;
@@ -96,13 +108,12 @@ public:
 class Eprp_test : public ::testing::Test {
 public:
 protected:
-  Eprp eprp;
+  Eprp_harness eprp;
   void SetUp() override {
     Eprp_method m1("test1.xyz.generate", "Generate a random test/method call to foo", &test1::foo);
     m1.add_label_required("lgdb", "lgraph directory");
     m1.add_label_optional("graph_name", "another super duper attribute");
 
-    EXPECT_EQ(m1.get_label_help("lgdb"), "lgraph directory");
     EXPECT_TRUE(m1.has_label("graph_name"));
     EXPECT_FALSE(m1.has_label("graph_name_not_there"));
 
@@ -136,7 +147,7 @@ protected:
 class Eprp_files : public ::testing::Test {
 public:
 protected:
-  Eprp eprp;
+  Eprp_harness eprp;
   void SetUp() override {
     Eprp_method m1("test1.files2", "Generate a random test/method call to foo", &test1::files2);
     m1.add_label_required("nofiles", "list of files");

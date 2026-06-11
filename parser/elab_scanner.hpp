@@ -286,7 +286,6 @@ protected:
     ;
     return filename;
   }
-  bool is_parse_inline() const { return memblock_fd == -1; }
 
   void parser_error_int(std::string_view text) const;
   void parser_warn_int(std::string_view text) const;
@@ -337,10 +336,6 @@ public:
   void parser_info(std::string_view txt) const { parser_warn_int(txt); }
 
   bool scan_next();
-  bool scan_prev();
-
-  void set_max_errors(int n) { max_errors = n; }
-  void set_max_warning(int n) { max_warnings = n; }
 
   bool scan_is_end() const { return scanner_pos >= token_list.size(); }
 
@@ -357,47 +352,6 @@ public:
     return scanner_pos;
   }
 
-  Token_id scan_token_id() const {
-    I(scanner_pos != 0);
-    I(scanner_pos < token_list.size());
-    return token_list[scanner_pos].tok;
-  }
-
-  std::string_view scan_prev_text() const {
-    size_t p = scanner_pos - 1;
-    if (scanner_pos <= 0) {
-      p = 0;
-    }
-    return token_list[p].get_text();
-  }
-
-  std::string_view scan_next_text() const {
-    size_t p = scanner_pos + 1;
-    if (p >= token_list.size()) {
-      p = token_list.size() - 1;
-    }
-    return token_list[p].get_text();
-  }
-
-  bool scan_next_is_token(Token_id tok) const {
-    size_t p = scanner_pos + 1;
-    if (p >= token_list.size()) {
-      return false;
-    }
-    return token_list[p].tok == tok;
-  }
-
-  std::string_view scan_peep_text(int offset) const {
-    I(offset != 0);
-    size_t p = scanner_pos + offset;
-    if (p >= token_list.size()) {
-      p = token_list.size() - 1;
-    } else if (offset > static_cast<int>(scanner_pos)) {
-      p = 0;
-    }
-    return token_list[p].get_text();
-  }
-
   inline std::string_view scan_text(const Token_entry te) const {
     I(token_list.size() > te);
     return token_list[te].get_text();
@@ -406,15 +360,6 @@ public:
   std::string_view scan_text() const { return token_list[scanner_pos].get_text(); }
   uint32_t         scan_line() const;
 
-  size_t get_token_pos() const { return token_list[scan_token_entry()].pos1; }
-
-  bool scan_is_prev_token(Token_id tok) const {
-    if (scanner_pos == 0) {
-      return false;
-    }
-    I(scanner_pos < token_list.size());
-    return token_list[scanner_pos - 1].tok == tok;
-  }
   bool scan_is_next_token(int pos, Token_id tok) const {
     if ((scanner_pos + pos) >= token_list.size()) {
       return false;
@@ -422,54 +367,8 @@ public:
     return token_list[scanner_pos + pos].tok == tok;
   }
 
-  bool scan_peep_is_token(Token_id tok, int offset) const {
-    I(offset != 0);
-    size_t p = scanner_pos + offset;
-    if (p >= token_list.size()) {
-      p = token_list.size() - 1;
-    } else if (offset > static_cast<int>(scanner_pos)) {
-      p = 0;
-    }
-    return token_list[p].tok == tok;
-    ;
-  }
-
-  void patch_pass(const absl::flat_hash_map<std::string, Token_id>& keywords);
-
-  void patch_pass() {
-    absl::flat_hash_map<std::string, Token_id> no_keywords;
-    patch_pass(no_keywords);
-  }
-
-  void parse_file(std::string_view _filename) {
-    parse_setup(_filename);
-    parse_step();
-  }
-
-  void parse_inline(std::string_view txt) {
-    parse_setup();
-    memblock      = txt.data();
-    memblock_size = txt.size();
-    parse_step();
-  }
-
-  void dump_token() const;
-
   virtual void elaborate() = 0;
 
   bool has_errors() const { return n_errors > 0; }
 
-  Ref_token scan_get_token(int offset = 0) const {
-    size_t p = scanner_pos + offset;
-    if (p >= token_list.size()) {
-      p = token_list.size() - 1;
-    }
-
-    // comment out by Sheng
-    // else if (offset > static_cast<int>(scanner_pos))
-    //  p = 0 ;
-    return token_list[p];
-  }
-
-  const Ref_token& get_token(Token_entry entry) { return token_list[entry]; }
 };

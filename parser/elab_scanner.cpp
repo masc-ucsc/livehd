@@ -147,41 +147,6 @@ void Elab_scanner::add_token(const Ref_token::Tracker& t) {
   token_list.emplace_back(t, memblock);
 }
 
-void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id>& keywords) {
-  for (size_t i = 0; i < token_list.size(); ++i) {
-    auto& t = token_list[i];
-    if (t.tok != Token_id_alnum) {
-      continue;
-    }
-
-    I(t.get_text().size() > 0);  // at least a character
-
-    const auto& txt = t.get_text();
-
-    if (isdigit(txt[0])) {
-      t.tok = Token_id_num;
-
-#ifndef NDEBUG
-      // binary accepts ? as part of the numeric constant
-      if (txt.size() > 2 && (txt[1] == 'b' || txt[1] == 'B')) {
-        if ((i + 1) < token_list.size()) {
-          I(token_list[i + 1].tok != Token_id_qmark);
-        }
-      }
-#endif
-
-      continue;
-    }
-
-    auto it = keywords.find(txt);
-    if (it == keywords.end()) {
-      continue;
-    }
-
-    t.tok = it->second;
-  }
-}
-
 void Elab_scanner::parse_setup(std::string_view fname) {
   if (memblock_fd == -1) {
     unregister_memblock();
@@ -424,16 +389,6 @@ bool Elab_scanner::scan_next() {
   return true;
 }
 
-bool Elab_scanner::scan_prev() {
-  if (scanner_pos <= 1) {
-    return false;
-  }
-
-  scanner_pos = scanner_pos - 1;
-
-  return true;
-}
-
 uint32_t Elab_scanner::scan_line() const {
   size_t max_pos = scanner_pos;
   if (max_pos >= token_list.size()) {
@@ -554,14 +509,4 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
   std::string third_1(col, ' ');
   std::string third_2(len, '^');
   std::print("{}{}\n", third_1, third_2);
-}
-
-void Elab_scanner::dump_token() const {
-  size_t pos = scanner_pos;
-  if (pos >= token_list.size()) {
-    pos = token_list.size();
-  }
-
-  auto& t = token_list[pos];
-  std::print("tok:{} pos1:{}, pos2:{}, line:{} text:{}\n", t.tok, t.pos1, t.pos2, t.line, t.get_text());
 }

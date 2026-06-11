@@ -184,8 +184,6 @@ public:
     threads.emplace_back(std::thread([this] { this->task(); }));  // Just one thread in critical path
   }
 
-  static int get_task_id() { return task_id; }
-
   virtual ~Thread_pool() {
     while (!started_lock) {
       ;  // The exit could be before we even booting the threads (uff)

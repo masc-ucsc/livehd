@@ -86,13 +86,6 @@ void Eprp_var::replace(const std::shared_ptr<Lnast>& lnast_old, std::shared_ptr<
   }
 }
 
-void Eprp_var::delete_label(std::string_view name) {
-  auto it = dict.find(name);
-  if (it != dict.end()) {
-    dict.erase(it);
-  }
-}
-
 std::string_view Eprp_var::get(std::string_view name, std::string_view default_value) const {
   const auto& elem = dict.find(name);
   if (elem == dict.end()) {

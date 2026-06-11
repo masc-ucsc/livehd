@@ -18,9 +18,4 @@ inline constexpr token_entry_t token_entry{};
 
 namespace hhds {
 
-template <>
-[[nodiscard]] inline std::string attr_tag_name<ast_parser::attrs::token_entry_t>() {
-  return "ast.token_entry";
-}
-
 }  // namespace hhds

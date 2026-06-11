@@ -6,9 +6,10 @@
 #include <print>
 
 #include "ast.hpp"
+#include "elab_test_scanner.hpp"
 #include "gtest/gtest.h"
 
-class Test_scanner : public Elab_scanner {
+class Test_scanner : public Elab_test_scanner {
 protected:
   enum test_rules : Rule_id {
     test_rule_invalid = 0,

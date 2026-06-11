@@ -169,7 +169,6 @@ protected:
 
   static bool   match(std::string_view a, std::string_view b) { return bundle_key::match(a, b); }
   static size_t match_first_partial(std::string_view a, std::string_view b) { return bundle_key::match_first_partial(a, b); }
-  static bool   match_either_partial(std::string_view a, std::string_view b) { return bundle_key::match_either_partial(a, b); }
 
   void del_int(std::string_view key);  // data leaves only; attrs are never deleted by data writes
 
@@ -184,7 +183,6 @@ public:
   bool             is_correct() const { return correct; }
   void             set_issue() const { correct = false; }
 
-  bool is_immutable() const { return immutable; }
   void set_immutable() { immutable = true; }
 
   // Binding-level typed facts (1b/D).
@@ -198,12 +196,6 @@ public:
   // The hot "this operand's comptime value, or unknown" read (1b/D+E).
   // Defined only for scalar bundles (≤1 data leaf); nullopt when the
   // value is absent or unknown. Reads the inline root Entry — never spills.
-  bool has_scalar() const {
-    if (has_root_) {
-      return !root_.trivial.is_invalid();
-    }
-    return key_map.size() == 1 && !key_map.begin()->second.trivial.is_invalid();
-  }
   std::optional<Dlop> scalar() const {
     if (has_root_) {
       if (root_.trivial.is_invalid()) {
@@ -227,7 +219,7 @@ public:
     return b;
   }
 
-  // For whole-bundle scalar reads prefer scalar()/has_scalar(); the keyed
+  // For whole-bundle scalar reads prefer scalar(); the keyed
   // forms are for FIELD reads. NOTE: has_trivial is EXISTENCE-only — an
   // entry with an INVALID trivial (a runtime-unknown marker) still counts;
   // first-write gates must test get_trivial(key).is_invalid() instead.
@@ -269,14 +261,6 @@ public:
   }
 
   void set(std::string_view key, const Dlop& trivial) { set(key, value_entry(key, false, trivial)); }
-  void let(std::string_view key, const Dlop& trivial) {
-    I(!immutable);  // FIXME: use llog library
-    set(key, value_entry(key, true, trivial));
-  }
-  void mut(std::string_view key, const Dlop& trivial) {
-    I(!immutable);  // FIXME: use llog library
-    set(key, value_entry(key, false, trivial));
-  }
   void var(std::string_view key, const Dlop& trivial) {
     I(!immutable);  // FIXME: use llog library
     set(key, value_entry(key, false, trivial));
@@ -368,8 +352,6 @@ public:
   bool has_top_named(std::string_view name) const;
   bool has_top_unnamed(int pos) const;
 
-  bool is_ordered(std::string_view key) const;
-
   void dump(std::string_view name = "?") const;
 
   // Dotted-key string helpers — implementations live in lnast/bundle_key.hpp
@@ -381,7 +363,6 @@ public:
   static std::string_view get_first_level(std::string_view key) { return bundle_key::get_first_level(key); }
   static std::string_view get_first_level_name(std::string_view key) { return bundle_key::get_first_level_name(key); }
   static int              get_first_level_pos(std::string_view key) { return bundle_key::get_first_level_pos(key); }
-  static int              get_last_level_pos(std::string_view key) { return get_first_level_pos(get_last_level(key)); }
 
   static bool is_single_level(std::string_view key) { return bundle_key::is_single_level(key); }
 

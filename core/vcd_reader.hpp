@@ -40,8 +40,6 @@ protected:
   size_t      timestamp_;       // current timestamp during parse
   std::string filename_;
 
-  [[nodiscard]] const std::vector<std::string>& get_alias(std::string_view name) const;
-
   // quantize the current timestamp into a bucket index
   [[nodiscard]] size_t get_current_bucket() const;
 

@@ -44,7 +44,6 @@ Pass_sample::Pass_sample(const Eprp_var& var) : Pass("pass.sample", var) {}
 void Pass_sample::do_work(hhds::Graph* g) {
   compute_histogram(g);
   compute_max_depth(g);
-  // annotate_placement(g);
   create_sample_graph(g);
 }
 
@@ -200,33 +199,6 @@ void Pass_sample::compute_max_depth(hhds::Graph* g) {
   }
 
   std::print("Pass: max_depth {}\n", max_depth);
-}
-
-void Pass_sample::annotate_placement(hhds::Graph* g) {
-  TRACE_EVENT("pass", "SAMPLE_replace_inline");
-
-  int x_pos = 0;
-
-  for (auto node : g->forward_class()) {
-    Ann_place p;
-    p.replace(x_pos++, 0.0, 1.0, 0.0);
-    node.attr(livehd::attrs::place).set(p);
-  }
-
-  auto dump = [](const hhds::Node_class& node, std::string_view tag) {
-    auto a = node.attr(livehd::attrs::place);
-    if (!a.has()) {
-      return;
-    }
-    auto place = a.get();
-    std::print("{}.cell {} placed at x:{}\n", tag, default_instance_name(node), place.get_x());
-  };
-  for (auto node : g->fast_class()) {
-    dump(node, "1");
-  }
-  for (auto node : g->forward_class()) {
-    dump(node, "2");
-  }
 }
 
 void Pass_sample::create_sample_graph(hhds::Graph* g) {

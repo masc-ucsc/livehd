@@ -42,7 +42,7 @@ grep -q 'sourceMappingURL=srcmap_in.fun1.v.map' "$V" || fail "missing sourceMapp
 grep -q '"version":3' "$M" || fail "$M is not a v3 source map"
 grep -q '"sources":\["srcmap_in.prp"\]' "$M" || fail "wrong sources list in $M"
 grep -qF 'o = a + b' "$M" || fail "sourcesContent does not embed the original pyrope in $M"
-grep -q '"x_livehd"' "$M" || fail "missing x_livehd SourceId extra in $M"
+grep -q '"x_hhds"' "$M" || fail "missing x_hhds SourceId extra in $M"
 
 # Line coverage: header/ports/wires/always blocks anchor at the mod
 # declaration, statements at their own source lines — near-total coverage

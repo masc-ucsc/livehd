@@ -8,11 +8,12 @@
 #include "benchmark/benchmark.h"
 #include "lnast/lnast_parser.hpp"
 #include "lnast/lnast_writer.hpp"
+#include "lnast/tests/ln_test_utils.hpp"
 
 std::shared_ptr<Lnast> read_ln(std::string filename) {
   std::ifstream fs;
   fs.open(filename);
-  Lnast_parser parser(fs);
+  Ln_test_parser parser(fs);
   return parser.parse_all();
 }
 

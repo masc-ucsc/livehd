@@ -72,29 +72,6 @@ void Bitwidth_range::set_range(const Dlop& min_val, const Dlop& max_val) {
 
 Bitwidth_range::Bitwidth_range(const Dlop& min_val, const Dlop& max_val) { set_range(min_val, max_val); }
 
-void Bitwidth_range::set_narrower_range(const Bitwidth_range& bw) {
-  if (likely(!bw.is_overflow() && !is_overflow())) {
-    max = std::min(max, bw.max);
-    min = std::max(min, bw.min);
-    I(max >= min);
-    return;
-  }
-
-  auto l_max = get_max();
-  auto n_max = bw.get_max();
-  if (n_max.lt_op(l_max)->is_known_true()) {
-    l_max = n_max;
-  }
-
-  auto l_min = get_min();
-  auto n_min = bw.get_min();
-  if (n_min.gt_op(l_min)->is_known_true()) {
-    l_min = n_min;
-  }
-
-  set_range(l_min, l_max);
-}
-
 void Bitwidth_range::set_wider_range(const Bitwidth_range& bw) {
   if (likely(!bw.is_overflow() && !is_overflow())) {
     max = std::max(max, bw.max);

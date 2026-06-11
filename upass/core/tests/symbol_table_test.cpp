@@ -34,7 +34,7 @@ TEST_F(Symbol_table_test, trivial_constants) {
   }
 
   {
-    auto ok = st.mut("foo", Dlop::create_integer(1));
+    auto ok = st.set("foo", Dlop::create_integer(1));
     EXPECT_TRUE(ok);
 
     EXPECT_TRUE(st.has_trivial("foo"));
@@ -44,7 +44,7 @@ TEST_F(Symbol_table_test, trivial_constants) {
   }
 
   {
-    auto ok = st.mut("foo", Dlop::create_integer(2));
+    auto ok = st.set("foo", Dlop::create_integer(2));
     EXPECT_TRUE(ok);
 
     EXPECT_DLOP_EQ(st.get_trivial("foo"), Dlop::create_integer(2));
@@ -66,7 +66,7 @@ TEST_F(Symbol_table_test, recursion) {
   EXPECT_TRUE(ok);
   EXPECT_TRUE(st.has_trivial("foo"));
 
-  auto ok1 = st.mut("foo", Dlop::create_integer(1));
+  auto ok1 = st.set("foo", Dlop::create_integer(1));
   EXPECT_TRUE(ok1);
   EXPECT_DLOP_EQ(st.get_trivial("foo"), Dlop::create_integer(1));
 
@@ -76,12 +76,11 @@ TEST_F(Symbol_table_test, recursion) {
   // `var` shadows it for this frame.
   st.function_scope("myfunc");
   EXPECT_TRUE(st.has_trivial("foo"));
-  EXPECT_TRUE(st.is_function_captured("foo"));
   auto ok2 = st.var("foo");
   EXPECT_TRUE(ok2);
   EXPECT_TRUE(st.has_trivial("foo"));
 
-  auto ok3 = st.mut("foo", Dlop::create_integer(2));
+  auto ok3 = st.set("foo", Dlop::create_integer(2));
   EXPECT_TRUE(ok3);
   EXPECT_DLOP_EQ(st.get_trivial("foo"), Dlop::create_integer(2));
 
@@ -92,7 +91,7 @@ TEST_F(Symbol_table_test, recursion) {
   EXPECT_TRUE(ok4);
   EXPECT_TRUE(st.has_trivial("foo"));
 
-  auto ok5 = st.mut("foo", Dlop::create_integer(3));
+  auto ok5 = st.set("foo", Dlop::create_integer(3));
   EXPECT_TRUE(ok5);
   EXPECT_DLOP_EQ(st.get_trivial("foo"), Dlop::create_integer(3));
 
@@ -103,7 +102,7 @@ TEST_F(Symbol_table_test, recursion) {
   EXPECT_TRUE(ok6);
   EXPECT_TRUE(st.has_trivial("foo"));
 
-  auto ok7 = st.mut("foo", Dlop::create_integer(4));
+  auto ok7 = st.set("foo", Dlop::create_integer(4));
   EXPECT_TRUE(ok7);
   EXPECT_DLOP_EQ(st.get_trivial("foo"), Dlop::create_integer(4));
 
@@ -144,10 +143,6 @@ TEST_F(Symbol_table_test, ordered_check) {
   // Decision 1: "0" no longer aliases the first named slot.
   EXPECT_FALSE(bundle->has_trivial("0"));
 
-  // "foo" key has no entries matching the prefix (entries live inside this
-  // bundle), so is_ordered("foo") is vacuously true.
-  EXPECT_TRUE(bundle->is_ordered("foo"));
-
   // Copy-on-write field stores (Pyrope value semantics — `p2 = p1` copies):
   // a dotted st.set un-shares the varmap slot when the bundle pointer is
   // held elsewhere, so a previously fetched shared_ptr no longer observes
@@ -155,33 +150,6 @@ TEST_F(Symbol_table_test, ordered_check) {
   st.set("foo.bar", Dlop::create_integer(4));  // replace stored "bar"
   bundle = st.get_bundle("foo");
   EXPECT_DLOP_EQ(bundle->get_trivial("bar"), Dlop::create_integer(4));
-  // Bundle now mixes named ("bar", "xxx") and unnamed ("2", "99") — no
-  // longer a pure positional list, so is_ordered("") is false.
-  EXPECT_FALSE(bundle->is_ordered(""));
-
-  st.set("foo.nothere", Dlop::create_integer(4));
-  bundle = st.get_bundle("foo");
-  EXPECT_FALSE(bundle->is_ordered(""));
-
-  // is_ordered("nothere") inspects the "nothere" sub-bundle's first-segment
-  // pos; a leaf entry has no sub-positions so it's vacuously true.
-  EXPECT_TRUE(bundle->is_ordered("nothere"));
-  st.set("foo.nothere.2", Dlop::create_integer(4));
-  bundle = st.get_bundle("foo");
-  EXPECT_TRUE(bundle->is_ordered("nothere"));
-  st.set("foo.nothere.x", Dlop::create_integer(4));
-  bundle = st.get_bundle("foo");
-  EXPECT_FALSE(bundle->is_ordered("nothere"));
-
-  st.set("foo.bar.0.xx", Dlop::create_integer(10));
-  st.set("foo.bar.1.yy", Dlop::create_integer(11));
-  st.set("foo.bar.2.xx", Dlop::create_integer(12));
-  st.set("foo.bar.8.zz", Dlop::create_integer(13));
-  bundle = st.get_bundle("foo");
-  EXPECT_TRUE(bundle->is_ordered("bar"));
-  st.set("foo.bar.NOT.zz", Dlop::create_integer(13));
-  bundle = st.get_bundle("foo");
-  EXPECT_FALSE(bundle->is_ordered("bar"));
 
   st.leave_scope();
 }
@@ -339,8 +307,7 @@ TEST_F(Symbol_table_test, entries_view_skips_attrs) {
 
 // 2b/B — Function scopes are write barriers but read-transparent: a callee
 // body walked on the shared table reads outer comptime consts directly
-// (closure capture), while a write that resolves only above the barrier is
-// flagged via is_function_captured (the caller reports the compile error).
+// (closure capture).
 TEST_F(Symbol_table_test, function_barrier_read_through_write_block) {
   Symbol_table st;
 
@@ -356,17 +323,11 @@ TEST_F(Symbol_table_test, function_barrier_read_through_write_block) {
   EXPECT_TRUE(st.is_known_const("outer_const"));
   EXPECT_TRUE(st.has_bundle("outer_const"));
 
-  // Writes do NOT: the name resolves only above the barrier.
-  EXPECT_TRUE(st.is_function_captured("outer_var"));
-  EXPECT_FALSE(st.is_function_captured("missing_everywhere"));
-
   // A callee-local of the same name shadows for both reads and writes...
   EXPECT_TRUE(st.set("outer_var", *Dlop::create_integer(99)));  // anchors in callee (write variant missed)
-  EXPECT_FALSE(st.is_function_captured("outer_var"));
   EXPECT_TRUE(st.get_trivial("outer_var").same_repr(*Dlop::create_integer(99)));
 
   // ...and leaving the callee restores the caller's value untouched.
   st.leave_scope();
   EXPECT_TRUE(st.get_trivial("outer_var").same_repr(*Dlop::create_integer(7)));
-  EXPECT_FALSE(st.is_function_captured("outer_var"));  // writable again here
 }

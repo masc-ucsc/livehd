@@ -58,11 +58,6 @@ uint64_t pass_submatch::hash_mffc_node(hhds::Node_class n_driver, uint64_t h_sin
   return lh::woothash64(i_hash, 24);
 }
 
-uint64_t pass_submatch::hash_mffc_leaf(uint64_t h_sink, hhds::Port_id pid) {
-  uint64_t i_hash[2] = {h_sink, static_cast<uint64_t>(pid)};
-  return lh::woothash64(i_hash, 16);
-}
-
 uint64_t pass_submatch::hash_node(hhds::Node_class n) {
   uint64_t              h;
   std::vector<uint16_t> i_hash;
@@ -75,8 +70,6 @@ uint64_t pass_submatch::hash_node(hhds::Node_class n) {
   h = lh::woothash64(&h, 8, static_cast<uint64_t>(type_op_of(n)) & 0xFFFF);
   return h;
 }
-
-uint32_t pass_submatch::group_score(uint32_t group_size, uint32_t num_nodes) { return group_size * group_size * num_nodes; }
 
 namespace {
 

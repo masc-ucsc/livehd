@@ -82,14 +82,6 @@ public:
     overflow = false;
   }
 
-  void set_narrower_range(const Bitwidth_range& bw);
-  void set_narrower_range(const Dlop& min_val, const Dlop& max_val) { set_narrower_range(Bitwidth_range(min_val, max_val)); }
-  void set_narrower_range(const spool_ptr<Dlop>& min_val, const spool_ptr<Dlop>& max_val) {
-    set_narrower_range(*min_val, *max_val);
-  }
-  void set_narrower_range(const Dlop& min_val, const spool_ptr<Dlop>& max_val) { set_narrower_range(min_val, *max_val); }
-  void set_narrower_range(const spool_ptr<Dlop>& min_val, const Dlop& max_val) { set_narrower_range(*min_val, max_val); }
-
   void set_wider_range(const Bitwidth_range& bw);
   void set_wider_range(const Dlop& min_val, const Dlop& max_val) { set_wider_range(Bitwidth_range(min_val, max_val)); }
   void set_wider_range(const spool_ptr<Dlop>& min_val, const spool_ptr<Dlop>& max_val) { set_wider_range(*min_val, *max_val); }
@@ -114,11 +106,9 @@ public:
   }
   Dlop get_max() const { return to_lconst(overflow, max); };
   Dlop get_min() const { return to_lconst(overflow, min); };
-  int   get_raw_max() const { return max; };
 
   bool is_always_negative() const { return max < 0; }
   bool is_always_positive() const { return min >= 0; }
-  bool is_2complement() const { return min < 0; }
 
   void dump() const;
 };

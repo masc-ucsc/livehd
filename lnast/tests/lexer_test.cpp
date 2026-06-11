@@ -4,6 +4,7 @@
 
 #include "gtest/gtest.h"
 #include "lnast_lexer.hpp"
+#include "ln_test_utils.hpp"
 
 class Lnast_lexer_test : public ::testing::Test {
 protected:
@@ -20,7 +21,7 @@ protected:
   }
 
   void check(std::string_view golden) {
-    auto result = lexer->lex_token().get_string();
+    auto result = token_to_string(lexer->lex_token());
     EXPECT_TRUE(result == golden) << "result = " << result << " <-> golden = " << golden << std::endl;
   }
 };

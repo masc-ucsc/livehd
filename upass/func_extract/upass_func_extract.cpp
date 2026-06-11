@@ -477,24 +477,6 @@ void uPass_func_extract::process_assign() {
   invalidate();
 }
 
-void uPass_func_extract::collect_body_refs(const std::shared_ptr<Lnast>& body, std::unordered_set<std::string>& refs) const {
-  if (!body) {
-    return;
-  }
-  std::function<void(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) {
-    if (nid.is_invalid()) {
-      return;
-    }
-    if (Lnast_ntype::is_ref(body->get_type(nid))) {
-      refs.insert(std::string(body->get_name(nid)));
-    }
-    for (auto c = body->get_child(nid); !c.is_invalid(); c = body->get_sibling_next(c)) {
-      walk(c);
-    }
-  };
-  walk(body->get_root());
-}
-
 void uPass_func_extract::process_func_def() {
   drop_current_func_def = false;
 

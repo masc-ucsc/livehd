@@ -265,19 +265,12 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
 // the Lgraph wrapper.
 
 // Per-pin bit width (plain int32). Storing 0 leaves
-// the attribute untouched logically (callers should use clear_bits instead).
+// the attribute untouched logically.
 inline void set_bits(const hhds::Pin_class& pin, int32_t b) {
   if (pin.is_invalid()) {
     return;
   }
   pin.attr(livehd::attrs::bits).set(b);
-}
-
-inline void clear_bits(const hhds::Pin_class& pin) {
-  if (pin.is_invalid()) {
-    return;
-  }
-  pin.attr(livehd::attrs::bits).del();
 }
 
 // Per-pin sign hint. Presence means signed; absence means unsigned. Mirrors
@@ -298,7 +291,6 @@ inline void set_sign(const hhds::Pin_class& pin) {
 
 // Per-node color taint.
 inline void set_color(const hhds::Node_class& node, int32_t c) { node.attr(livehd::attrs::color).set(c); }
-inline void clear_color(const hhds::Node_class& node) { node.attr(livehd::attrs::color).del(); }
 
 // User-assigned pin name. Empty string clears the attr.
 inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {

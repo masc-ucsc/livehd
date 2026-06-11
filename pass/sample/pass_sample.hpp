@@ -10,7 +10,6 @@ class Pass_sample : public Pass {
 protected:
   void compute_histogram(hhds::Graph* g);
   void compute_max_depth(hhds::Graph* g);
-  void annotate_placement(hhds::Graph* g);
   void create_sample_graph(hhds::Graph* g);
 
   void do_work(hhds::Graph* g);

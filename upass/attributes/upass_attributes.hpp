@@ -260,9 +260,6 @@ public:
   // that tmp can lower to max/min).
   std::optional<std::pair<Dlop, Dlop>> lookup_range(std::string_view tmp) const;
 
-  // Ref-text value recorded for an attr_set whose value was a ref (e.g.
-  // `attr_set f "clock_pin" my_clk` — a runtime wire ref for LGraph wiring).
-  std::optional<std::string> lookup_attr_ref(std::string_view var, std::string_view attr) const;
 
 private:
   // lookup_type_info_bundle return scratch (per-call; do not hold across calls)

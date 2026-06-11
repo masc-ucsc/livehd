@@ -7,18 +7,6 @@
 
 Lnast_parser::Lnast_parser(std::istream& _is) : is(_is) {}
 
-std::shared_ptr<Lnast> Lnast_parser::parse_all() {
-  lnast = std::make_unique<Lnast>();
-  lexer = std::make_unique<Lnast_lexer>(is);
-
-  read_all_tokens();
-  token_index = 0;
-  parse_top();
-
-  lexer = nullptr;
-  return lnast;
-}
-
 void Lnast_parser::parse_top() {
   auto root_nid = lnast->set_root(Lnast_ntype::create_top());
   tree_index.push(root_nid);

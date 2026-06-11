@@ -180,18 +180,9 @@ public:
   // is_loop_last flag, so a LiveHD-stored type round-trips both meanings.
   static inline constexpr bool is_loop_last(Ntype_op op) { return (static_cast<uint8_t>(op) & 1) != 0; }
 
-  static inline constexpr bool is_multi_sink(Ntype_op op) {
-    return op != Ntype_op::Mult && op != Ntype_op::And && op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::Ror
-           && op != Ntype_op::Not;
-  }
-
   static inline constexpr bool is_pin_trackable(Ntype_op op) {
     return op == Ntype_op::Set_mask || op == Ntype_op::Get_mask || op == Ntype_op::SHL || op == Ntype_op::SRA || op == Ntype_op::And
            || op == Ntype_op::Or || op == Ntype_op::Sext;
-  }
-
-  static inline constexpr bool is_synthesizable(Ntype_op op) {
-    return op != Ntype_op::Sub && op != Ntype_op::AttrSet && op != Ntype_op::Invalid && op != Ntype_op::Last_invalid;
   }
 
   static inline constexpr bool is_unlimited_sink(Ntype_op op) {
@@ -202,13 +193,6 @@ public:
     return op == Ntype_op::Memory || op == Ntype_op::Sub || op == Ntype_op::IO;
   }
   static inline constexpr bool is_multi_driver(Ntype_op op) { return is_unlimited_driver(op); }
-  static inline bool           is_single_driver_per_pin(Ntype_op op) {
-    if (is_unlimited_sink(op)) {
-      return true;
-    }
-    auto c = sink_pid2name[0][static_cast<std::size_t>(op)];  // Is first port Upper or lower case
-    return c[0] >= 'a' && c[0] <= 'z';
-  }
 
   // Returns the hhds::Port_id for a LiveHD sink name on the given op, or
   // livehd::Port_invalid when the name is not a valid sink for this op.
@@ -260,28 +244,11 @@ public:
     return name;
   }
 
-  static bool                  has_sink(Ntype_op op, std::string_view str);
-  static inline constexpr bool has_sink(Ntype_op op, hhds::Port_id pid) {
-    if (pid > 10) {
-      return is_unlimited_sink(op);
-    }
-    return sink_pid2name[pid][static_cast<std::size_t>(op)] != "invalid";
-  }
-
   static inline constexpr std::string_view get_driver_name(Ntype_op op) {
     (void)op;
     assert(!is_multi_driver(op));  // use <PID> for multidriveer pins
     return {"Y"};
   }
-
-  static inline constexpr bool has_driver(Ntype_op op, hhds::Port_id pid) {
-    if (pid == 0) {
-      return true;
-    }
-    return is_unlimited_driver(op);
-  }
-
-  static inline constexpr bool is_single_sink(Ntype_op op) { return ntype2single_input[static_cast<int>(op)]; }
 
   static std::string_view get_name(Ntype_op op) { return cell_name_sv[static_cast<size_t>(op)]; }
 

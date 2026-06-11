@@ -2,11 +2,11 @@
 
 #include <unistd.h>
 
+#include <filesystem>
 #include <memory>
 #include <string>
 
 #include "eprp_var.hpp"
-#include "file_utils.hpp"
 #include "gmock/gmock.h"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
@@ -19,7 +19,7 @@ protected:
 };
 
 TEST_F(SampleMainTest, EmptyLgraph) {
-  file_utils::clean_dir("pass_test_lgdb");
+  std::filesystem::remove_all("pass_test_lgdb");
 
   auto& lib    = livehd::Hhds_graph_library::instance("pass_test_lgdb");
   auto  top_io = lib.create_io("empty");

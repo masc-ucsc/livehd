@@ -88,21 +88,6 @@ inline size_t match_first_partial(std::string_view a, std::string_view b) {
   return 0;
 }
 
-inline bool match_either_partial(std::string_view a, std::string_view b) {
-  // True iff one is a prefix of the other at a segment boundary
-  // (a == b, b == a + ".x…", or a == b + ".x…").
-  if (a == b) {
-    return true;
-  }
-  if (a.size() < b.size() && b[a.size()] == '.' && b.starts_with(a)) {
-    return true;
-  }
-  if (b.size() < a.size() && a[b.size()] == '.' && a.starts_with(b)) {
-    return true;
-  }
-  return false;
-}
-
 inline std::string normalize_key(std::string_view key) {
   // Post-PR3 (bundle_sorted plan §8): legacy `:N:name` / `:N:` producers
   // have all been migrated to canonical form. Any `:` at the start of a

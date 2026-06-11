@@ -14,7 +14,7 @@
 #include <string>
 
 #include "absl/container/flat_hash_map.h"
-#include "elab_scanner.hpp"
+#include "elab_test_scanner.hpp"
 
 // control
 constexpr uint8_t Xlanguage_id_if     = 128;
@@ -44,7 +44,7 @@ constexpr uint8_t Xlanguage_id_until     = 146;
 constexpr uint8_t Xlanguage_id_in        = 147;
 constexpr uint8_t Xlanguage_id_by        = 148;
 
-class Xlanguage_scanner : public Elab_scanner {
+class Xlanguage_scanner : public Elab_test_scanner {
   absl::flat_hash_map<std::string, uint8_t> xlang_keyword;
 
 public:

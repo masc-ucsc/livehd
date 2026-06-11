@@ -74,5 +74,4 @@ protected:
 public:
   Bitwidth(bool hier, int max_iterations);
   void do_trans(const std::shared_ptr<hhds::Graph>& g);
-  bool is_finished() const { return !not_finished; }
 };

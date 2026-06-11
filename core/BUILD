@@ -67,17 +67,6 @@ cc_binary(
 )
 
 cc_test(
-    name = "hashset_test",
-    srcs = [
-        "tests/hashset_test.cpp",
-    ],
-    deps = [
-        ":core",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
     name = "diag_test",
     srcs = [
         "tests/diag_test.cpp",

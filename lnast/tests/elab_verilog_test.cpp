@@ -15,10 +15,15 @@
 #include <set>
 #include <string>
 
-#include "elab_scanner.hpp"
-#include "str_tools.hpp"
+#include "elab_test_scanner.hpp"
 
-class Verilog_scanner : public Elab_scanner {
+static std::string to_lower(std::string_view str) {
+  std::string s(str);
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char ch) { return std::tolower(ch); });
+  return s;
+}
+
+class Verilog_scanner : public Elab_test_scanner {
   std::set<std::string> verilog_keyword;
 
 public:
@@ -137,7 +142,7 @@ public:
     std::string_view module_name;
     while (!scan_is_end()) {
       if (scan_is_token(Token_id_alnum)) {
-        auto token = str_tools::to_lower(scan_text());
+        auto token = to_lower(scan_text());
 
         if (token == "module") {
           if (!module_name.empty()) {

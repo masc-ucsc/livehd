@@ -25,8 +25,6 @@ static void assert_no_prefix(std::string_view key) {
 //   - find_decl_scope_read crosses the barrier: a callee body walked on the
 //     shared table reads outer comptime consts directly (closure capture —
 //     what lets func_extract drop its capture maps).
-// A write whose name resolves ONLY above the barrier is a compile error at
-// the caller; see is_function_captured().
 Symbol_table::Scope* Symbol_table::find_decl_scope(std::string_view var) {
   if (stack.empty()) {
     return nullptr;
@@ -68,10 +66,6 @@ const Symbol_table::Scope* Symbol_table::find_decl_scope_read(std::string_view v
     // Read-transparent across Function barriers (closure capture).
   }
   return nullptr;
-}
-
-bool Symbol_table::is_function_captured(std::string_view var) const {
-  return find_decl_scope(var) == nullptr && find_decl_scope_read(var) != nullptr;
 }
 
 bool Symbol_table::var(std::string_view key) {
@@ -282,66 +276,6 @@ bool Symbol_table::set(std::string_view key, const Dlop& trivial) {
   bundle->set(field, trivial);
 
   return true;
-}
-
-bool Symbol_table::mut(std::string_view key, const Dlop& trivial) {
-  assert_no_prefix(key);
-  auto [var, field] = get_var_field(key);
-
-  Scope* target = find_decl_scope(var);
-  if (unlikely(target == nullptr)) {
-    Lnast::info("mutate {} but variable not declared in {}",
-                var,
-                stack.empty() ? std::string_view{""} : std::string_view{stack.back()->scope});
-    return false;
-  }
-
-  auto it = target->varmap.find(var);
-  if (unlikely(!it->second->has_trivial(field))) {
-    Lnast::info("mutate {} but field {} not declared in {}", var, field, target->scope);
-    return false;
-  }
-
-  unshare_for_write(it->second)->mut(field, trivial);
-  record_uncertain_modification(var);
-
-  return true;
-}
-
-bool Symbol_table::let(std::string_view key, std::shared_ptr<Bundle> bundle) {
-  I(!stack.empty());
-  assert_no_prefix(key);
-  auto [var, field] = get_var_field(key);
-
-  auto&      cur = *stack.back();
-  const auto it  = cur.varmap.find(var);
-  if (unlikely(it != cur.varmap.end())) {
-    Lnast::info("let {} but variable already declared in {}", var, cur.scope);
-    return false;
-  }
-
-  bundle->set_immutable();
-  cur.varmap.emplace(std::string(var), bundle);
-  cur.declared.emplace_back(std::string(var));
-  return true;
-}
-
-void Symbol_table::always_scope() {
-  I(!stack.empty());
-
-  // WARNING: keep same scope-id because shadowing can not happen here.
-  scope_storage.emplace_back(Scope_type::Always, stack.back()->func_id, stack.back()->scope);
-  auto* s   = &scope_storage.back();
-  s->parent = stack.back();
-  stack.emplace_back(s);
-}
-
-void Symbol_table::conditional_scope() {
-  I(!stack.empty());
-  scope_storage.emplace_back(Scope_type::Conditional, stack.back()->func_id, stack.back()->scope);
-  auto* s   = &scope_storage.back();
-  s->parent = stack.back();
-  stack.emplace_back(s);
 }
 
 void Symbol_table::function_scope(std::string_view func_id) {

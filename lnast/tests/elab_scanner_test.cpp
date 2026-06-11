@@ -1,6 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "elab_scanner.hpp"
+#include "elab_test_scanner.hpp"
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -17,7 +17,7 @@
 
 #define DUMP_SCANNER
 
-class Test_scanner : public Elab_scanner {
+class Test_scanner : public Elab_test_scanner {
 public:
   void elaborate() {
     // printf("%s sz=%d pos=%d line=%d\n", buffer_name, buffer_sz, buffer_start_pos, buffer_start_line);

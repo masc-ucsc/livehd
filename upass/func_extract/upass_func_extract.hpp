@@ -119,5 +119,4 @@ private:
   // Walks an extracted-function body and records every ref-text it reads.
   // Used to filter latest_outer_value down to just the names the comb body
   // actually consumes, so the inlined-capture prelude stays minimal.
-  void collect_body_refs(const std::shared_ptr<Lnast>& body, std::unordered_set<std::string>& refs) const;
 };

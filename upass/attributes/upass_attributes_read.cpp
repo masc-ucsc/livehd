@@ -149,29 +149,6 @@ std::optional<std::pair<Dlop, Dlop>> uPass_attributes::lookup_range(std::string_
   return it->second;
 }
 
-
-
-
-std::optional<std::string> uPass_attributes::lookup_attr_ref(std::string_view var, std::string_view attr) const {
-  // Ref-valued attrs ride the binding as string Consts under
-  // "<attr>_refname" (the LGraph wiring pass resolves the text by name).
-  if (runner_st == nullptr || var.empty()) {
-    return std::nullopt;
-  }
-  const auto root  = Bundle::get_first_level(var);
-  const auto field = Bundle::get_all_but_first_level(var);
-  const auto b     = runner_st->get_bundle(root);
-  if (!b) {
-    return std::nullopt;
-  }
-  const std::string key = absl::StrCat(attr, "_refname");
-  const auto&       v   = field.empty() ? b->get_attr(key) : b->get_attr(field, key);
-  if (v.is_invalid() || !v.is_string()) {
-    return std::nullopt;
-  }
-  return v.to_field();
-}
-
 std::optional<Dlop> uPass_attributes::resolve_value(std::string_view var) const {
   // Prefer the runner's aggregate fold (constprop's symbol table is the
   // primary source). Fall back to our own tmp_fold for refs that only this

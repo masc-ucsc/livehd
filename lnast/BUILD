@@ -36,7 +36,10 @@ filegroup(
 
 cc_test(
     name = "ast_test",
-    srcs = ["tests/ast_test.cpp"],
+    srcs = [
+        "tests/ast_test.cpp",
+        "tests/elab_test_scanner.hpp",
+    ],
     deps = [
         ":lnast",
         "@googletest//:gtest_main",
@@ -45,7 +48,10 @@ cc_test(
 
 cc_test(
     name = "ast_test2",
-    srcs = ["tests/ast_test2.cpp"],
+    srcs = [
+        "tests/ast_test2.cpp",
+        "tests/elab_test_scanner.hpp",
+    ],
     deps = [
         ":lnast",
         "@googletest//:gtest_main",
@@ -54,7 +60,10 @@ cc_test(
 
 cc_test(
     name = "elab_scanner_test",
-    srcs = ["tests/elab_scanner_test.cpp"],
+    srcs = [
+        "tests/elab_scanner_test.cpp",
+        "tests/elab_test_scanner.hpp",
+    ],
     args = ["$(location :pyrope_test)"],
     data = [
         ":pyrope_test",
@@ -75,7 +84,10 @@ cc_test(
 
 cc_test(
     name = "elab_verilog_test",
-    srcs = ["tests/elab_verilog_test.cpp"],
+    srcs = [
+        "tests/elab_verilog_test.cpp",
+        "tests/elab_test_scanner.hpp",
+    ],
     args = ["$(location :verilog_test)"],
     data = [
         ":verilog_test",
@@ -87,7 +99,10 @@ cc_test(
 
 cc_test(
     name = "elab_xlang_test",
-    srcs = ["tests/elab_xlang_test.cpp"],
+    srcs = [
+        "tests/elab_xlang_test.cpp",
+        "tests/elab_test_scanner.hpp",
+    ],
     deps = [
         ":lnast",
     ],
@@ -95,7 +110,10 @@ cc_test(
 
 cc_test(
     name = "lexer_test",
-    srcs = ["tests/lexer_test.cpp"],
+    srcs = [
+        "tests/lexer_test.cpp",
+        "tests/ln_test_utils.hpp",
+    ],
     deps = [
         ":lnast",
         "@googletest//:gtest_main",
@@ -105,7 +123,10 @@ cc_test(
 cc_test(
     name = "parser_writer_test",
     timeout = "short",  # to avoid infinite loops
-    srcs = ["tests/parser_writer_test.cpp"],
+    srcs = [
+        "tests/parser_writer_test.cpp",
+        "tests/ln_test_utils.hpp",
+    ],
     data = glob(["tests/ln/*.ln"]),
     deps = [
         ":lnast",
@@ -115,7 +136,10 @@ cc_test(
 
 cc_binary(
     name = "bench",
-    srcs = ["tests/bench.cpp"],
+    srcs = [
+        "tests/bench.cpp",
+        "tests/ln_test_utils.hpp",
+    ],
     deps = [
         ":lnast",
         "@google_benchmark//:benchmark",

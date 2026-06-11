@@ -174,11 +174,6 @@ public:
 
   T max(uint64_t m) { return rint.uniform<T>(m); }
 
-  T between(uint64_t m1, uint64_t m2) {
-    assert(m1 < m2);
-    return m1 + rint.uniform<T>(m2 - m1);
-  }
-
   T any() { return rint.uniform<T>(std::numeric_limits<T>::max()); }
 };
 
@@ -207,11 +202,6 @@ public:
     assert(m > base);
     assert(m < (base + delta));
     return base + m + rint.uniform<T>(delta - base - m);
-  }
-
-  T between(T m1, T m2) {
-    assert(m1 < m2);
-    return m1 + rint.uniform<T>(m2 - m1);
   }
 
   T any() { return base + rint.uniform<T>(delta); }

@@ -1,5 +1,6 @@
 
 #include "ast.hpp"
+#include "elab_test_scanner.hpp"
 
 #include <format>
 
@@ -45,7 +46,7 @@ static hhds::Tree::Node_class node_at(const Ast_parser& a, int level, int pos) {
   return {};
 }
 
-class Test_scanner : public Elab_scanner {
+class Test_scanner : public Elab_test_scanner {
 public:
   enum test_rules : Rule_id {
     test_rule_invalid = 0,

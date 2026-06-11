@@ -290,13 +290,6 @@ private:
     upass::error("failed\n");
   }
 
-  template <class T, class... Targs>
-  void print_types(T ty, Targs... tys) const {
-    std::cout << Lnast_ntype::debug_name(ty) << " ";
-    print_types(tys...);
-  }
-
-  void print_types() const {}
 };
 
 // Plugin registration lives in upass_verifier.cpp to avoid duplicate

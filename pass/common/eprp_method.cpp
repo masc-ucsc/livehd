@@ -14,15 +14,6 @@ void Eprp_method::add_label(std::string_view attr, std::string_view help_txt, bo
   labels.insert({std::string(attr), {help_txt, required, default_value}});
 }
 
-std::string_view Eprp_method::get_label_help(std::string_view label) const {
-  const auto it = labels.find(std::string(label));
-  if (it == labels.end()) {
-    return "";
-  }
-
-  return it->second.help;
-}
-
 std::pair<bool, std::string> Eprp_method::check_labels(const Eprp_var& var) const {
   for (const auto& l : labels) {
     if (!l.second.required) {

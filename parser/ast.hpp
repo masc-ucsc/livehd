@@ -38,7 +38,6 @@ public:
   Tree_index        get_root() const { return tree_->get_root_node(); }
 
   bool       is_root(const Tree_index& nid) const { return nid == get_root(); }
-  bool       is_leaf(const Tree_index& nid) const { return nid.is_leaf(); }
   Tree_index get_parent(const Tree_index& nid) const { return nid.parent(); }
   Tree_index get_first_child(const Tree_index& nid) const { return nid.first_child(); }
   Tree_index get_last_child(const Tree_index& nid) const { return nid.last_child(); }

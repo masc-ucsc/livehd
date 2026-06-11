@@ -46,7 +46,6 @@ protected:
   bool rule_top();
 
   void process_ast_handler(const hhds::Tree::Node_class& self, const Ast_parser_node& node);
-  void process_ast();
 
 public:
   Eprp();
@@ -55,8 +54,6 @@ public:
     assert(methods.find(std::string(method.get_name())) == methods.end());
     methods.insert({std::string(method.get_name()), method});
   }
-
-  bool has_method(std::string_view cmd) const { return methods.find(std::string(cmd)) != methods.end(); }
 
   // Registered method by name (nullptr when absent). Read-only access to a
   // method's label registry (name/help/default/required) — the lhd CLI uses
@@ -76,8 +73,4 @@ public:
 
   bool readline(const char* line);
 
-  std::string_view get_command_help(std::string_view cmd) const;
-
-  void get_commands(const std::function<void(std::string_view, std::string_view)>& fn) const;
-  void get_labels(std::string_view cmd, const std::function<void(std::string_view, std::string_view, bool required)>& fn) const;
 };

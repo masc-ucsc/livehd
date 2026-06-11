@@ -12,10 +12,7 @@ protected:
 
   uint64_t hash_mffc_root(hhds::Node_class n);
   uint64_t hash_mffc_node(hhds::Node_class n_driver, uint64_t hash_sink, hhds::Port_id pid);
-  uint64_t hash_mffc_leaf(uint64_t hash_sink, hhds::Port_id pid);
   uint64_t hash_node(hhds::Node_class node);
-
-  inline uint32_t group_score(uint32_t group_size, uint32_t num_nodes);
 
   void find_mffc_group(hhds::Graph* g);
 

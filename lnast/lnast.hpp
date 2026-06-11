@@ -231,7 +231,6 @@ public:
   const hhds::Tree&                    tree() const noexcept { return *tree_; }
   std::shared_ptr<hhds::Tree>          tree_ptr() const noexcept { return tree_; }
   const std::shared_ptr<hhds::Forest>& forest() const noexcept { return forest_; }
-  const std::shared_ptr<hhds::TreeIO>& treeio() const noexcept { return treeio_; }
 
   // Atomically swap the tree body backing this Lnast. `new_body` must be an
   // unattached tree (e.g. from `forest()->create_tree_temp(...)` or
@@ -255,10 +254,6 @@ public:
   Lnast_nid get_child(const Lnast_nid& nid) const { return nid.first_child(); }
 
   // True iff the node has exactly one child.
-  bool has_single_child(const Lnast_nid& nid) const {
-    auto fc = nid.first_child();
-    return fc.is_valid() && fc.is_last_child();
-  }
 
   // ── iteration ───────────────────────────────────────────────────────────
   // children(parent): visit each direct child of parent.
@@ -283,7 +278,6 @@ public:
   Lnast_ntype::Lnast_ntype_int get_type(const Lnast_nid& nid) const;
   void                         set_type(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int t);
   std::string_view             get_name(const Lnast_nid& nid) const;
-  std::string_view             get_vname(const Lnast_nid& nid) const { return get_name(nid); }
   void                         set_name(const Lnast_nid& nid, std::string_view name);
 
   // ── source provenance ([[1f]]) ──────────────────────────────────────────
@@ -319,7 +313,6 @@ public:
 
   // ── module metadata ─────────────────────────────────────────────────────
   std::string_view get_top_module_name() const { return top_module_name; }
-  void             set_top_module_name(std::string_view name) { top_module_name = name; }
 
   // ── lambda kind (Task 1r; stamped by func_extract on extracted trees) ───
   std::string_view get_lambda_kind() const noexcept { return lambda_kind_; }
@@ -330,7 +323,6 @@ public:
   bool is_template() const noexcept { return template_; }
   void set_template(bool t) noexcept { template_ = t; }
   // Generic type-parameter names (`<T, U>`), seam for the follow-up goal.
-  const std::vector<std::string>& get_generics() const noexcept { return generics_; }
   void                            set_generics(std::vector<std::string> g) { generics_ = std::move(g); }
   bool                            has_generics() const noexcept { return !generics_.empty(); }
 

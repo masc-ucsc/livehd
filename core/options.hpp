@@ -15,14 +15,6 @@ protected:
     return strcasecmp(s1.c_str(), s2.c_str()) == 0;
   }
 
-  void set_val(const std::string& label, const std::string& value) {
-    if (is_opt(label, "path")) {
-      path = value;
-    } else if (is_opt(label, "name")) {
-      name = value;
-    }
-  };
-
 public:
   Options_base() {
     path = "lgdb";

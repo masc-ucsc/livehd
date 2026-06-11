@@ -219,17 +219,6 @@ const char* Vcd_reader::parse_sample(const char* ptr) {
   return ptr;
 }
 
-const std::vector<std::string>& Vcd_reader::get_alias(std::string_view name) const {
-  static std::vector<std::string> empty_map;
-
-  auto it = alias_map_.find(name);
-  if (it == alias_map_.end()) {
-    return empty_map;
-  }
-
-  return it->second;
-}
-
 void Vcd_reader::parse() {
   const char* ptr = map_buffer_;
   while (ptr < map_end_) {

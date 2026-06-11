@@ -11,9 +11,6 @@ Vcd_sample::~Vcd_sample() {
   std::cout << "=== sample parity results ===\n";
   for (auto& [sig, p] : parity_) {
     std::print("  {} : {}\n", sig, p);
-    for (const auto& n : get_alias(sig)) {
-      std::print("     : {}\n", n);
-    }
   }
 }
 

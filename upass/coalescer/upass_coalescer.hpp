@@ -322,10 +322,6 @@ public:
   void set_options(const upass::Options_map& opts) override;
 
   // Counters surfaced for tests / diagnostics.
-  std::size_t pending_count() const { return pending.size(); }
-  std::size_t parked_total() const { return stat_parked; }
-  std::size_t dse_dropped_total() const { return stat_dse_dropped; }
-  std::size_t flushed_total() const { return stat_flushed; }
 
 private:
   // Source LNAST nid of a parked stmt, keyed by LHS name. flush_all sorts

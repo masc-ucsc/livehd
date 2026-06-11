@@ -24,27 +24,6 @@ public:
 
   bool is(Kind k) { return kind == k; }
 
-  std::string get_string() {
-    switch (kind) {
-#define KIND_STR(KIND) \
-  case Kind::KIND:     \
-    if (text.empty())  \
-      return #KIND;    \
-    else               \
-      return #KIND ", " + text;
-#define TOKEN_MK(NAME)           KIND_STR(NAME)
-#define TOKEN_PN(NAME, SPELLING) KIND_STR(NAME)
-#define TOKEN_LT(NAME)           KIND_STR(NAME)
-#define TOKEN_ID(NAME)           KIND_STR(id_##NAME)
-#define TOKEN_KW(SPELLING)       KIND_STR(kw_##SPELLING)
-#define TOKEN_TY(SPELLING)       KIND_STR(ty_##SPELLING)
-#define TOKEN_FN(NAME, SPELLING) KIND_STR(fn_##NAME)
-#include "lnast_tokens.def"
-#undef KIND_STR
-    }
-    return "";
-  }
-
   bool is_ty() {
     switch (kind) {
 #define TOKEN_TY(SPELLING) \

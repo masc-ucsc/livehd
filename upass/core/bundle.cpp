@@ -766,37 +766,6 @@ bool Bundle::concat(const Dlop &trivial) {
   return true;
 }
 
-bool Bundle::is_ordered(std::string_view key) const {
-  if (has_root_) {
-    return true; // 1b/E: the sole "0" leaf is ordered by construction
-  }
-  if (key.empty()) {
-    for (const auto &e : key_map) {
-      if (get_first_level_pos(e.first) < 0) {
-        return false; // not an ordered entry
-      }
-    }
-    return true;
-  }
-
-  // Bounded run walk (1b/C).
-  for (auto it = key_map.lower_bound(key); it != key_map.end(); ++it) {
-    auto e_pos = match_first_partial(key, it->first);
-    if (e_pos == 0) {
-      break;
-    }
-    if (e_pos >= it->first.size()) {
-      continue; // exact match — no sub-field to judge
-    }
-    auto field = std::string_view(it->first).substr(e_pos);
-    if (get_first_level_pos(field) < 0) {
-      return false; // OOPS, not ordered entry. This is not OK
-    }
-  }
-
-  return true;
-}
-
 bool Bundle::is_trivial_scalar() const {
   // A trivial scalar holds at most the single "0" data leaf (the inline
   // root after 1b/E); whole-bundle attrs (single-level keys) don't break

@@ -300,16 +300,3 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
 
   return "invalid";
 }
-
-bool Ntype::has_sink(Ntype_op op, std::string_view str) {
-  auto it = name2pid.find(str);
-  if (it == name2pid.end()) {
-    if (std::isdigit(str[0]) && is_unlimited_sink(op)) {
-      return true;
-    }
-
-    return false;
-  }
-
-  return sink_pid2name[it->second][static_cast<int>(op)] == str;
-}

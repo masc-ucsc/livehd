@@ -464,8 +464,6 @@ protected:
   // declared width (s4 → -2). sign_bit is the top bit index (bits-1).
   void emit_inline_sext(const std::string& dst, const std::string& src, int sign_bit);
 
-  absl::flat_hash_map<std::string, std::shared_ptr<Lnast>>& runner_function_registry() { return function_registry; }
-
   // Monotonic per-run counter giving each inline call site a unique rename
   // tag/salt. Cross-pass idempotence is a documented 1i follow-up. Also used
   // per comptime loop iteration (unroll_for/unroll_while) so each iteration's

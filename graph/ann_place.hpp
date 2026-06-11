@@ -26,9 +26,6 @@ public:
   }
 
   float get_x() const { return x; }
-  float get_y() const { return y; }
-  float get_width() const { return width; }
-  float get_height() const { return height; }
 
   bool is_valid() const { return width > 0 && height > 0; }
 };

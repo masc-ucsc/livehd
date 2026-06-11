@@ -58,12 +58,9 @@ public:
   void                           add(const std::shared_ptr<Lnast>& lnast);
   void                           add(std::string_view name, std::string_view value);
   void                           set_stage_labels(const Eprp_dict& _dict) { stage_dict = _dict; }
-  [[nodiscard]] bool             has_stage_label(std::string_view name) const { return stage_dict.find(name) != stage_dict.end(); }
   [[nodiscard]] std::string_view get_stage(std::string_view name, std::string_view default_value = "") const;
   void                           replace(const Eprp_var::Eprp_lnasts& lns);
   void                           replace(const std::shared_ptr<Lnast>& lnast_old, std::shared_ptr<Lnast>& lnast_new);
-
-  void delete_label(std::string_view name);
 
   [[nodiscard]] bool has_label(std::string_view name) const { return dict.find(name) != dict.end(); };
 

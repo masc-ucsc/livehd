@@ -75,12 +75,6 @@ namespace str_tools {
   return str.substr(0, pos);
 }
 
-[[nodiscard]] inline std::string to_lower(std::string_view str) {
-  std::string s(str);
-  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char ch) { return std::tolower(ch); });
-  return s;
-}
-
 [[nodiscard]] inline bool ends_with(std::string_view str, std::string_view end) {
   if (end.size() == str.size()) {
     return str == end;  // faster path

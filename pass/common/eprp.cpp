@@ -261,8 +261,6 @@ void Eprp::elaborate() {
 
   ast->up(Eprp_rule);
 
-  // process_ast();
-
   ast = nullptr;
 
   pipe.run();
@@ -288,20 +286,6 @@ void Eprp::process_ast_handler(const hhds::Tree::Node_class& self, const Ast_par
     }
 
     std::print("  children: {}\n", children_txt);
-  }
-}
-
-void Eprp::process_ast() {
-  for (const auto& ti : ast->depth_preorder()) {
-    std::print("ti.level:{} ti.pos:{}\n", level_of(ti), pos_of(ti));
-  }
-
-  // Bottom-up walk: HHDS post-order yields children before their parent.
-  // get_root() hoisted into a local: gcc-14 -Wdangling-reference flags the
-  // range-for over a member call on the temporary.
-  const auto ast_root = ast->get_root();
-  for (const auto& nid : ast_root.post_order_class()) {
-    process_ast_handler(nid, ast->get_data(nid));
   }
 }
 
@@ -338,33 +322,6 @@ void Eprp::run_method_now(std::string_view cmd, Eprp_var& var, const Eprp_var::E
   }
 
   m.method(var);
-}
-
-std::string_view Eprp::get_command_help(std::string_view cmd) const {
-  const auto it = methods.find(std::string(cmd));
-  if (it == methods.end()) {
-    return "";
-  }
-
-  return it->second.help;
-}
-
-void Eprp::get_commands(const std::function<void(std::string_view, std::string_view)>& fn) const {
-  for (const auto& v : methods) {
-    fn(v.first, v.second.help);
-  }
-}
-
-void Eprp::get_labels(std::string_view                                                              cmd,
-                      const std::function<void(std::string_view, std::string_view, bool required)>& fn) const {
-  const auto& it = methods.find(std::string(cmd));
-  if (it == methods.end()) {
-    return;
-  }
-
-  for (const auto& v : it->second.labels) {
-    fn(v.first, v.second.help, v.second.required);
-  }
 }
 
 Eprp::Eprp() {}

@@ -25,7 +25,6 @@ public:
   // add_child(node):           append `node` under the current idx_stmts.
   // add_child(parent, node):   append `node` under `parent` (nodes you just
   //                            created, e.g. operands of a fresh op node).
-  // append_after(sib, node):   insert `node` right after `sib`.
   // push_stmts(new_stmts):     save the current cursor and switch to
   //                            `new_stmts` (typically the body of a fresh
   //                            if/while/for scope). Pair with pop_stmts().
@@ -35,10 +34,6 @@ public:
   Lnast_nid add_child(const Lnast_node& n) { return lnast->add_child(idx_stmts, n); }
   Lnast_nid add_child(const Lnast_nid& parent, Lnast_ntype::Lnast_ntype_int type) { return lnast->add_child(parent, type); }
   Lnast_nid add_child(const Lnast_nid& parent, const Lnast_node& n) { return lnast->add_child(parent, n); }
-  Lnast_nid append_after(const Lnast_nid& sibling, Lnast_ntype::Lnast_ntype_int type) {
-    return lnast->append_sibling(sibling, type);
-  }
-  Lnast_nid append_after(const Lnast_nid& sibling, const Lnast_node& n) { return lnast->append_sibling(sibling, n); }
   void      push_stmts(const Lnast_nid& new_stmts) {
     stmts_stack_.push(idx_stmts);
     idx_stmts = new_stmts;

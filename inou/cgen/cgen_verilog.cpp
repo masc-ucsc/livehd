@@ -93,13 +93,6 @@ std::string Cgen_verilog::pin_wire_name(const hhds::Pin_class& pin) {
   return wire_name(pin);
 }
 
-bool Cgen_verilog::is_connected(const hhds::Pin_class& pin) {
-  if (pin.is_invalid()) {
-    return false;
-  }
-  return !pin.inp_edges().empty() || !pin.out_edges().empty();
-}
-
 hhds::Pin_class Cgen_verilog::get_driver(const hhds::Pin_class& sink) {
   if (sink.is_invalid()) {
     return {};
@@ -224,8 +217,8 @@ std::string Cgen_verilog::add_expression(std::string_view txt_seq, std::string_v
 
 // [[1f]]-G: record one source-map segment for the statement about to be
 // emitted for `node`. The SourceId (stamped by tolg/yosys ingress) resolves
-// through the graph's Source_locator to its primary anchor; a combined id
-// exports that anchor only (lossy by design — the full id rides x_livehd).
+// through the Source_locator at write time; a combined id displays as its
+// primary anchor (lossy by design — the full id rides x_hhds).
 void Cgen_verilog::note_src(const std::shared_ptr<File_output>& fout, const hhds::Node_class& node) {
   if (!srcmap) {
     return;
@@ -234,37 +227,8 @@ void Cgen_verilog::note_src(const std::shared_ptr<File_output>& fout, const hhds
   if (!ref.has()) {
     return;
   }
-  const auto id = ref.get();
-  auto*      g  = node.get_graph();
-  if (g == nullptr) {
-    return;
-  }
-  const auto& sl = g->source_locator();
-  const auto  a  = sl.resolve(id);
-  if (!a) {
-    return;
-  }
-  livehd::sourcemap::Segment seg;
-  seg.gen_line  = static_cast<uint32_t>(fout->append_line());  // prepend offset added at write time
-  seg.gen_col   = 0;
-  seg.source_id = id;
-  const std::string path(a->path);
-  if (auto it = map_source_idx_.find(path); it != map_source_idx_.end()) {
-    seg.src_idx = it->second;
-  } else {
-    seg.src_idx = static_cast<uint32_t>(map_sources_.size());
-    map_source_idx_.emplace(path, seg.src_idx);
-    map_sources_.push_back(path);
-  }
-  seg.src_line = a->line > 0 ? a->line - 1 : 0;
-  seg.src_col  = 0;
-  if (a->kind != hhds::Source_locator::Anchor_kind::Line_only) {
-    if (const auto lc = sl.to_line_col(a->path, a->start_byte)) {
-      seg.src_line = lc->line - 1;
-      seg.src_col  = lc->col - 1;
-    }
-  }
-  map_segments_.push_back(seg);
+  // prepend offset added at write time
+  map_segments_.push_back({static_cast<uint32_t>(fout->append_line()), 0, ref.get()});
 }
 
 void Cgen_verilog::note_module(const std::shared_ptr<File_output>& fout) {
@@ -284,24 +248,12 @@ void Cgen_verilog::write_srcmap(const std::shared_ptr<File_output>& fout, const 
   for (auto& seg : map_segments_) {
     seg.gen_line += static_cast<uint32_t>(fout->prepend_lines());
   }
-  // sourcesContent: the bytes the spans were minted on — in-memory from this
-  // run, else a disk re-read validated against the recorded content hash.
-  // Browser-style viewers can only display originals embedded in the map.
-  std::vector<std::shared_ptr<const std::string>> contents;
-  contents.reserve(map_sources_.size());
-  for (const auto& path : map_sources_) {
-    auto c = sl.file_content(path);
-    if (c == nullptr) {
-      c = sl.load_file_content(path);
-    }
-    contents.push_back(std::move(c));
-  }
   const auto  slash    = filename.find_last_of('/');
   std::string basename = slash == std::string::npos ? filename : filename.substr(slash + 1);
   fout->append("//# sourceMappingURL=", basename, ".map\n");
   std::ofstream ofs(filename + ".map");
   if (ofs.is_open()) {
-    ofs << livehd::sourcemap::to_json(basename, map_sources_, contents, std::move(map_segments_));
+    ofs << hhds::sourcemap::to_json(basename, sl, std::move(map_segments_));
   }
 }
 
@@ -1526,8 +1478,6 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   mux2vector.clear();
   first_array_block = true;
   map_segments_.clear();
-  map_sources_.clear();
-  map_source_idx_.clear();
 
   std::string filename;
   if (odir.empty()) {

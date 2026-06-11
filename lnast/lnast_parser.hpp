@@ -12,7 +12,6 @@
 class Lnast_parser {
 public:
   explicit Lnast_parser(std::istream&);
-  std::shared_ptr<Lnast> parse_all();
 
 protected:
   std::shared_ptr<Lnast>       lnast;
@@ -38,7 +37,6 @@ protected:
     I(cur_kind() != Lnast_token::eof);
     ++token_index;
   }
-  inline void rewind_token() { --token_index; }
 
   void add_leaf(Lnast_node n) { lnast->add_child(tree_index.top(), n); }
   void add_leaf(Lnast_ntype::Lnast_ntype_int n) { lnast->add_child(tree_index.top(), n); }

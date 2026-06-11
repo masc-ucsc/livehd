@@ -368,7 +368,6 @@ protected:
   auto move_to_child() { return lm->move_to_child(); }
   auto move_to_sibling() { return lm->move_to_sibling(); }
   void move_to_parent() { lm->move_to_parent(); }
-  auto get_ntype() const { return lm->get_ntype(); }
   auto get_raw_ntype() const { return lm->get_raw_ntype(); }
   bool is_invalid() const { return lm->is_invalid(); }
   bool is_last_child() const { return lm->is_last_child(); }

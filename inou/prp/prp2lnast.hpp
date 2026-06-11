@@ -442,7 +442,6 @@ protected:
 
   // Helpers
   std::string_view        get_text(const TSNode& n) const;
-  std::string             get_text_str(const TSNode& n) const { return std::string(get_text(n)); }
   static std::string_view trim(std::string_view s);
   std::string_view        text_between(uint32_t start, uint32_t end) const;
 
@@ -459,8 +458,6 @@ protected:
   inline TSNode   child_by_field(const TSNode& n, const char* field) const;
   inline uint32_t child_count(const TSNode& n) const { return ts_node_child_count(n); }
   inline TSNode   child(const TSNode& n, uint32_t i) const { return ts_node_child(n, i); }
-  inline TSNode   named_child(const TSNode& n, uint32_t i) const { return ts_node_named_child(n, i); }
-  inline uint32_t named_child_count(const TSNode& n) const { return ts_node_named_child_count(n); }
 
 public:
   Prp2lnast(std::string_view filename, std::string_view module_name);

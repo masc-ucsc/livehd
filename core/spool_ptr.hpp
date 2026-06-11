@@ -55,20 +55,6 @@ class spool_ptr {
 public:
   spool_ptr() noexcept = default;
 
-  template <class... Args>
-  static spool_ptr<T> make(Args&&... args) {
-    auto retval = pool.get_ptr();
-    retval->reconstruct(std::forward<Args>(args)...);
-    I(retval->shared_count == 1);
-    return spool_ptr<T>(retval);
-  }
-
-  static spool_ptr<T> make() {
-    auto retval = pool.get_ptr();
-    I(retval->shared_count == 1);
-    return spool_ptr<T>(retval);
-  }
-
   spool_ptr(const spool_ptr& sp) noexcept : data_(sp.data_) {
     I(data_);
     ++data_->shared_count;
