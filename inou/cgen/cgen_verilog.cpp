@@ -267,6 +267,13 @@ void Cgen_verilog::note_src(const std::shared_ptr<File_output>& fout, const hhds
   map_segments_.push_back(seg);
 }
 
+void Cgen_verilog::note_module(const std::shared_ptr<File_output>& fout) {
+  if (!srcmap || module_anchor_.is_invalid()) {
+    return;
+  }
+  note_src(fout, module_anchor_);
+}
+
 void Cgen_verilog::write_srcmap(const std::shared_ptr<File_output>& fout, const std::string& filename,
                                 const hhds::Source_locator& sl) {
   if (!srcmap || map_segments_.empty()) {
@@ -992,6 +999,7 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, hhds::Gra
 
   bool first_arg = true;
   for (const auto& e : entries) {
+    note_module(fout);
     if (!first_arg) {
       fout->append("  ,");
     } else {
@@ -1025,6 +1033,7 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, hhds::Gra
     }
   }
 
+  note_module(fout);
   fout->append(");\n");
 }
 
@@ -1084,16 +1093,19 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
         }
       }
       if (!dpin.is_invalid()) {
+        note_src(fout, node);
         fout->append(absl::StrCat(first_entry ? "" : ",", ".", io.decl->name, "(", get_wire_or_const(dpin), ")\n"));
         first_entry = false;
       }
     }
 
+    note_src(fout, node);
     fout->append(");\n");
   }
 }
 
 void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds::Graph* graph) {
+  note_module(fout);
   fout->append("always_comb begin\n");
 
   for (auto node : graph->forward_class()) {
@@ -1118,10 +1130,12 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds:
     }
   }
 
+  note_module(fout);
   fout->append("end\n");
 }
 
 void Cgen_verilog::create_outputs(std::shared_ptr<File_output> fout, hhds::Graph* graph) {
+  note_module(fout);
   fout->append("always_comb begin\n");
   auto gio = graph->get_io();
   I(gio);
@@ -1148,6 +1162,7 @@ void Cgen_verilog::create_outputs(std::shared_ptr<File_output> fout, hhds::Graph
       process_flop(fout, node);
     }
   }
+  note_module(fout);
   fout->append("end\n");
 }
 
@@ -1233,6 +1248,9 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
         enable = get_wire_or_const(enable_dpin);
       }
     }
+
+    // [[1f]]-G: anchor the whole always block at the reg's source site.
+    note_src(fout, node);
 
     if (depth <= 1) {
       // Depth 1 (or unset): today's single-flop emission, plus the optional
@@ -1323,6 +1341,9 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, const hhds:
     return;
   }
 
+  // [[1f]]-G: anchor the wire declaration line at its defining cell.
+  note_src(fout, dpin.get_master_node());
+
   int bits = bits_of(dpin);
 
   std::string reg_str;
@@ -1341,6 +1362,7 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, const hhds:
 
   if (!dpin.is_invalid() && is_type_flop(dpin.get_master_node())) {
     auto name_next = get_append_to_name(name, "___next_");
+    note_src(fout, dpin.get_master_node());
     if (bits <= 1) {
       fout->append(reg_str, name_next, ";\n");
     } else {
@@ -1516,7 +1538,27 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   auto fout = std::make_shared<File_output>(filename);
 
+  // Module anchor: any io node tolg stamped with the declaration's SourceId.
+  module_anchor_ = hhds::Node_class();
+  if (auto gio0 = graph->get_io(); gio0 && srcmap) {
+    auto pick = [&](const auto& decls, bool is_input) {
+      for (const auto& d : decls) {
+        auto pin = is_input ? graph->get_input_pin(d.name) : graph->get_output_pin(d.name);
+        if (!pin.is_invalid() && pin.get_master_node().attr(hhds::attrs::srcid).has()) {
+          module_anchor_ = pin.get_master_node();
+          return true;
+        }
+      }
+      return false;
+    };
+    if (!pick(gio0->get_input_pin_decls(), true)) {
+      pick(gio0->get_output_pin_decls(), false);
+    }
+  }
+
+  note_module(fout);
   fout->append("/* verilator lint_off WIDTH */\n");
+  note_module(fout);
   fout->append("module ", get_scaped_name(graph->get_name()), "(\n");
 
   hhds::Graph* g = graph.get();
@@ -1530,6 +1572,7 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   create_outputs(fout, g);
   create_registers(fout, g);
 
+  note_module(fout);
   fout->append("endmodule\n");
 
   write_srcmap(fout, filename, graph->source_locator());

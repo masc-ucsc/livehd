@@ -115,6 +115,9 @@ public:
   // else a file path. `set_human_stderr` toggles the human channel.
   void set_jsonl_path(std::string_view path);
   void set_human_stderr(bool on);
+  // Render the stderr channel as JSONL records instead of human text (the
+  // CLI's --diag-fmt jsonl). set_human_stderr still gates the channel on/off.
+  void set_stderr_jsonl(bool on);
 
 private:
   void init_output();  // lazily read env (once) unless overridden
@@ -135,6 +138,7 @@ private:
   std::string json_path_;
   std::FILE*  json_fp_      = nullptr;  // owned when json_out_ == file
   bool        human_stderr_ = false;
+  bool        stderr_jsonl_ = false;    // stderr channel renders JSONL, not text
   bool        configured_   = false;    // env read or setter called
 };
 

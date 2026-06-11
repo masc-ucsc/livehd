@@ -133,6 +133,14 @@ sh_test(
     data = _FLOW_DATA,
 )
 
+# --diag-fmt auto|jsonl|pretty: stdout envelope + stderr diagnostic rendering
+# (auto = isatty(stdout): pretty on a terminal, jsonl when piped/captured).
+sh_test(
+    name = "lhd_diag_fmt_test",
+    srcs = ["lhd_diag_fmt_test.sh"],
+    data = _FLOW_DATA,
+)
+
 # ln.cat / ln.diff LNAST debug tools (stdout payload; hhds tree edit distance).
 sh_test(
     name = "lhd_ln_tools_test",

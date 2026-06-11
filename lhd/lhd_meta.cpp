@@ -206,6 +206,8 @@ int help_command(const Options& opts) {
         "shared flags:\n"
         "  --top T   --reader yosys-verilog|yosys-slang|slang   --recipe O0|O1|O2\n"
         "  --set pass.flag=value   --config lhd.toml   --workdir DIR   --result-json PATH\n"
+        "  --diag-fmt auto|jsonl|pretty   result + diagnostic rendering (auto: pretty on a\n"
+        "                                 terminal, jsonl when piped/captured)\n"
         "  -q (quiet stderr)   --verbose (mirror step logs)   (`lhd describe config` for lhd.toml)\n"
         "\n"
         "Deterministic (content-hash run_id) and hermetic (undeclared input => missing_file)\n"

@@ -44,6 +44,12 @@ grep -q '"sources":\["srcmap_in.prp"\]' "$M" || fail "wrong sources list in $M"
 grep -qF 'o = a + b' "$M" || fail "sourcesContent does not embed the original pyrope in $M"
 grep -q '"x_livehd"' "$M" || fail "missing x_livehd SourceId extra in $M"
 
+# Line coverage: header/ports/wires/always blocks anchor at the mod
+# declaration, statements at their own source lines — near-total coverage
+# (every line except the sourceMappingURL trailer). Guard the floor.
+SEGS=$(sed 's/.*"mappings":"\([^"]*\)".*/\1/' "$M" | tr ';' '\n' | grep -c .)
+[ "$SEGS" -ge 12 ] || fail "expected >=12 mapped generated lines, got $SEGS"
+
 # --- 2. lg: round trip: filehash persisted, content recovered from disk -----
 "$LHD" elaborate srcmap_in.prp --emit-dir lg:lgdb --workdir wd2 -q --result-json r2.json \
   || fail "elaborate to lg:: $(cat r2.json 2>/dev/null)"

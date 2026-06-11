@@ -319,8 +319,13 @@ void Sink::emit(Diagnostic d) {
     write_json(to_jsonl(d, seq_));
   }
   if (human_stderr_) {
-    std::fputs(to_text(d).c_str(), stderr);
-    std::fputc('\n', stderr);
+    if (!stderr_jsonl_) {
+      std::fputs(to_text(d).c_str(), stderr);
+      std::fputc('\n', stderr);
+    } else if (json_out_ != Json::stderr_) {  // already written above when the JSONL channel targets stderr
+      std::fputs(to_jsonl(d, seq_).c_str(), stderr);
+      std::fputc('\n', stderr);
+    }
   }
   ++seq_;
   records_.push_back(std::move(d));
@@ -382,6 +387,8 @@ void Sink::set_human_stderr(bool on) {
   configured_   = true;
   human_stderr_ = on;
 }
+
+void Sink::set_stderr_jsonl(bool on) { stderr_jsonl_ = on; }
 
 void Sink::stage(Diagnostic d) { staged_ = std::move(d); }
 

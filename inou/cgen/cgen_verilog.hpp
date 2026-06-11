@@ -89,6 +89,13 @@ private:
   void note_src(const std::shared_ptr<File_output>& fout, const hhds::Node_class& node);
   void write_srcmap(const std::shared_ptr<File_output>& fout, const std::string& filename, const hhds::Source_locator& sl);
 
+  // Module-level anchor (a graph io node, stamped by tolg with the
+  // `mod`/`comb` declaration's SourceId): structural lines with no cell of
+  // their own — module header, ports, always_comb begin/end, endmodule — map
+  // to the unit's declaration instead of staying unmapped.
+  hhds::Node_class module_anchor_;
+  void             note_module(const std::shared_ptr<File_output>& fout);
+
 public:
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
 

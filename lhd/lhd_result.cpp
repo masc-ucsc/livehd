@@ -1,4 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include <unistd.h>
+
 #include <algorithm>
 #include <ctime>
 #include <cstdint>
@@ -7,6 +9,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <print>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -72,6 +75,51 @@ std::string source_date_epoch_iso() {
     return "";
   }
   return buf;
+}
+
+// --diag-fmt pretty: a short human status block on stdout instead of the JSON
+// envelope. --result-json files always carry JSON; stderr already renders the
+// per-diagnostic clang-style text, so this only summarizes the step result.
+void write_pretty(const Options& opts, const Result& res) {
+  bool        color = ::isatty(STDOUT_FILENO) != 0;
+  const char* good  = color ? "\033[1;32m" : "";
+  const char* bad   = color ? "\033[1;31m" : "";
+  const char* off   = color ? "\033[0m" : "";
+
+  auto plural = [](size_t n) { return n == 1 ? "" : "s"; };
+
+  std::string head = std::format("lhd {}: {}{}{} — {} error{}, {} warning{}",
+                                 res.command,
+                                 res.status == "pass" ? good : bad,
+                                 res.status,
+                                 off,
+                                 res.n_errors,
+                                 plural(res.n_errors),
+                                 res.n_warnings,
+                                 plural(res.n_warnings));
+  if (!res.run_id.empty()) {
+    head += std::format("  (run {})", res.run_id);
+  }
+  std::print("{}\n", head);
+
+  if (opts.verbose) {
+    for (const auto& step : res.recipe_steps) {
+      std::print("  step: {}\n", step);
+    }
+  }
+  for (const auto& out : res.outputs) {
+    std::print("  out: {}\n", out);
+  }
+  if (!res.scan_json.empty()) {
+    std::print("  scan: {}\n", res.scan_json);
+  }
+  if (res.status != "pass") {
+    std::print("  {}error[{}]{}: {}\n", bad, res.error_class, off, res.error_message);
+    if (!res.error_hint.empty()) {
+      std::print("  help: {}\n", res.error_hint);
+    }
+  }
+  std::fflush(stdout);
 }
 
 }  // namespace
@@ -222,11 +270,17 @@ void write_result(const Options& opts, const Result& res) {
   }
 
   if (opts.result_json.empty()) {
+    if (opts.diag_fmt == Diag_fmt::pretty) {
+      write_pretty(opts, res);
+      return;
+    }
     std::fputs(sb.GetString(), stdout);
     std::fputc('\n', stdout);
     std::fflush(stdout);
     return;
   }
+  // A --result-json file always carries the JSON envelope, whatever the
+  // display mode (it is the machine record of the run).
   std::ofstream ofs(opts.result_json);
   if (ofs.is_open()) {
     ofs << sb.GetString() << '\n';

@@ -152,11 +152,22 @@ private:
 public:
 
   void build() {
+    // [[1f]] module anchor: io-time cells (the to-positive port masks below)
+    // are minted outside any statement — anchor them, and the graph io nodes
+    // cgen reads for the module header, at the unit's `mod`/`comb` declaration
+    // (stamped on the LNAST root by func_extract / the specialize clone).
+    if (const auto id = lnast_->get_srcid(lnast_->get_root()); id != hhds::SourceId_invalid) {
+      cur_srcid_ = livehd::srcloc::import_srcid(g_->source_locator(), lnast_->source_locator(), id);
+    }
+
     // Inputs: from io_meta(). Unsigned inputs are wrapped in a to-positive
     // Get_mask so signed-declared ports read with their unsigned value (e.g.
     // a 3-bit `a` = 0b111 reads as 7, not -1) — mirrors lgyosys tposs.
     for (const auto& e : lnast_->io_meta().inputs) {
       auto   raw = g_->get_input_pin(e.name);  // body driver pin for the port
+      if (cur_srcid_ != hhds::SourceId_invalid && !raw.is_invalid()) {
+        raw.get_master_node().attr(hhds::attrs::srcid).set(cur_srcid_);
+      }
       int32_t mw  = io_mw(e);
       if (e.kind == Io_kind::boolean || mw <= 1) {
         set_bits(raw, 1);
@@ -184,6 +195,11 @@ public:
     }
     for (const auto& e : lnast_->io_meta().outputs) {
       out_names_.push_back(e.name);
+      if (cur_srcid_ != hhds::SourceId_invalid) {
+        if (auto sink = g_->get_output_pin(e.name); !sink.is_invalid()) {
+          sink.get_master_node().attr(hhds::attrs::srcid).set(cur_srcid_);
+        }
+      }
     }
 
     // Body: lower the `stmts` child of `top`.

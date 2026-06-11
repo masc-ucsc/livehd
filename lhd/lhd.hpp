@@ -26,6 +26,16 @@ struct Typed_path {
   std::string path;
 };
 
+// Rendering of the stdout result envelope and the stderr diagnostic stream:
+// machine JSONL or human text. `--diag-fmt auto` (the default) resolves at
+// Options construction via default_diag_fmt(); a presentation choice only, so
+// it is a top-level flag (never --set: those hash into the run_id).
+enum class Diag_fmt { jsonl, pretty };
+
+// pretty when stdout is a terminal, jsonl when piped/captured (agents, CI,
+// pipelines) — clang/git-style isatty detection, overridable with --diag-fmt.
+Diag_fmt default_diag_fmt();
+
 struct Options {
   std::string command;   // elaborate|synth|check|compile|list|describe|version|help
   std::string language;  // verilog|pyrope ("" for the IR/meta commands)
@@ -66,6 +76,8 @@ struct Options {
   int  jobs    = 0;
   bool quiet   = false;
   bool verbose = false;
+
+  Diag_fmt diag_fmt = default_diag_fmt();
 };
 
 // The structured result envelope (future_cli.md "Result schema"). Written as

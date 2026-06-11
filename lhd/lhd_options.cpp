@@ -1,4 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include <unistd.h>
+
 #include <algorithm>
 #include <cctype>
 #include <format>
@@ -10,6 +12,8 @@
 #include "lhd.hpp"
 
 namespace lhd {
+
+Diag_fmt default_diag_fmt() { return ::isatty(STDOUT_FILENO) != 0 ? Diag_fmt::pretty : Diag_fmt::jsonl; }
 
 namespace {
 
@@ -374,6 +378,17 @@ Options parse_args(int argc, char** argv) {
       opts.ref_top = need_value(a, i, argc, argv);
     } else if (a == "--result-json") {
       opts.result_json = need_value(a, i, argc, argv);
+    } else if (a == "--diag-fmt") {
+      auto v = need_value(a, i, argc, argv);
+      if (v == "jsonl") {
+        opts.diag_fmt = Diag_fmt::jsonl;
+      } else if (v == "pretty") {
+        opts.diag_fmt = Diag_fmt::pretty;
+      } else if (v != "auto") {  // auto = keep the isatty-resolved default
+        throw Lhd_error{"usage",
+                        std::format("--diag-fmt expects auto|jsonl|pretty, got '{}'", v),
+                        "auto = pretty on a terminal, jsonl when piped/captured"};
+      }
     } else if (a == "--workdir") {
       opts.workdir = need_value(a, i, argc, argv);
     } else if (a == "-j" || a == "--jobs") {

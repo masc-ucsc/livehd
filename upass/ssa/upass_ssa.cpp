@@ -326,6 +326,12 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   auto staging_body = lnast->forest()->create_tree_temp(std::format("ssa-{}", lnast->get_top_module_name()));
   auto staging      = std::make_shared<Lnast>(staging_body, lnast->get_top_module_name());
   auto new_root     = staging->set_root(Lnast_ntype::create_top());
+  // [[1f]] module anchor: replace_body swaps the whole tree — re-stamp the
+  // unit-declaration id (func_extract put it on the source root; the id
+  // lives in `lnast`'s locator, which survives replace_body).
+  if (const auto id = lnast->get_srcid(lnast->get_root()); id != hhds::SourceId_invalid) {
+    staging->set_srcid(new_root, id);
+  }
 
   // Re-emit the io node with flattened leaf entries (no nested tuple_add
   // type subtree). Width/signedness for each entry come from io_meta.

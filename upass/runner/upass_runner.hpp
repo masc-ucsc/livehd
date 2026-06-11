@@ -124,6 +124,13 @@ protected:
   // statement's id (the read cursor's node).
   void carry_srcid(const Lnast_nid& staged);
 
+  // [[1f]] rewrite carry: a scratch statement (inl-bind/inl-spec/…) replaces
+  // the statement the cursor sits on — stamp the scratch ROOT with the
+  // nearest enclosing SourceId so carry_srcid's ancestor walk hands it to
+  // every node emitted from the scratch walk (else the rewrite, and every
+  // cell tolg mints from it, loses provenance).
+  void stamp_scratch_srcid(const std::shared_ptr<Lnast>& scratch, const Lnast_nid& root);
+
   // [[1f]] call-site SourceIds of the active inline frames (parallel to the
   // lm source-frame stack, pushed only around the body splice). carry_srcid
   // mints combine(callee_def, call_site) for spliced nodes — the callee def

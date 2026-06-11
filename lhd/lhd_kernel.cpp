@@ -283,6 +283,7 @@ void setup_diag(const Options& opts, std::string_view step) {
   auto& sink = livehd::diag::sink();
   sink.clear();
   sink.set_human_stderr(!opts.quiet);
+  sink.set_stderr_jsonl(opts.diag_fmt == Diag_fmt::jsonl);
   const auto* d = find_slot(opts.emits, "diagnostics");
   sink.set_jsonl_path(d ? std::string_view{d->path} : std::string_view{"off"});
   sink.set_step(step);

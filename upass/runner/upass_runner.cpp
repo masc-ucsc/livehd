@@ -264,7 +264,18 @@ std::vector<std::string> uPass_runner::resolve_order(const std::vector<std::stri
 
 void uPass_runner::carry_srcid(const Lnast_nid& staged) {
   const auto& src_ln = lm->get_lnast();
-  auto        id     = src_ln->get_srcid(lm->get_current_nid());
+  auto        nid    = lm->get_current_nid();
+  auto        id     = src_ln->get_srcid(nid);
+  // The read cursor's node may be a child of the id-bearing statement (and a
+  // scratch tree carries its id on the ROOT only) — walk up so synthesized
+  // nodes really inherit the enclosing statement's id, as documented.
+  while (id == hhds::SourceId_invalid && nid.is_valid()) {
+    nid = src_ln->get_parent(nid);
+    if (!nid.is_valid()) {
+      break;
+    }
+    id = src_ln->get_srcid(nid);
+  }
   if (id == hhds::SourceId_invalid) {
     return;
   }
@@ -284,6 +295,28 @@ void uPass_runner::carry_srcid(const Lnast_nid& staged) {
     }
   }
   staging->set_srcid(staged, id);
+}
+
+void uPass_runner::stamp_scratch_srcid(const std::shared_ptr<Lnast>& scratch, const Lnast_nid& root) {
+  const auto& src_ln = lm->get_lnast();
+  auto        nid    = lm->get_current_nid();
+  auto        id     = src_ln->get_srcid(nid);
+  while (id == hhds::SourceId_invalid && nid.is_valid()) {
+    nid = src_ln->get_parent(nid);
+    if (!nid.is_valid()) {
+      break;
+    }
+    id = src_ln->get_srcid(nid);
+  }
+  if (id == hhds::SourceId_invalid) {
+    return;
+  }
+  // Re-mint into the scratch tree's own locator: carry_srcid resolves the id
+  // through the SOURCE tree's locator when the scratch walk emits.
+  id = livehd::srcloc::import_srcid(scratch->source_locator(), src_ln->source_locator(), id);
+  if (id != hhds::SourceId_invalid) {
+    scratch->set_srcid(root, id);
+  }
 }
 
 void uPass_runner::emit_push(Lnast_ntype::Lnast_ntype_int type) {
@@ -1281,6 +1314,7 @@ void uPass_runner::emit_inline_binding(const std::string& lhs, const Lnast_node&
   auto body = scratch_forest_->create_tree_temp("inl-bind");
   auto s    = std::make_shared<Lnast>(body, "inl-bind");
   auto root = s->set_root(Lnast_ntype::create_store());
+  stamp_scratch_srcid(s, root);
   s->add_child(root, Lnast_node::create_ref(lhs));
   s->add_child(root, rhs);
   flush_deferred_emits();     // flush outer-tree parked writes before the swap
@@ -1300,6 +1334,7 @@ void uPass_runner::emit_inline_tuple(const std::string& dst, const std::vector<s
   auto body = scratch_forest_->create_tree_temp("inl-tup");
   auto s    = std::make_shared<Lnast>(body, "inl-tup");
   auto root = s->set_root(Lnast_ntype::create_tuple_add());
+  stamp_scratch_srcid(s, root);
   s->add_child(root, Lnast_node::create_ref(dst));
   for (const auto& [k, v] : fields) {
     auto a = s->add_child(root, Lnast_ntype::create_store());
@@ -1323,6 +1358,7 @@ void uPass_runner::emit_inline_typespec(const std::string& name, int bits, bool 
   auto body = scratch_forest_->create_tree_temp("inl-type");
   auto s    = std::make_shared<Lnast>(body, "inl-type");
   auto root = s->set_root(Lnast_ntype::create_type_spec());
+  stamp_scratch_srcid(s, root);
   s->add_child(root, Lnast_node::create_ref(name));
   // Task 1t — emit the canonical prim_type_int(max,min) from (bits, signed).
   auto pt = s->add_child(root, Lnast_ntype::create_prim_type_int());
@@ -1354,6 +1390,7 @@ void uPass_runner::emit_inline_typespec_range(const std::string& name, const std
   auto body = scratch_forest_->create_tree_temp("inl-type");
   auto s    = std::make_shared<Lnast>(body, "inl-type");
   auto root = s->set_root(Lnast_ntype::create_type_spec());
+  stamp_scratch_srcid(s, root);
   s->add_child(root, Lnast_node::create_ref(name));
   // Mirror read_scalar_type_at_cursor's prim_type_int(max,min) layout: an
   // unset bound is the "nil" (unbounded) child.
@@ -1377,6 +1414,7 @@ void uPass_runner::emit_inline_sext(const std::string& dst, const std::string& s
   auto body = scratch_forest_->create_tree_temp("inl-sext");
   auto s    = std::make_shared<Lnast>(body, "inl-sext");
   auto root = s->set_root(Lnast_ntype::create_sext());
+  stamp_scratch_srcid(s, root);
   s->add_child(root, Lnast_node::create_ref(dst));
   s->add_child(root, Lnast_node::create_ref(src));
   s->add_child(root, Lnast_node::create_const(std::to_string(sign_bit)));
@@ -2348,6 +2386,11 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
   auto clone    = std::make_shared<Lnast>(mangled);
   auto src_root = tmpl->get_root();
   auto dst_root = clone->set_root(tmpl->get_type(src_root));  // top
+  // [[1f]] module anchor: the clone keeps pointing at the template's
+  // definition (set_root bypasses copy_subtree_into's carry).
+  if (const auto id = tmpl->get_srcid(src_root); id != hhds::SourceId_invalid) {
+    clone->set_srcid(dst_root, livehd::srcloc::import_srcid(clone->source_locator(), tmpl->source_locator(), id));
+  }
 
   // Emit one concrete input-port store: store(ref(name), const(nil), <type>).
   auto add_port = [&](const Lnast_nid& in_dst, const Spec_port& p, const std::string& name) {
@@ -2466,6 +2509,7 @@ void uPass_runner::emit_specialized_call(const std::string& dst, const std::stri
   auto body = scratch_forest_->create_tree_temp("inl-spec");
   auto s    = std::make_shared<Lnast>(body, "inl-spec");
   auto root = s->set_root(Lnast_ntype::create_func_call());
+  stamp_scratch_srcid(s, root);
   s->add_child(root, Lnast_node::create_ref(dst));
   s->add_child(root, Lnast_node::create_ref(mangled));  // mangled callee → tolg makes the Sub
   for (const auto& a : actuals) {
@@ -2786,6 +2830,7 @@ void uPass_runner::splice_init_call(const std::string& receiver, const std::stri
   auto body = scratch_forest_->create_tree_temp("init-call");
   auto s    = std::make_shared<Lnast>(body, "init-call");
   auto root = s->set_root(Lnast_ntype::create_func_call());
+  stamp_scratch_srcid(s, root);
   s->add_child(root, Lnast_node::create_ref(std::format("___ctor{}", ++inline_seq_)));
   s->add_child(root, Lnast_node::create_ref(init_fn));
   auto recv = s->add_child(root, Lnast_ntype::create_store());
@@ -2981,6 +3026,7 @@ void uPass_runner::emit_inline_tuple_pick(const std::string& dst, const std::str
   auto body = scratch_forest_->create_tree_temp("inl-pick");
   auto s    = std::make_shared<Lnast>(body, "inl-pick");
   auto root = s->set_root(Lnast_ntype::create_tuple_get());
+  stamp_scratch_srcid(s, root);
   s->add_child(root, Lnast_node::create_ref(dst));
   s->add_child(root, Lnast_node::create_ref(src));
   s->add_child(root, Lnast_node::create_const(index_text));
@@ -2998,6 +3044,7 @@ void uPass_runner::emit_inline_tuple_store(const std::string& dst, const std::st
   auto body = scratch_forest_->create_tree_temp("inl-tset");
   auto s    = std::make_shared<Lnast>(body, "inl-tset");
   auto root = s->set_root(Lnast_ntype::create_store());  // 3-child store == tuple_set
+  stamp_scratch_srcid(s, root);
   s->add_child(root, Lnast_node::create_ref(dst));
   s->add_child(root, Lnast_node::create_const(index_text));
   s->add_child(root, Lnast_node::create_ref(value));
@@ -3016,6 +3063,7 @@ void uPass_runner::emit_inline_declare_typed(const std::string& name, const std:
   auto body = scratch_forest_->create_tree_temp("inl-decl");
   auto s    = std::make_shared<Lnast>(body, "inl-decl");
   auto root = s->set_root(Lnast_ntype::create_declare());
+  stamp_scratch_srcid(s, root);
   s->add_child(root, Lnast_node::create_ref(name));
   auto pt = s->add_child(root, Lnast_ntype::create_prim_type_int());
   s->add_child(pt, Lnast_node::create_const(max ? std::string(max->to_pyrope()) : std::string("nil")));
@@ -3410,6 +3458,14 @@ void uPass_runner::run() {
     staging              = std::make_shared<Lnast>(body, lm->get_top_module_name());
     staging_parent       = staging->set_root(Lnast_ntype::create_top());
     staging_parent_stack = {};
+    // [[1f]] module anchor: replace_body swaps the WHOLE tree — re-stamp the
+    // unit-declaration id (func_extract put it on the source root) onto the
+    // fresh root or it dies with the old tree.
+    if (root_lnast_) {
+      if (const auto id = root_lnast_->get_srcid(root_lnast_->get_root()); id != hhds::SourceId_invalid) {
+        staging->set_srcid(staging->get_root(), id);
+      }
+    }
   };
   fresh_staging();
 
@@ -3767,6 +3823,10 @@ void uPass_runner::dead_code_eliminate_staging() {
 
   auto src_root = staging->get_root();
   auto dst_root = new_staging->set_root(staging->get_type(src_root));
+  // [[1f]] module anchor survives the DCE re-copy too.
+  if (const auto id = staging->get_srcid(src_root); id != hhds::SourceId_invalid) {
+    new_staging->set_srcid(dst_root, id);
+  }
 
   auto is_structural = [](Lnast_ntype::Lnast_ntype_int t) {
     return t == N::Lnast_ntype_top || t == N::Lnast_ntype_stmts || t == N::Lnast_ntype_if || t == N::Lnast_ntype_while

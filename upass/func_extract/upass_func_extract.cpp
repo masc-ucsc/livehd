@@ -544,6 +544,26 @@ void uPass_func_extract::process_func_def() {
   new_lnast->set_lambda_kind(func_kind);
   auto root_nid  = new_lnast->set_root(Lnast_ntype::create_top());
 
+  // [[1f]] module anchor: stamp the extracted root with the lambda
+  // definition's SourceId (nearest id-bearing ancestor of the cursor — the
+  // func_def statement). tolg anchors io-time cells at it and cgen the
+  // module header lines, so even structural Verilog stays attributable.
+  {
+    const auto& src = lm->get_lnast();
+    auto        nid = lm->get_current_nid();
+    auto        id  = src->get_srcid(nid);
+    while (id == hhds::SourceId_invalid && nid.is_valid()) {
+      nid = src->get_parent(nid);
+      if (!nid.is_valid()) {
+        break;
+      }
+      id = src->get_srcid(nid);
+    }
+    if (id != hhds::SourceId_invalid) {
+      new_lnast->set_srcid(root_nid, livehd::srcloc::import_srcid(new_lnast->source_locator(), src->source_locator(), id));
+    }
+  }
+
   // The func_def shape after the captures-slot removal is:
   //   func_def(name, kind, generics, inputs, outputs, stmts)
   // so from `kind` one sibling step reaches `generics`, a second reaches
