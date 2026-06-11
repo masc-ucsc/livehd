@@ -3405,25 +3405,64 @@ void Prp2lnast::maybe_emit_timecheck(TSNode timing_slot, TSNode id_node) {
       report_error(range_n,
                    "invalid-cycle-check",
                    "type",
-                   "a cycle check asserts a single landing cycle, not a range",
-                   "write `@[N]` with a literal N, or opt out with `@[]`");
+                   "a cycle check needs a literal cycle or a closed ascending range",
+                   "write `@[N]`, `@[A..=B]` / `@[A..<B]`, or opt out with `@[]`");
     }
     return;  // `@[]` — explicit opt-out, nothing recorded
   }
-  std::optional<int64_t> lit = resolve_cycle_value(index_n);
-  if (!lit || *lit < 0) {
-    report_error(index_n,
-                 "invalid-cycle-check",
-                 "type",
-                 "a cycle check must resolve to a cycle >= 0 (a literal or compile-time constant, counted from the "
-                 "enclosing lambda's inputs)",
-                 "write `@[N]` with a literal N (or a `const` resolvable to one), or opt out with `@[]`");
+  // `@[A..=B]` / `@[A..<B]` — a value reachable through paths of different
+  // depths (e.g. mux arms at different cycles) lands in a cycle RANGE; the
+  // check asserts the whole interval (same expression_item shape as the
+  // stage[A..=B] slot).
+  int64_t cmin = -1;
+  int64_t cmax = -1;
+  if (std::string_view(ts_node_type(index_n)) == "expression_item" && ts_node_named_child_count(index_n) == 3) {
+    TSNode lhs = ts_node_named_child(index_n, 0);
+    TSNode op  = ts_node_named_child(index_n, 1);
+    TSNode rhs = ts_node_named_child(index_n, 2);
+    if (std::string_view(ts_node_type(op)) == "binary_other_op") {
+      TSNode op_inner = ts_node_named_child(op, 0);
+      if (!ts_node_is_null(op_inner)) {
+        std::string_view op_kind(ts_node_type(op_inner));
+        bool             inclusive = op_kind == "op_range_inclusive";
+        if (inclusive || op_kind == "op_range_exclusive") {
+          auto lo = resolve_cycle_value(lhs);
+          auto hi = resolve_cycle_value(rhs);
+          if (lo && hi) {
+            cmin = *lo;
+            cmax = inclusive ? *hi : *hi - 1;
+            if (cmin < 0 || cmax < cmin) {
+              report_error(op,
+                           "invalid-cycle-check",
+                           "type",
+                           std::format("invalid cycle-check range [{}, {}]: cycles start at 0 and only ascending ranges "
+                                       "are allowed",
+                                       cmin,
+                                       cmax),
+                           "write an ascending range like `@[1..=2]`");
+            }
+          }
+        }
+      }
+    }
   }
-  auto txt  = std::to_string(*lit);
+  if (cmin < 0) {
+    std::optional<int64_t> lit = resolve_cycle_value(index_n);
+    if (!lit || *lit < 0) {
+      report_error(index_n,
+                   "invalid-cycle-check",
+                   "type",
+                   "a cycle check must resolve to a cycle >= 0 (a literal or compile-time constant, counted from the "
+                   "enclosing lambda's inputs)",
+                   "write `@[N]` / `@[A..=B]` with literals (or a `const` resolvable to one), or opt out with `@[]`");
+    }
+    cmin = *lit;
+    cmax = *lit;
+  }
   auto tcix = builder.add_child(Lnast_ntype::create_timecheck());
   lnast->add_child(tcix, identifier_to_node(id_node, /*for_lvalue=*/true));
-  lnast->add_child(tcix, Lnast_node::create_const(txt));
-  lnast->add_child(tcix, Lnast_node::create_const(txt));
+  lnast->add_child(tcix, Lnast_node::create_const(std::to_string(cmin)));
+  lnast->add_child(tcix, Lnast_node::create_const(std::to_string(cmax)));
   attach_loc(tcix, timing_slot);
 }
 
@@ -4795,24 +4834,75 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
       // min/max = nil (unconstrained — the form foreign Verilog modules,
       // which carry no markings, ingest as).
       std::string min_txt = "nil";
+      std::string max_txt = "nil";
       TSNode      range_n = child_by_field(timing, "range");
       if (!ts_node_is_null(range_n)) {
         report_error(range_n,
                      "invalid-mod-cycle",
                      "type",
-                     std::format("mod output '{}' declares a cycle range: an output lands at a single cycle", arg_name),
-                     "write `@[N]` with a literal N, or opt out with `@[]`");
+                     std::format("mod output '{}' declares an open-ended cycle range", arg_name),
+                     "write `@[N]`, a closed range `@[A..=B]` / `@[A..<B]`, or opt out with `@[]`");
       }
-      TSNode index_n = child_by_field(timing, "index");
-      if (!ts_node_is_null(index_n)) {
+      constexpr int64_t k_max_cycle = std::numeric_limits<int32_t>::max();
+      TSNode            index_n     = child_by_field(timing, "index");
+      bool              got_range   = false;
+      // An output reachable through paths of different depths (e.g. mux arms
+      // at different cycles) declares the interval with `@[A..=B]`/`@[A..<B]`
+      // (same expression_item shape as a stage[A..=B] slot).
+      if (!ts_node_is_null(index_n) && std::string_view(ts_node_type(index_n)) == "expression_item"
+          && ts_node_named_child_count(index_n) == 3) {
+        TSNode lhs = ts_node_named_child(index_n, 0);
+        TSNode op  = ts_node_named_child(index_n, 1);
+        TSNode rhs = ts_node_named_child(index_n, 2);
+        if (std::string_view(ts_node_type(op)) == "binary_other_op") {
+          TSNode op_inner = ts_node_named_child(op, 0);
+          if (!ts_node_is_null(op_inner)) {
+            std::string_view op_kind(ts_node_type(op_inner));
+            bool             inclusive = op_kind == "op_range_inclusive";
+            if (inclusive || op_kind == "op_range_exclusive") {
+              auto lo = resolve_cycle_value(lhs);
+              auto hi = resolve_cycle_value(rhs);
+              if (lo && hi) {
+                int64_t cmax = inclusive ? *hi : *hi - 1;
+                if (*lo < 0 || cmax < *lo) {
+                  report_error(op,
+                               "invalid-mod-cycle",
+                               "type",
+                               std::format("invalid landing-cycle range [{}, {}] for mod output '{}': cycles start at 0 "
+                                           "and only ascending ranges are allowed",
+                                           *lo,
+                                           cmax,
+                                           arg_name),
+                               "write an ascending range like `@[1..=2]`");
+                }
+                if (cmax > k_max_cycle) {
+                  report_error(rhs,
+                               "invalid-mod-cycle",
+                               "type",
+                               std::format("invalid landing cycle {} for mod output '{}': exceeds the maximum of {}",
+                                           cmax,
+                                           arg_name,
+                                           k_max_cycle),
+                               "use a realistic cycle count");
+                }
+                min_txt   = std::to_string(*lo);
+                max_txt   = std::to_string(cmax);
+                got_range = true;
+              }
+            }
+          }
+        }
+      }
+      if (!ts_node_is_null(index_n) && !got_range) {
         std::optional<int64_t> lit = resolve_cycle_value(index_n);
         if (!lit) {
           report_error(index_n,
                        "invalid-mod-cycle",
                        "type",
-                       std::format("mod output '{}' must declare a single landing cycle (a literal or compile-time constant)",
+                       std::format("mod output '{}' must declare its landing cycle (a literal, compile-time constant, or "
+                                   "closed ascending range)",
                                    arg_name),
-                       "write `@[N]` with a literal N (or a `const` resolvable to one), or opt out with `@[]`");
+                       "write `@[N]` / `@[A..=B]` with literals (or a `const` resolvable to one), or opt out with `@[]`");
         }
         if (*lit < 0) {
           report_error(index_n,
@@ -4823,7 +4913,6 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
                                    arg_name),
                        "use `@[0]` for a combinational feedthrough output");
         }
-        constexpr int64_t k_max_cycle = std::numeric_limits<int32_t>::max();
         if (*lit > k_max_cycle) {
           report_error(
               index_n,
@@ -4833,10 +4922,11 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
               "use a realistic cycle count");
         }
         min_txt = std::to_string(*lit);
+        max_txt = min_txt;
       }
       auto st = lnast->add_child(aidx, Lnast_ntype::create_stages());
       lnast->add_child(st, Lnast_node::create_const(min_txt));
-      lnast->add_child(st, Lnast_node::create_const(min_txt));
+      lnast->add_child(st, Lnast_node::create_const(max_txt));
     }
   }
 }

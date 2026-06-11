@@ -1,8 +1,11 @@
 /*
 :name: mod_cycle_range
 :type: error
-:error: must declare a single landing cycle
-:help: opt out with
+:tolg: 1
+:error: lands at cycle\(s\) \(0,0\) but \(1,2\) is declared at the interface
 */
 
-mod f(a:u8) -> (x:u8@[1..=2]) { x = a }   // locate_error_here
+// A closed landing-cycle RANGE on a mod output is LEGAL (multi-path values,
+// see equiv/mod_twopaths) — but it is still CHECKED: a combinational
+// feedthrough computes (0,0), which the declared (1,2) interval rejects.
+mod f(a:u8) -> (x:u8@[1..=2]) { x = a }

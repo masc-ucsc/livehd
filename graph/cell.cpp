@@ -218,13 +218,13 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 2 : return "clock_pin";  // runtime  x 1 or n_ports
         case 3 : return "din";        // runtime  x n_ports
         case 4 : return "enable";     // runtime  x n_ports
-        case 5 : return "fwd";        // comptime x 1
+        case 5 : return "fwd";        // comptime x 1 -- per-WRITE-port forwarding mask (bit j forwards write port j)
         case 6 : return "posclk";     // comptime x 1
         case 7 : return "type";       // comptime x 1 (0:async, 1:sync: 2:array)
         case 8 : return "wensize";    // comptime x 1  -- number of Write Enable bits
         case 9 : return "size";       // comptime x 1
         case 10: return "rdport";     // comptime x n_ports (1 rd, 0 wr)
-        case 11: return "init";       // comptime x 1 -- contents (entry 0 in the low `bits`, row-major); NOT restored by reset
+        case 11: return "init";       // comptime x 1 -- contents (entry 0 in the low `bits`, row-major); a reg array with a bound reset restores it via per-entry write ports (tolg)
         default: return "invalid";
       }
       break;

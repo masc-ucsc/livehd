@@ -23,56 +23,66 @@
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
-<li><strong>B2 — 1a-mem follow-ups (small, unscheduled).</strong>
-  <ul>
-  <li><strong>Failing LEC case:</strong> there are 2 failing tests:
-    <code>equiv/mem_pending_sync_init.prp</code> and
-    <code>equiv/mem_pending_sync_init.prp</code>.
-    <p>Several issues in these tests:</p>
-    <ul>
-    <li>The timecheck is incorrect. It should pass with <code>out@[1]</code> or
-      <code>out@[]</code> (no check), but <code>out@[0]</code> (currently passes
-      with this) is wrong.</li>
-    <li>The output data does not work (even when the timecheck is fixed or
-      disabled). Verilog ref gen verilog has <code>rd_dout_0</code> correctly,
-      and <code>INIT_EN</code> and <code>INIT</code>:
-      <pre><code>./bazel-bin/lhd/lhd compile --reader yosys-verilog inou/prp/tests/equiv/mem_pending_sync_init.v --emit-dir verilog:tmp/</code></pre>
-      <pre><code>cgen_memory_1rd_1wr #( .LATENCY_0(1) ,.BITS(3) ,.SIZE(4) ,.WENSIZE(3) ,.FWD(0)) data(
-.clk(get_mask_80)
-  ,.rd_addr_0(get_mask_76)
-  ,.rd_enable_0(2'sh1)
-  ,.wr_addr_0(1'b0)
-  ,.wr_enable_0(1'b0)
-  ,.wr_din_0(1'b0)
-);</code></pre>
-    </li>
-    <li>The Pyrope gen verilog seems fine, so in this case
-      <code>lgyosys_tolg.cpp</code> seems to have a bug or missing things
-      (<code>INIT</code>, output, and <code>BITS</code>):
-      <pre><code>./bazel-bin/lhd/lhd compile inou/prp/tests/equiv/mem_pending_sync_init.prp --emit-dir verilog:tmp/</code></pre>
-      <p>(once the <code>@[1]</code> issue is patched by hand)</p>
-      <pre><code>cgen_memory_1rd_1wr #( .LATENCY_0(1) ,.BITS(4) ,.SIZE(4) ,.WENSIZE(1) ,.FWD(0) ,.INIT_EN(1) ,.INIT(16'sh4321)) memory_20(
-.clk(clock)
-  ,.rd_addr_0(get_mask_16_u)
-  ,.rd_enable_0(2'sh1)
-  ,.rd_dout_0(memory_20_dout_0)
-  ,.wr_addr_0(1'b0)
-  ,.wr_enable_0(1'b0)
-  ,.wr_din_0(1'b0)
-);</code></pre>
-    </li>
-    <li>The Pyrope gen verilog fails.</li>
-    </ul>
-  </li>
 <li><strong>C — 1a-ops: remaining op / cell mappings.</strong>
   <ul>
-  <li><code>unique if/match</code> should chaing with hotmux, but cgen.verlog still does not handle hotmux (patch hotmux all across the flow).</li>
+  <li><code>unique if/match</code> should chain with hotmux, but cgen.verilog still does not handle hotmux (patch hotmux all across the flow).</li>
+  </ul></li>
+<li><strong>Known gaps (recorded 2026-06-10, unscheduled):</strong>
+  <ul>
+  <li>A comb feedback THROUGH a Memory cell (<code>t[i] = t[j] + 1</code>)
+    still diagnoses as a combinational loop — the Tarjan classifier accepts
+    only state Flops in an SCC; a clocked Memory should qualify as state and
+    home like a scalar state reg.</li>
+  <li>The yosys reader collapses <code>RD_TRANSPARENCY_MASK</code>
+    (per rd×wr in $mem_v2) into the per-WRITE-port <code>fwd</code> mask via
+    <code>as_int</code> — exact only for 1-read-port memories; multi-read
+    transparency mixes are approximated.</li>
+  <li>The reset-restore lowering mints one write port per entry, so a big
+    restored array exhausts the <code>ware/rtl</code> wrapper family
+    (now diagnosed in cgen: "needs a Rrd_Wwr wrapper"); a register-bank or
+    sweep-FSM fallback is unscheduled.</li>
   </ul></li>
 </ul>
 
 <h2>Subtasks — landed</h2>
 <ul class="subtasks">
 <li><strong>A — reg→Flop slice + combinational lowering milestone.</strong> <span class="status landed">landed</span></li>
+<li><strong>B2 — 1a-mem follow-ups.</strong> <span class="status landed">landed</span>
+  2026-06-10; <code>mem_pending_sync_init</code> + <code>mem_pending_reset_restore</code>
+  green and in the default suite, all 11 <code>mem_*</code> equiv pairs + new
+  <code>mod_twopaths</code> + yosys roundtrip <code>mem_sync_init.v</code> pass. What shipped:
+  <ul>
+  <li><strong>timecheck model:</strong> <code>@[N]</code> counts intervening flops
+    input→output. A clocked Memory (type 0/1) is ONE flop crossing for every path
+    through it (the commit edge / sync-read flop; the fwd mux is cell-internal and
+    never a 0-flop path) — a type=2 comb array crosses nothing. SCC state still
+    homes (scalar state-reg reads stay <code>@[0]</code>); the six landed clocked
+    mem tests moved <code>@[0]</code>→<code>@[1]</code>.</li>
+  <li><strong><code>@[]</code> no-check:</strong> the opt-out now survives the SSA io
+    harvest as stages −1 (was conflated with <code>@[0]</code>, and <code>@[0]</code>
+    itself was dropped on re-emit so it was checked NOWHERE — both fixed; a mod
+    re-emits every output's stages slot, <code>nil</code> for the opt-out).</li>
+  <li><strong>ranges + mux union:</strong> a Mux/Hotmux SELECT never adds path
+    depth; arms at different cycles UNION into a range, declared as
+    <code>@[A..=B]</code>/<code>@[A..&lt;B]</code> (interface and inline asserts).
+    <code>mod_twopaths</code> pins it; <code>lg_mux_misaligned</code> repurposed to a
+    still-real comb mix (state q + staged value at an Add).</li>
+  <li><strong>wrappers:</strong> <code>cgen_memory_*</code> LATENCY_0=1 double-flopped
+    (sampled read AND output flop — never exercised); all 9 single-clock variants +
+    multiclock regenerated: comb read → fwd → ONE output flop. <code>FWD</code> is
+    now a per-WRITE-port mask (tolg emits the user-port mask; cgen diagnoses
+    missing wrapper variants; new <code>1rd_3wr</code> variant).</li>
+  <li><strong>reset-restore:</strong> a concrete-init reg array with a bound reset
+    (explicit reset-candidate input binds, never mints) restores the init on reset:
+    per-entry restore write ports (addr=k, din=init[k], enable=reset, fwd-masked
+    OUT so reads during reset return committed contents) + user ports gated
+    <code>!reset</code>. No reset ⇒ power-on-only (mem_init_* unchanged).</li>
+  <li><strong>yosys reader:</strong> $mem_v2 <code>INIT</code> now imported (x→0,
+    fully-undef skipped); resolve_memory's partial-chunk RD_DATA used a per-bit
+    fill that the materializer skipped (width 0) — the dout never reached its
+    readers; now the segment-start+width convention. Pinned by
+    <code>inou/yosys/tests/mem_sync_init.v</code> (init + narrowed-width sync read).</li>
+  </ul></li>
 <li><strong>B — 1a-mem: Pyrope Memory → LGraph Memory cell.</strong>
   <span class="status landed">landed</span> 2026-06-09, suite 416/416, 6 LEC pairs
   (<code>mem_{basic,rf,const_idx,mut_array,rom,rtl_rf}</code>) + 3 error tests. The

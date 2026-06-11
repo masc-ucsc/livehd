@@ -780,9 +780,16 @@ private:
     bool             is_array    = false;  // type=2: mut/const array (no clock, no persistence)
     bool             is_pub      = false;  // pub reg: a remote regref may attach accesses — no diagnostics
     bool             init_wired  = false;
-    int              n_wr_total  = 0;  // pre-scanned write sites (fixes dout pids)
+    int              n_wr_total  = 0;  // user sites + restore ports (fixes dout pids)
+    int              n_user_wr   = 0;  // pre-scanned program write sites
     int              wr_next     = 0;
     int              rd_next     = 0;
+    // 1a-mem reset-restore — per-entry init values: when a concrete-init reg
+    // array coexists with a bound reset, finalize_mems() adds one restore
+    // write port per entry (addr=k, din=init[k], enable=reset) and gates the
+    // user ports' enables with !reset. Restore ports stay OUT of the fwd
+    // mask: a read during reset returns the committed (old) contents.
+    std::vector<spool_ptr<Const>> restore_vals;
   };
 
   static constexpr int kMemPortStride = 12;  // == Memory sink count, graph/cell.cpp
@@ -884,10 +891,13 @@ private:
     // reg initializer — same treatment as a mut array (reg and not-reg
     // initialize alike): a concrete value becomes POWER-ON contents on the
     // `init` pin (a scalar broadcasts to every entry; a tuple literal packs
-    // per entry). nil / 0sb? = uninitialized. Like every memory init it is
-    // NOT restored by a reset (a reset-sweep FSM stays future work).
-    // mut/const arrays get theirs via the whole-array store instead.
-    spool_ptr<Const> reg_init;
+    // per entry). nil / 0sb? = uninitialized. When the module also carries a
+    // bound reset, the per-entry values become restore write ports (a reset
+    // re-loads the init in one cycle — finalize_mems()); with no reset the
+    // init stays power-on-only. mut/const arrays get theirs via the
+    // whole-array store instead.
+    spool_ptr<Const>              reg_init;
+    std::vector<spool_ptr<Const>> init_entries;
     if (!is_array) {
       for (auto c = lnast_->get_sibling_next(mode_nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
         const auto ct = lnast_->get_type(c);
@@ -911,6 +921,7 @@ private:
           reg_init   = Const::create_integer(0);
           for (int64_t i = 0; i < size; ++i) {
             reg_init = reg_init->or_op(*entry->shl_op(*Const::create_integer(i * elem_mw)));
+            init_entries.emplace_back(entry);
           }
           break;
         }
@@ -924,6 +935,10 @@ private:
           if (!reg_init) {
             return;  // pack_tuple_init reported
           }
+          auto mask = Const::get_mask_value(elem_mw);
+          for (const auto& e : tit->second.elems) {
+            init_entries.emplace_back(Const::from_pyrope(lnast_->get_name(e))->and_op(*mask));
+          }
           break;
         }
         Pass::error("upass.tolg: memory '{}' initializer must be a comptime constant or tuple literal", name);
@@ -931,11 +946,18 @@ private:
       }
     }
 
+    const int  user_sites    = count_mem_write_sites(name);
+    const bool wants_restore = !is_array && reg_init && !reset_name_.empty();
+    // The fwd mask covers exactly the PROGRAM write ports (per-write-port
+    // forwarding in the cgen wrappers); restore ports stay un-forwarded so a
+    // read during reset returns the committed contents.
+    const int64_t fwd_mask = is_array ? 1 : (int64_t{1} << user_sites) - 1;
+
     auto mem = create_typed_node(*g_, Ntype_op::Memory);
     setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Const::create_integer(elem_mw)));
     setup_sink_by_name(mem, "size").connect_driver(create_const(*g_, *Const::create_integer(size)));
     setup_sink_by_name(mem, "type").connect_driver(create_const(*g_, *Const::create_integer(is_array ? 2 : 0)));
-    setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Const::create_integer(1)));
+    setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Const::create_integer(fwd_mask)));
     setup_sink_by_name(mem, "wensize").connect_driver(create_const(*g_, *Const::create_integer(1)));
     if (reg_init) {
       setup_sink_by_name(mem, "init").connect_driver(create_const(*g_, *reg_init));
@@ -959,7 +981,11 @@ private:
     // suppress access diagnostics. Dormant today (prp2lnast restricts `pub`
     // to file scope), but the gate is mode-keyed so it activates with regref.
     info.is_pub      = std::string_view(lnast_->get_name(mode_nid)).find("pub") != std::string_view::npos;
-    info.n_wr_total  = count_mem_write_sites(name);
+    info.n_user_wr   = user_sites;
+    info.n_wr_total  = user_sites + (wants_restore ? static_cast<int>(size) : 0);
+    if (wants_restore) {
+      info.restore_vals = std::move(init_entries);
+    }
     mem_map_.emplace(std::string(name), info);
     mem_order_.emplace_back(name);
   }
@@ -1186,11 +1212,25 @@ private:
       return true;
     }
 
+    int n_wr_cfg = 0;
+    for (const auto& rp : rdports) {
+      if (!Lnast_ntype::is_const(lnast_->get_type(rp))) {
+        continue;  // diagnosed in the port loop below
+      }
+      auto v = Const::from_pyrope(lnast_->get_name(rp));
+      if (!v || v->is_known_false()) {
+        ++n_wr_cfg;
+      }
+    }
+    // `fwd=true` means every write port forwards (the cgen wrappers take a
+    // per-write-port mask); a value > 1 passes through as an explicit mask.
+    const int64_t fwd_mask = fwd == 0 ? 0 : (fwd == 1 ? (int64_t{1} << n_wr_cfg) - 1 : fwd);
+
     auto mem = create_typed_node(*g_, Ntype_op::Memory);
     setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Const::create_integer(bits)));
     setup_sink_by_name(mem, "size").connect_driver(create_const(*g_, *Const::create_integer(size)));
     setup_sink_by_name(mem, "type").connect_driver(create_const(*g_, *Const::create_integer(type)));
-    setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Const::create_integer(fwd)));
+    setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Const::create_integer(fwd_mask)));
     setup_sink_by_name(mem, "wensize").connect_driver(create_const(*g_, *Const::create_integer(wensize)));
     if (type != 2) {
       setup_sink_by_name(mem, "posclk").connect_driver(create_const(*g_, *Const::create_integer(posclk)));
@@ -1266,7 +1306,7 @@ private:
       Pass::error("upass.tolg: multi-dimensional or field write to memory '{}' is not supported", lhs_name);
       return;
     }
-    if (mi.wr_next >= mi.n_wr_total) {
+    if (mi.wr_next >= mi.n_user_wr) {
       Pass::error("upass.tolg: internal — memory '{}' write-site pre-scan undercounted", lhs_name);
       return;
     }
@@ -1360,11 +1400,47 @@ private:
         continue;
       }
       const auto& mi = it->second;
-      if (mi.wr_next != mi.n_wr_total) {
+      if (mi.wr_next != mi.n_user_wr) {
         Pass::error("upass.tolg: internal — memory '{}' lowered {} write sites but the pre-scan counted {}",
                     name,
                     mi.wr_next,
-                    mi.n_wr_total);
+                    mi.n_user_wr);
+      }
+      // 1a-mem reset-restore — a concrete-init reg array with a bound reset
+      // restores its init on reset: one write port per entry (addr=k,
+      // din=init[k], enable=reset) on the slots after the user sites, and
+      // every USER port's enable gated with !reset (during reset the program
+      // writes are suppressed, exactly like a scalar reg's din). The restore
+      // ports are excluded from the fwd mask, so a same-cycle read during
+      // reset still returns the committed (old) contents.
+      if (!mi.restore_vals.empty()) {
+        Pin rst = reset_pin();
+        if (reset_neg_) {
+          rst = not1(rst);
+        }
+        const auto en_pid_off = 4;
+        Pin        not_rst    = not1(rst);
+        for (int u = 0; u < mi.n_user_wr; ++u) {
+          const auto pid = static_cast<uint64_t>(u * kMemPortStride + en_pid_off);
+          for (const auto& e : mi.node.inp_edges()) {
+            if (!e.sink.is_invalid() && static_cast<uint64_t>(e.sink.get_port_id()) == pid) {
+              auto old_en = e.driver;
+              e.del_edge();
+              mi.node.create_sink_pin(static_cast<hhds::Port_id>(pid)).connect_driver(and2(old_en, not_rst));
+              break;
+            }
+          }
+        }
+        for (int64_t k = 0; k < static_cast<int64_t>(mi.restore_vals.size()); ++k) {
+          const auto base = (mi.n_user_wr + k) * kMemPortStride;
+          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0))
+              .connect_driver(create_const(*g_, *Const::create_integer(k)));
+          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3))
+              .connect_driver(create_const(*g_, *mi.restore_vals[static_cast<size_t>(k)]));
+          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(rst);
+          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
+              .connect_driver(create_const(*g_, *Const::create_integer(0)));  // rdport = 0 (write)
+        }
       }
       // A read-less (or access-less) memory is a WARNING at most — its state
       // can be observed by a scan chain, and a future remote regref may
@@ -1792,13 +1868,16 @@ private:
     // latency interval (a following stage[N] re-stamps the pinned pick).
     // Bare-pipe unconstrained max (cmax<cmin) propagates as min (the
     // Phase-1 realization) — the io stages remain the caller-facing truth.
-    {
+    // A callee output declared `@[]` (stages -1) carries no interval: the
+    // instance propagates like a comb crossing and stage[] picks over it
+    // fall back to the plain-RHS path.
+    if (oe.stages_min >= 0) {
       const int64_t cmin = oe.stages_min;
       const int64_t cmax = oe.stages_max < oe.stages_min ? oe.stages_min : oe.stages_max;
       sub.attr(livehd::attrs::time_range).set({cmin, cmax});
       sub_time_[sub.get_debug_nid()] = {cmin, cmax};
+      sub_out_stages_[dst_name]      = {oe.stages_min, oe.stages_max, kind == "pipe", sub};
     }
-    sub_out_stages_[dst_name] = {oe.stages_min, oe.stages_max, kind == "pipe", sub};
   }
 
   // Task 1u-C — lower an undischarged timecheck statement to a pending
@@ -2730,11 +2809,45 @@ private:
     TR meet{0, 0, true};
 
     // Operand selection per kind: a Flop reads only din; a Sub skips its
-    // clock/reset sinks; everything else meets all inputs (consts unify).
+    // clock/reset sinks; a Memory skips its clock pins; a Mux/Hotmux skips
+    // its SELECT and unions the arm intervals (two paths of different depth
+    // = a cycle RANGE, the declaration covers it with `@[a..=b]` or `@[]`).
+    // When EVERY arm unifies (constants — e.g. the OR-of-conditions enable
+    // chain muxes true/false), the select's σ times the value instead.
+    // Everything else meets all inputs (consts unify).
     absl::flat_hash_set<uint64_t> skip_pids;
     bool                          din_only = false;
+    const bool                    is_mem   = type_op_of(node) == Ntype_op::Memory;
+    bool                          mem_clocked = false;
+    const bool is_mux = type_op_of(node) == Ntype_op::Mux || type_op_of(node) == Ntype_op::Hotmux;
+    TR         mux_sel{0, 0, true};
+    if (is_mux) {
+      skip_pids.insert(0);  // pid 0 = "s" — the select never adds path depth
+      for (const auto& e : node.inp_edges()) {
+        if (!e.sink.is_invalid() && e.sink.get_port_id() == 0) {
+          mux_sel = pin_tr(e.driver);
+          break;
+        }
+      }
+    }
     if (is_type_flop(node)) {
       din_only = true;
+    } else if (is_mem) {
+      // 1a-mem — a clocked Memory (type 0/1) is one flop crossing for every
+      // path through it: writes commit at the cycle edge, a sync read flops
+      // its dout, and the wrapper-internal forwarding mux is part of the
+      // cell abstraction (it never creates a 0-flop path). A type=2 comb
+      // array crosses nothing. The clock sinks are excluded from the meet.
+      for (const auto& e : node.inp_edges()) {
+        if (e.sink.is_invalid()) {
+          continue;
+        }
+        const auto raw_pid = static_cast<int>(e.sink.get_port_id());
+        if (Ntype::get_sink_name(Ntype_op::Memory, raw_pid) == "clock_pin") {
+          skip_pids.insert(static_cast<uint64_t>(raw_pid));
+          mem_clocked = true;
+        }
+      }
     } else if (is_type_sub(node)) {
       auto gio = node.get_subnode_io();
       if (gio) {
@@ -2768,6 +2881,10 @@ private:
         continue;
       }
       if (meet.min != t.min || meet.max != t.max) {
+        if (is_mux) {
+          meet = {std::min(meet.min, t.min), std::max(meet.max, t.max), false};
+          continue;
+        }
         Pass::error("upass.tolg: '{}' mixes values at different cycles (({},{}) vs ({},{})) at a {} cell (sink pid {}) "
                     "— align them with `stage[N]` first",
                     ln_->get_top_module_name(),
@@ -2781,8 +2898,19 @@ private:
       }
     }
 
+    if (is_mux && meet.any) {
+      meet = mux_sel;  // const-armed mux: the select times the value
+    }
+
     TR out = meet.any ? TR{0, 0, true} : meet;
-    if (is_type_flop(node)) {
+    if (is_mem) {
+      if (mem_clocked) {
+        if (out.any) {
+          out = {0, 0, false};
+        }
+        out = {out.min + 1, out.max + 1, false};
+      }
+    } else if (is_type_flop(node)) {
       auto    it   = flop_depth_.find(nid);
       int64_t dmin = 1;
       int64_t dmax = 1;
@@ -2973,6 +3101,49 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
   return walk(lnast->get_root());
 }
 
+// 1a-mem reset-restore — true when any ARRAY-typed reg declare carries a
+// concrete (non-nil) initializer. Such an array never mints an implicit
+// reset, but if the module already has a reset-candidate input it binds it:
+// the memory lowering adds per-entry restore write ports (reset re-loads the
+// init contents in one cycle).
+[[nodiscard]] bool tree_declares_init_reg_array(const std::shared_ptr<Lnast>& lnast) {
+  std::function<bool(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) -> bool {
+    if (Lnast_ntype::is_declare(lnast->get_type(nid))) {
+      auto c0 = lnast->get_first_child(nid);
+      if (!c0.is_invalid()) {
+        auto c1 = lnast->get_sibling_next(c0);
+        auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
+        if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
+          auto       mode     = lnast->get_name(c2);
+          const bool is_array = !c1.is_invalid() && Lnast_ntype::is_comp_type_array(lnast->get_type(c1));
+          if (is_array && (mode == "reg" || mode.starts_with("reg "))) {
+            for (auto c = lnast->get_sibling_next(c2); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+              const auto ct = lnast->get_type(c);
+              if (Lnast_ntype::is_const(ct)) {
+                auto txt = lnast->get_name(c);
+                if (txt != "nil" && txt != "0sb?") {
+                  return true;
+                }
+                break;
+              }
+              if (Lnast_ntype::is_ref(ct)) {
+                return true;  // tuple-literal init
+              }
+            }
+          }
+        }
+      }
+    }
+    for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      if (walk(c)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  return walk(lnast->get_root());
+}
+
 [[nodiscard]] bool needs_reset_rec(const std::shared_ptr<Lnast>& lnast, const uPass_tolg::Registry& registry,
                                    absl::flat_hash_map<std::string, bool>& memo, absl::flat_hash_set<std::string>& visiting) {
   const std::string key(lnast->get_top_module_name());
@@ -3102,9 +3273,7 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
   bool        reset_minted = false;
   bool        reset_neg    = false;
   {
-    absl::flat_hash_map<std::string, bool> memo;
-    absl::flat_hash_set<std::string>       visiting;
-    if (needs_reset_rec(lnast, registry, memo, visiting)) {
+    auto bind_reset_candidate = [&]() {
       int candidates = 0;
       for (const auto& e : lnast->io_meta().inputs) {
         const bool is_cand
@@ -3124,6 +3293,11 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
             "upass.tolg: '{}' has multiple reset-candidate inputs — give each reg an explicit `:[reset_pin=…]`",
             mod_name);
       }
+    };
+    absl::flat_hash_map<std::string, bool> memo;
+    absl::flat_hash_set<std::string>       visiting;
+    if (needs_reset_rec(lnast, registry, memo, visiting)) {
+      bind_reset_candidate();
       if (reset_name.empty()) {
         for (const auto& e : lnast->io_meta().inputs) {
           if (e.name == "reset") {
@@ -3148,6 +3322,12 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
         gio->set_unsign(reset_name, true);
         reset_minted = true;
       }
+    } else if (tree_declares_init_reg_array(lnast)) {
+      // 1a-mem reset-restore — a reg ARRAY with a concrete initializer never
+      // MINTS a reset (memories stay power-on-only by default), but when the
+      // module already carries a reset-candidate input, bind it: tolg then
+      // adds per-entry restore write ports so a reset re-loads the init.
+      bind_reset_candidate();
     }
   }
 

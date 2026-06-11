@@ -728,10 +728,14 @@ static hhds::Node_class resolve_memory(hhds::Graph* g, RTLIL::Cell* cell) {
 
         auto src_pin = create_pick_operator(dpin, offset, chunk.width, false);
         offset += chunk.width;
-        for (int i = 0; i < chunk.width; i++) {
-          I((size_t)(chunk.offset + i) < partially_assigned[wire].size());
-          partially_assigned[wire][chunk.offset + i] = src_pin;
-        }
+        // Segment convention (same as every other partial-assign writer and
+        // the process_partially_assigned materializer): the source pin sits
+        // at the segment's START index with its width in _bits. The old
+        // per-bit fill left _bits at 0, so the materializer skipped the
+        // whole RD_DATA segment — the memory dout never reached its readers.
+        I((size_t)chunk.offset < partially_assigned[wire].size());
+        partially_assigned[wire][chunk.offset]      = src_pin;
+        partially_assigned_bits[wire][chunk.offset] = chunk.width;
       }
     }
   }
@@ -2271,6 +2275,20 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           .connect_driver(create_const(*g, *Dlop::create_integer(width)));
       setup_sink_by_name(exit_node, "size")
           .connect_driver(create_const(*g, *Dlop::create_integer(depth)));
+
+      // $mem_v2 INIT (memory_collect folds $meminit / initial blocks into
+      // it) → the Memory `init` sink: same packing (entry 0 in the low
+      // WIDTH bits). Fully-undef = uninitialized; partial x bits load as 0.
+      if (cell->hasParam(ID::INIT)) {
+        const RTLIL::Const& iv = cell->getParam(ID::INIT);
+        if (!iv.is_fully_undef()) {
+          std::string val = "0ub";
+          for (char c : iv.as_string()) {  // MSB first
+            val += c == '1' ? '1' : '0';
+          }
+          setup_sink_by_name(exit_node, "init").connect_driver(create_const(*g, *Dlop::from_pyrope(val)));
+        }
+      }
 
       for (int i = 0; i < wrports; i++) {
         auto port_n = i * 12;

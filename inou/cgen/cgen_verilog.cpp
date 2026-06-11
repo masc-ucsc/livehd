@@ -356,6 +356,21 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     const int eff_rd = n_rd_ports > 0 ? n_rd_ports : 1;
     const int eff_wr = n_wr_ports > 0 ? n_wr_ports : 1;
 
+    // ware/rtl carries a fixed wrapper family; anything beyond it (e.g. a
+    // big reset-restored reg array minting one restore port per entry) needs
+    // a new cgen_memory_<R>rd_<W>wr.v variant.
+    const bool have_wrapper = single_clock ? ((eff_rd >= 1 && eff_rd <= 4 && eff_wr >= 1 && eff_wr <= 2)
+                                              || (eff_rd == 1 && eff_wr == 3))
+                                           : (eff_rd == 1 && eff_wr == 1);
+    if (!have_wrapper) {
+      Pass::error("memory {} needs a {}rd_{}wr {} wrapper that ware/rtl does not carry",
+                  debug_name(node),
+                  eff_rd,
+                  eff_wr,
+                  single_clock ? "single-clock" : "multiclock");
+      return;
+    }
+
     std::string name;
     name = absl::StrCat(name, "cgen_memory_", single_clock ? "" : "multiclock_");
     name = absl::StrCat(name, eff_rd, "rd_");

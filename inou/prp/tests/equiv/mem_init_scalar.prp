@@ -8,9 +8,9 @@
 // 1a-mem — a concrete reg-array initializer is treated exactly like a mut
 // array's (reg and not-reg initialize alike): the scalar broadcasts to every
 // entry as POWER-ON contents on the Memory `init` pin (the cgen wrapper's
-// INIT parameter → a Verilog initial block / $meminit). It is NOT restored
-// by a reset.
-mod regi(a:u8, i:u2, we:bool) -> (z:u8@[0]) {
+// INIT parameter → a Verilog initial block / $meminit). With no reset in the
+// module it is power-on-only. The clocked-memory read lands @[1].
+mod regi(a:u8, i:u2, we:bool) -> (z:u8@[1]) {
   reg t:[4]u8 = 3
   if we {
     t[i] = a

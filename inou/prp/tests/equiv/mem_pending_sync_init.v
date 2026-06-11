@@ -5,7 +5,6 @@ module \mem_pending_sync_init.syncinit (
 );
 
   reg [3:0] data[3:0];
-  reg [3:0] d0_mem;
 
   initial begin
     data[0] = 4'd1;
@@ -14,10 +13,10 @@ module \mem_pending_sync_init.syncinit (
     data[3] = 4'd4;
   end
 
-  // Match the current cgen_memory_1rd_1wr LATENCY_0=1 wrapper structure.
+  // type=1 (sync read, LATENCY_0=1): exactly ONE edge between the read
+  // address and the data out — q@[1] at the interface.
   always @(posedge clock) begin
-    d0_mem <= data[raddr];
-    q      <= d0_mem;
+    q <= data[raddr];
   end
 
 endmodule

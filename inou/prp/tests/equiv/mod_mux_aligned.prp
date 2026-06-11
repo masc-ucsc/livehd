@@ -5,10 +5,10 @@
 :pyrope_top: mod_mux_aligned.pick
 */
 
-// 2d-reg — a mux whose selector and data legs all land at the SAME cycle
-// (every operand stage[1]-delayed): the equal-meet at the Mux cell passes
-// and the output lands at the declared cycle 1. The misaligned variant is
-// the lg_mux_misaligned error test.
+// 2d-reg — a mux whose data legs all land at the SAME cycle (the select
+// never adds path depth): the arm union at the Mux cell is the single cycle
+// 1, matching the declared landing. Arms at DIFFERENT cycles union into a
+// range instead — see mod_twopaths.
 mod pick(sel:bool, a:u8, b:u8) -> (out:u9@[1]) {
   stage[1] sd = sel
   stage[1] ad = a

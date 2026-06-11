@@ -192,18 +192,25 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   std::vector<Flat_field> flat_inputs;
   std::vector<Flat_field> flat_outputs;
 
-  // Task 1q — read a `stages(min,max)` node's two const children.
+  // Task 1q — read a `stages(min,max)` node's two const children. A `nil`
+  // text (the `@[]` explicit no-check opt-out on a mod output) harvests as
+  // -1: distinguishable from a declared `@[0]` (which IS a real check that a
+  // mod output is a combinational feedthrough).
   auto read_stages = [&](Lnast_nid st_nid) -> std::pair<int32_t, int32_t> {
     int32_t smin = 0;
     int32_t smax = 0;
     auto    c    = lnast->get_first_child(st_nid);
     if (!c.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c))) {
-      if (auto v = Dlop::from_pyrope(lnast->get_name(c)); v && v->is_integer()) {
+      if (lnast->get_name(c) == "nil") {
+        smin = -1;
+      } else if (auto v = Dlop::from_pyrope(lnast->get_name(c)); v && v->is_integer()) {
         smin = static_cast<int32_t>(v->to_i());
       }
       auto c2 = lnast->get_sibling_next(c);
       if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
-        if (auto v2 = Dlop::from_pyrope(lnast->get_name(c2)); v2 && v2->is_integer()) {
+        if (lnast->get_name(c2) == "nil") {
+          smax = -1;
+        } else if (auto v2 = Dlop::from_pyrope(lnast->get_name(c2)); v2 && v2->is_integer()) {
           smax = static_cast<int32_t>(v2->to_i());
         }
       }
@@ -336,10 +343,13 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       // Task 1q — re-emit the trailing stages(min,max) annotation so the
       // post-SSA io tree keeps the pipe contract visible (the LN pipe upass
       // and lnast_to_slop read io_meta, but the dump stays source-of-truth).
-      if (!is_input && f.stages_min > 0) {
+      // A mod re-emits EVERY output's slot: `@[0]` (0,0) is a real check the
+      // LG checker must see, and the `@[]` opt-out (-1) re-emits as `nil` so
+      // tolg skips the pending record (1a-mem follow-up).
+      if (!is_input && (f.stages_min > 0 || lnast->get_lambda_kind() == "mod")) {
         auto st = staging->add_child(a, Lnast_ntype::create_stages());
-        staging->add_child(st, Lnast_node::create_const(std::to_string(f.stages_min)));
-        staging->add_child(st, Lnast_node::create_const(std::to_string(f.stages_max)));
+        staging->add_child(st, Lnast_node::create_const(f.stages_min < 0 ? "nil" : std::to_string(f.stages_min)));
+        staging->add_child(st, Lnast_node::create_const(f.stages_max < 0 ? "nil" : std::to_string(f.stages_max)));
       }
     }
   };

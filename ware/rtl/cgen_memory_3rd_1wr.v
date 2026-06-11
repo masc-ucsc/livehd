@@ -20,144 +20,165 @@ module cgen_memory_3rd_1wr
     parameter INIT_EN=0, parameter [BITS*SIZE-1:0] INIT=0)
     (input clk
 
+     // RD PORT 0
      ,input [`log2(SIZE)-1:0]  rd_addr_0
      ,input                    rd_enable_0
      ,output reg [BITS-1:0]    rd_dout_0
 
+     // RD PORT 1
      ,input [`log2(SIZE)-1:0]  rd_addr_1
      ,input                    rd_enable_1
      ,output reg [BITS-1:0]    rd_dout_1
 
+     // RD PORT 2
      ,input [`log2(SIZE)-1:0]  rd_addr_2
      ,input                    rd_enable_2
      ,output reg [BITS-1:0]    rd_dout_2
 
+     // WR PORT 0
      ,input [`log2(SIZE)-1:0]  wr_addr_0
      ,input [WENSIZE-1:0]      wr_enable_0
      ,input [BITS-1:0]         wr_din_0
-
-);
+     );
 
 localparam MASKSIZE = BITS/WENSIZE;
 
-reg [BITS-1:0]        d0_mem;
+(*ram_style = "block" *) reg [BITS-1:0] data[SIZE-1:0]; // synthesis syn_ramstyle = "block_ram"
 
-reg [BITS-1:0]        d1_mem;
-
-reg [BITS-1:0]        d2_mem;
-
+// Power-on contents (Memory cell `init` pin, entry 0 in the low BITS):
+// yosys lifts this into $meminit.
 generate
-    reg [BITS-1:0]        data[SIZE-1:0];
-    integer i;
-    // Power-on contents (Memory cell `init` pin, entry 0 in the low
-    // BITS): yosys lifts this into $meminit. NOT restored by reset.
-    if (INIT_EN) begin:BLOCK_INIT
-      integer ii;
-      initial begin
-        for(ii=0;ii<SIZE;ii=ii+1) begin
-          data[ii] = INIT[ii*BITS +: BITS];
-        end
+  if (INIT_EN) begin:BLOCK_INIT
+    integer ii;
+    initial begin
+      for(ii=0;ii<SIZE;ii=ii+1) begin
+        data[ii] = INIT[ii*BITS +: BITS];
       end
     end
-    always @(posedge clk) begin
-      for(i=0;i<WENSIZE;i=i+1) begin
-        if(wr_enable_0[i]) begin
-            data[wr_addr_0][i*MASKSIZE +: MASKSIZE] <=
-              wr_din_0[i*MASKSIZE +: MASKSIZE];
-        end
-      end
-    end
-
-    // LATENCY_0==0 is a true asynchronous (combinational) read of the
-    // CURRENT address; ==1 samples at the edge (same split as the
-    // multiclock variant).
-    if (LATENCY_0==1) begin:BLOCK_SYNC_RD
-      always @(posedge clk) begin
-        if (rd_enable_0)
-          d0_mem <= data[rd_addr_0];
-        else
-          d0_mem <= {BITS{1'bx}};
-        if (rd_enable_1)
-          d1_mem <= data[rd_addr_1];
-        else
-          d1_mem <= {BITS{1'bx}};
-        if (rd_enable_2)
-          d2_mem <= data[rd_addr_2];
-        else
-          d2_mem <= {BITS{1'bx}};
-      end
-    end else begin:BLOCK_ASYNC_RD
-      always_comb begin
-        if (rd_enable_0)
-          d0_mem = data[rd_addr_0];
-        else
-          d0_mem = {BITS{1'bx}};
-        if (rd_enable_1)
-          d1_mem = data[rd_addr_1];
-        else
-          d1_mem = {BITS{1'bx}};
-        if (rd_enable_2)
-          d2_mem = data[rd_addr_2];
-        else
-          d2_mem = {BITS{1'bx}};
-      end
-    end
+  end
 endgenerate
 
+//WRITE (port-order statement priority: on a same-address collision the
+//highest-numbered enabled port wins)
+integer i;
+always @(posedge clk) begin
+  for(i=0;i<WENSIZE;i=i+1) begin
+    if(wr_enable_0[i]) begin
+        data[wr_addr_0][i*MASKSIZE +: MASKSIZE] <=
+          wr_din_0[i*MASKSIZE +: MASKSIZE];
+    end
+  end
+end
+
+//READ PORT 0 — combinational read of the CURRENT address, then the
+//per-write-port FWD mask resolves same-cycle writes (write port j forwards
+//iff its FWD bit is set; port 0 has forwarding priority). LATENCY_0==1
+//flops the resolved value ONCE at the output (exactly one edge); ==0 is
+//fully asynchronous.
+reg [BITS-1:0]        d0_mem;
 reg [BITS-1:0]        d0_fwd;
 
-reg [BITS-1:0]        d1_fwd;
+always_comb begin
+  if (rd_enable_0)
+    d0_mem = data[rd_addr_0];
+  else
+    d0_mem = {BITS{1'bx}};
+end
 
-reg [BITS-1:0]        d2_fwd;
-
+genvar fwd_j0;
 generate
-  if (FWD) begin:BLOCK_FWD_TRUE
-    reg [WENSIZE-1:0] fwd_decision_cmp_0rd_0wr;
-    reg [WENSIZE-1:0] fwd_decision_cmp_1rd_0wr;
-    reg [WENSIZE-1:0] fwd_decision_cmp_2rd_0wr;
-    genvar j;
-    for(j=0;j<WENSIZE;j=j+1) begin:FWD_BLOCK_CALC_0
+  for(fwd_j0=0;fwd_j0<WENSIZE;fwd_j0=fwd_j0+1) begin:FWD_BLOCK_CALC_0
     always_comb begin
-      fwd_decision_cmp_0rd_0wr[j] = rd_addr_0 == wr_addr_0;
-      fwd_decision_cmp_1rd_0wr[j] = rd_addr_1 == wr_addr_0;
-      fwd_decision_cmp_2rd_0wr[j] = rd_addr_2 == wr_addr_0;
-      d0_fwd[j*MASKSIZE +: MASKSIZE] = 
-      wr_enable_0[j] && fwd_decision_cmp_0rd_0wr[j]?
-      wr_din_0[j*MASKSIZE +: MASKSIZE]:
-      d0_mem[j*MASKSIZE +: MASKSIZE];
-
-      d1_fwd[j*MASKSIZE +: MASKSIZE] = 
-      wr_enable_0[j] && fwd_decision_cmp_1rd_0wr[j]?
-      wr_din_0[j*MASKSIZE +: MASKSIZE]:
-      d1_mem[j*MASKSIZE +: MASKSIZE];
-
-      d2_fwd[j*MASKSIZE +: MASKSIZE] = 
-      wr_enable_0[j] && fwd_decision_cmp_2rd_0wr[j]?
-      wr_din_0[j*MASKSIZE +: MASKSIZE]:
-      d2_mem[j*MASKSIZE +: MASKSIZE];
-
-      end
-    end
-  end else begin:BLOCK_FWD_FALSE
-    always_comb begin
-      d0_fwd = d0_mem;
-      d1_fwd = d1_mem;
-      d2_fwd = d2_mem;
+      d0_fwd[fwd_j0*MASKSIZE +: MASKSIZE] =
+        (((FWD >> 0) & 1) != 0 && wr_enable_0[fwd_j0] && (wr_addr_0 == rd_addr_0)) ?
+        wr_din_0[fwd_j0*MASKSIZE +: MASKSIZE] :
+        d0_mem[fwd_j0*MASKSIZE +: MASKSIZE];
     end
   end
 endgenerate
 
 generate
-	if (LATENCY_0==1) begin:BLOCK1
+  if (LATENCY_0==1) begin:BLOCK_RD_LAT_0
     always @(posedge clk) begin
       rd_dout_0 <= d0_fwd;
+    end
+  end else begin:BLOCK_RD_COMB_0
+    assign rd_dout_0 = d0_fwd;
+  end
+endgenerate
+
+//READ PORT 1 — combinational read of the CURRENT address, then the
+//per-write-port FWD mask resolves same-cycle writes (write port j forwards
+//iff its FWD bit is set; port 0 has forwarding priority). LATENCY_0==1
+//flops the resolved value ONCE at the output (exactly one edge); ==0 is
+//fully asynchronous.
+reg [BITS-1:0]        d1_mem;
+reg [BITS-1:0]        d1_fwd;
+
+always_comb begin
+  if (rd_enable_1)
+    d1_mem = data[rd_addr_1];
+  else
+    d1_mem = {BITS{1'bx}};
+end
+
+genvar fwd_j1;
+generate
+  for(fwd_j1=0;fwd_j1<WENSIZE;fwd_j1=fwd_j1+1) begin:FWD_BLOCK_CALC_1
+    always_comb begin
+      d1_fwd[fwd_j1*MASKSIZE +: MASKSIZE] =
+        (((FWD >> 0) & 1) != 0 && wr_enable_0[fwd_j1] && (wr_addr_0 == rd_addr_1)) ?
+        wr_din_0[fwd_j1*MASKSIZE +: MASKSIZE] :
+        d1_mem[fwd_j1*MASKSIZE +: MASKSIZE];
+    end
+  end
+endgenerate
+
+generate
+  if (LATENCY_0==1) begin:BLOCK_RD_LAT_1
+    always @(posedge clk) begin
       rd_dout_1 <= d1_fwd;
+    end
+  end else begin:BLOCK_RD_COMB_1
+    assign rd_dout_1 = d1_fwd;
+  end
+endgenerate
+
+//READ PORT 2 — combinational read of the CURRENT address, then the
+//per-write-port FWD mask resolves same-cycle writes (write port j forwards
+//iff its FWD bit is set; port 0 has forwarding priority). LATENCY_0==1
+//flops the resolved value ONCE at the output (exactly one edge); ==0 is
+//fully asynchronous.
+reg [BITS-1:0]        d2_mem;
+reg [BITS-1:0]        d2_fwd;
+
+always_comb begin
+  if (rd_enable_2)
+    d2_mem = data[rd_addr_2];
+  else
+    d2_mem = {BITS{1'bx}};
+end
+
+genvar fwd_j2;
+generate
+  for(fwd_j2=0;fwd_j2<WENSIZE;fwd_j2=fwd_j2+1) begin:FWD_BLOCK_CALC_2
+    always_comb begin
+      d2_fwd[fwd_j2*MASKSIZE +: MASKSIZE] =
+        (((FWD >> 0) & 1) != 0 && wr_enable_0[fwd_j2] && (wr_addr_0 == rd_addr_2)) ?
+        wr_din_0[fwd_j2*MASKSIZE +: MASKSIZE] :
+        d2_mem[fwd_j2*MASKSIZE +: MASKSIZE];
+    end
+  end
+endgenerate
+
+generate
+  if (LATENCY_0==1) begin:BLOCK_RD_LAT_2
+    always @(posedge clk) begin
       rd_dout_2 <= d2_fwd;
     end
-  end else begin:BLOCK2
-    assign rd_dout_0 = d0_fwd;
-    assign rd_dout_1 = d1_fwd;
+  end else begin:BLOCK_RD_COMB_2
     assign rd_dout_2 = d2_fwd;
   end
 endgenerate
+
 endmodule

@@ -310,6 +310,9 @@ private:
     if ((kind != "pipe" && kind != "mod") || callee->io_meta().outputs.size() != 1) {
       return;
     }
+    if (callee->io_meta().outputs.front().stages_min < 0) {
+      return;  // callee output declared `@[]` — its landing cycle is unconstrained
+    }
 
     // Equal-meet over the ref actuals (consts unify with anything). Two
     // KNOWN fixed operands at different cycles is the 06c misalignment.
@@ -414,6 +417,11 @@ private:
       if (!extra.is_invalid() && N::is_const(ln_->get_type(extra)) && ln_->get_name(extra) == "checked") {
         return;
       }
+      // A ranged assert (`@[A..=B]` — multi-path values) needs the LG
+      // checker's interval propagation; this pass only derives fixed cycles.
+      if (const_of(mx) != const_of(mn)) {
+        return;
+      }
     }
     queued_checks_.push_back({nid, std::string(ln_->get_name(ref)), const_of(mn)});
   }
@@ -446,11 +454,9 @@ private:
       }
       const int64_t sigma = kit->second.min;
       if (kind == "mod") {
-        // Declared single cycle (N,N); the @[] opt-out harvests (0,0) like
-        // @[0] — both accept sigma 0, and a non-zero sigma against an @[]
-        // opt-out is indistinguishable here, so only flag fixed mismatches
-        // where the declaration is self-consistent.
-        if (oe.stages_min == oe.stages_max && sigma != oe.stages_min) {
+        // Declared single cycle (N,N). The `@[]` opt-out harvests as -1 —
+        // explicitly unchecked, skip it.
+        if (oe.stages_min >= 0 && oe.stages_min == oe.stages_max && sigma != oe.stages_min) {
           Pass::error("{}: mod output '{}' lands at cycle {} but its interface declares @[{}]",
                       ln_->get_top_module_name(),
                       oe.name,

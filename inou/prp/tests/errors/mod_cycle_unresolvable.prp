@@ -1,7 +1,7 @@
 /*
 :name: mod_cycle_unresolvable
 :type: error
-:error: literal or compile-time constant
+:error: literal, compile-time constant
 :help: resolvable to one
 */
 

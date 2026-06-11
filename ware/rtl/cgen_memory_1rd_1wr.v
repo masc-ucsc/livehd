@@ -20,7 +20,7 @@ module cgen_memory_1rd_1wr
     parameter INIT_EN=0, parameter [BITS*SIZE-1:0] INIT=0)
     (input clk
 
-      // RD PORT 0
+     // RD PORT 0
      ,input [`log2(SIZE)-1:0]  rd_addr_0
      ,input                    rd_enable_0
      ,output reg [BITS-1:0]    rd_dout_0
@@ -31,94 +31,70 @@ module cgen_memory_1rd_1wr
      ,input [BITS-1:0]         wr_din_0
      );
 
-
 localparam MASKSIZE = BITS/WENSIZE;
 
-reg [BITS-1:0]        d0_mem;
+(*ram_style = "block" *) reg [BITS-1:0] data[SIZE-1:0]; // synthesis syn_ramstyle = "block_ram"
 
+// Power-on contents (Memory cell `init` pin, entry 0 in the low BITS):
+// yosys lifts this into $meminit.
 generate
-  
-    (*ram_style = "block" *) reg [BITS-1:0]        data[SIZE-1:0]; // synthesis syn_ramstyle = "block_ram"
-    
-    integer i;
-    // Power-on contents (Memory cell `init` pin, entry 0 in the low
-    // BITS): yosys lifts this into $meminit. NOT restored by reset.
-    if (INIT_EN) begin:BLOCK_INIT
-      integer ii;
-      initial begin
-        for(ii=0;ii<SIZE;ii=ii+1) begin
-          data[ii] = INIT[ii*BITS +: BITS];
-        end
+  if (INIT_EN) begin:BLOCK_INIT
+    integer ii;
+    initial begin
+      for(ii=0;ii<SIZE;ii=ii+1) begin
+        data[ii] = INIT[ii*BITS +: BITS];
       end
     end
-    
-    //WRITE
-    always @(posedge clk) begin
-      for(i=0;i<WENSIZE;i=i+1) begin
-        if(wr_enable_0[i]) begin
-            data[wr_addr_0][i*MASKSIZE +: MASKSIZE] <=
-              wr_din_0[i*MASKSIZE +: MASKSIZE];
-        end
-      end
-    end
-    
-    //READ
-    // LATENCY_0==0 is a true asynchronous (combinational) read of the
-    // CURRENT address; ==1 samples at the edge (same split as the
-    // multiclock variant).
-    if (LATENCY_0==1) begin:BLOCK_SYNC_RD
-      always @(posedge clk) begin
-        if (rd_enable_0)
-          d0_mem <= data[rd_addr_0];
-        else
-          d0_mem <= {BITS{1'bx}};
-      end
-    end else begin:BLOCK_ASYNC_RD
-      always_comb begin
-        if (rd_enable_0)
-          d0_mem = data[rd_addr_0];
-        else
-          d0_mem = {BITS{1'bx}};
-      end
-    end
-    
-  
-    
+  end
 endgenerate
 
-
-  reg [BITS-1:0]        d0_fwd;
-
-generate
-  if (FWD) begin:BLOCK_FWD_TRUE
-    reg [WENSIZE-1:0] fwd_decision_cmp_0;
-    genvar j;
-    for(j=0;j<WENSIZE;j=j+1) begin: FWD_BLOCK_CALC_0
-    always_comb begin
-      fwd_decision_cmp_0[j] = wr_addr_0 == rd_addr_0;
-      
-      d0_fwd[j*MASKSIZE +: MASKSIZE] = 
-      wr_enable_0[j] && fwd_decision_cmp_0[j]?
-      wr_din_0[j*MASKSIZE +: MASKSIZE]:
-      d0_mem[j*MASKSIZE +: MASKSIZE];
-      end
+//WRITE (port-order statement priority: on a same-address collision the
+//highest-numbered enabled port wins)
+integer i;
+always @(posedge clk) begin
+  for(i=0;i<WENSIZE;i=i+1) begin
+    if(wr_enable_0[i]) begin
+        data[wr_addr_0][i*MASKSIZE +: MASKSIZE] <=
+          wr_din_0[i*MASKSIZE +: MASKSIZE];
     end
-  end else begin:BLOCK_FWD_FALSE
+  end
+end
+
+//READ PORT 0 — combinational read of the CURRENT address, then the
+//per-write-port FWD mask resolves same-cycle writes (write port j forwards
+//iff its FWD bit is set; port 0 has forwarding priority). LATENCY_0==1
+//flops the resolved value ONCE at the output (exactly one edge); ==0 is
+//fully asynchronous.
+reg [BITS-1:0]        d0_mem;
+reg [BITS-1:0]        d0_fwd;
+
+always_comb begin
+  if (rd_enable_0)
+    d0_mem = data[rd_addr_0];
+  else
+    d0_mem = {BITS{1'bx}};
+end
+
+genvar fwd_j0;
+generate
+  for(fwd_j0=0;fwd_j0<WENSIZE;fwd_j0=fwd_j0+1) begin:FWD_BLOCK_CALC_0
     always_comb begin
-      d0_fwd = d0_mem;
+      d0_fwd[fwd_j0*MASKSIZE +: MASKSIZE] =
+        (((FWD >> 0) & 1) != 0 && wr_enable_0[fwd_j0] && (wr_addr_0 == rd_addr_0)) ?
+        wr_din_0[fwd_j0*MASKSIZE +: MASKSIZE] :
+        d0_mem[fwd_j0*MASKSIZE +: MASKSIZE];
     end
   end
 endgenerate
 
 generate
-  if (LATENCY_0==1) begin:BLOCK1
+  if (LATENCY_0==1) begin:BLOCK_RD_LAT_0
     always @(posedge clk) begin
       rd_dout_0 <= d0_fwd;
     end
-  end else begin:BLOCK2
+  end else begin:BLOCK_RD_COMB_0
     assign rd_dout_0 = d0_fwd;
   end
 endgenerate
-
 
 endmodule
