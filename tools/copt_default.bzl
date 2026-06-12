@@ -9,6 +9,12 @@ COPTS = [
     "-Wno-error=deprecated-copy",  # abseil/abseil-cpp#948
     "-Wno-unknown-pragmas",
     "-Wno-error=deprecated",
+    # GCC -O2 emits a false-positive -Warray-bounds on slang's SLANG_ENUM
+    # toString() tables when inlined across the external-header boundary into
+    # LiveHD code (e.g. inou/slang). -isystem can't suppress it because the
+    # diagnostic is attributed to our call site; Clang (macOS) never emits it.
+    # Demote to a warning so the opt build is consistent across platforms.
+    "-Wno-error=array-bounds",
     "-Wunused",
     "-Wshadow",
 ]
