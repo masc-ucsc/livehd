@@ -2,34 +2,48 @@
 #include "slang_tree.hpp"
 
 #include <charconv>
-#include <format>
-#include <iostream>
+#include <string>
+#include <utility>
 
+#include "diag.hpp"
 #include "iassert.hpp"
-#include "slang/ast/ASTSerializer.h"
 #include "slang/ast/ASTVisitor.h"
-#include "slang/driver/Driver.h"
 #include "slang/util/SmallVector.h"
-// #include "slang/symbols/InstanceSymbols.h"
-// #include "slang/symbols/PortSymbols.h"
-// #include "slang/syntax/SyntaxPrinter.h"
-// #include "slang/syntax/SyntaxTree.h"
-// #include "slang/types/Type.h"
+#include "slang_location.hpp"
 
 // #define LNAST_NODE_POS 1
 
 Slang_tree::Slang_tree() { parsed_lnasts.clear(); }
 
+hhds::SourceId Slang_tree::mint_loc(slang::SourceRange range) {
+  if (sm_ == nullptr || lnast_builder.lnast == nullptr) {
+    return hhds::SourceId_invalid;
+  }
+  return livehd::slang_loc::mint(lnast_builder.lnast->source_locator(), *sm_, range);
+}
+
+void Slang_tree::emit_unsupported(slang::SourceRange range, std::string_view code, std::string message,
+                                  std::string_view hint) {
+  livehd::diag::Span span;
+  if (sm_ != nullptr) {
+    span = livehd::slang_loc::span_of(*sm_, range);
+  }
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                                     .code     = std::string(code),
+                                                     .category = "unsupported",
+                                                     .pass     = "inou.slang",
+                                                     .message  = std::move(message),
+                                                     .span     = std::move(span),
+                                                     .hint     = std::string(hint)});
+}
+
 void Slang_tree::process_root(const slang::ast::RootSymbol& root) {
   auto topInstances = root.topInstances;
   for (auto inst : topInstances) {
-    // std::print("slang_tree top:{}\n", inst->name);
-
     I(!has_lnast(inst->name));  // top level should not be already (may sub instances)
-    auto ok = process_top_instance(*inst);
-    if (!ok) {
-      Pass::info("unable to process top module:{}\n", inst->name);
-    }
+    // Failures inside emit a located diagnostic and fail the step; a benign
+    // "already lowered" dedup just returns false without a diagnostic.
+    process_top_instance(*inst);
   }
 }
 
@@ -51,9 +65,8 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol& symbol) 
   const auto& def = symbol.getDefinition();
 
   // Instance bodies are all the same, so if we've visited this one
-  // already don't bother doing it again.
+  // already don't bother doing it again (benign dedup, not an error).
   if (parsed_lnasts.contains(def.name)) {
-    std::print("slang_tree module:{} already parsed\n", def.name);
     return false;
   }
 
@@ -96,22 +109,35 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol& symbol) 
       const auto& type = port.getType();
       if (type.hasFixedRange()) {
         auto range = type.getFixedRange();
-        if (!range.isLittleEndian()) {
-          std::print("WARNING: {} is big endian, Flipping IO to handle. Careful about mix/match with modules\n", port.name);
+        if (!range.isDescending()) {  // ascending [0:N] == big-endian (v10 isLittleEndian)
+          livehd::diag::sink().emit(
+              livehd::diag::Diagnostic{.severity = livehd::diag::Severity::warning,
+                                       .code     = "big-endian-port",
+                                       .category = "unsupported",
+                                       .pass     = "inou.slang",
+                                       .message  = std::string("port '") + std::string(port.name)
+                                                   + "' is big-endian; flipping IO (mind mix/match with other modules)",
+                                       .span = sm_ != nullptr ? livehd::slang_loc::span_of(*sm_, port.location) : livehd::diag::Span{}});
         }
       }
       lnast_builder.vname2lname.emplace(var_name, var_name);
+      set_pending_loc(port.location);
       lnast_builder.create_declare_bits_stmts(var_name, type.isSigned(), type.getBitWidth());
+      clear_pending_loc();
 #ifdef LNAST_NODE_POS
       ++decl_pos;
 #endif
     } else if (p->kind == slang::ast::SymbolKind::InterfacePort) {
-      const auto& port = p->as<slang::ast::InterfacePortSymbol>();
-      (void)port;
-
-      std::print("port:{} FIXME\n", p->name);
+      emit_unsupported(p->location, "unsupported-interface-port",
+                       std::string("interface port '") + std::string(p->name) + "' is not supported by --reader slang",
+                       "use --reader yosys-slang for interface ports");
+      lnast_builder.lnast = nullptr;
+      return false;
     } else {
-      I(false);  // What other type?
+      emit_unsupported(p->location, "unsupported-port-kind",
+                       std::string("port '") + std::string(p->name) + "' has an unsupported kind");
+      lnast_builder.lnast = nullptr;
+      return false;
     }
   }
 
@@ -122,13 +148,16 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol& symbol) 
       const auto& ns   = member.as<slang::ast::NetSymbol>();
       auto*       expr = ns.getInitializer();
       if (expr) {
-        // std::string lhs_var = lnast_builder.get_lnast_name(member.name);
+        set_pending_loc(expr->sourceRange);
         lnast_builder.create_assign_stmts(member.name, process_expression(*expr, true));  // get last value for assigns
+        clear_pending_loc();
       }
     } else if (member.kind == slang::ast::SymbolKind::ContinuousAssign) {
       const auto& ca = member.as<slang::ast::ContinuousAssignSymbol>();
       const auto& as = ca.getAssignment();
-      bool        ok = process(as.as<slang::ast::AssignmentExpression>());
+      set_pending_loc(as.sourceRange);
+      bool ok = process(as.as<slang::ast::AssignmentExpression>());
+      clear_pending_loc();
       if (!ok) {
         lnast_builder.lnast = nullptr;
         return false;
@@ -140,9 +169,6 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol& symbol) 
         const auto& stmt = pbs.getBody();
 
         if (stmt.kind == slang::ast::StatementKind::Timed) {
-          Pass::info("always with sensitivity list at {} pos:{}, assuming always_comb",
-                     member.location.buffer().getId(),
-                     member.location.offset());
           const auto& timed = stmt.as<slang::ast::TimedStatement>();
           if (timed.stmt.kind == slang::ast::StatementKind::Block) {
             const auto& block = timed.stmt.as<slang::ast::BlockStatement>();
@@ -150,23 +176,42 @@ bool Slang_tree::process_top_instance(const slang::ast::InstanceSymbol& symbol) 
             for (const auto& bstmt : block.body.as<slang::ast::StatementList>().list) {
               if (bstmt->kind == slang::ast::StatementKind::ExpressionStatement) {
                 const auto& expr = bstmt->as<slang::ast::ExpressionStatement>().expr;
-                bool        ok   = process(expr.as<slang::ast::AssignmentExpression>());
+                set_pending_loc(expr.sourceRange);
+                bool ok = process(expr.as<slang::ast::AssignmentExpression>());
+                clear_pending_loc();
                 if (!ok) {
                   lnast_builder.lnast = nullptr;
                   return false;
                 }
               } else {
-                std::print("TODO: handle kind {}\n", (int)bstmt->kind);
+                emit_unsupported(bstmt->sourceRange, "unsupported-statement",
+                                 "only assignment statements are supported inside always blocks");
+                lnast_builder.lnast = nullptr;
+                return false;
               }
             }
           }
 
         } else {
-          std::cout << "FIXME: missing sensitivity type\n";
+          emit_unsupported(stmt.sourceRange, "unsupported-always",
+                           "always block without a sensitivity list is not supported by --reader slang",
+                           "use always_comb / always @(...) with a supported body");
+          lnast_builder.lnast = nullptr;
+          return false;
         }
       }
+    } else if (member.kind == slang::ast::SymbolKind::Instance) {
+      emit_unsupported(member.location, "unsupported-instance",
+                       std::string("submodule instance '") + std::string(member.name)
+                           + "' is not supported by --reader slang yet (design hierarchy lands in 2s)",
+                       "flatten the design, or use --reader yosys-slang for hierarchical Verilog");
+      lnast_builder.lnast = nullptr;
+      return false;
     } else {
-      Pass::error("FIXME: missing body type\n");
+      emit_unsupported(member.location, "unsupported-member",
+                       std::string("module member '") + std::string(member.name) + "' is not supported by --reader slang");
+      lnast_builder.lnast = nullptr;
+      return false;
     }
   }
 
@@ -301,8 +346,9 @@ std::string Slang_tree::process_expression(const slang::ast::Expression& expr, b
         var = lnast_builder.create_bit_not_stmts(lnast_builder.create_bit_xor_stmts(lhs, rhs));
         break;
       default: {
-        std::cout << "FIXME unimplemented binary operator\n";
-        var = "fix_binary_op";
+        emit_unsupported(expr.sourceRange, "unsupported-binary-op",
+                         "this binary operator is not supported by --reader slang yet");
+        return "0";
       }
     }
 
@@ -340,7 +386,9 @@ std::string Slang_tree::process_expression(const slang::ast::Expression& expr, b
         // case UnaryOperator::Postincrement:
         // case UnaryOperator::Postdecrement:
       default: {
-        std::cout << "FIXME unimplemented unary operator\n";
+        emit_unsupported(expr.sourceRange, "unsupported-unary-op",
+                         "this unary operator is not supported by --reader slang yet");
+        return "0";
       }
     }
   }
@@ -368,24 +416,6 @@ std::string Slang_tree::process_expression(const slang::ast::Expression& expr, b
     auto bw   = std::to_string(to_type->getBitWidth());
     auto mask = lnast_builder.create_mask_stmts(bw);
     return lnast_builder.create_bit_and_stmts(res, mask);
-#if 0
-    if (to_type->isSigned() && !from_type->isSigned()) {
-      if (to_type->getBitWidth()<=from_type->getBitWidth()) {
-        // sext(and(X,a),b) && a>b -> sext(X,b)
-        return lnast_builder.create_sext_stmts(res, create_lnast(min_bits));
-      }else{
-        // sext(and(X,a),b) && a<b -> and(X,a)
-        auto mask = lnast_builder.create_mask_stmts(create_lnast(min_bits));
-        return lnast_builder.create_bit_and_stmts(res, mask);
-      }
-    }
-
-    I(!to_type->isSigned() && from_type->isSigned());
-
-    auto tmp = lnast_builder.create_sext_stmts(res, create_lnast(from_type->getBitWidth()));
-    auto mask = lnast_builder.create_mask_stmts(create_lnast(to_type->getBitWidth()));
-    return lnast_builder.create_bit_and_stmts(tmp, mask);
-#endif
   }
 
   if (expr.kind == slang::ast::ExpressionKind::Concatenation) {
@@ -438,7 +468,9 @@ std::string Slang_tree::process_expression(const slang::ast::Expression& expr, b
     return lnast_builder.create_get_mask_stmts(sel_var, sel_mask);
   }
 
-  std::cout << "FIXME still unimplemented Expression kind\n";
-
-  return "FIXME_op";
+  // CIRCT-style default fallback: any AST expression kind the importer does not
+  // handle becomes a located diagnostic instead of slipping through silently.
+  emit_unsupported(expr.sourceRange, "unsupported-expression",
+                   "this expression is not supported by --reader slang yet");
+  return "0";
 }

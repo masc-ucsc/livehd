@@ -169,6 +169,14 @@ private:
   // signature is not fully typed; cleared on a specialized clone. tolg + the
   // no-LGraph gate read it. In-memory only (sibling to lambda_kind_).
   bool                          template_ = false;
+  // todo/ 1s subtask E — when set, uPass_timecheck skips this tree. Stamped on
+  // by inou.slang on every tree it produces (the direct SV reader lowers
+  // sequential `always` as comb and predates the timing conventions, so a
+  // generated `mod` would otherwise fail the timecheck before 2s improves
+  // unit-shape inference). In-memory only (sibling to lambda_kind_); the ln:
+  // reload re-derives lambda_kind, and slang output is comb, so the reload path
+  // is naturally timecheck-free without serializing this flag.
+  bool                          skip_timecheck_ = false;
   // Generic type parameters (`<T, U>`) recorded by func_extract from
   // the func_def generics child (a seam: the per-`T` body substitution lands
   // in a follow-up goal; this only preserves the names so a template carrying
@@ -320,6 +328,10 @@ public:
   //     specialized clone). True ⇒ no LGraph at definition time. ───────────
   bool is_template() const noexcept { return template_; }
   void set_template(bool t) noexcept { template_ = t; }
+
+  // ── timecheck suppression (todo/ 1s subtask E; stamped by inou.slang) ─────
+  bool get_skip_timecheck() const noexcept { return skip_timecheck_; }
+  void set_skip_timecheck(bool t) noexcept { skip_timecheck_ = t; }
   // Generic type-parameter names (`<T, U>`), seam for the follow-up goal.
   void                            set_generics(std::vector<std::string> g) { generics_ = std::move(g); }
   bool                            has_generics() const noexcept { return !generics_.empty(); }

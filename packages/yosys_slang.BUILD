@@ -29,9 +29,12 @@ cc_library(
     visibility = ["//visibility:public"],
     defines = ["YOSYS_ENABLE_PLUGINS", "SLANG_STATIC_DEFINE", "yosys_slang_EXPORTS"],
     deps = [
-        "@slang",
+        # Pinned slang v10.0 (todo/ 1s): yosys-slang upstream is written against
+        # the v10 slang API. The direct inou/slang reader uses @slang (v11.0).
+        "@slang_v10//:slang",
         "@at_clifford_yosys2//:kernel_include",
         #"@at_clifford_yosys2//:version",
     ],
+
     #alwayslink = True,
 )

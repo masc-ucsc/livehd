@@ -22,7 +22,10 @@ bazel_dep(name = "abseil-cpp", version = "20250814.2") # version = "20240722.1")
 bazel_dep(name = "google_benchmark", version = "1.9.5")
 bazel_dep(name = "googletest", version = "1.17.0.bcr.2")
 
-# FAILS: bazel_dep(name = "boost.multiprecision", version = "1.88.0.bcr.1")
+# slang v11.0 (@slang, the direct inou/slang reader) vendors boost_unordered as a
+# single header (SLANG_BOOST_SINGLE_HEADER). These boost.* BCR deps are kept only
+# for the pinned slang v10.0 (@slang_v10) that @yosys_slang still builds against
+# (todo/ 1s, subtask A).
 bazel_dep(name = "boost.multiprecision", version = "1.90.0.bcr.1")
 bazel_dep(name = "boost.unordered", version = "1.90.0.bcr.1")
 #### Flex/Bison
@@ -58,6 +61,30 @@ git_override(
 http_archive(
     name = "fmt",
     build_file = "//packages:fmt.BUILD",
+    sha256 = "e6a2b43c6ec4779fb53b15b705f7c20b4eb9d5ae35784d610ac6daec30737019",
+    strip_prefix = "fmt-12.1.0",  # slang v11.0 requires fmt >= 12.1
+    urls = [
+        "https://github.com/fmtlib/fmt/archive/refs/tags/12.1.0.zip",
+    ],
+)
+
+http_archive(
+    name = "slang",
+    build_file = "//packages:slang.BUILD",
+    patches = ["//packages:slang.patch"],
+    sha256 = "f33547e9a2d1b21510174f064584aa31efff5a6956dfda4153a21ee878ff90d5",
+    strip_prefix = "slang-11.0",
+    urls = [
+        "https://github.com/MikePopoloski/slang/archive/refs/tags/v11.0.zip",
+    ],
+)
+
+# fmt 11.1.4 + slang 10.0 pinned for @yosys_slang only (todo/ 1s). yosys-slang
+# upstream is written against the v10 slang API; the direct inou/slang reader
+# (@slang above) is the one on v11.0.
+http_archive(
+    name = "fmt_v10",
+    build_file = "//packages:fmt.BUILD",
     sha256 = "7e85cbf6125a76daa0f83cd9240eff863d988aca68cd5f66c01ff7b59fa886b6",
     strip_prefix = "fmt-11.1.4",
     urls = [
@@ -66,9 +93,9 @@ http_archive(
 )
 
 http_archive(
-    name = "slang",
-    build_file = "//packages:slang.BUILD",
-    patches = ["//packages:slang.patch"],
+    name = "slang_v10",
+    build_file = "//packages:slang_v10.BUILD",
+    patches = ["//packages:slang_v10.patch"],
     sha256 = "f04fa094e421d7306f817d5411f4de78017e594615e2fb9666b63d22df4188ff",
     strip_prefix = "slang-10.0",
     urls = [

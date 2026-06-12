@@ -8,7 +8,6 @@
 #include "inou_slang.hpp"
 
 #include "perf_tracing.hpp"
-#include "thread_pool.hpp"
 
 // clang-format on
 
@@ -23,6 +22,7 @@ void Inou_slang::setup() {
   m1.add_label_optional("includes", "comma separated include paths (otherwise, verilog paths)");
   m1.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
   m1.add_label_optional("undefines", "comma separated undefines");
+  m1.add_label_optional("timecheck", "true to keep timechecks on generated mods (default: suppressed for slang input)");
 
   register_pass(m1);
 
@@ -31,11 +31,12 @@ void Inou_slang::setup() {
   m2.add_label_optional("includes", "comma separated include paths (otherwise, verilog paths)");
   m2.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
   m2.add_label_optional("undefines", "comma separated undefines");
+  m2.add_label_optional("timecheck", "true to keep timechecks on generated mods (default: suppressed for slang input)");
 
   register_pass(m2);
 }
 
-Inou_slang::Inou_slang(const Eprp_var& var) : Pass("pass.lec", var) {}
+Inou_slang::Inou_slang(const Eprp_var& var) : Pass("inou.slang", var) {}
 
 void Inou_slang::work(Eprp_var& var) {
   TRACE_EVENT("verilog", "verilog_tolnast");
@@ -45,10 +46,7 @@ void Inou_slang::work(Eprp_var& var) {
 
   argv.push_back(strdup("lhd"));  // argv[0] placeholder for the slang driver
 
-  // #ifdef NDEBUG
   argv.push_back(strdup("--quiet"));
-  // #endif
-
   argv.push_back(strdup("--ignore-unknown-modules"));
   // argv.push_back(strdup("--single-unit"));
 
@@ -76,42 +74,38 @@ void Inou_slang::work(Eprp_var& var) {
     }
   }
 
-  std::mutex var_add_mutex;
+  // Timechecks on generated `mod`s are suppressed by default for slang input
+  // (the direct reader predates the io/timing conventions, todo/ 1s subtask E),
+  // overridable via --set inou.verilog.timecheck=true.
+  const bool keep_timecheck = var.has_label("timecheck") && var.get("timecheck") == "true";
 
+  // One isolated slang Driver/Compilation per file, processed sequentially. The
+  // old in-process thread_pool fan-out was never sound (two FIXME: slang
+  // multithread fails comments); the build system exposes parallelism instead by
+  // running independent `lhd elaborate --reader slang` invocations concurrently.
   std::vector<std::string> file_list = absl::StrSplit(p.files, ',');
 
   for (const auto& fname : file_list) {
-    thread_pool.add([fname, &var, &argv, &var_add_mutex]() -> void {
-      // std::lock_guard<std::mutex> guard(var_add_mutex); // FIXME: slang multithread fails
+    TRACE_EVENT("verilog", nullptr, [&fname](perfetto::EventContext ctx) { ctx.event()->set_name(fname); });
 
-      // TRACE_EVENT("verilog", perfetto::DynamicString{fname});
-      TRACE_EVENT("verilog", nullptr, [&fname](perfetto::EventContext ctx) {
-        std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
-        ctx.event()->set_name(converted_str + fname.c_str());
-      });
+    Slang_tree tree;
 
-      Slang_tree tree;
+    std::vector<char*> argv_final{argv};
 
-      std::vector<char*> argv_final{argv};
+    char* ptr_fname = strdup(fname.c_str());
 
-      char* ptr_fname = strdup(fname.c_str());
+    argv_final.emplace_back(ptr_fname);
+    argv_final.emplace_back(nullptr);
 
-      argv_final.emplace_back(ptr_fname);
-      argv_final.emplace_back(nullptr);
+    slang_main(argv_final.size() - 1, argv_final.data(), tree);  // compile to lnasts
 
-      slang_main(argv_final.size() - 1, argv_final.data(), tree);  // compile to lnasts
+    for (auto& ln : tree.pick_lnast()) {
+      ln->set_skip_timecheck(!keep_timecheck);
+      var.add(ln);
+    }
 
-      {
-        std::lock_guard<std::mutex> guard(var_add_mutex);  // FIXME: slang
-        for (auto& ln : tree.pick_lnast()) {
-          var.add(ln);
-        }
-      }
-
-      free(ptr_fname);
-    });
+    free(ptr_fname);
   }
-  thread_pool.wait_all();
 
   for (char* ptr : argv) {
     if (ptr) {

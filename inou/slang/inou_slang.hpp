@@ -1,15 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <atomic>
-#include <memory>
-
 #include "pass.hpp"
 
 class Inou_slang : public Pass {
-private:
-  static inline std::atomic<int> trace_module_cnt = 0;
-
 public:
   static void work(Eprp_var& var);
 

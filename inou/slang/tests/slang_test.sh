@@ -1,4 +1,9 @@
 #!/bin/bash
+# Smoke test for the standalone `slang` binary (inou/slang/tests/slang.cpp): it
+# runs slang_main on a trivial design and must parse + lower it to LNAST cleanly
+# (exit 0). The old --ast-json JSON dump it used to grep is gone in the slang
+# v11 driver port (todo/ 1s subtask B); the real SV->LNAST->round-trip coverage
+# lives in the slang_compile-* targets.
 
 SLANG=./bazel-bin/inou/slang/slang
 
@@ -14,20 +19,11 @@ fi
 
 for file in inou/yosys/tests/trivial.v
 do
-  ${SLANG} --ast-json result.json ${file}
+  ${SLANG} --quiet ${file}
   ret_val=$?
   if [ $ret_val -ne 0 ]; then
     echo "ERROR: could not direct execute slang with file:${file}!"
     exit $ret_val
-  fi
-
-  pts=$(basename $file)
-  pts=${pts%.v}
-
-	id_name=$(grep name result.json | grep ${pts})
-  if [ "${id_name}" == "" ]; then
-		echo "ERROR: could not find name:${pts} in json generate file for file:${file}"
-    exit -3
   fi
 done
 

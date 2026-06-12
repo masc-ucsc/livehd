@@ -1,39 +1,32 @@
-diff --git CMakeLists.txt CMakeLists.txt
-index 42290c2..ed5cb6f 100644
---- CMakeLists.txt
-+++ CMakeLists.txt
-@@ -210,7 +210,9 @@ else()
-   message(STATUS "Build STATIC library as: ${SLANG_LIB_NAME}")
- endif()
+diff --git external/CMakeLists.txt external/CMakeLists.txt
+--- external/CMakeLists.txt
++++ external/CMakeLists.txt
+@@ -19,19 +19,17 @@
+     ON
+     CACHE INTERNAL "")
 
--include(external/CMakeLists.txt)
-+#include(external/CMakeLists.txt)
+-FetchContent_Declare(
+-  fmt
+-  GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+-  GIT_TAG 12.1.0
+-  GIT_SHALLOW ON
+-  ${find_pkg_args})
+-
+-# Force fmtlib to always be a static lib if we pull it via FetchContent (i.e.
+-# not intercepted by find_package), since it's a private dependency that's
+-# mostly header-only already.
++# LiveHD: the Bazel sandbox has no network, so this fmt FetchContent cannot run.
++# Add the @fmt archive (passed in via FMT_CMAKE_PATH) as a subdirectory instead.
++# fmt_FOUND stays unset, so the install section below still exports fmt into
++# slangTargets and the rest of external/CMakeLists.txt is used unchanged (vendored
++# boost fallback, expected.hpp / boost / BS_thread_pool installs). fmt_SOURCE_DIR
++# (normally set by FetchContent) is set so the fmt header install still resolves.
 +get_filename_component(FMT_ROOT_DIR "${FMT_CMAKE_PATH}" DIRECTORY)
++set(fmt_SOURCE_DIR "${FMT_ROOT_DIR}")
+ set(saved_build_shared_libs ${BUILD_SHARED_LIBS})
+ set(BUILD_SHARED_LIBS OFF)
+-FetchContent_MakeAvailable(fmt)
 +add_subdirectory("${FMT_ROOT_DIR}" fmt EXCLUDE_FROM_ALL)
- add_subdirectory(source)
+ set(BUILD_SHARED_LIBS ${saved_build_shared_libs})
 
- if(SLANG_INCLUDE_TESTS)
-diff --git source/CMakeLists.txt source/CMakeLists.txt
-index 6f3bb58..59ac3e7 100644
---- source/CMakeLists.txt
-+++ source/CMakeLists.txt
-@@ -143,7 +143,10 @@ target_include_directories(
-   PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../external/>")
-
- # Link libraries
--target_link_libraries(slang_slang PUBLIC fmt::fmt Boost::headers)
-+target_link_libraries(slang_slang PUBLIC fmt::fmt)
-+if(DEFINED ENV{EXT_BUILD_DEPS})
-+  target_include_directories(slang_slang SYSTEM PUBLIC "$ENV{EXT_BUILD_DEPS}/include")
-+endif()
-
- if(SLANG_USE_THREADS)
-   find_package(Threads REQUIRED)
-@@ -226,4 +229,7 @@ if(SLANG_INCLUDE_INSTALL)
-     FILES ${CMAKE_CURRENT_BINARY_DIR}/slang/slang_export.h
-     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/slang/
-     COMPONENT slang_Development)
-+  install(FILES ../external/expected.hpp
-+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-+    COMPONENT slang_Development)
- endif()
+ if(NOT TARGET fmt::fmt)

@@ -17,8 +17,10 @@ cmake(
         #"SLANG_INCLUDE_INSTALL": "OFF",
         "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
         "CMAKE_BUILD_TYPE": "Release",
-         "SLANG_USE_BOOST": "OFF",
-         "SLANG_USE_MIMALLOC": "OFF",
+        # v11 defaults SLANG_USE_MIMALLOC ON; keep it OFF (mimalloc would
+        # FetchContent, which the network-less Bazel sandbox cannot do). The dead
+        # v10 SLANG_USE_BOOST cache entry is gone (slang.patch vendors boost).
+        "SLANG_USE_MIMALLOC": "OFF",
     },
 #    generate_args = select({
 #        "@platforms//os:macos": [
@@ -28,8 +30,21 @@ cmake(
 #        ],
 #    }),
     lib_source = ":all",
+    # slang's CMakeLists.txt force-enables ccache as the compiler launcher when it
+    # finds one; ccache then fails writing to its $HOME/.ccache dir (read-only in
+    # the foreign_cc sandbox). CCACHE_DISABLE makes ccache a passthrough so the
+    # compile uses the toolchain directly. Scoped here -- no global cache impact.
+    env = {
+        "CCACHE_DISABLE": "1",
+    },
     out_static_libs = [
         "libsvlang.a",
+    ],
+    # slang.patch builds slang against the vendored single-header boost
+    # (boost_unordered.hpp / boost_concurrent.hpp). Propagate the same define to
+    # LiveHD so its slang-header compiles pick the vendored path, not <boost/...>.
+    defines = [
+        "SLANG_BOOST_SINGLE_HEADER",
     ],
     visibility = ["//visibility:public"],
     data = [
@@ -38,7 +53,5 @@ cmake(
     ],
     deps = [
         "@fmt",
-        "@boost.unordered",
-        "@boost.multiprecision",
-    ]
+    ],
 )
