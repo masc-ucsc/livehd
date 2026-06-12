@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-// Workspace-relative source paths for the hhds Source_locator ([[1f]]).
+// Workspace-relative source paths for the hhds Source_locator.
 //
 // Source_locator::mint asserts paths are workspace-relative: SourceIds hash the
 // path, so the same file must yield the same id in every artifact and every

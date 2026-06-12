@@ -68,7 +68,6 @@ public:
   std::string create_red_and_stmts(std::string_view var_name);
   std::string create_red_xor_stmts(std::string_view var_name);
 
-  std::string create_sra_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_sext_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_bit_and_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_bit_or_stmts(const std::vector<std::string>& var);
@@ -87,6 +86,40 @@ public:
   std::string create_mod_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_get_mask_stmts(std::string_view sel_var, std::string_view bitmask);
   void        create_set_mask_stmts(std::string_view sel_var, std::string_view bitmask, std::string_view value);
+
+  std::string create_sra_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_eq_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_ne_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_lt_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_le_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_gt_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_ge_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_log_and_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_log_or_stmts(std::string_view a_var, std::string_view b_var);
+
+  // Settled-value read of a concurrently-driven wire: delay_assign(tmp, var, 1)
+  // (offset +1 = "future/settled this cycle"). Returns the tmp.
+  std::string create_settled_read_stmts(std::string_view var);
+
+  // declare( ref(var), type, const(mode), [init] ). Empty max/min = the
+  // prim_type_none sentinel; empty init = no init child (a reg without a
+  // reset value passes "nil" explicitly).
+  void create_declare_stmts(std::string_view var, std::string_view mode, std::string_view max_txt, std::string_view min_txt,
+                            std::string_view init = {});
+
+  // if/unique_if assembly: create the if node (under the current stmts),
+  // then per arm add_if_cond + add_if_stmts; the final add_if_stmts without a
+  // preceding cond is the else arm. Pair each add_if_stmts with
+  // push_stmts/pop_stmts to fill the branch body.
+  Lnast_nid create_if_stmt(bool unique) {
+    return lnast->add_child(idx_stmts, unique ? Lnast_ntype::create_unique_if() : Lnast_ntype::create_if());
+  }
+  void      add_if_cond(const Lnast_nid& if_nid, std::string_view cond) { add_value_child_pub(if_nid, cond); }
+  Lnast_nid add_if_stmts(const Lnast_nid& if_nid) { return lnast->add_child(if_nid, Lnast_ntype::create_stmts()); }
+
+  // Public leaf insertion for callers assembling structural nodes (if/io/...):
+  // ref when the text reads as an identifier, const otherwise.
+  void add_value_child_pub(const Lnast_nid& parent, std::string_view value);
 
 private:
   Lnast_nid   add_ref_child(const Lnast_nid& parent, std::string_view name);

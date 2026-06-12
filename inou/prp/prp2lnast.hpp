@@ -22,7 +22,7 @@ protected:
   // TS Parsing
   std::string prp_file;
   std::string src_filename;  // source path, for diagnostic spans
-  std::string src_relpath;   // workspace-relative form for SourceId minting ([[1f]])
+  std::string src_relpath;   // workspace-relative form for SourceId minting
   TSParser*   parser  = nullptr;
   TSTree*     ts_tree = nullptr;  // owned; freed in the dtor (and on ctor throw)
   TSNode      ts_root_node;
@@ -66,7 +66,7 @@ protected:
   [[noreturn]] void report_error(const Lnast_nid& nid, std::string_view code, std::string_view category, std::string message,
                                  std::string_view hint = {}) const;
 
-  // Stamp `node`'s span as the LNAST node's SourceId ([[1f]]; minted through
+  // Stamp `node`'s span as the LNAST node's SourceId (minted through
   // the Lnast's Source_locator), overriding the statement-level pending id
   // with a finer anchor — an `if` condition, a call site, a range expression —
   // so the consuming diagnostic points at the exact construct. No-op when
@@ -91,24 +91,24 @@ protected:
   // when they differ it reports and aborts (does not return).
   void check_decl_init_kind(std::string_view name, const Lnast_node& value, TSNode inner_type, const TSNode& anchor) const;
 
-  // 1g — primitive type token (`u32`/`s8`/`i4`/`int`/`integer`/`uint`/
+  // Primitive type token (`u32`/`s8`/`i4`/`int`/`integer`/`uint`/
   // `unsigned`/`bool`/`string`) as it appears in does/equals/case operand
   // position (plain `identifier` there — the grammar's *_type nodes only
   // exist in type contexts).
   static bool is_prim_type_token(std::string_view txt);
-  // 1g — lower one `does`/`equals`/`case` operand. An integer type-call
+  // Lower one `does`/`equals`/`case` operand. An integer type-call
   // (`int(max=…,min=…)` / `u8(min=…)`) lowers to a
   // `declare(tmp, prim_type_int(max,min), 'type')` and returns the tmp ref; a
   // bare type-token identifier returns a ref WITHOUT registering a read site
   // (constprop decodes the name to kind+envelope; a real variable of that
   // name — e.g. `i2` — still wins because the fold consults the symbol
   // table / type-info first). Anything else falls through to expr_to_node.
-  Lnast_node does_operand_to_node(TSNode n);
-  // 1g — shared by emit_int_type_call (declare side) and does_operand_to_node
+  Lnast_node  does_operand_to_node(TSNode n);
+  // Shared by emit_type_expr (declare side) and does_operand_to_node
   // (operand side): classify an integer type keyword and refine its (max,min)
-  // bounds from a `(max=…, min=…, bits=…)` argument tuple. Returns false when
-  // `kw` is not an integer type keyword.
-  bool int_type_call_bounds(std::string_view kw, TSNode tup, std::string& max_txt, std::string& min_txt);
+  // bounds from a `(max=…, min=…, bits=…)` constraint/argument tuple. Returns
+  // false when `kw` is not an integer type keyword.
+  bool        int_type_call_bounds(std::string_view kw, TSNode tup, std::string& max_txt, std::string& min_txt);
 
   // Reject `a = 3` with no prior `mut`/`const`/declare (or param/output) visible
   // in scope. Runs on the producer tree (pre-upass), so it sees only source-level
@@ -222,13 +222,8 @@ protected:
   void process_scope_statement(TSNode n, Lnast_nid target_stmts);
   // Shared body for process_description / process_scope_statement: walks ALL
   // children of `parent` (named + anonymous) so the grammar's hidden `wrap`/
-  // `sat` overflow tokens and `gate` field bubble-ups are visible.
+  // `sat` overflow tokens are visible.
   void walk_statement_block(TSNode parent);
-  // Wrap a statement in a synthesized `if cond { stmt }` (or `if !cond { stmt }`
-  // for `unless`). For decl-form assignments (`mut x = e when cond`) the decl
-  // is hoisted to the surrounding scope with a `nil` initializer, so `x` is
-  // visible regardless of the gate result.
-  void process_gated_statement(TSNode stmt, TSNode gate);
   void process_assignment(TSNode n);
   void process_declaration_statement(TSNode n);
   void process_assert_statement(TSNode n);
@@ -263,21 +258,21 @@ protected:
   // `string()` and interpolation. Returns the ref of the enum-type bundle
   // (entry name → carrier).
   Lnast_node lower_enum_def(std::string_view enum_name, TSNode enum_level_type, const std::vector<Enum_entry>& entries);
-  void process_type_statement(TSNode n);
-  void process_import_statement(TSNode n);
+  void       process_type_statement(TSNode n);
+  void       process_import_statement(TSNode n);
 
   // `pub` exports + the `import` builtin.
   // check_pub_value_decl: a `pub` value declaration must be file-scope `const`.
-  void check_pub_value_decl(TSNode decl_node, std::string_view kind);
+  void                       check_pub_value_decl(TSNode decl_node, std::string_view kind);
   // plain_string_literal_text: unquoted body of a plain comptime string
   // literal expression ('…' raw, or "…" with no interpolation); nullopt else.
   std::optional<std::string> plain_string_literal_text(TSNode n);
   // emit_import_call: the canonical marked-builtin call shape
   // `func_call(target, const "import", const '<unit>')` — what `lhd scan`
   // (collect_imports) matches and the upass resolver folds.
-  void emit_import_call(const Lnast_node& target, std::string_view unit, TSNode loc_node);
+  void                       emit_import_call(const Lnast_node& target, std::string_view unit, TSNode loc_node);
   // lower_import_call: validate + lower the expression form `import("unit")`.
-  void lower_import_call(TSNode call_node, TSNode arg_tuple, const Lnast_node& target);
+  void                       lower_import_call(TSNode call_node, TSNode arg_tuple, const Lnast_node& target);
 
   void process_test_statement(TSNode n);
   void process_spawn_statement(TSNode n);
@@ -308,25 +303,18 @@ protected:
   Lnast_node tuple_to_node(TSNode n, bool is_square);
   Lnast_node identifier_to_node(TSNode n, bool for_lvalue);
   Lnast_node constant_text_to_node(std::string_view text);
-  Lnast_node type_specification_to_node(TSNode n);
+  // `expr::[attr=…]` write-side attribute bracket in expression position.
+  Lnast_node attribute_set_to_node(TSNode n);
 
   // Type handling
-  void emit_type_spec(const Lnast_node& target, TSNode type_cast_node);
-  void emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
+  void                 emit_type_spec(const Lnast_node& target, TSNode type_cast_node);
+  void                 emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
   // Catch typical attribute-name mistakes (`initial`→`init`, `clk`→`clock_pin`,
   // `bit`→`bits`, …) at parse time with a targeted hint. `has_value` is true
   // when the attribute carries `=value` — it disambiguates `[clock=x]` (meant
   // `clock_pin`) from the valid flag-only classification `clk::[clock]`.
-  void reject_common_mistakes_attr_name(TSNode node, std::string_view name, bool has_value) const;
-  void emit_type_expr(const Lnast_nid& type_index, TSNode type_node);
-  // The integer type-call `int(max=,min=,bits=)` / `uint(bits=)`.
-  // Today the grammar lexes `int`/`uint`/`uN` as keyword tokens, so a
-  // parenthesized argument list does NOT match `function_call_type`; it lands
-  // as an ERROR node wrapping the keyword plus a bare `(…)` tuple. This helper
-  // recognizes that shape on a type_cast and emits a single
-  // `type_spec(target, prim_type_int(max,min))`, the canonical integer type.
-  // Returns true when it handled the type (caller skips the legacy lowering).
-  bool                 emit_int_type_call(const Lnast_node& target, TSNode type_cast_node);
+  void                 reject_common_mistakes_attr_name(TSNode node, std::string_view name, bool has_value) const;
+  void                 emit_type_expr(const Lnast_nid& type_index, TSNode type_node);
   // Comptime vector/matrix dimension extraction for a type_cast whose `type`
   // field is an `array_type` chain (e.g. `:[N][M]T`). Returns dims outer→inner
   // when every dimension is an integer-literal length; empty otherwise.

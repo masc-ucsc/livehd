@@ -35,7 +35,7 @@ public:
   // sets this flag for every LNAST past the original entry-point count.
   void set_is_function_body(bool v) { is_function_body_ = v; }
 
-  // 1i — populate the comb-body registry the runner inlines from. Keyed by
+  // Populate the comb-body registry the runner inlines from. Keyed by
   // the body's top-module name (e.g. "pp3.count_bits"). pass_upass passes
   // the same var.lnasts it hands constprop's set_function_registry; the
   // runner picks the function bodies (everything past the entry points) and
@@ -84,7 +84,7 @@ protected:
   // 6 passes total and only 2–4 overriders, this cuts the per-node virtual
   // dispatch count by 30–50% on the bulk arithmetic hot loop.
   std::vector<upass::uPass*> classify_capable_passes;
-  // 1i Phase E — passes that expose shared-ST reads (provide_bundle_fields /
+  // Passes that expose shared-ST reads (provide_bundle_fields /
   // provide_typename), consulted by try_bundle_fields / try_typename.
 
   // Step L of upass redesign — function-body registry the runner owns
@@ -115,23 +115,23 @@ protected:
   // The input Lnast being rebuilt (the lm tree at frame depth 0). The staging
   // body becomes ITS body via replace_body, so SourceIds carried into staging
   // must resolve in THIS Lnast's locator — carry_srcid imports ids read from
-  // a callee tree (inline frame) into it ([[1f]]).
+  // a callee tree (inline frame) into it.
   std::shared_ptr<Lnast> root_lnast_;
 
-  // [[1f]] general carry: stamp the freshly created staging node with the
+  // General carry: stamp the freshly created staging node with the
   // current source node's SourceId (cross-tree ids re-minted into
   // root_lnast_'s locator). Pass-synthesized nodes inherit the enclosing
   // statement's id (the read cursor's node).
   void carry_srcid(const Lnast_nid& staged);
 
-  // [[1f]] rewrite carry: a scratch statement (inl-bind/inl-spec/…) replaces
+  // Rewrite carry: a scratch statement (inl-bind/inl-spec/…) replaces
   // the statement the cursor sits on — stamp the scratch ROOT with the
   // nearest enclosing SourceId so carry_srcid's ancestor walk hands it to
   // every node emitted from the scratch walk (else the rewrite, and every
   // cell tolg mints from it, loses provenance).
   void stamp_scratch_srcid(const std::shared_ptr<Lnast>& scratch, const Lnast_nid& root);
 
-  // [[1f]] call-site SourceIds of the active inline frames (parallel to the
+  // Call-site SourceIds of the active inline frames (parallel to the
   // lm source-frame stack, pushed only around the body splice). carry_srcid
   // mints combine(callee_def, call_site) for spliced nodes — the callee def
   // stays the primary anchor, the call site becomes a Diagnostic::note.
@@ -203,31 +203,31 @@ protected:
   // Returns the first non-nullopt result from any pass's fold_ref(name).
   std::optional<Dlop> try_fold_ref(std::string_view name);
 
-  // 1i Phase E shared-ST reads: the comb-call inliner uses these to introspect
+  // Shared-ST reads: the comb-call inliner uses these to introspect
   // state it can't see through scalar fold_ref. try_bundle_fields returns the
   // flat comptime-const fields behind a bundle ref (for tuple actuals);
   // try_typename returns a var's declared typename (for method dispatch /
   // setter-init). First pass that provides wins.
   std::optional<std::vector<std::pair<std::string, Dlop>>> try_bundle_fields(std::string_view name);
-  std::string                                               try_typename(std::string_view name);
+  std::string                                              try_typename(std::string_view name);
   // Declared integer (max,min) range of a variable (for re-typing an untyped
   // inlined param from the actual at the call site). First pass that provides
   // wins. See uPass::provide_decl_type.
-  std::optional<upass::uPass::Decl_scalar_type>             try_decl_type(std::string_view name);
+  std::optional<upass::uPass::Decl_scalar_type>            try_decl_type(std::string_view name);
   // Folded (start, end_inclusive) bounds of a `range` tmp (comptime for-loop
   // iterable). First pass that provides wins. See uPass::provide_range.
-  std::optional<std::pair<Dlop, Dlop>>                    try_range(std::string_view name);
+  std::optional<std::pair<Dlop, Dlop>>                     try_range(std::string_view name);
   // Declared kind + range of a dotted field path (`t1.a`). First pass that
   // provides wins. See uPass::provide_field_type.
-  std::optional<upass::uPass::Field_decl_type>              try_field_type(std::string_view name);
+  std::optional<upass::uPass::Field_decl_type>             try_field_type(std::string_view name);
   // Inferred scalar kind of a variable (bool vs int even when
   // un-annotated). First pass returning a non-none kind wins (typecheck).
   // See uPass::provide_scalar_kind.
-  Io_kind                                                   try_scalar_kind(std::string_view name);
+  Io_kind                                                  try_scalar_kind(std::string_view name);
   // Declared storage class (mut/const/reg/type) of a variable. First pass
   // that provides a non-unknown answer wins. See uPass::provide_decl_storage
   // (ref-actual mutability).
-  upass::uPass::Decl_storage                                try_decl_storage(std::string_view name);
+  upass::uPass::Decl_storage                               try_decl_storage(std::string_view name);
 
   // Typed-self `does`-check: the receiver bound to `self:T` must
   // structurally satisfy T (per declared field: same-name receiver field
@@ -292,7 +292,7 @@ protected:
   // a typed runtime ref (var-arg ports), so a nested specialization can type it.
   void emit_inline_declare_typed(const std::string& name, const std::optional<Dlop>& max, const std::optional<Dlop>& min);
 
-  // ── 1i comb-call inliner ────────────────────────────────────────────────
+  // ── comb-call inliner ────────────────────────────────────────────────
   // Called from process_lnast's func_call case. If the callee resolves to a
   // comb body in function_registry and the call shape is supported, performs
   // a virtual splice — emit prologue param-binding assigns, push_source into
@@ -320,10 +320,10 @@ protected:
   // gathered var-arg (vararg_bindings_) OR constprop's slot→ref map
   // (try_tuple_slot_ref). False leaves the node to the normal fold/emit path
   // (nested access, dynamic index, comptime slot, or unknown ref).
-  bool try_resolve_tuple_get();
+  bool                                                                              try_resolve_tuple_get();
   // Source ref held at `slot` of tuple `name` (runtime-scalar slot). First pass
   // that provides wins. See uPass::provide_tuple_slot_ref.
-  std::optional<std::string> try_tuple_slot_ref(std::string_view name, std::string_view slot);
+  std::optional<std::string>                               try_tuple_slot_ref(std::string_view name, std::string_view slot);
   // Ordered (slot-key, is_positional) shape of tuple `name` for the runner's
   // tuple-for unroll. First pass that provides wins. See provide_tuple_shape.
   std::optional<std::vector<std::pair<std::string, bool>>> try_tuple_shape(std::string_view name);
@@ -338,17 +338,17 @@ protected:
   // mangled name so tolg instantiates the Sub. Returns true (call emitted);
   // a method (`ref self`) or var-arg boundary is left to the caller.
   struct Spec_port {
-    bool                 inject = false;  // false = keep the template's own (already-typed) port
+    bool                inject    = false;  // false = keep the template's own (already-typed) port
     std::optional<Dlop> max       = {};
     std::optional<Dlop> min       = {};
-    std::string          type_name = {};  // named type (takes precedence over max/min)
-    // 1p-runner var-arg expansion: a synthesized concrete port replacing one
+    std::string         type_name = {};  // named type (takes precedence over max/min)
+    // Var-arg expansion: a synthesized concrete port replacing one
     // leftover of a `...args` boundary. `port_name` is the new io port name;
     // `is_named`/`field` drive the in-body reconstruction tuple. (max/min/
     // type_name carry the actual's type, same as a fixed port.)
-    std::string port_name = {};
-    bool        is_named  = false;
-    std::string field     = {};
+    std::string         port_name = {};
+    bool                is_named  = false;
+    std::string         field     = {};
   };
   bool maybe_specialize_template_call(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,
                                       const std::vector<Lnast_node>& param_val, const std::vector<bool>& param_set,
@@ -392,25 +392,25 @@ protected:
   // (args exploded from V), consumes the store, and returns true. Returns
   // false (caller proceeds structurally) when there is no init, the value
   // isn't comptime-resolvable, or no overload matches the argument count.
-  bool try_init_construction();
+  bool                     try_init_construction();
   // Same recognition for the explicit call form `x = T(args…)`: called from
   // the func_call case when try_inline_func_call declined. The callee name
   // is not a registry function but a type bundle with `init`.
-  bool try_construct_call();
+  bool                     try_construct_call();
   // Shared splice: emit `receiver = <defaults of tn>` (when tn non-empty),
   // then synthesize and walk `init_fn(__ufcs_arg=receiver, args…)` inside an
   // init-construction window (attributes tally paused, ref-self-on-const
   // admitted, construction args bind positionally in tuple order).
-  void splice_init_call(const std::string& receiver, const std::string& tn, const std::string& init_fn,
-                        const std::vector<Ctor_arg>& args);
+  void                     splice_init_call(const std::string& receiver, const std::string& tn, const std::string& init_fn,
+                                            const std::vector<Ctor_arg>& args);
   // Selects the first init overload (tuple order) whose non-self formals
   // match the args (by count; named keys must all exist). Empty when none.
-  std::string select_init_overload(const std::vector<std::string>& candidates, const std::vector<Ctor_arg>& args);
+  std::string              select_init_overload(const std::vector<std::string>& candidates, const std::vector<Ctor_arg>& args);
   // Collects the init candidates recorded on type bundle `tn`: the single
   // `init` function-name string or the `init.N` overload list, tuple order.
   std::vector<std::string> init_candidates_of(std::string_view tn);
   // >0 while a synthesized constructor call is being spliced.
-  int init_construction_depth_ = 0;
+  int                      init_construction_depth_ = 0;
   // Vars whose `declare` has been walked but whose declaration store hasn't
   // arrived yet — the only store where construction may run.
   absl::flat_hash_set<std::string> pending_ctor_store_;
@@ -423,7 +423,7 @@ protected:
   // relaxes the arg-naming rules (construction args bind in tuple order) and
   // admits a const receiver on `ref self` (the constructor is the one legal
   // writer of a const).
-  bool ctor_call_pending_ = false;
+  bool                             ctor_call_pending_ = false;
 
   // Resolves a (possibly unqualified) callee name to a registry body. Tries
   // the bare name, then the unique "<module>.<name>" suffix match.
@@ -465,7 +465,7 @@ protected:
   void emit_inline_sext(const std::string& dst, const std::string& src, int sign_bit);
 
   // Monotonic per-run counter giving each inline call site a unique rename
-  // tag/salt. Cross-pass idempotence is a documented 1i follow-up. Also used
+  // tag/salt. Cross-pass idempotence is a documented follow-up. Also used
   // per comptime loop iteration (unroll_for/unroll_while) so each iteration's
   // re-walk gets a fresh tmp-rename namespace + block-scope id.
   uint32_t                                      inline_seq_{0};

@@ -54,7 +54,7 @@ std::string_view derived_attr_violation(std::string_view attr) {
 
 void uPass_semacheck::emit_sema_error(std::string_view code, std::string_view category, const std::string& msg,
                                       std::string_view hint, const Lnast* ln, const Lnast_nid& nid) {
-  auto span = ln->span_of(nid);  // SourceId resolved through the Lnast's locator ([[1f]])
+  auto span = ln->span_of(nid);  // SourceId resolved through the Lnast's locator
   livehd::diag::sink().emit(livehd::diag::Diagnostic{
       .severity = livehd::diag::Severity::error,
       .code     = std::string{code},
@@ -113,8 +113,7 @@ void uPass_semacheck::check_attr_writes(const Lnast* ln) {
 // checked here — that check runs in prp2lnast on the producer tree (see
 // Prp2lnast::check_undeclared_writes), where inliner/SSA-synthesized stores
 // can't false-positive.
-void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts,
-                                  const std::unordered_set<std::string>& visible) {
+void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts, const std::unordered_set<std::string>& visible) {
   std::unordered_set<std::string> here;
   for (auto c = ln->get_first_child(scope_stmts); !c.is_invalid(); c = ln->get_sibling_next(c)) {
     const auto ct = ln->get_type(c);

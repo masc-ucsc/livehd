@@ -44,11 +44,11 @@ void Inou_attr::set_color_to_lg(Eprp_var& var) {
 
 void Inou_attr::read_json(const std::string& filename, hhds::Graph* lg) {
   node2color.clear();
-  auto gio      = lg->get_io();
-  auto top_name = gio ? std::string{gio->get_name()} : std::string{};
-  FILE* pFile   = fopen(filename.c_str(), "rb");
+  auto  gio      = lg->get_io();
+  auto  top_name = gio ? std::string{gio->get_name()} : std::string{};
+  FILE* pFile    = fopen(filename.c_str(), "rb");
   if (pFile == nullptr) {
-    Pass::error("Could not open file {}", filename);
+    livehd::diag::err("inou.attr", "missing-file", "io").msg("Could not open file {}", filename).fatal();
     return;
   }
   char                      buffer[65536];
@@ -58,10 +58,12 @@ void Inou_attr::read_json(const std::string& filename, hhds::Graph* lg) {
 
   if (document.HasParseError()) {
     fclose(pFile);
-    Pass::error("input file: relaod {} Error(offset {}): {}",
-                filename,
-                static_cast<unsigned>(document.GetErrorOffset()),
-                rapidjson::GetParseError_En(document.GetParseError()));
+    livehd::diag::err("inou.attr", "parse-failed", "syntax")
+        .msg("input file: relaod {} Error(offset {}): {}",
+             filename,
+             static_cast<unsigned>(document.GetErrorOffset()),
+             rapidjson::GetParseError_En(document.GetParseError()))
+        .fatal();
     return;
   }
   I(document.IsArray());
@@ -108,10 +110,7 @@ void Inou_attr::color_lg(hhds::Graph* lg) {
     auto       it    = node2color.find(iname);
     if (it != node2color.end()) {
       set_color(node, static_cast<int32_t>(it->second));
-      std::print("Set color {} to instance {} at nid {}.\n",
-                 it->second,
-                 iname,
-                 static_cast<uint64_t>(node.get_debug_nid()));
+      std::print("Set color {} to instance {} at nid {}.\n", it->second, iname, static_cast<uint64_t>(node.get_debug_nid()));
     }
   }
 }
@@ -160,7 +159,7 @@ void Inou_attr::get_color_from_lg(Eprp_var& var) {
   std::ofstream fs;
   fs.open(filename, std::ios::out | std::ios::trunc);
   if (!fs.is_open()) {
-    Pass::error("Could not open file {}.\n", filename);
+    livehd::diag::err("inou.attr", "write-failed", "io").msg("Could not open file {}", filename).fatal();
     return;
   }
   fs << s.GetString() << std::endl;

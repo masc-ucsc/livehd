@@ -4,8 +4,8 @@
 
 #include <format>
 
-#include "hlop/dlop.hpp"
 #include "diag.hpp"
+#include "hlop/dlop.hpp"
 #include "lnast.hpp"
 
 // Registered once here (static-init at link time; alwayslink keeps it alive).
@@ -91,7 +91,6 @@ uPass_typecheck::Kind uPass_typecheck::kind_of(std::string_view name) const {
   const auto b = runner_st->get_bundle(name);
   return b ? kind_of_bundle(*b) : Kind::unknown;
 }
-
 
 void uPass_typecheck::set_dst_kind(Bundle& dst, Kind k) {
   // Stamp the BUNDLE-level value kind: no entry interplay, so constprop's
@@ -372,7 +371,7 @@ void uPass_typecheck::process_range() {
 }
 
 // Build a located Span from an LNAST nid: its SourceId resolved through the
-// owning Lnast's locator ([[1f]]). Mirrors uPass_verifier::span_from_nid.
+// owning Lnast's locator. Mirrors uPass_verifier::span_from_nid.
 livehd::diag::Span uPass_typecheck::span_from_nid(const Lnast_nid& nid) const {
   if (const auto& ln = lm->get_lnast()) {
     return ln->span_of(nid);

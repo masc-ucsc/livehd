@@ -4,14 +4,14 @@
 
 #include "absl/strings/str_split.h"
 
-#include "slang_tree.hpp"
+#include "slang_context.hpp"
 #include "inou_slang.hpp"
 
 #include "perf_tracing.hpp"
 
 // clang-format on
 
-extern int slang_main(int argc, char** argv, Slang_tree& tree);  // in slang_driver.cpp
+extern int slang_main(int argc, char** argv, Slang_context& tree);  // in slang_driver.cpp
 
 static Pass_plugin sample("inou.verilog", Inou_slang::setup);
 
@@ -23,6 +23,7 @@ void Inou_slang::setup() {
   m1.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
   m1.add_label_optional("undefines", "comma separated undefines");
   m1.add_label_optional("timecheck", "true to keep timechecks on generated mods (default: suppressed for slang input)");
+  m1.add_label_optional("unroll_limit", "slang-side loop unroll budget per process (default: 4000)");
 
   register_pass(m1);
 
@@ -32,6 +33,7 @@ void Inou_slang::setup() {
   m2.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
   m2.add_label_optional("undefines", "comma separated undefines");
   m2.add_label_optional("timecheck", "true to keep timechecks on generated mods (default: suppressed for slang input)");
+  m2.add_label_optional("unroll_limit", "slang-side loop unroll budget per process (default: 4000)");
 
   register_pass(m2);
 }
@@ -79,6 +81,14 @@ void Inou_slang::work(Eprp_var& var) {
   // overridable via --set inou.verilog.timecheck=true.
   const bool keep_timecheck = var.has_label("timecheck") && var.get("timecheck") == "true";
 
+  Slang_context::Options opts;
+  opts.keep_timecheck = keep_timecheck;
+  if (var.has_label("unroll_limit")) {
+    if (int v = atoi(std::string(var.get("unroll_limit")).c_str()); v > 0) {
+      opts.unroll_limit = v;
+    }
+  }
+
   // One isolated slang Driver/Compilation per file, processed sequentially. The
   // old in-process thread_pool fan-out was never sound (two FIXME: slang
   // multithread fails comments); the build system exposes parallelism instead by
@@ -88,7 +98,8 @@ void Inou_slang::work(Eprp_var& var) {
   for (const auto& fname : file_list) {
     TRACE_EVENT("verilog", nullptr, [&fname](perfetto::EventContext ctx) { ctx.event()->set_name(fname); });
 
-    Slang_tree tree;
+    Slang_context tree;
+    tree.set_options(opts);
 
     std::vector<char*> argv_final{argv};
 

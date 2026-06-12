@@ -32,7 +32,7 @@ void Pass_lnastfmt::fmt_begin(Eprp_var& var) {
 // Location string matched to the `lnast.dump` columns so the user can jump
 // straight from the error to the offending node:
 //   `[L,P line N @ fname]` — L/P is the tree index (level,pos) printed by
-//   dump as `(L,P)`; line/fname resolve from the node's SourceId ([[1f]])
+//   dump as `(L,P)`; line/fname resolve from the node's SourceId
 //   when one is attached.
 static std::string node_loc(const Lnast* ln, const Lnast_nid& it) {
   const auto  span = ln->span_of(it);
@@ -45,6 +45,26 @@ static std::string node_loc(const Lnast* ln, const Lnast_nid& it) {
   }
   s += "]";
   return s;
+}
+
+// Every check in this file guards a structural invariant of the tree —
+// "the compiler built a malformed LNAST" producer bugs, never user input —
+// so all of them share one code under the `internal` category. The node's
+// span still resolves (when the producer stamped a srcid), pointing at the
+// source that exercised the bug.
+template <typename... Args>
+[[noreturn]] static void fmt_error(const Lnast* ln, const Lnast_nid& nid, std::format_string<Args...> fmt, Args&&... args) {
+  auto msg      = std::format(fmt, std::forward<Args>(args)...);
+  auto msg_copy = msg;
+  livehd::diag::sink().stage(livehd::diag::Diagnostic{
+      .severity = livehd::diag::Severity::error,
+      .code     = "lnast-malformed",
+      .category = "internal",
+      .pass     = "pass.lnastfmt",
+      .message  = std::move(msg),
+      .span     = ln->span_of(nid),
+  });
+  throw Eprp::parser_error(Pass::eprp, msg_copy);
 }
 
 // A `ref` carries a single variable name. Allowed shapes (today):
@@ -134,20 +154,20 @@ static bool is_valid_ref_text(std::string_view name) {
 //     position 0), so this returns false for those — handled by the caller.
 static bool parent_writes_pos0(Lnast_ntype::Lnast_ntype_int pt) {
   return Lnast_ntype::is_store(pt) || Lnast_ntype::is_declare(pt) || Lnast_ntype::is_dp_assign(pt)
-         || Lnast_ntype::is_delay_assign(pt)
-         || Lnast_ntype::is_log_and(pt) || Lnast_ntype::is_log_or(pt) || Lnast_ntype::is_log_not(pt) || Lnast_ntype::is_bit_and(pt)
-         || Lnast_ntype::is_bit_or(pt) || Lnast_ntype::is_bit_not(pt) || Lnast_ntype::is_bit_xor(pt) || Lnast_ntype::is_red_and(pt)
-         || Lnast_ntype::is_red_or(pt) || Lnast_ntype::is_red_xor(pt) || Lnast_ntype::is_popcount(pt) || Lnast_ntype::is_plus(pt)
-         || Lnast_ntype::is_minus(pt) || Lnast_ntype::is_mult(pt) || Lnast_ntype::is_div(pt) || Lnast_ntype::is_mod(pt)
-         || Lnast_ntype::is_shl(pt) || Lnast_ntype::is_sra(pt) || Lnast_ntype::is_sext(pt) || Lnast_ntype::is_set_mask(pt)
-         || Lnast_ntype::is_get_mask(pt) || Lnast_ntype::is_eq(pt) || Lnast_ntype::is_ne(pt) || Lnast_ntype::is_lt(pt)
-         || Lnast_ntype::is_le(pt) || Lnast_ntype::is_gt(pt) || Lnast_ntype::is_ge(pt) || Lnast_ntype::is_is(pt)
-         || Lnast_ntype::is_tuple_add(pt) || Lnast_ntype::is_tuple_get(pt) || Lnast_ntype::is_type_spec(pt)
-         || Lnast_ntype::is_tuple_concat(pt) || Lnast_ntype::is_attr_set(pt) || Lnast_ntype::is_attr_get(pt)
-         || Lnast_ntype::is_func_call(pt) || Lnast_ntype::is_func_def(pt) || Lnast_ntype::is_range(pt)
-         || Lnast_ntype::is_func_does(pt) || Lnast_ntype::is_func_equals(pt) || Lnast_ntype::is_func_in(pt)
-         || Lnast_ntype::is_func_has(pt) || Lnast_ntype::is_func_case(pt) || Lnast_ntype::is_func_break(pt)
-         || Lnast_ntype::is_func_continue(pt) || Lnast_ntype::is_func_return(pt) || Lnast_ntype::is_for(pt);
+         || Lnast_ntype::is_delay_assign(pt) || Lnast_ntype::is_log_and(pt) || Lnast_ntype::is_log_or(pt)
+         || Lnast_ntype::is_log_not(pt) || Lnast_ntype::is_bit_and(pt) || Lnast_ntype::is_bit_or(pt) || Lnast_ntype::is_bit_not(pt)
+         || Lnast_ntype::is_bit_xor(pt) || Lnast_ntype::is_red_and(pt) || Lnast_ntype::is_red_or(pt) || Lnast_ntype::is_red_xor(pt)
+         || Lnast_ntype::is_popcount(pt) || Lnast_ntype::is_plus(pt) || Lnast_ntype::is_minus(pt) || Lnast_ntype::is_mult(pt)
+         || Lnast_ntype::is_div(pt) || Lnast_ntype::is_mod(pt) || Lnast_ntype::is_shl(pt) || Lnast_ntype::is_sra(pt)
+         || Lnast_ntype::is_sext(pt) || Lnast_ntype::is_set_mask(pt) || Lnast_ntype::is_get_mask(pt) || Lnast_ntype::is_eq(pt)
+         || Lnast_ntype::is_ne(pt) || Lnast_ntype::is_lt(pt) || Lnast_ntype::is_le(pt) || Lnast_ntype::is_gt(pt)
+         || Lnast_ntype::is_ge(pt) || Lnast_ntype::is_is(pt) || Lnast_ntype::is_tuple_add(pt) || Lnast_ntype::is_tuple_get(pt)
+         || Lnast_ntype::is_type_spec(pt) || Lnast_ntype::is_tuple_concat(pt) || Lnast_ntype::is_attr_set(pt)
+         || Lnast_ntype::is_attr_get(pt) || Lnast_ntype::is_func_call(pt) || Lnast_ntype::is_func_def(pt)
+         || Lnast_ntype::is_range(pt) || Lnast_ntype::is_func_does(pt) || Lnast_ntype::is_func_equals(pt)
+         || Lnast_ntype::is_func_in(pt) || Lnast_ntype::is_func_has(pt) || Lnast_ntype::is_func_case(pt)
+         || Lnast_ntype::is_func_break(pt) || Lnast_ntype::is_func_continue(pt) || Lnast_ntype::is_func_return(pt)
+         || Lnast_ntype::is_for(pt);
 }
 
 // Walk the tree and flag any tmp ref (`___N`) that is read but never written
@@ -214,15 +234,17 @@ static void check_unwritten_tmps(const Lnast* ln) {
   }
   for (const auto& name : dangling) {
     const auto& info = read_first.at(name);
-    Pass::error(
-        "lnastfmt: {} tmp ref '{}' is read (under {}) but never written by any statement "
-        "in this LNAST. Producer dropped its assignment, or producer emits the consumer "
-        "before the producing statement (e.g. an `if cond` whose `cond = …` lands as a "
-        "later sibling — fix prp2lnast to emit the cond's compute statements *before* "
-        "the `if` node).",
-        node_loc(ln, info.first),
-        name,
-        info.second);
+    fmt_error(ln,
+              info.first,
+
+              "{} tmp ref '{}' is read (under {}) but never written by any statement "
+              "in this LNAST. Producer dropped its assignment, or producer emits the consumer "
+              "before the producing statement (e.g. an `if cond` whose `cond = …` lands as a "
+              "later sibling — fix prp2lnast to emit the cond's compute statements *before* "
+              "the `if` node).",
+              node_loc(ln, info.first),
+              name,
+              info.second);
     return;
   }
 }
@@ -263,14 +285,14 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
         }
       }
       if (io_count > 1) {
-        Pass::error("lnastfmt: {} top has {} io children — at most one is allowed", node_loc(ln, first_io), io_count);
+        fmt_error(ln, first_io, "{} top has {} io children — at most one is allowed", node_loc(ln, first_io), io_count);
         return;
       }
       if (io_count == 1 && !first_seen) {
         // unreachable: io_count would have stayed 0
       }
       if (io_count == 1 && first_seen && !(first_io == first_child)) {
-        Pass::error("lnastfmt: {} io must be the first child of top", node_loc(ln, first_io));
+        fmt_error(ln, first_io, "{} io must be the first child of top", node_loc(ln, first_io));
         return;
       }
     }
@@ -282,15 +304,17 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
     if (Lnast_ntype::is_ref(type)) {
       const auto name = ln->get_name(it);
       if (!is_valid_ref_text(name)) {
-        Pass::error(
-            "lnastfmt: {} ref text '{}' is not a valid identifier — must be a single name "
-            "(`tmp ___N`, `[$%#]?<id>(.<id>)*` over alnum/underscore, or "
-            "`` `…` `` only if the name carries non-alnum characters). "
-            "Commas/spaces/colons typically mean the producer captured surrounding syntax "
-            "(type cast, lvalue list, …) into the ref; a backtick-escaped pure-alnum name "
-            "(like ``a``) means the producer didn't normalize it.",
-            node_loc(ln, it),
-            name);
+        fmt_error(ln,
+                  it,
+
+                  "{} ref text '{}' is not a valid identifier — must be a single name "
+                  "(`tmp ___N`, `[$%#]?<id>(.<id>)*` over alnum/underscore, or "
+                  "`` `…` `` only if the name carries non-alnum characters). "
+                  "Commas/spaces/colons typically mean the producer captured surrounding syntax "
+                  "(type cast, lvalue list, …) into the ref; a backtick-escaped pure-alnum name "
+                  "(like ``a``) means the producer didn't normalize it.",
+                  node_loc(ln, it),
+                  name);
         return;
       }
     }
@@ -298,11 +322,13 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
     if (Lnast_ntype::is_const(type)) {
       const auto name = ln->get_name(it);
       if (name == "__create_flop" || name == "__last_value") {
-        Pass::error(
-            "lnastfmt: {} const '{}' appears in LNAST; migrate the producer to `attr_set X storage reg` (§15.1) or `delay_assign` "
-            "(§15.2)",
-            node_loc(ln, it),
-            name);
+        fmt_error(ln,
+                  it,
+
+                  "{} const '{}' appears in LNAST; migrate the producer to `attr_set X storage reg` (§15.1) or `delay_assign` "
+                  "(§15.2)",
+                  node_loc(ln, it),
+                  name);
         return;
       }
     }
@@ -312,29 +338,35 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       auto c1 = c0.is_invalid() ? c0 : ln->get_sibling_next(c0);
       auto c2 = c1.is_invalid() ? c1 : ln->get_sibling_next(c1);
       if (c0.is_invalid() || c1.is_invalid() || c2.is_invalid() || !ln->get_sibling_next(c2).is_invalid()) {
-        Pass::error("lnastfmt: {} delay_assign must have exactly 3 children (dst, src, offset) per §15.2", node_loc(ln, it));
+        fmt_error(ln, it, "{} delay_assign must have exactly 3 children (dst, src, offset) per §15.2", node_loc(ln, it));
         return;
       }
       if (!Lnast_ntype::is_ref(ln->get_type(c0)) || !Lnast::is_tmp(ln->get_name(c0))) {
-        Pass::error("lnastfmt: {} delay_assign child 0 {} must be a tmp ref (___<n>), got '{}' of type {}",
-                    node_loc(ln, it),
-                    node_loc(ln, c0),
-                    ln->get_name(c0),
-                    Lnast_ntype::debug_name(ln->get_type(c0)));
+        fmt_error(ln,
+                  it,
+                  "{} delay_assign child 0 {} must be a tmp ref (___<n>), got '{}' of type {}",
+                  node_loc(ln, it),
+                  node_loc(ln, c0),
+                  ln->get_name(c0),
+                  Lnast_ntype::debug_name(ln->get_type(c0)));
         return;
       }
       if (!Lnast_ntype::is_ref(ln->get_type(c1))) {
-        Pass::error("lnastfmt: {} delay_assign child 1 {} must be a ref (declared variable name), got type {}",
-                    node_loc(ln, it),
-                    node_loc(ln, c1),
-                    Lnast_ntype::debug_name(ln->get_type(c1)));
+        fmt_error(ln,
+                  it,
+                  "{} delay_assign child 1 {} must be a ref (declared variable name), got type {}",
+                  node_loc(ln, it),
+                  node_loc(ln, c1),
+                  Lnast_ntype::debug_name(ln->get_type(c1)));
         return;
       }
       if (!Lnast_ntype::is_const(ln->get_type(c2)) && !Lnast_ntype::is_ref(ln->get_type(c2))) {
-        Pass::error("lnastfmt: {} delay_assign child 2 {} (offset) must be a const or comptime ref, got type {}",
-                    node_loc(ln, it),
-                    node_loc(ln, c2),
-                    Lnast_ntype::debug_name(ln->get_type(c2)));
+        fmt_error(ln,
+                  it,
+                  "{} delay_assign child 2 {} (offset) must be a const or comptime ref, got type {}",
+                  node_loc(ln, it),
+                  node_loc(ln, c2),
+                  Lnast_ntype::debug_name(ln->get_type(c2)));
         return;
       }
     }
@@ -348,21 +380,25 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       auto c1 = c0.is_invalid() ? c0 : ln->get_sibling_next(c0);
       auto c2 = c1.is_invalid() ? c1 : ln->get_sibling_next(c1);
       if (c0.is_invalid() || c1.is_invalid() || c2.is_invalid()) {
-        Pass::error("lnastfmt: {} attr_set must have at least 3 children (target, attr_key, value)", node_loc(ln, it));
+        fmt_error(ln, it, "{} attr_set must have at least 3 children (target, attr_key, value)", node_loc(ln, it));
         return;
       }
       if (!Lnast_ntype::is_ref(ln->get_type(c0))) {
-        Pass::error("lnastfmt: {} attr_set child 0 {} must be a ref (target var), got {}",
-                    node_loc(ln, it),
-                    node_loc(ln, c0),
-                    Lnast_ntype::debug_name(ln->get_type(c0)));
+        fmt_error(ln,
+                  it,
+                  "{} attr_set child 0 {} must be a ref (target var), got {}",
+                  node_loc(ln, it),
+                  node_loc(ln, c0),
+                  Lnast_ntype::debug_name(ln->get_type(c0)));
         return;
       }
       if (!Lnast_ntype::is_const(ln->get_type(c1))) {
-        Pass::error("lnastfmt: {} attr_set child 1 {} (attr_key) must be a const, got {}",
-                    node_loc(ln, it),
-                    node_loc(ln, c1),
-                    Lnast_ntype::debug_name(ln->get_type(c1)));
+        fmt_error(ln,
+                  it,
+                  "{} attr_set child 1 {} (attr_key) must be a const, got {}",
+                  node_loc(ln, it),
+                  node_loc(ln, c1),
+                  Lnast_ntype::debug_name(ln->get_type(c1)));
         return;
       }
       // (Derived/read-only attr_set rejection moved to upass/semacheck.)
@@ -372,15 +408,17 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       auto c1 = c0.is_invalid() ? c0 : ln->get_sibling_next(c0);
       auto c2 = c1.is_invalid() ? c1 : ln->get_sibling_next(c1);
       if (c0.is_invalid() || c1.is_invalid() || c2.is_invalid()) {
-        Pass::error("lnastfmt: {} attr_get must have at least 3 children (dst, target, attr_key)", node_loc(ln, it));
+        fmt_error(ln, it, "{} attr_get must have at least 3 children (dst, target, attr_key)", node_loc(ln, it));
         return;
       }
       if (!Lnast_ntype::is_ref(ln->get_type(c0)) || !Lnast::is_tmp(ln->get_name(c0))) {
-        Pass::error("lnastfmt: {} attr_get child 0 {} must be a tmp ref (___<n>), got {} '{}'",
-                    node_loc(ln, it),
-                    node_loc(ln, c0),
-                    Lnast_ntype::debug_name(ln->get_type(c0)),
-                    ln->get_name(c0));
+        fmt_error(ln,
+                  it,
+                  "{} attr_get child 0 {} must be a tmp ref (___<n>), got {} '{}'",
+                  node_loc(ln, it),
+                  node_loc(ln, c0),
+                  Lnast_ntype::debug_name(ln->get_type(c0)),
+                  ln->get_name(c0));
         return;
       }
       // child 1 (target) is normally a ref, but constprop / runner emit-with-
@@ -388,17 +426,21 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       // becomes `false.[crand]`) before the post-pipeline lnastfmt runs. Both
       // shapes are legal post-fold.
       if (!Lnast_ntype::is_ref(ln->get_type(c1)) && !Lnast_ntype::is_const(ln->get_type(c1))) {
-        Pass::error("lnastfmt: {} attr_get child 1 {} (target) must be a ref or const, got {}",
-                    node_loc(ln, it),
-                    node_loc(ln, c1),
-                    Lnast_ntype::debug_name(ln->get_type(c1)));
+        fmt_error(ln,
+                  it,
+                  "{} attr_get child 1 {} (target) must be a ref or const, got {}",
+                  node_loc(ln, it),
+                  node_loc(ln, c1),
+                  Lnast_ntype::debug_name(ln->get_type(c1)));
         return;
       }
       if (!Lnast_ntype::is_const(ln->get_type(c2))) {
-        Pass::error("lnastfmt: {} attr_get child 2 {} (attr_key) must be a const, got {}",
-                    node_loc(ln, it),
-                    node_loc(ln, c2),
-                    Lnast_ntype::debug_name(ln->get_type(c2)));
+        fmt_error(ln,
+                  it,
+                  "{} attr_get child 2 {} (attr_key) must be a const, got {}",
+                  node_loc(ln, it),
+                  node_loc(ln, c2),
+                  Lnast_ntype::debug_name(ln->get_type(c2)));
         return;
       }
     }
@@ -409,14 +451,16 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
     if (Lnast_ntype::is_store(type)) {
       auto c0 = ln->get_first_child(it);
       if (c0.is_invalid() || ln->get_sibling_next(c0).is_invalid()) {
-        Pass::error("lnastfmt: {} store must have at least 2 children (var, value)", node_loc(ln, it));
+        fmt_error(ln, it, "{} store must have at least 2 children (var, value)", node_loc(ln, it));
         return;
       }
       if (!Lnast_ntype::is_ref(ln->get_type(c0))) {
-        Pass::error("lnastfmt: {} store child 0 {} (var) must be a ref, got {}",
-                    node_loc(ln, it),
-                    node_loc(ln, c0),
-                    Lnast_ntype::debug_name(ln->get_type(c0)));
+        fmt_error(ln,
+                  it,
+                  "{} store child 0 {} (var) must be a ref, got {}",
+                  node_loc(ln, it),
+                  node_loc(ln, c0),
+                  Lnast_ntype::debug_name(ln->get_type(c0)));
         return;
       }
     }
@@ -429,30 +473,36 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       auto c1 = c0.is_invalid() ? c0 : ln->get_sibling_next(c0);
       auto c2 = c1.is_invalid() ? c1 : ln->get_sibling_next(c1);
       if (c0.is_invalid() || c1.is_invalid() || c2.is_invalid()) {
-        Pass::error("lnastfmt: {} declare must have at least 3 children (var, type, mode)", node_loc(ln, it));
+        fmt_error(ln, it, "{} declare must have at least 3 children (var, type, mode)", node_loc(ln, it));
         return;
       }
       if (!Lnast_ntype::is_ref(ln->get_type(c0))) {
-        Pass::error("lnastfmt: {} declare child 0 {} (var) must be a ref, got {}",
-                    node_loc(ln, it),
-                    node_loc(ln, c0),
-                    Lnast_ntype::debug_name(ln->get_type(c0)));
+        fmt_error(ln,
+                  it,
+                  "{} declare child 0 {} (var) must be a ref, got {}",
+                  node_loc(ln, it),
+                  node_loc(ln, c0),
+                  Lnast_ntype::debug_name(ln->get_type(c0)));
         return;
       }
       // child 1 is a type node, or a `ref` (a named type — the ref
       // resolves to the named type's symbol-table binding).
       if (!Lnast_ntype::is_type(ln->get_type(c1)) && !Lnast_ntype::is_ref(ln->get_type(c1))) {
-        Pass::error("lnastfmt: {} declare child 1 {} (type) must be a type node or named-type ref, got {}",
-                    node_loc(ln, it),
-                    node_loc(ln, c1),
-                    Lnast_ntype::debug_name(ln->get_type(c1)));
+        fmt_error(ln,
+                  it,
+                  "{} declare child 1 {} (type) must be a type node or named-type ref, got {}",
+                  node_loc(ln, it),
+                  node_loc(ln, c1),
+                  Lnast_ntype::debug_name(ln->get_type(c1)));
         return;
       }
       if (!Lnast_ntype::is_const(ln->get_type(c2))) {
-        Pass::error("lnastfmt: {} declare child 2 {} (mode) must be a const, got {}",
-                    node_loc(ln, it),
-                    node_loc(ln, c2),
-                    Lnast_ntype::debug_name(ln->get_type(c2)));
+        fmt_error(ln,
+                  it,
+                  "{} declare child 2 {} (mode) must be a const, got {}",
+                  node_loc(ln, it),
+                  node_loc(ln, c2),
+                  Lnast_ntype::debug_name(ln->get_type(c2)));
         return;
       }
     }
@@ -464,23 +514,27 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
       auto c0 = ln->get_first_child(it);
       if (c0.is_invalid() || !Lnast_ntype::is_ref(ln->get_type(c0))) {
         if (c0.is_invalid()) {
-          Pass::error("lnastfmt: {} {} LHS is missing", node_loc(ln, it), Lnast_ntype::debug_name(type));
+          fmt_error(ln, it, "{} {} LHS is missing", node_loc(ln, it), Lnast_ntype::debug_name(type));
         } else {
-          Pass::error("lnastfmt: {} {} LHS {} must be a ref, got {} '{}'",
-                      node_loc(ln, it),
-                      Lnast_ntype::debug_name(type),
-                      node_loc(ln, c0),
-                      Lnast_ntype::debug_name(ln->get_type(c0)),
-                      ln->get_name(c0));
+          fmt_error(ln,
+                    it,
+                    "{} {} LHS {} must be a ref, got {} '{}'",
+                    node_loc(ln, it),
+                    Lnast_ntype::debug_name(type),
+                    node_loc(ln, c0),
+                    Lnast_ntype::debug_name(ln->get_type(c0)),
+                    ln->get_name(c0));
         }
         return;
       }
       auto c1 = ln->get_sibling_next(c0);
       if (c1.is_invalid()) {
-        Pass::error("lnastfmt: {} {} with LHS '{}' is missing its RHS (expected exactly 2 children)",
-                    node_loc(ln, it),
-                    Lnast_ntype::debug_name(type),
-                    ln->get_name(c0));
+        fmt_error(ln,
+                  it,
+                  "{} {} with LHS '{}' is missing its RHS (expected exactly 2 children)",
+                  node_loc(ln, it),
+                  Lnast_ntype::debug_name(type),
+                  ln->get_name(c0));
         return;
       }
       auto c2 = ln->get_sibling_next(c1);
@@ -501,18 +555,22 @@ void Pass_lnastfmt::validate(const Lnast* ln) {
           }
         }
         if (!ok) {
-          Pass::error("lnastfmt: {} {} with LHS '{}' has more than 2 children",
-                      node_loc(ln, it),
-                      Lnast_ntype::debug_name(type),
-                      ln->get_name(c0));
+          fmt_error(ln,
+                    it,
+                    "{} {} with LHS '{}' has more than 2 children",
+                    node_loc(ln, it),
+                    Lnast_ntype::debug_name(type),
+                    ln->get_name(c0));
           return;
         }
         // Trailing children beyond the type slot are not allowed.
         if (!ln->get_sibling_next(c2).is_invalid()) {
-          Pass::error("lnastfmt: {} {} with LHS '{}' has more than 3 children in a signature position",
-                      node_loc(ln, it),
-                      Lnast_ntype::debug_name(type),
-                      ln->get_name(c0));
+          fmt_error(ln,
+                    it,
+                    "{} {} with LHS '{}' has more than 3 children in a signature position",
+                    node_loc(ln, it),
+                    Lnast_ntype::debug_name(type),
+                    ln->get_name(c0));
           return;
         }
       }

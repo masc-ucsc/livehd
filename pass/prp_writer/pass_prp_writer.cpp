@@ -23,7 +23,7 @@ void Pass_prp_writer::work(Eprp_var& var) {
   Pass_prp_writer p(var);
 
   if (var.lnasts.empty()) {
-    Pass::warn("pass.prp_writer: no LNASTs in pipeline — nothing written");
+    livehd::diag::warn("pass.prp_writer", "no-input", "io").msg("no LNASTs in pipeline — nothing written").emit();
     return;
   }
 
@@ -34,7 +34,7 @@ void Pass_prp_writer::work(Eprp_var& var) {
   }
 
   if (!p.setup_directory(out_dir)) {
-    Pass::error("pass.prp_writer: could not create output directory: {}", out_dir);
+    livehd::diag::err("pass.prp_writer", "write-failed", "io").msg("could not create output directory: {}", out_dir).fatal();
     return;
   }
 
@@ -44,7 +44,7 @@ void Pass_prp_writer::work(Eprp_var& var) {
 
     std::ofstream out(fname);
     if (!out.is_open()) {
-      Pass::error("pass.prp_writer: could not open output file: {}", fname);
+      livehd::diag::err("pass.prp_writer", "write-failed", "io").msg("could not open output file: {}", fname).fatal();
       return;
     }
 

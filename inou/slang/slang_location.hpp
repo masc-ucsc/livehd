@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-// Shared slang SourceRange -> LiveHD provenance conversion ([[1f]], todo/ 1s
+// Shared slang SourceRange -> LiveHD provenance conversion (todo/ 1s
 // subtasks C & D). One place extracts (workspace-relative path, byte span,
 // line:col) from a slang SourceManager; the diagnostic client (C) wraps it into
 // a diag::Span and the LNAST importer (D) mints a hhds::SourceId from the same
@@ -33,7 +33,7 @@ struct Loc_info {
 // file) into a workspace-relative path + byte/line/col. The single extraction
 // shared by the diagnostic client and the LNAST importer.
 inline Loc_info extract(const slang::SourceManager& sm, slang::SourceRange range) {
-  Loc_info out;
+  Loc_info   out;
   const auto start = sm.getFullyOriginalLoc(range.start());
   const auto end   = sm.getFullyOriginalLoc(range.end());
   if (!start.valid()) {
@@ -70,9 +70,7 @@ inline livehd::diag::Span to_span(const Loc_info& li) {
 }
 
 // Convenience: a diag::Span directly from a SourceRange (subtask C).
-inline livehd::diag::Span span_of(const slang::SourceManager& sm, slang::SourceRange range) {
-  return to_span(extract(sm, range));
-}
+inline livehd::diag::Span span_of(const slang::SourceManager& sm, slang::SourceRange range) { return to_span(extract(sm, range)); }
 
 inline livehd::diag::Span span_of(const slang::SourceManager& sm, slang::SourceLocation loc) {
   return span_of(sm, slang::SourceRange(loc, loc));

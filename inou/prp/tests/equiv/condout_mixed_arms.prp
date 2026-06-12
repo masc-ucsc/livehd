@@ -1,0 +1,20 @@
+/*
+:name: condout_mixed_arms
+:type: equiv
+:verilog_top: condout_mixed_arms.mixedarm
+:pyrope_top: condout_mixed_arms.mixedarm
+*/
+
+// Regression (constprop miscompile, repro B): one if-arm writes a comptime
+// CONSTANT to an io output, the other a runtime value. The const arm's
+// store used to be absorbed+dropped, so the emitted Verilog read the
+// runtime arm UNCONDITIONALLY (`o = a`, no mux) — the constant arm silently
+// vanished. The io-output keep guard preserves both arm stores so tolg
+// builds the mux.
+comb mixedarm(s:bool, a:u2) -> (o:u2) {
+  if s {
+    o = 1
+  } else {
+    o = a
+  }
+}

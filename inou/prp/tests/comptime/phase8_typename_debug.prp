@@ -21,7 +21,7 @@ cassert(g.b.[bits]   == nil)         // string field — no numeric envelope
 cassert(g.[bits]     == nil)         // poisoned by the string field
 cassert(g.[size]     == 2)
 
-const p::[debug="trace", owner="alu"] :u8 = 42
+const p:u8:[debug="trace", owner="alu"] = 42
 cassert(p.[bits]  == 8)
 cassert(p.[debug] == "trace")
 cassert(p.[owner] == "alu")

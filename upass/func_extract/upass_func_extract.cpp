@@ -7,7 +7,6 @@
 
 #include "dlop.hpp"
 #include "lnast_ntype.hpp"
-#include "lnast_srcloc.hpp"
 
 static upass::uPass_plugin plugin_func_extract("func_extract", upass::uPass_wrapper<uPass_func_extract>::get_upass);
 
@@ -19,12 +18,12 @@ void uPass_func_extract::copy_current_subtree(const std::shared_ptr<Lnast>& dst,
   const auto type       = lm->current_type();
   auto       new_parent = (Lnast_ntype::is_ref(type) || Lnast_ntype::is_const(type)) ? dst->add_child(parent, lm->current_node())
                                                                                      : dst->add_child(parent, type);
-  // [[1f]] cross-tree carry: re-mint the SourceId into the extracted Lnast's
+  // Cross-tree carry: re-mint the SourceId into the extracted Lnast's
   // own locator so the extracted body stays attributable to its source.
   if (Lnast::srcid_carries(type)) {
     const auto& src = lm->get_lnast();
     if (const auto id = src->get_srcid(lm->get_current_nid()); id != hhds::SourceId_invalid) {
-      dst->set_srcid(new_parent, livehd::srcloc::import_srcid(dst->source_locator(), src->source_locator(), id));
+      dst->set_srcid(new_parent, dst->source_locator().import_from(src->source_locator(), id));
     }
   }
   if (!lm->has_child()) {
@@ -77,8 +76,8 @@ void uPass_func_extract::stamp_template_if_untyped(const std::shared_ptr<Lnast>&
     return;
   }
   // io layout: top -> io(inputs_tuple_add, outputs_tuple_add), stmts.
-  auto root  = dst->get_root();
-  auto io_n  = dst->get_first_child(root);
+  auto root = dst->get_root();
+  auto io_n = dst->get_first_child(root);
   if (io_n.is_invalid() || !Lnast_ntype::is_io(dst->get_type(io_n))) {
     return;
   }
@@ -122,8 +121,8 @@ void uPass_func_extract::process_stmts_post() { --stmts_depth; }
 // scalars), then temp_scalar_value (SSA temps). Returns nullopt on
 // anything we can't statically resolve.
 static std::optional<Dlop> resolve_child_scalar(const std::string& name, bool is_ref, bool is_const,
-                                                 const std::unordered_map<std::string, Dlop>& latest,
-                                                 const std::unordered_map<std::string, Dlop>& temps) {
+                                                const std::unordered_map<std::string, Dlop>& latest,
+                                                const std::unordered_map<std::string, Dlop>& temps) {
   if (is_const) {
     try {
       return *Dlop::from_pyrope(name);
@@ -168,10 +167,10 @@ static void fold_temp_nary(upass::Lnast_manager* lm, Op op, const std::unordered
     return;
   }
   std::optional<Dlop> acc = resolve_child_scalar(std::string(lm->current_text()),
-                                                  Lnast_ntype::is_ref(lm->current_type()),
-                                                  Lnast_ntype::is_const(lm->current_type()),
-                                                  latest_outer_value,
-                                                  temp_scalar_value);
+                                                 Lnast_ntype::is_ref(lm->current_type()),
+                                                 Lnast_ntype::is_const(lm->current_type()),
+                                                 latest_outer_value,
+                                                 temp_scalar_value);
   if (!acc.has_value() || acc->is_invalid()) {
     lm->restore_cursor(saved);
     return;
@@ -319,7 +318,7 @@ upass::Vote uPass_func_extract::process_tuple_add(std::string_view dst_name, Bun
     lm->restore_cursor(saved);
     return upass::Vote::keep;
   }
-  std::string                            lhs_name(lm->current_text());
+  std::string                           lhs_name(lm->current_text());
   std::unordered_map<std::string, Dlop> fields;
   while (lm->move_to_sibling()) {
     if (!Lnast_ntype::is_store(lm->current_type()) || !lm->has_child()) {
@@ -524,9 +523,9 @@ void uPass_func_extract::process_func_def() {
   // stages_min>0. A ref-self mod keeps kind "mod" but is recognized as a
   // method by its `self` io entry.
   new_lnast->set_lambda_kind(func_kind);
-  auto root_nid  = new_lnast->set_root(Lnast_ntype::create_top());
+  auto root_nid = new_lnast->set_root(Lnast_ntype::create_top());
 
-  // [[1f]] module anchor: stamp the extracted root with the lambda
+  // Module anchor: stamp the extracted root with the lambda
   // definition's SourceId (nearest id-bearing ancestor of the cursor — the
   // func_def statement). tolg anchors io-time cells at it and cgen the
   // module header lines, so even structural Verilog stays attributable.
@@ -542,7 +541,7 @@ void uPass_func_extract::process_func_def() {
       id = src->get_srcid(nid);
     }
     if (id != hhds::SourceId_invalid) {
-      new_lnast->set_srcid(root_nid, livehd::srcloc::import_srcid(new_lnast->source_locator(), src->source_locator(), id));
+      new_lnast->set_srcid(root_nid, new_lnast->source_locator().import_from(src->source_locator(), id));
     }
   }
 

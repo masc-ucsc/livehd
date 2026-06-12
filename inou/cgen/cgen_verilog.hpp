@@ -18,7 +18,7 @@ class Cgen_verilog {
 private:
   const bool        verbose;
   std::string_view  odir;
-  const bool        srcmap;  // emit an ECMA-426 .map sidecar ([[1f]]-G)
+  const bool        srcmap;  // emit an ECMA-426 .map sidecar
   static inline int trace_module_cnt = 0;
 
   // Re-keyed onto hhds::Class_index — the migration moved cgen off
@@ -45,12 +45,12 @@ private:
   // Helper: name for a wire, preferring user-assigned name; falls back to a
   // synthesised name from node + port_id. Graph-IO pins resolve to their
   // declared name from GraphIO.
-  static std::string         pin_wire_name(const hhds::Pin_class& pin);
-  std::string                get_wire_or_const(const hhds::Pin_class& dpin) const;
-  static std::string         get_scaped_name(std::string_view name);
-  static std::string         get_append_to_name(std::string_view name, std::string_view ext);
-  std::string                get_expression(const hhds::Pin_class& dpin) const;
-  std::string                add_expression(std::string_view txt_seq, std::string_view txt_op, const hhds::Pin_class& dpin) const;
+  static std::string pin_wire_name(const hhds::Pin_class& pin);
+  std::string        get_wire_or_const(const hhds::Pin_class& dpin) const;
+  static std::string get_scaped_name(std::string_view name);
+  static std::string get_append_to_name(std::string_view name, std::string_view ext);
+  std::string        get_expression(const hhds::Pin_class& dpin) const;
+  std::string        add_expression(std::string_view txt_seq, std::string_view txt_op, const hhds::Pin_class& dpin) const;
 
   // Resolve the "driver of this sink pin": walk inp_edges and return the
   // first edge's driver. Returns an invalid Pin_class if not connected.
@@ -77,13 +77,13 @@ private:
   void add_to_pin2var(std::shared_ptr<File_output> fout, const hhds::Pin_class& dpin, std::string_view name, bool out_unsigned);
   void create_locals(std::shared_ptr<File_output> fout, hhds::Graph* graph);
 
-  // ── ECMA-426 egress ([[1f]]-G) ──────────────────────────────────────────
+  // ── ECMA-426 egress ──────────────────────────────────────────
   // One Segment per emitted statement whose node carries a SourceId: the
   // generated position is the line the statement is about to land on.
   // Resolution to file/line:col happens in hhds::sourcemap::to_json at write
   // time. note_src is a no-op unless `srcmap` is set.
   std::vector<hhds::sourcemap::Segment> map_segments_;
-  void note_src(const std::shared_ptr<File_output>& fout, const hhds::Node_class& node);
+  void                                  note_src(const std::shared_ptr<File_output>& fout, const hhds::Node_class& node);
   void write_srcmap(const std::shared_ptr<File_output>& fout, const std::string& filename, const hhds::Source_locator& sl);
 
   // Module-level anchor (a graph io node, stamped by tolg with the

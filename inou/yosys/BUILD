@@ -75,6 +75,10 @@ VERILOG_TESTS = glob(
     ],
 )
 
+# The full corpus (fixme/long/nocheck included): the //inou/slang ladder pins
+# an expectation for EVERY source, so they all need exported labels.
+ALL_VERILOG_TESTS = glob(["tests/*.v"])
+
 filegroup(
     name = "verilog_tests",
     srcs = VERILOG_TESTS,
@@ -104,4 +108,4 @@ YOSYS_COMPILE_TESTS = [
     ],
 ) for t in YOSYS_COMPILE_TESTS]
 
-exports_files(VERILOG_TESTS)
+exports_files(ALL_VERILOG_TESTS)

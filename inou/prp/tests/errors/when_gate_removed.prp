@@ -1,0 +1,14 @@
+/*
+:name: when_gate_removed
+:type: error
+:error: syntax
+:help: does not parse
+*/
+
+// The `when`/`unless` trailing gates were removed from Pyrope (all gating —
+// comptime or runtime — is an `if` block now). Without this check the parser
+// error-recovers `c = 100 when false` into `c = false`, silently flipping the
+// stored value; the nested-ERROR report makes it a hard syntax error instead.
+
+mut c = 1
+c = 100 when false // locate_error_here

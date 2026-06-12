@@ -37,30 +37,17 @@ protected:
 public:
   static inline Eprp eprp;
 
-  // The diag record is emitted downstream by Eprp::parser_error_int /
-  // parser_warn_int (the single throw path), so these stay thin.
-  static void error(std::string_view msg) { throw Eprp::parser_error(eprp, msg); }
-  static void warn(std::string_view msg) { eprp.parser_warn(msg); }
+  // Errors/warnings go through livehd::diag (the Builder or a pass-local
+  // located helper) — the old Pass::error/Pass::warn shims are deleted so
+  // generic, unlocated, code-less records cannot creep back in. `info`
+  // remains: it is debug-build progress logging, not a diagnostic, and stays
+  // out of the machine-readable stream.
   static void info(std::string_view msg) {
 #ifndef NDEBUG
     eprp.parser_info(msg);
 #else
     (void)msg;
 #endif
-  }
-
-  template <typename... Args>
-  static void error(std::format_string<Args...> format, Args&&... args) {
-    auto tmp = std::format(format, std::forward<Args>(args)...);
-    err_tracker::logger(tmp);
-    error(tmp);
-  }
-
-  template <typename... Args>
-  static void warn(std::format_string<Args...> format, Args&&... args) {
-    auto tmp = std::format(format, std::forward<Args>(args)...);
-    err_tracker::logger(tmp);
-    warn(std::string_view(tmp));
   }
 
   template <typename... Args>
@@ -74,7 +61,6 @@ public:
     ((void)args, ...);
 #endif
   }
-
 };
 
 class Pass_plugin {
@@ -88,8 +74,7 @@ protected:
 public:
   Pass_plugin(const std::string& name, const Setup_fn& setup_fn) {
     if (registry.find(name) != registry.end()) {
-      Pass::error("Pass_plugin: {} is already registered", name);
-      return;
+      livehd::diag::err("pass", "plugin-duplicate", "internal").msg("Pass_plugin: {} is already registered", name).fatal();
     }
     registry[name] = setup_fn;
   }

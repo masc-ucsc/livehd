@@ -90,7 +90,7 @@ inline constexpr place_t place{};
 // Per-node source provenance is hhds::attrs::srcid (one uint64 SourceId
 // resolved through the graph's Source_locator) — the old livehd::attrs::loc
 // (with its pos1=line-vs-byte mismatch) and livehd::attrs::source string pair
-// were write-only and are gone ([[1f]]).
+// were write-only and are gone.
 
 // Per-node serialized Dlop value used by Nconst cells.
 // Replaces Lgraph_attributes::const_map (which stored Dlop::serialize()).
@@ -148,6 +148,4 @@ inline constexpr pending_time_t pending_time{};
 
 }  // namespace livehd::attrs
 
-namespace hhds {
-
-}  // namespace hhds
+namespace hhds {}  // namespace hhds

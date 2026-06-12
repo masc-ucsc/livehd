@@ -2,19 +2,22 @@
 
 #include "diag.hpp"
 
+#include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <functional>
 #include <stdexcept>
 
+#include "hhds/source_excerpt.hpp"
+
 namespace livehd::diag {
 
 std::string_view to_string(Severity s) {
   switch (s) {
-    case Severity::error: return "error";
+    case Severity::error  : return "error";
     case Severity::warning: return "warning";
-    case Severity::note: return "note";
+    case Severity::note   : return "note";
   }
   return "error";
 }
@@ -24,7 +27,7 @@ namespace {
 void json_escape(std::string& out, std::string_view s) {
   for (char c : s) {
     switch (c) {
-      case '"': out += "\\\""; break;
+      case '"' : out += "\\\""; break;
       case '\\': out += "\\\\"; break;
       case '\n': out += "\\n"; break;
       case '\r': out += "\\r"; break;
@@ -55,8 +58,8 @@ void append_span(std::string& out, const Span& sp) {
     out += "null";
     return;
   }
-  out += '{';
-  bool first = true;
+  out        += '{';
+  bool first  = true;
   auto comma  = [&] {
     if (!first) {
       out += ',';
@@ -208,7 +211,10 @@ std::string loc_string(const Span& sp) {
 // location segment is omitted when the span is null, like `livehd:error:…`).
 // `error` = compilation cannot proceed; `warning` = proceeds but a likely issue;
 // `note` = a secondary location attached to the diagnostic. `help` = the hint.
-std::string to_text(const Diagnostic& d) {
+// With a locator, the message line and each note line are followed by a
+// caret-underlined excerpt of the spanned source (hhds::render_excerpt) —
+// silently omitted when the locator has no validated bytes for the file.
+std::string to_text(const Diagnostic& d, const hhds::Source_locator* sl) {
   // Prefix shared by the message line + its help/see continuations.
   std::string prefix = "livehd:";
   auto        loc    = loc_string(d.span);
@@ -217,11 +223,22 @@ std::string to_text(const Diagnostic& d) {
     prefix += ':';
   }
 
+  const auto excerpt = [sl](const Span& sp) -> std::string {
+    if (sl == nullptr) {
+      return {};
+    }
+    return hhds::render_excerpt(*sl, sp);
+  };
+
   std::string out;
   out += prefix;
   out += to_string(d.severity);
   out += ':';
   out += d.message;
+  if (auto ex = excerpt(d.span); !ex.empty()) {
+    out += '\n';
+    out += ex;
+  }
   if (!d.hint.empty()) {
     out += '\n';
     out += prefix;
@@ -235,17 +252,23 @@ std::string to_text(const Diagnostic& d) {
     out += s;
   }
   for (const auto& n : d.notes) {
-    out += "\nlivehd:";
-    auto nloc = loc_string(n.span);
+    out       += "\nlivehd:";
+    auto nloc  = loc_string(n.span);
     if (!nloc.empty()) {
       out += nloc;
       out += ':';
     }
     out += "note:";
     out += n.message;
+    if (auto ex = excerpt(n.span); !ex.empty()) {
+      out += '\n';
+      out += ex;
+    }
   }
   return out;
 }
+
+std::string to_text(const Diagnostic& d) { return to_text(d, nullptr); }
 
 void Sink::init_output() {
   if (configured_) {
@@ -305,14 +328,18 @@ void Sink::write_json(const std::string& line) {
 }
 
 void Sink::emit(Diagnostic d) {
+  // The category vocabulary is pinned (diag.hpp kCategories); a typo here
+  // would silently fragment the machine-readable stream, so fail loudly in
+  // debug builds at the first occurrence.
+  assert(is_known_category(d.category) && "diag: category not in the pinned vocabulary (see diag.hpp kCategories)");
   auto key = dedup_key(d);
   if (!seen_.insert(key).second) {
     return;  // already reported this (code, span, message) in the current step
   }
   switch (d.severity) {
-    case Severity::error: ++error_count_; break;
+    case Severity::error  : ++error_count_; break;
     case Severity::warning: ++warn_count_; break;
-    case Severity::note: ++note_count_; break;
+    case Severity::note   : ++note_count_; break;
   }
   init_output();
   if (json_out_ != Json::none) {
@@ -320,7 +347,7 @@ void Sink::emit(Diagnostic d) {
   }
   if (human_stderr_) {
     if (!stderr_jsonl_) {
-      std::fputs(to_text(d).c_str(), stderr);
+      std::fputs(to_text(d, locator_).c_str(), stderr);
       std::fputc('\n', stderr);
     } else if (json_out_ != Json::stderr_) {  // already written above when the JSONL channel targets stderr
       std::fputs(to_jsonl(d, seq_).c_str(), stderr);
@@ -340,9 +367,9 @@ void Sink::fatal(Diagnostic d) {
 
 size_t Sink::count(Severity s) const {
   switch (s) {
-    case Severity::error: return error_count_;
+    case Severity::error  : return error_count_;
     case Severity::warning: return warn_count_;
-    case Severity::note: return note_count_;
+    case Severity::note   : return note_count_;
   }
   return 0;
 }
@@ -409,5 +436,14 @@ Sink& sink() {
   static Sink s;
   return s;
 }
+
+void Builder::emit() { sink().emit(std::move(d_)); }
+
+void Builder::fatal() {
+  d_.severity = Severity::error;
+  sink().fatal(std::move(d_));
+}
+
+void Builder::stage() { sink().stage(std::move(d_)); }
 
 }  // namespace livehd::diag

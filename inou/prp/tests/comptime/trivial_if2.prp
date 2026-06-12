@@ -6,9 +6,9 @@
 */
 
 mut c2 = 100
-mut c2 = 3 when false   // No impact line of code
+if false { c2 = 3 }   // No impact line of code
 cassert(c2 == 100)
 
 mut cond = true
-c2 = 4 when cond
+if cond { c2 = 4 }
 cassert(c2 == 4)

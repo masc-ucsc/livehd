@@ -13,14 +13,14 @@
 #include <iostream>
 #include <stdexcept>
 
-#include "file_utils.hpp"
 #include "cgen_verilog.hpp"
+#include "file_utils.hpp"
 #include "inou_yosys_api.hpp"
 #ifdef I
 #undef I
 #endif
-#include "kernel/yosys.h"
 #include "graph_library_singleton.hpp"
+#include "kernel/yosys.h"
 #include "mustache.hpp"
 
 static void log_error_atexit() { throw std::runtime_error("yosys finished"); }
@@ -71,7 +71,9 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var& var, bool do_read) {
   }
 
   if (access(std::string(script_file).c_str(), R_OK) != F_OK) {
-    error("yosys setup could not find the provided script:{} file binary_path:{}", script_file, main_path);
+    livehd::diag::err("inou.yosys", "missing-file", "io")
+        .msg("yosys setup could not find the provided script:{} file binary_path:{}", script_file, main_path)
+        .fatal();
     return;
   }
 
@@ -82,7 +84,7 @@ void Inou_yosys_api::call_yosys(mustache::data& vars) {
   std::ifstream inFile;
   inFile.open(std::string(script_file));
   if (!inFile.good()) {
-    error("inou_yosys_api: could not open {}", script_file);
+    livehd::diag::err("inou.yosys", "missing-file", "io").msg("could not open {}", script_file).fatal();
   }
 
   std::stringstream strStream;
@@ -110,7 +112,7 @@ void Inou_yosys_api::call_yosys(mustache::data& vars) {
       Yosys::Pass::call(&design, cmd);
     } catch (...) {
       err_tracker::logger("inou.yosys cmd:{} failed\n", cmd);
-      error("inou.yosys cmd:{} failed\n", cmd);
+      livehd::diag::err("inou.yosys", "yosys-failed", "io").msg("cmd:{} failed", cmd).fatal();
     }
   }
 
@@ -120,7 +122,7 @@ void Inou_yosys_api::call_yosys(mustache::data& vars) {
 
   int fd = mkstemp(filename);
   if (fd < 0) {
-    error("Could not create yosys_script.XXXXXX file\n");
+    livehd::diag::err("inou.yosys", "write-failed", "io").msg("Could not create yosys_script.XXXXXX file").fatal();
     return -1;
   }
   int sz_check = write(fd, yosys_cmd.c_str(), yosys_cmd.size());
@@ -131,7 +133,7 @@ void Inou_yosys_api::call_yosys(mustache::data& vars) {
 
   int pid = fork();
   if (pid < 0) {
-    error("unable to fork??");
+    livehd::diag::err("inou.yosys", "yosys-failed", "internal").msg("unable to fork??").fatal();
     return -1;
   }
 
@@ -164,7 +166,7 @@ void Inou_yosys_api::call_yosys(mustache::data& vars) {
                     0};
 
     if (execvp(yosys.c_str(), argv) < 0) {
-      error("execvp fail with {}", strerror(errno));
+      livehd::diag::err("inou.yosys", "yosys-failed", "internal").msg("execvp fail with {}", strerror(errno)).fatal();
       exit(-3);
     }
 
@@ -176,7 +178,7 @@ void Inou_yosys_api::call_yosys(mustache::data& vars) {
   do {
     int w = waitpid(pid, &wstatus, WUNTRACED | WCONTINUED);
     if (w == -1) {
-      error("waitpid fail with {}", strerror(errno));
+      livehd::diag::err("inou.yosys", "yosys-failed", "internal").msg("waitpid fail with {}", strerror(errno)).fatal();
       return errno;
     }
 
@@ -218,7 +220,7 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
 
   const bool has_files = !files.empty() && files != "/INVALID";
   if (!has_files && filelist_file.empty()) {
-    error("at least one of files or filelist_file must be provided");
+    livehd::diag::err("inou.yosys", "bad-option", "io").msg("at least one of files or filelist_file must be provided").fatal();
     return;
   }
 
@@ -243,7 +245,9 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
     }
   }
   if (slang_plugin_path.empty()) {
-    error("internal error: slang.so could not be found (tried paths relative to exe_path:{})", exe_path);
+    livehd::diag::err("inou.yosys", "missing-file", "io")
+        .msg("internal error: slang.so could not be found (tried paths relative to exe_path:{})", exe_path)
+        .fatal();
     return;
   }
   vars.set("slang_plugin_path", slang_plugin_path);
@@ -308,7 +312,9 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
     vars.set("use_slang", mustache::data::type::bool_false);
     vars.set("use_verilog", mustache::data::type::bool_true);
   } else {
-    error("unrecognized frontend {} option. Either verilog or slang", frontend);
+    livehd::diag::err("inou.yosys", "bad-option", "io")
+        .msg("unrecognized frontend {} option. Either verilog or slang", frontend)
+        .fatal();
     return;
   }
 
@@ -338,7 +344,9 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
     } else if (techmap == "full") {
       vars.set("techmap_full", mustache::data::type::bool_true);
     } else {
-      error("unrecognized techmap {} option. Either full or alumacc", techmap);
+      livehd::diag::err("inou.yosys", "bad-option", "io")
+          .msg("unrecognized techmap {} option. Either full or alumacc", techmap)
+          .fatal();
       return;
     }
   }
@@ -356,7 +364,7 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
   } else if (abc == "false" || abc == "0") {
     // Nothing to do
   } else {
-    error("unrecognized abc {} option. Either true or false", techmap);
+    livehd::diag::err("inou.yosys", "bad-option", "io").msg("unrecognized abc {} option. Either true or false", techmap).fatal();
   }
 
   auto& lib = livehd::Hhds_graph_library::instance(path);

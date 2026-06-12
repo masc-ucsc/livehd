@@ -163,6 +163,7 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
     target = anchor_for(stack.back(), var);
   }
   record_uncertain_modification(var);
+  clear_uncertain_nil(var);  // a fresh write replaces the poison pin
 
   std::shared_ptr<Bundle> var_bundle;
   const auto              it = target->varmap.find(var);
@@ -262,6 +263,7 @@ bool Symbol_table::set(std::string_view key, const Dlop& trivial) {
     target = anchor_for(stack.back(), var);
   }
   record_uncertain_modification(var);
+  clear_uncertain_nil(var);  // a fresh write replaces the poison pin
 
   std::shared_ptr<Bundle> bundle;
   const auto              it = target->varmap.find(var);
@@ -390,6 +392,12 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
       // "unknown", which masks tests that *do* want the verifier to
       // discharge a conditionally-modified var.
       it->second->set("0", *Dlop::nil());
+      // …and mark it: this nil is a poison MARKER for a runtime-divergent
+      // value (the arm may or may not have run). Value consumers
+      // (known_const_scalar, constprop's operand folds, drop decisions)
+      // must keep the var's wire alive; only the eq/ne nil-short-circuit
+      // (cassert discharge) reads the raw nil. Cleared by the next set().
+      uncertain_nil_.insert(var_name);
     }
   }
 

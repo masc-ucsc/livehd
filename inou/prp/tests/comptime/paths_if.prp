@@ -31,14 +31,14 @@ if true {
 
 cassert(c == 5)
 
-c = 100 when false
+if false { c = 100 }
 cassert(c == 5)
-c = 100 unless true
+if not true { c = 100 }
 cassert(c == 5)
 
-c = 100 when true
+if true { c = 100 }
 cassert(c == 100)
-c = 200 unless false
+if not false { c = 200 }
 cassert(c == 200)
 
 comb no_know_input(a)->(r) {

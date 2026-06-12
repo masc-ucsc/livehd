@@ -6,8 +6,8 @@
 */
 mut a = 1
 const t_0 = (a, a + 1, a * 2)
-if t_0.0 < 0x1000 { a = t_0.1 } else { a = (t_0.2 ^ 0x5A) & 0xFFFFFF }
+if t_0[0] < 0x1000 { a = t_0[1] } else { a = (t_0[2] ^ 0x5A) & 0xFFFFFF }
 const t_1 = (a, a + 1, a * 2)
-if t_1.0 < 0x1000 { a = t_1.1 } else { a = (t_1.2 ^ 0x5A) & 0xFFFFFF }
+if t_1[0] < 0x1000 { a = t_1[1] } else { a = (t_1[2] ^ 0x5A) & 0xFFFFFF }
 const t_2 = (a, a + 1, a * 2)
 cassert(a == 3)

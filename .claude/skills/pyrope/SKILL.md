@@ -8,7 +8,8 @@ description: Write and check Pyrope (LiveHD's HDL). Use when creating or editing
 Pyrope is a hardware description language: every construct elaborates to wires,
 muxes, flops, and memories. This file is the working subset needed to *generate
 correct code*. The full spec lives in `~/projs/docs/docs/pyrope/` (chapters
-00–10). Always verify generated code with `lhd` (last section).
+00–13; `01b-quick_intro.md` is the human-oriented condensation of this
+skill). Always verify generated code with `lhd` (last section).
 
 ## Ground rules
 
@@ -56,7 +57,7 @@ pub comb get5() -> (v) { v = 5 }       // pub = importable from other files
 mandatory (`-> ()` for none); only `self`-methods may omit it. The body
 *assigns* the outputs — a trailing bare expression does nothing. **`return` is
 a terminator only**: `return X` is a syntax error. Assign first, then `return`
-/ `return when cond` / `return unless cond`. Callers get a named tuple
+(for a conditional early exit, wrap it: `if cond { return }`). Callers get a named tuple
 (`r.next`); a single-output tuple auto-unwraps. Destructuring binds **by
 name** — `const (b, c) = f(...)` (order irrelevant); rename with
 `(x=f.b) = f(...)`. Unnamed RHS tuples destructure positionally.
@@ -103,7 +104,7 @@ mut arr = [1, 2, 3]                    // [] = array: all entries same type
   conditional) — `a[0,1]` is not allowed.
 * Mutability: outer `const` freezes every field; inner `const` pins one field
   of a `mut` tuple.
-* `type Foo = (mut color:string = "", mut value:s33 = nil)` declares a type.
+* `type Foo = (mut color:string = "", mut value:i33 = nil)` declares a type.
   Complicated lambda types must be declared ahead with `type`, never inline.
 * Structural typing operators: `does` (a covers b's structure; `u32 does u16`),
   `equals`, `case` (`does` + defined-value match; `nil`/`0sb?` wildcards),
@@ -111,8 +112,9 @@ mut arr = [1, 2, 3]                    // [] = array: all entries same type
   there are no `!has`/`!in`/`!and` forms.
 * `:Type` annotations only at declaration sites. Check elsewhere with
   `cassert(x does T)`; convert with constructor calls: `u8(x)`, `int(s)`,
-  `string(n)`. `_` is allowed only as a name wildcard in type positions
-  (`comb() -> (_:int)`).
+  `string(n)`. There is no `_` wildcard — outputs must be named
+  (`comb() -> (res:int)`), and type-shape operands write the bare type
+  (`x does u8`, not `x does _:u8`).
 * Enums: `enum State = (Idle, Run, Done)` — one-hot encoding by default; any
   explicit value (or an `:int` type) switches to sequential; hierarchical
   enums nest. **Always compare against names** (`state == State.Idle`), never
@@ -143,12 +145,10 @@ destination (no `{a,b}` form).
   (parse error without it). A bare value means `==`. Arms: `== v`, `in (2,3)`,
   `case (a=1)`, `< 5`, `else`. The selector can declare locals:
   `match const t = f(); t { ... }`.
-* `when` / `unless` trailing gates are **compile-time** (`#if`-like — the
-  condition must be comptime): `assert(x) when DEBUG`, `reg r = 3 when CFG`,
-  `return unless DEBUG`. Runtime gating uses an `if` block or if-expression
-  (`if enable { count += 1 }`). Exception: verification statements are also
-  gated on runtime signals to silence spurious checks
-  (`always_assert(mem[7] == 7) unless mem.reset`).
+* There are **no `when`/`unless` trailing gates** (removed from the
+  language). All gating — comptime or runtime — uses an `if` block:
+  `if DEBUG { assert(x) }`, `if enable { count += 1 }`. A comptime-false
+  condition folds the block away entirely.
 * Loops `for i in 0..<N {}`, `while`, `loop` are fully unrolled — bounds must
   be comptime. `break`/`continue` work. Iterate tuples
   (`for (i, v) in t.enumerate()`), mutate via `for x in ref t { x += 1 }`.
@@ -332,8 +332,8 @@ pipe[1] dpram(we:bool, waddr:u8, raddr:u8, wdata:u32) -> (rdata:u32) {
 2. Outputs must be named in `-> (...)`; no positional returns; clause is
    mandatory (except `self` methods).
 3. `match` without a final `else` arm is a parse error.
-4. `when`/`unless` are comptime gates, not runtime muxes — `count += 1 when
-   enable` with a runtime `enable` is wrong; write `if enable { ... }`.
+4. `when`/`unless` trailing gates no longer exist — `count += 1 when enable`
+   is a syntax error; write `if enable { count += 1 }`.
 5. `.[defer]` is RHS-only; there is no deferred-write form.
 6. `@[N]` never inserts flops (pure check); `stage[N]` inserts them
    (`mod`-only). `pipe` calls need `stage[N]` at the call site.

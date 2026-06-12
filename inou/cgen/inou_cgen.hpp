@@ -6,7 +6,7 @@
 class Inou_cgen : public Pass {
 private:
   bool        verbose;
-  bool        srcmap = false;  // ECMA-426 .map sidecar ([[1f]]-G)
+  bool        srcmap = false;  // ECMA-426 .map sidecar
   std::string odir;
 
 protected:

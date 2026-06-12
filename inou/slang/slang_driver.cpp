@@ -17,14 +17,14 @@
 #include "slang/analysis/AnalysisManager.h"  // complete type for runAnalysis's unique_ptr
 #include "slang/ast/Compilation.h"
 #include "slang/driver/Driver.h"
+#include "slang_context.hpp"
 #include "slang_diag.hpp"
-#include "slang_tree.hpp"
 
 using namespace slang;
 using namespace slang::driver;
 
 template <typename TArgs>
-static int driverMain(int argc, TArgs argv, Slang_tree& slang_tree) {
+static int driverMain(int argc, TArgs argv, Slang_context& slang_tree) {
   SLANG_TRY {
     Driver driver;
     driver.addStandardArgs();
@@ -45,6 +45,11 @@ static int driverMain(int argc, TArgs argv, Slang_tree& slang_tree) {
     // Route slang's diagnostics through LiveHD's sink instead of stderr text.
     driver.diagEngine.clearClients();
     driver.diagEngine.addClient(std::make_shared<livehd::slang_diag::Sink_client>());
+
+    // NB: procedural writes to nets (`output d` + `d <= ...`, accepted by the
+    // lax yosys readers) cannot be relaxed: slang invalidates the assignment
+    // expression regardless of the AssignToNet severity, so the clean
+    // strict-LRM error is the best report ("declare the port as `output reg`").
 
     const bool quietMode = quiet == true;
 
@@ -75,5 +80,5 @@ static int driverMain(int argc, TArgs argv, Slang_tree& slang_tree) {
 }
 
 #ifndef FUZZ_TARGET
-int slang_main(int argc, char** argv, Slang_tree& tree) { return driverMain(argc, argv, tree); }
+int slang_main(int argc, char** argv, Slang_context& tree) { return driverMain(argc, argv, tree); }
 #endif

@@ -9,7 +9,6 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_cat.h"
 #include "cell.hpp"
-#include "hlop/dlop.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
@@ -185,7 +184,7 @@ void Pass_opentimer::read_vcd() {
 
     bool ok = vcd_list[i].open(f);
     if (!ok) {
-      Pass::error("could not read vcd {} file", f);
+      livehd::diag::err("pass.opentimer", "missing-file", "io").msg("could not read vcd {} file", f).fatal();
     }
   }
 }
@@ -300,11 +299,15 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         auto mask_dpin  = get_driver_of_sink_name(node, "mask");
         auto value_dpin = get_driver_of_sink_name(node, "value");
         if (a_dpin.is_invalid() || mask_dpin.is_invalid() || value_dpin.is_invalid()) {
-          Pass::error("Invalid corrupt set_mask node {} (cprop should have deleted it)", debug_name(node));
+          livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+              .msg("Invalid corrupt set_mask node {} (cprop should have deleted it)", debug_name(node))
+              .fatal();
           return;
         }
         if (!is_const_pin(mask_dpin)) {
-          Pass::error("opentimer can not handle non-constant masks on node {} (cprop/tmap first)", debug_name(node));
+          livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+              .msg("opentimer can not handle non-constant masks on node {} (cprop/tmap first)", debug_name(node))
+              .fatal();
           return;
         }
         auto mask_const = hydrate_const(mask_dpin);
@@ -313,11 +316,15 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         auto a_dpin    = get_driver_of_sink_name(node, "a");
         auto mask_dpin = get_driver_of_sink_name(node, "mask");
         if (a_dpin.is_invalid() || mask_dpin.is_invalid()) {
-          Pass::error("Invalid corrupt get_mask node {} (cprop should have deleted it)", debug_name(node));
+          livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+              .msg("Invalid corrupt get_mask node {} (cprop should have deleted it)", debug_name(node))
+              .fatal();
           return;
         }
         if (!is_const_pin(mask_dpin)) {
-          Pass::error("opentimer can not handle non-constant masks on node {} (cprop/tmap first)", debug_name(node));
+          livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+              .msg("opentimer can not handle non-constant masks on node {} (cprop/tmap first)", debug_name(node))
+              .fatal();
           return;
         }
         auto mask_const = hydrate_const(mask_dpin);
@@ -326,11 +333,15 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         auto a_dpin = get_driver_of_sink_name(node, "a");
         auto b_dpin = get_driver_of_sink_name(node, "b");
         if (a_dpin.is_invalid() || b_dpin.is_invalid()) {
-          Pass::error("Invalid corrupt SRA node {} (cprop should have deleted it)", debug_name(node));
+          livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+              .msg("Invalid corrupt SRA node {} (cprop should have deleted it)", debug_name(node))
+              .fatal();
           return;
         }
         if (!is_const_pin(b_dpin)) {
-          Pass::error("opentimer can not handle non-constant SRA on node {} (cprop/tmap first)", debug_name(node));
+          livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+              .msg("opentimer can not handle non-constant SRA on node {} (cprop/tmap first)", debug_name(node))
+              .fatal();
           return;
         }
         auto b_const = hydrate_const(b_dpin);
@@ -339,11 +350,15 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         auto a_dpin = get_driver_of_sink_name(node, "a");
         auto b_dpin = get_driver_of_sink_name(node, "b");
         if (a_dpin.is_invalid() || b_dpin.is_invalid()) {
-          Pass::error("Invalid corrupt Sext node {} (cprop should have deleted it)", debug_name(node));
+          livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+              .msg("Invalid corrupt Sext node {} (cprop should have deleted it)", debug_name(node))
+              .fatal();
           return;
         }
         if (!is_const_pin(b_dpin)) {
-          Pass::error("opentimer can not handle non-constant Sext on node {} (cprop/tmap first)", debug_name(node));
+          livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+              .msg("opentimer can not handle non-constant Sext on node {} (cprop/tmap first)", debug_name(node))
+              .fatal();
           return;
         }
         auto b_const = hydrate_const(b_dpin);
@@ -351,12 +366,16 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       } else if (op == Ntype_op::SHL) {
         auto a_dpin = get_driver_of_sink_name(node, "a");
         if (a_dpin.is_invalid()) {
-          Pass::error("Invalid corrupt SHL node {} (cprop should have deleted it)", debug_name(node));
+          livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
+              .msg("Invalid corrupt SHL node {} (cprop should have deleted it)", debug_name(node))
+              .fatal();
           return;
         }
         for (auto e : inp_edges_of_sink(node, "b")) {
           if (!is_const_pin(e.driver)) {
-            Pass::error("opentimer can not handle non-constant SHL on node {} (cprop/tmap first)", debug_name(node));
+            livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+                .msg("opentimer can not handle non-constant SHL on node {} (cprop/tmap first)", debug_name(node))
+                .fatal();
             return;
           }
           auto b_const = hydrate_const(e.driver);
@@ -367,14 +386,16 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           pin_tracker.add_or(wname, pin_net_name(e.driver));
         }
       } else if (op == Ntype_op::And) {
-        Dlop           a_mask = *Dlop::create_integer(-1);
+        Dlop            a_mask = *Dlop::create_integer(-1);
         hhds::Pin_class a_dpin;
         for (auto e : node.inp_edges()) {
           if (is_const_pin(e.driver)) {
             a_mask = a_mask.and_op(hydrate_const(e.driver));
           } else {
             if (!a_dpin.is_invalid()) {
-              Pass::error("pin_tracker needed for netlist can not handle multiple unknowns on node {}", debug_name(node));
+              livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+                  .msg("pin_tracker needed for netlist can not handle multiple unknowns on node {}", debug_name(node))
+                  .fatal();
               return;
             }
             a_dpin = e.driver;
@@ -384,7 +405,9 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           pin_tracker.add_and(wname, pin_net_name(a_dpin), a_mask);
         }
       } else {
-        Pass::error("opentimer needs a tmap/synthesized netlist; got node {}", debug_name(node));
+        livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+            .msg("opentimer needs a tmap/synthesized netlist; got node {}", debug_name(node))
+            .fatal();
         return;
       }
     }
@@ -431,7 +454,9 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       continue;
     }
     if (op != Ntype_op::Sub) {
-      Pass::error("opentimer pass needs the lgraph to be tmap, found cell {} with type {}", debug_name(node), Ntype::get_name(op));
+      livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+          .msg("opentimer pass needs the lgraph to be tmap, found cell {} with type {}", debug_name(node), Ntype::get_name(op))
+          .fatal();
       return;
     }
 
@@ -484,7 +509,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         continue;
       }
       std::string pname{d.name};
-      int32_t      bits = 0;
+      int32_t     bits = 0;
       auto        inps = pin.inp_edges();
       if (!inps.empty()) {
         bits = bits_of(inps.front().driver);
@@ -603,10 +628,10 @@ void Pass_opentimer::compute_power(const std::shared_ptr<hhds::Graph>& g) {
     for (const auto* pin : it2->second.pins()) {
       auto [cap, ipwr] = pin->power();
 
-      cap *= static_cast<float>(freq * power_unit * 0.5 * voltage * voltage * cap_unit / timeunit);
+      cap  *= static_cast<float>(freq * power_unit * 0.5 * voltage * voltage * cap_unit / timeunit);
       ipwr *= static_cast<float>(freq * power_unit * cap_unit / timeunit);
 
-      total_cap += cap;
+      total_cap  += cap;
       total_ipwr += ipwr;
 
       // WARNING: Replace last ':' for ','

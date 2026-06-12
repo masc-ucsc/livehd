@@ -179,7 +179,7 @@ public:
   // tmp-preserving scheme like `___<tag>N` would be rejected). Exposed
   // static so the runner can synthesize prologue/epilogue binding names
   // that match what current_text() emits for the body. Inlined names are
-  // therefore non-tmps; DCE-of-inlined-temporaries is a 1i follow-up.
+  // therefore non-tmps; DCE-of-inlined-temporaries is a follow-up.
   static std::string make_inlined_name(std::string_view tag, std::string_view raw) { return std::string(tag) + std::string(raw); }
 
   // True iff the read cursor has at least one child. Does not move the

@@ -15,7 +15,7 @@ bar.c = 6
 
 cassert(foo   == (a=2,b=3))
 cassert(bar.c ==  6)
-cassert(xxx.0 == 60        == xxx)
+cassert(xxx[0] == 60        == xxx)
 
 bar = foo
 

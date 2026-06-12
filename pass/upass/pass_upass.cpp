@@ -15,15 +15,14 @@
 #include <vector>
 
 #include "diag.hpp"
-
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
 #include "upass_constprop.hpp"
 #include "upass_pipe.hpp"
-#include "upass_timecheck.hpp"
 #include "upass_runner.hpp"
 #include "upass_semacheck.hpp"  // NOLINT: ensures plugin "semacheck" is linked
 #include "upass_ssa.hpp"
+#include "upass_timecheck.hpp"
 #include "upass_tolg.hpp"
 #include "upass_typecheck.hpp"  // NOLINT: ensures plugin "typecheck" is linked
 #include "upass_verifier.hpp"
@@ -110,7 +109,7 @@ void Pass_upass::setup() {
                         "Default on.",
                         "true");
   m1.add_label_optional("reset_style",
-                        "2d-reg elaboration flag: sync|async reset wiring for implicit-reset flops (default sync — "
+                        "elaboration flag: sync|async reset wiring for implicit-reset flops (default sync — "
                         "target-dependent, FPGA-typical). A per-reg `:[sync=…]` attr beats the flag.",
                         "sync");
   m1.add_label_optional(
@@ -214,7 +213,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   auto toln_txt = get_label("toln");
   run_toln      = (toln_txt != "false" && toln_txt != "0") || run_tolg;
 
-  // 2d-reg — sync|async reset wiring for implicit-reset flops (tolg-only).
+  // sync|async reset wiring for implicit-reset flops (tolg-only).
   reset_style = std::string(get_label("reset_style", "sync"));
 
   auto semacheck_txt = get_label("semacheck");
@@ -246,20 +245,22 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
       bool*       dep_flag;
     };
     const Dep_edge edges[] = {
-        {"typecheck", &do_typecheck, "attributes", &do_attrs},
-        {"constprop", &do_constprop, "attributes", &do_attrs},
-        {"constprop", &do_constprop, "typecheck", &do_typecheck},
-        {"bitwidth", &do_bitwidth, "constprop", &do_constprop},
-        {"coalescer", &do_coalescer, "constprop", &do_constprop},
-        {"coalescer", &do_coalescer, "bitwidth", &do_bitwidth},
-        {"assert", &do_assert, "constprop", &do_constprop},
+        {"typecheck", &do_typecheck, "attributes",     &do_attrs},
+        {"constprop", &do_constprop, "attributes",     &do_attrs},
+        {"constprop", &do_constprop,  "typecheck", &do_typecheck},
+        { "bitwidth",  &do_bitwidth,  "constprop", &do_constprop},
+        {"coalescer", &do_coalescer,  "constprop", &do_constprop},
+        {"coalescer", &do_coalescer,   "bitwidth",  &do_bitwidth},
+        {   "assert",    &do_assert,  "constprop", &do_constprop},
     };
     bool changed = true;
     while (changed) {
       changed = false;
       for (const auto& e : edges) {
         if (*e.flag && !*e.dep_flag) {
-          Pass::warn(std::format("pass.upass: {}:0 forces {}:0 ({} depends on {})", e.dep, e.pass, e.pass, e.dep));
+          livehd::diag::warn("pass.upass", "option-forced", "io")
+              .msg("{}:0 forces {}:0 ({} depends on {})", e.dep, e.pass, e.pass, e.dep)
+              .emit();
           *e.flag = false;
           changed = true;
         }
@@ -383,9 +384,11 @@ void Pass_upass::work(Eprp_var& var) {
   if (extract_it != up.upass_order.end()) {
     std::vector<std::string> extract_order{"func_extract"};
     for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
-      const auto ln     = var.lnasts.at(idx);
-      auto       lm     = std::make_shared<upass::Lnast_manager>(ln);
-      auto       runner = uPass_runner(lm, extract_order, up.pass_options);
+      const auto                  ln = var.lnasts.at(idx);
+      // Excerpt provider for any diagnostic emitted while this unit is walked.
+      livehd::diag::Locator_scope diag_scope(&ln->source_locator());
+      auto                        lm     = std::make_shared<upass::Lnast_manager>(ln);
+      auto                        runner = uPass_runner(lm, extract_order, up.pass_options);
       if (runner.has_configuration_error()) {
         fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
       }
@@ -430,6 +433,10 @@ void Pass_upass::work(Eprp_var& var) {
   for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
     const auto ln = var.lnasts.at(idx);
 
+    // Excerpt provider: diagnostics emitted while this unit is walked render
+    // their caret excerpt through the unit's locator (hash-validated bytes).
+    livehd::diag::Locator_scope diag_scope(&ln->source_locator());
+
     // A not-fully-typed template (var-args / untyped params) is
     // realized ONLY at call sites (comb inline / pipe-mod specialize), never as a
     // standalone unit. Run its walk NON-materializing so its diagnostics +
@@ -446,7 +453,7 @@ void Pass_upass::work(Eprp_var& var) {
     // count), strip the verifier from the order unless the test opted in
     // via verifier_include_funcs:true — dropping the verifier here avoids
     // double-walking unproven function bodies into the aggregate.
-    auto order = up.upass_order;
+    auto       order            = up.upass_order;
     const bool is_function_body = idx >= original_lnast_count;
     if (is_function_body && !up.verifier_include_funcs) {
       order.erase(std::remove(order.begin(), order.end(), "verifier"), order.end());
@@ -457,7 +464,7 @@ void Pass_upass::work(Eprp_var& var) {
     // walk still dispatches every pass, so diagnostics and side-channels
     // (io_meta/bw_meta) are unchanged. The func_extract pre-loop above keeps
     // materializing (the main walk consumes its rewrite).
-    runner.set_materialize(up.run_toln && !is_template);  // 1p-runner: never rewrite a template body
+    runner.set_materialize(up.run_toln && !is_template);  // never rewrite a template body
     runner.set_is_function_body(is_function_body);
     runner.set_function_registry(var.lnasts);  // 1i: comb bodies to inline from
     if (runner.has_configuration_error()) {
@@ -479,7 +486,7 @@ void Pass_upass::work(Eprp_var& var) {
       }
     }
     if (is_template) {
-      continue;  // 1p-runner: drop a template's standalone staging + spurious specializations
+      continue;  // drop a template's standalone staging + spurious specializations
     }
     auto new_lnasts = runner.take_new_lnasts();
     for (const auto& new_ln : new_lnasts) {

@@ -72,6 +72,11 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, st
 
   // dump();  // tree-sitter parse tree; enable for debugging the grammar
 
+  // Excerpt provider while the parse runs: a staged error thrown below emits
+  // (via parser_error_int -> Sink::flush) before this frame unwinds, so the
+  // scope is still active when the human line renders.
+  livehd::diag::Locator_scope diag_scope(&lnast->source_locator());
+
   // A throwing constructor does NOT run the destructor, so the TS resources would
   // leak on every reported error — which matters for the long-running LSP daemon
   // that re-parses on each keystroke. Clean up explicitly before rethrowing.
@@ -183,12 +188,10 @@ TSNode find_first_missing(TSNode n) {
 // First ERROR node at *statement position* — a direct child of a statement list
 // (`description` or `scope_statement`) — in DFS order, or a null node. Such an
 // ERROR is a genuine syntax error: stray tokens the parser could not attach to
-// any statement (e.g. `i c { … }`, junk before a block). The pyrope grammar also
-// emits ERROR nodes for benign quirks (uint/sint type-calls, `::[attr]:T`, an
-// unparenthesized multi-target tuple, an anonymous `comb`/`pipe` lambda), but
-// those always nest inside an `assignment`/`type_cast` and never surface at
-// statement position, so they are skipped. Prunes clean subtrees via
-// ts_node_has_error.
+// any statement (e.g. `i c { … }`, junk before a block). ERRORs nested inside
+// an `assignment`/`select` are skipped here; the lowering checks report those
+// shapes with dedicated messages (unparenthesized multi-target tuple,
+// `#[1,4]` comma index).
 TSNode find_first_error_statement(TSNode n) {
   std::string_view t(ts_node_type(n));
   const bool       is_stmt_list = (t == "description" || t == "scope_statement");
@@ -203,6 +206,41 @@ TSNode find_first_error_statement(TSNode n) {
       if (!ts_node_is_null(r)) {
         return r;
       }
+    }
+  }
+  return TSNode{};
+}
+
+// First ERROR node anywhere, EXCEPT the two shapes with dedicated lowering
+// diagnostics: a comma-bearing ERROR directly under an `assignment`
+// (tuple-requires-parens) and anything inside a `select` (`#[1,4]` comma
+// index). The cleaned-up grammar parses every valid construct without ERROR
+// recovery, so any remaining ERROR is a genuine syntax problem (an unbalanced
+// `(` swallowing a lambda signature, a removed keyword like `when`, the old
+// `::[attr] :type` ordering, …) that the lowering would otherwise mis-lower
+// silently or mis-report.
+TSNode find_first_error_node(TSNode n, std::string_view src) {
+  std::string_view t(ts_node_type(n));
+  if (t == "select") {
+    return TSNode{};
+  }
+  const bool in_assignment = (t == "assignment");
+  uint32_t   cnt           = ts_node_child_count(n);
+  for (uint32_t i = 0; i < cnt; i++) {
+    TSNode c = ts_node_child(n, i);
+    if (!ts_node_has_error(c)) {
+      continue;
+    }
+    if (std::string_view(ts_node_type(c)) == "ERROR") {
+      auto txt = src.substr(ts_node_start_byte(c), ts_node_end_byte(c) - ts_node_start_byte(c));
+      if (in_assignment && txt.find(',') != std::string_view::npos) {
+        continue;  // tuple-requires-parens shape — dedicated message
+      }
+      return c;
+    }
+    TSNode r = find_first_error_node(c, src);
+    if (!ts_node_is_null(r)) {
+      return r;
     }
   }
   return TSNode{};
@@ -336,7 +374,20 @@ void Prp2lnast::check_parse_errors() const {
                        : "the file does not parse — remove the unexpected token(s) or check for a dropped keyword/operator";
     report_error(err, "syntax-error", "syntax", std::format("syntax error: unexpected `{}`", stray), hint);
   }
-  // else: only benign ERROR nodes (uint/sint type-calls, `::[attr]:T`, …) — tolerated.
+  // Any other ERROR node is a genuine syntax problem too — except inside an
+  // `assignment`/`select`, whose lowering checks report dedicated messages
+  // (tuple-requires-parens, `#[1,4]` comma index).
+  TSNode any_err = find_first_error_node(ts_root_node, prp_file);
+  if (!ts_node_is_null(any_err)) {
+    auto stray = trim(get_text(any_err));
+    report_error(any_err,
+                 "syntax-error",
+                 "syntax",
+                 std::format("syntax error: unexpected `{}` — check for an unbalanced '(' / ')', '[' / ']', '{{' / '}}', or a "
+                             "dropped token",
+                             stray),
+                 "the file does not parse — fix the unbalanced/unexpected token run first; later diagnostics may be misleading");
+  }
 }
 
 void Prp2lnast::report_error(std::string_view code, std::string_view category, std::string message, std::string_view hint) const {
@@ -632,12 +683,10 @@ bool Prp2lnast::read_is_visible(const Read_site& rs) const {
     return c1.is_invalid() ? std::string_view{} : lnast->get_name(c1);
   };
 
-  // Does this statement-level node declare rs.name? A gated declaration
-  // (`mut x = e when c`) lowers to a FLAT `if` whose direct children are the
-  // decl statements — by design it declares into the surrounding scope
-  // (process_gated_statement), so look through `if` nodes' direct children
-  // too. Regular if/while arms live inside `stmts` wrappers (their own
-  // scope), which this deliberately does not descend into.
+  // Does this statement-level node declare rs.name? Look through `if` nodes'
+  // direct (non-stmts) children too — historic flat-if shapes declared into
+  // the surrounding scope. Regular if/while arms live inside `stmts` wrappers
+  // (their own scope), which this deliberately does not descend into.
   std::function<bool(const Lnast_nid&)> stmt_declares = [&](const Lnast_nid& c) -> bool {
     const auto ct = lnast->get_type(c);
     if (Lnast_ntype::is_declare(ct) && first_ref_is_name(c)) {
@@ -814,7 +863,7 @@ Lnast_nid prp_copy_one_node(const Lnast& src, const Lnast_nid& src_nid, Lnast& d
     nn = dst.add_child(dst_parent, t);
   }
   // Carry the SourceId across the decl-merge rebuild — one integer attr,
-  // copied unconditionally for every def-bearing kind ([[1f]]; the dst tree
+  // copied unconditionally for every def-bearing kind (the dst tree
   // becomes this same Lnast's body via replace_body, so the id stays
   // resolvable in the Lnast's own locator).
   if (Lnast::srcid_carries(t)) {
@@ -934,7 +983,7 @@ void Prp2lnast::rewrite_decls_to_declare() {
           prp_copy_subtree(*lnast, st, *staging, d);
         }
       } else if (kind == "reg") {
-        // 2d-reg / 3j — the reg initializer rides the cluster head (child 3);
+        // The reg initializer rides the cluster head (child 3);
         // fold it into the declare's optional 4th [value] child so tolg can
         // recover the reset value and the runner never binds it as a comptime
         // value (reg reads are runtime q reads).
@@ -960,9 +1009,7 @@ void Prp2lnast::walk_statement_block(TSNode parent) {
   // Walk ALL children (not just named) so the anonymous `wrap`/`sat` token
   // that the new grammar attaches as the `overflow` field on an assignment
   // statement can be detected — it precedes the assignment as a sibling
-  // because `_statement` is hidden. Similarly, a `when_unless_cond` node
-  // that the grammar attaches as the `gate` field of the hidden `_semicolon`
-  // bubbles up as a sibling immediately after the gated statement.
+  // because `_statement` is hidden.
   using namespace std::string_view_literals;
   const uint32_t   nc = ts_node_child_count(parent);
   std::string_view pending_overflow;
@@ -990,12 +1037,6 @@ void Prp2lnast::walk_statement_block(TSNode parent) {
     TSNode           c = ts_node_child(parent, i);
     std::string_view t(ts_node_type(c));
 
-    // `gate` siblings are consumed by the previous statement via lookahead.
-    const char* fname = ts_node_field_name_for_child(parent, i);
-    if (fname && std::string_view(fname) == "gate"sv) {
-      continue;
-    }
-
     if (!ts_node_is_named(c)) {
       if (t == "wrap"sv || t == "sat"sv) {
         pending_overflow = t;
@@ -1012,23 +1053,6 @@ void Prp2lnast::walk_statement_block(TSNode parent) {
       continue;
     }
 
-    // Look ahead for a sibling whose field name is `gate` — it carries the
-    // when/unless condition that gates this statement.
-    TSNode gate{};
-    bool   have_gate = false;
-    for (uint32_t j = i + 1; j < nc; j++) {
-      TSNode      g  = ts_node_child(parent, j);
-      const char* gf = ts_node_field_name_for_child(parent, j);
-      if (gf && std::string_view(gf) == "gate"sv) {
-        gate      = g;
-        have_gate = true;
-        break;
-      }
-      if (ts_node_is_named(g)) {
-        break;
-      }
-    }
-
     const bool is_assign = (t == "assignment"sv);
     if (is_assign && pending_overflow.empty()) {
       // Fallback: the grammar hides the `wrap`/`sat` token; recover it
@@ -1038,11 +1062,7 @@ void Prp2lnast::walk_statement_block(TSNode parent) {
     if (is_assign && !pending_overflow.empty()) {
       pending_overflow_kind = pending_overflow;
     }
-    if (have_gate) {
-      process_gated_statement(c, gate);
-    } else {
-      process_statement(c);
-    }
+    process_statement(c);
     pending_overflow_kind = {};
     pending_overflow      = {};
     prev_end              = ts_node_end_byte(c);
@@ -1053,7 +1073,7 @@ void Prp2lnast::process_statement(TSNode n) {
   if (ts_node_is_null(n)) {
     return;
   }
-  // Statement-granularity provenance ([[1f]]): every def-bearing LNAST node
+  // Statement-granularity provenance: every def-bearing LNAST node
   // created while this statement lowers — op nodes, SSA temps, synthesized
   // stores — inherits the statement's span id. Finer anchors (attach_loc at
   // ~30 sites) override per node; nested statements re-enter here and narrow.
@@ -1092,7 +1112,7 @@ void Prp2lnast::process_statement(TSNode n) {
       "tuple",
       "tuple_sq",
       "paren_group",
-      "type_specification",
+      "attribute_set",
       "constant",
   };
 
@@ -1188,133 +1208,6 @@ struct Decl_mods {
   bool             has_comptime{false};
   bool             has_pub{false};  // `pub` export modifier
 };
-// Resolve a `var_or_let_or_reg` decl node's modifiers. Defined below with the
-// declaration helpers (needs storage_kind_from_node_type); forward-declared
-// here because process_gated_statement calls it earlier in the file.
-static Decl_mods decode_decl(TSNode decl);
-
-void Prp2lnast::process_gated_statement(TSNode stmt, TSNode gate) {
-  // gate is a `when_unless_cond` node:
-  //   when_unless_cond := ('when' | 'unless') condition:_expression
-  //
-  // Lower `stmt when c`   to `if c <stmt-children…>`
-  //       `stmt unless c` to `if !c <stmt-children…>`
-  //
-  // Unlike a normal `if`, the gated body must NOT introduce a new scope:
-  // `mut x = e when c` declares x in the surrounding scope when c is true,
-  // and is a complete no-op when c is false (preserving any prior binding
-  // of x). We encode this by giving the `if` direct stmt children — no
-  // `stmts` wrapper — which signals to consumers (writer, constprop,
-  // runner) that the body executes flat in the parent scope.
-  // TODO(grammar_todo2.md #1): once the grammar splits when/unless into
-  // distinct named nodes, dispatch on node kind here.
-  std::string_view gate_kw_text = trim(get_text(gate));
-  bool             is_unless    = gate_kw_text.starts_with("unless");
-
-  TSNode cond_node = child_by_field(gate, "condition");
-
-  // Evaluate the gate condition into the surrounding scope so any
-  // helper stmts emitted by expr_to_node land before the `if`.
-  Lnast_node cref;
-  if (ts_node_is_null(cond_node)) {
-    cref = Lnast_node::create_const("true");
-  } else {
-    cref = expr_to_node(cond_node);
-  }
-  if (is_unless) {
-    auto idx     = builder.add_child(Lnast_ntype::create_log_not());
-    auto neg_ref = builder.mint_tmp_ref();
-    lnast->add_child(idx, neg_ref);
-    lnast->add_child(idx, cref);
-    cref = neg_ref;
-  }
-
-  // Decl-form assignment (`mut x = e when c`): the DECLARATION itself is not
-  // conditional — hoist it into the surrounding scope with a `nil`
-  // initializer so `x` is visible (and reads nil) when the gate is false;
-  // only the value store stays under the gate. Previously the false-gate
-  // `x == nil` read leaned on constprop's undeclared-reads-as-nil fold (now
-  // removed: undeclared reads are a compile error). Restricted to a simple
-  // identifier lvalue with a plain `=`; anything else keeps the flat path.
-  if (std::string_view(ts_node_type(stmt)) == "assignment" && pending_overflow_kind.empty()) {
-    TSNode decl_node = child_by_field(stmt, "decl");
-    TSNode lv        = child_by_field(stmt, "lvalue");
-    TSNode op        = child_by_field(stmt, "operator");
-    TSNode op_inner  = ts_node_is_null(op) ? TSNode{} : ts_node_named_child(op, 0);
-    bool   plain_eq  = ts_node_is_null(op_inner) || std::string_view(ts_node_type(op_inner)) == "assign";
-    if (!ts_node_is_null(decl_node) && !ts_node_is_null(lv) && plain_eq) {
-      std::string_view lvt(ts_node_type(lv));
-      TSNode           id = lvt == "typed_identifier" ? child_by_field(lv, "identifier") : lv;
-      TSNode           tc = lvt == "typed_identifier" ? child_by_field(lv, "type") : TSNode{};
-      if (!ts_node_is_null(id) && std::string_view(ts_node_type(id)) == "identifier") {
-        auto [kind, has_cpt, has_pub] = decode_decl(decl_node);
-        (void)has_pub;  // gated-decl hoist doesn't act on `pub` (handled in process_lvalue_for_assign)
-        // Already-declared name (`mut c2 = 100; mut c2 = 3 when false`): the
-        // gated re-decl must be a complete no-op when the gate is false —
-        // hoisting a nil store would clobber the prior binding. Keep the old
-        // flat lowering for that case; hoist only a FRESH declaration.
-        const bool already_visible
-            = !kind.empty()
-              && read_is_visible(
-                  {std::string(trim(get_text(id))), id, builder.idx_stmts, lnast->get_last_child(builder.idx_stmts)});
-        if (!kind.empty() && !already_visible) {
-          Lnast_node ref  = identifier_to_node(id, /*for_lvalue=*/true);
-          auto       aidx = builder.add_child(Lnast_ntype::create_attr_set());
-          lnast->add_child(aidx, ref);
-          lnast->add_child(aidx, Lnast_node::create_const("type"));
-          lnast->add_child(aidx, Lnast_node::create_const(kind));
-          attach_loc(aidx, id);
-          if (has_cpt) {
-            auto cidx = builder.add_child(Lnast_ntype::create_attr_set());
-            lnast->add_child(cidx, ref);
-            lnast->add_child(cidx, Lnast_node::create_const("comptime"));
-            lnast->add_child(cidx, Lnast_node::create_const("true"));
-          }
-          if (!ts_node_is_null(tc)) {
-            emit_type_spec(ref, tc);
-          }
-          auto sidx = builder.add_child(Lnast_ntype::create_store());
-          lnast->add_child(sidx, ref);
-          lnast->add_child(sidx, Lnast_node::create_const("nil"));
-          attach_loc(sidx, id);
-
-          // Gated value store, flat under the if (shares the cond eval).
-          auto if_idx = builder.add_child(Lnast_ntype::create_if());
-          lnast->add_child(if_idx, cref);
-          builder.push_stmts(if_idx);
-          TSNode     rv = child_by_field(stmt, "rvalue");
-          Lnast_node rvalue_node;
-          if (ts_node_is_null(rv)) {
-            // Hidden rvalue (constant) — extract text after the operator.
-            auto start  = ts_node_is_null(op) ? ts_node_end_byte(lv) : ts_node_end_byte(op);
-            rvalue_node = constant_text_to_node(trim(text_between(start, ts_node_end_byte(stmt))));
-          } else {
-            rvalue_node = expr_to_node(rv);
-          }
-          (void)process_lvalue_for_assign(id, rvalue_node, TSNode{}, TSNode{});
-          builder.pop_stmts();
-          return;
-        }
-      }
-    }
-  }
-
-  auto if_idx = builder.add_child(Lnast_ntype::create_if());
-  lnast->add_child(if_idx, cref);
-
-  // Flat form: emit the gated stmt's children directly under the if (no
-  // `stmts` wrapper). For multi-effect statements (e.g. `mut x = e when c`
-  // emits attr_set + assign), all effects live as siblings under the same
-  // `if`, sharing one cond evaluation.
-  // The gated statement is conditional, so a write inside it must not capture/
-  // update a file-scope comptime int binding (see const_int_bindings_).
-  builder.push_stmts(if_idx);
-  {
-    Conditional_scope guard(&conditional_depth_);
-    process_statement(stmt);
-  }
-  builder.pop_stmts();
-}
 
 // ---------------- Declaration / Assignment ----------------
 
@@ -1340,7 +1233,7 @@ static std::string_view storage_kind_from_node_type(std::string_view t) {
 }
 
 // Resolve (storage-kind, has-comptime, has-pub) for a `var_or_let_or_reg` decl
-// node (struct + forward decl are up near process_gated_statement).
+// node.
 static Decl_mods decode_decl(TSNode decl) {
   if (ts_node_is_null(decl)) {
     return {};
@@ -1366,13 +1259,13 @@ std::vector<int64_t> Prp2lnast::extract_array_dims(TSNode type_cast_node) const 
     if (ts_node_is_null(len)) {
       return {};
     }
-    TSNode idx = ts_node_child_by_field_name(len, "index", 5);
+    TSNode                 idx = ts_node_child_by_field_name(len, "index", 5);
     // A `constant` literal OR a compile-time-resolvable `const`/`mut` binding
     // (`[sz]u8` where `sz` was statically known at the declaration point) — both
     // resolve through resolve_cycle_value (which consults const_int_bindings_,
     // tracking decl-time-known muts with the same UPDATE/ERASE rules). The
     // resolved length must still be > 0, as before.
-    std::optional<int64_t> v = resolve_cycle_value(idx);
+    std::optional<int64_t> v   = resolve_cycle_value(idx);
     if (!v || *v <= 0) {
       return {};
     }
@@ -1578,10 +1471,13 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
             // Single fcall RHS: prefix must match the callee. Hard error
             // otherwise (cross-function reuse).
             if (prefix != rhs_fcall_name) {
-              Pass::error("destructure rename prefix `{}` does not match call `{}` in `{}`",
-                          prefix,
-                          rhs_fcall_name,
-                          get_text(inner));
+              report_error(inner,
+                           "destructure-prefix",
+                           "name",
+                           std::format("destructure rename prefix `{}` does not match call `{}` in `{}`",
+                                       prefix,
+                                       rhs_fcall_name,
+                                       get_text(inner)));
             }
           }
           // Emit a chain of single-key tuple_gets — constprop chains tmp
@@ -1682,10 +1578,10 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     bool             has_cpt = false;
     bool             has_pub = false;
     if (has_decl) {
-      auto pr  = decode_decl(decl_node);
-      kind_sv  = pr.kind;
-      has_cpt  = pr.has_comptime;
-      has_pub  = pr.has_pub;
+      auto pr = decode_decl(decl_node);
+      kind_sv = pr.kind;
+      has_cpt = pr.has_comptime;
+      has_pub = pr.has_pub;
     }
 
     // `pub const x = …` marks the value exportable (validated:
@@ -1747,7 +1643,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     }
 
     Lnast_node ref = identifier_to_node(id, /*for_lvalue=*/true);
-    Lnast_nid  reg_decl_head{};  // 2d-reg — set for `reg` decls; the init value rides this cluster head
+    Lnast_nid  reg_decl_head{};  // set for `reg` decls; the init value rides this cluster head
     if (has_decl) {
       auto idx = builder.add_child(Lnast_ntype::create_attr_set());
       lnast->add_child(idx, ref);
@@ -1775,7 +1671,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
         lnast->add_child(st, Lnast_node::create_const(min_txt));
         lnast->add_child(st, Lnast_node::create_const(max_txt));
       }
-      // 2d-reg — a `comb` may not declare a `reg` (06-functions.md: comb
+      // A `comb` may not declare a `reg` (06-functions.md: comb
       // logic is all at cycle 0 and holds no state; the `::[debug]` exception
       // is out of scope). pipe/mod bodies and file scope may.
       if (kind_sv == "reg") {
@@ -1840,7 +1736,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       store_value = wrapped;
     }
     if (!reg_decl_head.is_invalid()) {
-      // 2d-reg / 3j declare-folding — a `reg` declaration's initializer is its
+      // Declare-folding — a `reg` declaration's initializer is its
       // power-on/reset value, NOT a din write: ride it on the decl cluster
       // head so the decl-merge folds it into the declare's optional 4th
       // [value] child. Only genuine re-assignments emit a `store` (every
@@ -2540,8 +2436,9 @@ void Prp2lnast::process_control_statement(TSNode n) {
     emit_marker(Lnast_ntype::create_func_continue(), Lnast_node::create_invalid());
     return;
   }
-  TSNode arg = child_by_field(inner, "argument");
-  emit_marker(Lnast_ntype::create_func_return(), ts_node_is_null(arg) ? Lnast_node::create_invalid() : expr_to_node(arg));
+  // `return` is a terminator only — it never carries a value (assign outputs
+  // first, then `return`).
+  emit_marker(Lnast_ntype::create_func_return(), Lnast_node::create_invalid());
 }
 
 std::vector<Prp2lnast::Call_arg> Prp2lnast::collect_call_args(TSNode arg_tuple) {
@@ -2569,7 +2466,10 @@ std::vector<Prp2lnast::Call_arg> Prp2lnast::collect_call_args(TSNode arg_tuple) 
     std::string_view t(ts_node_type(c));
 
     Call_arg arg;
-    if (t == "assignment") {
+    if (t == "assignment" || t == "arg_assignment") {
+      // `arg_assignment` is the call-site named-binding node (`name = expr`,
+      // dotted names allowed); plain `assignment` still reaches here through
+      // data-tuple shapes (e.g. `function_call_type` arguments).
       arg.is_assign = true;
       TSNode lv     = child_by_field(c, "lvalue");
       TSNode rv     = child_by_field(c, "rvalue");
@@ -2771,7 +2671,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
     }
   }
 
-  Lnast_node lambda_ref = !hoist_name.empty()        ? Lnast_node::create_ref(hoist_name)
+  Lnast_node lambda_ref = !hoist_name.empty()          ? Lnast_node::create_ref(hoist_name)
                           : ts_node_is_null(name_node) ? builder.mint_tmp_ref()
                                                        : Lnast_node::create_ref(get_text(name_node));
 
@@ -2822,17 +2722,17 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // they bracket. The `ref` mod is encoded as the assign's RHS const text
   // ("ref") when no explicit default is present; downstream passes
   // (func_extract, constprop) detect it without inventing a new ntype.
-  auto                    in_idx = lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
-  std::vector<Param_attr> input_attrs;
-  // 2d-reg — `-> (reg q:T[@N] [= init])` output registers: the q pin IS the
+  auto                                   in_idx = lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
+  std::vector<Param_attr>                input_attrs;
+  // `-> (reg q:T[@N] [= init])` output registers: the q pin IS the
   // output (the counter idiom). Collected here; a matching `reg` declare is
   // synthesized at body entry below so tolg lowers the output as a Flop.
   std::vector<std::pair<TSNode, TSNode>> output_regs;  // (typed_identifier, definition)
-  auto                    collect_args = [&](TSNode                    container,
-                                             const Lnast_nid&          parent_tup,
-                                             std::vector<std::string>* names_out,
-                                             std::vector<Param_attr>*  attrs_out,
-                                             bool                      is_io_output) {
+  auto                                   collect_args = [&](TSNode                    container,
+                                                            const Lnast_nid&          parent_tup,
+                                                            std::vector<std::string>* names_out,
+                                                            std::vector<Param_attr>*  attrs_out,
+                                                            bool                      is_io_output) {
     TSNode pending_typed{};
     TSNode pending_def{};
     bool   pending_is_ref    = false;
@@ -2854,7 +2754,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
             names_out->emplace_back(get_text(id));
           }
         }
-        // 2d-reg — a `reg` modifier on an OUTPUT marks an output register
+        // A `reg` modifier on an OUTPUT marks an output register
         // (q is the output); on an input it is meaningless.
         if (pending_is_reg) {
           if (is_io_output) {
@@ -2968,7 +2868,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   auto saved_inflight_scopes = std::exchange(inflight_name_scopes_, {});
   auto body_idx              = lnast->add_child(fd_idx, Lnast_ntype::create_stmts());
   builder.push_stmts(body_idx);
-  // 2d-reg — synthesize the body `reg` declare for each `-> (reg q:T)` output
+  // Synthesize the body `reg` declare for each `-> (reg q:T)` output
   // register, the same cluster process_lvalue_for_assign emits for a body
   // `reg q:T = init` (the decl-merge folds it into declare(q, T, reg,
   // [init])). The q pin is the output; body stores are its din writes.
@@ -3050,6 +2950,11 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
           // `u6` → strip leading `u` → "6"; `s12` → strip `s` → "12".
           if (tt == "uint_type" || tt == "sint_type") {
             auto txt = trim(get_text(t));
+            // A `constraint` tuple (`u6(max=3)`) extends the node text past
+            // the keyword; keep only the width token.
+            if (auto paren = txt.find('('); paren != std::string_view::npos) {
+              txt = trim(txt.substr(0, paren));
+            }
             if (txt.size() >= 2 && (txt.front() == 'u' || txt.front() == 's')) {
               auto digits = txt.substr(1);
               try {
@@ -3776,7 +3681,7 @@ void Prp2lnast::process_import_statement(TSNode n) {
   TSNode mod   = child_by_field(n, "module");
   // String-literal-only: the old dotted-identifier grammar form
   // (`import a.b.c as x`) is rejected.
-  auto text = plain_string_literal_text(mod);
+  auto   text  = plain_string_literal_text(mod);
   if (!text || text->empty()) {
     report_error(ts_node_is_null(mod) ? n : mod,
                  "import-not-literal",
@@ -3980,8 +3885,8 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
       std::string_view itt(ts_node_type(it));
       // Plain value item only: an `assignment` (`a=1`) / `unary_expression`
       // (`...x` spread) is a genuine 1-element bundle, never grouping.
-      const bool plain = itt != "assignment" && itt != "unary_expression" && itt != "comment";
-      const auto tail  = text_between(ts_node_end_byte(it), ts_node_end_byte(n));
+      const bool       plain = itt != "assignment" && itt != "unary_expression" && itt != "comment";
+      const auto       tail  = text_between(ts_node_end_byte(it), ts_node_end_byte(n));
       if (plain && tail.find(',') == std::string_view::npos) {
         return expr_to_node(it);  // grouping — the value itself
       }
@@ -4007,8 +3912,20 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
       return identifier_to_node(id, false);
     }
   }
-  if (t == "type_specification") {
-    return type_specification_to_node(n);
+  if (t == "attribute_set") {
+    return attribute_set_to_node(n);
+  }
+  if (t == "typed_field") {
+    // Bare `name:type` tuple-type field (`(x:u3, y:s4)`, enum bodies, type
+    // shapes for `does`/`equals`/`case`). The name is the field ref; the
+    // type lowers as a type_spec against it.
+    TSNode     id   = child_by_field(n, "identifier");
+    Lnast_node aref = ts_node_is_null(id) ? Lnast_node::create_const("nil") : expr_to_node(id);
+    TSNode     tc   = child_by_field(n, "type");
+    if (!ts_node_is_null(tc)) {
+      emit_type_spec(aref, tc);
+    }
+    return aref;
   }
   if (t == "ref_identifier") {
     TSNode id = ts_node_named_child(n, 0);
@@ -4253,28 +4170,20 @@ Lnast_node Prp2lnast::identifier_to_node(TSNode n, bool for_lvalue) {
   return Lnast_node::create_ref(name);
 }
 
-Lnast_node Prp2lnast::type_specification_to_node(TSNode n) {
+Lnast_node Prp2lnast::attribute_set_to_node(TSNode n) {
+  // `expr::[attr=…]` — argument + attribute_sq carrier. Expression-level
+  // `expr:type` is no longer Pyrope (types appear only at declaration sites
+  // and inside tuple types), so there is no `type` field here.
+  // The `attribute` field tags the anonymous `seq(':', attribute_sq)`, so
+  // `child_by_field` would return the `:` token — walk children for the
+  // attribute_sq node instead.
   TSNode     arg  = child_by_field(n, "argument");
   Lnast_node aref = expr_to_node(arg);
-  TSNode     ty   = child_by_field(n, "type");
-  if (!ts_node_is_null(ty)) {
-    auto idx = builder.add_child(Lnast_ntype::create_type_spec());
-    lnast->add_child(idx, aref);
-    emit_type_expr(idx, ty);
-  }
-  // The `attribute` field on `typedOrAttributed` wraps an anonymous
-  // `seq(':', attribute_list)`, so `child_by_field("attribute")` returns
-  // the `:` token rather than the attribute_list. Find the attribute_list
-  // by walking children directly.
-  uint32_t total = ts_node_child_count(n);
-  for (uint32_t i = 0; i < total; i++) {
-    TSNode           c     = ts_node_child(n, i);
-    const char*      fname = ts_node_field_name_for_child(n, i);
+  uint32_t   nnc  = ts_node_named_child_count(n);
+  for (uint32_t i = 0; i < nnc; i++) {
+    TSNode           c = ts_node_named_child(n, i);
     std::string_view ct(ts_node_type(c));
-    if (ct == "attribute_list") {
-      emit_attribute_list(aref, c);
-    } else if ((ct == "tuple_sq" || ct == "attribute_sq") && fname && std::string_view(fname) == "attribute") {
-      // New grammar: write-side attribute carrier is a tuple_sq.
+    if (ct == "attribute_sq" || ct == "attribute_list" || ct == "tuple_sq") {
       emit_attribute_list(aref, c);
     }
   }
@@ -4319,7 +4228,7 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
   for (uint32_t i = 0; i < nn; i++) {
     TSNode           item = ts_node_named_child(tup, i);
     std::string_view it(ts_node_type(item));
-    if (it != "assignment" && it != "attribute_assignment") {
+    if (it != "assignment" && it != "arg_assignment" && it != "attribute_assignment") {
       continue;
     }
     TSNode lv = child_by_field(item, "lvalue");
@@ -4376,7 +4285,7 @@ Lnast_node Prp2lnast::does_operand_to_node(TSNode n) {
     TSNode fn  = child_by_field(n, "function");
     TSNode arg = child_by_field(n, "argument");
     if (!ts_node_is_null(fn) && !ts_node_is_null(arg) && std::string_view(ts_node_type(fn)) == "identifier"
-        && std::string_view(ts_node_type(arg)) == "tuple") {
+        && (std::string_view(ts_node_type(arg)) == "tuple" || std::string_view(ts_node_type(arg)) == "arg_tuple")) {
       // Only the named-arg form is a type literal — `u8(3)` stays a
       // constructor cast. Require ≥1 argument, all `max=`/`min=`/`bits=`.
       uint32_t nn       = ts_node_named_child_count(arg);
@@ -4384,7 +4293,7 @@ Lnast_node Prp2lnast::does_operand_to_node(TSNode n) {
       for (uint32_t i = 0; i < nn && all_size; i++) {
         TSNode           item = ts_node_named_child(arg, i);
         std::string_view it(ts_node_type(item));
-        if (it != "assignment" && it != "attribute_assignment") {
+        if (it != "assignment" && it != "arg_assignment" && it != "attribute_assignment") {
           all_size = false;
           break;
         }
@@ -4416,83 +4325,12 @@ Lnast_node Prp2lnast::does_operand_to_node(TSNode n) {
   return expr_to_node(n);
 }
 
-bool Prp2lnast::emit_int_type_call(const Lnast_node& target, TSNode type_cast_node) {
-  // Recognize the integer type-call `int(max=,min=,bits=)` / `uint(bits=)` /
-  // `uN(min=…)`. Because `int`/`uint`/`uN` are keyword tokens, the grammar
-  // cannot match the parenthesized form as `function_call_type`; it surfaces
-  // as an ERROR node wrapping the keyword (uint_type/sint_type) followed by a
-  // bare `(…)` tuple in the `type` field. Reconstruct the intended range and
-  // emit `type_spec(target, prim_type_int(max, min))`. "nil" marks an
-  // unbounded bound (e.g. `int(max=3)` pins only max).
-  TSNode   prim      = {};
-  bool     have_prim = false;
-  uint32_t total     = ts_node_child_count(type_cast_node);
-  for (uint32_t i = 0; i < total && !have_prim; i++) {
-    TSNode c = ts_node_child(type_cast_node, i);
-    if (std::string_view(ts_node_type(c)) != "ERROR") {
-      continue;
-    }
-    uint32_t en = ts_node_child_count(c);
-    for (uint32_t j = 0; j < en; j++) {
-      TSNode           ec = ts_node_child(c, j);
-      std::string_view et(ts_node_type(ec));
-      if (et == "uint_type" || et == "sint_type") {
-        prim      = ec;
-        have_prim = true;
-        break;
-      }
-    }
-  }
-  if (!have_prim) {
-    return false;
-  }
-  // The argument tuple lives in the `type` field (expression_type → tuple, or
-  // the tuple directly).
-  TSNode ty = child_by_field(type_cast_node, "type");
-  if (ts_node_is_null(ty)) {
-    return false;
-  }
-  TSNode tup      = {};
-  bool   have_tup = false;
-  if (std::string_view(ts_node_type(ty)) == "tuple") {
-    tup      = ty;
-    have_tup = true;
-  } else {
-    uint32_t nn = ts_node_named_child_count(ty);
-    for (uint32_t i = 0; i < nn && !have_tup; i++) {
-      TSNode inner = ts_node_named_child(ty, i);
-      if (std::string_view(ts_node_type(inner)) == "tuple") {
-        tup      = inner;
-        have_tup = true;
-      }
-    }
-  }
-  if (!have_tup) {
-    return false;
-  }
-  std::string max_txt;
-  std::string min_txt;
-  if (!int_type_call_bounds(trim(get_text(prim)), tup, max_txt, min_txt)) {
-    return false;
-  }
-  auto ts_idx = builder.add_child(Lnast_ntype::create_type_spec());
-  lnast->add_child(ts_idx, target);
-  auto pt = lnast->add_child(ts_idx, Lnast_ntype::create_prim_type_int());
-  lnast->add_child(pt, Lnast_node::create_const(max_txt.empty() ? "nil" : max_txt));
-  lnast->add_child(pt, Lnast_node::create_const(min_txt.empty() ? "nil" : min_txt));
-  return true;
-}
-
 void Prp2lnast::emit_type_spec(const Lnast_node& target, TSNode type_cast_node) {
-  // type_cast: ':' + (type + optional attribute | attribute).
-  // Same field-vs-anonymous-seq quirk as `type_specification_to_node`: the
-  // `attribute` field maps to a wrapping seq whose first child is `:`, so
-  // walk children to find the actual attribute_list.
-  //
-  // First try the integer type-call form (`int(max=3)`); when it
-  // matches it emits the canonical prim_type_int and we skip straight to the
-  // attribute carriers.
-  TSNode ty = emit_int_type_call(target, type_cast_node) ? TSNode{} : child_by_field(type_cast_node, "type");
+  // type_cast: ':' + (type + optional attribute | attribute). The integer
+  // type-call form (`int(max=3)`) parses as a uint_type/sint_type carrying a
+  // `constraint` tuple; emit_type_expr folds the constraint into the
+  // prim_type_int bounds.
+  TSNode ty = child_by_field(type_cast_node, "type");
   if (!ts_node_is_null(ty)) {
     // Tuple-shape type with default values (e.g. `:(x=0, y=1)`) is the only
     // way to declare a named-position tuple in Pyrope. Lower the inner
@@ -4560,13 +4398,22 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
     // `uN`/`sN`/`iN` computes its bounds; the unsized spellings (`uint`,
     // `unsigned`, `int`, `integer`) leave both bounds "nil" (unbounded). "nil"
     // marks an unbounded bound (a non-integer the consumers read as unset).
-    const bool  is_signed = (t == "sint_type");
+    // An optional `constraint` tuple (`int(max=…, min=…, bits=…)`) refines
+    // the keyword's bounds.
+    TSNode      constraint = child_by_field(type_node, "constraint");
     std::string txt(trim(get_text(type_node)));
-    std::string max_txt = "nil";
-    std::string min_txt = "nil";
-    if (!txt.empty() && std::isdigit(static_cast<unsigned char>(txt.back()))) {
+    // With a constraint the node text includes the `(…)`; keep the keyword.
+    if (auto paren = txt.find('('); paren != std::string::npos) {
+      txt = std::string(trim(std::string_view(txt).substr(0, paren)));
+    }
+    std::string max_txt;
+    std::string min_txt;
+    if (!ts_node_is_null(constraint)) {
+      int_type_call_bounds(txt, constraint, max_txt, min_txt);
+    } else if (!txt.empty() && std::isdigit(static_cast<unsigned char>(txt.back()))) {
       // First char is u/s/i; the remainder is the bit width.
-      const int n = std::stoi(txt.substr(1));
+      const int  n         = std::stoi(txt.substr(1));
+      const bool is_signed = (t == "sint_type");
       if (is_signed) {
         max_txt = std::string(Dlop::get_mask_value(n - 1)->to_pyrope());
         min_txt = std::string(Dlop::get_neg_mask_value(n - 1)->to_pyrope());
@@ -4576,8 +4423,8 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
       }
     }
     auto idx = lnast->add_child(parent, Lnast_ntype::create_prim_type_int());
-    lnast->add_child(idx, Lnast_node::create_const(max_txt));
-    lnast->add_child(idx, Lnast_node::create_const(min_txt));
+    lnast->add_child(idx, Lnast_node::create_const(max_txt.empty() ? "nil" : max_txt));
+    lnast->add_child(idx, Lnast_node::create_const(min_txt.empty() ? "nil" : min_txt));
   } else if (t == "bool_type") {
     lnast->add_child(parent, Lnast_ntype::create_prim_type_bool());
   } else if (t == "string_type") {
@@ -4613,18 +4460,71 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
   // `ubits`/`sbits` are added because attribute reads support them.
   static constexpr std::string_view known_attrs[] = {
       // Category A — LNAST/upass attrs
-      "max", "min", "bits", "ubits", "sbits", "wrap", "saturate", "sat", "comptime", "const", "mut", "typename", "private",
-      "size", "sign", "key", "crand", "rand", "loc", "file", "type",
+      "max",
+      "min",
+      "bits",
+      "ubits",
+      "sbits",
+      "wrap",
+      "saturate",
+      "sat",
+      "comptime",
+      "const",
+      "mut",
+      "typename",
+      "private",
+      "size",
+      "sign",
+      "key",
+      "crand",
+      "rand",
+      "loc",
+      "file",
+      "type",
       // Category B — LGraph wiring attrs
-      "clock", "reset", "debug", "_debug", "async", "init", "clock_pin", "din", "enable", "negreset", "posclk", "reset_pin",
-      "valid", "stop", "lat", "num", "addr", "fwd", "wensize", "rdport", "defer", "inputs", "outputs",
+      "clock",
+      "reset",
+      "debug",
+      "_debug",
+      "async",
+      "init",
+      "clock_pin",
+      "din",
+      "enable",
+      "negreset",
+      "posclk",
+      "reset_pin",
+      "valid",
+      "stop",
+      "lat",
+      "num",
+      "addr",
+      "fwd",
+      "wensize",
+      "rdport",
+      "defer",
+      "inputs",
+      "outputs",
       // Category C — synthesis hints
-      "critical", "delay", "donttouch", "keep", "inp_delay", "out_delay", "max_delay", "min_delay", "max_load", "max_fanout",
-      "max_cap", "left_of", "right_of", "top_of", "bottom_of", "align_with",
+      "critical",
+      "delay",
+      "donttouch",
+      "keep",
+      "inp_delay",
+      "out_delay",
+      "max_delay",
+      "min_delay",
+      "max_load",
+      "max_fanout",
+      "max_cap",
+      "left_of",
+      "right_of",
+      "top_of",
+      "bottom_of",
+      "align_with",
   };
-  auto is_known = [](std::string_view n) {
-    return std::find(std::begin(known_attrs), std::end(known_attrs), n) != std::end(known_attrs);
-  };
+  auto is_known
+      = [](std::string_view n) { return std::find(std::begin(known_attrs), std::end(known_attrs), n) != std::end(known_attrs); };
 
   if (is_known(name)) {
     // `clock`/`reset` are valid only as flag-only signal classifications
@@ -4646,23 +4546,19 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
     std::string_view hint;
   };
   static constexpr Mistake mistakes[] = {
-      {"initial", "use `init`"},  // LGraph's Flop pin is `initial`; the Pyrope attribute is `init`
-      {"clk", "use `clock_pin=ref <wire>` to pick a register's clock, or `clock` to classify a signal (`clk::[clock]`)"},
-      {"rst", "use `reset_pin=ref <wire>` to pick a register's reset, or `reset` to classify a signal (`rst::[reset]`)"},
-      {"width", "use `bits` to read a width (`x.[bits]`); to set a width declare a type, e.g. `:u8`"},
-      {"en", "use `enable`"},
-      {"posedge", "use `posclk` (`posclk=true`)"},
-      {"negedge", "use `posclk=false`"},
-      {"signed", "signedness is derived from the type — declare `:sN` (read it with `x.[sign]`)"},
-      {"unsigned", "signedness is derived from the type — declare `:uN` (read it with `x.[sign]`)"},
+      { "initial",                                                                                              "use `init`"}, // LGraph's Flop pin is `initial`; the Pyrope attribute is `init`
+      {     "clk", "use `clock_pin=ref <wire>` to pick a register's clock, or `clock` to classify a signal (`clk::[clock]`)"},
+      {     "rst", "use `reset_pin=ref <wire>` to pick a register's reset, or `reset` to classify a signal (`rst::[reset]`)"},
+      {   "width",                      "use `bits` to read a width (`x.[bits]`); to set a width declare a type, e.g. `:u8`"},
+      {      "en",                                                                                            "use `enable`"},
+      { "posedge",                                                                            "use `posclk` (`posclk=true`)"},
+      { "negedge",                                                                                      "use `posclk=false`"},
+      {  "signed",                           "signedness is derived from the type — declare `:sN` (read it with `x.[sign]`)"},
+      {"unsigned",                           "signedness is derived from the type — declare `:uN` (read it with `x.[sign]`)"},
   };
   for (const auto& m : mistakes) {
     if (name == m.wrong) {
-      report_error(node,
-                   "attr-name-mistake",
-                   "syntax",
-                   std::format("`{}` is not a Pyrope attribute name", name),
-                   m.hint);
+      report_error(node, "attr-name-mistake", "syntax", std::format("`{}` is not a Pyrope attribute name", name), m.hint);
     }
   }
 
@@ -4784,8 +4680,8 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
     if (ts_node_is_null(timing) && !ts_node_is_null(type_cast)) {
       timing = child_by_field(type_cast, "timing");
     }
-    const bool is_mod   = lambda_kind == "mod";
-    const bool is_pipe  = lambda_kind == "pipe";
+    const bool is_mod  = lambda_kind == "mod";
+    const bool is_pipe = lambda_kind == "pipe";
 
     if (!ts_node_is_null(timing) && !is_io_output) {
       report_error(timing,
@@ -4926,10 +4822,8 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
 void Prp2lnast::emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node) {
   // Composite tuple type `(name:T, name2:U, ...)` lowers to a `tuple_add` whose
   // children mirror the inputs/outputs shape: each field is a recursive
-  // `assign(ref, default-or-nil, type?)`. Pyrope parses each `name:T` field
-  // as a `type_specification` (not a `typed_identifier`) because tuple-item
-  // expressions reach the `type_specification` rule via `_restricted_expression`.
-  // For `name:T = default`, the field is an `assignment` whose lvalue is a
+  // `assign(ref, default-or-nil, type?)`. A bare `name:T` field parses as a
+  // `typed_field`; `name:T = default` is an `assignment` whose lvalue is a
   // `typed_identifier`.
   std::string_view t(ts_node_type(type_node));
   if (t == "expression_type") {
@@ -4946,11 +4840,12 @@ void Prp2lnast::emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node) 
         std::string_view it(ts_node_type(item));
         if (it == "typed_identifier") {
           emit_arg_assign(tup_idx, item, TSNode{}, /*is_ref_mod=*/false);
-        } else if (it == "type_specification") {
-          // (argument: identifier, type: <type>). Emit an arg-shape assign
-          // directly: ref(argument), const "nil", type-subtree.
-          TSNode arg = child_by_field(item, "argument");
-          TSNode ty  = child_by_field(item, "type");
+        } else if (it == "typed_field") {
+          // Bare `name:type` field (identifier: name, type: type_cast). Emit
+          // an arg-shape assign directly: ref(name), const "nil", type-subtree.
+          TSNode arg = child_by_field(item, "identifier");
+          TSNode tc  = child_by_field(item, "type");
+          TSNode ty  = ts_node_is_null(tc) ? TSNode{} : child_by_field(tc, "type");
           if (ts_node_is_null(arg)) {
             continue;
           }
@@ -5161,16 +5056,15 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
   }
 
   // Convert operands AFTER the op kinds are known: an operand adjacent to a
-  // `does`/`equals`/`case` operator is in type position (1g) — a primitive
+  // `does`/`equals`/`case` operator is in type position — a primitive
   // type token there is a type literal, not a variable read. Conversion stays
   // in source order, so helper-stmt emission order is unchanged.
   auto is_type_pos_op = [](std::string_view k) {
-    return k == "op_does" || k == "op_not_does" || k == "op_case" || k == "op_not_case" || k == "op_equals"
-           || k == "op_not_equals";
+    return k == "op_does" || k == "op_not_does" || k == "op_case" || k == "op_not_case" || k == "op_equals" || k == "op_not_equals";
   };
   for (size_t j = 0; j < operand_nodes.size(); ++j) {
-    const bool type_pos = (j > 0 && j - 1 < ops.size() && is_type_pos_op(ops[j - 1].kind))
-                          || (j < ops.size() && is_type_pos_op(ops[j].kind));
+    const bool type_pos
+        = (j > 0 && j - 1 < ops.size() && is_type_pos_op(ops[j - 1].kind)) || (j < ops.size() && is_type_pos_op(ops[j].kind));
     operands.push_back(type_pos ? does_operand_to_node(operand_nodes[j]) : expr_to_node(operand_nodes[j]));
   }
 
@@ -5686,7 +5580,7 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n, bool need_result) {
       "tuple",
       "tuple_sq",
       "paren_group",
-      "type_specification",
+      "attribute_set",
       "constant",
   };
 
@@ -5882,7 +5776,7 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
       } else if (t == "expression_list" || t == "expression_item" || t == "constant" || t == "identifier" || t == "tuple"
                  || t == "tuple_sq" || t == "paren_group" || t == "function_call_expression" || t == "member_selection"
                  || t == "bit_selection" || t == "dot_expression" || t == "unary_expression" || t == "attribute_read"
-                 || t == "type_specification" || t == "if_expression" || t == "match_expression") {
+                 || t == "attribute_set" || t == "if_expression" || t == "match_expression") {
         // Any expression-typed named child is the arm RHS.
         pending_expr = c;
         have_pending = true;
@@ -5924,11 +5818,9 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
           return neg_ref;
         };
 
-        // 1g — `does`/`case` arm patterns are in type position: a primitive
+        // `does`/`case` arm patterns are in type position: a primitive
         // type token (`does u32 { … }`) is a type literal, not a variable.
-        auto arm_rhs_to_node = [&](TSNode rhs) {
-          return (use_does || use_case) ? does_operand_to_node(rhs) : expr_to_node(rhs);
-        };
+        auto arm_rhs_to_node = [&](TSNode rhs) { return (use_does || use_case) ? does_operand_to_node(rhs) : expr_to_node(rhs); };
         Lnast_node       arm_cond;
         // Legacy grammar emitted an `expression_list` wrapper (multi-RHS arms);
         // the new grammar exposes the bare expression directly. Handle both.
@@ -5983,7 +5875,7 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
       "tuple",
       "tuple_sq",
       "paren_group",
-      "type_specification",
+      "attribute_set",
       "constant",
   };
 
@@ -6403,8 +6295,8 @@ Lnast_node Prp2lnast::attribute_read_to_node(TSNode n) {
       }
       TSNode name_n = ts_node_child(al, j);
       reject_common_mistakes_attr_name(name_n, get_text(name_n), false);
-      auto   idx    = builder.add_child(Lnast_ntype::create_attr_get());
-      auto   ref    = builder.mint_tmp_ref();
+      auto idx = builder.add_child(Lnast_ntype::create_attr_get());
+      auto ref = builder.mint_tmp_ref();
       lnast->add_child(idx, ref);
       lnast->add_child(idx, base);
       lnast->add_child(idx, Lnast_node::create_const(get_text(name_n)));
@@ -6415,7 +6307,8 @@ Lnast_node Prp2lnast::attribute_read_to_node(TSNode n) {
 }
 
 Lnast_node Prp2lnast::dot_expression_to_node(TSNode n) {
-  // dot_expression: item ('.' identifier|const)+
+  // dot_expression: item ('.' identifier)+ — positional entries use `[N]`
+  // (member_selection), never `.N`.
   uint32_t nnc = ts_node_named_child_count(n);
   if (nnc == 0) {
     return Lnast_node::create_ref(trim(get_text(n)));
@@ -6605,12 +6498,11 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
       // `typed_identifier`). Strip it: the ref text must be a bare
       // identifier; otherwise lnastfmt rejects the LNAST.
       std::string_view            lvt2(ts_node_type(lv));
-      // Phase 3 — capture any per-field attribute_list (`b::[poison=99]=2`)
+      // Phase 3 — capture any per-field attribute carrier (`b::[poison=99]=2`)
       // wherever the grammar attaches it so we can lower it as a post-tuple
-      // attr_set. The attribute_list may live under a `type_specification`
-      // wrapper or directly under the `typed_identifier`; walk children of
-      // the lvalue to find it. Doing so before the lvt2 dispatch keeps the
-      // logic shared between `typed_identifier` and `type_specification`.
+      // attr_set. The attribute_sq lives under the `typed_identifier`'s
+      // type_cast (or on the assignment node itself); walk the lvalue
+      // subtree to find it.
       // Recursively walk the lvalue subtree (and the assignment node itself,
       // since the grammar may attach `::[...]` between lvalue and `=`) to
       // find an attribute_list.
@@ -6663,8 +6555,8 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
           }
         }
       }
-      if (lvt2 == "type_specification") {
-        // `b::[poison=99]` parses as a type_specification with the bare
+      if (lvt2 == "attribute_set") {
+        // `b::[poison=99]` in expression-lvalue position carries the bare
         // identifier in the `argument` field.
         TSNode arg = child_by_field(lv, "argument");
         if (!ts_node_is_null(arg)) {
@@ -6782,17 +6674,14 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
       inflight_name_scopes_.back().push_back(it.assign_key);
       items.push_back(std::move(it));
     } else {
-      if (t == "type_specification") {
+      if (t == "typed_field") {
         // Type-tuple field intro (`type Complex = (v1:string, …)`): the
         // field name DECLARES the field — it is not a read of `v1`, and it
         // is readable by the later fields. Register it before lowering so
         // identifier_to_node resolves it in-flight.
-        TSNode arg = child_by_field(c, "argument");
-        if (!ts_node_is_null(arg)) {
-          TSNode id = std::string_view(ts_node_type(arg)) == "typed_identifier" ? child_by_field(arg, "identifier") : arg;
-          if (!ts_node_is_null(id) && std::string_view(ts_node_type(id)) == "identifier") {
-            inflight_name_scopes_.back().emplace_back(trim(get_text(id)));
-          }
+        TSNode id = child_by_field(c, "identifier");
+        if (!ts_node_is_null(id) && std::string_view(ts_node_type(id)) == "identifier") {
+          inflight_name_scopes_.back().emplace_back(trim(get_text(id)));
         }
       }
       Item it;
@@ -6893,7 +6782,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
             // tuple_get tmp (was a bare `ubits`/`sbits` attr_set). emit_type_expr
             // maps uint/sint→prim_type_int (bits/sign derive from the range),
             // bool→prim_type_bool, string→prim_type_string — so a typed field's
-            // kind is recorded for the 1g per-field `does`/`equals`/`case` check
+            // kind is recorded for the per-field `does`/`equals`/`case` check
             // (previously only integer field types survived).
             auto ts_idx = builder.add_child(Lnast_ntype::create_type_spec());
             lnast->add_child(ts_idx, tg_ref);

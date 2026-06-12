@@ -22,7 +22,7 @@ void Inou_cgen::setup() {
   Eprp_method m1("inou.cgen.verilog", "export verilog from an Lgraph", &Inou_cgen::to_cgen_verilog);
 
   m1.add_label_optional("verbose", "dump bits and wirename (true/false)", "false");
-  m1.add_label_optional("srcmap", "emit an ECMA-426 source-map sidecar (.v.map + sourceMappingURL comment) [[1f]]", "false");
+  m1.add_label_optional("srcmap", "emit an ECMA-426 source-map sidecar (.v.map + sourceMappingURL comment)", "false");
   register_inou("cgen", m1);
 }
 
@@ -50,20 +50,19 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
   // largest-first so the thread pool gets the heavy work in flight early.
   // Use forward_class iteration size as an approximation; if it's not cheap
   // enough at scale we can stash a node count on Graph and read it here.
-  std::sort(graphs.begin(), graphs.end(),
-            [](const std::shared_ptr<hhds::Graph>& a, const std::shared_ptr<hhds::Graph>& b) {
-              size_t a_n = 0;
-              for (auto _ : a->fast_class()) {
-                (void)_;
-                ++a_n;
-              }
-              size_t b_n = 0;
-              for (auto _ : b->fast_class()) {
-                (void)_;
-                ++b_n;
-              }
-              return a_n > b_n;
-            });
+  std::sort(graphs.begin(), graphs.end(), [](const std::shared_ptr<hhds::Graph>& a, const std::shared_ptr<hhds::Graph>& b) {
+    size_t a_n = 0;
+    for (auto _ : a->fast_class()) {
+      (void)_;
+      ++a_n;
+    }
+    size_t b_n = 0;
+    for (auto _ : b->fast_class()) {
+      (void)_;
+      ++b_n;
+    }
+    return a_n > b_n;
+  });
 
   for (auto& g : graphs) {
     thread_pool.add([g, verbose, dir, srcmap]() -> void {

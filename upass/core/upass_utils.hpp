@@ -23,7 +23,7 @@ template <typename... Args>
   throw std::runtime_error(msg);
 }
 
-// Located variant ([[1f]]-F): the caller resolves the node's SourceId through
+// Located variant: the caller resolves the node's SourceId through
 // its Lnast's locator (`ln->span_of(nid)`) and passes the resolved Span here —
 // core/diag stays a leaf library with no locator dependency.
 template <typename... Args>

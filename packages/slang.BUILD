@@ -21,6 +21,17 @@ cmake(
         # FetchContent, which the network-less Bazel sandbox cannot do). The dead
         # v10 SLANG_USE_BOOST cache entry is gone (slang.patch vendors boost).
         "SLANG_USE_MIMALLOC": "OFF",
+        # Force slang to use its vendored single-header boost
+        # (boost_unordered.hpp / boost_concurrent.hpp) instead of any system
+        # boost. slang's external/CMakeLists.txt only vendors + installs the
+        # single header and defines SLANG_BOOST_SINGLE_HEADER when
+        # find_package(Boost) FAILS. On hosts with a CMake-discoverable boost
+        # (e.g. Homebrew boost on macOS) find_package would succeed, so slang
+        # would build against <boost/...> and NOT install the single header --
+        # yet LiveHD always compiles slang headers with SLANG_BOOST_SINGLE_HEADER
+        # (see defines below), so <boost_unordered.hpp> would be missing. Disable
+        # the find so the vendored path is taken deterministically, host-agnostic.
+        "CMAKE_DISABLE_FIND_PACKAGE_Boost": "ON",
     },
 #    generate_args = select({
 #        "@platforms//os:macos": [

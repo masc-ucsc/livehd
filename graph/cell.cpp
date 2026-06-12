@@ -22,7 +22,7 @@ struct Livehd_attr_init {
     hhds::register_attr_tag<livehd::attrs::pin_signed_t>("livehd::attrs::pin_signed");
     hhds::register_attr_tag<livehd::attrs::color_t>("livehd::attrs::color");
     hhds::register_attr_tag<livehd::attrs::place_t>("livehd::attrs::place");
-    // source provenance rides hhds::attrs::srcid (self-registering, [[1f]])
+    // source provenance rides hhds::attrs::srcid (self-registering)
     hhds::register_attr_tag<livehd::attrs::const_value_t>("livehd::attrs::const_value");
     hhds::register_attr_tag<livehd::attrs::pin_const_value_t>("livehd::attrs::pin_const_value");
     hhds::register_attr_tag<livehd::attrs::lut_t>("livehd::attrs::lut");
@@ -223,7 +223,9 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 8 : return "wensize";    // comptime x 1  -- number of Write Enable bits
         case 9 : return "size";       // comptime x 1
         case 10: return "rdport";     // comptime x n_ports (1 rd, 0 wr)
-        case 11: return "init";       // comptime x 1 -- contents (entry 0 in the low `bits`, row-major); a reg array with a bound reset restores it via per-entry write ports (tolg)
+        case 11:
+          return "init";  // comptime x 1 -- contents (entry 0 in the low `bits`, row-major); a reg array with a bound reset
+                          // restores it via per-entry write ports (tolg)
         default: return "invalid";
       }
       break;

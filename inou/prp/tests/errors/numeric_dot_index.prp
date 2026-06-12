@@ -1,0 +1,13 @@
+/*
+:name: numeric_dot_index
+:type: error
+:error: syntax
+:help: does not parse
+*/
+
+// Dot tails are identifiers only: positional tuple entries are selected with
+// `[N]`, never `.N` (named fields are unordered, so a numeric position has no
+// meaning for them). `t.0` must be written `t[0]`.
+
+const t = (1, 2)
+cassert(t.0 == 1) // locate_error_here

@@ -12,13 +12,15 @@ if false {
     c = 2
 }
 cassert(c == 1)
-c = 100 when false
+if false { c = 100 }
 cassert(c == 1)
 
-mut c2 = 3 when false
-cassert(c2 == nil) // gated decl hoists to this scope; the gate was false
+mut c2 = nil
+if false { c2 = 3 }
+cassert(c2 == nil) // comptime-false arm leaves the nil init untouched
 
-mut c3 = 4 when true
+mut c3 = nil
+if true { c3 = 4 }
 cassert(c3 == 4)
 
 if true {

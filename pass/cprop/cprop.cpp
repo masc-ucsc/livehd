@@ -508,7 +508,9 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
     replace_node(node, result);
   } else if (op == Ntype_op::Mux) {
     auto sel_const = hydrate_const(inp_edges_ordered[0].driver);
-    I(sel_const.is_just_i64());
+    if (!sel_const.is_just_i64()) {
+      return;  // unknown-bit selector (0sb? poison cond): keep the mux as-is
+    }
 
     size_t sel = sel_const.to_just_i64();
 

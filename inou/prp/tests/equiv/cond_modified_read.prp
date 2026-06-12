@@ -1,0 +1,22 @@
+/*
+:name: cond_modified_read
+:type: equiv
+:verilog_top: cond_modified_read.condread
+:pyrope_top: cond_modified_read.condread
+*/
+
+// Regression (constprop miscompile, the slang `g = e && b` shape): a var
+// conditionally modified under an uncertain arm is pinned to nil by
+// Symbol_table::leave_scope (the cassert-discharge contract). A downstream
+// VALUE read through a comparison/logic chain used to fold that nil into
+// the chain, drop the producers, and leave a dangling ref that tolg wired
+// to 0sb? poison — the whole `e` wire vanished from the output cone. The
+// uncertain-nil MARK now propagates through eq/ne and log_* folds, keeping
+// every producer alive so tolg lowers the real wires.
+comb condread(s:bool, b:bool) -> (g:bool) {
+  mut e = false
+  if s {
+    e = true
+  }
+  g = e and b
+}

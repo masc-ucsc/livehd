@@ -11,8 +11,8 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "hlop/dlop.hpp"
 #include "diag.hpp"
+#include "hlop/dlop.hpp"
 #include "lnast_ntype.hpp"
 #include "pass.hpp"
 
@@ -68,7 +68,7 @@ struct CallInfo {
 }
 
 [[nodiscard]] std::string loc_str(const std::shared_ptr<Lnast>& ln, const Lnast_nid& nid) {
-  const auto span = ln->span_of(nid);  // SourceId resolved through the locator ([[1f]])
+  const auto span = ln->span_of(nid);  // SourceId resolved through the locator
   if (!span.start_line) {
     return std::string(ln->get_top_module_name());
   }
@@ -88,10 +88,9 @@ struct CallInfo {
 
 class Discharger {
 public:
-  Discharger(const std::shared_ptr<Lnast>& lnast, const uPass_timecheck::Registry& registry)
-      : ln_(lnast), registry_(registry) {}
+  Discharger(const std::shared_ptr<Lnast>& lnast, const uPass_timecheck::Registry& registry) : ln_(lnast), registry_(registry) {}
 
-  // [[1f]]-F: stage a located Diagnostic (the node's SourceId resolved
+  // Stage a located Diagnostic (the node's SourceId resolved
   // through the Lnast's locator) before the Pass::error-style throw; the
   // downstream flush emits the staged record exactly once. The loc_str text
   // stays in the message for human/test continuity.
@@ -185,10 +184,10 @@ private:
       }
       auto mx = ln_->get_sibling_next(mn);
       Stg  s;
-      s.decl_nid    = nid;
-      auto min_txt  = ln_->get_name(mn);
-      auto max_txt  = mx.is_invalid() ? min_txt : ln_->get_name(mx);
-      s.nil         = min_txt == "nil" || max_txt == "nil";
+      s.decl_nid   = nid;
+      auto min_txt = ln_->get_name(mn);
+      auto max_txt = mx.is_invalid() ? min_txt : ln_->get_name(mx);
+      s.nil        = min_txt == "nil" || max_txt == "nil";
       if (!s.nil) {
         s.min = const_of(mn);
         s.max = mx.is_invalid() ? s.min : const_of(mx);
@@ -196,7 +195,7 @@ private:
       pending_[name] = s;
       return;
     }
-    // plain reg — unknown until the LG checker classifies it (2d-reg: state
+    // plain reg — unknown until the LG checker classifies it (state
     // pins sigma(q)=sigma(din); a feedforward stage reg crosses +1; both need
     // the graph-level enable/SCC analysis). Remember the name so its stores
     // never bind a sigma here.
@@ -219,7 +218,7 @@ private:
       return;
     }
 
-    // 2d-reg — a store to a plain reg is a next-state din write; sigma(q) is
+    // A store to a plain reg is a next-state din write; sigma(q) is
     // the LG checker's call (state vs stage classification). Never bind it.
     if (plain_regs_.contains(name)) {
       forget(name);
@@ -273,18 +272,18 @@ private:
           if (ci.cmax >= ci.cmin) {
             error_at(stg.decl_nid.is_invalid() ? store_nid : stg.decl_nid,
                      "{}: stage[{}] on '{}' is outside the callee's declared latency range [{}, {}]",
-                        loc_str(ln_, stg.decl_nid.is_invalid() ? store_nid : stg.decl_nid),
-                        n,
-                        name,
-                        ci.cmin,
-                        ci.cmax);
+                     loc_str(ln_, stg.decl_nid.is_invalid() ? store_nid : stg.decl_nid),
+                     n,
+                     name,
+                     ci.cmin,
+                     ci.cmax);
           } else {
             error_at(stg.decl_nid.is_invalid() ? store_nid : stg.decl_nid,
                      "{}: stage[{}] on '{}' is below the callee's declared minimum latency {}",
-                        loc_str(ln_, stg.decl_nid.is_invalid() ? store_nid : stg.decl_nid),
-                        n,
-                        name,
-                        ci.cmin);
+                     loc_str(ln_, stg.decl_nid.is_invalid() ? store_nid : stg.decl_nid),
+                     n,
+                     name,
+                     ci.cmin);
           }
           return;
         }
@@ -292,10 +291,10 @@ private:
         if (ci.cmin != ci.cmax || n != ci.cmin) {
           error_at(stg.decl_nid.is_invalid() ? store_nid : stg.decl_nid,
                    "{}: mod call result '{}' lands at its declared cycle {} — `stage[{}]` must match it",
-                      loc_str(ln_, stg.decl_nid.is_invalid() ? store_nid : stg.decl_nid),
-                      name,
-                      ci.cmin,
-                      n);
+                   loc_str(ln_, stg.decl_nid.is_invalid() ? store_nid : stg.decl_nid),
+                   name,
+                   ci.cmin,
+                   n);
           return;
         }
       }
@@ -340,7 +339,7 @@ private:
     // Equal-meet over the ref actuals (consts unify with anything). Two
     // KNOWN fixed operands at different cycles is the 06c misalignment.
     Cyc  op{0, 0};
-    bool have      = false;
+    bool have        = false;
     bool any_unknown = false;
     for (auto a = ln_->get_sibling_next(callee_n); !a.is_invalid(); a = ln_->get_sibling_next(a)) {
       Lnast_nid val = a;
@@ -365,9 +364,9 @@ private:
       if (have && kit->second.min != op.min) {
         error_at(nid,
                  "{}: call operands at different cycles ({} vs {}) — align them with a `stage[N]` binding first",
-                    loc_str(ln_, nid),
-                    op.min,
-                    kit->second.min);
+                 loc_str(ln_, nid),
+                 op.min,
+                 kit->second.min);
         return;
       }
       op   = kit->second;
@@ -376,11 +375,11 @@ private:
 
     const auto& oe = callee->io_meta().outputs.front();
     CallInfo    ci;
-    ci.op       = op;
-    ci.op_known = have && !any_unknown;
-    ci.cmin     = oe.stages_min;
-    ci.cmax     = oe.stages_max;
-    ci.is_pipe  = kind == "pipe";
+    ci.op            = op;
+    ci.op_known      = have && !any_unknown;
+    ci.cmin          = oe.stages_min;
+    ci.cmax          = oe.stages_max;
+    ci.is_pipe       = kind == "pipe";
     calls_[dst_name] = ci;
   }
 
@@ -408,10 +407,10 @@ private:
       if (have && kit->second.min != meet.min) {
         error_at(nid,
                  "{}: '{}' mixes operands at different cycles ({} vs {}) — align them with `stage[N]` or check with `@[N]`",
-                    loc_str(ln_, nid),
-                    dst_name,
-                    meet.min,
-                    kit->second.min);
+                 loc_str(ln_, nid),
+                 dst_name,
+                 meet.min,
+                 kit->second.min);
         return;
       }
       meet = kit->second;
@@ -460,11 +459,11 @@ private:
       if (kit->second.min != qc.asserted) {
         error_at(qc.nid,
                  "{}: '{}' lands at cycle {}, not {} as `@[{}]` asserts",
-                    loc_str(ln_, qc.nid),
-                    qc.name,
-                    kit->second.min,
-                    qc.asserted,
-                    qc.asserted);
+                 loc_str(ln_, qc.nid),
+                 qc.name,
+                 kit->second.min,
+                 qc.asserted,
+                 qc.asserted);
         return;
       }
       ln_->add_child(qc.nid, Lnast_node::create_const("checked"));  // discharged
@@ -483,22 +482,24 @@ private:
         // Declared single cycle (N,N). The `@[]` opt-out harvests as -1 —
         // explicitly unchecked, skip it.
         if (oe.stages_min >= 0 && oe.stages_min == oe.stages_max && sigma != oe.stages_min) {
-          Pass::error("{}: mod output '{}' lands at cycle {} but its interface declares @[{}]",
-                      ln_->get_top_module_name(),
-                      oe.name,
-                      sigma,
-                      oe.stages_min);
+          error_at(Lnast_nid{},
+                   "{}: mod output '{}' lands at cycle {} but its interface declares @[{}]",
+                   ln_->get_top_module_name(),
+                   oe.name,
+                   sigma,
+                   oe.stages_min);
           return;
         }
       } else if (kind == "pipe") {
         // sigma <= declared min honesty (the body must support the ENTIRE
         // declared range; output padding fills the difference).
         if (oe.stages_min >= 1 && sigma > oe.stages_min) {
-          Pass::error("{}: pipe output '{}' lands at stage {} but the pipe declares a minimum of {}",
-                      ln_->get_top_module_name(),
-                      oe.name,
-                      sigma,
-                      oe.stages_min);
+          error_at(Lnast_nid{},
+                   "{}: pipe output '{}' lands at stage {} but the pipe declares a minimum of {}",
+                   ln_->get_top_module_name(),
+                   oe.name,
+                   sigma,
+                   oe.stages_min);
           return;
         }
       }
@@ -541,7 +542,7 @@ private:
   absl::flat_hash_map<std::string, Cyc>      known_;
   absl::flat_hash_map<std::string, Stg>      pending_;
   absl::flat_hash_map<std::string, CallInfo> calls_;
-  absl::flat_hash_set<std::string>           plain_regs_;  // 2d-reg: sigma owned by the LG checker
+  absl::flat_hash_set<std::string>           plain_regs_;  // sigma owned by the LG checker
   std::vector<Queued_check>                  queued_checks_;
 };
 

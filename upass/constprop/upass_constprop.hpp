@@ -9,11 +9,11 @@
 #include <unordered_map>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
+#include "call_resolver.hpp"
+#include "decl_facts.hpp"
 #include "hlop/dlop.hpp"
 #include "lnast_ntype.hpp"
-#include "call_resolver.hpp"
-#include "absl/container/flat_hash_set.h"
-#include "decl_facts.hpp"
 #include "symbol_table.hpp"
 #include "upass_core.hpp"
 
@@ -48,7 +48,7 @@ public:
   upass::Vote process_gt(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_ge(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_is(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
-  void process_if() override;
+  void        process_if() override;
 
   // Bitwidth Insensitive Reduce
   upass::Vote process_red_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
@@ -61,24 +61,24 @@ public:
   upass::Vote process_get_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_set_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
 
-  void process_stmts_post() override;
+  void        process_stmts_post() override;
   // At file-scope completion, fold every `pub` value export into
   // the Lnast's pub-values side channel (errors when not comptime-foldable).
-  void harvest_pub_values();
-  void process_declare() override;
-  void process_tuple_set() override;
-  void process_tuple_get() override;
+  void        harvest_pub_values();
+  void        process_declare() override;
+  void        process_tuple_set() override;
+  void        process_tuple_get() override;
   upass::Vote process_tuple_add(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_tuple_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
-  void process_attr_set() override;
-  void process_func_call() override;
+  void        process_attr_set() override;
+  void        process_func_call() override;
   upass::Vote process_func_does(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_func_equals(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_func_in(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_func_has(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_func_case(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
-  void process_range() override;
-  void end_run() override;
+  void        process_range() override;
+  void        end_run() override;
 
   // Bundle-access check (optable.md): a comptime-known tuple access whose key
   // is out of bounds (positional) or names a non-existent field is a compile
@@ -97,7 +97,6 @@ public:
   upass::Vote          classify_vote() {
     return classify_statement_impl().kind == upass::Emit_kind::drop_subtree ? upass::Vote::drop : upass::Vote::keep;
   }
-
 
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
 
@@ -119,8 +118,8 @@ public:
   static void set_ambiguous_units(std::unordered_set<std::string> s) { ambiguous_units_ = std::move(s); }
 
 protected:
-  static inline std::vector<Pending_import>      pending_imports_;
-  static inline std::unordered_set<std::string>  ambiguous_units_;
+  static inline std::vector<Pending_import>     pending_imports_;
+  static inline std::unordered_set<std::string> ambiguous_units_;
 
   // Resolve a live `import` call (the LiveHD docs):
   // cursor sits on the const "import" callee; binds `dst` (tuple form → pub
@@ -165,7 +164,7 @@ protected:
   // op-folding reads operands.) Signed/none-typed decls are not recorded.
   // Stores the declared MAX as a Dlop (for uN this is the N-bit all-ones
   // mask); the first-write coercion is `v & max`. No width/to_i.
-  std::optional<std::string>             pending_unsigned_overflow_msg_;
+  std::optional<std::string> pending_unsigned_overflow_msg_;
 
   // Named type per var, recorded by process_declare when the declare's
   // type slot is a `ref(NAMED)` (a named type, e.g. `mut c:v_type = …`). At the
@@ -175,7 +174,7 @@ protected:
   // c={x:3, b:"foo"}. NAMED may be declared via `type T=(…)` or `const T=(…)`;
   // both leave T's bundle in the symbol table.
 
-  // 2d-reg — names declared with mode `reg` (incl. stage-synthesized regs).
+  // Names declared with mode `reg` (incl. stage-synthesized regs).
   // Their reads are RUNTIME q reads (never fold through the symbol table)
   // and their stores are next-state din writes (never bound, never dropped):
   // Verilog `<=` semantics — a read after a write still sees the flop's q.
@@ -237,7 +236,6 @@ protected:
     return e.decl_max;
   }
 
-
   void check_unsigned_positive_overflow(std::string_view lhs, const Dlop& value);
 
   // Field paths read via tuple_get this walk (unused-unset warning).
@@ -260,8 +258,7 @@ protected:
         default                  : break;
       }
     }
-    if (const auto f = upass::decl_facts::lookup(st(), lm ? lm->get_lnast().get() : nullptr, name);
-        f && f->has_type_spec) {
+    if (const auto f = upass::decl_facts::lookup(st(), lm ? lm->get_lnast().get() : nullptr, name); f && f->has_type_spec) {
       if (q.kind == Io_kind::none) {
         switch (f->kind) {
           case upass::decl_facts::Num::unsigned_int:
@@ -281,13 +278,63 @@ protected:
     return q;
   }
 
+  // True when `name` (root, dotted paths collapse to their first level) is a
+  // declared OUTPUT of the unit under fold (io_meta is populated by the SSA
+  // upass before constprop runs). Outputs are the unit's boundary contract:
+  // their stores must always materialize (see classify_statement_impl).
+  bool is_io_output(std::string_view name) const {
+    const auto& ln = lm ? lm->get_lnast() : nullptr;
+    if (!ln) {
+      return false;
+    }
+    const auto root = Bundle::get_first_level(name);
+    for (const auto& oe : ln->io_meta().outputs) {
+      if (oe.name == root) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Poison-nil propagation for the cassert-discharge ops (eq/ne, log_*).
+  // When any ref operand is an uncertainty-pinned var (or a temp this rule
+  // already marked), the result is the same indeterminate nil: store it AND
+  // mark the dst, so
+  //   (a) the verifier still discharges casserts over the chain (the nil
+  //       reads through known_const_scalar), and
+  //   (b) value consumers keep the producer (classify's marked-dst gate),
+  //       never substitute the nil (emit_ref_or_folded refuses nils), and
+  //       the runner treats a nil if-cond as unknown — so tolg receives the
+  //       real wires instead of a dangling ref.
+  bool propagate_uncertain_nil(std::string_view dst, upass::Src_span src) {
+    if (dst.empty()) {
+      return false;
+    }
+    for (const auto& o : src) {
+      if (!o.name.empty() && st().is_uncertain_nil(o.name)) {
+        store_trivial(dst, *Dlop::nil());
+        st().mark_uncertain_nil(dst);  // after the store — set() clears marks
+        return true;
+      }
+    }
+    return false;
+  }
+
   // Push-form operand value. Mirrors current_prim_value: the
   // cross-pass fold override wins (wrap/sat narrowed values, attr-derived
   // tmps — all of which land on the table),
   // then a scalar bundle flattens, then the stored trivial. Dlop operands
   // carry their parsed value in the resolver's make_const bundle.
+  // An uncertainty-pinned var reads as INVALID here: its nil is a poison
+  // marker for a runtime-divergent value (mux of if-arm writes), so value
+  // folds must not consume it — the ref stays and tolg wires the real
+  // producer. The discharge ops (eq/ne, log_*) handle marked operands BEFORE
+  // calling the push_* templates via propagate_uncertain_nil above.
   Dlop operand_value(const upass::Operand& o) {
     if (!o.name.empty()) {
+      if (st().is_uncertain_nil(o.name)) {
+        return Dlop();
+      }
       // Cross-pass folds land on the table — read it directly.
       if (auto b = st().get_bundle(o.name); b && b->is_scalar()) {
         if (auto bv = b->lone_trivial(); !bv.is_invalid()) {
@@ -372,6 +419,12 @@ protected:
   auto current_prim_value() const {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
       auto name = current_text();
+      // Uncertainty-pinned poison nil never folds as a value (see
+      // operand_value above) — return invalid so the caller's foldable()
+      // gate keeps the ref alive.
+      if (st().is_uncertain_nil(name)) {
+        return Dlop();
+      }
       // cross-pass folds (wrap/sat narrowing on call-dst tmps,
       // attr_get results, `is`) land on the table now — no seam read.
       // Single-entry bundle: a parenthesized scalar `(expr)` lowers to a
@@ -485,13 +538,13 @@ protected:
   // (tuple) path. `bundle` is set only for real tuples.
   struct Does_operand {
     enum class Kind : uint8_t { integer, boolean, string, tuple, nil, unknown };
-    Kind                          kind = Kind::unknown;
+    Kind                          kind    = Kind::unknown;
     bool                          max_inf = false;  // envelope max is +∞
     bool                          min_inf = false;  // envelope min is −∞
-    Dlop                         max;
-    Dlop                         min;
+    Dlop                          max;
+    Dlop                          min;
     bool                          has_value = false;
-    Dlop                         value;  // valid when has_value
+    Dlop                          value;   // valid when has_value
     std::shared_ptr<Bundle const> bundle;  // set when kind==tuple
     // The TABLE name the bundle was resolved under (Bundle::name is
     // gone); resolve_field_operand's dotted declared-type query keys on it.
@@ -499,33 +552,33 @@ protected:
   };
   // Resolve the `does`/`equals`/`case` operand at the current cursor (a ref or
   // const). nullopt when undecidable this walk (defer the fold).
-  std::optional<Does_operand> resolve_does_operand();
+  std::optional<Does_operand>        resolve_does_operand();
   // Build a scalar Does_operand from a declared type query plus an optional
   // folded value (shared by the ref-operand and per-field paths).
-  static Does_operand build_scalar_operand(const upass::uPass::Scalar_type_query& q, const Dlop& folded);
+  static Does_operand                build_scalar_operand(const upass::uPass::Scalar_type_query& q, const Dlop& folded);
   // Resolve one named/positional field of a bundle to a Does_operand for the
-  // per-field type check (1g-D): declared type via the dotted query
+  // per-field type check: declared type via the dotted query
   // (`bundle.field`), value via the bundle entry, sub-bundle for nested tuples.
   // `declared_only` (used by the per-field type check) returns nullopt for a
   // scalar field with NO explicit declared type — an untyped field imposes no
   // type constraint (`m1 does (a:u32)` passes; `s case (a=0)` stays a value
   // pattern), so the check runs only when BOTH sides are declared-typed.
-  std::optional<Does_operand> resolve_field_operand(std::string_view base, const Bundle& b, std::string_view field,
-                                                    bool declared_only);
+  std::optional<Does_operand>        resolve_field_operand(std::string_view base, const Bundle& b, std::string_view field,
+                                                           bool declared_only);
   // Decode a primitive type token (`u32`/`s8`/`int`/`bool`/`string`/…) in
   // operand position to its kind+envelope. Returns nullopt if `name` is not a
   // type token.
   static std::optional<Does_operand> decode_prim_type_token(std::string_view name);
   // Build a one-entry positional bundle {0: value} so a scalar operand can take
   // the structural path against a real tuple (`(100,30) does 30`).
-  static std::shared_ptr<Bundle> single_positional_bundle(const Dlop& v);
+  static std::shared_ptr<Bundle>     single_positional_bundle(const Dlop& v);
   // Tri-state kind+envelope `a does b` for two NON-tuple operands. nullopt =
   // undecidable.
-  static std::optional<bool> scalar_does(const Does_operand& a, const Does_operand& b);
+  static std::optional<bool>         scalar_does(const Does_operand& a, const Does_operand& b);
   // Tri-state `a does b` for any two resolved operands: structural (tuple)
-  // path when a side is a real tuple (plus per-field type checks, 1g-D), else
+  // path when a side is a real tuple (plus per-field type checks), else
   // scalar_does. nullopt = undecidable. `equals` is this both ways.
-  std::optional<bool> compute_does(const Does_operand& a, const Does_operand& b);
+  std::optional<bool>                compute_does(const Does_operand& a, const Does_operand& b);
 
   // The actual-collection moved to the runner-owned resolver
   // (upass/core/call_resolver.hpp); the alias keeps every consumer
@@ -534,7 +587,7 @@ protected:
 
   static inline std::unordered_map<std::string, std::shared_ptr<Lnast>> function_registry;
 
-  std::optional<Dlop>                    resolve_current_scalar() const;
+  std::optional<Dlop>                     resolve_current_scalar() const;
   std::optional<std::vector<Call_actual>> collect_call_actuals();
 
   // Direct-cell call dispatch: `__sum(a, b)`, `__hotmux(sel, a, b, …)`, etc.

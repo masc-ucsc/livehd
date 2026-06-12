@@ -42,7 +42,11 @@ TEST(diag, emit_counts_and_records) {
 TEST(diag, warning_is_not_an_error) {
   Sink s;
   s.set_jsonl_path("off");
-  Diagnostic w{.severity = Severity::warning, .code = "shadow", .category = "name", .pass = "inou.prp", .message = "shadowed name x"};
+  Diagnostic w{.severity = Severity::warning,
+               .code     = "shadow",
+               .category = "name",
+               .pass     = "inou.prp",
+               .message  = "shadowed name x"};
   s.emit(std::move(w));
   EXPECT_FALSE(s.has_errors());
   EXPECT_EQ(s.count(Severity::warning), 1u);
@@ -73,7 +77,7 @@ TEST(diag, jsonl_off_suppresses_file) {
   s.set_human_stderr(false);
   s.emit(make_error());
   std::ifstream f(path);
-  EXPECT_FALSE(f.good());            // file never created
+  EXPECT_FALSE(f.good());             // file never created
   EXPECT_EQ(s.records().size(), 1u);  // but still accumulated in memory
 }
 
@@ -152,4 +156,83 @@ TEST(diag, global_sink_is_stable) {
   auto& a = livehd::diag::sink();
   auto& b = livehd::diag::sink();
   EXPECT_EQ(&a, &b);
+}
+
+TEST(diag, builder_builds_full_record) {
+  auto d = livehd::diag::err("upass.bitwidth", "negative-shift", "bitwidth")
+               .at(Span{.file = "foo.prp", .start_line = 3, .start_col = 9})
+               .msg("shift amount is always negative (range [{}, {}])", -4, -1)
+               .hint("a shift / bit-select count must be >= 0")
+               .note("declared here", Span{.file = "foo.prp", .start_line = 1})
+               .build();
+  EXPECT_EQ(d.severity, Severity::error);
+  EXPECT_EQ(d.code, "negative-shift");
+  EXPECT_EQ(d.category, "bitwidth");
+  EXPECT_EQ(d.pass, "upass.bitwidth");
+  EXPECT_EQ(d.message, "shift amount is always negative (range [-4, -1])");
+  EXPECT_EQ(d.span.start_line.value_or(0), 3u);
+  ASSERT_EQ(d.notes.size(), 1u);
+  EXPECT_EQ(d.notes[0].message, "declared here");
+}
+
+TEST(diag, builder_at_resolved_spans_carries_notes) {
+  hhds::Source_locator sl;
+  const auto           a    = sl.mint("src/a.prp", 0, 3, 1);
+  const auto           b    = sl.mint("src/a.prp", 4, 7, 2);
+  const auto           comb = sl.combine({a, b});
+
+  auto d = livehd::diag::warn("upass.runner", "unset-unused-field", "type")
+               .at(sl.resolve_spans(comb), "reached via this site")
+               .msg("field never read")
+               .build();
+  EXPECT_EQ(d.severity, Severity::warning);
+  EXPECT_EQ(d.span.start_byte.value_or(99), 0u);  // primary anchor
+  ASSERT_EQ(d.notes.size(), 1u);                  // the second parent rides as a note
+  EXPECT_EQ(d.notes[0].message, "reached via this site");
+  EXPECT_EQ(d.notes[0].span.start_line.value_or(0), 2u);
+}
+
+TEST(diag, builder_fatal_throws_and_records) {
+  // Builder terminals go through the process-global sink.
+  auto& s = livehd::diag::sink();
+  s.clear();
+  s.set_jsonl_path("off");
+  s.set_human_stderr(false);
+  EXPECT_THROW(livehd::diag::err("test", "tolg-error", "internal").msg("boom").fatal(), std::runtime_error);
+  EXPECT_TRUE(s.has_errors());
+  s.clear();
+}
+
+TEST(diag, text_renders_excerpt_with_locator) {
+  hhds::Source_locator sl;
+  sl.set_file_content("foo.prp", std::string("mut x = 1\ny = x << amt\n"));
+  const auto id = sl.mint("foo.prp", 14, 22, 2);  // "x << amt"
+
+  Diagnostic d   = make_error();
+  d.span         = sl.resolve_span(id);
+  const auto txt = livehd::diag::to_text(d, &sl);
+  EXPECT_NE(txt.find("livehd:foo.prp:2:5:error:"), std::string::npos);
+  EXPECT_NE(txt.find("2 | y = x << amt"), std::string::npos);
+  EXPECT_NE(txt.find("  |     ^~~~~~~~"), std::string::npos);
+  // The same record without a locator degrades to the plain line.
+  EXPECT_EQ(livehd::diag::to_text(d).find('|'), std::string::npos);
+}
+
+TEST(diag, locator_scope_restores_previous) {
+  hhds::Source_locator sl;
+  auto&                s = livehd::diag::sink();
+  EXPECT_EQ(s.locator(), nullptr);
+  {
+    livehd::diag::Locator_scope scope(&sl);
+    EXPECT_EQ(s.locator(), &sl);
+  }
+  EXPECT_EQ(s.locator(), nullptr);
+}
+
+TEST(diag, category_vocabulary_is_pinned) {
+  EXPECT_TRUE(livehd::diag::is_known_category("bitwidth"));
+  EXPECT_TRUE(livehd::diag::is_known_category("io"));
+  EXPECT_FALSE(livehd::diag::is_known_category("missing_file"));  // folded into "io"
+  EXPECT_FALSE(livehd::diag::is_known_category("attributes"));    // folded into "type"
+  EXPECT_FALSE(livehd::diag::is_known_category("bitwdith"));      // typos must not pass
 }

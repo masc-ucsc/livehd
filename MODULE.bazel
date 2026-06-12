@@ -52,7 +52,7 @@ bazel_dep(name = "hlop", version = "0.2.0")
 git_override(
     module_name = "hlop",
     remote = "https://github.com/masc-ucsc/hlop.git",
-    commit = "54f47b3f6b7397db1c732e6de6ddca6c8d7338a0",  # is_i/to_i -> is_just_i64/to_just_i64
+    commit = "f3f8e44e438d92c01dd3ca877ac165b413984f78",  # sra_op nil/negative guard + get_bitsn 64-bit word-boundary fix
 )
 # For local debug/testing, swap the git_override above for:
 # local_path_override(module_name = "hlop", path = "../hlop") # sometimes useful to debug together with hlop patches
@@ -131,7 +131,7 @@ bazel_dep(name = "hhds", version = "0.2.0")
 git_override(
     module_name = "hhds",
     remote = "https://github.com/masc-ucsc/hhds.git",
-    commit = "d31bbde3c166d2d9a70d2cbe4cee2a6c3d7a95f6",  # Source_span/resolve_spans/import_from + render_excerpt (diag reporting)
+    commit = "08018e22e5af6b56c66c06b1b82e8c4957e3f904",  # zero-encoded sedge fix (slang-2s instance edge loss)
 )
 # For local debug/testing, swap the git_override above for:
 # local_path_override(module_name = "hhds", path = "../hhds") # sometimes useful for debug together with hhds
@@ -140,9 +140,9 @@ git_override(
 http_archive(
     name = "tree-sitter-pyrope",
     build_file = "//packages:tree-sitter-pyrope.BUILD",
-    integrity = "sha256-L18TTHdz0ZA2Y/PWJUZ34JM9xkJHz/qcuA0SRHpU0c4=",
-    strip_prefix = "tree-sitter-pyrope-f4b985f09f526c884281af51277f2e13fdcda028",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/f4b985f09f526c884281af51277f2e13fdcda028.zip",
+    integrity = "sha256-SC8eUPtScD8DvtNx1AsB95iEzdGigGeApsLA13pPDEw=",
+    strip_prefix = "tree-sitter-pyrope-279462b1427472184266ea76b5ce7f2367661d20",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/279462b1427472184266ea76b5ce7f2367661d20.zip",
     ],
 )
 

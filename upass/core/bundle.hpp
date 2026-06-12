@@ -29,8 +29,8 @@ public:
     Dlop decl_max, decl_min;  // declared envelope (type-bake pre-step; persistent)
     Dlop bw_max, bw_min;      // derived range (bitwidth; per-write)
 
-    upass::Kind kind = upass::Kind::unknown;  // typecheck / type-bake
-    upass::Mode mode = upass::Mode::unknown;  // per-field mut/const (type-bake; rides entry copies)
+    upass::Kind kind      = upass::Kind::unknown;  // typecheck / type-bake
+    upass::Mode mode      = upass::Mode::unknown;  // per-field mut/const (type-bake; rides entry copies)
     bool        immutable = false;
     bool        comptime  = false;
   };
@@ -62,7 +62,7 @@ public:
     int              pos        = -1;
     size_t           leaf_count = 0;
     bool             has_leafs  = false;
-    Dlop            scalar;
+    Dlop             scalar;
   };
 
   // Sorted-iteration views over Bundle data. Materialized on each call
@@ -90,7 +90,7 @@ public:
   };
 
 protected:
-  // 1b/B — storage is TWO sorted maps sharing Canonical_less:
+  // Storage is TWO sorted maps sharing Canonical_less:
   //   key_map  — data leaves only, keyed by canonical dotted path
   //              ("name", "0", "a.b", "a.0", …). No attribute keys.
   //   attr_map — attribute leaves, keyed by BARE attr name (no "__")
@@ -105,7 +105,6 @@ protected:
   // Lookups by exact key are O(log N); sub-tree scans use
   // lower_bound("prefix.") + walk.
   using Key_map_type = std::map<std::string, Entry, Canonical_less>;
-
 
   // Binding-level typed facts (1b/D): mode is a property of the NAME
   // (mut/const/reg), type_name the nominal identity for `is` (empty =
@@ -146,7 +145,9 @@ protected:
 
   // Canonical attribute-name spelling: stickiness is encoded in the name
   // (leading '_'); the builtin alias "debug" stores as "_debug".
-  static std::string_view canon_attr(std::string_view attr_name) { return attr_name == "debug" ? std::string_view{"_debug"} : attr_name; }
+  static std::string_view canon_attr(std::string_view attr_name) {
+    return attr_name == "debug" ? std::string_view{"_debug"} : attr_name;
+  }
 
   const Entry& attr_entry(std::string_view attr_key) const {
     const auto it = attr_map.find(attr_key);
@@ -180,8 +181,8 @@ public:
   Bundle() : immutable(false), correct(true) {}
   explicit Bundle(std::string_view /*name — discarded*/) : Bundle() {}
 
-  bool             is_correct() const { return correct; }
-  void             set_issue() const { correct = false; }
+  bool is_correct() const { return correct; }
+  void set_issue() const { correct = false; }
 
   // Binding-level typed facts (1b/D).
   upass::Mode      get_mode() const { return mode_; }
@@ -210,10 +211,10 @@ public:
   // Dlop-operand factory for the runner's operand resolution (one wrapper
   // per const operand per node). One allocation, zero map nodes (inline root).
   static std::shared_ptr<Bundle> make_const(const Dlop& v, upass::Kind k) {
-    auto b = std::make_shared<Bundle>("");
-    b->root_           = Entry(false, v);
-    b->root_.kind      = k;
-    b->has_root_       = true;
+    auto b        = std::make_shared<Bundle>("");
+    b->root_      = Entry(false, v);
+    b->root_.kind = k;
+    b->has_root_  = true;
     return b;
   }
 
@@ -224,12 +225,12 @@ public:
   bool has_trivial(std::string_view key) const;
 
   const Entry& get_entry(std::string_view key) const;
-  const Dlop& get_trivial(std::string_view key) const { return get_entry(key).trivial; }
+  const Dlop&  get_trivial(std::string_view key) const { return get_entry(key).trivial; }
   // The LONE non-attr entry's value regardless of key depth (a 1-element
   // tuple-of-tuple flattens); invalid when the bundle isn't single-entry.
   // (The explicit spelling — a no-arg get_trivial() was ambiguous with the
   // "0"-keyed form, which means FIELD ZERO on a multi-shaped bundle.)
-  const Dlop& lone_trivial() const;
+  const Dlop&  lone_trivial() const;
 
   bool                    has_bundle(std::string_view key) const;
   std::shared_ptr<Bundle> get_bundle(std::string_view key) const;
@@ -253,8 +254,8 @@ public:
     // invalidates it (bitwidth re-stamps the fresh derivation right after;
     // a binding must never hold a range that does not contain its value).
     // Declared facts (kind / decl envelope / comptime / mode) persist.
-    e.bw_max = invalid_lconst;
-    e.bw_min = invalid_lconst;
+    e.bw_max    = invalid_lconst;
+    e.bw_min    = invalid_lconst;
     return e;
   }
 
@@ -268,7 +269,7 @@ public:
     return set("0", trivial);
   }
 
-  // Direct attribute access — routes to the dedicated attr_map (1b/B).
+  // Direct attribute access — routes to the dedicated attr_map.
   // Bare attribute names throughout (no "__"); a whole-bundle attr keys on
   // the name alone, a per-field attr on "field.attr_name". "debug" is
   // normalized to its canonical sticky spelling "_debug" on both reads and
@@ -363,6 +364,6 @@ public:
 
   static bool is_single_level(std::string_view key) { return bundle_key::is_single_level(key); }
 
-  // is_root_attribute / is_attribute / get_attribute are GONE (1b/B):
+  // is_root_attribute / is_attribute / get_attribute are GONE:
   // attribute-ness is membership in attr_map, not a "__" spelling.
 };

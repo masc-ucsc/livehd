@@ -133,7 +133,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   // Phase 5 — bookkeeping for any assignment-shaped op. The `nil` rvalue
   // is an explicit invalidation per spec and is not counted as a binding.
   // Detect by checking the single rhs ref or const text.
-  bool                 rhs_is_nil = false;
+  bool                rhs_is_nil = false;
   std::optional<Dlop> rhs_value;  // direct LNAST-source value, when scalar
 
   // rhs_value is only consumed by the wrap/sat narrowing block below, which
@@ -252,7 +252,7 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     // Shape/attr/alias state rides the shared binding slot; the
     // only alias bookkeeping left is the range-source chain (h.[size] on a
     // var assigned from a `range` tmp) and the handler notification.
-    const bool rhs_has_state = range_bounds.contains(rhs_s) || (!tmp_fold.empty() && tmp_fold.contains(rhs_s));
+    const bool        rhs_has_state = range_bounds.contains(rhs_s) || (!tmp_fold.empty() && tmp_fold.contains(rhs_s));
     if (!rhs_has_state) {
       reg.for_each_handler([&](upass::attributes::Attribute_handler& h) { h.on_alias_assign(*this, view.lhs, rhs); });
       return;
@@ -302,13 +302,13 @@ upass::Vote uPass_attributes::process_store(std::string_view dst_name, Bundle& d
   return upass::Vote::keep;
 }
 
-#define EXPR_PROCESS(NAME)                                                                              \
+#define EXPR_PROCESS(NAME)                                                                                    \
   upass::Vote uPass_attributes::process_##NAME(std::string_view dst_name, Bundle& dst, upass::Src_span src) { \
-    (void)dst_name;                                                                                     \
-    (void)dst;                                                                                          \
-    (void)src;                                                                                          \
-    on_assign_like(/*is_assign_node=*/false);                                                           \
-    return upass::Vote::keep;                                                                           \
+    (void)dst_name;                                                                                           \
+    (void)dst;                                                                                                \
+    (void)src;                                                                                                \
+    on_assign_like(/*is_assign_node=*/false);                                                                 \
+    return upass::Vote::keep;                                                                                 \
   }
 
 EXPR_PROCESS(plus)
@@ -372,14 +372,14 @@ upass::Vote uPass_attributes::process_is(std::string_view dst_name, Bundle& dst,
   }
 
   std::optional<Dlop> tn    = lookup_attr_value(lhs, "typename");
-  bool                 match = false;
+  bool                match = false;
   if (tn) {
     auto        repr = tn->to_pyrope();
     std::string stored
         = (repr.size() >= 2 && repr.front() == '\'' && repr.back() == '\'') ? std::string{repr.substr(1, repr.size() - 2)} : repr;
     match = (stored == rhs_text);
   }
-  Dlop folded        = match ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
+  Dlop folded         = match ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
   auto [it, inserted] = tmp_fold.emplace(std::string{dvar}, folded);
   if (!inserted && !it->second.same_repr(folded)) {
     it->second = folded;
@@ -415,11 +415,11 @@ void uPass_attributes::set_binding_attr(std::string_view target, std::string_vie
     livehd::diag::sink().emit(livehd::diag::Diagnostic{
         .severity = livehd::diag::Severity::error,
         .code     = "attr-conflict",
-        .category = "attributes",
+        .category = "type",
         .pass     = "upass.attributes",
-        .message  = std::format("attribute `{}` of `{}` is already set to a different value (attributes are add-only)",
-                                attr, target),
-        .hint     = "attributes bind once; remove the second assignment or use a different attribute",
+        .message
+        = std::format("attribute `{}` of `{}` is already set to a different value (attributes are add-only)", attr, target),
+        .hint = "attributes bind once; remove the second assignment or use a different attribute",
     });
     return;
   }
@@ -496,7 +496,7 @@ void uPass_attributes::process_attr_set() {
             case Decl_kind::reg_kind  : m = upass::Mode::reg_kind; break;
             case Decl_kind::await_kind: m = upass::Mode::await_kind; break;
             case Decl_kind::type_kind : m = upass::Mode::type_kind; break;
-            default: break;
+            default                   : break;
           }
           const auto root  = Bundle::get_first_level(target);
           const auto fpath = Bundle::get_all_but_first_level(target);
@@ -524,8 +524,8 @@ void uPass_attributes::process_attr_set() {
           const auto root  = Bundle::get_first_level(target);
           const auto fpath = Bundle::get_all_but_first_level(target);
           if (auto wb = runner_st->get_bundle_for_write(root); wb) {
-            const auto           key   = fpath.empty() ? std::string_view{"0"} : fpath;
-            const bool           multi = fpath.empty() && (wb->has_named_top() || wb->unnamed_top_count() > 1);
+            const auto key   = fpath.empty() ? std::string_view{"0"} : fpath;
+            const bool multi = fpath.empty() && (wb->has_named_top() || wb->unnamed_top_count() > 1);
             if (!multi && wb->has_trivial(key)) {
               Bundle::Entry fe = wb->get_entry(key);
               fe.immutable     = false;
@@ -537,7 +537,8 @@ void uPass_attributes::process_attr_set() {
       }
       // Still record the explicit value (true/false) so a `.[comptime]`
       // read returns the explicit answer.
-      set_binding_attr(target, attr_name,
+      set_binding_attr(target,
+                       attr_name,
                        (value_text == "false" || value_text == "0") ? *Dlop::create_integer(0) : *Dlop::create_integer(1));
     } else if (attr_name == "bits" && !value_is_ref) {
       // `[bits=N]` — explicit width, no signedness. Recorded as an attr
@@ -572,9 +573,8 @@ void uPass_attributes::process_attr_set() {
         // sticky buckets propagate too.
         if (attr_name == "typename" && value_text.size() >= 2 && value_text.front() == '\'' && value_text.back() == '\'') {
           std::string src{value_text.substr(1, value_text.size() - 2)};
-          const auto src_b = (runner_st != nullptr && !src.empty()) ? runner_st->get_bundle(src) : nullptr;
-          if (!src.empty() && src != target
-              && ((src_b && !src_b->get_attrs().empty()) || lookup_type_info(src) != nullptr)) {
+          const auto  src_b = (runner_st != nullptr && !src.empty()) ? runner_st->get_bundle(src) : nullptr;
+          if (!src.empty() && src != target && ((src_b && !src_b->get_attrs().empty()) || lookup_type_info(src) != nullptr)) {
             // Attr values ride the binding: copy the type var's attrs onto
             // the target's binding (fill-if-absent), then notify handlers.
             if (src_b) {

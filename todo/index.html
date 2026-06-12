@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="todo.css">
 </head>
 <body>
-<nav><span class="brand">LiveHD TODO</span><a href="#pyrope">Pyrope</a><a href="#verilog">Verilog</a><a href="#livehd">LiveHD</a></nav>
+<nav><span class="brand">LiveHD TODO</span><a href="#pre-todo">Pre TODO</a><a href="#pyrope">Pyrope</a><a href="#verilog">Verilog</a><a href="#livehd">LiveHD</a></nav>
 <main>
 <h1 id="todo">LiveHD TODO</h1>
 <p>Single hub for all pending work. One bullet per open task below, grouped by
@@ -17,17 +17,30 @@ then by Group <em>N</em>. Each badge links to that task's own page under
 <p><strong>Dependencies.</strong> Items in the same Group can be done in parallel;
 all letters in Group <em>N</em> must complete before Group <em>N+1</em> starts.
 Group letters are shared across the three topics, so cross-topic dependencies
-stay visible (e.g. Verilog <a class="xref" href="verilog/2s.html">2s</a> depends on
-Verilog <a class="xref" href="verilog/1s.html">1s</a>).</p>
+stay visible.</p>
 <p><strong>Lifecycle.</strong> A task page is deleted the moment its work lands —
 this hub is strictly current work. Conceptual "why/what" lives in the
 <a href="https://masc-ucsc.github.io/docs/livehd/">LiveHD &amp; Pyrope docs</a>;
 agent build/process rules live in <code>AGENTS.md</code>.</p>
 
+<h3 id="pre-todo">Pre TODO</h3>
+<p>Ideas to either turn into full todo pages or drop, ordered by date added
+(<code>dd/mm/yyyy</code>).</p>
+<ul>
+<li><strong>11/06/2026, COLOR:</strong> Handle different coloring algorithms with hierarchy (now flat), have a "continuous" optional pass to allow extraction.</li>
+<li><strong>12/06/2026, PARTITION:</strong> Given an lgraph hierarchy and color hierarchical nodes, extract new lgraph using that partition. Depends on COLOR.</li>
+<li><strong>12/06/2026, PRPCOLOR:</strong> Do a hierarchical coloring that generates Pyrope-like (comb/pipe) partitions, and timechecks annotations (mod). Exclude <code>comb</code>/<code>pipe</code> modules that already resemble Pyrope from traversal (no unnecessary re-partitioning).</li>
+<li><strong>12/06/2026, LEC:</strong> Create pass/lec todo by iterating over the pass/lec/lec.md BUT create the PARTITION and MATCH first.</li>
+<li><strong>12/06/2026, ABC:</strong> Bring back ABC, using color synth and options per partition (<code>reg foo::[abc="opt1=2;opt2=xx"] ...</code>) or global options (<code>lhd synth --set abc.opt1=2 --set abc.opt2=xx ...</code>).</li>
+</ul>
+
 <h3 id="pyrope">Pyrope</h3>
 <ul>
 <li><em>Group 2:</em><ul>
 <li><a class="xref" href="pyrope/2p.html">2p</a> Source-derived SSA / tmp names (<code>foo_l42_a</code>, drop <code>___N</code>).</li>
+</ul></li>
+<li><em>Group 3:</em><ul>
+<li><a class="xref" href="pyrope/3p.html">3p</a> Pyrope standard hardware library (<code>prplib.ware</code>) for common pipelined and non-pipelined designs: adders, multipliers, shifters, GCD, and debug/experimental blocks; includes deciding where <code>prplib</code> resides and how imports resolve.</li>
 </ul></li>
 <li><em>Group 4:</em><ul>
 <li><a class="xref" href="pyrope/4a.html">4a</a> Test functionality on top of slop (<code>test::[…]</code> blocks, runtime harness).</li>
@@ -37,9 +50,6 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 
 <h3 id="verilog">Verilog</h3>
 <ul>
-<li><em>Group 1:</em><ul>
-<li><a class="xref" href="verilog/1s.html">1s</a> Direct <code>--reader slang</code> foundation: upgrade LiveHD's direct SV→LNAST reader to slang <code>v11.0</code>, route diagnostics through LiveHD, attach HHDS <code>Source_locator</code> IDs, preserve current passing tests, and keep build-system parallel <code>lhd elaborate --reader slang</code> usage viable.</li>
-</ul></li>
 <li><em>Group 2:</em><ul>
 <li><a class="xref" href="verilog/2s.html">2s</a> Refactor and expand direct <code>--reader slang</code>: split the importer into driver/diagnostics, structure, expressions, lvalues, statements, and type lowering; support more synthesizable SystemVerilog through LNAST; and grow a tracked Verilog test ladder. <code>yosys-verilog</code> and <code>yosys-slang</code> remain supported production readers.</li>
 </ul></li>
@@ -48,6 +58,7 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 <h3 id="livehd">LiveHD</h3>
 <ul>
 <li><em>Group 1:</em><ul>
+<li><a class="xref" href="livehd/1c.html">1c</a> Function coverage for never-called LiveHD C++ functions: add focused Pyrope, Verilog, or <code>lhd/tests</code> checks before deprecating code.</li>
 <li><a class="xref" href="livehd/1d.html">1d</a> Demand-driven (lazy) emit + dead-code elimination for upass — remaining sea-of-nodes subtask.</li>
 </ul></li>
 <li><em>Group 2:</em><ul>

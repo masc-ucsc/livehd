@@ -3,6 +3,7 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:copt_default.bzl", "COPTS")
+load("//inou/slang:slang_ladder.bzl", "SLANG_LADDER")
 
 cc_library(
     name = "inou_slang",
@@ -49,23 +50,24 @@ sh_test(
     ],
 )
 
-# Direct --reader slang (SV -> LNAST) on slang v11.0 (todo/ 1s). The
-# slang_compile-* sh_tests below are the tracked pass set; each drives
-# `lhd compile --reader slang` + `lhd synth ln:` round-trip. The broader
-# inou/yosys/tests/*.v corpus is exercised (best-effort) by slang_compile.sh's
-# default mode and by the tests/verilog sky130 cases — wider SystemVerilog
-# coverage and a tracked test ladder are 2s, not 1s.
+# The --reader slang coverage ladder (todo/ 2s subtask E): one slang_compile-*
+# target per inou/yosys/tests/*.v source, pinned to its strongest passing tier
+# in slang_ladder.bzl (lec > verilog > lnast > error — see
+# inou/slang/README.md). tests/slang_compile.sh enforces the expectation both
+# ways, so a promotion or regression is an explicit ladder edit.
 #
-# Concurrency: inou.slang now runs one isolated slang Driver/Compilation per
-# file, sequentially (the old in-process thread_pool fan-out was never sound).
-# Parallelism comes from running independent `lhd elaborate --reader slang`
-# invocations concurrently under Bazel — every slang_compile-* target above is
-# its own action, so `bazel test //inou/slang:all` is the parallel smoke test.
+# Concurrency: inou.slang runs one isolated slang Driver/Compilation per file,
+# sequentially. Parallelism comes from running independent bazel test actions
+# concurrently — `bazel test //inou/slang:all` is the parallel sweep.
 
 [sh_test(
     name = "slang_compile-%s" % t,
+    size = "enormous" if t.startswith("long_") or t.startswith("nocheck_") else "large",
     srcs = ["tests/slang_compile.sh"],
-    args = ["$(location //inou/yosys:tests/%s.v)" % t],
+    args = [
+        SLANG_LADDER[t],
+        "$(location //inou/yosys:tests/%s.v)" % t,
+    ],
     data = [
         "//inou/yosys:tests/%s.v" % t,
         "//lhd",
@@ -73,21 +75,18 @@ sh_test(
     tags = [
         "slang_compile",
     ],
-) for t in [
-    "add",
-    "add1",
-    "add2",
-    "assigns",
-    "compare2",
-    "consts",
-    "issue_047",
-    "mt_basic_test",
-    "offset_input",
-    "satlarge",
-    "satsmall",
-    "simple_weird2",
-    "trivial",
-    "trivial_and",
-    "trivial_join",
-    "trivial_offset",
-]]
+    deps = [
+        "//inou/yosys:scripts",  # lgcheck + yosys2 for the lec tier
+    ],
+) for t in SLANG_LADDER.keys()]
+
+# Legacy no-argument mode: the sky130 cell-instance set (unknown-module policy).
+sh_test(
+    name = "slang_compile_sky130",
+    size = "large",
+    srcs = ["tests/slang_compile.sh"],
+    data = glob(["tests/verilog/*"]) + ["//lhd"],
+    tags = [
+        "slang_compile",
+    ],
+)

@@ -48,7 +48,7 @@ struct Operand {
   // 0sb/0ub BIT-PATTERN literal: carries bits, not a value — storing a
   // signed-negative pattern into an unsigned envelope is the documented
   // force/reinterpret, never an overflow (bitwidth skips the fit range).
-  bool pattern{false};
+  bool                          pattern{false};
 };
 using Src_span = std::span<const Operand>;
 
@@ -120,7 +120,7 @@ public:
   // path such as `t1.a`. The inliner's typed-self `does`-check uses this to
   // compare the declared self type's fields against the receiver's.
   struct Field_decl_type {
-    Io_kind              kind{Io_kind::none};
+    Io_kind             kind{Io_kind::none};
     std::optional<Dlop> range_max;
     std::optional<Dlop> range_min;
   };
@@ -167,12 +167,12 @@ public:
   // present only for explicitly-typed vars). `annotated` is true when an
   // explicit `:type` pinned a finite bound. An un-annotated integer var thus
   // reads kind=integer with annotated=false → the fold treats it as an
-  // unbounded envelope (superset of any int), matching the 1g ruling.
+  // unbounded envelope (superset of any int).
   struct Scalar_type_query {
-    Io_kind              kind{Io_kind::none};
+    Io_kind             kind{Io_kind::none};
     std::optional<Dlop> range_max;
     std::optional<Dlop> range_min;
-    bool                 annotated{false};
+    bool                annotated{false};
   };
   using Type_query_fn = std::function<Scalar_type_query(std::string_view)>;
 
@@ -307,10 +307,8 @@ public:
   // node — a hook whose payload includes subtrees (named-field stores,
   // does-operands) may walk it; dispatch_push saves/restores around each
   // call. Default: no-op, keep.
-#define PROCESS_NODE_PUSH(NAME)                                                                   \
-  virtual Vote process_##NAME(std::string_view /*dst_name*/, Bundle& /*dst*/, Src_span /*src*/) { \
-    return Vote::keep;                                                                            \
-  }
+#define PROCESS_NODE_PUSH(NAME) \
+  virtual Vote process_##NAME(std::string_view /*dst_name*/, Bundle& /*dst*/, Src_span /*src*/) { return Vote::keep; }
 
   PROCESS_NODE_PUSH(bit_and)
   PROCESS_NODE_PUSH(bit_or)

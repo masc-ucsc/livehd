@@ -19,7 +19,7 @@
 #include "node_util.hpp"  // //graph:graph — livehd::graph_util::* helpers
 #include "perf_tracing.hpp"
 #include "str_tools.hpp"
-// pass.hpp pulls in Pass::error/info reporting.
+// pass.hpp pulls in the diag reporting surface (livehd::diag) and Pass::info.
 #include "pass.hpp"
 // hlop's Dlop is the Dlop representation; we deserialize node-level
 // const-value strings via Dlop::unserialize.
@@ -153,6 +153,12 @@ std::string Cgen_verilog::get_scaped_name(std::string_view name) {
   if (name.empty()) {
     return res_name;
   }
+  // LNAST backtick-quoted names (`a[0]`) carry the ORIGINAL verilog escaped
+  // identifier inside the quotes; strip them before re-escaping.
+  if (name.size() >= 2 && name.front() == '`' && name.back() == '`') {
+    name.remove_prefix(1);
+    name.remove_suffix(1);
+  }
   if (reserved_keyword.contains(name)) {
     return absl::StrCat("\\", name, " ");
   } else {
@@ -215,7 +221,7 @@ std::string Cgen_verilog::add_expression(std::string_view txt_seq, std::string_v
   return absl::StrCat(txt_seq, " ", txt_op, " ", expr);
 }
 
-// [[1f]]-G: record one source-map segment for the statement about to be
+// Record one source-map segment for the statement about to be
 // emitted for `node`. The SourceId (stamped by tolg/yosys ingress) resolves
 // through the Source_locator at write time; a combined id displays as its
 // primary anchor (lossy by design — the full id rides x_hhds).
@@ -311,39 +317,49 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
 
     if (pin_name == "bits") {
       if (!is_const_pin(e.driver)) {
-        Pass::error("memory {} should have a constant for bits not {}", debug_name(node), debug_name(e.driver.get_master_node()));
+        livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+            .msg("memory {} should have a constant for bits not {}", debug_name(node), debug_name(e.driver.get_master_node()))
+            .fatal();
         return;
       }
       mem_bits = hydrate_const(e.driver).to_just_i64();
     } else if (pin_name == "size") {
       if (!is_const_pin(e.driver)) {
-        Pass::error("memory {} should have a constant for size not {}", debug_name(node), debug_name(e.driver.get_master_node()));
+        livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+            .msg("memory {} should have a constant for size not {}", debug_name(node), debug_name(e.driver.get_master_node()))
+            .fatal();
         return;
       }
       mem_size = hydrate_const(e.driver).to_just_i64();
     } else if (pin_name == "type") {
       if (!is_const_pin(e.driver)) {
-        Pass::error("memory {} should have a constant type not {}", debug_name(node), debug_name(e.driver.get_master_node()));
+        livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+            .msg("memory {} should have a constant type not {}", debug_name(node), debug_name(e.driver.get_master_node()))
+            .fatal();
         return;
       }
       mem_type = hydrate_const(e.driver).to_just_i64();
     } else if (pin_name == "wensize") {
       if (!is_const_pin(e.driver)) {
-        Pass::error("memory {} should have a constant for wensize not {}",
-                    debug_name(node),
-                    debug_name(e.driver.get_master_node()));
+        livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+            .msg("memory {} should have a constant for wensize not {}", debug_name(node), debug_name(e.driver.get_master_node()))
+            .fatal();
         return;
       }
       mem_wensize = hydrate_const(e.driver).to_just_i64();
     } else if (pin_name == "fwd") {
       if (!is_const_pin(e.driver)) {
-        Pass::error("memory {} should have a constant for fwd not {}", debug_name(node), debug_name(e.driver.get_master_node()));
+        livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+            .msg("memory {} should have a constant for fwd not {}", debug_name(node), debug_name(e.driver.get_master_node()))
+            .fatal();
         return;
       }
       mem_fwd = hydrate_const(e.driver).to_just_i64();
     } else if (pin_name == "init") {
       if (!is_const_pin(e.driver)) {
-        Pass::error("memory {} should have a constant for init not {}", debug_name(node), debug_name(e.driver.get_master_node()));
+        livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+            .msg("memory {} should have a constant for init not {}", debug_name(node), debug_name(e.driver.get_master_node()))
+            .fatal();
         return;
       }
       mem_init_dpin = e.driver;
@@ -357,7 +373,9 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       port_vector[port_id].din = e.driver;
     } else if (str_tools::ends_with(pin_name, "rdport")) {
       if (!is_const_pin(e.driver)) {
-        Pass::error("memory {} should have a constant rdport not {}", debug_name(node), debug_name(e.driver.get_master_node()));
+        livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+            .msg("memory {} should have a constant rdport not {}", debug_name(node), debug_name(e.driver.get_master_node()))
+            .fatal();
         return;
       }
       auto v                      = hydrate_const(e.driver);
@@ -386,7 +404,9 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     }
 
     if (base_clock_dpin.is_invalid()) {
-      Pass::error("memory {} should have a clock pin", debug_name(node));
+      livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+          .msg("memory {} should have a clock pin", debug_name(node))
+          .fatal();
       return;
     }
 
@@ -399,15 +419,17 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     // ware/rtl carries a fixed wrapper family; anything beyond it (e.g. a
     // big reset-restored reg array minting one restore port per entry) needs
     // a new cgen_memory_<R>rd_<W>wr.v variant.
-    const bool have_wrapper = single_clock ? ((eff_rd >= 1 && eff_rd <= 4 && eff_wr >= 1 && eff_wr <= 2)
-                                              || (eff_rd == 1 && eff_wr == 3))
-                                           : (eff_rd == 1 && eff_wr == 1);
+    const bool have_wrapper = single_clock
+                                  ? ((eff_rd >= 1 && eff_rd <= 4 && eff_wr >= 1 && eff_wr <= 2) || (eff_rd == 1 && eff_wr == 3))
+                                  : (eff_rd == 1 && eff_wr == 1);
     if (!have_wrapper) {
-      Pass::error("memory {} needs a {}rd_{}wr {} wrapper that ware/rtl does not carry",
-                  debug_name(node),
-                  eff_rd,
-                  eff_wr,
-                  single_clock ? "single-clock" : "multiclock");
+      livehd::diag::err("inou.cgen", "mem-wrapper-missing", "unsupported")
+          .msg("memory {} needs a {}rd_{}wr {} wrapper that ware/rtl does not carry",
+               debug_name(node),
+               eff_rd,
+               eff_wr,
+               single_clock ? "single-clock" : "multiclock")
+          .fatal();
       return;
     }
 
@@ -432,7 +454,9 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       // Power-on contents ride the wrapper's INIT parameter (packed, entry 0
       // in the low BITS); only the single-clock wrappers carry it.
       if (!single_clock) {
-        Pass::error("memory {} init contents are not supported on multiclock memories yet", debug_name(node));
+        livehd::diag::err("inou.cgen", "mem-multiclock-init", "unsupported")
+            .msg("memory {} init contents are not supported on multiclock memories yet", debug_name(node))
+            .fatal();
         return;
       }
       parameters = absl::StrCat(parameters, " ,.INIT_EN(1) ,.INIT(", hydrate_const(mem_init_dpin).to_verilog(), ")");
@@ -457,7 +481,9 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       }
       if (p.rdport) {
         if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid()) {
-          Pass::error("memory {} read port is not correctly configured\n", debug_name(node));
+          livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+              .msg("memory {} read port is not correctly configured", debug_name(node))
+              .fatal();
         }
         fout->append(absl::StrCat(first_entry ? "  .rd_addr_" : "  ,.rd_addr_", n_rd_pos, "(", get_wire_or_const(p.addr), ")\n"));
         first_entry = false;
@@ -476,7 +502,9 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         ++n_rd_pos;
       } else {
         if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid() || p.din.is_invalid()) {
-          Pass::error("memory {} write port is not correctly configured\n", debug_name(node));
+          livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+              .msg("memory {} write port is not correctly configured", debug_name(node))
+              .fatal();
         }
         fout->append(absl::StrCat(first_entry ? "  .wr_addr_" : "  ,.wr_addr_",
                                   std::to_string(n_wr_pos),
@@ -544,7 +572,9 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         continue;
       }
       if (p.addr.is_invalid() || p.din.is_invalid()) {
-        Pass::error("memory {} write port is not correctly configured\n", debug_name(node));
+        livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+            .msg("memory {} write port is not correctly configured", debug_name(node))
+            .fatal();
       }
       auto din_name   = get_wire_or_const(p.din);
       auto write_stmt = absl::StrCat(aname, "[", get_wire_or_const(p.addr), "] = ", din_name, ";\n");
@@ -563,7 +593,9 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         continue;
       }
       if (p.addr.is_invalid()) {
-        Pass::error("array {} read port is not correctly configured\n", debug_name(node));
+        livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+            .msg("array {} read port is not correctly configured", debug_name(node))
+            .fatal();
       }
       // Same dout convention as type 0/1: read port N drives pid (n_wr_ports + N).
       auto dout_dpin = node.create_driver_pin(static_cast<hhds::Port_id>(n_wr_ports + n_rd_pos));  // find-or-create
@@ -738,7 +770,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
         final_expr = absl::StrCat("{", sel, "}");
       } else {
         std::string a_replaced;
-        int32_t      value_bits_to_use = static_cast<int32_t>(range_end - range_begin);
+        int32_t     value_bits_to_use = static_cast<int32_t>(range_end - range_begin);
         if (value_bits_to_use >= bits_of(value_dpin)) {
           a_replaced = value;
         } else if (value_bits_to_use == 1) {
@@ -792,7 +824,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
       }
     } else {
       auto [range_begin, range_end] = mask_v.get_mask_range();
-      int32_t a_bits_to_use          = static_cast<int32_t>(range_end - range_begin);
+      int32_t a_bits_to_use         = static_cast<int32_t>(range_end - range_begin);
       if (a_bits_to_use > bits_of(dpin)) {
         range_end = bits_of(dpin) + range_begin;
       }
@@ -970,7 +1002,7 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, hhds::Gra
     // Prefer the concrete HHDS pin width when present. Some imported GraphIO
     // declarations can retain stale placeholder widths, while the graph pin
     // has already been fixed by bitwidth propagation.
-    hhds::Pin_class pin = e.is_input ? graph->get_input_pin(e.name) : graph->get_output_pin(e.name);
+    hhds::Pin_class pin  = e.is_input ? graph->get_input_pin(e.name) : graph->get_output_pin(e.name);
     const auto      bits = pin.is_invalid() ? e.bits : livehd::graph_util::bits_of(pin, *gio, e.name);
 
     if (bits > 1) {
@@ -1070,7 +1102,7 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds:
     }
     if (bits_of(node.get_driver_pin(0)) == 0) {
       if (op != Ntype_op::Nconst && op != Ntype_op::AttrSet && op != Ntype_op::Mux && op != Ntype_op::Hotmux) {
-        // missing bits; Pass::error in original — skip silent.
+        // missing bits; was a hard error in the original — skip silent.
       }
     }
     if (op == Ntype_op::Mux) {
@@ -1103,7 +1135,7 @@ void Cgen_verilog::create_outputs(std::shared_ptr<File_output> fout, hhds::Graph
     auto name = get_scaped_name(d.name);
     auto expr = get_expression(out_dpin);
     if (name != expr) {
-      // [[1f]]-G: an inlined expression's statement line lands here — anchor
+      // An inlined expression's statement line lands here — anchor
       // the output assignment at its driver cell's source.
       note_src(fout, out_dpin.get_master_node());
       fout->append("  ", name, " = ", expr, ";\n");
@@ -1190,7 +1222,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
       }
     }
 
-    // 2d-reg — write-enable: a conditionally-written state register holds
+    // Write-enable: a conditionally-written state register holds
     // its value when the OR-of-write-conditions is false (no din=q feedback
     // mux is ever inserted — the enable IS the hold).
     std::string enable;
@@ -1201,7 +1233,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
       }
     }
 
-    // [[1f]]-G: anchor the whole always block at the reg's source site.
+    // Anchor the whole always block at the reg's source site.
     note_src(fout, node);
 
     if (depth <= 1) {
@@ -1210,8 +1242,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
       fout->append("always @(", edge, " ", clock, reset_async, " ) begin\n");
 
       const std::string update = enable.empty() ? absl::StrCat(name, " <= ", name_next, ";\n")
-                                                : absl::StrCat("if (", enable, ") begin\n", name, " <= ", name_next,
-                                                               ";\nend\n");
+                                                : absl::StrCat("if (", enable, ") begin\n", name, " <= ", name_next, ";\nend\n");
       if (reset.empty()) {
         fout->append(update);
       } else {
@@ -1293,7 +1324,7 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, const hhds:
     return;
   }
 
-  // [[1f]]-G: anchor the wire declaration line at its defining cell.
+  // Anchor the wire declaration line at its defining cell.
   note_src(fout, dpin.get_master_node());
 
   int bits = bits_of(dpin);
@@ -1357,9 +1388,9 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
             }
           }
           for (auto& e2 : node.out_edges()) {
-            auto dout  = node.create_driver_pin(e2.driver.get_port_id());
-            auto iname = get_scaped_name(default_instance_name(node));
-            auto name2 = absl::StrCat(iname, "_dout_", e2.driver.get_port_id());
+            auto dout            = node.create_driver_pin(e2.driver.get_port_id());
+            auto iname           = get_scaped_name(default_instance_name(node));
+            auto name2           = absl::StrCat(iname, "_dout_", e2.driver.get_port_id());
             auto [it2, inserted] = pin2var.insert({dout.get_class_index(), name2});
             if (inserted) {
               int bits2 = bits_of(dout);

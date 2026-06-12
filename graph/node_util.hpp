@@ -18,9 +18,9 @@
 
 #include "attrs.hpp"
 #include "cell.hpp"
-#include "hlop/dlop.hpp"
 #include "hhds/attrs/name.hpp"
 #include "hhds/graph.hpp"
+#include "hlop/dlop.hpp"
 
 namespace livehd::graph_util {
 
@@ -85,8 +85,6 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
   }
   return static_cast<Ntype_op>(static_cast<uint16_t>(node.get_type()));
 }
-
-[[nodiscard]] inline bool is_type_of(const hhds::Node_class& node, Ntype_op op) { return type_op_of(node) == op; }
 
 [[nodiscard]] inline bool is_type_flop(const hhds::Node_class& node) {
   auto op = type_op_of(node);
@@ -406,12 +404,6 @@ inline void set_type_const_serialized(const hhds::Node_class& node, std::string_
   return node;
 }
 
-// Create a new node of `op` in the same graph as `origin`. Mirrors LiveHD's
-// `Node::create(op)` (the new node belongs to the same Lgraph the origin is on).
-[[nodiscard]] inline hhds::Node_class create_node_on(const hhds::Node_class& origin, Ntype_op op) {
-  return create_typed_node(*origin.get_graph(), op);
-}
-
 // Per-pin offset (used by Get_mask / Set_mask / Sext positional ops).
 inline void set_pin_offset(const hhds::Pin_class& pin, int32_t off) {
   if (pin.is_invalid()) {
@@ -425,7 +417,7 @@ inline void set_pin_offset(const hhds::Pin_class& pin, int32_t off) {
 }
 
 // Per-node source provenance is hhds::attrs::srcid, minted through the
-// graph's Source_locator ([[1f]]); the old set_source/set_loc1 string+line
+// graph's Source_locator; the old set_source/set_loc1 string+line
 // helpers are gone.
 
 // All drivers feeding a named sink port. Used by passes (memory, bit_or)

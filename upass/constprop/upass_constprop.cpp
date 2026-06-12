@@ -53,7 +53,7 @@ static std::optional<Dlop> stringify_concat_trivials(const std::vector<Dlop>& va
     return *Dlop::from_string("");
   }
   Dlop acc;
-  bool  first = true;
+  bool first = true;
   for (const auto& v : vals) {
     if (v.is_invalid() || v.has_unknowns()) {
       return std::nullopt;
@@ -100,7 +100,7 @@ static std::string bits_to_grouped(std::string_view bits, int bpd, bool upper) {
 // raise a compile error rather than silently mis-rendering.
 // Enum identity tag of a bundle, or nullptr. The parse-time `__enumentry`
 // LNAST tag (lower_enum_def) is stored as the bare "enumentry" attr leaf
-// (1b/B attrs map); a scalar carrier round-trip through Bundle::set may
+// (attrs map); a scalar carrier round-trip through Bundle::set may
 // intern it under positional layers ("0.enumentry") — accept both.
 static const Dlop* enum_identity_of(const std::shared_ptr<Bundle const>& b) {
   if (!b) {
@@ -250,7 +250,7 @@ void uPass_constprop::process_assign() {
 
   auto lhs_text = current_text();
 
-  // 2d-reg — a store to a reg-declared name is a next-state (din) write:
+  // A store to a reg-declared name is a next-state (din) write:
   // never bind it in the symbol table. Reads of the reg see the flop's q
   // (Verilog `<=` semantics), not the value written this cycle, so folding
   // the written value into later reads — or dropping the store because the
@@ -273,7 +273,7 @@ void uPass_constprop::process_assign() {
     if (auto it = st().tuple_slot_ref.find(std::string(current_text())); it != st().tuple_slot_ref.end()) {
       // Copy out first: operator[] can rehash the flat_hash_map and move the
       // element `it` points at (heap-use-after-free otherwise).
-      auto slots                                = it->second;
+      auto slots                                 = it->second;
       st().tuple_slot_ref[std::string(lhs_text)] = std::move(slots);
     }
     auto rhs_bundle = current_bundle();
@@ -407,6 +407,13 @@ void uPass_constprop::process_assign() {
       } else {
         st().set(lhs_text, rhs_bundle);
       }
+      // Poison propagation: aliasing a var that leave_scope pinned to nil
+      // (modified under an uncertain arm) makes the LHS equally
+      // runtime-divergent. set() above cleared any stale mark on the LHS;
+      // re-mark it so reads of the LHS don't fold the poison nil either.
+      if (st().is_uncertain_nil(current_text())) {
+        st().mark_uncertain_nil(lhs_text);
+      }
     } else if (st().has_trivial(current_text())) {
       // Scalar RHS (stored as trivial, not a bundle). Propagate the value so
       // subsequent uses of `lhs_text` resolve.
@@ -416,7 +423,7 @@ void uPass_constprop::process_assign() {
       }
       store_trivial(lhs_text, value);
     } else if (st().has_trivial(lhs_text) && st().in_uncertain_scope()) {
-      // 2d-reg — a RUNTIME-rhs write inside an uncertain if-arm: the LHS can
+      // A RUNTIME-rhs write inside an uncertain if-arm: the LHS can
       // no longer be claimed comptime-known. Setting nil makes readers see a
       // known-nil value (== short-circuits to nil; cassert nil discharges as
       // pass). Comptime writes get this via record_uncertain_modification, but
@@ -477,7 +484,8 @@ void uPass_constprop::process_assign() {
     // No width/to_i. `is_negative()` is false for an unknown sign bit (`0sb?`),
     // so that case keeps its natural width (see valid_simple); a known-1 sign
     // bit (incl. interior-unknown patterns like `0sb1?01_?000`) is reinterpreted.
-    if (const auto umax = decl_unsigned_max_of(lhs_text); !umax.is_invalid() && st().get_trivial(lhs_text).is_invalid() && v.is_negative()) {
+    if (const auto umax = decl_unsigned_max_of(lhs_text);
+        !umax.is_invalid() && st().get_trivial(lhs_text).is_invalid() && v.is_negative()) {
       v = *v.and_op(umax);
     }
     if (st().get_trivial(lhs_text).is_invalid()) {
@@ -660,8 +668,8 @@ upass::Vote uPass_constprop::process_shl(std::string_view dst_name, Bundle& dst,
     return classify_vote();
   }
   const std::string var{dst_name};
-  Dlop             n1 = operand_value(src[0]);
-  Dlop             n2 = operand_value(src[1]);
+  Dlop              n1 = operand_value(src[0]);
+  Dlop              n2 = operand_value(src[1]);
   if (!is_numeric(n1) || !is_numeric(n2)) {
     return classify_vote();
   }
@@ -676,8 +684,28 @@ upass::Vote uPass_constprop::process_shl(std::string_view dst_name, Bundle& dst,
 }
 
 upass::Vote uPass_constprop::process_sra(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  // Same negative-amount rule as process_shl: leave the sra unresolved
+  // instead of folding (Dlop::shrn hard-asserts on src2 < 0); the
+  // negative-shift diagnostic lives in upass.bitwidth. A nil operand
+  // (payload-less Dlop) likewise stays unresolved instead of asserting.
   (void)dst;
-  return push_binary_passthrough(dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return *n1.sra_op(n2); });
+  if (dst_name.empty() || src.size() < 2) {
+    return classify_vote();
+  }
+  const std::string var{dst_name};
+  Dlop              n1 = operand_value(src[0]);
+  Dlop              n2 = operand_value(src[1]);
+  if (!is_numeric(n1) || !is_numeric(n2) || n1.is_nil() || n2.is_nil()) {
+    return classify_vote();
+  }
+  if (n2.is_integer() && n2.is_negative()) {
+    return classify_vote();
+  }
+  Dlop r = *n1.sra_op(n2);
+  if (!r.is_invalid()) {
+    store_trivial(var, r);
+  }
+  return classify_vote();
 }
 
 // log_* results are bool-TYPED in Pyrope; Dlop's bitwise ops return integer
@@ -695,11 +723,17 @@ upass::Vote uPass_constprop::process_log_and(std::string_view dst_name, Bundle& 
   // Pyrope's type rule: `and` operands must already be bool — with bool
   // operands, bitwise AND equals logical AND; Dlop handles unknowns.
   (void)dst;
+  if (propagate_uncertain_nil(dst_name, src)) {  // poison nil: see process_eq_ne_impl
+    return classify_vote();
+  }
   return push_binary_passthrough(dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return log_result_as_bool(*n1.and_op(n2)); });
 }
 
 upass::Vote uPass_constprop::process_log_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
+  if (propagate_uncertain_nil(dst_name, src)) {  // poison nil: see process_eq_ne_impl
+    return classify_vote();
+  }
   return push_binary_passthrough(dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return log_result_as_bool(*n1.or_op(n2)); });
 }
 
@@ -707,6 +741,9 @@ upass::Vote uPass_constprop::process_log_not(std::string_view dst_name, Bundle& 
   // `not` operand must be bool; bitwise NOT over a 1-bit bool flips it.
   // nil stays nil (the cassert escape hatch for unset attrs).
   (void)dst;
+  if (propagate_uncertain_nil(dst_name, src)) {  // poison nil: see process_eq_ne_impl
+    return classify_vote();
+  }
   return push_unary(dst_name, src, [](Dlop& r) {
     if (r.is_nil()) {
       return;
@@ -745,7 +782,7 @@ upass::Vote uPass_constprop::process_log_not(std::string_view dst_name, Bundle& 
 // `match`/`case` folding because the resulting nil cond marked downstream
 // arms as uncertain.)
 static std::optional<Dlop> compare_bundles_eq(const std::shared_ptr<Bundle const>& a, const std::shared_ptr<Bundle const>& b,
-                                               const livehd::diag::Span& span = {}) {
+                                              const livehd::diag::Span& span = {}) {
   // Walks `src` and inspects each entry in `other`. Returns:
   //   - 'f' definite false (key missing on the other side, or concrete
   //          values mismatch at a shared key)
@@ -870,7 +907,7 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
   // check_undefined_reads — so no undeclared-reads-as-nil folding here.)
   struct Operand {
     std::shared_ptr<Bundle const> bundle;
-    Dlop                         scalar;
+    Dlop                          scalar;
     bool                          is_const_nil = false;
   };
   auto resolve = [this](const upass::Operand& in) -> Operand {
@@ -879,7 +916,7 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
       const auto name = in.name;
       // cross-pass folds (wrap/sat narrowing, attr-get results, `is`)
       // land on the table now — no seam read.
-      auto b = st().get_bundle(name);
+      auto       b    = st().get_bundle(name);
       if (b && !b->is_scalar()) {
         o.bundle = b;
       } else if (b && b->is_scalar()) {
@@ -908,8 +945,19 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
     return classify_vote();
   }
   const std::string var{dst_name};
-  Operand           a = resolve(srcs[0]);
-  Operand           b = resolve(srcs[1]);
+
+  // Poison-nil propagation: an operand pinned by leave_scope (modified under
+  // an uncertain arm) makes the comparison indeterminate — fold nil so the
+  // cassert-discharge chain works as before, but MARK the dst so the
+  // producer node is kept (classify) and value consumers never fold/drop it
+  // (`o = (e != 0) && b` previously lost the whole `e` wire to a dangling
+  // ref when this producer was dropped on its "known" nil).
+  if (propagate_uncertain_nil(var, srcs)) {
+    return classify_vote();
+  }
+
+  Operand a = resolve(srcs[0]);
+  Operand b = resolve(srcs[1]);
 
   // Mixed nil propagation: exactly one operand is a known-nil scalar. The
   // result is nil (indeterminate) — typically because the var was
@@ -944,7 +992,7 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
   // `v`. Without this case `(1,2) != (1,)` (where Symbol_table::set wraps
   // the 1-tuple as a scalar at position 0) hits neither the bundle-eq
   // nor scalar-eq paths and stays unfolded.
-  auto                 bundle_count_non_attr
+  auto                bundle_count_non_attr
       = [](const std::shared_ptr<Bundle const>& bnd) { return static_cast<int>(bnd->non_attr_entries().size()); };
   if (a.bundle && b.bundle) {
     // Same bundle object (whole-bundle alias, e.g. `mut y:Color = Color.Red`)
@@ -1147,7 +1195,7 @@ void uPass_constprop::process_stmts_post() {
     // an in-invocation completed unit carries stamped pub_values_. Either way
     // a LATER round re-walks the materialized tree, where fully-folded const
     // stores no longer exist — re-harvesting would spuriously fail.
-    bool skip = function_registry.contains(unit + ".__pub") || !lm->get_lnast()->get_pub_values().empty();
+    bool       skip = function_registry.contains(unit + ".__pub") || !lm->get_lnast()->get_pub_values().empty();
     if (!skip) {
       for (const auto& p : pending_imports_) {
         if (p.unit == unit) {
@@ -1175,7 +1223,7 @@ void uPass_constprop::harvest_pub_values() {
                                                        .category = "type",
                                                        .pass     = "upass.constprop",
                                                        .message  = msg,
-                                                       .hint = "a `pub const` initializer must fold to a comptime constant"});
+                                                       .hint     = "a `pub const` initializer must fold to a comptime constant"});
     throw std::runtime_error(msg);
   };
 
@@ -1278,7 +1326,7 @@ upass::Vote uPass_constprop::process_tuple_add(std::string_view dst_name, Bundle
         // that scalar so `!(p is yy)` folds over the 1-element bundle. Only
         // runner_fold_fn (NOT st().has_trivial), so constprop's own trivials keep
         // their original bundle-only behavior.
-        auto                 sub = st().get_bundle(txt);
+        auto                sub = st().get_bundle(txt);
         std::optional<Dlop> xfold;
         if (!sub) {
           if (auto f = st().known_const_scalar(txt); f && !f->is_invalid()) {
@@ -1465,7 +1513,7 @@ upass::Vote uPass_constprop::process_tuple_concat(std::string_view dst_name, Bun
   // the bundle stays unfolded.
   auto try_stringify = [&]() -> std::optional<Dlop> {
     std::vector<Dlop> entries;
-    bool               any_string = false;
+    bool              any_string = false;
     for (const auto& [k, ep] : acc->non_attr_entries()) {
       if (!Bundle::is_single_level(k)) {
         return std::nullopt;  // nested sub-bundle — don't try to stringify
@@ -1613,7 +1661,7 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_does_opera
       return op;
     }
     if (v->is_integer()) {
-      // Literal `v` → the point envelope [v, v] (1g ruling).
+      // Literal `v` → the point envelope [v, v].
       op.kind      = Does_operand::Kind::integer;
       op.max       = *v;
       op.min       = *v;
@@ -1627,20 +1675,20 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_does_opera
   if (!is_type(Lnast_ntype::Lnast_ntype_ref)) {
     return std::nullopt;
   }
-  auto name = current_text();
+  auto                            name            = current_text();
   // A real variable wins over a type-token spelling — Pyrope allows a variable
   // literally named `i3` (a 3-bit-signed type token) or `u8`. Gather the var's
   // state first: a bundle, a folded scalar value, and the combined type query.
   // Only when NONE of these identify a variable do we decode `name` as a
-  // primitive type literal (`u32`/`int`/`bool`/…) — the 1g operand form.
-  auto                            bundle = current_ref_bundle();
-  upass::uPass::Scalar_type_query q = scalar_type_query_of(name);
+  // primitive type literal (`u32`/`int`/`bool`/…) — the operand form.
+  auto                            bundle          = current_ref_bundle();
+  upass::uPass::Scalar_type_query q               = scalar_type_query_of(name);
   // A tuple-shaped bundle (a named field, or ≥2 positional entries) is a real
   // tuple. A scalar-wrapper bundle (`mut a:u32=3` stores `a` as `{0:3}`, a lone
   // `(3)` single positional) is a scalar — its declared kind/envelope ride the
   // type query, not the bundle shape.
-  const bool bundle_is_tuple = bundle && is_tuple_shaped(bundle);
-  Dlop      folded          = *Dlop::invalid();
+  const bool                      bundle_is_tuple = bundle && is_tuple_shaped(bundle);
+  Dlop                            folded          = *Dlop::invalid();
   if (bundle && !bundle_is_tuple && bundle->has_trivial("0")) {
     folded = bundle->lone_trivial();
   } else if (st().has_trivial(name)) {
@@ -1667,8 +1715,7 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_does_opera
 // silent it falls back to the value's own Dlop type. An un-annotated integer
 // reads as an unbounded envelope (superset of any int). Stays kind=unknown
 // when nothing is known (caller defers).
-uPass_constprop::Does_operand uPass_constprop::build_scalar_operand(const upass::uPass::Scalar_type_query& q,
-                                                                    const Dlop&                           folded) {
+uPass_constprop::Does_operand uPass_constprop::build_scalar_operand(const upass::uPass::Scalar_type_query& q, const Dlop& folded) {
   Does_operand op;
   if (!folded.is_invalid()) {
     op.value     = folded;
@@ -1721,14 +1768,13 @@ uPass_constprop::Does_operand uPass_constprop::build_scalar_operand(const upass:
   return op;
 }
 
-// Resolve one field of a bundle for the per-field type check (1g-D). The
+// Resolve one field of a bundle for the per-field type check. The
 // declared type rides the dotted query (`bundle_name.field` — the same alias
-// chase the 1k typed-self does-check uses); a nested sub-bundle becomes a
+// chase the typed-self does-check uses); a nested sub-bundle becomes a
 // tuple operand. nullopt when the bundle has no resolvable name (e.g. a
 // coerced literal) and the field carries no value.
 std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_field_operand(std::string_view base, const Bundle& b,
-                                                                                   std::string_view field,
-                                                                                   bool             declared_only) {
+                                                                                    std::string_view field, bool declared_only) {
   if (b.has_bundle(field)) {
     if (auto sub = b.get_bundle(field); sub && !sub->is_scalar()) {
       Does_operand op;
@@ -1758,7 +1804,7 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_field_oper
 // undecidable this walk.
 std::optional<bool> uPass_constprop::scalar_does(const Does_operand& a, const Does_operand& b) {
   using Kind = Does_operand::Kind;
-  // `x does nil` is true for any non-tuple x (1g ruling). nil on the LHS, or
+  // `x does nil` is true for any non-tuple x. nil on the LHS, or
   // tuple-vs-nil, is deferred (pinned as future behavior).
   if (b.kind == Kind::nil) {
     return true;  // a is non-tuple here (tuple path handled by the caller)
@@ -1812,7 +1858,7 @@ std::optional<bool> uPass_constprop::compute_does(const Does_operand& a, const D
     if (!structural_does(ba, bb)) {
       return false;  // shape: a must cover every top-level field of b
     }
-    // Per-field types (1g-D): for each top-level field of b that a also has,
+    // Per-field types: for each top-level field of b that a also has,
     // `a.field does b.field`. A KNOWN field-type mismatch makes the whole
     // `does` false; an undecidable field is ignored (shape already matched —
     // this only adds rejection power, never removes it). `(a=1) does
@@ -1862,7 +1908,7 @@ void uPass_constprop::fold_does(const std::string& dst) {
 struct Bundle_flat_entry {
   std::string_view name;  // empty for unnamed positional
   int              pos = -1;
-  Dlop            value;  // valid only when !is_sub_bundle
+  Dlop             value;  // valid only when !is_sub_bundle
   bool             is_sub_bundle = false;
 };
 
@@ -1927,7 +1973,7 @@ void uPass_constprop::fold_in(const std::string& dst) {
   // compare would claim cross-enum membership (enum_hier).
   if (const auto* lid_p = enum_identity_of(ba); lid_p != nullptr) {
     const Dlop& lid   = *lid_p;
-    bool         found = false;
+    bool        found = false;
     for (const auto& [k, ep] : bb->get_attrs()) {
       if (Bundle::get_last_level(k) != "enumentry") {
         continue;
@@ -2128,10 +2174,9 @@ void uPass_constprop::fold_case(const std::string& dst) {
   // `sel case 0b10` (scalar vs scalar literal) folds the same way as the
   // bundle/bundle path. Returns nullopt when the value isn't decidable yet
   // (undeclared ref / no trivial value) so we can defer.
-  // Out-param `b` captures the operand's bundle (for the per-field type check,
-  // 1g-D); left null for scalar/const operands.
-  auto resolve_flat = [this](std::shared_ptr<Bundle const>& b,
-                             std::string&                   nm) -> std::optional<std::vector<Bundle_flat_entry>> {
+  // Out-param `b` captures the operand's bundle (for the per-field type check);
+  // left null for scalar/const operands.
+  auto resolve_flat = [this](std::shared_ptr<Bundle const>& b, std::string& nm) -> std::optional<std::vector<Bundle_flat_entry>> {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
       nm = std::string(current_text());  // table name for the per-field declared-type query
       if (auto bun = current_ref_bundle()) {
@@ -2212,7 +2257,7 @@ void uPass_constprop::fold_case(const std::string& dst) {
       return;
     }
 
-    // Typed `case` (1g-D): when both sides carry a declared field type, the
+    // Typed `case`: when both sides carry a declared field type, the
     // pattern type must be satisfied — `subject.field does pattern.field`. A
     // KNOWN type mismatch (e.g. subject `a:u32` vs pattern `a:bool`) is a
     // definite false even if the values would match a wildcard.
@@ -2272,8 +2317,7 @@ std::optional<Dlop> uPass_constprop::resolve_current_scalar() const {
 std::optional<std::vector<uPass_constprop::Call_actual>> uPass_constprop::collect_call_actuals() {
   // Delegated to the resolver (pure code motion); constprop supplies
   // its scalar folding for value operands.
-  return upass::call_resolver::collect_call_actuals(*lm, st(), function_registry,
-                                                    [this]() { return resolve_current_scalar(); });
+  return upass::call_resolver::collect_call_actuals(*lm, st(), function_registry, [this]() { return resolve_current_scalar(); });
 }
 
 // Marker pseudo-function handlers. The runner has already moved the cursor
@@ -2300,7 +2344,7 @@ upass::Vote uPass_constprop::process_func_equals(std::string_view dst_name, Bund
   (void)dst_name;
   (void)dst;
   (void)src;
-  // `a equals b` ≡ `(a does b) and (b does a)`, types included (1g). For two
+  // `a equals b` ≡ `(a does b) and (b does a)`, types included. For two
   // tuples this reduces to structural_equals (same set of top-level keys);
   // for scalars it means identical kind+envelope. Undecidable on either side
   // leaves the result unresolved.
@@ -2408,7 +2452,7 @@ bool uPass_constprop::try_eval_sum_cell_call(std::string_view dst, const std::ve
     if (pid != 0 && pid != 1) {
       return false;  // Sum only has the add (a) and subtract (b) pins
     }
-    auto&              group = (pid == 0) ? a_vals : b_vals;
+    auto&             group = (pid == 0) ? a_vals : b_vals;
     std::vector<Dlop> vals;
     if (a.is_bundle) {
       if (!ordered_bundle_scalars(a.bundle_value, vals)) {
@@ -2523,7 +2567,7 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
   // pin carrying a tuple (`__mult(a=(7,1))`). Inputs must be foldable (no
   // unknown bits) — the per-op kernels assume known operands; the
   // mux/hotmux/lut path above is the one that folds unknowns.
-  const Ntype_op     nop = Ntype::get_op(op);
+  const Ntype_op    nop = Ntype::get_op(op);
   std::vector<Dlop> args;
   if (actuals.size() == 1 && actuals[0].is_bundle) {
     // Repeated single-pin tuple (`__mult(a=(7,1))`, `__and(a=(x,y))`, …): the
@@ -2567,7 +2611,7 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
   auto need_min = [&](std::size_t n) -> bool { return args.size() >= n; };
 
   Dlop result;
-  bool  matched = false;
+  bool matched = false;
 
   if (op == "mult") {
     if (need_min(1)) {
@@ -2726,9 +2770,13 @@ void uPass_constprop::process_import_call(const std::string& dst) {
   // (pending-import recording for the kernel's whole-file retry, and its
   // store_trivial for scalar url binds).
   upass::call_resolver::process_import_call(
-      *lm, st(), function_registry, ambiguous_units_,
+      *lm,
+      st(),
+      function_registry,
+      ambiguous_units_,
       [this](const std::string& text) { pending_imports_.push_back({std::string(lm->get_top_module_name()), text}); },
-      [this](std::string_view name, const Dlop& v) { store_trivial(name, v); }, dst);
+      [this](std::string_view name, const Dlop& v) { store_trivial(name, v); },
+      dst);
 }
 
 void uPass_constprop::process_func_call() {
@@ -2836,9 +2884,9 @@ void uPass_constprop::process_func_call() {
       const Dlop& val  = (*actuals)[0].value;
       const Dlop& spec = (*actuals)[1].value;
       if (!val.is_invalid() && !val.has_unknowns() && spec.is_string()) {
-        store_trivial(dst,
-                      *Dlop::from_string(
-                          format_interp_value(val, spec.to_string(), lm->get_lnast()->span_of(lm->get_current_nid()))));
+        store_trivial(
+            dst,
+            *Dlop::from_string(format_interp_value(val, spec.to_string(), lm->get_lnast()->span_of(lm->get_current_nid()))));
       }
     }
     move_to_parent();
@@ -3013,8 +3061,7 @@ void uPass_constprop::process_range() {
   // bodies (in_template_body): there unbound params can fold a bogus
   // descending range as an optimization artifact, not a user mistake — the
   // genuine error still surfaces when the body is realized at a call site.
-  if (start.is_integer() && end.is_integer() && !start.has_unknowns() && !end.has_unknowns()
-      && end.sub_op(start)->is_negative()) {
+  if (start.is_integer() && end.is_integer() && !start.has_unknowns() && !end.has_unknowns() && end.sub_op(start)->is_negative()) {
     if (!in_template_body()) {
       livehd::diag::Span span;
       if (const auto& ln = lm->get_lnast()) {
@@ -3084,8 +3131,8 @@ void uPass_constprop::process_tuple_get() {
     const auto range_b = st().get_bundle(current_text());
     if (range_b && !range_b->get_attr("rng_s").is_invalid() && st().has_trivial(src)) {
       const auto& src_val = st().get_trivial(src);
-      const Dlop start   = range_b->get_attr("rng_s");
-      const Dlop end_lc  = range_b->get_attr("rng_e");
+      const Dlop  start   = range_b->get_attr("rng_s");
+      const Dlop  end_lc  = range_b->get_attr("rng_e");
       if (src_val.is_string() && start.is_just_i64()) {
         const auto  start_idx = static_cast<size_t>(start.to_just_i64());
         std::string body      = strip_pyrope_quotes(src_val.to_pyrope());
@@ -3204,8 +3251,8 @@ void uPass_constprop::process_tuple_get() {
     if (auto sb = st().get_bundle(src); sb && key.size() > src.size() + 1) {
       const auto           fpath = std::string_view(key).substr(src.size() + 1);
       const Bundle::Entry& fe    = sb->get_entry(fpath);
-      const bool           facts = fe.kind != upass::Kind::unknown || fe.mode != upass::Mode::unknown
-                         || !fe.decl_max.is_invalid() || !fe.decl_min.is_invalid() || fe.comptime;
+      const bool           facts = fe.kind != upass::Kind::unknown || fe.mode != upass::Mode::unknown || !fe.decl_max.is_invalid()
+                                   || !fe.decl_min.is_invalid() || fe.comptime;
       if (facts) {
         if (auto db = st().get_bundle_for_write(dst); db && db->has_trivial("0")) {
           Bundle::Entry e = db->get_entry("0");
@@ -3327,7 +3374,7 @@ void uPass_constprop::process_tuple_set() {
   //
   // IMPORTANT: Attribute assignments (e.g. x["__bits"] = 2, x["__signed"] = 1)
   // must be skipped. The "__attr" spelling is LNAST-level text; Bundle storage
-  // keeps attributes in a separate bare-name attr map (1b/B), and attribute
+  // keeps attributes in a separate bare-name attr map, and attribute
   // annotations are not values that constprop propagates.
   move_to_child();
   auto tuple_var = std::string(current_text());
@@ -3562,7 +3609,7 @@ upass::Emit_decision uPass_constprop::classify_statement_impl() {
     return upass::Emit_decision::emit_node();
   }
 
-  // 2d-reg — writes to reg-declared names are next-state din writes; the
+  // Writes to reg-declared names are next-state din writes; the
   // write itself is the payload (process_assign never binds them, so the ST
   // can't hold a value — this guard is belt-and-braces against stale state).
   if (decl_mode_of(lhs_text) == upass::Mode::reg_kind) {
@@ -3575,13 +3622,34 @@ upass::Emit_decision uPass_constprop::classify_statement_impl() {
     return upass::Emit_decision::emit_node();
   }
 
+  // An uncertainty-pinned var (Symbol_table::leave_scope set its trivial to
+  // nil after an uncertain if-arm modified it) is runtime-divergent: the nil
+  // is a poison marker, not a value, so its stores must stay — they are the
+  // mux arms / pre-if binding tolg's lower_if merges.
+  if (st().is_uncertain_nil(lhs_text)) {
+    return upass::Emit_decision::emit_node();
+  }
+
+  // Keep every store to an io OUTPUT of this unit. The output is the unit's
+  // boundary contract: nothing inside the tree reads it, so no demand-driven
+  // re-emit ever fires for it — dropping a comptime output store leaves the
+  // port undriven (cgen emits an all-unknown poison const). This also keeps
+  // const/runtime if-arm writes to outputs, which tolg merges into the mux:
+  //   comb f(s:bool) -> (o:u2) { if s { o = 2 } else { o = 1 } }
+  // previously lost BOTH arm stores (o poison) because each arm's value was
+  // comptime at process time. A genuinely-dead duplicate store is swept by
+  // LGraph cprop/DCE downstream, so this never pessimizes the final graph.
+  if (is_io_output(lhs_text)) {
+    return upass::Emit_decision::emit_node();
+  }
+
   // RHS-aware guard: keep a 2-child `store(lhs, rhs)` whose RHS is a ref that
   // is NOT a genuine folded constant — i.e. either has no comptime value (a
   // runtime producer) or holds `nil` (an unset/poison marker). process_assign
   // cannot propagate such a RHS, so `lhs` keeps whatever it held before, and
   // the is_known_const check above may be true only because of a *stale* value
   // this very store was meant to overwrite. Dropping the store then loses the
-  // write. This is the 1i comb-inliner bug: the inliner seeds a scalar output
+  // write. This is the comb-inliner bug: the inliner seeds a scalar output
   // `<tag>out = nil`, the body assigns it a runtime value (`store(<tag>out,
   // ___mult)`, ___mult = `a*b` over module inputs), so both stay nil; the seed
   // is then aliased down the epilogue chain (`___ret = <tag>out`) and into the
@@ -3637,11 +3705,6 @@ upass::Emit_decision uPass_constprop::classify_statement_impl() {
 
 // fold_ref deleted — the runner reads Symbol_table::known_const_scalar directly.
 
-
-
-
-
-
 upass::Vote uPass_constprop::process_sext(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   // Sign-extend: [sext: ref(dst), ref_or_const(src), const(nbits)]
   // sext_op(ebits) interprets bit (ebits-1) of src as the sign bit.
@@ -3673,9 +3736,9 @@ upass::Vote uPass_constprop::process_get_mask(std::string_view dst_name, Bundle&
     return classify_vote();
   }
   const std::string var{dst_name};
-  Dlop             value = operand_value(src[0]);
+  Dlop              value = operand_value(src[0]);
 
-  bool  is_range = false;
+  bool is_range = false;
   Dlop range_start;
   Dlop range_end;
   Dlop mask;
@@ -3723,9 +3786,9 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
     return classify_vote();
   }
   const std::string var{dst_name};
-  Dlop             input_val = operand_value(src[0]);
+  Dlop              input_val = operand_value(src[0]);
 
-  bool  is_range = false;
+  bool is_range = false;
   Dlop range_start;
   Dlop range_end;
   Dlop mask;

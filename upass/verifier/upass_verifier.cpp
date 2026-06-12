@@ -15,7 +15,7 @@
 static std::string strip_pyrope_quotes(std::string s);
 
 // Build a best-effort diagnostic span from an LNAST node. Pre-sourcemap
-// ([[1f]]) upass nodes only carry a file path + line, so that is all we
+// upass nodes only carry a file path + line, so that is all we
 // populate; a node with no loc yields a null span (the renderer degrades to a
 // single line). Shared by the cassert and cputs diagnostics below.
 static livehd::diag::Span span_from_nid(const std::shared_ptr<upass::Lnast_manager>& lm, const Lnast_nid& nid);
@@ -55,10 +55,8 @@ void uPass_verifier::set_aggregate_expected(int expected_pass, int expected_fail
 // this record is the per-assertion breadcrumb that makes the failure
 // debuggable. `operand_text` is the (usually folded-to-a-temp) condition ref,
 // `value` is what it evaluated to, and `msg` is the optional user string.
-void uPass_verifier::emit_false_cassert_diag(const Lnast_nid&   cassert_nid,
-                                             const std::string& operand_text,
-                                             const std::string& value,
-                                             const std::string& msg) {
+void uPass_verifier::emit_false_cassert_diag(const Lnast_nid& cassert_nid, const std::string& operand_text,
+                                             const std::string& value, const std::string& msg) {
   livehd::diag::Span span = span_from_nid(lm, cassert_nid);
 
   // The message line leads with the user-supplied text when present (that is
@@ -73,7 +71,7 @@ void uPass_verifier::emit_false_cassert_diag(const Lnast_nid&   cassert_nid,
   }
 
   // A combined SourceId (an inlined assertion: callee def + call site) renders
-  // its secondary anchors as notes — every related file:loc ([[1f]]-C).
+  // its secondary anchors as notes — every related file:loc.
   std::vector<livehd::diag::Note> notes;
   if (const auto& ln = lm->get_lnast()) {
     notes = ln->notes_of(cassert_nid, "reached via this site");
@@ -86,9 +84,9 @@ void uPass_verifier::emit_false_cassert_diag(const Lnast_nid&   cassert_nid,
       .pass     = "upass.verifier",
       .message  = std::move(message),
       .span     = std::move(span),
-      .hint     = msg.empty() ? "pass a message as cassert's 2nd argument (cassert(cond, \"why\")) to label this assertion"
-                              : std::string{},
-      .notes    = std::move(notes),
+      .hint
+      = msg.empty() ? "pass a message as cassert's 2nd argument (cassert(cond, \"why\")) to label this assertion" : std::string{},
+      .notes = std::move(notes),
   });
 }
 
@@ -131,9 +129,9 @@ upass::Emit_decision uPass_verifier::classify_statement() {
   // Resolve both through the runner's aggregated fold_ref so we see whatever
   // constprop (or any future pass) knows.
   std::optional<Dlop> val;
-  std::string          operand_text;
-  std::string          assert_msg;  // user-supplied message (cassert's 2nd arg), if any
-  bool                 got_child = move_to_child();
+  std::string         operand_text;
+  std::string         assert_msg;  // user-supplied message (cassert's 2nd arg), if any
+  bool                got_child = move_to_child();
   if (got_child) {
     operand_text = std::string{current_text()};
     if (is_type(Lnast_ntype::Lnast_ntype_const)) {
@@ -209,7 +207,7 @@ static std::string strip_pyrope_quotes(std::string s) {
 }
 
 static livehd::diag::Span span_from_nid(const std::shared_ptr<upass::Lnast_manager>& lm, const Lnast_nid& nid) {
-  // SourceId resolved through the owning Lnast's locator ([[1f]]).
+  // SourceId resolved through the owning Lnast's locator.
   if (const auto& ln = lm->get_lnast()) {
     return ln->span_of(nid);
   }

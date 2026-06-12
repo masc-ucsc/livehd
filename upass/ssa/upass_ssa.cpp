@@ -9,8 +9,8 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "hlop/dlop.hpp"
 #include "diag.hpp"
+#include "hlop/dlop.hpp"
 #include "lnast_ntype.hpp"
 
 namespace {
@@ -29,9 +29,9 @@ constexpr bool stmt_has_dest(Lnast_ntype::Lnast_ntype_int t) {
 // Parse the bits/is_signed from a prim_type_uint/prim_type_sint subtree
 // (or any other type ntype). Returns {bits=0, is_signed=true} on miss.
 struct Type_info {
-  int32_t      bits      = 0;
-  bool         is_signed = true;
-  Io_kind kind   = Io_kind::none;
+  int32_t bits      = 0;
+  bool    is_signed = true;
+  Io_kind kind      = Io_kind::none;
 };
 Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid) {
   Type_info ti;
@@ -48,10 +48,10 @@ Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid
     return ti;
   }
   if (Lnast_ntype::is_prim_type_int(tty)) {
-    ti.kind = Io_kind::integer;
+    ti.kind                     = Io_kind::integer;
     // Canonical integer: derive bits/signed from the (max,min)
     // range children ("nil" = unbounded). signed ⇐ min<0; bits ⇐ both known.
-    auto                 max_nid = lnast->get_first_child(type_nid);
+    auto                max_nid = lnast->get_first_child(type_nid);
     std::optional<Dlop> max_v;
     std::optional<Dlop> min_v;
     if (!max_nid.is_invalid() && Lnast_ntype::is_const(lnast->get_type(max_nid))) {
@@ -108,7 +108,7 @@ void uPass_ssa::copy_subtree(const std::shared_ptr<Lnast>& src, const Lnast_nid&
   } else {
     new_nid = dst->add_child(dst_parent, type);
   }
-  // [[1f]] carry (same-locator: the staging body replaces src's own body).
+  // Carry (same-locator: the staging body replaces src's own body).
   if (Lnast::srcid_carries(type)) {
     dst->set_srcid(new_nid, src->get_srcid(src_nid));
   }
@@ -134,7 +134,7 @@ void uPass_ssa::copy_with_rename(const std::shared_ptr<Lnast>& src, const Lnast_
   } else {
     new_nid = dst->add_child(dst_parent, type);
   }
-  // [[1f]] carry (same-locator: the staging body replaces src's own body).
+  // Carry (same-locator: the staging body replaces src's own body).
   if (Lnast::srcid_carries(type)) {
     dst->set_srcid(new_nid, src->get_srcid(src_nid));
   }
@@ -326,7 +326,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   auto staging_body = lnast->forest()->create_tree_temp(std::format("ssa-{}", lnast->get_top_module_name()));
   auto staging      = std::make_shared<Lnast>(staging_body, lnast->get_top_module_name());
   auto new_root     = staging->set_root(Lnast_ntype::create_top());
-  // [[1f]] module anchor: replace_body swaps the whole tree — re-stamp the
+  // Module anchor: replace_body swaps the whole tree — re-stamp the
   // unit-declaration id (func_extract put it on the source root; the id
   // lives in `lnast`'s locator, which survives replace_body).
   if (const auto id = lnast->get_srcid(lnast->get_root()); id != hhds::SourceId_invalid) {
@@ -380,7 +380,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   absl::flat_hash_map<std::string, int>         ssa_count;   // version counter
   absl::flat_hash_set<std::string>              seen_lhs;    // first-seen tracker
 
-  // 2d-reg — reg-declared names are NEVER SSA-versioned: every read of a reg
+  // Reg-declared names are NEVER SSA-versioned: every read of a reg
   // sees the flop's q (Verilog `<=` semantics) regardless of program order,
   // and every store is a next-state din write to the SAME flop. Versioning
   // them would split the din writes off the declared name (a dangling flop)
@@ -437,7 +437,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     // ── Statements with a write dest as first child: apply SSA renaming ────
     if (has_dest) {
       auto stmt_node = staging->add_child(new_stmts, type);
-      // [[1f]] carry the statement's SourceId across the SSA rebuild.
+      // Carry the statement's SourceId across the SSA rebuild.
       if (Lnast::srcid_carries(type)) {
         staging->set_srcid(stmt_node, lnast->get_srcid(child));
       }
@@ -491,11 +491,58 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
         ++ssa_count[pending_lhs];
         rename_map[pending_lhs] = pending_ssa;
       }
+    } else if (Lnast_ntype::is_func_call(type)) {
+      // fcall(dst, callee, args...): dst and callee copy verbatim, but the
+      // ARGUMENT reads must follow the rename map — an instance fed by a
+      // reassigned wire reads its latest version, not the first one. A named
+      // arg `store(param, value)` renames only the value (never the formal
+      // parameter name).
+      auto stmt_node = staging->add_child(new_stmts, type);
+      if (Lnast::srcid_carries(type)) {
+        staging->set_srcid(stmt_node, lnast->get_srcid(child));
+      }
+      int pos = 0;
+      for (auto sub : lnast->children(child)) {
+        if (pos < 2) {
+          copy_subtree(lnast, sub, staging, stmt_node);  // dst tmp + callee name
+        } else if (Lnast_ntype::is_store(lnast->get_type(sub))) {
+          auto arg_node = staging->add_child(stmt_node, Lnast_ntype::create_store());
+          if (Lnast::srcid_carries(Lnast_ntype::create_store())) {
+            staging->set_srcid(arg_node, lnast->get_srcid(sub));
+          }
+          bool first_arg_child = true;
+          for (auto a2 : lnast->children(sub)) {
+            if (first_arg_child) {
+              copy_subtree(lnast, a2, staging, arg_node);  // formal param name
+              first_arg_child = false;
+            } else {
+              copy_with_rename(lnast, a2, staging, arg_node, rename_map);
+            }
+          }
+        } else {
+          copy_with_rename(lnast, sub, staging, stmt_node, rename_map);  // positional arg
+        }
+        ++pos;
+      }
     } else {
       // Control-flow / structural nodes (if, func_def, …): copy verbatim.
       // The lowerer's lower_branch() + Mux logic handles if/else correctly
       // without LNAST-level join nodes.
       copy_subtree(lnast, child, staging, new_stmts);
+    }
+  }
+
+  // Final-version write-back for io outputs: a top-level reassignment was
+  // SSA-versioned (out -> out___ssa_N) but tolg exports the pin bound to the
+  // BASE output name, so without a trailing rebind every write after the
+  // first is dead and the first write wins. (Reg-mode outputs are exempt
+  // from versioning above and need no rebind.)
+  for (const auto& f : flat_outputs) {
+    auto it = rename_map.find(f.name);
+    if (it != rename_map.end() && it->second != f.name) {
+      auto st = staging->add_child(new_stmts, Lnast_ntype::create_store());
+      staging->add_child(st, Lnast_node::create_ref(f.name));
+      staging->add_child(st, Lnast_node::create_ref(it->second));
     }
   }
 

@@ -31,10 +31,11 @@ grep -q '"inou.slang' "$W/r1.json" || fail "expected an inou.slang step: $(cat "
   || fail "slang reader pyrope: emit exited non-zero: $(cat "$W/r2.json" 2>/dev/null)"
 ls "$W/prps/"*.prp >/dev/null 2>&1 || fail "slang reader produced no .prp re-emission"
 
-# slang reader: lg:/verilog: are locked unsupported (tolg cannot lower yet)
-"$LHD" compile "$SV" --reader slang --emit verilog:"$W/x.v" --workdir "$W/w3" -q --result-json "$W/r3.json" 2>/dev/null
-[ $? -ne 0 ] || fail "slang reader verilog: emit must be unsupported"
-grep -q '"class":"unsupported"' "$W/r3.json" || fail "expected error.class=unsupported: $(cat "$W/r3.json")"
+# slang reader: verilog: emit goes through the same upass+tolg pipeline as
+# pyrope sources (todo/ 2s lifted the old "stops at LNAST" gate)
+"$LHD" compile "$SV" --reader slang --emit verilog:"$W/x.v" --workdir "$W/w3" -q --result-json "$W/r3.json" 2>/dev/null \
+  || fail "slang reader verilog: emit exited non-zero: $(cat "$W/r3.json" 2>/dev/null)"
+[ -s "$W/x.v" ] || fail "slang reader produced no verilog"
 
 # yosys-verilog reader: the plain yosys verilog frontend, end-to-end
 "$LHD" compile "$SV" --reader yosys-verilog --emit verilog:"$W/yv.v" --workdir "$W/w4" -q --result-json "$W/r4.json" \

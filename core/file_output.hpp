@@ -14,7 +14,7 @@ class File_output {
 
   std::vector<std::string> sequence;
 
-  // Newline tallies for source-map egress ([[1f]]-G): a consumer recording
+  // Newline tallies for source-map egress: a consumer recording
   // generated positions reads `append_line()` while emitting. Prepends land
   // before every append in the final file, so a recorded append-relative line
   // becomes absolute by adding `prepend_lines()` once emission is complete.

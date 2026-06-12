@@ -44,7 +44,7 @@ void uPass_pipe::run(const std::shared_ptr<Lnast>& lnast) {
     return;
   }
 
-  // 2d-reg — collect reg-declared names (declare mode `reg`, no stages
+  // Collect reg-declared names (declare mode `reg`, no stages
   // child): a reg-as-output (the counter idiom) must NOT get a second flop —
   // the reg itself is the pipeline stage (home stage min−1, checked by the
   // tolg Time_checker).

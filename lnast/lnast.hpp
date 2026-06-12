@@ -103,10 +103,10 @@ struct Lnast_bitwidth_meta {
 enum class Io_kind : uint8_t { none, integer, boolean, string };
 
 struct Lnast_io_entry {
-  std::string name      = {};          // field name, no $ / % prefix
-  int32_t     bits      = 0;           // 0 = unknown / infer from context
-  bool        is_signed = true;
-  bool        is_ref    = false;       // input declared with `ref` → write-back on inline
+  std::string name       = {};  // field name, no $ / % prefix
+  int32_t     bits       = 0;   // 0 = unknown / infer from context
+  bool        is_signed  = true;
+  bool        is_ref     = false;  // input declared with `ref` → write-back on inline
   // Input declared with `...` (var-args, `comb foo(...rest)`). The
   // marker rides the io store's default-value slot as `const "..."` (mirroring
   // the `ref` sentinel) and is harvested here by the SSA upass. A var-arg
@@ -114,7 +114,7 @@ struct Lnast_io_entry {
   // synthesized tuple at the call site (the comb inliner) and flags the lambda
   // as a not-fully-typed template (func_extract).
   bool        is_varargs = false;
-  Io_kind     kind      = Io_kind::none;  // scalar kind from the param's prim_type
+  Io_kind     kind       = Io_kind::none;  // scalar kind from the param's prim_type
   // Pipe stages annotation (outputs of a `pipe` func_def only).
   // From the trailing `stages(min,max)` io node: min 0 = absent (comb/mod),
   // max 0 with min>0 = unconstrained (bare `pipe`). The LN pipe upass keys
@@ -125,7 +125,7 @@ struct Lnast_io_entry {
   // Declared NAMED type of the param (`self:t1` → "t1"); empty when
   // untyped or annotated with a primitive type. The inliner's typed-self
   // `does`-check keys off inputs[0].type_name.
-  std::string type_name = {};
+  std::string type_name  = {};
 };
 struct Lnast_tree_io {
   std::vector<Lnast_io_entry> inputs;
@@ -136,7 +136,7 @@ struct Lnast_tree_io {
 // One `pub` export of a file unit (the LiveHD docs).
 // kind: "value" (comptime/const declaration) | "comb" | "mod" | "pipe" |
 // "fluid" (exported definition; its tree url is `<unit>.<name>`).
-// srcid ([[1f]]): the pub declaration's SourceId in the unit's locator —
+// srcid: the pub declaration's SourceId in the unit's locator —
 // the kernel-synthesized `<unit>.__pub` wrapper anchors its nodes here.
 // 0 when unknown (e.g. a manifest-restored pub list).
 struct Lnast_pub_entry {
@@ -150,17 +150,17 @@ private:
   // Forest must outlive the tree — HHDS Tree::forest_ptr is a raw pointer
   // and TreeIO::forest_owner_ is weak, so dropping our shared_ptr would
   // leave forest_ptr dangling.
-  std::shared_ptr<hhds::Forest> forest_;
-  std::shared_ptr<hhds::TreeIO> treeio_;
-  std::shared_ptr<hhds::Tree>   tree_;
-  std::string                   top_module_name;
-  Lnast_nid                     undefined_var_nid;
+  std::shared_ptr<hhds::Forest>                    forest_;
+  std::shared_ptr<hhds::TreeIO>                    treeio_;
+  std::shared_ptr<hhds::Tree>                      tree_;
+  std::string                                      top_module_name;
+  Lnast_nid                                        undefined_var_nid;
   // Durable lambda kind ("comb" / "pipe" / "mod" / ...; empty =
   // file-level / unknown). Stamped by func_extract when a lambda is
   // extracted into its own tree. Consumers gate on THIS, never on
   // stages_min>0 — a mod output legitimately stamps stages(0,0) or
   // stages(nil,nil) and a mod tree must not be mistaken for a pipe.
-  std::string                   lambda_kind_;
+  std::string                                      lambda_kind_;
   // Durable "deferred template" flag. A not-fully-typed lambda — an
   // untyped non-`self` input, a `...args` var-arg param, or an unbound generic
   // `<T>` — is kept as LNAST but emits NO LGraph at definition time; the
@@ -168,7 +168,7 @@ private:
   // `fluid` specialize into a Sub). Stamped by func_extract when the extracted
   // signature is not fully typed; cleared on a specialized clone. tolg + the
   // no-LGraph gate read it. In-memory only (sibling to lambda_kind_).
-  bool                          template_ = false;
+  bool                                             template_       = false;
   // todo/ 1s subtask E — when set, uPass_timecheck skips this tree. Stamped on
   // by inou.slang on every tree it produces (the direct SV reader lowers
   // sequential `always` as comb and predates the timing conventions, so a
@@ -176,18 +176,18 @@ private:
   // unit-shape inference). In-memory only (sibling to lambda_kind_); the ln:
   // reload re-derives lambda_kind, and slang output is comb, so the reload path
   // is naturally timecheck-free without serializing this flag.
-  bool                          skip_timecheck_ = false;
+  bool                                             skip_timecheck_ = false;
   // Generic type parameters (`<T, U>`) recorded by func_extract from
   // the func_def generics child (a seam: the per-`T` body substitution lands
   // in a follow-up goal; this only preserves the names so a template carrying
   // generics is detected and its mangling reserved).
-  std::vector<std::string>      generics_;
+  std::vector<std::string>                         generics_;
   // The file's `pub` export list, recorded by prp2lnast on the
   // file-level (top) Lnast. kind is "value" for `pub const`/`pub comptime`
   // declarations or the lambda kind ("comb"/"mod"/"pipe"/"fluid") for
   // exported definitions. In-memory only (like lambda_kind_): the durable
   // forms are the `<unit>.__pub` wrapper tree and the manifest pub index.
-  std::vector<Lnast_pub_entry>  pub_list_;
+  std::vector<Lnast_pub_entry>                     pub_list_;
   // Folded comptime leaves of the pub VALUE exports, stamped by
   // uPass_constprop when the file-scope walk completes: (flat dotted path,
   // pyrope const text) pairs — a scalar contributes ("name", "12"), a bundle
@@ -197,20 +197,20 @@ private:
   std::vector<std::pair<std::string, std::string>> pub_values_;
   // I/O metadata populated by the SSA upass (ssa:1).  Empty unless the SSA
   // pass has run on this LNAST.
-  Lnast_tree_io                 io_meta_;
+  Lnast_tree_io                                    io_meta_;
   // Bitwidth metadata populated by uPass_bitwidth::end_run().  Empty unless
   // the bitwidth pass has run on this LNAST.
-  Lnast_bitwidth_meta           bw_meta_;
-  // Source-provenance table ([[1f]]): nodes carry one uint64 SourceId
+  Lnast_bitwidth_meta                              bw_meta_;
+  // Source-provenance table: nodes carry one uint64 SourceId
   // (hhds::attrs::srcid) resolved through this locator. One locator per Lnast
   // (the single-writer unit — no locks); it survives replace_body (the locator
   // belongs to the Lnast, not the tree body). adopt() chains it to the loaded
   // Forest's source_map as a read-only base; export_into unions it back.
-  hhds::Source_locator          srcloc_;
+  hhds::Source_locator                             srcloc_;
   // While nonzero, set_data stamps every def-bearing node with this id (the
   // enclosing statement's span). Only producers (prp2lnast) drive it; copies
   // and staging rebuilds leave it 0 and carry srcid explicitly.
-  hhds::SourceId                pending_srcid_{0};
+  hhds::SourceId                                   pending_srcid_{0};
 
 public:
   static constexpr char version[] = "0.1.0";
@@ -227,7 +227,7 @@ public:
   // ── forest interchange (the lhd `ln:` directory = hhds::Forest::save) ───
   // Clone this Lnast's tree (attrs included) into `forest` as a tree named
   // by top_module_name, so N units can ride one Forest::save directory.
-  void export_into(hhds::Forest& forest) const;
+  void                          export_into(hhds::Forest& forest) const;
   // Wrap one tree of an externally loaded Forest (hhds::Forest::load). The
   // returned Lnast shares ownership of `forest`; replace_body() works (the
   // TreeIO is present). io_meta/bw_meta start empty — re-run the upasses.
@@ -251,7 +251,6 @@ public:
 
   // ── navigation forwarders (operate on Node_class internally) ────────────
   bool      is_root(const Lnast_nid& nid) const { return nid == get_root(); }
-  bool      is_leaf(const Lnast_nid& nid) const { return nid.is_leaf(); }
   bool      is_first_child(const Lnast_nid& nid) const { return nid.is_first_child(); }
   bool      is_last_child(const Lnast_nid& nid) const { return nid.is_last_child(); }
   Lnast_nid get_parent(const Lnast_nid& nid) const { return nid.parent(); }
@@ -286,7 +285,7 @@ public:
   std::string_view             get_name(const Lnast_nid& nid) const;
   void                         set_name(const Lnast_nid& nid, std::string_view name);
 
-  // ── source provenance ([[1f]]) ──────────────────────────────────────────
+  // ── source provenance ──────────────────────────────────────────
   // The old per-node `lnast.loc` struct + `lnast.fname` string attributes are
   // gone; one uint64 SourceId (hhds::attrs::srcid) resolved through the
   // locator below replaces both.
@@ -309,8 +308,11 @@ public:
 
   // Resolved diagnostic span / secondary anchors for a node, at emit time.
   // Null span / empty notes when the node carries no (resolvable) srcid.
-  livehd::diag::Span              span_of(const Lnast_nid& nid) const;
-  std::vector<livehd::diag::Note> notes_of(const Lnast_nid& nid, std::string_view message = "related source") const;
+  // spans_of resolves both in one call — feed it to diag::Builder::at() so a
+  // combined id's related sites (inline call chains) ride along as notes.
+  livehd::diag::Span                   span_of(const Lnast_nid& nid) const;
+  hhds::Source_locator::Resolved_spans spans_of(const Lnast_nid& nid) const;
+  std::vector<livehd::diag::Note>      notes_of(const Lnast_nid& nid, std::string_view message = "related source") const;
 
   // set_data: write-side helpers used by add_child / set_root. On the
   // read side, callers go through get_type/get_name.
@@ -333,12 +335,12 @@ public:
   bool get_skip_timecheck() const noexcept { return skip_timecheck_; }
   void set_skip_timecheck(bool t) noexcept { skip_timecheck_ = t; }
   // Generic type-parameter names (`<T, U>`), seam for the follow-up goal.
-  void                            set_generics(std::vector<std::string> g) { generics_ = std::move(g); }
-  bool                            has_generics() const noexcept { return !generics_.empty(); }
+  void set_generics(std::vector<std::string> g) { generics_ = std::move(g); }
+  bool has_generics() const noexcept { return !generics_.empty(); }
 
   // ── pub export list (recorded by prp2lnast on file-level trees) ─
   const std::vector<Lnast_pub_entry>& get_pub_list() const noexcept { return pub_list_; }
-  void add_pub(std::string_view name, std::string_view kind, hhds::SourceId srcid = 0) {
+  void                                add_pub(std::string_view name, std::string_view kind, hhds::SourceId srcid = 0) {
     pub_list_.push_back({std::string(name), std::string(kind), srcid});
   }
   // Folded pub-value leaves (set by uPass_constprop at file-walk completion).

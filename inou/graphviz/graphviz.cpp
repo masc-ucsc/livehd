@@ -44,12 +44,12 @@ void Graphviz::save_graph(std::string_view name, std::string_view dot_postfix, c
 
   int fd = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
-    Pass::error("inou.graphviz unable to create {}", file);
+    livehd::diag::err("inou.graphviz", "write-failed", "io").msg("unable to create {}", file).fatal();
     return;
   }
   size_t sz = write(fd, data.c_str(), data.size());
   if (sz != data.size()) {
-    Pass::error("inou.graphviz unexpected write missmatch");
+    livehd::diag::err("inou.graphviz", "write-failed", "io").msg("unexpected write missmatch").fatal();
     return;
   }
 
@@ -199,9 +199,9 @@ void Graphviz::create_color_map(hhds::Graph* lg) {
         continue;
       }
 
-      uint64_t edge = static_cast<uint64_t>(c);
-      edge <<= 32;
-      edge |= static_cast<uint32_t>(sc);
+      uint64_t edge   = static_cast<uint64_t>(c);
+      edge          <<= 32;
+      edge           |= static_cast<uint32_t>(sc);
 
       if (edges.contains(edge)) {
         continue;
@@ -270,8 +270,8 @@ void Graphviz::populate_lg_data(hhds::Graph* g, std::string_view dot_postfix) {
       }
     }
     if (type_op_of(node) == Ntype_op::Nconst) {
-      auto v = hydrate_const(node);
-      data += std::format(" {} [ {} label = <{}:{}> ];\n", gv_name, color, node_info, v.to_pyrope());
+      auto v  = hydrate_const(node);
+      data   += std::format(" {} [ {} label = <{}:{}> ];\n", gv_name, color, node_info, v.to_pyrope());
     } else {
       data += std::format(" {} [ {} label = <{}> ];\n", gv_name, color, node_info);
     }
@@ -287,11 +287,15 @@ void Graphviz::populate_lg_data(hhds::Graph* g, std::string_view dot_postfix) {
         if (!is_const_pin(inp.driver)) {
           continue;
         }
-        auto v = hydrate_const(inp.driver);
-        data += std::format(" const_{} [ label = <{}> ];\n", graphviz_legalize_name(v.to_pyrope()),
-                            graphviz_legalize_name(v.to_pyrope()));
-        data += std::format(" const_{} -> {} [ label = <{}b:(,{})> ];\n", graphviz_legalize_name(v.to_pyrope()), gv_name,
-                            bits_of(inp.driver), graphviz_legalize_name(pin_name_of(inp.sink)));
+        auto v  = hydrate_const(inp.driver);
+        data   += std::format(" const_{} [ label = <{}> ];\n",
+                              graphviz_legalize_name(v.to_pyrope()),
+                              graphviz_legalize_name(v.to_pyrope()));
+        data   += std::format(" const_{} -> {} [ label = <{}b:(,{})> ];\n",
+                              graphviz_legalize_name(v.to_pyrope()),
+                              gv_name,
+                              bits_of(inp.driver),
+                              graphviz_legalize_name(pin_name_of(inp.sink)));
       }
     }
   }
@@ -299,18 +303,18 @@ void Graphviz::populate_lg_data(hhds::Graph* g, std::string_view dot_postfix) {
   auto gio = g->get_io();
   if (gio) {
     for (const auto& decl : gio->get_input_pin_decls()) {
-      auto pin     = g->get_input_pin(decl.name);
-      auto io_name = graphviz_legalize_name(decl.name);
-      data += std::format(" {} [ label = <{}> ];\n", io_name, io_name);
+      auto pin      = g->get_input_pin(decl.name);
+      auto io_name  = graphviz_legalize_name(decl.name);
+      data         += std::format(" {} [ label = <{}> ];\n", io_name, io_name);
       for (const auto& out : pin.out_edges()) {
         populate_lg_handle_xedge(pin.get_master_node(), out, data, verbose);
       }
     }
     for (const auto& decl : gio->get_output_pin_decls()) {
-      auto pin                 = g->get_output_pin(decl.name);
-      std::string_view dst_str = "virtual_dst_module";
-      auto             dbits   = bits_of(pin);
-      data += std::format(" {} -> {} [ label = <{}b> ];\n", graphviz_legalize_name(decl.name), dst_str, dbits);
+      auto             pin      = g->get_output_pin(decl.name);
+      std::string_view dst_str  = "virtual_dst_module";
+      auto             dbits    = bits_of(pin);
+      data                     += std::format(" {} -> {} [ label = <{}b> ];\n", graphviz_legalize_name(decl.name), dst_str, dbits);
       for (const auto& out : pin.out_edges()) {
         populate_lg_handle_xedge(pin.get_master_node(), out, data, verbose);
       }
@@ -319,11 +323,14 @@ void Graphviz::populate_lg_data(hhds::Graph* g, std::string_view dot_postfix) {
           if (!is_const_pin(inp.driver)) {
             continue;
           }
-          auto v = hydrate_const(inp.driver);
-          data += std::format(" const_{} [ label = <{}> ];\n", graphviz_legalize_name(v.to_pyrope()),
-                              graphviz_legalize_name(v.to_pyrope()));
-          data += std::format(" const_{} -> {} [ label = <{}b> ];\n", graphviz_legalize_name(v.to_pyrope()),
-                              graphviz_legalize_name(decl.name), bits_of(inp.driver));
+          auto v  = hydrate_const(inp.driver);
+          data   += std::format(" const_{} [ label = <{}> ];\n",
+                                graphviz_legalize_name(v.to_pyrope()),
+                                graphviz_legalize_name(v.to_pyrope()));
+          data   += std::format(" const_{} -> {} [ label = <{}b> ];\n",
+                                graphviz_legalize_name(v.to_pyrope()),
+                                graphviz_legalize_name(decl.name),
+                                bits_of(inp.driver));
         }
       }
     }
@@ -342,8 +349,8 @@ void Graphviz::do_from_lnast(const std::shared_ptr<Lnast>& lnast, std::string_vi
     auto type = lnast->get_type(itr);
     auto name = lnast->get_name(itr);
 
-    auto id = std::to_string(level_of(itr)) + std::to_string(pos_of(itr));
-    data += std::format(" {} [ label = <{}, {}> ];\n", id, Lnast_ntype::debug_name(type), name);
+    auto id  = std::to_string(level_of(itr)) + std::to_string(pos_of(itr));
+    data    += std::format(" {} [ label = <{}, {}> ];\n", id, Lnast_ntype::debug_name(type), name);
 
     if (Lnast_ntype::is_top(type)) {
       continue;
@@ -351,8 +358,8 @@ void Graphviz::do_from_lnast(const std::shared_ptr<Lnast>& lnast, std::string_vi
 
     auto p = lnast->get_parent(itr);
 
-    auto parent_id = std::to_string(level_of(p)) + std::to_string(pos_of(p));
-    data += std::format(" {} -> {};\n", parent_id, id);
+    auto parent_id  = std::to_string(level_of(p)) + std::to_string(pos_of(p));
+    data           += std::format(" {} -> {};\n", parent_id, id);
   }
 
   data += "}\n";

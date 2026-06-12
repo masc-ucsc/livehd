@@ -10,7 +10,7 @@
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
 <h1><strong class="item-id">2s</strong> Direct slang reader cleanup and coverage</h1>
-<p>Refactor <code>inou/slang</code> after the <a class="xref" href="1s.html">1s</a>
+<p>Refactor <code>inou/slang</code> after the <strong>1s</strong> (landed 2026-06-11)
   slang <code>v11.0</code> upgrade so the direct <code>--reader slang</code> path is a
   maintainable SystemVerilog-to-LNAST importer instead of a narrow
   <code>slang_tree.cpp</code> switch. The goal is not to replace the
@@ -20,7 +20,7 @@
 
 <h2>Depends on</h2>
 <ul>
-<li><a class="xref" href="1s.html">1s</a> — slang <code>v11.0</code>, structured
+<li><strong>1s</strong> (landed 2026-06-11) — slang <code>v11.0</code>, structured
   diagnostics, source locations, and current-test preservation.</li>
 <li><strong>1a</strong> (landed 2026-06-11) — the LNAST→LGraph synthesis closure
   needed for tests that continue past LNAST into LGraph/codegen equivalence.</li>
@@ -188,7 +188,7 @@
   <code>comb</code> for pure combinational modules, emit <code>pipe</code> for simple
   pipeline-shaped modules when the importer can prove the contract, and fall
   back to <code>mod</code> otherwise. The direct-reader <code>mod</code> timecheck
-  suppression option is a prerequisite from <a class="xref" href="1s.html">1s</a>;
+  suppression option is a prerequisite from <strong>1s</strong> (landed 2026-06-11);
   <code>2s</code> should use it while improving inference so fewer modules need the
   fallback. Seed the inference from always-block classification: slang's
   <code>ProceduralBlockKind</code> plus edge-in-sensitivity detection for plain
@@ -224,45 +224,12 @@
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
-<li><strong>A — importer architecture split.</strong> Create focused
-  <code>inou/slang</code> modules for driver/diagnostics, lowering context, structure,
-  expressions, lvalues, statements, types, and tests, modeled on CIRCT's
-  <code>Context</code> + <code>Structure</code>/<code>Expressions</code>/<code>Statements</code>/<code>Types</code>
-  split. The context owns the <code>convert_*</code> entry points, the single
-  materialize-conversion helper, and the located <code>unsupported()</code>
-  fallback so no AST kind falls through silently. Keep the public EPRP
-  method names <code>inou.slang</code> / <code>inou.verilog</code> stable.</li>
-<li><strong>B — statement and lvalue core.</strong> Implement structured lowering for
-  <code>if</code>, <code>case</code>, basic loops, assignment forms, concatenation lvalues,
-  nested selects, and sign/width conversions. Keep <code>if</code>/<code>case</code>
-  as LNAST tree nodes (no mux trees); decompose assignment targets into lvalue
-  descriptors per yosys-slang <code>lvalue.cc</code>; route dynamic bit/range
-  selects through one addressing helper (<code>addressing.cc</code> is the model,
-  mapped onto LNAST <code>get_mask</code>/<code>set_mask</code> with shifted-mask
-  indices); const-eval first, with a capped and diagnosed slang-side unroll. Add
-  located unsupported diagnostics for each deliberately skipped statement or
-  expression kind, plus the blocking-vs-nonblocking mixing diagnostic.</li>
-<li><strong>C — module and instance coverage.</strong> Add module instance lowering,
-  parameter/default handling, named and ordered port connections, generated
-  blocks, unit-shape inference (<code>comb</code> / <code>pipe</code> / <code>mod</code>),
-  and blackbox/unknown-module policy. Follow CIRCT <code>Structure.cpp</code>:
-  two-phase module header/body conversion, port matching with an explicit
-  unconnected-port policy, and generate-block name prefixing; seed unit-shape
-  inference from <code>async_pattern.cc</code>-style block classification. Keep
-  multi-module designs working through <code>ln:</code> save/load.</li>
-<li><strong>D — memory and array slice.</strong> Decide and implement the
-  direct-reader array/memory policy, using yosys-slang's candidate analysis
-  (<code>memory.h</code> two-pass detect/disqualify, see Feature targets) as a
-  reference and LiveHD's LNAST memory vocabulary as the target.</li>
-<li><strong>E — coverage ladder.</strong> Replace the old generic
-  <code>verilog/3b</code> test note with a tracked list of passing/failing
-  <code>--reader slang</code> cases, including the filtered compliance slice
-  (yosys-slang <code>tests/unit</code> + <code>tests/various</code>, OpenROAD
-  <code>elab_testcases.h</code>),
-  complete <code>inou/yosys/tests/</code> regression ladder, curated real-DUT corpus, differential
-  <code>yosys-slang</code> oracle, and mutation smoke above. Promote tests from
-  LNAST-only to compile/equiv as soon as the LNAST→LGraph lowering
-  (1a, landed 2026-06-11) handles the emitted structures.</li>
+<li><strong>E (residual) — compliance slice + oracle.</strong> The
+  <code>inou/yosys/tests/</code> ladder landed (see below); still open from the
+  original E scope: the filtered compliance slice (yosys-slang
+  <code>tests/unit</code> + <code>tests/various</code>, OpenROAD
+  <code>elab_testcases.h</code>), a curated real-DUT corpus, the differential
+  <code>yosys-slang</code> oracle, and mutation smoke.</li>
 </ul>
 
 <h2>Out of scope</h2>
@@ -276,7 +243,73 @@
 </ul>
 
 <h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<ul class="subtasks">
+<li><strong>A — importer architecture split</strong> (landed 2026-06-12).
+  <code>slang_tree.cpp</code> replaced by one <code>Slang_context</code>
+  (<code>slang_context.{hpp,cpp}</code>) with per-concern visitor files
+  <code>slang_structure/stmt/expr/lvalue/types.cpp</code> — the CIRCT
+  <code>Context</code> split. One <code>materialize_conversion</code> seam, a
+  located <code>unsupported()</code> fallback on every dispatch default, EPRP
+  names unchanged. Modules emit the EXTRACTED unit form
+  (<code>top → [io, stmts]</code>, <code>lambda_kind="mod"</code>, exact
+  Verilog names) so SSA/io_meta/tolg lower them like Pyrope units; the kernel's
+  slang <code>lg:</code>/<code>verilog:</code> emit gates were removed.</li>
+<li><strong>B — statement and lvalue core</strong> (landed 2026-06-12).
+  if/case → <code>if</code>/<code>unique_if</code> (const-disjoint plain cases
+  promote to <code>unique_if</code>), capped slang-side loop unrolling via
+  EvalContext locals (<code>--set inou.verilog.unroll_limit=N</code>, default
+  4000), lvalue decomposition (vars / packed selects — const via
+  <code>set_mask</code>, dynamic via shift-RMW since tolg masks must be const /
+  concat split / member access), the bool/int kind discipline
+  (comparison results are LNAST bool; <code>to_int_value</code> at integer
+  contexts; single-bit <code>get_mask</code> is a -1/0 boolean and is never
+  used for bit extraction), the blocking-vs-nonblocking mixing diagnostic, and
+  dataflow-ordered driver emission (wires are nets, not statements).</li>
+<li><strong>C — module and instance coverage</strong> (landed 2026-06-12).
+  Instances lower to <code>func_call</code> → tolg <code>Sub</code> (multi-output
+  callees added to tolg via per-port <code>tuple_get</code> binding), named and
+  ordered connections, unconnected-port policy (inputs read x, outputs skip),
+  parameters fold per specialized body (distinct parameterizations get
+  <code>_pN</code>-suffixed units), generate blocks flatten with
+  <code>name_</code> prefixes, unknown modules diagnose. Registers:
+  <code>declare(reg)</code> hoisted to module start (an <code>output reg</code>'s
+  q pin IS the output), non-<code>clk/clock</code>/negedge clocks via per-reg
+  <code>clock_pin</code>/<code>posclk</code> attrs (added to tolg), async-reset
+  rung extraction → <code>initial/reset_pin/sync/negreset</code> attrs.</li>
+<li><strong>D — memory and array slice</strong> (landed 2026-06-12).
+  Fixed-size unpacked arrays lower to the LNAST memory vocabulary
+  (<code>comp_type_array</code> declare + 3-child <code>store</code> write ports +
+  <code>tuple_get</code> read ports), index bias for non-zero lower bounds, and
+  <code>fwd=0</code> (a pre-declare attr tolg now honors) so Verilog
+  nonblocking reads see old contents — regfiles and comb arrays LEC-pass.</li>
+<li><strong>E (core) — inou/yosys/tests ladder</strong> (landed 2026-06-12).
+  <code>slang_ladder.bzl</code> pins EVERY <code>inou/yosys/tests/*.v</code>
+  to its strongest tier (<code>lec</code> &gt; <code>verilog</code> &gt;
+  <code>lnast</code> &gt; <code>error</code>); <code>tests/slang_compile.sh</code>
+  enforces expectations both ways (an outgrown <code>error</code> entry fails
+  until promoted). See <code>inou/slang/README.md</code> for the tier table.</li>
+</ul>
+
+<h2>Notable shared fixes landed under this task</h2>
+<ul>
+<li>upass/ssa: io outputs reassigned at top level now get a final-version
+  write-back (the first write used to win); fcall ARGUMENT reads follow the
+  SSA rename map. Both were pre-existing, Pyrope-reproducible miscompiles.</li>
+<li>upass/tolg: LNAST <code>sext</code> (position → cell bit-count conversion)
+  and <code>div</code> lowering; 1-bit unsigned inputs get the to-positive
+  wrap; <code>set_mask</code>/pattern-const widths; multi-output Subs.</li>
+<li>hlop: <code>Blop::get_bitsn</code> 64-bit word-boundary fix
+  (<code>get_mask_value(64)</code> read as -1); <code>sra_op</code> nil/negative
+  guards.</li>
+<li>hhds: a zero-encoded sedge (node-as-sink at the same table index)
+  aliased the empty-slot sentinel and silently dropped the driver-side edge
+  half (instance outputs vanished).</li>
+<li>slang v10/v11 weak-symbol collision: <code>slang.so</code> (yosys-slang,
+  v10) exported weak template instantiations that dyld coalesced against
+  lhd's v11 copies (<code>Driver::parseCommandLine</code> →
+  <code>EXC_BAD_ACCESS</code>); both the plugin and its pinned v10 now build
+  with hidden visibility (0 exported slang symbols).</li>
+</ul>
 </main>
 <footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>verilog</code></footer>
 </body>

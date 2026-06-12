@@ -121,7 +121,7 @@ void Bitwidth::set_bits_sign(hhds::Pin_class& dpin, const Bitwidth_range& bw) {
   if (dpin.is_invalid()) {
     return;
   }
-  auto b = bw.get_sbits();
+  auto       b             = bw.get_sbits();
   const auto declared_bits = bits_of(dpin);
   if ((is_graph_input_pin(dpin) || is_graph_output_pin(dpin)) && declared_bits != 0) {
     // Top-level IO widths are fixed by the source RTL interface. Do not let
@@ -346,7 +346,9 @@ void Bitwidth::process_shl(hhds::Node_class& node, std::vector<hhds::Edge_class>
       return;
     }
     if (unlikely(!n_it->second.is_always_positive())) {
-      Pass::error("SHL B input can be negative (only positive allowed)");
+      livehd::diag::err("pass.bitwidth", "negative-shift", "bitwidth")
+          .msg("SHL B input can be negative (only positive allowed)")
+          .fatal();
     }
     if (n_bw_initialized) {
       n_bw.set_wider_range(n_it->second);
@@ -443,10 +445,10 @@ void Bitwidth::process_sum(hhds::Node_class& node, std::vector<hhds::Edge_class>
 
 void Bitwidth::process_memory(hhds::Node_class& node) {
   int64_t                      mem_size              = 0;
-  int32_t                       mem_bits              = 0;
-  int32_t                       mem_din_bits          = 0;
+  int32_t                      mem_bits              = 0;
+  int32_t                      mem_din_bits          = 0;
   bool                         mem_din_bits_missing  = false;
-  int32_t                       mem_addr_bits         = 0;
+  int32_t                      mem_addr_bits         = 0;
   bool                         mem_addr_bits_missing = false;
   std::vector<hhds::Pin_class> din_drivers;
   std::vector<hhds::Pin_class> addr_drivers;
@@ -465,11 +467,15 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
     } else if (n == "bits" || n == "size") {
       auto val = hydrate_const(e.driver);
       if (!is_const_pin(e.driver)) {
-        Pass::error("Memory node:{} has {} connected to a non-constant pin", debug_name(node), n);
+        livehd::diag::err("pass.bitwidth", "mem-malformed", "internal")
+            .msg("Memory node:{} has {} connected to a non-constant pin", debug_name(node), n)
+            .fatal();
         return;
       }
       if (!val.is_just_i64()) {
-        Pass::error("Memory node:{} has {} connected to a non-integer value", debug_name(node), n);
+        livehd::diag::err("pass.bitwidth", "mem-malformed", "internal")
+            .msg("Memory node:{} has {} connected to a non-integer value", debug_name(node), n)
+            .fatal();
         return;
       }
       auto v = val.to_just_i64();
@@ -482,7 +488,7 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
       auto n_din  = str_tools::ends_with(n, "din");
       auto n_addr = str_tools::ends_with(n, "addr");
       if (n_din || n_addr) {
-        auto   it    = bwmap.find(e.driver.get_class_index());
+        auto    it    = bwmap.find(e.driver.get_class_index());
         int32_t dbits = 0;
         if (it != bwmap.end()) {
           dbits = it->second.get_sbits();
@@ -517,7 +523,9 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
         if (it->second.get_sbits() <= mem_bits) {
           continue;
         }
-        Pass::error("memory {} input has more bits than memory width", debug_name(node));
+        livehd::diag::err("pass.bitwidth", "mem-width-mismatch", "bitwidth")
+            .msg("memory {} input has more bits than memory width", debug_name(node))
+            .fatal();
         return;
       }
     } else if (!mem_din_bits_missing && mem_bits != mem_din_bits) {
@@ -544,7 +552,9 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
           continue;
         }
         if (!it->second.get_range().is_just_i64()) {
-          Pass::error("memory {} size exceeds limit", debug_name(node));
+          livehd::diag::err("pass.bitwidth", "mem-size-limit", "bitwidth")
+              .msg("memory {} size exceeds limit", debug_name(node))
+              .fatal();
           return;
         }
         auto sz      = it->second.get_range().to_just_i64();
@@ -640,7 +650,7 @@ void Bitwidth::process_mult(hhds::Node_class& node, std::vector<hhds::Edge_class
 void Bitwidth::process_set_mask(hhds::Node_class& node) {
   auto a_dpin = get_driver_of_sink_name(node, "a");
   if (a_dpin.is_invalid()) {
-    Pass::error("set_mask can not have an undefined input");
+    livehd::diag::err("pass.bitwidth", "setmask-undefined", "bitwidth").msg("set_mask can not have an undefined input").fatal();
   }
 
   auto it = bwmap.find(a_dpin.get_class_index());
@@ -653,7 +663,7 @@ void Bitwidth::process_set_mask(hhds::Node_class& node) {
 
   auto mask_dpin = get_driver_of_sink_name(node, "mask");
   if (mask_dpin.is_invalid()) {
-    Pass::error("set_mask can not have an undefined mask");
+    livehd::diag::err("pass.bitwidth", "setmask-undefined", "bitwidth").msg("set_mask can not have an undefined mask").fatal();
   }
 
   if (!is_const_pin(mask_dpin)) {
@@ -664,7 +674,7 @@ void Bitwidth::process_set_mask(hhds::Node_class& node) {
 
   auto value_dpin = get_driver_of_sink_name(node, "value");
   if (value_dpin.is_invalid()) {
-    Pass::error("set_mask can not have an undefined value");
+    livehd::diag::err("pass.bitwidth", "setmask-undefined", "bitwidth").msg("set_mask can not have an undefined value").fatal();
   }
 
   auto           it2 = bwmap.find(value_dpin.get_class_index());
@@ -746,7 +756,7 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
     return;
   }
 
-  auto  it2 = bwmap.find(mask_dpin.get_class_index());
+  auto it2 = bwmap.find(mask_dpin.get_class_index());
   Dlop mask_val;
   if (it2 == bwmap.end()) {
     if (!is_const_pin(mask_dpin)) {
@@ -907,7 +917,7 @@ void Bitwidth::process_assignment_or(hhds::Node_class& node, std::vector<hhds::E
 void Bitwidth::process_bit_or(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
   I(inp_edges.size() > 1);
   int32_t max_bits     = 0;
-  bool   any_negative = false;
+  bool    any_negative = false;
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_class_index());
     if (it == bwmap.end()) {
@@ -1024,7 +1034,9 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, std::vector<hhds::Edge_cl
   }
 
   if (!hier && mask_pos >= 0 && pos_min_sbits != Bits_unknown && pos_min_sbits_pos != mask_pos) {
-    auto v = Dlop::create_integer(1)->shl_op(*Dlop::create_integer(pos_min_sbits - 1))->sub_op(hydrate_const(inp_edges[mask_pos].driver));
+    auto v = Dlop::create_integer(1)
+                 ->shl_op(*Dlop::create_integer(pos_min_sbits - 1))
+                 ->sub_op(hydrate_const(inp_edges[mask_pos].driver));
     if (v->is_just_i64() && v->to_just_i64() == 1) {
       if (inp_edges.size() == 2) {
         int pos = mask_pos == 0 ? 1 : 0;
@@ -1110,7 +1122,7 @@ void Bitwidth::process_attr_set_dp_assign(hhds::Node_class& node_dp) {
     return;
   }
 
-  const Bitwidth_range lhs_bw = it->second;
+  const Bitwidth_range                   lhs_bw = it->second;
   // Walk out_connected_pins (unique drivers from out_edges).
   absl::flat_hash_set<hhds::Class_index> seen_out;
   for (auto& e : node_dp.out_edges()) {
@@ -1151,7 +1163,9 @@ void Bitwidth::process_attr_set_bw(hhds::Node_class& node_attr, Bitwidth::Attr a
   I(is_const_pin(dpin_val));
   auto val = hydrate_const(dpin_val);
   if ((attr == Attr::Set_ubits || attr == Attr::Set_sbits) && !val.is_just_i64()) {
-    Pass::error("Attr bits value of node:{} exceeds the supported limit", debug_name(node_attr));
+    livehd::diag::err("pass.bitwidth", "bits-limit", "bitwidth")
+        .msg("Attr bits value of node:{} exceeds the supported limit", debug_name(node_attr))
+        .fatal();
     return;
   }
 
@@ -1184,7 +1198,9 @@ void Bitwidth::process_attr_set_bw(hhds::Node_class& node_attr, Bitwidth::Attr a
       Bitwidth_range set_bw;
       set_bw.set_sbits_range(bits);
       if (bw.get_min().lt_op(set_bw.get_min())->is_known_true()) {
-        Pass::error("bitwidth mismatch at node {}: min {} exceeds {}sbits", debug_name(node_attr), bw.get_min(), bits);
+        livehd::diag::err("pass.bitwidth", "bitwidth-mismatch", "bitwidth")
+            .msg("bitwidth mismatch at node {}: min {} exceeds {}sbits", debug_name(node_attr), bw.get_min(), bits)
+            .fatal();
       }
     } else {
       bw.set_sbits_range(bits);

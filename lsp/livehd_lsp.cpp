@@ -270,7 +270,7 @@ std::vector<livehd::diag::Diagnostic> analyze(std::string_view virtual_path, std
     try {
       Pass_upass::work(var);  // semacheck / typecheck / constprop / bitwidth / verifier / assert / …
     } catch (...) {
-      // upass aborted (a Pass::error throw or config error); its diagnostic is
+      // upass aborted (a diag fatal/parser_error throw or config error); its diagnostic is
       // already in the sink — the `|>` pipeline would stop here too.
     }
   }

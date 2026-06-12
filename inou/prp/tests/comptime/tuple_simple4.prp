@@ -8,17 +8,17 @@
 mut tup0 = (0, y = 1)
 
 tup0 = (33, y=44)
-cassert(tup0.0==33 and tup0.y==44)
+cassert(tup0[0]==33 and tup0.y==44)
 tup0 = (55, 66)
 // Reassigning to a positional tuple drops the `y` field. Reading an absent
 // field is now a compile error (Task 1m-B); probe existence with `has`
 // (03-bundle.md) instead of the old `tup0['y'] == nil` idiom.
-cassert(tup0.0==55 and not (tup0 has 'y') and tup0.1==66)
+cassert(tup0[0]==55 and not (tup0 has 'y') and tup0[1]==66)
 
 mut tup1 = (0, foo = 1)
 
 tup1 = (33, foo=44)
-cassert(tup1.0==33 and tup1.foo==44)
+cassert(tup1[0]==33 and tup1.foo==44)
 cassert(tup1 == (33, foo=44))
 
 mut tup2 = (true, foo = 0)

@@ -135,7 +135,7 @@ Lnast_range uPass_bitwidth::read_range(std::string_view name) const {
 
 void uPass_bitwidth::write_bw(std::string_view name, Bundle& dst, Lnast_range r, bool replace) {
   if (name.empty() || name.find('.') != std::string_view::npos) {
-    return;  // scalar names only (per-field ranges are a 1t follow-up)
+    return;  // scalar names only (per-field ranges are a follow-up)
   }
   check_declared_fit(name, r);
 
@@ -162,12 +162,12 @@ void uPass_bitwidth::write_bw(std::string_view name, Bundle& dst, Lnast_range r,
 
   // Write-through to lnast->bw_meta() — the tolg/LSP interface, and the
   // cross-invocation persistence store (replaces the old end_run flush).
-  auto& meta = lm->get_lnast()->bw_meta();
+  auto&         meta = lm->get_lnast()->bw_meta();
   BitwidthEntry me;
-  me.min                          = r.min;
-  me.max                          = r.max;
-  me.unbounded                    = r.is_unbounded();
-  meta.ranges[std::string(name)]  = me;
+  me.min                         = r.min;
+  me.max                         = r.max;
+  me.unbounded                   = r.is_unbounded();
+  meta.ranges[std::string(name)] = me;
 }
 
 void uPass_bitwidth::clear_range(std::string_view name) {
@@ -234,7 +234,7 @@ void uPass_bitwidth::check_declared_fit(std::string_view name, const Lnast_range
 void uPass_bitwidth::record_overflow(std::string_view name, const Lnast_range& value, const Lnast_range& env) {
   // The diagnostic is emitted AT the offending node: the cursor is on
   // the store/op during dispatch, so its SourceId (resolved through the
-  // owning Lnast's locator, [[1f]]) is the span. An error-severity diag
+  // owning Lnast's locator) is the span. An error-severity diag
   // fails the compile; no end_run throw, no deferral.
   livehd::diag::Span              span;
   std::vector<livehd::diag::Note> notes;
@@ -548,7 +548,7 @@ void uPass_bitwidth::process_type_spec() {
   if (runner_st == nullptr || !move_to_child()) {
     return;
   }
-  const std::string var{current_text()};
+  const std::string   var{current_text()};
   std::optional<Dlop> dmax;
   std::optional<Dlop> dmin;
   if (move_to_sibling() && Lnast_ntype::is_prim_type_int(get_raw_ntype())) {

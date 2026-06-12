@@ -55,7 +55,7 @@ cassert(g[1] + g[3] == 6)
 
 
 mut h = 2
-h.0 = 3
+h[0] = 3
 cassert(h   == 3)
 cassert(h[0] == 3)
 

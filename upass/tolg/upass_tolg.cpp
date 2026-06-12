@@ -15,11 +15,10 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"
-#include "hlop/dlop.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/attrs/srcid.hpp"
+#include "hlop/dlop.hpp"
 #include "lnast_ntype.hpp"
-#include "lnast_srcloc.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
 
@@ -39,7 +38,7 @@ using WriteMap = absl::flat_hash_map<std::string, Pin>;
 // (a leading 0 sign bit), which is what cgen's add_to_pin2var expects (it does
 // `--bits` for unsigned dpins). We track `mw` (the N) and stamp `mw+1` bits.
 struct Val {
-  Pin    pin;
+  Pin     pin;
   int32_t mw{0};
 };
 
@@ -54,7 +53,7 @@ struct Val {
 // Resolve a func_call callee name against the lnast registry the
 // same way the runner's lookup_callee does: exact top-module-name match, else
 // a UNIQUE "<module>.<name>" suffix match.
-[[nodiscard]] std::shared_ptr<Lnast> resolve_callee_lnast(std::string_view name,
+[[nodiscard]] std::shared_ptr<Lnast> resolve_callee_lnast(std::string_view                           name,
                                                           const std::vector<std::shared_ptr<Lnast>>& registry) {
   std::shared_ptr<Lnast> exact;
   std::shared_ptr<Lnast> suffix_hit;
@@ -116,16 +115,16 @@ public:
   // a per-reg `:[sync=…]` attr beats it.
   Tolg(const std::shared_ptr<Lnast>& lnast, hhds::Graph* g, Io_setup io_setup, const uPass_tolg::Registry* registry,
        hhds::GraphLibrary* lib, bool async_default)
-      : lnast_(lnast),
-        g_(g),
-        registry_(registry),
-        lib_(lib),
-        clock_name_(std::move(io_setup.clock_name)),
-        clock_minted_(io_setup.clock_minted),
-        reset_name_(std::move(io_setup.reset_name)),
-        reset_minted_(io_setup.reset_minted),
-        reset_neg_(io_setup.reset_neg),
-        reset_async_default_(async_default) {}
+      : lnast_(lnast)
+      , g_(g)
+      , registry_(registry)
+      , lib_(lib)
+      , clock_name_(std::move(io_setup.clock_name))
+      , clock_minted_(io_setup.clock_minted)
+      , reset_name_(std::move(io_setup.reset_name))
+      , reset_minted_(io_setup.reset_minted)
+      , reset_neg_(io_setup.reset_neg)
+      , reset_async_default_(async_default) {}
 
 private:
   // Deferred stage-reg creation: a declare(reg)+stages does NOT
@@ -143,40 +142,46 @@ private:
   // interval + kind, recorded when the Sub is created and consumed by the
   // following stage-reg din store for the range check + deficit narrowing.
   struct Sub_out {
-    int64_t           cmin    = 0;
-    int64_t           cmax    = 0;  // pipe convention: 0 with cmin>=1 = unconstrained
-    bool              is_pipe = false;
-    hhds::Node_class  node;  // to re-stamp time_range when stage[N] pins the pick
+    int64_t          cmin    = 0;
+    int64_t          cmax    = 0;  // pipe convention: 0 with cmin>=1 = unconstrained
+    bool             is_pipe = false;
+    hhds::Node_class node;  // to re-stamp time_range when stage[N] pins the pick
   };
 
 public:
-
   void build() {
     // Module anchor: io-time cells (the to-positive port masks below)
     // are minted outside any statement — anchor them, and the graph io nodes
     // cgen reads for the module header, at the unit's `mod`/`comb` declaration
     // (stamped on the LNAST root by func_extract / the specialize clone).
     if (const auto id = lnast_->get_srcid(lnast_->get_root()); id != hhds::SourceId_invalid) {
-      cur_srcid_ = livehd::srcloc::import_srcid(g_->source_locator(), lnast_->source_locator(), id);
+      cur_srcid_ = g_->source_locator().import_from(lnast_->source_locator(), id);
     }
 
     // Inputs: from io_meta(). Unsigned inputs are wrapped in a to-positive
     // Get_mask so signed-declared ports read with their unsigned value (e.g.
     // a 3-bit `a` = 0b111 reads as 7, not -1) — mirrors lgyosys tposs.
     for (const auto& e : lnast_->io_meta().inputs) {
-      auto   raw = g_->get_input_pin(e.name);  // body driver pin for the port
+      auto raw = g_->get_input_pin(e.name);  // body driver pin for the port
       if (cur_srcid_ != hhds::SourceId_invalid && !raw.is_invalid()) {
         raw.get_master_node().attr(hhds::attrs::srcid).set(cur_srcid_);
       }
-      int32_t mw  = io_mw(e);
-      if (e.kind == Io_kind::boolean || mw <= 1) {
+      int32_t mw = io_mw(e);
+      if (e.kind == Io_kind::boolean) {
+        set_bits(raw, 1);
+        set_unsign(raw);
+        record(e.name, raw, 1);
+      } else if (mw <= 1) {
         set_bits(raw, 1);
         if (e.is_signed) {
           set_sign(raw);
+          record(e.name, raw, 1);
         } else {
-          set_unsign(raw);
+          // 1-bit unsigned: same to-positive contract as the wide branch
+          // below, else `x + y` on 1-bit ports reads -1 (port decls are signed).
+          set_sign(raw);
+          record(e.name, to_positive(raw, 1), 1);
         }
-        record(e.name, raw, 1);
       } else if (e.is_signed) {
         set_bits(raw, mw);
         set_sign(raw);
@@ -228,7 +233,7 @@ public:
       }
       auto it = pin_map_.find(name);
       if (it == pin_map_.end()) {
-        Pass::warn("upass.tolg: output '{}' not driven by body — wiring nil (0sb?)", name);
+        warn_at(Lnast_nid{}, {"undriven-output", "type"}, "output '{}' not driven by body — wiring nil (0sb?)", name);
         sink.connect_driver(create_const(*g_, *Dlop::from_pyrope("0sb?")));
         continue;
       }
@@ -297,14 +302,16 @@ private:
       // A memory name never binds a scalar pin; only indexed
       // accesses are supported. A warning (not an error): hardware regs may
       // legitimately be observed by other means (scan chain, future regref).
-      Pass::warn("upass.tolg: memory '{}' used as a scalar value — whole-array reads are unsupported, wiring nil (0sb?)",
-                 name);
+      warn_at(Lnast_nid{},
+              {"memory-scalar-read", "unsupported"},
+              "memory '{}' used as a scalar value — whole-array reads are unsupported, wiring nil (0sb?)",
+              name);
       auto p        = nil_pin();
       pin_map_[key] = p;
       mw_map_[key]  = 1;
       return p;
     }
-    Pass::warn("upass.tolg: unresolved ref '{}' — wiring nil (0sb?)", name);
+    warn_at(Lnast_nid{}, {"unresolved-ref", "name"}, "unresolved ref '{}' — wiring nil (0sb?)", name);
     auto p        = nil_pin();
     pin_map_[key] = p;
     mw_map_[key]  = 1;
@@ -313,8 +320,8 @@ private:
 
   [[nodiscard]] Val leaf(const Lnast_nid& nid) {
     if (Lnast_ntype::is_const(lnast_->get_type(nid))) {
-      auto   c  = Dlop::from_pyrope(lnast_->get_name(nid));
-      int32_t mw = c->is_just_i64() ? mw_of_val(c->to_just_i64()) : int32_t{1};
+      auto    c  = Dlop::from_pyrope(lnast_->get_name(nid));
+      int32_t mw = c->is_just_i64() ? mw_of_val(c->to_just_i64()) : std::max<int32_t>(1, static_cast<int32_t>(c->get_bits()));
       return {create_const(*g_, *c), mw};
     }
     auto name = lnast_->get_name(nid);
@@ -342,39 +349,58 @@ private:
   // stamped with it, so LGraph nodes resolve back to Pyrope source.
   hhds::SourceId cur_srcid_{0};
 
-  // Stage a located Diagnostic, then throw (Pass::error semantics —
-  // the downstream flush seam emits the staged record exactly once, so the
-  // error carries a resolved span instead of no location). Anchor priority:
-  // the given nid's SourceId, falling back to the current statement's.
-  template <typename... Args>
-  [[noreturn]] void error_at(const Lnast_nid& nid, std::format_string<Args...> fmt, Args&&... args) {
-    auto               msg = std::format(fmt, std::forward<Args>(args)...);
-    livehd::diag::Span span;
+  // Anchor priority shared by error_at/warn_at: the given nid's SourceId,
+  // falling back to the current statement's (re-minted into the graph).
+  [[nodiscard]] livehd::diag::Diagnostic locate_record(const Lnast_nid& nid, livehd::diag::Severity sev, std::string_view code,
+                                                       std::string_view category, std::string msg) const {
+    livehd::diag::Span              span;
     std::vector<livehd::diag::Note> notes;
     if (!nid.is_invalid() && lnast_) {
       span  = lnast_->span_of(nid);
       notes = lnast_->notes_of(nid, "reached via this site");
     }
     if (span.is_null() && g_ != nullptr) {
-      span  = livehd::srcloc::span_of(g_->source_locator(), cur_srcid_);
-      notes = livehd::srcloc::notes_of(g_->source_locator(), cur_srcid_, "reached via this site");
+      const auto rs = g_->source_locator().resolve_spans(cur_srcid_);
+      span          = rs.primary;
+      notes         = livehd::diag::notes_from(rs, "reached via this site");
     }
-    livehd::diag::sink().stage(livehd::diag::Diagnostic{
-        .severity = livehd::diag::Severity::error,
-        .code     = "tolg-error",
-        .category = "type",
+    return livehd::diag::Diagnostic{
+        .severity = sev,
+        .code     = std::string(code),
+        .category = std::string(category),
         .pass     = "upass.tolg",
-        .message  = msg,
+        .message  = std::move(msg),
         .span     = std::move(span),
         .notes    = std::move(notes),
-    });
+    };
+  }
+
+  // Stage a located Diagnostic, then throw (Pass::error semantics — the
+  // downstream flush seam emits the staged record exactly once, so the error
+  // carries a resolved span instead of no location).
+  template <typename... Args>
+  [[noreturn]] void error_at(const Lnast_nid& nid, livehd::diag::Id id, std::format_string<Args...> fmt, Args&&... args) {
+    auto msg = std::format(fmt, std::forward<Args>(args)...);
+    livehd::diag::sink().stage(locate_record(nid, livehd::diag::Severity::error, id.code, id.category, msg));
     err_tracker::logger(msg);
     throw Eprp::parser_error(Pass::eprp, msg);
   }
 
   template <typename... Args>
+  [[noreturn]] void error_at(const Lnast_nid& nid, std::format_string<Args...> fmt, Args&&... args) {
+    error_at(nid, livehd::diag::Id{"tolg-error", "type"}, "{}", std::format(fmt, std::forward<Args>(args)...));
+  }
+
+  template <typename... Args>
   [[noreturn]] void error_here(std::format_string<Args...> fmt, Args&&... args) {
     error_at(Lnast_nid{}, "{}", std::format(fmt, std::forward<Args>(args)...));
+  }
+
+  // Non-fatal sibling: emit a located warning and continue lowering.
+  template <typename... Args>
+  void warn_at(const Lnast_nid& nid, livehd::diag::Id id, std::format_string<Args...> fmt, Args&&... args) {
+    auto msg = std::format(fmt, std::forward<Args>(args)...);
+    livehd::diag::sink().emit(locate_record(nid, livehd::diag::Severity::warning, id.code, id.category, std::move(msg)));
   }
 
   template <typename... Args>
@@ -387,12 +413,12 @@ private:
   }
 
   void lower_node(const Lnast_nid& nid) {
-    const auto t = lnast_->get_type(nid);
+    const auto t           = lnast_->get_type(nid);
     // Anchor the statement: nested lower_* calls (and the cells they mint)
     // inherit it; statements without an id keep the enclosing one.
     const auto saved_srcid = cur_srcid_;
     if (const auto id = lnast_->get_srcid(nid); id != hhds::SourceId_invalid) {
-      cur_srcid_ = livehd::srcloc::import_srcid(g_->source_locator(), lnast_->source_locator(), id);
+      cur_srcid_ = g_->source_locator().import_from(lnast_->source_locator(), id);
     }
     lower_node_dispatch(nid, t);
     cur_srcid_ = saved_srcid;
@@ -438,6 +464,10 @@ private:
       lower_op(nid, Ntype_op::SHL, false, OpW::maxw);
     } else if (N::is_sra(t)) {
       lower_op(nid, Ntype_op::SRA, false, OpW::firstw);
+    } else if (N::is_sext(t)) {
+      lower_sext(nid);
+    } else if (N::is_div(t)) {
+      lower_op(nid, Ntype_op::Div, false, OpW::firstw);
     } else if (N::is_bit_not(t) || N::is_log_not(t)) {
       lower_unary(nid, Ntype_op::Not);
     } else if (N::is_ne(t)) {
@@ -475,11 +505,12 @@ private:
       // nor a known tuple shape. Pyrope `for` is comptime-only (must fully
       // unroll), so this is a user error (a runtime/unknown iterable), not a
       // silent miscompile. HARD error rather than the unhandled warn below.
-      error_here("upass.tolg: non-comptime `for` loop in '{}' — the iterable did not resolve to a comptime range "
-                  "or tuple, so the loop could not unroll (Pyrope for-loops are comptime-only and must fully unroll)",
-                  lnast_->get_top_module_name());
+      error_here(
+          "upass.tolg: non-comptime `for` loop in '{}' — the iterable did not resolve to a comptime range "
+          "or tuple, so the loop could not unroll (Pyrope for-loops are comptime-only and must fully unroll)",
+          lnast_->get_top_module_name());
     } else {
-      Pass::warn("upass.tolg: unhandled node type '{}'", Lnast_ntype::to_sv(t));
+      warn_at(Lnast_nid{}, {"unhandled-node", "unsupported"}, "unhandled node type '{}'", Lnast_ntype::to_sv(t));
     }
   }
 
@@ -499,7 +530,13 @@ private:
     }
     auto it = reg_info_.find(std::string(lnast_->get_name(tgt)));
     if (it == reg_info_.end()) {
-      return;  // non-reg attr — carries no graph payload here
+      // Not a flop reg (yet): stash for a later array/memory declare (the
+      // importer emits the attr_set before the declare it qualifies).
+      auto  key_sv = lnast_->get_name(key_n);
+      auto  val_n0 = lnast_->get_sibling_next(key_n);
+      auto  val_sv = val_n0.is_invalid() ? std::string_view{"true"} : std::string_view(lnast_->get_name(val_n0));
+      pending_attrs_[std::string(lnast_->get_name(tgt))][std::string(key_sv)] = std::string(val_sv);
+      return;
     }
     auto& info  = it->second;
     auto  key   = lnast_->get_name(key_n);
@@ -507,6 +544,11 @@ private:
     auto  val   = val_n.is_invalid() ? std::string_view{"true"} : std::string_view(lnast_->get_name(val_n));
     if (key == "reset_pin") {
       info.reset_pin_name = std::string(val);
+    } else if (key == "clock_pin") {
+      info.clock_pin_name = std::string(val);
+    } else if (key == "posclk") {
+      info.has_posclk = true;
+      info.posclk_val = val != "false" && val != "0";
     } else if (key == "sync") {
       info.has_sync = true;
       info.sync_val = val != "false" && val != "0";
@@ -517,7 +559,11 @@ private:
     } else if (key == "type" || key == "comptime") {
       // storage-class markers — already consumed by the declare
     } else {
-      Pass::warn("upass.tolg: reg '{}' attribute '{}' not lowered (out of the 2d-reg slice)", lnast_->get_name(tgt), key);
+      warn_at(tgt,
+              {"reg-attr-not-lowered", "unsupported"},
+              "reg '{}' attribute '{}' not lowered (attribute not in the lowered set)",
+              lnast_->get_name(tgt),
+              key);
     }
   }
 
@@ -530,10 +576,10 @@ private:
       auto& flop = info.flop;
 
       // Runs after the walk: anchor this reg's diagnostics at its declaration
-      // ([[1f]]-F) instead of whatever statement the walk ended on.
+      // instead of whatever statement the walk ended on.
       cur_srcid_ = hhds::SourceId_invalid;
       if (const auto id = lnast_->get_srcid(info.decl_nid); id != hhds::SourceId_invalid) {
-        cur_srcid_ = livehd::srcloc::import_srcid(g_->source_locator(), lnast_->source_locator(), id);
+        cur_srcid_ = g_->source_locator().import_from(lnast_->source_locator(), id);
       }
 
       // din: the final shadow value (last-write-wins; branch writes arrive
@@ -547,10 +593,30 @@ private:
       }
       setup_sink_by_name(flop, "din").connect_driver(din);
 
+      // clock: explicit clock_pin=NAME beats the implicit/shared clock input.
+      if (!info.clock_pin_name.empty()) {
+        auto cpin = g_->get_input_pin(info.clock_pin_name);
+        if (cpin.is_invalid()) {
+          error_here("upass.tolg: reg '{}' names clock_pin '{}' but '{}' has no such input",
+                     name,
+                     info.clock_pin_name,
+                     lnast_->get_top_module_name());
+          continue;
+        }
+        setup_sink_by_name(flop, "clock_pin").connect_driver(cpin);
+      } else if (!clock_name_.empty()) {
+        setup_sink_by_name(flop, "clock_pin").connect_driver(clock_pin());
+      } else {
+        warn_at(info.decl_nid, {"no-clock", "time"}, "reg '{}' has no clock input to bind", name);
+      }
+      if (info.has_posclk && !info.posclk_val) {
+        setup_sink_by_name(flop, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+      }
+
       // q width: untyped regs take the final din width (mw+1 unsigned).
       if (info.decl_mw == 0) {
-        auto dit = mw_map_.find(din_key(name));
-        int32_t mw = dit != mw_map_.end() ? dit->second : int32_t{1};
+        auto    dit = mw_map_.find(din_key(name));
+        int32_t mw  = dit != mw_map_.end() ? dit->second : int32_t{1};
         set_bits(q, mw + 1);
         set_unsign(q);
         mw_map_[name] = mw;
@@ -560,9 +626,9 @@ private:
       // the true const => unconditionally written (no enable needed); any
       // other pin is the OR-of-conditions mux chain.
       if (auto eit = pin_map_.find(en_key(name)); eit != pin_map_.end()) {
-        const auto en      = eit->second;
-        const auto en_nid  = en.get_master_node().get_debug_nid();
-        const bool is_true = en_true_valid_ && en_nid == en_true_pin_.get_master_node().get_debug_nid();
+        const auto en       = eit->second;
+        const auto en_nid   = en.get_master_node().get_debug_nid();
+        const bool is_true  = en_true_valid_ && en_nid == en_true_pin_.get_master_node().get_debug_nid();
         const bool is_false = en_false_valid_ && en_nid == en_false_pin_.get_master_node().get_debug_nid();
         if (!is_true && !is_false) {
           setup_sink_by_name(flop, "enable").connect_driver(en);
@@ -572,12 +638,11 @@ private:
       // Reset wiring. Effective init: an explicit `initial=N` attr overrides
       // the declare's [value]; "nil" (or absent) = NO reset (confirmed
       // 2026-06-07 ruling).
-      const std::string init = !info.initial_txt.empty() ? info.initial_txt : info.init_txt;
-      const bool has_init    = !init.empty() && init != "nil";
-      const bool rp_false    = info.reset_pin_name == "false";
+      const std::string init     = !info.initial_txt.empty() ? info.initial_txt : info.init_txt;
+      const bool        has_init = !init.empty() && init != "nil";
+      const bool        rp_false = info.reset_pin_name == "false";
       if (rp_false && has_init) {
-        error_here("upass.tolg: reg '{}' has a non-nil initializer but `reset_pin=false` — drop the init or the override",
-                    name);
+        error_here("upass.tolg: reg '{}' has a non-nil initializer but `reset_pin=false` — drop the init or the override", name);
         return;
       }
       const bool wants_reset = (has_init || (!info.reset_pin_name.empty() && !rp_false)) && !rp_false;
@@ -592,9 +657,9 @@ private:
         rpin = g_->get_input_pin(info.reset_pin_name);
         if (rpin.is_invalid()) {
           error_here("upass.tolg: reg '{}' names reset_pin '{}' but '{}' has no such input",
-                      name,
-                      info.reset_pin_name,
-                      lnast_->get_top_module_name());
+                     name,
+                     info.reset_pin_name,
+                     lnast_->get_top_module_name());
           return;
         }
         if (info.reset_pin_name.ends_with("_n")) {
@@ -607,8 +672,8 @@ private:
         }
       } else {
         error_here("upass.tolg: reg '{}' has a reset value but '{}' has no reset input (setup_io bug)",
-                    name,
-                    lnast_->get_top_module_name());
+                   name,
+                   lnast_->get_top_module_name());
         return;
       }
       setup_sink_by_name(flop, "reset_pin").connect_driver(rpin);
@@ -659,7 +724,10 @@ private:
       return;
     }
     if (!lnast_->get_sibling_next(rhs).is_invalid()) {
-      Pass::warn("upass.tolg: tuple/field store not handled yet (lhs '{}')", lnast_->get_name(lhs));
+      warn_at(lhs,
+              {"tuple-store-unsupported", "unsupported"},
+              "tuple/field store not handled yet (lhs '{}')",
+              lnast_->get_name(lhs));
       return;
     }
     auto lhs_name = lnast_->get_name(lhs);
@@ -672,7 +740,7 @@ private:
       return;
     }
     if (reg_map_.contains(lhs_name)) {
-      // 2d-reg — a store to a declared reg is a next-state write: rebind the
+      // A store to a declared reg is a next-state write: rebind the
       // SHADOW din/enable keys (never the name — reads keep seeing q, Verilog
       // `<=` semantics). The branch-mux machinery merges conditional writes
       // into last-write-wins din + OR-of-conditions enable; finalize_regs()
@@ -722,15 +790,15 @@ private:
     if (name_nid.is_invalid()) {
       return;
     }
-    auto type_nid = lnast_->get_sibling_next(name_nid);
-    auto mode_nid = type_nid.is_invalid() ? type_nid : lnast_->get_sibling_next(type_nid);
-    auto mode     = mode_nid.is_invalid() || !Lnast_ntype::is_const(lnast_->get_type(mode_nid))
-                        ? std::string_view{}
-                        : std::string_view(lnast_->get_name(mode_nid));
+    auto       type_nid = lnast_->get_sibling_next(name_nid);
+    auto       mode_nid = type_nid.is_invalid() ? type_nid : lnast_->get_sibling_next(type_nid);
+    auto       mode     = mode_nid.is_invalid() || !Lnast_ntype::is_const(lnast_->get_type(mode_nid))
+                              ? std::string_view{}
+                              : std::string_view(lnast_->get_name(mode_nid));
     // 1a-mem — an array-typed declare is a Memory cell: reg → clocked async
     // memory; a mut/const array that survived to tolg (runtime-indexed) → a
     // comb type=2 array / ROM. Never a Flop, never a plain binding.
-    const bool is_reg = mode == "reg" || mode.starts_with("reg ");
+    const bool is_reg   = mode == "reg" || mode.starts_with("reg ");
     if (!type_nid.is_invalid() && Lnast_ntype::is_comp_type_array(lnast_->get_type(type_nid))
         && (is_reg || mode == "mut" || mode == "const" || mode.starts_with("mut ") || mode.starts_with("const "))) {
       lower_mem_declare(name_nid, type_nid, mode_nid, /*is_array=*/!is_reg);
@@ -757,26 +825,23 @@ private:
       if (mn.is_invalid()) {
         break;
       }
-      auto mx = lnast_->get_sibling_next(mn);
+      auto          mx = lnast_->get_sibling_next(mn);
       Pending_stage p;
-      p.min_txt  = std::string(lnast_->get_name(mn));
-      p.max_txt  = mx.is_invalid() ? p.min_txt : std::string(lnast_->get_name(mx));
-      p.decl_nid = nid;
+      p.min_txt                                               = std::string(lnast_->get_name(mn));
+      p.max_txt                                               = mx.is_invalid() ? p.min_txt : std::string(lnast_->get_name(mx));
+      p.decl_nid                                              = nid;
       pending_stage_[std::string(lnast_->get_name(name_nid))] = std::move(p);
       return;
     }
 
-    // Plain reg (no stages) — 2d-reg state/stage register: create the Flop
+    // Plain reg (no stages) — state/stage register: create the Flop
     // now; the name binds to q (reads see q), stores rebind the shadow
     // din/enable keys, finalize_regs() wires the pins. The declared type
     // gives q's width up front (a counter's `r + 1` read needs it before any
     // din store); untyped regs restamp from the final din width.
     auto flop = make_node(Ntype_op::Flop);
-    if (!clock_name_.empty()) {
-      setup_sink_by_name(flop, "clock_pin").connect_driver(clock_pin());
-    } else {
-      Pass::warn("upass.tolg: reg '{}' has no clock input to bind", lnast_->get_name(name_nid));
-    }
+    // clock wiring happens in finalize_regs (a clock_pin/posclk attr_set may
+    // arrive after the declare).
     auto name = lnast_->get_name(name_nid);
     auto q    = flop.create_driver_pin(0);
 
@@ -786,7 +851,7 @@ private:
     if (!type_nid.is_invalid()) {
       std::tie(info.decl_mw, info.is_signed) = declared_width(type_nid);
     }
-    // 2d-reg / 3j — the declare's optional trailing [value] child is the
+    // The declare's optional trailing [value] child is the
     // power-on/reset value (a const after declare-folding; an unresolved ref
     // means a runtime initializer, which a reset value cannot be).
     for (auto c = lnast_->get_sibling_next(mode_nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
@@ -796,8 +861,7 @@ private:
         break;
       }
       if (Lnast_ntype::is_ref(ct)) {
-        error_here("upass.tolg: reg '{}' initializer is not a compile-time constant — a reset value must be comptime",
-                    name);
+        error_here("upass.tolg: reg '{}' initializer is not a compile-time constant — a reset value must be comptime", name);
         return;
       }
     }
@@ -823,27 +887,40 @@ private:
     record(en_key(name), en_const(false), 1);
   }
 
-  // 2d-reg — per-reg lowering state recorded at the declare; consumed by
+  // Per-reg lowering state recorded at the declare; consumed by
   // finalize_regs() after every store/attr_set has been seen.
   struct Reg_info {
     hhds::Node_class flop;
     Lnast_nid        decl_nid;
-    std::string      init_txt;  // declare [value] child; "" = none, "nil" = explicit no-reset
-    int32_t           decl_mw   = 0;  // declared type width; 0 = untyped
+    std::string      init_txt;       // declare [value] child; "" = none, "nil" = explicit no-reset
+    int32_t          decl_mw   = 0;  // declared type width; 0 = untyped
     bool             is_signed = false;
     // Per-reg flop-attr overrides (04b-attributes.md): a per-reg `sync` beats
     // the upass.reset_style flag; `reset_pin=false` opts out of reset.
-    std::string reset_pin_name;  // explicit reset_pin=NAME / "false"
-    bool        has_sync = false;
-    bool        sync_val = true;
-    bool        negreset = false;
-    std::string initial_txt;  // explicit initial=N (overrides init_txt)
+    std::string      reset_pin_name;  // explicit reset_pin=NAME / "false"
+    std::string      clock_pin_name;  // explicit clock_pin=NAME (beats implicit clock)
+    bool             has_posclk = false;
+    bool             posclk_val = true;  // false = negedge clock
+    bool             has_sync = false;
+    bool             sync_val = true;
+    bool             negreset = false;
+    std::string      initial_txt;  // explicit initial=N (overrides init_txt)
   };
 
   // Shadow pin_map_ keys for a reg's next-state value and write-enable. The
   // \x01 prefix cannot collide with user identifiers or `___N` temps.
-  [[nodiscard]] static std::string din_key(std::string_view n) { return std::string("\x01""din:").append(n); }
-  [[nodiscard]] static std::string en_key(std::string_view n) { return std::string("\x01""en:").append(n); }
+  [[nodiscard]] static std::string din_key(std::string_view n) {
+    return std::string(
+               "\x01"
+               "din:")
+        .append(n);
+  }
+  [[nodiscard]] static std::string en_key(std::string_view n) {
+    return std::string(
+               "\x01"
+               "en:")
+        .append(n);
+  }
 
   // Cached 1/0 const pins for the enable shadow (node identity doubles as the
   // "still unconditionally true/false" test in finalize_regs).
@@ -864,17 +941,17 @@ private:
   // r-th read port's data comes out on driver pid (n_wr_total + r), so the
   // write-site count is pre-scanned at the declare.
   struct Mem_info {
-    hhds::Node_class node;
-    int64_t          size        = 0;
-    int32_t           elem_mw     = 0;  // element max-value width
-    bool             elem_signed = false;
-    bool             is_array    = false;  // type=2: mut/const array (no clock, no persistence)
-    bool             is_pub      = false;  // pub reg: a remote regref may attach accesses — no diagnostics
-    bool             init_wired  = false;
-    int              n_wr_total  = 0;  // user sites + restore ports (fixes dout pids)
-    int              n_user_wr   = 0;  // pre-scanned program write sites
-    int              wr_next     = 0;
-    int              rd_next     = 0;
+    hhds::Node_class             node;
+    int64_t                      size        = 0;
+    int32_t                      elem_mw     = 0;  // element max-value width
+    bool                         elem_signed = false;
+    bool                         is_array    = false;  // type=2: mut/const array (no clock, no persistence)
+    bool                         is_pub      = false;  // pub reg: a remote regref may attach accesses — no diagnostics
+    bool                         init_wired  = false;
+    int                          n_wr_total  = 0;  // user sites + restore ports (fixes dout pids)
+    int                          n_user_wr   = 0;  // pre-scanned program write sites
+    int                          wr_next     = 0;
+    int                          rd_next     = 0;
     // 1a-mem reset-restore — per-entry init values: when a concrete-init reg
     // array coexists with a bound reset, finalize_mems() adds one restore
     // write port per entry (addr=k, din=init[k], enable=reset) and gates the
@@ -1053,12 +1130,21 @@ private:
       }
     }
 
-    const int  user_sites    = count_mem_write_sites(name);
-    const bool wants_restore = !is_array && reg_init && !reset_name_.empty();
+    const int     user_sites    = count_mem_write_sites(name);
+    const bool    wants_restore = !is_array && reg_init && !reset_name_.empty();
     // The fwd mask covers exactly the PROGRAM write ports (per-write-port
     // forwarding in the cgen wrappers); restore ports stay un-forwarded so a
-    // read during reset returns the committed contents.
-    const int64_t fwd_mask = is_array ? 1 : (int64_t{1} << user_sites) - 1;
+    // read during reset returns the committed contents. A pre-declared
+    // `fwd=0` attr (verilog nonblocking memory semantics: reads see the old
+    // contents) clears the program-port forwarding.
+    int64_t fwd_mask = is_array ? 1 : (int64_t{1} << user_sites) - 1;
+    if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
+      if (auto fit = pit->second.find("fwd"); fit != pit->second.end()) {
+        if (auto fv = Dlop::from_pyrope(fit->second); fv && fv->is_just_i64()) {
+          fwd_mask = fv->to_just_i64();
+        }
+      }
+    }
 
     auto mem = make_node(Ntype_op::Memory);
     setup_sink_by_name(mem, "bits").connect_driver(create_const(*g_, *Dlop::create_integer(elem_mw)));
@@ -1074,7 +1160,7 @@ private:
       if (!clock_name_.empty()) {
         setup_sink_by_name(mem, "clock_pin").connect_driver(clock_pin());
       } else {
-        Pass::warn("upass.tolg: memory '{}' has no clock input to bind", name);
+        warn_at(Lnast_nid{}, {"no-clock", "time"}, "memory '{}' has no clock input to bind", name);
       }
     }
 
@@ -1129,7 +1215,7 @@ private:
           continue;
         }
       }
-      Pass::warn("upass.tolg: unhandled node type 'tuple_add'");
+      warn_at(nid, {"unhandled-node", "unsupported"}, "unhandled node type 'tuple_add'");
       return;
     }
     tuple_recs_[std::string(lnast_->get_name(dst))] = std::move(rec);
@@ -1203,7 +1289,7 @@ private:
     hhds::Node_class node;
     int              n_wr = 0;
     int              n_rd = 0;
-    int32_t           bits = 0;
+    int32_t          bits = 0;
   };
 
   // fcall(ref dst, ref __memory, ref cfg) — direct Memory-cell instantiation
@@ -1225,21 +1311,23 @@ private:
     }
     auto rit = tuple_recs_.find(std::string(lnast_->get_name(arg)));
     if (rit == tuple_recs_.end()) {
-      error_here("upass.tolg: __memory config '{}' must be a single tuple literal (build it as `mut cfg = (addr=…, "
-                  "bits=…, …)`)",
-                  lnast_->get_name(arg));
+      error_here(
+          "upass.tolg: __memory config '{}' must be a single tuple literal (build it as `mut cfg = (addr=…, "
+          "bits=…, …)`)",
+          lnast_->get_name(arg));
       return true;
     }
     const auto& cfg = rit->second;
 
     // Guardrail: cell pins verbatim — diagnose the old doc vocabulary.
-    static constexpr std::string_view known[] = {"addr", "bits", "clock_pin", "din", "enable", "fwd", "posclk",
-                                                 "type", "wensize", "size", "rdport", "init"};
+    static constexpr std::string_view known[]
+        = {"addr", "bits", "clock_pin", "din", "enable", "fwd", "posclk", "type", "wensize", "size", "rdport", "init"};
     for (const auto& [k, v] : cfg.named) {
       if (std::find(std::begin(known), std::end(known), k) == std::end(known)) {
-        error_here("upass.tolg: unknown __memory config field '{}' — the vocabulary is the Memory cell pins verbatim "
-                    "(addr/bits/clock_pin/din/enable/fwd/posclk/type/wensize/size/rdport/init; no `latency`, no `clock`)",
-                    k);
+        error_here(
+            "upass.tolg: unknown __memory config field '{}' — the vocabulary is the Memory cell pins verbatim "
+            "(addr/bits/clock_pin/din/enable/fwd/posclk/type/wensize/size/rdport/init; no `latency`, no `clock`)",
+            k);
         return true;
       }
     }
@@ -1271,8 +1359,7 @@ private:
 
     int64_t bits = 0, size = 0, type = 0, fwd = 0, wensize = 1, posclk = 1;
     if (!cfg_const("bits", 0, true, bits) || !cfg_const("size", 0, true, size) || !cfg_const("type", 0, false, type)
-        || !cfg_const("fwd", 0, false, fwd) || !cfg_const("wensize", 1, false, wensize)
-        || !cfg_const("posclk", 1, false, posclk)) {
+        || !cfg_const("fwd", 0, false, fwd) || !cfg_const("wensize", 1, false, wensize) || !cfg_const("posclk", 1, false, posclk)) {
       return true;
     }
     if (bits <= 0 || size <= 0) {
@@ -1346,7 +1433,7 @@ private:
       } else if (!clock_name_.empty()) {
         setup_sink_by_name(mem, "clock_pin").connect_driver(clock_pin());
       } else {
-        Pass::warn("upass.tolg: __memory has no clock to bind in '{}'", lnast_->get_top_module_name());
+        warn_at(Lnast_nid{}, {"no-clock", "time"}, "__memory has no clock to bind in '{}'", lnast_->get_top_module_name());
       }
     }
     if (auto it = cfg.named.find("init"); it != cfg.named.end()) {
@@ -1369,7 +1456,7 @@ private:
         error_here("upass.tolg: __memory 'rdport' entry {} must be a comptime 0/1 constant", i);
         return true;
       }
-      auto v = Dlop::from_pyrope(lnast_->get_name(rdports[i]));
+      auto       v     = Dlop::from_pyrope(lnast_->get_name(rdports[i]));
       const bool is_rd = v && !v->is_known_false();
       if (!is_rd) {
         ++n_wr;
@@ -1394,8 +1481,7 @@ private:
       }
     }
 
-    mem_results_[std::string(lnast_->get_name(dst))]
-        = Mem_result{mem, n_wr, n_ports - n_wr, static_cast<int32_t>(bits)};
+    mem_results_[std::string(lnast_->get_name(dst))] = Mem_result{mem, n_wr, n_ports - n_wr, static_cast<int32_t>(bits)};
     return true;
   }
 
@@ -1421,15 +1507,16 @@ private:
       // A type=2 array is lowered writes-before-reads (forwarding), so a
       // source-order read placed BEFORE this write would wrongly see it.
       // reg memories are exempt: fwd semantics are order-free by contract.
-      error_here("upass.tolg: array '{}' is written after being read — same-cycle order is not preserved for "
-                  "mut/const arrays; reorder the accesses or use a `reg` memory",
-                  lhs_name);
+      error_here(
+          "upass.tolg: array '{}' is written after being read — same-cycle order is not preserved for "
+          "mut/const arrays; reorder the accesses or use a `reg` memory",
+          lhs_name);
       return;
     }
     const auto base = mi.wr_next * kMemPortStride;
     ++mi.wr_next;
-    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(leaf(idx).pin);   // addr
-    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3)).connect_driver(leaf(val).pin);   // din
+    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(leaf(idx).pin);  // addr
+    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3)).connect_driver(leaf(val).pin);  // din
     auto en = current_path_cond();
     if (en.is_invalid()) {
       en = en_const(true);
@@ -1446,11 +1533,51 @@ private:
     auto src = dst.is_invalid() ? dst : lnast_->get_sibling_next(dst);
     auto idx = src.is_invalid() ? src : lnast_->get_sibling_next(src);
     if (idx.is_invalid()) {
-      Pass::warn("upass.tolg: unhandled node type 'tuple_get'");
+      warn_at(nid, {"unhandled-node", "unsupported"}, "unhandled node type 'tuple_get'");
       return;
     }
     auto it = mem_map_.find(std::string(lnast_->get_name(src)));
     if (it == mem_map_.end()) {
+      // Multi-output Sub result: tuple_get(dst, result, 'port') binds that
+      // output port's driver pin with the io-entry width/sign contract.
+      if (auto srt = sub_results_.find(std::string(lnast_->get_name(src))); srt != sub_results_.end()) {
+        if (!Lnast_ntype::is_const(lnast_->get_type(idx)) || !lnast_->get_sibling_next(idx).is_invalid()) {
+          error_here("upass.tolg: a multi-output instance result is read by a single output-port name");
+          return;
+        }
+        const auto&           pname = lnast_->get_name(idx);
+        const Lnast_io_entry* oe    = nullptr;
+        for (const auto& e : srt->second.outputs) {
+          if (e.name == pname) {
+            oe = &e;
+            break;
+          }
+        }
+        if (oe == nullptr) {
+          error_here("upass.tolg: instance result has no output named '{}'", pname);
+          return;
+        }
+        auto    out_dpin = srt->second.sub.create_driver_pin(oe->name);
+        int32_t mw       = io_mw(*oe);
+        if (oe->kind == Io_kind::boolean || mw <= 1) {
+          set_bits(out_dpin, 1);
+          if (oe->is_signed) {
+            set_sign(out_dpin);
+          } else {
+            set_unsign(out_dpin);
+          }
+          record(lnast_->get_name(dst), out_dpin, 1);
+        } else if (oe->is_signed) {
+          set_bits(out_dpin, mw);
+          set_sign(out_dpin);
+          record(lnast_->get_name(dst), out_dpin, mw);
+        } else {
+          set_bits(out_dpin, mw);
+          set_sign(out_dpin);
+          record(lnast_->get_name(dst), to_positive(out_dpin, mw), mw);
+        }
+        return;
+      }
       // 1a-mem — res[N] on a __memory result: bind the N-th read port's dout.
       if (auto mrt = mem_results_.find(std::string(lnast_->get_name(src))); mrt != mem_results_.end()) {
         const auto& mr = mrt->second;
@@ -1458,12 +1585,12 @@ private:
           error_here("upass.tolg: a __memory result is indexed by a single comptime read-port number");
           return;
         }
-        auto v = Dlop::from_pyrope(lnast_->get_name(idx));
+        auto          v = Dlop::from_pyrope(lnast_->get_name(idx));
         const int64_t k = (v && v->is_just_i64()) ? v->to_just_i64() : -1;
         if (k < 0 || k >= mr.n_rd) {
           error_here("upass.tolg: __memory result index {} out of range — the config has {} read port(s)",
-                      lnast_->get_name(idx),
-                      mr.n_rd);
+                     lnast_->get_name(idx),
+                     mr.n_rd);
           return;
         }
         auto dout = mr.node.create_driver_pin(static_cast<hhds::Port_id>(mr.n_wr + k));
@@ -1472,7 +1599,7 @@ private:
         record(lnast_->get_name(dst), to_positive(dout, mr.bits), mr.bits);
         return;
       }
-      Pass::warn("upass.tolg: unhandled node type 'tuple_get'");
+      warn_at(nid, {"unhandled-node", "unsupported"}, "unhandled node type 'tuple_get'");
       return;
     }
     auto& mi = it->second;
@@ -1509,9 +1636,9 @@ private:
       const auto& mi = it->second;
       if (mi.wr_next != mi.n_user_wr) {
         error_here("upass.tolg: internal — memory '{}' lowered {} write sites but the pre-scan counted {}",
-                    name,
-                    mi.wr_next,
-                    mi.n_user_wr);
+                   name,
+                   mi.wr_next,
+                   mi.n_user_wr);
       }
       // 1a-mem reset-restore — a concrete-init reg array with a bound reset
       // restores its init on reset: one write port per entry (addr=k,
@@ -1540,8 +1667,7 @@ private:
         }
         for (int64_t k = 0; k < static_cast<int64_t>(mi.restore_vals.size()); ++k) {
           const auto base = (mi.n_user_wr + k) * kMemPortStride;
-          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0))
-              .connect_driver(create_const(*g_, *Dlop::create_integer(k)));
+          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(create_const(*g_, *Dlop::create_integer(k)));
           mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3))
               .connect_driver(create_const(*g_, *mi.restore_vals[static_cast<size_t>(k)]));
           mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(rst);
@@ -1553,7 +1679,10 @@ private:
       // can be observed by a scan chain, and a future remote regref may
       // attach reads/writes. `pub` (regref potential) silences it entirely.
       if (!mi.is_pub && mi.rd_next == 0) {
-        Pass::warn("upass.tolg: memory '{}' is never read — contents are only observable via scan/regref", name);
+        warn_at(Lnast_nid{},
+                {"memory-never-read", "type"},
+                "memory '{}' is never read — contents are only observable via scan/regref",
+                name);
       }
     }
   }
@@ -1579,9 +1708,9 @@ private:
     if (!max_v || !max_v->is_integer()) {
       return {0, false};
     }
-    bool   min_known   = false;
-    bool   min_neg     = false;
-    int32_t min_bits    = 0;
+    bool    min_known = false;
+    bool    min_neg   = false;
+    int32_t min_bits  = 0;
     if (!mn.is_invalid()) {
       if (auto mn_v = Dlop::from_pyrope(lnast_->get_name(mn)); mn_v && mn_v->is_integer()) {
         min_known = true;
@@ -1611,10 +1740,10 @@ private:
   // Depth (0,0) is a plain wire — no Flop is created at all.
   void create_stage_flop(std::string_view name, const Pending_stage& p, const Lnast_nid& rhs) {
     // Runs from finalize (no statement walk active): anchor the flop at the
-    // stage declaration ([[1f]]-E).
+    // stage declaration.
     cur_srcid_ = hhds::SourceId_invalid;
     if (const auto id = lnast_->get_srcid(p.decl_nid); id != hhds::SourceId_invalid) {
-      cur_srcid_ = livehd::srcloc::import_srcid(g_->source_locator(), lnast_->source_locator(), id);
+      cur_srcid_ = g_->source_locator().import_from(lnast_->source_locator(), id);
     }
     const bool min_nil = p.min_txt == "nil";
     const bool max_nil = p.max_txt == "nil";
@@ -1651,15 +1780,12 @@ private:
         if (n < so.cmin || (so.cmax >= so.cmin && n > so.cmax)) {
           if (so.cmax >= so.cmin) {
             error_here("upass.tolg: stage[{}] on '{}' is outside the callee's declared latency range [{}, {}]",
-                        n,
-                        name,
-                        so.cmin,
-                        so.cmax);
+                       n,
+                       name,
+                       so.cmin,
+                       so.cmax);
           } else {
-            error_here("upass.tolg: stage[{}] on '{}' is below the callee's declared minimum latency {}",
-                        n,
-                        name,
-                        so.cmin);
+            error_here("upass.tolg: stage[{}] on '{}' is below the callee's declared minimum latency {}", n, name, so.cmin);
           }
           return;
         }
@@ -1667,11 +1793,12 @@ private:
       } else {
         // mod callee: the output's landing cycle is fixed by its interface.
         if (so.cmin != so.cmax || n != so.cmin) {
-          error_here("upass.tolg: mod call result '{}' lands at its declared cycle {} — `stage[{}]` must match it "
-                      "(add a separate `stage[N] x = value` for extra delay)",
-                      name,
-                      so.cmin,
-                      n);
+          error_here(
+              "upass.tolg: mod call result '{}' lands at its declared cycle {} — `stage[{}]` must match it "
+              "(add a separate `stage[N] x = value` for extra delay)",
+              name,
+              so.cmin,
+              n);
           return;
         }
         emin = emax = 0;
@@ -1699,9 +1826,9 @@ private:
       return;
     }
 
-    auto flop = make_node(Ntype_op::Flop);
+    auto flop                         = make_node(Ntype_op::Flop);
     flop_depth_[flop.get_debug_nid()] = {emin, emax};
-    // 2d-reg — the LN-inserted pipe output flop (vs a user `stage[N]` reg) is
+    // The LN-inserted pipe output flop (vs a user `stage[N]` reg) is
     // the narrowing target: LG pass1 rewrites its depth to (min−σ, max−σ).
     if (name.starts_with("___pipe_")) {
       inserted_flops_.insert(flop.get_debug_nid());
@@ -1711,7 +1838,7 @@ private:
     if (!clock_name_.empty()) {
       setup_sink_by_name(flop, "clock_pin").connect_driver(clock_pin());
     } else {
-      Pass::warn("upass.tolg: reg '{}' has no clock input to bind", name);
+      warn_at(Lnast_nid{}, {"no-clock", "time"}, "reg '{}' has no clock input to bind", name);
     }
     setup_sink_by_name(flop, "din").connect_driver(v.pin);
     auto q = flop.create_driver_pin(0);
@@ -1755,9 +1882,9 @@ private:
     std::string                    callee_full;
     std::shared_ptr<hhds::GraphIO> gio;
     const Lnast_tree_io*           cio_ptr = nullptr;
-    Lnast_tree_io                  cio_lg;            // synthesized for an lg: black box
-    std::string_view               kind;             // callee lambda kind ("" for an lg: black box)
-    std::shared_ptr<Lnast>         callee;            // kept alive: cio_ptr may point into its io_meta()
+    Lnast_tree_io                  cio_lg;  // synthesized for an lg: black box
+    std::string_view               kind;    // callee lambda kind ("" for an lg: black box)
+    std::shared_ptr<Lnast>         callee;  // kept alive: cio_ptr may point into its io_meta()
 
     // An `import("lg:foo")` binding folds the callee to the string
     // 'lg:foo'. Instantiate the foreign graph as a BLACK BOX: its GraphIO (the
@@ -1778,9 +1905,10 @@ private:
     if (!lg_name.empty()) {
       gio = lib_ != nullptr ? lib_->find_io(lg_name) : nullptr;
       if (!gio) {
-        error_here("upass.tolg: imported lg: graph '{}' not found in any input library — pass it as an `lg:` "
-                    "input (or it failed to load)",
-                    lg_name);
+        error_here(
+            "upass.tolg: imported lg: graph '{}' not found in any input library — pass it as an `lg:` "
+            "input (or it failed to load)",
+            lg_name);
         return;
       }
       auto kind_of_bits = [](uint32_t b) { return b == 1 ? Io_kind::boolean : Io_kind::integer; };
@@ -1788,12 +1916,16 @@ private:
         if (d.name == "clock" || d.name == "reset") {
           continue;  // implicit; wired from the parent below, not an argument
         }
-        cio_lg.inputs.push_back(
-            Lnast_io_entry{.name = d.name, .bits = static_cast<int32_t>(d.bits), .is_signed = !d.unsign, .kind = kind_of_bits(d.bits)});
+        cio_lg.inputs.push_back(Lnast_io_entry{.name      = d.name,
+                                               .bits      = static_cast<int32_t>(d.bits),
+                                               .is_signed = !d.unsign,
+                                               .kind      = kind_of_bits(d.bits)});
       }
       for (const auto& d : gio->get_output_pin_decls()) {
-        cio_lg.outputs.push_back(
-            Lnast_io_entry{.name = d.name, .bits = static_cast<int32_t>(d.bits), .is_signed = !d.unsign, .kind = kind_of_bits(d.bits)});
+        cio_lg.outputs.push_back(Lnast_io_entry{.name      = d.name,
+                                                .bits      = static_cast<int32_t>(d.bits),
+                                                .is_signed = !d.unsign,
+                                                .kind      = kind_of_bits(d.bits)});
       }
       cio_ptr     = &cio_lg;
       callee_full = lg_name;
@@ -1820,10 +1952,10 @@ private:
       // latency-carrying instance.
       if (lnast_->get_lambda_kind() != "mod") {
         error_here("upass.tolg: '{}' (a {}) calls the {} '{}' — only `mod` bodies may instantiate pipe/mod",
-                    lnast_->get_top_module_name(),
-                    lnast_->get_lambda_kind().empty() ? std::string_view{"comb"} : lnast_->get_lambda_kind(),
-                    kind,
-                    callee_name);
+                   lnast_->get_top_module_name(),
+                   lnast_->get_lambda_kind().empty() ? std::string_view{"comb"} : lnast_->get_lambda_kind(),
+                   kind,
+                   callee_name);
         return;
       }
 
@@ -1836,10 +1968,8 @@ private:
       cio_ptr = &callee->io_meta();
     }
     const auto& cio = *cio_ptr;
-    if (cio.outputs.size() != 1) {
-      error_here("upass.tolg: call to '{}' has {} outputs — multi-output call sites land in a later phase",
-                  callee_full,
-                  cio.outputs.size());
+    if (cio.outputs.empty()) {
+      error_here("upass.tolg: call to '{}' has no outputs — nothing to bind", callee_full);
       return;
     }
 
@@ -1880,9 +2010,7 @@ private:
         }
       } else {
         if (pos >= cio.inputs.size()) {
-          error_here("upass.tolg: call to '{}' passes more arguments than its {} declared inputs",
-                      callee_full,
-                      cio.inputs.size());
+          error_here("upass.tolg: call to '{}' passes more arguments than its {} declared inputs", callee_full, cio.inputs.size());
           return;
         }
         pname = cio.inputs[pos].name;
@@ -1899,10 +2027,7 @@ private:
       ++provided;
     }
     if (provided != cio.inputs.size()) {
-      error_here("upass.tolg: call to '{}' provides {} of its {} declared inputs",
-                  callee_full,
-                  provided,
-                  cio.inputs.size());
+      error_here("upass.tolg: call to '{}' provides {} of its {} declared inputs", callee_full, provided, cio.inputs.size());
       return;
     }
 
@@ -1919,14 +2044,14 @@ private:
     if (!callee_declares_clock && gio->has_input("clock")) {
       if (clock_name_.empty()) {
         error_here("upass.tolg: instance of clocked '{}' but '{}' has no clock to forward (needs_clock bug)",
-                    callee_full,
-                    lnast_->get_top_module_name());
+                   callee_full,
+                   lnast_->get_top_module_name());
         return;
       }
       sub.create_sink_pin("clock").connect_driver(clock_pin());
     }
 
-    // 2d-reg — minted-reset forwarding, same pattern: the callee's implicit
+    // Minted-reset forwarding, same pattern: the callee's implicit
     // "reset" input (active-high by construction) exists on its GraphIO but
     // not in its io_meta. An active-low caller reset is inverted on the way
     // in so the callee's polarity contract holds.
@@ -1940,8 +2065,8 @@ private:
     if (!callee_declares_reset && gio->has_input("reset")) {
       if (reset_name_.empty()) {
         error_here("upass.tolg: instance of reset-carrying '{}' but '{}' has no reset to forward (needs_reset bug)",
-                    callee_full,
-                    lnast_->get_top_module_name());
+                   callee_full,
+                   lnast_->get_top_module_name());
         return;
       }
       Pin r = reset_pin();
@@ -1955,11 +2080,26 @@ private:
       sub.create_sink_pin("reset").connect_driver(r);
     }
 
+    std::string dst_name(lnast_->get_name(dst));
+
+    if (cio.outputs.size() > 1) {
+      // Multi-output callee: the fcall result is a tuple; each
+      // tuple_get(dst2, result, 'port') binds that port's driver pin
+      // (lower_tuple_get below). Nothing binds the bare result name.
+      // Create EVERY output pin now: downstream passes/cgen walk the
+      // callee GraphIO and expect the pins to exist even when a port is
+      // left unread (`.e()` unconnected-output style).
+      for (const auto& oe2 : cio.outputs) {
+        (void)sub.create_driver_pin(oe2.name);
+      }
+      sub_results_[dst_name] = Sub_result{sub, {cio.outputs.begin(), cio.outputs.end()}};
+      return;
+    }
+
     // Single output: bind dst like a graph input (external value entering).
     const auto& oe       = cio.outputs.front();
     auto        out_dpin = sub.create_driver_pin(oe.name);
-    int32_t      mw       = io_mw(oe);
-    std::string dst_name(lnast_->get_name(dst));
+    int32_t     mw       = io_mw(oe);
     if (oe.kind == Io_kind::boolean || mw <= 1) {
       set_bits(out_dpin, 1);
       if (oe.is_signed) {
@@ -2039,7 +2179,7 @@ private:
     return clock_pin_;
   }
 
-  // 2d-reg — the module reset graph-input pin (same lazy stamping contract
+  // The module reset graph-input pin (same lazy stamping contract
   // as clock_pin).
   [[nodiscard]] Pin reset_pin() {
     if (!reset_pin_valid_) {
@@ -2095,7 +2235,7 @@ private:
     auto node = make_node(Ntype_op::Get_mask);
     setup_sink_by_name(node, "a").connect_driver(leaf(val).pin);
     setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Dlop::create_integer(mask)));
-    auto   drv = node.create_driver_pin(0);
+    auto    drv = node.create_driver_pin(0);
     int32_t mw  = static_cast<int32_t>(std::popcount(static_cast<uint64_t>(mask)));
     bind_result(lnast_->get_name(dst), drv, mw);
   }
@@ -2116,7 +2256,10 @@ private:
       }
       return ((static_cast<int64_t>(1) << width) - 1) << lo;
     }
-    Pass::warn("upass.tolg: get_mask mask operand '{}' not const/range — using 0", lnast_->get_name(mask_op));
+    warn_at(mask_op,
+            {"mask-not-const", "unsupported"},
+            "get_mask mask operand '{}' not const/range — using 0",
+            lnast_->get_name(mask_op));
     return 0;
   }
 
@@ -2145,7 +2288,8 @@ private:
     setup_sink_by_name(node, "a").connect_driver(vv.pin);
     setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Dlop::create_integer(mask)));
     setup_sink_by_name(node, "value").connect_driver(leaf(ins).pin);
-    bind_result(lnast_->get_name(dst), node.create_driver_pin(0), vv.mw);
+    int32_t mask_mw = mask > 0 ? static_cast<int32_t>(64 - std::countl_zero(static_cast<uint64_t>(mask))) : int32_t{0};
+    bind_result(lnast_->get_name(dst), node.create_driver_pin(0), std::max(vv.mw, mask_mw));
   }
 
   enum class OpW { add, mul, maxw, firstw, boolw };
@@ -2157,15 +2301,15 @@ private:
     if (dst.is_invalid()) {
       return;
     }
-    auto   node    = make_node(op);
-    int32_t max_mw  = 0;
-    int32_t sum_mw  = 0;
+    auto    node     = make_node(op);
+    int32_t max_mw   = 0;
+    int32_t sum_mw   = 0;
     int32_t first_mw = 0;
-    bool   first   = true;
+    bool    first    = true;
     for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
-      auto v      = leaf(c);
-      max_mw      = std::max(max_mw, v.mw);
-      sum_mw     += v.mw;
+      auto v  = leaf(c);
+      max_mw  = std::max(max_mw, v.mw);
+      sum_mw += v.mw;
       if (first) {
         first_mw = v.mw;
       }
@@ -2174,13 +2318,48 @@ private:
     }
     int32_t mw = 1;
     switch (wmode) {
-      case OpW::add: mw = static_cast<int32_t>(max_mw + 1); break;
-      case OpW::mul: mw = sum_mw > 0 ? sum_mw : int32_t{1}; break;
-      case OpW::maxw: mw = max_mw; break;
+      case OpW::add   : mw = static_cast<int32_t>(max_mw + 1); break;
+      case OpW::mul   : mw = sum_mw > 0 ? sum_mw : int32_t{1}; break;
+      case OpW::maxw  : mw = max_mw; break;
       case OpW::firstw: mw = first_mw; break;
-      case OpW::boolw: mw = 1; break;
+      case OpW::boolw : mw = 1; break;
     }
     bind_result(lnast_->get_name(dst), node.create_driver_pin(0), mw);
+  }
+
+  // LNAST sext(dst, a, b): reinterpret bit POSITION b of `a` as the sign
+  // (the Dlop::sext_op convention constprop folds with). The LGraph Sext
+  // cell's b operand is the kept bit COUNT instead (cgen slices [b-1:0],
+  // bitwidth ranges sbits=b, lgyosys Pick passes the width) - convert here.
+  // The result is SIGNED with meaningful width b+1.
+  void lower_sext(const Lnast_nid& nid) {
+    auto dst = lnast_->get_first_child(nid);
+    if (dst.is_invalid()) {
+      return;
+    }
+    auto a = lnast_->get_sibling_next(dst);
+    if (a.is_invalid()) {
+      return;
+    }
+    auto b = lnast_->get_sibling_next(a);
+    if (b.is_invalid()) {
+      return;
+    }
+    if (!Lnast_ntype::is_const(lnast_->get_type(b))) {
+      warn_at(b, {"sext-runtime-pos", "unsupported"}, "sext with a runtime sign position has no lowering — wiring nil");
+      bind_result(lnast_->get_name(dst), nil_pin(), 1);
+      return;
+    }
+    const auto pos  = const_val(b);
+    auto       av   = leaf(a);
+    auto       node = make_node(Ntype_op::Sext);
+    setup_sink_by_name(node, "a").connect_driver(av.pin);
+    setup_sink_by_name(node, "b").connect_driver(create_const(*g_, *Dlop::create_integer(pos + 1)));
+    const auto mw  = static_cast<int32_t>(pos) + 1;
+    auto       drv = node.create_driver_pin(0);
+    set_bits(drv, mw > 0 ? mw : 1);
+    set_sign(drv);
+    record(lnast_->get_name(dst), drv, mw > 0 ? mw : 1);
   }
 
   void lower_unary(const Lnast_nid& nid, Ntype_op op) {
@@ -2264,8 +2443,8 @@ private:
     // 1a-mem — memory write enables need each branch's full path condition;
     // only built while a memory exists (zero overhead otherwise). `guard`
     // accumulates enclosing ∧ ¬(prior conds); a branch's path is guard ∧ cond.
-    const bool track_path = !mem_map_.empty();
-    Pin        guard      = track_path ? current_path_cond() : Pin{};
+    const bool track_path             = !mem_map_.empty();
+    Pin        guard                  = track_path ? current_path_cond() : Pin{};
     auto       lower_branch_with_path = [&](const Lnast_nid& stmts, const Pin& path) {
       if (!track_path) {
         return lower_branch(stmts);
@@ -2329,12 +2508,34 @@ private:
         cur = ew->second;
       }
 
+      // The merged value's width is the widest among the branch sources;
+      // mw_lookup alone holds whatever the LAST write recorded (or 1 for a
+      // never-bound io output), which under-sizes the mux and truncates the
+      // wider arms. Take the max over every contributing pin's stamped bits
+      // (bits >= mw by construction, so this only ever widens).
+      auto pin_mw = [](const Pin& p) -> int32_t {
+        if (auto bb = livehd::graph_util::bits_of(p); bb > 0) {
+          return bb;
+        }
+        if (livehd::graph_util::is_const_pin(p)) {  // const pins carry no bits stamp
+          auto v = livehd::graph_util::hydrate_const(p);
+          if (v.is_just_i64()) {
+            return mw_of_val(v.to_just_i64());
+          }
+          return std::max<int32_t>(1, static_cast<int32_t>(v.get_bits()));
+        }
+        return 0;
+      };
+      int32_t mw = std::max(mw_lookup(var), pin_mw(cur));
       int n         = static_cast<int>(branches.size());
       int last_cond = has_else ? n - 2 : n - 1;
       for (int i = last_cond; i >= 0; --i) {
         auto& br       = branches[i];
         auto  wr       = br.writes.find(var);
         Pin   true_val = (wr != br.writes.end()) ? wr->second : cur;
+        if (wr != br.writes.end()) {
+          mw = std::max(mw, pin_mw(wr->second));
+        }
 
         auto mux = make_node(Ntype_op::Mux);
         mux.create_sink_pin(0).connect_driver(br.cond);   // selector
@@ -2342,8 +2543,7 @@ private:
         mux.create_sink_pin(2).connect_driver(true_val);  // true / then
         cur = mux.create_driver_pin(0);
       }
-      // The merged value's width is the widest among the branch sources.
-      bind_result(var, cur, mw_lookup(var));
+      bind_result(var, cur, mw);
     }
   }
 
@@ -2390,9 +2590,9 @@ private:
     set_unsign(sel);
 
     for (const auto& var : all_vars) {
-      auto base = pin_map_.find(var);
-      Pin  pre  = (base != pin_map_.end()) ? base->second : nil_pin();
-      auto ew   = else_writes.find(var);
+      auto base     = pin_map_.find(var);
+      Pin  pre      = (base != pin_map_.end()) ? base->second : nil_pin();
+      auto ew       = else_writes.find(var);
       Pin  else_val = (ew != else_writes.end()) ? ew->second : pre;
 
       auto hot = make_node(Ntype_op::Hotmux);
@@ -2412,7 +2612,7 @@ private:
   hhds::GraphLibrary*         lib_      = nullptr;
 
   absl::flat_hash_map<std::string, Pin>                         pin_map_;
-  absl::flat_hash_map<std::string, int32_t>                      mw_map_;
+  absl::flat_hash_map<std::string, int32_t>                     mw_map_;
   absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> range_map_;
   std::vector<WriteMap>                                         branch_writes_;
   std::vector<std::string>                                      out_names_;
@@ -2430,11 +2630,13 @@ private:
   // branch-path stack lower_if maintains for their write enables, the
   // recorded tuple literals (array initializers / __memory configs), and the
   // bound __memory results.
-  absl::flat_hash_map<std::string, Mem_info>   mem_map_;
-  std::vector<std::string>                     mem_order_;
-  std::vector<Pin>                             path_cond_;
-  absl::flat_hash_map<std::string, Tuple_rec>  tuple_recs_;
-  absl::flat_hash_map<std::string, Mem_result> mem_results_;
+  absl::flat_hash_map<std::string, Mem_info>         mem_map_;
+  std::vector<std::string>                           mem_order_;
+  std::vector<Pin>                                   path_cond_;
+  absl::flat_hash_map<std::string, Tuple_rec>        tuple_recs_;
+  absl::flat_hash_map<std::string, Mem_result>       mem_results_;
+  // attr_set seen before its target's declare (memory fwd overrides etc).
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, std::string>> pending_attrs_;
   std::string                                        clock_name_;
   bool                                               clock_minted_ = false;
   Pin                                                clock_pin_;
@@ -2452,16 +2654,23 @@ private:
 
   absl::flat_hash_map<std::string, Pending_stage> pending_stage_;
   absl::flat_hash_map<std::string, Sub_out>       sub_out_stages_;
+  // Multi-output instance results: fcall dst name -> (Sub node, callee
+  // outputs); consumed by tuple_get field reads.
+  struct Sub_result {
+    hhds::Node_class            sub;
+    std::vector<Lnast_io_entry> outputs;
+  };
+  absl::flat_hash_map<std::string, Sub_result> sub_results_;
 
   // Checker inputs gathered while building: pending records,
   // per-Flop effective crossing depth, per-Sub pinned latency interval.
   // Also adds plain_reg_flops_ (state/stage classification candidates) and
   // inserted_flops_ (the LN-inserted pipe output flops — narrowing targets).
-  std::vector<Pending_rec>                                       pending_checks_;
-  absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>     flop_depth_;
-  absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>     sub_time_;
-  absl::flat_hash_map<uint64_t, std::string>                     plain_reg_flops_;
-  absl::flat_hash_set<uint64_t>                                  inserted_flops_;
+  std::vector<Pending_rec>                                   pending_checks_;
+  absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>> flop_depth_;
+  absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>> sub_time_;
+  absl::flat_hash_map<uint64_t, std::string>                 plain_reg_flops_;
+  absl::flat_hash_set<uint64_t>                              inserted_flops_;
 
 public:
   // Lower the partition's declared per-output intervals as
@@ -2534,15 +2743,15 @@ public:
     }
   }
 
-  [[nodiscard]] std::vector<Pending_rec>&&                                   take_pending_checks() { return std::move(pending_checks_); }
+  [[nodiscard]] std::vector<Pending_rec>&& take_pending_checks() { return std::move(pending_checks_); }
   [[nodiscard]] absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& take_flop_depths() { return std::move(flop_depth_); }
   [[nodiscard]] absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& take_sub_times() { return std::move(sub_time_); }
-  [[nodiscard]] absl::flat_hash_map<uint64_t, std::string>&&                 take_plain_reg_flops() { return std::move(plain_reg_flops_); }
-  [[nodiscard]] absl::flat_hash_set<uint64_t>&&                              take_inserted_flops() { return std::move(inserted_flops_); }
+  [[nodiscard]] absl::flat_hash_map<uint64_t, std::string>&& take_plain_reg_flops() { return std::move(plain_reg_flops_); }
+  [[nodiscard]] absl::flat_hash_set<uint64_t>&&              take_inserted_flops() { return std::move(inserted_flops_); }
 };
 
-// The combined pipe/mod LG time checker (ex-1q-D,
-// written once for both kinds). Runs at the tolg seam on the just-built
+// The combined pipe/mod LG time checker (written once for both kinds).
+// Runs at the tolg seam on the just-built
 // graph:
 //   1. Tarjan SCC over the node digraph (flop din->q edges included, i.e.
 //      node-level cycles). A non-trivial SCC must contain a STATE-eligible
@@ -2579,36 +2788,39 @@ public:
                absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& flop_depth,
                absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& sub_time,
                absl::flat_hash_map<uint64_t, std::string>&& plain_regs, absl::flat_hash_set<uint64_t>&& inserted)
-      : g_(g),
-        ln_(ln),
-        pendings_(std::move(pendings)),
-        flop_depth_(std::move(flop_depth)),
-        sub_time_(std::move(sub_time)),
-        plain_regs_(std::move(plain_regs)),
-        inserted_(std::move(inserted)) {
+      : g_(g)
+      , ln_(ln)
+      , pendings_(std::move(pendings))
+      , flop_depth_(std::move(flop_depth))
+      , sub_time_(std::move(sub_time))
+      , plain_regs_(std::move(plain_regs))
+      , inserted_(std::move(inserted)) {
     for (const auto& [nid, name] : plain_regs_) {
       reg_flop_by_name_.emplace(name, nid);
     }
   }
 
-  // [[1f]]-F: stage a Diagnostic located via the graph node's srcid (stamped
+  // Stage a Diagnostic located via the graph node's srcid (stamped
   // by the lowering walk, resolved through the graph's locator) before the
-  // Pass::error-style throw. An id-less node degrades to an unlocated record.
+  // Pass::error-style throw. An id-less or invalid node degrades to an
+  // unlocated record.
   template <typename... Args>
-  [[noreturn]] void error_at_node(const hhds::Node_class& node, std::format_string<Args...> fmt, Args&&... args) {
+  [[noreturn]] void error_at_node(const hhds::Node_class& node, livehd::diag::Id id, std::format_string<Args...> fmt,
+                                  Args&&... args) {
     auto                            msg = std::format(fmt, std::forward<Args>(args)...);
     livehd::diag::Span              span;
     std::vector<livehd::diag::Note> notes;
-    if (g_ != nullptr) {
+    if (g_ != nullptr && !node.is_invalid()) {
       if (auto ref = node.attr(hhds::attrs::srcid); ref.has()) {
-        span  = livehd::srcloc::span_of(g_->source_locator(), ref.get());
-        notes = livehd::srcloc::notes_of(g_->source_locator(), ref.get(), "reached via this site");
+        const auto rs = g_->source_locator().resolve_spans(ref.get());
+        span          = rs.primary;
+        notes         = livehd::diag::notes_from(rs, "reached via this site");
       }
     }
     livehd::diag::sink().stage(livehd::diag::Diagnostic{
         .severity = livehd::diag::Severity::error,
-        .code     = "tolg-time-error",
-        .category = "type",
+        .code     = std::string(id.code),
+        .category = std::string(id.category),
         .pass     = "upass.tolg",
         .message  = msg,
         .span     = std::move(span),
@@ -2616,6 +2828,21 @@ public:
     });
     err_tracker::logger(msg);
     throw Eprp::parser_error(Pass::eprp, msg);
+  }
+
+  template <typename... Args>
+  [[noreturn]] void error_at_node(const hhds::Node_class& node, std::format_string<Args...> fmt, Args&&... args) {
+    error_at_node(node, livehd::diag::Id{"tolg-time-error", "time"}, "{}", std::format(fmt, std::forward<Args>(args)...));
+  }
+
+  // The pending record's value driver, as the diag anchor (invalid when
+  // undriven -- error_at_node degrades to an unlocated record).
+  [[nodiscard]] static hhds::Node_class pending_anchor(const auto& rec) {
+    if (rec.is_sink) {
+      auto edges = rec.pin.inp_edges();
+      return edges.empty() ? hhds::Node_class{} : edges.front().driver.get_master_node();
+    }
+    return rec.pin.get_master_node();
   }
 
   void run() {
@@ -2634,10 +2861,10 @@ public:
       idx.emplace(n.get_debug_nid(), nodes.size());
       nodes.push_back(n);
     }
-    const size_t          nn = nodes.size();
+    const size_t                  nn = nodes.size();
     std::vector<std::vector<int>> succ(nn);
     std::vector<std::vector<int>> pred(nn);
-    auto node_idx_of_pin = [&](const hhds::Pin_class& dpin) -> int {
+    auto                          node_idx_of_pin = [&](const hhds::Pin_class& dpin) -> int {
       if (dpin.is_invalid() || is_graph_input_pin(dpin)) {
         return -1;
       }
@@ -2664,7 +2891,7 @@ public:
       std::vector<int>    low(nn, -1), num(nn, -1);
       std::vector<bool>   on_stack(nn, false);
       std::vector<int>    stk;
-      int                 counter = 0;
+      int                 counter  = 0;
       int                 next_scc = 0;
       std::vector<size_t> scc_size;
       for (size_t root = 0; root < nn; ++root) {
@@ -2695,7 +2922,7 @@ public:
             size_t members = 0;
             int    w;
             do {
-              w           = stk.back();
+              w = stk.back();
               stk.pop_back();
               on_stack[w] = false;
               scc_id[w]   = next_scc;
@@ -2767,11 +2994,10 @@ public:
         }
         if (!has_state) {
           if (has_flop) {
-            error_at_node(
-                rep,
-                "upass.tolg: '{}' has register feedback through stage registers — make the looping register a plain "
-                "`reg` (state)",
-                ln_->get_top_module_name());
+            error_at_node(rep,
+                          "upass.tolg: '{}' has register feedback through stage registers — make the looping register a plain "
+                          "`reg` (state)",
+                          ln_->get_top_module_name());
           } else {
             error_at_node(rep, "upass.tolg: combinational loop in '{}'", ln_->get_top_module_name());
           }
@@ -2828,7 +3054,7 @@ public:
     // flop's din may transit through ANOTHER state flop's q, so iterate to a
     // fixpoint (bounded by the state count) — otherwise a chained state reg
     // would home at `any` and silently pass its `@[N]` check.
-    const auto din_pid = static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, "din"));
+    const auto din_pid    = static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, "din"));
     auto       din_driver = [&](const hhds::Node_class& flop) -> hhds::Pin_class {
       for (const auto& e : flop.inp_edges()) {
         if (!e.sink.is_invalid() && static_cast<uint64_t>(e.sink.get_port_id()) == din_pid) {
@@ -2850,8 +3076,7 @@ public:
         }
         const TR pinned = pin_tr(din_driver(nodes[i]));  // σ(q) = σ(din)
         auto     it     = tr_.find(nid);
-        if (it == tr_.end() || it->second.any != pinned.any || it->second.min != pinned.min
-            || it->second.max != pinned.max) {
+        if (it == tr_.end() || it->second.any != pinned.any || it->second.min != pinned.min || it->second.max != pinned.max) {
           tr_[nid] = pinned;
           changed  = true;
         }
@@ -2922,31 +3147,34 @@ public:
           const auto fnid     = rit->second;
           const bool is_state = state_.contains(fnid);
           if (!is_state && ln_->get_lambda_kind() == "pipe") {
-            Pass::error("upass.tolg: feedforward register '{}' in the output list of '{}' — the output is already "
-                        "registered by the pipe contract",
-                        rec.name,
-                        ln_->get_top_module_name());
-            return;
+            error_at_node(pending_anchor(rec),
+                          {"pipe-output-reg", "time"},
+                          "feedforward register '{}' in the output list of '{}' — the output is already "
+                          "registered by the pipe contract",
+                          rec.name,
+                          ln_->get_top_module_name());
           }
           if (is_state) {
             if (rec.min != rec.max) {
-              Pass::error("upass.tolg: register output '{}' of '{}' needs a fixed declared cycle (got [{}, {}])",
-                          rec.name,
-                          ln_->get_top_module_name(),
-                          rec.min,
-                          rec.max);
-              return;
+              error_at_node(pending_anchor(rec),
+                            {"reg-output-cycle", "time"},
+                            "register output '{}' of '{}' needs a fixed declared cycle (got [{}, {}])",
+                            rec.name,
+                            ln_->get_top_module_name(),
+                            rec.min,
+                            rec.max);
             }
             const TR home = tr_.contains(fnid) ? tr_.at(fnid) : TR{0, 0, true};
             if (!home.any && home.min + 1 != rec.min) {
-              Pass::error("upass.tolg: state register '{}' of '{}' homes at stage {} but its declared landing cycle {} "
-                          "requires home {}",
-                          rec.name,
-                          ln_->get_top_module_name(),
-                          home.min,
-                          rec.min,
-                          rec.min - 1);
-              return;
+              error_at_node(pending_anchor(rec),
+                            {"reg-output-cycle", "time"},
+                            "state register '{}' of '{}' homes at stage {} but its declared landing cycle {} "
+                            "requires home {}",
+                            rec.name,
+                            ln_->get_top_module_name(),
+                            home.min,
+                            rec.min,
+                            rec.min - 1);
             }
             rec.pin.attr(livehd::attrs::pending_time).del();
             continue;
@@ -3013,7 +3241,8 @@ private:
         break;
       }
     }
-    setup_sink_by_name(const_cast<hhds::Node_class&>(node), pin_name).connect_driver(create_const(*g_, *Dlop::create_integer(value)));
+    setup_sink_by_name(const_cast<hhds::Node_class&>(node), pin_name)
+        .connect_driver(create_const(*g_, *Dlop::create_integer(value)));
   }
 
   void eval_node(const hhds::Node_class& node) {
@@ -3023,7 +3252,7 @@ private:
 
     const auto nid = node.get_debug_nid();
 
-    // 2d-reg — a state flop's q is pinned (sigma(q)=sigma(din)) outside this
+    // A state flop's q is pinned (sigma(q)=sigma(din)) outside this
     // function; pass 1 leaves it unconstrained.
     if (state_.contains(nid)) {
       if (!tr_.contains(nid)) {
@@ -3042,11 +3271,11 @@ private:
     // chain muxes true/false), the select's σ times the value instead.
     // Everything else meets all inputs (consts unify).
     absl::flat_hash_set<uint64_t> skip_pids;
-    bool                          din_only = false;
-    const bool                    is_mem   = type_op_of(node) == Ntype_op::Memory;
+    bool                          din_only    = false;
+    const bool                    is_mem      = type_op_of(node) == Ntype_op::Memory;
     bool                          mem_clocked = false;
-    const bool is_mux = type_op_of(node) == Ntype_op::Mux || type_op_of(node) == Ntype_op::Hotmux;
-    TR         mux_sel{0, 0, true};
+    const bool                    is_mux      = type_op_of(node) == Ntype_op::Mux || type_op_of(node) == Ntype_op::Hotmux;
+    TR                            mux_sel{0, 0, true};
     if (is_mux) {
       skip_pids.insert(0);  // pid 0 = "s" — the select never adds path depth
       for (const auto& e : node.inp_edges()) {
@@ -3179,6 +3408,24 @@ private:
 // (illegal mutual hierarchy) breaks false so we never hang — the real
 // recursion diagnostic belongs to a later phase.
 [[nodiscard]] bool tree_declares_reg(const std::shared_ptr<Lnast>& lnast) {
+  // A reg whose `clock_pin=NAME` attr names its clock explicitly does not
+  // need the implicit `clock` input (the slang reader stamps these for
+  // non-clk/clock Verilog clock names); collect the covered names first.
+  absl::flat_hash_set<std::string>      clocked_elsewhere;
+  std::function<void(const Lnast_nid&)> scan_attrs = [&](const Lnast_nid& nid) {
+    if (Lnast_ntype::is_attr_set(lnast->get_type(nid))) {
+      auto tgt = lnast->get_first_child(nid);
+      auto key = tgt.is_invalid() ? tgt : lnast->get_sibling_next(tgt);
+      if (!key.is_invalid() && lnast->get_name(key) == "clock_pin") {
+        clocked_elsewhere.emplace(lnast->get_name(tgt));
+      }
+    }
+    for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      scan_attrs(c);
+    }
+  };
+  scan_attrs(lnast->get_root());
+
   std::function<bool(const Lnast_nid&)> has_reg = [&](const Lnast_nid& nid) -> bool {
     // 1a-mem — a __memory(cfg) instantiation needs the clock too (a type=2
     // array config leaves the minted input unused; acceptable, documented).
@@ -3197,7 +3444,7 @@ private:
           auto c2 = lnast->get_sibling_next(c1);
           if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
             auto mode = lnast->get_name(c2);
-            if (mode == "reg" || mode.starts_with("reg ")) {
+            if ((mode == "reg" || mode.starts_with("reg ")) && !clocked_elsewhere.contains(lnast->get_name(c0))) {
               return true;
             }
           }
@@ -3265,12 +3512,12 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
   return needs;
 }
 
-// 2d-reg — true when any plain-reg declare carries a non-nil initializer (the
+// True when any plain-reg declare carries a non-nil initializer (the
 // declare's trailing const [value] child) without an explicit per-reg
 // `reset_pin` attr override (those bind their own reset input). A ref init is
 // counted (tolg later requires it const; the reset NEED is already real).
 [[nodiscard]] bool tree_declares_reset_reg(const std::shared_ptr<Lnast>& lnast) {
-  absl::flat_hash_set<std::string> explicit_rp;
+  absl::flat_hash_set<std::string>      explicit_rp;
   std::function<void(const Lnast_nid&)> collect_rp = [&](const Lnast_nid& nid) {
     if (Lnast_ntype::is_attr_set(lnast->get_type(nid))) {
       auto c0 = lnast->get_first_child(nid);
@@ -3294,7 +3541,7 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
         auto c1 = lnast->get_sibling_next(c0);
         auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
         if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
-          auto mode = lnast->get_name(c2);
+          auto       mode     = lnast->get_name(c2);
           // 1a-mem — array regs are memories: no reset hardware in this
           // slice (only nil/0sb? init is accepted), so they never need the
           // implicit reset input.
@@ -3419,8 +3666,8 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
   // Declare I/O on the GraphIO: positional pin ids + meaningful bits + sign.
   // Port widths cgen emits come from these decls (meaningful width, not the +1
   // internal convention).
-  hhds::Port_id pid = 1;
-  auto declare = [&](const Lnast_io_entry& e, bool is_input) {
+  hhds::Port_id pid     = 1;
+  auto          declare = [&](const Lnast_io_entry& e, bool is_input) {
     uint32_t bits = e.kind == Io_kind::boolean ? 1u : (e.bits > 0 ? static_cast<uint32_t>(e.bits) : 1u);
     if (is_input) {
       if (!gio->has_input(e.name) && !gio->has_output(e.name)) {
@@ -3467,15 +3714,19 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
         // multi-bit clock-named port — diagnose instead of double-driving.
         for (const auto& e : lnast->io_meta().inputs) {
           if (e.name == "clock") {
-            Pass::error(
-                "upass.tolg: input 'clock' of '{}' is not usable as the pipeline clock (multi-bit data port) "
-                "and collides with the implicit clock — rename it or declare it 1-bit",
-                mod_name);
+            livehd::diag::err("upass.tolg", "clock-collision", "time")
+                .msg(
+                    "input 'clock' of '{}' is not usable as the pipeline clock (multi-bit data port) "
+                    "and collides with the implicit clock — rename it or declare it 1-bit",
+                    mod_name)
+                .fatal();
           }
         }
         for (const auto& e : lnast->io_meta().outputs) {
           if (e.name == "clock") {
-            Pass::error("upass.tolg: output 'clock' of '{}' collides with the implicit pipeline clock — rename it", mod_name);
+            livehd::diag::err("upass.tolg", "clock-collision", "time")
+                .msg("output 'clock' of '{}' collides with the implicit pipeline clock — rename it", mod_name)
+                .fatal();
           }
         }
         clock_name = "clock";
@@ -3490,7 +3741,7 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
     }
   }
 
-  // 2d-reg — implicit reset: when the tree (or, transitively, any pipe/mod
+  // Implicit reset: when the tree (or, transitively, any pipe/mod
   // callee instance) holds a reg with a non-nil initializer, bind an existing
   // reset/rst/reset_n/rst_n input (exactly one candidate; the `_n` variants
   // are active-low) or mint a 1-bit unsigned "reset" graph input — the same
@@ -3502,9 +3753,8 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
     auto bind_reset_candidate = [&]() {
       int candidates = 0;
       for (const auto& e : lnast->io_meta().inputs) {
-        const bool is_cand
-            = (e.name == "reset" || e.name == "rst" || e.name == "reset_n" || e.name == "rst_n")
-              && (e.kind == Io_kind::boolean || e.bits <= 1);
+        const bool is_cand = (e.name == "reset" || e.name == "rst" || e.name == "reset_n" || e.name == "rst_n")
+                             && (e.kind == Io_kind::boolean || e.bits <= 1);
         if (!is_cand) {
           continue;
         }
@@ -3515,9 +3765,10 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
         }
       }
       if (candidates > 1) {
-        Pass::error(
-            "upass.tolg: '{}' has multiple reset-candidate inputs — give each reg an explicit `:[reset_pin=…]`",
-            mod_name);
+        livehd::diag::err("upass.tolg", "reset-ambiguous", "time")
+            .msg("'{}' has multiple reset-candidate inputs — give each reg an explicit `:[reset_pin=…]`", mod_name)
+            .hint("name exactly one of reset/rst/reset_n/rst_n, or bind per-reg with `:[reset_pin=…]`")
+            .fatal();
       }
     };
     absl::flat_hash_map<std::string, bool> memo;
@@ -3527,16 +3778,19 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
       if (reset_name.empty()) {
         for (const auto& e : lnast->io_meta().inputs) {
           if (e.name == "reset") {
-            Pass::error(
-                "upass.tolg: input 'reset' of '{}' is not usable as the register reset (multi-bit data port) "
-                "and collides with the implicit reset — rename it or declare it 1-bit",
-                mod_name);
+            livehd::diag::err("upass.tolg", "reset-collision", "time")
+                .msg(
+                    "input 'reset' of '{}' is not usable as the register reset (multi-bit data port) "
+                    "and collides with the implicit reset — rename it or declare it 1-bit",
+                    mod_name)
+                .fatal();
           }
         }
         for (const auto& e : lnast->io_meta().outputs) {
           if (e.name == "reset") {
-            Pass::error("upass.tolg: output 'reset' of '{}' collides with the implicit register reset — rename it",
-                        mod_name);
+            livehd::diag::err("upass.tolg", "reset-collision", "time")
+                .msg("output 'reset' of '{}' collides with the implicit register reset — rename it", mod_name)
+                .fatal();
           }
         }
         reset_name = "reset";

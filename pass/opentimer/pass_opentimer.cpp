@@ -47,12 +47,14 @@ Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var
     } else if (str_tools::ends_with(f, ".v")) {    // Nothing to do
     } else if (str_tools::ends_with(f, ".prp")) {  // Nothing to do
     } else {
-      Pass::error("pass.opentimer unknown file extension '{}'", f);
+      livehd::diag::err("pass.opentimer", "bad-option", "io").msg("unknown file extension '{}'", f).fatal();
     }
   }
 
   if (n_lib_read > 2) {
-    Pass::error("pass.opentime only supports 1 or 2 liberty (max/min) files not {}", files);
+    livehd::diag::err("pass.opentimer", "bad-option", "io")
+        .msg("only supports 1 or 2 liberty (max/min) files not {}", files)
+        .fatal();
   }
 
   margin = 0;
@@ -60,7 +62,7 @@ Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var
     std::string txt{var.get("margin")};
     margin = std::stof(txt, nullptr);
     if (margin < 0 || margin > 100) {
-      Pass::error("pass.opentimer margin must be between 0 and 100 not {}", margin);
+      livehd::diag::err("pass.opentimer", "bad-option", "io").msg("margin must be between 0 and 100 not {}", margin).fatal();
     }
   }
 
@@ -79,7 +81,7 @@ Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var
 void Pass_opentimer::read_sdc(std::string_view sdc_file) {
   std::ifstream file(std::string{sdc_file});
   if (!file.is_open()) {
-    Pass::error("pass.opentimer could not open sdc:{}", sdc_file);
+    livehd::diag::err("pass.opentimer", "missing-file", "io").msg("could not open sdc:{}", sdc_file).fatal();
     return;
   }
 
@@ -110,7 +112,9 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
         }
       }
       if (pname.empty()) {
-        Pass::error("SDC file {} set_input_delay only supports [get_ports XX] syntax not {}", sdc_file, line);
+        livehd::diag::err("pass.opentimer", "sdc-unsupported", "unsupported")
+            .msg("SDC file {} set_input_delay only supports [get_ports XX] syntax not {}", sdc_file, line)
+            .fatal();
       }
       if (line_vec[2] == "-min" && line_vec[3] == "-rise") {
         timer.set_at(pname, ot::MIN, ot::RISE, delay);
@@ -142,7 +146,9 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
         }
       }
       if (pname.empty()) {
-        Pass::error("SDC file {} set_input_transition only supports [get_ports XX] syntax not {}", sdc_file, line);
+        livehd::diag::err("pass.opentimer", "sdc-unsupported", "unsupported")
+            .msg("SDC file {} set_input_transition only supports [get_ports XX] syntax not {}", sdc_file, line)
+            .fatal();
       }
       if (line_vec[2] == "-min" && line_vec[3] == "-rise") {
         timer.set_slew(pname, ot::MIN, ot::RISE, delay);
@@ -175,7 +181,9 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
         }
       }
       if (pname.empty()) {
-        Pass::error("SDC file {} set_output_delay only supports [get_ports XX] syntax not {}", sdc_file, line);
+        livehd::diag::err("pass.opentimer", "sdc-unsupported", "unsupported")
+            .msg("SDC file {} set_output_delay only supports [get_ports XX] syntax not {}", sdc_file, line)
+            .fatal();
       }
       if (line_vec[2] == "-min" && line_vec[3] == "-rise") {
         timer.set_rat(pname, ot::MIN, ot::RISE, delay);

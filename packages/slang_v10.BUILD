@@ -26,6 +26,14 @@ cmake(
         "CMAKE_BUILD_TYPE": "Release",
         "SLANG_USE_BOOST": "OFF",
         "SLANG_USE_MIMALLOC": "OFF",
+        # slang.so loads into processes that also carry slang v11 (lhd embeds
+        # the v11 reader). With default visibility the v10 weak/inline
+        # template instantiations (e.g. Driver::parseCommandLine<char**>) are
+        # exported and dyld's cross-image weak coalescing binds them to the
+        # MAIN executable's v11 copies -> EXC_BAD_ACCESS on v10 objects.
+        # Hidden visibility keeps every v10 symbol module-local to the plugin.
+        "CMAKE_CXX_VISIBILITY_PRESET": "hidden",
+        "CMAKE_VISIBILITY_INLINES_HIDDEN": "ON",
     },
     lib_source = ":all",
     # slang's CMakeLists.txt force-enables ccache as the compiler launcher when

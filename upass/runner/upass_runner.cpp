@@ -51,22 +51,19 @@
 
 #include "upass_runner.hpp"
 
-#include <set>
-
-#include "call_resolver.hpp"
-#include "decl_facts.hpp"
-
 #include <algorithm>
 #include <format>
 #include <functional>
 #include <map>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "call_resolver.hpp"
+#include "decl_facts.hpp"
 #include "diag.hpp"
-#include "lnast_srcloc.hpp"
 
 namespace {
 
@@ -159,7 +156,7 @@ void collect_cond_vars(const Lnast& ln, const Lnast_nid& while_nid, std::string_
 uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std::vector<std::string>& upass_names,
                            upass::Options_map options)
     : uPass_struct(_lm) {
-  root_lnast_ = _lm->get_lnast();  // no inline frame is active at construction
+  root_lnast_                = _lm->get_lnast();  // no inline frame is active at construction
   auto        upass_registry = upass::uPass_plugin::get_registry();
   std::string order_error;
   auto        resolved = resolve_order(upass_names, &order_error);
@@ -282,8 +279,8 @@ void uPass_runner::carry_srcid(const Lnast_nid& staged) {
   if (src_ln.get() != root_lnast_.get()) {
     // Inline frame: the id was minted in the callee Lnast's locator — re-mint
     // it into the root's so it stays resolvable after replace_body.
-    id = livehd::srcloc::import_srcid(root_lnast_->source_locator(), src_ln->source_locator(), id);
-    // Combined id for spliced bodies ([[1f]]-C): primary anchor = the callee
+    id = root_lnast_->source_locator().import_from(src_ln->source_locator(), id);
+    // Combined id for spliced bodies: primary anchor = the callee
     // def (the diag span), secondary = the call site (rendered as a note).
     // Nested inlining composes naturally — the inner call site is itself a
     // combine whose parents chain to the outer one.
@@ -313,7 +310,7 @@ void uPass_runner::stamp_scratch_srcid(const std::shared_ptr<Lnast>& scratch, co
   }
   // Re-mint into the scratch tree's own locator: carry_srcid resolves the id
   // through the SOURCE tree's locator when the scratch walk emits.
-  id = livehd::srcloc::import_srcid(scratch->source_locator(), src_ln->source_locator(), id);
+  id = scratch->source_locator().import_from(src_ln->source_locator(), id);
   if (id != hhds::SourceId_invalid) {
     scratch->set_srcid(root, id);
   }
@@ -330,7 +327,7 @@ void uPass_runner::emit_push(Lnast_ntype::Lnast_ntype_int type) {
   staging_parent_stack.push(staging_parent);
   staging_parent = nid;
 
-  // [[1f]] general carry — one integer attr, copied unconditionally for every
+  // General carry — one integer attr, copied unconditionally for every
   // def-bearing kind (the old per-node-kind whitelist is gone). A synthesized
   // node whose type differs from the read cursor's inherits the enclosing
   // statement's id, which is the documented fallback anchor.
@@ -468,9 +465,7 @@ std::optional<std::vector<std::pair<std::string, bool>>> uPass_runner::try_tuple
   // (alpha) so `for x in t` iterates a stable, source-like order.
   std::vector<std::pair<std::string, bool>> out;
   std::set<std::string>                     seen;
-  auto                                      is_positional = [](const std::string& k) {
-    return !k.empty() && k.find_first_not_of("0123456789") == std::string::npos;
-  };
+  auto is_positional = [](const std::string& k) { return !k.empty() && k.find_first_not_of("0123456789") == std::string::npos; };
   if (auto b = symbol_table_.get_bundle(name); b) {
     for (const auto& tl : b->top_levels()) {
       std::string key = tl.pos >= 0 ? std::to_string(tl.pos) : std::string(tl.name);
@@ -574,8 +569,8 @@ void uPass_runner::check_self_does(const livehd::diag::Span& span, std::string_v
     return;  // unknown / scalar named type — nothing structural to check
   }
 
-  const std::string                                         recv_name(receiver.is_ref() ? receiver.get_name() : std::string_view{});
-  const std::string                                         recv_tn = recv_name.empty() ? std::string{} : try_typename(recv_name);
+  const std::string                                        recv_name(receiver.is_ref() ? receiver.get_name() : std::string_view{});
+  const std::string                                        recv_tn = recv_name.empty() ? std::string{} : try_typename(recv_name);
   std::optional<std::vector<std::pair<std::string, Dlop>>> recv_fields;
   if (!recv_name.empty()) {
     recv_fields = try_bundle_fields(recv_name);
@@ -717,7 +712,7 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
     return;  // pure emission (dispatch happened in the caller); cursor untouched
   }
   const auto op_ntype = lm->current_type();
-  emit_push(op_ntype);  // carries the SourceId ([[1f]] general carry)
+  emit_push(op_ntype);  // carries the SourceId (general carry)
 
   // A `declare`/`type_spec` whose type slot (child 1) is a named-type
   // `ref` must NOT be folded: the ref names a TYPE, not a value, so folding it
@@ -1083,7 +1078,7 @@ void uPass_runner::process_verbatim(Pass_method fn) {
   emit_op_with_fold(/*fold_all=*/false);
 }
 
-// ── 1i comb-call inliner ──────────────────────────────────────────────────────
+// ── comb-call inliner ──────────────────────────────────────────────────────
 
 void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts) {
   function_registry.clear();
@@ -1094,8 +1089,8 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
   }
 
   // Build the call graph and mark callees that can reach themselves (direct or
-  // mutual recursion). 1i bails those to the evaluator, which fully unrolls
-  // comptime-bounded recursion; runner-side fuel-bounded recursion is Phase D.
+  // mutual recursion). The inliner bails those to the evaluator, which fully unrolls
+  // comptime-bounded recursion; runner-side fuel-bounded recursion remains a follow-up.
   recursive_callees_.clear();
   absl::flat_hash_map<std::string, std::vector<std::string>> edges;
   for (const auto& [name, ln] : function_registry) {
@@ -1152,7 +1147,7 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
     // runner's own C++ call stack (process_lnast → try_inline → …), so deep
     // comptime recursion (e.g. fib(10)) stack-overflows; the evaluator folds
     // to a constant without emitting/recursing the runner. Revisit only with
-    // an iterative work-stack rewrite of process_lnast (see 1i Phase D note).
+    // an iterative work-stack rewrite of process_lnast.
     // Recursion is allowed here (gated at the call site on constant args, which
     // is what lets the base case fold and terminate the unroll). Multi-output
     // is allowed too (epilogue splats a bundle); require at least one output.
@@ -1441,7 +1436,7 @@ bool uPass_runner::try_inline_func_call() {
 
   // Snapshot the call-site source span (cursor is on the func_call node) so the
   // argument-naming diagnostics below can point at the call line. The SourceId
-  // resolves through the tree that owns the node ([[1f]]).
+  // resolves through the tree that owns the node.
   const auto         call_nid  = lm->get_current_nid();  // func_call node in the source tree
   livehd::diag::Span call_span = lm->get_lnast()->span_of(call_nid);
 
@@ -1760,20 +1755,20 @@ bool uPass_runner::try_inline_func_call() {
   // erroring for the identical `comb`. The callee + io are already resolved.
 
   // ── Match actuals → params (positional + named) ──────────────────────────
-  const std::size_t        nparams = io.inputs.size();
+  const std::size_t       nparams    = io.inputs.size();
   // A trailing `...args` var-arg param (always the LAST input)
   // gathers every actual not consumed by a fixed leading param into one
   // synthesized tuple: positional leftovers become positional entries
   // (`args[i]`), named leftovers become named fields (`args.NAME`). Fixed
   // params bind by the normal rules below; only the leftovers go to the tuple.
-  const bool        has_vararg = nparams > 0 && io.inputs[nparams - 1].is_varargs;
-  const std::size_t nbind      = has_vararg ? nparams - 1 : nparams;  // bindable fixed params (vararg excluded)
-  std::vector<Lnast_node>                         vararg_pos;         // positional leftovers, in call order
-  std::vector<std::pair<std::string, Lnast_node>> vararg_named;       // named leftovers
-  std::vector<Lnast_node>  param_val(nparams, Lnast_node::create_invalid());
-  std::vector<bool>        param_set(nparams, false);
-  std::vector<std::string> param_func(nparams);  // non-empty: function-valued param
-  auto                     param_index = [&](std::string_view k) -> std::size_t {
+  const bool              has_vararg = nparams > 0 && io.inputs[nparams - 1].is_varargs;
+  const std::size_t       nbind      = has_vararg ? nparams - 1 : nparams;  // bindable fixed params (vararg excluded)
+  std::vector<Lnast_node> vararg_pos;                                       // positional leftovers, in call order
+  std::vector<std::pair<std::string, Lnast_node>> vararg_named;             // named leftovers
+  std::vector<Lnast_node>                         param_val(nparams, Lnast_node::create_invalid());
+  std::vector<bool>                               param_set(nparams, false);
+  std::vector<std::string>                        param_func(nparams);  // non-empty: function-valued param
+  auto                                            param_index = [&](std::string_view k) -> std::size_t {
     for (std::size_t i = 0; i < nbind; ++i) {  // never match the var-arg slot by name
       if (io.inputs[i].name == k) {
         return i;
@@ -2004,8 +1999,17 @@ bool uPass_runner::try_inline_func_call() {
     const auto k         = callee->get_lambda_kind();
     const bool is_method = !io.inputs.empty() && io.inputs[0].name == "self";
     if ((k == "mod" || k == "pipe" || k == "fluid") && !is_method) {
-      if (maybe_specialize_template_call(callee, io, param_val, param_set, nbind, has_vararg, vararg_pos, vararg_named, dst_name,
-                                         callee_name, call_span)) {
+      if (maybe_specialize_template_call(callee,
+                                         io,
+                                         param_val,
+                                         param_set,
+                                         nbind,
+                                         has_vararg,
+                                         vararg_pos,
+                                         vararg_named,
+                                         dst_name,
+                                         callee_name,
+                                         call_span)) {
         return true;
       }
     }
@@ -2212,14 +2216,14 @@ bool uPass_runner::try_inline_func_call() {
   // cursor regardless of how the body walk left it.
   active_inline_callees_.push_back(callee.get());
   flush_deferred_emits();  // flush caller-tree parked writes before entering
-  // [[1f]]-C: the call-site id, re-minted into the root locator (the calling
+  // Call-site id, re-minted into the root locator (the calling
   // tree may itself be a callee in nested inlining), anchors every node
   // spliced from this body via combine(callee_def, call_site) in carry_srcid.
   {
     const auto& call_ln      = lm->get_lnast();
     auto        call_site_id = call_ln->get_srcid(call_nid);
     if (call_site_id != hhds::SourceId_invalid && call_ln.get() != root_lnast_.get()) {
-      call_site_id = livehd::srcloc::import_srcid(root_lnast_->source_locator(), call_ln->source_locator(), call_site_id);
+      call_site_id = root_lnast_->source_locator().import_from(call_ln->source_locator(), call_site_id);
     }
     inline_call_sites_.push_back(call_site_id);
   }
@@ -2355,8 +2359,8 @@ bool uPass_runner::try_resolve_tuple_get() {
 
 // ── pipe/mod/fluid template specialization ──────────────────────────
 
-void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid,
-                                     const std::shared_ptr<Lnast>& dst, const Lnast_nid& dst_parent) {
+void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
+                                     const Lnast_nid& dst_parent) {
   const auto type = src->get_type(src_nid);
   Lnast_nid  newn;
   if (Lnast_ntype::is_ref(type)) {
@@ -2368,11 +2372,11 @@ void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Ln
   } else {
     newn = dst->add_child(dst_parent, type);
   }
-  // [[1f]] cross-tree carry: re-mint the id into the clone's own locator so
+  // Cross-tree carry: re-mint the id into the clone's own locator so
   // a specialized template body stays attributable to the template's source.
   if (Lnast::srcid_carries(type)) {
     if (const auto id = src->get_srcid(src_nid); id != hhds::SourceId_invalid) {
-      dst->set_srcid(newn, livehd::srcloc::import_srcid(dst->source_locator(), src->source_locator(), id));
+      dst->set_srcid(newn, dst->source_locator().import_from(src->source_locator(), id));
     }
   }
   for (auto c : src->children(src_nid)) {
@@ -2381,15 +2385,15 @@ void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Ln
 }
 
 std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::shared_ptr<Lnast>& tmpl, const std::string& mangled,
-                                                               const std::vector<Spec_port>& inject,
-                                                               const std::vector<Spec_port>& vports, const std::string& vname) {
+                                                                const std::vector<Spec_port>& inject,
+                                                                const std::vector<Spec_port>& vports, const std::string& vname) {
   auto clone    = std::make_shared<Lnast>(mangled);
   auto src_root = tmpl->get_root();
   auto dst_root = clone->set_root(tmpl->get_type(src_root));  // top
-  // [[1f]] module anchor: the clone keeps pointing at the template's
+  // Module anchor: the clone keeps pointing at the template's
   // definition (set_root bypasses copy_subtree_into's carry).
   if (const auto id = tmpl->get_srcid(src_root); id != hhds::SourceId_invalid) {
-    clone->set_srcid(dst_root, livehd::srcloc::import_srcid(clone->source_locator(), tmpl->source_locator(), id));
+    clone->set_srcid(dst_root, clone->source_locator().import_from(tmpl->source_locator(), id));
   }
 
   // Emit one concrete input-port store: store(ref(name), const(nil), <type>).
@@ -2411,7 +2415,7 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
       copy_subtree_into(tmpl, c, clone, dst_root);
     }
   } else {
-    // 1p-runner var-arg expansion: rebuild the io (drop the `...vname` marker
+    // Var-arg expansion: rebuild the io (drop the `...vname` marker
     // port, append the N concrete vports) and the body (prefix a
     // `vname = (port…)` reconstruction so the body's args[i]/args.NAME/
     // for-a-in-args lower via the normal tuple/for machinery). Append-only trees
@@ -2552,7 +2556,7 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
   // the tree holding the call site — from that tree's io_meta. Build a (bits,
   // signed) → (max,min) prim_type_int range for the latter (mirrors SSA's
   // emit_section).
-  const auto& caller_io = lm->get_lnast()->io_meta();
+  const auto& caller_io    = lm->get_lnast()->io_meta();
   auto        caller_input = [&](const std::string& nm) -> const Lnast_io_entry* {
     for (const auto& ce : caller_io.inputs) {
       if (ce.name == nm) {
@@ -2573,7 +2577,9 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
       fcall_arg_fail(call_span,
                      "fcall-untyped-actual",
                      std::format("argument `{}` to template `{}` has no declared type — a `{}` boundary needs an explicit width",
-                                 label, callee_name, kind),
+                                 label,
+                                 callee_name,
+                                 kind),
                      "annotate the actual, e.g. `x:u8`");
     };
     if (!av_set || !av.is_ref()) {
@@ -2625,7 +2631,7 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
     inject[i] = type_from_actual(param_val[i], param_set[i], e.name);
   }
 
-  // 1p-runner — var-arg boundary (`...vname`): expand the N leftover actuals into
+  // Var-arg boundary (`...vname`): expand the N leftover actuals into
   // N concrete typed ports on the clone (positional → vname__0…, named →
   // vname__KEY). clone_template_specialized drops the `...vname` io port, adds
   // these, and prefixes the body with `vname = (port…)` so args[i]/args.NAME/
@@ -2633,7 +2639,7 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
   std::vector<Spec_port> vports;
   std::string            vname;
   if (has_vararg) {
-    vname = io.inputs[nbind].name;
+    vname         = io.inputs[nbind].name;
     std::size_t k = 0;
     for (const auto& a : vararg_pos) {
       Spec_port vp = type_from_actual(a, true, std::format("{}[{}]", vname, k));
@@ -2905,16 +2911,16 @@ bool uPass_runner::try_init_construction() {
       return false;  // untyped binding — a plain function-value alias, allowed
     }
     livehd::diag::Span span = lm->get_lnast()->span_of(lm->get_current_nid());
-    const auto msg = std::format("cannot assign function reference `{}` to typed variable `{}`:{}", v_raw, x, tn);
-    livehd::diag::sink().emit(livehd::diag::Diagnostic{
-        .severity = livehd::diag::Severity::error,
-        .code     = "ctor-func-ref",
-        .category = "type",
-        .pass     = "upass.runner",
-        .message  = msg,
-        .span     = span,
-        .hint     = "call it (`x = T(...)`) or give the type an `init` method; a bare function "
-                    "reference may only bind to an untyped variable"});
+    const auto         msg  = std::format("cannot assign function reference `{}` to typed variable `{}`:{}", v_raw, x, tn);
+    livehd::diag::sink().emit(
+        livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                 .code     = "ctor-func-ref",
+                                 .category = "type",
+                                 .pass     = "upass.runner",
+                                 .message  = msg,
+                                 .span     = span,
+                                 .hint     = "call it (`x = T(...)`) or give the type an `init` method; a bare function "
+                                             "reference may only bind to an untyped variable"});
     throw std::runtime_error(msg);
   }
 
@@ -3162,7 +3168,7 @@ void uPass_runner::unroll_for() {
   const std::string& tagged_i = ivar;
   const auto         for_bm   = lm->save_cursor();  // on the for-node
   // Re-position the cursor on the body stmts (child2) before each iteration.
-  auto to_body = [&]() {
+  auto               to_body  = [&]() {
     lm->restore_cursor(for_bm);
     lm->move_to_child();    // child0 value
     lm->move_to_sibling();  // child1 iterable
@@ -3266,7 +3272,7 @@ void uPass_runner::unroll_for() {
           // back into d's slot (d is enclosing — relies on the Phase-3 fix to
           // lower a runtime mutation across the iteration block).
           is_ref ? std::function<void()>([&]() { emit_inline_tuple_store(iterable, index_text, tagged_i); })
-                          : std::function<void()>{});
+                 : std::function<void()>{});
       if (!ok) {
         break;
       }
@@ -3301,8 +3307,8 @@ void uPass_runner::unroll_while() {
   }
   const auto while_bm = lm->save_cursor();
   lm->move_to_child();  // condition
-  const auto           cond_type = lm->get_raw_ntype();
-  const std::string    cond_text = std::string(lm->current_text());
+  const auto          cond_type = lm->get_raw_ntype();
+  const std::string   cond_text = std::string(lm->current_text());
   std::optional<Dlop> cval;
   if (Lnast_ntype::is_ref(cond_type)) {
     cval = try_fold_ref(cond_text);
@@ -3458,7 +3464,7 @@ void uPass_runner::run() {
     staging              = std::make_shared<Lnast>(body, lm->get_top_module_name());
     staging_parent       = staging->set_root(Lnast_ntype::create_top());
     staging_parent_stack = {};
-    // [[1f]] module anchor: replace_body swaps the WHOLE tree — re-stamp the
+    // Module anchor: replace_body swaps the WHOLE tree — re-stamp the
     // unit-declaration id (func_extract put it on the source root) onto the
     // fresh root or it dies with the old tree.
     if (root_lnast_) {
@@ -3629,8 +3635,8 @@ void uPass_runner::dead_code_eliminate_staging() {
   // virtual-splices them from the (pre-rewrite) registry copy and the
   // standalone tree is dropped, so sweeping it is wasted and could perturb
   // the copy a later caller inlines. mod/pipe/fluid units — concrete defs
-  // AND specialized clones (1p) — ARE the final output, so they must be
-  // swept (1d hybrid): without this they kept dead post-unroll scaffolding
+  // AND specialized clones — ARE the final output, so they must be
+  // swept (hybrid): without this they kept dead post-unroll scaffolding
   // (the var-arg reconstruction tuple_add, a folded `.[bits]` attr_get)
   // that tolg then warned on. Templates never materialize (guarded by
   // materialize_ at the call site), so they don't reach here. The io-root
@@ -3640,7 +3646,7 @@ void uPass_runner::dead_code_eliminate_staging() {
   }
   using N = Lnast_ntype;
 
-  // Root set for user-named (non-temp) defs. The 1d model: variables cannot
+  // Root set for user-named (non-temp) defs. The model: variables cannot
   // declare outputs, so function IO is the authoritative named-var root set;
   // state elements (mut/reg declarations) are the other roots. Any OTHER
   // user var whose in-tree readers all vanished is dead — e.g. the var-arg
@@ -3791,7 +3797,7 @@ void uPass_runner::dead_code_eliminate_staging() {
       }
       // Temporary defs (`___N`) are always droppable when unread. A
       // user-named def is droppable only when it is NOT a root: not function
-      // IO (io_meta) and not a mut/reg state element. This is the 1d io-root
+      // IO (io_meta) and not a mut/reg state element. This is the io-root
       // rule — `protected_names` holds exactly those roots. Outputs are the
       // motivating case for the io_meta half (written, never read in-tree, so
       // they'd be mis-swept without the root); the var-arg reconstruction
@@ -3823,7 +3829,7 @@ void uPass_runner::dead_code_eliminate_staging() {
 
   auto src_root = staging->get_root();
   auto dst_root = new_staging->set_root(staging->get_type(src_root));
-  // [[1f]] module anchor survives the DCE re-copy too.
+  // Module anchor survives the DCE re-copy too.
   if (const auto id = staging->get_srcid(src_root); id != hhds::SourceId_invalid) {
     new_staging->set_srcid(dst_root, id);
   }
@@ -3847,7 +3853,7 @@ void uPass_runner::dead_code_eliminate_staging() {
           new_child = new_staging->add_child(dst, Lnast_node::create_const(staging->get_name(fc)));
         } else {
           new_child = new_staging->add_child(dst, t);
-          // [[1f]] carry across the DCE sweep (same-locator: both bodies end
+          // Carry across the DCE sweep (same-locator: both bodies end
           // up owned by root_lnast_, so the integer copies verbatim).
           if (Lnast::srcid_carries(t)) {
             new_staging->set_srcid(new_child, staging->get_srcid(fc));
@@ -4161,8 +4167,8 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   const bool        dotted = var.find('.') != std::string::npos;
 
   upass::Kind kind = upass::Kind::unknown;
-  Dlop       decl_max;  // invalid = unbounded/unset
-  Dlop       decl_min;
+  Dlop        decl_max;  // invalid = unbounded/unset
+  Dlop        decl_min;
   std::string type_name;
   upass::Mode mode     = upass::Mode::unknown;
   bool        comptime = false;
@@ -4254,9 +4260,9 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
       fe.comptime = fe.comptime || comptime;
       rb->set(fpath, std::move(fe));
     } else {
-      auto& pf = symbol_table_.pending_decl_facts[var];
-      pf.kind  = kind;
-      pf.mode  = mode;
+      auto& pf    = symbol_table_.pending_decl_facts[var];
+      pf.kind     = kind;
+      pf.mode     = mode;
       pf.decl_max = decl_max;
       pf.decl_min = decl_min;
       pf.comptime = comptime;

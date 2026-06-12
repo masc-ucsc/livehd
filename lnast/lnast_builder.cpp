@@ -191,13 +191,6 @@ std::string Lnast_builder::create_red_xor_stmts(std::string_view var_name) {
   return emit_unary_result(Lnast_ntype::create_red_xor(), var_name);
 }
 
-std::string Lnast_builder::create_sra_stmts(std::string_view a_var, std::string_view b_var) {
-  I(!a_var.empty());
-  I(!b_var.empty());
-
-  return emit_binary_result(Lnast_ntype::create_sra(), a_var, b_var);
-}
-
 std::string Lnast_builder::create_sext_stmts(std::string_view a_var, std::string_view b_var) {
   I(!a_var.empty());
   I(!b_var.empty());
@@ -217,24 +210,16 @@ std::string Lnast_builder::create_bit_and_stmts(std::string_view a_var, std::str
 }
 
 std::string Lnast_builder::create_bit_or_stmts(const std::vector<std::string>& var) {
-  std::string res_var;
-  Lnast_nid   lid;
-
-  for (auto v : var) {
+  // The verifier's binary-op contract wants exactly two operands per node: a
+  // single operand passes through untouched, more than two chain.
+  std::string acc;
+  for (const auto& v : var) {
     if (v.empty()) {
       continue;
     }
-
-    if (res_var.empty()) {
-      res_var = create_lnast_tmp();
-      lid     = lnast->add_child(idx_stmts, Lnast_ntype::create_bit_or());
-      add_ref_child(lid, res_var);
-    }
-
-    add_value_child(lid, v);
+    acc = acc.empty() ? v : emit_binary_result(Lnast_ntype::create_bit_or(), acc, v);
   }
-
-  return res_var;
+  return acc;
 }
 
 std::string Lnast_builder::create_bit_xor_stmts(std::string_view a_var, std::string_view b_var) {
@@ -436,13 +421,92 @@ std::string Lnast_builder::create_mod_stmts(std::string_view a_var, std::string_
   return emit_binary_result(Lnast_ntype::create_mod(), a_var, b_var);
 }
 
+std::string Lnast_builder::create_sra_stmts(std::string_view a_var, std::string_view b_var) {
+  I(!a_var.empty() && !b_var.empty());
+  return emit_binary_result(Lnast_ntype::create_sra(), a_var, b_var);
+}
+
+std::string Lnast_builder::create_eq_stmts(std::string_view a_var, std::string_view b_var) {
+  I(!a_var.empty() && !b_var.empty());
+  return emit_binary_result(Lnast_ntype::create_eq(), a_var, b_var);
+}
+
+std::string Lnast_builder::create_ne_stmts(std::string_view a_var, std::string_view b_var) {
+  I(!a_var.empty() && !b_var.empty());
+  return emit_binary_result(Lnast_ntype::create_ne(), a_var, b_var);
+}
+
+std::string Lnast_builder::create_lt_stmts(std::string_view a_var, std::string_view b_var) {
+  I(!a_var.empty() && !b_var.empty());
+  return emit_binary_result(Lnast_ntype::create_lt(), a_var, b_var);
+}
+
+std::string Lnast_builder::create_le_stmts(std::string_view a_var, std::string_view b_var) {
+  I(!a_var.empty() && !b_var.empty());
+  return emit_binary_result(Lnast_ntype::create_le(), a_var, b_var);
+}
+
+std::string Lnast_builder::create_gt_stmts(std::string_view a_var, std::string_view b_var) {
+  I(!a_var.empty() && !b_var.empty());
+  return emit_binary_result(Lnast_ntype::create_gt(), a_var, b_var);
+}
+
+std::string Lnast_builder::create_ge_stmts(std::string_view a_var, std::string_view b_var) {
+  I(!a_var.empty() && !b_var.empty());
+  return emit_binary_result(Lnast_ntype::create_ge(), a_var, b_var);
+}
+
+std::string Lnast_builder::create_log_and_stmts(std::string_view a_var, std::string_view b_var) {
+  I(!a_var.empty() && !b_var.empty());
+  return emit_binary_result(Lnast_ntype::create_log_and(), a_var, b_var);
+}
+
+std::string Lnast_builder::create_log_or_stmts(std::string_view a_var, std::string_view b_var) {
+  I(!a_var.empty() && !b_var.empty());
+  return emit_binary_result(Lnast_ntype::create_log_or(), a_var, b_var);
+}
+
+std::string Lnast_builder::create_settled_read_stmts(std::string_view var) {
+  I(!var.empty());
+  auto idx_delay = lnast->add_child(idx_stmts, Lnast_ntype::create_delay_assign());
+  auto tmp_var   = create_lnast_tmp();
+  add_ref_child(idx_delay, tmp_var);
+  add_ref_child(idx_delay, var);
+  add_const_child(idx_delay, "1");
+  return tmp_var;
+}
+
+void Lnast_builder::create_declare_stmts(std::string_view var, std::string_view mode, std::string_view max_txt,
+                                         std::string_view min_txt, std::string_view init) {
+  I(!var.empty() && !mode.empty());
+  auto idx = lnast->add_child(idx_stmts, Lnast_ntype::create_declare());
+  add_ref_child(idx, var);
+  if (max_txt.empty()) {
+    lnast->add_child(idx, Lnast_ntype::create_prim_type_none());
+  } else {
+    auto ty = lnast->add_child(idx, Lnast_ntype::create_prim_type_int());
+    add_const_child(ty, max_txt);
+    add_const_child(ty, min_txt);
+  }
+  add_const_child(idx, mode);
+  if (!init.empty()) {
+    if (init == "nil") {
+      add_const_child(idx, init);  // the no-reset sentinel is a const, never a ref
+    } else {
+      add_value_child(idx, init);
+    }
+  }
+}
+
+void Lnast_builder::add_value_child_pub(const Lnast_nid& parent, std::string_view value) { add_value_child(parent, value); }
+
 std::string Lnast_builder::create_get_mask_stmts(std::string_view sel_var, std::string_view bitmask) {
   I(sel_var.size() && bitmask.size());
 
   auto res_var = create_lnast_tmp();
   auto idx     = lnast->add_child(idx_stmts, Lnast_ntype::create_get_mask());
   add_ref_child(idx, res_var);
-  add_ref_child(idx, sel_var);
+  add_value_child(idx, sel_var);  // a constant selectee is legal (constprop folds it)
   add_value_child(idx, bitmask);
 
   return res_var;

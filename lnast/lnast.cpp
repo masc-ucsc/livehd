@@ -11,8 +11,6 @@
 #include <string>
 #include <vector>
 
-#include "lnast_srcloc.hpp"
-
 namespace {
 // Pre-register every Lnast attribute tag at static-init time. The HHDS
 // attribute registry is not thread-safe on first-touch — two threads racing
@@ -68,7 +66,7 @@ void Lnast::replace_body(std::shared_ptr<hhds::Tree> new_body) {
 void Lnast::export_into(hhds::Forest& forest) const {
   auto tio = forest.find_io(top_module_name);
   if (!tio) {
-    tio = forest.create_io(top_module_name);
+    tio           = forest.create_io(top_module_name);
     // Materialize the slot so it is Public and replace() below can swap it.
     auto writable = tio->create_tree();
   }
@@ -101,11 +99,11 @@ std::shared_ptr<Lnast> Lnast::adopt(std::shared_ptr<hhds::Forest> forest, std::s
   if (!tio) {
     return nullptr;
   }
-  auto lnast              = std::make_shared<Lnast>(module_name);
-  lnast->forest_          = std::move(forest);
-  lnast->treeio_          = std::move(tio);
-  lnast->tree_            = lnast->treeio_->get_tree();
-  lnast->top_module_name  = std::string{module_name};
+  auto lnast             = std::make_shared<Lnast>(module_name);
+  lnast->forest_         = std::move(forest);
+  lnast->treeio_         = std::move(tio);
+  lnast->tree_           = lnast->treeio_->get_tree();
+  lnast->top_module_name = std::string{module_name};
   // Loaded srcids live in the Forest's table (srcmap.txt); chain to it as a
   // read-only base so span_of resolves them. forest_ is co-owned, so the base
   // outlives this Lnast.
@@ -190,14 +188,21 @@ livehd::diag::Span Lnast::span_of(const Lnast_nid& nid) const {
   if (nid.is_invalid()) {
     return {};
   }
-  return livehd::srcloc::span_of(srcloc_, get_srcid(nid));
+  return srcloc_.resolve_span(get_srcid(nid));
+}
+
+hhds::Source_locator::Resolved_spans Lnast::spans_of(const Lnast_nid& nid) const {
+  if (nid.is_invalid()) {
+    return {};
+  }
+  return srcloc_.resolve_spans(get_srcid(nid));
 }
 
 std::vector<livehd::diag::Note> Lnast::notes_of(const Lnast_nid& nid, std::string_view message) const {
   if (nid.is_invalid()) {
     return {};
   }
-  return livehd::srcloc::notes_of(srcloc_, get_srcid(nid), message);
+  return livehd::diag::notes_from(srcloc_.resolve_spans(get_srcid(nid)), message);
 }
 
 void Lnast::set_data(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int type) {
@@ -257,10 +262,7 @@ void Lnast::print(std::ostream& os, const Lnast_nid& root_nid) const {
     if (span.is_null()) {
       return std::nullopt;
     }
-    return std::format("{}-{}@{}",
-                       span.start_byte.value_or(0),
-                       span.end_byte.value_or(0),
-                       span.file);
+    return std::format("{}-{}@{}", span.start_byte.value_or(0), span.end_byte.value_or(0), span.file);
   });
   tree_->print(os, root_nid, opts);
 }
@@ -331,13 +333,13 @@ std::shared_ptr<Lnast> finish_read(hhds::Tree::ReadDumpResult result) {
 
     for (const auto& [k, v] : nd.attributes) {
       if (k == "src") {
-        hhds::SourceId id  = 0;
-        auto [ptr, ec]     = std::from_chars(v.data(), v.data() + v.size(), id);
+        hhds::SourceId id = 0;
+        auto [ptr, ec]    = std::from_chars(v.data(), v.data() + v.size(), id);
         if (ec == std::errc{} && ptr == v.data() + v.size()) {
           lnast->set_srcid(node, id);
         }
       }
-      // legacy "loc"/"fname" attributes in old dumps are ignored ([[1f]])
+      // legacy "loc"/"fname" attributes in old dumps are ignored
     }
   }
 

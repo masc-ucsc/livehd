@@ -1,0 +1,20 @@
+/*
+:name: condout_seed_uncertain
+:type: equiv
+:verilog_top: condout_seed_uncertain.seedmod
+:pyrope_top: condout_seed_uncertain.seedmod
+*/
+
+// Regression (constprop miscompile, repro C — the `cond ? t : 0` shape the
+// direct slang Verilog reader emits): a comptime SEED followed by a runtime
+// write under an uncertain if-arm. The seed must rematerialize as the mux's
+// else/false input (tolg lower_if takes the pre-if binding); the post-if
+// read of `m` must demand the wire instead of folding to the nil that
+// Symbol_table::leave_scope pins on uncertainty-modified vars.
+comb seedmod(s:bool, t:u3) -> (b:u5) {
+  mut m:u6 = 0
+  if s {
+    m = t
+  }
+  b = m
+}

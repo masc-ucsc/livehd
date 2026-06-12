@@ -26,6 +26,7 @@ cc_library(
     linkopts = ["-lpthread"],
     visibility = ["//visibility:public"],
     deps = [
+        "@hhds//hhds:core",  # diag Span/excerpts ride the hhds source locator
         "@hlop//hlop:hlop",
         "@abseil-cpp//absl/container:btree",
         "@abseil-cpp//absl/container:flat_hash_map",

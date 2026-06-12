@@ -1,151 +1,137 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Direct slang front-end (SV -> LNAST) via the lhd kernel:
-#   1. `lhd compile --reader slang` runs inou.slang + lnastfmt + pass.upass
-#      (constprop:1 verifier:false) and emits the post-upass LNAST both as the
-#      binary `ln:` Forest dir and the textual `lnast-dump:` observable.
-#   2. `lhd synth ln:` reloads the saved Forest and re-runs upass — the
-#      serialization round-trip. NOTE: this is the binary hhds round-trip; the
-#      old lgshell flow round-tripped through the *textual* lnast.dump/
-#      lnast.read pair, which is no longer covered here (it remains an
-#      lgshell-only feature).
-# lhd checks the diag sink after every step, so the old stderr-grep error
-# heuristics reduce to exit codes.
+# Direct slang front-end (SV -> LNAST) test driver (todo/ 2s subtask E).
+#
+# Ladder mode (the bazel slang_compile-* targets):
+#   slang_compile.sh <tier> <file.v>
+# with tier one of:
+#   lec     - compile --reader slang to verilog AND lhd check (LEC) it against
+#             the source itself. The strongest tier.
+#   verilog - compile to verilog must succeed (a known LEC gap is tracked in
+#             slang_ladder.bzl next to the entry).
+#   lnast   - compile to ln:/lnast-dump + `lhd synth ln:` reload round-trip
+#             (the serialization tier; the construct does not reach tolg yet).
+#   error   - the compile MUST fail cleanly: non-zero exit and at least one
+#             structured diagnostic (no crash/abort).
+# Per-tier expectations are an acceptance gate both ways: a regression fails
+# its tier, and an `error` entry that starts compiling also FAILS so the
+# ladder gets promoted explicitly in slang_ladder.bzl.
+#
+# Legacy mode (no tier argument): every inou/slang/tests/verilog/*.v at the
+# `error` tier (the sky130 cell-instance set pins the unknown-module policy).
 
-echo "slang_compile.sh running in $(pwd)"
+set -u
 
 LHD=./bazel-bin/lhd/lhd
-
 if [ ! -x $LHD ]; then
   if [ -x ./lhd/lhd ]; then
     LHD=./lhd/lhd
-    echo "lhd is in $(pwd)"
   else
-    echo "FAILED: slang_compile.sh could not find the lhd binary in $(pwd)";
+    echo "FAILED: slang_compile.sh could not find the lhd binary in $(pwd)"
     exit 1
   fi
 fi
 
-rm -rf ./logs
-
-inputs=inou/slang/tests/verilog/*.v
-long=""
-if [ "$1" == "long" ]; then
-  long="true"
-  shift
-fi
-fixme=""
-if [ "$1" != "" ]; then
-  long="true"
-  fixme="true"
-  inputs=""
-  while [ "$1" != "" ]; do
-    inputs+=" "$1
-    shift
-  done
-  echo "slang_compile.sh inputs: ${inputs}"
-fi
-
-pass=0
-fail=0
-fail_list=""
-pass_list=""
-for full_input in ${inputs}
-do
-  STARTTIME=$SECONDS
-  input=$(basename ${full_input})
-  echo ${full_input}
-  base=${input%.*}
-
-  if [[ $input =~ "long_" ]]; then
-    if [[ $long == "" ]]; then
-      echo "Skipping long test for "$base
-      continue
-    fi
-    base=${base:5}
-  else
-    if [[ $long == "true" && $fixme != "true" ]]; then
-      echo "Skipping short test for "$base
-      continue
-    fi
-  fi
-  if [[ $input =~ "fixme_" ]]; then
-    if [[ $fixme == "" ]]; then
-      echo "Skipping fixme test for "$base
-      echo "PLEASE: Somebody fix this!!!"
-      continue
-    fi
-    base=${base:6}
-  fi
-  if [[ $input =~ "nocheck_" ]]; then
-    base=${base:8}
-  fi
-
-  rm -rf tmp_slang
-  mkdir -p tmp_slang
-
-  ln_dir="tmp_slang/${base}_ln"
-  dump_dir="tmp_slang/${base}_dump"
-  ${LHD} compile ${full_input} --reader slang \
-    --emit-dir ln:${ln_dir}/ --emit-dir lnast-dump:${dump_dir}/ \
-    --workdir tmp_slang/${base} -q --result-json tmp_slang/${input}.result.json \
-    >tmp_slang/${input}.log 2>tmp_slang/${input}.err
-  if [ $? -eq 0 ]; then
-    echo "Successfully created LNAST from ${input}"
-  else
-    echo "FAIL: slang LNAST parsing/upass terminated with an error (testcase ${input})"
-    cat tmp_slang/${input}.result.json 2>/dev/null
-    cat tmp_slang/${input}.err
-    ((fail++))
-    fail_list+=" "$base
-    continue
-  fi
-
+run_lnast_tier() { # <file> <base> <scratch>
+  local f=$1 base=$2 wd=$3
+  ${LHD} compile "$f" --reader slang \
+    --emit-dir ln:"$wd"/ln/ --emit-dir lnast-dump:"$wd"/dump/ \
+    --workdir "$wd"/w -q >"$wd"/compile.log 2>&1 || {
+    echo "FAIL(${base}): slang LNAST parsing/upass failed"
+    cat "$wd"/compile.log
+    return 1
+  }
   shopt -s nullglob
-  dump_files=(${dump_dir}/*.lnast)
+  local dumps=("$wd"/dump/*.lnast)
   shopt -u nullglob
-  if [ ${#dump_files[@]} -eq 0 ] || [ ! -s "${dump_files[0]}" ]; then
-    echo "FAIL: LNAST dump in ${dump_dir} is empty or missing"
-    ((fail++))
-    fail_list+=" "$base
-    continue
+  if [ ${#dumps[@]} -eq 0 ] || [ ! -s "${dumps[0]}" ]; then
+    echo "FAIL(${base}): LNAST dump empty or missing"
+    return 1
   fi
+  ${LHD} synth ln:"$wd"/ln/ --workdir "$wd"/wreload -q >"$wd"/reload.log 2>&1 || {
+    echo "FAIL(${base}): ln: reload/upass failed"
+    cat "$wd"/reload.log
+    return 1
+  }
+  return 0
+}
 
-  # Reload the saved ln: Forest and re-run upass (serialization round-trip).
-  ${LHD} synth ln:${ln_dir}/ \
-    --workdir tmp_slang/${base}_reload -q --result-json tmp_slang/${input}.reload.json \
-    >tmp_slang/${input}.reload.log 2>tmp_slang/${input}.reload.err
-  if [ $? -eq 0 ]; then
-    echo "Successfully reloaded LNAST from ${input}"
-  else
-    echo "FAIL: ln: reload/upass terminated with an error (testcase ${input})"
-    cat tmp_slang/${input}.reload.json 2>/dev/null
-    cat tmp_slang/${input}.reload.err
-    ((fail++))
-    fail_list+=" "$base
-    continue
+run_verilog_tier() { # <file> <base> <scratch>
+  local f=$1 base=$2 wd=$3
+  ${LHD} compile "$f" --reader slang --top "$base" \
+    --emit-dir verilog:"$wd"/v/ --workdir "$wd"/w -q >"$wd"/compile.log 2>&1 || {
+    echo "FAIL(${base}): slang -> verilog compile failed"
+    cat "$wd"/compile.log
+    return 1
+  }
+  cat "$wd"/v/*.v >"$wd"/all.v 2>/dev/null
+  if [ ! -s "$wd"/all.v ]; then
+    echo "FAIL(${base}): no verilog emitted"
+    return 1
   fi
+  return 0
+}
 
-  pass_list+=" "$base
-  ((pass++))
+run_one() { # <tier> <file>
+  local tier=$1 f=$2
+  local name base wd
+  name=$(basename "$f" .v)
+  base=${name#long_}
+  base=${base#fixme_}
+  base=${base#nocheck_}
+  base=${base#long_}
+  wd=tmp_slang/${name}
+  rm -rf "$wd"
+  mkdir -p "$wd"
 
-  ENDTIME=$SECONDS
-  echo "perf: takes $(($ENDTIME - $STARTTIME)) for top:"${base}
-done
+  case "$tier" in
+    lnast)
+      run_lnast_tier "$f" "$base" "$wd" || return 1
+      ;;
+    verilog)
+      run_verilog_tier "$f" "$base" "$wd" || return 1
+      ;;
+    lec)
+      run_verilog_tier "$f" "$base" "$wd" || return 1
+      ${LHD} check --impl verilog:"$wd"/all.v --ref verilog:"$f" --top "$base" \
+        --workdir "$wd"/wc -q >"$wd"/check.log 2>&1 || {
+        echo "FAIL(${base}): LEC mismatch vs source"
+        tail -5 "$wd"/check.log
+        return 1
+      }
+      ;;
+    error)
+      if ${LHD} compile "$f" --reader slang --emit-dir lnast-dump:"$wd"/dump/ \
+        --emit diagnostics:"$wd"/diag.jsonl --workdir "$wd"/w -q >"$wd"/compile.log 2>&1; then
+        echo "FAIL(${base}): expected a compile error but the compile passed — promote the ladder entry"
+        return 1
+      fi
+      if [ ! -s "$wd"/diag.jsonl ]; then
+        echo "FAIL(${base}): compile failed without a structured diagnostic (crash?)"
+        cat "$wd"/compile.log
+        return 1
+      fi
+      ;;
+    *)
+      echo "FAIL: unknown tier '$tier'"
+      return 1
+      ;;
+  esac
+  echo "PASS(${base}) tier=${tier}"
+  return 0
+}
 
-FAIL=$fail
-for job in $(jobs -p)
-do
-  echo $job
-  wait $job || let "FAIL+=1"
-done
-
-if [ $FAIL -eq 0 ]; then
-  echo "SUCCESS: pass:${pass} tests without errors"
-  exit 0
-else
-  echo "FAIL: ${pass} tests passed: ${pass_list}"
-  echo "FAIL: ${fail} tests failed: ${fail_list}"
-  exit 1
+if [ $# -ge 2 ]; then
+  run_one "$1" "$2"
+  exit $?
 fi
+
+# Legacy default mode: the sky130 cell-instance set. These instantiate
+# liberty cells with no module sources, so they pin the unknown-module
+# (blackbox) diagnostic policy: a clean located error, never a crash.
+fail=0
+for f in inou/slang/tests/verilog/*.v; do
+  run_one error "$f" || fail=1
+done
+exit $fail

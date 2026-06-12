@@ -1,0 +1,25 @@
+/*
+:name: condout_const_arms
+:type: equiv
+:verilog_top: condout_const_arms.condout
+:pyrope_top: condout_const_arms.condout
+*/
+
+// Regression (constprop miscompile, repro A): BOTH if-arm writes to an io
+// OUTPUT are comptime constants. Each arm's store used to be absorbed into
+// the symbol table and dropped (the arm value "is known"), leaving the
+// output undriven — cgen emitted an all-unknown poison const instead of a
+// mux. Output stores are now always kept (classify_statement_impl's
+// io-output guard), so tolg's lower_if merges both arms into a real mux.
+//
+// NOTE: the then/else constant ORDER is deliberate (1 then 2): tolg's
+// lower_if currently sizes the merged mux from the var's LAST recorded
+// write (upass_tolg mw_lookup), a separate pre-existing width bug. With the
+// wider constant in the else arm the mux is sized correctly either way.
+comb condout(s:bool) -> (o:u2) {
+  if s {
+    o = 1
+  } else {
+    o = 2
+  }
+}

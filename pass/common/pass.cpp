@@ -17,7 +17,7 @@ std::string Pass::get_files(const Eprp_var& var) const {
       std::string fname(f);
       if (access(fname.c_str(), F_OK) == -1) {
         _files = "/INVALID";
-        error("{} could not access file:{}", pass_name, f);
+        livehd::diag::err(pass_name, "missing-file", "io").msg("could not access file:{}", f).fatal();
       }
     }
   } else {
@@ -37,7 +37,7 @@ std::string Pass::get_path(const Eprp_var& var) const {
   }
   if (!setup_directory(_path)) {
     _path = "/INVALID";
-    error("{} could not gain access to path:{}", pass_name, _path);
+    livehd::diag::err(pass_name, "missing-path", "io").msg("could not gain access to path:{}", _path).fatal();
   }
 
   return _path;
@@ -50,7 +50,7 @@ std::string Pass::get_odir(const Eprp_var& var) const {
     _odir = var.get("odir");
     if (!setup_directory(_odir)) {
       _odir = "/INVALID";
-      error("{} could not gain access to odir:{}", pass_name, _odir);
+      livehd::diag::err(pass_name, "missing-path", "io").msg("could not gain access to odir:{}", _odir).fatal();
     }
   } else {
     _odir = "/INVALID";

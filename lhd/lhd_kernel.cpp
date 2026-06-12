@@ -26,7 +26,6 @@
 #include "lhd.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
-#include "lnast_srcloc.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
 #include "prp2lnast.hpp"
@@ -312,10 +311,10 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
 // from this table (the flags themselves are each method's registered EPRP
 // labels — add_label_optional/required is the single registration point).
 constexpr std::pair<std::string_view, std::string_view> kSetPasses[] = {
-    {"upass", "pass.upass"},
-    {"cprop", "pass.cprop"},
-    {"bitwidth", "pass.bitwidth"},
-    {"cgen", "inou.cgen.verilog"},
+    {   "upass",        "pass.upass"},
+    {   "cprop",        "pass.cprop"},
+    {"bitwidth",     "pass.bitwidth"},
+    {    "cgen", "inou.cgen.verilog"},
 };
 
 std::string_view set_pass_method(std::string_view set_name) {
@@ -331,9 +330,7 @@ std::string_view set_pass_method(std::string_view set_name) {
 // method). In lhd these belong to the kernel — odir comes from the typed
 // --emit/--emit-dir slot, inputs are positional — so they are not listed as
 // options and --set/--config rejects them.
-bool is_kernel_label(std::string_view flag) {
-  return flag == "files" || flag == "path" || flag == "odir";
-}
+bool is_kernel_label(std::string_view flag) { return flag == "files" || flag == "path" || flag == "odir"; }
 
 // --set pass[.idx].flag=value entries for `pass_name` -> EPRP labels.
 void merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_dict& labels) {
@@ -405,10 +402,15 @@ std::vector<std::pair<std::string, std::string>> recipe_graph_passes(const Optio
     return {};
   }
   if (r == "O1") {
-    return {{"cprop", "pass.cprop"}};
+    return {
+        {"cprop", "pass.cprop"}
+    };
   }
   if (r == "O2") {
-    return {{"cprop", "pass.cprop"}, {"bitwidth", "pass.bitwidth"}};
+    return {
+        {   "cprop",    "pass.cprop"},
+        {"bitwidth", "pass.bitwidth"}
+    };
   }
   throw Lhd_error{"usage", std::format("unknown recipe '{}'", r), "built-in recipes: O0, O1, O2 (`lhd list recipes`)"};
 }
@@ -511,7 +513,7 @@ void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<L
     return a->get_top_module_name() < b->get_top_module_name();
   });
 
-  auto forest = hhds::Forest::create();
+  auto                       forest = hhds::Forest::create();
   std::vector<Manifest_unit> manifest;
   for (const auto& ln : sorted) {
     std::string name{ln->get_top_module_name()};
@@ -653,8 +655,10 @@ void emit_lnast_dump_outputs(const std::vector<std::shared_ptr<Lnast>>& units, O
 // the sorted module names.
 std::vector<std::string> cgen_into(Options& opts, Result& res, Eprp_var& var, const std::string& odir) {
   ensure_dir(odir);
-  Eprp_var::Eprp_dict labels{{"odir", odir}};
-  merge_sets(opts, "cgen", labels);  // e.g. --set cgen.srcmap=1 ([[1f]]-G)
+  Eprp_var::Eprp_dict labels{
+      {"odir", odir}
+  };
+  merge_sets(opts, "cgen", labels);  // e.g. --set cgen.srcmap=1
   run_step("inou.cgen.verilog", var, labels, opts, res);
 
   std::vector<std::string> names;
@@ -687,7 +691,7 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
     if (e.kind != "verilog") {
       continue;
     }
-    auto names = cgen_into(opts, res, var, e.path);
+    auto                                          names = cgen_into(opts, res, var, e.path);
     std::vector<std::pair<std::string, uint64_t>> manifest;
     for (const auto& n : names) {
       std::ifstream      ifs(std::format("{}/{}.v", e.path, n));
@@ -705,8 +709,8 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
     }
     // One declared file: per-module cgen into scratch, then a deterministic
     // (name-sorted) concatenation.
-    auto scratch = std::format("{}/cgen_{:03d}", workdir(opts), ++step_counter);
-    auto names   = cgen_into(opts, res, var, scratch);
+    auto          scratch = std::format("{}/cgen_{:03d}", workdir(opts), ++step_counter);
+    auto          names   = cgen_into(opts, res, var, scratch);
     std::ofstream ofs(e.path);
     if (!ofs.is_open()) {
       throw Lhd_error{"config", std::format("could not write {}", e.path), ""};
@@ -733,7 +737,13 @@ void emit_pyrope_outputs(Options& opts, Result& res, Eprp_var& var) {
                       "pyrope output needs lnast/pyrope inputs (there is no LGraph -> LNAST decompiler)"};
     }
     ensure_dir(e.path);
-    run_step("pass.prp_writer", var, {{"odir", e.path}}, opts, res);
+    run_step("pass.prp_writer",
+             var,
+             {
+                 {"odir", e.path}
+    },
+             opts,
+             res);
 
     std::vector<std::string> names;
     names.reserve(var.lnasts.size());
@@ -757,7 +767,7 @@ void emit_pyrope_outputs(Options& opts, Result& res, Eprp_var& var) {
   }
 }
 
-// [[1f]] depfile closure: a compiled unit's Source_locator file table is the
+// Depfile closure: a compiled unit's Source_locator file table is the
 // list of source files its provenance actually references (its own file plus
 // anything imports pulled in) — fold them into the depfile prerequisites.
 void harvest_source_files(Result& res, const std::vector<std::shared_ptr<Lnast>>& units) {
@@ -866,17 +876,9 @@ void validate_emits(const Options& opts) {
       }
     }
   }
-  if (opts.language == "verilog" && opts.reader == "slang") {
-    // inou.slang still emits the pre-typesystem LNAST conventions (module-level
-    // `__ubits` stores, no comb lambda io_meta), which tolg cannot lower yet.
-    for (const char* k : {"lg", "verilog"}) {
-      reject_emit_kind(opts,
-                       k,
-                       {"unsupported",
-                        "--reader slang stops at LNAST today (inou.slang predates the current io/typesystem conventions)",
-                        "emit ln:/pyrope: from --reader slang, or use --reader yosys-slang for lg:/verilog:"});
-    }
-  }
+  // --reader slang emits the current func-style LNAST conventions (io node,
+  // declare/store, lambda_kind), so lg:/verilog: emits lower through the same
+  // upass+tolg pipeline as pyrope sources (todo/ 2s).
   if (opts.command == "compile" && opts.language == "verilog" && opts.reader != "slang") {
     for (const char* k : {"ln", "lnast-dump"}) {
       reject_emit_kind(opts,
@@ -925,17 +927,14 @@ void validate_dumps(const Options& opts) {
     return;
   }
   if (opts.command == "check" || opts.command == "scan" || opts.command == "ln.cat" || opts.command == "ln.diff") {
-    throw Lhd_error{"usage", std::format("{} has no --dump observables", opts.command), "--dump applies to elaborate/synth/compile"};
+    throw Lhd_error{"usage",
+                    std::format("{} has no --dump observables", opts.command),
+                    "--dump applies to elaborate/synth/compile"};
   }
   if (opts.language == "verilog" && opts.reader != "slang" && (wants_dump(opts, "parse") || wants_dump(opts, "lnast"))) {
     throw Lhd_error{"unsupported",
                     "the yosys-* readers elaborate to LGraphs, so there is no LNAST to dump",
                     "use --dump lg, or --reader slang (the direct SV -> LNAST front-end)"};
-  }
-  if (opts.language == "verilog" && opts.reader == "slang" && wants_dump(opts, "lg")) {
-    throw Lhd_error{"unsupported",
-                    "--reader slang stops at LNAST today (inou.slang predates the current io/typesystem conventions)",
-                    "use --dump parse|lnast, or --reader yosys-slang for the LGraph view"};
   }
   if (opts.command == "synth") {
     if (wants_dump(opts, "parse")) {
@@ -989,15 +988,15 @@ std::shared_ptr<Lnast> synthesize_pub_wrapper(const std::shared_ptr<Lnast>& ln) 
     return nullptr;
   }
   const std::string unit{ln->get_top_module_name()};
-  auto              w     = std::make_shared<Lnast>(unit + ".__pub");
-  auto              root  = w->set_root(Lnast_ntype::create_top());
-  auto              stmts = w->add_child(root, Lnast_ntype::create_stmts());
-  // [[1f]]-C: wrapper nodes anchor at their pub declaration — re-mint the pub
+  auto              w            = std::make_shared<Lnast>(unit + ".__pub");
+  auto              root         = w->set_root(Lnast_ntype::create_top());
+  auto              stmts        = w->add_child(root, Lnast_ntype::create_stmts());
+  // Wrapper nodes anchor at their pub declaration — re-mint the pub
   // decl's SourceId (recorded by prp2lnast) into the wrapper's own locator.
-  auto pub_srcid_of = [&](std::string_view name) -> hhds::SourceId {
+  auto              pub_srcid_of = [&](std::string_view name) -> hhds::SourceId {
     for (const auto& p : pubs) {
       if (p.name == name && p.srcid != hhds::SourceId_invalid) {
-        return livehd::srcloc::import_srcid(w->source_locator(), ln->source_locator(), p.srcid);
+        return w->source_locator().import_from(ln->source_locator(), p.srcid);
       }
     }
     return hhds::SourceId_invalid;
@@ -1095,7 +1094,13 @@ size_t pyrope_parse(Options& opts, Result& res, Eprp_var& var, const std::vector
     }
   }
 
-  run_step("inou.prp", var, {{"files", join_csv(opts.files)}}, opts, res);
+  run_step("inou.prp",
+           var,
+           {
+               {"files", join_csv(opts.files)}
+  },
+           opts,
+           res);
   run_step("pass.lnastfmt", var, {}, opts, res);
   if (wants_dump(opts, "parse")) {  // this invocation's source units only (imports are pre-elaborated)
     screen_dump_lnasts(std::vector<std::shared_ptr<Lnast>>(var.lnasts.begin() + static_cast<long>(n_imports), var.lnasts.end()),
@@ -1113,10 +1118,12 @@ std::string verilog_frontend(Options& opts, Result& res, Eprp_var& var) {
   const auto* d_out    = find_slot(opts.emit_dirs, "lg");
   std::string lib_path = d_out ? d_out->path : workdir(opts) + "/lgdb";
 
-  Eprp_var::Eprp_dict labels{{"files", join_csv(opts.files)},
-                             {"path", lib_path},
-                             {"top", opts.top.empty() ? std::string{"-auto-top"} : opts.top},
-                             {"frontend", opts.reader == "yosys-verilog" ? std::string{"verilog"} : std::string{"slang"}}};
+  Eprp_var::Eprp_dict labels{
+      {   "files",                                                           join_csv(opts.files)},
+      {    "path",                                                                       lib_path},
+      {     "top",                         opts.top.empty() ? std::string{"-auto-top"} : opts.top},
+      {"frontend", opts.reader == "yosys-verilog" ? std::string{"verilog"} : std::string{"slang"}}
+  };
   if (!opts.raw_args.empty()) {
     // Join with '\x1f' (ASCII unit separator) — a comma is lossy for shell
     // argv tokens like +incdir+a,b; inou_yosys_api splits on '\x1f' when seen.
@@ -1150,7 +1157,13 @@ void slang_parse(Options& opts, Result& res, Eprp_var& var) {
   check_inputs_exist(opts.files);
   res.inputs = opts.files;
 
-  run_step("inou.slang", var, {{"files", join_csv(opts.files)}}, opts, res);
+  run_step("inou.slang",
+           var,
+           {
+               {"files", join_csv(opts.files)}
+  },
+           opts,
+           res);
   run_step("pass.lnastfmt", var, {}, opts, res);
   if (wants_dump(opts, "parse")) {
     screen_dump_lnasts(var.lnasts, "post-parse");
@@ -1260,20 +1273,20 @@ void scan_command(Options& opts, Result& res) {
     if (!first) {
       payload += ',';
     }
-    first = false;
-    payload += std::format("{{\"file\":\"{}\",\"imports\":[", json_escape_min(f));
-    bool ifirst = true;
+    first        = false;
+    payload     += std::format("{{\"file\":\"{}\",\"imports\":[", json_escape_min(f));
+    bool ifirst  = true;
     for (const auto& imp : collect_imports(ln)) {
       if (!ifirst) {
         payload += ',';
       }
-      ifirst = false;
+      ifirst   = false;
       payload += std::format("\"{}\"", json_escape_min(imp));
     }
     payload += "]}";
   }
-  payload += "]";
-  res.scan_json = payload;
+  payload       += "]";
+  res.scan_json  = payload;
 }
 
 // ---- ln.cat / ln.diff (LNAST debug tools; payload on stdout) -----------------
@@ -1346,7 +1359,13 @@ std::vector<std::shared_ptr<Lnast>> ln_tool_units(Options& opts, Result& res, co
   for (const auto& f : files) {
     res.inputs.push_back(f);
   }
-  run_step(in.prp_files.empty() ? "inou.slang" : "inou.prp", var, {{"files", join_csv(files)}}, opts, res);
+  run_step(in.prp_files.empty() ? "inou.slang" : "inou.prp",
+           var,
+           {
+               {"files", join_csv(files)}
+  },
+           opts,
+           res);
   lower_lnasts(opts, res, var, workdir(opts) + "/lgdb", /*need_graphs=*/false);  // lnastfmt + upass; no tolg
 
   return std::vector<std::shared_ptr<Lnast>>(var.lnasts.begin() + static_cast<long>(n_imports), var.lnasts.end());
@@ -1430,16 +1449,16 @@ void print_line_diff(std::string& out, const std::vector<std::string>& a, const 
   for (size_t k = 0; k < ops.size(); ++k) {
     if (!show[k]) {
       if (!in_gap) {
-        out += "  ...\n";
-        in_gap = true;
+        out    += "  ...\n";
+        in_gap  = true;
       }
       continue;
     }
-    in_gap = false;
-    out += ops[k].first;
-    out += ' ';
-    out += *ops[k].second;
-    out += '\n';
+    in_gap  = false;
+    out    += ops[k].first;
+    out    += ' ';
+    out    += *ops[k].second;
+    out    += '\n';
   }
 }
 
@@ -1495,9 +1514,9 @@ void ln_diff_command(Options& opts, Result& res) {
   std::string out;
   double      total = 0.0;
   for (size_t k = 0; k < a_units.size(); ++k) {
-    const auto& la = a_units[k];
-    const auto& lb = b_units[k];
-    out += std::format("//---- ln.diff {} vs {}\n", la->get_top_module_name(), lb->get_top_module_name());
+    const auto& la  = a_units[k];
+    const auto& lb  = b_units[k];
+    out            += std::format("//---- ln.diff {} vs {}\n", la->get_top_module_name(), lb->get_top_module_name());
 
     // The hhds tree diff (Zhang-Shasha edit distance) on the live trees:
     // nodes match on (lnast type, name) — loc/fname attrs are ignored.
@@ -1507,8 +1526,8 @@ void ln_diff_command(Options& opts, Result& res) {
       }
       return la->get_name(x) == lb->get_name(y) ? 0.0 : 1.0;
     };
-    auto ted = hhds::TreeEditDistance::compute(la->tree_ptr(), lb->tree_ptr(), hhds::EditCosts{}, cost_fn);
-    total += ted.distance;
+    auto ted  = hhds::TreeEditDistance::compute(la->tree_ptr(), lb->tree_ptr(), hhds::EditCosts{}, cost_fn);
+    total    += ted.distance;
 
     if (ted.distance == 0.0) {
       out += "identical\n";
@@ -1587,7 +1606,10 @@ void elaborate_command(Options& opts, Result& res) {
       // extracted lambdas (`<unit>.<entity>` — the `ln:` url targets), and a
       // synthesized `<unit>.__pub` wrapper per pub-exporting file. A bare
       // `lhd elaborate x.prp` (no IR emits) stays front-end-only.
-      lower_lnasts(opts, res, var, lg_out ? lg_out->path : workdir(opts) + "/lgdb",
+      lower_lnasts(opts,
+                   res,
+                   var,
+                   lg_out ? lg_out->path : workdir(opts) + "/lgdb",
                    /*need_graphs=*/lg_out != nullptr || wants_dump(opts, "lg"));
       if (wants_dump(opts, "lg")) {
         screen_dump_graphs(var, "post-tolg");
@@ -1597,7 +1619,7 @@ void elaborate_command(Options& opts, Result& res) {
         res.outputs.push_back(lg_out->path);
       }
       if (ln_out != nullptr) {
-        auto publish = collect_source_derived(var.lnasts, filter_top(source_units, opts.top));
+        auto                                publish = collect_source_derived(var.lnasts, filter_top(source_units, opts.top));
         // Publication happens at completion (never a partial pub list): the
         // upass above either finished every unit or threw.
         std::vector<std::shared_ptr<Lnast>> wrappers;
@@ -1629,7 +1651,7 @@ void elaborate_command(Options& opts, Result& res) {
     // Absorb each lg: library into the output library. Name-hash gids make a
     // shared graph name keep the same gid across libraries, so load_merge is
     // conflict-free for matching names (and dedups them).
-    auto& lib = livehd::Hhds_graph_library::instance(lib_path);
+    auto&             lib      = livehd::Hhds_graph_library::instance(lib_path);
     for (const auto& d : ir.lg_dirs) {
       res.inputs.push_back(d);
       lib.load_merge(d);
@@ -1672,7 +1694,10 @@ void elaborate_command(Options& opts, Result& res) {
     if (lg_out != nullptr || wants_dump(opts, "lnast") || wants_dump(opts, "lg")) {
       // Re-lowering all units into ONE fresh library is the v0 aggregation:
       // gids stay consistent by construction.
-      lower_lnasts(opts, res, var, lg_out ? lg_out->path : workdir(opts) + "/lgdb",
+      lower_lnasts(opts,
+                   res,
+                   var,
+                   lg_out ? lg_out->path : workdir(opts) + "/lgdb",
                    /*need_graphs=*/lg_out != nullptr || wants_dump(opts, "lg"));
       if (wants_dump(opts, "lg")) {
         screen_dump_graphs(var, "post-tolg");
@@ -1728,7 +1753,10 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   // quiet mode (no count tally) — every cassert that resolves must hold, an
   // unknown / deferred cassert is left for later. A user can still silence it
   // with `--set upass.verifier=false`.
-  Eprp_var::Eprp_dict up{{"constprop", "1"}, {"verifier", "true"}};
+  Eprp_var::Eprp_dict up{
+      {"constprop",    "1"},
+      { "verifier", "true"}
+  };
   // Derived toln gate (the dual of the emit-derived tolg gate): when neither
   // the lnast.tolg stage below (need_graphs) nor any post-upass LNAST emit
   // (ln:/pyrope:/lnast-dump:) consumes the rewritten tree, skip materializing
@@ -1777,9 +1805,9 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
       for (const auto& [unit, text] : var.unresolved_imports) {
         std::string file;
         for (const auto& [pname, _] : pristine) {
-          const bool prefix = unit == pname
-                              || (unit.size() > pname.size() + 1 && unit.compare(0, pname.size(), pname) == 0
-                                  && unit[pname.size()] == '.');
+          const bool prefix
+              = unit == pname
+                || (unit.size() > pname.size() + 1 && unit.compare(0, pname.size(), pname) == 0 && unit[pname.size()] == '.');
           if (prefix && pname.size() > file.size()) {
             file = pname;
           }
@@ -1802,13 +1830,13 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
             }
             list += '"' + t + '"';
           }
-          livehd::diag::sink().emit(livehd::diag::Diagnostic{
-              .severity = livehd::diag::Severity::error,
-              .code     = "import-no-progress",
-              .category = "name",
-              .pass     = "lhd.elaborate",
-              .message  = std::format("unit `{}` is blocked on unresolved import(s): {}", file, list),
-              .hint     = std::format("an import cycle or a missing unit; available units: {}", units_avail)});
+          livehd::diag::sink().emit(
+              livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                       .code     = "import-no-progress",
+                                       .category = "name",
+                                       .pass     = "lhd.elaborate",
+                                       .message  = std::format("unit `{}` is blocked on unresolved import(s): {}", file, list),
+                                       .hint = std::format("an import cycle or a missing unit; available units: {}", units_avail)});
         }
         throw classify_engine_failure("import resolution made no progress");
       }
@@ -1850,7 +1878,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     for (const auto& ln : var.lnasts) {
       uPass_tolg::register_io(ln, lib_path, var.lnasts);
     }
-    // 2d-reg — the reset_style elaboration flag rides the upass set
+    // The reset_style elaboration flag rides the upass set
     // (`--set upass.reset_style=async`); tolg is its only consumer.
     std::string reset_style = "sync";
     if (auto it = up.find("reset_style"); it != up.end() && !it->second.empty()) {
@@ -1890,9 +1918,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
 
   if (const auto* lg_out = find_slot(opts.emit_dirs, "lg"); lg_out != nullptr) {
     if (lib_path.empty() || var.graphs.empty()) {
-      throw Lhd_error{"config",
-                      "no graphs to save into --emit-dir lg:",
-                      "the input produced no synthesizable modules"};
+      throw Lhd_error{"config", "no graphs to save into --emit-dir lg:", "the input produced no synthesizable modules"};
     }
     // By construction lib_path == the lg output dir whenever one was
     // declared (tolg/copy targeted it), so saving the library is the emit.
@@ -2094,7 +2120,13 @@ std::string materialize_verilog(Options& opts, Result& res, const std::string& k
   } else if (kind == "pyrope" || kind == "ln") {
     if (kind == "pyrope") {
       check_inputs_exist({path});
-      run_step("inou.prp", var, {{"files", path}}, opts, res);
+      run_step("inou.prp",
+               var,
+               {
+                   {"files", path}
+      },
+               opts,
+               res);
     } else {
       if (!fs::is_directory(path)) {
         throw Lhd_error{"missing_file", std::format("ln: input not found: {}", path), "an ln: input is a Forest save directory"};
@@ -2114,9 +2146,9 @@ std::string materialize_verilog(Options& opts, Result& res, const std::string& k
   } else {
     throw Lhd_error{"usage", std::format("check accepts verilog:, pyrope:, ln:, or lg: inputs, got {}:", kind), ""};
   }
-  auto scratch = std::format("{}/check_{}", workdir(opts), side);
-  auto names   = cgen_into(opts, res, var, scratch);
-  auto out     = std::format("{}/check_{}.v", workdir(opts), side);
+  auto          scratch = std::format("{}/check_{}", workdir(opts), side);
+  auto          names   = cgen_into(opts, res, var, scratch);
+  auto          out     = std::format("{}/check_{}.v", workdir(opts), side);
   std::ofstream ofs(out);
   for (const auto& n : names) {
     std::ifstream ifs(std::format("{}/{}.v", scratch, n));
@@ -2140,10 +2172,10 @@ void check_command(Options& opts, Result& res) {
   // lgcheck*.log) never land in the caller's directory (hermetic kernel).
   auto rundir = fs::absolute(workdir(opts)).string();
   auto cmd    = std::format("cd {} && {} --implementation {} --reference {}",
-                         shell_quote(rundir),
-                         shell_quote(lgcheck),
-                         shell_quote(impl_v),
-                         shell_quote(ref_v));
+                            shell_quote(rundir),
+                            shell_quote(lgcheck),
+                            shell_quote(impl_v),
+                            shell_quote(ref_v));
   if (!yosys.empty()) {
     cmd += std::format(" --yosys {}", shell_quote(yosys));
   }
@@ -2156,8 +2188,8 @@ void check_command(Options& opts, Result& res) {
   if (opts.impl_top.empty() && opts.ref_top.empty() && !opts.top.empty()) {
     cmd += std::format(" --top {}", shell_quote(opts.top));
   }
-  auto log = next_log_path(opts, "check.lgcheck");
-  cmd += std::format(" >> {} 2>&1", shell_quote(fs::absolute(log).string()));
+  auto log  = next_log_path(opts, "check.lgcheck");
+  cmd      += std::format(" >> {} 2>&1", shell_quote(fs::absolute(log).string()));
 
   res.recipe_steps.emplace_back("check.lgcheck");
   int rc = std::system(cmd.c_str());
@@ -2223,7 +2255,7 @@ void run_engine_command(Options& opts, Result& res) {
 
   // --depfile is supported on both frontends: the Verilog flow lists its
   // declared inputs, and the Pyrope flow additionally folds in every file the
-  // Source_locator tables saw ([[1f]] — the locator's file table IS the
+  // Source_locator tables saw (the locator's file table IS the
   // actually-read-files list, covering import discovery).
 
   if (opts.command == "elaborate") {

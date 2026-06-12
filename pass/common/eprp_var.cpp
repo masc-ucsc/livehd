@@ -43,7 +43,7 @@ void Eprp_var::add(std::string_view name, std::string_view value) {
       if (access(v_str.c_str(), R_OK) == -1) {
         livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
                                                            .code     = "missing-file",
-                                                           .category = "missing_file",
+                                                           .category = "io",
                                                            .pass     = "cli",
                                                            .message  = std::format("input file `{}` is not accessible", v_str),
                                                            .hint     = "check the path and the `files:` argument"});
@@ -55,12 +55,13 @@ void Eprp_var::add(std::string_view name, std::string_view value) {
     if (access(path.c_str(), R_OK) == -1) {
       mkdir(path.c_str(), 0755);
       if (access(path.c_str(), R_OK) == -1) {
-        livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
-                                                           .code     = "missing-path",
-                                                           .category = "missing_file",
-                                                           .pass     = "cli",
-                                                           .message  = std::format("path `{}` is not accessible and could not be created", path),
-                                                           .hint     = "check the `path:`/`src_path:` argument and permissions"});
+        livehd::diag::sink().emit(
+            livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                     .code     = "missing-path",
+                                     .category = "io",
+                                     .pass     = "cli",
+                                     .message  = std::format("path `{}` is not accessible and could not be created", path),
+                                     .hint     = "check the `path:`/`src_path:` argument and permissions"});
         std::print("ERROR: path {} is not accessible (skipping)\n", path);
         throw std::runtime_error("not valid file");
       }

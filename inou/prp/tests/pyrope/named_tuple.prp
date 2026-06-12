@@ -13,7 +13,7 @@ comb top() -> () {
   // does NOT create a named field `c` on x (the third element is unnamed, slot
   // 0). So `x has 'c'` is false and `x.c` would be an unknown-field error;
   // read it positionally. Only `b`'s own nested field is `b.c`.
-  cassert(x.a == 1 and x.b.c == 2 and x.0 == 10)
+  cassert(x.a == 1 and x.b.c == 2 and x[0] == 10)
   cassert(x has 'a' and x has 'b' and not (x has 'c'))
 }
 
