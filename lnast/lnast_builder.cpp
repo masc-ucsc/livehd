@@ -9,7 +9,32 @@
 
 Lnast_builder::Lnast_builder() {}
 
-std::string Lnast_builder::create_lnast_tmp() { return absl::StrCat("___", ++tmp_var_cnt); }
+std::string Lnast_builder::create_lnast_tmp() {
+  if (tmp_scope_.empty()) {
+    return absl::StrCat("___", ++tmp_var_cnt);
+  }
+  // `___<label>_<n>` with a per-label monotonic counter. The label always
+  // starts with a non-digit (set_tmp_scope keeps only a leading identifier
+  // run), so a scoped id can never collide with a `___<digits>` fallback id.
+  return absl::StrCat("___", tmp_scope_, "_", tmp_label_cnt_[tmp_scope_]++);
+}
+
+void Lnast_builder::set_tmp_scope(std::string_view dest) {
+  // Keep only the leading identifier run so the scope tracks the destination
+  // variable, not the surrounding syntax: `a:u4` -> a, `a.b.c` -> a,
+  // `(a, b)` -> "" (no scope). A leading digit is rejected (identifiers never
+  // start with one), which also guarantees the no-collision property above.
+  size_t i = 0;
+  while (i < dest.size()) {
+    const char c  = dest[i];
+    const bool ok = c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (i > 0 && c >= '0' && c <= '9');
+    if (!ok) {
+      break;
+    }
+    ++i;
+  }
+  tmp_scope_.assign(dest.substr(0, i));
+}
 
 Lnast_nid Lnast_builder::add_ref_child(const Lnast_nid& parent, std::string_view name) {
   return lnast->add_child(parent, Lnast_node::create_ref(name));
@@ -88,6 +113,8 @@ void Lnast_builder::new_lnast(std::string_view name) {
   vname2lname.clear();
   input_lnames_.clear();
   tmp_var_cnt = 0;
+  tmp_scope_.clear();
+  tmp_label_cnt_.clear();
 }
 
 // std::vector<std::shared_ptr<Lnast>> Lnast_builder::pick_lnast() {

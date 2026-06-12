@@ -37,7 +37,7 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 <h3 id="pyrope">Pyrope</h3>
 <ul>
 <li><em>Group 2:</em><ul>
-<li><a class="xref" href="pyrope/2p.html">2p</a> Source-derived SSA / tmp names (<code>foo_l42_a</code>, drop <code>___N</code>).</li>
+<li><a class="xref" href="pyrope/2p.html">2p</a> Stable / deterministic SSA &amp; tmp ids (local <code>foo_0</code>-style, drop global <code>___N</code>; minimal-diff under small edits, not a source-location map).</li>
 </ul></li>
 <li><em>Group 3:</em><ul>
 <li><a class="xref" href="pyrope/3p.html">3p</a> Pyrope standard hardware library (<code>prplib.ware</code>) for common pipelined and non-pipelined designs: adders, multipliers, shifters, GCD, and debug/experimental blocks; includes deciding where <code>prplib</code> resides and how imports resolve.</li>

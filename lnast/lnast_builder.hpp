@@ -54,6 +54,43 @@ public:
   std::string_view get_lnast_lhs_name(std::string_view val);
   void             mark_input_name(std::string_view lname) { input_lnames_.emplace(lname); }
 
+  // ── tmp-id scoping (stable SSA/tmp ids) ──────────────────────────────────
+  // create_lnast_tmp() mints intermediate/SSA temps. To keep ids stable under
+  // small source edits, a temp is named after the *current scope* — typically
+  // the destination variable of the statement being lowered — plus a per-scope
+  // running counter: `___<label>_<n>`. Editing or adding a statement then only
+  // renumbers temps that share its destination, instead of cascading a single
+  // global counter through the whole function (which renumbered everything
+  // after an inserted line). When no scope is open (statement kinds with no
+  // natural destination, e.g. an `if` condition), it falls back to a global
+  // `___N`. Both forms keep the leading `___` so every downstream `is_tmp`
+  // check (lnast_manager, ssa, constprop, prp_writer, …) is unaffected.
+  //
+  // The label is the leading identifier run of `dest`; surrounding syntax (a
+  // type annotation, field path, or brackets) is dropped so it does not churn
+  // the id. An empty/non-identifier `dest` clears the scope (global fallback).
+  void             set_tmp_scope(std::string_view dest);
+  std::string_view tmp_scope() const { return tmp_scope_; }
+
+  // RAII: open a tmp scope for the lifetime of a statement's lowering and
+  // restore the enclosing scope on exit, so a nested lambda/block body does
+  // not leak its destination back to the outer statement. Per-scope counters
+  // are shared (never reset on restore), so a restored scope keeps minting
+  // fresh, unique ids.
+  class [[nodiscard]] Tmp_scope_guard {
+  public:
+    Tmp_scope_guard(Lnast_builder& builder, std::string_view dest) : builder_(builder), prev_(builder.tmp_scope_) {
+      builder.set_tmp_scope(dest);
+    }
+    ~Tmp_scope_guard() { builder_.tmp_scope_ = std::move(prev_); }
+    Tmp_scope_guard(const Tmp_scope_guard&)            = delete;
+    Tmp_scope_guard& operator=(const Tmp_scope_guard&) = delete;
+
+  private:
+    Lnast_builder& builder_;
+    std::string    prev_;
+  };
+
   void new_lnast(std::string_view name);
 
   // ── stmt emitters ────────────────────────────────────────────────────────
@@ -130,4 +167,10 @@ private:
 
   std::stack<Lnast_nid>            stmts_stack_;
   absl::flat_hash_set<std::string> input_lnames_;
+
+  // tmp-id scoping state (see set_tmp_scope). tmp_scope_ empty => global ___N
+  // fallback via tmp_var_cnt; otherwise temps are `___<tmp_scope_>_<counter>`
+  // where the counter is per-label and monotonic for the whole lnast.
+  std::string                              tmp_scope_;
+  absl::flat_hash_map<std::string, int>    tmp_label_cnt_;
 };

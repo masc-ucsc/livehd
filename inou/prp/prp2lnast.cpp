@@ -1976,6 +1976,14 @@ void Prp2lnast::process_assignment(TSNode n) {
   TSNode rv   = child_by_field(n, "rvalue");
   TSNode tc   = child_by_field(n, "type");  // outer type_cast on complex lvalue
 
+  // Stable SSA/tmp ids: name every temp produced while lowering this statement
+  // after its destination variable (`___<lhs>_<n>`) so editing or inserting an
+  // unrelated statement does not renumber these temps. Covers the rvalue
+  // expression and the lvalue write below; the guard restores the enclosing
+  // scope on return (a nested lambda body keeps its own scope). See
+  // Lnast_builder::set_tmp_scope.
+  Lnast_builder::Tmp_scope_guard tmp_scope_guard(builder, ts_node_is_null(lv) ? std::string_view{} : get_text(lv));
+
   // ── Reject an unparenthesized multi-element tuple on either side ──────────
   //
   // A multi-target assignment requires explicit parentheses around the tuple:

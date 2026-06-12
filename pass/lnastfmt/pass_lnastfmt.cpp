@@ -107,10 +107,15 @@ static bool is_valid_ref_text(std::string_view name) {
     return false;  // pure alnum/underscore — should have been stripped
   }
   size_t i = 0;
-  // ___<digits> tmp form
+  // tmp form: `___<suffix>`, where suffix is either a bare counter (`___5`,
+  // the global fallback and inline-rename ids) or a stable scoped id
+  // `___<label>_<n>` (label = a destination identifier). Both are restricted
+  // to identifier chars after the `___`.
   if (name.size() - i >= 4 && name.substr(i, 3) == "___") {
     for (size_t j = i + 3; j < name.size(); ++j) {
-      if (name[j] < '0' || name[j] > '9') {
+      const char ch = name[j];
+      const bool ok = (ch == '_') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9');
+      if (!ok) {
         return false;
       }
     }
