@@ -66,7 +66,11 @@ if [ ! -f "$coverage_report" ]; then
   exit 1
 fi
 
-cp "$coverage_report" "$raw_lcov"
+# Bazel marks _coverage_report.dat read-only, and a plain cp propagates that
+# mode — so a second getcov run can't overwrite the previous raw_lcov. -f
+# unlinks the unwritable destination first; chmod restores a normal artifact.
+cp -f "$coverage_report" "$raw_lcov"
+chmod u+w "$raw_lcov"
 
 git ls-files -- \
   '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' \
@@ -110,11 +114,15 @@ awk -v root="$repo_root/" '
 
 # llvm-cov-exported lcov data trips lcov 2.x consistency checks (lambda
 # function records marked not-hit on lines that are hit); downgrade to warnings.
+# On Linux the GCC/gcov path additionally emits occasional negative hit counts
+# (e.g. "DA:1448,-2") on -c opt builds — a known gcov counter artifact that lcov
+# 2.x treats as a fatal (negative)->(corrupt) error; ignore it too so the report
+# stays consistent across platforms (macOS llvm-cov never produces negatives).
 # Note: lcov 2.x requires --ignore-errors BEFORE --summary.
-lcov --ignore-errors inconsistent,unsupported --summary "$filtered_lcov"
+lcov --ignore-errors inconsistent,unsupported,negative --summary "$filtered_lcov"
 
 rm -rf "$html_dir"
-genhtml --ignore-errors inconsistent,unsupported "$filtered_lcov" --output-directory "$html_dir"
+genhtml --ignore-errors inconsistent,unsupported,negative "$filtered_lcov" --output-directory "$html_dir"
 
 echo
 echo "Raw LCOV:      $raw_lcov"
