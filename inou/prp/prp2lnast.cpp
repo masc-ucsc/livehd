@@ -88,6 +88,11 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, st
     check_parse_errors();
 
     process_description();  // runs the scope checks internally, before rewrite_decls_to_declare
+
+    // Replace the remaining global-counter `___N` tmps (mint sites with no
+    // destination to scope on: if/while conditions, for-range temps, fcall
+    // statements, …) with edit-stable `___<site-hash>_<n>` ids (2p).
+    builder.stabilize_fallback_tmps();
   } catch (...) {
     ts_tree_delete(ts_tree);
     ts_parser_delete(parser);

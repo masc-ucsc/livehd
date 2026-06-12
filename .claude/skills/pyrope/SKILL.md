@@ -46,7 +46,7 @@ skill). Always verify generated code with `lhd` (last section).
 | `pipe[N]` | Fixed latency `N > 0`: every output lands exactly N cycles after its inputs; **never** a comb input→output path. A feedback `reg` is state (adds no latency); an unconditionally-written feedforward `reg` is a pipeline stage counted in N. A conditional write ⇒ state register. |
 | `pipe[A..=B]` / bare `pipe` | Latency range / fully flexible; the **caller** picks via `stage[N]`. `pipe` calls are only legal inside `mod`. |
 | `mod` | No constraints (Mealy, Moore, orchestrator). **Every output declares its landing cycle at the interface**: `-> (x:u8@[2], y:u8@[0])`. `@[0]` = comb feedthrough (legal in `mod`, forbidden in `pipe`); `@[]` = unconstrained opt-out; omitting `@[...]` is a compile error. Registered output: `-> (reg count:u8@[0])` — the q is the output. |
-| `fluid` | Transactional valid/retry handshakes (`.[valid]`, `.[retry]`, `.[fire]`). Callable only from `mod`/`fluid`. |
+| `fluid` | Transactional valid/retry handshakes (`.[valid]`, `.[retry]`, `.[fire]`). Callable only from `mod`/`fluid`. (TBD: parses only, no lowering.) |
 
 ```pyrope
 comb add(a:u8, b:u8) -> (r:u9) { r = a + b }
@@ -70,8 +70,10 @@ when `f` declares `self` as first parameter; `self` binds positionally, never
 `f(self=...)`; `ref self` needs a `mut` receiver. `ref` must be written at the
 declaration **and** the call: `comb inc(ref a) -> () { a += 1 }` … `inc(ref y)`.
 
-**Overloading/generics** — overload by gathering: `const add = [add1, add2]`.
-Generics: `comb f<T>(a:T, b:T) -> (r)`. Comptime parameters live in the `[...]`
+**Overloading/generics** — overload by gathering: `const add = [add1, add2]`
+(TBD: dispatch not lowered yet; only `init` overload sets resolve).
+Generics: `comb f<T>(a:T, b:T) -> (r)` (TBD: `<T>` body specialization
+pending; untyped params work). Comptime parameters live in the `[...]`
 slot: `comb g[n:int=1](x) -> (r)`, called as `g[3](x=2)`. Varargs `(...args)`
 gather leftovers (`args[i]` / `args.NAME`). There is **no placeholder lambda
 sugar** — no `_`/`_0`/`_1` shorthands; pass a named comb (`mymap.each(inc)`).
@@ -165,8 +167,8 @@ destination (no `{a,b}` form).
 reg counter:u8 = 0            // '= 0' is the RESET value (nil ⇒ no reset)
 const q   = counter           // bare name reads current q (snapshot first if needed)
 counter += 1                  // write with plain =/+=; lands at the cycle boundary
-const eoc = counter.[defer]   // RHS-ONLY end-of-cycle read — same-cycle wiring, no flop
-const old = past[2](counter)  // value 2 cycles ago (compiler inserts 2 flops)
+const eoc = counter.[defer]   // RHS-ONLY end-of-cycle read — same-cycle wiring, no flop (TBD: not lowered yet)
+const old = past[2](counter)  // value 2 cycles ago (compiler inserts 2 flops) (TBD: not lowered yet)
 ```
 
 * There is **no `x.[defer] = ...` write form**, and no `@[-1]`/`@[1]` register
@@ -222,7 +224,7 @@ mod accum(in1:u16, in2:u16) -> (out:u32@[3]) {
 reg mem:[256]u32 = 0       // async mem: 0-cycle read, fwd by default, reset to 0
 reg mem2:[16]i8 = nil      // no reset
 mut scratch:[] = nil       // plain array: no persistence across cycles
-mut m2:[4][8]u8 = 13       // multi-dimensional, row-major
+mut m2:[4][8]u8 = 13       // multi-dimensional, row-major (TBD: not lowered yet)
 ```
 
 Read `mem[addr]`; write `if we { mem[addr] = din }`. Indices can be enum- or
@@ -260,7 +262,8 @@ memories are shared with `regref("mem_pool/buf0")` — behaves like a local
   types, and constants can be imported: `const lib = import("file")` /
   `import("proj/file")`. `pub mut` and `pub reg` are compile errors — use
   `regref` for cross-hierarchy registers.
-* Pin the generated netlist/Verilog module name with the `lg` attribute:
+* Pin the generated netlist/Verilog module name with the `lg` attribute
+  (TBD: not implemented yet):
   `pub comb my_top::[lg="chip_top"](...)` — pub-only, comptime string; the
   `import` key stays `my_top`. Never invent `pub("name")`.
 * A fully typed `pipe`/`mod` lowers to a module; an untyped one is a per-call
@@ -356,6 +359,28 @@ pipe[1] dpram(we:bool, waddr:u8, raddr:u8, wdata:u32) -> (rdata:u32) {
     is the `= expr` initializer; `sync=false` for async reset.
 16. Enum comparisons use names (`State.Idle`), never the underlying integer.
 
+## Not yet implemented (avoid emitting)
+
+Valid spec Pyrope that LiveHD does not lower yet (`15-tbd.md` in the docs is
+the authoritative list). Do not generate these unless explicitly asked:
+
+* `fluid` lambdas / valid-retry handshakes (parses only)
+* `.[defer]` end-of-cycle reads
+* Temporal library: `past[n]`/`next[n]`/`rose`/`fell`/`stable`/`changed`/
+  `eventually`/`always`, `.[rising]`/`.[falling]`
+* Testbench extras: `peek`/`poke`, `waitfor`, `force`/`release`, `sigref`,
+  `spawn`/`join`/`cancel` (plain `test`/`step` works)
+* Overload-gathering call dispatch (`const add = [f1, f2]; add(x)`) — only
+  `init` overload sets resolve; prefer distinct names
+* Generic `<T>` body specialization (untyped-parameter templates DO work)
+* `import("prp")` stdlib; multi-dim memories and memory `init` contents;
+  `macro=`/`lg` attributes; `.[bw_max]`/`.[bw_min]` reads; `covercase`,
+  in-language `lec()`
+
+Runtime `wrap`/`sat` and enum-typed register resets ARE implemented.
+Imports: `import("file")` (all pub) or `import("file.pub_name")` (one
+entry); directories use slashes; no glob patterns.
+
 ## Checking code with `lhd`
 
 `lhd` is the LiveHD CLI (on `$PATH`; in a livehd checkout build with
@@ -374,10 +399,10 @@ JSONL stream (fields: `severity`, `code`, `category`, `pass`, `message`,
 `span`, `hint`). Triage by `category`:
 
 * `syntax` / `name` / `type` / `bitwidth` — the Pyrope source is wrong: fix it.
-* `unsupported` — valid Pyrope that LiveHD cannot lower *yet* (e.g. runtime
-  `wrap`/`sat` lowering, enum-typed register resets). Rewrite around it for
-  synthesis; do not "fix" correct source. `lhd elaborate` usually still
-  accepts it.
+* `unsupported` — valid Pyrope that LiveHD cannot lower *yet* (e.g.
+  `.[defer]`, temporal ops like `past[n]`, `fluid` lowering — see the
+  not-yet-implemented list above). Rewrite around it for synthesis; do not
+  "fix" correct source. `lhd elaborate` usually still accepts it.
 * `internal` — a LiveHD bug: reduce to a repro; do not change the source.
 
 The frontend is more permissive than the spec (it may accept stale forms the

@@ -63,14 +63,29 @@ public:
   // global counter through the whole function (which renumbered everything
   // after an inserted line). When no scope is open (statement kinds with no
   // natural destination, e.g. an `if` condition), it falls back to a global
-  // `___N`. Both forms keep the leading `___` so every downstream `is_tmp`
-  // check (lnast_manager, ssa, constprop, prp_writer, …) is unaffected.
+  // `___N` — which stabilize_fallback_tmps() rewrites to `___<hash>_<n>` at
+  // the end of the build. All forms keep the leading `___` so every
+  // downstream `is_tmp` check (lnast_manager, ssa, constprop, prp_writer, …)
+  // is unaffected.
   //
   // The label is the leading identifier run of `dest`; surrounding syntax (a
   // type annotation, field path, or brackets) is dropped so it does not churn
   // the id. An empty/non-identifier `dest` clears the scope (global fallback).
   void             set_tmp_scope(std::string_view dest);
   std::string_view tmp_scope() const { return tmp_scope_; }
+
+  // End-of-build rewrite of the remaining global-counter fallbacks: every
+  // `___<digits>` ref is renamed to `___<site-hash>_<occurrence>`, where the
+  // hash covers the parent node type plus the sibling ref/const texts at the
+  // tmp's first (defining) occurrence — see Lnast::tmp_site_hash — and the
+  // occurrence counter orders same-hash repeats within this lnast. The id
+  // then depends only on the statement that mints it, so inserting or
+  // editing unrelated code ahead no longer renumbers it (the counter did).
+  // Covers the mint sites with no destination to scope on: if/while
+  // conditions, for-range temps, func-call statements, type-spec temps.
+  // Call once after the tree is fully built; renames are applied
+  // consistently to every occurrence of each fallback name.
+  void stabilize_fallback_tmps();
 
   // RAII: open a tmp scope for the lifetime of a statement's lowering and
   // restore the enclosing scope on exit, so a nested lambda/block body does

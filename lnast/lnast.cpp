@@ -169,6 +169,51 @@ void Lnast::set_name(const Lnast_nid& nid, std::string_view name) {
   nid.attr(hhds::attrs::name).set(std::string(name));
 }
 
+uint32_t Lnast::tmp_site_hash(const Lnast_nid& ref_nid, const absl::flat_hash_map<std::string, std::string>* remap) const {
+  constexpr uint64_t kFnvOffset = 0xcbf29ce484222325ULL;
+  constexpr uint64_t kFnvPrime  = 0x100000001b3ULL;
+
+  uint64_t h   = kFnvOffset;
+  auto     mix = [&h](std::string_view s) {
+    for (const unsigned char c : s) {
+      h ^= c;
+      h *= kFnvPrime;
+    }
+    h ^= 0xffu;  // field separator so ("ab","c") and ("a","bc") differ
+    h *= kFnvPrime;
+  };
+
+  const auto parent = get_parent(ref_nid);
+  if (parent.is_invalid()) {
+    mix(get_name(ref_nid));
+  } else {
+    // The type name (not the enum value) so the hash survives ntype-table
+    // reorderings; leaf kinds are tagged so ref 'x' and const 'x' differ.
+    mix(Lnast_ntype::debug_name(get_type(parent)));
+    for (const auto& c : children(parent)) {
+      if (c == ref_nid) {
+        continue;
+      }
+      const auto t = get_type(c);
+      if (Lnast_ntype::is_ref(t) || Lnast_ntype::is_const(t)) {
+        std::string_view txt = get_name(c);
+        if (remap != nullptr) {
+          const auto it = remap->find(txt);
+          if (it != remap->end()) {
+            txt = it->second;
+          }
+        }
+        mix(Lnast_ntype::is_ref(t) ? "r" : "c");
+        mix(txt);
+      } else {
+        mix("n");
+        mix(Lnast_ntype::debug_name(t));
+      }
+    }
+  }
+  return static_cast<uint32_t>(h ^ (h >> 32));
+}
+
 hhds::SourceId Lnast::get_srcid(const Lnast_nid& nid) const {
   auto ref = nid.attr(hhds::attrs::srcid);
   if (!ref.has()) {

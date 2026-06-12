@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2f-lg — lg attribute (explicit lgraph/module name)</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2f-lg</strong> <code>lg</code> attribute (explicit lgraph/module name)</h1>
+<p><code>pub comb foo::[lg="name"]</code> pins the generated lgraph (and hence
+  the netlist/Verilog module name), replacing the compiler-mangled
+  <code>file.entity</code> name. Rules: pub-only, comptime string, lambda
+  kinds only, non-sticky, renames the artifact but never the
+  <code>import</code> key. No code handles the attribute today.
+  Landing this also simplifies <a href="2f-lgimport.html">2f-lgimport</a>
+  testing: its Pyrope-produced units can be imported via a pinned
+  <code>lg:</code> name instead of the mangled one.</p>
+<h2>Failing example (check the emitted module name)</h2>
+<pre><code>// chip.prp
+pub comb my_top::[lg="chip_top"](a:u8, b:u8) -&gt; (r:u9) { r = a + b }</code></pre>
+<pre><code>lhd compile chip.prp --top my_top --emit verilog:chip.v --workdir tmp
+grep -q "module chip_top" chip.v        # fails today (mangled name emitted)
+# other files still: const f = import("chip.my_top")  — key unchanged</code></pre>
+<h2>Docs (TBD markers)</h2>
+<ul>
+<li><a href="https://github.com/masc-ucsc/docs/blob/main/docs/pyrope/04b-attributes.md">docs/pyrope/04b-attributes.md</a> — "lg: explicit lgraph name" section (TBD admonition)</li>
+<li><a href="https://github.com/masc-ucsc/docs/blob/main/docs/pyrope/07-typesystem.md">docs/pyrope/07-typesystem.md</a> — import section (lg paragraph)</li>
+<li><a href="https://github.com/masc-ucsc/docs/blob/main/docs/pyrope/15-tbd.md">docs/pyrope/15-tbd.md</a></li>
+</ul>
+<h2>Done when</h2>
+<p>The grep passes; <code>lg</code> on non-pub/non-lambda errors; import key
+  unchanged; name collisions across files diagnosed. Then drop the TBD marks
+  in 04b/07 and the skill.</p>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>pyrope</code></footer>
+</body>
+</html>

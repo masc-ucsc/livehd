@@ -36,6 +36,45 @@ void Lnast_builder::set_tmp_scope(std::string_view dest) {
   tmp_scope_.assign(dest.substr(0, i));
 }
 
+void Lnast_builder::stabilize_fallback_tmps() {
+  // A global-counter fallback id: `___` followed by digits only. Scoped ids
+  // (`___<label>_<n>`, label starts with a non-digit) never match.
+  auto is_fallback = [](std::string_view name) {
+    if (name.size() < 4 || name.substr(0, 3) != "___") {
+      return false;
+    }
+    for (size_t i = 3; i < name.size(); ++i) {
+      if (name[i] < '0' || name[i] > '9') {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  absl::flat_hash_map<std::string, std::string> renamed;     // old fallback id -> hash id
+  absl::flat_hash_map<uint32_t, int>            occurrence;  // per-hash repeat counter (this lnast)
+
+  for (const Lnast_nid& it : lnast->depth_preorder()) {
+    if (!Lnast_ntype::is_ref(lnast->get_type(it))) {
+      continue;
+    }
+    const auto name = lnast->get_name(it);
+    if (!is_fallback(name)) {
+      continue;
+    }
+    auto found = renamed.find(name);
+    if (found == renamed.end()) {
+      // First occurrence = the defining statement (dst is child 0 and defs
+      // precede uses in stmt order). Hashing through `renamed` keeps a tmp
+      // whose siblings are earlier fallback tmps anchored to their *stable*
+      // new names, so stability propagates through chained expressions.
+      const auto h = lnast->tmp_site_hash(it, &renamed);
+      found        = renamed.emplace(std::string(name), absl::StrCat("___", h, "_", occurrence[h]++)).first;
+    }
+    lnast->set_name(it, found->second);
+  }
+}
+
 Lnast_nid Lnast_builder::add_ref_child(const Lnast_nid& parent, std::string_view name) {
   return lnast->add_child(parent, Lnast_node::create_ref(name));
 }

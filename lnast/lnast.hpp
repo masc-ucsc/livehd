@@ -358,6 +358,20 @@ public:
   // ── name predicates (work off the textual name only) ────────────────────
   static bool is_tmp(std::string_view name) { return name.size() >= 3 && name.substr(0, 3) == "___"; }
 
+  // Stable id of the statement "shape" around a tmp ref: FNV-1a over the
+  // parent's node type name plus every *other* child's leaf kind+text.
+  // Deterministic across processes/platforms (unlike absl/std hashing), so
+  // names derived from it survive recompiles and unrelated source edits —
+  // the basis of the hash-named tmps `___<hash>_<n>` (builder fallback
+  // stabilization) and `___<hash>_i<n>` (inline/unroll rename). Repeats of
+  // the same hash within one lnast are disambiguated by the caller's
+  // occurrence counter, so cross-site hash collisions only cost stability,
+  // never uniqueness. `remap` (optional) translates sibling texts that are
+  // themselves being renamed, so a hash never inherits another tmp's
+  // unstable old name.
+  uint32_t tmp_site_hash(const Lnast_nid&                                     ref_nid,
+                         const absl::flat_hash_map<std::string, std::string>* remap = nullptr) const;
+
   // ── print / dump / read ────────────────────────────────────────────────
   // print: pretty box-drawing tree for humans (hhds Tree::print).
   //   Not round-trippable. node_text shows "type: name".

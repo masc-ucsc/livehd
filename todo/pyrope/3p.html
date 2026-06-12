@@ -3,21 +3,39 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TODO 3p — Pyrope standard hardware library</title>
+<title>TODO 3p — Pyrope standard library (hardware + comptime)</title>
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">3p</strong> Pyrope standard hardware library</h1>
+<h1><strong class="item-id">3p</strong> Pyrope standard library (hardware + comptime)</h1>
 <p>Create a Pyrope standard library for common hardware building blocks, covering
   both pipelined and non-pipelined designs. The intended user-facing shape is a
   stable import namespace, for example <code>const x = import("prplib.ware")</code>
   followed by calls such as <code>x.csa(...)</code>.</p>
+<p>Also owns the <strong>software/comptime side</strong> (absorbed 2f-stdlib;
+  docs chapter 13): LNAST-op wrappers (<code>plus</code>, <code>minus</code>, …),
+  tuple utilities (<code>len</code>, <code>map</code>, <code>filter</code>,
+  <code>reduce</code>), strings, math, reached via
+  <code>const prp = import("prp")</code>. No <code>prp</code> library exists in
+  the repo today. Where the files live and how the import resolves is one
+  decision shared by both halves (subtask A).</p>
+<h2>Failing example (comptime half)</h2>
+<pre><code>const prp = import("prp")
+
+cassert(prp.plus(1, 2, 3) == 6)
+cassert(prp.len((1, 2, 23)) == 3)
+
+comb inc(a) -&gt; (r) { r = a + 1 }
+cassert((1, 2, 3).map(inc) == (2, 3, 4))</code></pre>
 <h2>Depends on</h2>
 <ul>
-<li><a class="xref" href="2p.html">2p</a> — source-derived names make generated
-  library expansion, dumps, and diagnostics easier to debug.</li>
+<li>2p (stable SSA/tmp ids) — <strong>landed</strong>: tmp ids are now scoped
+  (<code>___&lt;dest&gt;_&lt;n&gt;</code>) or hash-derived
+  (<code>___&lt;site-hash&gt;_&lt;n&gt;</code> / <code>_i&lt;n&gt;</code> for
+  inline/unroll copies), so generated library expansion, dumps, and
+  diagnostics stay edit-stable.</li>
 </ul>
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
@@ -39,6 +57,13 @@
 <li><strong>E — document and test import examples.</strong> Add examples that
   compile through <code>lhd</code>, exercise <code>import("prplib.ware")</code>,
   and show how downstream projects should depend on the library.</li>
+<li><strong>F — comptime/software library <code>import("prp")</code>.</strong>
+  Implement the chapter-13 wish-list (op wrappers, tuple
+  <code>len</code>/<code>map</code>/<code>filter</code>/<code>reduce</code>,
+  strings, math) until the chapter-13 examples cassert clean; then drop the
+  <a href="https://github.com/masc-ucsc/docs/blob/main/docs/pyrope/13-stdlib.md">13-stdlib</a>
+  TBD admonition (also tracked in
+  <a href="https://github.com/masc-ucsc/docs/blob/main/docs/pyrope/15-tbd.md">15-tbd</a>).</li>
 </ul>
 <h2>Subtasks — landed</h2>
 <p>None yet.</p>

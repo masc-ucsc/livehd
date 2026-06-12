@@ -136,6 +136,73 @@ int main() {
     check_eq(b.create_lnast_tmp(), "___z_0", "new_lnast resets per-label counters");
   }
 
+  // ── 7. stabilize_fallback_tmps(): hash-named fallbacks ────────────────────
+  // Build `plus(___1, p, q); minus(___2, ___1, r)` twice, with an unrelated
+  // statement prepended the second time. After stabilization the fallback ids
+  // must (a) derive from each def site (so they match across both builds even
+  // though the raw counters differ), (b) keep the `___` prefix with a digit
+  // right after it (no scoped-name collision), and (c) stay consistent
+  // between def and use.
+  {
+    auto build = [](bool lead) {
+      Lnast_builder b;
+      b.new_lnast("t");
+      if (lead) {
+        // An unrelated fallback temp ahead: shifts the raw global counter.
+        auto idx = b.add_child(Lnast_ntype::create_eq());
+        b.add_child(idx, Lnast_node::create_ref(b.create_lnast_tmp()));  // ___1
+        b.add_child(idx, Lnast_node::create_ref("s"));
+        b.add_child(idx, Lnast_node::create_const("0"));
+      }
+      auto t0  = b.create_lnast_tmp();  // ___1 or ___2
+      auto idx = b.add_child(Lnast_ntype::create_plus());
+      b.add_child(idx, Lnast_node::create_ref(t0));
+      b.add_child(idx, Lnast_node::create_ref("p"));
+      b.add_child(idx, Lnast_node::create_ref("q"));
+      auto t1   = b.create_lnast_tmp();
+      auto idx2 = b.add_child(Lnast_ntype::create_minus());
+      b.add_child(idx2, Lnast_node::create_ref(t1));
+      b.add_child(idx2, Lnast_node::create_ref(t0));  // chained: hash must use t0's NEW name
+      b.add_child(idx2, Lnast_node::create_ref("r"));
+      b.stabilize_fallback_tmps();
+
+      std::vector<std::string> names;  // [plus dst, minus dst, minus operand]
+      names.emplace_back(b.lnast->get_name(b.lnast->get_first_child(idx)));
+      names.emplace_back(b.lnast->get_name(b.lnast->get_first_child(idx2)));
+      names.emplace_back(b.lnast->get_name(b.lnast->get_sibling_next(b.lnast->get_first_child(idx2))));
+      return names;
+    };
+
+    auto base = build(false);
+    auto lead = build(true);
+    check_eq(lead[0], base[0], "fallback id survives a statement inserted ahead (plus dst)");
+    check_eq(lead[1], base[1], "fallback id survives a statement inserted ahead (chained minus dst)");
+    check_eq(base[2], base[0], "def and use of a fallback tmp get the same stabilized name");
+    check(base[0] != base[1], "different def sites get different ids");
+    for (const auto& n : base) {
+      check(n.size() > 4 && n.substr(0, 3) == "___" && n[3] >= '0' && n[3] <= '9' && n.find('_', 3) != std::string::npos,
+            std::string("stabilized id '") + n + "' has the ___<digits>_<n> shape");
+    }
+  }
+
+  // ── 8. Same-hash repeats stay unique via the occurrence counter ───────────
+  {
+    Lnast_builder b;
+    b.new_lnast("t");
+    std::vector<Lnast_nid> dsts;
+    for (int i = 0; i < 2; ++i) {  // two identical statements
+      auto idx = b.add_child(Lnast_ntype::create_plus());
+      dsts.push_back(b.add_child(idx, Lnast_node::create_ref(b.create_lnast_tmp())));
+      b.add_child(idx, Lnast_node::create_ref("p"));
+      b.add_child(idx, Lnast_node::create_ref("q"));
+    }
+    b.stabilize_fallback_tmps();
+    auto n0 = std::string(b.lnast->get_name(dsts[0]));
+    auto n1 = std::string(b.lnast->get_name(dsts[1]));
+    check(n0 != n1, "identical statements still mint unique ids");
+    check_eq(n1, n0.substr(0, n0.rfind('_')) + "_1", "second repeat is hash_1");
+  }
+
   if (failures) {
     std::print(stderr, "{} check(s) failed\n", failures);
     return 1;

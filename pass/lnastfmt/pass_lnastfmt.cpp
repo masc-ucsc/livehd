@@ -68,7 +68,9 @@ template <typename... Args>
 }
 
 // A `ref` carries a single variable name. Allowed shapes (today):
-//   - tmp ref      : `___<digits>` (Slice 1; will move to `Tree_index` per §13)
+//   - tmp ref      : `___<suffix>` over `[A-Za-z0-9_]` (scoped `___<label>_<n>`,
+//                    hash-stabilized `___<hash>_<n>` / inline `___<hash>_i<n>`,
+//                    or a bare-digit legacy counter)
 //   - quoted ident : `` `…` `` — Pyrope's escape for names containing
 //                    characters outside `[A-Za-z0-9_]`. Producers must keep
 //                    the backticks ONLY when the name actually has a
@@ -107,10 +109,11 @@ static bool is_valid_ref_text(std::string_view name) {
     return false;  // pure alnum/underscore — should have been stripped
   }
   size_t i = 0;
-  // tmp form: `___<suffix>`, where suffix is either a bare counter (`___5`,
-  // the global fallback and inline-rename ids) or a stable scoped id
-  // `___<label>_<n>` (label = a destination identifier). Both are restricted
-  // to identifier chars after the `___`.
+  // tmp form: `___<suffix>`, where suffix is a stable scoped id
+  // `___<label>_<n>` (label = a destination identifier), a hash-stabilized
+  // id (`___<hash>_<n>` from the builder, `___<hash>_i<n>` from the inline/
+  // unroll rename), or a bare legacy counter (`___5`, slang frontend). All
+  // are restricted to identifier chars after the `___`.
   if (name.size() - i >= 4 && name.substr(i, 3) == "___") {
     for (size_t j = i + 3; j < name.size(); ++j) {
       const char ch = name[j];

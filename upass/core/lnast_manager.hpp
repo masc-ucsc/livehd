@@ -64,9 +64,9 @@ public:
     if (is_tuple_field_key(current_nid)) {
       return raw;
     }
-    // Tmps (`___N`) must stay `___<digits>` tmps — several ops (attr_get dst,
-    // etc.) and DCE require it — so remap to a fresh globally-unique tmp
-    // number rather than `<tag>___N`. User vars get the readable `<tag>name`.
+    // Tmps (`___*`) must keep the `___` prefix — several ops (attr_get dst,
+    // etc.) and DCE key on it — so remap to a fresh stable tmp id rather
+    // than `<tag>___N`. User vars get the readable `<tag>name`.
     // (The salt keys rename_tmp, so a fresh per-iteration salt under the same
     // tag — push_iteration inside an inlined body — also gives fresh tmps.)
     if (raw.size() >= 3 && raw[0] == '_' && raw[1] == '_' && raw[2] == '_') {
@@ -270,12 +270,12 @@ protected:
     return std::string_view(*it);
   }
 
-  // Per-(frame, original-tmp) → fresh `___<N>` mapping, consistent within a
-  // frame so repeated reads of the same callee tmp resolve identically. The
-  // base is high to avoid colliding with caller tmps (which are small).
+  // Per-(frame, original-tmp) → fresh-name mapping, consistent within a
+  // frame so repeated reads of the same callee tmp resolve identically.
+  // tmp_hash_occ_ counts same-hash repeats per manager (= per output lnast)
+  // for rename_tmp's `___<hash>_i<n>` ids.
   mutable std::unordered_map<std::string, std::string> tmp_remap_;
-  mutable uint32_t                                     tmp_counter_{0};
-  static constexpr uint32_t                            kInlineTmpBase = 900000;
+  mutable std::unordered_map<uint32_t, uint32_t>       tmp_hash_occ_;
 
   // True when `nid` is the key (child 0) of an `assign` that is a field entry
   // of a tuple_add / tuple_concat — i.e. the `x` in `(x = v)`.
@@ -296,13 +296,25 @@ protected:
     return gt == Lnast_ntype::Lnast_ntype_tuple_add || gt == Lnast_ntype::Lnast_ntype_tuple_concat;
   }
 
+  // Fresh tmp mint for a read under an active rename frame. The fresh name
+  // must be unique in the emitted tree yet stable under unrelated source
+  // edits — the old global-counter scheme (`___<900000+n>`) renumbered every
+  // downstream tmp whenever anything upstream added a rename. Instead the
+  // id is `___<site-hash>_i<n>`: the hash of the statement that first reads
+  // the tmp (in practice its def — see Lnast::tmp_site_hash), and a per-hash
+  // occurrence counter, so the N unrolled copies of one statement get
+  // _i0.._iN-1 in walk order. The `_i<digits>` tail keeps the namespace
+  // disjoint from frontend names, whose final `_` segment is digits-only
+  // (scoped `___<label>_<n>`, stabilized `___<hash>_<n>`) or absent
+  // (legacy bare `___<digits>`).
   std::string_view rename_tmp(std::string_view raw) const {
     std::string key = std::to_string(active_salt_) + ":" + std::string(raw);
     auto        it  = tmp_remap_.find(key);
     if (it != tmp_remap_.end()) {
       return std::string_view(it->second);
     }
-    std::string fresh = "___" + std::to_string(kInlineTmpBase + (++tmp_counter_));
+    const auto  h     = lnast->tmp_site_hash(current_nid);
+    std::string fresh = "___" + std::to_string(h) + "_i" + std::to_string(tmp_hash_occ_[h]++);
     auto        ins   = tmp_remap_.emplace(std::move(key), std::move(fresh)).first;
     return std::string_view(ins->second);
   }
