@@ -2883,6 +2883,22 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
                          "registers hold state inside the body — declare the input plain and `reg` a body variable");
           }
         }
+        // `ref` is a comb-only inline+alias mechanism: the comb is inlined and
+        // the ref param becomes the caller's variable. A `mod`/`pipe` is a real
+        // module boundary (not inlined), so a non-`self` `ref` parameter there
+        // is a compile error. (`ref self` methods expand locally via UFCS and
+        // never expose the receiver as a port.) (2f-ref_wrap_sat B.)
+        if (pending_is_ref && !is_io_output && kind != "comb") {
+          TSNode           rid   = child_by_field(pending_typed, "identifier");
+          std::string_view rname = ts_node_is_null(rid) ? std::string_view{} : get_text(rid);
+          if (rname != "self") {
+            report_error(pending_typed,
+                         "ref-on-boundary",
+                         "type",
+                         std::format("a `ref` parameter is not valid on a `{}` — `ref` is comb-only (inline + alias)", kind),
+                         "make the lambda a `comb`, or pass the value and return the updated copy");
+          }
+        }
       }
       pending_typed     = TSNode{};
       pending_def       = TSNode{};

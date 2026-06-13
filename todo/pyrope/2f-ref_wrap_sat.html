@@ -71,7 +71,25 @@ cassert(v == 6)        // today: cassert false (wrap write not applied to v)
 </ul>
 
 <h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<ul>
+<li><strong>B — non-<code>self</code> <code>ref</code> on a <code>mod</code>/<code>pipe</code> is a
+  compile error.</strong> In <code>prp2lnast.cpp</code> the lambda io-param <code>flush</code>
+  now reports <code>ref-on-boundary</code> when an INPUT param carries <code>ref</code> and the
+  lambda kind is not <code>comb</code> (the <code>self</code> receiver is exempt).
+  <code>adv_ref_mod</code> / <code>adv_ref_pipe</code> pass.</li>
+</ul>
+
+<h2>Subtasks — still pending</h2>
+<ul>
+<li><strong>A — <code>wrap</code>/<code>sat</code> through the comb ref inline-alias.</strong> A
+  <code>wrap a += 1</code> through a <code>ref a</code> param does NOT propagate to the caller
+  (the caller's var stays unchanged; a PLAIN <code>a += 1</code> does propagate). The
+  <code>wrap</code>/<code>sat</code> write lowers to a <code>wrap(v=…, type=a)</code> func_call
+  whose result binds <code>a</code>; through the runner's ref inline-alias + write-back
+  (<code>upass_runner.cpp</code> ~2196/2310) the wrapped result is lost. Needs tracing the
+  inline sub-walk's wrap-func_call fold vs the write-back ordering. adv_ref_args_11,
+  adv_ufcs_21, adv_init_ctor_18 still fail.</li>
+</ul>
 
 <h2>Docs</h2>
 <ul>
