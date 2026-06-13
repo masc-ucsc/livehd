@@ -47,9 +47,9 @@
 </ul>
 <p><strong>Field kinds:</strong> a tuple-literal that is a <em>declaration</em> (the
   examples above, e.g. <code>const rest = (const b=2, mut c=3)</code>) needs a
-  <code>mut</code>/<code>const</code> on each named field — that enforcement is
-  <a href="2f-mutconst.html">2f-mutconst</a>. Splice literals here must follow it; bare
-  fields are still fine in call-argument spreads / comparisons / typed-var assignments.</p>
+  <code>mut</code>/<code>const</code> on each named field — that enforcement is 2f-mutconst
+  (landed). Splice literals here must follow it; bare fields are still fine in
+  call-argument spreads / comparisons / typed-var assignments.</p>
 
 <h2>Tests to fix (new spread-syntax tests, already in the regression, currently failing)</h2>
 <ul>

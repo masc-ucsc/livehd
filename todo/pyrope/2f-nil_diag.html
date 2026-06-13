@@ -57,8 +57,8 @@ const r = tw(nv(3))   // today: ABORT  (Assertion (dest_sz >= 1), addn, blop.hpp
   <li>This is the same shape as the asserts owned by other tasks — coordinate so each
     becomes "return nil, let half 2 report it" rather than a bespoke guard:
     <a href="2f-neg_bitrange.html">2f-neg_bitrange</a> (<code>shln src2&gt;=0</code>, negative
-    shift/index) and <a href="2f-bignum.html">2f-bignum</a> (<code>divn</code> unimplemented;
-    wide pop-count). LiveHD must not compute const ops itself — delegate to Dlop (see 2f-bignum).</li>
+    shift/index — landed) and 2f-bignum (<code>divn</code> / wide pop-count — landed).
+    LiveHD must not compute const ops itself — delegate to Dlop.</li>
   </ul></li>
 <li><strong>B — diagnose a <code>nil</code> in an op / constprop output.</strong>
   <ul>
