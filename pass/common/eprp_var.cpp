@@ -12,27 +12,11 @@
 #include "absl/strings/str_split.h"
 #include "diag.hpp"
 
-void Eprp_var::add(const Eprp_dict& _dict) {
-  for (const auto& var : _dict) {
-    add(var.first, var.second);
-  }
-}
-
-void Eprp_var::add(Eprp_lnasts& _lns) {
-  for (const auto& ln : _lns) {
-    lnasts.emplace_back(ln);
-  }
-}
-
-void Eprp_var::add(const Eprp_var& _var) { add(_var.dict); }
-
 void Eprp_var::add(const std::shared_ptr<hhds::Graph>& graph) {
   if (graph && std::find(graphs.begin(), graphs.end(), graph) == graphs.end()) {
     graphs.push_back(graph);
   }
 }
-
-void Eprp_var::add(std::unique_ptr<Lnast> lnast) { lnasts.emplace_back(std::move(lnast)); }
 
 void Eprp_var::add(const std::shared_ptr<Lnast>& lnast) { lnasts.emplace_back(lnast); }
 
@@ -69,22 +53,6 @@ void Eprp_var::add(std::string_view name, std::string_view value) {
   }
 
   dict[name] = value;
-}
-
-void Eprp_var::replace(const Eprp_var::Eprp_lnasts& lns) {
-  lnasts.clear();
-  lnasts = lns;
-}
-
-void Eprp_var::replace(const std::shared_ptr<Lnast>& lnast_old, std::shared_ptr<Lnast>& lnast_new) {
-  auto itr = std::find(lnasts.begin(), lnasts.end(), lnast_old);
-
-  if (itr != lnasts.cend()) {
-    auto indx       = std::distance(lnasts.begin(), itr);
-    lnasts.at(indx) = std::move(lnast_new);
-  } else {
-    I(false, "lnast provided is not found in the vector");
-  }
 }
 
 std::string_view Eprp_var::get(std::string_view name, std::string_view default_value) const {

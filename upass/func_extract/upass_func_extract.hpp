@@ -101,8 +101,6 @@ private:
   // below to decide whether an assignment is "outer / unconditional".
   int stmts_depth{0};
 
-  static std::string strip_io_prefix(std::string_view name);
-
   void copy_current_subtree(const std::shared_ptr<Lnast>& dst, const Lnast_nid& parent);
   void copy_current_children(const std::shared_ptr<Lnast>& dst, const Lnast_nid& parent);
 

@@ -275,7 +275,6 @@ public:
   // Structural nodes are inserted with an explicit type. Detached
   // Lnast_node values are only for ref/const/invalid leaves.
   Lnast_nid set_root(Lnast_ntype::Lnast_ntype_int type);
-  Lnast_nid set_root(const Lnast_node& n);
   Lnast_nid add_child(const Lnast_nid& parent, Lnast_ntype::Lnast_ntype_int type);
   Lnast_nid add_child(const Lnast_nid& parent, const Lnast_node& n);
 
@@ -308,10 +307,7 @@ public:
 
   // Resolved diagnostic span / secondary anchors for a node, at emit time.
   // Null span / empty notes when the node carries no (resolvable) srcid.
-  // spans_of resolves both in one call — feed it to diag::Builder::at() so a
-  // combined id's related sites (inline call chains) ride along as notes.
   livehd::diag::Span                   span_of(const Lnast_nid& nid) const;
-  hhds::Source_locator::Resolved_spans spans_of(const Lnast_nid& nid) const;
   std::vector<livehd::diag::Note>      notes_of(const Lnast_nid& nid, std::string_view message = "related source") const;
 
   // set_data: write-side helpers used by add_child / set_root. On the
@@ -374,13 +370,12 @@ public:
   uint32_t tmp_site_hash(const Lnast_nid&                                     ref_nid,
                          const absl::flat_hash_map<std::string, std::string>* remap = nullptr) const;
 
-  // ── print / dump / read ────────────────────────────────────────────────
+  // ── print / dump ────────────────────────────────────────────────────────
   // print: pretty box-drawing tree for humans (hhds Tree::print).
   //   Not round-trippable. node_text shows "type: name".
-  // dump: structured text via hhds Tree::write_dump. Round-trips through
-  //   Lnast::read. node_text holds just the variable name; type comes from
-  //   the type column. Per-node loc/fname ride as @(loc=..,fname=..).
-  // read: parse a `dump` file back into an Lnast.
+  // dump: structured text via hhds Tree::write_dump. node_text holds just the
+  //   variable name; type comes from the type column. Per-node loc/fname ride
+  //   as @(loc=..,fname=..).
   void print(std::ostream& os, const Lnast_nid& root_nid) const;
   void print(std::ostream& os) const { print(os, get_root()); }
   void print() const { print(std::cout, get_root()); }
@@ -388,13 +383,6 @@ public:
   void dump(std::ostream& os) const;
   void dump(const std::string& filename) const;
   void dump() const { dump(std::cout); }
-
-  // read: parse a single tree from a dump. read_all: parse every tree in a
-  // multi-tree dump (lnast.dump concatenates trees one after the other).
-  static std::shared_ptr<Lnast>              read(std::istream& is);
-  static std::shared_ptr<Lnast>              read(const std::string& filename);
-  static std::vector<std::shared_ptr<Lnast>> read_all(std::istream& is);
-  static std::vector<std::shared_ptr<Lnast>> read_all(const std::string& filename);
 
   template <typename... Args>
   static void info(std::format_string<Args...> format, Args&&... args) {

@@ -31,8 +31,8 @@ std::string_view to_string(Severity s);
 // Source location: hhds owns the resolved-span type (the locator mints,
 // resolves, and renders it — see hhds/source_locator.hpp). Every field is
 // optional; a default-constructed Span is "unknown" and serializes as JSON
-// null. Resolve one with `ln->span_of(nid)` (primary anchor) or
-// `ln->spans_of(nid)` (primary + the combined id's related sites).
+// null. Resolve one with `ln->span_of(nid)` (primary anchor); pair it with
+// `ln->notes_of(nid)` for the combined id's related sites.
 using Span = hhds::Source_span;
 
 struct Note {
@@ -235,7 +235,7 @@ public:
   }
 
   // Primary span + the combined id's related sites as notes, in one call
-  // (`ln->spans_of(nid)` / `Source_locator::resolve_spans`).
+  // (`Source_locator::resolve_spans`).
   Builder& at(const hhds::Source_locator::Resolved_spans& rs, std::string_view note_msg = "related source") {
     d_.span = rs.primary;
     for (const auto& r : rs.related) {

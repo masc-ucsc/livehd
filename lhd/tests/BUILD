@@ -169,6 +169,15 @@ sh_test(
     ],
 )
 
+# --recipe O1 (pass.cprop): a runtime Set_mask write chain plus single-bit
+# reads must fold through Cprop::try_find_single_driver_pin (the recursive
+# single-driver resolver) so y0->a and y2->c in the generated Verilog.
+sh_test(
+    name = "lhd_setmask_bitread_test",
+    srcs = ["lhd_setmask_bitread_test.sh"],
+    data = _FLOW_DATA + ["setmask_bitread.prp"],
+)
+
 # `--emit-dir pyrope:DIR` re-emission of a construct-rich source: the
 # coalescer upass per-op hooks (toln consumer present) + pass.prp_writer
 # unit emission, with the verifier discharging every cassert.

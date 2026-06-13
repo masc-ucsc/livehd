@@ -22,8 +22,6 @@
 // own ST when no stored value exists; we don't need to fight constprop
 // for primary binding.
 
-#include "upass_attributes_wrap_sat.hpp"
-
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -190,21 +188,3 @@ void uPass_attributes::record_assign(std::string_view lhs, bool rhs_is_nil) {
     }
   }
 }
-
-namespace upass {
-namespace attributes {
-
-void Const_handler::on_attr_set(uPass_attributes& owner, std::string_view lhs, std::string_view value_text) {
-  // attr_set type=const is the canonical signal. The actual single-bind
-  // check fires from record_assign when an assign lands on a const var.
-  // This handler exists so the registry has an exact-name slot for "type"
-  // (which dispatches here from process_attr_set when value_text=="const").
-  // Other type values (mut/reg/await) go through the same handler but
-  // require no policy action.
-  (void)owner;
-  (void)lhs;
-  (void)value_text;
-}
-
-}  // namespace attributes
-}  // namespace upass

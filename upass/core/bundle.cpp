@@ -345,34 +345,6 @@ std::shared_ptr<Bundle> Bundle::get_bundle(std::string_view key) const {
   return tup;
 }
 
-std::shared_ptr<Bundle> Bundle::get_bundle(const std::shared_ptr<Bundle const>& tup) const {
-  // create a trivial or sub-bundle with the selected fields
-  std::shared_ptr<Bundle> ret_tup;
-
-  tup->ensure_view_materialized();  // 1b/E
-  int pos = 0;
-  for (const auto& e : tup->key_map) {
-    auto field = e.second.trivial.to_field();
-
-    if (!has_trivial(field)) {
-      Lnast::info("bundle can not be indexed with key:{} with value {}", e.first, field);
-      return nullptr;
-    }
-    auto entry = get_entry(field);
-    if (!ret_tup) {
-      ret_tup = std::make_shared<Bundle>();
-    }
-    ret_tup->key_map.insert_or_assign(std::to_string(pos), entry);
-    ++pos;
-  }
-
-  if (!tup->is_correct()) {
-    ret_tup->set_issue();
-  }
-
-  return ret_tup;
-}
-
 void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const>& tup) {
   I(!key.empty());
 
@@ -720,26 +692,6 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup, std::string* confl
     }
   }
 
-  return true;
-}
-
-bool Bundle::concat(const Dlop& trivial) {
-  ensure_view_materialized();  // 1b/E
-  int next_pos = 0;
-  for (const auto& e : key_map) {
-    auto seg = first_segment_view(e.first);
-    if (segment_category(seg) != 2) {
-      dump();
-      Lnast::info("can not concat trivial:{} to unordered bundle field {}", trivial, e.first);
-      return false;
-    }
-    int n = str_tools::to_i(seg);
-    if (n + 1 > next_pos) {
-      next_pos = n + 1;
-    }
-  }
-
-  key_map.insert_or_assign(std::to_string(next_pos), Entry(false, trivial));
   return true;
 }
 

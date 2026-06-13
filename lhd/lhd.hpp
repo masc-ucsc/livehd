@@ -7,7 +7,7 @@
 // One invocation = one step: (declared inputs, config) -> (declared outputs,
 // exit code). No @tag, no ~/.cache, no lock, no `latest` symlink. lhd drives
 // the registered EPRP methods programmatically (Eprp::run_method_now) plus
-// the direct C++ entry points (Lnast::dump/read_all, uPass_tolg::run,
+// the direct C++ entry points (Lnast::dump, uPass_tolg::run,
 // livehd::Hhds_graph_library). The legacy lgshell REPL was removed
 // 2026-06-04 (lhd is the only driver; `lhd lsp` serves the LSP).
 

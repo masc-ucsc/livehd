@@ -121,12 +121,6 @@ Lnast_nid Lnast::set_root(Lnast_ntype::Lnast_ntype_int type) {
   return root;
 }
 
-Lnast_nid Lnast::set_root(const Lnast_node& n) {
-  auto root = tree_->add_root_node();
-  set_data(root, n);
-  return root;
-}
-
 Lnast_nid Lnast::add_child(const Lnast_nid& parent, Lnast_ntype::Lnast_ntype_int type) {
   auto child = parent.add_child();
   set_data(child, type);
@@ -236,13 +230,6 @@ livehd::diag::Span Lnast::span_of(const Lnast_nid& nid) const {
   return srcloc_.resolve_span(get_srcid(nid));
 }
 
-hhds::Source_locator::Resolved_spans Lnast::spans_of(const Lnast_nid& nid) const {
-  if (nid.is_invalid()) {
-    return {};
-  }
-  return srcloc_.resolve_spans(get_srcid(nid));
-}
-
 std::vector<livehd::diag::Note> Lnast::notes_of(const Lnast_nid& nid, std::string_view message) const {
   if (nid.is_invalid()) {
     return {};
@@ -267,12 +254,12 @@ void Lnast::set_data(const Lnast_nid& nid, const Lnast_node& n) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// print / dump / read
+// print / dump
 //
 // hhds split: print() is pretty-only (box-drawing, not round-trippable);
-// dump() goes through write_dump (parseable by read_dump). Lnast::read uses
-// hhds Tree::read_dump and re-applies the lnast-side attributes (name,
-// loc, fname) that ride in the dump as `'<name>' @(loc=..,fname=..)`.
+// dump() goes through write_dump and is round-trippable by hhds
+// Tree::read_dump (with lnast_type_table()); the lnast-side attributes
+// (name, src) ride in the dump as `'<name>' @(loc=..,fname=..)`.
 // ─────────────────────────────────────────────────────────────────────────
 
 namespace {
@@ -345,108 +332,4 @@ void Lnast::dump(const std::string& filename) const {
     throw std::runtime_error(std::format("lnast.dump: cannot open {} for writing", filename));
   }
   dump(ofs);
-}
-
-namespace {
-
-// Build an Lnast from one already-decoded hhds read_dump segment. Factored
-// out so single- and multi-tree readers share the post-processing.
-std::shared_ptr<Lnast> finish_read(hhds::Tree::ReadDumpResult result) {
-  auto top_name = std::string(result.tree->get_name());
-  auto lnast    = std::make_shared<Lnast>(top_name);
-  // The loaded tree is unattached (forest=null); replace_body wires it
-  // through TreeIO so forest_/treeio_ owns it from here on.
-  lnast->replace_body(result.tree);
-
-  // Re-apply per-node lnast attributes (name, loc, fname). NodeData entries
-  // are recorded in pre-order; iterating tree.pre_order() yields the same
-  // order, so we match them index-by-index.
-  size_t i = 0;
-  for (auto node : lnast->tree().pre_order()) {
-    if (i >= result.nodes.size()) {
-      break;
-    }
-    const auto& nd = result.nodes[i++];
-
-    // NodeData::node_text falls back to type_name when the dump line had no
-    // quoted text. Suppress that fallback so an unset name stays unset.
-    auto type     = lnast->get_type(node);
-    auto type_str = Lnast_ntype::to_sv(type);
-    if (!nd.node_text.empty() && nd.node_text != type_str) {
-      lnast->set_name(node, nd.node_text);
-    }
-
-    for (const auto& [k, v] : nd.attributes) {
-      if (k == "src") {
-        hhds::SourceId id = 0;
-        auto [ptr, ec]    = std::from_chars(v.data(), v.data() + v.size(), id);
-        if (ec == std::errc{} && ptr == v.data() + v.size()) {
-          lnast->set_srcid(node, id);
-        }
-      }
-      // legacy "loc"/"fname" attributes in old dumps are ignored
-    }
-  }
-
-  return lnast;
-}
-
-// A "name line" in a multi-tree dump is the header that starts a new tree:
-// it carries no tree-drawing prefix (every node line begins either with the
-// 0xe2 byte of ├/└/│ or with the 4-space prefix that hhds emits under a
-// last-child parent).
-bool is_name_line(const std::string& line) {
-  if (line.empty()) {
-    return false;
-  }
-  unsigned char c = static_cast<unsigned char>(line.front());
-  return c != 0xe2 && c != ' ';
-}
-
-}  // namespace
-
-std::shared_ptr<Lnast> Lnast::read(std::istream& is) {
-  auto trees = read_all(is);
-  return trees.empty() ? nullptr : trees.front();
-}
-
-std::shared_ptr<Lnast> Lnast::read(const std::string& filename) {
-  std::ifstream ifs(filename);
-  if (!ifs.is_open()) {
-    throw std::runtime_error(std::format("lnast.read: cannot open {} for reading", filename));
-  }
-  return read(ifs);
-}
-
-std::vector<std::shared_ptr<Lnast>> Lnast::read_all(std::istream& is) {
-  std::vector<std::shared_ptr<Lnast>> out;
-
-  // Split the stream into one-tree segments at every "name line" (header
-  // with no tree-drawing prefix), then hand each segment to hhds::read_dump.
-  std::string current;
-  bool        have_segment = false;
-  std::string line;
-  while (std::getline(is, line)) {
-    if (is_name_line(line) && have_segment) {
-      std::istringstream segment(current);
-      out.push_back(finish_read(hhds::Tree::read_dump(segment, lnast_type_table())));
-      current.clear();
-    }
-    current.append(line);
-    current.push_back('\n');
-    have_segment = true;
-  }
-  if (have_segment) {
-    std::istringstream segment(current);
-    out.push_back(finish_read(hhds::Tree::read_dump(segment, lnast_type_table())));
-  }
-  return out;
-}
-
-std::vector<std::shared_ptr<Lnast>> Lnast::read_all(const std::string& filename) {
-  std::ifstream ifs(filename);
-  if (!ifs.is_open()) {
-    throw std::runtime_error(std::format("lnast.read: cannot open {} for reading", filename));
-  }
-  return read_all(ifs);
 }

@@ -3,7 +3,6 @@
 
 #include <stack>
 
-#include "absl/container/flat_hash_set.h"
 #include "hlop/dlop.hpp"
 #include "lnast.hpp"
 
@@ -18,8 +17,6 @@ public:
   int                    tmp_var_cnt{0};
   std::shared_ptr<Lnast> lnast;
   Lnast_nid              idx_stmts;
-
-  absl::flat_hash_map<std::string, std::string> vname2lname;
 
   // ── cursor primitives ────────────────────────────────────────────────────
   // add_child(node):           append `node` under the current idx_stmts.
@@ -50,9 +47,6 @@ public:
   // ── naming ───────────────────────────────────────────────────────────────
   std::string      create_lnast_tmp();
   Lnast_node       mint_tmp_ref() { return Lnast_node::create_ref(create_lnast_tmp()); }
-  std::string      get_lnast_name(std::string_view val, bool last_value);
-  std::string_view get_lnast_lhs_name(std::string_view val);
-  void             mark_input_name(std::string_view lname) { input_lnames_.emplace(lname); }
 
   // ── tmp-id scoping (stable SSA/tmp ids) ──────────────────────────────────
   // create_lnast_tmp() mints intermediate/SSA temps. To keep ids stable under
@@ -112,13 +106,8 @@ public:
   // Each emitter writes one statement (or a small fixed pattern) under the
   // current `idx_stmts`, returning the result ref's lname for the cases that
   // produce a value.
-  std::string create_mask_stmts(std::string_view dest_max_bit);
-  std::string create_bitmask_stmts(std::string_view max_bit, std::string_view min_bit);
   std::string create_bit_not_stmts(std::string_view var_name);
   std::string create_log_not_stmts(std::string_view var_name);
-  std::string create_red_or_stmts(std::string_view var_name);
-  std::string create_red_and_stmts(std::string_view var_name);
-  std::string create_red_xor_stmts(std::string_view var_name);
 
   std::string create_sext_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_bit_and_stmts(std::string_view a_var, std::string_view b_var);
@@ -126,16 +115,12 @@ public:
   std::string create_bit_xor_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_shl_stmts(std::string_view a_var, std::string_view b_var);
   void        create_assign_stmts(std::string_view a_var, std::string_view b_var);
-  void        create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits);
-  void        create_func_call(std::string_view out_tup, std::string_view fname, std::string_view inp_tup);
   std::string create_tuple_get(std::string_view fields);
-  std::string create_tuple_get(std::string_view tup_var, std::string_view field_var);
 
   std::string create_minus_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_plus_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_mult_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_div_stmts(std::string_view a_var, std::string_view b_var);
-  std::string create_mod_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_get_mask_stmts(std::string_view sel_var, std::string_view bitmask);
   void        create_set_mask_stmts(std::string_view sel_var, std::string_view bitmask, std::string_view value);
 
@@ -180,8 +165,7 @@ private:
   std::string emit_unary_result(Lnast_ntype::Lnast_ntype_int op_type, std::string_view operand);
   std::string emit_binary_result(Lnast_ntype::Lnast_ntype_int op_type, std::string_view lhs, std::string_view rhs);
 
-  std::stack<Lnast_nid>            stmts_stack_;
-  absl::flat_hash_set<std::string> input_lnames_;
+  std::stack<Lnast_nid> stmts_stack_;
 
   // tmp-id scoping state (see set_tmp_scope). tmp_scope_ empty => global ___N
   // fallback via tmp_var_cnt; otherwise temps are `___<tmp_scope_>_<counter>`

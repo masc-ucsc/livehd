@@ -10,7 +10,6 @@
 
 #include "lnast_ntype.hpp"
 #include "upass_attributes_sticky.hpp"
-#include "upass_attributes_wrap_sat.hpp"
 
 // Plugin registration. Name "attributes" is what pass_upass appends to the
 // default upass order.
@@ -23,10 +22,10 @@ uPass_attributes::uPass_attributes(std::shared_ptr<upass::Lnast_manager>& _lm) :
   // Sticky `_*` / `debug` attribute pattern.
   reg.register_sticky_pattern(std::make_shared<upass::attributes::Sticky_handler>());
 
-  // Category-A consumption: const single-bind enforcement (type=const).
-  // wrap/sat are no longer attributes — they lower to a
+  // `type=const` single-bind enforcement is handled directly in record_assign
+  // (no attr_set dispatch handler needed); the default no-op handler covers
+  // type=mut/reg/await. wrap/sat are no longer attributes — they lower to a
   // `wrap|sat(v=…, type=…)` call handled in process_func_call.
-  reg.register_exact("type", std::make_shared<upass::attributes::Const_handler>());
 
   // Category-B LGraph-wiring handlers (clock_pin, reset_pin, posclk, ...).
   // Lives in its own translation unit so the table of pin/mode names doesn't

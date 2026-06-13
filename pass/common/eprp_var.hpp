@@ -49,18 +49,11 @@ public:
 
   Eprp_var(const Eprp_dict& _dict) : dict(_dict) {}
 
-  void add(const Eprp_dict& _dict);
-  void add(const Eprp_var& _var);
-  void add(Eprp_lnasts& _var);
-
   void                           add(const std::shared_ptr<hhds::Graph>& graph);
-  void                           add(std::unique_ptr<Lnast> lnast);
   void                           add(const std::shared_ptr<Lnast>& lnast);
   void                           add(std::string_view name, std::string_view value);
   void                           set_stage_labels(const Eprp_dict& _dict) { stage_dict = _dict; }
   [[nodiscard]] std::string_view get_stage(std::string_view name, std::string_view default_value = "") const;
-  void                           replace(const Eprp_var::Eprp_lnasts& lns);
-  void                           replace(const std::shared_ptr<Lnast>& lnast_old, std::shared_ptr<Lnast>& lnast_new);
 
   [[nodiscard]] bool has_label(std::string_view name) const { return dict.find(name) != dict.end(); };
 

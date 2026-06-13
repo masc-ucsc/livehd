@@ -2117,38 +2117,6 @@ void Prp2lnast::process_assignment(TSNode n) {
   (void)process_lvalue_for_assign(lv, rvalue_node, decl, tc, rhs_is_fcall, rhs_fcall_name, overflow_kind);
 }
 
-// ---------------- Assert ----------------
-
-void Prp2lnast::process_assert_statement(TSNode n) {
-  TSNode cond = child_by_field(n, "condition");
-  if (ts_node_is_null(cond)) {
-    // Hidden condition — extract text after the `cassert`/`assert` keyword.
-    // Find the 'condition' start position: the first non-'always'/assert token.
-    uint32_t start = 0;
-    for (uint32_t i = 0; i < child_count(n); i++) {
-      TSNode           c   = child(n, i);
-      std::string_view txt = get_text(c);
-      if (txt == "always" || txt == "assert" || txt == "cassert") {
-        start = ts_node_end_byte(c);
-      } else {
-        break;
-      }
-    }
-    auto txt = trim(text_between(start, ts_node_end_byte(n)));
-    auto idx = builder.add_child(Lnast_ntype::create_cassert());
-    attach_loc(idx, n);
-    lnast->add_child(idx, constant_text_to_node(txt));
-    return;
-  }
-  const bool saved_in_assert = in_assert_lowering_;
-  in_assert_lowering_        = true;  // `.[bw_max]`/`.[bw_min]` legal here
-  Lnast_node cond_ref        = expr_to_node(cond);
-  in_assert_lowering_        = saved_in_assert;
-  auto idx = builder.add_child(Lnast_ntype::create_cassert());
-  attach_loc(idx, n);
-  lnast->add_child(idx, cond_ref);
-}
-
 // ---------------- Control Flow ----------------
 
 void Prp2lnast::process_while_statement(TSNode n) {
@@ -2470,7 +2438,7 @@ std::vector<Prp2lnast::Call_arg> Prp2lnast::collect_call_args(TSNode arg_tuple) 
     return call_args;
   }
 
-  // Statement form (`process_function_call_statement`) wraps the call's
+  // The statement form of a call wraps the call's
   // argument tuple in an outer `expression_list`. Unwrap to the inner tuple
   // so the loop below iterates the real arg children (not a single
   // wrapped-tuple "arg" that would emit `f((a,b))` instead of `f(a,b)`).
@@ -2595,25 +2563,6 @@ void Prp2lnast::add_call_args_to_fcall(const Lnast_nid& fcall_idx, const std::ve
       lnast->add_child(fcall_idx, arg.value);
     }
   }
-}
-
-void Prp2lnast::process_function_call_statement(TSNode n) {
-  TSNode     func = child_by_field(n, "function");
-  TSNode     args = child_by_field(n, "argument");
-  Lnast_node func_ref;
-  if (ts_node_is_null(func)) {
-    func_ref = Lnast_node::create_const("nil");
-  } else {
-    auto name = trim(get_text(func));
-    func_ref  = Lnast_node::create_ref(name);
-  }
-  auto call_args    = collect_call_args(args);
-  auto generic_args = collect_generic_args(n);
-  auto idx          = builder.add_child(Lnast_ntype::create_func_call());
-  lnast->add_child(idx, builder.mint_tmp_ref());
-  lnast->add_child(idx, func_ref);
-  add_generic_args_to_fcall(idx, generic_args);
-  add_call_args_to_fcall(idx, call_args);
 }
 
 void Prp2lnast::process_lambda_statement(TSNode n) { process_lambda_statement_named(n, {}); }
@@ -3098,7 +3047,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
           }
           std::string_view tt(ts_node_type(node));
           if (tt == "assignment" || tt == "declaration_statement" || tt == "control_statement" || tt == "while_statement"
-              || tt == "for_statement" || tt == "loop_statement" || tt == "assert_statement" || tt == "function_call_statement") {
+              || tt == "for_statement" || tt == "loop_statement") {
             return true;
           }
           uint32_t cnc = ts_node_named_child_count(node);

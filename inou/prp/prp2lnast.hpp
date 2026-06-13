@@ -226,12 +226,10 @@ protected:
   void walk_statement_block(TSNode parent);
   void process_assignment(TSNode n);
   void process_declaration_statement(TSNode n);
-  void process_assert_statement(TSNode n);
   void process_while_statement(TSNode n);
   void process_for_statement(TSNode n);
   void process_loop_statement(TSNode n);
   void process_control_statement(TSNode n);
-  void process_function_call_statement(TSNode n);
   // Statement-table entry point (the table needs the plain `void(TSNode)`
   // member signature); forwards to the named variant with no override.
   void process_lambda_statement(TSNode n);

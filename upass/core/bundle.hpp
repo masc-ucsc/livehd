@@ -234,7 +234,6 @@ public:
 
   bool                    has_bundle(std::string_view key) const;
   std::shared_ptr<Bundle> get_bundle(std::string_view key) const;
-  std::shared_ptr<Bundle> get_bundle(const std::shared_ptr<Bundle const>& tup) const;
 
   // set a trivial/sub tuple. If already existed anything, it is deleted (not attributes)
 
@@ -300,7 +299,6 @@ public:
   // false with *conflict set to the colliding canonical path — the caller
   // diagnoses; `this` may be left partially merged, so discard it on failure.
   bool concat(const std::shared_ptr<Bundle const>& tup2, std::string* conflict = nullptr);
-  bool concat(const Dlop& trivial);
 
   bool is_empty() const { return !has_root_ && key_map.empty() && attr_map.empty(); }
   bool is_scalar() const { return has_root_ || key_map.size() <= 1; }
