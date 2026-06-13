@@ -88,9 +88,27 @@ cassert(E.a in u)                  // passes</code></pre>
 
 <h2>Subtasks — landed</h2>
 <ul class="subtasks">
+<li><strong>B — <code>:int</code> sequential numbering.</strong> <span class="status landed">landed</span>
+  In <code>lower_enum_def</code> (prp2lnast), an INTEGER level type (<code>:int</code>/<code>:iN</code>/
+  <code>:uN</code>) now forces sequential ordinals (0,1,2,…) instead of one-hot, treats an explicit
+  entry value as an ordinal that resets the sequence (so <code>enum V:i4=(a=-2,b,c,d)</code> →
+  -2,-1,0,1), and is NOT mistaken for a payload type. <code>adv_enum_seq_03</code>,
+  <code>adv_enum_seq_11</code>, <code>adv_enum_hier_10</code> pass; explicit-value numbering and
+  the existing enum tests stay green.</li>
 <li><strong>C — enum <code>|</code>/<code>&amp;</code> union and <code>in</code> bit-containment
   membership.</strong> <span class="status landed">landed</span> (with the <code>2f-enum_hier</code> fix;
   <code>adv_enum_hier_04</code>, <code>adv_mix_enum_match_08</code> pass)</li>
+</ul>
+
+<h2>Subtasks — still pending</h2>
+<ul>
+<li><strong>A — enum identity through a param / call / match selector.</strong> An enum value
+  passed as a function parameter loses its comptime fold + <code>__enumentry</code> identity at
+  the runner's inline param binding, so <code>match o { == Enum.E … }</code> arms fall to
+  <code>else</code>. Deep inliner work (the enum bundle param isn't bound comptime). Tests:
+  <code>adv_enum_match_identity</code>, <code>adv_enum_cast_12/19</code>, <code>adv_match_locals_19</code>.</li>
+<li><strong>D — hierarchical <code>string()</code> round-trip + <code>enum(...)</code> splice.</strong>
+  <code>adv_enum_hier_05</code>, <code>adv_enum_hier_14</code>.</li>
 </ul>
 
 <h2>Docs</h2>

@@ -3586,6 +3586,18 @@ Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_lev
     return std::string(trim(get_text(tc)));
   };
   const std::string level_pt = type_text_of(enum_level_type);
+  // An INTEGER level type (`enum V:int`/`:i4`/`:u8` …) forces SEQUENTIAL ordinal
+  // numbering (0,1,2,…), not the default one-hot, and makes an explicit entry
+  // value an ORDINAL (not a payload construction) that resets the sequence.
+  // (2f-enum group B.)
+  auto is_int_type = [](std::string_view s) {
+    if (s == "int" || s == "integer" || s == "uint" || s == "unsigned" || s == "signed") {
+      return true;
+    }
+    return s.size() >= 2 && (s[0] == 'u' || s[0] == 'i' || s[0] == 's')
+           && std::all_of(s.begin() + 1, s.end(), [](unsigned char c) { return std::isdigit(c); });
+  };
+  const bool level_is_int = is_int_type(level_pt);
 
   // Ordinal mode (payload-less): one-hot when NO entry is explicit, else a
   // traditional sequence (explicit value resets the counter) — 03-bundle.md.
@@ -3642,8 +3654,10 @@ Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_lev
       lnast->add_child(vidx, carrier);
       lnast->add_child(vidx, Lnast_node::create_const("__enumval"));
       lnast->add_child(vidx, Lnast_node::create_const(std::to_string(own_value)));
-    } else if (!pt.empty() && e.has_value) {
+    } else if (!pt.empty() && e.has_value && !is_int_type(pt)) {
       // Typed payload entry (`Yellow:Rgb = 0xff_ff00`): construct `Rgb(v)`.
+      // An INTEGER-typed enum (`:i4`) is NOT a payload — its explicit value is
+      // an ordinal, handled by the ordinal branch below.
       // The runner's init-construction hook splices the payload type's init.
       auto val  = expr_to_node(e.value_node);
       auto fidx = builder.add_child(Lnast_ntype::create_func_call());
@@ -3652,8 +3666,9 @@ Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_lev
       lnast->add_child(fidx, Lnast_node::create_ref(pt));
       lnast->add_child(fidx, val);
     } else if (e.has_value) {
-      if (auto ov = parse_ordinal(e.value_node); ov.has_value() && level_pt.empty() && !e.has_type) {
-        // Explicit ordinal literal (`b=5`) — resets the sequence counter.
+      if (auto ov = parse_ordinal(e.value_node); ov.has_value() && (level_pt.empty() || level_is_int) && !e.has_type) {
+        // Explicit ordinal literal (`b=5`, or `a=-2` on an `:int` enum) — resets
+        // the sequence counter.
         seq_next  = *ov + 1;
         auto tidx = builder.add_child(Lnast_ntype::create_tuple_add());
         carrier   = builder.mint_tmp_ref();
@@ -3677,7 +3692,7 @@ Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_lev
       // Auto: a fresh one-hot bit from the shared counter (ORed with the
       // ancestor bits in a hierarchy), or the running ordinal sequence value.
       int64_t v;
-      if (any_explicit) {
+      if (any_explicit || level_is_int) {
         v        = seq_next;
         seq_next = v + 1;
       } else {
