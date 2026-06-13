@@ -1,6 +1,7 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 config_setting(
@@ -64,6 +65,18 @@ cc_binary(
     ],
     deps = [
         ":core",
+    ],
+)
+
+# Vcd_reader smoke test: parse a small VCD ($scope/$var headers, timestamps,
+# vector + scalar samples) and check the per-signal parity table vcd_sample
+# derives from the value-change counts.
+sh_test(
+    name = "vcd_sample_test",
+    srcs = ["tests/vcd_sample_test.sh"],
+    data = [
+        "tests/vcd_sample_signals.vcd",
+        ":vcd_sample",
     ],
 )
 

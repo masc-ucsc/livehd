@@ -1,0 +1,20 @@
+$date June 2026 $end
+$version vcd_sample_test $end
+$timescale 1ns $end
+$scope module top $end
+$var wire 1 ! uart_tx $end
+$var wire 8 " uart_data [7:0] $end
+$var wire 1 # other_sig $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+b00000000 "
+0#
+#10
+1!
+b10100101 "
+#20
+0!
+1#
+#30

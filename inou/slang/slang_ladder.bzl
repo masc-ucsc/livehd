@@ -71,6 +71,8 @@ SLANG_LADDER = {
     "nocheck_cpp_api": "error",  # fail-unknown-module
     "nocheck_gcd_large": "error",  # duplicate definition; slang rejects per 1800
     "nocheck_join_fadd": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
+    "nocheck_slang_foreach": "verilog",  # foreach lowers to an async-read memory; memory LEC inconclusive
+    "nocheck_slang_loops": "lec",
     "not_vslogicnot": "lec",
     "null_port": "lec",
     "offset": "lec",

@@ -1,0 +1,31 @@
+/*
+:name: stmt_kinds
+:type: parsing lnast comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Statement-kind sweep for the prp frontend dispatch: assert statement,
+// standalone function-call statement, loop (unconditional break is the only
+// pinned unroll shape), impl statement, and a test block with spawn.
+
+comb check(a:u8) -> () {
+  assert(a == a)
+}
+
+check(a=3)
+
+mut acc = 0
+loop {
+  acc += 1
+  break
+}
+cassert(acc == 1)
+
+type Tr = (mut a:u8 = 0)
+type Ty = (mut b:u8 = 0)
+impl Tr for Ty (a = 1)
+
+test "spawn_smoke" {
+  spawn job = { assert(true) }
+}

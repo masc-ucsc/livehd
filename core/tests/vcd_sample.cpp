@@ -22,9 +22,9 @@ void Vcd_sample::on_value(const std::string& hier_name, std::string_view val) {
   }
 }
 
-int main() {
+int main(int argc, char** argv) {
   Vcd_sample vs;
-  if (!vs.open("foo_signals.vcd")) {
+  if (!vs.open(argc > 1 ? argv[1] : "foo_signals.vcd")) {
     return 1;
   }
   vs.process();

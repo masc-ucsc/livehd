@@ -1,0 +1,55 @@
+/*
+:name: coalesce_ops
+:type: comptime
+:verifier_pass: 9
+:verifier_fail: 0
+*/
+
+// Reduction / popcount / tuple-concat / loop / nominal-is constructs in one
+// comptime program: every result is discharged by the verifier, and the same
+// node kinds drive the upass per-op dispatch (red_*, popcount, tuple_concat,
+// while, is) when this file is re-used by the lhd pyrope re-emission test.
+
+comb addsmall(x:u4, y:u4) -> (r:u8) { r = u8(x) + u8(y) }
+
+const A = 0ub00000000 + 0xb5
+const r_and = A#&[..]
+const r_or  = A#|[..]
+const r_xor = A#^[..]
+const pop   = A#+[..]
+
+cassert(int(r_and) == 0)
+cassert(int(r_or) == 1)
+cassert(int(r_xor) == 1)
+cassert(pop == 5)
+
+mut acc = 0
+for i in 0..<3 {
+  acc += i
+}
+cassert(acc == 3)
+
+mut j = 0
+mut w = 0
+while j < 2 {
+  w += 10
+  j += 1
+}
+cassert(w == 20)
+
+const t3 = (1, 2) ++ (3, 4)
+cassert(t3[3] == 4)
+
+mut sel = 0
+unique if A#[0] == 1 {
+  sel = 1
+} elif A#[0] == 0 {
+  sel = 2
+}
+
+const s = addsmall(x=3, y=4)
+cassert(s == 7)
+
+type MyT = (mut f:u8 = 0)
+mut mv:MyT = (f=1)
+cassert(mv is MyT)

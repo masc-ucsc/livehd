@@ -1,0 +1,36 @@
+// Construct mix for the pyrope re-emission test (lhd_prp_writer_test.sh):
+// reductions, popcount, tuple concat, while and is at the top scope (the
+// upass per-op dispatch), plus a typed comb pair so lambda units flow
+// through pass.prp_writer.
+comb helper(a:u8, b:u8) -> (r:u16) { r = u16(a) + u16(b) }
+
+pub comb rich(x:u8, y:u8) -> (z:u16) {
+  const nb  = ~x
+  const ng  = -y
+  const sx  = x#sext[0..=3]
+  const tup = (lo=x, hi=y)
+  const lo2 = tup.lo
+  const hs  = helper(a=x, b=y)
+  z = u16(u8(nb & 0xff)) + u16(sx & 0xf) + u16(lo2) + hs + u16(ng + 256)
+}
+
+const A = 0ub00000000 + 0xb5
+cassert(int(A#&[..]) == 0)
+cassert(int(A#|[..]) == 1)
+cassert(int(A#^[..]) == 1)
+cassert(A#+[..] == 5)
+
+mut j = 0
+mut w = 0
+while j < 2 {
+  w += 10
+  j += 1
+}
+cassert(w == 20)
+
+const t3 = (1, 2) ++ (3, 4)
+cassert(t3[3] == 4)
+
+type MyT = (mut f:u8 = 0)
+mut mv:MyT = (f=1)
+cassert(mv is MyT)

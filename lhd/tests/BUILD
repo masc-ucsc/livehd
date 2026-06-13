@@ -156,3 +156,42 @@ sh_test(
     srcs = ["lhd_list_options_test.sh"],
     data = _FLOW_DATA,
 )
+
+# --recipe O2 (pass.cprop + pass.bitwidth): cell-type mix LEC'd against the
+# source, recipe provenance in --result-json, and the memory sizing path.
+sh_test(
+    name = "lhd_bitwidth_o2_test",
+    size = "large",
+    srcs = ["lhd_bitwidth_o2_test.sh"],
+    data = _FLOW_DATA + [
+        "bw_mem.v",
+        "bw_mix.v",
+    ],
+)
+
+# `--emit-dir pyrope:DIR` re-emission of a construct-rich source: the
+# coalescer upass per-op hooks (toln consumer present) + pass.prp_writer
+# unit emission, with the verifier discharging every cassert.
+sh_test(
+    name = "lhd_prp_writer_test",
+    srcs = ["lhd_prp_writer_test.sh"],
+    data = _FLOW_DATA + ["writer_rich.prp"],
+)
+
+# `lhd lsp` scripted JSON-RPC session over stdio: initialize negotiation,
+# didOpen/didChange/didSave/didClose, pull diagnostics on a broken buffer,
+# MethodNotFound, and clean shutdown/exit.
+sh_test(
+    name = "lhd_lsp_test",
+    srcs = ["lhd_lsp_test.py"],
+    data = ["//lhd"],
+)
+
+# Kernel debug observables: --dump lg (multi-graph stderr dump), --verbose
+# (step-log mirroring), --depfile (make-style prerequisites).
+sh_test(
+    name = "lhd_debug_obs_test",
+    size = "large",
+    srcs = ["lhd_debug_obs_test.sh"],
+    data = _FLOW_DATA + ["bw_mix.v"],
+)

@@ -70,4 +70,13 @@ grep -q '"class":"usage"' "$W/e1.json" || fail "ln.cat lg: must be a usage error
 "$LHD" ln.diff "$W/old.prp" -q >"$W/e2.json" 2>/dev/null
 grep -q '"class":"usage"' "$W/e2.json" || fail "ln.diff with one input must be a usage error: $(cat "$W/e2.json")"
 
+# 7. Unit-count mismatch: both unit lists named in the config error.
+cat > "$W/twolam.prp" <<'EOF'
+comb addone(a:u8) -> (z:u9) { z = a + 1 }
+comb xorit(a:u8, b:u8) -> (z:u8) { z = a ^ b }
+EOF
+"$LHD" ln.diff "$W/old.prp" "$W/twolam.prp" --workdir "$W/w7" -q >"$W/e3.json" 2>/dev/null
+grep -q 'unit count mismatch' "$W/e3.json" || fail "ln.diff unit mismatch must name the error: $(cat "$W/e3.json")"
+grep -q 'twolam.addone' "$W/e3.json" || fail "ln.diff mismatch error must list the unit names: $(cat "$W/e3.json")"
+
 echo "PASS: ln.cat / ln.diff"
