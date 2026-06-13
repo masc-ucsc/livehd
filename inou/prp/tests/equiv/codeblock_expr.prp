@@ -1,0 +1,14 @@
+/*
+:name: codeblock_expr
+:type: equiv
+:verilog_top: codeblock_expr.blk
+:pyrope_top: codeblock_expr.blk
+*/
+
+// 2f-codeblock_expr RTL coverage: a code-block-as-expression over comb INPUTS
+// (so it can't be comptime-folded away) whose value feeds an arithmetic op to
+// the output. a = 300 + in1 - in2 stays >= 45 (no underflow / signed output).
+comb blk(in1:u8, in2:u8) -> (out:u16) {
+  const a = {mut d = 300 + in1; d - in2}   // block-as-expression: a = 300 + in1 - in2
+  out = a << 2                              // out = (300 + in1 - in2) * 4
+}

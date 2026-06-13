@@ -4112,10 +4112,50 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
     return expr_to_node(arg);
   }
   if (t == "scope_statement") {
-    // Inline a scope expression: run its statements in the current scope
-    // and return the last computed expression.
-    process_scope_statement(n, builder.idx_stmts);
-    return Lnast_node::create_const("0");
+    // Code-block-as-expression: run the block's statements in a nested scope and
+    // yield the value of its LAST expression (05b-statements.md "Code block").
+    // Inner declarations stay scoped to the block (Conditional_scope bump). A
+    // block whose last item is a statement (assignment/decl/control) has no
+    // value → nil. (2f-codeblock_expr — was unconditionally folding to 0/nil.)
+    static const absl::flat_hash_set<std::string_view> block_stmt_kinds = {
+        "declaration_statement",
+        "assignment",
+        "while_statement",
+        "for_statement",
+        "loop_statement",
+        "control_statement",
+        "lambda",
+        "enum_assignment",
+        "type_statement",
+        "import_statement",
+        "test_statement",
+        "spawn_statement",
+        "impl_statement",
+        "scope_statement",
+    };
+    Conditional_scope guard(&conditional_depth_);
+    const uint32_t    nc   = ts_node_named_child_count(n);
+    int               last = -1;
+    for (int i = static_cast<int>(nc) - 1; i >= 0; --i) {
+      if (std::string_view(ts_node_type(ts_node_named_child(n, static_cast<uint32_t>(i)))) != "comment") {
+        last = i;
+        break;
+      }
+    }
+    Lnast_node result = Lnast_node::create_const("nil");
+    for (uint32_t i = 0; i < nc; i++) {
+      TSNode           c = ts_node_named_child(n, i);
+      std::string_view ct(ts_node_type(c));
+      if (ct == "comment") {
+        continue;
+      }
+      if (static_cast<int>(i) == last && !block_stmt_kinds.contains(ct)) {
+        result = expr_to_node(c);  // block value = last expression
+      } else {
+        process_statement(c);
+      }
+    }
+    return result;
   }
   if (t == "interpolated_string_literal") {
     return interpolated_string_to_node(n);

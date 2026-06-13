@@ -63,7 +63,18 @@ cassert(yy == 12)                     // FOLDS FALSE</code></pre>
 </ul>
 
 <h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<ul>
+<li><strong>A — code-block-as-expression yields its last expression.</strong>
+  <code>expr_to_node</code>'s <code>scope_statement</code> case in <code>prp2lnast.cpp</code>
+  unconditionally returned <code>const 0</code> after walking the block. It now lowers all
+  but the last named child as statements and returns the value of the last child when it is
+  an expression (a statement-shaped last → <code>nil</code>); inner decls stay scoped via the
+  <code>Conditional_scope</code> bump. The three comptime cases pass.</li>
+<li><strong>B — equiv test added and LEC-passes.</strong> <code>codeblock_expr.prp</code> +
+  golden <code>.v</code> (block over comb inputs feeding a shift). Unlike the splice equiv,
+  this needs no new tolg node — the block's statements emit into the scope and the last
+  expression feeds the output through normal arithmetic.</li>
+</ul>
 
 <h2>Equiv test spec (subtask B)</h2>
 <p>The block depends on runtime inputs <code>in1</code>/<code>in2</code> (its value
