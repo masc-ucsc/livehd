@@ -12,7 +12,7 @@ mut p1 = (
     result = a + 1
   },
   comb call2(self, a) -> (result) { // no ref, read-only method
-    result = a + int(self.found_once)
+    result = a - int(self.found_once)  // int(true) == -1, so `- int(found)` adds 1 when found
   }
 )
 

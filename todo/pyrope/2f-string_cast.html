@@ -52,7 +52,20 @@
 </ul>
 
 <h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<ul>
+<li><strong>A — <code>string(bool)</code> renders the word.</strong> <code>stringify_one</code>
+  (upass_constprop.cpp) now returns <code>"true"</code>/<code>"false"</code> for a bool instead
+  of falling through to the signed-all-ones decimal (<code>"-1"</code>/<code>"0"</code>).</li>
+<li><strong>B — <code>int(true) == -1</code>.</strong> The <code>to_int</code> cast now maps a bool
+  true to <code>-1</code> (1-bit signed all-ones), false to <code>0</code> (was forced to
+  <code>1</code>). <code>string(int(true))</code> is the decimal <code>"-1"</code>.</li>
+</ul>
+<p><strong>Blast radius patched:</strong> <code>coalesce_ops</code> /
+  <code>writer_rich</code> (<code>int(&lt;OR/XOR-reduction&gt;) == 1</code> → <code>== -1</code>, since
+  a reduction is a bool) and <code>tup_method</code> (<code>a + int(found)</code> →
+  <code>a - int(found)</code> so it still adds 1 when found). Decimal <code>string(int)</code>
+  and <code>int(string)</code> unaffected. (Subtask: the ASCII <code>string(int)</code> doc line
+  lives in <code>../docs</code>, not checked out.)</p>
 
 <h2>Retired / doc cleanup</h2>
 <ul>

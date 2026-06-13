@@ -39,6 +39,11 @@ static Dlop stringify_one(const Dlop& v) {
   if (v.is_string()) {
     return v;
   }
+  // `string(bool)` renders the literal word, not the bool's signed all-ones
+  // decimal ("-1"/"0"). (2f-string_cast ruling.)
+  if (v.is_bool() && !v.has_unknowns()) {
+    return *Dlop::from_string(v.is_known_true() ? "true" : "false");
+  }
   // Render the value to a string Dlop (the result feeds a TEXT concat in
   // stringify_concat_trivials — returning `v` itself would bit-concat). The
   // `string()` cast wants decimal text; to_decimal_string is width-safe for
@@ -3139,8 +3144,9 @@ void uPass_constprop::process_func_call() {
       if (v.is_string()) {
         v = Dlop::nil();
       } else if (v.is_bool() && !v.has_unknowns()) {
-        // `int(true)` is 1, never the bool's all-ones payload (~0 == -1).
-        v = *Dlop::from_pyrope(v.is_known_true() ? "1" : "0");
+        // `int(true) == -1` (true is the 1-bit signed all-ones value);
+        // `int(false) == 0`. (2f-string_cast ruling.)
+        v = *Dlop::from_pyrope(v.is_known_true() ? "-1" : "0");
       }
       result = v;
     } else {
