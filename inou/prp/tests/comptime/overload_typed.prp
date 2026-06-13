@@ -1,0 +1,26 @@
+/*
+:name: overload_typed
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// 2f-overload — dispatch on argument TYPES, not just arity. A candidate whose
+// declared parameter type cannot accept an actual (wrong scalar kind, or a
+// literal that overflows the declared width) is skipped, and the next is tried.
+
+// (1) kind dispatch: bool vs int
+comb on_bool(a:bool) -> (r:int) { r = if a { 1 } else { 0 } }
+comb on_int(a:int)   -> (r:int) { r = a + 100 }
+const k = [on_bool, on_int]
+
+cassert(k(true) == 1)    // bool actual → on_bool (on_int's int param rejects bool)
+cassert(k(7) == 107)     // int actual  → on_int  (on_bool's bool param rejects int)
+
+// (2) range dispatch: u8 vs u16
+comb small(a:u8)  -> (r:u32) { r = a + 1 }
+comb big(a:u16)   -> (r:u32) { r = a + 1 }
+const w = [small, big]
+
+cassert(w(200) == 201)     // 200 fits u8  → small
+cassert(w(5000) == 5001)   // 5000 overflows u8 → big

@@ -1,0 +1,19 @@
+/*
+:name: overload_arity
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// 2f-overload — a gathered lambda set dispatches a call to the first candidate
+// whose signature accepts it (tuple-order priority). Overloaded and plain calls
+// share the SAME argument rules, so same-kind args are named (`a=...`); the
+// arity then selects the overload.
+
+comb add2(a:int, b:int) -> (r:int) { r = a + b }
+comb add3(a:int, b:int, c:int) -> (r:int) { r = a + b + c }
+
+const add = [add2, add3]
+
+cassert(add(a=1, b=2) == 3)         // 2 args → add2
+cassert(add(a=1, b=2, c=3) == 6)    // 3 args → add3

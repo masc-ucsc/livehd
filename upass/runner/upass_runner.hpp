@@ -438,6 +438,40 @@ protected:
   // Collects the init candidates recorded on type bundle `tn`: the single
   // `init` function-name string or the `init.N` overload list, tuple order.
   std::vector<std::string> init_candidates_of(std::string_view tn);
+
+  // ── overload-gathering call dispatch (2f-overload) ───────────────────────
+  // One gathered/parsed actual argument of a call. Hoisted out of
+  // try_inline_func_call so the overload pre-resolution and the normal bind
+  // path gather identically (gather_actuals).
+  struct Actual {
+    bool        is_named{false};
+    bool        is_ref_pass{false};  // `f(ref x)` — positional, exempt from naming rules
+    std::string key;
+    Lnast_node  node{Lnast_node::create_invalid()};
+    std::string func_name;  // non-empty: this actual is a function value (closure)
+  };
+  // Walk the func_call actuals (cursor MUST be on the callee ref — the call's
+  // 2nd child). Fills `actuals` (positional / named / ref-pass) and the
+  // explicit `<…>` generic refs, honoring the UFCS-receiver drop. Saves and
+  // restores the cursor. Returns false on a malformed call shape (the caller
+  // then declines the inline).
+  bool gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& actuals, std::vector<std::string>& explicit_generics);
+  // A gathered lambda set `const add = [f1, f2]` folds (constprop) to a bundle
+  // of qualified function-name strings under numeric keys "0","1",… — the same
+  // shape `init` overloads use. Returns those names in tuple order (only the
+  // entries that resolve to a registry lambda); empty when `name` is not such a
+  // set. try_inline_func_call rewrites the callee to the FIRST candidate whose
+  // signature accepts the call (signature_matches), then proceeds as a normal
+  // single-callee inline; no candidate → a fatal `fcall-no-overload` diag.
+  std::vector<std::string> overload_candidates_of(std::string_view name);
+  // True iff callee signature `io` accepts `actuals` — naming + arity + scalar
+  // kind/range fit. The synchronous overload-dispatch predicate: a non-fatal
+  // mirror of try_inline_func_call's bind loop plus a per-arg kind/range
+  // pre-filter (a typed-param MISMATCH is otherwise only caught downstream, so
+  // it must be re-derived here to choose among candidates). Used ONLY to pick
+  // among gathered candidates; the winner still runs the full bind path, which
+  // remains the authority for diagnostics.
+  bool signature_matches(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool is_ctor_call);
   // >0 while a synthesized constructor call is being spliced.
   int                      init_construction_depth_ = 0;
   // Vars whose `declare` has been walked but whose declaration store hasn't

@@ -70,8 +70,11 @@ when `f` declares `self` as first parameter; `self` binds positionally, never
 `f(self=...)`; `ref self` needs a `mut` receiver. `ref` must be written at the
 declaration **and** the call: `comb inc(ref a) -> () { a += 1 }` … `inc(ref y)`.
 
-**Overloading/generics** — overload by gathering: `const add = [add1, add2]`
-(TBD: dispatch not lowered yet; only `init` overload sets resolve).
+**Overloading/generics** — overload by gathering: `const add = [add1, add2]`;
+a call dispatches (comptime) to the FIRST gathered lambda that can accept it
+(tuple order, no ambiguity error; no-match = compile error). "Can accept" uses
+the SAME argument rules as a direct call (same-kind positional args must still
+be named).
 Generics: `comb f<T>(a:T, b:T) -> (r)` — a per-call-site type-macro
 expansion. Bind explicitly (`f<u8>(a=1, b=2)`, one type per generic, in
 order) or let T infer (unify) from the actuals' declared types; bare

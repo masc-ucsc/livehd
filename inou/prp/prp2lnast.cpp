@@ -1094,12 +1094,10 @@ void Prp2lnast::process_statement(TSNode n) {
   static const absl::flat_hash_map<std::string_view, Handler> stmt_dispatch = {
       {  "declaration_statement",   &Prp2lnast::process_declaration_statement},
       {             "assignment",              &Prp2lnast::process_assignment},
-      {       "assert_statement",        &Prp2lnast::process_assert_statement},
       {        "while_statement",         &Prp2lnast::process_while_statement},
       {          "for_statement",           &Prp2lnast::process_for_statement},
       {         "loop_statement",          &Prp2lnast::process_loop_statement},
       {      "control_statement",       &Prp2lnast::process_control_statement},
-      {"function_call_statement", &Prp2lnast::process_function_call_statement},
       {                 "lambda",        &Prp2lnast::process_lambda_statement},
       {        "enum_assignment",         &Prp2lnast::process_enum_assignment},
       {         "type_statement",          &Prp2lnast::process_type_statement},

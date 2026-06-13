@@ -1,0 +1,22 @@
+/*
+:name: overload_kind_var
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// 2f-overload regression — a candidate is selected by the SAME callability test
+// the real bind then applies, so the two must classify an actual's kind
+// identically. A bool (or string) VARIABLE passed positionally must drive
+// exception-3 (unique-kind) binding the same way in both: the probe accepting a
+// candidate that the real bind would reject is the divergence this guards.
+
+comb f1(flag:bool, n:u8) -> (r:int) { r = if flag { int(n) } else { 0 } }
+comb f2(s:u16, t:u16)    -> (r:int) { r = int(s) + int(t) }
+const ovl = [f1, f2]
+
+const b = true            // a bool VARIABLE (not a literal at the call site)
+const m:u8 = 7
+cassert(ovl(b, m) == 7)   // bool var → flag, u8 var → n : dispatches to f1
+
+cassert(ovl(s=100, t=50) == 150)   // named s,t match only f2

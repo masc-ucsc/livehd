@@ -1,0 +1,17 @@
+/*
+:name: overload_no_match
+:type: error
+:error: no overload of `add` matches the call
+:help: none of the 2 gathered lambdas accepts these arguments
+*/
+
+// 2f-overload — when no gathered lambda accepts the call (here: too few
+// arguments for either the 2-arg or the 3-arg candidate), dispatch fails with
+// a clear compile error rather than silently picking one.
+
+comb add2(a:int, b:int) -> (r:int) { r = a + b }
+comb add3(a:int, b:int, c:int) -> (r:int) { r = a + b + c }
+
+const add = [add2, add3]
+
+cassert(add(1) == 1)  // locate_error_here

@@ -1541,6 +1541,44 @@ bool uPass_runner::try_inline_func_call() {
     }
   }
 
+  // Overload-gathering dispatch (2f-overload): `const add = [f1, f2]` folds to
+  // a bundle of qualified lambda-name strings under numeric keys. When the
+  // callee is such a set, rewrite it to the FIRST candidate whose signature
+  // accepts the call (tuple-order priority, mirroring select_init_overload);
+  // the rest of this function then inlines the chosen lambda as a normal single
+  // callee. A one-entry set defers to the normal bind path so its precise
+  // arg-shape diagnostics still fire; a multi-entry set with no match is a
+  // fatal `fcall-no-overload`.
+  if (!callee) {
+    auto cands = overload_candidates_of(callee_name);
+    if (!cands.empty()) {
+      std::vector<Actual>      ov_actuals;
+      std::vector<std::string> ov_generics;
+      if (gather_actuals(/*drop_ufcs_receiver=*/false, ov_actuals, ov_generics)) {
+        std::string chosen;
+        if (cands.size() == 1) {
+          chosen = cands.front();  // single → defer to the normal precise-error path
+        } else {
+          for (const auto& fn : cands) {
+            auto c = lookup_callee(fn);
+            if (c && signature_matches(c->io_meta(), ov_actuals, /*is_ctor_call=*/false)) {
+              chosen = fn;
+              break;
+            }
+          }
+          if (chosen.empty()) {
+            fcall_arg_fail(call_span,
+                           "fcall-no-overload",
+                           std::format("no overload of `{}` matches the call", source_callee_name),
+                           std::format("none of the {} gathered lambdas accepts these arguments", cands.size()));
+          }
+        }
+        callee_name = chosen;
+        callee      = lookup_callee(chosen);
+      }
+    }
+  }
+
   if (!callee) {
     lm->restore_cursor(saved);
     return false;  // not a known comb body → typecast / cell-op / marker path
@@ -1675,92 +1713,12 @@ bool uPass_runner::try_inline_func_call() {
   }
   --inline_budget_;
 
-  struct Actual {
-    bool        is_named{false};
-    bool        is_ref_pass{false};  // `f(ref x)` — positional by design, exempt from naming rules
-    std::string key;
-    Lnast_node  node{Lnast_node::create_invalid()};
-    std::string func_name;  // non-empty: this actual is a function value (closure)
-  };
-  // A ref actual whose raw name is itself a registry function is a higher-order
-  // / closure argument: capture the function name so the body's `f(x)` can
-  // resolve to it (see func_param_bindings_).
-  auto func_actual_name = [&]() -> std::string {
-    if (Lnast_ntype::is_ref(lm->get_raw_ntype()) && lookup_callee(lm->current_raw_text()) != nullptr) {
-      return std::string(lm->current_raw_text());
-    }
-    return {};
-  };
-
   std::vector<Actual>      actuals;
   std::vector<std::string> explicit_generics;  // `f<int,string>(…)` type-arg refs, in order
-  bool                     shape_ok = true;
-  while (lm->move_to_sibling()) {
-    const auto t = lm->get_raw_ntype();
-    if (Lnast_ntype::is_ref(t) || Lnast_ntype::is_const(t)) {
-      actuals.push_back(Actual{.is_named = false, .key = {}, .node = lm->current_node(), .func_name = func_actual_name()});
-    } else if (Lnast_ntype::is_store(t)) {
-      Actual a;
-      a.is_named      = true;
-      const auto here = lm->save_cursor();
-      if (!lm->move_to_child()) {
-        shape_ok = false;
-        lm->restore_cursor(here);
-        break;
-      }
-      a.key = std::string(lm->current_raw_text());  // param name — not renamed
-      // `f(ref x)` lowers to `assign(__ref_arg, x)` — a POSITIONAL pass-by-ref
-      // actual, not a named one. Strip the marker so it binds by position and
-      // the `ref` param's write-back fires (see the io.is_ref check below).
-      if (a.key == "__ref_arg") {
-        a.is_named    = false;
-        a.is_ref_pass = true;
-        a.key.clear();
-      }
-      // The UFCS receiver marker is positional too; the receiver
-      // binds to `self` via the has_self branch below (the no-self UFCS error
-      // already fired right after callee resolution). A namespace
-      // access (`b.add1(...)` through an import tuple) drops the receiver
-      // entirely: it names the namespace, it is not an argument.
-      if (a.key == call_ufcs_arg_marker) {
-        if (drop_ufcs_receiver) {
-          lm->restore_cursor(here);
-          continue;
-        }
-        a.is_named = false;
-        a.key.clear();
-      }
-      // Explicit generic binding — consumed here, never an actual. The value
-      // ref is frame-renamed text (its `'type'` declare tmp rides the same
-      // frame), so current_text(), not raw.
-      if (a.key == call_generic_arg_marker) {
-        if (!lm->move_to_sibling()) {
-          shape_ok = false;
-          lm->restore_cursor(here);
-          break;
-        }
-        explicit_generics.emplace_back(lm->current_text());
-        lm->restore_cursor(here);
-        continue;
-      }
-      if (!lm->move_to_sibling()) {
-        shape_ok = false;
-        lm->restore_cursor(here);
-        break;
-      }
-      a.func_name = func_actual_name();
-      a.node      = lm->current_node();
-      lm->restore_cursor(here);
-      actuals.push_back(std::move(a));
-    } else {
-      shape_ok = false;
-      break;
-    }
-  }
-  lm->restore_cursor(saved);  // back on the func_call node
-  if (!shape_ok) {
+  if (!gather_actuals(drop_ufcs_receiver, actuals, explicit_generics)) {
     return false;
   }
+  lm->restore_cursor(saved);  // back on the func_call node (gather left it on the callee ref)
 
   const auto& io = callee->io_meta();
   // io.empty() is allowed: a void comb (`comb top() { … }`) has no signature
@@ -1809,8 +1767,12 @@ bool uPass_runner::try_inline_func_call() {
   const bool        has_self       = nbind > 0 && io.inputs[0].name == "self";
   const std::size_t n_named_params = nbind - (has_self ? 1 : 0);  // fixed, non-self (var-arg excluded)
   // Classify a positional actual's scalar kind for exception (3). Dlop literals
-  // carry their kind verbatim; a typed `ref` whose declared range is known is an
-  // integer. Anything else is `none` (can't drive type-based disambiguation).
+  // carry their kind verbatim; a `ref` reports its inferred/declared scalar kind
+  // (bool/string/integer), falling back to integer for a range-carrying typed
+  // var. Anything else is `none` (can't drive type-based disambiguation). MUST
+  // stay identical to signature_matches's `classify` — the overload probe and
+  // this real bind have to agree on kind, or a probed-accepted candidate is
+  // committed and then rejected here (see signature_matches CONTRACT).
   auto              actual_kind    = [&](const Lnast_node& node) -> Io_kind {
     if (node.is_const()) {
       const auto t = node.get_name();
@@ -1828,8 +1790,13 @@ bool uPass_runner::try_inline_func_call() {
       }
       return Io_kind::none;
     }
-    if (node.is_ref() && try_decl_type(node.get_name()).has_value()) {
-      return Io_kind::integer;  // typed scalar var (range carrier)
+    if (node.is_ref()) {
+      if (auto k = try_scalar_kind(node.get_name()); k != Io_kind::none) {
+        return k;  // inferred/declared scalar kind (bool/string/integer)
+      }
+      if (try_decl_type(node.get_name()).has_value()) {
+        return Io_kind::integer;  // typed scalar var (range carrier)
+      }
     }
     return Io_kind::none;
   };
@@ -3082,6 +3049,367 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
     actuals.push_back(a);
   }
   emit_specialized_call(dst_name, mangled, actuals);
+  return true;
+}
+
+// ── overload-gathering call dispatch (2f-overload) ────────────────────────────
+
+bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& actuals,
+                                  std::vector<std::string>& explicit_generics) {
+  // Cursor MUST be on the callee ref (the func_call's 2nd child); the actuals
+  // are its following siblings. The cursor is saved/restored here so this can
+  // be called twice (overload probe + real bind) without disturbing the caller.
+  const auto entry = lm->save_cursor();
+
+  // A ref actual whose raw name is itself a registry function is a higher-order
+  // / closure argument: capture the function name so the body's `f(x)` can
+  // resolve to it (see func_param_bindings_).
+  auto func_actual_name = [&]() -> std::string {
+    if (Lnast_ntype::is_ref(lm->get_raw_ntype()) && lookup_callee(lm->current_raw_text()) != nullptr) {
+      return std::string(lm->current_raw_text());
+    }
+    return {};
+  };
+
+  bool shape_ok = true;
+  while (lm->move_to_sibling()) {
+    const auto t = lm->get_raw_ntype();
+    if (Lnast_ntype::is_ref(t) || Lnast_ntype::is_const(t)) {
+      actuals.push_back(Actual{.is_named = false, .key = {}, .node = lm->current_node(), .func_name = func_actual_name()});
+    } else if (Lnast_ntype::is_store(t)) {
+      Actual a;
+      a.is_named      = true;
+      const auto here = lm->save_cursor();
+      if (!lm->move_to_child()) {
+        shape_ok = false;
+        lm->restore_cursor(here);
+        break;
+      }
+      a.key = std::string(lm->current_raw_text());  // param name — not renamed
+      // `f(ref x)` lowers to `assign(__ref_arg, x)` — a POSITIONAL pass-by-ref
+      // actual, not a named one. Strip the marker so it binds by position and
+      // the `ref` param's write-back fires (see the io.is_ref check at bind).
+      if (a.key == "__ref_arg") {
+        a.is_named    = false;
+        a.is_ref_pass = true;
+        a.key.clear();
+      }
+      // The UFCS receiver marker is positional too (binds to `self`). A
+      // namespace access drops the receiver entirely — it names the namespace.
+      if (a.key == call_ufcs_arg_marker) {
+        if (drop_ufcs_receiver) {
+          lm->restore_cursor(here);
+          continue;
+        }
+        a.is_named = false;
+        a.key.clear();
+      }
+      // Explicit generic binding — consumed here, never an actual. The value
+      // ref is frame-renamed text, so current_text(), not raw.
+      if (a.key == call_generic_arg_marker) {
+        if (!lm->move_to_sibling()) {
+          shape_ok = false;
+          lm->restore_cursor(here);
+          break;
+        }
+        explicit_generics.emplace_back(lm->current_text());
+        lm->restore_cursor(here);
+        continue;
+      }
+      if (!lm->move_to_sibling()) {
+        shape_ok = false;
+        lm->restore_cursor(here);
+        break;
+      }
+      a.func_name = func_actual_name();
+      a.node      = lm->current_node();
+      lm->restore_cursor(here);
+      actuals.push_back(std::move(a));
+    } else {
+      shape_ok = false;
+      break;
+    }
+  }
+  lm->restore_cursor(entry);
+  return shape_ok;
+}
+
+std::vector<std::string> uPass_runner::overload_candidates_of(std::string_view name) {
+  // A gathered set `const add = [f1, f2]` (array `[…]` or tuple `(…)` — same
+  // lowering) constprop-records each positional entry under a numeric slot
+  // "0","1",… in one of two shapes, depending on whether process_tuple_add
+  // could qualify the lambda name in its current module:
+  //   (a) string field — `<module>.f` stored as a string Dlop (try_bundle_fields),
+  //       used when the gather sits in the same module the lambda registered in;
+  //   (b) ref slot — the raw lambda name in the tuple_slot_ref map
+  //       (try_tuple_shape + try_tuple_slot_ref), used when the gather is inside a
+  //       function body lowered standalone (the qualified name then misses the
+  //       registry, so the entry rode the runtime-slot path instead).
+  // Collect candidates in tuple order, resolving each via lookup_callee. Strict:
+  // EVERY slot must be positional and resolve to a registry lambda, otherwise
+  // this is a plain data tuple / mixed bundle, not an overload set (return empty
+  // so the caller falls through to the normal non-callee path).
+  std::vector<std::string> out;
+  if (name.empty()) {
+    return out;
+  }
+  auto unquote = [](std::string s) {
+    if (s.size() >= 2 && s.front() == '\'' && s.back() == '\'') {
+      return s.substr(1, s.size() - 2);
+    }
+    return s;
+  };
+  // Shape (a): string fields keyed by slot.
+  std::map<std::string, std::string> str_field;
+  if (auto bf = try_bundle_fields(name)) {
+    for (const auto& [key, val] : *bf) {
+      if (val.is_string()) {
+        str_field[key] = val.to_pyrope();
+      }
+    }
+  }
+  // Slot list: the tuple shape is authoritative (it carries positional-ness and
+  // every slot, value-typed or runtime-ref). Fall back to the string-field keys
+  // when no shape was recorded (a pure comptime string bundle).
+  std::vector<std::pair<std::string, bool>> slots;
+  if (auto shp = try_tuple_shape(name)) {
+    slots = *shp;
+  } else {
+    for (const auto& [key, _] : str_field) {
+      slots.emplace_back(key, true);
+    }
+  }
+  if (slots.empty()) {
+    return out;
+  }
+  std::map<int, std::string> ordered;
+  for (const auto& [slot, is_pos] : slots) {
+    if (!is_pos || slot.empty() || slot.find_first_not_of("0123456789") != std::string::npos) {
+      return {};  // a named field → not a clean positional lambda set
+    }
+    std::string fn;
+    if (auto it = str_field.find(slot); it != str_field.end()) {
+      fn = unquote(it->second);  // shape (a)
+    } else if (auto r = try_tuple_slot_ref(name, slot)) {
+      fn = *r;  // shape (b): raw lambda name
+    } else {
+      return {};  // slot is neither a fn-string nor a ref → not a lambda set
+    }
+    if (fn.starts_with("ln:")) {
+      fn = fn.substr(3);
+    }
+    if (!lookup_callee(fn)) {
+      return {};  // not a registry lambda
+    }
+    ordered[std::stoi(slot)] = std::move(fn);
+  }
+  if (ordered.empty()) {
+    return {};
+  }
+  for (auto& [i, fn] : ordered) {
+    out.push_back(std::move(fn));
+  }
+  return out;
+}
+
+bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool is_ctor_call) {
+  // CONTRACT: an overloaded and a non-overloaded call decide "can this lambda be
+  // called with these actuals?" by the SAME rules — a gathered overload only
+  // adds "try the candidates first-to-last, take the first that can be called,
+  // else a compile error". So this is a faithful, NON-FATAL mirror of
+  // try_inline_func_call's actual→param bind loop (06-functions.md §"Argument
+  // naming": positional binds only by exception 1/2/3, named binds by name) plus
+  // the missing-arg check and a per-arg scalar kind/range fit (the typed-param
+  // check the runner otherwise defers downstream — re-derived here so dispatch
+  // can tell candidates apart on type, not just arity). Returns true iff this
+  // candidate would accept the call. Conservative on the few shapes it does not
+  // model (bundle-leaf expansion of a named actual; typed-self `does`; ref-const)
+  // → returns false / leaves them to the chosen candidate's full bind path, which
+  // stays the authority for diagnostics. A too-strict skip thus surfaces as a
+  // clean no-overload, never a silently-wrong dispatch.
+  const std::size_t nparams    = io.inputs.size();
+  const bool        has_vararg = nparams > 0 && io.inputs[nparams - 1].is_varargs;
+  const std::size_t nbind      = has_vararg ? nparams - 1 : nparams;
+
+  std::vector<Lnast_node> param_val(nparams, Lnast_node::create_invalid());
+  std::vector<bool>       param_set(nparams, false);
+
+  auto param_index = [&](std::string_view k) -> std::size_t {
+    for (std::size_t i = 0; i < nbind; ++i) {
+      if (io.inputs[i].name == k) {
+        return i;
+      }
+    }
+    return nbind;
+  };
+  const bool        has_self       = nbind > 0 && io.inputs[0].name == "self";
+  const std::size_t n_named_params = nbind - (has_self ? 1 : 0);
+
+  // Comptime scalar kind of an actual (mirrors the inliner's actual_kind, with
+  // bool/string detection for typed refs added for the kind pre-filter).
+  auto classify = [&](const Lnast_node& node) -> Io_kind {
+    if (node.is_const()) {
+      const auto t = node.get_name();
+      if (t == "true" || t == "false") {
+        return Io_kind::boolean;
+      }
+      if (!t.empty() && (t.front() == '\'' || t.front() == '"')) {
+        return Io_kind::string;
+      }
+      if (t == "nil") {
+        return Io_kind::none;
+      }
+      if (auto v = Dlop::from_pyrope(t); v && v->is_integer()) {
+        return Io_kind::integer;
+      }
+      return Io_kind::none;
+    }
+    if (node.is_ref()) {
+      if (auto k = try_scalar_kind(node.get_name()); k != Io_kind::none) {
+        return k;
+      }
+      if (try_decl_type(node.get_name()).has_value()) {
+        return Io_kind::integer;
+      }
+    }
+    return Io_kind::none;
+  };
+
+  for (const auto& a : actuals) {
+    if (a.is_named) {
+      if (a.key == "self") {
+        return false;  // self is never named
+      }
+      const auto idx = param_index(a.key);
+      if (idx >= nbind) {
+        if (has_vararg) {
+          continue;  // named leftover → var-arg tuple
+        }
+        return false;  // unknown argument (bundle-leaf expansion not modeled here)
+      }
+      if (param_set[idx]) {
+        return false;  // duplicate
+      }
+      param_val[idx] = a.node;
+      param_set[idx] = true;
+    } else {
+      const auto next_unset = [&](std::size_t from) -> std::size_t {
+        for (std::size_t i = from; i < nbind; ++i) {
+          if (!param_set[i]) {
+            return i;
+          }
+        }
+        return nbind;
+      };
+      auto bind = [&](std::size_t i) {
+        param_val[i] = a.node;
+        param_set[i] = true;
+      };
+      if (a.is_ref_pass) {
+        const auto slot = next_unset(0);
+        if (slot >= nbind) {
+          if (has_vararg) {
+            continue;
+          }
+          return false;  // too many positional
+        }
+        bind(slot);
+        continue;
+      }
+      if (has_self && !param_set[0]) {
+        bind(0);  // self ← UFCS receiver
+        continue;
+      }
+      if (has_vararg) {
+        const auto slot = next_unset(has_self ? 1 : 0);
+        if (slot < nbind) {
+          bind(slot);
+        }
+        continue;  // fixed params filled; leftover → var-arg tuple
+      }
+      // Overloaded and non-overloaded calls share the SAME callability rules
+      // (06-functions.md §"Argument naming"); a gathered overload only differs
+      // in trying candidates first-to-last. So the positional-binding
+      // disambiguation below mirrors the real bind path exactly: ctor-style
+      // order binding is reserved for is_ctor_call (never reached here — the
+      // probe is invoked with is_ctor_call=false), and otherwise a positional
+      // actual binds only under exceptions 2/1/3.
+      if (is_ctor_call) {
+        const auto slot = next_unset(has_self ? 1 : 0);
+        if (slot >= nparams) {
+          return false;
+        }
+        bind(slot);
+        continue;
+      }
+      if (a.node.is_ref()) {  // exception 2: bare var name matches a param
+        const auto nidx = param_index(a.node.get_name());
+        if (nidx < nparams && nidx >= (has_self ? 1u : 0u) && !param_set[nidx]) {
+          bind(nidx);
+          continue;
+        }
+      }
+      if (n_named_params == 1) {  // exception 1: single non-self param
+        const auto slot = next_unset(has_self ? 1 : 0);
+        if (slot < nparams) {
+          bind(slot);
+          continue;
+        }
+      }
+      if (const auto k = classify(a.node); k != Io_kind::none) {  // exception 3: unique kind
+        std::size_t match = nparams;
+        std::size_t count = 0;
+        for (std::size_t i = (has_self ? 1u : 0u); i < nparams; ++i) {
+          if (!param_set[i] && io.inputs[i].kind == k) {
+            match = i;
+            ++count;
+          }
+        }
+        if (count == 1) {
+          bind(match);
+          continue;
+        }
+      }
+      return false;  // ambiguous / unbindable positional — must be named (same rule)
+    }
+  }
+
+  // Every non-self FIXED parameter must be bound (io_meta carries no defaults).
+  for (std::size_t i = (has_self ? 1 : 0); i < nbind; ++i) {
+    if (!param_set[i]) {
+      return false;  // missing required argument
+    }
+  }
+
+  // Per-arg scalar kind/range fit — the typed-param check the runner otherwise
+  // defers to downstream typecheck/bitwidth. Re-derived here so dispatch can
+  // distinguish e.g. `f(a:bool)` from `f(a:u8)`, or `f(a:u8)` from `f(a:u16)`.
+  // Skips self, the var-arg slot, and unset params; an untyped param or a
+  // not-comptime-classifiable actual is permissive (the full path / downstream
+  // remains authoritative). A typed-self structural `does` is NOT checked here
+  // (method overloads fall through to check_self_does on the chosen candidate).
+  for (std::size_t i = 0; i < nparams; ++i) {
+    if ((has_vararg && i == nbind) || (has_self && i == 0) || !param_set[i]) {
+      continue;
+    }
+    const auto& pe = io.inputs[i];
+    const auto  ak = classify(param_val[i]);
+    if (pe.kind != Io_kind::none && ak != Io_kind::none && pe.kind != ak) {
+      return false;  // kind mismatch (bool vs int vs string)
+    }
+    if (pe.kind == Io_kind::integer && pe.bits > 0 && pe.bits < 62 && param_val[i].is_const()) {
+      if (auto v = Dlop::from_pyrope(param_val[i].get_name());
+          v && v->is_integer() && !v->has_unknowns() && v->get_bits() <= 62) {
+        const int64_t val = v->to_just_i64();
+        const int64_t lo  = pe.is_signed ? -(int64_t{1} << (pe.bits - 1)) : int64_t{0};
+        const int64_t hi  = pe.is_signed ? (int64_t{1} << (pe.bits - 1)) - 1 : (int64_t{1} << pe.bits) - 1;
+        if (val < lo || val > hi) {
+          return false;  // literal does not fit this overload's declared width
+        }
+      }
+    }
+  }
+
   return true;
 }
 

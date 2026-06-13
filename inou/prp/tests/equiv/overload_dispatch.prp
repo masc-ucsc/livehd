@@ -1,0 +1,19 @@
+/*
+:name: overload_dispatch
+:type: equiv
+:verilog_top: overload_dispatch.ovdispatch
+:pyrope_top: overload_dispatch.ovdispatch
+*/
+
+// 2f-overload — overload dispatch is resolved at compile time, so the gathered
+// call lowers to the selected lambda's body inlined into the module. Here the
+// 2-arg call picks add2 (x+y) and the 3-arg call picks add3 (x+y+z).
+
+comb add2(a:u8, b:u8)        -> (r:u9)  { r = a + b }
+comb add3(a:u8, b:u8, c:u8)  -> (r:u10) { r = a + b + c }
+
+comb ovdispatch(x:u8, y:u8, z:u8) -> (s2:u9, s3:u10) {
+  const add = [add2, add3]
+  s2 = add(a=x, b=y)        // 2 args → add2
+  s3 = add(a=x, b=y, c=z)   // 3 args → add3
+}
