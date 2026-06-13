@@ -17,6 +17,7 @@
 #include "lnast_ntype.hpp"
 #include "str_tools.hpp"
 #include "upass_verifier.hpp"
+#include "wrap_sat.hpp"  // uN()/sN() constructor-cast wrap math (//upass/bitwidth)
 
 // Registered once here (not in the header) to avoid duplicate-registration
 // errors when multiple TUs include upass_constprop.hpp.
@@ -3006,18 +3007,40 @@ void uPass_constprop::process_func_call() {
       }
       result = v;
     } else {
-      // sized: fold only when the value fits. Signed/unsigned range check is
-      // deferred; the current test set just stores small positives.
+      // sized constructor `uN(v)` / `sN(v)`: a CONVERTING cast — wrap (drop
+      // bits) into the target envelope, same math as the `wrap` assignment
+      // prefix (07-typesystem: `val = u8(0x1F0)` ≡ `wrap val = 0x1F0`).
       if (v.is_string()) {
         v = Dlop::nil();
+      } else if (sized_sig) {
+        v = upass::bitwidth::wrap_to_signed(v, static_cast<uint32_t>(sized_bits));
+      } else {
+        v = upass::bitwidth::wrap_to_unsigned(v, static_cast<uint32_t>(sized_bits));
       }
-      (void)sized_sig;
-      (void)sized_bits;
       result = v;
     }
   }
 
   store_trivial(dst, result);
+
+  // The sized cast also TYPES its result (`u8(1)` is a u8-typed value, not a
+  // bare literal — the generics inference and `.[max]` reads key on the
+  // declared envelope). Stamp the dst entry's declared range.
+  if (kind == Cast::to_sized && sized_bits > 0 && !result.is_string() && !result.is_nil()) {
+    if (auto b = st().get_bundle_for_write(dst); b && (b->is_empty() || b->has_trivial("0"))) {
+      Bundle::Entry e = b->get_entry("0");
+      e.immutable     = false;
+      e.kind          = upass::Kind::integer;
+      if (sized_sig) {
+        e.decl_max = *Dlop::get_mask_value(static_cast<uint32_t>(sized_bits) - 1);
+        e.decl_min = *Dlop::get_neg_mask_value(static_cast<uint32_t>(sized_bits) - 1);
+      } else {
+        e.decl_max = *Dlop::get_mask_value(static_cast<uint32_t>(sized_bits));
+        e.decl_min = *Dlop::create_integer(0);
+      }
+      b->set("0", std::move(e));
+    }
+  }
 }
 
 void uPass_constprop::process_range() {
@@ -3210,10 +3233,13 @@ void uPass_constprop::process_tuple_get() {
   move_to_parent();
 
   // Bundle-access check: the (comptime-known) top-level key must be a valid
-  // index/field of `src`'s bundle. Only the first segment is checked here;
-  // nested-level checks are a later phase.
+  // index/field of `src`'s bundle; an all-index nested path (`b[2][10]`)
+  // must also resolve through every inner dimension.
   if (first_captured) {
     check_tuple_access(src, first_seg, first_is_index);
+    if (key.size() > src.size() + 1) {
+      check_nested_tuple_access(src, key.substr(src.size() + 1));  // the field path, sans "src."
+    }
     field_reads_.insert(key);  // Feeds the unused-unset warning
   }
 
@@ -3365,6 +3391,88 @@ void uPass_constprop::check_tuple_access(const std::string& base, const std::str
         .hint     = std::format("valid index range is [0, {}]", n_unnamed - 1),
     });
   }
+}
+
+void uPass_constprop::check_nested_tuple_access(const std::string& base, const std::string& key) {
+  // Inner-dimension bounds for ALL-INDEX paths (`b[2][10]` on b:[4][8]u8 —
+  // dim 0 is covered by check_tuple_access). A path with any NAMED segment
+  // stays a legal nil-probe, and a single segment was already checked.
+  if (key.find('.') == std::string::npos) {
+    return;
+  }
+  for (const char c : key) {
+    if (c != '.' && (c < '0' || c > '9')) {
+      return;
+    }
+  }
+  const auto b = st().get_bundle(base);
+  if (!b || b->is_empty() || b->is_scalar()) {
+    return;
+  }
+  // Segment-wise resolution: each prefix must be a leaf slot or an interior
+  // level (some leaf extends it). A leaf reached early admits only a
+  // trailing chain of [0]s (`x[0]` on a scalar is the scalar — sugar).
+  std::vector<std::string_view> segs;
+  {
+    std::string_view rest(key);
+    for (size_t pos = 0; pos <= rest.size();) {
+      const size_t dot = rest.find('.', pos);
+      segs.emplace_back(rest.substr(pos, dot == std::string_view::npos ? std::string_view::npos : dot - pos));
+      if (dot == std::string_view::npos) {
+        break;
+      }
+      pos = dot + 1;
+    }
+  }
+  const auto is_interior = [&](std::string_view p) {
+    for (const auto& [k, e] : b->non_attr_entries()) {
+      if (k.size() > p.size() + 1 && std::string_view(k).compare(0, p.size(), p) == 0 && k[p.size()] == '.') {
+        return true;
+      }
+    }
+    return false;
+  };
+  std::string cur;
+  for (size_t i = 0; i < segs.size(); ++i) {
+    if (!cur.empty()) {
+      cur += '.';
+    }
+    cur += segs[i];
+    if (b->has_trivial(cur)) {
+      // A leaf: any remaining segments must be the [0]-on-scalar sugar.
+      for (size_t j = i + 1; j < segs.size(); ++j) {
+        if (segs[j] != "0") {
+          goto out_of_bounds;
+        }
+      }
+      return;
+    }
+    if (is_interior(cur)) {
+      continue;
+    }
+    if (i == 0) {
+      return;  // dim-0 doesn't resolve — check_tuple_access owns that diagnostic
+    }
+    goto out_of_bounds;
+  }
+  return;  // full path is an interior level — the read extracts a sub-array
+out_of_bounds:
+  std::string bracket_path;
+  for (const char c : key) {
+    if (c == '.') {
+      bracket_path += "][";
+    } else {
+      bracket_path += c;
+    }
+  }
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{
+      .severity = livehd::diag::Severity::error,
+      .code     = "index-out-of-bounds",
+      .category = "type",
+      .pass     = "upass.constprop",
+      .message  = std::format("out of bounds access: `{}[{}]` does not exist", base, bracket_path),
+      .hint     = "every index must be inside its dimension's declared size",
+  });
 }
 
 void uPass_constprop::process_tuple_set() {

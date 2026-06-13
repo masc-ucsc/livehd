@@ -419,9 +419,10 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     // ware/rtl carries a fixed wrapper family; anything beyond it (e.g. a
     // big reset-restored reg array minting one restore port per entry) needs
     // a new cgen_memory_<R>rd_<W>wr.v variant.
-    const bool have_wrapper = single_clock
-                                  ? ((eff_rd >= 1 && eff_rd <= 4 && eff_wr >= 1 && eff_wr <= 2) || (eff_rd == 1 && eff_wr == 3))
-                                  : (eff_rd == 1 && eff_wr == 1);
+    const bool have_wrapper
+        = single_clock
+              ? ((eff_rd >= 1 && eff_rd <= 4 && eff_wr >= 1 && eff_wr <= 2) || (eff_rd == 1 && (eff_wr == 3 || eff_wr == 4)))
+              : (eff_rd == 1 && eff_wr == 1);
     if (!have_wrapper) {
       livehd::diag::err("inou.cgen", "mem-wrapper-missing", "unsupported")
           .msg("memory {} needs a {}rd_{}wr {} wrapper that ware/rtl does not carry",

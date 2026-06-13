@@ -1,0 +1,12 @@
+/*
+:name: generic_overflow
+:type: error
+:error: does not fit its declared range
+*/
+
+// 2f-generics — the binding is a macro expansion: `triadd<u8>` types every
+// `:T` param as u8, so an actual outside the envelope is the normal
+// bitwidth-overflow (no special coercion).
+
+comb triadd<T>(a:T, b:T, c:T) -> (r) { r = a + b + c }
+cassert(triadd<u8>(a=300, b=2, c=3) == 305)

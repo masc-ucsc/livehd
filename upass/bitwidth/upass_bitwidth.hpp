@@ -120,6 +120,11 @@ private:
   // does-not-fit diagnostic AT the current node.
   void check_declared_fit(std::string_view name, const Lnast_range& r);
 
+  // Check an element store against a declared array's ELEMENT envelope
+  // (the root bundle's internal __elem_max/__elem_min attrs, baked by the
+  // runner's declare pre-step). No-op for non-array bindings.
+  void check_array_elem_fit(std::string_view name, const Lnast_range& r);
+
   // Emit the common diagnostic at the current node's span.
   void record_overflow(std::string_view name, const Lnast_range& value, const Lnast_range& env);
 

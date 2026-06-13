@@ -72,8 +72,12 @@ declaration **and** the call: `comb inc(ref a) -> () { a += 1 }` … `inc(ref y)
 
 **Overloading/generics** — overload by gathering: `const add = [add1, add2]`
 (TBD: dispatch not lowered yet; only `init` overload sets resolve).
-Generics: `comb f<T>(a:T, b:T) -> (r)` (TBD: `<T>` body specialization
-pending; untyped params work). Comptime parameters live in the `[...]`
+Generics: `comb f<T>(a:T, b:T) -> (r)` — a per-call-site type-macro
+expansion. Bind explicitly (`f<u8>(a=1, b=2)`, one type per generic, in
+order) or let T infer (unify) from the actuals' declared types; bare
+literals leave T as the unbounded kind (`f(a=1, b=2)` → T = int). A
+generic `mod`/`pipe` mints one module per binding (`madd__u8_u8`).
+Comptime parameters live in the `[...]`
 slot: `comb g[n:int=1](x) -> (r)`, called as `g[3](x=2)`. Varargs `(...args)`
 gather leftovers (`args[i]` / `args.NAME`). There is **no placeholder lambda
 sugar** — no `_`/`_0`/`_1` shorthands; pass a named comb (`mymap.each(inc)`).
@@ -372,10 +376,9 @@ the authoritative list). Do not generate these unless explicitly asked:
   `spawn`/`join`/`cancel` (plain `test`/`step` works)
 * Overload-gathering call dispatch (`const add = [f1, f2]; add(x)`) — only
   `init` overload sets resolve; prefer distinct names
-* Generic `<T>` body specialization (untyped-parameter templates DO work)
-* `import("prp")` stdlib; multi-dim memories and memory `init` contents;
-  `macro=`/`lg` attributes; `.[bw_max]`/`.[bw_min]` reads; `covercase`,
-  in-language `lec()`
+* `import("prp")` stdlib; `comptime`-computed / inferred-type memory init
+  (`reg mem2 = reset_value` — literal/scalar init contents DO work);
+  `macro=`/`lg` attributes; `covercase`, in-language `lec()`
 
 Runtime `wrap`/`sat` and enum-typed register resets ARE implemented.
 Imports: `import("file")` (all pub) or `import("file.pub_name")` (one

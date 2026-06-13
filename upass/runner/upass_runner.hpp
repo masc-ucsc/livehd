@@ -350,12 +350,35 @@ protected:
     bool                is_named  = false;
     std::string         field     = {};
   };
+
+  // ── generic `<T,…>` per-call-site binding (2f-generics) ──────────────────
+  // One resolved binding per generic name: pure type-macro expansion — the
+  // bound type substitutes into `a:T` params, `-> (r:T)` outputs and body
+  // `:T` slots; normal typing rules apply afterwards (no special coercion).
+  struct Generic_bind {
+    Io_kind             kind = Io_kind::none;  // integer/boolean/string; none = named type
+    std::optional<Dlop> max  = {};             // integer envelope when known
+    std::optional<Dlop> min  = {};
+    std::string         type_name = {};  // named type (kind == none)
+    std::string         from      = {};  // binding source, for the mismatch diagnostic
+  };
+  // Explicit `<…>` bindings (declaration order) win; otherwise each generic
+  // is inferred from the DECLARED types of the actuals at its `:T` positions
+  // (literals contribute their kind only). Conflicts and `<…>` arity
+  // mismatches are fatal call-site errors. A generic that nothing types
+  // stays absent from the map (the `triadd(a=1,b=2,c=3)` → T = int case).
+  absl::flat_hash_map<std::string, Generic_bind> resolve_generic_binds(
+      const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io, const std::vector<Lnast_node>& param_val,
+      const std::vector<bool>& param_set, std::size_t nbind, const std::vector<std::string>& explicit_generics,
+      const std::string& callee_name, const livehd::diag::Span& call_span);
+
   bool maybe_specialize_template_call(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,
                                       const std::vector<Lnast_node>& param_val, const std::vector<bool>& param_set,
                                       std::size_t nbind, bool has_vararg, const std::vector<Lnast_node>& vararg_pos,
                                       const std::vector<std::pair<std::string, Lnast_node>>& vararg_named,
                                       const std::string& dst_name, const std::string& callee_name,
-                                      const livehd::diag::Span& call_span);
+                                      const livehd::diag::Span& call_span,
+                                      const absl::flat_hash_map<std::string, Generic_bind>& gbinds);
   // Deep-copy `tmpl` verbatim into a fresh (TreeIO-backed) Lnast named
   // `mangled`, then inject a concrete prim_type_int / named-type child into
   // each untyped fixed input port per `inject`. Clears the template flag and
@@ -363,11 +386,17 @@ protected:
   // non-empty the template has a `...vname` var-arg boundary: its io port is
   // replaced by the `vports` concrete ports and the body is prefixed with a
   // `vname = (port…)` reconstruction so the existing tuple/for machinery lowers.
+  // `out_inject` mirrors `inject` for the OUTPUT ports (`-> (r:T)` with T
+  // bound); `type_subst` rewrites body `ref <generic>` type slots to the
+  // bound concrete type during the copy (declare/type_spec `:T` uses — SSA
+  // strips io type refs, so only body slots need it).
   std::shared_ptr<Lnast> clone_template_specialized(const std::shared_ptr<Lnast>& tmpl, const std::string& mangled,
                                                     const std::vector<Spec_port>& inject, const std::vector<Spec_port>& vports,
-                                                    const std::string& vname);
+                                                    const std::string& vname, const std::vector<Spec_port>& out_inject,
+                                                    const absl::flat_hash_map<std::string, Generic_bind>& type_subst);
   void copy_subtree_into(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
-                         const Lnast_nid& dst_parent);
+                         const Lnast_nid& dst_parent,
+                         const absl::flat_hash_map<std::string, Generic_bind>* type_subst = nullptr);
   void emit_specialized_call(const std::string& dst, const std::string& mangled, const std::vector<Lnast_node>& actuals);
   // Specialized-module names this runner already minted this run (avoid
   // re-cloning the same signature within one tree; cross-tree dedup is by name

@@ -28,6 +28,12 @@ static constexpr std::string_view call_ref_arg_marker  = "__ref_arg";
 // so the runner can reject UFCS onto a self-less callee (the direct call form
 // `method(obj, ...)` lowers without it). Positional, like __ref_arg.
 static constexpr std::string_view call_ufcs_arg_marker = "__ufcs_arg";
+// Marks an explicit call-site generic binding (`f<int,string>(…)`): one
+// `store(__generic_arg, type_ref)` per type argument, in declaration order,
+// emitted BEFORE the normal actuals. The type_ref is either a named-type ref
+// or a `declare(tmp, prim_type, 'type')` tmp the runner resolves through the
+// same decl-facts ladder as a declared variable.
+static constexpr std::string_view call_generic_arg_marker = "__generic_arg";
 
 namespace {
 std::string slurp_file(std::string_view filename) {
@@ -1170,6 +1176,8 @@ void Prp2lnast::process_statement(TSNode n) {
           // an interpolated string), lowered the same way as the condition.
           uint32_t   nnc       = ts_node_named_child_count(arg_tuple);
           TSNode     cond_node = nnc >= 1 ? ts_node_named_child(arg_tuple, 0) : TSNode{};
+          const bool saved_in_assert = in_assert_lowering_;
+          in_assert_lowering_        = true;  // `.[bw_max]`/`.[bw_min]` legal here
           Lnast_node cond_ref  = ts_node_is_null(cond_node) ? Lnast_node::create_const("true") : expr_to_node(cond_node);
           // Lower the message (if any) BEFORE creating the cassert node so the
           // helper statements an interpolated string emits land ahead of the
@@ -1179,6 +1187,7 @@ void Prp2lnast::process_statement(TSNode n) {
           if (have_msg) {
             msg_ref = expr_to_node(ts_node_named_child(arg_tuple, 1));
           }
+          in_assert_lowering_ = saved_in_assert;
           auto idx = builder.add_child(Lnast_ntype::create_cassert());
           attach_loc(idx, n);  // source span → verifier can point at this assertion
           lnast->add_child(idx, cond_ref);
@@ -2133,8 +2142,11 @@ void Prp2lnast::process_assert_statement(TSNode n) {
     lnast->add_child(idx, constant_text_to_node(txt));
     return;
   }
-  Lnast_node cond_ref = expr_to_node(cond);
-  auto       idx      = builder.add_child(Lnast_ntype::create_cassert());
+  const bool saved_in_assert = in_assert_lowering_;
+  in_assert_lowering_        = true;  // `.[bw_max]`/`.[bw_min]` legal here
+  Lnast_node cond_ref        = expr_to_node(cond);
+  in_assert_lowering_        = saved_in_assert;
+  auto idx = builder.add_child(Lnast_ntype::create_cassert());
   attach_loc(idx, n);
   lnast->add_child(idx, cond_ref);
 }
@@ -2529,6 +2541,44 @@ std::vector<Prp2lnast::Call_arg> Prp2lnast::collect_call_args(TSNode arg_tuple) 
   return call_args;
 }
 
+std::vector<Lnast_node> Prp2lnast::collect_generic_args(TSNode call_node) {
+  // Explicit call-site generic bindings (`f<int,string>(…)`, grammar field
+  // `generic` → generic_type_list). Lower each type argument BEFORE the
+  // fcall node is created: a primitive/constrained type becomes a
+  // `declare(tmp, prim_type_*, 'type')` statement (the int-type-call shape —
+  // see does_operand_to_node) whose ref rides the marker; a named type
+  // passes its ref through directly.
+  std::vector<Lnast_node> out;
+  TSNode                  gen = child_by_field(call_node, "generic");
+  if (ts_node_is_null(gen)) {
+    return out;
+  }
+  uint32_t nn = ts_node_named_child_count(gen);
+  for (uint32_t i = 0; i < nn; i++) {
+    TSNode           ty = ts_node_named_child(gen, i);
+    std::string_view tt(ts_node_type(ty));
+    if (tt == "expression_type" || tt == "dot_expression_type") {
+      out.emplace_back(Lnast_node::create_ref(trim(get_text(ty))));
+      continue;
+    }
+    auto didx = builder.add_child(Lnast_ntype::create_declare());
+    auto tref = builder.mint_tmp_ref();
+    lnast->add_child(didx, tref);
+    emit_type_expr(didx, ty);
+    lnast->add_child(didx, Lnast_node::create_const("type"));
+    out.emplace_back(tref);
+  }
+  return out;
+}
+
+void Prp2lnast::add_generic_args_to_fcall(const Lnast_nid& fcall_idx, const std::vector<Lnast_node>& generic_args) {
+  for (const auto& g : generic_args) {
+    auto aidx = lnast->add_child(fcall_idx, Lnast_ntype::create_store());
+    lnast->add_child(aidx, Lnast_node::create_ref(call_generic_arg_marker));
+    lnast->add_child(aidx, g);
+  }
+}
+
 void Prp2lnast::add_call_args_to_fcall(const Lnast_nid& fcall_idx, const std::vector<Call_arg>& call_args) {
   for (const auto& arg : call_args) {
     if (arg.is_ufcs) {
@@ -2559,10 +2609,13 @@ void Prp2lnast::process_function_call_statement(TSNode n) {
     auto name = trim(get_text(func));
     func_ref  = Lnast_node::create_ref(name);
   }
-  auto idx = builder.add_child(Lnast_ntype::create_func_call());
+  auto call_args    = collect_call_args(args);
+  auto generic_args = collect_generic_args(n);
+  auto idx          = builder.add_child(Lnast_ntype::create_func_call());
   lnast->add_child(idx, builder.mint_tmp_ref());
   lnast->add_child(idx, func_ref);
-  add_call_args_to_fcall(idx, collect_call_args(args));
+  add_generic_args_to_fcall(idx, generic_args);
+  add_call_args_to_fcall(idx, call_args);
 }
 
 void Prp2lnast::process_lambda_statement(TSNode n) { process_lambda_statement_named(n, {}); }
@@ -4475,6 +4528,8 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
       // Category A — LNAST/upass attrs
       "max",
       "min",
+      "bw_max",
+      "bw_min",
       "bits",
       "ubits",
       "sbits",
@@ -6308,6 +6363,13 @@ Lnast_node Prp2lnast::attribute_read_to_node(TSNode n) {
       }
       TSNode name_n = ts_node_child(al, j);
       reject_common_mistakes_attr_name(name_n, get_text(name_n), false);
+      if (const auto aname = get_text(name_n); (aname == "bw_max" || aname == "bw_min") && !in_assert_lowering_) {
+        report_error(name_n,
+                     "bw-attr-non-debug",
+                     "type",
+                     std::format("`.[{}]` is debug-only — readable only inside `cassert`/`assert`", aname),
+                     "each elaboration may compute a different legal range; branch on `.[max]`/`.[min]` instead");
+      }
       auto idx = builder.add_child(Lnast_ntype::create_attr_get());
       auto ref = builder.mint_tmp_ref();
       lnast->add_child(idx, ref);
@@ -6384,7 +6446,8 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
     return ref;
   }
 
-  auto call_args = collect_call_args(arg);
+  auto call_args    = collect_call_args(arg);
+  auto generic_args = collect_generic_args(n);
   if (has_receiver) {
     Call_arg receiver_arg;
     receiver_arg.value   = receiver_ref;
@@ -6396,6 +6459,7 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   auto ref = builder.mint_tmp_ref();
   lnast->add_child(idx, ref);
   lnast->add_child(idx, func_ref);
+  add_generic_args_to_fcall(idx, generic_args);
   add_call_args_to_fcall(idx, call_args);
   attach_loc(idx, n);  // call-site span → upass argument-naming diagnostics point here
   return ref;

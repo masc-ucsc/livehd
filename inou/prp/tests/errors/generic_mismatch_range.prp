@@ -1,0 +1,11 @@
+/*
+:name: generic_mismatch_range
+:type: error
+:error: does not unify
+*/
+
+// 2f-generics — two declared integer types only unify when their envelopes
+// agree: u8 and u16 are different bindings for one `X`.
+
+comb f<X>(a:X, b:X) -> (r) { r = a + b }
+cassert(f(a=u8(1), b=u16(2)) == 3)

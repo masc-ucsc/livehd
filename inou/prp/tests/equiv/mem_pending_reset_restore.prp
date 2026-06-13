@@ -5,8 +5,8 @@
 :pyrope_top: mem_pending_reset_restore.restore
 */
 
-// The z@[1] is correct as there is no direct path between input a/i/we and output z that does not pass over 1 flop
-mod restore(reset:bool, a:u4, i:u1, we:bool) -> (z:u4@[1]) {
+// The async memory read lands @[0]: committed state, like a scalar reg read.
+mod restore(reset:bool, a:u4, i:u1, we:bool) -> (z:u4@[0]) {
   reg t:[2]u4 = (4, 9)
   z = t[i]
   if we {

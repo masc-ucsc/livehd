@@ -334,9 +334,11 @@ public:
   // ── timecheck suppression (todo/ 1s subtask E; stamped by inou.slang) ─────
   bool get_skip_timecheck() const noexcept { return skip_timecheck_; }
   void set_skip_timecheck(bool t) noexcept { skip_timecheck_ = t; }
-  // Generic type-parameter names (`<T, U>`), seam for the follow-up goal.
+  // Generic type-parameter names (`<T, U>`), bound per call site (comb
+  // splice re-types `a:T` params; mod/pipe specialization injects them).
   void set_generics(std::vector<std::string> g) { generics_ = std::move(g); }
   bool has_generics() const noexcept { return !generics_.empty(); }
+  const std::vector<std::string>& get_generics() const noexcept { return generics_; }
 
   // ── pub export list (recorded by prp2lnast on file-level trees) ─
   const std::vector<Lnast_pub_entry>& get_pub_list() const noexcept { return pub_list_; }

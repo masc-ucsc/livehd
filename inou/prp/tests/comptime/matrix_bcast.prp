@@ -1,0 +1,14 @@
+/*
+:name: matrix_bcast
+:type: parsing lnast comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// 2f-mem_multidim — the task's comptime example: a scalar initializer
+// broadcasts to every entry of a multi-dimensional array, and an element
+// write touches only its slot.
+mut b:[4][8]u8 = 13
+cassert(b[2][7] == 13)
+b[1][3] = 7
+cassert(b[1][3] == 7 and b[2][7] == 13)

@@ -1,0 +1,12 @@
+/*
+:name: generic_arity
+:type: error
+:error: declares 2 generic parameter\(s\) but the call binds 1
+:help: one type per generic name
+*/
+
+// 2f-generics — an explicit `<…>` binding list is all-or-nothing: one type
+// per generic name, in declaration order.
+
+comb two<T1,T2>(a:T1, b:T2) -> (c:T1) { c = a }
+cassert(two<int>(a=7, b="x") == 7)

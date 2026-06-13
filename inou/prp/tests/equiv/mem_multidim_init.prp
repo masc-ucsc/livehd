@@ -1,0 +1,14 @@
+/*
+:name: mem_multidim_init
+:type: equiv
+:verilog_top: mem_multidim_init.mdi
+:pyrope_top: mem_multidim_init.mdi
+*/
+
+// 2f-mem_multidim — nested tuple init contents flatten row-major:
+// ((1,2),(3,4)) → entries 1,2,3,4 at flat addresses 0..3; `reset` restores
+// them per entry.
+mod mdi(reset:bool, i:u1, j:u1) -> (z:u4@[0]) {
+  reg t:[2][2]u4 = ((1, 2), (3, 4))
+  z = t[i][j]
+}

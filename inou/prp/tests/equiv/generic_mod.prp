@@ -1,0 +1,19 @@
+/*
+:name: generic_mod
+:type: equiv
+:verilog_top: generic_mod.top
+:pyrope_top: generic_mod.top
+*/
+
+// 2f-generics — a generic `mod` is a deferred template: each call site's
+// binding mints a per-type module (madd__u8_u8, madd__u16_u16), exactly like
+// the untyped-param path.
+
+mod madd<T>(a:T, b:T) -> (r:T@[0]) {
+  r = a ^ b
+}
+
+mod top(x:u8, y:u8, w:u16, v:u16) -> (s8:u8@[0], s16:u16@[0]) {
+  s8  = madd(a=x, b=y)
+  s16 = madd<u16>(a=w, b=v)
+}

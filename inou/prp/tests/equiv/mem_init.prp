@@ -1,0 +1,16 @@
+/*
+:name: mem_init
+:type: equiv
+:verilog_top: mem_init.mem_init
+:pyrope_top: mem_init.mem_init
+*/
+
+// 2f-mem_multidim — per-entry reset contents: a reg array with a tuple
+// initializer re-loads (1,2,3,4) while `reset` is held (one restore write
+// port per entry; reads during reset return the committed contents). The
+// declared `reset:bool` opts into the restore hardware — without it the
+// init stays power-on-only (see mem_init_tuple.prp).
+mod mem_init(reset:bool, raddr:u2) -> (q:u8@[0]) {
+  reg mem:[4]u8 = (1, 2, 3, 4)
+  q = mem[raddr]
+}

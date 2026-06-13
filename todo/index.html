@@ -38,10 +38,8 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 <ul>
 <li><em>Group 2 — independent (start anytime):</em><ul>
 <li><a class="xref" href="pyrope/2f-overload.html">2f-overload</a> Overload-gathering call dispatch (<code>const add = [f1, f2]; add(x)</code>; <code>init</code> sets already resolve).</li>
-<li><a class="xref" href="pyrope/2f-generics.html">2f-generics</a> Generic <code>&lt;T&gt;</code> per-call-site body specialization (untyped-param templates work).</li>
-<li><a class="xref" href="pyrope/2f-mem_multidim.html">2f-mem_multidim</a> Multi-dimensional memories and memory init/reset contents.</li>
+<li><a class="xref" href="pyrope/2f-mem_comptime_init.html">2f-mem_comptime_init</a> Comptime-computed / inferred-type memory init (residual of 2f-mem_multidim).</li>
 <li><a class="xref" href="pyrope/2f-lg.html">2f-lg</a> <code>lg</code> attribute: pin the generated lgraph/Verilog module name.</li>
-<li><a class="xref" href="pyrope/2f-bw_maxmin.html">2f-bw_maxmin</a> Debug-only <code>.[bw_max]</code>/<code>.[bw_min]</code> attribute reads (pass tracks them; read not wired).</li>
 </ul></li>
 <li><em>Group 2 — import chain (in order):</em><ul>
 <li><a class="xref" href="pyrope/2f-lnimport.html">2f-lnimport</a> Test LNAST-level <code>import</code> (pyrope and <code>--reader slang</code> units; zero import tests today). Startable now; first of the chain.</li>

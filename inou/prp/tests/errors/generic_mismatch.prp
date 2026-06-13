@@ -1,0 +1,12 @@
+/*
+:name: generic_mismatch
+:type: error
+:error: does not unify
+:help: bind it explicitly
+*/
+
+// 2f-generics — every actual typed with the same generic must share one
+// type: an int literal and a string literal cannot both be `T`.
+
+comb triadd<T>(a:T, b:T, c:T) -> (r) { r = a + b + c }
+cassert(triadd(a=1, b="a", c=3) == 6)

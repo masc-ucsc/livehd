@@ -1,0 +1,34 @@
+/*
+:name: bw_maxmin
+:type: parsing lnast comptime
+:verifier_pass: 8
+:verifier_fail: 0
+*/
+
+// `.[bw_max]`/`.[bw_min]` — the bitwidth pass's running value range, readable
+// only inside cassert/assert (see errors/bw_attr_non_debug.prp for the gate).
+
+mut x:u8 = 30
+cassert(x.[max] == 255 and x.[min] == 0 and x.[bits] == 8)
+cassert(x.[bw_max] == 30 and x.[bw_min] == 30)
+
+// A reassignment moves the running range; the declared envelope is unchanged.
+x = 3
+cassert(x.[bw_max] == 3 and x.[bw_min] == 3)
+cassert(x.[max] == 255)
+
+// The `assert` spelling is a debug statement too.
+assert(x.[bw_max] == 3)
+
+// Partially-constrained declared type (04b-attributes example).
+mut opt1:unsigned(max=300) = 0
+opt1 = 200
+cassert(opt1.[bw_max] == 200)
+
+// `wrap` narrows the running range back into the envelope, and the sized
+// constructor cast `u8(...)` is the same conversion (07-typesystem example).
+mut val:u8 = 0
+wrap val = 0x1F0
+cassert(val == 240 and val.[bw_max] == 240)
+val = u8(0x1F0)
+cassert(val == 0xF0)

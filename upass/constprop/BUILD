@@ -16,6 +16,7 @@ cc_library(
     deps = [
         "//graph",
         "//lnast",
+        "//upass/bitwidth:wrap_sat_hdr",
         "//upass/core:upass",
         "//upass/verifier:upass_verifier",
     ],

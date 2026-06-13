@@ -1,0 +1,17 @@
+/*
+:name: mem_multidim_rw
+:type: equiv
+:verilog_top: mem_multidim_rw.md
+:pyrope_top: mem_multidim_rw.md
+*/
+
+// 2f-mem_multidim — a [2][4] reg memory with runtime indices on both the
+// write and the read: the Memory cell is flat (SIZE=8) and the address is
+// the row-major flatten i*4 + j.
+mod md(a:u8, wi:u1, wj:u2, ri:u1, rj:u2, we:bool) -> (z:u8@[0]) {
+  reg t:[2][4]u8 = nil
+  if we {
+    t[wi][wj] = a
+  }
+  z = t[ri][rj]
+}

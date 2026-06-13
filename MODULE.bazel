@@ -12,6 +12,7 @@ bazel_dep(name = "rules_python", version = "2.0.2")
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 new_git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
+new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
 
 bazel_dep(name = "rules_cc", version = "0.2.19")
 bazel_dep(name = "rules_shell", version = "0.8.0")
@@ -137,14 +138,25 @@ git_override(
 # local_path_override(module_name = "hhds", path = "../hhds") # sometimes useful for debug together with hhds
 
 # tree-sitter-pyrope
-http_archive(
+# TEMP (2f-generics): local sibling carrying the call-site `f<int,string>(…)`
+# grammar (../tree-sitter-pyrope commit 7f2409b, committed but NOT pushed —
+# push needs the repo owner). To restore the pin after `git push origin main`
+# in ../tree-sitter-pyrope, replace this block with the http_archive below,
+# updating integrity via:
+#   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/7f2409be5f0692f95c7c35c6d25448555118fa8d.zip | openssl dgst -sha256 -binary | base64
+new_local_repository(
     name = "tree-sitter-pyrope",
     build_file = "//packages:tree-sitter-pyrope.BUILD",
-    integrity = "sha256-SC8eUPtScD8DvtNx1AsB95iEzdGigGeApsLA13pPDEw=",
-    strip_prefix = "tree-sitter-pyrope-279462b1427472184266ea76b5ce7f2367661d20",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/279462b1427472184266ea76b5ce7f2367661d20.zip",
-    ],
+    path = "../tree-sitter-pyrope",
 )
+# http_archive(
+#     name = "tree-sitter-pyrope",
+#     build_file = "//packages:tree-sitter-pyrope.BUILD",
+#     integrity = "sha256-<recompute after push>",
+#     strip_prefix = "tree-sitter-pyrope-7f2409be5f0692f95c7c35c6d25448555118fa8d",
+#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/7f2409be5f0692f95c7c35c6d25448555118fa8d.zip",
+#     ],
+# )
 
 # tree sitter
 http_archive(

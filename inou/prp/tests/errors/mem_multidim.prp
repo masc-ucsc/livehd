@@ -1,14 +1,15 @@
 /*
 :name: mem_multidim
 :type: error
-:error: multi-dimensional
+:error: 2 dimension\(s\) but the access supplies 1
 :tolg: 1
 */
 
-// 1a-mem — multi-dimensional memories are out of scope (RTL instantiation or
-// a later slice).
-mod f(a:u8, i:u2, j:u2) -> (z:u8@[0]) {
-  reg t:[4][4]u8 = nil
-  t[i][j] = a
+// 2f-mem_multidim — multi-dimensional memories lower with flattened
+// row-major addressing, but every access must supply one index per
+// dimension (there is no partial-row select on a runtime memory).
+mod f(a:u8, i:u3, j:u2) -> (z:u8@[0]) {
+  reg t:[2][4]u8 = nil
+  t[i] = a
   z = t[i][j]
 }

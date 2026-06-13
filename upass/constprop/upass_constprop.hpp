@@ -86,6 +86,11 @@ public:
   // non-scalar) — a runtime index or an unresolved/partial base is skipped.
   void check_tuple_access(const std::string& base, const std::string& seg, bool is_index);
 
+  // Inner-dimension bounds for all-index dotted paths (`b[2][10]` on
+  // b:[4][8]u8); named segments stay legal nil-probes, scalar-leaf zero
+  // chains (`(1,2)[0][0]`) stay legal sugar.
+  void check_nested_tuple_access(const std::string& base, const std::string& key);
+
   // The emit decision rides the push VOTE: every value-op/store hook
   // returns classify_vote() (cursor-based evaluation, now constprop-private —
   // the base classify_statement virtual stays for the verifier/func_extract

@@ -389,6 +389,12 @@ protected:
   // around if/for/while/match arm bodies and lambda bodies.
   uint32_t conditional_depth_ = 0;
 
+  // True while lowering a `cassert`/`assert` condition (or message).
+  // `.[bw_max]`/`.[bw_min]` reads are debug-only: legal here, a compile error
+  // anywhere else (each elaboration may compute a different legal range, so
+  // branching on one would not converge).
+  bool in_assert_lowering_ = false;
+
   struct Conditional_scope {
     uint32_t* d;
     explicit Conditional_scope(uint32_t* dd) : d(dd) { ++*d; }
@@ -412,6 +418,12 @@ protected:
   };
   std::vector<Call_arg> collect_call_args(TSNode arg_tuple);
   void                  add_call_args_to_fcall(const Lnast_nid& fcall_idx, const std::vector<Call_arg>& call_args);
+  // Explicit call-site generic bindings (`f<int,string>(…)` — grammar field
+  // `generic`): type-arg refs collected BEFORE the fcall node exists, then
+  // attached as `store(__generic_arg, type_ref)` children ahead of the
+  // actuals.
+  std::vector<Lnast_node> collect_generic_args(TSNode call_node);
+  void                    add_generic_args_to_fcall(const Lnast_nid& fcall_idx, const std::vector<Lnast_node>& generic_args);
 
   // Lvalue helpers. `rhs_is_fcall` tells the lvalue_list path to bind by
   // name (return-field name) rather than position; otherwise positional

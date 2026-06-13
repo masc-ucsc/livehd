@@ -62,6 +62,8 @@ bool uPass_attributes::is_builtin_attr(std::string_view name) {
       // Category A — LNAST/upass attrs
       "max",
       "min",
+      "bw_max",
+      "bw_min",
       "bits",
       "wrap",
       "saturate",

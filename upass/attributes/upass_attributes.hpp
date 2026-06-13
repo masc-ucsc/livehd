@@ -369,6 +369,7 @@ private:
   // Helpers used by evaluate_attr_get.
   std::optional<Dlop> derive_max(std::string_view base) const;
   std::optional<Dlop> derive_min(std::string_view base) const;
+  std::optional<Dlop> derive_bw(std::string_view base, bool want_max) const;  // .[bw_max]/.[bw_min] running range
   std::optional<Dlop> derive_bits(std::string_view base, std::string_view variant) const;  // "bits"/"ubits"/"sbits"
   std::optional<Dlop> derive_comptime(std::string_view base, std::string_view base_text) const;
 

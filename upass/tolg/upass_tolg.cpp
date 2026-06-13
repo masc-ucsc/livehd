@@ -942,7 +942,8 @@ private:
   // write-site count is pre-scanned at the declare.
   struct Mem_info {
     hhds::Node_class             node;
-    int64_t                      size        = 0;
+    int64_t                      size        = 0;  // total entries (∏dims)
+    std::vector<int64_t>         dims;             // outer dim first; size 1 for a flat array
     int32_t                      elem_mw     = 0;  // element max-value width
     bool                         elem_signed = false;
     bool                         is_array    = false;  // type=2: mut/const array (no clock, no persistence)
@@ -1011,6 +1012,101 @@ private:
     return d;
   }
 
+  // Row-major flat address for a chained index list over `mi.dims`:
+  // addr = ((i0*D1 + i1)*D2 + i2)… (Horner). Const indices fold at build
+  // time; a runtime index materializes the accumulator and emits Mult/Sum
+  // cells (widths mirror lower_op: mul = sum of operand mws, add = max+1).
+  // Returns an invalid Pin after reporting (index-arity mismatch, non-integer
+  // index, field access).
+  [[nodiscard]] Pin flatten_mem_addr(const Mem_info& mi, const std::vector<Lnast_nid>& idxs, std::string_view name) {
+    if (idxs.size() != mi.dims.size()) {
+      error_here("upass.tolg: memory '{}' has {} dimension(s) but the access supplies {} index(es)",
+                 name,
+                 mi.dims.size(),
+                 idxs.size());
+      return {};
+    }
+    // A const index must be an integer — a string key would be a field
+    // access, which memories don't have.
+    auto const_index_of = [&](const Lnast_nid& nid, std::optional<int64_t>& out) -> bool {
+      if (!Lnast_ntype::is_const(lnast_->get_type(nid))) {
+        return true;  // runtime ref — resolved through leaf()
+      }
+      auto v = Dlop::from_pyrope(lnast_->get_name(nid));
+      if (!v || !v->is_just_i64()) {
+        error_here("upass.tolg: memory '{}' index '{}' is not an integer — field access on a memory is not supported",
+                   name,
+                   lnast_->get_name(nid));
+        return false;
+      }
+      out = v->to_just_i64();
+      return true;
+    };
+
+    std::optional<int64_t> acc_c;
+    Pin                    acc_p{};
+    int32_t                acc_mw = 0;
+    if (!const_index_of(idxs[0], acc_c)) {
+      return {};
+    }
+    if (!acc_c) {
+      auto v = leaf(idxs[0]);
+      acc_p  = v.pin;
+      acc_mw = v.mw;
+    }
+    for (size_t k = 1; k < idxs.size(); ++k) {
+      const int64_t          d = mi.dims[k];
+      std::optional<int64_t> ic;
+      if (!const_index_of(idxs[k], ic)) {
+        return {};
+      }
+      if (acc_c && ic) {
+        acc_c = *acc_c * d + *ic;
+        continue;
+      }
+      if (acc_c) {  // runtime index joins a const accumulator
+        acc_p  = create_const(*g_, *Dlop::create_integer(*acc_c));
+        acc_mw = mw_of_val(*acc_c);
+        acc_c.reset();
+      }
+      if (d != 1) {
+        auto mul = make_node(Ntype_op::Mult);
+        setup_sink_by_name(mul, "a").connect_driver(acc_p);
+        setup_sink_by_name(mul, "a").connect_driver(create_const(*g_, *Dlop::create_integer(d)));
+        auto md = mul.create_driver_pin(0);
+        acc_mw += mw_of_val(d);
+        set_bits(md, acc_mw + 1);
+        set_unsign(md);
+        acc_p = md;
+      }
+      Pin     ip{};
+      int32_t imw = 0;
+      if (ic) {
+        if (*ic == 0) {
+          continue;  // + 0 — skip the Sum
+        }
+        ip  = create_const(*g_, *Dlop::create_integer(*ic));
+        imw = mw_of_val(*ic);
+      } else {
+        auto v = leaf(idxs[k]);
+        ip  = v.pin;
+        imw = v.mw;
+      }
+      auto add = make_node(Ntype_op::Sum);
+      setup_sink_by_name(add, "a").connect_driver(acc_p);
+      setup_sink_by_name(add, "a").connect_driver(ip);
+      auto ad = add.create_driver_pin(0);
+      acc_mw  = std::max(acc_mw, imw) + 1;
+      set_bits(ad, acc_mw + 1);
+      set_unsign(ad);
+      acc_p = ad;
+    }
+    if (acc_c) {
+      return create_const(*g_, *Dlop::create_integer(*acc_c));
+    }
+    return acc_p;
+  }
+
   // Pre-scan: indexed stores (store(ref name, idx, val)) anywhere in the tree.
   [[nodiscard]] int count_mem_write_sites(std::string_view name) const {
     int                                   n    = 0;
@@ -1050,27 +1146,47 @@ private:
       error_here("upass.tolg: memory '{}' array type is missing its element type or size", name);
       return;
     }
-    if (Lnast_ntype::is_comp_type_array(lnast_->get_type(elem_nid))) {
-      error_here("upass.tolg: memory '{}' is multi-dimensional — not supported (use a single dimension)", name);
-      return;
+    // Collect the dimension chain — each comp_type_array level is
+    // (elem | nested comp_type_array, const '[N]'), nested OUTER dim first
+    // (`[4][8]u8` → top len is '[4]'). The flat entry layout is row-major
+    // (matrix_partial.prp contract): index (i,j) over dims (D0,D1) lands at
+    // flat address i*D1 + j.
+    std::vector<int64_t> dims;
+    while (true) {
+      // The size const's text is the raw '[N]' annotation — strip the brackets.
+      auto len_txt = std::string(lnast_->get_name(len_nid));
+      if (len_txt.size() >= 2 && len_txt.front() == '[' && len_txt.back() == ']') {
+        len_txt = len_txt.substr(1, len_txt.size() - 2);
+      }
+      int64_t d = 0;
+      if (auto c = Dlop::from_pyrope(len_txt); c && c->is_just_i64()) {
+        d = c->to_just_i64();
+      }
+      if (d <= 0) {
+        error_here("upass.tolg: memory '{}' size '{}' is not a positive comptime constant", name, lnast_->get_name(len_nid));
+        return;
+      }
+      dims.emplace_back(d);
+      if (!Lnast_ntype::is_comp_type_array(lnast_->get_type(elem_nid))) {
+        break;
+      }
+      auto inner_elem = lnast_->get_first_child(elem_nid);
+      auto inner_len  = inner_elem.is_invalid() ? inner_elem : lnast_->get_sibling_next(inner_elem);
+      if (inner_elem.is_invalid() || inner_len.is_invalid()) {
+        error_here("upass.tolg: memory '{}' array type is missing its element type or size", name);
+        return;
+      }
+      elem_nid = inner_elem;
+      len_nid  = inner_len;
     }
     auto [elem_mw, elem_signed] = declared_width(elem_nid);
     if (elem_mw == 0) {
       error_here("upass.tolg: memory '{}' element type must be a sized integer or bool", name);
       return;
     }
-    // The size const's text is the raw '[N]' annotation — strip the brackets.
-    auto len_txt = std::string(lnast_->get_name(len_nid));
-    if (len_txt.size() >= 2 && len_txt.front() == '[' && len_txt.back() == ']') {
-      len_txt = len_txt.substr(1, len_txt.size() - 2);
-    }
-    int64_t size = 0;
-    if (auto c = Dlop::from_pyrope(len_txt); c && c->is_just_i64()) {
-      size = c->to_just_i64();
-    }
-    if (size <= 0) {
-      error_here("upass.tolg: memory '{}' size '{}' is not a positive comptime constant", name, lnast_->get_name(len_nid));
-      return;
+    int64_t size = 1;
+    for (auto d : dims) {
+      size *= d;
     }
     // reg initializer — same treatment as a mut array (reg and not-reg
     // initialize alike): a concrete value becomes POWER-ON contents on the
@@ -1115,14 +1231,11 @@ private:
             error_here("upass.tolg: memory '{}' initializer must be a comptime constant or tuple literal", name);
             return;
           }
-          reg_init = pack_tuple_init(tit->second, name, size, elem_mw);
-          if (!reg_init) {
-            return;  // pack_tuple_init reported
+          // Row-major flatten; nested literals must match the dims chain.
+          if (!flatten_init_values(tit->second, dims, 0, name, elem_mw, init_entries)) {
+            return;  // flatten_init_values reported
           }
-          auto mask = Dlop::get_mask_value(elem_mw);
-          for (const auto& e : tit->second.elems) {
-            init_entries.emplace_back(Dlop::from_pyrope(lnast_->get_name(e))->and_op(*mask));
-          }
+          reg_init = pack_entries(init_entries, elem_mw);
           break;
         }
         error_here("upass.tolg: memory '{}' initializer must be a comptime constant or tuple literal", name);
@@ -1167,6 +1280,7 @@ private:
     Mem_info info;
     info.node        = mem;
     info.size        = size;
+    info.dims        = std::move(dims);
     info.elem_mw     = elem_mw;
     info.elem_signed = elem_signed;
     info.is_array    = is_array;
@@ -1241,7 +1355,22 @@ private:
         mi.init_wired = true;  // zero-filled default
         return;
       }
-      error_here("upass.tolg: array '{}' initializer '{}' is not supported — use a tuple literal or nil", name, txt);
+      // Scalar broadcast: every entry = value (masked to the element) — the
+      // same treatment the reg declare-initializer path applies.
+      auto v = Dlop::from_pyrope(txt);
+      if (!v || !v->is_just_i64()) {
+        error_here("upass.tolg: array '{}' initializer '{}' is not supported — use an integer, a tuple literal or nil",
+                   name,
+                   txt);
+        return;
+      }
+      auto entry = v->and_op(*Dlop::get_mask_value(mi.elem_mw));
+      auto init  = Dlop::create_integer(0);
+      for (int64_t i = 0; i < mi.size; ++i) {
+        init = init->or_op(*entry->shl_op(*Dlop::create_integer(i * mi.elem_mw)));
+      }
+      setup_sink_by_name(mi.node, "init").connect_driver(create_const(*g_, *init));
+      mi.init_wired = true;
       return;
     }
     auto tit = tuple_recs_.find(std::string(lnast_->get_name(rhs)));
@@ -1249,36 +1378,70 @@ private:
       error_here("upass.tolg: array '{}' initializer must be a comptime tuple literal", name);
       return;
     }
-    auto init = pack_tuple_init(tit->second, name, mi.size, mi.elem_mw);
-    if (!init) {
-      return;  // pack_tuple_init reported
+    std::vector<spool_ptr<Dlop>> entries;
+    if (!flatten_init_values(tit->second, mi.dims, 0, name, mi.elem_mw, entries)) {
+      return;  // flatten_init_values reported
     }
-    setup_sink_by_name(mi.node, "init").connect_driver(create_const(*g_, *init));
+    setup_sink_by_name(mi.node, "init").connect_driver(create_const(*g_, *pack_entries(entries, mi.elem_mw)));
     mi.init_wired = true;
   }
 
-  // Pack an all-const positional tuple into the wide `init` value: entry 0
-  // in the low `bits`, row-major. Returns null after reporting on error.
-  [[nodiscard]] spool_ptr<Dlop> pack_tuple_init(const Tuple_rec& rec, std::string_view name, int64_t size, int32_t bits) {
-    if (static_cast<int64_t>(rec.elems.size()) != size) {
-      error_here("upass.tolg: '{}' initializer has {} entries but the memory holds {}", name, rec.elems.size(), size);
-      return {};
+  // Flatten an init tuple literal to per-entry masked constants, ROW-MAJOR,
+  // validating each level's entry count against the dims chain. A nested
+  // dimension's literal arrives as a `ref` to its own recorded tuple_add
+  // (`((1,2),(3,4))` → outer elems are refs into tuple_recs_). Returns false
+  // after reporting.
+  [[nodiscard]] bool flatten_init_values(const Tuple_rec& rec, const std::vector<int64_t>& dims, size_t level,
+                                         std::string_view name, int32_t bits, std::vector<spool_ptr<Dlop>>& out) {
+    if (static_cast<int64_t>(rec.elems.size()) != dims[level]) {
+      error_here("upass.tolg: '{}' initializer has {} entries where dimension {} holds {}",
+                 name,
+                 rec.elems.size(),
+                 level,
+                 dims[level]);
+      return false;
     }
     auto mask = Dlop::get_mask_value(bits);
-    auto init = Dlop::create_integer(0);
     for (size_t i = 0; i < rec.elems.size(); ++i) {
       const auto& e = rec.elems[i];
+      if (level + 1 < dims.size()) {
+        if (!Lnast_ntype::is_ref(lnast_->get_type(e))) {
+          error_here("upass.tolg: '{}' initializer entry {} must be a nested tuple literal (the memory has {} dimensions)",
+                     name,
+                     i,
+                     dims.size());
+          return false;
+        }
+        auto tit = tuple_recs_.find(std::string(lnast_->get_name(e)));
+        if (tit == tuple_recs_.end() || !tit->second.named.empty()) {
+          error_here("upass.tolg: '{}' initializer entry {} must be a comptime tuple literal", name, i);
+          return false;
+        }
+        if (!flatten_init_values(tit->second, dims, level + 1, name, bits, out)) {
+          return false;
+        }
+        continue;
+      }
       if (!Lnast_ntype::is_const(lnast_->get_type(e))) {
         error_here("upass.tolg: '{}' initializer entry {} is not a compile-time constant", name, i);
-        return {};
+        return false;
       }
       auto v = Dlop::from_pyrope(lnast_->get_name(e));
       if (!v || !v->is_just_i64()) {
         error_here("upass.tolg: '{}' initializer entry {} is not an integer constant", name, i);
-        return {};
+        return false;
       }
-      auto entry = v->and_op(*mask)->shl_op(*Dlop::create_integer(static_cast<int64_t>(i) * bits));
-      init       = init->or_op(*entry);
+      out.emplace_back(v->and_op(*mask));
+    }
+    return true;
+  }
+
+  // Pack flat per-entry constants into the wide `init` value: entry 0 in the
+  // low `bits`.
+  [[nodiscard]] static spool_ptr<Dlop> pack_entries(const std::vector<spool_ptr<Dlop>>& entries, int32_t bits) {
+    auto init = Dlop::create_integer(0);
+    for (size_t i = 0; i < entries.size(); ++i) {
+      init = init->or_op(*entries[i]->shl_op(*Dlop::create_integer(static_cast<int64_t>(i) * bits)));
     }
     return init;
   }
@@ -1441,7 +1604,11 @@ private:
       if (Lnast_ntype::is_const(lnast_->get_type(it->second))) {
         init = Dlop::from_pyrope(lnast_->get_name(it->second));
       } else if (auto lit = tuple_recs_.find(std::string(lnast_->get_name(it->second))); lit != tuple_recs_.end()) {
-        init = pack_tuple_init(lit->second, "__memory init", size, static_cast<int32_t>(bits));
+        const std::vector<int64_t>   flat_dims{size};  // __memory is always flat
+        std::vector<spool_ptr<Dlop>> entries;
+        if (flatten_init_values(lit->second, flat_dims, 0, "__memory init", static_cast<int32_t>(bits), entries)) {
+          init = pack_entries(entries, static_cast<int32_t>(bits));
+        }
       }
       if (!init) {
         error_here("upass.tolg: __memory 'init' must be a comptime constant or tuple literal");
@@ -1489,15 +1656,21 @@ private:
   // site's full branch-path condition (true when unconditional); same-cycle
   // conflicts between ports are defined by the memory config (fwd), not here.
   void lower_mem_store(const Lnast_nid& lhs, std::string_view lhs_name, Mem_info& mi) {
-    auto idx = lnast_->get_sibling_next(lhs);
-    auto val = idx.is_invalid() ? idx : lnast_->get_sibling_next(idx);
-    if (val.is_invalid()) {
+    // Gather the index chain; the LAST sibling is the stored value
+    // (store(mem, i, j, …, val) is FLAT — one node, N index operands).
+    std::vector<Lnast_nid> idxs;
+    for (auto c = lnast_->get_sibling_next(lhs); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
+      idxs.emplace_back(c);
+    }
+    if (idxs.size() < 2) {
       error_here("upass.tolg: whole-array assignment to memory '{}' is not supported — write one entry at a time", lhs_name);
       return;
     }
-    if (!lnast_->get_sibling_next(val).is_invalid()) {
-      error_here("upass.tolg: multi-dimensional or field write to memory '{}' is not supported", lhs_name);
-      return;
+    auto val = idxs.back();
+    idxs.pop_back();
+    auto addr = flatten_mem_addr(mi, idxs, lhs_name);
+    if (addr.is_invalid()) {
+      return;  // flatten_mem_addr reported
     }
     if (mi.wr_next >= mi.n_user_wr) {
       error_here("upass.tolg: internal — memory '{}' write-site pre-scan undercounted", lhs_name);
@@ -1515,7 +1688,7 @@ private:
     }
     const auto base = mi.wr_next * kMemPortStride;
     ++mi.wr_next;
-    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(leaf(idx).pin);  // addr
+    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(addr);           // addr
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3)).connect_driver(leaf(val).pin);  // din
     auto en = current_path_cond();
     if (en.is_invalid()) {
@@ -1603,13 +1776,18 @@ private:
       return;
     }
     auto& mi = it->second;
-    if (!lnast_->get_sibling_next(idx).is_invalid()) {
-      error_here("upass.tolg: multi-dimensional or field read of memory '{}' is not supported", lnast_->get_name(src));
-      return;
+    // Gather the full index chain (tuple_get(dst, mem, i, j, …) is FLAT).
+    std::vector<Lnast_nid> idxs;
+    for (auto c = idx; !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
+      idxs.emplace_back(c);
+    }
+    auto addr = flatten_mem_addr(mi, idxs, lnast_->get_name(src));
+    if (addr.is_invalid()) {
+      return;  // flatten_mem_addr reported
     }
     const int  slot = mi.n_wr_total + mi.rd_next;
     const auto base = slot * kMemPortStride;
-    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(leaf(idx).pin);  // addr
+    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(addr);  // addr
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(en_const(true));
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
         .connect_driver(create_const(*g_, *Dlop::create_integer(1)));  // rdport = 1 (read)
@@ -3288,19 +3466,25 @@ private:
     if (is_type_flop(node)) {
       din_only = true;
     } else if (is_mem) {
-      // 1a-mem — a clocked Memory (type 0/1) is one flop crossing for every
-      // path through it: writes commit at the cycle edge, a sync read flops
-      // its dout, and the wrapper-internal forwarding mux is part of the
-      // cell abstraction (it never creates a 0-flop path). A type=2 comb
-      // array crosses nothing. The clock sinks are excluded from the meet.
+      // 2f-mem — a memory is treated like a register (08-memories.md): an
+      // ASYNC read (type 0/2) returns committed state with no added stage,
+      // exactly like a scalar reg read — @[0] from the read address. Only a
+      // SYNC read (type=1, registered dout) charges the +1 crossing. The
+      // clock sinks are excluded from the meet either way.
+      constexpr int kStride = 12;  // == uPass_tolg kMemPortStride (Memory sink count)
       for (const auto& e : node.inp_edges()) {
         if (e.sink.is_invalid()) {
           continue;
         }
-        const auto raw_pid = static_cast<int>(e.sink.get_port_id());
-        if (Ntype::get_sink_name(Ntype_op::Memory, raw_pid) == "clock_pin") {
+        const auto raw_pid   = static_cast<int>(e.sink.get_port_id());
+        const auto sink_name = Ntype::get_sink_name(Ntype_op::Memory, raw_pid % kStride);
+        if (sink_name == "clock_pin" && raw_pid < kStride) {
           skip_pids.insert(static_cast<uint64_t>(raw_pid));
-          mem_clocked = true;
+        } else if (sink_name == "type" && raw_pid < kStride) {
+          skip_pids.insert(static_cast<uint64_t>(raw_pid));
+          if (auto v = livehd::graph_util::hydrate_const(e.driver); v.is_just_i64() && v.to_just_i64() == 1) {
+            mem_clocked = true;  // sync read: dout is registered
+          }
         }
       }
     } else if (is_type_sub(node)) {

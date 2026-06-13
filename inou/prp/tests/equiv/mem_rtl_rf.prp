@@ -9,9 +9,9 @@
 // = the Memory cell pins VERBATIM (no `latency`; `type` picks 0 async /
 // 1 sync / 2 array; rdport entries are 0/1). A 2rd+1wr RF, fwd off: reads
 // are async (combinational on the current address) and see the committed
-// state only. res[N] is the N-th read port's data. Reads of a clocked
-// memory land @[1] (the write-commit edge crossing).
-mod rtlmem(raddr0:u4, raddr1:u4, wraddr:u4, din0:u4, we0:bool) -> (q0:u4@[1], q1:u4@[1]) {
+// state only. res[N] is the N-th read port's data. Async memory reads
+// land @[0] (committed state, like a reg read).
+mod rtlmem(raddr0:u4, raddr1:u4, wraddr:u4, din0:u4, we0:bool) -> (q0:u4@[0], q1:u4@[0]) {
   mut mem = (
     addr      = (raddr0, raddr1, wraddr),
     bits      = 4,

@@ -7,10 +7,10 @@
 
 // 1a-mem — a reg array is an async Memory cell (type 0, fwd on): a write
 // commits at the cycle edge; a same-cycle read of the written address sees
-// the new value through forwarding (part of the cell abstraction, never a
-// 0-flop path). `@[N]` counts intervening flops input->output: every path
-// through a clocked memory crosses the commit edge, so the read lands @[1].
-mod memdut(a:u8, wsel:u2, rsel:u2, we:bool) -> (z:u8@[1]) {
+// the new value through forwarding (part of the cell abstraction). Like a
+// scalar reg read, an ASYNC memory read returns committed state with no
+// added stage — it lands @[0]; only a SYNC read (type=1) charges +1.
+mod memdut(a:u8, wsel:u2, rsel:u2, we:bool) -> (z:u8@[0]) {
   reg t:[4]u8 = nil
   if we {
     t[wsel] = a

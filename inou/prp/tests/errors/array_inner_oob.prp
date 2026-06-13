@@ -1,0 +1,12 @@
+/*
+:name: array_inner_oob
+:type: error
+:error: out of bounds access
+:help: inside its dimension
+*/
+
+// 2f-mem_multidim — inner dimensions are bounds-checked too (08-memories.md:
+// `b[2][10]` on a [4][8] array must error, not silently read nil).
+
+mut b:[4][8]u8 = 13
+assert(b[2][10])

@@ -231,6 +231,39 @@ void uPass_bitwidth::check_declared_fit(std::string_view name, const Lnast_range
   }
 }
 
+void uPass_bitwidth::check_array_elem_fit(std::string_view name, const Lnast_range& r) {
+  // Element stores into a declared array ([4][8]u8 → each element u8): the
+  // element envelope rides the root bundle's internal __elem_max/__elem_min
+  // attrs (baked by the runner's declare pre-step). Scalars/tuples carry no
+  // such attrs — no-op there.
+  if (name.empty() || r.is_unbounded() || runner_st == nullptr) {
+    return;
+  }
+  const std::string_view base = ssa_base_name(name);
+  if (wrap_sat_exempt_.erase(name) != 0 || (base != name && wrap_sat_exempt_.erase(base) != 0)) {
+    return;
+  }
+  const auto b = runner_st->get_bundle(base);
+  if (!b) {
+    return;
+  }
+  const auto& mx = b->get_attr("__elem_max");
+  const auto& mn = b->get_attr("__elem_min");
+  if (mx.is_invalid() || mn.is_invalid()) {
+    return;
+  }
+  const auto env = range_from_entry(mx, mn);
+  if (env.is_unbounded()) {
+    return;
+  }
+  // Same containment judgement as check_declared_fit.
+  const bool is_unsigned_env = !env.is_signed();
+  const bool over            = is_unsigned_env ? (r.min > env.max || r.min < env.min) : !env.contains(r);
+  if (over) {
+    record_overflow(base, r, env);
+  }
+}
+
 void uPass_bitwidth::record_overflow(std::string_view name, const Lnast_range& value, const Lnast_range& env) {
   // The diagnostic is emitted AT the offending node: the cursor is on
   // the store/op during dispatch, so its SourceId (resolved through the
@@ -323,10 +356,13 @@ upass::Vote uPass_bitwidth::process_store(std::string_view dst_name, Bundle& dst
     write_bw(dst_name, dst, range_of_operand(src.front()), /*replace=*/true);
     return Vote::keep;
   }
-  // Field-path store (selectors + value). `x[0] = v` on a SCALAR binding is
-  // the scalar itself — stamp the value's range exactly. Any other path
-  // invalidates the root's scalar range (per-field ranges are a follow-up;
-  // an unbounded fallback is sound — the declared envelope still bounds it).
+  // Field-path store (selectors + value). The VALUE must fit a declared
+  // array's element envelope (b:[4][8]u8 → b[i][j] = 300 errors). `x[0] = v`
+  // on a SCALAR binding is the scalar itself — stamp the value's range
+  // exactly. Any other path invalidates the root's scalar range (per-field
+  // ranges are a follow-up; an unbounded fallback is sound — the declared
+  // envelope still bounds it).
+  check_array_elem_fit(dst_name, range_of_operand(src.back()));
   const auto& sel = src.front();
   const bool  slot0
       = sel.name.empty() && sel.bundle && !sel.bundle->lone_trivial().is_invalid() && sel.bundle->lone_trivial().is_known_zero();

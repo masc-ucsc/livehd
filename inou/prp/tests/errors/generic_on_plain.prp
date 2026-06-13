@@ -1,0 +1,11 @@
+/*
+:name: generic_on_plain
+:type: error
+:error: declares no generic parameters
+:help: drop the
+*/
+
+// 2f-generics — `<…>` at a call site is only meaningful on a generic lambda.
+
+comb f(a:u8, b:u8) -> (r) { r = a + b }
+cassert(f<u8>(a=1, b=2) == 3)

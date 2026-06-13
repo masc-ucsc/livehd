@@ -1,0 +1,10 @@
+/*
+:name: bw_attr_write
+:type: error
+:error: read-only
+:help: read it with
+*/
+
+// The running range is computed by the bitwidth pass; it is never settable.
+
+mut y::[bw_max=5] = 2

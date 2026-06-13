@@ -173,6 +173,32 @@ std::optional<Dlop> uPass_attributes::resolve_value(std::string_view var) const 
 // `.[bits]` through here. (`:[range=…]` sugar was removed — semacheck rejects
 // it like any other `:[max=]`/`:[min=]` attribute write.)
 
+std::optional<Dlop> uPass_attributes::derive_bw(std::string_view base, bool want_max) const {
+  // `.[bw_max]`/`.[bw_min]` — the bitwidth pass's running value range at this
+  // statement point (debug-only; prp2lnast rejects non-assert uses). The
+  // stamps ride the binding's "0" entry (upass/bitwidth write_bw, replace-on-
+  // stamp, SSA-versioned names verbatim) and are scalar-only: a dotted base
+  // has no per-field range and reads nil.
+  if (runner_st != nullptr && base.find('.') == std::string_view::npos) {
+    if (const auto b = runner_st->get_bundle(base); b) {
+      const auto& e = b->get_entry("0");
+      const auto& v = want_max ? e.bw_max : e.bw_min;
+      if (!v.is_invalid() && !v.is_nil()) {
+        return v;
+      }
+    }
+  }
+  // Cross-invocation persistence: a previous pass.upass run left ranges in
+  // bw_meta (this walk's bundles start empty).
+  if (lm != nullptr && lm->get_lnast() != nullptr) {
+    const auto& meta = lm->get_lnast()->bw_meta();
+    if (auto it = meta.ranges.find(std::string(base)); it != meta.ranges.end() && !it->second.unbounded) {
+      return *Dlop::create_integer(want_max ? it->second.max : it->second.min);
+    }
+  }
+  return std::nullopt;
+}
+
 std::optional<Dlop> uPass_attributes::derive_max(std::string_view base) const {
   // Explicit attr wins (e.g. `:int:[max=N]` partial pinning).
   if (auto v = lookup_attr_value(base, "max"); v) {
@@ -357,6 +383,10 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       result = derive_max(base);
     } else if (attr == "min") {
       result = derive_min(base);
+    } else if (attr == "bw_max") {
+      result = derive_bw(base, /*want_max=*/true);
+    } else if (attr == "bw_min") {
+      result = derive_bw(base, /*want_max=*/false);
     } else if (attr == "bits") {
       // Phase 3 — aggregate `tup.[bits]` is the sum of the per-field bits.
       // Falls back to scalar derivation when no tuple shape is known.
@@ -436,7 +466,8 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
   // previously this leaned on constprop's undeclared-reads-as-nil fold,
   // now removed (undeclared reads are a prp2lnast compile error).
   if (!result) {
-    if (sticky_pattern || !is_builtin_attr(attr) || attr == "bits" || attr == "max" || attr == "min" || attr == "typename") {
+    if (sticky_pattern || !is_builtin_attr(attr) || attr == "bits" || attr == "max" || attr == "min" || attr == "typename"
+        || attr == "bw_max" || attr == "bw_min") {
       result = *Dlop::nil();
     } else {
       return;

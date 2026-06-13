@@ -1,0 +1,28 @@
+/*
+:name: generics
+:type: parsing lnast comptime
+:verifier_pass: 7
+:verifier_fail: 0
+*/
+
+// 2f-generics — `<T,…>` is a per-call-site type-macro expansion: explicit
+// `f<type,…>(…)` bindings win, otherwise T is inferred (unified) from the
+// declared types of the actuals at `:T` positions; bare literals leave T as
+// the unbounded kind (T = int). Strict argument naming applies as usual.
+
+comb triadd<T>(a:T, b:T, c:T) -> (r) { r = a + b + c }
+
+cassert(triadd(a=1, b=2, c=3) == 6)              // T = int (inferred)
+cassert(triadd(a=u8(1), b=u8(2), c=u8(3)) == 6)  // T = u8 (inferred)
+cassert(triadd<u8>(a=1, b=2, c=3) == 6)          // T = u8 (explicit)
+
+comb f<X>(a:X, b:X) -> (r) { r = a + b }
+cassert(f(a=u22(33), b=u22(100)) == 133)
+
+comb two<T1,T2>(a:T1, b:T2) -> (c:T1) { c = a }  // generics need not agree
+cassert(two<int,string>(a=7, b="x") == 7)
+
+// The bound type is the param's DECLARED type inside the body.
+comb bw<T>(a:T) -> (r) { r = a.[bits] }
+cassert(bw<u8>(a=3) == 8)
+cassert(bw(a=u16(5)) == 16)

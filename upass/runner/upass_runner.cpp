@@ -90,6 +90,12 @@ bool prp_is_tmp_name(std::string_view n) { return n.size() >= 3 && n[0] == '_' &
 // can reject the UFCS form when the callee declares no `self`.
 constexpr std::string_view call_ufcs_arg_marker = "__ufcs_arg";
 
+// prp2lnast wraps each explicit call-site generic binding (`f<int,string>(…)`)
+// in a `store(__generic_arg, type_ref)` marker, in declaration order, ahead of
+// the normal actuals. The type_ref names a `'type'` declare tmp (primitive /
+// constrained types) or a named type directly.
+constexpr std::string_view call_generic_arg_marker = "__generic_arg";
+
 // Collect the NON-temporary variables that the `while` CONDITION reads
 // (transitively). `cond_ref` is the while's child-0 ref name; we trace its
 // definition backward through the while's preceding siblings (the cond
@@ -1686,8 +1692,9 @@ bool uPass_runner::try_inline_func_call() {
     return {};
   };
 
-  std::vector<Actual> actuals;
-  bool                shape_ok = true;
+  std::vector<Actual>      actuals;
+  std::vector<std::string> explicit_generics;  // `f<int,string>(…)` type-arg refs, in order
+  bool                     shape_ok = true;
   while (lm->move_to_sibling()) {
     const auto t = lm->get_raw_ntype();
     if (Lnast_ntype::is_ref(t) || Lnast_ntype::is_const(t)) {
@@ -1722,6 +1729,19 @@ bool uPass_runner::try_inline_func_call() {
         }
         a.is_named = false;
         a.key.clear();
+      }
+      // Explicit generic binding — consumed here, never an actual. The value
+      // ref is frame-renamed text (its `'type'` declare tmp rides the same
+      // frame), so current_text(), not raw.
+      if (a.key == call_generic_arg_marker) {
+        if (!lm->move_to_sibling()) {
+          shape_ok = false;
+          lm->restore_cursor(here);
+          break;
+        }
+        explicit_generics.emplace_back(lm->current_text());
+        lm->restore_cursor(here);
+        continue;
       }
       if (!lm->move_to_sibling()) {
         shape_ok = false;
@@ -1995,6 +2015,13 @@ bool uPass_runner::try_inline_func_call() {
   // rules apply to every callee kind). A `ref self` method is NOT a standalone
   // module — it keeps the splice path below. A `comb` template (untyped scalar
   // params / var-args) is excluded here and inlines as usual.
+  // Generic `<T,…>` bindings (2f-generics): explicit `<…>` args win, else
+  // inferred from the declared types of the actuals at `:T` positions.
+  // Resolved once here — both the specialize path and the comb splice
+  // substitute from the same map. Also validates `<…>` on a non-generic
+  // callee and unification conflicts (fatal).
+  const auto gbinds = resolve_generic_binds(callee, io, param_val, param_set, nbind, explicit_generics, callee_name, call_span);
+
   if (callee->is_template()) {
     const auto k         = callee->get_lambda_kind();
     const bool is_method = !io.inputs.empty() && io.inputs[0].name == "self";
@@ -2009,7 +2036,8 @@ bool uPass_runner::try_inline_func_call() {
                                          vararg_named,
                                          dst_name,
                                          callee_name,
-                                         call_span)) {
+                                         call_span,
+                                         gbinds)) {
         return true;
       }
     }
@@ -2170,8 +2198,14 @@ bool uPass_runner::try_inline_func_call() {
       continue;  // function value — no width/value binding
     }
     const auto pname = upass::Lnast_manager::make_inlined_name(tag, e.name);
+    const auto gbit  = e.type_name.empty() ? gbinds.end() : gbinds.find(e.type_name);
     if (e.bits > 0) {
       emit_inline_typespec(pname, e.bits, e.is_signed);
+    } else if (gbit != gbinds.end() && gbit->second.type_name.empty() && (gbit->second.max || gbit->second.min)) {
+      // `a:T` with T bound (explicit `<…>` or unified from the actuals):
+      // substitute the concrete envelope — macro expansion, so the normal
+      // range-fit rules then judge the actual against it.
+      emit_inline_typespec_range(pname, gbit->second.max, gbit->second.min);
     } else if (param_set[i] && param_val[i].is_ref()) {
       // Untyped param (`comb reverse(x)`): the signature carries no width, so
       // adopt the actual argument's declared type at this call site — the
@@ -2200,8 +2234,24 @@ bool uPass_runner::try_inline_func_call() {
       }
     }
   }
+  // Bind each generic NAME inside the inline frame so body `:T` slots
+  // (declare type refs, renamed to `inlN_T`) resolve through the normal
+  // named-type machinery.
+  for (const auto& [g, gb] : gbinds) {
+    if (gb.type_name.empty() && (gb.max || gb.min)) {
+      emit_inline_typespec_range(upass::Lnast_manager::make_inlined_name(tag, g), gb.max, gb.min);
+    }
+  }
   for (const auto& o : io.outputs) {
     const auto oname = upass::Lnast_manager::make_inlined_name(tag, o.name);
+    if (o.bits == 0 && !o.type_name.empty()) {
+      if (auto it = gbinds.find(o.type_name); it != gbinds.end() && it->second.type_name.empty() && (it->second.max || it->second.min)) {
+        // `-> (r:T)` with T bound — substitute the concrete envelope.
+        emit_inline_typespec_range(oname, it->second.max, it->second.min);
+        emit_inline_binding(oname, Lnast_node::create_const("nil"));
+        continue;
+      }
+    }
     emit_inline_typespec(oname, o.bits, o.is_signed);
     // Declare the output in the inlined top scope (mirrors a real body's io
     // `assign res = nil : T`). Without this, an output assigned inside a
@@ -2360,10 +2410,29 @@ bool uPass_runner::try_resolve_tuple_get() {
 // ── pipe/mod/fluid template specialization ──────────────────────────
 
 void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
-                                     const Lnast_nid& dst_parent) {
+                                     const Lnast_nid& dst_parent,
+                                     const absl::flat_hash_map<std::string, Generic_bind>* type_subst) {
   const auto type = src->get_type(src_nid);
   Lnast_nid  newn;
   if (Lnast_ntype::is_ref(type)) {
+    // Generic substitution: a body `:T` slot is a `ref T` (SSA strips io
+    // type refs; only body declare/type_spec slots carry them). Replace it
+    // with the bound concrete type (macro expansion).
+    if (type_subst != nullptr) {
+      if (auto it = type_subst->find(std::string(src->get_name(src_nid))); it != type_subst->end()) {
+        const auto& gb = it->second;
+        if (!gb.type_name.empty()) {
+          dst->add_child(dst_parent, Lnast_node::create_ref(gb.type_name));
+          return;
+        }
+        if (gb.max || gb.min) {
+          auto pt = dst->add_child(dst_parent, Lnast_ntype::create_prim_type_int());
+          dst->add_child(pt, Lnast_node::create_const(gb.max ? std::string(gb.max->to_pyrope()) : std::string("nil")));
+          dst->add_child(pt, Lnast_node::create_const(gb.min ? std::string(gb.min->to_pyrope()) : std::string("nil")));
+          return;
+        }
+      }
+    }
     newn = dst->add_child(dst_parent, Lnast_node::create_ref(src->get_name(src_nid)));
   } else if (Lnast_ntype::is_const(type)) {
     newn = dst->add_child(dst_parent, Lnast_node::create_const(src->get_name(src_nid)));
@@ -2380,14 +2449,17 @@ void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Ln
     }
   }
   for (auto c : src->children(src_nid)) {
-    copy_subtree_into(src, c, dst, newn);
+    copy_subtree_into(src, c, dst, newn, type_subst);
   }
 }
 
 std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::shared_ptr<Lnast>& tmpl, const std::string& mangled,
                                                                 const std::vector<Spec_port>& inject,
-                                                                const std::vector<Spec_port>& vports, const std::string& vname) {
+                                                                const std::vector<Spec_port>& vports, const std::string& vname,
+                                                                const std::vector<Spec_port>& out_inject,
+                                                                const absl::flat_hash_map<std::string, Generic_bind>& type_subst) {
   auto clone    = std::make_shared<Lnast>(mangled);
+  const auto* subst = type_subst.empty() ? nullptr : &type_subst;
   auto src_root = tmpl->get_root();
   auto dst_root = clone->set_root(tmpl->get_type(src_root));  // top
   // Module anchor: the clone keeps pointing at the template's
@@ -2412,7 +2484,7 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
 
   if (vname.empty()) {
     for (auto c : tmpl->children(src_root)) {
-      copy_subtree_into(tmpl, c, clone, dst_root);
+      copy_subtree_into(tmpl, c, clone, dst_root, subst);
     }
   } else {
     // Var-arg expansion: rebuild the io (drop the `...vname` marker
@@ -2436,13 +2508,13 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
           if (!nm.is_invalid() && tmpl->get_name(nm) == vname) {
             continue;  // drop the `...vname` marker port
           }
-          copy_subtree_into(tmpl, entry, clone, in_dst);
+          copy_subtree_into(tmpl, entry, clone, in_dst, subst);
         }
         for (const auto& vp : vports) {
           add_port(in_dst, vp, vp.port_name);
         }
         for (auto out = tmpl->get_sibling_next(src_in); !out.is_invalid(); out = tmpl->get_sibling_next(out)) {
-          copy_subtree_into(tmpl, out, clone, io_dst);  // output tuple (+ any further io children) verbatim
+          copy_subtree_into(tmpl, out, clone, io_dst, subst);  // output tuple (+ any further io children) verbatim
         }
       } else if (Lnast_ntype::is_stmts(ct) && !body_done) {
         body_done     = true;
@@ -2459,10 +2531,10 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
           }
         }
         for (auto bc : tmpl->children(c)) {
-          copy_subtree_into(tmpl, bc, clone, body_dst);
+          copy_subtree_into(tmpl, bc, clone, body_dst, subst);
         }
       } else {
-        copy_subtree_into(tmpl, c, clone, dst_root);
+        copy_subtree_into(tmpl, c, clone, dst_root, subst);
       }
     }
   }
@@ -2502,6 +2574,35 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
     }
     ++i;
   }
+
+  // OUTPUT ports: `-> (r:T)` with T bound gets the concrete type too (the
+  // outputs tuple is the io node's second tuple_add).
+  if (auto out_tup = clone->get_sibling_next(in_tup); !out_tup.is_invalid()) {
+    std::size_t oi = 0;
+    for (auto entry : clone->children(out_tup)) {
+      if (!Lnast_ntype::is_store(clone->get_type(entry))) {
+        continue;
+      }
+      auto name_n = clone->get_first_child(entry);
+      if (name_n.is_invalid() || clone->get_name(name_n) == "__empty_tuple") {
+        continue;
+      }
+      if (oi < out_inject.size() && out_inject[oi].inject) {
+        if (!out_inject[oi].type_name.empty()) {
+          clone->add_child(entry, Lnast_node::create_ref(out_inject[oi].type_name));
+        } else {
+          auto pt = clone->add_child(entry, Lnast_ntype::create_prim_type_int());
+          clone->add_child(
+              pt,
+              Lnast_node::create_const(out_inject[oi].max ? std::string(out_inject[oi].max->to_pyrope()) : std::string("nil")));
+          clone->add_child(
+              pt,
+              Lnast_node::create_const(out_inject[oi].min ? std::string(out_inject[oi].min->to_pyrope()) : std::string("nil")));
+        }
+      }
+      ++oi;
+    }
+  }
   return clone;
 }
 
@@ -2526,12 +2627,211 @@ void uPass_runner::emit_specialized_call(const std::string& dst, const std::stri
   lm->pop_source();
 }
 
+absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resolve_generic_binds(
+    const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io, const std::vector<Lnast_node>& param_val,
+    const std::vector<bool>& param_set, std::size_t nbind, const std::vector<std::string>& explicit_generics,
+    const std::string& callee_name, const livehd::diag::Span& call_span) {
+  absl::flat_hash_map<std::string, Generic_bind> binds;
+  const auto&                                    gens = callee->get_generics();
+  if (gens.empty()) {
+    if (!explicit_generics.empty()) {
+      fcall_arg_fail(call_span,
+                     "fcall-generic-arity",
+                     std::format("`{}` declares no generic parameters but the call binds {}", callee_name, explicit_generics.size()),
+                     "drop the `<…>` binding list");
+    }
+    return binds;
+  }
+
+  // One-line type description for the mismatch diagnostic.
+  const auto describe = [](const Generic_bind& gb) -> std::string {
+    if (!gb.type_name.empty()) {
+      return gb.type_name;
+    }
+    switch (gb.kind) {
+      case Io_kind::boolean: return "bool";
+      case Io_kind::string : return "string";
+      case Io_kind::integer:
+        if (gb.max || gb.min) {
+          return std::format("int(max={}, min={})",
+                             gb.max ? std::string(gb.max->to_pyrope()) : "nil",
+                             gb.min ? std::string(gb.min->to_pyrope()) : "nil");
+        }
+        return "int";
+      default: return "untyped";
+    }
+  };
+
+  // Resolve a TYPE NAME (an explicit `<…>` argument: a `'type'` declare tmp
+  // or a named type) into a binding.
+  const auto bind_of_type_name = [&](const std::string& tn, std::string from) -> Generic_bind {
+    Generic_bind gb;
+    gb.from = std::move(from);
+    if (const auto f = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), tn); f && f->has_type_spec) {
+      switch (f->kind) {
+        case upass::decl_facts::Num::unsigned_int:
+        case upass::decl_facts::Num::signed_int:
+          gb.kind = Io_kind::integer;
+          gb.max  = f->range_max;
+          gb.min  = f->range_min;
+          return gb;
+        case upass::decl_facts::Num::boolean:
+          gb.kind = Io_kind::boolean;
+          gb.max  = *Dlop::from_pyrope("1");
+          gb.min  = *Dlop::from_pyrope("0");
+          return gb;
+        case upass::decl_facts::Num::string: gb.kind = Io_kind::string; return gb;
+        case upass::decl_facts::Num::none  : break;
+      }
+    }
+    gb.type_name = tn;  // named type — substituted verbatim (macro expansion)
+    return gb;
+  };
+
+  // 1) Explicit `<…>` bindings: declaration order, all-or-nothing.
+  if (!explicit_generics.empty()) {
+    if (explicit_generics.size() != gens.size()) {
+      fcall_arg_fail(
+          call_span,
+          "fcall-generic-arity",
+          std::format("`{}` declares {} generic parameter(s) but the call binds {}", callee_name, gens.size(), explicit_generics.size()),
+          "bind one type per generic name, in declaration order");
+    }
+    for (std::size_t i = 0; i < gens.size(); ++i) {
+      binds[gens[i]] = bind_of_type_name(explicit_generics[i], std::format("the explicit `<…>` argument {}", i + 1));
+    }
+    return binds;
+  }
+
+  // 2) Inference from the actuals at `:T` positions. Declared types bind;
+  // literals contribute their KIND only (an integer literal leaves T's range
+  // open — `triadd(a=1,b=2,c=3)` is T = int).
+  const auto& caller_io = lm->get_lnast()->io_meta();
+  const auto  unify     = [&](const std::string& g, Generic_bind cand) {
+    auto [it, inserted] = binds.emplace(g, cand);
+    if (inserted) {
+      return;
+    }
+    auto&      prev          = it->second;
+    const auto kind_of       = [](const Generic_bind& b) { return b.type_name.empty() ? b.kind : Io_kind::none; };
+    const bool same_named    = !prev.type_name.empty() && prev.type_name == cand.type_name;
+    bool       compatible    = same_named;
+    if (prev.type_name.empty() && cand.type_name.empty() && kind_of(prev) == kind_of(cand)) {
+      // Same kind. Integer ranges must agree when BOTH are pinned; a
+      // kind-only candidate (literal) folds into the pinned one.
+      const bool prev_pinned = prev.max.has_value() || prev.min.has_value();
+      const bool cand_pinned = cand.max.has_value() || cand.min.has_value();
+      if (!prev_pinned && cand_pinned) {
+        prev.max  = cand.max;
+        prev.min  = cand.min;
+        prev.from = cand.from;
+        return;
+      }
+      if (!cand_pinned) {
+        compatible = true;
+      } else {
+        const auto same_bound = [](const std::optional<Dlop>& a, const std::optional<Dlop>& b) {
+          if (a.has_value() != b.has_value()) {
+            return false;
+          }
+          return !a.has_value() || a->same_repr(*b);
+        };
+        compatible = same_bound(prev.max, cand.max) && same_bound(prev.min, cand.min);
+      }
+    }
+    if (!compatible) {
+      fcall_arg_fail(call_span,
+                     "fcall-generic-mismatch",
+                     std::format("generic `{}` of `{}` does not unify: {} binds `{}` but {} binds `{}`",
+                                 g,
+                                 callee_name,
+                                 prev.from,
+                                 describe(prev),
+                                 cand.from,
+                                 describe(cand)),
+                     "every actual typed with the same generic must share one type; bind it explicitly with `f<type>(…)` if intended");
+    }
+  };
+  for (std::size_t i = 0; i < nbind && i < io.inputs.size(); ++i) {
+    const auto& e = io.inputs[i];
+    if (e.type_name.empty() || !param_set[i]) {
+      continue;
+    }
+    if (std::find(gens.begin(), gens.end(), e.type_name) == gens.end()) {
+      continue;  // a real named type (x:Point), not a generic
+    }
+    const auto&  av   = param_val[i];
+    const auto   from = std::format("argument `{}`", e.name);
+    Generic_bind cand;
+    cand.from = from;
+    if (av.is_const()) {
+      const auto t = av.get_name();
+      if (t == "true" || t == "false") {
+        cand.kind = Io_kind::boolean;
+        cand.max  = *Dlop::from_pyrope("1");
+        cand.min  = *Dlop::from_pyrope("0");
+      } else if (!t.empty() && (t.front() == '\'' || t.front() == '"')) {
+        cand.kind = Io_kind::string;
+      } else if (t == "nil") {
+        continue;  // nil carries no type
+      } else {
+        cand.kind = Io_kind::integer;  // kind only — the range stays open
+      }
+      unify(e.type_name, std::move(cand));
+      continue;
+    }
+    if (!av.is_ref()) {
+      continue;
+    }
+    const auto an = std::string(av.get_name());
+    if (auto tn = try_typename(an); !tn.empty()) {
+      cand.type_name = std::string(tn);
+    } else if (const auto f = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), an);
+               f && f->has_type_spec && (f->range_max || f->range_min)) {
+      cand.kind = (f->kind == upass::decl_facts::Num::boolean) ? Io_kind::boolean : Io_kind::integer;
+      cand.max  = f->range_max;
+      cand.min  = f->range_min;
+    } else {
+      const Lnast_io_entry* ci = nullptr;
+      for (const auto& ce : caller_io.inputs) {
+        if (ce.name == an) {
+          ci = &ce;
+          break;
+        }
+      }
+      if (ci != nullptr && ci->kind == Io_kind::boolean) {
+        cand.kind = Io_kind::boolean;
+        cand.max  = *Dlop::from_pyrope("1");
+        cand.min  = *Dlop::from_pyrope("0");
+      } else if (ci != nullptr && ci->bits > 0) {
+        cand.kind = Io_kind::integer;
+        if (ci->is_signed) {
+          cand.max = *Dlop::get_mask_value(ci->bits - 1);
+          cand.min = *Dlop::get_neg_mask_value(ci->bits - 1);
+        } else {
+          cand.max = *Dlop::get_mask_value(ci->bits);
+          cand.min = *Dlop::from_pyrope("0");
+        }
+      } else if (try_scalar_kind(an) == Io_kind::boolean) {
+        cand.kind = Io_kind::boolean;
+        cand.max  = *Dlop::from_pyrope("1");
+        cand.min  = *Dlop::from_pyrope("0");
+      } else {
+        continue;  // untyped ref — contributes nothing
+      }
+    }
+    unify(e.type_name, std::move(cand));
+  }
+  return binds;
+}
+
 bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,
                                                   const std::vector<Lnast_node>& param_val, const std::vector<bool>& param_set,
                                                   std::size_t nbind, bool has_vararg, const std::vector<Lnast_node>& vararg_pos,
                                                   const std::vector<std::pair<std::string, Lnast_node>>& vararg_named,
                                                   const std::string& dst_name, const std::string& callee_name,
-                                                  const livehd::diag::Span& call_span) {
+                                                  const livehd::diag::Span& call_span,
+                                                  const absl::flat_hash_map<std::string, Generic_bind>& gbinds) {
   const auto kind = std::string(callee->get_lambda_kind());
 
   // Readable bits/sign suffix from a declared (max,min) range — mirrors
@@ -2613,10 +2913,34 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
     return sp;
   };
 
+  // A port typed with a GENERIC name is not "already typed": the binding
+  // substitutes the concrete type (macro expansion).
+  const auto& gens            = callee->get_generics();
+  auto        is_generic_name = [&](const std::string& tn) {
+    return !tn.empty() && std::find(gens.begin(), gens.end(), tn) != gens.end();
+  };
+  auto spec_port_of_bind = [&](const Generic_bind& gb) -> std::optional<Spec_port> {
+    if (!gb.type_name.empty()) {
+      suffix.push_back(gb.type_name);
+      return Spec_port{true, std::nullopt, std::nullopt, gb.type_name};
+    }
+    if (gb.kind == Io_kind::boolean) {
+      suffix.emplace_back("bool");
+      return Spec_port{true, *Dlop::from_pyrope("1"), *Dlop::from_pyrope("0"), {}};
+    }
+    if (gb.kind == Io_kind::integer && (gb.max || gb.min)) {
+      suffix.push_back(suffix_for(gb.max, gb.min));
+      return Spec_port{true, gb.max, gb.min, {}};
+    }
+    return std::nullopt;  // kind-only / string — no concrete port type
+  };
+
   std::vector<Spec_port> inject(nbind);
   for (std::size_t i = 0; i < nbind; ++i) {
-    const auto& e             = io.inputs[i];
-    const bool  already_typed = e.bits > 0 || !e.type_name.empty() || e.kind == Io_kind::boolean;
+    const auto& e          = io.inputs[i];
+    const bool  is_generic = is_generic_name(e.type_name);
+    const bool  already_typed
+        = !is_generic && (e.bits > 0 || !e.type_name.empty() || e.kind == Io_kind::boolean);
     if (already_typed) {
       inject[i].inject = false;
       if (!e.type_name.empty()) {
@@ -2628,7 +2952,36 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
       }
       continue;
     }
+    if (is_generic) {
+      if (auto it = gbinds.find(e.type_name); it != gbinds.end()) {
+        if (auto sp = spec_port_of_bind(it->second); sp) {
+          inject[i] = std::move(*sp);
+          continue;
+        }
+      }
+      // Unbound generic at a hardware boundary: the actual's declared type
+      // decides, exactly like an untyped port (fatal when untyped).
+    }
     inject[i] = type_from_actual(param_val[i], param_set[i], e.name);
+  }
+
+  // `-> (r:T)` outputs with T bound get the concrete type injected too (the
+  // suffix tokens come from the inputs only, matching the untyped-param path).
+  std::vector<Spec_port> out_inject(io.outputs.size());
+  {
+    const auto saved_suffix_n = suffix.size();
+    for (std::size_t i = 0; i < io.outputs.size(); ++i) {
+      const auto& o = io.outputs[i];
+      if (!is_generic_name(o.type_name)) {
+        continue;
+      }
+      if (auto it = gbinds.find(o.type_name); it != gbinds.end()) {
+        if (auto sp = spec_port_of_bind(it->second); sp) {
+          out_inject[i] = std::move(*sp);
+        }
+      }
+    }
+    suffix.resize(saved_suffix_n);  // output bindings never alter the mangled name
   }
 
   // Var-arg boundary (`...vname`): expand the N leftover actuals into
@@ -2712,7 +3065,7 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
 
   if (!specialized_emitted_.contains(mangled)) {
     specialized_emitted_.insert(mangled);
-    new_lnasts.push_back(clone_template_specialized(callee, mangled, inject, vports, vname));
+    new_lnasts.push_back(clone_template_specialized(callee, mangled, inject, vports, vname, out_inject, gbinds));
   }
 
   // Actuals wired to the clone's ports, in io order: fixed params, then the
@@ -4169,13 +4522,43 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   upass::Kind kind = upass::Kind::unknown;
   Dlop        decl_max;  // invalid = unbounded/unset
   Dlop        decl_min;
+  Dlop        elem_max;  // array declares: the ELEMENT envelope ([4][8]u8 → u8)
+  Dlop        elem_min;
   std::string type_name;
   upass::Mode mode     = upass::Mode::unknown;
   bool        comptime = false;
 
   if (lm->move_to_sibling()) {  // TYPE slot
     const auto t = lm->get_raw_ntype();
-    if (Lnast_ntype::is_prim_type_int(t)) {
+    if (Lnast_ntype::is_comp_type_array(t)) {
+      // Array declare — bake the innermost element's envelope as INTERNAL
+      // bundle attrs (__elem_max/__elem_min; bitwidth checks element stores
+      // against them). Entry-0 decl_max/min stay untouched: stamping them
+      // would make the array read as a scalar of the element type
+      // (decl_facts/try_decl_type consumers).
+      int depth = 0;
+      while (Lnast_ntype::is_comp_type_array(lm->get_raw_ntype()) && lm->has_child()) {
+        lm->move_to_child();  // child0 = element (possibly a nested array)
+        ++depth;
+      }
+      if (Lnast_ntype::is_prim_type_int(lm->get_raw_ntype()) && lm->has_child()) {
+        lm->move_to_child();
+        ++depth;
+        if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
+          if (auto v = Dlop::from_pyrope(lm->current_text()); v->is_integer()) {
+            elem_max = *v;
+          }
+        }
+        if (lm->move_to_sibling() && Lnast_ntype::is_const(lm->get_raw_ntype())) {
+          if (auto v = Dlop::from_pyrope(lm->current_text()); v->is_integer()) {
+            elem_min = *v;
+          }
+        }
+      }
+      for (; depth > 0; --depth) {
+        lm->move_to_parent();
+      }
+    } else if (Lnast_ntype::is_prim_type_int(t)) {
       kind = upass::Kind::integer;
       if (lm->move_to_child()) {  // up to two const bounds; a non-integer child = unbounded
         if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
@@ -4311,6 +4694,12 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
     }
     e.comptime = e.comptime || comptime;
     bundle->set("0", std::move(e));
+  }
+  if (!elem_max.is_invalid()) {
+    bundle->set_attr("__elem_max", elem_max);
+  }
+  if (!elem_min.is_invalid()) {
+    bundle->set_attr("__elem_min", elem_min);
   }
 
   // Back-flow: when this dst is a tuple_get extraction tmp (`___2 = ___1.a`

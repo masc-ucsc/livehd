@@ -40,7 +40,7 @@ std::string_view derived_attr_violation(std::string_view attr) {
   if (attr == "range") {
     return "not an attribute; declare the bounds through a type instead (`:int(max=,min=)`, `:uN`/`:sN`)";
   }
-  if (attr == "bits" || attr == "size" || attr == "sign" || attr == "key") {
+  if (attr == "bits" || attr == "size" || attr == "sign" || attr == "key" || attr == "bw_max" || attr == "bw_min") {
     return "a derived read-only attribute (computed from the type/bundle); it can be read but not set";
   }
   return {};

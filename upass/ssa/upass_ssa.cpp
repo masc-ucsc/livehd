@@ -255,7 +255,15 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     int32_t smax = inh_smax;
     if (!type_nid.is_invalid() && Lnast_ntype::is_stages(lnast->get_type(type_nid))) {
       std::tie(smin, smax) = read_stages(type_nid);
-      type_nid             = Lnast_nid();  // no real type child
+      // A type may still FOLLOW the stages child: trees are append-only, so
+      // the generic specializer injects `-> (r:T@[N])`'s concrete type after
+      // the re-emitted stages slot (store(r, nil, stages, prim_type_int)).
+      auto after = lnast->get_sibling_next(type_nid);
+      if (!after.is_invalid() && !Lnast_ntype::is_stages(lnast->get_type(after))) {
+        type_nid = after;
+      } else {
+        type_nid = Lnast_nid();  // no real type child
+      }
     } else if (!type_nid.is_invalid()) {
       auto st_nid = lnast->get_sibling_next(type_nid);
       if (!st_nid.is_invalid() && Lnast_ntype::is_stages(lnast->get_type(st_nid))) {
