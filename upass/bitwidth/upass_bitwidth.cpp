@@ -469,9 +469,19 @@ upass::Vote uPass_bitwidth::process_popcount(std::string_view dst_name, Bundle& 
   if (src.empty()) {
     return stamp(dst_name, dst, Lnast_range::make_unbounded());
   }
+  const auto in = range_of_operand(src[0]);
+  // A >64-bit input collapses Lnast_range to `unbounded` (its int64 bounds can't
+  // hold the value), and get_sbits() then reports 64 — but the popcount of a
+  // 128-bit all-ones value is 128, which would violate the bw-soundness check
+  // against a [0,64] range. Leave the result unbounded for a wide input; the
+  // concrete count is supplied by hlop (Dlop::popcount_op). (2f-bignum: no const
+  // op — or its range — is computed in LiveHD for values hlop owns.)
+  if (in.unbounded) {
+    return stamp(dst_name, dst, Lnast_range::make_unbounded());
+  }
   Lnast_range result;
   result.min       = 0;
-  result.max       = range_of_operand(src[0]).get_sbits();
+  result.max       = in.get_sbits();
   result.unbounded = false;
   return stamp(dst_name, dst, result);
 }

@@ -76,7 +76,22 @@
 </ul>
 
 <h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<ul>
+<li><strong>A — hlop pin bumped</strong> to top of tree (<code>fba3ff2</code> in
+  <code>MODULE.bazel</code>): fixed multi-word division and signed multiply, so
+  <code>adv_int_bigprec_16</code> / <code>adv_int_div_10</code> pass.
+  <code>adv_int_bigprec_03</code> (<code>(-big)*(-big)</code>) was a separate
+  unary-minus-kind defect, fixed under <a href="2f-unary_type.html">2f-unary_type</a>.</li>
+<li><strong>B — wide pop-count no longer aborts.</strong> The value already came from
+  hlop (<code>Dlop::popcount_op</code>); the abort was a LiveHD-side range bug:
+  <code>upass_bitwidth::process_popcount</code> capped the result at the input's
+  <code>get_sbits()</code>, which reports <code>64</code> for a <code>&gt;64</code>-bit input
+  (whose <code>int64</code> <code>Lnast_range</code> collapsed to <code>unbounded</code>) — so a
+  128-set-bit count violated the <code>[0,64]</code> bw-soundness check at
+  <code>upass_runner.cpp:947</code>. Fix: leave the pop-count range UNBOUNDED for an
+  unbounded input (no false local range; the count rides hlop). All four
+  <code>adv_int_*</code> tests pass, no regressions.</li>
+</ul>
 
 <h2>Done when</h2>
 <p>The four <code>adv_int_*</code> comptime tests pass (no aborts, correct folds); the hlop
