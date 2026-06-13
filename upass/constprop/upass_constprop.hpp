@@ -501,7 +501,9 @@ protected:
   // bits packed LSB-first. `end` may be `nil` for an open-ended `lo..` slice
   // (lowered via sra_op); a concrete `hi >= lo` lowers via get_mask_op with
   // the closed mask. Returns invalid when bounds are not folded integers.
-  static Dlop apply_range_mask(const Dlop& value, const Dlop& start, const Dlop& end);
+  // Non-static: emits a negative-index / descending-range compile error
+  // (via lm's span + in_template_body gate) before the degenerate fold.
+  Dlop apply_range_mask(const Dlop& value, const Dlop& start, const Dlop& end);
 
   // Single-shot "store result only when the value actually changed".
   // The has_trivial/get_trivial!=/set dance was repeated at every fold site;

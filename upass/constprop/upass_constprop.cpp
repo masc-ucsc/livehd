@@ -200,18 +200,39 @@ Dlop uPass_constprop::apply_range_mask(const Dlop& value, const Dlop& start, con
   // trip, no width/limit guards (a nonsense range just yields a degenerate
   // mask). This handles arbitrary-precision values that would overflow int64.
   //
-  // A concrete negative `start` (or negative width below) would hard-assert in
-  // Dlop::shln / sra. This only happens for a nonsense range — e.g. folding a
-  // still-parametric body (`x#[x.[bits]-1-i]` with `x` unbound) — so yield a
-  // degenerate empty slice (0) rather than crash; real bound sites are valid.
-  // is_negative() reads the sign at any width (an is_just_i64 gate would skip
-  // the check entirely for >62-bit values).
-  if (start.is_integer() && start.is_negative()) {
+  // A concrete negative index/endpoint, or a descending range, is a USER error
+  // (indices are non-negative; ranges increasing — there is NO distance-from-end
+  // `#[]` indexing, use an open range `x#[lo..]`). Without this the negative
+  // amount would hard-assert in Dlop::shln (src2>=0) — a segfault. EXCEPTION:
+  // while folding a still-parametric template body (`x#[x.[bits]-1-i]` with `x`
+  // unbound), an unbound param can transiently fold negative — stay silent there
+  // and yield a degenerate empty slice (0). is_negative() reads the sign at any
+  // width (an is_just_i64 gate would skip >62-bit values). (2f-neg_bitrange)
+  auto neg_index_error = [&](std::string_view what) {
+    if (!in_template_body()) {
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "negative-bit-index",
+          .category = "type",
+          .pass     = "upass.constprop",
+          .message  = std::format("{} is not allowed", what),
+          .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+          .hint     = "bit/array/cycle indices are non-negative and ranges increasing; "
+                      "select to the end with an open range like `x#[lo..]`",
+      });
+    }
+  };
+  if (start.is_integer() && !start.has_unknowns() && start.is_negative()) {
+    neg_index_error("a negative bit/array index");
     return *Dlop::create_integer(0);
   }
   // Open-ended `start..`: right-shift by `start` (upper bits packed LSB-first).
   if (end.is_nil()) {
     return *value.sra_op(start);
+  }
+  if (end.is_integer() && !end.has_unknowns() && end.is_negative()) {
+    neg_index_error("a negative bit/array range endpoint");
+    return *Dlop::create_integer(0);
   }
   // Closed `start..=end`: build a contiguous mask of (end-start+1) ones at
   // position `start`, then get_mask_op selects+packs those bits to bit 0.
@@ -219,6 +240,7 @@ Dlop uPass_constprop::apply_range_mask(const Dlop& value, const Dlop& start, con
   auto one   = Dlop::create_integer(1);
   auto width = end.sub_op(start)->add_op(*one);  // end - start + 1
   if (width->is_negative()) {
+    neg_index_error("a descending bit/array range");
     return *Dlop::create_integer(0);  // negative-width (empty) slice — degenerate
   }
   auto mask = one->shl_op(*width)->sub_op(*one)->shl_op(start);

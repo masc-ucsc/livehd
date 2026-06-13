@@ -6165,11 +6165,12 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
                  "use a single index `#[3]` or a range `#[0..=3]`; OR them for a multi-bit mask");
   }
 
-  auto make_const_mask = [](std::string_view text) -> std::optional<Lnast_node> {
+  auto make_const_mask = [&](TSNode node) -> std::optional<Lnast_node> {
     // Only accept actual numeric source literals here. Identifier text like
     // `i` must NOT be reinterpreted as a Pyrope constant — Dlop::from_pyrope
     // happily parses single letters as character literals (`"i"` → 105),
     // which would silently produce a bit-105 mask for `t#[i]`.
+    auto text = get_text(node);
     if (text.empty()) {
       return std::nullopt;
     }
@@ -6180,6 +6181,17 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
     auto v = Dlop::from_pyrope(text);
     if (v->is_invalid() || !v->is_integer()) {
       return std::nullopt;
+    }
+    // A negative bit index is a compile error — never a value, never a `1<<-N`
+    // (which would feed a negative amount into Dlop::shln). There is NO
+    // distance-from-end `#[]` indexing; use an open range `x#[lo..]`.
+    // (2f-neg_bitrange)
+    if (v->is_negative()) {
+      report_error(node,
+                   "negative-bit-index",
+                   "type",
+                   std::format("negative bit index `{}` is not allowed", text),
+                   "bit/array/cycle indices are non-negative; select to the end with an open range like `x#[lo..]`");
     }
     // `#[N]` selects bit position N → single-bit mask `1 << N`. Pure Dlop
     // arithmetic (no to_i; works for any position width).
@@ -6208,10 +6220,28 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
     if (lo_v->is_invalid() || hi_v->is_invalid() || !lo_v->is_integer() || !hi_v->is_integer()) {
       return std::nullopt;
     }
+    // A negative endpoint or a descending range is a compile error — indices are
+    // non-negative and ranges increasing (no distance-from-end `#[]`). Without
+    // this `1<<(hi-lo+1)` / `1<<lo` would feed a negative amount into shln.
+    // (2f-neg_bitrange)
+    if (lo_v->is_negative() || hi_v->is_negative()) {
+      report_error(expr_item,
+                   "negative-bit-index",
+                   "type",
+                   std::format("negative bit-range endpoint in `{}` is not allowed", get_text(expr_item)),
+                   "bit/array/cycle indices are non-negative; select to the end with an open range like `x#[lo..]`");
+    }
     // `#[lo..=hi]` → contiguous mask `((1 << (hi-lo+1)) - 1) << lo`, all Dlop
     // arithmetic (no to_i; any width).
     auto one   = Dlop::create_integer(1);
     auto width = hi_v->sub_op(*lo_v)->add_op(*one);
+    if (width->is_negative()) {
+      report_error(expr_item,
+                   "descending-bit-range",
+                   "type",
+                   std::format("descending bit range `{}` is not allowed (ranges are increasing)", get_text(expr_item)),
+                   "write the bounds low-to-high, e.g. `x#[lo..=hi]` with lo <= hi");
+    }
     return Lnast_node::create_const(one->shl_op(*width)->sub_op(*one)->shl_op(*lo_v)->to_pyrope());
   };
 
@@ -6297,7 +6327,7 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
       }
       return make_dynamic_mask(index_n);  // plain single-bit index expr → `1 << index`
     }
-    if (auto const_mask = make_const_mask(get_text(index_n))) {
+    if (auto const_mask = make_const_mask(index_n)) {
       return *const_mask;
     }
     return make_dynamic_mask(index_n);

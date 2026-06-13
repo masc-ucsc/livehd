@@ -93,7 +93,23 @@
 </ul>
 
 <h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<ul>
+<li><strong>A — negative selector index / descending range is a clean compile error.</strong>
+  A literal <code>#[-1]</code> / <code>#[1..=-1]</code> is caught at lowering in
+  <code>prp2lnast.cpp compute_bit_mask_ref</code> (<code>make_const_mask</code> /
+  <code>make_range_mask</code>): a negative index, negative endpoint, or descending
+  (negative-width) range now <code>report_error</code>s with a span instead of feeding a
+  negative amount into <code>1&lt;&lt;N</code>/<code>shln</code>. A folded (non-literal) range is
+  also guarded in <code>upass_constprop.cpp apply_range_mask</code> (emits the same error
+  for a concrete negative start/endpoint/width, gated on <code>!in_template_body()</code> so
+  unbound parametric folds still yield the degenerate empty slice). Both error tests pass
+  (with <code>locate_error_here</code>); a standalone descending range still errors and
+  <code>-10..=0</code> still compiles.</li>
+<li><strong>B — arithmetic right-shift saturation</strong> (<code>-1 &gt;&gt; 10000 == -1</code>)
+  already works via the hlop pin; <code>adv_shifts_13</code> passes.</li>
+</ul>
+<p><strong>Still pending: C</strong> — docs (<code>04-variables.md</code> negative-end
+  examples) live in <code>../docs</code>, not checked out here.</p>
 
 <h2>Docs</h2>
 <ul>
