@@ -1,0 +1,16 @@
+/*
+:name: adv_enum_hier_14
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Doc 03-bundle.md lines 531-538: enum() splices a string field and a tuple's
+// fields in place. The string "field" becomes a member; foo comes from c.
+const a = "field"
+const c = (const foo=4)
+const my_other_enum = enum(...a, b=3, ...c)
+
+cassert(my_other_enum.field != my_other_enum.b)
+cassert(my_other_enum.b   == 3)
+cassert(my_other_enum.foo == 4)

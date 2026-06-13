@@ -1,0 +1,14 @@
+/*
+:name: adv_enum_hier_10
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Integer-typed enum with no explicit values: sequential 0,1,2 (doc rule that
+// :int switches off one-hot numbering).
+enum V6:int = (a, b, c)
+
+cassert(int(V6.a) == 0)
+cassert(int(V6.b) == 1)
+cassert(int(V6.c) == 2)

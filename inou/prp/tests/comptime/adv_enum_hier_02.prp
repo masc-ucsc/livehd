@@ -1,0 +1,18 @@
+/*
+:name: adv_enum_hier_02
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Doc 03-bundle.md: hierarchical name comparisons.
+// A parent equals its own child within the same subtree (the parent bit is a
+// prefix of the child encoding); cross-subtree names differ.
+enum Animal = (
+  bird   = enum(eagle, parrot),
+  mammal = enum(rat, human)
+)
+
+cassert(Animal.bird.eagle != Animal.mammal)
+cassert(Animal.bird != Animal.mammal.human)
+cassert(Animal.bird == Animal.bird.parrot)

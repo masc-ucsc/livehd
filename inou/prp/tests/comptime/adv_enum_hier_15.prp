@@ -1,0 +1,17 @@
+/*
+:name: adv_enum_hier_15
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// has / in introspection on a hierarchical enum, top level only.
+enum Dir = (
+  vert  = enum(up, down),
+  horiz = enum(left, right)
+)
+
+cassert(Dir.vert.up in Dir)
+cassert(Dir.horiz.left != Dir.horiz.right)
+cassert(Dir.vert != Dir.horiz)
+cassert(Dir.vert.up != Dir.horiz.left)

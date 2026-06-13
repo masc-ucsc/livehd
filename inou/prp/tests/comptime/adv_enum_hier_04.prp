@@ -1,0 +1,18 @@
+/*
+:name: adv_enum_hier_04
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Doc 03-bundle.md: enum union (|) and membership (in) on a hierarchical enum.
+enum Animal = (
+  bird   = enum(eagle, parrot),
+  mammal = enum(rat, human)
+)
+
+const human_rat = Animal.mammal.rat | Animal.mammal.human
+
+cassert(Animal.mammal.rat   in human_rat)
+cassert(Animal.mammal.human in human_rat)
+cassert(not (Animal.bird in human_rat))
