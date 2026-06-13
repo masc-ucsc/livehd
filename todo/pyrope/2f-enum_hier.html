@@ -58,22 +58,31 @@ not (Animal.bird  in human_rat)</code></pre>
 </ul>
 
 <h2>Subtasks — pending</h2>
-<ul class="subtasks">
-<li><strong>A — child entries inherit the parent bit.</strong>
-  <ul><li>In hierarchical enum lowering, each child's value must be
-    <code>parent_bits | new_one_hot_bit</code> (a fresh bit per leaf entry; leaf bit-count =
-    number of entries in the leaf tuple). Fix the int encodings.</li></ul></li>
-<li><strong>B — parent-equals-child subtree match.</strong>
-  <ul><li>With the parent bit shared, <code>parent == parent.child</code> holds within a
-    subtree and cross-subtree names differ — falls out of A if equality is bit-aware, else
-    fix the comparison.</li></ul></li>
-<li><strong>C — <code>in</code> / bitwise union over hierarchical leaves.</strong>
-  <ul><li><code>a | b</code> unions leaves and <code>x in union</code> is bit-containment
-    (<code>x.bits &amp; union == x.bits</code>); make the union/in cases pass.</li></ul></li>
-</ul>
+<p>None.</p>
 
 <h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<ul class="subtasks">
+<li><strong>A — child entries inherit the parent bit.</strong>
+  <ul><li><code>Prp2lnast::lower_enum_def</code> now threads a shared one-hot bit
+    counter (DFS pre-order) plus a <code>parent_bits</code> mask through the
+    hierarchy: a nested <code>enum(...)</code> entry claims a fresh bit first, then
+    its children OR it in (<code>parent_bits | (1 &lt;&lt; bit)</code>). The parent
+    carrier IS the children bundle and records its own bare bit as a
+    <code>__enumval</code> attr. Flat enums are unchanged (<code>parent_bits == 0</code>,
+    one bit per entry = the old <code>1 &lt;&lt; i</code>).</li></ul></li>
+<li><strong>B — parent-equals-child subtree match.</strong>
+  <ul><li><code>process_eq_ne_impl</code> gained a bit-aware fast path: when BOTH
+    operands are enum values, a hierarchical parent equals any descendant in its
+    subtree (<code>parent.bits &amp; child.bits == parent.bits</code>). Leaves,
+    siblings, and ordinal/payload enums (never parents) keep EXACT equality, so
+    flat-enum equality is not widened.</li></ul></li>
+<li><strong>C — <code>in</code> / bitwise union over hierarchical leaves.</strong>
+  <ul><li>Enum membership now distinguishes the RHS: an enum-TYPE bundle (carries
+    entry tags) keeps identity membership; a tagless scalar union
+    (<code>rat | human</code>) uses bit-containment
+    (<code>x.bits &amp; union == x.bits</code>). <code>int()</code> on a parent reads
+    its <code>enumval</code> attr (<code>enum_scalar_of</code>).</li></ul></li>
+</ul>
 
 <h2>Docs</h2>
 <ul>

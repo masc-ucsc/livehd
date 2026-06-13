@@ -130,6 +130,32 @@ static const Dlop* enum_identity_of(const std::shared_ptr<Bundle const>& b) {
   return nullptr;
 }
 
+// A hierarchical enum PARENT carrier (`Animal.bird`) is a multi-entry bundle
+// (its children navigate via `.eagle`); its own bare-bit encoding rides as the
+// `enumval` attr (prp2lnast's `__enumval` tag). Leaf carriers have no such attr.
+static bool enum_is_parent(const std::shared_ptr<Bundle const>& b) {
+  return b && b->has_attr("enumval") && !b->get_attr("enumval").is_invalid();
+}
+
+// The own bit-encoding of an enum VALUE: the `enumval` attr for a hierarchical
+// parent, else the lone scalar of a leaf carrier. Invalid when `b` is not an
+// enum value or carries no extractable scalar (e.g. a multi-field payload).
+static Dlop enum_scalar_of(const std::shared_ptr<Bundle const>& b) {
+  if (enum_identity_of(b) == nullptr) {
+    return Dlop();  // not an enum value
+  }
+  if (enum_is_parent(b)) {
+    return b->get_attr("enumval");
+  }
+  // Leaf carrier: its lone scalar (scalar() safely yields nullopt for a
+  // multi-field payload like `Rgb(c, init)` — those fold via compare_bundles_eq,
+  // not the bare-bit path).
+  if (auto s = b->scalar(); s.has_value()) {
+    return *s;
+  }
+  return Dlop();
+}
+
 static std::string format_interp_value(const Dlop& v, std::string_view spec, const livehd::diag::Span& span = {}) {
   if (v.is_nil()) {
     return "nil";
@@ -973,6 +999,30 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
   // ref when this producer was dropped on its "known" nil).
   if (propagate_uncertain_nil(var, srcs)) {
     return classify_vote();
+  }
+
+  // Enum equality (03-bundle.md "Hierarchical enumerates"): when BOTH operands
+  // are enum VALUES, compare bare bit-encodings. A hierarchical parent equals
+  // any descendant in its subtree — the parent's bits are a prefix of the
+  // child's (`Animal.bird == Animal.bird.parrot`). Leaves/siblings and
+  // ordinal/payload enums (never parents) keep EXACT equality, so this never
+  // widens flat-enum equality; only the parent-vs-descendant case is new.
+  {
+    auto raw = [this](const upass::Operand& in) -> std::shared_ptr<Bundle const> {
+      return in.name.empty() ? in.bundle : st().get_bundle(in.name);
+    };
+    const auto ea = raw(srcs[0]);
+    const auto eb = raw(srcs[1]);
+    if (enum_identity_of(ea) != nullptr && enum_identity_of(eb) != nullptr) {
+      const Dlop av = enum_scalar_of(ea);
+      const Dlop bv = enum_scalar_of(eb);
+      if (av.is_integer() && bv.is_integer() && !av.has_unknowns() && !bv.has_unknowns()) {
+        auto       subset = [](const Dlop& x, const Dlop& y) { return x.and_op(y)->same_repr(x); };  // x ⊆ y
+        const bool equal  = av.same_repr(bv) || (enum_is_parent(ea) && subset(av, bv)) || (enum_is_parent(eb) && subset(bv, av));
+        store_trivial(var, *Dlop::create_bool(Negate ? !equal : equal));
+        return classify_vote();
+      }
+    }
   }
 
   Operand a = resolve(srcs[0]);
@@ -1991,8 +2041,9 @@ void uPass_constprop::fold_in(const std::string& dst) {
   // collide across enums (Bird.parroket == Mammal.rat == 1), so a value
   // compare would claim cross-enum membership (enum_hier).
   if (const auto* lid_p = enum_identity_of(ba); lid_p != nullptr) {
-    const Dlop& lid   = *lid_p;
-    bool        found = false;
+    const Dlop& lid          = *lid_p;
+    bool        found        = false;
+    bool        rhs_has_tags = false;  // RHS is an enum-TYPE bundle (entry tags)
     for (const auto& [k, ep] : bb->get_attrs()) {
       if (Bundle::get_last_level(k) != "enumentry") {
         continue;
@@ -2000,12 +2051,28 @@ void uPass_constprop::fold_in(const std::string& dst) {
       if (Bundle::get_first_level(k) == k) {
         continue;  // the rhs bundle's own top-level tag, not a member entry's
       }
+      rhs_has_tags = true;
       if (!ep.trivial.is_invalid() && ep.trivial.same_repr(lid)) {
         found = true;
         break;
       }
     }
-    store_trivial(dst, *Dlop::create_bool(found));
+    if (rhs_has_tags) {
+      store_trivial(dst, *Dlop::create_bool(found));
+      return;
+    }
+    // RHS carries no entry tags: a bitwise UNION of enum encodings (`rat |
+    // human`). Membership is bit-containment — `x in u  ⇔  x.bits & u == x.bits`
+    // (03-bundle.md "Hierarchical enumerates"). The parent's bare bit lives in
+    // its `enumval` attr; a leaf's is its scalar.
+    const Dlop lhs_own = enum_scalar_of(ba);
+    if (auto rs = bb->scalar();
+        rs.has_value() && lhs_own.is_integer() && !lhs_own.has_unknowns() && rs->is_integer() && !rs->has_unknowns()) {
+      const bool contained = lhs_own.and_op(*rs)->same_repr(lhs_own);
+      store_trivial(dst, *Dlop::create_bool(contained));
+      return;
+    }
+    store_trivial(dst, *Dlop::create_bool(false));
     return;
   }
 
@@ -2971,6 +3038,14 @@ void uPass_constprop::process_func_call() {
         continue;
       }
     }
+    // A hierarchical enum PARENT (`int(Animal.bird)`) has no lone scalar — its
+    // own bit-encoding lives in the `enumval` attr. Recover it for numeric casts.
+    if (actual.value.is_invalid() && kind != Cast::to_string && !actual.var_name.empty()) {
+      if (Dlop ev = enum_scalar_of(st().get_bundle(actual.var_name)); !ev.is_invalid()) {
+        args.push_back(ev);
+        continue;
+      }
+    }
     if (actual.value.is_invalid()) {
       move_to_parent();
       return;
@@ -3541,6 +3616,21 @@ void uPass_constprop::process_tuple_set() {
       st().set(tuple_var, bundle);
     }
     bundle->set_attr("enumentry", *Dlop::from_pyrope(path_and_val[1].text));
+    move_to_parent();
+    return;
+  }
+
+  // `__enumval` is the parse-time own bit-encoding of a hierarchical enum
+  // PARENT carrier (a child-navigable bundle whose own scalar would otherwise
+  // be ambiguous). Land it as an attr so enum_scalar_of reads it for
+  // int()/==/in (03-bundle.md "Hierarchical enumerates").
+  if (path_and_val.size() == 2 && path_and_val[0].text == "__enumval" && !path_and_val[1].is_ref) {
+    auto bundle = tuple_var.find('.') == std::string::npos ? st().get_bundle_for_write(tuple_var) : st().get_bundle(tuple_var);
+    if (!bundle) {
+      bundle = std::make_shared<Bundle>(tuple_var);
+      st().set(tuple_var, bundle);
+    }
+    bundle->set_attr("enumval", *Dlop::from_pyrope(path_and_val[1].text));
     move_to_parent();
     return;
   }

@@ -3445,7 +3445,56 @@ void Prp2lnast::maybe_emit_timecheck(TSNode timing_slot, TSNode id_node) {
   attach_loc(tcix, timing_slot);
 }
 
-Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_level_type, const std::vector<Enum_entry>& entries) {
+// A nested-enum entry value (`bird = enum(eagle, parrot)`): the rvalue node is
+// directly an `enum_definition`. Returns the node, or a null TSNode when the
+// value is anything else (ordinal literal, payload ctor, plain expression).
+static TSNode enum_definition_node_of(TSNode rv) {
+  if (ts_node_is_null(rv)) {
+    return rv;
+  }
+  if (std::string_view(ts_node_type(rv)) == "enum_definition") {
+    return rv;
+  }
+  return TSNode{};
+}
+
+void Prp2lnast::parse_enum_definition_entries(TSNode enum_def_node, std::vector<Enum_entry>& entries) {
+  TSNode args = child_by_field(enum_def_node, "input");
+  if (ts_node_is_null(args)) {
+    return;
+  }
+  // Entries ride in the `input` arg_list as lambda-style pairs: a
+  // `typed_identifier` (name + optional payload type) optionally followed by a
+  // `definition`-tagged value expression.
+  for (uint32_t i = 0, nc = child_count(args); i < nc; ++i) {
+    TSNode           c     = child(args, i);
+    const char*      fname = ts_node_field_name_for_child(args, i);
+    std::string_view ct(ts_node_type(c));
+    if (ct == "comment") {
+      continue;
+    }
+    if (ct == "typed_identifier") {
+      Enum_entry e;
+      TSNode     id = child_by_field(c, "identifier");
+      e.name        = trim(get_text(ts_node_is_null(id) ? c : id));
+      if (TSNode tc = child_by_field(c, "type"); !ts_node_is_null(tc)) {
+        e.type_node = tc;
+        e.has_type  = true;
+      }
+      entries.push_back(std::move(e));
+    } else if (fname && std::string_view(fname) == "definition" && ct != "=" && !entries.empty()) {
+      entries.back().value_node = c;
+      entries.back().has_value  = true;
+    }
+  }
+}
+
+Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_level_type, const std::vector<Enum_entry>& entries,
+                                     int64_t parent_bits, int* bit_counter) {
+  // Shared one-hot bit allocator: a single counter threads through the whole
+  // hierarchical tree so each node gets a globally-unique bit (DFS pre-order).
+  int  local_bit    = 0;
+  int& bit          = bit_counter ? *bit_counter : local_bit;
   // Payload type text of a type_cast / expression_type / bare identifier.
   auto type_text_of = [&](TSNode tc) -> std::string {
     if (ts_node_is_null(tc)) {
@@ -3460,9 +3509,10 @@ Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_lev
 
   // Ordinal mode (payload-less): one-hot when NO entry is explicit, else a
   // traditional sequence (explicit value resets the counter) — 03-bundle.md.
+  // A nested `enum(...)` entry is one-hot hierarchical, never an ordinal seed.
   bool any_explicit = false;
   for (const auto& e : entries) {
-    if (e.has_value && !e.has_type && level_pt.empty()) {
+    if (e.has_value && !e.has_type && level_pt.empty() && ts_node_is_null(enum_definition_node_of(e.value_node))) {
       any_explicit = true;
       break;
     }
@@ -3494,7 +3544,25 @@ Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_lev
     const std::string full = absl::StrCat(enum_name, ".", e.name);
     Lnast_node        carrier{Lnast_node::create_invalid()};
 
-    if (!pt.empty() && e.has_value) {
+    const TSNode nested
+        = (!any_explicit && level_pt.empty() && e.has_value && !e.has_type) ? enum_definition_node_of(e.value_node) : TSNode{};
+    if (!ts_node_is_null(nested)) {
+      // Hierarchical entry (`bird = enum(eagle, parrot)`): the parent claims a
+      // fresh bit FIRST (DFS pre-order), then its children inherit it through
+      // `parent_bits`. The carrier IS the children bundle (so `.eagle` still
+      // navigates); the parent's own bare-bit encoding rides as a `__enumval`
+      // attr that int()/==/in read back (03-bundle.md "Hierarchical enumerates").
+      const int64_t own_value = parent_bits | (int64_t(1) << bit);
+      ++bit;
+      std::vector<Enum_entry> inner;
+      parse_enum_definition_entries(nested, inner);
+      carrier = lower_enum_def(e.name, TSNode{}, inner, own_value, &bit);
+
+      auto vidx = builder.add_child(Lnast_ntype::create_store());
+      lnast->add_child(vidx, carrier);
+      lnast->add_child(vidx, Lnast_node::create_const("__enumval"));
+      lnast->add_child(vidx, Lnast_node::create_const(std::to_string(own_value)));
+    } else if (!pt.empty() && e.has_value) {
       // Typed payload entry (`Yellow:Rgb = 0xff_ff00`): construct `Rgb(v)`.
       // The runner's init-construction hook splices the payload type's init.
       auto val  = expr_to_node(e.value_node);
@@ -3526,11 +3594,18 @@ Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_lev
         }
       }
     } else {
-      // Auto ordinal: one-hot bit i, or the running sequence value.
-      const int64_t v = any_explicit ? seq_next : (int64_t(1) << i);
-      seq_next        = v + 1;
-      auto tidx       = builder.add_child(Lnast_ntype::create_tuple_add());
-      carrier         = builder.mint_tmp_ref();
+      // Auto: a fresh one-hot bit from the shared counter (ORed with the
+      // ancestor bits in a hierarchy), or the running ordinal sequence value.
+      int64_t v;
+      if (any_explicit) {
+        v        = seq_next;
+        seq_next = v + 1;
+      } else {
+        v = parent_bits | (int64_t(1) << bit);
+        ++bit;
+      }
+      auto tidx = builder.add_child(Lnast_ntype::create_tuple_add());
+      carrier   = builder.mint_tmp_ref();
       lnast->add_child(tidx, carrier);
       lnast->add_child(tidx, Lnast_node::create_const(std::to_string(v)));
     }
@@ -3878,33 +3953,8 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
       }
       break;
     }
-    // Entries ride in the `input` arg_list as lambda-style pairs: a
-    // `typed_identifier` (name + optional payload type) optionally followed
-    // by a `definition`-tagged value expression.
     std::vector<Enum_entry> entries;
-    if (TSNode args = child_by_field(n, "input"); !ts_node_is_null(args)) {
-      for (uint32_t i = 0, nc = child_count(args); i < nc; ++i) {
-        TSNode           c     = child(args, i);
-        const char*      fname = ts_node_field_name_for_child(args, i);
-        std::string_view ct(ts_node_type(c));
-        if (ct == "comment") {
-          continue;
-        }
-        if (ct == "typed_identifier") {
-          Enum_entry e;
-          TSNode     id = child_by_field(c, "identifier");
-          e.name        = trim(get_text(ts_node_is_null(id) ? c : id));
-          if (TSNode tc = child_by_field(c, "type"); !ts_node_is_null(tc)) {
-            e.type_node = tc;
-            e.has_type  = true;
-          }
-          entries.push_back(std::move(e));
-        } else if (fname && std::string_view(fname) == "definition" && ct != "=" && !entries.empty()) {
-          entries.back().value_node = c;
-          entries.back().has_value  = true;
-        }
-      }
-    }
+    parse_enum_definition_entries(n, entries);
     return lower_enum_def(ename, TSNode{}, entries);
   }
   if (t == "constant") {

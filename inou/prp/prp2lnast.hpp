@@ -255,7 +255,18 @@ protected:
   // `__enumentry` identity attr ('NAME.entry') that powers enum-aware `in`,
   // `string()` and interpolation. Returns the ref of the enum-type bundle
   // (entry name → carrier).
-  Lnast_node lower_enum_def(std::string_view enum_name, TSNode enum_level_type, const std::vector<Enum_entry>& entries);
+  //
+  // Hierarchical enums (`bird = enum(eagle, parrot)`): one fresh one-hot bit
+  // per node in DFS pre-order — `parent_bits` ORs the ancestor bits into each
+  // descendant ("the lower hierarchy level bits are kept", 03-bundle.md). The
+  // parent carrier is the children bundle plus a `__enumval` attr holding the
+  // parent's own encoding (its bare bit, for int()/==/in). `bit_counter` is
+  // shared across the whole tree (nullptr starts a fresh top-level counter).
+  Lnast_node lower_enum_def(std::string_view enum_name, TSNode enum_level_type, const std::vector<Enum_entry>& entries,
+                            int64_t parent_bits = 0, int* bit_counter = nullptr);
+  // Parse the `enum(...)` argument list into Enum_entry rows (shared by the
+  // `const X = enum(...)` expression path and nested hierarchical entries).
+  void       parse_enum_definition_entries(TSNode enum_def_node, std::vector<Enum_entry>& entries);
   void       process_type_statement(TSNode n);
   void       process_import_statement(TSNode n);
 
