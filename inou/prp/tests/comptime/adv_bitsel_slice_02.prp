@@ -1,0 +1,15 @@
+/*
+:name: adv_bitsel_slice_02
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// 04-variables.md: b#sext[1..=-2] == 0sb110_100 (sign-extended negative-end slice).
+// (FINDING: negative-end sext range aborts in blop.hpp shln src2>=0)
+const b = 0ub0110_1001
+
+const s = b#sext[1..=-2]   // documented == 0sb110_100
+
+cassert(s == 0sb110_100)
+cassert(s < 0)

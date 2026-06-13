@@ -1,0 +1,14 @@
+/*
+:name: adv_bitsel_sext_04
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Single-bit selection must be unsigned (zext default): a set bit reads as 1, not -1.
+// Doc: 04-variables.md line 314 asserts b#[0] equals 1 (unsigned).
+const v = 0ub1010   // bit0=0 bit1=1 bit2=0 bit3=1
+cassert(v#[1] == 1)
+cassert(v#[3] == 1)
+cassert(v#[0] == 0)
+cassert(v#[2] == 0)

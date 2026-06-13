@@ -1,0 +1,13 @@
+/*
+:name: adv_bitsel_idx_12
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// A single-element range #[n..=n] selects exactly one bit, equals #[n].
+const x = 0ub1_0110
+cassert(x#[2..=2] == x#[2])
+cassert(x#[2..=2] == 1)
+cassert(x#[3..=3] == 0)
+cassert(x#[1..=1] == x#[1])

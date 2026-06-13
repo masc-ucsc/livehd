@@ -1,0 +1,14 @@
+/*
+:name: adv_bitsel_idx_18
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// One-hot from a shift: 1<<5 sets exactly bit 5.
+const oh = 1 << 5     // 0ub10_0000
+cassert(oh == 32)
+cassert(oh#[5] == 1)
+cassert(oh#[4] == 0)
+cassert(oh#[6] == 0)
+cassert(oh#[0] == 0)

@@ -1,0 +1,14 @@
+/*
+:name: adv_bitsel_sext_01
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// Doc-verbatim examples from 04-variables.md Range section (single-bit/sext)
+const b = 0ub0110_1001
+cassert(b#[1..]        == 0ub0110_100)
+cassert(b#[1..=-1]     == 0ub0110_100)
+cassert(b#[1..=-2]     == 0ub0110_100)
+cassert(b#[1..=-3]     == 0ub10_100)
+cassert(b#[0]          == 1)

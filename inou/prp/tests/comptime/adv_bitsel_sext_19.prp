@@ -1,0 +1,17 @@
+/*
+:name: adv_bitsel_sext_19
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// sext inside a comb lambda called with constant args, compared at top level.
+comb top_bit_sext(x:u8, lo:int, hi:int) -> (r:int) {
+  r = x#sext[lo..=hi]
+}
+const r1 = top_bit_sext(x=0ub1010_0000, lo=4, hi=7)  // 1010 top set -> -6
+const r2 = top_bit_sext(x=0ub0010_0000, lo=4, hi=7)  // 0010 -> 2
+cassert(r1 == -6)
+cassert(r2 == 2)
+cassert(r1 == 0sb1010)
+cassert(r2 == 0ub0010)
