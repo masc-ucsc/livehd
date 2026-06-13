@@ -146,6 +146,12 @@ std::string compute_run_id(const Options& opts) {
     buf += std::format("|set:{}={}", k, v);
   }
 
+  // Raw `--` args (verilog reader flags, e.g. `-F filelist.f`) change what gets
+  // read, so they belong in the run_id. Order-significant (slang argv order).
+  for (const auto& a : opts.raw_args) {
+    buf += std::format("|raw:{}", a);
+  }
+
   std::vector<std::string> inputs = opts.files;
   for (const auto& in : opts.ins) {
     inputs.push_back(in.path);

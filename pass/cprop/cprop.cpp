@@ -326,10 +326,11 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::
     int              nconstants = 0;
     int              npending   = 0;
 
+    // Seed the accumulator with the op's identity (0 for Sum/Or, -1 for And).
+    // A default Dlop is Invalid, which used to act as the additive identity but
+    // now propagates to nil (hlop's non-numeric guard) — poisoning the fold.
     Dlop result;
-    if (op == Ntype_op::And) {
-      result = Dlop::create_integer(-1);
-    }
+    result = Dlop::create_integer(op == Ntype_op::And ? -1 : 0);
 
     std::vector<hhds::Edge_class> edge_it2;
     for (auto& i : inp_edges_ordered) {
@@ -464,6 +465,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
     }
   } else if (op == Ntype_op::Sum) {
     Dlop result;
+    result = Dlop::create_integer(0);  // additive identity (Invalid no longer folds as 0)
     for (auto& i : inp_edges_ordered) {
       auto c = hydrate_const(i.driver);
       if (i.sink.get_port_id() == 0) {
@@ -476,6 +478,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
     replace_node(node, result);
   } else if (op == Ntype_op::Or) {
     Dlop result;
+    result = Dlop::create_integer(0);  // or identity (Invalid no longer folds as 0)
     for (auto& e : inp_edges_ordered) {
       auto c = hydrate_const(e.driver);
       result = result.or_op(c);

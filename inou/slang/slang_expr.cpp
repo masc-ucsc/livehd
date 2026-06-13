@@ -192,14 +192,14 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
   return name;
 }
 
-std::string Slang_context::booleanize(std::string v, const slang::ast::Expression& expr) {
+std::string Slang_context::booleanize(std::string v) {
   if (is_bool_value(v)) {
     return v;
   }
-  auto ti = tinfo(*expr.type);
-  if (ti.bits == 1 && !ti.is_signed) {
-    return v;
-  }
+  // A condition must be a real LNAST bool. A raw 1-bit net read is already 0/1
+  // but is still integer-typed, so it cannot be returned verbatim (typecheck
+  // rejects an integer condition); `v != 0` yields the bool (and cprop folds
+  // the compare away for a 1-bit operand).
   return mark_bool(builder_.create_ne_stmts(v, "0"));
 }
 
@@ -280,17 +280,17 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
   // Logical ops booleanize their self-determined operands.
   switch (expr.op) {
     case BinaryOperator::LogicalAnd:
-      return mark_bool(builder_.create_log_and_stmts(booleanize(lower_rvalue(le), le), booleanize(lower_rvalue(re), re)));
+      return mark_bool(builder_.create_log_and_stmts(booleanize(lower_rvalue(le)), booleanize(lower_rvalue(re))));
     case BinaryOperator::LogicalOr:
-      return mark_bool(builder_.create_log_or_stmts(booleanize(lower_rvalue(le), le), booleanize(lower_rvalue(re), re)));
+      return mark_bool(builder_.create_log_or_stmts(booleanize(lower_rvalue(le)), booleanize(lower_rvalue(re))));
     case BinaryOperator::LogicalImplication: {
-      auto a = booleanize(lower_rvalue(le), le);
-      auto b = booleanize(lower_rvalue(re), re);
+      auto a = booleanize(lower_rvalue(le));
+      auto b = booleanize(lower_rvalue(re));
       return mark_bool(builder_.create_log_or_stmts(mark_bool(builder_.create_log_not_stmts(a)), b));
     }
     case BinaryOperator::LogicalEquivalence: {
-      auto a = booleanize(lower_rvalue(le), le);
-      auto b = booleanize(lower_rvalue(re), re);
+      auto a = booleanize(lower_rvalue(le));
+      auto b = booleanize(lower_rvalue(re));
       return mark_bool(builder_.create_eq_stmts(a, b));
     }
     default: break;
@@ -413,7 +413,7 @@ std::string Slang_context::lower_conditional_expr(const slang::ast::ConditionalE
       emit_unsupported(expr.sourceRange, "unsupported-pattern", "pattern matching in ?: is not supported");
       return "0";
     }
-    auto v = booleanize(lower_rvalue(*c.expr), *c.expr);
+    auto v = booleanize(lower_rvalue(*c.expr));
     cond   = cond.empty() ? v : builder_.create_log_and_stmts(cond, v);
   }
 

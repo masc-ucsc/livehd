@@ -119,7 +119,7 @@ void Slang_context::lower_conditional(const slang::ast::ConditionalStatement& st
       emit_unsupported(stmt.sourceRange, "unsupported-pattern", "if-statement match patterns are not supported");
       return;
     }
-    auto v = booleanize(lower_rvalue(*c.expr), *c.expr);
+    auto v = booleanize(lower_rvalue(*c.expr));
     cond   = cond.empty() ? v : builder_.create_log_and_stmts(cond, v);
   }
 
@@ -254,16 +254,29 @@ void Slang_context::lower_case(const slang::ast::CaseStatement& stmt) {
     unique = all_const && disjoint;
   }
 
-  set_pending_loc(stmt.sourceRange);
-  auto if_nid = builder_.create_if_stmt(unique);
-  clear_pending_loc();
-
+  // Pre-compute every arm's match condition BEFORE the if node. A `uif`
+  // references all arm conditions in its header, so (exactly like
+  // lower_conditional) their defining statements must precede the if — else
+  // tolg meets a forward ref, wires nil, and the Hotmux selector folds to a
+  // non-const that trips cprop's `is_just_i64` assertion.
+  std::vector<std::string> arm_conds;
+  arm_conds.reserve(stmt.items.size());
   for (const auto& group : stmt.items) {
     std::string arm_cond;
     for (const auto* item : group.expressions) {
       auto m   = case_item_match(sel, si, *item, stmt.condition);
       arm_cond = arm_cond.empty() ? m : builder_.create_log_or_stmts(arm_cond, m);
     }
+    arm_conds.emplace_back(std::move(arm_cond));
+  }
+
+  set_pending_loc(stmt.sourceRange);
+  auto if_nid = builder_.create_if_stmt(unique);
+  clear_pending_loc();
+
+  size_t ai = 0;
+  for (const auto& group : stmt.items) {
+    const auto& arm_cond = arm_conds[ai++];
     if (arm_cond.empty()) {
       continue;
     }

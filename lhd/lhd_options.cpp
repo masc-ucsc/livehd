@@ -457,6 +457,14 @@ Options parse_args(int argc, char** argv) {
     }
   }
 
+  // `--reader slang` is a verilog front-end: when its sources ride the raw `--`
+  // args (e.g. `-- -F filelist.f`) instead of a positional .v file, there is no
+  // extension to infer from, so pin the language to verilog.
+  if ((opts.command == "elaborate" || opts.command == "compile") && opts.language.empty() && opts.reader == "slang"
+      && !opts.raw_args.empty()) {
+    opts.language = "verilog";
+  }
+
   // `--emit results:PATH` is the typed-slot spelling of --result-json.
   for (auto it = opts.emits.begin(); it != opts.emits.end();) {
     if (it->kind == "results") {

@@ -726,7 +726,10 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         const auto& ns = d.member->as<slang::ast::NetSymbol>();
         proc_kind_     = Proc_kind::none;
         set_pending_loc(ns.getInitializer()->sourceRange);
-        auto v = lower_rvalue(*ns.getInitializer());
+        // A net is an integer lvalue, so a bool initializer (e.g. `wire x =
+        // a == b;`) materializes to 0/1 — the same rule lower_assign applies to
+        // the continuous-`assign` path.
+        auto v = to_int_value(lower_rvalue(*ns.getInitializer()));
         if (!declared_.contains(&ns) && !input_syms_.contains(&ns)) {
           declare_value_symbol(ns, false);
         }

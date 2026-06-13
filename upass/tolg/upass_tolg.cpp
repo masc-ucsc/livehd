@@ -2412,19 +2412,23 @@ private:
     if (mask_op.is_invalid()) {
       return;
     }
-    int64_t mask = mask_from_operand(mask_op);
+    auto mask = mask_from_operand(mask_op);
 
     auto node = make_node(Ntype_op::Get_mask);
     setup_sink_by_name(node, "a").connect_driver(leaf(val).pin);
-    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Dlop::create_integer(mask)));
+    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *mask));
     auto    drv = node.create_driver_pin(0);
-    int32_t mw  = static_cast<int32_t>(std::popcount(static_cast<uint64_t>(mask)));
+    int32_t mw  = mask_popcount(*mask);
     bind_result(lnast_->get_name(dst), drv, mw);
   }
 
-  [[nodiscard]] int64_t mask_from_operand(const Lnast_nid& mask_op) {
+  // The mask of a get_mask/set_mask is a full Dlop, never an int64: a 64-bit
+  // (or wider) mask like 2^64-1 (`0x0ffffffffffffffff`, a full-width truncate)
+  // overflows int64 and would silently collapse to 0 — the value `from_pyrope`
+  // parses correctly is kept as-is.
+  [[nodiscard]] spool_ptr<Dlop> mask_from_operand(const Lnast_nid& mask_op) {
     if (Lnast_ntype::is_const(lnast_->get_type(mask_op))) {
-      return const_val(mask_op);
+      return Dlop::from_pyrope(lnast_->get_name(mask_op));
     }
     auto it = range_map_.find(std::string{lnast_->get_name(mask_op)});
     if (it != range_map_.end()) {
@@ -2432,17 +2436,28 @@ private:
       if (hi < lo) {
         std::swap(lo, hi);
       }
-      int width = static_cast<int>(hi - lo + 1);
-      if (width <= 0 || width > 63) {
-        return 0;
+      if (lo < 0 || hi < lo) {
+        return Dlop::create_integer(0);
       }
-      return ((static_cast<int64_t>(1) << width) - 1) << lo;
+      return Dlop::get_mask_value(static_cast<int>(hi), static_cast<int>(lo));  // multi-word capable, no 63-bit cap
     }
     warn_at(mask_op,
             {"mask-not-const", "unsupported"},
             "get_mask mask operand '{}' not const/range — using 0",
             lnast_->get_name(mask_op));
-    return 0;
+    return Dlop::create_integer(0);
+  }
+
+  // Number of set bits in a (non-negative) mask = the get_mask result width.
+  static int32_t mask_popcount(const Dlop& m) {
+    auto pc = m.popcount_op();
+    return pc->is_just_i64() ? static_cast<int32_t>(pc->to_just_i64()) : 0;
+  }
+
+  // Highest set bit + 1 of a (non-negative) mask = the set_mask reach.
+  static int32_t mask_high_bit(const Dlop& m) {
+    int gb = m.is_positive() ? m.get_bits() : 0;  // get_bits() counts the sign bit too
+    return gb > 0 ? static_cast<int32_t>(gb - 1) : int32_t{0};
   }
 
   // set_mask(ref(dst), value, mask, ins).
@@ -2463,14 +2478,14 @@ private:
     if (ins.is_invalid()) {
       return;
     }
-    int64_t mask = mask_from_operand(mask_op);
-    auto    vv   = leaf(val);
+    auto mask = mask_from_operand(mask_op);
+    auto vv   = leaf(val);
 
     auto node = make_node(Ntype_op::Set_mask);
     setup_sink_by_name(node, "a").connect_driver(vv.pin);
-    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Dlop::create_integer(mask)));
+    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *mask));
     setup_sink_by_name(node, "value").connect_driver(leaf(ins).pin);
-    int32_t mask_mw = mask > 0 ? static_cast<int32_t>(64 - std::countl_zero(static_cast<uint64_t>(mask))) : int32_t{0};
+    int32_t mask_mw = mask_high_bit(*mask);
     bind_result(lnast_->get_name(dst), node.create_driver_pin(0), std::max(vv.mw, mask_mw));
   }
 

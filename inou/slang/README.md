@@ -8,6 +8,23 @@ it like any Pyrope unit. It is NOT a replacement for the `yosys-verilog` /
 `yosys-slang` production readers; it exists so `ln:`/`lnast-dump:` flows can
 ingest SystemVerilog directly (todo/ 2s).
 
+## Passing raw slang driver args (`-- ...`)
+
+Everything after a `--` on the `lhd` command line rides straight to the slang
+driver, so the standard slang options work — in particular `-F`/`-f` command
+files (verilog file lists):
+
+```
+lhd compile --reader slang --top gcd -- -F ../simplechisel/build_gcd/filelist.f
+```
+
+The sources may come entirely from the file list, so a positional
+`verilog:`/`*.v` input is optional in that case (`files` and the raw flags are
+both accepted; at least one must supply sources). lhd hands the args to
+`inou.slang` as the `slang_flags` label (`\x1f`-separated so shell tokens like
+`+incdir+a,b` survive). Covered by `tests/slang_filelist.sh`
+(`bazel test //inou/slang:slang_filelist`).
+
 ## File map (CIRCT ImportVerilog-shaped split)
 
 | file | concern |

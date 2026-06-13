@@ -36,6 +36,9 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 
 <h3 id="pyrope">Pyrope</h3>
 <ul>
+<li><em>Group 1 — language simplification (do before the Group 2 grammar rework):</em><ul>
+<li><a class="xref" href="pyrope/1f-is_typename.html">1f-is_typename</a> <strong>[grammar + semantics — do first]</strong> Remove the <code>is</code>/<code>!is</code> nominal operator and the <code>.[typename]</code> attribute it lowered to; structural <code>does</code>/<code>equals</code>/<code>case</code> become the only type-comparison ops. Deletes <code>Lnast_ntype::is</code>, the <code>op_is</code>/<code>op_not_is</code> grammar tokens, and all <code>typename</code> tracking — simplifies the front-end and several tests.</li>
+</ul></li>
 <li><em>Group 2 — by priority (tree-sitter grammar change first, then seg-faults, then the rest; enums last):</em><ul>
 <li><a class="xref" href="pyrope/2f-splice.html">2f-splice</a> <strong>[partial]</strong> <code>++</code> dropped + the four <code>...</code> comptime tests landed; <strong>pending:</strong> the runtime-splice equiv test (needs a tolg <code>lower_tuple_concat</code>) and the doc TBD.</li>
 <li><a class="xref" href="pyrope/2f-neg_bitrange.html">2f-neg_bitrange</a> <strong>[landed; docs pending]</strong> Negative <code>#[]</code>/<code>[]</code>/<code>@[]</code> index / descending range = clean compile error; arithmetic right shift saturates. Code + tests done; only the <code>../docs</code> 04-variables update remains.</li>

@@ -1149,21 +1149,31 @@ std::string verilog_frontend(Options& opts, Result& res, Eprp_var& var) {
 // design is LNAST units, so the rest of the flow is the pyrope one (lnastfmt,
 // upass, emit-gated tolg). The yosys-* readers above elaborate to LGraphs.
 void slang_parse(Options& opts, Result& res, Eprp_var& var) {
-  if (!opts.raw_args.empty()) {
-    throw Lhd_error{"unsupported",
-                    "raw `--` args are yosys-reader only (inou.slang takes no flag string)",
-                    "use --reader yosys-slang, or file an inou.slang labels request"};
-  }
   check_inputs_exist(opts.files);
   res.inputs = opts.files;
 
-  run_step("inou.slang",
-           var,
-           {
-               {"files", join_csv(opts.files)}
-  },
-           opts,
-           res);
+  Eprp_var::Eprp_dict labels;
+  // An empty `files` label is rejected by Eprp_var::add (it validates each
+  // comma split path), so only set it when there are positional sources.
+  if (!opts.files.empty()) {
+    labels["files"] = join_csv(opts.files);
+  }
+  // Raw `--` args ride straight to the slang driver (e.g. `-F filelist.f` to
+  // read a file list). Join with '\x1f' (ASCII unit separator) so shell argv
+  // tokens like `+incdir+a,b` survive; inou.slang splits on '\x1f'. With a
+  // `-F`/`-f` file list the explicit `files` may be empty.
+  if (!opts.raw_args.empty()) {
+    std::string joined;
+    for (const auto& arg : opts.raw_args) {
+      if (!joined.empty()) {
+        joined += '\x1f';
+      }
+      joined += arg;
+    }
+    labels["slang_flags"] = joined;
+  }
+
+  run_step("inou.slang", var, labels, opts, res);
   run_step("pass.lnastfmt", var, {}, opts, res);
   if (wants_dump(opts, "parse")) {
     screen_dump_lnasts(var.lnasts, "post-parse");
@@ -1553,7 +1563,10 @@ void elaborate_command(Options& opts, Result& res) {
   const auto* ln_out = find_slot(opts.emit_dirs, "ln");
   const auto* lg_out = find_slot(opts.emit_dirs, "lg");
 
-  if (!opts.files.empty() && opts.language == "verilog") {
+  // `--reader slang -- -F filelist.f` supplies the verilog sources through the
+  // raw slang args, so a verilog elaboration is valid with no positional file.
+  const bool slang_flag_sources = opts.reader == "slang" && !opts.raw_args.empty();
+  if (opts.language == "verilog" && (!opts.files.empty() || slang_flag_sources)) {
     if (!ir.ln_dirs.empty() || !ir.lg_dirs.empty()) {
       throw Lhd_error{"usage", "verilog elaboration takes no ln:/lg: inputs", ""};
     }
@@ -2020,8 +2033,13 @@ void compile_command(Options& opts, Result& res) {
     graph_pipeline_and_emits(opts, res, var, lib_path);
   } else {
     setup_diag(opts, "compile.verilog");
-    if (opts.files.empty()) {
-      throw Lhd_error{"usage", "compile verilog requires at least one .v file", ""};
+    // `--reader slang -- -F filelist.f` supplies the sources through the raw
+    // slang args, so the positional .v file may be omitted in that case.
+    const bool slang_flag_sources = opts.reader == "slang" && !opts.raw_args.empty();
+    if (opts.files.empty() && !slang_flag_sources) {
+      throw Lhd_error{"usage",
+                      "compile verilog requires at least one .v file",
+                      "or pass a slang file list: --reader slang -- -F filelist.f"};
     }
     if (!ir.ln_dirs.empty() || !ir.lg_dirs.empty()) {
       throw Lhd_error{"usage", "compile verilog takes no ln:/lg: inputs", ""};

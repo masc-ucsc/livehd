@@ -4,6 +4,7 @@
 
 #include "absl/strings/str_split.h"
 
+#include "diag.hpp"
 #include "slang_context.hpp"
 #include "inou_slang.hpp"
 
@@ -18,22 +19,26 @@ static Pass_plugin sample("inou.verilog", Inou_slang::setup);
 void Inou_slang::setup() {
   Eprp_method m1("inou.verilog", "System verilog to LNAST using slang", &Inou_slang::work);
 
-  m1.add_label_required("files", "input verilog files");
+  m1.add_label_optional("files", "input verilog files (optional when slang_flags supplies the sources, e.g. -F filelist.f)");
   m1.add_label_optional("includes", "comma separated include paths (otherwise, verilog paths)");
   m1.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
   m1.add_label_optional("undefines", "comma separated undefines");
   m1.add_label_optional("timecheck", "true to keep timechecks on generated mods (default: suppressed for slang input)");
   m1.add_label_optional("unroll_limit", "slang-side loop unroll budget per process (default: 4000)");
+  m1.add_label_optional("slang_flags",
+                        "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
 
   register_pass(m1);
 
   Eprp_method m2("inou.slang", "alias for inou.verilog (System verilog to LNAST using slang)", &Inou_slang::work);
-  m2.add_label_required("files", "input verilog files");
+  m2.add_label_optional("files", "input verilog files (optional when slang_flags supplies the sources, e.g. -F filelist.f)");
   m2.add_label_optional("includes", "comma separated include paths (otherwise, verilog paths)");
   m2.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
   m2.add_label_optional("undefines", "comma separated undefines");
   m2.add_label_optional("timecheck", "true to keep timechecks on generated mods (default: suppressed for slang input)");
   m2.add_label_optional("unroll_limit", "slang-side loop unroll budget per process (default: 4000)");
+  m2.add_label_optional("slang_flags",
+                        "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
 
   register_pass(m2);
 }
@@ -76,6 +81,19 @@ void Inou_slang::work(Eprp_var& var) {
     }
   }
 
+  // Raw slang driver args (e.g. `-F filelist.f`) passed through verbatim from
+  // `lhd --reader slang -- <args>`. They are '\x1f'-separated (a comma is lossy
+  // for shell tokens like `+incdir+a,b`); empty splits are dropped.
+  const bool has_slang_flags = var.has_label("slang_flags");
+  if (has_slang_flags) {
+    auto txt = var.get("slang_flags");
+    for (const auto f : absl::StrSplit(txt, '\x1f')) {
+      if (!f.empty()) {
+        argv.push_back(strdup(std::string(f).c_str()));
+      }
+    }
+  }
+
   // Timechecks on generated `mod`s are suppressed by default for slang input
   // (the direct reader predates the io/timing conventions, todo/ 1s subtask E),
   // overridable via --set inou.verilog.timecheck=true.
@@ -89,23 +107,19 @@ void Inou_slang::work(Eprp_var& var) {
     }
   }
 
-  // One isolated slang Driver/Compilation per file, processed sequentially. The
-  // old in-process thread_pool fan-out was never sound (two FIXME: slang
-  // multithread fails comments); the build system exposes parallelism instead by
-  // running independent `lhd elaborate --reader slang` invocations concurrently.
-  std::vector<std::string> file_list = absl::StrSplit(p.files, ',');
-
-  for (const auto& fname : file_list) {
-    TRACE_EVENT("verilog", nullptr, [&fname](perfetto::EventContext ctx) { ctx.event()->set_name(fname); });
-
+  // Run one isolated slang Driver/Compilation over `argv` (plus an optional
+  // positional source file), lowering its lnasts into `var`. `fname == nullptr`
+  // means the sources come from `slang_flags` alone (e.g. `-F filelist.f`).
+  auto compile_unit = [&](const char* fname) {
     Slang_context tree;
     tree.set_options(opts);
 
     std::vector<char*> argv_final{argv};
-
-    char* ptr_fname = strdup(fname.c_str());
-
-    argv_final.emplace_back(ptr_fname);
+    char*              ptr_fname = nullptr;
+    if (fname != nullptr) {
+      ptr_fname = strdup(fname);
+      argv_final.emplace_back(ptr_fname);
+    }
     argv_final.emplace_back(nullptr);
 
     slang_main(argv_final.size() - 1, argv_final.data(), tree);  // compile to lnasts
@@ -115,7 +129,41 @@ void Inou_slang::work(Eprp_var& var) {
       var.add(ln);
     }
 
-    free(ptr_fname);
+    if (ptr_fname != nullptr) {
+      free(ptr_fname);
+    }
+  };
+
+  // `files` is optional: slang_flags (e.g. `-F filelist.f`) may supply the
+  // sources instead. The `files` label, when present, is a comma list; when
+  // absent the Pass base leaves a "/INVALID" sentinel, so read the label
+  // directly rather than `p.files`.
+  std::vector<std::string> file_list;
+  if (var.has_label("files")) {
+    auto txt = var.get("files");
+    if (!txt.empty()) {
+      file_list = absl::StrSplit(txt, ',');
+    }
+  }
+
+  if (file_list.empty()) {
+    if (!has_slang_flags) {
+      livehd::diag::err("inou.slang", "no-input", "io")
+          .msg("inou.slang needs `files` or slang_flags supplying the sources (e.g. -F filelist.f)")
+          .fatal();
+    }
+    // One isolated slang Driver/Compilation; sources come from slang_flags.
+    compile_unit(nullptr);
+  } else {
+    // One isolated slang Driver/Compilation per file, processed sequentially.
+    // The old in-process thread_pool fan-out was never sound (two FIXME: slang
+    // multithread fails comments); the build system exposes parallelism instead
+    // by running independent `lhd elaborate --reader slang` invocations
+    // concurrently.
+    for (const auto& fname : file_list) {
+      TRACE_EVENT("verilog", nullptr, [&fname](perfetto::EventContext ctx) { ctx.event()->set_name(fname); });
+      compile_unit(fname.c_str());
+    }
   }
 
   for (char* ptr : argv) {

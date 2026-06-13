@@ -154,7 +154,7 @@ private:
   std::string lower_conditional_expr(const slang::ast::ConditionalExpression& expr);
   std::string lower_call(const slang::ast::CallExpression& expr);
   std::string read_symbol(const slang::ast::ValueSymbol& sym, slang::SourceRange range);
-  std::string booleanize(std::string v, const slang::ast::Expression& expr);
+  std::string booleanize(std::string v);
   std::string lower_unpacked_read(const slang::ast::Expression& expr);  // memory/array element read
 
   // ── bool/int kind discipline ───────────────────────────────────────────────

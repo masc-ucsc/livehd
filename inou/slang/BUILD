@@ -50,6 +50,18 @@ sh_test(
     ],
 )
 
+# `--reader slang -- -F filelist.f` passthrough: the verilog sources ride the
+# raw slang driver args (a `-F` command file) with no positional `*.v` input.
+sh_test(
+    name = "slang_filelist",
+    size = "large",
+    srcs = ["tests/slang_filelist.sh"],
+    data = glob(["tests/filelist/*"]) + ["//lhd"],
+    deps = [
+        "//inou/yosys:scripts",  # lgcheck + yosys2 for the LEC check
+    ],
+)
+
 # The --reader slang coverage ladder (todo/ 2s subtask E): one slang_compile-*
 # target per inou/yosys/tests/*.v source, pinned to its strongest passing tier
 # in slang_ladder.bzl (lec > verilog > lnast > error — see
