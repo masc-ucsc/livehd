@@ -1,0 +1,20 @@
+/*
+:name: adv_string_interp_04
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Per 02-basics.md (Strings): single-quote strings do not interpolate, and the
+// cooked-string \{ \} escape produces the SAME literal braces. The doc asserts
+// these are equal:
+//   const txt3 = 'I have {num}'
+//   cassert(txt3 == "I have \{num\}")
+const num = 7
+
+const txt3 = 'I have {num}'
+cassert(txt3 == "I have \{num\}")   // doc-asserted equality of escape vs raw
+cassert(txt3 != "I have 7")
+
+// The escaped braces must not interpolate the value either.
+cassert("\{num\}" != "7")

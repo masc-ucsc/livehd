@@ -1,0 +1,15 @@
+/*
+:name: adv_code_blocks_02
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Block used directly inside cassert (no intermediate binding).
+cassert({4} == 4)
+
+// Block in arithmetic, the whole doc example inline.
+cassert(({const x = 3; 33 / 3} + 1) == 12)
+
+// Block whose last expression is a comparison-free integer expression.
+cassert({mut z = 100; z - 1} == 99)

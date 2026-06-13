@@ -1,0 +1,24 @@
+/*
+:name: adv_enum_cast_19
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// Enum used as a match selector with a parsed value, plus name in interpolation
+enum Mode = (Auto, Manual, Off)
+
+const chosen = Mode("Manual")
+
+const desc = match chosen {
+  == Mode.Auto   { "a:{Mode.Auto}"   }
+  == Mode.Manual { "m:{chosen}"      }
+  == Mode.Off    { "o:{Mode.Off}"    }
+  else           { "?" }
+}
+
+cassert(desc == "m:Mode.Manual")
+cassert(chosen == Mode.Manual)
+cassert(string(chosen) == "Mode.Manual")
+cassert(Mode("Off") == Mode.Off)
+cassert(int(Mode.Auto) == 0ub001)

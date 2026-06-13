@@ -1,0 +1,27 @@
+/*
+:name: adv_loops_while_13
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Boolean-state while: terminate when a bool flag flips. bool/int never mix.
+mut done = false
+mut n = 0
+while not done {
+  n += 1
+  if n == 8 {
+    done = true
+  }
+}
+cassert(n == 8)
+cassert(done)
+
+// Build a result from the loop, asserted at top level.
+mut bits = 0
+mut p = 0
+while p < 4 {
+  bits = bits | (1 << p)
+  p += 1
+}
+cassert(bits == 0ub1111)

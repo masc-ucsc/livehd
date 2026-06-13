@@ -1,0 +1,18 @@
+/*
+:name: adv_loops_while_02
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// `loop { ... break }` is `while true` with an explicit break. do-while shape:
+// the body runs at least once before the exit condition is checked.
+mut a = 0
+mut prod = 1
+loop {
+  a += 1
+  prod = prod * a
+  if a >= 5 { break }
+}
+cassert(prod == 120)  // 5! = 120
+cassert(a == 5)

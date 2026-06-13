@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2f-loop_unroll — comptime loop unroll: break-only exit, continue, enumerate, non-term detector</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2f-loop_unroll</strong> comptime loop unroll defects (one upass-runner mechanism)</h1>
+<p>All comptime loop unrolling (<code>for</code>, <code>while</code>, <code>loop</code>,
+  <code>break</code>/<code>continue</code>) is handled by the same mechanism in the
+  upass runner (see <code>task_2u</code> migration). Four defects, one engine:</p>
+<ol>
+<li><strong>Break-only-exit loops run the body once.</strong> <code>while true { … break }</code>
+  and <code>loop { … break }</code> execute the body a single time instead of iterating
+  until the <code>break</code> fires.</li>
+<li><strong><code>continue</code> in a comptime-unrolled <code>for</code> is a no-op</strong> —
+  the "skipped" iteration still runs. (<code>break</code> in a <code>for</code> <em>does</em>
+  work, so this is specifically <code>continue</code>.)</li>
+<li><strong><code>for … in X.enumerate()</code> does not unroll</strong> — the body runs 0×
+  (plain <code>for v in t</code> works; the <code>.enumerate()</code> desugaring does not).</li>
+<li><strong>The <code>while</code> non-termination detector false-positives</strong> when the
+  exit is an <em>indirect</em> bool flag rather than a condition variable: a terminating
+  loop is rejected with <em>"comptime loop cannot terminate"</em>.</li>
+</ol>
+<p><strong>Also seen:</strong> combining several of these loop forms in one program
+  <em>aborts</em> the runner (SIGABRT) — fixing the engine should remove the crash;
+  add a regression once it is reproducible standalone.</p>
+
+<h2>Depends on</h2>
+<p>None.</p>
+
+<h2>Scope (applies to every <code>2f-*</code> adversarial-finding task)</h2>
+<ul>
+<li>Fix <strong>only</strong> the tests listed below. Do <strong>not</strong> fix unrelated
+  failing <code>adv_*</code> tests.</li>
+<li>The fix must <strong>not increase</strong> the total number of failing tests. In
+  particular the existing loop tests must keep passing: <code>loop_equivalent.prp</code>,
+  the <code>equiv/loop_accum</code> LEC pair, and the other <code>for</code>/<code>while</code>
+  comptime tests.</li>
+<li>Comptime tests only — no new equiv test.</li>
+</ul>
+
+<h2>Examples (all valid; all wrong today)</h2>
+<pre><code>// 1. break-only exit must iterate until break
+mut a = 0
+while true { a += 1; if a >= 5 { break } }
+cassert(a == 5)                 // today: a == 1
+
+// 2. continue must skip just that iteration
+mut s = 0
+for i in 0..&lt;5 { if i == 2 { continue }; s = s + i }
+cassert(s == 8)                 // today: s == 10 (continue ignored)
+
+// 3. enumerate must unroll per element
+mut t = (10,20,30,40); mut sum = 0
+for (ix, v) in t.enumerate() { sum = sum + v }
+cassert(sum == 100)             // today: sum == 0
+
+// 4. terminating loop with an indirect flag must not be rejected
+mut done = false; mut n = 0
+while not done { n += 1; if n == 8 { done = true } }
+cassert(n == 8)                 // today: "comptime loop cannot terminate"</code></pre>
+
+<h2>Tests to fix (already in the regression, currently failing)</h2>
+<ul>
+<li><code>inou/prp/tests/comptime/adv_loops_while_02.prp</code> — (1) <code>loop { … break }</code> factorial.</li>
+<li><code>inou/prp/tests/comptime/adv_loop_break_continue.prp</code> — (2) <code>continue</code> + (1) <code>while true</code> break-only exit.</li>
+<li><code>inou/prp/tests/comptime/adv_loops_for_02.prp</code> — (3) <code>.enumerate()</code> unroll.</li>
+<li><code>inou/prp/tests/comptime/adv_loops_while_13.prp</code> — (4) non-termination detector false-positive.</li>
+</ul>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li><strong>A — break-only-exit loops iterate until break.</strong>
+  <ul><li><code>while true</code> / <code>loop</code> must keep unrolling the body until a
+    <code>break</code> (or the per-loop unroll cap) — not run it once.</li></ul></li>
+<li><strong>B — honor <code>continue</code> in the comptime-unrolled <code>for</code>.</strong>
+  <ul><li>A <code>continue</code> skips the rest of the current unrolled iteration;
+    <code>break</code> already works, so mirror it for <code>continue</code>.</li></ul></li>
+<li><strong>C — unroll <code>for … in X.enumerate()</code>.</strong>
+  <ul><li>The <code>.enumerate()</code> iteration must produce <code>(index, value)</code> per
+    element like plain tuple iteration does.</li></ul></li>
+<li><strong>D — fix the non-termination detector false-positive.</strong>
+  <ul><li>A loop whose exit depends on an indirect bool flag (written inside the body) must
+    not be flagged "cannot terminate"; track flag state across the unroll, not just the raw
+    condition variables (see <code>while_comptime_unroll</code> notes).</li></ul></li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<p>None yet.</p>
+
+<h2>Notes</h2>
+<ul>
+<li>Engine entry points: the runner's <code>unroll_while</code> / <code>for</code>-unroll
+  (consolidated by task <code>2u</code>). <code>break</code>/<code>continue</code> in a
+  parse-time-unrolled literal-range <code>for</code> was a previously-known limitation
+  (<code>while_comptime_unroll</code>); this task closes it.</li>
+</ul>
+
+<h2>Docs</h2>
+<ul>
+<li><a href="https://github.com/masc-ucsc/docs/blob/main/docs/pyrope/05b-statements.md">docs/pyrope/05b-statements.md</a> — loops (<code>for</code>/<code>while</code>/<code>loop</code>), <code>break</code>/<code>continue</code>, <code>.enumerate()</code> (fully unrolled, comptime bounds).</li>
+</ul>
+
+<h2>Done when</h2>
+<p>The four <code>adv_*</code> loop tests pass; the combined-loop abort no longer
+  happens; <code>loop_equivalent</code>, <code>equiv/loop_accum</code>, and the other
+  loop tests still pass; no previously-passing test regresses.</p>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>pyrope</code></footer>
+</body>
+</html>

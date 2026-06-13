@@ -1,0 +1,18 @@
+/*
+:name: adv_case_op_22
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// BUG FINDING (companion to case_op_10): UNTYPED `nil` value wildcard in a
+// `case` pattern. Per 07-typesystem.md, nil is a value wildcard. An untyped
+// `field=nil` should match any value of the field. The defect: nil is compared
+// as the literal 0/false, so it only "matches" when the field value is 0/false.
+// With non-zero/true field values these must still be true for a correct
+// compiler.
+
+cassert((a=5)     case (a=nil))     // value 5
+cassert((a=42)    case (a=nil))     // value 42
+cassert((flag=true) case (flag=nil))// value true
+cassert((x=-7)    case (x=nil))     // negative value

@@ -1,0 +1,36 @@
+/*
+:name: adv_wrap_sat_06
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// FINDING: `sat` on int(min,max) custom (non power-of-two) ranges should clamp
+// to the DECLARED bounds (07-typesystem.md / 04b-attributes.md: "saturate
+// clamps to the declared max/min"). For power-of-two widths (i4/u8) it does;
+// for custom ranges the implementation clamps to the bits-envelope instead
+// (e.g. int(min=0,max=10) sat 50 -> 15 not 10; int(min=20,max=30) sat 0 -> 0
+// not 20). Every cassert below is the documented, correct result.
+mut a:int(min=0, max=10) = 0
+sat a = 50
+cassert(a == 10)           // clamp to declared max=10
+
+mut b:int(min=0, max=10) = 0
+sat b = -3
+cassert(b == 0)            // clamp to declared min=0
+
+mut c:int(min=20, max=30) = 20
+sat c = 100
+cassert(c == 30)           // clamp to declared max=30
+
+mut d:int(min=20, max=30) = 20
+sat d = 0
+cassert(d == 20)           // clamp to declared min=20
+
+mut e:int(min=-5, max=5) = 0
+sat e = 99
+cassert(e == 5)            // clamp to declared max=5
+
+mut f:int(min=-5, max=5) = 0
+sat f = -99
+cassert(f == -5)           // clamp to declared min=-5

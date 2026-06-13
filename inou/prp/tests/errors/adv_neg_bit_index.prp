@@ -1,0 +1,11 @@
+/*
+:name: adv_neg_bit_index
+:type: error
+:error: negative
+*/
+// A negative bit index must be a clean compile error, never a segfault.
+// Today `b#[-1]` aborts (Assertion `src2 >= 0` in blop.hpp shln).
+// (:error: regex is a placeholder — align to the real diagnostic message.)
+const b = 0ub0110_1001
+const x = b#[-1]
+cassert(x == 0)

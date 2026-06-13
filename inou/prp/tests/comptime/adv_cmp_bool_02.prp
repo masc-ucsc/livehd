@@ -1,0 +1,13 @@
+/*
+:name: adv_cmp_bool_02
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// inline `not <literal>` compared directly with a boolean literal
+// (documented: `not true` is false, `not false` is true)
+cassert((not true) == false)
+cassert((not false) == true)
+cassert((not (1 == 1)) == false)
+cassert((not (1 == 2)) == true)

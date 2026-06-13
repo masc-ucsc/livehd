@@ -1,0 +1,21 @@
+/*
+:name: adv_mix_enum_match_08
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// FINDING CANDIDATE: enum bitwise union + `in` membership (03-bundle.md
+// "Enumerates ... can perform bitwise binary operations (and/or/xor) and the
+// set operator `in`"). A constituent of a `|`-union must satisfy `in`.
+enum Perm = (rd, wr, ex)
+
+const mask = Perm.rd | Perm.wr
+
+cassert(Perm.rd in mask)        // doc-guaranteed: union member
+cassert(Perm.wr in mask)        // doc-guaranteed: union member
+cassert(not (Perm.ex in mask))
+
+const view = (acl=mask)
+cassert(Perm.rd in view.acl)
+cassert(int(Perm.rd) | int(Perm.wr) == int(mask))

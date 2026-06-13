@@ -1,0 +1,12 @@
+/*
+:name: adv_ref_mod
+:type: error
+:error: ref
+*/
+// `ref` is a comb-only inline+alias mechanism. A `mod` is a real module
+// boundary (not inlined), so a `ref` parameter must be a compile error.
+// (:error: regex is a placeholder — align to the real diagnostic.)
+mod m(ref a:u8) -> (o:u8@[0]) {
+  a += 1
+  o = a
+}

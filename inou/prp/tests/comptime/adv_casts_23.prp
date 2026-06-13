@@ -1,0 +1,17 @@
+/*
+:name: adv_casts_23
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// From the 02-basics string->int example (doc lines 139-144).
+// FINDING: b parses to 127 (b == 127 holds, and 127 == 0x7F holds) but
+// b == 0x7F folds to false. A string-parsed integer mis-compares against a
+// hex literal even though the decimal comparison is correct.
+mut a:string = "127"
+mut b:int = a        // same as mut b = int(a)
+cassert(b == 127)
+cassert(127 == 0x7F)
+cassert(b == 127 == 0x7F)
+cassert(b == 0x7F)

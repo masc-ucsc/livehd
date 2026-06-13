@@ -1,0 +1,25 @@
+/*
+:name: adv_overload_18
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Tuple-typed param vs scalar param in a gathered set. A tuple actual must
+// pick the tuple candidate; a scalar must pick the scalar one. Tests the
+// kind/shape discrimination of the dispatcher.
+comb on_pair(p:(x:int, y:int)) -> (r:int) { r = p.x * 10 + p.y }
+comb on_scalar(a:int)          -> (r:int) { r = a + 1 }
+
+const t = [on_pair, on_scalar]
+
+const fromtuple  = t((x=3, y=4))   // tuple actual -> on_pair
+const fromscalar = t(7)            // scalar actual -> on_scalar
+
+cassert(fromtuple == 34)
+cassert(fromscalar == 8)
+
+// Reordering scalar first; a tuple still cannot bind to int -> on_pair.
+const t2 = [on_scalar, on_pair]
+const v = t2((x=1, y=2))
+cassert(v == 12)

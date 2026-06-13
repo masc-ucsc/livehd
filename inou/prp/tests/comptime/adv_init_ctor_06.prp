@@ -1,0 +1,35 @@
+/*
+:name: adv_init_ctor_06
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Overloaded init dispatched by argument KIND (bool vs int). An int actual
+// must skip the `b:bool` overload and bind init_from_int. Per docs
+// (07b-structtype.md coercion polymorphism + 06-functions overload rules),
+// the bool overload's `b:bool` param rejects an int, so `= 99` -> init_from_int.
+// SUSPECTED BUG: the int actual is mis-dispatched to the bool overload.
+
+comb init_from_bool(ref self, b:bool) {
+  self.tag = 1
+  self.kind = "bool"
+}
+comb init_from_int(ref self, n:int) {
+  self.tag = n
+  self.kind = "int"
+}
+
+type Cell = (
+  mut tag:int = nil,
+  mut kind:string = "",
+  const init = [init_from_bool, init_from_int]
+)
+
+mut x:Cell = true     // bool overload
+mut y:Cell = 99       // int overload (must skip bool param)
+
+cassert(x.tag == 1)
+cassert(x.kind == "bool")
+cassert(y.tag == 99)
+cassert(y.kind == "int")

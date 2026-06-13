@@ -1,0 +1,23 @@
+/*
+:name: adv_match_locals_19
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Local selector is an enum value from a call; arms compare against enum names
+// and the body uses the local.
+enum Color = (Red, Green, Blue)
+
+comb chosen() -> (r) { r = Color.Green }
+
+mut idx = 99
+match const c = chosen(); c {
+  == Color.Red   { idx = 0 }
+  == Color.Green { idx = if c == Color.Green { 1 } else { 7 } }
+  == Color.Blue  { idx = 2 }
+  else           { cassert(false) }
+}
+cassert(idx == 1)
+cassert(c == nil)
+cassert(chosen() == Color.Green)

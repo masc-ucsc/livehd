@@ -1,0 +1,13 @@
+/*
+:name: adv_int_bigprec_04
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// K/M/G/T binary modifiers from 02-basics.md (1K == 1024 is the doc example).
+cassert(1K == 1024)
+cassert(1M == 1048576)
+cassert(1G == 1073741824)
+cassert(1T == 1099511627776)
+cassert(4K == 4096)

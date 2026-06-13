@@ -1,0 +1,29 @@
+/*
+:name: adv_tuple_destruct_14
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Per 06-functions.md: an output may share the Pyrope name of an input
+// (`comb f(x) -> (x) { x = x + 1 }`). "In the lambda body, reads before the
+// output assignment use the input value and the assignment binds the output
+// field." So next_value(x=41) must yield 42 (single-field auto-unwrap).
+// Observed: the body read of `x` sees 0, not the input, so the result is 1.
+
+comb next_value(x) -> (x) {
+  x = x + 1
+}
+
+const r = next_value(x = 41)
+cassert(r == 42)
+cassert(r.x == 42)
+
+// A non-shared-name control in the same file (this part is correct).
+comb inc(a) -> (r) {
+  r = a + 1
+}
+
+const c = inc(a = 41)
+cassert(c == 42)
+cassert(c.r == 42)

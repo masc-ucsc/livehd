@@ -1,0 +1,22 @@
+/*
+:name: adv_arg_naming_18
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// FINDING: an output name equal to an input name is documented as legal
+// (06-functions.md: `comb next_value(x) -> (x) { x = x + 1 }`). Reads before
+// the assignment use the input value; the assignment binds the output. The
+// single-arg exception applies to the call and the single-field output tuple
+// auto-unwraps. All these casserts are true per the docs, but the compiler
+// mis-folds (returns the input, not the assigned output) and chaining two such
+// calls aborts internally (blop.hpp dest_sz>=1).
+
+comb next_value(x) -> (x) { x = x + 1 }
+comb twice(x) -> (x) { x = x + x }
+
+cassert(next_value(0) == 1)            // single-arg unnamed, output unwraps
+cassert(next_value(-1) == 0)
+cassert(twice(next_value(3)) == 8)     // chained: (3+1)*2
+cassert(next_value(x = 41) == 42)      // explicit named also fine

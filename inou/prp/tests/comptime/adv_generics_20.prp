@@ -1,0 +1,20 @@
+/*
+:name: adv_generics_20
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// A generic binds to ANY type — `does` enumerates `boolean` as a basic type,
+// and binding is a pure type-macro expansion. So an identity generic over a
+// bool actual must round-trip the value unchanged.
+comb idg<T>(a:T) -> (r:T) { r = a }
+
+// bool round-trips through an explicit-bound generic
+cassert(idg<bool>(a=true) == true)
+cassert(idg<bool>(a=false) == false)
+// bool round-trips through inference
+cassert(idg(a=true) == true)
+// non-bool round-trips for contrast
+cassert(idg<u8>(a=200) == 200)
+cassert(idg(a=i8(-7)) == -7)

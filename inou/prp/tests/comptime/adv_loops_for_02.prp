@@ -1,0 +1,24 @@
+/*
+:name: adv_loops_for_02
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// FINDING: enumerate() loop body. Per 05b-statements.md the canonical form is
+//   for (index,i) in bund.enumerate() { ... }   (doc lines ~258, ~270)
+// Here the body runs once per element, so the index-sum is 0+1+2+3 = 6 and the
+// value-sum is 10+20+30+40 = 100. Both casserts are true per the spec.
+mut bund = (10, 20, 30, 40)
+
+mut idx_sum = 0
+for (index, i) in bund.enumerate() {
+  idx_sum = idx_sum + index
+}
+cassert(idx_sum == 6)
+
+mut val_sum = 0
+for (index, i) in bund.enumerate() {
+  val_sum = val_sum + i
+}
+cassert(val_sum == 100)

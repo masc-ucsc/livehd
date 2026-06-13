@@ -1,0 +1,29 @@
+/*
+:name: adv_mix_loop_accum_11
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// FINDING CANDIDATE: doc-canonical `for (index,v) in t.enumerate()` loop
+// (05b-statements.md lines 258-261) does not iterate at comptime — the body
+// never runs, so accumulators stay at their init value. All three casserts
+// below are true per the docs.
+const bund = (1,2,3,4)
+mut sum_via_index = 0
+for (index, v) in bund.enumerate() {
+  sum_via_index = sum_via_index + bund[index]
+}
+cassert(sum_via_index == 10)
+
+mut sum_via_val = 0
+for (index, v) in bund.enumerate() {
+  sum_via_val = sum_via_val + v
+}
+cassert(sum_via_val == 10)
+
+mut idx_acc = 0
+for (index, v) in bund.enumerate() {
+  idx_acc = idx_acc + index
+}
+cassert(idx_acc == 6)

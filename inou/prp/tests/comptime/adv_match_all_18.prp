@@ -1,0 +1,21 @@
+/*
+:name: adv_match_all_18
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// match used inside an expression that is further combined; precedence-safe parens
+const x = 4
+
+const r = (match x { < 5 { 3 } else { 7 } }) + 1
+cassert(r == 4)
+
+const r2 = 10 * (match x { in (4,5) { 2 } else { 9 } })
+cassert(r2 == 20)
+
+const r3 = (match x { == 4 { 1 } else { 0 } }) & (3 + 4)
+cassert(r3 == 1)
+
+const r4 = (match x { > 0 { true } else { false } }) and (x != 0)
+cassert(r4 == true)

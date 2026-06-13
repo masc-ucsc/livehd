@@ -1,0 +1,17 @@
+/*
+:name: adv_bitwise_02
+:type: comptime
+:verifier_pass: 7
+:verifier_fail: 0
+*/
+
+// De Morgan's laws expressed with ~(...) form (the only spelling that parses)
+const a = 0sb0110_1001    // 105
+const b = 0sb0011_1100    // 60
+cassert(a == 105 and b == 60)
+cassert(~(a & b) == ((~a) | (~b)))   // De Morgan #1
+cassert(~(a | b) == ((~a) & (~b)))   // De Morgan #2
+cassert((a & b) == 40)
+cassert((a | b) == 125)
+cassert((a ^ b) == 85)
+cassert(~(a ^ b) == ~85)             // xnor == not xor

@@ -1,0 +1,25 @@
+/*
+:name: adv_bit_assign_06
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Build value in a loop (comptime fully unrolled), check at top level.
+// FINDING: LHS single-bit assign t#[i]=1 inside a for-loop INSIDE a comb
+// body is dropped (returns 0). The identical loop works at top level, and
+// non-loop bit writes inside a comb work; only loop+function drops them.
+comb build_ones(n:u4) -> (r:u8) {
+  mut t:u8 = nil
+  t#[0..=7] = 0
+  for i in 0..<n {
+    t#[i] = 1
+  }
+  r = t
+}
+const v3 = build_ones(n=3)
+const v0 = build_ones(n=0)
+const v8 = build_ones(n=8)
+cassert(v3 == 0ub0000_0111)
+cassert(v0 == 0)
+cassert(v8 == 0ub1111_1111)

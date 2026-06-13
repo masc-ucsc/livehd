@@ -1,0 +1,17 @@
+/*
+:name: adv_shifts_06
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// Shift-by-tuple builds a one-hot set of bits (1 << each element OR'd together)
+const a = 1 << (0,)            // single-element tuple, bit 0 set
+cassert(a == 1)
+const b = 1 << (0, 1, 2, 3)    // bits 0..3 -> 0b1111 == 15
+cassert(b == 15)
+const c = 1 << (4,)            // bit 4
+cassert(c == 16)
+const d = 1 << (1, 4, 3)       // bits 1,3,4 -> 0ub01_1010 == 26
+cassert(d == 0ub01_1010)
+cassert(d == 26)

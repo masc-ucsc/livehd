@@ -1,0 +1,22 @@
+/*
+:name: adv_int_div_13
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Division result fits into typed destinations (range-fit check).
+// FINDING: the range/bitwidth pass appears to check the DIVIDEND's range
+// against the destination type instead of the QUOTIENT's. `(-9)/3 == -3`
+// clearly fits int(min=-3,max=3), but the fit check rejects it as
+// "value -9 does not fit". The plain `q == -3` cassert proves the value
+// is really -3.
+const a:u8 = 200 / 2
+const b:i4 = (-14) / 2
+const c:u1 = 5 / 5
+const d:int(min=-3, max=3) = (-9) / 3
+
+cassert(a == 100)
+cassert(b == -7)
+cassert(c == 1)
+cassert(d == -3)

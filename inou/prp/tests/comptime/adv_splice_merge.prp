@@ -1,0 +1,13 @@
+/*
+:name: adv_splice_merge
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+// 03-bundle.md: `(...a, ...b)` splices/merges both tuples' fields into a new tuple.
+const a = (mut x = 1, mut y = 2)
+const b = (const z = 3)
+const c = (...a, ...b)
+cassert(c == (const x = 1, const y = 2, const z = 3))
+cassert(c == (1, 2, 3))
+cassert(c.z == 3)

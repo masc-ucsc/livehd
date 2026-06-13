@@ -1,0 +1,21 @@
+/*
+:name: adv_mix_deep_fold_21
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Verbatim init-constructor example from 06-functions.md ("Init (constructor)"):
+// an inline anonymous tuple type with an `init` comb. Construction must run
+// init(ref constructed, 0), so the field becomes 0 + 1 == 1.
+mut constructed:(
+  mut field:u32,
+  comb init(ref self, v) { self.field = v + 1 }
+) = 0
+cassert(constructed.field == 1)
+
+constructed.field = 7     // plain write, no hook
+cassert(constructed.field == 7)
+
+// And the constructed field is not its raw default.
+cassert(constructed.field != 0)

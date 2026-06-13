@@ -1,0 +1,14 @@
+/*
+:name: adv_enum_seq_11
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// i4 signed type forces sequential, with a negative explicit start
+enum V:i4 = (a=-2, b, c, d)
+cassert(int(V.a) == -2)
+cassert(int(V.b) == -1)
+cassert(int(V.c) == 0)
+cassert(int(V.d) == 1)
+cassert(int(V.d) - int(V.a) == 3)

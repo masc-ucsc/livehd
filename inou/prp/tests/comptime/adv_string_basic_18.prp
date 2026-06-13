@@ -1,0 +1,20 @@
+/*
+:name: adv_string_basic_18
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Documented implicit conversion at a typed declaration (02-basics.md):
+//   mut a:string = "127"
+//   mut b:int    = a        // same as mut b = int(a)
+//   mut c:string = b        // same as mut c = string(b)
+//   cassert(a == c)
+//   cassert(b == 0x7F)
+mut a:string = "127"
+mut b:int = a
+mut c:string = b
+cassert(a == c)
+cassert(b == 0x7F)
+cassert(b == 127)
+cassert(a == "127")

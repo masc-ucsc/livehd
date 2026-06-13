@@ -1,0 +1,11 @@
+/*
+:name: adv_string_bool
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+// string(bool) renders the literal word; string(integer) is decimal text.
+cassert(string(true)  == "true")
+cassert(string(false) == "false")
+cassert(string(1)  == "1")      // control: integer string is decimal (works)
+cassert(string(-1) == "-1")

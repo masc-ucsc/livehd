@@ -1,0 +1,14 @@
+/*
+:name: adv_bitwise_18
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// One-hot construction with shift by a tuple (02-basics / 04-variables.md line 567):
+//   1 << (1,4,3) == 0ub01_1010
+cassert((1 << (1,4,3)) == 0ub01_1010)
+cassert((1 << (0,1,2)) == 0ub111)
+cassert((1 << (0,)) == 1)
+cassert((1 << (3,)) == 8)
+cassert((1 << (1,2)) == 0ub110)

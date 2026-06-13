@@ -1,0 +1,29 @@
+/*
+:name: adv_mix_generic_tuple_03
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Nested generic calls: result of one generic feeds another, type inferred
+// through the named-field tuple at each layer.
+comb pair<T>(a:T, b:T) -> (p:(first:T, second:T)) {
+  p = (first = a, second = b)
+}
+
+comb sum_pair<T>(p:(first:T, second:T)) -> (s:T) {
+  s = p.first + p.second
+}
+
+// inner is the single-field output `p`, which auto-unwraps to the tuple.
+const inner = pair<u8>(a = 100, b = 50)
+const total = sum_pair<u9>(p = inner)
+cassert(total == 150)
+
+// Fully nested in one expression.
+const total2 = sum_pair<int>(p = pair<int>(a = 3, b = 4))
+cassert(total2 == 7)
+
+// Inference all the way through.
+const total3 = sum_pair(p = pair(a = 1000, b = 24))
+cassert(total3 == 1024)

@@ -1,0 +1,11 @@
+/*
+:name: adv_unary_minus
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+// Unary minus is integer; nesting it keeps the integer kind.
+cassert(-(-5) == 5)
+cassert(-(-(-5)) == -5)
+cassert(-(-(-(-7))) == 7)
+cassert((-(-3)) + 1 == 4)

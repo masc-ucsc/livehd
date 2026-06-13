@@ -1,0 +1,12 @@
+/*
+:name: adv_splice_extend
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+// 03-bundle.md: extend a tuple by splicing it into a new literal with extra fields.
+const y  = (mut ff = 1, const zz = 3)
+const y2 = (...y, qq = 2)
+cassert(y2 == (1, 3, 2))
+cassert(y2.qq == 2)
+cassert(y2.ff == 1)

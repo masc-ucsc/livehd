@@ -1,0 +1,15 @@
+/*
+:name: adv_shifts_13
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// Arithmetic right shift saturates: a negative value drains to -1, a positive
+// value drains to 0, for ANY shift amount (no >64-bit limit, no crash).
+cassert((5 >> 10) == 0)            // positive drains to 0
+cassert((1 >> 1) == 0)
+cassert((-5 >> 10) == -1)          // negative drains to -1 (all sign bits)
+cassert((-1 >> 1000) == -1)
+cassert((-1 >> 10000) == -1)       // large amount must still fold to -1 (not crash)
+cassert((123456789 >> 50) == 0)

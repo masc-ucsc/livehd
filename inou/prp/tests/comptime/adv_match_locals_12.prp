@@ -1,0 +1,26 @@
+/*
+:name: adv_match_locals_12
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Two sequential matches, each declaring a local with the SAME name `t`.
+// Each scope is closed, so re-using `t` is not a shadow.
+comb a_val() -> (r) { r = 1 }
+comb b_val() -> (r) { r = 2 }
+
+mut r1 = 0
+match const t = a_val(); t {
+  == 1 { r1 = t * 10 }
+  else { cassert(false) }
+}
+cassert(r1 == 10)
+
+mut r2 = 0
+match const t = b_val(); t {
+  == 2 { r2 = t * 100 }
+  else { cassert(false) }
+}
+cassert(r2 == 200)
+cassert(t == nil)

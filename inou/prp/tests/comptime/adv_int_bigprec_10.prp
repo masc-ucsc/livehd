@@ -1,0 +1,18 @@
+/*
+:name: adv_int_bigprec_10
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// Population count on big sparse and dense values.
+const sparse:u160 = (1 << 159) | (1 << 80) | (1 << 0)
+cassert(sparse#+[0..=159] == 3)
+
+const dense:u128 = (1 << 128) - 1
+cassert(dense#+[0..=127] == 128)
+
+const half:u128 = 0x0000000000000000FFFFFFFFFFFFFFFF
+cassert(half#+[0..=127] == 64)
+cassert(half#+[0..=63]  == 64)
+cassert(half#+[64..=127] == 0)

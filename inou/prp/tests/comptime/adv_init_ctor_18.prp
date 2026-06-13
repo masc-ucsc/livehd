@@ -1,0 +1,31 @@
+/*
+:name: adv_init_ctor_18
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// init with wrap/sat narrowing inside the constructor body. Probe wrap overflow
+// boundary on u4 (max 15) and sat clamp.
+// SUSPECTED BUG: `wrap self.field = v` inside init stores v verbatim (17) into
+// the u4 field instead of wrapping to 1; the same `wrap` at top level folds
+// correctly. Only the over-range `a` case (v=17) fails; in-range b/c pass.
+
+type Reg4 = (
+  mut wrapped:u4 = nil,
+  mut satted:u4 = nil,
+  comb init(ref self, v) {
+    wrap self.wrapped = v        // v may exceed u4 -> wraps mod 16
+    sat  self.satted  = v        // v above 15 -> clamps to 15
+  }
+)
+
+mut a:Reg4 = 17    // 17 mod 16 = 1 ; sat -> 15
+mut b:Reg4 = 15    // exact max, no overflow
+mut c:Reg4 = 0     // zero
+
+cassert(a.wrapped == 1)
+cassert(a.satted == 15)
+cassert(b.wrapped == 15)
+cassert(b.satted == 15)
+cassert(c.wrapped == 0)

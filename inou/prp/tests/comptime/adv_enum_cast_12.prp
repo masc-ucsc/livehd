@@ -1,0 +1,21 @@
+/*
+:name: adv_enum_cast_12
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// Typed enum variable assigned via name parse, compared by name
+enum Phase = (Fetch, Decode, Execute, Write)
+
+mut p:Phase = Phase.Fetch
+cassert(p == Phase.Fetch)
+
+p = Phase("Execute")
+cassert(p == Phase.Execute)
+cassert(p != Phase.Fetch)
+
+p = Phase.Write
+cassert(string(p) == "Phase.Write")
+cassert(int(p) == 8)   // one-hot: Fetch=1, Decode=2, Execute=4, Write=8
+cassert(p in Phase)

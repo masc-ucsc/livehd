@@ -1,0 +1,21 @@
+/*
+:name: adv_tuple_access_16
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// Mutate a named field through a string selector, then read it back.
+type Person = (name:string = "", mut age:u32 = 0)
+mut a = (
+  ,mut one:Person = (name = "one", age = 0)
+  ,mut two:Person = (name = "two", age = 0)
+)
+a['one'].age = 10
+a['two'].age = 20
+
+cassert(a.one.age == 10)
+cassert(a.two.age == 20)
+cassert(a['one'].age == 10)
+cassert(a.one.name == "one")
+cassert(a.two.name == "two")

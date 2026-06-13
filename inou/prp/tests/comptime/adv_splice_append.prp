@@ -1,0 +1,13 @@
+/*
+:name: adv_splice_append
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// 05b-statements.md array-builder idiom (replaces `++=`): rebuild with `...`.
+mut acc:[] = nil
+for i in 0..<5 {
+  acc = (...acc, i)
+}
+cassert(acc == (0, 1, 2, 3, 4))
+cassert(acc[3] == 3)

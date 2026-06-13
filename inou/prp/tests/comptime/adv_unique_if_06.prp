@@ -1,0 +1,19 @@
+/*
+:name: adv_unique_if_06
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// Declaration list in the unique-if/elif headers (doc 05b lines 53-57).
+// Each header may declare locals restricted to the remaining chain.
+const x = 10
+mut out = 0
+unique if mut x1 = x + 1; x1 == 12 { out = 1 }
+elif mut x2 = x + 1; x2 == 11 { out = 2 }
+else { out = 3 }
+cassert(out == 2)
+
+// Declaration used in the taken arm body (expression form, leading header)
+const r = unique if mut t = x * 2; t == 20 { t + 5 } else { 0 }
+cassert(r == 25)

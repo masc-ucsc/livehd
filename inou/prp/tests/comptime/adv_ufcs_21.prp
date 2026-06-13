@@ -1,0 +1,25 @@
+/*
+:name: adv_ufcs_21
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// Doc 06-functions.md line 476 shows `comb upd(ref self) { sat self.val += 1 }`
+// as a valid method form, and wrap/sat are per-write qualifiers. A ref-self
+// method applying wrap / sat to a u8 field should fold like top-level wrap/sat.
+const Reg8 = (
+  mut v:u8 = 0,
+  comb addw(ref self, x) { wrap self.v += x },   // 250+10 -> wraps to 4
+  comb adds(ref self, x) { sat self.v += x }      // 250+10 -> saturates to 255
+)
+
+mut a:Reg8 = nil
+a.v = 250
+a.addw(x=10)
+cassert(a.v == 4)
+
+mut b:Reg8 = nil
+b.v = 250
+b.adds(x=10)
+cassert(b.v == 255)

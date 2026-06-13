@@ -1,0 +1,28 @@
+/*
+:name: adv_comb_basic_11
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Argument-naming exception: passing a variable whose name matches the param.
+comb scale(a, b) -> (r) { r = a * b }
+
+const a = 6
+const b = 7
+const p = scale(a, b)
+cassert(p == 42)
+
+// Mixed: one matches by name, the other named explicitly.
+const q = scale(a, b=10)
+cassert(q == 60)
+
+// Both explicit names but swapped order still binds correctly.
+const r = scale(b=3, a=4)
+cassert(r == 12)
+
+// Single matching-name variable into a one-arg comb.
+comb negate(a) -> (r) { r = 0 - a }
+const aa = 5
+const s = negate(aa)
+cassert(s == -5)

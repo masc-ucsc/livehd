@@ -1,0 +1,15 @@
+/*
+:name: adv_int_prec_16
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Doc 04-variables.md line ~568: 1<<(1,4,3) one-hot == 0ub01_1010 (=26).
+// '<<' (prio 3) binds tighter than '==' (prio 4), so no extra parens needed.
+const a = 1 << (1, 4, 3)
+cassert(a == 0ub01_1010)
+const b = (1 << 3) | (1 << 0)
+cassert(b == 9)
+const c = 1 << (0, 7)
+cassert(c == 0ub1000_0001)

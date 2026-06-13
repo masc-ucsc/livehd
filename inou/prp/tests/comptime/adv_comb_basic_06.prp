@@ -1,0 +1,25 @@
+/*
+:name: adv_comb_basic_06
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Input/output share the same source name: comb f(x) -> (x).
+comb next_value(x) -> (x) {
+  x = x + 1
+}
+
+const a = next_value(x=41)
+cassert(a == 42)
+
+const b = next_value(x=-1)
+cassert(b == 0)
+
+// Chained: reads of x inside use input value, then bind output.
+const c = next_value(x=next_value(x=98))
+cassert(c == 100)
+
+// Auto-unwrap on the shared name output.
+const d = next_value(x=0)
+cassert(d == 1 and d.x == 1)

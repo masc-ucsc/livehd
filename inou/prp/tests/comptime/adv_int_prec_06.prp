@@ -1,0 +1,14 @@
+/*
+:name: adv_int_prec_06
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Doc 04-variables.md line ~840: (x or !y) == (x or (!y)) == (x or not y)
+// Parenthesizing the unary on the RHS of `or` must stay boolean.
+const x = true
+const y = false
+cassert((x or !y) == (x or (!y)))
+cassert((x or (!y)) == (x or not y))
+cassert(x or (!y))

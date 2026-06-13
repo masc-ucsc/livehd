@@ -1,0 +1,26 @@
+/*
+:name: adv_equals_is_has_in_09
+:type: comptime
+:verifier_pass: 7
+:verifier_fail: 0
+*/
+
+// does on tuples: structural superset; extra fields allowed.
+const small = (a=1, b=2)
+const big = (a=10, b=20, c=30)
+cassert(big does small)
+cassert(not (small does big))
+
+// fully-named tuples ignore field order in does
+const m3 = (b=2, a=0)
+cassert(small does m3)
+cassert(m3 does small)
+
+// per-field type matters (07-typesystem.md lines 185-186): a string-typed
+// field is NOT a superset of an int-valued field of the same name.
+cassert((const a:string=nil, const b:int=nil) does (const a="hello", const b=33))
+cassert(not ((const b:string=nil, const a:int=nil) does (const a="hello", const b=33)))
+
+// nil rule: a non-tuple x does nil is true
+mut z:u8 = 5
+cassert(z does nil)

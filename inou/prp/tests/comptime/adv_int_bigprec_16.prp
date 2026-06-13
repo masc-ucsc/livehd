@@ -1,0 +1,14 @@
+/*
+:name: adv_int_bigprec_16
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// Big-integer division — exact quotients well beyond 64 bits.
+cassert((1 << 100) / (1 << 50) == (1 << 50))
+cassert((1 << 128) / 2 == (1 << 127))
+cassert(1000000000000000000000000 / 1000000000000 == 1000000000000)
+cassert((1 << 100) / 1 == (1 << 100))
+cassert(((1 << 80) + (1 << 40)) / (1 << 40) == (1 << 40) + 1)
+cassert(-(1 << 90) / (1 << 45) == -(1 << 45))

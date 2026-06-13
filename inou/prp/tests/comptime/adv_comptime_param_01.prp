@@ -1,0 +1,17 @@
+/*
+:name: adv_comptime_param_01
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// Documented comptime parameter slot (06-functions.md, COMPTIME section):
+// `comb g[n:int=1](x) -> (r)`, default used when caller omits the slot,
+// overridden via `g[3](x=2)`. The [..] slot is comptime.
+comb g[n:int=1](x) -> (r) { r = x * n }
+
+const a = g[3](x=2)   // override the comptime param -> 6
+const b = g(x=5)      // use the default n==1 -> 5
+
+cassert(a == 6)
+cassert(b == 5)

@@ -1,0 +1,14 @@
+/*
+:name: adv_unknown_bits_11
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Per 04-variables.md: `a case b` requires every DEFINED bit of `b` to match
+// `a`; only ? bits are wildcards. When a known bit of the pattern contradicts
+// the value, `case` must be false (and `not(case)` true).
+cassert(not (0ub1101 case 0ub10??))   // pattern needs bit2=0, value has bit2=1
+cassert(not (0ub0011 case 0ub10??))   // pattern needs bit3=1, value has bit3=0
+cassert(not (0ub1011 case 0ub0???))   // pattern needs bit3=0, value has bit3=1
+cassert(not (0ub1111 case 0ub0??0))   // bit3 and bit0 both mismatch

@@ -1,0 +1,16 @@
+/*
+:name: adv_tuple_mut_12
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Write through a string selector and a dot selector are equivalent paths.
+// Both update the same mut named field.
+mut t = (mut one=1, mut two=2)
+t['one'] = 11
+t.two = 22
+cassert(t.one == 11)
+cassert(t['one'] == 11)
+cassert(t.two == 22)
+cassert(t == (const one=11, const two=22))

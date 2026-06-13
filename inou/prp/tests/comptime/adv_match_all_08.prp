@@ -1,0 +1,21 @@
+/*
+:name: adv_match_all_08
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// strict-less-than comparison arm at every boundary around the threshold
+comb f(v) -> (r) {
+  r = match v {
+    < 0  { 100 }
+    < 10 { 200 }
+    else { 300 }
+  }
+}
+
+cassert(f(v=-1) == 100)
+cassert(f(v=0)  == 200)
+cassert(f(v=9)  == 200)
+cassert(f(v=10) == 300)
+cassert(f(v=11) == 300)

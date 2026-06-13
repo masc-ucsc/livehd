@@ -1,0 +1,19 @@
+/*
+:name: adv_enum_match_identity
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+// An enum value must keep its identity as a match selector through a function
+// parameter — `== Enum.Entry` arms must fold, not fall through to `else`.
+enum Op = (add, sub, mul)
+comb classify(o:Op) -> (r) {
+  r = match o {
+    == Op.add { 1 }
+    == Op.sub { 2 }
+    else      { 0 }
+  }
+}
+cassert(classify(o=Op.add) == 1)
+cassert(classify(o=Op.sub) == 2)
+cassert(classify(o=Op.mul) == 0)

@@ -1,0 +1,19 @@
+/*
+:name: adv_ufcs_05
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Doc 06-functions.md lines 716-720: a free `comb set_x(ref self, x) -> (self)`
+// called via UFCS. An in-place call mutates the receiver; a result-bound call
+// must NOT mutate the original. Doc asserts: a_1.x == 10 and a_3.x == 20.
+comb set_x(ref self, x) -> (self) { self.x = x }
+
+mut a1 = (mut x:u10 = 0)
+a1.set_x(x=10)              // in-place mutate: a1.x = 10
+mut a3 = a1.set_x(x=20)    // bound copy-return: a3.x = 20, a1 unchanged
+
+cassert(a3.x == 20)
+cassert(a1.x == 10)
+cassert(a1.x != a3.x)

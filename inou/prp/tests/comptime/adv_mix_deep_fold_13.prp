@@ -1,0 +1,24 @@
+/*
+:name: adv_mix_deep_fold_13
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// Power-of-two literal modifiers K/M/G/T, per 02-basics.md:
+//   1K == 1024, 1M == 1024*1024, 1G == 1024^3, 1T == 1024^4
+const a = 1K
+cassert(a == 1024)
+
+const b = 1M
+cassert(b == 1024 * 1024)
+
+const c = 1G
+cassert(c == 1024 * 1024 * 1024)
+
+const d = 1T
+cassert(d == 1024 * 1024 * 1024 * 1024)
+
+// Mixed power-of-two modifiers in one chained expression.
+const e = 2K + 3M + 1G
+cassert(e == ((2 * 1024) + (3 * 1024 * 1024)) + (1024 * 1024 * 1024))

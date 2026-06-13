@@ -1,0 +1,17 @@
+/*
+:name: adv_unknown_bits_21
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// FINDING: a code-block-as-expression whose value is an OR/shift of an
+// unknown-bit operand mishandles x-propagation. Each cassert is true per the
+// docs (`0ub? | 1 == 1`, mask-then-shift folds), and the equivalent top-level
+// forms all fold correctly, but these block-expression forms do not.
+const forced = { mut s = 0ub? ; s | 1 }            // 0ub? | 1 == 1
+cassert(forced == 1)
+const shifted = { const u1 = 0ub1?0 ; (u1 & 0ub100) << 1 }  // mask, then shift
+cassert(shifted == 0ub1000)
+const forced2 = { const u2 = 0sb? ; u2 | 0sb1111 } // OR all-ones -> -1
+cassert(forced2 == 0sb1)

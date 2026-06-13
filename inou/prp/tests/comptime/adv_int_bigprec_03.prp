@@ -1,0 +1,16 @@
+/*
+:name: adv_int_bigprec_03
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// Negative big values: arithmetic negation, sign of products, big subtraction.
+const big   = 1 << 90
+const negb  = -big
+cassert(negb == -1237940039285380274899124224)
+cassert(negb + big == 0)
+cassert(negb * -1 == big)
+cassert((-big) * (-big) == big * big)
+cassert(big * -3 == -3 * big)
+cassert((1 - (1 << 100)) == -(1267650600228229401496703205375))

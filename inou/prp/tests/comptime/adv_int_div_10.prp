@@ -1,0 +1,23 @@
+/*
+:name: adv_int_div_10
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Large unlimited-precision integers divide exactly (beyond 64 bits).
+// FINDING: division of an integer whose magnitude exceeds 64 bits aborts
+// (Abort trap: 6) even though the docs promise unlimited precision and the
+// same operands handle +, *, and == fine. `big` here is 2^80; `big*3` and
+// the comparisons all work, but `big / 1024`, `big / 2`, `big / big`, and
+// `(big*3)/3` all crash the compiler.
+const big = 1208925819614629174706176   // 2^80
+const a = big / 1024                     // 2^70
+const b = big / 2                        // 2^79
+const c = (big * 3) / 3
+const d = big / big
+
+cassert(a == 1180591620717411303424)
+cassert(b == 604462909807314587353088)
+cassert(c == big)
+cassert(d == 1)

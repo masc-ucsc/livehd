@@ -1,0 +1,15 @@
+/*
+:name: adv_cmp_bool_19
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// big unlimited-precision integer comparisons using K/M/G/T modifiers
+// (documented in 02-basics.md: 1K==1024 ... 1T==1024^4)
+cassert(1K == 1024)
+cassert(1M == 1024 * 1024)
+cassert(1G == 1024 * 1024 * 1024)
+cassert(1T == 1024 * 1024 * 1024 * 1024)
+// chained comparison over the modifiers
+cassert(1K < 1M < 1G < 1T)

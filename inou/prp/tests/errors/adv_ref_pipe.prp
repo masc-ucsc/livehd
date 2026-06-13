@@ -1,0 +1,11 @@
+/*
+:name: adv_ref_pipe
+:type: error
+:error: ref
+*/
+// `ref` is comb-only; a `pipe` boundary must reject a `ref` parameter.
+// (:error: regex is a placeholder — align to the real diagnostic.)
+pipe[1] p(ref a:u8) -> (o:u8) {
+  a += 1
+  o = a
+}

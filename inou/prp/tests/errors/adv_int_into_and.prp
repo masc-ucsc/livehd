@@ -1,0 +1,9 @@
+/*
+:name: adv_int_into_and
+:type: error
+:error: (and|boolean)
+*/
+// `and`/`or` are boolean-only; an integer operand is a compile error
+// (even via a bitwise result: `~n1 and true` is also an error).
+const n1:u3 = 1
+const r = n1 and true

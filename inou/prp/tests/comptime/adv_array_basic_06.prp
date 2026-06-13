@@ -1,0 +1,18 @@
+/*
+:name: adv_array_basic_06
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// Signed-range array index: declared over -4..<4 (8 entries). Reading and
+// writing at the negative boundary, zero, and positive boundary.
+mut a:[-4..<4]i5 = nil
+a[-4] = -3
+a[0]  = 7
+a[3]  = 3
+cassert(a[-4] == -3)
+cassert(a[0] == 7)
+cassert(a[3] == 3)
+cassert(a[-1] == 0)
+cassert(a[1] == 0)

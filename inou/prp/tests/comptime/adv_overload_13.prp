@@ -1,0 +1,21 @@
+/*
+:name: adv_overload_13
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// int(min,max) range candidates with adjacent, non-overlapping windows.
+// The literal must pick the candidate whose declared range contains it.
+comb lo(a:int(min=0, max=99))    -> (r:int) { r = a + 1 }
+comb hi(a:int(min=100, max=199)) -> (r:int) { r = a + 2 }
+
+const p = [lo, hi]
+
+const at99  = p(99)    // fits lo
+const at100 = p(100)   // overflows lo (max 99) -> hi
+const at0   = p(0)     // fits lo
+
+cassert(at99 == 100)
+cassert(at100 == 102)
+cassert(at0 == 1)

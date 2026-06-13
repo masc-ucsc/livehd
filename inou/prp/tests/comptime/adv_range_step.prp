@@ -1,0 +1,16 @@
+/*
+:name: adv_range_step
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// 03-bundle.md ranges: `step N` strides the range; bounds are comptime so the
+// for unrolls. (No `++` here — isolates the `step` parse from tuple concat.)
+mut cnt  = 0
+mut last = 0
+for i in 0..<10 step 2 {
+  cnt  = cnt + 1
+  last = i
+}
+cassert(cnt == 5)
+cassert(last == 8)

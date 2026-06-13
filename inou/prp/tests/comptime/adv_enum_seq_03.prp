@@ -1,0 +1,13 @@
+/*
+:name: adv_enum_seq_03
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Integer type on the enum forces sequential numbering even with no explicit value
+enum V:int = (a, b, c)
+cassert(int(V.a) == 0)
+cassert(int(V.b) == 1)
+cassert(int(V.c) == 2)
+cassert(int(V.c) == int(V.a) + 2)

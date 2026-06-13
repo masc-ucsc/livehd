@@ -1,0 +1,29 @@
+/*
+:name: adv_match_all_20
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// statement-form match assigning two outputs; exactly-one-branch over all kinds
+comb f(v) -> (lo, hi) {
+  match v {
+    == 0     { lo = 1 ; hi = 10 }
+    in (1,2) { lo = 2 ; hi = 20 }
+    < 5      { lo = 3 ; hi = 30 }
+    > 99     { lo = 4 ; hi = 40 }
+    else     { lo = 5 ; hi = 50 }
+  }
+}
+
+const a = f(v=0)
+const b = f(v=2)
+const c = f(v=4)
+const d = f(v=100)
+const e = f(v=50)
+
+cassert(a.lo == 1 and a.hi == 10)
+cassert(b.lo == 2 and b.hi == 20)
+cassert(c.lo == 3 and c.hi == 30)
+cassert(d.lo == 4 and d.hi == 40)
+cassert(e.lo == 5 and e.hi == 50)

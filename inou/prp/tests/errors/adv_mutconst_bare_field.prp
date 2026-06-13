@@ -1,0 +1,15 @@
+/*
+:name: adv_mutconst_bare_field
+:type: error
+:error: (mut|const)
+*/
+// A named field inside a `mut` tuple literal must declare its kind keyword
+// (`mut`/`const`). A bare `ff = 1` should be a compile error. (A `const` outer
+// tuple MAY use bare named fields — they inherit const — so this rule is
+// specific to `mut` tuple literals.)
+//
+// Currently the frontend ACCEPTS this (no error), so this test fails with
+// "expected a compile error, none was emitted" until 2f-mutconst lands.
+// The :error: regex above is a placeholder — align it to the real message.
+mut y = (ff = 1, zz = 3)
+cassert(y.ff == 1)

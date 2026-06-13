@@ -1,0 +1,20 @@
+/*
+:name: adv_comptime_param_16
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// Outer generic comb whose body adds the results of two nested generic calls,
+// each binding the SAME T explicitly. All values fold at comptime; the result
+// is a plain comptime integer the casserts check.
+comb twice<T>(x:T) -> (r) { r = x + x }
+comb quad<T>(x:T) -> (r) { r = twice<T>(x=x) + twice<T>(x=x) }
+
+const a = quad<u8>(x=3)    // (3+3)+(3+3) == 12
+const b = quad<i8>(x=-2)   // (-2-2)+(-2-2) == -8
+const c = quad<u16>(x=100) // 400
+
+cassert(a == 12)
+cassert(b == -8)
+cassert(c == 400)
