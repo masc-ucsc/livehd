@@ -4049,10 +4049,18 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
     if (ts_node_named_child_count(n) == 1) {
       TSNode           it = ts_node_named_child(n, 0);
       std::string_view itt(ts_node_type(it));
-      // Plain value item only: an `assignment` (`a=1`) / `unary_expression`
-      // (`...x` spread) is a genuine 1-element bundle, never grouping.
-      const bool       plain = itt != "assignment" && itt != "unary_expression" && itt != "comment";
-      const auto       tail  = text_between(ts_node_end_byte(it), ts_node_end_byte(n));
+      // Plain value item only: an `assignment` (`a=1`) is a genuine 1-element
+      // bundle, never grouping. A `unary_expression` is grouping too — `(-x)`,
+      // `(~x)`, `(not x)` unwrap so the inner value keeps its scalar kind (a
+      // 1-tuple would stamp Kind::tuple and a parent `+`/`&`/`==` would reject
+      // it; see 2f-unary_type) — EXCEPT a spread `...x`, which is a genuine
+      // 1-element bundle.
+      bool plain = itt != "assignment" && itt != "comment";
+      if (itt == "unary_expression") {
+        TSNode op_n = child_by_field(it, "operator");
+        plain = !ts_node_is_null(op_n) && std::string_view(ts_node_type(op_n)) != "op_spread";
+      }
+      const auto tail = text_between(ts_node_end_byte(it), ts_node_end_byte(n));
       if (plain && tail.find(',') == std::string_view::npos) {
         return expr_to_node(it);  // grouping — the value itself
       }

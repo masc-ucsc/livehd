@@ -82,7 +82,16 @@ cassert(~(a & b) == ((~a) | (~b)))  // De Morgan, untyped consts — same defect
   kind-less operand. Fixing kind propagation on the unary node should cover A/B/C.</p>
 
 <h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<p><strong>A/B/C — all fixed by one root-cause change.</strong> A parenthesized
+  <em>unary</em> expression (<code>(-x)</code>, <code>(~x)</code>, <code>(not x)</code>)
+  was NOT unwrapped by the grouping-unwrap in <code>prp2lnast.cpp</code>
+  (<code>expr_to_node</code>, the <code>tuple</code> single-item case): only the spread
+  <code>...x</code> is a genuine 1-element bundle, but the guard excluded ALL
+  <code>unary_expression</code>s. So <code>(-x)</code> became a 1-element tuple_add stamped
+  <code>Kind::tuple</code>, and a parent <code>+</code>/<code>&amp;</code>/<code>==</code>/<code>and</code>
+  rejected it. Fix: unwrap a single <code>unary_expression</code> unless its operator is
+  <code>op_spread</code>. All four <code>adv_*</code> tests pass; the two cross-group lock-in
+  error tests still pass; also fixes <code>adv_int_bigprec_03</code> (<code>(-big)*(-big)</code>).</p>
 
 <h2>Docs</h2>
 <ul>
