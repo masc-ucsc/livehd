@@ -69,7 +69,19 @@ const r = tw(nv(3))   // today: ABORT  (Assertion (dest_sz >= 1), addn, blop.hpp
 </ul>
 
 <h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<ul>
+<li><strong>A/B for division — done.</strong> Division by a comptime-known zero already
+  yields <code>nil</code> via <code>Dlop::div_op</code> (half 1); the missing half was the
+  report. <code>upass_constprop::process_div</code> now detects a known-zero divisor and emits
+  a clean <code>div-by-zero</code> compile error (with a span) instead of storing the nil — so
+  <code>1/0</code> no longer folds to a value that is both <code>==0</code> and <code>==1</code>.
+  Both <code>adv_div_by_zero</code> / <code>adv_div_by_zero_var</code> tests pass; normal
+  division still folds; no regressions.</li>
+</ul>
+<p><strong>Still pending:</strong> the general "any <code>nil</code> in a constprop output is a
+  diagnostic" half (only division is wired today), and the <code>addn dest_sz&gt;=1</code>
+  shared-io abort (<code>comb f(x)-&gt;(x)</code> chaining) — no tracked failing test, separate
+  scenario.</p>
 
 <h2>Notes</h2>
 <ul>

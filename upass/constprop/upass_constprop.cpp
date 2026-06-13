@@ -697,6 +697,25 @@ upass::Vote uPass_constprop::process_mult(std::string_view dst_name, Bundle& dst
 
 upass::Vote uPass_constprop::process_div(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
+  // Division by a comptime-known zero is an illegal operation: Dlop::div_op
+  // yields nil, and a nil reaching a constprop output must be REPORTED, not
+  // silently folded (`1/0` otherwise compares ==0 AND ==1). Emit a clean
+  // compile error rather than storing the nil. (2f-nil_diag)
+  for (size_t i = 1; i < src.size(); ++i) {
+    const Dlop d = operand_value(src[i]);
+    if (d.is_integer() && !d.has_unknowns() && d.is_known_zero()) {
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "div-by-zero",
+          .category = "type",
+          .pass     = "upass.constprop",
+          .message  = "division by zero is an illegal operation (the result is nil)",
+          .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+          .hint     = "guard the divisor so it is non-zero at compile time",
+      });
+      return classify_vote();  // do not fold/store the nil
+    }
+  }
   return push_nary(dst_name, src, [](Dlop& r, Dlop n) { r = r.div_op(n); });
 }
 
