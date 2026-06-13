@@ -34,14 +34,14 @@
   mut a = (a=1,b=2)
   const b = (c=3)
 
-  const ccat1 = a ++ b
+  const ccat1 = (...a, ...b)
   cassert(ccat1 == (a=1,b=2,c=3))
-  // Decision 1: `ccat1 == (1,2,3)` dropped — named tuples don't compare
-  // equal to unnamed tuples via positional cross-match.
+  // `ccat1 == (1,2,3)` is false — a named tuple never compares equal to an
+  // unnamed (positional) tuple via positional cross-match (see tuple_simple5).
 }
 
 {
-  cassert((1,a=2,c=3) ++ (b=20,33,d=30,4) == (1,a=2,c=3,b=20,33,d=30,4))
+  cassert((...(1,a=2,c=3), ...(b=20,33,d=30,4)) == (1,a=2,c=3,b=20,33,d=30,4))
 }
 
 {

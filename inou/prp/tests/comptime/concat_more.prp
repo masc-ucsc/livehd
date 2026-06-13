@@ -8,7 +8,7 @@
 {
   const lhs = (a=1,b=2)
   const rhs = (c=3,d=4)
-  const got = lhs ++ rhs
+  const got = (...lhs, ...rhs)
 
   cassert(got == (a=1,b=2,c=3,d=4))
   cassert(got.a + got.d == 5)
@@ -18,7 +18,7 @@
 {
   const lhs = (cfg=(lo=1,hi=2), tag=7)
   const rhs = (cfg=(bar=3,extra=4), out=8)
-  const got = lhs ++ rhs
+  const got = (...lhs, ...rhs)
 
   cassert(got.cfg.lo == 1)
   cassert(got.cfg.hi == 2)
@@ -28,14 +28,14 @@
 }
 
 {
-  const got = (lane=(zero=0)) ++ (lane=(one=1)) ++ (lane=(two=2))
+  const got = (...(lane=(zero=0)), ...(lane=(one=1)), ...(lane=(two=2)))
 
   cassert(got.lane == (zero=0,one=1,two=2))
   cassert(got.lane has 'one' and got.lane has 'two')
 }
 
 {
-  const got = (10,a=1) ++ (20,b=2,30) ++ (c=3,40)
+  const got = (...(10,a=1), ...(20,b=2,30), ...(c=3,40))
 
   cassert(got.a + got.b + got.c == 6)
   cassert(got[0] == 10)
@@ -53,14 +53,14 @@
 }
 
 {
-  const got = 5 ++ (a=6) ++ 7
+  const got = (5, ...(a=6), 7)
 
   cassert(got == (5,a=6,7))
   cassert(got[0] + got.a + got[1] == 18)
 }
 
 {
-  const got = (a=2, b=nil) ++ (a=2, b=10, c=3)
+  const got = (...(a=2, b=nil), ...(a=2, b=10, c=3))
 
   cassert(got.a == 2)
   cassert(got.b == 10)
@@ -73,6 +73,6 @@
   mut b = (mut f1:u32=3, mut f2:u32=4)
   a.f1 = nil
   b.f2 = nil
-  const x = a ++ b
+  const x = (...a, ...b)
   cassert(x.f1==3 and x.f2==2)
 }

@@ -9,7 +9,7 @@ mut hello = "hello"
 
 mut world = " world"
 
-const hw = hello ++ world ++ "!"
+const hw = string(hello, world, "!")
 
 cassert(hw == 'hello world!')
 

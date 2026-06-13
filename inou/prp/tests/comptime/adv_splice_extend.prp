@@ -7,6 +7,8 @@
 // 03-bundle.md: extend a tuple by splicing it into a new literal with extra fields.
 const y  = (mut ff = 1, const zz = 3)
 const y2 = (...y, const qq = 2)
-cassert(y2 == (1, 3, 2))
+// y2 = (ff=1, zz=3, qq=2): the splice keeps the field NAMES, so compare by
+// name (a named tuple never equals a positional one; see tuple_simple5).
+cassert(y2 == (ff = 1, zz = 3, qq = 2))
 cassert(y2.qq == 2)
 cassert(y2.ff == 1)

@@ -5,7 +5,7 @@
 */
 
 // Arithmetic requires integer operands; a string operand is a type error
-// (no implicit conversion). `++` is the string/tuple concat operator, not `+`.
+// (no implicit conversion). Use `string(s, ...)` for string concatenation, not `+`.
 
 mut s:string = "hi"
 mut x = s + 1

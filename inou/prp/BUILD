@@ -95,8 +95,12 @@ cc_binary(
         ["tests/equiv/*.prp"],
         # accum.prp is the aspirational call-site-phase file (stage[N]/@[N]):
         # no test header, no golden .v — it goes live with the call-site phase.
+        # splice_merge.prp (2f-splice subtask D) has a golden but needs runtime
+        # tuple_concat tolg lowering (a spliced bundle's runtime field wires are
+        # dropped today); it goes live once tolg gains lower_tuple_concat.
         exclude = [
             "tests/equiv/accum.prp",
+            "tests/equiv/splice_merge.prp",
         ],
     )
 ]

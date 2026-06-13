@@ -806,7 +806,10 @@ upass::Vote uPass_constprop::process_log_not(std::string_view dst_name, Bundle& 
 // in canonical order (attributes → named alphabetical → unnamed by
 // index), so name matching is direct and position matching falls out of
 // the unnamed-by-index ordering. Nested paths (`b.c`) walk by exact key.
-// Canonical key shape detection:
+// A NAMED tuple never compares equal to an UNNAMED (positional) one even
+// when the values line up — `(x=1,y=2) != (1,2)` — because their keys
+// differ (named vs "0"/"1"); see tuple_simple5 / tuple_doc2. Canonical key
+// shape detection:
 //   - "__attr"          → attribute (covered by Bundle::is_attribute)
 //   - "0", "1", …       → unnamed (first char is a digit)
 //   - anything else     → named (bare name)

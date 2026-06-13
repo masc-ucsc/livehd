@@ -5,7 +5,7 @@
 */
 
 // A variable's type cannot change after it is established: `d` is an integer,
-// so reassigning a tuple is an error. Use a new variable: `mut e = d ++ 60`.
+// so reassigning a tuple is an error. Use a new variable: `mut e = (d, 60)`.
 
 mut d = 2
-d = d ++ 60
+d = (d, 60)

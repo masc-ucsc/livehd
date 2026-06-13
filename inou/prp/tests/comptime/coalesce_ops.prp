@@ -37,7 +37,7 @@ while j < 2 {
 }
 cassert(w == 20)
 
-const t3 = (1, 2) ++ (3, 4)
+const t3 = (...(1, 2), ...(3, 4))
 cassert(t3[3] == 4)
 
 mut sel = 0

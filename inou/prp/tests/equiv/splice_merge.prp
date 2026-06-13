@@ -1,0 +1,16 @@
+/*
+:name: splice_merge
+:type: equiv
+:verilog_top: splice_merge.spl
+:pyrope_top: splice_merge.spl
+*/
+
+// 2f-splice RTL coverage: splice-merge a tuple whose fields are comb INPUTS
+// (`...a`), extend it with a const field, then feed the merged fields through
+// arithmetic to the output — so the splice lowers through tolg -> Verilog and
+// LECs against the golden.
+comb spl(in1:u8, in2:u8) -> (out:u16) {
+  const a = (mut p = in1, mut q = in2)
+  const m = (...a, const r = 7)        // splice-merge with runtime fields
+  out = (m.p + m.q + m.r) << 1         // out = (in1 + in2 + 7) * 2
+}

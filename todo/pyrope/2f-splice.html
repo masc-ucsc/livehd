@@ -101,7 +101,37 @@
 </ul>
 
 <h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<ul>
+<li><strong>A — grammar synced</strong> via the <code>MODULE.bazel</code> pin bump to
+  <code>ab2f8f2</code>: <code>++</code> no longer parses (<code>...</code> spread is the
+  surface).</li>
+<li><strong>B — all <code>++</code>/<code>++=</code> tests reworked to <code>...</code></strong>
+  (tuple_concat, concat_more, coalesce_ops, scalar_tuple, loop_equivalent, tuple_exclude,
+  tuple_doc2, tuple_simple2/6, tuple_simple_attr, attr_size, writer_rich, and the
+  <code>errors/concat_*</code> / <code>typecheck_*</code> / <code>bundle_compound_field</code>
+  tests). <strong>String concat is now <code>string(a, b, …)</code></strong> (multi-arg
+  <code>string()</code>), replacing <code>"a" ++ "b"</code>.</li>
+<li><strong>C — the four <code>adv_splice_*</code> comptime tests pass.</strong> Merge
+  <code>(...a,...b)</code>, extend <code>(...y, qq=2)</code>, self-splice append
+  <code>acc=(...acc,i)</code> (the <code>mut x:[]=nil</code> seed now declares an empty
+  array — clears <em>array_nil_shape</em>), and call-arg spread <code>foo(a=1, ...rest)</code>.
+  Scalar self-splice + duplicate-field errors still fire. <strong>Semantics note:</strong>
+  a spliced named tuple keeps its field NAMES — a named tuple never compares equal to a
+  positional one (<code>(x=1,y=2,z=3) != (1,2,3)</code>; see <code>tuple_simple5</code>), so
+  the merge/extend tests compare by name.</li>
+</ul>
+
+<h2>Subtasks — still pending</h2>
+<ul>
+<li><strong>D — equiv test (runtime hardware splice).</strong> <code>splice_merge.prp</code> +
+  golden <code>.v</code> exist but are <strong>excluded</strong> from the equiv harness (in
+  <code>inou/prp/BUILD</code>): tolg has no <code>tuple_concat</code> lowering, so a spliced
+  bundle's RUNTIME field wires (<code>...a</code> where <code>a</code>'s fields are comb
+  inputs) are dropped and the LEC fails. Goes live once tolg gains a
+  <code>lower_tuple_concat</code> that merges each operand bundle's field wires.</li>
+<li><strong>E — docs TBD.</strong> The <code>15-tbd.md</code> / <code>03-bundle.md</code>
+  <code>...</code> rows live in the <code>../docs</code> repo, which is not checked out here.</li>
+</ul>
 
 <h2>Equiv test spec (subtask D)</h2>
 <pre><code>// inou/prp/tests/equiv/splice_merge.prp

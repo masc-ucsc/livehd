@@ -96,6 +96,11 @@ constexpr std::string_view call_ufcs_arg_marker = "__ufcs_arg";
 // constrained types) or a named type directly.
 constexpr std::string_view call_generic_arg_marker = "__generic_arg";
 
+// prp2lnast wraps a call-argument spread (`f(..., ...rest)`) in a
+// `store(__spread_arg, rest)` marker; the runner expands rest's bundle fields
+// into named (non-numeric key) / positional (numeric key) actuals at gather.
+constexpr std::string_view call_spread_arg_marker = "__spread_arg";
+
 // Collect the NON-temporary variables that the `while` CONDITION reads
 // (transitively). `cond_ref` is the while's child-0 ref name; we trace its
 // definition backward through the while's preceding siblings (the cond
@@ -3113,6 +3118,37 @@ bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& 
           break;
         }
         explicit_generics.emplace_back(lm->current_text());
+        lm->restore_cursor(here);
+        continue;
+      }
+      // Call-argument spread (`f(..., ...rest)`): expand the referenced bundle's
+      // fields into named (non-numeric key) / positional (numeric key) actuals.
+      // The bundle is fully folded by constprop before the call resolves, so the
+      // field values are concrete consts (same shape as the named-bundle-leaf
+      // expansion at the bind loop above). An unresolved bundle expands to
+      // nothing (the call then fails arity/naming as before).
+      if (a.key == call_spread_arg_marker) {
+        if (!lm->move_to_sibling()) {
+          shape_ok = false;
+          lm->restore_cursor(here);
+          break;
+        }
+        const auto bundle_name = std::string(lm->current_text());
+        if (auto bf = try_bundle_fields(bundle_name)) {
+          for (const auto& [fld, val] : *bf) {
+            if (val.is_invalid()) {
+              continue;
+            }
+            const bool numeric = !fld.empty() && fld.find_first_not_of("0123456789") == std::string::npos;
+            Actual     sa;
+            sa.is_named = !numeric;
+            if (sa.is_named) {
+              sa.key = fld;
+            }
+            sa.node = Lnast_node::create_const(val.to_pyrope());
+            actuals.push_back(std::move(sa));
+          }
+        }
         lm->restore_cursor(here);
         continue;
       }

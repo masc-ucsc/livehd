@@ -9,5 +9,7 @@ const a = (mut x = 1, mut y = 2)
 const b = (const z = 3)
 const c = (...a, ...b)
 cassert(c == (const x = 1, const y = 2, const z = 3))
-cassert(c == (1, 2, 3))
+// the spliced tuple keeps its field NAMES — a named tuple never compares
+// equal to a positional one (`c == (1,2,3)` is false; see tuple_simple5).
+cassert(c == (x = 1, y = 2, z = 3))
 cassert(c.z == 3)

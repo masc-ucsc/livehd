@@ -34,6 +34,11 @@ static constexpr std::string_view call_ufcs_arg_marker = "__ufcs_arg";
 // or a `declare(tmp, prim_type, 'type')` tmp the runner resolves through the
 // same decl-facts ladder as a declared variable.
 static constexpr std::string_view call_generic_arg_marker = "__generic_arg";
+// Marks a call-argument spread (`f(..., ...rest)`): the runner expands the
+// referenced bundle's fields into named (`b=…`) / positional actuals at call
+// resolution, so `foo(a=1, ...rest)` binds rest's fields to the matching
+// params. The value child is the spread bundle's ref.
+static constexpr std::string_view call_spread_arg_marker = "__spread_arg";
 
 namespace {
 std::string slurp_file(std::string_view filename) {
@@ -1734,6 +1739,22 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     // overflow check, and codegen emits get_mask / mux+get_mask. The type_spec
     // above runs first so the lhs's type is known when the call is processed.
     Lnast_node store_value = rvalue;
+    // `mut x:[] = nil` (UNSIZED array type + nil init) declares an EMPTY array,
+    // not a nil scalar — so a later self-splice append (`x = (...x, e)`) can
+    // grow it. Seed it with an empty tuple (which establishes a tuple shape, so
+    // typecheck's "nil scalar cannot re-shape to a tuple" guard never fires)
+    // instead of a nil scalar. Sized arrays (`:[N]T`) keep their prefill path;
+    // reg arrays are left to the declare cluster. (2f-splice: array_nil_shape.)
+    if (has_decl && reg_decl_head.is_invalid() && !ts_node_is_null(tc) && rvalue.is_const()
+        && rvalue.get_name() == "nil") {
+      TSNode ty = child_by_field(tc, "type");
+      if (!ts_node_is_null(ty) && std::string_view(ts_node_type(ty)) == "array_type" && extract_array_dims(tc).empty()) {
+        auto ta_idx = builder.add_child(Lnast_ntype::create_tuple_add());
+        auto empty  = builder.mint_tmp_ref();
+        lnast->add_child(ta_idx, empty);  // empty tuple_add — zero entries
+        store_value = empty;
+      }
+    }
     if (!overflow_kind.empty()) {
       Lnast_node wrapped = builder.mint_tmp_ref();
       auto       fc      = builder.add_child(Lnast_ntype::create_func_call());
@@ -2489,6 +2510,15 @@ std::vector<Prp2lnast::Call_arg> Prp2lnast::collect_call_args(TSNode arg_tuple) 
     } else if (t == "ref_identifier") {
       arg.is_ref = true;
       arg.value  = expr_to_node(c);
+    } else if (t == "unary_expression" && [&] {
+                 TSNode op_n = child_by_field(c, "operator");
+                 return !ts_node_is_null(op_n) && std::string_view(ts_node_type(op_n)) == "op_spread";
+               }()) {
+      // `...rest` call-argument spread: capture the inner bundle ref and mark
+      // it so the runner expands rest's fields into named/positional actuals.
+      TSNode arg_n = child_by_field(c, "argument");
+      arg.is_spread = true;
+      arg.value     = expr_to_node(arg_n);
     } else {
       arg.value = expr_to_node(c);
     }
@@ -2554,6 +2584,10 @@ void Prp2lnast::add_call_args_to_fcall(const Lnast_nid& fcall_idx, const std::ve
     } else if (arg.is_ref) {
       auto aidx = lnast->add_child(fcall_idx, Lnast_ntype::create_store());
       lnast->add_child(aidx, Lnast_node::create_ref(call_ref_arg_marker));
+      lnast->add_child(aidx, arg.value);
+    } else if (arg.is_spread) {
+      auto aidx = lnast->add_child(fcall_idx, Lnast_ntype::create_store());
+      lnast->add_child(aidx, Lnast_node::create_ref(call_spread_arg_marker));
       lnast->add_child(aidx, arg.value);
     } else if (arg.is_assign) {
       auto aidx = lnast->add_child(fcall_idx, Lnast_ntype::create_store());

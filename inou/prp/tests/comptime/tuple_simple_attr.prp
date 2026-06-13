@@ -7,9 +7,9 @@
 
 mut foo::[potato=4] = (a=-1)
 
-foo ++= (b = 1)
+foo = (...foo, b = 1)
 
-foo ++= (const c:u5 = 2)
+foo = (...foo, const c:u5 = 2)
 
 cassert(foo == (a=-1, b=1, c=2))
 cassert(foo.c.[bits] == 5)   // declared-type-driven: bits=5 from c:u5

@@ -20,7 +20,7 @@ cassert(d.[size] == 1)
 mut e = ("hello", "world")
 cassert(e.[size] == 2)
 
-mut g = 44 ++ 33
+mut g = (44, 33)
 cassert(g.[size] == 2)
 
 mut h = 1..=3

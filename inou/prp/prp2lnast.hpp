@@ -422,6 +422,7 @@ protected:
     bool        is_assign = false;
     bool        is_ref    = false;
     bool        is_ufcs   = false;  // the receiver of `obj.method(...)`
+    bool        is_spread = false;  // `...rest` — expand the bundle's fields at the call
     std::string assign_key;
     Lnast_node  value;
   };
