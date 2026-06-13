@@ -47,10 +47,13 @@ cassert(v == 6)        // today: cassert false (wrap write not applied to v)
 <li><code>inou/prp/tests/comptime/adv_init_ctor_18.prp</code> — <code>wrap</code>/<code>sat self.field = v</code> in an <code>init</code> body (v=17 → wrap 1 / sat 15; stored verbatim today).</li>
 </ul>
 
-<h2>B — <code>ref</code> on a <code>mod</code>/<code>pipe</code> parameter is a compile error</h2>
-<p><code>ref</code> requires inlining + aliasing, which only a <code>comb</code> does. A
-  <code>mod</code>/<code>pipe</code> is a real boundary, so a <code>ref</code> parameter there
-  must be rejected. Today it is silently accepted.</p>
+<h2>B — ordinary <code>ref</code> on a <code>mod</code>/<code>pipe</code> parameter is a compile error</h2>
+<p>Ordinary non-<code>self</code> <code>ref</code> requires inlining + aliasing, which only a
+  <code>comb</code> does. A <code>mod</code>/<code>pipe</code> is a real boundary, so a
+  non-<code>self</code> <code>ref</code> parameter there must be rejected. Today it is
+  silently accepted. <code>ref self</code> methods are the exception: a UFCS call such
+  as <code>foo.f1(...)</code> expands locally against the receiver and does not expose
+  the receiver as a Verilog module port.</p>
 <p>Tests to fix (already failing — "no error emitted"):</p>
 <ul>
 <li><code>inou/prp/tests/errors/adv_ref_mod.prp</code> — <code>mod m(ref a:u8)</code>.</li>
@@ -63,7 +66,7 @@ cassert(v == 6)        // today: cassert false (wrap write not applied to v)
 <ul class="subtasks">
 <li><strong>A — preserve <code>wrap</code>/<code>sat</code> through the comb ref inline-alias</strong>
   so the qualified write applies to the caller's variable.</li>
-<li><strong>B — reject <code>ref</code> on a <code>mod</code>/<code>pipe</code> parameter</strong>
+<li><strong>B — reject ordinary non-<code>self</code> <code>ref</code> on a <code>mod</code>/<code>pipe</code> parameter</strong>
   with a clean compile error.</li>
 </ul>
 

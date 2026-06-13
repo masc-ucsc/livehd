@@ -6,5 +6,5 @@
 */
 // 03-bundle.md: call-argument spread `foo(a=1, ...rest)` fills the remaining params.
 comb foo(a, b, c) -> (r) { r = a + b + c }
-const rest = (b = 2, c = 3)
+const rest = (const b = 2, mut c = 3)
 cassert(foo(a = 1, ...rest) == 6)

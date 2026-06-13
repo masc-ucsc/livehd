@@ -1,0 +1,10 @@
+/*
+:name: adv_div_by_zero_var
+:type: error
+:error: (divi|zero|nil|illegal)
+*/
+// Division by a comptime-known zero must also be reported (nil in output).
+// (:error: regex is a placeholder — align to the real diagnostic.)
+const d = 0
+const x = 7 / d
+cputs("x")

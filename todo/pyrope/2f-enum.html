@@ -11,14 +11,13 @@
 <main>
 <h1><strong class="item-id">2f-enum</strong> remaining enum semantics (identity, <code>:int</code> numbering, membership, string round-trip)</h1>
 <p>The enum findings that are <em>not</em> the hierarchical-encoding bug
-  (<a href="2f-enum_hier.html">2f-enum_hier</a> owns that — do not touch it here). Four
-  groups; several adjacent behaviours already work and must stay working (noted inline).</p>
+  (<code>2f-enum_hier</code>, now landed, owned that). Four groups; several adjacent
+  behaviours already work and must stay working (noted inline). <strong>Group C
+  (membership) landed</strong> as a side effect of the <code>2f-enum_hier</code> fix — see below.</p>
 
 <h2>Depends on</h2>
-<ul>
-<li><a class="xref" href="2f-enum_hier.html">2f-enum_hier</a> — group D's hierarchical-name
-  string round-trip needs the correct child encoding first; otherwise independent.</li>
-</ul>
+<p>None (the <code>2f-enum_hier</code> child-encoding fix that group D's string round-trip
+  needed has landed).</p>
 
 <h2>Scope (applies to every <code>2f-*</code> adversarial-finding task)</h2>
 <ul>
@@ -58,18 +57,14 @@ cassert(int(V.a)==0 and int(V.b)==1 and int(V.c)==2)   // today: one-hot</code><
 <li><code>inou/prp/tests/comptime/adv_enum_hier_10.prp</code> (<code>:int</code> suppresses sequential — same root cause)</li>
 </ul>
 
-<h2>Group C — enum bitwise union + <code>in</code> membership</h2>
+<h2>Group C — enum bitwise union + <code>in</code> membership <span class="status landed">landed</span></h2>
 <p><code>a | b</code> unions enum members and <code>x in union</code> is bit-containment.
-  Broken even for flat enums. (Hierarchical <code>in</code>/union also fails, but that is
-  driven by the encoding fix in <code>2f-enum_hier</code> §C; here it is the membership
-  machinery itself.)</p>
+  This <strong>landed with the <code>2f-enum_hier</code> fix</strong> (the membership machinery
+  rides the same enum bit/scalar handling): <code>adv_enum_hier_04.prp</code> and
+  <code>adv_mix_enum_match_08.prp</code> now pass and stay as regression guards.</p>
 <pre><code>enum E = (a, b, c)
 const u = E.a | E.b
-cassert(E.a in u)                  // today: folds false</code></pre>
-<ul>
-<li><code>inou/prp/tests/comptime/adv_enum_hier_04.prp</code></li>
-<li><code>inou/prp/tests/comptime/adv_mix_enum_match_08.prp</code></li>
-</ul>
+cassert(E.a in u)                  // passes</code></pre>
 
 <h2>Group D — string round-trip &amp; <code>enum(...)</code> splice</h2>
 <p>Flat <code>string(E.a)</code>/<code>E("a")</code> already work; the failing cases are the
@@ -87,14 +82,16 @@ cassert(E.a in u)                  // today: folds false</code></pre>
   boundary; see <code>enum_machinery_landed</code> notes).</li>
 <li><strong>B — honor the <code>:int</code> sequential-numbering trigger</strong> (and resume
   the sequence after a negative explicit value).</li>
-<li><strong>C — implement enum <code>|</code>/<code>&amp;</code> union and <code>in</code>
-  bit-containment membership.</strong></li>
 <li><strong>D — recover the enum name in <code>string()</code> for hierarchical entries, and
   support <code>enum(...)</code> splice.</strong></li>
 </ul>
 
 <h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<ul class="subtasks">
+<li><strong>C — enum <code>|</code>/<code>&amp;</code> union and <code>in</code> bit-containment
+  membership.</strong> <span class="status landed">landed</span> (with the <code>2f-enum_hier</code> fix;
+  <code>adv_enum_hier_04</code>, <code>adv_mix_enum_match_08</code> pass)</li>
+</ul>
 
 <h2>Docs</h2>
 <ul>

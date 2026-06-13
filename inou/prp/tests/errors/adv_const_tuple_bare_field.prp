@@ -1,0 +1,12 @@
+/*
+:name: adv_const_tuple_bare_field
+:type: error
+:error: (mut|const)
+*/
+// A tuple-literal DECLARATION (a `const`/`mut` binding with no explicit type)
+// must declare each named field's kind: bare `b = 2` is a compile error; write
+// `(const b = 2, const c = 3)`. (Not required in: function calls, value
+// comparisons, or assignment to an already-typed variable.)
+// (:error: regex is a placeholder — align to the real diagnostic.)
+const rest = (b = 2, c = 3)
+cassert(rest.b == 2)

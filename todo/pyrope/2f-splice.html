@@ -39,18 +39,23 @@
 <h2>The new model (from <code>../docs/docs/pyrope/03-bundle.md</code>)</h2>
 <ul>
 <li>Merge: <code>const c = (...a, ...b)</code> — splice both into a new literal (field-name merge rules unchanged: duplicate field with differing values = error).</li>
-<li>Extend: <code>const y2 = (...y, qq=2)</code> — add fields to a copy.</li>
+<li>Extend: <code>const y2 = (...y, const qq=2)</code> — add fields to a copy.</li>
 <li>Mid-literal insert: <code>(1, ...mid, 6)</code> (positional already works today).</li>
 <li>Append idiom (replaces <code>++=</code>): <code>mut acc:[] = nil; for i in 0..&lt;5 { acc = (...acc, i) }</code>. A <code>mut</code> var that is <em>already a tuple</em> may self-splice (arity grows, base type unchanged).</li>
-<li>Call-argument spread: <code>foo(a=1, ...rest)</code>.</li>
+<li>Call-argument spread: <code>const rest = (const b=2, mut c=3); foo(a=1, ...rest)</code>.</li>
 <li>Self-splicing a <em>non-tuple</em> scalar stays a compile error ("a variable's type cannot change"). <strong>Already correct today</strong> — keep it.</li>
 </ul>
+<p><strong>Field kinds:</strong> a tuple-literal that is a <em>declaration</em> (the
+  examples above, e.g. <code>const rest = (const b=2, mut c=3)</code>) needs a
+  <code>mut</code>/<code>const</code> on each named field — that enforcement is
+  <a href="2f-mutconst.html">2f-mutconst</a>. Splice literals here must follow it; bare
+  fields are still fine in call-argument spreads / comparisons / typed-var assignments.</p>
 
 <h2>Tests to fix (new spread-syntax tests, already in the regression, currently failing)</h2>
 <ul>
 <li><code>inou/prp/tests/comptime/adv_splice_merge.prp</code> — <code>(...a, ...b)</code> merge.</li>
 <li><code>inou/prp/tests/comptime/adv_splice_append.prp</code> — <code>acc = (...acc, i)</code> array-builder idiom (the old <code>++=</code> replacement).</li>
-<li><code>inou/prp/tests/comptime/adv_splice_extend.prp</code> — <code>(...y, qq=2)</code> extend.</li>
+<li><code>inou/prp/tests/comptime/adv_splice_extend.prp</code> — <code>(...y, const qq=2)</code> extend.</li>
 <li><code>inou/prp/tests/comptime/adv_splice_callarg.prp</code> — <code>foo(a=1, ...rest)</code> call-arg spread.</li>
 </ul>
 <p>(The earlier <code>++</code>/<code>++=</code>-based <code>adv_*</code> tests for these

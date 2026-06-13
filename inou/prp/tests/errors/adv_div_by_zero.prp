@@ -1,0 +1,11 @@
+/*
+:name: adv_div_by_zero
+:type: error
+:error: (divi|zero|nil|illegal)
+*/
+// Division by a literal zero is a bad operation: it must emit a diagnostic
+// (the op yields nil; a nil in a constprop output should be reported), not
+// silently fold. Today it folds with no error.
+// (:error: regex is a placeholder — align to the real diagnostic.)
+const x = 1 / 0
+cputs("x")
