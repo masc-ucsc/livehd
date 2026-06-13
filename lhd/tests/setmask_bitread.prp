@@ -1,0 +1,15 @@
+// Cprop Set_mask chain resolver coverage (lhd_setmask_bitread_test.sh): four
+// runtime single-bit inputs written into a u4 via a bit-range write chain
+// (r#[0]=a .. r#[3]=d) lower to a chain of LiveHD Set_mask nodes that upass
+// cannot comptime-fold. Reading single bits back (y0=r#[0], y2=r#[2]) makes
+// pass.cprop walk the chain via try_find_single_driver_pin to land on the
+// writing value pin, so at --recipe O1 the reads fold: y0 -> a, y2 -> c.
+pub comb setmask_bitread(a:u1, b:u1, c:u1, d:u1) -> (y0:u1, y2:u1) {
+  mut r:u4 = 0
+  r#[0] = a
+  r#[1] = b
+  r#[2] = c
+  r#[3] = d
+  y0 = r#[0]
+  y2 = r#[2]
+}

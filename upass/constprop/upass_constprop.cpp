@@ -150,6 +150,24 @@ static std::string format_interp_value(const Dlop& v, std::string_view spec, con
   }
 }
 
+// get_mask is Pyrope's default-zext bit-select (the "force" operator): with a
+// non-negative mask the extracted bits are packed LSB-first as an UNSIGNED
+// value, so the fold is never negative. Dlop::get_mask_op carries a single-bit
+// quirk that returns the signed 1-bit -1 for a lone selected SET bit; per the
+// spec `#[N]` (and `#[n..=n]`, `#zext[n]`) zero-extends — a set bit reads as the
+// unsigned 1 — and only the explicit `#sext` form may be negative. Restore the
+// unsigned value here so the comptime fold matches the RTL (cgen emits a plain
+// `a[N]` part-select) and the [0,1] bitwidth. A positive mask can only fold
+// negative via this quirk (the lone bit's zext value is 1); unknown and
+// negative-mask (carve-out) results pass through untouched.
+static Dlop get_mask_zext(const Dlop& value, const Dlop& mask) {
+  Dlop r = *value.get_mask_op(mask);
+  if (!mask.is_negative() && r.is_integer() && !r.has_unknowns() && r.is_negative()) {
+    return *Dlop::create_integer(1);
+  }
+  return r;
+}
+
 Dlop uPass_constprop::apply_range_mask(const Dlop& value, const Dlop& start, const Dlop& end) {
   // Bit-slice `value#[start..=end]` (and the open `value#[start..]` when `end`
   // is nil). Everything stays in Dlop arithmetic — no is_i/to_i, no int round-
@@ -178,7 +196,7 @@ Dlop uPass_constprop::apply_range_mask(const Dlop& value, const Dlop& start, con
     return *Dlop::create_integer(0);  // negative-width (empty) slice — degenerate
   }
   auto mask = one->shl_op(*width)->sub_op(*one)->shl_op(start);
-  return *value.get_mask_op(*mask);
+  return get_mask_zext(value, *mask);
 }
 
 uPass_constprop::uPass_constprop(std::shared_ptr<upass::Lnast_manager>& _lm) : uPass(_lm) {
@@ -2688,7 +2706,7 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
     }
   } else if (op == "get_mask") {
     if (need_n(2)) {
-      result  = *args[0].get_mask_op(args[1]);
+      result  = get_mask_zext(args[0], args[1]);
       matched = true;
     }
   } else if (op == "set_mask") {
@@ -3877,10 +3895,12 @@ upass::Vote uPass_constprop::process_get_mask(std::string_view dst_name, Bundle&
   if (!is_numeric(mask)) {
     return classify_vote();
   }
-  // Trust Dlop::get_mask_op — including the single-bit-mask → Bool rule. We
+  // get_mask is the default zext select, so a single set bit reads as the
+  // unsigned 1 (never -1; `#sext` sign-extends via a separate sext node) —
+  // get_mask_zext restores that for Dlop::get_mask_op's single-bit quirk. We
   // store whatever it returns (invalid included): the fold is real and
   // downstream code shouldn't silently drop it.
-  store_trivial(var, *value.get_mask_op(mask));
+  store_trivial(var, get_mask_zext(value, mask));
   return classify_vote();
 }
 

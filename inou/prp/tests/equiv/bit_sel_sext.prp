@@ -1,0 +1,23 @@
+/*
+:name: bit_sel_sext
+:type: equiv
+:verilog_top: bit_sel_sext.bsel
+:pyrope_top: bit_sel_sext.bsel
+*/
+
+// 2f-bit_sel_sext RTL coverage: a no-operator `#[N]` is a default zext (a bit
+// reads as the unsigned 0/1, NEVER -1); only `#sext` may be negative. The
+// comptime fold of that rule is checked by the adv_bitsel_* comptime tests;
+// this equiv test guards the *RTL datapath* for the three extraction shapes.
+//
+// `zout` keeps the 1-bit zext (e1) and 2-bit zext (e2) in pure UNSIGNED
+// arithmetic so a set bit contributes +1000/+10 (the golden only matches a
+// zero-extended select). `sout` exposes the 2-bit `#sext` on a SIGNED port so
+// the negative path (-2..1) is checked without contaminating zout's unsigned
+// arithmetic (Verilog turns a mixed signed/unsigned expression unsigned).
+comb bsel(a:u8) -> (zout:u32, sout:s8) {
+  mut e1 = a#[3]            // 1-bit zext -> 0 or 1   (NEVER -1)
+  mut e2 = a#[0..=1]        // 2-bit zext -> 0..3
+  zout = (e1 * 1000) + (e2 * 10)
+  sout = a#sext[6..=7]      // 2-bit sext -> -2..1 (signed)
+}

@@ -490,11 +490,12 @@ upass::Vote uPass_bitwidth::process_sext(std::string_view dst_name, Bundle& dst,
 }
 
 // get_mask(base, mask) — the selected bits packed LSB-first as an UNSIGNED
-// value (this is the "force" operator). For a known non-negative mask
-// of width w = popcount(mask), the result lies in [0, 2^w − 1]. A single
-// selected bit yields the signed 1-bit value (-1/0), matching Dlop::get_mask_op
-// and the `x#[i]` semantics. Negative (carve-out) or unknown masks stay
-// conservative — their width depends on the source, unknown here.
+// value (this is the default zext "force" operator). For a known non-negative
+// mask of width w = popcount(mask), the result lies in [0, 2^w − 1] — including
+// the single-bit case w==1, which is the unsigned [0, 1] (a set bit reads as 1,
+// never -1; only the explicit `#sext` form, lowered to a separate sext node,
+// may be negative). Negative (carve-out) or unknown masks stay conservative —
+// their width depends on the source, unknown here.
 upass::Vote uPass_bitwidth::process_get_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   if (src.size() < 2) {
     return stamp(dst_name, dst, Lnast_range::make_unbounded());
@@ -506,9 +507,6 @@ upass::Vote uPass_bitwidth::process_get_mask(std::string_view dst_name, Bundle& 
   int w = std::popcount(static_cast<uint64_t>(mask.min));
   if (w == 0) {
     return stamp(dst_name, dst, Lnast_range::constant(0));
-  }
-  if (w == 1) {
-    return stamp(dst_name, dst, Lnast_range::boolean());  // signed 1-bit [-1, 0]
   }
   if (w >= 63) {
     return stamp(dst_name, dst, Lnast_range::make_unbounded());

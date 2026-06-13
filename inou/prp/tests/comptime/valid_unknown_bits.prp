@@ -19,7 +19,7 @@ mut v:u8 = 0sb1?01_?000
 // v = 0sb1?01_?000 → bit3=?, bit4=1, bit5=0, bit6=? (LSB-first). The slice
 // packs bit3..bit6 with bit3 at position 0, so v#[3..=6] == ?,1,0,? == 0sb?01?.
 cassert(v#[3..=6] == 0sb0?01?)
-cassert(v#[7]    == 0sb1)    // top bit is known 1
+cassert(v#[7]    == 1)       // top bit is known 1; `#[N]` is a default zext, so a set bit reads as the unsigned 1 (NEVER -1) — see 2f-bit_sel_sext
 cassert(v#[0..=2] == 0)        // bottom three are known 0
 
 // AND with 0 collapses unknown to 0.

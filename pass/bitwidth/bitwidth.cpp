@@ -772,18 +772,31 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
   Dlop a_max = it->second.get_max();
   Dlop a_min = it->second.get_min();
 
+  // get_mask is the zext (force) bit-select: a non-negative mask yields a
+  // non-negative result. Dlop::get_mask_op returns the signed 1-bit -1 for a
+  // lone selected set bit, but Pyrope `#[N]` zero-extends (a set bit is the
+  // unsigned 1; only `#sext` may be negative). Correct the quirk so a single-
+  // bit slice derives the [0,1] range instead of an inverted [0,-1].
+  auto gm = [](const Dlop& v, const Dlop& m) -> Dlop {
+    Dlop r = *v.get_mask_op(m);
+    if (!m.is_negative() && r.is_integer() && !r.has_unknowns() && r.is_negative()) {
+      return *Dlop::create_integer(1);
+    }
+    return r;
+  };
+
   Dlop res_max;
   if (a_max.same_repr(a_min)) {
-    res_max = a_max.get_mask_op(mask_val);
+    res_max = gm(a_max, mask_val);
   } else {
-    res_max = a_max.get_mask_value()->get_mask_op(mask_val);
+    res_max = gm(*a_max.get_mask_value(), mask_val);
   }
 
   Dlop res_min = res_max;
 
   if (a_min.is_negative()) {
     Dlop tmp;
-    tmp = Dlop::create_integer(-1)->get_mask_op(mask_val);
+    tmp = gm(*Dlop::create_integer(-1), mask_val);
     if (tmp.gt_op(res_max)->is_known_true()) {
       res_max = tmp;
     }
@@ -792,7 +805,7 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
   }
 
   Dlop val2;
-  val2 = a_min.get_mask_op(mask_val);
+  val2 = gm(a_min, mask_val);
   if (val2.gt_op(res_max)->is_known_true()) {
     res_max = val2;
   }
