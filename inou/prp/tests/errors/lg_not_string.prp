@@ -1,0 +1,11 @@
+/*
+:name: lg_not_string
+:type: error
+:error: must be a compile-time string literal
+:help: quoted string constant
+*/
+
+// Task 2f-lg — the `lg` value must be a comptime string literal; a bare
+// integer (or any non-string expression) is rejected.
+
+pub comb foo::[lg=3](a:u8, b:u8) -> (r:u9) { r = a + b }  // locate_error_here

@@ -35,6 +35,14 @@ struct uPass_tolg {
   // (mirrors the yosys two-pass build).
   static void register_io(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path, const Registry& registry);
 
+  // Phase 0 — cross-unit `lg="name"` (2f-lg) collision check. Two units that
+  // resolve to the same effective graph name (an lg override colliding with
+  // another lg name or a default `file.entity`) would silently share one
+  // GraphIO (find_io reuses it) and emit a broken double-driven module. Fatal
+  // diagnostic on collision. MUST run before the register_io() loop. Idempotent
+  // and cheap (linear scan); callable from any tolg orchestration site.
+  static void detect_lg_collisions(const Registry& registry);
+
   // Phase 2 — build the body graph. `reset_style` is the elaboration
   // flag (`upass.reset_style=sync|async`, default sync — target-dependent,
   // FPGA-typical): it decides whether implicit-reset flops tie their `async`

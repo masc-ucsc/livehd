@@ -2596,9 +2596,69 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
     kind                             = "pipe";
   }
 
+  // `::[lg="name"]` — explicit lgraph/module-name override (todo/pyrope/2f-lg).
+  // The attribute rides the function_definition_decl's `pipe_config` slot
+  // (grammar `_attr_prefix` = `:: attribute_sq`); it can only appear here, on a
+  // lambda name. Rules: pub-only, value is a comptime string, non-sticky (it
+  // lives on this one func_def, never propagated). The validated name lands on
+  // the pub entry below; func_extract copies it onto the extracted Lnast and
+  // tolg renames the artifact (NOT the `import("file.entity")` key). A bare/
+  // misplaced `lg` on a non-lambda is rejected by reject_common_mistakes_attr_name.
+  std::string lg_value;
+  bool        has_lg = false;
+  TSNode      lg_node{};
+  if (!ts_node_is_null(fdef)) {
+    // The `::[…]` prefix lands in the function_definition_decl's `pipe_config`
+    // field. Its grammar rule `_attr_prefix` is hidden (`:: attribute_sq`), so
+    // the field tags BOTH the `::` token and the attribute_sq node — pick the
+    // attribute_sq, not the bare token (child_by_field would return the `::`).
+    for (uint32_t ci = 0; ci < ts_node_child_count(fdef); ci++) {
+      TSNode      pc = ts_node_child(fdef, ci);
+      const char* fn = ts_node_field_name_for_child(fdef, ci);
+      if (!fn || std::string_view(fn) != "pipe_config") {
+        continue;
+      }
+      std::string_view pct(ts_node_type(pc));
+      if (pct != "attribute_sq" && pct != "tuple_sq") {
+        continue;  // the `::` punctuation, not the bracket list
+      }
+      for (uint32_t i = 0; i < ts_node_named_child_count(pc); i++) {
+        TSNode           item = ts_node_named_child(pc, i);
+        std::string_view it(ts_node_type(item));
+        std::string_view key;
+        TSNode           rv{};
+        if (it == "attribute_assignment") {
+          TSNode lv = child_by_field(item, "lvalue");
+          rv        = child_by_field(item, "rvalue");
+          if (!ts_node_is_null(lv)) {
+            key = trim(get_text(lv));
+          }
+        } else if (it == "identifier" || it == "ref_identifier") {
+          key = trim(get_text(item));
+        }
+        if (key != "lg") {
+          continue;  // other lambda-name attributes are out of scope here
+        }
+        has_lg  = true;
+        lg_node = item;
+        if (auto sv = plain_string_literal_text(rv); sv) {
+          lg_value = *sv;
+        } else {
+          report_error(item,
+                       "lg-not-string",
+                       "type",
+                       "the `lg` attribute value must be a compile-time string literal (e.g. `lg=\"chip_top\"`)",
+                       "pin the module name with a quoted string constant");
+        }
+      }
+    }
+  }
+
   // `pub comb/mod/pipe/fluid name …` marks the definition
   // exportable. Only file-scope named definitions may be pub.
-  if (TSNode pub_node = child_by_field(n, "pub"); !ts_node_is_null(pub_node)) {
+  TSNode     pub_node = child_by_field(n, "pub");
+  const bool is_pub   = !ts_node_is_null(pub_node);
+  if (is_pub) {
     if (!builder.at_top_stmts() || !lambda_kind_stack_.empty() || conditional_depth_ > 0) {
       report_error(pub_node,
                    "pub-not-file-scope",
@@ -2615,7 +2675,16 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
     }
     // Normalize the fluid kind text ("fluid …" variants) to the bare kind.
     std::string_view pub_kind = kind.size() >= 5 && kind.substr(0, 5) == "fluid" ? "fluid" : kind;
-    lnast->add_pub(trim(get_text(name_node)), pub_kind, mint_src(name_node));
+    lnast->add_pub(trim(get_text(name_node)), pub_kind, mint_src(name_node), lg_value);
+  }
+  // The `lg` rename is pub-only: a non-pub (file-local) unit has no stable
+  // export name to pin. Diagnose here rather than silently dropping it.
+  if (has_lg && !is_pub) {
+    report_error(lg_node,
+                 "lg-requires-pub",
+                 "type",
+                 "the `lg` attribute is only valid on a `pub` lambda definition",
+                 "add `pub` before the definition, or remove the `lg` attribute");
   }
 
   // Workaround for tree-sitter not always attaching the body to `code`:
@@ -4463,6 +4532,20 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
 }
 
 void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view name, bool has_value) const {
+  // `lg` is the explicit lgraph/module-name attribute. It is ONLY valid on a
+  // `pub` lambda name (`pub comb f::[lg="name"]`), where it is consumed by
+  // process_lambda_statement_named before reaching this path. Any `lg` that
+  // arrives here is attached to a non-lambda (a variable/expression attribute
+  // bracket), which has no module artifact to rename — reject it. (2f-lg)
+  if (name == "lg") {
+    report_error(node,
+                 "lg-not-lambda",
+                 "type",
+                 "the `lg` attribute is only valid on a `pub` lambda definition, not on a value",
+                 "move `lg=\"name\"` onto the `pub comb`/`mod`/`pipe` definition");
+    return;
+  }
+
   // Unknown attribute names are normally pass-through (user extensibility —
   // attributes_spec.md §1.D), so this only errors on a curated list of
   // popular mistakes plus singular/plural near-misses of the built-in

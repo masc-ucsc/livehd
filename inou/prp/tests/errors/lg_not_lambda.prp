@@ -1,0 +1,11 @@
+/*
+:name: lg_not_lambda
+:type: error
+:error: not on a value
+:help: pub comb
+*/
+
+// Task 2f-lg — `lg` renames a generated lgraph/module; it is meaningless on a
+// value export (no module artifact), so it is rejected there.
+
+pub const X::[lg="y"] = 3  // locate_error_here

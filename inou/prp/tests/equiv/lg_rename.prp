@@ -1,0 +1,13 @@
+/*
+:name: lg_rename
+:type: equiv
+:verilog_top: chip_top
+:pyrope_top: chip_top
+*/
+
+// Task 2f-lg — `lg="chip_top"` pins the generated lgraph/Verilog module name,
+// replacing the compiler-mangled `lg_rename.my_top`. The equiv check proves
+// both the rename (the generated module is `chip_top`, matched as :pyrope_top:)
+// and that the renamed artifact still implements `a + b`.
+
+pub comb my_top::[lg="chip_top"](a:u8, b:u8) -> (r:u9) { r = a + b }

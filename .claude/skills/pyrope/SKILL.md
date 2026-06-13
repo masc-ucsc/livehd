@@ -269,10 +269,12 @@ memories are shared with `regref("mem_pool/buf0")` — behaves like a local
   types, and constants can be imported: `const lib = import("file")` /
   `import("proj/file")`. `pub mut` and `pub reg` are compile errors — use
   `regref` for cross-hierarchy registers.
-* Pin the generated netlist/Verilog module name with the `lg` attribute
-  (TBD: not implemented yet):
+* Pin the generated netlist/Verilog module name with the `lg` attribute:
   `pub comb my_top::[lg="chip_top"](...)` — pub-only, comptime string; the
-  `import` key stays `my_top`. Never invent `pub("name")`.
+  `import` key stays `my_top` (only the lgraph/module artifact is renamed, and
+  it becomes importable as `import("lg:chip_top")`). `lg` on a non-pub or
+  non-lambda errors; two units pinned to the same name are diagnosed. Never
+  invent `pub("name")`.
 * A fully typed `pipe`/`mod` lowers to a module; an untyped one is a per-call
   template (every actual feeding it must have a declared type).
 * Do not instantiate conditionally to "save hardware": a lambda called inside
@@ -381,7 +383,7 @@ the authoritative list). Do not generate these unless explicitly asked:
   `init` overload sets resolve; prefer distinct names
 * `import("prp")` stdlib; `comptime`-computed / inferred-type memory init
   (`reg mem2 = reset_value` — literal/scalar init contents DO work);
-  `macro=`/`lg` attributes; `covercase`, in-language `lec()`
+  `macro=` attribute; `covercase`, in-language `lec()`
 
 Runtime `wrap`/`sat` and enum-typed register resets ARE implemented.
 Imports: `import("file")` (all pub) or `import("file.pub_name")` (one

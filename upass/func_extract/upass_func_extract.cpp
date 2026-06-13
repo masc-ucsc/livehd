@@ -521,6 +521,19 @@ void uPass_func_extract::process_func_def() {
   // stages_min>0. A ref-self mod keeps kind "mod" but is recognized as a
   // method by its `self` io entry.
   new_lnast->set_lambda_kind(func_kind);
+  // 2f-lg: pin the artifact name when this lambda carried `pub comb
+  // f::[lg="name"]`. The override is pub-only, recorded on the file-level pub
+  // entry by prp2lnast; copy it onto the extracted tree so tolg names the
+  // GraphIO/module after it. The extracted_name (top_module_name) — the
+  // `import("file.entity")` key — is deliberately left mangled.
+  if (const auto& file_ln = lm->get_lnast(); file_ln) {
+    for (const auto& p : file_ln->get_pub_list()) {
+      if (p.name == func_name && !p.lg.empty()) {
+        new_lnast->set_lg_name(p.lg);
+        break;
+      }
+    }
+  }
   auto root_nid = new_lnast->set_root(Lnast_ntype::create_top());
 
   // Module anchor: stamp the extracted root with the lambda

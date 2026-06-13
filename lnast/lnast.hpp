@@ -143,6 +143,13 @@ struct Lnast_pub_entry {
   std::string    name;
   std::string    kind;
   hhds::SourceId srcid = 0;
+  // Explicit lgraph/module-name override (`pub comb f::[lg="name"]`). Empty
+  // when unset (the artifact keeps the mangled `<file>.<entity>` name). The
+  // `lg` attribute is pub-only, so this rides the pub entry; func_extract copies
+  // it onto the extracted Lnast's lg_name_ (see todo/pyrope/2f-lg). Default
+  // member initializer so existing `{name, kind}` / `{name, kind, srcid}`
+  // aggregate initializers stay valid (no -Wmissing-field-initializers).
+  std::string    lg = {};
 };
 
 class Lnast {
@@ -161,6 +168,13 @@ private:
   // stages_min>0 — a mod output legitimately stamps stages(0,0) or
   // stages(nil,nil) and a mod tree must not be mistaken for a pipe.
   std::string                                      lambda_kind_;
+  // Explicit lgraph/module name (`pub comb f::[lg="name"]`). Empty ⇒ the
+  // artifact keeps the mangled `<file>.<entity>` (top_module_name). Stamped by
+  // func_extract from the file-level pub entry's `lg`. tolg uses this as the
+  // GraphIO/graph name (so cgen emits `module <lg>` and `import("lg:<lg>")`
+  // resolves) WITHOUT changing top_module_name — the `import("file.entity")`
+  // key is unchanged. In-memory only (sibling to lambda_kind_). See 2f-lg.
+  std::string                                      lg_name_;
   // Durable "deferred template" flag. A not-fully-typed lambda — an
   // untyped non-`self` input, a `...args` var-arg param, or an unbound generic
   // `<T>` — is kept as LNAST but emits NO LGraph at definition time; the
@@ -322,6 +336,14 @@ public:
   std::string_view get_lambda_kind() const noexcept { return lambda_kind_; }
   void             set_lambda_kind(std::string_view kind) { lambda_kind_ = kind; }
 
+  // ── explicit lgraph/module name override (`::[lg="name"]`; see 2f-lg) ──────
+  std::string_view get_lg_name() const noexcept { return lg_name_; }
+  void             set_lg_name(std::string_view name) { lg_name_ = name; }
+  // Effective artifact name: the `lg` override when set, else the mangled
+  // top_module_name. This is the GraphIO/library key and the emitted module
+  // name; it is NOT the `import("file.entity")` key (that stays top_module_name).
+  std::string_view get_graph_name() const noexcept { return lg_name_.empty() ? std::string_view(top_module_name) : std::string_view(lg_name_); }
+
   // ── deferred template (stamped by func_extract; cleared on a
   //     specialized clone). True ⇒ no LGraph at definition time. ───────────
   bool is_template() const noexcept { return template_; }
@@ -338,8 +360,8 @@ public:
 
   // ── pub export list (recorded by prp2lnast on file-level trees) ─
   const std::vector<Lnast_pub_entry>& get_pub_list() const noexcept { return pub_list_; }
-  void                                add_pub(std::string_view name, std::string_view kind, hhds::SourceId srcid = 0) {
-    pub_list_.push_back({std::string(name), std::string(kind), srcid});
+  void add_pub(std::string_view name, std::string_view kind, hhds::SourceId srcid = 0, std::string_view lg = {}) {
+    pub_list_.push_back({std::string(name), std::string(kind), srcid, std::string(lg)});
   }
   // Folded pub-value leaves (set by uPass_constprop at file-walk completion).
   const std::vector<std::pair<std::string, std::string>>& get_pub_values() const noexcept { return pub_values_; }

@@ -9,7 +9,21 @@
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">2f-lg</strong> <code>lg</code> attribute (explicit lgraph/module name)</h1>
+<h1><strong class="item-id">2f-lg</strong> <code>lg</code> attribute (explicit lgraph/module name) <span class="status landed">landed</span></h1>
+<p class="status-note"><strong>Landed.</strong> Parsing/validation in
+  <code>inou/prp/prp2lnast.cpp</code> (reads <code>::[lg=&quot;…&quot;]</code> from the
+  func_def <code>pipe_config</code> slot, pub-only + comptime-string checks; misplaced
+  <code>lg</code> rejected in <code>reject_common_mistakes_attr_name</code>); the name
+  rides the file-level pub entry (<code>lnast/lnast.hpp</code> <code>Lnast_pub_entry::lg</code>),
+  is copied onto the extracted unit's <code>lg_name_</code> by
+  <code>upass/func_extract</code>, and becomes the GraphIO/graph name via
+  <code>Lnast::get_graph_name()</code> at every <code>find_io</code>/<code>create_io</code>
+  site in <code>upass/tolg</code> (so cgen emits it and <code>import("lg:…")</code> resolves)
+  while <code>top_module_name</code> — the <code>import("file.entity")</code> key — is
+  untouched. Cross-unit name collisions are diagnosed by
+  <code>uPass_tolg::detect_lg_collisions()</code>. Tests:
+  <code>inou/prp/tests/equiv/lg_rename.prp</code> and
+  <code>inou/prp/tests/errors/lg_not_{pub,string,lambda}.prp</code>.</p>
 <p><code>pub comb foo::[lg="name"]</code> pins the generated lgraph (and hence
   the netlist/Verilog module name), replacing the compiler-mangled
   <code>file.entity</code> name. Rules: pub-only, comptime string, lambda

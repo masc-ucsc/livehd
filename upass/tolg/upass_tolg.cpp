@@ -2137,7 +2137,11 @@ private:
         return;
       }
 
-      callee_full = std::string(callee->get_top_module_name());
+      // 2f-lg: the callee's GraphIO is keyed by its effective graph name (lg
+      // override or mangled name) — the same key register_io/setup_io_impl
+      // used. resolve_callee_lnast above still matched by top_module_name (the
+      // import/call identity), so the rename never affects call resolution.
+      callee_full = std::string(callee->get_graph_name());
       gio         = lib_ != nullptr ? lib_->find_io(callee_full) : nullptr;
       if (!gio) {
         error_here("upass.tolg: callee '{}' has no registered GraphIO — register_io() phase missing", callee_full);
@@ -3840,7 +3844,12 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
 [[nodiscard]] Io_setup setup_io_impl(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path,
                                      const uPass_tolg::Registry& registry) {
   auto& lib      = livehd::Hhds_graph_library::instance(lib_path);
-  auto  mod_name = std::string(lnast->get_top_module_name());
+  // 2f-lg: the GraphIO/library key (hence the emitted module name and the
+  // `import("lg:<name>")` key) is the effective graph name — the `lg="…"`
+  // override when present, else the mangled top_module_name. The
+  // `import("file.entity")` key (function_registry, resolve_callee_lnast,
+  // needs_*_rec memo) stays on top_module_name and is untouched here.
+  auto  mod_name = std::string(lnast->get_graph_name());
 
   auto gio = lib.find_io(mod_name);
   if (!gio) {
@@ -4000,6 +4009,31 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
 
 }  // namespace
 
+void uPass_tolg::detect_lg_collisions(const Registry& registry) {
+  // 2f-lg: a `pub comb f::[lg="name"]` pins the artifact (GraphIO/module)
+  // name. Two units resolving to the SAME effective graph name would silently
+  // share one GraphIO and emit a broken, double-driven module. Diagnose before
+  // any GraphIO is created. The import key (top_module_name) is unique by
+  // mangling and unaffected. Linear scan: a compile carries few units.
+  std::vector<std::pair<std::string, std::string>> seen;  // (graph name, owning unit)
+  for (const auto& ln : registry) {
+    if (!ln || ln->is_template() || ln->io_meta().empty()) {
+      continue;  // same filter as register_io/run: only units that mint a GraphIO
+    }
+    std::string gname(ln->get_graph_name());
+    std::string unit(ln->get_top_module_name());
+    for (const auto& [g, u] : seen) {
+      if (g == gname && u != unit) {
+        livehd::diag::err("upass.tolg", "lg-name-collision", "type")
+            .msg("two units map to the same lgraph/module name '{}' (units '{}' and '{}')", gname, u, unit)
+            .hint("give each `pub` definition a distinct `lg=\"…\"` name (or drop `lg` to use the default `file.entity`)")
+            .fatal();
+      }
+    }
+    seen.emplace_back(std::move(gname), std::move(unit));
+  }
+}
+
 void uPass_tolg::register_io(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path, const Registry& registry) {
   if (!lnast || lnast->io_meta().empty()) {
     return;  // not a lowerable module (e.g. the empty file-root tree)
@@ -4029,7 +4063,7 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
   auto io_setup = setup_io_impl(lnast, lib_path, registry);
 
   auto& lib      = livehd::Hhds_graph_library::instance(lib_path);
-  auto  gio      = lib.find_io(std::string(lnast->get_top_module_name()));
+  auto  gio      = lib.find_io(std::string(lnast->get_graph_name()));  // 2f-lg: lg override or mangled name
   auto  g_shared = gio->has_graph() ? gio->get_graph() : gio->create_graph();
 
   Tolg builder(lnast, g_shared.get(), std::move(io_setup), &registry, &lib, reset_style == "async");

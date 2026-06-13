@@ -1873,6 +1873,9 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   }
   {
     Stdout_to_log redirect(next_log_path(opts, "lnast.tolg"));
+    // 2f-lg: reject two units pinned to the same artifact name (lg="…")
+    // before any GraphIO is created.
+    uPass_tolg::detect_lg_collisions(var.lnasts);
     // Two-phase: register every module's GraphIO first so call
     // sites can bind callee GraphIOs (Sub instances) regardless of order.
     for (const auto& ln : var.lnasts) {

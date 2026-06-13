@@ -549,6 +549,9 @@ void Pass_upass::work(Eprp_var& var) {
   // Two-phase: register every module's GraphIO first so call
   // sites can bind callee GraphIOs (Sub instances) regardless of build order.
   if (up.run_tolg) {
+    // 2f-lg: reject two units pinned to the same artifact name before any
+    // GraphIO is created (shared helper; see upass_tolg).
+    uPass_tolg::detect_lg_collisions(var.lnasts);
     for (const auto& ln : var.lnasts) {
       uPass_tolg::register_io(ln, "lgdb_tolg", var.lnasts);
     }

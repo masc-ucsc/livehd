@@ -1,0 +1,11 @@
+/*
+:name: lg_not_pub
+:type: error
+:error: attribute is only valid on a
+:help: before the definition
+*/
+
+// Task 2f-lg — the `lg="name"` lgraph/module-name override is pub-only; a
+// file-local (non-pub) unit has no stable export name to pin.
+
+comb my_top::[lg="chip_top"](a:u8, b:u8) -> (r:u9) { r = a + b }  // locate_error_here
