@@ -8,7 +8,7 @@ pub comb rich(x:u8, y:u8) -> (z:u16) {
   const nb  = ~x
   const ng  = -y
   const sx  = x#sext[0..=3]
-  const tup = (lo=x, hi=y)
+  const tup = (const lo=x, const hi=y)
   const lo2 = tup.lo
   const hs  = helper(a=x, b=y)
   z = u16(u8(nb & 0xff)) + u16(sx & 0xf) + u16(lo2) + hs + u16(ng + 256)

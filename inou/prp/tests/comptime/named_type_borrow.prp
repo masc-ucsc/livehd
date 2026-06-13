@@ -18,7 +18,7 @@ cassert(b.x == 3)        // supplied field overrides the default
 cassert(b.b == "foo")    // omitted field inherits a_type's default
 
 // `const` form: v_type is an ordinary value that doubles as a type.
-const v_type = (x:u3 = nil, b:string = "foo")
+const v_type = (const x:u3 = nil, const b:string = "foo")
 mut c:v_type = (x = 3)
 cassert(c.x == 3)
 cassert(c.b == "foo")

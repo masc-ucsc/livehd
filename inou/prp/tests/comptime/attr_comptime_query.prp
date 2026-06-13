@@ -23,7 +23,7 @@ const b = a + 1
 cassert(b.[comptime])
 
 // 3) Tuple field — propagates through tuple bind.
-const t = (x = 7, y = 8)
+const t = (const x = 7, const y = 8)
 cassert(t.x.[comptime])
 cassert(t.[comptime])
 

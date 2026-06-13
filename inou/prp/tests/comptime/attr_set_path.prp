@@ -20,7 +20,7 @@ cassert(a.[note] == 1)
 cassert(a == 7)
 
 // Plain writes through tuple paths (no attribute modification on assignment).
-mut t = (x = 0, y = (lo = 0, hi = 0))
+mut t = (mut x = 0, mut y = (const lo = 0, mut hi = 0))
 t.x = 11
 cassert(t.x == 11)
 
@@ -43,7 +43,7 @@ cassert(y.[_special])
 cassert(t.y.lo.[bound] == nil)
 
 // Plain writes to a scalar tuple field in sequence.
-mut u = (v = 0)
+mut u = (mut v = 0)
 u.v = 5
 u.v = 6
 cassert(u.v == 6)

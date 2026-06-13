@@ -11,6 +11,6 @@
 //
 // `a` has fields `b` and `c` only — `a.d` is unknown.
 
-const a = (b = 1, c = 2)
+const a = (const b = 1, const c = 2)
 const y = a.d
 cassert(y == 5)

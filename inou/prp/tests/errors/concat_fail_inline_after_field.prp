@@ -8,5 +8,5 @@
 // by a later inline concat expansion.
 // Doc: ../docs/docs/pyrope/03-bundle.md `...` triggers a compile error if the same entry already exists.
 
-const a = (x=1,y=2)
-const bad = (x=0, ...a) // locate_error_here
+const a = (const x=1, const y=2)
+const bad = (const x=0, ...a) // locate_error_here

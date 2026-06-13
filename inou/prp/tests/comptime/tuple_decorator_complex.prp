@@ -18,7 +18,7 @@ comb get_xy(self, idx:string) -> (r) {
   }
 }
 
-comptime const Point = (_x = 0, _y = 0, init = init_xy, get = get_xy)
+comptime const Point = (mut _x = 0, mut _y = 0, const init = init_xy, const get = get_xy)
 
 const p:Point = (1, 2)   // init runs at construction
 

@@ -73,7 +73,21 @@ const t = (1, 2, 3)                          // OK: positional entries (no names
 </ul>
 
 <h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<ul>
+<li><strong>A — diagnostic emitted.</strong> In <code>prp2lnast.cpp process_assignment</code>:
+  when the assignment is an untyped <code>const</code>/<code>mut</code> DECLARATION (a
+  <code>decl</code>, no type on the lvalue, plain <code>=</code>) whose RHS is a tuple literal,
+  each NAMED field (an <code>assignment</code>/<code>simple_assignment</code> entry) must carry a
+  <code>const</code>/<code>mut</code> kind; a bare one reports <code>tuple-field-needs-kind</code>.
+  Positional entries, typed declarations, calls, and comparisons are naturally excluded (the
+  check only runs on a decl-with-no-type in <code>process_assignment</code>).
+  <code>adv_const_tuple_bare_field</code> / <code>adv_mutconst_bare_field</code> pass.</li>
+<li><strong>B — ~50 in-tree tests patched.</strong> Adding the diagnostic surfaced 50
+  bare-field-declaration tests (more than the ~37 estimate); each got <code>const</code>/<code>mut</code>
+  on its named fields (<code>mut</code> where the field is later mutated, else <code>const</code>),
+  verified per-test. Includes the <code>lhd_import_test</code> / <code>lhd_prp_writer_test</code>
+  heredoc'd sources. No net regression (full suite: 67 → 65 failing).</li>
+</ul>
 
 <h2>Docs</h2>
 <ul>

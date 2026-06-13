@@ -9,11 +9,11 @@ const x = 1
 
 cassert(x == x[0] == 1)
 
-const y = (foo=3)
+const y = (const foo=3)
 
 cassert(y.foo == y == 3 == ((((3)))))
 
-const z = (4,bar=true)
+const z = (4,const bar=true)
 
 cassert(z[0] == 4 == (((4))))
 cassert(z == (bar=true, 4))

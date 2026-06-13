@@ -11,7 +11,7 @@
 
 comb top() -> () {
   const c = 10
-  mut x = (a=1, mut b = (c=2), mut c)
+  mut x = (const a=1, mut b = (c=2), mut c)
 }
 
 const a = top()   // locate_error_here

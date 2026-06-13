@@ -11,8 +11,8 @@
 // same concrete values must compare equal regardless of whether their
 // fields were declared `mut` or `const` on either side.
 
-const m_const_const = (a=2, b=60)
-mut   m_mut_const   = (a=2, b=60)
+const m_const_const = (const a=2, const b=60)
+mut   m_mut_const   = (const a=2, const b=60)
 
 // 1. Plain `==` literal vs declared bundle — should be true.
 cassert(m_const_const == (a=2, b=60))
@@ -25,8 +25,8 @@ cassert(m_const_const == m_mut_const)
 cassert(m_const_const == (b=60, a=2))
 
 // 4. Different declared mutability should not affect `==`.
-const cc = (a=1, b=2)
-mut   mm = (a=1, b=2)
+const cc = (const a=1, const b=2)
+mut   mm = (const a=1, const b=2)
 cassert(cc == mm)
 cassert(mm == cc)
 
@@ -36,7 +36,7 @@ cassert(not (m_const_const == (a=2, b=999)))
 cassert((a=1, b=2) != (a=1, b=3))
 
 // 6. `case` operator must also compare values only and fold concretely.
-const t = (a=2, b=60)
+const t = (const a=2, const b=60)
 cassert(    t case (a=2, b=0sb?))     // wildcard on b → match
 cassert(not(t case (a=33, b=0sb?)))   // a mismatch → definite false
 cassert(    t case (a=2))             // subset rhs → match

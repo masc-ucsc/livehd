@@ -4,5 +4,5 @@
 :error: invalid in operator
 */
 
-mut t = (a=1, b=nil)
+mut t = (const a=1, const b=nil)
 const x = t.b + 1

@@ -10,5 +10,5 @@
 // Doc: ../docs/docs/pyrope/03-bundle.md `,ff += 2 // error:`
 
 mut y = (
-  ,zz += 3 // locate_error_here
+  ,mut zz += 3 // locate_error_here
 )

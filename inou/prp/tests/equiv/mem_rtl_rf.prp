@@ -13,15 +13,15 @@
 // land @[0] (committed state, like a reg read).
 mod rtlmem(raddr0:u4, raddr1:u4, wraddr:u4, din0:u4, we0:bool) -> (q0:u4@[0], q1:u4@[0]) {
   mut mem = (
-    addr      = (raddr0, raddr1, wraddr),
-    bits      = 4,
-    size      = 16,
-    din       = (0, 0, din0),
-    enable    = (1, 1, we0),
-    fwd       = false,
-    type      = 0,
-    wensize   = 1,
-    rdport    = (1, 1, 0),
+    const addr      = (raddr0, raddr1, wraddr),
+    const bits      = 4,
+    const size      = 16,
+    const din       = (0, 0, din0),
+    const enable    = (1, 1, we0),
+    const fwd       = false,
+    const type      = 0,
+    const wensize   = 1,
+    const rdport    = (1, 1, 0),
   )
   mut res = __memory(mem)
   q0 = res[0]

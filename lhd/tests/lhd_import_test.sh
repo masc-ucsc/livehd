@@ -26,7 +26,7 @@ fail() {
 # ── fixtures ──────────────────────────────────────────────────────────────────
 cat > "$W/explib.prp" <<'EOF'
 pub const magic = 3*4
-pub const cfg = (gain=2, shift=1)
+pub const cfg = (const gain=2, const shift=1)
 pub comb add1(a:u8) -> (r:u9) { r = a + 1 }
 const local_only = 7
 EOF
@@ -167,7 +167,7 @@ grep -q '"status":"pass"' "$W/r8.json" || fail "dead-branch result not pass: $(c
 # imported value-field / scalar reads fold INSIDE the extracted unit — the
 # import-aware half of the closure-capture rule (ex-todo/ entry 2j).
 cat > "$W/caplib.prp" <<'EOF'
-pub const cfg = (gain=3, offset=5)
+pub const cfg = (const gain=3, const offset=5)
 pub const k = 100
 EOF
 cat > "$W/capuse.prp" <<'EOF'

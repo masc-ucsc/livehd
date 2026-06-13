@@ -5,8 +5,8 @@
 :verifier_fail: 0
 */
 
-mut foo = (a=40,b=50)
-mut bar = (c=60)
+mut foo = (mut a=40,mut b=50)
+mut bar = (mut c=60)
 mut xxx = (60)
 
 foo.a = 2

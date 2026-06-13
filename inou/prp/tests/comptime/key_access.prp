@@ -5,7 +5,7 @@
 :verifier_fail: 0
 */
 
-const foo = (xx=3, yy=4)
+const foo = (const xx=3, const yy=4)
 
 // named tuple: positional access (`foo[0]`) is not allowed — use the names.
 cassert(foo.xx.[key] == "xx")

@@ -9,7 +9,7 @@
 // (only scalars do). Per-field `.[bits]` reads require an annotated
 // field; untyped fields read as nil.
 
-const t = (a:u3=5, b:u2=2, c:u7=100)
+const t = (const a:u3=5, const b:u2=2, const c:u7=100)
 cassert(t.a.[bits] == 3)
 cassert(t.b.[bits] == 2)
 cassert(t.c.[bits] == 7)

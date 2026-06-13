@@ -16,6 +16,6 @@ cassert(Perm.rd in mask)        // doc-guaranteed: union member
 cassert(Perm.wr in mask)        // doc-guaranteed: union member
 cassert(not (Perm.ex in mask))
 
-const view = (acl=mask)
+const view = (const acl=mask)
 cassert(Perm.rd in view.acl)
 cassert(int(Perm.rd) | int(Perm.wr) == int(mask))

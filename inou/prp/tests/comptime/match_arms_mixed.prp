@@ -32,7 +32,7 @@ const r2 = match sel {
 cassert(r2.lo == 4 and r2.hi == 2)
 
 // Tuple selector, pattern-match on whole tuple via `case`.
-const tup = (a=1, b=2)
+const tup = (const a=1, const b=2)
 const r3 = match tup {
   case (a=0, b=0)   { 0 }
   case (a=1, b=2)   { 99 }

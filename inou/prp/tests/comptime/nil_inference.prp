@@ -15,7 +15,7 @@ c = c + 1
 cassert(c == 4)
 
 // Tuple fields infer independently: binding `a` leaves `b` untouched.
-mut t = (a=nil, b=nil)
+mut t = (mut a=nil, mut b=nil)
 t.a = 7
 cassert(t.a == 7)
 

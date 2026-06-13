@@ -6,7 +6,7 @@
 */
 
 {
-  mut a = (r1 = (b=1,c=2), r2 = (3,4))
+  mut a = (const r1 = (const b=1,const c=2), const r2 = (3,4))
   cassert(a.r1 == (b=1,c=2) and a.r2 == (3,4))
   cassert(a.r1.c    == 2)
   cassert(a.r1.b    == 1)
@@ -18,7 +18,7 @@
 }
 
 {
-  mut a = (foo = 3)
+  mut a = (const foo = 3)
   cassert(a has 'foo')
   cassert(!(a has 'bar'))
   cassert(not (a has 'bar'))
@@ -27,7 +27,7 @@
 {
   const xx = 3
 
-  mut a = (xx, xx = 44, foo = 55)
+  mut a = (xx, const xx = 44, const foo = 55)
   // Decision 1: drop `(3, 44, 55)` cross-match — named slots stay named.
   cassert(a == (xx, xx=44, foo=55))
   cassert(xx == 3)

@@ -13,5 +13,5 @@
 // field missing kind keyword` — fields are introduced at the tuple literal, not
 // through a later `mut t.field = ...`.
 
-mut t = (b = 1)
+mut t = (const b = 1)
 mut t.c = 2   // locate_error_here

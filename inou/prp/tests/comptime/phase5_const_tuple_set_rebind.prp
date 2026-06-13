@@ -18,7 +18,7 @@
 // stands in as the negative path placeholder. Run manually and check
 // stderr for the rebind error.
 
-const t = (a = 5,)
+const t = (mut a = 5,)
 t.a = 7
 cassert(t.a == 7)
 cassert(false)

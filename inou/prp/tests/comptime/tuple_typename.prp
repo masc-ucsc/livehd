@@ -5,7 +5,7 @@
 :verifier_fail: 0
 */
 
-comptime const X1 = (a=33)
+comptime const X1 = (const a=33)
 
 cassert(X1.[typename] == "X1")
 

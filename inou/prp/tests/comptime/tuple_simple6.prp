@@ -5,7 +5,7 @@
 :verifier_fail: 0
 */
 
-mut x = (a:u32 = 3, b = 4, mut 5)
+mut x = (const a:u32 = 3, const b = 4, mut 5)
 
 cassert(x == (a=3,b=4,5))
 cassert(x == (b=4,5,a=3))

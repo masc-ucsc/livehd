@@ -5,7 +5,7 @@
 :verifier_fail: 0
 */
 
-mut tup0 = (0, y = 1)
+mut tup0 = (0, mut y = 1)
 
 tup0 = (33, y=44)
 cassert(tup0[0]==33 and tup0.y==44)
@@ -15,13 +15,13 @@ tup0 = (55, 66)
 // (03-bundle.md) instead of the old `tup0['y'] == nil` idiom.
 cassert(tup0[0]==55 and not (tup0 has 'y') and tup0[1]==66)
 
-mut tup1 = (0, foo = 1)
+mut tup1 = (0, mut foo = 1)
 
 tup1 = (33, foo=44)
 cassert(tup1[0]==33 and tup1.foo==44)
 cassert(tup1 == (33, foo=44))
 
-mut tup2 = (true, foo = 0)
+mut tup2 = (true, mut foo = 0)
 
 tup2 = (false, 44)
 cassert(tup2 == (false, 44))

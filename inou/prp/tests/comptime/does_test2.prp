@@ -38,7 +38,7 @@ cassert(bool equals bool)
 cassert(not (u32 equals bool))
 
 // ── typed case (kind mismatch on a field rejects) ───────────────────────
-const s = (a:u32=0, b:bool=false)
+const s = (const a:u32=0, const b:bool=false)
 cassert(not (s case (a:bool=nil)))   // field a: u32 vs bool → false
 cassert(s case (a=0))                // untyped value pattern matches
 cassert(not (s case (a=1)))          // value mismatch

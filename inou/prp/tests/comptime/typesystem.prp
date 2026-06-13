@@ -37,7 +37,7 @@ cassert(b.x == 7)
 
 
 // ── 2. Anonymous tuple has nil typename. Named tuple has stable typename.
-const anon = (p=1, q=2)
+const anon = (const p=1, const q=2)
 cassert(anon.[typename] == nil)
 
 type named_t = (p:u4 = 0, q:u4 = 0)

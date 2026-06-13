@@ -8,6 +8,6 @@
 // Doc: ../docs/docs/pyrope/03-bundle.md `,ff = 2 // error:`
 
 mut x = (
-  ,ff = 1
-  ,ff = 2 // locate_error_here
+  ,const ff = 1
+  ,const ff = 2 // locate_error_here
 )

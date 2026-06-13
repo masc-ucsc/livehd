@@ -12,5 +12,5 @@
 // immutable and introduced with the tuple literal (kind keyword + type), so a
 // `a.b:u3 = ...` write has nowhere to attach the type.
 
-mut a = (b = 1)
+mut a = (mut b = 1)
 a.b:u3 = 2   // locate_error_here

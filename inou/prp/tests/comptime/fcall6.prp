@@ -21,7 +21,7 @@ comptime const Triple = (
   mut a:s32 = 0,
   mut b:s32 = 0,
   mut c:s32 = 0,
-  map = apply_each,
+  const map = apply_each,
 )
 
 mut v:Triple = (a = 10, b = 20, c = 30)

@@ -5,7 +5,7 @@
 :verifier_fail: 0
 */
 
-const t1 = (a=1,b=2,c=3)
+const t1 = (const a=1,const b=2,const c=3)
 
 mut t2 = ()
 for (e, idx, key) in t1 {

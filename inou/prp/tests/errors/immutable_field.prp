@@ -15,5 +15,5 @@
 // (`mut f = (mut b=3, const e=5); f.e = 10`) — is NOT yet caught; only a
 // fully-`const` base is rejected today.
 
-const r = (a = 1)
+const r = (const a = 1)
 r.a = 33

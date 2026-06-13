@@ -8,16 +8,16 @@
 // Different init but still going thought the memory, so still 1 flop q@[1] between inputs and outputs
 mod syncinit(raddr:u2) -> (q:u4@[1]) {
   mut mem = (
-    addr      = (raddr),
-    bits      = 4,
-    size      = 4,
-    din       = (0),
-    enable    = (1),
-    fwd       = false,
-    type      = 1,
-    wensize   = 1,
-    rdport    = (1),
-    init      = (1, 2, 3, 4),
+    const addr      = (raddr),
+    const bits      = 4,
+    const size      = 4,
+    const din       = (0),
+    const enable    = (1),
+    const fwd       = false,
+    const type      = 1,
+    const wensize   = 1,
+    const rdport    = (1),
+    const init      = (1, 2, 3, 4),
   )
   mut res = __memory(mem)
   q = res[0]

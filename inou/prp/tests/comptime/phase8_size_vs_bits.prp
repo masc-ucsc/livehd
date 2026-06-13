@@ -9,7 +9,7 @@
 // width. `bits` is the concat width (for a tuple) or the per-element
 // width (for an array).
 
-const t = (a:u4=3, b:u4=5, c:u4=7)
+const t = (const a:u4=3, const b:u4=5, const c:u4=7)
 cassert(t.[size] == 3)               // three entries
 cassert(t.[bits] == nil)             // no bits for structs
 cassert(t.a.[bits] == 4)

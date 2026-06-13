@@ -6,8 +6,8 @@
 */
 
 {
-  const lhs = (a=1,b=2)
-  const rhs = (c=3,d=4)
+  const lhs = (const a=1,const b=2)
+  const rhs = (const c=3,const d=4)
   const got = (...lhs, ...rhs)
 
   cassert(got == (a=1,b=2,c=3,d=4))
@@ -16,8 +16,8 @@
 }
 
 {
-  const lhs = (cfg=(lo=1,hi=2), tag=7)
-  const rhs = (cfg=(bar=3,extra=4), out=8)
+  const lhs = (const cfg=(const lo=1,const hi=2), const tag=7)
+  const rhs = (const cfg=(const bar=3,const extra=4), const out=8)
   const got = (...lhs, ...rhs)
 
   cassert(got.cfg.lo == 1)
@@ -43,9 +43,9 @@
 }
 
 {
-  const base = (left=1, mid=(x=2))
-  const tail = (right=3, last=4)
-  const got = (head=0, ...base, marker=9, ...tail)
+  const base = (const left=1, const mid=(const x=2))
+  const tail = (const right=3, const last=4)
+  const got = (const head=0, ...base, const marker=9, ...tail)
 
   cassert(got == (head=0,left=1,mid=(x=2),marker=9,right=3,last=4))
   cassert(got.mid.x == 2)

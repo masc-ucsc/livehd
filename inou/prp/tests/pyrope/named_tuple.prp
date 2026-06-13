@@ -7,7 +7,7 @@
 
 comb top() -> () {
   const c = 10
-  mut x = (a=1, mut b = (c=2), mut c)
+  mut x = (const a=1, mut b = (const c=2), mut c)
   cassert(x == (a=1, b=(c=2), 10))
   // `mut c` adds a POSITIONAL field with the value of the outer `c` (10) — it
   // does NOT create a named field `c` on x (the third element is unnamed, slot

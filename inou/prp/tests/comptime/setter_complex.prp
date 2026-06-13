@@ -20,7 +20,7 @@ comb init_v(ref self, v) {
   self.v = v
 }
 
-comptime const Tup = (v = "", init = [init_empty, init_v])
+comptime const Tup = (mut v = "", const init = [init_empty, init_v])
 
 mut x:Tup = nil       // no-arg init overload runs at construction
 cassert(x.v == "empty")

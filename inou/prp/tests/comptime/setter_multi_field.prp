@@ -33,10 +33,10 @@ comb maybe_set_x(ref self, v:int, flag:bool) {
 comptime const Pair = (
   mut x:int = 0,
   mut y:int = 0,
-  init = set_pair,  // constructor, runs at construction
-  set  = set_pair,  // same comb as explicit method
-  get  = get_pair,
-  upd  = maybe_set_x,
+  const init = set_pair,  // constructor, runs at construction
+  const set  = set_pair,  // same comb as explicit method
+  const get  = get_pair,
+  const upd  = maybe_set_x,
 )
 
 // Two independent instances: state must not leak between them.

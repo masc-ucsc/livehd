@@ -32,7 +32,7 @@ comb apply(x, f) -> (r) { r = f(x) }
 cassert(apply(x = 1, f = step_up) == 8)
 
 // Captured tuple field: capture into a comb body, read out by name.
-const CFG = (gain = 2, offset = 5)
+const CFG = (const gain = 2, const offset = 5)
 comb cfg_apply(x) -> (r) { r = x * CFG.gain + CFG.offset }
 cassert(cfg_apply(x = 10) == 25)
 

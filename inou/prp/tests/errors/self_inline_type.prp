@@ -12,6 +12,6 @@ comb set_b(ref self:(a:u32=nil, b:string="")) {
   self.b = "foo"
 }
 
-mut x = (a=1, b="")
+mut x = (const a=1, mut b="")
 x.set_b()
 cassert(x.b == "foo")

@@ -2073,6 +2073,36 @@ void Prp2lnast::process_assignment(TSNode n) {
     op_kind = "assign";  // assignment without an explicit operator defaults to plain `=`
   }
 
+  // 2f-mutconst: a tuple-literal DECLARATION — an untyped `const`/`mut` binding —
+  // must declare each NAMED field's kind (`const`/`mut`); a bare `b = 2` is a
+  // compile error. The field kind is NOT required where it comes from context:
+  // function-call args / comparison RHS (those never reach here as a `decl`) and
+  // assignment to an already-TYPED variable (excluded by the no-type gate).
+  // Positional entries and nested tuples are unaffected.
+  if (!ts_node_is_null(decl) && ts_node_is_null(tc) && op_kind == "assign" && !ts_node_is_null(rv)
+      && std::string_view(ts_node_type(rv)) == "tuple") {
+    const auto dk       = decode_decl(decl).kind;
+    const bool lv_typed = !ts_node_is_null(lv) && !ts_node_is_null(child_by_field(lv, "type"));
+    if ((dk == "const" || dk == "mut") && !lv_typed) {
+      uint32_t nrc = ts_node_named_child_count(rv);
+      for (uint32_t i = 0; i < nrc; i++) {
+        TSNode           f = ts_node_named_child(rv, i);
+        std::string_view ft(ts_node_type(f));
+        if (ft != "assignment" && ft != "simple_assignment") {
+          continue;  // positional entry / comment — no name, no kind keyword needed
+        }
+        if (ts_node_is_null(child_by_field(f, "decl"))) {
+          report_error(f,
+                       "tuple-field-needs-kind",
+                       "type",
+                       "a named field in a tuple-literal declaration must declare its kind (`const` or `mut`)",
+                       "write `const NAME = …` or `mut NAME = …` (bare fields are only allowed in calls, "
+                       "comparisons, or a typed-variable assignment)");
+        }
+      }
+    }
+  }
+
   // The grammar attaches a statement-level `wrap`/`sat` prefix as the
   // `overflow` field of the enclosing _statement. Passed to
   // process_lvalue_for_assign, which lowers the scalar write through a

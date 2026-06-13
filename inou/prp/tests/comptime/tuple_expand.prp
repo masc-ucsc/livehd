@@ -5,16 +5,16 @@
 :verifier_fail: 0
 */
 
-const a1 = (a=(b=1,c=2), 7, 3, d=3)
+const a1 = (const a=(const b=1,const c=2), 7, 3, const d=3)
 
-const a2 = (a.b=1, a.c=2, d=3, 7, 3)
+const a2 = (const a.b=1, const a.c=2, const d=3, 7, 3)
 cassert(a1 == a2)
 
-const a3 = (7, a.c=2, a.b=1, d=3, 3)
+const a3 = (7, const a.c=2, const a.b=1, const d=3, 3)
 cassert(a1 == a3)
 
-const a4 = (d=3,7,3,a=(b=1,c=2))
+const a4 = (const d=3,7,3,const a=(const b=1,const c=2))
 cassert(a1 == a4)
 
-const a5 = (a.c=2, 7, d=3, 3, a.b=1)
+const a5 = (const a.c=2, 7, const d=3, 3, const a.b=1)
 cassert(a1 == a5)
