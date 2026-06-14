@@ -15,13 +15,15 @@
   algorithm. This revives the deleted <code>pass/label</code> suite (four algorithms),
   but with one core change: the old pass colored a <em>flat</em> graph, whereas this one
   attaches colors to the <strong>hierarchy</strong> using the built-in hierarchical
-  iterators. The output is the per-node color plus an aggregate <strong>color metadata</strong>
-  record per <code>graph_library</code> (keyed by top).</p>
+  iterators. The output is a complete per-node color plus an aggregate
+  <strong>color metadata</strong> record persisted on the selected top graph.</p>
 <p><strong>Scope is coloring + metadata only.</strong> Turning the colors into real
-  modules — "one new lgraph per color id" built into a fresh <code>graph_library</code> —
+  modules — "one new lgraph per nonzero color id" built into a fresh <code>graph_library</code> —
   is the separate future <code>PARTITION</code> task (see Pre&nbsp;TODO). This task just
   produces and records the coloring that <code>PARTITION</code> (and <code>PRPCOLOR</code>,
-  <code>ABC</code>) will consume.</p>
+  <code>ABC</code>) will consume. The <code>lhd pass color</code> CLI plumbing is in scope;
+  <code>lhd synth</code> can later become a convenience wrapper over a broader
+  <code>lhd pass synth</code> flow.</p>
 
 <h2>Depends on</h2>
 <p>None. The old source lives in git history (see <em>Revival</em> below); the per-node
@@ -79,6 +81,9 @@
 <ul>
 <li><strong>Per-node output is just an integer color id.</strong> There is <em>no</em> per-node
   "shared" flag — <strong>sameness of id is the sharing</strong>.</li>
+<li><strong><code>NO_COLOR = 0</code> is invalid in a finished coloring.</strong> Every
+  partitionable node reachable from the selected top must receive a nonzero color id. A later
+  <code>partition</code> pass must diagnose any remaining zero as a color-pass bug.</li>
 <li><strong>Same color id ⇒ the same module.</strong> A color id is, conceptually, the module
   that <code>PARTITION</code> will later generate once and instantiate everywhere that id
   appears.</li>
@@ -112,16 +117,21 @@
   <strong>significantly more efficient</strong> — one write per def, not per instance. Expose this
   as a per-pass option; the hierarchical reader falls back to the flat color when no per-instance
   color is set.</li>
+<li><strong>One active coloring per top.</strong> A <code>color</code> run starts by clearing the
+  active coloring for that top, then the selected algorithm writes the new complete coloring. The
+  algorithm may implement options such as <code>keep_colored</code>, but the final result for the
+  selected top still must be complete and nonzero.</li>
 </ul>
 
-<h2>Color metadata (per <code>graph_library</code>, keyed by top)</h2>
+<h2>Color metadata (persistent top-graph attr)</h2>
 <p>Separate from the per-node ids, the pass records an aggregate descriptor of the coloring.
-  It lives at the <code>graph_library</code> level and is <strong>keyed by top</strong>, so one
-  library can hold several independent colorings (one per top); the common case is a single
-  entry. Holds hints — not per-node data:</p>
-<pre><code>color_metadata : map&lt;top_name, ColoringInfo&gt;
-
-ColoringInfo {
+  It is a persistent HHDS graph attribute attached to the selected top graph, so it is saved inside
+  the <code>graph_library</code> with the graph body. Each top graph has one active coloring record.
+  The attr value is a serialized text blob, preferably one JSON object (not JSONL unless history is
+  added later). Holds hints — not per-node data:</p>
+<pre><code>ColoringInfo {
+  schema_version : 1
+  top         : "top_module"
   algorithm   : "mincut" | "acyclic" | "synth" | "path"
   params      : { ... }              // cutoff, seed, alg, continuous, ...
   colors      : map&lt;color_id, ColorInfo&gt;
@@ -132,8 +142,8 @@ ColorInfo {
   instance_cnt: int                  // how many hierarchical instances it spans
   // ... room for more hints
 }</code></pre>
-<p>The per-instance <code>hier_storage</code> color is anchored to the top's hierarchy, and this
-  metadata stays keyed by top. The durable tree-level home for this descriptor is task
+<p>The per-instance <code>hier_storage</code> color is anchored to the top's hierarchy, and the
+  metadata lives on that same top graph. The durable tree-level home for this descriptor is task
   <a class="xref" href="3c.html">3c</a> (<em>Partition descriptor as a tree-level HHDS attribute</em>).</p>
 
 <h2>CLI surface</h2>
@@ -141,14 +151,23 @@ ColorInfo {
 lhd pass color clear --top &lt;mod&gt;                                  lg:dir
 # &lt;alg&gt; ∈ mincut | acyclic | synth | path ; params discoverable via `lhd list options`
 # --top selects the hierarchy root; colors + metadata are written in place into lg:dir
+# clear removes the active coloring for that top only, not unrelated tops in the library
 # --config &lt;file&gt; supplies a bulk option set for complicated runs
 # keep_colored: lhd pass color &lt;alg&gt; --top m --set pass.color.&lt;alg&gt;.keep_colored=1 lg:dir</code></pre>
 <p>The single <code>color</code> method takes the algorithm as its one positional arg; everything
   else is <code>--set pass.color.&lt;alg&gt;.*</code>. The matching <code>lhd pass partition</code>
-  verb (task <a class="xref" href="2p-partition.html">2p-partition</a>) consumes these colors.</p>
+  verb (task <a class="xref" href="2p-partition.html">2p-partition</a>) consumes these colors.
+  Add the <code>lhd pass</code> command, graph-library input/output handling, option listing, and
+  <code>--set pass.color...</code> validation as part of this task.</p>
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
+<li><strong>CLI — add <code>lhd pass</code> graph-pass plumbing.</strong>
+  <ul><li>Add a first-class <code>lhd pass</code> command that consumes <code>lg:dir</code>,
+    dispatches <code>color</code>/<code>clear</code>, saves in-place mutations, exposes
+    <code>pass.color.*</code> through <code>lhd list options</code>/<code>lhd describe</code>, and
+    validates <code>--set</code>/<code>--config</code> entries. Keep <code>lhd synth</code> as-is
+    for now; a later cleanup may make it a wrapper over <code>lhd pass synth</code>.</li></ul></li>
 <li><strong>A — revive + port the four algorithms.</strong>
   <ul>
   <li>Port the four algorithms from the old <code>pass/label/</code> source (<code>e446552a8^</code>,
@@ -173,18 +192,19 @@ lhd pass color clear --top &lt;mod&gt;                                  lg:dir
     <code>flat_storage</code> <code>color</code> attr (per def) for the all-instances-share case;
     the hierarchical reader falls back to it when no per-instance color is set.</li>
   <li>Add a <code>keep_colored</code> option (the enabler for the <a class="xref" href="2p-partition.html">2p-partition</a>
-    iterative flow): when set, <strong>prune the hierarchical descent at any sub-instance whose
-    module already has a color for this top</strong> — leave an earlier coloring of the lower
-    levels untouched instead of overwriting it. This is how "color a subset → partition →
-    re-color the higher level" preserves what was already partitioned below.</li>
+    iterative flow) as an algorithm option. A color run still begins by clearing the selected top's
+    active coloring; the algorithm decides what existing colored hierarchy to preserve or prune, and
+    must leave a complete nonzero coloring for the selected top.</li>
   </ul></li>
 <li><strong>C — color-id semantics + <code>continuous</code> mode.</strong>
   <ul><li>Enforce "same id ⇒ structurally identical region"; allow discontinuous same-id regions
     by default; add the optional <code>continuous</code> flag that splits a color into per-region
     ids.</li></ul></li>
-<li><strong>D — per-(library, top) color metadata.</strong>
-  <ul><li>Build and store the <code>ColoringInfo</code> record (algorithm/params + per-color name
-    hint, region count, instance count) keyed by top.</li></ul></li>
+<li><strong>D — active color metadata on the top graph.</strong>
+  <ul><li>Build and store the serialized <code>ColoringInfo</code> graph attribute on the selected
+    top graph (schema version, top, algorithm/params + per-color name hint, region count, instance
+    count). One active record per top; a new color run overwrites that top's record, and
+    <code>color clear</code> removes it for that top.</li></ul></li>
 <li><strong>E — tests.</strong>
   <ul><li>Restore the four gtests from history
     (<code>{acyclic,mincut,synth,path}_test.cpp</code> at <code>e446552a8^</code>), ported to the
@@ -213,7 +233,7 @@ git show 'e446552a8^':pass/label/acyclic_test.cpp    # + mincut_/synth_/path_tes
 <h2>Downstream (not this task)</h2>
 <ul>
 <li><strong><code>PARTITION</code></strong> (Pre&nbsp;TODO) — reads the colors and builds a new
-  <code>graph_library</code>: one lgraph per color id, instantiated wherever that id appears.
+  <code>graph_library</code>: one lgraph per nonzero color id, instantiated wherever that id appears.
   This is the reason the structural-identity invariant exists.</li>
 <li><strong><code>PRPCOLOR</code></strong> (Pre&nbsp;TODO) — a coloring variant that emits
   Pyrope-like (<code>comb</code>/<code>pipe</code>) partitions and timecheck (<code>mod</code>)
@@ -228,8 +248,9 @@ git show 'e446552a8^':pass/label/acyclic_test.cpp    # + mincut_/synth_/path_tes
   <code>lhd pass color &lt;alg&gt;</code> (method <code>pass.color</code>, <code>alg</code> ∈
   mincut/acyclic/synth/path); given a top, they walk the hierarchy with
   <code>fast_hier</code>/<code>forward_hier</code> and write a per-instance <code>hier_storage</code>
-  color id (with a per-pass <code>compact</code> flat option for the all-instances-share case);
-  a per-(library, top) metadata record captures the coloring; the restored gtests and the
+  nonzero color id for every partitionable node (with a per-pass <code>compact</code> flat option
+  for the all-instances-share case); a serialized active metadata attr on the top graph captures the
+  coloring; the restored gtests and the
   <code>lhd/tests</code> hierarchical-coloring wrapper pass; no previously-passing test regresses.</p>
 </main>
 <footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
