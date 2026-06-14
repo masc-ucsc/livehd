@@ -5198,6 +5198,32 @@ void Prp2lnast::emit_type_spec(const Lnast_node& target, TSNode type_cast_node) 
           auto aidx       = builder.add_child(Lnast_ntype::create_store());
           lnast->add_child(aidx, target);
           lnast->add_child(aidx, bundle_ref);
+          // The tuple-shape store above carries the field VALUES/shape, and
+          // tuple_to_node records each field's type on the field's tuple_get
+          // tmp (read side: `does`/`.[bits]`). ALSO stamp each field's type on
+          // the DOTTED field path `target.field` so the runner's dotted-declare
+          // bake records decl_max/min on the field entry (pending until the
+          // value-store establishes the field). This is what lets the per-field
+          // overflow check (cat 3) see `x.a`'s declared range — the tmp-keyed
+          // form never lands on the field's value-bundle entry.
+          if (const auto tn = target.get_name(); !tn.empty() && tn.find('.') == std::string_view::npos) {
+            for (uint32_t j = 0, jc = ts_node_named_child_count(inner); j < jc; ++j) {
+              TSNode item = ts_node_named_child(inner, j);
+              if (std::string_view(ts_node_type(item)) != "typed_field") {
+                continue;
+              }
+              TSNode fid = child_by_field(item, "identifier");
+              TSNode ftc = child_by_field(item, "type");
+              if (ts_node_is_null(fid) || ts_node_is_null(ftc)) {
+                continue;
+              }
+              const std::string fname{trim(get_text(fid))};
+              if (fname.empty() || fname.find('.') != std::string::npos) {
+                continue;
+              }
+              emit_type_spec(Lnast_node::create_ref(std::string(tn) + "." + fname), ftc);
+            }
+          }
           // Skip the empty `type_spec expr_type:` we'd otherwise emit; the
           // tuple-shape information is now encoded in the target's bundle.
           goto attrs;

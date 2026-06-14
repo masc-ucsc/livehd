@@ -230,15 +230,17 @@ protected:
   // The declared MAX for an UNSIGNED int decl (min known ≥ 0); invalid Dlop
   // when unsigned-ness doesn't hold or nothing was declared.
   Dlop decl_unsigned_max_of(std::string_view var) {
-    const auto b = st().get_bundle(var);
-    if (!b) {
+    // Resolve via the shared decl_facts derivation so a dotted field path
+    // (`x.a`) resolves to its FIELD's declared range, not just the bare-var "0"
+    // slot — lets the overflow check apply to field writes too (review cat 3).
+    const auto f = upass::decl_facts::lookup(st(), lm ? lm->get_lnast().get() : nullptr, var);
+    if (!f || !f->range_max || !f->range_min) {
       return Dlop();
     }
-    const Bundle::Entry& e = b->get_entry("0");
-    if (e.decl_max.is_invalid() || e.decl_min.is_invalid() || e.decl_min.is_negative() || e.decl_max.is_negative()) {
-      return Dlop();
+    if (f->range_min->is_negative() || f->range_max->is_negative()) {
+      return Dlop();  // signed/none-typed: the unsigned positive-overflow check does not apply
     }
-    return e.decl_max;
+    return *f->range_max;
   }
 
   void check_unsigned_positive_overflow(std::string_view lhs, const Dlop& value);

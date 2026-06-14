@@ -1,0 +1,9 @@
+/*
+:name: field_overflow
+:type: error
+:error: (does not fit|declared range|overflow)
+*/
+// A tuple field declared u3 (range [0,7]) cannot hold 99 — the field write
+// must fit its declared range, same as a scalar (review cat 3).
+mut x:(a:u3, c:u3) = (a=0, c=0)
+x.a = 99

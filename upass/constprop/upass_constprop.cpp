@@ -3951,7 +3951,8 @@ void uPass_constprop::process_tuple_set() {
 
     auto v = resolve_value();
     if (v) {
-      check_field_store_kind(tuple_var + "." + name, *v);  // field write must keep its kind (cat 3)
+      check_field_store_kind(tuple_var + "." + name, *v);             // field write must keep its kind (cat 3)
+      check_unsigned_positive_overflow(tuple_var + "." + name, *v);   // ... and fit its declared range (cat 3)
       // Update bundle in place; scalar values are propagated by tuple_get.
       bundle->set(name, *v);
     } else if (val_child.is_ref && st().has_bundle(val_child.text)) {
@@ -3974,7 +3975,8 @@ void uPass_constprop::process_tuple_set() {
   if (val_child.is_ref) {
     if (st().has_trivial(val_child.text)) {
       const auto rv = st().get_trivial(val_child.text);
-      check_field_store_kind(key, rv);  // field/array-element write must keep its kind (cat 3)
+      check_field_store_kind(key, rv);             // field/array write must keep its kind (cat 3)
+      check_unsigned_positive_overflow(key, rv);   // ... and fit its declared range (cat 3)
       store_trivial(key, rv);
     } else if (st().has_bundle(val_child.text)) {
       auto b = st().get_bundle(val_child.text);
@@ -3985,7 +3987,8 @@ void uPass_constprop::process_tuple_set() {
   } else {
     Dlop val = *Dlop::from_pyrope(val_child.text);
     if (!val.is_invalid()) {
-      check_field_store_kind(key, val);  // field/array-element write must keep its kind (cat 3)
+      check_field_store_kind(key, val);            // field/array write must keep its kind (cat 3)
+      check_unsigned_positive_overflow(key, val);  // ... and fit its declared range (cat 3)
       store_trivial(key, val);
     }
   }
