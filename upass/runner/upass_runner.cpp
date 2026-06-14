@@ -3595,9 +3595,18 @@ bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<
               }
             }
             if (cover) {
-              for (std::size_t idx : idxs) {
-                param_val[idx] = a.node;
-                param_set[idx] = true;
+              // Bind each leaf to its FIELD's const value (mirroring the real
+              // bind in try_inline_func_call), not the whole tuple ref — else
+              // the per-arg range check below sees a non-const ref and silently
+              // skips range-fit for every tuple-param leaf (cat 2).
+              for (const auto& [fld, val] : *af) {
+                for (std::size_t idx : idxs) {
+                  if (io.inputs[idx].name.substr(prefix.size() + 1) == fld) {
+                    param_val[idx] = val.is_invalid() ? a.node : Lnast_node::create_const(val.to_pyrope());
+                    param_set[idx] = true;
+                    break;
+                  }
+                }
               }
               matched = true;
               break;
