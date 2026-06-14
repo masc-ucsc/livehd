@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2p-partition — build a new graph_library from the colors</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2p-partition</strong> build a new <code>graph_library</code> from the colors</h1>
+<p>Consume the per-node colors produced by <a class="xref" href="2c-color.html">2c-color</a> and
+  emit a new <code>graph_library</code> in which <strong>each color id is a module</strong>:
+  generate one new lgraph per color id, instantiate it once per colored region, and build a new
+  <strong>top</strong> that wires all the partition modules together. The generated design, emitted
+  with the same top, must be <strong>LEC-equivalent to the original</strong>.</p>
+<p>This is the <code>PARTITION</code> Pre&nbsp;TODO promoted to a task. It is a
+  <strong>single pass on a given <code>--top</code></strong> (flow A): it partitions exactly one
+  level. Multi-level partitioning is just repeated CLI calls — <code>color</code> →
+  <code>partition</code> → <code>color … keep_colored=1</code> → <code>partition</code> — using the
+  <code>keep_colored</code> option in 2c-color to preserve already-partitioned lower levels.</p>
+
+<h2>Depends on</h2>
+<ul>
+<li><a class="xref" href="2c-color.html">2c-color</a> — provides the per-instance colors
+  (<code>hier_storage</code>, flat fallback) + the per-(library, top) color metadata this pass reads.</li>
+</ul>
+
+<h2>What a partition is</h2>
+<ul>
+<li><strong>Region = a maximal connected component of same-colored nodes.</strong> A color id may
+  appear as several disjoint regions (the 2c-color <code>continuous</code> option forbids that when a
+  consumer needs one region per color).</li>
+<li><strong>Color id → one module def; region → one instance.</strong> All regions of a color id are
+  generated as a single lgraph and instantiated once per region in the new top — this is exactly the
+  "one lgraph per id, instantiated wherever it appears" contract from 2c-color.</li>
+<li><strong>Cut edge → a port.</strong> An edge whose driver-color ≠ sink-color crosses a partition
+  boundary: it is a driver-pin (output) on the driver's color-module and a sink-pin (input) on the
+  sink's. The original design's own primary inputs/outputs stay ports of the <strong>new top</strong>.</li>
+</ul>
+
+<h2>The canonical interface (approach A) + <code>debug_color</code></h2>
+<ul>
+<li><strong>Derive each color's interface from one representative region</strong> — its crossing
+  edges become the module's ports, named from the crossing wire's <code>pin_name</code>, in a
+  canonical order. Every other region of that color is <em>assumed</em> to match (2c-color's
+  structural-identity invariant guarantees it), and a region whose cut signature differs is a
+  <strong>hard error</strong>.</li>
+<li><strong>This mismatch will be the common failure</strong> — and the bug is almost always upstream
+  in the <em>color</em> pass, not here. So <code>--set pass.partition.debug_color=1</code> turns the
+  first-mismatch hard error into a full diagnosis: materialize the candidate interface for
+  <em>every</em> region of each color, diff them, and pinpoint <strong>which color, which two regions,
+  and which node / edge / port diverges</strong>, so the coloring can be fixed.</li>
+</ul>
+
+<h2>Name + source-locator preservation (first-class)</h2>
+<p>The whole point is a readable, LEC-checkable rebuild, so preservation is a requirement, not a
+  nicety. HHDS has no move-node-across-graphs API, so each color-module is built by
+  <em>recreating</em> nodes/pins/edges in a fresh graph — every recreate must carry the provenance:</p>
+<ul>
+<li><strong>Reg + wire names.</strong> Carry <code>livehd::attrs::pin_name</code> on every recreated
+  pin (<code>pin_name_of</code> / <code>set_pin_name</code> / <code>wire_name</code>,
+  <code>graph/node_util.hpp:145,235,294</code>). A wire promoted to a boundary port keeps its original
+  name; preserve as many internal wire names as possible (reg names especially — they anchor the LEC).</li>
+<li><strong>Source locators.</strong> Carry <code>hhds::attrs::srcid</code> on every recreated node
+  (<code>graph/attrs.hpp:90</code>, <code>graph/node_util.hpp:419</code>) <em>and</em> populate each
+  new graph's <code>Source_locator</code> (file content) so the carried srcids still resolve — the
+  emitted Verilog keeps its sourcemap back to the original RTL.</li>
+</ul>
+
+<h2>CLI surface</h2>
+<pre><code>lhd pass partition --top &lt;mod&gt; --set pass.partition.&lt;param&gt;=v  lg:dir --emit-dir lg:dir2
+lhd pass partition --top &lt;mod&gt;                                lg:dir              # no output: stats only
+lhd pass partition --top &lt;mod&gt; --set pass.partition.debug_color=1  lg:dir --emit-dir lg:dir2
+# no --emit-dir  ⇒ stats are implicit (color/region/port counts, cut sizes); the flag only bumps verbosity
+# --config &lt;file&gt; supplies a bulk option set</code></pre>
+
+<h2>Verification — Verilog-level LEC</h2>
+<p>Emit Verilog from the partitioned <code>lg:dir2</code> with the <strong>same top</strong> and prove
+  it equivalent to the original Verilog with <code>lgcheck</code> (yosys <code>sat -prove</code>) — the
+  flattened partitioned netlist must be functionally identical to the flattened original. Ships as a
+  bazel equiv test. (Full standalone LEC tooling is the later <code>LEC</code> Pre&nbsp;TODO, which
+  depends on this task + <code>MATCH</code>; 2p uses the existing <code>lgcheck</code> for its
+  acceptance test.)</p>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li><strong>A — read colors + find regions.</strong>
+  <ul><li>For <code>--top</code>, read the per-instance <code>hier_storage</code> colors (flat
+    fallback) + the color metadata; compute regions as connected components of same-colored nodes.
+    Emit the stats (per-color region/instance/port counts, cut sizes).</li></ul></li>
+<li><strong>B — per-color module def + canonical interface.</strong>
+  <ul><li>For each color id, <code>GraphLibrary::create_graph</code> and recreate the representative
+    region's nodes/pins/edges (<code>create_node</code>, <code>create_driver_pin</code>/<code>create_sink_pin</code>,
+    <code>add_edge</code> — no cross-graph move API). Crossing edges → boundary ports named from the
+    crossing wire's <code>pin_name</code>, canonical order. Trust the 2c structural-identity invariant;
+    hard-error if a region's cut signature differs.</li></ul></li>
+<li><strong>C — <code>debug_color</code> diagnostic.</strong>
+  <ul><li>Under <code>--set pass.partition.debug_color=1</code>, materialize and diff every region's
+    interface per color and pinpoint the divergent color / region pair / node / edge / port instead of
+    failing on the first mismatch.</li></ul></li>
+<li><strong>D — build the new top + emit.</strong>
+  <ul><li>Create the new top; for each region, instantiate its color-module as a <code>Sub</code>
+    (<code>create_typed_node</code> + <code>set_subnode</code> + boundary pins by formal name — pattern
+    at <code>upass/tolg/upass_tolg.cpp:2158–2167</code>); wire boundary ports per the original cut
+    edges; thread the original primary I/O to the new top's ports; <code>commit()</code> the new
+    <code>graph_library</code> and write it via <code>--emit-dir lg:dir2</code>.</li></ul></li>
+<li><strong>E — name + locator preservation.</strong>
+  <ul><li>Carry <code>livehd::attrs::pin_name</code> (reg/wire names; boundary ports inherit the
+    crossing wire's name) and <code>hhds::attrs::srcid</code> on every recreated node/pin, and populate
+    each new graph's <code>Source_locator</code> so srcids resolve in the emitted Verilog.</li></ul></li>
+<li><strong>F — verification.</strong>
+  <ul><li>Emit Verilog from <code>lg:dir2</code> (same top) and <code>lgcheck</code> it against the
+    original Verilog; land it as a bazel equiv test on a small hierarchical design with repeated
+    instances.</li></ul></li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<p>None yet.</p>
+
+<h2>Design notes</h2>
+<ul>
+<li><strong>Module naming.</strong> Use the color metadata's per-color name hint; default to a stable
+  <code>&lt;top&gt;__c&lt;id&gt;</code>. Color 0 (<code>NO_COLOR</code>) is unpartitioned — decide whether it
+  stays in the top body or errors as "design not fully colored."</li>
+<li><strong>Multi-fanout cut.</strong> A driver feeding several sinks in another color is one output
+  port that fans out at the top, not one port per sink.</li>
+<li><strong>Hierarchy.</strong> Single level per call; the multi-level loop is scripted with 2c-color's
+  <code>keep_colored</code> (color upper level, partition, leaving the already-colored lower levels
+  pruned from the walk).</li>
+</ul>
+
+<h2>Downstream (not this task)</h2>
+<ul>
+<li><strong><code>PRPCOLOR</code></strong> / <strong><code>ABC</code></strong> (Pre&nbsp;TODO) — color
+  variants + per-partition synth that build on the colored + partitioned design.</li>
+<li><strong><code>LEC</code></strong> (Pre&nbsp;TODO) — standalone LEC tooling; depends on this task +
+  <code>MATCH</code>.</li>
+<li><strong><a class="xref" href="3c.html">3c</a></strong> — the durable tree-level HHDS attribute home
+  for the partition/color descriptor.</li>
+</ul>
+
+<h2>Done when</h2>
+<p>Given a colored design, <code>lhd pass partition --top m lg:dir --emit-dir lg:dir2</code> builds a
+  new <code>graph_library</code> with one module per color id (instanced per region) and a new top
+  wiring them; the Verilog emitted from <code>lg:dir2</code> with the same top is <code>lgcheck</code>-equivalent
+  to the original; reg names, as many wires as possible, and source locators are preserved;
+  <code>debug_color</code> pinpoints same-color region mismatches; stats print with no
+  <code>--emit-dir</code>; no previously-passing test regresses.</p>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>

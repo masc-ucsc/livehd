@@ -64,6 +64,12 @@ public:
     if (is_tuple_field_key(current_nid)) {
       return raw;
     }
+    // A func_call's named-argument / marker key (`v`/`type` of a wrap|sat call,
+    // a param name) is a structural label matched by exact string — keep raw so
+    // the wrap/sat narrow handler and call resolver still match it after inline.
+    if (is_call_arg_key(current_nid)) {
+      return raw;
+    }
     // Tmps (`___*`) must keep the `___` prefix — several ops (attr_get dst,
     // etc.) and DCE key on it — so remap to a fresh stable tmp id rather
     // than `<tag>___N`. User vars get the readable `<tag>name`.
@@ -294,6 +300,25 @@ protected:
     }
     const auto gt = lnast->get_type(gp);
     return gt == Lnast_ntype::Lnast_ntype_tuple_add || gt == Lnast_ntype::Lnast_ntype_tuple_concat;
+  }
+
+  // The child-0 ref of a `store` directly under a `func_call` is a named-arg /
+  // marker KEY (e.g. `v`/`type` of a `wrap`/`sat` library call, a callee param
+  // name, or a `__ref_arg`/`__ufcs_arg` marker) — a structural label matched by
+  // exact string, never a local variable. Renaming it under an inline frame
+  // (`v` → `inl1_v`) makes the wrap/sat narrow handler and the call resolver
+  // miss the key, dropping the narrowed/copy-through value. Keep it raw, like
+  // the tuple-field-key exemption above.
+  bool is_call_arg_key(const Lnast_nid& nid) const {
+    auto parent = lnast->get_parent(nid);
+    if (parent.is_invalid() || !Lnast_ntype::is_store(lnast->get_type(parent))) {
+      return false;
+    }
+    if (lnast->get_first_child(parent) != nid) {
+      return false;  // the value side, not the key
+    }
+    auto gp = lnast->get_parent(parent);
+    return !gp.is_invalid() && Lnast_ntype::is_func_call(lnast->get_type(gp));
   }
 
   // Fresh tmp mint for a read under an active rename frame. The fresh name

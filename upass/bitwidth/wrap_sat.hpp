@@ -18,6 +18,7 @@
 // and has no link dependency, just <const.hpp>.
 
 #include <cstdint>
+#include <optional>
 
 #include "hlop/dlop.hpp"
 
@@ -76,6 +77,23 @@ inline Dlop saturate_signed(const Dlop& v, uint32_t n) {
   }
   if (lo.sub_op(v)->is_positive() && !v.same_repr(lo)) {
     return lo;
+  }
+  return v;
+}
+
+// Saturate to an explicit declared integer range [lo, hi] (`int(min,max)`).
+// Used for `sat` when the lhs declares non-power-of-two bounds — clamp to the
+// DECLARED max/min, not the bits-envelope. Either bound may be absent (then
+// only the present side clamps; the caller supplies the bits-envelope default).
+inline Dlop saturate_to_range(const Dlop& v, const std::optional<Dlop>& lo, const std::optional<Dlop>& hi) {
+  if (v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_nil()) {
+    return v;
+  }
+  if (hi && hi->is_integer() && v.sub_op(*hi)->is_positive() && !v.same_repr(*hi)) {
+    return *hi;  // v > hi
+  }
+  if (lo && lo->is_integer() && lo->sub_op(v)->is_positive() && !v.same_repr(*lo)) {
+    return *lo;  // v < lo
   }
   return v;
 }

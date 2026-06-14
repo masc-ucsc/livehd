@@ -1,0 +1,30 @@
+/*
+:name: range_step
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+// `a..=b step n` / `a..<b step n`: the stride is a per-range attribute (default
+// 1), so nested loops are independent and a plain range still steps by 1.
+mut cnt = 0
+mut sum = 0
+for i in 0..=10 step 2 {        // 0,2,4,6,8,10 -> 6 iters
+  for j in 0..<6 step 3 {       // 0,3 -> 2 iters
+    cnt = cnt + 1
+    sum = sum + i + j
+  }
+}
+cassert(cnt == 12)             // 6 * 2
+cassert(sum == ((0+2+4+6+8+10) * 2) + ((0 + 3) * 6))
+
+mut c1 = 0
+for k in 0..<4 { c1 = c1 + 1 } // plain range, implicit step 1
+cassert(c1 == 4)
+
+mut last = 0
+for m in 1..=9 step 4 { last = m }   // 1,5,9
+cassert(last == 9)
+
+mut e = 0
+for p in 0..<10 step 3 { e = e + 1 } // 0,3,6,9 -> 4
+cassert(e == 4)

@@ -154,6 +154,37 @@ void uPass_typecheck::require_all(Kind required, Kind result, std::string_view s
   set_dst_kind(dst, result);
 }
 
+void uPass_typecheck::require_shift(std::string_view sym, Bundle& dst, upass::Src_span src) {
+  // `a << b`: `a` must be integer; the amount `b` is integer OR a tuple of bit
+  // positions (the documented one-hot construction `1 << (1,4,3)`,
+  // 04-variables.md). constprop folds the tuple form; a non-integer leaf simply
+  // leaves it unresolved. Result is integer. (Only `<<` — not `>>` — per spec.)
+  bool bad     = false;
+  bool has_nil = false;
+  for (std::size_t i = 0; i < src.size(); ++i) {
+    const Kind k = kind_of_operand(src[i]);
+    if (k == Kind::nil) {
+      has_nil = true;
+    } else if (k == Kind::unknown || k == Kind::integer) {
+      // ok
+    } else if (i == 1 && k == Kind::tuple) {
+      // shift-by-tuple one-hot amount — accepted
+    } else {
+      bad = true;
+    }
+  }
+  if (has_nil) {
+    emit_type_error("nil-operand",
+                    std::format("`nil` is invalid in operator `{}` (only copy, `==nil`/`!=nil`, and `.[valid]` are allowed)",
+                                sym));
+  } else if (bad) {
+    emit_type_error("type-mismatch-arith",
+                    std::format("operator `{}` requires integer operands", sym),
+                    "no implicit conversion — cast explicitly (e.g. `int(b)`, `int(true)==-1`)");
+  }
+  set_dst_kind(dst, Kind::integer);
+}
+
 void uPass_typecheck::require_same(Kind result, std::string_view sym, std::string_view code, Bundle& dst, upass::Src_span src) {
   bool any_nil = false;
   for (const auto& o : src) {
@@ -390,7 +421,7 @@ upass::Vote uPass_typecheck::process_bit_and(std::string_view, Bundle& dst, upas
 upass::Vote uPass_typecheck::process_bit_or(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "|", "type-mismatch-arith", dst, src); return Vote::keep; }
 upass::Vote uPass_typecheck::process_bit_xor(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "^", "type-mismatch-arith", dst, src); return Vote::keep; }
 upass::Vote uPass_typecheck::process_bit_not(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "~", "type-mismatch-arith", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_shl(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "<<", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_shl(std::string_view, Bundle& dst, upass::Src_span src) { require_shift("<<", dst, src); return Vote::keep; }
 upass::Vote uPass_typecheck::process_sra(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, ">>", "type-mismatch-arith", dst, src); return Vote::keep; }
 
 // ── logical keywords: bool operands → bool (NO int — use `&`/`|`) ────────────

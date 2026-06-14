@@ -1021,26 +1021,137 @@ void Prp2lnast::rewrite_decls_to_declare() {
   lnast->replace_body(staging->tree_ptr());
 }
 
-void Prp2lnast::walk_statement_block(TSNode parent) {
-  // Walk ALL children (not just named) so the anonymous `wrap`/`sat` token
-  // that the new grammar attaches as the `overflow` field on an assignment
-  // statement can be detected — it precedes the assignment as a sibling
-  // because `_statement` is hidden.
+// True if `s` is a bare `return` (control_statement wrapping return_statement).
+static bool ts_is_bare_return(TSNode s) {
+  if (std::string_view(ts_node_type(s)) != "control_statement") {
+    return false;
+  }
+  TSNode inner = ts_node_named_child(s, 0);
+  return !ts_node_is_null(inner) && std::string_view(ts_node_type(inner)) == "return_statement";
+}
+
+// True if a `scope_statement`'s last statement is a bare `return` (i.e. the
+// block returns on its straight-line tail). Minimal all-paths-return check —
+// deeper nesting (return only inside a nested if of the tail) is not modeled.
+static bool ts_block_tail_returns(TSNode scope) {
+  if (ts_node_is_null(scope) || std::string_view(ts_node_type(scope)) != "scope_statement") {
+    return false;
+  }
+  uint32_t n = ts_node_named_child_count(scope);
+  return n > 0 && ts_is_bare_return(ts_node_named_child(scope, n - 1));
+}
+
+// True if `n`'s subtree contains a bare `return`, NOT crossing into a nested
+// `lambda` (an inner function's return is its own concern).
+static bool ts_subtree_has_return(TSNode n) {
+  if (std::string_view(ts_node_type(n)) == "lambda") {
+    return false;
+  }
+  if (ts_is_bare_return(n)) {
+    return true;
+  }
+  uint32_t cnc = ts_node_named_child_count(n);
+  for (uint32_t i = 0; i < cnc; i++) {
+    if (ts_subtree_has_return(ts_node_named_child(n, i))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// True if `n`'s subtree contains a `return` lexically INSIDE a for/while/loop
+// (not crossing a nested lambda). Such a function needs the synthesized
+// return-flag desugar (a return can't be lowered as a pure scope-rewrite once
+// it has to cross a loop boundary — it must stop the loop and skip past it).
+static bool ts_subtree_has_loop_return(TSNode n, bool inside_loop) {
+  std::string_view t(ts_node_type(n));
+  if (t == "lambda") {
+    return false;
+  }
+  if (ts_is_bare_return(n)) {
+    return inside_loop;
+  }
+  const bool now_loop
+      = inside_loop || t == "for_statement" || t == "while_statement" || t == "loop_statement";
+  uint32_t cnc = ts_node_named_child_count(n);
+  for (uint32_t i = 0; i < cnc; i++) {
+    if (ts_subtree_has_loop_return(ts_node_named_child(n, i), now_loop)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Recognize the early-return guard idiom `if cond { …; return }` — a plain
+// (non-`unique`, single-arm, no `elif`, no `else`, no header `init`) `if` whose
+// then-branch returns on its tail. Such a guard desugars structurally (no
+// runtime flag): the statements after it move into a synthesized `else`, so the
+// existing if-scope machinery handles the early termination (the tail-return
+// statement itself is dropped). Returns the condition + then-body nodes.
+bool Prp2lnast::is_guarded_return_if(TSNode s, TSNode& cond_out, TSNode& then_out) {
+  if (std::string_view(ts_node_type(s)) != "if_expression") {
+    return false;
+  }
+  const uint32_t nc = child_count(s);
+  TSNode         cond{};
+  TSNode         code{};
+  int            nconds = 0, ncodes = 0, nelse = 0, ninit = 0;
+  bool           is_unique = false;
+  for (uint32_t i = 0; i < nc; i++) {
+    TSNode c = child(s, i);
+    if (std::string_view(ts_node_type(c)) == "unique") {
+      is_unique = true;
+    }
+    const char* fn = ts_node_field_name_for_child(s, i);
+    if (!fn) {
+      continue;
+    }
+    std::string_view f(fn);
+    if (f == "condition") {
+      cond = c;
+      ++nconds;
+    } else if (f == "code") {
+      code = c;
+      ++ncodes;
+    } else if (f == "else") {
+      ++nelse;  // tree-sitter tags BOTH the `else` keyword and its body
+    } else if (f == "init") {
+      ++ninit;
+    }
+  }
+  if (is_unique || nconds != 1 || ncodes != 1 || nelse != 0 || ninit != 0) {
+    return false;
+  }
+  if (!ts_block_tail_returns(code)) {
+    return false;
+  }
+  cond_out = cond;
+  then_out = code;
+  return true;
+}
+
+void Prp2lnast::walk_statement_block(TSNode parent) { lower_children_range(parent, 0); }
+
+// Lower a scope's child statements starting at child index `from`. Besides the
+// normal per-statement lowering (with the hidden `wrap`/`sat` overflow-prefix
+// gap-scan), this honors early `return` by restructuring the scope (per the
+// 2f-return_leak design): a bare `return` drops the rest of the scope, and a
+// guarded `if cond { … return }` pushes the rest of the scope into a synthesized
+// `else`. Both leave NO `func_return` node, so the existing if-scope machinery
+// handles early termination — no runner flag. `return` is only valid inside a
+// function body, and the rewrite is per-scope, so a top-level guard (the common
+// idiom, e.g. adv_multi_out_07) is handled exactly; a `return` nested in a loop
+// or several `if` levels deep falls back to the prior behavior.
+void Prp2lnast::lower_children_range(TSNode parent, uint32_t from) {
   using namespace std::string_view_literals;
   const uint32_t   nc = ts_node_child_count(parent);
   std::string_view pending_overflow;
-  // Track the end byte of the previous processed child so we can scan the
-  // unparsed source span between siblings for the `wrap` / `sat` overflow
-  // prefix. The new grammar hides those tokens entirely (they are part of
-  // a hidden `_statement` seq with a field tag), so they no longer surface
-  // even as anonymous children.
-  uint32_t         prev_end             = ts_node_start_byte(parent);
+  uint32_t         prev_end = (from == 0) ? ts_node_start_byte(parent) : ts_node_end_byte(ts_node_child(parent, from - 1));
   auto             scan_overflow_in_gap = [&](uint32_t gap_end) -> std::string_view {
     if (prev_end >= gap_end) {
       return {};
     }
-    auto gap = text_between(prev_end, gap_end);
-    auto kw  = trim(gap);
+    auto kw = trim(text_between(prev_end, gap_end));
     if (kw == "wrap"sv) {
       return "wrap"sv;
     }
@@ -1049,7 +1160,7 @@ void Prp2lnast::walk_statement_block(TSNode parent) {
     }
     return {};
   };
-  for (uint32_t i = 0; i < nc; i++) {
+  for (uint32_t i = from; i < nc; i++) {
     TSNode           c = ts_node_child(parent, i);
     std::string_view t(ts_node_type(c));
 
@@ -1059,20 +1170,86 @@ void Prp2lnast::walk_statement_block(TSNode parent) {
       }
       continue;
     }
-    // A scope_statement that was already consumed as a lambda body must
-    // not be re-walked here, otherwise the body content emits twice
-    // (once inside the lambda's body_idx, once as an orphan top-level
-    // stmts). See `consumed_lambda_body_starts`.
+    // A scope_statement already consumed as a lambda body must not re-walk.
     if (consumed_lambda_body_starts.contains(ts_node_start_byte(c))) {
       pending_overflow = {};
       prev_end         = ts_node_end_byte(c);
       continue;
     }
 
+    // Early-return rewrite (see header comment). Only fires when a `return` is
+    // actually present, so return-free scopes lower exactly as before.
+    if (ts_is_bare_return(c)) {
+      // In a return-flag function (one with a return inside a loop), a `return`
+      // sets the flag (and `break`s the enclosing loop, if any) so the loop
+      // unrolls stop and the post-loop continuation guards skip the rest.
+      if (!return_flag_name_.empty()) {
+        Pending_src pending_guard(*lnast, mint_src(c));
+        auto        sidx = builder.add_child(Lnast_ntype::create_store());
+        lnast->add_child(sidx, Lnast_node::create_ref(return_flag_name_));
+        lnast->add_child(sidx, Lnast_node::create_const("true"));
+        if (in_return_loop_) {
+          auto bidx = builder.add_child(Lnast_ntype::create_func_break());
+          lnast->add_child(bidx, builder.mint_tmp_ref());
+        }
+      }
+      return;  // terminator: the rest of this scope is unreachable
+    }
+    TSNode gcond{}, gthen{};
+    if (is_guarded_return_if(c, gcond, gthen)) {
+      Pending_src pending_guard(*lnast, mint_src(c));
+      Lnast_node  cref    = ts_node_is_null(gcond) ? Lnast_node::create_const("true") : expr_to_node(gcond);
+      auto        if_idx  = builder.add_child(Lnast_ntype::create_if());
+      attach_loc(if_idx, c);
+      lnast->add_child(if_idx, cref);
+      auto then_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
+      builder.push_stmts(then_idx);
+      lower_children_range(gthen, 0);  // then-body; the tail `return` is handled recursively
+      builder.pop_stmts();
+      auto else_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
+      builder.push_stmts(else_idx);
+      lower_children_range(parent, i + 1);  // continuation: rest of this scope
+      builder.pop_stmts();
+      return;  // continuation absorbed into the else
+    }
+    // Return-flag mode (function has a return inside a loop): a compound
+    // statement (`if`/loop, not the clean guard above) that transitively
+    // contains a `return` must guard its continuation on the flag — `if flag {
+    // [break] } else { rest }` — so the rest of this scope is skipped once a
+    // return fired (and an enclosing loop is broken). Loops also lower their
+    // body with in_return_loop_ set, turning their inner returns into flag+break.
+    if (!return_flag_name_.empty()) {
+      const bool is_loop = (t == "for_statement"sv || t == "while_statement"sv || t == "loop_statement"sv);
+      const bool is_if   = (t == "if_expression"sv);
+      if ((is_loop || is_if) && ts_subtree_has_return(c)) {
+        Pending_src pending_guard(*lnast, mint_src(c));
+        const bool  saved_in_loop = in_return_loop_;
+        if (is_loop) {
+          in_return_loop_ = true;
+        }
+        process_statement(c);
+        in_return_loop_ = saved_in_loop;
+        // Continuation guard.
+        auto if_idx = builder.add_child(Lnast_ntype::create_if());
+        attach_loc(if_idx, c);
+        lnast->add_child(if_idx, Lnast_node::create_ref(return_flag_name_));
+        auto then_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
+        if (in_return_loop_) {  // nested in an enclosing loop → propagate the break outward
+          builder.push_stmts(then_idx);
+          auto bidx = builder.add_child(Lnast_ntype::create_func_break());
+          lnast->add_child(bidx, builder.mint_tmp_ref());
+          builder.pop_stmts();
+        }
+        auto else_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
+        builder.push_stmts(else_idx);
+        lower_children_range(parent, i + 1);
+        builder.pop_stmts();
+        return;  // continuation absorbed into the else
+      }
+    }
+
     const bool is_assign = (t == "assignment"sv);
     if (is_assign && pending_overflow.empty()) {
-      // Fallback: the grammar hides the `wrap`/`sat` token; recover it
-      // from the source text between the previous statement and this one.
       pending_overflow = scan_overflow_in_gap(ts_node_start_byte(c));
     }
     if (is_assign && !pending_overflow.empty()) {
@@ -1394,7 +1571,7 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
 
 Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
                                                 bool rhs_is_fcall, std::string_view rhs_fcall_name,
-                                                std::string_view overflow_kind) {
+                                                std::string_view overflow_kind, bool rhs_name_bindable) {
   std::string_view lvt(ts_node_type(lvalue));
   if (lvt == "lvalue_list") {
     // Tuple lvalue: `(x0, x1, …) = rhs`. Each item is an `lvalue_item`,
@@ -1533,7 +1710,14 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       // correct because the literal's slots are positional anyway.
       std::string key_text;
       bool        use_name_key = false;
-      if (rhs_is_fcall) {
+      // Bind by NAME when the RHS is a function call OR any name-bindable RHS
+      // (a named-tuple literal / a variable bound to a named tuple). A named
+      // tuple is stored field-by-name (the bundle map is lexically sorted, so
+      // declaration order is NOT preserved) — it must be read by field name,
+      // not position (03-bundle.md "Named-tuple destructuring"). An UNNAMED
+      // positional literal RHS keeps positional binding (rhs_name_bindable
+      // false), so `(a,b) = (2,3)` / tuple-swap still work.
+      if (rhs_is_fcall || rhs_name_bindable) {
         if (inner_t == "identifier") {
           key_text     = std::string(trim(get_text(inner)));
           use_name_key = true;
@@ -1753,6 +1937,38 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
         auto empty  = builder.mint_tmp_ref();
         lnast->add_child(ta_idx, empty);  // empty tuple_add — zero entries
         store_value = empty;
+      }
+    }
+    // Documented implicit conversion at a typed scalar declaration:
+    //   `mut b:int = a`  ==  `mut b = int(a)`   (a:string)
+    //   `mut c:string = b` == `mut c = string(b)`           (02-basics.md)
+    // Insert the cast so a cross-kind initializer converts instead of tripping
+    // the typecheck assign-type-mismatch. ONLY for an UNBOUNDED `int` / `string`
+    // declared type: those have no overflow envelope, so an idempotent int()/
+    // string() wrap is harmless. A SIZED/RANGED int (`u3`, `s4`, `int(min,max)`)
+    // is excluded — wrapping its initializer in `int(...)` would defeat the
+    // bitwidth overflow fit-check (the cast result is fit-exempt) and mangle a
+    // bit-pattern literal's unknown bits. `bool` stays explicit (boolean(...));
+    // nil/array/reg/wrap-sat are also excluded.
+    if (has_decl && reg_decl_head.is_invalid() && overflow_kind.empty() && !ts_node_is_null(tc)) {
+      const TSNode      ty = child_by_field(tc, "type");
+      const Scalar_kind dk = declared_scalar_kind(ty);
+      // Bounded int types carry a trailing width digit (`u3`/`s8`) or range args
+      // (children, e.g. `int(min=0,max=3)`); bare `int`/`uint`/`sint` is unbounded.
+      const bool is_unbounded_int
+          = dk == Scalar_kind::integer && ts_node_named_child_count(ty) == 0 && [&] {
+              std::string_view tt = trim(get_text(ty));
+              return tt == "int" || tt == "uint" || tt == "sint";
+            }();
+      const bool is_nil_init = store_value.is_const() && store_value.get_name() == "nil";
+      if ((is_unbounded_int || dk == Scalar_kind::string) && extract_array_dims(tc).empty() && !is_nil_init) {
+        const char* cast   = (dk == Scalar_kind::integer) ? "int" : "string";
+        Lnast_node  casted = builder.mint_tmp_ref();
+        auto        fc     = builder.add_child(Lnast_ntype::create_func_call());
+        lnast->add_child(fc, casted);
+        lnast->add_child(fc, Lnast_node::create_ref(cast));
+        lnast->add_child(fc, store_value);
+        store_value = casted;
       }
     }
     if (!overflow_kind.empty()) {
@@ -2165,10 +2381,72 @@ void Prp2lnast::process_assignment(TSNode n) {
       rhs_fcall_name = std::string(trim(get_text(fn)));
     }
   }
-  (void)process_lvalue_for_assign(lv, rvalue_node, decl, tc, rhs_is_fcall, rhs_fcall_name, overflow_kind);
+  // A destructure RHS is "name-bindable" unless it is an UNNAMED positional
+  // tuple literal `(e0, e1, …)` — those bind by position; everything else (a
+  // named-tuple literal, or a variable bound to a named tuple) binds by name.
+  bool rhs_positional_literal = !ts_node_is_null(rv) && std::string_view(ts_node_type(rv)) == "tuple";
+  if (rhs_positional_literal) {
+    uint32_t nrc = ts_node_named_child_count(rv);
+    for (uint32_t i = 0; i < nrc; i++) {
+      std::string_view ft(ts_node_type(ts_node_named_child(rv, i)));
+      if (ft == "assignment" || ft == "simple_assignment") {
+        rhs_positional_literal = false;  // has a named field → name-bindable
+        break;
+      }
+    }
+  }
+  (void)process_lvalue_for_assign(lv, rvalue_node, decl, tc, rhs_is_fcall, rhs_fcall_name, overflow_kind,
+                                  /*rhs_name_bindable=*/!rhs_positional_literal);
 }
 
 // ---------------- Control Flow ----------------
+
+Lnast_node Prp2lnast::emit_always_true_ref() {
+  // `1 == 1` — a recomputed always-true REF used as the condition for the
+  // infinite-loop forms. A literal `const 'true'` condition makes the runner
+  // skip the in-loop constprop dispatch of the body, so a body break-guard
+  // never folds and the loop mis-terminates; a ref condition takes the proven
+  // data-dependent unroll path. constprop folds the `1==1` away (no leak).
+  auto idx = builder.add_child(Lnast_ntype::create_eq());
+  auto ref = builder.mint_tmp_ref();
+  lnast->add_child(idx, ref);
+  lnast->add_child(idx, Lnast_node::create_const("1"));
+  lnast->add_child(idx, Lnast_node::create_const("1"));
+  return ref;
+}
+
+void Prp2lnast::lower_infinite_loop(TSNode code, TSNode loc) {
+  // `loop {}` / `while {}` / `while true {}` ≡
+  //   while (1==1) { if (1==1) { body } else { break } }
+  // Same shape as a data-dependent `while cond { if cond {body} else {break} }`,
+  // but with a recomputed always-true ref so the runner folds the body each
+  // iteration (the body must `break` to terminate). The `else { break }` is dead
+  // for the infinite form (1==1 never false) and folds away.
+  Lnast_node cond_ref  = emit_always_true_ref();
+  auto       while_idx = builder.add_child(Lnast_ntype::create_while());
+  attach_loc(while_idx, loc);
+  lnast->add_child(while_idx, cond_ref);
+  auto body_idx = lnast->add_child(while_idx, Lnast_ntype::create_stmts());
+  builder.push_stmts(body_idx);
+
+  Lnast_node inner_cond = emit_always_true_ref();  // recomputed per iteration
+  auto       if_idx     = builder.add_child(Lnast_ntype::create_if());
+  attach_loc(if_idx, loc);
+  lnast->add_child(if_idx, inner_cond);
+  auto then_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
+  builder.push_stmts(then_idx);
+  if (!ts_node_is_null(code)) {
+    process_scope_statement(code, then_idx);
+  }
+  builder.pop_stmts();
+  auto else_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
+  builder.push_stmts(else_idx);
+  auto brk = builder.add_child(Lnast_ntype::create_func_break());
+  lnast->add_child(brk, builder.mint_tmp_ref());
+  builder.pop_stmts();
+
+  builder.pop_stmts();
+}
 
 void Prp2lnast::process_while_statement(TSNode n) {
   TSNode cond = child_by_field(n, "condition");
@@ -2183,51 +2461,45 @@ void Prp2lnast::process_while_statement(TSNode n) {
     }
   }
 
-  Lnast_node cond_ref;
-  if (ts_node_is_null(cond)) {
-    cond_ref = Lnast_node::create_const("true");
-  } else {
-    cond_ref = expr_to_node(cond);
+  // Infinite form — `while { … }` (no cond) or `while true { … }` (literal-true
+  // cond) — shares the `loop {}` lowering (recomputed `1==1` ref condition).
+  if (ts_node_is_null(cond) || trim(get_text(cond)) == "true") {
+    lower_infinite_loop(code, n);
+    return;
   }
-  auto while_idx = builder.add_child(Lnast_ntype::create_while());
+
+  // Pyrope loops are comptime-only — a `while` must fully unroll (codegen has
+  // no runtime-loop lowering). Lower
+  //   while cond { body }  ≡  while cond { if cond { body } else { break } }
+  // The condition re-lowered INSIDE the body is re-evaluated every iteration
+  // (the unroll re-walks the body), and the synthesized `break` terminates the
+  // loop when it turns false. The outer `while` keeps the real condition so
+  // typecheck still bool-checks it and a statically-false condition drops the
+  // loop (zero iterations) without entering the body.
+  Lnast_node cond_ref  = expr_to_node(cond);
+  auto       while_idx = builder.add_child(Lnast_ntype::create_while());
   attach_loc(while_idx, n);  // span → upass/typecheck cond-not-bool can point here
   lnast->add_child(while_idx, cond_ref);
   auto body_idx = lnast->add_child(while_idx, Lnast_ntype::create_stmts());
   builder.push_stmts(body_idx);
 
-  if (ts_node_is_null(cond)) {
-    // `while { … }` (no condition, like `loop {}`): the body must `break`.
-    if (!ts_node_is_null(code)) {
-      process_scope_statement(code, body_idx);
-    }
-  } else {
-    // Pyrope loops are comptime-only — a `while` must fully unroll (codegen has
-    // no runtime-loop lowering). The runner only unrolls the infinite form
-    // `while true { … break }`, re-walking the body each iteration. So lower
-    //   while cond { body }  ≡  while cond { if cond { body } else { break } }
-    // The condition re-lowered INSIDE the body is re-evaluated every iteration
-    // (the unroll re-walks the body), and the synthesized `break` terminates
-    // the loop when it turns false. The outer `while` keeps the real condition
-    // so typecheck still bool-checks it and a statically-false condition drops
-    // the loop (zero iterations) without entering the body.
-    Lnast_node inner_cond = expr_to_node(cond);  // emitted into the body → recomputed per iteration
-    auto       if_idx     = builder.add_child(Lnast_ntype::create_if());
-    attach_loc(if_idx, cond);
-    lnast->add_child(if_idx, inner_cond);
+  Lnast_node inner_cond = expr_to_node(cond);  // emitted into the body → recomputed per iteration
+  auto       if_idx     = builder.add_child(Lnast_ntype::create_if());
+  attach_loc(if_idx, cond);
+  lnast->add_child(if_idx, inner_cond);
 
-    auto then_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
-    builder.push_stmts(then_idx);
-    if (!ts_node_is_null(code)) {
-      process_scope_statement(code, then_idx);
-    }
-    builder.pop_stmts();
-
-    auto else_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
-    builder.push_stmts(else_idx);
-    auto brk = builder.add_child(Lnast_ntype::create_func_break());
-    lnast->add_child(brk, builder.mint_tmp_ref());
-    builder.pop_stmts();
+  auto then_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
+  builder.push_stmts(then_idx);
+  if (!ts_node_is_null(code)) {
+    process_scope_statement(code, then_idx);
   }
+  builder.pop_stmts();
+
+  auto else_idx = lnast->add_child(if_idx, Lnast_ntype::create_stmts());
+  builder.push_stmts(else_idx);
+  auto brk = builder.add_child(Lnast_ntype::create_func_break());
+  lnast->add_child(brk, builder.mint_tmp_ref());
+  builder.pop_stmts();
 
   builder.pop_stmts();
 }
@@ -2365,11 +2637,22 @@ void Prp2lnast::process_for_statement(TSNode n) {
 
   // Bindings first (value, then optional idx/key) so identifier_to_node records
   // them as for-declared before the body is walked.
-  Lnast_node value_ref = identifier_to_node(bind_ids[0], true);
-  const bool have_idx  = bind_ids.size() >= 2;
-  const bool have_key  = bind_ids.size() >= 3;
-  Lnast_node idx_ref   = have_idx ? identifier_to_node(bind_ids[1], true) : Lnast_node::create_invalid();
-  Lnast_node key_ref   = have_key ? identifier_to_node(bind_ids[2], true) : Lnast_node::create_invalid();
+  // Binding order: `for value in t`, or `for (index, value [, key]) in t`. A
+  // PAIR means enumerate, with the index/position FIRST (like most languages,
+  // not Ruby) — `index` is the const position, `value` is a copy of the element
+  // (mutable only via `for (index, value) in ref t`, which writes it back), and
+  // `key` is the field name for named tuples. Single-bind is just the value.
+  // (Declare in source order; then assign roles.)
+  std::vector<Lnast_node> bind_refs;
+  bind_refs.reserve(bind_ids.size());
+  for (auto bid : bind_ids) {
+    bind_refs.push_back(identifier_to_node(bid, true));
+  }
+  const bool have_idx  = bind_refs.size() >= 2;
+  const bool have_key  = bind_refs.size() >= 3;
+  Lnast_node value_ref = have_idx ? bind_refs[1] : bind_refs[0];
+  Lnast_node idx_ref   = have_idx ? bind_refs[0] : Lnast_node::create_invalid();
+  Lnast_node key_ref   = have_key ? bind_refs[2] : Lnast_node::create_invalid();
 
   // Resolve the iterable into a single ref child + detect `ref` (write-back)
   // iteration. A bare `NAME` / `ref NAME` (possibly wrapped in a single-child
@@ -2443,16 +2726,9 @@ void Prp2lnast::process_for_statement(TSNode n) {
 }
 
 void Prp2lnast::process_loop_statement(TSNode n) {
-  // loop { body } -> while true body
-  TSNode code      = child_by_field(n, "code");
-  auto   while_idx = builder.add_child(Lnast_ntype::create_while());
-  lnast->add_child(while_idx, Lnast_node::create_const("true"));
-  auto body_idx = lnast->add_child(while_idx, Lnast_ntype::create_stmts());
-  builder.push_stmts(body_idx);
-  if (!ts_node_is_null(code)) {
-    process_scope_statement(code, body_idx);
-  }
-  builder.pop_stmts();
+  // `loop { body }` ≡ `while (1==1) { if (1==1) {body} else {break} }` — the
+  // recomputed-ref infinite form (the body must `break` to terminate).
+  lower_infinite_loop(child_by_field(n, "code"), n);
 }
 
 void Prp2lnast::process_control_statement(TSNode n) {
@@ -3219,7 +3495,31 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
       lnast->add_child(aidx, Lnast_node::create_ref(output_refs.front()));
       lnast->add_child(aidx, val);
     } else {
+      // Early-return desugar (2f-return_leak): a body with a `return` inside a
+      // loop gets a synthesized `mut <flag> = false` at its top; returns then
+      // set the flag (and `break`), and post-loop continuations guard on it.
+      // Straight-line / `if` returns still use the clean no-flag scope-rewrite.
+      // Save/restore so a nested lambda gets its own flag + fresh in-loop state.
+      std::string saved_ret_flag = return_flag_name_;
+      bool        saved_in_loop  = in_return_loop_;
+      return_flag_name_.clear();
+      in_return_loop_ = false;
+      if (ts_subtree_has_loop_return(code, false)) {
+        // NOT a `___`-tmp name: it is a real loop-carried `mut` var (written in
+        // the loop, read after), and the inline frame must rename it as a var
+        // (inl-tag), not rename_tmp it into a single-assignment SSA temp.
+        return_flag_name_ = "__retflag" + std::to_string(synth_return_flag_count_++);
+        auto didx         = builder.add_child(Lnast_ntype::create_declare());
+        lnast->add_child(didx, Lnast_node::create_ref(return_flag_name_));
+        lnast->add_child(didx, Lnast_ntype::create_prim_type_bool());
+        lnast->add_child(didx, Lnast_node::create_const("mut"));
+        auto sidx = builder.add_child(Lnast_ntype::create_store());
+        lnast->add_child(sidx, Lnast_node::create_ref(return_flag_name_));
+        lnast->add_child(sidx, Lnast_node::create_const("false"));
+      }
       process_scope_statement(code, body_idx);
+      return_flag_name_ = saved_ret_flag;
+      in_return_loop_   = saved_in_loop;
     }
   }
   // Drop the body's param-bits frame even if there was no `code` (defensive:
@@ -3648,7 +3948,9 @@ Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_lev
       ++bit;
       std::vector<Enum_entry> inner;
       parse_enum_definition_entries(nested, inner);
-      carrier = lower_enum_def(e.name, TSNode{}, inner, own_value, &bit);
+      // Pass the fully-qualified prefix (`E3.l1`) so nested leaf identity is
+      // `E3.l1.l1a`, not the prefix-less `l1.l1a` (string() reads __enumentry).
+      carrier = lower_enum_def(full, TSNode{}, inner, own_value, &bit);
 
       auto vidx = builder.add_child(Lnast_ntype::create_store());
       lnast->add_child(vidx, carrier);
@@ -4265,6 +4567,14 @@ static std::string unescape_cooked_string(std::string_view raw) {
         break;
       case '"':
         out.push_back('"');
+        ++i;
+        break;
+      case '{':  // `\{` / `\}` escape the interpolation braces to literal { }
+        out.push_back('{');
+        ++i;
+        break;
+      case '}':
+        out.push_back('}');
         ++i;
         break;
       case 'x': {
@@ -5332,6 +5642,12 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
       tier = Tier::times;
     } else if (ct == "binary_other_op") {
       tier = Tier::other;
+    } else if (ct == "binary_step_op") {
+      // `a..=b step n`: a separate (looser) grammar precedence, but functionally
+      // an "other"-tier op — emit_other has the `op_step` → step() call case.
+      // It is always the single outer op over a (range) left operand, so it
+      // never mixes with arithmetic at this level.
+      tier = Tier::other;
     } else if (ct == "binary_compare_op") {
       tier = Tier::compare;
     } else if (ct == "binary_logical_op") {
@@ -5776,19 +6092,20 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n, bool need_result) {
   std::vector<Arm> arms;
   TSNode           else_code{};
   bool             have_else = false;
-  bool             init_done = false;
 
-  auto eval_init = [&]() {
-    if (init_done) {
+  // `_if_branch` is inlined into `if_expression`, so the leading `if` and every
+  // `elif` each contribute their own `init` field (flattened, in source order
+  // `init, condition, code` per branch). Lower each branch's init where it is
+  // encountered — before that branch's condition — so an elif header decl
+  // (`elif mut x2 = …; x2 == …`) is visible to its own condition. (The old
+  // once-only `eval_init` lowered only the first branch's init.)
+  auto lower_branch_init = [&](TSNode init) {
+    if (ts_node_is_null(init)) {
       return;
     }
-    init_done   = true;
-    TSNode init = child_by_field(n, "init");
-    if (!ts_node_is_null(init)) {
-      uint32_t inc = ts_node_named_child_count(init);
-      for (uint32_t i = 0; i < inc; i++) {
-        process_statement(ts_node_named_child(init, i));
-      }
+    uint32_t inc = ts_node_named_child_count(init);
+    for (uint32_t i = 0; i < inc; i++) {
+      process_statement(ts_node_named_child(init, i));
     }
   };
 
@@ -5803,7 +6120,11 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n, bool need_result) {
     }
     std::string_view f(field_name);
     TSNode           c = child(n, i);
-    if (f == "condition") {
+    if (f == "init") {
+      // This branch's header decls (`if/elif mut x = …; cond`): lower now so
+      // they precede this branch's condition read.
+      lower_branch_init(c);
+    } else if (f == "condition") {
       pending_cond = c;
       have_cond    = true;
     } else if (f == "code") {
@@ -5812,7 +6133,6 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n, bool need_result) {
         have_else = true;
         in_else   = false;
       } else if (have_cond) {
-        eval_init();
         Lnast_node cref = ts_node_is_null(pending_cond) ? Lnast_node::create_const("true") : expr_to_node(pending_cond);
         arms.push_back({cref, c});
         have_cond = false;
@@ -6090,10 +6410,17 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
         // Emit `<compare> tmp = subject_ref rhs` and return the tmp ref,
         // wrapping in log_not when the operator is the negated form.
         auto       emit_compare = [&](const Lnast_node& rhs) {
-          auto compare_ntype = use_case   ? Lnast_ntype::create_func_case()
-                               : use_does ? Lnast_ntype::create_func_does()
-                               : use_in   ? Lnast_ntype::create_func_in()
-                                          : Lnast_ntype::create_eq();
+          // Relational arm ops (`< 0`, `>= 5`, …) must lower to their proper
+          // relational node — they previously fell through to `eq`, silently
+          // turning `< rhs` into `== rhs`. Operand order is (subject, rhs).
+          auto compare_ntype = use_case             ? Lnast_ntype::create_func_case()
+                               : use_does           ? Lnast_ntype::create_func_does()
+                               : use_in             ? Lnast_ntype::create_func_in()
+                               : pending_op == "<"  ? Lnast_ntype::create_lt()
+                               : pending_op == "<=" ? Lnast_ntype::create_le()
+                               : pending_op == ">"  ? Lnast_ntype::create_gt()
+                               : pending_op == ">=" ? Lnast_ntype::create_ge()
+                                                    : Lnast_ntype::create_eq();
           auto idx           = builder.add_child(compare_ntype);
           auto ref           = builder.mint_tmp_ref();
           lnast->add_child(idx, ref);
@@ -6499,19 +6826,50 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
   // Dlop::sext_op, matching the graph Sext cell).
   if (!ts_node_is_null(ext_node)) {
     std::string_view et(ts_node_type(ext_node));
-    if (et == "sign_extend" && mask_ref.is_const()) {
-      auto mv = Dlop::from_pyrope(mask_ref.get_name());
-      if (!mv->is_invalid() && mv->is_integer()) {
-        int sign_bit = mv->popcount() - 1;
-        if (sign_bit < 0) {
-          sign_bit = 0;
+    if (et == "sign_extend") {
+      if (mask_ref.is_const()) {
+        auto mv = Dlop::from_pyrope(mask_ref.get_name());
+        if (!mv->is_invalid() && mv->is_integer()) {
+          int sign_bit = mv->popcount() - 1;
+          if (sign_bit < 0) {
+            sign_bit = 0;
+          }
+          auto s_idx = builder.add_child(Lnast_ntype::create_sext());
+          auto s_ref = builder.mint_tmp_ref();
+          lnast->add_child(s_idx, s_ref);
+          lnast->add_child(s_idx, ref);
+          lnast->add_child(s_idx, Lnast_node::create_const(sign_bit));
+          return s_ref;
         }
-        auto s_idx = builder.add_child(Lnast_ntype::create_sext());
-        auto s_ref = builder.mint_tmp_ref();
-        lnast->add_child(s_idx, s_ref);
-        lnast->add_child(s_idx, ref);
-        lnast->add_child(s_idx, Lnast_node::create_const(sign_bit));
-        return s_ref;
+      } else {
+        // Non-literal closed range `#sext[lo..=hi]`: the mask is a `range` ref
+        // (non-const), so popcount isn't statically known — but the sign-bit
+        // position equals `hi - lo` (= popcount(mask)-1 for a contiguous mask).
+        // Emit `sext(ref, hi-lo)`; constprop folds the minus + sext once lo/hi
+        // resolve. (Mirror compute_bit_mask_ref's inclusive-range detection.)
+        TSNode idxn = child_by_field(sel_node, "index");
+        if (!ts_node_is_null(idxn) && std::string_view(ts_node_type(idxn)) == "expression_item"
+            && ts_node_named_child_count(idxn) == 3) {
+          TSNode op_w = ts_node_named_child(idxn, 1);
+          if (std::string_view(ts_node_type(op_w)) == "binary_other_op") {
+            TSNode op_i = ts_node_named_child(op_w, 0);
+            if (!ts_node_is_null(op_i) && std::string_view(ts_node_type(op_i)) == "op_range_inclusive") {
+              Lnast_node lo_n    = expr_to_node(ts_node_named_child(idxn, 0));
+              Lnast_node hi_n    = expr_to_node(ts_node_named_child(idxn, 2));
+              auto       m_idx   = builder.add_child(Lnast_ntype::create_minus());
+              auto       pos_ref = builder.mint_tmp_ref();
+              lnast->add_child(m_idx, pos_ref);
+              lnast->add_child(m_idx, hi_n);
+              lnast->add_child(m_idx, lo_n);  // sign-bit position = hi - lo
+              auto s_idx = builder.add_child(Lnast_ntype::create_sext());
+              auto s_ref = builder.mint_tmp_ref();
+              lnast->add_child(s_idx, s_ref);
+              lnast->add_child(s_idx, ref);
+              lnast->add_child(s_idx, pos_ref);
+              return s_ref;
+            }
+          }
+        }
       }
     }
     // zext (and any sext whose width isn't statically known): the bare

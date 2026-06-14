@@ -57,6 +57,17 @@ Dlop uPass_attributes::narrow_for_lhs(std::string_view type_src, const Dlop& v, 
   if (is_wrap) {
     return is_signed ? wrap_to_signed(v, ti->bits) : wrap_to_unsigned(v, ti->bits);
   }
+  // `sat` clamps to the DECLARED (min,max) when the type carries an explicit
+  // integer range (`int(min,max)` — possibly non-power-of-two). A missing bound
+  // falls back to the bits-envelope so a half-open int still narrows. (`wrap`
+  // stays bits-based: two's-complement modulo is independent of declared bounds.)
+  if (ti->range_max || ti->range_min) {
+    Dlop lo = ti->range_min ? *ti->range_min
+                            : (is_signed ? *Dlop::get_neg_mask_value(ti->bits - 1) : *Dlop::create_integer(0));
+    Dlop hi = ti->range_max ? *ti->range_max
+                            : (is_signed ? *Dlop::get_mask_value(ti->bits - 1) : *Dlop::get_mask_value(ti->bits));
+    return upass::bitwidth::saturate_to_range(v, lo, hi);
+  }
   return is_signed ? saturate_signed(v, ti->bits) : saturate_unsigned(v, ti->bits);
 }
 
@@ -138,9 +149,6 @@ void uPass_attributes::record_assign(std::string_view lhs, bool rhs_is_nil) {
   if (lhs.empty()) {
     return;
   }
-  if (rhs_is_nil) {
-    return;  // nil invalidations don't count as a real binding (per spec)
-  }
 
   // record_assign's only remaining side effects need type_info for `lhs`:
   //   * the bound marker gates the unsigned first-write coercion in
@@ -167,6 +175,19 @@ void uPass_attributes::record_assign(std::string_view lhs, bool rhs_is_nil) {
   const auto field = Bundle::get_all_but_first_level(lhs);
   auto       b     = runner_st->get_bundle_for_write(root);
   if (!b) {
+    return;
+  }
+  if (rhs_is_nil) {
+    // An explicit `nil` write RELEASES the binding window (04-variables.md: nil
+    // is an invalidation/release). Clear `vbound` so a later re-bind of the
+    // same name — e.g. a second `match const t = …` at the same lexical scope,
+    // whose declare resolves to this same bundle — does not read as a const
+    // rebind. The write still doesn't count as a real binding.
+    if (field.empty()) {
+      b->clear_attr("vbound");
+    } else {
+      b->clear_attr(field, "vbound");
+    }
     return;
   }
   const bool was_bound = field.empty() ? b->has_attr("vbound") : b->has_attr(field, "vbound");

@@ -760,8 +760,35 @@ upass::Vote uPass_constprop::process_shl(std::string_view dst_name, Bundle& dst,
   }
   const std::string var{dst_name};
   Dlop              n1 = operand_value(src[0]);
-  Dlop              n2 = operand_value(src[1]);
-  if (!is_numeric(n1) || !is_numeric(n2)) {
+  if (!is_numeric(n1)) {
+    return classify_vote();
+  }
+  // `a << (b0, b1, …)` one-hot construction (04-variables.md §<<): OR together
+  // `a << bi` for every tuple element. A 1-tuple `(b,)` folds the same as the
+  // scalar `b` via the path below, so only the MULTI-entry positional bundle
+  // needs this branch (keying off entry count avoids the (0,)-is-scalar-shaped
+  // ambiguity). `>>`/sra is intentionally NOT given this treatment.
+  {
+    std::shared_ptr<const Bundle> rb = src[1].name.empty() ? src[1].bundle : st().get_bundle(std::string(src[1].name));
+    if (rb && rb->named_top_count() == 0 && rb->non_attr_entries().size() > 1) {
+      Dlop acc = *Dlop::create_integer(0);
+      bool ok  = true;
+      for (const auto& kv : rb->non_attr_entries()) {
+        const Dlop& bit = kv.second.trivial;
+        if (!bit.is_integer() || bit.has_unknowns() || bit.is_negative()) {
+          ok = false;
+          break;
+        }
+        acc = *acc.or_op(*n1.shl_op(bit));
+      }
+      if (ok) {
+        store_trivial(var, acc);
+      }
+      return classify_vote();  // tuple RHS handled (folded, or left unresolved on an unknown bit)
+    }
+  }
+  Dlop n2 = operand_value(src[1]);
+  if (!is_numeric(n2)) {
     return classify_vote();
   }
   if (n2.is_integer() && n2.is_negative()) {
@@ -2413,7 +2440,9 @@ void uPass_constprop::fold_case(const std::string& dst) {
       continue;
     }
 
-    if (re.value.has_unknowns()) {
+    // A `nil` pattern field is a full value wildcard (07-typesystem.md): it
+    // matches any subject value.
+    if (re.value.is_nil()) {
       continue;
     }
 
@@ -2421,15 +2450,24 @@ void uPass_constprop::fold_case(const std::string& dst) {
       continue;
     }
 
+    // eq_op is three-valued and masks the pattern's unknown (`?`) bits, so a
+    // PARTIALLY-defined pattern (`0ub10??`) still enforces its DEFINED bits —
+    // unlike a blanket `has_unknowns() → continue`, which would skip the whole
+    // field-check and wrongly match on a defined-bit disagreement.
     const Dlop eq_result = *lmatch->value.eq_op(re.value);
-    if (eq_result.is_known_true()) {
-      continue;
-    }
-    if (eq_result.is_known_false()) {
+    if (eq_result.is_known_false()) {  // defined-bit mismatch
       store_trivial(dst, *Dlop::create_bool(false));
       return;
     }
-    defer = true;
+    if (eq_result.is_known_true()) {
+      continue;
+    }
+    // Unknown eq result: the only disagreement is in the pattern's wildcard
+    // positions → a fully/partially masked pattern matches.
+    if (re.value.has_unknowns()) {
+      continue;
+    }
+    defer = true;  // subject itself undecidable
   }
 
   if (defer) {
@@ -2940,25 +2978,37 @@ void uPass_constprop::process_func_call() {
       move_to_parent();
       return;
     }
-    // `a..=b step s` has no dedicated LNAST op yet; its step
-    // amount must be a positive integer (ranges only ascend — see the
-    // descending-range check in process_range), so diagnose a comptime
-    // non-positive step here even though the call itself stays unfolded.
+    // `a..=b step s`: the step amount must be a positive integer (ranges only
+    // ascend — see the descending-range check in process_range). It overrides
+    // the range's baseline `rng_step` (1, stamped in process_range) — the stride
+    // is a per-range attribute so nested loops are independent — and `dst` is
+    // aliased to the (now-stepped) range so the for-loop / value forms read it.
     // Layout: ref(dst), const("step"), (const|ref)(range), (const|ref)(amount).
     if (lm->current_raw_text() == "step" && !in_template_body()) {
-      if (move_to_sibling() && move_to_sibling()) {
-        Dlop amount = current_prim_value();
-        // is_integer() first: nil/string would otherwise slip into the sign
-        // checks. is_negative/is_known_zero work at any width (no 64-bit cap).
-        if (amount.is_integer() && !amount.has_unknowns() && (amount.is_negative() || amount.is_known_zero())) {
-          livehd::diag::sink().emit(livehd::diag::Diagnostic{
-              .severity = livehd::diag::Severity::error,
-              .code     = "invalid-range-step",
-              .category = "type",
-              .pass     = "upass.constprop",
-              .message  = std::format("range step must be a positive integer (got {})", amount.to_decimal_string()),
-              .hint     = "ranges only ascend; use a positive step, e.g. `0..=10 step 2`",
-          });
+      if (move_to_sibling()) {  // child2: the range ref
+        std::string range_src(current_text());
+        if (move_to_sibling()) {  // child3: the step amount
+          Dlop amount = current_prim_value();
+          // is_integer() first: nil/string would otherwise slip into the sign
+          // checks. is_negative/is_known_zero work at any width (no 64-bit cap).
+          if (amount.is_integer() && !amount.has_unknowns() && (amount.is_negative() || amount.is_known_zero())) {
+            livehd::diag::sink().emit(livehd::diag::Diagnostic{
+                .severity = livehd::diag::Severity::error,
+                .code     = "invalid-range-step",
+                .category = "type",
+                .pass     = "upass.constprop",
+                .message  = std::format("range step must be a positive integer (got {})", amount.to_decimal_string()),
+                .hint     = "ranges only ascend; use a positive step, e.g. `0..=10 step 2`",
+            });
+          } else if (amount.is_just_i64()) {
+            if (auto rb = st().get_bundle_for_write(range_src); rb && !rb->get_attr("rng_s").is_invalid()) {
+              rb->set_attr("rng_step", amount);  // override the baseline stride of 1
+            }
+            // Re-fetch post-write (COW un-shares the slot) and alias dst to it.
+            if (auto rb2 = st().get_bundle(range_src); rb2 && !rb2->get_attr("rng_s").is_invalid()) {
+              st().set(dst, rb2);
+            }
+          }
         }
       }
     }
@@ -3222,12 +3272,18 @@ void uPass_constprop::process_range() {
   // descending source form lands here as end < start. is_integer() is the
   // load-bearing gate: the open-end sentinel (`x[a..]` → nil end) and string
   // bounds must not reach the subtraction, and nil reads as 0 — which would
-  // flag every `a..` with a > 0. `end - start < 0` compares at any width
-  // (an is_just_i64 gate would skip >62-bit bounds). Skip deferred-template
+  // flag every `a..` with a > 0. Skip deferred-template
   // bodies (in_template_body): there unbound params can fold a bogus
   // descending range as an optimization artifact, not a user mistake — the
   // genuine error still surfaces when the body is realized at a call site.
-  if (start.is_integer() && end.is_integer() && !start.has_unknowns() && !end.has_unknowns() && end.sub_op(start)->is_negative()) {
+  //
+  // An EMPTY exclusive range (`first..<first`, `first..+0`) lowers to
+  // end == start-1 — a valid zero-element range, not a descending one (e.g.
+  // `for i in 0..<n` with n==0 → range(0,-1) iterates zero times). Only
+  // end <= start-2 is truly descending (`5..=0` → delta -5), so gate on
+  // `(end - start) + 1 < 0` rather than `(end - start) < 0`.
+  if (start.is_integer() && end.is_integer() && !start.has_unknowns() && !end.has_unknowns()
+      && end.sub_op(start)->add_op(*Dlop::create_integer(1))->is_negative()) {
     if (!in_template_body()) {
       livehd::diag::Span span;
       if (const auto& ln = lm->get_lnast()) {
@@ -3256,6 +3312,10 @@ void uPass_constprop::process_range() {
   if (auto rb = st().get_bundle_for_write(dst); rb) {
     rb->set_attr("rng_s", start);
     rb->set_attr("rng_e", end);
+    // Baseline stride is 1; `a..=b step n` overrides it via process_func_call's
+    // `step` handler. Stamping it always (per-range, so nested loops are
+    // independent) keeps the unroll uniform: it always does `v += rng_step`.
+    rb->set_attr("rng_step", *Dlop::create_integer(1));
   }
 
   // Materialize a tuple bundle for closed integer ranges so eq/tuple_get can
@@ -3707,11 +3767,22 @@ void uPass_constprop::process_tuple_set() {
   path.reserve(path_and_val.size() - 1);
   for (std::size_t i = 0; i + 1 < path_and_val.size(); ++i) {
     std::string elem = path_and_val[i].text;
-    if (path_and_val[i].is_ref && st().has_trivial(elem)) {
-      // to_field() unwraps a string trivial to its content (no quotes) and
-      // renders an int trivial as its decimal text — exactly the field-name
-      // shape we want for `tuple[ref] = …`.
-      elem = st().get_trivial(elem).to_field();
+    if (path_and_val[i].is_ref) {
+      if (st().has_trivial(elem)) {
+        // to_field() unwraps a string trivial to its content (no quotes) and
+        // renders an int trivial as its decimal text — exactly the field-name
+        // shape we want for `tuple[ref] = …`.
+        elem = st().get_trivial(elem).to_field();
+      }
+    } else {
+      // const field selector: the LNAST const text is the pyrope-syntactic
+      // form (`'one'`, `"foo"`, `0`). Canonicalize to the bare bundle key the
+      // read path (process_tuple_get) uses, so a string selector `t['one']=v`
+      // lands on the SAME key as `t.one`/a read `t['one']`. Keep raw on parse
+      // failure (covers internal `__`-attr keys, already filtered above).
+      if (auto v = Dlop::from_pyrope(elem); v && !v->is_invalid()) {
+        elem = v->to_field();
+      }
     }
     path.push_back(std::move(elem));
   }
@@ -4002,7 +4073,27 @@ upass::Vote uPass_constprop::process_get_mask(std::string_view dst_name, Bundle&
     return classify_vote();
   }
   const std::string var{dst_name};
-  Dlop              value = operand_value(src[0]);
+  // A range BASE (`(1..=3)#[..]`) converts to its one-hot integer
+  // (04-variables.md): the contiguous mask ((1<<(hi-lo+1))-1)<<lo. Without
+  // this, operand_value would read the range's materialized field "0" (==lo)
+  // and fold the select to that scalar. Only closed, non-negative ranges have
+  // a finite encoding; open/negative bases fall through to operand_value.
+  Dlop value;
+  if (src[0].bundle && !src[0].bundle->get_attr("rng_s").is_invalid()) {
+    const Dlop rs = src[0].bundle->get_attr("rng_s");
+    const Dlop re = src[0].bundle->get_attr("rng_e");
+    if (rs.is_integer() && !rs.has_unknowns() && !rs.is_negative() && re.is_integer() && !re.has_unknowns()
+        && !re.is_negative()) {
+      auto one   = Dlop::create_integer(1);
+      auto width = re.sub_op(rs)->add_op(*one);  // hi - lo + 1
+      if (!width->is_negative()) {
+        value = *one->shl_op(*width)->sub_op(*one)->shl_op(rs);  // ((1<<w)-1)<<lo
+      }
+    }
+  }
+  if (value.is_invalid()) {
+    value = operand_value(src[0]);
+  }
 
   bool is_range = false;
   Dlop range_start;

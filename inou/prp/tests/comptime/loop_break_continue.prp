@@ -1,0 +1,39 @@
+/*
+:name: loop_break_continue
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+// break / continue / non-termination in comptime loops (2f-loop_unroll).
+// `while true`/`loop` lower to a recomputed `1==1` ref so the body folds each
+// iteration and the break-guard resolves; continue skips the rest of the
+// current iteration; the non-termination check tracks body progress vars.
+
+// break in `while true`
+mut a = 0
+while true { a += 1; if a >= 5 { break } }
+cassert(a == 5)
+
+// break in `loop {}` (accumulates a factorial)
+mut f = 1
+mut k = 0
+loop { k += 1; f = f * k; if k >= 5 { break } }
+cassert(f == 120 and k == 5)
+
+// continue in a `for`
+mut s = 0
+for i in 0..<5 { if i == 2 { continue }; s = s + i }
+cassert(s == 8)             // 0+1+3+4
+
+// continue in a `while`
+mut s2 = 0
+mut j = 0
+while j < 5 { j += 1; if j == 3 { continue }; s2 = s2 + j }
+cassert(s2 == 1 + 2 + 4 + 5)
+
+// late-flipping exit flag must NOT trip the non-termination check
+mut done = false
+mut n = 0
+while not done { n += 1; if n == 8 { done = true } }
+cassert(n == 8)
+cassert(done)

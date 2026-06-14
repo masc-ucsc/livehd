@@ -160,6 +160,9 @@ private:
   void require_all(Kind required, Kind result, std::string_view sym, std::string_view code, Bundle& dst, upass::Src_span src,
                    bool allow_nil = false);
   void require_same(Kind result, std::string_view sym, std::string_view code, Bundle& dst, upass::Src_span src);
+  // `a << b`: `a` integer; `b` integer OR a tuple of bit positions (the
+  // documented one-hot form `1 << (1,4,3)`). Result integer.
+  void require_shift(std::string_view sym, Bundle& dst, upass::Src_span src);
 
   void emit_type_error(std::string_view code, const std::string& msg, std::string_view hint = {},
                        livehd::diag::Span span = {});

@@ -142,6 +142,19 @@ void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts,
         }
         here.insert(name);
       }
+    } else if (Lnast_ntype::is_store(ct)) {
+      // An explicit `store name = nil` is a RELEASE (04-variables.md: nil
+      // invalidates the binding), ending the name's declaration window. A later
+      // re-declare in the same scope is then legal — e.g. two sequential
+      // `match const t = …` (each lowers to declare t + … + `store t = nil`),
+      // whose closed scopes are disjoint, so re-using `t` is not a redeclare.
+      auto c0 = ln->get_first_child(c);
+      if (!c0.is_invalid() && Lnast_ntype::is_ref(ln->get_type(c0))) {
+        auto c1 = ln->get_sibling_next(c0);
+        if (!c1.is_invalid() && Lnast_ntype::is_const(ln->get_type(c1)) && ln->get_name(c1) == "nil") {
+          here.erase(std::string(ln->get_name(c0)));
+        }
+      }
     }
     const bool is_func_body = Lnast_ntype::is_func_def(ct);
     for (auto cc = ln->get_first_child(c); !cc.is_invalid(); cc = ln->get_sibling_next(cc)) {

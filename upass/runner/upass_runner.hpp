@@ -214,9 +214,10 @@ protected:
   // inlined param from the actual at the call site). First pass that provides
   // wins. See uPass::provide_decl_type.
   std::optional<upass::uPass::Decl_scalar_type>            try_decl_type(std::string_view name);
-  // Folded (start, end_inclusive) bounds of a `range` tmp (comptime for-loop
-  // iterable). First pass that provides wins. See uPass::provide_range.
-  std::optional<std::pair<Dlop, Dlop>>                     try_range(std::string_view name);
+  // Folded (start, end_inclusive, step) bounds of a `range` tmp (comptime
+  // for-loop iterable). The step is per-range (defaults to 1; `a..=b step n`
+  // sets it), so the unroll always does `v += step`. See uPass::provide_range.
+  std::optional<std::tuple<Dlop, Dlop, Dlop>>             try_range(std::string_view name);
   // Declared kind + range of a dotted field path (`t1.a`). First pass that
   // provides wins. See uPass::provide_field_type.
   std::optional<upass::uPass::Field_decl_type>             try_field_type(std::string_view name);
@@ -521,6 +522,11 @@ protected:
   void emit_inline_typespec_range(const std::string& name, const std::optional<Dlop>& range_max,
                                   const std::optional<Dlop>& range_min);
 
+  // A `bool`-bound generic param/output: emit a childless prim_type_bool
+  // typespec. A bool bind also carries max=1/min=0, so callers must test the
+  // bool kind BEFORE the (max||min) range branch.
+  void emit_inline_typespec_bool(const std::string& name);
+
   // Emits `dst = sext(src, sign_bit)` through the walk so constprop folds it.
   // Mirrors the deleted evaluator's adjust_for_type: a signed output's raw
   // value (e.g. a get_mask bit-slice 0b1110 = 14) must be reinterpreted as its
@@ -538,6 +544,11 @@ protected:
   // (nested) unrolls so the fuel/depth guard bounds non-terminating loops the
   // same way recursion is bounded.
   bool                                          loop_break_hit_{false};
+  // Set by a `func_continue` reached on a comptime-taken path: like break it
+  // stops the rest of the CURRENT iteration's body walk, but (unlike break) the
+  // unroller does NOT stop — it proceeds to the next iteration. Reset at the
+  // start of each iteration (walk_loop_iteration).
+  bool                                          loop_continue_hit_{false};
   int                                           loop_depth_{0};
   std::shared_ptr<hhds::Forest>                 scratch_forest_;
   // Callee bodies currently being spliced (innermost last). Re-entering one

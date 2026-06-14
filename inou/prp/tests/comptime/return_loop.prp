@@ -1,0 +1,32 @@
+/*
+:name: return_loop
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+// Early `return` inside a comptime-unrolled loop must stop the loop AND skip the
+// rest of the function (2f-return_leak: prp2lnast desugars it to a synthesized
+// `mut` flag + `break` + a post-loop `if flag {} else { rest }` guard, so the
+// existing if-scope / break machinery handles it — no runner flag).
+comb sum_until(n, stop) -> (r) {
+  r = 0
+  for i in 0..<n {
+    if i == stop { return }
+    r = r + i
+  }
+  r = r + 100
+}
+cassert(sum_until(n=5, stop=3) == 3)      // 0+1+2, return at i==3 -> skip the +100
+cassert(sum_until(n=5, stop=9) == 110)    // no return: 0+1+2+3+4 = 10, then +100
+cassert(sum_until(n=0, stop=3) == 100)    // empty loop -> +100
+
+comb first_ge(lo, hi, thr) -> (r) {
+  r = 0 - 1
+  mut i = lo
+  while i < hi {
+    if i >= thr { r = i ; return }   // assigns the output, then returns
+    i = i + 1
+  }
+}
+cassert(first_ge(lo=0, hi=10, thr=4) == 4)
+cassert(first_ge(lo=0, hi=3,  thr=9) == 0 - 1)  // never reaches thr -> loop ends, r stays -1

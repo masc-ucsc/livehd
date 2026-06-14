@@ -148,6 +148,35 @@ void collect_cond_vars(const Lnast& ln, const Lnast_nid& while_nid, std::string_
   }
 }
 
+// Collect every NON-tmp variable WRITTEN (store/declare target) anywhere in the
+// loop body subtree, excluding nested lambda (func_def) bodies. Used to broaden
+// the non-termination state signature: a cond-var-only signature false-positives
+// a loop whose exit flag flips late — `while not done { n+=1; if n==8 {done=true} }`
+// (done is frozen for iterations 1..7) — even though a real progress var (n)
+// advances. Including the body's written vars makes a state REPEAT mean genuine
+// non-progress; a still-advancing var simply never repeats (bounded by the fuel cap).
+void collect_body_assigned_vars(const Lnast& ln, const Lnast_nid& nid, absl::flat_hash_set<std::string>& out) {
+  if (nid.is_invalid()) {
+    return;
+  }
+  const auto t = ln.get_type(nid);
+  if (Lnast_ntype::is_func_def(t)) {
+    return;  // a nested lambda's writes are its own scope, not loop-carried
+  }
+  if (Lnast_ntype::is_store(t) || Lnast_ntype::is_declare(t)) {
+    const auto def = ln.get_first_child(nid);
+    if (!def.is_invalid() && Lnast_ntype::is_ref(ln.get_type(def))) {
+      const auto nm = ln.get_name(def);
+      if (!nm.empty() && !prp_is_tmp_name(nm)) {
+        out.emplace(nm);
+      }
+    }
+  }
+  for (auto c : ln.children(nid)) {
+    collect_body_assigned_vars(ln, c, out);
+  }
+}
+
 // Emit a fatal comptime-loop diagnostic anchored at the `while` node's source
 // span (prp2lnast's attach_loc survives the lnastfmt round-trip), then abort the
 // walk — mirrors fcall_arg_fail's crash-safe flush-before-throw.
@@ -445,7 +474,7 @@ std::optional<upass::uPass::Decl_scalar_type> uPass_runner::try_decl_type(std::s
   return upass::uPass::Decl_scalar_type{.range_max = f->range_max, .range_min = f->range_min};
 }
 
-std::optional<std::pair<Dlop, Dlop>> uPass_runner::try_range(std::string_view name) {
+std::optional<std::tuple<Dlop, Dlop, Dlop>> uPass_runner::try_range(std::string_view name) {
   // Folded range bounds ride the range tmp's binding attrs.
   const auto b = symbol_table_.get_bundle(name);
   if (!b) {
@@ -455,7 +484,11 @@ std::optional<std::pair<Dlop, Dlop>> uPass_runner::try_range(std::string_view na
   if (start.is_invalid()) {
     return std::nullopt;
   }
-  return std::make_pair(start, Dlop(b->get_attr("rng_e")));
+  Dlop step = b->get_attr("rng_step");  // per-range stride (process_range stamps 1)
+  if (step.is_invalid()) {
+    step = *Dlop::create_integer(1);  // baseline stride for ranges with no attr
+  }
+  return std::make_tuple(start, Dlop(b->get_attr("rng_e")), step);
 }
 
 std::optional<std::string> uPass_runner::try_tuple_slot_ref(std::string_view name, std::string_view slot) {
@@ -1410,6 +1443,27 @@ void uPass_runner::emit_inline_typespec_range(const std::string& name, const std
   lm->pop_source();
 }
 
+void uPass_runner::emit_inline_typespec_bool(const std::string& name) {
+  // A `bool`-bound generic param/output: emit a childless prim_type_bool
+  // typespec (mirrors prp2lnast's `:bool` lowering). Without this, a bool bind
+  // — which also carries max=1/min=0 — would be typed as int(1,0), turning a
+  // `r == true` round-trip into an int==bool mismatch.
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-type");
+  auto s    = std::make_shared<Lnast>(body, "inl-type");
+  auto root = s->set_root(Lnast_ntype::create_type_spec());
+  stamp_scratch_srcid(s, root);
+  s->add_child(root, Lnast_node::create_ref(name));
+  s->add_child(root, Lnast_ntype::create_prim_type_bool());  // leaf, no max/min children
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);
+  process_lnast();
+  flush_deferred_emits();
+  lm->pop_source();
+}
+
 void uPass_runner::emit_inline_sext(const std::string& dst, const std::string& src, int sign_bit) {
   if (sign_bit < 0) {
     return;
@@ -2173,6 +2227,10 @@ bool uPass_runner::try_inline_func_call() {
     const auto gbit  = e.type_name.empty() ? gbinds.end() : gbinds.find(e.type_name);
     if (e.bits > 0) {
       emit_inline_typespec(pname, e.bits, e.is_signed);
+    } else if (gbit != gbinds.end() && gbit->second.type_name.empty() && gbit->second.kind == Io_kind::boolean) {
+      // `a:T` with T bound to `bool` — must precede the (max||min) branch since
+      // a bool bind also carries max=1/min=0 (else it would be typed int(1,0)).
+      emit_inline_typespec_bool(pname);
     } else if (gbit != gbinds.end() && gbit->second.type_name.empty() && (gbit->second.max || gbit->second.min)) {
       // `a:T` with T bound (explicit `<…>` or unified from the actuals):
       // substitute the concrete envelope — macro expansion, so the normal
@@ -2210,18 +2268,28 @@ bool uPass_runner::try_inline_func_call() {
   // (declare type refs, renamed to `inlN_T`) resolve through the normal
   // named-type machinery.
   for (const auto& [g, gb] : gbinds) {
-    if (gb.type_name.empty() && (gb.max || gb.min)) {
+    if (gb.type_name.empty() && gb.kind == Io_kind::boolean) {
+      emit_inline_typespec_bool(upass::Lnast_manager::make_inlined_name(tag, g));
+    } else if (gb.type_name.empty() && (gb.max || gb.min)) {
       emit_inline_typespec_range(upass::Lnast_manager::make_inlined_name(tag, g), gb.max, gb.min);
     }
   }
   for (const auto& o : io.outputs) {
     const auto oname = upass::Lnast_manager::make_inlined_name(tag, o.name);
     if (o.bits == 0 && !o.type_name.empty()) {
-      if (auto it = gbinds.find(o.type_name); it != gbinds.end() && it->second.type_name.empty() && (it->second.max || it->second.min)) {
-        // `-> (r:T)` with T bound — substitute the concrete envelope.
-        emit_inline_typespec_range(oname, it->second.max, it->second.min);
-        emit_inline_binding(oname, Lnast_node::create_const("nil"));
-        continue;
+      if (auto it = gbinds.find(o.type_name); it != gbinds.end() && it->second.type_name.empty()) {
+        if (it->second.kind == Io_kind::boolean) {
+          // `-> (r:T)` with T bound to `bool` — precede the range branch.
+          emit_inline_typespec_bool(oname);
+          emit_inline_binding(oname, Lnast_node::create_const("nil"));
+          continue;
+        }
+        if (it->second.max || it->second.min) {
+          // `-> (r:T)` with T bound — substitute the concrete envelope.
+          emit_inline_typespec_range(oname, it->second.max, it->second.min);
+          emit_inline_binding(oname, Lnast_node::create_const("nil"));
+          continue;
+        }
       }
     }
     emit_inline_typespec(oname, o.bits, o.is_signed);
@@ -3816,11 +3884,12 @@ bool uPass_runner::walk_loop_iteration(const std::function<void()>& emit_binds, 
   // Bind the iteration variable(s) into this scope so the body's reads fold.
   emit_binds();
 
+  loop_continue_hit_ = false;  // fresh per iteration (a `continue` skips only this one)
   if (lm->move_to_child()) {
     do {
       process_lnast();
-      if (loop_break_hit_) {
-        break;  // a comptime `break` fired — skip the rest of this iteration's body
+      if (loop_break_hit_ || loop_continue_hit_) {
+        break;  // a comptime `break`/`continue` fired — skip the rest of this iteration's body
       }
     } while (lm->move_to_sibling());
     lm->move_to_parent();
@@ -3892,14 +3961,18 @@ void uPass_runner::unroll_for() {
     lm->move_to_sibling();  // child2 body
   };
 
-  // (a) Range iterable: `for i in lo..hi` — bind a Dlop each iteration.
-  if (auto rng = try_range(iterable); rng && rng->first.is_just_i64() && rng->second.is_just_i64()) {
-    const int64_t lo          = rng->first.to_just_i64();
-    const int64_t hi          = rng->second.to_just_i64();  // inclusive
-    const bool    saved_break = loop_break_hit_;
-    loop_break_hit_           = false;
+  // (a) Range iterable: `for i in lo..hi [step n]` — bind a Dlop each iteration.
+  if (auto rng = try_range(iterable); rng && std::get<0>(*rng).is_just_i64() && std::get<1>(*rng).is_just_i64()) {
+    const int64_t lo          = std::get<0>(*rng).to_just_i64();
+    const int64_t hi          = std::get<1>(*rng).to_just_i64();  // inclusive
+    int64_t       step        = std::get<2>(*rng).is_just_i64() ? std::get<2>(*rng).to_just_i64() : 1;
+    if (step < 1) {
+      step = 1;  // non-positive step is a comptime error (process_func_call); avoid a hang here
+    }
+    const bool saved_break = loop_break_hit_;
+    loop_break_hit_        = false;
     ++loop_depth_;
-    for (int64_t v = lo; v <= hi; ++v) {
+    for (int64_t v = lo; v <= hi; v += step) {
       to_body();
       if (!walk_loop_iteration([&]() { emit_inline_binding(tagged_i, Lnast_node::create_const(std::to_string(v))); })) {
         break;  // fuel exhausted
@@ -3909,7 +3982,8 @@ void uPass_runner::unroll_for() {
       }
     }
     --loop_depth_;
-    loop_break_hit_ = saved_break;
+    loop_break_hit_    = saved_break;
+    loop_continue_hit_ = false;  // a `continue` never escapes the loop
     lm->restore_cursor(for_bm);
     return;
   }
@@ -3999,7 +4073,8 @@ void uPass_runner::unroll_for() {
       ++pos;
     }
     --loop_depth_;
-    loop_break_hit_ = saved_break;
+    loop_break_hit_    = saved_break;
+    loop_continue_hit_ = false;  // a `continue` never escapes the loop
     lm->restore_cursor(for_bm);
     return;
   }
@@ -4065,7 +4140,16 @@ void uPass_runner::unroll_while() {
   // inputs are already seen, it can never converge".
   absl::flat_hash_set<std::string> cond_var_set;
   collect_cond_vars(*lm->get_lnast(), lm->get_current_nid(), cond_text, Lnast_ntype::is_ref(cond_type), cond_var_set);
-  const std::vector<std::string>   loop_vars(cond_var_set.begin(), cond_var_set.end());
+  // Broaden the state signature with the body's loop-carried (written) vars, so a
+  // late-flipping exit flag is not mistaken for "no progress" (BUG C): a real
+  // progress var advancing keeps the signature changing until the loop exits.
+  {
+    const auto& ln_  = *lm->get_lnast();
+    const auto  cnid = ln_.get_first_child(lm->get_current_nid());           // condition
+    const auto  bnid = cnid.is_invalid() ? cnid : ln_.get_sibling_next(cnid);  // body stmts
+    collect_body_assigned_vars(ln_, bnid, cond_var_set);
+  }
+  const std::vector<std::string> loop_vars(cond_var_set.begin(), cond_var_set.end());
   absl::flat_hash_set<std::string> seen_states;
 
   // Span for any loop diagnostic below — the `while` node carries the SourceId.
@@ -4146,7 +4230,8 @@ void uPass_runner::unroll_while() {
     }
   }
   --loop_depth_;
-  loop_break_hit_ = saved_break;
+  loop_break_hit_    = saved_break;
+  loop_continue_hit_ = false;  // a `continue` never escapes the loop
   lm->restore_cursor(while_bm);  // leave cursor on the while-node
 }
 
@@ -4772,7 +4857,17 @@ void uPass_runner::process_lnast() {
         emit_subtree_verbatim();
       }
       break;
-    C_OP(func_continue)
+    // `continue`: during a loop unroll, stop the rest of THIS iteration's body
+    // (loop_continue_hit_, checked by the body-walk loops) but let the unroller
+    // proceed to the next iteration. Outside a loop, emit verbatim.
+    case Ntype::Lnast_ntype_func_continue:
+      dispatch_to_passes(&upass::uPass::process_func_continue);
+      if (loop_depth_ > 0) {
+        loop_continue_hit_ = true;
+      } else {
+        emit_subtree_verbatim();
+      }
+      break;
     C_OP(func_return)
     case Ntype::Lnast_ntype_func_def:
       process_drop_candidate_verbatim(&upass::uPass::process_func_def);
@@ -5147,8 +5242,8 @@ void uPass_runner::process_stmts() {
     lm->move_to_child();
     do {
       process_lnast();
-      if (loop_break_hit_) {
-        break;  // a comptime `break` fired in a nested block — stop emitting the rest
+      if (loop_break_hit_ || loop_continue_hit_) {
+        break;  // a comptime `break`/`continue` fired in a nested block — stop emitting the rest
       }
     } while (lm->move_to_sibling());
     lm->move_to_parent();
@@ -5222,8 +5317,8 @@ void uPass_runner::process_if() {
           if (taken) {
             while (lm->move_to_sibling()) {
               process_lnast();
-              if (loop_break_hit_) {
-                break;  // a comptime `break` fired — stop emitting the rest of this flat body
+              if (loop_break_hit_ || loop_continue_hit_) {
+                break;  // a comptime `break`/`continue` fired — stop emitting the rest of this flat body
               }
             }
           }

@@ -77,18 +77,25 @@ cassert(v == 6)        // today: cassert false (wrap write not applied to v)
   now reports <code>ref-on-boundary</code> when an INPUT param carries <code>ref</code> and the
   lambda kind is not <code>comb</code> (the <code>self</code> receiver is exempt).
   <code>adv_ref_mod</code> / <code>adv_ref_pipe</code> pass.</li>
+<li><strong>A (plain <code>ref</code> param) — landed 2026-06-13.</strong> The root cause was
+  NOT write-back ordering: the inline-frame rename in <code>Lnast_manager::current_text()</code>
+  mangled the <code>wrap</code>/<code>sat</code> library call's structural arg KEYS
+  (<code>v</code>/<code>type</code> &rarr; <code>inl1_v</code>/<code>inl1_type</code>), so the
+  attributes narrow handler never matched <code>key=="type"</code> and the narrowed value was
+  never published. Fixed with a new <code>is_call_arg_key()</code> exemption (mirrors the
+  tuple-field-key exemption): the child-0 ref of a <code>store</code> under a
+  <code>func_call</code> stays raw. <strong>adv_ref_args_11 passes.</strong></li>
 </ul>
 
 <h2>Subtasks — still pending</h2>
 <ul>
-<li><strong>A — <code>wrap</code>/<code>sat</code> through the comb ref inline-alias.</strong> A
-  <code>wrap a += 1</code> through a <code>ref a</code> param does NOT propagate to the caller
-  (the caller's var stays unchanged; a PLAIN <code>a += 1</code> does propagate). The
-  <code>wrap</code>/<code>sat</code> write lowers to a <code>wrap(v=…, type=a)</code> func_call
-  whose result binds <code>a</code>; through the runner's ref inline-alias + write-back
-  (<code>upass_runner.cpp</code> ~2196/2310) the wrapped result is lost. Needs tracing the
-  inline sub-walk's wrap-func_call fold vs the write-back ordering. adv_ref_args_11,
-  adv_ufcs_21, adv_init_ctor_18 still fail.</li>
+<li><strong>A (<code>ref self</code> UFCS / <code>init</code>).</strong> <code>adv_ufcs_21</code>
+  (<code>wrap</code>/<code>sat self.v += x</code> in a <code>ref self</code> method) and
+  <code>adv_init_ctor_18</code> (<code>wrap</code>/<code>sat self.field = v</code> in an
+  <code>init</code> body) still fail — they flow through the ref-self UFCS write-back /
+  init-construction inline paths, not the plain-ref arg-key path fixed above. Overlaps with
+  <a href="2f-ufcs_ref_self.html">2f-ufcs_ref_self</a> and
+  <a href="2f-init_dispatch.html">2f-init_dispatch</a>.</li>
 </ul>
 
 <h2>Docs</h2>

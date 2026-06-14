@@ -641,7 +641,28 @@ void uPass_func_extract::process_func_def() {
         };
         walk(body_nid);
       }
+      // A parameter / output is a local declaration that shadows any enclosing
+      // const (06-functions.md lexical scoping), so it must NEVER be closure-
+      // captured: a spurious `store <param> = <outer const>` would double-write
+      // the inlined binding (alongside the real param bind) and trip the const-
+      // rebind check. Collect the signature names to exclude (io layout:
+      // io(inputs_tuple_add, outputs_tuple_add), each entry a store(ref name…)).
+      std::unordered_set<std::string> local_io;
+      for (auto sig : new_lnast->children(io_idx)) {
+        for (auto entry : new_lnast->children(sig)) {
+          if (!Lnast_ntype::is_store(new_lnast->get_type(entry))) {
+            continue;
+          }
+          auto nm = new_lnast->get_first_child(entry);
+          if (!nm.is_invalid()) {
+            local_io.insert(std::string(new_lnast->get_name(nm)));
+          }
+        }
+      }
       for (const auto& name : body_refs) {
+        if (local_io.contains(name)) {
+          continue;  // param/output shadows any enclosing const — never capture
+        }
         auto it = latest_outer_value.find(name);
         if (it != latest_outer_value.end()) {
           auto a_idx = new_lnast->add_child(stmts, Lnast_ntype::create_store());

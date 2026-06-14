@@ -1,5 +1,53 @@
 # Adversarial Pyrope comptime findings
 
+## Status after the 2026-06-13 fix pass
+
+`bazel test //inou/prp/...` went from **395 pass / 58 fail → 422 pass / 31 fail**
+(27 adversarial tests fixed, zero regressions). Landed families and their fix
+sites (all in this commit's diff):
+
+| family | tests | fix site |
+|--------|-------|----------|
+| string_escape_brace | string_interp_04 | prp2lnast `unescape_cooked_string` `\{`/`\}` |
+| match_relational_arm | match_all_08/18/20 | prp2lnast `match_expr_to_node` lt/le/gt/ge arm ops |
+| range_fit_div | int_div_13 | `lnast_range.hpp` div/mod constant fold |
+| string_selector_write | tuple_mut_12, tuple_access_16 | constprop `process_tuple_set` const-key `to_field()` |
+| kmgt_literal (+ paren_unary_type) | mix_deep_fold_13, cmp_bool_19 | `../hlop` `dlop.cpp` K/M/G/T decimal suffix |
+| single_bit_lhs_assign_in_for | bit_assign_06 | constprop `process_range` empty-range gate (`< -1`) |
+| elif_decl_visibility | unique_if_06 | prp2lnast `if_expr_to_node` per-branch `init` lowering |
+| inliner_param_collision | comb_basic_11 | func_extract closure-capture excludes param/output names |
+| generic_bool_param | generics_20 | runner `emit_inline_typespec_bool` + 3 gbind sites |
+| sat_envelope | wrap_sat_06 | attributes `narrow_for_lhs` + `wrap_sat.hpp` `saturate_to_range` |
+| case_nil_wildcard | unknown_bits_11, case_op_22 | constprop `fold_case` nil-wildcard + 3-valued eq |
+| match_local_rebind | match_locals_12 | attributes `record_assign` nil-release + semacheck nil-release |
+| tuple_destructure | tuple_destruct_04 | prp2lnast destructure binds by name unless positional literal |
+| bitsel_range_onehot | bitsel_slice_12 | constprop `process_get_mask` range-BASE one-hot |
+| bitsel_sext_nonliteral | bitsel_sext_19 | prp2lnast `bit_selection_to_node` non-const sext = `sext(_,hi-lo)` |
+| implicit_cast_decl | casts_23, string_basic_18 | prp2lnast typed-decl `int()`/`string()` cast (bare/unbounded only) |
+| shift_tuple_onehot | bitwise_18, int_prec_16, shifts_06 | constprop `process_shl` + typecheck `require_shift` |
+| ref_wrap_sat (partial) | ref_args_11 | lnast_manager `is_call_arg_key` (keeps wrap/sat arg keys raw thru inline) |
+| return_leak | multi_out_07 (+ new return_loop test) | prp2lnast `lower_children_range` early-return scope-rewrite; loop case via synthesized `mut` flag + break + post-loop guard |
+| range_step | range_step (+ new range_step test) | prp2lnast `binary_step_op` tier dispatch (was dropped); per-range `rng_step` attr (default 1) + `try_range`/`unroll_for` `v += step` |
+| loop_unroll | loop_break_continue, loops_while_02/13, loops_for_02, mix_loop_accum_11 (+ new loop_break_continue test) | `while true`/`loop` now lower to a recomputed `1==1` ref (const cond skipped the in-loop body fold → break mis-fired iter 1); `loop_continue_hit_` for continue; non-term signature broadened to body-written mut vars; enumerate is now the native pair form `for (index, value) in t` (`.enumerate()` dropped) |
+| string_fmt_positional | string_basic_07, string_interp_19 (DELETED) | feature DROPPED, not implemented — the positional `string("…{}…", args)` form is redundant with double-quote interpolation `"…{x:spec}…"` (which keeps the `:d`/`:b`/`:x` specs). Removed from `../docs/docs/pyrope/02-basics.md` + both tests deleted |
+
+### Still OPEN (30 adv tests + bit_select) — see todo/pyrope/2f-*
+
+Each open family has a `todo/pyrope/2f-*.html` work order with the verified
+root-cause + fix-site from the diagnostic sweep:
+
+* **2f-enum** — enum_cast_12, enum_cast_19, enum_match_identity, match_locals_19, enum_hier_05 (string→enum parse fold; captured-free-var not aliased into inline frame), enum_hier_14 (`enum(...)` spread)
+* **2f-ref_wrap_sat** — init_ctor_18, ufcs_21 (wrap/sat through `ref self`/`init`; plain `ref` arg now lands)
+* **2f-init_dispatch** — init_ctor_06, init_ctor_11, mix_deep_fold_21 (ctor overload kind-aware + single-param-absorbs-tuple + inline-tuple ctor)
+* **2f-arg_naming_tuple** — mix_generic_tuple_03/04, overload_18 (flattened tuple param/output regrouping + positional type elems)
+* **2f-ufcs_ref_self** — ufcs_05, ufcs_14 (copy-return self write-back suppression; const-tuple extension-method attach)
+* **2f-does_positional** — does_op_08, overload_13, equals_is_has_in_09 (positional `does`; 08/09 also need the new const/mut field syntax)
+* **2f-array_index_range** — array_basic_06 (custom-range array dims `[-4..<4]i5`)
+* **2f-comptime_param** — comptime_param_01 (grammar: `[...]` comptime-param slot in lambda decl)
+
+Plus two non-adversarial, separately-tracked: `slang_compile-long_BTBsa`
+(slang ladder) and `lhd_setmask_bitread_test` (Set_mask chain resolver).
+
 
 ## Methodology
 

@@ -5,20 +5,19 @@
 :verifier_fail: 0
 */
 
-// FINDING: enumerate() loop body. Per 05b-statements.md the canonical form is
-//   for (index,i) in bund.enumerate() { ... }   (doc lines ~258, ~270)
-// Here the body runs once per element, so the index-sum is 0+1+2+3 = 6 and the
-// value-sum is 10+20+30+40 = 100. Both casserts are true per the spec.
+// A pair binding `for (index, value) in t` IS the enumerate: index first
+// (position), value second (05b-statements.md). The body runs once per element,
+// so the index-sum is 0+1+2+3 = 6 and the value-sum is 10+20+30+40 = 100.
 mut bund = (10, 20, 30, 40)
 
 mut idx_sum = 0
-for (index, i) in bund.enumerate() {
+for (index, i) in bund {
   idx_sum = idx_sum + index
 }
 cassert(idx_sum == 6)
 
 mut val_sum = 0
-for (index, i) in bund.enumerate() {
+for (index, i) in bund {
   val_sum = val_sum + i
 }
 cassert(val_sum == 100)

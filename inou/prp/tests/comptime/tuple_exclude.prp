@@ -8,7 +8,7 @@
 const t1 = (const a=1,const b=2,const c=3)
 
 mut t2 = ()
-for (e, idx, key) in t1 {
+for (idx, e, key) in t1 {  // (index, value, key) order
   mut sing_tup = ()
   sing_tup[key] = e
   t2 = (...t2, ...sing_tup)
@@ -20,7 +20,7 @@ cassert(t1.b == t2.b)
 cassert(t1.c == t2.c)
 
 mut t3 = ()
-for (e, idx, key) in t1 {
+for (idx, e, key) in t1 {  // (index, value, key) order
   mut sing_tup = ()
   sing_tup[key] = e
   if key != "b" { t3 = (...t3, ...sing_tup) }

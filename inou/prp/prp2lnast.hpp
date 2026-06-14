@@ -158,6 +158,17 @@ protected:
   // this, the body content would also emit as an orphan top-level stmts.
   std::unordered_set<uint32_t> consumed_lambda_body_starts;
 
+  // Early-`return` desugar state (2f-return_leak). A function whose body has a
+  // `return` inside a loop is lowered with a synthesized `mut <flag> = false`
+  // declared at its body top; `return_flag_name_` holds that flag's name while
+  // lowering the body ("" otherwise, i.e. the clean no-flag scope-rewrite mode).
+  // `in_return_loop_` is true while lowering inside such a loop's body, so a
+  // `return` there becomes `<flag> = true; break`. `synth_return_flag_count_`
+  // uniquifies the flag name across (possibly nested) functions.
+  std::string return_flag_name_;
+  bool        in_return_loop_         = false;
+  int         synth_return_flag_count_ = 0;
+
   // Counter for file-unique hoisted in-tuple method names (`call` →
   // `call__t1`). The bundle field keeps the source name; the func_def (and
   // hence the registry unit) gets the unique one, so two bundles may both
@@ -224,11 +235,22 @@ protected:
   // children of `parent` (named + anonymous) so the grammar's hidden `wrap`/
   // `sat` overflow tokens are visible.
   void walk_statement_block(TSNode parent);
+  // Lower a scope's children from index `from`, desugaring early `return`
+  // (2f-return_leak): a guarded `if cond { … return }` pushes the rest of the
+  // scope into a synthesized `else`; a bare `return` drops the rest.
+  void lower_children_range(TSNode parent, uint32_t from);
+  bool is_guarded_return_if(TSNode s, TSNode& cond_out, TSNode& then_out);
   void process_assignment(TSNode n);
   void process_declaration_statement(TSNode n);
   void process_while_statement(TSNode n);
   void process_for_statement(TSNode n);
   void process_loop_statement(TSNode n);
+  // An always-true RECOMPUTED ref (`1 == 1`) for `loop`/`while true` conditions
+  // (a literal `const 'true'` cond makes the runner skip the in-loop body fold,
+  // so the break-guard never resolves). `lower_infinite_loop` builds the shared
+  // `while (1==1) { if (1==1) {body} else {break} }` shape from the body node.
+  Lnast_node emit_always_true_ref();
+  void       lower_infinite_loop(TSNode code, TSNode loc);
   void process_control_statement(TSNode n);
   // Statement-table entry point (the table needs the plain `void(TSNode)`
   // member signature); forwards to the named variant with no override.
@@ -448,7 +470,7 @@ protected:
   // call before the store (replaces the old attr_set(wrap) tag).
   Lnast_node process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
                                        bool rhs_is_fcall = false, std::string_view rhs_fcall_name = {},
-                                       std::string_view overflow_kind = {});
+                                       std::string_view overflow_kind = {}, bool rhs_name_bindable = false);
 
   // Helpers
   std::string_view        get_text(const TSNode& n) const;

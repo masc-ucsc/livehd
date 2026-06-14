@@ -245,6 +245,13 @@ struct Lnast_range {
     if (unbounded) {
       return make_unbounded();
     }
+    // Two known endpoints fold the quotient exactly (mirrors band/bor/bxor);
+    // the loose [-|a|,|a|] bound below otherwise rejects e.g. (-9)/3 against a
+    // declared int(-3,3). Guard the INT64_MIN/-1 overflow corner.
+    if (!b.unbounded && is_constant() && b.is_constant() && b.min != 0
+        && !(min == std::numeric_limits<int64_t>::min() && b.min == -1)) {
+      return constant(min / b.min);  // truncated integer division, any sign
+    }
     int64_t m;
     if (!magnitude(m)) {
       return make_unbounded();  // INT64_MIN — can't take |.|
@@ -261,6 +268,10 @@ struct Lnast_range {
   Lnast_range mod(const Lnast_range& b) const noexcept {
     if (unbounded) {
       return make_unbounded();
+    }
+    if (!b.unbounded && is_constant() && b.is_constant() && b.min != 0
+        && !(min == std::numeric_limits<int64_t>::min() && b.min == -1)) {
+      return constant(min % b.min);  // both endpoints known → exact remainder
     }
     int64_t ma;
     if (!magnitude(ma)) {

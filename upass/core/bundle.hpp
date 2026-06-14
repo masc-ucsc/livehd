@@ -292,6 +292,10 @@ public:
   void set_attr(std::string_view field, std::string_view attr_name, const Dlop& v) {
     attr_map.insert_or_assign(absl::StrCat(field, ".", canon_attr(attr_name)), Entry(false, v));
   }
+  void clear_attr(std::string_view attr_name) { attr_map.erase(std::string(canon_attr(attr_name))); }
+  void clear_attr(std::string_view field, std::string_view attr_name) {
+    attr_map.erase(absl::StrCat(field, ".", canon_attr(attr_name)));
+  }
 
   // Pyrope `a ++ b` (03-bundle.md). A colliding named field merges only when
   // one side is `nil`, both leaves carry the same comptime value, or both
