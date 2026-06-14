@@ -560,6 +560,13 @@ protected:
   std::string materialize_array_literal(const std::vector<int64_t>& dims, size_t level, const std::vector<Dlop>& flat,
                                         size_t start);
 
+  // 2f-nil_diag — an if/match/while condition that folds to a nil (Type::Nil)
+  // value is an illegal use of nil in a conditional: emit a compile error.
+  // `which` names the construct ("if"/"match"/"while") for the message. The
+  // cursor must be on the condition node (its span is used). Template bodies
+  // fold nil placeholders for unbound params, so they are exempt.
+  void report_cond_nil(std::string_view which);
+
   // Monotonic per-run counter giving each inline call site a unique rename
   // tag/salt. Cross-pass idempotence is a documented follow-up. Also used
   // per comptime loop iteration (unroll_for/unroll_while) so each iteration's

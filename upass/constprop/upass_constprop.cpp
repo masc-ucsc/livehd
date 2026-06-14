@@ -740,17 +740,39 @@ void uPass_constprop::process_unary(F op) {
 
 upass::Vote uPass_constprop::process_plus(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_nary(dst_name, src, [](Dlop& r, Dlop n) { r = r.add_op(n); });
+  return push_nary(dst_name, src, [](Dlop& r, Dlop n) { r = r.add_op(n); }, /*report_nil=*/true);
 }
 
 upass::Vote uPass_constprop::process_minus(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_nary(dst_name, src, [](Dlop& r, Dlop n) { r = r.sub_op(n); });
+  return push_nary(dst_name, src, [](Dlop& r, Dlop n) { r = r.sub_op(n); }, /*report_nil=*/true);
 }
 
 upass::Vote uPass_constprop::process_mult(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_nary(dst_name, src, [](Dlop& r, Dlop n) { r = r.mult_op(n); });
+  return push_nary(dst_name, src, [](Dlop& r, Dlop n) { r = r.mult_op(n); }, /*report_nil=*/true);
+}
+
+bool uPass_constprop::report_arith_nil(const Dlop& r) {
+  // 2f-nil_diag — an arithmetic op that folds to a nil (Type::Nil) result is
+  // an illegal/unsupported/degenerate operation on comptime operands (a nil
+  // operand, an unsupported mix, a 0-width result, …). Report it and let the
+  // template skip the store, so the garbage nil never propagates. A template
+  // body folds nil placeholders for unbound params, so it is exempt — the real
+  // error resurfaces when the body is realized at a concrete call site.
+  if (!r.is_nil() || in_template_body()) {
+    return false;
+  }
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{
+      .severity = livehd::diag::Severity::error,
+      .code     = "nil-operation",
+      .category = "type",
+      .pass     = "upass.constprop",
+      .message  = "illegal or unsupported operation: the result is nil",
+      .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+      .hint     = "an operand is nil/uninitialized or the operation is undefined for these values",
+  });
+  return true;
 }
 
 upass::Vote uPass_constprop::process_div(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
@@ -774,7 +796,7 @@ upass::Vote uPass_constprop::process_div(std::string_view dst_name, Bundle& dst,
       return classify_vote();  // do not fold/store the nil
     }
   }
-  return push_nary(dst_name, src, [](Dlop& r, Dlop n) { r = r.div_op(n); });
+  return push_nary(dst_name, src, [](Dlop& r, Dlop n) { r = r.div_op(n); }, /*report_nil=*/true);
 }
 
 upass::Vote uPass_constprop::process_bit_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
@@ -817,7 +839,8 @@ upass::Vote uPass_constprop::process_mod(std::string_view dst_name, Bundle& dst,
       return classify_vote();  // do not fold/store the nil
     }
   }
-  return push_binary_passthrough(dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return *n1.mod_op(n2); });
+  return push_binary_passthrough(
+      dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return *n1.mod_op(n2); }, /*report_nil=*/true);
 }
 
 upass::Vote uPass_constprop::process_shl(std::string_view dst_name, Bundle& dst, upass::Src_span src) {

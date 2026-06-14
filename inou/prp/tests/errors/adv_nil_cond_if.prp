@@ -1,0 +1,10 @@
+/*
+:name: adv_nil_cond_if
+:type: error
+:error: (nil|condition)
+*/
+// 2f-nil_diag — a nil value used as an `if` condition is illegal.
+const c = nil
+if c {
+  cputs("x")
+}

@@ -103,6 +103,15 @@ public:
     return classify_statement_impl().kind == upass::Emit_kind::drop_subtree ? upass::Vote::drop : upass::Vote::keep;
   }
 
+  // 2f-nil_diag: an arithmetic op that folded to a nil (Type::Nil) result —
+  // an illegal/unsupported/degenerate op on comptime operands (a nil operand,
+  // a degenerate width, …) — is a compile error; the garbage nil is never
+  // stored. Returns true (and emits the diagnostic) when `r` is nil; the
+  // fold templates then skip the store. Template bodies (in_template_body)
+  // legally fold nil placeholders for unbound params, so they are exempt —
+  // the genuine error resurfaces when the body is realized at a real call.
+  bool report_arith_nil(const Dlop& r);
+
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
 
   // Unresolved live imports recorded during the walk: (unit that
@@ -354,8 +363,13 @@ protected:
 
   // Push-form fold templates (the cursor-walking originals below die with
   // the cursor-walking originals).
+  // report_nil (2f-nil_diag): true ONLY for genuine arithmetic ops (+ - * / %)
+  // — a nil result there is an illegal/degenerate operation worth a compile
+  // error. Comparisons, logical and/or, casts and bitwise nil-bit propagation
+  // reuse these same templates but legitimately yield/keep nil, so they leave
+  // it false.
   template <typename F>
-  upass::Vote push_nary(std::string_view dst, upass::Src_span src, F op) {
+  upass::Vote push_nary(std::string_view dst, upass::Src_span src, F op, bool report_nil = false) {
     if (dst.empty() || src.empty()) {
       return upass::Vote::keep;
     }
@@ -370,13 +384,13 @@ protected:
       }
       op(r, operand);
     }
-    if (!r.is_invalid()) {
+    if (!r.is_invalid() && !(report_nil && report_arith_nil(r))) {
       store_trivial(dst, r);
     }
     return classify_vote();
   }
   template <typename F>
-  upass::Vote push_binary_passthrough(std::string_view dst, upass::Src_span src, F op) {
+  upass::Vote push_binary_passthrough(std::string_view dst, upass::Src_span src, F op, bool report_nil = false) {
     if (dst.empty() || src.size() < 2) {
       return upass::Vote::keep;
     }
@@ -386,7 +400,7 @@ protected:
       return upass::Vote::keep;
     }
     Dlop r = op(n1, n2);
-    if (!r.is_invalid()) {
+    if (!r.is_invalid() && !(report_nil && report_arith_nil(r))) {
       store_trivial(dst, r);
     }
     return classify_vote();

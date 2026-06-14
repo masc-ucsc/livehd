@@ -4493,6 +4493,13 @@ void uPass_runner::unroll_while() {
   const bool have_body = lm->move_to_sibling();  // body stmts
   lm->move_to_parent();                          // back to while
 
+  // 2f-nil_diag — a condition that folds to nil is an illegal use of nil; a
+  // genuinely runtime condition folds to nullopt (not nil) and stays verbatim.
+  if (cval && !cval->is_invalid() && cval->is_nil()) {
+    report_cond_nil("while");
+    return;
+  }
+
   const bool cond_is_true_literal  = (cond_type == Lnast_ntype::Lnast_ntype_const && cond_text == "true");
   const bool cond_is_false_literal = (cond_type == Lnast_ntype::Lnast_ntype_const && cond_text == "false");
   const bool cond_folds_false
@@ -5668,6 +5675,23 @@ void uPass_runner::process_stmts() {
   symbol_table_.leave_scope();
 }
 
+void uPass_runner::report_cond_nil(std::string_view which) {
+  // Exempt unrealized template bodies: unbound params fold nil placeholders;
+  // the real error resurfaces when the body is realized at a call site.
+  if (lm->get_lnast() && lm->get_lnast()->is_template()) {
+    return;
+  }
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{
+      .severity = livehd::diag::Severity::error,
+      .code     = "nil-condition",
+      .category = "type",
+      .pass     = "upass.runner",
+      .message  = std::format("a nil value is used as the `{}` condition", which),
+      .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+      .hint     = "the condition folds to nil (a nil/uninitialized operand or an illegal operation)",
+  });
+}
+
 void uPass_runner::process_if() {
   // Dispatch first so passes can update their symbol tables from the condition.
   dispatch_to_passes(&upass::uPass::process_if);
@@ -5698,6 +5722,10 @@ void uPass_runner::process_if() {
         cval = *Dlop::from_pyrope(lm->current_text());
       } else {
         cval = try_fold_ref(lm->current_text());
+      }
+      // 2f-nil_diag — a nil condition is an illegal use of nil in a conditional.
+      if (cval && !cval->is_invalid() && cval->is_nil()) {
+        report_cond_nil("if");
       }
 
       // Peek at the body shape: if the second child is not `stmts`, this

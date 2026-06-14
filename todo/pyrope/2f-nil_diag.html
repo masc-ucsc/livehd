@@ -10,6 +10,21 @@
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
 <h1><strong class="item-id">2f-nil_diag</strong> illegal ops return <code>nil</code>, not abort; a <code>nil</code> in a constprop output is a diagnostic</h1>
+<p style="padding:.6em;background:#e6ffe6;border-left:4px solid #2a2"><strong>✅ LANDED 2026-06-14.</strong>
+  Per the user's rule: <em>any arithmetic op that produces a nil is a compile
+  error, and any conditional that uses a nil is a compile error — no
+  exceptions</em>. <code>uPass_constprop::report_arith_nil</code> reports a nil
+  result from the arithmetic ops (<code>+ - * / %</code>, via a
+  <code>report_nil</code> flag on the fold templates — comparisons / logical /
+  casts / bitwise nil-bit propagation legitimately yield nil and are NOT
+  flagged); <code>uPass_runner::report_cond_nil</code> reports a nil
+  <code>if</code>/<code>while</code> condition (<code>match</code> arms keep nil
+  as the legitimate "comptime can't decide" marker). Template bodies are exempt
+  (unbound-param nil placeholders). New error tests
+  <code>adv_nil_operation</code>, <code>adv_nil_cond_if</code>,
+  <code>adv_nil_cond_while</code>; the two <code>adv_div_by_zero*</code> tests
+  still pass; 473/473, no regressions. The <code>addn dest_sz&gt;=1</code> abort
+  no longer reproduces (the shared-io case folds cleanly now).</p>
 <p>Two halves of one mechanism, for reporting bad/illegal operations cleanly instead of
   crashing or silently folding garbage:</p>
 <ol>

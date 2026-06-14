@@ -1,0 +1,10 @@
+/*
+:name: adv_nil_cond_while
+:type: error
+:error: (nil|condition)
+*/
+// 2f-nil_diag — a nil value used as a `while` condition is illegal.
+const c = nil
+while c {         // locate_error_here
+  cputs("x")
+}
