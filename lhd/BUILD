@@ -45,13 +45,23 @@ cc_library(
 cc_binary(
     name = "lhd",
     srcs = ["lhd_main.cpp"],
+    additional_linker_inputs = ["lhd_export.lds"],
     copts = COPTS,
     data = [
         "//inou/yosys:scripts",
     ],
+    # `--export-dynamic` lets the dlopen'd yosys-slang plugin bind to the Yosys
+    # symbols in this binary; the version script then force-localizes lhd's own
+    # slang/fmt/boost so they do not interpose the plugin's incompatible
+    # embedded copies (see lhd_export.lds). macOS has no version-script flag and
+    # does not run the yosys-slang plugin path, so it is Linux-only.
     linkopts = select({
         "@platforms//os:macos": ["-lz"],
-        "//conditions:default": ["-Wl,--export-dynamic", "-lz"],
+        "//conditions:default": [
+            "-Wl,--export-dynamic",
+            "-lz",
+            "-Wl,--version-script=$(location lhd_export.lds)",
+        ],
     }),
     visibility = ["//visibility:public"],
     deps = [

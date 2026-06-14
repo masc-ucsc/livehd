@@ -219,8 +219,14 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
   const auto filelist_file{var.get("filelist_file")};
 
   const bool has_files = !files.empty() && files != "/INVALID";
-  if (!has_files && filelist_file.empty()) {
-    livehd::diag::err("inou.yosys", "bad-option", "io").msg("at least one of files or filelist_file must be provided").fatal();
+  // Sources can also ride in slang_flags (e.g. `lhd ... --reader yosys-slang --
+  // -F filelist.f`, where lhd forwards the raw `--` args as slang_flags into
+  // read_slang). Accept that as a valid source spec too.
+  const bool has_slang_flag_sources = !var.get("slang_flags").empty();
+  if (!has_files && filelist_file.empty() && !has_slang_flag_sources) {
+    livehd::diag::err("inou.yosys", "bad-option", "io")
+        .msg("at least one of files, filelist_file, or slang_flags sources must be provided")
+        .fatal();
     return;
   }
 

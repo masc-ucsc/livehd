@@ -1121,11 +1121,16 @@ std::string verilog_frontend(Options& opts, Result& res, Eprp_var& var) {
   std::string lib_path = d_out ? d_out->path : workdir(opts) + "/lgdb";
 
   Eprp_var::Eprp_dict labels{
-      {   "files",                                                           join_csv(opts.files)},
       {    "path",                                                                       lib_path},
       {     "top",                         opts.top.empty() ? std::string{"-auto-top"} : opts.top},
       {"frontend", opts.reader == "yosys-verilog" ? std::string{"verilog"} : std::string{"slang"}}
   };
+  // An empty `files` label is path-validated (and rejected) by Eprp_var::add, so
+  // only set it when there are positional sources; with `-- -F filelist.f` the
+  // sources ride in slang_flags instead.
+  if (!opts.files.empty()) {
+    labels["files"] = join_csv(opts.files);
+  }
   if (!opts.raw_args.empty()) {
     // Join with '\x1f' (ASCII unit separator) — a comma is lossy for shell
     // argv tokens like +incdir+a,b; inou_yosys_api splits on '\x1f' when seen.
@@ -1159,6 +1164,11 @@ void slang_parse(Options& opts, Result& res, Eprp_var& var) {
   // comma split path), so only set it when there are positional sources.
   if (!opts.files.empty()) {
     labels["files"] = join_csv(opts.files);
+  }
+  // Forward --top so inou.slang elaborates only that module's hierarchy (it
+  // otherwise auto-tops every uninstantiated module, e.g. a sim/difftest top).
+  if (!opts.top.empty() && opts.top != "-auto-top") {
+    labels["top"] = opts.top;
   }
   // Raw `--` args ride straight to the slang driver (e.g. `-F filelist.f` to
   // read a file list). Join with '\x1f' (ASCII unit separator) so shell argv
@@ -1565,10 +1575,11 @@ void elaborate_command(Options& opts, Result& res) {
   const auto* ln_out = find_slot(opts.emit_dirs, "ln");
   const auto* lg_out = find_slot(opts.emit_dirs, "lg");
 
-  // `--reader slang -- -F filelist.f` supplies the verilog sources through the
-  // raw slang args, so a verilog elaboration is valid with no positional file.
-  const bool slang_flag_sources = opts.reader == "slang" && !opts.raw_args.empty();
-  if (opts.language == "verilog" && (!opts.files.empty() || slang_flag_sources)) {
+  // `--reader <slang|yosys-slang|yosys-verilog> -- -F filelist.f` supplies the
+  // verilog sources through the raw slang args, so a verilog elaboration is
+  // valid with no positional file.
+  const bool raw_arg_sources = !opts.raw_args.empty();
+  if (opts.language == "verilog" && (!opts.files.empty() || raw_arg_sources)) {
     if (!ir.ln_dirs.empty() || !ir.lg_dirs.empty()) {
       throw Lhd_error{"usage", "verilog elaboration takes no ln:/lg: inputs", ""};
     }
@@ -2035,13 +2046,15 @@ void compile_command(Options& opts, Result& res) {
     graph_pipeline_and_emits(opts, res, var, lib_path);
   } else {
     setup_diag(opts, "compile.verilog");
-    // `--reader slang -- -F filelist.f` supplies the sources through the raw
-    // slang args, so the positional .v file may be omitted in that case.
-    const bool slang_flag_sources = opts.reader == "slang" && !opts.raw_args.empty();
-    if (opts.files.empty() && !slang_flag_sources) {
+    // `--reader <slang|yosys-slang|yosys-verilog> -- -F filelist.f` supplies the
+    // sources through the raw slang args, so the positional .v file may be
+    // omitted in that case. For the slang front-end the raw args ride to its own
+    // driver; for the yosys readers they ride to `read_slang`/`read_verilog`.
+    const bool raw_arg_sources = !opts.raw_args.empty();
+    if (opts.files.empty() && !raw_arg_sources) {
       throw Lhd_error{"usage",
                       "compile verilog requires at least one .v file",
-                      "or pass a slang file list: --reader slang -- -F filelist.f"};
+                      "or pass a slang file list: --reader slang|yosys-slang -- -F filelist.f"};
     }
     if (!ir.ln_dirs.empty() || !ir.lg_dirs.empty()) {
       throw Lhd_error{"usage", "compile verilog takes no ln:/lg: inputs", ""};

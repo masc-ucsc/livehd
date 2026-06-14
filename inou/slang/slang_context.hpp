@@ -81,6 +81,7 @@ private:
   absl::flat_hash_set<const slang::ast::Symbol*>              output_syms_;
   absl::flat_hash_set<const slang::ast::Symbol*>              reg_syms_;   // clocked state vars
   absl::flat_hash_set<const slang::ast::Symbol*>              mem_syms_;   // unpacked arrays lowered as memories
+  absl::flat_hash_set<const slang::ast::Symbol*>              mem_wensize_emitted_;  // memories whose wensize attr was emitted
   absl::flat_hash_set<const slang::ast::Symbol*>              declared_;   // declare stmt already emitted
   std::string                                                 genblk_prefix_;
   bool                                                        module_failed_ = false;
@@ -223,6 +224,14 @@ private:
   // base (caller then falls back to the unpacked/memory path or a diagnostic).
   bool resolve_packed_lvalue(const slang::ast::Expression& lhs, Packed_lv& out);
   void emit_packed_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr);
+
+  // `mem[addr][const-chunk] <= data`: a chunked masked memory write (the XS SRAM
+  // models' byte/chunk write-enable idiom). Lowers to a memory write port whose
+  // store carries the chunk index, so tolg sets the memory's `wensize` and a
+  // per-chunk write-enable (LEC-matching the yosys-slang $memwr WR_EN model).
+  // Returns false when lhs is not a constant-aligned bit-slice of a memory
+  // element (the caller then falls through to the existing diagnostic).
+  bool lower_mem_element_bitslice_write(const slang::ast::Expression& lhs, const std::string& rhs);
 
   // ── types + conversions (slang_types.cpp) ─────────────────────────────────
   struct Tinfo {

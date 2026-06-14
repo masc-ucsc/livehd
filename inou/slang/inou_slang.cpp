@@ -22,6 +22,7 @@ void Inou_slang::setup() {
   Eprp_method m1("inou.verilog", "System verilog to LNAST using slang", &Inou_slang::work);
 
   m1.add_label_optional("files", "input verilog files (optional when slang_flags supplies the sources, e.g. -F filelist.f)");
+  m1.add_label_optional("top", "elaborate only this top module's hierarchy (forwarded to slang as --top)");
   m1.add_label_optional("includes", "comma separated include paths (otherwise, verilog paths)");
   m1.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
   m1.add_label_optional("undefines", "comma separated undefines");
@@ -34,6 +35,7 @@ void Inou_slang::setup() {
 
   Eprp_method m2("inou.slang", "alias for inou.verilog (System verilog to LNAST using slang)", &Inou_slang::work);
   m2.add_label_optional("files", "input verilog files (optional when slang_flags supplies the sources, e.g. -F filelist.f)");
+  m2.add_label_optional("top", "elaborate only this top module's hierarchy (forwarded to slang as --top)");
   m2.add_label_optional("includes", "comma separated include paths (otherwise, verilog paths)");
   m2.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
   m2.add_label_optional("undefines", "comma separated undefines");
@@ -79,6 +81,20 @@ void Inou_slang::work(Eprp_var& var) {
   }
   if (!user_has("--ignore-unknown-modules")) {
     argv.push_back(strdup("--ignore-unknown-modules"));
+  }
+
+  // Forward lhd's `--top` so slang elaborates ONLY that module's hierarchy.
+  // Without it slang auto-tops EVERY uninstantiated module (e.g. a SimTop with
+  // difftest probes), wasting elaboration on -- and emitting reader errors for
+  // -- modules outside the design under test. Skip when the caller already
+  // passed an explicit `--top` in the raw slang args (slang's `--top` is
+  // repeatable, but honor the user's intent).
+  if (!user_has("--top") && var.has_label("top")) {
+    auto top = var.get("top");
+    if (!top.empty() && top != "-auto-top") {
+      argv.push_back(strdup("--top"));
+      argv.push_back(strdup(std::string(top).c_str()));
+    }
   }
 
   if (var.has_label("includes")) {

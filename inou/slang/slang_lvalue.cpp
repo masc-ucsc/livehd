@@ -115,6 +115,13 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
         return;
       }
 
+      // `mem[addr][const-chunk] <= data`: a chunked masked memory write (the
+      // base is a packed element of an unpacked array). Lowered via the memory
+      // write-enable-granularity (wensize) path before the packed-root attempt.
+      if (lower_mem_element_bitslice_write(lhs, rhs)) {
+        return;
+      }
+
       // Any chain of packed `.field` / `[idx]` / `[hi:lo]` collapses to one
       // contiguous bit-slice of a root variable (handles arbitrary nesting,
       // e.g. `bus[i].field`, `s.sub.arr[j]`).
@@ -227,6 +234,115 @@ void Slang_context::lower_unpacked_write(const slang::ast::Expression& lhs, cons
   ln.add_child(st, Lnast_node::create_ref(lname_of(*base_sym)));
   builder_.add_value_child_pub(st, idx);
   builder_.add_value_child_pub(st, val);
+}
+
+// `mem[addr][const-chunk] <= data` — a chunked masked memory write (the XS SRAM
+// byte/chunk write-enable idiom). A naive read-modify-write would be wrong here
+// (a synchronous read gives last cycle's word, and multiple disjoint partial
+// writes to one word would clobber each other). Instead lower it the way the
+// hardware means it and the way the yosys-slang reference does ($memwr WR_EN):
+// a memory write port whose enable is the per-chunk bit. The store carries the
+// chunk index as an extra child; tolg sets the memory `wensize` (= #chunks) and
+// the per-chunk enable. Disjoint chunks become independent write ports that the
+// wensize memory wrapper merges. Only constant chunk-aligned slices are handled.
+bool Slang_context::lower_mem_element_bitslice_write(const slang::ast::Expression& lhs, const std::string& rhs) {
+  using slang::ast::RangeSelectionKind;
+
+  // The slice base must be a single memory-element select: mem[addr].
+  const auto& base = lhs.kind == ExpressionKind::ElementSelect ? lhs.as<slang::ast::ElementSelectExpression>().value()
+                                                               : lhs.as<slang::ast::RangeSelectExpression>().value();
+  if (base.kind != ExpressionKind::ElementSelect) {
+    return false;
+  }
+  const auto& base_es = base.as<slang::ast::ElementSelectExpression>();
+  if (!base_es.value().type->getCanonicalType().isUnpackedArray()) {
+    return false;
+  }
+  const auto* mem_sym = resolve_base_symbol(base_es.value());
+  if (mem_sym == nullptr || flat_port_syms_.contains(mem_sym)) {
+    return false;  // flat-port arrays use the bit-slice path elsewhere
+  }
+  auto mit = mem_info_.find(mem_sym);
+  if (mit == mem_info_.end()) {
+    return false;
+  }
+  const auto& mi        = mit->second;
+  const int   word_bits = mi.elem_bits;
+
+  // The element word's type (e.g. `reg [3:0]`) gives the in-word bit indexing.
+  const auto& elem_ty = base.type->getCanonicalType();
+  if (!elem_ty.isIntegral() || !elem_ty.hasFixedRange()) {
+    return false;
+  }
+  auto          range = elem_ty.getFixedRange();
+  auto          ti    = tinfo(*lhs.type);
+  const int64_t width = ti.bits;
+
+  // Constant low bit of the slice within the word; a dynamic in-word offset
+  // returns false (the caller then diagnoses it as nested-lvalue).
+  std::optional<int64_t> lo_bit;
+  if (lhs.kind == ExpressionKind::ElementSelect) {
+    if (auto ci = try_eval_int(lhs.as<slang::ast::ElementSelectExpression>().selector())) {
+      lo_bit = range.isDescending() ? (*ci - range.lower()) : (range.upper() - *ci);
+    }
+  } else {
+    const auto& rs   = lhs.as<slang::ast::RangeSelectExpression>();
+    auto        kind = rs.getSelectionKind();
+    if (kind == RangeSelectionKind::Simple) {
+      auto l = try_eval_int(rs.left());
+      auto r = try_eval_int(rs.right());
+      if (l && r) {
+        lo_bit = range.isDescending() ? std::min(*l, *r) - range.lower() : range.upper() - std::max(*l, *r);
+      }
+    } else if (auto b = try_eval_int(rs.left())) {
+      if (kind == RangeSelectionKind::IndexedUp) {
+        lo_bit = range.isDescending() ? (*b - range.lower()) : (range.upper() - *b - (width - 1));
+      } else {  // IndexedDown
+        lo_bit = range.isDescending() ? (*b - range.lower() - (width - 1)) : (range.upper() - *b);
+      }
+    }
+  }
+  if (!lo_bit || *lo_bit < 0 || width <= 0 || *lo_bit + width > word_bits) {
+    return false;
+  }
+  // Uniform chunk granularity only (the SRAM WE model): the slice width must
+  // divide the word and the offset must be chunk-aligned.
+  if (word_bits % width != 0 || *lo_bit % width != 0) {
+    return false;
+  }
+  const int64_t wensize = word_bits / width;  // number of write-enable chunks
+  const int64_t chunk   = *lo_bit / width;    // which chunk this write targets
+
+  // Position the chunk data within the full word (the other chunks are
+  // don't-care — their write-enable bit is 0). din is the full element width.
+  auto        val = to_pattern(rhs, static_cast<int>(width), ti.is_signed);
+  std::string din = *lo_bit == 0 ? val : builder_.create_shl_stmts(val, std::to_string(*lo_bit));
+  din             = to_pattern(to_int_value(din), word_bits, false);
+
+  // Emit the per-memory wensize attr once (consumed by tolg's finalize_mems).
+  if (wensize > 1 && !mem_wensize_emitted_.contains(mem_sym)) {
+    mem_wensize_emitted_.insert(mem_sym);
+    auto& ln   = *builder_.lnast;
+    auto  aidx = builder_.add_child(Lnast_ntype::create_attr_set());
+    ln.add_child(aidx, Lnast_node::create_ref(lname_of(*mem_sym)));
+    ln.add_child(aidx, Lnast_node::create_const("wensize"));
+    ln.add_child(aidx, Lnast_node::create_const(std::to_string(wensize)));
+  }
+
+  // Memory write port: store(mem, addr, din, chunk). The extra chunk child
+  // (D+2 store children) marks a chunked write to tolg.
+  auto idx = to_int_value(lower_rvalue(base_es.selector()));
+  if (mi.lower != 0) {
+    idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
+  }
+  note_write(*mem_sym, current_assign_nonblocking_, lhs.sourceRange.start());
+  auto& ln = *builder_.lnast;
+  auto  st = builder_.add_child(Lnast_ntype::create_store());
+  ln.add_child(st, Lnast_node::create_ref(lname_of(*mem_sym)));
+  builder_.add_value_child_pub(st, idx);
+  builder_.add_value_child_pub(st, din);
+  builder_.add_value_child_pub(st, std::to_string(chunk));
+  return true;
 }
 
 // Unpacked-array PORT element access: the port is a FLAT packed bus, so

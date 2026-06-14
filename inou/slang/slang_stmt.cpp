@@ -382,8 +382,23 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
     locals.push_back(lv);
   }
   if (stmt.loopVars.empty()) {
-    // `for (i = 0; ...)` over an existing genvar-style variable
+    // `for (i = 0; ...)` over a variable declared OUTSIDE the for-header (e.g.
+    // a module-scope `integer i`, as the firtool-generated SRAM models use).
+    // slang doesn't list it in loopVars, and try_eval of `i = 0` fails until
+    // `i` is an EvalContext local — so bind the assigned variable here, seeded
+    // with the init value. The loop is unrolled, so the counter is comptime.
     for (const auto* ie : stmt.initializers) {
+      if (ie->kind == slang::ast::ExpressionKind::Assignment) {
+        const auto& assign = ie->as<slang::ast::AssignmentExpression>();
+        if (assign.left().kind == slang::ast::ExpressionKind::NamedValue) {
+          const auto& sym = assign.left().as<slang::ast::NamedValueExpression>().symbol;
+          if (auto cv = try_eval(assign.right())) {
+            eval_ctx_->createLocal(&sym, *cv);
+            locals.push_back(&sym);
+            continue;
+          }
+        }
+      }
       if (!try_eval(*ie)) {  // eval applies the assignment to a local
         emit_error(stmt.sourceRange, "non-const-loop-init", "comptime", "for-loop initializer must be compile-time constant");
         return;

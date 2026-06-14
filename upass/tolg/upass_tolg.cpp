@@ -1662,6 +1662,17 @@ private:
     for (auto c = lnast_->get_sibling_next(lhs); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       idxs.emplace_back(c);
     }
+    // Chunked masked write: store(mem, <idx…>, din, chunk_k) has dims+2
+    // children — the trailing const is the per-chunk write-enable index, so the
+    // enable becomes `path_cond << k` (the wensize byte/chunk-enable model; the
+    // memory's wensize is set from the reader's pending attr in finalize_mems).
+    int chunk = -1;
+    if (idxs.size() == mi.dims.size() + 2) {
+      if (auto cv = Dlop::from_pyrope(lnast_->get_name(idxs.back())); cv && cv->is_just_i64()) {
+        chunk = static_cast<int>(cv->to_just_i64());
+        idxs.pop_back();
+      }
+    }
     if (idxs.size() < 2) {
       error_here("upass.tolg: whole-array assignment to memory '{}' is not supported — write one entry at a time", lhs_name);
       return;
@@ -1693,6 +1704,9 @@ private:
     auto en = current_path_cond();
     if (en.is_invalid()) {
       en = en_const(true);
+    }
+    if (chunk >= 0) {
+      en = shl1_by(en, chunk);  // per-chunk write enable: bit `chunk` = path_cond
     }
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(en);  // enable
     mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
@@ -1853,6 +1867,24 @@ private:
               .connect_driver(create_const(*g_, *Dlop::create_integer(0)));  // rdport = 0 (write)
         }
       }
+      // Chunked masked writes (mem[addr][chunk]<=data) set a wensize > 1 via a
+      // pending attr from the reader; the declare provisionally drove wensize=1,
+      // so re-drive it here (after every write port is in place). wensize is the
+      // single config pin at port_id 8 (see graph/cell.cpp Memory pin names).
+      if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
+        if (auto wit = pit->second.find("wensize"); wit != pit->second.end()) {
+          if (auto wv = Dlop::from_pyrope(wit->second); wv && wv->is_just_i64() && wv->to_just_i64() > 1) {
+            for (const auto& e : mi.node.inp_edges()) {
+              if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == 8) {
+                e.del_edge();
+                break;
+              }
+            }
+            setup_sink_by_name(mi.node, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(wv->to_just_i64())));
+          }
+        }
+      }
+
       // A read-less (or access-less) memory is a WARNING at most — its state
       // can be observed by a scan chain, and a future remote regref may
       // attach reads/writes. `pub` (regref potential) silences it entirely.

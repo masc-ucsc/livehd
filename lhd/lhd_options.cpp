@@ -459,11 +459,12 @@ Options parse_args(int argc, char** argv) {
     }
   }
 
-  // `--reader slang` is a verilog front-end: when its sources ride the raw `--`
-  // args (e.g. `-- -F filelist.f`) instead of a positional .v file, there is no
-  // extension to infer from, so pin the language to verilog.
-  if ((opts.command == "elaborate" || opts.command == "compile") && opts.language.empty() && opts.reader == "slang"
-      && !opts.raw_args.empty()) {
+  // The verilog readers (`slang`, `yosys-slang`, `yosys-verilog`) can take their
+  // sources via the raw `--` args (e.g. `-- -F filelist.f`) instead of a
+  // positional .v file, in which case there is no extension to infer from, so
+  // pin the language to verilog.
+  if ((opts.command == "elaborate" || opts.command == "compile") && opts.language.empty() && !opts.raw_args.empty()
+      && (opts.reader == "slang" || opts.reader == "yosys-slang" || opts.reader == "yosys-verilog")) {
     opts.language = "verilog";
   }
 
