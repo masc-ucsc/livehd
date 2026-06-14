@@ -36,7 +36,10 @@ cc_library(
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
-    deps = ["//core"],
+    deps = [
+        "//core",
+        "//upass/core:range_bits_hdr",
+    ],
 )
 
 cc_test(

@@ -12,6 +12,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
 #include "hlop/dlop.hpp"
+#include "range_bits.hpp"
 #include "lnast_ntype.hpp"
 
 namespace {
@@ -368,13 +369,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
         // Re-emit the canonical prim_type_int(max,min) from the
         // flat field's (bits, signed).
         auto ty = staging->add_child(a, Lnast_ntype::create_prim_type_int());
-        if (f.is_signed) {
-          staging->add_child(ty, Lnast_node::create_const(std::string(Dlop::get_mask_value(f.bits - 1)->to_pyrope())));
-          staging->add_child(ty, Lnast_node::create_const(std::string(Dlop::get_neg_mask_value(f.bits - 1)->to_pyrope())));
-        } else {
-          staging->add_child(ty, Lnast_node::create_const(std::string(Dlop::get_mask_value(f.bits)->to_pyrope())));
-          staging->add_child(ty, Lnast_node::create_const("0"));
-        }
+        staging->add_child(ty, Lnast_node::create_const(std::string(upass::max_from_bits(f.bits, f.is_signed).to_pyrope())));
+        staging->add_child(ty, Lnast_node::create_const(std::string(upass::min_from_bits(f.bits, f.is_signed).to_pyrope())));
       }
       // Re-emit the trailing stages(min,max) annotation so the
       // post-SSA io tree keeps the pipe contract visible (the LN pipe upass

@@ -21,6 +21,7 @@
 #include <optional>
 
 #include "hlop/dlop.hpp"
+#include "range_bits.hpp"
 
 namespace upass::bitwidth {
 
@@ -54,7 +55,7 @@ inline Dlop saturate_unsigned(const Dlop& v, uint32_t n) {
     return v;
   }
   Dlop lo = *Dlop::create_integer(0);
-  Dlop hi = *Dlop::get_mask_value(n);
+  Dlop hi = upass::unsigned_max_from_bits(n);  // 2^n - 1
   if (v.is_negative()) {
     return lo;
   }
@@ -70,8 +71,8 @@ inline Dlop saturate_signed(const Dlop& v, uint32_t n) {
   if (n == 0 || v.is_invalid() || v.is_string() || v.has_unknowns() || v.is_nil()) {
     return v;
   }
-  Dlop hi = *Dlop::get_mask_value(n - 1);
-  Dlop lo = *Dlop::get_neg_mask_value(n - 1);
+  Dlop hi = upass::signed_max_from_bits(n);  // 2^(n-1) - 1  (0 for n==1)
+  Dlop lo = upass::signed_min_from_bits(n);  // -2^(n-1)     (-1 for n==1)
   if (v.sub_op(hi)->is_positive() && !v.same_repr(hi)) {
     return hi;
   }

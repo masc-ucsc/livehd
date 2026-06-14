@@ -12,6 +12,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "call_resolver.hpp"
 #include "decl_facts.hpp"
+#include "range_bits.hpp"
 #include "hlop/dlop.hpp"
 #include "lnast_ntype.hpp"
 #include "symbol_table.hpp"
@@ -381,6 +382,27 @@ protected:
     Dlop n1 = operand_value(src[0]);
     Dlop n2 = operand_value(src[1]);
     if (!is_numeric(n1) || !is_numeric(n2)) {
+      return upass::Vote::keep;
+    }
+    Dlop r = op(n1, n2);
+    if (!r.is_invalid()) {
+      store_trivial(dst, r);
+    }
+    return classify_vote();
+  }
+  // Like push_binary_passthrough but additionally refuses to fold a nil
+  // operand: ordering a nil (Type::Nil) walks payload-less bits in
+  // three_way_cmp and yields a garbage Less/Greater/Equal. Mirrors the nil
+  // guard process_sra already carries. (Bitwise and/or DO propagate nil bit-
+  // precisely, so they intentionally keep using push_binary_passthrough.)
+  template <typename F>
+  upass::Vote push_binary_compare(std::string_view dst, upass::Src_span src, F op) {
+    if (dst.empty() || src.size() < 2) {
+      return upass::Vote::keep;
+    }
+    Dlop n1 = operand_value(src[0]);
+    Dlop n2 = operand_value(src[1]);
+    if (!is_numeric(n1) || !is_numeric(n2) || n1.is_nil() || n2.is_nil()) {
       return upass::Vote::keep;
     }
     Dlop r = op(n1, n2);

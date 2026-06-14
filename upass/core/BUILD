@@ -14,10 +14,23 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        ":range_bits_hdr",
         "//core",
         "//lnast",
     ],
     alwayslink = True,
+)
+
+# Header-only: canonical (max,min)-from-bits reconstruction. Depends only on
+# hlop so lightweight consumers (e.g. the wrap_sat_hdr header) can pull it in
+# without linking the full upass/core plugin.
+cc_library(
+    name = "range_bits_hdr",
+    hdrs = ["range_bits.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = ["@hlop//hlop:hlop"],
 )
 
 cc_test(

@@ -1282,20 +1282,20 @@ upass::Vote uPass_constprop::process_eq(std::string_view dst_name, Bundle& dst, 
 
 upass::Vote uPass_constprop::process_lt(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_binary_passthrough(dst_name, src, [](Dlop x, Dlop y) -> Dlop { return *x.lt_op(y); });
+  return push_binary_compare(dst_name, src, [](Dlop x, Dlop y) -> Dlop { return *x.lt_op(y); });
 }
 upass::Vote uPass_constprop::process_le(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_binary_passthrough(dst_name, src, [](Dlop x, Dlop y) -> Dlop { return *x.le_op(y); });
+  return push_binary_compare(dst_name, src, [](Dlop x, Dlop y) -> Dlop { return *x.le_op(y); });
 }
 upass::Vote uPass_constprop::process_gt(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_binary_passthrough(dst_name, src, [](Dlop x, Dlop y) -> Dlop { return *x.gt_op(y); });
+  return push_binary_compare(dst_name, src, [](Dlop x, Dlop y) -> Dlop { return *x.gt_op(y); });
 }
 
 upass::Vote uPass_constprop::process_ge(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_binary_passthrough(dst_name, src, [](Dlop x, Dlop y) -> Dlop { return *x.ge_op(y); });
+  return push_binary_compare(dst_name, src, [](Dlop x, Dlop y) -> Dlop { return *x.ge_op(y); });
 }
 
 void uPass_constprop::process_if() {
@@ -1812,14 +1812,10 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::decode_prim_type_t
   if (name.size() >= 2 && (name[0] == 'u' || name[0] == 's' || name[0] == 'i')
       && std::all_of(name.begin() + 1, name.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
     const int n = std::stoi(std::string(name.substr(1)));
-    op.kind     = Does_operand::Kind::integer;
-    if (name[0] == 'u') {
-      op.min = *Dlop::create_integer(0);
-      op.max = *Dlop::get_mask_value(n);  // 2^n - 1
-    } else {
-      op.max = *Dlop::get_mask_value(n - 1);      // 2^(n-1) - 1
-      op.min = *Dlop::get_neg_mask_value(n - 1);  // -2^(n-1)
-    }
+    op.kind            = Does_operand::Kind::integer;
+    const bool sugar_s = (name[0] != 'u');
+    op.max             = upass::max_from_bits(static_cast<uint32_t>(n), sugar_s);
+    op.min             = upass::min_from_bits(static_cast<uint32_t>(n), sugar_s);
     return op;
   }
   return std::nullopt;
@@ -3305,13 +3301,8 @@ void uPass_constprop::process_func_call() {
       Bundle::Entry e = b->get_entry("0");
       e.immutable     = false;
       e.kind          = upass::Kind::integer;
-      if (sized_sig) {
-        e.decl_max = *Dlop::get_mask_value(static_cast<uint32_t>(sized_bits) - 1);
-        e.decl_min = *Dlop::get_neg_mask_value(static_cast<uint32_t>(sized_bits) - 1);
-      } else {
-        e.decl_max = *Dlop::get_mask_value(static_cast<uint32_t>(sized_bits));
-        e.decl_min = *Dlop::create_integer(0);
-      }
+      e.decl_max      = upass::max_from_bits(static_cast<uint32_t>(sized_bits), sized_sig);
+      e.decl_min      = upass::min_from_bits(static_cast<uint32_t>(sized_bits), sized_sig);
       b->set("0", std::move(e));
     }
   }

@@ -28,6 +28,7 @@
 #include <string_view>
 
 #include "hlop/dlop.hpp"
+#include "range_bits.hpp"
 #include "upass_attributes.hpp"
 #include "upass_utils.hpp"
 #include "wrap_sat.hpp"  // narrowing math now lives in //upass/bitwidth (T2 #7)
@@ -62,10 +63,8 @@ Dlop uPass_attributes::narrow_for_lhs(std::string_view type_src, const Dlop& v, 
   // falls back to the bits-envelope so a half-open int still narrows. (`wrap`
   // stays bits-based: two's-complement modulo is independent of declared bounds.)
   if (ti->range_max || ti->range_min) {
-    Dlop lo = ti->range_min ? *ti->range_min
-                            : (is_signed ? *Dlop::get_neg_mask_value(ti->bits - 1) : *Dlop::create_integer(0));
-    Dlop hi = ti->range_max ? *ti->range_max
-                            : (is_signed ? *Dlop::get_mask_value(ti->bits - 1) : *Dlop::get_mask_value(ti->bits));
+    Dlop lo = ti->range_min ? *ti->range_min : upass::min_from_bits(ti->bits, is_signed);
+    Dlop hi = ti->range_max ? *ti->range_max : upass::max_from_bits(ti->bits, is_signed);
     return upass::bitwidth::saturate_to_range(v, lo, hi);
   }
   return is_signed ? saturate_signed(v, ti->bits) : saturate_unsigned(v, ti->bits);

@@ -63,6 +63,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "call_resolver.hpp"
 #include "decl_facts.hpp"
+#include "range_bits.hpp"
 #include "diag.hpp"
 
 namespace {
@@ -1409,18 +1410,12 @@ void uPass_runner::emit_inline_typespec(const std::string& name, int bits, bool 
   auto root = s->set_root(Lnast_ntype::create_type_spec());
   stamp_scratch_srcid(s, root);
   s->add_child(root, Lnast_node::create_ref(name));
-  // Emit the canonical prim_type_int(max,min) from (bits, signed).
-  auto pt = s->add_child(root, Lnast_ntype::create_prim_type_int());
-  if (bits > 0 && is_signed) {
-    s->add_child(pt, Lnast_node::create_const(std::string(Dlop::get_mask_value(static_cast<int>(bits) - 1)->to_pyrope())));
-    s->add_child(pt, Lnast_node::create_const(std::string(Dlop::get_neg_mask_value(static_cast<int>(bits) - 1)->to_pyrope())));
-  } else if (bits > 0) {
-    s->add_child(pt, Lnast_node::create_const(std::string(Dlop::get_mask_value(static_cast<int>(bits))->to_pyrope())));
-    s->add_child(pt, Lnast_node::create_const("0"));
-  } else {
-    s->add_child(pt, Lnast_node::create_const("nil"));
-    s->add_child(pt, Lnast_node::create_const("nil"));
-  }
+  // Emit the canonical prim_type_int(max,min) from (bits, signed). bits>0 here
+  // (early return above), so just split on signedness via the shared helpers.
+  auto       pt = s->add_child(root, Lnast_ntype::create_prim_type_int());
+  const auto ub = static_cast<uint32_t>(bits);
+  s->add_child(pt, Lnast_node::create_const(std::string(upass::max_from_bits(ub, is_signed).to_pyrope())));
+  s->add_child(pt, Lnast_node::create_const(std::string(upass::min_from_bits(ub, is_signed).to_pyrope())));
   flush_deferred_emits();
   lm->push_source(s, "", 0);
   process_lnast();  // cursor at type_spec root → C_OP(type_spec): dispatch + emit
@@ -2958,13 +2953,8 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
         cand.min  = *Dlop::from_pyrope("0");
       } else if (ci != nullptr && ci->bits > 0) {
         cand.kind = Io_kind::integer;
-        if (ci->is_signed) {
-          cand.max = *Dlop::get_mask_value(ci->bits - 1);
-          cand.min = *Dlop::get_neg_mask_value(ci->bits - 1);
-        } else {
-          cand.max = *Dlop::get_mask_value(ci->bits);
-          cand.min = *Dlop::from_pyrope("0");
-        }
+        cand.max  = upass::max_from_bits(ci->bits, ci->is_signed);
+        cand.min  = upass::min_from_bits(ci->bits, ci->is_signed);
       } else if (try_scalar_kind(an) == Io_kind::boolean) {
         cand.kind = Io_kind::boolean;
         cand.max  = *Dlop::from_pyrope("1");
@@ -3051,10 +3041,10 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
         sp = {true, *Dlop::from_pyrope("1"), *Dlop::from_pyrope("0"), {}};
         suffix.emplace_back("bool");
       } else if (ci->is_signed) {
-        sp = {true, *Dlop::get_mask_value(ci->bits - 1), *Dlop::get_neg_mask_value(ci->bits - 1), {}};
+        sp = {true, upass::signed_max_from_bits(ci->bits), upass::signed_min_from_bits(ci->bits), {}};
         suffix.push_back("s" + std::to_string(ci->bits));
       } else {
-        sp = {true, *Dlop::get_mask_value(ci->bits), *Dlop::from_pyrope("0"), {}};
+        sp = {true, upass::unsigned_max_from_bits(ci->bits), *Dlop::from_pyrope("0"), {}};
         suffix.push_back("u" + std::to_string(ci->bits));
       }
     } else if (try_scalar_kind(an) == Io_kind::boolean) {
@@ -4234,14 +4224,9 @@ void uPass_runner::unroll_for() {
               continue;
             }
             upass::uPass::Decl_scalar_type dt;
-            if (ie.is_signed) {
-              dt.range_max = *Dlop::get_mask_value(ie.bits - 1);
-              dt.range_min = *Dlop::get_neg_mask_value(ie.bits - 1);
-            } else {
-              dt.range_max = *Dlop::get_mask_value(ie.bits);
-              dt.range_min = *Dlop::from_pyrope("0");
-            }
-            elem_dt = dt;
+            dt.range_max = upass::max_from_bits(ie.bits, ie.is_signed);
+            dt.range_min = upass::min_from_bits(ie.bits, ie.is_signed);
+            elem_dt      = dt;
             break;
           }
         }

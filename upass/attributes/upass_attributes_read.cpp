@@ -27,6 +27,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "hlop/dlop.hpp"
+#include "range_bits.hpp"
 #include "decl_facts.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
@@ -42,28 +43,13 @@ bool is_uppercase_ident(std::string_view name) {
   return std::isupper(static_cast<unsigned char>(name.front())) != 0;
 }
 
-// max/min for an unsigned type with `n` bits. n==0 means "unbounded" — the
-// caller should treat that as "no derivation possible".
-Dlop max_unsigned(uint32_t n) {
-  if (n == 0) {
-    return *Dlop::create_integer(0);
-  }
-  return *Dlop::get_mask_value(n);
-}
-
-Dlop max_signed(uint32_t n) {
-  if (n == 0) {
-    return *Dlop::create_integer(0);
-  }
-  return *Dlop::get_mask_value(n - 1);
-}
-
-Dlop min_signed(uint32_t n) {
-  if (n == 0) {
-    return *Dlop::create_integer(0);
-  }
-  return *Dlop::get_neg_mask_value(n - 1);
-}
+// max/min for an `n`-bit type. n==0 means "unbounded" — the caller treats the
+// returned 0 as "no derivation possible". These delegate to the canonical
+// upass::*_from_bits helpers (range_bits.hpp) so the n<=1 signed edge is handled
+// in one place.
+Dlop max_unsigned(uint32_t n) { return upass::unsigned_max_from_bits(n); }
+Dlop max_signed(uint32_t n) { return upass::signed_max_from_bits(n); }
+Dlop min_signed(uint32_t n) { return upass::signed_min_from_bits(n); }
 
 }  // namespace
 
