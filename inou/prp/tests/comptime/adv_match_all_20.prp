@@ -5,7 +5,8 @@
 :verifier_fail: 0
 */
 
-// statement-form match assigning two outputs; exactly-one-branch over all kinds
+// statement-form match assigning two outputs; exactly-one-branch over all kinds.
+// Two outputs MUST destructure by name; remap to distinct names per call site.
 comb f(v) -> (lo, hi) {
   match v {
     == 0     { lo = 1 ; hi = 10 }
@@ -16,14 +17,14 @@ comb f(v) -> (lo, hi) {
   }
 }
 
-const a = f(v=0)
-const b = f(v=2)
-const c = f(v=4)
-const d = f(v=100)
-const e = f(v=50)
+const (a_lo = f.lo, a_hi = f.hi) = f(v=0)
+const (b_lo = f.lo, b_hi = f.hi) = f(v=2)
+const (c_lo = f.lo, c_hi = f.hi) = f(v=4)
+const (d_lo = f.lo, d_hi = f.hi) = f(v=100)
+const (e_lo = f.lo, e_hi = f.hi) = f(v=50)
 
-cassert(a.lo == 1 and a.hi == 10)
-cassert(b.lo == 2 and b.hi == 20)
-cassert(c.lo == 3 and c.hi == 30)
-cassert(d.lo == 4 and d.hi == 40)
-cassert(e.lo == 5 and e.hi == 50)
+cassert(a_lo == 1 and a_hi == 10)
+cassert(b_lo == 2 and b_hi == 20)
+cassert(c_lo == 3 and c_hi == 30)
+cassert(d_lo == 4 and d_hi == 40)
+cassert(e_lo == 5 and e_hi == 50)

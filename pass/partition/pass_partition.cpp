@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <format>
+#include <functional>
 #include <print>
 #include <string>
 #include <utility>
@@ -314,6 +315,22 @@ bool Partitioner::collect() {
 }
 
 void Partitioner::name_ports() {
+  // A boundary port becomes a wire in the region module; it must not collide
+  // with a recreated internal node's name. The classic failure is a flop whose
+  // q is a region output: the port would otherwise take the flop's own
+  // wire_name and cgen would emit two same-named declarations (the output reg
+  // and the internal flop reg) at different widths. Reserve every internal
+  // recreated-node name per region so port naming routes around them.
+  absl::flat_hash_map<hhds::Node_class, absl::flat_hash_set<std::string>> internal_names;
+  for (auto& [r, nodes] : region_nodes_) {
+    auto& set = internal_names[r];
+    for (const auto& n : nodes) {
+      if (gu::has_name(n)) {
+        set.insert(sanitize(std::string{gu::node_name_of(n)}));
+      }
+    }
+  }
+
   for (auto& [r, ports] : module_inputs_) {
     std::sort(ports.begin(), ports.end(), [](const InputPort& a, const InputPort& b) {
       if (a.driver.get_debug_nid() != b.driver.get_debug_nid()) {
@@ -324,7 +341,7 @@ void Partitioner::name_ports() {
     // re-index after sort
     auto& idx = in_index_[r];
     idx.clear();
-    absl::flat_hash_set<std::string> used;
+    absl::flat_hash_set<std::string> used = internal_names[r];
     for (size_t i = 0; i < ports.size(); ++i) {
       ports[i].name = [&] {
         std::string base = ports[i].from_primary && !ports[i].primary_name.empty() ? ports[i].primary_name
@@ -351,11 +368,21 @@ void Partitioner::name_ports() {
   }
   out_index_.clear();  // rebuilt below after the sort settles indices
   for (auto& [r, ports] : module_outputs_) {
-    absl::flat_hash_set<std::string> used;
+    absl::flat_hash_set<std::string> used = internal_names[r];
     for (size_t i = 0; i < ports.size(); ++i) {
       std::string base = sanitize(std::string{gu::wire_name(ports[i].driver)});
       if (base.empty()) {
         base = "out";
+      }
+      // A region output driven by a stateful node (flop/memory) shares that
+      // node's emitted reg wire name. cgen declares the output reg (from the IO
+      // decl) AND the node's own reg under that one name, at mismatched
+      // width/sign -> broken Verilog (it also skips the port=node assign when
+      // the names match). Give the port a distinct name so cgen emits a clean
+      // `port = node` assign, exactly like a normal module's flop-driven output.
+      auto dop = gu::type_op_of(ports[i].driver.get_master_node());
+      if (dop == Ntype_op::Flop || dop == Ntype_op::Memory) {
+        base += "_o";
       }
       std::string nm = base;
       int         k  = 1;
@@ -405,8 +432,28 @@ void Partitioner::build_module(const hhds::Node_class& r) {
   // Recreate region nodes.
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class> node_map;
   for (const auto& n : region_nodes_[r]) {
-    auto neo     = gu::create_typed_node(*body, gu::type_op_of(n));
-    node_map[n]  = neo;
+    auto op  = gu::type_op_of(n);
+    auto neo = gu::create_typed_node(*body, op);
+    if (op == Ntype_op::Sub) {
+      // Hierarchical input: re-link the instance to the partitioned child def
+      // in the output library. Children are partitioned before their parents,
+      // so the same-named def already exists in outlib_. Without this the Sub
+      // is left dangling (its body wires float) and the child def is lost.
+      if (auto child = n.get_subnode_io()) {
+        auto out_child = outlib_->find_io(child->get_name());
+        if (out_child) {
+          neo.set_subnode(out_child);
+        } else {
+          livehd::diag::err("pass.partition", "missing-subdef", "unsupported")
+              .msg("sub-instance '{}' in '{}' references child def '{}' missing from the output library",
+                   gu::debug_name(n),
+                   top_,
+                   std::string{child->get_name()})
+              .fatal();
+        }
+      }
+    }
+    node_map[n] = neo;
     carry_node_attrs(body.get(), n, neo);
   }
 
@@ -626,15 +673,19 @@ void Pass_partition::partition(Eprp_var& var) {
   auto out = std::string{var.get("out", "")};
   bool dbg = var.get("debug_color", "false") != "false" && var.get("debug_color", "false") != "0";
 
-  // Resolve the top graph.
-  hhds::Graph* g = nullptr;
+  // Resolve the top graph and index the loaded library by gid.
+  hhds::Graph*                                 g = nullptr;
+  absl::flat_hash_map<hhds::Gid, hhds::Graph*> gid2graph;
   for (const auto& sp : var.graphs) {
-    if (sp && (top.empty() || sp->get_name() == top)) {
+    if (!sp) {
+      continue;
+    }
+    gid2graph[sp->get_gid()] = sp.get();
+    if (g == nullptr && (top.empty() || sp->get_name() == top)) {
       g = sp.get();
       if (top.empty()) {
         top = std::string{sp->get_name()};
       }
-      break;
     }
   }
   if (g == nullptr) {
@@ -642,14 +693,40 @@ void Pass_partition::partition(Eprp_var& var) {
     return;
   }
 
+  // Reachable defs in children-before-parents (post-order) order, so each
+  // parent's Sub instances can re-link to an already-partitioned child def in
+  // the output library. A flat single-module top yields just itself.
+  std::vector<hhds::Graph*>          order;
+  absl::flat_hash_set<hhds::Gid>     seen;
+  std::function<void(hhds::Graph*)>  dfs = [&](hhds::Graph* gg) {
+    if (gg == nullptr || !seen.insert(gg->get_gid()).second) {
+      return;
+    }
+    for (auto n : gg->forward_class()) {
+      if (gu::is_type_sub(n)) {
+        auto it = gid2graph.find(n.get_subnode_gid());
+        if (it != gid2graph.end()) {
+          dfs(it->second);
+        }
+      }
+    }
+    order.push_back(gg);
+  };
+  dfs(g);
+
   if (out.empty()) {
-    // Stats-only mode: count colors/regions/ports without building an output library.
-    Partitioner p(g, nullptr, top, dbg);
-    p.report_stats();
+    // Stats-only mode: count colors/regions/ports per reachable def without
+    // building an output library.
+    for (auto* def : order) {
+      Partitioner p(def, nullptr, std::string{def->get_name()}, dbg);
+      p.report_stats();
+    }
     return;
   }
 
   auto& outlib = livehd::Hhds_graph_library::instance(out);
-  Partitioner p(g, &outlib, top, dbg);
-  p.run();
+  for (auto* def : order) {
+    Partitioner p(def, &outlib, std::string{def->get_name()}, dbg);
+    p.run();
+  }
 }

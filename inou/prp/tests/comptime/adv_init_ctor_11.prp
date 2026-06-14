@@ -6,10 +6,9 @@
 */
 
 // init that takes a single array-typed param and loops (comptime unrolled) to
-// accumulate. A 2-element array works; a 4-element array does not.
-// SUSPECTED BUG: the construction tuple passed to init's single [4]int param
-// arrives with the wrong size/contents (a plain top-level loop over the same
-// literal sums correctly).
+// accumulate. The construction tuple binds WHOLE to init's single `[4]int`
+// param: try_init_construction tries the whole-tuple single-arg form before
+// exploding the tuple into N positional args.
 
 type Accum = (
   mut total:int = nil,

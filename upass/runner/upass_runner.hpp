@@ -565,6 +565,12 @@ protected:
   // Inlinable callees whose body uses positional placeholders (_0/_1/_); the
   // prologue binds those aliases for these only.
   absl::flat_hash_set<std::string>              placeholder_callees_;
+  // Result tmps of an inlined call that returned >1 LOGICAL output. Binding one
+  // of these WHOLE to a single user variable (`const inner = two_output_f()`) is
+  // an error — multiple outputs must be destructured (`const (o1,o2) = f()`).
+  // A destructure consumes the tmp via tuple_gets, never a whole store, so it is
+  // not flagged. (06-functions.md "Binding return values".)
+  absl::flat_hash_set<std::string>              multi_output_results_;
   // Higher-order / closure support: maps a function-valued param's RAW name
   // (as read in the callee body, e.g. `f` in `r = f(x)`) to the registry
   // function it is bound to at this call site (e.g. `step_up`). Saved/restored

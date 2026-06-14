@@ -9,7 +9,8 @@
 // must skip the `b:bool` overload and bind init_from_int. Per docs
 // (07b-structtype.md coercion polymorphism + 06-functions overload rules),
 // the bool overload's `b:bool` param rejects an int, so `= 99` -> init_from_int.
-// SUSPECTED BUG: the int actual is mis-dispatched to the bool overload.
+// Dispatch runs the per-arg kind/range fit (select_init_overload delegates to
+// signature_matches), so the int skips the `b:bool` overload.
 
 comb init_from_bool(ref self, b:bool) {
   self.tag = 1

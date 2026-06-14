@@ -6,6 +6,7 @@
 */
 
 // Conditional early return via bare `return`; outputs keep prior assignment.
+// Two outputs MUST destructure by name; remap to distinct names per call site.
 comb safe_div(x, y) -> (q, ok) {
   q = 0
   ok = false
@@ -14,14 +15,14 @@ comb safe_div(x, y) -> (q, ok) {
   ok = true
 }
 
-const a = safe_div(x=20, y=4)
-cassert(a.q == 5)
-cassert(a.ok == true)
+const (a_q = safe_div.q, a_ok = safe_div.ok) = safe_div(x=20, y=4)
+cassert(a_q == 5)
+cassert(a_ok == true)
 
-const b = safe_div(x=20, y=0)
-cassert(b.q == 0)
-cassert(b.ok == false)
+const (b_q = safe_div.q, b_ok = safe_div.ok) = safe_div(x=20, y=0)
+cassert(b_q == 0)
+cassert(b_ok == false)
 
-// Destructure the early-return case.
+// Destructure the early-return case by the output names directly.
 const (q, ok) = safe_div(x=99, y=0)
 cassert(q == 0 and ok == false)

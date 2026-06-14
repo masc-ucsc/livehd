@@ -1308,7 +1308,17 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
     }
     bool all_outputs_written = true;
     for (const auto& o : io.outputs) {
-      if (!defined.contains(o.name)) {
+      // A tuple-typed output is flattened to leaves `p.first`/`p.second`, but the
+      // body writes the LOGICAL output `p` (as a tuple). Accept the leaf OR its
+      // top-level (pre-dot) prefix — but only when the leaf IS dotted (a genuine
+      // flattened tuple output), so a plain scalar output keeps the strict check.
+      bool ok = defined.contains(o.name);
+      if (!ok) {
+        if (const auto dp = o.name.find('.'); dp != std::string::npos) {
+          ok = defined.contains(o.name.substr(0, dp));
+        }
+      }
+      if (!ok) {
         all_outputs_written = false;
         break;
       }
@@ -2429,15 +2439,52 @@ bool uPass_runner::try_inline_func_call() {
     }
     return Lnast_node::create_ref(raw);
   };
-  if (io.outputs.empty()) {
+  // Regroup FLATTENED output leaves back into LOGICAL outputs. A tuple-typed
+  // output `p:(first,second)` is flattened in io_meta to leaves `p.first`,
+  // `p.second` (just like a tuple param); they must be regrouped by their
+  // top-level (pre-dot) prefix so a SINGLE logical output binds correctly:
+  //   - one scalar output       → dst = value          (name dropped)
+  //   - one TUPLE output         → dst = (sub=val, …)    (name dropped; dst IS the tuple)
+  //   - N logical outputs        → dst = (lname=…, …)    (splat, picked by destructure)
+  // (2f-arg_naming_tuple: the symmetric of the call-arg tuple regroup.)
+  std::vector<std::string>                                                 logical_order;
+  absl::flat_hash_map<std::string, std::vector<std::pair<std::string, Lnast_node>>> logical;
+  for (const auto& o : io.outputs) {
+    const auto  dp    = o.name.find('.');
+    std::string lname = dp == std::string::npos ? o.name : o.name.substr(0, dp);
+    std::string sub   = dp == std::string::npos ? std::string{} : o.name.substr(dp + 1);
+    if (!logical.contains(lname)) {
+      logical_order.push_back(lname);
+    }
+    logical[lname].emplace_back(std::move(sub), output_ref(o));
+  }
+  if (logical_order.empty()) {
     // Void comb (e.g. `top()` called for its casserts) — nothing to bind back.
-  } else if (io.outputs.size() == 1) {
-    emit_inline_binding(dst_name, output_ref(io.outputs[0]));
+  } else if (logical_order.size() == 1) {
+    auto& leaves = logical[logical_order[0]];
+    if (leaves.size() == 1 && leaves[0].first.empty()) {
+      emit_inline_binding(dst_name, leaves[0].second);  // single scalar output
+    } else {
+      emit_inline_tuple(dst_name, leaves);  // single TUPLE output → dst IS the tuple
+    }
   } else {
+    // >1 logical outputs: splat as a bundle for a destructure to field-pick, and
+    // record the result tmp so a WHOLE bind to a single user var is rejected
+    // (`const inner = two_output_f()` — see the store handler).
+    multi_output_results_.insert(dst_name);
     std::vector<std::pair<std::string, Lnast_node>> fields;
-    fields.reserve(io.outputs.size());
-    for (const auto& o : io.outputs) {
-      fields.emplace_back(o.name, output_ref(o));
+    fields.reserve(logical_order.size());
+    for (const auto& lname : logical_order) {
+      auto& leaves = logical[lname];
+      if (leaves.size() == 1 && leaves[0].first.empty()) {
+        fields.emplace_back(lname, leaves[0].second);  // scalar logical output
+      } else {
+        // A tuple-typed output among several: keep its dotted leaves so the
+        // destructure / `.lname.sub` read still resolves (rare; one level).
+        for (auto& [sub, ref] : leaves) {
+          fields.emplace_back(lname + "." + sub, ref);
+        }
+      }
     }
     emit_inline_tuple(dst_name, fields);
   }
@@ -3696,8 +3743,10 @@ std::vector<std::string> uPass_runner::init_candidates_of(std::string_view tn) {
 
 std::string uPass_runner::select_init_overload(const std::vector<std::string>& candidates, const std::vector<Ctor_arg>& args) {
   // Tuple-order priority (07b-structtype.md "Lambda overloading"): first
-  // candidate whose non-self formals fit the args wins. Arity for
-  // positional; full key-coverage for named.
+  // candidate whose non-self formals fit the args wins. Delegates to
+  // signature_matches (is_ctor_call=true) so per-arg KIND/RANGE fit — not just
+  // arity — decides, letting `init(99)` skip a `b:bool` overload instead of
+  // binding the first arity-compatible candidate.
   for (const auto& fn : candidates) {
     auto callee = lookup_callee(fn);
     if (!callee) {
@@ -3707,28 +3756,16 @@ std::string uPass_runner::select_init_overload(const std::vector<std::string>& c
     if (cio.inputs.empty() || cio.inputs[0].name != "self") {
       continue;  // init must be a method (ref self first)
     }
-    const std::size_t formal = cio.inputs.size() - 1;
-    if (args.size() != formal) {
-      continue;
-    }
-    bool names_ok = true;
+    // Build actuals for the probe: a self placeholder (binds slot 0
+    // positionally — signature_matches skips it in the kind check, so any
+    // non-invalid node serves) followed by the constructor args in tuple order.
+    std::vector<Actual> actuals;
+    actuals.reserve(args.size() + 1);
+    actuals.push_back(Actual{.is_named = false, .is_ref_pass = false, .key = {}, .node = Lnast_node::create_const("0")});
     for (const auto& a : args) {
-      if (a.key.empty()) {
-        continue;
-      }
-      bool found = false;
-      for (std::size_t i = 1; i < cio.inputs.size(); ++i) {
-        if (cio.inputs[i].name == a.key) {
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        names_ok = false;
-        break;
-      }
+      actuals.push_back(Actual{.is_named = !a.key.empty(), .is_ref_pass = false, .key = a.key, .node = a.node});
     }
-    if (names_ok) {
+    if (signature_matches(cio, actuals, /*is_ctor_call=*/true)) {
       return fn;
     }
   }
@@ -3812,6 +3849,15 @@ bool uPass_runner::try_init_construction() {
   if (x.find('.') != std::string::npos || prp_is_tmp_name(x)) {
     return false;
   }
+  // An inline anonymous tuple type (`mut x:(field:u32, comb init...) = 0`) lowers
+  // to a `store(x, <type-bundle>)` — binding x to the type's default shape, which
+  // carries the `init` field — that PRECEDES the real `= value` construction
+  // store. This shape-binding store must bind structurally and must NOT consume
+  // the pending-ctor flag: the construction runs on the NEXT store, where x now
+  // holds the inline type's `init`. (2f-init_dispatch.)
+  if (pending_ctor_store_.contains(x) && v_is_ref && !init_candidates_of(v_text).empty()) {
+    return false;
+  }
   if (!pending_ctor_store_.erase(x)) {
     return false;  // re-assignment, not the declaration initializer
   }
@@ -3846,7 +3892,14 @@ bool uPass_runner::try_init_construction() {
     throw std::runtime_error(msg);
   }
 
-  const auto candidates = init_candidates_of(tn);
+  auto candidates = init_candidates_of(tn);
+  if (candidates.empty() && tn.empty()) {
+    // Inline anonymous tuple type (`mut x:(field:u32, comb init...) = 0`): the
+    // type bundle — including its `init` field — was already bound to x by the
+    // type-spec store, but it carries no `typename` attr, so try_typename is
+    // empty. Look for `init` directly on x's own bundle. (2f-init_dispatch.)
+    candidates = init_candidates_of(x);
+  }
   if (candidates.empty()) {
     return false;
   }
@@ -3862,6 +3915,16 @@ bool uPass_runner::try_init_construction() {
   } else if (auto fv = try_fold_ref(v_text); fv && !fv->is_invalid()) {
     args.push_back(Ctor_arg{.key = {}, .node = Lnast_node::create_const(fv->to_pyrope())});
   } else if (auto vb = try_bundle_fields(v_text); vb && !vb->empty()) {
+    // The construction value is a tuple. An init taking a SINGLE array/tuple
+    // param (`init(ref self, data:[4]int)`) must receive the WHOLE tuple, not N
+    // exploded positional args. Try the whole-tuple single-arg form first; fall
+    // back to the exploded multi-arg form (the `(a="x", b=0)` multi-param ctor)
+    // only when no overload accepts the single tuple.
+    std::vector<Ctor_arg> whole{Ctor_arg{.key = {}, .node = Lnast_node::create_ref(v_text)}};
+    if (const auto chosen_whole = select_init_overload(candidates, whole); !chosen_whole.empty()) {
+      splice_init_call(x, tn, chosen_whole, whole);
+      return true;
+    }
     for (const auto& [key, val] : *vb) {
       if (key.find('.') != std::string::npos || val.is_invalid()) {
         return false;  // nested / non-comptime field — structural fallback
@@ -4872,11 +4935,30 @@ void uPass_runner::process_lnast() {
           if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
             self_dst = lm->current_text();
           }
-          bool is_self = false;
+          bool        is_self = false;
+          std::string rhs_name;
+          bool        rhs_is_ref = false;
           if (!self_dst.empty() && lm->move_to_sibling() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
-            is_self = lm->current_text() == self_dst;
+            rhs_name   = lm->current_text();
+            rhs_is_ref = true;
+            is_self    = rhs_name == self_dst;
           }
           lm->restore_cursor(here);
+          // Multiple outputs bound WHOLE to one user variable must be
+          // destructured. The result tmp of a >1-output call is recorded by the
+          // epilogue; a destructure picks fields (tuple_get) and never reaches
+          // here, so only the single-variable bind trips this.
+          if (rhs_is_ref && !Lnast::is_tmp(self_dst) && multi_output_results_.contains(rhs_name)) {
+            livehd::diag::sink().emit(livehd::diag::Diagnostic{
+                .severity = livehd::diag::Severity::error,
+                .code     = "multi-output-one-var",
+                .category = "type",
+                .pass     = "upass.runner",
+                .message  = std::format("a call returning multiple outputs cannot bind to the single variable `{}`", self_dst),
+                .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+                .hint     = "destructure into the output names, e.g. `const (o1, o2) = f(...)` (or remap `(x=f.o1, …)`)",
+            });
+          }
           if (is_self) {
             livehd::diag::sink().emit(livehd::diag::Diagnostic{
                 .severity = livehd::diag::Severity::error,

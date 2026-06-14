@@ -87,6 +87,16 @@ sh_test(
     data = _FLOW_DATA + ["part_flat.v"],
 )
 
+# 2c-color / 2p hierarchical-input (prerequisite for 2a-abc): color + partition
+# descend a multi-module Pyrope hierarchy (combinational + sequential fixtures),
+# re-link Sub instances, and the partitioned design stays LEC-equivalent.
+sh_test(
+    name = "lhd_partition_hier_test",
+    size = "large",
+    srcs = ["lhd_partition_hier_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:hier_tests"],
+)
+
 # 2c-color: every coloring algorithm (acyclic|synth|path|mincut) + continuous +
 # clear run through the lhd CLI on a real design.
 sh_test(

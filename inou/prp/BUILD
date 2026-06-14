@@ -17,6 +17,17 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# Hierarchical Pyrope fixtures shared by the color / partition / abc pass tests
+# (a combinational and a sequential multi-level design).
+filegroup(
+    name = "hier_tests",
+    srcs = [
+        "tests/pyrope/hier_comb.prp",
+        "tests/pyrope/hier_seq.prp",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "inou_prp",
     srcs = glob(

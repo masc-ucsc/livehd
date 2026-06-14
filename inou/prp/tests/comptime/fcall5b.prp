@@ -10,8 +10,7 @@ comb dox(a) -> (foo, c) {
   c   = a + 10
 }
 
-// whatever: same shape, different name — used to test rename of the whole
-// return tuple plus a sub-field in the same destructure
+// whatever: same shape, different name — used to test rename of return fields
 comb whatever(a) -> (foo, c) {
   foo = (bar = a + 100, baz = a + 200)
   c   = a + 1000
@@ -33,8 +32,9 @@ cassert(x == 21 and y == 22 and z == 30)
 // OK — discard the return value entirely (no capture on the LHS)
 dox(a=99)
 
-// match against a nested local tuple built from the call result
-const t = dox(a=5)
+// match against a nested tuple rebuilt from a destructured call result
+const (tfoo = dox.foo, tc = dox.c) = dox(a=5)
+const t = (const foo = tfoo, const c = tc)
 mut hit = 0
 match t {
   == (foo=(bar=0, baz=0), c=0)   { hit = 100 }
@@ -52,12 +52,12 @@ match t {
 }
 cassert(hit2 == 1)
 
-// rename whole-return + sub-field in the same destructure, using a different func name
-mut (zall = whatever, yfoo = whatever.foo) = whatever(a=20)
-cassert(zall.foo.bar == 120 and zall.foo.baz == 220 and zall.c == 1020)
-cassert(yfoo.bar == 120 and yfoo.baz == 220)
+// rename the whole nested field + the scalar via remap, using a different func
+mut (wfoo = whatever.foo, wc = whatever.c) = whatever(a=20)
+cassert(wfoo.bar == 120 and wfoo.baz == 220)
+cassert(wc == 1020)
 
 // reassign (no mut) — order swapped, bind by name
-(yfoo = whatever.foo, zall = whatever) = whatever(a=30)
-cassert(zall == (foo=(bar=130, baz=230), c=1030))
-cassert(yfoo == (bar=130, baz=230))
+(wc = whatever.c, wfoo = whatever.foo) = whatever(a=30)
+cassert(wfoo == (bar=130, baz=230))
+cassert(wc == 1030)

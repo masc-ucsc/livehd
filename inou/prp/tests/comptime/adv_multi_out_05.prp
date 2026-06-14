@@ -1,28 +1,30 @@
 /*
 :name: adv_multi_out_05
 :type: comptime
-:verifier_pass: 4
+:verifier_pass: 3
 :verifier_fail: 0
 */
 
 // Output named the same as an input: `comb f(x) -> (x)` is legal, and reads
 // before the output assignment use the INPUT value (06-functions.md lines
 // 257-261 and the next_value example at 610-611). So x=41 -> x = 41+1 = 42.
+// A single output drops the output name: the result binds directly to `a`,
+// so `a` IS the scalar 42 (there is no `a.x` field).
 comb next_value(x) -> (x) {
   x = x + 1
 }
 
 const a = next_value(x=41)
 cassert(a == 42)
-cassert(a.x == 42)
 
 // Two outputs, one shares an input name. After `x = x + y`, x is the output
-// binding, so `sum = x + 1` reads the freshly-written output.
+// binding, so `sum = x + 1` reads the freshly-written output. Two outputs MUST
+// destructure by the output names.
 comb shift_pair(x, y) -> (x, sum) {
   x = x + y
   sum = x + 1
 }
 
-const r = shift_pair(x=2, y=3)
-cassert(r.x == 5)
-cassert(r.sum == 6)
+const (x, sum) = shift_pair(x=2, y=3)
+cassert(x == 5)
+cassert(sum == 6)

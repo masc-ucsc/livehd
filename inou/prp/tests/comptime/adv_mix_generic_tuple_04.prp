@@ -9,20 +9,21 @@
 // time, then destructure. The 3 uniform elements are an ARRAY `[3]T` — an
 // unnamed tuple-type `(T,T,T)` is malformed (a tuple-type field must be named,
 // `name:T`); see errors/unnamed_tuple_type_field.
+// Two outputs MUST destructure by name.
 comb fold3<T>(xs:[3]T) -> (sum:T, prod:T) {
   sum  = xs[0] + xs[1] + xs[2]
   prod = xs[0] * xs[1] * xs[2]
 }
 
-const r = fold3<u16>(xs = (2, 3, 5))
-cassert(r.sum == 10)
-cassert(r.prod == 30)
+const (sum, prod) = fold3<u16>(xs = (2, 3, 5))
+cassert(sum == 10)
+cassert(prod == 30)
 
 // Boundary: zeros and a one keep prod==0, sum tracks.
-const r2 = fold3<int>(xs = (0, 7, 1))
-cassert(r2.sum == 8)
-cassert(r2.prod == 0)
+const (sum2 = fold3.sum, prod2 = fold3.prod) = fold3<int>(xs = (0, 7, 1))
+cassert(sum2 == 8)
+cassert(prod2 == 0)
 
 // Negative element via signed generic
-const r3 = fold3<i8>(xs = (-2, 3, 4))
-cassert(r3.prod == -24)
+const (sum3 = fold3.sum, prod3 = fold3.prod) = fold3<i8>(xs = (-2, 3, 4))
+cassert(prod3 == -24)

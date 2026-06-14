@@ -1,0 +1,18 @@
+/*
+:name: multi_output_one_var
+:type: error
+:error: returning multiple outputs cannot bind to the single variable
+:help: destructure into the output names
+*/
+// A call to a callee with two or more outputs cannot bind to one variable: the
+// return-binding rule mirrors the call-argument rule, so each output must be
+// captured by its own name. Destructure `const (q, r) = divmod(...)` or remap
+// `const (x = divmod.q, y = divmod.r) = divmod(...)`. See 06-functions.md
+// "Binding return values".
+comb divmod(n, d) -> (q, r) {
+  q = n / d
+  r = n % d
+}
+
+const dm = divmod(n=17, d=5)   // error: 2 outputs into one var `dm`
+cassert(dm.q == 3)

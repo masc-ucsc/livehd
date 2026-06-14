@@ -1,0 +1,31 @@
+/*
+:name: hier_comb
+:type: lgraph compile
+*/
+
+// Combinational hierarchy fixture for the color / partition / abc passes.
+//
+// `top` instantiates `adder` twice and `bitmix` once, so the elaborated LGraph
+// library has three module defs (top, adder, bitmix) with the adder def
+// instanced twice as Sub nodes under top. Output widths are chosen so nothing
+// narrows (runtime wrap/sat has no tolg lowering yet), keeping the design a
+// clean purely-combinational hierarchy (good for abc seq=false). Each leaf has
+// a few independent ops so `pass color synth` finds more than one region.
+
+mod adder(a:u8, b:u8) -> (s:u9@[0]) {
+  s = a + b
+}
+
+mod bitmix(a:u8, b:u8) -> (x:u8@[0]) {
+  const p = a & b
+  const q = a ^ b
+  const r = a | b
+  x = (p ^ q) & r
+}
+
+mod top(a:u8, b:u8, c:u8) -> (o:u12@[0]) {
+  const s1 = adder(a=a, b=b)
+  const s2 = adder(a=b, b=c)
+  const m1 = bitmix(a=a, b=c)
+  o = s1 + s2 + m1
+}

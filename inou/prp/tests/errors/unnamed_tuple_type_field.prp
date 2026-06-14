@@ -1,0 +1,12 @@
+/*
+:name: unnamed_tuple_type_field
+:type: error
+:error: tuple-type field must be named
+:help: name each field
+*/
+// A tuple used as a TYPE must have NAMED fields (`name:T`). A bare type entry
+// like `(int, int, int)` has no field name and is malformed — use an array
+// `[N]T` for N uniform elements, or name each field. (Named fields `x:int` and
+// `x=nil` are fine; only the bare-type form errors.)
+mut x:(int, int, int) = (1, 2, 3)
+cassert(x[0] == 1)

@@ -1,0 +1,35 @@
+/*
+:name: hier_seq
+:type: lgraph compile
+*/
+
+// Sequential 3-level hierarchy fixture for the color / partition / abc passes.
+//
+//   top -> stage_unit (x2) -> delayer (one per stage_unit)
+//
+// A clean 2-deep pipeline: `delayer` is 1 cycle, `stage_unit` adds its own
+// flop for 2 cycles total, `top` combines two stage_units. Flops live in
+// `delayer` (reg r) and `stage_unit` (reg r), so `pass color synth` must split
+// each def at its registers, and the named flops exercise abc seq=true
+// flop-name preservation. Registers only store (no narrowing) because runtime
+// wrap/sat has no tolg lowering yet.
+
+mod delayer(din:u8) -> (q:u8@[1]) {
+  reg r:u8 = 0
+  q = r
+  r = din
+}
+
+mod stage_unit(din:u8, k:u8) -> (y:u8@[2]) {
+  const m = din & k
+  stage[1] d = delayer(din=m)
+  reg r:u8 = 0
+  y = r
+  r = d
+}
+
+mod top(din:u8, k1:u8, k2:u8) -> (o:u9@[2]) {
+  stage[2] a = stage_unit(din=din, k=k1)
+  stage[2] b = stage_unit(din=din, k=k2)
+  o = a + b
+}
