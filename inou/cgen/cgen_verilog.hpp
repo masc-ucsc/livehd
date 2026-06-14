@@ -35,6 +35,7 @@ private:
   absl::flat_hash_map<pin_key_t, Expr>         pin2expr;
   absl::flat_hash_map<pin_key_t, std::string>  pin2var;
   absl::flat_hash_map<node_key_t, std::string> mux2vector;
+  absl::flat_hash_map<std::string, int>         declared_name_counts;
 
   bool first_array_block;
 
@@ -50,12 +51,13 @@ private:
   // Helper: name for a wire, preferring user-assigned name; falls back to a
   // synthesised name from node + port_id. Graph-IO pins resolve to their
   // declared name from GraphIO.
-  static std::string pin_wire_name(const hhds::Pin_class& pin);
-  std::string        get_wire_or_const(const hhds::Pin_class& dpin) const;
-  static std::string get_scaped_name(std::string_view name);
-  static std::string get_append_to_name(std::string_view name, std::string_view ext);
-  std::string        get_expression(const hhds::Pin_class& dpin) const;
-  std::string        add_expression(std::string_view txt_seq, std::string_view txt_op, const hhds::Pin_class& dpin) const;
+  static std::string         pin_wire_name(const hhds::Pin_class& pin);
+  std::string                get_wire_or_const(const hhds::Pin_class& dpin) const;
+  static std::string         get_scaped_name(std::string_view name);
+  static std::string         get_append_to_name(std::string_view name, std::string_view ext);
+  std::string                get_unique_decl_name(std::string_view name);
+  std::string                get_expression(const hhds::Pin_class& dpin) const;
+  std::string                add_expression(std::string_view txt_seq, std::string_view txt_op, const hhds::Pin_class& dpin) const;
 
   // Resolve the "driver of this sink pin": walk inp_edges and return the
   // first edge's driver. Returns an invalid Pin_class if not connected.

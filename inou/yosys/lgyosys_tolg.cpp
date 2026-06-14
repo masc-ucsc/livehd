@@ -43,8 +43,10 @@ using livehd::graph_util::has_name;
 using livehd::graph_util::is_const_pin;
 using livehd::graph_util::is_graph_input_pin;
 using livehd::graph_util::is_graph_output_pin;
+using livehd::graph_util::get_driver_of_sink_name;
 using livehd::graph_util::node_name_of;
 using livehd::graph_util::pin_name_of;
+using livehd::graph_util::is_unsign;
 using livehd::graph_util::set_bits;
 using livehd::graph_util::set_pin_name;
 using livehd::graph_util::set_pin_offset;
@@ -83,12 +85,24 @@ static absl::flat_hash_map<const RTLIL::Cell*, hhds::Node_class>             cel
 static absl::flat_hash_map<const RTLIL::Wire*, std::vector<hhds::Pin_class>> partially_assigned;
 static absl::flat_hash_map<const RTLIL::Wire*, std::vector<int>>             partially_assigned_bits;
 static absl::flat_hash_map<const RTLIL::Wire*, std::vector<int>>             partially_assigned_fwd;
+static absl::flat_hash_set<hhds::Class_index>                                explicit_pin_signs;
 
 static std::vector<const RTLIL::Wire*> pending_outputs;
 
 // ---------------------------------------------------------------------------
 // Local helpers
 // ---------------------------------------------------------------------------
+static void mark_pin_sign_from_wire(const hhds::Pin_class& pin, const RTLIL::Wire* wire) {
+  if (pin.is_invalid() || wire == nullptr) {
+    return;
+  }
+  if (wire->is_signed) {
+    set_sign(pin);
+  } else {
+    set_unsign(pin);
+  }
+  explicit_pin_signs.insert(pin.get_class_index());
+}
 namespace {
 
 [[nodiscard]] Dlop hydrate_const_pin(const hhds::Pin_class& pin) {
@@ -148,6 +162,32 @@ namespace {
 
 // Yosys src attributes are "file.v:42[.column]" strings; mint a line-only
 // anchor in the graph's Source_locator and stamp the node's srcid.
+
+[[nodiscard]] bool is_power_of_two(uint32_t v) { return v != 0 && (v & (v - 1)) == 0; }
+
+[[nodiscard]] uint32_t log2_exact(uint32_t v) {
+  I(is_power_of_two(v));
+  uint32_t r = 0;
+  while (v > 1) {
+    v >>= 1;
+    ++r;
+  }
+  return r;
+}
+
+[[nodiscard]] uint32_t ceil_log2(uint32_t v) {
+  if (v <= 1) {
+    return 1;
+  }
+  uint32_t r = 0;
+  --v;
+  while (v != 0) {
+    v >>= 1;
+    ++r;
+  }
+  return r;
+}
+
 static void set_loc(hhds::Node_class& node, const std::string& src) {
   if (src.empty()) {
     return;
@@ -226,11 +266,7 @@ static void look_for_wire(hhds::Graph* g, const RTLIL::Wire* wire) {
     }
     // Carry the RTLIL signedness onto the graph-input driver pin. Bits are
     // declared on the GraphIO (set in add_graph_input); sign lives per-pin.
-    if (wire->is_signed) {
-      set_sign(pin);
-    } else {
-      set_unsign(pin);
-    }
+    mark_pin_sign_from_wire(pin, wire);
     auto node = pin.get_master_node();
     set_loc(node, wire->get_src_attribute());
     wire2pin[wire] = pin;
@@ -245,6 +281,7 @@ static void look_for_wire(hhds::Graph* g, const RTLIL::Wire* wire) {
       set_pin_name(dpin, wname);
     }
     wire2pin[wire] = dpin;
+    mark_pin_sign_from_wire(dpin, wire);
   }
 }
 
@@ -399,6 +436,7 @@ static hhds::Pin_class get_edge_pin(hhds::Graph* g, const RTLIL::Wire* wire, boo
   set_loc(node, wire->get_src_attribute());
 
   wire2pin[wire] = node.create_driver_pin(0);
+  mark_pin_sign_from_wire(wire2pin[wire], wire);
   return wire2pin[wire];
 }
 
@@ -409,23 +447,19 @@ static hhds::Pin_class create_pick_operator(hhds::Graph* g, const RTLIL::Wire* w
   if (auto it = partially_assigned.find(wire); it != partially_assigned.end()) {
     const auto it_bits = partially_assigned_bits.find(wire);
     I(it_bits != partially_assigned_bits.end());
-    // Both vectors are sized to wire->width and indexed by BIT-OFFSET (a segment
-    // starting at bit `o` stores its pin at index `o`, in-between indices empty)
-    // — the same convention the materializer process_partially_assigned_other
-    // uses (`it.second[i]`, `i += width`). The loop locates the segment whose
-    // start equals `offset` by accumulating widths in `bits`; the pin is then at
-    // index `bits` (== offset). The old code returned `it->second[pos]` with a
-    // DENSE counter `pos` that diverges from the bit-offset after the first
-    // segment, so every non-zero-offset slice returned an empty pin — the
-    // read-all-entries + dynamic-index register-file pattern collapsed to
-    // const 0 / all-x.
-    int32_t bits = 0;
-    for (const auto& b : it_bits->second) {
-      if (bits == offset) {
-        I(it->second.size() > static_cast<size_t>(bits));
-        return it->second[bits];
+    for (auto pos = 0u; pos < it_bits->second.size(); ++pos) {
+      const auto assigned_width = it_bits->second[pos];
+      if (assigned_width <= 0) {
+        continue;
       }
-      bits += b;
+      const auto assigned_begin = static_cast<int>(pos);
+      const auto assigned_end   = assigned_begin + assigned_width;
+      if (assigned_begin <= offset && offset + width <= assigned_end) {
+        I(it->second.size() > pos);
+        const auto& src_pin = it->second[pos];
+        I(!src_pin.is_invalid());
+        return create_pick_operator(src_pin, offset - assigned_begin, width, is_signed);
+      }
     }
   }
 
@@ -594,6 +628,62 @@ static hhds::Pin_class get_unsigned_dpin(hhds::Graph* g, const RTLIL::Cell* cell
   return a_tposs.create_driver_pin(0);
 }
 
+static bool cell_port_is_signed(const RTLIL::Cell* cell, const RTLIL::IdString& name) {
+  if (name == ID::A && cell->hasParam(ID::A_SIGNED)) {
+    return cell->getParam(ID::A_SIGNED).as_bool();
+  }
+  if (name == ID::B && cell->hasParam(ID::B_SIGNED)) {
+    return cell->getParam(ID::B_SIGNED).as_bool();
+  }
+  return false;
+}
+
+static hhds::Pin_class unwrap_to_positive_for_signed_compare(const hhds::Pin_class& dpin) {
+  if (dpin.is_invalid() || is_const_pin(dpin)) {
+    return dpin;
+  }
+
+  auto node = master_node(dpin);
+  if (type_op_of(node) != Ntype_op::Get_mask) {
+    return dpin;
+  }
+
+  auto mask = get_driver_of_sink_name(node, "mask");
+  if (mask.is_invalid() || !is_const_pin(mask)) {
+    return dpin;
+  }
+
+  auto a = get_driver_of_sink_name(node, "a");
+  if (a.is_invalid()) {
+    return dpin;
+  }
+
+  auto mask_v   = hydrate_const_pin(mask);
+  auto dpin_bits = bits_of(dpin);
+  auto a_bits    = bits_of(a);
+  bool all_ones  = mask_v.is_i() && mask_v.to_i() == -1;
+  if (!all_ones && mask_v.is_i() && dpin_bits > 0 && dpin_bits <= 62) {
+    all_ones = mask_v.to_i() == ((int64_t{1} << dpin_bits) - 1);
+  }
+  if (!all_ones || a_bits != dpin_bits || is_unsign(a)) {
+    return dpin;
+  }
+
+  // get_unsigned_dpin() and concatenation normalization use Get_mask(a,-1) as
+  // a to-positive wrapper. For signed RTLIL comparisons, keeping that wrapper
+  // zero-extends the operand and turns checks such as signed(~addr) < 0 into
+  // unsigned comparisons. Drop the wrapper so the original signed pin reaches
+  // the LT/GT node.
+  return a;
+}
+
+static hhds::Pin_class get_comparator_dpin(hhds::Graph* g, const RTLIL::Cell* cell, const RTLIL::IdString& name) {
+  if (cell_port_is_signed(cell, name)) {
+    return unwrap_to_positive_for_signed_compare(get_dpin(g, cell, name));
+  }
+  return get_unsigned_dpin(g, cell, name);
+}
+
 static bool is_yosys_output(const std::string& idstring) {
   return idstring == "\\Y" || idstring == "\\Q" || idstring == "\\RD_DATA";
 }
@@ -677,6 +767,7 @@ static hhds::Pin_class get_partial_dpin(hhds::Graph* g, const RTLIL::Wire* wire)
 
     or_dpin        = real_dpin;
     wire2pin[wire] = real_dpin;
+    mark_pin_sign_from_wire(real_dpin, wire);
   }
 
   set_bits_wirename(or_dpin, wire);
@@ -728,10 +819,12 @@ static hhds::Node_class resolve_memory(hhds::Graph* g, RTLIL::Cell* cell) {
           }
         } else if (chunk.width == ss.size()) {
           wire2pin[wire] = dpin;
+          mark_pin_sign_from_wire(dpin, wire);
           set_bits_wirename(dpin, wire);
         } else {
           hhds::Pin_class pick_pin = create_pick_operator(dpin, offset, chunk.width, false);
           wire2pin[wire]           = pick_pin;
+          mark_pin_sign_from_wire(pick_pin, wire);
           set_bits_wirename(pick_pin, wire);
         }
         offset += chunk.width;
@@ -993,11 +1086,13 @@ static void process_cell_drivers_intialization(RTLIL::Module* mod, hhds::Graph* 
               }
             }
             wire2pin[wire] = driver_pin;
+            mark_pin_sign_from_wire(driver_pin, wire);
             set_bits_wirename(driver_pin, wire);
           } else {
             I((chunk.width + offset) <= bits_of(driver_pin));
             hhds::Pin_class pick_pin = create_pick_operator(driver_pin, offset, chunk.width, wire->is_signed);
             wire2pin[wire]           = pick_pin;
+            mark_pin_sign_from_wire(pick_pin, wire);
             set_bits_wirename(pick_pin, wire);
           }
           offset += chunk.width;
@@ -1016,6 +1111,7 @@ static void process_cell_drivers_intialization(RTLIL::Module* mod, hhds::Graph* 
               set_pin_name(n2_dpin, wname);
             }
             wire2pin[wire] = n2_dpin;
+            mark_pin_sign_from_wire(n2_dpin, wire);
           }
 
           auto src_pin  = create_pick_operator(driver_pin, offset, chunk.width, wire->is_signed);
@@ -1028,7 +1124,7 @@ static void process_cell_drivers_intialization(RTLIL::Module* mod, hhds::Graph* 
             if (s == e) {
               set_pin_name(src_pin, absl::StrCat(&wire->name.str()[1], "[", s, "]"));
             } else {
-              set_pin_name(src_pin, absl::StrCat(&wire->name.str()[1], "[", s, ":", e, "]"));
+              set_pin_name(src_pin, absl::StrCat(&wire->name.str()[1], "[", e, ":", s, "]"));
             }
           }
 
@@ -1104,6 +1200,7 @@ static void process_assigns(RTLIL::Module* mod, hhds::Graph* g) {
                 set_driver_name_if_free(or_dpin, best_name);
                 or_node.create_sink_pin(0).connect_driver(prev_pin);
                 wire2pin[lhs_wire] = or_dpin;
+                mark_pin_sign_from_wire(or_dpin, lhs_wire);
               }
               global_lhs_pos += lhs_wire->width;
               continue;
@@ -1145,6 +1242,7 @@ static void process_assigns(RTLIL::Module* mod, hhds::Graph* g) {
                     set_driver_name_if_free(or_dpin, bit_name);
                     or_node.create_sink_pin(0).connect_driver(chunk_pin);
                     wire2pin[chunk.wire] = or_dpin;
+                    mark_pin_sign_from_wire(or_dpin, chunk.wire);
                   }
                 }
               }
@@ -1196,9 +1294,11 @@ static void process_assigns(RTLIL::Module* mod, hhds::Graph* g) {
             append_to_or_node(g, prev_n, dpin, 0);
           } else {
             wire2pin[lhs_wire] = dpin;
+            mark_pin_sign_from_wire(dpin, lhs_wire);
           }
         } else {
           wire2pin[lhs_wire] = dpin;
+          mark_pin_sign_from_wire(dpin, lhs_wire);
         }
 
         global_lhs_pos += lhs_wire->width;
@@ -1217,6 +1317,7 @@ static void process_assigns(RTLIL::Module* mod, hhds::Graph* g) {
               set_pin_name(or_dpin, wname);
             }
             wire2pin[lhs_wire] = or_dpin;
+            mark_pin_sign_from_wire(or_dpin, lhs_wire);
           } else {
             auto& dpin = wire2pin[lhs_wire];
             I((int)bits_of(dpin) == lhs_wire->width);
@@ -1563,8 +1664,8 @@ static void process_partially_assigned_self_chains(hhds::Graph* g) {
 static void connect_comparator(hhds::Node_class& exit_node, const RTLIL::Cell* cell) {
   auto* g = exit_node.get_graph();
 
-  auto a_dpin = get_unsigned_dpin(g, cell, ID::A);
-  auto b_dpin = get_unsigned_dpin(g, cell, ID::B);
+  auto a_dpin = get_comparator_dpin(g, cell, ID::A);
+  auto b_dpin = get_comparator_dpin(g, cell, ID::B);
 
   setup_sink_by_name(exit_node, "a").connect_driver(a_dpin);
 
@@ -1573,6 +1674,14 @@ static void connect_comparator(hhds::Node_class& exit_node, const RTLIL::Cell* c
   } else {
     setup_sink_by_name(exit_node, "b").connect_driver(b_dpin);
   }
+
+  auto out = exit_node.create_driver_pin(0);
+  if (cell_port_is_signed(cell, ID::A) || cell_port_is_signed(cell, ID::B)) {
+    set_sign(out);
+  } else {
+    set_unsign(out);
+  }
+  explicit_pin_signs.insert(out.get_class_index());
 }
 
 static void process_partially_assigned(hhds::Graph* g) {
@@ -2078,11 +2187,78 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         setup_sink_by_name(exit_node, "a").connect_driver(not_node.create_driver_pin(0));
         setup_sink_by_name(exit_node, "mask").connect_driver(create_const(*g, *Dlop::create_integer(-1)));
       }
+    } else if (std::strncmp(cell->type.c_str(), "$demux", 6) == 0) {
+      // Yosys $demux: place A into one WIDTH-bit lane selected by S, all
+      // other lanes zero. Lower to a variable shift so downstream HHDS
+      // consumers only need the existing SHL/Mult vocabulary.
+      auto width  = cell->getParam(ID::WIDTH).as_int();
+      auto y_bits = get_output_size(cell);
+      I(width > 0);
+      I(y_bits >= width);
+
+      set_type_op(exit_node, Ntype_op::SHL);
+      set_bits(exit_node.create_driver_pin(0), y_bits);
+      setup_sink_by_name(exit_node, "a")
+          .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::A), false));
+
+      auto s_dpin = create_pick_concat_dpin(g, cell->getPort(ID::S), false);
+      hhds::Pin_class shift_dpin;
+      if (width == 1) {
+        shift_dpin = s_dpin;
+      } else if (is_power_of_two(static_cast<uint32_t>(width))) {
+        auto amount_w = std::max<uint32_t>(1, ceil_log2(static_cast<uint32_t>(y_bits)));
+        auto scale    = log2_exact(static_cast<uint32_t>(width));
+        auto shl_node = create_typed_node(*g, Ntype_op::SHL, amount_w);
+        setup_sink_by_name(shl_node, "a").connect_driver(s_dpin);
+        setup_sink_by_name(shl_node, "b")
+            .connect_driver(create_const(*g, *Dlop::create_integer(scale)));
+        shift_dpin = shl_node.create_driver_pin(0);
+      } else {
+        auto amount_w = std::max<uint32_t>(1, ceil_log2(static_cast<uint32_t>(y_bits)));
+        auto mul_node = create_typed_node(*g, Ntype_op::Mult, amount_w);
+        setup_sink_by_name(mul_node, "a").connect_driver(s_dpin);
+        setup_sink_by_name(mul_node, "a")
+            .connect_driver(create_const(*g, *Dlop::create_integer(width)));
+        shift_dpin = mul_node.create_driver_pin(0);
+      }
+      setup_sink_by_name(exit_node, "b").connect_driver(shift_dpin);
+    } else if (std::strncmp(cell->type.c_str(), "$bwmux", 6) == 0) {
+      // Yosys $bwmux is a bitwise mux:
+      //   Y = (A & ~S) | (B & S)
+      // It appears in byte-enabled SRAM update logic. Import it explicitly so
+      // the write-data input is preserved instead of treating the cell as an
+      // unsupported black-box-ish placeholder.
+      auto y_bits = get_output_size(cell);
+
+      auto a_dpin = create_pick_concat_dpin(g, cell->getPort(ID::A), false);
+      auto b_dpin = create_pick_concat_dpin(g, cell->getPort(ID::B), false);
+      auto s_dpin = create_pick_concat_dpin(g, cell->getPort(ID::S), false);
+
+      auto not_s = create_typed_node(*g, Ntype_op::Not, y_bits);
+      not_s.create_sink_pin(0).connect_driver(s_dpin);
+
+      auto keep_a = create_typed_node(*g, Ntype_op::And, y_bits);
+      keep_a.create_sink_pin(0).connect_driver(a_dpin);
+      keep_a.create_sink_pin(0).connect_driver(not_s.create_driver_pin(0));
+
+      auto take_b = create_typed_node(*g, Ntype_op::And, y_bits);
+      take_b.create_sink_pin(0).connect_driver(b_dpin);
+      take_b.create_sink_pin(0).connect_driver(s_dpin);
+
+      set_type_op(exit_node, Ntype_op::Or);
+      set_bits(exit_node.create_driver_pin(0), y_bits);
+      exit_node.create_sink_pin(0).connect_driver(keep_a.create_driver_pin(0));
+      exit_node.create_sink_pin(0).connect_driver(take_b.create_driver_pin(0));
     } else if (std::strncmp(cell->type.c_str(), "$mux", 4) == 0) {
       set_type_op(exit_node, Ntype_op::Mux);
       set_bits(exit_node.create_driver_pin(0), get_output_size(cell));
 
-      setup_sink_by_name(exit_node, "s").connect_driver(get_dpin(g, cell, ID::S));
+      // $mux selectors are bit-vector control values, not signed data. Using
+      // get_dpin() defaults to signed and can turn a one-bit slice such as
+      // addr[0] into a sign-extension of the whole address wire, which in turn
+      // corrupts bmuxmap-generated SRAM read trees.
+      setup_sink_by_name(exit_node, "s")
+          .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::S), false));
       setup_sink_by_name(exit_node, "p1").connect_driver(get_dpin(g, cell, ID::A));
       setup_sink_by_name(exit_node, "p2").connect_driver(get_dpin(g, cell, ID::B));
     } else if (std::strncmp(cell->type.c_str(), "$add", 4) == 0 || std::strncmp(cell->type.c_str(), "$sub", 4) == 0) {
@@ -2506,6 +2682,13 @@ static void finalize_module(hhds::Graph* g) {
       // and reset with LiveHD's internal signed-by-default convention.
       continue;
     }
+    if (explicit_pin_signs.contains(dpin.get_class_index())) {
+      // Internal RTLIL wires may be explicitly unsigned (the common case for
+      // logic vectors and generated FIFO pointers). Unsigned is represented by
+      // deleting the pin_signed attr, so preserve the explicit import-time
+      // decision instead of treating attr absence as "unknown".
+      continue;
+    }
 
     if (op == Ntype_op::Get_mask) {
       set_unsign(dpin);
@@ -2632,6 +2815,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         partially_assigned.clear();
         partially_assigned_bits.clear();
         partially_assigned_fwd.clear();
+        explicit_pin_signs.clear();
 
         TRACE_EVENT("inou", nullptr, [&mod_name](perfetto::EventContext ctx) { ctx.event()->set_name("YOSYS_tolg_" + mod_name); });
 
@@ -2669,6 +2853,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 
         process_assigns(mod, g);
         process_cell_drivers_intialization(mod, g);
+        process_assigns(mod, g);
         process_cells(mod, g);
         process_partially_assigned(g);
         process_connect_outputs(mod, g);
@@ -2677,6 +2862,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         wire2pin.clear();
         cell2node.clear();
         partially_assigned.clear();
+        explicit_pin_signs.clear();
         picks.clear();
         pending_outputs.clear();
       }

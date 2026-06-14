@@ -258,6 +258,23 @@ std::string Cgen_verilog::get_append_to_name(std::string_view name, std::string_
   return absl::StrCat(ext, name);
 }
 
+std::string Cgen_verilog::get_unique_decl_name(std::string_view name) {
+  std::string base{name};
+  auto [it, inserted] = declared_name_counts.insert({base, 1});
+  if (inserted) {
+    return base;
+  }
+
+  const auto suffix = absl::StrCat("_cgen", it->second++);
+  if (!base.empty() && base.front() == '\\') {
+    while (!base.empty() && base.back() == ' ') {
+      base.pop_back();
+    }
+    return absl::StrCat(base, suffix, " ");
+  }
+  return absl::StrCat(base, suffix);
+}
+
 std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) const {
   auto var_it = pin2var.find(dpin.get_class_index());
   if (var_it != pin2var.end()) {
@@ -344,8 +361,8 @@ void Cgen_verilog::process_flop(std::shared_ptr<File_output> fout, const hhds::N
   auto dpin_d = get_driver(sink_d);
   auto dpin_q = node.get_driver_pin(0);
 
-  auto       pin_name  = pin_wire_name(dpin_q);
-  const auto name_next = get_scaped_name(absl::StrCat("___next_", pin_name));
+  auto       pin_name  = get_wire_or_const(dpin_q);
+  const auto name_next = get_append_to_name(pin_name, "___next_");
 
   if (dpin_d.is_invalid()) {
     fout->append("  ", name_next, " = 'hx; // disconnected flop\n");
@@ -839,7 +856,11 @@ void Cgen_verilog::process_mux(std::shared_ptr<File_output> fout, const hhds::No
       }
       size_t num_cases = size_t{1} << sel_bits;
       if (num_cases > ordered_inp.size() - 1) {
-        fout->append("       default: ", dest_var, " = 'hx;\n");
+        // The import path runs Yosys `setundef -zero` for deterministic RTL
+        // semantics. Reintroducing X on sparse mux defaults makes regenerated
+        // Verilog strictly less defined than the reference netlist and breaks
+        // LEC for byte-enable update chains.
+        fout->append("       default: ", dest_var, " = '0;\n");
       }
       fout->append("   endcase\n");
     }
@@ -918,7 +939,16 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
     auto rhs   = get_expression(get_driver(find_sink_pin(node, "b")));
     final_expr = absl::StrCat(lhs, "/", rhs);
   } else if (op == Ntype_op::Not) {
-    auto lhs   = get_expression(get_driver(find_sink_pin(node, "a")));
+    auto     lhs_dpin = get_driver(find_sink_pin(node, "a"));
+    auto     lhs      = get_expression(lhs_dpin);
+    auto     var_pre  = pin2var.find(dpin.get_class_index());
+    if (var_pre != pin2var.end() && var_pre->second != lhs) {
+      // Bitwise NOT is evaluated at the node output width. Assign through the
+      // destination-width temporary first, so a narrow expression like addr[3:0]
+      // becomes 5'b0_addr before ~ is applied.
+      fout->append("  ", var_pre->second, " = ", lhs, ";\n");
+      lhs = var_pre->second;
+    }
     final_expr = absl::StrCat("~", lhs);
   } else if (op == Ntype_op::Set_mask) {
     auto a_dpin = get_driver(find_sink_pin(node, "a"));
@@ -1019,6 +1049,10 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
         }
         m.append(a_bits / 4, 'f');
         final_expr = absl::StrCat("(", a, " & ", a_bits, "'h", m, ")");
+      } else if (bits_of(dpin) > a_bits && a_bits > 0) {
+        final_expr = absl::StrCat("{{", bits_of(dpin) - a_bits, "{1'b0}},", a, "}");
+      } else if (bits_of(dpin) > 0 && a_bits > bits_of(dpin)) {
+        final_expr = absl::StrCat(a, "[", bits_of(dpin) - 1, ":0]");
       } else {
         final_expr = a;
       }
@@ -1089,11 +1123,48 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
   } else if (op == Ntype_op::LT || op == Ntype_op::GT) {
     std::vector<std::string> lhs;
     std::vector<std::string> rhs;
+    bool signed_compare = !is_unsign(dpin);
+    auto cmp_expr = [&](hhds::Pin_class cmp_dpin) {
+      if (signed_compare && !cmp_dpin.is_invalid() && !is_const_pin(cmp_dpin)) {
+        auto cmp_node = cmp_dpin.get_master_node();
+        if (type_op_of(cmp_node) == Ntype_op::Get_mask) {
+          auto a_dpin    = get_driver(find_sink_pin(cmp_node, "a"));
+          auto mask_dpin = get_driver(find_sink_pin(cmp_node, "mask"));
+          if (!a_dpin.is_invalid() && !mask_dpin.is_invalid() && is_const_pin(mask_dpin) && !is_unsign(a_dpin)) {
+            auto mask_v  = hydrate_const(mask_dpin);
+            auto out_w   = bits_of(cmp_dpin);
+            auto a_w     = bits_of(a_dpin);
+            bool all_one = mask_v.is_i() && mask_v.to_i() == -1;
+            if (!all_one && mask_v.is_i() && out_w > 0 && out_w <= 62) {
+              all_one = mask_v.to_i() == ((int64_t{1} << out_w) - 1);
+            }
+            if (!all_one && mask_v.is_i() && a_w > 0 && a_w <= 62) {
+              all_one = mask_v.to_i() == ((int64_t{1} << a_w) - 1);
+            }
+
+            // get_unsigned_dpin() can leave a Get_mask(a,-1) wrapper around a
+            // signed value. For signed comparisons, that wrapper would
+            // zero-extend the value and break guards such as signed(~addr) < 0.
+            // Real zero-extensions over unsigned RTLIL wires are protected by
+            // the imported pin signedness: !is_unsign(a_dpin) is false.
+            if (all_one && a_w > 0 && out_w > 0 && out_w >= a_w) {
+              cmp_dpin = a_dpin;
+            }
+          }
+        }
+      }
+
+      auto expr = get_expression(cmp_dpin);
+      if (signed_compare) {
+        return absl::StrCat("$signed(", expr, ")");
+      }
+      return expr;
+    };
     for (const auto& e : node.inp_edges()) {
       if (Ntype::get_sink_name(op, e.sink.get_port_id()) == "a") {
-        lhs.emplace_back(get_expression(e.driver));
+        lhs.emplace_back(cmp_expr(e.driver));
       } else {
-        rhs.emplace_back(get_expression(e.driver));
+        rhs.emplace_back(cmp_expr(e.driver));
       }
     }
     std::string cmp = (op == Ntype_op::GT) ? " > " : " < ";
@@ -1107,7 +1178,17 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
       }
     }
   } else if (op == Ntype_op::SHL) {
-    auto val_expr = get_expression(get_driver(find_sink_pin(node, "a")));
+    auto val_dpin = get_driver(find_sink_pin(node, "a"));
+    auto val_expr = get_expression(val_dpin);
+    auto out_bits = bits_of(dpin);
+    auto val_bits = bits_of(val_dpin);
+    if (out_bits > val_bits && val_bits > 0) {
+      // Verilog shifts keep the left operand width. LiveHD/Isabelle SHL
+      // semantics shift at the node output width, so explicitly zero-extend
+      // before shifting. This matters for demux lowering, e.g. a 32-bit lane
+      // shifted into a 512-bit memory word.
+      val_expr = absl::StrCat("{{", out_bits - val_bits, "{1'b0}},", val_expr, "}");
+    }
 
     // Verilog `a << b` is self-determined by `a`'s width: a narrow left operand
     // (e.g. a 1-bit const `1`, or a 1-bit signal) shifts WITHIN that narrow
@@ -1184,8 +1265,16 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
   }
 
   if (final_expr.empty()) {
-    Pass::info("likely issue in node:{} that has no compute value", debug_name(node));
-    final_expr = "'hx";
+    if (op == Ntype_op::Sum || op == Ntype_op::Or || op == Ntype_op::Xor) {
+      // Empty variadic nodes can be left behind by cprop/bitwidth on paths
+      // where all operands folded away. The Isabelle exporter interprets
+      // empty Sum/Or/Xor as the neutral zero value, so Cgen must do the same
+      // for RTL/LGraph LEC.
+      final_expr = "'0";
+    } else {
+      Pass::info("likely issue in node:{} that has no compute value", debug_name(node));
+      final_expr = "'hx";
+    }
   }
 
   if (has_color(node)) {
@@ -1492,9 +1581,8 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     }
 
     auto        dpin      = node.get_driver_pin(0);
-    std::string pin_name  = pin_wire_name(dpin);
-    const auto  name      = get_scaped_name(pin_name);
-    const auto  name_next = get_scaped_name(absl::StrCat("___next_", pin_name));
+    std::string name      = get_wire_or_const(dpin);
+    const auto  name_next = get_append_to_name(name, "___next_");
 
     std::string edge        = "posedge";
     auto        posclk_sink = find_sink_pin(node, "posclk");
@@ -1623,7 +1711,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     // contract forbids inventing a different reset style per stage.
     int  bits    = bits_of(dpin);
     bool out_uns = is_unsign(dpin);
-    if (out_uns) {
+    if (out_uns && type_op_of(dpin.get_master_node()) == Ntype_op::Get_mask) {
       --bits;
     }
     std::vector<std::string> stage_names;
@@ -1649,7 +1737,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     };
 
     if (reset.empty()) {
-      emit_chain();
+      emit_enabled(emit_chain);
     } else {
       if (negreset) {
         fout->append("if (!", reset, ") begin\n");
@@ -1661,7 +1749,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
       }
       fout->append(name, " <= ", reset_initial, ";\n");
       fout->append("end else begin\n");
-      emit_chain();
+      emit_enabled(emit_chain);
       fout->append("end\n");
     }
 
@@ -1675,10 +1763,12 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, const hhds:
     return;
   }
 
-  auto [it, replaced] = pin2var.insert({dpin.get_class_index(), std::string(name)});
-  if (!replaced) {
+  if (pin2var.contains(dpin.get_class_index())) {
     return;
   }
+  auto unique_name = get_unique_decl_name(name);
+  pin2var.insert({dpin.get_class_index(), unique_name});
+  name = unique_name;
 
   // Anchor the wire declaration line at its defining cell.
   note_src(fout, dpin.get_master_node());
@@ -1688,7 +1778,9 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, const hhds:
   std::string reg_str;
   if (out_unsigned) {
     reg_str = "reg ";
-    --bits;
+    if (type_op_of(dpin.get_master_node()) == Ntype_op::Get_mask) {
+      --bits;
+    }
   } else {
     reg_str = "reg signed ";
   }
@@ -1905,6 +1997,7 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   pin2var.clear();
   pin2expr.clear();
   mux2vector.clear();
+  declared_name_counts.clear();
   first_array_block = true;
   map_segments_.clear();
   mem_wrappers_emitted_.clear();

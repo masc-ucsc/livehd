@@ -34,11 +34,34 @@ flatten
 chformal -remove
 
 proc -ifx
+{{#memory_collect}}
+# Preserve $mem/$mem_v2 cells for yosys2lg/pass.isabelle memory semantics.
+# Running setundef before memory_collect can make recent Yosys assert in
+# kernel/mem.cc when memory enables contain X-state policy bits.
+# If requested, setundef is applied after memory collection.
+opt_expr
+opt_merge
+pmuxtree
+# Lower bitwise mux/demux cells before yosys2lg. The HHDS importer supports
+# ordinary mux/logic cells, but not raw $bwmux/$demux; leaving them here can
+# silently drop write-data paths in byte-enabled SRAM update logic.
+bmuxmap
+memory_collect
+{{#setundef_zero}}
+setundef -zero
+{{/setundef_zero}}
+{{/memory_collect}}
+{{^memory_collect}}
+{{#setundef_zero}}
+setundef -zero
+{{/setundef_zero}}
 #opt -fast
 opt_expr
 opt_merge
 pmuxtree
+bmuxmap
 memory -nomap
+{{/memory_collect}}
 
 #flatten
 

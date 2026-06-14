@@ -6,8 +6,13 @@
 //  Scope (v1, strict mode default):
 //    Combinational: Dlop, Sum, Mult, Div, And, Or, Xor, Ror, Not, LT, GT, EQ,
 //                   SHL, SRA, Mux, Sext, Get_mask, Set_mask, IO
-//    Stateful:      Flop only.
-//    Rejected:      Latch, Fflop, Memory, Sub, LUT, AttrGet/AttrSet, Tposs.
+//    Stateful:      Flop plus a conservative first Memory slice in the
+//                   executable model. Memory emission supports preserved
+//                   async/array memories with at most one read and one write
+//                   port, represented as function-valued Isabelle state.
+//                   Sync-read and multi-port memories remain fail-fast until
+//                   their stateful read-data/collision policy is connected.
+//    Rejected:      Latch, Fflop, Sub, LUT, AttrGet/AttrSet, Tposs.
 
 #include "pass_isabelle.hpp"
 
@@ -54,6 +59,8 @@ bool node_is_op(const Node& node, Ntype_op op) { return node_op(node) == op; }
 bool node_is_const(const Node& node) { return livehd::graph_util::is_type_const(node) || node_op(node) == Ntype_op::Nconst; }
 
 bool node_is_flop(const Node& node) { return livehd::graph_util::is_type_flop(node); }
+
+bool node_is_memory(const Node& node) { return node_op(node) == Ntype_op::Memory; }
 
 bool pin_is_input(const Node_pin& pin) { return livehd::graph_util::is_graph_input_pin(pin); }
 
@@ -110,6 +117,19 @@ CertWFFallback parse_cert_wf_fallback(std::string_view mode) {
     return CertWFFallback::Eval;
   }
   return CertWFFallback::Fail;
+}
+
+uint32_t ceil_log2_u64(uint64_t v) {
+  if (v <= 1) {
+    return 1;
+  }
+  --v;
+  uint32_t w = 0;
+  while (v != 0) {
+    ++w;
+    v >>= 1;
+  }
+  return w == 0 ? 1 : w;
 }
 
 }  // namespace
@@ -239,6 +259,33 @@ std::string make_field_name(std::string_view role, std::string_view rtl_name, ab
   return name;
 }
 
+struct Memory_port_info {
+  size_t   port_id = 0;
+  bool     rdport = false;
+  Node_pin addr;
+  Node_pin din;
+  Node_pin enable;
+  Node_pin clock;
+  uint32_t driver_pid = 0;  // read-output driver pin id, valid only for rdport
+};
+
+struct Memory_info {
+  Node node;
+  uint32_t nid = 0;
+  std::string field;
+  std::string raw_name;
+  uint32_t bits = 0;
+  uint32_t addr_width = 1;
+  uint64_t size = 0;
+  uint32_t wensize = 0;
+  int64_t type = 0;
+  int64_t fwd = 0;
+  int64_t posclk = 1;
+  std::vector<Memory_port_info> ports;
+  std::vector<size_t> read_ports;
+  std::vector<size_t> write_ports;
+};
+
 // Render a width as a literal numeric Isabelle word annotation: ":: <w> word".
 std::string ty_word(uint32_t w) { return ":: " + std::to_string(w) + " word"; }
 
@@ -261,10 +308,27 @@ std::string lit_one(uint32_t w) { return "(1 :: " + std::to_string(w) + " word)"
 // Format a width-annotated `ucast` of an inner expression.
 std::string ucast_at(const std::string& expr, uint32_t w) { return "((ucast (" + expr + ") :: " + std::to_string(w) + " word))"; }
 
+bool node_output_is_signed(const Node &node) {
+  auto n = node;
+  auto dpin = n.create_driver_pin(0);
+  return !dpin.is_invalid() && !livehd::graph_util::is_unsign(dpin);
+}
+
 // Format a numeric literal of width w.
 std::string lit_const_pos(int64_t v, uint32_t w) { return "(" + std::to_string(v) + " :: " + std::to_string(w) + " word)"; }
 std::string lit_const_neg(int64_t v, uint32_t w) {
   return "((word_of_int (" + std::to_string(v) + ")) :: " + std::to_string(w) + " word)";
+}
+
+std::string isabelle_int_literal(std::string_view decimal) {
+  if (!decimal.empty() && decimal.front() == '-') {
+    return "(- " + std::string(decimal.substr(1)) + ")";
+  }
+  return std::string(decimal);
+}
+
+std::string lit_const_decimal(const Const &v, uint32_t w) {
+  return "((word_of_int " + isabelle_int_literal(v.to_decimal_string()) + ") :: " + std::to_string(w) + " word)";
 }
 
 std::string cert_op_tag_from_expr(const std::string& expr) {
@@ -418,6 +482,8 @@ struct Ctx {
   // Map: flop nid -> field selector name
   std::map<uint32_t, std::string>    flop_field;
   std::map<uint32_t, uint32_t>       flop_width;
+  // Map: memory nid -> function-valued state metadata.
+  std::map<uint32_t, Memory_info>     memory_info;
 
   // Reverse map: rtl name -> isabelle field (for name-map header).
   std::vector<std::tuple<std::string, std::string, std::string>> name_map_rows;
@@ -453,6 +519,136 @@ void check_width(const Ctx& ctx, const Node& node, uint32_t w, std::string_view 
           "node n_" + std::to_string(node_id(node)) + " (" + std::string(what) + ") has width " + std::to_string(w)
               + " > max_width=" + std::to_string(ctx.max_width));
   }
+}
+
+int64_t const_pin_int(const Ctx &ctx, const Node_pin &pin, const Node &owner, std::string_view field) {
+  if (!pin_is_const(pin)) {
+    fatal(ctx, "Memory node n_" + std::to_string(node_id(owner)) + " has non-constant "
+                   + std::string(field) + " policy pin.");
+  }
+  auto v = pin_const_value(pin);
+  if (!v.is_i()) {
+    fatal(ctx, "Memory node n_" + std::to_string(node_id(owner)) + " has non-integer "
+                   + std::string(field) + " policy pin.");
+  }
+  return v.to_i();
+}
+
+std::string memory_policy_summary(const Memory_info &mi) {
+  std::ostringstream oss;
+  oss << "memory node n_" << mi.nid
+      << " bits=" << mi.bits
+      << " size=" << mi.size
+      << " addr_width=" << mi.addr_width
+      << " type=" << mi.type
+      << " fwd=" << mi.fwd
+      << " posclk=" << mi.posclk
+      << " wensize=" << mi.wensize
+      << " rdports=" << mi.read_ports.size()
+      << " wrports=" << mi.write_ports.size();
+  for (const auto &p : mi.ports) {
+    oss << " port" << p.port_id << "{"
+        << (p.rdport ? "rd" : "wr")
+        << ",addr=" << (p.addr.is_invalid() ? "missing" : "ok")
+        << ",enable=" << (p.enable.is_invalid() ? "missing" : "ok")
+        << ",din=" << (p.din.is_invalid() ? "missing" : "ok")
+        << ",clock=" << (p.clock.is_invalid() ? "missing" : "ok")
+        << "}";
+  }
+  return oss.str();
+}
+
+Memory_info parse_memory_info(Ctx &ctx, const Node &node) {
+  Memory_info mi;
+  mi.node = node;
+  mi.nid = node_id(node);
+
+  for (const auto &e : inp_edges_ordered(node)) {
+    const auto raw_pid = static_cast<size_t>(e.sink.get_port_id());
+    const auto pname   = std::string(Ntype::get_sink_name(Ntype_op::Memory, raw_pid % 11));
+    const auto port_id = raw_pid / 11;
+    if (mi.ports.size() <= port_id) {
+      mi.ports.resize(port_id + 1);
+    }
+    mi.ports[port_id].port_id = port_id;
+
+    if (pname == "bits") {
+      const auto v = const_pin_int(ctx, e.driver, node, pname);
+      if (v <= 0) fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has non-positive bits.");
+      mi.bits = static_cast<uint32_t>(v);
+    } else if (pname == "size") {
+      const auto v = const_pin_int(ctx, e.driver, node, pname);
+      if (v <= 0) fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has non-positive size.");
+      mi.size = static_cast<uint64_t>(v);
+    } else if (pname == "wensize") {
+      const auto v = const_pin_int(ctx, e.driver, node, pname);
+      if (v < 0) fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has negative wensize.");
+      mi.wensize = static_cast<uint32_t>(v);
+    } else if (pname == "type") {
+      mi.type = const_pin_int(ctx, e.driver, node, pname);
+    } else if (pname == "fwd") {
+      mi.fwd = const_pin_int(ctx, e.driver, node, pname);
+    } else if (pname == "posclk") {
+      mi.posclk = const_pin_int(ctx, e.driver, node, pname);
+    } else if (pname == "rdport") {
+      const bool rd = const_pin_int(ctx, e.driver, node, pname) != 0;
+      mi.ports[port_id].rdport = rd;
+    } else if (pname == "addr") {
+      mi.ports[port_id].addr = e.driver;
+    } else if (pname == "din") {
+      mi.ports[port_id].din = e.driver;
+    } else if (pname == "enable") {
+      mi.ports[port_id].enable = e.driver;
+    } else if (pname == "clock_pin") {
+      mi.ports[port_id].clock = e.driver;
+    }
+  }
+
+  if (mi.bits == 0 || mi.size == 0) {
+    fatal(ctx, "Memory node n_" + std::to_string(mi.nid)
+                   + " is missing constant bits/size policy.");
+  }
+  check_width(ctx, node, mi.bits, "memory data");
+  mi.addr_width = ceil_log2_u64(mi.size);
+  if (mi.addr_width == 0 || mi.addr_width > ctx.max_width) {
+    fatal(ctx, "Memory node n_" + std::to_string(mi.nid)
+                   + " has unsupported address width " + std::to_string(mi.addr_width));
+  }
+  if (mi.wensize == 0) {
+    mi.wensize = 1;
+  }
+  if (mi.bits % mi.wensize != 0) {
+    fatal(ctx, "Memory node n_" + std::to_string(mi.nid)
+                   + " has bits not divisible by wensize: bits=" + std::to_string(mi.bits)
+                   + " wensize=" + std::to_string(mi.wensize));
+  }
+
+  for (size_t idx = 0; idx < mi.ports.size(); ++idx) {
+    auto &p = mi.ports[idx];
+    p.port_id = idx;
+    if (p.rdport) {
+      p.driver_pid = static_cast<uint32_t>(mi.write_ports.size() + mi.read_ports.size());
+      mi.read_ports.push_back(idx);
+      if (p.addr.is_invalid()) fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " read port missing addr.");
+      if (p.enable.is_invalid()) fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " read port missing enable.");
+    } else {
+      mi.write_ports.push_back(idx);
+      if (p.addr.is_invalid()) fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " write port missing addr.");
+      if (p.enable.is_invalid()) fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " write port missing enable.");
+      if (p.din.is_invalid()) fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " write port missing din.");
+    }
+  }
+
+  if (mi.read_ports.size() > 1 || mi.write_ports.size() > 1) {
+    fatal(ctx, memory_policy_summary(mi)
+                   + ". pass.isabelle memory v1 supports at most one read and one write port.");
+  }
+  if (!(mi.type == 0 || mi.type == 2)) {
+    fatal(ctx, memory_policy_summary(mi)
+                   + ". pass.isabelle memory v1 supports async/array memories only; sync-read memories need explicit read-data state.");
+  }
+
+  return mi;
 }
 
 uint32_t pin_width(const Ctx& ctx, const Node_pin& pin, const Node& owner) {
@@ -508,12 +704,7 @@ std::string lit_const_at(const Ctx& ctx, const Node& node, const Dlop& v, uint32
   if (mask_lo == 0 && static_cast<uint32_t>(mask_hi) <= w) {
     return "((2 ^ " + std::to_string(w) + " - 1) :: " + std::to_string(w) + " word)";
   }
-  if (ctx.strict) {
-    fatal(ctx,
-          "Const node n_" + std::to_string(node_id(node))
-              + " is a non-mask arbitrary-width constant; pass.isabelle needs a decimal emitter.");
-  }
-  return undefined_at(w, "Const node n_" + std::to_string(node_id(node)) + " is a non-mask arbitrary-width constant");
+  return lit_const_decimal(v, w);
 }
 
 // Driver expression: how the consumer references the value produced by `dpin`.
@@ -557,7 +748,84 @@ std::string driver_expr_at(const Ctx& ctx, const Node_pin& dpin, uint32_t expect
   return driver_expr(ctx, dpin);
 }
 
-std::string ucast_pin_at(const Ctx& ctx, const Node_pin& dpin, uint32_t w) { return ucast_at(driver_expr_at(ctx, dpin, w), w); }
+uint32_t minimal_unsigned_const_width(const Const &v) {
+  if (!v.is_i()) {
+    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_bits()));
+  }
+  const int64_t iv = v.to_i();
+  if (iv <= 0) {
+    return 1;
+  }
+
+  auto uv = static_cast<uint64_t>(iv);
+  uint32_t bits = 0;
+  while (uv != 0) {
+    ++bits;
+    uv >>= 1;
+  }
+  return std::max<uint32_t>(1, bits);
+}
+
+std::string shift_amount_expr_at(const Ctx &ctx, const Node_pin &dpin, uint32_t expected_w) {
+  auto driver_node = pin_node(dpin);
+  if (pin_is_const(dpin)) {
+    const auto v = pin_const_value(dpin);
+    const auto w = std::max<uint32_t>(expected_w, minimal_unsigned_const_width(v));
+    return lit_const_at(ctx, driver_node, v, w);
+  }
+  return driver_expr_at(ctx, dpin, expected_w);
+}
+
+std::string ucast_pin_at(const Ctx &ctx, const Node_pin &dpin, uint32_t w) {
+  return ucast_at(driver_expr_at(ctx, dpin, w), w);
+}
+
+std::string bool_pin_at(const Ctx &ctx, const Node_pin &dpin, uint32_t w = 1) {
+  return "((" + driver_expr_at(ctx, dpin, w) + ") \\<noteq> 0)";
+}
+
+const Memory_info &memory_info_for(const Ctx &ctx, const Node &node) {
+  auto it = ctx.memory_info.find(node_id(node));
+  if (it == ctx.memory_info.end()) {
+    fatal(ctx, "internal: memory node n_" + std::to_string(node_id(node)) + " has no Memory_info.");
+  }
+  return it->second;
+}
+
+std::string memory_read_expr(const Ctx &ctx, const Memory_info &mi) {
+  if (mi.read_ports.empty()) {
+    fatal(ctx, memory_policy_summary(mi) + ". memory read expression requested for write-only memory.");
+  }
+  const auto &p = mi.ports.at(mi.read_ports.front());
+  const auto addr = ucast_pin_at(ctx, p.addr, mi.addr_width);
+  const auto en = bool_pin_at(ctx, p.enable, pin_width(ctx, p.enable, mi.node));
+  return "(if " + en + " then mem_read (" + mi.field + " s) " + addr
+         + " else " + lit_zero(mi.bits) + ")";
+}
+
+std::string memory_next_expr(const Ctx &ctx, const Memory_info &mi) {
+  if (mi.write_ports.empty()) {
+    return mi.field + " s";
+  }
+
+  const auto &p = mi.ports.at(mi.write_ports.front());
+  const auto current = mi.field + " s";
+  const auto addr = ucast_pin_at(ctx, p.addr, mi.addr_width);
+  const auto data = ucast_pin_at(ctx, p.din, mi.bits);
+  const auto enable_w = std::max<uint32_t>(1, mi.wensize);
+  const auto enable = ucast_pin_at(ctx, p.enable, enable_w);
+  const auto enable_bool = "((" + enable + ") \\<noteq> 0)";
+
+  if (mi.wensize <= 1) {
+    return "(if " + enable_bool + " then mem_write (" + current + ") " + addr + " " + data
+           + " else " + current + ")";
+  }
+
+  const auto byte_w = mi.bits / mi.wensize;
+  return "(if " + enable_bool + " then mem_write_be (" + current + ") " + addr + " "
+         + data + " " + enable + " " + std::to_string(byte_w)
+         + " else " + current + ")";
+}
 
 // Format an n-ary infix operator using lowercase function-name form
 //   to avoid Isabelle's `OR`/`AND`/`XOR` infix-vs-token parser ambiguity in
@@ -619,13 +887,8 @@ std::string int_of_const(const Ctx& ctx, const Node& node, const Dlop& v, uint32
     return std::to_string(i);
   }
   auto [mask_lo, mask_hi] = v.get_mask_range();
-  if (mask_lo == 0 && static_cast<uint32_t>(mask_hi) <= w) {
-    return "((2::int) ^ " + std::to_string(w) + " - 1)";
-  }
-  fatal(ctx,
-        "Const node n_" + std::to_string(node_id(node))
-            + " is a non-mask arbitrary-width constant; certificate needs a decimal emitter.");
-  return "0";
+  if (mask_lo == 0 && static_cast<uint32_t>(mask_hi) <= w) return "((2::int) ^ " + std::to_string(w) + " - 1)";
+  return isabelle_int_literal(v.to_decimal_string());
 }
 
 struct Cert_build {
@@ -804,7 +1067,12 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
 
       case Ntype_op::LT:
       case Ntype_op::GT: {
-        op_expr = (node_op(node) == Ntype_op::LT) ? "Op_ULT" : "Op_UGT";
+        const bool is_signed = node_output_is_signed(node);
+        if (node_op(node) == Ntype_op::LT) {
+          op_expr = is_signed ? "Op_SLT" : "Op_ULT";
+        } else {
+          op_expr = is_signed ? "Op_SGT" : "Op_UGT";
+        }
         std::vector<Node_pin> drivers;
         for (const auto& e : inp_edges_ordered(node)) {
           drivers.push_back(e.driver);
@@ -866,10 +1134,14 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
           op_expr = "Op_Const 0";
         } else if (have_a && !have_b) {
           op_expr = "Op_Sum 1";
-          deps    = {cert_dep_id(ctx, build, a, w)};
+          deps = {cert_dep_id(ctx, build, a, pin_width(ctx, a, node))};
         } else if (have_a && have_b) {
           op_expr = "Op_SRA";
-          deps    = {cert_dep_id(ctx, build, a, w), cert_dep_id(ctx, build, b, pin_width(ctx, b, node))};
+          auto shift_w = pin_width(ctx, b, node);
+          if (pin_is_const(b)) {
+            shift_w = std::max<uint32_t>(shift_w, minimal_unsigned_const_width(pin_const_value(b)));
+          }
+          deps = {cert_dep_id(ctx, build, a, pin_width(ctx, a, node)), cert_dep_id(ctx, build, b, shift_w)};
         } else {
           fatal(ctx, "SRA node n_" + std::to_string(node_id(node)) + " missing a/b.");
         }
@@ -992,10 +1264,63 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
   return oss.str();
 }
 
-void emit_cert_theory(const Ctx& ctx, const std::vector<Node>& topo, const std::vector<Node>& flop_nodes,
-                      const absl::flat_hash_set<uint32_t>& flop_nids, const std::map<std::string, Node_pin>& out_drivers,
-                      const std::map<uint32_t, Node_pin>& flop_din, const std::map<uint32_t, Node_pin>& flop_reset,
-                      const std::map<uint32_t, Node_pin>& flop_enable) {
+void emit_memory_cert_stub_theory(const Ctx &ctx,
+                                  const std::vector<Node> &topo,
+                                  const std::vector<Node> &flop_nodes,
+                                  const std::vector<Node> &memory_nodes) {
+  const std::string model_theory = ctx.top_name + "_Lgraph";
+  const std::string cert_theory  = ctx.top_name + "_Lgraph_Cert";
+  const std::string path         = ctx.output_dir + "/" + cert_theory + ".thy";
+  std::ofstream ofs(path);
+  if (!ofs) {
+    std::cerr << "pass.isabelle could not write " << path << "\n";
+    return;
+  }
+
+  ofs << "(* Generated by pass.isabelle. Do not edit by hand. *)\n";
+  ofs << "theory " << cert_theory << "\n";
+  ofs << "  imports " << model_theory << "\n";
+  ofs << "begin\n\n";
+
+  ofs << "definition " << ctx.top_name << "_node_count :: nat where\n";
+  ofs << "  \"" << ctx.top_name << "_node_count = " << topo.size() << "\"\n\n";
+  ofs << "definition " << ctx.top_name << "_flop_count :: nat where\n";
+  ofs << "  \"" << ctx.top_name << "_flop_count = " << flop_nodes.size() << "\"\n\n";
+  ofs << "definition " << ctx.top_name << "_memory_count :: nat where\n";
+  ofs << "  \"" << ctx.top_name << "_memory_count = " << memory_nodes.size() << "\"\n\n";
+
+  ofs << "lemma " << ctx.top_name << "_certificate_counts:\n";
+  ofs << "  \"" << ctx.top_name << "_node_count = " << topo.size()
+      << " \\<and> " << ctx.top_name << "_flop_count = " << flop_nodes.size()
+      << " \\<and> " << ctx.top_name << "_memory_count = " << memory_nodes.size() << "\"\n";
+  ofs << "  by (simp add: " << ctx.top_name << "_node_count_def "
+      << ctx.top_name << "_flop_count_def " << ctx.top_name << "_memory_count_def)\n\n";
+
+  ofs << "text \\<open>\n";
+  ofs << "  This design contains preserved LGraph Memory nodes.  The executable\n";
+  ofs << "  generated model represents them as function-valued Isabelle state fields\n";
+  ofs << "  using SemanticPrimitives.mem_read/mem_write/mem_write_be.  The current\n";
+  ofs << "  graph certificate evaluator is still bit-vector-only, so pass.isabelle\n";
+  ofs << "  intentionally does not emit graph_cert_wf or eval_graph bridge theorems\n";
+  ofs << "  for memory designs yet.  Add memory-valued certificate sources and memory\n";
+  ofs << "  read/write evaluator operators before enabling certificate proofs here.\n";
+  ofs << "\\<close>\n\n";
+
+  ofs << "end\n";
+
+  std::cout << "pass.isabelle: " << ctx.base_name << " -> " << path
+            << " (memory certificate stub: " << topo.size() << " internal nodes, "
+            << flop_nodes.size() << " flops, " << memory_nodes.size() << " memories)\n";
+}
+
+void emit_cert_theory(const Ctx &ctx,
+                      const std::vector<Node> &topo,
+                      const std::vector<Node> &flop_nodes,
+                      const absl::flat_hash_set<uint32_t> &flop_nids,
+                      const std::map<std::string, Node_pin> &out_drivers,
+                      const std::map<uint32_t, Node_pin> &flop_din,
+                      const std::map<uint32_t, Node_pin> &flop_reset,
+                      const std::map<uint32_t, Node_pin> &flop_enable) {
   (void)flop_nids;
   const std::string model_theory = ctx.top_name + "_Lgraph";
   const std::string cert_theory  = ctx.top_name + "_Lgraph_Cert";
@@ -1511,7 +1836,7 @@ void emit_cert_theory(const Ctx& ctx, const std::vector<Node>& topo, const std::
 // Emit the inline Isabelle expression for a node (no surrounding `let n_<id>`).
 std::string emit_node_expr(const Ctx& ctx, const Node& node) {
   const auto op = node_op(node);
-  const auto w  = node_width(ctx, node);
+  const auto w  = node_is_memory(node) ? memory_info_for(ctx, node).bits : node_width(ctx, node);
 
   // Gather sink edges grouped by pin.
   // For multi-driver pin groups (Sum's A/B, EQ's variadic A, And's variadic A,
@@ -1670,14 +1995,18 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
             ctx,
             "LT/GT node n_" + std::to_string(node_id(node)) + " has " + std::to_string(drivers.size()) + " inputs; v1 expects 2.");
       }
-      uint32_t    wa    = pin_width(ctx, drivers[0], node);
-      uint32_t    wb    = pin_width(ctx, drivers[1], node);
-      uint32_t    cmp_w = std::max(wa, wb);
-      // v1 default: emit unsigned comparison. Signed variant requires LGraph
-      // signedness attribute - not threaded in v1 (warn-and-emit-unsigned).
-      const char* cmp   = (op == Ntype_op::LT) ? "<" : ">";
-      return "(if " + ucast_pin_at(ctx, drivers[0], cmp_w) + " " + cmp + " " + ucast_pin_at(ctx, drivers[1], cmp_w) + " then "
-             + lit_one(1) + " else " + lit_zero(1) + ")";
+      uint32_t wa = pin_width(ctx, drivers[0], node);
+      uint32_t wb = pin_width(ctx, drivers[1], node);
+      uint32_t cmp_w = std::max(wa, wb);
+      const char *cmp = (op == Ntype_op::LT) ? "<" : ">";
+      if (node_output_is_signed(node)) {
+        return "(if sint " + ucast_pin_at(ctx, drivers[0], cmp_w) + " " + cmp + " sint "
+               + ucast_pin_at(ctx, drivers[1], cmp_w)
+               + " then " + lit_one(1) + " else " + lit_zero(1) + ")";
+      }
+      return "(if " + ucast_pin_at(ctx, drivers[0], cmp_w) + " " + cmp + " "
+             + ucast_pin_at(ctx, drivers[1], cmp_w)
+             + " then " + lit_one(1) + " else " + lit_zero(1) + ")";
     }
 
     case Ntype_op::EQ: {
@@ -1727,13 +2056,13 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       const std::string a_cast = ucast_pin_at(ctx, a, w);
       if (bs.size() == 1) {
         auto bw = pin_width(ctx, bs[0], node);
-        return "(push_bit (unat (" + driver_expr_at(ctx, bs[0], bw) + ")) " + a_cast + ")";
+        return "(push_bit (unat (" + shift_amount_expr_at(ctx, bs[0], bw) + ")) " + a_cast + ")";
       }
       // Multi-shift-OR: inline OR-chain
       std::vector<std::string> shifts;
       for (auto& bd : bs) {
         auto bw = pin_width(ctx, bd, node);
-        shifts.push_back("(push_bit (unat (" + driver_expr_at(ctx, bd, bw) + ")) " + a_cast + ")");
+        shifts.push_back("(push_bit (unat (" + shift_amount_expr_at(ctx, bd, bw) + ")) " + a_cast + ")");
       }
       return nary_op_func("Bit_Operations.or", shifts);
     }
@@ -1776,13 +2105,16 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
         if (have_a && !have_b) {
           return ucast_pin_at(ctx, a, w);
         }
-        if (ctx.strict) {
-          fatal(ctx, reason);
-        }
+        if (ctx.strict) fatal(ctx, reason);
         return undefined_at(w, reason);
       }
+      uint32_t value_w = pin_width(ctx, a, node);
       uint32_t shift_w = pin_width(ctx, b, node);
-      return "(sem_sra " + ucast_pin_at(ctx, a, w) + " " + ucast_pin_at(ctx, b, shift_w) + ")";
+      if (pin_is_const(b)) {
+        shift_w = std::max<uint32_t>(shift_w, minimal_unsigned_const_width(pin_const_value(b)));
+      }
+      return "((ucast (sem_sra " + ucast_pin_at(ctx, a, value_w) + " "
+             + shift_amount_expr_at(ctx, b, shift_w) + ") :: " + std::to_string(w) + " word))";
     }
 
     case Ntype_op::Mux: {
@@ -1919,8 +2251,17 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
              + driver_expr_at(ctx, value, value_w) + ")";
     }
 
+    case Ntype_op::Memory: {
+      const auto &mi = memory_info_for(ctx, node);
+      if (mi.bits != w) {
+        fatal(ctx, "Memory node n_" + std::to_string(node_id(node))
+                       + " output width " + std::to_string(w)
+                       + " does not match memory bits " + std::to_string(mi.bits));
+      }
+      return memory_read_expr(ctx, mi);
+    }
+
     // Unsupported in v1.
-    case Ntype_op::Memory:
     case Ntype_op::Latch:
     case Ntype_op::Fflop:
     case Ntype_op::Sub:
@@ -2128,7 +2469,33 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
       ctx.name_map_rows.emplace_back("state", flop_raw, fld);
     }
   }
-  bool sequential = !flop_nodes.empty();
+
+  // Preserved LGraph memories become function-valued state fields.  The v1
+  // executable model intentionally supports only a conservative async/array
+  // subset; parse_memory_info rejects the rest before emission.
+  std::vector<Node> memory_nodes;
+  absl::flat_hash_set<uint32_t> memory_nids;
+  for (auto node : g->fast_class()) {
+    if (node_is_memory(node)) {
+      auto mi = parse_memory_info(ctx, node);
+      std::string mem_raw;
+      auto nm = livehd::graph_util::node_name_of(node);
+      if (!nm.empty() && nm[0] != '_') {
+        mem_raw = std::string(nm);
+      }
+      if (mem_raw.empty()) {
+        mem_raw = "memory_" + std::to_string(node_id(node));
+      }
+      mi.raw_name = mem_raw;
+      mi.field = make_field_name("st_", mem_raw, ctx.used_fields);
+      ctx.name_map_rows.emplace_back("memory", mem_raw, mi.field);
+      ctx.memory_info[node_id(node)] = mi;
+      memory_nodes.emplace_back(node);
+      memory_nids.insert(node_id(node));
+    }
+  }
+
+  bool sequential = !flop_nodes.empty() || !memory_nodes.empty();
 
   // ---- Compute root set for reachability -------------------------------
   std::vector<Node_pin>           roots;
@@ -2169,6 +2536,17 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
   }
   for (auto& kv : flop_enable) {
     roots.push_back(kv.second);
+  }
+
+  // (c) drivers of every supported memory write-port input
+  for (const auto &mn : memory_nodes) {
+    const auto &mi = ctx.memory_info.at(node_id(mn));
+    for (auto idx : mi.write_ports) {
+      const auto &p = mi.ports.at(idx);
+      roots.push_back(p.addr);
+      roots.push_back(p.din);
+      roots.push_back(p.enable);
+    }
   }
 
   // ---- Topo-order all reachable internal combinational nodes -----------
@@ -2235,6 +2613,10 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
       for (auto& kv : ctx.flop_field) {
         ofs << "  " << kv.second << " :: \"" << ctx.flop_width[kv.first] << " word\"\n";
       }
+      for (const auto &mn : memory_nodes) {
+        const auto &mi = ctx.memory_info.at(node_id(mn));
+        ofs << "  " << mi.field << " :: \"(" << mi.addr_width << ", " << mi.bits << ") mem\"\n";
+      }
       ofs << "\n";
     }
 
@@ -2243,12 +2625,10 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
       std::ostringstream oss;
       oss << "    (let\n";
       bool first = true;
-      for (const auto& n : topo) {
-        if (!first) {
-          oss << ";\n";
-        }
-        first    = false;
-        auto w   = node_width(ctx, n);
+      for (const auto &n : topo) {
+        if (!first) oss << ";\n";
+        first = false;
+        auto w   = node_is_memory(n) ? memory_info_for(ctx, n).bits : node_width(ctx, n);
         auto rhs = emit_node_expr(ctx, n);
         oss << "       n_" << node_id(n) << " = (" << rhs << " " << ty_word(w) << ")";
       }
@@ -2298,12 +2678,10 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
       ofs << "    (let\n";
       // Emit the same combinational let-chain (it covers reset/enable/din cones).
       bool first = true;
-      for (const auto& n : topo) {
-        if (!first) {
-          ofs << ";\n";
-        }
-        first    = false;
-        auto w   = node_width(ctx, n);
+      for (const auto &n : topo) {
+        if (!first) ofs << ";\n";
+        first = false;
+        auto w   = node_is_memory(n) ? memory_info_for(ctx, n).bits : node_width(ctx, n);
         auto rhs = emit_node_expr(ctx, n);
         ofs << "       n_" << node_id(n) << " = (" << rhs << " " << ty_word(w) << ")";
       }
@@ -2331,6 +2709,14 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
         ofs << "       new_" << fld << " = flop_next " << reset_e << " "
             << "(0 :: " << fw << " word) " << en_e << " " << din_e << " (" << fld << " s)";
       }
+      // Per-memory new value via function-map updates.  All RHS expressions
+      // reference old state s; record update below is simultaneous.
+      for (const auto &mn : memory_nodes) {
+        const auto &mi = ctx.memory_info.at(node_id(mn));
+        if (!first) ofs << ";\n";
+        first = false;
+        ofs << "       new_" << mi.field << " = " << memory_next_expr(ctx, mi);
+      }
       ofs << "\n     in s\\<lparr>";
       bool fc = true;
       for (auto& fn : flop_nodes) {
@@ -2340,6 +2726,12 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
         fc       = false;
         auto fld = ctx.flop_field[node_id(fn)];
         ofs << fld << " := new_" << fld;
+      }
+      for (const auto &mn : memory_nodes) {
+        if (!fc) ofs << ", ";
+        fc = false;
+        const auto &mi = ctx.memory_info.at(node_id(mn));
+        ofs << mi.field << " := new_" << mi.field;
       }
       ofs << "\\<rparr>)\"\n\n";
 
@@ -2360,8 +2752,15 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
     return;
   }
 
-  emit_cert_theory(ctx, topo, flop_nodes, flop_nids, out_drivers, flop_din, flop_reset, flop_enable);
+  if (!memory_nodes.empty()) {
+    emit_memory_cert_stub_theory(ctx, topo, flop_nodes, memory_nodes);
+  } else {
+    emit_cert_theory(ctx, topo, flop_nodes, flop_nids,
+                     out_drivers, flop_din, flop_reset, flop_enable);
+  }
 
-  std::cout << "pass.isabelle: " << ctx.base_name << " -> " << theory_path << " (" << topo.size() << " nodes, " << flop_nodes.size()
-            << " flops, sequential=" << (sequential ? "yes" : "no") << ")\n";
+  std::cout << "pass.isabelle: " << ctx.base_name << " -> " << theory_path
+            << " (" << topo.size() << " nodes, " << flop_nodes.size()
+            << " flops, " << memory_nodes.size() << " memories, sequential="
+            << (sequential ? "yes" : "no") << ")\n";
 }

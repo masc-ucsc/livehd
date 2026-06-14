@@ -163,6 +163,16 @@ void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, std::vector<hhd
   auto op = type_op_of(node);
 
   for (auto& out : node.out_edges()) {
+    auto out_bits = bits_of(out.driver);
+    for (auto& inp : inp_edges_ordered) {
+      auto inp_bits = bits_of(inp.driver);
+      if (out_bits > 0 && inp_bits > 0 && out_bits != inp_bits) {
+        return;
+      }
+    }
+  }
+
+  for (auto& out : node.out_edges()) {
     for (auto& inp : inp_edges_ordered) {
       if (op == Ntype_op::Xor) {
         if (is_driver_connected_to_sink(inp.driver, out.sink)) {
@@ -180,6 +190,14 @@ void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, std::vector<hhd
 }
 
 void Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new_dpin) {
+  auto new_bits = bits_of(new_dpin);
+  for (auto& out : node.out_edges()) {
+    auto out_bits = bits_of(out.driver);
+    if (out_bits > 0 && new_bits > 0 && out_bits != new_bits) {
+      return;
+    }
+  }
+
   for (auto& out : node.out_edges()) {
     new_dpin.connect_sink(out.sink);
   }

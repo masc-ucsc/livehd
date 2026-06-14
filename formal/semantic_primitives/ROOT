@@ -1,0 +1,5 @@
+session DINO_Semantic_Primitives_Test = "HOL-Library" +
+  options [document = false, browser_info = false]
+  theories
+    SemanticPrimitives
+    SemanticPrimitives_Test

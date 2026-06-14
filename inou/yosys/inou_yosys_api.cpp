@@ -288,6 +288,8 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
   const auto abc{var.get("abc")};
   const auto top{var.get("top")};
   const auto frontend{var.get("frontend")};
+  const auto setundef{var.get("setundef")};
+  const auto memory_mode{var.get("memory_mode")};
   // const auto lib{var.get("liberty")};
 
   mustache::data vars;
@@ -411,6 +413,26 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
     }
   }
 
+  if (!setundef.empty()) {
+    if (setundef == "zero" || setundef == "true") {
+      vars.set("setundef_zero", mustache::data::type::bool_true);
+    } else {
+      error("unrecognized setundef {} option. Supported values: zero, true", setundef);
+      return;
+    }
+  }
+
+  if (!memory_mode.empty()) {
+    if (memory_mode == "collect" || memory_mode == "preserve") {
+      vars.set("memory_collect", mustache::data::type::bool_true);
+    } else if (memory_mode == "nomap" || memory_mode == "default") {
+      // Existing flow: memory -nomap.
+    } else {
+      error("unrecognized memory_mode {} option. Supported values: collect, preserve, nomap, default", memory_mode);
+      return;
+    }
+  }
+
   const auto rename_top{var.get("rename_top")};
   if (!rename_top.empty()) {
     vars.set("rename_top", std::string(rename_top));
@@ -469,6 +491,8 @@ void Inou_yosys_api::setup() {
   m1.add_label_optional("path", "path to build the lgraph[s]", "");  // empty: kernel passes an explicit path; no stray lgdb/
   m1.add_label_optional("frontend", "frontend to use: verilog or slang", "verilog");
   m1.add_label_optional("slang_flags", "comma- (or \\x1f-) separated flags for read_slang command", "");
+  m1.add_label_optional("setundef", "replace undef/don't-care values before graph import: zero|true", "");
+  m1.add_label_optional("memory_mode", "memory lowering mode before graph import: default|nomap|collect|preserve", "");
   m1.add_label_optional("techmap", "Either full or alumac techmap or none from yosys. Cannot be used with liberty", "");
   m1.add_label_optional("liberty", "Liberty file for technology mapping. Cannot be used with techmap, will call abc for tmap", "");
   m1.add_label_optional("abc", "run ABC inside yosys before loading lgraph", "false");

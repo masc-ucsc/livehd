@@ -285,3 +285,9 @@ vim.diagnostic.setqflist()` to list them).
 
 > `prpfmt` auto-formatting is independent of the language server above — wire it
 > up separately via [`conform.nvim`](https://github.com/stevearc/conform.nvim).
+
+# Isabelle Translation
+
+See [`pass/isabelle/README.md`](pass/isabelle/README.md) for the
+`pass.isabelle` validation flow, CVA6 cache/memory LEC status, certificate-proof
+workflow, and Isabelle heap-build rules.
