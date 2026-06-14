@@ -225,6 +225,12 @@ protected:
   // un-annotated). First pass returning a non-none kind wins (typecheck).
   // See uPass::provide_scalar_kind.
   Io_kind                                                  try_scalar_kind(std::string_view name);
+  // Comptime scalar kind of a call actual (const literal or ref): bool/string/
+  // integer, falling back to integer for a range-carrying typed var; `none`
+  // otherwise. The single source of truth shared by try_inline_func_call's real
+  // bind and signature_matches's overload probe — they MUST agree on kind or a
+  // probed-accepted candidate gets rejected at commit.
+  Io_kind                                                  actual_node_kind(const Lnast_node& node);
   // Declared storage class (mut/const/reg/type) of a variable. First pass
   // that provides a non-unknown answer wins. See uPass::provide_decl_storage
   // (ref-actual mutability).

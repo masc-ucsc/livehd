@@ -586,6 +586,34 @@ Io_kind uPass_runner::try_scalar_kind(std::string_view name) {
   }
 }
 
+Io_kind uPass_runner::actual_node_kind(const Lnast_node& node) {
+  if (node.is_const()) {
+    const auto t = node.get_name();
+    if (t == "true" || t == "false") {
+      return Io_kind::boolean;
+    }
+    if (!t.empty() && (t.front() == '\'' || t.front() == '"')) {
+      return Io_kind::string;
+    }
+    if (t == "nil") {
+      return Io_kind::none;
+    }
+    if (auto v = Dlop::from_pyrope(t); v && v->is_integer()) {
+      return Io_kind::integer;
+    }
+    return Io_kind::none;
+  }
+  if (node.is_ref()) {
+    if (auto k = try_scalar_kind(node.get_name()); k != Io_kind::none) {
+      return k;  // inferred/declared scalar kind (bool/string/integer)
+    }
+    if (try_decl_type(node.get_name()).has_value()) {
+      return Io_kind::integer;  // typed scalar var (range carrier)
+    }
+  }
+  return Io_kind::none;
+}
+
 upass::uPass::Decl_storage uPass_runner::try_decl_storage(std::string_view name) {
   const auto f = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), name);
   if (!f) {
@@ -1833,37 +1861,9 @@ bool uPass_runner::try_inline_func_call() {
   // Classify a positional actual's scalar kind for exception (3). Dlop literals
   // carry their kind verbatim; a `ref` reports its inferred/declared scalar kind
   // (bool/string/integer), falling back to integer for a range-carrying typed
-  // var. Anything else is `none` (can't drive type-based disambiguation). MUST
-  // stay identical to signature_matches's `classify` — the overload probe and
-  // this real bind have to agree on kind, or a probed-accepted candidate is
-  // committed and then rejected here (see signature_matches CONTRACT).
-  auto              actual_kind    = [&](const Lnast_node& node) -> Io_kind {
-    if (node.is_const()) {
-      const auto t = node.get_name();
-      if (t == "true" || t == "false") {
-        return Io_kind::boolean;
-      }
-      if (!t.empty() && (t.front() == '\'' || t.front() == '"')) {
-        return Io_kind::string;
-      }
-      if (t == "nil") {
-        return Io_kind::none;
-      }
-      if (auto v = Dlop::from_pyrope(t); v && v->is_integer()) {
-        return Io_kind::integer;
-      }
-      return Io_kind::none;
-    }
-    if (node.is_ref()) {
-      if (auto k = try_scalar_kind(node.get_name()); k != Io_kind::none) {
-        return k;  // inferred/declared scalar kind (bool/string/integer)
-      }
-      if (try_decl_type(node.get_name()).has_value()) {
-        return Io_kind::integer;  // typed scalar var (range carrier)
-      }
-    }
-    return Io_kind::none;
-  };
+  // var. The shared actual_node_kind() is also used by signature_matches's
+  // overload probe, so the two agree on kind by construction.
+  auto              actual_kind    = [&](const Lnast_node& node) { return actual_node_kind(node); };
   for (auto& a : actuals) {
     if (a.is_named) {
       if (a.key == "self") {
@@ -3452,35 +3452,9 @@ bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<
   const bool        has_self       = nbind > 0 && io.inputs[0].name == "self";
   const std::size_t n_named_params = nbind - (has_self ? 1 : 0);
 
-  // Comptime scalar kind of an actual (mirrors the inliner's actual_kind, with
-  // bool/string detection for typed refs added for the kind pre-filter).
-  auto classify = [&](const Lnast_node& node) -> Io_kind {
-    if (node.is_const()) {
-      const auto t = node.get_name();
-      if (t == "true" || t == "false") {
-        return Io_kind::boolean;
-      }
-      if (!t.empty() && (t.front() == '\'' || t.front() == '"')) {
-        return Io_kind::string;
-      }
-      if (t == "nil") {
-        return Io_kind::none;
-      }
-      if (auto v = Dlop::from_pyrope(t); v && v->is_integer()) {
-        return Io_kind::integer;
-      }
-      return Io_kind::none;
-    }
-    if (node.is_ref()) {
-      if (auto k = try_scalar_kind(node.get_name()); k != Io_kind::none) {
-        return k;
-      }
-      if (try_decl_type(node.get_name()).has_value()) {
-        return Io_kind::integer;
-      }
-    }
-    return Io_kind::none;
-  };
+  // Comptime scalar kind of an actual — the same actual_node_kind() the real
+  // bind (try_inline_func_call) uses, so probe and commit agree on kind.
+  auto classify = [&](const Lnast_node& node) { return actual_node_kind(node); };
 
   for (const auto& a : actuals) {
     if (a.is_named) {
