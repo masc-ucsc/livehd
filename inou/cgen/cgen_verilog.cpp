@@ -279,6 +279,125 @@ void Cgen_verilog::process_flop(std::shared_ptr<File_output> fout, const hhds::N
   }
 }
 
+// A level-sensitive latch (yosys $dlatch). Unlike a flop it has no `___next_`
+// combinational half: it is emitted directly as `always @* if (en) q = d;`,
+// which yosys re-reads as a $dlatch for LEC. The reader maps EN->enable,
+// D->din, and connects a const-0 `posclk` only for active-low enable
+// (EN_POLARITY==false), so a known-false posclk means the transparent level is
+// `!enable` (e.g. prim_clk_gate's `if (!clk_i)`).
+void Cgen_verilog::process_latch(std::shared_ptr<File_output> fout, const hhds::Node_class& node) {
+  auto dpin_q = node.get_driver_pin(0);
+  auto name   = get_scaped_name(pin_wire_name(dpin_q));
+
+  auto din_dpin = get_driver(find_sink_pin(node, "din"));
+  auto en_dpin  = get_driver(find_sink_pin(node, "enable"));
+  if (din_dpin.is_invalid() || en_dpin.is_invalid()) {
+    return;  // malformed latch: leave the declared reg inert rather than emit garbage
+  }
+  auto din    = get_wire_or_const(din_dpin);
+  auto enable = get_wire_or_const(en_dpin);
+
+  bool neg_en      = false;
+  auto posclk_dpin = get_driver(find_sink_pin(node, "posclk"));
+  if (!posclk_dpin.is_invalid() && is_const_pin(posclk_dpin)) {
+    neg_en = hydrate_const(posclk_dpin).is_known_false();
+  }
+
+  note_src(fout, node);
+  fout->append("always @* begin\n");
+  fout->append(absl::StrCat("  if (", neg_en ? "!" : "", enable, ") ", name, " = ", din, ";\n"));
+  fout->append("end\n");
+}
+
+// Generate a cgen_memory_[multiclock_]<R>rd_<W>wr module mirroring the static
+// ware/rtl wrapper templates, for (R,W,clock) shapes ware/rtl does not ship
+// (e.g. a register file that reads out all entries -> many read ports, or a
+// multi-clock RF). Semantics match the templates exactly: port-order write
+// priority, per-write-port FWD forwarding, and LATENCY_0 (==1 flops the output
+// once, ==0 async). Uses $clog2 instead of the `log2 macro to avoid depending
+// on a macro that may not be in scope when emitted inline.
+std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd, int n_wr, bool single_clock) {
+  std::string s;
+  s += absl::StrCat("module ", mod_name, "\n");
+  s += "  #(parameter BITS = 4, SIZE=128, FWD=1, LATENCY_0=1, WENSIZE=1,\n";
+  s += "    parameter INIT_EN=0, parameter [BITS*SIZE-1:0] INIT=0)\n  (\n";
+  bool first = true;
+  auto port  = [&](const std::string& decl) {
+    s += (first ? "    " : "   ,") + decl + "\n";
+    first = false;
+  };
+  if (single_clock) {
+    port("input clk");
+  }
+  for (int k = 0; k < n_rd; ++k) {
+    port(absl::StrCat("input [$clog2(SIZE)-1:0] rd_addr_", k));
+    port(absl::StrCat("input rd_enable_", k));
+    if (!single_clock) {
+      port(absl::StrCat("input rd_clock_", k));
+    }
+    port(absl::StrCat("output reg [BITS-1:0] rd_dout_", k));
+  }
+  for (int j = 0; j < n_wr; ++j) {
+    port(absl::StrCat("input [$clog2(SIZE)-1:0] wr_addr_", j));
+    port(absl::StrCat("input [WENSIZE-1:0] wr_enable_", j));
+    if (!single_clock) {
+      port(absl::StrCat("input wr_clock_", j));
+    }
+    port(absl::StrCat("input [BITS-1:0] wr_din_", j));
+  }
+  s += "  );\n";
+  s += "localparam MASKSIZE = BITS/WENSIZE;\n";
+  s += "reg [BITS-1:0] data[SIZE-1:0];\n";
+  s += "generate if (INIT_EN) begin:BLOCK_INIT\n";
+  s += "  integer ii;\n  initial for(ii=0;ii<SIZE;ii=ii+1) data[ii] = INIT[ii*BITS +: BITS];\n";
+  s += "end endgenerate\n";
+  // WRITE: single-clock = one always with all ports (port-order priority);
+  // multiclock = one always per write clock.
+  s += "integer i;\n";
+  auto wr_body = [&](int j) {
+    s += absl::StrCat("  for(i=0;i<WENSIZE;i=i+1) if(wr_enable_",
+                      j,
+                      "[i]) data[wr_addr_",
+                      j,
+                      "][i*MASKSIZE +: MASKSIZE] <= wr_din_",
+                      j,
+                      "[i*MASKSIZE +: MASKSIZE];\n");
+  };
+  if (single_clock) {
+    s += "always @(posedge clk) begin\n";
+    for (int j = 0; j < n_wr; ++j) {
+      wr_body(j);
+    }
+    s += "end\n";
+  } else {
+    for (int j = 0; j < n_wr; ++j) {
+      s += absl::StrCat("always @(posedge wr_clock_", j, ") begin\n");
+      wr_body(j);
+      s += "end\n";
+    }
+  }
+  // READ ports
+  for (int k = 0; k < n_rd; ++k) {
+    s += absl::StrCat("reg [BITS-1:0] d", k, "_mem; reg [BITS-1:0] d", k, "_fwd;\n");
+    s += absl::StrCat("always_comb d", k, "_mem = rd_enable_", k, " ? data[rd_addr_", k, "] : {BITS{1'bx}};\n");
+    s += absl::StrCat("genvar fwd_j", k, ";\n");
+    s += absl::StrCat("generate for(fwd_j", k, "=0;fwd_j", k, "<WENSIZE;fwd_j", k, "=fwd_j", k, "+1) begin:FWD_BLOCK_CALC_", k, "\n");
+    s += absl::StrCat("  always_comb d", k, "_fwd[fwd_j", k, "*MASKSIZE +: MASKSIZE] =\n");
+    for (int j = 0; j < n_wr; ++j) {
+      s += absl::StrCat("    (((FWD >> ", j, ") & 1) != 0 && wr_enable_", j, "[fwd_j", k, "] && (wr_addr_", j, " == rd_addr_", k,
+                        ")) ? wr_din_", j, "[fwd_j", k, "*MASKSIZE +: MASKSIZE] :\n");
+    }
+    s += absl::StrCat("    d", k, "_mem[fwd_j", k, "*MASKSIZE +: MASKSIZE];\n");
+    s += "end endgenerate\n";
+    s += absl::StrCat("generate if (LATENCY_0==1) begin:BLOCK_RD_LAT_", k, "\n");
+    s += absl::StrCat("  always @(posedge ", single_clock ? std::string("clk") : absl::StrCat("rd_clock_", k), ") rd_dout_", k,
+                      " <= d", k, "_fwd;\n");
+    s += absl::StrCat("end else begin:BLOCK_RD_COMB_", k, "\n  assign rd_dout_", k, " = d", k, "_fwd;\nend endgenerate\n");
+  }
+  s += "endmodule\n";
+  return s;
+}
+
 void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds::Node_class& node) {
   note_src(fout, node);
   auto iname = get_scaped_name(default_instance_name(node));
@@ -423,23 +542,22 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         = single_clock
               ? ((eff_rd >= 1 && eff_rd <= 4 && eff_wr >= 1 && eff_wr <= 2) || (eff_rd == 1 && (eff_wr == 3 || eff_wr == 4)))
               : (eff_rd == 1 && eff_wr == 1);
-    if (!have_wrapper) {
-      livehd::diag::err("inou.cgen", "mem-wrapper-missing", "unsupported")
-          .msg("memory {} needs a {}rd_{}wr {} wrapper that ware/rtl does not carry",
-               debug_name(node),
-               eff_rd,
-               eff_wr,
-               single_clock ? "single-clock" : "multiclock")
-          .fatal();
-      return;
-    }
-
     std::string name;
     name = absl::StrCat(name, "cgen_memory_", single_clock ? "" : "multiclock_");
     name = absl::StrCat(name, eff_rd, "rd_");
     name = absl::StrCat(name, eff_wr, "wr");
 
-    fout->prepend(absl::StrCat("`include \"", name, ".v\" \n"));
+    // ware/rtl ships a fixed wrapper family; for any other (R,W,clock) shape
+    // (e.g. a register file reading out all entries, or a multi-clock RF)
+    // generate the wrapper module inline instead of `include`ing a missing file.
+    // Dedup per file so two same-shape memories do not re-define the module.
+    if (mem_wrappers_emitted_.insert(name).second) {
+      if (have_wrapper) {
+        fout->prepend(absl::StrCat("`include \"", name, ".v\" \n"));
+      } else {
+        fout->prepend(gen_mem_wrapper(name, eff_rd, eff_wr, single_clock));
+      }
+    }
     fout->append(absl::StrCat(name));
 
     std::string parameters;
@@ -1098,7 +1216,10 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds:
     if (Ntype::is_multi_driver(op)) {
       continue;
     }
-    if (!node.has_out_edges() || is_type_flop(node)) {
+    // is_type_register excludes Flop/Fflop/Latch/Memory from combinational
+    // expression emission (Memory is already handled by is_multi_driver above);
+    // a Latch is emitted as a level-sensitive block in create_registers.
+    if (!node.has_out_edges() || is_type_register(node)) {
       continue;
     }
     if (bits_of(node.get_driver_pin(0)) == 0) {
@@ -1153,6 +1274,10 @@ void Cgen_verilog::create_outputs(std::shared_ptr<File_output> fout, hhds::Graph
 
 void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Graph* graph) {
   for (auto node : graph->fast_class()) {
+    if (type_op_of(node) == Ntype_op::Latch) {
+      process_latch(fout, node);
+      continue;
+    }
     if (!is_type_flop(node)) {
       continue;
     }
@@ -1389,9 +1514,13 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
             }
           }
           for (auto& e2 : node.out_edges()) {
-            auto dout            = node.create_driver_pin(e2.driver.get_port_id());
-            auto iname           = get_scaped_name(default_instance_name(node));
-            auto name2           = absl::StrCat(iname, "_dout_", e2.driver.get_port_id());
+            auto dout = node.create_driver_pin(e2.driver.get_port_id());
+            // Escape the FULL derived name as one unit: a memory instance name
+            // can carry verilog-special chars (e.g. the '.' of a flattened
+            // hierarchical name), so escaping iname first and then appending
+            // "_dout_N" would drop the suffix past the escaped id's terminating
+            // space (`\u_fifo.mem _dout_1`), which yosys cannot parse.
+            auto name2           = get_scaped_name(absl::StrCat(default_instance_name(node), "_dout_", e2.driver.get_port_id()));
             auto [it2, inserted] = pin2var.insert({dout.get_class_index(), name2});
             if (inserted) {
               int bits2 = bits_of(dout);
@@ -1480,7 +1609,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
 
       pin2expr.insert({dpin.get_class_index(), Expr(attr_name, false)});
       continue;
-    } else if (!is_type_flop(node)) {
+    } else if (!is_type_register(node)) {  // Flop/Fflop/Latch all declare their q as a reg
       auto nname = node_name_of(node);
       if (!nname.empty() && nname.front() != '_') {
         continue;
@@ -1510,6 +1639,7 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   mux2vector.clear();
   first_array_block = true;
   map_segments_.clear();
+  mem_wrappers_emitted_.clear();
 
   std::string filename;
   if (odir.empty()) {

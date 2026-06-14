@@ -114,6 +114,21 @@ class Thread_pool {
   }
 
   void add_(const std::function<void(void)>& job) {
+    // Run inline (serially) — see DISABLE_THREAD_POOL above. The worker/queue
+    // path below is disabled: its `jobs_left` accounting races between the
+    // workers (next_job's compensating fetch_add on an empty dequeue + task's
+    // unconditional fetch_sub) and the destructor-side wait_all(), which can
+    // leave jobs_left positive while the queue is empty. wait_all() then busy-
+    // spins forever at static-destruction time (a teardown deadlock observed
+    // draining multi-module inou.cgen jobs). Inline keeps jobs_left==0, so
+    // every wait_all() returns immediately and shutdown is clean. The pool is
+    // only used for per-module Verilog cgen (a performance optimization, not a
+    // correctness requirement); build-level parallelism comes from independent
+    // lhd invocations instead.
+    job();
+    return;
+
+#if 0  // racy worker/queue path, kept for reference
     if (env_threads == 1) {
       job();
       return;
@@ -126,19 +141,7 @@ class Thread_pool {
       queue.enqueue(job);
       job_available_var.notify_one();
     }
-    // To be deprecated
-    // #ifdef DISABLE_THREAD_POOL
-    //     job();
-    //     return;
-    // #else
-    //     if (jobs_left > 48) {  // FIXME->sh: what if not so much core?
-    //       job();
-    //       return;
-    //     }
-    //     jobs_left.fetch_add(1, std::memory_order_relaxed);
-    //     queue.enqueue(job);
-    //     job_available_var.notify_one();
-    // #endif
+#endif
   }
 
 public:

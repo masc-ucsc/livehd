@@ -38,6 +38,11 @@ private:
 
   bool first_array_block;
 
+  // Per-module set of cgen_memory_* wrapper module names already emitted into
+  // the current file (whether `include`d or generated inline), so two memories
+  // of the same shape do not re-define the module.
+  absl::flat_hash_set<std::string> mem_wrappers_emitted_;
+
   std::atomic<int>                               nrunning;
   inline static std::mutex                       lgs_mutex;  // setup of static reserved_keyword
   inline static absl::flat_hash_set<std::string> reserved_keyword;
@@ -62,6 +67,10 @@ private:
   static hhds::Pin_class find_sink_pin(const hhds::Node_class& node, std::string_view name);
 
   void process_flop(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
+  void process_latch(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
+  // Generate a cgen_memory_[multiclock_]<R>rd_<W>wr module body for a (R,W,clock)
+  // shape that ware/rtl does not ship, mirroring the static wrapper templates.
+  static std::string gen_mem_wrapper(const std::string& mod_name, int n_rd, int n_wr, bool single_clock);
   void process_memory(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
   void process_mux(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
   void process_hotmux(std::shared_ptr<File_output> fout, const hhds::Node_class& node);

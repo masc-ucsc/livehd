@@ -721,10 +721,18 @@ static hhds::Node_class resolve_memory(hhds::Graph* g, RTLIL::Cell* cell) {
           partially_assigned[wire].resize(wire->width);
           partially_assigned_bits[wire].resize(wire->width);
 
-          I(wire2pin.find(wire) == wire2pin.end());
-          auto pa_node = create_typed_node(*g, Ntype_op::Or, wire->width);
-
-          wire2pin[wire] = pa_node.create_driver_pin(0);
+          // A reader processed in process_assigns (e.g. a module-level
+          // `connect rf_read {rf_full[..]}` whose RHS is this memory's wide
+          // read-port output) may have already created an empty Or placeholder
+          // for `wire` via get_edge_pin(). Reuse it as the partial-assign
+          // accumulator instead of asserting it absent; the
+          // process_partially_assigned materializer (get_partial_dpin) expects
+          // exactly that Or node. Mirrors the guarded pattern in
+          // process_cell_drivers_intialization's parallel else branch.
+          if (wire2pin.find(wire) == wire2pin.end()) {
+            auto pa_node   = create_typed_node(*g, Ntype_op::Or, wire->width);
+            wire2pin[wire] = pa_node.create_driver_pin(0);
+          }
         }
         set_bits(dpin, ss.size());
 

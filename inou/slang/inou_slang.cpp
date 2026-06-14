@@ -140,18 +140,27 @@ void Inou_slang::work(Eprp_var& var) {
     }
   }
 
-  // Run one isolated slang Driver/Compilation over `argv` (plus an optional
-  // positional source file), lowering its lnasts into `var`. `fname == nullptr`
-  // means the sources come from `slang_flags` alone (e.g. `-F filelist.f`).
-  auto compile_unit = [&](const char* fname) {
+  // Run ONE slang Driver/Compilation over `argv` plus every positional source
+  // file in `fnames`, lowering its lnasts into `var`. All files share a single
+  // compilation so cross-file references resolve: packages defined in one file
+  // are visible to importers, and a module instantiating another finds its
+  // definition (the per-file isolated-compilation model could not — it reported
+  // `unknown package`/`unknown module` for any multi-file design). `--top`
+  // restricts elaboration to that design's hierarchy; `lower_instance` recurses
+  // into each instantiated definition (deduped), so one compilation still emits
+  // one Lnast per reachable module. An empty `fnames` means the sources come
+  // from `slang_flags` alone (e.g. `-F filelist.f`).
+  auto compile_unit = [&](const std::vector<std::string>& fnames) {
     Slang_context tree;
     tree.set_options(opts);
 
     std::vector<char*> argv_final{argv};
-    char*              ptr_fname = nullptr;
-    if (fname != nullptr) {
-      ptr_fname = strdup(fname);
-      argv_final.emplace_back(ptr_fname);
+    std::vector<char*> owned;
+    owned.reserve(fnames.size());
+    for (const auto& fname : fnames) {
+      char* ptr = strdup(fname.c_str());
+      owned.emplace_back(ptr);
+      argv_final.emplace_back(ptr);
     }
     argv_final.emplace_back(nullptr);
 
@@ -162,8 +171,8 @@ void Inou_slang::work(Eprp_var& var) {
       var.add(ln);
     }
 
-    if (ptr_fname != nullptr) {
-      free(ptr_fname);
+    for (char* ptr : owned) {
+      free(ptr);
     }
   };
 
@@ -185,18 +194,15 @@ void Inou_slang::work(Eprp_var& var) {
           .msg("inou.slang needs `files` or slang_flags supplying the sources (e.g. -F filelist.f)")
           .fatal();
     }
-    // One isolated slang Driver/Compilation; sources come from slang_flags.
-    compile_unit(nullptr);
+    // One slang Driver/Compilation; sources come from slang_flags.
+    compile_unit({});
   } else {
-    // One isolated slang Driver/Compilation per file, processed sequentially.
-    // The old in-process thread_pool fan-out was never sound (two FIXME: slang
-    // multithread fails comments); the build system exposes parallelism instead
-    // by running independent `lhd elaborate --reader slang` invocations
-    // concurrently.
-    for (const auto& fname : file_list) {
-      TRACE_EVENT("verilog", nullptr, [&fname](perfetto::EventContext ctx) { ctx.event()->set_name(fname); });
-      compile_unit(fname.c_str());
-    }
+    // One slang Driver/Compilation over every source file. A multi-file design
+    // (package + submodules + top) must share a single compilation so slang can
+    // resolve cross-file packages and instantiations; the build system still
+    // gets parallelism by running independent `lhd elaborate --reader slang`
+    // invocations (one design each) concurrently.
+    compile_unit(file_list);
   }
 
   for (char* ptr : argv) {

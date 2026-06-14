@@ -1268,14 +1268,10 @@ private:
     if (reg_init) {
       setup_sink_by_name(mem, "init").connect_driver(create_const(*g_, *reg_init));
     }
-    if (!is_array) {
-      setup_sink_by_name(mem, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
-      if (!clock_name_.empty()) {
-        setup_sink_by_name(mem, "clock_pin").connect_driver(clock_pin());
-      } else {
-        warn_at(Lnast_nid{}, {"no-clock", "time"}, "memory '{}' has no clock input to bind", name);
-      }
-    }
+    // Clock wiring (posclk + clock_pin) for a clocked (non-array) memory is
+    // deferred to finalize_mems: the slang reader emits the clock_pin/posclk
+    // attr_set AFTER this declare in lnast order, so pending_attrs_ is not yet
+    // populated here (unlike fwd, which the reader emits before the declare).
 
     Mem_info info;
     info.node        = mem;
@@ -1882,6 +1878,40 @@ private:
             }
             setup_sink_by_name(mi.node, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(wv->to_just_i64())));
           }
+        }
+      }
+
+      // Clocked (non-array) memory clock wiring, deferred from lower_mem_declare
+      // (the clock_pin/posclk attr_set arrives after the declare). Mirrors the
+      // per-reg wiring in finalize_regs: an explicit clock_pin=<input> (the
+      // slang reader emits it for a non-`clk`/`clock` write clock) beats the
+      // implicit shared clock; posclk=false marks a negedge write clock.
+      if (!mi.is_array) {
+        bool        posclk_val = true;
+        std::string clock_pin_name;
+        if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
+          if (auto cit = pit->second.find("clock_pin"); cit != pit->second.end()) {
+            clock_pin_name = cit->second;
+          }
+          if (auto pcit = pit->second.find("posclk"); pcit != pit->second.end()) {
+            posclk_val = pcit->second != "false" && pcit->second != "0";
+          }
+        }
+        setup_sink_by_name(mi.node, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(posclk_val ? 1 : 0)));
+        if (!clock_pin_name.empty()) {
+          auto cpin = g_->get_input_pin(clock_pin_name);
+          if (cpin.is_invalid()) {
+            error_here("upass.tolg: memory '{}' names clock_pin '{}' but '{}' has no such input",
+                       name,
+                       clock_pin_name,
+                       lnast_->get_top_module_name());
+          } else {
+            setup_sink_by_name(mi.node, "clock_pin").connect_driver(cpin);
+          }
+        } else if (!clock_name_.empty()) {
+          setup_sink_by_name(mi.node, "clock_pin").connect_driver(clock_pin());
+        } else {
+          warn_at(Lnast_nid{}, {"no-clock", "time"}, "memory '{}' has no clock input to bind", name);
         }
       }
 

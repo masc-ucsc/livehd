@@ -498,7 +498,12 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
 
   } else if (op == Ntype_op::EQ) {
     bool eq = true;
-    I(inp_edges_ordered.size() > 1);
+    // EQ is a single-port, multi-edge "all drivers on port a are equal" cell.
+    // When both comparator operands resolve to the SAME driver pin (e.g.
+    // const==const), HHDS collapses the duplicate driver->sink edges into one,
+    // leaving a single input edge. A 1-input "all-equal" is trivially true, and
+    // the loop below already yields that (it starts at index 1), so no >1
+    // assertion is warranted (try_constant_prop only calls this with n>=1).
     auto first = hydrate_const(inp_edges_ordered[0].driver);
     for (auto i = 1u; i < inp_edges_ordered.size(); ++i) {
       auto c = hydrate_const(inp_edges_ordered[i].driver);

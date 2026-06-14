@@ -17,7 +17,12 @@ read_verilog -sv -nomeminit {{input}}
 {{/use_verilog}}
 
 {{#use_slang}}
-read_slang {{slang_top}} {{slang_flags}} {{files_str}} {{filelist_file_str}}
+# --no-proc: leave RTLIL processes for our own `proc -ifx` below. The slang
+# frontend's internal proc pipeline runs proc_rmdead, whose BitPatternPool
+# fragments into millions of cubes on wide casex/casez decoders (e.g. 32-bit
+# instruction decoders), effectively hanging. `proc -ifx` routes case-x through
+# proc_mux (x = don't-care match) and skips proc_rmdead entirely.
+read_slang {{slang_top}} --no-proc {{slang_flags}} {{files_str}} {{filelist_file_str}}
 {{/use_slang}}
 
 # single file, no hierarchy needed
@@ -28,7 +33,7 @@ hierarchy {{top}}
 flatten
 chformal -remove
 
-proc
+proc -ifx
 #opt -fast
 opt_expr
 opt_merge
