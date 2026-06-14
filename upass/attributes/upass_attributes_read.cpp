@@ -43,14 +43,6 @@ bool is_uppercase_ident(std::string_view name) {
   return std::isupper(static_cast<unsigned char>(name.front())) != 0;
 }
 
-// max/min for an `n`-bit type. n==0 means "unbounded" — the caller treats the
-// returned 0 as "no derivation possible". These delegate to the canonical
-// upass::*_from_bits helpers (range_bits.hpp) so the n<=1 signed edge is handled
-// in one place.
-Dlop max_unsigned(uint32_t n) { return upass::unsigned_max_from_bits(n); }
-Dlop max_signed(uint32_t n) { return upass::signed_max_from_bits(n); }
-Dlop min_signed(uint32_t n) { return upass::signed_min_from_bits(n); }
-
 }  // namespace
 
 std::optional<Dlop> uPass_attributes::lookup_attr_value(std::string_view var, std::string_view attr) const {
@@ -198,18 +190,11 @@ std::optional<Dlop> uPass_attributes::derive_max(std::string_view base) const {
     if (ti->range_max) {
       return *ti->range_max;
     }
-    // A prim_type_int with only `min` pinned (e.g. `int(min=3)`) leaves max
-    // unbounded ⇒ nil, even though a legacy uN/sN kind may also be recorded.
-    // Symmetric with derive_min's half-open guard below.
-    if (ti->range_min && !ti->range_max) {
-      return std::nullopt;
-    }
-    if (ti->kind == Numeric_kind::unsigned_int && ti->bits != 0) {
-      return max_unsigned(ti->bits);
-    }
-    if (ti->kind == Numeric_kind::signed_int && ti->bits != 0) {
-      return max_signed(ti->bits);
-    }
+    // No range_max pinned ⇒ max is unbounded (nil). range_max is the single
+    // source of truth: `:u8` lowers to `int(0,255)` so a width type already
+    // carries it; reconstructing a max FROM `bits` here would be the inverted
+    // dependency the review (cat 1) calls out (bits is derived from max/min,
+    // not the other way round). bool keeps its own {-1,0} envelope.
     if (ti->kind == Numeric_kind::boolean) {
       return *Dlop::create_integer(0);
     }
@@ -226,17 +211,10 @@ std::optional<Dlop> uPass_attributes::derive_min(std::string_view base) const {
     if (ti->range_min) {
       return *ti->range_min;
     }
-    // A prim_type_int with only `max` pinned (e.g. `int(max=3)`) leaves min
-    // unbounded ⇒ nil, even though a legacy uN/sN kind may also be recorded.
-    if (ti->range_max && !ti->range_min) {
-      return std::nullopt;
-    }
-    if (ti->kind == Numeric_kind::unsigned_int && ti->bits != 0) {
-      return *Dlop::create_integer(0);
-    }
-    if (ti->kind == Numeric_kind::signed_int && ti->bits != 0) {
-      return min_signed(ti->bits);
-    }
+    // No range_min pinned ⇒ min is unbounded (nil). range_min is the single
+    // source of truth (`:u8` lowers to `int(0,255)`); reconstructing a min FROM
+    // `bits` is the inverted dependency the review (cat 1) calls out. bool keeps
+    // its own {-1,0} envelope.
     if (ti->kind == Numeric_kind::boolean) {
       return *Dlop::create_integer(-1);
     }
