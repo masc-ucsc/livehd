@@ -1,0 +1,50 @@
+--- smt/available_solvers.cpp
++++ smt/available_solvers.cpp
+@@ -27,7 +27,9 @@
+ #include "utils/logger.h"
+ 
+ // these two always included
++#ifdef WITH_BITWUZLA
+ #include "smt-switch/bitwuzla_factory.h"
++#endif
+ #include "smt-switch/cvc5_factory.h"
+ 
+ #ifdef WITH_BOOLECTOR
+@@ -78,7 +80,9 @@
+ 
+ // list of regular (non-interpolator) solver enums
+ const std::vector<SolverEnum> solver_enums({
++#ifdef WITH_BITWUZLA
+     BZLA,
++#endif
+     CVC5,
+ #ifdef WITH_BOOLECTOR
+     BTOR,
+@@ -101,10 +105,12 @@
+   SmtSolver s;
+   auto printing_style = DEFAULT_STYLE;
+   switch (se) {
++#ifdef WITH_BITWUZLA
+     case BZLA: {
+       s = BitwuzlaSolverFactory::create(logging);
+       break;
+     }
++#endif
+ #ifdef WITH_BOOLECTOR
+     case BTOR: {
+       s = BoolectorSolverFactory::create(logging);
+@@ -268,12 +274,14 @@
+   SmtSolver s;
+   PrintingStyleEnum printing_style = DEFAULT_STYLE;
+   switch (se) {
++#ifdef WITH_BITWUZLA
+     case BZLA:
+     case BZLA_INTERPOLATOR: {
+       s = BitwuzlaSolverFactory::create_interpolating_solver();
+       printing_style = BZLA_STYLE;
+       break;
+     }
++#endif
+     case CVC5:
+     case CVC5_INTERPOLATOR: {
+       s = Cvc5SolverFactory::create_interpolating_solver();

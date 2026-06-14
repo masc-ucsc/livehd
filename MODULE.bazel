@@ -221,6 +221,56 @@ http_archive(
    patches = ["//packages:yosys.patch", "//packages:yosys_lexer.patch"],
 )
 
+# cvc5 -- SMT backend for pass/lec (smt-switch -> cvc5 -> Pono). We use the
+# official prebuilt non-GPL static libraries (no from-source solver build).
+# Pinned to a tagged release (cvc5 >= 1.3.4 per lec.md). The bundled LGPL
+# libgmp is intentionally NOT imported (see packages/cvc5.BUILD); GMP is linked
+# dynamically against the system shared lib.
+#
+# TODO(lec): expand to a select()-per-platform set (Linux arm64, macOS
+# arm64/x86_64) -- one http_archive each with the same cvc5.BUILD, aliased
+# through a //third_party/cvc5 select(). Linux x86_64 first to de-risk the build
+# on the dev machine (Milestone 1).
+http_archive(
+    name = "cvc5",
+    build_file = "//packages:cvc5.BUILD",
+    sha256 = "dcdbfada0ce493ee98259c0816e0daafc561c223aadb3af298c2968e73ea39c6",
+    strip_prefix = "cvc5-Linux-x86_64-static",
+    urls = [
+        "https://github.com/cvc5/cvc5/releases/download/cvc5-1.3.4/cvc5-Linux-x86_64-static.zip",
+    ],
+)
+
+# smt-switch -- the solver-agnostic term layer between Pono and cvc5. Built
+# from source (rules_foreign_cc cmake) against the prebuilt @cvc5. smtswitch.patch
+# retargets cvc5/CMakeLists.txt at the cvc5 release layout. Pin v1.1.3 (the
+# PrimOp / Op(prim,idx0,idx1) ABI is version-sensitive, per lec.md).
+http_archive(
+    name = "smtswitch",
+    build_file = "//packages:smtswitch.BUILD",
+    patches = ["//packages:smtswitch.patch"],
+    sha256 = "364ea3689f212543dc9d11d77d378cc9965a0dcf3e6111480f2d0ebd586d9b88",
+    strip_prefix = "smt-switch-1.1.3",
+    urls = [
+        "https://github.com/stanford-centaur/smt-switch/archive/refs/tags/v1.1.3.zip",
+    ],
+)
+
+# pono -- the model-checking engine layer (BMC / k-induction / IC3-PDR) for
+# pass/lec. Built directly with Bazel via packages/pono.BUILD (library core
+# only; no file frontends). pono.patch makes the bitwuzla backend optional so
+# the cvc5-only stack links. Pinned to a main commit (pono main moves).
+http_archive(
+    name = "pono",
+    build_file = "//packages:pono.BUILD",
+    patches = ["//packages:pono.patch"],
+    sha256 = "2b76229f06800bf831691403e276bc217692fea2b16e604e4c7704987525ce88",
+    strip_prefix = "pono-ec4fe894013d91bd1ca3c6a0e6dea160a6756a4e",
+    urls = [
+        "https://github.com/stanford-centaur/pono/archive/ec4fe894013d91bd1ca3c6a0e6dea160a6756a4e.zip",
+    ],
+)
+
 # mustache
 http_archive(
     name = "mustache",

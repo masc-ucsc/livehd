@@ -237,6 +237,56 @@ design diff.
 
 ---
 
+## Milestone 1 — STATUS: COMPLETE (2026-06-14)
+
+`bazel test //pass/lec/...` is green (5 tests), and `lhd lec --set lec.cross=true`
+verdicts agree with `lgcheck` on equal + different pairs. Files shipped:
+`pass/lec/{encode,query,pass_lec}.{hpp,cpp}` + `BUILD`, tests
+`tests/{cvc5_link,smtswitch_link,pono_link,comb_equiv}_test.cpp` +
+`tests/lec_cross_test.sh`. CLI: `lhd lec --impl … --ref …`, `--set lec.*`
+options registered (`lhd list options 'lec\..*'`), typos hard-error.
+
+**Build deviations from the original sketch (these shipped; plan reconciled):**
+
+- **cvc5** (`packages/cvc5.BUILD`, pin `cvc5-1.3.4` Linux-x86_64 prebuilt
+  `-static.zip`): the prebuilt `libcvc5.a` + `libcadical.a` + LibPoly are merged
+  into **one relocatable object** (`ld -r --whole-archive`) and the **CaDiCaL
+  symbols are localized** (`objcopy --localize-symbol '*CaDiCaL*'`). Reason:
+  **Berkeley-abc** (linked into the same `lhd` binary via the Yosys flow) **also
+  vendors CaDiCaL** → duplicate strong symbols at the final link. Localizing
+  cvc5's private copy fixes it (same idea as `lhd_export.lds` for slang/fmt/boost).
+  `libcvc5parser.a` is dropped (the C++-API backend never uses the SMT-LIB
+  parser, and it collides on member basenames during the merge). GMP stays
+  **dynamic** (`-lgmp`/`-lgmpxx`). NB: `ar x` flattens duplicate member
+  basenames — must use `ld -r --whole-archive`, never extract.
+- **smt-switch** (`packages/smtswitch.BUILD` + `smtswitch.patch`, pin **v1.1.3**,
+  `rules_foreign_cc` cmake): built against cvc5 **headers only**
+  (`@cvc5//:cvc5_headers`) — a STATIC `smt-switch-cvc5` has no link step, so the
+  patch drops the `find_library(... REQUIRED)` checks + per-lib link records and
+  **disables the ar-repack** (cvc5 comes from `@cvc5` downstream, kept a single
+  localized copy). `CVC5_HOME` is passed as `$$EXT_BUILD_DEPS` (leading `$$`
+  only — a trailing `$$` leaves a stray `$`).
+- **pono** (`packages/pono.BUILD` + `pono.patch`, pin main `ec4fe89`): built
+  **directly with Bazel** (a hand `cc_library`, like abc/yosys), **not** its own
+  CMake. Pono's CMake hard-requires bitwuzla + Btor2Tools + flex/bison, but all
+  of that is in the file `frontends/` (and the witness `printers/`), which
+  pass/lec does not use (it builds the `TransitionSystem` in memory). We glob
+  `core/engines/smt/utils/options/modifiers/refiners`, exclude
+  `frontends/`, `printers/`, `engines/msat_ic3ia.cpp` (MathSAT, off-limits), and
+  `pono.patch` gates the bitwuzla references in `smt/available_solvers.cpp`
+  behind `WITH_BITWUZLA` (undefined here). Force-include `<cassert>`/`<cstdint>`
+  (libstdc++ no longer pulls them transitively).
+- **L1 discharge**: combinational miter latched into a 1-bit state var, property
+  `Not(bad_state)`, default engine **k-induction** (`lec.engine=ind`) which gives
+  a definitive `Proven` (BMC alone returns UNKNOWN on no-CEX); BMC/IC3 selectable.
+- **`lhd lec`** lives in `lhd_kernel.cpp::lec_command` and discharges via
+  `lec::prove_equal` directly (clean `equiv_fail` error class + witness);
+  `pass.lec` is registered for the `lec.*` option registry and is also a working
+  dispatch entry (`graph[0]`=ref, `graph[1]`=impl). Inputs: `lg:`/`pyrope:`/`ln:`
+  (verilog LEC still goes through `lhd check`).
+
+M2–M6 remain as below (unstarted).
+
 ## Encoder reference (L0) — LiveHD graph facts
 
 The post-elaboration netlist is an `hhds::Graph` (external dep); the op enum and

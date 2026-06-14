@@ -29,6 +29,7 @@
 #include "node_util.hpp"
 #include "pass.hpp"
 #include "prp2lnast.hpp"
+#include "query.hpp"  // pass/lec L1 (lec::prove_equal) for the cross-check path
 #include "rapidjson/document.h"
 #include "thread_pool.hpp"
 #include "upass_tolg.hpp"
@@ -319,6 +320,7 @@ constexpr std::pair<std::string_view, std::string_view> kSetPasses[] = {
     {"partition",    "pass.partition"},
     {      "abc",          "pass.abc"},
     {  "liberty",      "pass.liberty"},
+    {      "lec",          "pass.lec"},
 };
 
 std::string_view set_pass_method(std::string_view set_name) {
@@ -907,9 +909,9 @@ void validate_emits(const Options& opts) {
                      "pyrope",
                      {"unsupported", "there is no LGraph -> LNAST decompiler", "pyrope outputs need ln:/pyrope inputs"});
   }
-  if (opts.command == "check") {
+  if (opts.command == "check" || opts.command == "lec") {
     for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump"}) {
-      reject_emit_kind(opts, k, {"usage", "check has no outputs beyond the result", ""});
+      reject_emit_kind(opts, k, {"usage", std::format("{} has no outputs beyond the result", opts.command), ""});
     }
   }
   if (opts.command == "ln.cat" || opts.command == "ln.diff") {
@@ -930,7 +932,8 @@ void validate_dumps(const Options& opts) {
   if (opts.dumps.empty()) {
     return;
   }
-  if (opts.command == "check" || opts.command == "scan" || opts.command == "ln.cat" || opts.command == "ln.diff") {
+  if (opts.command == "check" || opts.command == "lec" || opts.command == "scan" || opts.command == "ln.cat"
+      || opts.command == "ln.diff") {
     throw Lhd_error{"usage",
                     std::format("{} has no --dump observables", opts.command),
                     "--dump applies to elaborate/synth/compile"};
@@ -2255,6 +2258,162 @@ void check_command(Options& opts, Result& res) {
   }
 }
 
+// ---- lec (in-process relational equivalence via pass.lec / Pono) ------------
+
+// Load one --impl/--ref side into `var.graphs` WITHOUT cgen (the front half of
+// materialize_verilog). lec consumes the graph directly. verilog: is rejected
+// here -- there is no in-process Verilog reader on this path; use `lhd check`
+// (lgcheck) for verilog: LEC, or feed lg:/pyrope:/ln:.
+void load_side_graphs(Options& opts, Result& res, const std::string& kind, const std::string& path, std::string_view side,
+                      Eprp_var& var) {
+  res.inputs.push_back(path);
+  if (kind == "lg") {
+    if (!fs::is_directory(path)) {
+      throw Lhd_error{"missing_file", std::format("lg: input not found: {}", path), ""};
+    }
+    auto& lib = livehd::Hhds_graph_library::instance(path);
+    for (const hhds::Gid id : lib.all_gids()) {
+      auto g = lib.get_graph(id);
+      if (g) {
+        var.add(g);
+      }
+    }
+  } else if (kind == "pyrope" || kind == "ln") {
+    if (kind == "pyrope") {
+      check_inputs_exist({path});
+      run_step("inou.prp", var, {{"files", path}}, opts, res);
+    } else {
+      if (!fs::is_directory(path)) {
+        throw Lhd_error{"missing_file", std::format("ln: input not found: {}", path), "an ln: input is a Forest save directory"};
+      }
+      for (auto& ln : load_ln_dir(path)) {
+        var.add(ln);
+      }
+    }
+    auto lib_path = std::format("{}/lec_{}_lgdb", workdir(opts), side);
+    lower_lnasts(opts, res, var, lib_path, /*need_graphs=*/true);
+    graph_pipeline_and_emits(opts, res, var, lib_path);
+  } else {
+    throw Lhd_error{"usage",
+                    std::format("lec accepts lg:, pyrope:, or ln: inputs, got {}:", kind),
+                    "verilog: LEC goes through `lhd check` (lgcheck)"};
+  }
+  if (var.graphs.empty()) {
+    throw Lhd_error{"config", std::format("lec {} input {} holds no graphs", side, path), ""};
+  }
+}
+
+void lec_command(Options& opts, Result& res) {
+  setup_diag(opts, "lec");
+  if (opts.impl_path.empty() || opts.ref_path.empty()) {
+    throw Lhd_error{"usage", "lec requires --impl KIND:PATH and --ref KIND:PATH", "graph inputs: lg:/pyrope:/ln:"};
+  }
+
+  Eprp_var ref_var;
+  Eprp_var impl_var;
+  load_side_graphs(opts, res, opts.ref_kind, opts.ref_path, "ref", ref_var);
+  load_side_graphs(opts, res, opts.impl_kind, opts.impl_path, "impl", impl_var);
+
+  // Pick the top module on each side: explicit --{ref,impl}-top, else --top,
+  // else the sole module.
+  auto pick = [&](Eprp_var& v, const std::string& want, std::string_view side) -> std::shared_ptr<hhds::Graph> {
+    const std::string& t = !want.empty() ? want : opts.top;
+    if (!t.empty()) {
+      for (auto& g : v.graphs) {
+        if (g && g->get_name() == t) {
+          return g;
+        }
+      }
+      throw Lhd_error{"config", std::format("lec: {} top '{}' not found", side, t), ""};
+    }
+    if (v.graphs.size() == 1) {
+      return v.graphs.front();
+    }
+    throw Lhd_error{"usage", std::format("lec: {} has {} modules; pass --{}-top or --top", side, v.graphs.size(), side), ""};
+  };
+  auto ref_g  = pick(ref_var, opts.ref_top, "ref");
+  auto impl_g = pick(impl_var, opts.impl_top, "impl");
+
+  Eprp_var::Eprp_dict labels;
+  merge_sets(opts, "lec", labels);
+
+  auto label = [&](std::string_view k, std::string_view def) -> std::string {
+    auto it = labels.find(std::string{k});
+    return it == labels.end() ? std::string{def} : it->second;
+  };
+  bool cross = label("cross", "false") != "false" && label("cross", "false") != "0";
+
+  // Discharge in-process via pass/lec (L1). The engine is the authority on the
+  // non-cross path; in cross mode we additionally run lgcheck and assert
+  // agreement (the strongest encoder check).
+  livehd::lec::Lec_options o;
+  o.engine  = label("engine", "ind");
+  o.solver  = label("solver", "cvc5");
+  o.bound   = std::atoi(label("bound", "20").c_str());
+  o.timeout = std::atoi(label("timeout", "0").c_str());
+  o.witness = label("witness", "true") != "false" && label("witness", "true") != "0";
+
+  res.recipe_steps.emplace_back(std::format("pass.lec engine:{} solver:{}", o.engine, o.solver));
+  auto r         = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), o);
+  bool lec_equiv = r.verdict == livehd::lec::Verdict::Proven;
+  bool lec_known = r.verdict != livehd::lec::Verdict::Unknown;
+
+  const char* verdict = lec_known ? (lec_equiv ? "PROVEN equivalent" : "REFUTED (not equivalent)") : "UNKNOWN";
+  std::print("lec: '{}' {} ({})\n", impl_g->get_name(), verdict, r.detail);
+  if (r.verdict == livehd::lec::Verdict::Refuted && !r.witness.empty()) {
+    std::print("  counterexample: {}\n", r.witness);
+  }
+
+  if (!cross) {
+    if (r.verdict == livehd::lec::Verdict::Refuted) {
+      throw Lhd_error{"equiv_fail",
+                      std::format("'{}' is not equivalent ({} vs {})", impl_g->get_name(), opts.impl_path, opts.ref_path),
+                      r.witness.empty() ? "" : std::format("counterexample: {}", r.witness)};
+    }
+    if (r.verdict == livehd::lec::Verdict::Unknown) {
+      throw Lhd_error{"unsupported", std::format("lec could not decide equivalence of '{}'", impl_g->get_name()), r.detail};
+    }
+    return;  // Proven
+  }
+
+  auto impl_v  = fs::absolute(materialize_verilog(opts, res, opts.impl_kind, opts.impl_path, "impl")).string();
+  auto ref_v   = fs::absolute(materialize_verilog(opts, res, opts.ref_kind, opts.ref_path, "ref")).string();
+  auto lgcheck = locate_lgcheck();
+  auto yosys   = locate_lgcheck_yosys();
+  auto rundir  = fs::absolute(workdir(opts)).string();
+  auto cmd     = std::format("cd {} && {} --implementation {} --reference {}",
+                         shell_quote(rundir),
+                         shell_quote(lgcheck),
+                         shell_quote(impl_v),
+                         shell_quote(ref_v));
+  if (!yosys.empty()) {
+    cmd += std::format(" --yosys {}", shell_quote(yosys));
+  }
+  if (!opts.top.empty()) {
+    cmd += std::format(" --top {}", shell_quote(opts.top));
+  }
+  auto log  = next_log_path(opts, "lec.lgcheck");
+  cmd      += std::format(" >> {} 2>&1", shell_quote(fs::absolute(log).string()));
+  int  rc        = std::system(cmd.c_str());
+  bool lg_equiv  = rc == 0;
+
+  std::print("lec cross-check: engine={} -> {}; lgcheck -> {}\n",
+             o.engine,
+             lec_known ? (lec_equiv ? "equivalent" : "different") : "unknown",
+             lg_equiv ? "equivalent" : "different");
+
+  if (lec_known && lec_equiv != lg_equiv) {
+    throw Lhd_error{"internal",
+                    std::format("lec engine and lgcheck DISAGREE (engine={}, lgcheck={})",
+                                lec_equiv ? "equivalent" : "different",
+                                lg_equiv ? "equivalent" : "different"),
+                    std::format("see {}", log)};
+  }
+  if (!lg_equiv) {
+    throw Lhd_error{"equiv_fail", std::format("equivalence check failed ({} vs {})", opts.impl_path, opts.ref_path), ""};
+  }
+}
+
 // ---- pass (graph-pass plumbing: color / partition) --------------------------
 
 // Load every graph of an lg: library into `var` (mirrors synth's lg branch).
@@ -2461,6 +2620,8 @@ void run_engine_command(Options& opts, Result& res) {
     compile_command(opts, res);
   } else if (opts.command == "check") {
     check_command(opts, res);
+  } else if (opts.command == "lec") {
+    lec_command(opts, res);
   } else if (opts.command == "scan") {
     scan_command(opts, res);
   } else if (opts.command == "ln.cat") {

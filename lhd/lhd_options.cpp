@@ -390,8 +390,8 @@ Options parse_args(int argc, char** argv) {
                       std::format("unknown option '{}'", a),
                       opts.command.empty() ? "run `lhd help`" : std::format("run `lhd help {}`", opts.command)};
     } else if (opts.command.empty()) {
-      if (a == "elaborate" || a == "compile" || a == "synth" || a == "check" || a == "scan" || a == "lsp" || a == "list"
-          || a == "describe" || a == "version" || a == "help" || a == "ln.cat" || a == "ln.diff" || a == "pass") {
+      if (a == "elaborate" || a == "compile" || a == "synth" || a == "check" || a == "lec" || a == "scan" || a == "lsp"
+          || a == "list" || a == "describe" || a == "version" || a == "help" || a == "ln.cat" || a == "ln.diff" || a == "pass") {
         // ln.cat/ln.diff keep their positionals raw and ORDERED in opts.files
         // (an ln:DIR token must keep its place — ln.diff sides are positional).
         opts.command = a;

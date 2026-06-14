@@ -34,6 +34,8 @@ cc_library(
         "//pass/liberty:pass_liberty",
         "//pass/cprop:pass_cprop",
         "//pass/isabelle:pass_isabelle",
+        "//pass/lec:lec_query",
+        "//pass/lec:pass_lec",
         "//pass/partition:pass_partition",
         "//pass/lnastfmt:pass_lnastfmt",
         "//pass/prp_writer:pass_prp_writer",

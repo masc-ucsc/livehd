@@ -1,0 +1,28 @@
+--- cvc5/CMakeLists.txt
++++ cvc5/CMakeLists.txt
+@@ -24,21 +24,13 @@
+   target_link_libraries(smt-switch-cvc5 ${LIBRT})
+ endif()
+ 
+-find_library(POLYLIB REQUIRED NAMES libpicpoly.a PATHS "${CVC5_HOME}/build/deps/lib")
+-
+-find_library(POLYLIBXX REQUIRED NAMES libpicpolyxx.a PATHS "${CVC5_HOME}/build/deps/lib")
+-
+-find_library(CADICAL REQUIRED NAMES libcadical.a libcadical.so libcadical.dylib)
+-
+-target_link_libraries(smt-switch-cvc5 "${CVC5_HOME}/build/src/libcvc5.a")
+-target_link_libraries(smt-switch-cvc5 "${CVC5_HOME}/build/src/parser/libcvc5parser.a")
+-target_link_libraries(smt-switch-cvc5 "${POLYLIBXX}")
+-target_link_libraries(smt-switch-cvc5 "${POLYLIB}")
+-target_link_libraries(smt-switch-cvc5 "${CADICAL}")
++# LiveHD: cvc5 is provided downstream by @cvc5 (one combined+localized lib).
++# A STATIC smt-switch-cvc5 has no link step, so it only needs cvc5 HEADERS to
++# compile -- skip the find_library(REQUIRED) checks and per-lib link records.
+ target_link_libraries(smt-switch-cvc5 smt-switch)
+ target_link_libraries(smt-switch-cvc5 ${GMP_LIBRARIES})
+ 
+-if(SMT_SWITCH_LIB_TYPE STREQUAL STATIC)
++if(FALSE)  # LiveHD: repack disabled (cvc5 comes from @cvc5; keep smt-switch-cvc5 thin)
+   # we want the static library to include the cvc5 source and dependencies (except GMP)
+   # use libtool to combine
+   add_custom_command(
