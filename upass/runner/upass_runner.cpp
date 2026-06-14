@@ -3462,7 +3462,31 @@ bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<
         if (has_vararg) {
           continue;  // named leftover → var-arg tuple
         }
-        return false;  // unknown argument (bundle-leaf expansion not modeled here)
+        // Mirror try_inline_func_call's named bundle-leaf expansion: a
+        // bundle-literal actual `ar=(x=2,y=11)` expands into the flattened
+        // leaf params `ar.x`, `ar.y`. The probe MUST accept whatever the real
+        // bind accepts, or a callable overload is rejected here and never
+        // chosen (spurious fcall-no-overload with ≥2 candidates).
+        bool expanded = false;
+        if (a.node.is_ref()) {
+          if (auto bf = try_bundle_fields(a.node.get_name()); bf && !bf->empty()) {
+            expanded = true;
+            for (const auto& [fld, val] : *bf) {
+              const auto leaf = a.key + "." + fld;
+              const auto lidx = param_index(leaf);
+              if (lidx >= nbind || val.is_invalid()) {
+                expanded = false;
+                break;
+              }
+              param_val[lidx] = Lnast_node::create_const(val.to_pyrope());
+              param_set[lidx] = true;
+            }
+          }
+        }
+        if (!expanded) {
+          return false;  // unknown argument
+        }
+        continue;
       }
       if (param_set[idx]) {
         return false;  // duplicate
