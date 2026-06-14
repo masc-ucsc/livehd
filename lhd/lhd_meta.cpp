@@ -15,7 +15,7 @@ namespace lhd {
 namespace {
 
 constexpr std::string_view kSteps =
-    R"json(["elaborate verilog","elaborate pyrope","synth","check","scan","compile verilog","compile pyrope","ln.cat","ln.diff"])json";
+    R"json(["elaborate verilog","elaborate pyrope","synth","check","scan","compile verilog","compile pyrope","ln.cat","ln.diff","pass","lsp"])json";
 constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
 constexpr std::string_view kEmitKinds =
     R"json(["ln","lg","verilog","pyrope","lnast-dump","graphviz","metadata","results","diagnostics"])json";
@@ -35,6 +35,7 @@ std::string json_escape(std::string_view s) {
       case '"': out += "\\\""; break;
       case '\\': out += "\\\\"; break;
       case '\n': out += "\\n"; break;
+      case '\r': out += "\\r"; break;
       case '\t': out += "\\t"; break;
       default:
         if (static_cast<unsigned char>(c) < 0x20) {
@@ -283,6 +284,11 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"lsp","description":"Pyrope LSP server (task 1n): JSON-RPC over stdio, Content-Length framed. Drives prp2lnast + pass.upass + core/diag per buffer; .prp only, ephemeral, no lgdb. stdio belongs to the protocol, so no result JSON is written","args":{},"examples":["lhd lsp"]})json");
     return 0;
   }
+  if (name == "pass") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut node coloring), partition (region->module Sub split), abc (combinational ABC tech-map), liberty gensim <file.lib> (Liberty -> sim models)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","abc","liberty"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models"]})json");
+    return 0;
+  }
   if (name == "lnast-dump") {
     print_json_line(
         R"json({"schema_version":1,"name":"lnast-dump","description":"Round-trippable textual LNAST dump (the Lnast::dump text form), one <unit>.lnast per unit. A debug/test observable; the binary interchange form is ln:. From elaborate: post-parse; from synth/compile: post-upass","direction":"out"})json");
@@ -353,6 +359,8 @@ int help_command(const Options& opts) {
         "               lhd ln.diff old.prp new.prp\n"
         "               lhd ln.diff ln:before/ x.prp\n"
         "  lsp        Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
+        "  pass       run one graph pass over lg: inputs: color <alg> | partition | abc | liberty gensim\n"
+        "               lhd pass abc --top m lg:dir --emit-dir lg:net\n"
         "  list       steps | recipes | emit-kinds | error-classes | options [REGEX]\n"
         "               lhd list options 'cgen\\..*'   # the --set/--config pass.flag vocabulary\n"
         "  describe   <command | recipe:NAME | emit-kind | pass.flag | dump | config>\n"

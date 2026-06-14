@@ -1254,12 +1254,26 @@ std::vector<std::string> collect_imports(const std::shared_ptr<Lnast>& ln) {
 }
 
 std::string json_escape_min(std::string_view s) {
+  // Full JSON string escaping: a raw newline/tab/control byte (e.g. in a unit
+  // name or import string) would otherwise produce invalid JSON. Mirrors
+  // core/diag.cpp json_escape.
   std::string out;
   for (char c : s) {
-    if (c == '"' || c == '\\') {
-      out += '\\';
+    switch (c) {
+      case '"' : out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\n': out += "\\n"; break;
+      case '\r': out += "\\r"; break;
+      case '\t': out += "\\t"; break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          char buf[8];
+          std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+          out += buf;
+        } else {
+          out += c;
+        }
     }
-    out += c;
   }
   return out;
 }
