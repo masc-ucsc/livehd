@@ -7702,6 +7702,58 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
     return chunk_ref;
   };
 
+  // Per-field attribute overrides (`b::[poison=99]=2`), per-field type
+  // annotations (`a:u4=3`), and `mut` markers — emit a tuple_get tmp bound to
+  // the field, then attach decorations against that tmp (the attribute pass
+  // alias-chases them onto `tuple_ref.field`). Shared by the no-spread and
+  // spread paths so a decorated field in a spread literal (`(...xs, a:u4=3)`)
+  // keeps its type/attr/mut instead of silently dropping them.
+  auto decorate_fields = [&](const Lnast_node& tuple_ref) {
+    for (const auto& it : items) {
+      if ((!it.has_attr_list && !it.has_type_cast && !it.is_mut) || !it.is_assign) {
+        continue;
+      }
+      auto tg_idx = builder.add_child(Lnast_ntype::create_tuple_get());
+      auto tg_ref = builder.mint_tmp_ref();
+      lnast->add_child(tg_idx, tg_ref);
+      lnast->add_child(tg_idx, tuple_ref);
+      lnast->add_child(tg_idx, Lnast_node::create_const(it.assign_key));
+      if (it.is_mut) {
+        auto d_idx = builder.add_child(Lnast_ntype::create_declare());
+        lnast->add_child(d_idx, tg_ref);
+        lnast->add_child(d_idx, Lnast_ntype::create_prim_type_none());
+        lnast->add_child(d_idx, Lnast_node::create_const("mut"));
+      }
+      if (it.has_type_cast) {
+        TSNode ty = child_by_field(it.type_cast_node, "type");
+        if (!ts_node_is_null(ty)) {
+          std::string_view tt(ts_node_type(ty));
+          if (tt == "uint_type" || tt == "sint_type" || tt == "bool_type" || tt == "string_type") {
+            auto ts_idx = builder.add_child(Lnast_ntype::create_type_spec());
+            lnast->add_child(ts_idx, tg_ref);
+            emit_type_expr(ts_idx, ty);
+          } else if (tt == "expression_type" || tt == "dot_expression_type" || tt == "function_call_type") {
+            auto raw = trim(get_text(ty));
+            if (!raw.empty()) {
+              auto as_idx = builder.add_child(Lnast_ntype::create_attr_set());
+              lnast->add_child(as_idx, tg_ref);
+              lnast->add_child(as_idx, Lnast_node::create_const("typename"));
+              std::string quoted;
+              quoted.reserve(raw.size() + 2);
+              quoted.push_back('\'');
+              quoted.append(raw);
+              quoted.push_back('\'');
+              lnast->add_child(as_idx, Lnast_node::create_const(quoted));
+            }
+          }
+        }
+      }
+      if (it.has_attr_list) {
+        emit_attribute_list(tg_ref, it.attr_list_node);
+      }
+    }
+  };
+
   if (!has_spread) {
     auto idx = builder.add_child(Lnast_ntype::create_tuple_add());
     auto ref = builder.mint_tmp_ref();
@@ -7725,76 +7777,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
         lnast->add_child(idx, it.value);
       }
     }
-    // Per-field attribute overrides (e.g. `b::[poison=99]=2`) and per-
-    // field type annotations (e.g. `a:u4=3`). Emit a tuple_get to
-    // introduce a tmp ref bound to the field, then attach decorations
-    // against that tmp. The attribute pass tracks tuple_get aliases and
-    // migrates the attrs to the underlying path so `t.b.[poison]` /
-    // `t.a.[bits]` reads find the override.
-    //
-    // Per-field types: `a:u4` is sugar for `a:int(max=15,min=0)`, so emit the
-    // canonical `prim_type_int(max,min)` via a `type_spec` on the field's
-    // tuple_get tmp (was a bare `ubits`/`sbits` attr_set). Downstream
-    // passes only ever see `prim_type_int`; `bits`/`sign` derive from the range.
-    // (`type_spec` is in `parent_writes_pos0` so lnastfmt's unwritten-tmp check
-    // accepts the tmp once the producing `tuple_get` is DCE'd.)
-    for (const auto& it : items) {
-      if ((!it.has_attr_list && !it.has_type_cast && !it.is_mut) || !it.is_assign) {
-        continue;
-      }
-      auto tg_idx = builder.add_child(Lnast_ntype::create_tuple_get());
-      auto tg_ref = builder.mint_tmp_ref();
-      lnast->add_child(tg_idx, tg_ref);
-      lnast->add_child(tg_idx, ref);
-      lnast->add_child(tg_idx, Lnast_node::create_const(it.assign_key));
-      if (it.is_mut) {
-        // Record the field's `mut` marker on the tuple_get tmp (alias-chased
-        // by attributes' lookup_type_info onto `t.field`): a write through a
-        // mut field of a `const` tuple is legal, not a const rebind.
-        auto d_idx = builder.add_child(Lnast_ntype::create_declare());
-        lnast->add_child(d_idx, tg_ref);
-        lnast->add_child(d_idx, Lnast_ntype::create_prim_type_none());
-        lnast->add_child(d_idx, Lnast_node::create_const("mut"));
-      }
-      if (it.has_type_cast) {
-        TSNode ty = child_by_field(it.type_cast_node, "type");
-        if (!ts_node_is_null(ty)) {
-          std::string_view tt(ts_node_type(ty));
-          if (tt == "uint_type" || tt == "sint_type" || tt == "bool_type" || tt == "string_type") {
-            // `a:u4` is sugar for `a:int(max=15,min=0)`. Emit the
-            // canonical prim_type node via a `type_spec` on the field's
-            // tuple_get tmp (was a bare `ubits`/`sbits` attr_set). emit_type_expr
-            // maps uint/sint→prim_type_int (bits/sign derive from the range),
-            // bool→prim_type_bool, string→prim_type_string — so a typed field's
-            // kind is recorded for the per-field `does`/`equals`/`case` check
-            // (previously only integer field types survived).
-            auto ts_idx = builder.add_child(Lnast_ntype::create_type_spec());
-            lnast->add_child(ts_idx, tg_ref);
-            emit_type_expr(ts_idx, ty);
-          } else if (tt == "expression_type" || tt == "dot_expression_type" || tt == "function_call_type") {
-            // Named-type field (`inn:inner_t`): record its typename so a later
-            // `o.inn.[typename]` resolves — mirrors the top-level `:Type` case in
-            // emit_type_spec. The attribute pass migrates this tuple_get-tmp attr
-            // onto the underlying field path (same as the ubits/sbits case).
-            auto raw = trim(get_text(ty));
-            if (!raw.empty()) {
-              auto as_idx = builder.add_child(Lnast_ntype::create_attr_set());
-              lnast->add_child(as_idx, tg_ref);
-              lnast->add_child(as_idx, Lnast_node::create_const("typename"));
-              std::string quoted;
-              quoted.reserve(raw.size() + 2);
-              quoted.push_back('\'');
-              quoted.append(raw);
-              quoted.push_back('\'');
-              lnast->add_child(as_idx, Lnast_node::create_const(quoted));
-            }
-          }
-        }
-      }
-      if (it.has_attr_list) {
-        emit_attribute_list(tg_ref, it.attr_list_node);
-      }
-    }
+    decorate_fields(ref);
     return ref;
   }
 
@@ -7804,7 +7787,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
   // over those refs.
   std::vector<Lnast_node> chunks;
   std::vector<Item>       pending;
-  for (auto& it : items) {
+  for (const auto& it : items) {  // copy (not move): items stays intact for decorate_fields below
     if (it.is_spread) {
       if (!pending.empty()) {
         chunks.push_back(emit_chunk_tuple_add(pending));
@@ -7812,7 +7795,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
       }
       chunks.push_back(it.value);
     } else {
-      pending.push_back(std::move(it));
+      pending.push_back(it);
     }
   }
   if (!pending.empty()) {
@@ -7826,6 +7809,9 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
   for (const auto& c : chunks) {
     lnast->add_child(idx, c);
   }
+  // Decorate the non-spread fields against the concat result so a decorated
+  // field in a spread literal (`(...xs, a:u4=3)`) keeps its type/attr/mut.
+  decorate_fields(ref);
   return ref;
 }
 
