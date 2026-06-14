@@ -3076,8 +3076,10 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
   for (std::size_t i = 0; i < nbind; ++i) {
     const auto& e          = io.inputs[i];
     const bool  is_generic = is_generic_name(e.type_name);
+    // A half-open `int(max=99)` param carries a range but bits==0; treat it as
+    // already-typed too so the actual's type isn't injected over it (cat 1).
     const bool  already_typed
-        = !is_generic && (e.bits > 0 || !e.type_name.empty() || e.kind == Io_kind::boolean);
+        = !is_generic && (e.bits > 0 || e.has_range || !e.type_name.empty() || e.kind == Io_kind::boolean);
     if (already_typed) {
       inject[i].inject = false;
       if (!e.type_name.empty()) {

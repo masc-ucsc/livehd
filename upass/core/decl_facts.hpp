@@ -191,15 +191,17 @@ inline std::optional<Facts> lookup(const Symbol_table& st, const Lnast* ln, std:
       any              = true;
     }
   }
-  // io PORT facts stay in io_meta (a fact-only table entry would read as a
-  // runtime-unknown value claim downstream): kind+bits, no ranges.
+  // io PORT facts come from io_meta: kind+bits, plus the EXACT int(min,max)
+  // range when the port pins both bounds (has_range). Carrying the range — not
+  // just `bits` — lets downstream max/min derivation and overload range-fit use
+  // the precise bounds instead of a power-of-two `bits` window (review cat 1 R1).
   if (ti.kind == Num::none && ti.bits == 0 && ln != nullptr) {
     const auto& io         = ln->io_meta();
     auto        merge_port = [&](const Lnast_io_entry& pe) {
       if (pe.name != var) {
         return false;
       }
-      if (pe.bits == 0 && pe.kind != Io_kind::boolean) {
+      if (pe.bits == 0 && pe.kind != Io_kind::boolean && !pe.has_range) {
         return false;  // unbounded/untyped (template port) — nothing to pin
       }
       ti.has_type_spec = true;
@@ -209,6 +211,11 @@ inline std::optional<Facts> lookup(const Symbol_table& st, const Lnast* ln, std:
       } else {
         ti.kind = pe.is_signed ? Num::signed_int : Num::unsigned_int;
         ti.bits = static_cast<uint32_t>(pe.bits);
+        if (pe.has_range) {
+          ti.range_min = *Dlop::create_integer(pe.range_min);
+          ti.range_max = *Dlop::create_integer(pe.range_max);
+          ti.kind      = pe.range_min < 0 ? Num::signed_int : Num::unsigned_int;
+        }
       }
       any = true;
       return true;

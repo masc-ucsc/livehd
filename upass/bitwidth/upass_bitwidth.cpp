@@ -302,7 +302,19 @@ Lnast_range uPass_bitwidth::envelope_of_operand(const upass::Operand& o) const {
   // Params skip the declare bake; their declared width rides io_meta (SSA).
   const auto base = ssa_base_name(o.name);
   for (const auto& in : lm->get_lnast()->io_meta().inputs) {
-    if (in.name == base && in.kind == Io_kind::integer && in.bits > 0 && in.bits <= 62) {
+    if (in.name != base || in.kind != Io_kind::integer) {
+      continue;
+    }
+    // Prefer the EXACT declared int(min,max) when the port pins both bounds —
+    // `int(0,99)` admits [0,99], not the [0,127] bits window (cat 1).
+    if (in.has_range) {
+      Lnast_range r;
+      r.min       = in.range_min;
+      r.max       = in.range_max;
+      r.unbounded = false;
+      return r;
+    }
+    if (in.bits > 0 && in.bits <= 62) {
       if (in.is_signed) {
         return Lnast_range::sext_to(in.bits - 1);
       }
