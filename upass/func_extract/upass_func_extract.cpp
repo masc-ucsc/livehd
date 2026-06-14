@@ -317,6 +317,28 @@ upass::Vote uPass_func_extract::process_tuple_add(std::string_view dst_name, Bun
     return upass::Vote::keep;
   }
   std::string                           lhs_name(lm->current_text());
+
+  // A single positional-const tuple `(v,)` is a scalar carrier (e.g. an enum
+  // entry `(1,)`, whose `__enumentry` identity rides as a later attr store).
+  // Record its lone value as a SCALAR so an enclosing enum tuple_add
+  // (`store add = ___carrier`) and the following `store Op = ___tuple` can
+  // resolve, letting `Op` reach latest_outer_bundle and be closure-captured
+  // into an inlined comb that compares `== Op.add`. Without this the enum is
+  // unresolved inside the comb body and the match arms fall to `else`.
+  {
+    const auto peek = lm->save_cursor();
+    if (lm->move_to_sibling() && Lnast_ntype::is_const(lm->current_type()) && lm->is_last_child()) {
+      std::string ctext(lm->current_text());
+      lm->restore_cursor(saved);
+      try {
+        temp_scalar_value[lhs_name] = *Dlop::from_pyrope(ctext);
+      } catch (...) {
+      }
+      return upass::Vote::keep;
+    }
+    lm->restore_cursor(peek);
+  }
+
   std::unordered_map<std::string, Dlop> fields;
   while (lm->move_to_sibling()) {
     if (!Lnast_ntype::is_store(lm->current_type()) || !lm->has_child()) {

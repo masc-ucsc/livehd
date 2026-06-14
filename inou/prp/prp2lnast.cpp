@@ -2225,6 +2225,15 @@ void Prp2lnast::process_assignment(TSNode n) {
   TSNode rv   = child_by_field(n, "rvalue");
   TSNode tc   = child_by_field(n, "type");  // outer type_cast on complex lvalue
 
+  // Keep the RHS node of a top-level `const NAME = "str" | (tuple)` so a later
+  // `enum(...NAME, …)` spread can splice it in place (see const_rvalue_nodes_).
+  if (!ts_node_is_null(decl) && !ts_node_is_null(lv) && !ts_node_is_null(rv) && conditional_depth_ == 0
+      && std::string_view(ts_node_type(lv)) == "identifier" && decode_decl(decl).kind == "const") {
+    if (std::string_view rvt(ts_node_type(rv)); rvt == "constant" || rvt == "tuple") {
+      const_rvalue_nodes_[std::string(trim(get_text(lv)))] = rv;
+    }
+  }
+
   // Stable SSA/tmp ids: name every temp produced while lowering this statement
   // after its destination variable (`___<lhs>_<n>`) so editing or inserting an
   // unrelated statement does not renumber these temps. Covers the rvalue
@@ -3846,6 +3855,7 @@ void Prp2lnast::parse_enum_definition_entries(TSNode enum_def_node, std::vector<
   // Entries ride in the `input` arg_list as lambda-style pairs: a
   // `typed_identifier` (name + optional payload type) optionally followed by a
   // `definition`-tagged value expression.
+  bool pending_spread = false;  // a `...` mod token precedes the operand identifier
   for (uint32_t i = 0, nc = child_count(args); i < nc; ++i) {
     TSNode           c     = child(args, i);
     const char*      fname = ts_node_field_name_for_child(args, i);
@@ -3853,7 +3863,20 @@ void Prp2lnast::parse_enum_definition_entries(TSNode enum_def_node, std::vector<
     if (ct == "comment") {
       continue;
     }
+    // `enum(...NAME, …)`: a `...` mod flags the NEXT identifier as a SPREAD of a
+    // comptime const — a const string splices as a field name, a const tuple
+    // splices its named fields, so `enum(...a, b=3, ...c)` lowers exactly like
+    // `enum("field", b=3, const foo=4)` (03-bundle.md, 2f-enum group D).
+    if (fname && std::string_view(fname) == "mod" && trim(get_text(c)) == "...") {
+      pending_spread = true;
+      continue;
+    }
     if (ct == "typed_identifier") {
+      if (pending_spread) {
+        pending_spread = false;
+        expand_enum_spread(c, entries);
+        continue;
+      }
       Enum_entry e;
       TSNode     id = child_by_field(c, "identifier");
       e.name        = trim(get_text(ts_node_is_null(id) ? c : id));
@@ -3867,6 +3890,75 @@ void Prp2lnast::parse_enum_definition_entries(TSNode enum_def_node, std::vector<
       entries.back().has_value  = true;
     }
   }
+}
+
+// Expand an `enum(...NAME)` spread operand (a typed_identifier naming a const)
+// into enum entries: a const STRING becomes a field whose name is the string
+// content; a const TUPLE splices each of its named fields (carrying their
+// values). See const_rvalue_nodes_ / parse_enum_definition_entries.
+void Prp2lnast::expand_enum_spread(TSNode operand, std::vector<Enum_entry>& entries) {
+  TSNode      id = child_by_field(operand, "identifier");
+  std::string nm(trim(get_text(ts_node_is_null(id) ? operand : id)));
+  auto        it = const_rvalue_nodes_.find(nm);
+  if (it == const_rvalue_nodes_.end()) {
+    report_error(operand,
+                 "enum-spread-unresolved",
+                 "comptime",
+                 std::format("enum spread `...{}` must reference a compile-time `const` string or tuple", nm),
+                 "declare it as a `const` string (splices as a field name) or a `const` tuple (splices its fields)");
+    return;
+  }
+  TSNode           rv = it->second;
+  std::string_view rvt(ts_node_type(rv));
+  if (rvt == "constant") {
+    // String const → a field whose NAME is the string content.
+    std::string s(trim(get_text(rv)));
+    if (s.size() >= 2 && (s.front() == '"' || s.front() == '\'')) {
+      s = s.substr(1, s.size() - 2);
+    }
+    Enum_entry e;
+    e.name = std::move(s);
+    entries.push_back(std::move(e));
+    return;
+  }
+  if (rvt == "tuple") {
+    // Splice each named field (`const foo=4` → `foo=4`).
+    for (uint32_t i = 0, nc = ts_node_named_child_count(rv); i < nc; ++i) {
+      TSNode           item = ts_node_named_child(rv, i);
+      std::string_view itt(ts_node_type(item));
+      Enum_entry       e;
+      if (itt == "assignment") {
+        TSNode ilv = child_by_field(item, "lvalue");
+        if (ts_node_is_null(ilv)) {
+          continue;
+        }
+        if (std::string_view(ts_node_type(ilv)) == "typed_identifier") {
+          TSNode iid = child_by_field(ilv, "identifier");
+          e.name     = trim(get_text(ts_node_is_null(iid) ? ilv : iid));
+        } else {
+          e.name = trim(get_text(ilv));
+        }
+        if (TSNode irv = child_by_field(item, "rvalue"); !ts_node_is_null(irv)) {
+          e.value_node = irv;
+          e.has_value  = true;
+        }
+      } else if (itt == "identifier" || itt == "typed_identifier") {
+        TSNode iid = (itt == "typed_identifier") ? child_by_field(item, "identifier") : item;
+        e.name     = trim(get_text(ts_node_is_null(iid) ? item : iid));
+      } else {
+        continue;
+      }
+      if (!e.name.empty()) {
+        entries.push_back(std::move(e));
+      }
+    }
+    return;
+  }
+  report_error(operand,
+               "enum-spread-unresolved",
+               "comptime",
+               std::format("enum spread `...{}` must be a `const` string or tuple", nm),
+               "use a `const` string or a `const` named tuple");
 }
 
 Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_level_type, const std::vector<Enum_entry>& entries,

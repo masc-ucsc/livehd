@@ -994,10 +994,36 @@ static bool structural_does(const std::shared_ptr<Bundle const>& a, const std::s
   // Per top-level segment of b: a must have a matching top-level entry of
   // the same kind. top_levels() collapses nested keys (`foo.x`/`foo.y`)
   // into one entry, so each is checked once.
+  // Per-field kind (07-typesystem.md): a string-typed field is NOT a superset
+  // of an int-valued field of the same name. Derive a leaf's kind from its
+  // typed Entry, falling back to the collapsed scalar's representation.
+  auto leaf_kind = [](const std::shared_ptr<Bundle const>& bnd, std::string_view name, const Dlop& scalar) -> upass::Kind {
+    const auto k = bnd->get_entry(name).kind;
+    if (k != upass::Kind::unknown) {
+      return k;
+    }
+    if (!scalar.is_invalid() && !scalar.is_nil()) {
+      if (scalar.is_string()) {
+        return upass::Kind::string;
+      }
+      if (scalar.is_bool()) {
+        return upass::Kind::boolean;
+      }
+      if (scalar.is_integer()) {
+        return upass::Kind::integer;
+      }
+    }
+    return upass::Kind::unknown;
+  };
   for (const auto& tb : b->top_levels()) {
     if (tb.pos < 0) {
       if (!a->has_top_named(tb.name)) {
         return false;
+      }
+      const auto bk = leaf_kind(b, tb.name, tb.scalar);
+      const auto ak = leaf_kind(a, tb.name, a->get_trivial(tb.name));
+      if (ak != upass::Kind::unknown && bk != upass::Kind::unknown && ak != bk) {
+        return false;  // same-named field of an incompatible kind — not a superset
       }
     } else {
       if (!a->has_top_unnamed(tb.pos)) {
@@ -1163,6 +1189,25 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
   } else if (b.bundle && !a.scalar.is_invalid() && bundle_count_non_attr(b.bundle) > 1) {
     result = *Dlop::create_bool(Negate);
   } else if (!a.bundle && !b.bundle && !a.scalar.is_invalid() && !b.scalar.is_invalid()) {
+    // Pyrope forbids MIXING TYPES across a comparison: a known `bool` vs a known
+    // int/string is a COMPILE ERROR — write the conversion explicitly (a bare
+    // `true == foo#[0]` compares a boolean to `int(min=0,max=1)`). Gated on
+    // both-known + non-nil so the `x == nil` idiom and unknown bit-pattern
+    // compares (`(v!=0) == 0sb?`, handled by same_bits_ignore_type below) still
+    // fold. Mirrors the tuple-path check in compare_bundles_eq.
+    if (!a.scalar.is_nil() && !b.scalar.is_nil() && !a.scalar.has_unknowns() && !b.scalar.has_unknowns()
+        && (a.scalar.is_bool() != b.scalar.is_bool() || a.scalar.is_string() != b.scalar.is_string())) {
+      const std::string_view suggest = Negate ? "==" : "!=";
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "compare-type-mismatch",
+          .category = "type",
+          .pass     = "upass.constprop",
+          .message  = "comparison mixes a bool with an int/string — types must match (no implicit convert)",
+          .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+          .hint     = std::format("compare the integer side to zero to get a bool, e.g. `expr {} 0`", suggest)});
+      throw std::runtime_error("comparison mixes a bool with an int/string");
+    }
     // same_repr gives bit-identity including unknown positions (so
     // `0sb? == 0sb?` is known-true). eq_op only reduces to known-false
     // when neither side carries unknowns; otherwise it returns a 1-bit
@@ -3114,6 +3159,24 @@ void uPass_constprop::process_func_call() {
     }
   }
   if (kind == Cast::none) {
+    // Enum string-cast `E("a")` / hierarchical `E3("l1.l1b")`: `fname` is the
+    // enum type and the lone positional string actual is a (possibly dotted)
+    // member path. Resolve it against the enum bundle exactly as a `.`-access
+    // (process_tuple_get) does — bind dst to the leaf carrier so its
+    // `__enumentry` identity + scalar survive for ==/string()/in. Works in any
+    // position (inline, reassignment, declaration), unlike the runner's
+    // construction splice which only fires on a declaration RHS.
+    if (actuals.has_value() && actuals->size() == 1 && !(*actuals)[0].is_named && (*actuals)[0].value.is_string()) {
+      const std::string member = strip_pyrope_quotes((*actuals)[0].value.to_pyrope());
+      const std::string key    = fname + "." + member;  // member may itself contain '.'
+      if (st().has_bundle(key)) {
+        if (auto sub = st().get_bundle(key); enum_identity_of(sub) != nullptr) {
+          st().set(dst, sub);
+          move_to_parent();
+          return;
+        }
+      }
+    }
     move_to_parent();
     return;
   }
@@ -3342,7 +3405,8 @@ void uPass_constprop::process_tuple_get() {
   auto dst = std::string(current_text());
 
   move_to_sibling();
-  auto src = std::string(current_text());  // source tuple variable
+  auto src     = std::string(current_text());          // source tuple variable
+  auto src_raw = std::string(lm->current_raw_text());  // un-renamed source (inline-frame free vars)
 
   if (!move_to_sibling()) {
     move_to_parent();

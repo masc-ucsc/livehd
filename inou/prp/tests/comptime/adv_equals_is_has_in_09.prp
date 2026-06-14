@@ -6,13 +6,13 @@
 */
 
 // does on tuples: structural superset; extra fields allowed.
-const small = (a=1, b=2)
-const big = (a=10, b=20, c=30)
+const small = (const a=1, const b=2)
+const big = (const a=10, const b=20, const c=30)
 cassert(big does small)
 cassert(not (small does big))
 
 // fully-named tuples ignore field order in does
-const m3 = (b=2, a=0)
+const m3 = (const b=2, const a=0)
 cassert(small does m3)
 cassert(m3 does small)
 

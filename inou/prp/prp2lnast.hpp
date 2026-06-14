@@ -289,6 +289,9 @@ protected:
   // Parse the `enum(...)` argument list into Enum_entry rows (shared by the
   // `const X = enum(...)` expression path and nested hierarchical entries).
   void       parse_enum_definition_entries(TSNode enum_def_node, std::vector<Enum_entry>& entries);
+  // Splice an `enum(...NAME)` spread operand into entries (const string → field
+  // name; const tuple → its named fields). See const_rvalue_nodes_.
+  void       expand_enum_spread(TSNode operand, std::vector<Enum_entry>& entries);
   void       process_type_statement(TSNode n);
   void       process_import_statement(TSNode n);
 
@@ -412,6 +415,14 @@ protected:
   // resolves the value that was statically known AT THE LAMBDA DECLARATION
   // POINT; a mut that has since gone runtime is erased and the slot errors.
   std::unordered_map<std::string, int64_t> const_int_bindings_;
+
+  // `const NAME = <string | tuple literal>` → the RHS CST node, kept so an
+  // `enum(...NAME, …)` spread can splice NAME (a string becomes a field name; a
+  // tuple's named fields are spliced in place) at lowering time — `enum(...a,
+  // b=3, ...c)` lowers exactly like `enum("field", b=3, const foo=4)`
+  // (2f-enum group D). Recorded only for top-level `const` decls with a simple
+  // identifier lvalue.
+  std::unordered_map<std::string, TSNode> const_rvalue_nodes_;
 
   // Nesting depth of conditional / loop / nested-lambda bodies currently being
   // lowered. >0 means writes are not unconditional statement-level writes, so

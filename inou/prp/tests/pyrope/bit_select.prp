@@ -19,12 +19,14 @@ cassert(y2 == 0x78)
 // mix), so cast with `int(true)` and turn the integer back into a bool with `!=0`.
 cassert(y3 == ((int(true) ^ int(true) ^ 0 ^ 0) != 0))
 cassert(y3 == ((1 ^ 1 ^ 0 ^ 0) != 0))
-cassert(y3 == (1 ^ 1 ^ 0 ^ 0)#[0])
+// `#[0]` yields an int(min=0,max=1); a bool may not be compared to an int, so
+// turn the extracted bit back into a bool with `!= 0` (mixing is a compile error).
+cassert(y3 == ((1 ^ 1 ^ 0 ^ 0)#[0] != 0))
 
 cassert(y4 == ((int(true) | 0 | 0 | 0) != 0))
 
 cassert(y5 == ((int(true) ^ 0 ^ 0 ^ 0) != 0))
 cassert(y5 != y3)                   // the two reductions differ (true != false)
-cassert(y5 == (1 ^ 0 ^ 0 ^ 0)#[0])
+cassert(y5 == ((1 ^ 0 ^ 0 ^ 0)#[0] != 0))
 
 cassert(false)

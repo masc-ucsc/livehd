@@ -6,8 +6,8 @@
 */
 
 // named-vs-positional matching. Fully named tuples: order independent.
-const fn1 = (a=1, b=2)
-const fn2 = (b=2, a=1)
+const fn1 = (const a=1, const b=2)
+const fn2 = (const b=2, const a=1)
 cassert(fn1 does fn2)         // both fully named, order independent
 cassert(fn2 does fn1)
 // mixed: an unnamed field forces position+name to match (doc 07-typesystem

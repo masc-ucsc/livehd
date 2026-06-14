@@ -21,10 +21,13 @@
 
 <h2>Failing tests</h2>
 <ul>
-<li><code>inou/prp/tests/comptime/adv_does_op_08.prp</code> — positional <code>does</code>: <code>(1,b=2) does (b=2,1)</code> wrongly true (BUG A); also uses bare named fields in a tuple-literal decl</li>
-<li><code>inou/prp/tests/comptime/adv_equals_is_has_in_09.prp</code> — value-only RHS field gets no kind &rarr; <code>string does int</code> not rejected (BUG B); also bare named fields</li>
+<li><code>inou/prp/tests/comptime/adv_does_op_08.prp</code> — positional <code>does</code>: <code>(1,b=2) does (b=2,1)</code> wrongly true (BUG A); mutconst syntax migrated</li>
+<li><code>inou/prp/tests/comptime/adv_equals_is_has_in_09.prp</code> — <span class="status landed">LANDED 2026-06-14</span> (BUG B per-field kind + mutconst syntax)</li>
 <li><code>inou/prp/tests/comptime/adv_overload_13.prp</code> — declared int range not used in dispatch: <code>p(100)</code> binds the wrong overload (BUG C)</li>
 </ul>
+
+<h2>Landed (2026-06-14)</h2>
+<p><strong>BUG B + mutconst syntax</strong> &mdash; <code>structural_does</code> (constprop) now derives each named leaf's <em>kind</em> (from <code>Entry.kind</code>, falling back to the collapsed scalar's repr) and rejects a same-named field of an incompatible kind, so <code>(b:string) does (b=33:int)</code> is no longer a superset. <code>adv_does_op_08</code> and <code>adv_equals_is_has_in_09</code> had their <code>(a=1,b=2)</code> tuple-literal <em>declarations</em> migrated to <code>(const a=1, const b=2)</code> for the landed <code>2f-mutconst</code> rule (matching the 49 tests that commit already patched). <code>adv_equals_is_has_in_09</code> now passes.</p>
 
 <h2>Root cause (verified)</h2>
 <p><strong>B</strong> (easiest): <code>compute_does</code> (<code>upass_constprop.cpp:1984</code>) resolves the SUBSET operand with <code>declared_only=true</code>, so a value-only field <code>b=33</code> has no kind and <code>string does int</code> isn't rejected. <strong>A</strong>: <code>structural_does</code> (<code>~966</code>) does not enforce positional matching when an unnamed field is present, because <code>Top_level_entry</code> gives <code>pos=-1</code> for named fields (the bundle canonicalizes named fields alphabetically, dropping insertion order). <strong>C</strong>: <code>signature_matches</code> (<code>upass_runner.cpp:3436</code>) uses a power-of-two bits window instead of the declared <code>int(min,max)</code> range, so <code>p(100)</code> mis-dispatches. <strong>NOTE</strong>: <code>adv_does_op_08</code>/<code>adv_equals_is_has_in_09</code> now also fail the landed <code>2f-mutconst</code> rule — their <code>(a=1,b=2)</code> tuple-literal <em>declarations</em> need <code>(const a=1, const b=2)</code>. That is test-syntax maintenance for the new rule, separate from the <code>does</code> code bugs (the bare-named-field <em>comparison</em> RHS lines are fine).</p>
