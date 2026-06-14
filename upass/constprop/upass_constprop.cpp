@@ -307,8 +307,18 @@ upass::Vote uPass_constprop::process_store(std::string_view dst_name, Bundle& ds
   // Route by src arity; the bodies walk the node
   // under the cursor (store payloads include subtree initializers that the
   // operand span carries only as placeholders).
-  (void)dst_name;
   (void)dst;
+  // A store to a reg-declared name (scalar reg OR a `reg` memory/array) is a
+  // next-state write consumed by tolg; constprop must not symbolically bind it
+  // (reads see the flop's q, not the value written this cycle). process_assign
+  // already skips a reg scalar after move_to_child — but the multi-operand path
+  // (a memory index, or a chunked `mem[addr][chunk]<=` write) reaches
+  // process_tuple_set, which would tuple-key the addr/din. A din that SSA-renamed
+  // to a `___N` temp then trips the bundle's "no __ keys" invariant. Skip the
+  // whole store for reg memories — tolg owns the memory's contents.
+  if (decl_mode_of(dst_name) == upass::Mode::reg_kind) {
+    return classify_vote();
+  }
   if (src.size() <= 1) {
     process_assign();
   } else {
