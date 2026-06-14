@@ -1,19 +1,18 @@
 /*
 :name: phase8_typename_debug
 :type: parsing lnast comptime
-:verifier_pass: 10
+:verifier_pass: 9
 :verifier_fail: 0
 */
 
-// Phase 8 — non-size attributes. `typename` reports the user-type name
-// of an aggregate; `debug` and arbitrary user attrs round-trip with
-// whatever value they were given. A heterogeneous aggregate (one field
-// with no numeric envelope) reports `bits == nil`.
+// Phase 8 — non-size attributes. `debug` and arbitrary user attrs round-trip
+// with whatever value they were given. A heterogeneous aggregate (one field
+// with no numeric envelope) reports `bits == nil`. (The `.[typename]`
+// attribute was removed — task 1f-is_typename.)
 
 type complex_t = (a:u32 = nil, b:string = "hello")
 
 const g:complex_t = (a=7, b="hi")
-cassert(g.[typename] == "complex_t")
 cassert(g.a.[bits]   == 32)
 cassert(g.a.[min]    == 0)
 cassert(g.a.[max]    == 4294967295)

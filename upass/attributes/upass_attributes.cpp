@@ -340,58 +340,6 @@ EXPR_PROCESS(set_mask)
 
 #undef EXPR_PROCESS
 
-upass::Vote uPass_attributes::process_is(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
-  // `p is xx` — nominal type identity. Compare `lookup_attr_value(p,
-  // "typename")` against the rhs ref's textual name. Folds to 1/0;
-  // when LHS has no recorded typename, folds to 0 (only NAMED-type
-  // values match). (Push wrapper: body walks the cursor.)
-  (void)dst_name;
-  (void)dst;
-  (void)src;
-  on_assign_like(/*is_assign_node=*/false);
-
-  if (!move_to_child()) {
-    return upass::Vote::keep;
-  }
-  auto dvar = normalize_name(current_text());
-  if (!move_to_sibling()) {
-    move_to_parent();
-    return upass::Vote::keep;
-  }
-  auto lhs = normalize_name(current_text());
-  if (!move_to_sibling()) {
-    move_to_parent();
-    return upass::Vote::keep;
-  }
-  auto rhs_text = std::string{current_text()};
-  move_to_parent();
-
-  if (dvar.empty() || lhs.empty() || rhs_text.empty()) {
-    return upass::Vote::keep;
-  }
-
-  std::optional<Dlop> tn    = lookup_attr_value(lhs, "typename");
-  bool                match = false;
-  if (tn) {
-    auto        repr = tn->to_pyrope();
-    std::string stored
-        = (repr.size() >= 2 && repr.front() == '\'' && repr.back() == '\'') ? std::string{repr.substr(1, repr.size() - 2)} : repr;
-    match = (stored == rhs_text);
-  }
-  Dlop folded         = match ? *Dlop::create_integer(1) : *Dlop::create_integer(0);
-  auto [it, inserted] = tmp_fold.emplace(std::string{dvar}, folded);
-  if (!inserted && !it->second.same_repr(folded)) {
-    it->second = folded;
-  }
-  // The fold IS the `is` dst's value; write the binding too (dst is
-  // a single-writer tmp constprop keeps alive but never folds), so table-only
-  // operand resolution sees it without the runner_fold_fn pull seam.
-  if (runner_st != nullptr) {
-    (void)runner_st->set(dvar, folded);
-  }
-  return upass::Vote::keep;
-}
-
 void uPass_attributes::set_binding_attr(std::string_view target, std::string_view attr, const Dlop& v) {
   if (runner_st == nullptr || target.empty()) {
     return;

@@ -1,21 +1,23 @@
 /*
 :name: typesystem
 :type: parsing lnast comptime
-:verifier_pass: 29
+:verifier_pass: 23
 :verifier_fail: 0
 */
 
 // Corner cases for the new typesystem (task 1v in todo/). These
 // exercise behaviors NOT covered by the phase8_*.prp suite:
 //   - using a variable as a type (`mut b:a = ...`)
-//   - structural equality across different typenames
-//   - `is` (nominal) vs `==` (structural)
+//   - structural equality across different named types (`==` is structural)
 //   - non-stickiness of `comptime` on copy
-//   - recursive bundle deep-copy with nested typenames
+//   - recursive bundle deep-copy with nested types
 //   - field-level `const` preserved under a `mut` outer
 //   - nil-overwrite-is-not-a-write
-//   - anonymous tuple → typename nil
 //   - heterogeneous bundle poison for `[bits]` (complex-typed field)
+//
+// Nominal type identity (`is`) and the `.[typename]` attribute were removed
+// (task 1f-is_typename) — structural `does`/`equals`/`case` are the only
+// type-comparison ops, so this file no longer asserts on typenames.
 //
 // Cases that would require a compile-error path (writing a `const`,
 // implicit basic-type conversion, writing a `const` field, value
@@ -36,28 +38,24 @@ cassert(b.x == 7)
 // b.y = 7                      // would compile error: field `y` is const
 
 
-// ── 2. Anonymous tuple has nil typename. Named tuple has stable typename.
+// ── 2. Anonymous and named tuples both bind their field values.
 const anon = (const p=1, const q=2)
-cassert(anon.[typename] == nil)
+cassert(anon.p == 1)
+cassert(anon.q == 2)
 
 type named_t = (p:u4 = 0, q:u4 = 0)
 const n:named_t = (p=1, q=2)
-cassert(n.[typename] == "named_t")
+cassert(n.p == 1)
+cassert(n.q == 2)
 
 
 // ── 3. Structural equality across two named types with the same shape.
-//       `==` ignores typename; `is` checks it.
+//       `==` is structural: it compares field names + values, not typenames.
 type xx = (a:u3 = nil, b:u5 = 1)
 type yy = (a:u3 = nil, b:u5 = 1)
 const p:xx = (a=3, b=1)
 const q:yy = (a=3, b=1)
 cassert(p == q)                // structural — same field names + values
-cassert(p.[typename] == "xx")
-cassert(q.[typename] == "yy")
-cassert(p is xx)
-cassert(q is yy)
-cassert(!(p is yy))             // nominal — typenames differ
-cassert(!(q is xx))
 
 
 // ── 4. `comptime` is non-sticky on copy. Assigning a comptime value
@@ -69,15 +67,13 @@ cassert(r == 5)
 cassert(!(r.[comptime]))        // comptime not inherited
 
 
-// ── 5. Recursive bundle. Each nested complex type carries its own
-//       typename; the deep-copy is fully recursive.
+// ── 5. Recursive bundle. The deep-copy of nested complex types is fully
+//       recursive; each nested field keeps its own value.
 type inner_t = (x:u4 = 0)
 type outer_t = (inn:inner_t = nil, tag:u3 = 0)
 const o:outer_t = (inn=(x=5), tag=3)
 cassert(o.inn.x == 5)
 cassert(o.tag == 3)
-cassert(o.inn.[typename] == "inner_t")
-cassert(o.[typename]     == "outer_t")
 
 
 // ── 6. Field-level `const` inside an outer `mut` tuple is enforced at

@@ -446,7 +446,6 @@ upass::Vote uPass_typecheck::process_ge(std::string_view, Bundle& dst, upass::Sr
 // ── bit manipulation / type-id: result kind only (operands not kind-checked) ─
 upass::Vote uPass_typecheck::process_set_mask(std::string_view, Bundle& dst, upass::Src_span) { set_dst_kind(dst, Kind::integer); return Vote::keep; }
 upass::Vote uPass_typecheck::process_sext(std::string_view, Bundle& dst, upass::Src_span) { set_dst_kind(dst, Kind::integer); return Vote::keep; }
-upass::Vote uPass_typecheck::process_is(std::string_view, Bundle& dst, upass::Src_span) { set_dst_kind(dst, Kind::boolean); return Vote::keep; }
 // clang-format on
 
 // ── aggregates: passthrough kinds, no homogeneity check ─────────────────────

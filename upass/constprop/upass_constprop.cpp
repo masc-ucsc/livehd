@@ -1280,16 +1280,6 @@ upass::Vote uPass_constprop::process_ge(std::string_view dst_name, Bundle& dst, 
   return push_binary_passthrough(dst_name, src, [](Dlop x, Dlop y) -> Dlop { return *x.ge_op(y); });
 }
 
-upass::Vote uPass_constprop::process_is(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
-  // `is` is folded by upass_attributes (which has the typename data);
-  // constprop is a no-op beyond keeping the node alive so its dst tmp is
-  // still readable downstream.
-  (void)dst_name;
-  (void)dst;
-  (void)src;
-  return classify_vote();
-}
-
 void uPass_constprop::process_if() {
   // Observe the condition so the symbol table is populated before the runner
   // queries try_fold_ref(). The runner's process_if (Slice 7) performs the

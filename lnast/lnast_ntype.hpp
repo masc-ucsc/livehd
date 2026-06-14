@@ -75,13 +75,13 @@ public:
   static constexpr bool is_nary_op(Lnast_ntype_int v) {
     return v == Lnast_ntype_bit_and || v == Lnast_ntype_bit_or || v == Lnast_ntype_bit_xor || v == Lnast_ntype_log_and
            || v == Lnast_ntype_log_or || v == Lnast_ntype_plus || v == Lnast_ntype_minus || v == Lnast_ntype_mult
-           || v == Lnast_ntype_is || v == Lnast_ntype_eq || v == Lnast_ntype_ne || v == Lnast_ntype_lt || v == Lnast_ntype_le
+           || v == Lnast_ntype_eq || v == Lnast_ntype_ne || v == Lnast_ntype_lt || v == Lnast_ntype_le
            || v == Lnast_ntype_gt || v == Lnast_ntype_ge;
   }
 
   // basic_op have 1-to-1 translation between LNAST and Lgraph
   static constexpr bool is_direct_lgraph_op(Lnast_ntype_int v) {
-    return (v >= Lnast_ntype_bit_and && v <= Lnast_ntype_ge) && v != Lnast_ntype_mod && v != Lnast_ntype_is && v != Lnast_ntype_ne
+    return (v >= Lnast_ntype_bit_and && v <= Lnast_ntype_ge) && v != Lnast_ntype_mod && v != Lnast_ntype_ne
            && v != Lnast_ntype_le && v != Lnast_ntype_ge;
   }
 

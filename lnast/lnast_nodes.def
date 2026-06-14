@@ -102,7 +102,6 @@ LNAST_NODE( sext, sext )
 LNAST_NODE( set_mask, set_mask )
 LNAST_NODE( get_mask, get_mask )
 // - Comparison
-LNAST_NODE( is, is )
 LNAST_NODE( ne, ne )
 LNAST_NODE( eq, eq )
 LNAST_NODE( lt, lt )

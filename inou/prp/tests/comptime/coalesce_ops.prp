@@ -5,10 +5,10 @@
 :verifier_fail: 0
 */
 
-// Reduction / popcount / tuple-concat / loop / nominal-is constructs in one
-// comptime program: every result is discharged by the verifier, and the same
-// node kinds drive the upass per-op dispatch (red_*, popcount, tuple_concat,
-// while, is) when this file is re-used by the lhd pyrope re-emission test.
+// Reduction / popcount / tuple-concat / loop constructs in one comptime
+// program: every result is discharged by the verifier, and the same node
+// kinds drive the upass per-op dispatch (red_*, popcount, tuple_concat,
+// while) when this file is re-used by the lhd pyrope re-emission test.
 
 comb addsmall(x:u4, y:u4) -> (r:u8) { r = u8(x) + u8(y) }
 
@@ -52,4 +52,4 @@ cassert(s == 7)
 
 type MyT = (mut f:u8 = 0)
 mut mv:MyT = (f=1)
-cassert(mv is MyT)
+cassert(mv.f == 1)

@@ -4573,7 +4573,6 @@ bool dce_is_def_producing(Lnast_ntype::Lnast_ntype_int t) {
     case N::Lnast_ntype_le:
     case N::Lnast_ntype_gt:
     case N::Lnast_ntype_ge:
-    case N::Lnast_ntype_is:
     case N::Lnast_ntype_func_call:
     case N::Lnast_ntype_func_does:
     case N::Lnast_ntype_func_equals:
@@ -5046,7 +5045,6 @@ void uPass_runner::process_lnast() {
     A_OP(le)
     A_OP(gt)
     A_OP(ge)
-    A_OP(is)
 
     // Function Call — 1i: if the callee is a comb body in the registry and
     // the call shape is supported, virtually splice it (prologue / push_source

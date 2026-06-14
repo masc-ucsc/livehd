@@ -68,7 +68,6 @@ public:
   upass::Vote process_popcount(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_ne(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_eq(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
-  upass::Vote process_is(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_lt(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_le(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_gt(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;

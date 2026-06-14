@@ -47,7 +47,6 @@ public:
   upass::Vote process_le(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_gt(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_ge(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
-  upass::Vote process_is(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   void        process_if() override;
 
   // Bitwidth Insensitive Reduce

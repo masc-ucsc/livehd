@@ -6097,12 +6097,9 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
     if (kind == "op_not_in") {
       return wrap_not(make_binop(Lnast_ntype::create_func_in(), l, r));
     }
-    if (kind == "op_is") {
-      return make_binop(Lnast_ntype::create_is(), l, r);
-    }
-    if (kind == "op_not_is") {
-      return wrap_not(make_binop(Lnast_ntype::create_is(), l, r));
-    }
+    // `op_is` / `op_not_is` were removed from the grammar (task 1f-is_typename,
+    // tree-sitter-pyrope daf3508): `a is b` is now a syntax error, so there is
+    // no compare-op branch for it. Structural `does` / `equals` / `case` remain.
     if (kind == "op_does") {
       return make_binop(Lnast_ntype::create_func_does(), l, r);
     }
@@ -7244,6 +7241,15 @@ Lnast_node Prp2lnast::attribute_read_to_node(TSNode n) {
                      "type",
                      std::format("`.[{}]` is debug-only — readable only inside `cassert`/`assert`", aname),
                      "each elaboration may compute a different legal range; branch on `.[max]`/`.[min]` instead");
+      }
+      if (get_text(name_n) == "typename") {
+        // Nominal type identity was removed (task 1f-is_typename): the
+        // `typename` attribute is no longer a readable user attribute.
+        report_error(name_n,
+                     "typename-attr-removed",
+                     "type",
+                     "the `.[typename]` attribute has been removed",
+                     "use the structural `does` / `equals` / `case` operators for type comparison");
       }
       auto idx = builder.add_child(Lnast_ntype::create_attr_get());
       auto ref = builder.mint_tmp_ref();

@@ -317,7 +317,6 @@ void Lnast_writer::write_div() { write_n_ary("div"); }
 void Lnast_writer::write_mod() { write_n_ary("mod"); }
 void Lnast_writer::write_shl() { write_n_ary("shl"); }
 void Lnast_writer::write_sra() { write_n_ary("sra"); }
-void Lnast_writer::write_is() { write_n_ary("is"); }
 void Lnast_writer::write_ne() { write_n_ary("ne"); }
 void Lnast_writer::write_eq() { write_n_ary("eq"); }
 void Lnast_writer::write_lt() { write_n_ary("lt"); }

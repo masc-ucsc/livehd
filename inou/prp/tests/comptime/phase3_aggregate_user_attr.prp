@@ -10,7 +10,7 @@
 // preserves the annotation when the tuple gets flattened away in Phase 4
 // — without propagation, the LGraph-bound consumer would lose the flag.
 //
-// Built-in Pyrope aggregate reads (`size`, `bits`, `typename`, `key`) have
+// Built-in Pyrope aggregate reads (`size`, `bits`, `key`) have
 // dedicated semantics resolved before flattening; they are not generic
 // aggregate-to-field inheritance. Other built-ins may choose different
 // semantics, e.g. aggregate `[debug]` marks every tuple field as debug.

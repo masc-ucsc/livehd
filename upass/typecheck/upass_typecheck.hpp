@@ -101,7 +101,6 @@ public:
   // single-bit→bool vs range→int is ambiguous; tuple_get likewise.)
   Vote process_set_mask(std::string_view, Bundle&, upass::Src_span) override;
   Vote process_sext(std::string_view, Bundle&, upass::Src_span) override;
-  Vote process_is(std::string_view, Bundle&, upass::Src_span) override;
 
   // Aggregates — passthrough kinds, no homogeneity check.
   Vote process_tuple_add(std::string_view, Bundle&, upass::Src_span) override;

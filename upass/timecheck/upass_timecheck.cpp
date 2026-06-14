@@ -83,7 +83,7 @@ struct CallInfo {
          || N::is_red_xor(t) || N::is_popcount(t) || N::is_log_and(t) || N::is_log_or(t) || N::is_log_not(t) || N::is_plus(t)
          || N::is_minus(t) || N::is_mult(t) || N::is_div(t) || N::is_mod(t) || N::is_shl(t) || N::is_sra(t) || N::is_sext(t)
          || N::is_set_mask(t) || N::is_get_mask(t) || N::is_ne(t) || N::is_eq(t) || N::is_lt(t) || N::is_le(t) || N::is_gt(t)
-         || N::is_ge(t) || N::is_is(t);
+         || N::is_ge(t);
 }
 
 class Discharger {

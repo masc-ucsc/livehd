@@ -1,5 +1,5 @@
 // Construct mix for the pyrope re-emission test (lhd_prp_writer_test.sh):
-// reductions, popcount, tuple concat, while and is at the top scope (the
+// reductions, popcount, tuple concat, and while at the top scope (the
 // upass per-op dispatch), plus a typed comb pair so lambda units flow
 // through pass.prp_writer.
 comb helper(a:u8, b:u8) -> (r:u16) { r = u16(a) + u16(b) }
@@ -33,4 +33,4 @@ cassert(t3[3] == 4)
 
 type MyT = (mut f:u8 = 0)
 mut mv:MyT = (f=1)
-cassert(mv is MyT)
+cassert(mv.f == 1)

@@ -255,17 +255,6 @@ public:
     handle_op();
     return consume_park_vote();
   }
-  // `is` is a pure scalar (bool) type comparison — a drop-candidate in the
-  // runner switch, no side effect, no bundle/tuple state. Park it like the
-  // other scalar comparisons so a dead or DSE'd `is` result is dropped at
-  // flush (const-known) instead of emitted-then-swept (1d hybrid B).
-  upass::Vote process_is(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
-    (void)dst_name;
-    (void)dst;
-    (void)src;
-    handle_op();
-    return consume_park_vote();
-  }
 
   // Scope / control-flow boundaries — flush everything to keep emission order
   // anchored to the original lexical position of each parked stmt. v1 is
