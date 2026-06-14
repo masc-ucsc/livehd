@@ -28,6 +28,18 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# pass.abc fixtures (task 2a-abc): a flat combinational Pyrope design plus a
+# small self-contained Liberty so the ABC tech-map + LEC test is hermetic (no
+# PDK dependency).
+filegroup(
+    name = "abc_tests",
+    srcs = [
+        "tests/abc/test.lib",
+        "tests/pyrope/abc_comb.prp",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "inou_prp",
     srcs = glob(

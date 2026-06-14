@@ -97,6 +97,17 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:hier_tests"],
 )
 
+# 2a-abc: `lhd pass abc` technology-maps a colored combinational design to a
+# standard-cell netlist (blackbox Sub cells), `pass liberty gensim` models each
+# cell, and the netlist is LEC-equivalent to the original logic (+ a negative
+# control). Hermetic via a small vendored Liberty.
+sh_test(
+    name = "lhd_abc_test",
+    size = "large",
+    srcs = ["lhd_abc_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
 # 2c-color: every coloring algorithm (acyclic|synth|path|mincut) + continuous +
 # clear run through the lhd CLI on a real design.
 sh_test(

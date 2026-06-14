@@ -1,0 +1,48 @@
+library(test_lib) {
+  delay_model : table_lookup;
+  time_unit : "1ns";
+  capacitive_load_unit (1,pf);
+  default_inout_pin_cap : 0.0;
+  default_input_pin_cap : 0.0;
+  default_output_pin_cap : 0.0;
+  default_fanout_load : 1.0;
+
+  cell(INVx1) {
+    area : 1;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "A'";
+      timing() { related_pin : "A"; cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(BUFx1) {
+    area : 2;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "A";
+      timing() { related_pin : "A"; cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(NAND2x1) {
+    area : 3;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(B) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "(A B)'";
+      timing() { related_pin : "A B"; cell_rise(scalar){values("0.2");} cell_fall(scalar){values("0.2");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(NOR2x1) {
+    area : 3;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(B) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "(A+B)'";
+      timing() { related_pin : "A B"; cell_rise(scalar){values("0.2");} cell_fall(scalar){values("0.2");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(XOR2x1) {
+    area : 5;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(B) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "(A^B)";
+      timing() { related_pin : "A B"; cell_rise(scalar){values("0.3");} cell_fall(scalar){values("0.3");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+}

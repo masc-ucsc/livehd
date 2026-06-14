@@ -1,0 +1,17 @@
+/*
+:name: abc_comb
+:type: lgraph compile
+*/
+
+// Flat combinational fixture for pass.abc (task 2a-abc): purely bitwise logic
+// plus a mux, no hierarchy and no narrowing, so the design stays a clean
+// combinational cone that ABC can bit-blast, optimize and technology-map.
+// Exercises And / Or / Xor / Not / Mux and a near-passthrough output.
+mod abc_comb(a:u8, b:u8, c:u8, s:u1) -> (x:u8@[0], y:u8@[0], z:u8@[0]) {
+  x = (a & b) | (c ^ a)
+  mut y = b & c
+  if s {
+    y = a | b
+  }
+  z = ~a
+}
