@@ -137,18 +137,19 @@ git_override(
 # For local debug/testing, swap the git_override above for:
 # local_path_override(module_name = "hhds", path = "../hhds") # sometimes useful for debug together with hhds
 
-# tree-sitter-pyrope (top of tree: "more grammar fixes from adversarial testing")
+# tree-sitter-pyrope (top of tree: "remove is from grammar", daf3508)
 # To bump the pin, recompute integrity via:
 #   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip | openssl dgst -sha256 -binary | base64
 # LOCAL OVERRIDE (task 1f-is_typename): pointing at ../tree-sitter-pyrope
-# (daf3508 "remove is from grammar") so `a is b` is a syntax error. Restore the
-# http_archive pin below once daf3508 is published + integrity is recomputed.
+# (daf3508 "remove is from grammar") so `a is b` is a syntax error. daf3508 is now
+# published on origin/main; the http_archive pin below mirrors it (top of tree) and
+# can be swapped in for the local override when a published checkout is preferred.
 # http_archive(
 #     name = "tree-sitter-pyrope",
 #     build_file = "//packages:tree-sitter-pyrope.BUILD",
-#     integrity = "sha256-q4VwjRxpS8fSvcUiMAlNB85lpAPQJR0u7h1f59d9BFI=",
-#     strip_prefix = "tree-sitter-pyrope-ab2f8f2d00c01212447f40df8675b4fc9f6a77cc",
-#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/ab2f8f2d00c01212447f40df8675b4fc9f6a77cc.zip",
+#     integrity = "sha256-DHZ/ChtWmV07FBhgEaDSG8lBVcQU39u8cA0GIXK+XW0=",
+#     strip_prefix = "tree-sitter-pyrope-daf3508b6612eb6ae11d119354155c4e05baa297",
+#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/daf3508b6612eb6ae11d119354155c4e05baa297.zip",
 #     ],
 # )
 new_local_repository(

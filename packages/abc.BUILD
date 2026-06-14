@@ -100,8 +100,26 @@ cc_library(
                    "src/sat/bsat/satChecker.c",
                    "src/sat/bsat2/*.cpp",
                ],
+           ) +
+           # C++ sources outside src/sat (acd, eslim, transduction, ttopt, rar,
+           # utilPrefix, ...) define symbols referenced by the .c objects above;
+           # without them a full binary link fails (undefined Abc_ManRewireInt,
+           # eSLIM, adder_return_array, etc.). utilPrefix.cpp's main() is inside a
+           # block comment, so it is safe to compile into the library.
+           glob(
+               [
+                   "src/aig/**/*.cpp",
+                   "src/base/**/*.cpp",
+                   "src/bool/**/*.cpp",
+                   "src/bdd/**/*.cpp",
+                   "src/map/**/*.cpp",
+                   "src/misc/**/*.cpp",
+                   "src/opt/**/*.cpp",
+                   "src/proof/**/*.cpp",
+               ],
+               allow_empty = True,
            ),
-    hdrs = glob(["src/**/**/*.h", "src/**/**/*.hpp"]) + glob([
+    hdrs = glob(["src/**/*.h", "src/**/*.hpp", "src/**/*.tpp"]) + glob([
         "src/**/**/*Unfold2.c",
         "src/sat/kissat/sort.c"
     ]),

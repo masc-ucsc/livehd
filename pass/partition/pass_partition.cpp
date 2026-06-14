@@ -119,17 +119,19 @@ struct OutWire {
 
 class Partitioner {
 public:
-  Partitioner(hhds::Graph* g, hhds::GraphLibrary* outlib, std::string top, bool debug_color)
-      : g_(g), outlib_(outlib), top_(std::move(top)), debug_color_(debug_color) {}
+  Partitioner(hhds::Graph* g, hhds::GraphLibrary* outlib, std::string top, bool debug_color,
+              livehd::partition::Body_builder hook = {})
+      : g_(g), outlib_(outlib), top_(std::move(top)), debug_color_(debug_color), hook_(std::move(hook)) {}
 
   bool run();
   void report_stats();
 
 private:
-  hhds::Graph*        g_;
-  hhds::GraphLibrary* outlib_;
-  std::string         top_;
-  bool                debug_color_;
+  hhds::Graph*                    g_;
+  hhds::GraphLibrary*             outlib_;
+  std::string                     top_;
+  bool                            debug_color_;
+  livehd::partition::Body_builder hook_;
 
   Union_find uf_;
 
@@ -429,6 +431,27 @@ void Partitioner::build_module(const hhds::Node_class& r) {
 
   auto body = gio->create_graph();
 
+  // Body-builder hook (task 2a-abc): hand the region interface + contents to the
+  // caller, which fills the body (e.g. an ABC-mapped netlist) instead of the
+  // original logic. The IO pins are already materialized on `body`.
+  if (hook_) {
+    livehd::partition::Region_body rb;
+    rb.body        = body.get();
+    rb.src         = g_;
+    rb.color       = color;
+    rb.module_name = name;
+    for (auto& p : module_inputs_[r]) {
+      rb.inputs.push_back({p.name, p.driver, gu::bits_of(p.driver), !gu::is_unsign(p.driver)});
+    }
+    for (auto& p : module_outputs_[r]) {
+      rb.outputs.push_back({p.name, p.driver, gu::bits_of(p.driver), !gu::is_unsign(p.driver)});
+    }
+    rb.nodes = region_nodes_[r];
+    hook_(rb);
+    body->commit();
+    return;
+  }
+
   // Recreate region nodes.
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class> node_map;
   for (const auto& n : region_nodes_[r]) {
@@ -666,17 +689,16 @@ void Partitioner::report_stats() {
   std::print("  total boundary ports: {}\n", total_ports);
 }
 
-}  // namespace
-
-void Pass_partition::partition(Eprp_var& var) {
-  auto top = std::string{var.get("top", "")};
-  auto out = std::string{var.get("out", "")};
-  bool dbg = var.get("debug_color", "false") != "false" && var.get("debug_color", "false") != "0";
-
-  // Resolve the top graph and index the loaded library by gid.
+// Resolve the top graph from `graphs` and compute the reachable defs in
+// children-before-parents (post-order) order, so each parent's Sub instances can
+// re-link to an already-partitioned child def in the output library. A flat
+// single-module top yields just itself. Returns the top graph (nullptr if not
+// found); `top` is filled in when it was empty.
+hhds::Graph* resolve_order(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string& top,
+                           std::vector<hhds::Graph*>& order) {
   hhds::Graph*                                 g = nullptr;
   absl::flat_hash_map<hhds::Gid, hhds::Graph*> gid2graph;
-  for (const auto& sp : var.graphs) {
+  for (const auto& sp : graphs) {
     if (!sp) {
       continue;
     }
@@ -689,16 +711,10 @@ void Pass_partition::partition(Eprp_var& var) {
     }
   }
   if (g == nullptr) {
-    livehd::diag::err("pass.partition", "no-top", "unsupported").msg("partition: top module '{}' not found in the input library", top).fatal();
-    return;
+    return nullptr;
   }
-
-  // Reachable defs in children-before-parents (post-order) order, so each
-  // parent's Sub instances can re-link to an already-partitioned child def in
-  // the output library. A flat single-module top yields just itself.
-  std::vector<hhds::Graph*>          order;
-  absl::flat_hash_set<hhds::Gid>     seen;
-  std::function<void(hhds::Graph*)>  dfs = [&](hhds::Graph* gg) {
+  absl::flat_hash_set<hhds::Gid>    seen;
+  std::function<void(hhds::Graph*)> dfs = [&](hhds::Graph* gg) {
     if (gg == nullptr || !seen.insert(gg->get_gid()).second) {
       return;
     }
@@ -713,10 +729,49 @@ void Pass_partition::partition(Eprp_var& var) {
     order.push_back(gg);
   };
   dfs(g);
+  return g;
+}
+
+}  // namespace
+
+bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, hhds::GraphLibrary* outlib,
+                                         std::string_view top_in, bool debug_color,
+                                         const livehd::partition::Body_builder& hook) {
+  std::string               top{top_in};
+  std::vector<hhds::Graph*> order;
+  auto*                     g = resolve_order(graphs, top, order);
+  if (g == nullptr) {
+    livehd::diag::err("pass.partition", "no-top", "unsupported")
+        .msg("partition: top module '{}' not found in the input library", top)
+        .fatal();
+    return false;
+  }
+  for (auto* def : order) {
+    Partitioner p(def, outlib, std::string{def->get_name()}, debug_color, hook);
+    if (!p.run()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void Pass_partition::partition(Eprp_var& var) {
+  auto top = std::string{var.get("top", "")};
+  auto out = std::string{var.get("out", "")};
+  bool dbg = var.get("debug_color", "false") != "false" && var.get("debug_color", "false") != "0";
 
   if (out.empty()) {
     // Stats-only mode: count colors/regions/ports per reachable def without
     // building an output library.
+    std::string               t = top;
+    std::vector<hhds::Graph*> order;
+    auto*                     g = resolve_order(var.graphs, t, order);
+    if (g == nullptr) {
+      livehd::diag::err("pass.partition", "no-top", "unsupported")
+          .msg("partition: top module '{}' not found in the input library", t)
+          .fatal();
+      return;
+    }
     for (auto* def : order) {
       Partitioner p(def, nullptr, std::string{def->get_name()}, dbg);
       p.report_stats();
@@ -725,8 +780,5 @@ void Pass_partition::partition(Eprp_var& var) {
   }
 
   auto& outlib = livehd::Hhds_graph_library::instance(out);
-  for (auto* def : order) {
-    Partitioner p(def, &outlib, std::string{def->get_name()}, dbg);
-    p.run();
-  }
+  build_decomposition(var.graphs, &outlib, top, dbg);
 }

@@ -317,6 +317,8 @@ constexpr std::pair<std::string_view, std::string_view> kSetPasses[] = {
     {     "cgen", "inou.cgen.verilog"},
     {    "color",        "pass.color"},
     {"partition",    "pass.partition"},
+    {      "abc",          "pass.abc"},
+    {  "liberty",      "pass.liberty"},
 };
 
 std::string_view set_pass_method(std::string_view set_name) {
@@ -2256,10 +2258,42 @@ void pass_command(Options& opts, Result& res) {
   setup_diag(opts, "pass");
   if (opts.files.empty()) {
     throw Lhd_error{"usage",
-                    "pass requires a subcommand: color <alg> | partition",
-                    "e.g. `lhd pass color acyclic --top m lg:dir` or `lhd pass partition --top m lg:dir --emit-dir lg:dir2`"};
+                    "pass requires a subcommand: color <alg> | partition | abc | liberty gensim",
+                    "e.g. `lhd pass color acyclic --top m lg:dir` or `lhd pass abc --top m lg:dir --emit-dir lg:net`"};
   }
   const std::string sub = opts.files[0];
+
+  // `pass liberty gensim <file.lib> --emit-dir lg:DIR` takes a Liberty FILE, not
+  // an lg: input — handle it before the lg: requirement below.
+  if (sub == "liberty") {
+    std::string subsub = opts.files.size() > 1 ? opts.files[1] : std::string{};
+    if (subsub != "gensim") {
+      throw Lhd_error{"usage", "pass liberty supports: gensim <file.lib> --emit-dir lg:DIR", ""};
+    }
+    if (opts.files.size() < 3) {
+      throw Lhd_error{"usage", "pass liberty gensim needs a Liberty .lib file argument", ""};
+    }
+    const std::string lib_file = opts.files[2];
+    check_inputs_exist({lib_file});
+    const auto* lg_out = find_slot(opts.emit_dirs, "lg");
+    if (lg_out == nullptr) {
+      throw Lhd_error{"usage", "pass liberty gensim needs --emit-dir lg:DIR for the model library", ""};
+    }
+    std::error_code ec;
+    fs::remove_all(lg_out->path, ec);
+    ensure_dir(lg_out->path);
+    res.inputs.push_back(lib_file);
+    Eprp_var            var;
+    Eprp_var::Eprp_dict labels{
+        {"files", lib_file},
+        {  "out", lg_out->path}
+    };
+    merge_sets(opts, "liberty", labels);
+    run_step("pass.liberty", var, labels, opts, res);
+    livehd::Hhds_graph_library::save(lg_out->path);
+    res.outputs.push_back(lg_out->path);
+    return;
+  }
 
   auto ir = gather_ir_inputs(opts, "pass");
   if (ir.lg_dirs.empty()) {
@@ -2316,8 +2350,34 @@ void pass_command(Options& opts, Result& res) {
       livehd::Hhds_graph_library::save(lg_out->path);
       res.outputs.push_back(lg_out->path);
     }
+  } else if (sub == "abc") {
+    Eprp_var var;
+    load_lg_into_var(lg_in, var);
+    if (var.graphs.empty()) {
+      throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};
+    }
+    const auto*         lg_out = find_slot(opts.emit_dirs, "lg");
+    Eprp_var::Eprp_dict labels;
+    if (!opts.top.empty()) {
+      labels["top"] = opts.top;
+    }
+    if (lg_out != nullptr) {
+      if (fs::weakly_canonical(lg_out->path) == fs::weakly_canonical(lg_in)) {
+        throw Lhd_error{"usage", "abc --emit-dir lg: must differ from the input lg:", ""};
+      }
+      std::error_code ec;
+      fs::remove_all(lg_out->path, ec);
+      ensure_dir(lg_out->path);
+      labels["out"] = lg_out->path;
+    }
+    merge_sets(opts, "abc", labels);
+    run_step("pass.abc", var, labels, opts, res);
+    if (lg_out != nullptr) {
+      livehd::Hhds_graph_library::save(lg_out->path);
+      res.outputs.push_back(lg_out->path);
+    }
   } else {
-    throw Lhd_error{"usage", std::format("unknown pass subcommand '{}'", sub), "use: color <alg> | partition"};
+    throw Lhd_error{"usage", std::format("unknown pass subcommand '{}'", sub), "use: color <alg> | partition | abc | liberty gensim"};
   }
 }
 
