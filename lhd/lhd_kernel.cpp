@@ -311,10 +311,12 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
 // from this table (the flags themselves are each method's registered EPRP
 // labels — add_label_optional/required is the single registration point).
 constexpr std::pair<std::string_view, std::string_view> kSetPasses[] = {
-    {   "upass",        "pass.upass"},
-    {   "cprop",        "pass.cprop"},
-    {"bitwidth",     "pass.bitwidth"},
-    {    "cgen", "inou.cgen.verilog"},
+    {    "upass",        "pass.upass"},
+    {    "cprop",        "pass.cprop"},
+    { "bitwidth",     "pass.bitwidth"},
+    {     "cgen", "inou.cgen.verilog"},
+    {    "color",        "pass.color"},
+    {"partition",    "pass.partition"},
 };
 
 std::string_view set_pass_method(std::string_view set_name) {
@@ -2224,6 +2226,88 @@ void check_command(Options& opts, Result& res) {
   }
 }
 
+// ---- pass (graph-pass plumbing: color / partition) --------------------------
+
+// Load every graph of an lg: library into `var` (mirrors synth's lg branch).
+void load_lg_into_var(const std::string& lib_path, Eprp_var& var) {
+  auto& lib = livehd::Hhds_graph_library::instance(lib_path);
+  for (const hhds::Gid id : lib.all_gids()) {  // gids are sparse name-hashes
+    auto g = lib.get_graph(id);
+    if (g) {
+      var.add(g);
+    }
+  }
+}
+
+void pass_command(Options& opts, Result& res) {
+  setup_diag(opts, "pass");
+  if (opts.files.empty()) {
+    throw Lhd_error{"usage",
+                    "pass requires a subcommand: color <alg> | partition",
+                    "e.g. `lhd pass color acyclic --top m lg:dir` or `lhd pass partition --top m lg:dir --emit-dir lg:dir2`"};
+  }
+  const std::string sub = opts.files[0];
+
+  auto ir = gather_ir_inputs(opts, "pass");
+  if (ir.lg_dirs.empty()) {
+    throw Lhd_error{"usage", "pass requires an lg:DIR input", "e.g. `lhd pass color acyclic --top m lg:dir`"};
+  }
+  if (ir.lg_dirs.size() > 1) {
+    throw Lhd_error{"unsupported", "multiple lg: inputs are not supported (gids are library-scoped)", ""};
+  }
+  const auto& lg_in = ir.lg_dirs.front();
+  if (!fs::is_directory(lg_in)) {
+    throw Lhd_error{"missing_file", std::format("lg: input not found: {}", lg_in), "an lg: input is a GraphLibrary directory"};
+  }
+  res.inputs.push_back(lg_in);
+
+  if (sub == "color") {
+    std::string alg = opts.files.size() > 1 ? opts.files[1] : std::string{"acyclic"};
+    Eprp_var    var;
+    load_lg_into_var(lg_in, var);
+    if (var.graphs.empty()) {
+      throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};
+    }
+    Eprp_var::Eprp_dict labels;
+    labels["alg"] = alg;
+    if (!opts.top.empty()) {
+      labels["top"] = opts.top;
+    }
+    merge_sets(opts, "color", labels);
+    run_step("pass.color", var, labels, opts, res);
+    livehd::Hhds_graph_library::save(lg_in);  // in-place coloring
+    res.outputs.push_back(lg_in);
+  } else if (sub == "partition") {
+    Eprp_var var;
+    load_lg_into_var(lg_in, var);
+    if (var.graphs.empty()) {
+      throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};
+    }
+    const auto*         lg_out = find_slot(opts.emit_dirs, "lg");
+    Eprp_var::Eprp_dict labels;
+    if (!opts.top.empty()) {
+      labels["top"] = opts.top;
+    }
+    if (lg_out != nullptr) {
+      if (fs::weakly_canonical(lg_out->path) == fs::weakly_canonical(lg_in)) {
+        throw Lhd_error{"usage", "partition --emit-dir lg: must differ from the input lg:", ""};
+      }
+      std::error_code ec;
+      fs::remove_all(lg_out->path, ec);
+      ensure_dir(lg_out->path);
+      labels["out"] = lg_out->path;
+    }
+    merge_sets(opts, "partition", labels);
+    run_step("pass.partition", var, labels, opts, res);
+    if (lg_out != nullptr) {
+      livehd::Hhds_graph_library::save(lg_out->path);
+      res.outputs.push_back(lg_out->path);
+    }
+  } else {
+    throw Lhd_error{"usage", std::format("unknown pass subcommand '{}'", sub), "use: color <alg> | partition"};
+  }
+}
+
 }  // namespace
 
 // ---- public entry points ----------------------------------------------------
@@ -2296,6 +2380,8 @@ void run_engine_command(Options& opts, Result& res) {
     ln_cat_command(opts, res);
   } else if (opts.command == "ln.diff") {
     ln_diff_command(opts, res);
+  } else if (opts.command == "pass") {
+    pass_command(opts, res);
   } else {
     throw Lhd_error{"usage", std::format("unknown command '{}'", opts.command), ""};
   }

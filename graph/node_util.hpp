@@ -290,6 +290,40 @@ inline void set_sign(const hhds::Pin_class& pin) {
 // Per-node color taint.
 inline void set_color(const hhds::Node_class& node, int32_t c) { node.attr(livehd::attrs::color).set(c); }
 
+// Clear the flat per-node color (the old Node::del_color).
+inline void del_color(const hhds::Node_class& node) {
+  if (node.attr(livehd::attrs::color).has()) {
+    node.attr(livehd::attrs::color).del();
+  }
+}
+
+// Per-hierarchical-instance color (pass/color hier_color mode). Only valid in
+// hier traversal context (the attr resolves through the node's hier_pos).
+[[nodiscard]] inline bool    has_hier_color(const hhds::Node_class& node) { return node.attr(livehd::attrs::hier_color).has(); }
+[[nodiscard]] inline int32_t hier_color_of(const hhds::Node_class& node) {
+  auto a = node.attr(livehd::attrs::hier_color);
+  return a.has() ? a.get() : 0;
+}
+inline void set_hier_color(const hhds::Node_class& node, int32_t c) { node.attr(livehd::attrs::hier_color).set(c); }
+inline void del_hier_color(const hhds::Node_class& node) {
+  if (node.attr(livehd::attrs::hier_color).has()) {
+    node.attr(livehd::attrs::hier_color).del();
+  }
+}
+
+// Unified color reader for pass/color + pass/partition: prefer the per-instance
+// hier color when present (hier mode), else fall back to the flat color. A
+// return of 0 (NO_COLOR) means uncolored.
+[[nodiscard]] inline int32_t node_color_of(const hhds::Node_class& node) {
+  if (node.is_hier() && node.attr(livehd::attrs::hier_color).has()) {
+    return node.attr(livehd::attrs::hier_color).get();
+  }
+  return color_of(node);
+}
+[[nodiscard]] inline bool has_node_color(const hhds::Node_class& node) {
+  return (node.is_hier() && node.attr(livehd::attrs::hier_color).has()) || has_color(node);
+}
+
 // User-assigned pin name. Empty string clears the attr.
 inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   if (pin.is_invalid()) {

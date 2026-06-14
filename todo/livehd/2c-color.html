@@ -161,62 +161,49 @@ lhd pass color clear --top &lt;mod&gt;                                  lg:dir
   <code>--set pass.color...</code> validation as part of this task.</p>
 
 <h2>Subtasks — pending</h2>
+<p>Core task complete (see <em>landed</em>). Only this non-blocking refinement remains:</p>
 <ul class="subtasks">
-<li><strong>CLI — add <code>lhd pass</code> graph-pass plumbing.</strong>
-  <ul><li>Add a first-class <code>lhd pass</code> command that consumes <code>lg:dir</code>,
-    dispatches <code>color</code>/<code>clear</code>, saves in-place mutations, exposes
-    <code>pass.color.*</code> through <code>lhd list options</code>/<code>lhd describe</code>, and
-    validates <code>--set</code>/<code>--config</code> entries. Keep <code>lhd synth</code> as-is
-    for now; a later cleanup may make it a wrapper over <code>lhd pass synth</code>.</li></ul></li>
-<li><strong>A — revive + port the four algorithms.</strong>
-  <ul>
-  <li>Port the four algorithms from the old <code>pass/label/</code> source (<code>e446552a8^</code>,
-    the algorithm spec) into a new <code>pass/color/</code> on the current
-    <code>hhds::Graph</code>/<code>Node_class</code> API: node iteration, Eprp registration as the
-    single method <code>pass.color</code> with the algorithm as a positional arg
-    (<code>lhd pass color &lt;alg&gt;</code>; params under <code>--set pass.color.&lt;alg&gt;.*</code>;
-    cf. <code>pass/bitwidth/pass_bitwidth.cpp</code>), color writes (see <em>Storage</em>), and a
-    fresh Bazel <code>BUILD</code>.</li>
-  <li>Re-wire VieCut in <code>MODULE.bazel</code> for <code>mincut</code> (the other three are
-    self-contained). Land <code>acyclic</code> first (no external dep), then <code>mincut</code>.</li>
-  </ul></li>
-<li><strong>B — convert each algorithm to hierarchical color, driven from a top.</strong>
-  <ul>
-  <li>Add a <code>top</code> label; resolve the top graph from the <code>graph_library</code>;
-    walk with <code>fast_hier()</code>/<code>forward_hier()</code> instead of the old flat
-    node-table loop. No flattening.</li>
-  <li>Rework each algorithm's <code>compact_flat</code> coloring into per-<em>instance</em>
-    <code>hier_storage</code> color (the default). Add the <code>hier_storage</code> color attr +
-    hier <code>set_color</code>/<code>color_of</code> variants.</li>
-  <li>Add the per-pass <code>compact</code>/<code>flat</code> option that writes the existing
-    <code>flat_storage</code> <code>color</code> attr (per def) for the all-instances-share case;
-    the hierarchical reader falls back to it when no per-instance color is set.</li>
-  <li>Add a <code>keep_colored</code> option (the enabler for the <a class="xref" href="2p-partition.html">2p-partition</a>
-    iterative flow) as an algorithm option. A color run still begins by clearing the selected top's
-    active coloring; the algorithm decides what existing colored hierarchy to preserve or prune, and
-    must leave a complete nonzero coloring for the selected top.</li>
-  </ul></li>
-<li><strong>C — color-id semantics + <code>continuous</code> mode.</strong>
-  <ul><li>Enforce "same id ⇒ structurally identical region"; allow discontinuous same-id regions
-    by default; add the optional <code>continuous</code> flag that splits a color into per-region
-    ids.</li></ul></li>
-<li><strong>D — active color metadata on the top graph.</strong>
-  <ul><li>Build and store the serialized <code>ColoringInfo</code> graph attribute on the selected
-    top graph (schema version, top, algorithm/params + per-color name hint, region count, instance
-    count). One active record per top; a new color run overwrites that top's record, and
-    <code>color clear</code> removes it for that top.</li></ul></li>
-<li><strong>E — tests.</strong>
-  <ul><li>Restore the four gtests from history
-    (<code>{acyclic,mincut,synth,path}_test.cpp</code> at <code>e446552a8^</code>), ported to the
-    current API, for the per-algorithm coloring invariants.</li>
-  <li>Add an <code>lhd/tests</code> wrapper (e.g. <code>color_synth1.py</code>, precedent noted in
-    <a class="xref" href="1c.html">1c</a>) that colors a real <em>hierarchical</em> design with a
-    given top and checks the emitted colors + metadata (repeated instances of one module share an
-    id; metadata region/instance counts are right).</li></ul></li>
+<li><strong>B′ — per-instance <code>hier_storage</code> write.</strong> The <code>hier_color</code>
+  attr + <code>set_hier_color</code>/<code>hier_color_of</code> variants and the unified reader
+  (<code>node_color_of</code>, hier-then-flat) all exist, and the metadata + <code>node_color_of</code>
+  read path already prefer it. But the four algorithms currently write only the <em>flat</em>
+  per-def color: that is correct and far cheaper here because every algorithm colors by graph
+  <em>structure</em>, so all instances of a def share an id (exactly the documented all-instances-share
+  case where flat is the right representation). Wiring an actual per-instance writer is only needed
+  for a future context-sensitive coloring; the infrastructure is in place.</li>
 </ul>
 
 <h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<ul class="subtasks">
+<li><strong>CLI — <code>lhd pass</code> plumbing. LANDED.</strong> First-class <code>lhd pass</code>
+  command (<code>lhd/lhd_kernel.cpp</code> <code>pass_command</code> + <code>lhd/lhd_options.cpp</code>
+  routing): <code>color &lt;alg&gt;</code> / <code>color clear</code> consume <code>lg:dir</code> and
+  save in place; <code>color</code>/<code>partition</code> are in <code>kSetPasses</code> so
+  <code>--set color.*</code>/<code>--set partition.*</code> are discoverable via
+  <code>lhd list options</code> and strictly validated.</li>
+<li><strong>A — four algorithms ported. LANDED.</strong> <code>pass/color/</code> on the current
+  <code>hhds::Graph</code>/<code>Node_class</code> API (one <code>pass.color</code> method, algorithm
+  as the <code>alg</code> label): <code>color_acyclic</code>, <code>color_synth</code>,
+  <code>color_path</code>, <code>color_mincut</code> + shared <code>color_common</code>. Node identity
+  keys directly on <code>Node_class</code> (hashable per def). VieCut revived via the in-tree
+  <code>//third_party/viecut</code> (its <code>BUILD</code> made header-only — <code>mincut.cpp</code>
+  is the app <code>main()</code> and was shadowing <code>gtest_main</code>).</li>
+<li><strong>B — top-driven hierarchical walk. LANDED.</strong> <code>top</code> label resolves the
+  top graph; <code>hier=true</code> colors the top plus every unique sub-def reached through
+  <code>Graph::hier_range()</code>. Per-pass <code>compact</code> option + <code>keep_colored</code>
+  (honored by <code>apply_coloring</code>). See B′ for the per-instance write.</li>
+<li><strong>C — <code>continuous</code> mode. LANDED.</strong> Union-find per-region split renumbers
+  each color into one id per maximal connected same-color region; same-id structural identity is
+  cross-checked by partition's <code>debug_color</code>.</li>
+<li><strong>D — active metadata. LANDED.</strong> Serialized <code>ColoringInfo</code> JSON
+  (schema_version/top/algorithm/params + per-color name/region_cnt/instance_cnt) stored on the top
+  graph (via its <code>INPUT_NODE</code> carrier, persisted with the body); <code>clear</code> removes
+  it.</li>
+<li><strong>E — tests. LANDED.</strong> Four ported gtests
+  (<code>pass/color/{acyclic,synth,path,mincut}_test.cpp</code>, invariant-based) +
+  <code>lhd/tests/lhd_color_test.sh</code> (all four algorithms + continuous + clear through the CLI
+  on a real design).</li>
+</ul>
 
 <h2>Revival commands</h2>
 <pre><code># algorithm reference (read the deleted source):

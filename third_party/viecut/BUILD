@@ -6,12 +6,12 @@ licenses(["notice"])  # ISC
 
 cc_library(
     name = "viecut",
-    srcs = glob(
-        ["*.cpp"],
-        exclude = [
-            "test*",
-        ],
-    ),
+    # VieCut is header-only apart from mincut.cpp, which is the standalone app
+    # entry point (it defines main()). Keeping it in the library makes any
+    # consumer that links libviecut pull in that main(), shadowing the
+    # consumer's own main (e.g. gtest_main). It belongs only in the cc_binary
+    # below, so the library carries headers only.
+    srcs = [],
     hdrs = glob(["**/*.h"]),
     copts = [
         "-w",

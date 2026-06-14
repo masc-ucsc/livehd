@@ -87,6 +87,27 @@ struct place_t {
 };
 inline constexpr place_t place{};
 
+// Per-hierarchical-instance color (pass/color "hier" storage mode). Unlike
+// the flat `color` above (one value per node-in-a-def), this is keyed per
+// instance, so two instances of the same module def can carry different ids.
+// Readers prefer this when present and fall back to the flat color otherwise
+// (graph_util::node_color_of). Written only when pass.color hier_color=1.
+struct hier_color_t {
+  using value_type = int32_t;
+  using storage    = hhds::hier_storage;
+};
+inline constexpr hier_color_t hier_color{};
+
+// Graph-level active coloring descriptor (serialized JSON, one per top graph)
+// produced by pass/color and consumed by pass/partition. Stored on the
+// Graph's own Attr_host under a sentinel key (graph_util::coloring_info_key),
+// so it persists inside the graph_library with the body. See 2c-color.
+struct coloring_info_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr coloring_info_t coloring_info{};
+
 // Per-node source provenance is hhds::attrs::srcid (one uint64 SourceId
 // resolved through the graph's Source_locator) — the old livehd::attrs::loc
 // (with its pos1=line-vs-byte mismatch) and livehd::attrs::source string pair

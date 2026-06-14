@@ -77,6 +77,25 @@ sh_test(
     data = _FLOW_DATA + ["scan_imports.prp"],
 )
 
+# 2c-color / 2p-partition: `lhd pass color <alg>` colors a flat top, `lhd pass
+# partition` rebuilds it as one-module-per-region + a new top, and the
+# partitioned Verilog is LEC-equivalent to the original (acyclic + synth).
+sh_test(
+    name = "lhd_partition_test",
+    size = "large",
+    srcs = ["lhd_partition_test.sh"],
+    data = _FLOW_DATA + ["part_flat.v"],
+)
+
+# 2c-color: every coloring algorithm (acyclic|synth|path|mincut) + continuous +
+# clear run through the lhd CLI on a real design.
+sh_test(
+    name = "lhd_color_test",
+    size = "large",
+    srcs = ["lhd_color_test.sh"],
+    data = _FLOW_DATA + ["part_hier.v"],
+)
+
 # Task 1m — pub/import machinery (the LiveHD docs): pub index
 # + __pub wrapper publication, two-invocation and iterate-until-converged
 # same-invocation imports, and the failure-mode diagnostics.

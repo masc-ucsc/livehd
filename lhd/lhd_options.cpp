@@ -391,7 +391,7 @@ Options parse_args(int argc, char** argv) {
                       opts.command.empty() ? "run `lhd help`" : std::format("run `lhd help {}`", opts.command)};
     } else if (opts.command.empty()) {
       if (a == "elaborate" || a == "compile" || a == "synth" || a == "check" || a == "scan" || a == "lsp" || a == "list"
-          || a == "describe" || a == "version" || a == "help" || a == "ln.cat" || a == "ln.diff") {
+          || a == "describe" || a == "version" || a == "help" || a == "ln.cat" || a == "ln.diff" || a == "pass") {
         // ln.cat/ln.diff keep their positionals raw and ORDERED in opts.files
         // (an ln:DIR token must keep its place — ln.diff sides are positional).
         opts.command = a;
@@ -404,7 +404,9 @@ Options parse_args(int argc, char** argv) {
       // compile (flags may intervene); inferred from the source-file
       // extensions (.prp -> pyrope, .v/.sv -> verilog) when omitted.
       opts.language = a;
-    } else if (opts.command == "elaborate" || opts.command == "compile" || opts.command == "synth") {
+    } else if (opts.command == "elaborate" || opts.command == "compile" || opts.command == "synth" || opts.command == "pass") {
+      // `pass` positionals: the subcommand word(s) (color/partition/clear/<alg>)
+      // land in opts.files; an lg:DIR is routed to opts.ins by route_positional.
       if (!route_positional(opts, a)) {
         opts.files.emplace_back(a);
       }

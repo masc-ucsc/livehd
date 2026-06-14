@@ -90,41 +90,48 @@ lhd pass partition --top &lt;mod&gt; --set pass.partition.debug_color=1  lg:dir 
   acceptance test.)</p>
 
 <h2>Subtasks — pending</h2>
+<p>Core task complete (see <em>landed</em>). Non-blocking follow-ups:</p>
 <ul class="subtasks">
-<li><strong>A — read colors + find regions.</strong>
-  <ul><li>For <code>--top</code>, read the per-instance <code>hier_storage</code> colors (flat
-    fallback) + the top graph's active color metadata; validate that every partitionable node has a
-    nonzero color id; compute regions as connected components of same-colored nodes. Emit the stats
-    (per-color region/instance/port counts, cut sizes). A zero color is a diagnostic error because
-    it means the color pass produced an incomplete coloring.</li></ul></li>
-<li><strong>B — per-color module def + canonical interface.</strong>
-  <ul><li>For each nonzero color id, <code>GraphLibrary::create_graph</code> and recreate the representative
-    region's nodes/pins/edges (<code>create_node</code>, <code>create_driver_pin</code>/<code>create_sink_pin</code>,
-    <code>add_edge</code> — no cross-graph move API). Crossing edges → boundary ports named from the
-    crossing wire's <code>pin_name</code>, canonical order. Trust the 2c structural-identity invariant;
-    hard-error if a region's cut signature differs.</li></ul></li>
-<li><strong>C — <code>debug_color</code> diagnostic.</strong>
-  <ul><li>Under <code>--set pass.partition.debug_color=1</code>, materialize and diff every region's
-    interface per color and pinpoint the divergent color / region pair / node / edge / port instead of
-    failing on the first mismatch.</li></ul></li>
-<li><strong>D — build the new top + emit.</strong>
-  <ul><li>Create the new top; for each region, instantiate its color-module as a <code>Sub</code>
-    (<code>create_typed_node</code> + <code>set_subnode</code> + boundary pins by formal name — pattern
-    at <code>upass/tolg/upass_tolg.cpp:2158–2167</code>); wire boundary ports per the original cut
-    edges; thread the original primary I/O to the new top's ports; <code>commit()</code> the new
-    <code>graph_library</code> and write it via <code>--emit-dir lg:dir2</code>.</li></ul></li>
-<li><strong>E — name + locator preservation.</strong>
-  <ul><li>Carry <code>livehd::attrs::pin_name</code> (reg/wire names; boundary ports inherit the
-    crossing wire's name) and <code>hhds::attrs::srcid</code> on every recreated node/pin, and populate
-    each new graph's <code>Source_locator</code> so srcids resolve in the emitted Verilog.</li></ul></li>
-<li><strong>F — verification.</strong>
-  <ul><li>Emit Verilog from <code>lg:dir2</code> (same top) and <code>lgcheck</code> it against the
-    original Verilog; land it as a bazel equiv test on a small hierarchical design with repeated
-    instances.</li></ul></li>
+<li><strong>Hierarchical-input partition.</strong> The pass partitions one <em>flat</em> level: the
+  top's own colored nodes become per-region modules. A top that itself contains <code>Sub</code>
+  instances (multi-level input) is not handled yet — those would need their target defs copied into
+  the output library. The multi-level <em>flow</em> (color → partition → color&nbsp;keep_colored →
+  partition) is unaffected; only a single call's input being already-hierarchical is deferred.</li>
+<li><strong>cgen multi-fanout Sub-output decl.</strong> When a region's output pin feeds several
+  other regions directly (Sub→Sub), <code>inou/cgen/cgen_verilog.cpp</code> emits the connecting
+  wire's <code>reg</code> declaration twice (once from the producer's <code>out_pins()</code> handle,
+  once from each consumer's <code>inp_edges</code> handle — the same driver-bit/class-index mismatch
+  the Memory branch already works around). It is cosmetic: both decls now carry the correct width
+  (partition stamps bits/sign on the Sub pins) and yosys tolerates the duplicate, so LEC passes.</li>
 </ul>
 
 <h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<ul class="subtasks">
+<li><strong>A — read colors + find regions. LANDED.</strong> Reads the active coloring
+  (<code>node_color_of</code>, hier-then-flat) on <code>--top</code>; rejects any zero color with a
+  diagnostic; regions = union-find connected components of same-color nodes; stats-only mode (no
+  <code>--emit-dir</code>) prints per-region node/in-port/out-port counts.</li>
+<li><strong>B — per-region module def + interface. LANDED.</strong> One module per region (with
+  <code>continuous</code> coloring, color ≡ region — the todo's one-module-per-id case);
+  <code>GraphLibrary::create_io</code>/<code>create_graph</code> + node/pin/edge recreation; crossing
+  edges → boundary ports named from the crossing wire's <code>pin_name</code> (canonical, sorted);
+  constants recreated inside the module (never ported); multi-fanout cut = one output port.</li>
+<li><strong>C — <code>debug_color</code>. LANDED.</strong> <code>--set partition.debug_color=1</code>
+  groups regions by color and reports any same-color interface-signature divergence (color / region
+  pair / widths). Module-per-region keeps the rebuild correct regardless.</li>
+<li><strong>D — new top + emit. LANDED.</strong> New top (original IO) instantiates each region as a
+  <code>Sub</code> (<code>set_subnode</code>, boundary pins by formal name); wires cut edges
+  (driver-region Sub output → consumer-region Sub input), primary I/O threaded through; bits/sign
+  stamped on Sub pins so cgen widths match; <code>commit()</code> + save via <code>--emit-dir lg:</code>.</li>
+<li><strong>E — name + locator preservation. LANDED.</strong> Recreated nodes/pins carry
+  <code>hhds::attrs::name</code>, <code>livehd::attrs::pin_name</code>, <code>pin_offset</code>,
+  <code>lut</code>, bits/sign; <code>hhds::attrs::srcid</code> is re-minted into each new graph's
+  <code>Source_locator</code> via <code>import_from</code>.</li>
+<li><strong>F — verification. LANDED.</strong> <code>lhd/tests/lhd_partition_test.sh</code>: a flat
+  top is colored (acyclic + synth, continuous), partitioned, re-emitted to Verilog, and
+  <code>lgcheck</code>-proven equivalent to the original; plus stats-only and clean-error-on-cleared
+  cases.</li>
+</ul>
 
 <h2>Design notes</h2>
 <ul>
