@@ -495,7 +495,7 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
                                                 : (range.upper() - *ci - (width_up - 1));
           return {bottom, {}};
         }
-        auto v = lower_rvalue(idx);
+        auto v = to_int_value(lower_rvalue(idx));  // settle the selector to an int (match the rvalue select path)
         if (range.isDescending()) {
           int64_t bias = range.lower() + (width_down - 1);
           return {std::nullopt, bias == 0 ? v : builder_.create_minus_stmts(v, std::to_string(bias))};

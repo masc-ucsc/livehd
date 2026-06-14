@@ -728,7 +728,17 @@ hhds::Pin_class Cprop::try_find_single_driver_pin(hhds::Node_class& node, int64_
   auto [range_begin, range_end] = mask_const.get_mask_range();
   if (pos >= range_end || pos < range_begin) {
     if (is_const_pin(a_pin)) {
-      auto v = hydrate_const(a_pin).get_mask_op(Dlop::get_mask_value(pos));
+      // get_mask is Pyrope's default-ZEXT bit-select: a non-negative mask packs
+      // the selected bits LSB-first as an UNSIGNED value. Dlop::get_mask_op has a
+      // single-bit quirk that returns the signed 1-bit -1 for a lone set bit;
+      // `#[N]` zero-extends (a set bit is the unsigned 1), so correct it here to
+      // match cgen's plain `a[N]` part-select — same fix as upass get_mask_zext
+      // and pass/bitwidth's `gm`.
+      const auto pos_mask = Dlop::get_mask_value(pos);
+      auto       v        = hydrate_const(a_pin).get_mask_op(*pos_mask);
+      if (!pos_mask->is_negative() && v->is_integer() && !v->has_unknowns() && v->is_negative()) {
+        v = Dlop::create_integer(1);
+      }
       return create_const(*current_graph, *v);
     }
     auto a_master = a_pin.get_master_node();

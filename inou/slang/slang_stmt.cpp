@@ -231,6 +231,14 @@ std::string Slang_context::case_item_match(const std::string& sel, const Tinfo& 
           emit_warning(item.sourceRange, "casez-x-item", "comptime", "x bits in a casez item never match (two-state)");
           return "0";
         }
+        if (nbits < 64) {
+          // Bits above the item literal are zero-extended: a wider selector must
+          // have them clear to match. The disjointness pre-scan in lower_case
+          // already assumes this — extend the mask here so the EMITTED compare
+          // agrees (else a narrow casez item vs a wider selector ignores the
+          // selector's high bits and the two lowerings disagree).
+          mask |= ~((1ULL << nbits) - 1);
+        }
         auto sp     = to_pattern(sel, si.bits, si.is_signed);
         auto masked = builder_.create_bit_and_stmts(sp, std::to_string(mask));
         return builder_.create_eq_stmts(masked, std::to_string(val));

@@ -1745,7 +1745,11 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       auto b_bits = cell->getParam(ID::B_WIDTH).as_int();
 
       if ((a_bits == y_bits && b_bits == y_bits) || (a_sign && b_sign)) {
-        connect_all_inputs(exit_node.create_sink_pin(0), cell);
+        // Per-operand sign-extension (each via its own A_SIGNED/B_SIGNED), same as
+        // $and/$or above — connect_all_inputs would collapse to one shared sign and
+        // mis-extend the mixed-sign equal-width case.
+        exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::A));
+        exit_node.create_sink_pin(0).connect_driver(get_dpin(g, cell, ID::B));
       } else {
         exit_node.create_sink_pin(0).connect_driver(get_unsigned_dpin(g, cell, ID::A));
         exit_node.create_sink_pin(0).connect_driver(get_unsigned_dpin(g, cell, ID::B));
@@ -1769,7 +1773,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           and_node = create_typed_node(*g, Ntype_op::And, 1);
 
           set_type_op(exit_node, Ntype_op::Get_mask);
-          set_bits(exit_node.create_driver_pin(0), 1);
+          set_bits(exit_node.create_driver_pin(0), y_bits);  // zext the 1-bit reduce to y_bits (match $reduce_and/or)
           setup_sink_by_name(exit_node, "a").connect_driver(and_node.create_driver_pin(0));
           setup_sink_by_name(exit_node, "mask").connect_driver(create_const(*g, *Dlop::create_integer(-1)));
         }
@@ -1818,7 +1822,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           not_node = create_typed_node(*g, Ntype_op::Not, 1);
 
           set_type_op(exit_node, Ntype_op::Get_mask);
-          set_bits(exit_node.create_driver_pin(0), 1);
+          set_bits(exit_node.create_driver_pin(0), y_bits);  // zext the 1-bit reduce to y_bits (match $reduce_and/or)
           setup_sink_by_name(exit_node, "a").connect_driver(not_node.create_driver_pin(0));
           setup_sink_by_name(exit_node, "mask").connect_driver(create_const(*g, *Dlop::create_integer(-1)));
         }

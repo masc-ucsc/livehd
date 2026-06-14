@@ -371,12 +371,28 @@ void Bitwidth::process_shl(hhds::Node_class& node, std::vector<hhds::Edge_class>
     return;
   }
 
-  auto max     = a_bw.get_max();
-  auto min     = a_bw.get_min();
-  auto max_val = max.shl_op(n_bw.get_max());
-  auto min_val = min.shl_op(n_bw.get_min());
+  auto max = a_bw.get_max();
+  auto min = a_bw.get_min();
+  // a<<n = a*2^n is monotonic in n per fixed operand (UP for a>0, MORE NEGATIVE
+  // for a<0). The range envelope is the min/max over the four corner shifts —
+  // NOT max<<nmax / min<<nmin, which leaves a negative `min` at min<<nmin and so
+  // under-estimates the (more negative) true lower bound for signed inputs.
+  const Dlop corners[4] = {*max.shl_op(n_bw.get_max()),
+                           *max.shl_op(n_bw.get_min()),
+                           *min.shl_op(n_bw.get_max()),
+                           *min.shl_op(n_bw.get_min())};
+  Dlop       lo         = corners[0];
+  Dlop       hi         = corners[0];
+  for (const auto& c : corners) {
+    if (c.lt_op(lo)->is_known_true()) {
+      lo = c;
+    }
+    if (c.gt_op(hi)->is_known_true()) {
+      hi = c;
+    }
+  }
 
-  Bitwidth_range bw(min_val, max_val);
+  Bitwidth_range bw(lo, hi);
   adjust_bw(node.create_driver_pin(0), bw);
 }
 
@@ -403,11 +419,14 @@ void Bitwidth::process_sra(hhds::Node_class& node, std::vector<hhds::Edge_class>
   auto n_bw = n_it->second;
 
   if (n_bw.get_min().is_positive() && n_bw.get_min().is_just_i64()) {
-    auto max     = a_bw.get_max();
-    auto min     = a_bw.get_min();
-    auto amount  = Dlop::create_integer(1)->shl_op(n_bw.get_min());
-    auto max_val = max.div_op(*amount);
-    auto min_val = min.div_op(*amount);
+    auto max = a_bw.get_max();
+    auto min = a_bw.get_min();
+    // Arithmetic >> (rounds toward -inf), NOT division (rounds toward zero): the
+    // two differ for negative operands (`-3 sra 1` == -2, but `-3 / 2` == -1), so
+    // division gives an unsoundly tight lower bound. Shifting by the SMALLEST
+    // amount keeps the widest (most extreme) envelope.
+    auto max_val = max.sra_op(n_bw.get_min());
+    auto min_val = min.sra_op(n_bw.get_min());
 
     Bitwidth_range bw(min_val, max_val);
     adjust_bw(node.create_driver_pin(0), bw);
