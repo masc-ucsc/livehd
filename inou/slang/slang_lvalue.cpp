@@ -108,110 +108,27 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
                                                                    : lhs.as<slang::ast::RangeSelectExpression>().value();
       const auto& base_ty = base.type->getCanonicalType();
 
+      // An element/range select on an unpacked array is a memory/flat-port
+      // write (single-element only); handled separately.
       if (base_ty.isUnpackedArray()) {
         lower_unpacked_write(lhs, rhs);
+        return;
+      }
+
+      // Any chain of packed `.field` / `[idx]` / `[hi:lo]` collapses to one
+      // contiguous bit-slice of a root variable (handles arbitrary nesting,
+      // e.g. `bus[i].field`, `s.sub.arr[j]`).
+      Packed_lv lv;
+      if (resolve_packed_lvalue(lhs, lv)) {
+        emit_packed_rmw(lv, rhs, lhs.sourceRange);
         return;
       }
       if (!base_ty.isIntegral() || !base_ty.hasFixedRange()) {
         emit_unsupported(lhs.sourceRange, "unsupported-lhs", "unsupported assignment-target shape");
         return;
       }
-
-      // packed select write: read-modify-write through set_mask on the base.
-      auto ti     = tinfo(*lhs.type);
-      auto bi     = tinfo(base_ty);
-      auto range  = base_ty.getFixedRange();
-      int  stride = base_ty.isPackedArray() ? static_cast<int>(base_ty.getArrayElementType()->getBitWidth()) : 1;
-
-      std::optional<int64_t> const_low;
-      std::string            dyn_low;
-
-      auto normalize = [&](const slang::ast::Expression& idx, int64_t width_down,
-                           int64_t width_up) -> std::pair<std::optional<int64_t>, std::string> {
-        if (auto ci = try_eval_int(idx)) {
-          int64_t bottom = range.isDescending() ? (*ci - range.lower() - (width_down - 1))
-                                                  : (range.upper() - *ci - (width_up - 1));
-          return {bottom, {}};
-        }
-        auto v = lower_rvalue(idx);
-        if (range.isDescending()) {
-          int64_t bias = range.lower() + (width_down - 1);
-          return {std::nullopt, bias == 0 ? v : builder_.create_minus_stmts(v, std::to_string(bias))};
-        }
-        int64_t bias = range.upper() - (width_up - 1);
-        return {std::nullopt, builder_.create_minus_stmts(std::to_string(bias), v)};
-      };
-
-      if (lhs.kind == ExpressionKind::ElementSelect) {
-        const auto& es               = lhs.as<slang::ast::ElementSelectExpression>();
-        std::tie(const_low, dyn_low) = normalize(es.selector(), 1, 1);
-      } else {
-        const auto& rs = lhs.as<slang::ast::RangeSelectExpression>();
-        using slang::ast::RangeSelectionKind;
-        auto kind = rs.getSelectionKind();
-        if (kind == RangeSelectionKind::Simple) {
-          auto l = try_eval_int(rs.left());
-          auto r = try_eval_int(rs.right());
-          if (!l || !r) {
-            emit_error(lhs.sourceRange, "non-const-range", "syntax", "simple range bounds must be compile-time constants");
-            return;
-          }
-          const_low = range.isDescending() ? std::min(*l, *r) - range.lower() : range.upper() - std::max(*l, *r);
-        } else {
-          int64_t w = (ti.bits) / stride;
-          if (kind == RangeSelectionKind::IndexedUp) {
-            std::tie(const_low, dyn_low) = normalize(rs.left(), 1, w);
-          } else {
-            std::tie(const_low, dyn_low) = normalize(rs.left(), w, 1);
-          }
-        }
-      }
-
-      // The value written into the masked bits comes from the LOW bits of the
-      // RHS; mask out a signed RHS pattern first.
-      auto val = to_pattern(rhs, ti.bits, ti.is_signed);
-
-      const auto* base_sym = resolve_base_symbol(base);
-      if (base_sym == nullptr) {
-        emit_unsupported(lhs.sourceRange, "unsupported-lhs-nesting",
-                         "nested non-variable assignment targets are not supported yet");
-        return;
-      }
-      auto base_name = lname_of(*base_sym);
-
-      if (const_low) {
-        int64_t lo_bit = *const_low * stride;
-        if (lo_bit < 0) {
-          emit_warning(lhs.sourceRange, "select-out-of-range", "bitwidth", "constant select is out of the declared range");
-          lo_bit = 0;
-        }
-        std::string sel_mask = lo_bit == 0
-                                   ? mask_text(ti.bits)
-                                   : std::string(Dlop::get_mask_value(lo_bit + ti.bits - 1, lo_bit)->to_pyrope());
-        note_write(*base_sym, current_assign_nonblocking_, lhs.sourceRange.start());
-        builder_.create_set_mask_stmts(base_name, sel_mask, val);
-        return;
-      }
-
-      // Dynamic select write: tolg requires const set_mask masks, so lower an
-      // explicit read-modify-write with shifts (yosys-slang's shift-based
-      // addressing, onto plain and/or/shl).
-      auto cur   = read_symbol(*base_sym, base.sourceRange);
-      auto cur_p = to_pattern(cur, bi.bits, bi.is_signed);
-
-      std::string shamt = dyn_low;
-      if (stride != 1) {
-        shamt = builder_.create_mult_stmts(shamt, std::to_string(stride));
-      }
-      auto sel_mask = builder_.create_shl_stmts(mask_text(ti.bits), shamt);
-      auto keep     = builder_.create_bit_and_stmts(cur_p, builder_.create_bit_not_stmts(sel_mask));
-      auto ins      = builder_.create_shl_stmts(val, shamt);
-      auto next     = builder_.create_bit_or_stmts({keep, ins});
-      if (bi.is_signed) {
-        next = builder_.create_sext_stmts(next, std::to_string(bi.bits - 1));
-      }
-      note_write(*base_sym, current_assign_nonblocking_, lhs.sourceRange.start());
-      builder_.create_assign_stmts(base_name, next);
+      emit_unsupported(lhs.sourceRange, "unsupported-lhs-nesting",
+                       "nested non-variable assignment targets are not supported yet");
       return;
     }
 
@@ -221,20 +138,13 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
         emit_unsupported(lhs.sourceRange, "unsupported-lhs-member", "only packed-struct field targets are supported");
         return;
       }
-      const auto& field = ma.member.as<slang::ast::FieldSymbol>();
-      auto        ti    = tinfo(*lhs.type);
-      auto        lo    = static_cast<int64_t>(field.bitOffset);
-      std::string sel_mask
-          = lo == 0 ? mask_text(ti.bits) : std::string(Dlop::get_mask_value(lo + ti.bits - 1, lo)->to_pyrope());
-      auto        val      = to_pattern(rhs, ti.bits, ti.is_signed);
-      const auto* base_sym = resolve_base_symbol(ma.value());
-      if (base_sym == nullptr) {
-        emit_unsupported(lhs.sourceRange, "unsupported-lhs-nesting",
-                         "nested non-variable assignment targets are not supported yet");
+      Packed_lv lv;
+      if (resolve_packed_lvalue(lhs, lv)) {
+        emit_packed_rmw(lv, rhs, lhs.sourceRange);
         return;
       }
-      note_write(*base_sym, current_assign_nonblocking_, lhs.sourceRange.start());
-      builder_.create_set_mask_stmts(lname_of(*base_sym), sel_mask, val);
+      emit_unsupported(lhs.sourceRange, "unsupported-lhs-nesting",
+                       "nested non-variable assignment targets are not supported yet");
       return;
     }
 
@@ -399,4 +309,157 @@ const slang::ast::ValueSymbol* Slang_context::resolve_base_symbol(const slang::a
     return resolve_base_symbol(base.as<slang::ast::ConversionExpression>().operand());
   }
   return nullptr;
+}
+
+bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Packed_lv& out) {
+  using slang::ast::RangeSelectionKind;
+
+  switch (lhs.kind) {
+    case ExpressionKind::NamedValue: {
+      const auto& sym = lhs.as<slang::ast::NamedValueExpression>().symbol;
+      const auto& ct  = sym.getType().getCanonicalType();
+      if (!ct.isIntegral() || !ct.hasFixedRange()) {
+        return false;  // unpacked / non-packed root: not a packed slice
+      }
+      if (!declared_.contains(&sym) && !input_syms_.contains(&sym)) {
+        declare_value_symbol(sym, /*force_reg=*/false);
+      }
+      auto ti       = tinfo(sym.getType());
+      out.base      = &sym;
+      out.const_off = 0;
+      out.dyn_off.clear();
+      out.width     = ti.bits;
+      out.is_signed = ti.is_signed;
+      return true;
+    }
+
+    case ExpressionKind::Conversion:
+      // a same-bitstream-width bitcast passes through to the inner target
+      return resolve_packed_lvalue(lhs.as<slang::ast::ConversionExpression>().operand(), out);
+
+    case ExpressionKind::MemberAccess: {
+      const auto& ma = lhs.as<slang::ast::MemberAccessExpression>();
+      if (ma.member.kind != slang::ast::SymbolKind::Field || !ma.value().type->isIntegral()) {
+        return false;
+      }
+      if (!resolve_packed_lvalue(ma.value(), out)) {
+        return false;
+      }
+      const auto& field = ma.member.as<slang::ast::FieldSymbol>();
+      auto        ti    = tinfo(*lhs.type);
+      out.const_off += static_cast<int64_t>(field.bitOffset);  // field offset within its struct
+      out.width     = ti.bits;
+      out.is_signed = ti.is_signed;
+      return true;
+    }
+
+    case ExpressionKind::ElementSelect:
+    case ExpressionKind::RangeSelect: {
+      const auto& base = lhs.kind == ExpressionKind::ElementSelect ? lhs.as<slang::ast::ElementSelectExpression>().value()
+                                                                   : lhs.as<slang::ast::RangeSelectExpression>().value();
+      const auto& base_ty = base.type->getCanonicalType();
+      if (!base_ty.isIntegral() || !base_ty.hasFixedRange()) {
+        return false;  // unpacked array element / non-packed base
+      }
+      if (!resolve_packed_lvalue(base, out)) {
+        return false;
+      }
+
+      auto    range  = base_ty.getFixedRange();
+      int     stride = base_ty.isPackedArray() ? static_cast<int>(base_ty.getArrayElementType()->getBitWidth()) : 1;
+      auto    ti     = tinfo(*lhs.type);
+
+      // local low-bit offset within `base`, in element units (const and/or dynamic)
+      std::optional<int64_t> const_low;
+      std::string            dyn_low;
+      auto normalize = [&](const slang::ast::Expression& idx, int64_t width_down,
+                           int64_t width_up) -> std::pair<std::optional<int64_t>, std::string> {
+        if (auto ci = try_eval_int(idx)) {
+          int64_t bottom = range.isDescending() ? (*ci - range.lower() - (width_down - 1))
+                                                : (range.upper() - *ci - (width_up - 1));
+          return {bottom, {}};
+        }
+        auto v = lower_rvalue(idx);
+        if (range.isDescending()) {
+          int64_t bias = range.lower() + (width_down - 1);
+          return {std::nullopt, bias == 0 ? v : builder_.create_minus_stmts(v, std::to_string(bias))};
+        }
+        int64_t bias = range.upper() - (width_up - 1);
+        return {std::nullopt, builder_.create_minus_stmts(std::to_string(bias), v)};
+      };
+
+      if (lhs.kind == ExpressionKind::ElementSelect) {
+        std::tie(const_low, dyn_low) = normalize(lhs.as<slang::ast::ElementSelectExpression>().selector(), 1, 1);
+      } else {
+        const auto& rs   = lhs.as<slang::ast::RangeSelectExpression>();
+        auto        kind = rs.getSelectionKind();
+        if (kind == RangeSelectionKind::Simple) {
+          auto l = try_eval_int(rs.left());
+          auto r = try_eval_int(rs.right());
+          if (!l || !r) {
+            return false;  // non-const simple range bounds: unsupported here
+          }
+          const_low = range.isDescending() ? std::min(*l, *r) - range.lower() : range.upper() - std::max(*l, *r);
+        } else {
+          int64_t w = ti.bits / stride;
+          if (kind == RangeSelectionKind::IndexedUp) {
+            std::tie(const_low, dyn_low) = normalize(rs.left(), 1, w);
+          } else {
+            std::tie(const_low, dyn_low) = normalize(rs.left(), w, 1);
+          }
+        }
+      }
+
+      // fold the local offset (bits) into the accumulator
+      if (const_low) {
+        out.const_off += (*const_low) * stride;
+      }
+      if (!dyn_low.empty()) {
+        std::string term = stride == 1 ? dyn_low : builder_.create_mult_stmts(dyn_low, std::to_string(stride));
+        out.dyn_off      = out.dyn_off.empty() ? term : builder_.create_plus_stmts(out.dyn_off, term);
+      }
+      out.width     = ti.bits;
+      out.is_signed = ti.is_signed;
+      return true;
+    }
+
+    default: return false;
+  }
+}
+
+void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr) {
+  // value written into the slice comes from the LOW bits of the RHS
+  auto val       = to_pattern(rhs, static_cast<int>(lv.width), lv.is_signed);
+  auto base_name = lname_of(*lv.base);
+
+  if (lv.dyn_off.empty()) {
+    int64_t lo_bit = lv.const_off;
+    if (lo_bit < 0) {
+      emit_warning(sr, "select-out-of-range", "bitwidth", "constant select is out of the declared range");
+      lo_bit = 0;
+    }
+    std::string sel_mask = lo_bit == 0
+                               ? mask_text(static_cast<int>(lv.width))
+                               : std::string(Dlop::get_mask_value(lo_bit + lv.width - 1, lo_bit)->to_pyrope());
+    note_write(*lv.base, current_assign_nonblocking_, sr.start());
+    builder_.create_set_mask_stmts(base_name, sel_mask, val);
+    return;
+  }
+
+  // Dynamic offset: tolg requires const set_mask masks, so lower an explicit
+  // read-modify-write with shifts (and/or/shl) on the full base.
+  auto bi    = tinfo(lv.base->getType());
+  auto cur   = read_symbol(*lv.base, sr);
+  auto cur_p = to_pattern(cur, bi.bits, bi.is_signed);
+
+  std::string shamt = lv.const_off == 0 ? lv.dyn_off : builder_.create_plus_stmts(lv.dyn_off, std::to_string(lv.const_off));
+  auto        sel_mask = builder_.create_shl_stmts(mask_text(static_cast<int>(lv.width)), shamt);
+  auto        keep     = builder_.create_bit_and_stmts(cur_p, builder_.create_bit_not_stmts(sel_mask));
+  auto        ins      = builder_.create_shl_stmts(val, shamt);
+  auto        next     = builder_.create_bit_or_stmts({keep, ins});
+  if (bi.is_signed) {
+    next = builder_.create_sext_stmts(next, std::to_string(bi.bits - 1));
+  }
+  note_write(*lv.base, current_assign_nonblocking_, sr.start());
+  builder_.create_assign_stmts(base_name, next);
 }

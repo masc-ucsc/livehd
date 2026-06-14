@@ -12,6 +12,8 @@
 #include "slang/ast/expressions/ConversionExpression.h"
 #include "slang/ast/expressions/LiteralExpressions.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
+#include "slang/ast/symbols/SubroutineSymbols.h"
+#include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/ast/types/AllTypes.h"
 #include "slang_context.hpp"
 
@@ -266,10 +268,20 @@ std::string Slang_context::lower_unary(const slang::ast::UnaryExpression& expr) 
     case UnaryOperator::Preincrement:
     case UnaryOperator::Predecrement:
     case UnaryOperator::Postincrement:
-    case UnaryOperator::Postdecrement:
-      emit_unsupported(expr.sourceRange, "unsupported-incdec",
-                       "increment/decrement outside an unrolled loop step is not supported by --reader slang yet");
-      return "0";
+    case UnaryOperator::Postdecrement: {
+      // `x++`/`++x`/`x--`/`--x`: read-modify-write the target. Pre returns the
+      // new value, post returns the snapshot of the old value (blocking semantics).
+      const bool is_inc = expr.op == UnaryOperator::Preincrement || expr.op == UnaryOperator::Postincrement;
+      const bool is_pre = expr.op == UnaryOperator::Preincrement || expr.op == UnaryOperator::Predecrement;
+      auto       cur    = to_pattern(to_int_value(lower_rvalue(operand)), oi.bits, oi.is_signed);
+      // post-inc/dec returns the OLD value, but the write below re-versions the
+      // operand, so snapshot it into a fresh temp first (cprop folds the +0).
+      std::string old_snap = is_pre ? std::string{} : builder_.create_plus_stmts(cur, "0");
+      auto        nv       = trunc_to(is_inc ? builder_.create_plus_stmts(cur, "1") : builder_.create_minus_stmts(cur, "1"),
+                                      oi.bits);
+      assign_to(operand, nv);
+      return is_pre ? nv : old_snap;
+    }
     default:
       emit_unsupported(expr.sourceRange, "unsupported-unary-op",
                        std::string("unary operator '") + std::string(slang::ast::toString(expr.op)) + "' is not supported");
@@ -641,8 +653,66 @@ std::string Slang_context::lower_call(const slang::ast::CallExpression& expr) {
     return "0";
   }
 
+  // User function: inline the body for synthesizable, input-only functions.
+  const auto* sub = std::get<const slang::ast::SubroutineSymbol*>(expr.subroutine);
+  if (sub != nullptr && sub->subroutineKind == slang::ast::SubroutineKind::Function && sub->returnValVar != nullptr
+      && !expr.hasOutputArgs() && !sub->flags.has(slang::ast::MethodFlags::DPIImport)) {
+    return inline_call(expr, *sub);
+  }
+
   emit_unsupported(expr.sourceRange, "unsupported-function-call",
                    std::string("call to '") + std::string(expr.getSubroutineName())
                        + "' is not supported by --reader slang yet (only compile-time evaluable functions fold)");
   return "0";
+}
+
+std::string Slang_context::inline_call(const slang::ast::CallExpression& expr, const slang::ast::SubroutineSymbol& sub) {
+  if (inline_depth_ > 32) {
+    emit_unsupported(expr.sourceRange, "unsupported-function-call",
+                     std::string("call to '") + std::string(sub.name) + "' exceeds the inline-recursion limit");
+    return "0";
+  }
+  auto formals = sub.getArguments();
+  auto actuals = expr.arguments();
+  if (formals.size() != actuals.size()) {
+    emit_unsupported(expr.sourceRange, "unsupported-function-call", "function argument count mismatch");
+    return "0";
+  }
+
+  // Snapshot all actual-argument values BEFORE binding the formals (the formals
+  // are shared symbols across call sites, so binding first could alias).
+  std::vector<std::string> argv;
+  argv.reserve(actuals.size());
+  for (const auto* a : actuals) {
+    argv.push_back(lower_rvalue(*a));
+  }
+  for (size_t i = 0; i < formals.size(); ++i) {
+    const auto& fa = *formals[i];
+    if (fa.direction != slang::ast::ArgumentDirection::In) {
+      emit_unsupported(expr.sourceRange, "unsupported-function-call",
+                       "only pure input-argument functions can be inlined by --reader slang");
+      return "0";
+    }
+    declare_value_symbol(fa, /*force_reg=*/false);
+    note_write(fa, /*nonblocking=*/false, expr.sourceRange.start());
+    builder_.create_assign_stmts(lname_of(fa), argv[i]);
+  }
+
+  const auto& rv = *sub.returnValVar;
+  declare_value_symbol(rv, /*force_reg=*/false);
+
+  // Lower the body with a function-return context active (Return assigns `rv`).
+  // Returns that are terminal per branch merge correctly through the existing
+  // branch machinery; mid-block early returns are not modeled.
+  bool        saved_in  = in_function_call_;
+  const auto* saved_ret = func_ret_sym_;
+  in_function_call_     = true;
+  func_ret_sym_         = &rv;
+  ++inline_depth_;
+  lower_statement(sub.getBody());
+  --inline_depth_;
+  in_function_call_ = saved_in;
+  func_ret_sym_     = saved_ret;
+
+  return read_symbol(rv, expr.sourceRange);
 }

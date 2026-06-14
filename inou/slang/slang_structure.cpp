@@ -566,9 +566,15 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         case SymbolKind::TransparentMember:
         case SymbolKind::EmptyMember:
         case SymbolKind::Genvar:
-        case SymbolKind::StatementBlock:  // lowered where referenced (slang puts them next to procedures)
-        case SymbolKind::Subroutine:      // bodies fold at call sites or are diagnosed there
-        case SymbolKind::ElabSystemTask:  // $info/$warning/$error handled by slang itself
+        case SymbolKind::StatementBlock:    // lowered where referenced (slang puts them next to procedures)
+        case SymbolKind::Subroutine:        // bodies fold at call sites or are diagnosed there
+        case SymbolKind::ElabSystemTask:    // $info/$warning/$error handled by slang itself
+        case SymbolKind::WildcardImport:    // `import pkg::*` — slang already resolved the names
+        case SymbolKind::ExplicitImport:    // `import pkg::sym` — ditto
+        case SymbolKind::Modport:           // interface modport view; not codegen-relevant here
+        case SymbolKind::AssertionPort:     // property/sequence formal args
+        case SymbolKind::Sequence:          // named sequences (assertion-only, not synthesized)
+        case SymbolKind::Property:          // named properties (assertion-only, not synthesized)
           break;
 
         case SymbolKind::Net: {
@@ -827,6 +833,30 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
   }
 
   const auto& stmt = pbs.getBody();
+  // A standalone `assert/assume/cover property(...)` is modeled by slang as an
+  // implicit Always procedural block whose body is the assertion (possibly
+  // wrapped in a Block/List), NOT a Timed event-control. Assertions are not
+  // synthesized, so ignore such bodies (mirrors lower_statement in slang_stmt.cpp).
+  std::function<bool(const slang::ast::Statement&)> assertion_only = [&](const slang::ast::Statement& s) -> bool {
+    switch (s.kind) {
+      case StatementKind::Empty:
+      case StatementKind::ImmediateAssertion:
+      case StatementKind::ConcurrentAssertion: return true;
+      case StatementKind::Block: return assertion_only(s.as<slang::ast::BlockStatement>().body);
+      case StatementKind::List:
+        for (const auto* c : s.as<slang::ast::StatementList>().list) {
+          if (!assertion_only(*c)) {
+            return false;
+          }
+        }
+        return true;
+      default: return false;
+    }
+  };
+  if (stmt.kind != StatementKind::Timed && assertion_only(stmt)) {
+    emit_warning(stmt.sourceRange, "assertion-ignored", "unsupported", "assertion-only process ignored (synthesis semantics)");
+    return;
+  }
   if (stmt.kind != StatementKind::Timed) {
     emit_unsupported(stmt.sourceRange, "unsupported-always",
                      "always block without an event control is not supported by --reader slang");
@@ -983,6 +1013,23 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
             }
           }
           return true;
+        }
+        case StatementKind::Conditional: {
+          // Reset arms commonly guard config-dependent regs with a compile-time
+          // `if` (e.g. `if (CVA6Cfg.RVZCMT) ...`, `if (FPGA_ALTERA) ...`). Fold
+          // the constant condition and harvest only the taken branch.
+          const auto& cs = s.as<slang::ast::ConditionalStatement>();
+          if (cs.conditions.size() != 1 || cs.conditions[0].pattern != nullptr) {
+            return false;
+          }
+          auto cv = try_eval(*cs.conditions[0].expr);
+          if (!cv || !cv->isInteger()) {
+            return false;  // a non-constant reset guard has no flop lowering
+          }
+          if (cv->isTrue()) {
+            return harvest(cs.ifTrue);
+          }
+          return cs.ifFalse == nullptr ? true : harvest(*cs.ifFalse);
         }
         case StatementKind::ExpressionStatement: {
           const auto& e = s.as<slang::ast::ExpressionStatement>().expr;

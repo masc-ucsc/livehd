@@ -97,7 +97,23 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
     case StatementKind::ConcurrentAssertion:
       emit_warning(stmt.sourceRange, "assertion-ignored", "unsupported", "concurrent assertion ignored (synthesis semantics)");
       return;
-    case StatementKind::Return:
+    case StatementKind::Return: {
+      // Inside an inlined function body, `return expr` assigns the result var.
+      if (in_function_call_ && func_ret_sym_ != nullptr) {
+        const auto* re = stmt.as<slang::ast::ReturnStatement>().expr;
+        if (re != nullptr) {
+          set_pending_loc(stmt.sourceRange);
+          auto v = lower_rvalue(*re);
+          note_write(*func_ret_sym_, /*nonblocking=*/false, stmt.sourceRange.start());
+          builder_.create_assign_stmts(lname_of(*func_ret_sym_), v);
+          clear_pending_loc();
+        }
+        return;
+      }
+      emit_unsupported(stmt.sourceRange, "unsupported-jump",
+                       std::string(slang::ast::toString(stmt.kind)) + " is not supported in this context by --reader slang");
+      return;
+    }
     case StatementKind::Break:
     case StatementKind::Continue:
       // Only reachable outside an unrolled-loop/function context here.
@@ -168,6 +184,23 @@ std::string Slang_context::case_item_match(const std::string& sel, const Tinfo& 
                                            slang::ast::CaseStatementCondition cond_kind) {
   using slang::ast::CaseStatementCondition;
 
+  // `case (x) inside { ..., [lo:hi], ... }`: a range item matches when
+  // lo <= x <= hi (inclusive). Only appears under the Inside condition.
+  if (item.kind == slang::ast::ExpressionKind::ValueRange) {
+    const auto& vr = item.as<slang::ast::ValueRangeExpression>();
+    if (vr.rangeKind != slang::ast::ValueRangeKind::Simple) {
+      emit_unsupported(item.sourceRange, "unsupported-case-inside",
+                       "tolerance ranges ([a +/- b]) in case-inside are not supported by --reader slang");
+      return "0";
+    }
+    auto sp = to_pattern(sel, si.bits, si.is_signed);
+    auto lo = lower_rvalue(vr.left());
+    auto hi = lower_rvalue(vr.right());
+    auto ge = builder_.create_ge_stmts(sp, lo);
+    auto le = builder_.create_le_stmts(sp, hi);
+    return builder_.create_log_and_stmts(ge, le);
+  }
+
   if (cond_kind == CaseStatementCondition::WildcardJustZ || cond_kind == CaseStatementCondition::WildcardXOrZ) {
     if (auto cv = try_eval(item); cv && cv->isInteger()) {
       const auto& sv = cv->integer();
@@ -211,11 +244,6 @@ std::string Slang_context::case_item_match(const std::string& sel, const Tinfo& 
 void Slang_context::lower_case(const slang::ast::CaseStatement& stmt) {
   using slang::ast::CaseStatementCondition;
   using slang::ast::UniquePriorityCheck;
-
-  if (stmt.condition == CaseStatementCondition::Inside) {
-    emit_unsupported(stmt.sourceRange, "unsupported-case-inside", "case ... inside is not supported by --reader slang yet");
-    return;
-  }
 
   auto si  = tinfo(*stmt.expr.type);
   auto sel = lower_rvalue(stmt.expr);

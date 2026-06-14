@@ -169,6 +169,13 @@ private:
   std::string lower_assignment_pattern(const slang::ast::Expression& expr, std::span<const slang::ast::Expression* const> elems);
   std::string lower_conditional_expr(const slang::ast::ConditionalExpression& expr);
   std::string lower_call(const slang::ast::CallExpression& expr);
+  // Inline a (synthesizable, input-only) user function: bind args, lower the
+  // body, capture the return value. Returns the result temp.
+  std::string inline_call(const slang::ast::CallExpression& expr, const slang::ast::SubroutineSymbol& sub);
+  // function-inlining context (consumed by the Return statement handler)
+  bool                              in_function_call_ = false;
+  const slang::ast::VariableSymbol* func_ret_sym_     = nullptr;
+  int                               inline_depth_     = 0;
   std::string read_symbol(const slang::ast::ValueSymbol& sym, slang::SourceRange range);
   std::string booleanize(std::string v);
   std::string lower_unpacked_read(const slang::ast::Expression& expr);  // memory/array element read
@@ -201,6 +208,21 @@ private:
   const slang::ast::ValueSymbol* resolve_base_symbol(const slang::ast::Expression& base);
   void                           lower_unpacked_write(const slang::ast::Expression& lhs, const std::string& rhs);
   bool                           current_assign_nonblocking_ = false;
+
+  // A packed assignment target resolved to a single contiguous bit-slice of a
+  // root variable: nested chains of `.field` / `[idx]` / `[hi:lo]` / conversion
+  // on a packed (integral) root collapse to (base, low-bit offset, width).
+  struct Packed_lv {
+    const slang::ast::ValueSymbol* base = nullptr;
+    int64_t                        const_off = 0;  // accumulated constant low-bit offset
+    std::string                    dyn_off;        // accumulated dynamic low-bit offset ("" = none)
+    int64_t                        width = 0;      // selected slice width in bits
+    bool                           is_signed = false;  // signedness of the selected slice
+  };
+  // Returns false when the path touches an unpacked array or a non-resolvable
+  // base (caller then falls back to the unpacked/memory path or a diagnostic).
+  bool resolve_packed_lvalue(const slang::ast::Expression& lhs, Packed_lv& out);
+  void emit_packed_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr);
 
   // ── types + conversions (slang_types.cpp) ─────────────────────────────────
   struct Tinfo {
