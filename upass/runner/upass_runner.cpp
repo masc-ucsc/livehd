@@ -3761,9 +3761,9 @@ std::string uPass_runner::select_init_overload(const std::vector<std::string>& c
     // non-invalid node serves) followed by the constructor args in tuple order.
     std::vector<Actual> actuals;
     actuals.reserve(args.size() + 1);
-    actuals.push_back(Actual{.is_named = false, .is_ref_pass = false, .key = {}, .node = Lnast_node::create_const("0")});
+    actuals.push_back(Actual{.is_named = false, .is_ref_pass = false, .key = {}, .node = Lnast_node::create_const("0"), .func_name = {}});
     for (const auto& a : args) {
-      actuals.push_back(Actual{.is_named = !a.key.empty(), .is_ref_pass = false, .key = a.key, .node = a.node});
+      actuals.push_back(Actual{.is_named = !a.key.empty(), .is_ref_pass = false, .key = a.key, .node = a.node, .func_name = {}});
     }
     if (signature_matches(cio, actuals, /*is_ctor_call=*/true)) {
       return fn;

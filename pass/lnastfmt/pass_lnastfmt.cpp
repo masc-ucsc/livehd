@@ -93,20 +93,56 @@ static bool is_valid_ref_text(std::string_view name) {
     // need the escape — i.e. the inner text contains at least one char
     // that's not `[A-Za-z0-9_]` (otherwise prp2lnast should have stripped
     // the backticks). Reject ``a`` to keep the LNAST canonical.
-    if (name.size() < 2 || name.back() != '`') {
-      return false;
+    //
+    // The closing backtick may be followed by a plain `___ssa_<n>` version
+    // marker: when upass.ssa reassigns an escaped Verilog identifier (e.g. a
+    // Yosys netlist wire `\0\_T_156_x[1:0]`), it appends the SSA suffix AFTER
+    // the closing backtick (`…`___ssa_1). The suffix is pure alnum, so the
+    // result is still an unambiguous single ref — accept it on round-trip.
+    constexpr std::string_view ssa_tail   = "___ssa_";
+    constexpr std::string_view close_tail = "`___ssa_";  // closing backtick + marker
+    size_t                     close;
+    std::string_view           tail;
+    if (name.back() == '`') {
+      close = name.size() - 1;
+    } else {
+      close = name.rfind(close_tail);
+      if (close == std::string_view::npos) {
+        return false;  // unterminated, or junk after the escaped name
+      }
+      tail = name.substr(close + 1);  // ___ssa_<digits>
     }
-    auto inner = name.substr(1, name.size() - 2);
+    if (close < 1) {
+      return false;  // empty escaped name (``)
+    }
+    auto inner = name.substr(1, close - 1);
     if (inner.empty()) {
       return false;
     }
+    bool needs_escape = false;
     for (char ch : inner) {
       bool plain = (ch == '_') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9');
       if (!plain) {
-        return true;  // escape needed — keep it
+        needs_escape = true;
+        break;
       }
     }
-    return false;  // pure alnum/underscore — should have been stripped
+    if (!needs_escape) {
+      return false;  // pure alnum/underscore — should have been stripped
+    }
+    if (tail.empty()) {
+      return true;  // bare `…` escaped name
+    }
+    // Only an `___ssa_<digits>` version marker may trail the closing backtick.
+    if (tail.size() <= ssa_tail.size()) {
+      return false;
+    }
+    for (size_t j = ssa_tail.size(); j < tail.size(); ++j) {
+      if (tail[j] < '0' || tail[j] > '9') {
+        return false;
+      }
+    }
+    return true;
   }
   size_t i = 0;
   // tmp form: `___<suffix>`, where suffix is a stable scoped id

@@ -46,7 +46,7 @@ SLANG_LADDER = {
     "issue_047": "verilog",  # compiles; LEC gap tracked
     "issue_057": "lec",
     "logic_bitwise_op_gld": "lec",
-    "long_BTBsa": "error",  # typecheck kind gap on a generated netlist shape
+    "long_BTBsa": "lnast",  # Yosys netlist; LNAST round-trips (escaped-id `\…[1:0]` names SSA-version + serialize) — tolg stops verilog: "mixes values at different cycles"
     "long_gcd": "verilog",  # compiles; LEC gap tracked
     "long_gcd_small": "error",  # duplicate definition; slang rejects per 1800
     "long_iwls_adder": "lec",
