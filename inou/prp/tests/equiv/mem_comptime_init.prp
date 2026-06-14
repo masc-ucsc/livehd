@@ -1,0 +1,23 @@
+/*
+:name: mem_comptime_init
+:type: equiv
+:verilog_top: mem_comptime_init.mci
+:pyrope_top: mem_comptime_init.mci
+*/
+
+// 2f-mem_comptime_init — a reg-array initializer that is a COMPTIME-COMPUTED
+// bundle (filled by a loop, not a tuple literal). The runner materializes the
+// fully-comptime bundle into nested tuple_add literals on the emitted declare
+// so tolg can pack it onto the Memory `init` pin (entry 0 in the low bits),
+// row-major. `reset` restores the per-entry contents — same model as the
+// literal-init multidim test. iv (comptime) carries no hardware of its own.
+mod mci(reset:bool, i:u1, j:u1) -> (z:u4@[0]) {
+  comptime mut iv:[2][2]u4 = nil
+  for a in 0..<2 {
+    for b in 0..<2 {
+      iv[a][b] = a * 2 + b + 1   // ((1,2),(3,4))
+    }
+  }
+  reg t:[2][2]u4 = iv
+  z = t[i][j]
+}

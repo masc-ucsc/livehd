@@ -539,6 +539,27 @@ protected:
   // declared width (s4 → -2). sign_bit is the top bit index (bits-1).
   void emit_inline_sext(const std::string& dst, const std::string& src, int sign_bit);
 
+  // 2f-mem_comptime_init — when a reg-array declare's initializer is a ref to a
+  // fully-comptime bundle (built by a loop, not a tuple literal), tolg can't
+  // resolve it (it only sees literal tuple_adds). Cursor is at the declare
+  // node. If this is such a case, materialize the bundle's flattened comptime
+  // values into NESTED positional tuple_add literals (so tolg's tuple_recs_
+  // resolves them) and re-emit the declare with its init pointed at the
+  // materialized outer temp (and, for the inferred form, a synthesized
+  // comp_type_array type). Returns true if it handled+emitted the declare (the
+  // caller skips the verbatim emit); false to fall through unchanged.
+  bool try_materialize_array_init();
+
+  // Emits `dst = (c0, c1, …)` as a POSITIONAL tuple_add (no field-key store
+  // wrappers — tolg's memory-init path requires `named` empty). Children are
+  // const leaves or refs to nested tuples.
+  void emit_inline_positional_tuple(const std::string& dst, const std::vector<Lnast_node>& children);
+
+  // Recursively emit the nested tuple_add literals for a row-major flat value
+  // vector shaped by `dims`. Returns the name of the outermost tuple temp.
+  std::string materialize_array_literal(const std::vector<int64_t>& dims, size_t level, const std::vector<Dlop>& flat,
+                                        size_t start);
+
   // Monotonic per-run counter giving each inline call site a unique rename
   // tag/salt. Cross-pass idempotence is a documented follow-up. Also used
   // per comptime loop iteration (unroll_for/unroll_while) so each iteration's

@@ -10,6 +10,15 @@
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
 <h1><strong class="item-id">2f-mem_comptime_init</strong> Comptime-computed / inferred-type memory init</h1>
+<p style="padding:.6em;background:#e6ffe6;border-left:4px solid #2a2"><strong>✅ LANDED 2026-06-14.</strong>
+  The runner now materializes a fully-comptime array bundle into nested
+  positional <code>tuple_add</code> literals on the emitted reg-array declare
+  (<code>uPass_runner::try_materialize_array_init</code>), so tolg packs it onto
+  the Memory <code>init</code> pin. The inferred form synthesizes the
+  <code>comp_type_array</code> (dims from the bundle shape + element envelope
+  from <code>__elem_max</code>/<code>__elem_min</code>). Equiv pairs
+  <code>mem_comptime_init</code> (typed) and <code>mem_comptime_init_inferred</code>
+  LEC against a restore-on-reset golden; 08-memories + 15-tbd TBDs dropped.</p>
 <p>Residual of <code>2f-mem_multidim</code> (multi-dim memories + literal/scalar
   init contents landed 2026-06-12). A reg-array initializer must today be a
   tuple <strong>literal</strong> or a scalar broadcast: upass.tolg resolves the

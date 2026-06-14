@@ -1512,6 +1512,203 @@ void uPass_runner::emit_inline_sext(const std::string& dst, const std::string& s
   lm->pop_source();
 }
 
+void uPass_runner::emit_inline_positional_tuple(const std::string& dst, const std::vector<Lnast_node>& children) {
+  // `dst = (c0, c1, …)` — positional tuple_add (no store-wrapped field keys),
+  // so tolg's memory-init path (which requires `named` empty) can consume it.
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-ptup");
+  auto s    = std::make_shared<Lnast>(body, "inl-ptup");
+  auto root = s->set_root(Lnast_ntype::create_tuple_add());
+  stamp_scratch_srcid(s, root);
+  s->add_child(root, Lnast_node::create_ref(dst));
+  for (const auto& c : children) {
+    s->add_child(root, c);
+  }
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);
+  process_lnast();  // cursor at tuple_add root → dispatch + emit
+  flush_deferred_emits();
+  lm->pop_source();
+}
+
+std::string uPass_runner::materialize_array_literal(const std::vector<int64_t>& dims, size_t level,
+                                                    const std::vector<Dlop>& flat, size_t start) {
+  // Outer dim first (dims[0]); inner tuples are emitted BEFORE the outer so
+  // they are recorded (tuple_recs_) and staged ahead of the reference to them.
+  const std::string name = "___marrayinit_" + std::to_string(inline_seq_) + "_" + std::to_string(level) + "_"
+                           + std::to_string(start);
+  std::vector<Lnast_node> children;
+  if (level + 1 == dims.size()) {
+    for (int64_t k = 0; k < dims[level]; ++k) {
+      children.emplace_back(Lnast_node::create_const(std::string(flat[start + static_cast<size_t>(k)].to_pyrope())));
+    }
+  } else {
+    int64_t stride = 1;
+    for (size_t l = level + 1; l < dims.size(); ++l) {
+      stride *= dims[l];
+    }
+    for (int64_t k = 0; k < dims[level]; ++k) {
+      auto child = materialize_array_literal(dims, level + 1, flat, start + static_cast<size_t>(k * stride));
+      children.emplace_back(Lnast_node::create_ref(child));
+    }
+  }
+  emit_inline_positional_tuple(name, children);
+  return name;
+}
+
+bool uPass_runner::try_materialize_array_init() {
+  if (!materialize_ || !lm->has_child()) {
+    return false;
+  }
+  // Read the declare shape without disturbing the outer cursor.
+  // Layout: declare(ref name, <type>, const mode, [init]).
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();  // child0 = name
+  if (!Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  const std::string name{lm->current_text()};
+  if (!lm->move_to_sibling()) {  // child1 = type
+    lm->restore_cursor(saved);
+    return false;
+  }
+  const auto type_ntype   = lm->get_raw_ntype();
+  const bool type_is_array = Lnast_ntype::is_comp_type_array(type_ntype);
+  const bool type_is_none  = Lnast_ntype::is_prim_type_none(type_ntype);
+  const auto type_nid     = lm->get_current_nid();
+  if (!lm->move_to_sibling() || !Lnast_ntype::is_const(lm->get_raw_ntype())) {  // child2 = mode
+    lm->restore_cursor(saved);
+    return false;
+  }
+  const std::string mode{lm->current_text()};
+  if (!lm->move_to_sibling() || !Lnast_ntype::is_ref(lm->get_raw_ntype())) {  // child3 = init (ref)
+    lm->restore_cursor(saved);
+    return false;
+  }
+  const std::string init_ref{lm->current_text()};
+  lm->restore_cursor(saved);
+
+  // Scope: reg memories only (a mut/const array inits via a separate
+  // whole-array store, not the declare init child). Skip our own materialized
+  // literals (re-entry guard) and anything that is not an array declare.
+  if (mode.find("reg") == std::string::npos) {
+    return false;
+  }
+  if (init_ref.starts_with("___marrayinit_")) {
+    return false;
+  }
+  if (!type_is_array && !type_is_none) {
+    return false;
+  }
+
+  // The initializer must be a fully-comptime, dense, rectangular array bundle.
+  auto b = symbol_table_.get_bundle(init_ref);
+  if (!b) {
+    return false;
+  }
+  const auto& km = b->non_attr_entries();
+  if (km.empty()) {
+    return false;
+  }
+  std::vector<int64_t> dims;
+  std::vector<Dlop>    flat;
+  for (const auto& [k, e] : km) {
+    if (e.trivial.is_invalid()) {
+      return false;  // a runtime field — not a comptime literal
+    }
+    flat.emplace_back(e.trivial);
+    // Each dotted segment must be a non-negative decimal index (positional
+    // array), else this is a named tuple/struct, not an array.
+    size_t seg = 0, pos = 0;
+    while (true) {
+      const size_t dot  = k.find('.', pos);
+      const auto   part = k.substr(pos, dot == std::string::npos ? std::string::npos : dot - pos);
+      if (part.empty() || part.find_first_not_of("0123456789") != std::string::npos) {
+        return false;
+      }
+      const int64_t idx = std::stoll(part);
+      if (dims.size() <= seg) {
+        dims.resize(seg + 1, 0);
+      }
+      dims[seg] = std::max(dims[seg], idx + 1);
+      if (dot == std::string::npos) {
+        break;
+      }
+      pos = dot + 1;
+      ++seg;
+    }
+  }
+  int64_t total = 1;
+  for (auto d : dims) {
+    total *= d;
+  }
+  if (dims.empty() || total != static_cast<int64_t>(flat.size())) {
+    return false;  // ragged / not dense — let the existing diagnostic fire
+  }
+  if (type_is_none && total == 1) {
+    return false;  // a 1-entry inferred bundle is a scalar reg, not a memory
+  }
+
+  // Element envelope for the inferred (typeless) form — synthesize a
+  // prim_type_int from the bundle's baked element range, falling back to the
+  // values' magnitude when the attr is absent.
+  Dlop emax = b->get_attr("__elem_max");
+  Dlop emin = b->get_attr("__elem_min");
+  if (type_is_none && emax.is_invalid()) {
+    int64_t mx = 0;
+    for (const auto& v : flat) {
+      if (!v.is_just_i64()) {
+        return false;
+      }
+      mx = std::max(mx, v.to_just_i64());
+    }
+    emax = *Dlop::create_integer(mx);
+    emin = *Dlop::create_integer(0);
+  }
+
+  ++inline_seq_;  // fresh namespace for this declare's materialized temps
+  const std::string outer = materialize_array_literal(dims, 0, flat, 0);
+
+  // Re-emit the declare with its init pointed at the materialized literal.
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-memdecl");
+  auto s    = std::make_shared<Lnast>(body, "inl-memdecl");
+  auto root = s->set_root(Lnast_ntype::create_declare());
+  stamp_scratch_srcid(s, root);
+  s->add_child(root, Lnast_node::create_ref(name));
+  if (type_is_array) {
+    copy_subtree_into(lm->get_lnast(), type_nid, s, root, nullptr);  // keep the declared type
+  } else {
+    // Synthesize comp_type_array(... prim_type_int(emax,emin) ...), outer dim
+    // first (matches prp2lnast's array_type lowering).
+    std::function<void(const Lnast_nid&, size_t)> build_arr = [&](const Lnast_nid& parent, size_t l) {
+      auto arr = s->add_child(parent, Lnast_ntype::create_comp_type_array());
+      if (l + 1 < dims.size()) {
+        build_arr(arr, l + 1);
+      } else {
+        auto pt = s->add_child(arr, Lnast_ntype::create_prim_type_int());
+        s->add_child(pt, Lnast_node::create_const(std::string(emax.to_pyrope())));
+        s->add_child(pt, Lnast_node::create_const(std::string(emin.to_pyrope())));
+      }
+      s->add_child(arr, Lnast_node::create_const("[" + std::to_string(dims[l]) + "]"));
+    };
+    build_arr(root, 0);
+  }
+  s->add_child(root, Lnast_node::create_const(mode));
+  s->add_child(root, Lnast_node::create_ref(outer));
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);
+  process_lnast();  // cursor at declare root → declare case (guard skips re-entry)
+  flush_deferred_emits();
+  lm->pop_source();
+  return true;
+}
+
 bool uPass_runner::try_inline_func_call() {
   // One-shot ctor marker (see splice_init_call): true only for the
   // synthesized constructor call itself, never for calls nested inside the
@@ -4979,6 +5176,12 @@ void uPass_runner::process_lnast() {
     // declared var (LHS, not folded); child1 the type subtree; child2 the mode
     // const; optional child3 an init value (folded if a ref).
     case Ntype::Lnast_ntype_declare:
+      // 2f-mem_comptime_init — a reg-array declare whose init is a ref to a
+      // fully-comptime bundle: materialize it into nested tuple_add literals
+      // and re-emit the declare (tolg only resolves literal tuple_adds).
+      if (try_materialize_array_init()) {
+        break;
+      }
       // Remember that the NEXT store to this var is its declaration
       // initializer — the only store where the init constructor may run.
       if (lm->has_child()) {
