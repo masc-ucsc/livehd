@@ -130,6 +130,17 @@ private:
   // Returns false (with a diagnostic) for shapes the reader cannot lower.
   bool declare_unpacked(const slang::ast::ValueSymbol& sym, bool is_reg);
 
+  // Unpacked-array PORTS are not memories: an `output T arr[N-1:0]` port lowers
+  // to a FLAT packed [N*elem_bits-1:0] IO bus (Verilator/yosys flatten unpacked
+  // ports the same way, so LEC lines up), and element access `arr[i]` becomes a
+  // bit-slice at `(i-lower)*elem_bits`. Symbols here carry their dims in
+  // mem_info_ but route through bit-slice get/set instead of store/tuple_get.
+  absl::flat_hash_set<const slang::ast::Symbol*> flat_port_syms_;
+  // Flat bit-slice read/write of an unpacked-array port element (reuses the
+  // packed set_mask / shift+mask machinery).
+  std::string flat_port_read(const slang::ast::ElementSelectExpression& es, const Mem_info& mi);
+  void        flat_port_write(const slang::ast::ElementSelectExpression& es, const Mem_info& mi, const std::string& rhs);
+
   // ── statements (slang_stmt.cpp) ────────────────────────────────────────────
   void lower_statement(const slang::ast::Statement& stmt);
   void lower_conditional(const slang::ast::ConditionalStatement& stmt);
@@ -151,6 +162,11 @@ private:
   std::string lower_unary(const slang::ast::UnaryExpression& expr);
   std::string lower_select(const slang::ast::Expression& expr);  // Element/Range select rvalue
   std::string lower_concat(const slang::ast::ConcatenationExpression& expr);
+  // Packed `'{...}` assignment pattern (simple/structured/replicated): elements
+  // are already resolved positionally MSB-first, so concatenate them like a
+  // concat. `type` must be integral (packed struct/array); unpacked targets are
+  // diagnosed by the caller.
+  std::string lower_assignment_pattern(const slang::ast::Expression& expr, std::span<const slang::ast::Expression* const> elems);
   std::string lower_conditional_expr(const slang::ast::ConditionalExpression& expr);
   std::string lower_call(const slang::ast::CallExpression& expr);
   std::string read_symbol(const slang::ast::ValueSymbol& sym, slang::SourceRange range);
@@ -192,6 +208,10 @@ private:
     bool is_signed = false;
   };
   static Tinfo tinfo(const slang::ast::Type& t);
+  // Like tinfo, but a fixed-size unpacked array of integral elements reports
+  // its FLAT packed width (elem_bits * count, unsigned) — the representation an
+  // unpacked-array port lowers to. Other types fall through to tinfo.
+  static Tinfo flat_or_tinfo(const slang::ast::Type& t);
   void         emit_prim_type_int(const Lnast_nid& parent, int bits, bool is_signed);
   // The single conversion boundary: adjust an integer-semantics value from
   // (from_bits, from_signed) to (to_bits, to_signed). Truncate first, then

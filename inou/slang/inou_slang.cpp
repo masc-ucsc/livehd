@@ -2,6 +2,8 @@
 
 // clang-format off
 
+#include <algorithm>
+
 #include "absl/strings/str_split.h"
 
 #include "diag.hpp"
@@ -53,9 +55,31 @@ void Inou_slang::work(Eprp_var& var) {
 
   argv.push_back(strdup("lhd"));  // argv[0] placeholder for the slang driver
 
-  argv.push_back(strdup("--quiet"));
-  argv.push_back(strdup("--ignore-unknown-modules"));
-  // argv.push_back(strdup("--single-unit"));
+  // Collect the raw slang_flags first so the convenience defaults below
+  // (`--quiet`, `--ignore-unknown-modules`) are only injected when the caller
+  // did NOT already pass them. slang declares these as `optional<bool>`
+  // options, so supplying one twice is a hard "more than one value provided"
+  // error rather than a harmless repeat.
+  std::vector<std::string> user_flags;
+  const bool               has_slang_flags = var.has_label("slang_flags");
+  if (has_slang_flags) {
+    auto txt = var.get("slang_flags");
+    for (const auto f : absl::StrSplit(txt, '\x1f')) {
+      if (!f.empty()) {
+        user_flags.emplace_back(f);
+      }
+    }
+  }
+  const auto user_has = [&](std::string_view flag) {
+    return std::find(user_flags.begin(), user_flags.end(), flag) != user_flags.end();
+  };
+
+  if (!user_has("-q") && !user_has("--quiet")) {
+    argv.push_back(strdup("--quiet"));
+  }
+  if (!user_has("--ignore-unknown-modules")) {
+    argv.push_back(strdup("--ignore-unknown-modules"));
+  }
 
   if (var.has_label("includes")) {
     auto txt = var.get("includes");
@@ -82,16 +106,9 @@ void Inou_slang::work(Eprp_var& var) {
   }
 
   // Raw slang driver args (e.g. `-F filelist.f`) passed through verbatim from
-  // `lhd --reader slang -- <args>`. They are '\x1f'-separated (a comma is lossy
-  // for shell tokens like `+incdir+a,b`); empty splits are dropped.
-  const bool has_slang_flags = var.has_label("slang_flags");
-  if (has_slang_flags) {
-    auto txt = var.get("slang_flags");
-    for (const auto f : absl::StrSplit(txt, '\x1f')) {
-      if (!f.empty()) {
-        argv.push_back(strdup(std::string(f).c_str()));
-      }
-    }
+  // `lhd --reader slang -- <args>` (already split into `user_flags` above).
+  for (const auto& f : user_flags) {
+    argv.push_back(strdup(f.c_str()));
   }
 
   // Timechecks on generated `mod`s are suppressed by default for slang input

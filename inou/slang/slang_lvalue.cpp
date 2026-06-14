@@ -257,6 +257,9 @@ std::string Slang_context::lower_unpacked_read(const slang::ast::Expression& exp
   }
   const auto& es       = expr.as<slang::ast::ElementSelectExpression>();
   const auto* base_sym = resolve_base_symbol(es.value());
+  if (base_sym != nullptr && flat_port_syms_.contains(base_sym)) {
+    return flat_port_read(es, mem_info_.at(base_sym));
+  }
   auto        mit      = base_sym != nullptr ? mem_info_.find(base_sym) : mem_info_.end();
   if (mit == mem_info_.end()) {
     emit_unsupported(expr.sourceRange, "unsupported-array-read", "unpacked array read on an unsupported base");
@@ -290,6 +293,10 @@ void Slang_context::lower_unpacked_write(const slang::ast::Expression& lhs, cons
   }
   const auto& es       = lhs.as<slang::ast::ElementSelectExpression>();
   const auto* base_sym = resolve_base_symbol(es.value());
+  if (base_sym != nullptr && flat_port_syms_.contains(base_sym)) {
+    flat_port_write(es, mem_info_.at(base_sym), rhs);
+    return;
+  }
   auto        mit      = base_sym != nullptr ? mem_info_.find(base_sym) : mem_info_.end();
   if (mit == mem_info_.end()) {
     emit_unsupported(lhs.sourceRange, "unsupported-array-write", "unpacked array write on an unsupported base");
@@ -310,6 +317,71 @@ void Slang_context::lower_unpacked_write(const slang::ast::Expression& lhs, cons
   ln.add_child(st, Lnast_node::create_ref(lname_of(*base_sym)));
   builder_.add_value_child_pub(st, idx);
   builder_.add_value_child_pub(st, val);
+}
+
+// Unpacked-array PORT element access: the port is a FLAT packed bus, so
+// element `arr[idx]` is the slice at bit `(idx-lower)*elem_bits` (reusing the
+// packed-select shift/mask machinery), NOT a memory store/tuple_get.
+std::string Slang_context::flat_port_read(const slang::ast::ElementSelectExpression& es, const Mem_info& mi) {
+  const auto* base_sym  = resolve_base_symbol(es.value());
+  const int   flat_bits = mi.elem_bits * static_cast<int>(mi.size);
+  auto        p         = to_pattern(to_int_value(read_symbol(*base_sym, es.value().sourceRange)), flat_bits, false);
+
+  if (auto ci = try_eval_int(es.selector())) {
+    int64_t lo_bit = (*ci - mi.lower) * mi.elem_bits;
+    if (lo_bit < 0 || lo_bit + mi.elem_bits > flat_bits) {
+      emit_warning(es.sourceRange, "select-out-of-range", "bitwidth", "constant array-port select is out of range");
+      lo_bit = std::max<int64_t>(lo_bit, 0);
+    }
+    auto r = extract_field(p, lo_bit, mi.elem_bits);
+    return mi.elem_signed ? builder_.create_sext_stmts(r, std::to_string(mi.elem_bits - 1)) : r;
+  }
+
+  auto idx = to_int_value(lower_rvalue(es.selector()));
+  if (mi.lower != 0) {
+    idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
+  }
+  std::string shamt = mi.elem_bits != 1 ? builder_.create_mult_stmts(idx, std::to_string(mi.elem_bits)) : idx;
+  const int   bias  = mi.elem_bits;
+  shamt             = builder_.create_plus_stmts(shamt, std::to_string(bias));
+  auto shifted      = builder_.create_sra_stmts(builder_.create_shl_stmts(p, std::to_string(bias)), shamt);
+  auto r            = trunc_to(shifted, mi.elem_bits);
+  return mi.elem_signed ? builder_.create_sext_stmts(r, std::to_string(mi.elem_bits - 1)) : r;
+}
+
+void Slang_context::flat_port_write(const slang::ast::ElementSelectExpression& es, const Mem_info& mi,
+                                    const std::string& rhs) {
+  const auto* base_sym  = resolve_base_symbol(es.value());
+  const int   flat_bits = mi.elem_bits * static_cast<int>(mi.size);
+  auto        base_name = lname_of(*base_sym);
+  auto        val       = to_pattern(to_int_value(rhs), mi.elem_bits, mi.elem_signed);
+
+  if (auto ci = try_eval_int(es.selector())) {
+    int64_t lo_bit = (*ci - mi.lower) * mi.elem_bits;
+    if (lo_bit < 0 || lo_bit + mi.elem_bits > flat_bits) {
+      emit_warning(es.sourceRange, "select-out-of-range", "bitwidth", "constant array-port select is out of range");
+      lo_bit = std::max<int64_t>(lo_bit, 0);
+    }
+    std::string sel_mask = lo_bit == 0 ? mask_text(mi.elem_bits)
+                                       : std::string(Dlop::get_mask_value(lo_bit + mi.elem_bits - 1, lo_bit)->to_pyrope());
+    note_write(*base_sym, current_assign_nonblocking_, es.sourceRange.start());
+    builder_.create_set_mask_stmts(base_name, sel_mask, val);
+    return;
+  }
+
+  // dynamic element index: read-modify-write with shifts (const set_mask only).
+  auto cur_p = to_pattern(to_int_value(read_symbol(*base_sym, es.value().sourceRange)), flat_bits, false);
+  auto idx   = to_int_value(lower_rvalue(es.selector()));
+  if (mi.lower != 0) {
+    idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
+  }
+  std::string shamt    = mi.elem_bits != 1 ? builder_.create_mult_stmts(idx, std::to_string(mi.elem_bits)) : idx;
+  auto        sel_mask = builder_.create_shl_stmts(mask_text(mi.elem_bits), shamt);
+  auto        keep     = builder_.create_bit_and_stmts(cur_p, builder_.create_bit_not_stmts(sel_mask));
+  auto        ins      = builder_.create_shl_stmts(val, shamt);
+  auto        next     = builder_.create_bit_or_stmts({keep, ins});
+  note_write(*base_sym, current_assign_nonblocking_, es.sourceRange.start());
+  builder_.create_assign_stmts(base_name, next);
 }
 
 // A select/member chain bottoms out in a named variable for the

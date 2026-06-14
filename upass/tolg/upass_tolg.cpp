@@ -461,7 +461,7 @@ private:
     } else if (N::is_gt(t)) {
       lower_op(nid, Ntype_op::GT, false, OpW::boolw);
     } else if (N::is_shl(t)) {
-      lower_op(nid, Ntype_op::SHL, false, OpW::maxw);
+      lower_op(nid, Ntype_op::SHL, false, OpW::shlw);
     } else if (N::is_sra(t)) {
       lower_op(nid, Ntype_op::SRA, false, OpW::firstw);
     } else if (N::is_sext(t)) {
@@ -2489,7 +2489,7 @@ private:
     bind_result(lnast_->get_name(dst), node.create_driver_pin(0), std::max(vv.mw, mask_mw));
   }
 
-  enum class OpW { add, mul, maxw, firstw, boolw };
+  enum class OpW { add, mul, maxw, firstw, boolw, shlw };
 
   // n-ary op: child0 = dst, children 1..N = operands. Commutative ops feed all
   // operands into sink "a"; positional binary ops use "a" then "b".
@@ -2498,17 +2498,27 @@ private:
     if (dst.is_invalid()) {
       return;
     }
-    auto    node     = make_node(op);
-    int32_t max_mw   = 0;
-    int32_t sum_mw   = 0;
-    int32_t first_mw = 0;
-    bool    first    = true;
+    auto    node      = make_node(op);
+    int32_t max_mw    = 0;
+    int32_t sum_mw    = 0;
+    int32_t first_mw  = 0;
+    int32_t second_mw = 0;       // shift-amount magnitude width (shlw)
+    int64_t shl_amt   = -1;      // shift-amount value when constant (shlw); <0 = dynamic
+    bool    first     = true;
     for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       auto v  = leaf(c);
       max_mw  = std::max(max_mw, v.mw);
       sum_mw += v.mw;
       if (first) {
         first_mw = v.mw;
+      } else if (second_mw == 0) {
+        second_mw = v.mw;
+        if (Lnast_ntype::is_const(lnast_->get_type(c))) {
+          auto cv = Dlop::from_pyrope(lnast_->get_name(c));
+          if (cv->is_just_i64()) {
+            shl_amt = cv->to_just_i64();
+          }
+        }
       }
       setup_sink_by_name(node, (commutative || first) ? "a" : "b").connect_driver(v.pin);
       first = false;
@@ -2520,6 +2530,15 @@ private:
       case OpW::maxw  : mw = max_mw; break;
       case OpW::firstw: mw = first_mw; break;
       case OpW::boolw : mw = 1; break;
+      case OpW::shlw  : {
+        // A left shift GROWS: out = a_width + shift_amount. A constant amount is
+        // exact; a dynamic amount uses the 2^amount_width-1 upper bound (capped
+        // to avoid pathological blow-up). Without this the result kept the input
+        // width (old OpW::maxw) and `b<<N` silently truncated in intermediates.
+        int64_t grow = shl_amt >= 0 ? shl_amt : (second_mw >= 12 ? int64_t{4096} : ((int64_t{1} << second_mw) - 1));
+        mw           = static_cast<int32_t>(first_mw + grow);
+        break;
+      }
     }
     bind_result(lnast_->get_name(dst), node.create_driver_pin(0), mw);
   }
@@ -2697,13 +2716,19 @@ private:
     }
 
     for (const auto& var : all_vars) {
-      Pin  cur;
-      auto base = pin_map_.find(var);
-      cur       = (base != pin_map_.end()) ? base->second : nil_pin();
-      auto ew   = else_writes.find(var);
-      if (ew != else_writes.end()) {
-        cur = ew->second;
-      }
+      // `pre` is the var's value ENTERING this if (it already encodes every
+      // prior statement's writes — e.g. an earlier separate `if(inr) ov<=0`).
+      // A branch that does not write `var` must fall back to `pre`, NOT to the
+      // else value: the else only applies on the all-conds-false path. Seeding
+      // the chain's false arm (`cur`) with the else value while still using
+      // `cur` as the fallback for non-writing branches (the old code) leaked
+      // the else value up into the then/elif arms, clobbering `pre`. For a
+      // reg's enable shadow this collapsed a conditional enable into constant
+      // true (write-every-cycle); for its din it forced the else value.
+      auto base      = pin_map_.find(var);
+      const Pin pre  = (base != pin_map_.end()) ? base->second : nil_pin();
+      auto      ew   = else_writes.find(var);
+      Pin       cur  = (ew != else_writes.end()) ? ew->second : pre;
 
       // The merged value's width is the widest among the branch sources;
       // mw_lookup alone holds whatever the LAST write recorded (or 1 for a
@@ -2723,13 +2748,13 @@ private:
         }
         return 0;
       };
-      int32_t mw = std::max(mw_lookup(var), pin_mw(cur));
+      int32_t mw = std::max({mw_lookup(var), pin_mw(cur), pin_mw(pre)});
       int n         = static_cast<int>(branches.size());
       int last_cond = has_else ? n - 2 : n - 1;
       for (int i = last_cond; i >= 0; --i) {
         auto& br       = branches[i];
         auto  wr       = br.writes.find(var);
-        Pin   true_val = (wr != br.writes.end()) ? wr->second : cur;
+        Pin   true_val = (wr != br.writes.end()) ? wr->second : pre;
         if (wr != br.writes.end()) {
           mw = std::max(mw, pin_mw(wr->second));
         }

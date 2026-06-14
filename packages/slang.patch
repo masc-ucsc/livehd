@@ -30,3 +30,68 @@ diff --git external/CMakeLists.txt external/CMakeLists.txt
  set(BUILD_SHARED_LIBS ${saved_build_shared_libs})
 
  if(NOT TARGET fmt::fmt)
+
+diff --git source/ast/symbols/VariableSymbols.cpp source/ast/symbols/VariableSymbols.cpp
+--- source/ast/symbols/VariableSymbols.cpp
++++ source/ast/symbols/VariableSymbols.cpp
+@@ -35,7 +35,14 @@
+     const Symbol& sym = scope.asSymbol();
+     switch (sym.kind) {
+         case SymbolKind::StatementBlock:
+-            return sym.as<StatementBlockSymbol>().defaultLifetime;
++            // LiveHD slang reader (Verilator/VCS-compat): an implicit-lifetime
++            // variable declared inside a procedural begin-end block defaults to
++            // AUTOMATIC (re-initialized on each block entry) rather than strict
++            // LRM static. This is the dominant synthesis-tool behavior and lets
++            // a loop body initialize a local from the (automatic) loop variable
++            // without a spurious AutoFromStaticInit error. An explicit
++            // static/automatic keyword still wins (handled before this call).
++            return VariableLifetime::Automatic;
+         case SymbolKind::Subroutine:
+             return sym.as<SubroutineSymbol>().defaultLifetime;
+         case SymbolKind::MethodPrototype:
+diff --git source/parsing/Parser_expressions.cpp source/parsing/Parser_expressions.cpp
+--- source/parsing/Parser_expressions.cpp
++++ source/parsing/Parser_expressions.cpp
+@@ -81,9 +81,21 @@
+         if (options.has(ExpressionOptions::DisallowAttrs))
+             errorIfAttributes(attributes);
+ 
+-        auto& operand = parsePrimaryExpression(options);
+-        auto& postfix = parsePostfixExpression(operand, options);
+-        leftOperand = &factory.prefixUnaryExpression(opKind, opToken, attributes, postfix);
++        // LiveHD slang reader (Verilator/VCS-compat): allow a unary prefix
++        // operator to apply to another unary expression, e.g. `!&x`, `!|x`,
++        // `!^x`, `~^x`. The strict LRM grammar only permits a `primary` operand
++        // here, so when the operand itself starts with a unary prefix operator
++        // recurse at max precedence (absorbing nested prefix + postfix but never
++        // a binary operator) to bind it as `op(unary)`.
++        ExpressionSyntax* operandExpr;
++        if (getUnaryPrefixExpression(peek().kind) != SyntaxKind::Unknown) {
++            operandExpr = &parseSubExpression(options, INT_MAX);
++        }
++        else {
++            auto& operand = parsePrimaryExpression(options);
++            operandExpr = &parsePostfixExpression(operand, options);
++        }
++        leftOperand = &factory.prefixUnaryExpression(opKind, opToken, attributes, *operandExpr);
+     }
+     else {
+         leftOperand = &parsePrimaryExpression(options);
+diff --git source/ast/Expression.cpp source/ast/Expression.cpp
+--- source/ast/Expression.cpp
++++ source/ast/Expression.cpp
+@@ -557,7 +557,12 @@
+         }
+         case ExpressionKind::Concatenation: {
+             auto& concat = as<ConcatenationExpression>();
+-            if (!concat.type->isIntegral())
++            // LiveHD slang reader (Verilator-compat): besides an integral
++            // (packed) concatenation, also accept an UNPACKED-array concatenation
++            // as an lvalue — e.g. `{sig}` connected to an unpacked output port
++            // `arr[0:0]`, a common port-connect idiom. Each operand must itself
++            // be assignable; the connection drives the corresponding array slice.
++            if (!concat.type->isIntegral() && !concat.type->isUnpackedArray())
+                 break;
+ 
+             for (auto op : concat.operands()) {

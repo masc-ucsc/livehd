@@ -7,6 +7,7 @@
 // in the integer range of its slang type; conversions go through the single
 // materialize_conversion seam (slang_types.cpp).
 
+#include "slang/ast/expressions/AssignmentExpressions.h"
 #include "slang/ast/expressions/CallExpression.h"
 #include "slang/ast/expressions/ConversionExpression.h"
 #include "slang/ast/expressions/LiteralExpressions.h"
@@ -72,6 +73,12 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
     case ExpressionKind::RangeSelect:
     case ExpressionKind::MemberAccess: return lower_select(expr);
     case ExpressionKind::Call: return lower_call(expr.as<slang::ast::CallExpression>());
+    case ExpressionKind::SimpleAssignmentPattern:
+      return lower_assignment_pattern(expr, expr.as<slang::ast::SimpleAssignmentPatternExpression>().elements());
+    case ExpressionKind::StructuredAssignmentPattern:
+      return lower_assignment_pattern(expr, expr.as<slang::ast::StructuredAssignmentPatternExpression>().elements());
+    case ExpressionKind::ReplicatedAssignmentPattern:
+      return lower_assignment_pattern(expr, expr.as<slang::ast::ReplicatedAssignmentPatternExpression>().elements());
     case ExpressionKind::Inside: {
       const auto& in = expr.as<slang::ast::InsideExpression>();
       auto        li = tinfo(*in.left().type);
@@ -438,6 +445,32 @@ std::string Slang_context::lower_conditional_expr(const slang::ast::ConditionalE
   builder_.pop_stmts();
 
   return tmp;
+}
+
+std::string Slang_context::lower_assignment_pattern(const slang::ast::Expression&                     expr,
+                                                    std::span<const slang::ast::Expression* const> elems) {
+  // `T'{...}` for a packed (integral) struct/array: slang resolves `elements()`
+  // positionally MSB-first, so the value is just the fields concatenated — same
+  // bit layout as a `{...}` concat of those fields. Unpacked targets (memories /
+  // unpacked-array vars) are a different lowering and stay unsupported here.
+  if (!expr.type->isIntegral()) {
+    emit_unsupported(expr.sourceRange, "unsupported-assignment-pattern",
+                     "only packed (integral) '{...} assignment patterns are supported by --reader slang yet");
+    return "0";
+  }
+  std::vector<std::string> parts;
+  int64_t                  offset = 0;
+  for (auto it = elems.rbegin(); it != elems.rend(); ++it) {  // LSB-first accumulation
+    const auto& e  = **it;
+    auto        oi = tinfo(*e.type);
+    auto        v  = to_pattern(to_int_value(lower_rvalue(e)), oi.bits, oi.is_signed);
+    parts.emplace_back(offset == 0 ? v : builder_.create_shl_stmts(v, std::to_string(offset)));
+    offset += oi.bits;
+  }
+  if (parts.empty()) {
+    return "0";
+  }
+  return builder_.create_bit_or_stmts(parts);
 }
 
 std::string Slang_context::lower_concat(const slang::ast::ConcatenationExpression& expr) {

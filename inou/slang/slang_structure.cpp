@@ -104,10 +104,38 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
       const auto& type   = port.getType();
       const bool  is_out = port.direction == slang::ast::ArgumentDirection::Out;
 
+      // Unpacked-array port `T arr[N-1:0]` -> flat packed [N*elem_bits-1:0] IO
+      // (Verilator/yosys flatten unpacked ports identically, so LEC lines up);
+      // element access lowers to a bit-slice (see flat_port_read/write).
+      bool     is_flat_array = false;
+      int      io_bits       = 0;
+      bool     io_signed     = false;
+      Mem_info flat_mi;
       if (!type.isIntegral()) {
-        emit_unsupported(port.location, "unsupported-port-type",
-                         std::string("port '") + std::string(port.name) + "' has a non-integral type");
-        continue;
+        const auto& ct = type.getCanonicalType();
+        if (ct.kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+          const auto& arr  = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
+          const auto& elem = arr.elementType.getCanonicalType();
+          if (elem.isIntegral() && !elem.isUnpackedArray()) {
+            auto ei            = tinfo(elem);
+            flat_mi.lower      = arr.range.lower();
+            flat_mi.elem_bits  = ei.bits;
+            flat_mi.elem_signed = ei.is_signed;
+            flat_mi.size       = arr.range.width();
+            io_bits            = ei.bits * static_cast<int>(flat_mi.size);
+            io_signed          = false;  // flattened bus is just bits
+            is_flat_array      = true;
+          }
+        }
+        if (!is_flat_array) {
+          emit_unsupported(port.location, "unsupported-port-type",
+                           std::string("port '") + std::string(port.name) + "' has a non-integral type");
+          continue;
+        }
+      } else {
+        auto ti   = tinfo(type);
+        io_bits   = ti.bits;
+        io_signed = ti.is_signed;
       }
 
       // The inside-the-module symbol the body references.
@@ -131,21 +159,24 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
         } else {
           input_syms_.insert(internal);
         }
+        if (is_flat_array) {
+          flat_port_syms_.insert(internal);
+          mem_info_.emplace(internal, flat_mi);
+        }
       }
 
-      if (type.hasFixedRange() && !type.getFixedRange().isDescending()) {
+      if (!is_flat_array && type.hasFixedRange() && !type.getFixedRange().isDescending()) {
         emit_warning(slang::SourceRange(port.location, port.location), "big-endian-port", "io",
                      std::string("port '") + std::string(port.name)
                          + "' is big-endian; flipping IO (mind mix/match with other modules)");
       }
 
-      auto  ti    = tinfo(type);
       auto& ln    = *builder_.lnast;
       auto  entry = ln.add_child(is_out ? out_tup : in_tup, Lnast_ntype::create_store());
       ln.set_pending_srcid(mint_loc(port.location));
       ln.add_child(entry, Lnast_node::create_ref(var_name));
       ln.add_child(entry, Lnast_node::create_const("nil"));  // no default value
-      emit_prim_type_int(entry, ti.bits, ti.is_signed);
+      emit_prim_type_int(entry, io_bits, io_signed);
       if (is_out) {
         // `@[]` landing-cycle opt-out: the form foreign Verilog modules, which
         // carry no timing markings, ingest as.
@@ -1074,6 +1105,21 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
   proc_kind_ = Proc_kind::none;
 }
 
+Slang_context::Tinfo Slang_context::flat_or_tinfo(const slang::ast::Type& t) {
+  const auto& ct = t.getCanonicalType();
+  if (!ct.isIntegral() && ct.kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+    const auto& arr  = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
+    const auto& elem = arr.elementType.getCanonicalType();
+    if (elem.isIntegral() && !elem.isUnpackedArray()) {
+      Tinfo r;
+      r.bits      = tinfo(elem).bits * static_cast<int>(arr.range.width());
+      r.is_signed = false;
+      return r;
+    }
+  }
+  return tinfo(t);
+}
+
 void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   if (!lower_module(inst)) {
     return;  // diagnosed inside
@@ -1114,7 +1160,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
 
     if (expr == nullptr) {  // unconnected
       if (!is_out) {
-        auto ti = tinfo(port.getType());
+        auto ti = flat_or_tinfo(port.getType());
         // unconnected input reads x
         std::string qmarks(static_cast<size_t>(ti.bits), '?');
         in_args.emplace_back(std::string(port.name), absl::StrCat("0ub", qmarks));
@@ -1131,8 +1177,8 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     } else {
       set_pending_loc(expr->sourceRange);
       auto v  = to_int_value(lower_rvalue(*expr));
-      auto pi = tinfo(port.getType());
-      auto ei = tinfo(*expr->type);
+      auto pi = flat_or_tinfo(port.getType());
+      auto ei = flat_or_tinfo(*expr->type);
       v       = materialize_conversion(v, ei.bits, ei.is_signed, pi.bits, pi.is_signed);
       clear_pending_loc();
       in_args.emplace_back(std::string(port.name), v);
@@ -1166,8 +1212,8 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       ln.add_child(tg, Lnast_node::create_const(oc.port->name));
       v = t;
     }
-    auto pi = tinfo(oc.port->getType());
-    auto ei = tinfo(*oc.expr->type);
+    auto pi = flat_or_tinfo(oc.port->getType());
+    auto ei = flat_or_tinfo(*oc.expr->type);
     assign_to(*oc.expr, materialize_conversion(v, pi.bits, pi.is_signed, ei.bits, ei.is_signed));
   }
   clear_pending_loc();

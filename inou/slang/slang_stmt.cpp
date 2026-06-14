@@ -134,10 +134,30 @@ void Slang_context::lower_conditional(const slang::ast::ConditionalStatement& st
   builder_.pop_stmts();
 
   if (stmt.ifFalse != nullptr) {
-    auto else_stmts = builder_.add_if_stmts(if_nid);
-    builder_.push_stmts(else_stmts);
-    lower_statement(*stmt.ifFalse);
-    builder_.pop_stmts();
+    // If the THEN lowered to NOTHING (an empty `begin end`, or a dropped
+    // `q <= q` self-assign hold), an `if(cond){}else{X}` leaves an
+    // empty-then branch that downstream mishandles: constprop collapses it to
+    // `if(cond){X}` (losing the negation) and tolg drops the guard entirely —
+    // both flip the effective condition (LEC mismatch, e.g. SoomRV FIFO). Emit
+    // the else as a negated then-only `if(!cond){X}` instead; the harmless
+    // empty `if(cond){}` is DCE'd. (`cond` is a bool from booleanize.)
+    const bool then_empty = builder_.lnast->get_first_child(then_stmts).is_invalid();
+    if (then_empty) {
+      auto neg = mark_bool(builder_.create_log_not_stmts(cond));
+      set_pending_loc(stmt.sourceRange);
+      auto neg_if = builder_.create_if_stmt(false);
+      clear_pending_loc();
+      builder_.add_if_cond(neg_if, neg);
+      auto neg_then = builder_.add_if_stmts(neg_if);
+      builder_.push_stmts(neg_then);
+      lower_statement(*stmt.ifFalse);
+      builder_.pop_stmts();
+    } else {
+      auto else_stmts = builder_.add_if_stmts(if_nid);
+      builder_.push_stmts(else_stmts);
+      lower_statement(*stmt.ifFalse);
+      builder_.pop_stmts();
+    }
   }
 }
 

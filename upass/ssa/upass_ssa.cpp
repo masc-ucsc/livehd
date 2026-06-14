@@ -4,6 +4,7 @@
 
 #include <bit>
 #include <format>
+#include <functional>
 #include <optional>
 #include <string>
 
@@ -413,6 +414,34 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     }
   }
 
+  // Collect the BASE names that a branch subtree (re)writes — the scalar/wire
+  // 2-child store/dp_assign dests, recursively (nested ifs included), skipping
+  // regs and tuple-set stores. Used for the branch carry-in below.
+  std::function<void(const Lnast_nid&, absl::flat_hash_set<std::string>&)> collect_branch_writes =
+      [&](const Lnast_nid& sub, absl::flat_hash_set<std::string>& out) {
+        for (auto c : lnast->children(sub)) {
+          auto ct = lnast->get_type(c);
+          if (stmt_has_dest(ct) && !Lnast_ntype::is_declare(ct)) {
+            size_t nchild = 0;
+            for (auto x : lnast->children(c)) {
+              (void)x;
+              ++nchild;
+            }
+            bool scalar_store = !Lnast_ntype::is_store(ct) || nchild <= 2;
+            if (scalar_store) {
+              auto d0 = lnast->get_first_child(c);
+              if (!d0.is_invalid()) {
+                auto nm = lnast->get_name(d0);
+                if (is_user_var(nm) && !reg_names.contains(nm)) {
+                  out.emplace(nm);
+                }
+              }
+            }
+          }
+          collect_branch_writes(c, out);  // recurse (nested stmts/ifs)
+        }
+      };
+
   for (auto child : lnast->children(stmts_nid)) {
     auto type = lnast->get_type(child);
 
@@ -533,10 +562,41 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
         ++pos;
       }
     } else {
-      // Control-flow / structural nodes (if, func_def, …): copy verbatim.
-      // The lowerer's lower_branch() + Mux logic handles if/else correctly
-      // without LNAST-level join nodes.
-      copy_subtree(lnast, child, staging, new_stmts);
+      // Control-flow / structural nodes (if, func_def, always_ff body, …).
+      // The lowerer's lower_branch() + Mux logic merges base-name WRITES, so a
+      // branch body must keep its write targets on the BASE name. But its READS
+      // must follow the live rename_map: another scope (always_ff, nested if)
+      // that reads a comb net the straight-line scope already SSA-versioned must
+      // see the versioned driver, not the net's declaration-time poison —
+      // copying verbatim left those reads on the stale base (the bug that
+      // dropped the FIFO `outDataReg <= IN_data` override: its guards
+      // `empty`/`outputReady`/`doInsert` read the `0ub?` poison and folded to
+      // constants). So copy WITH rename. Regs are never in rename_map (flop q
+      // semantics) so reg writes stay base; for comb vars (re)written in this
+      // branch we first do the carry-in below — bind the base name to its
+      // current version and reset the rename to base — so those writes stay on
+      // the base for the Mux merge while everything else reads the live version.
+      if (Lnast_ntype::is_if_like(type)) {
+        absl::flat_hash_set<std::string> bwrites;
+        collect_branch_writes(child, bwrites);
+        for (const auto& var : bwrites) {
+          auto it = rename_map.find(var);
+          if (it != rename_map.end() && it->second != var) {
+            auto st = staging->add_child(new_stmts, Lnast_ntype::create_store());
+            staging->add_child(st, Lnast_node::create_ref(var));
+            staging->add_child(st, Lnast_node::create_ref(it->second));
+            it->second = var;  // branch writes + post-branch reads use the merged base
+          }
+        }
+        // Reads inside the branch follow the live rename_map (so a versioned comb
+        // net read here resolves to its driver, not its poison base); writes were
+        // reset to base above so the Mux merge still works; regs aren't versioned.
+        copy_with_rename(lnast, child, staging, new_stmts, rename_map);
+      } else {
+        // Other structural nodes (func_def, …) own a separate name scope — the
+        // outer rename_map must NOT leak in, so copy verbatim.
+        copy_subtree(lnast, child, staging, new_stmts);
+      }
     }
   }
 
