@@ -1,0 +1,13 @@
+/*
+:name: typename_attr_removed
+:type: error
+:error: the .*typename.* attribute has been removed
+:help: structural
+*/
+// The `.[typename]` attribute was removed (task 1f-is_typename): nominal type
+// identity is gone, so a `.[typename]` read is a clean compile error. Structural
+// `does` / `equals` / `case` are the only type-comparison operators.
+
+type Foo = (a:u8 = 0)
+const x:Foo = (a=1)
+cassert(x.[typename] == "Foo")

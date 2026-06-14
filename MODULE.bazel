@@ -50,13 +50,13 @@ git_override(
 
 # hlop (Dlop value type + slop/dlop execution layer)
 bazel_dep(name = "hlop", version = "0.2.0")
-# git_override(
-#     module_name = "hlop",
-#     remote = "https://github.com/masc-ucsc/hlop.git",
-#     commit = "7561e23b29d503074430c72de4a532ecbebc2309",  # is_mask multi-word fix (all-ones low word) + unlimited-precision ops
-# )
+git_override(
+    module_name = "hlop",
+    remote = "https://github.com/masc-ucsc/hlop.git",
+    commit = "d0578d197f9d07744d7562932bd08f9c70f3649c",  # several cleanup around hlop (on top of issue_057 part-select fold fix + is_mask multi-word)
+)
 # For local debug/testing, swap the git_override above for:
-local_path_override(module_name = "hlop", path = "../hlop")  # WIP: issue_057 part-select fold fix on top of 7561e23
+# local_path_override(module_name = "hlop", path = "../hlop")  # WIP on top of d0578d1
 
 # slang (fmt required by slang CMake)
 http_archive(
