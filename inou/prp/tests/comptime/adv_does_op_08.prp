@@ -10,11 +10,11 @@ const fn1 = (const a=1, const b=2)
 const fn2 = (const b=2, const a=1)
 cassert(fn1 does fn2)         // both fully named, order independent
 cassert(fn2 does fn1)
-// mixed: an unnamed field forces position+name to match (doc 07-typesystem
-// "when either a or b have unnamed fields ... name but also position should
-// match"). Here b=(b=2, 1) has an unnamed value 1 at position 1, but a's
-// position-1 field is named `b` -> the unnamed value cannot positionally match.
-cassert(not ((1, b=2) does (b=2, 1)))
+// mixed named/unnamed: unnamed entries are ordered AMONG THEMSELVES; named
+// fields occupy no positional slot and match by name. So `(1, b=2)` and
+// `(b=2, 1)` both have unnamed[0]==1 and b==2 -> structurally equal, hence
+// `does` holds (and `==` would too: `==` true implies `does` true).
+cassert((1, b=2) does (b=2, 1))
 cassert((1, b=2) does (1, b=2))      // exact position + name match
 // extra named field, still superset
 cassert((a=1, b=2, c=3) does (a=1, b=2))

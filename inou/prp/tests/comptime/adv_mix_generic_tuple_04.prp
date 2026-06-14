@@ -5,9 +5,11 @@
 :verifier_fail: 0
 */
 
-// Generic over the element type of a 1-D array passed as a tuple field;
-// fold a reduction at compile time, then destructure.
-comb fold3<T>(xs:(T, T, T)) -> (sum:T, prod:T) {
+// Generic over the element type of a 1-D array; fold a reduction at compile
+// time, then destructure. The 3 uniform elements are an ARRAY `[3]T` — an
+// unnamed tuple-type `(T,T,T)` is malformed (a tuple-type field must be named,
+// `name:T`); see errors/unnamed_tuple_type_field.
+comb fold3<T>(xs:[3]T) -> (sum:T, prod:T) {
   sum  = xs[0] + xs[1] + xs[2]
   prod = xs[0] * xs[1] * xs[2]
 }

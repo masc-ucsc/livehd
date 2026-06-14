@@ -262,6 +262,41 @@ TSNode find_first_error_node(TSNode n, std::string_view src) {
   return TSNode{};
 }
 
+// `comb g[n:int=1](x)`: a `[...]` slot after a lambda name parses as a `tuple_sq`
+// wrapped in an ERROR (the grammar has no typed parameter / attribute slot
+// there). A TYPED item inside that bracket is the tell-tale of the mistake —
+// attributes and parameters never carry a type in a `[...]`. Returns the
+// offending `tuple_sq` (searched only under an ERROR), or null.
+static TSNode find_typed_param_sq(TSNode n, bool in_error) {
+  std::string_view t(ts_node_type(n));
+  in_error = in_error || (t == "ERROR");
+  if (in_error && t == "tuple_sq") {
+    for (uint32_t i = 0, c = ts_node_named_child_count(n); i < c; ++i) {
+      TSNode           item = ts_node_named_child(n, i);
+      std::string_view it(ts_node_type(item));
+      TSNode           ti{};
+      if (it == "typed_identifier") {
+        ti = item;
+      } else if (it == "assignment") {
+        TSNode lv = ts_node_child_by_field_name(item, "lvalue", 6);
+        if (!ts_node_is_null(lv) && std::string_view(ts_node_type(lv)) == "typed_identifier") {
+          ti = lv;
+        }
+      }
+      if (!ts_node_is_null(ti) && !ts_node_is_null(ts_node_child_by_field_name(ti, "type", 4))) {
+        return n;
+      }
+    }
+  }
+  for (uint32_t i = 0, c = ts_node_child_count(n); i < c; ++i) {
+    TSNode r = find_typed_param_sq(ts_node_child(n, i), in_error);
+    if (!ts_node_is_null(r)) {
+      return r;
+    }
+  }
+  return TSNode{};
+}
+
 // ── Typed-declaration initializer kind check (shared by variables & params) ──
 // A typed scalar declaration (`mut c:bool = …`, or a function parameter
 // `b:bool = …`) constrains the initializer's kind: bool/int/string are distinct
@@ -361,6 +396,16 @@ void Prp2lnast::check_decl_init_kind(std::string_view name, const Lnast_node& va
 void Prp2lnast::check_parse_errors() const {
   if (!ts_node_has_error(ts_root_node)) {
     return;  // clean parse
+  }
+  // `comb g[n:int=1](x)` — a typed `[...]` parameter/attribute. Detect this
+  // specific shape first so it gets a clear message instead of the generic
+  // "expected …" recovery token. Attributes and parameters carry no type.
+  if (TSNode tsq = find_typed_param_sq(ts_root_node, /*in_error=*/false); !ts_node_is_null(tsq)) {
+    report_error(tsq,
+                 "typed-param-attr",
+                 "syntax",
+                 "typed parameters are not allowed: a `[...]` attribute / comptime parameter cannot carry a type",
+                 "drop the type (attributes have no type, e.g. `[n]`), or pass the value as a regular `(name)` parameter");
   }
   // A MISSING node (a token the parser had to insert to recover) is the most
   // unambiguous syntax error, so prefer it.
@@ -2200,12 +2245,38 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     };
     collect(lvalue);
     if (have_root) {
+      Lnast_node store_val = rvalue;
+      // A `wrap`/`sat` write to a FIELD (`wrap self.v += x`) must lower the value
+      // through `wrap|sat(v=<value>, type=<field>)` just like a plain-variable
+      // write (above). The `type` operand carries the field's declared envelope,
+      // recovered by reading the field (a tuple_get on the same path). Without
+      // this the qualifier was silently dropped and the field never wrapped.
+      if (!overflow_kind.empty()) {
+        Lnast_node type_ref = builder.mint_tmp_ref();
+        auto       tg        = builder.add_child(Lnast_ntype::create_tuple_get());
+        lnast->add_child(tg, type_ref);
+        lnast->add_child(tg, root);
+        for (auto& p : path) {
+          lnast->add_child(tg, p);
+        }
+        Lnast_node wrapped = builder.mint_tmp_ref();
+        auto       fc      = builder.add_child(Lnast_ntype::create_func_call());
+        lnast->add_child(fc, wrapped);
+        lnast->add_child(fc, Lnast_node::create_ref(overflow_kind));  // callee: wrap | sat
+        auto va = lnast->add_child(fc, Lnast_ntype::create_store());  // v = <value>
+        lnast->add_child(va, Lnast_node::create_ref("v"));
+        lnast->add_child(va, rvalue);
+        auto ta = lnast->add_child(fc, Lnast_ntype::create_store());  // type = <field> (its declared envelope)
+        lnast->add_child(ta, Lnast_node::create_ref("type"));
+        lnast->add_child(ta, type_ref);
+        store_val = wrapped;
+      }
       auto idx = builder.add_child(Lnast_ntype::create_store());
       lnast->add_child(idx, root);
       for (auto& p : path) {
         lnast->add_child(idx, p);
       }
-      lnast->add_child(idx, rvalue);
+      lnast->add_child(idx, store_val);
       return root;
     }
   }
@@ -2218,12 +2289,61 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
   return ref;
 }
 
+// First call (anywhere under `n`) to a function declared with a `ref` parameter,
+// else a null node. The callee method name is the last identifier of the call's
+// `function` expression (a bare identifier, or a `dot_expression`/`member_selection`
+// for UFCS). See ref_param_funcs_ / process_assignment.
+TSNode Prp2lnast::find_ref_param_call(TSNode n) const {
+  if (std::string_view(ts_node_type(n)) == "function_call_expression") {
+    if (TSNode fnode = child_by_field(n, "function"); !ts_node_is_null(fnode)) {
+      std::string_view ft(ts_node_type(fnode));
+      std::string      nm;
+      if (ft == "identifier") {
+        nm = trim(get_text(fnode));
+      } else if (ft == "dot_expression" || ft == "member_selection") {
+        for (int i = static_cast<int>(ts_node_named_child_count(fnode)) - 1; i >= 0; --i) {
+          TSNode c = ts_node_named_child(fnode, static_cast<uint32_t>(i));
+          if (std::string_view(ts_node_type(c)) == "identifier") {
+            nm = trim(get_text(c));
+            break;
+          }
+        }
+      }
+      if (!nm.empty() && ref_param_funcs_.contains(nm)) {
+        return n;
+      }
+    }
+  }
+  for (uint32_t i = 0, nc = ts_node_named_child_count(n); i < nc; ++i) {
+    if (TSNode r = find_ref_param_call(ts_node_named_child(n, i)); !ts_node_is_null(r)) {
+      return r;
+    }
+  }
+  return TSNode{};
+}
+
 void Prp2lnast::process_assignment(TSNode n) {
   TSNode decl = child_by_field(n, "decl");
   TSNode lv   = child_by_field(n, "lvalue");
   TSNode op   = child_by_field(n, "operator");
   TSNode rv   = child_by_field(n, "rvalue");
   TSNode tc   = child_by_field(n, "type");  // outer type_cast on complex lvalue
+
+  // A `ref`-parameter method/comb (`comb set_x(ref self, …)`) mutates its
+  // receiver, so its RESULT cannot be consumed in a right-hand-side expression
+  // (`mut a3 = a1.set_x(...)`). Only the in-place statement form `a1.set_x(...)`
+  // is allowed (the receiver IS the result). A `mod`/`pipe` whole-rhs bind stays
+  // legal — those return a value without mutating the caller (2f-ufcs).
+  if (!ts_node_is_null(rv) && !ref_param_funcs_.empty()) {
+    if (TSNode bad = find_ref_param_call(rv); !ts_node_is_null(bad)) {
+      report_error(bad,
+                   "ref-method-in-rhs",
+                   "type",
+                   "a method with a `ref` parameter mutates its receiver and cannot be used in a right-hand-side "
+                   "expression",
+                   "call it as a statement (`obj.method(...)`) — the receiver is the result");
+    }
+  }
 
   // Keep the RHS node of a top-level `const NAME = "str" | (tuple)` so a later
   // `enum(...NAME, …)` spread can splice it in place (see const_rvalue_nodes_).
@@ -2930,6 +3050,39 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
     }
   }
   TSNode code = child_by_field(n, "code");
+
+  // Record a method declared with a `ref self` parameter (the implicit UFCS
+  // receiver). The `mod` field of an `arg_list` item is the `ref` token; only
+  // `ref self` makes a call illegal in a rhs — an explicit `ref x` arg (the
+  // caller writes `f(ref x)`) is the caller opting into the mutation, so a
+  // result bind there is fine. Used by process_assignment / find_ref_param_call.
+  {
+    std::string fname = !ts_node_is_null(name_node) ? std::string(trim(get_text(name_node))) : std::string(hoist_name);
+    if (!fname.empty() && !ts_node_is_null(fdef)) {
+      if (TSNode inp = child_by_field(fdef, "input"); !ts_node_is_null(inp)) {
+        for (uint32_t i = 0, nc = ts_node_child_count(inp); i < nc; ++i) {
+          const char* fn = ts_node_field_name_for_child(inp, i);
+          if (!fn || std::string_view(fn) != "mod" || trim(get_text(ts_node_child(inp, i))) != "ref") {
+            continue;
+          }
+          // The typed_identifier following the `ref` mod is the ref param; only a
+          // `self` receiver triggers the rhs ban.
+          for (uint32_t j = i + 1; j < nc; ++j) {
+            TSNode c = ts_node_child(inp, j);
+            if (std::string_view(ts_node_type(c)) != "typed_identifier") {
+              continue;
+            }
+            TSNode id = child_by_field(c, "identifier");
+            if (!ts_node_is_null(id) && trim(get_text(id)) == "self") {
+              ref_param_funcs_.insert(fname);
+            }
+            break;
+          }
+          break;
+        }
+      }
+    }
+  }
 
   std::string_view kind       = ts_node_is_null(func_type_node) ? std::string_view{"comb"} : trim(get_text(func_type_node));
   // A pipe lambda's depth attribute (`pipe[3]`, `pipe[2..=5]`,
@@ -5022,6 +5175,25 @@ void Prp2lnast::emit_type_spec(const Lnast_node& target, TSNode type_cast_node) 
       for (uint32_t i = 0; i < inner_count; i++) {
         TSNode inner = ts_node_named_child(ty, i);
         if (std::string_view(ts_node_type(inner)) == "tuple") {
+          // A tuple used as a TYPE must have NAMED fields (`name:type`, parsed as
+          // `typed_field`). A bare type entry like `(int, int, int)` has no field
+          // name and is malformed — point the user at an array `[N]T` (uniform
+          // elements) or a named field. (2f-arg_naming_tuple.)
+          for (uint32_t j = 0, jc = ts_node_named_child_count(inner); j < jc; ++j) {
+            TSNode item = ts_node_named_child(inner, j);
+            // A bare `identifier` item (`(int, int, int)`) is a TYPE with no field
+            // name. Named fields (`x:int` → typed_field, `x=nil` → assignment) are
+            // fine — only the unnamed bare-type form is malformed.
+            if (std::string_view(ts_node_type(item)) == "identifier") {
+              report_error(item,
+                           "unnamed-tuple-type-field",
+                           "type",
+                           std::format("a tuple-type field must be named (`name:T`): a bare `{}` has no field name",
+                                       trim(get_text(item))),
+                           "use an array type `[N]T` for N uniform elements, or name each field "
+                           "(`_:T` for an anonymous field)");
+            }
+          }
           auto bundle_ref = tuple_to_node(inner, false);
           auto aidx       = builder.add_child(Lnast_ntype::create_store());
           lnast->add_child(aidx, target);

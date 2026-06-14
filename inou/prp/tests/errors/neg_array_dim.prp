@@ -1,0 +1,11 @@
+/*
+:name: neg_array_dim
+:type: error
+:error: array index is negative
+:help: must be >= 0
+*/
+// A negative array dimension is not allowed: `[-4..<4]` would make the low slots
+// have negative indices, and any `bw_min < 0` in an index is a compile error.
+// The bitwidth pass rejects the negative index when the array is written.
+mut a:[-4..<4]i5 = nil
+a[-4] = 3

@@ -139,6 +139,9 @@ private:
   // the range view also covers folded constants and runtime amounts.
   void check_shift_amount(const Lnast_range& amt);
 
+  // An array index / dimension must be >= 0; a bw_min < 0 index is a compile error.
+  void check_index_nonneg(const Lnast_range& idx);
+
   // Common body for the value-op hooks.
   Vote stamp(std::string_view dst_name, Bundle& dst, Lnast_range r) {
     // REPLACE semantics: each stamp is a fresh derivation

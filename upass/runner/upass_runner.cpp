@@ -1976,6 +1976,72 @@ bool uPass_runner::try_inline_func_call() {
         bind(slot);
         continue;
       }
+      // Positional TUPLE actual → a flattened tuple-param GROUP. A tuple-typed
+      // param `p:(x,y)` is flattened to leaves `p.x`,`p.y`; a positional tuple
+      // actual binds by EXPANDING its fields into those leaves (the positional
+      // mirror of the named-arg expansion above). signature_matches has already
+      // rejected candidates whose only params are scalars, so this only fires for
+      // the genuine tuple-param candidate. (2f-arg_naming_tuple.)
+      if (a.node.is_ref()) {
+        auto bf              = try_bundle_fields(a.node.get_name());
+        bool is_tuple_actual = false;
+        if (bf && !bf->empty()) {  // genuine tuple (named field or >1 entry), not a 1-entry scalar
+          is_tuple_actual = bf->size() > 1;
+          for (const auto& [fld, fv] : *bf) {
+            (void)fv;
+            if (fld.find_first_not_of("0123456789") != std::string::npos) {
+              is_tuple_actual = true;
+              break;
+            }
+          }
+        }
+        if (is_tuple_actual) {
+          absl::flat_hash_map<std::string, std::vector<std::size_t>> groups;
+          for (std::size_t i = (has_self ? 1u : 0u); i < nbind; ++i) {
+            if (param_set[i]) {
+              continue;
+            }
+            const auto& pn = io.inputs[i].name;
+            if (auto dp = pn.rfind('.'); dp != std::string::npos) {
+              groups[pn.substr(0, dp)].push_back(i);
+            }
+          }
+          bool matched = false;
+          for (auto& [prefix, idxs] : groups) {
+            if (idxs.size() != bf->size()) {
+              continue;
+            }
+            auto leaf_idx = [&](std::string_view fld) -> std::size_t {
+              for (std::size_t idx : idxs) {
+                if (io.inputs[idx].name.substr(prefix.size() + 1) == fld) {
+                  return idx;
+                }
+              }
+              return nbind;
+            };
+            bool ok = true;
+            for (const auto& [fld, val] : *bf) {
+              if (val.is_invalid() || leaf_idx(fld) >= nbind) {
+                ok = false;
+                break;
+              }
+            }
+            if (!ok) {
+              continue;
+            }
+            for (const auto& [fld, val] : *bf) {
+              const auto idx = leaf_idx(fld);
+              param_val[idx] = Lnast_node::create_const(val.to_pyrope());
+              param_set[idx] = true;
+            }
+            matched = true;
+            break;
+          }
+          if (matched) {
+            continue;
+          }
+        }
+      }
       // Exception 2: a bare variable whose name matches an unset, non-self
       // parameter binds to THAT parameter — so reordered calls like `f(b, a)`
       // bind by name, not position.
@@ -3446,6 +3512,72 @@ bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<
         bind(slot);
         continue;
       }
+      // Tuple-shape discrimination (a `does`-style field check): a positional
+      // TUPLE actual binds ONLY to a tuple-shaped param — a group of flattened
+      // leaves sharing a dotted prefix (`p:(x,y)` → io entries `p.x`,`p.y`) whose
+      // field names it structurally covers. It must NEVER fall through to
+      // exception 1 and bind to a lone scalar param (`a:int`). So when the actual
+      // is a readable bundle, match-or-reject here.
+      if (a.node.is_ref()) {
+        auto af              = try_bundle_fields(a.node.get_name());
+        bool is_tuple_actual = false;
+        if (af && !af->empty()) {  // a genuine tuple (named field or >1 entry), NOT a 1-entry scalar
+          is_tuple_actual = af->size() > 1;
+          for (const auto& [fld, fv] : *af) {
+            (void)fv;
+            if (fld.find_first_not_of("0123456789") != std::string::npos) {
+              is_tuple_actual = true;
+              break;
+            }
+          }
+        }
+        if (is_tuple_actual) {
+          // group unset non-self params by their top-level (pre-dot) prefix
+          absl::flat_hash_map<std::string, std::vector<std::size_t>> groups;
+          for (std::size_t i = (has_self ? 1u : 0u); i < nbind; ++i) {
+            if (param_set[i]) {
+              continue;
+            }
+            const auto& pn = io.inputs[i].name;
+            if (auto dp = pn.rfind('.'); dp != std::string::npos) {
+              groups[pn.substr(0, dp)].push_back(i);
+            }
+          }
+          bool matched = false;
+          for (auto& [prefix, idxs] : groups) {
+            if (idxs.size() != af->size()) {
+              continue;
+            }
+            // every actual field name must be a leaf of this param group
+            bool cover = true;
+            for (const auto& [fld, _] : *af) {
+              bool found = false;
+              for (std::size_t idx : idxs) {
+                if (io.inputs[idx].name.substr(prefix.size() + 1) == fld) {
+                  found = true;
+                  break;
+                }
+              }
+              if (!found) {
+                cover = false;
+                break;
+              }
+            }
+            if (cover) {
+              for (std::size_t idx : idxs) {
+                param_val[idx] = a.node;
+                param_set[idx] = true;
+              }
+              matched = true;
+              break;
+            }
+          }
+          if (!matched) {
+            return false;  // a tuple actual can't bind a scalar param / no matching group
+          }
+          continue;
+        }
+      }
       if (a.node.is_ref()) {  // exception 2: bare var name matches a param
         const auto nidx = param_index(a.node.get_name());
         if (nidx < nparams && nidx >= (has_self ? 1u : 0u) && !param_set[nidx]) {
@@ -3501,14 +3633,19 @@ bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<
     if (pe.kind != Io_kind::none && ak != Io_kind::none && pe.kind != ak) {
       return false;  // kind mismatch (bool vs int vs string)
     }
-    if (pe.kind == Io_kind::integer && pe.bits > 0 && pe.bits < 62 && param_val[i].is_const()) {
+    if (pe.kind == Io_kind::integer && param_val[i].is_const()
+        && (pe.has_range || (pe.bits > 0 && pe.bits < 62))) {
       if (auto v = Dlop::from_pyrope(param_val[i].get_name());
           v && v->is_integer() && !v->has_unknowns() && v->get_bits() <= 62) {
         const int64_t val = v->to_just_i64();
-        const int64_t lo  = pe.is_signed ? -(int64_t{1} << (pe.bits - 1)) : int64_t{0};
-        const int64_t hi  = pe.is_signed ? (int64_t{1} << (pe.bits - 1)) - 1 : (int64_t{1} << pe.bits) - 1;
+        // Prefer the EXACT declared `int(min,max)` range (so adjacent windows
+        // like int(0,99) vs int(100,199) discriminate 100 correctly — a
+        // `does`-style range containment); fall back to the bits window.
+        const int64_t lo = pe.has_range ? pe.range_min : (pe.is_signed ? -(int64_t{1} << (pe.bits - 1)) : int64_t{0});
+        const int64_t hi = pe.has_range ? pe.range_max
+                                        : (pe.is_signed ? (int64_t{1} << (pe.bits - 1)) - 1 : (int64_t{1} << pe.bits) - 1);
         if (val < lo || val > hi) {
-          return false;  // literal does not fit this overload's declared width
+          return false;  // argument does not fit this overload's declared range
         }
       }
     }

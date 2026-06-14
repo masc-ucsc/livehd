@@ -1,0 +1,14 @@
+/*
+:name: ref_method_in_rhs
+:type: error
+:error: `ref` parameter mutates its receiver
+:help: call it as a statement
+*/
+// A method with a `ref` parameter (`ref self`) has a side effect on its receiver,
+// so its result cannot be consumed in a right-hand-side expression. Only the
+// in-place statement form `a1.set_x(...)` is allowed (the receiver is the result).
+// (A `mod`/`pipe` whole-rhs bind stays legal — those don't mutate the caller.)
+comb set_x(ref self, x) -> (self) { self.x = x }
+
+mut a1 = (mut x:u10 = 0)
+mut a3 = a1.set_x(x=20)   // ERROR: ref-self method used in a rhs expression

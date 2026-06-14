@@ -86,7 +86,11 @@ void uPass_attributes::process_func_call() {
     move_to_parent();
     return;
   }
-  const auto callee  = current_text();
+  // Read the callee RAW: inside an inlined comb body the inliner tag-prefixes
+  // the fname (`wrap` → `inlN_wrap`), so `current_text()` would never match and
+  // the narrowing would be silently skipped — exactly why `wrap`/`sat` in a
+  // method/init body folded to the un-narrowed value. (See inliner_func_name_raw_read.)
+  const auto callee  = lm->current_raw_text();
   const bool is_wrap = callee == "wrap";
   const bool is_sat  = callee == "sat" || callee == "saturate";
   if (!is_wrap && !is_sat) {

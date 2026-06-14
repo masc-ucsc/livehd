@@ -1,0 +1,10 @@
+/*
+:name: neg_array_index
+:type: error
+:error: array index is negative
+:help: must be >= 0
+*/
+// Indexing an array at a negative position is a compile error — an array index
+// must be >= 0 (the bitwidth pass rejects any index whose range minimum < 0).
+mut a:[8]i5 = nil
+a[-1] = 3

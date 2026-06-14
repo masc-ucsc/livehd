@@ -424,6 +424,16 @@ protected:
   // identifier lvalue.
   std::unordered_map<std::string, TSNode> const_rvalue_nodes_;
 
+  // Functions (comb/mod/pipe) declared with a `ref` parameter (e.g. `ref self`).
+  // Such a call mutates the caller, so using its RESULT in a right-hand-side
+  // expression (`mut a3 = a1.set_x(...)`) is illegal — only the in-place
+  // statement form is allowed. Recorded by name as definitions are lowered
+  // (top-down, so a defined-before-use call is caught). See find_ref_param_call /
+  // process_assignment (2f-ufcs).
+  std::unordered_set<std::string> ref_param_funcs_;
+  // First call (anywhere in `n`) to a `ref`-param function, else a null node.
+  TSNode find_ref_param_call(TSNode n) const;
+
   // Nesting depth of conditional / loop / nested-lambda bodies currently being
   // lowered. >0 means writes are not unconditional statement-level writes, so
   // they must not record or update const_int_bindings_ (a conditional re-bind

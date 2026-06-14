@@ -90,13 +90,24 @@ lhd pass partition --top &lt;mod&gt; --set pass.partition.debug_color=1  lg:dir 
   acceptance test.)</p>
 
 <h2>Subtasks — pending</h2>
-<p>Core task complete (see <em>landed</em>). Non-blocking follow-ups:</p>
+<p>Core <em>flat-level</em> task complete (see <em>landed</em>). Open items:</p>
 <ul class="subtasks">
-<li><strong>Hierarchical-input partition.</strong> The pass partitions one <em>flat</em> level: the
-  top's own colored nodes become per-region modules. A top that itself contains <code>Sub</code>
-  instances (multi-level input) is not handled yet — those would need their target defs copied into
-  the output library. The multi-level <em>flow</em> (color → partition → color&nbsp;keep_colored →
-  partition) is unaffected; only a single call's input being already-hierarchical is deferred.</li>
+<li><strong>Hierarchical-input partition. [PREREQUISITE for <a class="xref" href="2a-abc.html">2a-abc</a> —
+  reopened 2026-06-14.]</strong> Verified against code: the pass partitions only the single
+  <code>--top</code> graph — <code>collect()</code> iterates one <code>g_-&gt;forward_class()</code>
+  (<code>pass_partition.cpp:232</code>) and never descends the hierarchy or touches the library's other
+  defs. Worse, <code>is_partitionable</code> returns <strong>true</strong> for <code>Sub</code>
+  (<code>color_common.hpp:49</code>), so a top that already instantiates child modules has each
+  <code>Sub</code> recreated via <code>create_typed_node(*body, Sub)</code> with <strong>no
+  <code>set_subnode</code> and no child-def copied into <code>outlib_</code></strong>
+  (<code>pass_partition.cpp:407–411</code>) — a <strong>silently corrupt</strong> output library (dangling
+  Subs, no guard/error). No test covers it (<code>part_hier.v</code> is used by the color test only).
+  To support a hierarchical <code>lg:orig</code>: (1) partition <em>every</em> def in the library, not just
+  the top; (2) when a region contains a <code>Sub</code>, copy/recurse its target def into
+  <code>outlib_</code> and re-link the instance; (3) add a <code>part_hier</code>
+  partition+<code>lgcheck</code> test. The scripted multi-level <em>flow</em>
+  (color → partition → color&nbsp;keep_colored → partition) is a different thing and does not cover a
+  single already-hierarchical input.</li>
 <li><strong>cgen multi-fanout Sub-output decl.</strong> When a region's output pin feeds several
   other regions directly (Sub→Sub), <code>inou/cgen/cgen_verilog.cpp</code> emits the connecting
   wire's <code>reg</code> declaration twice (once from the producer's <code>out_pins()</code> handle,

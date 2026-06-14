@@ -33,6 +33,9 @@ struct Type_info {
   int32_t bits      = 0;
   bool    is_signed = true;
   Io_kind kind      = Io_kind::none;
+  bool    has_range = false;  // explicit `int(min,max)` bounds (both known, fit i64)
+  int64_t range_min = 0;
+  int64_t range_max = 0;
 };
 Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid) {
   Type_info ti;
@@ -76,6 +79,13 @@ Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid
         ti.bits = max_v->is_known_zero() ? 0 : static_cast<int32_t>(max_v->get_bits() - 1);
       } else {
         ti.bits = static_cast<int32_t>(std::max<int64_t>(max_v->get_bits(), min_v->get_bits()));
+      }
+      // Keep the EXACT declared bounds for range-precise overload dispatch (the
+      // `bits` window above only approximates `int(min,max)`).
+      if (max_v->is_just_i64() && min_v->is_just_i64()) {
+        ti.has_range = true;
+        ti.range_min = min_v->to_just_i64();
+        ti.range_max = max_v->to_just_i64();
       }
     }
   }
@@ -316,6 +326,9 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     }
     auto ti = type_info_from(lnast, type_nid);
     out.push_back({full, ti.bits, ti.is_signed, is_ref, is_vararg, ti.kind, smin, smax, std::move(type_name)});
+    out.back().has_range = ti.has_range;
+    out.back().range_min = ti.range_min;
+    out.back().range_max = ti.range_max;
   };
 
   if (!in_tup_nid.is_invalid()) {

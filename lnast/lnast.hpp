@@ -126,6 +126,13 @@ struct Lnast_io_entry {
   // untyped or annotated with a primitive type. The inliner's typed-self
   // `does`-check keys off inputs[0].type_name.
   std::string type_name  = {};
+  // Declared `int(min,max)` range when the param's type pins explicit bounds
+  // (`a:int(min=0,max=99)`). Drives overload dispatch: the candidate whose range
+  // CONTAINS the argument is selected (a `does`-style range containment), which a
+  // power-of-two `bits` window cannot express. has_range=false → use `bits`.
+  bool        has_range  = false;
+  int64_t     range_min  = 0;
+  int64_t     range_max  = 0;
 };
 struct Lnast_tree_io {
   std::vector<Lnast_io_entry> inputs;

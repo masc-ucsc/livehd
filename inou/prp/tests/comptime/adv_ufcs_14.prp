@@ -5,17 +5,18 @@
 :verifier_fail: 0
 */
 
-// Extension method added after a type declaration (doc 06-functions.md lines
-// 754-765): `t1.double = t1_do_double` attaches a new method that UFCS can call.
-// Doc asserts y.a == 6 after y.double().
+// A free `comb f(ref self, …)` is callable as a UFCS method on any value of the
+// matching shape: `y.t1_do_double()` lowers to `t1_do_double(ref y)`. (Attaching
+// the function to a NON-EXISTENT field — `t1.double = t1_do_double` — is a
+// compile error: a tuple has no `double` field and `t1` is const; UFCS on the
+// free name is the supported form.)
 const t1 = (mut a:u32 = 0)
 
 comb t1_do_double(ref self) { self.a *= 2 }
-t1.double = t1_do_double
 
 mut y:t1 = (a=3)
-y.double()
+y.t1_do_double()
 cassert(y.a == 6)
 
-y.double()
+y.t1_do_double()
 cassert(y.a == 12)

@@ -343,6 +343,32 @@ void uPass_bitwidth::check_shift_amount(const Lnast_range& amt) {
   });
 }
 
+void uPass_bitwidth::check_index_nonneg(const Lnast_range& idx) {
+  // An array index (and an array dimension like `[-4..<4]`, whose negative
+  // start makes every slot index negative) must be >= 0: any `bw_min < 0` in an
+  // index is a compile error. Mirrors check_shift_amount's template-skip.
+  if (idx.is_unbounded() || idx.min >= 0) {
+    return;
+  }
+  if (const auto& ln = lm->get_lnast(); ln && ln->is_template()) {
+    return;
+  }
+  livehd::diag::Span span;
+  if (const auto& ln = lm->get_lnast()) {
+    span = ln->span_of(lm->get_current_nid());
+  }
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{
+      .severity = livehd::diag::Severity::error,
+      .code     = "negative-index",
+      .category = "bitwidth",
+      .pass     = "upass.bitwidth",
+      .message  = std::format("array index is negative (range [{}, {}])", idx.min, idx.max),
+      .span     = std::move(span),
+      .hint     = "an array index must be >= 0 — negative indices and negative array dimensions (e.g. `[-4..<4]`) "
+                  "are not allowed",
+  });
+}
+
 // ── Process hooks (push form) ────────────────────────────────────────────────
 
 upass::Vote uPass_bitwidth::process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
@@ -363,6 +389,10 @@ upass::Vote uPass_bitwidth::process_store(std::string_view dst_name, Bundle& dst
   // ranges are a follow-up; an unbounded fallback is sound — the declared
   // envelope still bounds it).
   check_array_elem_fit(dst_name, range_of_operand(src.back()));
+  // Every selector (index) preceding the value must be a non-negative index.
+  for (std::size_t i = 0; i + 1 < src.size(); ++i) {
+    check_index_nonneg(range_of_operand(src[i]));
+  }
   const auto& sel = src.front();
   const bool  slot0
       = sel.name.empty() && sel.bundle && !sel.bundle->lone_trivial().is_invalid() && sel.bundle->lone_trivial().is_known_zero();
