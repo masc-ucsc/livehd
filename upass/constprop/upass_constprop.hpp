@@ -243,6 +243,14 @@ protected:
 
   void check_unsigned_positive_overflow(std::string_view lhs, const Dlop& value);
 
+  // A field/array-element write `x.a = v` / `b[i] = v` must not change the
+  // destination's kind (Pyrope: a variable's type cannot change). The field's
+  // established kind is its current comptime value's kind (string vs integer);
+  // a string-into-int or int-into-string write is a compile error. Generalizes
+  // the scalar assign-type-mismatch rule to field/array stores (review cat 3).
+  // No-op when either side's kind is not comptime-known.
+  void check_field_store_kind(std::string_view field_key, const Dlop& value);
+
   // Field paths read via tuple_get this walk (unused-unset warning).
   absl::flat_hash_set<std::string> field_reads_;
 

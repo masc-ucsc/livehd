@@ -293,6 +293,49 @@ void uPass_constprop::check_unsigned_positive_overflow(std::string_view lhs, con
   });
 }
 
+void uPass_constprop::check_field_store_kind(std::string_view field_key, const Dlop& value) {
+  // Value kind (string vs integer); skip nil/invalid/unknown values.
+  if (value.is_invalid() || value.is_nil()) {
+    return;
+  }
+  const bool v_str = value.is_string();
+  const bool v_int = value.is_integer();
+  if (v_str == v_int) {
+    return;  // neither, or ambiguous — can't decide
+  }
+  const auto dot = field_key.rfind('.');
+  if (dot == std::string_view::npos) {
+    return;  // scalar dst: assign-type-mismatch lives in the scalar path
+  }
+  const auto b = st().get_bundle(field_key.substr(0, dot));
+  if (!b) {
+    return;
+  }
+  const Dlop& cur = b->get_trivial(std::string(field_key.substr(dot + 1)));
+  if (cur.is_invalid() || cur.is_nil()) {
+    return;  // field not yet established — nothing to compare against
+  }
+  const bool cur_str = cur.is_string();
+  const bool cur_int = cur.is_integer();
+  if (cur_str == cur_int) {
+    return;  // field kind not comptime-known
+  }
+  if (v_str != cur_str) {
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "assign-type-mismatch",
+        .category = "type",
+        .pass     = "upass.constprop",
+        .message  = std::format("`{}` is {} but is written a {} value (a variable's type cannot change)",
+                                field_key,
+                                cur_str ? "a string" : "an integer",
+                                v_str ? "string" : "integer"),
+        .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+        .hint     = "keep the field's declared kind, or declare it with the intended type",
+    });
+  }
+}
+
 void uPass_constprop::set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts) {
   function_registry.clear();
   for (const auto& ln : lnasts) {
@@ -3908,6 +3951,7 @@ void uPass_constprop::process_tuple_set() {
 
     auto v = resolve_value();
     if (v) {
+      check_field_store_kind(tuple_var + "." + name, *v);  // field write must keep its kind (cat 3)
       // Update bundle in place; scalar values are propagated by tuple_get.
       bundle->set(name, *v);
     } else if (val_child.is_ref && st().has_bundle(val_child.text)) {
@@ -3929,7 +3973,9 @@ void uPass_constprop::process_tuple_set() {
 
   if (val_child.is_ref) {
     if (st().has_trivial(val_child.text)) {
-      store_trivial(key, st().get_trivial(val_child.text));
+      const auto rv = st().get_trivial(val_child.text);
+      check_field_store_kind(key, rv);  // field/array-element write must keep its kind (cat 3)
+      store_trivial(key, rv);
     } else if (st().has_bundle(val_child.text)) {
       auto b = st().get_bundle(val_child.text);
       if (b) {
@@ -3939,6 +3985,7 @@ void uPass_constprop::process_tuple_set() {
   } else {
     Dlop val = *Dlop::from_pyrope(val_child.text);
     if (!val.is_invalid()) {
+      check_field_store_kind(key, val);  // field/array-element write must keep its kind (cat 3)
       store_trivial(key, val);
     }
   }

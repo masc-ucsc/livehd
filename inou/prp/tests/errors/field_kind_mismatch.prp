@@ -1,0 +1,9 @@
+/*
+:name: field_kind_mismatch
+:type: error
+:error: (type cannot change|mismatch|string|integer)
+*/
+// A tuple field declared/initialized as an integer cannot be re-assigned a
+// string value — a variable's kind cannot change (review cat 3).
+mut x:(a:u3, c:u3) = (a=0, c=0)
+x.a = "hello"
