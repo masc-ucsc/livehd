@@ -1714,6 +1714,14 @@ upass::Vote uPass_constprop::process_tuple_concat(std::string_view dst_name, Bun
 
   auto acc = std::make_shared<Bundle>(dvar);
 
+  // 2f-splice — carry each operand's RUNTIME field slot-refs into the result.
+  // A spliced bundle's runtime fields (e.g. comb inputs `(...a, …)`) have no
+  // comptime value, so they ride tuple_slot_ref; concat must propagate them or
+  // a later `m.field` read dangles and the (comptime-only) tuple op leaks a
+  // tuple_concat into tolg. Named fields keep their key; positional fields are
+  // offset by the positionals already merged into acc before that operand.
+  std::map<std::string, std::string> result_slot_ref;
+
   // Wrap a single trivial as a 1-entry positional bundle so Bundle::concat
   // appends it as a slot instead of mishandling the bare key.
   auto wrap_trivial = [&](const Dlop& val) -> std::shared_ptr<Bundle> {
@@ -1752,6 +1760,11 @@ upass::Vote uPass_constprop::process_tuple_concat(std::string_view dst_name, Bun
   };
 
   do {
+    const int   base = static_cast<int>(acc->unnamed_top_count());  // positional offset for this operand
+    std::string opname;
+    if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
+      opname = std::string(current_text());
+    }
     auto op = resolve_operand();
     if (!op) {
       move_to_parent();
@@ -1777,6 +1790,17 @@ upass::Vote uPass_constprop::process_tuple_concat(std::string_view dst_name, Bun
       }
       move_to_parent();
       return classify_vote();  // error reported; leave dst unresolved
+    }
+    // Carry this operand's runtime slot-refs into the result (named keys as-is,
+    // positional keys offset by `base`). Read from the local-built map too so a
+    // self-splice `acc = (...acc, …)` sees acc's prior runtime fields.
+    if (!opname.empty()) {
+      if (const auto it = st().tuple_slot_ref.find(opname); it != st().tuple_slot_ref.end()) {
+        for (const auto& [slot, ref] : it->second) {
+          const bool positional = !slot.empty() && slot.find_first_not_of("0123456789") == std::string::npos;
+          result_slot_ref[positional ? std::to_string(base + std::stoi(slot)) : slot] = ref;
+        }
+      }
     }
   } while (move_to_sibling());
 
@@ -1809,8 +1833,13 @@ upass::Vote uPass_constprop::process_tuple_concat(std::string_view dst_name, Bun
 
   if (auto folded = try_stringify(); folded.has_value()) {
     store_trivial(dvar, *folded);
+    st().tuple_slot_ref.erase(dvar);
   } else {
     st().set(dvar, acc);
+    st().tuple_slot_ref.erase(dvar);
+    if (!result_slot_ref.empty()) {
+      st().tuple_slot_ref[dvar] = std::move(result_slot_ref);
+    }
   }
   return classify_vote();
 }
