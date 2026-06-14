@@ -548,16 +548,7 @@ std::optional<upass::uPass::Field_decl_type> uPass_runner::try_field_type(std::s
     return std::nullopt;
   }
   upass::uPass::Field_decl_type ft;
-  switch (f->kind) {
-    case upass::decl_facts::Num::unsigned_int:
-    case upass::decl_facts::Num::signed_int  : ft.kind = Io_kind::integer; break;
-    case upass::decl_facts::Num::boolean     : ft.kind = Io_kind::boolean; break;
-    case upass::decl_facts::Num::string      : ft.kind = Io_kind::string; break;
-    case upass::decl_facts::Num::none        : ft.kind = Io_kind::none; break;
-  }
-  if (ft.kind == Io_kind::none && (f->range_max || f->range_min)) {
-    ft.kind = Io_kind::integer;
-  }
+  ft.kind      = upass::decl_facts::io_kind_from_num(f->kind, f->range_max || f->range_min);
   ft.range_max = f->range_max;
   ft.range_min = f->range_min;
   return ft;
@@ -567,23 +558,26 @@ Io_kind uPass_runner::try_scalar_kind(std::string_view name) {
   // The inferred kind lattice off the binding (ex typecheck's
   // provide_scalar_kind): multi-shape → none (a tuple), else the producer-
   // stamped value kind, else the "0" Entry's declared kind.
-  const auto b = symbol_table_.get_bundle(name);
-  if (!b) {
-    return Io_kind::none;
+  if (const auto b = symbol_table_.get_bundle(name); b && !(b->has_named_top() || b->unnamed_top_count() > 1)) {
+    upass::Kind k = b->get_value_kind();
+    if (k == upass::Kind::unknown) {
+      k = b->get_entry("0").kind;
+    }
+    switch (k) {
+      case upass::Kind::integer: return Io_kind::integer;
+      case upass::Kind::boolean: return Io_kind::boolean;
+      case upass::Kind::string : return Io_kind::string;
+      default                  : break;
+    }
   }
-  if (b->has_named_top() || b->unnamed_top_count() > 1) {
-    return Io_kind::none;
+  // Bundle had no concrete kind: fall back to the declared type_spec, same as
+  // constprop's scalar_type_query_of — a `:bool`/`:string`/typed var that has
+  // not been written yet still has a known scalar kind (review cat 4 #5).
+  if (const auto f = upass::decl_facts::lookup(symbol_table_, lm ? lm->get_lnast().get() : nullptr, name);
+      f && f->has_type_spec) {
+    return upass::decl_facts::io_kind_from_num(f->kind, f->range_max || f->range_min);
   }
-  upass::Kind k = b->get_value_kind();
-  if (k == upass::Kind::unknown) {
-    k = b->get_entry("0").kind;
-  }
-  switch (k) {
-    case upass::Kind::integer: return Io_kind::integer;
-    case upass::Kind::boolean: return Io_kind::boolean;
-    case upass::Kind::string : return Io_kind::string;
-    default                  : return Io_kind::none;
-  }
+  return Io_kind::none;
 }
 
 Io_kind uPass_runner::actual_node_kind(const Lnast_node& node) {

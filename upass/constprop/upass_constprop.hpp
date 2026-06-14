@@ -265,16 +265,7 @@ protected:
     }
     if (const auto f = upass::decl_facts::lookup(st(), lm ? lm->get_lnast().get() : nullptr, name); f && f->has_type_spec) {
       if (q.kind == Io_kind::none) {
-        switch (f->kind) {
-          case upass::decl_facts::Num::unsigned_int:
-          case upass::decl_facts::Num::signed_int  : q.kind = Io_kind::integer; break;
-          case upass::decl_facts::Num::boolean     : q.kind = Io_kind::boolean; break;
-          case upass::decl_facts::Num::string      : q.kind = Io_kind::string; break;
-          case upass::decl_facts::Num::none        : break;
-        }
-        if (q.kind == Io_kind::none && (f->range_max || f->range_min)) {
-          q.kind = Io_kind::integer;
-        }
+        q.kind = upass::decl_facts::io_kind_from_num(f->kind, f->range_max || f->range_min);
       }
       q.range_max = f->range_max;
       q.range_min = f->range_min;

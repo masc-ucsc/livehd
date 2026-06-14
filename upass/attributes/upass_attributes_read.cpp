@@ -198,6 +198,12 @@ std::optional<Dlop> uPass_attributes::derive_max(std::string_view base) const {
     if (ti->range_max) {
       return *ti->range_max;
     }
+    // A prim_type_int with only `min` pinned (e.g. `int(min=3)`) leaves max
+    // unbounded ⇒ nil, even though a legacy uN/sN kind may also be recorded.
+    // Symmetric with derive_min's half-open guard below.
+    if (ti->range_min && !ti->range_max) {
+      return std::nullopt;
+    }
     if (ti->kind == Numeric_kind::unsigned_int && ti->bits != 0) {
       return max_unsigned(ti->bits);
     }

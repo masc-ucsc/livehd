@@ -27,6 +27,21 @@ namespace upass::decl_facts {
 
 enum class Num : uint8_t { none, unsigned_int, signed_int, boolean, string };
 
+// Canonical decl_facts::Num -> Io_kind projection. Several passes mapped this by
+// hand (runner try_field_type, constprop scalar_type_query_of, …); share one so
+// they agree. `range`-only facts (no explicit Num) are integers — pass
+// has_range to fold that in.
+inline Io_kind io_kind_from_num(Num n, bool has_range = false) {
+  switch (n) {
+    case Num::unsigned_int:
+    case Num::signed_int  : return Io_kind::integer;
+    case Num::boolean     : return Io_kind::boolean;
+    case Num::string      : return Io_kind::string;
+    case Num::none        : return has_range ? Io_kind::integer : Io_kind::none;
+  }
+  return Io_kind::none;
+}
+
 struct Facts {
   upass::Mode          mode{upass::Mode::unknown};
   Num                  kind{Num::none};
