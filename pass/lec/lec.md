@@ -160,6 +160,20 @@ ports' addresses always equal?" → merge; "guaranteed never equal?" → no-forw
 license). Optional: tiny memories expanded to flops.
 
 ### M5 — Hierarchical congruence + CEGAR
+**Landed (combinational inline flattening):** a `Sub` instance whose def is
+*combinational* is flattened inline by the encoder — the def is encoded with its
+inputs bound to the instance's input Vals and its outputs wired onto the
+instance's output pins (`Encoder::set_sub_lib`, a name-hash `Gid -> def graph`
+map). The map is supplied by `lhd lec --lib lg:DIR` (repeatable); the prime use
+is an ABC standard-cell netlist whose blackbox cell `Sub`s resolve to the
+`pass.liberty gensim` cell models. Such a mapped netlist also drives its
+multi-bit IO boundary with `Get_mask`/`Set_mask`, both now fully encoded
+(contiguous-mask bit-select / bit-insert); its unsigned nets carry no spare sign
+bit, so under `--lib` the encoder uses the **raw** `bits_of` width there instead
+of the front-end magnitude+1 `real_width`. Unresolved / stateful / too-deeply
+nested defs keep the sound `Sub -> Unknown`. The assume-guarantee skeleton below
+is the remaining (sequential / black-box) work.
+
 Assume-guarantee: prove a changed leaf def equivalent **in isolation with free
 inputs** (free-input isolation is conservative → always sound; a
 reachable-input-only proof is *unsound* for congruence), then black-box it in

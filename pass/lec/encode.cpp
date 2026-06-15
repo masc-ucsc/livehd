@@ -448,10 +448,76 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
       continue;
     }
 
-    // Still out of scope: Fflop (no reset model yet), latches, and sub-instances
-    // (M5 = hierarchical congruence).
-    if (op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Sub) {
-      return fail("sequential/structural op '" + std::string(Ntype::get_name(op)) + "' not supported yet (M2 = Flop only)");
+    // Still out of scope: Fflop (no reset model yet), latches.
+    if (op == Ntype_op::Fflop || op == Ntype_op::Latch) {
+      return fail("sequential op '" + std::string(Ntype::get_name(op)) + "' not supported yet (M2 = Flop only)");
+    }
+    // Sub (instance) flattening (M5): encode the def inline with its inputs
+    // bound to this instance's input Vals, and wire its outputs onto this
+    // instance's output pins. Combinational defs only (e.g. ABC standard cells);
+    // anything unresolved or stateful keeps the sound `Sub -> fail`.
+    if (op == Ntype_op::Sub) {
+      if (sub_lib_ == nullptr) {
+        return fail("Sub instance '" + gu::debug_name(node) + "' but no resolution library (need --lib lg:DIR of the defs)");
+      }
+      auto git = sub_lib_->find(node.get_subnode_gid());
+      if (git == sub_lib_->end() || git->second == nullptr) {
+        return fail("Sub instance '" + gu::debug_name(node) + "' def (gid) is not in the resolution library");
+      }
+      if (sub_depth_ > 32) {
+        return fail("Sub flattening nested too deep (>32)");
+      }
+      hhds::Graph* def = git->second;
+      for (auto dn : def->forward_class()) {  // combinational defs only (sound)
+        auto dop = gu::type_op_of(dn);
+        if (dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Latch || dop == Ntype_op::Memory) {
+          return fail("Sub def '" + std::string(def->get_name()) + "' is sequential (flattening is combinational-only)");
+        }
+      }
+      // Port-ids may differ between this instance's blackbox IO and the def, so
+      // bind by NAME: the instance's subnode IO maps its pin port-ids to the
+      // (Liberty) names the def's IO also uses.
+      auto                                            sub_io = node.get_subnode_io();
+      absl::flat_hash_map<hhds::Port_id, std::string> in_name;
+      absl::flat_hash_map<hhds::Port_id, std::string> out_name;
+      for (const auto& d : sub_io->get_input_pin_decls()) {
+        in_name[sub_io->get_input_port_id(d.name)] = d.name;
+      }
+      for (const auto& d : sub_io->get_output_pin_decls()) {
+        out_name[sub_io->get_output_port_id(d.name)] = d.name;
+      }
+      absl::flat_hash_map<std::string, Val> bound;
+      for (const auto& e : node.inp_edges()) {
+        auto nit = in_name.find(e.sink.get_port_id());
+        if (nit == in_name.end()) {
+          return fail("Sub instance '" + gu::debug_name(node) + "' input pin has no IO name");
+        }
+        bool sok = true;
+        Val  v   = driver_val(e.driver, sok);
+        if (!sok) {
+          return fail("Sub instance '" + gu::debug_name(node) + "' input has no encodable driver");
+        }
+        bound[nit->second] = v;
+      }
+      ++sub_depth_;
+      Encoded sub_out = encode(def, &bound, std::format("{}{}.", prefix, static_cast<uint64_t>(node.get_debug_nid())));
+      --sub_depth_;
+      if (!sub_out.ok) {
+        return fail("Sub def '" + std::string(def->get_name()) + "' encode failed: " + sub_out.error);
+      }
+      for (const auto& e : node.out_edges()) {
+        auto dp  = e.driver;
+        auto nit = out_name.find(dp.get_port_id());
+        if (nit == out_name.end()) {
+          return fail("Sub instance '" + gu::debug_name(node) + "' output pin has no IO name");
+        }
+        auto oit = sub_out.outputs.find(nit->second);
+        if (oit == sub_out.outputs.end()) {
+          return fail("Sub def '" + std::string(def->get_name()) + "' has no output '" + nit->second + "'");
+        }
+        pin2val[dp.get_class_index()] = oit->second;
+      }
+      continue;
     }
 
     auto dpin = node.get_driver_pin(0);
@@ -459,6 +525,13 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     if (W == 0) {
       // Comparisons/reductions are 1-bit; default unknown width to that.
       W = 1;
+    }
+    // An ABC standard-cell netlist's Set_mask output concat uses RAW net widths
+    // (its unsigned nets carry no spare sign bit), so the front-end magnitude+1
+    // real_width would truncate the running concatenation a bit at a time. Use
+    // the raw bits there so the stored value keeps full width.
+    if (sub_lib_ != nullptr && op == Ntype_op::Set_mask) {
+      W = std::max(1, gu::bits_of(dpin));
     }
     bool out_signed = !gu::is_unsign(dpin);
 
@@ -668,17 +741,16 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
         if (rb < 0 || re <= rb) {
           return fail("Get_mask non-contiguous mask not supported (M1)");
         }
-        int hi = std::min(re, a.width) - 1;
-        if (hi < rb) {
-          return fail("Get_mask range outside operand (M1)");
-        }
-        Term slice = bv_extract(tm_, a.term, hi, rb);
-        Val  sv{slice, hi - rb + 1, false};
+        // Bits at/above the operand width are its sign/zero extension (matching
+        // the bit-blast's per-bit extension, lec.md bit-width trap), so widen
+        // `a` to cover [rb,re) rather than failing on an out-of-range slice.
+        Term aw    = re > a.width ? fit(a, re) : a.term;
+        Term slice = bv_extract(tm_, aw, re - 1, rb);
+        Val  sv{slice, re - rb, false};
         result = fit(sv, W);
         break;
       }
       case Ntype_op::Set_mask: {
-        // Support only the trivial mask==0 passthrough in M1.
         hhds::Pin_class mask_pin;
         for (const auto& e : node.inp_edges()) {
           if (e.sink.get_port_id() == Ntype::get_sink_pid(op, "mask")) {
@@ -686,14 +758,56 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
             break;
           }
         }
-        if (!mask_pin.is_invalid() && gu::is_const_pin(mask_pin)) {
-          Dlop mask = gu::hydrate_const(mask_pin);
-          if (mask.is_known_zero() && !pid(0).empty()) {
-            result = fit(pid(0)[0], W);
-            break;
-          }
+        if (mask_pin.is_invalid() || !gu::is_const_pin(mask_pin)) {
+          return fail("Set_mask with non-constant mask not supported (M1)");
         }
-        return fail("Set_mask (non-trivial) not supported (M1)");
+        if (pid(0).empty()) {
+          return fail("Set_mask missing a");
+        }
+        const Val& a    = pid(0)[0];
+        Dlop       mask = gu::hydrate_const(mask_pin);
+        if (mask.is_known_zero()) {
+          result = fit(a, W);  // nothing replaced
+          break;
+        }
+        // Full contiguous-mask bit-insert (the bit-blast's output concat): out[i]
+        // = (rb<=i<re) ? value[i-rb] : a[i]. Enabled when a resolution library is
+        // present (an ABC standard-cell netlist), where the result width is the
+        // RAW net width — its unsigned nets carry no spare sign bit, so use
+        // bits_of(dpin), not the front-end magnitude+1 real_width.
+        if (sub_lib_ == nullptr) {
+          return fail("Set_mask (non-trivial) not supported (M1)");
+        }
+        int  Wm    = std::max(1, gu::bits_of(dpin));
+        auto range = mask.get_mask_range();
+        int  rb = range.first, re = range.second;
+        if (rb < 0 || re <= rb) {
+          return fail("Set_mask non-contiguous mask not supported (M1)");
+        }
+        if (rb >= Wm) {
+          result = fit(a, Wm);  // replaced region entirely above the result
+          break;
+        }
+        auto& vvec = pid(Ntype::get_sink_pid(op, "value"));
+        if (vvec.empty()) {
+          return fail("Set_mask missing value");
+        }
+        int               re_c = std::min(re, Wm);
+        Term              aw   = fit(a, Wm);
+        std::vector<Term> parts;  // MSB first
+        if (re_c < Wm) {
+          parts.push_back(bv_extract(tm_, aw, Wm - 1, re_c));  // unchanged high bits of a
+        }
+        parts.push_back(fit(vvec[0], re_c - rb));  // value's low bits fill the masked window
+        if (rb > 0) {
+          parts.push_back(bv_extract(tm_, aw, rb - 1, 0));  // unchanged low bits of a
+        }
+        Term r = parts.front();
+        for (size_t k = 1; k < parts.size(); ++k) {
+          r = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {r, parts[k]});
+        }
+        result = fit(Val{r, Wm, false}, W);  // result pin's declared width
+        break;
       }
       case Ntype_op::AttrSet: {
         // pass-through of the parent driver (pid0).

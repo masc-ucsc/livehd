@@ -317,6 +317,8 @@ Options parse_args(int argc, char** argv) {
       opts.ins.emplace_back(parse_typed(a, need_value(a, i, argc, argv), false));
     } else if (a == "--in-dir") {
       opts.in_dirs.emplace_back(parse_typed(a, need_value(a, i, argc, argv), false));
+    } else if (a == "--lib") {
+      opts.libs.emplace_back(parse_typed(a, need_value(a, i, argc, argv), false));
     } else if (a == "--top") {
       opts.top = need_value(a, i, argc, argv);
     } else if (a == "--reader") {

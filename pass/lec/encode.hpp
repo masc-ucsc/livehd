@@ -88,6 +88,17 @@ class Encoder {
 public:
   explicit Encoder(cvc5::TermManager& tm) : tm_(tm) {}
 
+  // Resolution library for Sub (instance) flattening (M5): maps a sub-graph's
+  // name-hash Gid to its definition graph. When set, a `Sub` node whose
+  // `get_subnode_gid()` resolves to a *combinational* def is flattened inline
+  // (the def is encoded with its inputs bound to the instance's input Vals and
+  // its outputs wired to the instance's output pins). Unset, or a def that is
+  // missing / contains state / nests too deep, keeps the sound `Sub -> fail`.
+  // Typically the gensim cell-model library behind an ABC standard-cell netlist;
+  // it also flips Get_mask/Set_mask to raw bit-vector widths (a mapped netlist's
+  // unsigned nets carry no spare sign bit, unlike front-end RTL).
+  void set_sub_lib(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* lib) { sub_lib_ = lib; }
+
   // Encode the combinational logic of `g`.
   //
   // `shared_inputs` (optional): a map from input-port name to an already-built
@@ -113,7 +124,9 @@ private:
   // Bit-vector sort of `width` bits (clamped to >= 1).
   cvc5::Sort bv(int width);
 
-  cvc5::TermManager& tm_;
+  cvc5::TermManager&                                  tm_;
+  const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib_   = nullptr;
+  int                                                 sub_depth_ = 0;  // Sub flattening recursion guard
 };
 
 }  // namespace livehd::lec

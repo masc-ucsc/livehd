@@ -14,7 +14,8 @@
 
 namespace livehd::lec {
 
-Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts) {
+Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
+                         const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
   Query_result res;
   res.detail = "solver=" + opts.solver + " (cvc5 direct, flop-cut inductive miter)";
 
@@ -73,6 +74,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   if (opts.engine == "bmc") {
     const int N = opts.bound > 0 ? opts.bound : 20;
     Encoder   enc(tm);
+    enc.set_sub_lib(sub_lib);
 
     struct In {
       int  w;
@@ -448,6 +450,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   absl::flat_hash_map<std::string, cvc5::Term> shared_mems = build_shared_mems("s_");
 
   Encoder enc(tm);
+  enc.set_sub_lib(sub_lib);
   Encoded re = enc.encode(ref, &shared, "", &shared_mems);
   if (!re.ok) {
     res.verdict  = Verdict::Unknown;

@@ -2368,8 +2368,33 @@ void lec_command(Options& opts, Result& res) {
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
   o.reset        = label("reset", "");
 
+  // --lib lg:DIR libraries resolve Sub instances during encoding (e.g. the
+  // gensim cell models behind an ABC standard-cell netlist), so lec can flatten
+  // a hierarchical/mapped impl. Gids are name-hash stable, so an instance's
+  // subnode gid matches its def's gid across libraries.
+  absl::flat_hash_map<hhds::Gid, hhds::Graph*> sub_lib;
+  std::vector<std::shared_ptr<hhds::Graph>>    sub_lib_keep;
+  for (const auto& lp : opts.libs) {
+    if (lp.kind != "lg") {
+      throw Lhd_error{"usage", std::format("lec --lib expects lg:DIR, got '{}:'", lp.kind), "the cell-model library, e.g. --lib lg:models"};
+    }
+    if (!fs::is_directory(lp.path)) {
+      throw Lhd_error{"missing_file", std::format("lec --lib not found: {}", lp.path), ""};
+    }
+    auto& lib = livehd::Hhds_graph_library::instance(lp.path);
+    for (const hhds::Gid id : lib.all_gids()) {
+      auto g = lib.get_graph(id);
+      if (!g) {
+        continue;
+      }
+      sub_lib_keep.push_back(g);
+      sub_lib[id] = g.get();  // later --lib wins on a gid clash
+    }
+  }
+  const auto* sub_lib_ptr = sub_lib.empty() ? nullptr : &sub_lib;
+
   res.recipe_steps.emplace_back(std::format("pass.lec engine:{} solver:{} phase:{}", o.engine, o.solver, o.phase));
-  auto r         = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), o);
+  auto r         = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), o, sub_lib_ptr);
   bool lec_equiv = r.verdict == livehd::lec::Verdict::Proven;
   bool lec_known = r.verdict != livehd::lec::Verdict::Unknown;
 

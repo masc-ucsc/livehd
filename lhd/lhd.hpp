@@ -46,6 +46,10 @@ struct Options {
   std::vector<Typed_path> emit_dirs;
   std::vector<Typed_path> ins;
   std::vector<Typed_path> in_dirs;
+  // --lib KIND:DIR (repeatable): extra graph libraries used only to resolve
+  // references, never elaborated as inputs. lec uses them to flatten Sub
+  // instances (e.g. the gensim cell models behind an ABC standard-cell netlist).
+  std::vector<Typed_path> libs;
 
   std::string top;
   // elaborate verilog: yosys-verilog|yosys-slang (yosys -> LGraphs) or

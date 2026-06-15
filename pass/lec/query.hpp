@@ -3,6 +3,7 @@
 
 #include <string>
 
+#include "absl/container/flat_hash_map.h"
 #include "hhds/graph.hpp"
 
 namespace livehd::lec {
@@ -52,6 +53,12 @@ struct Lec_options {
 // Prove the (combinational) outputs of `ref` and `impl` equal for all inputs,
 // matching primary inputs by name. Returns Proven / Refuted(+witness) /
 // Unknown(+detail).
-Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts = {});
+//
+// `sub_lib` (optional): name-hash Gid -> definition graph, used to flatten
+// `Sub` instances inline during encoding (M5). Needed when a side is a
+// hierarchical / standard-cell netlist (e.g. an ABC mapping whose cells resolve
+// to gensim models); nullptr keeps the sound Sub -> Unknown.
+Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts = {},
+                         const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib = nullptr);
 
 }  // namespace livehd::lec
