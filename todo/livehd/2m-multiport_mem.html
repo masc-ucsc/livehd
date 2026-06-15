@@ -21,12 +21,10 @@
   <code>lgcheck</code>-pass against <code>--reader yosys-slang</code>.</p>
 
 <h2>Depends on</h2>
-<ul>
-<li><a class="xref" href="../verilog/2s.html">2s</a> — the direct <code>--reader slang</code>
-  memory support (chunked <code>wensize</code> writes + module-scope loop-var unroll) is what
-  lets these SRAM models reach <code>tolg</code>/<code>cgen</code> at all; this task finishes the
-  codegen side.</li>
-</ul>
+<p>None — the <code>2s</code> prerequisite landed (the direct <code>--reader slang</code> memory
+  support — chunked <code>wensize</code> writes + module-scope loop-var unroll — that lets these
+  SRAM models reach <code>tolg</code>/<code>cgen</code> at all). This task finishes the codegen
+  side.</p>
 
 <h2>The failing case</h2>
 <p><code>data_mem_8x4</code> (<code>../xs/build/build_opt/rtl/data_mem_8x4.sv</code>): two read
