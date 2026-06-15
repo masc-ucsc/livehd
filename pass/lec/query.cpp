@@ -15,7 +15,7 @@ namespace livehd::lec {
 
 Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts) {
   Query_result res;
-  res.detail = "solver=" + opts.solver + " (cvc5 direct, combinational miter)";
+  res.detail = "solver=" + opts.solver + " (cvc5 direct, flop-cut inductive miter)";
 
   if (opts.solver != "cvc5") {
     res.verdict  = Verdict::Unknown;
@@ -52,6 +52,35 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   };
   add_inputs(ref);
   add_inputs(impl);
+
+  // Shared current-state symbols: one symbolic BV per corresponding flop, keyed
+  // by its cross-design state key (source span preferred). Both encodings reuse
+  // these, so the miter assumes equal current state and proves equal next state
+  // + outputs (the M2 register-correspondence inductive step).
+  auto add_flops = [&](hhds::Graph* g) {
+    for (auto node : g->forward_class()) {
+      if (graph_util::type_op_of(node) != Ntype_op::Flop) {
+        continue;
+      }
+      auto q = node.get_driver_pin(0);
+      if (q.is_invalid()) {
+        continue;
+      }
+      std::string key = flop_state_key(*g, node);
+      if (shared.count(key)) {
+        continue;
+      }
+      int w = real_width(q);
+      if (w == 0) {
+        w = 1;
+      }
+      bool       sgn = !graph_util::is_unsign(q);
+      cvc5::Term t   = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), key);
+      shared[key]    = Val{t, w, sgn};
+    }
+  };
+  add_flops(ref);
+  add_flops(impl);
 
   Encoder enc(tm);
   Encoded re = enc.encode(ref, &shared);

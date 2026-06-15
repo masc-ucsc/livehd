@@ -4,11 +4,14 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <format>
 #include <string>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "cell.hpp"
+#include "hhds/attrs/srcid.hpp"
+#include "hhds/source_locator.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
 
@@ -18,6 +21,29 @@ using cvc5::Kind;
 using cvc5::Sort;
 using cvc5::Term;
 namespace gu = livehd::graph_util;
+
+// Stable 1:1 cut-point key for a state cell (Flop), used to put corresponding
+// registers of the two designs in correspondence. The SOURCE SPAN (srcid ->
+// Source_locator) is preferred: an RTL register keeps the same source location
+// across variable renames AND across front-ends (native slang and yosys-slang
+// both anchor the cell to the same declaration), unlike the post-synthesis pin
+// name which each reader mangles differently. Falls back to the pin name, then
+// the node id (an unmatchable per-design fallback -> a sound Unknown, never a
+// false "equal").
+std::string flop_state_key(const hhds::Graph& g, const hhds::Node_class& node) {
+  auto ref = node.attr(hhds::attrs::srcid);
+  if (ref.has()) {
+    auto span = g.source_locator().resolve_span(ref.get());
+    if (!span.file.empty()) {
+      return std::format("\x01s:{}-{}@{}", span.start_byte.value_or(0), span.end_byte.value_or(0), span.file);
+    }
+  }
+  auto nm = gu::pin_name_of(node.get_driver_pin(0));
+  if (!nm.empty()) {
+    return std::string("\x01n:") + std::string(nm);
+  }
+  return std::string("\x01f:") + std::to_string(static_cast<uint64_t>(node.get_debug_nid()));
+}
 
 namespace {
 
@@ -99,8 +125,21 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     if (c.is_just_i64()) {
       t = bv_const(tm_, width, static_cast<uint64_t>(c.to_just_i64()));
     } else {
-      // Wide constant: feed the decimal string (handles arbitrary precision).
-      t = tm_.mkBitVector(static_cast<uint32_t>(width), c.to_decimal_string(), 10);
+      // Wide / partially-unknown constant: build from the MSB-first binary string
+      // (get_bits() chars, no prefix). Unknown (X / don't-care) bits are masked
+      // to 0 — consistent across two designs reading the same source constant.
+      // (Refine to a shared free symbol if X-sensitive equivalence is needed.)
+      auto bin = c.to_binary();
+      for (auto& ch : bin) {
+        if (ch != '0' && ch != '1') {
+          ch = '0';
+        }
+      }
+      if (bin.empty()) {
+        bin = "0";
+      }
+      width = static_cast<int>(bin.size());
+      t     = tm_.mkBitVector(static_cast<uint32_t>(width), bin, 2);
     }
     return Val{t, width, sgn};
   };
@@ -129,7 +168,12 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     auto dpin = g->get_input_pin(d.name);
     int  w    = real_width_io(dpin, *gio, d.name);
     if (w == 0) {
-      return fail("input '" + d.name + "' has unknown bit width");
+      // A width-less input is a scalar control signal — a clock (abstracted out
+      // of the relational encoding via the flop-state cut) or a 1-bit reset /
+      // enable. Both designs read the same RTL, so a missing bits attr is
+      // consistent across sides; default to 1 rather than refusing to encode.
+      // (A genuinely multi-bit input always carries a bits attr from tolg.)
+      w = 1;
     }
     bool sgn = dpin.is_invalid() ? !gio->is_unsign(d.name) : !gu::is_unsign(dpin);
     Val  v;
@@ -152,6 +196,46 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     }
   }
 
+  // ---- M2 flop cut-points (register-correspondence SEC). Each Flop's Q (driver
+  // pin 0) is a CURRENT-STATE symbol, shared across the two designs by its
+  // preserved name (so a 1:1 latch map falls out of name equality). Seeded here,
+  // before the combinational loop, so downstream comb reads resolve it like an
+  // input; the matching NEXT-STATE value is emitted as a synthetic output after
+  // the loop, and the miter then compares next-states alongside primary outputs.
+  std::vector<hhds::Node_class> flops;
+  for (auto node : g->forward_class()) {
+    auto op = gu::type_op_of(node);
+    if (op != Ntype_op::Flop) {
+      continue;
+    }
+    auto qpin = node.get_driver_pin(0);
+    if (qpin.is_invalid()) {
+      continue;
+    }
+    int w = real_width(qpin);
+    if (w == 0) {
+      w = 1;
+    }
+    bool        sgn = !gu::is_unsign(qpin);
+    std::string nm  = flop_state_key(*g, node);
+    Val         v;
+    if (shared_inputs != nullptr) {
+      if (auto it = shared_inputs->find(nm); it != shared_inputs->end()) {
+        v = it->second;
+        if (v.width != w) {
+          v.term  = fit(v, w);
+          v.width = w;
+        }
+      }
+    }
+    if (v.term.isNull()) {
+      v = Val{tm_.mkConst(bv(w), std::string(prefix) + nm), w, sgn};
+    }
+    pin2val[qpin.get_class_index()] = v;
+    out.inputs[nm]                  = v;
+    flops.push_back(node);
+  }
+
   // ---- Combinational nodes in topological order.
   for (auto node : g->forward_class()) {
     auto op = gu::type_op_of(node);
@@ -164,9 +248,14 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     if (op == Ntype_op::Nconst) {
       continue;
     }
-    // Sequential / structural elements: out of scope for the M1 comb slice.
-    if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Memory || op == Ntype_op::Sub) {
-      return fail("sequential/structural op '" + std::string(Ntype::get_name(op)) + "' not supported (M1 is combinational-only)");
+    // Flops were cut above (Q seeded; next-state emitted below) — skip the cell.
+    if (op == Ntype_op::Flop) {
+      continue;
+    }
+    // Still out of scope: Fflop (no reset model yet), latches, memories (M4 =
+    // SMT arrays), and sub-instances (M5 = hierarchical congruence).
+    if (op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Memory || op == Ntype_op::Sub) {
+      return fail("sequential/structural op '" + std::string(Ntype::get_name(op)) + "' not supported yet (M2 = Flop only)");
     }
 
     auto dpin = node.get_driver_pin(0);
@@ -452,6 +541,74 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
       return fail("op '" + std::string(Ntype::get_name(op)) + "' produced no term");
     }
     pin2val[dpin.get_class_index()] = Val{result, W, out_signed};
+  }
+
+  // ---- M2 next-state functions. For each cut flop emit the value it latches
+  // next cycle as a synthetic output keyed "<nxt><statekey>", so the miter
+  // compares the two designs' next-state for every corresponding register (the
+  // inductive step: equal current state + equal inputs => equal next state &
+  // outputs). N = reset_active ? initial : (enable ? din : Q). reset_pin is a
+  // shared primary input, so the same query covers the reset/base case.
+  for (const auto& node : flops) {
+    auto qpin = node.get_driver_pin(0);
+    int  w    = real_width(qpin);
+    if (w == 0) {
+      w = 1;
+    }
+    bool       sgn = !gu::is_unsign(qpin);
+    const Val& qv  = pin2val[qpin.get_class_index()];  // current-state symbol (seeded above)
+    bool       ok  = true;
+
+    Term nval;
+    if (auto din_d = gu::get_driver_of_sink_name(node, "din"); !din_d.is_invalid()) {
+      Val dv = driver_val(din_d, ok);
+      if (!ok) {
+        return fail("flop '" + gu::debug_name(node) + "' din not encodable");
+      }
+      nval = fit(dv, w);
+    } else {
+      nval = qv.term;  // no din -> the register holds
+    }
+
+    // enable: a low write-enable holds Q (no din=q feedback mux in the graph).
+    if (auto en_d = gu::get_driver_of_sink_name(node, "enable"); !en_d.is_invalid()) {
+      if (gu::is_const_pin(en_d)) {
+        if (gu::hydrate_const(en_d).is_known_false()) {
+          nval = qv.term;  // never writes
+        }
+      } else {
+        Val ev = driver_val(en_d, ok);
+        if (!ok) {
+          return fail("flop '" + gu::debug_name(node) + "' enable not encodable");
+        }
+        Term en_hot = tm_.mkTerm(Kind::DISTINCT, {ev.term, bv_const(tm_, ev.width, 0)});
+        nval        = tm_.mkTerm(Kind::ITE, {en_hot, nval, qv.term});
+      }
+    }
+
+    // reset: a non-const reset overrides with the initial value when asserted.
+    if (auto rst_d = gu::get_driver_of_sink_name(node, "reset_pin"); !rst_d.is_invalid() && !gu::is_const_pin(rst_d)) {
+      Val rv = driver_val(rst_d, ok);
+      if (!ok) {
+        return fail("flop '" + gu::debug_name(node) + "' reset not encodable");
+      }
+      Term rbit     = tm_.mkTerm(Kind::DISTINCT, {rv.term, bv_const(tm_, rv.width, 0)});
+      bool negreset = false;
+      if (auto neg_d = gu::get_driver_of_sink_name(node, "negreset"); !neg_d.is_invalid() && gu::is_const_pin(neg_d)) {
+        negreset = !gu::hydrate_const(neg_d).is_known_false();
+      }
+      Term rst_hot = negreset ? tm_.mkTerm(Kind::NOT, {rbit}) : rbit;
+      Term initv   = bv_const(tm_, w, 0);
+      if (auto init_d = gu::get_driver_of_sink_name(node, "initial"); !init_d.is_invalid()) {
+        Val iv = driver_val(init_d, ok);
+        if (ok) {
+          initv = fit(iv, w);
+        }
+      }
+      nval = tm_.mkTerm(Kind::ITE, {rst_hot, initv, nval});
+    }
+
+    out.outputs[std::string("\x01nxt:") + flop_state_key(*g, node)] = Val{nval, w, sgn};
   }
 
   // ---- Outputs: value driving each output sink, fit to the declared width.

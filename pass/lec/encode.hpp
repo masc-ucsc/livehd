@@ -38,6 +38,12 @@ struct Encoded {
 int real_width(const hhds::Pin_class& pin);
 int real_width_io(const hhds::Pin_class& pin, const hhds::GraphIO& gio, std::string_view name);
 
+// Stable cross-design / cross-front-end correspondence key for a Flop state
+// cell (source span preferred, then pin name). Used by both the encoder (to
+// emit current/next state under one key) and prove_equal (to share the
+// current-state symbol across the two designs). See M2 in lec.md.
+std::string flop_state_key(const hhds::Graph& g, const hhds::Node_class& node);
+
 // Extend (sign/zero per v.is_signed) or truncate `v` to exactly `width` bits.
 cvc5::Term fit_to(cvc5::TermManager& tm, const Val& v, int width);
 
