@@ -646,6 +646,15 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::u
       }
     } else if (Lnast_ntype::is_store(ct)) {
       auto name = first_ref_name(c);
+      // 2f-defer — `.[defer]` is an RHS-only end-of-cycle READ; there is no
+      // deferred-write form. A `x.[defer] = …` LHS is a clean error.
+      if (name.find(".[defer]") != std::string::npos || name.find("[defer]") != std::string::npos) {
+        report_error(c,
+                     "defer-lhs-write",
+                     "name",
+                     "`.[defer]` is an RHS-only end-of-cycle read — there is no `x.[defer] = …` write form",
+                     "write the variable directly (`x = …`); read its end-of-cycle value elsewhere with `x.[defer]`");
+      }
       if (!name.empty() && !prp_name_is_tmp(name) && !here.contains(name) && !visible.contains(name)) {
         report_error(c,
                      "assign-no-decl",
@@ -827,8 +836,8 @@ void Prp2lnast::check_undefined_reads() const {
   collect_hoisted_names(lnast->get_root(), hoisted);
 
   for (const auto& rs : read_sites_) {
-    if (rs.name.empty() || rs.name == "self" || prp_name_is_tmp(rs.name) || prp_name_is_placeholder_arg(rs.name)
-        || hoisted.contains(rs.name)) {
+    if (rs.name.empty() || rs.name == "self" || rs.defer_exempt || prp_name_is_tmp(rs.name)
+        || prp_name_is_placeholder_arg(rs.name) || hoisted.contains(rs.name)) {
       continue;
     }
     if (read_is_visible(rs)) {
@@ -7241,6 +7250,10 @@ Lnast_node Prp2lnast::attribute_read_to_node(TSNode n) {
   // of `attr_get` ops. Multiple chained reads (`x.[a].[b]`) chain through a
   // temporary.
   TSNode     arg  = child_by_field(n, "argument");
+  // 2f-defer — remember which read_sites the base expression records, so an
+  // `x.[defer]` can exempt them from the undefined-read check (defer reads the
+  // end-of-cycle value, which may be written later in the cycle).
+  const size_t base_reads_begin = read_sites_.size();
   Lnast_node base = expr_to_node(arg);
 
   uint32_t nnc = ts_node_named_child_count(n);
@@ -7276,6 +7289,13 @@ Lnast_node Prp2lnast::attribute_read_to_node(TSNode n) {
                      "type",
                      "the `.[typename]` attribute has been removed",
                      "use the structural `does` / `equals` / `case` operators for type comparison");
+      }
+      if (get_text(name_n) == "defer") {
+        // The end-of-cycle read may reference a variable defined later in the
+        // cycle — exempt the base expression's reads from the undefined check.
+        for (size_t k = base_reads_begin; k < read_sites_.size(); ++k) {
+          read_sites_[k].defer_exempt = true;
+        }
       }
       auto idx = builder.add_child(Lnast_ntype::create_attr_get());
       auto ref = builder.mint_tmp_ref();

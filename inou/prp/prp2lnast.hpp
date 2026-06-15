@@ -193,6 +193,10 @@ protected:
     TSNode      node;
     Lnast_nid   scope;
     Lnast_nid   before;
+    // 2f-defer — the base of an `x.[defer]` read: defer reads the END-of-cycle
+    // value, so it may legally reference a variable written later in the same
+    // cycle (or by the same statement). Exempt from the undefined-read check.
+    bool        defer_exempt = false;
   };
   std::vector<Read_site> read_sites_;
   // True iff `rs.name` is visible at the recorded site (see Read_site).

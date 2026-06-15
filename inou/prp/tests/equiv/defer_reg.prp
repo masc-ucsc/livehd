@@ -1,0 +1,16 @@
+/*
+:name: defer_reg
+:type: equiv
+:verilog_top: defer_reg.dreg
+:pyrope_top: defer_reg.dreg
+*/
+
+// 2f-defer — a register's `.[defer]` reads its accumulated NEXT-state (the din,
+// the value committed this cycle), not its current q. Here `o` sees r's
+// in-cycle write (a+1) the same cycle, so o == a+1 combinationally while r's q
+// (the registered copy) is a cycle behind.
+mod dreg(a:u8) -> (o:u9@[0]) {
+  reg r:u9 = 0
+  r = a + 1
+  o = r.[defer]
+}

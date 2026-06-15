@@ -10,6 +10,35 @@
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
 <h1><strong class="item-id">2f-defer</strong> <code>.[defer]</code> end-of-cycle reads</h1>
+<p style="padding:.6em;background:#e6ffe6;border-left:4px solid #2a2"><strong>◑ PARTIAL — LANDED 2026-06-14 (lgraph lowering).</strong>
+  Per the user's model, <code>.[defer]</code> is a <em>deferred lgraph edge</em>:
+  don't wire it at the read site; remember (consumer ← base) and connect the
+  base's LAST dpin after every statement is lowered. Implemented in tolg
+  (<code>lower_attr_get</code> → passthrough buffer + <code>resolve_defers</code>
+  after <code>finalize_regs</code>): a plain var resolves to its final SSA
+  driver (<code>logical_last_</code>, SSA versions collapsed), a <code>reg</code>
+  to its accumulated <code>din</code> (next-state), never <code>q</code>. The
+  runner keeps the defer base un-folded (<code>emit_op_with_fold</code>); the
+  frontend exempts the defer base from the undefined-read check (it may
+  reference a later/same-cycle write) and rejects the LHS write form
+  (<code>defer-lhs-write</code>). <strong>Equiv (LEC) tests:</strong>
+  <code>defer_comb</code> (combinational <code>o = x.[defer] == a+1</code>) and
+  <code>defer_reg</code> (reg <code>.[defer]</code> = next-state). Bonus tolg
+  fixes that fell out: multi-output lg: call bound to a named var
+  (<code>tmp.sub</code> resolves via aliased <code>sub_results_</code>) and a
+  forward field read deferred to end-of-pass (<code>pending_tgets_</code>).</p>
+<p style="padding:.6em;background:#fff7e6;border-left:4px solid #e90"><strong>Still pending — the cross-language feedback's per-output acyclicity.</strong>
+  The verilog/pyrope mix below now WIRES correctly (the deferred edge closes
+  <code>c ← tmp.add</code>, <code>tmp.add</code> resolves via the deferred
+  field read), but tolg's combinational-loop check treats the imported
+  <code>add_sub</code> Sub as opaque (any input → any output), so it
+  conservatively REJECTS the acyclic feedback (<code>add</code> ↛ <code>c</code>)
+  as a comb loop. Completing the mix needs per-output dependency analysis on the
+  imported lgraph (which inputs each output combinationally depends on) so the
+  loop check models the Sub per-output — that distinguishes the legal feedback
+  from the true-cycle negative case. Current behavior is SAFE (a conservative
+  error, never a miscompile). The comptime casserts + slop/codegen for
+  <code>.[defer]</code> are a separate future item (per the user).</p>
 <p><code>x.[defer]</code> is an <strong>RHS-only</strong> read of the value a
   variable/register holds at the <em>end</em> of the current cycle, after all
   in-cycle writes have accumulated. It is same-cycle <em>wiring</em>, not a

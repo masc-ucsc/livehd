@@ -224,6 +224,12 @@ public:
     finalize_regs();
     // Sanity-check the per-memory port allocation.
     finalize_mems();
+    // 2f-defer — bind any deferred field reads (forward references to a call
+    // result lowered later, e.g. the defer feedback's `tmp.add`) now that every
+    // call's Sub result exists; then wire each `.[defer]` buffer to its base's
+    // final driver (incl. a reg's accumulated din).
+    resolve_pending_tgets();
+    resolve_defers();
 
     // Outputs: connect each output's bound driver to its graph output sink.
     for (const auto& name : out_names_) {
@@ -284,6 +290,13 @@ private:
     mw_map_[key]  = mw;
     if (!branch_writes_.empty()) {
       branch_writes_.back()[key] = pin;
+    }
+    // 2f-defer — track the LOGICAL variable's most-recent driver (SSA versions
+    // collapse to the root). Shadow keys (\x01din:/\x01en:) never name a defer
+    // base, so skip them.
+    if (!key.empty() && key.front() != '\x01') {
+      const auto pos = key.find("___ssa_");
+      logical_last_[pos == std::string::npos ? key : key.substr(0, pos)] = {pin, mw};
     }
   }
 
@@ -487,6 +500,10 @@ private:
       // anything unresolvable (runtime wrap/sat, comb recursion) stays a
       // HARD error inside lower_func_call.
       lower_func_call(nid);
+    } else if (N::is_attr_get(t)) {
+      // `.[defer]` end-of-cycle read (2f-defer). Other attribute reads fold in
+      // upass.attributes before tolg; an unhandled one keeps the warn inside.
+      lower_attr_get(nid);
     } else if (N::is_attr_set(t)) {
       // Per-reg flop-attr overrides (reset_pin/sync/negreset/
       // initial); anything else keeps the unhandled warn below.
@@ -515,6 +532,88 @@ private:
           lnast_->get_top_module_name());
     } else {
       warn_at(Lnast_nid{}, {"unhandled-node", "unsupported"}, "unhandled node type '{}'", Lnast_ntype::to_sv(t));
+    }
+  }
+
+  // attr_get(ref(dst), ref(base), const(attr)) — only `.[defer]` reaches tolg
+  // (every other attribute read folds in upass.attributes). `x.[defer]` is the
+  // end-of-cycle read: the value the base holds AFTER all in-cycle writes, as
+  // same-cycle wiring (no flop). The base's final dpin is not known at the read
+  // site (single walk), so emit a passthrough buffer whose OUTPUT consumers
+  // read now and whose INPUT is connected to the base's last dpin in
+  // resolve_defers() (after finalize_regs). A LHS `x.[defer] = …` write form is
+  // rejected upstream in prp2lnast — only the RHS read reaches here. (2f-defer)
+  void lower_attr_get(const Lnast_nid& nid) {
+    auto dst = lnast_->get_first_child(nid);
+    if (dst.is_invalid()) {
+      return;
+    }
+    auto base = lnast_->get_sibling_next(dst);
+    auto attr = base.is_invalid() ? base : lnast_->get_sibling_next(base);
+    const std::string attr_name = attr.is_invalid() ? std::string{} : std::string(lnast_->get_name(attr));
+    if (attr_name != "defer") {
+      warn_at(nid, {"unhandled-node", "unsupported"}, "unhandled attribute read '.[{}]'", attr_name);
+      return;
+    }
+    if (base.is_invalid() || !Lnast_ntype::is_ref(lnast_->get_type(base))) {
+      error_here("upass.tolg: `.[defer]` must read a variable or field reference");
+      return;
+    }
+    std::string base_name(lnast_->get_name(base));
+    // Single-driver Or = a pure passthrough (cgen emits `out = a`). The input
+    // sink stays open until resolve_defers() wires the base's final driver.
+    auto buf  = make_node(Ntype_op::Or);
+    auto out  = buf.create_driver_pin(0);
+    set_bits(out, 1);  // provisional; restamped from the base width at resolve
+    set_unsign(out);
+    auto sink = setup_sink_by_name(buf, "a");
+    record(lnast_->get_name(dst), out, 1);
+    defer_pends_.push_back(Defer_pend{.sink = sink, .out = out, .base = std::move(base_name), .src = nid});
+  }
+
+  // Re-resolve each deferred field read once the whole body (incl. later
+  // calls) has lowered: by now the source name is a known Sub result / memory,
+  // so lower_tuple_get binds the port driver. tget_final_ makes a genuinely
+  // unresolvable one warn rather than defer again. (2f-defer)
+  void resolve_pending_tgets() {
+    tget_final_ = true;
+    for (const auto& nid : pending_tgets_) {
+      lower_tuple_get(nid);
+    }
+    pending_tgets_.clear();
+  }
+
+  // Wire every pending `.[defer]` buffer to its base's last dpin: a reg's
+  // accumulated next-state (din) — never q — or a plain variable's final
+  // combinational driver. A genuine end-of-cycle feedback that is actually a
+  // combinational cycle (the base depends on the deferred value) surfaces as a
+  // graph loop downstream, not here. (2f-defer)
+  void resolve_defers() {
+    for (auto& dp : defer_pends_) {
+      Pin     drv;
+      int32_t mw = 1;
+      if (reg_map_.contains(dp.base)) {
+        if (auto dit = pin_map_.find(din_key(dp.base)); dit != pin_map_.end()) {
+          drv = dit->second;  // accumulated next-state (last in-cycle write)
+          mw  = mw_lookup(din_key(dp.base));
+        } else {
+          drv = resolve(dp.base);  // never written this cycle → holds q
+          mw  = mw_lookup(dp.base);
+        }
+      } else if (const auto pos = dp.base.find("___ssa_"); true) {
+        // A plain variable's last dpin is its final SSA version's driver
+        // (logical_last_), not the read-site version pin_map_ holds for `base`.
+        const std::string logical = pos == std::string::npos ? dp.base : dp.base.substr(0, pos);
+        if (auto lit = logical_last_.find(logical); lit != logical_last_.end()) {
+          drv = lit->second.first;
+          mw  = lit->second.second;
+        } else {
+          drv = resolve(dp.base);  // never written — resolve reports + wires nil
+          mw  = mw_lookup(dp.base);
+        }
+      }
+      dp.sink.connect_driver(drv);
+      set_bits(dp.out, mw);
     }
   }
 
@@ -775,6 +874,15 @@ private:
       if (auto mrt = mem_results_.find(rhs_name); mrt != mem_results_.end()) {
         auto rec_copy                       = mrt->second;
         mem_results_[std::string(lhs_name)] = rec_copy;
+        return;
+      }
+      // A multi-output call result bound to a named var (`mut tmp = add_sub(…)`):
+      // alias the Sub_result so `tmp.add`/`tmp.sub` resolve through the named
+      // var, not just the call's result temp. (Copy before insert — operator[]
+      // may rehash and invalidate the found iterator.)
+      if (auto srt = sub_results_.find(rhs_name); srt != sub_results_.end()) {
+        auto rec_copy                       = srt->second;
+        sub_results_[std::string(lhs_name)] = std::move(rec_copy);
         return;
       }
     }
@@ -1833,6 +1941,15 @@ private:
         set_bits(dout, mr.bits);
         set_unsign(dout);  // __memory data is raw bits — unsigned
         record(lnast_->get_name(dst), to_positive(dout, mr.bits), mr.bits);
+        return;
+      }
+      // 2f-defer — a single-field read (`src.field`) of a name that is not yet
+      // a known memory / Sub result. It may be a forward reference to a call
+      // result lowered later in the body (the defer feedback `tmp.add.[defer]`
+      // reads tmp.add before `tmp = add_sub(…)` runs). Defer the bind to
+      // end-of-pass; re-resolved with tget_final_, a still-unresolved one warns.
+      if (!tget_final_ && Lnast_ntype::is_const(lnast_->get_type(idx)) && lnast_->get_sibling_next(idx).is_invalid()) {
+        pending_tgets_.emplace_back(nid);
         return;
       }
       warn_at(nid, {"unhandled-node", "unsupported"}, "unhandled node type 'tuple_get'");
@@ -2960,10 +3077,32 @@ private:
 
   absl::flat_hash_map<std::string, Pin>                         pin_map_;
   absl::flat_hash_map<std::string, int32_t>                     mw_map_;
+  // 2f-defer — the last driver written to each LOGICAL variable (SSA versions
+  // x / x___ssa_1 / … collapsed to "x"): `x.[defer]` reads the value after ALL
+  // in-cycle writes, i.e. the last SSA version's driver, not the read-site one.
+  absl::flat_hash_map<std::string, std::pair<Pin, int32_t>>     logical_last_;
+  // 2f-defer — a field read whose source is a Sub result created by a call
+  // lowered LATER in the body (`c = tmp.add.[defer]` reads tmp.add before
+  // `tmp = add_sub(…)` runs). Deferred to end-of-pass, then re-resolved with
+  // tget_final_ so a still-unresolved one warns instead of looping.
+  std::vector<Lnast_nid>                                        pending_tgets_;
+  bool                                                          tget_final_ = false;
   absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> range_map_;
   std::vector<WriteMap>                                         branch_writes_;
   std::vector<std::string>                                      out_names_;
   WriteMap                                                      empty_writes_;
+
+  // 2f-defer — `x.[defer]` is an end-of-cycle read: the edge from the base's
+  // FINAL driver is added after every statement is processed (the runner's
+  // single walk doesn't know the final dpin at the read site). Each entry is a
+  // passthrough buffer's input sink waiting for its base's last dpin.
+  struct Defer_pend {
+    Pin         sink;  // the buffer's "A" input sink (consumers already read its output)
+    Pin         out;   // the buffer's output driver (restamped from the base width)
+    std::string base;  // the base variable / dotted field path
+    Lnast_nid   src;   // for diagnostics (the `.[defer]` site)
+  };
+  std::vector<Defer_pend>                                       defer_pends_;
 
   // Reg lowering state. reg_map_ holds each declared reg's Flop
   // node (reads resolve to its q via pin_map_; stores rebind the shadow

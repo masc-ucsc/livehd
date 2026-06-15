@@ -1,0 +1,15 @@
+/*
+:name: defer_comb
+:type: equiv
+:verilog_top: defer_comb.dcomb
+:pyrope_top: defer_comb.dcomb
+*/
+
+// 2f-defer — `x.[defer]` reads x's END-of-cycle value (after all in-cycle
+// writes) as same-cycle wiring: o sees x's final value (a+1), not the value at
+// the read site (0). tolg adds the edge from x's last dpin after the pass.
+comb dcomb(a:u8) -> (o:u9) {
+  mut x = 0
+  o = x.[defer]
+  x = a + 1
+}

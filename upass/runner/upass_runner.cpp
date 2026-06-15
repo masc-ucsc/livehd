@@ -787,11 +787,29 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
   // the type with `a`'s value. Keep child 1 verbatim for these op-nodes.
   const bool type_slot_at_1 = Lnast_ntype::is_declare(op_ntype) || Lnast_ntype::is_type_spec(op_ntype);
 
+  // 2f-defer — `x.[defer]` (an attr_get whose attr name is "defer") is an
+  // end-of-cycle read: keep the BASE (child 1) as a `ref` so tolg can wire the
+  // base's FINAL dpin. Folding it here would capture the base's value AT THE
+  // READ SITE instead of its end-of-cycle value.
+  bool defer_base_at_1 = false;
+  if (Lnast_ntype::is_attr_get(op_ntype)) {
+    // Peek the attr name (the last child, a const) WITHOUT moving the cursor.
+    const auto& ln  = lm->get_lnast();
+    const auto  nid = lm->get_current_nid();
+    Lnast_nid   last;
+    for (auto c = ln->get_first_child(nid); !c.is_invalid(); c = ln->get_sibling_next(c)) {
+      last = c;
+    }
+    if (!last.is_invalid() && Lnast_ntype::is_const(ln->get_type(last)) && ln->get_name(last) == "defer") {
+      defer_base_at_1 = true;
+    }
+  }
+
   if (lm->has_child()) {
     lm->move_to_child();
     int idx = 0;
     do {
-      const bool is_lhs = ((idx == 0) && !fold_all) || (idx == 1 && type_slot_at_1);
+      const bool is_lhs = ((idx == 0) && !fold_all) || (idx == 1 && (type_slot_at_1 || defer_base_at_1));
       if (!is_lhs && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
         emit_ref_or_folded(lm->current_text());
       } else if (!is_lhs && Lnast_ntype::is_store(lm->get_raw_ntype())) {
@@ -5724,6 +5742,9 @@ void uPass_runner::process_if() {
         cval = try_fold_ref(lm->current_text());
       }
       // 2f-nil_diag — a nil condition is an illegal use of nil in a conditional.
+      // nil is NOT unknown: a genuinely runtime condition folds to nullopt (not
+      // nil) and stays verbatim. A nil here means the condition came from a nil
+      // operand / illegal op, which can never be a valid gate → compile error.
       if (cval && !cval->is_invalid() && cval->is_nil()) {
         report_cond_nil("if");
       }
