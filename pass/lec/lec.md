@@ -5,6 +5,21 @@
 > the fluid-pipeline brainstorming are preserved verbatim in **Appendix A** as
 > the long-term reference. Where the two disagree, the plan here wins.
 
+> **⚠ Architecture update (2026-06-14, supersedes the rows below).** The
+> `Pono + smt-switch` discharge stack was **dropped**. `pass/lec` now talks to
+> **cvc5 directly via its native C++ API**. Rationale: the M1 encoder is
+> combinational-only, so `prove_equal` is just a miter `bad = OR(ref_i !=
+> impl_i)` discharged with **one `cvc5::Solver::checkSat`** (UNSAT = equal, SAT =
+> witness) — the Pono transition-system/latch/BMC apparatus was a no-op wrapper
+> around that single query. Dropping the two layers also removed an fmt-12 source
+> incompatibility (pono) and the `rules_foreign_cc` CMake build (smt-switch).
+> cvc5 stays the **prebuilt non-GPL static** lib (`packages/cvc5_repo.bzl`,
+> per-host: Linux x86_64 / Linux arm64 / macOS arm64); GMP is now the hermetic
+> `@gmp` BCR module (no system/homebrew libgmp). **When unbounded *sequential*
+> equivalence (designs without flop correspondence) is actually needed, re-add a
+> BMC unroll on cvc5, or re-introduce Pono.** Everything past M1 in this doc that
+> assumes a model checker should be re-read with that in mind.
+
 ## Decision record (2026-06-14)
 
 | Decision | Choice |
@@ -12,13 +27,13 @@
 | Primary use case | A *small edit* to a few `.prp` files in a large repo, re-verified **fast** by checking only what changed |
 | Baseline model | Explicit `--ref` / `--impl` each run; **no persistent certificate cache in v1** (the original Phase 6 is deferred) |
 | Reduction granularity | Per-**def** structural diff: collapse structurally-identical defs, hand only the changed defs to the solver |
-| Discharge engine | **Pono, in-process via its C++ API.** No `.btor2` files, no shelling out to a model checker |
-| Solver backend | smt-switch + **cvc5** (modified BSD-3) as the single backend — cvc5 ships official **prebuilt static libs** for Linux + macOS (arm64/x86_64), so *no from-source solver build*; covers QF_ABV (bit-vectors + arrays) and every Pono engine. bitwuzla (MIT, faster pure-BV but Meson-only + from-source) is a later `lec.solver=bitwuzla` opt-in. *Grounded in research — see Build notes.* |
+| Discharge engine | ~~Pono, in-process via its C++ API~~ → **cvc5 directly (native C++ API), single `checkSat` on a combinational miter.** See the Architecture update banner above. |
+| Solver backend | **cvc5** (modified BSD-3) as the single backend, used **directly** (no smt-switch) — cvc5 ships official **prebuilt static libs** for Linux x86_64 / Linux arm64 / macOS arm64, so *no from-source solver build*; covers QF_BV (and QF_ABV for future memory work). GMP is the hermetic `@gmp` BCR module. bitwuzla is a possible later `lec.solver=bitwuzla` opt-in. |
 | `lgcheck` (yosys `equiv`) | Kept **only as a bring-up cross-check oracle.** The goal is to *replace* it — it does not scale beyond combinational logic |
 | Proof strategy | Modular / congruence skeleton **plus preserved flop & memory names as first-class cut-points** (register-correspondence SEC: a sequential proof collapses to a combinational base+step between matched state) |
 | Core abstraction | A **relational query engine**: `prove_equal` / `prove_distinct` / `is_sat` over *subsets* of one or two designs. Incremental LEC and design queries (e.g. "are these two memory-port addresses always / never equal?") are both **clients** |
 | Engine tuning | Pono's main switches are exposed as `lec.*` set-options through the existing `lhd list options` registry — e.g. `lhd check --set lec.timeout=90 --set lec.engine=ind`; unknown `lec.*` flags hard-error (no silent no-op) |
-| Milestone 1 | De-risk the build: link `libpono` + `smt-switch` + solver in Bazel, encode **one combinational module**, prove a known-equal and a known-different pair through the C++ API, cross-checked against `lgcheck`. Nothing else until this is green |
+| Milestone 1 | **DONE.** Encode **one combinational module** to cvc5 bit-vector terms, prove a known-equal and a known-different pair via `cvc5::checkSat`, cross-checked against `lgcheck` (`//pass/lec:comb_equiv_test`, `:cvc5_link_test`, `:lec_cross_test` all green). |
 
 **Explicitly out of v1:** sequential k-induction (M2), structural def-diff
 reduction (M3), memory queries (M4), hierarchical congruence + CEGAR (M5),

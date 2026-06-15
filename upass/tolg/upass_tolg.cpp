@@ -499,6 +499,10 @@ private:
       // An all-const tuple literal is recorded as a potential array
       // initializer; anything else keeps the unhandled warn inside.
       lower_tuple_add(nid);
+    } else if (N::is_tuple_concat(t)) {
+      // `...` splice / `++` residue: comptime bookkeeping (the runner already
+      // folded the spliced field wires upstream). Record the merged tuple.
+      lower_tuple_concat(nid);
     } else if (N::is_for(t)) {
       // A `for` node reaching tolg means uPass_runner::unroll_for
       // could NOT unroll it: the iterable resolved to neither a comptime range
@@ -1326,6 +1330,55 @@ private:
         }
       }
       warn_at(nid, {"unhandled-node", "unsupported"}, "unhandled node type 'tuple_add'");
+      return;
+    }
+    tuple_recs_[std::string(lnast_->get_name(dst))] = std::move(rec);
+  }
+
+  // tuple_concat(ref dst, op…) — the `...` splice / `++` result. 2f-splice: a
+  // tuple op is fully comptime, so by the time it reaches tolg its real data
+  // has already folded into wire refs upstream (the runner propagates each
+  // operand's runtime field slot-refs through the concat). The surviving node
+  // is pure comptime bookkeeping, so RECORD the merged tuple — exactly like
+  // lower_tuple_add — instead of warning + dropping the spliced field wires.
+  // No hardware is created here (tuple ops never lower to a cell); a downstream
+  // whole-tuple read resolves through the record like any other tuple literal.
+  void lower_tuple_concat(const Lnast_nid& nid) {
+    auto dst = lnast_->get_first_child(nid);
+    if (dst.is_invalid()) {
+      return;
+    }
+    Tuple_rec rec;
+    for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
+      const auto ct = lnast_->get_type(c);
+      if (Lnast_ntype::is_ref(ct)) {
+        // Splice an operand tuple: merge its recorded fields in order (positional
+        // appended, named keyed). Constprop already reported any field overlap.
+        if (auto it = tuple_recs_.find(std::string(lnast_->get_name(c))); it != tuple_recs_.end()) {
+          for (auto e : it->second.elems) {
+            rec.elems.emplace_back(e);
+          }
+          for (const auto& [k, v] : it->second.named) {
+            rec.named[k] = v;
+          }
+          continue;
+        }
+        rec.elems.emplace_back(c);  // a bare ref operand — append as one positional field
+        continue;
+      }
+      if (Lnast_ntype::is_const(ct)) {
+        rec.elems.emplace_back(c);
+        continue;
+      }
+      if (Lnast_ntype::is_store(ct)) {
+        auto k = lnast_->get_first_child(c);
+        auto v = k.is_invalid() ? k : lnast_->get_sibling_next(k);
+        if (!v.is_invalid() && lnast_->get_sibling_next(v).is_invalid()) {
+          rec.named[std::string(lnast_->get_name(k))] = v;
+          continue;
+        }
+      }
+      warn_at(nid, {"unhandled-node", "unsupported"}, "unhandled node type 'tuple_concat'");
       return;
     }
     tuple_recs_[std::string(lnast_->get_name(dst))] = std::move(rec);

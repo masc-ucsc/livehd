@@ -4,9 +4,9 @@ load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:copt_default.bzl", "COPTS")
 
-# L0 encoder (LGraph -> smt-switch terms) + L1 relational query (prove_equal,
-# discharged through Pono). The reusable engine core; the pass.lec plugin (L3)
-# layers on top.
+# L0 encoder (LGraph -> cvc5 bit-vector terms) + L1 relational query
+# (prove_equal, a direct cvc5 combinational-miter checkSat). The reusable engine
+# core; the pass.lec plugin (L3) layers on top.
 cc_library(
     name = "lec_query",
     srcs = [
@@ -22,8 +22,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//graph",
+        "@cvc5",  # prebuilt cvc5 (combined+localized) -- the SMT backend
         "@hhds//hhds:graph",
-        "@pono",
     ],
 )
 
@@ -43,7 +43,8 @@ cc_library(
     alwayslink = True,  # static Pass_plugin registration
 )
 
-# Milestone-1 build de-risk: cvc5 link smoke test (lec.md build sequence step 1).
+# cvc5 link smoke test: the prebuilt static cvc5 links and a QF_ABV query runs
+# through cvc5's own C++ API (the API pass/lec is built directly on).
 cc_test(
     name = "cvc5_link_test",
     srcs = ["tests/cvc5_link_test.cpp"],
@@ -51,30 +52,6 @@ cc_test(
     deps = [
         "@cvc5",
         "@googletest//:gtest_main",
-    ],
-)
-
-# Build sequence step 2: smt-switch (cvc5 backend) link smoke test.
-cc_test(
-    name = "smtswitch_link_test",
-    srcs = ["tests/smtswitch_link_test.cpp"],
-    copts = COPTS,
-    deps = [
-        "@cvc5",  # smt-switch is built header-only against cvc5; link it here
-        "@googletest//:gtest_main",
-        "@smtswitch//:smt_switch",
-    ],
-)
-
-# Build sequence step 3: full cvc5 -> smt-switch -> Pono stack link test +
-# L1 discharge-mechanism validation (latched miter, k-induction/BMC).
-cc_test(
-    name = "pono_link_test",
-    srcs = ["tests/pono_link_test.cpp"],
-    copts = COPTS,
-    deps = [
-        "@googletest//:gtest_main",
-        "@pono",
     ],
 )
 

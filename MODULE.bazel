@@ -38,6 +38,12 @@ bazel_dep(name = "mimalloc", version = "2.2.4.bcr.2")
 
 bazel_dep(name = "libffi", version = "3.4.7.bcr.4")
 
+# GMP -- cvc5's bignum backend. cvc5's non-GPL prebuilt static libs leave the
+# GMP symbols undefined (they are not bundled, to avoid the LGPL libgmp.a); they
+# are satisfied at the final `lhd` link by this hermetic BCR build of GMP (no
+# dependency on a system/homebrew libgmp). See packages/cvc5.BUILD.
+bazel_dep(name = "gmp", version = "6.3.0.bcr.1")
+
 # iassert
 bazel_dep(name = "iassert", version = "0.1.0")
 git_override(
@@ -221,55 +227,26 @@ http_archive(
    patches = ["//packages:yosys.patch", "//packages:yosys_lexer.patch"],
 )
 
-# cvc5 -- SMT backend for pass/lec (smt-switch -> cvc5 -> Pono). We use the
+# cvc5 -- SMT backend for pass/lec, used directly via its native C++ API. We use the
 # official prebuilt non-GPL static libraries (no from-source solver build).
 # Pinned to a tagged release (cvc5 >= 1.3.4 per lec.md). The bundled LGPL
-# libgmp is intentionally NOT imported (see packages/cvc5.BUILD); GMP is linked
-# dynamically against the system shared lib.
+# libgmp is intentionally NOT imported (see packages/cvc5.BUILD); GMP comes from
+# the hermetic @gmp BCR module (bazel_dep above), not a system shared lib.
 #
-# TODO(lec): expand to a select()-per-platform set (Linux arm64, macOS
-# arm64/x86_64) -- one http_archive each with the same cvc5.BUILD, aliased
-# through a //third_party/cvc5 select(). Linux x86_64 first to de-risk the build
-# on the dev machine (Milestone 1).
-http_archive(
-    name = "cvc5",
-    build_file = "//packages:cvc5.BUILD",
-    sha256 = "dcdbfada0ce493ee98259c0816e0daafc561c223aadb3af298c2968e73ea39c6",
-    strip_prefix = "cvc5-Linux-x86_64-static",
-    urls = [
-        "https://github.com/cvc5/cvc5/releases/download/cvc5-1.3.4/cvc5-Linux-x86_64-static.zip",
-    ],
-)
+# The prebuilt is host-specific (we build `lhd` for the host, not cross-compile),
+# so @cvc5 is registered by a module extension that picks the Linux x86_64 /
+# macOS arm64 / ... asset matching the build host. Adding a platform is a one-row
+# edit in packages/cvc5_repo.bzl; the repo name stays @cvc5 everywhere.
+cvc5_ext = use_extension("//packages:cvc5_repo.bzl", "cvc5_repo")
+use_repo(cvc5_ext, "cvc5")
 
-# smt-switch -- the solver-agnostic term layer between Pono and cvc5. Built
-# from source (rules_foreign_cc cmake) against the prebuilt @cvc5. smtswitch.patch
-# retargets cvc5/CMakeLists.txt at the cvc5 release layout. Pin v1.1.3 (the
-# PrimOp / Op(prim,idx0,idx1) ABI is version-sensitive, per lec.md).
-http_archive(
-    name = "smtswitch",
-    build_file = "//packages:smtswitch.BUILD",
-    patches = ["//packages:smtswitch.patch"],
-    sha256 = "364ea3689f212543dc9d11d77d378cc9965a0dcf3e6111480f2d0ebd586d9b88",
-    strip_prefix = "smt-switch-1.1.3",
-    urls = [
-        "https://github.com/stanford-centaur/smt-switch/archive/refs/tags/v1.1.3.zip",
-    ],
-)
-
-# pono -- the model-checking engine layer (BMC / k-induction / IC3-PDR) for
-# pass/lec. Built directly with Bazel via packages/pono.BUILD (library core
-# only; no file frontends). pono.patch makes the bitwuzla backend optional so
-# the cvc5-only stack links. Pinned to a main commit (pono main moves).
-http_archive(
-    name = "pono",
-    build_file = "//packages:pono.BUILD",
-    patches = ["//packages:pono.patch"],
-    sha256 = "2b76229f06800bf831691403e276bc217692fea2b16e604e4c7704987525ce88",
-    strip_prefix = "pono-ec4fe894013d91bd1ca3c6a0e6dea160a6756a4e",
-    urls = [
-        "https://github.com/stanford-centaur/pono/archive/ec4fe894013d91bd1ca3c6a0e6dea160a6756a4e.zip",
-    ],
-)
+# NOTE: @smtswitch and @pono were intentionally removed. pass/lec now talks to
+# cvc5 directly through its native C++ API (it builds a combinational miter and
+# discharges it with a single checkSat), so the solver-agnostic term layer
+# (smt-switch) and the model-checking engine layer (pono, BMC/k-induction/IC3)
+# are no longer needed. This also drops the fmt-12 source incompatibility and the
+# rules_foreign_cc CMake build that those two carried. If unbounded *sequential*
+# equivalence (no flop correspondence) is ever required, re-add pono here.
 
 # mustache
 http_archive(

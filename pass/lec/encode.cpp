@@ -3,6 +3,7 @@
 #include "encode.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -13,8 +14,30 @@
 
 namespace livehd::lec {
 
-using namespace smt;
+using cvc5::Kind;
+using cvc5::Sort;
+using cvc5::Term;
 namespace gu = livehd::graph_util;
+
+namespace {
+
+// Bit-vector constant that always fits the requested width: cvc5 requires the
+// value to be < 2^width, so mask the low `width` bits (this also yields the
+// correct two's-complement encoding for negative i64 inputs).
+Term bv_const(cvc5::TermManager& tm, int width, uint64_t val) {
+  if (width < 64) {
+    val &= (uint64_t{1} << width) - 1;
+  }
+  return tm.mkBitVector(static_cast<uint32_t>(width), val);
+}
+
+// Indexed bit-vector slice a[hi:lo] (inclusive), via mkOp(BITVECTOR_EXTRACT).
+Term bv_extract(cvc5::TermManager& tm, const Term& t, int hi, int lo) {
+  auto op = tm.mkOp(Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(hi), static_cast<uint32_t>(lo)});
+  return tm.mkTerm(op, {t});
+}
+
+}  // namespace
 
 // Real bus width of a pin: bits attribute is the signed magnitude+1 count;
 // an unsigned pin drops the spare sign bit (see lec.md "Bit-width trap").
@@ -36,20 +59,21 @@ int real_width_io(const hhds::Pin_class& pin, const hhds::GraphIO& gio, std::str
 }
 
 // Extend / truncate a value to exactly `width` bits.
-smt::Term fit_to(const smt::SmtSolver& solver, const Val& v, int width) {
+Term fit_to(cvc5::TermManager& tm, const Val& v, int width) {
   if (v.width == width) {
     return v.term;
   }
   if (width < v.width) {
-    return solver->make_term(Op(Extract, width - 1, 0), v.term);  // truncate low bits
+    return bv_extract(tm, v.term, width - 1, 0);  // truncate low bits
   }
-  int d = width - v.width;
-  return solver->make_term(Op(v.is_signed ? Sign_Extend : Zero_Extend, d), v.term);
+  uint32_t d  = static_cast<uint32_t>(width - v.width);
+  auto     op = tm.mkOp(v.is_signed ? Kind::BITVECTOR_SIGN_EXTEND : Kind::BITVECTOR_ZERO_EXTEND, {d});
+  return tm.mkTerm(op, {v.term});
 }
 
-Sort Encoder::bv(int width) { return solver_->make_sort(BV, width < 1 ? 1 : width); }
+Sort Encoder::bv(int width) { return tm_.mkBitVectorSort(width < 1 ? 1 : width); }
 
-smt::Term Encoder::fit(const Val& v, int width) { return fit_to(solver_, v, width); }
+Term Encoder::fit(const Val& v, int width) { return fit_to(tm_, v, width); }
 
 Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, Val>* shared_inputs, std::string_view prefix) {
   Encoded out;
@@ -73,10 +97,10 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     bool sgn   = c.is_negative();
     Term t;
     if (c.is_just_i64()) {
-      t = solver_->make_term(c.to_just_i64(), bv(width));
+      t = bv_const(tm_, width, static_cast<uint64_t>(c.to_just_i64()));
     } else {
       // Wide constant: feed the decimal string (handles arbitrary precision).
-      t = solver_->make_term(c.to_decimal_string(), bv(width), 10);
+      t = tm_.mkBitVector(static_cast<uint32_t>(width), c.to_decimal_string(), 10);
     }
     return Val{t, width, sgn};
   };
@@ -97,7 +121,7 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
 
   // 1-bit BV from a Bool predicate.
   auto pred_to_bv = [&](const Term& b) -> Term {
-    return solver_->make_term(Ite, b, solver_->make_term(1, bv(1)), solver_->make_term(0, bv(1)));
+    return tm_.mkTerm(Kind::ITE, {b, bv_const(tm_, 1, 1), bv_const(tm_, 1, 0)});
   };
 
   // ---- Inputs: shared symbol or a fresh one, mapped onto the input driver pin.
@@ -119,8 +143,8 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
         }
       }
     }
-    if (v.term == nullptr) {
-      v = Val{solver_->make_symbol(std::string(prefix) + d.name, bv(w)), w, sgn};
+    if (v.term.isNull()) {
+      v = Val{tm_.mkConst(bv(w), std::string(prefix) + d.name), w, sgn};
     }
     out.inputs[d.name] = v;
     if (!dpin.is_invalid()) {
@@ -178,17 +202,17 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
       case Ntype_op::And:
       case Ntype_op::Or:
       case Ntype_op::Xor: {
-        PrimOp pop = (op == Ntype_op::And) ? BVAnd : (op == Ntype_op::Or) ? BVOr : BVXor;
+        Kind k = (op == Ntype_op::And) ? Kind::BITVECTOR_AND : (op == Ntype_op::Or) ? Kind::BITVECTOR_OR : Kind::BITVECTOR_XOR;
         for (const auto& v : all) {
           Term t = fit(v, W);
-          result = result == nullptr ? t : solver_->make_term(pop, result, t);
+          result = result.isNull() ? t : tm_.mkTerm(k, {result, t});
         }
         break;
       }
       case Ntype_op::Mult: {
         for (const auto& v : all) {
           Term t = fit(v, W);
-          result = result == nullptr ? t : solver_->make_term(BVMul, result, t);
+          result = result.isNull() ? t : tm_.mkTerm(Kind::BITVECTOR_MULT, {result, t});
         }
         break;
       }
@@ -196,13 +220,13 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
         Term add_acc;
         for (const auto& v : pid(0)) {  // "a" pins: added
           Term t  = fit(v, W);
-          add_acc = add_acc == nullptr ? t : solver_->make_term(BVAdd, add_acc, t);
+          add_acc = add_acc.isNull() ? t : tm_.mkTerm(Kind::BITVECTOR_ADD, {add_acc, t});
         }
-        if (add_acc == nullptr) {
-          add_acc = solver_->make_term(0, bv(W));
+        if (add_acc.isNull()) {
+          add_acc = bv_const(tm_, W, 0);
         }
         for (const auto& v : pid(1)) {  // "b" pins: subtracted
-          add_acc = solver_->make_term(BVSub, add_acc, fit(v, W));
+          add_acc = tm_.mkTerm(Kind::BITVECTOR_SUB, {add_acc, fit(v, W)});
         }
         result = add_acc;
         break;
@@ -213,30 +237,30 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
         }
         Term a = fit(pid(0)[0], W);
         Term b = fit(pid(1)[0], W);
-        result = solver_->make_term(out_signed ? BVSdiv : BVUdiv, a, b);
+        result = tm_.mkTerm(out_signed ? Kind::BITVECTOR_SDIV : Kind::BITVECTOR_UDIV, {a, b});
         break;
       }
       case Ntype_op::Not: {
         if (all.empty()) {
           return fail("Not has no operand");
         }
-        result = solver_->make_term(BVNot, fit(all[0], W));
+        result = tm_.mkTerm(Kind::BITVECTOR_NOT, {fit(all[0], W)});
         break;
       }
       case Ntype_op::Ror: {
         // reduction-OR: 1 iff any input bit set.
         Term concat;
         for (const auto& v : all) {
-          concat = concat == nullptr ? v.term : solver_->make_term(Concat, concat, v.term);
+          concat = concat.isNull() ? v.term : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {concat, v.term});
         }
-        if (concat == nullptr) {
+        if (concat.isNull()) {
           return fail("Ror has no operand");
         }
         int cw = 0;
         for (const auto& v : all) {
           cw += v.width;
         }
-        result = pred_to_bv(solver_->make_term(Distinct, concat, solver_->make_term(0, bv(cw))));
+        result = pred_to_bv(tm_.mkTerm(Kind::DISTINCT, {concat, bv_const(tm_, cw, 0)}));
         break;
       }
       case Ntype_op::EQ: {
@@ -251,8 +275,8 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
         for (size_t i = 1; i < all.size(); ++i) {
           Term lhs = fit(all[0], cw);
           Term rhs = fit(all[i], cw);
-          Term eq  = solver_->make_term(Equal, lhs, rhs);
-          acc      = acc == nullptr ? eq : solver_->make_term(And, acc, eq);
+          Term eq  = tm_.mkTerm(Kind::EQUAL, {lhs, rhs});
+          acc      = acc.isNull() ? eq : tm_.mkTerm(Kind::AND, {acc, eq});
         }
         result = pred_to_bv(acc);
         break;
@@ -267,12 +291,13 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
         Term acc;
         for (const auto& a : as) {
           for (const auto& b : bs) {
-            bool   both_signed = a.is_signed && b.is_signed;
-            int    cw          = std::max(a.width, b.width);
-            Term   la = fit(a, cw), lb = fit(b, cw);
-            PrimOp cmp = (op == Ntype_op::LT) ? (both_signed ? BVSlt : BVUlt) : (both_signed ? BVSgt : BVUgt);
-            Term   one = solver_->make_term(cmp, la, lb);
-            acc        = acc == nullptr ? one : solver_->make_term(And, acc, one);
+            bool both_signed = a.is_signed && b.is_signed;
+            int  cw          = std::max(a.width, b.width);
+            Term la = fit(a, cw), lb = fit(b, cw);
+            Kind cmp = (op == Ntype_op::LT) ? (both_signed ? Kind::BITVECTOR_SLT : Kind::BITVECTOR_ULT)
+                                            : (both_signed ? Kind::BITVECTOR_SGT : Kind::BITVECTOR_UGT);
+            Term one = tm_.mkTerm(cmp, {la, lb});
+            acc      = acc.isNull() ? one : tm_.mkTerm(Kind::AND, {acc, one});
           }
         }
         result = pred_to_bv(acc);
@@ -285,28 +310,25 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
         Term a = fit(pid(0)[0], W);
         Term acc;
         for (const auto& b : pid(1)) {  // one-hot amounts, ORed
-          Term sh = solver_->make_term(BVShl, a, fit(b, W));
-          acc     = acc == nullptr ? sh : solver_->make_term(BVOr, acc, sh);
+          Term sh = tm_.mkTerm(Kind::BITVECTOR_SHL, {a, fit(b, W)});
+          acc     = acc.isNull() ? sh : tm_.mkTerm(Kind::BITVECTOR_OR, {acc, sh});
         }
-        result = acc == nullptr ? a : acc;
+        result = acc.isNull() ? a : acc;
         break;
       }
       case Ntype_op::SRA: {
         if (pid(0).empty() || pid(1).empty()) {
           return fail("SRA missing a/b");
         }
-        result = solver_->make_term(BVAshr, fit(pid(0)[0], W), fit(pid(1)[0], W));
+        result = tm_.mkTerm(Kind::BITVECTOR_ASHR, {fit(pid(0)[0], W), fit(pid(1)[0], W)});
         break;
       }
       case Ntype_op::Sext: {
         if (pid(0).empty() || pid(1).empty()) {
           return fail("Sext missing a/pos");
         }
-        const Val&      a = pid(0)[0];
+        const Val& a = pid(0)[0];
         // pos must be a constant we can read.
-        // (driver_val already turned a const driver into a literal Val; recover its int)
-        // Re-fetch the pos driver as a Dlop for the position.
-        // Find the pid1 edge driver pin:
         hhds::Pin_class pos_pin;
         for (const auto& e : node.inp_edges()) {
           if (e.sink.get_port_id() == 1) {
@@ -325,9 +347,13 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
         if (pos < 1 || pos > a.width) {
           return fail("Sext position out of range (M1)");
         }
-        Term low = (pos == a.width) ? a.term : solver_->make_term(Op(Extract, pos - 1, 0), a.term);
-        result   = (W <= pos) ? (W == pos ? low : solver_->make_term(Op(Extract, W - 1, 0), low))
-                              : solver_->make_term(Op(Sign_Extend, W - pos), low);
+        Term low = (pos == a.width) ? a.term : bv_extract(tm_, a.term, pos - 1, 0);
+        if (W <= pos) {
+          result = (W == pos) ? low : bv_extract(tm_, low, W - 1, 0);
+        } else {
+          auto op2 = tm_.mkOp(Kind::BITVECTOR_SIGN_EXTEND, {static_cast<uint32_t>(W - pos)});
+          result   = tm_.mkTerm(op2, {low});
+        }
         break;
       }
       case Ntype_op::Get_mask: {
@@ -361,7 +387,7 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
         if (hi < rb) {
           return fail("Get_mask range outside operand (M1)");
         }
-        Term slice = solver_->make_term(Op(Extract, hi, rb), a.term);
+        Term slice = bv_extract(tm_, a.term, hi, rb);
         Val  sv{slice, hi - rb + 1, false};
         result = fit(sv, W);
         break;
@@ -414,15 +440,15 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
         result = fit(arms.back(), W);
         for (int k = static_cast<int>(arms.size()) - 2; k >= 0; --k) {
           int64_t key  = (op == Ntype_op::Mux) ? k : (int64_t{1} << k);
-          Term    cond = solver_->make_term(Equal, sel.term, solver_->make_term(key, bv(sel.width)));
-          result       = solver_->make_term(Ite, cond, fit(arms[k], W), result);
+          Term    cond = tm_.mkTerm(Kind::EQUAL, {sel.term, bv_const(tm_, sel.width, static_cast<uint64_t>(key))});
+          result       = tm_.mkTerm(Kind::ITE, {cond, fit(arms[k], W), result});
         }
         break;
       }
       default: return fail("unsupported op '" + std::string(Ntype::get_name(op)) + "' (M1)");
     }
 
-    if (result == nullptr) {
+    if (result.isNull()) {
       return fail("op '" + std::string(Ntype::get_name(op)) + "' produced no term");
     }
     pin2val[dpin.get_class_index()] = Val{result, W, out_signed};

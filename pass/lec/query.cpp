@@ -2,69 +2,37 @@
 
 #include "query.hpp"
 
+#include <cvc5/cvc5.h>
+
 #include <algorithm>
 #include <string>
-#include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "core/fts.h"
-#include "core/prop.h"
-#include "core/proverresult.h"
 #include "encode.hpp"
-#include "engines/prover.h"
 #include "node_util.hpp"
-#include "options/options.h"
-#include "smt/available_solvers.h"
-#include "utils/make_provers.h"
 
 namespace livehd::lec {
 
-using namespace smt;
-
-namespace {
-
-pono::Engine to_engine(const std::string& s, std::string& err) {
-  if (s == "bmc") {
-    return pono::BMC;
-  }
-  if (s == "bmc-sp") {
-    return pono::BMC_SP;
-  }
-  if (s == "ind" || s == "kind") {
-    return pono::KIND;
-  }
-  if (s == "ic3" || s == "ic3bits") {
-    return pono::IC3_BITS;
-  }
-  err = "unknown lec.engine '" + s + "' (expected bmc|ind|ic3)";
-  return pono::KIND;
-}
-
-}  // namespace
-
 Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts) {
   Query_result res;
-  res.detail = "engine=" + opts.engine + " solver=" + opts.solver + " bound=" + std::to_string(opts.bound);
+  res.detail = "solver=" + opts.solver + " (cvc5 direct, combinational miter)";
 
   if (opts.solver != "cvc5") {
     res.verdict  = Verdict::Unknown;
-    res.detail  += "; solver backend '" + opts.solver + "' not built (M1 = cvc5 only)";
-    return res;
-  }
-  std::string  eng_err;
-  pono::Engine engine = to_engine(opts.engine, eng_err);
-  if (!eng_err.empty()) {
-    res.verdict  = Verdict::Unknown;
-    res.detail  += "; " + eng_err;
+    res.detail  += "; solver backend '" + opts.solver + "' not built (cvc5 only)";
     return res;
   }
 
-  SmtSolver                        solver = pono::create_solver(CVC5, false, true, true);
-  pono::FunctionalTransitionSystem fts(solver);
+  cvc5::TermManager tm;
+  cvc5::Solver      solver(tm);
+  solver.setLogic("QF_BV");
+  if (opts.witness) {
+    solver.setOption("produce-models", "true");
+  }
 
-  // Shared primary inputs: one FTS input var per input name (union of both
-  // designs), so the unroller treats them as free-per-cycle. Both encodings
-  // reuse these terms -> assume_equal(inputs) is structural.
+  // Shared primary inputs: one symbolic BV per input name (union of both
+  // designs). Both encodings reuse these terms, so "equal inputs" is structural
+  // (the miter constrains nothing on the inputs -> they range freely).
   absl::flat_hash_map<std::string, Val> shared;
   auto                                  add_inputs = [&](hhds::Graph* g) {
     auto gio = g->get_io();
@@ -78,14 +46,14 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         w = 1;
       }
       bool sgn       = pin.is_invalid() ? !gio->is_unsign(d.name) : !graph_util::is_unsign(pin);
-      Term t         = fts.make_inputvar(d.name, solver->make_sort(BV, w));
+      cvc5::Term t   = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), d.name);
       shared[d.name] = Val{t, w, sgn};
     }
   };
   add_inputs(ref);
   add_inputs(impl);
 
-  Encoder enc(solver);
+  Encoder enc(tm);
   Encoded re = enc.encode(ref, &shared);
   if (!re.ok) {
     res.verdict  = Verdict::Unknown;
@@ -100,7 +68,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   }
 
   // Miter over common outputs: bad = Or_i (ref_out_i != impl_out_i).
-  Term bad;
+  cvc5::Term bad;
   for (const auto& [name, rv] : re.outputs) {
     auto it = ie.outputs.find(name);
     if (it == ie.outputs.end()) {
@@ -108,11 +76,11 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       res.detail  += "; output '" + name + "' present in ref but not impl";
       return res;
     }
-    int  w    = std::max(rv.width, it->second.width);
-    Term a    = fit_to(solver, rv, w);
-    Term b    = fit_to(solver, it->second, w);
-    Term diff = solver->make_term(Distinct, a, b);
-    bad       = bad == nullptr ? diff : solver->make_term(Or, bad, diff);
+    int        w    = std::max(rv.width, it->second.width);
+    cvc5::Term a    = fit_to(tm, rv, w);
+    cvc5::Term b    = fit_to(tm, it->second, w);
+    cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {a, b});
+    bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
   }
   // also flag impl-only outputs
   for (const auto& [name, iv] : ie.outputs) {
@@ -122,48 +90,39 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       return res;
     }
   }
-  if (bad == nullptr) {
+  if (bad.isNull()) {
     res.verdict  = Verdict::Proven;  // no outputs to compare -> vacuously equal
     res.detail  += "; no comparable outputs";
     return res;
   }
 
-  // Latch the combinational miter into a 1-bit state var so the SafetyProperty
-  // references only current state (a pure-combinational bad makes BMC return
-  // UNKNOWN). bad_state' = bad, init bad_state = 0, property = Not(bad_state).
-  Term bad_state = fts.make_statevar("__lec_bad", solver->make_sort(BOOL));
-  fts.set_init(solver->make_term(Equal, bad_state, solver->make_term(false)));
-  fts.assign_next(bad_state, bad);
+  // Combinational equivalence: the miter is UNSAT iff the designs agree on every
+  // common output for all inputs. No state, no unrolling -- a single SMT query.
+  // (opts.engine / opts.bound are sequential-model-checking knobs, unused here.)
+  solver.assertFormula(bad);
+  cvc5::Result r = solver.checkSat();
 
-  pono::SafetyProperty prop(solver, solver->make_term(Not, bad_state));
-  pono::PonoOptions    pono_opts;
-  auto                 prover = pono::make_prover(engine, prop, fts, solver, pono_opts);
-  prover->initialize();
-
-  pono::ProverResult r = prover->check_until(std::max(1, opts.bound));
-
-  if (r == pono::TRUE) {
+  if (r.isUnsat()) {
     res.verdict = Verdict::Proven;
-  } else if (r == pono::FALSE) {
+  } else if (r.isSat()) {
     res.verdict = Verdict::Refuted;
     if (opts.witness) {
-      std::vector<smt::UnorderedTermMap> wit;
-      if (prover->witness(wit) && !wit.empty()) {
-        std::string w;
-        for (const auto& [name, v] : shared) {
-          auto it = wit[0].find(v.term);
-          if (it != wit[0].end()) {
-            if (!w.empty()) {
-              w += ", ";
-            }
-            w += name + "=" + it->second->to_string();
-          }
+      std::string w;
+      for (const auto& [name, v] : shared) {
+        cvc5::Term val = solver.getValue(v.term);
+        if (val.isNull()) {
+          continue;
         }
-        res.witness = w;
+        if (!w.empty()) {
+          w += ", ";
+        }
+        w += name + "=" + val.getBitVectorValue(10);
       }
+      res.witness = w;
     }
   } else {
-    res.verdict = Verdict::Unknown;
+    res.verdict  = Verdict::Unknown;
+    res.detail  += "; checkSat returned unknown";
   }
   return res;
 }
