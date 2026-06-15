@@ -1,0 +1,3 @@
+// 2f-lnimport fixture: a pub entry (importable) and a private one (not).
+pub comb my_add(a, b) -> (r) { r = a + b }
+comb private_one(a) -> (r) { r = a }

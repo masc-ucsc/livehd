@@ -92,6 +92,29 @@ cc_binary(
     ])
 ]
 
+# Import tests (2f-lnimport): multi-file — an importer plus the unit(s) it
+# imports. Each test names its inputs via the `:files:` header; every .prp in
+# tests/imports/ is bundled into data so the header's repo-relative paths
+# resolve at runtime. A `lib_*.prp` is an imported dependency only (no
+# standalone target — it is meaningful only as another unit's import).
+[
+    sh_test(
+        name = "prp-import-%s" % prp_file.split("/")[-1].split(".")[0],
+        srcs = ["tests/pyrope_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:%s)" % prp_file,
+        ],
+        data = [
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//lhd",
+        ] + ["//inou/prp:%s" % f for f in glob(["tests/imports/*.prp"])],
+    )
+    for prp_file in glob(["tests/imports/*.prp"])
+    if not prp_file.split("/")[-1].startswith("lib_")
+]
+
 # Equivalence pairs (tests/equiv/<name>.prp + golden <name>.v): the harness
 # lowers the .prp to Verilog (tolg path) and formally LECs it against the
 # golden via inou/yosys/lgcheck, so these need the yosys scripts/binary on

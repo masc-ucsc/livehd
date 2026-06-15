@@ -1,0 +1,14 @@
+/*
+:name: import_basic
+:type: comptime
+:files: inou/prp/tests/imports/lib_add.prp inou/prp/tests/imports/import_basic.prp
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// 2f-lnimport — LNAST-level import of a Pyrope unit. `import("lib_add")` binds
+// the whole pub namespace; `import("lib_add.my_add")` binds one pub entry.
+const lib = import("lib_add")
+cassert(lib.my_add(a=1, b=2) == 3)
+
+const f = import("lib_add.my_add")
+cassert(f(a=3, b=4) == 7)

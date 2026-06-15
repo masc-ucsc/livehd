@@ -196,6 +196,56 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
     return;
   }
 
+  // Dot selector — `import("unit.member")` imports ONE pub entry of the unit
+  // (07-typesystem.md). Only fires when the prefix names a loaded source unit;
+  // otherwise this falls through (a dotted UNIT name still resolves via the
+  // whole-namespace paths below).
+  if (const auto dot = text.rfind('.'); dot != std::string::npos) {
+    const std::string unit(text.substr(0, dot));
+    const std::string member(text.substr(dot + 1));
+    if (const auto uit = function_registry.find(unit);
+        uit != function_registry.end() && uit->second->get_lambda_kind().empty()) {
+      const auto&            src   = uit->second;
+      const Lnast_pub_entry* found = nullptr;
+      for (const auto& p : src->get_pub_list()) {
+        if (p.name == member) {
+          found = &p;
+          break;
+        }
+      }
+      if (found == nullptr) {
+        // The entry exists privately (registered lambda) vs. truly absent — both
+        // are "not importable"; point the user at `pub`.
+        livehd::diag::sink().emit(livehd::diag::Diagnostic{
+            .severity = livehd::diag::Severity::error,
+            .code     = "import-not-pub",
+            .category = "name",
+            .pass     = "upass.call_resolver",
+            .message  = std::format("`{}` is not a pub entry of unit `{}`", member, unit),
+            .hint     = "only `pub` file-scope entries can be imported; add `pub` to the definition or fix the name"});
+        return;
+      }
+      if (found->kind == "value") {
+        if (src->get_pub_values().empty()) {
+          pend();  // exporter's value not stamped yet this invocation
+          return;
+        }
+        for (const auto& [path, val_text] : src->get_pub_values()) {
+          if (path == member) {
+            store_trivial(dst, *Dlop::from_pyrope(val_text));
+            return;
+          }
+        }
+        pend();  // a tuple-valued pub member (member.0, …) — not handled by the dot selector yet
+        return;
+      }
+      // A pub lambda: bind its qualified tree name so `f(...)` dispatches to it
+      // (same string the whole-namespace path binds the field to).
+      store_trivial(dst, str_const(absl::StrCat(unit, ".", member)));
+      return;
+    }
+  }
+
   // Tuple form — the unit's whole pub namespace.
   auto build_namespace = [&](std::string_view                                        unit,
                              const std::vector<std::pair<std::string, std::string>>& values,

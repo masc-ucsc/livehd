@@ -1,0 +1,9 @@
+/*
+:name: import_cycle
+:type: error
+:files: inou/prp/tests/imports/import_cycle_a.prp inou/prp/tests/imports/lib_cycle_b.prp
+:error: (blocked|cycle|unresolved|progress)
+*/
+// 2f-lnimport — a mutual import cycle makes no progress and errors cleanly.
+const x = import("lib_cycle_b")
+pub const va = 1

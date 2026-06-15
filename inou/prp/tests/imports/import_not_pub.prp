@@ -1,0 +1,9 @@
+/*
+:name: import_not_pub
+:type: error
+:files: inou/prp/tests/imports/lib_add.prp inou/prp/tests/imports/import_not_pub.prp
+:error: (not a pub|pub)
+*/
+// 2f-lnimport — a non-`pub` entry cannot be imported.
+const f = import("lib_add.private_one")
+cassert(f(a=5) == 5)
