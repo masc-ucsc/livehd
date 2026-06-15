@@ -38,6 +38,7 @@ SLANG_LADDER = {
     "fixme_noloop": "lec",
     "fixme_paramods": "error",  # instance arrays / paramod shapes not lowered yet
     "fixme_sha256": "verilog",  # compiles to verilog (1-bit-cond + bool-net fixes); LEC gap on the wide reduction
+    "fn_ret_bool": "lec",  # logic-returning fn whose body returns a bool, then compared to a literal
     "fixme_with_tuples": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
     "flop": "lec",
     "gates": "lec",

@@ -103,7 +103,11 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
         const auto* re = stmt.as<slang::ast::ReturnStatement>().expr;
         if (re != nullptr) {
           set_pending_loc(stmt.sourceRange);
-          auto v = lower_rvalue(*re);
+          // A Verilog function returns a bit-vector (`logic`/`bit`/`int`), never
+          // a distinct bool: coerce a boolean result (e.g. `return a == b;`) to
+          // an integer so the result var is integer-kind. Otherwise a caller's
+          // `f(x) != 0` later trips the bool-vs-int comparison type check.
+          auto v = to_int_value(lower_rvalue(*re));
           note_write(*func_ret_sym_, /*nonblocking=*/false, stmt.sourceRange.start());
           builder_.create_assign_stmts(lname_of(*func_ret_sym_), v);
           clear_pending_loc();
