@@ -15,7 +15,7 @@ namespace lhd {
 namespace {
 
 constexpr std::string_view kSteps =
-    R"json(["elaborate verilog","elaborate pyrope","synth","check","scan","compile verilog","compile pyrope","ln.cat","ln.diff","pass","lsp"])json";
+    R"json(["elaborate verilog","elaborate pyrope","synth","check","lec","scan","compile verilog","compile pyrope","ln.cat","ln.diff","pass","lsp"])json";
 constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
 constexpr std::string_view kEmitKinds =
     R"json(["ln","lg","verilog","pyrope","lnast-dump","graphviz","metadata","results","diagnostics"])json";
@@ -245,6 +245,11 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"check","description":"Logic equivalence check (LEC) via inou/yosys/lgcheck; non-verilog sides are compiled to verilog first (bare .prp/.v/.sv paths infer their kind)","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd check --impl verilog:net.v --ref verilog:gold.v --impl-top foo --ref-top foo","lhd check --impl x.prp --ref verilog:gold.v"]})json");
     return 0;
   }
+  if (name == "lec") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"lec","description":"Relational equivalence check (LEC) via the in-process pass/lec engine (cvc5, no yosys): prove_equal(ref, impl). lg:/pyrope:/ln: sides are loaded/elaborated to LGraphs (verilog LEC still goes through `lhd check`). Engine knobs are --set lec.* (`lhd lec --help`)","args":{"required":[{"name":"impl","type":"lg:DIR|pyrope:PATH|ln:DIR"},{"name":"ref","type":"lg:DIR|pyrope:PATH|ln:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"set","type":"lec.flag=value","repeatable":true}]},"inputs":["lg","pyrope","ln"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.prp","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind"]})json");
+    return 0;
+  }
   if (name == "compile" || name == "compile verilog" || name == "compile pyrope") {
     print_json_line(
         R"json({"schema_version":1,"name":"compile","description":"Fused elaborate+synth (one action, one exit code)","args":{"note":"= elaborate <language> args + synth args"},"examples":["lhd compile foo.v --top foo --recipe O2 --emit verilog:net.v","lhd compile x.prp --emit verilog:net.v --emit-dir lg:x_lgs/"]})json");
@@ -328,69 +333,362 @@ int describe_command(const Options& opts) {
   return 1;
 }
 
-int help_command(const Options& opts) {
-  std::string topic = opts.files.empty() ? "" : opts.files.front();
-  if (topic.empty() || topic == "help") {
+// List the --set pass.flag options whose name starts with `prefix` (e.g.
+// "lec.") as one `name=default  # brief` line each — the discoverability
+// section under a command/subcommand --help. Reads the live EPRP registry, so
+// it can never drift from what --set actually accepts.
+void print_options(std::string_view prefix) {
+  const auto                     all = list_set_options();
+  std::vector<const Set_option*> sel;
+  size_t                         w = 0;
+  for (const auto& o : all) {
+    if (o.name.starts_with(prefix)) {
+      sel.push_back(&o);
+      w = std::max(w, o.name.size() + 1 + o.default_value.size());
+    }
+  }
+  for (const auto* o : sel) {
+    std::print("  {:<{}}  # {}\n", std::format("{}={}", o->name, o->default_value), w, brief_help(o->help));
+  }
+}
+
+// The "options (--set …)" block under a command's --help: the inline option
+// listing for every pass that command can run.
+void print_options_section(std::initializer_list<std::string_view> prefixes) {
+  std::print("\noptions (--set pass.flag=value; `lhd describe pass.flag` for the full text):\n");
+  for (auto p : prefixes) {
+    print_options(p);
+  }
+}
+
+void print_general_help() {
+  std::print(
+      "lhd — LiveHD stateless CLI kernel (the LiveHD docs)\n"
+      "\n"
+      "usage: lhd [flags] <command> [args]   (shared flags may come before or after the command)\n"
+      "  the language word is optional (inferred from .prp/.v/.sv); ln:/lg: IR inputs are positional\n"
+      "\n"
+      "commands:\n"
+      "  elaborate  sources (+ positional ln: imports) -> ln:/lg: IR; ln:/lg:-only inputs aggregate\n"
+      "               lhd elaborate x.prp --emit-dir ln:x_lns/\n"
+      "               lhd elaborate foo.v --top foo --emit-dir lg:foo_lgs/\n"
+      "  synth      transform / optimize / codegen over IR inputs (takes no sources)\n"
+      "               lhd synth ln:x_lns/ --recipe O1 --emit verilog:net.v\n"
+      "               lhd synth lg:foo_lgs/ --emit-dir lg:foo_opt_lgs/\n"
+      "  compile    fused elaborate + synth\n"
+      "               lhd compile x.prp --emit verilog:net.v\n"
+      "               lhd compile foo.v --top foo --recipe O2 --emit verilog:net.v\n"
+      "  check      logic equivalence (LEC) via inou/yosys/lgcheck; pyrope:/ln:/lg: sides compile first\n"
+      "               lhd check --impl verilog:net.v --ref verilog:gold.v --top foo\n"
+      "               lhd check --impl x.prp --ref verilog:gold.v\n"
+      "  lec        relational equivalence (LEC) via the in-process cvc5 engine (no yosys; lg:/pyrope:/ln:)\n"
+      "               lhd lec --impl impl.prp --ref ref.prp\n"
+      "               lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind\n"
+      "  scan       report each .prp file's import strings (the result's \"scan\" member)\n"
+      "               lhd scan x.prp y.prp\n"
+      "  ln.cat     print LNAST to stdout: sources elaborate through upass, ln: dirs print as stored\n"
+      "               lhd ln.cat x.prp\n"
+      "               lhd ln.cat ln:x_lns/ --top x\n"
+      "  ln.diff    diff two LNAST trees: line diff + hhds tree edit distance, on stdout\n"
+      "               lhd ln.diff old.prp new.prp\n"
+      "               lhd ln.diff ln:before/ x.prp\n"
+      "  lsp        Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
+      "  pass       run one graph pass over lg: inputs: color <alg> | partition | abc | liberty gensim\n"
+      "               lhd pass abc --top m lg:dir --emit-dir lg:net\n"
+      "  list       steps | recipes | emit-kinds | error-classes | options [REGEX]\n"
+      "               lhd list options 'cgen\\..*'   # the --set/--config pass.flag vocabulary\n"
+      "  describe   <command | recipe:NAME | emit-kind | pass.flag | dump | config>  (the JSON form)\n"
+      "               lhd describe cgen.srcmap      # one option, full help text\n"
+      "  version | help [command]\n"
+      "\n"
+      "per-command help:  lhd <command> --help   (== `lhd help <command>`; lists that command's\n"
+      "  --set options too) — e.g. `lhd lec --help`, `lhd pass --help`, `lhd pass partition --help`\n"
+      "\n"
+      "typed I/O (KIND:PATH):  ln: = Forest dir (LNAST units)   lg: = GraphLibrary dir (LGraphs)\n"
+      "  ln:/lg:/pyrope:/lnast-dump: are directory containers (--emit-dir only);\n"
+      "  verilog: is --emit (one netlist file) or --emit-dir (one .v per module)\n"
+      "\n"
+      "debug dumps (printed to stderr; a dump forces the stage that produces it):\n"
+      "  --dump parse|lnast|lg   post-parse LNAST | post-upass LNAST | textual LGraph\n"
+      "               lhd elaborate x.prp --dump parse,lnast\n"
+      "               lhd compile x.prp --recipe O0 --dump lg\n"
+      "\n"
+      "shared flags:\n"
+      "  --top T   --reader yosys-verilog|yosys-slang|slang   --recipe O0|O1|O2\n"
+      "  --set pass.flag=value   --config lhd.toml   (`lhd list options` for the vocabulary)\n"
+      "  --workdir DIR   --result-json PATH\n"
+      "  --diag-fmt auto|jsonl|pretty   result + diagnostic rendering (auto: pretty on a\n"
+      "                                 terminal, jsonl when piped/captured)\n"
+      "  -q (quiet stderr)   --verbose (mirror step logs)   (`lhd describe config` for lhd.toml)\n"
+      "\n"
+      "Deterministic (content-hash run_id) and hermetic (undeclared input => missing_file)\n"
+      "by contract.\n");
+}
+
+// `lhd pass [SUB] --help` — the graph-pass subcommands, each with its own
+// --set options. `sub` is the subcommand word ("color"/"partition"/...), empty
+// for the `pass` overview.
+int help_pass(const std::string& sub) {
+  if (sub == "color") {
     std::print(
-        "lhd — LiveHD stateless CLI kernel (the LiveHD docs)\n"
+        "lhd pass color <alg> — node coloring over an lg: library (in place)\n"
         "\n"
-        "usage: lhd [flags] <command> [args]   (shared flags may come before or after the command)\n"
-        "  the language word is optional (inferred from .prp/.v/.sv); ln:/lg: IR inputs are positional\n"
+        "usage: lhd pass color [acyclic|synth|path|mincut] --top M lg:DIR\n"
+        "  alg defaults to acyclic. The coloring is written back into the input lg:.\n"
         "\n"
-        "commands:\n"
-        "  elaborate  sources (+ positional ln: imports) -> ln:/lg: IR; ln:/lg:-only inputs aggregate\n"
-        "               lhd elaborate x.prp --emit-dir ln:x_lns/\n"
-        "               lhd elaborate foo.v --top foo --emit-dir lg:foo_lgs/\n"
-        "  synth      transform / optimize / codegen over IR inputs (takes no sources)\n"
-        "               lhd synth ln:x_lns/ --recipe O1 --emit verilog:net.v\n"
-        "               lhd synth lg:foo_lgs/ --emit-dir lg:foo_opt_lgs/\n"
-        "  compile    fused elaborate + synth\n"
-        "               lhd compile x.prp --emit verilog:net.v\n"
-        "               lhd compile foo.v --top foo --recipe O2 --emit verilog:net.v\n"
-        "  check      logic equivalence (LEC) via inou/yosys/lgcheck; pyrope:/ln:/lg: sides compile first\n"
-        "               lhd check --impl verilog:net.v --ref verilog:gold.v --top foo\n"
-        "               lhd check --impl x.prp --ref verilog:gold.v\n"
-        "  scan       report each .prp file's import strings (the result's \"scan\" member)\n"
-        "               lhd scan x.prp y.prp\n"
-        "  ln.cat     print LNAST to stdout: sources elaborate through upass, ln: dirs print as stored\n"
-        "               lhd ln.cat x.prp\n"
-        "               lhd ln.cat ln:x_lns/ --top x\n"
-        "  ln.diff    diff two LNAST trees: line diff + hhds tree edit distance, on stdout\n"
-        "               lhd ln.diff old.prp new.prp\n"
-        "               lhd ln.diff ln:before/ x.prp\n"
-        "  lsp        Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
-        "  pass       run one graph pass over lg: inputs: color <alg> | partition | abc | liberty gensim\n"
-        "               lhd pass abc --top m lg:dir --emit-dir lg:net\n"
-        "  list       steps | recipes | emit-kinds | error-classes | options [REGEX]\n"
-        "               lhd list options 'cgen\\..*'   # the --set/--config pass.flag vocabulary\n"
-        "  describe   <command | recipe:NAME | emit-kind | pass.flag | dump | config>\n"
-        "               lhd describe cgen.srcmap      # one option, full help text\n"
-        "  version | help [command]\n"
-        "\n"
-        "typed I/O (KIND:PATH):  ln: = Forest dir (LNAST units)   lg: = GraphLibrary dir (LGraphs)\n"
-        "  ln:/lg:/pyrope:/lnast-dump: are directory containers (--emit-dir only);\n"
-        "  verilog: is --emit (one netlist file) or --emit-dir (one .v per module)\n"
-        "\n"
-        "debug dumps (printed to stderr; a dump forces the stage that produces it):\n"
-        "  --dump parse|lnast|lg   post-parse LNAST | post-upass LNAST | textual LGraph\n"
-        "               lhd elaborate x.prp --dump parse,lnast\n"
-        "               lhd compile x.prp --recipe O0 --dump lg\n"
-        "\n"
-        "shared flags:\n"
-        "  --top T   --reader yosys-verilog|yosys-slang|slang   --recipe O0|O1|O2\n"
-        "  --set pass.flag=value   --config lhd.toml   (`lhd list options` for the vocabulary)\n"
-        "  --workdir DIR   --result-json PATH\n"
-        "  --diag-fmt auto|jsonl|pretty   result + diagnostic rendering (auto: pretty on a\n"
-        "                                 terminal, jsonl when piped/captured)\n"
-        "  -q (quiet stderr)   --verbose (mirror step logs)   (`lhd describe config` for lhd.toml)\n"
-        "\n"
-        "Deterministic (content-hash run_id) and hermetic (undeclared input => missing_file)\n"
-        "by contract.\n");
+        "example:\n"
+        "  lhd pass color acyclic --top m lg:dir\n");
+    print_options_section({"color."});
     return 0;
   }
-  Options d;
-  d.files.push_back(topic == "elaborate" ? "elaborate verilog" : topic);
-  return describe_command(d);
+  if (sub == "partition") {
+    std::print(
+        "lhd pass partition — split a design into region -> module Subs (LEC-equivalent)\n"
+        "\n"
+        "usage: lhd pass partition --top M lg:DIR --emit-dir lg:OUT/\n"
+        "  --emit-dir lg: (must differ from the input) receives the partitioned library.\n"
+        "\n"
+        "example:\n"
+        "  lhd pass partition --top m lg:dir --emit-dir lg:parts\n");
+    print_options_section({"partition."});
+    return 0;
+  }
+  if (sub == "abc") {
+    std::print(
+        "lhd pass abc — combinational ABC tech-map (bit-blast -> AIG -> sky130 blackboxes)\n"
+        "\n"
+        "usage: lhd pass abc --top M lg:DIR --emit-dir lg:OUT/\n"
+        "  --emit-dir lg: (must differ from the input) receives the mapped netlist.\n"
+        "\n"
+        "example:\n"
+        "  lhd pass abc --top m lg:dir --emit-dir lg:net\n");
+    print_options_section({"abc."});
+    return 0;
+  }
+  if (sub == "liberty") {
+    std::print(
+        "lhd pass liberty gensim <file.lib> — Liberty cells -> LGraph simulation models\n"
+        "\n"
+        "usage: lhd pass liberty gensim <file.lib> --emit-dir lg:OUT/\n"
+        "  Takes a Liberty FILE (not an lg: input); --emit-dir lg: receives the model library.\n"
+        "\n"
+        "example:\n"
+        "  lhd pass liberty gensim sky130.lib --emit-dir lg:models\n");
+    print_options_section({"liberty."});
+    return 0;
+  }
+  if (!sub.empty()) {
+    std::print(stderr, "lhd help: unknown pass subcommand '{}' (color | partition | abc | liberty)\n", sub);
+    return 1;
+  }
+  std::print(
+      "lhd pass — run one graph pass over an lg: library input\n"
+      "\n"
+      "usage: lhd pass <subcommand> [args] [--top M] lg:DIR [--emit-dir lg:OUT/]\n"
+      "\n"
+      "subcommands (run `lhd pass <subcommand> --help` for each one's --set options):\n"
+      "  color <alg>          acyclic|synth|path|mincut node coloring (in place)\n"
+      "  partition            region -> module Sub split (-> new lg:)\n"
+      "  abc                  combinational ABC tech-map (-> new lg:)\n"
+      "  liberty gensim FILE  Liberty -> simulation models (-> new lg:)\n"
+      "\n"
+      "examples:\n"
+      "  lhd pass color acyclic --top m lg:dir\n"
+      "  lhd pass partition --top m lg:dir --emit-dir lg:parts\n"
+      "  lhd pass abc --top m lg:dir --emit-dir lg:net\n"
+      "  lhd pass liberty gensim sky130.lib --emit-dir lg:models\n");
+  return 0;
+}
+
+int help_command(const Options& opts) {
+  const std::string topic = opts.files.empty() ? "" : opts.files.front();
+  const std::string sub   = opts.files.size() > 1 ? opts.files[1] : "";
+
+  if (topic.empty() || topic == "help") {
+    print_general_help();
+    return 0;
+  }
+
+  if (topic == "elaborate") {
+    std::print(
+        "lhd elaborate — sources (+ positional ln: imports) -> ln:/lg: IR\n"
+        "\n"
+        "usage: lhd elaborate [pyrope|verilog] <files…|ln:DIR|lg:DIR> [flags]\n"
+        "  The language word is optional (inferred from .prp/.v/.sv). Pyrope elaborates into\n"
+        "  ln: (Forest) and/or lg: (GraphLibrary) dirs; positional ln:DIR inputs supply\n"
+        "  pre-elaborated imports; ln:/lg:-only inputs aggregate into one container. Verilog\n"
+        "  goes through a --reader (yosys-* -> lg:; slang -> the direct SV->LNAST front-end).\n"
+        "\n"
+        "flags:\n"
+        "  --top T              elaborate only this module's hierarchy\n"
+        "  --reader R           yosys-verilog | yosys-slang | slang   (default yosys-slang)\n"
+        "  --emit-dir ln:DIR/   --emit-dir lg:DIR/   (--reader slang adds ln:)\n"
+        "  --depfile PATH   --workdir DIR   --result-json PATH\n"
+        "\n"
+        "examples:\n"
+        "  lhd elaborate x.prp --emit-dir ln:x_lns/\n"
+        "  lhd elaborate foo.v --top foo --emit-dir lg:foo_lgs/\n"
+        "  lhd elaborate foo.sv --reader slang --emit-dir ln:foo_lns/\n");
+    print_options_section({"upass."});
+    return 0;
+  }
+  if (topic == "synth") {
+    std::print(
+        "lhd synth — transform / optimize / codegen over IR inputs (takes no sources)\n"
+        "\n"
+        "usage: lhd synth <ln:DIR|lg:DIR>… [flags]\n"
+        "  ln: dirs are lowered (pass.upass + tolg); lg: dirs are loaded.\n"
+        "\n"
+        "flags:\n"
+        "  --top T              --recipe O0|O1|O2   (default O1; `lhd list recipes`)\n"
+        "  --emit verilog:PATH                       one concatenated netlist file\n"
+        "  --emit-dir K:DIR/    lg: | ln: | verilog: | pyrope:\n"
+        "  --set pass.flag=value   --config lhd.toml\n"
+        "\n"
+        "examples:\n"
+        "  lhd synth ln:x_lns/ --recipe O1 --emit verilog:net.v\n"
+        "  lhd synth lg:foo_lgs/ --emit-dir lg:foo_opt_lgs/\n");
+    print_options_section({"cprop.", "bitwidth.", "cgen."});
+    return 0;
+  }
+  if (topic == "compile") {
+    std::print(
+        "lhd compile — fused elaborate + synth (one action, one exit code)\n"
+        "\n"
+        "usage: lhd compile [pyrope|verilog] <files…> [synth flags]\n"
+        "  = elaborate <language> args + synth args.\n"
+        "\n"
+        "flags:\n"
+        "  --top T   --reader R   --recipe O0|O1|O2\n"
+        "  --emit verilog:PATH   --emit-dir lg:DIR/ | ln:DIR/ | verilog:DIR/ | pyrope:DIR/\n"
+        "  --set pass.flag=value   --config lhd.toml\n"
+        "\n"
+        "examples:\n"
+        "  lhd compile foo.v --top foo --recipe O2 --emit verilog:net.v\n"
+        "  lhd compile x.prp --emit verilog:net.v --emit-dir lg:x_lgs/\n");
+    print_options_section({"upass.", "cprop.", "bitwidth.", "cgen."});
+    return 0;
+  }
+  if (topic == "check") {
+    std::print(
+        "lhd check — logic equivalence (LEC) via inou/yosys/lgcheck\n"
+        "\n"
+        "usage: lhd check --impl KIND:PATH --ref KIND:PATH [flags]\n"
+        "  Sides may be verilog:/pyrope:/ln:/lg: or a bare .v/.sv/.prp path (kind inferred);\n"
+        "  non-verilog sides are compiled to Verilog first. For the in-process cvc5 engine\n"
+        "  (no yosys, lg:/pyrope:/ln: only) use `lhd lec` instead.\n"
+        "\n"
+        "flags:\n"
+        "  --impl KIND:PATH   --ref KIND:PATH\n"
+        "  --top T            --impl-top T   --ref-top T\n"
+        "\n"
+        "examples:\n"
+        "  lhd check --impl verilog:net.v --ref verilog:gold.v --top foo\n"
+        "  lhd check --impl x.prp --ref verilog:gold.v\n");
+    return 0;
+  }
+  if (topic == "lec") {
+    std::print(
+        "lhd lec — relational equivalence (LEC) via the in-process pass/lec engine (cvc5)\n"
+        "\n"
+        "usage: lhd lec --impl KIND:PATH --ref KIND:PATH [flags]\n"
+        "  Sides are lg:DIR, pyrope:PATH (or a bare .prp), or ln:DIR — loaded/elaborated to\n"
+        "  LGraphs and proven equal in process (no yosys). verilog: LEC goes through\n"
+        "  `lhd check`. Engine knobs are the --set lec.* options below.\n"
+        "\n"
+        "flags:\n"
+        "  --impl KIND:PATH   --ref KIND:PATH\n"
+        "  --top T            --impl-top T   --ref-top T\n"
+        "  --set lec.flag=value\n"
+        "\n"
+        "examples:\n"
+        "  lhd lec --impl impl.prp --ref ref.prp\n"
+        "  lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind\n");
+    print_options_section({"lec."});
+    return 0;
+  }
+  if (topic == "scan") {
+    std::print(
+        "lhd scan — Pyrope import/dependency discovery (for depfile/BUILD generators)\n"
+        "\n"
+        "usage: lhd scan <files.prp>… [--result-json PATH]\n"
+        "  Parses each .prp and reports its import strings (raw, as written).\n"
+        "\n"
+        "example:\n"
+        "  lhd scan f1.prp f2.prp\n");
+    return 0;
+  }
+  if (topic == "ln.cat") {
+    std::print(
+        "lhd ln.cat — print LNAST trees to stdout (the Lnast::dump text form)\n"
+        "\n"
+        "usage: lhd ln.cat <.prp|.v|.sv|ln:DIR>… [--top M]\n"
+        "  Sources are elaborated through pass.upass first; ln:DIR forests print as stored.\n"
+        "  --top filters units.\n"
+        "\n"
+        "examples:\n"
+        "  lhd ln.cat x.prp\n"
+        "  lhd ln.cat ln:x_lns/ --top x\n");
+    return 0;
+  }
+  if (topic == "ln.diff") {
+    std::print(
+        "lhd ln.diff — diff two LNAST trees on stdout (line diff + hhds tree edit distance)\n"
+        "\n"
+        "usage: lhd ln.diff <A> <B> [--top M]\n"
+        "  Each side is one .prp/.v/.sv source (elaborated through pass.upass) or one ln:DIR\n"
+        "  forest; multi-unit sides pair sorted-by-name (use --top to select one unit).\n"
+        "\n"
+        "examples:\n"
+        "  lhd ln.diff old.prp new.prp\n"
+        "  lhd ln.diff ln:before/ x.prp --top x\n");
+    return 0;
+  }
+  if (topic == "lsp") {
+    std::print(
+        "lhd lsp — Pyrope LSP server over stdio (JSON-RPC, Content-Length framed; .prp only)\n"
+        "\n"
+        "usage: lhd lsp\n"
+        "  Drives prp2lnast + pass.upass + core/diag per buffer; ephemeral, no lgdb. stdio\n"
+        "  belongs to the protocol, so no result JSON is written.\n");
+    return 0;
+  }
+  if (topic == "pass") {
+    return help_pass(sub);
+  }
+  if (topic == "list") {
+    std::print(
+        "lhd list — enumerate the CLI vocabulary (one JSON line; --diag-fmt pretty for options)\n"
+        "\n"
+        "usage: lhd list <pattern>\n"
+        "  steps | recipes | emit-kinds | error-classes | options [REGEX]\n"
+        "  `options` lists every --set/--config pass.flag (filter with a REGEX over the names).\n"
+        "\n"
+        "examples:\n"
+        "  lhd list options 'cgen\\..*'\n"
+        "  lhd list recipes\n");
+    return 0;
+  }
+  if (topic == "describe") {
+    std::print(
+        "lhd describe — one item's full record as JSON (pretty prose for pass.flag options)\n"
+        "\n"
+        "usage: lhd describe <command | recipe:NAME | emit-kind | pass.flag | dump | config>\n"
+        "  For readable per-command help use `lhd help <command>` / `lhd <command> --help`.\n"
+        "\n"
+        "examples:\n"
+        "  lhd describe cgen.srcmap\n"
+        "  lhd describe lec\n");
+    return 0;
+  }
+  if (topic == "version") {
+    std::print("lhd version — print the tool version (also `lhd --version`)\n");
+    return 0;
+  }
+
+  // Non-command topics (recipe:NAME, emit-kind, pass.flag, dump, config) stay
+  // on the describe path (JSON, or pretty prose for an option name).
+  return describe_command(opts);
 }
 
 }  // namespace
