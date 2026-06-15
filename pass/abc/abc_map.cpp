@@ -54,6 +54,23 @@ std::string subst(std::string s, std::string_view tok, std::string_view val) {
   return s;
 }
 
+// Adapter exposing the per-region ABC gate constructors as the arith::Ops
+// bit-algebra (Bit = Abc_Obj_t*), so the templated adder/comparator builders in
+// abc_arith.hpp drive ABC without any ABC dependency of their own (2i-abc_arith).
+struct Abc_bit_ops {
+  std::function<Abc_Obj_t*(bool)>                    konst;
+  std::function<Abc_Obj_t*(Abc_Obj_t*)>              not_;
+  std::function<Abc_Obj_t*(Abc_Obj_t*, Abc_Obj_t*)> and_fn;
+  std::function<Abc_Obj_t*(Abc_Obj_t*, Abc_Obj_t*)> or_fn;
+  std::function<Abc_Obj_t*(Abc_Obj_t*, Abc_Obj_t*)> xor_fn;
+  Abc_Obj_t*                                         zero() { return konst(false); }
+  Abc_Obj_t*                                         one() { return konst(true); }
+  Abc_Obj_t*                                         inv(Abc_Obj_t* a) { return not_(a); }
+  Abc_Obj_t*                                         and_(Abc_Obj_t* a, Abc_Obj_t* b) { return and_fn(a, b); }
+  Abc_Obj_t*                                         or_(Abc_Obj_t* a, Abc_Obj_t* b) { return or_fn(a, b); }
+  Abc_Obj_t*                                         xor_(Abc_Obj_t* a, Abc_Obj_t* b) { return xor_fn(a, b); }
+};
+
 }  // namespace
 
 std::string Mapper::comb_flow() const {
@@ -165,6 +182,14 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     slots[eff] = net;
     return net;
   };
+
+  // arith::Ops view over the gate constructors, for the Sum/comparator builders.
+  Abc_bit_ops ops;
+  ops.konst  = abc_const_bit;
+  ops.not_   = abc_not;
+  ops.and_fn = [&](Abc_Obj_t* x, Abc_Obj_t* y) { return abc_bin(x, y, '&'); };
+  ops.or_fn  = [&](Abc_Obj_t* x, Abc_Obj_t* y) { return abc_bin(x, y, '|'); };
+  ops.xor_fn = [&](Abc_Obj_t* x, Abc_Obj_t* y) { return abc_bin(x, y, '^'); };
 
   // --- region inputs -> per-bit ABC PIs (creation order == readback order) ---
   std::vector<std::pair<size_t, int>> pi_order;  // PI index -> (input port, bit)
@@ -330,10 +355,103 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           slots[b] = abc_bit(a_drv, std::min(b, from_bit));
         }
       }
+    } else if (op == Ntype_op::Sum) {
+      // result = sum(A terms, pid 0) - sum(B terms, pid 1), at width out_bits
+      // (the bitwidth-resolved result width, wide enough for carry growth).
+      // Each operand is sign/zero-extended to that width by abc_bit; A terms
+      // accumulate (cin=0), B terms subtract via two's complement (~b + 1).
+      std::vector<hhds::Pin_class> a_drv;
+      std::vector<hhds::Pin_class> b_drv;
+      for (const auto& e : n.inp_edges()) {
+        if (e.sink.get_port_id() == 0) {
+          a_drv.push_back(e.driver);
+        } else if (e.sink.get_port_id() == 1) {
+          b_drv.push_back(e.driver);
+        }
+      }
+      int  bs     = opts_.block_size > 0 ? opts_.block_size : arith::default_block_size(out_bits);
+      auto extend = [&](const hhds::Pin_class& d) {
+        std::vector<Abc_Obj_t*> v(out_bits);
+        for (int i = 0; i < out_bits; ++i) {
+          v[i] = abc_bit(d, i);
+        }
+        return v;
+      };
+      std::vector<Abc_Obj_t*> acc;
+      size_t                  ai = 0;
+      if (a_drv.empty()) {
+        acc.assign(out_bits, abc_const_bit(false));
+      } else {
+        acc = extend(a_drv[0]);
+        ai  = 1;
+      }
+      for (; ai < a_drv.size(); ++ai) {
+        acc = arith::build_add(opts_.adder, bs, ops, acc, extend(a_drv[ai]), abc_const_bit(false)).sum;
+      }
+      for (const auto& bd : b_drv) {
+        acc = arith::build_add(opts_.adder, bs, ops, acc, arith::bv_invert(ops, extend(bd)), abc_const_bit(true)).sum;
+      }
+      for (int b = 0; b < out_bits; ++b) {
+        slots[b] = acc[b];
+      }
+    } else if (op == Ntype_op::LT || op == Ntype_op::GT) {
+      // 1-bit result. pid 0 = a, pid 1 = b; LT = a<b, GT = a>b == b<a. Compare
+      // at max(width)+1 (one guard bit so a-b can't overflow the signed range).
+      hhds::Pin_class a_d;
+      hhds::Pin_class b_d;
+      for (const auto& e : n.inp_edges()) {
+        if (e.sink.get_port_id() == 0) {
+          a_d = e.driver;
+        } else if (e.sink.get_port_id() == 1) {
+          b_d = e.driver;
+        }
+      }
+      bool                    uns = gu::is_unsign(a_d) && gu::is_unsign(b_d);
+      int                     w   = std::max(gu::bits_of(a_d), gu::bits_of(b_d)) + 1;
+      int                     bs  = opts_.block_size > 0 ? opts_.block_size : arith::default_block_size(w);
+      std::vector<Abc_Obj_t*> av(w);
+      std::vector<Abc_Obj_t*> bv(w);
+      for (int i = 0; i < w; ++i) {
+        av[i] = abc_bit(a_d, i);
+        bv[i] = abc_bit(b_d, i);
+      }
+      Abc_Obj_t* res = op == Ntype_op::LT ? arith::build_lt(opts_.adder, bs, ops, av, bv, uns)
+                                          : arith::build_lt(opts_.adder, bs, ops, bv, av, uns);
+      slots[0]       = res;
+      for (int b = 1; b < out_bits; ++b) {
+        slots[b] = abc_const_bit(false);
+      }
+    } else if (op == Ntype_op::EQ) {
+      // 1-bit result; n-ary all-equal (operands on pid 0). Compare at
+      // max(width)+1 so sign-extension differences are caught.
+      std::vector<hhds::Pin_class> ds;
+      for (const auto& e : n.inp_edges()) {
+        ds.push_back(e.driver);
+      }
+      if (ds.size() <= 1) {
+        slots[0] = abc_const_bit(true);
+      } else {
+        int w = 0;
+        for (const auto& d : ds) {
+          w = std::max(w, gu::bits_of(d));
+        }
+        ++w;
+        std::vector<std::vector<Abc_Obj_t*>> operands(ds.size());
+        for (size_t k = 0; k < ds.size(); ++k) {
+          operands[k].resize(w);
+          for (int i = 0; i < w; ++i) {
+            operands[k][i] = abc_bit(ds[k], i);
+          }
+        }
+        slots[0] = arith::build_eq(ops, operands);
+      }
+      for (int b = 1; b < out_bits; ++b) {
+        slots[b] = abc_const_bit(false);
+      }
     } else {
       livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
           .msg("pass.abc: cell '{}' in region '{}' has no combinational bit-blast yet "
-               "(supported: and/or/xor/not/mux/hotmux/const)",
+               "(supported: and/or/xor/not/mux/hotmux/sum/lt/gt/eq/get_mask/set_mask/sext/const)",
                Ntype::get_name(op),
                rb.module_name)
           .emit();

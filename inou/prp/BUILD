@@ -35,6 +35,7 @@ filegroup(
     name = "abc_tests",
     srcs = [
         "tests/abc/test.lib",
+        "tests/pyrope/abc_arith.prp",
         "tests/pyrope/abc_comb.prp",
     ],
     visibility = ["//visibility:public"],

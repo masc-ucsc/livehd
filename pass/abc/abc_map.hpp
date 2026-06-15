@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include "abc_arith.hpp"  // arith::Adder_kind
 #include "hhds/graph.hpp"
 #include "pass_partition.hpp"  // livehd::partition::Region_body
 
@@ -18,6 +19,10 @@ struct Map_options {
   std::string delay;         // {D} substitution
   std::string load;          // {L} substitution
   bool        verbose = false;
+  // Combinational adder architecture for Sum/comparators (2i-abc_arith) and the
+  // CSKA/CLA block width (0 => auto from the operating width).
+  arith::Adder_kind adder      = arith::Adder_kind::rca;
+  int               block_size = 0;
 };
 
 // Stats-only mode (no --emit-dir): summarize what would be mapped.

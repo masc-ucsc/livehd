@@ -57,12 +57,14 @@
 </ul>
 <p><strong>Remaining:</strong> Subtask 5 (<code>seq=true</code>: flops→latches, clock/reset strip + reattach,
   single-root flop-name remap, sequential default flow) — currently a loud <code>seq-unsupported</code>
-  diagnostic. Also pending: arithmetic-cell bit-blast (<code>sum/mult/cmp/shift</code> — today a loud
-  <code>unsupported-cell</code> diag) — <strong>promoted to its own task <a href="2i-abc_arith.html">2i-abc_arith</a></strong>
-  (adder + comparators with selectable adder architectures first; <code>mult/div/mod</code>/shift stay
-  unsupported, barrel shifter next). Also still pending here: hierarchical regions containing a
-  <code>Sub</code> as an ABC pseudo-boundary, and per-region <code>flow</code> overrides. <em>Do not delete this
-  page until seq + arithmetic land.</em></p>
+  diagnostic. Arithmetic-cell bit-blast partially <strong>LANDED</strong> (2i-abc_arith): <code>Sum</code> (add/subtract,
+  multi-operand) + comparators <code>LT</code>/<code>GT</code>/<code>EQ</code> now expand into gate networks via
+  the selectable adder library <code>pass/abc/abc_arith.hpp</code> (<code>--set pass.abc.adder=rca|cska|cla</code>,
+  <code>block_size</code>), LEC-verified per architecture. Still <code>unsupported-cell</code>:
+  <code>Mult</code>/<code>Div</code>/<code>Mod</code> and the variable shifts <code>SHL</code>/<code>SRA</code>/<code>Ror</code>
+  (the architecture-selectable barrel shifter is the next task — see the Pre&nbsp;TODO). Also still pending here:
+  <code>seq=true</code>, hierarchical regions containing a <code>Sub</code> as an ABC pseudo-boundary, and
+  per-region <code>flow</code> overrides. <em>Do not delete this page until seq lands.</em></p>
 
 <h2>Conceptual flow</h2>
 <pre><code>lhd elaborate prp/verilog files                       --emit-dir lg:orig

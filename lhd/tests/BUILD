@@ -108,6 +108,15 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
+# 2i-abc_arith: every selectable adder architecture (rca/cska/cla + block_size)
+# tech-maps the arithmetic fixture and is LEC-equivalent to the original logic.
+sh_test(
+    name = "lhd_abc_arith_test",
+    size = "large",
+    srcs = ["lhd_abc_arith_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
 # 2c-color: every coloring algorithm (acyclic|synth|path|mincut) + continuous +
 # clear run through the lhd CLI on a real design.
 sh_test(

@@ -2,8 +2,10 @@
 
 #include "pass_abc.hpp"
 
+#include <charconv>
 #include <cstdlib>
 #include <string>
+#include <system_error>
 
 #include "abc_map.hpp"
 #include "diag.hpp"
@@ -24,6 +26,8 @@ void Pass_abc::setup() {
   m.add_label_optional("delay", "{D} substitution in flow", "");
   m.add_label_optional("load", "{L} substitution in flow", "");
   m.add_label_optional("verbose", "per-module ABC stats", "false");
+  m.add_label_optional("adder", "combinational adder architecture for Sum/comparators: rca|cska|cla", "rca");
+  m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
   register_pass(m);
 }
 
@@ -55,6 +59,28 @@ void Pass_abc::work(Eprp_var& var) {
   auto delay   = std::string{var.get("delay", "")};
   auto load    = std::string{var.get("load", "")};
   bool verbose = truthy(var.get("verbose", "false"));
+  auto adder_s = std::string{var.get("adder", "rca")};
+  auto bs_s    = std::string{var.get("block_size", "0")};
+
+  auto adder = livehd::abc::arith::parse_adder_kind(adder_s);
+  if (!adder.has_value()) {
+    livehd::diag::err("pass.abc", "bad-adder", "usage")
+        .msg("pass.abc: unknown adder '{}' (use rca|cska|cla)", adder_s)
+        .fatal();
+    return;
+  }
+  int block_size = 0;
+  {
+    auto* b = bs_s.data();
+    auto* e = bs_s.data() + bs_s.size();
+    auto [p, ec] = std::from_chars(b, e, block_size);
+    if (ec != std::errc{} || p != e || block_size < 0) {
+      livehd::diag::err("pass.abc", "bad-block-size", "usage")
+          .msg("pass.abc: block_size must be a non-negative integer, got '{}'", bs_s)
+          .fatal();
+      return;
+    }
+  }
 
   if (seq) {
     // Sequential mapping (flops -> ABC latches, name preservation, dretime) is a
@@ -66,11 +92,13 @@ void Pass_abc::work(Eprp_var& var) {
     return;
   }
   livehd::abc::Map_options opts;
-  opts.flow    = flow;
-  opts.seq     = seq;
-  opts.delay   = delay;
-  opts.load    = load;
-  opts.verbose = verbose;
+  opts.flow       = flow;
+  opts.seq        = seq;
+  opts.delay      = delay;
+  opts.load       = load;
+  opts.verbose    = verbose;
+  opts.adder      = adder.value();
+  opts.block_size = block_size;
 
   if (out.empty()) {
     // Stats-only (no --emit-dir): no Liberty needed.

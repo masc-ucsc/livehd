@@ -1,0 +1,18 @@
+/*
+:name: abc_arith
+:type: lgraph compile
+*/
+
+// Flat combinational arithmetic fixture for pass.abc (task 2i-abc_arith):
+// adders (2- and 3-operand Sum) plus the comparators LT/GT/EQ, with no
+// hierarchy and no narrowing (every output is wide enough to hold its value),
+// so the design stays a clean combinational cone that ABC can bit-blast with
+// the selected adder architecture, optimize and technology-map. The
+// comparators exercise the subtractor path of the same adder framework.
+mod abc_arith(a:u8, b:u8, c:u8) -> (sum:u9@[0], sum3:u10@[0], lt:u1@[0], gt:u1@[0], eq:u1@[0]) {
+  sum  = a + b
+  sum3 = a + b + c
+  lt   = a < b
+  gt   = a > b
+  eq   = a == b
+}
