@@ -121,16 +121,25 @@
   the merge/extend tests compare by name.</li>
 </ul>
 
-<h2>Subtasks — still pending</h2>
+<h2>Subtasks — landed (cont.)</h2>
 <ul>
-<li><strong>D — equiv test (runtime hardware splice).</strong> <code>splice_merge.prp</code> +
-  golden <code>.v</code> exist but are <strong>excluded</strong> from the equiv harness (in
-  <code>inou/prp/BUILD</code>): tolg has no <code>tuple_concat</code> lowering, so a spliced
-  bundle's RUNTIME field wires (<code>...a</code> where <code>a</code>'s fields are comb
-  inputs) are dropped and the LEC fails. Goes live once tolg gains a
-  <code>lower_tuple_concat</code> that merges each operand bundle's field wires.</li>
-<li><strong>E — docs TBD.</strong> The <code>15-tbd.md</code> / <code>03-bundle.md</code>
-  <code>...</code> rows live in the <code>../docs</code> repo, which is not checked out here.</li>
+<li><strong>D — equiv test LANDED 2026-06-14.</strong> Per the user's rule
+  (<em>tuple ops are always comptime; a tuple op that needs runtime is a compile
+  failure</em>) tolg gets NO runtime <code>tuple_concat</code> lowering. Instead the
+  runner flattens the splice at comptime: <code>process_tuple_concat</code> now
+  propagates each operand's runtime field <code>tuple_slot_ref</code>s into the
+  result (named keys as-is, positional offset by the merged count), so
+  <code>m.p</code>/<code>m.q</code> fold straight to the comb-input wires
+  (<code>in1</code>/<code>in2</code>) and the splice resolves to flat
+  <code>(in1+in2+7)&lt;&lt;1</code>. The residual (dead) <code>tuple_concat</code> is
+  recorded by a new <code>lower_tuple_concat</code> in tolg as comptime
+  bookkeeping (mirrors <code>lower_tuple_add</code> — merges operand records,
+  emits NO hardware), so tolg no longer warns/drops wires.
+  <code>splice_merge</code> is un-excluded in <code>inou/prp/BUILD</code> and LECs;
+  full prp suite 474/474, no regressions.</li>
+<li><strong>E — docs TBD dropped.</strong> Removed the <code>...</code> splice TBD
+  rows from <code>15-tbd.md</code> and the WARNING admonition in
+  <code>03-bundle.md</code> (in <code>../docs</code>).</li>
 </ul>
 
 <h2>Equiv test spec (subtask D)</h2>
