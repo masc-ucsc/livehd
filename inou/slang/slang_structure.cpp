@@ -999,6 +999,35 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       body = &body->as<slang::ast::BlockStatement>().body;
       continue;
     }
+    // A named block may carry local declarations before the reset if/else
+    // (`begin : p int errs; if (!rst) ... end`). Hoist the declarations into the
+    // prologue (lowered with the clocked body) and descend into the lone
+    // conditional, so the reset-rung extraction still sees `if (rst) ... else`.
+    if (body->kind == StatementKind::List) {
+      const slang::ast::Statement* cond = nullptr;
+      bool                         ok   = true;
+      std::vector<const slang::ast::Statement*> pre;
+      for (const auto* sub : body->as<slang::ast::StatementList>().list) {
+        if (sub->kind == StatementKind::Empty) {
+          continue;
+        }
+        if (sub->kind == StatementKind::VariableDeclaration) {
+          pre.push_back(sub);
+        } else if (sub->kind == StatementKind::Conditional && cond == nullptr) {
+          cond = sub;
+        } else {
+          ok = false;
+          break;
+        }
+      }
+      if (ok && cond != nullptr) {
+        for (const auto* p : pre) {
+          prologue.push_back(p);
+        }
+        body = cond;
+        continue;
+      }
+    }
     if (body->kind != StatementKind::Conditional) {
       emit_unsupported(body->sourceRange, "unsupported-async-pattern",
                        "expected `if (rst) ... else ...` rungs for the extra edge triggers",

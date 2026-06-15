@@ -15,6 +15,7 @@ SLANG_LADDER = {
     "arith": "lec",
     "arraycells": "error",  # instance arrays / paramod shapes not lowered yet
     "assigns": "lec",
+    "async_localdecl": "lec",  # async-reset always_ff w/ a block-local temp before the if/else
     "common_sub": "lec",
     "compare": "lec",
     "compare2": "lec",
