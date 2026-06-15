@@ -10,6 +10,26 @@
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
 <h1><strong class="item-id">2f-lnimport</strong> Test LNAST-level <code>import</code> (pyrope and slang units)</h1>
+<p style="padding:.6em;background:#e6ffe6;border-left:4px solid #2a2"><strong>✅ LANDED 2026-06-14.</strong>
+  First-ever import tests added under <code>inou/prp/tests/imports/</code>
+  (multi-file via the <code>:files:</code> header, bundled into the bazel target
+  data): <code>import_basic</code> (whole pub namespace
+  <code>import("lib_add")</code> AND single-entry dot selector
+  <code>import("lib_add.my_add")</code>), <code>import_not_pub</code> (a non-pub
+  entry errors), <code>import_cycle</code> (a mutual cycle makes no progress and
+  errors). Fix: the dot-selector form was unhandled — <code>call_resolver</code>
+  now splits unit/member and binds the one pub entry (lambda → qualified tree
+  name; value → folded value) or emits <code>import-not-pub</code>. Full prp
+  suite 477/477, no regressions.</p>
+<p style="padding:.6em;background:#fff7e6;border-left:4px solid #e90"><strong>Note (slang unit):</strong>
+  the in-invocation slang <code>.v</code>+<code>.prp</code> mix below is
+  <strong>intentionally not done at the ln: level</strong> — <code>lhd</code>
+  deliberately forbids mixing pyrope and verilog sources in one invocation, and
+  there is no LNAST-artifact input reader. Verilog↔Pyrope interop is provided by
+  the decoupled <a href="2f-lgimport.html">2f-lgimport</a> <code>lg:</code>
+  two-step path (compile the <code>.v</code> separately, then
+  <code>import("lg:add_sub")</code>), which is also what
+  <a href="2f-defer.html">2f-defer</a>'s mix test uses.</p>
 <p>Plain <code>import</code> resolves at the LNAST level: the frontend
   translates it (<code>process_import_statement</code>), <code>lhd scan</code>
   lists imports, and the upass resolver consumes them — but <strong>no test
