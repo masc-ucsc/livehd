@@ -18,6 +18,7 @@
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
 #include "upass_constprop.hpp"
+#include "upass_func_extract.hpp"  // front-end lambda split (2g)
 #include "upass_pipe.hpp"
 #include "upass_runner.hpp"
 #include "upass_semacheck.hpp"  // NOLINT: ensures plugin "semacheck" is linked
@@ -91,7 +92,6 @@ void Pass_upass::setup() {
                         "rename multi-assigned user variables to SSA-unique names",
                         "true");
   m1.add_label_optional("assert", "enable assert test", "true");
-  m1.add_label_optional("func_extract", "enable func_extract upass (spawn helper lnasts for comb func_defs)", "true");
   m1.add_label_optional("typecheck", "enable typecheck upass (kind/operator/nil checks; runs after attributes)", "true");
   m1.add_label_optional("semacheck",
                         "enable semacheck upass (semantic legality: read-only-attr writes, declare-once/shadowing; "
@@ -219,9 +219,6 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   auto semacheck_txt = get_label("semacheck");
   bool do_semacheck  = semacheck_txt != "false" && semacheck_txt != "0";
 
-  auto func_extract_txt = get_label("func_extract");
-  bool do_func_extract  = func_extract_txt != "false" && func_extract_txt != "0";
-
   auto typecheck_txt = get_label("typecheck");
   bool do_typecheck  = typecheck_txt != "false" && typecheck_txt != "0";
 
@@ -279,10 +276,6 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   // is irrelevant — only that it is registered before the walk starts.
   if (do_semacheck) {
     upass_order.emplace_back("semacheck");
-  }
-
-  if (do_func_extract) {
-    upass_order.emplace_back("func_extract");
   }
 
   // Phase 1 of the attribute pass runs before constprop so sticky/attribute
@@ -374,39 +367,28 @@ void Pass_upass::work(Eprp_var& var) {
     uPass_constprop::set_ambiguous_units(std::move(ambiguous));
   }
 
-  // Capture original entry-point count BEFORE func_extract spawns helper
-  // lnasts. Anything appended past this index in the func_extract loop is
-  // a function-body spawn — used below to gate the verifier off for
-  // spawn lnasts unless verifier_include_funcs:true was passed.
+  // Capture original entry-point count BEFORE the lambda split spawns helper
+  // lnasts. Anything appended past this index is a function-body spawn — used
+  // below to gate the verifier off for spawn lnasts (and to mark them
+  // is_function_body) unless verifier_include_funcs:true was passed.
   const auto original_lnast_count = var.lnasts.size();
 
-  const auto extract_it = std::find(up.upass_order.begin(), up.upass_order.end(), "func_extract");
-  if (extract_it != up.upass_order.end()) {
-    std::vector<std::string> extract_order{"func_extract"};
-    for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
-      const auto                  ln = var.lnasts.at(idx);
-      // Excerpt provider for any diagnostic emitted while this unit is walked.
-      livehd::diag::Locator_scope diag_scope(&ln->source_locator());
-      auto                        lm     = std::make_shared<upass::Lnast_manager>(ln);
-      auto                        runner = uPass_runner(lm, extract_order, up.pass_options);
-      if (runner.has_configuration_error()) {
-        fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
-      }
-      runner.run();
-
-      auto staged = runner.take_staging();
-      if (staged) {
-        // In-place body swap via TreeIO::replace. `ln` (the same shared_ptr
-        // already in var.lnasts) now refers to the rewritten tree; the
-        // staging wrapper is dropped.
-        ln->replace_body(staged->tree_ptr());
-      }
-      auto new_lnasts = runner.take_new_lnasts();
-      for (const auto& new_ln : new_lnasts) {
-        var.add(new_ln);
-      }
+  // ── Front-end lambda split (2g). Pull every comb/pipe/mod func_def out of
+  // each entry-point tree into its own `top -> [io, stmts]` Lnast and drop it
+  // from the module body, so the main walk + tolg never see func_defs. This is
+  // a direct, materialize-free tree surgery replacing the old runner-based
+  // func_extract pass: a no-op on function-free inputs (where the old pass
+  // re-materialized the whole module tree regardless — the dominant cost), and
+  // it never rebuilds a tree that dropped nothing. Iterate by index up to the
+  // ORIGINAL count: the appended trees already arrive in extracted unit form
+  // and carry no func_def to split. SSA below harvests io_meta from them.
+  for (std::size_t idx = 0; idx < original_lnast_count; ++idx) {
+    const auto                  ln = var.lnasts.at(idx);
+    // Excerpt provider for any diagnostic emitted while this unit is split.
+    livehd::diag::Locator_scope diag_scope(&ln->source_locator());
+    for (const auto& new_ln : upass::extract_lambda_functions(ln)) {
+      var.add(new_ln);
     }
-    up.upass_order.erase(std::remove(up.upass_order.begin(), up.upass_order.end(), "func_extract"), up.upass_order.end());
   }
 
   if (up.upass_order.empty()) {
@@ -414,10 +396,10 @@ void Pass_upass::work(Eprp_var& var) {
     return;
   }
 
-  // ── SSA normalisation (ssa:1): run after func_extract, before the main
+  // ── SSA normalisation (ssa:1): run after the lambda split, before the main
   // runner.  Harvests I/O metadata into lnast->io_meta(), expands I/O
   // tuple_add nodes into a flat stmts body, drops the top-level 'io' node.
-  // Only function-body LNASTs (the ones func_extract spawned) have the
+  // Only function-body LNASTs (the ones the split spawned) have the
   // io+stmts layout; run() is a no-op on top-level LNASTs.
   if (up.run_ssa) {
     for (const auto& ln : var.lnasts) {

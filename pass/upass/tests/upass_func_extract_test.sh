@@ -1,8 +1,9 @@
 #!/bin/sh
-# func_extract via the lhd kernel: a `comb` lambda is extracted into its own
-# LNAST unit (one <unit>.lnast file in the lnast-dump: dir replaces the old
-# lgshell stdout unit listing), the original func_def is removed, and the
-# resolved order comes from the upass per-step log.
+# Lambda split via the lhd kernel (2g): a `comb` lambda is extracted into its
+# own LNAST unit (one <unit>.lnast file in the lnast-dump: dir), and the
+# original func_def is removed from the module body. The split is now a
+# front-end tree surgery at the pipeline entry (not a runner pass), so there is
+# no "resolved order: func_extract" log line to check — assert the IR instead.
 
 set -eu
 
@@ -18,12 +19,6 @@ EMPTY_W="${TEST_TMPDIR}/w_empty"
   --set upass.constprop=false --set upass.assert=false --set upass.verifier=false --set upass.ssa=false \
   --emit-dir lnast-dump:"${DUMP}/" --workdir "${W}" -q \
   --result-json "${TEST_TMPDIR}/result.json" >/dev/null 2>&1
-
-if ! grep -q "uPass - resolved order: func_extract" "${W}"/logs/*pass_upass*.log; then
-  echo "FAIL: expected func_extract-only order not found"
-  cat "${W}"/logs/*pass_upass*.log
-  exit 1
-fi
 
 if [ ! -f "${DUMP}/simple.top.lnast" ]; then
   echo "FAIL: extracted function LNAST simple.top not found"
