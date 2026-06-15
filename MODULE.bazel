@@ -150,18 +150,25 @@ git_override(
 # LiveHD's core diag.hpp / parser.hpp); see //packages:prpparse.BUILD.
 # To bump the pin, recompute integrity via:
 #   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip | openssl dgst -sha256 -binary | base64
-http_archive(
+# 2f-stream: LOCAL OVERRIDE for co-development of the streaming seam
+# (Ast_arena::reset + Parser::parse_next). The local ../tree-sitter-pyrope is at
+# the pinned commit 0f4e69f + the 2f-stream edits. RESTORE the http_archive pin
+# below once those edits are pushed (recompute integrity per the curl line above):
+#   strip_prefix = "tree-sitter-pyrope-<commit>/prpparse"
+#   urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip"]
+new_local_repository(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-jWNdIxpybeecNDg+aJYxi0VXJz/IURCLlFTuhwNxDVg=",
-    strip_prefix = "tree-sitter-pyrope-0f4e69f28e8abb9075c5e3ce1e5b3864df85bfb1/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/0f4e69f28e8abb9075c5e3ce1e5b3864df85bfb1.zip"],
+    path = "../tree-sitter-pyrope/prpparse",
 )
-# For local prpparse co-development, swap the http_archive above for:
-# new_local_repository(
+# To bump the pin, recompute integrity via:
+#   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip | openssl dgst -sha256 -binary | base64
+# http_archive(
 #     name = "prpparse",
 #     build_file = "//packages:prpparse.BUILD",
-#     path = "../tree-sitter-pyrope/prpparse",
+#     integrity = "sha256-jWNdIxpybeecNDg+aJYxi0VXJz/IURCLlFTuhwNxDVg=",
+#     strip_prefix = "tree-sitter-pyrope-0f4e69f28e8abb9075c5e3ce1e5b3864df85bfb1/prpparse",
+#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/0f4e69f28e8abb9075c5e3ce1e5b3864df85bfb1.zip"],
 # )
 
 # OpenTimer

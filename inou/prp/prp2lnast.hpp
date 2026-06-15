@@ -77,6 +77,13 @@ protected:
   // node carries no loc.
   [[noreturn]] void report_error(const Lnast_nid& nid, std::string_view code, std::string_view category, std::string message,
                                  std::string_view hint = {}) const;
+  // Located-error variant from a pre-captured span (2f-stream): the deferred
+  // undefined-read check runs after the parse arena was reset per construct, so
+  // the originating TSNode is gone — the read site's span was captured into
+  // Read_site at record time and is replayed here.
+  [[noreturn]] void report_error_at(uint32_t start_byte, uint32_t end_byte, uint32_t start_line, uint32_t start_col,
+                                    uint32_t end_line, uint32_t end_col, std::string_view code, std::string_view category,
+                                    std::string message, std::string_view hint = {}) const;
 
   // Stamp `node`'s span as the LNAST node's SourceId (minted through
   // the Lnast's Source_locator), overriding the statement-level pending id
@@ -198,7 +205,12 @@ protected:
   // params/outputs + enclosing comptime bindings only).
   struct Read_site {
     std::string name;
-    TSNode      node;
+    // Captured diagnostic span of the read (start/end byte + 1-based line/col),
+    // taken at record time. Streaming (2f-stream) resets the parse arena between
+    // top-level constructs, so the originating TSNode (Ast*) does NOT outlive the
+    // walk — the undefined-read check runs afterward and emits from these fields.
+    uint32_t    start_byte = 0, end_byte = 0;
+    uint32_t    start_line = 0, start_col = 0, end_line = 0, end_col = 0;
     Lnast_nid   scope;
     Lnast_nid   before;
     // 2f-defer — the base of an `x.[defer]` read: defer reads the END-of-cycle
@@ -251,6 +263,15 @@ protected:
   // (2f-return_leak): a guarded `if cond { … return }` pushes the rest of the
   // scope into a synthesized `else`; a bare `return` drops the rest.
   void lower_children_range(TSNode parent, uint32_t from);
+  // Recover the hidden `wrap`/`sat` overflow keyword from the raw source gap
+  // `[prev_end, gap_end)` before a statement (the prpparse CST does not
+  // materialize it). Returns "wrap"/"sat"/"" (last identifier run in the gap,
+  // comments stripped). Shared by lower_children_range and the streaming
+  // top-level driver (2f-stream).
+  std::string_view scan_overflow_in_gap(uint32_t prev_end, uint32_t gap_end) const;
+  // 2f-stream top-level driver: lower one construct pulled from the parse stream,
+  // tracking the overflow-prefix gap scan + prev_end across calls.
+  void lower_streamed_top_level(TSNode c, std::string_view& pending_overflow, uint32_t& prev_end);
   bool is_guarded_return_if(TSNode s, TSNode& cond_out, TSNode& then_out);
   void process_assignment(TSNode n);
   void process_declaration_statement(TSNode n);
@@ -433,8 +454,16 @@ protected:
   // tuple's named fields are spliced in place) at lowering time — `enum(...a,
   // b=3, ...c)` lowers exactly like `enum("field", b=3, const foo=4)`
   // (2f-enum group D). Recorded only for top-level `const` decls with a simple
-  // identifier lvalue.
+  // identifier lvalue. The RHS subtree is DEEP-COPIED into `retained_arena_`
+  // (below) so it survives the streaming arena reset between constructs — the
+  // spread can be in a LATER top-level statement than the const.
   std::unordered_map<std::string, TSNode> const_rvalue_nodes_;
+  // Persistent arena holding the cloned `const_rvalue_nodes_` RHS subtrees. The
+  // streaming parser recycles its own arena per construct (2f-stream), so any
+  // CST node a later statement still needs is cloned here instead, keyed off the
+  // same `prp_buf` bytes (which outlive the parse). Small: only const string /
+  // tuple rvalues that an `enum(...)` spread might reference.
+  prpparse::Ast_arena retained_arena_;
 
   // Functions (comb/mod/pipe) declared with a `ref` parameter (e.g. `ref self`).
   // Such a call mutates the caller, so using its RESULT in a right-hand-side

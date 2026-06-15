@@ -91,13 +91,14 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, st
     prp_buf    = std::make_unique<prpparse::Source_buffer>(src_relpath.empty() ? src_filename : src_relpath,
                                                            prp_file);
     prp_parser = std::make_unique<prpparse::Parser>(*prp_buf);
-    const prpparse::Ast* root = prp_parser->parse_ast();
-    ts_root_node              = TSNode{root, prp_buf.get()};
 
-    // dump();  // parse tree; enable for debugging the grammar
-
-    // check_parse_errors() is moot: prpparse fails fast (no MISSING/ERROR nodes),
-    // so a returning parse is well-formed.
+    // 2f-stream: process_description pulls one top-level construct at a time from
+    // prp_parser->parse_next() and lowers it, recycling the parser's CST arena
+    // before the next — so no whole-file parse tree is built on the LiveHD path
+    // (resident parse-tree memory stays bounded to one construct). The CLI /
+    // --sexp / differential-oracle paths still use the whole-file parse_ast() /
+    // parse() builders. check_parse_errors() is moot: prpparse fails fast (no
+    // MISSING/ERROR nodes), so a returning parse is well-formed.
 
     process_description();  // runs the scope checks internally, before rewrite_decls_to_declare
 
@@ -149,6 +150,29 @@ void Prp2lnast::report_error(const TSNode& node, std::string_view code, std::str
   auto msg_copy = message;
   // Stage the rich record; the throw path (parser_error_int -> sink.flush) emits
   // it exactly once and prints the `livehd: error:` line.
+  livehd::diag::sink().stage(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                                      .code     = std::string(code),
+                                                      .category = std::string(category),
+                                                      .pass     = "inou.prp",
+                                                      .message  = std::move(message),
+                                                      .span     = std::move(span),
+                                                      .hint     = std::string(hint)});
+  throw Eprp::parser_error(Pass::eprp, msg_copy);
+}
+
+void Prp2lnast::report_error_at(uint32_t start_byte, uint32_t end_byte, uint32_t start_line, uint32_t start_col,
+                                uint32_t end_line, uint32_t end_col, std::string_view code, std::string_view category,
+                                std::string message, std::string_view hint) const {
+  livehd::diag::Span span;
+  span.file       = src_filename;
+  span.start_byte = start_byte;
+  span.end_byte   = end_byte;
+  span.start_line = start_line;
+  span.start_col  = start_col;
+  span.end_line   = end_line;
+  span.end_col    = end_col;
+
+  auto msg_copy = message;
   livehd::diag::sink().stage(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
                                                       .code     = std::string(code),
                                                       .category = std::string(category),
@@ -691,13 +715,13 @@ void Prp2lnast::check_undefined_reads() const {
       continue;
     }
     // report_error throws — the first undefined read aborts the parse. The
-    // TSNode gives a located diagnostic (the read site).
-    report_error(rs.node,
-                 "undefined-read",
-                 "name",
-                 std::format("read of undefined variable '{}' (not visible here: declared later, out of scope, or never)", rs.name),
-                 "declare it with `mut`/`const`/`reg` before use — a variable is visible from its "
-                 "declaration to the end of its scope");
+    // pre-captured span (2f-stream: the originating TSNode is gone) locates it.
+    report_error_at(rs.start_byte, rs.end_byte, rs.start_line, rs.start_col, rs.end_line, rs.end_col,
+                    "undefined-read",
+                    "name",
+                    std::format("read of undefined variable '{}' (not visible here: declared later, out of scope, or never)", rs.name),
+                    "declare it with `mut`/`const`/`reg` before use — a variable is visible from its "
+                    "declaration to the end of its scope");
   }
 }
 
@@ -740,9 +764,55 @@ inline TSNode Prp2lnast::child_by_field(const TSNode& node, const char* field) c
 
 // ---------------- Top level ----------------
 
+// 2f-stream top-level driver: lower ONE construct pulled from the parse stream.
+// Mirrors the lower_children_range loop body for the file scope — the hidden
+// wrap/sat overflow-prefix gap scan + process_statement — but NOT the early-
+// `return` rewrite, which is inert at file scope (`return` is only valid inside a
+// function body, where return_flag_name_ is set; the nested scopes that can carry
+// a return still go through lower_children_range, which keeps the rewrite).
+void Prp2lnast::lower_streamed_top_level(TSNode c, std::string_view& pending_overflow, uint32_t& prev_end) {
+  using namespace std::string_view_literals;
+  std::string_view t(ts_node_type(c));
+
+  if (!ts_node_is_named(c)) {  // defensive: the stream yields named statements
+    if (t == "wrap"sv || t == "sat"sv) {
+      pending_overflow = t;
+    }
+    return;
+  }
+  // A scope_statement already consumed as a lambda body must not re-walk (a
+  // tree-sitter-era shape; prpparse attaches the body to the lambda, so this is
+  // inert here — kept for parity with lower_children_range).
+  if (consumed_lambda_body_starts.contains(ts_node_start_byte(c))) {
+    pending_overflow = {};
+    prev_end         = ts_node_end_byte(c);
+    return;
+  }
+  const bool is_assign = (t == "assignment"sv);
+  if (is_assign && pending_overflow.empty()) {
+    pending_overflow = scan_overflow_in_gap(prev_end, ts_node_start_byte(c));
+  }
+  if (is_assign && !pending_overflow.empty()) {
+    pending_overflow_kind = pending_overflow;
+  }
+  process_statement(c);
+  pending_overflow_kind = {};
+  pending_overflow      = {};
+  prev_end              = ts_node_end_byte(c);
+}
+
 void Prp2lnast::process_description() {
   builder.idx_stmts = lnast->add_child(lnast->get_root(), Lnast_ntype::create_stmts());
-  walk_statement_block(ts_root_node);
+  // 2f-stream: stream the file's top-level constructs. Each parse_next() yields
+  // one construct and recycles the previous one's CST arena, so the whole parse
+  // tree never exists at once. Nested scopes within a construct still lower via
+  // walk_statement_block/lower_children_range (the construct is fully alive
+  // during its own walk).
+  std::string_view pending_overflow;
+  uint32_t         prev_end = 0;  // start of buffer (matches lower_children_range's from==0)
+  while (const prpparse::Ast* c_ast = prp_parser->parse_next()) {
+    lower_streamed_top_level(TSNode{c_ast, prp_buf.get()}, pending_overflow, prev_end);
+  }
   // Run the scope checks on the PRE-rewrite tree: declarations are still in
   // their `attr_set(t,"type",K)` form here, with their source spans intact and
   // each scope's declarations un-merged. rewrite_decls_to_declare folds
@@ -775,6 +845,25 @@ Lnast_nid prp_copy_one_node(const Lnast& src, const Lnast_nid& src_nid, Lnast& d
     dst.set_srcid(nn, src.get_srcid(src_nid));
   }
   return nn;
+}
+
+// Deep-copy a prpparse CST subtree into `dst` (2f-stream). The streaming parser
+// recycles its arena per construct, so a CST node a later statement still needs
+// (an `enum(...NAME)` spread's const rvalue) is cloned into a persistent arena.
+// Byte offsets are preserved — they index the still-live source buffer — so
+// get_text() on the clone reads the same bytes. Call prpparse::link_parents on
+// the result before facade navigation.
+prpparse::Ast* clone_prp_subtree(prpparse::Ast_arena& dst, const prpparse::Ast* src) {
+  if (src == nullptr) {
+    return nullptr;
+  }
+  prpparse::Ast* c = dst.make(src->kind, src->start_byte, src->end_byte);
+  c->field         = src->field;
+  c->named         = src->named;
+  for (const prpparse::Ast* k : src->kids) {
+    c->add(clone_prp_subtree(dst, k));
+  }
+  return c;
 }
 
 // Faithful recursive subtree copy (no merging) — used for the TYPE subtree.
@@ -1031,54 +1120,56 @@ void Prp2lnast::walk_statement_block(TSNode parent) { lower_children_range(paren
 // function body, and the rewrite is per-scope, so a top-level guard (the common
 // idiom, e.g. adv_multi_out_07) is handled exactly; a `return` nested in a loop
 // or several `if` levels deep falls back to the prior behavior.
+std::string_view Prp2lnast::scan_overflow_in_gap(uint32_t prev_end, uint32_t gap_end) const {
+  using namespace std::string_view_literals;
+  if (prev_end >= gap_end) {
+    return {};
+  }
+  // The `wrap`/`sat` overflow keyword is an anonymous prefix the prpparse CST
+  // does not materialize, so recover it from the raw source gap before the
+  // statement. The gap can also hold the enclosing scope's opening `{` (first
+  // statement) or trailing `//`/`/* */` comments, so strip comments and take
+  // the LAST identifier run rather than requiring the whole gap to equal it.
+  std::string_view g = text_between(prev_end, gap_end);
+  std::string      stripped;
+  stripped.reserve(g.size());
+  for (size_t k = 0; k < g.size();) {
+    if (k + 1 < g.size() && g[k] == '/' && g[k + 1] == '/') {
+      while (k < g.size() && g[k] != '\n') ++k;  // line comment to EOL
+    } else if (k + 1 < g.size() && g[k] == '/' && g[k + 1] == '*') {
+      k += 2;
+      while (k + 1 < g.size() && !(g[k] == '*' && g[k + 1] == '/')) ++k;
+      if (k + 1 < g.size()) k += 2;  // past the closing */
+    } else {
+      stripped.push_back(g[k]);
+      ++k;
+    }
+  }
+  size_t end = stripped.size();
+  while (end > 0 && (stripped[end - 1] == ' ' || stripped[end - 1] == '\t' || stripped[end - 1] == '\r'
+                     || stripped[end - 1] == '\n')) {
+    --end;
+  }
+  size_t begin = end;
+  while (begin > 0 && ((stripped[begin - 1] >= 'a' && stripped[begin - 1] <= 'z')
+                       || (stripped[begin - 1] >= 'A' && stripped[begin - 1] <= 'Z'))) {
+    --begin;
+  }
+  std::string_view last(stripped.data() + begin, end - begin);
+  if (last == "wrap"sv) {
+    return "wrap"sv;
+  }
+  if (last == "sat"sv) {
+    return "sat"sv;
+  }
+  return {};
+}
+
 void Prp2lnast::lower_children_range(TSNode parent, uint32_t from) {
   using namespace std::string_view_literals;
   const uint32_t   nc = ts_node_child_count(parent);
   std::string_view pending_overflow;
   uint32_t         prev_end = (from == 0) ? ts_node_start_byte(parent) : ts_node_end_byte(ts_node_child(parent, from - 1));
-  auto             scan_overflow_in_gap = [&](uint32_t gap_end) -> std::string_view {
-    if (prev_end >= gap_end) {
-      return {};
-    }
-    // The `wrap`/`sat` overflow keyword is an anonymous prefix the prpparse CST
-    // does not materialize, so recover it from the raw source gap before the
-    // statement. The gap can also hold the enclosing scope's opening `{` (first
-    // statement) or trailing `//`/`/* */` comments, so strip comments and take
-    // the LAST identifier run rather than requiring the whole gap to equal it.
-    std::string_view g = text_between(prev_end, gap_end);
-    std::string      stripped;
-    stripped.reserve(g.size());
-    for (size_t k = 0; k < g.size();) {
-      if (k + 1 < g.size() && g[k] == '/' && g[k + 1] == '/') {
-        while (k < g.size() && g[k] != '\n') ++k;  // line comment to EOL
-      } else if (k + 1 < g.size() && g[k] == '/' && g[k + 1] == '*') {
-        k += 2;
-        while (k + 1 < g.size() && !(g[k] == '*' && g[k + 1] == '/')) ++k;
-        if (k + 1 < g.size()) k += 2;  // past the closing */
-      } else {
-        stripped.push_back(g[k]);
-        ++k;
-      }
-    }
-    size_t end = stripped.size();
-    while (end > 0 && (stripped[end - 1] == ' ' || stripped[end - 1] == '\t' || stripped[end - 1] == '\r'
-                       || stripped[end - 1] == '\n')) {
-      --end;
-    }
-    size_t begin = end;
-    while (begin > 0 && ((stripped[begin - 1] >= 'a' && stripped[begin - 1] <= 'z')
-                         || (stripped[begin - 1] >= 'A' && stripped[begin - 1] <= 'Z'))) {
-      --begin;
-    }
-    std::string_view last(stripped.data() + begin, end - begin);
-    if (last == "wrap"sv) {
-      return "wrap"sv;
-    }
-    if (last == "sat"sv) {
-      return "sat"sv;
-    }
-    return {};
-  };
   for (uint32_t i = from; i < nc; i++) {
     TSNode           c = ts_node_child(parent, i);
     std::string_view t(ts_node_type(c));
@@ -1169,7 +1260,7 @@ void Prp2lnast::lower_children_range(TSNode parent, uint32_t from) {
 
     const bool is_assign = (t == "assignment"sv);
     if (is_assign && pending_overflow.empty()) {
-      pending_overflow = scan_overflow_in_gap(ts_node_start_byte(c));
+      pending_overflow = scan_overflow_in_gap(prev_end, ts_node_start_byte(c));
     }
     if (is_assign && !pending_overflow.empty()) {
       pending_overflow_kind = pending_overflow;
@@ -2224,7 +2315,11 @@ void Prp2lnast::process_assignment(TSNode n) {
   if (!ts_node_is_null(decl) && !ts_node_is_null(lv) && !ts_node_is_null(rv) && conditional_depth_ == 0
       && std::string_view(ts_node_type(lv)) == "identifier" && decode_decl(decl).kind == "const") {
     if (std::string_view rvt(ts_node_type(rv)); rvt == "constant" || rvt == "tuple") {
-      const_rvalue_nodes_[std::string(trim(get_text(lv)))] = rv;
+      // Clone the RHS subtree into the persistent arena (2f-stream): the spread
+      // can be a LATER top-level statement, after this construct's arena is reset.
+      prpparse::Ast* kept = clone_prp_subtree(retained_arena_, rv.a);
+      prpparse::link_parents(kept);
+      const_rvalue_nodes_[std::string(trim(get_text(lv)))] = TSNode{kept, prp_buf.get()};
     }
   }
 
@@ -4871,7 +4966,20 @@ Lnast_node Prp2lnast::identifier_to_node(TSNode n, bool for_lvalue) {
   // earlier lambda params feeding a default value) are resolved right here —
   // they have no statement-level declaration the scope walk could find.
   if (!name_in_inflight_scope(name)) {
-    read_sites_.push_back({std::string{name}, n, builder.idx_stmts, lnast->get_last_child(builder.idx_stmts)});
+    // Capture the read site's span NOW (2f-stream): the streaming arena reset
+    // means `n` (its Ast) will not outlive this construct, but the undefined-read
+    // check runs after the whole walk.
+    const auto sp = ts_node_start_point(n);
+    const auto ep = ts_node_end_point(n);
+    read_sites_.push_back(Read_site{.name       = std::string{name},
+                                    .start_byte = ts_node_start_byte(n),
+                                    .end_byte   = ts_node_end_byte(n),
+                                    .start_line = sp.row + 1,
+                                    .start_col  = sp.column + 1,
+                                    .end_line   = ep.row + 1,
+                                    .end_col    = ep.column + 1,
+                                    .scope      = builder.idx_stmts,
+                                    .before     = lnast->get_last_child(builder.idx_stmts)});
   }
   return Lnast_node::create_ref(name);
 }
