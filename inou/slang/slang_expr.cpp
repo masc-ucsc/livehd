@@ -283,6 +283,10 @@ std::string Slang_context::lower_unary(const slang::ast::UnaryExpression& expr) 
       std::string old_snap = is_pre ? std::string{} : builder_.create_plus_stmts(cur, "0");
       auto        nv       = trunc_to(is_inc ? builder_.create_plus_stmts(cur, "1") : builder_.create_minus_stmts(cur, "1"),
                                       oi.bits);
+      // `x++`/`x--` is a BLOCKING write (LRM); set the flag so note_write does
+      // not inherit a stale nonblocking style from a preceding `<=` and then
+      // false-flag the variable as mixing assignment styles.
+      current_assign_nonblocking_ = false;
       assign_to(operand, nv);
       return is_pre ? nv : old_snap;
     }

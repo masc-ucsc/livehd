@@ -44,6 +44,7 @@ SLANG_LADDER = {
     "graphtest": "lec",
     "grid_hier_test": "error",  # instance arrays / paramod shapes not lowered yet
     "hierarchy": "lec",
+    "inc_after_nb": "lec",  # x++ is blocking even after a nonblocking <= in the same process
     "issue_047": "verilog",  # compiles; LEC gap tracked
     "issue_057": "lec",
     "logic_bitwise_op_gld": "lec",
