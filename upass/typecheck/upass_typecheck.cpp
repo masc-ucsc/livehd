@@ -208,8 +208,17 @@ void uPass_typecheck::require_same(Kind result, std::string_view sym, std::strin
       }
     }
     if (bad) {
+      // Name the operands + their inferred kinds — the comparison has no source
+      // span here, so the operand names are the only handle for localizing it.
+      std::string ops;
+      for (const auto& o : src) {
+        if (!ops.empty()) {
+          ops += " vs ";
+        }
+        ops += absl::StrCat(o.name.empty() ? "<const>" : o.name, ":", kind_name(kind_of_operand(o)));
+      }
       emit_type_error(code,
-                      std::format("`{}` requires both operands to be the same type", sym),
+                      std::format("`{}` requires both operands to be the same type ({})", sym, ops),
                       "no implicit conversion — cast explicitly (e.g. `int(b)`, `x == false`)");
     }
   }
