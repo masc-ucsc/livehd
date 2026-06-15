@@ -115,6 +115,17 @@ cc_binary(
     if not prp_file.split("/")[-1].startswith("lib_")
 ]
 
+# 2f-lgimport: the lg: import (compiled lgraph) two-step flow + LEC, plus the
+# not-found / port-mismatch diagnostics, exercised from a self-contained script
+# (it generates its own .v / .prp fixtures and drives `lhd compile` + `lhd
+# check`). Needs the yosys scripts (lgcheck) on top of the lhd binary.
+sh_test(
+    name = "prp-import-lg",
+    srcs = ["tests/imports/lg_import_test.sh"],
+    data = ["//lhd"],
+    deps = ["//inou/yosys:scripts"],
+)
+
 # Equivalence pairs (tests/equiv/<name>.prp + golden <name>.v): the harness
 # lowers the .prp to Verilog (tolg path) and formally LECs it against the
 # golden via inou/yosys/lgcheck, so these need the yosys scripts/binary on

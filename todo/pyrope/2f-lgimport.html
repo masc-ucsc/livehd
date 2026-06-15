@@ -10,6 +10,23 @@
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
 <h1><strong class="item-id">2f-lgimport</strong> Test <code>lg:</code> import (compiled lgraph units)</h1>
+<p style="padding:.6em;background:#e6ffe6;border-left:4px solid #2a2"><strong>✅ LANDED 2026-06-14.</strong>
+  The two-step <code>lg:</code> flow now works and is a checked-in test
+  (<code>inou/prp/tests/imports/lg_import_test.sh</code> → bazel
+  <code>prp-import-lg</code>): compile a unit into an lgdb, then
+  <code>import("lg:name")</code> from a Pyrope source and LEC the result.
+  Fixes: (1) <code>compile_command</code> ignored <code>lg:</code> inputs on the
+  pyrope path — it now <code>load_merge</code>s each lg: input library into the
+  working library before tolg (the same linker mechanism the ln:+lg: elaborate
+  path uses), so <code>import("lg:name")</code> resolves the pre-compiled graph
+  by name and the call lowers to a <code>Sub</code> instance. (2) A wrong port
+  name at the call site asserted inside <code>resolve_sink_port</code>; tolg now
+  pre-checks <code>gio-&gt;has_input</code> and emits a clean port-mismatch
+  diagnostic. Covered: slang-producer two-step LEC (<code>o == a+b</code>),
+  not-found diagnostic, port-mismatch diagnostic, and an lg: unit from a Pyrope
+  producer (<code>::[lg="name"]</code> for a stable name vs the mangled
+  <code>file.entity</code>). Full prp suite 478/478, no regressions. Unblocks
+  <a href="2f-defer.html">2f-defer</a>'s mix test.</p>
 <p><code>import("lg:name")</code> imports an already-compiled
   <strong>lgraph</strong> — e.g. a Verilog module compiled earlier, or a
   previously built Pyrope unit — instead of an LNAST unit. Some

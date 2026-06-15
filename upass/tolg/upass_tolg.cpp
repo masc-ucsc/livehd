@@ -2314,7 +2314,17 @@ private:
         ++pos;
         val = a;
       }
-      auto v    = leaf(val);
+      auto v = leaf(val);
+      // 2f-lgimport — validate the port name BEFORE create_sink_pin: an unknown
+      // port (e.g. a typo, or a call shaped for a different module) otherwise
+      // asserts inside resolve_sink_port (graph.cpp). The compiler must never
+      // abort on user input — emit a clean port-mismatch diagnostic instead.
+      if (!gio->has_input(pname)) {
+        error_here("upass.tolg: call to '{}' names input '{}' which the imported module does not have",
+                   callee_full,
+                   pname);
+        return;
+      }
       auto spin = sub.create_sink_pin(pname);
       if (spin.is_invalid()) {
         error_here("upass.tolg: callee '{}' has no input named '{}'", callee_full, pname);

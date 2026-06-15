@@ -2061,7 +2061,18 @@ void compile_command(Options& opts, Result& res) {
     pyrope_parse(opts, res, var, ir.ln_dirs);
     const auto* lg_out   = find_slot(opts.emit_dirs, "lg");
     std::string lib_path = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
-    lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts));
+    // 2f-lgimport — absorb any lg: input libraries into the working library
+    // BEFORE lowering, so a source unit's `import("lg:name")` resolves to the
+    // pre-compiled graph by name at tolg (same linker mechanism the ln:+lg:
+    // elaborate path uses). Name-hash gids make matching names dedup cleanly.
+    if (!ir.lg_dirs.empty()) {
+      auto& lib = livehd::Hhds_graph_library::instance(lib_path);
+      for (const auto& d : ir.lg_dirs) {
+        res.inputs.push_back(d);
+        lib.load_merge(d);
+      }
+    }
+    lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts) || !ir.lg_dirs.empty());
     graph_pipeline_and_emits(opts, res, var, lib_path);
   } else {
     setup_diag(opts, "compile.verilog");
