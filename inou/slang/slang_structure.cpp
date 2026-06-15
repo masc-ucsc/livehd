@@ -66,11 +66,28 @@ struct Write_collector : public slang::ast::ASTVisitor<Write_collector, slang::a
 };
 
 // Collects every unpacked-array element-select in the module along with its
-// selector, so the caller can classify each array as constant- or
-// runtime-indexed (the constness eval needs the module EvalContext, which the
-// caller holds). Recurses through generate instances.
+// selector, plus the set of for-loop INDUCTION variables, so the caller can
+// classify each array as constant- or runtime-indexed (a selector that folds,
+// or references only loop-induction vars / params / genvars, is constant after
+// the reader unrolls). Recurses through generate instances.
 struct Array_index_collector : public slang::ast::ASTVisitor<Array_index_collector, slang::ast::VisitFlags::AllGood> {
   std::vector<std::pair<const slang::ast::ValueSymbol*, const slang::ast::Expression*>> selects;
+  absl::flat_hash_set<const slang::ast::Symbol*>                                        loop_vars;
+
+  void handle(const slang::ast::ForLoopStatement& f) {
+    for (const auto* lv : f.loopVars) {  // `for (int i = ...)` header-declared counters
+      loop_vars.insert(lv);
+    }
+    for (const auto* ie : f.initializers) {  // `for (i = ...)` counters declared outside the header
+      if (ie->kind == ExpressionKind::Assignment) {
+        const auto& a = ie->as<slang::ast::AssignmentExpression>();
+        if (a.left().kind == ExpressionKind::NamedValue) {
+          loop_vars.insert(&a.left().as<slang::ast::NamedValueExpression>().symbol);
+        }
+      }
+    }
+    visitDefault(f);
+  }
 
   void handle(const slang::ast::ElementSelectExpression& es) {
     if (es.value().type->getCanonicalType().isUnpackedArray()) {
@@ -79,6 +96,24 @@ struct Array_index_collector : public slang::ast::ASTVisitor<Array_index_collect
       }
     }
     visitDefault(es);
+  }
+};
+
+// True iff every symbol the selector references is statically resolvable once
+// the reader unrolls loops: a for-loop induction var, a genvar, a parameter, or
+// an enum value. A reference to any genuine runtime signal (net / port /
+// register / module variable) makes the index runtime — keep that array a
+// memory (dynamic-shift flattening mismatches; cf. the `tuplish` regression).
+struct Static_selector_scan : public slang::ast::ASTVisitor<Static_selector_scan, slang::ast::VisitFlags::AllGood> {
+  const absl::flat_hash_set<const slang::ast::Symbol*>* loop_vars = nullptr;
+  bool                                                  all_static = true;
+
+  void handle(const slang::ast::ValueExpressionBase& e) {
+    const auto k = e.symbol.kind;
+    if (k != slang::ast::SymbolKind::Genvar && k != slang::ast::SymbolKind::Parameter
+        && k != slang::ast::SymbolKind::EnumValue && !loop_vars->contains(&e.symbol)) {
+      all_static = false;
+    }
   }
 };
 
@@ -363,7 +398,15 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
     Array_index_collector aic;
     body->visit(aic);
     for (const auto& [sym, sel] : aic.selects) {
-      if (!try_eval_int(*sel)) {
+      if (try_eval_int(*sel)) {
+        continue;  // folds to a constant (genvar/param/const index)
+      }
+      // Not directly foldable: still constant after unroll if it references only
+      // loop-induction vars / params / genvars. A runtime signal makes it a memory.
+      Static_selector_scan ss;
+      ss.loop_vars = &aic.loop_vars;
+      sel->visit(ss);
+      if (!ss.all_static) {
         runtime_indexed_arrays_.insert(sym);
       }
     }
