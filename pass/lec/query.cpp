@@ -136,6 +136,24 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   } else if (r.isSat()) {
     res.verdict = Verdict::Refuted;
     if (opts.witness) {
+      // Name the diverging output(s) first — the actionable part of the CEX —
+      // then the satisfying input/current-state assignment.
+      std::string diffs;
+      for (const auto& [name, rv] : re.outputs) {
+        auto it = ie.outputs.find(name);
+        if (it == ie.outputs.end()) {
+          continue;
+        }
+        int        w    = std::max(rv.width, it->second.width);
+        cvc5::Term rval = solver.getValue(fit_to(tm, rv, w));
+        cvc5::Term ival = solver.getValue(fit_to(tm, it->second, w));
+        if (!rval.isNull() && !ival.isNull() && rval.getBitVectorValue(10) != ival.getBitVectorValue(10)) {
+          if (!diffs.empty()) {
+            diffs += ", ";
+          }
+          diffs += name + "(ref=" + rval.getBitVectorValue(10) + " impl=" + ival.getBitVectorValue(10) + ")";
+        }
+      }
       std::string w;
       for (const auto& [name, v] : shared) {
         cvc5::Term val = solver.getValue(v.term);
@@ -147,7 +165,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         }
         w += name + "=" + val.getBitVectorValue(10);
       }
-      res.witness = w;
+      res.witness = (diffs.empty() ? "" : "diff " + diffs + " @ ") + w;
     }
   } else {
     res.verdict  = Verdict::Unknown;

@@ -648,7 +648,12 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     }
     int ow = real_width_io(spin, *gio, d.name);
     if (ow == 0) {
-      ow = v.width;
+      // A width-less output port is a 1-bit scalar (Verilog: a port with no
+      // range is one bit) — NOT the width of whatever drives it. Defaulting to
+      // the driver width left a scalar output carrying a wide internal value
+      // (e.g. a 65-bit mux feeding a 1-bit `busy_o`), which then mismatched the
+      // other reader's correctly-1-bit output. fit() truncates the driver to it.
+      ow = 1;
     }
     out.outputs[d.name] = Val{fit(v, ow), ow, !gio->is_unsign(d.name)};
   }
