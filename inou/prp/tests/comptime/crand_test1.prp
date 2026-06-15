@@ -1,9 +1,17 @@
 /*
 :name: crand_test
-:type: parsing lnast comptime
-:verifier_pass: 1
+:type: parsing lnast upass
 :verifier_fail: 0
 */
+
+// `c` is a compile-time-random bool, so `if c` is a runtime branch and `x`
+// is runtime-divergent (x ∈ {1, 2}). On uncertain-exit `x` loses its dlop
+// trivial status, so `x == 1 or x == 2` cannot fold at compile time — proving
+// it needs value-set / range path-merge inference, which is not implemented
+// (and not trivial). This runs the upass pipeline (it must not crash); the
+// cassert is left as documentation rather than a comptime-resolved check.
+// A future range-aware form would be `cassert(x.[max] <= 2 and x.[min] >= 1)`
+// once if-arm range merge is tracked.
 
 const a = false
 

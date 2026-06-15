@@ -384,20 +384,17 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
         continue;
       }
       auto it = declaring->varmap.find(var_name);
-      // Setting the scalar to nil (concrete Type::Nil) — readers see a
-      // known-nil value, downstream `==` against another operand
-      // short-circuits to nil (see process_eq_ne_impl), and cassert nil
-      // discharges as pass per attributes_spec §Phase 2. Using plain-
-      // invalid would leave the cassert unfolded and counted as
-      // "unknown", which masks tests that *do* want the verifier to
-      // discharge a conditionally-modified var.
-      it->second->set("0", *Dlop::nil());
-      // …and mark it: this nil is a poison MARKER for a runtime-divergent
-      // value (the arm may or may not have run). Value consumers
-      // (known_const_scalar, constprop's operand folds, drop decisions)
-      // must keep the var's wire alive; only the eq/ne nil-short-circuit
-      // (cassert discharge) reads the raw nil. Cleared by the next set().
-      uncertain_nil_.insert(var_name);
+      // The arm may or may not have run, so on exit the var is
+      // runtime-divergent: a mux of the pre-if binding and the arm writes.
+      // That is UNKNOWN (a real runtime value), NOT nil — nil is reserved for a
+      // genuinely absent/illegal value (`a = nil`, or a nil-propagating op) and
+      // is a compile error in any non-`==`/`!=` use. Invalidate the comptime
+      // value so every consumer (known_const_scalar, constprop's operand folds,
+      // the runner's if/while gate) treats the var as runtime and keeps its real
+      // wire; the bitwidth pass re-derives the width from the LGraph mux. A
+      // cassert over such a var no longer discharges at compile time — it is left
+      // to the runtime check, which is correct for a value the compiler cannot pin.
+      it->second->set("0", invalid_lconst);
     }
   }
 

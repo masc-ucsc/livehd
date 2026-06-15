@@ -1,7 +1,7 @@
 /*
 :name: paths_if
 :type: comptime
-:verifier_pass: 10
+:verifier_pass: 9
 :verifier_fail: 0
 :verifier_include_funcs: true
 */
@@ -82,11 +82,11 @@ comb no_know_input(a)->(r) {
   }else{
     r = 100
   }
-  cassert(r == 1)  // Discharged by nil-on-uncertain-exit: after the two
-                  // uncertain ifs, r reads as nil (Symbol_table::leave_scope
-                  // re-pins modified vars to nil), so `r == 1` folds to nil
-                  // and cassert nil passes per attributes_spec §Phase 2.
-                  // Convergent-branch path-merge would still be a stronger
-                  // proof, but nil-on-exit already moves this out of
-                  // "verifier-unresolved" territory.
+  // After the two runtime `if a`s, r is runtime-divergent (r ∈ {100, 200} —
+  // never 1). It loses its dlop trivial status on uncertain-exit, so a cassert
+  // over it cannot fold at compile time. NO cassert here: the old
+  // `cassert(r == 1)` only "passed" via the unsound nil-on-uncertain-exit
+  // discharge, which wrongly passed an always-false claim. Proving the real
+  // bound (r ∈ {100,200}) needs convergent-branch / range path-merge — a
+  // follow-up (see crand_test1).
 }
