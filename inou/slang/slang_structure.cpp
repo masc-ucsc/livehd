@@ -65,6 +65,23 @@ struct Write_collector : public slang::ast::ASTVisitor<Write_collector, slang::a
   }
 };
 
+// Collects every unpacked-array element-select in the module along with its
+// selector, so the caller can classify each array as constant- or
+// runtime-indexed (the constness eval needs the module EvalContext, which the
+// caller holds). Recurses through generate instances.
+struct Array_index_collector : public slang::ast::ASTVisitor<Array_index_collector, slang::ast::VisitFlags::AllGood> {
+  std::vector<std::pair<const slang::ast::ValueSymbol*, const slang::ast::Expression*>> selects;
+
+  void handle(const slang::ast::ElementSelectExpression& es) {
+    if (es.value().type->getCanonicalType().isUnpackedArray()) {
+      if (const auto* sym = lhs_base_symbol(es.value())) {
+        selects.emplace_back(sym, &es.selector());
+      }
+    }
+    visitDefault(es);
+  }
+};
+
 }  // namespace
 
 std::string Slang_context::module_name_of(const slang::ast::InstanceSymbol& symbol) {
@@ -338,10 +355,27 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   for (const auto* sym : reg_syms_) {
     declare_reg(sym->as<slang::ast::ValueSymbol>());
   }
-  // Pre-declare COMBINATIONAL packed-aggregate arrays as flat packed buses
+  // Classify each unpacked array as constant- or runtime-indexed (a non-const
+  // selector anywhere makes it runtime-indexed). A comb plain-vector array that
+  // is never runtime-indexed is safe to flatten; a runtime-indexed one stays a
+  // memory.
+  {
+    Array_index_collector aic;
+    body->visit(aic);
+    for (const auto& [sym, sel] : aic.selects) {
+      if (!try_eval_int(*sel)) {
+        runtime_indexed_arrays_.insert(sym);
+      }
+    }
+  }
+
+  // Pre-declare COMBINATIONAL flattenable arrays as flat packed buses
   // (declare_unpacked's flatten branch): they must be declared before any
   // element access lowers, so resolve_packed_lvalue and the read path see them
-  // as flat (bit-slice) symbols rather than memories.
+  // as flat (bit-slice) symbols rather than memories. Flatten an array of a
+  // packed AGGREGATE (struct/union — its `.field` writes need composition) or a
+  // plain-vector array that is never runtime-indexed (its bit-slice writes need
+  // composition too, and constant offsets make flattening exact).
   for (const auto& member : body->members()) {
     if (member.kind != slang::ast::SymbolKind::Variable) {
       continue;
@@ -355,7 +389,12 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       continue;
     }
     const auto& elem = ct.as<slang::ast::FixedSizeUnpackedArrayType>().elementType.getCanonicalType();
-    if (elem.isIntegral() && (elem.isStruct() || elem.isPackedUnion())) {
+    if (!elem.isIntegral()) {
+      continue;
+    }
+    const bool aggregate    = elem.isStruct() || elem.isPackedUnion();
+    const bool const_indexed = !runtime_indexed_arrays_.contains(&vsym);
+    if (aggregate || const_indexed) {
       declare_value_symbol(vsym, /*force_reg=*/false);
     }
   }
@@ -421,13 +460,16 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
   // read does not forward the prior same-process write). Restricted to non-reg
   // (comb) arrays with an aggregate element, so the clocked-memory path (FIFOs,
   // register files) and plain-scalar comb arrays are untouched.
-  // Only a packed STRUCT/UNION element needs this (its `.field` sub-writes are
-  // what the memory model cannot compose). A plain vector element (`logic [3:0]`,
-  // which is a packed array of bits) stays a memory — it has no field writes and
-  // is commonly runtime-indexed, where the memory model is the right fit.
-  const bool    elem_struct = elem.isStruct() || elem.isPackedUnion();
-  const int64_t flat_bits   = static_cast<int64_t>(ei.bits) * arr.range.width();
-  if (!is_reg && elem_struct && flat_bits > 0 && flat_bits <= 65536) {
+  // Flatten a comb array to a packed bus when element accesses compose better
+  // as bit-slices than as memory ports: a packed STRUCT/UNION element (its
+  // `.field` sub-writes must compose) OR a plain-vector array that is never
+  // runtime-indexed (its `[slice]` sub-writes compose via set_mask, and constant
+  // element offsets make the flattening exact). A runtime-indexed plain-vector
+  // array stays a memory (dynamic-shift flattening mismatches).
+  const bool    elem_struct  = elem.isStruct() || elem.isPackedUnion();
+  const bool    const_indexed = !runtime_indexed_arrays_.contains(&sym);
+  const int64_t flat_bits    = static_cast<int64_t>(ei.bits) * arr.range.width();
+  if (!is_reg && (elem_struct || const_indexed) && flat_bits > 0 && flat_bits <= 65536) {
     Mem_info fmi;
     fmi.lower       = arr.range.lower();
     fmi.elem_bits   = ei.bits;

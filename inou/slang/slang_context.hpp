@@ -138,6 +138,12 @@ private:
   // bit-slice at `(i-lower)*elem_bits`. Symbols here carry their dims in
   // mem_info_ but route through bit-slice get/set instead of store/tuple_get.
   absl::flat_hash_set<const slang::ast::Symbol*> flat_port_syms_;
+  // Unpacked arrays indexed by a NON-constant selector somewhere in the module.
+  // A comb plain-vector array that is NEVER runtime-indexed is safe to flatten
+  // to a packed bus (constant element offsets, set_mask composition); a
+  // runtime-indexed one must stay a memory (dynamic-shift flattening mismatches
+  // — see the `tuplish` regression). Populated by a pre-pass in lower_module.
+  absl::flat_hash_set<const slang::ast::Symbol*> runtime_indexed_arrays_;
   // Flat bit-slice read/write of an unpacked-array port element (reuses the
   // packed set_mask / shift+mask machinery).
   std::string flat_port_read(const slang::ast::ElementSelectExpression& es, const Mem_info& mi);

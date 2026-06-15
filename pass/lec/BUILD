@@ -98,3 +98,10 @@ sh_test(
     data = ["//lhd"],
     tags = ["no-sandbox"],  # compiles RTL via both readers + lgcheck
 )
+
+sh_test(
+    name = "lec_combarray_test",
+    srcs = ["tests/lec_combarray_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # compiles RTL via both readers + lgcheck
+)
