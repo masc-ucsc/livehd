@@ -84,3 +84,10 @@ sh_test(
     data = ["//lhd"],
     tags = ["no-sandbox"],  # invokes the in-process cvc5 BMC engine
 )
+
+sh_test(
+    name = "lec_mem_test",
+    srcs = ["tests/lec_mem_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # compiles RTL + runs the in-process cvc5 array engine
+)

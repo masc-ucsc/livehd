@@ -148,7 +148,55 @@ std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Node_class& n
   return Val{fit_to(tm, v, width), width, c.is_negative()};
 }
 
-Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, Val>* shared_inputs, std::string_view prefix) {
+// Index width to address `size` entries: clog2(size), at least 1.
+static int mem_addr_width(int size) {
+  int w = 1;
+  while ((1 << w) < size) {
+    ++w;
+  }
+  return w;
+}
+
+// Decode the reader-invariant signature (size/bits/port-roles) of a Memory cell
+// from its config pins. Mirrors inou/cgen's port decode (pid -> port*12+field).
+Mem_sig read_mem_sig(const hhds::Node_class& node) {
+  Mem_sig sig;
+  for (auto e : node.inp_edges()) {
+    auto raw_pid  = static_cast<int>(e.sink.get_port_id());
+    auto pin_name = Ntype::get_sink_name(Ntype_op::Memory, raw_pid);
+    if (pin_name == "bits") {
+      if (gu::is_const_pin(e.driver)) {
+        sig.bits = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
+      }
+    } else if (pin_name == "size") {
+      if (gu::is_const_pin(e.driver)) {
+        sig.size = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
+      }
+    } else if (std::string_view(pin_name).find("rdport") != std::string_view::npos) {
+      if (gu::is_const_pin(e.driver)) {
+        if (gu::hydrate_const(e.driver).is_known_false()) {
+          ++sig.n_wr;
+        } else {
+          ++sig.n_rd;
+        }
+      }
+    }
+  }
+  sig.addr_w = mem_addr_width(sig.size > 0 ? sig.size : 2);
+  return sig;
+}
+
+// Stable cross-front-end correspondence key for a Memory cut. The signature is
+// reader-invariant (same RTL array -> same size/bits/ports); `occ` (running
+// count of prior same-signature memories in forward_class() order) disambiguates
+// multiple identical memories. Both designs enumerate in the same RTL order, so
+// corresponding memories collapse to one shared array symbol. See M4 in lec.md.
+std::string mem_state_key(const Mem_sig& sig, int occ) {
+  return std::format("\x01m:{}x{}:r{}w{}#{}", sig.size, sig.bits, sig.n_rd, sig.n_wr, occ);
+}
+
+Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, Val>* shared_inputs, std::string_view prefix,
+                        const absl::flat_hash_map<std::string, cvc5::Term>* shared_mems) {
   Encoded out;
   auto    gio = g->get_io();
 
@@ -283,11 +331,106 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     flops.push_back(node);
   }
 
+  // ---- M4 memory cut, phase 1: decode each Memory and SEED its read douts with
+  // fresh symbols (like a flop Q) so the combinational loop can consume them.
+  // The actual dout = select(array, addr) and the write next-state are emitted in
+  // phase 2 (after the loop), once addr/din/enable have been computed; an
+  // equality ties the fresh dout to its real value. This mirrors the BMC
+  // fresh-var deferral and is sound for both async and registered reads.
+  auto ends_with = [](std::string_view s, std::string_view suf) {
+    return s.size() >= suf.size() && s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
+  };
+  struct MPort {
+    bool            rd = false;
+    hhds::Pin_class addr, din, en;
+  };
+  struct MemCut {
+    hhds::Node_class    node;
+    std::string         key;
+    Mem_sig             sig;
+    std::vector<MPort>  ports;
+    int                 wensize = 0;
+    int                 fwd     = 0;
+    cvc5::Term          a_cur;
+    std::vector<Term>   rd_fresh;  // fresh dout symbol per read port (port order)
+    std::vector<hhds::Pin_class> rd_addr;
+  };
+  std::vector<MemCut>                   mem_cuts;
+  absl::flat_hash_map<std::string, int> mem_occ;  // per-signature occurrence -> stable key
+  for (auto node : g->forward_class()) {
+    if (gu::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
+      continue;
+    }
+    MemCut mc;
+    mc.node = node;
+    mc.sig  = read_mem_sig(node);
+    if (mc.sig.bits <= 0 || mc.sig.size <= 0) {
+      return fail("memory '" + gu::debug_name(node) + "' missing bits/size");
+    }
+    std::string sg = std::to_string(mc.sig.size) + "x" + std::to_string(mc.sig.bits) + ":r" + std::to_string(mc.sig.n_rd)
+                   + "w" + std::to_string(mc.sig.n_wr);
+    mc.key = mem_state_key(mc.sig, mem_occ[sg]++);
+    for (auto e : node.inp_edges()) {
+      auto             raw_pid = static_cast<int>(e.sink.get_port_id());
+      std::string_view pn      = Ntype::get_sink_name(Ntype_op::Memory, raw_pid);
+      size_t           pid     = static_cast<size_t>(raw_pid) / 12;
+      if (pn == "wensize") {
+        mc.wensize = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
+      } else if (pn == "fwd") {
+        mc.fwd = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
+      } else if (pn == "bits" || pn == "size" || pn == "type" || pn == "init" || pn == "posclk"
+                 || ends_with(pn, "clock_pin")) {
+        // config / clock: abstracted out of the relational encoding
+      } else {
+        if (mc.ports.size() <= pid) {
+          mc.ports.resize(pid + 1);
+        }
+        if (ends_with(pn, "addr")) {
+          mc.ports[pid].addr = e.driver;
+        } else if (ends_with(pn, "din")) {
+          mc.ports[pid].din = e.driver;
+        } else if (ends_with(pn, "enable")) {
+          mc.ports[pid].en = e.driver;
+        } else if (ends_with(pn, "rdport")) {
+          mc.ports[pid].rd = !gu::hydrate_const(e.driver).is_known_false();
+        }
+      }
+    }
+    // Current contents: shared array symbol (collapse) or fresh.
+    Sort asort = tm_.mkArraySort(bv(mc.sig.addr_w), bv(mc.sig.bits));
+    if (shared_mems != nullptr) {
+      if (auto it = shared_mems->find(mc.key); it != shared_mems->end()) {
+        mc.a_cur = it->second;
+      }
+    }
+    if (mc.a_cur.isNull()) {
+      mc.a_cur = tm_.mkConst(asort, std::string(prefix) + mc.key);
+    }
+    // Seed each read port's dout with a fresh symbol at driver pid (n_wr + k).
+    int n_rd_pos = 0;
+    for (auto& p : mc.ports) {
+      if (!p.rd) {
+        continue;
+      }
+      auto dout_dpin = node.create_driver_pin(static_cast<hhds::Port_id>(mc.sig.n_wr + n_rd_pos));
+      bool sgn       = dout_dpin.is_invalid() ? false : !gu::is_unsign(dout_dpin);
+      Term fresh     = tm_.mkConst(bv(mc.sig.bits), std::string(prefix) + mc.key + ":rd" + std::to_string(n_rd_pos));
+      if (!dout_dpin.is_invalid()) {
+        pin2val[dout_dpin.get_class_index()] = Val{fresh, mc.sig.bits, sgn};
+      }
+      mc.rd_fresh.push_back(fresh);
+      mc.rd_addr.push_back(p.addr);
+      ++n_rd_pos;
+    }
+    mem_cuts.push_back(std::move(mc));
+  }
+
   // ---- Combinational nodes in topological order.
   for (auto node : g->forward_class()) {
     auto op = gu::type_op_of(node);
 
-    // Skip nodes with no consumers (cgen does the same).
+    // Skip nodes with no consumers (cgen does the same). A memory with no read
+    // ports is unobservable (its contents are never sampled) -> sound to skip.
     if (!node.has_out_edges()) {
       continue;
     }
@@ -299,9 +442,15 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     if (op == Ntype_op::Flop) {
       continue;
     }
-    // Still out of scope: Fflop (no reset model yet), latches, memories (M4 =
-    // SMT arrays), and sub-instances (M5 = hierarchical congruence).
-    if (op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Memory || op == Ntype_op::Sub) {
+    // Memory is cut in two phases (read douts seeded before this loop, writes +
+    // dout-tie emitted after) — like a flop. Skip the cell here.
+    if (op == Ntype_op::Memory) {
+      continue;
+    }
+
+    // Still out of scope: Fflop (no reset model yet), latches, and sub-instances
+    // (M5 = hierarchical congruence).
+    if (op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Sub) {
       return fail("sequential/structural op '" + std::string(Ntype::get_name(op)) + "' not supported yet (M2 = Flop only)");
     }
 
@@ -656,6 +805,66 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     }
 
     out.outputs[std::string("\x01nxt:") + flop_state_key(*g, node)] = Val{nval, w, sgn};
+  }
+
+  // ---- M4 memory cut, phase 2: now that write addr/din/enable are resolved,
+  // build the next-state array and tie each fresh read dout to its real value.
+  for (auto& mc : mem_cuts) {
+    auto fit_unsigned = [&](const Val& v, int wd) -> Term { return fit_to(tm_, Val{v.term, v.width, false}, wd); };
+
+    // Apply writes in port order: array' = store(array, addr, masked_din).
+    Term a_next = mc.a_cur;
+    bool ok     = true;
+    for (auto& p : mc.ports) {
+      if (p.rd || p.din.is_invalid()) {
+        continue;
+      }
+      Val av = driver_val(p.addr, ok);
+      Val dv = driver_val(p.din, ok);
+      if (!ok) {
+        return fail("memory '" + gu::debug_name(mc.node) + "' write addr/din not encodable");
+      }
+      Term addr = fit_unsigned(av, mc.sig.addr_w);
+      Term din  = fit_to(tm_, Val{dv.term, dv.width, false}, mc.sig.bits);
+      // Per-bit write mask: word-enable (wensize<=1) replicates the enable hot
+      // bit across all bits; per-bit-enable (wensize>=bits) uses the mask.
+      Term wmask;
+      if (p.en.is_invalid()) {
+        wmask = tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(tm_, mc.sig.bits, 0)});
+      } else {
+        Val ev = driver_val(p.en, ok);
+        if (!ok) {
+          return fail("memory '" + gu::debug_name(mc.node) + "' enable not encodable");
+        }
+        if (mc.wensize >= mc.sig.bits && mc.wensize > 1) {
+          wmask = fit_to(tm_, Val{ev.term, ev.width, false}, mc.sig.bits);
+        } else {
+          Term en_hot = tm_.mkTerm(Kind::DISTINCT, {ev.term, bv_const(tm_, ev.width, 0)});
+          wmask       = tm_.mkTerm(Kind::ITE, {en_hot, tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(tm_, mc.sig.bits, 0)}),
+                                               bv_const(tm_, mc.sig.bits, 0)});
+        }
+      }
+      Term old      = tm_.mkTerm(Kind::SELECT, {a_next, addr});
+      Term keep     = tm_.mkTerm(Kind::BITVECTOR_AND, {tm_.mkTerm(Kind::BITVECTOR_NOT, {wmask}), old});
+      Term set      = tm_.mkTerm(Kind::BITVECTOR_AND, {wmask, din});
+      Term new_word = tm_.mkTerm(Kind::BITVECTOR_OR, {keep, set});
+      a_next        = tm_.mkTerm(Kind::STORE, {a_next, addr, new_word});
+    }
+
+    // Tie each fresh read dout to select(read-source, addr). fwd!=0 reads see
+    // this cycle's writes (a_next); else the pre-write contents (a_cur).
+    const Term& rd_src = (mc.fwd != 0) ? a_next : mc.a_cur;
+    for (size_t k = 0; k < mc.rd_fresh.size(); ++k) {
+      Val av = driver_val(mc.rd_addr[k], ok);
+      if (!ok) {
+        return fail("memory '" + gu::debug_name(mc.node) + "' read addr not encodable");
+      }
+      Term addr = fit_unsigned(av, mc.sig.addr_w);
+      Term real = tm_.mkTerm(Kind::SELECT, {rd_src, addr});
+      out.equalities.emplace_back(mc.rd_fresh[k], real);
+    }
+
+    out.next_mem[mc.key] = a_next;
   }
 
   // ---- Outputs: value driving each output sink, fit to the declared width.

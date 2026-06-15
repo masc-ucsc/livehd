@@ -128,13 +128,27 @@ lhd lec --impl lg:i --ref lg:r --top dut --set lec.engine=bmc
 
 ---
 
+### Memories (M4, SMT array theory)
+
+A `Memory` cell is cut like a flop: its contents are an SMT array (`QF_ABV`,
+`select`/`store`), and **corresponding memories of the two designs collapse to
+one shared array symbol** — matched by a reader-invariant signature
+(`size`×`bits`, read/write port counts) so the same RTL array read through both
+front-ends lines up. The cut proves equal read douts + equal post-cycle
+contents. The `wensize` difference between the readers (native word-enable vs
+yosys-slang per-bit-enable) is normalized to a per-bit write mask, and a 0-cycle
+(async) read is tied to `select(contents, addr)` via a deferred equality so it
+composes with the combinational cone. This makes a large register file — where
+`lhd check`'s yosys-equiv bit-blasts and times out — tractable in one array
+query. Best run with `lec.engine=ind` (the `bmc` array unroll can hit the cvc5
+CaDiCaL crash below). Regression: `pass/lec/tests/lec_mem_test.sh`.
+
 ## Current limitations (pass/lec)
 
-- **Memory not yet modeled.** A design with a `Memory` cell (FIFOs, large RAMs,
-  some register files) returns `UNKNOWN: sequential/structural op 'memory' not
-  supported`. The encoder is flop-aware (M2) but arrays (M4) / black-boxing
-  matched memories (M5) are future work. Use `lhd check` for those today.
-- Also unsupported by the encoder: `Fflop`, `Latch`, `Sub` (instances).
+- Unsupported by the encoder: `Fflop`, `Latch`, `Sub` (instances, M5).
+- **Memory `init` contents** are not seeded — the BMC/ind initial array is an
+  unconstrained symbol (sound: starts both designs from the same arbitrary
+  contents). Power-on-ROM equivalence would need the `init` pin modeled.
 - **`ind` incompleteness** — false-REFUTE on unreachable states (use `bmc`).
 - **cvc5 CaDiCaL crash** — cvc5's bundled CaDiCaL subsume/elim inprocessing can
   segfault on some `bmc` instances (a cvc5 solver bug, not the encoding). `ind`

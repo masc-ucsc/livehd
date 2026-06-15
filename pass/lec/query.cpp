@@ -26,10 +26,41 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 
   cvc5::TermManager tm;
   cvc5::Solver      solver(tm);
-  solver.setLogic("QF_BV");
+  solver.setLogic("QF_ABV");  // bit-vectors + arrays (M4 memory cut)
   if (opts.witness) {
     solver.setOption("produce-models", "true");
   }
+
+  // Shared current-state ARRAY symbol per memory cut key, across both designs
+  // (the "collapse corresponding memories" assumption). Built once; the encoder
+  // reuses the symbol for the matching memory in each design.
+  auto build_shared_mems = [&](std::string_view tag) {
+    absl::flat_hash_map<std::string, cvc5::Term> sm;
+    absl::flat_hash_map<std::string, int>        occ;
+    auto                                         add = [&](hhds::Graph* g) {
+      for (auto node : g->forward_class()) {
+        if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
+          continue;
+        }
+        Mem_sig sig = read_mem_sig(node);
+        if (sig.bits <= 0 || sig.size <= 0) {
+          continue;
+        }
+        std::string sg  = std::to_string(sig.size) + "x" + std::to_string(sig.bits) + ":r" + std::to_string(sig.n_rd)
+                       + "w" + std::to_string(sig.n_wr);
+        std::string key = mem_state_key(sig, occ[sg]++);
+        if (sm.count(key)) {
+          continue;
+        }
+        cvc5::Sort asort = tm.mkArraySort(tm.mkBitVectorSort(static_cast<uint32_t>(sig.addr_w)),
+                                          tm.mkBitVectorSort(static_cast<uint32_t>(sig.bits)));
+        sm[key]          = tm.mkConst(asort, std::string(tag) + key);
+      }
+    };
+    add(ref);
+    add(impl);
+    return sm;
+  };
 
   // ── BMC engine: unroll N cycles from the reset state ──────────────────────
   // The single-step inductive miter (below) assumes an arbitrary equal current
@@ -210,6 +241,11 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       }
     }
 
+    // Memory state[0]: one shared array per cut key (corresponding memories
+    // collapse to the same initial contents); threaded forward like flop state.
+    absl::flat_hash_map<std::string, cvc5::Term> ref_mem = build_shared_mems("m0_");
+    absl::flat_hash_map<std::string, cvc5::Term> impl_mem = ref_mem;
+
     cvc5::Term bad;
     int        uid = 0;  // unique suffix for fresh per-cycle state vars
     for (int cyc = 0; cyc < total_cyc; ++cyc) {
@@ -237,6 +273,22 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         pin_state(impl_state, ns_impl);
         ref_state  = std::move(ns_ref);
         impl_state = std::move(ns_impl);
+
+        // Same fresh-var pinning for memory arrays (keeps each cycle's array
+        // terms shallow; the unrolling lives in the equality assertions).
+        absl::flat_hash_map<std::string, cvc5::Term> nm_ref, nm_impl;
+        auto pin_mem = [&](const absl::flat_hash_map<std::string, cvc5::Term>& prev_next,
+                           absl::flat_hash_map<std::string, cvc5::Term>&       cur) {
+          for (const auto& [key, pv] : prev_next) {
+            cvc5::Term s = tm.mkConst(pv.getSort(), "ma" + std::to_string(uid++));
+            solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {s, pv}));
+            cur[key] = s;
+          }
+        };
+        pin_mem(ref_mem, nm_ref);
+        pin_mem(impl_mem, nm_impl);
+        ref_mem  = std::move(nm_ref);
+        impl_mem = std::move(nm_impl);
       }
 
       absl::flat_hash_map<std::string, Val> sh_ref, sh_impl;
@@ -266,17 +318,23 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         sh_impl[k] = v;
       }
 
-      Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(cyc) + "_");
+      Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(cyc) + "_", &ref_mem);
       if (!re.ok) {
         res.verdict  = Verdict::Unknown;
         res.detail  += "; ref encode failed: " + re.error;
         return res;
       }
-      Encoded ie = enc.encode(impl, &sh_impl, "i" + std::to_string(cyc) + "_");
+      Encoded ie = enc.encode(impl, &sh_impl, "i" + std::to_string(cyc) + "_", &impl_mem);
       if (!ie.ok) {
         res.verdict  = Verdict::Unknown;
         res.detail  += "; impl encode failed: " + ie.error;
         return res;
+      }
+      for (const auto& [l, r] : re.equalities) {
+        solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+      }
+      for (const auto& [l, r] : ie.equalities) {
+        solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
       }
 
       if (checking) {
@@ -309,6 +367,8 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       }
       ref_state  = std::move(rn);
       impl_state = std::move(in);
+      ref_mem    = std::move(re.next_mem);
+      impl_mem   = std::move(ie.next_mem);
     }
 
     res.detail = "solver=cvc5 (bmc, phase=" + opts.phase + ", " + std::to_string(N) + " checked steps"
@@ -383,18 +443,29 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   add_flops(ref);
   add_flops(impl);
 
+  // Shared current-state memory arrays (M4 cut): corresponding memories collapse
+  // to one array symbol, so the step proves equal next-state contents + douts.
+  absl::flat_hash_map<std::string, cvc5::Term> shared_mems = build_shared_mems("s_");
+
   Encoder enc(tm);
-  Encoded re = enc.encode(ref, &shared);
+  Encoded re = enc.encode(ref, &shared, "", &shared_mems);
   if (!re.ok) {
     res.verdict  = Verdict::Unknown;
     res.detail  += "; ref encode failed: " + re.error;
     return res;
   }
-  Encoded ie = enc.encode(impl, &shared);
+  Encoded ie = enc.encode(impl, &shared, "", &shared_mems);
   if (!ie.ok) {
     res.verdict  = Verdict::Unknown;
     res.detail  += "; impl encode failed: " + ie.error;
     return res;
+  }
+  // Tie deferred memory-read douts to their select(array, addr) values.
+  for (const auto& [l, r] : re.equalities) {
+    solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+  }
+  for (const auto& [l, r] : ie.equalities) {
+    solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
   }
 
   // Miter over common outputs: bad = Or_i (ref_out_i != impl_out_i).
@@ -417,6 +488,26 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     if (!re.outputs.count(name)) {
       res.verdict  = Verdict::Unknown;
       res.detail  += "; output '" + name + "' present in impl but not ref";
+      return res;
+    }
+  }
+  // Memory next-state contents: corresponding memories must hold equal contents
+  // after the step (DISTINCT over array sort). A memory present in only one side
+  // is an unmatched cut -> sound Unknown.
+  for (const auto& [key, rmem] : re.next_mem) {
+    auto it = ie.next_mem.find(key);
+    if (it == ie.next_mem.end()) {
+      res.verdict  = Verdict::Unknown;
+      res.detail  += "; memory '" + key + "' present in ref but not impl";
+      return res;
+    }
+    cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {rmem, it->second});
+    bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
+  }
+  for (const auto& [key, imem] : ie.next_mem) {
+    if (!re.next_mem.count(key)) {
+      res.verdict  = Verdict::Unknown;
+      res.detail  += "; memory '" + key + "' present in impl but not ref";
       return res;
     }
   }

@@ -32,7 +32,38 @@ struct Encoded {
   // Graph IO, by declared port name.
   absl::flat_hash_map<std::string, Val> inputs;
   absl::flat_hash_map<std::string, Val> outputs;
+
+  // M4 memory state. Each Memory cell is cut like a Flop: its current contents
+  // are an SMT array symbol (shared across the two designs by mem_state_key, so
+  // corresponding memories "collapse"), and its post-cycle contents are the
+  // next-state array. Read douts are ordinary BV terms in `outputs`/pin2val.
+  absl::flat_hash_map<std::string, cvc5::Term> next_mem;  // key -> next-state array
+
+  // Side constraints the caller must assert (EQUAL lhs rhs). Used to tie an
+  // async read dout (a fresh symbol seeded before the combinational loop so
+  // downstream logic can consume it) to its select(array, addr) once the read
+  // address has been computed — the same fresh-var deferral the BMC loop uses
+  // for flop state, applied inside one encode() for memory reads.
+  std::vector<std::pair<cvc5::Term, cvc5::Term>> equalities;
 };
+
+// Reader-invariant signature of a Memory cell (the same RTL array read through
+// two front-ends yields the same signature). Drives both the shared-array sort
+// in query.cpp and the cut key here.
+struct Mem_sig {
+  int size   = 0;  // entries
+  int bits   = 0;  // element width
+  int addr_w = 1;  // index width = clog2(size)
+  int n_rd   = 0;  // read ports
+  int n_wr   = 0;  // write ports
+};
+
+// Decode the size/bits/port-count signature of a Memory node from its config
+// pins (mirrors inou/cgen's port decode). occ is supplied by the caller as the
+// running count of prior same-signature memories in forward_class() order, so
+// the key is stable and identical across the two front-ends.
+Mem_sig     read_mem_sig(const hhds::Node_class& node);
+std::string mem_state_key(const Mem_sig& sig, int occ);
 
 // Real bus width of a pin (signed magnitude+1 count; unsigned drops the spare
 // sign bit). 0 means "unknown / no bits attribute". See lec.md "Bit-width trap".
@@ -67,8 +98,12 @@ public:
   // On any unsupported op or sequential element (Flop/Memory/Sub), the returned
   // Encoded has ok=false and a populated `error` (the encoder never silently
   // produces a wrong term).
+  // `shared_mems` (optional): a map from mem_state_key to an already-built SMT
+  // array term for the memory's CURRENT contents. Memories whose key is present
+  // reuse that array (this is how corresponding memories collapse across two
+  // designs); memories not present get a fresh array `mkConst`.
   Encoded encode(hhds::Graph* g, const absl::flat_hash_map<std::string, Val>* shared_inputs = nullptr,
-                 std::string_view prefix = "");
+                 std::string_view prefix = "", const absl::flat_hash_map<std::string, cvc5::Term>* shared_mems = nullptr);
 
 private:
   // Fit `v` to exactly `width` bits: sign/zero-extend (per v.is_signed) when
