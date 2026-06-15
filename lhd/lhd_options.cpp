@@ -146,6 +146,21 @@ bool is_bare_key(std::string_view s) {
   return true;
 }
 
+// A --config table name = the command-path namespace (2h-set_path): one or
+// more bare segments joined by dots, e.g. [cgen], [upass], [pass.abc].
+bool is_table_name(std::string_view s) {
+  size_t start = 0;
+  for (size_t p = 0; p <= s.size(); ++p) {
+    if (p == s.size() || s[p] == '.') {
+      if (!is_bare_key(s.substr(start, p - start))) {
+        return false;
+      }
+      start = p + 1;
+    }
+  }
+  return true;
+}
+
 // "value" -> value; true/false; integer. Throws on anything else.
 std::string toml_value(const std::string& file, int lineno, std::string_view raw) {
   if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
@@ -211,10 +226,10 @@ void load_config(Options& opts) {
         throw Lhd_error{"config", std::format("{}:{}: malformed table header '{}'", opts.config, lineno, t), ""};
       }
       auto name = trim(t.substr(1, t.size() - 2));
-      if (!is_bare_key(name)) {
+      if (!is_table_name(name)) {
         throw Lhd_error{"config",
                         std::format("{}:{}: unsupported table '[{}]'", opts.config, lineno, name),
-                        "config tables are pass names: [upass], [cprop], [bitwidth], [cgen] (`lhd list options`)"};
+                        "config tables are command-path pass names: [upass], [cgen], [pass.abc] (`lhd list options`)"};
       }
       table = name;
       continue;
@@ -237,7 +252,10 @@ void load_config(Options& opts) {
       file_recipe = value;
       continue;
     }
-    file_sets.emplace_back(std::format("{}.{}", table, key), value);
+    // Canonicalize against the empty context: a config table name is already a
+    // full command-path namespace (2h-set_path), so this is a no-op for known
+    // passes and leaves an unknown one for check_known_set_passes to reject.
+    file_sets.emplace_back(canonical_set_key(std::format("{}.{}", table, key), ""), value);
   }
 
   // File entries are defaults: prepend so later (CLI) --set entries overwrite
@@ -274,6 +292,11 @@ Options parse_args(int argc, char** argv) {
   // value wherever they sit (`lhd --top foo synth ...` keeps foo with --top).
   bool raw_mode  = false;
   bool want_help = false;
+  // The command-path established by the command words seen so far, dotted
+  // (2h-set_path): "" before the command word, the command after it, and
+  // "pass.<sub>" once a `pass` sub-command is read. Each --set key to its
+  // right is canonicalized against this so abbreviated keys resolve.
+  std::string cmd_path;
   for (int i = 1; i < argc; ++i) {
     std::string_view a{argv[i]};
 
@@ -315,9 +338,12 @@ Options parse_args(int argc, char** argv) {
       auto kv  = std::string{need_value(a, i, argc, argv)};
       auto pos = kv.find('=');
       if (pos == std::string::npos || pos == 0) {
-        throw Lhd_error{"usage", std::format("--set expects pass[.idx].flag=value, got '{}'", kv), ""};
+        throw Lhd_error{"usage", std::format("--set expects pass.flag=value, got '{}'", kv), ""};
       }
-      opts.sets.emplace_back(kv.substr(0, pos), kv.substr(pos + 1));
+      // Canonicalize the key against the command path seen so far so an
+      // abbreviated key (`adder` after `pass abc`) resolves to `pass.abc.adder`
+      // (2h-set_path). Fully-qualified keys pass through unchanged.
+      opts.sets.emplace_back(canonical_set_key(kv.substr(0, pos), cmd_path), kv.substr(pos + 1));
     } else if (a == "--dump") {
       // Repeatable, comma-separable: --dump parse --dump lg == --dump parse,lg
       std::string v{need_value(a, i, argc, argv)};
@@ -395,6 +421,7 @@ Options parse_args(int argc, char** argv) {
         // ln.cat/ln.diff keep their positionals raw and ORDERED in opts.files
         // (an ln:DIR token must keep its place — ln.diff sides are positional).
         opts.command = a;
+        cmd_path     = a;  // command-path root for --set abbreviation (2h-set_path)
       } else {
         throw Lhd_error{"usage", std::format("unknown command '{}'", a), "run `lhd help` for the command list"};
       }
@@ -408,6 +435,12 @@ Options parse_args(int argc, char** argv) {
       // `pass` positionals: the subcommand word(s) (color/partition/clear/<alg>)
       // land in opts.files; an lg:DIR is routed to opts.ins by route_positional.
       if (!route_positional(opts, a)) {
+        // The first `pass` positional is the sub-command (abc/color/partition/
+        // liberty): extend the command path to pass.<sub> so a --set to its
+        // right may drop the `pass.<sub>.` prefix (2h-set_path).
+        if (opts.command == "pass" && opts.files.empty()) {
+          cmd_path = "pass." + std::string{a};
+        }
         opts.files.emplace_back(a);
       }
     } else {

@@ -43,7 +43,10 @@ Per region (`Region_body` from the partition seam):
 ABC's frame is global: one `Abc_Start`/`Abc_Stop` per run, `read_lib` once before
 the region loop.
 
-## Options (`--set abc.<flag>=value`)
+## Options (`--set pass.abc.<flag>=value`)
+
+The option namespace matches the command path (`lhd pass abc`); after the
+`pass abc` words the key may be abbreviated (`--set library=…`), see 2h-set_path.
 
 | flag | meaning | default |
 |------|---------|---------|

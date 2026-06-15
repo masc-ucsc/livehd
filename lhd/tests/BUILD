@@ -117,6 +117,15 @@ sh_test(
     data = _FLOW_DATA + ["part_hier.v"],
 )
 
+# 2h-set_path: --set namespace = command path + context-relative key
+# abbreviation (all five forms of pass.color.continuous behave identically).
+sh_test(
+    name = "lhd_set_path_test",
+    size = "large",
+    srcs = ["lhd_set_path_test.sh"],
+    data = _FLOW_DATA + ["part_hier.v"],
+)
+
 # Task 1m — pub/import machinery (the LiveHD docs): pub index
 # + __pub wrapper publication, two-invocation and iterate-until-converged
 # same-invocation imports, and the failure-mode diagnostics.

@@ -311,16 +311,24 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
 // validation, and `lhd list options` / `lhd describe pass.flag` all derive
 // from this table (the flags themselves are each method's registered EPRP
 // labels — add_label_optional/required is the single registration point).
+// The set-name is the command-path namespace the option is reached under
+// (2h-set_path): standalone `lhd pass <sub>` commands take `pass.<sub>.*`,
+// `lhd lec` is a top-level command so it keeps `lec.*`, and the passes that
+// only run inside a recipe (upass/cprop/bitwidth/cgen — no bare command word
+// to anchor them) keep their short method-derived names. canonical_set_key()
+// lets a user drop any leading segment the command words to the left already
+// supply, so `--set pass.abc.adder`, `--set abc.adder` (after `pass`) and
+// `--set adder` (after `pass abc`) all resolve here to `pass.abc`.
 constexpr std::pair<std::string_view, std::string_view> kSetPasses[] = {
-    {    "upass",        "pass.upass"},
-    {    "cprop",        "pass.cprop"},
-    { "bitwidth",     "pass.bitwidth"},
-    {     "cgen", "inou.cgen.verilog"},
-    {    "color",        "pass.color"},
-    {"partition",    "pass.partition"},
-    {      "abc",          "pass.abc"},
-    {  "liberty",      "pass.liberty"},
-    {      "lec",          "pass.lec"},
+    {         "upass",        "pass.upass"},
+    {         "cprop",        "pass.cprop"},
+    {      "bitwidth",     "pass.bitwidth"},
+    {          "cgen", "inou.cgen.verilog"},
+    {    "pass.color",        "pass.color"},
+    {"pass.partition",    "pass.partition"},
+    {      "pass.abc",          "pass.abc"},
+    {  "pass.liberty",      "pass.liberty"},
+    {           "lec",          "pass.lec"},
 };
 
 std::string_view set_pass_method(std::string_view set_name) {
@@ -338,10 +346,13 @@ std::string_view set_pass_method(std::string_view set_name) {
 // options and --set/--config rejects them.
 bool is_kernel_label(std::string_view flag) { return flag == "files" || flag == "path" || flag == "odir"; }
 
-// --set pass[.idx].flag=value entries for `pass_name` -> EPRP labels.
+// canonical `<pass>.flag=value` set entries for `pass_name` -> EPRP labels.
+// Keys arrive canonicalized (canonical_set_key, at parse time), so the pass
+// token may itself contain dots (e.g. `pass.abc`); split on the LAST dot so
+// the final component is always the flag.
 void merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_dict& labels) {
   for (const auto& [key, value] : opts.sets) {
-    auto pos = key.find('.');
+    auto pos = key.rfind('.');
     if (pos == std::string::npos) {
       throw Lhd_error{"usage", std::format("--set expects pass.flag=value, got '{}={}'", key, value), ""};
     }
@@ -349,11 +360,6 @@ void merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_
     auto flag = key.substr(pos + 1);
     if (pass != pass_name) {
       continue;
-    }
-    if (flag.find('.') != std::string::npos) {
-      throw Lhd_error{"unsupported",
-                      std::format("--set repeated-pass index addressing ('{}') is not implemented yet", key),
-                      "built-in recipes run each pass once; use pass.flag=value"};
     }
     labels[flag] = value;
   }
@@ -364,7 +370,7 @@ void merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_
 // blind). Requires init_engine().
 void check_known_set_passes(const Options& opts) {
   for (const auto& [key, value] : opts.sets) {
-    auto pos = key.find('.');
+    auto pos = key.rfind('.');
     if (pos == std::string::npos) {
       throw Lhd_error{"usage", std::format("--set expects pass.flag=value, got '{}={}'", key, value), ""};
     }
@@ -381,11 +387,6 @@ void check_known_set_passes(const Options& opts) {
       throw Lhd_error{"usage",
                       std::format("--set/--config references unknown pass '{}'", pass),
                       std::format("known passes: {} (`lhd list options`)", known)};
-    }
-    if (flag.find('.') != std::string::npos) {
-      throw Lhd_error{"unsupported",
-                      std::format("--set repeated-pass index addressing ('{}') is not implemented yet", key),
-                      "built-in recipes run each pass once; use pass.flag=value"};
     }
     if (is_kernel_label(flag)) {
       throw Lhd_error{"usage",
@@ -2475,7 +2476,7 @@ void pass_command(Options& opts, Result& res) {
         {"files", lib_file},
         {  "out", lg_out->path}
     };
-    merge_sets(opts, "liberty", labels);
+    merge_sets(opts, "pass.liberty", labels);
     run_step("pass.liberty", var, labels, opts, res);
     livehd::Hhds_graph_library::save(lg_out->path);
     res.outputs.push_back(lg_out->path);
@@ -2507,7 +2508,7 @@ void pass_command(Options& opts, Result& res) {
     if (!opts.top.empty()) {
       labels["top"] = opts.top;
     }
-    merge_sets(opts, "color", labels);
+    merge_sets(opts, "pass.color", labels);
     run_step("pass.color", var, labels, opts, res);
     livehd::Hhds_graph_library::save(lg_in);  // in-place coloring
     res.outputs.push_back(lg_in);
@@ -2531,7 +2532,7 @@ void pass_command(Options& opts, Result& res) {
       ensure_dir(lg_out->path);
       labels["out"] = lg_out->path;
     }
-    merge_sets(opts, "partition", labels);
+    merge_sets(opts, "pass.partition", labels);
     run_step("pass.partition", var, labels, opts, res);
     if (lg_out != nullptr) {
       livehd::Hhds_graph_library::save(lg_out->path);
@@ -2557,7 +2558,7 @@ void pass_command(Options& opts, Result& res) {
       ensure_dir(lg_out->path);
       labels["out"] = lg_out->path;
     }
-    merge_sets(opts, "abc", labels);
+    merge_sets(opts, "pass.abc", labels);
     run_step("pass.abc", var, labels, opts, res);
     if (lg_out != nullptr) {
       livehd::Hhds_graph_library::save(lg_out->path);
@@ -2571,6 +2572,38 @@ void pass_command(Options& opts, Result& res) {
 }  // namespace
 
 // ---- public entry points ----------------------------------------------------
+
+// Resolve an abbreviated --set/--config key to its canonical
+// "<passtoken>.<flag>" form (2h-set_path). `ctx` is the command-path
+// established by the command words to the LEFT of the flag, dotted
+// (e.g. "pass.abc" after `lhd pass abc`, "" before any command word). Tries
+// the key as-is, then prepends successively shorter prefixes of `ctx`
+// (longest first); the first candidate whose leading segment(s) name a known
+// pass (kSetPasses) wins. Returns the key unchanged when nothing resolves, so
+// check_known_set_passes still emits the standard unknown-pass error. Uses
+// only the constexpr kSetPasses table, so it is safe before init_engine().
+std::string canonical_set_key(std::string_view key, std::string_view ctx) {
+  auto names_a_pass = [](std::string_view candidate) {
+    auto pos = candidate.rfind('.');
+    return pos != std::string_view::npos && !set_pass_method(candidate.substr(0, pos)).empty();
+  };
+  if (names_a_pass(key)) {
+    return std::string{key};
+  }
+  std::string prefix{ctx};
+  while (!prefix.empty()) {
+    std::string candidate = prefix + "." + std::string{key};
+    if (names_a_pass(candidate)) {
+      return candidate;
+    }
+    auto pos = prefix.rfind('.');
+    if (pos == std::string::npos) {
+      break;
+    }
+    prefix.resize(pos);
+  }
+  return std::string{key};
+}
 
 Lhd_error classify_engine_failure(std::string_view fallback_msg) {
   const auto& recs = livehd::diag::sink().records();

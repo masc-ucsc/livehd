@@ -58,7 +58,9 @@
 <p><strong>Remaining:</strong> Subtask 5 (<code>seq=true</code>: flops→latches, clock/reset strip + reattach,
   single-root flop-name remap, sequential default flow) — currently a loud <code>seq-unsupported</code>
   diagnostic. Also pending: arithmetic-cell bit-blast (<code>sum/mult/cmp/shift</code> — today a loud
-  <code>unsupported-cell</code> diag), hierarchical regions containing a
+  <code>unsupported-cell</code> diag) — <strong>promoted to its own task <a href="2i-abc_arith.html">2i-abc_arith</a></strong>
+  (adder + comparators with selectable adder architectures first; <code>mult/div/mod</code>/shift stay
+  unsupported, barrel shifter next). Also still pending here: hierarchical regions containing a
   <code>Sub</code> as an ABC pseudo-boundary, and per-region <code>flow</code> overrides. <em>Do not delete this
   page until seq + arithmetic land.</em></p>
 

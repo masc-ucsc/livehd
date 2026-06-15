@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2i-abc_arith — ABC arithmetic bit-blast (Sum + comparators, selectable adders)</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2i-abc_arith</strong> ABC arithmetic bit-blast — Sum + comparators, selectable adder architectures</h1>
+
+<p>The combinational <a href="2a-abc.html">2a-abc</a> tech-mapper bit-blasts only the <em>trivial</em> cells
+  (<code>And/Or/Xor/Not/Mux/Hotmux/Get_mask/Set_mask/Sext/const</code>). Any <strong>non-trivial</strong>
+  arithmetic cell hits the loud <code>unsupported-cell</code> diag — e.g. the <code>simple_add.v</code>
+  adder:</p>
+<pre><code>lhd elaborate inou/yosys/tests/simple_add.v --emit-dir lg:tmp4
+lhd pass color synth lg:tmp4
+lhd pass abc lg:tmp4 --emit-dir lg:tmp4b
+# livehd:error:pass.abc: cell 'sum' in region 'simple_add__c2' has no
+#   combinational bit-blast yet (supported: and/or/xor/not/mux/hotmux/const)</code></pre>
+
+<p>This task <strong>expands the non-trivial cells into gate networks of the existing trivial primitives</strong>
+  before ABC, and adds the first <em>architecture-selectable</em> expansion: the adder. A <code>Sum</code> can
+  be lowered as a ripple-carry, carry-skip, or carry-lookahead adder via <code>--set pass.abc.adder=…</code>,
+  with a <code>block_size</code> knob for the blocked architectures. The code is structured so future complex
+  blocks (the barrel shifter is <strong>next</strong>; multipliers, prefix adders later) plug in without
+  touching the per-cell dispatch.</p>
+
+<h2>Scope (decided)</h2>
+<ul>
+<li><strong>Implement now:</strong>
+  <ul>
+  <li><code>Ntype_op::Sum</code> — addition (pid 0 = A, n-ary additive) and subtraction (pid 1 = B, n-ary
+    subtractive). Result <code>= ΣAᵢ − ΣBⱼ</code>.</li>
+  <li>Comparators <code>Ntype_op::LT</code>, <code>Ntype_op::GT</code> (binary, pid 0 = A / pid 1 = B) and
+    <code>Ntype_op::EQ</code> (n-ary all-equal). <code>LE</code>/<code>GE</code>/<code>NE</code> are
+    <em>not</em> cells — they are synthesized as <code>Not</code> of <code>GT</code>/<code>LT</code>/<code>EQ</code>
+    upstream and never reach ABC, so they need no handling here.</li>
+  </ul></li>
+<li><strong>Stays unsupported (unchanged):</strong> <code>Mult</code>, <code>Div</code>, <code>Mod</code>,
+  <code>SHL</code>, <code>SRA</code>, <code>Ror</code> — keep emitting the existing <code>unsupported-cell</code>
+  diag exactly as today. (Per user: "the other blocks should just fail for the moment like sum does now.")</li>
+<li><strong>Adder architectures now:</strong> <code>rca</code> (ripple-carry), <code>cska</code> (carry-skip),
+  <code>cla</code> (carry-lookahead). Future (not now): Han–Carlson, Sklansky, Brent–Kung, … — the framework
+  must accept them as drop-ins.</li>
+<li><strong>Next task (not here):</strong> the barrel shifter with the same option pattern
+  (<code>pass.abc.shifter=…</code>). See the Pre&nbsp;TODO bullet.</li>
+</ul>
+
+<h2>Locked design decisions</h2>
+<ul>
+<li><strong>Seed-the-AIG, let ABC optimize.</strong> The chosen adder is only the <em>initial</em> structure
+  handed to the existing ABC flow (<code>strash; &amp;get -n; &amp;fraig -x; &amp;put; &amp;get -n; &amp;dch -f;
+  &amp;nf {D}; &amp;put</code>). ABC re-synthesizes the AIG, so functionally-equivalent adders (RCA/CSKA/CLA)
+  may converge to similar or identical mapped netlists — that is accepted. No structure-preservation mode; the
+  knob seeds ABC's starting point. <em>Correctness is the bar; observable structural difference is not
+  required.</em></li>
+<li><strong>Default architecture = <code>rca</code></strong> (needs no <code>block_size</code>).</li>
+<li><strong><code>block_size</code></strong> sets the CSKA skip-block / CLA lookahead-group width; the last block
+  may be narrower. When unset for <code>cska</code>/<code>cla</code> it is auto-derived from the adder width
+  <code>W</code>:
+  <pre><code>block_size = (W > 16) ? W/4 : (W > 8) ? W/2 : W      // clamp to ≥ 1</code></pre>
+  User override via <code>--set pass.abc.block_size=N</code>. (RCA ignores it.)</li>
+<li><strong>Comparators reuse the adder.</strong> <code>LT</code>/<code>GT</code> are a subtraction
+  (<code>a + ~b + 1</code>) read off the carry-out / sign bit, so they go through the same selectable adder.
+  <code>EQ</code> is pure <code>Xor</code>+reduce (no adder).</li>
+</ul>
+
+<h2>CLI surface</h2>
+<p>The adder options are <code>pass.abc.adder</code> and <code>pass.abc.block_size</code>, under the
+  command-path namespace (<code>lhd pass abc</code> ⇒ <code>pass.abc.*</code>):</p>
+<pre><code>lhd pass abc --top add_test lg:orig --emit-dir lg:net \
+    --set pass.abc.adder=cla --set pass.abc.block_size=4
+lhd pass abc … --set pass.abc.adder=rca        # default; block_size ignored
+lhd pass abc … --set pass.abc.adder=cska       # block_size auto = W/4|W/2|W
+lhd pass abc … --set adder=cla                 # abbreviated (prefix supplied by 'pass abc')
+
+# pass.abc.* (all abc options): library, flow, seq, delay, load, verbose, adder, block_size</code></pre>
+<p><strong>The <code>--set</code> namespace + abbreviation machinery is a separate prerequisite,</strong>
+  <a href="2h-set_path.html">2h-set_path</a>: it makes every option namespace match the command path
+  (<code>pass.abc.*</code>) and lets the key drop any prefix the command words to its left already supply — so
+  <code>--set pass.abc.adder=cla</code>, <code>--set abc.adder=cla</code> (after <code>pass</code>), and
+  <code>--set adder=cla</code> (after <code>pass abc</code>) are all equivalent. 2i only has to
+  <em>register</em> the two new labels (<code>adder</code>, <code>block_size</code>) on the
+  <code>pass.abc</code> method; the kernel parsing lands in 2h.</p>
+
+<h2>Code structure — the complex-cell expander seam</h2>
+<p>Keep the trivial-gate AIG constructors (<code>abc_const_bit</code>/<code>abc_not</code>/<code>abc_bin</code>/
+  <code>abc_bit</code>) in <code>abc_map.cpp</code> exactly as they are. Add a backend-agnostic
+  <strong>bit-vector algebra + adder library</strong> that complex cells lower into. The library never includes
+  ABC headers, so it is unit-testable against a plain software bit model.</p>
+
+<pre><code>// pass/abc/abc_arith.hpp  — header-only templates, no ABC dependency
+//
+// Ops is any type exposing: Bit zero(); Bit one(); Bit inv(Bit);
+//                           Bit and_(Bit,Bit); Bit or_(Bit,Bit); Bit xor_(Bit,Bit);
+// Bit vectors are LSB-first, equal length == the adder width W.
+
+enum class Adder_kind { rca, cska, cla };
+std::optional&lt;Adder_kind&gt; parse_adder_kind(std::string_view);   // diag on unknown
+int  default_block_size(int width);                              // W/4|W/2|W, ≥1
+
+template&lt;class Bit&gt; struct Add_result { std::vector&lt;Bit&gt; sum; Bit carry_out; };
+
+template&lt;class Bit, class Ops&gt;
+Add_result&lt;Bit&gt; build_add(Adder_kind, int block_size, Ops&amp;,
+                          std::span&lt;const Bit&gt; a, std::span&lt;const Bit&gt; b, Bit cin);
+
+// shared primitives the builders + comparators use
+template&lt;class Bit, class Ops&gt; struct FA { Bit sum, carry; };
+template&lt;class Bit, class Ops&gt; FA&lt;Bit,Ops&gt; full_adder(Ops&amp;, Bit a, Bit b, Bit cin);
+template&lt;class Bit, class Ops&gt; std::vector&lt;Bit&gt; bv_invert(Ops&amp;, std::span&lt;const Bit&gt;);
+
+// comparators (reuse build_add for LT/GT)
+template&lt;class Bit, class Ops&gt;
+Bit build_lt(Adder_kind, int bs, Ops&amp;, std::span&lt;const Bit&gt; a, std::span&lt;const Bit&gt; b, bool is_unsigned);
+template&lt;class Bit, class Ops&gt;
+Bit build_eq(Ops&amp;, const std::vector&lt;std::span&lt;const Bit&gt;&gt;&amp; ops_bits);   // all-equal</code></pre>
+
+<p>Adding a new architecture = new <code>*_add</code> helper + an <code>Adder_kind</code> entry + one
+  <code>parse_adder_kind</code> string + one <code>build_add</code> switch arm. Adding a new complex cell
+  (barrel shifter next) = a new builder in this file + a new dispatch arm in <code>abc_map.cpp</code> that
+  speaks only <code>Ops</code>. This is the documented seam for "non-trivial gates expand to complex blocks."</p>
+
+<h3>Wiring in <code>abc_map.cpp</code></h3>
+<ul>
+<li><code>Map_options</code> (+<code>abc_map.hpp</code>): add <code>Adder_kind adder = rca;</code> and
+  <code>int block_size = 0;  // 0 ⇒ auto</code>. <code>pass_abc.cpp</code> parses
+  <code>pass.abc.adder</code> (diag on unknown) + <code>pass.abc.block_size</code>.</li>
+<li>Build one <code>Ops</code> adapter per region wrapping the existing closures:
+  <code>zero()=abc_const_bit(false)</code>, <code>one()=abc_const_bit(true)</code>, <code>inv=abc_not</code>,
+  <code>and_/or_/xor_ = abc_bin(·,·,'&amp;'|'|'|'^')</code>. <code>Bit = Abc_Obj_t*</code>.</li>
+<li>New dispatch arms before the final <code>else</code> (the <code>unsupported-cell</code> fallthrough stays
+  for Mult/Div/Mod/shift).</li>
+</ul>
+
+<h2>Per-cell lowering (exact)</h2>
+<h3><code>Sum</code></h3>
+<ul>
+<li>Gather A drivers (<code>get_port_id()==0</code>) and B drivers (<code>==1</code>) via
+  <code>inp_edges</code> (n-ary each).</li>
+<li><code>W = out_bits</code> (the cprop/<code>upass.bitwidth</code>-resolved result width — already wide enough
+  for carry growth, e.g. <code>u32+u32→u33</code>). Build each operand as <code>W</code> bits with
+  <code>abc_bit(drv,i)</code>, which already sign/zero-extends per the driver's own signedness.</li>
+<li><code>acc</code>: if A non-empty, <code>acc = A[0]</code>; for each further <code>A[k]</code>,
+  <code>acc = build_add(kind, bs, acc, A[k], cin=zero).sum</code>. If A empty, <code>acc = {W × zero}</code>.</li>
+<li>For each B driver <code>Bⱼ</code>: <code>acc = build_add(kind, bs, acc, bv_invert(Bⱼ), cin=one).sum</code>
+  (two's-complement subtract <code>acc − Bⱼ</code>).</li>
+<li>Emit <code>acc[0..W)</code> as the output bits (carry beyond <code>W</code> dropped = truncation to the
+  declared result width). Single A &amp; no B ⇒ <code>acc = A[0]</code>, no adder built.</li>
+<li><code>bs</code> = <code>opts.block_size &gt; 0 ? opts.block_size : default_block_size(W)</code>.</li>
+</ul>
+
+<h3><code>LT</code> / <code>GT</code></h3>
+<ul>
+<li><code>GT(a,b) ≡ LT(b,a)</code> — implement by swapping the operands into <code>build_lt</code>.</li>
+<li><code>build_lt(a,b)</code>: <code>unsigned = is_unsign(a) &amp;&amp; is_unsign(b)</code>;
+  <code>W = max(bits(a),bits(b)) + 1</code> (one guard bit ⇒ <code>a−b</code> can't overflow
+  <code>W</code> bits). Operand vectors via <code>abc_bit</code> (auto-extend per own sign).
+  <code>(diff,cout) = build_add(kind, bs, a, bv_invert(b), cin=one)</code> ⇒ <code>a − b</code>.
+  <code>lt = unsigned ? inv(cout) : diff[W-1]</code> (no carry-out/borrow ⇒ <code>a&lt;b</code> unsigned;
+  guard-bit sign ⇒ <code>a&lt;b</code> signed; mixed-sign falls out because the unsigned operand
+  zero-extends into a non-negative signed value).</li>
+<li>Result is 1-bit: <code>out[0]=lt</code>, any higher out bits = <code>zero</code>.</li>
+</ul>
+
+<h3><code>EQ</code> (n-ary all-equal)</h3>
+<ul>
+<li>≤1 driver ⇒ <code>const 1</code>. Else <code>W = max(bits(dᵢ)) + 1</code> (guard bit so a signed-negative
+  never equals an unsigned value by bit accident).</li>
+<li><code>eq = ⋀_{j≥1} ⋀_{b&lt;W} inv( d_j[b] ⊕ d_0[b] )</code> using <code>abc_bit</code>-extended bits. No adder.</li>
+<li><code>out[0]=eq</code>, higher bits <code>zero</code>.</li>
+</ul>
+
+<h2>Subtasks — build order</h2>
+<ul class="subtasks">
+<li><strong>0 — register the labels (depends on <a href="2h-set_path.html">2h-set_path</a>).</strong> The
+  <code>--set</code> command-path namespace + abbreviation lands in 2h; here just add the two new
+  <code>add_label_optional</code> entries (<code>adder</code>, <code>block_size</code>) to the
+  <code>pass.abc</code> Eprp method so <code>--set pass.abc.adder</code>/<code>pass.abc.block_size</code>
+  resolve and the strict-typo check accepts them.</li>
+<li><strong>1 — <code>abc_arith.hpp</code> + unit tests.</strong> <code>full_adder</code>, <code>rca_add</code>,
+  <code>cska_add</code>, <code>cla_add</code>, <code>build_add</code>, <code>build_lt</code>, <code>build_eq</code>,
+  <code>parse_adder_kind</code>, <code>default_block_size</code>. A standalone gtest instantiates the templates
+  with a software <code>Ops</code> (<code>Bit = bool</code>) and checks every architecture × a sweep of widths
+  and <code>block_size</code>s against reference <code>+/−/&lt;/&gt;/==</code> over random vectors (signed and
+  unsigned). <strong>No ABC frame needed</strong> — pure functional verification of the gate construction.</li>
+<li><strong>2 — dispatch + options in <code>abc_map.cpp</code>/<code>pass_abc.cpp</code>.</strong>
+  <code>Map_options.adder</code>/<code>.block_size</code>, the <code>Ops</code> adapter, the <code>Sum</code> /
+  <code>LT</code> / <code>GT</code> / <code>EQ</code> arms. <code>Mult/Div/Mod/SHL/SRA/Ror</code> still hit
+  <code>unsupported-cell</code>.</li>
+<li><strong>3 — end-to-end + LEC.</strong> <code>simple_add.v</code> maps (the original error case). Add Pyrope
+  fixtures: <code>u32+u32</code>, signed add, subtract (<code>a−b</code>), multi-operand
+  (<code>a+b+c−d</code>), and comparators (signed + unsigned <code>&lt;</code>/<code>&gt;</code>/<code>==</code>,
+  plus an <code>LE</code>/<code>GE</code>/<code>NE</code> case to confirm they lower to <code>Not</code> of a
+  supported cmp and still map). LEC each mapped netlist against its <code>restruct</code> twin via
+  <code>lhd check</code> (the 2a-abc pattern: link <code>lg:models</code> from
+  <code>pass liberty gensim</code>). Run with <code>--set pass.abc.adder=rca</code>, <code>cska</code>,
+  <code>cla</code> (and a non-default <code>block_size</code>) — all three must LEC-pass.</li>
+<li><strong>4 — docs.</strong> <code>pass/abc/README.md</code> (the new arms + the <code>abc_arith</code> seam +
+  the option table), AGENTS notes if needed, and the LiveHD docs adder/CLI mention. Delete this page on landing
+  (note the un-done barrel-shifter follow-on lives in the Pre&nbsp;TODO, not here).</li>
+</ul>
+
+<h2>Verification</h2>
+<ul>
+<li><strong>Framework unit test (subtask 1)</strong> — exhaustive-ish functional check of each adder
+  architecture + each comparator against a software reference, decoupled from ABC/Liberty. Catches construction
+  bugs (carry chains, block boundaries, sign/guard-bit handling) cheaply and deterministically.</li>
+<li><strong>End-to-end LEC (subtask 3)</strong> — the only way to confirm the bit-blast is sound after ABC's
+  lossy optimization. <code>netlist</code> module ≡ <code>restruct</code> twin via <code>lhd check</code> with
+  the gensim cell models linked, for each architecture and a non-default block size. A negative control
+  (deliberately wrong adder) must fail LEC.</li>
+</ul>
+
+<h2>Future (explicitly not this task)</h2>
+<ul>
+<li><strong>LNAST <code>abc</code> attribute propagation.</strong> Per-expression control rather than a global
+  flag, e.g.
+  <pre><code>comb add_test(a:u32, b:u32)->(r:u32) {
+  const r1::[lhd.pass.abc.adder=cla, lhd.pass.abc.block_size=4] = a + b
+  const r2::[lhd.pass.abc.adder=rca]                            = a + b
+  assert(r1 == r2)
+  r = r1
+}</code></pre>
+  The attribute must ride the LNAST → LGraph lowering and land on (or near) the resulting <code>Sum</code> node
+  so <code>pass.abc</code> can read a per-node override of the global <code>pass.abc.adder</code>/<code>block_size</code>.
+  Needs: an attribute carrier on the cell (an <code>hhds</code> per-node attr), the prp2lnast/tolg plumbing to
+  set it, and a per-node lookup in the <code>Sum</code> dispatch arm that falls back to <code>Map_options</code>.
+  The <code>assert(r1==r2)</code> example is itself a self-checking LEC fixture once this lands.</li>
+<li><strong>Barrel shifter with options — the next task.</strong> Same pattern as the adder
+  (<code>pass.abc.shifter=…</code> + block/stage knobs) for <code>SHL</code>/<code>SRA</code>/<code>Ror</code>,
+  built on the same <code>abc_arith</code> complex-cell seam.</li>
+<li>Multipliers (array/Booth/Wallace), prefix adders (Han–Carlson, Sklansky, Brent–Kung), <code>Div</code>/
+  <code>Mod</code> — later, via the same seam.</li>
+</ul>
+
+<h2>Depends on</h2>
+<ul>
+<li><a href="2a-abc.html">2a-abc</a> — the combinational mapper + bit-blast boundary + <code>pass liberty
+  gensim</code> models + LEC harness this extends. The trivial-gate constructors and <code>abc_bit</code>
+  sign/zero-extension helper are reused verbatim.</li>
+<li><a href="2h-set_path.html">2h-set_path</a> — the <code>pass.abc.*</code> command-path namespace + the
+  <code>--set</code> abbreviation that the adder/block_size CLI uses.</li>
+</ul>
+
+<h2>Done when</h2>
+<p><code>lhd pass abc … --emit-dir lg:net</code> maps designs containing <code>Sum</code> (add + subtract,
+  multi-operand) and <code>LT</code>/<code>GT</code>/<code>EQ</code> comparators — starting with
+  <code>simple_add.v</code> — to standard-cell netlists; <code>pass.abc.adder ∈ {rca,cska,cla}</code> selects
+  the seed structure (default <code>rca</code>) and <code>pass.abc.block_size</code> overrides the auto block
+  width; the <code>abc_arith</code> framework is unit-tested against a software model for all three
+  architectures and all comparators; every architecture LEC-passes against the <code>restruct</code> twin;
+  <code>Mult/Div/Mod</code>/shift still emit the existing <code>unsupported-cell</code> diag; the adder options
+  are reachable as <code>pass.abc.adder</code>/<code>pass.abc.block_size</code> (on the <a href="2h-set_path.html">2h</a>
+  namespace); and no previously-passing test regresses.</p>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>

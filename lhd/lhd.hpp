@@ -116,6 +116,13 @@ struct Lhd_error {
 // argv -> Options. Throws Lhd_error{usage,...} on malformed input.
 Options parse_args(int argc, char** argv);
 
+// Resolve an abbreviated --set/--config key to its canonical
+// "<passtoken>.<flag>" form (2h-set_path), given the command-path context
+// (the dotted command words to the LEFT of the flag, e.g. "pass.abc"; "" when
+// the flag precedes any command word). Returns the key unchanged when it does
+// not resolve. Uses only the constexpr pass-name table — no init_engine().
+std::string canonical_set_key(std::string_view key, std::string_view ctx);
+
 // Meta commands (list/describe/version/help). Most need no engine init;
 // `list options` / `describe pass.flag` initialize the pass registry
 // themselves (the option vocabulary lives on the registered EPRP labels).

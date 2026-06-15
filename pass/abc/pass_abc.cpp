@@ -84,7 +84,7 @@ void Pass_abc::work(Eprp_var& var) {
   }
   if (library.empty()) {
     livehd::diag::err("pass.abc", "no-library", "unsupported")
-        .msg("pass.abc needs a Liberty file: set --set abc.library=<file.lib> (or export HAGENT_TECH_DIR)")
+        .msg("pass.abc needs a Liberty file: set --set pass.abc.library=<file.lib> (or export HAGENT_TECH_DIR)")
         .fatal();
     return;
   }

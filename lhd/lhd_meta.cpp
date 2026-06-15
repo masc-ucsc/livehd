@@ -165,8 +165,10 @@ int describe_option(const Options& opts, const std::string& name) {
     }
     return 0;
   }
-  // A known pass with an unknown flag gets a targeted hint.
-  auto prefix = name.substr(0, name.find('.'));
+  // A known pass with an unknown flag gets a targeted hint. The pass token is
+  // everything up to the LAST dot (the flag), so dotted command-path
+  // namespaces like `pass.abc` are reported whole (2h-set_path).
+  auto prefix = name.substr(0, name.rfind('.'));
   for (const auto& o : all) {
     if (o.name.size() > prefix.size() && o.name.compare(0, prefix.size(), prefix) == 0 && o.name[prefix.size()] == '.') {
       std::print(stderr, "lhd describe: unknown option '{}' (`lhd list options {}\\..*` shows what {} accepts)\n", name, prefix,
