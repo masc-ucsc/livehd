@@ -87,6 +87,16 @@ else
   # global namespace (abc keeps its own copy).
   nm --defined-only --extern-only $(location lib/libcadical.a) \
     | awk '$$2 ~ /^[TDBR]$$/ {print $$3}' | sort -u > "$$work/cad.syms"
+  # CaDiCaL's Reap class and the ipasir_/ccadical C API are NOT inside
+  # libcadical.a in this cvc5 layout (they ride a separate object), so the
+  # libcadical.a sweep above misses them and they stay GLOBAL -> duplicate-clash
+  # with abc's vendored CaDiCaL, and cvc5's subsume/elim then segfaults using
+  # the wrong Reap. Localize them by their actual names in the combined object
+  # (the same set the macOS -unexported_symbol patterns cover).
+  nm --defined-only --extern-only "$$work/combined.o" \
+    | awk '$$2 ~ /^[TDBRVW]$$/ {print $$3}' \
+    | grep -E '^(ipasir_|ccadical|_ZN4Reap)' >> "$$work/cad.syms"
+  sort -u "$$work/cad.syms" -o "$$work/cad.syms"
   objcopy --localize-symbols="$$work/cad.syms" \
     "$$work/combined.o" "$$work/local.o"
   rm -f $@

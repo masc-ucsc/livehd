@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -120,6 +121,32 @@ Term fit_to(cvc5::TermManager& tm, const Val& v, int width) {
 Sort Encoder::bv(int width) { return tm_.mkBitVectorSort(width < 1 ? 1 : width); }
 
 Term Encoder::fit(const Val& v, int width) { return fit_to(tm_, v, width); }
+
+// Concrete reset/initial value of a flop's `initial` pin (the reset value), as a
+// `width`-bit BV. Returns nullopt for a reset-less flop (no constant initial) —
+// its power-on value is arbitrary, so the BMC caller seeds a fresh shared symbol
+// instead. Unknown bits in the initial are masked to 0 (a defined reset).
+std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Node_class& node, int width) {
+  auto init_d = gu::get_driver_of_sink_name(node, "initial");
+  if (init_d.is_invalid() || !gu::is_const_pin(init_d)) {
+    return std::nullopt;
+  }
+  Dlop c = gu::hydrate_const(init_d);
+  if (c.is_just_i64()) {
+    return Val{bv_const(tm, width, static_cast<uint64_t>(c.to_just_i64())), width, c.is_negative()};
+  }
+  auto bin = c.to_binary();
+  for (auto& ch : bin) {
+    if (ch != '0' && ch != '1') {
+      ch = '0';
+    }
+  }
+  if (bin.empty()) {
+    bin = "0";
+  }
+  Val v{tm.mkBitVector(static_cast<uint32_t>(bin.size()), bin, 2), static_cast<int>(bin.size()), c.is_negative()};
+  return Val{fit_to(tm, v, width), width, c.is_negative()};
+}
 
 Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, Val>* shared_inputs, std::string_view prefix) {
   Encoded out;

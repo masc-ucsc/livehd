@@ -30,6 +30,182 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     solver.setOption("produce-models", "true");
   }
 
+  // ── BMC engine: unroll N cycles from the reset state ──────────────────────
+  // The single-step inductive miter (below) assumes an arbitrary equal current
+  // state, so it false-REFUTEs on UNREACHABLE states where the two front-ends
+  // resolve a don't-care differently. BMC instead starts from the reset state
+  // (each flop's constant `initial`, or a shared fresh symbol for a reset-less
+  // flop) and chains each design's own next-state forward, so only states
+  // reachable within N cycles are explored — sound for that bound (this is what
+  // yosys' own lgcheck does with its bounded miter).
+  if (opts.engine == "bmc") {
+    const int N = opts.bound > 0 ? opts.bound : 20;
+    Encoder   enc(tm);
+
+    struct In {
+      int  w;
+      bool sgn;
+    };
+    absl::flat_hash_map<std::string, In> ins;
+    auto                                 collect_ins = [&](hhds::Graph* g) {
+      auto gio = g->get_io();
+      for (const auto& d : gio->get_input_pin_decls()) {
+        if (ins.count(d.name)) {
+          continue;
+        }
+        auto pin = g->get_input_pin(d.name);
+        int  w   = real_width_io(pin, *gio, d.name);
+        if (w == 0) {
+          w = 1;
+        }
+        bool sgn  = pin.is_invalid() ? !gio->is_unsign(d.name) : !graph_util::is_unsign(pin);
+        ins[d.name] = In{w, sgn};
+      }
+    };
+    collect_ins(ref);
+    collect_ins(impl);
+
+    // state[0]: reset initial per flop (shared equal across designs).
+    absl::flat_hash_map<std::string, Val> ref_state, impl_state;
+    {
+      absl::flat_hash_map<std::string, int> fw;
+      absl::flat_hash_map<std::string, Val> init;
+      auto                                  collect_flops = [&](hhds::Graph* g) {
+        for (auto node : g->forward_class()) {
+          if (graph_util::type_op_of(node) != Ntype_op::Flop) {
+            continue;
+          }
+          auto q = node.get_driver_pin(0);
+          if (q.is_invalid()) {
+            continue;
+          }
+          auto key = flop_state_key(*g, node);
+          int  w   = real_width(q);
+          if (w == 0) {
+            w = 1;
+          }
+          fw[key] = w;
+          if (!init.count(key)) {
+            if (auto iv = flop_initial(tm, node, w)) {
+              init[key] = *iv;
+            }
+          }
+        }
+      };
+      collect_flops(ref);
+      collect_flops(impl);
+      for (const auto& [key, w] : fw) {
+        Val v;
+        if (auto it = init.find(key); it != init.end()) {
+          v = it->second;
+        } else {
+          v = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), "s0_" + key), w, false};
+        }
+        ref_state[key]  = v;
+        impl_state[key] = v;
+      }
+    }
+
+    cvc5::Term bad;
+    int        uid = 0;  // unique suffix for fresh per-cycle state vars
+    for (int cyc = 0; cyc < N; ++cyc) {
+      // Current state for cycle i>0 is a FRESH symbol per flop, pinned to the
+      // previous cycle's next-state by a flat equality assertion. Substituting
+      // the next-state term directly instead would re-nest the whole transition
+      // every cycle (a counter's state becomes (((q+1)+1)...) — cvc5's recursive
+      // term walk then stack-overflows past ~13 steps). Fresh-var + assert keeps
+      // every cycle's terms shallow; the unrolling lives in the assertion set.
+      if (cyc > 0) {
+        absl::flat_hash_map<std::string, Val> ns_ref, ns_impl;
+        auto pin_state = [&](const absl::flat_hash_map<std::string, Val>& prev_next,
+                             absl::flat_hash_map<std::string, Val>&       cur) {
+          for (const auto& [key, pv] : prev_next) {
+            cvc5::Term s = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(pv.width)), "st" + std::to_string(uid++));
+            solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {s, pv.term}));
+            cur[key] = Val{s, pv.width, pv.is_signed};
+          }
+        };
+        pin_state(ref_state, ns_ref);
+        pin_state(impl_state, ns_impl);
+        ref_state  = std::move(ns_ref);
+        impl_state = std::move(ns_impl);
+      }
+
+      absl::flat_hash_map<std::string, Val> sh_ref, sh_impl;
+      for (const auto& [name, info] : ins) {
+        cvc5::Term t = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(info.w)), "c" + std::to_string(cyc) + "_" + name);
+        Val        v{t, info.w, info.sgn};
+        sh_ref[name]  = v;
+        sh_impl[name] = v;
+      }
+      for (const auto& [k, v] : ref_state) {
+        sh_ref[k] = v;
+      }
+      for (const auto& [k, v] : impl_state) {
+        sh_impl[k] = v;
+      }
+
+      Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(cyc) + "_");
+      if (!re.ok) {
+        res.verdict  = Verdict::Unknown;
+        res.detail  += "; ref encode failed: " + re.error;
+        return res;
+      }
+      Encoded ie = enc.encode(impl, &sh_impl, "i" + std::to_string(cyc) + "_");
+      if (!ie.ok) {
+        res.verdict  = Verdict::Unknown;
+        res.detail  += "; impl encode failed: " + ie.error;
+        return res;
+      }
+
+      for (const auto& [name, rv] : re.outputs) {
+        if (!name.empty() && name[0] == '\x01') {
+          continue;  // next-state, not a primary output
+        }
+        auto it = ie.outputs.find(name);
+        if (it == ie.outputs.end()) {
+          continue;
+        }
+        int        w    = std::max(rv.width, it->second.width);
+        cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, rv, w), fit_to(tm, it->second, w)});
+        bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
+      }
+
+      // Stash each design's next-state terms (built on this cycle's shallow
+      // current-state symbols) for the next cycle's fresh-var pinning.
+      absl::flat_hash_map<std::string, Val> rn, in;
+      for (const auto& [name, rv] : re.outputs) {
+        if (name.rfind("\x01nxt:", 0) == 0) {
+          rn[name.substr(5)] = rv;
+        }
+      }
+      for (const auto& [name, iv] : ie.outputs) {
+        if (name.rfind("\x01nxt:", 0) == 0) {
+          in[name.substr(5)] = iv;
+        }
+      }
+      ref_state  = std::move(rn);
+      impl_state = std::move(in);
+    }
+
+    res.detail = "solver=cvc5 (bmc, " + std::to_string(N) + " steps from reset)";
+    if (bad.isNull()) {
+      res.verdict = Verdict::Proven;
+      return res;
+    }
+    solver.assertFormula(bad);
+    cvc5::Result r = solver.checkSat();
+    if (r.isUnsat()) {
+      res.verdict = Verdict::Proven;
+    } else if (r.isSat()) {
+      res.verdict = Verdict::Refuted;
+    } else {
+      res.verdict  = Verdict::Unknown;
+      res.detail  += "; checkSat returned unknown";
+    }
+    return res;
+  }
+
   // Shared primary inputs: one symbolic BV per input name (union of both
   // designs). Both encodings reuse these terms, so "equal inputs" is structural
   // (the miter constrains nothing on the inputs -> they range freely).

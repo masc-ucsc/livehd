@@ -3,6 +3,7 @@
 
 #include <cvc5/cvc5.h>
 
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -43,6 +44,11 @@ int real_width_io(const hhds::Pin_class& pin, const hhds::GraphIO& gio, std::str
 // emit current/next state under one key) and prove_equal (to share the
 // current-state symbol across the two designs). See M2 in lec.md.
 std::string flop_state_key(const hhds::Graph& g, const hhds::Node_class& node);
+
+// Concrete reset value of a flop (its constant `initial` pin), as a width-bit
+// BV; nullopt for a reset-less flop. Used by the BMC engine to seed the
+// reachable-from-reset initial state. See M2/BMC in lec.md.
+std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Node_class& node, int width);
 
 // Extend (sign/zero per v.is_signed) or truncate `v` to exactly `width` bits.
 cvc5::Term fit_to(cvc5::TermManager& tm, const Val& v, int width);
