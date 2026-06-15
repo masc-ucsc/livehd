@@ -679,7 +679,12 @@ void Cprop::scalar_sext(hhds::Node_class& node, std::vector<hhds::Edge_class>& i
 
   const auto& wire_dpin = inp_edges_ordered[0].driver;
 
-  if (self_pos == 1) {
+  // Sext(X,1) feeding a Mux can be bypassed (a Mux selector/arm is contractually
+  // 1 bit) ONLY when X is already 1 bit. For a wider X (e.g. the offset-0 select
+  // of a bmux mux-tree, where X is the full ~addr signal) bypassing connects a
+  // multi-bit value to the 1-bit Mux selector, which cgen then emits as a
+  // reduction-OR (`if (x)` instead of `if (x[0])`) — selecting the wrong arm.
+  if (self_pos == 1 && bits_of(wire_dpin) == 1) {
     for (auto& e : node.out_edges()) {
       if (type_op_of(e.sink.get_master_node()) == Ntype_op::Mux) {
         e.sink.connect_driver(wire_dpin);

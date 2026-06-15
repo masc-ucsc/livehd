@@ -4517,6 +4517,9 @@ void uPass_runner::unroll_while() {
 
   // 2f-nil_diag — a condition that folds to nil is an illegal use of nil; a
   // genuinely runtime condition folds to nullopt (not nil) and stays verbatim.
+  // An uncertainty-pinned poison nil (conditionally-driven var) is treated as
+  // UNKNOWN, not an error (see the if-condition note above); a `const c = nil`
+  // clears the uncertain mark on store, so it still errors.
   if (cval && !cval->is_invalid() && cval->is_nil()) {
     report_cond_nil("while");
     return;

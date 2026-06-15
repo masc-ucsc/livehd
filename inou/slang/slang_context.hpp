@@ -80,6 +80,7 @@ private:
   absl::flat_hash_set<const slang::ast::Symbol*>              input_syms_;
   absl::flat_hash_set<const slang::ast::Symbol*>              output_syms_;
   absl::flat_hash_set<const slang::ast::Symbol*>              reg_syms_;   // clocked state vars
+  absl::flat_hash_set<const slang::ast::Symbol*>              latch_syms_; // level-sensitive latch state vars (subset of reg_syms_)
   absl::flat_hash_set<const slang::ast::Symbol*>              mem_syms_;   // unpacked arrays lowered as memories
   absl::flat_hash_set<const slang::ast::Symbol*>              mem_wensize_emitted_;  // memories whose wensize attr was emitted
   absl::flat_hash_set<const slang::ast::Symbol*>              declared_;   // declare stmt already emitted

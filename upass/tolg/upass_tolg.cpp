@@ -697,17 +697,48 @@ private:
       }
       setup_sink_by_name(flop, "din").connect_driver(din);
 
+      if (info.is_latch) {
+        // A latch (Ntype_op::Latch) has no clock/reset/posclk: wire only its
+        // enable (the transparency condition; cgen process_latch emits
+        // `always @* if(enable) q = din`). din already carries the if-merge
+        // `cond ? d : q`. Skip the const-false (never-written) enable.
+        if (info.decl_mw == 0) {
+          auto    dit = mw_map_.find(din_key(name));
+          int32_t mw  = dit != mw_map_.end() ? dit->second : int32_t{1};
+          set_bits(q, mw + 1);
+          set_unsign(q);
+          mw_map_[name] = mw;
+        }
+        if (auto eit = pin_map_.find(en_key(name)); eit != pin_map_.end()) {
+          const auto  en       = eit->second;
+          const auto  en_nid   = en.get_master_node().get_debug_nid();
+          const bool  is_false = en_false_valid_ && en_nid == en_false_pin_.get_master_node().get_debug_nid();
+          if (!is_false) {
+            setup_sink_by_name(flop, "enable").connect_driver(en);
+          }
+        }
+        continue;
+      }
+
       // clock: explicit clock_pin=NAME beats the implicit/shared clock input.
+      // A named clock is usually a module input (clk_i), but can also be an
+      // internal/derived wire — e.g. a gated clock (a clock-gate cell's
+      // `clk & en_latch` output) feeding a flop. Check has_input FIRST (a clock
+      // input is NOT in pin_map_; an unrelated same-named signal might be, which
+      // is why pin_map_-first is wrong), then fall back to pin_map_ for the
+      // internal-wire case. get_input_pin would assert on a non-input.
       if (!info.clock_pin_name.empty()) {
-        auto cpin = g_->get_input_pin(info.clock_pin_name);
-        if (cpin.is_invalid()) {
-          error_here("upass.tolg: reg '{}' names clock_pin '{}' but '{}' has no such input",
+        if (g_->get_io()->has_input(info.clock_pin_name)) {
+          setup_sink_by_name(flop, "clock_pin").connect_driver(g_->get_input_pin(info.clock_pin_name));
+        } else if (auto cn = std::string(info.clock_pin_name); pin_map_.contains(cn)) {
+          setup_sink_by_name(flop, "clock_pin").connect_driver(pin_map_.at(cn));
+        } else {
+          error_here("upass.tolg: reg '{}' names clock_pin '{}' but '{}' has no such input/wire",
                      name,
                      info.clock_pin_name,
                      lnast_->get_top_module_name());
           continue;
         }
-        setup_sink_by_name(flop, "clock_pin").connect_driver(cpin);
       } else if (!clock_name_.empty()) {
         setup_sink_by_name(flop, "clock_pin").connect_driver(clock_pin());
       } else {
@@ -912,13 +943,14 @@ private:
     // memory; a mut/const array that survived to tolg (runtime-indexed) → a
     // comb type=2 array / ROM. Never a Flop, never a plain binding.
     const bool is_reg   = mode == "reg" || mode.starts_with("reg ");
+    const bool is_latch = mode == "latch";  // level-sensitive latch (din+enable, no clock)
     if (!type_nid.is_invalid() && Lnast_ntype::is_comp_type_array(lnast_->get_type(type_nid))
         && (is_reg || mode == "mut" || mode == "const" || mode.starts_with("mut ") || mode.starts_with("const "))) {
       lower_mem_declare(name_nid, type_nid, mode_nid, /*is_array=*/!is_reg);
       return;
     }
 
-    if (!is_reg) {
+    if (!is_reg && !is_latch) {
       // mut/const/type declares carry no graph payload here (values arrive
       // via their stores); nothing to lower.
       return;
@@ -952,14 +984,16 @@ private:
     // din/enable keys, finalize_regs() wires the pins. The declared type
     // gives q's width up front (a counter's `r + 1` read needs it before any
     // din store); untyped regs restamp from the final din width.
-    auto flop = make_node(Ntype_op::Flop);
+    auto flop = make_node(is_latch ? Ntype_op::Latch : Ntype_op::Flop);
     // clock wiring happens in finalize_regs (a clock_pin/posclk attr_set may
-    // arrive after the declare).
+    // arrive after the declare). A latch has no clock/reset — finalize_regs
+    // wires only its din + enable.
     auto name = lnast_->get_name(name_nid);
     auto q    = flop.create_driver_pin(0);
 
     Reg_info info;
     info.flop     = flop;
+    info.is_latch = is_latch;
     info.decl_nid = nid;
     if (!type_nid.is_invalid()) {
       std::tie(info.decl_mw, info.is_signed) = declared_width(type_nid);
@@ -1018,6 +1052,7 @@ private:
     bool             sync_val = true;
     bool             negreset = false;
     std::string      initial_txt;  // explicit initial=N (overrides init_txt)
+    bool             is_latch = false;  // mode "latch": Ntype_op::Latch, wire din+enable only
   };
 
   // Shadow pin_map_ keys for a reg's next-state value and write-enable. The

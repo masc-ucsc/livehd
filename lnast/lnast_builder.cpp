@@ -376,6 +376,23 @@ std::string Lnast_builder::create_settled_read_stmts(std::string_view var) {
   return tmp_var;
 }
 
+// 2f-defer — an end-of-cycle (deferred) read: `tmp = var.[defer]`. tolg lowers
+// it to a passthrough buffer whose input is connected, after all statements are
+// lowered (resolve_defers), to `var`'s final driver. Unlike the settled read
+// (delay_assign +1, LNAST-tier only, no tolg lowering → not LEC-exact), this is
+// a real, delay-free combinational feedback edge — the correct lowering for a
+// combinational-cycle read (e.g. a ready/valid handshake whose dataflow loops
+// through a submodule instance but is not a true combinational loop).
+std::string Lnast_builder::create_defer_read_stmts(std::string_view var) {
+  I(!var.empty());
+  auto idx     = lnast->add_child(idx_stmts, Lnast_ntype::create_attr_get());
+  auto tmp_var = create_lnast_tmp();
+  add_ref_child(idx, tmp_var);
+  add_ref_child(idx, var);
+  add_const_child(idx, "defer");
+  return tmp_var;
+}
+
 void Lnast_builder::create_declare_stmts(std::string_view var, std::string_view mode, std::string_view max_txt,
                                          std::string_view min_txt, std::string_view init) {
   I(!var.empty() && !mode.empty());

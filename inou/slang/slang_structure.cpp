@@ -232,7 +232,15 @@ void Slang_context::collect_state_vars(const slang::ast::InstanceBodySymbol& bod
         }
       }
     }
-    if (!is_edge) {
+    // Latch state: an `always_latch`, or a level-sensitive (non-edge) `always`
+    // whose body uses nonblocking `<=` (the inferred-latch idiom, e.g.
+    // prim_clk_gate's `always @(clk_i or ...) if (!clk_i) en_latch <= ...`).
+    // Such vars become Ntype_op::Latch in tolg (din = cond?d:q, enable = cond);
+    // their `<=` writes are collected below. A non-edge `always` with only
+    // blocking `=` writes is plain comb (no nonblocking syms → nothing added).
+    const bool is_latch_block = pbs.procedureKind == slang::ast::ProceduralBlockKind::AlwaysLatch
+                                || (!is_edge && pbs.procedureKind == slang::ast::ProceduralBlockKind::Always);
+    if (!is_edge && !is_latch_block) {
       continue;
     }
 
@@ -240,6 +248,9 @@ void Slang_context::collect_state_vars(const slang::ast::InstanceBodySymbol& bod
     pbs.getBody().visit(wc);
     for (const auto* sym : wc.nonblocking) {
       reg_syms_.insert(sym);
+      if (is_latch_block) {
+        latch_syms_.insert(sym);
+      }
     }
   }
 }
@@ -274,6 +285,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   auto saved_inputs        = std::move(input_syms_);
   auto saved_outputs       = std::move(output_syms_);
   auto saved_regs          = std::move(reg_syms_);
+  auto saved_latches       = std::move(latch_syms_);
   auto saved_mems          = std::move(mem_syms_);
   auto saved_declared      = std::move(declared_);
   auto saved_prefix        = std::move(genblk_prefix_);
@@ -292,6 +304,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   input_syms_.clear();
   output_syms_.clear();
   reg_syms_.clear();
+  latch_syms_.clear();
   mem_syms_.clear();
   declared_.clear();
   genblk_prefix_.clear();
@@ -342,7 +355,8 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   input_syms_            = std::move(saved_inputs);
   output_syms_           = std::move(saved_outputs);
   reg_syms_              = std::move(saved_regs);
-  mem_syms_              = std::move(saved_mems);
+  latch_syms_           = std::move(saved_latches);
+  mem_syms_             = std::move(saved_mems);
   declared_              = std::move(saved_declared);
   genblk_prefix_         = std::move(saved_prefix);
   module_failed_         = saved_failed;
@@ -430,9 +444,13 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
 
   auto ti   = tinfo(type);
   auto name = lname_of(sym);
+  // A level-sensitive latch var lowers to Ntype_op::Latch (mode "latch"); it has
+  // no clock/reset — its enable (transparency condition) and din are wired by
+  // tolg's finalize_regs from the body's if-merge.
+  const char* mode = latch_syms_.contains(&sym) ? "latch" : "reg";
   set_pending_loc(sym.location);
   builder_.create_declare_stmts(name,
-                                "reg",
+                                mode,
                                 ti.is_signed ? std::string(Dlop::get_mask_value(ti.bits - 1)->to_pyrope()) : mask_text(ti.bits),
                                 ti.is_signed ? std::string(Dlop::get_neg_mask_value(ti.bits - 1)->to_pyrope()) : "0",
                                 "nil");  // no reset by default; async patterns override via attrs
@@ -826,7 +844,11 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     case ProceduralBlockKind::Final: return;
     case ProceduralBlockKind::AlwaysComb: lower_comb_process(pbs.getBody()); return;
     case ProceduralBlockKind::AlwaysLatch:
-      emit_unsupported(pbs.location, "unsupported-latch", "always_latch is not supported by --reader slang");
+      // The latch state vars were classified in collect_state_vars (declared as
+      // mode "latch" → Ntype_op::Latch). The body lowers like any if/store; the
+      // store rebinds the latch's din/enable shadows (tolg lower_if branch-merge
+      // gives din = cond?d:q, enable = cond), exactly as for a reg.
+      lower_comb_process(pbs.getBody());
       return;
     case ProceduralBlockKind::Always:
     case ProceduralBlockKind::AlwaysFF: break;
@@ -1168,10 +1190,17 @@ Slang_context::Tinfo Slang_context::flat_or_tinfo(const slang::ast::Type& t) {
 }
 
 void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
+  // lower_module() recursively lowers the callee body (lower_members), which
+  // resets in_comb_cycle_ to false on the way out. Save/restore it so that when
+  // THIS instance sits in a combinational cycle, its input port connections
+  // below still read through the 2f-defer path (a cyclic handshake's forward
+  // reference to a not-yet-lowered net must defer, not resolve to nil).
+  const bool saved_in_comb_cycle = in_comb_cycle_;
   if (!lower_module(inst)) {
     return;  // diagnosed inside
   }
-  auto callee = module_name_of(inst);
+  in_comb_cycle_ = saved_in_comb_cycle;
+  auto callee    = module_name_of(inst);
 
   proc_kind_ = Proc_kind::none;
 
