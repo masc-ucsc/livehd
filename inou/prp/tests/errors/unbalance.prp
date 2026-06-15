@@ -4,7 +4,7 @@
 :verifier_pass: 0
 :verifier_fail: 0
 :error: ')'
-:help: unbalance
+:help: opened here
 */
 
 comb foo( -> (z) { // locate_error_here

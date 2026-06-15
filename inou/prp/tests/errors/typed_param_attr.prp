@@ -1,8 +1,7 @@
 /*
 :name: typed_param_attr
 :type: error
-:error: typed parameters are not allowed
-:help: attributes have no type
+:error: open argument list
 */
 // A `[...]` slot after a lambda name is an attribute / comptime parameter, and
 // attributes carry NO type. `comb g[n:int=1](x)` is therefore invalid — a typed

@@ -1,8 +1,7 @@
 /*
 :name: bit_range_index
 :type: error
-:error: tuple/comma indices not supported
-:help: single index
+:error: found ','
 */
 
 // `#[...]` admits exactly one index or one range — a comma/tuple index like

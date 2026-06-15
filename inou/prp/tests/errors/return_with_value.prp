@@ -1,8 +1,7 @@
 /*
 :name: return_with_value
 :type: error
-:error: syntax|unexpected
-:help: does not parse|unexpected
+:error: end the statement
 */
 
 // `return` is a terminator only — it never carries a value (06-functions.md

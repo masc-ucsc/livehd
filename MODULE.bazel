@@ -138,42 +138,31 @@ bazel_dep(name = "hhds", version = "0.2.0")
 git_override(
     module_name = "hhds",
     remote = "https://github.com/masc-ucsc/hhds.git",
-    commit = "08018e22e5af6b56c66c06b1b82e8c4957e3f904",  # zero-encoded sedge fix (slang-2s instance edge loss)
+    commit = "879606c05e8c5f3495de6ab89fe4734d91d042f9",  # + Source_locator::span_minter/reserve (prpparse front-end)
 )
 # For local debug/testing, swap the git_override above for:
 # local_path_override(module_name = "hhds", path = "../hhds") # sometimes useful for debug together with hhds
 
-# tree-sitter-pyrope (top of tree: "remove is from grammar", daf3508)
+# prpparse — hand-written recursive-descent Pyrope parser; the inou/prp front-end
+# (it replaced the tree-sitter-pyrope grammar, so neither @tree-sitter nor
+# @tree-sitter-pyrope is a dependency anymore). Rooted at the prpparse/ subdir of
+# the tree-sitter-pyrope repo so consumers include `prpparse/<hdr>` (no clash with
+# LiveHD's core diag.hpp / parser.hpp); see //packages:prpparse.BUILD.
 # To bump the pin, recompute integrity via:
 #   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip | openssl dgst -sha256 -binary | base64
-# LOCAL OVERRIDE (task 1f-is_typename): pointing at ../tree-sitter-pyrope
-# (daf3508 "remove is from grammar") so `a is b` is a syntax error. daf3508 is now
-# published on origin/main; the http_archive pin below mirrors it (top of tree) and
-# can be swapped in for the local override when a published checkout is preferred.
-# http_archive(
-#     name = "tree-sitter-pyrope",
-#     build_file = "//packages:tree-sitter-pyrope.BUILD",
-#     integrity = "sha256-DHZ/ChtWmV07FBhgEaDSG8lBVcQU39u8cA0GIXK+XW0=",
-#     strip_prefix = "tree-sitter-pyrope-daf3508b6612eb6ae11d119354155c4e05baa297",
-#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/daf3508b6612eb6ae11d119354155c4e05baa297.zip",
-#     ],
-# )
-new_local_repository(
-    name = "tree-sitter-pyrope",
-    build_file = "//packages:tree-sitter-pyrope.BUILD",
-    path = "../tree-sitter-pyrope",
-)
-
-# tree sitter
 http_archive(
-    name = "tree-sitter",
-    build_file = "//packages:tree-sitter.BUILD",
-    sha256 = "1bfd4db2b3a6a4b81058c6a6cfa7fd339e71508c44355c7c8a5034e9b2ad56f1",
-    strip_prefix = "tree-sitter-0.25.6",
-    urls = [
-        "https://github.com/tree-sitter/tree-sitter/archive/refs/tags/v0.25.6.zip",
-    ],
+    name = "prpparse",
+    build_file = "//packages:prpparse.BUILD",
+    integrity = "sha256-jWNdIxpybeecNDg+aJYxi0VXJz/IURCLlFTuhwNxDVg=",
+    strip_prefix = "tree-sitter-pyrope-0f4e69f28e8abb9075c5e3ce1e5b3864df85bfb1/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/0f4e69f28e8abb9075c5e3ce1e5b3864df85bfb1.zip"],
 )
+# For local prpparse co-development, swap the http_archive above for:
+# new_local_repository(
+#     name = "prpparse",
+#     build_file = "//packages:prpparse.BUILD",
+#     path = "../tree-sitter-pyrope/prpparse",
+# )
 
 # OpenTimer
 http_archive(

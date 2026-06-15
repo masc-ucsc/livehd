@@ -54,19 +54,9 @@ cc_library(
         "//core",
         "//lnast",
         "//pass/common:pass",
-        "@tree-sitter-pyrope//:tree-sitter-pyrope",
+        "@prpparse//:prpparse",
     ],
     alwayslink = True,
-)
-
-cc_binary(
-    name = "ts_traverse_test",
-    srcs = ["tests/ts_traverse_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":inou_prp",
-        # "@com_google_googletest//:gtest_main",
-    ],
 )
 
 [

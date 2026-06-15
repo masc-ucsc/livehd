@@ -1,7 +1,7 @@
 /*
 :name: tuple_rhs_requires_parens
 :type: error
-:error: tuple|right-hand-side|parenth|syntax
+:error: end the statement
 */
 
 // Multi-value assignment requires an explicit tuple on the rhs.

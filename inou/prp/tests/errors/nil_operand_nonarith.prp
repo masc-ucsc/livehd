@@ -1,0 +1,12 @@
+/*
+:name: nil_operand_nonarith
+:type: error
+:error: (nil|operand)
+*/
+// 2f-nil — nil is legal only as a direct-assignment RHS or in `==`/`!=`. A nil
+// operand reaching ANY other operator (here a shift; same for < <= | & ~ >> etc.)
+// is an illegal use of nil and must be reported, not silently folded. (The
+// arithmetic `+` case is covered by adv_nil_operation.prp.)
+const a = nil
+const y = a << 2   // locate_error_here
+cputs("y")

@@ -1,8 +1,7 @@
 /*
 :name: bad_if
 :type: error
-:error: syntax|unexpected
-:help: block|control statement
+:error: end the statement
 */
 
 // `i c` is junk before a `{ … }` block — almost certainly a typo for an `if`

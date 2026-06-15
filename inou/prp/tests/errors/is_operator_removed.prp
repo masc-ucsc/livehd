@@ -1,8 +1,8 @@
 /*
 :name: is_operator_removed
 :type: error
-:error: syntax error: unexpected
-:help: does not parse
+:error: close arguments
+:help: opened here
 */
 // The `is` / `!is` nominal type operator was removed (task 1f-is_typename):
 // `a is b` is no longer valid syntax (the tree-sitter-pyrope grammar dropped

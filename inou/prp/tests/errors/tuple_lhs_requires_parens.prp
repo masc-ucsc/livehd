@@ -1,7 +1,7 @@
 /*
 :name: tuple_lhs_requires_parens
 :type: error
-:error: tuple|left-hand-side|parenth|syntax
+:error: end the statement
 */
 
 // Multi-target assignment requires an explicit tuple on the lhs.

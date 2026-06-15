@@ -3,6 +3,7 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <stack>
 #include <string>
@@ -15,17 +16,25 @@
 #include "lnast.hpp"
 #include "lnast_builder.hpp"
 #include "lnast_ntype.hpp"
-#include "tree_sitter/api.h"
+#include "prp_ast_facade.hpp"
+
+namespace prpparse {
+class Parser;
+struct Diag;
+}
 
 class Prp2lnast {
 protected:
-  // TS Parsing
+  // Parsing (prpparse: a hand-written recursive-descent Pyrope parser whose Ast
+  // is walked through the tree-sitter-shaped facade in prp_ast_facade.hpp).
   std::string prp_file;
   std::string src_filename;  // source path, for diagnostic spans
   std::string src_relpath;   // workspace-relative form for SourceId minting
-  TSParser*   parser  = nullptr;
-  TSTree*     ts_tree = nullptr;  // owned; freed in the dtor (and on ctor throw)
-  TSNode      ts_root_node;
+  // Own the buffer + parser so the arena-allocated Ast (and the source bytes the
+  // facade reads spans from) outlive the whole lowering.
+  std::unique_ptr<prpparse::Source_buffer> prp_buf;
+  std::unique_ptr<prpparse::Parser>        prp_parser;
+  TSNode                                   ts_root_node;  // facade handle over the Ast root
 
   // Mint a SourceId for `node`'s span in the Lnast's locator (0 when the node
   // is null or no source path is known).
@@ -59,6 +68,9 @@ protected:
   // Location-less variant (span = null) for defensive sites with no TS node.
   [[noreturn]] void report_error(std::string_view code, std::string_view category, std::string message,
                                  std::string_view hint = {}) const;
+  // Bridge a prpparse syntax diagnostic (fail-fast Parse_error) into the LiveHD
+  // diag sink and abort the parse, so a syntax error surfaces like any other.
+  [[noreturn]] void report_prpparse_error(const prpparse::Diag& d) const;
   // Variant anchored at the source span previously attached (via `attach_loc`)
   // to an LNAST node — for post-build checks that walk the tree and no longer
   // hold the originating TSNode. Falls back to the location-less form when the
@@ -72,10 +84,6 @@ protected:
   // so the consuming diagnostic points at the exact construct. No-op when
   // `node` is null.
   void attach_loc(const Lnast_nid& idx, const TSNode& node);
-
-  // If the tree-sitter parse produced a MISSING node (genuine syntax error),
-  // report it and abort (does not return); a clean parse returns normally.
-  void check_parse_errors() const;
 
   // Reject a bare-`0b…` binary literal: Pyrope requires an explicit sign on
   // binary constants (`0ub…` unsigned / `0sb…` signed). `text` is the literal
@@ -528,6 +536,6 @@ public:
 
   std::shared_ptr<Lnast> get_lnast() { return std::move(lnast); }
   void                   dump_tree_sitter() const;
-  void                   dump_tree_sitter(TSTreeCursor* tc, int level) const;
+  void                   dump_tree_sitter(TSNode n, int level) const;
   void                   dump() const;
 };

@@ -1,8 +1,7 @@
 /*
 :name: attr_before_type
 :type: error
-:error: syntax
-:help: does not parse
+:error: end the statement
 */
 
 // A write-side attribute bracket comes AFTER the type: `p:u8:[debug="x"]`.

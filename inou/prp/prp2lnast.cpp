@@ -18,10 +18,10 @@
 #include "absl/strings/str_cat.h"
 #include "diag.hpp"
 #include "pass.hpp"
+#include "prpparse/parser.hpp"
+#include "prpparse/prp_diag.hpp"
 #include "source_path.hpp"
 #include "str_tools.hpp"
-
-extern "C" TSLanguage* tree_sitter_pyrope();
 
 static constexpr std::string_view call_ref_arg_marker  = "__ref_arg";
 // Marks the receiver actual of a UFCS method call `obj.method(...)`
@@ -75,28 +75,29 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, st
     lnast->source_locator().set_file_content(src_relpath, std::string(prp_file));
   }
 
-  parser = ts_parser_new();
-  ts_parser_set_language(parser, tree_sitter_pyrope());
-
-  ts_tree      = ts_parser_parse_string(parser, NULL, prp_file.data(), prp_file.size());
-  ts_root_node = ts_tree_root_node(ts_tree);
-
-  // dump();  // tree-sitter parse tree; enable for debugging the grammar
-
   // Excerpt provider while the parse runs: a staged error thrown below emits
   // (via parser_error_int -> Sink::flush) before this frame unwinds, so the
   // scope is still active when the human line renders.
   livehd::diag::Locator_scope diag_scope(&lnast->source_locator());
 
-  // A throwing constructor does NOT run the destructor, so the TS resources would
-  // leak on every reported error — which matters for the long-running LSP daemon
-  // that re-parses on each keystroke. Clean up explicitly before rethrowing.
+  // prpparse fail-fast: the first syntax error throws prpparse::Parse_error
+  // carrying a rich Diag (shape-compatible with livehd::diag). Map it into the
+  // LiveHD sink + parser_error so it surfaces exactly like a tree-sitter-era
+  // syntax diagnostic. A throwing constructor skips the destructor, so the
+  // parser/buffer unique_ptrs are reset before rethrowing.
   try {
-    // Stop before analyzing a file that did not parse. A MISSING node (a token the
-    // parser had to insert to recover, e.g. an unbalanced `)`/`}`) is an
-    // unambiguous syntax error — unlike ERROR nodes, which the pyrope grammar also
-    // emits for valid `uint`/`sint` constructs, so a MISSING check is quirk-safe.
-    check_parse_errors();
+    // `from_file`-style buffer, but the bytes are already in `prp_file` (the ctor
+    // read the file / took the LSP buffer). The locator path must be relative.
+    prp_buf    = std::make_unique<prpparse::Source_buffer>(src_relpath.empty() ? src_filename : src_relpath,
+                                                           prp_file);
+    prp_parser = std::make_unique<prpparse::Parser>(*prp_buf);
+    const prpparse::Ast* root = prp_parser->parse_ast();
+    ts_root_node              = TSNode{root, prp_buf.get()};
+
+    // dump();  // parse tree; enable for debugging the grammar
+
+    // check_parse_errors() is moot: prpparse fails fast (no MISSING/ERROR nodes),
+    // so a returning parse is well-formed.
 
     process_description();  // runs the scope checks internally, before rewrite_decls_to_declare
 
@@ -104,23 +105,16 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, st
     // destination to scope on: if/while conditions, for-range temps, fcall
     // statements, …) with edit-stable `___<site-hash>_<n>` ids (2p).
     builder.stabilize_fallback_tmps();
+  } catch (const prpparse::Parse_error& pe) {
+    report_prpparse_error(pe.diag);  // stages the diag + throws Eprp::parser_error
   } catch (...) {
-    ts_tree_delete(ts_tree);
-    ts_parser_delete(parser);
-    ts_tree = nullptr;
-    parser  = nullptr;
+    prp_parser.reset();
+    prp_buf.reset();
     throw;
   }
 }
 
-Prp2lnast::~Prp2lnast() {
-  if (ts_tree != nullptr) {
-    ts_tree_delete(ts_tree);
-  }
-  if (parser != nullptr) {
-    ts_parser_delete(parser);
-  }
-}
+Prp2lnast::~Prp2lnast() = default;
 
 std::string_view Prp2lnast::get_text(const TSNode& node) const {
   auto start  = ts_node_start_byte(node);
@@ -181,122 +175,6 @@ void Prp2lnast::attach_loc(const Lnast_nid& idx, const TSNode& node) {
 }
 
 namespace {
-// First MISSING node in DFS order (a token the parser inserted to recover), or a
-// null node. Prunes clean subtrees via ts_node_has_error (which is set whenever a
-// descendant is an ERROR or a MISSING node).
-TSNode find_first_missing(TSNode n) {
-  if (ts_node_is_missing(n)) {
-    return n;
-  }
-  uint32_t cnt = ts_node_child_count(n);
-  for (uint32_t i = 0; i < cnt; i++) {
-    TSNode c = ts_node_child(n, i);
-    if (ts_node_has_error(c) || ts_node_is_missing(c)) {
-      TSNode r = find_first_missing(c);
-      if (!ts_node_is_null(r)) {
-        return r;
-      }
-    }
-  }
-  return TSNode{};
-}
-
-// First ERROR node at *statement position* — a direct child of a statement list
-// (`description` or `scope_statement`) — in DFS order, or a null node. Such an
-// ERROR is a genuine syntax error: stray tokens the parser could not attach to
-// any statement (e.g. `i c { … }`, junk before a block). ERRORs nested inside
-// an `assignment`/`select` are skipped here; the lowering checks report those
-// shapes with dedicated messages (unparenthesized multi-target tuple,
-// `#[1,4]` comma index).
-TSNode find_first_error_statement(TSNode n) {
-  std::string_view t(ts_node_type(n));
-  const bool       is_stmt_list = (t == "description" || t == "scope_statement");
-  uint32_t         cnt          = ts_node_child_count(n);
-  for (uint32_t i = 0; i < cnt; i++) {
-    TSNode c = ts_node_child(n, i);
-    if (is_stmt_list && std::string_view(ts_node_type(c)) == "ERROR") {
-      return c;
-    }
-    if (ts_node_has_error(c)) {
-      TSNode r = find_first_error_statement(c);
-      if (!ts_node_is_null(r)) {
-        return r;
-      }
-    }
-  }
-  return TSNode{};
-}
-
-// First ERROR node anywhere, EXCEPT the two shapes with dedicated lowering
-// diagnostics: a comma-bearing ERROR directly under an `assignment`
-// (tuple-requires-parens) and anything inside a `select` (`#[1,4]` comma
-// index). The cleaned-up grammar parses every valid construct without ERROR
-// recovery, so any remaining ERROR is a genuine syntax problem (an unbalanced
-// `(` swallowing a lambda signature, a removed keyword like `when`, the old
-// `::[attr] :type` ordering, …) that the lowering would otherwise mis-lower
-// silently or mis-report.
-TSNode find_first_error_node(TSNode n, std::string_view src) {
-  std::string_view t(ts_node_type(n));
-  if (t == "select") {
-    return TSNode{};
-  }
-  const bool in_assignment = (t == "assignment");
-  uint32_t   cnt           = ts_node_child_count(n);
-  for (uint32_t i = 0; i < cnt; i++) {
-    TSNode c = ts_node_child(n, i);
-    if (!ts_node_has_error(c)) {
-      continue;
-    }
-    if (std::string_view(ts_node_type(c)) == "ERROR") {
-      auto txt = src.substr(ts_node_start_byte(c), ts_node_end_byte(c) - ts_node_start_byte(c));
-      if (in_assignment && txt.find(',') != std::string_view::npos) {
-        continue;  // tuple-requires-parens shape — dedicated message
-      }
-      return c;
-    }
-    TSNode r = find_first_error_node(c, src);
-    if (!ts_node_is_null(r)) {
-      return r;
-    }
-  }
-  return TSNode{};
-}
-
-// `comb g[n:int=1](x)`: a `[...]` slot after a lambda name parses as a `tuple_sq`
-// wrapped in an ERROR (the grammar has no typed parameter / attribute slot
-// there). A TYPED item inside that bracket is the tell-tale of the mistake —
-// attributes and parameters never carry a type in a `[...]`. Returns the
-// offending `tuple_sq` (searched only under an ERROR), or null.
-static TSNode find_typed_param_sq(TSNode n, bool in_error) {
-  std::string_view t(ts_node_type(n));
-  in_error = in_error || (t == "ERROR");
-  if (in_error && t == "tuple_sq") {
-    for (uint32_t i = 0, c = ts_node_named_child_count(n); i < c; ++i) {
-      TSNode           item = ts_node_named_child(n, i);
-      std::string_view it(ts_node_type(item));
-      TSNode           ti{};
-      if (it == "typed_identifier") {
-        ti = item;
-      } else if (it == "assignment") {
-        TSNode lv = ts_node_child_by_field_name(item, "lvalue", 6);
-        if (!ts_node_is_null(lv) && std::string_view(ts_node_type(lv)) == "typed_identifier") {
-          ti = lv;
-        }
-      }
-      if (!ts_node_is_null(ti) && !ts_node_is_null(ts_node_child_by_field_name(ti, "type", 4))) {
-        return n;
-      }
-    }
-  }
-  for (uint32_t i = 0, c = ts_node_child_count(n); i < c; ++i) {
-    TSNode r = find_typed_param_sq(ts_node_child(n, i), in_error);
-    if (!ts_node_is_null(r)) {
-      return r;
-    }
-  }
-  return TSNode{};
-}
-
 // ── Typed-declaration initializer kind check (shared by variables & params) ──
 // A typed scalar declaration (`mut c:bool = …`, or a function parameter
 // `b:bool = …`) constrains the initializer's kind: bool/int/string are distinct
@@ -393,63 +271,6 @@ void Prp2lnast::check_decl_init_kind(std::string_view name, const Lnast_node& va
                "(e.g. `int(x)`, `x == false`)");
 }
 
-void Prp2lnast::check_parse_errors() const {
-  if (!ts_node_has_error(ts_root_node)) {
-    return;  // clean parse
-  }
-  // `comb g[n:int=1](x)` — a typed `[...]` parameter/attribute. Detect this
-  // specific shape first so it gets a clear message instead of the generic
-  // "expected …" recovery token. Attributes and parameters carry no type.
-  if (TSNode tsq = find_typed_param_sq(ts_root_node, /*in_error=*/false); !ts_node_is_null(tsq)) {
-    report_error(tsq,
-                 "typed-param-attr",
-                 "syntax",
-                 "typed parameters are not allowed: a `[...]` attribute / comptime parameter cannot carry a type",
-                 "drop the type (attributes have no type, e.g. `[n]`), or pass the value as a regular `(name)` parameter");
-  }
-  // A MISSING node (a token the parser had to insert to recover) is the most
-  // unambiguous syntax error, so prefer it.
-  TSNode miss = find_first_missing(ts_root_node);
-  if (!ts_node_is_null(miss)) {
-    // ts_node_type of a MISSING node is the expected symbol (e.g. `)`), so name it.
-    auto expected = std::string_view(ts_node_type(miss));
-    report_error(miss,
-                 "missing-token",
-                 "syntax",
-                 std::format("syntax error: expected '{}'", expected),
-                 "the file does not parse — check for an unbalanced '(' / ')', '[' / ']', '{' / '}', or a dropped token");
-  }
-  // No inserted token, but the parser may have parked stray tokens in an ERROR
-  // node at statement position (e.g. `i c { … }` — junk before a block). Report
-  // it with a hint tailored to what follows. Benign grammar quirks nest their
-  // ERROR inside an `assignment`/`type_cast` (never at statement position), so
-  // `find_first_error_statement` skips them and they stay tolerated.
-  TSNode err = find_first_error_statement(ts_root_node);
-  if (!ts_node_is_null(err)) {
-    auto             stray        = trim(get_text(err));
-    TSNode           nxt          = ts_node_next_named_sibling(err);
-    const bool       before_block = !ts_node_is_null(nxt) && std::string_view(ts_node_type(nxt)) == "scope_statement";
-    std::string_view hint
-        = before_block ? "stray tokens before a `{ … }` block — did you mean a control statement "
-                         "(`if`/`for`/`while`/`match`/`loop`) or a lambda (`comb`/`pipe`/`mod`)?"
-                       : "the file does not parse — remove the unexpected token(s) or check for a dropped keyword/operator";
-    report_error(err, "syntax-error", "syntax", std::format("syntax error: unexpected `{}`", stray), hint);
-  }
-  // Any other ERROR node is a genuine syntax problem too — except inside an
-  // `assignment`/`select`, whose lowering checks report dedicated messages
-  // (tuple-requires-parens, `#[1,4]` comma index).
-  TSNode any_err = find_first_error_node(ts_root_node, prp_file);
-  if (!ts_node_is_null(any_err)) {
-    auto stray = trim(get_text(any_err));
-    report_error(any_err,
-                 "syntax-error",
-                 "syntax",
-                 std::format("syntax error: unexpected `{}` — check for an unbalanced '(' / ')', '[' / ']', '{{' / '}}', or a "
-                             "dropped token",
-                             stray),
-                 "the file does not parse — fix the unbalanced/unexpected token run first; later diagnostics may be misleading");
-  }
-}
 
 void Prp2lnast::report_error(std::string_view code, std::string_view category, std::string message, std::string_view hint) const {
   auto msg_copy = message;
@@ -460,6 +281,32 @@ void Prp2lnast::report_error(std::string_view code, std::string_view category, s
                                                       .message  = std::move(message),
                                                       .hint     = std::string(hint)});
   throw Eprp::parser_error(Pass::eprp, msg_copy);
+}
+
+void Prp2lnast::report_prpparse_error(const prpparse::Diag& d) const {
+  livehd::diag::Span span;
+  if (d.span.valid) {
+    span.file       = src_filename;
+    span.start_byte = d.span.start_byte;
+    span.end_byte   = d.span.end_byte;
+    span.start_line = d.span.start_line;
+    span.start_col  = d.span.start_col;
+    span.end_line   = d.span.end_line;
+    span.end_col    = d.span.end_col;
+  }
+  // prpparse's notes (e.g. "'(' opened here") become a hint when none was set.
+  std::string hint = d.hint;
+  if (hint.empty() && !d.notes.empty()) {
+    hint = d.notes.front().message;
+  }
+  livehd::diag::sink().stage(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                                      .code     = d.code,
+                                                      .category = d.category.empty() ? std::string("syntax") : d.category,
+                                                      .pass     = "inou.prp",
+                                                      .message  = d.message,
+                                                      .span     = std::move(span),
+                                                      .hint     = std::move(hint)});
+  throw Eprp::parser_error(Pass::eprp, d.message);
 }
 
 void Prp2lnast::report_error(const Lnast_nid& nid, std::string_view code, std::string_view category, std::string message,
@@ -864,32 +711,20 @@ std::string_view Prp2lnast::trim(std::string_view s) {
   return s;
 }
 
-void Prp2lnast::dump_tree_sitter() const {
-  auto tc = ts_tree_cursor_new(ts_root_node);
+void Prp2lnast::dump_tree_sitter() const { dump_tree_sitter(ts_root_node, 1); }
 
-  dump_tree_sitter(&tc, 1);
+void Prp2lnast::dump_tree_sitter(TSNode n, int level) const {
+  if (ts_node_is_null(n)) {
+    return;
+  }
+  auto             indent       = std::string(level * 2, ' ');
+  auto             num_children = ts_node_child_count(n);
+  std::string_view node_type(ts_node_type(n));
 
-  ts_tree_cursor_delete(&tc);
-}
+  std::print("{}{} {}\n", indent, node_type, num_children);
 
-void Prp2lnast::dump_tree_sitter(TSTreeCursor* tc, int level) const {
-  auto indent = std::string(level * 2, ' ');
-
-  bool go_next = true;
-  while (go_next) {
-    auto             node         = ts_tree_cursor_current_node(tc);
-    auto             num_children = ts_node_child_count(node);
-    std::string_view node_type(ts_node_type(node));
-
-    std::print("{}{} {}\n", indent, node_type, num_children);
-
-    if (num_children) {
-      ts_tree_cursor_goto_first_child(tc);
-      dump_tree_sitter(tc, level + 1);
-      ts_tree_cursor_goto_parent(tc);
-    }
-
-    go_next = ts_tree_cursor_goto_next_sibling(tc);
+  for (uint32_t i = 0; i < num_children; ++i) {
+    dump_tree_sitter(ts_node_child(n, i), level + 1);
   }
 }
 
@@ -1153,7 +988,7 @@ bool Prp2lnast::is_guarded_return_if(TSNode s, TSNode& cond_out, TSNode& then_ou
   bool           is_unique = false;
   for (uint32_t i = 0; i < nc; i++) {
     TSNode c = child(s, i);
-    if (std::string_view(ts_node_type(c)) == "unique") {
+    if (trim(get_text(c)) == "unique") {  // anonymous `unique` marker (text, not node type)
       is_unique = true;
     }
     const char* fn = ts_node_field_name_for_child(s, i);
@@ -1205,11 +1040,41 @@ void Prp2lnast::lower_children_range(TSNode parent, uint32_t from) {
     if (prev_end >= gap_end) {
       return {};
     }
-    auto kw = trim(text_between(prev_end, gap_end));
-    if (kw == "wrap"sv) {
+    // The `wrap`/`sat` overflow keyword is an anonymous prefix the prpparse CST
+    // does not materialize, so recover it from the raw source gap before the
+    // statement. The gap can also hold the enclosing scope's opening `{` (first
+    // statement) or trailing `//`/`/* */` comments, so strip comments and take
+    // the LAST identifier run rather than requiring the whole gap to equal it.
+    std::string_view g = text_between(prev_end, gap_end);
+    std::string      stripped;
+    stripped.reserve(g.size());
+    for (size_t k = 0; k < g.size();) {
+      if (k + 1 < g.size() && g[k] == '/' && g[k + 1] == '/') {
+        while (k < g.size() && g[k] != '\n') ++k;  // line comment to EOL
+      } else if (k + 1 < g.size() && g[k] == '/' && g[k + 1] == '*') {
+        k += 2;
+        while (k + 1 < g.size() && !(g[k] == '*' && g[k + 1] == '/')) ++k;
+        if (k + 1 < g.size()) k += 2;  // past the closing */
+      } else {
+        stripped.push_back(g[k]);
+        ++k;
+      }
+    }
+    size_t end = stripped.size();
+    while (end > 0 && (stripped[end - 1] == ' ' || stripped[end - 1] == '\t' || stripped[end - 1] == '\r'
+                       || stripped[end - 1] == '\n')) {
+      --end;
+    }
+    size_t begin = end;
+    while (begin > 0 && ((stripped[begin - 1] >= 'a' && stripped[begin - 1] <= 'z')
+                         || (stripped[begin - 1] >= 'A' && stripped[begin - 1] <= 'Z'))) {
+      --begin;
+    }
+    std::string_view last(stripped.data() + begin, end - begin);
+    if (last == "wrap"sv) {
       return "wrap"sv;
     }
-    if (kw == "sat"sv) {
+    if (last == "sat"sv) {
       return "sat"sv;
     }
     return {};
@@ -3389,10 +3254,12 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
       const char*      fname = ts_node_field_name_for_child(container, i);
       std::string_view ct(ts_node_type(ci));
       if (fname && std::string_view(fname) == "mod") {
-        // grammar arg_list `mod` field: choice('...', 'ref', 'reg').
-        next_is_ref    = (ct == "ref");
-        next_is_reg    = (ct == "reg");
-        next_is_vararg = (ct == "...");  // var-args param
+        // grammar arg_list `mod` field: choice('...', 'ref', 'reg'). The marker
+        // is an anonymous token, so classify by its source text (not node type).
+        std::string_view mod_txt = trim(get_text(ci));
+        next_is_ref    = (mod_txt == "ref");
+        next_is_reg    = (mod_txt == "reg");
+        next_is_vararg = (mod_txt == "...");  // var-args param
         continue;
       }
       if (ct == "typed_identifier") {
@@ -6460,7 +6327,7 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n, bool need_result) {
   // LNAST node, which tolg turns into a Hotmux instead of a Mux chain.
   bool is_unique = false;
   for (uint32_t i = 0; i < nc; i++) {
-    if (std::string_view(ts_node_type(child(n, i))) == "unique") {
+    if (trim(get_text(child(n, i))) == "unique") {  // anonymous `unique` marker (text, not node type)
       is_unique = true;
       break;
     }
@@ -6838,7 +6705,7 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
     lnast->add_child(if_idx, arm.cref);
     emit_body(arm.code);
   }
-  if (else_code.tree != nullptr) {
+  if (!ts_node_is_null(else_code)) {
     emit_body(else_code);
   }
 

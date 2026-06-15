@@ -1,8 +1,7 @@
 /*
 :name: numeric_dot_index
 :type: error
-:error: syntax
-:help: does not parse
+:error: field name after
 */
 
 // Dot tails are identifiers only: positional tuple entries are selected with

@@ -1,0 +1,31 @@
+/*
+:name: case_nested
+:type: parsing lnast comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// Recursive nested-`case` folding: fold_case recurses into sub-bundle pattern
+// fields, applying the same subset/wildcard rules at every level.
+
+const t = (const foo = (const bar = 6, const baz = 7), const c = 15)
+
+// nested wildcard: bar/c are wildcards, baz discriminates → match
+cassert(    t case (foo = (bar = 0sb?, baz = 7), c = 0sb?))
+// nested concrete exact match
+cassert(    t case (foo = (bar = 6,    baz = 7), c = 15))
+// nested defined-bit mismatch (baz) → definite false (NOT nil/unknown)
+cassert(not(t case (foo = (bar = 0sb?, baz = 0), c = 0sb?)))
+// subset: pattern omits c entirely, and bar is a wildcard → match
+cassert(    t case (foo = (bar = 0sb?, baz = 7)))
+// nested concrete mismatch on bar → false
+cassert(not(t case (foo = (bar = 9,    baz = 7), c = 15)))
+
+// the fold must propagate through `if` so the taken arm is deterministic
+mut hit = 0
+match t {
+  case (foo = (bar = 0sb?, baz = 0), c = 0sb?) { hit = 1 }
+  case (foo = (bar = 0sb?, baz = 7), c = 0sb?) { hit = 2 }
+  else                                         { hit = 3 }
+}
+cassert(hit == 2)

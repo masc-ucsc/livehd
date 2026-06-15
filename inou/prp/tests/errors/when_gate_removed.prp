@@ -1,8 +1,7 @@
 /*
 :name: when_gate_removed
 :type: error
-:error: syntax
-:help: does not parse
+:error: end the statement
 */
 
 // The `when`/`unless` trailing gates were removed from Pyrope (all gating —
