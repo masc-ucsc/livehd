@@ -972,6 +972,13 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
         // through to the width-agnostic part-select forms instead.
       } else if (a_bits > 0 && range_begin >= static_cast<int>(a_bits)) {
         final_expr = absl::StrCat("{", range_end - range_begin, "{", a, "[", a_bits - 1, "]}}");
+      } else if (a_bits > 0 && range_end > static_cast<int>(a_bits) && range_begin == 0) {
+        // Pure widening: let the assignment context extend the bare net per its
+        // declared signedness (sign-extend a signed net, zero-extend unsigned).
+        // Indexing a[a_bits-1] here would overflow a net declared narrower than
+        // bits_of — an unsigned driver drops its always-0 sign bit at declare
+        // (reg [bits-2:0]), so a[bits-1] reads as undef (X) in yosys.
+        final_expr = a;
       } else if (a_bits > 0 && range_end > static_cast<int>(a_bits)) {
         auto top   = absl::StrCat("{{", range_end - a_bits, "{", a, "[", a_bits - 1, "]}}");
         final_expr = absl::StrCat(top, ",", a, "[", a_bits - 1, ":", range_begin, "]}");
@@ -1021,6 +1028,16 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
   } else if (op == Ntype_op::SHL) {
     auto val_expr = get_expression(get_driver(find_sink_pin(node, "a")));
 
+    // Verilog `a << b` is self-determined by `a`'s width: a narrow left operand
+    // (e.g. a 1-bit const `1`, or a 1-bit signal) shifts WITHIN that narrow
+    // width and loses the high bits before the surrounding context (`~`, `&`)
+    // can widen it. That silently corrupts a dynamic bit-write RMW mask
+    // (`~(1<<idx)` for `data[idx]=…` zero-extends to all-but-low-bits instead
+    // of all-but-bit-idx). Pad the left operand to this node's full inferred
+    // width (and force unsigned) so the shift happens at the correct width.
+    auto        obits    = bits_of(node.get_driver_pin(0));
+    std::string wide_val = absl::StrCat("({", std::to_string(obits), "{1'b0}} | ", val_expr, ")");
+
     // SHL "b" is a multi-driver sink (LiveHD: all drivers represent one-hot
     // shift amounts ORed together). Walk inp_edges and filter by sink name.
     std::string onehot;
@@ -1030,7 +1047,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
         continue;
       }
       auto amt_expr = get_expression(e.driver);
-      onehot        = absl::StrCat(onehot, first ? "(" : " | (", val_expr, " << ", amt_expr, ")");
+      onehot        = absl::StrCat(onehot, first ? "(" : " | (", wide_val, " << ", amt_expr, ")");
       first         = false;
     }
     final_expr = onehot;
@@ -1537,8 +1554,13 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           if (dpin2.out_edges().empty()) {
             continue;
           }
-          auto name2 = get_scaped_name(pin_wire_name(dpin2));
-          add_to_pin2var(fout, dpin2, name2, is_unsign(dpin2));
+          // Re-fetch the canonical driver handle (driver bit set) so this keys
+          // pin2var identically to the edge.driver a consumer's inp_edges loop
+          // uses — otherwise the same instance-output net is declared twice
+          // (once here, once by the consumer) and lookups miss this entry.
+          auto cdpin = node.create_driver_pin(dpin2.get_port_id());
+          auto name2 = get_scaped_name(pin_wire_name(cdpin));
+          add_to_pin2var(fout, cdpin, name2, is_unsign(cdpin));
         }
       }
       continue;

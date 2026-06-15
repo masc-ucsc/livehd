@@ -187,14 +187,18 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
   }
 
   // Drivers emit in dataflow dependency order (lower_members), so wire reads
-  // are plain. Only the combinational-cycle fallback needs the settled-value
-  // read (delay_assign +1) - LNAST-tier only, tolg has no lowering for it.
+  // are plain. A combinational-cycle read uses a 2f-defer end-of-cycle read
+  // (attr_get .[defer]): tolg connects it to the wire's final driver as a
+  // delay-free feedback edge. This is LEC-exact, unlike the old settled read
+  // (delay_assign +1, LNAST-tier only, no tolg lowering) — important because
+  // most such "cycles" are false positives (e.g. a ready/valid handshake whose
+  // dataflow loops through a submodule instance but is not a true comb loop).
   if (in_comb_cycle_) {
     const auto* scope = sym.getParentScope();
     const bool  module_level
         = scope != nullptr && (&scope->asSymbol() == body_ || scope->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
     if (module_level) {
-      return builder_.create_settled_read_stmts(name);
+      return builder_.create_defer_read_stmts(name);
     }
   }
 

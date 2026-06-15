@@ -398,15 +398,23 @@ static hhds::Pin_class create_pick_operator(hhds::Graph* g, const RTLIL::Wire* w
   if (auto it = partially_assigned.find(wire); it != partially_assigned.end()) {
     const auto it_bits = partially_assigned_bits.find(wire);
     I(it_bits != partially_assigned_bits.end());
+    // Both vectors are sized to wire->width and indexed by BIT-OFFSET (a segment
+    // starting at bit `o` stores its pin at index `o`, in-between indices empty)
+    // — the same convention the materializer process_partially_assigned_other
+    // uses (`it.second[i]`, `i += width`). The loop locates the segment whose
+    // start equals `offset` by accumulating widths in `bits`; the pin is then at
+    // index `bits` (== offset). The old code returned `it->second[pos]` with a
+    // DENSE counter `pos` that diverges from the bit-offset after the first
+    // segment, so every non-zero-offset slice returned an empty pin — the
+    // read-all-entries + dynamic-index register-file pattern collapsed to
+    // const 0 / all-x.
     int32_t bits = 0;
-    auto    pos  = 0u;
     for (const auto& b : it_bits->second) {
       if (bits == offset) {
-        I(it->second.size() > pos);
-        return it->second[pos];
+        I(it->second.size() > static_cast<size_t>(bits));
+        return it->second[bits];
       }
       bits += b;
-      ++pos;
     }
   }
 

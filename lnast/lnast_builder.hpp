@@ -137,6 +137,10 @@ public:
   // Settled-value read of a concurrently-driven wire: delay_assign(tmp, var, 1)
   // (offset +1 = "future/settled this cycle"). Returns the tmp.
   std::string create_settled_read_stmts(std::string_view var);
+  // 2f-defer end-of-cycle read: attr_get(tmp, var, "defer"). A delay-free
+  // combinational feedback edge (tolg connects it to var's final driver). The
+  // LEC-exact replacement for the settled read in a combinational cycle.
+  std::string create_defer_read_stmts(std::string_view var);
 
   // declare( ref(var), type, const(mode), [init] ). Empty max/min = the
   // prim_type_none sentinel; empty init = no init child (a reg without a
