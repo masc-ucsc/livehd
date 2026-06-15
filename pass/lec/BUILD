@@ -91,3 +91,10 @@ sh_test(
     data = ["//lhd"],
     tags = ["no-sandbox"],  # compiles RTL + runs the in-process cvc5 array engine
 )
+
+sh_test(
+    name = "lec_arrfield_test",
+    srcs = ["tests/lec_arrfield_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # compiles RTL via both readers + lgcheck
+)

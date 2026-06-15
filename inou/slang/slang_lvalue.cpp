@@ -474,6 +474,35 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
       const auto& base = lhs.kind == ExpressionKind::ElementSelect ? lhs.as<slang::ast::ElementSelectExpression>().value()
                                                                    : lhs.as<slang::ast::RangeSelectExpression>().value();
       const auto& base_ty = base.type->getCanonicalType();
+
+      // Flattened array element: `arr[idx]` is a bit-slice of the packed bus
+      // var. The element-select base is the unpacked array, so the generic
+      // packed recursion (which needs a packed base) does not apply — resolve
+      // it directly to the bus root plus the element bit-offset. A `.field` /
+      // `[slice]` wrapper above then folds in via the MemberAccess/packed cases.
+      if (lhs.kind == ExpressionKind::ElementSelect && base_ty.isUnpackedArray()) {
+        const auto* fsym = resolve_base_symbol(base);
+        if (fsym != nullptr && flat_port_syms_.contains(fsym)) {
+          const auto& mi = mem_info_.at(fsym);
+          out.base       = fsym;
+          out.const_off  = 0;
+          out.dyn_off.clear();
+          out.width     = mi.elem_bits;
+          out.is_signed = mi.elem_signed;
+          const auto& sel = lhs.as<slang::ast::ElementSelectExpression>().selector();
+          if (auto ci = try_eval_int(sel)) {
+            out.const_off = (*ci - mi.lower) * mi.elem_bits;
+          } else {
+            auto idx = to_int_value(lower_rvalue(sel));
+            if (mi.lower != 0) {
+              idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
+            }
+            out.dyn_off = mi.elem_bits != 1 ? builder_.create_mult_stmts(idx, std::to_string(mi.elem_bits)) : idx;
+          }
+          return true;
+        }
+      }
+
       if (!base_ty.isIntegral() || !base_ty.hasFixedRange()) {
         return false;  // unpacked array element / non-packed base
       }

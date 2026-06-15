@@ -338,6 +338,27 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   for (const auto* sym : reg_syms_) {
     declare_reg(sym->as<slang::ast::ValueSymbol>());
   }
+  // Pre-declare COMBINATIONAL packed-aggregate arrays as flat packed buses
+  // (declare_unpacked's flatten branch): they must be declared before any
+  // element access lowers, so resolve_packed_lvalue and the read path see them
+  // as flat (bit-slice) symbols rather than memories.
+  for (const auto& member : body->members()) {
+    if (member.kind != slang::ast::SymbolKind::Variable) {
+      continue;
+    }
+    const auto& vsym = member.as<slang::ast::VariableSymbol>();
+    if (reg_syms_.contains(&vsym) || declared_.contains(&vsym)) {
+      continue;
+    }
+    const auto& ct = vsym.getType().getCanonicalType();
+    if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+      continue;
+    }
+    const auto& elem = ct.as<slang::ast::FixedSizeUnpackedArrayType>().elementType.getCanonicalType();
+    if (elem.isIntegral() && (elem.isStruct() || elem.isPackedUnion())) {
+      declare_value_symbol(vsym, /*force_reg=*/false);
+    }
+  }
   lower_members(*body);
 
   bool ok = !module_failed_;
@@ -391,6 +412,36 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
     return false;
   }
   auto ei = tinfo(elem);
+
+  // FLATTEN a COMBINATIONAL array of a packed AGGREGATE (struct/union/packed
+  // array) to a single packed bus, matching yosys-slang (which flattens small
+  // arrays to flops+mux). Element access then becomes a bit-slice, so a nested
+  // `arr[const].field = v` composes via set_mask on ONE variable — a
+  // memory-element read-modify-write would instead clobber sibling fields (the
+  // read does not forward the prior same-process write). Restricted to non-reg
+  // (comb) arrays with an aggregate element, so the clocked-memory path (FIFOs,
+  // register files) and plain-scalar comb arrays are untouched.
+  // Only a packed STRUCT/UNION element needs this (its `.field` sub-writes are
+  // what the memory model cannot compose). A plain vector element (`logic [3:0]`,
+  // which is a packed array of bits) stays a memory — it has no field writes and
+  // is commonly runtime-indexed, where the memory model is the right fit.
+  const bool    elem_struct = elem.isStruct() || elem.isPackedUnion();
+  const int64_t flat_bits   = static_cast<int64_t>(ei.bits) * arr.range.width();
+  if (!is_reg && elem_struct && flat_bits > 0 && flat_bits <= 65536) {
+    Mem_info fmi;
+    fmi.lower       = arr.range.lower();
+    fmi.elem_bits   = ei.bits;
+    fmi.elem_signed = ei.is_signed;
+    fmi.size        = arr.range.width();
+    mem_info_.emplace(&sym, fmi);
+    mem_syms_.insert(&sym);
+    flat_port_syms_.insert(&sym);  // reuse the flat bit-slice get/set machinery
+    auto name = lname_of(sym);
+    set_pending_loc(sym.location);
+    builder_.create_declare_stmts(name, "mut", mask_text(static_cast<int>(flat_bits)), "0");
+    clear_pending_loc();
+    return true;
+  }
 
   Mem_info mi;
   mi.lower       = arr.range.lower();
