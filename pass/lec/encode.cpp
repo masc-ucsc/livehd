@@ -23,24 +23,44 @@ using cvc5::Term;
 namespace gu = livehd::graph_util;
 
 // Stable 1:1 cut-point key for a state cell (Flop), used to put corresponding
-// registers of the two designs in correspondence. The SOURCE SPAN (srcid ->
-// Source_locator) is preferred: an RTL register keeps the same source location
-// across variable renames AND across front-ends (native slang and yosys-slang
-// both anchor the cell to the same declaration), unlike the post-synthesis pin
-// name which each reader mangles differently. Falls back to the pin name, then
-// the node id (an unmatchable per-design fallback -> a sound Unknown, never a
-// false "equal").
+// registers of the two designs in correspondence. The REGISTER NAME is the
+// primary key: both front-ends preserve the RTL name (yosys-slang on the pin,
+// native slang now stamps it in tolg), whereas they anchor the srcid to
+// different source constructs (native -> the declaration, yosys -> the
+// always_ff assignment) so the source span does NOT match across readers. The
+// span is the fallback for an unnamed flop (a pass-inserted pipeline stage),
+// then the node id (an unmatchable per-design fallback -> a sound Unknown).
+//
+// The name is normalized: a leading "$...$" yosys decoration (e.g.
+// "$driver$cnt_q") and a trailing "___ssa_N" SSA suffix are stripped so the two
+// readers' spellings of the same register collapse to one key.
+static std::string normalize_reg_name(std::string_view raw) {
+  std::string_view s = raw;
+  if (!s.empty() && s.front() == '$') {
+    if (auto e = s.find('$', 1); e != std::string_view::npos) {
+      s.remove_prefix(e + 1);
+    }
+  }
+  if (auto p = s.find("___ssa_"); p != std::string_view::npos) {
+    s = s.substr(0, p);
+  }
+  return std::string{s};
+}
+
 std::string flop_state_key(const hhds::Graph& g, const hhds::Node_class& node) {
+  auto pn = gu::pin_name_of(node.get_driver_pin(0));
+  if (pn.empty()) {
+    pn = gu::node_name_of(node);
+  }
+  if (auto nm = normalize_reg_name(pn); !nm.empty()) {
+    return std::string("\x01n:") + nm;
+  }
   auto ref = node.attr(hhds::attrs::srcid);
   if (ref.has()) {
     auto span = g.source_locator().resolve_span(ref.get());
     if (!span.file.empty()) {
       return std::format("\x01s:{}-{}@{}", span.start_byte.value_or(0), span.end_byte.value_or(0), span.file);
     }
-  }
-  auto nm = gu::pin_name_of(node.get_driver_pin(0));
-  if (!nm.empty()) {
-    return std::string("\x01n:") + std::string(nm);
   }
   return std::string("\x01f:") + std::to_string(static_cast<uint64_t>(node.get_debug_nid()));
 }

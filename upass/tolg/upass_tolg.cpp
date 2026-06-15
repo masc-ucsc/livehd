@@ -990,6 +990,20 @@ private:
     // wires only its din + enable.
     auto name = lnast_->get_name(name_nid);
     auto q    = flop.create_driver_pin(0);
+    // Keep the register's RTL name on q. The lnast path otherwise leaves the
+    // flop unnamed (cgen then synthesizes `flop_<nid>`), losing the identity
+    // that yosys-slang preserves — pass/lec needs it to put corresponding flops
+    // of the two front-ends in 1:1 correspondence (and the emitted Verilog reads
+    // better). Strip any SSA suffix so it matches the logical (declared) name.
+    {
+      std::string base{name};
+      if (auto p = base.find("___ssa_"); p != std::string::npos) {
+        base.resize(p);
+      }
+      if (!base.empty()) {
+        livehd::graph_util::set_pin_name(q, base);
+      }
+    }
 
     Reg_info info;
     info.flop     = flop;
