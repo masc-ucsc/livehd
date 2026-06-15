@@ -371,9 +371,9 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
                    + "w" + std::to_string(mc.sig.n_wr);
     mc.key = mem_state_key(mc.sig, mem_occ[sg]++);
     for (auto e : node.inp_edges()) {
-      auto             raw_pid = static_cast<int>(e.sink.get_port_id());
-      std::string_view pn      = Ntype::get_sink_name(Ntype_op::Memory, raw_pid);
-      size_t           pid     = static_cast<size_t>(raw_pid) / 12;
+      auto        raw_pid = static_cast<int>(e.sink.get_port_id());
+      std::string pn      = Ntype::get_sink_name(Ntype_op::Memory, raw_pid);
+      size_t      pid     = static_cast<size_t>(raw_pid) / 12;
       if (pn == "wensize") {
         mc.wensize = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
       } else if (pn == "fwd") {
