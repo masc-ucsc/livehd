@@ -52,11 +52,20 @@ genrule(
     #
     # The toolchains differ by host (the prebuilt is host-specific, so we branch
     # on `uname` rather than a config select):
-    #   Linux: GNU `ld -r --whole-archive` + objcopy --localize-symbol.
+    #   Linux: GNU `ld -r --whole-archive` + objcopy --localize-symbols.
     #   macOS: ld64 has neither flag and there is no objcopy. Drive ld64 via the
     #          clang driver (auto-supplies -arch/-platform_version) with
     #          -all_load (== --whole-archive) and -unexported_symbol (wildcards),
     #          which localizes the matched symbols during the -r link itself.
+    #
+    # WHY A SYMBOL LIST, NOT A NAME PATTERN (Linux): CaDiCaL does NOT keep all of
+    # its symbols under the `CaDiCaL::` namespace / `ccadical_` C prefix -- the
+    # `Reap` class and the `ipasir_*` C API live in the GLOBAL namespace. A
+    # `*CaDiCaL*`/`ccadical*` pattern silently misses those (17 of cvc5's 1010
+    # CaDiCaL globals), and they then duplicate-clash with Berkeley-abc's own
+    # vendored CaDiCaL at the `lhd` link (ld.lld: "duplicate symbol Reap::..."`).
+    # So we extract EVERY strong global symbol that libcadical.a defines and
+    # localize exactly that set -- robust to any future CaDiCaL namespacing.
     cmd = """
 set -e
 work=$$(mktemp -d)
@@ -64,14 +73,21 @@ if [ "$$(uname)" = "Darwin" ]; then
   clang -nostdlib -Wl,-r -Wl,-all_load \
     -Wl,-unexported_symbol,'*CaDiCaL*' \
     -Wl,-unexported_symbol,'*ccadical*' \
+    -Wl,-unexported_symbol,'*Reap*' \
+    -Wl,-unexported_symbol,'ipasir_*' \
     -o "$$work/combined.o" $(SRCS)
   rm -f $@
   ar rcs $@ "$$work/combined.o"
 else
   ld -r -o "$$work/combined.o" --whole-archive $(SRCS) --no-whole-archive
-  objcopy --wildcard \
-    --localize-symbol '*CaDiCaL*' \
-    --localize-symbol 'ccadical*' \
+  # Localize every strong (T/D/B/R, not weak) global symbol defined by cvc5's
+  # bundled CaDiCaL, by name extracted from libcadical.a. ld -r has already
+  # bound cvc5's internal references into combined.o, so making these file-local
+  # keeps cvc5's private CaDiCaL intact while removing them from the link's
+  # global namespace (abc keeps its own copy).
+  nm --defined-only --extern-only $(location lib/libcadical.a) \
+    | awk '$$2 ~ /^[TDBR]$$/ {print $$3}' | sort -u > "$$work/cad.syms"
+  objcopy --localize-symbols="$$work/cad.syms" \
     "$$work/combined.o" "$$work/local.o"
   rm -f $@
   ar rcs $@ "$$work/local.o"
