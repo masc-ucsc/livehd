@@ -1017,9 +1017,24 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       emit_warning(cond->sourceRange, "async-reset-polarity", "time",
                    "the async-reset guard polarity does not match its edge trigger");
     }
+    // A reset synchronizer drives the flop from a DERIVED module-level signal
+    // (rst_int_ni = scanmode ? scan_reset_n : rst_ni), not a module input.
+    // Accept an input OR a module-level net/var (tolg resolves its driver and
+    // wires it to reset_pin). A local/block-scoped signal still has no stable
+    // cut driver -> reject.
     if (!input_syms_.contains(rst_sym)) {
-      emit_unsupported(cond->sourceRange, "unsupported-async-pattern", "the async reset must be a module input");
-      return;
+      const auto* rsc          = rst_sym->getParentScope();
+      const bool  module_level = rsc != nullptr
+                                && (&rsc->asSymbol() == body_
+                                    || rsc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
+      if (!module_level) {
+        emit_unsupported(cond->sourceRange, "unsupported-async-pattern",
+                         "the async reset must be a module input or a module-level signal");
+        return;
+      }
+      if (!declared_.contains(rst_sym)) {
+        declare_value_symbol(*rst_sym, /*force_reg=*/false);
+      }
     }
 
     // The then-arm must be const nonblocking stores to regs: those become

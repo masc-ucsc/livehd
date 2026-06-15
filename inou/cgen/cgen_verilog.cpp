@@ -1331,6 +1331,16 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
       } else {
         reset = get_wire_or_const(reset_dpin);
 
+        // A reset is a 1-bit boolean: its level test and (especially) any async
+        // edge event must be on a single bit. A DERIVED reset driver (e.g. a
+        // scan-bypass mux `scanmode ? scan_reset_n : rst_ni`) can carry an
+        // inferred-wider width whose upper bits are always 0; yosys rejects a
+        // posedge/negedge event on a multi-bit net. Narrow to bit 0 (exact for
+        // a boolean reset, and consistent between the edge and the level test).
+        if (bits_of(reset_dpin) > 1) {
+          reset = absl::StrCat(reset, "[0]");
+        }
+
         auto negreset_dpin = get_driver(find_sink_pin(node, "negreset"));
         if (!negreset_dpin.is_invalid()) {
           negreset = !hydrate_const(negreset_dpin).is_known_false();

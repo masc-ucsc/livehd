@@ -788,14 +788,24 @@ private:
       Pin  rpin;
       bool neg = info.negreset;
       if (!info.reset_pin_name.empty()) {
-        // Explicit per-reg reset input (must be a declared graph input).
-        rpin = g_->get_input_pin(info.reset_pin_name);
-        if (rpin.is_invalid()) {
-          error_here("upass.tolg: reg '{}' names reset_pin '{}' but '{}' has no such input",
-                     name,
-                     info.reset_pin_name,
-                     lnast_->get_top_module_name());
-          return;
+        // Usually a graph input, but a reset synchronizer drives it from a
+        // DERIVED module-level signal — wire from that signal's driver instead.
+        // (get_input_pin ASSERTS on a non-input name; gate on has_input first.)
+        if (g_->get_io()->has_input(info.reset_pin_name)) {
+          rpin = g_->get_input_pin(info.reset_pin_name);
+        } else {
+          // Derived reset signal: its FINAL combinational driver lives in
+          // logical_last_ (the last SSA version), NOT pin_map_[name] that
+          // resolve() checks (which holds the read-site version, or nothing).
+          std::string base = info.reset_pin_name;
+          if (auto p = base.find("___ssa_"); p != std::string::npos) {
+            base.resize(p);
+          }
+          if (auto lit = logical_last_.find(base); lit != logical_last_.end()) {
+            rpin = lit->second.first;
+          } else {
+            rpin = resolve(info.reset_pin_name);
+          }
         }
         if (info.reset_pin_name.ends_with("_n")) {
           neg = true;
