@@ -14,8 +14,8 @@
   both pipelined and non-pipelined designs. The intended user-facing shape is a
   stable import namespace, for example <code>const x = import("prplib.ware")</code>
   followed by calls such as <code>x.csa(...)</code>.</p>
-<p>Also owns the <strong>software/comptime side</strong> (absorbed 2f-stdlib;
-  docs chapter 13): LNAST-op wrappers (<code>plus</code>, <code>minus</code>, …),
+<p>Also owns the <strong>software/comptime side</strong> (docs chapter 13):
+  LNAST-op wrappers (<code>plus</code>, <code>minus</code>, …),
   tuple utilities (<code>len</code>, <code>map</code>, <code>filter</code>,
   <code>reduce</code>), strings, math, reached via
   <code>const prp = import("prp")</code>. No <code>prp</code> library exists in

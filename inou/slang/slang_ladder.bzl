@@ -65,6 +65,7 @@ SLANG_LADDER = {
     "mt_basic_test": "lec",
     "multiassign": "lec",
     "mux": "lec",
+    "nshift": "lec",  # Verilog shift count is unsigned; negative-constant count masks to unsigned (no nil/error)
     "mux2": "lec",
     "nocheck_blackboxing2": "error",  # fail-unknown-module
     "nocheck_chunk_FetchTargetQueue": "error",  # fail-unsupported-system-task

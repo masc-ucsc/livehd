@@ -1394,8 +1394,12 @@ void uPass_runner::flush_deferred_emits() { dispatch_to_passes(&upass::uPass::fl
 void uPass_runner::emit_inline_binding(const std::string& lhs, const Lnast_node& rhs) {
   // A synthesized `lhs = nil` seed is exempt from typecheck's
   // nil-does-not-infer-tuple-shape rule (the body/epilogue legally binds a
-  // tuple over it).
-  if (rhs.is_const() && rhs.get_name() == "nil") {
+  // tuple over it). The mark also propagates along the epilogue alias chain
+  // (`hs = inl1_r` where inl1_r is a runtime-valued output that stayed nil-
+  // seeded): the LHS is then equally a runtime-placeholder nil, so constprop's
+  // nil-operand check skips it (it is not a genuine illegal nil).
+  if ((rhs.is_const() && rhs.get_name() == "nil")
+      || (rhs.is_ref() && symbol_table_.nil_seeded.contains(std::string(rhs.get_name())))) {
     symbol_table_.nil_seeded.insert(lhs);
   }
   if (!scratch_forest_) {

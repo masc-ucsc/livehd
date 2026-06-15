@@ -33,21 +33,13 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 
 <h3 id="pyrope">Pyrope</h3>
 <ul>
-<li><em>Group 2 — by priority (tree-sitter grammar change first, then seg-faults, then the rest; enums last):</em><ul>
-<li><a class="xref" href="pyrope/2f-splice.html">2f-splice</a> <strong>[partial]</strong> <code>++</code> dropped + the four <code>...</code> comptime tests landed; <strong>pending:</strong> the runtime-splice equiv test (needs a tolg <code>lower_tuple_concat</code>) and the doc TBD.</li>
-<li><a class="xref" href="pyrope/2f-nil_diag.html">2f-nil_diag</a> <strong>[partial]</strong> Division by a comptime-known zero now reports a diagnostic; <strong>pending:</strong> the <code>addn dest_sz&gt;=1</code> shared-io abort and a general "<code>nil</code> in a constprop output" diagnostic.</li>
-<li><a class="xref" href="pyrope/2f-mem_comptime_init.html">2f-mem_comptime_init</a> Comptime-computed / inferred-type memory init (residual of 2f-mem_multidim).</li>
-<li><a class="xref" href="pyrope/2f-lnimport.html">2f-lnimport</a> Test LNAST-level <code>import</code> (pyrope and <code>--reader slang</code> units; zero import tests today). First of the import chain.</li>
-<li><a class="xref" href="pyrope/2f-lgimport.html">2f-lgimport</a> Test <code>import("lg:name")</code> — import a compiled lgraph (Verilog or Pyrope produced). After 2f-lnimport; the landed <code>lg</code> name-pinning gives stable <code>lg:</code> names for the test.</li>
-<li><a class="xref" href="pyrope/2f-defer.html">2f-defer</a> <code>.[defer]</code> end-of-cycle reads (RHS-only same-cycle wiring); mix test imports <code>lg:add_sub</code>. After 2f-lgimport.</li>
-</ul></li>
 <li><em>Group 3 — needs still-unspecified codegen/verification tasks first:</em><ul>
 <li><a class="xref" href="pyrope/3f-temporal.html">3f-temporal</a> Temporal library: <code>past[n]</code>/<code>next[n]</code>, <code>rose</code>/<code>fell</code>/<code>stable</code>/<code>changed</code>/<code>eventually</code>/<code>always</code>, <code>.[rising]</code> sugar.</li>
 <li><a class="xref" href="pyrope/3f-fluid.html">3f-fluid</a> <code>fluid</code> lambdas: valid/retry/fire elastic lowering (parses only today).</li>
 <li><a class="xref" href="pyrope/3f-testbench.html">3f-testbench</a> Testbench extras: <code>peek</code>/<code>poke</code>, <code>waitfor</code>, <code>force</code>/<code>release</code>, <code>sigref</code>, <code>spawn</code>/<code>join</code>/<code>cancel</code> (plain <code>test</code>/<code>step</code> works).</li>
 <li><a class="xref" href="pyrope/3f-macro.html">3f-macro</a> <code>macro=</code> memory-compiler binding (<code>reg ram:[1024]u32:[macro="sram_32kx32"]</code>).</li>
 <li><a class="xref" href="pyrope/3f-verif_extras.html">3f-verif_extras</a> <code>covercase</code>, in-language <code>lec()</code>, <code>requires</code>/<code>ensures</code>.</li>
-<li><a class="xref" href="pyrope/3p.html">3p</a> Pyrope standard hardware library (<code>prplib.ware</code>) for common pipelined and non-pipelined designs: adders, multipliers, shifters, GCD, and debug/experimental blocks; includes deciding where <code>prplib</code> resides and how imports resolve. Also owns the comptime/software stdlib <code>import("prp")</code>: plus/len/map/filter/reduce, strings, math (absorbed 2f-stdlib).</li>
+<li><a class="xref" href="pyrope/3p.html">3p</a> Pyrope standard hardware library (<code>prplib.ware</code>) for common pipelined and non-pipelined designs: adders, multipliers, shifters, GCD, and debug/experimental blocks; includes deciding where <code>prplib</code> resides and how imports resolve. Also owns the comptime/software stdlib <code>import("prp")</code>: plus/len/map/filter/reduce, strings, math.</li>
 </ul></li>
 <li><em>Group 4:</em><ul>
 <li><a class="xref" href="pyrope/4a.html">4a</a> Test functionality on top of slop (<code>test::[…]</code> blocks, runtime harness).</li>

@@ -13,15 +13,18 @@
 #include <algorithm>
 #include <functional>
 #include <print>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "cell.hpp"
 #include "diag.hpp"
 #include "dlop.hpp"
 #include "hhds/attrs/name.hpp"
+#include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
 #include "node_util.hpp"
 
@@ -397,6 +400,25 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // --- read back: each mapped gate -> a 1-bit blackbox Sub in the body ---
   auto* body = rb.body;
 
+  // Source-map carry-through (task 2a-abc): ABC's strash/dch destroy per-node
+  // provenance, so re-mint each output port's original driver srcid into the
+  // body locator. Computed up front so the output-concat glue can carry it and
+  // the per-gate cone attribution below can reuse it.
+  std::vector<hhds::SourceId> po_srcid(rb.outputs.size(), hhds::SourceId_invalid);
+  for (size_t po = 0; po < rb.outputs.size(); ++po) {
+    auto drv = rb.outputs[po].src_driver;
+    if (drv.is_invalid()) {
+      continue;
+    }
+    auto onode = drv.get_master_node();
+    if (onode.is_invalid()) {
+      continue;
+    }
+    if (auto a = onode.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
+      po_srcid[po] = body->source_locator().import_from(rb.src->source_locator(), a.get());
+    }
+  }
+
   // find-or-declare a 1-bit blackbox cell def (Liberty pins) in the out library
   auto blackbox_io = [&](Mio_Gate_t* g) -> std::shared_ptr<hhds::GraphIO> {
     std::string cell{Mio_GateReadName(g)};
@@ -532,6 +554,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     hhds::Pin_class acc = gu::create_const(*body, *Dlop::create_integer(0));
     for (int b = 0; b < w; ++b) {
       auto sm = gu::create_typed_node(*body, Ntype_op::Set_mask);
+      if (po_srcid[po] != hhds::SourceId_invalid) {
+        sm.attr(hhds::attrs::srcid).set(po_srcid[po]);
+      }
       acc.connect_sink(gu::setup_sink_by_name(sm, "a"));
       gu::create_const(*body, *Dlop::create_integer(int64_t{1} << b)).connect_sink(gu::setup_sink_by_name(sm, "mask"));
       bits[b].connect_sink(gu::setup_sink_by_name(sm, "value"));
@@ -541,6 +566,73 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
     gu::set_bits(acc, w);
     acc.connect_sink(opin);
+  }
+
+  // --- source-map carry-through: stamp each mapped gate with the srcid of the
+  // original output cone(s) it feeds. Backward-DFS from every PO over the mapped
+  // netlist; a gate reached from a single output gets that output's srcid, one
+  // fanning out to several gets combine() (order = ascending output index, so
+  // the lowest-index output is the primary anchor). ABC's optimization is lossy
+  // so exact per-gate lineage is unrecoverable — the output cone is the
+  // faithful-yet-cheap approximation. ---
+  {
+    absl::flat_hash_map<Abc_Obj_t*, hhds::Node_class> node2sub;
+    for (auto& [sub, obj] : gates) {
+      node2sub[obj] = sub;
+    }
+    // roots = the mapped gate driving each PO bit, grouped by output port
+    std::vector<std::vector<Abc_Obj_t*>> port_roots(rb.outputs.size());
+    Abc_NtkForEachPo(mapped, pObj, i) {
+      if (i >= static_cast<int>(po_order.size())) {
+        continue;
+      }
+      auto* drv = Abc_ObjFanin0(Abc_ObjFanin0(pObj));  // PO -> net -> driving node
+      if (drv != nullptr && Abc_ObjIsNode(drv)) {
+        port_roots[po_order[i].first].push_back(drv);
+      }
+    }
+    // per output, DFS its fanin cone and record the port on each reached gate
+    absl::flat_hash_map<Abc_Obj_t*, std::vector<int>> cone_ports;
+    for (size_t po = 0; po < rb.outputs.size(); ++po) {
+      if (po_srcid[po] == hhds::SourceId_invalid) {
+        continue;  // no provenance to attribute this cone with
+      }
+      absl::flat_hash_set<Abc_Obj_t*> visited;
+      std::vector<Abc_Obj_t*>         stack = port_roots[po];
+      while (!stack.empty()) {
+        auto* g = stack.back();
+        stack.pop_back();
+        if (!visited.insert(g).second) {
+          continue;
+        }
+        if (node2sub.contains(g)) {
+          cone_ports[g].push_back(static_cast<int>(po));
+        }
+        Abc_Obj_t* fin = nullptr;
+        int        k   = 0;
+        Abc_ObjForEachFanin(g, fin, k) {
+          auto* d = Abc_ObjFanin0(fin);  // fanin net -> its driving node
+          if (d != nullptr && Abc_ObjIsNode(d) && !visited.contains(d)) {
+            stack.push_back(d);
+          }
+        }
+      }
+    }
+    for (auto& [g, ports] : cone_ports) {
+      std::vector<hhds::SourceId> ids;
+      for (int po : ports) {
+        auto id = po_srcid[po];
+        if (std::find(ids.begin(), ids.end(), id) == ids.end()) {
+          ids.push_back(id);  // distinct outputs may share a srcid; keep it unique
+        }
+      }
+      if (ids.empty()) {
+        continue;
+      }
+      auto sid = ids.size() == 1 ? ids.front()
+                                 : body->source_locator().combine(std::span<const hhds::SourceId>(ids.data(), ids.size()));
+      node2sub[g].attr(hhds::attrs::srcid).set(sid);
+    }
   }
 
   if (opts_.verbose) {

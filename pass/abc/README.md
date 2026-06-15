@@ -53,9 +53,21 @@ the region loop.
 | `delay` / `load` | `{D}` / `{L}` substitution | empty |
 | `verbose` | per-region gate count | `false` |
 
+## Source-map carry-through
+
+ABC's `strash`/`dch` destroy per-node provenance, so after mapping each gate is
+re-attributed to the **original output cone** it feeds: each output port's driver
+`srcid` is re-minted into the body locator (`import_from`), and a backward DFS
+from every PO stamps each gate `Sub` in that PO's fanin cone with the output's
+srcid (a gate feeding several outputs gets a `combine(...)`, lowest output index
+= primary). The output-concat `Set_mask` glue carries the port srcid too. The
+emitted netlist therefore points back to the pre-ABC RTL (verify with `cgen --set
+cgen.srcmap=1`). Attribution is per-cone, not per-gate — ABC's optimization is
+lossy, so exact gate lineage is unrecoverable.
+
 ## Status
 
 Combinational mapping (`seq=false`) is complete and LEC-verified
-(`//lhd/tests:lhd_abc_test`). Not yet implemented: `seq=true` (flops→latches +
-name preservation), arithmetic-cell bit-blast (`sum/mult/cmp/shift`), and srcid
-carry-through. See `todo/livehd/2a-abc.html`.
+(`//lhd/tests:lhd_abc_test`), with source-map carry-through (above). Not yet
+implemented: `seq=true` (flops→latches + name preservation) and arithmetic-cell
+bit-blast (`sum/mult/cmp/shift`). See `todo/livehd/2a-abc.html`.

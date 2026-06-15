@@ -163,7 +163,6 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
     target = anchor_for(stack.back(), var);
   }
   record_uncertain_modification(var);
-  clear_uncertain_nil(var);  // a fresh write replaces the poison pin
 
   std::shared_ptr<Bundle> var_bundle;
   const auto              it = target->varmap.find(var);
@@ -263,7 +262,6 @@ bool Symbol_table::set(std::string_view key, const Dlop& trivial) {
     target = anchor_for(stack.back(), var);
   }
   record_uncertain_modification(var);
-  clear_uncertain_nil(var);  // a fresh write replaces the poison pin
 
   std::shared_ptr<Bundle> bundle;
   const auto              it = target->varmap.find(var);

@@ -120,12 +120,10 @@ public:
   // The strict comptime-fold read (ex runner_fold_fn / fold_ref):
   // a concrete (no-unknowns) value on a TRIVIAL-SCALAR binding. A
   // multi-entry tuple or named 1-tuple never inlines (position-0 truncation),
-  // and unknown-carrying values never inline (LEC-breaking).
-  // NOTE on uncertainty-pinned nils (see mark_uncertain_nil): they DO read
-  // through here as nil — the verifier's cassert discharge depends on it.
-  // The nil-specific consumers are already safe: emit_ref_or_folded never
-  // substitutes a nil, the runner's if pruning treats nil as unknown, and
-  // constprop's classify keeps producers of marked names.
+  // and unknown-carrying values never inline (LEC-breaking). A var modified
+  // under an uncertain if-arm is invalidated on scope-exit (leave_scope sets
+  // its trivial invalid), so it is not a known-const here and never folds —
+  // it is runtime-divergent, NOT nil.
   std::optional<Dlop> known_const_scalar(std::string_view name) const {
     if (name.empty() || !is_known_const(name)) {
       return std::nullopt;
@@ -134,32 +132,6 @@ public:
       return std::nullopt;
     }
     return get_trivial(name);
-  }
-
-  // ── Uncertainty-pinned nil tracking ────────────────────────────────────
-  // leave_scope() re-pins a var modified under an uncertain if-arm to nil so
-  // `==`-style folds discharge casserts (attributes_spec §Phase 2). That nil
-  // is a POISON MARKER, not a comptime value: the var's real value is
-  // runtime-divergent (mux of the arm writes and the pre-if binding). The
-  // mark lets VALUE consumers (fold/substitute/drop decisions) tell the two
-  // apart and keep the wire alive, while eq/ne keep reading the raw nil
-  // trivial for the cassert-discharge contract. A subsequent set() of the
-  // var (any new value, certain or not) clears the mark; leave_scope re-adds
-  // it when the write was again under uncertainty.
-  void               mark_uncertain_nil(std::string_view name) { uncertain_nil_.insert(std::string(Bundle::get_first_level(name))); }
-  [[nodiscard]] bool is_uncertain_nil(std::string_view name) const {
-    if (uncertain_nil_.empty()) {
-      return false;
-    }
-    return uncertain_nil_.contains(Bundle::get_first_level(name));
-  }
-  void clear_uncertain_nil(std::string_view var) {
-    if (uncertain_nil_.empty()) {
-      return;
-    }
-    if (auto it = uncertain_nil_.find(var); it != uncertain_nil_.end()) {
-      uncertain_nil_.erase(it);
-    }
   }
 
   // Runtime tuple-slot refs (loop-migration Step 1): dst tuple →
@@ -219,12 +191,6 @@ private:
   // it once the arm exits. Tmps (___N) are skipped — they're SSA values
   // anchored at the function scope, not user-visible state.
   void record_uncertain_modification(std::string_view name);
-
-  // Vars whose nil was pinned by leave_scope (uncertain-arm exit). See
-  // mark_uncertain_nil() above. Keyed by bare var name; entries are erased
-  // on the next set() of the var (absl heterogeneous lookup keeps the hot
-  // path allocation-free).
-  absl::flat_hash_set<std::string> uncertain_nil_;
 
   static std::pair<std::string_view, std::string_view> get_var_field(std::string_view key) {
     auto var   = Bundle::get_first_level(key);

@@ -532,12 +532,10 @@ void uPass_constprop::process_assign() {
       } else {
         st().set(lhs_text, rhs_bundle);
       }
-      // Poison propagation: aliasing a var that leave_scope pinned to nil
-      // (modified under an uncertain arm) makes the LHS equally
-      // runtime-divergent. set() above cleared any stale mark on the LHS;
-      // re-mark it so reads of the LHS don't fold the poison nil either.
-      if (st().is_uncertain_nil(current_text())) {
-        st().mark_uncertain_nil(lhs_text);
+      // Aliasing an inliner runtime-seed nil keeps the LHS a runtime placeholder
+      // (not a genuine nil) — propagate the mark so the nil-operand check skips it.
+      if (st().nil_seeded.contains(std::string(current_text()))) {
+        st().nil_seeded.insert(std::string(lhs_text));
       }
     } else if (st().has_trivial(current_text())) {
       // Scalar RHS (stored as trivial, not a bundle). Propagate the value so
@@ -547,6 +545,10 @@ void uPass_constprop::process_assign() {
         check_unsigned_positive_overflow(lhs_text, value);
       }
       store_trivial(lhs_text, value);
+      // Propagate the inliner runtime-seed nil mark along the alias (see above).
+      if (st().nil_seeded.contains(std::string(current_text()))) {
+        st().nil_seeded.insert(std::string(lhs_text));
+      }
     } else if (st().has_trivial(lhs_text) && st().in_uncertain_scope()) {
       // A RUNTIME-rhs write inside an uncertain if-arm: the LHS can
       // no longer be claimed comptime-known. Setting nil makes readers see a
@@ -775,6 +777,41 @@ bool uPass_constprop::report_arith_nil(const Dlop& r) {
   return true;
 }
 
+bool uPass_constprop::report_nil_operand(upass::Src_span src) {
+  // 2f-nil — a nil operand reaching any operator other than `==`/`!=` is an
+  // illegal use of nil: nil is the absence of a value (07-typesystem.md), valid
+  // only as a direct-assignment RHS or inside an equality test. Reaching an
+  // arithmetic/logic/shift/compare/reduce operator means an uninitialized or
+  // illegal value flows into real computation → compile error (the op does not
+  // fold). A template body folds nil placeholders for unbound params, so it is
+  // exempt; the real error resurfaces when the body is realized at a call site.
+  if (in_template_body()) {
+    return false;
+  }
+  for (const auto& o : src) {
+    // Skip the inliner's synthesized `lhs = nil` runtime seeds: those nils are
+    // placeholders for a runtime-valued call output (the body binds a real value
+    // the ST can't fold), NOT a genuine illegal nil. They flow into ops legally;
+    // tolg wires the real producer. A user's `const a = nil` is not seeded here.
+    if (!o.name.empty() && st().nil_seeded.contains(std::string(o.name))) {
+      continue;
+    }
+    if (operand_value(o).is_nil()) {
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "nil-operand",
+          .category = "type",
+          .pass     = "upass.constprop",
+          .message  = "nil used as an operand of a non-equality operation",
+          .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+          .hint = "nil is only valid in `==`/`!=` or a direct assignment; it cannot feed an arithmetic/logic/shift/compare/reduce operator",
+      });
+      return true;
+    }
+  }
+  return false;
+}
+
 upass::Vote uPass_constprop::process_div(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
   // Division by a comptime-known zero is an illegal operation: Dlop::div_op
@@ -852,6 +889,9 @@ upass::Vote uPass_constprop::process_shl(std::string_view dst_name, Bundle& dst,
   if (dst_name.empty() || src.size() < 2) {
     return classify_vote();
   }
+  if (report_nil_operand(src)) {  // nil shift operand is illegal (07-typesystem.md)
+    return classify_vote();
+  }
   const std::string var{dst_name};
   Dlop              n1 = operand_value(src[0]);
   if (!is_numeric(n1)) {
@@ -904,10 +944,13 @@ upass::Vote uPass_constprop::process_sra(std::string_view dst_name, Bundle& dst,
   if (dst_name.empty() || src.size() < 2) {
     return classify_vote();
   }
+  if (report_nil_operand(src)) {  // nil shift operand is illegal (07-typesystem.md)
+    return classify_vote();
+  }
   const std::string var{dst_name};
   Dlop              n1 = operand_value(src[0]);
   Dlop              n2 = operand_value(src[1]);
-  if (!is_numeric(n1) || !is_numeric(n2) || n1.is_nil() || n2.is_nil()) {
+  if (!is_numeric(n1) || !is_numeric(n2)) {
     return classify_vote();
   }
   if (n2.is_integer() && n2.is_negative()) {
@@ -933,35 +976,37 @@ static Dlop log_result_as_bool(const Dlop& r) {
 
 upass::Vote uPass_constprop::process_log_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   // Pyrope's type rule: `and` operands must already be bool — with bool
-  // operands, bitwise AND equals logical AND; Dlop handles unknowns.
+  // operands, bitwise AND equals logical AND; Dlop handles unknowns. A nil
+  // operand is NOT an error here (nil_operand_error=false): `and`/`or` are the
+  // cassert/attribute-discharge combinators (`cassert(x.[debug] and …)` over an
+  // unset/deferred attr), so nil propagates (keeps) for the verifier to resolve.
   (void)dst;
-  if (propagate_uncertain_nil(dst_name, src)) {  // poison nil: see process_eq_ne_impl
-    return classify_vote();
-  }
-  return push_binary_passthrough(dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return log_result_as_bool(*n1.and_op(n2)); });
+  return push_binary_passthrough(
+      dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return log_result_as_bool(*n1.and_op(n2)); }, /*report_nil=*/false,
+      /*nil_operand_error=*/false);
 }
 
 upass::Vote uPass_constprop::process_log_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  if (propagate_uncertain_nil(dst_name, src)) {  // poison nil: see process_eq_ne_impl
-    return classify_vote();
-  }
-  return push_binary_passthrough(dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return log_result_as_bool(*n1.or_op(n2)); });
+  return push_binary_passthrough(
+      dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return log_result_as_bool(*n1.or_op(n2)); }, /*report_nil=*/false,
+      /*nil_operand_error=*/false);
 }
 
 upass::Vote uPass_constprop::process_log_not(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   // `not` operand must be bool; bitwise NOT over a 1-bit bool flips it.
-  // nil stays nil (the cassert escape hatch for unset attrs).
+  // nil stays nil (the cassert escape hatch for unset attrs), so a nil operand
+  // is NOT an error (nil_operand_error=false) — it propagates for the verifier.
   (void)dst;
-  if (propagate_uncertain_nil(dst_name, src)) {  // poison nil: see process_eq_ne_impl
-    return classify_vote();
-  }
-  return push_unary(dst_name, src, [](Dlop& r) {
-    if (r.is_nil()) {
-      return;
-    }
-    r = log_result_as_bool(*r.not_op());
-  });
+  return push_unary(
+      dst_name, src,
+      [](Dlop& r) {
+        if (r.is_nil()) {
+          return;
+        }
+        r = log_result_as_bool(*r.not_op());
+      },
+      /*nil_operand_error=*/false);
 }
 
 // Bundle-aware equality. Returns nullopt when constprop can't decide
@@ -1186,16 +1231,6 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
     return classify_vote();
   }
   const std::string var{dst_name};
-
-  // Poison-nil propagation: an operand pinned by leave_scope (modified under
-  // an uncertain arm) makes the comparison indeterminate — fold nil so the
-  // cassert-discharge chain works as before, but MARK the dst so the
-  // producer node is kept (classify) and value consumers never fold/drop it
-  // (`o = (e != 0) && b` previously lost the whole `e` wire to a dangling
-  // ref when this producer was dropped on its "known" nil).
-  if (propagate_uncertain_nil(var, srcs)) {
-    return classify_vote();
-  }
 
   // Enum equality (03-bundle.md "Hierarchical enumerates"): when BOTH operands
   // are enum VALUES, compare bare bit-encodings. A hierarchical parent equals
@@ -2235,6 +2270,75 @@ static std::vector<Bundle_flat_entry> collect_first_level(const std::shared_ptr<
   return entries;
 }
 
+// Recursive structural case-match: does subject bundle `subj` match pattern
+// `pat`? Returns 1 = match, 0 = definite mismatch, -1 = defer (undecidable this
+// walk). Same contract as the top-level fold_case loop, extended to nested
+// shapes: every pattern key must exist in the subject (subset match), a `nil`
+// pattern field or unknown (`0sb?`/`?`) pattern bits are wildcards, and a nested
+// sub-bundle pattern field recurses into the subject's sub-bundle. Value-only —
+// declared field-type checks are applied at the top level by fold_case.
+static int match_case_value(const std::shared_ptr<Bundle const>& subj, const std::shared_ptr<Bundle const>& pat) {
+  if (!subj || !pat) {
+    return -1;
+  }
+  const auto subj_flat = collect_first_level(subj);
+  const auto pat_flat  = collect_first_level(pat);
+  bool       defer     = false;
+  for (const auto& re : pat_flat) {
+    const Bundle_flat_entry* lmatch = nullptr;
+    for (const auto& le : subj_flat) {
+      const bool hit = re.name.empty() ? (le.name.empty() && le.pos == re.pos) : (le.name == re.name);
+      if (hit) {
+        lmatch = &le;
+        break;
+      }
+    }
+    if (lmatch == nullptr) {
+      return 0;  // pattern key absent in subject
+    }
+    if (re.is_sub_bundle) {
+      if (!lmatch->is_sub_bundle) {
+        if (lmatch->value.is_invalid()) {
+          defer = true;
+          continue;
+        }
+        return 0;  // a concrete scalar subject can never match a tuple pattern
+      }
+      const std::string key = re.name.empty() ? std::to_string(re.pos) : std::string(re.name);
+      const int         r   = match_case_value(subj->get_bundle(key), pat->get_bundle(key));
+      if (r == 0) {
+        return 0;
+      }
+      if (r < 0) {
+        defer = true;
+      }
+      continue;
+    }
+    if (lmatch->is_sub_bundle || lmatch->value.is_invalid() || re.value.is_invalid()) {
+      defer = true;
+      continue;
+    }
+    if (re.value.is_nil()) {
+      continue;  // nil pattern field = full wildcard
+    }
+    if (lmatch->value.same_repr(re.value)) {
+      continue;
+    }
+    const Dlop eq = *lmatch->value.eq_op(re.value);
+    if (eq.is_known_false()) {
+      return 0;  // defined-bit mismatch
+    }
+    if (eq.is_known_true()) {
+      continue;
+    }
+    if (re.value.has_unknowns()) {
+      continue;  // disagreement only in the pattern's wildcard bits
+    }
+    defer = true;  // subject itself undecidable
+  }
+  return defer ? -1 : 1;
+}
+
 // Fold `dst = in(l, r)`. Cursor is on the const("in") marker. Walks forward
 // to read l and r, evaluates the membership predicate, and stores /*FIXME-LCONST-CTOR*/Lconst(0/1)
 // in the symbol table.
@@ -2546,7 +2650,8 @@ void uPass_constprop::fold_case(const std::string& dst) {
   // poisoned downstream `if` cond folding).
   bool defer = false;
   for (const auto& re : rhs_flat) {
-    if (re.is_sub_bundle || re.value.is_invalid()) {
+    // A scalar pattern entry with no value yet (not a sub-bundle) is undecidable.
+    if (re.value.is_invalid() && !re.is_sub_bundle) {
       defer = true;
       continue;
     }
@@ -2587,6 +2692,31 @@ void uPass_constprop::fold_case(const std::string& dst) {
           return;
         }
       }
+    }
+
+    // Nested pattern field: recurse into the sub-bundles (match_case_value
+    // applies the same subset/wildcard rules at every level). A concrete scalar
+    // subject can never match a tuple pattern → definite false.
+    if (re.is_sub_bundle) {
+      const std::string key = re.name.empty() ? std::to_string(re.pos) : std::string(re.name);
+      if (!lmatch->is_sub_bundle) {
+        if (lmatch->value.is_invalid()) {
+          defer = true;
+          continue;
+        }
+        store_trivial(dst, *Dlop::create_bool(false));
+        return;
+      }
+      const int r = match_case_value(lhs_bundle ? lhs_bundle->get_bundle(key) : nullptr,
+                                     rhs_bundle ? rhs_bundle->get_bundle(key) : nullptr);
+      if (r == 0) {
+        store_trivial(dst, *Dlop::create_bool(false));
+        return;
+      }
+      if (r < 0) {
+        defer = true;
+      }
+      continue;
     }
 
     if (lmatch->is_sub_bundle || lmatch->value.is_invalid()) {
@@ -4129,16 +4259,12 @@ upass::Emit_decision uPass_constprop::classify_statement_impl() {
   }
 
   // Drop iff the ST holds a fully-known value. is_known_const() encapsulates
-  // has_trivial + is_invalid + has_unknowns in one call.
+  // has_trivial + is_invalid + has_unknowns in one call. A var modified under
+  // an uncertain if-arm is invalidated on scope-exit (Symbol_table::leave_scope
+  // sets its trivial invalid — it is runtime-divergent, a mux of the arm writes
+  // and the pre-if binding tolg's lower_if merges), so is_known_const is false
+  // here and its stores are kept by this check.
   if (!st().is_known_const(lhs_text)) {
-    return upass::Emit_decision::emit_node();
-  }
-
-  // An uncertainty-pinned var (Symbol_table::leave_scope set its trivial to
-  // nil after an uncertain if-arm modified it) is runtime-divergent: the nil
-  // is a poison marker, not a value, so its stores must stay — they are the
-  // mux arms / pre-if binding tolg's lower_if merges.
-  if (st().is_uncertain_nil(lhs_text)) {
     return upass::Emit_decision::emit_node();
   }
 

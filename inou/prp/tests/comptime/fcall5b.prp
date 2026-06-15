@@ -43,17 +43,14 @@ match t {
 }
 cassert(hit == 200)
 
-// match using `case` pattern with wildcards (flat shape — match on the nested
-// `foo` field directly). NOTE: matching `case` on a *nested* sub-bundle pattern
-// (e.g. `match t { case (foo=(bar=0sb?, baz=7), ...) }`) does not comptime-fold
-// yet — fold_case only walks first-level entries and defers on sub-bundles, so
-// the arm stays runtime and hit2 would be unresolved. Recursive nested-`case`
-// folding (mirroring nested `==`/compare_bundles_eq) is a follow-up.
+// match using `case` pattern with wildcards on the nested shape (recursive
+// nested-`case` folding: fold_case recurses into sub-bundle pattern fields, so
+// `bar`/`c` wildcards match and `baz=7` discriminates).
 mut hit2 = 0
-match t.foo {
-  case (bar=0sb?, baz=7) { hit2 = 1 }
-  case (bar=0sb?, baz=0) { hit2 = 2 }
-  else                   { hit2 = 3 }
+match t {
+  case (foo=(bar=0sb?, baz=7), c=0sb?) { hit2 = 1 }
+  case (foo=(bar=0sb?, baz=0), c=0sb?) { hit2 = 2 }
+  else                                 { hit2 = 3 }
 }
 cassert(hit2 == 1)
 

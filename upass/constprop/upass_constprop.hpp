@@ -112,6 +112,13 @@ public:
   // the genuine error resurfaces when the body is realized at a real call.
   bool report_arith_nil(const Dlop& r);
 
+  // 2f-nil: a nil operand reaching a non-`==`/`!=` operator is an illegal use
+  // of nil — nil is only valid in an equality test (`==`/`!=`) or a direct
+  // assignment. Scans the operands; on the first nil it emits the diagnostic
+  // and returns true so the fold template bails (no fold/store). Template
+  // bodies fold nil placeholders for unbound params, so they are exempt.
+  bool report_nil_operand(upass::Src_span src);
+
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
 
   // Unresolved live imports recorded during the walk: (unit that
@@ -311,45 +318,17 @@ protected:
     return false;
   }
 
-  // Poison-nil propagation for the cassert-discharge ops (eq/ne, log_*).
-  // When any ref operand is an uncertainty-pinned var (or a temp this rule
-  // already marked), the result is the same indeterminate nil: store it AND
-  // mark the dst, so
-  //   (a) the verifier still discharges casserts over the chain (the nil
-  //       reads through known_const_scalar), and
-  //   (b) value consumers keep the producer (classify's marked-dst gate),
-  //       never substitute the nil (emit_ref_or_folded refuses nils), and
-  //       the runner treats a nil if-cond as unknown — so tolg receives the
-  //       real wires instead of a dangling ref.
-  bool propagate_uncertain_nil(std::string_view dst, upass::Src_span src) {
-    if (dst.empty()) {
-      return false;
-    }
-    for (const auto& o : src) {
-      if (!o.name.empty() && st().is_uncertain_nil(o.name)) {
-        store_trivial(dst, *Dlop::nil());
-        st().mark_uncertain_nil(dst);  // after the store — set() clears marks
-        return true;
-      }
-    }
-    return false;
-  }
-
   // Push-form operand value. Mirrors current_prim_value: the
   // cross-pass fold override wins (wrap/sat narrowed values, attr-derived
   // tmps — all of which land on the table),
   // then a scalar bundle flattens, then the stored trivial. Dlop operands
   // carry their parsed value in the resolver's make_const bundle.
-  // An uncertainty-pinned var reads as INVALID here: its nil is a poison
-  // marker for a runtime-divergent value (mux of if-arm writes), so value
-  // folds must not consume it — the ref stays and tolg wires the real
-  // producer. The discharge ops (eq/ne, log_*) handle marked operands BEFORE
-  // calling the push_* templates via propagate_uncertain_nil above.
+  // A var modified under an uncertain if-arm reads as INVALID here:
+  // Symbol_table::leave_scope invalidates its trivial on scope-exit (it is a
+  // runtime-divergent mux of the arm writes), so value folds skip it and the
+  // ref stays for tolg to wire the real producer.
   Dlop operand_value(const upass::Operand& o) {
     if (!o.name.empty()) {
-      if (st().is_uncertain_nil(o.name)) {
-        return Dlop();
-      }
       // Cross-pass folds land on the table — read it directly.
       if (auto b = st().get_bundle(o.name); b && b->is_scalar()) {
         if (auto bv = b->lone_trivial(); !bv.is_invalid()) {
@@ -364,14 +343,17 @@ protected:
   // Push-form fold templates (the cursor-walking originals below die with
   // the cursor-walking originals).
   // report_nil (2f-nil_diag): true ONLY for genuine arithmetic ops (+ - * / %)
-  // — a nil result there is an illegal/degenerate operation worth a compile
-  // error. Comparisons, logical and/or, casts and bitwise nil-bit propagation
-  // reuse these same templates but legitimately yield/keep nil, so they leave
-  // it false.
+  // — a nil RESULT there (from non-nil operands, e.g. a degenerate width) is an
+  // illegal operation worth a compile error. A nil OPERAND is rejected up front
+  // by report_nil_operand in every template below (it is illegal in any
+  // non-`==`/`!=` op), so result-nil only ever fires on non-nil-operand cases.
   template <typename F>
   upass::Vote push_nary(std::string_view dst, upass::Src_span src, F op, bool report_nil = false) {
     if (dst.empty() || src.empty()) {
       return upass::Vote::keep;
+    }
+    if (report_nil_operand(src)) {
+      return classify_vote();
     }
     Dlop r = operand_value(src[0]);
     if (!is_numeric(r)) {
@@ -389,10 +371,18 @@ protected:
     }
     return classify_vote();
   }
+  // nil_operand_error=false for the LOGICAL combinators (`and`/`or`): a nil
+  // operand there is NOT an error — nil propagates (the op keeps, unresolved),
+  // which is the verifier's cassert/attribute-discharge path (`cassert(x.[debug]
+  // and …)` over an unset/deferred attr). Hard data ops (mod) keep it true.
   template <typename F>
-  upass::Vote push_binary_passthrough(std::string_view dst, upass::Src_span src, F op, bool report_nil = false) {
+  upass::Vote push_binary_passthrough(std::string_view dst, upass::Src_span src, F op, bool report_nil = false,
+                                      bool nil_operand_error = true) {
     if (dst.empty() || src.size() < 2) {
       return upass::Vote::keep;
+    }
+    if (nil_operand_error && report_nil_operand(src)) {
+      return classify_vote();
     }
     Dlop n1 = operand_value(src[0]);
     Dlop n2 = operand_value(src[1]);
@@ -405,19 +395,21 @@ protected:
     }
     return classify_vote();
   }
-  // Like push_binary_passthrough but additionally refuses to fold a nil
-  // operand: ordering a nil (Type::Nil) walks payload-less bits in
-  // three_way_cmp and yields a garbage Less/Greater/Equal. Mirrors the nil
-  // guard process_sra already carries. (Bitwise and/or DO propagate nil bit-
-  // precisely, so they intentionally keep using push_binary_passthrough.)
+  // Ordering comparisons (`<`, `<=`, …). A nil operand is rejected by
+  // report_nil_operand (ordering a nil walks payload-less bits in three_way_cmp
+  // and yields a garbage Less/Greater/Equal — and per 07-typesystem.md nil may
+  // not feed a non-`==`/`!=` op anyway).
   template <typename F>
   upass::Vote push_binary_compare(std::string_view dst, upass::Src_span src, F op) {
     if (dst.empty() || src.size() < 2) {
       return upass::Vote::keep;
     }
+    if (report_nil_operand(src)) {
+      return classify_vote();
+    }
     Dlop n1 = operand_value(src[0]);
     Dlop n2 = operand_value(src[1]);
-    if (!is_numeric(n1) || !is_numeric(n2) || n1.is_nil() || n2.is_nil()) {
+    if (!is_numeric(n1) || !is_numeric(n2)) {
       return upass::Vote::keep;
     }
     Dlop r = op(n1, n2);
@@ -426,10 +418,15 @@ protected:
     }
     return classify_vote();
   }
+  // nil_operand_error=false for logical `not`: a nil operand propagates (keeps)
+  // for the cassert/attribute-discharge path, same as push_binary_passthrough.
   template <typename F>
-  upass::Vote push_unary(std::string_view dst, upass::Src_span src, F op) {
+  upass::Vote push_unary(std::string_view dst, upass::Src_span src, F op, bool nil_operand_error = true) {
     if (dst.empty() || src.empty()) {
       return upass::Vote::keep;
+    }
+    if (nil_operand_error && report_nil_operand(src)) {
+      return classify_vote();
     }
     Dlop r = operand_value(src[0]);
     if (!is_numeric(r)) {
@@ -446,6 +443,9 @@ protected:
     if (dst.empty() || src.empty()) {
       return upass::Vote::keep;
     }
+    if (report_nil_operand(src)) {
+      return classify_vote();
+    }
     Dlop v = operand_value(src[0]);
     if (!is_numeric(v)) {
       return upass::Vote::keep;
@@ -460,12 +460,6 @@ protected:
   auto current_prim_value() const {
     if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
       auto name = current_text();
-      // Uncertainty-pinned poison nil never folds as a value (see
-      // operand_value above) — return invalid so the caller's foldable()
-      // gate keeps the ref alive.
-      if (st().is_uncertain_nil(name)) {
-        return Dlop();
-      }
       // cross-pass folds (wrap/sat narrowing on call-dst tmps,
       // attr_get results, `is`) land on the table now — no seam read.
       // Single-entry bundle: a parenthesized scalar `(expr)` lowers to a
