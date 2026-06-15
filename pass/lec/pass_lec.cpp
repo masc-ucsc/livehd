@@ -29,6 +29,12 @@ void Pass_lec::setup() {
   m.add_label_optional("bound", "BMC / induction depth bound k", "20");
   m.add_label_optional("timeout", "per-query wall-clock seconds (0 = none)", "0");
   m.add_label_optional("witness", "print the counterexample/witness on Refuted", "true");
+  m.add_label_optional("phase",
+                       "bmc reset-phase: free (default) | reset (hold reset asserted, check) | run "
+                       "(hold reset N cycles, then deassert and check)",
+                       "free");
+  m.add_label_optional("reset_cycles", "run phase: reset-hold prologue length before checking", "2");
+  m.add_label_optional("reset", "explicit reset inputs: name[:lo|:hi], comma-separated (else auto-detect)", "");
   m.add_label_optional("cross", "also run lgcheck and assert agreement (bring-up only)", "false");
   register_pass(m);
 }
@@ -47,6 +53,9 @@ void Pass_lec::lec(Eprp_var& var) {
   o.bound   = str_tools::to_i(var.get("bound", "20"));
   o.timeout = str_tools::to_i(var.get("timeout", "0"));
   o.witness = parse_bool(var.get("witness", "true"));
+  o.phase        = std::string{var.get("phase", "free")};
+  o.reset_cycles = str_tools::to_i(var.get("reset_cycles", "2"));
+  o.reset        = std::string{var.get("reset", "")};
 
   auto ref  = var.graphs[0];
   auto impl = var.graphs[1];

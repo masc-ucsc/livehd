@@ -5,6 +5,7 @@
 #include <cvc5/cvc5.h>
 
 #include <algorithm>
+#include <cctype>
 #include <string>
 
 #include "absl/container/flat_hash_map.h"
@@ -65,7 +66,110 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     collect_ins(ref);
     collect_ins(impl);
 
-    // state[0]: reset initial per flop (shared equal across designs).
+    // Reset-phase setup. A PRIMARY reset input is an input name that drives some
+    // flop's reset_pin directly; its asserted level is 0 when that flop is
+    // active-low (negreset), else 1. (Derived resets — driven by a mux, not a
+    // primary input — are not directly controllable and are simply left free.)
+    absl::flat_hash_map<std::string, bool> reset_negset;  // name -> negreset
+    auto                                   collect_resets = [&](hhds::Graph* g) {
+      for (auto node : g->forward_class()) {
+        if (graph_util::type_op_of(node) != Ntype_op::Flop) {
+          continue;
+        }
+        auto rst_d = graph_util::get_driver_of_sink_name(node, "reset_pin");
+        if (rst_d.is_invalid() || !graph_util::is_graph_input_pin(rst_d)) {
+          continue;
+        }
+        auto nm = std::string(graph_util::pin_name_of(rst_d));
+        if (nm.empty() || !ins.count(nm)) {
+          continue;
+        }
+        bool negreset = false;
+        if (auto neg_d = graph_util::get_driver_of_sink_name(node, "negreset");
+            !neg_d.is_invalid() && graph_util::is_const_pin(neg_d)) {
+          negreset = !graph_util::hydrate_const(neg_d).is_known_false();
+        }
+        reset_negset[nm] = negreset;
+      }
+    };
+    // Canonical reset-name test (token-aware to avoid matching "first"/"burst").
+    // negreset (active-low) inferred from an _n / _ni / n suffix.
+    auto reset_name_polarity = [](const std::string& nm, bool& negreset) -> bool {
+      std::string lc = nm;
+      for (auto& c : lc) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
+      bool tok_match = false;
+      size_t start   = 0;
+      for (size_t i = 0; i <= lc.size(); ++i) {
+        if (i == lc.size() || lc[i] == '_') {
+          std::string tok = lc.substr(start, i - start);
+          if (tok == "rst" || tok == "reset" || tok == "rstn" || tok == "resetn" || tok == "arst" || tok == "areset"
+              || tok == "nrst" || tok == "nreset" || tok == "por") {
+            tok_match = true;
+          }
+          start = i + 1;
+        }
+      }
+      if (!tok_match) {
+        return false;
+      }
+      auto ends = [&](std::string_view s) { return lc.size() >= s.size() && lc.compare(lc.size() - s.size(), s.size(), s) == 0; };
+      negreset = ends("_n") || ends("_ni") || ends("_n_i") || ends("_ni_i") || lc == "rstn" || lc == "resetn" || ends("nrst")
+                 || ends("nreset");
+      return true;
+    };
+
+    const bool phase_reset = opts.phase == "reset";
+    const bool phase_run   = opts.phase == "run";
+    if (phase_reset || phase_run) {
+      if (!opts.reset.empty()) {
+        // Explicit override: authoritative list of reset inputs + polarity.
+        std::string spec = opts.reset;
+        size_t      p    = 0;
+        while (p < spec.size()) {
+          size_t      comma = spec.find(',', p);
+          std::string tok   = spec.substr(p, comma == std::string::npos ? std::string::npos : comma - p);
+          p                 = comma == std::string::npos ? spec.size() : comma + 1;
+          if (tok.empty()) {
+            continue;
+          }
+          bool        negreset = false;
+          std::string nm       = tok;
+          if (auto colon = tok.find(':'); colon != std::string::npos) {
+            nm           = tok.substr(0, colon);
+            auto pol     = tok.substr(colon + 1);
+            negreset     = (pol == "lo" || pol == "low" || pol == "n" || pol == "0");
+          } else {
+            reset_name_polarity(nm, negreset);  // infer from suffix
+          }
+          if (ins.count(nm)) {
+            reset_negset[nm] = negreset;
+          }
+        }
+      } else {
+        // Auto: structural async resets (reset_pin-driven inputs)...
+        collect_resets(ref);
+        collect_resets(impl);
+        // ...plus canonical reset-named inputs (sync resets folded into din).
+        for (const auto& [name, info] : ins) {
+          if (reset_negset.count(name)) {
+            continue;
+          }
+          bool negreset = false;
+          if (reset_name_polarity(name, negreset)) {
+            reset_negset[name] = negreset;
+          }
+        }
+      }
+    }
+    const int reset_hold = phase_run ? (opts.reset_cycles > 0 ? opts.reset_cycles : 1) : 0;
+    const int total_cyc  = N + reset_hold;  // run: prologue + checked window
+
+    // state[0]: reset initial per flop (shared equal across designs). In `run`
+    // phase we instead start from a FRESH arbitrary equal state and let the
+    // reset-hold prologue drive both designs into their reset state — so the
+    // checked window genuinely exercises free-running behavior from reset.
     absl::flat_hash_map<std::string, Val> ref_state, impl_state;
     {
       absl::flat_hash_map<std::string, int> fw;
@@ -96,8 +200,8 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       collect_flops(impl);
       for (const auto& [key, w] : fw) {
         Val v;
-        if (auto it = init.find(key); it != init.end()) {
-          v = it->second;
+        if (!phase_run && init.count(key)) {
+          v = init.at(key);
         } else {
           v = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), "s0_" + key), w, false};
         }
@@ -108,7 +212,11 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 
     cvc5::Term bad;
     int        uid = 0;  // unique suffix for fresh per-cycle state vars
-    for (int cyc = 0; cyc < N; ++cyc) {
+    for (int cyc = 0; cyc < total_cyc; ++cyc) {
+      // `run` phase: the first `reset_hold` cycles hold reset asserted and are
+      // NOT mitered (prologue); the rest are the checked window. `reset` phase:
+      // reset asserted on every cycle and every cycle is checked.
+      const bool checking = phase_run ? (cyc >= reset_hold) : true;
       // Current state for cycle i>0 is a FRESH symbol per flop, pinned to the
       // previous cycle's next-state by a flat equality assertion. Substituting
       // the next-state term directly instead would re-nest the whole transition
@@ -134,7 +242,20 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       absl::flat_hash_map<std::string, Val> sh_ref, sh_impl;
       for (const auto& [name, info] : ins) {
         cvc5::Term t = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(info.w)), "c" + std::to_string(cyc) + "_" + name);
-        Val        v{t, info.w, info.sgn};
+        // Phase control: pin a primary reset input to its asserted level during
+        // the reset phase / run-prologue, and to its deasserted level in the
+        // run-checked window. (active-low reset -> asserted=0, deasserted=all-1.)
+        if (auto rit = reset_negset.find(name); rit != reset_negset.end()) {
+          const bool assert_reset = phase_reset || (phase_run && cyc < reset_hold);
+          const bool negreset     = rit->second;
+          // asserted level: 0 if active-low else all-ones; deasserted is the dual.
+          const bool drive_zero = assert_reset ? negreset : !negreset;
+          cvc5::Term lvl        = drive_zero ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0)
+                                             : tm.mkTerm(cvc5::Kind::BITVECTOR_NOT,
+                                                         {tm.mkBitVector(static_cast<uint32_t>(info.w), 0)});
+          solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {t, lvl}));
+        }
+        Val v{t, info.w, info.sgn};
         sh_ref[name]  = v;
         sh_impl[name] = v;
       }
@@ -158,17 +279,19 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         return res;
       }
 
-      for (const auto& [name, rv] : re.outputs) {
-        if (!name.empty() && name[0] == '\x01') {
-          continue;  // next-state, not a primary output
+      if (checking) {
+        for (const auto& [name, rv] : re.outputs) {
+          if (!name.empty() && name[0] == '\x01') {
+            continue;  // next-state, not a primary output
+          }
+          auto it = ie.outputs.find(name);
+          if (it == ie.outputs.end()) {
+            continue;
+          }
+          int        w    = std::max(rv.width, it->second.width);
+          cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, rv, w), fit_to(tm, it->second, w)});
+          bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
         }
-        auto it = ie.outputs.find(name);
-        if (it == ie.outputs.end()) {
-          continue;
-        }
-        int        w    = std::max(rv.width, it->second.width);
-        cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, rv, w), fit_to(tm, it->second, w)});
-        bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
       }
 
       // Stash each design's next-state terms (built on this cycle's shallow
@@ -188,7 +311,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       impl_state = std::move(in);
     }
 
-    res.detail = "solver=cvc5 (bmc, " + std::to_string(N) + " steps from reset)";
+    res.detail = "solver=cvc5 (bmc, phase=" + opts.phase + ", " + std::to_string(N) + " checked steps"
+               + (reset_hold ? " after " + std::to_string(reset_hold) + " reset-hold" : "")
+               + (reset_negset.empty() && opts.phase != "free" ? "; WARNING no primary reset input found" : "") + ")";
     if (bad.isNull()) {
       res.verdict = Verdict::Proven;
       return res;

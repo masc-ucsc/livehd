@@ -2363,8 +2363,11 @@ void lec_command(Options& opts, Result& res) {
   o.bound   = std::atoi(label("bound", "20").c_str());
   o.timeout = std::atoi(label("timeout", "0").c_str());
   o.witness = label("witness", "true") != "false" && label("witness", "true") != "0";
+  o.phase        = label("phase", "free");
+  o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
+  o.reset        = label("reset", "");
 
-  res.recipe_steps.emplace_back(std::format("pass.lec engine:{} solver:{}", o.engine, o.solver));
+  res.recipe_steps.emplace_back(std::format("pass.lec engine:{} solver:{} phase:{}", o.engine, o.solver, o.phase));
   auto r         = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), o);
   bool lec_equiv = r.verdict == livehd::lec::Verdict::Proven;
   bool lec_known = r.verdict != livehd::lec::Verdict::Unknown;

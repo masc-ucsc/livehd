@@ -77,3 +77,10 @@ sh_test(
     data = ["//lhd"],
     tags = ["no-sandbox"],  # invokes the lgcheck yosys subprocess
 )
+
+sh_test(
+    name = "lec_phase_test",
+    srcs = ["tests/lec_phase_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # invokes the in-process cvc5 BMC engine
+)

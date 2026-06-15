@@ -51,6 +51,9 @@ Output: `PROVEN equivalent`, `REFUTED (not equivalent)` + a counterexample, or
 | `lec.bound`  | `20`  | BMC unroll depth (number of cycles from reset) |
 | `lec.solver` | `cvc5`| SMT backend (only cvc5 is built) |
 | `lec.witness`| `true`| print the counterexample on REFUTED |
+| `lec.phase`  | `free`| BMC reset-phase: `free` \| `reset` \| `run` (see below) |
+| `lec.reset_cycles` | `2` | `run` phase: cycles to hold reset before checking |
+| `lec.reset`  | *(auto)* | explicit reset inputs `name[:lo\|:hi]`, comma-separated; overrides auto-detect |
 | `lec.cross`  | `false`| also run `lhd check` (lgcheck) and assert the two agree |
 
 Example: `lhd lec --impl lg:a --ref lg:b --top foo --set lec.engine=bmc --set lec.bound=32`
@@ -70,6 +73,37 @@ Example: `lhd lec --impl lg:a --ref lg:b --top foo --set lec.engine=bmc --set le
   explored, so it does **not** false-REFUTE on unreachable states. Bounded
   proof (like `lhd check`'s bounded miter). Use it when `ind` REFUTEs a design
   you believe is equivalent.
+
+### Reset-phase separation (`lec.phase`, `bmc` only)
+
+Reset-asserted behavior and free-running behavior are best proved **separately** —
+a design can match its reference while reset is held but diverge once released
+(or vice-versa), and a single mixed unroll hides which. The `bmc` engine takes a
+phase:
+
+- **`free` (default).** The reset input ranges freely; the unroll mixes both
+  behaviors (the original `bmc` semantics).
+- **`reset`.** Every primary reset input is held **asserted** on every cycle and
+  every cycle is mitered — proves the two designs agree *under reset* (same reset
+  values, same reset-forced outputs).
+- **`run`.** Reset is held asserted for `lec.reset_cycles` cycles with **no**
+  miter (just to drive both designs into their reset state), then **deasserted**
+  and the following `lec.bound` cycles are mitered — proves free-running
+  equivalence, undisturbed by reset.
+
+To fully verify a sequential design, run **both** `reset` and `run`; both must
+PROVE. (Demonstration + regression: `pass/lec/tests/lec_phase_test.sh` — a +1 vs
++2 counter PROVEs only in `reset`, a reset-forced combinational output PROVEs
+only in `run`.)
+
+**Reset-input detection.** A reset input is found automatically as (a) any
+primary input driving a flop's `reset_pin` (async resets, e.g. a reset
+synchronizer), and (b) any input with a canonical reset name (`rst`, `reset`,
+`rst_n`, `rst_ni`, …; synchronous resets are folded into `din` and carry no
+structural marker). The asserted level follows the flop's `negreset` attribute,
+or for name-detected inputs an `_n`/`_ni` suffix (→ active-low). Override with
+`lec.reset=rst_ni,clr_i:hi` when the heuristic mislabels an input. The verdict
+detail line reports the resolved phase and warns if no reset input was found.
 
 ### Register correspondence (how the two sides line up)
 
