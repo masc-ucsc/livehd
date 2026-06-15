@@ -2900,6 +2900,7 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
     }
   }
   clone->set_lambda_kind(tmpl->get_lambda_kind());
+  clone->set_verilog_origin(tmpl->is_verilog_origin());
   clone->set_template(false);
   clone->set_generics({});
 

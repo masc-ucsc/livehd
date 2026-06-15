@@ -175,6 +175,7 @@ private:
   // stages_min>0 — a mod output legitimately stamps stages(0,0) or
   // stages(nil,nil) and a mod tree must not be mistaken for a pipe.
   std::string                                      lambda_kind_;
+  bool                                             verilog_origin_ = false;  // set by the native slang reader
   // Explicit lgraph/module name (`pub comb f::[lg="name"]`). Empty ⇒ the
   // artifact keeps the mangled `<file>.<entity>` (top_module_name). Stamped by
   // func_extract from the file-level pub entry's `lg`. tolg uses this as the
@@ -342,6 +343,16 @@ public:
   // ── lambda kind (stamped by func_extract on extracted trees) ───
   std::string_view get_lambda_kind() const noexcept { return lambda_kind_; }
   void             set_lambda_kind(std::string_view kind) { lambda_kind_ = kind; }
+
+  // ── Verilog-origin marker. Set by the native slang reader. A Verilog
+  // `always_ff` reg is a 1-cycle STATE element (its q reads at the current
+  // cycle), never a pyrope feedforward `@[stage]` reg — so tolg's staging
+  // analysis must NOT charge the +1 pipeline crossing on these flops (that
+  // would falsely flag a concat/OR of a registered field with a comb field as
+  // "mixes values at different cycles"). In-memory only (sibling to
+  // lambda_kind_); propagated on clone.
+  bool is_verilog_origin() const noexcept { return verilog_origin_; }
+  void set_verilog_origin(bool v) { verilog_origin_ = v; }
 
   // ── explicit lgraph/module name override (`::[lg="name"]`; see 2f-lg) ──────
   std::string_view get_lg_name() const noexcept { return lg_name_; }

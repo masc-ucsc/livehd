@@ -374,6 +374,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
 
   builder_.lnast = std::make_shared<Lnast>(unit_name);
   builder_.lnast->set_lambda_kind("mod");
+  builder_.lnast->set_verilog_origin(true);  // Verilog flops are state, not pyrope feedforward stages
   auto root_nid = builder_.lnast->set_root(Lnast_ntype::create_top());
   builder_.lnast->set_srcid(root_nid, mint_loc(symbol.location));
   auto io_nid  = builder_.lnast->add_child(root_nid, Lnast_ntype::create_io());

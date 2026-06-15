@@ -3510,8 +3510,16 @@ public:
           }
         }
       }
-      // Classify: every non-trivial SCC needs a state-eligible flop.
-      const auto en_pid = static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, "enable"));
+      // Classify: every non-trivial SCC needs a state-eligible flop. A plain reg
+      // with neither an enable nor a feedback SCC is otherwise a pyrope
+      // FEEDFORWARD (`@[stage]`) flop: σ(q)=σ(din)+1. But a VERILOG `always_ff`
+      // reg is always a 1-cycle STATE element (q reads at the current cycle, σ=0)
+      // — never a feedforward pipeline stage. Treating it as feedforward gave a
+      // spurious stage-1 that tripped the "mixes values at different cycles"
+      // check when the reg's output was combined with a stage-0 value (e.g. a
+      // concat field). For a Verilog-origin module, all plain regs are state.
+      const bool verilog_origin = ln_->is_verilog_origin();
+      const auto en_pid         = static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, "enable"));
       for (size_t i = 0; i < nn; ++i) {
         if (!is_type_flop(nodes[i])) {
           continue;
@@ -3526,7 +3534,7 @@ public:
               break;
             }
           }
-          if (en_driven || nontrivial[static_cast<size_t>(scc_id[i])]) {
+          if (verilog_origin || en_driven || nontrivial[static_cast<size_t>(scc_id[i])]) {
             state_.insert(nid);
           }
         }
