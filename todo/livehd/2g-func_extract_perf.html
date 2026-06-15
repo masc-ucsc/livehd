@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2g — func_extract is the slowest upass; move extraction to the lnast creators</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2g</strong> func_extract is the slowest upass — move extraction to the lnast creators</h1>
+<p><code>func_extract</code> is the single most expensive <code>pass.upass</code> sub-pass,
+  even on inputs that define <em>no</em> <code>comb</code>/<code>pipe</code>/<code>mod</code>
+  lambdas. Goal: stop running it as a post-hoc, re-walk-and-re-materialize pass, and
+  instead have the lnast creators (<code>inou/prp</code> and <code>inou/slang</code>) emit
+  the multiple LNASTs <strong>at creation time</strong>, turning each function definition
+  site into a plain import reference. The dedicated <code>func_extract</code> pass is then
+  deleted.</p>
+
+<h2>Symptom (measurement)</h2>
+<p>Per-pass cost on the LSP/compile flow (from <code>bench_upass.sh</code>, input
+  <code>xx.prp</code>; each pass disabled one-at-a-time, <code>cost = full − without</code>):</p>
+<pre>
+=== Summary ===
+baseline (no upass):    0.257s
+full pipeline (+tolg):  0.652s
+lsp-shell-equiv:        0.662s
+lsp-server:             0.570s
+
+Per-pass cost (sorted, most expensive first):
+pass             without(s)      cost(s)
+func_extract          0.530         .122   ← largest, with no functions present
+attributes            0.600         .052
+constprop             0.611         .041
+typecheck             0.617         .035
+tolg                  0.642         .010
+verifier              0.651         .001
+ssa                   0.667        -.015
+bitwidth              0.673        -.021
+assert                0.680        -.028
+coalescer             0.714        -.062
+</pre>
+
+<h2>Why it is expensive today</h2>
+<p>Unlike every other sub-pass, <code>func_extract</code> does <strong>not</strong> ride the
+  single main-pipeline walk. <code>pass_upass.cpp</code> runs it as a dedicated
+  <em>pre-loop</em>: for every entry-point LNAST it builds a fresh <code>uPass_runner</code>
+  over <code>extract_order = {"func_extract"}</code> and calls <code>run()</code>
+  (<code>pass/upass/pass_upass.cpp:383–410</code>). Three compounding costs, all paid even
+  when there is nothing to extract:</p>
+<ul class="subtasks">
+<li><strong>1. Separate full traversal.</strong> An extra DFS of every top-level LNAST
+  before the main pipeline even starts.</li>
+<li><strong>2. Unconditional re-materialization (dominant term).</strong> The pre-loop runner
+  is created <em>without</em> <code>set_materialize(false)</code>, so <code>materialize_</code>
+  defaults to <code>true</code> (<code>upass_runner.hpp:57,113</code>). It builds a complete
+  staging copy of the module's tree via <code>emit_*</code> and the caller
+  <code>replace_body()</code>s it in — <em>even when zero func_defs were found and nothing
+  was dropped</em>.</li>
+<li><strong>3. Per-node closure-capture bookkeeping.</strong> Overrides of
+  <code>process_assign</code>/<code>store</code>/<code>plus</code>/<code>…</code>/<code>tuple_add</code>/
+  <code>func_call</code> fire on every matching node with <code>save_cursor</code>/<code>restore_cursor</code>
+  + <code>unordered_map</code> churn (<code>latest_outer_value</code>, <code>temp_scalar_value</code>,
+  <code>fold_temp_nary</code>, …), all only to inline outer-scope constants into
+  <em>extracted</em> bodies — wasted with no func_defs.</li>
+</ul>
+<p>The pass was bolted onto the runner as the path of least resistance; the runner already
+  reserves the seam for retiring it — <code>function_registry</code>, "the function-body
+  registry the runner owns <em>once func_extract collapses into the main walk</em>"
+  (<code>upass_runner.hpp:90–96</code>, "Step L of the upass redesign"). This task goes one
+  step further than Step L: push the split all the way up to the lnast creators.</p>
+
+<h2>What func_extract actually does (the behavior to preserve)</h2>
+<p>Beyond dropping each <code>func_def</code> node and registering the body, the pass does
+  exactly four things — none of which need a separate post-walk:</p>
+<ul class="subtasks">
+<li><strong>Structural split.</strong> Mint a <code>top → [io, stmts]</code> LNAST per
+  <code>comb</code>/<code>pipe</code>/<code>mod</code> def, copy the signature verbatim, stamp
+  lambda kind / <code>lg</code> name / SourceId anchor.</li>
+<li><strong>Template flag.</strong> <code>set_template(true)</code> when the signature is not
+  fully concrete: an untyped non-<code>self</code> input, a <code>...</code> varargs default,
+  or any generic (<code>stamp_template_if_untyped</code>, <code>upass_func_extract.cpp:71–111</code>).
+  Everything downstream gates on <code>is_template()</code> — <code>tolg</code>/<code>timecheck</code>/<code>bitwidth</code>
+  skip templates (<code>tolg.cpp:4400,4414</code>; <code>bitwidth.cpp:338,365</code>); the main
+  walk runs templates non-materializing and drops their standalone clones
+  (<code>pass_upass.cpp:449,467,488</code>).</li>
+<li><strong>Generic names.</strong> <code>set_generics(&lt;T,U&gt;)</code> verbatim — a seam only;
+  per-<code>T</code> substitution is todo <a href="3g.html">3g</a> (deferred).</li>
+<li><strong>Closure capture.</strong> Inline the outer-scope comptime constants the body reads
+  (<code>const K = 42</code> → prelude <code>store K = 42</code>) so the extracted body is
+  self-contained. Done via a partial Dlop fold during the walk (<code>fold_temp_nary</code>).
+  This is the only non-syntactic piece.</li>
+</ul>
+<p><strong>The real specialization is not here — it is at call sites in the runner</strong> and
+  stays untouched: a <code>comb</code> template inlines (constprop folds per call, so each site
+  can specialize differently); a <code>pipe</code>/<code>mod</code>/<code>fluid</code> template
+  is cloned by <code>make_specialized_clone</code> (<code>runner.cpp:~2880–2967</code>) which
+  does <code>set_template(false)</code>, <code>set_generics({})</code>, and injects the concrete
+  port types from the resolved actuals; generic binds resolve once via
+  <code>resolve_generic_binds</code> (<code>runner.cpp:2991+</code>). Clones dedup by mangled
+  signature.</p>
+
+<h2>Proposed design</h2>
+<p><strong>The lnast creators already know where every function is</strong> —
+  <code>comb</code>/<code>pipe</code>/<code>mod name(...)</code> is an explicit grammar
+  production in <code>prp2lnast</code>, and <code>slang</code> knows its module/function
+  boundaries. So the split is purely syntactic and belongs in the front-end:</p>
+<ul class="subtasks">
+<li><strong>Front-end emits one LNAST per comb/pipe/mod at creation</strong>, with
+  <code>is_template</code>, <code>generics</code>, lambda kind, <code>lg</code> name and the
+  SourceId anchor all stamped <em>directly</em> from the AST (no re-deriving by walking a
+  copied io). The runner needs a callee body to inline/specialize from regardless of kind, so
+  a tree is always produced.</li>
+<li><strong>The definition site becomes a reference:</strong>
+  <code>const fun1 = import("ln:localfile.fun1")</code> — binds the name to the freshly-minted
+  sibling LNAST. This makes the function dependency first-class in the IR (helps the LSP,
+  incremental rebuild, and the depfile / import-resolver feed of
+  <a href="3y-agent.html">3y-agent</a>). <strong>The resolver scheme already exists</strong>
+  — <code>call_resolver.cpp:174,188</code> handle <code>ln:</code> (bind to the lnast tree name,
+  resolved against the function registry; the inline-able form, already used as
+  <code>const f = import("ln:u.g")</code> at <code>runner.cpp:1830</code>) and <code>lg:</code>
+  (bind the url, lowered to a <code>Sub</code> instance at tolg). Bare
+  <code>import("file.entity")</code> remains the cross-file <code>pub</code>-entry form
+  (<code>:199+</code>). So nothing new is needed in the resolver; the front-end just emits the
+  ref and registers the minted tree. <code>pub</code> just rides the same ref:
+  <code>pub const fun1 = import("ln:localfile.fun1")</code> re-exports; drop <code>pub</code>
+  for file-local. No special func-registry list.</li>
+<li><strong>The dedicated <code>func_extract</code> pass and its pre-loop are deleted.</strong>
+  The runner's template inline/specialize machinery is unchanged.</li>
+</ul>
+
+<h3>Unit-vs-inline is an optimization, not a correctness gate</h3>
+<p><strong>Inlining is always legal.</strong> For <code>comb</code> it is a splice; for
+  <code>mod</code>/<code>pipe</code> it is hierarchy flattening (equivalent hardware — each
+  call site gets its own logic+state copy whether realized as a <code>Sub</code> instance or
+  inlined; <code>pipe</code> flop stages travel with the body). The only cost of over-inlining
+  is code/area bloat, and locally-defined functions are inlined most of the time anyway.
+  Consequences:</p>
+<ul class="subtasks">
+<li>Whether a tree is emitted as a <strong>standalone lowerable unit</strong> (its own LGraph
+  module + <code>Sub</code> instances) versus a <strong>call-site-only callee</strong> is a
+  bloat/hierarchy knob — and it is expressed directly by <em>which import scheme the def site
+  emits</em>: <code>import("ln:…")</code> exposes the lnast tree so the runner can inline it,
+  while <code>import("lg:…")</code> forces a <code>Sub</code> instance at tolg (preserves the
+  module boundary). Default: emit <code>lg:</code> for <code>pub</code>/top
+  <code>mod</code>/<code>pipe</code> (preserve the boundary for instancing, synthesis hierarchy,
+  debug, and to avoid duplicating big/multiply-instantiated bodies); emit <code>ln:</code> and
+  inline everything else. Note <code>tolg</code> already lowers a concrete non-template tree
+  standalone and skips templates (<code>tolg.cpp:4400</code>) — keep that, just feed it
+  front-end-built trees.</li>
+<li><strong>Every hard edge has a safe fallback: inline it.</strong> Forward reference we could
+  not pre-resolve, ambiguous typed-vs-template, a callee whose interface is not ready, or a
+  fiddly cross-unit capture — none can produce wrong hardware, so each degrades to "a bit more
+  code," never a blocker.</li>
+</ul>
+
+<h3>Correctness condition — resolve callee interfaces independent of tree order</h3>
+<p>Today this is free: a global SSA pre-loop harvests <code>io_meta</code> into <em>every</em>
+  tree before the main walk (<code>pass_upass.cpp:422–426</code>), so any callee's interface is
+  known regardless of definition order, forward refs, or mutual recursion. Front-end emission
+  must preserve that guarantee. Two options:</p>
+<ul class="subtasks">
+<li><strong>(a) Front-end populates <code>io_meta</code> directly — chosen.</strong> prp/slang
+  already compute the full signature (param names, types/ranges, output names, <code>stages</code>
+  annotations) to decide typed-vs-template, so filling <code>io_meta</code> is nearly free and
+  makes every callee interface queryable independent of processing order — forward refs, mutual
+  recursion, and cross-file <code>import("ln:…")</code> (which have no single serial order) all
+  just work. It subsumes the io-harvest half of the SSA pre-pass (body SSA-renaming still runs;
+  its io-harvest becomes a no-op when <code>io_meta</code> is pre-filled). Partial
+  <code>io_meta</code> (a param typed by a comptime expr like <code>int(MAX)</code>) is fine —
+  the unknown range resolves later in bitwidth / at specialization, which coincides with the
+  template flag anyway.</li>
+<li><strong>(b) Enforce serial / topological tree order — rejected.</strong> Fragile against
+  forward references and mutual recursion, and undefined across imported files. Trades a cheap
+  data-population step for a brittle scheduling constraint.</li>
+</ul>
+
+<h3>Closure capture is orthogonal to typed-ness</h3>
+<p>Even a fully-typed <code>comb</code> can close over an outer comptime constant, so concrete
+  trees need capture too — it is not a template-only concern. Replace the partial
+  <code>fold_temp_nary</code> with a <strong>capture list</strong> recorded by the front-end (the
+  free variables the body reads that are bound in the enclosing scope), resolved with full
+  constprop fidelity <strong>when the defining unit is processed</strong> (where the def-scope
+  consts are live). This matters for lexical scoping: a <code>pub</code> function imported and
+  called from another file closes over <em>its definition</em> scope, not the caller's — so the
+  capture must be baked at the defining unit before any foreign call site sees it, never deferred
+  to the call site. For file-local functions (the common case) the captured consts are in the
+  same scope and trivially available.</p>
+
+<h2>Depends on</h2>
+<p>None. Touches <code>inou/prp</code> (prp2lnast), <code>inou/slang</code>,
+  <code>pass/upass/pass_upass.cpp</code>, and <code>lnast/</code> (io_meta + flags at creation),
+  and removes <code>upass/func_extract/</code>. The <code>ln:</code>/<code>lg:</code> import schemes
+  already exist (<code>call_resolver.cpp:174,188</code>) — no resolver change. Coordinates with
+  <a href="3g.html">3g</a> (generics seam) and <a href="3y-agent.html">3y-agent</a> (import-ref
+  dependency feed).</p>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li><strong>A — <code>io_meta</code> at creation.</strong> Teach prp2lnast (then slang) to populate
+  <code>lnast->io_meta()</code> directly from the signature, plus <code>is_template</code>,
+  <code>generics</code>, lambda kind, <code>lg</code> name and SourceId anchor. Verify the SSA
+  io-harvest becomes a no-op when <code>io_meta</code> is pre-filled (body SSA-renaming still
+  runs). Order-independent callee resolution is the acceptance test.</li>
+<li><strong>B — front-end emits the per-function trees + import ref.</strong>
+  Mint one sibling LNAST per <code>comb</code>/<code>pipe</code>/<code>mod</code> during AST→LNAST
+  lowering and register it under its tree name; replace the def with
+  <code>const name = import("ln:file.name")</code> (or <code>lg:</code> for a forced unit;
+  <code>pub</code>-aware). <strong>No resolver change needed</strong> — <code>ln:</code>/<code>lg:</code>
+  already resolve (<code>call_resolver.cpp:174,188</code>); the registry / inliner / constprop
+  bind the callee exactly as today. Handle nested defs with qualified names; dedup by name.</li>
+<li><strong>C — capture list, resolved at the defining unit.</strong> Record each body's free
+  enclosing-scope variables; resolve their comptime values when the defining unit is processed and
+  bake them (replaces <code>fold_temp_nary</code>). Cover the cross-unit / <code>pub</code> case
+  explicitly.</li>
+<li><strong>D — delete the func_extract pass + pre-loop.</strong> Remove
+  <code>upass/func_extract/</code>, the <code>extract_order</code> pre-loop and the
+  <code>func_extract</code> toggle in <code>pass_upass.cpp</code>. Keep the
+  <code>is_template</code> gating and the runner inline/specialize path. Optional: have the runner
+  inline directly from a still-inline <code>func_def</code> node (the Step-L
+  <code>function_registry</code> seam) as the always-legal fallback for any def the front-end did
+  not pre-register.</li>
+<li><strong>E — unit-vs-inline policy.</strong> Encode the policy as the emitted scheme:
+  <code>lg:</code> (forced <code>Sub</code> instance) for the default standalone-unit set
+  (<code>pub</code>/top <code>mod</code>/<code>pipe</code>), <code>ln:</code> (inline-able) for the
+  rest. Confirm hierarchy/area expectations on a multi-instance design.</li>
+<li><strong>F — re-measure + LEC.</strong> Re-run <code>bench_upass.sh</code> on <code>xx.prp</code>
+  (no functions → func_extract cost gone) and on a function-heavy module (unchanged behavior);
+  full <code>//…</code> green, no LEC/test regressions.</li>
+</ul>
+
+<h2>Interim mitigations (if the redesign is staged)</h2>
+<p>Cheap wins that reduce the cost without the front-end rework, usable as stepping stones:</p>
+<ul class="subtasks">
+<li><strong>Cheap pre-scan + skip.</strong> Before the pre-loop runner, scan (or reuse a parse-time
+  flag) for any <code>comb</code>/<code>pipe</code>/<code>mod</code> func_def; if none, skip the whole
+  iteration — no walk, no staging, no <code>replace_body</code>. Zeroes the no-functions case.</li>
+<li><strong>Skip re-materialization when nothing was dropped.</strong> Run the pre-loop
+  non-materializing and only build/swap a staging tree on modules that actually extracted a def.
+  The <code>replace_body</code> full-tree swap is the bulk of the cost.</li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<p>None yet.</p>
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>
