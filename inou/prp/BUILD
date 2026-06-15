@@ -126,6 +126,16 @@ sh_test(
     deps = ["//inou/yosys:scripts"],
 )
 
+# 2f-defer — the cross-language `.[defer]` feedback (a Pyrope mod wires an
+# imported Verilog module's output back into its input in the same cycle). Same
+# two-step lg: flow + LEC as the lg import test.
+sh_test(
+    name = "prp-defer-mix",
+    srcs = ["tests/imports/defer_mix_test.sh"],
+    data = ["//lhd"],
+    deps = ["//inou/yosys:scripts"],
+)
+
 # Equivalence pairs (tests/equiv/<name>.prp + golden <name>.v): the harness
 # lowers the .prp to Verilog (tolg path) and formally LECs it against the
 # golden via inou/yosys/lgcheck, so these need the yosys scripts/binary on

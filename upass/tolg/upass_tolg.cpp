@@ -568,6 +568,7 @@ private:
     set_unsign(out);
     auto sink = setup_sink_by_name(buf, "a");
     record(lnast_->get_name(dst), out, 1);
+    defer_cut_nids_.insert(buf.get_debug_nid());  // loop check cuts this node's in-edge
     defer_pends_.push_back(Defer_pend{.sink = sink, .out = out, .base = std::move(base_name), .src = nid});
   }
 
@@ -3157,6 +3158,11 @@ private:
   absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>> sub_time_;
   absl::flat_hash_map<uint64_t, std::string>                 plain_reg_flops_;
   absl::flat_hash_set<uint64_t>                              inserted_flops_;
+  // 2f-defer — the `.[defer]` passthrough buffers. A defer edge may legally
+  // close a same-cycle cycle (Verilog allows comb loops; a later lgraph pass
+  // detects/handles real ones), so the time-checker cuts these nodes' in-edges
+  // instead of flagging the loop.
+  absl::flat_hash_set<uint64_t>                              defer_cut_nids_;
 
 public:
   // Lower the partition's declared per-output intervals as
@@ -3234,6 +3240,7 @@ public:
   [[nodiscard]] absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& take_sub_times() { return std::move(sub_time_); }
   [[nodiscard]] absl::flat_hash_map<uint64_t, std::string>&& take_plain_reg_flops() { return std::move(plain_reg_flops_); }
   [[nodiscard]] absl::flat_hash_set<uint64_t>&&              take_inserted_flops() { return std::move(inserted_flops_); }
+  [[nodiscard]] absl::flat_hash_set<uint64_t>&&              take_defer_cuts() { return std::move(defer_cut_nids_); }
 };
 
 // The combined pipe/mod LG time checker (written once for both kinds).
@@ -3273,14 +3280,16 @@ public:
   Time_checker(hhds::Graph* g, const std::shared_ptr<Lnast>& ln, std::vector<Pending_rec>&& pendings,
                absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& flop_depth,
                absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& sub_time,
-               absl::flat_hash_map<uint64_t, std::string>&& plain_regs, absl::flat_hash_set<uint64_t>&& inserted)
+               absl::flat_hash_map<uint64_t, std::string>&& plain_regs, absl::flat_hash_set<uint64_t>&& inserted,
+               absl::flat_hash_set<uint64_t>&& defer_cuts)
       : g_(g)
       , ln_(ln)
       , pendings_(std::move(pendings))
       , flop_depth_(std::move(flop_depth))
       , sub_time_(std::move(sub_time))
       , plain_regs_(std::move(plain_regs))
-      , inserted_(std::move(inserted)) {
+      , inserted_(std::move(inserted))
+      , defer_cuts_(std::move(defer_cuts)) {
     for (const auto& [nid, name] : plain_regs_) {
       reg_flop_by_name_.emplace(name, nid);
     }
@@ -3362,6 +3371,12 @@ public:
       return it == idx.end() ? -1 : static_cast<int>(it->second);
     };
     for (size_t i = 0; i < nn; ++i) {
+      // 2f-defer — a `.[defer]` buffer is an end-of-cycle wire: cut its in-edge
+      // for loop detection (like a state flop's q). A defer feedback may legally
+      // form a same-cycle cycle; a later lgraph pass handles real comb loops.
+      if (defer_cuts_.contains(nodes[i].get_debug_nid())) {
+        continue;
+      }
       for (const auto& e : nodes[i].inp_edges()) {
         const int p = node_idx_of_pin(e.driver);
         if (p >= 0) {
@@ -3888,6 +3903,7 @@ private:
   absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>> sub_time_;
   absl::flat_hash_map<uint64_t, std::string>                 plain_regs_;
   absl::flat_hash_set<uint64_t>                              inserted_;
+  absl::flat_hash_set<uint64_t>                              defer_cuts_;  // 2f-defer: cut these in-edges
   absl::flat_hash_map<std::string, uint64_t>                 reg_flop_by_name_;
   absl::flat_hash_set<uint64_t>                              state_;
   absl::flat_hash_map<uint64_t, TR>                          tr_;
@@ -4383,7 +4399,8 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
                            builder.take_flop_depths(),
                            builder.take_sub_times(),
                            builder.take_plain_reg_flops(),
-                           builder.take_inserted_flops());
+                           builder.take_inserted_flops(),
+                           builder.take_defer_cuts());
       checker.run();
     }
   }
