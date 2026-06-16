@@ -466,9 +466,15 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     if (op == Ntype_op::Sub) {
       auto                                            sub_io = node.get_subnode_io();
       absl::flat_hash_map<hhds::Port_id, std::string> in_name;
+      absl::flat_hash_map<hhds::Port_id, int>         in_pw;  // declared input-port real width
       absl::flat_hash_map<hhds::Port_id, std::string> out_name;
       for (const auto& d : sub_io->get_input_pin_decls()) {
         in_name[sub_io->get_input_port_id(d.name)] = d.name;
+        // Literal declared width of the port the BLACKBOX receives on. A driver
+        // wider than this is truncated by the port connection, so the miter must
+        // compare only these bits. (DeclaredIoPin.bits is the literal bus width,
+        // already in the same units as the encoder's real_width here.)
+        in_pw[sub_io->get_input_port_id(d.name)] = static_cast<int>(d.bits);
       }
       for (const auto& d : sub_io->get_output_pin_decls()) {
         out_name[sub_io->get_output_port_id(d.name)] = d.name;
@@ -553,12 +559,20 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
         pin2val[dp.get_class_index()] = ov;
       }
       for (const auto& e : node.inp_edges()) {  // inputs = miter comparison points
-        auto        nit  = in_name.find(e.sink.get_port_id());
-        std::string port = nit != in_name.end() ? nit->second : std::to_string(e.sink.get_port_id());
+        auto        pid  = e.sink.get_port_id();
+        auto        nit  = in_name.find(pid);
+        std::string port = nit != in_name.end() ? nit->second : std::to_string(pid);
         bool        sok  = true;
         Val         v    = driver_val(e.driver, sok);
         if (!sok) {
           return fail("blackbox Sub '" + defname + "' input '" + port + "' has no encodable driver");
+        }
+        // Compare only the bits the blackbox port actually receives: a driver
+        // wider than the declared port is truncated by the connection, so a reader
+        // that leaves an extra high bit on the net (e.g. a 6-bit addr into a 5-bit
+        // SRAM port) must not spuriously diverge from one that doesn't.
+        if (auto pit = in_pw.find(pid); pit != in_pw.end() && pit->second > 0 && pit->second < v.width) {
+          v = Val{fit(v, pit->second), pit->second, v.is_signed};
         }
         out.outputs[std::string("\x02") + "bbin:" + bk + ":" + port] = v;
       }
