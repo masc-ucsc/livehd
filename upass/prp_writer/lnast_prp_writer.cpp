@@ -551,6 +551,106 @@ static std::optional<long long> parse_int_const(std::string_view s) {
   }
 }
 
+static int hex_digit(char c) {
+  if (c >= '0' && c <= '9') {
+    return c - '0';
+  }
+  if (c >= 'a' && c <= 'f') {
+    return c - 'a' + 10;
+  }
+  if (c >= 'A' && c <= 'F') {
+    return c - 'A' + 10;
+  }
+  return -1;
+}
+
+// Returns N>0 if `s` equals 2^N - 1 (all N low bits set), else 0.  Handles
+// arbitrary-width 0x-hex (the >64-bit data buses firtool emits) and narrow
+// decimal.  Width recovery for the uN/sN spellings can't go through int64
+// (those overflow past 63 bits → the type was lost as `int`).
+static int all_ones_width(std::string_view s) {
+  if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+    std::string_view h = s.substr(2);
+    size_t           i = 0;
+    while (i + 1 < h.size() && h[i] == '0') {  // strip leading zeros
+      ++i;
+    }
+    h = h.substr(i);
+    if (h.empty()) {
+      return 0;
+    }
+    int top = hex_digit(h[0]);
+    int topbits;
+    switch (top) {  // most-significant nibble of a 2^N-1 value
+      case 1: topbits = 1; break;
+      case 3: topbits = 2; break;
+      case 7: topbits = 3; break;
+      case 15: topbits = 4; break;
+      default: return 0;
+    }
+    for (size_t k = 1; k < h.size(); ++k) {
+      if (hex_digit(h[k]) != 15) {
+        return 0;
+      }
+    }
+    return topbits + 4 * static_cast<int>(h.size() - 1);
+  }
+  auto v = parse_int_const(s);
+  if (!v || *v < 0) {
+    return 0;
+  }
+  for (int n = 1; n < 63; ++n) {
+    if (*v == ((1LL << n) - 1)) {
+      return n;
+    }
+  }
+  return 0;
+}
+
+// Returns k>=0 if |s| equals 2^k (a single set bit), else -1.  Used to confirm
+// the signed sN range bound min == -2^(N-1) at arbitrary width.
+static int pow2_width(std::string_view s) {
+  if (!s.empty() && s[0] == '-') {
+    s = s.substr(1);
+  }
+  if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+    std::string_view h = s.substr(2);
+    size_t           i = 0;
+    while (i + 1 < h.size() && h[i] == '0') {
+      ++i;
+    }
+    h = h.substr(i);
+    if (h.empty()) {
+      return -1;
+    }
+    int top = hex_digit(h[0]);
+    int toplog;
+    switch (top) {
+      case 1: toplog = 0; break;
+      case 2: toplog = 1; break;
+      case 4: toplog = 2; break;
+      case 8: toplog = 3; break;
+      default: return -1;
+    }
+    for (size_t k = 1; k < h.size(); ++k) {
+      if (hex_digit(h[k]) != 0) {
+        return -1;
+      }
+    }
+    return toplog + 4 * static_cast<int>(h.size() - 1);
+  }
+  auto v = parse_int_const(s);
+  if (!v || *v <= 0) {
+    return -1;
+  }
+  for (int k = 0; k < 63; ++k) {
+    if (*v == (1LL << k)) {
+      return k;
+    }
+  }
+  return -1;
+}
+
 std::string Lnast_prp_writer::render_type() { return render_type_at(cur); }
 
 std::string Lnast_prp_writer::render_type_at(Lnast_nid type_nid) {
@@ -569,23 +669,19 @@ std::string Lnast_prp_writer::render_type_at(Lnast_nid type_nid) {
       if (c_min.is_invalid()) {
         return "int";  // single-sided bound — no clean uN/sN spelling
       }
-      auto maxv = parse_int_const(lnast->get_name(c_max));
-      auto minv = parse_int_const(lnast->get_name(c_min));
-      if (maxv && minv) {
-        if (*minv == 0 && *maxv >= 0) {
-          // Unsigned uN: min == 0, max == 2^N - 1.
-          for (int n = 1; n < 63; ++n) {
-            if (*maxv == ((1LL << n) - 1)) {
-              return "u" + std::to_string(n);
-            }
-          }
-        } else if (*minv < 0) {
-          // Signed sN: min == -2^(N-1), max == 2^(N-1) - 1.
-          for (int n = 2; n < 63; ++n) {
-            if (*maxv == ((1LL << (n - 1)) - 1) && *minv == -(1LL << (n - 1))) {
-              return "s" + std::to_string(n);
-            }
-          }
+      auto max_t = lnast->get_name(c_max);
+      auto min_t = lnast->get_name(c_min);
+      // Unsigned uN: min == 0, max == 2^N - 1.  Width recovery is arbitrary-
+      // precision (firtool data buses are routinely 128/256/512 bits wide — the
+      // old int64 path overflowed and silently downgraded them to `int`).
+      if (min_t == "0") {
+        if (int n = all_ones_width(max_t); n > 0) {
+          return "u" + std::to_string(n);
+        }
+      } else if (!min_t.empty() && min_t[0] == '-') {
+        // Signed sN: max == 2^(N-1) - 1 (all-ones width N-1), min == -2^(N-1).
+        if (int m = all_ones_width(max_t); m > 0 && pow2_width(min_t) == m) {
+          return "s" + std::to_string(m + 1);
         }
       }
       return "int";  // safe, lossy fallback — `int` accepts any value and re-parses
@@ -962,6 +1058,13 @@ void Lnast_prp_writer::write_get_mask() {
   }
   move_to_parent();
 
+  // A contiguous low mask 2^N-1 (the width-truncation case, incl. wide >64-bit
+  // data buses) is `src#[0..=N-1]`.
+  if (int n = all_ones_width(mask_txt); n > 0) {
+    os << std::format("{}#[0..={}]", src, n - 1);
+    return;
+  }
+  // A contiguous run not based at bit 0 (narrow): `src#[lo..=hi]`.
   auto maskv = parse_int_const(mask_txt);
   if (maskv && *maskv > 0) {
     unsigned long long m = static_cast<unsigned long long>(*maskv);
