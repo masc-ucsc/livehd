@@ -1569,8 +1569,22 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           // uses — otherwise the same instance-output net is declared twice
           // (once here, once by the consumer) and lookups miss this entry.
           auto cdpin = node.create_driver_pin(dpin2.get_port_id());
-          auto name2 = get_scaped_name(pin_wire_name(cdpin));
-          add_to_pin2var(fout, cdpin, name2, is_unsign(cdpin));
+          // Use a DEDICATED net name (like the Memory dout above), never the wire
+          // name: a Sub output that drives a module output directly is otherwise
+          // named after that port, and declaring it here re-declares the port
+          // (illegal — `Incompatible re-declaration of wire`; also an instance
+          // output cannot legally drive an `output reg`). create_outputs then
+          // emits `<port> = <iname>_o<pid>;` like any other driver.
+          auto name2           = get_scaped_name(absl::StrCat(default_instance_name(node), "_o", dpin2.get_port_id()));
+          auto [it2, inserted] = pin2var.insert({cdpin.get_class_index(), name2});
+          if (inserted) {
+            int bits2 = bits_of(cdpin);
+            if (bits2 <= 1) {
+              fout->append("wire signed ", name2, ";\n");
+            } else {
+              fout->append("wire signed [", std::to_string(bits2 - 1), ":0] ", name2, ";\n");
+            }
+          }
         }
       }
       continue;

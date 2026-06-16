@@ -63,6 +63,68 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     return sm;
   };
 
+  // Shared output symbols for BLACKBOX Sub instances (missing/empty defs). Each
+  // blackbox output becomes one free symbol SHARED across both designs, keyed
+  // "<defname>#<occ>:<port>" (matches the encoder). Built at the max output width
+  // seen across the two designs (bit-width trap). A Sub is a blackbox unless the
+  // resolution library has a purely-combinational def for it (mirrors encode.cpp).
+  auto build_shared_bbox = [&]() {
+    absl::flat_hash_map<std::string, Val>  bb;
+    absl::flat_hash_map<std::string, int>  bw;   // key -> max real width
+    absl::flat_hash_map<std::string, bool> bsg;  // key -> signed
+    auto                                   add = [&](hhds::Graph* g) {
+      absl::flat_hash_map<std::string, int> occ;
+      for (auto node : g->forward_class()) {
+        if (graph_util::type_op_of(node) != Ntype_op::Sub) {
+          continue;
+        }
+        bool blackbox = true;
+        if (sub_lib != nullptr) {
+          if (auto git = sub_lib->find(node.get_subnode_gid()); git != sub_lib->end() && git->second != nullptr) {
+            blackbox = false;
+            for (auto dn : git->second->forward_class()) {
+              auto dop = graph_util::type_op_of(dn);
+              if (dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Latch || dop == Ntype_op::Memory) {
+                blackbox = true;
+                break;
+              }
+            }
+          }
+        }
+        if (!blackbox) {
+          continue;
+        }
+        auto                                            sub_io = node.get_subnode_io();
+        std::string                                     defname(sub_io->get_name());
+        std::string                                     bk = defname + "#" + std::to_string(occ[defname]++);
+        absl::flat_hash_map<hhds::Port_id, std::string> out_name;
+        for (const auto& d : sub_io->get_output_pin_decls()) {
+          out_name[sub_io->get_output_port_id(d.name)] = d.name;
+        }
+        for (const auto& e : node.out_edges()) {
+          auto        dp   = e.driver;
+          auto        nit  = out_name.find(dp.get_port_id());
+          std::string port = nit != out_name.end() ? nit->second : std::to_string(dp.get_port_id());
+          std::string key  = bk + ":" + port;
+          int         w    = real_width(dp);
+          if (w == 0) {
+            w = 1;
+          }
+          if (auto it = bw.find(key); it == bw.end() || w > it->second) {
+            bw[key]  = w;
+            bsg[key] = !graph_util::is_unsign(dp);
+          }
+        }
+      }
+    };
+    add(ref);
+    add(impl);
+    for (const auto& [key, w] : bw) {
+      bb[key] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), "bb:" + key), w, bsg[key]};
+    }
+    return bb;
+  };
+
   // ── BMC engine: unroll N cycles from the reset state ──────────────────────
   // The single-step inductive miter (below) assumes an arbitrary equal current
   // state, so it false-REFUTEs on UNREACHABLE states where the two front-ends
@@ -75,6 +137,8 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     const int N = opts.bound > 0 ? opts.bound : 20;
     Encoder   enc(tm);
     enc.set_sub_lib(sub_lib);
+    absl::flat_hash_map<std::string, Val> shared_bbox = build_shared_bbox();
+    enc.set_shared_bbox(&shared_bbox);
 
     struct In {
       int  w;
@@ -455,9 +519,11 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   // Shared current-state memory arrays (M4 cut): corresponding memories collapse
   // to one array symbol, so the step proves equal next-state contents + douts.
   absl::flat_hash_map<std::string, cvc5::Term> shared_mems = build_shared_mems("s_");
+  absl::flat_hash_map<std::string, Val>        shared_bbox = build_shared_bbox();
 
   Encoder enc(tm);
   enc.set_sub_lib(sub_lib);
+  enc.set_shared_bbox(&shared_bbox);
   Encoded re = enc.encode(ref, &shared, "", &shared_mems);
   if (!re.ok) {
     res.verdict  = Verdict::Unknown;

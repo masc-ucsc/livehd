@@ -202,6 +202,7 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
 
   // driver-pin Class_index -> Val (SSA value table)
   absl::flat_hash_map<hhds::Class_index, Val> pin2val;
+  absl::flat_hash_map<std::string, int>       bbox_occ;  // blackbox Sub occurrence per def-name (forward_class order)
 
   auto fail = [&](const std::string& msg) -> Encoded& {
     if (out.ok) {
@@ -463,26 +464,6 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     // instance's output pins. Combinational defs only (e.g. ABC standard cells);
     // anything unresolved or stateful keeps the sound `Sub -> fail`.
     if (op == Ntype_op::Sub) {
-      if (sub_lib_ == nullptr) {
-        return fail("Sub instance '" + gu::debug_name(node) + "' but no resolution library (need --lib lg:DIR of the defs)");
-      }
-      auto git = sub_lib_->find(node.get_subnode_gid());
-      if (git == sub_lib_->end() || git->second == nullptr) {
-        return fail("Sub instance '" + gu::debug_name(node) + "' def (gid) is not in the resolution library");
-      }
-      if (sub_depth_ > 32) {
-        return fail("Sub flattening nested too deep (>32)");
-      }
-      hhds::Graph* def = git->second;
-      for (auto dn : def->forward_class()) {  // combinational defs only (sound)
-        auto dop = gu::type_op_of(dn);
-        if (dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Latch || dop == Ntype_op::Memory) {
-          return fail("Sub def '" + std::string(def->get_name()) + "' is sequential (flattening is combinational-only)");
-        }
-      }
-      // Port-ids may differ between this instance's blackbox IO and the def, so
-      // bind by NAME: the instance's subnode IO maps its pin port-ids to the
-      // (Liberty) names the def's IO also uses.
       auto                                            sub_io = node.get_subnode_io();
       absl::flat_hash_map<hhds::Port_id, std::string> in_name;
       absl::flat_hash_map<hhds::Port_id, std::string> out_name;
@@ -492,36 +473,94 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
       for (const auto& d : sub_io->get_output_pin_decls()) {
         out_name[sub_io->get_output_port_id(d.name)] = d.name;
       }
-      absl::flat_hash_map<std::string, Val> bound;
-      for (const auto& e : node.inp_edges()) {
-        auto nit = in_name.find(e.sink.get_port_id());
-        if (nit == in_name.end()) {
-          return fail("Sub instance '" + gu::debug_name(node) + "' input pin has no IO name");
+
+      // Resolve to a *combinational* def for inline flattening (M5): only when a
+      // resolution library is supplied AND the def has no state. Otherwise the
+      // instance is a BLACKBOX and is collapsed below (shared outputs / mitered
+      // inputs) — sound when both designs carry the corresponding instance.
+      hhds::Graph* def = nullptr;
+      if (sub_lib_ != nullptr && sub_depth_ <= 32) {
+        if (auto git = sub_lib_->find(node.get_subnode_gid()); git != sub_lib_->end() && git->second != nullptr) {
+          def        = git->second;
+          for (auto dn : def->forward_class()) {  // combinational defs only (sound)
+            auto dop = gu::type_op_of(dn);
+            if (dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Latch || dop == Ntype_op::Memory) {
+              def = nullptr;  // stateful -> not flattenable -> fall through to blackbox
+              break;
+            }
+          }
         }
-        bool sok = true;
-        Val  v   = driver_val(e.driver, sok);
+      }
+
+      if (def != nullptr) {
+        // Bind the instance inputs by NAME and encode the def inline.
+        absl::flat_hash_map<std::string, Val> bound;
+        for (const auto& e : node.inp_edges()) {
+          auto nit = in_name.find(e.sink.get_port_id());
+          if (nit == in_name.end()) {
+            return fail("Sub instance '" + gu::debug_name(node) + "' input pin has no IO name");
+          }
+          bool sok = true;
+          Val  v   = driver_val(e.driver, sok);
+          if (!sok) {
+            return fail("Sub instance '" + gu::debug_name(node) + "' input has no encodable driver");
+          }
+          bound[nit->second] = v;
+        }
+        ++sub_depth_;
+        Encoded sub_out = encode(def, &bound, std::format("{}{}.", prefix, static_cast<uint64_t>(node.get_debug_nid())));
+        --sub_depth_;
+        if (!sub_out.ok) {
+          return fail("Sub def '" + std::string(def->get_name()) + "' encode failed: " + sub_out.error);
+        }
+        for (const auto& e : node.out_edges()) {
+          auto dp  = e.driver;
+          auto nit = out_name.find(dp.get_port_id());
+          if (nit == out_name.end()) {
+            return fail("Sub instance '" + gu::debug_name(node) + "' output pin has no IO name");
+          }
+          auto oit = sub_out.outputs.find(nit->second);
+          if (oit == sub_out.outputs.end()) {
+            return fail("Sub def '" + std::string(def->get_name()) + "' has no output '" + nit->second + "'");
+          }
+          pin2val[dp.get_class_index()] = oit->second;
+        }
+        continue;
+      }
+
+      // ---- BLACKBOX COLLAPSE. Key by module name + occurrence (forward_class
+      // order), reader-invariant so corresponding instances align across designs.
+      std::string defname(sub_io->get_name());
+      std::string bk = defname + "#" + std::to_string(bbox_occ[defname]++);
+      for (const auto& e : node.out_edges()) {  // outputs = shared free symbols
+        auto        dp   = e.driver;
+        auto        nit  = out_name.find(dp.get_port_id());
+        std::string port = nit != out_name.end() ? nit->second : std::to_string(dp.get_port_id());
+        std::string key  = bk + ":" + port;
+        Val         ov;
+        if (shared_bbox_ != nullptr) {
+          if (auto it = shared_bbox_->find(key); it != shared_bbox_->end()) {
+            ov = it->second;
+          }
+        }
+        if (ov.term.isNull()) {  // fallback (query should have pre-built it): fresh
+          int w = real_width(dp);
+          if (w == 0) {
+            w = 1;
+          }
+          ov = Val{tm_.mkConst(bv(w), "bb:" + key), w, !gu::is_unsign(dp)};
+        }
+        pin2val[dp.get_class_index()] = ov;
+      }
+      for (const auto& e : node.inp_edges()) {  // inputs = miter comparison points
+        auto        nit  = in_name.find(e.sink.get_port_id());
+        std::string port = nit != in_name.end() ? nit->second : std::to_string(e.sink.get_port_id());
+        bool        sok  = true;
+        Val         v    = driver_val(e.driver, sok);
         if (!sok) {
-          return fail("Sub instance '" + gu::debug_name(node) + "' input has no encodable driver");
+          return fail("blackbox Sub '" + defname + "' input '" + port + "' has no encodable driver");
         }
-        bound[nit->second] = v;
-      }
-      ++sub_depth_;
-      Encoded sub_out = encode(def, &bound, std::format("{}{}.", prefix, static_cast<uint64_t>(node.get_debug_nid())));
-      --sub_depth_;
-      if (!sub_out.ok) {
-        return fail("Sub def '" + std::string(def->get_name()) + "' encode failed: " + sub_out.error);
-      }
-      for (const auto& e : node.out_edges()) {
-        auto dp  = e.driver;
-        auto nit = out_name.find(dp.get_port_id());
-        if (nit == out_name.end()) {
-          return fail("Sub instance '" + gu::debug_name(node) + "' output pin has no IO name");
-        }
-        auto oit = sub_out.outputs.find(nit->second);
-        if (oit == sub_out.outputs.end()) {
-          return fail("Sub def '" + std::string(def->get_name()) + "' has no output '" + nit->second + "'");
-        }
-        pin2val[dp.get_class_index()] = oit->second;
+        out.outputs[std::string("\x02") + "bbin:" + bk + ":" + port] = v;
       }
       continue;
     }

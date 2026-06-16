@@ -99,6 +99,17 @@ public:
   // unsigned nets carry no spare sign bit, unlike front-end RTL).
   void set_sub_lib(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* lib) { sub_lib_ = lib; }
 
+  // Shared output symbols for BLACKBOX Sub instances (missing/unresolved defs —
+  // e.g. the XiangShan SRAM macros `array_*_ext`, or any module read with its
+  // children left empty). A blackbox is "collapsed": each of its outputs becomes
+  // a fresh symbol SHARED across the two designs (keyed "<defname>#<occ>:<port>"
+  // here), and each of its inputs is emitted as a miter comparison output
+  // ("\x02bbin:<defname>#<occ>:<port>"). Sound when BOTH designs instantiate the
+  // corresponding blackbox (matched by module name + occurrence order) — the
+  // surrounding logic must drive identical inputs, and identical inputs yield the
+  // identical (shared) outputs. Built once in query.cpp and reused by both encodes.
+  void set_shared_bbox(const absl::flat_hash_map<std::string, Val>* bb) { shared_bbox_ = bb; }
+
   // Encode the combinational logic of `g`.
   //
   // `shared_inputs` (optional): a map from input-port name to an already-built
@@ -125,8 +136,9 @@ private:
   cvc5::Sort bv(int width);
 
   cvc5::TermManager&                                  tm_;
-  const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib_   = nullptr;
-  int                                                 sub_depth_ = 0;  // Sub flattening recursion guard
+  const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib_     = nullptr;
+  const absl::flat_hash_map<std::string, Val>*        shared_bbox_ = nullptr;
+  int                                                 sub_depth_   = 0;  // Sub flattening recursion guard
 };
 
 }  // namespace livehd::lec
