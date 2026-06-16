@@ -82,6 +82,22 @@ std::string Lnast_prp_writer::take_decl_keyword(std::string_view lhs) {
   return kw;
 }
 
+std::string Lnast_prp_writer::decl_prefix(std::string_view lhs) {
+  auto kw = take_decl_keyword(lhs);
+  if (!kw.empty()) {
+    declared_.insert(std::string(lhs));
+    return kw + " ";
+  }
+  if (is_tmp(lhs)) {
+    return {};  // `___` compiler temps auto-declare
+  }
+  if (declared_.count(std::string(lhs))) {
+    return {};
+  }
+  declared_.insert(std::string(lhs));
+  return "mut ";
+}
+
 std::string_view Lnast_prp_writer::strip_prefix(std::string_view name) { return name; }
 
 // ── Main dispatch ─────────────────────────────────────────────────────────────
@@ -113,6 +129,7 @@ void Lnast_prp_writer::write_node() {
     case N::Lnast_ntype_shl         : write_infix("<<"); break;
     case N::Lnast_ntype_sra         : write_infix(">>"); break;
     case N::Lnast_ntype_sext        : write_sext(); break;
+    case N::Lnast_ntype_get_mask    : write_get_mask(); break;
     case N::Lnast_ntype_eq          : write_infix("=="); break;
     case N::Lnast_ntype_ne          : write_infix("!="); break;
     case N::Lnast_ntype_lt          : write_infix("<"); break;
@@ -137,11 +154,224 @@ void Lnast_prp_writer::write_node() {
 // ── Structural ────────────────────────────────────────────────────────────────
 
 void Lnast_prp_writer::write_top() {
-  // Bare-file modules have no enclosing comb/fun declaration in the source;
-  // explicit function definitions are emitted by write_func_def() instead.
-  if (move_to_child()) {
-    write_node();
+  if (!move_to_child()) {
+    return;
+  }
+  // Slang-origin module: the first child is an `io` node (port declarations)
+  // followed by a `stmts` body sibling.  Emit a named comb/mod lambda.
+  if (current_ntype() == Lnast_ntype::Lnast_ntype_io) {
+    write_module();
     move_to_parent();
+    return;
+  }
+  // Pyrope-origin bare file: no enclosing comb/fun declaration in the source;
+  // explicit function definitions are emitted by write_func_def() instead.
+  write_node();
+  move_to_parent();
+}
+
+// ── Module (slang-origin io + body) ─────────────────────────────────────────
+
+// Reconstruct a Verilog-derived module as a named Pyrope comb/mod.  Cursor sits
+// on the `io` node (its sibling is the body `stmts`).  The header is emitted
+// from the io subtree; the body is the following `stmts`, emitted inside the
+// lambda braces (NOT brace-wrapped again — its parent is `top`, so write_stmts
+// would not wrap it, but we walk it directly here to control indentation).
+void Lnast_prp_writer::write_module() {
+  Lnast_nid io_nid = cur;
+
+  const bool is_mod = body_has_state(lnast->get_sibling_next(io_nid));
+  print(is_mod ? "mod " : "comb ");
+  print(lambda_name());
+  emit_module_header(io_nid, is_mod);
+  print(" {\n");
+  ++depth;
+
+  auto stmts_nid = lnast->get_sibling_next(io_nid);
+  collect_folded_attrs(stmts_nid);  // gather reg/mem attrs to fold into declares
+  if (!stmts_nid.is_invalid()) {
+    // Emit top-level `declare` statements first.  The slang reader places an
+    // `attr_set` (e.g. `data.[fwd]=0`, a reg's `reset_pin`/`sync`/`initial`)
+    // *before* the reg/memory `declare` it qualifies; Pyrope rejects an
+    // attribute write to an undeclared variable, so hoisting the declares above
+    // those attr writes makes the output reparse.  These declares carry no
+    // forward-referencing init (the slang reset value is the `nil` sentinel,
+    // suppressed), so reordering is semantically inert; the non-declare
+    // statements keep their original order.
+    for (int pass = 0; pass < 2; ++pass) {
+      cur = stmts_nid;
+      if (move_to_child()) {  // push stmts, cur -> first statement
+        do {
+          const bool is_decl = current_ntype() == Lnast_ntype::Lnast_ntype_declare;
+          if (is_decl != (pass == 0)) {
+            continue;
+          }
+          // Skip attr_set statements that were folded into a declare's `:[…]`.
+          if (current_ntype() == Lnast_ntype::Lnast_ntype_attr_set) {
+            auto tgt = lnast->get_child(cur);
+            if (!tgt.is_invalid() && folded_attrs_.count(std::string(strip_prefix(lnast->get_name(tgt))))) {
+              continue;
+            }
+          }
+          print_indent();
+          write_node();
+          os << "\n";
+        } while (move_to_sibling());
+        move_to_parent();  // cur -> stmts, pop
+      }
+    }
+  }
+
+  --depth;
+  print_indent();
+  print("}\n");
+  cur = io_nid;  // restore for the caller's move_to_parent()
+}
+
+// Emit `(in0:T0, in1:T1, …) -> (out0:T0, …)` from the io node.  The io node has
+// two `tuple_add` children: the first groups input ports, the second outputs.
+// Each port is `store(ref(name), const(init|nil), type, [stages])`.
+void Lnast_prp_writer::emit_module_header(Lnast_nid io_nid, bool is_mod) {
+  auto emit_group = [&](Lnast_nid tup_nid, bool is_output) {
+    print("(");
+    bool first = true;
+    if (!tup_nid.is_invalid()) {
+      for (auto port = lnast->get_child(tup_nid); !port.is_invalid(); port = lnast->get_sibling_next(port)) {
+        auto name_nid = lnast->get_child(port);  // ref(name)
+        if (name_nid.is_invalid()) {
+          continue;
+        }
+        auto init_nid = lnast->get_sibling_next(name_nid);          // const(init|nil)
+        auto type_nid = init_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(init_nid);
+        if (!first) {
+          print(", ");
+        }
+        auto pname = strip_prefix(lnast->get_name(name_nid));
+        declared_.insert(std::string(pname));  // io ports are pre-declared; body writes skip `mut`
+        print(pname);
+        if (!type_nid.is_invalid()) {
+          auto t = render_type_at(type_nid);
+          if (!t.empty()) {
+            print(":");
+            print(t);
+          }
+        }
+        // Every `mod` output must carry a landing-cycle annotation.  The slang
+        // reader leaves the stages node nil/nil (no explicit pipe depth), so
+        // opt out of the cycle check with `@[]` — it does not change lowering,
+        // only skips the interface-latency assertion.
+        if (is_mod && is_output) {
+          print("@[]");
+        }
+        first = false;
+      }
+    }
+    print(")");
+  };
+
+  auto in_tup  = lnast->get_child(io_nid);
+  auto out_tup = in_tup.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(in_tup);
+  emit_group(in_tup, /*is_output=*/false);
+  print(" -> ");
+  emit_group(out_tup, /*is_output=*/true);
+}
+
+bool Lnast_prp_writer::body_has_state(Lnast_nid nid) const {
+  if (nid.is_invalid()) {
+    return false;
+  }
+  // A `declare` whose qualifier child (const) is "reg"/"latch" marks state.
+  if (lnast->get_type(nid) == Lnast_ntype::Lnast_ntype_declare) {
+    // declare( ref, type, const(qualifier), [value] ) — qualifier is child 2.
+    auto c0 = lnast->get_child(nid);
+    if (!c0.is_invalid()) {
+      auto c1 = lnast->get_sibling_next(c0);
+      if (!c1.is_invalid()) {
+        auto c2 = lnast->get_sibling_next(c1);
+        if (!c2.is_invalid() && lnast->get_type(c2) == Lnast_ntype::Lnast_ntype_const) {
+          auto q = lnast->get_name(c2);
+          if (q == "reg" || q == "latch") {
+            return true;
+          }
+        }
+      }
+    }
+  }
+  for (auto c = lnast->get_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    if (body_has_state(c)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::string Lnast_prp_writer::lambda_name() const {
+  std::string_view full = lnast->get_top_module_name();
+  auto             dot  = full.rfind('.');
+  std::string_view tail = (dot == std::string_view::npos) ? full : full.substr(dot + 1);
+  if (tail.empty()) {
+    tail = full;
+  }
+  return std::string(tail);
+}
+
+std::string Lnast_prp_writer::render_attr_value(Lnast_nid value_nid) const {
+  if (value_nid.is_invalid()) {
+    return "true";  // a flag-only attr_set (no value child) reads as true
+  }
+  auto name = lnast->get_name(value_nid);
+  if (lnast->get_type(value_nid) == Lnast_ntype::Lnast_ntype_ref) {
+    return std::string(strip_prefix(name));  // e.g. reset_pin=<wire>
+  }
+  return std::string(name);  // const: number / true / false — verbatim
+}
+
+// Collect the slang reader's per-reg/per-memory `attr_set` statements into
+// folded_attrs_, mapping the importer attr vocabulary to Pyrope source names:
+//   initial=N  -> init=N
+//   sync=B     -> async=(!B)   (the importer's `sync` is the inverse of the
+//                               source `async`; `sync=false` is an async reset)
+//   everything else (reset_pin, negreset, clock_pin, posclk, fwd, …) verbatim.
+void Lnast_prp_writer::collect_folded_attrs(Lnast_nid stmts_nid) {
+  if (stmts_nid.is_invalid()) {
+    return;
+  }
+  for (auto s = lnast->get_child(stmts_nid); !s.is_invalid(); s = lnast->get_sibling_next(s)) {
+    if (lnast->get_type(s) != Lnast_ntype::Lnast_ntype_attr_set) {
+      continue;
+    }
+    auto var_nid = lnast->get_child(s);
+    if (var_nid.is_invalid()) {
+      continue;
+    }
+    auto key_nid = lnast->get_sibling_next(var_nid);
+    if (key_nid.is_invalid()) {
+      continue;
+    }
+    // The pyrope-origin decl-class attr (`attr_set x type mut/reg/…`) is handled
+    // by write_attr_set/pending_decl_, not folded — leave it alone.
+    auto key = std::string(lnast->get_name(key_nid));
+    if (key == "type" || key == "comptime") {
+      continue;
+    }
+    auto val_nid = lnast->get_sibling_next(key_nid);
+    std::string val = render_attr_value(val_nid);
+
+    if (key == "initial") {
+      key = "init";
+    } else if (key == "sync") {
+      key = "async";
+      val = (val == "false" || val == "0") ? "true" : "false";
+    }
+
+    auto        var = std::string(strip_prefix(lnast->get_name(var_nid)));
+    std::string tok = key + "=" + val;
+    auto        it  = folded_attrs_.find(var);
+    if (it == folded_attrs_.end()) {
+      folded_attrs_[var] = tok;
+    } else {
+      it->second += ", " + tok;
+    }
   }
 }
 
@@ -246,6 +476,7 @@ void Lnast_prp_writer::write_declare() {
     return;
   }
   auto lhs = strip_prefix(current_text());  // ref(var)
+  declared_.insert(std::string(lhs));       // an explicit declare; later writes skip the `mut`
 
   std::string type_suffix;
   if (move_to_sibling()) {
@@ -262,6 +493,13 @@ void Lnast_prp_writer::write_declare() {
 
   const bool has_value = move_to_sibling();  // optional inline init
 
+  // A `const 'nil'` value is the slang reader's "no reset / no initializer"
+  // sentinel — emit a bare declaration (`reg r:u8`) so tolg gives the flop no
+  // reset pin (sync reset is carried by the body mux instead).  `= nil` is not
+  // a reparsable initializer for an integer reg.
+  const bool nil_value
+      = has_value && current_ntype() == Lnast_ntype::Lnast_ntype_const && current_text() == "nil";
+
   print(kw);
   print(" ");
   print(lhs);
@@ -269,7 +507,15 @@ void Lnast_prp_writer::write_declare() {
     print(":");
     print(type_suffix);
   }
-  if (has_value) {
+  // Fold any collected reg/memory attributes onto the declaration.  With a type
+  // the suffix is `:[…]` (single colon after the type); without one it is the
+  // `::[…]` prefix form.
+  if (auto it = folded_attrs_.find(std::string(lhs)); it != folded_attrs_.end()) {
+    print(type_suffix.empty() ? "::[" : ":[");
+    print(it->second);
+    print("]");
+  }
+  if (has_value && !nil_value) {
     print(" = ");
     write_node();
   }
@@ -294,15 +540,17 @@ static std::optional<long long> parse_int_const(std::string_view s) {
   }
 }
 
-std::string Lnast_prp_writer::render_type() {
+std::string Lnast_prp_writer::render_type() { return render_type_at(cur); }
+
+std::string Lnast_prp_writer::render_type_at(Lnast_nid type_nid) {
   using N = Lnast_ntype;
-  switch (current_ntype()) {
+  switch (lnast->get_type(type_nid)) {
     case N::Lnast_ntype_prim_type_none  : return {};
     case N::Lnast_ntype_prim_type_bool  : return "bool";
     case N::Lnast_ntype_prim_type_string: return "string";
     case N::Lnast_ntype_prim_type_int   : {
       // prim_type_int( [max], [min] ) — both children optional (absent ⇒ unbounded).
-      auto c_max = lnast->get_child(cur);
+      auto c_max = lnast->get_child(type_nid);
       if (c_max.is_invalid()) {
         return "int";  // unbounded integer
       }
@@ -331,7 +579,18 @@ std::string Lnast_prp_writer::render_type() {
       }
       return "int";  // safe, lossy fallback — `int` accepts any value and re-parses
     }
-    default: return {};  // comp_type_* / named-type ref — not yet serialised; drop
+    case N::Lnast_ntype_comp_type_array: {
+      // comp_type_array( elem_type, const("[N]") ) -> "[N]elemtype".  The size
+      // const already carries its brackets (e.g. "[4]"), so concatenate as-is.
+      auto elem = lnast->get_child(type_nid);
+      if (elem.is_invalid()) {
+        return {};
+      }
+      auto size_n = lnast->get_sibling_next(elem);
+      std::string sz = size_n.is_invalid() ? std::string{} : std::string(lnast->get_name(size_n));
+      return sz + render_type_at(elem);
+    }
+    default: return {};  // comp_type_tuple / named-type ref — not yet serialised; drop
   }
 }
 
@@ -346,11 +605,7 @@ void Lnast_prp_writer::write_store() {
     return;
   }
   auto lhs = strip_prefix(current_text());
-  auto kw  = take_decl_keyword(lhs);
-  if (!kw.empty()) {
-    print(kw);
-    print(" ");
-  }
+  print(decl_prefix(lhs));
   print(lhs);
   while (move_to_sibling() && !is_last_child()) {
     print("[");
@@ -428,11 +683,7 @@ void Lnast_prp_writer::write_func_call() {
   }
   // LHS
   auto lhs = strip_prefix(current_text());
-  auto kw  = take_decl_keyword(lhs);
-  if (!kw.empty()) {
-    print(kw);
-    print(" ");
-  }
+  print(decl_prefix(lhs));
   print(lhs);
   print(" = ");
   // function name
@@ -479,11 +730,7 @@ void Lnast_prp_writer::write_tuple_add() {
     return;
   }
   auto lhs = strip_prefix(current_text());
-  auto kw  = take_decl_keyword(lhs);
-  if (!kw.empty()) {
-    print(kw);
-    print(" ");
-  }
+  print(decl_prefix(lhs));
   print(lhs);
   print(" = (");
   bool first = true;
@@ -503,11 +750,7 @@ void Lnast_prp_writer::write_tuple_get() {
     return;
   }
   auto lhs = strip_prefix(current_text());
-  auto kw  = take_decl_keyword(lhs);
-  if (!kw.empty()) {
-    print(kw);
-    print(" ");
-  }
+  print(decl_prefix(lhs));
   print(lhs);
   print(" = ");
   move_to_sibling();
@@ -547,16 +790,18 @@ void Lnast_prp_writer::write_attr_set() {
     return;
   }
 
-  // Generic attribute set: var.attr = value
+  // Generic attribute set/flag: `var.[attr] = value` (or `var.[attr]` when the
+  // attr_set carries no value child).  The attr name is a bare identifier, so
+  // print the const text directly rather than through write_const (which would
+  // quote it as a string literal).
   print(var_name);
-  do {
-    if (!is_last_child()) {
-      print(".");
-    } else {
-      print(" = ");
-    }
-    write_node();
-  } while (move_to_sibling());
+  print(".[");
+  print(current_text());  // attr name (cursor is on the attr const)
+  print("]");
+  if (move_to_sibling()) {
+    print(" = ");
+    write_node();  // value
+  }
 
   move_to_parent();
 }
@@ -566,11 +811,7 @@ void Lnast_prp_writer::write_attr_get() {
     return;
   }
   auto lhs = strip_prefix(current_text());
-  auto kw  = take_decl_keyword(lhs);
-  if (!kw.empty()) {
-    print(kw);
-    print(" ");
-  }
+  print(decl_prefix(lhs));
   print(lhs);
   print(" = ");
   move_to_sibling();
@@ -611,11 +852,7 @@ void Lnast_prp_writer::write_infix(std::string_view op) {
 
   // First child is the LHS (result variable).
   auto lhs = strip_prefix(current_text());
-  auto kw  = take_decl_keyword(lhs);
-  if (!kw.empty()) {
-    print(kw);
-    print(" ");
-  }
+  print(decl_prefix(lhs));
   print(lhs);
   print(" = ");
 
@@ -639,11 +876,7 @@ void Lnast_prp_writer::write_prefix_unary(std::string_view op) {
     return;
   }
   auto lhs = strip_prefix(current_text());
-  auto kw  = take_decl_keyword(lhs);
-  if (!kw.empty()) {
-    print(kw);
-    print(" ");
-  }
+  print(decl_prefix(lhs));
   print(lhs);
   print(" = ");
   print(op);
@@ -653,23 +886,71 @@ void Lnast_prp_writer::write_prefix_unary(std::string_view op) {
   move_to_parent();
 }
 
+// sext( dst, src, pos ) — sign-extend `src` treating bit `pos` as the sign bit.
+// Reparsable spelling: `src#sext[0..=pos]`.  prp2lnast lowers `#sext[0..=pos]`
+// to get_mask(src, (1<<(pos+1))-1) then sext(_, pos); when `src` is already
+// exactly pos+1 bits wide (the only shape the corpus produces — the sext source
+// is the prior get_mask slice), the inner get_mask is the identity, so the
+// round-trip reproduces the same sext.
 void Lnast_prp_writer::write_sext() {
-  // No Pyrope 3.0 operator for sext — emit as a named call with comment.
   if (!move_to_child()) {
     return;
   }
   auto lhs = strip_prefix(current_text());
+  print(decl_prefix(lhs));
+  print(lhs);
+  print(" = ");
   move_to_sibling();
-  auto val  = strip_prefix(current_text());
-  auto bits = std::string{};
+  auto src = std::string(strip_prefix(current_text()));
+  auto pos = std::string{"0"};
   if (move_to_sibling()) {
-    bits = strip_prefix(current_text());
+    pos = std::string(strip_prefix(current_text()));
+  }
+  move_to_parent();
+  os << std::format("{}#sext[0..={}]", src, pos);
+}
+
+// get_mask( dst, src, mask ) — extract the bits of `src` selected by `mask`,
+// packed LSB-first.  For a contiguous run of set bits [lo..hi] this is exactly
+// `src#[lo..=hi]`; that is all the corpus produces (width-truncation masks
+// (1<<n)-1, plus a couple of non-zero-based contiguous slices).  Non-contiguous
+// masks fall back to `src & mask` (numerically equal only when the mask is
+// zero-based, but keeps the output reparsable rather than emitting a comment).
+void Lnast_prp_writer::write_get_mask() {
+  if (!move_to_child()) {
+    return;
+  }
+  auto lhs = strip_prefix(current_text());
+  print(decl_prefix(lhs));
+  print(lhs);
+  print(" = ");
+
+  move_to_sibling();  // src
+  auto src = std::string(strip_prefix(current_text()));
+
+  std::string mask_txt;
+  if (move_to_sibling()) {  // mask const
+    mask_txt = std::string(current_text());
   }
   move_to_parent();
 
-  auto kw = take_decl_keyword(lhs);
-  if (!kw.empty()) {
-    os << kw << " ";
+  auto maskv = parse_int_const(mask_txt);
+  if (maskv && *maskv > 0) {
+    unsigned long long m = static_cast<unsigned long long>(*maskv);
+    int lo = 0;
+    while (((m >> lo) & 1ULL) == 0ULL) {
+      ++lo;
+    }
+    int hi = 63;
+    while (hi > lo && ((m >> hi) & 1ULL) == 0ULL) {
+      --hi;
+    }
+    unsigned long long contiguous = ((hi - lo) >= 63) ? ~0ULL : (((1ULL << (hi - lo + 1)) - 1ULL) << lo);
+    if (contiguous == m) {
+      os << std::format("{}#[{}..={}]", src, lo, hi);
+      return;
+    }
   }
-  os << std::format("{} = sext({}, {})  /* sign-extend */", lhs, val, bits);
+  // Non-contiguous / unparsable mask: fall back to a plain bitwise AND.
+  os << std::format("{} & {}", src, mask_txt);
 }

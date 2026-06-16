@@ -656,9 +656,16 @@ private:
     } else if (key == "sync") {
       info.has_sync = true;
       info.sync_val = val != "false" && val != "0";
+    } else if (key == "async") {
+      // Canonical Pyrope-source spelling (04b-attributes.md known_attrs): the
+      // inverse of the importer's `sync`.  `async=true` => async reset.
+      info.has_sync = true;
+      info.sync_val = val == "false" || val == "0";
     } else if (key == "negreset") {
       info.negreset = val != "false" && val != "0";
-    } else if (key == "initial") {
+    } else if (key == "initial" || key == "init") {
+      // `init` is the Pyrope-source spelling; `initial` the importer's.  Both
+      // override the declare's reset value.
       info.initial_txt = std::string(val);
     } else if (key == "type" || key == "comptime") {
       // storage-class markers — already consumed by the declare
@@ -2107,6 +2114,22 @@ private:
               }
             }
             setup_sink_by_name(mi.node, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(wv->to_just_i64())));
+          }
+        }
+        // Re-drive the forwarding mask (fwd, port 5).  lower_mem_declare reads
+        // `fwd` from pending_attrs_ at declare time, which only works when the
+        // attr_set precedes the declare (the slang reader's order).  When the
+        // Pyrope source folds the attr onto the declaration (`reg t:[N]T:[fwd=0]`)
+        // prp2lnast emits the attr_set AFTER the declare, so it lands here.
+        if (auto fit = pit->second.find("fwd"); fit != pit->second.end()) {
+          if (auto fv = Dlop::from_pyrope(fit->second); fv && fv->is_just_i64()) {
+            for (const auto& e : mi.node.inp_edges()) {
+              if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == 5) {
+                e.del_edge();
+                break;
+              }
+            }
+            setup_sink_by_name(mi.node, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(fv->to_just_i64())));
           }
         }
       }

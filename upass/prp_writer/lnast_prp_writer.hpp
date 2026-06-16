@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "lnast.hpp"
 
@@ -56,6 +57,7 @@ private:
 
   // ── Node writers ─────────────────────────────────────────────────────────
   void write_top();
+  void write_module();   // slang-origin: io node + body -> comb|mod NAME(...) -> (...) { … }
   void write_stmts();
   void write_if();
   void write_declare();  // declare(ref, type, qualifier, [value])
@@ -75,13 +77,30 @@ private:
   void write_infix(std::string_view op);
   // Prefix unary:  LHS = <op>a
   void write_prefix_unary(std::string_view op);
-  // sext — no Pyrope operator; emit as call with comment
+  // sext — emit as a reparsable `src#sext[0..=pos]` bit-select
   void write_sext();
+  // get_mask — emit a `src#[lo..=hi]` bit-select reconstructed from the mask
+  void write_get_mask();
 
   // Serialises a type node (cursor must sit on the type child) into a Pyrope
   // type suffix without moving the cursor: "" for prim_type_none, "bool",
   // "string", or "int"/"uN"/"sN" reconstructed from a prim_type_int range.
   std::string render_type();
+  // Same, but on an explicit node id (used by the io-port walk, which navigates
+  // the tree directly rather than through the shared cursor). Also handles
+  // comp_type_array -> "[N]T".
+  std::string render_type_at(Lnast_nid type_nid);
+
+  // Emits the `comb|mod NAME(in:T, …) -> (out:T, …)` header from the io node
+  // (cursor-independent; reads the io subtree via direct tree accessors).
+  void emit_module_header(Lnast_nid io_nid, bool is_mod);
+  // True if the module body declares state (a `reg`/`latch` declare, anywhere
+  // in the stmts subtree) — selects `mod` over `comb`.
+  bool body_has_state(Lnast_nid stmts_nid) const;
+  // The lambda name to emit: the last `.`-component of the top module name
+  // (e.g. "trivial_if.fun3" -> "fun3"), so the generated identifier is a plain
+  // Pyrope name (no dotted/escaped identifier the re-compile leg would reject).
+  std::string lambda_name() const;
 
   // ── Declaration tracking ─────────────────────────────────────────────────
   // Maps a variable name to its pending storage-class keyword ("mut", "reg",
@@ -92,6 +111,35 @@ private:
   // Returns the stored keyword for `lhs` (e.g. "mut") and removes it from
   // the map, or returns "" if no pending declaration exists.
   std::string take_decl_keyword(std::string_view lhs);
+
+  // Names already introduced in the current lambda (io ports, explicit
+  // `declare` nodes, and prior first-writes).  Post-upass slang LNAST writes to
+  // SSA-renamed user variables (`a___ssa_1`) and bare wires with no `declare`
+  // node; Pyrope rejects assignment to an undeclared variable, so the first
+  // write to such a name must carry a `mut`.  `___`-prefixed compiler temps
+  // auto-declare and are never tracked.
+  std::unordered_set<std::string> declared_;
+
+  // Storage-class prefix to print before an assignment LHS: a pending
+  // attr_set-type keyword if one is queued, else "mut " on the first write to
+  // an untracked non-temp name, else "" (already declared, or a temp).  Marks
+  // the name declared as a side effect.
+  std::string decl_prefix(std::string_view lhs);
+
+  // Reg/memory flop attributes the slang reader emits as standalone `attr_set`
+  // statements (`r.[initial]=N`, `r.[reset_pin]=rst`, `data.[fwd]=0`, …).
+  // Pyrope only accepts attribute writes folded into the DECLARATION
+  // (`reg r:T:[init=N, reset_pin=rst]`), so write_module pre-collects them here
+  // keyed by variable name (assembled "k=v, k=v" body) and write_declare emits
+  // the `:[…]` suffix; the standalone attr_set statements are then skipped.
+  std::unordered_map<std::string, std::string> folded_attrs_;
+
+  // Walk the top-level body statements and populate folded_attrs_ (mapping the
+  // slang attr vocabulary to the Pyrope source one: initial->init,
+  // sync->async with the value inverted, everything else verbatim).
+  void collect_folded_attrs(Lnast_nid stmts_nid);
+  // Render an attr value leaf (const text or ref name) to Pyrope source.
+  std::string render_attr_value(Lnast_nid value_nid) const;
 
   // ── Utilities ────────────────────────────────────────────────────────────
   static bool             is_tmp(std::string_view name);

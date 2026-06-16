@@ -44,3 +44,7 @@ pp*
 .sdd/runtime/
 diag.jsonl
 diag*.jsonl
+
+# local agent worktrees / scratch
+.claude/worktrees/
+tmp_v2prp_census/
