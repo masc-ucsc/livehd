@@ -49,9 +49,9 @@ run pass partition --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/re" --workdir "$W/w
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/w5"
 
 # 6. emit Verilog: impl = netlist modules + cell models ; ref = original logic
-run synth lg:"$W/net" --top "$TOP" --recipe O0 --emit-dir verilog:"$W/netv" --workdir "$W/w6"
-run synth lg:"$W/models" --recipe O0 --emit-dir verilog:"$W/modelsv" --workdir "$W/w7"
-run synth lg:"$W/re" --top "$TOP" --recipe O0 --emit-dir verilog:"$W/rev" --workdir "$W/w8"
+run compile lg:"$W/net" --top "$TOP" --recipe O0 --emit-dir verilog:"$W/netv" --workdir "$W/w6"
+run compile lg:"$W/models" --recipe O0 --emit-dir verilog:"$W/modelsv" --workdir "$W/w7"
+run compile lg:"$W/re" --top "$TOP" --recipe O0 --emit-dir verilog:"$W/rev" --workdir "$W/w8"
 
 # the netlist really is a standard-cell netlist (Sub instances of Liberty cells)
 grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$W/netv/${TOP}__c"*.v || fail "no standard cells in the ABC netlist"

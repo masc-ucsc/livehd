@@ -135,7 +135,7 @@ std::string compute_run_id(const Options& opts) {
   // Hash the RESOLVED config: the implicit default recipe must hash the same
   // as the equivalent explicit --recipe.
   std::string recipe = opts.recipe;
-  if (recipe.empty() && (opts.command == "synth" || opts.command == "compile")) {
+  if (recipe.empty() && opts.command == "compile") {
     recipe = "O1";
   }
   buf += std::format("|top={}|reader={}|recipe={}", opts.top, opts.reader, recipe);

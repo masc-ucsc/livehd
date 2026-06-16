@@ -396,8 +396,8 @@ entry); directories use slashes; no glob patterns.
 deterministic; the exit code is the verdict (0 = pass).
 
 ```sh
-lhd elaborate foo.prp                 # parse + frontend diagnostics (fast syntax check)
-lhd compile foo.prp --top NAME --emit verilog:foo.v --workdir tmp   # full lowering
+lhd compile foo.prp                   # parse + lower + diagnostics (no emit; quick check)
+lhd compile foo.prp --top NAME --emit verilog:foo.v --workdir tmp   # full lowering + netlist
 lhd scan foo.prp                      # list the file's imports
 lhd lsp                               # Pyrope language server over stdio (prplsp wrapper)
 ```
@@ -410,11 +410,12 @@ JSONL stream (fields: `severity`, `code`, `category`, `pass`, `message`,
 * `unsupported` — valid Pyrope that LiveHD cannot lower *yet* (e.g.
   `.[defer]`, temporal ops like `past[n]`, `fluid` lowering — see the
   not-yet-implemented list above). Rewrite around it for synthesis; do not
-  "fix" correct source. `lhd elaborate` usually still accepts it.
+  "fix" correct source. The front-end usually still accepts it (the
+  `unsupported` diagnostic comes from a later lowering stage).
 * `internal` — a LiveHD bug: reduce to a repro; do not change the source.
 
 The frontend is more permissive than the spec (it may accept stale forms the
-docs forbid), so passing `lhd elaborate` is necessary but not sufficient —
+docs forbid), so passing `lhd compile` is necessary but not sufficient —
 follow this skill's rules for style/semantics, and use `lhd` to catch
 mechanical errors. Generated module names are `file.entity` (e.g.
 `cnt.counter`); pin them with the `lg` attribute when a fixed name is needed.

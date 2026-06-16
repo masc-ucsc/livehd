@@ -68,9 +68,9 @@ seq_lec() {
   run pass partition --top "$top" lg:"$d/lg" --emit-dir lg:"$d/re" --workdir "$d/w4"
   run pass liberty gensim "$LIB" --emit-dir lg:"$d/models" --workdir "$d/w5"
 
-  run synth lg:"$d/net" --top "$top" --recipe O0 --emit-dir verilog:"$d/netv" --workdir "$d/w6"
-  run synth lg:"$d/models" --recipe O0 --emit-dir verilog:"$d/modelsv" --workdir "$d/w7"
-  run synth lg:"$d/re" --top "$top" --recipe O0 --emit-dir verilog:"$d/rev" --workdir "$d/w8"
+  run compile lg:"$d/net" --top "$top" --recipe O0 --emit-dir verilog:"$d/netv" --workdir "$d/w6"
+  run compile lg:"$d/models" --recipe O0 --emit-dir verilog:"$d/modelsv" --workdir "$d/w7"
+  run compile lg:"$d/re" --top "$top" --recipe O0 --emit-dir verilog:"$d/rev" --workdir "$d/w8"
 
   # the netlist really is a standard-cell netlist (Sub instances of Liberty cells)
   grep -hq "NAND2x1\|NOR2x1\|INVx1\|XOR2x1\|BUFx1" "$d/netv/"*.v || fail "$fix: no standard cells in the ABC netlist"

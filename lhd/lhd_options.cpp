@@ -117,6 +117,25 @@ Typed_path parse_check_side(std::string_view flag, std::string_view arg) {
                   "input kinds: verilog, pyrope, ln, lg"};
 }
 
+// --emit PATH: KIND:PATH, or a bare output path whose kind is inferred from the
+// extension (.v/.sv -> verilog, .prp -> pyrope). Inference is `--emit` only (a
+// single file); `--emit-dir` directory containers keep their explicit KIND:DIR.
+Typed_path parse_emit_arg(std::string_view flag, std::string_view arg) {
+  auto pos = arg.find(':');
+  if (pos != std::string_view::npos && pos != 0 && is_known_kind(canonical_kind(arg.substr(0, pos)), /*output=*/true)) {
+    return parse_typed(flag, arg, /*output=*/true);
+  }
+  if (ends_with(arg, ".prp")) {
+    return {"pyrope", std::string{arg}};
+  }
+  if (ends_with(arg, ".v") || ends_with(arg, ".sv")) {
+    return {"verilog", std::string{arg}};
+  }
+  // No extension match: defer to the typed parser for its precise KIND:PATH
+  // usage error (a missing ':' or an unknown kind).
+  return parse_typed(flag, arg, /*output=*/true);
+}
+
 // ---- --config lhd.toml --------------------------------------------------------
 // A strict TOML *subset*: `#` comments, `[pass]` tables, and `key = value`
 // where value is a quoted string, a boolean, or an integer. Each table entry
@@ -264,7 +283,7 @@ void load_config(Options& opts) {
   // ignored (one lhd.toml can serve every step of a flow), so only the
   // recipe-consuming commands pick it up.
   opts.sets.insert(opts.sets.begin(), file_sets.begin(), file_sets.end());
-  if (opts.recipe.empty() && (opts.command == "synth" || opts.command == "compile")) {
+  if (opts.recipe.empty() && opts.command == "compile") {
     opts.recipe = file_recipe;
   }
 }
@@ -310,7 +329,7 @@ Options parse_args(int argc, char** argv) {
     }
 
     if (a == "--emit") {
-      opts.emits.emplace_back(parse_typed(a, need_value(a, i, argc, argv), true));
+      opts.emits.emplace_back(parse_emit_arg(a, need_value(a, i, argc, argv)));
     } else if (a == "--emit-dir") {
       opts.emit_dirs.emplace_back(parse_typed(a, need_value(a, i, argc, argv), true));
     } else if (a == "--in") {
@@ -418,8 +437,8 @@ Options parse_args(int argc, char** argv) {
                       std::format("unknown option '{}'", a),
                       opts.command.empty() ? "run `lhd help`" : std::format("run `lhd help {}`", opts.command)};
     } else if (opts.command.empty()) {
-      if (a == "elaborate" || a == "compile" || a == "synth" || a == "check" || a == "lec" || a == "scan" || a == "lsp"
-          || a == "list" || a == "describe" || a == "version" || a == "help" || a == "ln.cat" || a == "ln.diff" || a == "pass") {
+      if (a == "compile" || a == "check" || a == "lec" || a == "scan" || a == "lsp" || a == "list" || a == "describe"
+          || a == "version" || a == "help" || a == "ln.cat" || a == "ln.diff" || a == "pass") {
         // ln.cat/ln.diff keep their positionals raw and ORDERED in opts.files
         // (an ln:DIR token must keep its place — ln.diff sides are positional).
         opts.command = a;
@@ -427,13 +446,13 @@ Options parse_args(int argc, char** argv) {
       } else {
         throw Lhd_error{"usage", std::format("unknown command '{}'", a), "run `lhd help` for the command list"};
       }
-    } else if ((opts.command == "elaborate" || opts.command == "compile") && opts.language.empty() && opts.files.empty()
-               && opts.ins.empty() && opts.in_dirs.empty() && (a == "verilog" || a == "pyrope")) {
-      // The optional language word: the first positional after elaborate/
-      // compile (flags may intervene); inferred from the source-file
-      // extensions (.prp -> pyrope, .v/.sv -> verilog) when omitted.
+    } else if (opts.command == "compile" && opts.language.empty() && opts.files.empty() && opts.ins.empty()
+               && opts.in_dirs.empty() && (a == "verilog" || a == "pyrope")) {
+      // The optional language word: the first positional after compile (flags
+      // may intervene); inferred from the source-file extensions (.prp ->
+      // pyrope, .v/.sv -> verilog) when omitted.
       opts.language = a;
-    } else if (opts.command == "elaborate" || opts.command == "compile" || opts.command == "synth" || opts.command == "pass") {
+    } else if (opts.command == "compile" || opts.command == "pass") {
       // `pass` positionals: the subcommand word(s) (color/partition/clear/<alg>)
       // land in opts.files; an lg:DIR is routed to opts.ins by route_positional.
       if (!route_positional(opts, a)) {
@@ -490,7 +509,7 @@ Options parse_args(int argc, char** argv) {
     } else {
       throw Lhd_error{"usage",
                       std::format("cannot infer the source language of '{}'", opts.files.front()),
-                      "use `lhd elaborate pyrope|verilog ...` or .prp/.v/.sv extensions"};
+                      "use `lhd compile pyrope|verilog ...` or .prp/.v/.sv extensions"};
     }
   }
 

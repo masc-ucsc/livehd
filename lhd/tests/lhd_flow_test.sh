@@ -36,11 +36,11 @@ IN_LN="$W/in_lns"
 IN_LG="$W/in_lgs"
 case "$IN_KIND" in
   ln)
-    prep_lhd elaborate "$PRP" --emit-dir ln:"$IN_LN/"
+    prep_lhd compile "$PRP" --emit-dir ln:"$IN_LN/"
     [ -f "$IN_LN/forest.txt" ] || fail "input prep: missing $IN_LN/forest.txt"
     ;;
   lg)
-    prep_lhd elaborate "$PRP" --emit-dir lg:"$IN_LG/"
+    prep_lhd compile "$PRP" --emit-dir lg:"$IN_LG/"
     [ -f "$IN_LG/library.txt" ] || fail "input prep: missing $IN_LG/library.txt"
     ;;
 esac
@@ -54,20 +54,20 @@ cmd=()
 case "$IN_KIND-$OUT_KIND" in
   pyrope-verilog) cmd=(compile "$PRP" --emit verilog:"$OUT_V") ;;
   pyrope-pyrope) cmd=(compile "$PRP" --emit-dir pyrope:"$OUT_PRP/") ;;
-  pyrope-ln) cmd=(elaborate "$PRP" --emit-dir ln:"$OUT_LN/") ;;
-  pyrope-lg) cmd=(elaborate "$PRP" --emit-dir lg:"$OUT_LG/") ;;
+  pyrope-ln) cmd=(compile "$PRP" --emit-dir ln:"$OUT_LN/") ;;
+  pyrope-lg) cmd=(compile "$PRP" --emit-dir lg:"$OUT_LG/") ;;
   verilog-verilog) cmd=(compile "$V0" --reader yosys-verilog --top "$TOP" --emit verilog:"$OUT_V") ;;
   verilog-pyrope) cmd=(compile "$V0" --reader yosys-verilog --top "$TOP" --emit-dir pyrope:"$OUT_PRP/") ;;
-  verilog-ln) cmd=(elaborate "$V0" --reader yosys-verilog --top "$TOP" --emit-dir ln:"$OUT_LN/") ;;
-  verilog-lg) cmd=(elaborate "$V0" --reader yosys-verilog --top "$TOP" --emit-dir lg:"$OUT_LG/") ;;
-  ln-verilog) cmd=(synth ln:"$IN_LN" --emit verilog:"$OUT_V") ;;
-  ln-pyrope) cmd=(synth ln:"$IN_LN" --emit-dir pyrope:"$OUT_PRP/") ;;
-  ln-ln) cmd=(synth ln:"$IN_LN" --emit-dir ln:"$OUT_LN/") ;;  # post-upass forest
-  ln-lg) cmd=(synth ln:"$IN_LN" --emit-dir lg:"$OUT_LG/") ;;
-  lg-verilog) cmd=(synth lg:"$IN_LG" --emit verilog:"$OUT_V") ;;
-  lg-pyrope) cmd=(synth lg:"$IN_LG" --emit-dir pyrope:"$OUT_PRP/") ;;
-  lg-ln) cmd=(synth lg:"$IN_LG" --emit-dir ln:"$OUT_LN/") ;;
-  lg-lg) cmd=(synth lg:"$IN_LG" --emit-dir lg:"$OUT_LG/") ;;
+  verilog-ln) cmd=(compile "$V0" --reader yosys-verilog --top "$TOP" --emit-dir ln:"$OUT_LN/") ;;
+  verilog-lg) cmd=(compile "$V0" --reader yosys-verilog --top "$TOP" --emit-dir lg:"$OUT_LG/") ;;
+  ln-verilog) cmd=(compile ln:"$IN_LN" --emit verilog:"$OUT_V") ;;
+  ln-pyrope) cmd=(compile ln:"$IN_LN" --emit-dir pyrope:"$OUT_PRP/") ;;
+  ln-ln) cmd=(compile ln:"$IN_LN" --emit-dir ln:"$OUT_LN/") ;;  # post-upass forest
+  ln-lg) cmd=(compile ln:"$IN_LN" --emit-dir lg:"$OUT_LG/") ;;
+  lg-verilog) cmd=(compile lg:"$IN_LG" --emit verilog:"$OUT_V") ;;
+  lg-pyrope) cmd=(compile lg:"$IN_LG" --emit-dir pyrope:"$OUT_PRP/") ;;
+  lg-ln) cmd=(compile lg:"$IN_LG" --emit-dir ln:"$OUT_LN/") ;;
+  lg-lg) cmd=(compile lg:"$IN_LG" --emit-dir lg:"$OUT_LG/") ;;
   *) fail "unknown flow $IN_KIND -> $OUT_KIND" ;;
 esac
 

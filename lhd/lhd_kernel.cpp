@@ -774,6 +774,54 @@ void emit_pyrope_outputs(Options& opts, Result& res, Eprp_var& var) {
   }
 }
 
+// `--emit foo.prp` (single-file pyrope, inferred from the .prp extension).
+// Pyrope re-emission is inherently one .prp per unit, so the single-file form
+// is only valid for a one-unit design: emit that unit's .prp to the file; a
+// multi-unit design must use --emit-dir pyrope:DIR/.
+void emit_pyrope_single_file(Options& opts, Result& res, Eprp_var& var) {
+  const auto* e = find_slot(opts.emits, "pyrope");
+  if (e == nullptr) {
+    return;
+  }
+  if (var.lnasts.empty()) {
+    throw Lhd_error{"unsupported",
+                    "no LNAST units to emit as pyrope",
+                    "pyrope output needs source/ln: inputs (there is no LGraph -> LNAST decompiler)"};
+  }
+  std::vector<std::string> names;
+  names.reserve(var.lnasts.size());
+  for (const auto& ln : var.lnasts) {
+    names.emplace_back(ln->get_top_module_name());
+  }
+  std::sort(names.begin(), names.end());
+  names.erase(std::unique(names.begin(), names.end()), names.end());
+  if (names.size() != 1) {
+    throw Lhd_error{"usage",
+                    std::format("--emit pyrope:{} is a single file, but the design has {} units", e->path, names.size()),
+                    "use --emit-dir pyrope:DIR/ for a multi-unit design (one .prp per unit)"};
+  }
+  auto scratch = std::format("{}/prp_{:03d}", workdir(opts), ++step_counter);
+  ensure_dir(scratch);
+  run_step("pass.prp_writer",
+           var,
+           {
+               {"odir", scratch}
+  },
+           opts,
+           res);
+  auto          src = std::format("{}/{}.prp", scratch, names.front());
+  std::ifstream ifs(src);
+  if (!ifs.is_open()) {
+    throw Lhd_error{"internal", std::format("pass.prp_writer did not produce {}", src), "check the step log in --workdir"};
+  }
+  std::ofstream ofs(e->path);
+  if (!ofs.is_open()) {
+    throw Lhd_error{"config", std::format("could not write {}", e->path), ""};
+  }
+  ofs << ifs.rdbuf();
+  res.outputs.push_back(e->path);
+}
+
 // Depfile closure: a compiled unit's Source_locator file table is the
 // list of source files its provenance actually references (its own file plus
 // anything imports pulled in) — fold them into the depfile prerequisites.
@@ -849,14 +897,15 @@ void validate_emits(const Options& opts) {
   reject_emit_kind(opts, "graphviz", {"unsupported", "--emit graphviz: is not implemented yet", ""});
   reject_emit_kind(opts, "metadata", {"unsupported", "--emit metadata: is not implemented yet (needs [3c] hashes)", ""});
 
-  // ln:/lg:/pyrope:/lnast-dump: outputs are containers (a Forest dir, a
-  // GraphLibrary dir, one file per unit) — directory form only, never a
-  // single file.
+  // ln:/lg:/lnast-dump: outputs are directory containers (a Forest dir, a
+  // GraphLibrary dir, one file per unit) — directory form only, never a single
+  // file. (pyrope: is allowed as a single file for a one-unit design; the
+  // multi-unit check lives in emit_pyrope_single_file.)
   for (const auto& e : opts.emits) {
-    if (e.kind == "ln" || e.kind == "lg" || e.kind == "pyrope" || e.kind == "lnast-dump") {
+    if (e.kind == "ln" || e.kind == "lg" || e.kind == "lnast-dump") {
       throw Lhd_error{"usage",
                       std::format("--emit {0}:PATH is a directory container; use --emit-dir {0}:DIR/", e.kind),
-                      "ln: is a Forest save dir, lg: a GraphLibrary save dir, pyrope:/lnast-dump: one file per unit"};
+                      "ln: is a Forest save dir, lg: a GraphLibrary save dir, lnast-dump: one file per unit"};
     }
   }
 
@@ -864,25 +913,10 @@ void validate_emits(const Options& opts) {
   for (const auto& in : opts.in_dirs) {
     has_ln_inputs |= in.kind == "ln";
   }
-  const bool has_sources = !opts.files.empty();
+  // Sources may arrive as positional files or, for the verilog readers, via
+  // raw `-- -F filelist.f` args (no positional file then).
+  const bool has_sources = !opts.files.empty() || !opts.raw_args.empty();
 
-  if (opts.command == "elaborate") {
-    reject_emit_kind(opts, "verilog", {"usage", "elaborate does not emit verilog", "use `lhd synth` or `lhd compile`"});
-    reject_emit_kind(opts,
-                     "pyrope",
-                     {"unsupported",
-                      "pyrope re-emission needs the post-upass LNAST",
-                      "use `lhd compile --emit-dir pyrope:DIR/` (or synth from ln: inputs)"});
-    if (opts.language == "verilog" && opts.reader != "slang") {
-      for (const char* k : {"ln", "lnast-dump"}) {
-        reject_emit_kind(opts,
-                         k,
-                         {"unsupported",
-                          "the yosys-* readers elaborate to LGraphs (lg:), not LNAST",
-                          "use --emit-dir lg:DIR/, or --reader slang (the direct SV -> LNAST front-end)"});
-      }
-    }
-  }
   // --reader slang emits the current func-style LNAST conventions (io node,
   // declare/store, lambda_kind), so lg:/verilog: emits lower through the same
   // upass+tolg pipeline as pyrope sources (todo/ 2s).
@@ -900,15 +934,15 @@ void validate_emits(const Options& opts) {
                       "there is no LGraph -> LNAST decompiler, so the yosys-* readers cannot re-emit pyrope",
                       "--reader slang elaborates SV to LNAST, which can"});
   }
-  if (opts.command == "synth" && !has_ln_inputs && !has_sources) {
-    // ln/pyrope/lnast-dump outputs need LNAST units on the pipe; an lg
-    // (LGraph) input has none and there is no decompiler.
+  if (opts.command == "compile" && !has_ln_inputs && !has_sources) {
+    // An lg:-only compile (no sources, no ln: inputs) has no LNAST on the pipe;
+    // ln/pyrope/lnast-dump outputs need LNAST units, and there is no decompiler.
     for (const char* k : {"ln", "lnast-dump"}) {
-      reject_emit_kind(opts, k, {"unsupported", "there is no LGraph -> LNAST decompiler", "ln: outputs need ln: inputs"});
+      reject_emit_kind(opts, k, {"unsupported", "there is no LGraph -> LNAST decompiler", "ln: outputs need source/ln: inputs"});
     }
     reject_emit_kind(opts,
                      "pyrope",
-                     {"unsupported", "there is no LGraph -> LNAST decompiler", "pyrope outputs need ln:/pyrope inputs"});
+                     {"unsupported", "there is no LGraph -> LNAST decompiler", "pyrope outputs need source/ln: inputs"});
   }
   if (opts.command == "check" || opts.command == "lec") {
     for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump"}) {
@@ -921,7 +955,7 @@ void validate_emits(const Options& opts) {
                        k,
                        {"usage",
                         std::format("{} prints to stdout and has no --emit outputs", opts.command),
-                        "use elaborate/synth/compile for declared artifacts"});
+                        "use compile for declared artifacts"});
     }
   }
 }
@@ -935,28 +969,25 @@ void validate_dumps(const Options& opts) {
   }
   if (opts.command == "check" || opts.command == "lec" || opts.command == "scan" || opts.command == "ln.cat"
       || opts.command == "ln.diff") {
-    throw Lhd_error{"usage",
-                    std::format("{} has no --dump observables", opts.command),
-                    "--dump applies to elaborate/synth/compile"};
+    throw Lhd_error{"usage", std::format("{} has no --dump observables", opts.command), "--dump applies to compile"};
   }
   if (opts.language == "verilog" && opts.reader != "slang" && (wants_dump(opts, "parse") || wants_dump(opts, "lnast"))) {
     throw Lhd_error{"unsupported",
                     "the yosys-* readers elaborate to LGraphs, so there is no LNAST to dump",
                     "use --dump lg, or --reader slang (the direct SV -> LNAST front-end)"};
   }
-  if (opts.command == "synth") {
-    if (wants_dump(opts, "parse")) {
-      throw Lhd_error{"usage", "synth consumes pre-parsed IR; --dump parse is an elaborate/compile observable", ""};
-    }
-    if (wants_dump(opts, "lnast")) {
-      bool has_ln = false;
-      for (const auto& in : opts.in_dirs) {
-        has_ln |= in.kind == "ln";
-      }
-      if (!has_ln) {
-        throw Lhd_error{"usage", "--dump lnast needs ln: inputs (an lg: input carries no LNAST)", ""};
-      }
-    }
+  // compile from IR inputs has no front-end parse, and only ln: inputs carry
+  // LNAST: --dump parse needs sources, --dump lnast needs sources or ln:.
+  const bool has_sources = !opts.files.empty() || !opts.raw_args.empty();
+  bool       has_ln      = false;
+  for (const auto& in : opts.in_dirs) {
+    has_ln |= in.kind == "ln";
+  }
+  if (!has_sources && wants_dump(opts, "parse")) {
+    throw Lhd_error{"usage", "--dump parse needs source files (an ln:/lg: input is already parsed)", ""};
+  }
+  if (!has_sources && !has_ln && wants_dump(opts, "lnast")) {
+    throw Lhd_error{"usage", "--dump lnast needs source files or ln: inputs (an lg: input carries no LNAST)", ""};
   }
 }
 
@@ -1590,201 +1621,6 @@ void ln_diff_command(Options& opts, Result& res) {
 //   sources (.prp [+ ln: imports] | .v)  -> --emit-dir ln:DIR and/or lg:DIR
 //   ln: dirs only (aggregate)            -> one combined ln:/lg: container
 //   one lg: dir (pass-through copy)      -> lg:DIR
-void elaborate_command(Options& opts, Result& res) {
-  auto        ir     = gather_ir_inputs(opts, "elaborate");
-  const auto* ln_out = find_slot(opts.emit_dirs, "ln");
-  const auto* lg_out = find_slot(opts.emit_dirs, "lg");
-
-  // `--reader <slang|yosys-slang|yosys-verilog> -- -F filelist.f` supplies the
-  // verilog sources through the raw slang args, so a verilog elaboration is
-  // valid with no positional file.
-  const bool raw_arg_sources = !opts.raw_args.empty();
-  if (opts.language == "verilog" && (!opts.files.empty() || raw_arg_sources)) {
-    if (!ir.ln_dirs.empty() || !ir.lg_dirs.empty()) {
-      throw Lhd_error{"usage", "verilog elaboration takes no ln:/lg: inputs", ""};
-    }
-    setup_diag(opts, "elaborate.verilog");
-    Eprp_var var;
-    if (opts.reader == "slang") {  // direct SV -> LNAST: the pyrope flow from here
-      slang_parse(opts, res, var);
-      if (ln_out != nullptr) {
-        save_ln_dir(opts, res, filter_top(var.lnasts, opts.top), ln_out->path);
-      }
-      emit_lnast_dump_outputs(filter_top(var.lnasts, opts.top), opts, res);  // post-parse dump
-      if (lg_out != nullptr || wants_dump(opts, "lnast")) {
-        lower_lnasts(opts, res, var, lg_out ? lg_out->path : workdir(opts) + "/lgdb", /*need_graphs=*/lg_out != nullptr);
-        if (lg_out != nullptr) {
-          livehd::Hhds_graph_library::save(lg_out->path);
-          res.outputs.push_back(lg_out->path);
-        }
-      }
-      harvest_source_files(res, var.lnasts);
-      write_depfile(opts, res);
-      return;
-    }
-    auto lib_path = verilog_frontend(opts, res, var);
-    if (wants_dump(opts, "lg")) {
-      screen_dump_graphs(var, "post-tolg");
-    }
-    if (lg_out != nullptr) {
-      livehd::Hhds_graph_library::save(lib_path);
-      res.outputs.push_back(lg_out->path);
-    }
-    write_depfile(opts, res);
-    return;
-  }
-
-  if (!opts.files.empty()) {  // pyrope sources (+ optional ln: imports)
-    if (!ir.lg_dirs.empty()) {
-      throw Lhd_error{"usage", "lg: inputs cannot join a source elaboration", "aggregate lg: libraries in a separate step"};
-    }
-    setup_diag(opts, "elaborate.pyrope");
-    Eprp_var var;
-    auto     n_imports = pyrope_parse(opts, res, var, ir.ln_dirs);
-
-    // Emit only THIS invocation's source units (imports have their own
-    // elaboration step and ln: directory).
-    std::vector<std::shared_ptr<Lnast>> source_units(var.lnasts.begin() + static_cast<long>(n_imports), var.lnasts.end());
-    emit_lnast_dump_outputs(filter_top(source_units, opts.top), opts, res);  // post-parse dump
-    if (ln_out != nullptr || lg_out != nullptr || wants_dump(opts, "lnast") || wants_dump(opts, "lg")) {
-      // Elaboration is parse + pass.upass: the `ln:` emit publishes
-      // the POST-upass units (pre-elaborated for importers), each file unit's
-      // extracted lambdas (`<unit>.<entity>` — the `ln:` url targets), and a
-      // synthesized `<unit>.__pub` wrapper per pub-exporting file. A bare
-      // `lhd elaborate x.prp` (no IR emits) stays front-end-only.
-      lower_lnasts(opts,
-                   res,
-                   var,
-                   lg_out ? lg_out->path : workdir(opts) + "/lgdb",
-                   /*need_graphs=*/lg_out != nullptr || wants_dump(opts, "lg"));
-      if (wants_dump(opts, "lg")) {
-        screen_dump_graphs(var, "post-tolg");
-      }
-      if (lg_out != nullptr) {
-        livehd::Hhds_graph_library::save(lg_out->path);
-        res.outputs.push_back(lg_out->path);
-      }
-      if (ln_out != nullptr) {
-        auto                                publish = collect_source_derived(var.lnasts, filter_top(source_units, opts.top));
-        // Publication happens at completion (never a partial pub list): the
-        // upass above either finished every unit or threw.
-        std::vector<std::shared_ptr<Lnast>> wrappers;
-        for (const auto& ln : publish) {
-          if (ln->get_lambda_kind().empty() && !ln->get_top_module_name().ends_with(".__pub")) {
-            if (auto w = synthesize_pub_wrapper(ln)) {
-              wrappers.push_back(std::move(w));
-            }
-          }
-        }
-        publish.insert(publish.end(), wrappers.begin(), wrappers.end());
-        save_ln_dir(opts, res, publish, ln_out->path);
-      }
-    }
-    harvest_source_files(res, var.lnasts);
-    write_depfile(opts, res);
-    return;
-  }
-
-  // Aggregation: IR inputs only.
-  // Linker: merge lg: libraries + lower ln: source units that
-  // reference them (`import("lg:foo")` → a black-box Sub) into a new lg: lib.
-  if (!ir.ln_dirs.empty() && !ir.lg_dirs.empty()) {
-    setup_diag(opts, "elaborate.merge");
-    if (lg_out == nullptr) {
-      throw Lhd_error{"usage", "merging ln: + lg: inputs needs --emit-dir lg:DIR/", ""};
-    }
-    const std::string lib_path = lg_out->path;
-    // Absorb each lg: library into the output library. Name-hash gids make a
-    // shared graph name keep the same gid across libraries, so load_merge is
-    // conflict-free for matching names (and dedups them).
-    auto&             lib      = livehd::Hhds_graph_library::instance(lib_path);
-    for (const auto& d : ir.lg_dirs) {
-      res.inputs.push_back(d);
-      lib.load_merge(d);
-    }
-    // Lower the ln: source units into the SAME library; their `import("lg:…")`
-    // calls resolve to the absorbed graphs by name at tolg.
-    Eprp_var var;
-    for (const auto& d : ir.ln_dirs) {
-      res.inputs.push_back(d);
-      for (auto& ln : load_ln_dir(d)) {
-        var.add(ln);
-      }
-    }
-    run_step("pass.lnastfmt", var, {}, opts, res);
-    lower_lnasts(opts, res, var, lib_path, /*need_graphs=*/true);
-    if (wants_dump(opts, "lg")) {
-      screen_dump_graphs(var, "post-tolg");
-    }
-    livehd::Hhds_graph_library::save(lib_path);
-    res.outputs.push_back(lib_path);
-    return;
-  }
-  if (!ir.ln_dirs.empty()) {
-    setup_diag(opts, "elaborate.aggregate");
-    Eprp_var var;
-    for (const auto& d : ir.ln_dirs) {
-      res.inputs.push_back(d);
-      for (auto& ln : load_ln_dir(d)) {
-        var.add(ln);
-      }
-    }
-    run_step("pass.lnastfmt", var, {}, opts, res);
-    if (wants_dump(opts, "parse")) {
-      screen_dump_lnasts(var.lnasts, "post-parse");
-    }
-    if (ln_out != nullptr) {
-      save_ln_dir(opts, res, var.lnasts, ln_out->path);
-    }
-    emit_lnast_dump_outputs(var.lnasts, opts, res);
-    if (lg_out != nullptr || wants_dump(opts, "lnast") || wants_dump(opts, "lg")) {
-      // Re-lowering all units into ONE fresh library is the v0 aggregation:
-      // gids stay consistent by construction.
-      lower_lnasts(opts,
-                   res,
-                   var,
-                   lg_out ? lg_out->path : workdir(opts) + "/lgdb",
-                   /*need_graphs=*/lg_out != nullptr || wants_dump(opts, "lg"));
-      if (wants_dump(opts, "lg")) {
-        screen_dump_graphs(var, "post-tolg");
-      }
-      if (lg_out != nullptr) {
-        livehd::Hhds_graph_library::save(lg_out->path);
-        res.outputs.push_back(lg_out->path);
-      }
-    }
-    if (ln_out == nullptr && lg_out == nullptr && find_slot(opts.emit_dirs, "lnast-dump") == nullptr && opts.dumps.empty()) {
-      throw Lhd_error{"usage", "aggregation needs --emit-dir ln:DIR/ and/or --emit-dir lg:DIR/ (or a --dump)", ""};
-    }
-    return;
-  }
-  if (!ir.lg_dirs.empty()) {
-    setup_diag(opts, "elaborate.aggregate");
-    if (ir.lg_dirs.size() > 1) {
-      throw Lhd_error{"unsupported",
-                      "linking multiple lg: libraries needs gid remapping (not implemented yet)",
-                      "aggregate from the ln: directories instead (re-lowers into one library)"};
-    }
-    if (lg_out == nullptr) {
-      throw Lhd_error{"usage", "an lg: pass-through needs --emit-dir lg:DIR/", ""};
-    }
-    const auto& src = ir.lg_dirs.front();
-    if (!fs::is_directory(src)) {
-      throw Lhd_error{"missing_file", std::format("lg: input not found: {}", src), ""};
-    }
-    res.inputs.push_back(src);
-    if (fs::weakly_canonical(lg_out->path) != fs::weakly_canonical(src)) {
-      std::error_code ec;
-      fs::remove_all(lg_out->path, ec);
-      ensure_dir(lg_out->path);
-      fs::copy(src, lg_out->path, fs::copy_options::recursive | fs::copy_options::overwrite_existing);
-    }
-    res.outputs.push_back(lg_out->path);
-    return;
-  }
-  throw Lhd_error{"usage", "elaborate requires source files or ln:/lg: inputs", ""};
-}
-
 // ---- synth ------------------------------------------------------------------
 
 // Lower LNAST units: lnastfmt + upass, then (only when `need_graphs`) the
@@ -1976,27 +1812,40 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
   }
 
   emit_verilog_outputs(opts, res, var);
-  emit_ln_outputs(var.lnasts, opts, res);          // post-upass forest (synth from ln: inputs)
-  emit_pyrope_outputs(opts, res, var);             // post-upass .prp re-emission (pass.prp_writer)
+  // ln: emit is handled per-path by the caller (source publish vs plain forest),
+  // so it is NOT done here.
+  emit_pyrope_outputs(opts, res, var);             // --emit-dir pyrope:DIR/ (one .prp per unit)
+  emit_pyrope_single_file(opts, res, var);         // --emit foo.prp (single-unit design)
   emit_lnast_dump_outputs(var.lnasts, opts, res);  // post-upass textual dump (debug/test observable)
 }
 
-void synth_command(Options& opts, Result& res) {
-  setup_diag(opts, "synth");
+// First-elaboration `ln:` publish from pyrope sources: the source-derived
+// units (each source plus its extracted lambdas — the `ln:<unit>.<entity>` url
+// targets) plus a synthesized `<unit>.__pub` wrapper per pub-exporting file.
+// Imports are pre-elaborated and keep their own `ln:` dir, so they are
+// excluded (var.lnasts[n_imports..] is this invocation's source set).
+void publish_source_ln(Options& opts, Result& res, Eprp_var& var, size_t n_imports, const std::string& dir) {
+  std::vector<std::shared_ptr<Lnast>> source_units(var.lnasts.begin() + static_cast<long>(n_imports), var.lnasts.end());
+  auto                                publish = collect_source_derived(var.lnasts, filter_top(source_units, opts.top));
+  // Publication happens at completion (never a partial pub list): the upass
+  // above either finished every unit or threw.
+  std::vector<std::shared_ptr<Lnast>> wrappers;
+  for (const auto& ln : publish) {
+    if (ln->get_lambda_kind().empty() && !ln->get_top_module_name().ends_with(".__pub")) {
+      if (auto w = synthesize_pub_wrapper(ln)) {
+        wrappers.push_back(std::move(w));
+      }
+    }
+  }
+  publish.insert(publish.end(), wrappers.begin(), wrappers.end());
+  save_ln_dir(opts, res, publish, dir);
+}
 
-  if (!opts.files.empty()) {
-    throw Lhd_error{"usage",
-                    std::format("synth does not take source files ('{}')", opts.files.front()),
-                    "synth consumes IR: ln:DIR (forest) or lg:DIR (graph library)"};
-  }
-  auto ir = gather_ir_inputs(opts, "synth");
-
-  if (ir.ln_dirs.empty() && ir.lg_dirs.empty()) {
-    throw Lhd_error{"usage", "synth requires ln:DIR and/or lg:DIR inputs", ""};
-  }
-  if (!ir.ln_dirs.empty() && !ir.lg_dirs.empty()) {
-    throw Lhd_error{"unsupported", "mixing ln: and lg: inputs in one synth is not supported yet", ""};
-  }
+// IR-only compile: ln:DIR forests and/or lg:DIR libraries, no sources. ln:
+// dirs are re-lowered (lnastfmt + upass + tolg); a single lg: dir is loaded.
+// Then the shared graph pipeline (recipe + emits) runs. (The ln: + lg: linker
+// has its own path — see compile_link_ir.)
+void compile_ir(Options& opts, Result& res, const Ir_inputs& ir) {
   if (ir.lg_dirs.size() > 1) {
     throw Lhd_error{"unsupported",
                     "multiple lg: inputs are not supported yet (gids are library-scoped)",
@@ -2004,10 +1853,12 @@ void synth_command(Options& opts, Result& res) {
   }
 
   const auto* lg_out = find_slot(opts.emit_dirs, "lg");
+  const auto* ln_out = find_slot(opts.emit_dirs, "ln");
   Eprp_var    var;
   std::string lib_path;
 
   if (!ir.ln_dirs.empty()) {
+    setup_diag(opts, "compile.ln");
     for (const auto& d : ir.ln_dirs) {
       res.inputs.push_back(d);
       for (auto& ln : load_ln_dir(d)) {
@@ -2016,7 +1867,11 @@ void synth_command(Options& opts, Result& res) {
     }
     lib_path = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
     lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts));
+    if (ln_out != nullptr) {  // re-publish the post-upass forest (the loaded units are the design)
+      emit_ln_outputs(var.lnasts, opts, res);
+    }
   } else {
+    setup_diag(opts, "compile.lg");
     const auto& lg_in = ir.lg_dirs.front();
     if (!fs::is_directory(lg_in)) {
       throw Lhd_error{"missing_file", std::format("lg: input not found: {}", lg_in), "an lg: input is a GraphLibrary directory"};
@@ -2049,23 +1904,56 @@ void synth_command(Options& opts, Result& res) {
   graph_pipeline_and_emits(opts, res, var, lib_path);
 }
 
-// ---- compile (fused elaborate + synth) --------------------------------------
+// Linker: merge lg: libraries + lower the ln: source units that reference them
+// (`import("lg:foo")` -> a black-box Sub) into one new lg: library, then run
+// the shared graph pipeline (recipe + emits).
+void compile_link_ir(Options& opts, Result& res, const Ir_inputs& ir) {
+  setup_diag(opts, "compile.link");
+  const auto* lg_out = find_slot(opts.emit_dirs, "lg");
+  if (lg_out == nullptr) {
+    throw Lhd_error{"usage", "linking ln: + lg: inputs needs --emit-dir lg:DIR/", ""};
+  }
+  const std::string lib_path = lg_out->path;
+  // Absorb each lg: library into the output library. Name-hash gids make a
+  // shared graph name keep the same gid across libraries, so load_merge is
+  // conflict-free for matching names (and dedups them).
+  auto&             lib      = livehd::Hhds_graph_library::instance(lib_path);
+  for (const auto& d : ir.lg_dirs) {
+    res.inputs.push_back(d);
+    lib.load_merge(d);
+  }
+  // Lower the ln: source units into the SAME library; their `import("lg:…")`
+  // calls resolve to the absorbed graphs by name at tolg.
+  Eprp_var var;
+  for (const auto& d : ir.ln_dirs) {
+    res.inputs.push_back(d);
+    for (auto& ln : load_ln_dir(d)) {
+      var.add(ln);
+    }
+  }
+  lower_lnasts(opts, res, var, lib_path, /*need_graphs=*/true);
+  graph_pipeline_and_emits(opts, res, var, lib_path);
+}
 
-void compile_command(Options& opts, Result& res) {
-  auto     ir = gather_ir_inputs(opts, "compile");
+// ---- compile (the single source->IR->netlist action; front-end + elaborate +
+// synth fused into one) ------------------------------------------------------
+
+// Source-driven compile (pyrope or verilog): front-end parse -> pass.upass ->
+// (recipe + emits). The pyrope path also publishes a first-elaboration `ln:`
+// dir (pub wrappers) when one is requested; the slang path emits the plain
+// post-upass forest.
+void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
   Eprp_var var;
   if (opts.language == "pyrope") {
     setup_diag(opts, "compile.pyrope");
-    if (opts.files.empty()) {
-      throw Lhd_error{"usage", "compile pyrope requires at least one .prp file", ""};
-    }
-    pyrope_parse(opts, res, var, ir.ln_dirs);
-    const auto* lg_out   = find_slot(opts.emit_dirs, "lg");
-    std::string lib_path = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
+    auto        n_imports = pyrope_parse(opts, res, var, ir.ln_dirs);
+    const auto* lg_out    = find_slot(opts.emit_dirs, "lg");
+    const auto* ln_out    = find_slot(opts.emit_dirs, "ln");
+    std::string lib_path  = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
     // 2f-lgimport — absorb any lg: input libraries into the working library
     // BEFORE lowering, so a source unit's `import("lg:name")` resolves to the
-    // pre-compiled graph by name at tolg (same linker mechanism the ln:+lg:
-    // elaborate path uses). Name-hash gids make matching names dedup cleanly.
+    // pre-compiled graph by name at tolg (the same linker mechanism the
+    // ln:+lg: path uses). Name-hash gids make matching names dedup cleanly.
     if (!ir.lg_dirs.empty()) {
       auto& lib = livehd::Hhds_graph_library::instance(lib_path);
       for (const auto& d : ir.lg_dirs) {
@@ -2074,27 +1962,24 @@ void compile_command(Options& opts, Result& res) {
       }
     }
     lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts) || !ir.lg_dirs.empty());
+    if (ln_out != nullptr) {
+      publish_source_ln(opts, res, var, n_imports, ln_out->path);
+    }
     graph_pipeline_and_emits(opts, res, var, lib_path);
   } else {
     setup_diag(opts, "compile.verilog");
-    // `--reader <slang|yosys-slang|yosys-verilog> -- -F filelist.f` supplies the
-    // sources through the raw slang args, so the positional .v file may be
-    // omitted in that case. For the slang front-end the raw args ride to its own
-    // driver; for the yosys readers they ride to `read_slang`/`read_verilog`.
-    const bool raw_arg_sources = !opts.raw_args.empty();
-    if (opts.files.empty() && !raw_arg_sources) {
-      throw Lhd_error{"usage",
-                      "compile verilog requires at least one .v file",
-                      "or pass a slang file list: --reader slang|yosys-slang -- -F filelist.f"};
-    }
     if (!ir.ln_dirs.empty() || !ir.lg_dirs.empty()) {
-      throw Lhd_error{"usage", "compile verilog takes no ln:/lg: inputs", ""};
+      throw Lhd_error{"usage", "verilog sources take no ln:/lg: inputs", ""};
     }
     if (opts.reader == "slang") {  // direct SV -> LNAST: the pyrope flow from here
       slang_parse(opts, res, var);
       const auto* lg_out   = find_slot(opts.emit_dirs, "lg");
+      const auto* ln_out   = find_slot(opts.emit_dirs, "ln");
       std::string lib_path = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
       lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts));
+      if (ln_out != nullptr) {  // the slang units are the design (no imports) -> plain forest
+        save_ln_dir(opts, res, filter_top(var.lnasts, opts.top), ln_out->path);
+      }
       graph_pipeline_and_emits(opts, res, var, lib_path);
     } else {
       auto lib_path = verilog_frontend(opts, res, var);
@@ -2103,6 +1988,32 @@ void compile_command(Options& opts, Result& res) {
   }
   harvest_source_files(res, var.lnasts);
   write_depfile(opts, res);
+}
+
+void compile_command(Options& opts, Result& res) {
+  auto ir = gather_ir_inputs(opts, "compile");
+
+  // `--reader <slang|yosys-slang|yosys-verilog> -- -F filelist.f` supplies the
+  // verilog sources through the raw slang args, so a source compile is valid
+  // with no positional file.
+  const bool has_sources = !opts.files.empty() || (opts.language == "verilog" && !opts.raw_args.empty());
+
+  if (has_sources) {
+    compile_sources(opts, res, ir);
+    return;
+  }
+
+  // No sources: IR-only inputs (aggregate / link / optimize).
+  if (ir.ln_dirs.empty() && ir.lg_dirs.empty()) {
+    throw Lhd_error{"usage",
+                    "compile requires source files (.prp/.v/.sv) or ln:/lg: inputs",
+                    "e.g. `lhd compile foo.prp`, `lhd compile lg:dir --emit verilog:net.v`"};
+  }
+  if (!ir.ln_dirs.empty() && !ir.lg_dirs.empty()) {
+    compile_link_ir(opts, res, ir);  // ln: + lg: linker
+    return;
+  }
+  compile_ir(opts, res, ir);  // ln:-only or lg:-only
 }
 
 // ---- check ------------------------------------------------------------------
@@ -2681,14 +2592,7 @@ void run_engine_command(Options& opts, Result& res) {
   // Source_locator tables saw (the locator's file table IS the
   // actually-read-files list, covering import discovery).
 
-  if (opts.command == "elaborate") {
-    if (!opts.recipe.empty()) {
-      throw Lhd_error{"usage", "--recipe applies to synth/compile; elaborate has a fixed frontend", ""};
-    }
-    elaborate_command(opts, res);
-  } else if (opts.command == "synth") {
-    synth_command(opts, res);
-  } else if (opts.command == "compile") {
+  if (opts.command == "compile") {
     compile_command(opts, res);
   } else if (opts.command == "check") {
     check_command(opts, res);

@@ -21,7 +21,7 @@ fail() {
 }
 
 # slang reader: SV -> LNAST -> ln: (Forest dir)
-"$LHD" elaborate "$SV" --reader slang --emit-dir ln:"$W/lns/" --workdir "$W/w1" -q --result-json "$W/r1.json" \
+"$LHD" compile "$SV" --reader slang --emit-dir ln:"$W/lns/" --workdir "$W/w1" -q --result-json "$W/r1.json" \
   || fail "slang reader ln: emit exited non-zero: $(cat "$W/r1.json" 2>/dev/null)"
 [ -f "$W/lns/forest.txt" ] || fail "slang reader produced no forest.txt"
 grep -q '"inou.slang' "$W/r1.json" || fail "expected an inou.slang step: $(cat "$W/r1.json")"
@@ -44,7 +44,7 @@ ls "$W/prps/"*.prp >/dev/null 2>&1 || fail "slang reader produced no .prp re-emi
 
 # the old two-value spelling is rejected with a usage error (argv-stage
 # errors write the result JSON to stdout, --result-json is not parsed yet)
-out=$("$LHD" elaborate "$SV" --reader yosys --emit-dir lg:"$W/lg/" -q 2>/dev/null)
+out=$("$LHD" compile "$SV" --reader yosys --emit-dir lg:"$W/lg/" -q 2>/dev/null)
 [ $? -ne 0 ] || fail "--reader yosys (old spelling) must be a usage error"
 grep -q '"class":"usage"' <<<"$out" || fail "expected error.class=usage: $out"
 

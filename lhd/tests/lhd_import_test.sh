@@ -2,7 +2,7 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # Task 1m — `pub` exports + `import()` (the LiveHD docs):
-#  1. two-invocation flow: elaborate the exporter into an ln: dir (manifest
+#  1. two-invocation flow: compile the exporter into an ln: dir (manifest
 #     pub index + `<unit>.__pub` wrapper), then compile an importer against it
 #     (pub-tuple values/bundles, lambda field calls inside a comb, `ln:` url
 #     import, `equals` tree-url identity — all comptime-verified);
@@ -43,9 +43,9 @@ cassert(b.add1 equals bar2)
 cassert(bar2(a=3) == 4)
 EOF
 
-# ── 1. two-invocation: elaborate exporter, import from the ln: dir ────────────
-"$LHD" elaborate "$W/explib.prp" --emit-dir ln:"$W/explib_ln/" --workdir "$W/w1" -q --result-json "$W/r1.json" \
-  || fail "exporter elaborate failed: $(cat "$W/r1.json" 2>/dev/null)"
+# ── 1. two-invocation: compile exporter, import from the ln: dir ────────────
+"$LHD" compile "$W/explib.prp" --emit-dir ln:"$W/explib_ln/" --workdir "$W/w1" -q --result-json "$W/r1.json" \
+  || fail "exporter compile failed: $(cat "$W/r1.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r1.json" || fail "exporter result not pass: $(cat "$W/r1.json")"
 
 MAN="$W/explib_ln/manifest.json"
@@ -109,7 +109,7 @@ grep -q 'blocked on unresolved import' "$W/r6.json" || fail "expected no-progres
 
 # Non-foldable pub value: rejected when the EXPORTING file elaborates.
 printf 'pub const bad = 0sb?\n' > "$W/nf.prp"
-"$LHD" elaborate "$W/nf.prp" --emit-dir ln:"$W/nf_ln/" --workdir "$W/w7" -q --result-json "$W/r7.json" 2>/dev/null
+"$LHD" compile "$W/nf.prp" --emit-dir ln:"$W/nf_ln/" --workdir "$W/w7" -q --result-json "$W/r7.json" 2>/dev/null
 [ $? -ne 0 ] || fail "non-foldable pub value must exit non-zero"
 grep -q 'not comptime-foldable' "$W/r7.json" || fail "expected pub-not-comptime error: $(cat "$W/r7.json")"
 
@@ -118,8 +118,8 @@ grep -q 'not comptime-foldable' "$W/r7.json" || fail "expected pub-not-comptime 
 mkdir -p "$W/dupA" "$W/dupB"
 printf 'pub const v = 1\n' > "$W/dupA/dup.prp"
 printf 'pub const v = 2\n' > "$W/dupB/dup.prp"
-"$LHD" elaborate "$W/dupA/dup.prp" --emit-dir ln:"$W/dupA_ln/" --workdir "$W/w8a" -q 2>/dev/null
-"$LHD" elaborate "$W/dupB/dup.prp" --emit-dir ln:"$W/dupB_ln/" --workdir "$W/w8b" -q 2>/dev/null
+"$LHD" compile "$W/dupA/dup.prp" --emit-dir ln:"$W/dupA_ln/" --workdir "$W/w8a" -q 2>/dev/null
+"$LHD" compile "$W/dupB/dup.prp" --emit-dir ln:"$W/dupB_ln/" --workdir "$W/w8b" -q 2>/dev/null
 printf 'const b = import("dup")\ncassert(b.v == 1)\n' > "$W/imp_dup.prp"
 "$LHD" compile "$W/imp_dup.prp" ln:"$W/dupA_ln" ln:"$W/dupB_ln" --set upass.verifier=true \
   --workdir "$W/w8" -q --result-json "$W/r8.json" 2>/dev/null
@@ -189,8 +189,8 @@ EOF
   || fail "2j capture (same-invocation) failed: $(cat "$W/r10.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r10.json" || fail "2j capture same-invocation not pass: $(cat "$W/r10.json")"
 # two-invocation: capture an imported tuple from a pre-elaborated ln: dir
-"$LHD" elaborate "$W/caplib.prp" --emit-dir ln:"$W/caplib_ln/" --workdir "$W/w11" -q \
-  || fail "2j capture exporter elaborate failed"
+"$LHD" compile "$W/caplib.prp" --emit-dir ln:"$W/caplib_ln/" --workdir "$W/w11" -q \
+  || fail "2j capture exporter compile failed"
 "$LHD" compile "$W/capuse.prp" ln:"$W/caplib_ln" \
   --set upass.verifier=true --set upass.verifier_pass=3 --set upass.verifier_fail=0 \
   --workdir "$W/w12" -q --result-json "$W/r12.json" \

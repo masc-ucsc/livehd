@@ -4,8 +4,8 @@
 # --config lhd.toml: pass-flag defaults as a declared input file.
 #  - [pass] table entries reach the pass (upass log shows the resolved order)
 #  - an explicit CLI --set overrides the file entry
-#  - the top-level `recipe` key is picked up by recipe-consuming commands
-#    (and silently ignored by elaborate, which has no recipe slot)
+#  - the top-level `recipe` key drives compile's graph passes (a no-op when no
+#    graphs are produced, e.g. a bare --emit-dir ln: lowering)
 #  - junk (unknown top-level key / typo'd pass table) errors, never no-ops
 
 set -u
@@ -35,13 +35,14 @@ grep -q "resolved order: noop" "$W/w1/logs/"*upass*.log || fail "config [upass] 
 # override resolves to the full chain ending in constprop — not the file's noop.
 grep -q "resolved order: attributes typecheck constprop" "$W/w2/logs/"*upass*.log || fail "--set must override the config file entry"
 
-# recipe = "O2" from the file drives the graph passes; elaborate ignores it.
+# recipe = "O2" from the file drives the graph passes when graphs are produced.
 printf 'recipe = "O2"\n[upass]\nverifier = false\n' > "$W/sane.toml"
 "$LHD" compile "$PRP" --config "$W/sane.toml" --emit verilog:"$W/v3.v" --workdir "$W/w3" -q --result-json "$W/r3.json" \
   || fail "compile with a sane config exited non-zero: $(cat "$W/r3.json" 2>/dev/null)"
 grep -q 'pass.bitwidth' "$W/r3.json" || fail "config recipe=O2 did not run pass.bitwidth: $(cat "$W/r3.json")"
-"$LHD" elaborate "$PRP" --config "$W/sane.toml" --emit-dir ln:"$W/lns/" --workdir "$W/w4" -q --result-json "$W/r4.json" \
-  || fail "elaborate must ignore the config recipe default: $(cat "$W/r4.json" 2>/dev/null)"
+# A bare ln: emit produces no graphs, so the recipe is a no-op (must still pass).
+"$LHD" compile "$PRP" --config "$W/sane.toml" --emit-dir ln:"$W/lns/" --workdir "$W/w4" -q --result-json "$W/r4.json" \
+  || fail "compile --emit-dir ln: with a recipe config exited non-zero: $(cat "$W/r4.json" 2>/dev/null)"
 
 # Junk must error (config class), never silently no-op. Config-load errors
 # fire in argv parsing, before --result-json exists -> JSON lands on stdout.

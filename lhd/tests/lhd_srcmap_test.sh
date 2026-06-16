@@ -51,19 +51,19 @@ SEGS=$(sed 's/.*"mappings":"\([^"]*\)".*/\1/' "$M" | tr ';' '\n' | grep -c .)
 [ "$SEGS" -ge 12 ] || fail "expected >=12 mapped generated lines, got $SEGS"
 
 # --- 2. lg: round trip: filehash persisted, content recovered from disk -----
-"$LHD" elaborate srcmap_in.prp --emit-dir lg:lgdb --workdir wd2 -q --result-json r2.json \
-  || fail "elaborate to lg:: $(cat r2.json 2>/dev/null)"
+"$LHD" compile srcmap_in.prp --emit-dir lg:lgdb --workdir wd2 -q --result-json r2.json \
+  || fail "compile to lg:: $(cat r2.json 2>/dev/null)"
 grep -q '^filehash ' lgdb/srcmap.txt || fail "lgdb/srcmap.txt lacks the filehash record"
-"$LHD" synth lg:lgdb --emit-dir verilog:v2 --set cgen.srcmap=1 --workdir wd3 -q --result-json r3.json \
-  || fail "synth from lg:: $(cat r3.json 2>/dev/null)"
+"$LHD" compile lg:lgdb --emit-dir verilog:v2 --set cgen.srcmap=1 --workdir wd3 -q --result-json r3.json \
+  || fail "compile from lg:: $(cat r3.json 2>/dev/null)"
 M2=v2/srcmap_in.fun1.v.map
 [ -f "$M2" ] || fail "missing $M2"
 grep -qF 'o = a + b' "$M2" || fail "post-load map lacks sourcesContent (disk recovery failed) in $M2"
 
 # --- 3. drifted source: stale content must be dropped, not embedded ---------
 echo '// drifted after the lg: save' >> srcmap_in.prp
-"$LHD" synth lg:lgdb --emit-dir verilog:v3 --set cgen.srcmap=1 --workdir wd4 -q --result-json r4.json \
-  || fail "synth from lg: (drifted source): $(cat r4.json 2>/dev/null)"
+"$LHD" compile lg:lgdb --emit-dir verilog:v3 --set cgen.srcmap=1 --workdir wd4 -q --result-json r4.json \
+  || fail "compile from lg: (drifted source): $(cat r4.json 2>/dev/null)"
 M3=v3/srcmap_in.fun1.v.map
 [ -f "$M3" ] || fail "missing $M3"
 if grep -q '"sourcesContent"' "$M3"; then

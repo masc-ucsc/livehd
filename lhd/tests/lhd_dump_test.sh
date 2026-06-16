@@ -17,10 +17,10 @@ fail() {
   exit 1
 }
 
-# 1. elaborate --dump parse,lnast: both stages on stderr; --dump lnast forces
-#    pass.upass even though elaborate declared no lg: emit.
-"$LHD" elaborate "$PRP" --dump parse,lnast --workdir "$W/w1" -q --result-json "$W/r1.json" 2>"$W/e1" \
-  || fail "elaborate --dump parse,lnast exited nonzero: $(cat "$W/r1.json" 2>/dev/null)"
+# 1. compile --dump parse,lnast: both stages on stderr; --dump lnast forces
+#    pass.upass even with no lg: emit declared.
+"$LHD" compile "$PRP" --dump parse,lnast --workdir "$W/w1" -q --result-json "$W/r1.json" 2>"$W/e1" \
+  || fail "compile --dump parse,lnast exited nonzero: $(cat "$W/r1.json" 2>/dev/null)"
 grep -q '//---- lnast trivial_if (post-parse)' "$W/e1" || fail "missing post-parse dump: $(head -3 "$W/e1")"
 grep -q '(post-upass)' "$W/e1" || fail "missing post-upass dump"
 grep -q 'pass.upass' "$W/r1.json" || fail "--dump lnast did not force pass.upass: $(cat "$W/r1.json")"
@@ -33,7 +33,7 @@ grep -q '^module trivial_if.fun3' "$W/e2" || fail "missing module line in lg dum
 grep -q 'input  \$a' "$W/e2" || fail "missing IO decl in lg dump"
 
 # 3. Clean stdout: dumps never ride the protocol stream.
-out=$("$LHD" elaborate "$PRP" --dump parse --workdir "$W/w3" -q 2>/dev/null)
+out=$("$LHD" compile "$PRP" --dump parse --workdir "$W/w3" -q 2>/dev/null)
 case "$out" in
   '{"schema_version"'*) ;;
   *) fail "stdout is not the bare result envelope: $out" ;;
@@ -41,11 +41,11 @@ esac
 echo "$out" | grep -q 'post-parse' && fail "dump leaked onto stdout"
 
 # 4. Stage availability is validated, not silently no-op'd.
-"$LHD" synth lg:/nonexistent --dump lnast -q --result-json "$W/r4.json" 2>/dev/null
-grep -q '"class":"usage"' "$W/r4.json" || fail "synth lg: --dump lnast must be a usage error: $(cat "$W/r4.json")"
+"$LHD" compile lg:/nonexistent --dump lnast -q --result-json "$W/r4.json" 2>/dev/null
+grep -q '"class":"usage"' "$W/r4.json" || fail "compile lg: --dump lnast must be a usage error: $(cat "$W/r4.json")"
 # (a malformed --dump fails in parse_args, before --result-json applies, so
 # the envelope rides stdout)
-"$LHD" elaborate x.prp --dump bogus -q 2>/dev/null >"$W/r5.json"
+"$LHD" compile x.prp --dump bogus -q 2>/dev/null >"$W/r5.json"
 grep -q '"class":"usage"' "$W/r5.json" || fail "--dump bogus must be a usage error: $(cat "$W/r5.json")"
 
 echo "PASS: --dump parse|lnast|lg"

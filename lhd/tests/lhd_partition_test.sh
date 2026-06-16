@@ -37,7 +37,7 @@ for ALG in acyclic synth; do
   # 3. partition into a fresh library
   run pass partition --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/lg2" --workdir "$D/w3"
   # 4. emit verilog from the partitioned library (verbatim, no re-opt)
-  run synth lg:"$D/lg2" --top "$TOP" --recipe O0 --emit verilog:"$D/part.v" --workdir "$D/w4"
+  run compile lg:"$D/lg2" --top "$TOP" --recipe O0 --emit verilog:"$D/part.v" --workdir "$D/w4"
   # the new top must be a real hierarchy (instantiates the per-region modules)
   grep -q "part_flat__c" "$D/part.v" || fail "$ALG: partitioned verilog has no per-color submodules"
   # 5. LEC: the partitioned design must equal the original

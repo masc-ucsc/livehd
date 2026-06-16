@@ -10,7 +10,7 @@
 #             the source itself. The strongest tier.
 #   verilog - compile to verilog must succeed (a known LEC gap is tracked in
 #             slang_ladder.bzl next to the entry).
-#   lnast   - compile to ln:/lnast-dump + `lhd synth ln:` reload round-trip
+#   lnast   - compile to ln:/lnast-dump + `lhd compile ln:` reload round-trip
 #             (the serialization tier; the construct does not reach tolg yet).
 #   error   - the compile MUST fail cleanly: non-zero exit and at least one
 #             structured diagnostic (no crash/abort).
@@ -49,7 +49,7 @@ run_lnast_tier() { # <file> <base> <scratch>
     echo "FAIL(${base}): LNAST dump empty or missing"
     return 1
   fi
-  ${LHD} synth ln:"$wd"/ln/ --workdir "$wd"/wreload -q >"$wd"/reload.log 2>&1 || {
+  ${LHD} compile ln:"$wd"/ln/ --workdir "$wd"/wreload -q >"$wd"/reload.log 2>&1 || {
     echo "FAIL(${base}): ln: reload/upass failed"
     cat "$wd"/reload.log
     return 1

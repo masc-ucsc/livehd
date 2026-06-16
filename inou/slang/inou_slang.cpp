@@ -200,7 +200,7 @@ void Inou_slang::work(Eprp_var& var) {
     // One slang Driver/Compilation over every source file. A multi-file design
     // (package + submodules + top) must share a single compilation so slang can
     // resolve cross-file packages and instantiations; the build system still
-    // gets parallelism by running independent `lhd elaborate --reader slang`
+    // gets parallelism by running independent `lhd compile --reader slang`
     // invocations (one design each) concurrently.
     compile_unit(file_list);
   }

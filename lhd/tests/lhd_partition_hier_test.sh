@@ -48,13 +48,13 @@ for entry in "${DESIGNS[@]}"; do
     # 1. compile the hierarchical design to an lg library (all defs)
     run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
     # 2. reference Verilog (pre-color; coloring only adds attrs, but keep it clean)
-    run synth lg:"$D/lg" --top "$TOP" --recipe O0 --emit verilog:"$D/ref.v" --workdir "$D/w2"
+    run compile lg:"$D/lg" --top "$TOP" --recipe O0 --emit verilog:"$D/ref.v" --workdir "$D/w2"
     # 3. color every def in the hierarchy
     run pass color "$ALG" --top "$TOP" lg:"$D/lg" --workdir "$D/w3"
     # 4. partition every def + re-link Sub instances into a fresh library
     run pass partition --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/lg2" --workdir "$D/w4"
     # 5. emit Verilog from the partitioned library (verbatim, no re-opt)
-    run synth lg:"$D/lg2" --top "$TOP" --recipe O0 --emit verilog:"$D/part.v" --workdir "$D/w5"
+    run compile lg:"$D/lg2" --top "$TOP" --recipe O0 --emit verilog:"$D/part.v" --workdir "$D/w5"
     # hierarchy preserved: per-color submodules exist AND the child def survived
     grep -q "${BASE}.*__c" "$D/part.v" || fail "$FIX/$ALG: no per-color submodules in partitioned Verilog"
     grep -q "${BASE}.${CHILD}" "$D/part.v" || fail "$FIX/$ALG: child def '$CHILD' dropped (hierarchy lost)"

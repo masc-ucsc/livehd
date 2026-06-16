@@ -37,7 +37,7 @@ enum class Diag_fmt { jsonl, pretty };
 Diag_fmt default_diag_fmt();
 
 struct Options {
-  std::string command;   // elaborate|synth|check|compile|list|describe|version|help
+  std::string command;   // compile|check|lec|scan|lsp|ln.cat|ln.diff|pass|list|describe|version|help
   std::string language;  // verilog|pyrope ("" for the IR/meta commands)
 
   std::vector<std::string> files;  // positional: source files / list pattern / describe name
@@ -87,7 +87,7 @@ struct Options {
 // The structured result envelope (future_cli.md "Result schema"). Written as
 // one JSON object to --result-json (else stdout).
 struct Result {
-  std::string command;          // e.g. "elaborate verilog"
+  std::string command;          // e.g. "compile verilog"
   std::string status = "pass";  // pass|fail
   std::string run_id;           // content hash (deterministic, never wall clock)
   int         exit_code = 0;
@@ -148,7 +148,7 @@ struct Set_option {
 // itself (idempotent).
 std::vector<Set_option> list_set_options();
 
-// Engine commands (elaborate/synth/check/compile). Requires the pass registry
+// Engine commands (compile/check/lec/scan/pass/ln.cat/ln.diff/lsp). Requires the pass registry
 // to be initialized. Throws Lhd_error or std::exception on failure.
 void run_engine_command(Options& opts, Result& res);
 

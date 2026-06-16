@@ -13,7 +13,7 @@ logic.
 ## Flow
 
 ```
-lhd elaborate ...                       --emit-dir lg:orig
+lhd compile ...                         --emit-dir lg:orig
 lhd pass color synth --top m lg:orig
 lhd pass abc         --top m lg:orig    --emit-dir lg:netlist   # this pass
 lhd pass partition   --top m lg:orig    --emit-dir lg:restruct  # the LEC twin

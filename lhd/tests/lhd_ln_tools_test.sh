@@ -31,8 +31,8 @@ grep -q 'get_mask' "$W/cat.out" || fail "ln.cat dump has no get_mask node (post-
 grep -q 'schema_version' "$W/cat.out" && fail "ln.cat stdout must not carry the result envelope"
 
 # 2. ln.cat of an ln: dir prints the stored (post-parse) units.
-"$LHD" elaborate "$W/old.prp" --emit-dir ln:"$W/lns/" --workdir "$W/w2" -q --result-json "$W/r.json" 2>/dev/null \
-  || fail "elaborate to ln: failed: $(cat "$W/r.json")"
+"$LHD" compile "$W/old.prp" --emit-dir ln:"$W/lns/" --workdir "$W/w2" -q --result-json "$W/r.json" 2>/dev/null \
+  || fail "compile to ln: failed: $(cat "$W/r.json")"
 "$LHD" ln.cat ln:"$W/lns/" -q >"$W/cat2.out" 2>/dev/null || fail "ln.cat ln: exited nonzero"
 head -1 "$W/cat2.out" | grep -q '^old$' || fail "ln.cat ln: wrong first line: $(head -1 "$W/cat2.out")"
 

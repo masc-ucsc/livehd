@@ -90,7 +90,7 @@ echo "$out" | grep -q '^cgen\.srcmap=' || fail "flags-before-command list option
 id_a=$(sed 's/.*"run_id":"\([^"]*\)".*/\1/' "$W/r9a.json")
 id_b=$(sed 's/.*"run_id":"\([^"]*\)".*/\1/' "$W/r9b.json")
 [ -n "$id_a" ] && [ "$id_a" = "$id_b" ] || fail "run_id must not depend on flag order: '$id_a' vs '$id_b'"
-"$LHD" elaborate -q pyrope "$PRP" --workdir "$W/w9c" >/dev/null 2>&1 \
+"$LHD" compile -q pyrope "$PRP" --workdir "$W/w9c" >/dev/null 2>&1 \
   || fail "language word after intervening flags failed"
 "$LHD" --help >/dev/null 2>&1 || fail "lhd --help must print the general help"
 "$LHD" --bogus list >/dev/null 2>&1 && fail "an unknown flag before the command must still error"

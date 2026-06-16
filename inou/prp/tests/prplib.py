@@ -74,9 +74,13 @@ class PrpRunner:
     def lhd_parse(self, test, mode):
         # Front-end only: inou.prp + pass.lnastfmt, no upass ('parsing' and
         # 'lnast' are the same surface; the old parse_only flag was removed).
-        cmd = [self.lhd, 'elaborate']
+        # `lhd elaborate` is gone (folded into `lhd compile`), and compile
+        # always runs pass.upass — so gut upass to a no-op (order=noop) to keep
+        # this tier a pure front-end parse check, no emit (so no tolg either).
+        cmd = [self.lhd, 'compile']
         cmd += test.params['files']
         cmd += ['--workdir', self._scratch(test, mode), '-q']
+        cmd += ['--set', 'upass.order=noop', '--set', 'upass.verifier=false']
         return cmd
 
     def lhd_upass(self, test, mode):

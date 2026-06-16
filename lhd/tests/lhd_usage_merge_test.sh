@@ -20,19 +20,19 @@ fail() {
 }
 
 # 1. Verilog leaf -> lg: (through yosys)
-"$LHD" elaborate "$D/inv.v" --top inv --emit-dir lg:"$W/inv_lg/" --workdir "$W/w1" -q --result-json "$W/r1.json" \
-  || fail "inv.v elaborate→lg failed: $(cat "$W/r1.json" 2>/dev/null)"
+"$LHD" compile "$D/inv.v" --top inv --emit-dir lg:"$W/inv_lg/" --workdir "$W/w1" -q --result-json "$W/r1.json" \
+  || fail "inv.v compile→lg failed: $(cat "$W/r1.json" 2>/dev/null)"
 
 # 2. Pyrope leaf -> lg:
-"$LHD" elaborate "$D/adder.prp" --emit-dir lg:"$W/adder_lg/" --workdir "$W/w2" -q --result-json "$W/r2.json" \
-  || fail "adder.prp elaborate→lg failed: $(cat "$W/r2.json" 2>/dev/null)"
+"$LHD" compile "$D/adder.prp" --emit-dir lg:"$W/adder_lg/" --workdir "$W/w2" -q --result-json "$W/r2.json" \
+  || fail "adder.prp compile→lg failed: $(cat "$W/r2.json" 2>/dev/null)"
 
 # 3. Top Pyrope importing BOTH -> ln: (imports stay unresolved until link)
-"$LHD" elaborate "$D/top.prp" --emit-dir ln:"$W/top_ln/" --workdir "$W/w3" -q --result-json "$W/r3.json" \
-  || fail "top.prp elaborate→ln failed: $(cat "$W/r3.json" 2>/dev/null)"
+"$LHD" compile "$D/top.prp" --emit-dir ln:"$W/top_ln/" --workdir "$W/w3" -q --result-json "$W/r3.json" \
+  || fail "top.prp compile→ln failed: $(cat "$W/r3.json" 2>/dev/null)"
 
 # 4. LINK: merge the two lg: libraries + lower the top against them -> new lg:
-"$LHD" elaborate --top top lg:"$W/inv_lg/" lg:"$W/adder_lg/" ln:"$W/top_ln/" \
+"$LHD" compile --top top lg:"$W/inv_lg/" lg:"$W/adder_lg/" ln:"$W/top_ln/" \
   --emit-dir lg:"$W/merged_lg/" --workdir "$W/w4" -q --result-json "$W/r4.json" \
   || fail "link/merge failed: $(cat "$W/r4.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r4.json" || fail "merge not pass: $(cat "$W/r4.json")"
@@ -41,10 +41,10 @@ for n in inv adder.adder top.top; do
   grep -q "graph_io .* ${n}\$" "$W/merged_lg/library.txt" || fail "merged lib misses ${n}: $(cat "$W/merged_lg/library.txt")"
 done
 
-# 5. synth the assembled library -> Verilog
-"$LHD" synth lg:"$W/merged_lg/" --emit verilog:"$W/top.v" --workdir "$W/w5" -q --result-json "$W/r5.json" \
-  || fail "synth of merged library failed: $(cat "$W/r5.json" 2>/dev/null)"
-grep -q '"status":"pass"' "$W/r5.json" || fail "synth not pass"
+# 5. compile the assembled library -> Verilog
+"$LHD" compile lg:"$W/merged_lg/" --emit verilog:"$W/top.v" --workdir "$W/w5" -q --result-json "$W/r5.json" \
+  || fail "compile of merged library failed: $(cat "$W/r5.json" 2>/dev/null)"
+grep -q '"status":"pass"' "$W/r5.json" || fail "compile not pass"
 grep -q 'module inv' "$W/top.v" || fail "verilog misses module inv: $(cat "$W/top.v")"
 grep -q 'module \\adder.adder' "$W/top.v" || fail "verilog misses module adder.adder"
 grep -q 'module \\top.top' "$W/top.v" || fail "verilog misses module top.top"
