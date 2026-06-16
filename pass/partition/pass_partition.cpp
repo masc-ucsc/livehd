@@ -4,8 +4,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <format>
 #include <functional>
+#include <limits>
 #include <print>
 #include <string>
 #include <utility>
@@ -186,6 +188,13 @@ private:
   void diagnose_colors();
   void build_module(const hhds::Node_class& r);
   void build_top();
+  // Regions in a reproducible order: by color, then by the smallest member node
+  // id (invariant to which member the union-find picks as representative).
+  // `region_nodes_` / `module_gio_` are flat_hash_maps whose iteration order is
+  // unspecified; creating the per-region modules, Sub instances and boundary
+  // pins in that order made the serialized top lg (and downstream cgen/LEC)
+  // nondeterministic. Iterate this instead wherever construction order matters.
+  [[nodiscard]] std::vector<hhds::Node_class> ordered_regions();
   void carry_node_attrs(hhds::Graph* body, const hhds::Node_class& orig, const hhds::Node_class& neo);
   void carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo);
 };
@@ -398,6 +407,29 @@ void Partitioner::name_ports() {
   }
 }
 
+std::vector<hhds::Node_class> Partitioner::ordered_regions() {
+  std::vector<hhds::Node_class> regs;
+  regs.reserve(region_nodes_.size());
+  for (auto& [r, nodes] : region_nodes_) {
+    (void)nodes;
+    regs.push_back(r);
+  }
+  auto min_nid = [&](const hhds::Node_class& r) {
+    uint64_t m = std::numeric_limits<uint64_t>::max();
+    for (const auto& n : region_nodes_[r]) {
+      m = std::min<uint64_t>(m, n.get_debug_nid());
+    }
+    return m;
+  };
+  std::sort(regs.begin(), regs.end(), [&](const hhds::Node_class& a, const hhds::Node_class& b) {
+    if (region_color_[a] != region_color_[b]) {
+      return region_color_[a] < region_color_[b];
+    }
+    return min_nid(a) < min_nid(b);
+  });
+  return regs;
+}
+
 void Partitioner::build_module(const hhds::Node_class& r) {
   int         color = region_color_[r];
   std::string name  = std::format("{}__c{}", top_, color);
@@ -537,7 +569,8 @@ void Partitioner::build_top() {
   // One Sub instance per region.
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class>                     sub_of;
   absl::flat_hash_map<hhds::Node_class, absl::flat_hash_map<std::string, hhds::Pin_class>> sub_out_pin;
-  for (auto& [r, gio] : module_gio_) {
+  for (const auto& r : ordered_regions()) {
+    auto gio = module_gio_[r];
     auto sub = gu::create_typed_node(*t, Ntype_op::Sub);
     sub.set_subnode(gio);
     sub.attr(hhds::attrs::name).set(std::format("u_{}", std::string{gio->get_name()}));
@@ -568,8 +601,12 @@ void Partitioner::build_top() {
   };
 
   // Wire each module's input ports.
-  for (auto& [r, ports] : module_inputs_) {
-    for (const auto& p : ports) {
+  for (const auto& r : ordered_regions()) {
+    auto it = module_inputs_.find(r);
+    if (it == module_inputs_.end()) {
+      continue;
+    }
+    for (const auto& p : it->second) {
       auto spin = sub_of[r].create_sink_pin(p.name);
       if (auto b = gu::bits_of(p.driver); b != 0) {
         gu::set_bits(spin, b);
@@ -664,8 +701,7 @@ bool Partitioner::run() {
   if (debug_color_) {
     diagnose_colors();
   }
-  for (auto& [r, nodes] : region_nodes_) {
-    (void)nodes;
+  for (const auto& r : ordered_regions()) {
     build_module(r);
   }
   build_top();
