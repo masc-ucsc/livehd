@@ -5,6 +5,8 @@
 #include <format>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 // ── Constructor ───────────────────────────────────────────────────────────────
 
@@ -655,6 +657,56 @@ static int pow2_width(std::string_view s) {
   return -1;
 }
 
+// If `s` is a single contiguous run of set bits [lo..hi] (lo may be > 0),
+// returns (lo, hi); else nullopt.  Works at ARBITRARY width via the hex string
+// (decimal narrow via int64) — a get_mask packs the selected bits LSB-first, so
+// a non-zero-based contiguous mask is `src#[lo..=hi]` (which compacts), NOT
+// `src & mask` (which leaves them in place).  The from-0 case (lo==0) is the
+// width-truncation mask; lo>0 is a bit-field extract / shifter slice.
+static std::optional<std::pair<int, int>> contiguous_run(std::string_view s) {
+  std::vector<bool> bits;
+  if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+    std::string_view h = s.substr(2);
+    for (size_t i = h.size(); i-- > 0;) {  // LSB hex digit first
+      int d = hex_digit(h[i]);
+      if (d < 0) {
+        return std::nullopt;
+      }
+      for (int b = 0; b < 4; ++b) {
+        bits.push_back((d >> b) & 1);
+      }
+    }
+  } else {
+    auto v = parse_int_const(s);
+    if (!v || *v <= 0) {
+      return std::nullopt;
+    }
+    unsigned long long m = static_cast<unsigned long long>(*v);
+    for (int b = 0; b < 64; ++b) {
+      bits.push_back((m >> b) & 1ULL);
+    }
+  }
+  int lo = -1;
+  int hi = -1;
+  for (int i = 0; i < static_cast<int>(bits.size()); ++i) {
+    if (bits[i]) {
+      if (lo < 0) {
+        lo = i;
+      }
+      hi = i;
+    }
+  }
+  if (lo < 0) {
+    return std::nullopt;  // all-zero mask
+  }
+  for (int i = lo; i <= hi; ++i) {
+    if (!bits[i]) {
+      return std::nullopt;  // non-contiguous
+    }
+  }
+  return std::make_pair(lo, hi);
+}
+
 std::string Lnast_prp_writer::render_type() { return render_type_at(cur); }
 
 std::string Lnast_prp_writer::render_type_at(Lnast_nid type_nid) {
@@ -1062,30 +1114,15 @@ void Lnast_prp_writer::write_get_mask() {
   }
   move_to_parent();
 
-  // A contiguous low mask 2^N-1 (the width-truncation case, incl. wide >64-bit
-  // data buses) is `src#[0..=N-1]`.
-  if (int n = all_ones_width(mask_txt); n > 0) {
-    os << std::format("{}#[0..={}]", src, n - 1);
+  // A contiguous run of set bits [lo..hi] (any width, lo possibly > 0) is
+  // `src#[lo..=hi]` — get_mask packs the selected bits LSB-first, so a
+  // non-zero-based slice must COMPACT (a plain `src & mask` would leave the bits
+  // in place and is wrong for lo>0).
+  if (auto run = contiguous_run(mask_txt)) {
+    os << std::format("{}#[{}..={}]", src, run->first, run->second);
     return;
   }
-  // A contiguous run not based at bit 0 (narrow): `src#[lo..=hi]`.
-  auto maskv = parse_int_const(mask_txt);
-  if (maskv && *maskv > 0) {
-    unsigned long long m = static_cast<unsigned long long>(*maskv);
-    int lo = 0;
-    while (((m >> lo) & 1ULL) == 0ULL) {
-      ++lo;
-    }
-    int hi = 63;
-    while (hi > lo && ((m >> hi) & 1ULL) == 0ULL) {
-      --hi;
-    }
-    unsigned long long contiguous = ((hi - lo) >= 63) ? ~0ULL : (((1ULL << (hi - lo + 1)) - 1ULL) << lo);
-    if (contiguous == m) {
-      os << std::format("{}#[{}..={}]", src, lo, hi);
-      return;
-    }
-  }
-  // Non-contiguous / unparsable mask: fall back to a plain bitwise AND.
+  // Non-contiguous / unparsable mask: fall back to a plain bitwise AND (lossy —
+  // get_mask would compact the scattered bits, but the corpus has no such mask).
   os << std::format("{} & {}", src, mask_txt);
 }
