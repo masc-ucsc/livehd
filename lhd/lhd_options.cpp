@@ -5,6 +5,7 @@
 #include <cctype>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -340,6 +341,41 @@ Options parse_args(int argc, char** argv) {
       opts.libs.emplace_back(parse_typed(a, need_value(a, i, argc, argv), false));
     } else if (a == "--top") {
       opts.top = need_value(a, i, argc, argv);
+    } else if (a == "--target") {  // `lhd tool` (2f-cli): node|pin|edge|all
+      opts.tool_target = need_value(a, i, argc, argv);
+    } else if (a == "--attr") {  // explicit display column CSV
+      opts.tool_attr = need_value(a, i, argc, argv);
+    } else if (a == "--max" || a == "--hops" || a == "-C" || a == "--context") {  // row cap / focus radius / diff context
+      auto   v        = std::string{need_value(a, i, argc, argv)};
+      size_t consumed = 0;
+      long   n        = 0;
+      try {
+        n = std::stol(v, &consumed);
+      } catch (const std::exception&) {
+        consumed = 0;
+      }
+      if (v.empty() || consumed != v.size() || n < 0) {
+        throw Lhd_error{"usage", std::format("{} expects a non-negative integer, got '{}'", a, v), ""};
+      }
+      if (a == "--max") {
+        opts.tool_max = static_cast<int>(n);
+      } else if (a == "--hops") {
+        opts.tool_hops = static_cast<int>(n);
+      } else {
+        opts.tool_context = static_cast<int>(n);
+      }
+    } else if (a == "--hier") {  // optional integer depth; bare = all levels
+      if (i + 1 < argc) {
+        std::string_view nx{argv[i + 1]};
+        if (!nx.empty() && std::all_of(nx.begin(), nx.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
+          opts.tool_hier = static_cast<int>(std::stol(std::string{nx}));
+          ++i;
+        } else {
+          opts.tool_hier = std::numeric_limits<int>::max();
+        }
+      } else {
+        opts.tool_hier = std::numeric_limits<int>::max();
+      }
     } else if (a == "--reader") {
       opts.reader = need_value(a, i, argc, argv);
       if (opts.reader != "yosys-verilog" && opts.reader != "yosys-slang" && opts.reader != "slang") {
@@ -438,9 +474,10 @@ Options parse_args(int argc, char** argv) {
                       opts.command.empty() ? "run `lhd help`" : std::format("run `lhd help {}`", opts.command)};
     } else if (opts.command.empty()) {
       if (a == "compile" || a == "check" || a == "lec" || a == "scan" || a == "lsp" || a == "list" || a == "describe"
-          || a == "version" || a == "help" || a == "ln.cat" || a == "ln.diff" || a == "pass") {
-        // ln.cat/ln.diff keep their positionals raw and ORDERED in opts.files
-        // (an ln:DIR token must keep its place — ln.diff sides are positional).
+          || a == "version" || a == "help" || a == "tool" || a == "pass") {
+        // tool keeps its positionals raw and ORDERED in opts.files: the verb
+        // (cat/grep/diff/tree), the filter terms (name:/color:/from:…), and the
+        // ln:/lg: inputs all keep their place — tool_command classifies them.
         opts.command = a;
         cmd_path     = a;  // command-path root for --set abbreviation (2h-set_path)
       } else {

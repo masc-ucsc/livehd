@@ -3,19 +3,23 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "color_common.hpp"  // livehd::color::is_partitionable / NO_COLOR (2f-cli tool)
 #include "diag.hpp"
 #include "eprp.hpp"
 #include "file_utils.hpp"
@@ -949,12 +953,12 @@ void validate_emits(const Options& opts) {
       reject_emit_kind(opts, k, {"usage", std::format("{} has no outputs beyond the result", opts.command), ""});
     }
   }
-  if (opts.command == "ln.cat" || opts.command == "ln.diff") {
+  if (opts.command == "tool") {
     for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump"}) {
       reject_emit_kind(opts,
                        k,
                        {"usage",
-                        std::format("{} prints to stdout and has no --emit outputs", opts.command),
+                        "tool prints to stdout (redirect with `>`); it has no --emit outputs",
                         "use compile for declared artifacts"});
     }
   }
@@ -967,8 +971,7 @@ void validate_dumps(const Options& opts) {
   if (opts.dumps.empty()) {
     return;
   }
-  if (opts.command == "check" || opts.command == "lec" || opts.command == "scan" || opts.command == "ln.cat"
-      || opts.command == "ln.diff") {
+  if (opts.command == "check" || opts.command == "lec" || opts.command == "scan" || opts.command == "tool") {
     throw Lhd_error{"usage", std::format("{} has no --dump observables", opts.command), "--dump applies to compile"};
   }
   if (opts.language == "verilog" && opts.reader != "slang" && (wants_dump(opts, "parse") || wants_dump(opts, "lnast"))) {
@@ -1245,8 +1248,7 @@ bool emits_need_graphs(const Options& opts) {
 // print/compare it, so the commands count too.
 bool emits_need_lnast(const Options& opts) {
   return find_slot(opts.emit_dirs, "ln") != nullptr || find_slot(opts.emit_dirs, "pyrope") != nullptr
-         || find_slot(opts.emit_dirs, "lnast-dump") != nullptr || wants_dump(opts, "lnast") || opts.command == "ln.cat"
-         || opts.command == "ln.diff";
+         || find_slot(opts.emit_dirs, "lnast-dump") != nullptr || wants_dump(opts, "lnast") || opts.command == "tool";
 }
 
 // ---- scan (pyrope import/dependency discovery) -------------------------------
@@ -1477,7 +1479,7 @@ std::vector<std::string> dump_lines_no_attrs(const std::shared_ptr<Lnast>& ln) {
 }
 
 // Minimal LCS line diff: -/+ lines with 2 lines of kept context per hunk.
-void print_line_diff(std::string& out, const std::vector<std::string>& a, const std::vector<std::string>& b) {
+void print_line_diff(std::string& out, const std::vector<std::string>& a, const std::vector<std::string>& b, size_t ctx = 2) {
   const size_t n = a.size();
   const size_t m = b.size();
   if (n * m > size_t{16} * 1024 * 1024) {
@@ -1506,7 +1508,7 @@ void print_line_diff(std::string& out, const std::vector<std::string>& a, const 
       ++i;
     }
   }
-  constexpr size_t  kCtx = 2;
+  const size_t      kCtx = ctx;
   std::vector<bool> show(ops.size(), false);
   for (size_t k = 0; k < ops.size(); ++k) {
     if (ops[k].first == ' ') {
@@ -1535,9 +1537,10 @@ void print_line_diff(std::string& out, const std::vector<std::string>& a, const 
   }
 }
 
-void ln_cat_command(Options& opts, Result& res) {
-  setup_diag(opts, "ln.cat");
-  auto in = classify_ln_inputs(opts.files, "ln.cat");
+// `lhd tool cat ln:…` — the former ln.cat: bare Lnast::dump concatenation of
+// every selected unit. `tokens` are the input tokens (the verb stripped).
+void tool_cat_ln(Options& opts, Result& res, const std::vector<std::string>& tokens) {
+  auto in = classify_ln_inputs(tokens, "tool cat");
   for (const auto& d : opts.in_dirs) {  // --in-dir ln:DIR spelling
     if (d.kind == "ln") {
       in.ln_dirs.push_back(d.path);
@@ -1553,15 +1556,16 @@ void ln_cat_command(Options& opts, Result& res) {
   std::fflush(stdout);
 }
 
-void ln_diff_command(Options& opts, Result& res) {
-  setup_diag(opts, "ln.diff");
-  if (opts.files.size() != 2) {
+// `lhd tool diff ln:a ln:b` — the former ln.diff: Zhang-Shasha tree-edit
+// distance + line diff over the two LNAST forests. `tokens` are the two inputs.
+void tool_diff_ln(Options& opts, Result& res, const std::vector<std::string>& tokens) {
+  if (tokens.size() != 2) {
     throw Lhd_error{"usage",
-                    "ln.diff takes exactly two inputs (each a .prp/.v/.sv source or an ln:DIR forest)",
-                    "e.g. `lhd ln.diff old.prp new.prp` or `lhd ln.diff ln:before/ x.prp`"};
+                    "tool diff (ln) takes exactly two inputs (each a .prp/.v/.sv source or an ln:DIR forest)",
+                    "e.g. `lhd tool diff old.prp new.prp` or `lhd tool diff ln:before/ x.prp`"};
   }
-  auto a_units = sorted_by_name(filter_top(ln_tool_units(opts, res, classify_ln_inputs({opts.files[0]}, "ln.diff")), opts.top));
-  auto b_units = sorted_by_name(filter_top(ln_tool_units(opts, res, classify_ln_inputs({opts.files[1]}, "ln.diff")), opts.top));
+  auto a_units = sorted_by_name(filter_top(ln_tool_units(opts, res, classify_ln_inputs({tokens[0]}, "tool diff")), opts.top));
+  auto b_units = sorted_by_name(filter_top(ln_tool_units(opts, res, classify_ln_inputs({tokens[1]}, "tool diff")), opts.top));
 
   auto names_of = [](const std::vector<std::shared_ptr<Lnast>>& units) {
     std::vector<std::string> names;
@@ -1574,9 +1578,9 @@ void ln_diff_command(Options& opts, Result& res) {
   if (a_units.size() != b_units.size()) {
     throw Lhd_error{"config",
                     std::format("unit count mismatch: {} has [{}], {} has [{}]",
-                                opts.files[0],
+                                tokens[0],
                                 join_csv(names_of(a_units)),
-                                opts.files[1],
+                                tokens[1],
                                 join_csv(names_of(b_units))),
                     "use --top NAME to select one unit per side"};
   }
@@ -1589,7 +1593,7 @@ void ln_diff_command(Options& opts, Result& res) {
   for (size_t k = 0; k < a_units.size(); ++k) {
     const auto& la  = a_units[k];
     const auto& lb  = b_units[k];
-    out            += std::format("//---- ln.diff {} vs {}\n", la->get_top_module_name(), lb->get_top_module_name());
+    out            += std::format("//---- tool diff {} vs {}\n", la->get_top_module_name(), lb->get_top_module_name());
 
     // The hhds tree diff (Zhang-Shasha edit distance) on the live trees:
     // nodes match on (lnast type, name) — loc/fname attrs are ignored.
@@ -1605,7 +1609,7 @@ void ln_diff_command(Options& opts, Result& res) {
     if (ted.distance == 0.0) {
       out += "identical\n";
     } else {
-      print_line_diff(out, dump_lines_no_attrs(la), dump_lines_no_attrs(lb));
+      print_line_diff(out, dump_lines_no_attrs(la), dump_lines_no_attrs(lb), static_cast<size_t>(opts.tool_context));
     }
     out += std::format("tree-edit-distance: {}\n", ted.distance);
   }
@@ -2505,6 +2509,725 @@ void pass_command(Options& opts, Result& res) {
   }
 }
 
+// ===========================================================================
+// `lhd tool` (2f-cli): unified ln/lg inspector — cat / grep / diff / tree.
+// Replaces the former ln.cat / ln.diff. Verbs are polymorphic over ln:/lg:.
+// ===========================================================================
+
+enum class Tool_target { node, pin, edge, all };
+
+Tool_target parse_tool_target(const std::string& s) {
+  if (s.empty() || s == "all") {
+    return Tool_target::all;
+  }
+  if (s == "node") {
+    return Tool_target::node;
+  }
+  if (s == "pin") {
+    return Tool_target::pin;
+  }
+  if (s == "edge") {
+    return Tool_target::edge;
+  }
+  throw Lhd_error{"usage", std::format("--target expects node|pin|edge|all, got '{}'", s), ""};
+}
+
+// One AND-combined filter term, `field:value` (or a bare token: numeric=>id,
+// text=>name). Numeric fields support comparisons/ranges + `nil`; string
+// fields default to substring, `~`=regex, `=`=exact.
+struct Tool_filter {
+  enum class Kind { sub, re, eq, num_eq, num_gt, num_lt, num_ge, num_le, num_range, is_nil };
+  std::string field;
+  Kind        kind = Kind::sub;
+  std::string sval;
+  std::regex  re;
+  long        n1 = 0;
+  long        n2 = 0;
+};
+
+bool tool_is_numeric_field(std::string_view f) {
+  return f == "id" || f == "nid" || f == "color" || f == "bits" || f == "delay" || f == "hier_color";
+}
+
+long tool_parse_long(std::string_view v, std::string_view ctx) {
+  size_t consumed = 0;
+  long   n        = 0;
+  try {
+    n = std::stol(std::string{v}, &consumed);
+  } catch (const std::exception&) {
+    consumed = 0;
+  }
+  if (v.empty() || consumed != v.size()) {
+    throw Lhd_error{"usage", std::format("filter '{}': expected an integer, got '{}'", ctx, v), ""};
+  }
+  return n;
+}
+
+Tool_filter parse_tool_filter(const std::string& tok) {
+  Tool_filter f;
+  std::string field;
+  std::string val;
+  if (auto pos = tok.find(':'); pos == std::string::npos) {
+    bool numeric = !tok.empty() && std::all_of(tok.begin(), tok.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+    field        = numeric ? "id" : "name";
+    val          = tok;
+  } else {
+    field = tok.substr(0, pos);
+    val   = tok.substr(pos + 1);
+  }
+  f.field = field;
+  if (val == "nil") {
+    f.kind = Tool_filter::Kind::is_nil;
+    return f;
+  }
+  if (tool_is_numeric_field(field)) {
+    if (val.starts_with(">=")) {
+      f.kind = Tool_filter::Kind::num_ge;
+      f.n1   = tool_parse_long(val.substr(2), tok);
+    } else if (val.starts_with("<=")) {
+      f.kind = Tool_filter::Kind::num_le;
+      f.n1   = tool_parse_long(val.substr(2), tok);
+    } else if (val.starts_with(">")) {
+      f.kind = Tool_filter::Kind::num_gt;
+      f.n1   = tool_parse_long(val.substr(1), tok);
+    } else if (val.starts_with("<")) {
+      f.kind = Tool_filter::Kind::num_lt;
+      f.n1   = tool_parse_long(val.substr(1), tok);
+    } else if (auto rp = val.find(".."); rp != std::string::npos) {
+      f.kind = Tool_filter::Kind::num_range;
+      f.n1   = tool_parse_long(val.substr(0, rp), tok);
+      f.n2   = tool_parse_long(val.substr(rp + 2), tok);
+    } else {
+      f.kind = Tool_filter::Kind::num_eq;
+      f.n1   = tool_parse_long(val, tok);
+    }
+  } else if (val.starts_with("~")) {
+    f.kind = Tool_filter::Kind::re;
+    try {
+      f.re = std::regex(val.substr(1));
+    } catch (const std::regex_error& e) {
+      throw Lhd_error{"usage", std::format("filter '{}': bad regex: {}", tok, e.what()), ""};
+    }
+  } else if (val.starts_with("=")) {
+    f.kind = Tool_filter::Kind::eq;
+    f.sval = val.substr(1);
+  } else {
+    f.kind = Tool_filter::Kind::sub;
+    f.sval = val;
+  }
+  return f;
+}
+
+// A flattened inspector record. `cols` carries every filterable+displayable
+// field (value "nil" = unset); `ident` is the always-shown identity.
+struct Tool_record {
+  char                                             type = 'n';  // n|p|e
+  std::string                                      ident;
+  std::vector<std::pair<std::string, std::string>> cols;
+};
+
+const std::string* tool_col(const Tool_record& r, std::string_view key) {
+  for (const auto& [k, v] : r.cols) {
+    if (k == key) {
+      return &v;
+    }
+  }
+  return nullptr;
+}
+
+bool tool_match(const Tool_record& r, const Tool_filter& f) {
+  const std::string* v = tool_col(r, f.field);
+  if (v == nullptr && f.field == "id") {
+    v = tool_col(r, "nid");  // 'id' aliases 'nid'
+  }
+  if (v == nullptr) {
+    return false;  // field not applicable to this entity
+  }
+  if (f.kind == Tool_filter::Kind::is_nil) {
+    return *v == "nil";
+  }
+  if (*v == "nil") {
+    return false;
+  }
+  switch (f.kind) {
+    case Tool_filter::Kind::sub: return v->find(f.sval) != std::string::npos;
+    case Tool_filter::Kind::re: return std::regex_search(*v, f.re);
+    case Tool_filter::Kind::eq: return *v == f.sval;
+    default: break;
+  }
+  long n = tool_parse_long(*v, f.field);
+  switch (f.kind) {
+    case Tool_filter::Kind::num_eq: return n == f.n1;
+    case Tool_filter::Kind::num_gt: return n > f.n1;
+    case Tool_filter::Kind::num_lt: return n < f.n1;
+    case Tool_filter::Kind::num_ge: return n >= f.n1;
+    case Tool_filter::Kind::num_le: return n <= f.n1;
+    case Tool_filter::Kind::num_range: return n >= f.n1 && n <= f.n2;
+    default: return false;
+  }
+}
+
+bool tool_match_all(const Tool_record& r, const std::vector<Tool_filter>& filters) {
+  for (const auto& f : filters) {
+    if (!tool_match(r, f)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::string tool_endpoint_name(const hhds::Pin_class& pin) {
+  namespace gu = livehd::graph_util;
+  if (gu::is_graph_input_pin(pin) || gu::is_graph_output_pin(pin)) {
+    return std::format("${}", pin.get_pin_name());
+  }
+  auto node = pin.get_master_node();
+  auto pn   = gu::pin_name_of(pin);
+  if (pn.empty()) {
+    return std::format("{}.p{}", gu::debug_name(node), pin.get_port_id());
+  }
+  return std::format("{}.{}", gu::debug_name(node), pn);
+}
+
+std::string tool_node_src(hhds::Graph* g, const hhds::Node_class& node) {
+  auto ref = node.attr(hhds::attrs::srcid);
+  if (!ref.has()) {
+    return "nil";
+  }
+  auto sp = g->source_locator().resolve_span(ref.get());
+  if (sp.start_line) {
+    return std::format("{}:{}", sp.file.empty() ? std::string{"?"} : sp.file, *sp.start_line);
+  }
+  return sp.file.empty() ? std::string{"nil"} : sp.file;
+}
+
+std::string tool_color_str(const hhds::Node_class& node) {
+  namespace gu = livehd::graph_util;
+  return gu::has_node_color(node) ? std::to_string(gu::node_color_of(node)) : std::string{"nil"};
+}
+
+std::string tool_pin_label(const hhds::Pin_class& pin) {
+  auto pn = livehd::graph_util::pin_name_of(pin);
+  return pn.empty() ? std::format("p{}", pin.get_port_id()) : std::string{pn};
+}
+
+Tool_record tool_node_record(hhds::Graph* g, const hhds::Node_class& node) {
+  namespace gu = livehd::graph_util;
+  Tool_record r;
+  r.type  = 'n';
+  r.ident = gu::debug_name(node);
+  r.cols.emplace_back("nid", std::to_string(static_cast<uint64_t>(node.get_debug_nid())));
+  r.cols.emplace_back("kind", std::string{Ntype::get_name(gu::type_op_of(node))});
+  auto nm = gu::node_name_of(node);
+  r.cols.emplace_back("name", nm.empty() ? std::string{"nil"} : std::string{nm});
+  r.cols.emplace_back("color", tool_color_str(node));
+  r.cols.emplace_back("src", tool_node_src(g, node));
+  r.cols.emplace_back("partitionable", livehd::color::is_partitionable(node) ? "1" : "0");
+  return r;
+}
+
+// Output (driver) pins of `node`, deduped — the "what is this signal's width"
+// view. An input pin is some other node's output, so it is not lost.
+void tool_pin_records(const hhds::Node_class& node, std::vector<Tool_record>& out) {
+  namespace gu = livehd::graph_util;
+  std::set<std::pair<int, std::string>> seen;
+  for (const auto& e : node.out_edges()) {
+    const auto& pin = e.driver;
+    auto        pn  = gu::pin_name_of(pin);
+    if (!seen.insert({pin.get_port_id(), std::string{pn}}).second) {
+      continue;
+    }
+    Tool_record r;
+    r.type  = 'p';
+    r.ident = tool_endpoint_name(pin);
+    r.cols.emplace_back("nid", std::to_string(static_cast<uint64_t>(node.get_debug_nid())));
+    r.cols.emplace_back("name", pn.empty() ? std::string{"nil"} : std::string{pn});
+    int32_t b = gu::bits_of(pin);
+    r.cols.emplace_back("bits", b != 0 ? std::to_string(b) : std::string{"nil"});
+    r.cols.emplace_back("signed", gu::is_unsign(pin) ? "0" : "1");
+    out.push_back(std::move(r));
+  }
+}
+
+void tool_edge_records(const hhds::Node_class& node, std::vector<Tool_record>& out) {
+  namespace gu = livehd::graph_util;
+  for (const auto& e : node.out_edges()) {
+    std::string from = tool_endpoint_name(e.driver);
+    std::string to   = tool_endpoint_name(e.sink);
+    int32_t     b    = gu::bits_of(e.driver);
+    Tool_record r;
+    r.type  = 'e';
+    r.ident = std::format("{} -> {}  ({}b)", from, to, b);
+    r.cols.emplace_back("from", from);
+    r.cols.emplace_back("to", to);
+    r.cols.emplace_back("bits", b != 0 ? std::to_string(b) : std::string{"nil"});
+    out.push_back(std::move(r));
+  }
+}
+
+void tool_flat_records(hhds::Graph* g, Tool_target tgt, std::vector<Tool_record>& recs) {
+  for (auto node : g->forward_class()) {
+    if (tgt == Tool_target::node || tgt == Tool_target::all) {
+      recs.push_back(tool_node_record(g, node));
+    }
+    if (tgt == Tool_target::pin || tgt == Tool_target::all) {
+      tool_pin_records(node, recs);
+    }
+    if (tgt == Tool_target::edge || tgt == Tool_target::all) {
+      tool_edge_records(node, recs);
+    }
+  }
+}
+
+std::vector<std::string> tool_split_csv(const std::string& s) {
+  std::vector<std::string> out;
+  size_t                   start = 0;
+  while (start <= s.size()) {
+    auto end = s.find(',', start);
+    out.push_back(s.substr(start, end == std::string::npos ? std::string::npos : end - start));
+    if (end == std::string::npos) {
+      break;
+    }
+    start = end + 1;
+  }
+  return out;
+}
+
+std::vector<std::string> tool_display_cols(const Options& opts, Tool_target tgt) {
+  if (!opts.tool_attr.empty()) {
+    return tool_split_csv(opts.tool_attr);
+  }
+  switch (tgt) {
+    case Tool_target::node: return {"color", "src"};
+    case Tool_target::pin: return {"bits", "signed"};
+    case Tool_target::edge: return {"bits"};
+    default: return {"color", "src", "bits", "signed"};  // target=all flat (grep)
+  }
+}
+
+std::string tool_render_pretty(const Tool_record& r, const std::vector<std::string>& cols) {
+  std::string line = r.ident;
+  for (const auto& key : cols) {
+    const std::string* v = tool_col(r, key);
+    if (v == nullptr) {
+      continue;
+    }
+    if (key == "signed") {  // cosmetic: bare `signed` when set, omit otherwise
+      if (*v == "1") {
+        line += "  signed";
+      }
+      continue;
+    }
+    line += std::format("  {}={}", key, *v);
+  }
+  return line;
+}
+
+std::string tool_render_jsonl(const Tool_record& r, std::string_view mod) {
+  std::string out = "{";
+  out += std::format("\"t\":\"{}\"", r.type == 'n' ? "node" : (r.type == 'p' ? "pin" : "edge"));
+  out += std::format(",\"mod\":\"{}\"", json_escape_min(mod));
+  for (const auto& [k, v] : r.cols) {
+    if (v == "nil") {
+      out += std::format(",\"{}\":null", k);
+    } else if (k == "signed" || k == "partitionable") {
+      out += std::format(",\"{}\":{}", k, v == "1" ? "true" : "false");
+    } else if (tool_is_numeric_field(k) || k == "bits") {
+      out += std::format(",\"{}\":{}", k, v);
+    } else {
+      out += std::format(",\"{}\":\"{}\"", k, json_escape_min(v));
+    }
+  }
+  out += "}";
+  return out;
+}
+
+// Load one lg: library and return the graphs selected by --top (all when
+// --top is empty), sorted by name. The graphs outlive `var` (owned by the
+// Hhds_graph_library singleton keyed on `dir`).
+std::vector<std::shared_ptr<hhds::Graph>> tool_select_graphs(const std::string& dir, const Options& opts) {
+  if (!fs::is_directory(dir)) {
+    throw Lhd_error{"missing_file", std::format("lg: input not found: {}", dir), "an lg: input is a GraphLibrary directory"};
+  }
+  Eprp_var var;
+  load_lg_into_var(dir, var);
+  std::vector<std::shared_ptr<hhds::Graph>> sel;
+  for (auto& g : var.graphs) {
+    if (!g) {
+      continue;
+    }
+    if (!opts.top.empty() && g->get_name() != opts.top) {
+      continue;
+    }
+    sel.push_back(g);
+  }
+  std::sort(sel.begin(), sel.end(), [](const auto& a, const auto& b) { return a->get_name() < b->get_name(); });
+  return sel;
+}
+
+// Nested per-node block for `cat --target all` (pretty): node header + its
+// input pins (with driver) + output pins (with sink).
+void tool_cat_all_pretty(hhds::Graph* g, const std::vector<Tool_filter>& filters, std::string& out, size_t& budget,
+                         bool& truncated) {
+  namespace gu = livehd::graph_util;
+  auto take    = [&](const std::string& line) {
+    if (budget == 0) {
+      truncated = true;
+      return false;
+    }
+    out += line;
+    out += '\n';
+    --budget;
+    return true;
+  };
+  for (auto node : g->forward_class()) {
+    auto nr = tool_node_record(g, node);
+    if (!filters.empty() && !tool_match_all(nr, filters)) {
+      continue;
+    }
+    if (!take(std::format("  {}", tool_render_pretty(nr, {"color", "src"})))) {
+      return;
+    }
+    for (const auto& e : node.inp_edges()) {
+      int32_t b = gu::bits_of(e.sink);
+      if (!take(std::format("    .{}  bits={}{}  <- {}",
+                            tool_pin_label(e.sink),
+                            b != 0 ? std::to_string(b) : std::string{"nil"},
+                            gu::is_unsign(e.sink) ? "" : " signed",
+                            tool_endpoint_name(e.driver)))) {
+        return;
+      }
+    }
+    for (const auto& e : node.out_edges()) {
+      int32_t b = gu::bits_of(e.driver);
+      if (!take(std::format("    .{}  bits={}{}  -> {}",
+                            tool_pin_label(e.driver),
+                            b != 0 ? std::to_string(b) : std::string{"nil"},
+                            gu::is_unsign(e.driver) ? "" : " signed",
+                            tool_endpoint_name(e.sink)))) {
+        return;
+      }
+    }
+  }
+}
+
+size_t tool_budget(const Options& opts) {
+  return opts.tool_max <= 0 ? std::numeric_limits<size_t>::max() : static_cast<size_t>(opts.tool_max);
+}
+
+// `tool cat lg:…` — single-library structured dump (module headers preserved).
+void tool_cat_lg(Options& opts, const std::vector<std::string>& lg_dirs, const std::vector<Tool_filter>& filters) {
+  if (lg_dirs.size() > 1) {
+    throw Lhd_error{"usage", "tool cat takes one lg: input (use tool grep for multi-library search)", ""};
+  }
+  Tool_target tgt   = parse_tool_target(opts.tool_target);
+  auto        dcols = tool_display_cols(opts, tgt);
+  bool        jsonl = opts.diag_fmt == Diag_fmt::jsonl;
+  auto        graphs = tool_select_graphs(lg_dirs.front(), opts);
+  if (graphs.empty()) {
+    throw Lhd_error{"config", std::format("lg: input {} holds no matching graphs", lg_dirs.front()), "check --top"};
+  }
+  std::string out;
+  size_t      budget    = tool_budget(opts);
+  bool        truncated = false;
+  for (const auto& gp : graphs) {
+    hhds::Graph* g = gp.get();
+    if (!jsonl) {
+      out += std::format("module {}\n", g->get_name());
+    }
+    if (!jsonl && tgt == Tool_target::all) {
+      tool_cat_all_pretty(g, filters, out, budget, truncated);
+    } else {
+      std::vector<Tool_record> recs;
+      tool_flat_records(g, tgt, recs);
+      for (const auto& r : recs) {
+        if (!filters.empty() && !tool_match_all(r, filters)) {
+          continue;
+        }
+        if (budget == 0) {
+          truncated = true;
+          break;
+        }
+        out += jsonl ? tool_render_jsonl(r, g->get_name()) : std::format("  {}", tool_render_pretty(r, dcols));
+        out += '\n';
+        --budget;
+      }
+    }
+    if (truncated) {
+      break;
+    }
+  }
+  if (truncated) {
+    out += std::format("-- output truncated at --max {} rows; narrow with --top/filters or raise --max (0 = unlimited)\n",
+                       opts.tool_max);
+  }
+  std::fwrite(out.data(), 1, out.size(), stdout);
+  std::fflush(stdout);
+}
+
+// `tool grep lg:… [lg:…]` — flat matches across one or more libraries, each
+// line prefixed `lib/`. A filter is required.
+void tool_grep_lg(Options& opts, const std::vector<std::string>& lg_dirs, const std::vector<Tool_filter>& filters) {
+  if (filters.empty()) {
+    throw Lhd_error{"usage", "tool grep requires at least one filter (e.g. color:nil, name:Mult, bits:>8)", ""};
+  }
+  Tool_target tgt    = parse_tool_target(opts.tool_target);
+  auto        dcols  = tool_display_cols(opts, tgt);
+  bool        jsonl  = opts.diag_fmt == Diag_fmt::jsonl;
+  std::string out;
+  size_t      budget    = tool_budget(opts);
+  bool        truncated = false;
+  for (const auto& dir : lg_dirs) {
+    std::string lib = fs::path(dir).filename().string();
+    if (lib.empty()) {
+      lib = dir;
+    }
+    for (const auto& gp : tool_select_graphs(dir, opts)) {
+      hhds::Graph*             g = gp.get();
+      std::vector<Tool_record> recs;
+      tool_flat_records(g, tgt, recs);
+      for (const auto& r : recs) {
+        if (!tool_match_all(r, filters)) {
+          continue;
+        }
+        if (budget == 0) {
+          truncated = true;
+          break;
+        }
+        if (jsonl) {
+          out += tool_render_jsonl(r, std::format("{}/{}", lib, g->get_name()));
+        } else {
+          out += std::format("{}/{}", lib, g->get_name());
+          out += "  ";
+          out += tool_render_pretty(r, dcols);
+        }
+        out += '\n';
+        --budget;
+      }
+      if (truncated) {
+        break;
+      }
+    }
+    if (truncated) {
+      break;
+    }
+  }
+  if (truncated) {
+    out += std::format("-- output truncated at --max {} rows; tighten filters or raise --max (0 = unlimited)\n", opts.tool_max);
+  }
+  std::fwrite(out.data(), 1, out.size(), stdout);
+  std::fflush(stdout);
+}
+
+// Deterministic per-line listing of one library for `tool diff` (module-prefixed
+// so the unified diff stays aligned across modules).
+std::vector<std::string> tool_diff_lines(const std::string& dir, Options& opts, Tool_target tgt,
+                                         const std::vector<Tool_filter>& filters, const std::vector<std::string>& dcols) {
+  std::vector<std::string> lines;
+  for (const auto& gp : tool_select_graphs(dir, opts)) {
+    hhds::Graph*             g = gp.get();
+    std::vector<Tool_record> recs;
+    tool_flat_records(g, tgt, recs);
+    for (const auto& r : recs) {
+      if (!filters.empty() && !tool_match_all(r, filters)) {
+        continue;
+      }
+      lines.push_back(std::format("{}: {}", g->get_name(), tool_render_pretty(r, dcols)));
+    }
+  }
+  return lines;
+}
+
+void tool_diff_lg(Options& opts, const std::vector<std::string>& lg_dirs, const std::vector<Tool_filter>& filters) {
+  if (lg_dirs.size() != 2) {
+    throw Lhd_error{"usage", "tool diff takes exactly two lg: inputs", "e.g. `lhd tool diff lg:before lg:after --attr color`"};
+  }
+  Tool_target tgt   = parse_tool_target(opts.tool_target);
+  auto        dcols = tool_display_cols(opts, tgt);
+  auto        a     = tool_diff_lines(lg_dirs[0], opts, tgt, filters, dcols);
+  auto        b     = tool_diff_lines(lg_dirs[1], opts, tgt, filters, dcols);
+  std::string out;
+  if (a == b) {
+    out += "identical\n";
+  } else {
+    print_line_diff(out, a, b, static_cast<size_t>(opts.tool_context));
+  }
+  std::fwrite(out.data(), 1, out.size(), stdout);
+  std::fflush(stdout);
+}
+
+size_t tool_node_count(hhds::Graph* g) {
+  size_t n = 0;
+  for ([[maybe_unused]] auto node : g->forward_class()) {
+    ++n;
+  }
+  return n;
+}
+
+void tool_tree_children(hhds::Graph* g, int maxdepth, int depth, std::set<hhds::Gid>& on_path, std::string& out, size_t& budget,
+                        bool& truncated) {
+  namespace gu = livehd::graph_util;
+  if (depth >= maxdepth) {
+    return;
+  }
+  for (auto node : g->fast_class()) {
+    if (node.get_subnode_gid() == hhds::Gid_invalid) {
+      continue;
+    }
+    auto sub = node.get_subnode_graph();
+    if (!sub) {
+      continue;
+    }
+    if (budget == 0) {
+      truncated = true;
+      return;
+    }
+    out += std::format("{}{}  : {}  [{} nodes]\n",
+                       std::string(static_cast<size_t>(depth + 1) * 2, ' '),
+                       gu::default_instance_name(node),
+                       sub->get_name(),
+                       tool_node_count(sub.get()));
+    --budget;
+    hhds::Gid gid = node.get_subnode_gid();
+    if (on_path.insert(gid).second) {  // cycle guard
+      tool_tree_children(sub.get(), maxdepth, depth + 1, on_path, out, budget, truncated);
+      on_path.erase(gid);
+    }
+    if (truncated) {
+      return;
+    }
+  }
+}
+
+void tool_tree_lg(Options& opts, const std::vector<std::string>& lg_dirs) {
+  if (lg_dirs.size() != 1) {
+    throw Lhd_error{"usage", "tool tree takes one lg: input", ""};
+  }
+  int maxdepth = opts.tool_hier < 0 ? std::numeric_limits<int>::max() : opts.tool_hier;  // tree: full by default
+  auto graphs   = tool_select_graphs(lg_dirs.front(), opts);
+  if (graphs.empty()) {
+    throw Lhd_error{"config", std::format("lg: input {} holds no matching graphs", lg_dirs.front()), "check --top"};
+  }
+  std::string out;
+  size_t      budget    = tool_budget(opts);
+  bool        truncated = false;
+  for (const auto& gp : graphs) {
+    hhds::Graph* g = gp.get();
+    out += std::format("{}  [{} nodes]\n", g->get_name(), tool_node_count(g));
+    std::set<hhds::Gid> on_path;
+    tool_tree_children(g, maxdepth, 0, on_path, out, budget, truncated);
+    if (truncated) {
+      break;
+    }
+  }
+  if (truncated) {
+    out += std::format("-- output truncated at --max {} rows; raise --max (0 = unlimited)\n", opts.tool_max);
+  }
+  std::fwrite(out.data(), 1, out.size(), stdout);
+  std::fflush(stdout);
+}
+
+// A positional token's input kind: "lg" / "ln" / "src" (.prp/.v/.sv) / "" (a
+// filter term). lg: prefix strips to a directory; ln:/source keep the raw token
+// for classify_ln_inputs.
+std::string tool_input_kind(const std::string& t) {
+  if (auto pos = t.find(':'); pos != std::string::npos && pos != 0) {
+    auto k = t.substr(0, pos);
+    if (k == "lg" || k == "lgraph" || k == "design") {
+      return "lg";
+    }
+    if (k == "ln" || k == "lnast") {
+      return "ln";
+    }
+  }
+  std::string_view sv{t};
+  if (sv.ends_with(".prp") || sv.ends_with(".v") || sv.ends_with(".sv")) {
+    return "src";
+  }
+  return "";
+}
+
+void tool_command(Options& opts, Result& res) {
+  setup_diag(opts, "tool");
+  if (opts.files.empty()) {
+    throw Lhd_error{"usage", "tool requires a verb: cat | grep | diff | tree", "e.g. `lhd tool cat lg:dir` or `lhd tool grep color:nil lg:dir`"};
+  }
+  const std::string verb = opts.files[0];
+  if (verb != "cat" && verb != "grep" && verb != "diff" && verb != "tree") {
+    throw Lhd_error{"usage", std::format("unknown tool verb '{}'", verb), "use: cat | grep | diff | tree"};
+  }
+
+  std::vector<std::string> lg_dirs;
+  std::vector<std::string> ln_tokens;  // ln:/source tokens, raw for classify_ln_inputs
+  std::vector<Tool_filter> filters;
+  for (size_t k = 1; k < opts.files.size(); ++k) {
+    const std::string& t    = opts.files[k];
+    auto               kind = tool_input_kind(t);
+    if (kind == "lg") {
+      lg_dirs.push_back(t.substr(t.find(':') + 1));
+    } else if (kind == "ln" || kind == "src") {
+      ln_tokens.push_back(t);
+    } else {
+      filters.push_back(parse_tool_filter(t));
+    }
+  }
+  for (const auto& d : opts.in_dirs) {  // --in-dir ln:DIR spelling
+    if (d.kind == "ln") {
+      ln_tokens.push_back("ln:" + d.path);
+    }
+  }
+  for (const auto& d : opts.ins) {  // --in lg:DIR spelling
+    if (d.kind == "lg") {
+      lg_dirs.push_back(d.path);
+    }
+  }
+
+  const bool have_lg = !lg_dirs.empty();
+  const bool have_ln = !ln_tokens.empty();
+  if (have_lg && have_ln) {
+    throw Lhd_error{"usage", "tool takes either lg: or ln:/source inputs, not both", ""};
+  }
+
+  if (verb == "tree") {
+    if (!have_lg) {
+      throw Lhd_error{"usage", "tool tree needs an lg: input", "e.g. `lhd tool tree lg:dir --top m`"};
+    }
+    tool_tree_lg(opts, lg_dirs);
+    return;
+  }
+  if (verb == "grep") {
+    if (!have_lg) {
+      throw Lhd_error{"usage", "tool grep needs lg: input(s)", "ln: grep is not yet supported"};
+    }
+    tool_grep_lg(opts, lg_dirs, filters);
+    return;
+  }
+  if (verb == "cat") {
+    if (have_ln) {
+      if (!filters.empty()) {
+        throw Lhd_error{"usage", "tool cat ln: does not take filters (LNAST cat is whole-unit)", ""};
+      }
+      tool_cat_ln(opts, res, ln_tokens);
+    } else if (have_lg) {
+      tool_cat_lg(opts, lg_dirs, filters);
+    } else {
+      throw Lhd_error{"usage", "tool cat needs an lg:DIR, ln:DIR, or .prp/.v/.sv input", ""};
+    }
+    return;
+  }
+  // verb == "diff"
+  if (have_ln) {
+    if (!filters.empty()) {
+      throw Lhd_error{"usage", "tool diff ln: does not take filters", ""};
+    }
+    tool_diff_ln(opts, res, ln_tokens);
+  } else if (have_lg) {
+    tool_diff_lg(opts, lg_dirs, filters);
+  } else {
+    throw Lhd_error{"usage", "tool diff needs two lg: or two ln:/source inputs", ""};
+  }
+}
+
 }  // namespace
 
 // ---- public entry points ----------------------------------------------------
@@ -2600,10 +3323,8 @@ void run_engine_command(Options& opts, Result& res) {
     lec_command(opts, res);
   } else if (opts.command == "scan") {
     scan_command(opts, res);
-  } else if (opts.command == "ln.cat") {
-    ln_cat_command(opts, res);
-  } else if (opts.command == "ln.diff") {
-    ln_diff_command(opts, res);
+  } else if (opts.command == "tool") {
+    tool_command(opts, res);
   } else if (opts.command == "pass") {
     pass_command(opts, res);
   } else {

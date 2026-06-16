@@ -186,10 +186,10 @@ std::string compute_run_id(const Options& opts) {
 }
 
 void write_result(const Options& opts, const Result& res) {
-  // ln.cat/ln.diff own stdout (their payload IS the protocol, like lsp): on
-  // success the envelope is written only to an explicit --result-json. On
-  // failure it is the error report and prints as usual.
-  if ((opts.command == "ln.cat" || opts.command == "ln.diff") && opts.result_json.empty() && res.status == "pass") {
+  // tool (cat/grep/diff/tree) owns stdout (its payload IS the protocol, like
+  // lsp): on success the envelope is written only to an explicit --result-json.
+  // On failure it is the error report and prints as usual.
+  if (opts.command == "tool" && opts.result_json.empty() && res.status == "pass") {
     return;
   }
 

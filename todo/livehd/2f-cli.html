@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2f-cli — lhd tool: unified ln/lg inspector &amp; attribute debugger</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2f-cli</strong> <code>lhd tool</code> — unified ln/lg inspector &amp; attribute debugger</h1>
+
+<p>A single <code>lhd tool &lt;verb&gt;</code> command family for inspecting LNAST
+(<code>ln:</code>) and LGraph (<code>lg:</code>) artifacts — <strong>cat / grep / diff / tree</strong> —
+with first-class access to per-node/per-pin <strong>attributes</strong> (color, bits,
+signed, src, …). It <strong>replaces</strong> the current <code>lhd ln.cat</code> /
+<code>lhd ln.diff</code> (deleted) and folds the LGraph attribute dump/diff into the
+same surface. Verbs are polymorphic over <code>ln:</code>/<code>lg:</code>; the focus of
+this task is the <strong>lg</strong> side, keeping <strong>ln</strong> consistent.</p>
+
+<h2>Why</h2>
+<p>Attribute annotations (most pressingly <strong>color</strong> from <code>pass.color</code>,
+but equally <code>bits</code>/<code>signed</code>/<code>delay</code>/<code>src</code>) live on
+the LGraph and are today nearly invisible: a developer can run <code>pass.color</code> and
+get an opaque "<code>uncolored-node</code>" fatal from <code>pass.partition</code>
+(<code>pass/partition/pass_partition.cpp:248-254</code>) naming exactly one node, with no
+way to <em>see</em> which nodes lack the attribute or <em>why</em>. The motivating bug:
+the <code>synth</code> algorithm leaves some nodes uncolored and there is no debugging flow.
+This task builds the general observable so we (and a coding agent) can:</p>
+<ul>
+<li><strong>Debug attribute holes</strong> — e.g. "which nodes did <code>synth</code> leave
+  uncolored, and where in the source?" → <code>lhd tool grep --target node color:nil lg:cpu</code>.</li>
+<li><strong>Diff attributes across a change</strong> — see what a flag/algorithm/code edit
+  moved → <code>lhd tool diff lg:before lg:after --target node --attr color</code>.</li>
+</ul>
+<p>Related: the <strong>PRPCOLOR</strong> pre-TODO (hierarchical Pyrope-like coloring) and
+<code>pass/color</code> are the primary consumers of this debugger; the
+<a class="xref" href="3y-agent.html">3y-agent</a> CLI shares the kernel-command and
+JSONL conventions; this is the same "<code>lhd</code> subcommand over the kernel" pattern as
+<a class="xref" href="2n.html">2n</a> (<code>lhd lsp</code>).</p>
+
+<h2>Status</h2>
+<p><span class="status landed">landed</span> — the <code>lhd tool</code> family (cat/grep/diff/tree),
+the <code>field:value</code> filter grammar, <code>--target</code>/<code>--attr</code>/<code>--max</code>/<code>--hier</code>,
+jsonl output, and the <code>ln.cat</code>/<code>ln.diff</code> removal all shipped in the kernel
+(<code>lhd/lhd_kernel.cpp</code> <code>tool_command</code> + helpers, <code>lhd/lhd_options.cpp</code>,
+<code>lhd/lhd_meta.cpp</code>, <code>lhd/lhd_result.cpp</code>). Tests
+<code>lhd/tests/lhd_tool_test.sh</code> (lg path) + <code>lhd_ln_tools_test.sh</code> (ln path,
+converted) green; full <code>//lhd/...</code> suite green. A few follow-ups remain (below) —
+page kept until those land or are dropped.</p>
+
+<h2>Command surface (agreed)</h2>
+<p><strong>Form:</strong> <code>lhd tool &lt;verb&gt; [options] &lt;inputs…&gt;</code> —
+inputs are kind-prefixed <code>ln:DIR</code> / <code>lg:DIR</code>; the prefix selects the
+representation, verbs are polymorphic where it makes sense.</p>
+
+<h3>Verbs</h3>
+<table>
+<tr><th>verb</th><th>inputs</th><th>behavior</th></tr>
+<tr><td><code>cat</code></td><td>1</td><td>structured dump (nesting/ports/hierarchy preserved); default attrs shown; filters optional (narrow scope, keep structure)</td></tr>
+<tr><td><code>grep</code></td><td>≥1</td><td><strong>search</strong> — requires ≥1 filter, may span multiple libs, flat matches prefixed <code>lib/entity</code>, pipe-friendly</td></tr>
+<tr><td><code>diff</code></td><td>2</td><td>unified-diff <code>-</code>/<code>+</code> output, <code>-C n</code> = classic text-line context; deterministic id-ordered listing keeps hunks stable for same-source compares</td></tr>
+<tr><td><code>tree</code></td><td>1</td><td>instance hierarchy rooted at <code>--top</code> (<code>inst : def</code> + node counts); <code>--hier</code> full by default</td></tr>
+</table>
+<p><code>cat</code>/<code>diff</code> work on both <code>ln:</code> and <code>lg:</code> (parity with the
+deleted <code>ln.cat</code>/<code>ln.diff</code>). <code>grep</code>/<code>tree</code> are lg-focused
+for now; ln support is a later nicety.</p>
+
+<h3>Options (shared)</h3>
+<ul>
+<li><code>--target node|pin|edge|all</code> — <strong>default <code>all</code></strong>. The split
+  follows where attributes live: <strong>node</strong> = color/srcid · <strong>pin</strong> =
+  bits/signed/delay · <strong>edge</strong> = pin-to-pin wiring. This is the "nodes vs pins vs
+  connectivity" axis.</li>
+<li><code>--top &lt;name&gt;</code> — pick module (defaults to the lib's top; error if ambiguous).</li>
+<li><code>--hier [N]</code> — bare = all instance levels, <code>N</code> = depth bound, omitted = flat
+  (just <code>--top</code>'s own nodes). <code>tree</code> defaults to full.</li>
+<li><code>--attr &lt;csv&gt;</code> — override the default attribute columns.</li>
+<li><code>--hops N</code> — focus radius around filter matches (cat/grep); the "show me around this
+  node" knob (replaces a dedicated <code>--focus</code>; you select the center with a
+  <code>name:</code>/<code>id:</code> filter).</li>
+<li><code>--max N</code> — row cap, default <strong>~200</strong>, <code>--max 0</code> = unlimited;
+  truncates with a "<em>N more… narrow with --top/filters or raise --max</em>" footer. Primary
+  guard against "very long very fast".</li>
+<li><code>--diag-fmt pretty|jsonl</code> — <strong>reuse the existing global diag format flag</strong>;
+  <code>pretty</code> (greppable) is default, <code>jsonl</code> is the structured form.</li>
+<li><code>--emit &lt;file&gt;</code> — <strong>reuse the kernel <code>--emit</code> slot</strong> to write to a
+  file (else stdout). NOTE: kernel <code>--emit</code> today targets IR artifacts (lg/.v/.prp) and
+  <code>is_kernel_label()</code> reserves <code>files/path/odir</code> — the emit machinery must be
+  extended to accept a text/jsonl tool-output target.</li>
+</ul>
+
+<h3>Default attribute columns (<code>--attr</code> overrides; identity <code>kind_nid[:name]</code> always shown)</h3>
+<ul>
+<li><strong>node</strong> = <code>color, src</code></li>
+<li><strong>pin</strong> = <code>bits, signed</code></li>
+<li><strong>edge</strong> = <code>bits</code></li>
+</ul>
+
+<h3>Filter grammar (shared by cat/grep/diff; space-separated terms = AND)</h3>
+<ul>
+<li><code>id:12</code> (numeric → id) · <code>name:Mult</code> (text → name); a <strong>bare token
+  auto-disambiguates</strong> (numeric = id, non-numeric = name) since ids are numeric and names
+  are not.</li>
+<li><strong>strings</strong> (<code>name:</code>, <code>src:</code>): <strong>substring by default</strong>,
+  <code>~</code> = regex, <code>=</code> = exact — <code>name:add</code>, <code>name:~^alu_</code>,
+  <code>name:=add_3</code>.</li>
+<li><strong>numerics</strong> (<code>id:</code>/<code>color:</code>/<code>bits:</code>): equality +
+  comparisons + ranges — <code>bits:&gt;8</code>, <code>bits:&lt;=4</code>, <code>bits:8..16</code>;
+  <code>color:nil</code> = unset.</li>
+<li>generic <code>&lt;attr&gt;:value</code> for any roster attr — <code>signed:…</code>,
+  <code>delay:…</code>, <code>src:alu.prp:5</code> (substring on resolved <code>path:line</code>).</li>
+<li><strong>edges</strong>: <code>from:X</code> = edges driven by X, <code>to:Y</code> = edges into Y;
+  either side optional, combine for a specific wire. X/Y are node/pin selectors (numeric=id,
+  text=name).</li>
+</ul>
+
+<h3>jsonl shape (<code>--diag-fmt jsonl</code>)</h3>
+<p>Flat, one type-tagged record per entity; <code>--target</code> selects which types stream out;
+<code>nil</code> → <code>null</code>:</p>
+<pre><code>{"t":"node","mod":"alu","nid":12,"kind":"Mult","name":"prod","color":null,"src":"alu.prp:5"}
+{"t":"pin","mod":"alu","nid":12,"pin":"a","bits":8,"signed":true}
+{"t":"edge","mod":"alu","from":"Mult_12.y","to":"Sum_8.b","bits":16}
+</code></pre>
+
+<h3>Canonical uses (the color-debug goal, end-to-end)</h3>
+<pre><code>lhd tool grep --target node color:nil lg:cpu             # uncolored nodes (== the partition-fatal set)
+lhd tool cat  --target node color:nil lg:cpu --top alu   # ...same, in structural context
+lhd tool grep name:Mult_12 --hops 1 --target edge lg:alu # wiring around one node
+lhd tool diff lg:before lg:after --target node --attr color  # what a flag/algo change moved
+lhd tool tree lg:cpu --top cpu                           # instance hierarchy
+</code></pre>
+
+<h2>Design decisions (converged — record of <em>why</em>)</h2>
+<ul class="subtasks">
+<li><strong>Unified <code>lhd tool</code> verb family.</strong> One noun (<code>tool</code>) + bare
+  verbs (cat/grep/diff/tree), kind-prefixed inputs. Subsumes <code>ln.cat</code>/<code>ln.diff</code>.</li>
+<li><strong>Attributes are default-on, not a separate verb.</strong> <code>cat lg:</code> always shows
+  a default attribute set; <code>--attr</code> narrows/widens; <code>grep</code> filters;
+  <code>diff</code> compares. "cat shows, grep filters, diff compares" — attributes are a facet of
+  the existing verbs.</li>
+<li><strong><code>cat</code> keeps structure.</strong> The graph's map/connectivity matters, not just a
+  flat attribute table.</li>
+<li><strong><code>--target</code> defaults to <code>all</code>.</strong> Informative by default; rely on
+  <code>--top</code>/<code>--hier</code>/<code>--max</code>/filters to trim. <code>--target</code> picks
+  <em>which entity's attributes</em> (node vs pin vs edge), which aligns with where attributes are
+  stored.</li>
+<li><strong>grep = search, cat = dump.</strong> <code>grep</code> requires ≥1 filter and is the
+  multi-lib search (output prefixed <code>lib/entity</code>); <code>cat</code> is the
+  (optionally-filtered) single-artifact dump. Difference is intent, not output shape.</li>
+<li><strong>diff = grep's filter grammar + unified-diff output.</strong> Same filters/target/scope;
+  <code>-C n</code> = classic text-line context; deterministic id-ordered listing (within a module)
+  keeps hunks stable for same-source flag/algo compares. (Pairing is positional over that stable
+  listing — see traps re: code edits that renumber.)</li>
+<li><strong>tree = instance hierarchy.</strong> Per-instance lines (<code>inst : def</code>) rooted at
+  <code>--top</code>, node counts; <code>--hier</code> full by default. (Hardware mental model; mirrors
+  the existing <code>inou.graphviz.fromlg.hierarchy</code> parent→child emitter.)</li>
+<li><strong>Filter syntax = <code>field:value</code>, AND-combined</strong>, substring-default strings
+  (<code>~</code> regex, <code>=</code> exact), numeric comparisons/ranges, <code>from:</code>/<code>to:</code>
+  for edges, bare-token id/name auto-disambiguation.</li>
+<li><strong>Size guard = default <code>--max</code> cap</strong> (truncate-with-footer), not a verbosity
+  dial — detail is already governed by <code>--target</code>/<code>--attr</code>.</li>
+<li><strong>Reuse the global <code>--diag-fmt</code></strong> for pretty/jsonl (one switch for all machine
+  output) and the kernel <strong><code>--emit</code></strong> for file output.</li>
+<li><strong>jsonl = flat, type-tagged, one record per entity</strong> (stream/jq/diff-friendly), not
+  nested-per-node.</li>
+<li><strong>ln.cat/ln.diff are deleted</strong>, not aliased — single consistent surface.</li>
+</ul>
+
+<h2>Implementation notes / reuse hooks (from codebase survey)</h2>
+<h3>CLI wiring</h3>
+<ul>
+<li>Add a read-only kernel command <code>tool_command(opts,res)</code> routed from
+  <code>run_engine_command()</code> (<code>lhd/lhd_kernel.cpp</code>), modeled on the
+  <code>pass_command</code> / <code>ln_cat_command</code> blocks. Sub-verb from <code>opts.files[0]</code>
+  (cat/grep/diff/tree), inputs via <code>gather_ir_inputs</code>, <code>load_lg_into_var</code>. No
+  <code>Hhds_graph_library::save()</code> — read-only.</li>
+<li><strong>Delete</strong> <code>ln_cat_command</code>/<code>ln_diff_command</code> dispatch + their
+  command names; update callers/tests; emit a helpful "use <code>lhd tool cat ln:…</code>" error for the
+  old names.</li>
+<li>Flags ride the EPRP registry / <code>--set</code> validation (<code>check_known_set_passes</code>,
+  <code>kSetPasses</code>) like every other command; <code>--diag-fmt</code>/<code>--emit</code> already exist.</li>
+</ul>
+<h3>Graph walk &amp; attribute access</h3>
+<ul>
+<li>Walk <code>g-&gt;forward_class()</code> + <code>livehd::color::is_partitionable(node)</code> — the
+  <em>same</em> walk/predicate <code>pass.color</code> and <code>pass.partition</code> use, so the dump
+  agrees with the consumer. (Do <strong>not</strong> clone <code>dump_graph_text</code>'s
+  <code>fast_class()</code> walk — different order/scope.)</li>
+<li>Identity: <code>graph_util::debug_name(node)</code> → <code>Type_nid[:name]</code>;
+  <code>node_name_of</code>, <code>type_op_of</code>.</li>
+<li>color: <code>graph_util::node_color_of(node)</code> / <code>has_node_color(node)</code> — the unified
+  hier-or-flat reader (matches partition). Sentinel <code>NO_COLOR=0</code>.</li>
+<li>pin attrs: <code>bits_of(pin)</code>, <code>is_unsign</code>/<code>pin_signed</code>, delay.</li>
+<li>src: copy the <code>Cgen_verilog::note_src</code> idiom (<code>inou/cgen/cgen_verilog.cpp:228-238</code>)
+  — <code>node.attr(hhds::attrs::srcid)</code> → <code>g-&gt;source_locator().resolve_span(id)</code> →
+  <code>file</code>+<code>start_line</code> (+col via line_offsets).</li>
+<li>HHDS attribute stores are iterable per-tag (<code>for (auto&amp; [k,v] : g-&gt;attr_store(Tag{}))</code>,
+  cf. <code>lnast.cpp:82-88</code>) but there is <strong>no tag reflection</strong>
+  (<code>Attr_tag_registry</code> is private) — so the dumper uses a <strong>fixed roster</strong> of the
+  known tags in <code>graph/attrs.hpp</code> (color, hier_color, bits, pin_signed, pin_delay,
+  time_range, const_value, srcid). Adding a roster attr is a one-liner; document the roster.</li>
+<li>Related existing observables to keep in mind (don't duplicate gratuitously):
+  <code>lhd compile --dump lg</code> (<code>dump_graph_text</code>), <code>inou.graphviz.from</code> (already
+  color-codes nodes; uncolored partitionable nodes render plain white — invisible), and
+  <code>inou.attr.save</code> (dumps colors to JSON).</li>
+</ul>
+
+<h2>Key correctness traps</h2>
+<ul>
+<li><strong><code>color:nil</code> ≠ "synth-skipped".</strong> In <code>color_synth.cpp</code> the 4 skip
+  sites only stop a node from <em>originating</em> a fresh id; a skipped <code>Mult</code>/<code>Div</code>/
+  wide-<code>Sum</code> that is a sink of a colored predecessor still gets colored, and conversely the
+  skip <em>cascades</em> (a skipped node never propagates its id to its sinks, so those sinks may end
+  uncolored too). So <code>color:nil</code> is the genuinely-uncolored set (== the partition-fatal set),
+  <strong>not</strong> a node-class you can <code>kind:Mult</code> your way to. The tool should report the
+  set honestly; it must not claim to explain <em>why</em>.</li>
+<li><strong>Walk <code>forward_class()</code>, not <code>fast_class()</code></strong> — to match the
+  consumer's node order/scope.</li>
+<li><strong><code>hier_color</code> only resolves in a hier-traversal context</strong>
+  (<code>node.is_hier()</code>); a flat per-def dump shows flat color. Per-instance color (compact=false)
+  needs the <code>pass_color</code> <code>hier_range</code> walk, not a flat clone. (Note: today
+  <code>apply_coloring</code> writes flat color even in compact=false, so per-instance variance is
+  mostly moot — verify before relying on either way.)</li>
+<li><strong>srcid gaps:</strong> synthesized nodes (finalize_regs / create_stage_flop) carry
+  <code>SourceId_invalid</code> → <code>src</code> shows unknown; combined ids resolve only their primary
+  anchor. <code>src=?</code> is ambiguous (synthesized vs unstamped) — surface it, don't hide it.</li>
+<li><strong>diff pairing:</strong> the unified-diff is positional over the deterministic listing — clean
+  for same-source flag/algo compares (nids deterministic from one compile), noisier for code edits that
+  renumber nids. Accepted tradeoff; a name-keyed or structural mode is a later option if needed.</li>
+<li><strong><code>--emit</code> overlaps the IR-emit slot</strong> — extend the kernel emit path to accept
+  a text/jsonl tool target without colliding with lg/.v/.prp emission.</li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<ul class="subtasks">
+<li><strong>A — <code>tool</code> dispatch + ln.* removal.</strong> <span class="status landed">landed</span>
+  Kernel <code>tool_command</code> + verb routing; positionals classified into lg dirs / ln tokens /
+  filters; <code>ln.cat</code>/<code>ln.diff</code> deleted (dispatch, meta describe/list/help,
+  result stdout-ownership all moved to <code>tool</code>); <code>tool cat/diff ln:</code> reuse the
+  former ln logic (<code>tool_cat_ln</code>/<code>tool_diff_ln</code>).</li>
+<li><strong>B — <code>cat lg</code> structured dump + roster.</strong> <span class="status landed">landed</span>
+  <code>forward_class</code> walk; identity (<code>debug_name</code>) + default columns per <code>--target</code>
+  (node=color,src · pin=bits,signed · edge=bits); nested per-node block for <code>--target all</code>;
+  <code>--top</code>/<code>--attr</code>/<code>--max</code>; src via the <code>note_src</code> srcid→resolve_span idiom.</li>
+<li><strong>C — filter grammar.</strong> <span class="status landed">landed</span>
+  <code>field:value</code> parser (<code>id</code>/<code>name</code>/<code>&lt;attr&gt;</code>, substring/<code>~</code>regex/<code>=</code>exact,
+  numeric <code>&gt;</code>/<code>&lt;</code>/<code>&gt;=</code>/<code>&lt;=</code>/<code>a..b</code>, <code>nil</code>,
+  <code>from:</code>/<code>to:</code>, bare-token id/name disambiguation); shared by cat/grep/diff.</li>
+<li><strong>D — <code>grep</code>.</strong> <span class="status landed">landed</span>
+  Filter-required search across one+ lg libraries, <code>lib/module</code>-prefixed flat matches.</li>
+<li><strong>E — <code>diff lg</code>.</strong> <span class="status landed">landed</span>
+  Unified-diff (LCS <code>print_line_diff</code>, now <code>-C n</code>-parameterized) over the deterministic
+  id-ordered listing; shares grammar/target; <code>identical</code> on no change.</li>
+<li><strong>F — <code>tree</code>.</strong> <span class="status landed">landed</span>
+  Instance hierarchy from <code>--top</code> via <code>get_subnode_graph</code>, node counts, <code>--hier [N]</code>
+  depth, cycle guard.</li>
+<li><strong>G — jsonl.</strong> <span class="status landed">landed</span>
+  Flat type-tagged one-record-per-entity via <code>--diag-fmt jsonl</code> (<code>nil</code>→<code>null</code>).</li>
+</ul>
+
+<h2>Subtasks — remaining</h2>
+<ul class="subtasks">
+<li><strong><code>--emit</code> file output.</strong> Currently stdout-only (redirect with <code>&gt;</code>);
+  <code>--emit</code> is rejected for <code>tool</code>. Extend the kernel emit slot to accept a text/jsonl
+  tool target.</li>
+<li><strong><code>--hops N</code> radius.</strong> Flag is parsed (<code>opts.tool_hops</code>) but not yet wired —
+  reserved. Implement the N-hop neighborhood expansion around filter matches (BFS over edges) for cat/grep.</li>
+<li><strong>IO ports + dead-output pins.</strong> Records come from <code>forward_class</code> nodes only;
+  module IO ports show only as <code>$name</code> endpoints in edges, and a zero-fanout output pin is not
+  emitted under <code>--target pin</code>. Add an explicit IO/ports section.</li>
+<li><strong><code>grep</code>/<code>tree</code> on <code>ln:</code></strong> (ln-side parity beyond cat/diff).</li>
+<li><strong>Name-keyed / structural <code>diff</code> pairing</strong> for code-edit diffs that renumber nids
+  (today positional over the id-ordered listing — clean for same-source flag/algo compares, noisier across edits).</li>
+<li><strong>Per-instance <code>hier_color</code></strong> (compact=false): a flat per-def dump shows flat color;
+  per-instance fidelity needs the <code>pass_color</code> <code>hier_range</code> walk.</li>
+</ul>
+
+<h2>Out of scope (separate work)</h2>
+<ul>
+<li>A <strong>graphviz uncolored-sentinel overlay</strong> (partitionable &amp; <code>!has_color</code> →
+  glaring node) — a complementary <em>visual</em> for small graphs, a separate change in
+  <code>inou/graphviz</code>, not <code>lhd tool</code>.</li>
+<li>A sound "<em>why</em> uncolored" explainer needs per-algorithm provenance recording (what each
+  algorithm <em>did</em> to each node), not post-hoc inference.</li>
+</ul>
+
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>

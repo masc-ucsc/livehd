@@ -15,7 +15,7 @@ namespace lhd {
 namespace {
 
 constexpr std::string_view kSteps =
-    R"json(["compile verilog","compile pyrope","check","lec","scan","ln.cat","ln.diff","pass","lsp"])json";
+    R"json(["compile verilog","compile pyrope","check","lec","scan","tool","pass","lsp"])json";
 constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
 constexpr std::string_view kEmitKinds =
     R"json(["ln","lg","verilog","pyrope","lnast-dump","graphviz","metadata","results","diagnostics"])json";
@@ -286,14 +286,9 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"lnast-dump","description":"Round-trippable textual LNAST dump (the Lnast::dump text form), one <unit>.lnast per unit. A debug/test observable; the binary interchange form is ln:. The dumped tree is post-upass","direction":"out"})json");
     return 0;
   }
-  if (name == "ln.cat") {
+  if (name == "tool") {
     print_json_line(
-        R"json({"schema_version":1,"name":"ln.cat","description":"Print LNAST trees to stdout (the Lnast::dump text form, pipe-friendly; no result envelope unless --result-json). Sources (.prp, or .v/.sv via the direct inou.slang front-end) are elaborated through pass.upass first (the --dump lnast tree); ln:DIR forests print as stored. --top filters units","args":{"required":[{"name":"inputs","type":".prp|.v|.sv|ln:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"}]},"inputs":["pyrope","verilog","ln"],"outputs":["stdout"],"examples":["lhd ln.cat x.prp","lhd ln.cat ln:x_lns/ --top x"]})json");
-    return 0;
-  }
-  if (name == "ln.diff") {
-    print_json_line(
-        R"json({"schema_version":1,"name":"ln.diff","description":"Diff two LNAST trees on stdout: a line diff of the dump texts plus the hhds tree edit distance (Zhang-Shasha via hhds/tree_edit_distance.hpp; nodes match on lnast type + name, loc/fname attrs are ignored). Each side is one .prp/.v/.sv source (elaborated through pass.upass) or one ln:DIR forest; multi-unit sides pair sorted-by-name (use --top to select one unit)","args":{"required":[{"name":"a","type":".prp|.v|.sv|ln:DIR","positional":true},{"name":"b","type":".prp|.v|.sv|ln:DIR","positional":true}],"optional":[{"name":"top","type":"string"}]},"inputs":["pyrope","verilog","ln"],"outputs":["stdout"],"examples":["lhd ln.diff old.prp new.prp","lhd ln.diff ln:before/ x.prp --top x"]})json");
+        R"json({"schema_version":1,"name":"tool","description":"Unified ln/lg inspector (2f-cli): `lhd tool <verb> [options] <inputs>` where a verb is cat|grep|diff|tree and inputs are ln:DIR / lg:DIR (or .prp/.v/.sv sources for the ln path). cat = structured dump; grep = filtered search (>=1 filter, may span libraries); diff = unified-diff of two inputs; tree = instance hierarchy. lg options: --target node|pin|edge|all (default all), --attr CSV, --max N, --hier [N], --top M; filters are field:value terms (name:/id:/color:/bits:/from:/to:, substring|~regex|=exact, numeric >,<,>=,<=,a..b,nil). Prints to stdout (--diag-fmt jsonl for machine form). Replaces the former ln.cat/ln.diff","args":{"required":[{"name":"verb","type":"cat|grep|diff|tree","positional":true},{"name":"inputs","type":"ln:DIR|lg:DIR|.prp|.v|.sv|field:value","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"target","type":"node|pin|edge|all"},{"name":"attr","type":"csv"},{"name":"max","type":"int"},{"name":"hier","type":"int?"}]},"inputs":["ln","lg","pyrope","verilog"],"outputs":["stdout"],"examples":["lhd tool cat lg:dir --top m","lhd tool grep color:nil lg:dir","lhd tool diff lg:before lg:after --attr color","lhd tool tree lg:dir --top m","lhd tool cat x.prp","lhd tool diff old.prp new.prp"]})json");
     return 0;
   }
   if (name == "dump") {
@@ -308,7 +303,7 @@ int describe_command(const Options& opts) {
   }
 
   // `lhd describe pass.flag` — a --set/--config option (after the named
-  // dotted commands above: ln.cat/ln.diff are not options).
+  // commands above are not --set/--config options).
   if (name.find('.') != std::string::npos) {
     int rc = describe_option(opts, name);
     if (rc >= 0) {
@@ -370,12 +365,11 @@ void print_general_help() {
       "               lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind\n"
       "  scan       report each .prp file's import strings (the result's \"scan\" member)\n"
       "               lhd scan x.prp y.prp\n"
-      "  ln.cat     print LNAST to stdout: sources elaborate through upass, ln: dirs print as stored\n"
-      "               lhd ln.cat x.prp\n"
-      "               lhd ln.cat ln:x_lns/ --top x\n"
-      "  ln.diff    diff two LNAST trees: line diff + hhds tree edit distance, on stdout\n"
-      "               lhd ln.diff old.prp new.prp\n"
-      "               lhd ln.diff ln:before/ x.prp\n"
+      "  tool       inspect ln:/lg: artifacts: cat | grep | diff | tree (stdout; --diag-fmt jsonl)\n"
+      "               lhd tool cat lg:dir --top m       # structured dump + attributes\n"
+      "               lhd tool grep color:nil lg:dir    # filtered search (e.g. uncolored nodes)\n"
+      "               lhd tool diff lg:before lg:after --attr color\n"
+      "               lhd tool cat x.prp                # LNAST cat (was ln.cat)\n"
       "  lsp        Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
       "  pass       run one graph pass over lg: inputs: color <alg> | partition | abc | liberty gensim\n"
       "               lhd pass abc --top m lg:dir --emit-dir lg:net\n"
@@ -570,30 +564,32 @@ int help_command(const Options& opts) {
         "  lhd scan f1.prp f2.prp\n");
     return 0;
   }
-  if (topic == "ln.cat") {
+  if (topic == "tool") {
     std::print(
-        "lhd ln.cat — print LNAST trees to stdout (the Lnast::dump text form)\n"
+        "lhd tool — unified ln/lg inspector (2f-cli): cat | grep | diff | tree\n"
         "\n"
-        "usage: lhd ln.cat <.prp|.v|.sv|ln:DIR>… [--top M]\n"
-        "  Sources are elaborated through pass.upass first; ln:DIR forests print as stored.\n"
-        "  --top filters units.\n"
+        "usage: lhd tool <verb> [options] <inputs…>\n"
+        "  inputs are ln:DIR / lg:DIR (or .prp/.v/.sv sources for the ln path).\n"
+        "  cat   structured dump of one input (attributes shown by default)\n"
+        "  grep  filtered search (>=1 filter; may span multiple lg: libraries)\n"
+        "  diff  unified-diff of two inputs (-C n text-line context)\n"
+        "  tree  instance hierarchy rooted at --top\n"
+        "\n"
+        "lg options:\n"
+        "  --target node|pin|edge|all   what to show (default all; node=color/src,\n"
+        "                               pin=bits/signed, edge=wiring)\n"
+        "  --top M    pick a module     --attr CSV   choose columns\n"
+        "  --hier [N] descend instances --max N      row cap (0 = unlimited)\n"
+        "\n"
+        "filters (field:value, AND-combined): name:Mult  id:12  color:nil  bits:>8\n"
+        "  bits:8..16  src:x.prp:5  from:A  to:B   (strings: substring, ~regex, =exact)\n"
         "\n"
         "examples:\n"
-        "  lhd ln.cat x.prp\n"
-        "  lhd ln.cat ln:x_lns/ --top x\n");
-    return 0;
-  }
-  if (topic == "ln.diff") {
-    std::print(
-        "lhd ln.diff — diff two LNAST trees on stdout (line diff + hhds tree edit distance)\n"
-        "\n"
-        "usage: lhd ln.diff <A> <B> [--top M]\n"
-        "  Each side is one .prp/.v/.sv source (elaborated through pass.upass) or one ln:DIR\n"
-        "  forest; multi-unit sides pair sorted-by-name (use --top to select one unit).\n"
-        "\n"
-        "examples:\n"
-        "  lhd ln.diff old.prp new.prp\n"
-        "  lhd ln.diff ln:before/ x.prp --top x\n");
+        "  lhd tool cat lg:dir --top m\n"
+        "  lhd tool grep color:nil lg:dir            # nodes pass.color left uncolored\n"
+        "  lhd tool diff lg:before lg:after --attr color\n"
+        "  lhd tool tree lg:dir --top m\n"
+        "  lhd tool cat x.prp          lhd tool diff old.prp new.prp   # the former ln.cat/ln.diff\n");
     return 0;
   }
   if (topic == "lsp") {

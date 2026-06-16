@@ -137,6 +137,15 @@ sh_test(
     data = _FLOW_DATA + ["part_hier.v"],
 )
 
+# 2f-cli: the `lhd tool` lg-side inspector (cat/grep/diff/tree, the filter
+# grammar, jsonl, --max) on a real colored design.
+sh_test(
+    name = "lhd_tool_test",
+    size = "large",
+    srcs = ["lhd_tool_test.sh"],
+    data = _FLOW_DATA + ["part_hier.v"],
+)
+
 # 2h-set_path: --set namespace = command path + context-relative key
 # abbreviation (all five forms of pass.color.continuous behave identically).
 sh_test(

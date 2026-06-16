@@ -37,7 +37,7 @@ enum class Diag_fmt { jsonl, pretty };
 Diag_fmt default_diag_fmt();
 
 struct Options {
-  std::string command;   // compile|check|lec|scan|lsp|ln.cat|ln.diff|pass|list|describe|version|help
+  std::string command;   // compile|check|lec|scan|lsp|tool|pass|list|describe|version|help
   std::string language;  // verilog|pyrope ("" for the IR/meta commands)
 
   std::vector<std::string> files;  // positional: source files / list pattern / describe name
@@ -68,6 +68,18 @@ struct Options {
   // forces the stage that produces it (the screen twin of --emit-dir
   // lnast-dump:/lg:).
   std::vector<std::string> dumps;
+
+  // `lhd tool` (2f-cli) inspector: target = node|pin|edge|all ("" => all);
+  // attr = explicit display column CSV ("" => per-target defaults); max = row
+  // cap (0 = unlimited); hier = -1 unset (flat for cat/grep/diff, full for
+  // tree), INT_MAX = bare --hier (all levels), else an explicit depth; hops =
+  // focus radius around filter matches (reserved).
+  std::string tool_target;
+  std::string tool_attr;
+  int         tool_max     = 200;
+  int         tool_hier    = -1;
+  int         tool_hops    = 0;
+  int         tool_context = 2;  // `tool diff -C n` text-line context
 
   std::string impl_kind, impl_path, impl_top;  // check
   std::string ref_kind, ref_path, ref_top;     // check
