@@ -683,8 +683,12 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
         Term a = fit(pid(0)[0], W);
         Term acc;
         for (const auto& b : pid(1)) {  // one-hot amounts, ORed
-          Term sh = tm_.mkTerm(Kind::BITVECTOR_SHL, {a, fit(b, W)});
-          acc     = acc.isNull() ? sh : tm_.mkTerm(Kind::BITVECTOR_OR, {acc, sh});
+          // A shift count is UNSIGNED (a bit position), so zero-extend it. Reading
+          // it as signed would sign-extend a wrapped 3-bit amount like 7 (== -1)
+          // to a huge value, overshifting `1 << amt` to 0 (e.g. RISC-V vlmax).
+          Term shamt = fit_to(tm_, Val{b.term, b.width, false}, W);
+          Term sh    = tm_.mkTerm(Kind::BITVECTOR_SHL, {a, shamt});
+          acc        = acc.isNull() ? sh : tm_.mkTerm(Kind::BITVECTOR_OR, {acc, sh});
         }
         result = acc.isNull() ? a : acc;
         break;
