@@ -15,6 +15,7 @@
 // harvests io_meta from it and tolg lowers it with the exact Verilog name.
 
 #include <memory>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -128,6 +129,15 @@ private:
     int64_t size        = 0;
   };
   absl::flat_hash_map<const slang::ast::Symbol*, Mem_info> mem_info_;
+  // Power-on memory contents harvested from `initial begin mem[k]=v; … end`
+  // blocks (a pre-pass in lower_module, BEFORE the declares emit). Keyed by the
+  // array symbol; the inner map is index→value. declare_unpacked emits these as
+  // the reg array's declare initializer (scalar broadcast if uniform, else a
+  // tuple literal), matching the hand-written `reg t:[N]T = (…)` goldens.
+  absl::flat_hash_map<const slang::ast::Symbol*, std::map<int64_t, int64_t>> mem_init_vals_;
+  // Walk an `initial` block body collecting constant `mem[const] = const`
+  // element writes into mem_init_vals_.
+  void collect_mem_inits(const slang::ast::Statement& stmt);
   // Emit the comp_type_array declare for an unpacked array (reg or mut).
   // Returns false (with a diagnostic) for shapes the reader cannot lower.
   bool declare_unpacked(const slang::ast::ValueSymbol& sym, bool is_reg);

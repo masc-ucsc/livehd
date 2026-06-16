@@ -37,6 +37,13 @@
   with <code>2m-multiport_mem</code> (memory <code>cgen</code> on the re-compile leg): fold
   those fixes in as the corpus reaches them rather than waiting on 2m.</p>
 
+<p><strong>STATUS (2026-06-16): DONE.</strong> All 61 <code>inou/prp/tests/equiv/*.v</code>
+  round-trip <code>slang → pyrope → lg → verilog</code> and are <code>lhd check</code>-equivalent
+  to their golden. Gated by the <code>prp-v2prp-&lt;name&gt;</code> bazel tests (all &lt; 20 s, none
+  tagged <code>long</code>); <code>inou/prp/tests/v2prp_census.py</code> is the manual census;
+  <code>inou/prp/tests/v2prp_test.py</code> is the per-file gate. Pyrope-origin round-trip and the
+  full prp/upass/cprop/lec/yosys suites stay green. See "Subtasks — landed".</p>
+
 <h2>Current state — the writer dies at the module boundary</h2>
 <p><code>upass/prp_writer</code> was written to round-trip <strong>Pyrope-origin</strong> LNAST
   (driven by <code>pass.prp_writer</code> + the <code>lhd_prp_writer_test</code> /
@@ -84,7 +91,45 @@ mod memdut(a:u8, wsel:u2, rsel:u2, we:bool) -> (z:u8@[0]) {
   <code>$</code>/<code>%</code> IO sigils), so the writer's existing ref/const printing mostly
   works once the <em>signature</em> is emitted.</p>
 
-<h2>Subtasks — pending</h2>
+<h2>Subtasks — landed</h2>
+<ul class="subtasks">
+<li><strong>A,B — module structure + lambda body. DONE.</strong> <code>write_top()</code> detects the
+  slang-origin <code>io</code> child and calls the new <code>write_module()</code>, which emits
+  <code>pub comb|mod NAME::[lg="&lt;file&gt;.&lt;top&gt;"](in:T, …) -&gt; (out:T@[], …) { … }</code>
+  and walks the <code>top → stmts</code> body directly (declares hoisted above the attr writes).
+  comb vs mod is chosen by <code>body_has_state()</code> (any <code>reg</code>/<code>latch</code>
+  declare); port types come from <code>render_type_at()</code> (incl. <code>comp_type_array → [N]T</code>).</li>
+<li><strong>C — sequential / registers. DONE.</strong> Sync-reset regs keep their explicit
+  body reset mux (<code>reg r:T</code>, no init — the <code>nil</code> sentinel is suppressed,
+  giving the flop no reset pin); clock/reset stay explicit io ports and tolg reuses them. Async
+  regs fold the slang attrs onto the declaration
+  (<code>reg r:T:[init=N, reset_pin=rst, async=…, negreset=…]</code>) with the importer→source
+  attr remap (<code>initial→init</code>, <code>sync→async</code> inverted). tolg's
+  <code>lower_attr_set</code> now honors the canonical source spellings <code>async</code>/<code>init</code>.</li>
+<li><strong>D — memories. DONE.</strong> Reg arrays emit <code>reg t:[N]T:[fwd=…]</code>; the slang
+  reader now harvests <code>initial begin mem[k]=v end</code> power-on contents (scalar broadcast
+  or tuple literal) and folds them into the declare initializer. tolg re-drives the memory
+  <code>fwd</code> mask in <code>finalize_mems</code> so an attr folded onto the declaration (emitted
+  AFTER it by prp2lnast) still takes effect.</li>
+<li><strong>E — operators. DONE.</strong> <code>get_mask → src#[lo..=hi]</code> (contiguous mask),
+  real <code>sext → src#sext[0..=pos]</code>, tuple-literal init rendering, declare-on-first-write
+  for SSA/undeclared names (<code>x___ssa_N</code>).</li>
+<li><strong>F — reference / LEC plumbing. DONE.</strong> The checked-in gate is <code>lhd check
+  --impl pyrope:… --ref verilog:&lt;golden&gt; --top &lt;module&gt;</code> (recompiles the emitted
+  Pyrope internally, then yosys lgcheck); a check timeout is inconclusive, not a fail. The
+  <code>yosys-slang</code> dotted-name path is sidestepped entirely (the golden <code>.v</code>
+  IS the reference). <code>lhd lec</code> (cvc5) remains the manual secondary cross-check.</li>
+<li><strong>G — generated naming. DONE.</strong> The writer pins the module name with
+  <code>::[lg="&lt;file&gt;.&lt;top&gt;"]</code> so the re-compiled module is byte-identical to the
+  golden's (a non-dotted <code>chip_top</code> no longer doubles to <code>chip_top.chip_top</code>),
+  letting a single <code>--top</code> drive both LEC sides.</li>
+<li><strong>Bonus (upass/ssa). DONE.</strong> <code>tuple_get</code>/<code>tuple_add</code>/<code>attr_get</code>
+  RHS reads are now SSA-renamed (they were copied verbatim), so a memory-read index that reads a
+  reassigned wire resolves to the live driver, not its declaration-time poison
+  (<code>mem_multidim_rw</code>).</li>
+</ul>
+
+<h2>Subtasks — original plan (all landed above)</h2>
 <ul class="subtasks">
 <li><strong>A — module structure from the <code>io</code> node.</strong> Add an <code>io</code>
   case to <code>write_node()</code> and emit the module header
@@ -130,9 +175,6 @@ mod memdut(a:u8, wsel:u2, rsel:u2, we:bool) -> (z:u8@[0]) {
   long as it does not break the other regression tests — and if it does, fixing those is part
   of this task.</li>
 </ul>
-
-<h2>Subtasks — landed</h2>
-<p>None yet.</p>
 
 <h2>Manual bring-up flow (the smoke test)</h2>
 <p>The full chain on one file, exactly as it should work end-to-end. Raw

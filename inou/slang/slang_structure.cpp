@@ -7,6 +7,7 @@
 // module emits one Lnast in the extracted unit form; instances lower to
 // func_call statements the upass/tolg Sub machinery resolves by module name.
 
+#include <algorithm>
 #include <cctype>
 #include <functional>
 
@@ -384,6 +385,14 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
 
   emit_module_io(symbol, in_tup, out_tup);
   collect_state_vars(*body);
+  // Harvest `initial begin mem[k]=v; end` power-on contents before the declares
+  // emit (declare_unpacked folds them into the reg array's initializer).
+  for (const auto& member : body->members()) {
+    if (member.kind == slang::ast::SymbolKind::ProceduralBlock
+        && member.as<slang::ast::ProceduralBlockSymbol>().procedureKind == slang::ast::ProceduralBlockKind::Initial) {
+      collect_mem_inits(member.as<slang::ast::ProceduralBlockSymbol>().getBody());
+    }
+  }
   // Hoist every state reg's declare to module start: drivers emit in
   // dataflow order, so a comb reader sorted before the owning edge process
   // must already see the declare (reg q-reads are order-free only once
@@ -479,6 +488,46 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
 // fwd=0 attr rides ahead of the declare: verilog nonblocking memory writes
 // never forward to same-cycle reads (Pyrope reg arrays default to
 // program-order forwarding).
+// Walk an `initial` block body, recording constant `mem[const] = const` element
+// writes (the standard memory power-on idiom) into mem_init_vals_. Only simple
+// element-select-of-named-value assignments with foldable index/value are
+// captured; anything else is silently skipped (the block stays "ignored").
+void Slang_context::collect_mem_inits(const slang::ast::Statement& stmt) {
+  using slang::ast::ExpressionKind;
+  using slang::ast::StatementKind;
+  switch (stmt.kind) {
+    case StatementKind::List:
+      for (const auto* s : stmt.as<slang::ast::StatementList>().list) {
+        collect_mem_inits(*s);
+      }
+      return;
+    case StatementKind::Block: collect_mem_inits(stmt.as<slang::ast::BlockStatement>().body); return;
+    case StatementKind::ExpressionStatement: {
+      const auto& e = stmt.as<slang::ast::ExpressionStatement>().expr;
+      if (e.kind != ExpressionKind::Assignment) {
+        return;
+      }
+      const auto& as  = e.as<slang::ast::AssignmentExpression>();
+      const auto& lhs = as.left();
+      if (lhs.kind != ExpressionKind::ElementSelect) {
+        return;
+      }
+      const auto& es = lhs.as<slang::ast::ElementSelectExpression>();
+      if (es.value().kind != ExpressionKind::NamedValue) {
+        return;
+      }
+      const auto* sym = &es.value().as<slang::ast::NamedValueExpression>().symbol;
+      auto        idx = try_eval_int(es.selector());
+      auto        val = try_eval_int(as.right());
+      if (idx && val && *idx >= 0) {
+        mem_init_vals_[sym][*idx] = *val;
+      }
+      return;
+    }
+    default: return;
+  }
+}
+
 bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is_reg) {
   const auto& ct = sym.getType().getCanonicalType();
   if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
@@ -552,7 +601,23 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
   emit_prim_type_int(tidx, ei.bits, ei.is_signed);
   ln.add_child(tidx, Lnast_node::create_const(absl::StrCat("[", mi.size, "]")));
   ln.add_child(didx, Lnast_node::create_const(is_reg ? "reg" : "mut"));
-  if (is_reg) {
+  // Power-on contents from an `initial` block: a uniform fill becomes a scalar
+  // broadcast (`= 3`); a per-entry fill a tuple literal (`= (1,2,3,4)`), index
+  // order with un-written entries defaulting to 0.  Absent → `nil` (reg only).
+  if (auto iit = mem_init_vals_.find(&sym); iit != mem_init_vals_.end() && !iit->second.empty()) {
+    const auto& vals    = iit->second;
+    const bool  uniform = std::all_of(vals.begin(), vals.end(),
+                                      [&](const auto& kv) { return kv.second == vals.begin()->second; });
+    if (uniform && static_cast<int64_t>(vals.size()) == mi.size) {
+      ln.add_child(didx, Lnast_node::create_const(absl::StrCat(vals.begin()->second)));
+    } else {
+      auto vidx = ln.add_child(didx, Lnast_ntype::create_tuple_add());
+      for (int64_t k = 0; k < mi.size; ++k) {
+        auto vit = vals.find(k);
+        ln.add_child(vidx, Lnast_node::create_const(absl::StrCat(vit != vals.end() ? vit->second : int64_t{0})));
+      }
+    }
+  } else if (is_reg) {
     ln.add_child(didx, Lnast_node::create_const("nil"));  // no power-on contents
   }
   clear_pending_loc();

@@ -172,3 +172,27 @@ sh_test(
         ],
     )
 ]
+
+# 2f-v2prp: the REVERSE direction over the same equiv corpus — the slang reader
+# lowers each golden <name>.v to Pyrope (upass/prp_writer), `lhd check`
+# re-compiles that Pyrope and LECs it against the same <name>.v. `lhd check`
+# (yosys) is the authoritative gate; a check timeout is inconclusive (not a
+# fail). Driven off the .v files (every equiv pair ships one). All current pairs
+# run < 20 s, so none are tagged `long`/`manual`.
+[
+    sh_test(
+        name = "prp-v2prp-%s" % v_file.split("/")[-1].split(".")[0],
+        srcs = ["tests/v2prp_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:%s)" % v_file,
+        ],
+        data = [
+            "//inou/prp:tests/v2prp_test.py",
+            "//inou/prp:%s" % v_file,
+            "//lhd",
+        ],
+        deps = ["//inou/yosys:scripts"],
+    )
+    for v_file in glob(["tests/equiv/*.v"])
+]

@@ -68,6 +68,9 @@ private:
   void write_func_call();
   void write_func_def();
   void write_tuple_add();
+  // Renders a tuple_add node in EXPRESSION position (no LHS child) as a Pyrope
+  // tuple literal `(v0, v1, …)` — used for a memory declare's initializer.
+  void write_tuple_literal();
   void write_tuple_get();
   void write_attr_set();
   void write_attr_get();

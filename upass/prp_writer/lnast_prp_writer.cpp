@@ -181,8 +181,15 @@ void Lnast_prp_writer::write_module() {
   Lnast_nid io_nid = cur;
 
   const bool is_mod = body_has_state(lnast->get_sibling_next(io_nid));
+  // `pub … ::[lg="<name>"]` pins the generated module name to the source module
+  // name verbatim, so the re-compile leg and LEC see the SAME identifier as the
+  // golden .v.  Without it the lambda name `fun3` would be re-qualified by the
+  // .prp filename (`trivial_if.fun3` → `trivial_if.fun3.fun3`, and a non-dotted
+  // `chip_top` → `chip_top.chip_top`).  lg requires a `pub` lambda.
+  print("pub ");
   print(is_mod ? "mod " : "comb ");
   print(lambda_name());
+  print(std::format("::[lg=\"{}\"]", lnast->get_top_module_name()));
   emit_module_header(io_nid, is_mod);
   print(" {\n");
   ++depth;
@@ -517,7 +524,11 @@ void Lnast_prp_writer::write_declare() {
   }
   if (has_value && !nil_value) {
     print(" = ");
-    write_node();
+    if (current_ntype() == Lnast_ntype::Lnast_ntype_tuple_add) {
+      write_tuple_literal();  // memory init: a bare tuple_add (no LHS child)
+    } else {
+      write_node();
+    }
   }
   move_to_parent();
 }
@@ -743,6 +754,23 @@ void Lnast_prp_writer::write_tuple_add() {
   }
   print(")");
   move_to_parent();
+}
+
+void Lnast_prp_writer::write_tuple_literal() {
+  // tuple_add( v0, v1, … ) used as a value (no LHS child) -> `(v0, v1, …)`.
+  print("(");
+  if (move_to_child()) {
+    bool first = true;
+    do {
+      if (!first) {
+        print(", ");
+      }
+      write_node();
+      first = false;
+    } while (move_to_sibling());
+    move_to_parent();
+  }
+  print(")");
 }
 
 void Lnast_prp_writer::write_tuple_get() {

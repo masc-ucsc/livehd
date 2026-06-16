@@ -570,6 +570,29 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
         }
         ++pos;
       }
+    } else if (Lnast_ntype::is_tuple_get(type) || Lnast_ntype::is_tuple_add(type)
+               || Lnast_ntype::is_attr_get(type)) {
+      // dst/tuple_get/tuple_add/attr_get: the first child is a write target
+      // (a temp or user var) copied VERBATIM (these aren't SSA-versioned, as
+      // before), but the remaining children are READS that must follow the live
+      // rename_map — e.g. a `tuple_get` memory-read index, or a `tuple_add`
+      // field, that reads an SSA-versioned comb net (a wire reassigned after its
+      // declaration-time poison) must resolve to the live driver, not the stale
+      // base. (mem_multidim_rw: `data[raddr]` read the poison `raddr` base
+      // instead of `raddr___ssa_1 = {ri,rj}`.)
+      auto stmt_node = staging->add_child(new_stmts, type);
+      if (Lnast::srcid_carries(type)) {
+        staging->set_srcid(stmt_node, lnast->get_srcid(child));
+      }
+      bool first = true;
+      for (auto sub : lnast->children(child)) {
+        if (first) {
+          copy_subtree(lnast, sub, staging, stmt_node);  // write target — verbatim
+          first = false;
+        } else {
+          copy_with_rename(lnast, sub, staging, stmt_node, rename_map);  // reads
+        }
+      }
     } else {
       // Control-flow / structural nodes (if, func_def, always_ff body, …).
       // The lowerer's lower_branch() + Mux logic merges base-name WRITES, so a
