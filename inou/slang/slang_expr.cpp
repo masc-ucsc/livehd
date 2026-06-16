@@ -454,8 +454,22 @@ std::string Slang_context::lower_conditional_expr(const slang::ast::ConditionalE
   // a fresh non-`___` local: the `___` namespace is single-write SSA, and
   // this temp is written more than once.
   auto tmp = fresh_local("mux");
-  builder_.create_declare_stmts(tmp, "mut", "", "");  // rangeless: arms may carry x
-  builder_.create_assign_stmts(tmp, b);               // else value seeds the width
+  // Type the temp to the expression's width.  The DIRECT slang->lg path infers
+  // this fine from the fit_wrap'd arm seed, but the v2prp round-trip re-emits
+  // the arms as bare integer literals (sizes lost), so an UNTYPED `mut` temp
+  // makes the re-compile re-infer a signed minimal width and sign-extend the
+  // values through a chained mux (the CLZ priority-encoder class: io_out[0]
+  // proved but the upper bits diverged).  A typed temp pins the width/sign.
+  if (ti.bits > 0) {
+    builder_.create_declare_stmts(tmp,
+                                  "mut",
+                                  ti.is_signed ? std::string(Dlop::get_mask_value(ti.bits - 1)->to_pyrope())
+                                               : mask_text(ti.bits),
+                                  ti.is_signed ? std::string(Dlop::get_neg_mask_value(ti.bits - 1)->to_pyrope()) : "0");
+  } else {
+    builder_.create_declare_stmts(tmp, "mut", "", "");  // rangeless: arms may carry x
+  }
+  builder_.create_assign_stmts(tmp, b);  // else value seeds the width
 
   auto if_nid = builder_.create_if_stmt(false);
   builder_.add_if_cond(if_nid, cond);
