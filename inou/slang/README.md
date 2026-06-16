@@ -65,7 +65,7 @@ strongest passing tier; `tests/slang_compile.sh <tier> <file>` enforces it
 both ways (a regression fails, and an outgrown `error` entry fails until the
 ladder is promoted). Tiers:
 
-- `lec` — slang→LNAST→tolg→cgen Verilog, LEC-checked (`lhd check`) against
+- `lec` — slang→LNAST→tolg→cgen Verilog, LEC-checked (`lhd lec --set lec.solver=lgyosys`) against
   the source. The strongest tier.
 - `verilog` — compiles to Verilog; a known LEC gap is tracked in the ladder
   comment next to the entry.

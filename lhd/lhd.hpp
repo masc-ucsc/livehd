@@ -37,7 +37,7 @@ enum class Diag_fmt { jsonl, pretty };
 Diag_fmt default_diag_fmt();
 
 struct Options {
-  std::string command;   // compile|check|lec|scan|lsp|tool|pass|list|describe|version|help
+  std::string command;   // compile|lec|scan|lsp|tool|pass|list|describe|version|help
   std::string language;  // verilog|pyrope ("" for the IR/meta commands)
 
   std::vector<std::string> files;  // positional: source files / list pattern / describe name
@@ -52,9 +52,11 @@ struct Options {
   std::vector<Typed_path> libs;
 
   std::string top;
-  // elaborate verilog: yosys-verilog|yosys-slang (yosys -> LGraphs) or
-  // slang (the direct inou.slang SV -> LNAST front-end).
-  std::string reader = "yosys-slang";
+  // Verilog front-end. Default `slang` — the direct inou.slang SV -> LNAST
+  // front-end, so verilog joins the pyrope flow (ln:/lg: emits, in-process
+  // lec). `--reader yosys-slang|yosys-verilog` overrides to the yosys path
+  // (SV/Verilog -> LGraphs).
+  std::string reader = "slang";
   std::string depfile;
   std::string recipe;       // resolved per-command default in the kernel
   std::string recipe_file;  // deferred (unsupported)
@@ -69,20 +71,26 @@ struct Options {
   // lnast-dump:/lg:).
   std::vector<std::string> dumps;
 
-  // `lhd tool` (2f-cli) inspector: target = node|pin|edge|all ("" => all);
+  // `lhd tool` inspector: target = node|pin|edge|all ("" => all);
   // attr = explicit display column CSV ("" => per-target defaults); max = row
   // cap (0 = unlimited); hier = -1 unset (flat for cat/grep/diff, full for
   // tree), INT_MAX = bare --hier (all levels), else an explicit depth; hops =
   // focus radius around filter matches (reserved).
   std::string tool_target;
+  // `tool tree --target kind:<X>` (repeatable): node kinds to list inside each
+  // module of the hierarchy — registers/memories that ride the same instance
+  // tree. Empty => the bare instance tree (default). `kind:register` aliases
+  // flop/fflop/latch, `kind:memory` aliases memory; any Ntype name (flop, mux,
+  // sub, …) also matches exactly.
+  std::vector<std::string> tool_kinds;
   std::string tool_attr;
   int         tool_max     = 200;
   int         tool_hier    = -1;
   int         tool_hops    = 0;
   int         tool_context = 2;  // `tool diff -C n` text-line context
 
-  std::string impl_kind, impl_path, impl_top;  // check
-  std::string ref_kind, ref_path, ref_top;     // check
+  std::string impl_kind, impl_path, impl_top;  // lec --impl
+  std::string ref_kind, ref_path, ref_top;     // lec --ref
 
   std::string result_json;
   std::string workdir;
@@ -160,7 +168,7 @@ struct Set_option {
 // itself (idempotent).
 std::vector<Set_option> list_set_options();
 
-// Engine commands (compile/check/lec/scan/pass/ln.cat/ln.diff/lsp). Requires the pass registry
+// Engine commands (compile/lec/scan/pass/tool/lsp). Requires the pass registry
 // to be initialized. Throws Lhd_error or std::exception on failure.
 void run_engine_command(Options& opts, Result& res);
 

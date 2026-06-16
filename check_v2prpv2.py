@@ -17,14 +17,15 @@ Outcome semantics (mirrors the 2f-v2prp gate, scaled up):
   * yosys-slang can't read it          -> SKIP   (outside the gate; not our failure)
   * slang reader can't lower it        -> IMPL   (a --reader slang gap)
   * re-compile (prp -> verilog) fails  -> RECOMP (a writer / tolg / cgen gap)
-  * lhd check not-equivalent           -> LECFAIL
-  * lhd check times out                -> INCONCLUSIVE (NOT a fail)
-  * lhd check equivalent               -> PASS    (lgcheck is reported alongside;
+  * lhd lec not-equivalent             -> LECFAIL
+  * lhd lec times out                  -> INCONCLUSIVE (NOT a fail)
+  * lhd lec equivalent                 -> PASS    (lgcheck is reported alongside;
                                                    a lgcheck TIMEOUT falls back to
-                                                   lhd check and does NOT fail)
+                                                   lhd lec and does NOT fail)
 
-`lhd check` is treated as equal-or-better than `lgcheck`: the PASS/FAIL verdict is
-lhd check's; lgcheck is an extra signal (proven / refuted / timeout / skipped).
+`lhd lec --set lec.solver=lgyosys` is treated as equal-or-better than `lgcheck`:
+the PASS/FAIL verdict is lec's; lgcheck is an extra signal (proven / refuted /
+timeout / skipped).
 
 Usage:
   check_v2prpv2.py --top TOP [opts] -- <slang read args, e.g. files +incdir+...>
@@ -62,7 +63,7 @@ def main():
     ap = argparse.ArgumentParser(description="Verilog->Pyrope->Verilog round-trip LEC driver")
     ap.add_argument("--top", required=True, help="top module name")
     ap.add_argument("--workdir", default=None, help="scratch dir (default tmp_v2prpv2_<top>)")
-    ap.add_argument("--check-timeout", type=int, default=120, help="lhd check timeout (s); timeout=inconclusive")
+    ap.add_argument("--check-timeout", type=int, default=120, help="lhd lec timeout (s); timeout=inconclusive")
     ap.add_argument("--lgcheck-timeout", type=int, default=120, help="lgcheck timeout (s); timeout=fall back to lhd check")
     ap.add_argument("--recipe", default="O0", help="re-compile recipe for the prp->verilog leg")
     ap.add_argument("--keep", action="store_true", help="keep the scratch dir")
@@ -162,8 +163,8 @@ def main():
     # yosys-slang emit only when no plain source file was given.
     ref = ref_path if ref_path else v1_top
 
-    # ── 4. lhd check (authoritative) ─────────────────────────────────────────
-    rc, log = run([lhd, "check", "--impl", "verilog:" + v2_top, "--ref", "verilog:" + ref,
+    # ── 4. lhd lec --set lec.solver=lgyosys (authoritative) ──────────────────
+    rc, log = run([lhd, "lec", "--set", "lec.solver=lgyosys", "--impl", "verilog:" + v2_top, "--ref", "verilog:" + ref,
                    "--top", top, "--workdir", os.path.join(work, "w_chk")], timeout=args.check_timeout)
     lhd_chk = "timeout" if rc is None else ("pass" if rc == 0 else "fail")
 
@@ -184,8 +185,8 @@ def main():
 
     t = time.time() - t0
     if lhd_chk == "pass":
-        # lgcheck "refuted" while lhd check "pass" is a disagreement worth flagging,
-        # but lhd check is authoritative (equal-or-better) -> still PASS.
+        # lgcheck "refuted" while lhd lec "pass" is a disagreement worth flagging,
+        # but lhd lec is authoritative (equal-or-better) -> still PASS.
         return report("PASS", lhd_chk, lg, t=t)
     if lhd_chk == "timeout":
         return report("INCONCLUSIVE", lhd_chk, lg,

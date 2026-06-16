@@ -82,7 +82,7 @@ lhd compile --reader slang --top data_mem_8x4 --recipe O1 --emit-dir verilog:imp
 <h2>Verification</h2>
 <p>For each fixed memory module, compile to Verilog with <code>--reader slang</code> (impl) and
   <code>--reader yosys-slang</code> (ref) and prove them equivalent with
-  <code>lhd check --top &lt;mod&gt; --impl verilog:impl.v --ref verilog:ref.v</code> (the
+  <code>lhd lec --set lec.solver=lgyosys --top &lt;mod&gt; --impl verilog:impl.v --ref verilog:ref.v</code> (the
   <code>inou/yosys/lgcheck</code> sat/BMC path). <code>data_mem_8x4</code> and <code>array_ext</code>
   must stop being <code>IMPL_FAIL</code> in the XS per-module sweep, and the single-clock chunked
   memory (already LEC-passing, e.g. the <code>/tmp/m2.sv</code> repro) must not regress.</p>

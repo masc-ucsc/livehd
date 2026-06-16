@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# `lhd tool cat|diff` on the ln/source path (2f-cli; the former ln.cat/ln.diff).
+# `lhd tool cat|diff` on the ln/source path (the former ln.cat/ln.diff).
 # Payload on stdout, no result envelope unless --result-json. `tool cat` prints
 # the post-upass tree for sources and the stored units for ln: dirs; `tool diff`
 # prints a line diff plus the hhds tree edit distance (type+name cost; loc/fname
@@ -30,6 +30,11 @@ head -1 "$W/cat.out" | grep -q '^old$' || fail "tool cat must start with the mod
 grep -q '^old.fun3$' "$W/cat.out" || fail "tool cat dump is missing the old.fun3 unit"
 grep -q 'get_mask' "$W/cat.out" || fail "tool cat dump has no get_mask node (post-upass body)"
 grep -q 'schema_version' "$W/cat.out" && fail "tool cat stdout must not carry the result envelope"
+
+# 1b. the explicit pyrope: scheme (URL-like) is the same as the bare-.prp shortcut.
+"$LHD" tool cat "pyrope:$W/old.prp" --workdir "$W/w1b" -q >"$W/catp.out" 2>/dev/null \
+  || fail "tool cat pyrope: exited nonzero"
+cmp -s "$W/cat.out" "$W/catp.out" || fail "pyrope:FILE must match the bare .prp shortcut"
 
 # 2. tool cat of an ln: dir prints the stored (post-parse) units.
 "$LHD" compile "$W/old.prp" --emit-dir ln:"$W/lns/" --workdir "$W/w2" -q --result-json "$W/r.json" 2>/dev/null \

@@ -9,13 +9,14 @@
 #include <vector>
 
 #include "lhd.hpp"
+#include "log.hpp"  // livehd::log::channels() for `lhd list log-channels`
 
 namespace lhd {
 
 namespace {
 
 constexpr std::string_view kSteps =
-    R"json(["compile verilog","compile pyrope","check","lec","scan","tool","pass","lsp"])json";
+    R"json(["compile verilog","compile pyrope","lec","scan","tool","pass","lsp"])json";
 constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
 constexpr std::string_view kEmitKinds =
     R"json(["ln","lg","verilog","pyrope","lnast-dump","graphviz","metadata","results","diagnostics"])json";
@@ -179,16 +180,45 @@ int describe_option(const Options& opts, const std::string& name) {
   return -1;
 }
 
+// `lhd list log-channels` — the developer-logging channel vocabulary
+// (livehd::log). `--set <channel>.log=<level>` (off|error|warn|info|debug|trace)
+// enables tracing for a channel and its dotted subtree; compiled out in `-c opt`.
+int list_log_channels(const Options& opts) {
+  const auto& chans = livehd::log::channels();
+  if (opts.diag_fmt == Diag_fmt::jsonl) {
+    std::string items = "[";
+    for (auto c : chans) {
+      if (items.size() > 1) {
+        items += ',';
+      }
+      items += std::format("\"{}\"", json_escape(c));
+    }
+    items += "]";
+    print_json_line(std::format(
+        R"json({{"schema_version":1,"pattern":"log-channels","levels":["off","error","warn","info","debug","trace"],"items":{}}})json",
+        items));
+    return 0;
+  }
+  std::print("log channels ( --set <channel>.log=off|error|warn|info|debug|trace; off by default ):\n");
+  for (auto c : chans) {
+    std::print("  {}\n", c);
+  }
+  return 0;
+}
+
 int list_command(const Options& opts) {
   std::string pattern = opts.files.empty() ? "" : opts.files.front();
 
   if (pattern.empty()) {
     print_json_line(
-        R"json({"schema_version":1,"patterns":[{"name":"steps","scope":"global"},{"name":"recipes","scope":"global"},{"name":"emit-kinds","scope":"global"},{"name":"error-classes","scope":"global"},{"name":"options","scope":"global"}]})json");
+        R"json({"schema_version":1,"patterns":[{"name":"steps","scope":"global"},{"name":"recipes","scope":"global"},{"name":"emit-kinds","scope":"global"},{"name":"error-classes","scope":"global"},{"name":"options","scope":"global"},{"name":"log-channels","scope":"global"}]})json");
     return 0;
   }
   if (pattern == "options") {
     return list_options(opts);
+  }
+  if (pattern == "log-channels") {
+    return list_log_channels(opts);
   }
   if (pattern == "steps") {
     print_json_line(std::format(R"json({{"schema_version":1,"pattern":"steps","items":{}}})json", kSteps));
@@ -206,7 +236,9 @@ int list_command(const Options& opts) {
     print_json_line(std::format(R"json({{"schema_version":1,"pattern":"error-classes","items":{}}})json", kErrorClasses));
     return 0;
   }
-  std::print(stderr, "lhd list: unknown pattern '{}' (try: steps, recipes, emit-kinds, error-classes, options [REGEX])\n", pattern);
+  std::print(stderr,
+             "lhd list: unknown pattern '{}' (try: steps, recipes, emit-kinds, error-classes, options [REGEX], log-channels)\n",
+             pattern);
   return 1;
 }
 
@@ -227,19 +259,14 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"scan","description":"Pyrope import/dependency discovery: parse each .prp and report its import strings (raw, as written; path resolution lands with the import resolver). For depfile writers and BUILD generators (gazelle-style)","args":{"required":[{"name":"files","type":"path[]","positional":true}],"optional":[{"name":"result-json","type":"path"}]},"inputs":["pyrope"],"outputs":["result.scan"],"examples":["lhd scan f1.prp f2.prp"]})json");
     return 0;
   }
-  if (name == "check") {
-    print_json_line(
-        R"json({"schema_version":1,"name":"check","description":"Logic equivalence check (LEC) via inou/yosys/lgcheck; non-verilog sides are compiled to verilog first (bare .prp/.v/.sv paths infer their kind)","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd check --impl verilog:net.v --ref verilog:gold.v --impl-top foo --ref-top foo","lhd check --impl x.prp --ref verilog:gold.v"]})json");
-    return 0;
-  }
   if (name == "lec") {
     print_json_line(
-        R"json({"schema_version":1,"name":"lec","description":"Relational equivalence check (LEC) via the in-process pass/lec engine (cvc5, no yosys): prove_equal(ref, impl). lg:/pyrope:/ln: sides are loaded/elaborated to LGraphs (verilog LEC still goes through `lhd check`). Engine knobs are --set lec.* (`lhd lec --help`)","args":{"required":[{"name":"impl","type":"lg:DIR|pyrope:PATH|ln:DIR"},{"name":"ref","type":"lg:DIR|pyrope:PATH|ln:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"set","type":"lec.flag=value","repeatable":true}]},"inputs":["lg","pyrope","ln"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.prp","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind"]})json");
+        R"json({"schema_version":1,"name":"lec","description":"Logic equivalence check (LEC): prove_equal(ref, impl). Sides are verilog:/pyrope:/ln:/lg: (or a bare .v/.sv/.prp; kind inferred), loaded/elaborated to LGraphs (verilog via --reader, default slang). The --set lec.solver knob picks the backend: cvc5 (default, in-process SMT), bitwuzla (in-process SMT), or lgyosys (inou/yosys/lgcheck, the former `lhd check`). Other engine knobs are --set lec.* (`lhd lec --help`)","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"set","type":"lec.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.v","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind","lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo"]})json");
     return 0;
   }
   if (name == "compile" || name == "compile verilog" || name == "compile pyrope") {
     print_json_line(
-        R"json({"schema_version":1,"name":"compile","description":"The single source->IR->netlist action (front-end + elaborate + synth fused: one action, one exit code). Takes Pyrope/(System)Verilog sources (language word optional: inferred from .prp/.v/.sv) and/or ln:/lg: IR inputs; positional ln:DIR supplies pre-elaborated imports, lg:DIR pre-compiled libraries; ln:/lg:-only inputs aggregate, optimize, or link. Verilog readers: yosys-verilog/yosys-slang go through yosys into lg:, slang is the direct SV -> LNAST front-end (ln:/lg: emits, the pyrope flow)","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["yosys-verilog","yosys-slang","slang"],"default":"yosys-slang"},{"name":"recipe","type":"enum","values":["O0","O1","O2"],"default":"O1"},{"name":"set","type":"pass.flag=value","repeatable":true},{"name":"depfile","type":"path"},{"name":"emit","type":"verilog:PATH|pyrope:PATH (or a bare .v/.sv/.prp; kind inferred)"},{"name":"emit-dir","type":"lg:DIR/|ln:DIR/|verilog:DIR/|pyrope:DIR/|lnast-dump:DIR/"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","ln","pyrope","lnast-dump"],"examples":["lhd compile foo.v --top foo --recipe O2 --emit verilog:net.v","lhd compile x.prp --emit net.v --emit-dir lg:x_lgs/","lhd compile x.prp --emit-dir ln:x_lns/","lhd compile ln:x_lns/ --recipe O1 --emit verilog:net.v","lhd compile lg:top_lgs/ --emit-dir lg:top_opt_lgs/"]})json");
+        R"json({"schema_version":1,"name":"compile","description":"The single source->IR->netlist action (front-end + elaborate + synth fused: one action, one exit code). Takes Pyrope/(System)Verilog sources (language word optional: inferred from .prp/.v/.sv) and/or ln:/lg: IR inputs; positional ln:DIR supplies pre-elaborated imports, lg:DIR pre-compiled libraries; ln:/lg:-only inputs aggregate, optimize, or link. Verilog readers: yosys-verilog/yosys-slang go through yosys into lg:, slang is the direct SV -> LNAST front-end (ln:/lg: emits, the pyrope flow)","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"recipe","type":"enum","values":["O0","O1","O2"],"default":"O1"},{"name":"set","type":"pass.flag=value","repeatable":true},{"name":"depfile","type":"path"},{"name":"emit","type":"verilog:PATH|pyrope:PATH (or a bare .v/.sv/.prp; kind inferred)"},{"name":"emit-dir","type":"lg:DIR/|ln:DIR/|verilog:DIR/|pyrope:DIR/|lnast-dump:DIR/"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","ln","pyrope","lnast-dump"],"examples":["lhd compile foo.v --top foo --recipe O2 --emit verilog:net.v","lhd compile x.prp --emit net.v --emit-dir lg:x_lgs/","lhd compile x.prp --emit-dir ln:x_lns/","lhd compile ln:x_lns/ --recipe O1 --emit verilog:net.v","lhd compile lg:top_lgs/ --emit-dir lg:top_opt_lgs/"]})json");
     return 0;
   }
   if (name == "recipe:O0" || name == "O0") {
@@ -288,7 +315,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "tool") {
     print_json_line(
-        R"json({"schema_version":1,"name":"tool","description":"Unified ln/lg inspector (2f-cli): `lhd tool <verb> [options] <inputs>` where a verb is cat|grep|diff|tree and inputs are ln:DIR / lg:DIR (or .prp/.v/.sv sources for the ln path). cat = structured dump; grep = filtered search (>=1 filter, may span libraries); diff = unified-diff of two inputs; tree = instance hierarchy. lg options: --target node|pin|edge|all (default all), --attr CSV, --max N, --hier [N], --top M; filters are field:value terms (name:/id:/color:/bits:/from:/to:, substring|~regex|=exact, numeric >,<,>=,<=,a..b,nil). Prints to stdout (--diag-fmt jsonl for machine form). Replaces the former ln.cat/ln.diff","args":{"required":[{"name":"verb","type":"cat|grep|diff|tree","positional":true},{"name":"inputs","type":"ln:DIR|lg:DIR|.prp|.v|.sv|field:value","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"target","type":"node|pin|edge|all"},{"name":"attr","type":"csv"},{"name":"max","type":"int"},{"name":"hier","type":"int?"}]},"inputs":["ln","lg","pyrope","verilog"],"outputs":["stdout"],"examples":["lhd tool cat lg:dir --top m","lhd tool grep color:nil lg:dir","lhd tool diff lg:before lg:after --attr color","lhd tool tree lg:dir --top m","lhd tool cat x.prp","lhd tool diff old.prp new.prp"]})json");
+        R"json({"schema_version":1,"name":"tool","description":"Unified ln/lg inspector: `lhd tool <verb> [options] <inputs>` where a verb is cat|grep|diff|tree and inputs are ln:DIR / lg:DIR / verilog:FILE / pyrope:FILE (a bare .prp/.v/.sv source is the verilog:/pyrope: shortcut; the ln path takes sources). cat = structured dump; grep = filtered search (>=1 filter, may span libraries); diff = unified-diff of two inputs; tree = instance hierarchy (add --target kind:register / --target kind:memory, repeatable, to also list those nodes inside each module — registers/memories on the same hierarchy; any Ntype name also matches). lg options: --target node|pin|edge|all (default all) or tree's kind:<X>, --attr CSV, --max N, --hier [N], --top M; filters are field=value terms (name=/kind=/id=/color=/bits=/from=/to=; ':' also accepted but Pyrope reads it as a type; strings substring|==exact|~regex; numeric >,<,>=,<=,a..b; =nil; a bare term like 'get_mask' has no field and matches any column plus the node/pin identity). Prints to stdout (--diag-fmt jsonl for machine form). Replaces the former ln.cat/ln.diff","args":{"required":[{"name":"verb","type":"cat|grep|diff|tree","positional":true},{"name":"inputs","type":"ln:DIR|lg:DIR|verilog:FILE|pyrope:FILE|.prp|.v|.sv|field=value|term","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"target","type":"node|pin|edge|all|kind:<X>"},{"name":"attr","type":"csv"},{"name":"max","type":"int"},{"name":"hier","type":"int?"}]},"inputs":["ln","lg","pyrope","verilog"],"outputs":["stdout"],"examples":["lhd tool cat lg:dir --top m","lhd tool grep get_mask lg:dir","lhd tool grep color=nil lg:dir","lhd tool diff lg:before lg:after --attr color","lhd tool tree lg:dir --top m","lhd tool tree lg:dir --top m --target kind:register --target kind:memory","lhd tool cat x.prp","lhd tool diff old.prp new.prp"]})json");
     return 0;
   }
   if (name == "dump") {
@@ -357,17 +384,15 @@ void print_general_help() {
       "               lhd compile x.prp --emit-dir ln:x_lns/      # pre-elaborate for importers\n"
       "               lhd compile ln:x_lns/ --emit verilog:net.v  # synth from IR\n"
       "               lhd compile lg:foo_lgs/ --emit-dir lg:foo_opt_lgs/\n"
-      "  check      logic equivalence (LEC) via inou/yosys/lgcheck; pyrope:/ln:/lg: sides compile first\n"
-      "               lhd check --impl verilog:net.v --ref verilog:gold.v --top foo\n"
-      "               lhd check --impl x.prp --ref verilog:gold.v\n"
-      "  lec        relational equivalence (LEC) via the in-process cvc5 engine (no yosys; lg:/pyrope:/ln:)\n"
-      "               lhd lec --impl impl.prp --ref ref.prp\n"
-      "               lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind\n"
+      "  lec        logic equivalence (LEC): verilog:/pyrope:/ln:/lg: sides, --set lec.solver picks the\n"
+      "               backend — cvc5 (default, in-process) | bitwuzla | lgyosys (yosys/lgcheck)\n"
+      "               lhd lec --impl impl.prp --ref ref.v\n"
+      "               lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo\n"
       "  scan       report each .prp file's import strings (the result's \"scan\" member)\n"
       "               lhd scan x.prp y.prp\n"
       "  tool       inspect ln:/lg: artifacts: cat | grep | diff | tree (stdout; --diag-fmt jsonl)\n"
       "               lhd tool cat lg:dir --top m       # structured dump + attributes\n"
-      "               lhd tool grep color:nil lg:dir    # filtered search (e.g. uncolored nodes)\n"
+      "               lhd tool grep get_mask lg:dir     # filtered search (bare term -> any field)\n"
       "               lhd tool diff lg:before lg:after --attr color\n"
       "               lhd tool cat x.prp                # LNAST cat (was ln.cat)\n"
       "  lsp        Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
@@ -393,7 +418,7 @@ void print_general_help() {
       "               lhd compile x.prp --recipe O0 --dump lg\n"
       "\n"
       "shared flags:\n"
-      "  --top T   --reader yosys-verilog|yosys-slang|slang   --recipe O0|O1|O2\n"
+      "  --top T   --reader slang|yosys-slang|yosys-verilog   --recipe O0|O1|O2\n"
       "  --set pass.flag=value   --config lhd.toml   (`lhd list options` for the vocabulary)\n"
       "  --workdir DIR   --result-json PATH\n"
       "  --diag-fmt auto|jsonl|pretty   result + diagnostic rendering (auto: pretty on a\n"
@@ -500,7 +525,7 @@ int help_command(const Options& opts) {
         "  direct SV->LNAST front-end). The graph recipe (default O1) and codegen then run.\n"
         "\n"
         "flags:\n"
-        "  --top T              --reader R   yosys-verilog | yosys-slang | slang (default yosys-slang)\n"
+        "  --top T              --reader R   slang | yosys-slang | yosys-verilog (default slang)\n"
         "  --recipe O0|O1|O2    (default O1; `lhd list recipes`)\n"
         "  --emit verilog:PATH | pyrope:PATH   (or a bare .v/.sv/.prp — kind inferred)\n"
         "  --emit-dir K:DIR/    lg: | ln: | verilog: | pyrope: | lnast-dump:\n"
@@ -515,41 +540,29 @@ int help_command(const Options& opts) {
     print_options_section({"upass.", "cprop.", "bitwidth.", "cgen."});
     return 0;
   }
-  if (topic == "check") {
-    std::print(
-        "lhd check — logic equivalence (LEC) via inou/yosys/lgcheck\n"
-        "\n"
-        "usage: lhd check --impl KIND:PATH --ref KIND:PATH [flags]\n"
-        "  Sides may be verilog:/pyrope:/ln:/lg: or a bare .v/.sv/.prp path (kind inferred);\n"
-        "  non-verilog sides are compiled to Verilog first. For the in-process cvc5 engine\n"
-        "  (no yosys, lg:/pyrope:/ln: only) use `lhd lec` instead.\n"
-        "\n"
-        "flags:\n"
-        "  --impl KIND:PATH   --ref KIND:PATH\n"
-        "  --top T            --impl-top T   --ref-top T\n"
-        "\n"
-        "examples:\n"
-        "  lhd check --impl verilog:net.v --ref verilog:gold.v --top foo\n"
-        "  lhd check --impl x.prp --ref verilog:gold.v\n");
-    return 0;
-  }
   if (topic == "lec") {
     std::print(
-        "lhd lec — relational equivalence (LEC) via the in-process pass/lec engine (cvc5)\n"
+        "lhd lec — logic equivalence (LEC): prove_equal(ref, impl)\n"
         "\n"
         "usage: lhd lec --impl KIND:PATH --ref KIND:PATH [flags]\n"
-        "  Sides are lg:DIR, pyrope:PATH (or a bare .prp), or ln:DIR — loaded/elaborated to\n"
-        "  LGraphs and proven equal in process (no yosys). verilog: LEC goes through\n"
-        "  `lhd check`. Engine knobs are the --set lec.* options below.\n"
+        "  Sides may be verilog:/pyrope:/ln:/lg: or a bare .v/.sv/.prp path (kind inferred).\n"
+        "  Each side is loaded/elaborated to LGraphs; verilog elaborates through --reader\n"
+        "  (default slang, the direct SV->LNAST front-end; --reader yosys-slang|yosys-verilog\n"
+        "  overrides). The --set lec.solver knob selects the backend:\n"
+        "    cvc5     in-process SMT (default)\n"
+        "    bitwuzla in-process SMT\n"
+        "    lgyosys  inou/yosys/lgcheck (the former `lhd check`; reads Verilog directly,\n"
+        "             the path for gate-level / yosys-origin netlists)\n"
         "\n"
         "flags:\n"
         "  --impl KIND:PATH   --ref KIND:PATH\n"
         "  --top T            --impl-top T   --ref-top T\n"
-        "  --set lec.flag=value\n"
+        "  --reader R         --set lec.flag=value\n"
         "\n"
         "examples:\n"
-        "  lhd lec --impl impl.prp --ref ref.prp\n"
-        "  lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind\n");
+        "  lhd lec --impl impl.prp --ref ref.v\n"
+        "  lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind\n"
+        "  lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo\n");
     print_options_section({"lec."});
     return 0;
   }
@@ -566,10 +579,11 @@ int help_command(const Options& opts) {
   }
   if (topic == "tool") {
     std::print(
-        "lhd tool — unified ln/lg inspector (2f-cli): cat | grep | diff | tree\n"
+        "lhd tool — unified ln/lg inspector: cat | grep | diff | tree\n"
         "\n"
         "usage: lhd tool <verb> [options] <inputs…>\n"
-        "  inputs are ln:DIR / lg:DIR (or .prp/.v/.sv sources for the ln path).\n"
+        "  inputs are ln:DIR / lg:DIR / verilog:FILE / pyrope:FILE (a bare .prp/.v/.sv\n"
+        "  source is the verilog:/pyrope: shortcut; the ln path takes sources).\n"
         "  cat   structured dump of one input (attributes shown by default)\n"
         "  grep  filtered search (>=1 filter; may span multiple lg: libraries)\n"
         "  diff  unified-diff of two inputs (-C n text-line context)\n"
@@ -581,14 +595,21 @@ int help_command(const Options& opts) {
         "  --top M    pick a module     --attr CSV   choose columns\n"
         "  --hier [N] descend instances --max N      row cap (0 = unlimited)\n"
         "\n"
-        "filters (field:value, AND-combined): name:Mult  id:12  color:nil  bits:>8\n"
-        "  bits:8..16  src:x.prp:5  from:A  to:B   (strings: substring, ~regex, =exact)\n"
+        "tree --target kind:<X> (repeatable): also list the nodes of kind X inside each\n"
+        "  module, so registers/memories show where they sit in the hierarchy. kind:register\n"
+        "  = flop/fflop/latch, kind:memory = memory; any Ntype name (flop, mux, sub, …) also\n"
+        "  matches exactly. Default (no kind) = the bare instance tree.\n"
+        "\n"
+        "filters (AND-combined): a bare term matches any column + identity (grep get_mask),\n"
+        "  or field=value: name=Mult  kind=mux  id=12  color=nil  bits>8  bits=8..16  from=A\n"
+        "  ('=' preferred — Pyrope reads ':' as a type; ':' still works; strings ==exact, ~regex)\n"
         "\n"
         "examples:\n"
         "  lhd tool cat lg:dir --top m\n"
-        "  lhd tool grep color:nil lg:dir            # nodes pass.color left uncolored\n"
+        "  lhd tool grep color=nil lg:dir            # nodes pass.color left uncolored\n"
         "  lhd tool diff lg:before lg:after --attr color\n"
         "  lhd tool tree lg:dir --top m\n"
+        "  lhd tool tree lg:dir --top m --target kind:register --target kind:memory\n"
         "  lhd tool cat x.prp          lhd tool diff old.prp new.prp   # the former ln.cat/ln.diff\n");
     return 0;
   }
@@ -609,11 +630,13 @@ int help_command(const Options& opts) {
         "lhd list — enumerate the CLI vocabulary (one JSON line; --diag-fmt pretty for options)\n"
         "\n"
         "usage: lhd list <pattern>\n"
-        "  steps | recipes | emit-kinds | error-classes | options [REGEX]\n"
+        "  steps | recipes | emit-kinds | error-classes | options [REGEX] | log-channels\n"
         "  `options` lists every --set/--config pass.flag (filter with a REGEX over the names).\n"
+        "  `log-channels` lists the developer-logging channels (`--set <channel>.log=<level>`).\n"
         "\n"
         "examples:\n"
         "  lhd list options 'cgen\\..*'\n"
+        "  lhd list log-channels\n"
         "  lhd list recipes\n");
     return 0;
   }

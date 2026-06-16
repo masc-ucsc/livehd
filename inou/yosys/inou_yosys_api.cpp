@@ -21,6 +21,7 @@
 #endif
 #include "graph_library_singleton.hpp"
 #include "kernel/yosys.h"
+#include "lgyosys_tolg.hpp"
 #include "mustache.hpp"
 
 static void log_error_atexit() { throw std::runtime_error("yosys finished"); }
@@ -375,18 +376,19 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
 
   auto& lib = livehd::Hhds_graph_library::instance(path);
 
-  // gids are sparse name-hashes (not a sequential counter), so "new graphs"
-  // can't be a capacity range — snapshot the live gid set before yosys runs and
-  // diff against it afterward. all_gids() returns a sorted vector.
-  const std::vector<hhds::Gid> before = lib.all_gids();
-
   Yosys::yosys_setup();
 
   call_yosys(vars);
 
-  for (const hhds::Gid id : lib.all_gids()) {
-    if (std::binary_search(before.begin(), before.end(), id)) {
-      continue;  // existed before yosys ran
+  // The yosys2lg pass records the gid of every module body it built this run
+  // (livehd::yosys_tolg::built_gids, reset at the pass's execute() entry). We
+  // collect exactly those rather than diffing all_gids() before/after: gids are
+  // stable name-hashes, so when re-running into a previously-saved lgdb the
+  // module's slot is already loaded from disk and a before/after diff would
+  // find nothing "new" — yielding a spurious "produced no graphs".
+  for (const hhds::Gid id : livehd::yosys_tolg::built_gids()) {
+    if (!lib.has_graph(id)) {
+      continue;
     }
     auto g = lib.get_graph(id);
     if (g) {

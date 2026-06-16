@@ -10,7 +10,7 @@
 #   lhd pass color <alg>                  (colors EVERY def: top + sub-defs)
 #   lhd pass partition --emit-dir lg:dir2 (partitions every def + re-links Subs)
 #   lg:dir2 -> verilog
-#   lhd check (partitioned vs original): must be LEC-equivalent
+#   lhd lec --set lec.solver=lgyosys (partitioned vs original): must be LEC-equivalent
 #
 # Fixtures (inou/prp/tests/pyrope):
 #   hier_comb  - combinational, top instances `adder` x2 + `bitmix`
@@ -59,7 +59,7 @@ for entry in "${DESIGNS[@]}"; do
     grep -q "${BASE}.*__c" "$D/part.v" || fail "$FIX/$ALG: no per-color submodules in partitioned Verilog"
     grep -q "${BASE}.${CHILD}" "$D/part.v" || fail "$FIX/$ALG: child def '$CHILD' dropped (hierarchy lost)"
     # 6. LEC: the partitioned hierarchical design must equal the original
-    run check --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
+    run lec --set lec.solver=lgyosys --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
     echo "PASS: $FIX [$ALG] hierarchical partition is LEC-equivalent to the original"
   done
 done

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """2f-v2prp gated test: a single golden `.v` round-trips through Pyrope.
 
-    lhd compile --reader slang foo.v --emit-dir pyrope:DIR/   # slang -> Pyrope
-    lhd check   --impl pyrope:DIR/foo.prp --ref verilog:foo.v # recompile + LEC
+    lhd compile foo.v --emit-dir pyrope:DIR/                         # slang -> Pyrope
+    lhd lec --set lec.solver=lgyosys --impl pyrope:DIR/foo.prp --ref verilog:foo.v  # recompile + LEC
 
-`lhd check` (yosys/lgcheck) is the authoritative gate: equivalent => pass,
-not-equivalent => fail, and a check TIMEOUT => inconclusive (exit 0, NOT a fail
+`lhd lec --set lec.solver=lgyosys` (yosys/lgcheck) is the authoritative gate:
+equivalent => pass, not-equivalent => fail, and a TIMEOUT => inconclusive (exit 0, NOT a fail
 — per the task's gate semantics).  This is the per-file form driven by the
 `prp-v2prp-<name>` bazel targets; inou/prp/tests/v2prp_census.py is the
 whole-corpus census.
@@ -76,13 +76,13 @@ def main():
     #    so a single --top pins both sides.
     try:
         chk = subprocess.run(
-            [lhd, "check", "--impl", "pyrope:" + prp, "--ref", "verilog:" + v, "--top", top,
+            [lhd, "lec", "--set", "lec.solver=lgyosys", "--impl", "pyrope:" + prp, "--ref", "verilog:" + v, "--top", top,
              "--workdir", os.path.join(work, "w_check")],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=CHECK_TIMEOUT)
     except subprocess.TimeoutExpired:
         # Authoritative gate is inconclusive on timeout — pass (run `lhd lec`
         # by hand for the cvc5 cross-check).
-        print("{} - v2prp - inconclusive (lhd check timeout >{}s, NOT a fail)".format(name, CHECK_TIMEOUT))
+        print("{} - v2prp - inconclusive (lhd lec timeout >{}s, NOT a fail)".format(name, CHECK_TIMEOUT))
         return 0
 
     if chk.returncode == 0:

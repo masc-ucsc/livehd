@@ -71,6 +71,16 @@ sh_test(
     data = _FLOW_DATA,
 )
 
+# `lhd lec` as the single equivalence command: verilog inputs (slang default +
+# --reader yosys-* override), the cvc5 (default) and lgyosys backends via
+# --set lec.solver, and the retired `check` command's migration error.
+sh_test(
+    name = "lhd_lec_verilog_test",
+    size = "large",
+    srcs = ["lhd_lec_verilog_test.sh"],
+    data = _FLOW_DATA + glob(["merge_demo/*"]),
+)
+
 sh_test(
     name = "lhd_scan_test",
     srcs = ["lhd_scan_test.sh"],
@@ -137,13 +147,16 @@ sh_test(
     data = _FLOW_DATA + ["part_hier.v"],
 )
 
-# 2f-cli: the `lhd tool` lg-side inspector (cat/grep/diff/tree, the filter
-# grammar, jsonl, --max) on a real colored design.
+# The `lhd tool` lg-side inspector (cat/grep/diff/tree, the filter grammar,
+# jsonl, --max) on a real colored design.
 sh_test(
     name = "lhd_tool_test",
     size = "large",
     srcs = ["lhd_tool_test.sh"],
-    data = _FLOW_DATA + ["part_hier.v"],
+    data = _FLOW_DATA + [
+        "part_hier.v",
+        "tree_hier.prp",
+    ],
 )
 
 # 2h-set_path: --set namespace = command path + context-relative key

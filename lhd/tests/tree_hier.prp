@@ -1,0 +1,30 @@
+/*
+:name: tree_hier
+:type: lgraph
+*/
+
+// Hierarchical fixture for `lhd tool tree --target kind:register|memory`: the
+// top instantiates a flop-only module (`regs`) and a memory module (`ram`), so
+// the call tree carries both a register and a memory one level down. Widths are
+// chosen so nothing narrows (runtime wrap/sat has no tolg lowering yet).
+
+mod regs(din:u8) -> (q:u8@[1]) {
+  reg r:u8 = 0
+  q = r
+  r = din
+}
+
+mod ram(waddr:u3, wdata:u8, we:u1, raddr:u3) -> (rdata:u8@[0]) {
+  reg mem:[8]u8 = 0
+  rdata = mem[raddr]
+  if we {
+    mem[waddr] = wdata
+  }
+}
+
+mod top(din:u8, waddr:u3, wdata:u8, we:u1, raddr:u3) -> (q:u8@[1], rdata:u8@[0]) {
+  stage[1] u_regs = regs(din=din)
+  const u_ram = ram(waddr=waddr, wdata=wdata, we=we, raddr=raddr)
+  q     = u_regs
+  rdata = u_ram
+}

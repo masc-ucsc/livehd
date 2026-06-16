@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "diag.hpp"
+#include "log.hpp"                // LHD_LOG developer tracing on the "upass" channel
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
 #include "upass_constprop.hpp"
@@ -334,6 +335,8 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
 
 void Pass_upass::work(Eprp_var& var) {
   Pass_upass up(var);
+
+  LHD_LOG("upass", info, "run: {} input unit(s), {} pass(es) in order", var.lnasts.size(), up.upass_order.size());
 
   // Test-level expectations (verifier_pass / verifier_fail) describe the
   // whole program, including any helper lnasts func_extract spawns from

@@ -174,9 +174,9 @@ sh_test(
 ]
 
 # 2f-v2prp: the REVERSE direction over the same equiv corpus — the slang reader
-# lowers each golden <name>.v to Pyrope (upass/prp_writer), `lhd check`
-# re-compiles that Pyrope and LECs it against the same <name>.v. `lhd check`
-# (yosys) is the authoritative gate; a check timeout is inconclusive (not a
+# lowers each golden <name>.v to Pyrope (upass/prp_writer), `lhd lec`
+# re-compiles that Pyrope and LECs it against the same <name>.v. `lhd lec
+# --set lec.solver=lgyosys` (yosys) is the authoritative gate; a timeout is inconclusive (not a
 # fail). Driven off the .v files (every equiv pair ships one). All current pairs
 # run < 20 s, so none are tagged `long`/`manual`.
 [

@@ -65,7 +65,7 @@ compile good.sv g_ys     yosys-slang
 compile bad.sv  b_native slang
 
 check() {
-  $LHD check --impl "verilog:$WORK/$1_all.v" --ref "verilog:$WORK/$2_all.v" --impl-top ca --ref-top ca \
+  $LHD lec --set lec.solver=lgyosys --impl "verilog:$WORK/$1_all.v" --ref "verilog:$WORK/$2_all.v" --impl-top ca --ref-top ca \
        --workdir "$WORK/c_${1}_${2}_$$" 2>&1 | grep -o '"status":"[a-z]*"' | head -1
 }
 expect() { if [ "$2" != "$3" ]; then echo "FAIL: $1 -> got '$2', want '$3'"; fail=1; else echo "ok: $1 -> $2"; fi; }

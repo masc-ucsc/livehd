@@ -28,6 +28,7 @@
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
+#include "lgyosys_tolg.hpp"
 #include "node_util.hpp"
 #include "perf_tracing.hpp"
 #include "source_path.hpp"
@@ -56,6 +57,16 @@ using livehd::graph_util::type_op_of;
 // When true, the cell bits should have no effect (set to zero or large num for
 // bitwidth to adjust should work too)
 #define CELL_SIZE_IGNORE 1
+
+// Built-gid channel for do_tolg (see lgyosys_tolg.hpp). Defined outside the
+// yosys PRIVATE_NAMESPACE so Inou_yosys_api::do_tolg (other TU, same
+// cc_library) can read it.
+namespace livehd::yosys_tolg {
+static std::vector<hhds::Gid> g_built_gids;
+void                          reset_built_gids() { g_built_gids.clear(); }
+void                          record_built_gid(hhds::Gid id) { g_built_gids.push_back(id); }
+const std::vector<hhds::Gid>& built_gids() { return g_built_gids; }
+}  // namespace livehd::yosys_tolg
 
 USING_YOSYS_NAMESPACE
 PRIVATE_NAMESPACE_BEGIN
@@ -2510,6 +2521,11 @@ struct Yosys2lg_Pass : public Yosys::Pass {
     cell_port_inputs.clear();
     driven_signals.clear();
 
+    // Records the gid of every module body (re)built below so do_tolg can
+    // collect exactly this run's graphs (gids are stable name-hashes, so an
+    // all_gids() diff is empty when re-running into a saved lgdb).
+    livehd::yosys_tolg::reset_built_gids();
+
     auto& lib = Hhds_graph_library::instance(path);
 
     // First pass: declare IOs for every module so cross-module Sub references
@@ -2521,6 +2537,13 @@ struct Yosys2lg_Pass : public Yosys::Pass {
       auto gio = lib.find_io(mod_name);
       if (!gio) {
         gio = lib.create_io(mod_name);
+      } else if (design->selected_module(it.first) && gio->has_graph()) {
+        // Re-elaboration into a saved lgdb: drop the stale loaded body BEFORE
+        // reconciling IO decls below. A loaded body's IO pins are connected,
+        // and delete_input/add_input (the port_id-reorder dance) forbids
+        // deleting a connected pin. The second pass rebuilds the body fresh.
+        // delete_graph keeps the GraphIO, its IO decls, and the stable gid.
+        lib.delete_graph(gio->get_gid());
       }
 
       for (const auto& port : mod->ports) {
@@ -2598,13 +2621,17 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 
         auto gio = lib.find_io(mod_name);
         I(gio);
-        std::shared_ptr<hhds::Graph> g_shared;
-        if (gio->has_graph()) {
-          g_shared = gio->get_graph();
-        } else {
-          g_shared = gio->create_graph();
-        }
+        // Build a fresh body. Any stale loaded body was already dropped in the
+        // first pass (re-elaboration must replace, not append onto, the loaded
+        // graph — building into it would double every node and double-drive
+        // the outputs), so create_graph() always starts clean here.
+        I(!gio->has_graph());
+        std::shared_ptr<hhds::Graph> g_shared = gio->create_graph();
+        I(g_shared);
         auto* g = g_shared.get();
+
+        // Record the gid so do_tolg can collect exactly this run's graphs.
+        livehd::yosys_tolg::record_built_gid(gio->get_gid());
 
         process_assigns(mod, g);
         process_cell_drivers_intialization(mod, g);

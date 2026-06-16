@@ -6,7 +6,7 @@
 # Ladder mode (the bazel slang_compile-* targets):
 #   slang_compile.sh <tier> <file.v>
 # with tier one of:
-#   lec     - compile --reader slang to verilog AND lhd check (LEC) it against
+#   lec     - compile --reader slang to verilog AND lhd lec --set lec.solver=lgyosys (LEC) it against
 #             the source itself. The strongest tier.
 #   verilog - compile to verilog must succeed (a known LEC gap is tracked in
 #             slang_ladder.bzl next to the entry).
@@ -94,7 +94,7 @@ run_one() { # <tier> <file>
       ;;
     lec)
       run_verilog_tier "$f" "$base" "$wd" || return 1
-      ${LHD} check --impl verilog:"$wd"/all.v --ref verilog:"$f" --top "$base" \
+      ${LHD} lec --set lec.solver=lgyosys --impl verilog:"$wd"/all.v --ref verilog:"$f" --top "$base" \
         --workdir "$wd"/wc -q >"$wd"/check.log 2>&1 || {
         echo "FAIL(${base}): LEC mismatch vs source"
         tail -5 "$wd"/check.log

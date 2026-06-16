@@ -13,7 +13,7 @@
 #   pass partition --emit-dir lg:re  (same module structure, original logic)
 #   pass liberty gensim test.lib --emit-dir lg:models
 #   cgen net + models -> impl.v ; cgen re -> ref.v
-#   lhd check (impl vs ref): must be LEC-equivalent
+#   lhd lec --set lec.solver=lgyosys (impl vs ref): must be LEC-equivalent
 #   negative control: a corrupted reference must FAIL the check
 #
 # Hermetic: uses a small vendored Liberty (inou/prp/tests/abc/test.lib), not the
@@ -60,11 +60,11 @@ cat "$W/netv/"*.v "$W/modelsv/"*.v > "$W/impl.v"
 cat "$W/rev/"*.v > "$W/ref.v"
 
 # 7. LEC: the tech-mapped netlist must equal the original logic
-run check --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/wc"
+run lec --set lec.solver=lgyosys --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/wc"
 
 # 8. negative control: a corrupted reference MUST fail the equivalence check
 sed 's/\^/\&/g' "$W/ref.v" > "$W/ref_bad.v"
-if "$LHD" check --impl verilog:"$W/impl.v" --ref verilog:"$W/ref_bad.v" --top "$TOP" \
+if "$LHD" lec --set lec.solver=lgyosys --impl verilog:"$W/impl.v" --ref verilog:"$W/ref_bad.v" --top "$TOP" \
     --workdir "$W/wcn" -q --result-json "$W/rn.json" 2>/dev/null; then
   fail "negative control passed LEC against a corrupted reference (the check is not sound)"
 fi

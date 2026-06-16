@@ -107,5 +107,5 @@ $LHD lec --impl lg:/tmp/ci --ref lg:/tmp/cr --top ctr --set lec.engine=bmc --set
 ## Workaround until fixed
 
 `engine=ind` (the default) is unaffected. For designs where `ind` false-REFUTEs
-(unreachable states) and `bmc` is needed, lower `lec.bound`, or use `lhd check`
+(unreachable states) and `bmc` is needed, lower `lec.bound`, or use `--set lec.solver=lgyosys`
 (yosys lgcheck) which doesn't link the cvc5 CaDiCaL.

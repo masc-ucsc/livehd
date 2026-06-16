@@ -341,8 +341,16 @@ Options parse_args(int argc, char** argv) {
       opts.libs.emplace_back(parse_typed(a, need_value(a, i, argc, argv), false));
     } else if (a == "--top") {
       opts.top = need_value(a, i, argc, argv);
-    } else if (a == "--target") {  // `lhd tool` (2f-cli): node|pin|edge|all
-      opts.tool_target = need_value(a, i, argc, argv);
+    } else if (a == "--target") {  // `lhd tool`: node|pin|edge|all, or tree's kind:<X>
+      auto v = std::string{need_value(a, i, argc, argv)};
+      // `tool tree --target kind:register --target kind:memory` (repeatable):
+      // a kind:<X> / kind=<X> value selects node kinds to surface in the tree;
+      // anything else is the cat/grep/diff node|pin|edge|all target.
+      if (v.starts_with("kind:") || v.starts_with("kind=")) {
+        opts.tool_kinds.push_back(v.substr(5));
+      } else {
+        opts.tool_target = std::move(v);
+      }
     } else if (a == "--attr") {  // explicit display column CSV
       opts.tool_attr = need_value(a, i, argc, argv);
     } else if (a == "--max" || a == "--hops" || a == "-C" || a == "--context") {  // row cap / focus radius / diff context
@@ -473,8 +481,14 @@ Options parse_args(int argc, char** argv) {
                       std::format("unknown option '{}'", a),
                       opts.command.empty() ? "run `lhd help`" : std::format("run `lhd help {}`", opts.command)};
     } else if (opts.command.empty()) {
-      if (a == "compile" || a == "check" || a == "lec" || a == "scan" || a == "lsp" || a == "list" || a == "describe"
-          || a == "version" || a == "help" || a == "tool" || a == "pass") {
+      if (a == "check") {
+        // `check` merged into `lec` (the lgcheck/yosys backend is now a solver).
+        throw Lhd_error{"usage",
+                        "the `check` command merged into `lec` — use `lhd lec ... --set lec.solver=lgyosys`",
+                        "lec defaults to the in-process cvc5 solver; lgyosys is the yosys/lgcheck backend"};
+      }
+      if (a == "compile" || a == "lec" || a == "scan" || a == "lsp" || a == "list" || a == "describe" || a == "version"
+          || a == "help" || a == "tool" || a == "pass") {
         // tool keeps its positionals raw and ORDERED in opts.files: the verb
         // (cat/grep/diff/tree), the filter terms (name:/color:/from:…), and the
         // ln:/lg: inputs all keep their place — tool_command classifies them.

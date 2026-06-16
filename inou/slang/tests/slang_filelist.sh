@@ -47,7 +47,7 @@ fi
 
 # LEC the emitted netlist against the same two sources.
 cat "$DIR"/sub.v "$DIR"/foo.v >"$WD"/ref.v
-${LHD} check --impl verilog:"$WD"/all.v --ref verilog:"$WD"/ref.v --top foo \
+${LHD} lec --set lec.solver=lgyosys --impl verilog:"$WD"/all.v --ref verilog:"$WD"/ref.v --top foo \
   --workdir "$WD"/wc -q >"$WD"/check.log 2>&1 || {
   echo "FAIL(filelist): LEC mismatch vs source"
   tail -10 "$WD"/check.log

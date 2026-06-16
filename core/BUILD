@@ -9,6 +9,15 @@ config_setting(
     values = {"define": "profiling=1"},
 )
 
+# LHD_LOG (core/log.hpp) is developer trace logging. It compiles to a no-op in
+# -c opt and stays active everywhere else, so the macro define is OFF under the
+# `opt` compilation mode and ON otherwise. `defines` (not local_defines)
+# propagate to every dependent so the macro vanishes in opt across the tree.
+config_setting(
+    name = "opt_build",
+    values = {"compilation_mode": "opt"},
+)
+
 cc_library(
     name = "core",
     srcs = glob(
@@ -22,6 +31,9 @@ cc_library(
             "LIVEHD_PROFILING=1",
         ],
         "//conditions:default": [],
+    }) + select({
+        ":opt_build": [],
+        "//conditions:default": ["LIVEHD_LOGGING=1"],
     }),
     includes = ["."],
     linkopts = ["-lpthread"],
@@ -84,6 +96,17 @@ cc_test(
     name = "diag_test",
     srcs = [
         "tests/diag_test.cpp",
+    ],
+    deps = [
+        ":core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "log_test",
+    srcs = [
+        "tests/log_test.cpp",
     ],
     deps = [
         ":core",

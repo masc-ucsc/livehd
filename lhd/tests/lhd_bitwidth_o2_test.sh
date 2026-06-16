@@ -26,7 +26,7 @@ fail() {
   --emit verilog:"$W/bw_mix.gen.v" --workdir "$W/w_mix" -q 2>/dev/null \
   || fail "O2 compile of bw_mix.v failed"
 [ -s "$W/bw_mix.gen.v" ] || fail "O2 compile produced empty netlist"
-"$LHD" check --impl verilog:"$W/bw_mix.gen.v" --ref verilog:"$MIX" --top bw_mix \
+"$LHD" lec --set lec.solver=lgyosys --impl verilog:"$W/bw_mix.gen.v" --ref verilog:"$MIX" --top bw_mix \
   --workdir "$W/w_chk" -q 2>/dev/null \
   || fail "bw_mix O2 netlist is not equivalent to the source"
 

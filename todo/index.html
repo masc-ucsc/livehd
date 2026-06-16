@@ -51,7 +51,6 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 <h3 id="livehd">LiveHD</h3>
 <ul>
 <li><em>Group 2:</em><ul>
-<li><a class="xref" href="livehd/2f-cli.html">2f-cli</a> <code>lhd tool</code> unified ln/lg inspector &amp; attribute debugger (cat/grep/diff/tree) — replaces <code>ln.cat</code>/<code>ln.diff</code>; debug/diff color &amp; other attributes. Core landed (tests green); <code>--emit</code>/<code>--hops</code>/IO-ports follow-ups remain.</li>
 <li><a class="xref" href="livehd/2n.html">2n</a> Pyrope LSP server — Phases B–E (hover/nav/workspace) remain.</li>
 <li><a class="xref" href="livehd/2m-multiport_mem.html">2m-multiport_mem</a> Multiport / multi-clock memory codegen: the <code>--reader slang</code> chunked-<code>wensize</code> SRAM writes now elaborate, but <code>tolg</code>/<code>cgen</code> can't emit them — per-port clock binding (driving case XiangShan <code>data_mem_8x4</code>, three distinct port clocks → "no clock to bind" → truncated Verilog), the multiclock <code>cgen_memory</code> wrapper family (only <code>1rd_1wr</code> exists), and a related single-clock <code>array_ext.v</code> cgen hang.</li>
 </ul></li>

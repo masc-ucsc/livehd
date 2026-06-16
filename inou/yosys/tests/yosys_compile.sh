@@ -3,7 +3,7 @@
 #
 # Verilog round-trip via the lhd kernel: each test compiles
 # verilog -> LGraph (yosys-verilog reader) -> cprop (O1) -> cgen verilog,
-# then LECs the generated netlist against the original with `lhd check`
+# then LECs the generated netlist against the original with `lhd lec --set lec.solver=lgyosys`
 # (inou/yosys/lgcheck underneath). One `lhd compile` replaces the old
 # tolg|>lgraph.save + lgraph.match|>cprop|>cgen lgshell pipelines; the
 # stderr-grep heuristics are gone because lhd checks the diag sink after
@@ -117,7 +117,7 @@ do
       continue
     fi
   else
-    ${LHD} check --impl verilog:tmp_yosys_mix/all_${base}.v --ref verilog:${full_input} \
+    ${LHD} lec --set lec.solver=lgyosys --impl verilog:tmp_yosys_mix/all_${base}.v --ref verilog:${full_input} \
       --top ${base} --workdir tmp_yosys/${base}_check -q \
       --result-json tmp_yosys/${input}.check.json >/dev/null 2>&1
     if [ $? -eq 0 ]; then

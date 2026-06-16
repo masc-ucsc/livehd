@@ -32,7 +32,7 @@
 | `lgcheck` (yosys `equiv`) | Kept **only as a bring-up cross-check oracle.** The goal is to *replace* it — it does not scale beyond combinational logic |
 | Proof strategy | Modular / congruence skeleton **plus preserved flop & memory names as first-class cut-points** (register-correspondence SEC: a sequential proof collapses to a combinational base+step between matched state) |
 | Core abstraction | A **relational query engine**: `prove_equal` / `prove_distinct` / `is_sat` over *subsets* of one or two designs. Incremental LEC and design queries (e.g. "are these two memory-port addresses always / never equal?") are both **clients** |
-| Engine tuning | Pono's main switches are exposed as `lec.*` set-options through the existing `lhd list options` registry — e.g. `lhd check --set lec.timeout=90 --set lec.engine=ind`; unknown `lec.*` flags hard-error (no silent no-op) |
+| Engine tuning | Pono's main switches are exposed as `lec.*` set-options through the existing `lhd list options` registry — e.g. `lhd lec --set lec.timeout=90 --set lec.engine=ind`; unknown `lec.*` flags hard-error (no silent no-op) |
 | Milestone 1 | **DONE.** Encode **one combinational module** to cvc5 bit-vector terms, prove a known-equal and a known-different pair via `cvc5::checkSat`, cross-checked against `lgcheck` (`//pass/lec:comb_equiv_test`, `:cvc5_link_test`, `:lec_cross_test` all green). |
 
 **Explicitly out of v1:** sequential k-induction (M2), structural def-diff
@@ -57,7 +57,7 @@ Two first clients motivate the whole effort:
 
 1. **Incremental LEC** (the headline): `prove_equal(impl.outputs, ref.outputs)`
    under `assume_equal(inputs)`, made fast by only re-proving the *changed*
-   defs. This is what eventually backs `lhd check`.
+   defs. This is what eventually backs `lhd lec`.
 2. **Design queries for other passes**: e.g. a memory-port optimizer asks
    `prove_equal(portA.addr, portB.addr)` to merge ports, or
    `prove_distinct(write.addr, read.addr)` to license a no-forwarding
@@ -68,7 +68,7 @@ Two first clients motivate the whole effort:
 ## Architecture (layers)
 
 ```
-   L3  Orchestration            pass.lec  /  lhd check  /  pass-facing query helpers
+   L3  Orchestration            pass.lec  /  lhd lec  /  pass-facing query helpers
         |  structural diff -> reduced set of queries -> report / certificate
         v
    L2  Correspondence & reduction
@@ -94,7 +94,7 @@ Two first clients motivate the whole effort:
   (`assume`/`assert`), chooses an engine, and reports a typed result.
 - **L2** is what makes it *fast*: it shrinks the work L1 has to do.
 - **L3** is the thin CLI/pass glue (mirrors the existing `pass.color` /
-  `pass.partition` / `lhd check` plumbing).
+  `pass.partition` / `lhd lec` plumbing).
 
 ---
 
@@ -213,7 +213,7 @@ pass/lec/
 ```
 
 **`lhd lec` CLI (L3):** add to `lhd/lhd_kernel.cpp` next to `check_command`,
-taking `--impl KIND:PATH` / `--ref KIND:PATH` like `check` (reuse
+taking `--impl KIND:PATH` / `--ref KIND:PATH` like `lec` (reuse
 `materialize_verilog`'s front half to get `LGraph`s, but stop *before* cgen —
 we want the graph, not Verilog). v1 just encodes + queries whole comb modules.
 Register `{"lec", "pass.lec"}` in `kSetPasses[]` (lhd/lhd_kernel.cpp:313) and
@@ -311,8 +311,9 @@ options registered (`lhd list options 'lec\..*'`), typos hard-error.
 - **`lhd lec`** lives in `lhd_kernel.cpp::lec_command` and discharges via
   `lec::prove_equal` directly (clean `equiv_fail` error class + witness);
   `pass.lec` is registered for the `lec.*` option registry and is also a working
-  dispatch entry (`graph[0]`=ref, `graph[1]`=impl). Inputs: `lg:`/`pyrope:`/`ln:`
-  (verilog LEC still goes through `lhd check`).
+  dispatch entry (`graph[0]`=ref, `graph[1]`=impl). Inputs: `verilog:`/`lg:`/
+  `pyrope:`/`ln:` (verilog elaborates through `--reader`, default slang; or use
+  `--set lec.solver=lgyosys` for the yosys/lgcheck backend).
 
 M2–M6 remain as below (unstarted).
 
@@ -381,12 +382,13 @@ comptime pins `1 bits, 5 fwd, 6 posclk, 7 type (0 async-rd / 1 sync-rd /
 
 Pono exposes many knobs (engine, solver backend, bound, timeout, …). The main
 ones are surfaced through LiveHD's **existing** set-option registry so they work
-uniformly on `lhd lec` *and* `lhd check` — same machinery `pass.color` /
-`pass.partition` already use:
+uniformly on `lhd lec` (the single equivalence command) — same machinery
+`pass.color` / `pass.partition` already use:
 
 ```
-lhd check --impl … --ref … --set lec.engine=ind  --set lec.timeout=90
-lhd lec   --impl … --ref … --set lec.solver=bitwuzla --set lec.bound=20
+lhd lec --impl … --ref … --set lec.engine=ind     --set lec.timeout=90
+lhd lec --impl … --ref … --set lec.solver=bitwuzla --set lec.bound=20
+lhd lec --impl … --ref … --set lec.solver=lgyosys  # the yosys/lgcheck backend (was `lhd check`)
 ```
 
 Wiring (three touch-points, all derived from one table):

@@ -11,6 +11,7 @@
 #include "eprp.hpp"
 #include "err_tracker.hpp"
 #include "iassert.hpp"
+#include "log.hpp"
 
 static_assert(__cplusplus >= 201703L, "C++ 17 support is required. Please upgrade your compiler.");
 
@@ -39,27 +40,22 @@ public:
 
   // Errors/warnings go through livehd::diag (the Builder or a pass-local
   // located helper) — the old Pass::error/Pass::warn shims are deleted so
-  // generic, unlocated, code-less records cannot creep back in. `info`
-  // remains: it is debug-build progress logging, not a diagnostic, and stays
-  // out of the machine-readable stream.
+  // generic, unlocated, code-less records cannot creep back in. `info` remains:
+  // it is developer progress logging, not a diagnostic, so it stays out of the
+  // machine-readable stream. It rides the "pass" livehd::log channel (off
+  // unless `--set pass.log=<level>`) and is compiled out entirely in `-c opt`
+  // via LHD_LOG. The `(void)` casts keep the params used when LHD_LOG is a
+  // no-op (opt) so -Werror=unused-parameter stays happy.
   static void info(std::string_view msg) {
-#ifndef NDEBUG
-    eprp.parser_info(msg);
-#else
+    LHD_LOG("pass", info, "{}", msg);
     (void)msg;
-#endif
   }
 
   template <typename... Args>
   static void info(std::format_string<Args...> format, Args&&... args) {
-#ifndef NDEBUG
-    auto tmp = std::format(format, std::forward<Args>(args)...);
-    err_tracker::logger(tmp);
-    eprp.parser_info(tmp);
-#else
+    LHD_LOG("pass", info, format, std::forward<Args>(args)...);
     (void)format;
     ((void)args, ...);
-#endif
   }
 };
 

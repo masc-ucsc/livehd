@@ -58,7 +58,7 @@ grep -q "addsub u_" "$W/out/lg_use.lg_use_top.v" || fail "top does not instantia
 
 # ---- 3. LEC: top (instantiating addsub) + the addsub body == flat a+b -------
 cat "$W/out/lg_use.lg_use_top.v" "$W/addsub.v" > "$W/impl.v"
-$LHD check --impl "verilog:$W/impl.v" --ref "verilog:$W/gold.v" \
+$LHD lec --set lec.solver=lgyosys --impl "verilog:$W/impl.v" --ref "verilog:$W/gold.v" \
   --impl-top lg_use.lg_use_top --ref-top lg_use.lg_use_top --workdir "$W/wlec" -q \
   || fail "LEC: imported lg netlist is not equivalent to a+b"
 

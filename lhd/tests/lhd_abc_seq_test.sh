@@ -11,7 +11,7 @@
 # vendored Liberty is purely combinational). Memories and Sub instances are
 # treated as blackbox boundaries: their I/O is cut at the ABC border and they
 # are rebuilt natively and reconnected. Each region's mapped netlist must be
-# sequentially LEC-equivalent (yosys miter + BMC/induction, via `lhd check`) to
+# sequentially LEC-equivalent (yosys miter + BMC/induction, via `lhd lec --set lec.solver=lgyosys`) to
 # its original-logic `partition` twin.
 #
 #   prp -> lg (O1)
@@ -20,9 +20,9 @@
 #   pass partition                          (same module structure, original logic)
 #   pass liberty gensim test.lib            (behavioral model per comb cell)
 #   cgen net + models -> impl.v ; cgen re -> ref.v
-#   lhd check (impl vs ref): must be sequentially LEC-equivalent
+#   lhd lec --set lec.solver=lgyosys (impl vs ref): must be sequentially LEC-equivalent
 #
-# LEC soundness of this `lhd check` / gensim pipeline (a corrupted reference must
+# LEC soundness of this `lhd lec` / gensim pipeline (a corrupted reference must
 # FAIL) is covered by the combinational lhd_abc_test's negative control. A
 # sequential negative control is intentionally omitted here: disproving
 # sequential inequivalence drives yosys onto a slow temporal-induction search,
@@ -85,7 +85,7 @@ seq_lec() {
   cat "$d/rev/"*.v > "$d/ref.v"
 
   # sequential LEC: the tech-mapped netlist must equal the original logic
-  run check --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$top" --workdir "$d/wc"
+  run lec --set lec.solver=lgyosys --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$top" --workdir "$d/wc"
   echo "PASS: pass.abc seq tech-map LEC-equivalent for '$top'"
 }
 

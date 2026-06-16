@@ -47,7 +47,7 @@ grep -q "add_sub u_" "$W/out/test_defer.test_defer.v" || fail "top does not inst
 
 # LEC: top (with the same-cycle feedback) + the add_sub body == flat (a+b)-3.
 cat "$W/out/test_defer.test_defer.v" "$W/add_sub.v" > "$W/impl.v"
-$LHD check --impl "verilog:$W/impl.v" --ref "verilog:$W/gold.v" \
+$LHD lec --set lec.solver=lgyosys --impl "verilog:$W/impl.v" --ref "verilog:$W/gold.v" \
   --impl-top test_defer.test_defer --ref-top test_defer.test_defer --workdir "$W/wlec" -q \
   || fail "LEC: defer feedback netlist is not equivalent to (a+b)-3"
 

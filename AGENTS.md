@@ -56,7 +56,7 @@ per-step logs land under `--workdir`. Examples:
 ```
 lhd compile foo.v --reader yosys-verilog --top foo --recipe O1 --emit verilog:out.v
 lhd compile foo.prp --emit-dir lg:foo_lgs/ --emit-dir lnast-dump:dumps/
-lhd check --impl verilog:out.v --ref verilog:foo.v --top foo
+lhd lec --impl verilog:out.v --ref verilog:foo.v --top foo --set lec.solver=lgyosys
 ```
 Internally lhd drives the registered EPRP methods (conceptually the pipe
 `inou.yosys.tolg |> pass.cprop |> inou.cgen.verilog`); pass/inou names in
@@ -114,7 +114,7 @@ Enforced by `scripts/contracts/diff_no_compile_flags_touched.sh`.
 ### Running Yosys tests
 - **Single test**: `./inou/yosys/tests/yosys_compile.sh ./inou/yosys/tests/<test>.v` (or `bazel test //inou/yosys:yosys_compile-<test>`)
 - **Full suite**: `./inou/yosys/tests/yosys_compile.sh`
-- The script drives `lhd compile`/`lhd check`; each test gets a fresh scratch
+- The script drives `lhd compile`/`lhd lec`; each test gets a fresh scratch
   `--workdir` (no shared `lgdb` state to clean — the kernel is stateless).
   Per-step logs (yosys chatter included) are under `tmp_yosys/<top>/logs/`.
 

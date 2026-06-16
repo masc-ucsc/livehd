@@ -25,7 +25,10 @@ void Pass_lec::setup() {
                 "Relational equivalence: prove_equal(ref=graph0, impl=graph1) under assume_equal(inputs)",
                 &Pass_lec::lec);
   m.add_label_optional("engine", "discharge engine: bmc | ind (k-induction) | ic3", "ind");
-  m.add_label_optional("solver", "smt-switch backend: cvc5 | bitwuzla", "cvc5");
+  m.add_label_optional("solver",
+                       "equivalence backend: cvc5 (default, in-process SMT) | bitwuzla (in-process SMT) | "
+                       "lgyosys (kernel-routed yosys/lgcheck; reads Verilog directly)",
+                       "cvc5");
   m.add_label_optional("bound", "BMC / induction depth bound k", "20");
   m.add_label_optional("timeout", "per-query wall-clock seconds (0 = none)", "0");
   m.add_label_optional("witness", "print the counterexample/witness on Refuted", "true");

@@ -44,17 +44,17 @@ run compile "$V0" --reader yosys-verilog --top "$TOP" --emit-dir lg:"$W/lg3/" --
 run compile lg:"$W/lg3/" --emit verilog:"$W/v3.v" --workdir "$W/w6"
 
 for i in 1 2 3; do
-  run check --impl verilog:"$W/v$i.v" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c$i"
+  run lec --set lec.solver=lgyosys --impl verilog:"$W/v$i.v" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c$i"
   echo "check verilog$i vs verilog0: equivalent"
 done
 
 # leg 4: check compiles non-verilog sides itself — pyrope: (bare .prp path,
 # kind inferred from the extension), ln:, and lg: against the golden verilog
-run check --impl "$PRP" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c4"
+run lec --set lec.solver=lgyosys --impl "$PRP" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c4"
 echo "check pyrope (bare path) vs verilog0: equivalent"
-run check --impl ln:"$W/lns/" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c5"
+run lec --set lec.solver=lgyosys --impl ln:"$W/lns/" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c5"
 echo "check ln: vs verilog0: equivalent"
-run check --impl lg:"$W/lg2/" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c6"
+run lec --set lec.solver=lgyosys --impl lg:"$W/lg2/" --ref verilog:"$V0" --impl-top "$TOP" --ref-top "$TOP" --workdir "$W/c6"
 echo "check lg: vs verilog0: equivalent"
 
 echo "PASS: all generated netlists and direct IR/source sides are equivalent to the golden verilog"

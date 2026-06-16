@@ -7,7 +7,7 @@
 #   lhd pass color <alg> --set color.continuous=true   (in-place coloring)
 #   lhd pass partition --emit-dir lg:dir2              (one module per region + new top)
 #   lg:dir2 -> verilog
-#   lhd check  (partitioned verilog vs the original): must be LEC-equivalent
+#   lhd lec --set lec.solver=lgyosys  (partitioned verilog vs the original): LEC-equivalent
 #
 # Runs for the self-contained coloring algorithms (acyclic, synth); also checks
 # the stats-only mode and that an incomplete coloring is a clean error (not an
@@ -41,7 +41,7 @@ for ALG in acyclic synth; do
   # the new top must be a real hierarchy (instantiates the per-region modules)
   grep -q "part_flat__c" "$D/part.v" || fail "$ALG: partitioned verilog has no per-color submodules"
   # 5. LEC: the partitioned design must equal the original
-  run check --impl verilog:"$D/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$D/c"
+  run lec --set lec.solver=lgyosys --impl verilog:"$D/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$D/c"
   echo "PASS: $ALG partition is LEC-equivalent to the original"
 done
 

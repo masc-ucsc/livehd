@@ -19,7 +19,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
-#include "color_common.hpp"  // livehd::color::is_partitionable / NO_COLOR (2f-cli tool)
+#include "color_common.hpp"  // livehd::color::is_partitionable / NO_COLOR (lhd tool)
 #include "diag.hpp"
 #include "eprp.hpp"
 #include "file_utils.hpp"
@@ -30,6 +30,7 @@
 #include "lhd.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
+#include "log.hpp"  // livehd::log — `--set <channel>.log=<level>` developer logging
 #include "node_util.hpp"
 #include "pass.hpp"
 #include "prp2lnast.hpp"
@@ -362,6 +363,9 @@ void merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_
     }
     auto pass = key.substr(0, pos);
     auto flag = key.substr(pos + 1);
+    if (flag == "log") {
+      continue;  // `<channel>.log` is a livehd::log channel (apply_log_settings), not a pass label
+    }
     if (pass != pass_name) {
       continue;
     }
@@ -378,8 +382,26 @@ void check_known_set_passes(const Options& opts) {
     if (pos == std::string::npos) {
       throw Lhd_error{"usage", std::format("--set expects pass.flag=value, got '{}={}'", key, value), ""};
     }
-    auto pass   = key.substr(0, pos);
-    auto flag   = key.substr(pos + 1);
+    auto pass = key.substr(0, pos);
+    auto flag = key.substr(pos + 1);
+    if (flag == "log") {
+      // `<channel>.log=<level>` enables developer logging (livehd::log), a
+      // namespace orthogonal to the pass-flag registry: validate the channel
+      // and the level here, then apply_log_settings() records it.
+      if (!livehd::log::is_channel(pass)) {
+        throw Lhd_error{"usage",
+                        std::format("--set/--config references unknown log channel '{}'", pass),
+                        "`lhd list log-channels` lists the channels you can enable"};
+      }
+      bool ok = false;
+      (void)livehd::log::parse_level(value, ok);
+      if (!ok) {
+        throw Lhd_error{"usage",
+                        std::format("--set/--config log level '{}={}' must be off|error|warn|info|debug|trace", key, value),
+                        ""};
+      }
+      continue;
+    }
     auto method = set_pass_method(pass);
     if (method.empty()) {
       std::string known;
@@ -402,6 +424,24 @@ void check_known_set_passes(const Options& opts) {
       throw Lhd_error{"usage",
                       std::format("--set/--config references unknown flag '{}' of pass '{}'", flag, pass),
                       std::format("`lhd list options {}\\..*` shows what {} accepts", pass, pass)};
+    }
+  }
+}
+
+// Apply every `--set <channel>.log=<level>` to the livehd::log registry (the
+// channel and level were already validated by check_known_set_passes). In a
+// release build LHD_LOG is compiled out, so this just records levels nothing
+// reads — `--set ...log=...` stays accepted across build modes either way.
+void apply_log_settings(const Options& opts) {
+  for (const auto& [key, value] : opts.sets) {
+    auto pos = key.rfind('.');
+    if (pos == std::string::npos || key.substr(pos + 1) != "log") {
+      continue;
+    }
+    bool ok  = false;
+    auto lvl = livehd::log::parse_level(value, ok);
+    if (ok) {
+      livehd::log::configure(key.substr(0, pos), lvl);
     }
   }
 }
@@ -948,7 +988,7 @@ void validate_emits(const Options& opts) {
                      "pyrope",
                      {"unsupported", "there is no LGraph -> LNAST decompiler", "pyrope outputs need source/ln: inputs"});
   }
-  if (opts.command == "check" || opts.command == "lec") {
+  if (opts.command == "lec") {
     for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump"}) {
       reject_emit_kind(opts, k, {"usage", std::format("{} has no outputs beyond the result", opts.command), ""});
     }
@@ -971,7 +1011,7 @@ void validate_dumps(const Options& opts) {
   if (opts.dumps.empty()) {
     return;
   }
-  if (opts.command == "check" || opts.command == "lec" || opts.command == "scan" || opts.command == "tool") {
+  if (opts.command == "lec" || opts.command == "scan" || opts.command == "tool") {
     throw Lhd_error{"usage", std::format("{} has no --dump observables", opts.command), "--dump applies to compile"};
   }
   if (opts.language == "verilog" && opts.reader != "slang" && (wants_dump(opts, "parse") || wants_dump(opts, "lnast"))) {
@@ -1387,13 +1427,23 @@ Ln_inputs classify_ln_inputs(const std::vector<std::string>& tokens, std::string
                         std::format("{} reads LNAST, not lg: graph libraries", cmd),
                         "inputs are .prp/.v/.sv sources or ln:DIR forests"};
       }
+      // Explicit source schemes (URL-like, like the .prp/.v/.sv shortcuts below):
+      // the scheme is authoritative, so strip it and route by language.
+      if (kind == "pyrope") {
+        in.prp_files.push_back(t.substr(pos + 1));
+        continue;
+      }
+      if (kind == "verilog") {
+        in.sv_files.push_back(t.substr(pos + 1));
+        continue;
+      }
       // any other prefix: treat as a plain path (mirror route_positional)
     }
     std::string_view sv{t};
     if (sv.ends_with(".prp")) {
-      in.prp_files.push_back(t);
+      in.prp_files.push_back(t);  // pyrope: shortcut
     } else if (sv.ends_with(".v") || sv.ends_with(".sv")) {
-      in.sv_files.push_back(t);
+      in.sv_files.push_back(t);  // verilog: shortcut
     } else {
       throw Lhd_error{"usage",
                       std::format("{}: cannot classify input '{}'", cmd, t),
@@ -2073,61 +2123,24 @@ std::string locate_lgcheck_yosys() {
   return "";
 }
 
-// Return a verilog file for an --impl/--ref side, materializing non-verilog
-// kinds into the scratch workdir: lg: libraries go straight through cgen;
-// pyrope:/ln: inputs first run the compile pipeline (parse/load -> upass ->
-// tolg -> recipe graph passes, default O1) to graphs.
+// Load one --impl/--ref side into `var.graphs` (no cgen). Defined below; both
+// lec backends share it.
+void load_side_graphs(Options& opts, Result& res, const std::string& kind, const std::string& path, std::string_view side,
+                      Eprp_var& var);
+
+// Return a verilog file for an --impl/--ref side (the lgyosys/lgcheck backend):
+// a verilog side passes straight through (lgcheck reads Verilog directly);
+// every other kind is loaded to graphs (load_side_graphs) and re-emitted with
+// cgen into the scratch workdir.
 std::string materialize_verilog(Options& opts, Result& res, const std::string& kind, const std::string& path,
                                 std::string_view side) {
-  res.inputs.push_back(path);
   if (kind == "verilog") {
+    res.inputs.push_back(path);
     check_inputs_exist({path});
     return path;
   }
   Eprp_var var;
-  if (kind == "lg") {
-    if (!fs::is_directory(path)) {
-      throw Lhd_error{"missing_file", std::format("lg: input not found: {}", path), ""};
-    }
-    auto& lib = livehd::Hhds_graph_library::instance(path);
-    for (const hhds::Gid id : lib.all_gids()) {  // gids are sparse name-hashes now
-      auto g = lib.get_graph(id);
-      if (g) {
-        var.add(g);
-      }
-    }
-    if (var.graphs.empty()) {
-      throw Lhd_error{"config", std::format("lg: input {} holds no graphs", path), ""};
-    }
-  } else if (kind == "pyrope" || kind == "ln") {
-    if (kind == "pyrope") {
-      check_inputs_exist({path});
-      run_step("inou.prp",
-               var,
-               {
-                   {"files", path}
-      },
-               opts,
-               res);
-    } else {
-      if (!fs::is_directory(path)) {
-        throw Lhd_error{"missing_file", std::format("ln: input not found: {}", path), "an ln: input is a Forest save directory"};
-      }
-      for (auto& ln : load_ln_dir(path)) {
-        var.add(ln);
-      }
-    }
-    auto lib_path = std::format("{}/check_{}_lgdb", workdir(opts), side);
-    lower_lnasts(opts, res, var, lib_path, /*need_graphs=*/true);
-    graph_pipeline_and_emits(opts, res, var, lib_path);  // recipe passes only — check declares no emits
-    if (var.graphs.empty()) {
-      throw Lhd_error{"config",
-                      std::format("{}: input {} produced no synthesizable modules", kind, path),
-                      "a pure-comptime design has no module IO to check"};
-    }
-  } else {
-    throw Lhd_error{"usage", std::format("check accepts verilog:, pyrope:, ln:, or lg: inputs, got {}:", kind), ""};
-  }
+  load_side_graphs(opts, res, kind, path, side, var);  // lg/pyrope/ln -> graphs (throws if empty)
   auto          scratch = std::format("{}/check_{}", workdir(opts), side);
   auto          names   = cgen_into(opts, res, var, scratch);
   auto          out     = std::format("{}/check_{}.v", workdir(opts), side);
@@ -2139,12 +2152,10 @@ std::string materialize_verilog(Options& opts, Result& res, const std::string& k
   return out;
 }
 
-void check_command(Options& opts, Result& res) {
-  setup_diag(opts, "check");
-  if (opts.impl_path.empty() || opts.ref_path.empty()) {
-    throw Lhd_error{"usage", "check requires --impl KIND:PATH and --ref KIND:PATH", ""};
-  }
-
+// The lgyosys backend (`--set lec.solver=lgyosys`): materialize both sides to
+// Verilog and discharge with inou/yosys/lgcheck (the former `lhd check`).
+// Verilog sides pass straight through; pyrope:/ln:/lg: are compiled first.
+void lec_lgyosys(Options& opts, Result& res) {
   auto impl_v  = fs::absolute(materialize_verilog(opts, res, opts.impl_kind, opts.impl_path, "impl")).string();
   auto ref_v   = fs::absolute(materialize_verilog(opts, res, opts.ref_kind, opts.ref_path, "ref")).string();
   auto lgcheck = locate_lgcheck();
@@ -2170,14 +2181,16 @@ void check_command(Options& opts, Result& res) {
   if (opts.impl_top.empty() && opts.ref_top.empty() && !opts.top.empty()) {
     cmd += std::format(" --top {}", shell_quote(opts.top));
   }
-  auto log  = next_log_path(opts, "check.lgcheck");
+  auto log  = next_log_path(opts, "lec.lgcheck");
   cmd      += std::format(" >> {} 2>&1", shell_quote(fs::absolute(log).string()));
 
-  res.recipe_steps.emplace_back("check.lgcheck");
+  res.recipe_steps.emplace_back("pass.lec solver:lgyosys (lgcheck)");
   int rc = std::system(cmd.c_str());
   if (opts.verbose) {
     mirror_log_to_stderr(log);
   }
+  std::string name = !opts.impl_top.empty() ? opts.impl_top : opts.impl_path;
+  std::print("lec: '{}' {} (solver=lgyosys)\n", name, rc == 0 ? "PROVEN equivalent" : "REFUTED (not equivalent)");
   if (rc != 0) {
     throw Lhd_error{"equiv_fail",
                     std::format("equivalence check failed ({} vs {})", opts.impl_path, opts.ref_path),
@@ -2187,10 +2200,12 @@ void check_command(Options& opts, Result& res) {
 
 // ---- lec (in-process relational equivalence via pass.lec / Pono) ------------
 
-// Load one --impl/--ref side into `var.graphs` WITHOUT cgen (the front half of
-// materialize_verilog). lec consumes the graph directly. verilog: is rejected
-// here -- there is no in-process Verilog reader on this path; use `lhd check`
-// (lgcheck) for verilog: LEC, or feed lg:/pyrope:/ln:.
+// Load one --impl/--ref side into `var.graphs` WITHOUT cgen. lg: libraries load
+// directly; pyrope:/ln: parse/load then lower (upass + tolg + recipe) to
+// graphs; verilog: elaborates through --reader — slang (the default: direct
+// SV -> LNAST, the pyrope flow) or yosys-slang/yosys-verilog (yosys ->
+// LGraphs). The in-process lec engine consumes the graphs directly; the
+// lgyosys backend re-emits them through cgen (materialize_verilog).
 void load_side_graphs(Options& opts, Result& res, const std::string& kind, const std::string& path, std::string_view side,
                       Eprp_var& var) {
   res.inputs.push_back(path);
@@ -2205,25 +2220,43 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
         var.add(g);
       }
     }
-  } else if (kind == "pyrope" || kind == "ln") {
-    if (kind == "pyrope") {
+  } else if (kind == "pyrope" || kind == "ln" || kind == "verilog") {
+    // Verilog through a yosys reader elaborates straight to LGraphs; every
+    // other path (pyrope, ln:, verilog via slang) yields LNAST that lowers
+    // through upass + tolg + the recipe.
+    const bool yosys_reader = kind == "verilog" && opts.reader != "slang";
+    auto       lib_path     = std::format("{}/lec_{}_lgdb", workdir(opts), side);
+    if (yosys_reader) {
       check_inputs_exist({path});
-      run_step("inou.prp", var, {{"files", path}}, opts, res);
+      Eprp_var::Eprp_dict labels{
+          {    "path",                                                                      lib_path},
+          {   "files",                                                                          path},
+          {     "top",                          opts.top.empty() ? std::string{"-auto-top"} : opts.top},
+          {"frontend", opts.reader == "yosys-verilog" ? std::string{"verilog"} : std::string{"slang"}},
+      };
+      run_step("inou.yosys.tolg", var, labels, opts, res);
     } else {
-      if (!fs::is_directory(path)) {
-        throw Lhd_error{"missing_file", std::format("ln: input not found: {}", path), "an ln: input is a Forest save directory"};
+      if (kind == "pyrope") {
+        check_inputs_exist({path});
+        run_step("inou.prp", var, {{"files", path}}, opts, res);
+      } else if (kind == "verilog") {  // slang: the direct SV -> LNAST front-end
+        check_inputs_exist({path});
+        run_step("inou.slang", var, {{"files", path}}, opts, res);
+      } else {  // ln:
+        if (!fs::is_directory(path)) {
+          throw Lhd_error{"missing_file", std::format("ln: input not found: {}", path), "an ln: input is a Forest save directory"};
+        }
+        for (auto& ln : load_ln_dir(path)) {
+          var.add(ln);
+        }
       }
-      for (auto& ln : load_ln_dir(path)) {
-        var.add(ln);
-      }
+      lower_lnasts(opts, res, var, lib_path, /*need_graphs=*/true);
+      graph_pipeline_and_emits(opts, res, var, lib_path);
     }
-    auto lib_path = std::format("{}/lec_{}_lgdb", workdir(opts), side);
-    lower_lnasts(opts, res, var, lib_path, /*need_graphs=*/true);
-    graph_pipeline_and_emits(opts, res, var, lib_path);
   } else {
     throw Lhd_error{"usage",
-                    std::format("lec accepts lg:, pyrope:, or ln: inputs, got {}:", kind),
-                    "verilog: LEC goes through `lhd check` (lgcheck)"};
+                    std::format("lec accepts verilog:, lg:, pyrope:, or ln: inputs, got {}:", kind),
+                    "a bare .v/.sv/.prp path infers its kind"};
   }
   if (var.graphs.empty()) {
     throw Lhd_error{"config", std::format("lec {} input {} holds no graphs", side, path), ""};
@@ -2233,7 +2266,30 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
 void lec_command(Options& opts, Result& res) {
   setup_diag(opts, "lec");
   if (opts.impl_path.empty() || opts.ref_path.empty()) {
-    throw Lhd_error{"usage", "lec requires --impl KIND:PATH and --ref KIND:PATH", "graph inputs: lg:/pyrope:/ln:"};
+    throw Lhd_error{"usage",
+                    "lec requires --impl KIND:PATH and --ref KIND:PATH",
+                    "sides: verilog:/pyrope:/ln:/lg: or a bare .v/.sv/.prp path"};
+  }
+
+  // The solver selects the backend: cvc5 (default) / bitwuzla discharge
+  // in-process (pass/lec, no yosys); lgyosys shells out to inou/yosys/lgcheck
+  // (the former `lhd check`) — the only backend that reads Verilog without a
+  // front-end reader and the path for gate-level / yosys-origin netlists.
+  Eprp_var::Eprp_dict labels;
+  merge_sets(opts, "lec", labels);
+  auto label = [&](std::string_view k, std::string_view def) -> std::string {
+    auto it = labels.find(std::string{k});
+    return it == labels.end() ? std::string{def} : it->second;
+  };
+  const std::string solver = label("solver", "cvc5");
+  if (solver != "cvc5" && solver != "bitwuzla" && solver != "lgyosys") {
+    throw Lhd_error{"usage",
+                    std::format("--set lec.solver expects cvc5|bitwuzla|lgyosys, got '{}'", solver),
+                    "cvc5 (default, in-process SMT) | bitwuzla (in-process SMT) | lgyosys (yosys/lgcheck)"};
+  }
+  if (solver == "lgyosys") {
+    lec_lgyosys(opts, res);
+    return;
   }
 
   Eprp_var ref_var;
@@ -2261,13 +2317,6 @@ void lec_command(Options& opts, Result& res) {
   auto ref_g  = pick(ref_var, opts.ref_top, "ref");
   auto impl_g = pick(impl_var, opts.impl_top, "impl");
 
-  Eprp_var::Eprp_dict labels;
-  merge_sets(opts, "lec", labels);
-
-  auto label = [&](std::string_view k, std::string_view def) -> std::string {
-    auto it = labels.find(std::string{k});
-    return it == labels.end() ? std::string{def} : it->second;
-  };
   bool cross = label("cross", "false") != "false" && label("cross", "false") != "0";
 
   // Discharge in-process via pass/lec (L1). The engine is the authority on the
@@ -2275,7 +2324,7 @@ void lec_command(Options& opts, Result& res) {
   // agreement (the strongest encoder check).
   livehd::lec::Lec_options o;
   o.engine  = label("engine", "ind");
-  o.solver  = label("solver", "cvc5");
+  o.solver  = solver;  // cvc5 | bitwuzla
   o.bound   = std::atoi(label("bound", "20").c_str());
   o.timeout = std::atoi(label("timeout", "0").c_str());
   o.witness = label("witness", "true") != "false" && label("witness", "true") != "0";
@@ -2333,6 +2382,18 @@ void lec_command(Options& opts, Result& res) {
 
   auto impl_v  = fs::absolute(materialize_verilog(opts, res, opts.impl_kind, opts.impl_path, "impl")).string();
   auto ref_v   = fs::absolute(materialize_verilog(opts, res, opts.ref_kind, opts.ref_path, "ref")).string();
+  // cross mode re-materializes both sides through materialize_verilog, which
+  // re-records their input paths (load_side_graphs already did above) — collapse
+  // res.inputs back to one entry per side (stable, first occurrence wins).
+  {
+    std::vector<std::string> dedup;
+    for (const auto& p : res.inputs) {
+      if (std::find(dedup.begin(), dedup.end(), p) == dedup.end()) {
+        dedup.push_back(p);
+      }
+    }
+    res.inputs = std::move(dedup);
+  }
   auto lgcheck = locate_lgcheck();
   auto yosys   = locate_lgcheck_yosys();
   auto rundir  = fs::absolute(workdir(opts)).string();
@@ -2510,7 +2571,7 @@ void pass_command(Options& opts, Result& res) {
 }
 
 // ===========================================================================
-// `lhd tool` (2f-cli): unified ln/lg inspector — cat / grep / diff / tree.
+// `lhd tool`: unified ln/lg inspector — cat / grep / diff / tree.
 // Replaces the former ln.cat / ln.diff. Verbs are polymorphic over ln:/lg:.
 // ===========================================================================
 
@@ -2536,7 +2597,7 @@ Tool_target parse_tool_target(const std::string& s) {
 // text=>name). Numeric fields support comparisons/ranges + `nil`; string
 // fields default to substring, `~`=regex, `=`=exact.
 struct Tool_filter {
-  enum class Kind { sub, re, eq, num_eq, num_gt, num_lt, num_ge, num_le, num_range, is_nil };
+  enum class Kind { sub, re, eq, num_eq, num_gt, num_lt, num_ge, num_le, num_range, is_nil, any_sub };
   std::string field;
   Kind        kind = Kind::sub;
   std::string sval;
@@ -2547,6 +2608,16 @@ struct Tool_filter {
 
 bool tool_is_numeric_field(std::string_view f) {
   return f == "id" || f == "nid" || f == "color" || f == "bits" || f == "delay" || f == "hier_color";
+}
+
+// The columns a `<field><sep><value>` filter may target. A token whose head is
+// not one of these is treated as a bare match-everything term instead, so a
+// value that merely contains ':'/'=' (e.g. a src path `x.prp:5`) is not
+// mis-split into a bogus field.
+bool tool_is_known_field(std::string_view f) {
+  return f == "nid" || f == "id" || f == "kind" || f == "name" || f == "color" || f == "src"
+         || f == "partitionable" || f == "bits" || f == "signed" || f == "from" || f == "to" || f == "delay"
+         || f == "hier_color";
 }
 
 long tool_parse_long(std::string_view v, std::string_view ctx) {
@@ -2565,17 +2636,27 @@ long tool_parse_long(std::string_view v, std::string_view ctx) {
 
 Tool_filter parse_tool_filter(const std::string& tok) {
   Tool_filter f;
-  std::string field;
-  std::string val;
-  if (auto pos = tok.find(':'); pos == std::string::npos) {
-    bool numeric = !tok.empty() && std::all_of(tok.begin(), tok.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
-    field        = numeric ? "id" : "name";
-    val          = tok;
-  } else {
-    field = tok.substr(0, pos);
-    val   = tok.substr(pos + 1);
+  // A field filter is `<field><op><value>`, where <op> starts at the first of
+  // ':' '=' '>' '<' '~' and <field> (the text before it) is a known column.
+  // Pyrope reads `a:b` as "a has type b", so '=' is the preferred separator
+  // (`name=get_mask`, `kind=get_mask`, `color=nil`); '>'/'<' may lead directly
+  // (`bits>8`) and ':' stays accepted out of habit. Anything else — a token
+  // with no operator, or whose head is not a known field (e.g. the src path
+  // `x.prp:5`) — is a bare match-everything term: a substring tested against
+  // every column and the node/pin identity, so `lhd tool grep get_mask lg:dir`
+  // lights up the get_mask cells exactly as `cat` shows them.
+  auto sep = tok.find_first_of(":=<>~");
+  if (sep == std::string::npos || !tool_is_known_field(std::string_view{tok}.substr(0, sep))) {
+    f.kind = Tool_filter::Kind::any_sub;
+    f.sval = tok;
+    return f;
   }
-  f.field = field;
+  std::string field = tok.substr(0, sep);
+  std::string val   = tok.substr(sep);  // operator(s) + value; e.g. ">8", "=nil", ":Mult"
+  f.field           = field;
+  if (!val.empty() && (val.front() == ':' || val.front() == '=')) {
+    val.erase(0, 1);  // strip one equality separator; a relational op may remain (`=>8`, `:>8`)
+  }
   if (val == "nil") {
     f.kind = Tool_filter::Kind::is_nil;
     return f;
@@ -2636,6 +2717,17 @@ const std::string* tool_col(const Tool_record& r, std::string_view key) {
 }
 
 bool tool_match(const Tool_record& r, const Tool_filter& f) {
+  if (f.kind == Tool_filter::Kind::any_sub) {  // bare term: substring vs identity + every set column
+    if (r.ident.find(f.sval) != std::string::npos) {
+      return true;
+    }
+    for (const auto& [k, val] : r.cols) {
+      if (val != "nil" && val.find(f.sval) != std::string::npos) {
+        return true;
+      }
+    }
+    return false;
+  }
   const std::string* v = tool_col(r, f.field);
   if (v == nullptr && f.field == "id") {
     v = tool_col(r, "nid");  // 'id' aliases 'nid'
@@ -2816,6 +2908,9 @@ std::string tool_render_pretty(const Tool_record& r, const std::vector<std::stri
       if (*v == "1") {
         line += "  signed";
       }
+      continue;
+    }
+    if (*v == "nil") {  // omit unset/absent attributes to cut verbosity
       continue;
     }
     line += std::format("  {}={}", key, *v);
@@ -3064,8 +3159,70 @@ size_t tool_node_count(hhds::Graph* g) {
   return n;
 }
 
-void tool_tree_children(hhds::Graph* g, int maxdepth, int depth, std::set<hhds::Gid>& on_path, std::string& out, size_t& budget,
-                        bool& truncated) {
+// Does a node's cell kind match one of the `tool tree --target kind:<X>`
+// selectors? `register`/`reg` aliases the sequential state cells (flop, fflop,
+// latch) but NOT memory; `memory`/`mem` aliases memory; any other token matches
+// an Ntype name exactly (flop, mux, sub, …), so the tree can spotlight any kind.
+bool tool_tree_kind_match(Ntype_op op, const std::vector<std::string>& kinds) {
+  std::string_view name = Ntype::get_name(op);
+  for (const auto& k : kinds) {
+    if (k == "register" || k == "reg" || k == "registers") {
+      if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
+        return true;
+      }
+    } else if (k == "memory" || k == "mem" || k == "memories") {
+      if (op == Ntype_op::Memory) {
+        return true;
+      }
+    } else if (k == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Width of a node's first non-zero output pin (the "register/memory holds N
+// bits" view). 0 = unknown (no sized driver pin, e.g. a dead flop).
+int32_t tool_tree_node_bits(const hhds::Node_class& node) {
+  namespace gu = livehd::graph_util;
+  for (const auto& e : node.out_edges()) {
+    if (auto b = gu::bits_of(e.driver); b != 0) {
+      return b;
+    }
+  }
+  return 0;
+}
+
+// List the nodes of `g` whose kind matches `kinds`, indented to sit beside the
+// module's sub-instances (a register/memory is content of the module, not a
+// child in the call tree). No-op when `kinds` is empty (the default tree).
+void tool_tree_kind_nodes(hhds::Graph* g, const std::vector<std::string>& kinds, int indent, std::string& out,
+                          size_t& budget, bool& truncated) {
+  namespace gu = livehd::graph_util;
+  if (kinds.empty()) {
+    return;
+  }
+  for (auto node : g->forward_class()) {  // topological => deterministic order
+    auto op = gu::type_op_of(node);
+    if (op == Ntype_op::Sub || !tool_tree_kind_match(op, kinds)) {
+      continue;  // Sub instances are the call tree itself (printed elsewhere)
+    }
+    if (budget == 0) {
+      truncated = true;
+      return;
+    }
+    auto bits = tool_tree_node_bits(node);
+    out += std::format("{}{}  : {}{}\n",
+                       std::string(static_cast<size_t>(indent), ' '),
+                       gu::default_instance_name(node),
+                       Ntype::get_name(op),
+                       bits != 0 ? std::format("  ({}b)", bits) : std::string{});
+    --budget;
+  }
+}
+
+void tool_tree_children(hhds::Graph* g, const std::vector<std::string>& kinds, int maxdepth, int depth,
+                        std::set<hhds::Gid>& on_path, std::string& out, size_t& budget, bool& truncated) {
   namespace gu = livehd::graph_util;
   if (depth >= maxdepth) {
     return;
@@ -3088,9 +3245,15 @@ void tool_tree_children(hhds::Graph* g, int maxdepth, int depth, std::set<hhds::
                        sub->get_name(),
                        tool_node_count(sub.get()));
     --budget;
+    // The instance's registers/memories sit one level in, alongside its own
+    // sub-instances (which the recursion below prints at the same indent).
+    tool_tree_kind_nodes(sub.get(), kinds, (depth + 2) * 2, out, budget, truncated);
+    if (truncated) {
+      return;
+    }
     hhds::Gid gid = node.get_subnode_gid();
     if (on_path.insert(gid).second) {  // cycle guard
-      tool_tree_children(sub.get(), maxdepth, depth + 1, on_path, out, budget, truncated);
+      tool_tree_children(sub.get(), kinds, maxdepth, depth + 1, on_path, out, budget, truncated);
       on_path.erase(gid);
     }
     if (truncated) {
@@ -3114,8 +3277,12 @@ void tool_tree_lg(Options& opts, const std::vector<std::string>& lg_dirs) {
   for (const auto& gp : graphs) {
     hhds::Graph* g = gp.get();
     out += std::format("{}  [{} nodes]\n", g->get_name(), tool_node_count(g));
+    tool_tree_kind_nodes(g, opts.tool_kinds, 2, out, budget, truncated);  // top module's own regs/mems
+    if (truncated) {
+      break;
+    }
     std::set<hhds::Gid> on_path;
-    tool_tree_children(g, maxdepth, 0, on_path, out, budget, truncated);
+    tool_tree_children(g, opts.tool_kinds, maxdepth, 0, on_path, out, budget, truncated);
     if (truncated) {
       break;
     }
@@ -3139,10 +3306,13 @@ std::string tool_input_kind(const std::string& t) {
     if (k == "ln" || k == "lnast") {
       return "ln";
     }
+    if (k == "verilog" || k == "pyrope") {
+      return "src";  // explicit source scheme (URL-like); classify_ln_inputs strips the prefix
+    }
   }
   std::string_view sv{t};
   if (sv.ends_with(".prp") || sv.ends_with(".v") || sv.ends_with(".sv")) {
-    return "src";
+    return "src";  // bare-extension shortcut for pyrope:/verilog:
   }
   return "";
 }
@@ -3309,6 +3479,7 @@ void run_engine_command(Options& opts, Result& res) {
   validate_emits(opts);
   validate_dumps(opts);
   check_known_set_passes(opts);  // --set AND --config table names: a typo'd pass must error, not no-op
+  apply_log_settings(opts);      // --set <channel>.log=<level> -> livehd::log (developer logging)
 
   // --depfile is supported on both frontends: the Verilog flow lists its
   // declared inputs, and the Pyrope flow additionally folds in every file the
@@ -3317,8 +3488,6 @@ void run_engine_command(Options& opts, Result& res) {
 
   if (opts.command == "compile") {
     compile_command(opts, res);
-  } else if (opts.command == "check") {
-    check_command(opts, res);
   } else if (opts.command == "lec") {
     lec_command(opts, res);
   } else if (opts.command == "scan") {
