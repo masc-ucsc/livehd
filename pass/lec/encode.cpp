@@ -610,12 +610,21 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
           Term t = fit(v, W);
           result = result.isNull() ? t : tm_.mkTerm(k, {result, t});
         }
+        if (result.isNull()) {
+          // Degenerate 0-operand reduction (can arise after the front-end folds
+          // every operand away): the identity element. AND of nothing = all-ones,
+          // OR/XOR of nothing = 0.
+          result = (op == Ntype_op::And) ? tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(tm_, W, 0)}) : bv_const(tm_, W, 0);
+        }
         break;
       }
       case Ntype_op::Mult: {
         for (const auto& v : all) {
           Term t = fit(v, W);
           result = result.isNull() ? t : tm_.mkTerm(Kind::BITVECTOR_MULT, {result, t});
+        }
+        if (result.isNull()) {
+          result = bv_const(tm_, W, 1);  // empty product = 1
         }
         break;
       }
