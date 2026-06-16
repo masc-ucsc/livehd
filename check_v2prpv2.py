@@ -88,6 +88,25 @@ def main():
     p_dir = os.path.join(work, "prp")
     v2_dir = os.path.join(work, "v2")
 
+    # The reference (verilog1) is the ORIGINAL input verilog — the ground truth,
+    # read by lgcheck's standard yosys read_verilog.  We deliberately do NOT use
+    # yosys-slang's re-emit as the reference: yosys-slang can itself diverge from
+    # the source (e.g. it mishandles an overflowing sized literal like `6'h40`),
+    # which would flag a CORRECT round-trip as a false mismatch.  yosys-slang is
+    # only the GATE here (it must be able to read the design).
+    source_files = [a for a in slang_args if (a.endswith(".v") or a.endswith(".sv")) and not a.startswith("-")]
+    ref_path = None
+    if len(source_files) == 1:
+        ref_path = source_files[0]
+    elif len(source_files) > 1:
+        ref_path = os.path.join(work, "ref_all.v")
+        with open(ref_path, "w") as out:
+            for s in source_files:
+                with open(s) as f:
+                    out.write(f.read() + "\n")
+    # else: no plain source files (e.g. `-F filelist`) -> fall back to the
+    # yosys-slang emit as the reference (best effort).
+
     def report(status, lhd_chk="-", lg="-", detail="", t=0.0):
         print("v2prpv2 {:9s} top={} lhd_check={} lgcheck={} ({:.1f}s){}".format(
             status, top, lhd_chk, lg, t, ("  " + detail) if detail and not args.quiet else ""))
@@ -139,15 +158,19 @@ def main():
             shutil.rmtree(work, ignore_errors=True)
         return report("ROUNDTRIP", t=time.time() - t0)
 
+    # The reference is the original source (verilog1); fall back to the
+    # yosys-slang emit only when no plain source file was given.
+    ref = ref_path if ref_path else v1_top
+
     # ── 4. lhd check (authoritative) ─────────────────────────────────────────
-    rc, log = run([lhd, "check", "--impl", "verilog:" + v2_top, "--ref", "verilog:" + v1_top,
+    rc, log = run([lhd, "check", "--impl", "verilog:" + v2_top, "--ref", "verilog:" + ref,
                    "--top", top, "--workdir", os.path.join(work, "w_chk")], timeout=args.check_timeout)
     lhd_chk = "timeout" if rc is None else ("pass" if rc == 0 else "fail")
 
     # ── 5. lgcheck (secondary cross-check; timeout falls back to lhd check) ───
     lg = "skip"
     if os.path.exists("./inou/yosys/lgcheck"):
-        rc2, log2 = run(["./inou/yosys/lgcheck", "--reference", v1_top, "--implementation", v2_top,
+        rc2, log2 = run(["./inou/yosys/lgcheck", "--reference", ref, "--implementation", v2_top,
                          "--reference_top", top, "--implementation_top", top], timeout=args.lgcheck_timeout)
         if rc2 is None:
             lg = "timeout"
