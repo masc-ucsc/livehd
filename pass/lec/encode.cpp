@@ -276,8 +276,14 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
       auto it = shared_inputs->find(d.name);
       if (it != shared_inputs->end()) {
         v = it->second;
-        if (v.width != w) {
-          v.term  = fit(v, w);  // reconcile declared width across the two designs
+        // Reconcile a width disagreement across the two designs by EXTENDING up
+        // to the wider view, never truncating: the readers can undercount an
+        // input's bus width by a sign-bit slot (the "bit-width trap"), and
+        // truncating the shared symbol to the narrower side would drop the top
+        // bit (e.g. d=0x80 -> 0), a spurious mismatch. The shared symbol is built
+        // at the max width in query.cpp, so this only ever extends (defensively).
+        if (v.width < w) {
+          v.term  = fit(v, w);
           v.width = w;
         }
       }
@@ -317,7 +323,7 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     if (shared_inputs != nullptr) {
       if (auto it = shared_inputs->find(nm); it != shared_inputs->end()) {
         v = it->second;
-        if (v.width != w) {
+        if (v.width < w) {  // extend up only; never truncate (see input note above)
           v.term  = fit(v, w);
           v.width = w;
         }
@@ -625,16 +631,22 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
         if (all.size() < 2) {
           return fail("EQ expects >= 2 operands");
         }
-        int cw = 0;
+        // Verilog comparison signedness: the operation is signed ONLY if EVERY
+        // operand is signed; one unsigned operand makes the whole compare
+        // unsigned. The width extension must follow that effective sign, not each
+        // operand's own sign — else a 1-bit `signed` control (value 1 == -1)
+        // would sign-extend to all-ones inside an `== 1` and never match.
+        int  cw         = 0;
+        bool eff_signed = true;
         for (const auto& v : all) {
-          cw = std::max(cw, v.width);
+          cw         = std::max(cw, v.width);
+          eff_signed = eff_signed && v.is_signed;
         }
+        auto ext = [&](const Val& v) { return fit_to(tm_, Val{v.term, v.width, eff_signed}, cw); };
         Term acc;
         for (size_t i = 1; i < all.size(); ++i) {
-          Term lhs = fit(all[0], cw);
-          Term rhs = fit(all[i], cw);
-          Term eq  = tm_.mkTerm(Kind::EQUAL, {lhs, rhs});
-          acc      = acc.isNull() ? eq : tm_.mkTerm(Kind::AND, {acc, eq});
+          Term eq = tm_.mkTerm(Kind::EQUAL, {ext(all[0]), ext(all[i])});
+          acc     = acc.isNull() ? eq : tm_.mkTerm(Kind::AND, {acc, eq});
         }
         result = pred_to_bv(acc);
         break;
@@ -649,9 +661,12 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
         Term acc;
         for (const auto& a : as) {
           for (const auto& b : bs) {
+            // Signed compare only if BOTH operands are signed; the extension must
+            // match (zero-extend both when the compare is unsigned).
             bool both_signed = a.is_signed && b.is_signed;
             int  cw          = std::max(a.width, b.width);
-            Term la = fit(a, cw), lb = fit(b, cw);
+            Term la          = fit_to(tm_, Val{a.term, a.width, both_signed}, cw);
+            Term lb          = fit_to(tm_, Val{b.term, b.width, both_signed}, cw);
             Kind cmp = (op == Ntype_op::LT) ? (both_signed ? Kind::BITVECTOR_SLT : Kind::BITVECTOR_ULT)
                                             : (both_signed ? Kind::BITVECTOR_SGT : Kind::BITVECTOR_UGT);
             Term one = tm_.mkTerm(cmp, {la, lb});
@@ -678,7 +693,19 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
         if (pid(0).empty() || pid(1).empty()) {
           return fail("SRA missing a/b");
         }
-        result = tm_.mkTerm(Kind::BITVECTOR_ASHR, {fit(pid(0)[0], W), fit(pid(1)[0], W)});
+        // A right shift pulls bits DOWN from higher positions, so the operand
+        // must be at its full width BEFORE shifting — fitting it to the (possibly
+        // narrower) output width W first would drop the very bits the shift moves
+        // into range (e.g. (w[63:0] >> 1)[0] = w[1], but ((w[0]) >> 1) = 0). Shift
+        // at max(operand,output) width, then fit the result to W. Arithmetic
+        // (sign-replicating) only for a signed operand; logical otherwise — this
+        // mirrors Verilog `>>>` (arithmetic iff the operand is signed).
+        const Val& a   = pid(0)[0];
+        int        cw  = std::max(a.width, std::max(W, 1));
+        Term       af  = fit(a, cw);
+        Term       shf = fit_to(tm_, Val{pid(1)[0].term, pid(1)[0].width, false}, cw);  // shift amount: unsigned
+        Kind       k   = a.is_signed ? Kind::BITVECTOR_ASHR : Kind::BITVECTOR_LSHR;
+        result         = fit_to(tm_, Val{tm_.mkTerm(k, {af, shf}), cw, a.is_signed}, W);
         break;
       }
       case Ntype_op::Sext: {

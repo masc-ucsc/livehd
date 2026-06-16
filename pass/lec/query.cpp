@@ -84,15 +84,15 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     auto                                 collect_ins = [&](hhds::Graph* g) {
       auto gio = g->get_io();
       for (const auto& d : gio->get_input_pin_decls()) {
-        if (ins.count(d.name)) {
-          continue;
-        }
         auto pin = g->get_input_pin(d.name);
         int  w   = real_width_io(pin, *gio, d.name);
         if (w == 0) {
           w = 1;
         }
-        bool sgn  = pin.is_invalid() ? !gio->is_unsign(d.name) : !graph_util::is_unsign(pin);
+        if (auto it = ins.find(d.name); it != ins.end() && it->second.w >= w) {
+          continue;  // keep the max-width view across both designs (bit-width trap)
+        }
+        bool sgn    = pin.is_invalid() ? !gio->is_unsign(d.name) : !graph_util::is_unsign(pin);
         ins[d.name] = In{w, sgn};
       }
     };
@@ -221,7 +221,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           if (w == 0) {
             w = 1;
           }
-          fw[key] = w;
+          if (auto it = fw.find(key); it == fw.end() || w > it->second) {
+            fw[key] = w;  // max-width across both designs (bit-width trap)
+          }
           if (!init.count(key)) {
             if (auto iv = flop_initial(tm, node, w)) {
               init[key] = *iv;
@@ -395,18 +397,23 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 
   // Shared primary inputs: one symbolic BV per input name (union of both
   // designs). Both encodings reuse these terms, so "equal inputs" is structural
-  // (the miter constrains nothing on the inputs -> they range freely).
+  // (the miter constrains nothing on the inputs -> they range freely). The symbol
+  // is built at the MAX real-width seen across the two designs: the readers can
+  // disagree on a bus's width by a sign-bit slot (the "bit-width trap"), and
+  // sharing at the max keeps the extra bit FREE (sound) — sharing at the min
+  // would constrain it (false PROVE), truncating it in the encoder drops it
+  // (false REFUTE, e.g. an input 0x80 -> 0).
   absl::flat_hash_map<std::string, Val> shared;
   auto                                  add_inputs = [&](hhds::Graph* g) {
     auto gio = g->get_io();
     for (const auto& d : gio->get_input_pin_decls()) {
-      if (shared.count(d.name)) {
-        continue;
-      }
       auto pin = g->get_input_pin(d.name);
       int  w   = real_width_io(pin, *gio, d.name);
       if (w == 0) {
         w = 1;
+      }
+      if (auto it = shared.find(d.name); it != shared.end() && it->second.width >= w) {
+        continue;  // already have an equal-or-wider shared symbol
       }
       bool sgn       = pin.is_invalid() ? !gio->is_unsign(d.name) : !graph_util::is_unsign(pin);
       cvc5::Term t   = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), d.name);
@@ -430,12 +437,12 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         continue;
       }
       std::string key = flop_state_key(*g, node);
-      if (shared.count(key)) {
-        continue;
-      }
-      int w = real_width(q);
+      int         w   = real_width(q);
       if (w == 0) {
         w = 1;
+      }
+      if (auto it = shared.find(key); it != shared.end() && it->second.width >= w) {
+        continue;  // keep the wider shared state symbol (see input note above)
       }
       bool       sgn = !graph_util::is_unsign(q);
       cvc5::Term t   = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), key);
