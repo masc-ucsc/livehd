@@ -68,6 +68,12 @@ Always fix source code — never add `-Wno-*` flags to BUILD files. Exception: e
 
 ## Contracts
 
+### Git branches
+
+Do **not** create a git branch unless the user explicitly asks for one. Work
+on the current branch by default; only run `git checkout -b` / `git switch -c`
+(or otherwise create a branch) when the user clearly indicates to do so.
+
 ### Compiler warning options
 
 Unless the user explicitly indicates otherwise, do **not** change compiler
