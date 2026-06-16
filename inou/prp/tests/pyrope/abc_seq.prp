@@ -1,0 +1,21 @@
+/*
+:name: abc_seq
+:type: lgraph compile
+*/
+
+// Flat sequential fixture for pass.abc seq=true (task 2a-abc subtask 5): two
+// independent registers, each fed by its own combinational cone, no hierarchy
+// and no narrowing. `pass color synth` splits the def at each register, so abc
+// maps the combinational cones to standard cells and carries each flop across
+// ABC as a latch (retiming-capable), reconstructing native LGraph flops with
+// their `p`/`q` names preserved and their reset (initial = 0) value intact.
+// Registers only store same-cycle combinational values (no narrowing) because
+// the runtime wrap/sat path has no tolg lowering yet.
+mod abc_seq(a:u4, b:u4, c:u4, d:u4) -> (x:u4@[1], y:u4@[1]) {
+  reg p:u4 = 0
+  reg q:u4 = 0
+  p = (a & b) | (c ^ a)
+  q = (c & d) ^ (a | b)
+  x = p
+  y = q
+}

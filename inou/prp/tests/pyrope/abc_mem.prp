@@ -1,0 +1,27 @@
+/*
+:name: abc_mem
+:type: lgraph
+*/
+
+// NOTE: `:type: lgraph` (not `lgraph compile`) on purpose. The auto-generated
+// `compile` sub-test runs recipe O2, whose cprop/bitwidth pass still trips on
+// this memory ("input has more bits than memory width" — a pre-existing
+// single-vs-multiport memory limitation tracked by 2m-multiport_mem, not abc).
+// The pass.abc seq flow (lhd_abc_seq_test) drives this fixture at recipe O1,
+// which lowers and tech-maps it cleanly.
+
+// Sequential fixture exercising pass.abc seq=true memory-as-blackbox handling
+// (task 2a-abc subtask 5): a small 1-read / 1-write register-array memory with
+// surrounding combinational logic. abc must NOT bit-blast the memory; it cuts
+// the memory at the region boundary (its read data becomes an ABC source, its
+// address/data/enable cones become ABC sinks), maps only the surrounding logic
+// to standard cells, and reconstructs the native Memory node, reconnected and
+// LEC-equivalent to the original. Async read (`@[0]`) keeps the cgen path on the
+// single-clock cgen_memory_1rd_1wr wrapper.
+mod abc_mem(waddr:u3, wdata:u8, we:u1, raddr:u3, mask:u8) -> (rdata:u8@[0]) {
+  reg mem:[8]u8 = 0
+  rdata = mem[raddr] & mask     // combinational logic on the read path
+  if we {
+    mem[waddr] = wdata
+  }
+}

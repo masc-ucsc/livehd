@@ -37,6 +37,9 @@ filegroup(
         "tests/abc/test.lib",
         "tests/pyrope/abc_arith.prp",
         "tests/pyrope/abc_comb.prp",
+        "tests/pyrope/abc_mem.prp",
+        "tests/pyrope/abc_seq.prp",
+        "tests/pyrope/hier_seq.prp",
     ],
     visibility = ["//visibility:public"],
 )

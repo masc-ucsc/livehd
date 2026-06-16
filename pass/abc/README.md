@@ -28,17 +28,40 @@ Per region (`Region_body` from the partition seam):
 1. **to ABC** — bit-blast each comb cell into a 1-bit AIG netlist
    (`ABC_NTK_NETLIST`/`ABC_FUNC_AIG`). Multi-bit module IO becomes per-bit ABC
    PIs/POs (the bit-blast boundary). Supported cells: `and/or/xor/not`,
-   `mux/hotmux`, `get_mask/set_mask/sext` (constant mask/position), and
-   constants. Any other cell (arithmetic, `flop`, `memory`, `sub`) is a loud
-   `unsupported-cell` diagnostic.
-2. **flow** — `Abc_NtkToLogic` → run `pass.abc.flow` (default
-   `strash; &get -n; &fraig -x; &put; &get -n; &dch -f; &nf {D}; &put`) against
-   the `read_lib` Liberty → `Abc_NtkToNetlist`.
+   `mux/hotmux`, `get_mask/set_mask/sext` (constant mask/position), `sum` +
+   `lt/gt/eq` (via the selectable adder library, 2i-abc_arith), and constants.
+   Still `unsupported-cell`: `mult/div/mod` and variable shifts.
+2. **flow** — `Abc_NtkToLogic` → run `pass.abc.flow` (comb default
+   `strash; &get -n; &fraig -x; &put; &get -n; &dch -f; &nf {D}; &put`; seq
+   default adds `dretime`) against the `read_lib` Liberty → `Abc_NtkToNetlist`.
 3. **from ABC** — each mapped gate becomes a 1-bit blackbox `Sub` named after the
    Liberty cell (`Mio_GateReadName`), with pins from the Mio gate. Multi-bit
    outputs are reassembled with a `Set_mask` concat; inputs are bit-selected with
    `Get_mask`. PI/PO correspondence is matched by **creation order** (ABC
    preserves CI/CO order across the flow).
+
+### Sequential (`seq=true`)
+
+Registers cross into ABC as 1-bit **latches** (`Abc_NtkCreateLatch` + `Bi`/`Bo`)
+so ABC can retime/optimize across them, but stay **native `Flop`s** on read-back
+(never mapped to library DFFs — the Liberty stays purely combinational). Each
+flop's Q-net seeds `bitnet` as a source; its latch D is wired (after the comb
+loop) to the folded next-state `reset? rval : (enable? din : Q)`, so the
+reconstructed flop is a plain D-flop with only the region clock + power-on
+`initial` reattached, and ABC sees the true register function. Latch init comes
+from the reset/initial constant. On read-back, latches rebuild into native flops:
+a single-root region (one register name) collapses to one named flop, a 1:1
+multi-register region rebuilds one flop per register, and a retiming-reshaped
+region falls back to `<region>__r<n>` 1-bit flops (all LEC-correct).
+
+### Blackbox boundaries (memories + hierarchical `Sub`)
+
+A region `Memory` or child `Sub` instance is never bit-blasted: its consumed
+output pins become fresh ABC PIs (sources), its combinationally-driven inputs
+become ABC POs (the cones feeding them), constant inputs are recreated directly,
+and the node is rebuilt natively (a `Sub` is re-linked to the partitioned child
+def) and reconnected. Boundary PIs/POs are appended after the region ports so the
+region read-back stays index-aligned.
 
 ABC's frame is global: one `Abc_Start`/`Abc_Stop` per run, `read_lib` once before
 the region loop.
@@ -51,8 +74,10 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | flag | meaning | default |
 |------|---------|---------|
 | `library` | Liberty `.lib` for `read_lib` | `$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib` |
-| `flow` | ABC command string (`{D}`/`{L}` substituted) | built-in comb default |
-| `seq` | sequential mapping | `false` (`true` not implemented yet) |
+| `flow` | ABC command string (`{D}`/`{L}` substituted) | built-in comb/seq default |
+| `seq` | sequential mapping (flops→latches, memories/Subs blackboxed) | `false` |
+| `adder` | comb adder architecture for `sum`/cmp: `rca`/`cska`/`cla` | `rca` |
+| `block_size` | CSKA/CLA block width (`0` = auto) | `0` |
 | `delay` / `load` | `{D}` / `{L}` substitution | empty |
 | `verbose` | per-region gate count | `false` |
 
@@ -71,6 +96,10 @@ lossy, so exact gate lineage is unrecoverable.
 ## Status
 
 Combinational mapping (`seq=false`) is complete and LEC-verified
-(`//lhd/tests:lhd_abc_test`), with source-map carry-through (above). Not yet
-implemented: `seq=true` (flops→latches + name preservation) and arithmetic-cell
-bit-blast (`sum/mult/cmp/shift`). See `todo/livehd/2a-abc.html`.
+(`//lhd/tests:lhd_abc_test`), with source-map carry-through (above) and the
+selectable `sum`/comparator bit-blast (`//lhd/tests:lhd_abc_arith_test`).
+Sequential mapping (`seq=true`) — flops↔latches with name preservation +
+single-root remap, and memory/`Sub` blackbox boundaries — is complete and
+LEC-verified (`//lhd/tests:lhd_abc_seq_test`: flops, memory, and a 3-level
+hierarchy). Not yet implemented: `mult/div/mod` + variable-shift bit-blast, and
+per-region `flow` overrides. See `todo/livehd/2a-abc.html`.

@@ -64,15 +64,13 @@ void Pass_abc::work(Eprp_var& var) {
 
   auto adder = livehd::abc::arith::parse_adder_kind(adder_s);
   if (!adder.has_value()) {
-    livehd::diag::err("pass.abc", "bad-adder", "usage")
-        .msg("pass.abc: unknown adder '{}' (use rca|cska|cla)", adder_s)
-        .fatal();
+    livehd::diag::err("pass.abc", "bad-adder", "usage").msg("pass.abc: unknown adder '{}' (use rca|cska|cla)", adder_s).fatal();
     return;
   }
   int block_size = 0;
   {
-    auto* b = bs_s.data();
-    auto* e = bs_s.data() + bs_s.size();
+    auto* b      = bs_s.data();
+    auto* e      = bs_s.data() + bs_s.size();
     auto [p, ec] = std::from_chars(b, e, block_size);
     if (ec != std::errc{} || p != e || block_size < 0) {
       livehd::diag::err("pass.abc", "bad-block-size", "usage")
@@ -82,15 +80,6 @@ void Pass_abc::work(Eprp_var& var) {
     }
   }
 
-  if (seq) {
-    // Sequential mapping (flops -> ABC latches, name preservation, dretime) is a
-    // separate subtask; comb mapping (default) lands first. Fail loudly rather
-    // than silently mishandling flops.
-    livehd::diag::err("pass.abc", "seq-unsupported", "unsupported")
-        .msg("pass.abc seq=true is not implemented yet; use the default combinational mapping (seq=false)")
-        .fatal();
-    return;
-  }
   livehd::abc::Map_options opts;
   opts.flow       = flow;
   opts.seq        = seq;
@@ -127,8 +116,9 @@ void Pass_abc::work(Eprp_var& var) {
   }
 
   bool dbg = false;
-  Pass_partition::build_decomposition(var.graphs, &outlib, top, dbg,
-                                      [&mapper](const livehd::partition::Region_body& rb) { mapper.map_region(rb); });
+  Pass_partition::build_decomposition(var.graphs, &outlib, top, dbg, [&mapper](const livehd::partition::Region_body& rb) {
+    mapper.map_region(rb);
+  });
 
   mapper.stop();
 }

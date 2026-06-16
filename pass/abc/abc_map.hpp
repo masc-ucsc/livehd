@@ -13,12 +13,12 @@
 namespace livehd::abc {
 
 struct Map_options {
-  std::string library;       // Liberty .lib for read_lib
-  std::string flow;          // ABC command string (empty => built-in default)
-  bool        seq     = false;
-  std::string delay;         // {D} substitution
-  std::string load;          // {L} substitution
-  bool        verbose = false;
+  std::string       library;  // Liberty .lib for read_lib
+  std::string       flow;     // ABC command string (empty => built-in default)
+  bool              seq = false;
+  std::string       delay;  // {D} substitution
+  std::string       load;   // {L} substitution
+  bool              verbose    = false;
   // Combinational adder architecture for Sum/comparators (2i-abc_arith) and the
   // CSKA/CLA block width (0 => auto from the operating width).
   arith::Adder_kind adder      = arith::Adder_kind::rca;
@@ -49,6 +49,7 @@ private:
   hhds::GraphLibrary* outlib_     = nullptr;  // where blackbox cell defs are declared
 
   [[nodiscard]] std::string comb_flow() const;
+  [[nodiscard]] std::string seq_flow() const;
 };
 
 }  // namespace livehd::abc

@@ -117,6 +117,17 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
+# 2a-abc subtask 5: sequential tech-mapping (seq=true). Flops cross into ABC as
+# latches and return as native flops (name + reset preserved); memories and Sub
+# instances are blackbox boundaries. Each region is sequentially LEC-equivalent
+# (yosys BMC/induction) to its original-logic twin, plus a negative control.
+sh_test(
+    name = "lhd_abc_seq_test",
+    size = "large",
+    srcs = ["lhd_abc_seq_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
 # 2c-color: every coloring algorithm (acyclic|synth|path|mincut) + continuous +
 # clear run through the lhd CLI on a real design.
 sh_test(

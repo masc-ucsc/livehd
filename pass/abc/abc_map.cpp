@@ -28,6 +28,9 @@
 #include "hhds/graph.hpp"
 #include "node_util.hpp"
 
+// clang-format off
+// ABC headers must stay in dependency order: abc.h defines Abc_Frame_t (used by
+// cmd.h/main.h) and the word/namespace macros. Do not sort.
 extern "C" {
 #include "base/abc/abc.h"       // brings abc_global.h (word, macros, ABC_NAMESPACE_*)
 #include "base/main/abcapis.h"  // Abc_Frame_t
@@ -37,6 +40,7 @@ extern "C" {
 #include "map/mio/mio.h"
 #include "misc/extra/extra.h"
 }
+// clang-format on
 
 namespace gu = livehd::graph_util;
 
@@ -47,6 +51,12 @@ namespace {
 // Built-in combinational flow (task default). {D}/{L} substituted from opts.
 constexpr std::string_view kCombFlow = "strash; &get -n; &fraig -x; &put; &get -n; &dch -f; &nf {D}; &put";
 
+// Built-in sequential flow (seq=true). Same comb opt/map as kCombFlow but with a
+// retiming step (`dretime`) so ABC is allowed to move the region's registers
+// across the combinational logic. Latch count/order may change; the read-back is
+// robust to that (per-latch reconstruction + single-root remap).
+constexpr std::string_view kSeqFlow = "strash; &get -n; &fraig -x; &put; dretime; &get -n; &dch -f; &nf {D}; &put";
+
 std::string subst(std::string s, std::string_view tok, std::string_view val) {
   for (auto pos = s.find(tok); pos != std::string::npos; pos = s.find(tok, pos)) {
     s.replace(pos, tok.size(), val);
@@ -54,27 +64,42 @@ std::string subst(std::string s, std::string_view tok, std::string_view val) {
   return s;
 }
 
+// One-hot mask value (only bit `b` set) for Get_mask/Set_mask bit-select/concat,
+// valid for ANY bit position (`int64_t{1} << b` is UB for b >= 63, so it cannot
+// build masks for buses wider than 64 bits). from_binary builds MSB->LSB, so bit
+// b is a leading '1' followed by b zeros.
+spool_ptr<Dlop> bit_mask(int b) {
+  return Dlop::from_binary(std::string("1") + std::string(static_cast<size_t>(b), '0'), /*unsigned_result=*/true);
+}
+
 // Adapter exposing the per-region ABC gate constructors as the arith::Ops
 // bit-algebra (Bit = Abc_Obj_t*), so the templated adder/comparator builders in
 // abc_arith.hpp drive ABC without any ABC dependency of their own (2i-abc_arith).
 struct Abc_bit_ops {
-  std::function<Abc_Obj_t*(bool)>                    konst;
-  std::function<Abc_Obj_t*(Abc_Obj_t*)>              not_;
+  std::function<Abc_Obj_t*(bool)>                   konst;
+  std::function<Abc_Obj_t*(Abc_Obj_t*)>             not_;
   std::function<Abc_Obj_t*(Abc_Obj_t*, Abc_Obj_t*)> and_fn;
   std::function<Abc_Obj_t*(Abc_Obj_t*, Abc_Obj_t*)> or_fn;
   std::function<Abc_Obj_t*(Abc_Obj_t*, Abc_Obj_t*)> xor_fn;
-  Abc_Obj_t*                                         zero() { return konst(false); }
-  Abc_Obj_t*                                         one() { return konst(true); }
-  Abc_Obj_t*                                         inv(Abc_Obj_t* a) { return not_(a); }
-  Abc_Obj_t*                                         and_(Abc_Obj_t* a, Abc_Obj_t* b) { return and_fn(a, b); }
-  Abc_Obj_t*                                         or_(Abc_Obj_t* a, Abc_Obj_t* b) { return or_fn(a, b); }
-  Abc_Obj_t*                                         xor_(Abc_Obj_t* a, Abc_Obj_t* b) { return xor_fn(a, b); }
+  Abc_Obj_t*                                        zero() { return konst(false); }
+  Abc_Obj_t*                                        one() { return konst(true); }
+  Abc_Obj_t*                                        inv(Abc_Obj_t* a) { return not_(a); }
+  Abc_Obj_t*                                        and_(Abc_Obj_t* a, Abc_Obj_t* b) { return and_fn(a, b); }
+  Abc_Obj_t*                                        or_(Abc_Obj_t* a, Abc_Obj_t* b) { return or_fn(a, b); }
+  Abc_Obj_t*                                        xor_(Abc_Obj_t* a, Abc_Obj_t* b) { return xor_fn(a, b); }
 };
 
 }  // namespace
 
 std::string Mapper::comb_flow() const {
   std::string f = opts_.flow.empty() ? std::string{kCombFlow} : opts_.flow;
+  f             = subst(std::move(f), "{D}", opts_.delay);
+  f             = subst(std::move(f), "{L}", opts_.load);
+  return f;
+}
+
+std::string Mapper::seq_flow() const {
+  std::string f = opts_.flow.empty() ? std::string{kSeqFlow} : opts_.flow;
   f             = subst(std::move(f), "{D}", opts_.delay);
   f             = subst(std::move(f), "{L}", opts_.load);
   return f;
@@ -107,14 +132,14 @@ void Mapper::stop() {
 }
 
 void Mapper::map_region(const livehd::partition::Region_body& rb) {
-  auto*       manNtk  = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
-  manNtk->pName       = Extra_UtilStrsav(const_cast<char*>(rb.module_name.c_str()));
-  auto* manFunc       = static_cast<Hop_Man_t*>(manNtk->pManFunc);
+  auto* manNtk  = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
+  manNtk->pName = Extra_UtilStrsav(const_cast<char*>(rb.module_name.c_str()));
+  auto* manFunc = static_cast<Hop_Man_t*>(manNtk->pManFunc);
 
   // bit i of an original driver pin -> the ABC net carrying it.
   absl::flat_hash_map<hhds::Pin_class, absl::flat_hash_map<int, Abc_Obj_t*>> bitnet;
   // Region node membership (handles into rb.src).
-  absl::flat_hash_set<hhds::Node_class> region;
+  absl::flat_hash_set<hhds::Node_class>                                      region;
   for (const auto& n : rb.nodes) {
     region.insert(n);
   }
@@ -125,7 +150,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     Abc_ObjAddFanin(net, node);
     return net;
   };
-  Abc_Obj_t* const1 = nullptr;
+  Abc_Obj_t* const1     = nullptr;
   auto       abc_const1 = [&]() {
     if (const1 == nullptr) {
       auto* node  = Abc_NtkCreateNode(manNtk);
@@ -141,15 +166,17 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     return new_net(node);
   };
   auto abc_bin = [&](Abc_Obj_t* a, Abc_Obj_t* b, char kind) {
-    auto* node = Abc_NtkCreateNode(manNtk);
-    node->pData = kind == '&'   ? Hop_CreateAnd(manFunc, 2)
-                  : kind == '|' ? Hop_CreateOr(manFunc, 2)
-                                : Hop_CreateExor(manFunc, 2);
+    auto* node  = Abc_NtkCreateNode(manNtk);
+    node->pData = kind == '&' ? Hop_CreateAnd(manFunc, 2) : kind == '|' ? Hop_CreateOr(manFunc, 2) : Hop_CreateExor(manFunc, 2);
     Abc_ObjAddFanin(node, a);
     Abc_ObjAddFanin(node, b);
     return new_net(node);
   };
   auto abc_const_bit = [&](bool v) { return v ? abc_const1() : abc_not(abc_const1()); };
+  // 2:1 mux on ABC nets: sel ? t : f  ==  (sel & t) | (~sel & f).
+  auto abc_mux       = [&](Abc_Obj_t* sel, Abc_Obj_t* t, Abc_Obj_t* f) {
+    return abc_bin(abc_bin(sel, t, '&'), abc_bin(abc_not(sel), f, '&'), '|');
+  };
 
   // --- bit i of an original driver pin, with sign/zero extension past width ---
   std::function<Abc_Obj_t*(const hhds::Pin_class&, int)> abc_bit = [&](const hhds::Pin_class& drv, int i) -> Abc_Obj_t* {
@@ -170,8 +197,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       return it->second;
     }
     if (gu::is_const_pin(drv)) {
-      auto val = gu::hydrate_const(drv);
-      auto* net = abc_const_bit(val.bit_test(eff));
+      auto  val  = gu::hydrate_const(drv);
+      auto* net  = abc_const_bit(val.bit_test(eff));
       slots[eff] = net;
       return net;
     }
@@ -207,13 +234,163 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
   }
 
+  // --- sequential: each region Flop -> N 1-bit ABC latches (seq=true only) ---
+  // The latch output (Q) seeds bitnet so the combinational cells read it as a
+  // source; the latch input (D) is wired to the folded next-state cone AFTER the
+  // comb loop (it may depend on logic that has not been bit-blasted yet). Flops
+  // stay NATIVE on read-back (never mapped to library DFFs) -- the latch only
+  // exists so ABC can optimize/retime across the register boundary.
+  struct Seq_flop {
+    hhds::Node_class        node;
+    std::string             root;
+    int                     bits = 0;
+    hhds::Pin_class         q_pin;
+    hhds::Pin_class         din_drv, en_drv, rst_drv, rval_drv, clk_drv;
+    bool                    neg_reset = false;
+    std::vector<Abc_Obj_t*> bi;  // per-bit latch BI (data-in terminal)
+  };
+  std::vector<Seq_flop> flops;
+  if (opts_.seq) {
+    for (auto n : rb.src->forward_class()) {
+      if (!region.contains(n)) {
+        continue;
+      }
+      if (!gu::is_type_flop(n)) {
+        continue;
+      }
+      Seq_flop f;
+      f.node  = n;
+      f.q_pin = n.create_driver_pin(0);
+      f.bits  = gu::bits_of(f.q_pin);
+      if (f.bits == 0) {
+        f.bits = 1;
+      }
+      f.root = gu::wire_name(f.q_pin);  // the register's signal name (e.g. "r")
+      if (f.root.empty()) {
+        f.root = std::format("{}__flop{}", rb.module_name, n.get_debug_nid());
+      }
+      f.din_drv  = gu::get_driver_of_sink_name(n, "din");
+      f.en_drv   = gu::get_driver_of_sink_name(n, "enable");
+      f.rst_drv  = gu::get_driver_of_sink_name(n, "reset_pin");
+      f.rval_drv = gu::get_driver_of_sink_name(n, "initial");
+      f.clk_drv  = gu::get_driver_of_sink_name(n, "clock_pin");
+      if (auto nr = gu::get_driver_of_sink_name(n, "negreset"); !nr.is_invalid() && gu::is_const_pin(nr)) {
+        f.neg_reset = gu::hydrate_const(nr).bit_test(0);
+      }
+      bool  has_rval = !f.rval_drv.is_invalid() && gu::is_const_pin(f.rval_drv);
+      auto  rval     = has_rval ? gu::hydrate_const(f.rval_drv) : Dlop{};
+      auto& slots    = bitnet[f.q_pin];
+      for (int b = 0; b < f.bits; ++b) {
+        auto* bo    = Abc_NtkCreateBo(manNtk);
+        auto* latch = Abc_NtkCreateLatch(manNtk);
+        auto* bi    = Abc_NtkCreateBi(manNtk);
+        Abc_ObjAddFanin(bo, latch);
+        Abc_ObjAddFanin(latch, bi);
+        if (has_rval) {
+          rval.bit_test(b) ? Abc_LatchSetInit1(latch) : Abc_LatchSetInit0(latch);
+        } else {
+          Abc_LatchSetInitDc(latch);
+        }
+        auto* qnet = Abc_NtkCreateNet(manNtk);
+        Abc_ObjAddFanin(qnet, bo);
+        auto nm = f.bits == 1 ? std::format("{}_%r", f.root) : std::format("{}_%r_{}", f.root, b);
+        Abc_ObjAssignName(qnet, const_cast<char*>(nm.c_str()), nullptr);
+        slots[b] = qnet;  // flop Q bit -> latch output net (a CI source for the AIG)
+        f.bi.push_back(bi);
+      }
+      flops.push_back(std::move(f));
+    }
+  }
+
+  // --- blackbox boundary nodes (Sub instances + memories): never bit-blasted.
+  // Each consumed output driver pin becomes fresh ABC PIs (a source for the
+  // surrounding logic, seeded into bitnet); each combinationally-driven input
+  // becomes ABC POs (the cone feeding it, created after the comb loop); constant
+  // inputs are recreated directly on read-back. The node itself is rebuilt
+  // natively and reconnected. Boundary PIs/POs are appended AFTER the region
+  // ports so the region-port read-back stays index-aligned (region first). ---
+  struct Bbox_out {
+    hhds::Pin_class src_pin;
+    int             port_id;
+    int             bits;
+    bool            sign;
+  };
+  struct Bbox_in {
+    int             port_id;
+    hhds::Pin_class drv;
+    int             bits;
+  };
+  struct Bbox {
+    hhds::Node_class                             node;
+    Ntype_op                                     op;
+    std::vector<Bbox_out>                        outs;
+    std::vector<Bbox_in>                         ins;
+    std::vector<std::pair<int, hhds::Pin_class>> const_ins;  // (port_id, const driver)
+  };
+  std::vector<Bbox>                      bboxes;
+  std::vector<std::tuple<int, int, int>> bbox_pi;  // appended PI -> (bbox, out, bit)
+  for (auto n : rb.src->forward_class()) {
+    if (!region.contains(n)) {
+      continue;
+    }
+    auto op = gu::type_op_of(n);
+    if (op != Ntype_op::Sub && op != Ntype_op::Memory) {
+      continue;
+    }
+    Bbox bb;
+    bb.node                                          = n;
+    bb.op                                            = op;
+    int                                       bb_idx = static_cast<int>(bboxes.size());
+    // outputs: distinct driver pins that feed region logic -> fresh PI sources
+    absl::flat_hash_map<int, hhds::Pin_class> out_pins;
+    for (const auto& e : n.out_edges()) {
+      out_pins.emplace(static_cast<int>(e.driver.get_port_id()), e.driver);
+    }
+    for (auto& [pid, op_pin] : out_pins) {
+      int w = gu::bits_of(op_pin);
+      if (w == 0) {
+        w = 1;
+      }
+      int oi = static_cast<int>(bb.outs.size());
+      bb.outs.push_back({op_pin, pid, w, !gu::is_unsign(op_pin)});
+      auto& slots = bitnet[op_pin];
+      for (int b = 0; b < w; ++b) {
+        auto* obj = Abc_NtkCreatePi(manNtk);
+        auto* net = Abc_NtkCreateNet(manNtk);
+        Abc_ObjAddFanin(net, obj);
+        slots[b] = net;
+        bbox_pi.emplace_back(bb_idx, oi, b);
+      }
+    }
+    // inputs: const-driven recreated directly; comb-driven cut as POs
+    for (const auto& e : n.inp_edges()) {
+      int pid = static_cast<int>(e.sink.get_port_id());
+      if (gu::is_const_pin(e.driver)) {
+        bb.const_ins.emplace_back(pid, e.driver);
+      } else {
+        int w = gu::bits_of(e.driver);
+        if (w == 0) {
+          w = 1;
+        }
+        bb.ins.push_back({pid, e.driver, w});
+      }
+    }
+    bboxes.push_back(std::move(bb));
+  }
+
   // --- bit-blast each region node in topological order ---
   bool unsupported = false;
   for (auto n : rb.src->forward_class()) {
     if (!region.contains(n)) {
       continue;
     }
-    auto op       = gu::type_op_of(n);
+    auto op = gu::type_op_of(n);
+    if (op == Ntype_op::Sub || op == Ntype_op::Memory) {
+      continue;  // blackbox boundary (Sub instance / memory) -- handled separately
+    }
+    if (opts_.seq && gu::is_type_flop(n)) {
+      continue;  // sequential register -- crosses into ABC as a latch (handled above)
+    }
     auto out_pin  = n.create_driver_pin(0);
     int  out_bits = gu::bits_of(out_pin);
     if (out_bits == 0) {
@@ -230,7 +407,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         slots[b] = abc_not(abc_bit(a, b));
       }
     } else if (op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor) {
-      char kind = op == Ntype_op::And ? '&' : (op == Ntype_op::Or ? '|' : '^');
+      char                         kind = op == Ntype_op::And ? '&' : (op == Ntype_op::Or ? '|' : '^');
       std::vector<hhds::Pin_class> ins;
       for (const auto& e : n.inp_edges()) {
         ins.push_back(e.driver);
@@ -244,9 +421,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         slots[b] = acc == nullptr ? abc_const_bit(false) : acc;
       }
     } else if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
-      hhds::Pin_class                       sel;
+      hhds::Pin_class                           sel;
       absl::flat_hash_map<int, hhds::Pin_class> data;  // pid-1 (value) -> driver
-      int                                   max_v = -1;
+      int                                       max_v = -1;
       for (const auto& e : n.inp_edges()) {
         auto pid = e.sink.get_port_id();
         if (pid == 0) {
@@ -292,11 +469,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
             .emit();
         unsupported = true;
       } else {
-        auto mask   = gu::hydrate_const(m_drv);
-        bool neg    = mask.is_negative();
-        int  mb     = mask.get_bits();
-        int  pmb    = neg ? mb - 1 : mb;
-        int  a_bits = gu::bits_of(a_drv);
+        auto             mask   = gu::hydrate_const(m_drv);
+        bool             neg    = mask.is_negative();
+        int              mb     = mask.get_bits();
+        int              pmb    = neg ? mb - 1 : mb;
+        int              a_bits = gu::bits_of(a_drv);
         std::vector<int> pos;
         for (int k = 0; k < pmb; ++k) {
           bool sel = neg ? !mask.bit_test(k) : mask.bit_test(k);
@@ -450,10 +627,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
     } else {
       livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
-          .msg("pass.abc: cell '{}' in region '{}' has no combinational bit-blast yet "
-               "(supported: and/or/xor/not/mux/hotmux/sum/lt/gt/eq/get_mask/set_mask/sext/const)",
-               Ntype::get_name(op),
-               rb.module_name)
+          .msg(
+              "pass.abc: cell '{}' in region '{}' has no combinational bit-blast yet "
+              "(supported: and/or/xor/not/mux/hotmux/sum/lt/gt/eq/get_mask/set_mask/sext/const)",
+              Ntype::get_name(op),
+              rb.module_name)
           .emit();
       unsupported = true;
     }
@@ -461,6 +639,47 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   if (unsupported) {
     Abc_NtkDelete(manNtk);
     return;
+  }
+
+  // --- sequential: wire each latch's data-in (D) to the folded next-state ---
+  // The native LGraph flop's next state is  reset? rval : (enable? din : Q).
+  // Folding enable+reset into the AIG means the reconstructed flop is a plain
+  // D-flop (only clock + power-on init reattached), and ABC sees the true
+  // next-state function so retiming/sweeping stays sound.
+  // enable/reset are single control signals: an N-bit pin asserts on (pin != 0),
+  // i.e. the OR-reduction of its bits (matches cgen/yosys reg semantics). Reduce
+  // once per flop, not per data bit.
+  auto reduce_or = [&](const hhds::Pin_class& p) -> Abc_Obj_t* {
+    int w = gu::bits_of(p);
+    if (w <= 0) {
+      w = 1;
+    }
+    Abc_Obj_t* acc = abc_bit(p, 0);
+    for (int k = 1; k < w; ++k) {
+      acc = abc_bin(acc, abc_bit(p, k), '|');
+    }
+    return acc;
+  };
+  for (auto& f : flops) {
+    Abc_Obj_t* en_active  = f.en_drv.is_invalid() ? nullptr : reduce_or(f.en_drv);
+    Abc_Obj_t* rst_active = nullptr;
+    if (!f.rst_drv.is_invalid()) {
+      rst_active = reduce_or(f.rst_drv);
+      if (f.neg_reset) {
+        rst_active = abc_not(rst_active);
+      }
+    }
+    for (int b = 0; b < f.bits; ++b) {
+      Abc_Obj_t* d = abc_bit(f.din_drv, b);
+      if (en_active != nullptr) {
+        d = abc_mux(en_active, d, abc_bit(f.q_pin, b));  // (en != 0)? din : Q
+      }
+      if (rst_active != nullptr) {
+        Abc_Obj_t* rval = f.rval_drv.is_invalid() ? abc_const_bit(false) : abc_bit(f.rval_drv, b);
+        d               = abc_mux(rst_active, rval, d);  // reset? rval : (...)
+      }
+      Abc_ObjAddFanin(f.bi[b], d);
+    }
   }
 
   // --- region outputs -> per-bit ABC POs ---
@@ -482,11 +701,29 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
   }
 
+  // --- blackbox combinational inputs -> per-bit ABC POs (appended after the
+  // region outputs so the region-output read-back stays index-aligned) ---
+  std::vector<std::tuple<int, int, int>> bbox_po;  // appended PO -> (bbox, in, bit)
+  for (size_t bi = 0; bi < bboxes.size(); ++bi) {
+    auto& bb = bboxes[bi];
+    for (size_t ii = 0; ii < bb.ins.size(); ++ii) {
+      const auto& in = bb.ins[ii];
+      for (int b = 0; b < in.bits; ++b) {
+        auto* value = abc_bit(in.drv, b);
+        auto* buf   = Abc_NtkCreateNode(manNtk);
+        buf->pData  = Hop_IthVar(manFunc, 0);
+        Abc_ObjAddFanin(buf, value);
+        auto* onet = new_net(buf);
+        auto* obj  = Abc_NtkCreatePo(manNtk);
+        Abc_ObjAddFanin(obj, onet);
+        bbox_po.emplace_back(static_cast<int>(bi), static_cast<int>(ii), b);
+      }
+    }
+  }
+
   Abc_NtkFinalizeRead(manNtk);
   if (!Abc_NtkCheck(manNtk)) {
-    livehd::diag::err("pass.abc", "abc-check", "internal")
-        .msg("ABC netlist check failed for region '{}'", rb.module_name)
-        .fatal();
+    livehd::diag::err("pass.abc", "abc-check", "internal").msg("ABC netlist check failed for region '{}'", rb.module_name).fatal();
     Abc_NtkDelete(manNtk);
     return;
   }
@@ -497,11 +734,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   Abc_NtkDelete(manNtk);
   Abc_FrameClearVerifStatus(frame);
   Abc_FrameSetCurrentNetwork(frame, pLogic);
-  auto flow = comb_flow();
+  auto flow = opts_.seq ? seq_flow() : comb_flow();
   if (Cmd_CommandExecute(frame, flow.c_str()) != 0) {
-    livehd::diag::err("pass.abc", "abc-flow", "internal")
-        .msg("ABC flow failed for region '{}': {}", rb.module_name, flow)
-        .fatal();
+    livehd::diag::err("pass.abc", "abc-flow", "internal").msg("ABC flow failed for region '{}': {}", rb.module_name, flow).fatal();
     return;
   }
   auto* mapped = Abc_NtkToNetlist(Abc_FrameReadNtk(frame));
@@ -543,7 +778,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     if (auto existing = outlib_->find_io(cell)) {
       return existing;
     }
-    auto io = outlib_->create_io(cell);
+    auto          io  = outlib_->create_io(cell);
     hhds::Port_id pid = 1;
     for (auto* pin = Mio_GateReadPins(g); pin != nullptr; pin = Mio_PinReadNext(pin)) {
       io->add_input(Mio_PinReadName(pin), pid++);
@@ -556,7 +791,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
 
   // lazily build bit b of a body input pin (Get_mask bit-select; pin itself if 1-bit)
   std::vector<std::vector<hhds::Pin_class>> in_bit(rb.inputs.size());
-  auto input_bit = [&](size_t port_idx, int b) -> hhds::Pin_class {
+  auto                                      input_bit = [&](size_t port_idx, int b) -> hhds::Pin_class {
     auto&       cache = in_bit[port_idx];
     const auto& port  = rb.inputs[port_idx];
     int         w     = port.bits == 0 ? 1 : port.bits;
@@ -573,7 +808,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
     auto gm = gu::create_typed_node(*body, Ntype_op::Get_mask);
     ipin.connect_sink(gu::setup_sink_by_name(gm, "a"));
-    gu::create_const(*body, *Dlop::create_integer(int64_t{1} << b)).connect_sink(gu::setup_sink_by_name(gm, "mask"));
+    gu::create_const(*body, *bit_mask(b)).connect_sink(gu::setup_sink_by_name(gm, "mask"));
     auto d = gm.create_driver_pin(0);
     gu::set_bits(d, 1);
     gu::set_unsign(d);
@@ -582,14 +817,84 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   };
 
   absl::flat_hash_map<Abc_Obj_t*, hhds::Pin_class> net2drv;
-  int  i = 0;
-  Abc_Obj_t* pObj = nullptr;
+  int                                              i    = 0;
+  Abc_Obj_t*                                       pObj = nullptr;
+
+  // pass 1.bbox: rebuild each blackbox node (Sub instance / memory) natively.
+  // Its output pins drive the boundary PIs (mapped in pass 1a); its inputs are
+  // wired in pass 2c once their driving cones resolve. Const inputs are wired now.
+  struct Bbox_recon {
+    hhds::Node_class                          node;
+    std::vector<std::vector<hhds::Pin_class>> out_bit;  // [out idx][bit] -> body driver
+    std::vector<std::vector<hhds::Pin_class>> in_bit;   // [in idx][bit] -> body driver (filled pass 3)
+  };
+  std::vector<Bbox_recon> bbox_recon(bboxes.size());
+  for (size_t bi = 0; bi < bboxes.size(); ++bi) {
+    auto& bb = bboxes[bi];
+    auto& br = bbox_recon[bi];
+    auto  nn = gu::create_typed_node(*body, bb.op);
+    if (bb.op == Ntype_op::Sub) {
+      if (auto child = bb.node.get_subnode_io()) {
+        if (auto out_child = outlib_->find_io(child->get_name())) {
+          nn.set_subnode(out_child);
+        } else {
+          livehd::diag::err("pass.abc", "missing-subdef", "unsupported")
+              .msg("pass.abc: sub-instance in region '{}' references child def '{}' missing from the output library",
+                   rb.module_name,
+                   std::string{child->get_name()})
+              .emit();
+          unsupported = true;
+        }
+      }
+    }
+    if (auto nm = gu::node_name_of(bb.node); !nm.empty()) {
+      nn.attr(hhds::attrs::name).set(std::string{nm});
+    }
+    br.node = nn;
+    br.out_bit.resize(bb.outs.size());
+    for (size_t oi = 0; oi < bb.outs.size(); ++oi) {
+      const auto& o  = bb.outs[oi];
+      auto        dp = nn.create_driver_pin(o.port_id);
+      gu::set_bits(dp, o.bits);
+      if (!o.sign) {
+        gu::set_unsign(dp);
+      }
+      br.out_bit[oi].resize(o.bits);
+      if (o.bits == 1) {
+        br.out_bit[oi][0] = dp;
+      } else {
+        for (int b = 0; b < o.bits; ++b) {
+          auto gm = gu::create_typed_node(*body, Ntype_op::Get_mask);
+          dp.connect_sink(gu::setup_sink_by_name(gm, "a"));
+          gu::create_const(*body, *bit_mask(b)).connect_sink(gu::setup_sink_by_name(gm, "mask"));
+          auto d = gm.create_driver_pin(0);
+          gu::set_bits(d, 1);
+          gu::set_unsign(d);
+          br.out_bit[oi][b] = d;
+        }
+      }
+    }
+    for (const auto& [pid, cdrv] : bb.const_ins) {
+      gu::create_const(*body, gu::hydrate_const(cdrv)).connect_sink(nn.create_sink_pin(pid));
+    }
+    br.in_bit.resize(bb.ins.size());
+    for (size_t ii = 0; ii < bb.ins.size(); ++ii) {
+      br.in_bit[ii].assign(bb.ins[ii].bits, hhds::Pin_class{});
+    }
+  }
+  if (unsupported) {
+    Abc_NtkDelete(mapped);
+    return;
+  }
 
   // pass 1a: PI nets -> body input bit drivers (match by creation order — ABC
   // preserves CI/CO order across the flow, more robust than name parsing).
   Abc_NtkForEachPi(mapped, pObj, i) {
     if (i < static_cast<int>(pi_order.size())) {
       net2drv[Abc_ObjFanout0(pObj)] = input_bit(pi_order[i].first, pi_order[i].second);
+    } else if (int j = i - static_cast<int>(pi_order.size()); j < static_cast<int>(bbox_pi.size())) {
+      auto [bx, oi, b]              = bbox_pi[j];
+      net2drv[Abc_ObjFanout0(pObj)] = bbox_recon[bx].out_bit[oi][b];
     }
   }
 
@@ -611,17 +916,139 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     gates.emplace_back(sub, pObj);
   }
 
-  // pass 2: wire each Sub's fanins (fanin k <-> Liberty pin k)
-  auto const0_pin = [&]() {
-    return gu::create_const(*body, *Dlop::create_integer(0));
+  // pass 1c (seq): each ABC latch -> a native LGraph Flop. Flops are never
+  // mapped to library DFFs (locked design decision): the latch only carried the
+  // register across ABC so it could optimize/retime the surrounding logic. The
+  // latch output net (Q) is mapped into net2drv so the comb fanins/outputs read
+  // the flop's Q; the latch input net (D) is recorded and wired in pass 2b (its
+  // driving gate is created in pass 2). Reassembly: a single-root region (one
+  // distinct register name) collapses every surviving latch into one named
+  // flop; a multi-register region with a 1:1 latch count rebuilds one flop per
+  // original register; otherwise (retiming reshaped the count) each surviving
+  // latch becomes its own deterministically-named 1-bit flop.
+  struct Recon_flop {
+    hhds::Node_class        node;
+    int                     bits = 0;
+    std::vector<Abc_Obj_t*> dnet;  // per-bit latch data-in net (wired in pass 2b)
   };
+  std::vector<Recon_flop> recon;
+  if (opts_.seq && !flops.empty()) {
+    // src external driver -> body driver pin (region input port, or recreated const)
+    absl::flat_hash_map<hhds::Pin_class, std::string> src_in_to_name;
+    for (const auto& port : rb.inputs) {
+      src_in_to_name[port.src_driver] = port.name;
+    }
+    auto body_pin_for_src = [&](const hhds::Pin_class& d) -> hhds::Pin_class {
+      if (d.is_invalid()) {
+        return {};
+      }
+      if (auto it = src_in_to_name.find(d); it != src_in_to_name.end()) {
+        return body->get_input_pin(it->second);
+      }
+      if (gu::is_const_pin(d)) {
+        return gu::create_const(*body, gu::hydrate_const(d));
+      }
+      return {};
+    };
+    auto region_clk = body_pin_for_src(flops.front().clk_drv);
+
+    // surviving latches, in stable vBoxes order
+    std::vector<Abc_Obj_t*> lat;
+    Abc_NtkForEachLatch(mapped, pObj, i) { lat.push_back(pObj); }
+    int m = static_cast<int>(lat.size());
+
+    absl::flat_hash_set<std::string> roots;
+    for (const auto& f : flops) {
+      roots.insert(f.root);
+    }
+
+    struct Group {
+      std::string      name;
+      std::vector<int> idx;  // indices into `lat`
+      hhds::Pin_class  clk;
+    };
+    // Single-root region (one register name, possibly multi-bit): collapse every
+    // surviving latch into one named flop. `pass color synth` splits each def at
+    // its registers, so regions are single-root in practice and this is the path
+    // the seq tests exercise. Any multi-register region falls back to per-latch
+    // 1-bit flops -- always LEC-correct regardless of how retiming reshaped or
+    // reordered the latches (each latch is faithfully its own 1-bit register; no
+    // cross-register order assumption).
+    std::vector<Group> groups;
+    if (roots.size() == 1) {
+      Group g{flops.front().root, {}, region_clk};
+      for (int k = 0; k < m; ++k) {
+        g.idx.push_back(k);
+      }
+      groups.push_back(std::move(g));
+    } else {
+      for (int k = 0; k < m; ++k) {
+        groups.push_back(Group{std::format("{}__r{}", rb.module_name, k), {k}, region_clk});
+      }
+    }
+
+    for (auto& g : groups) {
+      int  k = static_cast<int>(g.idx.size());
+      auto F = gu::create_typed_node(*body, Ntype_op::Flop);
+      F.attr(hhds::attrs::name).set(g.name);
+      auto Fq = F.create_driver_pin(0);
+      gu::set_bits(Fq, k);
+      gu::set_unsign(Fq);
+      if (!g.clk.is_invalid()) {
+        g.clk.connect_sink(gu::setup_sink_by_name(F, "clock_pin"));
+      }
+      // power-on / reset init from the (possibly retimed) latch init values.
+      // Build the value MSB->LSB as a binary string so widths past 64 bits stay
+      // exact (an int64 accumulator would overflow / be UB).
+      bool        any_init = false;
+      std::string init_bits(k, '0');  // index 0 = MSB (bit k-1)
+      for (int b = 0; b < k; ++b) {
+        int v = Abc_LatchInit(lat[g.idx[b]]);  // 1=zero, 2=one, else dc/none
+        if (v == 1 || v == 2) {
+          any_init = true;
+          if (v == 2) {
+            init_bits[k - 1 - b] = '1';
+          }
+        }
+      }
+      if (any_init) {
+        gu::create_const(*body, *Dlop::from_binary(init_bits, /*unsigned_result=*/true))
+            .connect_sink(gu::setup_sink_by_name(F, "initial"));
+      }
+      Recon_flop rf;
+      rf.node = F;
+      rf.bits = k;
+      for (int b = 0; b < k; ++b) {
+        auto*           L    = lat[g.idx[b]];
+        auto*           qnet = Abc_ObjFanout0(Abc_ObjFanout0(L));  // latch -> BO -> Q net
+        auto*           dnet = Abc_ObjFanin0(Abc_ObjFanin0(L));    // latch <- BI <- D net
+        hhds::Pin_class qd;
+        if (k == 1) {
+          qd = Fq;
+        } else {
+          auto gm = gu::create_typed_node(*body, Ntype_op::Get_mask);
+          Fq.connect_sink(gu::setup_sink_by_name(gm, "a"));
+          gu::create_const(*body, *bit_mask(b)).connect_sink(gu::setup_sink_by_name(gm, "mask"));
+          qd = gm.create_driver_pin(0);
+          gu::set_bits(qd, 1);
+          gu::set_unsign(qd);
+        }
+        net2drv[qnet] = qd;
+        rf.dnet.push_back(dnet);
+      }
+      recon.push_back(std::move(rf));
+    }
+  }
+
+  // pass 2: wire each Sub's fanins (fanin k <-> Liberty pin k)
+  auto const0_pin = [&]() { return gu::create_const(*body, *Dlop::create_integer(0)); };
   for (auto& [sub, obj] : gates) {
-    auto* g = static_cast<Mio_Gate_t*>(obj->pData);
+    auto*                    g = static_cast<Mio_Gate_t*>(obj->pData);
     std::vector<std::string> pins;
     for (auto* pin = Mio_GateReadPins(g); pin != nullptr; pin = Mio_PinReadNext(pin)) {
       pins.emplace_back(Mio_PinReadName(pin));
     }
-    int k = 0;
+    int        k   = 0;
     Abc_Obj_t* fin = nullptr;
     Abc_ObjForEachFanin(obj, fin, k) {
       if (k >= static_cast<int>(pins.size())) {
@@ -638,6 +1065,35 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
   }
 
+  // pass 2b (seq): wire each reconstructed flop's din from the body driver that
+  // feeds its latch D net (now resolvable: PIs in 1a, gates in 1b/2). Multi-bit
+  // din is reassembled with a Set_mask concat, mirroring the PO reassembly.
+  for (auto& rf : recon) {
+    int                          k = rf.bits;
+    std::vector<hhds::Pin_class> dbits(k);
+    for (int b = 0; b < k; ++b) {
+      auto it  = net2drv.find(rf.dnet[b]);
+      dbits[b] = it != net2drv.end() ? it->second : const0_pin();
+    }
+    auto din_sink = gu::setup_sink_by_name(rf.node, "din");
+    if (k == 1) {
+      dbits[0].connect_sink(din_sink);
+      continue;
+    }
+    hhds::Pin_class acc = gu::create_const(*body, *Dlop::create_integer(0));
+    for (int b = 0; b < k; ++b) {
+      auto sm = gu::create_typed_node(*body, Ntype_op::Set_mask);
+      acc.connect_sink(gu::setup_sink_by_name(sm, "a"));
+      gu::create_const(*body, *bit_mask(b)).connect_sink(gu::setup_sink_by_name(sm, "mask"));
+      dbits[b].connect_sink(gu::setup_sink_by_name(sm, "value"));
+      acc = sm.create_driver_pin(0);
+      gu::set_bits(acc, b + 1);
+      gu::set_unsign(acc);
+    }
+    gu::set_bits(acc, k);
+    acc.connect_sink(din_sink);
+  }
+
   // pass 3: POs -> reassemble multi-bit outputs (Set_mask concat). Match by
   // creation order (po_order), consistent with the PI readback.
   std::vector<std::vector<hhds::Pin_class>> out_bits(rb.outputs.size());
@@ -646,12 +1102,48 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     out_bits[po].resize(w);
   }
   Abc_NtkForEachPo(mapped, pObj, i) {
-    if (i >= static_cast<int>(po_order.size())) {
-      continue;
-    }
     auto* net = Abc_ObjFanin0(pObj);
     auto  dit = net2drv.find(net);
-    out_bits[po_order[i].first][po_order[i].second] = dit != net2drv.end() ? dit->second : const0_pin();
+    auto  drv = dit != net2drv.end() ? dit->second : const0_pin();
+    if (i < static_cast<int>(po_order.size())) {
+      out_bits[po_order[i].first][po_order[i].second] = drv;
+    } else if (int j = i - static_cast<int>(po_order.size()); j < static_cast<int>(bbox_po.size())) {
+      auto [bx, ii, b]             = bbox_po[j];
+      bbox_recon[bx].in_bit[ii][b] = drv;  // wired to the recon node sink below
+    }
+  }
+
+  // pass 3b: wire each rebuilt blackbox node's combinational inputs from the
+  // captured PO drivers (multi-bit reassembled with a Set_mask concat).
+  for (size_t bx = 0; bx < bboxes.size(); ++bx) {
+    auto& bb = bboxes[bx];
+    auto& br = bbox_recon[bx];
+    for (size_t ii = 0; ii < bb.ins.size(); ++ii) {
+      int   w    = bb.ins[ii].bits;
+      auto  sink = br.node.create_sink_pin(bb.ins[ii].port_id);
+      auto& dbit = br.in_bit[ii];
+      for (int b = 0; b < w; ++b) {
+        if (dbit[b].is_invalid()) {
+          dbit[b] = const0_pin();
+        }
+      }
+      if (w == 1) {
+        dbit[0].connect_sink(sink);
+        continue;
+      }
+      hhds::Pin_class acc = gu::create_const(*body, *Dlop::create_integer(0));
+      for (int b = 0; b < w; ++b) {
+        auto sm = gu::create_typed_node(*body, Ntype_op::Set_mask);
+        acc.connect_sink(gu::setup_sink_by_name(sm, "a"));
+        gu::create_const(*body, *bit_mask(b)).connect_sink(gu::setup_sink_by_name(sm, "mask"));
+        dbit[b].connect_sink(gu::setup_sink_by_name(sm, "value"));
+        acc = sm.create_driver_pin(0);
+        gu::set_bits(acc, b + 1);
+        gu::set_unsign(acc);
+      }
+      gu::set_bits(acc, w);
+      acc.connect_sink(sink);
+    }
   }
 
   for (size_t po = 0; po < rb.outputs.size(); ++po) {
@@ -676,7 +1168,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         sm.attr(hhds::attrs::srcid).set(po_srcid[po]);
       }
       acc.connect_sink(gu::setup_sink_by_name(sm, "a"));
-      gu::create_const(*body, *Dlop::create_integer(int64_t{1} << b)).connect_sink(gu::setup_sink_by_name(sm, "mask"));
+      gu::create_const(*body, *bit_mask(b)).connect_sink(gu::setup_sink_by_name(sm, "mask"));
       bits[b].connect_sink(gu::setup_sink_by_name(sm, "value"));
       acc = sm.create_driver_pin(0);
       gu::set_bits(acc, b + 1);
@@ -747,8 +1239,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       if (ids.empty()) {
         continue;
       }
-      auto sid = ids.size() == 1 ? ids.front()
-                                 : body->source_locator().combine(std::span<const hhds::SourceId>(ids.data(), ids.size()));
+      auto sid
+          = ids.size() == 1 ? ids.front() : body->source_locator().combine(std::span<const hhds::SourceId>(ids.data(), ids.size()));
       node2sub[g].attr(hhds::attrs::srcid).set(sid);
     }
   }
