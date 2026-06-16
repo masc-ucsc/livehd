@@ -425,6 +425,10 @@ struct Lambda_extractor {
     auto new_lnast = std::make_shared<Lnast>(extracted_name);
     new_lnast->set_lambda_kind(func_kind);
     if (const auto& file_ln = lm->get_lnast(); file_ln) {
+      // Carry HDL provenance (a v2prp `::[hdl]` unit, or any verilog-origin
+      // source) onto the extracted per-lambda Lnast so tolg's reg-timing treats
+      // its plain regs as always_ff state, not pyrope feedforward stages.
+      new_lnast->set_verilog_origin(file_ln->is_verilog_origin());
       for (const auto& p : file_ln->get_pub_list()) {
         if (p.name == func_name && !p.lg.empty()) {
           new_lnast->set_lg_name(p.lg);

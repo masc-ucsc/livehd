@@ -189,7 +189,11 @@ void Lnast_prp_writer::write_module() {
   print("pub ");
   print(is_mod ? "mod " : "comb ");
   print(lambda_name());
-  print(std::format("::[lg=\"{}\"]", lnast->get_top_module_name()));
+  // `lg` pins the module name; `hdl` marks this as a Verilog-imported unit so
+  // the re-compile treats its plain regs as always_ff state (σ=0), not Pyrope
+  // feedforward pipeline stages (the cross-cycle timing check would otherwise
+  // fire when a reg q meets a combinational value).
+  print(std::format("::[lg=\"{}\", hdl]", lnast->get_top_module_name()));
   emit_module_header(io_nid, is_mod);
   print(" {\n");
   ++depth;

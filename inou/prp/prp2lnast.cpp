@@ -3076,7 +3076,8 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // tolg renames the artifact (NOT the `import("file.entity")` key). A bare/
   // misplaced `lg` on a non-lambda is rejected by reject_common_mistakes_attr_name.
   std::string lg_value;
-  bool        has_lg = false;
+  bool        has_lg  = false;
+  bool        has_hdl = false;  // `::[hdl]` — HDL-imported unit (verilog reg = state)
   TSNode      lg_node{};
   if (!ts_node_is_null(fdef)) {
     // The `::[…]` prefix lands in the function_definition_decl's `pipe_config`
@@ -3106,6 +3107,15 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
           }
         } else if (it == "identifier" || it == "ref_identifier") {
           key = trim(get_text(item));
+        }
+        if (key == "hdl") {
+          // Marker emitted by upass/prp_writer on a Verilog-imported (v2prp)
+          // unit: its plain regs are always_ff STATE elements (σ=0), not Pyrope
+          // feedforward pipeline stages.  Sets the same provenance the slang
+          // reader sets directly, so the tolg reg-timing analysis treats the
+          // re-compiled regs as state and does not trip the cross-cycle check.
+          has_hdl = true;
+          continue;
         }
         if (key != "lg") {
           continue;  // other lambda-name attributes are out of scope here
@@ -3156,6 +3166,9 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
                  "type",
                  "the `lg` attribute is only valid on a `pub` lambda definition",
                  "add `pub` before the definition, or remove the `lg` attribute");
+  }
+  if (has_hdl) {
+    lnast->set_verilog_origin(true);
   }
 
   // Workaround for tree-sitter not always attaching the body to `code`:
