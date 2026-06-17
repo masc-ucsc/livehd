@@ -653,8 +653,8 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
   set_pending_loc(sym.location);
   builder_.create_declare_stmts(name,
                                 mode,
-                                ti.is_signed ? std::string(Dlop::get_mask_value(ti.bits - 1)->to_pyrope()) : mask_text(ti.bits),
-                                ti.is_signed ? std::string(Dlop::get_neg_mask_value(ti.bits - 1)->to_pyrope()) : "0",
+                                int_max_str(ti.bits, ti.is_signed),
+                                int_min_str(ti.bits, ti.is_signed),
                                 "nil");  // no reset by default; async patterns override via attrs
   clear_pending_loc();
 }

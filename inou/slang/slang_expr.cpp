@@ -468,11 +468,7 @@ std::string Slang_context::lower_conditional_expr(const slang::ast::ConditionalE
   // values through a chained mux (the CLZ priority-encoder class: io_out[0]
   // proved but the upper bits diverged).  A typed temp pins the width/sign.
   if (ti.bits > 0) {
-    builder_.create_declare_stmts(tmp,
-                                  "mut",
-                                  ti.is_signed ? std::string(Dlop::get_mask_value(ti.bits - 1)->to_pyrope())
-                                               : mask_text(ti.bits),
-                                  ti.is_signed ? std::string(Dlop::get_neg_mask_value(ti.bits - 1)->to_pyrope()) : "0");
+    builder_.create_declare_stmts(tmp, "mut", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
   } else {
     builder_.create_declare_stmts(tmp, "mut", "", "");  // rangeless: arms may carry x
   }

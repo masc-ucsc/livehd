@@ -76,14 +76,20 @@ ladder is promoted). Tiers:
 Run one: `bazel test //inou/slang:slang_compile-<name>`; all:
 `bazel test //inou/slang:all`.
 
-Current tally (2026-06-12, 110 sources): **70 lec**, 16 verilog, 24 error
-(9 of those are non-LRM sources slang correctly rejects, e.g. procedural
-writes to nets; the rest are tracked feature gaps: instance arrays,
+Current tally (2026-06-17, 116 sources): **86 lec**, 7 verilog, 2 lnast,
+21 error (9 of those are non-LRM sources slang correctly rejects, e.g.
+procedural writes to nets; the rest are tracked feature gaps: instance arrays,
 hierarchical punch-through references, `'bx` golden arms, dynamic
-mem-element part-selects). Three LEC-capable big-memory tests (`long_mem`,
-`long_mem3`, `fixme_mem_offset`) are deliberately capped at `verilog`:
-memory LEC is slow on big arrays, and the small-array coverage
-(simple_rf1/rf2, tuplish, fixme_array) carries the equivalence guarantee.
+mem-element part-selects). The 7 `verilog`-capped entries are LEC-slow or
+genuine gaps: four big-memory / wide-arith tests (`long_mem`, `long_mem3`,
+`fixme_mem_offset`, `long_nocheck_iwls_square`) and `fixme_sha256`'s wide
+reduction are deliberately capped because LEC is slow there (the small-array
+coverage simple_rf1/rf2, tuplish, fixme_array carries the memory guarantee);
+`mem_sync_init` and `nocheck_slang_foreach` are real memory-lowering gaps.
+Correct mixed signed/unsigned arithmetic and narrow (1- and 2-bit) signed
+port/temp ranges (`add1`, `issue_047`, …) are now LEC-verified — a signed
+operand in an unsigned expression zero-extends, and `materialize_conversion`
+plus `int_min_str`/`int_max_str` carry the 1800 §11.8.2 sign rules.
 
 The `tests/verilog/` sky130 cell samples run at the `lnast` tier through the
 legacy no-argument `slang_compile.sh` mode (`slang_compile_sky130` target).

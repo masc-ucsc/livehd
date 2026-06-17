@@ -43,6 +43,10 @@ inline Dlop signed_min_from_bits(uint32_t bits) {
   if (bits == 1) {
     return *Dlop::create_integer(-1);  // 1-bit signed min is -1
   }
+  if (bits == 2) {
+    return *Dlop::create_integer(-2);  // 2-bit signed min is -2: get_neg_mask_value(1)
+                                       // hits the same wart as get_neg_mask_value(0) and returns +1
+  }
   return *Dlop::get_neg_mask_value(bits - 1);  // -2^(bits-1)
 }
 

@@ -263,6 +263,12 @@ private:
   // unpacked-array port lowers to. Other types fall through to tinfo.
   static Tinfo flat_or_tinfo(const slang::ast::Type& t);
   void         emit_prim_type_int(const Lnast_nid& parent, int bits, bool is_signed);
+  // Pyrope literals for the max/min value of a `bits`-wide integer of the given
+  // sign. Works around Dlop::get_{,neg_}mask_value's narrow-arg wart (both
+  // return 1 for arg <= 1): a 1-bit signed is {0,-1} and a 2-bit signed is
+  // {1,-2}, not the (1,1) the naive get_*_mask_value(bits-1) calls produce.
+  std::string  int_max_str(int bits, bool is_signed) const;
+  std::string  int_min_str(int bits, bool is_signed) const;
   // The single conversion boundary: adjust an integer-semantics value from
   // (from_bits, from_signed) to (to_bits, to_signed). Truncate first, then
   // reinterpret; widening is a no-op in LNAST integer semantics.

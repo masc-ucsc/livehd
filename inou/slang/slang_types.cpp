@@ -24,16 +24,46 @@ Slang_context::Tinfo Slang_context::tinfo(const slang::ast::Type& t) {
 
 std::string Slang_context::mask_text(int bits) const { return std::string(Dlop::get_mask_value(bits)->to_pyrope()); }
 
+std::string Slang_context::int_max_str(int bits, bool is_signed) const {
+  if (bits <= 0) {
+    bits = 1;
+  }
+  if (!is_signed) {
+    return std::string(Dlop::get_mask_value(bits)->to_pyrope());  // 2^bits - 1
+  }
+  // signed max = 2^(bits-1) - 1; a 1-bit signed maxes at 0 (range {-1,0}).
+  // get_mask_value(0) returns 1 (narrow-arg wart), so special-case bits<=1.
+  if (bits <= 1) {
+    return "0";
+  }
+  return std::string(Dlop::get_mask_value(bits - 1)->to_pyrope());
+}
+
+std::string Slang_context::int_min_str(int bits, bool is_signed) const {
+  if (!is_signed) {
+    return "0";
+  }
+  if (bits <= 0) {
+    bits = 1;
+  }
+  // signed min = -2^(bits-1). get_neg_mask_value(arg) returns the correct
+  // -2^arg for arg >= 2, but +1 for arg <= 1 (the narrow wart), so the two
+  // narrow widths are special-cased; bits >= 3 (arg >= 2) delegates and stays
+  // exact even past 64 bits.
+  if (bits == 1) {
+    return "-1";
+  }
+  if (bits == 2) {
+    return "-2";
+  }
+  return std::string(Dlop::get_neg_mask_value(bits - 1)->to_pyrope());
+}
+
 void Slang_context::emit_prim_type_int(const Lnast_nid& parent, int bits, bool is_signed) {
   auto& ln = *builder_.lnast;
   auto  ty = ln.add_child(parent, Lnast_ntype::create_prim_type_int());
-  if (is_signed) {
-    ln.add_child(ty, Lnast_node::create_const(Dlop::get_mask_value(bits - 1)->to_pyrope()));
-    ln.add_child(ty, Lnast_node::create_const(Dlop::get_neg_mask_value(bits - 1)->to_pyrope()));
-  } else {
-    ln.add_child(ty, Lnast_node::create_const(Dlop::get_mask_value(bits)->to_pyrope()));
-    ln.add_child(ty, Lnast_node::create_const("0"));
-  }
+  ln.add_child(ty, Lnast_node::create_const(int_max_str(bits, is_signed)));
+  ln.add_child(ty, Lnast_node::create_const(int_min_str(bits, is_signed)));
 }
 
 std::string Slang_context::trunc_to(const std::string& v, int bits) {
@@ -84,8 +114,15 @@ std::string Slang_context::materialize_conversion(const std::string& v, int from
     return v;
   }
 
-  // signed -> unsigned: negative values wrap to the to_bits pattern.
-  return trunc_to(v, to_bits);
+  // signed -> unsigned (to_bits >= from_bits here; the narrowing case is handled
+  // above). Reinterpret the source's bits as unsigned at its OWN width, giving a
+  // non-negative value; widening to the larger to_bits is then a zero-extend
+  // (automatic in unbounded-integer semantics). Masking to to_bits instead would
+  // SIGN-extend the signed source (get_mask replicates the sign bit past
+  // from_bits) — wrong, e.g. a signed 4'b1000 (-8) in an unsigned context is 8,
+  // not 24. This is the Verilog rule that an unsigned expression treats a signed
+  // operand as unsigned for width extension (1800 §11.8.2).
+  return trunc_to(v, from_bits);
 }
 
 std::string Slang_context::to_pattern(const std::string& v, int bits, bool is_signed) {

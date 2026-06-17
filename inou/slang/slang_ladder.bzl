@@ -9,7 +9,7 @@
 SLANG_LADDER = {
     "Snxn1k": "lec",
     "add": "lec",
-    "add1": "verilog",  # compiles; LEC gap tracked
+    "add1": "lec",  # mixed signed+unsigned add (signed->unsigned widening = zero-extend, not sign-extend)
     "add2": "lec",
     "aldff": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
     "arith": "lec",
@@ -23,16 +23,16 @@ SLANG_LADDER = {
     "cprop": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
     "cse_basic": "lec",
     "dce1": "lec",
-    "dce2": "verilog",  # compiles; LEC gap tracked
+    "dce2": "lec",
     "dce3": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
     "expression_00002": "lec",
-    "fflop": "verilog",  # compiles; LEC gap tracked
+    "fflop": "lec",
     "fixme_array": "lec",
     "fixme_async": "lec",
-    "fixme_hier_test": "verilog",  # compiles; LEC gap tracked
+    "fixme_hier_test": "lec",
     "fixme_latch": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
     "fixme_mem_offset": "verilog",  # capped: 46-entry array, slow memory LEC
-    "fixme_multiport": "verilog",  # compiles; LEC gap tracked
+    "fixme_multiport": "lec",
     "fixme_nlatch": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
     "fixme_nocheck_implicit_en": "lnast",  # byte-enable mem write (mem[a][chunk]<=…) now lowers (wensize); tolg comb-loops on the en?d:self self-read idiom
     "fixme_noloop": "lec",
@@ -46,14 +46,14 @@ SLANG_LADDER = {
     "grid_hier_test": "error",  # instance arrays / paramod shapes not lowered yet
     "hierarchy": "lec",
     "inc_after_nb": "lec",  # x++ is blocking even after a nonblocking <= in the same process
-    "issue_047": "verilog",  # compiles; LEC gap tracked
+    "issue_047": "lec",  # narrow signed port range: signed[1:0] is {-2..1}, signed[0:0] is {-1,0}
     "issue_057": "lec",
     "logic_bitwise_op_gld": "lec",
     "long_BTBsa": "lnast",  # Yosys netlist; LNAST round-trips (escaped-id `\…[1:0]` names SSA-version + serialize) — tolg stops verilog: "mixes values at different cycles"
-    "long_gcd": "verilog",  # compiles; LEC gap tracked
+    "long_gcd": "lec",
     "long_gcd_small": "error",  # duplicate definition; slang rejects per 1800
     "long_iwls_adder": "lec",
-    "long_kogg_stone_64": "verilog",  # compiles; LEC gap tracked
+    "long_kogg_stone_64": "lec",
     "long_mem": "verilog",  # LEC-capable but memory LEC is slow on big arrays; small-array coverage rides simple_rf1/rf2/tuplish
     "long_mem3": "verilog",  # capped: slow memory LEC (see long_mem)
     "long_nocheck_iwls_square": "verilog",  # compiles; LEC gap tracked
@@ -63,7 +63,7 @@ SLANG_LADDER = {
     "loop_in_lg": "lec",
     "loop_in_lg2": "lec",
     "mem_reset": "error",  # non-LRM: undeclared identifiers (yosys-only laxness)
-    "mem_sync_init": "verilog",  # compiles; LEC gap tracked
+    "mem_sync_init": "verilog",  # initial-block ROM contents lower correctly in LNAST (init tuple) but the read-only `mut` array zero-fills in tolg instead of becoming a Memory with INIT
     "mismatch": "lec",
     "mt_basic_test": "lec",
     "multiassign": "lec",
@@ -83,7 +83,7 @@ SLANG_LADDER = {
     "offset_input": "lec",
     "operators": "lec",
     "params": "lec",
-    "params_submodule": "verilog",  # compiles; LEC gap tracked
+    "params_submodule": "lec",
     "pick": "lec",
     "punch": "error",  # non-LRM: undeclared identifiers (yosys-only laxness)
     "punch.gld": "error",  # illegal identifier in the auto-generated golden (unescaped dot)
@@ -91,13 +91,13 @@ SLANG_LADDER = {
     "punching_3": "lec",
     "random_delay": "lec",
     "reduce": "lec",
-    "sample_stage1": "verilog",  # compiles; LEC gap tracked
+    "sample_stage1": "lec",
     "satlarge": "lec",
     "satpick": "lec",
     "satsmall": "lec",
     "shift": "lec",
     "shiftx": "lec",
-    "shiftx_simple": "verilog",  # compiles; LEC gap tracked
+    "shiftx_simple": "lec",
     "signs": "lec",
     "simple_add": "lec",
     "simple_flop": "lec",
