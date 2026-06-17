@@ -1,13 +1,13 @@
-# RFReadMux — --reader slang fails (own file is yosys-slang-parseable)
+# RFReadMux — prp gen fails
 
-kind=-
+kind=mod
 
 | stage | result |
 |---|---|
 | yosys+slang gate | FAIL |
-| --reader slang -> prp | FAIL |
-| slang -> lg | NA |
-| prp -> lg | NA |
+| --reader slang -> prp | PASS |
+| slang -> lg | PASS |
+| prp -> lg | FAIL |
 | yosys-slang -> lg | NA |
 | lec prp vs slang | NA |
 | lec prp vs yosys-slang | NA |
@@ -15,5 +15,5 @@ kind=-
 
 **First failure message:**
 ```
-unpacked array read on an unsupported base
+upass.tolg: call to 'PriorityEncoder' has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending
 ```

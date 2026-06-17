@@ -1,4 +1,4 @@
-# InstrDecoder — lg gen from slang fails
+# InstrDecoder — prp gen fails
 
 kind=mod
 
@@ -6,7 +6,7 @@ kind=mod
 |---|---|
 | yosys+slang gate | PASS |
 | --reader slang -> prp | PASS |
-| slang -> lg | FAIL |
+| slang -> lg | PASS |
 | prp -> lg | FAIL |
 | yosys-slang -> lg | PASS |
 | lec prp vs slang | NA |
@@ -15,5 +15,5 @@ kind=mod
 
 **First failure message:**
 ```
-upass.tolg: internal — memory 'OUT_uop' lowered 0 write sites but the pre-scan counted 1
+`==` requires both operands to be the same type (___4124228857_0:boolean vs <const>:integer)
 ```

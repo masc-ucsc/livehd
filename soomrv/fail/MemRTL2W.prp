@@ -1,18 +1,18 @@
 pub mod MemRTL2W::[lg="MemRTL2W", hdl](clk:u1, IN_nce:u1, IN_nwe:u1, IN_addr:u9, IN_data:u256, IN_wm:u32, IN_nce1:u1, IN_nwe1:u1, IN_addr1:u9, IN_data1:u256, IN_wm1:u32) -> (OUT_data:u256@[], OUT_data1:u256@[]) {
-  reg ce1_reg:u1
-  reg dbgMultiple:u1
-  reg addr_reg:u9
-  reg OUT_data:u256
-  reg we_reg:u1
+  reg mem:[512]u256:[fwd=0, wensize=32]
   reg ce_reg:u1
+  reg addr_reg:u9
+  reg dbgMultiple:u1
   reg data_reg:u256
   reg wm_reg:u32
-  reg data1_reg:u256
+  reg we_reg:u1
   reg we1_reg:u1
+  reg data1_reg:u256
   reg addr1_reg:u9
-  reg OUT_data1:u256
+  reg ce1_reg:u1
   reg wm1_reg:u32
-  reg mem:[512]u256:[fwd=0, wensize=32]
+  reg OUT_data1:u256
+  reg OUT_data:u256
   ce_reg = IN_nce
   addr_reg = IN_addr
   data_reg = IN_data

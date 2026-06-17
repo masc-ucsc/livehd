@@ -1,9 +1,9 @@
 pub mod CacheReadInterface::[lg="CacheReadInterface", hdl](clk:u1, rst:u1, IN_valid:u1, IN_id:u2, IN_len:u8, IN_addr:u10, IN_mmio:u1, IN_mmioData:u32, IN_ready:u1, IN_CACHE_ready:u1, IN_CACHE_data:u32) -> (OUT_ready:u1@[], OUT_valid:u1@[], OUT_id:u2@[], OUT_data:u128@[], OUT_last:u1@[], OUT_CACHE_ce:u1@[], OUT_CACHE_we:u1@[], OUT_CACHE_addr:u10@[], OUT_cacheReadValid:u1@[], OUT_cacheReadId:u2@[]) {
-  reg next:u62
-  reg readMetaSR:u74
-  reg accIdx_r:u3
-  reg acc:u128
   reg cur:u62
+  reg readMetaSR:u74
+  reg acc:u128
+  reg accIdx_r:u3
+  reg next:u62
   mut accIdx_c = 0
   mut FIFO_valid = 0
   mut FIFO_data = 0

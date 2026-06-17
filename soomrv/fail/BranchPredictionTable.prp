@@ -1,10 +1,10 @@
 pub mod BranchPredictionTable::[lg="BranchPredictionTable", hdl](clk:u1, rst:u1, IN_readValid:u1, IN_readAddr:u12, IN_writeEn:u1, IN_writeAddr:u12, IN_writeInit:u1, IN_writeTaken:u1) -> (OUT_taken:u1@[]) {
   reg resetIdx:u13
-  reg OUT_taken:u1
-  reg write_r:u15
-  reg hist:[4096]u1:[fwd=0]
-  reg pred:[4096]u1:[fwd=0]
   reg writeTempReg:u2
+  reg OUT_taken:u1
+  reg pred:[4096]u1:[fwd=0]
+  reg hist:[4096]u1:[fwd=0]
+  reg write_r:u15
   mut write_c = 0
   if IN_readValid != 0 {
     OUT_taken = pred[IN_readAddr]

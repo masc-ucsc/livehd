@@ -1,7 +1,7 @@
 pub mod BranchSelector::[lg="BranchSelector", hdl](clk:u1, rst:u1, IN_isUOps:u218, IN_branches:u296, IN_ROB_curSqN:u7, IN_RN_nextSqN:u7, IN_mispredFlush:u1) -> (OUT_branch:u74@[], OUT_PERFC_branchMispr:u1@[]) {
-  reg OUT_PERFC_branchMispr:u1
-  reg OUT_branch:u74
   reg priorityPort:u1
+  reg OUT_branch:u74
+  reg OUT_PERFC_branchMispr:u1
   mut _b2i_1 = 0
   mut compBranches = 0
   mut branch_c = 0

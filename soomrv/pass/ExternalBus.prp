@@ -1,11 +1,11 @@
 pub mod ExternalBus::[lg="ExternalBus", hdl](clk:u1, rst:u1, IN_bus:u32, IN_busReady:u1, s_axi_awid:u2, s_axi_awaddr:u32, s_axi_awlen:u8, s_axi_awsize:u3, s_axi_awburst:u2, s_axi_awlock:u1, s_axi_awcache:u4, s_axi_awvalid:u1, s_axi_wdata:u32, s_axi_wstrb:u4, s_axi_wlast:u1, s_axi_wvalid:u1, s_axi_bready:u1, s_axi_arid:u2, s_axi_araddr:u32, s_axi_arlen:u8, s_axi_arsize:u3, s_axi_arburst:u2, s_axi_arlock:u1, s_axi_arcache:u4, s_axi_arvalid:u1, s_axi_rready:u1) -> (OUT_busOE:u1@[], OUT_bus:u32@[], OUT_busValid:u1@[], s_axi_awready:u1@[], s_axi_wready:u1@[], s_axi_bid:u2@[], s_axi_bvalid:u1@[], s_axi_arready:u1@[], s_axi_rid:u2@[], s_axi_rdata:u32@[], s_axi_rlast:u1@[], s_axi_rvalid:u1@[]) {
-  reg state:u3
-  reg s_axi_awready:u1
-  reg curCnt:u4
   reg s_axi_bvalid:u1
+  reg s_axi_arready:u1
+  reg curCnt:u4
+  reg s_axi_awready:u1
+  reg state:u3
   reg curID:u2
   reg s_axi_bid:u2
-  reg s_axi_arready:u1
   s_axi_wready = 0
   s_axi_rvalid = 0
   OUT_busOE = 1

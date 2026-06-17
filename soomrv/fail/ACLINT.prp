@@ -1,8 +1,8 @@
 pub mod ACLINT::[lg="ACLINT", hdl](clk:u1, rst:u1, IN_re:u1, IN_raddr:u30, IN_we:u1, IN_wmask:u4, IN_waddr:u30, IN_wdata:u32) -> (OUT_rdata:u32@[], OUT_rbusy:u1@[], OUT_rvalid:u1@[], OUT_mtime:u64@[], OUT_mtimecmp:u64@[]) {
+  reg OUT_rvalid:u1
   reg mtime:u64
   reg mtimecmp:u64
   reg OUT_rdata:u32
-  reg OUT_rvalid:u1
   OUT_rbusy = 0
   OUT_mtime = mtime
   OUT_mtimecmp = mtimecmp

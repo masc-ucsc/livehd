@@ -1,6 +1,6 @@
 pub mod PrefetchExecutor::[lg="PrefetchExecutor", hdl](clk:u1, rst:u1, IN_prefetch:u33, IN_ctReadReady:u1, IN_ctResult:u86, IN_missReady:u1) -> (OUT_prefetchReady:u1@[], OUT_ctRead:u13@[], OUT_miss:u71@[], OUT_prefetchAck:u2@[]) {
-  reg pfOp:[2]u33:[fwd=0]
   reg OUT_prefetchAck:u2
+  reg pfOp:[2]u33:[fwd=0]
   mut j = 0
   mut _b2i_1 = 0
   mut assocHitUnary_c = 0

@@ -1,0 +1,526 @@
+pub mod TagBuffer::[lg="TagBuffer", hdl](clk:u1, rst:u1, IN_mispr:u1, IN_mispredFlush:u1, IN_issueValid:u4, IN_commitValid:u4, IN_commitNewest:u4, IN_RAT_commitPrevTags:u28, IN_commitTagDst:u28) -> (OUT_issueTags:u24@[], OUT_issueTagsValid:u4@[]) {
+  reg free:u64
+  reg freeCom:u64
+  reg OUT_issueTagsValid:[4]u1:[fwd=0]
+  reg mispredWait:u1
+  reg OUT_issueTags:[4]u6:[fwd=0]
+  mut issueTagsValid:u4 = 0
+  mut issueTags:u24 = 0
+  ___1 = PriorityEncoder(IN_data = free)
+  issueTags = ___1["OUT_idx"]
+  issueTagsValid = ___1["OUT_idxValid"]
+  mispredWait = 0
+  if rst != 0 {
+    mut i = 0
+    free#[0..=0] = 1
+    freeCom#[0..=0] = 1
+    free#[1..=1] = 1
+    freeCom#[1..=1] = 1
+    free#[2..=2] = 1
+    freeCom#[2..=2] = 1
+    free#[3..=3] = 1
+    freeCom#[3..=3] = 1
+    free#[4..=4] = 1
+    freeCom#[4..=4] = 1
+    free#[5..=5] = 1
+    freeCom#[5..=5] = 1
+    free#[6..=6] = 1
+    freeCom#[6..=6] = 1
+    free#[7..=7] = 1
+    freeCom#[7..=7] = 1
+    free#[8..=8] = 1
+    freeCom#[8..=8] = 1
+    free#[9..=9] = 1
+    freeCom#[9..=9] = 1
+    free#[10..=10] = 1
+    freeCom#[10..=10] = 1
+    free#[11..=11] = 1
+    freeCom#[11..=11] = 1
+    free#[12..=12] = 1
+    freeCom#[12..=12] = 1
+    free#[13..=13] = 1
+    freeCom#[13..=13] = 1
+    free#[14..=14] = 1
+    freeCom#[14..=14] = 1
+    free#[15..=15] = 1
+    freeCom#[15..=15] = 1
+    free#[16..=16] = 1
+    freeCom#[16..=16] = 1
+    free#[17..=17] = 1
+    freeCom#[17..=17] = 1
+    free#[18..=18] = 1
+    freeCom#[18..=18] = 1
+    free#[19..=19] = 1
+    freeCom#[19..=19] = 1
+    free#[20..=20] = 1
+    freeCom#[20..=20] = 1
+    free#[21..=21] = 1
+    freeCom#[21..=21] = 1
+    free#[22..=22] = 1
+    freeCom#[22..=22] = 1
+    free#[23..=23] = 1
+    freeCom#[23..=23] = 1
+    free#[24..=24] = 1
+    freeCom#[24..=24] = 1
+    free#[25..=25] = 1
+    freeCom#[25..=25] = 1
+    free#[26..=26] = 1
+    freeCom#[26..=26] = 1
+    free#[27..=27] = 1
+    freeCom#[27..=27] = 1
+    free#[28..=28] = 1
+    freeCom#[28..=28] = 1
+    free#[29..=29] = 1
+    freeCom#[29..=29] = 1
+    free#[30..=30] = 1
+    freeCom#[30..=30] = 1
+    free#[31..=31] = 1
+    freeCom#[31..=31] = 1
+    free#[32..=32] = 1
+    freeCom#[32..=32] = 1
+    free#[33..=33] = 1
+    freeCom#[33..=33] = 1
+    free#[34..=34] = 1
+    freeCom#[34..=34] = 1
+    free#[35..=35] = 1
+    freeCom#[35..=35] = 1
+    free#[36..=36] = 1
+    freeCom#[36..=36] = 1
+    free#[37..=37] = 1
+    freeCom#[37..=37] = 1
+    free#[38..=38] = 1
+    freeCom#[38..=38] = 1
+    free#[39..=39] = 1
+    freeCom#[39..=39] = 1
+    free#[40..=40] = 1
+    freeCom#[40..=40] = 1
+    free#[41..=41] = 1
+    freeCom#[41..=41] = 1
+    free#[42..=42] = 1
+    freeCom#[42..=42] = 1
+    free#[43..=43] = 1
+    freeCom#[43..=43] = 1
+    free#[44..=44] = 1
+    freeCom#[44..=44] = 1
+    free#[45..=45] = 1
+    freeCom#[45..=45] = 1
+    free#[46..=46] = 1
+    freeCom#[46..=46] = 1
+    free#[47..=47] = 1
+    freeCom#[47..=47] = 1
+    free#[48..=48] = 1
+    freeCom#[48..=48] = 1
+    free#[49..=49] = 1
+    freeCom#[49..=49] = 1
+    free#[50..=50] = 1
+    freeCom#[50..=50] = 1
+    free#[51..=51] = 1
+    freeCom#[51..=51] = 1
+    free#[52..=52] = 1
+    freeCom#[52..=52] = 1
+    free#[53..=53] = 1
+    freeCom#[53..=53] = 1
+    free#[54..=54] = 1
+    freeCom#[54..=54] = 1
+    free#[55..=55] = 1
+    freeCom#[55..=55] = 1
+    free#[56..=56] = 1
+    freeCom#[56..=56] = 1
+    free#[57..=57] = 1
+    freeCom#[57..=57] = 1
+    free#[58..=58] = 1
+    freeCom#[58..=58] = 1
+    free#[59..=59] = 1
+    freeCom#[59..=59] = 1
+    free#[60..=60] = 1
+    freeCom#[60..=60] = 1
+    free#[61..=61] = 1
+    freeCom#[61..=61] = 1
+    free#[62..=62] = 1
+    freeCom#[62..=62] = 1
+    mut i_s1 = 0
+    OUT_issueTagsValid#[0..=0] = 0
+    OUT_issueTagsValid#[1..=1] = 0
+    OUT_issueTagsValid#[2..=2] = 0
+    OUT_issueTagsValid#[3..=3] = 0
+    free#[63..=63] = 1
+    freeCom#[63..=63] = 1
+    i = 0
+    i_s1 = 0
+  } else {
+    if IN_mispr != 0 {
+      mut i_s2 = 0
+      i_s2 = 0
+      mispredWait = 1
+      if (freeCom & 1) != 0 {
+        free#[0..=0] = 1
+      }
+      if ((freeCom >> 1) & 1) != 0 {
+        free#[1..=1] = 1
+      }
+      if ((freeCom >> 2) & 1) != 0 {
+        free#[2..=2] = 1
+      }
+      if ((freeCom >> 3) & 1) != 0 {
+        free#[3..=3] = 1
+      }
+      if ((freeCom >> 4) & 1) != 0 {
+        free#[4..=4] = 1
+      }
+      if ((freeCom >> 5) & 1) != 0 {
+        free#[5..=5] = 1
+      }
+      if ((freeCom >> 6) & 1) != 0 {
+        free#[6..=6] = 1
+      }
+      if ((freeCom >> 7) & 1) != 0 {
+        free#[7..=7] = 1
+      }
+      if ((freeCom >> 8) & 1) != 0 {
+        free#[8..=8] = 1
+      }
+      if ((freeCom >> 9) & 1) != 0 {
+        free#[9..=9] = 1
+      }
+      if ((freeCom >> 10) & 1) != 0 {
+        free#[10..=10] = 1
+      }
+      if ((freeCom >> 11) & 1) != 0 {
+        free#[11..=11] = 1
+      }
+      if ((freeCom >> 12) & 1) != 0 {
+        free#[12..=12] = 1
+      }
+      if ((freeCom >> 13) & 1) != 0 {
+        free#[13..=13] = 1
+      }
+      if ((freeCom >> 14) & 1) != 0 {
+        free#[14..=14] = 1
+      }
+      if ((freeCom >> 15) & 1) != 0 {
+        free#[15..=15] = 1
+      }
+      if ((freeCom >> 16) & 1) != 0 {
+        free#[16..=16] = 1
+      }
+      if ((freeCom >> 17) & 1) != 0 {
+        free#[17..=17] = 1
+      }
+      if ((freeCom >> 18) & 1) != 0 {
+        free#[18..=18] = 1
+      }
+      if ((freeCom >> 19) & 1) != 0 {
+        free#[19..=19] = 1
+      }
+      if ((freeCom >> 20) & 1) != 0 {
+        free#[20..=20] = 1
+      }
+      if ((freeCom >> 21) & 1) != 0 {
+        free#[21..=21] = 1
+      }
+      if ((freeCom >> 22) & 1) != 0 {
+        free#[22..=22] = 1
+      }
+      if ((freeCom >> 23) & 1) != 0 {
+        free#[23..=23] = 1
+      }
+      if ((freeCom >> 24) & 1) != 0 {
+        free#[24..=24] = 1
+      }
+      if ((freeCom >> 25) & 1) != 0 {
+        free#[25..=25] = 1
+      }
+      if ((freeCom >> 26) & 1) != 0 {
+        free#[26..=26] = 1
+      }
+      if ((freeCom >> 27) & 1) != 0 {
+        free#[27..=27] = 1
+      }
+      if ((freeCom >> 28) & 1) != 0 {
+        free#[28..=28] = 1
+      }
+      if ((freeCom >> 29) & 1) != 0 {
+        free#[29..=29] = 1
+      }
+      if ((freeCom >> 30) & 1) != 0 {
+        free#[30..=30] = 1
+      }
+      if ((freeCom >> 31) & 1) != 0 {
+        free#[31..=31] = 1
+      }
+      if ((freeCom >> 32) & 1) != 0 {
+        free#[32..=32] = 1
+      }
+      if ((freeCom >> 33) & 1) != 0 {
+        free#[33..=33] = 1
+      }
+      if ((freeCom >> 34) & 1) != 0 {
+        free#[34..=34] = 1
+      }
+      if ((freeCom >> 35) & 1) != 0 {
+        free#[35..=35] = 1
+      }
+      if ((freeCom >> 36) & 1) != 0 {
+        free#[36..=36] = 1
+      }
+      if ((freeCom >> 37) & 1) != 0 {
+        free#[37..=37] = 1
+      }
+      if ((freeCom >> 38) & 1) != 0 {
+        free#[38..=38] = 1
+      }
+      if ((freeCom >> 39) & 1) != 0 {
+        free#[39..=39] = 1
+      }
+      if ((freeCom >> 40) & 1) != 0 {
+        free#[40..=40] = 1
+      }
+      if ((freeCom >> 41) & 1) != 0 {
+        free#[41..=41] = 1
+      }
+      if ((freeCom >> 42) & 1) != 0 {
+        free#[42..=42] = 1
+      }
+      if ((freeCom >> 43) & 1) != 0 {
+        free#[43..=43] = 1
+      }
+      if ((freeCom >> 44) & 1) != 0 {
+        free#[44..=44] = 1
+      }
+      if ((freeCom >> 45) & 1) != 0 {
+        free#[45..=45] = 1
+      }
+      if ((freeCom >> 46) & 1) != 0 {
+        free#[46..=46] = 1
+      }
+      if ((freeCom >> 47) & 1) != 0 {
+        free#[47..=47] = 1
+      }
+      if ((freeCom >> 48) & 1) != 0 {
+        free#[48..=48] = 1
+      }
+      if ((freeCom >> 49) & 1) != 0 {
+        free#[49..=49] = 1
+      }
+      if ((freeCom >> 50) & 1) != 0 {
+        free#[50..=50] = 1
+      }
+      if ((freeCom >> 51) & 1) != 0 {
+        free#[51..=51] = 1
+      }
+      if ((freeCom >> 52) & 1) != 0 {
+        free#[52..=52] = 1
+      }
+      if ((freeCom >> 53) & 1) != 0 {
+        free#[53..=53] = 1
+      }
+      if ((freeCom >> 54) & 1) != 0 {
+        free#[54..=54] = 1
+      }
+      if ((freeCom >> 55) & 1) != 0 {
+        free#[55..=55] = 1
+      }
+      if ((freeCom >> 56) & 1) != 0 {
+        free#[56..=56] = 1
+      }
+      if ((freeCom >> 57) & 1) != 0 {
+        free#[57..=57] = 1
+      }
+      if ((freeCom >> 58) & 1) != 0 {
+        free#[58..=58] = 1
+      }
+      if ((freeCom >> 59) & 1) != 0 {
+        free#[59..=59] = 1
+      }
+      if ((freeCom >> 60) & 1) != 0 {
+        free#[60..=60] = 1
+      }
+      if ((freeCom >> 61) & 1) != 0 {
+        free#[61..=61] = 1
+      }
+      if ((freeCom >> 62) & 1) != 0 {
+        free#[62..=62] = 1
+      }
+      if ((freeCom >> 63) & 1) != 0 {
+        free#[63..=63] = 1
+      }
+      mut i_s3 = 0
+      OUT_issueTagsValid#[0..=0] = 0
+      OUT_issueTags#[0..=5] = 0ub??????
+      OUT_issueTagsValid#[1..=1] = 0
+      OUT_issueTags#[6..=11] = 0ub??????
+      OUT_issueTagsValid#[2..=2] = 0
+      OUT_issueTags#[12..=17] = 0ub??????
+      OUT_issueTags#[18..=23] = 0ub??????
+      OUT_issueTagsValid#[3..=3] = 0
+      i_s3 = 0
+    } else {
+      mut i_s4 = 0
+      i_s4 = 0
+      if (IN_issueValid & 1) != 0 {
+        OUT_issueTags#[0..=5] = 0ub??????
+        OUT_issueTagsValid#[0..=0] = 0
+      }
+      if ((IN_issueValid >> 1) & 1) != 0 {
+        OUT_issueTags#[6..=11] = 0ub??????
+        OUT_issueTagsValid#[1..=1] = 0
+      }
+      if ((IN_issueValid >> 2) & 1) != 0 {
+        OUT_issueTags#[12..=17] = 0ub??????
+        OUT_issueTagsValid#[2..=2] = 0
+      }
+      if ((IN_issueValid >> 3) & 1) != 0 {
+        OUT_issueTags#[18..=23] = 0ub??????
+        OUT_issueTagsValid#[3..=3] = 0
+      }
+      mut i_s5 = 0
+      i_s5 = 0
+      if ((((OUT_issueTagsValid & 1) == 0) or ((IN_issueValid & 1) != 0)) and ((issueTagsValid & 1) != 0)) and (not ((mispredWait != 0) or (IN_mispredFlush != 0))) {
+        ___222 = issueTags#[0..=5]
+        OUT_issueTags#[0..=5] = issueTags#[0..=5]
+        OUT_issueTagsValid#[0..=0] = 1
+        free = (free & (~(1 << ___222))) | (0 << ___222)
+      }
+      if (((((OUT_issueTagsValid >> 1) & 1) == 0) or (((IN_issueValid >> 1) & 1) != 0)) and (((issueTagsValid >> 1) & 1) != 0)) and (not ((mispredWait != 0) or (IN_mispredFlush != 0))) {
+        ___245 = issueTags#[6..=11]
+        OUT_issueTags#[6..=11] = issueTags#[6..=11]
+        OUT_issueTagsValid#[1..=1] = 1
+        free = (free & (~(1 << ___245))) | (0 << ___245)
+      }
+      if (((((OUT_issueTagsValid >> 2) & 1) == 0) or (((IN_issueValid >> 2) & 1) != 0)) and (((issueTagsValid >> 2) & 1) != 0)) and (not ((mispredWait != 0) or (IN_mispredFlush != 0))) {
+        ___268 = issueTags#[12..=17]
+        OUT_issueTags#[12..=17] = issueTags#[12..=17]
+        OUT_issueTagsValid#[2..=2] = 1
+        free = (free & (~(1 << ___268))) | (0 << ___268)
+      }
+      if (((((OUT_issueTagsValid >> 3) & 1) == 0) or (((IN_issueValid >> 3) & 1) != 0)) and (((issueTagsValid >> 3) & 1) != 0)) and (not ((mispredWait != 0) or (IN_mispredFlush != 0))) {
+        ___291 = issueTags#[18..=23]
+        OUT_issueTags#[18..=23] = issueTags#[18..=23]
+        OUT_issueTagsValid#[3..=3] = 1
+        free = (free & (~(1 << ___291))) | (0 << ___291)
+      }
+    }
+    mut i_s6 = 0
+    i_s6 = 0
+    if (IN_commitValid & 1) != 0 {
+      if IN_mispredFlush != 0 {
+        if (IN_mispr == 0) and (((IN_commitTagDst#[0..=6] >> 6) & 1) == 0) {
+          ___307 = IN_commitTagDst#[0..=6]#[0..=5]
+          free = (free & (~(1 << ___307))) | (0 << ___307)
+        }
+      } else {
+        if (IN_commitNewest & 1) != 0 {
+          if ((IN_RAT_commitPrevTags#[0..=6] >> 6) & 1) == 0 {
+            ___320 = IN_RAT_commitPrevTags#[0..=6]#[0..=5]
+            ___327 = IN_RAT_commitPrevTags#[0..=6]#[0..=5]
+            free = (free & (~(1 << ___327))) | (1 << ___327)
+            freeCom = (freeCom & (~(1 << ___320))) | (1 << ___320)
+          }
+          if ((IN_commitTagDst#[0..=6] >> 6) & 1) == 0 {
+            ___338 = IN_commitTagDst#[0..=6]#[0..=5]
+            ___345 = IN_commitTagDst#[0..=6]#[0..=5]
+            free = (free & (~(1 << ___345))) | (0 << ___345)
+            freeCom = (freeCom & (~(1 << ___338))) | (0 << ___338)
+          }
+        } else {
+          if ((IN_commitTagDst#[0..=6] >> 6) & 1) == 0 {
+            ___356 = IN_commitTagDst#[0..=6]#[0..=5]
+            ___363 = IN_commitTagDst#[0..=6]#[0..=5]
+            free = (free & (~(1 << ___363))) | (1 << ___363)
+            freeCom = (freeCom & (~(1 << ___356))) | (1 << ___356)
+          }
+        }
+      }
+    }
+    if ((IN_commitValid >> 1) & 1) != 0 {
+      if IN_mispredFlush != 0 {
+        if (IN_mispr == 0) and (((IN_commitTagDst#[7..=13] >> 6) & 1) == 0) {
+          ___380 = IN_commitTagDst#[7..=13]#[0..=5]
+          free = (free & (~(1 << ___380))) | (0 << ___380)
+        }
+      } else {
+        if ((IN_commitNewest >> 1) & 1) != 0 {
+          if ((IN_RAT_commitPrevTags#[7..=13] >> 6) & 1) == 0 {
+            ___394 = IN_RAT_commitPrevTags#[7..=13]#[0..=5]
+            ___401 = IN_RAT_commitPrevTags#[7..=13]#[0..=5]
+            free = (free & (~(1 << ___401))) | (1 << ___401)
+            freeCom = (freeCom & (~(1 << ___394))) | (1 << ___394)
+          }
+          if ((IN_commitTagDst#[7..=13] >> 6) & 1) == 0 {
+            ___412 = IN_commitTagDst#[7..=13]#[0..=5]
+            ___419 = IN_commitTagDst#[7..=13]#[0..=5]
+            free = (free & (~(1 << ___419))) | (0 << ___419)
+            freeCom = (freeCom & (~(1 << ___412))) | (0 << ___412)
+          }
+        } else {
+          if ((IN_commitTagDst#[7..=13] >> 6) & 1) == 0 {
+            ___430 = IN_commitTagDst#[7..=13]#[0..=5]
+            ___437 = IN_commitTagDst#[7..=13]#[0..=5]
+            free = (free & (~(1 << ___437))) | (1 << ___437)
+            freeCom = (freeCom & (~(1 << ___430))) | (1 << ___430)
+          }
+        }
+      }
+    }
+    if ((IN_commitValid >> 2) & 1) != 0 {
+      if IN_mispredFlush != 0 {
+        if (IN_mispr == 0) and (((IN_commitTagDst#[14..=20] >> 6) & 1) == 0) {
+          ___454 = IN_commitTagDst#[14..=20]#[0..=5]
+          free = (free & (~(1 << ___454))) | (0 << ___454)
+        }
+      } else {
+        if ((IN_commitNewest >> 2) & 1) != 0 {
+          if ((IN_RAT_commitPrevTags#[14..=20] >> 6) & 1) == 0 {
+            ___468 = IN_RAT_commitPrevTags#[14..=20]#[0..=5]
+            ___475 = IN_RAT_commitPrevTags#[14..=20]#[0..=5]
+            free = (free & (~(1 << ___475))) | (1 << ___475)
+            freeCom = (freeCom & (~(1 << ___468))) | (1 << ___468)
+          }
+          if ((IN_commitTagDst#[14..=20] >> 6) & 1) == 0 {
+            ___486 = IN_commitTagDst#[14..=20]#[0..=5]
+            ___493 = IN_commitTagDst#[14..=20]#[0..=5]
+            free = (free & (~(1 << ___493))) | (0 << ___493)
+            freeCom = (freeCom & (~(1 << ___486))) | (0 << ___486)
+          }
+        } else {
+          if ((IN_commitTagDst#[14..=20] >> 6) & 1) == 0 {
+            ___504 = IN_commitTagDst#[14..=20]#[0..=5]
+            ___511 = IN_commitTagDst#[14..=20]#[0..=5]
+            free = (free & (~(1 << ___511))) | (1 << ___511)
+            freeCom = (freeCom & (~(1 << ___504))) | (1 << ___504)
+          }
+        }
+      }
+    }
+    if ((IN_commitValid >> 3) & 1) != 0 {
+      if IN_mispredFlush != 0 {
+        if (IN_mispr == 0) and (((IN_commitTagDst#[21..=27] >> 6) & 1) == 0) {
+          ___528 = IN_commitTagDst#[21..=27]#[0..=5]
+          free = (free & (~(1 << ___528))) | (0 << ___528)
+        }
+      } else {
+        if ((IN_commitNewest >> 3) & 1) != 0 {
+          if ((IN_RAT_commitPrevTags#[21..=27] >> 6) & 1) == 0 {
+            ___542 = IN_RAT_commitPrevTags#[21..=27]#[0..=5]
+            ___549 = IN_RAT_commitPrevTags#[21..=27]#[0..=5]
+            free = (free & (~(1 << ___549))) | (1 << ___549)
+            freeCom = (freeCom & (~(1 << ___542))) | (1 << ___542)
+          }
+          if ((IN_commitTagDst#[21..=27] >> 6) & 1) == 0 {
+            ___560 = IN_commitTagDst#[21..=27]#[0..=5]
+            ___567 = IN_commitTagDst#[21..=27]#[0..=5]
+            free = (free & (~(1 << ___567))) | (0 << ___567)
+            freeCom = (freeCom & (~(1 << ___560))) | (0 << ___560)
+          }
+        } else {
+          if ((IN_commitTagDst#[21..=27] >> 6) & 1) == 0 {
+            ___578 = IN_commitTagDst#[21..=27]#[0..=5]
+            ___585 = IN_commitTagDst#[21..=27]#[0..=5]
+            free = (free & (~(1 << ___585))) | (1 << ___585)
+            freeCom = (freeCom & (~(1 << ___578))) | (1 << ___578)
+          }
+        }
+      }
+    }
+  }
+}

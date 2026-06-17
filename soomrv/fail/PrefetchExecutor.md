@@ -1,4 +1,4 @@
-# PrefetchExecutor — lg gen from slang fails
+# PrefetchExecutor — prp gen fails
 
 kind=mod
 
@@ -6,7 +6,7 @@ kind=mod
 |---|---|
 | yosys+slang gate | PASS |
 | --reader slang -> prp | PASS |
-| slang -> lg | FAIL |
+| slang -> lg | PASS |
 | prp -> lg | FAIL |
 | yosys-slang -> lg | PASS |
 | lec prp vs slang | NA |
@@ -15,5 +15,5 @@ kind=mod
 
 **First failure message:**
 ```
-upass.tolg: combinational loop in 'PrefetchExecutor'
+upass.tolg: call to 'OHEncoder' has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending
 ```

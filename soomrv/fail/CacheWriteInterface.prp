@@ -1,7 +1,7 @@
 pub mod CacheWriteInterface::[lg="CacheWriteInterface", hdl](clk:u1, rst:u1, IN_valid:u1, IN_addr:u10, IN_data:u128, IN_id:u2, IN_CACHE_ready:u1) -> (OUT_ready:u1@[], OUT_ackValid:u1@[], OUT_ackId:u2@[], OUT_CACHE_ce:u1@[], OUT_CACHE_we:u1@[], OUT_CACHE_wm:u1@[], OUT_CACHE_addr:u10@[], OUT_CACHE_data:u128@[]) {
+  reg OUT_ackValid:u1
   reg OUT_ackId:u2
   reg cur_r:u143
-  reg OUT_ackValid:u1
   mut genblk1_wm_new = 0
   mut genblk1_addrConflict = 0
   mut genblk1_chunkInsertIdx = 0

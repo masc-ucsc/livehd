@@ -1,6 +1,6 @@
 pub mod FIFO::[lg="FIFO", hdl](clk:u1, rst:u1, IN_valid:u1, IN_data:u32, IN_ready:u1) -> (free:u3@[], OUT_ready:u1@[], OUT_valid:u1@[], OUT_data:u32@[]) {
-  reg indexIn:u2
   reg indexOut:u2
+  reg indexIn:u2
   reg outDataReg:u32
   reg fullCond:u1
   reg outValidReg:u1

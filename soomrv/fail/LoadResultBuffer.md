@@ -15,5 +15,5 @@ kind=-
 
 **First failure message:**
 ```
-unpacked array read on an unsupported base
+nested non-variable assignment targets are not supported yet
 ```

@@ -1,7 +1,7 @@
 pub mod BypassLSU::[lg="BypassLSU", hdl](clk:u1, rst:u1, IN_branch:u74, IN_uopLdEn:u1, IN_uopLd:u101, IN_uopStEn:u1, IN_uopSt:u184, IN_ldStall:u1, IN_memc:u559) -> (OUT_ldStall:u1@[], OUT_stStall:u1@[], OUT_uopLd:u101@[], OUT_ldData:u32@[], OUT_memc:u225@[]) {
-  reg activeLd:u101
-  reg OUT_memc:u225
   reg state:u3
+  reg OUT_memc:u225
+  reg activeLd:u101
   reg OUT_ldData:u32
   mut _b2i_1 = 0
   mut invalidateActiveLd = 0

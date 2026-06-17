@@ -15,5 +15,5 @@ kind=-
 
 **First failure message:**
 ```
-unpacked array read on an unsupported base
+only single-element reads of unpacked arrays are supported by --reader slang
 ```

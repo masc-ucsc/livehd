@@ -15,5 +15,5 @@ kind=-
 
 **First failure message:**
 ```
-unpacked array read on an unsupported base
+`!=` requires both operands to be the same type (timeoutCommit:boolean vs <const>:integer)
 ```

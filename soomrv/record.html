@@ -10,14 +10,14 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 .msg{font-size:11px;color:#57606a;max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>
 <h1>soomrv Verilog &rarr; Pyrope translation sweep</h1>
-<p><b>12 / 75 PASS</b> (slang round-trip LEC-verified). Pipeline: <code>--reader slang</code> &rarr; .prp &rarr; lg; LEC (lgyosys) prp-lg vs slang-lg and vs yosys-slang-lg; abc map (only if slang-LEC PROVEN). yosys+slang gate runs on a <code>!&amp;</code>&rarr;<code>~&amp;</code>-normalized tree.</p>
+<p><b>13 / 75 PASS</b> (slang round-trip LEC-verified). Pipeline: <code>--reader slang</code> &rarr; .prp &rarr; lg; LEC (lgyosys) prp-lg vs slang-lg and vs yosys-slang-lg; abc map (only if slang-LEC PROVEN). yosys+slang gate runs on a <code>!&amp;</code>&rarr;<code>~&amp;</code>-normalized tree.</p>
 <h2>Primary classification (each module in exactly one bucket)</h2>
 <table><tr><th>category</th><th class=num>count</th><th>bar</th></tr>
-<tr><td style="color:#1a7f37;font-weight:700">PASS</td><td class=num>12</td><td><span class=bar style="width:72px"></span></td></tr>
-<tr><td>yosys+slang fails</td><td class=num>24</td><td><span class=bar style="width:144px;background:#cf222e"></span></td></tr>
-<tr><td>--reader slang fails</td><td class=num>23</td><td><span class=bar style="width:138px;background:#cf222e"></span></td></tr>
-<tr><td>lg gen from slang fails</td><td class=num>2</td><td><span class=bar style="width:12px;background:#cf222e"></span></td></tr>
-<tr><td>prp gen fails</td><td class=num>2</td><td><span class=bar style="width:12px;background:#cf222e"></span></td></tr>
+<tr><td style="color:#1a7f37;font-weight:700">PASS</td><td class=num>13</td><td><span class=bar style="width:78px"></span></td></tr>
+<tr><td>yosys+slang fails</td><td class=num>22</td><td><span class=bar style="width:132px;background:#cf222e"></span></td></tr>
+<tr><td>--reader slang fails</td><td class=num>20</td><td><span class=bar style="width:120px;background:#cf222e"></span></td></tr>
+<tr><td>lg gen from slang fails</td><td class=num>0</td><td><span class=bar style="width:0px;background:#cf222e"></span></td></tr>
+<tr><td>prp gen fails</td><td class=num>8</td><td><span class=bar style="width:48px;background:#cf222e"></span></td></tr>
 <tr><td>lec prp vs from slang fails</td><td class=num>6</td><td><span class=bar style="width:36px;background:#cf222e"></span></td></tr>
 <tr><td>lec inconclusive</td><td class=num>6</td><td><span class=bar style="width:36px;background:#cf222e"></span></td></tr>
 <tr><td>other</td><td class=num>0</td><td><span class=bar style="width:0px;background:#cf222e"></span></td></tr>
@@ -28,30 +28,31 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <tr><td>yosys+slang gate FAIL (single-unit, design-level)</td><td class=num>43</td></tr>
 <tr><td>lg gen from yosys-slang FAIL</td><td class=num>0</td></tr>
 <tr><td>lec prp vs yosys-slang REFUTED</td><td class=num>11</td></tr>
-<tr><td>abc gen FAIL</td><td class=num>12</td></tr>
+<tr><td>abc gen FAIL</td><td class=num>13</td></tr>
 </table>
 <h2>Dominant blocking issues (group by category + root-cause message)</h2>
 <table><tr><th>category</th><th>root-cause message</th><th class=num>#</th><th>modules</th></tr>
-<tr><td style="color:#cf222e">yosys+slang fails</td><td><code>unpacked array read on an unsupported base</code></td><td class=num>9</td><td style="font-size:11px">IntALU, LoadBuffer, LoadResultBuffer, PrefetchIssuer, PriorityEncoder, ROB, Scheduler, StoreDataIQ, StoreQueue</td></tr>
 <tr><td style="color:#cf222e">--reader slang fails</td><td><code>nested non-variable assignment targets are not supported yet</code></td><td class=num>8</td><td style="font-size:11px">AGU, BranchPredictor, BranchTargetBuffer, MemoryController, Multiply, TLBMissQueue, TagePredictor, TageTable</td></tr>
+<tr><td style="color:#cf222e">yosys+slang fails</td><td><code>nested non-variable assignment targets are not supported yet</code></td><td class=num>7</td><td style="font-size:11px">LoadBuffer, LoadResultBuffer, PrefetchIssuer, ReturnStack, StoreDataIQ, StoreQueue, StoreQueueBackend</td></tr>
 <tr><td style="color:#cf222e">lec prp vs from slang fails</td><td><code>(no message)</code></td><td class=num>6</td><td style="font-size:11px">ACLINT, CacheWriteInterface, Divide, PageWalker, StoreDataLoad, TValSelect</td></tr>
 <tr><td style="color:#9a6700">lec inconclusive</td><td><code>(no message)</code></td><td class=num>6</td><td style="font-size:11px">BranchPredictionTable, BypassLSU, MemRTL, MemRTL1RW, MemRTL2W, RenameTable</td></tr>
 <tr><td style="color:#cf222e">yosys+slang fails</td><td><code>interface port &#x27;X&#x27; is not supported by --reader slang</code></td><td class=num>6</td><td style="font-size:11px">CSR, CacheLineManager, IFetch, IFetchPipeline, LoadStoreUnit, MMIO</td></tr>
 <tr><td style="color:#cf222e">--reader slang fails</td><td><code>&#x27;X&#x27; is not a valid top-level module</code></td><td class=num>4</td><td style="font-size:11px">CacheArbiter, CacheArbiter2, MemRTLC, OpDownsample</td></tr>
+<tr><td style="color:#cf222e">prp gen fails</td><td><code>upass.tolg: call to &#x27;X&#x27; has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may n</code></td><td class=num>4</td><td style="font-size:11px">CacheReadInterface, PrefetchExecutor, RFReadMux, TagBuffer</td></tr>
 <tr><td style="color:#cf222e">--reader slang fails</td><td><code>variable &#x27;X&#x27; driven by always_ff procedure cannot be written to by any other process</code></td><td class=num>4</td><td style="font-size:11px">DataPrefetch, ExternalAXISim, SoC, Top</td></tr>
-<tr><td style="color:#cf222e">--reader slang fails</td><td><code>unpacked array read on an unsupported base</code></td><td class=num>4</td><td style="font-size:11px">InstrAligner, RFReadMux, Rename, TagBuffer</td></tr>
+<tr><td style="color:#cf222e">prp gen fails</td><td><code>assignment to undeclared variable &#x27;X&#x27; (declare it with `mut`/`const` first)</code></td><td class=num>2</td><td style="font-size:11px">BranchSelector, InstrAligner</td></tr>
 <tr><td style="color:#cf222e">yosys+slang fails</td><td><code>variable &#x27;X&#x27; driven by always_ff procedure cannot be written to by any other process</code></td><td class=num>2</td><td style="font-size:11px">Core, PrefetchPatternDetector</td></tr>
 <tr><td style="color:#cf222e">yosys+slang fails</td><td><code>instance &#x27;X&#x27; refers to an unknown module (blackboxes are not supported by --reader slang)</code></td><td class=num>2</td><td style="font-size:11px">FDiv, FPU</td></tr>
-<tr><td style="color:#cf222e">yosys+slang fails</td><td><code>nested non-variable assignment targets are not supported yet</code></td><td class=num>2</td><td style="font-size:11px">ReturnStack, StoreQueueBackend</td></tr>
 <tr><td style="color:#cf222e">yosys+slang fails</td><td><code>`!=` requires both operands to be the same type (predicted___ssa_1:boolean vs &lt;const&gt;:integer)</code></td><td class=num>1</td><td style="font-size:11px">BranchHandler</td></tr>
-<tr><td style="color:#cf222e">prp gen fails</td><td><code>assignment to undeclared variable &#x27;X&#x27; (declare it with `mut`/`const` first)</code></td><td class=num>1</td><td style="font-size:11px">BranchSelector</td></tr>
-<tr><td style="color:#cf222e">prp gen fails</td><td><code>upass.tolg: call to &#x27;X&#x27; has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may n</code></td><td class=num>1</td><td style="font-size:11px">CacheReadInterface</td></tr>
 <tr><td style="color:#cf222e">--reader slang fails</td><td><code>system task &#x27;X&#x27; is not supported by --reader slang</code></td><td class=num>1</td><td style="font-size:11px">ExternalBusMem</td></tr>
 <tr><td style="color:#cf222e">--reader slang fails</td><td><code>instance &#x27;X&#x27; refers to an unknown module (blackboxes are not supported by --reader slang)</code></td><td class=num>1</td><td style="font-size:11px">FMul</td></tr>
-<tr><td style="color:#cf222e">lg gen from slang fails</td><td><code>upass.tolg: internal — memory &#x27;X&#x27; lowered N write sites but the pre-scan counted N</code></td><td class=num>1</td><td style="font-size:11px">InstrDecoder</td></tr>
+<tr><td style="color:#cf222e">prp gen fails</td><td><code>`==` requires both operands to be the same type (___4124228857_0:boolean vs &lt;const&gt;:integer)</code></td><td class=num>1</td><td style="font-size:11px">InstrDecoder</td></tr>
+<tr><td style="color:#cf222e">yosys+slang fails</td><td><code>`!=` requires both operands to be the same type (HasFU___ssa_1:boolean vs &lt;const&gt;:integer)</code></td><td class=num>1</td><td style="font-size:11px">IntALU</td></tr>
 <tr><td style="color:#cf222e">yosys+slang fails</td><td><code>unpacked array write on an unsupported base</code></td><td class=num>1</td><td style="font-size:11px">IssueQueue</td></tr>
 <tr><td style="color:#cf222e">--reader slang fails</td><td><code>module member &#x27;X&#x27; (kind InstanceArray) is not supported by --reader slang</code></td><td class=num>1</td><td style="font-size:11px">Load</td></tr>
-<tr><td style="color:#cf222e">lg gen from slang fails</td><td><code>upass.tolg: combinational loop in &#x27;X&#x27;</code></td><td class=num>1</td><td style="font-size:11px">PrefetchExecutor</td></tr>
+<tr><td style="color:#cf222e">--reader slang fails</td><td><code>only single-element reads of unpacked arrays are supported by --reader slang</code></td><td class=num>1</td><td style="font-size:11px">Rename</td></tr>
+<tr><td style="color:#cf222e">yosys+slang fails</td><td><code>`!=` requires both operands to be the same type (timeoutCommit:boolean vs &lt;const&gt;:integer)</code></td><td class=num>1</td><td style="font-size:11px">ROB</td></tr>
+<tr><td style="color:#cf222e">prp gen fails</td><td><code>read of undefined variable &#x27;X&#x27; (not visible here: declared later, out of scope, or never)</code></td><td class=num>1</td><td style="font-size:11px">Scheduler</td></tr>
 <tr><td style="color:#cf222e">yosys+slang fails</td><td><code>memory &#x27;X&#x27; has a non-integral or multi-dimensional element type</code></td><td class=num>1</td><td style="font-size:11px">TLB</td></tr>
 </table>
 <h2>Per-module results</h2>
@@ -153,6 +154,20 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#cf222e;font-weight:600">REFUTED</td>
 <td style="color:#cf222e;font-weight:600">FAIL</td>
 <td class=msg title="pass.abc: cell &#x27;sra&#x27; in region &#x27;PrefixSum__c1&#x27; has no combinational bit-blast yet (supported: and/or/xor/not/mux/hotmux/sum/lt/gt/eq/get_mask/set_mask/sext/shl/const)">pass.abc: cell &#x27;sra&#x27; in region &#x27;PrefixSum__c1&#x27; has no combinational bit-blast yet (support</td>
+</tr>
+<tr>
+<td><b>PriorityEncoder</b></td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td>comb</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PROVEN</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td class=msg title=""></td>
 </tr>
 <tr>
 <td><b>RangeMaskGen</b></td>
@@ -351,20 +366,6 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td class=msg title="instance &#x27;isSigNaN_a&#x27; refers to an unknown module (blackboxes are not supported by --reader slang)">instance &#x27;isSigNaN_a&#x27; refers to an unknown module (blackboxes are not supported by --reade</td>
 </tr>
 <tr>
-<td><b>InstrAligner</b></td>
-<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
-</tr>
-<tr>
 <td><b>Load</b></td>
 <td style="color:#cf222e;font-weight:600">--reader slang fails</td>
 <td>-</td>
@@ -435,20 +436,6 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td class=msg title="&#x27;OpDownsample&#x27; is not a valid top-level module">&#x27;OpDownsample&#x27; is not a valid top-level module</td>
 </tr>
 <tr>
-<td><b>RFReadMux</b></td>
-<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
-</tr>
-<tr>
 <td><b>Rename</b></td>
 <td style="color:#cf222e;font-weight:600">--reader slang fails</td>
 <td>-</td>
@@ -460,7 +447,7 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
+<td class=msg title="only single-element reads of unpacked arrays are supported by --reader slang">only single-element reads of unpacked arrays are supported by --reader slang</td>
 </tr>
 <tr>
 <td><b>SoC</b></td>
@@ -489,20 +476,6 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
-</tr>
-<tr>
-<td><b>TagBuffer</b></td>
-<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
 </tr>
 <tr>
 <td><b>TagePredictor</b></td>
@@ -715,34 +688,6 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td class=msg title=""></td>
 </tr>
 <tr>
-<td><b>InstrDecoder</b></td>
-<td style="color:#cf222e;font-weight:600">lg gen from slang fails</td>
-<td>mod</td>
-<td style="color:#1a7f37;font-weight:600">PASS</td>
-<td style="color:#1a7f37;font-weight:600">PASS</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#1a7f37;font-weight:600">PASS</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="upass.tolg: internal — memory &#x27;OUT_uop&#x27; lowered 0 write sites but the pre-scan counted 1">upass.tolg: internal — memory &#x27;OUT_uop&#x27; lowered 0 write sites but the pre-scan counted 1</td>
-</tr>
-<tr>
-<td><b>PrefetchExecutor</b></td>
-<td style="color:#cf222e;font-weight:600">lg gen from slang fails</td>
-<td>mod</td>
-<td style="color:#1a7f37;font-weight:600">PASS</td>
-<td style="color:#1a7f37;font-weight:600">PASS</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#1a7f37;font-weight:600">PASS</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="upass.tolg: combinational loop in &#x27;PrefetchExecutor&#x27;">upass.tolg: combinational loop in &#x27;PrefetchExecutor&#x27;</td>
-</tr>
-<tr>
 <td><b>BranchSelector</b></td>
 <td style="color:#cf222e;font-weight:600">prp gen fails</td>
 <td>mod</td>
@@ -769,6 +714,90 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td class=msg title="upass.tolg: call to &#x27;FIFO&#x27; has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending">upass.tolg: call to &#x27;FIFO&#x27; has no hardware lowering yet — only pipe/mod calls become insta</td>
+</tr>
+<tr>
+<td><b>InstrAligner</b></td>
+<td style="color:#cf222e;font-weight:600">prp gen fails</td>
+<td>mod</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="assignment to undeclared variable &#x27;isInstrStart32_c&#x27; (declare it with `mut`/`const` first)">assignment to undeclared variable &#x27;isInstrStart32_c&#x27; (declare it with `mut`/`const` first)</td>
+</tr>
+<tr>
+<td><b>InstrDecoder</b></td>
+<td style="color:#cf222e;font-weight:600">prp gen fails</td>
+<td>mod</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="`==` requires both operands to be the same type (___4124228857_0:boolean vs &lt;const&gt;:integer)">`==` requires both operands to be the same type (___4124228857_0:boolean vs &lt;const&gt;:intege</td>
+</tr>
+<tr>
+<td><b>PrefetchExecutor</b></td>
+<td style="color:#cf222e;font-weight:600">prp gen fails</td>
+<td>mod</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="upass.tolg: call to &#x27;OHEncoder&#x27; has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending">upass.tolg: call to &#x27;OHEncoder&#x27; has no hardware lowering yet — only pipe/mod calls become </td>
+</tr>
+<tr>
+<td><b>RFReadMux</b></td>
+<td style="color:#cf222e;font-weight:600">prp gen fails</td>
+<td>mod</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="upass.tolg: call to &#x27;PriorityEncoder&#x27; has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending">upass.tolg: call to &#x27;PriorityEncoder&#x27; has no hardware lowering yet — only pipe/mod calls b</td>
+</tr>
+<tr>
+<td><b>Scheduler</b></td>
+<td style="color:#cf222e;font-weight:600">prp gen fails</td>
+<td>mod</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="read of undefined variable &#x27;modTable&#x27; (not visible here: declared later, out of scope, or never)">read of undefined variable &#x27;modTable&#x27; (not visible here: declared later, out of scope, or </td>
+</tr>
+<tr>
+<td><b>TagBuffer</b></td>
+<td style="color:#cf222e;font-weight:600">prp gen fails</td>
+<td>mod</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="upass.tolg: call to &#x27;PriorityEncoder&#x27; has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending">upass.tolg: call to &#x27;PriorityEncoder&#x27; has no hardware lowering yet — only pipe/mod calls b</td>
 </tr>
 <tr>
 <td><b>BranchHandler</b></td>
@@ -894,7 +923,7 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
+<td class=msg title="`!=` requires both operands to be the same type (HasFU___ssa_1:boolean vs &lt;const&gt;:integer)">`!=` requires both operands to be the same type (HasFU___ssa_1:boolean vs &lt;const&gt;:integer)</td>
 </tr>
 <tr>
 <td><b>IssueQueue</b></td>
@@ -922,7 +951,7 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
+<td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
 </tr>
 <tr>
 <td><b>LoadResultBuffer</b></td>
@@ -936,7 +965,7 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
+<td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
 </tr>
 <tr>
 <td><b>LoadStoreUnit</b></td>
@@ -978,7 +1007,7 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
+<td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
 </tr>
 <tr>
 <td><b>PrefetchPatternDetector</b></td>
@@ -995,20 +1024,6 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td class=msg title="variable &#x27;missSR&#x27; driven by always_ff procedure cannot be written to by any other process">variable &#x27;missSR&#x27; driven by always_ff procedure cannot be written to by any other process</td>
 </tr>
 <tr>
-<td><b>PriorityEncoder</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
-</tr>
-<tr>
 <td><b>ROB</b></td>
 <td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
 <td>-</td>
@@ -1020,7 +1035,7 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
+<td class=msg title="`!=` requires both operands to be the same type (timeoutCommit:boolean vs &lt;const&gt;:integer)">`!=` requires both operands to be the same type (timeoutCommit:boolean vs &lt;const&gt;:integer)</td>
 </tr>
 <tr>
 <td><b>ReturnStack</b></td>
@@ -1037,20 +1052,6 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
 </tr>
 <tr>
-<td><b>Scheduler</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
-</tr>
-<tr>
 <td><b>StoreDataIQ</b></td>
 <td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
 <td>-</td>
@@ -1062,7 +1063,7 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
+<td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
 </tr>
 <tr>
 <td><b>StoreQueue</b></td>
@@ -1076,7 +1077,7 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
+<td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
 </tr>
 <tr>
 <td><b>StoreQueueBackend</b></td>

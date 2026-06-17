@@ -1,0 +1,169 @@
+pub mod Scheduler::[lg="Scheduler", hdl](clk:u1, rst:u1, IN_valid:u1, IN_uopSqN:u28, IN_uopLoadSqN:u28, IN_uopStoreSqN:u28, IN_uop:u320) -> (OUT_order:u8@[]) {
+  reg prio_r:u2
+  mut candidates:u12 = 0
+  mut prios_c:u8 = 0
+  mut outOrderRaw:u8 = 0
+  mut i = 0
+  mut fu = 0
+  mut sqN = 0
+  mut loadSqN = 0
+  mut storeSqN = 0
+  mut GetCandidates = 0
+  mut retval = 0
+  mut i_s1 = 0
+  mut i_s3 = 0
+  mut i_s4 = 0
+  mut fu__w1 = IN_uop#[0..=79]#[10..=13]
+  GetCandidates = 0ub???
+  fu = 0ub????
+  i = 0sb?
+  i_s1 = 0sb?
+  loadSqN = 0ub???????
+  mut loadSqN__w1 = IN_uopLoadSqN#[0..=6]
+  retval = 0
+  sqN = 0ub???????
+  mut sqN__w1 = IN_uopSqN#[0..=6]
+  storeSqN = 0ub???????
+  mut storeSqN__w1 = IN_uopStoreSqN#[0..=6]
+  unique if fu__w1 == 10 {
+    retval = (1 << (storeSqN__w1 - ((storeSqN__w1 / 2) * 2)))#[0..=31]#sext[0..=31]#[0..=2]
+  } elif ((fu__w1 == 9) or (fu__w1 == 3)) or (fu__w1 == 12) {
+  } else {
+    if ((0x1846 >> (fu__w1 + 1)) & 1) != 0 {
+      retval = (retval | 1)#[0..=2]
+    }
+    if ((0x826 >> (fu__w1 + 1)) & 1) != 0 {
+      retval = (retval | 2)#[0..=2]
+    }
+    if ((42 >> (fu__w1 + 1)) & 1) != 0 {
+      retval = (retval | 4)#[0..=2]
+    }
+    if ((0x810 >> (fu__w1 + 1)) & 1) != 0 {
+      retval = (retval | 8)#[0..=2]
+    }
+  }
+  mut GetCandidates__w1 = retval
+  mut fu__w2 = IN_uop#[80..=159]#[10..=13]
+  candidates#[0..=2] = GetCandidates__w1
+  mut loadSqN__w2 = IN_uopLoadSqN#[7..=13]
+  retval = 0
+  mut sqN__w2 = IN_uopSqN#[7..=13]
+  mut storeSqN__w2 = IN_uopStoreSqN#[7..=13]
+  unique if fu__w2 == 10 {
+    retval = (1 << (storeSqN__w2 - ((storeSqN__w2 / 2) * 2)))#[0..=31]#sext[0..=31]#[0..=2]
+  } elif ((fu__w2 == 9) or (fu__w2 == 3)) or (fu__w2 == 12) {
+  } else {
+    if ((0x1846 >> (fu__w2 + 1)) & 1) != 0 {
+      retval = (retval | 1)#[0..=2]
+    }
+    if ((0x826 >> (fu__w2 + 1)) & 1) != 0 {
+      retval = (retval | 2)#[0..=2]
+    }
+    if ((42 >> (fu__w2 + 1)) & 1) != 0 {
+      retval = (retval | 4)#[0..=2]
+    }
+    if ((0x810 >> (fu__w2 + 1)) & 1) != 0 {
+      retval = (retval | 8)#[0..=2]
+    }
+  }
+  mut GetCandidates__w2 = retval
+  mut fu__w3 = IN_uop#[160..=239]#[10..=13]
+  mut candidates__w1 = candidates
+  candidates__w1#[3..=5] = GetCandidates__w2
+  mut loadSqN__w3 = IN_uopLoadSqN#[14..=20]
+  retval = 0
+  mut sqN__w3 = IN_uopSqN#[14..=20]
+  mut storeSqN__w3 = IN_uopStoreSqN#[14..=20]
+  unique if fu__w3 == 10 {
+    retval = (1 << (storeSqN__w3 - ((storeSqN__w3 / 2) * 2)))#[0..=31]#sext[0..=31]#[0..=2]
+  } elif ((fu__w3 == 9) or (fu__w3 == 3)) or (fu__w3 == 12) {
+  } else {
+    if ((0x1846 >> (fu__w3 + 1)) & 1) != 0 {
+      retval = (retval | 1)#[0..=2]
+    }
+    if ((0x826 >> (fu__w3 + 1)) & 1) != 0 {
+      retval = (retval | 2)#[0..=2]
+    }
+    if ((42 >> (fu__w3 + 1)) & 1) != 0 {
+      retval = (retval | 4)#[0..=2]
+    }
+    if ((0x810 >> (fu__w3 + 1)) & 1) != 0 {
+      retval = (retval | 8)#[0..=2]
+    }
+  }
+  mut GetCandidates__w3 = retval
+  mut fu__w4 = IN_uop#[240..=319]#[10..=13]
+  mut candidates__w2 = candidates__w1
+  candidates__w2#[6..=8] = GetCandidates__w3
+  mut loadSqN__w4 = IN_uopLoadSqN#[21..=27]
+  retval = 0
+  mut sqN__w4 = IN_uopSqN#[21..=27]
+  mut storeSqN__w4 = IN_uopStoreSqN#[21..=27]
+  unique if fu__w4 == 10 {
+    retval = (1 << (storeSqN__w4 - ((storeSqN__w4 / 2) * 2)))#[0..=31]#sext[0..=31]#[0..=2]
+  } elif ((fu__w4 == 9) or (fu__w4 == 3)) or (fu__w4 == 12) {
+  } else {
+    if ((0x1846 >> (fu__w4 + 1)) & 1) != 0 {
+      retval = (retval | 1)#[0..=2]
+    }
+    if ((0x826 >> (fu__w4 + 1)) & 1) != 0 {
+      retval = (retval | 2)#[0..=2]
+    }
+    if ((42 >> (fu__w4 + 1)) & 1) != 0 {
+      retval = (retval | 4)#[0..=2]
+    }
+    if ((0x810 >> (fu__w4 + 1)) & 1) != 0 {
+      retval = (retval | 8)#[0..=2]
+    }
+  }
+  mut GetCandidates__w4 = retval
+  mut candidates__w3 = candidates__w2
+  candidates__w3#[9..=11] = GetCandidates__w4
+  if rst != 0 {
+    prio_r = 0
+  } else {
+    mut i_s2 = 0
+    i_s2 = 0
+    if (IN_valid != 0) and ((IN_uop#[0..=79] & 1) != 0) {
+      mut modTable:[8]u2 = 0
+      prio_r = modTable[(OUT_order.[defer]#[0..=1] + 1)#[0..=2]]
+    }
+    if (IN_valid != 0) and ((IN_uop#[80..=159] & 1) != 0) {
+      prio_r = modTable[(OUT_order.[defer]#[2..=3] + 1)#[0..=2]]
+    }
+    if (IN_valid != 0) and ((IN_uop#[160..=239] & 1) != 0) {
+      prio_r = modTable[(OUT_order.[defer]#[4..=5] + 1)#[0..=2]]
+    }
+    if (IN_valid != 0) and ((IN_uop#[240..=319] & 1) != 0) {
+      prio_r = modTable[(OUT_order.[defer]#[6..=7] + 1)#[0..=2]]
+    }
+  }
+  i_s3 = 0sb?
+  prios_c#[0..=1] = prio_r
+  mut prios_c__w1 = prios_c
+  prios_c__w1#[2..=3] = modTable[(OUT_order.[defer]#[0..=1] + 1)#[0..=2]]
+  mut prios_c__w2 = prios_c__w1
+  prios_c__w2#[4..=5] = modTable[(OUT_order.[defer]#[2..=3] + 1)#[0..=2]]
+  mut prios_c__w3 = prios_c__w2
+  prios_c__w3#[6..=7] = modTable[(OUT_order.[defer]#[4..=5] + 1)#[0..=2]]
+  ___253 = PriorityEncoder(IN_data = (candidates__w3.[defer]#[0..=2] >> prios_c__w3#[0..=1]) | (candidates__w3.[defer]#[0..=2] << (3 - prios_c__w3#[0..=1])#[0..=31])#[0..=2])
+  outOrderRaw#[0..=1] = ___253["OUT_idx"]#[0..=1]
+  ___268 = PriorityEncoder(IN_data = (candidates__w3.[defer]#[3..=5] >> prios_c__w3#[2..=3]) | (candidates__w3.[defer]#[3..=5] << (3 - prios_c__w3#[2..=3])#[0..=31])#[0..=2])
+  mut outOrderRaw__w1 = outOrderRaw
+  outOrderRaw__w1#[2..=3] = ___268["OUT_idx"]#[0..=1]
+  ___283 = PriorityEncoder(IN_data = (candidates__w3.[defer]#[6..=8] >> prios_c__w3#[4..=5]) | (candidates__w3.[defer]#[6..=8] << (3 - prios_c__w3#[4..=5])#[0..=31])#[0..=2])
+  mut outOrderRaw__w2 = outOrderRaw__w1
+  outOrderRaw__w2#[4..=5] = ___283["OUT_idx"]#[0..=1]
+  ___298 = PriorityEncoder(IN_data = (candidates__w3.[defer]#[9..=11] >> prios_c__w3#[6..=7]) | (candidates__w3.[defer]#[9..=11] << (3 - prios_c__w3#[6..=7])#[0..=31])#[0..=2])
+  i_s4 = 0sb?
+  mut outOrderRaw__w3 = outOrderRaw__w2
+  outOrderRaw__w3#[6..=7] = ___298["OUT_idx"]#[0..=1]
+  OUT_order#[0..=1] = modTable[(outOrderRaw__w3.[defer]#[0..=1] + prios_c__w3.[defer]#[0..=1])#[0..=2]]
+  mut OUT_order__w1 = OUT_order
+  OUT_order__w1#[2..=3] = modTable[(outOrderRaw__w3.[defer]#[2..=3] + prios_c__w3.[defer]#[2..=3])#[0..=2]]
+  mut OUT_order__w2 = OUT_order__w1
+  OUT_order__w2#[4..=5] = modTable[(outOrderRaw__w3.[defer]#[4..=5] + prios_c__w3.[defer]#[4..=5])#[0..=2]]
+  mut OUT_order__w3 = OUT_order__w2
+  OUT_order__w3#[6..=7] = modTable[(outOrderRaw__w3.[defer]#[6..=7] + prios_c__w3.[defer]#[6..=7])#[0..=2]]
+  OUT_order = OUT_order__w3
+}

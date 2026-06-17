@@ -1,11 +1,11 @@
 pub mod MemRTL1RW::[lg="MemRTL1RW", hdl](clk:u1, IN_nce:u1, IN_nwe:u1, IN_addr:u7, IN_data:u256, IN_wm:u32) -> (OUT_data:u256@[]) {
   reg wm_reg:u32
-  reg we_reg:u1
-  reg data_reg:u256
   reg ce_reg:u1
+  reg addr_reg:u7
+  reg we_reg:u1
   reg mem:[128]u256:[fwd=0, wensize=32]
   reg OUT_data:u256
-  reg addr_reg:u7
+  reg data_reg:u256
   ce_reg = IN_nce
   addr_reg = IN_addr
   data_reg = IN_data

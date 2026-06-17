@@ -1,12 +1,12 @@
 pub mod TrapHandler::[lg="TrapHandler", hdl](clk:u1, rst:u1, IN_trapInstr:u48, IN_pcReadData:u35, IN_trapControl:u134, IN_MEM_busy:u1) -> (OUT_pcRead:u7@[], OUT_trapInfo:u72@[], OUT_branch:u74@[], OUT_flushTLB:u1@[], OUT_fence:u1@[], OUT_clearICache:u1@[], OUT_disableIFetch:u1@[], OUT_dbgStallPC:u32@[]) {
-  reg memoryWait:u1
   reg OUT_fence:u1
-  reg OUT_clearICache:u1
-  reg fetchOffs:u3
   reg trapPCSpec_r:u2
+  reg fetchOffs:u3
   reg trapInfo_r:u72
-  reg OUT_dbgStallPC:u32
+  reg OUT_clearICache:u1
   reg OUT_flushTLB:u1
+  reg OUT_dbgStallPC:u32
+  reg memoryWait:u1
   mut _b2i_1 = 0
   mut finalHalfwPC = 0
   mut delegate = 0

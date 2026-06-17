@@ -1,10 +1,10 @@
 pub mod Divide::[lg="Divide", hdl](clk:u1, rst:u1, en:u1, IN_branch:u74, IN_uop:u183) -> (OUT_busy:u1@[], OUT_uop:u52@[]) {
-  reg d:u32
-  reg OUT_uop:u52
   reg cnt:u6
-  reg running:u1
+  reg OUT_uop:u52
   reg invert:u1
+  reg running:u1
   reg r:u65
+  reg d:u32
   reg uop:u183
   mut d_inv = 0
   mut q = 0

@@ -1,6 +1,6 @@
 pub mod TValSelect::[lg="TValSelect", hdl](clk:u1, rst:u1, IN_branch:u74, IN_commitSqN:u7, IN_tvalProvs:u80) -> (OUT_tvalState:u32@[]) {
-  reg curTVal:u40
   reg invalidateCurTVal:u1
+  reg curTVal:u40
   mut _b2i_1 = 0
   mut invalidateCurTVal_c = 0
   mut earliest = 0

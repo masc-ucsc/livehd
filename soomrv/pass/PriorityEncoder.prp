@@ -1,0 +1,962 @@
+pub comb PriorityEncoder::[lg="PriorityEncoder", hdl](IN_data:u32) -> (OUT_idx:u5, OUT_idxValid:u1) {
+  mut freePadded = 0
+  mut gen_0_genblk1_i = 0
+  mut gen_0_genblk1_j = 0
+  mut gen_0_genblk1_s:u32 = 0
+  mut _b2i_1 = 0
+  mut _b2i_2 = 0
+  mut _b2i_3 = 0
+  mut _b2i_4 = 0
+  mut _b2i_5 = 0
+  mut _b2i_6 = 0
+  mut _b2i_7 = 0
+  mut _b2i_8 = 0
+  mut _b2i_9 = 0
+  mut _b2i_10 = 0
+  mut _b2i_11 = 0
+  mut _b2i_12 = 0
+  mut _b2i_13 = 0
+  mut _b2i_14 = 0
+  mut _b2i_15 = 0
+  mut _b2i_16 = 0
+  mut _b2i_17 = 0
+  mut _b2i_18 = 0
+  mut _b2i_19 = 0
+  mut _b2i_20 = 0
+  mut _b2i_21 = 0
+  mut _b2i_22 = 0
+  mut _b2i_23 = 0
+  mut _b2i_24 = 0
+  mut _b2i_25 = 0
+  mut _b2i_26 = 0
+  mut _b2i_27 = 0
+  mut _b2i_28 = 0
+  mut _b2i_29 = 0
+  mut _b2i_30 = 0
+  mut _b2i_31 = 0
+  mut _b2i_32 = 0
+  mut gen_1_genblk1_genblk1_0_a = 0
+  mut gen_1_genblk1_genblk1_0_b = 0
+  mut gen_1_genblk1_genblk1_0_gen2_0_genblk1_0_mux:[2]u1 = 0
+  mut _b2i_33 = 0
+  mut gen_1_genblk1_genblk1_0_gen2_0_genblk2_redSum = 0
+  mut gen_1_genblk1_genblk1_0_gen2_0_s:u32 = 0
+  mut gen_1_genblk1_genblk1_1_a = 0
+  mut gen_1_genblk1_genblk1_1_b = 0
+  mut gen_1_genblk1_genblk1_1_gen2_0_genblk1_0_mux:[2]u1 = 0
+  mut _b2i_34 = 0
+  mut gen_1_genblk1_genblk1_1_gen2_0_genblk2_redSum = 0
+  mut gen_1_genblk1_genblk1_2_a = 0
+  mut gen_1_genblk1_genblk1_2_b = 0
+  mut gen_1_genblk1_genblk1_2_gen2_0_genblk1_0_mux:[2]u1 = 0
+  mut _b2i_35 = 0
+  mut gen_1_genblk1_genblk1_2_gen2_0_genblk2_redSum = 0
+  mut gen_1_genblk1_genblk1_3_a = 0
+  mut gen_1_genblk1_genblk1_3_b = 0
+  mut gen_1_genblk1_genblk1_3_gen2_0_genblk1_0_mux:[2]u1 = 0
+  mut _b2i_36 = 0
+  mut gen_1_genblk1_genblk1_3_gen2_0_genblk2_redSum = 0
+  mut gen_1_genblk1_genblk1_4_a = 0
+  mut gen_1_genblk1_genblk1_4_b = 0
+  mut gen_1_genblk1_genblk1_4_gen2_0_genblk1_0_mux:[2]u1 = 0
+  mut _b2i_37 = 0
+  mut gen_1_genblk1_genblk1_4_gen2_0_genblk2_redSum = 0
+  mut gen_1_genblk1_genblk1_5_a = 0
+  mut gen_1_genblk1_genblk1_5_b = 0
+  mut gen_1_genblk1_genblk1_5_gen2_0_genblk1_0_mux:[2]u1 = 0
+  mut _b2i_38 = 0
+  mut gen_1_genblk1_genblk1_5_gen2_0_genblk2_redSum = 0
+  mut gen_1_genblk1_genblk1_6_a = 0
+  mut gen_1_genblk1_genblk1_6_b = 0
+  mut gen_1_genblk1_genblk1_6_gen2_0_genblk1_0_mux:[2]u1 = 0
+  mut _b2i_39 = 0
+  mut gen_1_genblk1_genblk1_6_gen2_0_genblk2_redSum = 0
+  mut gen_1_genblk1_genblk1_7_a = 0
+  mut gen_1_genblk1_genblk1_7_b = 0
+  mut gen_1_genblk1_genblk1_7_gen2_0_genblk1_0_mux:[2]u1 = 0
+  mut _b2i_40 = 0
+  mut gen_1_genblk1_genblk1_7_gen2_0_genblk2_redSum = 0
+  mut gen_1_genblk1_genblk1_8_a = 0
+  mut gen_1_genblk1_genblk1_8_b = 0
+  mut gen_1_genblk1_genblk1_8_gen2_0_genblk1_0_mux:[2]u1 = 0
+  mut _b2i_41 = 0
+  mut gen_1_genblk1_genblk1_8_gen2_0_genblk2_redSum = 0
+  mut gen_1_genblk1_genblk1_9_a = 0
+  mut gen_1_genblk1_genblk1_9_b = 0
+  mut gen_1_genblk1_genblk1_9_gen2_0_genblk1_0_mux:[2]u1 = 0
+  mut _b2i_42 = 0
+  mut gen_1_genblk1_genblk1_9_gen2_0_genblk2_redSum = 0
+  mut gen_1_genblk1_genblk1_10_a = 0
+  mut gen_1_genblk1_genblk1_10_b = 0
+  mut gen_1_genblk1_genblk1_10_gen2_0_genblk1_0_mux:[2]u1 = 0
+  mut _b2i_43 = 0
+  mut gen_1_genblk1_genblk1_10_gen2_0_genblk2_redSum = 0
+  mut gen_1_genblk1_genblk1_11_a = 0
+  mut gen_1_genblk1_genblk1_11_b = 0
+  mut gen_1_genblk1_genblk1_11_gen2_0_genblk1_0_mux:[2]u1 = 0
+  mut _b2i_44 = 0
+  mut gen_1_genblk1_genblk1_11_gen2_0_genblk2_redSum = 0
+  mut gen_1_genblk1_genblk1_12_a = 0
+  mut gen_1_genblk1_genblk1_12_b = 0
+  mut gen_1_genblk1_genblk1_12_gen2_0_genblk1_0_mux:[2]u1 = 0
+  mut _b2i_45 = 0
+  mut gen_1_genblk1_genblk1_12_gen2_0_genblk2_redSum = 0
+  mut gen_1_genblk1_genblk1_13_a = 0
+  mut gen_1_genblk1_genblk1_13_b = 0
+  mut gen_1_genblk1_genblk1_13_gen2_0_genblk1_0_mux:[2]u1 = 0
+  mut _b2i_46 = 0
+  mut gen_1_genblk1_genblk1_13_gen2_0_genblk2_redSum = 0
+  mut gen_1_genblk1_genblk1_14_a = 0
+  mut gen_1_genblk1_genblk1_14_b = 0
+  mut gen_1_genblk1_genblk1_14_gen2_0_genblk1_0_mux:[2]u1 = 0
+  mut _b2i_47 = 0
+  mut gen_1_genblk1_genblk1_14_gen2_0_genblk2_redSum = 0
+  mut gen_1_genblk1_genblk1_15_a = 0
+  mut gen_1_genblk1_genblk1_15_b = 0
+  mut gen_1_genblk1_genblk1_15_gen2_0_genblk1_0_mux:[2]u1 = 0
+  mut _b2i_48 = 0
+  mut gen_1_genblk1_genblk1_15_gen2_0_genblk2_redSum = 0
+  mut gen_2_genblk1_genblk1_0_a = 0
+  mut gen_2_genblk1_genblk1_0_b = 0
+  mut gen_2_genblk1_genblk1_0_gen2_0_genblk1_0_mux:[2]u2 = 0
+  mut _b2i_49 = 0
+  mut gen_2_genblk1_genblk1_0_gen2_0_genblk2_redSum = 0
+  mut gen_2_genblk1_genblk1_0_gen2_0_s:u24 = 0
+  mut gen_2_genblk1_genblk1_1_a = 0
+  mut gen_2_genblk1_genblk1_1_b = 0
+  mut gen_2_genblk1_genblk1_1_gen2_0_genblk1_0_mux:[2]u2 = 0
+  mut _b2i_50 = 0
+  mut gen_2_genblk1_genblk1_1_gen2_0_genblk2_redSum = 0
+  mut gen_2_genblk1_genblk1_2_a = 0
+  mut gen_2_genblk1_genblk1_2_b = 0
+  mut gen_2_genblk1_genblk1_2_gen2_0_genblk1_0_mux:[2]u2 = 0
+  mut _b2i_51 = 0
+  mut gen_2_genblk1_genblk1_2_gen2_0_genblk2_redSum = 0
+  mut gen_2_genblk1_genblk1_3_a = 0
+  mut gen_2_genblk1_genblk1_3_b = 0
+  mut gen_2_genblk1_genblk1_3_gen2_0_genblk1_0_mux:[2]u2 = 0
+  mut _b2i_52 = 0
+  mut gen_2_genblk1_genblk1_3_gen2_0_genblk2_redSum = 0
+  mut gen_2_genblk1_genblk1_4_a = 0
+  mut gen_2_genblk1_genblk1_4_b = 0
+  mut gen_2_genblk1_genblk1_4_gen2_0_genblk1_0_mux:[2]u2 = 0
+  mut _b2i_53 = 0
+  mut gen_2_genblk1_genblk1_4_gen2_0_genblk2_redSum = 0
+  mut gen_2_genblk1_genblk1_5_a = 0
+  mut gen_2_genblk1_genblk1_5_b = 0
+  mut gen_2_genblk1_genblk1_5_gen2_0_genblk1_0_mux:[2]u2 = 0
+  mut _b2i_54 = 0
+  mut gen_2_genblk1_genblk1_5_gen2_0_genblk2_redSum = 0
+  mut gen_2_genblk1_genblk1_6_a = 0
+  mut gen_2_genblk1_genblk1_6_b = 0
+  mut gen_2_genblk1_genblk1_6_gen2_0_genblk1_0_mux:[2]u2 = 0
+  mut _b2i_55 = 0
+  mut gen_2_genblk1_genblk1_6_gen2_0_genblk2_redSum = 0
+  mut gen_2_genblk1_genblk1_7_a = 0
+  mut gen_2_genblk1_genblk1_7_b = 0
+  mut gen_2_genblk1_genblk1_7_gen2_0_genblk1_0_mux:[2]u2 = 0
+  mut _b2i_56 = 0
+  mut gen_2_genblk1_genblk1_7_gen2_0_genblk2_redSum = 0
+  mut gen_3_genblk1_genblk1_0_a = 0
+  mut gen_3_genblk1_genblk1_0_b = 0
+  mut gen_3_genblk1_genblk1_0_gen2_0_genblk1_0_mux:[2]u3 = 0
+  mut _b2i_57 = 0
+  mut gen_3_genblk1_genblk1_0_gen2_0_genblk2_redSum = 0
+  mut gen_3_genblk1_genblk1_0_gen2_0_s:u16 = 0
+  mut gen_3_genblk1_genblk1_1_a = 0
+  mut gen_3_genblk1_genblk1_1_b = 0
+  mut gen_3_genblk1_genblk1_1_gen2_0_genblk1_0_mux:[2]u3 = 0
+  mut _b2i_58 = 0
+  mut gen_3_genblk1_genblk1_1_gen2_0_genblk2_redSum = 0
+  mut gen_3_genblk1_genblk1_2_a = 0
+  mut gen_3_genblk1_genblk1_2_b = 0
+  mut gen_3_genblk1_genblk1_2_gen2_0_genblk1_0_mux:[2]u3 = 0
+  mut _b2i_59 = 0
+  mut gen_3_genblk1_genblk1_2_gen2_0_genblk2_redSum = 0
+  mut gen_3_genblk1_genblk1_3_a = 0
+  mut gen_3_genblk1_genblk1_3_b = 0
+  mut gen_3_genblk1_genblk1_3_gen2_0_genblk1_0_mux:[2]u3 = 0
+  mut _b2i_60 = 0
+  mut gen_3_genblk1_genblk1_3_gen2_0_genblk2_redSum = 0
+  mut gen_4_genblk1_genblk1_0_a = 0
+  mut gen_4_genblk1_genblk1_0_b = 0
+  mut gen_4_genblk1_genblk1_0_gen2_0_genblk1_0_mux:[2]u4 = 0
+  mut _b2i_61 = 0
+  mut gen_4_genblk1_genblk1_0_gen2_0_genblk2_redSum = 0
+  mut gen_4_genblk1_genblk1_0_gen2_0_s:u10 = 0
+  mut gen_4_genblk1_genblk1_1_a = 0
+  mut gen_4_genblk1_genblk1_1_b = 0
+  mut gen_4_genblk1_genblk1_1_gen2_0_genblk1_0_mux:[2]u4 = 0
+  mut _b2i_62 = 0
+  mut gen_4_genblk1_genblk1_1_gen2_0_genblk2_redSum = 0
+  mut gen_5_genblk1_genblk1_0_a = 0
+  mut gen_5_genblk1_genblk1_0_b = 0
+  mut gen_5_genblk1_genblk1_0_gen2_0_genblk1_0_mux:[2]u5 = 0
+  mut _b2i_63 = 0
+  mut gen_5_genblk1_genblk1_0_gen2_0_genblk2_redSum = 0
+  mut gen_5_genblk1_genblk1_0_gen2_0_s:u6 = 0
+  mut packedIdcs = 0
+  mut i = 0
+  mut _b2i_64 = 0
+  mut freePadded__w1 = IN_data | 0
+  freePadded = 0ub????????????????????????????????
+  gen_0_genblk1_i = 0sb?
+  gen_0_genblk1_j = 0sb?
+  gen_0_genblk1_s#[0..=0] = 1
+  if (freePadded__w1 & 1) == 0 {
+    _b2i_1 = 1
+  } else {
+    _b2i_1 = 0
+  }
+  mut gen_0_genblk1_s__w1 = gen_0_genblk1_s
+  gen_0_genblk1_s__w1#[0..=0] = _b2i_1
+  mut gen_0_genblk1_s__w2 = gen_0_genblk1_s__w1
+  gen_0_genblk1_s__w2#[1..=1] = 1
+  if ((freePadded__w1 >> 1) & 1) == 0 {
+    _b2i_2 = 1
+  } else {
+    _b2i_2 = 0
+  }
+  mut gen_0_genblk1_s__w3 = gen_0_genblk1_s__w2
+  gen_0_genblk1_s__w3#[1..=1] = _b2i_2
+  mut gen_0_genblk1_s__w4 = gen_0_genblk1_s__w3
+  gen_0_genblk1_s__w4#[2..=2] = 1
+  if ((freePadded__w1 >> 2) & 1) == 0 {
+    _b2i_3 = 1
+  } else {
+    _b2i_3 = 0
+  }
+  mut gen_0_genblk1_s__w5 = gen_0_genblk1_s__w4
+  gen_0_genblk1_s__w5#[2..=2] = _b2i_3
+  mut gen_0_genblk1_s__w6 = gen_0_genblk1_s__w5
+  gen_0_genblk1_s__w6#[3..=3] = 1
+  if ((freePadded__w1 >> 3) & 1) == 0 {
+    _b2i_4 = 1
+  } else {
+    _b2i_4 = 0
+  }
+  mut gen_0_genblk1_s__w7 = gen_0_genblk1_s__w6
+  gen_0_genblk1_s__w7#[3..=3] = _b2i_4
+  mut gen_0_genblk1_s__w8 = gen_0_genblk1_s__w7
+  gen_0_genblk1_s__w8#[4..=4] = 1
+  if ((freePadded__w1 >> 4) & 1) == 0 {
+    _b2i_5 = 1
+  } else {
+    _b2i_5 = 0
+  }
+  mut gen_0_genblk1_s__w9 = gen_0_genblk1_s__w8
+  gen_0_genblk1_s__w9#[4..=4] = _b2i_5
+  mut gen_0_genblk1_s__w10 = gen_0_genblk1_s__w9
+  gen_0_genblk1_s__w10#[5..=5] = 1
+  if ((freePadded__w1 >> 5) & 1) == 0 {
+    _b2i_6 = 1
+  } else {
+    _b2i_6 = 0
+  }
+  mut gen_0_genblk1_s__w11 = gen_0_genblk1_s__w10
+  gen_0_genblk1_s__w11#[5..=5] = _b2i_6
+  mut gen_0_genblk1_s__w12 = gen_0_genblk1_s__w11
+  gen_0_genblk1_s__w12#[6..=6] = 1
+  if ((freePadded__w1 >> 6) & 1) == 0 {
+    _b2i_7 = 1
+  } else {
+    _b2i_7 = 0
+  }
+  mut gen_0_genblk1_s__w13 = gen_0_genblk1_s__w12
+  gen_0_genblk1_s__w13#[6..=6] = _b2i_7
+  mut gen_0_genblk1_s__w14 = gen_0_genblk1_s__w13
+  gen_0_genblk1_s__w14#[7..=7] = 1
+  if ((freePadded__w1 >> 7) & 1) == 0 {
+    _b2i_8 = 1
+  } else {
+    _b2i_8 = 0
+  }
+  mut gen_0_genblk1_s__w15 = gen_0_genblk1_s__w14
+  gen_0_genblk1_s__w15#[7..=7] = _b2i_8
+  mut gen_0_genblk1_s__w16 = gen_0_genblk1_s__w15
+  gen_0_genblk1_s__w16#[8..=8] = 1
+  if ((freePadded__w1 >> 8) & 1) == 0 {
+    _b2i_9 = 1
+  } else {
+    _b2i_9 = 0
+  }
+  mut gen_0_genblk1_s__w17 = gen_0_genblk1_s__w16
+  gen_0_genblk1_s__w17#[8..=8] = _b2i_9
+  mut gen_0_genblk1_s__w18 = gen_0_genblk1_s__w17
+  gen_0_genblk1_s__w18#[9..=9] = 1
+  if ((freePadded__w1 >> 9) & 1) == 0 {
+    _b2i_10 = 1
+  } else {
+    _b2i_10 = 0
+  }
+  mut gen_0_genblk1_s__w19 = gen_0_genblk1_s__w18
+  gen_0_genblk1_s__w19#[9..=9] = _b2i_10
+  mut gen_0_genblk1_s__w20 = gen_0_genblk1_s__w19
+  gen_0_genblk1_s__w20#[10..=10] = 1
+  if ((freePadded__w1 >> 10) & 1) == 0 {
+    _b2i_11 = 1
+  } else {
+    _b2i_11 = 0
+  }
+  mut gen_0_genblk1_s__w21 = gen_0_genblk1_s__w20
+  gen_0_genblk1_s__w21#[10..=10] = _b2i_11
+  mut gen_0_genblk1_s__w22 = gen_0_genblk1_s__w21
+  gen_0_genblk1_s__w22#[11..=11] = 1
+  if ((freePadded__w1 >> 11) & 1) == 0 {
+    _b2i_12 = 1
+  } else {
+    _b2i_12 = 0
+  }
+  mut gen_0_genblk1_s__w23 = gen_0_genblk1_s__w22
+  gen_0_genblk1_s__w23#[11..=11] = _b2i_12
+  mut gen_0_genblk1_s__w24 = gen_0_genblk1_s__w23
+  gen_0_genblk1_s__w24#[12..=12] = 1
+  if ((freePadded__w1 >> 12) & 1) == 0 {
+    _b2i_13 = 1
+  } else {
+    _b2i_13 = 0
+  }
+  mut gen_0_genblk1_s__w25 = gen_0_genblk1_s__w24
+  gen_0_genblk1_s__w25#[12..=12] = _b2i_13
+  mut gen_0_genblk1_s__w26 = gen_0_genblk1_s__w25
+  gen_0_genblk1_s__w26#[13..=13] = 1
+  if ((freePadded__w1 >> 13) & 1) == 0 {
+    _b2i_14 = 1
+  } else {
+    _b2i_14 = 0
+  }
+  mut gen_0_genblk1_s__w27 = gen_0_genblk1_s__w26
+  gen_0_genblk1_s__w27#[13..=13] = _b2i_14
+  mut gen_0_genblk1_s__w28 = gen_0_genblk1_s__w27
+  gen_0_genblk1_s__w28#[14..=14] = 1
+  if ((freePadded__w1 >> 14) & 1) == 0 {
+    _b2i_15 = 1
+  } else {
+    _b2i_15 = 0
+  }
+  mut gen_0_genblk1_s__w29 = gen_0_genblk1_s__w28
+  gen_0_genblk1_s__w29#[14..=14] = _b2i_15
+  mut gen_0_genblk1_s__w30 = gen_0_genblk1_s__w29
+  gen_0_genblk1_s__w30#[15..=15] = 1
+  if ((freePadded__w1 >> 15) & 1) == 0 {
+    _b2i_16 = 1
+  } else {
+    _b2i_16 = 0
+  }
+  mut gen_0_genblk1_s__w31 = gen_0_genblk1_s__w30
+  gen_0_genblk1_s__w31#[15..=15] = _b2i_16
+  mut gen_0_genblk1_s__w32 = gen_0_genblk1_s__w31
+  gen_0_genblk1_s__w32#[16..=16] = 1
+  if ((freePadded__w1 >> 16) & 1) == 0 {
+    _b2i_17 = 1
+  } else {
+    _b2i_17 = 0
+  }
+  mut gen_0_genblk1_s__w33 = gen_0_genblk1_s__w32
+  gen_0_genblk1_s__w33#[16..=16] = _b2i_17
+  mut gen_0_genblk1_s__w34 = gen_0_genblk1_s__w33
+  gen_0_genblk1_s__w34#[17..=17] = 1
+  if ((freePadded__w1 >> 17) & 1) == 0 {
+    _b2i_18 = 1
+  } else {
+    _b2i_18 = 0
+  }
+  mut gen_0_genblk1_s__w35 = gen_0_genblk1_s__w34
+  gen_0_genblk1_s__w35#[17..=17] = _b2i_18
+  mut gen_0_genblk1_s__w36 = gen_0_genblk1_s__w35
+  gen_0_genblk1_s__w36#[18..=18] = 1
+  if ((freePadded__w1 >> 18) & 1) == 0 {
+    _b2i_19 = 1
+  } else {
+    _b2i_19 = 0
+  }
+  mut gen_0_genblk1_s__w37 = gen_0_genblk1_s__w36
+  gen_0_genblk1_s__w37#[18..=18] = _b2i_19
+  mut gen_0_genblk1_s__w38 = gen_0_genblk1_s__w37
+  gen_0_genblk1_s__w38#[19..=19] = 1
+  if ((freePadded__w1 >> 19) & 1) == 0 {
+    _b2i_20 = 1
+  } else {
+    _b2i_20 = 0
+  }
+  mut gen_0_genblk1_s__w39 = gen_0_genblk1_s__w38
+  gen_0_genblk1_s__w39#[19..=19] = _b2i_20
+  mut gen_0_genblk1_s__w40 = gen_0_genblk1_s__w39
+  gen_0_genblk1_s__w40#[20..=20] = 1
+  if ((freePadded__w1 >> 20) & 1) == 0 {
+    _b2i_21 = 1
+  } else {
+    _b2i_21 = 0
+  }
+  mut gen_0_genblk1_s__w41 = gen_0_genblk1_s__w40
+  gen_0_genblk1_s__w41#[20..=20] = _b2i_21
+  mut gen_0_genblk1_s__w42 = gen_0_genblk1_s__w41
+  gen_0_genblk1_s__w42#[21..=21] = 1
+  if ((freePadded__w1 >> 21) & 1) == 0 {
+    _b2i_22 = 1
+  } else {
+    _b2i_22 = 0
+  }
+  mut gen_0_genblk1_s__w43 = gen_0_genblk1_s__w42
+  gen_0_genblk1_s__w43#[21..=21] = _b2i_22
+  mut gen_0_genblk1_s__w44 = gen_0_genblk1_s__w43
+  gen_0_genblk1_s__w44#[22..=22] = 1
+  if ((freePadded__w1 >> 22) & 1) == 0 {
+    _b2i_23 = 1
+  } else {
+    _b2i_23 = 0
+  }
+  mut gen_0_genblk1_s__w45 = gen_0_genblk1_s__w44
+  gen_0_genblk1_s__w45#[22..=22] = _b2i_23
+  mut gen_0_genblk1_s__w46 = gen_0_genblk1_s__w45
+  gen_0_genblk1_s__w46#[23..=23] = 1
+  if ((freePadded__w1 >> 23) & 1) == 0 {
+    _b2i_24 = 1
+  } else {
+    _b2i_24 = 0
+  }
+  mut gen_0_genblk1_s__w47 = gen_0_genblk1_s__w46
+  gen_0_genblk1_s__w47#[23..=23] = _b2i_24
+  mut gen_0_genblk1_s__w48 = gen_0_genblk1_s__w47
+  gen_0_genblk1_s__w48#[24..=24] = 1
+  if ((freePadded__w1 >> 24) & 1) == 0 {
+    _b2i_25 = 1
+  } else {
+    _b2i_25 = 0
+  }
+  mut gen_0_genblk1_s__w49 = gen_0_genblk1_s__w48
+  gen_0_genblk1_s__w49#[24..=24] = _b2i_25
+  mut gen_0_genblk1_s__w50 = gen_0_genblk1_s__w49
+  gen_0_genblk1_s__w50#[25..=25] = 1
+  if ((freePadded__w1 >> 25) & 1) == 0 {
+    _b2i_26 = 1
+  } else {
+    _b2i_26 = 0
+  }
+  mut gen_0_genblk1_s__w51 = gen_0_genblk1_s__w50
+  gen_0_genblk1_s__w51#[25..=25] = _b2i_26
+  mut gen_0_genblk1_s__w52 = gen_0_genblk1_s__w51
+  gen_0_genblk1_s__w52#[26..=26] = 1
+  if ((freePadded__w1 >> 26) & 1) == 0 {
+    _b2i_27 = 1
+  } else {
+    _b2i_27 = 0
+  }
+  mut gen_0_genblk1_s__w53 = gen_0_genblk1_s__w52
+  gen_0_genblk1_s__w53#[26..=26] = _b2i_27
+  mut gen_0_genblk1_s__w54 = gen_0_genblk1_s__w53
+  gen_0_genblk1_s__w54#[27..=27] = 1
+  if ((freePadded__w1 >> 27) & 1) == 0 {
+    _b2i_28 = 1
+  } else {
+    _b2i_28 = 0
+  }
+  mut gen_0_genblk1_s__w55 = gen_0_genblk1_s__w54
+  gen_0_genblk1_s__w55#[27..=27] = _b2i_28
+  mut gen_0_genblk1_s__w56 = gen_0_genblk1_s__w55
+  gen_0_genblk1_s__w56#[28..=28] = 1
+  if ((freePadded__w1 >> 28) & 1) == 0 {
+    _b2i_29 = 1
+  } else {
+    _b2i_29 = 0
+  }
+  mut gen_0_genblk1_s__w57 = gen_0_genblk1_s__w56
+  gen_0_genblk1_s__w57#[28..=28] = _b2i_29
+  mut gen_0_genblk1_s__w58 = gen_0_genblk1_s__w57
+  gen_0_genblk1_s__w58#[29..=29] = 1
+  if ((freePadded__w1 >> 29) & 1) == 0 {
+    _b2i_30 = 1
+  } else {
+    _b2i_30 = 0
+  }
+  mut gen_0_genblk1_s__w59 = gen_0_genblk1_s__w58
+  gen_0_genblk1_s__w59#[29..=29] = _b2i_30
+  mut gen_0_genblk1_s__w60 = gen_0_genblk1_s__w59
+  gen_0_genblk1_s__w60#[30..=30] = 1
+  if ((freePadded__w1 >> 30) & 1) == 0 {
+    _b2i_31 = 1
+  } else {
+    _b2i_31 = 0
+  }
+  mut gen_0_genblk1_s__w61 = gen_0_genblk1_s__w60
+  gen_0_genblk1_s__w61#[30..=30] = _b2i_31
+  mut gen_0_genblk1_s__w62 = gen_0_genblk1_s__w61
+  gen_0_genblk1_s__w62#[31..=31] = 1
+  if ((freePadded__w1 >> 31) & 1) == 0 {
+    _b2i_32 = 1
+  } else {
+    _b2i_32 = 0
+  }
+  mut gen_0_genblk1_s__w63 = gen_0_genblk1_s__w62
+  gen_0_genblk1_s__w63#[31..=31] = _b2i_32
+  mut gen_1_genblk1_genblk1_0_b__w1 = (gen_0_genblk1_s__w63 >> 1) & 1
+  gen_1_genblk1_genblk1_0_a = 0ub?
+  mut gen_1_genblk1_genblk1_0_a__w1 = gen_0_genblk1_s__w63 & 1
+  gen_1_genblk1_genblk1_0_b = 0ub?
+  gen_1_genblk1_genblk1_0_gen2_0_genblk1_0_mux[0] = gen_1_genblk1_genblk1_0_b__w1 & 1
+  gen_1_genblk1_genblk1_0_gen2_0_genblk1_0_mux[1] = gen_1_genblk1_genblk1_0_a__w1 & 1
+  if ((gen_1_genblk1_genblk1_0_a__w1 & 1) & 1) == 0 {
+    _b2i_33 = 1
+  } else {
+    _b2i_33 = 0
+  }
+  gen_1_genblk1_genblk1_0_gen2_0_genblk2_redSum = 0ub?
+  mut gen_1_genblk1_genblk1_0_gen2_0_genblk2_redSum__w1 = _b2i_33
+  mut gen_1_genblk1_genblk1_1_b__w1 = (gen_0_genblk1_s__w63 >> 3) & 1
+  gen_1_genblk1_genblk1_0_gen2_0_s#[0..=1] = (gen_1_genblk1_genblk1_0_gen2_0_genblk1_0_mux[gen_1_genblk1_genblk1_0_gen2_0_genblk2_redSum__w1] | (((gen_1_genblk1_genblk1_0_a__w1 & 1) & 1) << 1))
+  gen_1_genblk1_genblk1_1_a = 0ub?
+  mut gen_1_genblk1_genblk1_1_a__w1 = (gen_0_genblk1_s__w63 >> 2) & 1
+  gen_1_genblk1_genblk1_1_b = 0ub?
+  gen_1_genblk1_genblk1_1_gen2_0_genblk1_0_mux[0] = gen_1_genblk1_genblk1_1_b__w1 & 1
+  gen_1_genblk1_genblk1_1_gen2_0_genblk1_0_mux[1] = gen_1_genblk1_genblk1_1_a__w1 & 1
+  if ((gen_1_genblk1_genblk1_1_a__w1 & 1) & 1) == 0 {
+    _b2i_34 = 1
+  } else {
+    _b2i_34 = 0
+  }
+  gen_1_genblk1_genblk1_1_gen2_0_genblk2_redSum = 0ub?
+  mut gen_1_genblk1_genblk1_1_gen2_0_genblk2_redSum__w1 = _b2i_34
+  mut gen_1_genblk1_genblk1_2_b__w1 = (gen_0_genblk1_s__w63 >> 5) & 1
+  mut gen_1_genblk1_genblk1_0_gen2_0_s__w1 = gen_1_genblk1_genblk1_0_gen2_0_s
+  gen_1_genblk1_genblk1_0_gen2_0_s__w1#[2..=3] = (gen_1_genblk1_genblk1_1_gen2_0_genblk1_0_mux[gen_1_genblk1_genblk1_1_gen2_0_genblk2_redSum__w1] | (((gen_1_genblk1_genblk1_1_a__w1 & 1) & 1) << 1))
+  gen_1_genblk1_genblk1_2_a = 0ub?
+  mut gen_1_genblk1_genblk1_2_a__w1 = (gen_0_genblk1_s__w63 >> 4) & 1
+  gen_1_genblk1_genblk1_2_b = 0ub?
+  gen_1_genblk1_genblk1_2_gen2_0_genblk1_0_mux[0] = gen_1_genblk1_genblk1_2_b__w1 & 1
+  gen_1_genblk1_genblk1_2_gen2_0_genblk1_0_mux[1] = gen_1_genblk1_genblk1_2_a__w1 & 1
+  if ((gen_1_genblk1_genblk1_2_a__w1 & 1) & 1) == 0 {
+    _b2i_35 = 1
+  } else {
+    _b2i_35 = 0
+  }
+  gen_1_genblk1_genblk1_2_gen2_0_genblk2_redSum = 0ub?
+  mut gen_1_genblk1_genblk1_2_gen2_0_genblk2_redSum__w1 = _b2i_35
+  mut gen_1_genblk1_genblk1_3_b__w1 = (gen_0_genblk1_s__w63 >> 7) & 1
+  mut gen_1_genblk1_genblk1_0_gen2_0_s__w2 = gen_1_genblk1_genblk1_0_gen2_0_s__w1
+  gen_1_genblk1_genblk1_0_gen2_0_s__w2#[4..=5] = (gen_1_genblk1_genblk1_2_gen2_0_genblk1_0_mux[gen_1_genblk1_genblk1_2_gen2_0_genblk2_redSum__w1] | (((gen_1_genblk1_genblk1_2_a__w1 & 1) & 1) << 1))
+  gen_1_genblk1_genblk1_3_a = 0ub?
+  mut gen_1_genblk1_genblk1_3_a__w1 = (gen_0_genblk1_s__w63 >> 6) & 1
+  gen_1_genblk1_genblk1_3_b = 0ub?
+  gen_1_genblk1_genblk1_3_gen2_0_genblk1_0_mux[0] = gen_1_genblk1_genblk1_3_b__w1 & 1
+  gen_1_genblk1_genblk1_3_gen2_0_genblk1_0_mux[1] = gen_1_genblk1_genblk1_3_a__w1 & 1
+  if ((gen_1_genblk1_genblk1_3_a__w1 & 1) & 1) == 0 {
+    _b2i_36 = 1
+  } else {
+    _b2i_36 = 0
+  }
+  gen_1_genblk1_genblk1_3_gen2_0_genblk2_redSum = 0ub?
+  mut gen_1_genblk1_genblk1_3_gen2_0_genblk2_redSum__w1 = _b2i_36
+  mut gen_1_genblk1_genblk1_4_b__w1 = (gen_0_genblk1_s__w63 >> 9) & 1
+  mut gen_1_genblk1_genblk1_0_gen2_0_s__w3 = gen_1_genblk1_genblk1_0_gen2_0_s__w2
+  gen_1_genblk1_genblk1_0_gen2_0_s__w3#[6..=7] = (gen_1_genblk1_genblk1_3_gen2_0_genblk1_0_mux[gen_1_genblk1_genblk1_3_gen2_0_genblk2_redSum__w1] | (((gen_1_genblk1_genblk1_3_a__w1 & 1) & 1) << 1))
+  gen_1_genblk1_genblk1_4_a = 0ub?
+  mut gen_1_genblk1_genblk1_4_a__w1 = (gen_0_genblk1_s__w63 >> 8) & 1
+  gen_1_genblk1_genblk1_4_b = 0ub?
+  gen_1_genblk1_genblk1_4_gen2_0_genblk1_0_mux[0] = gen_1_genblk1_genblk1_4_b__w1 & 1
+  gen_1_genblk1_genblk1_4_gen2_0_genblk1_0_mux[1] = gen_1_genblk1_genblk1_4_a__w1 & 1
+  if ((gen_1_genblk1_genblk1_4_a__w1 & 1) & 1) == 0 {
+    _b2i_37 = 1
+  } else {
+    _b2i_37 = 0
+  }
+  gen_1_genblk1_genblk1_4_gen2_0_genblk2_redSum = 0ub?
+  mut gen_1_genblk1_genblk1_4_gen2_0_genblk2_redSum__w1 = _b2i_37
+  mut gen_1_genblk1_genblk1_5_b__w1 = (gen_0_genblk1_s__w63 >> 11) & 1
+  mut gen_1_genblk1_genblk1_0_gen2_0_s__w4 = gen_1_genblk1_genblk1_0_gen2_0_s__w3
+  gen_1_genblk1_genblk1_0_gen2_0_s__w4#[8..=9] = (gen_1_genblk1_genblk1_4_gen2_0_genblk1_0_mux[gen_1_genblk1_genblk1_4_gen2_0_genblk2_redSum__w1] | (((gen_1_genblk1_genblk1_4_a__w1 & 1) & 1) << 1))
+  gen_1_genblk1_genblk1_5_a = 0ub?
+  mut gen_1_genblk1_genblk1_5_a__w1 = (gen_0_genblk1_s__w63 >> 10) & 1
+  gen_1_genblk1_genblk1_5_b = 0ub?
+  gen_1_genblk1_genblk1_5_gen2_0_genblk1_0_mux[0] = gen_1_genblk1_genblk1_5_b__w1 & 1
+  gen_1_genblk1_genblk1_5_gen2_0_genblk1_0_mux[1] = gen_1_genblk1_genblk1_5_a__w1 & 1
+  if ((gen_1_genblk1_genblk1_5_a__w1 & 1) & 1) == 0 {
+    _b2i_38 = 1
+  } else {
+    _b2i_38 = 0
+  }
+  gen_1_genblk1_genblk1_5_gen2_0_genblk2_redSum = 0ub?
+  mut gen_1_genblk1_genblk1_5_gen2_0_genblk2_redSum__w1 = _b2i_38
+  mut gen_1_genblk1_genblk1_6_b__w1 = (gen_0_genblk1_s__w63 >> 13) & 1
+  mut gen_1_genblk1_genblk1_0_gen2_0_s__w5 = gen_1_genblk1_genblk1_0_gen2_0_s__w4
+  gen_1_genblk1_genblk1_0_gen2_0_s__w5#[10..=11] = (gen_1_genblk1_genblk1_5_gen2_0_genblk1_0_mux[gen_1_genblk1_genblk1_5_gen2_0_genblk2_redSum__w1] | (((gen_1_genblk1_genblk1_5_a__w1 & 1) & 1) << 1))
+  gen_1_genblk1_genblk1_6_a = 0ub?
+  mut gen_1_genblk1_genblk1_6_a__w1 = (gen_0_genblk1_s__w63 >> 12) & 1
+  gen_1_genblk1_genblk1_6_b = 0ub?
+  gen_1_genblk1_genblk1_6_gen2_0_genblk1_0_mux[0] = gen_1_genblk1_genblk1_6_b__w1 & 1
+  gen_1_genblk1_genblk1_6_gen2_0_genblk1_0_mux[1] = gen_1_genblk1_genblk1_6_a__w1 & 1
+  if ((gen_1_genblk1_genblk1_6_a__w1 & 1) & 1) == 0 {
+    _b2i_39 = 1
+  } else {
+    _b2i_39 = 0
+  }
+  gen_1_genblk1_genblk1_6_gen2_0_genblk2_redSum = 0ub?
+  mut gen_1_genblk1_genblk1_6_gen2_0_genblk2_redSum__w1 = _b2i_39
+  mut gen_1_genblk1_genblk1_7_b__w1 = (gen_0_genblk1_s__w63 >> 15) & 1
+  mut gen_1_genblk1_genblk1_0_gen2_0_s__w6 = gen_1_genblk1_genblk1_0_gen2_0_s__w5
+  gen_1_genblk1_genblk1_0_gen2_0_s__w6#[12..=13] = (gen_1_genblk1_genblk1_6_gen2_0_genblk1_0_mux[gen_1_genblk1_genblk1_6_gen2_0_genblk2_redSum__w1] | (((gen_1_genblk1_genblk1_6_a__w1 & 1) & 1) << 1))
+  gen_1_genblk1_genblk1_7_a = 0ub?
+  mut gen_1_genblk1_genblk1_7_a__w1 = (gen_0_genblk1_s__w63 >> 14) & 1
+  gen_1_genblk1_genblk1_7_b = 0ub?
+  gen_1_genblk1_genblk1_7_gen2_0_genblk1_0_mux[0] = gen_1_genblk1_genblk1_7_b__w1 & 1
+  gen_1_genblk1_genblk1_7_gen2_0_genblk1_0_mux[1] = gen_1_genblk1_genblk1_7_a__w1 & 1
+  if ((gen_1_genblk1_genblk1_7_a__w1 & 1) & 1) == 0 {
+    _b2i_40 = 1
+  } else {
+    _b2i_40 = 0
+  }
+  gen_1_genblk1_genblk1_7_gen2_0_genblk2_redSum = 0ub?
+  mut gen_1_genblk1_genblk1_7_gen2_0_genblk2_redSum__w1 = _b2i_40
+  mut gen_1_genblk1_genblk1_8_b__w1 = (gen_0_genblk1_s__w63 >> 17) & 1
+  mut gen_1_genblk1_genblk1_0_gen2_0_s__w7 = gen_1_genblk1_genblk1_0_gen2_0_s__w6
+  gen_1_genblk1_genblk1_0_gen2_0_s__w7#[14..=15] = (gen_1_genblk1_genblk1_7_gen2_0_genblk1_0_mux[gen_1_genblk1_genblk1_7_gen2_0_genblk2_redSum__w1] | (((gen_1_genblk1_genblk1_7_a__w1 & 1) & 1) << 1))
+  gen_1_genblk1_genblk1_8_a = 0ub?
+  mut gen_1_genblk1_genblk1_8_a__w1 = (gen_0_genblk1_s__w63 >> 16) & 1
+  gen_1_genblk1_genblk1_8_b = 0ub?
+  gen_1_genblk1_genblk1_8_gen2_0_genblk1_0_mux[0] = gen_1_genblk1_genblk1_8_b__w1 & 1
+  gen_1_genblk1_genblk1_8_gen2_0_genblk1_0_mux[1] = gen_1_genblk1_genblk1_8_a__w1 & 1
+  if ((gen_1_genblk1_genblk1_8_a__w1 & 1) & 1) == 0 {
+    _b2i_41 = 1
+  } else {
+    _b2i_41 = 0
+  }
+  gen_1_genblk1_genblk1_8_gen2_0_genblk2_redSum = 0ub?
+  mut gen_1_genblk1_genblk1_8_gen2_0_genblk2_redSum__w1 = _b2i_41
+  mut gen_1_genblk1_genblk1_9_b__w1 = (gen_0_genblk1_s__w63 >> 19) & 1
+  mut gen_1_genblk1_genblk1_0_gen2_0_s__w8 = gen_1_genblk1_genblk1_0_gen2_0_s__w7
+  gen_1_genblk1_genblk1_0_gen2_0_s__w8#[16..=17] = (gen_1_genblk1_genblk1_8_gen2_0_genblk1_0_mux[gen_1_genblk1_genblk1_8_gen2_0_genblk2_redSum__w1] | (((gen_1_genblk1_genblk1_8_a__w1 & 1) & 1) << 1))
+  gen_1_genblk1_genblk1_9_a = 0ub?
+  mut gen_1_genblk1_genblk1_9_a__w1 = (gen_0_genblk1_s__w63 >> 18) & 1
+  gen_1_genblk1_genblk1_9_b = 0ub?
+  gen_1_genblk1_genblk1_9_gen2_0_genblk1_0_mux[0] = gen_1_genblk1_genblk1_9_b__w1 & 1
+  gen_1_genblk1_genblk1_9_gen2_0_genblk1_0_mux[1] = gen_1_genblk1_genblk1_9_a__w1 & 1
+  if ((gen_1_genblk1_genblk1_9_a__w1 & 1) & 1) == 0 {
+    _b2i_42 = 1
+  } else {
+    _b2i_42 = 0
+  }
+  gen_1_genblk1_genblk1_9_gen2_0_genblk2_redSum = 0ub?
+  mut gen_1_genblk1_genblk1_9_gen2_0_genblk2_redSum__w1 = _b2i_42
+  mut gen_1_genblk1_genblk1_10_b__w1 = (gen_0_genblk1_s__w63 >> 21) & 1
+  mut gen_1_genblk1_genblk1_0_gen2_0_s__w9 = gen_1_genblk1_genblk1_0_gen2_0_s__w8
+  gen_1_genblk1_genblk1_0_gen2_0_s__w9#[18..=19] = (gen_1_genblk1_genblk1_9_gen2_0_genblk1_0_mux[gen_1_genblk1_genblk1_9_gen2_0_genblk2_redSum__w1] | (((gen_1_genblk1_genblk1_9_a__w1 & 1) & 1) << 1))
+  gen_1_genblk1_genblk1_10_a = 0ub?
+  mut gen_1_genblk1_genblk1_10_a__w1 = (gen_0_genblk1_s__w63 >> 20) & 1
+  gen_1_genblk1_genblk1_10_b = 0ub?
+  gen_1_genblk1_genblk1_10_gen2_0_genblk1_0_mux[0] = gen_1_genblk1_genblk1_10_b__w1 & 1
+  gen_1_genblk1_genblk1_10_gen2_0_genblk1_0_mux[1] = gen_1_genblk1_genblk1_10_a__w1 & 1
+  if ((gen_1_genblk1_genblk1_10_a__w1 & 1) & 1) == 0 {
+    _b2i_43 = 1
+  } else {
+    _b2i_43 = 0
+  }
+  gen_1_genblk1_genblk1_10_gen2_0_genblk2_redSum = 0ub?
+  mut gen_1_genblk1_genblk1_10_gen2_0_genblk2_redSum__w1 = _b2i_43
+  mut gen_1_genblk1_genblk1_11_b__w1 = (gen_0_genblk1_s__w63 >> 23) & 1
+  mut gen_1_genblk1_genblk1_0_gen2_0_s__w10 = gen_1_genblk1_genblk1_0_gen2_0_s__w9
+  gen_1_genblk1_genblk1_0_gen2_0_s__w10#[20..=21] = (gen_1_genblk1_genblk1_10_gen2_0_genblk1_0_mux[gen_1_genblk1_genblk1_10_gen2_0_genblk2_redSum__w1] | (((gen_1_genblk1_genblk1_10_a__w1 & 1) & 1) << 1))
+  gen_1_genblk1_genblk1_11_a = 0ub?
+  mut gen_1_genblk1_genblk1_11_a__w1 = (gen_0_genblk1_s__w63 >> 22) & 1
+  gen_1_genblk1_genblk1_11_b = 0ub?
+  gen_1_genblk1_genblk1_11_gen2_0_genblk1_0_mux[0] = gen_1_genblk1_genblk1_11_b__w1 & 1
+  gen_1_genblk1_genblk1_11_gen2_0_genblk1_0_mux[1] = gen_1_genblk1_genblk1_11_a__w1 & 1
+  if ((gen_1_genblk1_genblk1_11_a__w1 & 1) & 1) == 0 {
+    _b2i_44 = 1
+  } else {
+    _b2i_44 = 0
+  }
+  gen_1_genblk1_genblk1_11_gen2_0_genblk2_redSum = 0ub?
+  mut gen_1_genblk1_genblk1_11_gen2_0_genblk2_redSum__w1 = _b2i_44
+  mut gen_1_genblk1_genblk1_12_b__w1 = (gen_0_genblk1_s__w63 >> 25) & 1
+  mut gen_1_genblk1_genblk1_0_gen2_0_s__w11 = gen_1_genblk1_genblk1_0_gen2_0_s__w10
+  gen_1_genblk1_genblk1_0_gen2_0_s__w11#[22..=23] = (gen_1_genblk1_genblk1_11_gen2_0_genblk1_0_mux[gen_1_genblk1_genblk1_11_gen2_0_genblk2_redSum__w1] | (((gen_1_genblk1_genblk1_11_a__w1 & 1) & 1) << 1))
+  gen_1_genblk1_genblk1_12_a = 0ub?
+  mut gen_1_genblk1_genblk1_12_a__w1 = (gen_0_genblk1_s__w63 >> 24) & 1
+  gen_1_genblk1_genblk1_12_b = 0ub?
+  gen_1_genblk1_genblk1_12_gen2_0_genblk1_0_mux[0] = gen_1_genblk1_genblk1_12_b__w1 & 1
+  gen_1_genblk1_genblk1_12_gen2_0_genblk1_0_mux[1] = gen_1_genblk1_genblk1_12_a__w1 & 1
+  if ((gen_1_genblk1_genblk1_12_a__w1 & 1) & 1) == 0 {
+    _b2i_45 = 1
+  } else {
+    _b2i_45 = 0
+  }
+  gen_1_genblk1_genblk1_12_gen2_0_genblk2_redSum = 0ub?
+  mut gen_1_genblk1_genblk1_12_gen2_0_genblk2_redSum__w1 = _b2i_45
+  mut gen_1_genblk1_genblk1_13_b__w1 = (gen_0_genblk1_s__w63 >> 27) & 1
+  mut gen_1_genblk1_genblk1_0_gen2_0_s__w12 = gen_1_genblk1_genblk1_0_gen2_0_s__w11
+  gen_1_genblk1_genblk1_0_gen2_0_s__w12#[24..=25] = (gen_1_genblk1_genblk1_12_gen2_0_genblk1_0_mux[gen_1_genblk1_genblk1_12_gen2_0_genblk2_redSum__w1] | (((gen_1_genblk1_genblk1_12_a__w1 & 1) & 1) << 1))
+  gen_1_genblk1_genblk1_13_a = 0ub?
+  mut gen_1_genblk1_genblk1_13_a__w1 = (gen_0_genblk1_s__w63 >> 26) & 1
+  gen_1_genblk1_genblk1_13_b = 0ub?
+  gen_1_genblk1_genblk1_13_gen2_0_genblk1_0_mux[0] = gen_1_genblk1_genblk1_13_b__w1 & 1
+  gen_1_genblk1_genblk1_13_gen2_0_genblk1_0_mux[1] = gen_1_genblk1_genblk1_13_a__w1 & 1
+  if ((gen_1_genblk1_genblk1_13_a__w1 & 1) & 1) == 0 {
+    _b2i_46 = 1
+  } else {
+    _b2i_46 = 0
+  }
+  gen_1_genblk1_genblk1_13_gen2_0_genblk2_redSum = 0ub?
+  mut gen_1_genblk1_genblk1_13_gen2_0_genblk2_redSum__w1 = _b2i_46
+  mut gen_1_genblk1_genblk1_14_b__w1 = (gen_0_genblk1_s__w63 >> 29) & 1
+  mut gen_1_genblk1_genblk1_0_gen2_0_s__w13 = gen_1_genblk1_genblk1_0_gen2_0_s__w12
+  gen_1_genblk1_genblk1_0_gen2_0_s__w13#[26..=27] = (gen_1_genblk1_genblk1_13_gen2_0_genblk1_0_mux[gen_1_genblk1_genblk1_13_gen2_0_genblk2_redSum__w1] | (((gen_1_genblk1_genblk1_13_a__w1 & 1) & 1) << 1))
+  gen_1_genblk1_genblk1_14_a = 0ub?
+  mut gen_1_genblk1_genblk1_14_a__w1 = (gen_0_genblk1_s__w63 >> 28) & 1
+  gen_1_genblk1_genblk1_14_b = 0ub?
+  gen_1_genblk1_genblk1_14_gen2_0_genblk1_0_mux[0] = gen_1_genblk1_genblk1_14_b__w1 & 1
+  gen_1_genblk1_genblk1_14_gen2_0_genblk1_0_mux[1] = gen_1_genblk1_genblk1_14_a__w1 & 1
+  if ((gen_1_genblk1_genblk1_14_a__w1 & 1) & 1) == 0 {
+    _b2i_47 = 1
+  } else {
+    _b2i_47 = 0
+  }
+  gen_1_genblk1_genblk1_14_gen2_0_genblk2_redSum = 0ub?
+  mut gen_1_genblk1_genblk1_14_gen2_0_genblk2_redSum__w1 = _b2i_47
+  mut gen_1_genblk1_genblk1_15_b__w1 = (gen_0_genblk1_s__w63 >> 31) & 1
+  mut gen_1_genblk1_genblk1_0_gen2_0_s__w14 = gen_1_genblk1_genblk1_0_gen2_0_s__w13
+  gen_1_genblk1_genblk1_0_gen2_0_s__w14#[28..=29] = (gen_1_genblk1_genblk1_14_gen2_0_genblk1_0_mux[gen_1_genblk1_genblk1_14_gen2_0_genblk2_redSum__w1] | (((gen_1_genblk1_genblk1_14_a__w1 & 1) & 1) << 1))
+  gen_1_genblk1_genblk1_15_a = 0ub?
+  mut gen_1_genblk1_genblk1_15_a__w1 = (gen_0_genblk1_s__w63 >> 30) & 1
+  gen_1_genblk1_genblk1_15_b = 0ub?
+  gen_1_genblk1_genblk1_15_gen2_0_genblk1_0_mux[0] = gen_1_genblk1_genblk1_15_b__w1 & 1
+  gen_1_genblk1_genblk1_15_gen2_0_genblk1_0_mux[1] = gen_1_genblk1_genblk1_15_a__w1 & 1
+  if ((gen_1_genblk1_genblk1_15_a__w1 & 1) & 1) == 0 {
+    _b2i_48 = 1
+  } else {
+    _b2i_48 = 0
+  }
+  gen_1_genblk1_genblk1_15_gen2_0_genblk2_redSum = 0ub?
+  mut gen_1_genblk1_genblk1_15_gen2_0_genblk2_redSum__w1 = _b2i_48
+  mut gen_1_genblk1_genblk1_0_gen2_0_s__w15 = gen_1_genblk1_genblk1_0_gen2_0_s__w14
+  gen_1_genblk1_genblk1_0_gen2_0_s__w15#[30..=31] = (gen_1_genblk1_genblk1_15_gen2_0_genblk1_0_mux[gen_1_genblk1_genblk1_15_gen2_0_genblk2_redSum__w1] | (((gen_1_genblk1_genblk1_15_a__w1 & 1) & 1) << 1))
+  mut gen_2_genblk1_genblk1_0_b__w1 = gen_1_genblk1_genblk1_0_gen2_0_s__w15#[2..=3]
+  gen_2_genblk1_genblk1_0_a = 0ub??
+  mut gen_2_genblk1_genblk1_0_a__w1 = gen_1_genblk1_genblk1_0_gen2_0_s__w15#[0..=1]
+  gen_2_genblk1_genblk1_0_b = 0ub??
+  gen_2_genblk1_genblk1_0_gen2_0_genblk1_0_mux[0] = gen_2_genblk1_genblk1_0_b__w1#[0..=1]
+  gen_2_genblk1_genblk1_0_gen2_0_genblk1_0_mux[1] = gen_2_genblk1_genblk1_0_a__w1#[0..=1]
+  if (gen_2_genblk1_genblk1_0_a__w1#[0..=1] & 1) == 0 {
+    _b2i_49 = 1
+  } else {
+    _b2i_49 = 0
+  }
+  gen_2_genblk1_genblk1_0_gen2_0_genblk2_redSum = 0ub?
+  mut gen_2_genblk1_genblk1_0_gen2_0_genblk2_redSum__w1 = _b2i_49
+  mut gen_2_genblk1_genblk1_1_b__w1 = gen_1_genblk1_genblk1_0_gen2_0_s__w15#[6..=7]
+  gen_2_genblk1_genblk1_0_gen2_0_s#[0..=2] = (gen_2_genblk1_genblk1_0_gen2_0_genblk1_0_mux[gen_2_genblk1_genblk1_0_gen2_0_genblk2_redSum__w1] | ((gen_2_genblk1_genblk1_0_a__w1#[0..=1] & 1) << 2))
+  gen_2_genblk1_genblk1_1_a = 0ub??
+  mut gen_2_genblk1_genblk1_1_a__w1 = gen_1_genblk1_genblk1_0_gen2_0_s__w15#[4..=5]
+  gen_2_genblk1_genblk1_1_b = 0ub??
+  gen_2_genblk1_genblk1_1_gen2_0_genblk1_0_mux[0] = gen_2_genblk1_genblk1_1_b__w1#[0..=1]
+  gen_2_genblk1_genblk1_1_gen2_0_genblk1_0_mux[1] = gen_2_genblk1_genblk1_1_a__w1#[0..=1]
+  if (gen_2_genblk1_genblk1_1_a__w1#[0..=1] & 1) == 0 {
+    _b2i_50 = 1
+  } else {
+    _b2i_50 = 0
+  }
+  gen_2_genblk1_genblk1_1_gen2_0_genblk2_redSum = 0ub?
+  mut gen_2_genblk1_genblk1_1_gen2_0_genblk2_redSum__w1 = _b2i_50
+  mut gen_2_genblk1_genblk1_2_b__w1 = gen_1_genblk1_genblk1_0_gen2_0_s__w15#[10..=11]
+  mut gen_2_genblk1_genblk1_0_gen2_0_s__w1 = gen_2_genblk1_genblk1_0_gen2_0_s
+  gen_2_genblk1_genblk1_0_gen2_0_s__w1#[3..=5] = (gen_2_genblk1_genblk1_1_gen2_0_genblk1_0_mux[gen_2_genblk1_genblk1_1_gen2_0_genblk2_redSum__w1] | ((gen_2_genblk1_genblk1_1_a__w1#[0..=1] & 1) << 2))
+  gen_2_genblk1_genblk1_2_a = 0ub??
+  mut gen_2_genblk1_genblk1_2_a__w1 = gen_1_genblk1_genblk1_0_gen2_0_s__w15#[8..=9]
+  gen_2_genblk1_genblk1_2_b = 0ub??
+  gen_2_genblk1_genblk1_2_gen2_0_genblk1_0_mux[0] = gen_2_genblk1_genblk1_2_b__w1#[0..=1]
+  gen_2_genblk1_genblk1_2_gen2_0_genblk1_0_mux[1] = gen_2_genblk1_genblk1_2_a__w1#[0..=1]
+  if (gen_2_genblk1_genblk1_2_a__w1#[0..=1] & 1) == 0 {
+    _b2i_51 = 1
+  } else {
+    _b2i_51 = 0
+  }
+  gen_2_genblk1_genblk1_2_gen2_0_genblk2_redSum = 0ub?
+  mut gen_2_genblk1_genblk1_2_gen2_0_genblk2_redSum__w1 = _b2i_51
+  mut gen_2_genblk1_genblk1_3_b__w1 = gen_1_genblk1_genblk1_0_gen2_0_s__w15#[14..=15]
+  mut gen_2_genblk1_genblk1_0_gen2_0_s__w2 = gen_2_genblk1_genblk1_0_gen2_0_s__w1
+  gen_2_genblk1_genblk1_0_gen2_0_s__w2#[6..=8] = (gen_2_genblk1_genblk1_2_gen2_0_genblk1_0_mux[gen_2_genblk1_genblk1_2_gen2_0_genblk2_redSum__w1] | ((gen_2_genblk1_genblk1_2_a__w1#[0..=1] & 1) << 2))
+  gen_2_genblk1_genblk1_3_a = 0ub??
+  mut gen_2_genblk1_genblk1_3_a__w1 = gen_1_genblk1_genblk1_0_gen2_0_s__w15#[12..=13]
+  gen_2_genblk1_genblk1_3_b = 0ub??
+  gen_2_genblk1_genblk1_3_gen2_0_genblk1_0_mux[0] = gen_2_genblk1_genblk1_3_b__w1#[0..=1]
+  gen_2_genblk1_genblk1_3_gen2_0_genblk1_0_mux[1] = gen_2_genblk1_genblk1_3_a__w1#[0..=1]
+  if (gen_2_genblk1_genblk1_3_a__w1#[0..=1] & 1) == 0 {
+    _b2i_52 = 1
+  } else {
+    _b2i_52 = 0
+  }
+  gen_2_genblk1_genblk1_3_gen2_0_genblk2_redSum = 0ub?
+  mut gen_2_genblk1_genblk1_3_gen2_0_genblk2_redSum__w1 = _b2i_52
+  mut gen_2_genblk1_genblk1_4_b__w1 = gen_1_genblk1_genblk1_0_gen2_0_s__w15#[18..=19]
+  mut gen_2_genblk1_genblk1_0_gen2_0_s__w3 = gen_2_genblk1_genblk1_0_gen2_0_s__w2
+  gen_2_genblk1_genblk1_0_gen2_0_s__w3#[9..=11] = (gen_2_genblk1_genblk1_3_gen2_0_genblk1_0_mux[gen_2_genblk1_genblk1_3_gen2_0_genblk2_redSum__w1] | ((gen_2_genblk1_genblk1_3_a__w1#[0..=1] & 1) << 2))
+  gen_2_genblk1_genblk1_4_a = 0ub??
+  mut gen_2_genblk1_genblk1_4_a__w1 = gen_1_genblk1_genblk1_0_gen2_0_s__w15#[16..=17]
+  gen_2_genblk1_genblk1_4_b = 0ub??
+  gen_2_genblk1_genblk1_4_gen2_0_genblk1_0_mux[0] = gen_2_genblk1_genblk1_4_b__w1#[0..=1]
+  gen_2_genblk1_genblk1_4_gen2_0_genblk1_0_mux[1] = gen_2_genblk1_genblk1_4_a__w1#[0..=1]
+  if (gen_2_genblk1_genblk1_4_a__w1#[0..=1] & 1) == 0 {
+    _b2i_53 = 1
+  } else {
+    _b2i_53 = 0
+  }
+  gen_2_genblk1_genblk1_4_gen2_0_genblk2_redSum = 0ub?
+  mut gen_2_genblk1_genblk1_4_gen2_0_genblk2_redSum__w1 = _b2i_53
+  mut gen_2_genblk1_genblk1_5_b__w1 = gen_1_genblk1_genblk1_0_gen2_0_s__w15#[22..=23]
+  mut gen_2_genblk1_genblk1_0_gen2_0_s__w4 = gen_2_genblk1_genblk1_0_gen2_0_s__w3
+  gen_2_genblk1_genblk1_0_gen2_0_s__w4#[12..=14] = (gen_2_genblk1_genblk1_4_gen2_0_genblk1_0_mux[gen_2_genblk1_genblk1_4_gen2_0_genblk2_redSum__w1] | ((gen_2_genblk1_genblk1_4_a__w1#[0..=1] & 1) << 2))
+  gen_2_genblk1_genblk1_5_a = 0ub??
+  mut gen_2_genblk1_genblk1_5_a__w1 = gen_1_genblk1_genblk1_0_gen2_0_s__w15#[20..=21]
+  gen_2_genblk1_genblk1_5_b = 0ub??
+  gen_2_genblk1_genblk1_5_gen2_0_genblk1_0_mux[0] = gen_2_genblk1_genblk1_5_b__w1#[0..=1]
+  gen_2_genblk1_genblk1_5_gen2_0_genblk1_0_mux[1] = gen_2_genblk1_genblk1_5_a__w1#[0..=1]
+  if (gen_2_genblk1_genblk1_5_a__w1#[0..=1] & 1) == 0 {
+    _b2i_54 = 1
+  } else {
+    _b2i_54 = 0
+  }
+  gen_2_genblk1_genblk1_5_gen2_0_genblk2_redSum = 0ub?
+  mut gen_2_genblk1_genblk1_5_gen2_0_genblk2_redSum__w1 = _b2i_54
+  mut gen_2_genblk1_genblk1_6_b__w1 = gen_1_genblk1_genblk1_0_gen2_0_s__w15#[26..=27]
+  mut gen_2_genblk1_genblk1_0_gen2_0_s__w5 = gen_2_genblk1_genblk1_0_gen2_0_s__w4
+  gen_2_genblk1_genblk1_0_gen2_0_s__w5#[15..=17] = (gen_2_genblk1_genblk1_5_gen2_0_genblk1_0_mux[gen_2_genblk1_genblk1_5_gen2_0_genblk2_redSum__w1] | ((gen_2_genblk1_genblk1_5_a__w1#[0..=1] & 1) << 2))
+  gen_2_genblk1_genblk1_6_a = 0ub??
+  mut gen_2_genblk1_genblk1_6_a__w1 = gen_1_genblk1_genblk1_0_gen2_0_s__w15#[24..=25]
+  gen_2_genblk1_genblk1_6_b = 0ub??
+  gen_2_genblk1_genblk1_6_gen2_0_genblk1_0_mux[0] = gen_2_genblk1_genblk1_6_b__w1#[0..=1]
+  gen_2_genblk1_genblk1_6_gen2_0_genblk1_0_mux[1] = gen_2_genblk1_genblk1_6_a__w1#[0..=1]
+  if (gen_2_genblk1_genblk1_6_a__w1#[0..=1] & 1) == 0 {
+    _b2i_55 = 1
+  } else {
+    _b2i_55 = 0
+  }
+  gen_2_genblk1_genblk1_6_gen2_0_genblk2_redSum = 0ub?
+  mut gen_2_genblk1_genblk1_6_gen2_0_genblk2_redSum__w1 = _b2i_55
+  mut gen_2_genblk1_genblk1_7_b__w1 = gen_1_genblk1_genblk1_0_gen2_0_s__w15#[30..=31]
+  mut gen_2_genblk1_genblk1_0_gen2_0_s__w6 = gen_2_genblk1_genblk1_0_gen2_0_s__w5
+  gen_2_genblk1_genblk1_0_gen2_0_s__w6#[18..=20] = (gen_2_genblk1_genblk1_6_gen2_0_genblk1_0_mux[gen_2_genblk1_genblk1_6_gen2_0_genblk2_redSum__w1] | ((gen_2_genblk1_genblk1_6_a__w1#[0..=1] & 1) << 2))
+  gen_2_genblk1_genblk1_7_a = 0ub??
+  mut gen_2_genblk1_genblk1_7_a__w1 = gen_1_genblk1_genblk1_0_gen2_0_s__w15#[28..=29]
+  gen_2_genblk1_genblk1_7_b = 0ub??
+  gen_2_genblk1_genblk1_7_gen2_0_genblk1_0_mux[0] = gen_2_genblk1_genblk1_7_b__w1#[0..=1]
+  gen_2_genblk1_genblk1_7_gen2_0_genblk1_0_mux[1] = gen_2_genblk1_genblk1_7_a__w1#[0..=1]
+  if (gen_2_genblk1_genblk1_7_a__w1#[0..=1] & 1) == 0 {
+    _b2i_56 = 1
+  } else {
+    _b2i_56 = 0
+  }
+  gen_2_genblk1_genblk1_7_gen2_0_genblk2_redSum = 0ub?
+  mut gen_2_genblk1_genblk1_7_gen2_0_genblk2_redSum__w1 = _b2i_56
+  mut gen_2_genblk1_genblk1_0_gen2_0_s__w7 = gen_2_genblk1_genblk1_0_gen2_0_s__w6
+  gen_2_genblk1_genblk1_0_gen2_0_s__w7#[21..=23] = (gen_2_genblk1_genblk1_7_gen2_0_genblk1_0_mux[gen_2_genblk1_genblk1_7_gen2_0_genblk2_redSum__w1] | ((gen_2_genblk1_genblk1_7_a__w1#[0..=1] & 1) << 2))
+  mut gen_3_genblk1_genblk1_0_b__w1 = gen_2_genblk1_genblk1_0_gen2_0_s__w7#[3..=5]
+  gen_3_genblk1_genblk1_0_a = 0ub???
+  mut gen_3_genblk1_genblk1_0_a__w1 = gen_2_genblk1_genblk1_0_gen2_0_s__w7#[0..=2]
+  gen_3_genblk1_genblk1_0_b = 0ub???
+  gen_3_genblk1_genblk1_0_gen2_0_genblk1_0_mux[0] = gen_3_genblk1_genblk1_0_b__w1#[0..=2]
+  gen_3_genblk1_genblk1_0_gen2_0_genblk1_0_mux[1] = gen_3_genblk1_genblk1_0_a__w1#[0..=2]
+  if (gen_3_genblk1_genblk1_0_a__w1#[0..=2] & 1) == 0 {
+    _b2i_57 = 1
+  } else {
+    _b2i_57 = 0
+  }
+  gen_3_genblk1_genblk1_0_gen2_0_genblk2_redSum = 0ub?
+  mut gen_3_genblk1_genblk1_0_gen2_0_genblk2_redSum__w1 = _b2i_57
+  mut gen_3_genblk1_genblk1_1_b__w1 = gen_2_genblk1_genblk1_0_gen2_0_s__w7#[9..=11]
+  gen_3_genblk1_genblk1_0_gen2_0_s#[0..=3] = (gen_3_genblk1_genblk1_0_gen2_0_genblk1_0_mux[gen_3_genblk1_genblk1_0_gen2_0_genblk2_redSum__w1] | ((gen_3_genblk1_genblk1_0_a__w1#[0..=2] & 1) << 3))
+  gen_3_genblk1_genblk1_1_a = 0ub???
+  mut gen_3_genblk1_genblk1_1_a__w1 = gen_2_genblk1_genblk1_0_gen2_0_s__w7#[6..=8]
+  gen_3_genblk1_genblk1_1_b = 0ub???
+  gen_3_genblk1_genblk1_1_gen2_0_genblk1_0_mux[0] = gen_3_genblk1_genblk1_1_b__w1#[0..=2]
+  gen_3_genblk1_genblk1_1_gen2_0_genblk1_0_mux[1] = gen_3_genblk1_genblk1_1_a__w1#[0..=2]
+  if (gen_3_genblk1_genblk1_1_a__w1#[0..=2] & 1) == 0 {
+    _b2i_58 = 1
+  } else {
+    _b2i_58 = 0
+  }
+  gen_3_genblk1_genblk1_1_gen2_0_genblk2_redSum = 0ub?
+  mut gen_3_genblk1_genblk1_1_gen2_0_genblk2_redSum__w1 = _b2i_58
+  mut gen_3_genblk1_genblk1_2_b__w1 = gen_2_genblk1_genblk1_0_gen2_0_s__w7#[15..=17]
+  mut gen_3_genblk1_genblk1_0_gen2_0_s__w1 = gen_3_genblk1_genblk1_0_gen2_0_s
+  gen_3_genblk1_genblk1_0_gen2_0_s__w1#[4..=7] = (gen_3_genblk1_genblk1_1_gen2_0_genblk1_0_mux[gen_3_genblk1_genblk1_1_gen2_0_genblk2_redSum__w1] | ((gen_3_genblk1_genblk1_1_a__w1#[0..=2] & 1) << 3))
+  gen_3_genblk1_genblk1_2_a = 0ub???
+  mut gen_3_genblk1_genblk1_2_a__w1 = gen_2_genblk1_genblk1_0_gen2_0_s__w7#[12..=14]
+  gen_3_genblk1_genblk1_2_b = 0ub???
+  gen_3_genblk1_genblk1_2_gen2_0_genblk1_0_mux[0] = gen_3_genblk1_genblk1_2_b__w1#[0..=2]
+  gen_3_genblk1_genblk1_2_gen2_0_genblk1_0_mux[1] = gen_3_genblk1_genblk1_2_a__w1#[0..=2]
+  if (gen_3_genblk1_genblk1_2_a__w1#[0..=2] & 1) == 0 {
+    _b2i_59 = 1
+  } else {
+    _b2i_59 = 0
+  }
+  gen_3_genblk1_genblk1_2_gen2_0_genblk2_redSum = 0ub?
+  mut gen_3_genblk1_genblk1_2_gen2_0_genblk2_redSum__w1 = _b2i_59
+  mut gen_3_genblk1_genblk1_3_b__w1 = gen_2_genblk1_genblk1_0_gen2_0_s__w7#[21..=23]
+  mut gen_3_genblk1_genblk1_0_gen2_0_s__w2 = gen_3_genblk1_genblk1_0_gen2_0_s__w1
+  gen_3_genblk1_genblk1_0_gen2_0_s__w2#[8..=11] = (gen_3_genblk1_genblk1_2_gen2_0_genblk1_0_mux[gen_3_genblk1_genblk1_2_gen2_0_genblk2_redSum__w1] | ((gen_3_genblk1_genblk1_2_a__w1#[0..=2] & 1) << 3))
+  gen_3_genblk1_genblk1_3_a = 0ub???
+  mut gen_3_genblk1_genblk1_3_a__w1 = gen_2_genblk1_genblk1_0_gen2_0_s__w7#[18..=20]
+  gen_3_genblk1_genblk1_3_b = 0ub???
+  gen_3_genblk1_genblk1_3_gen2_0_genblk1_0_mux[0] = gen_3_genblk1_genblk1_3_b__w1#[0..=2]
+  gen_3_genblk1_genblk1_3_gen2_0_genblk1_0_mux[1] = gen_3_genblk1_genblk1_3_a__w1#[0..=2]
+  if (gen_3_genblk1_genblk1_3_a__w1#[0..=2] & 1) == 0 {
+    _b2i_60 = 1
+  } else {
+    _b2i_60 = 0
+  }
+  gen_3_genblk1_genblk1_3_gen2_0_genblk2_redSum = 0ub?
+  mut gen_3_genblk1_genblk1_3_gen2_0_genblk2_redSum__w1 = _b2i_60
+  mut gen_3_genblk1_genblk1_0_gen2_0_s__w3 = gen_3_genblk1_genblk1_0_gen2_0_s__w2
+  gen_3_genblk1_genblk1_0_gen2_0_s__w3#[12..=15] = (gen_3_genblk1_genblk1_3_gen2_0_genblk1_0_mux[gen_3_genblk1_genblk1_3_gen2_0_genblk2_redSum__w1] | ((gen_3_genblk1_genblk1_3_a__w1#[0..=2] & 1) << 3))
+  mut gen_4_genblk1_genblk1_0_b__w1 = gen_3_genblk1_genblk1_0_gen2_0_s__w3#[4..=7]
+  gen_4_genblk1_genblk1_0_a = 0ub????
+  mut gen_4_genblk1_genblk1_0_a__w1 = gen_3_genblk1_genblk1_0_gen2_0_s__w3#[0..=3]
+  gen_4_genblk1_genblk1_0_b = 0ub????
+  gen_4_genblk1_genblk1_0_gen2_0_genblk1_0_mux[0] = gen_4_genblk1_genblk1_0_b__w1#[0..=3]
+  gen_4_genblk1_genblk1_0_gen2_0_genblk1_0_mux[1] = gen_4_genblk1_genblk1_0_a__w1#[0..=3]
+  if (gen_4_genblk1_genblk1_0_a__w1#[0..=3] & 1) == 0 {
+    _b2i_61 = 1
+  } else {
+    _b2i_61 = 0
+  }
+  gen_4_genblk1_genblk1_0_gen2_0_genblk2_redSum = 0ub?
+  mut gen_4_genblk1_genblk1_0_gen2_0_genblk2_redSum__w1 = _b2i_61
+  mut gen_4_genblk1_genblk1_1_b__w1 = gen_3_genblk1_genblk1_0_gen2_0_s__w3#[12..=15]
+  gen_4_genblk1_genblk1_0_gen2_0_s#[0..=4] = (gen_4_genblk1_genblk1_0_gen2_0_genblk1_0_mux[gen_4_genblk1_genblk1_0_gen2_0_genblk2_redSum__w1] | ((gen_4_genblk1_genblk1_0_a__w1#[0..=3] & 1) << 4))
+  gen_4_genblk1_genblk1_1_a = 0ub????
+  mut gen_4_genblk1_genblk1_1_a__w1 = gen_3_genblk1_genblk1_0_gen2_0_s__w3#[8..=11]
+  gen_4_genblk1_genblk1_1_b = 0ub????
+  gen_4_genblk1_genblk1_1_gen2_0_genblk1_0_mux[0] = gen_4_genblk1_genblk1_1_b__w1#[0..=3]
+  gen_4_genblk1_genblk1_1_gen2_0_genblk1_0_mux[1] = gen_4_genblk1_genblk1_1_a__w1#[0..=3]
+  if (gen_4_genblk1_genblk1_1_a__w1#[0..=3] & 1) == 0 {
+    _b2i_62 = 1
+  } else {
+    _b2i_62 = 0
+  }
+  gen_4_genblk1_genblk1_1_gen2_0_genblk2_redSum = 0ub?
+  mut gen_4_genblk1_genblk1_1_gen2_0_genblk2_redSum__w1 = _b2i_62
+  mut gen_4_genblk1_genblk1_0_gen2_0_s__w1 = gen_4_genblk1_genblk1_0_gen2_0_s
+  gen_4_genblk1_genblk1_0_gen2_0_s__w1#[5..=9] = (gen_4_genblk1_genblk1_1_gen2_0_genblk1_0_mux[gen_4_genblk1_genblk1_1_gen2_0_genblk2_redSum__w1] | ((gen_4_genblk1_genblk1_1_a__w1#[0..=3] & 1) << 4))
+  mut gen_5_genblk1_genblk1_0_b__w1 = gen_4_genblk1_genblk1_0_gen2_0_s__w1#[5..=9]
+  gen_5_genblk1_genblk1_0_a = 0ub?????
+  mut gen_5_genblk1_genblk1_0_a__w1 = gen_4_genblk1_genblk1_0_gen2_0_s__w1#[0..=4]
+  gen_5_genblk1_genblk1_0_b = 0ub?????
+  gen_5_genblk1_genblk1_0_gen2_0_genblk1_0_mux[0] = gen_5_genblk1_genblk1_0_b__w1#[0..=4]
+  gen_5_genblk1_genblk1_0_gen2_0_genblk1_0_mux[1] = gen_5_genblk1_genblk1_0_a__w1#[0..=4]
+  if (gen_5_genblk1_genblk1_0_a__w1#[0..=4] & 1) == 0 {
+    _b2i_63 = 1
+  } else {
+    _b2i_63 = 0
+  }
+  gen_5_genblk1_genblk1_0_gen2_0_genblk2_redSum = 0ub?
+  mut gen_5_genblk1_genblk1_0_gen2_0_genblk2_redSum__w1 = _b2i_63
+  gen_5_genblk1_genblk1_0_gen2_0_s#[0..=5] = (gen_5_genblk1_genblk1_0_gen2_0_genblk1_0_mux[gen_5_genblk1_genblk1_0_gen2_0_genblk2_redSum__w1] | ((gen_5_genblk1_genblk1_0_a__w1#[0..=4] & 1) << 5))
+  mut packedIdcs__w1 = gen_5_genblk1_genblk1_0_gen2_0_s#[0..=5]
+  OUT_idx#[0..=4] = packedIdcs__w1#[0..=5]#[1..=5]
+  i = 0sb?
+  packedIdcs = 0ub??????
+  if (packedIdcs__w1#[0..=5] & 1) == 0 {
+    _b2i_64 = 1
+  } else {
+    _b2i_64 = 0
+  }
+  OUT_idxValid#[0..=0] = _b2i_64
+}

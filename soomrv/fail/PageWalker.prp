@@ -1,10 +1,10 @@
 pub mod PageWalker::[lg="PageWalker", hdl](clk:u1, rst:u1, IN_rqs:u165, IN_ldStall:u1, IN_ldAck:u86, IN_ldResUOp:u82) -> (OUT_res:u53@[], OUT_ldUOp:u33@[]) {
-  reg state:u2
-  reg OUT_ldUOp:u33
-  reg pageWalkIter:u1
   reg OUT_res:u53
-  reg pageWalkAddr:u32
+  reg pageWalkIter:u1
+  reg state:u2
   reg rqID:u2
+  reg pageWalkAddr:u32
+  reg OUT_ldUOp:u33
   mut pwLdRes = 0
   mut i = 0
   mut nextLookup = 0

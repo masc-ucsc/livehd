@@ -1,6 +1,6 @@
 pub mod SysCon::[lg="SysCon", hdl](clk:u1, rst:u1, IN_re:u1, IN_raddr:u30, IN_we:u1, IN_wmask:u4, IN_waddr:u30, IN_wdata:u32) -> (OUT_rdata:u32@[], OUT_rbusy:u1@[], OUT_rvalid:u1@[], OUT_powerOff:u1@[], OUT_reboot:u1@[]) {
-  reg OUT_reboot:u1
   reg OUT_powerOff:u1
+  reg OUT_reboot:u1
   OUT_rbusy = 0
   OUT_rdata = 0
   OUT_rvalid = 0

@@ -1,13 +1,13 @@
-# Scheduler — yosys+slang fails
+# Scheduler — prp gen fails
 
-kind=-
+kind=mod
 
 | stage | result |
 |---|---|
 | yosys+slang gate | FAIL |
-| --reader slang -> prp | FAIL |
-| slang -> lg | NA |
-| prp -> lg | NA |
+| --reader slang -> prp | PASS |
+| slang -> lg | PASS |
+| prp -> lg | FAIL |
 | yosys-slang -> lg | NA |
 | lec prp vs slang | NA |
 | lec prp vs yosys-slang | NA |
@@ -15,5 +15,5 @@ kind=-
 
 **First failure message:**
 ```
-unpacked array read on an unsupported base
+read of undefined variable 'modTable' (not visible here: declared later, out of scope, or never)
 ```
