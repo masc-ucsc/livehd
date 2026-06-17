@@ -1,4 +1,4 @@
-# DataPrefetch — yosys+slang fails
+# DataPrefetch — --reader slang fails (own file is yosys-slang-parseable)
 
 kind=-
 

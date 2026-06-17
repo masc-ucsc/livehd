@@ -1,4 +1,4 @@
-# ExternalBusMem — yosys+slang fails
+# ExternalBusMem — --reader slang fails (own file is yosys-slang-parseable)
 
 kind=-
 

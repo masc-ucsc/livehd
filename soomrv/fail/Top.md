@@ -1,4 +1,4 @@
-# Top — yosys+slang fails
+# Top — --reader slang fails (own file is yosys-slang-parseable)
 
 kind=-
 

@@ -33,6 +33,8 @@ sort -o "$RES" "$RES"
 echo "sweep done: $(wc -l < $RES) modules"
 awk -F'\t' '{print $2}' "$RES" | sed 's/:.*//' | sort | uniq -c | sort -rn
 
-# 4. report
+# 4. refine the yosys+slang bucket per-file (the single-unit gate fails globally
+#    on a few unparseable files), then report.
+python3 "$HERE/reclassify.py" "$RES"
 python3 "$HERE/gen_report.py" "$RES" "$HERE/record.html"
 echo "wrote $HERE/record.html"

@@ -1,4 +1,4 @@
-# InstrAligner — yosys+slang fails
+# InstrAligner — --reader slang fails (own file is yosys-slang-parseable)
 
 kind=-
 

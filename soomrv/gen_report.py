@@ -83,6 +83,26 @@ out.append("<p style='font-size:12px;color:#57606a'>PASS + the primary buckets "
            "yosys+slang) partition the modules. The yosys-slang lg-gen, lec-vs-yosys-slang and "
            "abc counters are <i>cross-checks</i> &mdash; a PASS module may still fail one.</p>")
 
+# ── dominant blocking issues (by normalized error message) — the prioritization view ──
+import re
+def norm_msg(m):
+    m = re.sub(r"'[^']*'", "'X'", m)
+    m = re.sub(r'"[^"]*"', '"X"', m)
+    m = re.sub(r'\b\d+\b', 'N', m)
+    return m[:110] if m else "(no message)"
+groups = collections.defaultdict(list)
+for r in rows:
+    if r["category"] == "PASS":
+        continue
+    groups[(r["category"].split(":")[0], norm_msg(r["msg"]))].append(r["top"])
+out.append("<h2>Dominant blocking issues (group by category + root-cause message)</h2>")
+out.append("<table><tr><th>category</th><th>root-cause message</th><th class=num>#</th><th>modules</th></tr>")
+for (cat, msg), mods in sorted(groups.items(), key=lambda kv:-len(kv[1])):
+    out.append(f'<tr><td style="color:{catclass(cat)}">{html.escape(cat)}</td>'
+               f'<td><code>{html.escape(msg)}</code></td><td class=num>{len(mods)}</td>'
+               f'<td style="font-size:11px">{html.escape(", ".join(sorted(mods)))}</td></tr>')
+out.append("</table>")
+
 # ── per-module table ──
 out.append("<h2>Per-module results</h2>")
 hdr = ["module","primary category","kind","yosys+slang","reader slang","slang&rarr;lg",

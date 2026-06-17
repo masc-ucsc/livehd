@@ -1,4 +1,4 @@
-# CacheArbiter — yosys+slang fails
+# CacheArbiter — --reader slang fails (own file is yosys-slang-parseable)
 
 kind=-
 

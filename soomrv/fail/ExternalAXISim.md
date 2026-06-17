@@ -1,4 +1,4 @@
-# ExternalAXISim — yosys+slang fails
+# ExternalAXISim — --reader slang fails (own file is yosys-slang-parseable)
 
 kind=-
 

@@ -1,4 +1,4 @@
-# TagBuffer — yosys+slang fails
+# TagBuffer — --reader slang fails (own file is yosys-slang-parseable)
 
 kind=-
 

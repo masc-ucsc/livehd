@@ -1,4 +1,4 @@
-# BranchPredictor — yosys+slang fails
+# BranchPredictor — --reader slang fails (own file is yosys-slang-parseable)
 
 kind=-
 

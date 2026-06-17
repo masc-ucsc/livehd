@@ -1,4 +1,4 @@
-# Rename — yosys+slang fails
+# Rename — --reader slang fails (own file is yosys-slang-parseable)
 
 kind=-
 

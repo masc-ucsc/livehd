@@ -15,7 +15,7 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <table><tr><th>category</th><th class=num>count</th><th>bar</th></tr>
 <tr><td style="color:#1a7f37;font-weight:700">PASS</td><td class=num>12</td><td><span class=bar style="width:72px"></span></td></tr>
 <tr><td>yosys+slang fails (gate)</td><td class=num>43</td><td><span class=bar style="width:258px;background:#cf222e"></span></td></tr>
-<tr><td>--reader slang fails</td><td class=num>7</td><td><span class=bar style="width:42px;background:#cf222e"></span></td></tr>
+<tr><td>--reader slang fails</td><td class=num>23</td><td><span class=bar style="width:138px;background:#cf222e"></span></td></tr>
 <tr><td>lg gen from slang fails</td><td class=num>2</td><td><span class=bar style="width:12px;background:#cf222e"></span></td></tr>
 <tr><td>lg gen from yosys-slang fails</td><td class=num>0</td><td><span class=bar style="width:0px;background:#cf222e"></span></td></tr>
 <tr><td>prp gen fails</td><td class=num>2</td><td><span class=bar style="width:12px;background:#cf222e"></span></td></tr>
@@ -26,6 +26,30 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <tr><td>other</td><td class=num>0</td><td><span class=bar style="width:0px;background:#cf222e"></span></td></tr>
 </table>
 <p style='font-size:12px;color:#57606a'>PASS + the primary buckets (--reader slang / lg gen from slang / prp gen / lec vs slang / lec inconclusive / yosys+slang) partition the modules. The yosys-slang lg-gen, lec-vs-yosys-slang and abc counters are <i>cross-checks</i> &mdash; a PASS module may still fail one.</p>
+<h2>Dominant blocking issues (group by category + root-cause message)</h2>
+<table><tr><th>category</th><th>root-cause message</th><th class=num>#</th><th>modules</th></tr>
+<tr><td style="color:#cf222e">yosys+slang fails</td><td><code>unpacked array read on an unsupported base</code></td><td class=num>9</td><td style="font-size:11px">IntALU, LoadBuffer, LoadResultBuffer, PrefetchIssuer, PriorityEncoder, ROB, Scheduler, StoreDataIQ, StoreQueue</td></tr>
+<tr><td style="color:#cf222e">--reader slang fails</td><td><code>nested non-variable assignment targets are not supported yet</code></td><td class=num>8</td><td style="font-size:11px">AGU, BranchPredictor, BranchTargetBuffer, MemoryController, Multiply, TLBMissQueue, TagePredictor, TageTable</td></tr>
+<tr><td style="color:#cf222e">lec prp vs from slang fails</td><td><code>(no message)</code></td><td class=num>6</td><td style="font-size:11px">ACLINT, CacheWriteInterface, Divide, PageWalker, StoreDataLoad, TValSelect</td></tr>
+<tr><td style="color:#9a6700">lec inconclusive</td><td><code>(no message)</code></td><td class=num>6</td><td style="font-size:11px">BranchPredictionTable, BypassLSU, MemRTL, MemRTL1RW, MemRTL2W, RenameTable</td></tr>
+<tr><td style="color:#cf222e">yosys+slang fails</td><td><code>interface port &#x27;X&#x27; is not supported by --reader slang</code></td><td class=num>6</td><td style="font-size:11px">CSR, CacheLineManager, IFetch, IFetchPipeline, LoadStoreUnit, MMIO</td></tr>
+<tr><td style="color:#cf222e">--reader slang fails</td><td><code>&#x27;X&#x27; is not a valid top-level module</code></td><td class=num>4</td><td style="font-size:11px">CacheArbiter, CacheArbiter2, MemRTLC, OpDownsample</td></tr>
+<tr><td style="color:#cf222e">--reader slang fails</td><td><code>variable &#x27;X&#x27; driven by always_ff procedure cannot be written to by any other process</code></td><td class=num>4</td><td style="font-size:11px">DataPrefetch, ExternalAXISim, SoC, Top</td></tr>
+<tr><td style="color:#cf222e">--reader slang fails</td><td><code>unpacked array read on an unsupported base</code></td><td class=num>4</td><td style="font-size:11px">InstrAligner, RFReadMux, Rename, TagBuffer</td></tr>
+<tr><td style="color:#cf222e">yosys+slang fails</td><td><code>variable &#x27;X&#x27; driven by always_ff procedure cannot be written to by any other process</code></td><td class=num>2</td><td style="font-size:11px">Core, PrefetchPatternDetector</td></tr>
+<tr><td style="color:#cf222e">yosys+slang fails</td><td><code>instance &#x27;X&#x27; refers to an unknown module (blackboxes are not supported by --reader slang)</code></td><td class=num>2</td><td style="font-size:11px">FDiv, FPU</td></tr>
+<tr><td style="color:#cf222e">yosys+slang fails</td><td><code>nested non-variable assignment targets are not supported yet</code></td><td class=num>2</td><td style="font-size:11px">ReturnStack, StoreQueueBackend</td></tr>
+<tr><td style="color:#cf222e">yosys+slang fails</td><td><code>`!=` requires both operands to be the same type (predicted___ssa_1:boolean vs &lt;const&gt;:integer)</code></td><td class=num>1</td><td style="font-size:11px">BranchHandler</td></tr>
+<tr><td style="color:#cf222e">prp gen fails</td><td><code>assignment to undeclared variable &#x27;X&#x27; (declare it with `mut`/`const` first)</code></td><td class=num>1</td><td style="font-size:11px">BranchSelector</td></tr>
+<tr><td style="color:#cf222e">prp gen fails</td><td><code>upass.tolg: call to &#x27;X&#x27; has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may n</code></td><td class=num>1</td><td style="font-size:11px">CacheReadInterface</td></tr>
+<tr><td style="color:#cf222e">--reader slang fails</td><td><code>system task &#x27;X&#x27; is not supported by --reader slang</code></td><td class=num>1</td><td style="font-size:11px">ExternalBusMem</td></tr>
+<tr><td style="color:#cf222e">--reader slang fails</td><td><code>instance &#x27;X&#x27; refers to an unknown module (blackboxes are not supported by --reader slang)</code></td><td class=num>1</td><td style="font-size:11px">FMul</td></tr>
+<tr><td style="color:#cf222e">lg gen from slang fails</td><td><code>upass.tolg: internal — memory &#x27;X&#x27; lowered N write sites but the pre-scan counted N</code></td><td class=num>1</td><td style="font-size:11px">InstrDecoder</td></tr>
+<tr><td style="color:#cf222e">yosys+slang fails</td><td><code>unpacked array write on an unsupported base</code></td><td class=num>1</td><td style="font-size:11px">IssueQueue</td></tr>
+<tr><td style="color:#cf222e">--reader slang fails</td><td><code>module member &#x27;X&#x27; (kind InstanceArray) is not supported by --reader slang</code></td><td class=num>1</td><td style="font-size:11px">Load</td></tr>
+<tr><td style="color:#cf222e">lg gen from slang fails</td><td><code>upass.tolg: combinational loop in &#x27;X&#x27;</code></td><td class=num>1</td><td style="font-size:11px">PrefetchExecutor</td></tr>
+<tr><td style="color:#cf222e">yosys+slang fails</td><td><code>memory &#x27;X&#x27; has a non-integral or multi-dimensional element type</code></td><td class=num>1</td><td style="font-size:11px">TLB</td></tr>
+</table>
 <h2>Per-module results</h2>
 <table><tr><th>module</th><th>primary category</th><th>kind</th><th>yosys+slang</th><th>reader slang</th><th>slang&amp;rarr;lg</th><th>yosys-slang&amp;rarr;lg</th><th>prp&amp;rarr;lg</th><th>lec vs slang</th><th>lec vs ys-slang</th><th>abc</th><th>first-fail msg</th></tr>
 <tr>
@@ -211,6 +235,20 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
 </tr>
 <tr>
+<td><b>BranchPredictor</b></td>
+<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
+<td>-</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
+</tr>
+<tr>
 <td><b>BranchTargetBuffer</b></td>
 <td style="color:#cf222e;font-weight:600">--reader slang fails</td>
 <td>-</td>
@@ -223,6 +261,104 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
+</tr>
+<tr>
+<td><b>CacheArbiter</b></td>
+<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
+<td>-</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="&#x27;CacheArbiter&#x27; is not a valid top-level module">&#x27;CacheArbiter&#x27; is not a valid top-level module</td>
+</tr>
+<tr>
+<td><b>CacheArbiter2</b></td>
+<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
+<td>-</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="&#x27;CacheArbiter2&#x27; is not a valid top-level module">&#x27;CacheArbiter2&#x27; is not a valid top-level module</td>
+</tr>
+<tr>
+<td><b>DataPrefetch</b></td>
+<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
+<td>-</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="variable &#x27;missSR&#x27; driven by always_ff procedure cannot be written to by any other process">variable &#x27;missSR&#x27; driven by always_ff procedure cannot be written to by any other process</td>
+</tr>
+<tr>
+<td><b>ExternalAXISim</b></td>
+<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
+<td>-</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="variable &#x27;tfs[0]&#x27; driven by always_ff procedure cannot be written to by any other process">variable &#x27;tfs[0]&#x27; driven by always_ff procedure cannot be written to by any other process</td>
+</tr>
+<tr>
+<td><b>ExternalBusMem</b></td>
+<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
+<td>-</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="system task &#x27;$fflush&#x27; is not supported by --reader slang">system task &#x27;$fflush&#x27; is not supported by --reader slang</td>
+</tr>
+<tr>
+<td><b>FMul</b></td>
+<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
+<td>-</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="instance &#x27;isSigNaN_a&#x27; refers to an unknown module (blackboxes are not supported by --reader slang)">instance &#x27;isSigNaN_a&#x27; refers to an unknown module (blackboxes are not supported by --reade</td>
+</tr>
+<tr>
+<td><b>InstrAligner</b></td>
+<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
+<td>-</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
 </tr>
 <tr>
 <td><b>Load</b></td>
@@ -239,6 +375,34 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td class=msg title="module member &#x27;lookupEnc&#x27; (kind InstanceArray) is not supported by --reader slang">module member &#x27;lookupEnc&#x27; (kind InstanceArray) is not supported by --reader slang</td>
 </tr>
 <tr>
+<td><b>MemRTLC</b></td>
+<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
+<td>-</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="&#x27;MemRTLC&#x27; is not a valid top-level module">&#x27;MemRTLC&#x27; is not a valid top-level module</td>
+</tr>
+<tr>
+<td><b>MemoryController</b></td>
+<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
+<td>-</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
+</tr>
+<tr>
 <td><b>Multiply</b></td>
 <td style="color:#cf222e;font-weight:600">--reader slang fails</td>
 <td>-</td>
@@ -253,6 +417,62 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
 </tr>
 <tr>
+<td><b>OpDownsample</b></td>
+<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
+<td>-</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="&#x27;OpDownsample&#x27; is not a valid top-level module">&#x27;OpDownsample&#x27; is not a valid top-level module</td>
+</tr>
+<tr>
+<td><b>RFReadMux</b></td>
+<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
+<td>-</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
+</tr>
+<tr>
+<td><b>Rename</b></td>
+<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
+<td>-</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
+</tr>
+<tr>
+<td><b>SoC</b></td>
+<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
+<td>-</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="variable &#x27;missSR&#x27; driven by always_ff procedure cannot be written to by any other process">variable &#x27;missSR&#x27; driven by always_ff procedure cannot be written to by any other process</td>
+</tr>
+<tr>
 <td><b>TLBMissQueue</b></td>
 <td style="color:#cf222e;font-weight:600">--reader slang fails</td>
 <td>-</td>
@@ -265,6 +485,20 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
+</tr>
+<tr>
+<td><b>TagBuffer</b></td>
+<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
+<td>-</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
 </tr>
 <tr>
 <td><b>TagePredictor</b></td>
@@ -293,6 +527,20 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
+</tr>
+<tr>
+<td><b>Top</b></td>
+<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
+<td>-</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="variable &#x27;tfs[0]&#x27; driven by always_ff procedure cannot be written to by any other process">variable &#x27;tfs[0]&#x27; driven by always_ff procedure cannot be written to by any other process</td>
 </tr>
 <tr>
 <td><b>BranchPredictionTable</b></td>
@@ -533,20 +781,6 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td class=msg title="`!=` requires both operands to be the same type (predicted___ssa_1:boolean vs &lt;const&gt;:integer)">`!=` requires both operands to be the same type (predicted___ssa_1:boolean vs &lt;const&gt;:inte</td>
 </tr>
 <tr>
-<td><b>BranchPredictor</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
-</tr>
-<tr>
 <td><b>CSR</b></td>
 <td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
 <td>-</td>
@@ -559,34 +793,6 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td class=msg title="interface port &#x27;IF_mmio&#x27; is not supported by --reader slang">interface port &#x27;IF_mmio&#x27; is not supported by --reader slang</td>
-</tr>
-<tr>
-<td><b>CacheArbiter</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="&#x27;CacheArbiter&#x27; is not a valid top-level module">&#x27;CacheArbiter&#x27; is not a valid top-level module</td>
-</tr>
-<tr>
-<td><b>CacheArbiter2</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="&#x27;CacheArbiter2&#x27; is not a valid top-level module">&#x27;CacheArbiter2&#x27; is not a valid top-level module</td>
 </tr>
 <tr>
 <td><b>CacheLineManager</b></td>
@@ -617,48 +823,6 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td class=msg title="variable &#x27;missSR&#x27; driven by always_ff procedure cannot be written to by any other process">variable &#x27;missSR&#x27; driven by always_ff procedure cannot be written to by any other process</td>
 </tr>
 <tr>
-<td><b>DataPrefetch</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="variable &#x27;missSR&#x27; driven by always_ff procedure cannot be written to by any other process">variable &#x27;missSR&#x27; driven by always_ff procedure cannot be written to by any other process</td>
-</tr>
-<tr>
-<td><b>ExternalAXISim</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="variable &#x27;tfs[0]&#x27; driven by always_ff procedure cannot be written to by any other process">variable &#x27;tfs[0]&#x27; driven by always_ff procedure cannot be written to by any other process</td>
-</tr>
-<tr>
-<td><b>ExternalBusMem</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="system task &#x27;$fflush&#x27; is not supported by --reader slang">system task &#x27;$fflush&#x27; is not supported by --reader slang</td>
-</tr>
-<tr>
 <td><b>FDiv</b></td>
 <td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
 <td>-</td>
@@ -671,20 +835,6 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td class=msg title="instance &#x27;fdiv&#x27; refers to an unknown module (blackboxes are not supported by --reader slang)">instance &#x27;fdiv&#x27; refers to an unknown module (blackboxes are not supported by --reader slan</td>
-</tr>
-<tr>
-<td><b>FMul</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="instance &#x27;isSigNaN_a&#x27; refers to an unknown module (blackboxes are not supported by --reader slang)">instance &#x27;isSigNaN_a&#x27; refers to an unknown module (blackboxes are not supported by --reade</td>
 </tr>
 <tr>
 <td><b>FPU</b></td>
@@ -727,20 +877,6 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td class=msg title="interface port &#x27;IF_icache&#x27; is not supported by --reader slang">interface port &#x27;IF_icache&#x27; is not supported by --reader slang</td>
-</tr>
-<tr>
-<td><b>InstrAligner</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
 </tr>
 <tr>
 <td><b>IntALU</b></td>
@@ -827,48 +963,6 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td class=msg title="interface port &#x27;IF_mem&#x27; is not supported by --reader slang">interface port &#x27;IF_mem&#x27; is not supported by --reader slang</td>
 </tr>
 <tr>
-<td><b>MemRTLC</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="&#x27;MemRTLC&#x27; is not a valid top-level module">&#x27;MemRTLC&#x27; is not a valid top-level module</td>
-</tr>
-<tr>
-<td><b>MemoryController</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
-</tr>
-<tr>
-<td><b>OpDownsample</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="&#x27;OpDownsample&#x27; is not a valid top-level module">&#x27;OpDownsample&#x27; is not a valid top-level module</td>
-</tr>
-<tr>
 <td><b>PrefetchIssuer</b></td>
 <td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
 <td>-</td>
@@ -911,35 +1005,7 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
 </tr>
 <tr>
-<td><b>RFReadMux</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
-</tr>
-<tr>
 <td><b>ROB</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
-</tr>
-<tr>
-<td><b>Rename</b></td>
 <td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
 <td>-</td>
 <td style="color:#cf222e;font-weight:600">FAIL</td>
@@ -979,20 +1045,6 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
-</tr>
-<tr>
-<td><b>SoC</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="variable &#x27;missSR&#x27; driven by always_ff procedure cannot be written to by any other process">variable &#x27;missSR&#x27; driven by always_ff procedure cannot be written to by any other process</td>
 </tr>
 <tr>
 <td><b>StoreDataIQ</b></td>
@@ -1049,33 +1101,5 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td class=msg title="memory &#x27;tlb&#x27; has a non-integral or multi-dimensional element type">memory &#x27;tlb&#x27; has a non-integral or multi-dimensional element type</td>
-</tr>
-<tr>
-<td><b>TagBuffer</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="unpacked array read on an unsupported base">unpacked array read on an unsupported base</td>
-</tr>
-<tr>
-<td><b>Top</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="variable &#x27;tfs[0]&#x27; driven by always_ff procedure cannot be written to by any other process">variable &#x27;tfs[0]&#x27; driven by always_ff procedure cannot be written to by any other process</td>
 </tr>
 </table>

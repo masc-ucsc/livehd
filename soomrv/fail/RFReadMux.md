@@ -1,4 +1,4 @@
-# RFReadMux — yosys+slang fails
+# RFReadMux — --reader slang fails (own file is yosys-slang-parseable)
 
 kind=-
 
