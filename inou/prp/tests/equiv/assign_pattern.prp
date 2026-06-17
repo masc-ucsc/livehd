@@ -1,0 +1,33 @@
+/*
+:name: assign_pattern
+:type: equiv_slang
+:verilog_top: apat_top
+:pyrope_top: assign_pattern.apat_top
+*/
+
+// Pyrope reference for assign_pattern.v (SimpleAssignmentPattern lvalue).
+// `:type: equiv_slang` — yosys-slang's read_slang cannot ingest the `'{...}`
+// lvalue, so only --reader slang is checked (against this reference).
+//
+// The .v wires two child modules through `'{...}` output-port patterns; only
+// the TOP is LEC'd, so this is the flattened behavioral equivalent of apat_top:
+//   res_idx = first set-bit index of data (apat_enc priority encoder, N=1)
+//   res_vld = |data
+//   res_lo  = apat_split out[0] = data[1:0]
+//   res_hi  = apat_split out[1] = data[3:2]
+comb apat_top(data:u4) -> (res_idx:u2, res_vld:u1, res_lo:u2, res_hi:u2) {
+  // Priority encoder (LSB first), default 3 — expressed arithmetically rather
+  // than as a nested if/elif chain of constants, which would trip tolg's
+  // lower_if merged-mux width bug (a 1-bit mux for a 0..3 value; see
+  // condout_const_arms). On the zero-extended bits (#[i] is 0/1): AND=`*`,
+  // OR-of-disjoint-terms=`+`, NOT=`1 - x`.
+  mut d0 = data#[0]
+  mut d1 = data#[1]
+  mut d2 = data#[2]
+  mut b1 = (1 - d0) * (1 - d1)
+  mut b0 = ((1 - d0) * d1) + ((1 - d0) * (1 - d1) * (1 - d2))
+  res_idx = (b1 * 2) + b0
+  res_vld = data != 0
+  res_lo = data#[0..=1]
+  res_hi = data#[2..=3]
+}

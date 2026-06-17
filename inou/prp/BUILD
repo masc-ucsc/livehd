@@ -194,7 +194,17 @@ sh_test(
         ],
         deps = ["//inou/yosys:scripts"],
     )
-    for v_file in glob(["tests/equiv/*.v"])
+    for v_file in glob(
+        ["tests/equiv/*.v"],
+        # assign_pattern.v wires submodules through `'{...}` output-port patterns
+        # (hierarchical), so the v2prp round-trip (emit one Pyrope, recompile it
+        # standalone) does not apply — it is covered by its `:type: equiv_slang`
+        # prp-equiv target instead. hier_value.v IS a single module and stays
+        # here: this round-trip is what exercises --reader slang HierarchicalValue.
+        exclude = [
+            "tests/equiv/assign_pattern.v",
+        ],
+    )
 ]
 
 # prp->prp round-trip: a Pyrope source re-emitted through pass.prp_writer must

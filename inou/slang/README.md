@@ -87,3 +87,79 @@ memory LEC is slow on big arrays, and the small-array coverage
 
 The `tests/verilog/` sky130 cell samples run at the `lnast` tier through the
 legacy no-argument `slang_compile.sh` mode (`slang_compile_sky130` target).
+
+## Which Verilog constructs to support (triage rule)
+
+When a SystemVerilog construct fails to lower, decide whether it is a bug to fix
+or a test to drop using three reference points — the standalone slang frontend,
+the yosys-slang plugin, and our native reader:
+
+1. **slang native frontend rejects it → out of scope, for sure.** slang v11 is
+   the strictest valid-SV gate; if its frontend cannot elaborate the construct it
+   is either illegal SV or non-elaboratable, so `--reader slang` has nothing
+   well-formed to lower. Drop it (or keep it as an `error`-tier test when slang
+   rejects it *cleanly*).
+2. **yosys-slang handles it → we must support it too.** A construct the
+   yosys-slang plugin lowers is a real, synthesizable RTL idiom; both
+   `--reader slang` and `--reader yosys-slang` should match it. A failure here is
+   a genuine bug to fix.
+3. **yosys-slang fails but slang native succeeds → it depends.** The construct is
+   valid SV (the frontend accepts it) but the yosys-slang plugin's RTLIL
+   conversion cannot handle it. Try to support it in our native lowering —
+   unless it is a non-synthesizable construct (`$foo` system tasks,
+   simulation-only strangeness), in which case dropping the test is fine.
+
+### Running the three checks
+
+```
+# 1. standalone slang frontend  (valid-SV gate; NOT always installed locally)
+slang foo.sv
+
+# 2. yosys + the yosys-slang plugin, no LiveHD  (plugin path is bazel-mangled;
+#    `find bazel-bin/external -name slang.so` if the +http_archive+ form moves)
+./bazel-bin/inou/yosys/yosys2 \
+  -m ./bazel-bin/external/+http_archive+yosys_slang/slang.so \
+  -p "read_slang foo.sv"
+
+# 3a. LiveHD native reader (slang-library based)
+lhd compile --reader slang       foo.v --emit-dir pyrope:out/
+# 3b. LiveHD yosys-slang reader
+lhd compile --reader yosys-slang foo.v --emit-dir verilog:out/
+```
+
+**When standalone `slang` is not installed**, use `--reader slang` as a proxy for
+check 1: the native reader embeds the same slang v11 frontend, so a clean
+elaboration that merely hits a lowering gap surfaces as an `unsupported-*`
+diagnostic (`"pass":"inou.slang","category":"unsupported"`), whereas a frontend
+rejection surfaces with slang's own diagnostic code (e.g.
+`AssignmentPatternNoContext`). So an `unsupported-*` from `--reader slang` ≡
+"slang native succeeds" (case 2/3); a slang frontend code ≡ "slang native
+rejects" (case 1).
+
+Worked examples (`inou/prp/tests/equiv/`), both now supported by `--reader slang`:
+
+| test | standalone slang | yosys-slang | `--reader slang` | equiv test |
+|---|---|---|---|---|
+| `hier_value.v` (`HierarchicalValue`) | ✅ | ✅ | ✅ (read as a `ValueExpressionBase`, `slang_expr.cpp`) | `:type: equiv` (prp-equiv + prp-v2prp round-trip) |
+| `assign_pattern.v` (`SimpleAssignmentPattern` lvalue) | ✅ | ❌ | ✅ (`assign_to_pattern`, `slang_lvalue.cpp`) | `:type: equiv_slang` (yosys can't read the `'{...}` lvalue) |
+
+### equiv testing: `:type: equiv` vs `:type: equiv_slang`
+
+`inou/prp/tests/equiv/<name>.{prp,v}` golden pairs are LEC'd top-only. The `.prp`
+header's `:type:` selects how the readers are exercised:
+
+- **`:type: equiv`** (default, `prplib.run_equiv`): the `.prp` lowers to Verilog
+  and lgchecks against the golden `.v` (yosys `read_verilog`). The matching
+  `prp-v2prp-<name>` target additionally round-trips the `.v` through
+  `--reader slang` → Pyrope → recompile → LEC, so the native reader is exercised
+  too. Use when yosys can read the `.v` (e.g. `hier_value.v`, plain module name).
+- **`:type: equiv_slang`** (`prplib.run_equiv_slang`): for a `.v` that yosys's
+  `read_slang`/`read_verilog` cannot ingest (e.g. `'{...}` assignment-pattern
+  lvalues in `assign_pattern.v`). The `.v` is read by the NATIVE `--reader slang`
+  into clean cgen Verilog (implementation) and lgcheck'd against the
+  `.prp`-generated Verilog (reference) — so only `--reader slang` is on the hook,
+  and no yosys read of the original `.v` is needed.
+
+The `:pyrope_top:`/`:verilog_top:` header tags pin the (differently-named) top on
+each side. Pick `equiv` when both readers can read the `.v`; `equiv_slang` when
+only the native slang reader can.

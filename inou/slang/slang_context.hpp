@@ -222,6 +222,8 @@ private:
   // ── lvalues (slang_lvalue.cpp) ─────────────────────────────────────────────
   void lower_assign(const slang::ast::AssignmentExpression& expr);
   void assign_to(const slang::ast::Expression& lhs, const std::string& rhs);
+  void assign_to_pattern(const slang::ast::Expression& lhs, std::span<const slang::ast::Expression* const> elems,
+                         const std::string& rhs);
   void note_write(const slang::ast::Symbol& sym, bool nonblocking, slang::SourceLocation loc);
   const slang::ast::ValueSymbol* resolve_base_symbol(const slang::ast::Expression& base);
   void                           lower_unpacked_write(const slang::ast::Expression& lhs, const std::string& rhs);

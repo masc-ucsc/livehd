@@ -6,11 +6,24 @@
 // member access, concatenation (MSB-first split of the RHS), memory element
 // write - instead of a fixed three-case switch.
 
+#include "slang/ast/expressions/AssignmentExpressions.h"
 #include "slang/ast/expressions/ConversionExpression.h"
 #include "slang/ast/types/AllTypes.h"
 #include "slang_context.hpp"
 
 using slang::ast::ExpressionKind;
+
+namespace {
+// An lvalue assignment-pattern element on an OUTPUT-port connection arrives
+// wrapped as `<target> = EmptyArgument` (the same shape lower_instance peels off
+// the whole connection). Strip the wrapper to the real target lvalue.
+const slang::ast::Expression& pattern_lvalue_target(const slang::ast::Expression& e) {
+  if (const auto* a = e.as_if<slang::ast::AssignmentExpression>()) {
+    return a->left();
+  }
+  return e;
+}
+}  // namespace
 
 void Slang_context::note_write(const slang::ast::Symbol& sym, bool nonblocking, slang::SourceLocation loc) {
   if (proc_kind_ == Proc_kind::none) {
@@ -155,10 +168,60 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
       return;
     }
 
+    case ExpressionKind::SimpleAssignmentPattern:
+      // `'{a, b, ...}` used as an assignment target. The only SV-legal form is an
+      // unpacked-array output-port connection (the port type supplies the
+      // pattern's context), e.g. soomrv's `.OUT_idx('{resLzTz})`.
+      assign_to_pattern(lhs, lhs.as<slang::ast::SimpleAssignmentPatternExpression>().elements(), rhs);
+      return;
+
     default:
       emit_unsupported(lhs.sourceRange, "unsupported-lhs",
                        std::string("assignment-target kind '") + std::string(slang::ast::toString(lhs.kind))
                            + "' is not supported by --reader slang yet");
+  }
+}
+
+// `'{...}` (SimpleAssignmentPattern) as an assignment target. slang lowers an
+// unpacked-array output-port connection `.p('{a, b})` to `'{a, b} = <child
+// output>`, so `rhs` is the child's flattened output bus. Decompose it per
+// element and recurse:
+//   - unpacked array target: source element k maps to array index left+k*step
+//     (LRM: first listed element -> leftmost index); its bit offset in the flat
+//     bus is (idx-lower)*elem_bits, exactly matching flat_port_read/write
+//     (Verilator/yosys flatten unpacked ports identically, so LEC lines up).
+//   - packed (integral) target: slang resolves elements MSB-first, like a
+//     `{...}` concatenation (element 0 occupies the high bits).
+void Slang_context::assign_to_pattern(const slang::ast::Expression& lhs,
+                                      std::span<const slang::ast::Expression* const> elems, const std::string& rhs) {
+  const auto& ct = lhs.type->getCanonicalType();
+
+  if (!ct.isIntegral() && ct.kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+    const auto&   arr   = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
+    const int     eb    = flat_or_tinfo(arr.elementType).bits;
+    const int     flat  = eb * static_cast<int>(arr.range.width());
+    const int64_t left  = arr.range.left;
+    const int64_t lower = arr.range.lower();
+    const int64_t step  = arr.range.right >= arr.range.left ? 1 : -1;
+    auto          p     = to_pattern(to_int_value(rhs), flat, false);
+    int64_t       k     = 0;
+    for (const auto* e : elems) {
+      const int64_t idx    = left + k * step;
+      const int64_t lo_bit = (idx - lower) * eb;
+      assign_to(pattern_lvalue_target(*e), extract_field(p, lo_bit, eb));
+      ++k;
+    }
+    return;
+  }
+
+  // Packed target: MSB-first concatenation of the elements (element 0 highest).
+  auto    ti     = tinfo(*lhs.type);
+  auto    p      = to_pattern(to_int_value(rhs), ti.bits, false);
+  int64_t offset = ti.bits;
+  for (const auto* e : elems) {
+    auto oi = tinfo(*e->type);
+    offset -= oi.bits;
+    assign_to(pattern_lvalue_target(*e), extract_field(p, offset < 0 ? 0 : offset, oi.bits));
   }
 }
 

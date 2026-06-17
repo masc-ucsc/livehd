@@ -31,8 +31,15 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
   }
 
   switch (expr.kind) {
-    case ExpressionKind::NamedValue: {
-      const auto& nv = expr.as<slang::ast::NamedValueExpression>();
+    case ExpressionKind::NamedValue:
+    case ExpressionKind::HierarchicalValue: {
+      // A HierarchicalValue (e.g. `stage[i-1].acc` into a named generate block)
+      // is, after unrolling/const-folding, just a ValueExpressionBase whose
+      // .symbol slang already resolved to the target instance's member. Its
+      // lname is cached (lname_of) at the prefix where the member was declared,
+      // and Dep_collector records the cross-block read, so the dependency sort
+      // emits the producing block first and the read is a plain wire.
+      const auto& nv = expr.as<slang::ast::ValueExpressionBase>();
       return read_symbol(nv.symbol, expr.sourceRange);
     }
     case ExpressionKind::UnaryOp: return lower_unary(expr.as<slang::ast::UnaryExpression>());

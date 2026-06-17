@@ -371,6 +371,93 @@ class PrpRunner:
         print(clog.decode('utf-8', 'ignore'))
         return 1
 
+    def _emit_combined_verilog(self, tmp_dir, cmd, odir, safe_name, side):
+        # Run a compile cmd that emits per-module Verilog into odir, then
+        # concatenate the generated .v into one file (so lgcheck sees every
+        # submodule of a hierarchical design). Returns (combined_path, log) or
+        # (None, log) on failure.
+        shutil.rmtree(odir, ignore_errors=True)
+        os.makedirs(odir, exist_ok=True)
+        proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        try:
+            log, _ = proc.communicate()
+            rc = proc.returncode
+        except Exception:
+            proc.kill()
+            return None, b''
+        if rc != 0:
+            return None, log
+        gen_vs = sorted(glob.glob(os.path.join(odir, '*.v')))
+        if not gen_vs:
+            return None, log
+        combined = os.path.join(odir, 'all_{}_{}.v'.format(safe_name, side))
+        with open(combined, 'w') as out:
+            for v in gen_vs:
+                with open(v) as f:
+                    out.write(f.read())
+                    out.write('\n')
+        return combined, log
+
+    def run_equiv_slang(self, tmp_dir, test: PrpTest):
+        # equiv variant for a golden .v that yosys-slang's read_slang cannot
+        # ingest (e.g. `'{...}` assignment-pattern lvalues on output ports). The
+        # standard `equiv` mode has lgcheck read the golden .v directly, which
+        # yosys cannot do here. Instead the .v is read by the NATIVE --reader
+        # slang into clean cgen Verilog (implementation) and LEC'd against the
+        # .prp-generated Verilog (reference). Only --reader slang is exercised
+        # (hence the `_slang` suffix); comparison is top-only via lgcheck.
+        name = test.params['name']
+        prp  = test.params['files'][0]
+        vfile = os.path.splitext(prp)[0] + '.v'
+        v_abs = vfile if os.path.isabs(vfile) else os.path.join(tmp_dir, vfile)
+        if not os.path.exists(v_abs):
+            print('{} - equiv_slang - FAILED: no golden verilog {}'.format(name, vfile))
+            return 1
+        safe = re.sub(r'\W+', '_', name)
+
+        # reference: .prp -> Verilog
+        ref_odir = os.path.join(tmp_dir, 'tmp_eqs_ref_' + safe)
+        ref, rlog = self._emit_combined_verilog(tmp_dir, self.lhd_equiv(test, ref_odir), ref_odir, safe, 'ref')
+        if ref is None:
+            print('{} - equiv_slang - FAILED: prp->verilog pipeline'.format(name))
+            print(rlog.decode('utf-8', 'ignore'))
+            return 1
+
+        # implementation: golden .v read by the native slang reader -> Verilog
+        impl_odir = os.path.join(tmp_dir, 'tmp_eqs_impl_' + safe)
+        impl_cmd = [self.lhd, 'compile', '--reader', 'slang', vfile, '--recipe', 'O0',
+                    '--emit-dir', 'verilog:{}/'.format(impl_odir),
+                    '--workdir', self._scratch(test, 'equiv_slang')]
+        impl, ilog = self._emit_combined_verilog(tmp_dir, impl_cmd, impl_odir, safe, 'impl')
+        if impl is None:
+            print('{} - equiv_slang - FAILED: --reader slang could not lower {}'.format(name, vfile))
+            print(ilog.decode('utf-8', 'ignore'))
+            return 1
+
+        verilog_top = (test.params.get('verilog_top') or '').strip() or self._verilog_top_module(v_abs)
+        pyrope_top  = (test.params.get('pyrope_top') or '').strip()
+        if not pyrope_top:
+            gen_mods = self._verilog_modules(ref)
+            pyrope_top = gen_mods[0] if len(gen_mods) == 1 else verilog_top
+
+        check = subprocess.Popen(
+            ['./inou/yosys/lgcheck', '--reference', ref, '--implementation', impl,
+             '--reference_top', pyrope_top, '--implementation_top', verilog_top],
+            cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        try:
+            clog, _ = check.communicate()
+            crc = check.returncode
+        except Exception:
+            check.kill()
+            crc, clog = 1, b''
+        if crc == 0:
+            print('{} - equiv_slang - success (verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
+            return 0
+        print('{} - equiv_slang - FAILED: lgcheck not equivalent (verilog_top:{} pyrope_top:{})'.format(
+            name, verilog_top, pyrope_top))
+        print(clog.decode('utf-8', 'ignore'))
+        return 1
+
     @staticmethod
     def _find_marker_lines(test: PrpTest):
         # 1-based line numbers of any comment containing `locate_error_here`.
@@ -423,6 +510,9 @@ class PrpRunner:
                 continue
             if mode == 'equiv':
                 rc = self.run_equiv(tmp_dir, test)
+                continue
+            if mode == 'equiv_slang':
+                rc = self.run_equiv_slang(tmp_dir, test)
                 continue
 
             cmd = []

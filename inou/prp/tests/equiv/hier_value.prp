@@ -1,0 +1,15 @@
+/*
+:name: hier_value
+:type: equiv
+:verilog_top: hval_popcnt
+:pyrope_top: hier_value.hval_popcnt
+*/
+
+// Pyrope reference for hier_value.v (HierarchicalValue). The .v builds a
+// 4-bit population count as a running sum across `stage[i]` generate-block
+// instances, each reading `stage[i-1].acc` hierarchically. Only the module
+// TOP is LEC'd, so this flat reference (the sum of the four input bits) is the
+// behavioral equivalent — no need to mirror the generate hierarchy.
+comb hval_popcnt(in:u4) -> (cnt:u3) {
+  cnt = in#[0] + in#[1] + in#[2] + in#[3]
+}
