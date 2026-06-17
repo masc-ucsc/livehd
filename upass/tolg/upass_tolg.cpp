@@ -1294,8 +1294,17 @@ private:
         auto c0 = lnast_->get_first_child(nid);
         if (!c0.is_invalid() && lnast_->get_name(c0) == name) {
           auto c1 = lnast_->get_sibling_next(c0);
-          if (!c1.is_invalid() && !lnast_->get_sibling_next(c1).is_invalid()) {
-            ++n;
+          if (!c1.is_invalid()) {
+            auto c2 = lnast_->get_sibling_next(c1);
+            // A real memory write is store(mem, idx, val); a typed declaration —
+            // store(name, init, TYPE) — also has 3 children but its last is a
+            // type node (an unpacked-array OUTPUT port emits both a flat packed
+            // `= nil : int` decl-store AND its comp_type_array memory declare).
+            // Counting the decl-store as a write desyncs the pre-scan from the
+            // lowering (which ignores it) — skip type-tailed stores.
+            if (!c2.is_invalid() && !Lnast_ntype::is_type(lnast_->get_type(c2))) {
+              ++n;
+            }
           }
         }
       }
@@ -3562,6 +3571,16 @@ public:
           }
         }
       }
+      // Memory nodes are sequential state as well: a read dout reflects STORED
+      // state (decoupled from this cycle's write din for the acyclicity check),
+      // so a reg-array pipeline like `pfOp[1] <= pfOp[0]` — whose write din is a
+      // read of the same memory node — is NOT a combinational loop.  Cut them
+      // like flops so the node-level dout->din self-edge does not false-positive.
+      for (size_t i = 0; i < nn; ++i) {
+        if (type_op_of(nodes[i]) == Ntype_op::Memory) {
+          state_.insert(nodes[i].get_debug_nid());
+        }
+      }
       for (int s = 0; s < next_scc; ++s) {
         if (!nontrivial[static_cast<size_t>(s)]) {
           continue;
@@ -3581,6 +3600,11 @@ public:
             if (state_.contains(nodes[i].get_debug_nid())) {
               has_state = true;
             }
+          } else if (type_op_of(nodes[i]) == Ntype_op::Memory) {
+            // A memory's stored state breaks the cycle (its read dout reflects the
+            // flopped contents, decoupled from this cycle's write din) — a
+            // reg-array pipeline `pfOp[1] <= pfOp[0]` is sequential, not a loop.
+            has_state = true;
           }
         }
         if (!has_state) {

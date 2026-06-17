@@ -477,8 +477,12 @@ void Slang_context::flat_port_write(const slang::ast::ElementSelectExpression& e
 // read-modify-write form; deeper nesting (select-of-select with dynamic
 // indices) is diagnosed by the caller when this returns nullptr.
 const slang::ast::ValueSymbol* Slang_context::resolve_base_symbol(const slang::ast::Expression& base) {
-  if (base.kind == ExpressionKind::NamedValue) {
-    const auto& sym = base.as<slang::ast::NamedValueExpression>().symbol;
+  // NamedValue and HierarchicalValue are both ValueExpressionBase with a resolved
+  // `.symbol`.  Hierarchical = a reference into a (const-folded) named generate
+  // block, e.g. an unpacked-array read `gen[g-1].s[2*i+0]` (PriorityEncoder): the
+  // base symbol is the genblock instance's array, declared on demand here.
+  if (base.kind == ExpressionKind::NamedValue || base.kind == ExpressionKind::HierarchicalValue) {
+    const auto& sym = base.as<slang::ast::ValueExpressionBase>().symbol;
     if (!declared_.contains(&sym) && !input_syms_.contains(&sym)) {
       declare_value_symbol(sym, /*force_reg=*/false);
     }
