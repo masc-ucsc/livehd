@@ -491,7 +491,14 @@ Options parse_args(int argc, char** argv) {
                         "the `check` command merged into `lec` — use `lhd lec ... --set lec.solver=lgyosys`",
                         "lec defaults to the in-process cvc5 solver; lgyosys is the yosys/lgcheck backend"};
       }
-      if (a == "compile" || a == "lec" || a == "semdiff" || a == "scan" || a == "lsp" || a == "list" || a == "describe"
+      if (a == "semdiff") {
+        // `semdiff` is now a `pass` subcommand (it runs a single graph pass over
+        // two lg: libraries), not a top-level command.
+        throw Lhd_error{"usage",
+                        "`semdiff` is now a `pass` subcommand — use `lhd pass semdiff --ref lg:… --impl lg:…`",
+                        "e.g. `lhd pass semdiff --ref lg:gold --impl lg:opt --top adder`"};
+      }
+      if (a == "compile" || a == "lec" || a == "scan" || a == "lsp" || a == "list" || a == "describe"
           || a == "version" || a == "help" || a == "tool" || a == "pass") {
         // tool keeps its positionals raw and ORDERED in opts.files: the verb
         // (cat/grep/diff/tree), the filter terms (name:/color:/from:…), and the

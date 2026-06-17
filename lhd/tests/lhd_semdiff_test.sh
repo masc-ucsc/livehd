@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# End-to-end test for `lhd semdiff` (task 2f-semdiff): the structural diff/match
+# End-to-end test for `lhd pass semdiff` (task 2f-semdiff): the structural diff/match
 # marks corresponding nodes of two lg: libraries with a shared `match` attribute,
 # and the diff is greppable (`tool grep match=0`) and visualizable
 # (`tool diff --match`). Covers: identical/commutative full match, a real
@@ -49,7 +49,7 @@ mod m(a:u8, b:u8, c:u8) -> (y:u9@[0]) {
 EOF
 compile "$W/g1.prp" "$W/g1"
 compile "$W/o1.prp" "$W/o1"
-"$LHD" semdiff --ref lg:"$W/g1" --impl lg:"$W/o1" -q --workdir "$W/w1" >/dev/null 2>&1 || fail "semdiff #1"
+"$LHD" pass semdiff --ref lg:"$W/g1" --impl lg:"$W/o1" -q --workdir "$W/w1" >/dev/null 2>&1 || fail "semdiff #1"
 [ "$(match0_count "$W/g1")" -eq 0 ] || fail "#1 ref has unmatched nodes (expected full commutative match)"
 [ "$(match0_count "$W/o1")" -eq 0 ] || fail "#1 impl has unmatched nodes (expected full commutative match)"
 [ "$(matched_count "$W/g1")" -gt 0 ] || fail "#1 ref matched nothing"
@@ -74,7 +74,7 @@ mod m(a:u8, b:u8, c:u8) -> (y:u9@[0]) {
 EOF
 compile "$W/g2.prp" "$W/g2"
 compile "$W/o2.prp" "$W/o2"
-"$LHD" semdiff --ref lg:"$W/g2" --impl lg:"$W/o2" -q --workdir "$W/w2" >/dev/null 2>&1 || fail "semdiff #2"
+"$LHD" pass semdiff --ref lg:"$W/g2" --impl lg:"$W/o2" -q --workdir "$W/w2" >/dev/null 2>&1 || fail "semdiff #2"
 [ "$(match0_count "$W/g2")" -gt 0 ] || fail "#2 expected the and/sum to be unmatched"
 [ "$(match0_count "$W/o2")" -gt 0 ] || fail "#2 expected the or/sum to be unmatched"
 [ "$(matched_count "$W/g2")" -gt 0 ] || fail "#2 expected the shared logic to still match"
@@ -105,8 +105,8 @@ compile "$W/g3.prp" "$W/g3off"
 compile "$W/o3.prp" "$W/o3off"
 cp -r "$W/g3off" "$W/g3on"
 cp -r "$W/o3off" "$W/o3on"
-"$LHD" semdiff --ref lg:"$W/g3off" --impl lg:"$W/o3off" -q --workdir "$W/w3a" >/dev/null 2>&1 || fail "semdiff #3 off"
-"$LHD" semdiff --ref lg:"$W/g3on" --impl lg:"$W/o3on" --set semdiff.matching_names=true -q --workdir "$W/w3b" >/dev/null 2>&1 || fail "semdiff #3 on"
+"$LHD" pass semdiff --ref lg:"$W/g3off" --impl lg:"$W/o3off" -q --workdir "$W/w3a" >/dev/null 2>&1 || fail "semdiff #3 off"
+"$LHD" pass semdiff --ref lg:"$W/g3on" --impl lg:"$W/o3on" --set semdiff.matching_names=true -q --workdir "$W/w3b" >/dev/null 2>&1 || fail "semdiff #3 on"
 OFF=$(matched_count "$W/g3off")
 ON=$(matched_count "$W/g3on")
 [ "$ON" -gt "$OFF" ] || fail "#3 matching_names=true ($ON) should match more than off ($OFF) (the named flop)"
@@ -117,7 +117,7 @@ echo "PASS: matching_names anchors the renamed-region flop ($OFF -> $ON matched)
 # ---------------------------------------------------------------------------
 compile "$W/g1.prp" "$W/g4"
 compile "$W/o1.prp" "$W/o4"
-"$LHD" semdiff --ref lg:"$W/g4" --impl lg:"$W/o4" --set semdiff.id_granularity=region -q --workdir "$W/w4" >/dev/null 2>&1 || fail "semdiff #4"
+"$LHD" pass semdiff --ref lg:"$W/g4" --impl lg:"$W/o4" --set semdiff.id_granularity=region -q --workdir "$W/w4" >/dev/null 2>&1 || fail "semdiff #4"
 REGIONS=$("$LHD" tool grep -v match=0 lg:"$W/g4" --target node --attr match --diag-fmt jsonl 2>/dev/null | grep -o '"match":[0-9]*' | sort -u | wc -l | tr -d ' ')
 [ "$REGIONS" -eq 1 ] || fail "#4 region granularity should union the connected cone into 1 id, got $REGIONS"
 echo "PASS: id_granularity=region unions the matched cone into one id"
@@ -134,8 +134,8 @@ echo "PASS: grep -v match=0 inverts cleanly (partitions the node set)"
 # ---------------------------------------------------------------------------
 # 6. usage guards: non-lg sides and same dir are rejected.
 # ---------------------------------------------------------------------------
-"$LHD" semdiff --ref "$W/g1.prp" --impl "$W/o1.prp" -q --workdir "$W/w6" >/dev/null 2>&1 && fail "#6 expected non-lg sides to be rejected"
-"$LHD" semdiff --ref lg:"$W/g1" --impl lg:"$W/g1" -q --workdir "$W/w6b" >/dev/null 2>&1 && fail "#6 expected same lg: dir to be rejected"
+"$LHD" pass semdiff --ref "$W/g1.prp" --impl "$W/o1.prp" -q --workdir "$W/w6" >/dev/null 2>&1 && fail "#6 expected non-lg sides to be rejected"
+"$LHD" pass semdiff --ref lg:"$W/g1" --impl lg:"$W/g1" -q --workdir "$W/w6b" >/dev/null 2>&1 && fail "#6 expected same lg: dir to be rejected"
 echo "PASS: usage guards (non-lg sides, identical dirs) reject"
 
-echo "PASS: all lhd semdiff scenarios passed"
+echo "PASS: all lhd pass semdiff scenarios passed"

@@ -97,7 +97,7 @@ sh_test(
     data = _FLOW_DATA + ["part_flat.v"],
 )
 
-# 2f-semdiff: `lhd semdiff` structurally matches two lg: libraries (marks the
+# 2f-semdiff: `lhd pass semdiff` structurally matches two lg: libraries (marks the
 # `match` attribute), the diff is greppable (tool grep match=0 / -v) and
 # visualizable (tool diff --match); covers commutative full-match, an isolated
 # difference, the matching_names flop anchor, and id_granularity=region.

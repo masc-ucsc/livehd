@@ -16,7 +16,7 @@ namespace lhd {
 namespace {
 
 constexpr std::string_view kSteps =
-    R"json(["compile verilog","compile pyrope","lec","semdiff","scan","tool","pass","lsp"])json";
+    R"json(["compile verilog","compile pyrope","lec","scan","tool","pass","lsp"])json";
 constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
 constexpr std::string_view kEmitKinds =
     R"json(["ln","lg","verilog","pyrope","lnast-dump","graphviz","metadata","results","diagnostics"])json";
@@ -264,9 +264,9 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"lec","description":"Logic equivalence check (LEC): prove_equal(ref, impl). Sides are verilog:/pyrope:/ln:/lg: (or a bare .v/.sv/.prp; kind inferred), loaded/elaborated to LGraphs (verilog via --reader, default slang). The --set lec.solver knob picks the backend: cvc5 (default, in-process SMT), bitwuzla (in-process SMT), or lgyosys (inou/yosys/lgcheck, the former `lhd check`). Other engine knobs are --set lec.* (`lhd lec --help`)","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"set","type":"lec.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.v","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind","lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo"]})json");
     return 0;
   }
-  if (name == "semdiff") {
+  if (name == "semdiff" || name == "pass semdiff") {
     print_json_line(
-        R"json({"schema_version":1,"name":"semdiff","description":"Structural diff/match (a structural LEC): structural_match(ref, impl) marks corresponding nodes/driver-pins of both lg: libraries with a shared `match` attribute (0 = no counterpart) and saves both back in place. v1 marks lg: libraries, so both sides must be lg:DIR (compile sources to lg: first). Inspect the diff with `lhd tool grep match=0 lg:impl` or visualize it with `lhd tool diff lg:ref lg:impl --match`. Knobs are --set semdiff.* (matching_names | id_granularity=pair|region)","args":{"required":[{"name":"impl","type":"lg:DIR"},{"name":"ref","type":"lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"set","type":"semdiff.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd semdiff --ref lg:gold --impl lg:opt --top adder","lhd semdiff --ref lg:gold --impl lg:opt --set semdiff.matching_names=true","lhd tool diff lg:gold lg:opt --match"]})json");
+        R"json({"schema_version":1,"name":"pass semdiff","description":"Structural diff/match (a structural LEC), a `pass` subcommand: structural_match(ref, impl) marks corresponding nodes/driver-pins of both lg: libraries with a shared `match` attribute (0 = no counterpart) and saves both back in place. v1 marks lg: libraries, so both sides must be lg:DIR (compile sources to lg: first). Inspect the diff with `lhd tool grep match=0 lg:impl` or visualize it with `lhd tool diff lg:ref lg:impl --match`. Knobs are --set pass.semdiff.* (matching_names | id_granularity=pair|region)","args":{"required":[{"name":"impl","type":"lg:DIR"},{"name":"ref","type":"lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"set","type":"pass.semdiff.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass semdiff --ref lg:gold --impl lg:opt --top adder","lhd pass semdiff --ref lg:gold --impl lg:opt --set pass.semdiff.matching_names=true","lhd tool diff lg:gold lg:opt --match"]})json");
     return 0;
   }
   if (name == "compile" || name == "compile verilog" || name == "compile pyrope") {
@@ -310,7 +310,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "pass") {
     print_json_line(
-        R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut node coloring), partition (region->module Sub split), abc (combinational ABC tech-map), liberty gensim <file.lib> (Liberty -> sim models)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","abc","liberty"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models"]})json");
+        R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut node coloring), partition (region->module Sub split), abc (combinational ABC tech-map), liberty gensim <file.lib> (Liberty -> sim models), semdiff (structural diff/match of two lg: libraries via --ref/--impl; `lhd describe \"pass semdiff\"`)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","abc","liberty","semdiff"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"ref","type":"lg:DIR (semdiff)"},{"name":"impl","type":"lg:DIR (semdiff)"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder"]})json");
     return 0;
   }
   if (name == "lnast-dump") {
@@ -393,10 +393,6 @@ void print_general_help() {
       "               backend — cvc5 (default, in-process) | bitwuzla | lgyosys (yosys/lgcheck)\n"
       "               lhd lec --impl impl.prp --ref ref.v\n"
       "               lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo\n"
-      "  semdiff    structural diff/match (structural LEC): mark corresponding nodes of two lg: with a\n"
-      "               shared `match` attr (0 = no counterpart); grep/visualize the differing regions\n"
-      "               lhd semdiff --ref lg:gold --impl lg:opt --top adder\n"
-      "               lhd tool diff lg:gold lg:opt --match   # visualize  |  lhd tool grep match=0 lg:opt\n"
       "  scan       report each .prp file's import strings (the result's \"scan\" member)\n"
       "               lhd scan x.prp y.prp\n"
       "  tool       inspect ln:/lg: artifacts: cat | grep | diff | tree (stdout; --diag-fmt jsonl)\n"
@@ -405,8 +401,9 @@ void print_general_help() {
       "               lhd tool diff lg:before lg:after --attr color\n"
       "               lhd tool cat x.prp                # LNAST cat (was ln.cat)\n"
       "  lsp        Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
-      "  pass       run one graph pass over lg: inputs: color <alg> | partition | abc | liberty gensim\n"
+      "  pass       run one graph pass over lg: inputs: color <alg> | partition | abc | liberty gensim | semdiff\n"
       "               lhd pass abc --top m lg:dir --emit-dir lg:net\n"
+      "               lhd pass semdiff --ref lg:gold --impl lg:opt --top adder   # structural diff/match\n"
       "  list       steps | recipes | emit-kinds | error-classes | options [REGEX]\n"
       "               lhd list options 'cgen\\..*'   # the --set/--config pass.flag vocabulary\n"
       "  describe   <command | recipe:NAME | emit-kind | pass.flag | dump | config>  (the JSON form)\n"
@@ -490,8 +487,37 @@ int help_pass(const std::string& sub) {
     print_options_section({"liberty."});
     return 0;
   }
+  if (sub == "semdiff") {
+    std::print(
+        "lhd pass semdiff — structural diff/match (a structural LEC)\n"
+        "\n"
+        "usage: lhd pass semdiff --ref lg:DIR --impl lg:DIR [flags]\n"
+        "  Establishes a structural correspondence between the two designs: corresponding\n"
+        "  nodes (and their driver pins) get a shared `match` id, a node with no counterpart\n"
+        "  gets 0. Anchored frontier propagation, meet-in-the-middle: forward from inputs\n"
+        "  (commutative-aware), then backward from outputs for whatever is still unmatched.\n"
+        "  Both lg: libraries are marked in place and saved, so the diff is greppable and\n"
+        "  visualizable. v1 marks lg: libraries, so both sides must be lg:DIR (compile first).\n"
+        "\n"
+        "flags:\n"
+        "  --ref lg:DIR   --impl lg:DIR\n"
+        "  --top T        --ref-top T   --impl-top T\n"
+        "  --set pass.semdiff.matching_names=true   anchor internal flops/mems by hierarchical name\n"
+        "  --set pass.semdiff.id_granularity=region one id per connected matched region (else pair)\n"
+        "\n"
+        "inspect the result:\n"
+        "  lhd tool grep match=0 lg:impl       # what in impl has no counterpart (the diff)\n"
+        "  lhd tool grep -v match=0 lg:ref     # what in ref matched\n"
+        "  lhd tool diff lg:ref lg:impl --match  # visualize: matched regions + -/+ differences\n"
+        "\n"
+        "examples:\n"
+        "  lhd pass semdiff --ref lg:gold --impl lg:opt --top adder\n"
+        "  lhd pass semdiff --ref lg:gold --impl lg:opt --set pass.semdiff.matching_names=true\n");
+    print_options_section({"pass.semdiff."});
+    return 0;
+  }
   if (!sub.empty()) {
-    std::print(stderr, "lhd help: unknown pass subcommand '{}' (color | partition | abc | liberty)\n", sub);
+    std::print(stderr, "lhd help: unknown pass subcommand '{}' (color | partition | abc | liberty | semdiff)\n", sub);
     return 1;
   }
   std::print(
@@ -504,12 +530,14 @@ int help_pass(const std::string& sub) {
       "  partition            region -> module Sub split (-> new lg:)\n"
       "  abc                  combinational ABC tech-map (-> new lg:)\n"
       "  liberty gensim FILE  Liberty -> simulation models (-> new lg:)\n"
+      "  semdiff              structural diff/match of two lg: (--ref/--impl; marked in place)\n"
       "\n"
       "examples:\n"
       "  lhd pass color acyclic --top m lg:dir\n"
       "  lhd pass partition --top m lg:dir --emit-dir lg:parts\n"
       "  lhd pass abc --top m lg:dir --emit-dir lg:net\n"
-      "  lhd pass liberty gensim sky130.lib --emit-dir lg:models\n");
+      "  lhd pass liberty gensim sky130.lib --emit-dir lg:models\n"
+      "  lhd pass semdiff --ref lg:gold --impl lg:opt --top adder\n");
   return 0;
 }
 
@@ -576,33 +604,9 @@ int help_command(const Options& opts) {
     return 0;
   }
   if (topic == "semdiff") {
-    std::print(
-        "lhd semdiff — structural diff/match (a structural LEC)\n"
-        "\n"
-        "usage: lhd semdiff --ref lg:DIR --impl lg:DIR [flags]\n"
-        "  Establishes a structural correspondence between the two designs: corresponding\n"
-        "  nodes (and their driver pins) get a shared `match` id, a node with no counterpart\n"
-        "  gets 0. Anchored frontier propagation, meet-in-the-middle: forward from inputs\n"
-        "  (commutative-aware), then backward from outputs for whatever is still unmatched.\n"
-        "  Both lg: libraries are marked in place and saved, so the diff is greppable and\n"
-        "  visualizable. v1 marks lg: libraries, so both sides must be lg:DIR (compile first).\n"
-        "\n"
-        "flags:\n"
-        "  --ref lg:DIR   --impl lg:DIR\n"
-        "  --top T        --ref-top T   --impl-top T\n"
-        "  --set semdiff.matching_names=true   anchor internal flops/mems by hierarchical name\n"
-        "  --set semdiff.id_granularity=region one id per connected matched region (else pair)\n"
-        "\n"
-        "inspect the result:\n"
-        "  lhd tool grep match=0 lg:impl       # what in impl has no counterpart (the diff)\n"
-        "  lhd tool grep -v match=0 lg:ref     # what in ref matched\n"
-        "  lhd tool diff lg:ref lg:impl --match  # visualize: matched regions + -/+ differences\n"
-        "\n"
-        "examples:\n"
-        "  lhd semdiff --ref lg:gold --impl lg:opt --top adder\n"
-        "  lhd semdiff --ref lg:gold --impl lg:opt --set semdiff.matching_names=true\n");
-    print_options_section({"semdiff."});
-    return 0;
+    // `semdiff` moved under `pass`; keep `lhd help semdiff` as a convenience
+    // alias for `lhd help pass semdiff`.
+    return help_pass("semdiff");
   }
   if (topic == "scan") {
     std::print(

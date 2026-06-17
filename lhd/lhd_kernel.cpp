@@ -36,7 +36,7 @@
 #include "prp2lnast.hpp"
 #include "query.hpp"  // pass/lec L1 (lec::prove_equal) for the cross-check path
 #include "rapidjson/document.h"
-#include "semdiff.hpp"  // pass/semdiff (structural_match) for the `lhd semdiff` command
+#include "semdiff.hpp"  // pass/semdiff (structural_match) for the `lhd pass semdiff` command
 #include "thread_pool.hpp"
 #include "upass_tolg.hpp"
 #include "woothash.hpp"
@@ -389,7 +389,7 @@ constexpr std::pair<std::string_view, std::string_view> kSetPasses[] = {
     {      "pass.abc",          "pass.abc"},
     {  "pass.liberty",      "pass.liberty"},
     {           "lec",          "pass.lec"},
-    {       "semdiff",      "pass.semdiff"},
+    {  "pass.semdiff",      "pass.semdiff"},
 };
 
 std::string_view set_pass_method(std::string_view set_name) {
@@ -993,6 +993,14 @@ void reject_emit_kind(const Options& opts, std::string_view kind, const Lhd_erro
   }
 }
 
+// `lhd pass semdiff …` — the structural diff/match pass, now a `pass`
+// subcommand rather than a top-level command. The command-level validations
+// that used to key off the former `semdiff` command word (no --emit/--dump
+// observables) now key off this.
+bool is_pass_semdiff(const Options& opts) {
+  return opts.command == "pass" && !opts.files.empty() && opts.files.front() == "semdiff";
+}
+
 void validate_emits(const Options& opts) {
   // Kinds with no implementation yet anywhere:
   reject_emit_kind(opts, "graphviz", {"unsupported", "--emit graphviz: is not implemented yet", ""});
@@ -1045,9 +1053,10 @@ void validate_emits(const Options& opts) {
                      "pyrope",
                      {"unsupported", "there is no LGraph -> LNAST decompiler", "pyrope outputs need source/ln: inputs"});
   }
-  if (opts.command == "lec" || opts.command == "semdiff") {
+  if (opts.command == "lec" || is_pass_semdiff(opts)) {
+    const std::string_view what = opts.command == "lec" ? "lec" : "pass semdiff";
     for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump"}) {
-      reject_emit_kind(opts, k, {"usage", std::format("{} has no outputs beyond the result", opts.command), ""});
+      reject_emit_kind(opts, k, {"usage", std::format("{} has no outputs beyond the result", what), ""});
     }
   }
   if (opts.command == "tool") {
@@ -1068,8 +1077,9 @@ void validate_dumps(const Options& opts) {
   if (opts.dumps.empty()) {
     return;
   }
-  if (opts.command == "lec" || opts.command == "semdiff" || opts.command == "scan" || opts.command == "tool") {
-    throw Lhd_error{"usage", std::format("{} has no --dump observables", opts.command), "--dump applies to compile"};
+  if (opts.command == "lec" || is_pass_semdiff(opts) || opts.command == "scan" || opts.command == "tool") {
+    const std::string_view what = is_pass_semdiff(opts) ? "pass semdiff" : std::string_view{opts.command};
+    throw Lhd_error{"usage", std::format("{} has no --dump observables", what), "--dump applies to compile"};
   }
   if (opts.language == "verilog" && opts.reader != "slang" && (wants_dump(opts, "parse") || wants_dump(opts, "lnast"))) {
     throw Lhd_error{"unsupported",
@@ -2505,7 +2515,7 @@ void lec_command(Options& opts, Result& res) {
 
 // ---- semdiff (structural diff/match: stamp the `match` attribute) -----------
 
-// `lhd semdiff --ref lg:A --impl lg:B [--top m]`: structural LEC. Mirrors
+// `lhd pass semdiff --ref lg:A --impl lg:B [--top m]`: structural LEC. Mirrors
 // lec_command (two sides, per-side top pick) but instead of an SMT proof it
 // calls semdiff::structural_match to stamp corresponding nodes/pins of both
 // libraries with a shared `match` id (0 = no counterpart), then saves both lg:
@@ -2513,10 +2523,11 @@ void lec_command(Options& opts, Result& res) {
 // visualizable (`lhd tool diff lg:A lg:B --match`). v1 marks lg: libraries in
 // place, so both sides must be lg: (compile sources to lg: first); the
 // structural_match API itself is kind-agnostic (pass.semdiff / a future lec).
+// Reached only through pass_command (`lhd pass semdiff`), not a top-level word.
 void semdiff_command(Options& opts, Result& res) {
   setup_diag(opts, "semdiff");
   if (opts.impl_path.empty() || opts.ref_path.empty()) {
-    throw Lhd_error{"usage", "semdiff requires --ref lg:DIR and --impl lg:DIR", "e.g. `lhd semdiff --ref lg:gold --impl lg:opt --top adder`"};
+    throw Lhd_error{"usage", "pass semdiff requires --ref lg:DIR and --impl lg:DIR", "e.g. `lhd pass semdiff --ref lg:gold --impl lg:opt --top adder`"};
   }
   if (opts.ref_kind != "lg" || opts.impl_kind != "lg") {
     throw Lhd_error{"usage",
@@ -2524,7 +2535,7 @@ void semdiff_command(Options& opts, Result& res) {
                     "compile sources to lg: first (e.g. `lhd compile a.v --emit-dir lg:gold`)"};
   }
   if (fs::weakly_canonical(opts.ref_path) == fs::weakly_canonical(opts.impl_path)) {
-    throw Lhd_error{"usage", "semdiff --ref and --impl must be different lg: libraries", ""};
+    throw Lhd_error{"usage", "pass semdiff --ref and --impl must be different lg: libraries", ""};
   }
 
   // Each side loads from its OWN library instance, so the two graphs keep
@@ -2545,18 +2556,18 @@ void semdiff_command(Options& opts, Result& res) {
           return g;
         }
       }
-      throw Lhd_error{"config", std::format("semdiff: {} top '{}' not found", side, t), ""};
+      throw Lhd_error{"config", std::format("pass semdiff: {} top '{}' not found", side, t), ""};
     }
     if (v.graphs.size() == 1) {
       return v.graphs.front();
     }
-    throw Lhd_error{"usage", std::format("semdiff: {} has {} modules; pass --{}-top or --top", side, v.graphs.size(), side), ""};
+    throw Lhd_error{"usage", std::format("pass semdiff: {} has {} modules; pass --{}-top or --top", side, v.graphs.size(), side), ""};
   };
   auto ref_g  = pick(ref_var, opts.ref_top, "ref");
   auto impl_g = pick(impl_var, opts.impl_top, "impl");
 
   Eprp_var::Eprp_dict labels;
-  merge_sets(opts, "semdiff", labels);
+  merge_sets(opts, "pass.semdiff", labels);
   auto label = [&](std::string_view k, std::string_view def) -> std::string {
     auto it = labels.find(std::string{k});
     return it == labels.end() ? std::string{def} : it->second;
@@ -2567,7 +2578,7 @@ void semdiff_command(Options& opts, Result& res) {
   o.id_granularity = label("id_granularity", "pair");
   o.verbose        = false;  // the command prints its own summary below
   if (o.id_granularity != "pair" && o.id_granularity != "region") {
-    throw Lhd_error{"usage", std::format("--set semdiff.id_granularity expects pair|region, got '{}'", o.id_granularity), ""};
+    throw Lhd_error{"usage", std::format("--set pass.semdiff.id_granularity expects pair|region, got '{}'", o.id_granularity), ""};
   }
 
   res.recipe_steps.emplace_back(std::format("pass.semdiff alg:{} matching_names:{} id_granularity:{}", o.alg, o.matching_names, o.id_granularity));
@@ -2614,10 +2625,20 @@ void pass_command(Options& opts, Result& res) {
   setup_diag(opts, "pass");
   if (opts.files.empty()) {
     throw Lhd_error{"usage",
-                    "pass requires a subcommand: color <alg> | partition | abc | liberty gensim",
+                    "pass requires a subcommand: color <alg> | partition | abc | liberty gensim | semdiff",
                     "e.g. `lhd pass color acyclic --top m lg:dir` or `lhd pass abc --top m lg:dir --emit-dir lg:net`"};
   }
   const std::string sub = opts.files[0];
+
+  // `pass semdiff --ref lg:A --impl lg:B`: the structural diff/match pass takes
+  // two lg: libraries via --ref/--impl (not a positional lg: input) and marks
+  // the `match` attribute on both in place — so handle it before the single
+  // lg:-input requirement below. semdiff_command holds the side-loading logic
+  // (it mirrors lec_command), just like `pass liberty` is handled specially.
+  if (sub == "semdiff") {
+    semdiff_command(opts, res);
+    return;
+  }
 
   // `pass liberty gensim <file.lib> --emit-dir lg:DIR` takes a Liberty FILE, not
   // an lg: input — handle it before the lg: requirement below.
@@ -2734,7 +2755,7 @@ void pass_command(Options& opts, Result& res) {
       res.outputs.push_back(lg_out->path);
     }
   } else {
-    throw Lhd_error{"usage", std::format("unknown pass subcommand '{}'", sub), "use: color <alg> | partition | abc | liberty gensim"};
+    throw Lhd_error{"usage", std::format("unknown pass subcommand '{}'", sub), "use: color <alg> | partition | abc | liberty gensim | semdiff"};
   }
 }
 
@@ -3351,7 +3372,7 @@ void tool_diff_match_lg(Options& opts, const std::vector<std::string>& lg_dirs) 
   }
   if (!saw_match) {
     std::string hint =
-        "-- no `match` attribute found; run `lhd semdiff --ref lg:… --impl lg:…` first to mark correspondences, "
+        "-- no `match` attribute found; run `lhd pass semdiff --ref lg:… --impl lg:…` first to mark correspondences, "
         "then `lhd tool diff … --match`\n";
     std::fwrite(hint.data(), 1, hint.size(), stdout);
     std::fflush(stdout);
@@ -3775,8 +3796,6 @@ void run_engine_command(Options& opts, Result& res) {
     compile_command(opts, res);
   } else if (opts.command == "lec") {
     lec_command(opts, res);
-  } else if (opts.command == "semdiff") {
-    semdiff_command(opts, res);
   } else if (opts.command == "scan") {
     scan_command(opts, res);
   } else if (opts.command == "tool") {
