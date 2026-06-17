@@ -28,7 +28,6 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 (<code>dd/mm/yyyy</code>).</p>
 <ul>
 <li><strong>12/06/2026, PRPCOLOR:</strong> Do a hierarchical coloring that generates Pyrope-like (comb/pipe) partitions, and timechecks annotations (mod). Exclude <code>comb</code>/<code>pipe</code> modules that already resemble Pyrope from traversal (no unnecessary re-partitioning).</li>
-<li><strong>12/06/2026, LEC:</strong> Create pass/lec todo by iterating over the pass/lec/lec.md BUT create the PARTITION and MATCH first.</li>
 <li><strong>15/06/2026, ABC-COMPLEX-CELLS:</strong> Remaining <code>pass.abc</code> cell bit-blast (the follow-on to 2a-abc, now landed comb+seq): the architecture-selectable barrel shifter (<code>SHL</code>/<code>SRA</code>/<code>Ror</code>, <code>--set pass.abc.shifter=…</code> + stage/block knobs) plus <code>Mult</code>/<code>Div</code>/<code>Mod</code> — all still <code>unsupported-cell</code> today — built on the same <code>abc_arith.hpp</code> complex-cell seam and option pattern as the landed adder/comparators. Also the deferred <code>pass.abc</code> knobs: per-region <code>flow</code> overrides keyed off color metadata, and multi-clock-domain regions (today all reconstructed flops take the region's single clock). Promote to a full page when started.</li>
 </ul>
 
@@ -53,6 +52,7 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 <li><em>Group 2:</em><ul>
 <li><a class="xref" href="livehd/2n.html">2n</a> Pyrope LSP server — Phases B–E (hover/nav/workspace) remain.</li>
 <li><a class="xref" href="livehd/2m-multiport_mem.html">2m-multiport_mem</a> Multiport / multi-clock memory codegen: the <code>--reader slang</code> chunked-<code>wensize</code> SRAM writes now elaborate, but <code>tolg</code>/<code>cgen</code> can't emit them — per-port clock binding (driving case XiangShan <code>data_mem_8x4</code>, three distinct port clocks → "no clock to bind" → truncated Verilog), the multiclock <code>cgen_memory</code> wrapper family (only <code>1rd_1wr</code> exists), and a related single-clock <code>array_ext.v</code> cgen hang.</li>
+<li><a class="xref" href="livehd/2f-semdiff.html">2f-semdiff</a> Structural diff/match between two LGraphs — a <em>structural LEC</em> mirroring the <code>lec</code> API (<code>--ref</code>/<code>--impl</code>, two tops). Anchored frontier propagation (forward then backward, meet-in-the-middle) marks corresponding nodes/pins with a new greppable <code>match</code> attribute; the unmatched gaps are the diff. This is the <strong>MATCH</strong> piece for the LEC pre-todo, which a future <code>lec</code> leverages to shrink the miter.</li>
 </ul></li>
 <li><em>Group 3:</em><ul>
 <li><a class="xref" href="livehd/3l.html">3l</a> Demand-driven (lazy) emit + dead-code elimination for upass — remaining sea-of-nodes subtask.</li>
