@@ -1101,7 +1101,9 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, hhds::Gra
   auto gio = graph->get_io();
   I(gio);
 
-  // Combine input + output decls, sort by port_id (matches each_sorted_graph_io semantics).
+  // Combine input + output decls and sort by port_id for a deterministic
+  // module-header declaration order. Ports are emitted by name, so the order is
+  // purely textual (stable diffs); correctness does not depend on it.
   struct IoEntry {
     std::string name;
     uint32_t    bits;
@@ -1183,7 +1185,8 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
 
     bool first_entry = true;
 
-    // Order pins by port_id to match LiveHD sub.get_sorted_io_pins().
+    // Order pins by port_id for a deterministic instance-connection order. The
+    // connections are named (.name(sig)), so this only fixes the textual order.
     struct SortedPin {
       const hhds::GraphIO::DeclaredIoPin* decl;
       bool                                is_input;
@@ -1314,7 +1317,18 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
       }
     }
     auto        clock_sink = find_sink_pin(node, "clock_pin");
-    std::string clock      = get_scaped_name(pin_wire_name(get_driver(clock_sink)));
+    // Use get_expression (not pin_wire_name directly): an internal/derived clock
+    // (a gated/buffered clock feeding the flop's clock_pin) may be either a
+    // DECLARED net — e.g. a `Get_mask` masking `clk & en` to 1 bit, whose wire
+    // name carries cgen's `_u` suffix recorded in pin2var (pin_wire_name returns
+    // the bare name, so `always @(posedge get_mask_16)` would miss the real
+    // `get_mask_16_u` net) — or a single-fanout node INLINED as an expression
+    // (a boolean `clk_b & gate` with no other consumer is never declared as a
+    // wire, so its bare name `and_28` is undeclared). get_expression resolves
+    // both (pin2var net name, else the pin2expr inline expression), giving
+    // `always @(posedge (clk_b & gate))`; a module-input clock falls through to
+    // its input name as before.
+    std::string clock      = get_expression(get_driver(clock_sink));
 
     std::string reset_async;
     std::string reset;

@@ -571,15 +571,21 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
         ++pos;
       }
     } else if (Lnast_ntype::is_tuple_get(type) || Lnast_ntype::is_tuple_add(type)
-               || Lnast_ntype::is_attr_get(type)) {
-      // dst/tuple_get/tuple_add/attr_get: the first child is a write target
-      // (a temp or user var) copied VERBATIM (these aren't SSA-versioned, as
+               || Lnast_ntype::is_attr_get(type) || Lnast_ntype::is_attr_set(type)) {
+      // dst/tuple_get/tuple_add/attr_get/attr_set: the first child is the
+      // target (a temp/user var being read, or — for attr_set — the entity
+      // being attributed) copied VERBATIM (these aren't SSA-versioned, as
       // before), but the remaining children are READS that must follow the live
       // rename_map — e.g. a `tuple_get` memory-read index, or a `tuple_add`
       // field, that reads an SSA-versioned comb net (a wire reassigned after its
       // declaration-time poison) must resolve to the live driver, not the stale
       // base. (mem_multidim_rw: `data[raddr]` read the poison `raddr` base
-      // instead of `raddr___ssa_1 = {ri,rj}`.)
+      // instead of `raddr___ssa_1 = {ri,rj}`.) For `attr_set` the value operand
+      // is likewise a read: a `clock_pin`/`reset_pin` driven by an INTERNAL wire
+      // (a gated/derived/buffered clock — `attr_set q clock_pin gclk`) must
+      // resolve to the wire's live SSA driver (`gclk___ssa_1 = clk`), not the
+      // declaration-time `gclk = 0ub?` poison — otherwise the flop clock binds
+      // to an invalid/unknown const.
       auto stmt_node = staging->add_child(new_stmts, type);
       if (Lnast::srcid_carries(type)) {
         staging->set_srcid(stmt_node, lnast->get_srcid(child));
