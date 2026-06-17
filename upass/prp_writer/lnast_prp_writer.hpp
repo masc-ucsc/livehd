@@ -138,6 +138,10 @@ private:
   // keyed by variable name (assembled "k=v, k=v" body) and write_declare emits
   // the `:[…]` suffix; the standalone attr_set statements are then skipped.
   std::unordered_map<std::string, std::string> folded_attrs_;
+  // Per (var,attr) pairs folded above (key "var\x01attr"), so write_attr_set
+  // skips re-emitting a folded attr that occurs deeper than the top-level body
+  // (e.g. a memory's `mem.[wensize]=N` written inside the always block).
+  std::unordered_set<std::string> folded_keys_;
 
   // Walk the top-level body statements and populate folded_attrs_ (mapping the
   // slang attr vocabulary to the Pyrope source one: initial->init,

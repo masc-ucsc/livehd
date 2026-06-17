@@ -320,6 +320,12 @@ bool Lnast_prp_writer::body_has_state(Lnast_nid nid) const {
   if (nid.is_invalid()) {
     return false;
   }
+  // A submodule instantiation lowers to a `func_call`; only a `mod` (or `pipe`)
+  // may instantiate (a `comb` calling a sub has "no hardware lowering yet"), so
+  // such a module must be emitted as `mod` even when it carries no register.
+  if (lnast->get_type(nid) == Lnast_ntype::Lnast_ntype_func_call) {
+    return true;
+  }
   // A `declare` whose qualifier child (const) is "reg"/"latch" marks state.
   if (lnast->get_type(nid) == Lnast_ntype::Lnast_ntype_declare) {
     // declare( ref, type, const(qualifier), [value] ) — qualifier is child 2.
@@ -377,6 +383,16 @@ void Lnast_prp_writer::collect_folded_attrs(Lnast_nid stmts_nid) {
     return;
   }
   for (auto s = lnast->get_child(stmts_nid); !s.is_invalid(); s = lnast->get_sibling_next(s)) {
+    // Recurse into nested blocks (always-block stmts AND if/else arms) so a
+    // memory's static config attr written deep inside the body — e.g.
+    // mem.[wensize]=N at each write site under `if (ce) if (we) …` — still folds
+    // into the declaration.  These attrs carry a constant value (the same in
+    // every arm); write_attr_set drops every occurrence via folded_keys_.
+    auto st = lnast->get_type(s);
+    if (st == Lnast_ntype::Lnast_ntype_stmts || Lnast_ntype::is_if_like(st)) {
+      collect_folded_attrs(s);
+      continue;
+    }
     if (lnast->get_type(s) != Lnast_ntype::Lnast_ntype_attr_set) {
       continue;
     }
@@ -396,6 +412,9 @@ void Lnast_prp_writer::collect_folded_attrs(Lnast_nid stmts_nid) {
     }
     auto val_nid = lnast->get_sibling_next(key_nid);
     std::string val = render_attr_value(val_nid);
+
+    auto var0 = std::string(strip_prefix(lnast->get_name(var_nid)));
+    folded_keys_.insert(var0 + "\x01" + key);  // record (var,orig-key) for write_attr_set skip
 
     if (key == "initial") {
       key = "init";
@@ -562,6 +581,12 @@ void Lnast_prp_writer::write_declare() {
     } else {
       write_node();
     }
+  } else if (!has_value && kw != "reg" && kw != "latch" && !kw.starts_with("reg ")) {
+    // A combinational var declared without an initializer (e.g. a Verilog
+    // `BranchProv x;` wire/var) still needs a value in Pyrope — default to 0
+    // (the var is unconditionally assigned before any read).  Regs keep their
+    // bare form (no initializer = no reset pin).
+    print(" = 0");
   }
   move_to_parent();
 }
@@ -1009,6 +1034,15 @@ void Lnast_prp_writer::write_attr_set() {
     return;
   }
 
+  // A folded attr (collected into a declaration's `:[…]` suffix) must NOT also
+  // be emitted as a standalone statement (it would be an assignment to an
+  // undeclared `var.[attr]`).  This catches occurrences deeper than the
+  // top-level body (e.g. mem.[wensize]=N inside the always block).
+  if (folded_keys_.count(std::string(var_name) + "\x01" + std::string(current_text()))) {
+    move_to_parent();
+    return;
+  }
+
   // Generic attribute set/flag: `var.[attr] = value` (or `var.[attr]` when the
   // attr_set carries no value child).  The attr name is a bare identifier, so
   // print the const text directly rather than through write_const (which would
@@ -1035,9 +1069,14 @@ void Lnast_prp_writer::write_attr_get() {
   print(" = ");
   move_to_sibling();
   print(strip_prefix(current_text()));
+  // attr_get reads an ATTRIBUTE: `base.[attr]` (bracket form).  Each remaining
+  // sibling is the attr name (a bare const), so emit `.[name]` — NOT `.name`
+  // (write_node would quote a string attr like "defer" -> `."defer"`, which the
+  // parser rejects with "expected a field name after '.'").
   while (move_to_sibling()) {
-    print(".");
-    write_node();
+    print(".[");
+    print(current_text());
+    print("]");
   }
   move_to_parent();
 }
