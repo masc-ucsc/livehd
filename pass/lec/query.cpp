@@ -29,6 +29,17 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   cvc5::Solver      solver(tm);
   solver.setLogic("QF_ABV");  // bit-vectors + arrays (M4 memory cut)
 
+  // Per-checkSat wall-clock bound (lec.timeout seconds; 0 = unbounded). Hard
+  // nonlinear miters (a chain of two multiplies — associativity, distributivity,
+  // 3-way commutativity at >=16 bits) make cvc5's bit-blast never return. Without
+  // this, `lhd lec` freezes forever. A bound makes the timed-out checkSat come
+  // back `unknown`, which both checkSat sites already map to Verdict::Unknown — a
+  // SOUND degrade (never a false Proven/Refuted). tlimit-per resets per query, so
+  // it bounds each decisive checkSat in the comb / inductive / BMC frames.
+  if (opts.timeout > 0) {
+    solver.setOption("tlimit-per", std::to_string(static_cast<long long>(opts.timeout) * 1000));
+  }
+
   // Bit-blasting BV sub-solver. cvc5's default LAZY bitblast solver can return a
   // spurious SAT on these wide multi-output arithmetic miters: it reports SAT
   // while the underlying CaDiCaL is actually UNSAT, so the miter false-REFUTEs
@@ -479,6 +490,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     } else {
       res.verdict  = Verdict::Unknown;
       res.detail  += "; checkSat returned unknown";
+      if (opts.timeout > 0) {
+        res.detail += " (hit lec.timeout=" + std::to_string(opts.timeout) + "s; raise --set lec.timeout)";
+      }
     }
     return res;
   }
@@ -662,6 +676,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   } else {
     res.verdict  = Verdict::Unknown;
     res.detail  += "; checkSat returned unknown";
+    if (opts.timeout > 0) {
+      res.detail += " (hit lec.timeout=" + std::to_string(opts.timeout) + "s; raise --set lec.timeout)";
+    }
   }
   return res;
 }

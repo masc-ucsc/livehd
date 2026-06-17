@@ -105,3 +105,12 @@ sh_test(
     data = ["//lhd"],
     tags = ["no-sandbox"],  # compiles RTL via both readers + lgcheck
 )
+
+# lec.timeout regression: nonlinear-multiplier miters that freeze cvc5 forever
+# must come back promptly as UNKNOWN once a per-query solver time limit is set.
+sh_test(
+    name = "lec_timeout_test",
+    srcs = ["tests/lec_timeout_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # runs the in-process cvc5 solver under a time limit
+)

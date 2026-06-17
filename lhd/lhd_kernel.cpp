@@ -2395,7 +2395,7 @@ void lec_command(Options& opts, Result& res) {
   o.engine  = label("engine", "ind");
   o.solver  = solver;  // cvc5 | bitwuzla
   o.bound   = std::atoi(label("bound", "20").c_str());
-  o.timeout = std::atoi(label("timeout", "0").c_str());
+  o.timeout = std::atoi(label("timeout", "120").c_str());  // bound the CLI: hard miters degrade to UNKNOWN, never freeze (0 = unbounded)
   o.witness = label("witness", "true") != "false" && label("witness", "true") != "0";
   o.phase        = label("phase", "free");
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());

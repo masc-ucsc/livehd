@@ -30,7 +30,7 @@ void Pass_lec::setup() {
                        "lgyosys (kernel-routed yosys/lgcheck; reads Verilog directly)",
                        "cvc5");
   m.add_label_optional("bound", "BMC / induction depth bound k", "20");
-  m.add_label_optional("timeout", "per-query wall-clock seconds (0 = none)", "0");
+  m.add_label_optional("timeout", "per-query cvc5 wall-clock seconds (0 = unbounded; default bounds the CLI so a hard miter degrades to UNKNOWN instead of freezing)", "120");
   m.add_label_optional("witness", "print the counterexample/witness on Refuted", "true");
   m.add_label_optional("phase",
                        "bmc reset-phase: free (default) | reset (hold reset asserted, check) | run "
@@ -54,7 +54,7 @@ void Pass_lec::lec(Eprp_var& var) {
   o.engine  = std::string{var.get("engine", "ind")};
   o.solver  = std::string{var.get("solver", "cvc5")};
   o.bound   = str_tools::to_i(var.get("bound", "20"));
-  o.timeout = str_tools::to_i(var.get("timeout", "0"));
+  o.timeout = str_tools::to_i(var.get("timeout", "120"));
   o.witness = parse_bool(var.get("witness", "true"));
   o.phase        = std::string{var.get("phase", "free")};
   o.reset_cycles = str_tools::to_i(var.get("reset_cycles", "2"));
