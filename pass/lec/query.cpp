@@ -28,6 +28,30 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   cvc5::TermManager tm;
   cvc5::Solver      solver(tm);
   solver.setLogic("QF_ABV");  // bit-vectors + arrays (M4 memory cut)
+
+  // Bit-blasting BV sub-solver. cvc5's default LAZY bitblast solver can return a
+  // spurious SAT on these wide multi-output arithmetic miters: it reports SAT
+  // while the underlying CaDiCaL is actually UNSAT, so the miter false-REFUTEs
+  // and a witness query (getValue) then aborts inside CaDiCaL ("can only get
+  // value in satisfied state"). The EAGER internal bit-blaster solves the same
+  // miters correctly and keeps the SAT assignment, so witness extraction is
+  // safe — but it has no theory of arrays, so restrict it to array-free queries.
+  // Memory cuts (M4) introduce array symbols; those keep the default solver.
+  bool has_mem = false;
+  for (auto* g : {ref, impl}) {
+    for (auto node : g->forward_class()) {
+      if (graph_util::type_op_of(node) == Ntype_op::Memory) {
+        has_mem = true;
+        break;
+      }
+    }
+    if (has_mem) {
+      break;
+    }
+  }
+  if (!has_mem) {
+    solver.setOption("bv-solver", "bitblast-internal");
+  }
   if (opts.witness) {
     solver.setOption("produce-models", "true");
   }

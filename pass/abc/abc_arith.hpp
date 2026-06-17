@@ -109,7 +109,7 @@ inline Add_result<Bit> cska_add(Ops& ops, const std::vector<Bit>& a, const std::
   for (int base = 0; base < w; base += block_size) {
     int hi    = std::min(base + block_size, w);
     Bit carry = block_cin;
-    Bit pall;
+    Bit pall{};  // value-init: inner loop always runs (hi>base), so this is overwritten before use; silences -Wmaybe-uninitialized
     bool first = true;
     for (int i = base; i < hi; ++i) {
       Bit p = ops.xor_(a[i], b[i]);
