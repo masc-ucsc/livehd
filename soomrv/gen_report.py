@@ -26,18 +26,17 @@ prim = collections.Counter(r["category"].split(":")[0] for r in rows)
 n = len(rows)
 npass = prim.get("PASS", 0)
 
-# cross-check counters (independent of primary verdict)
-cc = {
-  "yosys+slang fails (gate)":        sum(1 for r in rows if r["GATE"]=="FAIL"),
-  "--reader slang fails":            cnt_primary("--reader slang fails"),
-  "lg gen from slang fails":         cnt_primary("lg gen from slang fails"),
-  "lg gen from yosys-slang fails":   sum(1 for r in rows if r["LGYS"]=="FAIL"),
-  "prp gen fails":                   cnt_primary("prp gen fails"),
-  "lec prp vs from slang fails":     sum(1 for r in rows if r["LECSL"]=="REFUTED"),
-  "lec prp vs from yosys-slang fails":sum(1 for r in rows if r["LECYS"]=="REFUTED"),
-  "abc gen fails":                   sum(1 for r in rows if r["ABC"]=="FAIL"),
-  "lec inconclusive (timeout)":      cnt_primary("lec inconclusive"),
-  "other":                           sum(v for k,v in prim.items() if k.startswith("other")),
+# PRIMARY partition (each module in exactly one bucket = its first failing stage)
+PRIMARY_ORDER = ["yosys+slang fails","--reader slang fails","lg gen from slang fails",
+                 "prp gen fails","lec prp vs from slang fails","lec inconclusive"]
+primary = {k: cnt_primary(k) for k in PRIMARY_ORDER}
+primary["other"] = sum(v for k,v in prim.items() if k.startswith("other"))
+# CROSS-CHECK counters (independent signals; a PASS module may still trip one)
+cross = {
+  "yosys+slang gate FAIL (single-unit, design-level)": sum(1 for r in rows if r["GATE"]=="FAIL"),
+  "lg gen from yosys-slang FAIL":   sum(1 for r in rows if r["LGYS"]=="FAIL"),
+  "lec prp vs yosys-slang REFUTED": sum(1 for r in rows if r["LECYS"]=="REFUTED"),
+  "abc gen FAIL":                   sum(1 for r in rows if r["ABC"]=="FAIL"),
 }
 
 def cell(v):
@@ -69,19 +68,25 @@ out.append(f"<p><b>{npass} / {n} PASS</b> (slang round-trip LEC-verified). "
            f"and vs yosys-slang-lg; abc map (only if slang-LEC PROVEN). "
            f"yosys+slang gate runs on a <code>!&amp;</code>&rarr;<code>~&amp;</code>-normalized tree.</p>")
 
-# ── counters ──
-out.append("<h2>Failure-point counters</h2>")
+# ── PRIMARY partition counters (each module in exactly one) ──
+out.append("<h2>Primary classification (each module in exactly one bucket)</h2>")
 out.append("<table><tr><th>category</th><th class=num>count</th><th>bar</th></tr>")
 out.append(f'<tr><td style="color:#1a7f37;font-weight:700">PASS</td><td class=num>{npass}</td>'
            f'<td><span class=bar style="width:{npass*6}px"></span></td></tr>')
-for k,v in cc.items():
+for k in PRIMARY_ORDER + ["other"]:
+    v = primary[k]
     out.append(f'<tr><td>{html.escape(k)}</td><td class=num>{v}</td>'
                f'<td><span class=bar style="width:{v*6}px;background:#cf222e"></span></td></tr>')
+out.append(f"<tr><th>total</th><th class=num>{npass+sum(primary.values())}</th><th></th></tr></table>")
+out.append("<p style='font-size:12px;color:#57606a'>'yosys+slang fails' = the module's OWN file is "
+           "one yosys-slang cannot parse (genuinely hard, lower priority); '--reader slang fails' = the "
+           "module IS yosys-slang-parseable, so the LiveHD slang-reader gap is the actionable blocker.</p>")
+# ── CROSS-CHECK counters (independent signals) ──
+out.append("<h2>Cross-check signals (independent &mdash; a PASS module may still trip one)</h2>")
+out.append("<table><tr><th>signal</th><th class=num>count</th></tr>")
+for k,v in cross.items():
+    out.append(f'<tr><td>{html.escape(k)}</td><td class=num>{v}</td></tr>')
 out.append("</table>")
-out.append("<p style='font-size:12px;color:#57606a'>PASS + the primary buckets "
-           "(--reader slang / lg gen from slang / prp gen / lec vs slang / lec inconclusive / "
-           "yosys+slang) partition the modules. The yosys-slang lg-gen, lec-vs-yosys-slang and "
-           "abc counters are <i>cross-checks</i> &mdash; a PASS module may still fail one.</p>")
 
 # ── dominant blocking issues (by normalized error message) — the prioritization view ──
 import re
