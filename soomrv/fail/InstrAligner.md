@@ -1,11 +1,19 @@
-# InstrAligner — translation FAIL
+# InstrAligner — yosys+slang fails
 
-**Reason:** WRITER-FAIL (.prp does not re-compile; kind=mod, todos=0)
+kind=-
 
-**Read set:** /mada/users/renau/projs/soomrv/repo/src/Config.sv /mada/users/renau/projs/soomrv/repo/src/Include.sv /mada/users/renau/projs/soomrv/repo/src/InstrAligner.sv  soomrv/stubs/PriorityEncoder.stub.sv
+| stage | result |
+|---|---|
+| yosys+slang gate | FAIL |
+| --reader slang -> prp | FAIL |
+| slang -> lg | NA |
+| prp -> lg | NA |
+| yosys-slang -> lg | NA |
+| lec prp vs slang | NA |
+| lec prp vs yosys-slang | NA |
+| abc gen | NA |
 
-**Detail:**
+**First failure message:**
 ```
-"message":"assignment to undeclared variable 'isInstrStart32_c' (declare it with `mut`/`const` first)"
-TODOs=0
+unpacked array read on an unsupported base
 ```

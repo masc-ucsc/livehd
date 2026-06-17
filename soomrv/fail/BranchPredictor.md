@@ -1,11 +1,19 @@
-# BranchPredictor — translation FAIL
+# BranchPredictor — yosys+slang fails
 
-**Reason:** WRITER-FAIL (.prp does not re-compile; kind=mod, todos=0)
+kind=-
 
-**Read set:** /mada/users/renau/projs/soomrv/repo/src/Config.sv /mada/users/renau/projs/soomrv/repo/src/Include.sv /mada/users/renau/projs/soomrv/repo/src/BranchPredictor.sv  soomrv/stubs/BranchTargetBuffer.stub.sv soomrv/stubs/FIFO.stub.sv soomrv/stubs/RegFile.stub.sv soomrv/stubs/ReturnStack.stub.sv soomrv/stubs/TagePredictor.stub.sv
+| stage | result |
+|---|---|
+| yosys+slang gate | FAIL |
+| --reader slang -> prp | FAIL |
+| slang -> lg | NA |
+| prp -> lg | NA |
+| yosys-slang -> lg | NA |
+| lec prp vs slang | NA |
+| lec prp vs yosys-slang | NA |
+| abc gen | NA |
 
-**Detail:**
+**First failure message:**
 ```
-"message":"assignment to undeclared variable 'BTB_br' (declare it with `mut`/`const` first)"
-TODOs=0
+nested non-variable assignment targets are not supported yet
 ```

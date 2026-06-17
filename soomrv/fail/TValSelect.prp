@@ -1,0 +1,44 @@
+pub mod TValSelect::[lg="TValSelect", hdl](clk:u1, rst:u1, IN_branch:u74, IN_commitSqN:u7, IN_tvalProvs:u80) -> (OUT_tvalState:u32@[]) {
+  reg curTVal:u40
+  reg invalidateCurTVal:u1
+  mut _b2i_1 = 0
+  mut invalidateCurTVal_c = 0
+  mut earliest = 0
+  mut i = 0
+  if ((curTVal & 1) != 0) and (((IN_commitSqN - curTVal#[1..=7])#[0..=6]#sext[0..=6] > 0) or (((IN_branch & 1) != 0) and ((curTVal#[1..=7] - IN_branch#[21..=27])#[0..=6]#sext[0..=6] > 0))) {
+    _b2i_1 = 1
+  } else {
+    _b2i_1 = 0
+  }
+  mut earliest__w1 = 0ub????????????????????????????????????????
+  mut earliest__w2 = earliest__w1
+  earliest__w2#[0..=0] = 0
+  OUT_tvalState#[0..=31] = curTVal#[8..=39]
+  earliest = earliest__w2
+  i = 0sb?
+  invalidateCurTVal_c = 0ub?
+  mut invalidateCurTVal_c__w1 = _b2i_1
+  if ((IN_tvalProvs#[0..=39] & 1) != 0) and (true or ((earliest__w2#[1..=7] - IN_tvalProvs#[0..=39]#[1..=7])#[0..=6]#sext[0..=6] > 0)) {
+    earliest = IN_tvalProvs#[0..=39]
+  }
+  if ((IN_tvalProvs#[40..=79] & 1) != 0) and (((earliest & 1) == 0) or ((earliest#[1..=7] - IN_tvalProvs#[40..=79]#[1..=7])#[0..=6]#sext[0..=6] > 0)) {
+    earliest = IN_tvalProvs#[40..=79]
+  }
+  if rst != 0 {
+    curTVal = 0ub????????????????????????????????????????
+    curTVal#[0..=0] = 0
+    invalidateCurTVal = 0
+  } else {
+    invalidateCurTVal = invalidateCurTVal_c__w1
+    if invalidateCurTVal != 0 {
+      curTVal#[1..=7] = 0ub???????
+      curTVal#[0..=0] = 0
+    }
+    if (((earliest & 1) != 0) and (((IN_branch & 1) == 0) or ((earliest#[1..=7] - IN_branch#[21..=27])#[0..=6]#sext[0..=6] < 0))) and (((curTVal & 1) == 0) or ((curTVal#[1..=7] - earliest#[1..=7])#[0..=6]#sext[0..=6] >= 0)) {
+      curTVal#[8..=39] = earliest#[8..=39]
+      curTVal#[1..=7] = earliest#[1..=7]
+      curTVal#[0..=0] = 1
+      invalidateCurTVal = 0
+    }
+  }
+}

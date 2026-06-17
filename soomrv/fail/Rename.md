@@ -1,10 +1,19 @@
-# Rename — translation FAIL
+# Rename — yosys+slang fails
 
-**Reason:** COMPILE-FAIL (slang reader could not lower)
+kind=-
 
-**Read set:** /mada/users/renau/projs/soomrv/repo/src/Config.sv /mada/users/renau/projs/soomrv/repo/src/Include.sv /mada/users/renau/projs/soomrv/repo/src/Rename.sv  soomrv/stubs/RenameTable.stub.sv soomrv/stubs/Scheduler.stub.sv soomrv/stubs/TagBuffer.stub.sv
+| stage | result |
+|---|---|
+| yosys+slang gate | FAIL |
+| --reader slang -> prp | FAIL |
+| slang -> lg | NA |
+| prp -> lg | NA |
+| yosys-slang -> lg | NA |
+| lec prp vs slang | NA |
+| lec prp vs yosys-slang | NA |
+| abc gen | NA |
 
-**Detail:**
+**First failure message:**
 ```
-      2 "code":"unsupported-array-read"	"message":"only single-element reads of unpacked arrays are supported by --reader slang"
+unpacked array read on an unsupported base
 ```

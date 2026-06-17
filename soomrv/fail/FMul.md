@@ -1,13 +1,19 @@
-# FMul — translation FAIL
+# FMul — yosys+slang fails
 
-**Reason:** COMPILE-FAIL (slang reader could not lower)
+kind=-
 
-**Read set:** /mada/users/renau/projs/soomrv/repo/src/Config.sv /mada/users/renau/projs/soomrv/repo/src/Include.sv /mada/users/renau/projs/soomrv/repo/src/FMul.sv 
+| stage | result |
+|---|---|
+| yosys+slang gate | FAIL |
+| --reader slang -> prp | FAIL |
+| slang -> lg | NA |
+| prp -> lg | NA |
+| yosys-slang -> lg | NA |
+| lec prp vs slang | NA |
+| lec prp vs yosys-slang | NA |
+| abc gen | NA |
 
-**Detail:**
+**First failure message:**
 ```
-      1 "code":"unknown-module"	"message":"instance 'recode' refers to an unknown module (blackboxes are not supported by --reader slang)"
-      1 "code":"unknown-module"	"message":"instance 'recB' refers to an unknown module (blackboxes are not supported by --reader slang)"
-      1 "code":"unknown-module"	"message":"instance 'recA' refers to an unknown module (blackboxes are not supported by --reader slang)"
-      1 "code":"unknown-module"	"message":"instance 'mulRec' refers to an unknown module (blackboxes are not supported by --reader slang)"
+instance 'isSigNaN_a' refers to an unknown module (blackboxes are not supported by --reader slang)
 ```

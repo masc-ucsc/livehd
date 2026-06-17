@@ -1,11 +1,19 @@
-# Scheduler — translation FAIL
+# Scheduler — yosys+slang fails
 
-**Reason:** WRITER-FAIL (.prp does not re-compile; kind=mod, todos=0)
+kind=-
 
-**Read set:** /mada/users/renau/projs/soomrv/repo/src/Config.sv /mada/users/renau/projs/soomrv/repo/src/Include.sv /mada/users/renau/projs/soomrv/repo/src/Scheduler.sv  soomrv/stubs/PriorityEncoder.stub.sv
+| stage | result |
+|---|---|
+| yosys+slang gate | FAIL |
+| --reader slang -> prp | FAIL |
+| slang -> lg | NA |
+| prp -> lg | NA |
+| yosys-slang -> lg | NA |
+| lec prp vs slang | NA |
+| lec prp vs yosys-slang | NA |
+| abc gen | NA |
 
-**Detail:**
+**First failure message:**
 ```
-"message":"read of undefined variable 'modTable' (not visible here: declared later, out of scope, or never)"
-TODOs=0
+unpacked array read on an unsupported base
 ```

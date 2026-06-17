@@ -1,72 +1,48 @@
 pub mod ExternalBus::[lg="ExternalBus", hdl](clk:u1, rst:u1, IN_bus:u32, IN_busReady:u1, s_axi_awid:u2, s_axi_awaddr:u32, s_axi_awlen:u8, s_axi_awsize:u3, s_axi_awburst:u2, s_axi_awlock:u1, s_axi_awcache:u4, s_axi_awvalid:u1, s_axi_wdata:u32, s_axi_wstrb:u4, s_axi_wlast:u1, s_axi_wvalid:u1, s_axi_bready:u1, s_axi_arid:u2, s_axi_araddr:u32, s_axi_arlen:u8, s_axi_arsize:u3, s_axi_arburst:u2, s_axi_arlock:u1, s_axi_arcache:u4, s_axi_arvalid:u1, s_axi_rready:u1) -> (OUT_busOE:u1@[], OUT_bus:u32@[], OUT_busValid:u1@[], s_axi_awready:u1@[], s_axi_wready:u1@[], s_axi_bid:u2@[], s_axi_bvalid:u1@[], s_axi_arready:u1@[], s_axi_rid:u2@[], s_axi_rdata:u32@[], s_axi_rlast:u1@[], s_axi_rvalid:u1@[]) {
-  reg curCnt:u4
-  reg s_axi_arready:u1
-  reg s_axi_bid:u2
-  reg s_axi_awready:u1
-  reg curID:u2
   reg state:u3
+  reg s_axi_awready:u1
+  reg curCnt:u4
   reg s_axi_bvalid:u1
+  reg curID:u2
+  reg s_axi_bid:u2
+  reg s_axi_arready:u1
   s_axi_wready = 0
   s_axi_rvalid = 0
   OUT_busOE = 1
   OUT_bus = 0
   OUT_busValid = 0
-  ___2 = state == 1
-  ___3 = state == 3
-  ___5 = state == 2
-  ___6 = state == 4
   s_axi_rvalid = 0
-  ___1 = state == 0
-  ___4 = ___2 or ___3
-  ___7 = ___5 or ___6
   s_axi_rdata = 0ub????????????????????????????????
   s_axi_rid = 0ub??
   s_axi_rlast = 0ub?
-  unique if ___1 {
-    ___8 = s_axi_arvalid != 0
-    if ___8 {
+  unique if state == 0 {
+    if s_axi_arvalid != 0 {
       OUT_busValid = 1
       OUT_busOE = 1
-      ___11 = s_axi_arsize#[0..=1]
       mut _mux_1:u2 = 0
-      ___10 = s_axi_arlen == 0
-      ___12 = ___11#[0..=1]
-      ___9 = s_axi_araddr#[0..=28]
       _mux_1 = 3
-      if ___10 {
-        _mux_1 = ___12
+      if s_axi_arlen == 0 {
+        _mux_1 = s_axi_arsize#[0..=1]#[0..=1]
       }
-      ___14 = _mux_1 << 29
-      ___16 = ___9 | ___14
-      ___17 = ___16 | 0
-      OUT_bus = ___17
+      OUT_bus = (s_axi_araddr#[0..=28] | (_mux_1 << 29)) | 0
     } else {
-      ___18 = s_axi_awvalid != 0
-      if ___18 {
+      if s_axi_awvalid != 0 {
         OUT_busValid = 1
         OUT_busOE = 1
-        ___21 = s_axi_awsize#[0..=1]
         mut _mux_2:u2 = 0
-        ___19 = s_axi_awaddr#[0..=28]
-        ___20 = s_axi_awlen == 0
-        ___22 = ___21#[0..=1]
         _mux_2 = 3
-        if ___20 {
-          _mux_2 = ___22
+        if s_axi_awlen == 0 {
+          _mux_2 = s_axi_awsize#[0..=1]#[0..=1]
         }
-        ___24 = _mux_2 << 29
-        ___26 = ___19 | ___24
-        ___27 = ___26 | 0x80000000
-        OUT_bus = ___27
+        OUT_bus = (s_axi_awaddr#[0..=28] | (_mux_2 << 29)) | 0x80000000
       }
     }
-  } elif ___4 {
+  } elif (state == 1) or (state == 3) {
     mut _b2i_3 = 0
     OUT_busValid = s_axi_rready
-    ___28 = curCnt == 15
     s_axi_rid = curID
     s_axi_rvalid = IN_busReady
-    if ___28 {
+    if curCnt == 15 {
       _b2i_3 = 1
     } else {
       _b2i_3 = 0
@@ -74,102 +50,72 @@ pub mod ExternalBus::[lg="ExternalBus", hdl](clk:u1, rst:u1, IN_bus:u32, IN_busR
     OUT_busOE = 0
     s_axi_rdata = IN_bus
     s_axi_rlast = _b2i_3
-  } elif ___7 {
+  } elif (state == 2) or (state == 4) {
     OUT_busOE = 1
     OUT_bus = s_axi_wdata
     OUT_busValid = s_axi_wvalid
     s_axi_wready = IN_busReady
   } else {
   }
-  ___29 = rst != 0
   s_axi_arready = 0
   s_axi_awready = 0
   s_axi_bid = 0ub??
   s_axi_bvalid = 0
-  if ___29 {
+  if rst != 0 {
     curCnt = 0ub????
     curID = 0ub??
     state = 0
   } else {
-    ___31 = state == 1
-    ___32 = state == 3
-    ___34 = state == 2
-    ___35 = state == 4
-    ___30 = state == 0
-    ___33 = ___31 or ___32
-    ___36 = ___34 or ___35
-    unique if ___30 {
-      ___37 = s_axi_arvalid != 0
-      if ___37 {
-        ___38 = IN_busReady != 0
-        if ___38 {
+    unique if state == 0 {
+      if s_axi_arvalid != 0 {
+        if IN_busReady != 0 {
           mut _mux_4:u3 = 0
-          ___39 = s_axi_arlen == 0
           _mux_4 = 1
           s_axi_arready = 1
-          if ___39 {
+          if s_axi_arlen == 0 {
             _mux_4 = 3
           }
           mut _mux_5:u4 = 0
-          ___42 = s_axi_arlen == 0
           _mux_5 = 0
           curID = s_axi_arid
           state = _mux_4
-          if ___42 {
+          if s_axi_arlen == 0 {
             _mux_5 = 15
           }
           curCnt = _mux_5
         }
       } else {
-        ___45 = s_axi_awvalid != 0
-        if ___45 {
-          ___46 = IN_busReady != 0
-          if ___46 {
+        if s_axi_awvalid != 0 {
+          if IN_busReady != 0 {
             mut _mux_6:u3 = 0
-            ___47 = s_axi_awlen == 0
             _mux_6 = 2
             s_axi_awready = 1
-            if ___47 {
+            if s_axi_awlen == 0 {
               _mux_6 = 4
             }
             mut _mux_7:u4 = 0
-            ___50 = s_axi_awlen == 0
             _mux_7 = 0
             curID = s_axi_awid
             state = _mux_6
-            if ___50 {
+            if s_axi_awlen == 0 {
               _mux_7 = 15
             }
             curCnt = _mux_7
           }
         }
       }
-    } elif ___33 {
-      ___54 = s_axi_rready != 0
-      ___53 = s_axi_rvalid != 0
-      ___55 = ___54 and ___53
-      if ___55 {
-        ___56 = curCnt + 1
-        ___57 = ___56#[0..=31]
-        ___58 = ___57#[0..=3]
-        ___59 = s_axi_rlast != 0
-        curCnt = ___58
-        if ___59 {
+    } elif (state == 1) or (state == 3) {
+      if (s_axi_rready != 0) and (s_axi_rvalid != 0) {
+        curCnt = (curCnt + 1)#[0..=31]#[0..=3]
+        if s_axi_rlast != 0 {
           curCnt = 0ub????
           state = 0
         }
       }
-    } elif ___36 {
-      ___61 = s_axi_wready != 0
-      ___60 = s_axi_wvalid != 0
-      ___62 = ___61 and ___60
-      if ___62 {
-        ___63 = curCnt + 1
-        ___64 = ___63#[0..=31]
-        ___65 = ___64#[0..=3]
-        ___66 = s_axi_wlast != 0
-        curCnt = ___65
-        if ___66 {
+    } elif (state == 2) or (state == 4) {
+      if (s_axi_wready != 0) and (s_axi_wvalid != 0) {
+        curCnt = (curCnt + 1)#[0..=31]#[0..=3]
+        if s_axi_wlast != 0 {
           curCnt = 0ub????
           s_axi_bid = curID
           s_axi_bvalid = 1

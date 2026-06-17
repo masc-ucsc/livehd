@@ -1,11 +1,19 @@
-# PrefetchExecutor — translation FAIL
+# PrefetchExecutor — lg gen from slang fails
 
-**Reason:** WRITER-FAIL (.prp does not re-compile; kind=mod, todos=0)
+kind=mod
 
-**Read set:** /mada/users/renau/projs/soomrv/repo/src/Config.sv /mada/users/renau/projs/soomrv/repo/src/Include.sv /mada/users/renau/projs/soomrv/repo/src/PrefetchExecutor.sv  soomrv/stubs/OHEncoder.stub.sv
+| stage | result |
+|---|---|
+| yosys+slang gate | PASS |
+| --reader slang -> prp | PASS |
+| slang -> lg | FAIL |
+| prp -> lg | FAIL |
+| yosys-slang -> lg | PASS |
+| lec prp vs slang | NA |
+| lec prp vs yosys-slang | NA |
+| abc gen | NA |
 
-**Detail:**
+**First failure message:**
 ```
-"message":"upass.tolg: call to 'OHEncoder' has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending"
-TODOs=0
+upass.tolg: combinational loop in 'PrefetchExecutor'
 ```

@@ -26,583 +26,344 @@ pub comb RangeMaskGen::[lg="RangeMaskGen", hdl](IN_allOnes:u1, IN_enable:u1, IN_
   mut _b2i_17 = 0
   mut _b2i_18 = 0
   mut _b2i_19 = 0
-  ___1 = 1 << IN_startIdx
-  ___2 = ___1#[0..=31]
-  ___3 = ___2#sext[0..=31]
-  ___4 = ___3#[0..=15]
-  ___5 = 1 << IN_endIdx
-  ___6 = ___5#[0..=31]
-  ___7 = ___6#sext[0..=31]
-  ___8 = ___7#[0..=15]
-  ___9 = IN_startIdx + 0
-  ___10 = ___9#[0..=31]
-  ___11 = ___10#[0..=3]
-  ___12 = IN_endIdx + 0
-  ___13 = ___12#[0..=31]
-  ___14 = ___13#[0..=3]
-  mut startIdxSh__w1 = ___11
-  mut endIdxSh__w1 = ___14
-  ___16 = startIdxSh__w1 >= endIdxSh__w1
+  mut startIdxSh__w1 = (IN_startIdx + 0)#[0..=31]#[0..=3]
+  mut endIdxSh__w1 = (IN_endIdx + 0)#[0..=31]#[0..=3]
   active = 0ub?
   endIdxOH = 0ub????????????????
-  mut endIdxOH__w1 = ___8
+  mut endIdxOH__w1 = (1 << IN_endIdx)#[0..=31]#sext[0..=31]#[0..=15]
   endIdxSh = 0ub????
   startIdxOH = 0ub????????????????
-  mut startIdxOH__w1 = ___4
+  mut startIdxOH__w1 = (1 << IN_startIdx)#[0..=31]#sext[0..=31]#[0..=15]
   startIdxSh = 0ub????
-  if ___16 {
+  if startIdxSh__w1 >= endIdxSh__w1 {
     _b2i_1 = 1
   } else {
     _b2i_1 = 0
   }
-  ___18 = startIdxSh__w1 > endIdxSh__w1
-  if ___18 {
+  if startIdxSh__w1 > endIdxSh__w1 {
     _b2i_2 = 1
   } else {
     _b2i_2 = 0
   }
-  ___19 = _b2i_2 & 1
-  _mux_3 = ___19
-  ___20 = endIdxOH__w1 & 1
-  ___21 = startIdxOH__w1 & 1
-  mut doEnd__w1 = ___20
-  mut doStart__w1 = ___21
-  ___23 = doStart__w1 != 0
-  ___22 = doEnd__w1 != 0
+  _mux_3 = _b2i_2 & 1
+  mut doEnd__w1 = endIdxOH__w1 & 1
+  mut doStart__w1 = startIdxOH__w1 & 1
   mut active__w1 = _mux_3
-  ___24 = ___23 and ___22
   active = active__w1
   doEnd = 0ub?
   doStart = 0ub?
   i = 0sb?
-  if ___24 {
+  if (doStart__w1 != 0) and (doEnd__w1 != 0) {
     active = 0
   } else {
-    ___25 = doStart__w1 != 0
-    if ___25 {
+    if doStart__w1 != 0 {
       active = 1
     } else {
-      ___26 = doEnd__w1 != 0
-      if ___26 {
+      if doEnd__w1 != 0 {
         active = 0
       }
     }
   }
-  ___29 = active != 0
-  ___28 = IN_enable != 0
-  ___30 = ___29 and ___28
-  ___27 = IN_allOnes != 0
-  ___31 = ___30 or ___27
-  if ___31 {
+  if ((active != 0) and (IN_enable != 0)) or (IN_allOnes != 0) {
     _b2i_4 = 1
   } else {
     _b2i_4 = 0
   }
-  ___32 = endIdxOH__w1 >> 1
-  ___33 = ___32 & 1
-  ___34 = startIdxOH__w1 >> 1
-  ___35 = ___34 & 1
-  mut doEnd__w2 = ___33
-  mut doStart__w2 = ___35
-  ___37 = doStart__w2 != 0
-  ___36 = doEnd__w2 != 0
+  mut doEnd__w2 = (endIdxOH__w1 >> 1) & 1
+  mut doStart__w2 = (startIdxOH__w1 >> 1) & 1
   OUT_range#[0..=0] = _b2i_4
-  ___38 = ___37 and ___36
-  if ___38 {
+  if (doStart__w2 != 0) and (doEnd__w2 != 0) {
     active = 0
   } else {
-    ___39 = doStart__w2 != 0
-    if ___39 {
+    if doStart__w2 != 0 {
       active = 1
     } else {
-      ___40 = doEnd__w2 != 0
-      if ___40 {
+      if doEnd__w2 != 0 {
         active = 0
       }
     }
   }
-  ___43 = active != 0
-  ___42 = IN_enable != 0
-  ___44 = ___43 and ___42
-  ___41 = IN_allOnes != 0
-  ___45 = ___44 or ___41
-  if ___45 {
+  if ((active != 0) and (IN_enable != 0)) or (IN_allOnes != 0) {
     _b2i_5 = 1
   } else {
     _b2i_5 = 0
   }
-  ___46 = endIdxOH__w1 >> 2
-  ___47 = ___46 & 1
-  ___48 = startIdxOH__w1 >> 2
-  ___49 = ___48 & 1
-  mut doEnd__w3 = ___47
-  mut doStart__w3 = ___49
-  ___51 = doStart__w3 != 0
-  ___50 = doEnd__w3 != 0
+  mut doEnd__w3 = (endIdxOH__w1 >> 2) & 1
+  mut doStart__w3 = (startIdxOH__w1 >> 2) & 1
   mut OUT_range__w1 = OUT_range
   OUT_range__w1#[1..=1] = _b2i_5
-  ___52 = ___51 and ___50
-  if ___52 {
+  if (doStart__w3 != 0) and (doEnd__w3 != 0) {
     active = 0
   } else {
-    ___53 = doStart__w3 != 0
-    if ___53 {
+    if doStart__w3 != 0 {
       active = 1
     } else {
-      ___54 = doEnd__w3 != 0
-      if ___54 {
+      if doEnd__w3 != 0 {
         active = 0
       }
     }
   }
-  ___57 = active != 0
-  ___56 = IN_enable != 0
-  ___58 = ___57 and ___56
-  ___55 = IN_allOnes != 0
-  ___59 = ___58 or ___55
-  if ___59 {
+  if ((active != 0) and (IN_enable != 0)) or (IN_allOnes != 0) {
     _b2i_6 = 1
   } else {
     _b2i_6 = 0
   }
-  ___60 = endIdxOH__w1 >> 3
-  ___61 = ___60 & 1
-  ___62 = startIdxOH__w1 >> 3
-  ___63 = ___62 & 1
-  mut doEnd__w4 = ___61
-  mut doStart__w4 = ___63
-  ___65 = doStart__w4 != 0
-  ___64 = doEnd__w4 != 0
+  mut doEnd__w4 = (endIdxOH__w1 >> 3) & 1
+  mut doStart__w4 = (startIdxOH__w1 >> 3) & 1
   mut OUT_range__w2 = OUT_range__w1
   OUT_range__w2#[2..=2] = _b2i_6
-  ___66 = ___65 and ___64
-  if ___66 {
+  if (doStart__w4 != 0) and (doEnd__w4 != 0) {
     active = 0
   } else {
-    ___67 = doStart__w4 != 0
-    if ___67 {
+    if doStart__w4 != 0 {
       active = 1
     } else {
-      ___68 = doEnd__w4 != 0
-      if ___68 {
+      if doEnd__w4 != 0 {
         active = 0
       }
     }
   }
-  ___71 = active != 0
-  ___70 = IN_enable != 0
-  ___72 = ___71 and ___70
-  ___69 = IN_allOnes != 0
-  ___73 = ___72 or ___69
-  if ___73 {
+  if ((active != 0) and (IN_enable != 0)) or (IN_allOnes != 0) {
     _b2i_7 = 1
   } else {
     _b2i_7 = 0
   }
-  ___74 = endIdxOH__w1 >> 4
-  ___75 = ___74 & 1
-  ___76 = startIdxOH__w1 >> 4
-  ___77 = ___76 & 1
-  mut doEnd__w5 = ___75
-  mut doStart__w5 = ___77
-  ___79 = doStart__w5 != 0
-  ___78 = doEnd__w5 != 0
+  mut doEnd__w5 = (endIdxOH__w1 >> 4) & 1
+  mut doStart__w5 = (startIdxOH__w1 >> 4) & 1
   mut OUT_range__w3 = OUT_range__w2
   OUT_range__w3#[3..=3] = _b2i_7
-  ___80 = ___79 and ___78
-  if ___80 {
+  if (doStart__w5 != 0) and (doEnd__w5 != 0) {
     active = 0
   } else {
-    ___81 = doStart__w5 != 0
-    if ___81 {
+    if doStart__w5 != 0 {
       active = 1
     } else {
-      ___82 = doEnd__w5 != 0
-      if ___82 {
+      if doEnd__w5 != 0 {
         active = 0
       }
     }
   }
-  ___85 = active != 0
-  ___84 = IN_enable != 0
-  ___86 = ___85 and ___84
-  ___83 = IN_allOnes != 0
-  ___87 = ___86 or ___83
-  if ___87 {
+  if ((active != 0) and (IN_enable != 0)) or (IN_allOnes != 0) {
     _b2i_8 = 1
   } else {
     _b2i_8 = 0
   }
-  ___88 = endIdxOH__w1 >> 5
-  ___89 = ___88 & 1
-  ___90 = startIdxOH__w1 >> 5
-  ___91 = ___90 & 1
-  mut doEnd__w6 = ___89
-  mut doStart__w6 = ___91
-  ___93 = doStart__w6 != 0
-  ___92 = doEnd__w6 != 0
+  mut doEnd__w6 = (endIdxOH__w1 >> 5) & 1
+  mut doStart__w6 = (startIdxOH__w1 >> 5) & 1
   mut OUT_range__w4 = OUT_range__w3
   OUT_range__w4#[4..=4] = _b2i_8
-  ___94 = ___93 and ___92
-  if ___94 {
+  if (doStart__w6 != 0) and (doEnd__w6 != 0) {
     active = 0
   } else {
-    ___95 = doStart__w6 != 0
-    if ___95 {
+    if doStart__w6 != 0 {
       active = 1
     } else {
-      ___96 = doEnd__w6 != 0
-      if ___96 {
+      if doEnd__w6 != 0 {
         active = 0
       }
     }
   }
-  ___99 = active != 0
-  ___98 = IN_enable != 0
-  ___100 = ___99 and ___98
-  ___97 = IN_allOnes != 0
-  ___101 = ___100 or ___97
-  if ___101 {
+  if ((active != 0) and (IN_enable != 0)) or (IN_allOnes != 0) {
     _b2i_9 = 1
   } else {
     _b2i_9 = 0
   }
-  ___102 = endIdxOH__w1 >> 6
-  ___103 = ___102 & 1
-  ___104 = startIdxOH__w1 >> 6
-  ___105 = ___104 & 1
-  mut doEnd__w7 = ___103
-  mut doStart__w7 = ___105
-  ___107 = doStart__w7 != 0
-  ___106 = doEnd__w7 != 0
+  mut doEnd__w7 = (endIdxOH__w1 >> 6) & 1
+  mut doStart__w7 = (startIdxOH__w1 >> 6) & 1
   mut OUT_range__w5 = OUT_range__w4
   OUT_range__w5#[5..=5] = _b2i_9
-  ___108 = ___107 and ___106
-  if ___108 {
+  if (doStart__w7 != 0) and (doEnd__w7 != 0) {
     active = 0
   } else {
-    ___109 = doStart__w7 != 0
-    if ___109 {
+    if doStart__w7 != 0 {
       active = 1
     } else {
-      ___110 = doEnd__w7 != 0
-      if ___110 {
+      if doEnd__w7 != 0 {
         active = 0
       }
     }
   }
-  ___113 = active != 0
-  ___112 = IN_enable != 0
-  ___114 = ___113 and ___112
-  ___111 = IN_allOnes != 0
-  ___115 = ___114 or ___111
-  if ___115 {
+  if ((active != 0) and (IN_enable != 0)) or (IN_allOnes != 0) {
     _b2i_10 = 1
   } else {
     _b2i_10 = 0
   }
-  ___116 = endIdxOH__w1 >> 7
-  ___117 = ___116 & 1
-  ___118 = startIdxOH__w1 >> 7
-  ___119 = ___118 & 1
-  mut doEnd__w8 = ___117
-  mut doStart__w8 = ___119
-  ___121 = doStart__w8 != 0
-  ___120 = doEnd__w8 != 0
+  mut doEnd__w8 = (endIdxOH__w1 >> 7) & 1
+  mut doStart__w8 = (startIdxOH__w1 >> 7) & 1
   mut OUT_range__w6 = OUT_range__w5
   OUT_range__w6#[6..=6] = _b2i_10
-  ___122 = ___121 and ___120
-  if ___122 {
+  if (doStart__w8 != 0) and (doEnd__w8 != 0) {
     active = 0
   } else {
-    ___123 = doStart__w8 != 0
-    if ___123 {
+    if doStart__w8 != 0 {
       active = 1
     } else {
-      ___124 = doEnd__w8 != 0
-      if ___124 {
+      if doEnd__w8 != 0 {
         active = 0
       }
     }
   }
-  ___127 = active != 0
-  ___126 = IN_enable != 0
-  ___128 = ___127 and ___126
-  ___125 = IN_allOnes != 0
-  ___129 = ___128 or ___125
-  if ___129 {
+  if ((active != 0) and (IN_enable != 0)) or (IN_allOnes != 0) {
     _b2i_11 = 1
   } else {
     _b2i_11 = 0
   }
-  ___130 = endIdxOH__w1 >> 8
-  ___131 = ___130 & 1
-  ___132 = startIdxOH__w1 >> 8
-  ___133 = ___132 & 1
-  mut doEnd__w9 = ___131
-  mut doStart__w9 = ___133
-  ___135 = doStart__w9 != 0
-  ___134 = doEnd__w9 != 0
+  mut doEnd__w9 = (endIdxOH__w1 >> 8) & 1
+  mut doStart__w9 = (startIdxOH__w1 >> 8) & 1
   mut OUT_range__w7 = OUT_range__w6
   OUT_range__w7#[7..=7] = _b2i_11
-  ___136 = ___135 and ___134
-  if ___136 {
+  if (doStart__w9 != 0) and (doEnd__w9 != 0) {
     active = 0
   } else {
-    ___137 = doStart__w9 != 0
-    if ___137 {
+    if doStart__w9 != 0 {
       active = 1
     } else {
-      ___138 = doEnd__w9 != 0
-      if ___138 {
+      if doEnd__w9 != 0 {
         active = 0
       }
     }
   }
-  ___141 = active != 0
-  ___140 = IN_enable != 0
-  ___142 = ___141 and ___140
-  ___139 = IN_allOnes != 0
-  ___143 = ___142 or ___139
-  if ___143 {
+  if ((active != 0) and (IN_enable != 0)) or (IN_allOnes != 0) {
     _b2i_12 = 1
   } else {
     _b2i_12 = 0
   }
-  ___144 = endIdxOH__w1 >> 9
-  ___145 = ___144 & 1
-  ___146 = startIdxOH__w1 >> 9
-  ___147 = ___146 & 1
-  mut doEnd__w10 = ___145
-  mut doStart__w10 = ___147
-  ___149 = doStart__w10 != 0
-  ___148 = doEnd__w10 != 0
+  mut doEnd__w10 = (endIdxOH__w1 >> 9) & 1
+  mut doStart__w10 = (startIdxOH__w1 >> 9) & 1
   mut OUT_range__w8 = OUT_range__w7
   OUT_range__w8#[8..=8] = _b2i_12
-  ___150 = ___149 and ___148
-  if ___150 {
+  if (doStart__w10 != 0) and (doEnd__w10 != 0) {
     active = 0
   } else {
-    ___151 = doStart__w10 != 0
-    if ___151 {
+    if doStart__w10 != 0 {
       active = 1
     } else {
-      ___152 = doEnd__w10 != 0
-      if ___152 {
+      if doEnd__w10 != 0 {
         active = 0
       }
     }
   }
-  ___155 = active != 0
-  ___154 = IN_enable != 0
-  ___156 = ___155 and ___154
-  ___153 = IN_allOnes != 0
-  ___157 = ___156 or ___153
-  if ___157 {
+  if ((active != 0) and (IN_enable != 0)) or (IN_allOnes != 0) {
     _b2i_13 = 1
   } else {
     _b2i_13 = 0
   }
-  ___158 = endIdxOH__w1 >> 10
-  ___159 = ___158 & 1
-  ___160 = startIdxOH__w1 >> 10
-  ___161 = ___160 & 1
-  mut doEnd__w11 = ___159
-  mut doStart__w11 = ___161
-  ___163 = doStart__w11 != 0
-  ___162 = doEnd__w11 != 0
+  mut doEnd__w11 = (endIdxOH__w1 >> 10) & 1
+  mut doStart__w11 = (startIdxOH__w1 >> 10) & 1
   mut OUT_range__w9 = OUT_range__w8
   OUT_range__w9#[9..=9] = _b2i_13
-  ___164 = ___163 and ___162
-  if ___164 {
+  if (doStart__w11 != 0) and (doEnd__w11 != 0) {
     active = 0
   } else {
-    ___165 = doStart__w11 != 0
-    if ___165 {
+    if doStart__w11 != 0 {
       active = 1
     } else {
-      ___166 = doEnd__w11 != 0
-      if ___166 {
+      if doEnd__w11 != 0 {
         active = 0
       }
     }
   }
-  ___169 = active != 0
-  ___168 = IN_enable != 0
-  ___170 = ___169 and ___168
-  ___167 = IN_allOnes != 0
-  ___171 = ___170 or ___167
-  if ___171 {
+  if ((active != 0) and (IN_enable != 0)) or (IN_allOnes != 0) {
     _b2i_14 = 1
   } else {
     _b2i_14 = 0
   }
-  ___172 = endIdxOH__w1 >> 11
-  ___173 = ___172 & 1
-  ___174 = startIdxOH__w1 >> 11
-  ___175 = ___174 & 1
-  mut doEnd__w12 = ___173
-  mut doStart__w12 = ___175
-  ___177 = doStart__w12 != 0
-  ___176 = doEnd__w12 != 0
+  mut doEnd__w12 = (endIdxOH__w1 >> 11) & 1
+  mut doStart__w12 = (startIdxOH__w1 >> 11) & 1
   mut OUT_range__w10 = OUT_range__w9
   OUT_range__w10#[10..=10] = _b2i_14
-  ___178 = ___177 and ___176
-  if ___178 {
+  if (doStart__w12 != 0) and (doEnd__w12 != 0) {
     active = 0
   } else {
-    ___179 = doStart__w12 != 0
-    if ___179 {
+    if doStart__w12 != 0 {
       active = 1
     } else {
-      ___180 = doEnd__w12 != 0
-      if ___180 {
+      if doEnd__w12 != 0 {
         active = 0
       }
     }
   }
-  ___183 = active != 0
-  ___182 = IN_enable != 0
-  ___184 = ___183 and ___182
-  ___181 = IN_allOnes != 0
-  ___185 = ___184 or ___181
-  if ___185 {
+  if ((active != 0) and (IN_enable != 0)) or (IN_allOnes != 0) {
     _b2i_15 = 1
   } else {
     _b2i_15 = 0
   }
-  ___186 = endIdxOH__w1 >> 12
-  ___187 = ___186 & 1
-  ___188 = startIdxOH__w1 >> 12
-  ___189 = ___188 & 1
-  mut doEnd__w13 = ___187
-  mut doStart__w13 = ___189
-  ___191 = doStart__w13 != 0
-  ___190 = doEnd__w13 != 0
+  mut doEnd__w13 = (endIdxOH__w1 >> 12) & 1
+  mut doStart__w13 = (startIdxOH__w1 >> 12) & 1
   mut OUT_range__w11 = OUT_range__w10
   OUT_range__w11#[11..=11] = _b2i_15
-  ___192 = ___191 and ___190
-  if ___192 {
+  if (doStart__w13 != 0) and (doEnd__w13 != 0) {
     active = 0
   } else {
-    ___193 = doStart__w13 != 0
-    if ___193 {
+    if doStart__w13 != 0 {
       active = 1
     } else {
-      ___194 = doEnd__w13 != 0
-      if ___194 {
+      if doEnd__w13 != 0 {
         active = 0
       }
     }
   }
-  ___197 = active != 0
-  ___196 = IN_enable != 0
-  ___198 = ___197 and ___196
-  ___195 = IN_allOnes != 0
-  ___199 = ___198 or ___195
-  if ___199 {
+  if ((active != 0) and (IN_enable != 0)) or (IN_allOnes != 0) {
     _b2i_16 = 1
   } else {
     _b2i_16 = 0
   }
-  ___200 = endIdxOH__w1 >> 13
-  ___201 = ___200 & 1
-  ___202 = startIdxOH__w1 >> 13
-  ___203 = ___202 & 1
-  mut doEnd__w14 = ___201
-  mut doStart__w14 = ___203
-  ___205 = doStart__w14 != 0
-  ___204 = doEnd__w14 != 0
+  mut doEnd__w14 = (endIdxOH__w1 >> 13) & 1
+  mut doStart__w14 = (startIdxOH__w1 >> 13) & 1
   mut OUT_range__w12 = OUT_range__w11
   OUT_range__w12#[12..=12] = _b2i_16
-  ___206 = ___205 and ___204
-  if ___206 {
+  if (doStart__w14 != 0) and (doEnd__w14 != 0) {
     active = 0
   } else {
-    ___207 = doStart__w14 != 0
-    if ___207 {
+    if doStart__w14 != 0 {
       active = 1
     } else {
-      ___208 = doEnd__w14 != 0
-      if ___208 {
+      if doEnd__w14 != 0 {
         active = 0
       }
     }
   }
-  ___211 = active != 0
-  ___210 = IN_enable != 0
-  ___212 = ___211 and ___210
-  ___209 = IN_allOnes != 0
-  ___213 = ___212 or ___209
-  if ___213 {
+  if ((active != 0) and (IN_enable != 0)) or (IN_allOnes != 0) {
     _b2i_17 = 1
   } else {
     _b2i_17 = 0
   }
-  ___214 = endIdxOH__w1 >> 14
-  ___215 = ___214 & 1
-  ___216 = startIdxOH__w1 >> 14
-  ___217 = ___216 & 1
-  mut doEnd__w15 = ___215
-  mut doStart__w15 = ___217
-  ___219 = doStart__w15 != 0
-  ___218 = doEnd__w15 != 0
+  mut doEnd__w15 = (endIdxOH__w1 >> 14) & 1
+  mut doStart__w15 = (startIdxOH__w1 >> 14) & 1
   mut OUT_range__w13 = OUT_range__w12
   OUT_range__w13#[13..=13] = _b2i_17
-  ___220 = ___219 and ___218
-  if ___220 {
+  if (doStart__w15 != 0) and (doEnd__w15 != 0) {
     active = 0
   } else {
-    ___221 = doStart__w15 != 0
-    if ___221 {
+    if doStart__w15 != 0 {
       active = 1
     } else {
-      ___222 = doEnd__w15 != 0
-      if ___222 {
+      if doEnd__w15 != 0 {
         active = 0
       }
     }
   }
-  ___225 = active != 0
-  ___224 = IN_enable != 0
-  ___226 = ___225 and ___224
-  ___223 = IN_allOnes != 0
-  ___227 = ___226 or ___223
-  if ___227 {
+  if ((active != 0) and (IN_enable != 0)) or (IN_allOnes != 0) {
     _b2i_18 = 1
   } else {
     _b2i_18 = 0
   }
-  ___228 = endIdxOH__w1 >> 15
-  ___229 = ___228 & 1
-  ___230 = startIdxOH__w1 >> 15
-  ___231 = ___230 & 1
-  mut doEnd__w16 = ___229
-  mut doStart__w16 = ___231
-  ___233 = doStart__w16 != 0
-  ___232 = doEnd__w16 != 0
+  mut doEnd__w16 = (endIdxOH__w1 >> 15) & 1
+  mut doStart__w16 = (startIdxOH__w1 >> 15) & 1
   mut OUT_range__w14 = OUT_range__w13
   OUT_range__w14#[14..=14] = _b2i_18
-  ___234 = ___233 and ___232
-  if ___234 {
+  if (doStart__w16 != 0) and (doEnd__w16 != 0) {
     active = 0
   } else {
-    ___235 = doStart__w16 != 0
-    if ___235 {
+    if doStart__w16 != 0 {
       active = 1
     } else {
-      ___236 = doEnd__w16 != 0
-      if ___236 {
+      if doEnd__w16 != 0 {
         active = 0
       }
     }
   }
-  ___239 = active != 0
-  ___238 = IN_enable != 0
-  ___240 = ___239 and ___238
-  ___237 = IN_allOnes != 0
-  ___241 = ___240 or ___237
-  if ___241 {
+  if ((active != 0) and (IN_enable != 0)) or (IN_allOnes != 0) {
     _b2i_19 = 1
   } else {
     _b2i_19 = 0

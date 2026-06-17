@@ -1,226 +1,99 @@
 pub comb PrefixSum::[lg="PrefixSum", hdl](IN_data:u32) -> (OUT_psum:u192) {
   mut sum = 0
   mut i = 0
-  ___1 = IN_data & 1
-  ___2 = 0 + ___1
-  ___3 = ___2#[0..=5]
-  mut sum__w2 = ___3
-  ___4 = IN_data >> 1
-  ___5 = ___4 & 1
-  ___6 = sum__w2 + ___5
-  ___7 = ___6#[0..=5]
+  mut sum__w2 = (0 + (IN_data & 1))#[0..=5]
   OUT_psum#[0..=5] = sum__w2
-  mut sum__w3 = ___7
-  ___8 = IN_data >> 2
-  ___9 = ___8 & 1
-  ___10 = sum__w3 + ___9
-  ___11 = ___10#[0..=5]
+  mut sum__w3 = (sum__w2 + ((IN_data >> 1) & 1))#[0..=5]
   mut OUT_psum__w1 = OUT_psum
   OUT_psum__w1#[6..=11] = sum__w3
-  mut sum__w4 = ___11
-  ___12 = IN_data >> 3
-  ___13 = ___12 & 1
-  ___14 = sum__w4 + ___13
-  ___15 = ___14#[0..=5]
+  mut sum__w4 = (sum__w3 + ((IN_data >> 2) & 1))#[0..=5]
   mut OUT_psum__w2 = OUT_psum__w1
   OUT_psum__w2#[12..=17] = sum__w4
-  mut sum__w5 = ___15
-  ___16 = IN_data >> 4
-  ___17 = ___16 & 1
-  ___18 = sum__w5 + ___17
-  ___19 = ___18#[0..=5]
+  mut sum__w5 = (sum__w4 + ((IN_data >> 3) & 1))#[0..=5]
   mut OUT_psum__w3 = OUT_psum__w2
   OUT_psum__w3#[18..=23] = sum__w5
-  mut sum__w6 = ___19
-  ___20 = IN_data >> 5
-  ___21 = ___20 & 1
-  ___22 = sum__w6 + ___21
-  ___23 = ___22#[0..=5]
+  mut sum__w6 = (sum__w5 + ((IN_data >> 4) & 1))#[0..=5]
   mut OUT_psum__w4 = OUT_psum__w3
   OUT_psum__w4#[24..=29] = sum__w6
-  mut sum__w7 = ___23
-  ___24 = IN_data >> 6
-  ___25 = ___24 & 1
-  ___26 = sum__w7 + ___25
-  ___27 = ___26#[0..=5]
+  mut sum__w7 = (sum__w6 + ((IN_data >> 5) & 1))#[0..=5]
   mut OUT_psum__w5 = OUT_psum__w4
   OUT_psum__w5#[30..=35] = sum__w7
-  mut sum__w8 = ___27
-  ___28 = IN_data >> 7
-  ___29 = ___28 & 1
-  ___30 = sum__w8 + ___29
-  ___31 = ___30#[0..=5]
+  mut sum__w8 = (sum__w7 + ((IN_data >> 6) & 1))#[0..=5]
   mut OUT_psum__w6 = OUT_psum__w5
   OUT_psum__w6#[36..=41] = sum__w8
-  mut sum__w9 = ___31
-  ___32 = IN_data >> 8
-  ___33 = ___32 & 1
-  ___34 = sum__w9 + ___33
-  ___35 = ___34#[0..=5]
+  mut sum__w9 = (sum__w8 + ((IN_data >> 7) & 1))#[0..=5]
   mut OUT_psum__w7 = OUT_psum__w6
   OUT_psum__w7#[42..=47] = sum__w9
-  mut sum__w10 = ___35
-  ___36 = IN_data >> 9
-  ___37 = ___36 & 1
-  ___38 = sum__w10 + ___37
-  ___39 = ___38#[0..=5]
+  mut sum__w10 = (sum__w9 + ((IN_data >> 8) & 1))#[0..=5]
   mut OUT_psum__w8 = OUT_psum__w7
   OUT_psum__w8#[48..=53] = sum__w10
-  mut sum__w11 = ___39
-  ___40 = IN_data >> 10
-  ___41 = ___40 & 1
-  ___42 = sum__w11 + ___41
-  ___43 = ___42#[0..=5]
+  mut sum__w11 = (sum__w10 + ((IN_data >> 9) & 1))#[0..=5]
   mut OUT_psum__w9 = OUT_psum__w8
   OUT_psum__w9#[54..=59] = sum__w11
-  mut sum__w12 = ___43
-  ___44 = IN_data >> 11
-  ___45 = ___44 & 1
-  ___46 = sum__w12 + ___45
-  ___47 = ___46#[0..=5]
+  mut sum__w12 = (sum__w11 + ((IN_data >> 10) & 1))#[0..=5]
   mut OUT_psum__w10 = OUT_psum__w9
   OUT_psum__w10#[60..=65] = sum__w12
-  mut sum__w13 = ___47
-  ___48 = IN_data >> 12
-  ___49 = ___48 & 1
-  ___50 = sum__w13 + ___49
-  ___51 = ___50#[0..=5]
+  mut sum__w13 = (sum__w12 + ((IN_data >> 11) & 1))#[0..=5]
   mut OUT_psum__w11 = OUT_psum__w10
   OUT_psum__w11#[66..=71] = sum__w13
-  mut sum__w14 = ___51
-  ___52 = IN_data >> 13
-  ___53 = ___52 & 1
-  ___54 = sum__w14 + ___53
-  ___55 = ___54#[0..=5]
+  mut sum__w14 = (sum__w13 + ((IN_data >> 12) & 1))#[0..=5]
   mut OUT_psum__w12 = OUT_psum__w11
   OUT_psum__w12#[72..=77] = sum__w14
-  mut sum__w15 = ___55
-  ___56 = IN_data >> 14
-  ___57 = ___56 & 1
-  ___58 = sum__w15 + ___57
-  ___59 = ___58#[0..=5]
+  mut sum__w15 = (sum__w14 + ((IN_data >> 13) & 1))#[0..=5]
   mut OUT_psum__w13 = OUT_psum__w12
   OUT_psum__w13#[78..=83] = sum__w15
-  mut sum__w16 = ___59
-  ___60 = IN_data >> 15
-  ___61 = ___60 & 1
-  ___62 = sum__w16 + ___61
-  ___63 = ___62#[0..=5]
+  mut sum__w16 = (sum__w15 + ((IN_data >> 14) & 1))#[0..=5]
   mut OUT_psum__w14 = OUT_psum__w13
   OUT_psum__w14#[84..=89] = sum__w16
-  mut sum__w17 = ___63
-  ___64 = IN_data >> 16
-  ___65 = ___64 & 1
-  ___66 = sum__w17 + ___65
-  ___67 = ___66#[0..=5]
+  mut sum__w17 = (sum__w16 + ((IN_data >> 15) & 1))#[0..=5]
   mut OUT_psum__w15 = OUT_psum__w14
   OUT_psum__w15#[90..=95] = sum__w17
-  mut sum__w18 = ___67
-  ___68 = IN_data >> 17
-  ___69 = ___68 & 1
-  ___70 = sum__w18 + ___69
-  ___71 = ___70#[0..=5]
+  mut sum__w18 = (sum__w17 + ((IN_data >> 16) & 1))#[0..=5]
   mut OUT_psum__w16 = OUT_psum__w15
   OUT_psum__w16#[96..=101] = sum__w18
-  mut sum__w19 = ___71
-  ___72 = IN_data >> 18
-  ___73 = ___72 & 1
-  ___74 = sum__w19 + ___73
-  ___75 = ___74#[0..=5]
+  mut sum__w19 = (sum__w18 + ((IN_data >> 17) & 1))#[0..=5]
   mut OUT_psum__w17 = OUT_psum__w16
   OUT_psum__w17#[102..=107] = sum__w19
-  mut sum__w20 = ___75
-  ___76 = IN_data >> 19
-  ___77 = ___76 & 1
-  ___78 = sum__w20 + ___77
-  ___79 = ___78#[0..=5]
+  mut sum__w20 = (sum__w19 + ((IN_data >> 18) & 1))#[0..=5]
   mut OUT_psum__w18 = OUT_psum__w17
   OUT_psum__w18#[108..=113] = sum__w20
-  mut sum__w21 = ___79
-  ___80 = IN_data >> 20
-  ___81 = ___80 & 1
-  ___82 = sum__w21 + ___81
-  ___83 = ___82#[0..=5]
+  mut sum__w21 = (sum__w20 + ((IN_data >> 19) & 1))#[0..=5]
   mut OUT_psum__w19 = OUT_psum__w18
   OUT_psum__w19#[114..=119] = sum__w21
-  mut sum__w22 = ___83
-  ___84 = IN_data >> 21
-  ___85 = ___84 & 1
-  ___86 = sum__w22 + ___85
-  ___87 = ___86#[0..=5]
+  mut sum__w22 = (sum__w21 + ((IN_data >> 20) & 1))#[0..=5]
   mut OUT_psum__w20 = OUT_psum__w19
   OUT_psum__w20#[120..=125] = sum__w22
-  mut sum__w23 = ___87
-  ___88 = IN_data >> 22
-  ___89 = ___88 & 1
-  ___90 = sum__w23 + ___89
-  ___91 = ___90#[0..=5]
+  mut sum__w23 = (sum__w22 + ((IN_data >> 21) & 1))#[0..=5]
   mut OUT_psum__w21 = OUT_psum__w20
   OUT_psum__w21#[126..=131] = sum__w23
-  mut sum__w24 = ___91
-  ___92 = IN_data >> 23
-  ___93 = ___92 & 1
-  ___94 = sum__w24 + ___93
-  ___95 = ___94#[0..=5]
+  mut sum__w24 = (sum__w23 + ((IN_data >> 22) & 1))#[0..=5]
   mut OUT_psum__w22 = OUT_psum__w21
   OUT_psum__w22#[132..=137] = sum__w24
-  mut sum__w25 = ___95
-  ___96 = IN_data >> 24
-  ___97 = ___96 & 1
-  ___98 = sum__w25 + ___97
-  ___99 = ___98#[0..=5]
+  mut sum__w25 = (sum__w24 + ((IN_data >> 23) & 1))#[0..=5]
   mut OUT_psum__w23 = OUT_psum__w22
   OUT_psum__w23#[138..=143] = sum__w25
-  mut sum__w26 = ___99
-  ___100 = IN_data >> 25
-  ___101 = ___100 & 1
-  ___102 = sum__w26 + ___101
-  ___103 = ___102#[0..=5]
+  mut sum__w26 = (sum__w25 + ((IN_data >> 24) & 1))#[0..=5]
   mut OUT_psum__w24 = OUT_psum__w23
   OUT_psum__w24#[144..=149] = sum__w26
-  mut sum__w27 = ___103
-  ___104 = IN_data >> 26
-  ___105 = ___104 & 1
-  ___106 = sum__w27 + ___105
-  ___107 = ___106#[0..=5]
+  mut sum__w27 = (sum__w26 + ((IN_data >> 25) & 1))#[0..=5]
   mut OUT_psum__w25 = OUT_psum__w24
   OUT_psum__w25#[150..=155] = sum__w27
-  mut sum__w28 = ___107
-  ___108 = IN_data >> 27
-  ___109 = ___108 & 1
-  ___110 = sum__w28 + ___109
-  ___111 = ___110#[0..=5]
+  mut sum__w28 = (sum__w27 + ((IN_data >> 26) & 1))#[0..=5]
   mut OUT_psum__w26 = OUT_psum__w25
   OUT_psum__w26#[156..=161] = sum__w28
-  mut sum__w29 = ___111
-  ___112 = IN_data >> 28
-  ___113 = ___112 & 1
-  ___114 = sum__w29 + ___113
-  ___115 = ___114#[0..=5]
+  mut sum__w29 = (sum__w28 + ((IN_data >> 27) & 1))#[0..=5]
   mut OUT_psum__w27 = OUT_psum__w26
   OUT_psum__w27#[162..=167] = sum__w29
-  mut sum__w30 = ___115
-  ___116 = IN_data >> 29
-  ___117 = ___116 & 1
-  ___118 = sum__w30 + ___117
-  ___119 = ___118#[0..=5]
+  mut sum__w30 = (sum__w29 + ((IN_data >> 28) & 1))#[0..=5]
   mut OUT_psum__w28 = OUT_psum__w27
   OUT_psum__w28#[168..=173] = sum__w30
-  mut sum__w31 = ___119
-  ___120 = IN_data >> 30
-  ___121 = ___120 & 1
-  ___122 = sum__w31 + ___121
-  ___123 = ___122#[0..=5]
+  mut sum__w31 = (sum__w30 + ((IN_data >> 29) & 1))#[0..=5]
   mut OUT_psum__w29 = OUT_psum__w28
   OUT_psum__w29#[174..=179] = sum__w31
-  mut sum__w32 = ___123
-  ___124 = IN_data >> 31
-  ___125 = ___124 & 1
-  ___126 = sum__w32 + ___125
-  ___127 = ___126#[0..=5]
+  mut sum__w32 = (sum__w31 + ((IN_data >> 30) & 1))#[0..=5]
   mut OUT_psum__w30 = OUT_psum__w29
   OUT_psum__w30#[180..=185] = sum__w32
-  mut sum__w33 = ___127
+  mut sum__w33 = (sum__w32 + ((IN_data >> 31) & 1))#[0..=5]
   mut OUT_psum__w31 = OUT_psum__w30
   OUT_psum__w31#[186..=191] = sum__w33
   OUT_psum = OUT_psum__w31

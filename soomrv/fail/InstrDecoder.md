@@ -1,11 +1,19 @@
-# InstrDecoder — translation FAIL
+# InstrDecoder — lg gen from slang fails
 
-**Reason:** WRITER-FAIL (.prp does not re-compile; kind=mod, todos=0)
+kind=mod
 
-**Read set:** /mada/users/renau/projs/soomrv/repo/src/Config.sv /mada/users/renau/projs/soomrv/repo/src/Include.sv /mada/users/renau/projs/soomrv/repo/src/InstrDecoder.sv 
+| stage | result |
+|---|---|
+| yosys+slang gate | PASS |
+| --reader slang -> prp | PASS |
+| slang -> lg | FAIL |
+| prp -> lg | FAIL |
+| yosys-slang -> lg | PASS |
+| lec prp vs slang | NA |
+| lec prp vs yosys-slang | NA |
+| abc gen | NA |
 
-**Detail:**
+**First failure message:**
 ```
-"message":"upass.tolg: whole-array assignment to memory 'OUT_uop' is not supported — write one entry at a time"
-TODOs=0
+upass.tolg: internal — memory 'OUT_uop' lowered 0 write sites but the pre-scan counted 1
 ```

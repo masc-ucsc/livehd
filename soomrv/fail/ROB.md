@@ -1,11 +1,19 @@
-# ROB — translation FAIL
+# ROB — yosys+slang fails
 
-**Reason:** COMPILE-FAIL (slang reader could not lower)
+kind=-
 
-**Read set:** /mada/users/renau/projs/soomrv/repo/src/Config.sv /mada/users/renau/projs/soomrv/repo/src/Include.sv /mada/users/renau/projs/soomrv/repo/src/ROB.sv 
+| stage | result |
+|---|---|
+| yosys+slang gate | FAIL |
+| --reader slang -> prp | FAIL |
+| slang -> lg | NA |
+| prp -> lg | NA |
+| yosys-slang -> lg | NA |
+| lec prp vs slang | NA |
+| lec prp vs yosys-slang | NA |
+| abc gen | NA |
 
-**Detail:**
+**First failure message:**
 ```
-      4 "code":"unsupported-array-write"	"message":"unpacked array write on an unsupported base"
-      1 "code":"unsupported-array-read"	"message":"unpacked array read on an unsupported base"
+unpacked array read on an unsupported base
 ```

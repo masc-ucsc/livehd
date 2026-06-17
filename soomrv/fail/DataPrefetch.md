@@ -1,11 +1,19 @@
-# DataPrefetch — translation FAIL
+# DataPrefetch — yosys+slang fails
 
-**Reason:** WRITER-FAIL (.prp does not re-compile; kind=mod, todos=0)
+kind=-
 
-**Read set:** /mada/users/renau/projs/soomrv/repo/src/Config.sv /mada/users/renau/projs/soomrv/repo/src/Include.sv /mada/users/renau/projs/soomrv/repo/src/DataPrefetch.sv  soomrv/stubs/PrefetchIssuer.stub.sv soomrv/stubs/PrefetchPatternDetector.stub.sv
+| stage | result |
+|---|---|
+| yosys+slang gate | FAIL |
+| --reader slang -> prp | FAIL |
+| slang -> lg | NA |
+| prp -> lg | NA |
+| yosys-slang -> lg | NA |
+| lec prp vs slang | NA |
+| lec prp vs yosys-slang | NA |
+| abc gen | NA |
 
-**Detail:**
+**First failure message:**
 ```
-"message":"upass.tolg: call to 'PrefetchPatternDetector' has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending"
-TODOs=0
+variable 'missSR' driven by always_ff procedure cannot be written to by any other process
 ```

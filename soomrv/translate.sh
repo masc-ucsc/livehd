@@ -1,109 +1,132 @@
 #!/bin/bash
-# translate.sh — per-module Verilog->Pyrope translation + LEC for soomrv.
+# translate.sh — per-module Verilog->Pyrope translation + fine-grained classification.
 #
-#   translate.sh <TOP> <readfile1> [readfile2 ...]
+#   translate.sh <TOP>
 #
-# Compiles <TOP> (--reader slang) to a single .prp, LEC-checks it against the
-# original, classifies, places the .prp in soomrv/pass/ or soomrv/fail/ (+ .md),
-# and prints one structured line.
+# Uses the WHOLE soomrv file list with `--top <TOP>` (real submodules, no stubs).
+# Runs the full pipeline and records every signal, then classifies the module by
+# its FIRST failing stage (the 10 categories the project tracks).  One TSV line
+# is appended to $RESULTS; PASS .prp -> soomrv/pass/, fails -> soomrv/fail/ (+.md).
 #
-# Both LEC sides are pre-compiled to lg: with the slang flags applied (passing a
-# raw multi-file .sv to `lhd lec` does NOT forward the flags, so use-before-
-# declare enums etc. break the ref read); lg-vs-lg LEC with cvc5 + lgyosys then
-# confirms the round-trip (.prp -> lg  ==  slang(original) -> lg) by two
-# independent engines (SMT + yosys-SAT).
-#
-# Verdict: LEC-FAIL if either engine REFUTES; PASS if either PROVES and neither
-# refutes (cvc5 UNKNOWN on memory modules is covered by lgyosys PROVEN, and vice
-# versa); else LEC-FAIL (undecided).  COMPILE-FAIL (reader) / WRITER-FAIL (.prp
-# does not re-compile) short-circuit earlier.
+# yosys+slang gate: the raw `yosys2 -m slang.so -p read_slang …` parse, run on a
+# `!&`/`!|`/`!^`-normalized copy of the tree ($NORM) — yosys-slang's bundled slang
+# lacks the chained-unary-reduction parse LiveHD's patched slang has, so `!&x`
+# (3 soomrv files) would otherwise fail the whole single-unit read; `!&`≡`~&`
+# (reduction NAND) is semantics-preserving.  If the gate STILL fails, yosys+slang
+# genuinely cannot read the module -> not worth fixing LiveHD for it.
 set -u
-LHD=./bazel-bin/lhd/lhd
-HERE=soomrv
-SLANG_FLAGS="--single-unit --std latest --allow-use-before-declare --relax-enum-conversions --ignore-unknown-modules --allow-toplevel-iface-ports -Wno-explicit-static -Wno-missing-top -Wno-multiple-always-assigns"
+LHD=/mada/users/renau/projs/livehd/bazel-bin/lhd/lhd
+YOSYS=/mada/users/renau/projs/livehd/bazel-bin/inou/yosys/yosys2
+SLANGSO=/mada/users/renau/projs/livehd/bazel-bin/external/+http_archive+yosys_slang/slang.so
+ABCLIB=/mada/users/renau/projs/livehd/inou/prp/tests/abc/test.lib
+ORIG=/mada/users/renau/projs/soomrv/repo
+NORM=/tmp/snorm
+HERE=/mada/users/renau/projs/livehd/soomrv
+RESULTS=${RESULTS:-/tmp/soomrv_results.tsv}
+FILES=$(cat /tmp/soomrv_rel.txt)
+SLANG="--single-unit --std latest --allow-use-before-declare --relax-enum-conversions --ignore-unknown-modules --allow-toplevel-iface-ports -Wno-explicit-static -Wno-missing-top"
+# read_slang flags.  GATE = raw yosys2 (we add --no-proc).  LHD = via lhd
+# --reader yosys-slang, which injects its OWN --no-proc, so DON'T repeat it here.
+YSREAD_GATE="--no-proc --single-unit --std latest --allow-use-before-declare --relax-enum-conversions --ignore-unknown-modules"
+YSREAD_LHD="--single-unit --std latest --allow-use-before-declare --relax-enum-conversions --ignore-unknown-modules"
+LECT=150  # per-LEC timeout (s)
 
-TOP="$1"; shift
-FILES="$@"
-# Inject (* blackbox *) stubs for TOP's instantiated submodules (deps.txt), so the
-# per-file compile keeps them as Sub instances (LEC blackbox-collapses both sides).
-STUBS=""
-if [ -f "$HERE/stubs/deps.txt" ]; then
-  for d in $(grep -E "^$TOP:" "$HERE/stubs/deps.txt" | cut -d: -f2-); do
-    [ -f "$HERE/stubs/$d.stub.sv" ] && STUBS="$STUBS $HERE/stubs/$d.stub.sv"
-  done
-fi
-FILES="$FILES $STUBS"   # stubs AFTER packages (their port types come from Include.sv)
-W=/tmp/sv_$TOP
-rm -rf "$W"; mkdir -p "$W"
-PRP="$W/$TOP.prp"
+TOP="$1"
+W=/tmp/sv2_$TOP; rm -rf "$W"; mkdir -p "$W"
+ngraphs() { ls "$1" 2>/dev/null | grep -vcE 'library|srcmap|json'; }
+emsg() { grep '"severity":"error"' "$1" 2>/dev/null | grep -oE '"message":"[^"]*"' | head -1 | sed 's/^"message":"//;s/"$//'; }
 
-emit_fail_md() {  # $1=reason  $2=detail-file-or-text
-  {
-    echo "# $TOP — translation FAIL"; echo
-    echo "**Reason:** $1"; echo
-    echo "**Read set:** $FILES"; echo
-    echo "**Detail:**"; echo '```'
-    [ -f "$2" ] && cat "$2" || echo "$2"
-    echo '```'
-  } > "$HERE/fail/$TOP.md"
-}
-place_fail() { rm -f "$HERE/pass/$TOP.prp"; [ -f "$PRP" ] && cp "$PRP" "$HERE/fail/"; }
+GATE=NA; RSLANG=NA; LGSLANG=NA; LGYS=NA; PRPGEN=NA; LECSL=NA; LECYS=NA; ABC=NA
+MSG=""; kind="-"
 
-# 1. compile to pyrope
-$LHD compile --reader slang --top "$TOP" --recipe O0 --emit-dir pyrope:"$W/prp/" \
-  --workdir "$W/c" --emit diagnostics:"$W/diag.jsonl" -- $SLANG_FLAGS $FILES > "$W/compile.log" 2>&1
-if [ $? -ne 0 ] || [ ! -f "$W/prp/$TOP.prp" ]; then
-  grep '"severity":"error"' "$W/diag.jsonl" 2>/dev/null | grep -oE '"code":"[^"]*"|"message":"[^"]*"' | paste - - | sort | uniq -c | sort -rn > "$W/errsum.txt"
-  place_fail; emit_fail_md "COMPILE-FAIL (slang reader could not lower)" "$W/errsum.txt"
-  echo "$TOP verdict=COMPILE-FAIL errors=$(grep -c '"severity":"error"' "$W/diag.jsonl")"; exit 0
-fi
-cp "$W/prp/$TOP.prp" "$PRP"
-todos=$(grep -c "TODO: unhandled" "$PRP" 2>/dev/null)
-kind=$(grep -oE "pub (comb|pipe|mod)" "$PRP" | head -1 | awk '{print $2}')
+# 1. yosys+slang gate (normalized tree)
+(cd "$NORM" && timeout 200 $YOSYS -m "$SLANGSO" -p "read_slang --top $TOP $YSREAD_GATE $FILES") > "$W/gate.log" 2>&1
+[ $? -eq 0 ] && GATE=PASS || GATE=FAIL
 
-# 2. re-compile the .prp -> lg (writer-fidelity gate + impl lg)
-$LHD compile "$PRP" --top "$TOP" --recipe O0 --emit-dir lg:"$W/impllg/" \
-  --workdir "$W/pc" --emit diagnostics:"$W/pdiag.jsonl" > "$W/pcompile.log" 2>&1
-if [ $? -ne 0 ] || [ "$todos" != "0" ]; then
-  grep '"severity":"error"' "$W/pdiag.jsonl" 2>/dev/null | grep -oE '"message":"[^"]*"' | sort -u > "$W/perrsum.txt"
-  echo "TODOs=$todos" >> "$W/perrsum.txt"
-  place_fail; emit_fail_md "WRITER-FAIL (.prp does not re-compile; kind=$kind, todos=$todos)" "$W/perrsum.txt"
-  echo "$TOP verdict=WRITER-FAIL kind=$kind todos=$todos"; exit 0
+# 2. --reader slang -> prp
+(cd "$ORIG" && $LHD compile --reader slang --top "$TOP" $FILES --emit-dir pyrope:"$W/prp" \
+   --workdir "$W/c_prp" --emit diagnostics:"$W/d_prp.jsonl" -- $SLANG) > "$W/prp.log" 2>&1
+PRP="$W/prp/$TOP.prp"
+if [ -f "$PRP" ]; then RSLANG=PASS; kind=$(grep -oE "pub (comb|pipe|mod)" "$PRP" | head -1 | awk '{print $2}'); else RSLANG=FAIL; MSG=$(emsg "$W/d_prp.jsonl"); fi
+
+# 3. --reader slang -> lg (ref)
+if [ "$RSLANG" = PASS ]; then
+  (cd "$ORIG" && $LHD compile --reader slang --top "$TOP" $FILES --emit-dir lg:"$W/sllg" \
+     --workdir "$W/c_sl" --emit diagnostics:"$W/d_sl.jsonl" -- $SLANG) > "$W/sl.log" 2>&1
+  [ "$(ngraphs $W/sllg)" -ge 1 ] && LGSLANG=PASS || { LGSLANG=FAIL; [ -z "$MSG" ] && MSG=$(emsg "$W/d_sl.jsonl"); }
 fi
 
-# 3. ref (original) -> lg with the slang flags
-$LHD compile --reader slang --top "$TOP" --recipe O0 --emit-dir lg:"$W/reflg/" \
-  --workdir "$W/rc" -- $SLANG_FLAGS $FILES > "$W/refcompile.log" 2>&1
-
-# 4. lg-vs-lg LEC.  lgyosys (primary verdict) first with a generous timeout;
-# cvc5 (secondary signal) capped short — its array theory can hang on a wide/deep
-# memory, which would otherwise eat the whole budget.
-timeout 200 $LHD lec --impl lg:"$W/impllg/" --ref lg:"$W/reflg/" --top "$TOP" --workdir "$W/lecy" --set lec.solver=lgyosys > "$W/lecy.log" 2>&1
-v_ys=$(grep -oE "(PROVEN|REFUTED|UNKNOWN)" "$W/lecy.log" | head -1)
-timeout 90 $LHD lec --impl lg:"$W/impllg/" --ref lg:"$W/reflg/" --top "$TOP" --workdir "$W/lec" > "$W/lec.log" 2>&1
-v_cvc5=$(grep -oE "(PROVEN|REFUTED|UNKNOWN)" "$W/lec.log" | head -1)
-
-# lgyosys (yosys SAT) is the PRIMARY verdict: on lg-vs-lg it has no original-
-# reading blind spots, and it models `'x` as a true don't-care (the in-process
-# cvc5 encoder treats `'x` as a concrete value and can false-REFUTE on designs
-# that assign `'x`, e.g. `curTVal.sqN <= 'x`).  cvc5 is the fallback when lgyosys
-# cannot decide (e.g. it times out), and is reported either way.
-detail="cvc5=${v_cvc5:-NONE} lgyosys=${v_ys:-NONE}"
-if [ "$v_ys" = "PROVEN" ]; then
-  verdict=PASS
-  [ "$v_cvc5" = "REFUTED" ] && detail="$detail (cvc5 'x/don't-care artifact)"
-elif [ "$v_ys" = "REFUTED" ]; then
-  verdict=LEC-FAIL
-elif [ "$v_cvc5" = "PROVEN" ]; then
-  verdict=PASS
-else
-  verdict=LEC-FAIL
+# 4. prp -> lg (impl)
+if [ "$RSLANG" = PASS ]; then
+  $LHD compile "$PRP" --top "$TOP" --emit-dir lg:"$W/impllg" --workdir "$W/c_impl" \
+     --emit diagnostics:"$W/d_impl.jsonl" > "$W/impl.log" 2>&1
+  [ "$(ngraphs $W/impllg)" -ge 1 ] && PRPGEN=PASS || PRPGEN=FAIL
 fi
 
-if [ "$verdict" = "PASS" ]; then
+# 5. --reader yosys-slang -> lg (normalized; only if the gate could read it)
+if [ "$GATE" = PASS ]; then
+  (cd "$NORM" && $LHD compile --reader yosys-slang --top "$TOP" $FILES --emit-dir lg:"$W/yslg" \
+     --workdir "$W/c_ys" --emit diagnostics:"$W/d_ys.jsonl" -- $YSREAD_LHD) > "$W/ys.log" 2>&1
+  [ "$(ngraphs $W/yslg)" -ge 1 ] && LGYS=PASS || LGYS=FAIL
+fi
+
+# 6. lec prp-lg vs slang-lg  (lgyosys: reliable on lg-vs-lg, models 'x as don't-care)
+if [ "$PRPGEN" = PASS ] && [ "$LGSLANG" = PASS ]; then
+  timeout $LECT $LHD lec --impl lg:"$W/impllg" --ref lg:"$W/sllg" --top "$TOP" --workdir "$W/lec_sl" --set lec.solver=lgyosys > "$W/lec_sl.log" 2>&1
+  LECSL=$(grep -oE "(PROVEN|REFUTED|UNKNOWN)" "$W/lec_sl.log" | head -1); [ -z "$LECSL" ] && LECSL=TIMEOUT
+fi
+# 7. lec prp-lg vs yosys-slang-lg
+if [ "$PRPGEN" = PASS ] && [ "$LGYS" = PASS ]; then
+  timeout $LECT $LHD lec --impl lg:"$W/impllg" --ref lg:"$W/yslg" --top "$TOP" --workdir "$W/lec_ys" --set lec.solver=lgyosys > "$W/lec_ys.log" 2>&1
+  LECYS=$(grep -oE "(PROVEN|REFUTED|UNKNOWN)" "$W/lec_ys.log" | head -1); [ -z "$LECYS" ] && LECYS=TIMEOUT
+fi
+
+# 8. abc gen (only when lec-vs-slang PROVEN): color acyclic then map.
+if [ "$LECSL" = PROVEN ]; then
+  cp -r "$W/impllg" "$W/abcin"
+  timeout 120 $LHD pass color acyclic lg:"$W/abcin" > "$W/color.log" 2>&1
+  timeout 200 $LHD pass abc lg:"$W/abcin" --set pass.abc.library="$ABCLIB" --emit-dir lg:"$W/abc" > "$W/abc.log" 2>&1
+  [ "$(ngraphs $W/abc)" -ge 1 ] && ABC=PASS || { ABC=FAIL; MSG=$(emsg "$W/abc.log"); }
+fi
+
+# ── PRIMARY classify: the slang deliverable path (first failing stage).  The
+# yosys-slang lg-gen / lec are CROSS-CHECK signals recorded separately (their own
+# counters), so they never demote a module whose slang round-trip already PROVEN.
+CAT=""
+if   [ "$RSLANG" = FAIL ] && [ "$GATE" = FAIL ]; then CAT="yosys+slang fails"
+elif [ "$RSLANG" = FAIL ]; then                       CAT="--reader slang fails"
+elif [ "$LGSLANG" = FAIL ]; then                      CAT="lg gen from slang fails"
+elif [ "$PRPGEN" = FAIL ]; then                       CAT="prp gen fails"; MSG=$(emsg "$W/d_impl.jsonl")
+elif [ "$LECSL" = REFUTED ]; then                     CAT="lec prp vs from slang fails"; MSG=$(grep -oE 'counterexample[^"]*' $W/lec_sl.log|grep -v schema|head -1)
+elif [ "$LECSL" = PROVEN ]; then                      CAT="PASS"
+elif [ "$LECYS" = PROVEN ] && [ "$LECSL" != REFUTED ]; then CAT="PASS"   # slang lec inconclusive but yosys-slang proved
+elif [ "$LECSL" = TIMEOUT ] || [ "$LECSL" = UNKNOWN ] || [ "$LECYS" = TIMEOUT ]; then CAT="lec inconclusive"
+else                                                  CAT="other: rslang=$RSLANG lgslang=$LGSLANG prpgen=$PRPGEN lecsl=$LECSL lgys=$LGYS"
+fi
+
+# ── place artifacts ──────────────────────────────────────────────────────────
+if [ "$CAT" = "PASS" ]; then
   cp "$PRP" "$HERE/pass/"; rm -f "$HERE/fail/$TOP.prp" "$HERE/fail/$TOP.md"
 else
-  place_fail
-  emit_fail_md "LEC-FAIL ($detail)" "$(grep -oE 'counterexample[^\"]*' $W/lec.log $W/lecy.log | grep -v schema | head -2)"
+  rm -f "$HERE/pass/$TOP.prp"
+  [ -f "$PRP" ] && cp "$PRP" "$HERE/fail/"
+  {
+    echo "# $TOP — $CAT"; echo
+    echo "kind=$kind"; echo
+    echo "| stage | result |"; echo "|---|---|"
+    echo "| yosys+slang gate | $GATE |"
+    echo "| --reader slang -> prp | $RSLANG |"
+    echo "| slang -> lg | $LGSLANG |"
+    echo "| prp -> lg | $PRPGEN |"
+    echo "| yosys-slang -> lg | $LGYS |"
+    echo "| lec prp vs slang | $LECSL |"
+    echo "| lec prp vs yosys-slang | $LECYS |"
+    echo "| abc gen | $ABC |"; echo
+    echo "**First failure message:**"; echo '```'; echo "${MSG:-(none captured)}"; echo '```'
+  } > "$HERE/fail/$TOP.md"
 fi
-echo "$TOP verdict=$verdict kind=$kind todos=$todos $detail"
+
+# TSV: top  cat  kind  gate  rslang  lgslang  lgys  prpgen  lecsl  lecys  abc  msg
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  "$TOP" "$CAT" "$kind" "$GATE" "$RSLANG" "$LGSLANG" "$LGYS" "$PRPGEN" "$LECSL" "$LECYS" "$ABC" "${MSG//$'\t'/ }" >> "$RESULTS"
+echo "$TOP	$CAT	kind=$kind	gate=$GATE rslang=$RSLANG lgslang=$LGSLANG lgys=$LGYS prpgen=$PRPGEN lecsl=$LECSL lecys=$LECYS abc=$ABC"

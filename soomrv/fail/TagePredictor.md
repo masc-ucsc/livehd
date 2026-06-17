@@ -1,11 +1,19 @@
-# TagePredictor — translation FAIL
+# TagePredictor — --reader slang fails
 
-**Reason:** WRITER-FAIL (.prp does not re-compile; kind=mod, todos=0)
+kind=-
 
-**Read set:** /mada/users/renau/projs/soomrv/repo/src/Config.sv /mada/users/renau/projs/soomrv/repo/src/Include.sv /mada/users/renau/projs/soomrv/repo/src/TagePredictor.sv  soomrv/stubs/BranchPredictionTable.stub.sv soomrv/stubs/TageTable.stub.sv
+| stage | result |
+|---|---|
+| yosys+slang gate | PASS |
+| --reader slang -> prp | FAIL |
+| slang -> lg | NA |
+| prp -> lg | NA |
+| yosys-slang -> lg | PASS |
+| lec prp vs slang | NA |
+| lec prp vs yosys-slang | NA |
+| abc gen | NA |
 
-**Detail:**
+**First failure message:**
 ```
-"message":"upass.tolg: call to 'BranchPredictionTable' has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending"
-TODOs=0
+nested non-variable assignment targets are not supported yet
 ```

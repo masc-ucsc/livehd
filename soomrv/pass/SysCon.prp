@@ -1,0 +1,27 @@
+pub mod SysCon::[lg="SysCon", hdl](clk:u1, rst:u1, IN_re:u1, IN_raddr:u30, IN_we:u1, IN_wmask:u4, IN_waddr:u30, IN_wdata:u32) -> (OUT_rdata:u32@[], OUT_rbusy:u1@[], OUT_rvalid:u1@[], OUT_powerOff:u1@[], OUT_reboot:u1@[]) {
+  reg OUT_reboot:u1
+  reg OUT_powerOff:u1
+  OUT_rbusy = 0
+  OUT_rdata = 0
+  OUT_rvalid = 0
+  OUT_powerOff = 0
+  OUT_reboot = 0
+  ___1 = rst != 0
+  if ___1 {
+  }
+
+  if not ___1 {
+    if IN_we != 0 {
+      if (0 | (IN_waddr << 2)) == 4278190084 {
+        if (IN_wmask & 1) != 0 {
+          if IN_wdata#[0..=7] == 119 {
+            OUT_reboot = 1
+          }
+          if IN_wdata#[0..=7] == 85 {
+            OUT_powerOff = 1
+          }
+        }
+      }
+    }
+  }
+}

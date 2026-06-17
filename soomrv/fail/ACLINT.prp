@@ -1,0 +1,90 @@
+pub mod ACLINT::[lg="ACLINT", hdl](clk:u1, rst:u1, IN_re:u1, IN_raddr:u30, IN_we:u1, IN_wmask:u4, IN_waddr:u30, IN_wdata:u32) -> (OUT_rdata:u32@[], OUT_rbusy:u1@[], OUT_rvalid:u1@[], OUT_mtime:u64@[], OUT_mtimecmp:u64@[]) {
+  reg mtime:u64
+  reg mtimecmp:u64
+  reg OUT_rdata:u32
+  reg OUT_rvalid:u1
+  OUT_rbusy = 0
+  OUT_mtime = mtime
+  OUT_mtimecmp = mtimecmp
+  OUT_rvalid = 0
+  if rst != 0 {
+    mtime = 0
+    mtimecmp = 0
+  } else {
+    mtime = (mtime + 1)#[0..=63]
+    if IN_re != 0 {
+      ___6 = 0 | (IN_raddr << 2)
+      unique if ___6 == 0x1100bff8 {
+        OUT_rdata = mtime#[0..=31]
+        OUT_rvalid = 1
+      } elif ___6 == 0x1100bffc {
+        OUT_rdata = mtime#[32..=63]
+        OUT_rvalid = 1
+      } elif ___6 == 0x11004000 {
+        OUT_rdata = mtimecmp#[0..=31]
+        OUT_rvalid = 1
+      } elif ___6 == 0x11004004 {
+        OUT_rdata = mtimecmp#[32..=63]
+        OUT_rvalid = 1
+      } else {
+      }
+    }
+    if IN_we != 0 {
+      ___17 = 0 | (IN_waddr << 2)
+      unique if ___17 == 0x1100bff8 {
+        if (IN_wmask & 1) != 0 {
+          mtime#[0..=7] = IN_wdata#[0..=7]
+        }
+        if ((IN_wmask >> 1) & 1) != 0 {
+          mtime#[8..=15] = IN_wdata#[8..=15]
+        }
+        if ((IN_wmask >> 2) & 1) != 0 {
+          mtime#[16..=23] = IN_wdata#[16..=23]
+        }
+        if ((IN_wmask >> 3) & 1) != 0 {
+          mtime#[24..=31] = IN_wdata#[24..=31]
+        }
+      } elif ___17 == 0x1100bffc {
+        if (IN_wmask & 1) != 0 {
+          mtime#[32..=39] = IN_wdata#[0..=7]
+        }
+        if ((IN_wmask >> 1) & 1) != 0 {
+          mtime#[40..=47] = IN_wdata#[8..=15]
+        }
+        if ((IN_wmask >> 2) & 1) != 0 {
+          mtime#[48..=55] = IN_wdata#[16..=23]
+        }
+        if ((IN_wmask >> 3) & 1) != 0 {
+          mtime#[56..=63] = IN_wdata#[24..=31]
+        }
+      } elif ___17 == 0x11004000 {
+        if (IN_wmask & 1) != 0 {
+          mtimecmp#[0..=7] = IN_wdata#[0..=7]
+        }
+        if ((IN_wmask >> 1) & 1) != 0 {
+          mtimecmp#[8..=15] = IN_wdata#[8..=15]
+        }
+        if ((IN_wmask >> 2) & 1) != 0 {
+          mtimecmp#[16..=23] = IN_wdata#[16..=23]
+        }
+        if ((IN_wmask >> 3) & 1) != 0 {
+          mtimecmp#[24..=31] = IN_wdata#[24..=31]
+        }
+      } elif ___17 == 0x11004004 {
+        if (IN_wmask & 1) != 0 {
+          mtimecmp#[32..=39] = IN_wdata#[0..=7]
+        }
+        if ((IN_wmask >> 1) & 1) != 0 {
+          mtimecmp#[40..=47] = IN_wdata#[8..=15]
+        }
+        if ((IN_wmask >> 2) & 1) != 0 {
+          mtimecmp#[48..=55] = IN_wdata#[16..=23]
+        }
+        if ((IN_wmask >> 3) & 1) != 0 {
+          mtimecmp#[56..=63] = IN_wdata#[24..=31]
+        }
+      } else {
+      }
+    }
+  }
+}

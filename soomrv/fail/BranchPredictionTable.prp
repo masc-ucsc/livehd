@@ -1,0 +1,60 @@
+pub mod BranchPredictionTable::[lg="BranchPredictionTable", hdl](clk:u1, rst:u1, IN_readValid:u1, IN_readAddr:u12, IN_writeEn:u1, IN_writeAddr:u12, IN_writeInit:u1, IN_writeTaken:u1) -> (OUT_taken:u1@[]) {
+  reg resetIdx:u13
+  reg OUT_taken:u1
+  reg write_r:u15
+  reg hist:[4096]u1:[fwd=0]
+  reg pred:[4096]u1:[fwd=0]
+  reg writeTempReg:u2
+  mut write_c = 0
+  if IN_readValid != 0 {
+    OUT_taken = pred[IN_readAddr]
+  }
+  write_c = 0ub???????????????
+  mut write_c__w1 = write_c
+  write_c__w1#[0..=0] = IN_writeEn
+  mut write_c__w2 = write_c__w1
+  write_c__w2#[1..=1] = IN_writeInit
+  mut write_c__w3 = write_c__w2
+  write_c__w3#[3..=14] = IN_writeAddr
+  mut write_c__w4 = write_c__w3
+  write_c__w4#[2..=2] = IN_writeTaken
+  if rst != 0 {
+    resetIdx = 0
+    writeTempReg = 0ub??
+    write_r = 0ub??????????????0
+  } else {
+    if ((resetIdx >> 12) & 1) == 0 {
+      pred[resetIdx#[0..=11]] = 0
+      hist[resetIdx#[0..=11]] = 0
+      resetIdx = (resetIdx + 1)#[0..=31]#[0..=12]
+    } else {
+      write_r = write_c__w4
+      if (write_c__w4 & 1) != 0 {
+        writeTempReg = hist[write_c__w4#[3..=14]] | (pred[write_c__w4#[3..=14]] << 1)
+      }
+      if (write_r & 1) != 0 {
+        if (writeTempReg != 3) and (((write_r >> 2) & 1) != 0) {
+          ___28 = (writeTempReg + 1)#[0..=1]
+          hist[write_r#[3..=14]] = ___28 & 1
+          pred[write_r#[3..=14]] = (___28 >> 1) & 1
+        }
+        if (writeTempReg != 0) and (((write_r >> 2) & 1) == 0) {
+          ___40 = (writeTempReg - 1)#[0..=1]
+          hist[write_r#[3..=14]] = ___40 & 1
+          pred[write_r#[3..=14]] = (___40 >> 1) & 1
+        }
+        if ((write_r >> 1) & 1) != 0 {
+          mut _b2i_1 = 0
+          if ((write_r >> 2) & 1) == 0 {
+            _b2i_1 = 1
+          } else {
+            _b2i_1 = 0
+          }
+          ___55 = _b2i_1 | (((write_r >> 2) & 1) << 1)
+          hist[write_r#[3..=14]] = ___55 & 1
+          pred[write_r#[3..=14]] = (___55 >> 1) & 1
+        }
+      }
+    }
+  }
+}

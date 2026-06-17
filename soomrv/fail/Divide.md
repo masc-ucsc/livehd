@@ -1,11 +1,19 @@
-# Divide — translation FAIL
+# Divide — lec prp vs from slang fails
 
-**Reason:** LEC-FAIL (cvc5=REFUTED lgyosys=NONE)
+kind=mod
 
-**Read set:** /mada/users/renau/projs/soomrv/repo/src/Config.sv /mada/users/renau/projs/soomrv/repo/src/Include.sv /mada/users/renau/projs/soomrv/repo/src/Divide.sv 
+| stage | result |
+|---|---|
+| yosys+slang gate | FAIL |
+| --reader slang -> prp | PASS |
+| slang -> lg | PASS |
+| prp -> lg | PASS |
+| yosys-slang -> lg | NA |
+| lec prp vs slang | REFUTED |
+| lec prp vs yosys-slang | NA |
+| abc gen | NA |
 
-**Detail:**
+**First failure message:**
 ```
-/tmp/sv_Divide/lec.log:counterexample: diff nxt:n:OUT_uop(ref=0 impl=4503599627370494), OUT_uop(ref=2251799813685246 impl=2251799813685247) @ n:running=0, n:OUT_uop=4503599627370495, rst=0, clk=0, en=0, IN_uop=8522825728, n:uop=0, IN_branch=266338304, n:invert=0, n:r=0, n:cnt=0, n:d=0
-/tmp/sv_Divide/lec.log:counterexample: diff 
+(none captured)
 ```

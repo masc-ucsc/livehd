@@ -1,11 +1,19 @@
-# Load — translation FAIL
+# Load — --reader slang fails
 
-**Reason:** COMPILE-FAIL (slang reader could not lower)
+kind=-
 
-**Read set:** /mada/users/renau/projs/soomrv/repo/src/Config.sv /mada/users/renau/projs/soomrv/repo/src/Include.sv /mada/users/renau/projs/soomrv/repo/src/Load.sv 
+| stage | result |
+|---|---|
+| yosys+slang gate | PASS |
+| --reader slang -> prp | FAIL |
+| slang -> lg | NA |
+| prp -> lg | NA |
+| yosys-slang -> lg | PASS |
+| lec prp vs slang | NA |
+| lec prp vs yosys-slang | NA |
+| abc gen | NA |
 
-**Detail:**
+**First failure message:**
 ```
-     23 "code":"unsupported-lhs-nesting"	"message":"nested non-variable assignment targets are not supported yet"
-      1 "code":"unknown-module"	"message":"instance 'lookupEnc' refers to an unknown module (blackboxes are not supported by --reader slang)"
+module member 'lookupEnc' (kind InstanceArray) is not supported by --reader slang
 ```

@@ -1,12 +1,19 @@
-# AGU — translation FAIL
+# AGU — --reader slang fails
 
-**Reason:** COMPILE-FAIL (slang reader could not lower)
+kind=-
 
-**Read set:** /mada/users/renau/projs/soomrv/repo/src/Config.sv /mada/users/renau/projs/soomrv/repo/src/Include.sv /mada/users/renau/projs/soomrv/repo/src/AGU.sv  soomrv/stubs/TLBMissQueue.stub.sv
+| stage | result |
+|---|---|
+| yosys+slang gate | PASS |
+| --reader slang -> prp | FAIL |
+| slang -> lg | NA |
+| prp -> lg | NA |
+| yosys-slang -> lg | PASS |
+| lec prp vs slang | NA |
+| lec prp vs yosys-slang | NA |
+| abc gen | NA |
 
-**Detail:**
+**First failure message:**
 ```
-      1 "code":"type-mismatch-eq"	"message":"`!=` requires both operands to be the same type (isStore_s1:boolean vs <const>:integer)"
-      1 "code":"type-mismatch-eq"	"message":"`!=` requires both operands to be the same type (isLoad_s1:boolean vs <const>:integer)"
-      1 "code":"type-mismatch-eq"	"message":"`!=` requires both operands to be the same type (isAtomic:boolean vs <const>:integer)"
+nested non-variable assignment targets are not supported yet
 ```

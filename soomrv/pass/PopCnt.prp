@@ -1,0 +1,81 @@
+pub comb PopCnt::[lg="PopCnt", hdl](in:u32) -> (res:u6) {
+  mut inPadded = 0
+  mut tree_0_genblk1_iSums = 0
+  mut tree_1_genblk1_genblk1_0_iSums = 0
+  mut tree_2_genblk1_genblk1_0_iSums = 0
+  mut tree_3_genblk1_genblk1_0_iSums = 0
+  mut tree_4_genblk1_genblk1_0_iSums = 0
+  mut tree_5_genblk1_genblk1_0_iSums = 0
+  mut inPadded__w1 = in | 0
+  mut tree_0_genblk1_iSums__w1 = inPadded__w1
+  tree_1_genblk1_genblk1_0_iSums = 0ub????????????????????????????????
+  mut tree_1_genblk1_genblk1_0_iSums__w1 = tree_1_genblk1_genblk1_0_iSums
+  tree_1_genblk1_genblk1_0_iSums__w1#[0..=1] = ((tree_0_genblk1_iSums__w1 & 1) + ((tree_0_genblk1_iSums__w1 >> 1) & 1))#[0..=1]
+  mut tree_1_genblk1_genblk1_0_iSums__w2 = tree_1_genblk1_genblk1_0_iSums__w1
+  tree_1_genblk1_genblk1_0_iSums__w2#[2..=3] = (((tree_0_genblk1_iSums__w1 >> 2) & 1) + ((tree_0_genblk1_iSums__w1 >> 3) & 1))#[0..=1]
+  mut tree_1_genblk1_genblk1_0_iSums__w3 = tree_1_genblk1_genblk1_0_iSums__w2
+  tree_1_genblk1_genblk1_0_iSums__w3#[4..=5] = (((tree_0_genblk1_iSums__w1 >> 4) & 1) + ((tree_0_genblk1_iSums__w1 >> 5) & 1))#[0..=1]
+  mut tree_1_genblk1_genblk1_0_iSums__w4 = tree_1_genblk1_genblk1_0_iSums__w3
+  tree_1_genblk1_genblk1_0_iSums__w4#[6..=7] = (((tree_0_genblk1_iSums__w1 >> 6) & 1) + ((tree_0_genblk1_iSums__w1 >> 7) & 1))#[0..=1]
+  mut tree_1_genblk1_genblk1_0_iSums__w5 = tree_1_genblk1_genblk1_0_iSums__w4
+  tree_1_genblk1_genblk1_0_iSums__w5#[8..=9] = (((tree_0_genblk1_iSums__w1 >> 8) & 1) + ((tree_0_genblk1_iSums__w1 >> 9) & 1))#[0..=1]
+  mut tree_1_genblk1_genblk1_0_iSums__w6 = tree_1_genblk1_genblk1_0_iSums__w5
+  tree_1_genblk1_genblk1_0_iSums__w6#[10..=11] = (((tree_0_genblk1_iSums__w1 >> 10) & 1) + ((tree_0_genblk1_iSums__w1 >> 11) & 1))#[0..=1]
+  mut tree_1_genblk1_genblk1_0_iSums__w7 = tree_1_genblk1_genblk1_0_iSums__w6
+  tree_1_genblk1_genblk1_0_iSums__w7#[12..=13] = (((tree_0_genblk1_iSums__w1 >> 12) & 1) + ((tree_0_genblk1_iSums__w1 >> 13) & 1))#[0..=1]
+  mut tree_1_genblk1_genblk1_0_iSums__w8 = tree_1_genblk1_genblk1_0_iSums__w7
+  tree_1_genblk1_genblk1_0_iSums__w8#[14..=15] = (((tree_0_genblk1_iSums__w1 >> 14) & 1) + ((tree_0_genblk1_iSums__w1 >> 15) & 1))#[0..=1]
+  mut tree_1_genblk1_genblk1_0_iSums__w9 = tree_1_genblk1_genblk1_0_iSums__w8
+  tree_1_genblk1_genblk1_0_iSums__w9#[16..=17] = (((tree_0_genblk1_iSums__w1 >> 16) & 1) + ((tree_0_genblk1_iSums__w1 >> 17) & 1))#[0..=1]
+  mut tree_1_genblk1_genblk1_0_iSums__w10 = tree_1_genblk1_genblk1_0_iSums__w9
+  tree_1_genblk1_genblk1_0_iSums__w10#[18..=19] = (((tree_0_genblk1_iSums__w1 >> 18) & 1) + ((tree_0_genblk1_iSums__w1 >> 19) & 1))#[0..=1]
+  mut tree_1_genblk1_genblk1_0_iSums__w11 = tree_1_genblk1_genblk1_0_iSums__w10
+  tree_1_genblk1_genblk1_0_iSums__w11#[20..=21] = (((tree_0_genblk1_iSums__w1 >> 20) & 1) + ((tree_0_genblk1_iSums__w1 >> 21) & 1))#[0..=1]
+  mut tree_1_genblk1_genblk1_0_iSums__w12 = tree_1_genblk1_genblk1_0_iSums__w11
+  tree_1_genblk1_genblk1_0_iSums__w12#[22..=23] = (((tree_0_genblk1_iSums__w1 >> 22) & 1) + ((tree_0_genblk1_iSums__w1 >> 23) & 1))#[0..=1]
+  mut tree_1_genblk1_genblk1_0_iSums__w13 = tree_1_genblk1_genblk1_0_iSums__w12
+  tree_1_genblk1_genblk1_0_iSums__w13#[24..=25] = (((tree_0_genblk1_iSums__w1 >> 24) & 1) + ((tree_0_genblk1_iSums__w1 >> 25) & 1))#[0..=1]
+  mut tree_1_genblk1_genblk1_0_iSums__w14 = tree_1_genblk1_genblk1_0_iSums__w13
+  tree_1_genblk1_genblk1_0_iSums__w14#[26..=27] = (((tree_0_genblk1_iSums__w1 >> 26) & 1) + ((tree_0_genblk1_iSums__w1 >> 27) & 1))#[0..=1]
+  mut tree_1_genblk1_genblk1_0_iSums__w15 = tree_1_genblk1_genblk1_0_iSums__w14
+  tree_1_genblk1_genblk1_0_iSums__w15#[28..=29] = (((tree_0_genblk1_iSums__w1 >> 28) & 1) + ((tree_0_genblk1_iSums__w1 >> 29) & 1))#[0..=1]
+  mut tree_1_genblk1_genblk1_0_iSums__w16 = tree_1_genblk1_genblk1_0_iSums__w15
+  tree_1_genblk1_genblk1_0_iSums__w16#[30..=31] = (((tree_0_genblk1_iSums__w1 >> 30) & 1) + ((tree_0_genblk1_iSums__w1 >> 31) & 1))#[0..=1]
+  tree_2_genblk1_genblk1_0_iSums = 0ub????????????????????????
+  mut tree_2_genblk1_genblk1_0_iSums__w1 = tree_2_genblk1_genblk1_0_iSums
+  tree_2_genblk1_genblk1_0_iSums__w1#[0..=2] = (tree_1_genblk1_genblk1_0_iSums__w16#[0..=1] + tree_1_genblk1_genblk1_0_iSums__w16#[2..=3])#[0..=2]
+  mut tree_2_genblk1_genblk1_0_iSums__w2 = tree_2_genblk1_genblk1_0_iSums__w1
+  tree_2_genblk1_genblk1_0_iSums__w2#[3..=5] = (tree_1_genblk1_genblk1_0_iSums__w16#[4..=5] + tree_1_genblk1_genblk1_0_iSums__w16#[6..=7])#[0..=2]
+  mut tree_2_genblk1_genblk1_0_iSums__w3 = tree_2_genblk1_genblk1_0_iSums__w2
+  tree_2_genblk1_genblk1_0_iSums__w3#[6..=8] = (tree_1_genblk1_genblk1_0_iSums__w16#[8..=9] + tree_1_genblk1_genblk1_0_iSums__w16#[10..=11])#[0..=2]
+  mut tree_2_genblk1_genblk1_0_iSums__w4 = tree_2_genblk1_genblk1_0_iSums__w3
+  tree_2_genblk1_genblk1_0_iSums__w4#[9..=11] = (tree_1_genblk1_genblk1_0_iSums__w16#[12..=13] + tree_1_genblk1_genblk1_0_iSums__w16#[14..=15])#[0..=2]
+  mut tree_2_genblk1_genblk1_0_iSums__w5 = tree_2_genblk1_genblk1_0_iSums__w4
+  tree_2_genblk1_genblk1_0_iSums__w5#[12..=14] = (tree_1_genblk1_genblk1_0_iSums__w16#[16..=17] + tree_1_genblk1_genblk1_0_iSums__w16#[18..=19])#[0..=2]
+  mut tree_2_genblk1_genblk1_0_iSums__w6 = tree_2_genblk1_genblk1_0_iSums__w5
+  tree_2_genblk1_genblk1_0_iSums__w6#[15..=17] = (tree_1_genblk1_genblk1_0_iSums__w16#[20..=21] + tree_1_genblk1_genblk1_0_iSums__w16#[22..=23])#[0..=2]
+  mut tree_2_genblk1_genblk1_0_iSums__w7 = tree_2_genblk1_genblk1_0_iSums__w6
+  tree_2_genblk1_genblk1_0_iSums__w7#[18..=20] = (tree_1_genblk1_genblk1_0_iSums__w16#[24..=25] + tree_1_genblk1_genblk1_0_iSums__w16#[26..=27])#[0..=2]
+  mut tree_2_genblk1_genblk1_0_iSums__w8 = tree_2_genblk1_genblk1_0_iSums__w7
+  tree_2_genblk1_genblk1_0_iSums__w8#[21..=23] = (tree_1_genblk1_genblk1_0_iSums__w16#[28..=29] + tree_1_genblk1_genblk1_0_iSums__w16#[30..=31])#[0..=2]
+  tree_3_genblk1_genblk1_0_iSums = 0ub????????????????
+  mut tree_3_genblk1_genblk1_0_iSums__w1 = tree_3_genblk1_genblk1_0_iSums
+  tree_3_genblk1_genblk1_0_iSums__w1#[0..=3] = (tree_2_genblk1_genblk1_0_iSums__w8#[0..=2] + tree_2_genblk1_genblk1_0_iSums__w8#[3..=5])#[0..=3]
+  mut tree_3_genblk1_genblk1_0_iSums__w2 = tree_3_genblk1_genblk1_0_iSums__w1
+  tree_3_genblk1_genblk1_0_iSums__w2#[4..=7] = (tree_2_genblk1_genblk1_0_iSums__w8#[6..=8] + tree_2_genblk1_genblk1_0_iSums__w8#[9..=11])#[0..=3]
+  mut tree_3_genblk1_genblk1_0_iSums__w3 = tree_3_genblk1_genblk1_0_iSums__w2
+  tree_3_genblk1_genblk1_0_iSums__w3#[8..=11] = (tree_2_genblk1_genblk1_0_iSums__w8#[12..=14] + tree_2_genblk1_genblk1_0_iSums__w8#[15..=17])#[0..=3]
+  mut tree_3_genblk1_genblk1_0_iSums__w4 = tree_3_genblk1_genblk1_0_iSums__w3
+  tree_3_genblk1_genblk1_0_iSums__w4#[12..=15] = (tree_2_genblk1_genblk1_0_iSums__w8#[18..=20] + tree_2_genblk1_genblk1_0_iSums__w8#[21..=23])#[0..=3]
+  tree_4_genblk1_genblk1_0_iSums = 0ub??????????
+  mut tree_4_genblk1_genblk1_0_iSums__w1 = tree_4_genblk1_genblk1_0_iSums
+  tree_4_genblk1_genblk1_0_iSums__w1#[0..=4] = (tree_3_genblk1_genblk1_0_iSums__w4#[0..=3] + tree_3_genblk1_genblk1_0_iSums__w4#[4..=7])#[0..=4]
+  mut tree_4_genblk1_genblk1_0_iSums__w2 = tree_4_genblk1_genblk1_0_iSums__w1
+  tree_4_genblk1_genblk1_0_iSums__w2#[5..=9] = (tree_3_genblk1_genblk1_0_iSums__w4#[8..=11] + tree_3_genblk1_genblk1_0_iSums__w4#[12..=15])#[0..=4]
+  tree_5_genblk1_genblk1_0_iSums = 0ub??????
+  mut tree_5_genblk1_genblk1_0_iSums__w1 = tree_5_genblk1_genblk1_0_iSums
+  tree_5_genblk1_genblk1_0_iSums__w1#[0..=5] = (tree_4_genblk1_genblk1_0_iSums__w2#[0..=4] + tree_4_genblk1_genblk1_0_iSums__w2#[5..=9])#[0..=5]
+  inPadded = 0ub????????????????????????????????
+  res = tree_5_genblk1_genblk1_0_iSums__w1
+  tree_0_genblk1_iSums = 0ub????????????????????????????????
+}

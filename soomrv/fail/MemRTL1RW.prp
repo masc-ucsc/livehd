@@ -1,0 +1,119 @@
+pub mod MemRTL1RW::[lg="MemRTL1RW", hdl](clk:u1, IN_nce:u1, IN_nwe:u1, IN_addr:u7, IN_data:u256, IN_wm:u32) -> (OUT_data:u256@[]) {
+  reg wm_reg:u32
+  reg we_reg:u1
+  reg data_reg:u256
+  reg ce_reg:u1
+  reg mem:[128]u256:[fwd=0, wensize=32]
+  reg OUT_data:u256
+  reg addr_reg:u7
+  ce_reg = IN_nce
+  addr_reg = IN_addr
+  data_reg = IN_data
+  we_reg = IN_nwe
+  wm_reg = IN_wm
+  if ce_reg == 0 {
+    if we_reg == 0 {
+      mut i = 0
+      i = 0
+      if (wm_reg & 1) != 0 {
+        
+        mem[addr_reg][data_reg#[0..=7]] = 0
+      }
+      if ((wm_reg >> 1) & 1) != 0 {
+        mem[addr_reg][data_reg#[8..=15] << 8] = 1
+      }
+      if ((wm_reg >> 2) & 1) != 0 {
+        mem[addr_reg][data_reg#[16..=23] << 16] = 2
+      }
+      if ((wm_reg >> 3) & 1) != 0 {
+        mem[addr_reg][data_reg#[24..=31] << 24] = 3
+      }
+      if ((wm_reg >> 4) & 1) != 0 {
+        mem[addr_reg][data_reg#[32..=39] << 32] = 4
+      }
+      if ((wm_reg >> 5) & 1) != 0 {
+        mem[addr_reg][data_reg#[40..=47] << 40] = 5
+      }
+      if ((wm_reg >> 6) & 1) != 0 {
+        mem[addr_reg][data_reg#[48..=55] << 48] = 6
+      }
+      if ((wm_reg >> 7) & 1) != 0 {
+        mem[addr_reg][data_reg#[56..=63] << 56] = 7
+      }
+      if ((wm_reg >> 8) & 1) != 0 {
+        mem[addr_reg][data_reg#[64..=71] << 64] = 8
+      }
+      if ((wm_reg >> 9) & 1) != 0 {
+        mem[addr_reg][data_reg#[72..=79] << 72] = 9
+      }
+      if ((wm_reg >> 10) & 1) != 0 {
+        mem[addr_reg][data_reg#[80..=87] << 80] = 10
+      }
+      if ((wm_reg >> 11) & 1) != 0 {
+        mem[addr_reg][data_reg#[88..=95] << 88] = 11
+      }
+      if ((wm_reg >> 12) & 1) != 0 {
+        mem[addr_reg][data_reg#[96..=103] << 96] = 12
+      }
+      if ((wm_reg >> 13) & 1) != 0 {
+        mem[addr_reg][data_reg#[104..=111] << 104] = 13
+      }
+      if ((wm_reg >> 14) & 1) != 0 {
+        mem[addr_reg][data_reg#[112..=119] << 112] = 14
+      }
+      if ((wm_reg >> 15) & 1) != 0 {
+        mem[addr_reg][data_reg#[120..=127] << 120] = 15
+      }
+      if ((wm_reg >> 16) & 1) != 0 {
+        mem[addr_reg][data_reg#[128..=135] << 128] = 16
+      }
+      if ((wm_reg >> 17) & 1) != 0 {
+        mem[addr_reg][data_reg#[136..=143] << 136] = 17
+      }
+      if ((wm_reg >> 18) & 1) != 0 {
+        mem[addr_reg][data_reg#[144..=151] << 144] = 18
+      }
+      if ((wm_reg >> 19) & 1) != 0 {
+        mem[addr_reg][data_reg#[152..=159] << 152] = 19
+      }
+      if ((wm_reg >> 20) & 1) != 0 {
+        mem[addr_reg][data_reg#[160..=167] << 160] = 20
+      }
+      if ((wm_reg >> 21) & 1) != 0 {
+        mem[addr_reg][data_reg#[168..=175] << 168] = 21
+      }
+      if ((wm_reg >> 22) & 1) != 0 {
+        mem[addr_reg][data_reg#[176..=183] << 176] = 22
+      }
+      if ((wm_reg >> 23) & 1) != 0 {
+        mem[addr_reg][data_reg#[184..=191] << 184] = 23
+      }
+      if ((wm_reg >> 24) & 1) != 0 {
+        mem[addr_reg][data_reg#[192..=199] << 192] = 24
+      }
+      if ((wm_reg >> 25) & 1) != 0 {
+        mem[addr_reg][data_reg#[200..=207] << 200] = 25
+      }
+      if ((wm_reg >> 26) & 1) != 0 {
+        mem[addr_reg][data_reg#[208..=215] << 208] = 26
+      }
+      if ((wm_reg >> 27) & 1) != 0 {
+        mem[addr_reg][data_reg#[216..=223] << 216] = 27
+      }
+      if ((wm_reg >> 28) & 1) != 0 {
+        mem[addr_reg][data_reg#[224..=231] << 224] = 28
+      }
+      if ((wm_reg >> 29) & 1) != 0 {
+        mem[addr_reg][data_reg#[232..=239] << 232] = 29
+      }
+      if ((wm_reg >> 30) & 1) != 0 {
+        mem[addr_reg][data_reg#[240..=247] << 240] = 30
+      }
+      if ((wm_reg >> 31) & 1) != 0 {
+        mem[addr_reg][data_reg#[248..=255] << 248] = 31
+      }
+    } else {
+      OUT_data = mem[addr_reg]
+    }
+  }
+}

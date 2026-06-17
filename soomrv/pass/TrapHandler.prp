@@ -1,12 +1,12 @@
 pub mod TrapHandler::[lg="TrapHandler", hdl](clk:u1, rst:u1, IN_trapInstr:u48, IN_pcReadData:u35, IN_trapControl:u134, IN_MEM_busy:u1) -> (OUT_pcRead:u7@[], OUT_trapInfo:u72@[], OUT_branch:u74@[], OUT_flushTLB:u1@[], OUT_fence:u1@[], OUT_clearICache:u1@[], OUT_disableIFetch:u1@[], OUT_dbgStallPC:u32@[]) {
   reg memoryWait:u1
-  reg OUT_flushTLB:u1
-  reg trapInfo_r:u72
-  reg fetchOffs:u3
   reg OUT_fence:u1
-  reg OUT_dbgStallPC:u32
-  reg trapPCSpec_r:u2
   reg OUT_clearICache:u1
+  reg fetchOffs:u3
+  reg trapPCSpec_r:u2
+  reg trapInfo_r:u72
+  reg OUT_dbgStallPC:u32
+  reg OUT_flushTLB:u1
   mut _b2i_1 = 0
   mut finalHalfwPC = 0
   mut delegate = 0
@@ -20,60 +20,31 @@ pub mod TrapHandler::[lg="TrapHandler", hdl](clk:u1, rst:u1, IN_trapInstr:u48, I
   mut OUT_flushTLB_c = 0
   mut setMemoryWait = 0
   mut OUT_dbgStallPC_c = 0
-  ___1 = IN_trapInstr#[43..=46]
-  ___3 = IN_trapInstr >> 47
-  ___4 = ___3 & 1
-  ___5 = ___4 != 0
-  ___2 = ___1 != 15
   OUT_disableIFetch = memoryWait
-  ___6 = ___5 or ___2
-  if ___6 {
+  if (((IN_trapInstr >> 47) & 1) != 0) or (IN_trapInstr#[43..=46] != 15) {
     _b2i_1 = 1
   } else {
     _b2i_1 = 0
   }
   OUT_pcRead#[6..=6] = _b2i_1
-  ___7 = IN_trapInstr#[2..=6]
   mut OUT_pcRead__w1 = OUT_pcRead
-  OUT_pcRead__w1#[1..=5] = ___7
-  ___8 = IN_trapInstr & 1
-  ___9 = IN_trapInstr#[7..=9]
-  ___10 = IN_pcReadData#[4..=34]
-  ___11 = ___10#[3..=30]
-  fetchOffs = ___9
-  ___12 = ___11 << 3
-  ___13 = fetchOffs | ___12
-  mut finalHalfwPC__w1 = ___13
-  ___14 = finalHalfwPC__w1 << 1
+  OUT_pcRead__w1#[1..=5] = IN_trapInstr#[2..=6]
+  fetchOffs = IN_trapInstr#[7..=9]
+  mut finalHalfwPC__w1 = fetchOffs | (IN_pcReadData#[4..=34]#[3..=30] << 3)
   OUT_trapInfo = trapInfo_r
-  ___15 = 0 | ___14
   mut OUT_trapInfo__w1 = OUT_trapInfo
-  OUT_trapInfo__w1#[8..=39] = ___15
+  OUT_trapInfo__w1#[8..=39] = (0 | (finalHalfwPC__w1 << 1))
   mut OUT_pcRead__w2 = OUT_pcRead__w1
-  OUT_pcRead__w2#[0..=0] = ___8
+  OUT_pcRead__w2#[0..=0] = (IN_trapInstr & 1)
   OUT_trapInfo = OUT_trapInfo__w1
-  ___16 = trapPCSpec_r == 0
-  ___17 = trapPCSpec_r == 1
-  ___18 = trapPCSpec_r == 2
-  ___19 = trapPCSpec_r == 3
   finalHalfwPC = 0ub???????????????????????????????
-  unique if ___16 {
-  } elif ___17 {
-    ___20 = finalHalfwPC__w1 << 1
-    ___21 = 0 | ___20
-    ___22 = ___21 + 2
-    ___23 = ___22#[0..=31]
-    OUT_trapInfo#[40..=71] = ___23
-  } elif ___18 {
-    ___24 = finalHalfwPC__w1 << 1
-    ___25 = 0 | ___24
-    OUT_trapInfo#[40..=71] = ___25
-  } elif ___19 {
-    ___26 = finalHalfwPC__w1 << 1
-    ___27 = 0 | ___26
-    ___28 = ___27 - 2
-    ___29 = ___28#[0..=31]
-    OUT_trapInfo#[40..=71] = ___29
+  unique if trapPCSpec_r == 0 {
+  } elif trapPCSpec_r == 1 {
+    OUT_trapInfo#[40..=71] = ((0 | (finalHalfwPC__w1 << 1)) + 2)#[0..=31]
+  } elif trapPCSpec_r == 2 {
+    OUT_trapInfo#[40..=71] = (0 | (finalHalfwPC__w1 << 1))
+  } elif trapPCSpec_r == 3 {
+    OUT_trapInfo#[40..=71] = ((0 | (finalHalfwPC__w1 << 1)) - 2)#[0..=31]
   } else {
   }
   mut OUT_branch_c__w1 = 0ub??????????????????????????????????????????????????????????????????????????
@@ -103,300 +74,159 @@ pub mod TrapHandler::[lg="TrapHandler", hdl](clk:u1, rst:u1, IN_trapInstr:u48, I
   OUT_dbgStallPC_c = OUT_dbgStallPC_c__w1
   OUT_fence_c = 0
   OUT_flushTLB_c = 0
-  ___31 = not ___30
   delegate = 0
   isInterrupt = 0
   setMemoryWait = 0
   trapCause = 0
   trapInfo_c = trapInfo_c__w2
   trapPCSpec_c = 0
-  if ___31 {
-    ___32 = IN_trapInstr & 1
-    ___33 = ___32 != 0
-    if ___33 {
-      ___34 = IN_trapInstr#[10..=14]
-      ___36 = IN_trapInstr#[43..=46]
-      ___37 = ___36 == 7
-      ___35 = ___34 == 15
-      ___39 = IN_trapInstr#[43..=46]
-      ___41 = IN_trapInstr#[43..=46]
-      ___43 = IN_trapInstr#[43..=46]
-      ___44 = ___43 == 4
-      ___42 = ___41 == 5
-      ___45 = ___44 or ___42
-      ___40 = ___39 == 14
-      ___46 = ___45 or ___40
-      ___38 = ___37 and ___35
-      ___48 = IN_trapInstr >> 47
-      ___49 = ___48 & 1
-      ___50 = ___49 == 0
-      ___47 = ___46 or ___38
-      ___51 = ___50 and ___47
-      if ___51 {
+  if not ___30 {
+    if (IN_trapInstr & 1) != 0 {
+      if (((IN_trapInstr >> 47) & 1) == 0) and ((((IN_trapInstr#[43..=46] == 4) or (IN_trapInstr#[43..=46] == 5)) or (IN_trapInstr#[43..=46] == 14)) or ((IN_trapInstr#[43..=46] == 7) and (IN_trapInstr#[10..=14] == 15))) {
         ___52 = IN_trapInstr#[43..=46]
-        ___53 = ___52 == 5
-        ___54 = ___52 == 4
-        ___55 = ___52 == 14
-        ___56 = ___52 == 7
-        unique if ___53 {
+        unique if ___52 == 5 {
           OUT_branch_c#[69..=70] = 1
-        } elif ___54 {
+        } elif ___52 == 4 {
           OUT_branch_c#[69..=70] = 1
           OUT_clearICache_c = 1
           OUT_fence_c = 1
           setMemoryWait = 1
-        } elif ___55 {
-          ___57 = IN_trapControl#[103..=133]
-          ___58 = ___57 << 1
+        } elif ___52 == 14 {
           OUT_branch_c#[69..=70] = 0
-          ___59 = 0 | ___58
-          OUT_branch_c#[28..=59] = ___59
-        } elif ___56 {
+          OUT_branch_c#[28..=59] = (0 | (IN_trapControl#[103..=133] << 1))
+        } elif ___52 == 7 {
           OUT_branch_c#[69..=70] = 1
           OUT_flushTLB_c = 1
         } else {
         }
-        ___60 = IN_trapInstr#[43..=46]
-        ___62 = IN_trapInstr#[43..=46]
-        ___63 = ___62 == 14
-        ___61 = ___60 == 5
-        ___64 = ___63 or ___61
-        if ___64 {
-          ___65 = IN_trapControl >> 6
-          ___66 = ___65 & 1
-          ___67 = ___66 != 0
-          if ___67 {
+        if (IN_trapInstr#[43..=46] == 14) or (IN_trapInstr#[43..=46] == 5) {
+          if ((IN_trapControl >> 6) & 1) != 0 {
             trapInfo_c#[0..=0] = 1
-            ___68 = IN_trapInstr#[43..=46]
-            ___69 = ___68 == 14
             trapInfo_c#[8..=39] = 0ub????????????????????????????????
-            if ___69 {
-              ___70 = IN_trapControl#[103..=133]
-              ___71 = ___70 << 1
-              ___72 = 0 | ___71
-              trapInfo_c#[40..=71] = ___72
+            if IN_trapInstr#[43..=46] == 14 {
+              trapInfo_c#[40..=71] = (0 | (IN_trapControl#[103..=133] << 1))
               trapPCSpec_c = 0
             } else {
               trapInfo_c#[40..=71] = 0ub????????????????????????????????
               trapPCSpec_c = 1
             }
-            ___73 = IN_trapControl#[1..=5]
-            trapInfo_c#[2..=6] = ___73
-            ___74 = IN_trapControl & 1
-            trapInfo_c#[1..=1] = ___74
-            ___75 = IN_trapControl & 1
-            ___77 = IN_trapControl#[42..=71]
-            ___79 = IN_trapControl#[73..=102]
+            trapInfo_c#[2..=6] = IN_trapControl#[1..=5]
+            trapInfo_c#[1..=1] = (IN_trapControl & 1)
             mut _mux_2:u30 = 0
-            ___80 = ___79#[0..=29]
             OUT_branch_c#[69..=70] = 0
-            ___76 = ___75 != 0
-            ___78 = ___77#[0..=29]
-            _mux_2 = ___80
+            _mux_2 = IN_trapControl#[73..=102]#[0..=29]
             trapInfo_c#[7..=7] = 1
-            if ___76 {
-              _mux_2 = ___78
+            if (IN_trapControl & 1) != 0 {
+              _mux_2 = IN_trapControl#[42..=71]#[0..=29]
             }
-            ___81 = _mux_2 << 2
-            ___82 = 0 | ___81
-            OUT_branch_c#[28..=59] = ___82
+            OUT_branch_c#[28..=59] = (0 | (_mux_2 << 2))
           }
         }
         OUT_branch_c#[0..=0] = 1
-        ___83 = IN_trapInstr#[29..=35]
-        OUT_branch_c#[21..=27] = ___83
+        OUT_branch_c#[21..=27] = IN_trapInstr#[29..=35]
         OUT_branch_c#[6..=6] = 1
-        ___84 = IN_trapInstr#[15..=21]
-        OUT_branch_c#[14..=20] = ___84
-        ___85 = IN_trapInstr#[22..=28]
-        OUT_branch_c#[7..=13] = ___85
-        ___86 = IN_trapInstr#[2..=6]
-        OUT_branch_c#[1..=5] = ___86
-        ___87 = IN_trapInstr#[7..=9]
-        OUT_branch_c#[65..=67] = ___87
+        OUT_branch_c#[14..=20] = IN_trapInstr#[15..=21]
+        OUT_branch_c#[7..=13] = IN_trapInstr#[22..=28]
+        OUT_branch_c#[1..=5] = IN_trapInstr#[2..=6]
+        OUT_branch_c#[65..=67] = IN_trapInstr#[7..=9]
         OUT_branch_c#[60..=62] = 0
         OUT_branch_c#[63..=64] = 0
         OUT_branch_c#[68..=68] = 0
         OUT_branch_c#[71..=73] = 0
       } else {
-        ___88 = IN_trapInstr#[43..=46]
-        ___90 = IN_trapInstr#[43..=46]
-        ___91 = ___90 >= 6
-        ___89 = ___88 <= 13
-        ___93 = IN_trapInstr >> 47
-        ___94 = ___93 & 1
-        ___95 = ___94 != 0
-        ___92 = ___91 and ___89
-        ___96 = ___95 or ___92
-        if ___96 {
-          ___97 = IN_trapInstr#[10..=14]
-          ___99 = IN_trapInstr#[43..=46]
-          ___100 = ___99 == 7
-          ___98 = ___97 == 16
-          ___102 = IN_trapInstr >> 47
-          ___103 = ___102 & 1
-          ___104 = ___103 == 0
-          ___101 = ___100 and ___98
+        if (((IN_trapInstr >> 47) & 1) != 0) or ((IN_trapInstr#[43..=46] >= 6) and (IN_trapInstr#[43..=46] <= 13)) {
           mut _b2i_3 = 0
-          ___105 = ___104 and ___101
           delegate = 0ub?
           trapCause = 2
-          if ___105 {
+          if (((IN_trapInstr >> 47) & 1) == 0) and ((IN_trapInstr#[43..=46] == 7) and (IN_trapInstr#[10..=14] == 16)) {
             _b2i_3 = 1
           } else {
             _b2i_3 = 0
           }
-          ___106 = IN_trapInstr >> 47
-          ___107 = ___106 & 1
-          ___108 = ___107 != 0
           isInterrupt = _b2i_3
-          if ___108 {
+          if ((IN_trapInstr >> 47) & 1) != 0 {
             trapCause = 24
           } else {
-            ___109 = isInterrupt != 0
-            if ___109 {
-              ___110 = IN_trapControl#[1..=5]
-              trapCause = ___110
+            if isInterrupt != 0 {
+              trapCause = IN_trapControl#[1..=5]
             } else {
               ___111 = IN_trapInstr#[43..=46]
-              ___112 = ___111 == 7
-              ___113 = ___111 == 8
-              ___114 = ___111 == 9
-              ___115 = ___111 == 10
-              ___116 = ___111 == 11
-              ___117 = ___111 == 12
-              ___118 = ___111 == 13
-              ___119 = ___111 == 6
-              unique if ___112 {
-                ___120 = IN_trapInstr#[10..=14]
-                trapCause = ___120
-              } elif ___113 {
+              unique if ___111 == 7 {
+                trapCause = IN_trapInstr#[10..=14]
+              } elif ___111 == 8 {
                 trapCause = 4
-              } elif ___114 {
+              } elif ___111 == 9 {
                 trapCause = 5
-              } elif ___115 {
+              } elif ___111 == 10 {
                 trapCause = 13
-              } elif ___116 {
+              } elif ___111 == 11 {
                 trapCause = 6
-              } elif ___117 {
+              } elif ___111 == 12 {
                 trapCause = 7
-              } elif ___118 {
+              } elif ___111 == 13 {
                 trapCause = 15
-              } elif ___119 {
+              } elif ___111 == 6 {
                 trapCause = 2
               } else {
               }
-              ___121 = trapCause == 11
-              if ___121 {
+              if trapCause == 11 {
                 ___122 = IN_trapControl#[7..=8]
-                ___123 = ___122 == 1
-                ___124 = ___122 == 0
-                unique if ___123 {
+                unique if ___122 == 1 {
                   trapCause = 9
-                } elif ___124 {
+                } elif ___122 == 0 {
                   trapCause = 8
                 } else {
                 }
               }
             }
           }
-          ___127 = trapCause#[0..=3]
-          ___126 = IN_trapControl#[9..=24]
-          ___129 = ___126 << 1
-          ___128 = ___127 + 1
-          ___130 = ___129 >> ___128
-          ___131 = ___130 & 1
-          ___134 = trapCause#[0..=3]
-          ___133 = IN_trapControl#[25..=40]
-          ___136 = ___133 << 1
-          ___135 = ___134 + 1
-          ___137 = ___136 >> ___135
-          ___138 = ___137 & 1
           mut _mux_4:u1 = 0
-          ___139 = ___138 & 1
-          ___125 = isInterrupt != 0
-          ___132 = ___131 & 1
-          _mux_4 = ___139
-          if ___125 {
-            _mux_4 = ___132
+          _mux_4 = (((IN_trapControl#[25..=40] << 1) >> (trapCause#[0..=3] + 1)) & 1) & 1
+          if isInterrupt != 0 {
+            _mux_4 = (((IN_trapControl#[9..=24] << 1) >> (trapCause#[0..=3] + 1)) & 1) & 1
           }
-          ___141 = IN_trapControl#[7..=8]
-          ___143 = trapCause <= 15
-          ___142 = ___141 != 3
-          ___144 = ___143 and ___142
-          ___140 = _mux_4 != 0
           mut _b2i_5 = 0
-          ___145 = ___144 and ___140
-          if ___145 {
+          if ((trapCause <= 15) and (IN_trapControl#[7..=8] != 3)) and (_mux_4 != 0) {
             _b2i_5 = 1
           } else {
             _b2i_5 = 0
           }
           trapInfo_c#[0..=0] = 1
           trapInfo_c#[40..=71] = 0ub????????????????????????????????
-          ___146 = IN_trapInstr >> 1
-          ___147 = ___146 & 1
           mut _mux_6:u2 = 0
-          ___148 = ___147 != 0
           _mux_6 = 3
           delegate = _b2i_5
           trapInfo_c#[8..=39] = 0ub????????????????????????????????
-          if ___148 {
+          if ((IN_trapInstr >> 1) & 1) != 0 {
             _mux_6 = 2
           }
           trapInfo_c#[2..=6] = trapCause
           trapInfo_c#[1..=1] = delegate
-          ___152 = IN_trapControl#[42..=71]
-          ___154 = IN_trapControl#[73..=102]
           mut _mux_7:u30 = 0
-          ___155 = ___154#[0..=29]
           OUT_branch_c#[0..=0] = 1
-          ___151 = delegate != 0
-          ___153 = ___152#[0..=29]
-          _mux_7 = ___155
+          _mux_7 = IN_trapControl#[73..=102]#[0..=29]
           trapInfo_c#[7..=7] = isInterrupt
           trapPCSpec_c = _mux_6
-          if ___151 {
-            _mux_7 = ___153
+          if delegate != 0 {
+            _mux_7 = IN_trapControl#[42..=71]#[0..=29]
           }
-          ___156 = _mux_7 << 2
-          ___157 = 0 | ___156
-          OUT_branch_c#[28..=59] = ___157
-          ___158 = IN_trapInstr#[29..=35]
-          OUT_branch_c#[21..=27] = ___158
+          OUT_branch_c#[28..=59] = (0 | (_mux_7 << 2))
+          OUT_branch_c#[21..=27] = IN_trapInstr#[29..=35]
           OUT_branch_c#[6..=6] = 1
-          ___159 = IN_trapInstr#[15..=21]
-          OUT_branch_c#[14..=20] = ___159
-          ___160 = IN_trapInstr#[22..=28]
-          ___161 = IN_trapInstr#[43..=46]
-          ___163 = IN_trapInstr#[43..=46]
-          ___165 = IN_trapInstr#[43..=46]
-          ___166 = ___165 == 11
-          ___164 = ___163 == 12
-          ___167 = ___166 or ___164
-          ___162 = ___161 == 13
-          OUT_branch_c#[7..=13] = ___160
-          ___168 = ___167 or ___162
-          if ___168 {
-            ___169 = IN_trapInstr#[15..=21]
-            ___170 = ___169 - 1
-            ___171 = ___170#[0..=31]
-            ___172 = ___171#[0..=6]
-            OUT_branch_c#[14..=20] = ___172
+          OUT_branch_c#[14..=20] = IN_trapInstr#[15..=21]
+          OUT_branch_c#[7..=13] = IN_trapInstr#[22..=28]
+          if ((IN_trapInstr#[43..=46] == 11) or (IN_trapInstr#[43..=46] == 12)) or (IN_trapInstr#[43..=46] == 13) {
+            OUT_branch_c#[14..=20] = (IN_trapInstr#[15..=21] - 1)#[0..=31]#[0..=6]
           }
-          ___173 = IN_trapInstr#[2..=6]
-          OUT_branch_c#[1..=5] = ___173
-          ___174 = IN_trapInstr#[7..=9]
-          OUT_branch_c#[65..=67] = ___174
+          OUT_branch_c#[1..=5] = IN_trapInstr#[2..=6]
+          OUT_branch_c#[65..=67] = IN_trapInstr#[7..=9]
           OUT_branch_c#[60..=62] = 0
           OUT_branch_c#[63..=64] = 0
           OUT_branch_c#[68..=68] = 0
           OUT_branch_c#[69..=70] = 0
           OUT_branch_c#[71..=73] = 0
         } else {
-          ___175 = finalHalfwPC__w1 << 1
-          ___176 = 0 | ___175
-          OUT_dbgStallPC_c = ___176
+          OUT_dbgStallPC_c = 0 | (finalHalfwPC__w1 << 1)
         }
       }
     }
@@ -405,20 +235,15 @@ pub mod TrapHandler::[lg="TrapHandler", hdl](clk:u1, rst:u1, IN_trapInstr:u48, I
   OUT_dbgStallPC = OUT_dbgStallPC_c
   OUT_fence = OUT_fence_c
   OUT_flushTLB = OUT_flushTLB_c
-  ___177 = rst != 0
   trapInfo_r = trapInfo_c
   trapPCSpec_r = trapPCSpec_c
-  if ___177 {
+  if rst != 0 {
     memoryWait = 0
   } else {
-    ___178 = setMemoryWait != 0
-    if ___178 {
+    if setMemoryWait != 0 {
       memoryWait = 1
     } else {
-      ___180 = memoryWait != 0
-      ___179 = IN_MEM_busy == 0
-      ___181 = ___180 and ___179
-      if ___181 {
+      if (memoryWait != 0) and (IN_MEM_busy == 0) {
         memoryWait = 0
       }
     }

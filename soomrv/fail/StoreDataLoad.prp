@@ -1,0 +1,223 @@
+pub comb StoreDataLoad::[lg="StoreDataLoad", hdl](clk:u1, rst:u1, IN_branch:u74, IN_uop:u34, IN_atomicUOp:u94, IN_readReady:u2, IN_readData:u64) -> (OUT_ready:u2, OUT_readReq:u14, OUT_uop:u80) {
+  mut i = 0
+  mut _b2i_1 = 0
+  mut _b2i_2 = 0
+  mut genblk1_0_uopATO = 0
+  mut genblk1_1_uopATO = 0
+  mut genblk1_0_uopIQ = 0
+  mut _b2i_3 = 0
+  mut genblk1_0_offs = 0
+  mut genblk1_0_raw = 0
+  mut genblk1_0_offs_s1 = 0
+  mut genblk1_0_ShiftData = 0
+  mut genblk1_0_shifted = 0
+  mut genblk1_0_readDataShifted = 0
+  mut genblk1_0_regFileLookup = 0
+  mut genblk1_0_outUOp = 0
+  mut genblk1_1_uopIQ = 0
+  mut _b2i_4 = 0
+  mut genblk1_1_offs = 0
+  mut genblk1_1_readDataShifted = 0
+  mut genblk1_1_regFileLookup = 0
+  mut genblk1_1_outUOp = 0
+  OUT_readReq#[1..=6] = IN_uop#[0..=16]#[8..=14]#[0..=5]
+  i = 0sb?
+  if ((IN_uop#[0..=16] & 1) != 0) and (((IN_uop#[0..=16]#[8..=14] >> 6) & 1) == 0) {
+    _b2i_1 = 1
+  } else {
+    _b2i_1 = 0
+  }
+  mut OUT_readReq__w1 = OUT_readReq
+  OUT_readReq__w1#[0..=0] = _b2i_1
+  mut OUT_readReq__w2 = OUT_readReq__w1
+  OUT_readReq__w2#[8..=13] = IN_uop#[17..=33]#[8..=14]#[0..=5]
+  if ((IN_uop#[17..=33] & 1) != 0) and (((IN_uop#[17..=33]#[8..=14] >> 6) & 1) == 0) {
+    _b2i_2 = 1
+  } else {
+    _b2i_2 = 0
+  }
+  genblk1_0_uopATO = 0ub????????????????????????????????????????
+  mut genblk1_0_uopATO__w1 = genblk1_0_uopATO
+  genblk1_0_uopATO__w1#[0..=0] = (IN_atomicUOp#[0..=46] & 1)
+  mut genblk1_0_uopATO__w2 = genblk1_0_uopATO__w1
+  genblk1_0_uopATO__w2#[1..=7] = IN_atomicUOp#[0..=46]#[8..=14]
+  genblk1_1_uopATO = 0ub????????????????????????????????????????
+  mut genblk1_1_uopATO__w1 = genblk1_1_uopATO
+  genblk1_1_uopATO__w1#[0..=0] = (IN_atomicUOp#[47..=93] & 1)
+  mut genblk1_1_uopATO__w2 = genblk1_1_uopATO__w1
+  genblk1_1_uopATO__w2#[1..=7] = IN_atomicUOp#[47..=93]#[8..=14]
+  mut OUT_readReq__w3 = OUT_readReq__w2
+  OUT_readReq__w3#[7..=7] = _b2i_2
+  mut genblk1_0_uopATO__w3 = genblk1_0_uopATO__w2
+  genblk1_0_uopATO__w3#[8..=39] = IN_atomicUOp#[0..=46]#[15..=46]
+  mut genblk1_1_uopATO__w3 = genblk1_1_uopATO__w2
+  genblk1_1_uopATO__w3#[8..=39] = IN_atomicUOp#[47..=93]#[15..=46]
+  genblk1_0_uopIQ = 0ub????????????????????????????????????????
+  if (not (((genblk1_0_uopATO__w3.[defer] & 1) != 0) and ((genblk1_0_uopIQ.[defer] & 1) != 0))) and (((OUT_readReq__w3.[defer]#[0..=6] & 1) == 0) or ((IN_readReady & 1) != 0)) {
+    _b2i_3 = 1
+  } else {
+    _b2i_3 = 0
+  }
+  OUT_ready#[0..=0] = _b2i_3
+  genblk1_0_offs = 0ub??
+  mut genblk1_0_offs_s1__w1 = genblk1_0_offs.[defer]
+  mut genblk1_0_shifted__w1 = 0ub????????????????????????????????
+  genblk1_0_ShiftData = 0ub????????????????????????????????
+  genblk1_0_offs_s1 = 0ub??
+  genblk1_0_raw = 0ub????????????????????????????????
+  mut genblk1_0_raw__w1 = IN_readData#[0..=31]
+  genblk1_0_shifted = genblk1_0_shifted__w1
+  unique if genblk1_0_offs_s1__w1 == 0 {
+    genblk1_0_shifted = genblk1_0_raw__w1
+  } elif genblk1_0_offs_s1__w1 == 1 {
+    genblk1_0_shifted#[8..=15] = genblk1_0_raw__w1#[0..=7]
+  } elif genblk1_0_offs_s1__w1 == 2 {
+    genblk1_0_shifted#[16..=31] = genblk1_0_raw__w1#[0..=15]
+  } elif genblk1_0_offs_s1__w1 == 3 {
+    genblk1_0_shifted#[24..=31] = genblk1_0_raw__w1#[0..=7]
+  } else {
+  }
+  mut genblk1_0_ShiftData__w1 = genblk1_0_shifted
+  mut genblk1_0_offs__w1 = 0ub??
+  genblk1_0_ShiftData = genblk1_0_ShiftData__w1
+  genblk1_0_offs = genblk1_0_offs__w1
+  genblk1_0_offs_s1 = genblk1_0_offs_s1__w1
+  genblk1_0_raw = genblk1_0_raw__w1
+  genblk1_0_readDataShifted = 0ub????????????????????????????????
+  mut genblk1_0_readDataShifted__w1 = genblk1_0_ShiftData__w1
+  genblk1_0_regFileLookup = 0
+  if rst != 0 {
+    genblk1_0_uopIQ = 0ub???????????????????????????????????????0
+  } else {
+    if genblk1_0_regFileLookup.[defer] != 0 {
+      genblk1_0_uopIQ#[8..=39] = genblk1_0_readDataShifted__w1.[defer]
+    }
+    if ((genblk1_0_uopATO__w3.[defer] & 1) == 0) or (((IN_branch & 1) != 0) and ((((IN_branch >> 6) & 1) != 0) or ((genblk1_0_uopIQ.[defer]#[1..=7] - IN_branch#[14..=20])#[0..=6]#sext[0..=6] > 0))) {
+      genblk1_0_uopIQ = 0ub???????????????????????????????????????0
+    }
+    if (((IN_uop#[0..=16] & 1) != 0) and ((OUT_ready.[defer] & 1) != 0)) and (((IN_branch & 1) == 0) or ((((IN_branch >> 6) & 1) == 0) and ((IN_uop#[0..=16]#[1..=7] - IN_branch#[14..=20])#[0..=6]#sext[0..=6] <= 0))) {
+      genblk1_0_uopIQ#[0..=0] = 1
+      genblk1_0_uopIQ#[1..=7] = IN_uop#[0..=16]#[1..=7]
+      if ((IN_uop#[0..=16]#[8..=14] >> 6) & 1) != 0 {
+        ___119 = (IN_uop#[0..=16]#[8..=14] >> 5) & 1
+        genblk1_0_offs_s1 = IN_uop#[0..=16]#[15..=16]
+        genblk1_0_raw = IN_uop#[0..=16]#[8..=14]#[0..=5] | ((((((((((((((((((((((((((___119 | (___119 << 1)) | (___119 << 2)) | (___119 << 3)) | (___119 << 4)) | (___119 << 5)) | (___119 << 6)) | (___119 << 7)) | (___119 << 8)) | (___119 << 9)) | (___119 << 10)) | (___119 << 11)) | (___119 << 12)) | (___119 << 13)) | (___119 << 14)) | (___119 << 15)) | (___119 << 16)) | (___119 << 17)) | (___119 << 18)) | (___119 << 19)) | (___119 << 20)) | (___119 << 21)) | (___119 << 22)) | (___119 << 23)) | (___119 << 24)) | (___119 << 25)) << 6)
+        genblk1_0_shifted = 0ub????????????????????????????????
+        unique if genblk1_0_offs_s1 == 0 {
+          genblk1_0_shifted = genblk1_0_raw
+        } elif genblk1_0_offs_s1 == 1 {
+          genblk1_0_shifted#[8..=15] = genblk1_0_raw#[0..=7]
+        } elif genblk1_0_offs_s1 == 2 {
+          genblk1_0_shifted#[16..=31] = genblk1_0_raw#[0..=15]
+        } elif genblk1_0_offs_s1 == 3 {
+          genblk1_0_shifted#[24..=31] = genblk1_0_raw#[0..=7]
+        } else {
+        }
+        genblk1_0_ShiftData = genblk1_0_shifted
+        genblk1_0_uopIQ#[8..=39] = genblk1_0_ShiftData
+      } else {
+        genblk1_0_offs = IN_uop#[0..=16]#[15..=16]
+        genblk1_0_regFileLookup = 1
+      }
+    }
+  }
+  genblk1_0_outUOp = 0ub????????????????????????????????????????
+  mut genblk1_0_outUOp__w1 = 0ub???????????????????????????????????????0
+  genblk1_0_outUOp = genblk1_0_outUOp__w1
+  if (genblk1_0_uopATO__w3.[defer] & 1) != 0 {
+    genblk1_0_outUOp = genblk1_0_uopATO__w3.[defer]
+  } else {
+    if (genblk1_0_uopIQ.[defer] & 1) != 0 {
+      genblk1_0_outUOp = genblk1_0_uopIQ.[defer]
+      if genblk1_0_regFileLookup.[defer] != 0 {
+        genblk1_0_outUOp#[8..=39] = genblk1_0_readDataShifted__w1.[defer]
+      }
+    }
+  }
+  OUT_uop#[0..=39] = genblk1_0_outUOp.[defer]
+  genblk1_1_uopIQ = 0ub????????????????????????????????????????
+  if (not (((genblk1_1_uopATO__w3.[defer] & 1) != 0) and ((genblk1_1_uopIQ.[defer] & 1) != 0))) and (((OUT_readReq__w3.[defer]#[7..=13] & 1) == 0) or (((IN_readReady >> 1) & 1) != 0)) {
+    _b2i_4 = 1
+  } else {
+    _b2i_4 = 0
+  }
+  mut OUT_ready__w1 = OUT_ready
+  OUT_ready__w1#[1..=1] = _b2i_4
+  genblk1_1_offs = 0ub??
+  mut genblk1_0_offs_s1__w2 = genblk1_1_offs.[defer]
+  mut genblk1_0_shifted__w2 = 0ub????????????????????????????????
+  mut genblk1_0_raw__w2 = IN_readData#[32..=63]
+  genblk1_0_shifted = genblk1_0_shifted__w2
+  unique if genblk1_0_offs_s1__w2 == 0 {
+    genblk1_0_shifted = genblk1_0_raw__w2
+  } elif genblk1_0_offs_s1__w2 == 1 {
+    genblk1_0_shifted#[8..=15] = genblk1_0_raw__w2#[0..=7]
+  } elif genblk1_0_offs_s1__w2 == 2 {
+    genblk1_0_shifted#[16..=31] = genblk1_0_raw__w2#[0..=15]
+  } elif genblk1_0_offs_s1__w2 == 3 {
+    genblk1_0_shifted#[24..=31] = genblk1_0_raw__w2#[0..=7]
+  } else {
+  }
+  mut genblk1_0_ShiftData__w2 = genblk1_0_shifted
+  mut genblk1_1_offs__w1 = 0ub??
+  genblk1_0_ShiftData = genblk1_0_ShiftData__w2
+  genblk1_0_offs_s1 = genblk1_0_offs_s1__w2
+  genblk1_0_raw = genblk1_0_raw__w2
+  genblk1_1_offs = genblk1_1_offs__w1
+  genblk1_1_readDataShifted = 0ub????????????????????????????????
+  mut genblk1_1_readDataShifted__w1 = genblk1_0_ShiftData__w2
+  genblk1_1_regFileLookup = 0
+  if rst != 0 {
+    genblk1_1_uopIQ = 0ub???????????????????????????????????????0
+  } else {
+    if genblk1_1_regFileLookup.[defer] != 0 {
+      genblk1_1_uopIQ#[8..=39] = genblk1_1_readDataShifted__w1.[defer]
+    }
+    if ((genblk1_1_uopATO__w3.[defer] & 1) == 0) or (((IN_branch & 1) != 0) and ((((IN_branch >> 6) & 1) != 0) or ((genblk1_1_uopIQ.[defer]#[1..=7] - IN_branch#[14..=20])#[0..=6]#sext[0..=6] > 0))) {
+      genblk1_1_uopIQ = 0ub???????????????????????????????????????0
+    }
+    if (((IN_uop#[17..=33] & 1) != 0) and (((OUT_ready__w1.[defer] >> 1) & 1) != 0)) and (((IN_branch & 1) == 0) or ((((IN_branch >> 6) & 1) == 0) and ((IN_uop#[17..=33]#[1..=7] - IN_branch#[14..=20])#[0..=6]#sext[0..=6] <= 0))) {
+      genblk1_1_uopIQ#[0..=0] = 1
+      genblk1_1_uopIQ#[1..=7] = IN_uop#[17..=33]#[1..=7]
+      if ((IN_uop#[17..=33]#[8..=14] >> 6) & 1) != 0 {
+        ___279 = (IN_uop#[17..=33]#[8..=14] >> 5) & 1
+        genblk1_0_offs_s1 = IN_uop#[17..=33]#[15..=16]
+        genblk1_0_raw = IN_uop#[17..=33]#[8..=14]#[0..=5] | ((((((((((((((((((((((((((___279 | (___279 << 1)) | (___279 << 2)) | (___279 << 3)) | (___279 << 4)) | (___279 << 5)) | (___279 << 6)) | (___279 << 7)) | (___279 << 8)) | (___279 << 9)) | (___279 << 10)) | (___279 << 11)) | (___279 << 12)) | (___279 << 13)) | (___279 << 14)) | (___279 << 15)) | (___279 << 16)) | (___279 << 17)) | (___279 << 18)) | (___279 << 19)) | (___279 << 20)) | (___279 << 21)) | (___279 << 22)) | (___279 << 23)) | (___279 << 24)) | (___279 << 25)) << 6)
+        genblk1_0_shifted = 0ub????????????????????????????????
+        unique if genblk1_0_offs_s1 == 0 {
+          genblk1_0_shifted = genblk1_0_raw
+        } elif genblk1_0_offs_s1 == 1 {
+          genblk1_0_shifted#[8..=15] = genblk1_0_raw#[0..=7]
+        } elif genblk1_0_offs_s1 == 2 {
+          genblk1_0_shifted#[16..=31] = genblk1_0_raw#[0..=15]
+        } elif genblk1_0_offs_s1 == 3 {
+          genblk1_0_shifted#[24..=31] = genblk1_0_raw#[0..=7]
+        } else {
+        }
+        genblk1_0_ShiftData = genblk1_0_shifted
+        genblk1_1_uopIQ#[8..=39] = genblk1_0_ShiftData
+      } else {
+        genblk1_1_offs = IN_uop#[17..=33]#[15..=16]
+        genblk1_1_regFileLookup = 1
+      }
+    }
+  }
+  genblk1_1_outUOp = 0ub????????????????????????????????????????
+  mut genblk1_1_outUOp__w1 = 0ub???????????????????????????????????????0
+  genblk1_1_outUOp = genblk1_1_outUOp__w1
+  if (genblk1_1_uopATO__w3.[defer] & 1) != 0 {
+    genblk1_1_outUOp = genblk1_1_uopATO__w3.[defer]
+  } else {
+    if (genblk1_1_uopIQ.[defer] & 1) != 0 {
+      genblk1_1_outUOp = genblk1_1_uopIQ.[defer]
+      if genblk1_1_regFileLookup.[defer] != 0 {
+        genblk1_1_outUOp#[8..=39] = genblk1_1_readDataShifted__w1.[defer]
+      }
+    }
+  }
+  mut OUT_uop__w1 = OUT_uop
+  OUT_uop__w1#[40..=79] = genblk1_1_outUOp.[defer]
+  OUT_readReq = OUT_readReq__w3
+  OUT_ready = OUT_ready__w1
+  OUT_uop = OUT_uop__w1
+}

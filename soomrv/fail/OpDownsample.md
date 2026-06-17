@@ -1,10 +1,19 @@
-# OpDownsample — translation FAIL
+# OpDownsample — yosys+slang fails
 
-**Reason:** COMPILE-FAIL (slang reader could not lower)
+kind=-
 
-**Read set:** /mada/users/renau/projs/soomrv/repo/src/lib/OpDownsample.sv  soomrv/stubs/PrefixSum.stub.sv soomrv/stubs/PriorityEncoder.stub.sv
+| stage | result |
+|---|---|
+| yosys+slang gate | FAIL |
+| --reader slang -> prp | FAIL |
+| slang -> lg | NA |
+| prp -> lg | NA |
+| yosys-slang -> lg | NA |
+| lec prp vs slang | NA |
+| lec prp vs yosys-slang | NA |
+| abc gen | NA |
 
-**Detail:**
+**First failure message:**
 ```
-      1 "code":"InvalidTopModule"	"message":"'OpDownsample' is not a valid top-level module"
+'OpDownsample' is not a valid top-level module
 ```
