@@ -1010,15 +1010,33 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
       if (now.get() != rn.dst.get()) {
         merge_fact_fields(*now, *rn.dst);
       }
-      // Bw soundness invariant: a comptime-known value must lie
-      // WITHIN its derived range (the range is a conservative bound on the
-      // CURRENT value; replace-on-stamp + value-write invalidation keep it
-      // fresh). A violation is an internal compiler bug, not a user error.
+      // Bw soundness check: a comptime-known value must lie WITHIN its derived
+      // range. When it provably does not (e.g. a negative literal stamped onto
+      // an unsigned-typed slot, `o:u4 = -1`), that is a USER bitwidth error, not
+      // a compiler bug — it is reachable straight from source. Report it once
+      // (skip if an upstream pass already flagged the design) and let the run
+      // fail cleanly instead of tripping a hard invariant abort.
       {
         const Bundle::Entry& e0 = now->get_entry("0");
         if (!e0.trivial.is_invalid() && e0.trivial.is_integer() && !e0.trivial.has_unknowns() && !e0.bw_max.is_invalid()
             && !e0.bw_min.is_invalid()) {
-          I(!e0.trivial.gt_op(e0.bw_max)->is_known_true() && !e0.trivial.lt_op(e0.bw_min)->is_known_true());
+          const bool over  = e0.trivial.gt_op(e0.bw_max)->is_known_true();
+          const bool under = e0.trivial.lt_op(e0.bw_min)->is_known_true();
+          if ((over || under) && !livehd::diag::sink().has_errors()) {
+            livehd::diag::sink().emit(livehd::diag::Diagnostic{
+                .severity = livehd::diag::Severity::error,
+                .code     = "bitwidth-overflow",
+                .category = "bitwidth",
+                .pass     = "upass.runner",
+                .message  = std::format("`{}` (value {}) does not fit its declared range [{}, {}]",
+                                        rn.dst_name,
+                                        e0.trivial.to_decimal_string(),
+                                        e0.bw_min.to_decimal_string(),
+                                        e0.bw_max.to_decimal_string()),
+                .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+                .hint     = "widen the declared type, force fewer bits with a bit-select, or adjust the value",
+            });
+          }
         }
       }
     } else if (!rn.dst_was_bound
@@ -4580,10 +4598,11 @@ void uPass_runner::unroll_while() {
   // in O(1) iterations, but a DIVERGENT loop whose condition variable keeps
   // changing yet never reaches the exit (`while c != 10 { c -= 1 }` from below)
   // never repeats a state. This bounds such loops to a prompt error rather than
-  // grinding to the shared fuel cap. 100k body-copies is already absurd for a
+  // grinding to the shared fuel cap. 32k body-copies is already absurd for a
   // comptime unroll (it lowers to that many hardware copies), so no real loop
-  // hits it.
-  constexpr std::size_t kMaxLoopUnroll = 100000;
+  // hits it — and a tiny runaway source now errors in seconds instead of taking
+  // >60s to fold 100k trivial iterations first (a DoS-y footgun).
+  constexpr std::size_t kMaxLoopUnroll = 32768;
   std::size_t           loop_iters     = 0;
   while (true) {
     lm->restore_cursor(while_bm);  // cursor on the while node — the scope where the condition folds

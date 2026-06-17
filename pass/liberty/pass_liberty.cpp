@@ -10,7 +10,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <format>
+#include <fstream>
+#include <iterator>
 #include <print>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -183,6 +187,47 @@ bool model_cell(hhds::GraphLibrary& outlib, Mio_Gate_t* g) {
   return true;
 }
 
+// ABC's Liberty tokenizer (read_lib) asserts — aborting the whole process —
+// on malformed input rather than returning an error, so the Cmd_CommandExecute
+// != 0 check below never fires for garbage like a lone "(". A well-formed
+// Liberty file's first non-comment token is `library`; pre-validate that cheaply
+// (skipping leading whitespace and /* */ + // comments) so bad input gets a
+// clean diagnostic instead of a SIGABRT. Returns "" if OK, else a reason.
+std::string liberty_prevalidate(const std::string& files) {
+  std::stringstream ss(files);
+  std::string       path;
+  while (ss >> path) {
+    std::ifstream ifs(path, std::ios::binary);
+    if (!ifs.good()) {
+      continue;  // a genuinely missing file is reported on the open path
+    }
+    const std::string body((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    size_t            i = 0;
+    for (;;) {  // skip whitespace + comments
+      while (i < body.size() && std::isspace(static_cast<unsigned char>(body[i]))) {
+        ++i;
+      }
+      if (i + 1 < body.size() && body[i] == '/' && body[i + 1] == '*') {
+        i += 2;
+        while (i + 1 < body.size() && !(body[i] == '*' && body[i + 1] == '/')) {
+          ++i;
+        }
+        i += 2;
+      } else if (i + 1 < body.size() && body[i] == '/' && body[i + 1] == '/') {
+        while (i < body.size() && body[i] != '\n') {
+          ++i;
+        }
+      } else {
+        break;
+      }
+    }
+    if (body.compare(i, 7, "library") != 0) {
+      return std::format("'{}' is not a Liberty library (expected a 'library(...)' header)", path);
+    }
+  }
+  return {};
+}
+
 }  // namespace
 
 void Pass_liberty::gensim(Eprp_var& var) {
@@ -198,6 +243,10 @@ void Pass_liberty::gensim(Eprp_var& var) {
     livehd::diag::err("pass.liberty", "no-out", "unsupported")
         .msg("pass.liberty gensim needs --emit-dir lg:DIR for the model library")
         .fatal();
+    return;
+  }
+  if (auto why = liberty_prevalidate(files); !why.empty()) {
+    livehd::diag::err("pass.liberty", "bad-lib", "io").msg("pass.liberty: {}", why).fatal();
     return;
   }
 

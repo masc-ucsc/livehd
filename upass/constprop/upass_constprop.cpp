@@ -752,7 +752,29 @@ upass::Vote uPass_constprop::process_minus(std::string_view dst_name, Bundle& ds
 
 upass::Vote uPass_constprop::process_mult(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_nary(dst_name, src, [](Dlop& r, Dlop n) { r = r.mult_op(n); }, /*report_nil=*/true);
+  // mult_op grows the result width by the SUM of the operand widths. Dlop tracks
+  // that width in an int16 64-bit-word count, so a product of two very wide
+  // constants (e.g. `(1<<1100000) * (1<<1100000)`) overflows it to a negative
+  // value -> reconstruct() converts that to a ~2^64 size -> Dlop::alloc spins
+  // forever growing the pool (a >60s hang). Stay well under the overflow: when
+  // the combined width would exceed kMaxFoldBits, leave `r` invalid so push_nary
+  // skips the fold and keeps the Mult node structural (no comptime evaluation).
+  // The bound is generous vs. any real constant fold (operands are tiny).
+  constexpr long long kMaxFoldBits = 1 << 20;  // 1,048,576 bits, << the ~2.097M overflow
+  return push_nary(
+      dst_name,
+      src,
+      [](Dlop& r, Dlop n) {
+        if (r.is_invalid()) {
+          return;
+        }
+        if (static_cast<long long>(r.get_bits()) + n.get_bits() > kMaxFoldBits) {
+          r = Dlop{};  // invalid -> store skipped, Mult kept structural
+          return;
+        }
+        r = r.mult_op(n);
+      },
+      /*report_nil=*/true);
 }
 
 bool uPass_constprop::report_arith_nil(const Dlop& r) {

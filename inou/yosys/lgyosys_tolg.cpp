@@ -830,6 +830,14 @@ static void process_cell_drivers_intialization(RTLIL::Module* mod, hhds::Graph* 
       cell2node[cell] = resolve_memory(g, cell);
       continue;
     }
+    // $print / $check are effect-only debug cells (Yosys lowers $display /
+    // $write / assert-with-message to them). They have no data output, so
+    // materializing a node would leave a 0-bit driver pin that trips the
+    // post-conversion width invariant. LiveHD has no debug-print semantics to
+    // model, so drop them (skipped symmetrically in process_cells()).
+    if (cell->type == "$print" || cell->type == "$check") {
+      continue;
+    }
 
     auto node = g->create_node();
     set_loc(node, cell->get_src_attribute());
@@ -1591,6 +1599,9 @@ static void process_connect_outputs(RTLIL::Module* mod, hhds::Graph* g) {
 
 static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
   for (auto cell : mod->cells()) {
+    if (cell->type == "$print" || cell->type == "$check") {
+      continue;  // effect-only debug cells, dropped in process_cell_drivers_intialization()
+    }
     I(cell2node.find(cell) != cell2node.end());
     hhds::Node_class exit_node = cell2node[cell];
 

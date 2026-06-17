@@ -599,15 +599,20 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
 
     if (mem_size && mem_addr_bits_missing) {
       Bitwidth_range addr_bw(-mem_size / 2, mem_size / 2 - 1);
-      auto           addr_sbits = addr_bw.get_sbits();
       for (auto& dpin : addr_drivers) {
         auto it = bwmap.find(dpin.get_class_index());
-        if (it != bwmap.end()) {
-          I(it->second.get_sbits() <= addr_sbits);
-        } else {
+        if (it == bwmap.end()) {
           bwmap.insert_or_assign(dpin.get_class_index(), addr_bw);
           discovered_some_backward_nodes_try_again = true;
         }
+        // else: the address driver already has a derived range. It may
+        // legitimately be WIDER than the freshly inferred signed address width
+        // — a normal unsigned address `raddr:uN` carries an extra sign bit
+        // (get_sbits() == N+1), one more than the ceil(log2(entries)) the
+        // memory needs. Keep the existing range. (The removed
+        // `I(get_sbits() <= addr_sbits)` here wrongly aborted on that common
+        // unsigned-address case; e.g. a 2-entry mem with a u1 address, and
+        // several ware/rtl barrel-shifter / BTB designs.)
       }
     }
   }

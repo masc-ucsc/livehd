@@ -50,6 +50,23 @@ struct Lec_options {
   std::string reset;  // e.g. "rst_ni,clr_i:hi"
 };
 
+// The BMC engine unrolls `bound` (+ `reset_cycles`) SMT copies of the design;
+// an absurd value (e.g. from `--set lec.bound=2000000000`) builds billions of
+// cycles and hangs. Callers validate against this ceiling and reject out-of-range
+// values with a clean diagnostic. Real bounds are tiny (tests use <= 32).
+inline constexpr int kLecMaxUnroll = 100000;
+
+// "" if bound/reset_cycles are in [0, kLecMaxUnroll], else a human message.
+inline std::string lec_options_range_error(const Lec_options& o) {
+  if (o.bound < 0 || o.bound > kLecMaxUnroll) {
+    return "lec.bound out of range (0.." + std::to_string(kLecMaxUnroll) + "), got " + std::to_string(o.bound);
+  }
+  if (o.reset_cycles < 0 || o.reset_cycles > kLecMaxUnroll) {
+    return "lec.reset_cycles out of range (0.." + std::to_string(kLecMaxUnroll) + "), got " + std::to_string(o.reset_cycles);
+  }
+  return {};
+}
+
 // Prove the (combinational) outputs of `ref` and `impl` equal for all inputs,
 // matching primary inputs by name. Returns Proven / Refuted(+witness) /
 // Unknown(+detail).

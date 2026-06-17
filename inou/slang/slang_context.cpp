@@ -71,6 +71,14 @@ std::string Slang_context::lname_of(const slang::ast::Symbol& sym) {
   if (base.empty()) {
     base = "_anon";
   }
+  // A user symbol whose sanitized name begins with "___" sits in LiveHD's
+  // reserved tmp namespace (Lnast::is_tmp). Every "<base>_sN" uniquing candidate
+  // would then also start with "___", so the loop below would spin forever
+  // (observed on `___x` signals and on escaped names in trace0.v/trace1.v).
+  // Push such a name out of the tmp namespace once, before uniquing.
+  if (Lnast::is_tmp(base)) {
+    base.insert(0, "usr");  // "___x" -> "usr___x"
+  }
   std::string name = base;
   int         n    = 0;
   while (used_names_.contains(name) || Lnast::is_tmp(name)) {

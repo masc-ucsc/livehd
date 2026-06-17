@@ -79,6 +79,60 @@ void check_inputs_exist(const std::vector<std::string>& files) {
   }
 }
 
+// An lg: input is a GraphLibrary directory whose manifest is library.txt.
+// GraphLibrary::load_merge() asserts ifs.good() when that file is missing, so a
+// non-directory or an empty/incomplete dir would abort the process. Validate up
+// front so the linker import paths (compile prp/ln + lg:) reject it cleanly,
+// mirroring the lg-only path's is_directory guard.
+// hhds writes a 12-byte header (magic, version, endian) at the front of every
+// graph_*/tree_* body.bin. The format identity magic is stable ("HHGB"/"HHTB").
+constexpr uint32_t kHhdsGraphBodyMagic = 0x48484742;  // "HHGB"
+constexpr uint32_t kHhdsTreeBodyMagic  = 0x48485442;  // "HHTB"
+
+// Validate the on-disk body.bin magic before handing a dir to the hhds loader.
+// hhds::Graph/Tree::load_body() check the magic only with assert(), compiled
+// out under NDEBUG — where the loader then reads garbage counts and corrupts
+// the heap (SIGABRT). A truncated/garbage body.bin is reachable via the
+// documented lg:/ln: inputs (e.g. an interrupted write), so reject a bad magic
+// with a clean diagnostic. Only the stable identity magic is checked here (not
+// the version), so a normal hhds version bump still flows through to hhds.
+void check_ir_body_magic(std::string_view dir, std::string_view subdir_prefix, uint32_t magic, std::string_view kind) {
+  std::error_code ec;
+  for (const auto& entry : fs::directory_iterator(dir, ec)) {
+    if (!entry.is_directory()) {
+      continue;
+    }
+    const auto name = entry.path().filename().string();
+    if (name.rfind(subdir_prefix, 0) != 0) {  // e.g. "graph_" / "tree_"
+      continue;
+    }
+    const auto body = entry.path() / "body.bin";
+    if (!fs::is_regular_file(body)) {
+      continue;
+    }
+    std::ifstream ifs(body, std::ios::binary);
+    uint32_t      m = 0;
+    ifs.read(reinterpret_cast<char*>(&m), sizeof(m));
+    if (!ifs.good() || m != magic) {
+      throw Lhd_error{"config",
+                      std::format("{} input {} is corrupt ({}/body.bin has a bad or truncated header)", kind, dir, name),
+                      "the directory was not produced by a matching lhd version, or a write was truncated"};
+    }
+  }
+}
+
+void check_lg_input_dir(std::string_view d) {
+  if (!fs::is_directory(d)) {
+    throw Lhd_error{"missing_file", std::format("lg: input not found: {}", d), "an lg: input is a GraphLibrary directory"};
+  }
+  if (!fs::is_regular_file(fs::path(d) / "library.txt")) {
+    throw Lhd_error{"config",
+                    std::format("lg: input {} is not a GraphLibrary (no library.txt)", d),
+                    "produce one with `lhd compile ... --emit-dir lg:DIR/`"};
+  }
+  check_ir_body_magic(d, "graph_", kHhdsGraphBodyMagic, "lg:");
+}
+
 const Typed_path* find_slot(const std::vector<Typed_path>& slots, std::string_view kind) {
   for (const auto& s : slots) {
     if (s.kind == kind) {
@@ -621,6 +675,7 @@ std::vector<std::shared_ptr<Lnast>> load_ln_dir(const std::string& dir) {
     throw Lhd_error{"config", std::format("malformed manifest.json in {}", dir), ""};
   }
 
+  check_ir_body_magic(dir, "tree_", kHhdsTreeBodyMagic, "ln:");
   auto forest = hhds::Forest::create();
   forest->load(dir);
 
@@ -1373,7 +1428,16 @@ void scan_command(Options& opts, Result& res) {
   std::string payload = "[";
   bool        first   = true;
   for (const auto& f : opts.files) {
+    // A directory (e.g. a path with a trailing '/') passes check_inputs_exist
+    // but has an empty stem; create_io asserts on an empty unit name. Reject any
+    // non-regular-file / empty-stem input with a clean usage error.
+    if (!fs::is_regular_file(f)) {
+      throw Lhd_error{"usage", std::format("scan expects .prp source files, got '{}'", f), "scan derives a module name from each file's stem"};
+    }
     auto base = fs::path(f).stem().string();
+    if (base.empty()) {
+      throw Lhd_error{"usage", std::format("cannot derive a module name from '{}'", f), ""};
+    }
 
     std::shared_ptr<Lnast> ln;
     {
@@ -1930,6 +1994,7 @@ void compile_ir(Options& opts, Result& res, const Ir_inputs& ir) {
     if (!fs::is_directory(lg_in)) {
       throw Lhd_error{"missing_file", std::format("lg: input not found: {}", lg_in), "an lg: input is a GraphLibrary directory"};
     }
+    check_ir_body_magic(lg_in, "graph_", kHhdsGraphBodyMagic, "lg:");
     res.inputs.push_back(lg_in);
     lib_path = lg_in;
     if (lg_out != nullptr && fs::weakly_canonical(lg_out->path) != fs::weakly_canonical(lg_in)) {
@@ -1973,6 +2038,7 @@ void compile_link_ir(Options& opts, Result& res, const Ir_inputs& ir) {
   // conflict-free for matching names (and dedups them).
   auto&             lib      = livehd::Hhds_graph_library::instance(lib_path);
   for (const auto& d : ir.lg_dirs) {
+    check_lg_input_dir(d);
     res.inputs.push_back(d);
     lib.load_merge(d);
   }
@@ -2011,6 +2077,7 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
     if (!ir.lg_dirs.empty()) {
       auto& lib = livehd::Hhds_graph_library::instance(lib_path);
       for (const auto& d : ir.lg_dirs) {
+        check_lg_input_dir(d);
         res.inputs.push_back(d);
         lib.load_merge(d);
       }
@@ -2332,6 +2399,10 @@ void lec_command(Options& opts, Result& res) {
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
   o.reset        = label("reset", "");
 
+  if (auto e = livehd::lec::lec_options_range_error(o); !e.empty()) {
+    throw Lhd_error{"usage", e, "the BMC engine unrolls one SMT copy of the design per cycle"};
+  }
+
   // --lib lg:DIR libraries resolve Sub instances during encoding (e.g. the
   // gensim cell models behind an ABC standard-cell netlist), so lec can flatten
   // a hierarchical/mapped impl. Gids are name-hash stable, so an instance's
@@ -2495,6 +2566,7 @@ void pass_command(Options& opts, Result& res) {
   if (!fs::is_directory(lg_in)) {
     throw Lhd_error{"missing_file", std::format("lg: input not found: {}", lg_in), "an lg: input is a GraphLibrary directory"};
   }
+  check_ir_body_magic(lg_in, "graph_", kHhdsGraphBodyMagic, "lg:");
   res.inputs.push_back(lg_in);
 
   if (sub == "color") {
@@ -3356,6 +3428,9 @@ void tool_command(Options& opts, Result& res) {
   const bool have_ln = !ln_tokens.empty();
   if (have_lg && have_ln) {
     throw Lhd_error{"usage", "tool takes either lg: or ln:/source inputs, not both", ""};
+  }
+  for (const auto& d : lg_dirs) {  // reject a corrupt/non-GraphLibrary dir cleanly before the hhds loader asserts
+    check_lg_input_dir(d);
   }
 
   if (verb == "tree") {

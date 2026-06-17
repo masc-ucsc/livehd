@@ -12,6 +12,7 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <unordered_map>
 
 #include "cgen_verilog.hpp"
 #include "file_utils.hpp"
@@ -81,6 +82,47 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var& var, bool do_read) {
   std::print("path:{} script:{}\n", main_path, script_file);
 }
 
+// DFS over the module-instantiation graph; true if a cycle is reachable from
+// `mod`. `state`: 0/absent=unvisited, 1=on the current DFS stack, 2=done.
+static bool yosys_dfs_inst_cycle(Yosys::RTLIL::Design& design, Yosys::RTLIL::Module* mod,
+                                 std::unordered_map<const void*, int>& state, std::string& cyc) {
+  state[mod] = 1;
+  for (auto* cell : mod->cells()) {
+    auto* sub = design.module(cell->type);  // nullptr for $-primitives / blackboxes
+    if (sub == nullptr) {
+      continue;
+    }
+    const int st = state.count(sub) ? state[sub] : 0;
+    if (st == 1) {
+      cyc = sub->name.str();
+      if (!cyc.empty() && cyc.front() == '\\') {
+        cyc.erase(0, 1);
+      }
+      return true;
+    }
+    if (st == 0 && yosys_dfs_inst_cycle(design, sub, state, cyc)) {
+      return true;
+    }
+  }
+  state[mod] = 2;
+  return false;
+}
+
+// Yosys' `hierarchy` pass recurses unbounded over the instantiation tree, so a
+// self/mutually-recursive module (a module that transitively instantiates
+// itself) overflows the stack and SIGSEGVs the process. Detect such a cycle in
+// the populated design before running `hierarchy` so it becomes a clean
+// diagnostic instead. (`--reader yosys-slang` already rejects this cleanly.)
+static bool yosys_has_inst_cycle(Yosys::RTLIL::Design& design, std::string& cyc) {
+  std::unordered_map<const void*, int> state;
+  for (auto* mod : design.modules()) {
+    if (!state.count(mod) && yosys_dfs_inst_cycle(design, mod, state, cyc)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void Inou_yosys_api::call_yosys(mustache::data& vars) {
   std::ifstream inFile;
   inFile.open(std::string(script_file));
@@ -109,6 +151,18 @@ void Inou_yosys_api::call_yosys(mustache::data& vars) {
     std::string cmd{c};  // yosys call needs std::string
 
     std::print("yosys cmd:{}\n", cmd);
+    // Guard the `hierarchy` pass against a recursive-instantiation stack
+    // overflow (checked here, before the inner try, so the diagnostic is not
+    // re-wrapped by the generic catch below).
+    if (cmd.rfind("hierarchy", 0) == 0) {
+      std::string cyc;
+      if (yosys_has_inst_cycle(design, cyc)) {
+        livehd::diag::err("inou.yosys", "recursive-instantiation", "unsupported")
+            .msg("module '{}' is part of a recursive instantiation cycle", cyc)
+            .hint("a module cannot (transitively) instantiate itself; remove the recursion")
+            .fatal();
+      }
+    }
     try {
       Yosys::Pass::call(&design, cmd);
     } catch (...) {

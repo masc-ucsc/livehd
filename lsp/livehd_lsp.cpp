@@ -112,15 +112,29 @@ bool read_message(std::string& body) {
         val = val.substr(s);
       }
       if (key == "Content-Length") {
-        content_length = std::strtoul(val.c_str(), nullptr, 10);
-        have_len       = true;
+        // Parse defensively: strtoul wraps a leading '-' to a huge value, so a
+        // "Content-Length: -5" would make resize() below throw std::length_error
+        // (abort), and an implausibly large length would block the read loop
+        // forever (hang). Reject negative / non-numeric / out-of-range and treat
+        // it as a missing length rather than crashing.
+        errno          = 0;
+        char* end      = nullptr;
+        const auto raw = std::strtoull(val.c_str(), &end, 10);
+        if (end != val.c_str() && errno == 0 && !val.empty() && val.front() != '-') {
+          content_length = static_cast<size_t>(raw);
+          have_len       = true;
+        }
       }
     }
   }
 
-  if (!have_len) {
+  // A framed body larger than this is implausible for an LSP message; cap it so
+  // a bogus/huge Content-Length cannot resize() to an aborting size or stall the
+  // read loop waiting for bytes that will never arrive.
+  constexpr size_t kMaxBodyBytes = 64u * 1024 * 1024;  // 64 MiB
+  if (!have_len || content_length > kMaxBodyBytes) {
     body.clear();
-    return true;
+    return have_len ? false : true;
   }
   body.resize(content_length);
   size_t got = 0;

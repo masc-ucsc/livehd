@@ -60,6 +60,11 @@ void Pass_lec::lec(Eprp_var& var) {
   o.reset_cycles = str_tools::to_i(var.get("reset_cycles", "2"));
   o.reset        = std::string{var.get("reset", "")};
 
+  if (auto e = lec::lec_options_range_error(o); !e.empty()) {
+    livehd::diag::err("pass.lec", "bad-bound", "io").msg("pass.lec: {}", e).fatal();
+    return;
+  }
+
   auto ref  = var.graphs[0];
   auto impl = var.graphs[1];
   auto mod  = std::string{impl->get_name()};

@@ -64,7 +64,7 @@ void Pass_abc::work(Eprp_var& var) {
 
   auto adder = livehd::abc::arith::parse_adder_kind(adder_s);
   if (!adder.has_value()) {
-    livehd::diag::err("pass.abc", "bad-adder", "usage").msg("pass.abc: unknown adder '{}' (use rca|cska|cla)", adder_s).fatal();
+    livehd::diag::err("pass.abc", "bad-adder", "io").msg("pass.abc: unknown adder '{}' (use rca|cska|cla)", adder_s).fatal();
     return;
   }
   int block_size = 0;
@@ -73,7 +73,7 @@ void Pass_abc::work(Eprp_var& var) {
     auto* e      = bs_s.data() + bs_s.size();
     auto [p, ec] = std::from_chars(b, e, block_size);
     if (ec != std::errc{} || p != e || block_size < 0) {
-      livehd::diag::err("pass.abc", "bad-block-size", "usage")
+      livehd::diag::err("pass.abc", "bad-block-size", "io")
           .msg("pass.abc: block_size must be a non-negative integer, got '{}'", bs_s)
           .fatal();
       return;

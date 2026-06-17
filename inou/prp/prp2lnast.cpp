@@ -9,6 +9,7 @@
 #include <functional>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -51,6 +52,77 @@ std::string slurp_file(std::string_view filename) {
 }  // namespace
 
 // File-backed entry: read `filename` from disk, then delegate to the buffer ctor.
+// Largest bracket-nesting depth we let reach the recursive-descent parser. The
+// prpparse expression grammar recurses several stack frames per nesting level
+// with no depth limit, so a pathologically nested expression (~12k deep)
+// overflows the stack and SIGSEGVs the process. We reject deeper input up front
+// with a clean syntax diagnostic. The cap is far above any real source and well
+// below the overflow threshold.
+static constexpr int kMaxParseNesting = 4000;
+
+// Approximate the peak recursive-descent parser depth `src` would induce, so we
+// can reject stack-overflowing input before it reaches the parser. Two unbounded
+// recursion drivers exist: bracket nesting (`(`/`[`/`{` -> parse_paren etc.) and
+// a run of leading unary operators (`!`/`~`/`-`/`+` -> parse_unary). Both leave a
+// frame on the stack, so the live depth ~= open brackets + pending unary run.
+// We track that sum and return its peak (string-literal and comment bytes are
+// skipped). *deepest_byte gets the offset where the peak occurred.
+static int max_parser_depth(std::string_view src, size_t& deepest_byte) {
+  int    bracket = 0, unary_run = 0, peak = 0;
+  size_t peak_byte = 0;
+  enum { code, line_comment, block_comment, dq_string } st = code;
+  for (size_t i = 0; i < src.size(); ++i) {
+    const char c = src[i];
+    switch (st) {
+      case line_comment:
+        if (c == '\n') {
+          st = code;
+        }
+        break;
+      case block_comment:
+        if (c == '*' && i + 1 < src.size() && src[i + 1] == '/') {
+          st = code;
+          ++i;
+        }
+        break;
+      case dq_string:
+        if (c == '\\') {
+          ++i;  // skip the escaped byte
+        } else if (c == '"') {
+          st = code;
+        }
+        break;
+      case code:
+        if (c == '/' && i + 1 < src.size() && src[i + 1] == '/') {
+          st = line_comment;
+          ++i;
+        } else if (c == '/' && i + 1 < src.size() && src[i + 1] == '*') {
+          st = block_comment;
+          ++i;
+        } else if (c == '"') {
+          st = dq_string;
+        } else if (c == '(' || c == '[' || c == '{') {
+          ++bracket;
+        } else if (c == ')' || c == ']' || c == '}') {
+          if (bracket > 0) {
+            --bracket;
+          }
+        } else if (c == '!' || c == '~' || c == '-' || c == '+') {
+          ++unary_run;  // a chain of prefix operators recurses one frame each
+        } else if (!std::isspace(static_cast<unsigned char>(c))) {
+          unary_run = 0;  // any operand/atom consumes the pending prefix run
+        }
+        if (bracket + unary_run > peak) {
+          peak      = bracket + unary_run;
+          peak_byte = i;
+        }
+        break;
+    }
+  }
+  deepest_byte = peak_byte;
+  return peak;
+}
+
 Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name)
     : Prp2lnast(filename, module_name, slurp_file(filename)) {}
 
@@ -79,6 +151,35 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, st
   // (via parser_error_int -> Sink::flush) before this frame unwinds, so the
   // scope is still active when the human line renders.
   livehd::diag::Locator_scope diag_scope(&lnast->source_locator());
+
+  // Guard the recursive-descent parser against stack-overflow on pathologically
+  // nested input (the parser has no depth limit). Reject it with a clean syntax
+  // diagnostic before parsing, pointing at the deepest opener.
+  {
+    size_t    deep_byte = 0;
+    const int max_nest  = max_parser_depth(prp_file, deep_byte);
+    if (max_nest > kMaxParseNesting) {
+      uint32_t line = 1, col = 1;
+      for (size_t i = 0; i < deep_byte && i < prp_file.size(); ++i) {
+        if (prp_file[i] == '\n') {
+          ++line;
+          col = 1;
+        } else {
+          ++col;
+        }
+      }
+      report_error_at(static_cast<uint32_t>(deep_byte),
+                      static_cast<uint32_t>(deep_byte + 1),
+                      line,
+                      col,
+                      line,
+                      col + 1,
+                      "nesting-too-deep",
+                      "syntax",
+                      std::format("expression nesting too deep ({} levels; max {})", max_nest, kMaxParseNesting),
+                      "simplify deeply nested parentheses/brackets");
+    }
+  }
 
   // prpparse fail-fast: the first syntax error throws prpparse::Parse_error
   // carrying a rich Diag (shape-compatible with livehd::diag). Map it into the
@@ -5017,6 +5118,31 @@ Lnast_node Prp2lnast::attribute_set_to_node(TSNode n) {
   return aref;
 }
 
+// Largest int-type bit width whose bounds we materialize. A wider type (e.g.
+// `u2147483647`) makes Dlop::get_mask_value build a multi-gigabit constant and
+// hang, so the two `u<N>/s<N>/i<N>` parse sites reject anything above this with
+// a clean diagnostic. Generous vs. any real design (buses are a few k bits).
+static constexpr long long kMaxIntTypeWidth = 1 << 20;
+
+// Parse the <N> in `u<N>/s<N>/i<N>`. Returns nullopt on non-numeric, overflow,
+// negative, or above kMaxIntTypeWidth.
+static std::optional<int> try_parse_int_type_width(std::string_view digits) {
+  if (digits.empty()) {
+    return std::nullopt;
+  }
+  size_t    pos = 0;
+  long long v   = 0;
+  try {
+    v = std::stoll(std::string(digits), &pos);
+  } catch (...) {
+    return std::nullopt;
+  }
+  if (pos != digits.size() || v < 0 || v > kMaxIntTypeWidth) {
+    return std::nullopt;
+  }
+  return static_cast<int>(v);
+}
+
 bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::string& max_txt, std::string& min_txt) {
   // Classify the base keyword → signedness and optional concrete width.
   bool unsigned_base = false;
@@ -5048,7 +5174,15 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
   }
   // Concrete width sugar (`u8(min=…)`): seed bounds from the width first.
   if (kw.size() >= 2 && (kw[0] == 'u' || kw[0] == 's' || kw[0] == 'i') && std::isdigit(static_cast<unsigned char>(kw[1]))) {
-    bits_to_bounds(std::stoi(std::string(kw.substr(1))), max_txt, min_txt);
+    auto w = try_parse_int_type_width(kw.substr(1));
+    if (!w) {
+      report_error(tup,
+                   "width-too-large",
+                   "type",
+                   std::format("integer type width '{}' is out of range (0..{} bits)", kw, kMaxIntTypeWidth),
+                   "use a smaller bit width");
+    }
+    bits_to_bounds(*w, max_txt, min_txt);
   }
   // Refine with the named args.
   uint32_t nn = ts_node_named_child_count(tup);
@@ -5284,7 +5418,15 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
       int_type_call_bounds(txt, constraint, max_txt, min_txt);
     } else if (!txt.empty() && std::isdigit(static_cast<unsigned char>(txt.back()))) {
       // First char is u/s/i; the remainder is the bit width.
-      const int  n         = std::stoi(txt.substr(1));
+      auto w = try_parse_int_type_width(std::string_view{txt}.substr(1));
+      if (!w) {
+        report_error(type_node,
+                     "width-too-large",
+                     "type",
+                     std::format("integer type width '{}' is out of range (0..{} bits)", txt, kMaxIntTypeWidth),
+                     "use a smaller bit width");
+      }
+      const int  n         = *w;
       const bool is_signed = (t == "sint_type");
       if (is_signed) {
         max_txt = std::string(Dlop::get_mask_value(n - 1)->to_pyrope());
