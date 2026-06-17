@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <ostream>
 #include <stack>
@@ -8,6 +9,8 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "lnast.hpp"
 
@@ -57,7 +60,7 @@ private:
 
   // ── Node writers ─────────────────────────────────────────────────────────
   void write_top();
-  void write_module();   // slang-origin: io node + body -> comb|mod NAME(...) -> (...) { … }
+  void write_module();  // slang-origin: io node + body -> comb|mod NAME(...) -> (...) { … }
   void write_stmts();
   void write_if();
   void write_declare();  // declare(ref, type, qualifier, [value])
@@ -71,19 +74,18 @@ private:
   // Renders a tuple_add node in EXPRESSION position (no LHS child) as a Pyrope
   // tuple literal `(v0, v1, …)` — used for a memory declare's initializer.
   void write_tuple_literal();
-  void write_tuple_get();
   void write_attr_set();
-  void write_attr_get();
   void write_delay_assign();
 
-  // Infix binary:  LHS = a <op> b [op c …]
-  void write_infix(std::string_view op);
-  // Prefix unary:  LHS = <op>a
-  void write_prefix_unary(std::string_view op);
-  // sext — emit as a reparsable `src#sext[0..=pos]` bit-select
-  void write_sext();
-  // get_mask — emit a `src#[lo..=hi]` bit-select reconstructed from the mask
-  void write_get_mask();
+  // Statement form of a value-producing op (`lhs = <rhs>`).  The RHS itself is
+  // rendered by render_def_rhs(), which also inlines single-use temps.  Used for
+  // every infix/unary/postfix value op (plus, bit_and, sext, get_mask,
+  // tuple_get, attr_get, …) — they differ only in how render_def_rhs spells the
+  // RHS, so the statement wrapper is shared.
+  void write_value_stmt();
+  // range( dst, lo, hi ) fallback — a range temp not folded into a get_mask
+  // (the usual consumer) emits `dst = lo..=hi`.
+  void write_range();
   // set_mask — emit a `dst#[lo..=hi] = ins` bit-range LHS assign (RMW)
   void write_set_mask();
 
@@ -98,10 +100,10 @@ private:
 
   // Emits the `comb|mod NAME(in:T, …) -> (out:T, …)` header from the io node
   // (cursor-independent; reads the io subtree via direct tree accessors).
-  void emit_module_header(Lnast_nid io_nid, bool is_mod);
+  void        emit_module_header(Lnast_nid io_nid, bool is_mod);
   // True if the module body declares state (a `reg`/`latch` declare, anywhere
   // in the stmts subtree) — selects `mod` over `comb`.
-  bool body_has_state(Lnast_nid stmts_nid) const;
+  bool        body_has_state(Lnast_nid stmts_nid) const;
   // The lambda name to emit: the last `.`-component of the top module name
   // (e.g. "trivial_if.fun3" -> "fun3"), so the generated identifier is a plain
   // Pyrope name (no dotted/escaped identifier the re-compile leg would reject).
@@ -141,16 +143,73 @@ private:
   // Per (var,attr) pairs folded above (key "var\x01attr"), so write_attr_set
   // skips re-emitting a folded attr that occurs deeper than the top-level body
   // (e.g. a memory's `mem.[wensize]=N` written inside the always block).
-  std::unordered_set<std::string> folded_keys_;
+  std::unordered_set<std::string>              folded_keys_;
 
   // Walk the top-level body statements and populate folded_attrs_ (mapping the
   // slang attr vocabulary to the Pyrope source one: initial->init,
   // sync->async with the value inverted, everything else verbatim).
-  void collect_folded_attrs(Lnast_nid stmts_nid);
+  void        collect_folded_attrs(Lnast_nid stmts_nid);
   // Render an attr value leaf (const text or ref name) to Pyrope source.
   std::string render_attr_value(Lnast_nid value_nid) const;
 
+  // ── Single-use temp folding (expression inlining) ─────────────────────────
+  // The post-uPass LNAST is fully flattened: every operation is its own
+  // statement assigning to a `___tmp`, so `res = a + 1` arrives as
+  // `plus(___t, a, 1)` + `store(res, ___t)`.  Folding inlines a `___tmp` that
+  // is written once and read once back into its single use, undoing the
+  // flattening so the emitted Pyrope reads like the source (`res = a + 1`).
+  struct Fold_info {
+    Lnast_nid                    def_node;
+    Lnast_ntype::Lnast_ntype_int def_type  = Lnast_ntype::Lnast_ntype_invalid;
+    int                          def_count = 0;   // assignments to this name
+    int                          use_count = 0;   // reads of this name
+    int                          def_index = -1;  // pre-order index of the (single) def
+    int                          use_index = -1;  // pre-order index of the (single) use
+  };
+  std::unordered_map<std::string, Fold_info>                           fold_info_;    // by raw name
+  std::unordered_map<std::string, std::vector<int>>                    write_idx_;    // name -> sorted write pre-order indices
+  std::unordered_set<std::string>                                      foldable_;     // temp names to inline at their use
+  std::unordered_set<int64_t>                                          folded_node_;  // def-node keys (get_class_index) to skip
+  std::unordered_map<std::string, std::pair<std::string, std::string>> range_lohi_;   // range-temp name -> "lo","hi"
+  std::vector<Lnast_nid> get_mask_nodes_;                                             // every get_mask, for range-mask resolution
+
+  // Pre-pass: walk the whole tree, populate the maps above, and decide which
+  // temps are foldable.  Called once at the start of write_all().
+  void        analyze_folding();
+  void        scan_node(Lnast_nid nid, int& index);  // recursive pre-order populate
+  // True if a node type writes its child0 (an LHS def).  if/cassert/loop and the
+  // pseudo-func_* nodes read child0 instead, so they return false.
+  static bool defines_child0(Lnast_ntype::Lnast_ntype_int t);
+  // A `store(lhs, value)` with no index levels and a ref/const value — the only
+  // store shape that inlines as a plain copy.
+  bool        is_pure_copy(Lnast_nid store_node) const;
+  // No operand of `def_node` is reassigned strictly between pre-order indices
+  // (d, u) — the condition that makes moving a pure expression to its single use
+  // value-preserving.
+  bool        operands_stable(Lnast_nid def_node, int d, int u) const;
+  // True if `name` is a `___tmp` selected for inlining.
+  bool        is_foldable(std::string_view name) const { return foldable_.count(std::string(name)) != 0; }
+  // True if a node's def-key is in folded_node_ (its statement is suppressed).
+  bool        is_folded_node(Lnast_nid nid) const { return folded_node_.count(nid.get_class_index().value) != 0; }
+
+  // Render a value node (ref/const, or a foldable temp's inlined expression) to
+  // a Pyrope expression string.  operand_ctx => parenthesise a loose (infix /
+  // unary) sub-expression so precedence is preserved when it nests inside
+  // another operator; tight postfix forms (`x#[..]`, `x[i]`, `x.[a]`) never get
+  // wrapped.
+  std::string render_value(Lnast_nid node, bool operand_ctx);
+  // Render the RHS expression (everything after `lhs = `) of a value-producing
+  // "defining" node, inlining folded operands recursively.
+  std::string render_def_rhs(Lnast_nid def_node, bool operand_ctx);
+  // A const leaf -> its Pyrope spelling (number / true|false|nil / quoted string).
+  std::string const_text(Lnast_nid node) const;
+
   // ── Utilities ────────────────────────────────────────────────────────────
   static bool             is_tmp(std::string_view name);
+  // The infix symbol for a binary/n-ary op ntype ("+", "==", "and", …) or "" if
+  // the type is not an infix op.
+  static std::string_view infix_symbol(Lnast_ntype::Lnast_ntype_int t);
+  // True if `t` is a value-producing op whose single-use temp can be inlined.
+  static bool             is_foldable_optype(Lnast_ntype::Lnast_ntype_int t);
   std::string             strip_prefix(std::string_view name) const;  // renames ___ssa_N out of the SSA namespace
 };

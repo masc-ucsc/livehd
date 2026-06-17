@@ -17,7 +17,8 @@ Lnast_prp_writer::Lnast_prp_writer(std::ostream& _os, std::shared_ptr<Lnast> _ln
 void Lnast_prp_writer::write_all() {
   depth     = 0;
   nid_stack = {};
-  cur       = lnast->get_root();
+  analyze_folding();  // decide which single-use temps to inline
+  cur = lnast->get_root();
   write_node();
 }
 
@@ -72,6 +73,50 @@ void Lnast_prp_writer::println(std::string_view s) {
 
 bool Lnast_prp_writer::is_tmp(std::string_view name) {
   return name.size() >= 3 && name[0] == '_' && name[1] == '_' && name[2] == '_';
+}
+
+std::string_view Lnast_prp_writer::infix_symbol(Lnast_ntype::Lnast_ntype_int t) {
+  using N = Lnast_ntype;
+  switch (t) {
+    case N::Lnast_ntype_plus   : return "+";
+    case N::Lnast_ntype_minus  : return "-";
+    case N::Lnast_ntype_mult   : return "*";
+    case N::Lnast_ntype_div    : return "/";
+    case N::Lnast_ntype_mod    : return "%";
+    case N::Lnast_ntype_shl    : return "<<";
+    case N::Lnast_ntype_sra    : return ">>";
+    case N::Lnast_ntype_eq     : return "==";
+    case N::Lnast_ntype_ne     : return "!=";
+    case N::Lnast_ntype_lt     : return "<";
+    case N::Lnast_ntype_le     : return "<=";
+    case N::Lnast_ntype_gt     : return ">";
+    case N::Lnast_ntype_ge     : return ">=";
+    case N::Lnast_ntype_log_and: return "and";
+    case N::Lnast_ntype_log_or : return "or";
+    case N::Lnast_ntype_bit_and: return "&";
+    case N::Lnast_ntype_bit_or : return "|";
+    case N::Lnast_ntype_bit_xor: return "^";
+    default                    : return "";
+  }
+}
+
+bool Lnast_prp_writer::is_foldable_optype(Lnast_ntype::Lnast_ntype_int t) {
+  using N = Lnast_ntype;
+  if (!infix_symbol(t).empty()) {
+    return true;  // every infix arithmetic/bitwise/logical/comparison op
+  }
+  switch (t) {
+    case N::Lnast_ntype_log_not:
+    case N::Lnast_ntype_bit_not:
+    case N::Lnast_ntype_sext:
+    case N::Lnast_ntype_get_mask:
+    case N::Lnast_ntype_tuple_get:
+    case N::Lnast_ntype_attr_get : return true;
+    // store is foldable only as a plain copy (handled at the call site, which
+    // checks the arity); set_mask/range/func_call/delay_assign are statement
+    // forms, never inlined.
+    default                      : return false;
+  }
 }
 
 std::string Lnast_prp_writer::take_decl_keyword(std::string_view lhs) {
@@ -145,33 +190,36 @@ void Lnast_prp_writer::write_node() {
     case N::Lnast_ntype_func_call   : write_func_call(); break;
     case N::Lnast_ntype_func_def    : write_func_def(); break;
     case N::Lnast_ntype_tuple_add   : write_tuple_add(); break;
-    case N::Lnast_ntype_tuple_get   : write_tuple_get(); break;
     case N::Lnast_ntype_attr_set    : write_attr_set(); break;
-    case N::Lnast_ntype_attr_get    : write_attr_get(); break;
     case N::Lnast_ntype_delay_assign: write_delay_assign(); break;
-    case N::Lnast_ntype_plus        : write_infix("+"); break;
-    case N::Lnast_ntype_minus       : write_infix("-"); break;
-    case N::Lnast_ntype_mult        : write_infix("*"); break;
-    case N::Lnast_ntype_div         : write_infix("/"); break;
-    case N::Lnast_ntype_mod         : write_infix("%"); break;
-    case N::Lnast_ntype_shl         : write_infix("<<"); break;
-    case N::Lnast_ntype_sra         : write_infix(">>"); break;
-    case N::Lnast_ntype_sext        : write_sext(); break;
-    case N::Lnast_ntype_get_mask    : write_get_mask(); break;
     case N::Lnast_ntype_set_mask    : write_set_mask(); break;
-    case N::Lnast_ntype_eq          : write_infix("=="); break;
-    case N::Lnast_ntype_ne          : write_infix("!="); break;
-    case N::Lnast_ntype_lt          : write_infix("<"); break;
-    case N::Lnast_ntype_le          : write_infix("<="); break;
-    case N::Lnast_ntype_gt          : write_infix(">"); break;
-    case N::Lnast_ntype_ge          : write_infix(">="); break;
-    case N::Lnast_ntype_log_and     : write_infix("and"); break;
-    case N::Lnast_ntype_log_or      : write_infix("or"); break;
-    case N::Lnast_ntype_log_not     : write_prefix_unary("not "); break;
-    case N::Lnast_ntype_bit_and     : write_infix("&"); break;
-    case N::Lnast_ntype_bit_or      : write_infix("|"); break;
-    case N::Lnast_ntype_bit_xor     : write_infix("^"); break;
-    case N::Lnast_ntype_bit_not     : write_prefix_unary("~"); break;
+    case N::Lnast_ntype_range       : write_range(); break;
+    // All value-producing ops share one statement wrapper; render_def_rhs()
+    // spells the per-op RHS and inlines any single-use temp operands.
+    case N::Lnast_ntype_plus        :
+    case N::Lnast_ntype_minus       :
+    case N::Lnast_ntype_mult        :
+    case N::Lnast_ntype_div         :
+    case N::Lnast_ntype_mod         :
+    case N::Lnast_ntype_shl         :
+    case N::Lnast_ntype_sra         :
+    case N::Lnast_ntype_sext        :
+    case N::Lnast_ntype_get_mask    :
+    case N::Lnast_ntype_eq          :
+    case N::Lnast_ntype_ne          :
+    case N::Lnast_ntype_lt          :
+    case N::Lnast_ntype_le          :
+    case N::Lnast_ntype_gt          :
+    case N::Lnast_ntype_ge          :
+    case N::Lnast_ntype_log_and     :
+    case N::Lnast_ntype_log_or      :
+    case N::Lnast_ntype_log_not     :
+    case N::Lnast_ntype_bit_and     :
+    case N::Lnast_ntype_bit_or      :
+    case N::Lnast_ntype_bit_xor     :
+    case N::Lnast_ntype_bit_not     :
+    case N::Lnast_ntype_tuple_get   :
+    case N::Lnast_ntype_attr_get    : write_value_stmt(); break;
     default                         : {
       // Unknown node — emit a comment so the output stays parseable.
       println(std::format("/* TODO: unhandled node type {} */", static_cast<int>(current_ntype())));
@@ -242,6 +290,9 @@ void Lnast_prp_writer::write_module() {
       cur = stmts_nid;
       if (move_to_child()) {  // push stmts, cur -> first statement
         do {
+          if (is_folded_node(cur)) {
+            continue;  // a temp def inlined at its single use
+          }
           const bool is_decl = current_ntype() == Lnast_ntype::Lnast_ntype_declare;
           if (is_decl != (pass == 0)) {
             continue;
@@ -281,7 +332,7 @@ void Lnast_prp_writer::emit_module_header(Lnast_nid io_nid, bool is_mod) {
         if (name_nid.is_invalid()) {
           continue;
         }
-        auto init_nid = lnast->get_sibling_next(name_nid);          // const(init|nil)
+        auto init_nid = lnast->get_sibling_next(name_nid);  // const(init|nil)
         auto type_nid = init_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(init_nid);
         if (!first) {
           print(", ");
@@ -410,8 +461,8 @@ void Lnast_prp_writer::collect_folded_attrs(Lnast_nid stmts_nid) {
     if (key == "type" || key == "comptime") {
       continue;
     }
-    auto val_nid = lnast->get_sibling_next(key_nid);
-    std::string val = render_attr_value(val_nid);
+    auto        val_nid = lnast->get_sibling_next(key_nid);
+    std::string val     = render_attr_value(val_nid);
 
     auto var0 = std::string(strip_prefix(lnast->get_name(var_nid)));
     folded_keys_.insert(var0 + "\x01" + key);  // record (var,orig-key) for write_attr_set skip
@@ -449,6 +500,9 @@ void Lnast_prp_writer::write_stmts() {
   }
   if (move_to_child()) {
     do {
+      if (is_folded_node(cur)) {
+        continue;  // a temp def inlined at its single use — emit nothing
+      }
       print_indent();
       write_node();
       os << "\n";
@@ -470,9 +524,9 @@ void Lnast_prp_writer::write_if() {
     return;
   }
 
-  // First child: condition (ref or const)
+  // First child: condition (ref or const) — inline a single-use temp condition.
   print(unique ? "unique if " : "if ");
-  write_node();
+  print(render_value(cur, /*operand_ctx=*/false));
   print(" {\n");
   ++depth;
 
@@ -499,9 +553,9 @@ void Lnast_prp_writer::write_if() {
       print_indent();
       print("}");
     } else {
-      // elif condition
+      // elif condition — inline a single-use temp condition.
       print(" elif ");
-      write_node();
+      print(render_value(cur, /*operand_ctx=*/false));
       print(" {\n");
       ++depth;
       if (!move_to_sibling()) {
@@ -556,8 +610,7 @@ void Lnast_prp_writer::write_declare() {
   // sentinel — emit a bare declaration (`reg r:u8`) so tolg gives the flop no
   // reset pin (sync reset is carried by the body mux instead).  `= nil` is not
   // a reparsable initializer for an integer reg.
-  const bool nil_value
-      = has_value && current_ntype() == Lnast_ntype::Lnast_ntype_const && current_text() == "nil";
+  const bool nil_value = has_value && current_ntype() == Lnast_ntype::Lnast_ntype_const && current_text() == "nil";
 
   print(kw);
   print(" ");
@@ -579,7 +632,7 @@ void Lnast_prp_writer::write_declare() {
     if (current_ntype() == Lnast_ntype::Lnast_ntype_tuple_add) {
       write_tuple_literal();  // memory init: a bare tuple_add (no LHS child)
     } else {
-      write_node();
+      print(render_value(cur, /*operand_ctx=*/false));
     }
   } else if (!has_value && kw != "reg" && kw != "latch" && !kw.starts_with("reg ")) {
     // A combinational var declared without an initializer (e.g. a Verilog
@@ -640,9 +693,9 @@ static int all_ones_width(std::string_view s) {
     int top = hex_digit(h[0]);
     int topbits;
     switch (top) {  // most-significant nibble of a 2^N-1 value
-      case 1: topbits = 1; break;
-      case 3: topbits = 2; break;
-      case 7: topbits = 3; break;
+      case 1 : topbits = 1; break;
+      case 3 : topbits = 2; break;
+      case 7 : topbits = 3; break;
       case 15: topbits = 4; break;
       default: return 0;
     }
@@ -684,10 +737,10 @@ static int pow2_width(std::string_view s) {
     int top = hex_digit(h[0]);
     int toplog;
     switch (top) {
-      case 1: toplog = 0; break;
-      case 2: toplog = 1; break;
-      case 4: toplog = 2; break;
-      case 8: toplog = 3; break;
+      case 1 : toplog = 0; break;
+      case 2 : toplog = 1; break;
+      case 4 : toplog = 2; break;
+      case 8 : toplog = 3; break;
       default: return -1;
     }
     for (size_t k = 1; k < h.size(); ++k) {
@@ -801,8 +854,8 @@ std::string Lnast_prp_writer::render_type_at(Lnast_nid type_nid) {
       if (elem.is_invalid()) {
         return {};
       }
-      auto size_n = lnast->get_sibling_next(elem);
-      std::string sz = size_n.is_invalid() ? std::string{} : std::string(lnast->get_name(size_n));
+      auto        size_n = lnast->get_sibling_next(elem);
+      std::string sz     = size_n.is_invalid() ? std::string{} : std::string(lnast->get_name(size_n));
       return sz + render_type_at(elem);
     }
     default: return {};  // comp_type_tuple / named-type ref — not yet serialised; drop
@@ -819,8 +872,8 @@ void Lnast_prp_writer::write_store() {
   if (!move_to_child()) {
     return;
   }
-  auto        lhs   = std::string(strip_prefix(current_text()));
-  Lnast_nid   first = cur;
+  auto      lhs   = std::string(strip_prefix(current_text()));
+  Lnast_nid first = cur;
   // Fold a redundant self-store `lhs = lhs` (a set_mask in-place collapse aliases
   // its versioned result back to the base, so the reader's store-back becomes a
   // no-op).  Only the simple two-child shape (no index levels) can be one.
@@ -836,11 +889,11 @@ void Lnast_prp_writer::write_store() {
   print(lhs);
   while (move_to_sibling() && !is_last_child()) {
     print("[");
-    write_node();
+    print(render_value(cur, /*operand_ctx=*/false));
     print("]");
   }
   print(" = ");
-  write_node();
+  print(render_value(cur, /*operand_ctx=*/false));  // cursor sits on the value (last child)
   move_to_parent();
 }
 
@@ -892,11 +945,11 @@ void Lnast_prp_writer::write_cassert() {
   // `cassert`. Emit `cassert(<cond>)` so the round-trip output reparses
   // under the current grammar.
   print("cassert(");
-  write_node();
+  print(render_value(cur, /*operand_ctx=*/false));
   // Optional 2nd child: a comptime message string (cassert(cond, "msg")).
   if (move_to_sibling()) {
     print(", ");
-    write_node();
+    print(render_value(cur, /*operand_ctx=*/false));
   }
   print(")");
   move_to_parent();
@@ -930,12 +983,12 @@ void Lnast_prp_writer::write_func_call() {
         print(strip_prefix(current_text()));  // argument name
         print(" = ");
         if (move_to_sibling()) {
-          write_node();  // argument value
+          print(render_value(cur, /*operand_ctx=*/false));  // argument value
         }
         move_to_parent();
       }
     } else {
-      write_node();
+      print(render_value(cur, /*operand_ctx=*/false));
     }
     first = false;
   }
@@ -965,7 +1018,14 @@ void Lnast_prp_writer::write_tuple_add() {
     if (!first) {
       print(", ");
     }
-    write_node();
+    // A `store` element is a NAMED field (`name = value`) — emit it through
+    // write_store so the field name (e.g. the memory config's `bits`) survives;
+    // a positional element is a plain value that may inline a single-use temp.
+    if (current_ntype() == Lnast_ntype::Lnast_ntype_store) {
+      write_node();
+    } else {
+      print(render_value(cur, /*operand_ctx=*/false));
+    }
     first = false;
   }
   print(")");
@@ -981,30 +1041,16 @@ void Lnast_prp_writer::write_tuple_literal() {
       if (!first) {
         print(", ");
       }
-      write_node();
+      if (current_ntype() == Lnast_ntype::Lnast_ntype_store) {
+        write_node();  // named field `name = value`
+      } else {
+        print(render_value(cur, /*operand_ctx=*/false));
+      }
       first = false;
     } while (move_to_sibling());
     move_to_parent();
   }
   print(")");
-}
-
-void Lnast_prp_writer::write_tuple_get() {
-  if (!move_to_child()) {
-    return;
-  }
-  auto lhs = strip_prefix(current_text());
-  print(decl_prefix(lhs));
-  print(lhs);
-  print(" = ");
-  move_to_sibling();
-  print(strip_prefix(current_text()));
-  while (move_to_sibling()) {
-    print("[");
-    write_node();
-    print("]");
-  }
-  move_to_parent();
 }
 
 // ── Attributes ────────────────────────────────────────────────────────────────
@@ -1053,31 +1099,9 @@ void Lnast_prp_writer::write_attr_set() {
   print("]");
   if (move_to_sibling()) {
     print(" = ");
-    write_node();  // value
+    print(render_value(cur, /*operand_ctx=*/false));  // value
   }
 
-  move_to_parent();
-}
-
-void Lnast_prp_writer::write_attr_get() {
-  if (!move_to_child()) {
-    return;
-  }
-  auto lhs = strip_prefix(current_text());
-  print(decl_prefix(lhs));
-  print(lhs);
-  print(" = ");
-  move_to_sibling();
-  print(strip_prefix(current_text()));
-  // attr_get reads an ATTRIBUTE: `base.[attr]` (bracket form).  Each remaining
-  // sibling is the attr name (a bare const), so emit `.[name]` — NOT `.name`
-  // (write_node would quote a string attr like "defer" -> `."defer"`, which the
-  // parser rejects with "expected a field name after '.'").
-  while (move_to_sibling()) {
-    print(".[");
-    print(current_text());
-    print("]");
-  }
   move_to_parent();
 }
 
@@ -1092,117 +1116,13 @@ void Lnast_prp_writer::write_delay_assign() {
   print(lhs);
   print(" = #[");
   move_to_sibling();
-  write_node();
+  print(render_value(cur, /*operand_ctx=*/false));
   if (move_to_sibling()) {
     print(", ");
-    write_node();
+    print(render_value(cur, /*operand_ctx=*/false));
   }
   print("]");
   move_to_parent();
-}
-
-// ── Infix / prefix helpers ────────────────────────────────────────────────────
-
-void Lnast_prp_writer::write_infix(std::string_view op) {
-  if (!move_to_child()) {
-    return;
-  }
-
-  // First child is the LHS (result variable).
-  auto lhs = strip_prefix(current_text());
-  print(decl_prefix(lhs));
-  print(lhs);
-  print(" = ");
-
-  // Remaining siblings are the RHS operands.  Serialize each through
-  // write_node() so nested non-leaf nodes are handled correctly.
-  bool first = true;
-  while (move_to_sibling()) {
-    if (!first) {
-      print(" ");
-      print(op);
-      print(" ");
-    }
-    write_node();
-    first = false;
-  }
-  move_to_parent();
-}
-
-void Lnast_prp_writer::write_prefix_unary(std::string_view op) {
-  if (!move_to_child()) {
-    return;
-  }
-  auto lhs = strip_prefix(current_text());
-  print(decl_prefix(lhs));
-  print(lhs);
-  print(" = ");
-  print(op);
-  if (move_to_sibling()) {
-    write_node();
-  }
-  move_to_parent();
-}
-
-// sext( dst, src, pos ) — sign-extend `src` treating bit `pos` as the sign bit.
-// Reparsable spelling: `src#sext[0..=pos]`.  prp2lnast lowers `#sext[0..=pos]`
-// to get_mask(src, (1<<(pos+1))-1) then sext(_, pos); when `src` is already
-// exactly pos+1 bits wide (the only shape the corpus produces — the sext source
-// is the prior get_mask slice), the inner get_mask is the identity, so the
-// round-trip reproduces the same sext.
-void Lnast_prp_writer::write_sext() {
-  if (!move_to_child()) {
-    return;
-  }
-  auto lhs = strip_prefix(current_text());
-  print(decl_prefix(lhs));
-  print(lhs);
-  print(" = ");
-  move_to_sibling();
-  auto src = std::string(strip_prefix(current_text()));
-  auto pos = std::string{"0"};
-  if (move_to_sibling()) {
-    pos = std::string(strip_prefix(current_text()));
-  }
-  move_to_parent();
-  os << std::format("{}#sext[0..={}]", src, pos);
-}
-
-// get_mask( dst, src, mask ) — extract the bits of `src` selected by `mask`,
-// packed LSB-first.  For a contiguous run of set bits [lo..hi] this is exactly
-// `src#[lo..=hi]`; that is all the corpus produces (width-truncation masks
-// (1<<n)-1, plus a couple of non-zero-based contiguous slices).  Non-contiguous
-// masks fall back to `src & mask` (numerically equal only when the mask is
-// zero-based, but keeps the output reparsable rather than emitting a comment).
-void Lnast_prp_writer::write_get_mask() {
-  if (!move_to_child()) {
-    return;
-  }
-  auto lhs = strip_prefix(current_text());
-  print(decl_prefix(lhs));
-  print(lhs);
-  print(" = ");
-
-  move_to_sibling();  // src
-  auto src = std::string(strip_prefix(current_text()));
-
-  std::string mask_txt;
-  if (move_to_sibling()) {  // mask const
-    mask_txt = std::string(current_text());
-  }
-  move_to_parent();
-
-  // A contiguous run of set bits [lo..hi] (any width, lo possibly > 0) is
-  // `src#[lo..=hi]` — get_mask packs the selected bits LSB-first, so a
-  // non-zero-based slice must COMPACT (a plain `src & mask` would leave the bits
-  // in place and is wrong for lo>0).
-  if (auto run = contiguous_run(mask_txt)) {
-    os << std::format("{}#[{}..={}]", src, run->first, run->second);
-    return;
-  }
-  // Non-contiguous / unparsable mask: fall back to a plain bitwise AND (lossy —
-  // get_mask would compact the scattered bits, but the corpus has no such mask).
-  os << std::format("{} & {}", src, mask_txt);
 }
 
 // Decompose a (hex- or decimal-) constant mask into its maximal contiguous runs
@@ -1234,7 +1154,7 @@ static std::vector<std::pair<int, int>> mask_runs(std::string_view s) {
     }
   }
   std::vector<std::pair<int, int>> runs;
-  int lo = -1;
+  int                              lo = -1;
   for (int i = 0; i < static_cast<int>(bits.size()); ++i) {
     if (bits[i]) {
       if (lo < 0) {
@@ -1266,16 +1186,16 @@ void Lnast_prp_writer::write_set_mask() {
   }
   std::string dst = std::string(strip_prefix(current_text()));  // SSA suffix stripped
   std::string val = dst;
-  if (move_to_sibling()) {  // val (base)
-    val = std::string(strip_prefix(current_text()));
+  if (move_to_sibling()) {  // val (base) — may be a single-use temp to inline
+    val = render_value(cur, /*operand_ctx=*/true);
   }
   std::string mask_txt;
   if (move_to_sibling()) {  // mask const
     mask_txt = std::string(current_text());
   }
   std::string ins;
-  if (move_to_sibling()) {  // insert value
-    ins = std::string(strip_prefix(current_text()));
+  if (move_to_sibling()) {  // insert value — may be a single-use temp to inline
+    ins = render_value(cur, /*operand_ctx=*/true);
   }
   move_to_parent();
 
@@ -1316,7 +1236,323 @@ void Lnast_prp_writer::write_set_mask() {
     } else {
       os << std::format("{}#[{}..={}] = {}#[{}..={}]", target, lo, hi, ins, ins_off, ins_off + w - 1);
     }
-    ins_off += w;
-    need_sep = true;
+    ins_off  += w;
+    need_sep  = true;
   }
+}
+
+// ── Single-use temp folding ─────────────────────────────────────────────────
+
+bool Lnast_prp_writer::defines_child0(Lnast_ntype::Lnast_ntype_int t) {
+  using N = Lnast_ntype;
+  if (!infix_symbol(t).empty()) {
+    return true;
+  }
+  switch (t) {
+    case N::Lnast_ntype_log_not:
+    case N::Lnast_ntype_bit_not:
+    case N::Lnast_ntype_red_or:
+    case N::Lnast_ntype_red_and:
+    case N::Lnast_ntype_red_xor:
+    case N::Lnast_ntype_popcount:
+    case N::Lnast_ntype_sext:
+    case N::Lnast_ntype_set_mask:
+    case N::Lnast_ntype_get_mask:
+    case N::Lnast_ntype_store:
+    case N::Lnast_ntype_declare:
+    case N::Lnast_ntype_dp_assign:
+    case N::Lnast_ntype_delay_assign:
+    case N::Lnast_ntype_range:
+    case N::Lnast_ntype_tuple_add:
+    case N::Lnast_ntype_tuple_get:
+    case N::Lnast_ntype_attr_set:
+    case N::Lnast_ntype_attr_get:
+    case N::Lnast_ntype_func_call   : return true;
+    // if/unique_if/cassert/for/while and the pseudo-func_* nodes read child0 (a
+    // condition / value), so leave it classified as a USE — the safe default
+    // (over-counting a use only blocks a fold; mis-marking a use as a def could
+    // wrongly inline a multiply-read temp).
+    default                         : return false;
+  }
+}
+
+bool Lnast_prp_writer::is_pure_copy(Lnast_nid store_node) const {
+  auto c0 = lnast->get_child(store_node);
+  if (c0.is_invalid()) {
+    return false;
+  }
+  auto val = lnast->get_sibling_next(c0);
+  if (val.is_invalid() || !lnast->get_sibling_next(val).is_invalid()) {
+    return false;  // value-less, or has index levels (a field write, not a copy)
+  }
+  auto vt = lnast->get_type(val);
+  return vt == Lnast_ntype::Lnast_ntype_ref || vt == Lnast_ntype::Lnast_ntype_const;
+}
+
+bool Lnast_prp_writer::operands_stable(Lnast_nid def_node, int d, int u) const {
+  int pos = 0;
+  for (auto c = lnast->get_child(def_node); !c.is_invalid(); c = lnast->get_sibling_next(c), ++pos) {
+    if (pos == 0) {
+      continue;  // the LHS being defined
+    }
+    if (lnast->get_type(c) != Lnast_ntype::Lnast_ntype_ref) {
+      continue;  // const / type leaf — never changes
+    }
+    auto it = write_idx_.find(std::string(lnast->get_name(c)));
+    if (it == write_idx_.end()) {
+      continue;  // never assigned (io input / const-fed) — stable
+    }
+    for (int w : it->second) {
+      if (w > d && w < u) {
+        return false;  // operand reassigned between the def and its single use
+      }
+    }
+  }
+  return true;
+}
+
+void Lnast_prp_writer::scan_node(Lnast_nid nid, int& index) {
+  const int  my_index = index++;
+  const auto t        = lnast->get_type(nid);
+  const bool def0     = defines_child0(t);
+
+  int pos = 0;
+  for (auto c = lnast->get_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c), ++pos) {
+    if (lnast->get_type(c) == Lnast_ntype::Lnast_ntype_ref) {
+      std::string nm(lnast->get_name(c));
+      auto&       fi = fold_info_[nm];
+      if (def0 && pos == 0) {
+        fi.def_count++;
+        fi.def_node  = nid;
+        fi.def_type  = t;
+        fi.def_index = my_index;
+        if (t != Lnast_ntype::Lnast_ntype_declare) {
+          write_idx_[nm].push_back(my_index);  // pushed in increasing index order
+        }
+      } else {
+        fi.use_count++;
+        fi.use_index = my_index;
+      }
+    }
+    scan_node(c, index);  // pre-order recurse (leaves just advance the counter)
+  }
+  if (t == Lnast_ntype::Lnast_ntype_get_mask) {
+    get_mask_nodes_.push_back(nid);
+  }
+}
+
+void Lnast_prp_writer::analyze_folding() {
+  fold_info_.clear();
+  write_idx_.clear();
+  foldable_.clear();
+  folded_node_.clear();
+  range_lohi_.clear();
+  get_mask_nodes_.clear();
+
+  int index = 0;
+  scan_node(lnast->get_root(), index);
+
+  // A range temp feeding a get_mask mask reconstructs a `src#[lo..=hi]` slice.
+  // Record its bounds, and (when the range is used only there) suppress the
+  // standalone range statement.
+  for (auto gm : get_mask_nodes_) {
+    auto src = lnast->get_child(gm);
+    if (src.is_invalid()) {
+      continue;
+    }
+    src = lnast->get_sibling_next(src);  // child1: src
+    if (src.is_invalid()) {
+      continue;
+    }
+    auto mask = lnast->get_sibling_next(src);  // child2: mask
+    if (mask.is_invalid() || lnast->get_type(mask) != Lnast_ntype::Lnast_ntype_ref) {
+      continue;
+    }
+    std::string mn(lnast->get_name(mask));
+    auto        it = fold_info_.find(mn);
+    if (it == fold_info_.end() || it->second.def_type != Lnast_ntype::Lnast_ntype_range) {
+      continue;
+    }
+    auto rlo = lnast->get_child(it->second.def_node);
+    if (rlo.is_invalid()) {
+      continue;
+    }
+    rlo             = lnast->get_sibling_next(rlo);  // child1: lo
+    auto        rhi = rlo.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(rlo);
+    std::string lo  = rlo.is_invalid() ? std::string("0") : std::string(lnast->get_name(rlo));
+    std::string hi  = rhi.is_invalid() ? lo : std::string(lnast->get_name(rhi));
+    range_lohi_[mn] = {lo, hi};
+    if (it->second.use_count == 1) {
+      folded_node_.insert(it->second.def_node.get_class_index().value);  // range stmt inlined into the slice
+    }
+  }
+
+  // Select the single-def / single-use temps whose value-producing definition
+  // can be inlined back into the (one) use.
+  for (auto& [name, fi] : fold_info_) {
+    if (!is_tmp(name)) {
+      continue;  // only `___` compiler temps are inlined
+    }
+    if (fi.def_count != 1 || fi.use_count != 1) {
+      continue;  // must be written once and read once
+    }
+    if (fi.def_index < 0 || fi.use_index < 0 || fi.def_index >= fi.use_index) {
+      continue;  // need a forward def-before-use
+    }
+    bool ok = is_foldable_optype(fi.def_type);
+    if (fi.def_type == Lnast_ntype::Lnast_ntype_store) {
+      ok = is_pure_copy(fi.def_node);  // a bare copy `___t = x`
+    }
+    if (!ok) {
+      continue;
+    }
+    if (!operands_stable(fi.def_node, fi.def_index, fi.use_index)) {
+      continue;
+    }
+    foldable_.insert(name);
+    folded_node_.insert(fi.def_node.get_class_index().value);
+  }
+}
+
+std::string Lnast_prp_writer::const_text(Lnast_nid node) const {
+  auto text = lnast->get_name(node);
+  if (!text.empty() && (isdigit(static_cast<unsigned char>(text[0])) || text[0] == '-')) {
+    return std::string(text);
+  }
+  if (text == "true" || text == "false" || text == "nil") {
+    return std::string(text);
+  }
+  return std::format("\"{}\"", escape_string(text));
+}
+
+std::string Lnast_prp_writer::render_value(Lnast_nid node, bool operand_ctx) {
+  auto t = lnast->get_type(node);
+  if (t == Lnast_ntype::Lnast_ntype_ref) {
+    std::string nm(lnast->get_name(node));
+    if (is_foldable(nm)) {
+      return render_def_rhs(fold_info_.at(nm).def_node, operand_ctx);
+    }
+    return std::string(strip_prefix(nm));
+  }
+  if (t == Lnast_ntype::Lnast_ntype_const) {
+    return const_text(node);
+  }
+  // A non-leaf operand (not produced by the flattened LNAST, but be safe).
+  return render_def_rhs(node, operand_ctx);
+}
+
+std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
+  using N   = Lnast_ntype;
+  auto t    = lnast->get_type(def);
+  auto c0   = lnast->get_child(def);
+  auto wrap = [&](std::string s, bool loose) -> std::string {
+    return (operand_ctx && loose) ? "(" + s + ")" : s;  // parens only where precedence needs them
+  };
+
+  // Infix arithmetic / bitwise / logical / comparison: `a <op> b [<op> c …]`.
+  if (auto sym = infix_symbol(t); !sym.empty()) {
+    std::string out;
+    bool        first = true;
+    for (auto c = lnast->get_sibling_next(c0); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      if (!first) {
+        out += " ";
+        out += sym;
+        out += " ";
+      }
+      out   += render_value(c, /*operand_ctx=*/true);
+      first  = false;
+    }
+    return wrap(out, /*loose=*/true);
+  }
+
+  switch (t) {
+    case N::Lnast_ntype_log_not:
+    case N::Lnast_ntype_bit_not: {
+      auto        opnd  = lnast->get_sibling_next(c0);
+      std::string s     = (t == N::Lnast_ntype_log_not) ? "not " : "~";
+      s                += opnd.is_invalid() ? std::string{} : render_value(opnd, /*operand_ctx=*/true);
+      return wrap(s, /*loose=*/true);
+    }
+    case N::Lnast_ntype_sext: {
+      auto        src = lnast->get_sibling_next(c0);
+      auto        pos = src.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(src);
+      std::string s   = src.is_invalid() ? std::string{} : render_value(src, /*operand_ctx=*/true);
+      std::string p   = pos.is_invalid() ? std::string("0") : std::string(strip_prefix(lnast->get_name(pos)));
+      return std::format("{}#sext[0..={}]", s, p);  // postfix — binds tight, never wrapped
+    }
+    case N::Lnast_ntype_get_mask: {
+      auto        src  = lnast->get_sibling_next(c0);
+      auto        mask = src.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(src);
+      std::string s    = src.is_invalid() ? std::string{} : render_value(src, /*operand_ctx=*/true);
+      if (!mask.is_invalid()) {
+        if (lnast->get_type(mask) == N::Lnast_ntype_ref) {
+          auto rit = range_lohi_.find(std::string(lnast->get_name(mask)));
+          if (rit != range_lohi_.end()) {
+            return std::format("{}#[{}..={}]", s, rit->second.first, rit->second.second);  // tight
+          }
+        } else if (lnast->get_type(mask) == N::Lnast_ntype_const) {
+          std::string mt(lnast->get_name(mask));
+          if (auto run = contiguous_run(mt)) {
+            return std::format("{}#[{}..={}]", s, run->first, run->second);  // tight
+          }
+          return wrap(std::format("{} & {}", s, mt), /*loose=*/true);
+        }
+      }
+      std::string mv = mask.is_invalid() ? std::string("0") : render_value(mask, /*operand_ctx=*/true);
+      return wrap(std::format("{} & {}", s, mv), /*loose=*/true);
+    }
+    case N::Lnast_ntype_tuple_get: {
+      auto        base = lnast->get_sibling_next(c0);
+      std::string s    = base.is_invalid() ? std::string{} : render_value(base, /*operand_ctx=*/true);
+      for (auto idx = base.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(base); !idx.is_invalid();
+           idx      = lnast->get_sibling_next(idx)) {
+        s += "[" + render_value(idx, /*operand_ctx=*/false) + "]";
+      }
+      return s;  // postfix
+    }
+    case N::Lnast_ntype_attr_get: {
+      auto        base = lnast->get_sibling_next(c0);
+      std::string s    = base.is_invalid() ? std::string{} : render_value(base, /*operand_ctx=*/true);
+      // Each remaining sibling is an attr name (a bare const) -> `.[name]`.
+      for (auto a = base.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(base); !a.is_invalid();
+           a      = lnast->get_sibling_next(a)) {
+        s += ".[";
+        s += lnast->get_name(a);
+        s += "]";
+      }
+      return s;  // postfix
+    }
+    case N::Lnast_ntype_store: {
+      auto val = lnast->get_sibling_next(c0);  // a pure copy: value is the lone RHS child
+      return val.is_invalid() ? std::string{} : render_value(val, operand_ctx);
+    }
+    case N::Lnast_ntype_range: {
+      auto        lo  = lnast->get_sibling_next(c0);
+      auto        hi  = lo.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(lo);
+      std::string los = lo.is_invalid() ? std::string("0") : std::string(strip_prefix(lnast->get_name(lo)));
+      std::string his = hi.is_invalid() ? los : std::string(strip_prefix(lnast->get_name(hi)));
+      return std::format("{}..={}", los, his);
+    }
+    default:
+      // Not an inline-able value op (reached only defensively).
+      return c0.is_invalid() ? std::string{} : std::string(strip_prefix(lnast->get_name(c0)));
+  }
+}
+
+void Lnast_prp_writer::write_value_stmt() {
+  auto        c0  = lnast->get_child(cur);
+  std::string lhs = c0.is_invalid() ? std::string{} : std::string(strip_prefix(lnast->get_name(c0)));
+  print(decl_prefix(lhs));
+  print(lhs);
+  print(" = ");
+  print(render_def_rhs(cur, /*operand_ctx=*/false));
+}
+
+void Lnast_prp_writer::write_range() {
+  auto        c0  = lnast->get_child(cur);
+  std::string lhs = c0.is_invalid() ? std::string{} : std::string(strip_prefix(lnast->get_name(c0)));
+  print(decl_prefix(lhs));
+  print(lhs);
+  print(" = ");
+  print(render_def_rhs(cur, /*operand_ctx=*/false));
 }
