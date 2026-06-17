@@ -1,6 +1,6 @@
 pub comb PrefixRed::[lg="PrefixRed", hdl](IN_data:u32) -> (OUT_pval:u32) {
-  mut red
-  mut i
+  mut red = 0
+  mut i = 0
   i = 0sb?
   red = 0
   {

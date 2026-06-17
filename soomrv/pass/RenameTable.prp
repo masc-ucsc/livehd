@@ -1,0 +1,1094 @@
+pub mod RenameTable::[lg="RenameTable", hdl](clk:u1, rst:u1, IN_mispred:u1, IN_mispredFlush:u1, IN_lookupIDs:u40, IN_issueValid:u4, IN_issueIDs:u20, IN_issueTags:u28, IN_issueAvail:u4, IN_commitValid:u4, IN_commitIDs:u20, IN_commitTags:u28, IN_wbValid:u4, IN_wbTag:u28) -> (OUT_lookupAvail:u8@[], OUT_lookupSpecTag:u56@[], OUT_commitPrevTags:u28@[]) {
+  reg specTag:[32]u7:[fwd=0]
+  reg tagAvail:u64
+  reg comTag:[32]u7:[fwd=0]
+  mut i = 0
+  mut j = 0
+  mut j_s1 = 0
+  mut i_s1 = 0
+  ___1 = IN_lookupIDs#[0..=4]
+  i = 0sb?
+  ___2 = specTag[___1]
+  OUT_lookupSpecTag#[0..=6] = ___2
+  ___3 = OUT_lookupSpecTag#[0..=6]
+  ___4 = ___3#[0..=5]
+  ___6 = tagAvail << 1
+  ___5 = ___4 + 1
+  ___7 = ___6 >> ___5
+  ___9 = OUT_lookupSpecTag#[0..=6]
+  ___10 = ___9 >> 6
+  ___8 = ___7 & 1
+  ___11 = ___10 & 1
+  ___12 = ___8 | ___11
+  ___13 = IN_wbTag#[0..=6]
+  ___14 = OUT_lookupSpecTag#[0..=6]
+  ___16 = IN_wbValid & 1
+  ___17 = ___16 != 0
+  ___15 = ___13 == ___14
+  OUT_lookupAvail#[0..=0] = ___12
+  ___18 = ___17 and ___15
+  j = 0sb?
+  if ___18 {
+    OUT_lookupAvail#[0..=0] = 1
+  }
+  ___19 = IN_wbTag#[7..=13]
+  ___20 = OUT_lookupSpecTag#[0..=6]
+  ___22 = IN_wbValid >> 1
+  ___23 = ___22 & 1
+  ___24 = ___23 != 0
+  ___21 = ___19 == ___20
+  ___25 = ___24 and ___21
+  if ___25 {
+    OUT_lookupAvail#[0..=0] = 1
+  }
+  ___26 = IN_wbTag#[14..=20]
+  ___27 = OUT_lookupSpecTag#[0..=6]
+  ___29 = IN_wbValid >> 2
+  ___30 = ___29 & 1
+  ___31 = ___30 != 0
+  ___28 = ___26 == ___27
+  ___32 = ___31 and ___28
+  if ___32 {
+    OUT_lookupAvail#[0..=0] = 1
+  }
+  ___33 = IN_wbTag#[21..=27]
+  ___34 = OUT_lookupSpecTag#[0..=6]
+  ___36 = IN_wbValid >> 3
+  ___37 = ___36 & 1
+  ___38 = ___37 != 0
+  ___35 = ___33 == ___34
+  ___39 = ___38 and ___35
+  if ___39 {
+    OUT_lookupAvail#[0..=0] = 1
+  }
+  ___40 = IN_lookupIDs#[5..=9]
+  j_s1 = 0sb?
+  ___41 = specTag[___40]
+  mut OUT_lookupSpecTag__w1 = OUT_lookupSpecTag
+  OUT_lookupSpecTag__w1#[7..=13] = ___41
+  ___42 = OUT_lookupSpecTag__w1#[7..=13]
+  ___43 = ___42#[0..=5]
+  ___45 = tagAvail << 1
+  ___44 = ___43 + 1
+  ___46 = ___45 >> ___44
+  ___48 = OUT_lookupSpecTag__w1#[7..=13]
+  ___49 = ___48 >> 6
+  ___47 = ___46 & 1
+  ___50 = ___49 & 1
+  ___51 = ___47 | ___50
+  ___52 = IN_wbTag#[0..=6]
+  ___53 = OUT_lookupSpecTag__w1#[7..=13]
+  ___55 = IN_wbValid & 1
+  ___56 = ___55 != 0
+  ___54 = ___52 == ___53
+  mut OUT_lookupAvail__w1 = OUT_lookupAvail
+  OUT_lookupAvail__w1#[1..=1] = ___51
+  OUT_lookupAvail = OUT_lookupAvail__w1
+  ___57 = ___56 and ___54
+  if ___57 {
+    OUT_lookupAvail#[1..=1] = 1
+  }
+  ___58 = IN_wbTag#[7..=13]
+  ___59 = OUT_lookupSpecTag__w1#[7..=13]
+  ___61 = IN_wbValid >> 1
+  ___62 = ___61 & 1
+  ___63 = ___62 != 0
+  ___60 = ___58 == ___59
+  ___64 = ___63 and ___60
+  if ___64 {
+    OUT_lookupAvail#[1..=1] = 1
+  }
+  ___65 = IN_wbTag#[14..=20]
+  ___66 = OUT_lookupSpecTag__w1#[7..=13]
+  ___68 = IN_wbValid >> 2
+  ___69 = ___68 & 1
+  ___70 = ___69 != 0
+  ___67 = ___65 == ___66
+  ___71 = ___70 and ___67
+  if ___71 {
+    OUT_lookupAvail#[1..=1] = 1
+  }
+  ___72 = IN_wbTag#[21..=27]
+  ___73 = OUT_lookupSpecTag__w1#[7..=13]
+  ___75 = IN_wbValid >> 3
+  ___76 = ___75 & 1
+  ___77 = ___76 != 0
+  ___74 = ___72 == ___73
+  ___78 = ___77 and ___74
+  if ___78 {
+    OUT_lookupAvail#[1..=1] = 1
+  }
+  ___79 = IN_lookupIDs#[10..=14]
+  ___80 = specTag[___79]
+  mut OUT_lookupSpecTag__w2 = OUT_lookupSpecTag__w1
+  OUT_lookupSpecTag__w2#[14..=20] = ___80
+  ___81 = OUT_lookupSpecTag__w2#[14..=20]
+  ___82 = ___81#[0..=5]
+  ___84 = tagAvail << 1
+  ___83 = ___82 + 1
+  ___85 = ___84 >> ___83
+  ___87 = OUT_lookupSpecTag__w2#[14..=20]
+  ___88 = ___87 >> 6
+  ___86 = ___85 & 1
+  ___89 = ___88 & 1
+  ___90 = ___86 | ___89
+  ___91 = IN_wbTag#[0..=6]
+  ___92 = OUT_lookupSpecTag__w2#[14..=20]
+  ___94 = IN_wbValid & 1
+  ___95 = ___94 != 0
+  ___93 = ___91 == ___92
+  mut OUT_lookupAvail__w2 = OUT_lookupAvail
+  OUT_lookupAvail__w2#[2..=2] = ___90
+  OUT_lookupAvail = OUT_lookupAvail__w2
+  ___96 = ___95 and ___93
+  if ___96 {
+    OUT_lookupAvail#[2..=2] = 1
+  }
+  ___97 = IN_wbTag#[7..=13]
+  ___98 = OUT_lookupSpecTag__w2#[14..=20]
+  ___100 = IN_wbValid >> 1
+  ___101 = ___100 & 1
+  ___102 = ___101 != 0
+  ___99 = ___97 == ___98
+  ___103 = ___102 and ___99
+  if ___103 {
+    OUT_lookupAvail#[2..=2] = 1
+  }
+  ___104 = IN_wbTag#[14..=20]
+  ___105 = OUT_lookupSpecTag__w2#[14..=20]
+  ___107 = IN_wbValid >> 2
+  ___108 = ___107 & 1
+  ___109 = ___108 != 0
+  ___106 = ___104 == ___105
+  ___110 = ___109 and ___106
+  if ___110 {
+    OUT_lookupAvail#[2..=2] = 1
+  }
+  ___111 = IN_wbTag#[21..=27]
+  ___112 = OUT_lookupSpecTag__w2#[14..=20]
+  ___114 = IN_wbValid >> 3
+  ___115 = ___114 & 1
+  ___116 = ___115 != 0
+  ___113 = ___111 == ___112
+  ___117 = ___116 and ___113
+  if ___117 {
+    OUT_lookupAvail#[2..=2] = 1
+  }
+  ___118 = IN_issueIDs#[0..=4]
+  ___120 = IN_issueIDs#[0..=4]
+  ___121 = IN_lookupIDs#[10..=14]
+  ___123 = IN_issueValid & 1
+  ___124 = ___123 != 0
+  ___122 = ___120 == ___121
+  ___125 = ___124 and ___122
+  ___119 = ___118 != 0
+  OUT_lookupSpecTag = OUT_lookupSpecTag__w2
+  ___126 = ___125 and ___119
+  if ___126 {
+    ___127 = IN_issueAvail & 1
+    ___128 = IN_issueTags#[0..=6]
+    OUT_lookupAvail#[2..=2] = ___127
+    OUT_lookupSpecTag#[14..=20] = ___128
+  }
+  ___129 = IN_lookupIDs#[15..=19]
+  ___130 = specTag[___129]
+  mut OUT_lookupSpecTag__w3 = OUT_lookupSpecTag
+  OUT_lookupSpecTag__w3#[21..=27] = ___130
+  ___131 = OUT_lookupSpecTag__w3#[21..=27]
+  ___132 = ___131#[0..=5]
+  ___134 = tagAvail << 1
+  ___133 = ___132 + 1
+  ___135 = ___134 >> ___133
+  ___137 = OUT_lookupSpecTag__w3#[21..=27]
+  ___138 = ___137 >> 6
+  ___136 = ___135 & 1
+  ___139 = ___138 & 1
+  ___140 = ___136 | ___139
+  ___141 = IN_wbTag#[0..=6]
+  ___142 = OUT_lookupSpecTag__w3#[21..=27]
+  ___144 = IN_wbValid & 1
+  ___145 = ___144 != 0
+  ___143 = ___141 == ___142
+  mut OUT_lookupAvail__w3 = OUT_lookupAvail
+  OUT_lookupAvail__w3#[3..=3] = ___140
+  OUT_lookupAvail = OUT_lookupAvail__w3
+  ___146 = ___145 and ___143
+  if ___146 {
+    OUT_lookupAvail#[3..=3] = 1
+  }
+  ___147 = IN_wbTag#[7..=13]
+  ___148 = OUT_lookupSpecTag__w3#[21..=27]
+  ___150 = IN_wbValid >> 1
+  ___151 = ___150 & 1
+  ___152 = ___151 != 0
+  ___149 = ___147 == ___148
+  ___153 = ___152 and ___149
+  if ___153 {
+    OUT_lookupAvail#[3..=3] = 1
+  }
+  ___154 = IN_wbTag#[14..=20]
+  ___155 = OUT_lookupSpecTag__w3#[21..=27]
+  ___157 = IN_wbValid >> 2
+  ___158 = ___157 & 1
+  ___159 = ___158 != 0
+  ___156 = ___154 == ___155
+  ___160 = ___159 and ___156
+  if ___160 {
+    OUT_lookupAvail#[3..=3] = 1
+  }
+  ___161 = IN_wbTag#[21..=27]
+  ___162 = OUT_lookupSpecTag__w3#[21..=27]
+  ___164 = IN_wbValid >> 3
+  ___165 = ___164 & 1
+  ___166 = ___165 != 0
+  ___163 = ___161 == ___162
+  ___167 = ___166 and ___163
+  if ___167 {
+    OUT_lookupAvail#[3..=3] = 1
+  }
+  ___168 = IN_issueIDs#[0..=4]
+  ___170 = IN_issueIDs#[0..=4]
+  ___171 = IN_lookupIDs#[15..=19]
+  ___173 = IN_issueValid & 1
+  ___174 = ___173 != 0
+  ___172 = ___170 == ___171
+  ___175 = ___174 and ___172
+  ___169 = ___168 != 0
+  OUT_lookupSpecTag = OUT_lookupSpecTag__w3
+  ___176 = ___175 and ___169
+  if ___176 {
+    ___177 = IN_issueAvail & 1
+    ___178 = IN_issueTags#[0..=6]
+    OUT_lookupAvail#[3..=3] = ___177
+    OUT_lookupSpecTag#[21..=27] = ___178
+  }
+  ___179 = IN_lookupIDs#[20..=24]
+  ___180 = specTag[___179]
+  mut OUT_lookupSpecTag__w4 = OUT_lookupSpecTag
+  OUT_lookupSpecTag__w4#[28..=34] = ___180
+  ___181 = OUT_lookupSpecTag__w4#[28..=34]
+  ___182 = ___181#[0..=5]
+  ___184 = tagAvail << 1
+  ___183 = ___182 + 1
+  ___185 = ___184 >> ___183
+  ___187 = OUT_lookupSpecTag__w4#[28..=34]
+  ___188 = ___187 >> 6
+  ___186 = ___185 & 1
+  ___189 = ___188 & 1
+  ___190 = ___186 | ___189
+  ___191 = IN_wbTag#[0..=6]
+  ___192 = OUT_lookupSpecTag__w4#[28..=34]
+  ___194 = IN_wbValid & 1
+  ___195 = ___194 != 0
+  ___193 = ___191 == ___192
+  mut OUT_lookupAvail__w4 = OUT_lookupAvail
+  OUT_lookupAvail__w4#[4..=4] = ___190
+  OUT_lookupAvail = OUT_lookupAvail__w4
+  ___196 = ___195 and ___193
+  if ___196 {
+    OUT_lookupAvail#[4..=4] = 1
+  }
+  ___197 = IN_wbTag#[7..=13]
+  ___198 = OUT_lookupSpecTag__w4#[28..=34]
+  ___200 = IN_wbValid >> 1
+  ___201 = ___200 & 1
+  ___202 = ___201 != 0
+  ___199 = ___197 == ___198
+  ___203 = ___202 and ___199
+  if ___203 {
+    OUT_lookupAvail#[4..=4] = 1
+  }
+  ___204 = IN_wbTag#[14..=20]
+  ___205 = OUT_lookupSpecTag__w4#[28..=34]
+  ___207 = IN_wbValid >> 2
+  ___208 = ___207 & 1
+  ___209 = ___208 != 0
+  ___206 = ___204 == ___205
+  ___210 = ___209 and ___206
+  if ___210 {
+    OUT_lookupAvail#[4..=4] = 1
+  }
+  ___211 = IN_wbTag#[21..=27]
+  ___212 = OUT_lookupSpecTag__w4#[28..=34]
+  ___214 = IN_wbValid >> 3
+  ___215 = ___214 & 1
+  ___216 = ___215 != 0
+  ___213 = ___211 == ___212
+  ___217 = ___216 and ___213
+  if ___217 {
+    OUT_lookupAvail#[4..=4] = 1
+  }
+  ___218 = IN_issueIDs#[0..=4]
+  ___220 = IN_issueIDs#[0..=4]
+  ___221 = IN_lookupIDs#[20..=24]
+  ___223 = IN_issueValid & 1
+  ___224 = ___223 != 0
+  ___222 = ___220 == ___221
+  ___225 = ___224 and ___222
+  ___219 = ___218 != 0
+  OUT_lookupSpecTag = OUT_lookupSpecTag__w4
+  ___226 = ___225 and ___219
+  if ___226 {
+    ___227 = IN_issueAvail & 1
+    ___228 = IN_issueTags#[0..=6]
+    OUT_lookupAvail#[4..=4] = ___227
+    OUT_lookupSpecTag#[28..=34] = ___228
+  }
+  ___229 = IN_issueIDs#[5..=9]
+  ___231 = IN_issueIDs#[5..=9]
+  ___232 = IN_lookupIDs#[20..=24]
+  ___234 = IN_issueValid >> 1
+  ___235 = ___234 & 1
+  ___236 = ___235 != 0
+  ___233 = ___231 == ___232
+  ___237 = ___236 and ___233
+  ___230 = ___229 != 0
+  ___238 = ___237 and ___230
+  if ___238 {
+    ___239 = IN_issueAvail >> 1
+    ___240 = ___239 & 1
+    ___241 = IN_issueTags#[7..=13]
+    OUT_lookupAvail#[4..=4] = ___240
+    OUT_lookupSpecTag#[28..=34] = ___241
+  }
+  ___242 = IN_lookupIDs#[25..=29]
+  ___243 = specTag[___242]
+  mut OUT_lookupSpecTag__w5 = OUT_lookupSpecTag
+  OUT_lookupSpecTag__w5#[35..=41] = ___243
+  ___244 = OUT_lookupSpecTag__w5#[35..=41]
+  ___245 = ___244#[0..=5]
+  ___247 = tagAvail << 1
+  ___246 = ___245 + 1
+  ___248 = ___247 >> ___246
+  ___250 = OUT_lookupSpecTag__w5#[35..=41]
+  ___251 = ___250 >> 6
+  ___249 = ___248 & 1
+  ___252 = ___251 & 1
+  ___253 = ___249 | ___252
+  ___254 = IN_wbTag#[0..=6]
+  ___255 = OUT_lookupSpecTag__w5#[35..=41]
+  ___257 = IN_wbValid & 1
+  ___258 = ___257 != 0
+  ___256 = ___254 == ___255
+  mut OUT_lookupAvail__w5 = OUT_lookupAvail
+  OUT_lookupAvail__w5#[5..=5] = ___253
+  OUT_lookupAvail = OUT_lookupAvail__w5
+  ___259 = ___258 and ___256
+  if ___259 {
+    OUT_lookupAvail#[5..=5] = 1
+  }
+  ___260 = IN_wbTag#[7..=13]
+  ___261 = OUT_lookupSpecTag__w5#[35..=41]
+  ___263 = IN_wbValid >> 1
+  ___264 = ___263 & 1
+  ___265 = ___264 != 0
+  ___262 = ___260 == ___261
+  ___266 = ___265 and ___262
+  if ___266 {
+    OUT_lookupAvail#[5..=5] = 1
+  }
+  ___267 = IN_wbTag#[14..=20]
+  ___268 = OUT_lookupSpecTag__w5#[35..=41]
+  ___270 = IN_wbValid >> 2
+  ___271 = ___270 & 1
+  ___272 = ___271 != 0
+  ___269 = ___267 == ___268
+  ___273 = ___272 and ___269
+  if ___273 {
+    OUT_lookupAvail#[5..=5] = 1
+  }
+  ___274 = IN_wbTag#[21..=27]
+  ___275 = OUT_lookupSpecTag__w5#[35..=41]
+  ___277 = IN_wbValid >> 3
+  ___278 = ___277 & 1
+  ___279 = ___278 != 0
+  ___276 = ___274 == ___275
+  ___280 = ___279 and ___276
+  if ___280 {
+    OUT_lookupAvail#[5..=5] = 1
+  }
+  ___281 = IN_issueIDs#[0..=4]
+  ___283 = IN_issueIDs#[0..=4]
+  ___284 = IN_lookupIDs#[25..=29]
+  ___286 = IN_issueValid & 1
+  ___287 = ___286 != 0
+  ___285 = ___283 == ___284
+  ___288 = ___287 and ___285
+  ___282 = ___281 != 0
+  OUT_lookupSpecTag = OUT_lookupSpecTag__w5
+  ___289 = ___288 and ___282
+  if ___289 {
+    ___290 = IN_issueAvail & 1
+    ___291 = IN_issueTags#[0..=6]
+    OUT_lookupAvail#[5..=5] = ___290
+    OUT_lookupSpecTag#[35..=41] = ___291
+  }
+  ___292 = IN_issueIDs#[5..=9]
+  ___294 = IN_issueIDs#[5..=9]
+  ___295 = IN_lookupIDs#[25..=29]
+  ___297 = IN_issueValid >> 1
+  ___298 = ___297 & 1
+  ___299 = ___298 != 0
+  ___296 = ___294 == ___295
+  ___300 = ___299 and ___296
+  ___293 = ___292 != 0
+  ___301 = ___300 and ___293
+  if ___301 {
+    ___302 = IN_issueAvail >> 1
+    ___303 = ___302 & 1
+    ___304 = IN_issueTags#[7..=13]
+    OUT_lookupAvail#[5..=5] = ___303
+    OUT_lookupSpecTag#[35..=41] = ___304
+  }
+  ___305 = IN_lookupIDs#[30..=34]
+  ___306 = specTag[___305]
+  mut OUT_lookupSpecTag__w6 = OUT_lookupSpecTag
+  OUT_lookupSpecTag__w6#[42..=48] = ___306
+  ___307 = OUT_lookupSpecTag__w6#[42..=48]
+  ___308 = ___307#[0..=5]
+  ___310 = tagAvail << 1
+  ___309 = ___308 + 1
+  ___311 = ___310 >> ___309
+  ___313 = OUT_lookupSpecTag__w6#[42..=48]
+  ___314 = ___313 >> 6
+  ___312 = ___311 & 1
+  ___315 = ___314 & 1
+  ___316 = ___312 | ___315
+  ___317 = IN_wbTag#[0..=6]
+  ___318 = OUT_lookupSpecTag__w6#[42..=48]
+  ___320 = IN_wbValid & 1
+  ___321 = ___320 != 0
+  ___319 = ___317 == ___318
+  mut OUT_lookupAvail__w6 = OUT_lookupAvail
+  OUT_lookupAvail__w6#[6..=6] = ___316
+  OUT_lookupAvail = OUT_lookupAvail__w6
+  ___322 = ___321 and ___319
+  if ___322 {
+    OUT_lookupAvail#[6..=6] = 1
+  }
+  ___323 = IN_wbTag#[7..=13]
+  ___324 = OUT_lookupSpecTag__w6#[42..=48]
+  ___326 = IN_wbValid >> 1
+  ___327 = ___326 & 1
+  ___328 = ___327 != 0
+  ___325 = ___323 == ___324
+  ___329 = ___328 and ___325
+  if ___329 {
+    OUT_lookupAvail#[6..=6] = 1
+  }
+  ___330 = IN_wbTag#[14..=20]
+  ___331 = OUT_lookupSpecTag__w6#[42..=48]
+  ___333 = IN_wbValid >> 2
+  ___334 = ___333 & 1
+  ___335 = ___334 != 0
+  ___332 = ___330 == ___331
+  ___336 = ___335 and ___332
+  if ___336 {
+    OUT_lookupAvail#[6..=6] = 1
+  }
+  ___337 = IN_wbTag#[21..=27]
+  ___338 = OUT_lookupSpecTag__w6#[42..=48]
+  ___340 = IN_wbValid >> 3
+  ___341 = ___340 & 1
+  ___342 = ___341 != 0
+  ___339 = ___337 == ___338
+  ___343 = ___342 and ___339
+  if ___343 {
+    OUT_lookupAvail#[6..=6] = 1
+  }
+  ___344 = IN_issueIDs#[0..=4]
+  ___346 = IN_issueIDs#[0..=4]
+  ___347 = IN_lookupIDs#[30..=34]
+  ___349 = IN_issueValid & 1
+  ___350 = ___349 != 0
+  ___348 = ___346 == ___347
+  ___351 = ___350 and ___348
+  ___345 = ___344 != 0
+  OUT_lookupSpecTag = OUT_lookupSpecTag__w6
+  ___352 = ___351 and ___345
+  if ___352 {
+    ___353 = IN_issueAvail & 1
+    ___354 = IN_issueTags#[0..=6]
+    OUT_lookupAvail#[6..=6] = ___353
+    OUT_lookupSpecTag#[42..=48] = ___354
+  }
+  ___355 = IN_issueIDs#[5..=9]
+  ___357 = IN_issueIDs#[5..=9]
+  ___358 = IN_lookupIDs#[30..=34]
+  ___360 = IN_issueValid >> 1
+  ___361 = ___360 & 1
+  ___362 = ___361 != 0
+  ___359 = ___357 == ___358
+  ___363 = ___362 and ___359
+  ___356 = ___355 != 0
+  ___364 = ___363 and ___356
+  if ___364 {
+    ___365 = IN_issueAvail >> 1
+    ___366 = ___365 & 1
+    ___367 = IN_issueTags#[7..=13]
+    OUT_lookupAvail#[6..=6] = ___366
+    OUT_lookupSpecTag#[42..=48] = ___367
+  }
+  ___368 = IN_issueIDs#[10..=14]
+  ___370 = IN_issueIDs#[10..=14]
+  ___371 = IN_lookupIDs#[30..=34]
+  ___373 = IN_issueValid >> 2
+  ___374 = ___373 & 1
+  ___375 = ___374 != 0
+  ___372 = ___370 == ___371
+  ___376 = ___375 and ___372
+  ___369 = ___368 != 0
+  ___377 = ___376 and ___369
+  if ___377 {
+    ___378 = IN_issueAvail >> 2
+    ___379 = ___378 & 1
+    ___380 = IN_issueTags#[14..=20]
+    OUT_lookupAvail#[6..=6] = ___379
+    OUT_lookupSpecTag#[42..=48] = ___380
+  }
+  ___381 = IN_lookupIDs#[35..=39]
+  ___382 = specTag[___381]
+  mut OUT_lookupSpecTag__w7 = OUT_lookupSpecTag
+  OUT_lookupSpecTag__w7#[49..=55] = ___382
+  ___383 = OUT_lookupSpecTag__w7#[49..=55]
+  ___384 = ___383#[0..=5]
+  ___386 = tagAvail << 1
+  ___385 = ___384 + 1
+  ___387 = ___386 >> ___385
+  ___389 = OUT_lookupSpecTag__w7#[49..=55]
+  ___390 = ___389 >> 6
+  ___388 = ___387 & 1
+  ___391 = ___390 & 1
+  ___392 = ___388 | ___391
+  ___393 = IN_wbTag#[0..=6]
+  ___394 = OUT_lookupSpecTag__w7#[49..=55]
+  ___396 = IN_wbValid & 1
+  ___397 = ___396 != 0
+  ___395 = ___393 == ___394
+  mut OUT_lookupAvail__w7 = OUT_lookupAvail
+  OUT_lookupAvail__w7#[7..=7] = ___392
+  OUT_lookupAvail = OUT_lookupAvail__w7
+  ___398 = ___397 and ___395
+  if ___398 {
+    OUT_lookupAvail#[7..=7] = 1
+  }
+  ___399 = IN_wbTag#[7..=13]
+  ___400 = OUT_lookupSpecTag__w7#[49..=55]
+  ___402 = IN_wbValid >> 1
+  ___403 = ___402 & 1
+  ___404 = ___403 != 0
+  ___401 = ___399 == ___400
+  ___405 = ___404 and ___401
+  if ___405 {
+    OUT_lookupAvail#[7..=7] = 1
+  }
+  ___406 = IN_wbTag#[14..=20]
+  ___407 = OUT_lookupSpecTag__w7#[49..=55]
+  ___409 = IN_wbValid >> 2
+  ___410 = ___409 & 1
+  ___411 = ___410 != 0
+  ___408 = ___406 == ___407
+  ___412 = ___411 and ___408
+  if ___412 {
+    OUT_lookupAvail#[7..=7] = 1
+  }
+  ___413 = IN_wbTag#[21..=27]
+  ___414 = OUT_lookupSpecTag__w7#[49..=55]
+  ___416 = IN_wbValid >> 3
+  ___417 = ___416 & 1
+  ___418 = ___417 != 0
+  ___415 = ___413 == ___414
+  ___419 = ___418 and ___415
+  if ___419 {
+    OUT_lookupAvail#[7..=7] = 1
+  }
+  ___420 = IN_issueIDs#[0..=4]
+  ___422 = IN_issueIDs#[0..=4]
+  ___423 = IN_lookupIDs#[35..=39]
+  ___425 = IN_issueValid & 1
+  ___426 = ___425 != 0
+  ___424 = ___422 == ___423
+  ___427 = ___426 and ___424
+  ___421 = ___420 != 0
+  OUT_lookupSpecTag = OUT_lookupSpecTag__w7
+  ___428 = ___427 and ___421
+  if ___428 {
+    ___429 = IN_issueAvail & 1
+    ___430 = IN_issueTags#[0..=6]
+    OUT_lookupAvail#[7..=7] = ___429
+    OUT_lookupSpecTag#[49..=55] = ___430
+  }
+  ___431 = IN_issueIDs#[5..=9]
+  ___433 = IN_issueIDs#[5..=9]
+  ___434 = IN_lookupIDs#[35..=39]
+  ___436 = IN_issueValid >> 1
+  ___437 = ___436 & 1
+  ___438 = ___437 != 0
+  ___435 = ___433 == ___434
+  ___439 = ___438 and ___435
+  ___432 = ___431 != 0
+  ___440 = ___439 and ___432
+  if ___440 {
+    ___441 = IN_issueAvail >> 1
+    ___442 = ___441 & 1
+    ___443 = IN_issueTags#[7..=13]
+    OUT_lookupAvail#[7..=7] = ___442
+    OUT_lookupSpecTag#[49..=55] = ___443
+  }
+  ___444 = IN_issueIDs#[10..=14]
+  ___446 = IN_issueIDs#[10..=14]
+  ___447 = IN_lookupIDs#[35..=39]
+  ___449 = IN_issueValid >> 2
+  ___450 = ___449 & 1
+  ___451 = ___450 != 0
+  ___448 = ___446 == ___447
+  ___452 = ___451 and ___448
+  ___445 = ___444 != 0
+  ___453 = ___452 and ___445
+  if ___453 {
+    ___454 = IN_issueAvail >> 2
+    ___455 = ___454 & 1
+    ___456 = IN_issueTags#[14..=20]
+    OUT_lookupAvail#[7..=7] = ___455
+    OUT_lookupSpecTag#[49..=55] = ___456
+  }
+  ___457 = IN_commitIDs#[0..=4]
+  i_s1 = 0sb?
+  ___458 = comTag[___457]
+  OUT_commitPrevTags#[0..=6] = ___458
+  ___459 = IN_commitIDs#[5..=9]
+  ___460 = comTag[___459]
+  mut OUT_commitPrevTags__w1 = OUT_commitPrevTags
+  OUT_commitPrevTags__w1#[7..=13] = ___460
+  ___461 = IN_commitIDs#[10..=14]
+  ___462 = comTag[___461]
+  mut OUT_commitPrevTags__w2 = OUT_commitPrevTags__w1
+  OUT_commitPrevTags__w2#[14..=20] = ___462
+  ___463 = IN_commitIDs#[15..=19]
+  ___464 = comTag[___463]
+  mut OUT_commitPrevTags__w3 = OUT_commitPrevTags__w2
+  OUT_commitPrevTags__w3#[21..=27] = ___464
+  ___465 = rst != 0
+  if ___465 {
+    mut i_s2 = 0
+    i_s2 = 0
+    comTag[0] = 64
+    specTag[0] = 64
+    comTag[1] = 64
+    specTag[1] = 64
+    comTag[2] = 64
+    specTag[2] = 64
+    comTag[3] = 64
+    specTag[3] = 64
+    comTag[4] = 64
+    specTag[4] = 64
+    comTag[5] = 64
+    specTag[5] = 64
+    comTag[6] = 64
+    specTag[6] = 64
+    comTag[7] = 64
+    specTag[7] = 64
+    comTag[8] = 64
+    specTag[8] = 64
+    comTag[9] = 64
+    specTag[9] = 64
+    comTag[10] = 64
+    specTag[10] = 64
+    comTag[11] = 64
+    specTag[11] = 64
+    comTag[12] = 64
+    specTag[12] = 64
+    comTag[13] = 64
+    specTag[13] = 64
+    comTag[14] = 64
+    specTag[14] = 64
+    comTag[15] = 64
+    specTag[15] = 64
+    comTag[16] = 64
+    specTag[16] = 64
+    comTag[17] = 64
+    specTag[17] = 64
+    comTag[18] = 64
+    specTag[18] = 64
+    comTag[19] = 64
+    specTag[19] = 64
+    comTag[20] = 64
+    specTag[20] = 64
+    comTag[21] = 64
+    specTag[21] = 64
+    comTag[22] = 64
+    specTag[22] = 64
+    comTag[23] = 64
+    specTag[23] = 64
+    comTag[24] = 64
+    specTag[24] = 64
+    comTag[25] = 64
+    specTag[25] = 64
+    comTag[26] = 64
+    specTag[26] = 64
+    comTag[27] = 64
+    specTag[27] = 64
+    comTag[28] = 64
+    specTag[28] = 64
+    comTag[29] = 64
+    specTag[29] = 64
+    comTag[30] = 64
+    specTag[30] = 64
+    comTag[31] = 64
+    specTag[31] = 64
+    tagAvail = 18446744073709551615
+  } else {
+    mut i_s3 = 0
+    ___466 = IN_wbTag#[0..=6]
+    ___467 = ___466 >> 6
+    ___468 = ___467 & 1
+    ___470 = IN_wbValid & 1
+    ___471 = ___470 != 0
+    ___469 = ___468 == 0
+    ___472 = ___471 and ___469
+    i_s3 = 0
+    if ___472 {
+      ___473 = IN_wbTag#[0..=6]
+      ___474 = ___473#[0..=5]
+      ___475 = 1 << ___474
+      ___476 = ~___475
+      ___477 = tagAvail & ___476
+      ___478 = 1 << ___474
+      ___479 = ___477 | ___478
+      tagAvail = ___479
+    }
+    ___480 = IN_wbTag#[7..=13]
+    ___481 = ___480 >> 6
+    ___482 = ___481 & 1
+    ___484 = IN_wbValid >> 1
+    ___485 = ___484 & 1
+    ___486 = ___485 != 0
+    ___483 = ___482 == 0
+    ___487 = ___486 and ___483
+    if ___487 {
+      ___488 = IN_wbTag#[7..=13]
+      ___489 = ___488#[0..=5]
+      ___490 = 1 << ___489
+      ___491 = ~___490
+      ___492 = tagAvail & ___491
+      ___493 = 1 << ___489
+      ___494 = ___492 | ___493
+      tagAvail = ___494
+    }
+    ___495 = IN_wbTag#[14..=20]
+    ___496 = ___495 >> 6
+    ___497 = ___496 & 1
+    ___499 = IN_wbValid >> 2
+    ___500 = ___499 & 1
+    ___501 = ___500 != 0
+    ___498 = ___497 == 0
+    ___502 = ___501 and ___498
+    if ___502 {
+      ___503 = IN_wbTag#[14..=20]
+      ___504 = ___503#[0..=5]
+      ___505 = 1 << ___504
+      ___506 = ~___505
+      ___507 = tagAvail & ___506
+      ___508 = 1 << ___504
+      ___509 = ___507 | ___508
+      tagAvail = ___509
+    }
+    ___510 = IN_wbTag#[21..=27]
+    ___511 = ___510 >> 6
+    ___512 = ___511 & 1
+    ___514 = IN_wbValid >> 3
+    ___515 = ___514 & 1
+    ___516 = ___515 != 0
+    ___513 = ___512 == 0
+    ___517 = ___516 and ___513
+    if ___517 {
+      ___518 = IN_wbTag#[21..=27]
+      ___519 = ___518#[0..=5]
+      ___520 = 1 << ___519
+      ___521 = ~___520
+      ___522 = tagAvail & ___521
+      ___523 = 1 << ___519
+      ___524 = ___522 | ___523
+      tagAvail = ___524
+    }
+    ___525 = IN_mispred != 0
+    if ___525 {
+      mut i_s4 = 0
+      i_s4 = 1
+      ___526 = comTag[1]
+      specTag[1] = ___526
+      ___527 = comTag[2]
+      specTag[2] = ___527
+      ___528 = comTag[3]
+      specTag[3] = ___528
+      ___529 = comTag[4]
+      specTag[4] = ___529
+      ___530 = comTag[5]
+      specTag[5] = ___530
+      ___531 = comTag[6]
+      specTag[6] = ___531
+      ___532 = comTag[7]
+      specTag[7] = ___532
+      ___533 = comTag[8]
+      specTag[8] = ___533
+      ___534 = comTag[9]
+      specTag[9] = ___534
+      ___535 = comTag[10]
+      specTag[10] = ___535
+      ___536 = comTag[11]
+      specTag[11] = ___536
+      ___537 = comTag[12]
+      specTag[12] = ___537
+      ___538 = comTag[13]
+      specTag[13] = ___538
+      ___539 = comTag[14]
+      specTag[14] = ___539
+      ___540 = comTag[15]
+      specTag[15] = ___540
+      ___541 = comTag[16]
+      specTag[16] = ___541
+      ___542 = comTag[17]
+      specTag[17] = ___542
+      ___543 = comTag[18]
+      specTag[18] = ___543
+      ___544 = comTag[19]
+      specTag[19] = ___544
+      ___545 = comTag[20]
+      specTag[20] = ___545
+      ___546 = comTag[21]
+      specTag[21] = ___546
+      ___547 = comTag[22]
+      specTag[22] = ___547
+      ___548 = comTag[23]
+      specTag[23] = ___548
+      ___549 = comTag[24]
+      specTag[24] = ___549
+      ___550 = comTag[25]
+      specTag[25] = ___550
+      ___551 = comTag[26]
+      specTag[26] = ___551
+      ___552 = comTag[27]
+      specTag[27] = ___552
+      ___553 = comTag[28]
+      specTag[28] = ___553
+      ___554 = comTag[29]
+      specTag[29] = ___554
+      ___555 = comTag[30]
+      specTag[30] = ___555
+      ___556 = comTag[31]
+      specTag[31] = ___556
+    } else {
+      mut i_s5 = 0
+      ___557 = IN_issueIDs#[0..=4]
+      ___559 = IN_issueValid & 1
+      ___560 = ___559 != 0
+      ___558 = ___557 != 0
+      ___561 = ___560 and ___558
+      i_s5 = 0
+      if ___561 {
+        ___562 = IN_issueTags#[0..=6]
+        ___563 = IN_issueIDs#[0..=4]
+        specTag[___563] = ___562
+        ___564 = IN_issueTags#[0..=6]
+        ___565 = ___564 >> 6
+        ___566 = ___565 & 1
+        ___567 = ___566 == 0
+        if ___567 {
+          ___568 = IN_issueTags#[0..=6]
+          ___569 = ___568#[0..=5]
+          ___570 = 1 << ___569
+          ___571 = ~___570
+          ___572 = tagAvail & ___571
+          ___573 = 0 << ___569
+          ___574 = ___572 | ___573
+          tagAvail = ___574
+        }
+      }
+      ___575 = IN_issueIDs#[5..=9]
+      ___577 = IN_issueValid >> 1
+      ___578 = ___577 & 1
+      ___579 = ___578 != 0
+      ___576 = ___575 != 0
+      ___580 = ___579 and ___576
+      if ___580 {
+        ___581 = IN_issueTags#[7..=13]
+        ___582 = IN_issueIDs#[5..=9]
+        specTag[___582] = ___581
+        ___583 = IN_issueTags#[7..=13]
+        ___584 = ___583 >> 6
+        ___585 = ___584 & 1
+        ___586 = ___585 == 0
+        if ___586 {
+          ___587 = IN_issueTags#[7..=13]
+          ___588 = ___587#[0..=5]
+          ___589 = 1 << ___588
+          ___590 = ~___589
+          ___591 = tagAvail & ___590
+          ___592 = 0 << ___588
+          ___593 = ___591 | ___592
+          tagAvail = ___593
+        }
+      }
+      ___594 = IN_issueIDs#[10..=14]
+      ___596 = IN_issueValid >> 2
+      ___597 = ___596 & 1
+      ___598 = ___597 != 0
+      ___595 = ___594 != 0
+      ___599 = ___598 and ___595
+      if ___599 {
+        ___600 = IN_issueTags#[14..=20]
+        ___601 = IN_issueIDs#[10..=14]
+        specTag[___601] = ___600
+        ___602 = IN_issueTags#[14..=20]
+        ___603 = ___602 >> 6
+        ___604 = ___603 & 1
+        ___605 = ___604 == 0
+        if ___605 {
+          ___606 = IN_issueTags#[14..=20]
+          ___607 = ___606#[0..=5]
+          ___608 = 1 << ___607
+          ___609 = ~___608
+          ___610 = tagAvail & ___609
+          ___611 = 0 << ___607
+          ___612 = ___610 | ___611
+          tagAvail = ___612
+        }
+      }
+      ___613 = IN_issueIDs#[15..=19]
+      ___615 = IN_issueValid >> 3
+      ___616 = ___615 & 1
+      ___617 = ___616 != 0
+      ___614 = ___613 != 0
+      ___618 = ___617 and ___614
+      if ___618 {
+        ___619 = IN_issueTags#[21..=27]
+        ___620 = IN_issueIDs#[15..=19]
+        specTag[___620] = ___619
+        ___621 = IN_issueTags#[21..=27]
+        ___622 = ___621 >> 6
+        ___623 = ___622 & 1
+        ___624 = ___623 == 0
+        if ___624 {
+          ___625 = IN_issueTags#[21..=27]
+          ___626 = ___625#[0..=5]
+          ___627 = 1 << ___626
+          ___628 = ~___627
+          ___629 = tagAvail & ___628
+          ___630 = 0 << ___626
+          ___631 = ___629 | ___630
+          tagAvail = ___631
+        }
+      }
+    }
+    mut i_s6 = 0
+    ___632 = IN_commitIDs#[0..=4]
+    ___634 = IN_commitValid & 1
+    ___635 = ___634 != 0
+    ___633 = ___632 != 0
+    ___636 = ___635 and ___633
+    i_s6 = 0
+    if ___636 {
+      ___637 = IN_mispredFlush != 0
+      if ___637 {
+        ___638 = IN_mispred == 0
+        if ___638 {
+          ___639 = IN_commitTags#[0..=6]
+          ___640 = IN_commitIDs#[0..=4]
+          specTag[___640] = ___639
+        }
+      } else {
+        ___641 = IN_commitTags#[0..=6]
+        ___642 = IN_commitIDs#[0..=4]
+        comTag[___642] = ___641
+        ___643 = IN_mispred != 0
+        if ___643 {
+          ___644 = IN_commitTags#[0..=6]
+          ___645 = IN_commitIDs#[0..=4]
+          specTag[___645] = ___644
+        }
+      }
+    }
+    ___646 = IN_commitIDs#[5..=9]
+    ___648 = IN_commitValid >> 1
+    ___649 = ___648 & 1
+    ___650 = ___649 != 0
+    ___647 = ___646 != 0
+    ___651 = ___650 and ___647
+    if ___651 {
+      ___652 = IN_mispredFlush != 0
+      if ___652 {
+        ___653 = IN_mispred == 0
+        if ___653 {
+          ___654 = IN_commitTags#[7..=13]
+          ___655 = IN_commitIDs#[5..=9]
+          specTag[___655] = ___654
+        }
+      } else {
+        ___656 = IN_commitTags#[7..=13]
+        ___657 = IN_commitIDs#[5..=9]
+        comTag[___657] = ___656
+        ___658 = IN_mispred != 0
+        if ___658 {
+          ___659 = IN_commitTags#[7..=13]
+          ___660 = IN_commitIDs#[5..=9]
+          specTag[___660] = ___659
+        }
+      }
+    }
+    ___661 = IN_commitIDs#[10..=14]
+    ___663 = IN_commitValid >> 2
+    ___664 = ___663 & 1
+    ___665 = ___664 != 0
+    ___662 = ___661 != 0
+    ___666 = ___665 and ___662
+    if ___666 {
+      ___667 = IN_mispredFlush != 0
+      if ___667 {
+        ___668 = IN_mispred == 0
+        if ___668 {
+          ___669 = IN_commitTags#[14..=20]
+          ___670 = IN_commitIDs#[10..=14]
+          specTag[___670] = ___669
+        }
+      } else {
+        ___671 = IN_commitTags#[14..=20]
+        ___672 = IN_commitIDs#[10..=14]
+        comTag[___672] = ___671
+        ___673 = IN_mispred != 0
+        if ___673 {
+          ___674 = IN_commitTags#[14..=20]
+          ___675 = IN_commitIDs#[10..=14]
+          specTag[___675] = ___674
+        }
+      }
+    }
+    ___676 = IN_commitIDs#[15..=19]
+    ___678 = IN_commitValid >> 3
+    ___679 = ___678 & 1
+    ___680 = ___679 != 0
+    ___677 = ___676 != 0
+    ___681 = ___680 and ___677
+    if ___681 {
+      ___682 = IN_mispredFlush != 0
+      if ___682 {
+        ___683 = IN_mispred == 0
+        if ___683 {
+          ___684 = IN_commitTags#[21..=27]
+          ___685 = IN_commitIDs#[15..=19]
+          specTag[___685] = ___684
+        }
+      } else {
+        ___686 = IN_commitTags#[21..=27]
+        ___687 = IN_commitIDs#[15..=19]
+        comTag[___687] = ___686
+        ___688 = IN_mispred != 0
+        if ___688 {
+          ___689 = IN_commitTags#[21..=27]
+          ___690 = IN_commitIDs#[15..=19]
+          specTag[___690] = ___689
+        }
+      }
+    }
+  }
+  OUT_commitPrevTags = OUT_commitPrevTags__w3
+}

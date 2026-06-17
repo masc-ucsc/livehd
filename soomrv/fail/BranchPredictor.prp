@@ -1,0 +1,561 @@
+pub mod BranchPredictor::[lg="BranchPredictor", hdl](clk:u1, rst:u1, en1:u1, IN_mispr:u49, IN_pcValid:u1, IN_fetchID:u5, IN_comFetchID:u5, IN_retDecUpd:u37, IN_pcFileRData:u35, IN_btUpdates:u152, IN_bpUpdate:u10) -> (OUT_stall:u1@[], OUT_fetchLimit:u6@[], OUT_pc:u31@[], OUT_lastOffs:u3@[], OUT_curRetAddr:u31@[], OUT_lateRetAddr:u31@[], OUT_rIdx:u5@[], OUT_predBr:u41@[], OUT_pcFileRead:u6@[]) {
+  reg recovery:u16
+  reg pcReg:u31
+  reg bpUpdateActive:u10
+  reg pcRegNoInc:u31
+  reg ignorePred:u1
+  reg history:u64
+  mut btUpdate = 0
+  mut i = 0
+  mut recoveredPC = 0
+  mut RET_stall = 0
+  mut bpBackup = 0
+  mut RET_idx = 0
+  mut _b2i_1 = 0
+  mut TAGE_tageID = 0
+  mut TAGE_altPred = 0
+  mut bpFileRE = 0
+  mut bpFileRAddr = 0
+  mut bpFileRData = 0
+  mut branchAddr = 0
+  mut lookupHistory = 0
+  mut updHistory = 0
+  mut recRIdx = 0
+  mut recHistory = 0
+  mut updFIFO_deq = 0
+  mut bpUpdate = 0
+  mut btUpdate__w1 = 0ub????????????????????????????????????????????????????????????????????????????
+  ___1 = IN_btUpdates#[0..=75]
+  ___2 = ___1 & 1
+  mut btUpdate__w2 = btUpdate__w1
+  btUpdate__w2#[0..=0] = 0
+  ___3 = ___2 != 0
+  btUpdate = btUpdate__w2
+  i = 0sb?
+  if ___3 {
+    ___4 = IN_btUpdates#[0..=75]
+    btUpdate = ___4
+  }
+  ___5 = IN_btUpdates#[76..=151]
+  ___6 = ___5 & 1
+  ___7 = ___6 != 0
+  if ___7 {
+    ___8 = IN_btUpdates#[76..=151]
+    btUpdate = ___8
+  }
+  ___10 = IN_pcFileRData#[4..=34]
+  ___11 = ___10#[3..=30]
+  ___9 = recovery#[6..=8]
+  ___12 = ___11 << 3
+  ___13 = ___9 | ___12
+  ___14 = recovery#[14..=15]
+  mut recoveredPC__w1 = ___13
+  ___15 = ___14 == 3
+  ___16 = ___14 == 2
+  ___17 = ___14 == 1
+  ___18 = ___14 == 0
+  recoveredPC = recoveredPC__w1
+  unique if ___15 {
+    ___19 = recoveredPC - 1
+    ___20 = ___19#[0..=31]
+    ___21 = ___20#[0..=30]
+    recoveredPC = ___21
+  } elif ___16 {
+  } elif ___17 {
+    ___22 = recoveredPC + 1
+    ___23 = ___22#[0..=31]
+    ___24 = ___23#[0..=30]
+    recoveredPC = ___24
+  } elif ___18 {
+  } else {
+  }
+  RET_stall = 0ub?
+  ___25 = RET_stall.[defer]
+  bpBackup = 0ub????????????????????????????????????????????????????????????????????????????????
+  OUT_stall = ___25
+  RET_idx = 0ub?????
+  mut bpBackup__w1 = bpBackup
+  bpBackup__w1#[11..=74] = history
+  ___26 = RET_idx.[defer]
+  mut bpBackup__w2 = bpBackup__w1
+  bpBackup__w2#[6..=10] = ___26
+  ___27 = OUT_predBr.[defer]
+  ___28 = ___27#[4..=5]
+  ___29 = ___28 == 2
+  if ___29 {
+    _b2i_1 = 1
+  } else {
+    _b2i_1 = 0
+  }
+  mut bpBackup__w3 = bpBackup__w2
+  bpBackup__w3#[5..=5] = _b2i_1
+  ___30 = OUT_predBr.[defer]
+  ___31 = ___30 >> 2
+  ___32 = ___31 & 1
+  mut bpBackup__w4 = bpBackup__w3
+  bpBackup__w4#[4..=4] = ___32
+  ___33 = OUT_predBr.[defer]
+  ___34 = ___33#[7..=9]
+  mut bpBackup__w5 = bpBackup__w4
+  bpBackup__w5#[1..=3] = ___34
+  ___35 = OUT_predBr.[defer]
+  ___36 = ___35 & 1
+  TAGE_tageID = 0ub????
+  mut bpBackup__w6 = bpBackup__w5
+  bpBackup__w6#[0..=0] = ___36
+  ___37 = TAGE_tageID.[defer]
+  TAGE_altPred = 0ub?
+  mut bpBackup__w7 = bpBackup__w6
+  bpBackup__w7#[76..=79] = ___37
+  ___38 = TAGE_altPred.[defer]
+  mut bpBackup__w8 = bpBackup__w7
+  bpBackup__w8#[75..=75] = ___38
+  bpFileRE = 0ub?
+  ___39 = bpFileRE.[defer]
+  bpFileRAddr = 0ub?????
+  ___40 = bpFileRAddr.[defer]
+  ___41 = RegFile(clk = clk, IN_re = ___39, IN_raddr = ___40, IN_we = en1, IN_waddr = IN_fetchID, IN_wdata = bpBackup__w8)
+  ___42 = ___41#[0..=79]
+  bpFileRData = 0ub????????????????????????????????????????????????????????????????????????????????
+  mut bpFileRData__w1 = ___42
+  ___43 = OUT_pc.[defer]
+  OUT_predBr = 0
+  branchAddr = 0ub???????????????????????????????
+  mut branchAddr__w1 = ___43
+  ___44 = OUT_curRetAddr.[defer]
+  mut OUT_predBr__w1 = 0
+  OUT_predBr__w1#[10..=40] = ___44
+  OUT_lastOffs = 7
+  mut OUT_predBr__w2 = OUT_predBr__w1
+  OUT_predBr__w2#[7..=9] = 7
+  OUT_predBr = OUT_predBr__w2
+  OUT_pc = pcReg
+  ___45 = ignorePred != 0
+  if ___45 {
+    ___46 = recovery#[14..=15]
+    ___48 = recovery & 1
+    ___49 = ___48 != 0
+    ___47 = ___46 != 0
+    ___50 = ___49 and ___47
+    if ___50 {
+      ___51 = recoveredPC.[defer]
+      OUT_pc = ___51
+    }
+  } else {
+    mut BTB_br = 0
+    BTB_br = 0ub?????????????????????????????????????????
+    ___52 = BTB_br.[defer]
+    ___53 = ___52#[4..=5]
+    ___54 = ___53 != 3
+    ___55 = BTB_br.[defer]
+    ___56 = ___55 & 1
+    ___57 = ___56 != 0
+    ___58 = ___57 and ___54
+    if ___58 {
+      ___59 = BTB_br.[defer]
+      OUT_predBr = ___59
+      ___60 = OUT_predBr >> 2
+      mut TAGE_taken = 0
+      TAGE_taken = 0ub?
+      ___61 = ___60 & 1
+      ___62 = TAGE_taken.[defer]
+      ___63 = ___61 | ___62
+      OUT_predBr#[2..=2] = ___63
+      ___64 = BTB_br.[defer]
+      ___65 = ___64 >> 3
+      ___66 = ___65 & 1
+      ___68 = OUT_predBr >> 2
+      ___69 = ___68 & 1
+      ___70 = ___69 == 0
+      ___67 = ___66 != 0
+      mut _b2i_2 = 0
+      ___71 = ___70 and ___67
+      if ___71 {
+        _b2i_2 = 1
+      } else {
+        _b2i_2 = 0
+      }
+      OUT_predBr#[3..=3] = _b2i_2
+      ___72 = OUT_predBr >> 2
+      ___73 = ___72 & 1
+      ___74 = ___73 != 0
+      if ___74 {
+        ___75 = OUT_predBr#[10..=40]
+        ___76 = OUT_predBr#[7..=9]
+        OUT_lastOffs = ___76
+        OUT_pc = ___75
+      }
+      ___77 = OUT_predBr#[7..=9]
+      ___79 = OUT_predBr >> 3
+      ___80 = ___79 & 1
+      ___81 = ___80 != 0
+      ___78 = ___77 != 7
+      ___82 = ___81 and ___78
+      if ___82 {
+        ___83 = OUT_predBr#[7..=9]
+        ___84 = OUT_predBr#[7..=9]
+        ___85 = ___84 + 1
+        ___87 = pcRegNoInc#[3..=30]
+        ___86 = ___85#[0..=2]
+        ___88 = ___87 << 3
+        ___89 = ___86 | ___88
+        OUT_lastOffs = ___83
+        OUT_pc = ___89
+      }
+    } else {
+      mut RET_br = 0
+      RET_br = 0ub?????????????????????????????????????????
+      ___90 = RET_br.[defer]
+      ___91 = ___90 & 1
+      ___92 = ___91 != 0
+      ___93 = BTB_br.[defer]
+      ___94 = ___93#[4..=5]
+      ___95 = ___94 == 3
+      ___96 = BTB_br.[defer]
+      ___97 = ___96 & 1
+      ___98 = ___97 != 0
+      ___99 = ___98 and ___95
+      ___100 = ___99 and ___92
+      if ___100 {
+        ___101 = BTB_br.[defer]
+        OUT_predBr = ___101
+        OUT_predBr#[2..=2] = 1
+        OUT_predBr#[3..=3] = 0
+        ___102 = OUT_curRetAddr.[defer]
+        OUT_predBr#[10..=40] = ___102
+        ___103 = OUT_predBr#[10..=40]
+        ___104 = OUT_predBr#[7..=9]
+        OUT_lastOffs = ___104
+        OUT_pc = ___103
+      } else {
+        OUT_predBr#[0..=0] = 1
+        OUT_predBr#[4..=5] = 2
+        OUT_predBr#[1..=1] = 1
+        ___105 = TAGE_taken.[defer]
+        OUT_predBr#[2..=2] = ___105
+      }
+    }
+  }
+  ___106 = btUpdate.[defer]
+  ___107 = BranchTargetBuffer(clk = clk, rst = rst, IN_pcValid = IN_pcValid, IN_pc = OUT_pc, IN_btUpdate = ___106)
+  BTB_br = ___107
+  ___108 = branchAddr__w1.[defer]
+  lookupHistory = 0ub????????????????????????????????????????????????????????????????
+  ___109 = lookupHistory.[defer]
+  ___110 = bpUpdateActive & 1
+  ___111 = IN_pcFileRData#[4..=34]
+  updHistory = 0ub????????????????????????????????????????????????????????????????
+  ___112 = updHistory.[defer]
+  ___113 = bpFileRData__w1.[defer]
+  ___115 = bpUpdateActive >> 1
+  ___114 = ___113#[76..=79]
+  ___116 = ___115 & 1
+  ___117 = bpFileRData__w1.[defer]
+  ___118 = ___117 >> 75
+  ___119 = ___118 & 1
+  ___120 = bpFileRData__w1.[defer]
+  ___121 = ___120 >> 4
+  ___122 = ___121 & 1
+  ___123 = TagePredictor(clk = clk, rst = rst, IN_predValid = IN_pcValid, IN_predAddr = ___108, IN_predHistory = ___109, IN_writeValid = ___110, IN_writeAddr = ___111, IN_writeHistory = ___112, IN_writeTageID = ___114, IN_writeTaken = ___116, IN_writeAltPred = ___119, IN_writePred = ___122)
+  ___124 = ___123["OUT_predTageID"]
+  mut TAGE_tageID__w1 = ___124
+  ___125 = ___123["OUT_altPred"]
+  mut TAGE_altPred__w1 = ___125
+  ___126 = ___123["OUT_predTaken"]
+  TAGE_taken = ___126
+  ___127 = RET_idx.[defer]
+  OUT_rIdx = ___127
+  ___128 = OUT_predBr.[defer]
+  recRIdx = 0ub?????
+  ___129 = recRIdx.[defer]
+  ___130 = ReturnStack(clk = clk, rst = rst, IN_valid = IN_pcValid, IN_fetchID = IN_fetchID, IN_comFetchID = IN_comFetchID, IN_lastPC = pcRegNoInc, IN_branch = ___128, IN_recoveryIdx = ___129, IN_mispr = IN_mispr, IN_returnUpd = IN_retDecUpd)
+  ___131 = ___130["OUT_stall"]
+  mut RET_stall__w1 = ___131
+  ___132 = ___130["OUT_curRetAddr"]
+  OUT_curRetAddr = ___132
+  ___133 = ___130["OUT_lateRetAddr"]
+  OUT_lateRetAddr = ___133
+  ___134 = ___130["OUT_curIdx"]
+  mut RET_idx__w1 = ___134
+  ___135 = ___130["OUT_predBr"]
+  RET_br = ___135
+  ___136 = bpFileRData__w1.[defer]
+  ___137 = ___136#[11..=74]
+  ___138 = recovery#[6..=8]
+  recHistory = 0ub????????????????????????????????????????????????????????????????
+  mut recHistory__w1 = ___137
+  ___139 = bpFileRData__w1.[defer]
+  ___140 = ___139#[1..=3]
+  ___141 = ___138 > ___140
+  ___142 = bpFileRData__w1.[defer]
+  ___143 = ___142 & 1
+  ___144 = ___143 != 0
+  ___145 = ___144 and ___141
+  recHistory = recHistory__w1
+  if ___145 {
+    ___146 = bpFileRData__w1.[defer]
+    ___147 = ___146 >> 4
+    ___149 = recHistory#[0..=62]
+    ___148 = ___147 & 1
+    ___150 = ___149 << 1
+    ___151 = ___148 | ___150
+    recHistory = ___151
+  }
+  ___152 = recovery#[1..=3]
+  ___154 = recovery#[1..=3]
+  ___155 = ___154 == 3
+  ___153 = ___152 == 4
+  ___156 = ___155 or ___153
+  if ___156 {
+    ___157 = recovery#[1..=3]
+    mut _b2i_3 = 0
+    ___158 = ___157 == 4
+    if ___158 {
+      _b2i_3 = 1
+    } else {
+      _b2i_3 = 0
+    }
+    ___159 = recHistory#[0..=62]
+    ___160 = ___159 << 1
+    ___161 = _b2i_3 | ___160
+    recHistory = ___161
+  }
+  ___162 = recovery#[1..=3]
+  ___164 = recovery#[1..=3]
+  ___165 = ___164 == 2
+  ___163 = ___162 == 1
+  ___166 = ___165 or ___163
+  if ___166 {
+    ___167 = recovery#[1..=3]
+    mut _b2i_4 = 0
+    ___168 = ___167 == 2
+    if ___168 {
+      _b2i_4 = 1
+    } else {
+      _b2i_4 = 0
+    }
+    ___169 = recHistory#[0..=62]
+    ___170 = ___169 << 1
+    ___171 = _b2i_4 | ___170
+    recHistory = ___171
+  }
+  ___172 = bpFileRData__w1.[defer]
+  ___173 = ___172#[6..=10]
+  ___174 = recovery#[4..=5]
+  mut recRIdx__w1 = ___173
+  ___175 = ___174 == 2
+  ___176 = ___174 == 1
+  recRIdx = recRIdx__w1
+  unique if ___175 {
+    ___177 = recRIdx - 1
+    ___178 = ___177#[0..=31]
+    ___179 = ___178#[0..=4]
+    recRIdx = ___179
+  } elif ___176 {
+    ___180 = recRIdx + 1
+    ___181 = ___180#[0..=31]
+    ___182 = ___181#[0..=4]
+    recRIdx = ___182
+  } else {
+  }
+  ___183 = recovery & 1
+  mut lookupHistory__w1 = history
+  ___184 = ___183 != 0
+  lookupHistory = lookupHistory__w1
+  if ___184 {
+    ___185 = recHistory.[defer]
+    lookupHistory = ___185
+  } else {
+    ___186 = OUT_predBr.[defer]
+    ___187 = ___186 >> 1
+    ___188 = ___187 & 1
+    ___189 = ___188 == 0
+    ___190 = OUT_predBr.[defer]
+    ___191 = ___190#[4..=5]
+    ___192 = ___191 == 2
+    ___193 = OUT_predBr.[defer]
+    ___194 = ___193 & 1
+    ___195 = ___194 != 0
+    ___196 = ___195 and ___192
+    ___197 = ___196 and ___189
+    if ___197 {
+      ___198 = OUT_predBr.[defer]
+      ___199 = ___198 >> 2
+      ___201 = lookupHistory#[0..=62]
+      ___200 = ___199 & 1
+      ___202 = ___201 << 1
+      ___203 = ___200 | ___202
+      lookupHistory = ___203
+    }
+  }
+  ___204 = bpFileRData__w1.[defer]
+  ___205 = ___204#[11..=74]
+  ___206 = bpUpdateActive#[7..=9]
+  mut updHistory__w1 = ___205
+  ___207 = bpFileRData__w1.[defer]
+  ___208 = ___207#[1..=3]
+  ___209 = ___206 > ___208
+  ___210 = bpFileRData__w1.[defer]
+  ___211 = ___210 >> 5
+  ___212 = ___211 & 1
+  ___213 = ___212 != 0
+  ___214 = bpFileRData__w1.[defer]
+  ___215 = ___214 & 1
+  ___216 = ___215 != 0
+  ___217 = ___216 and ___213
+  ___218 = ___217 and ___209
+  updHistory = updHistory__w1
+  if ___218 {
+    ___219 = bpFileRData__w1.[defer]
+    ___220 = ___219 >> 4
+    ___222 = updHistory#[0..=62]
+    ___221 = ___220 & 1
+    ___223 = ___222 << 1
+    ___224 = ___221 | ___223
+    updHistory = ___224
+  }
+  ___225 = IN_bpUpdate & 1
+  ___226 = IN_bpUpdate#[1..=9]
+  updFIFO_deq = 0ub?
+  ___227 = updFIFO_deq.[defer]
+  ___228 = FIFO(clk = clk, rst = rst, IN_valid = ___225, IN_data = ___226, IN_ready = ___227)
+  ___229 = ___228["OUT_valid"]
+  bpUpdate = 0ub??????????
+  mut bpUpdate__w1 = bpUpdate
+  bpUpdate__w1#[0..=0] = ___229
+  ___230 = ___228["OUT_data"]
+  ___231 = rst != 0
+  mut bpUpdate__w2 = bpUpdate__w1
+  bpUpdate__w2#[1..=9] = ___230
+  if ___231 {
+    bpUpdateActive = 0ub?????????0
+  } else {
+    ___232 = updFIFO_deq.[defer]
+    ___233 = ___232 != 0
+    if ___233 {
+      ___234 = bpUpdate__w2.[defer]
+      bpUpdateActive = ___234
+    } else {
+      bpUpdateActive = 0ub?????????0
+    }
+  }
+  OUT_fetchLimit = 0ub?????0
+  ___235 = bpUpdate__w2.[defer]
+  ___236 = ___235 & 1
+  ___237 = ___236 != 0
+  if ___237 {
+    OUT_fetchLimit#[0..=0] = 1
+    ___238 = bpUpdate__w2.[defer]
+    ___239 = ___238#[2..=6]
+    OUT_fetchLimit#[1..=5] = ___239
+  } else {
+    ___240 = IN_bpUpdate & 1
+    ___241 = ___240 != 0
+    if ___241 {
+      OUT_fetchLimit#[0..=0] = 1
+      ___242 = IN_bpUpdate#[2..=6]
+      OUT_fetchLimit#[1..=5] = ___242
+    }
+  }
+  OUT_pcFileRead#[1..=5] = 0ub?????
+  ___243 = IN_mispr & 1
+  mut OUT_pcFileRead__w1 = OUT_pcFileRead
+  OUT_pcFileRead__w1#[0..=0] = 0
+  mut bpFileRAddr__w1 = 0ub?????
+  OUT_pcFileRead = OUT_pcFileRead__w1
+  ___244 = ___243 != 0
+  bpFileRAddr = bpFileRAddr__w1
+  bpFileRE = 0
+  updFIFO_deq = 0
+  if ___244 {
+    ___245 = IN_mispr#[2..=6]
+    ___246 = IN_mispr#[46..=47]
+    ___247 = ___246 != 0
+    bpFileRAddr = ___245
+    bpFileRE = 1
+    if ___247 {
+      ___248 = IN_mispr#[2..=6]
+      OUT_pcFileRead#[1..=5] = ___248
+      OUT_pcFileRead#[0..=0] = 1
+    }
+  } else {
+    ___249 = bpUpdate__w2.[defer]
+    ___250 = ___249 & 1
+    ___251 = ___250 != 0
+    if ___251 {
+      updFIFO_deq = 1
+      ___252 = bpUpdate__w2.[defer]
+      ___253 = ___252#[2..=6]
+      bpFileRAddr = ___253
+      bpFileRE = 1
+      ___254 = bpUpdate__w2.[defer]
+      ___255 = ___254#[2..=6]
+      OUT_pcFileRead#[1..=5] = ___255
+      OUT_pcFileRead#[0..=0] = 1
+    }
+  }
+  ___256 = rst != 0
+  recovery = 0ub0?????????0?00?0
+  if ___256 {
+    history = 0
+    ignorePred = 1
+    pcReg = 1073741824
+    pcRegNoInc = 0ub???????????????????????????????
+  } else {
+    ___257 = IN_pcValid != 0
+    if ___257 {
+      ___258 = OUT_pc.[defer]
+      ___259 = ___258#[3..=30]
+      ___260 = ___259 + 1
+      ___261 = ___260#[0..=27]
+      ___262 = ___261 << 3
+      ___263 = 0 | ___262
+      pcReg = ___263
+      ___264 = OUT_pc.[defer]
+      ignorePred = 0
+      pcRegNoInc = ___264
+      ___265 = lookupHistory.[defer]
+      history = ___265
+    } else {
+      ___266 = recovery & 1
+      ___267 = ___266 != 0
+      if ___267 {
+        ___268 = recHistory.[defer]
+        ___269 = recovery#[14..=15]
+        ___270 = ___269 != 0
+        history = ___268
+        if ___270 {
+          ___271 = recoveredPC.[defer]
+          pcReg = ___271
+        }
+      }
+    }
+    ___272 = IN_mispr & 1
+    ___273 = ___272 != 0
+    if ___273 {
+      recovery#[0..=0] = 1
+      ___274 = IN_mispr#[46..=47]
+      recovery#[14..=15] = ___274
+      ___275 = IN_mispr#[2..=6]
+      recovery#[9..=13] = ___275
+      ___276 = IN_mispr#[41..=42]
+      recovery#[4..=5] = ___276
+      ___277 = IN_mispr#[38..=40]
+      recovery#[1..=3] = ___277
+      ___278 = IN_mispr#[43..=45]
+      ___279 = IN_mispr#[46..=47]
+      ___281 = IN_mispr#[7..=37]
+      mut _mux_5:u31 = 0
+      ___283 = 0ub???????????????????????????????#[0..=30]
+      ___280 = ___279 == 0
+      ___282 = ___281#[0..=30]
+      _mux_5 = ___283
+      recovery#[6..=8] = ___278
+      if ___280 {
+        _mux_5 = ___282
+      }
+      ignorePred = 1
+      pcReg = _mux_5
+    }
+  }
+}

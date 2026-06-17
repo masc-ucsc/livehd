@@ -1,0 +1,286 @@
+pub mod CacheReadInterface::[lg="CacheReadInterface", hdl](clk:u1, rst:u1, IN_valid:u1, IN_id:u2, IN_len:u8, IN_addr:u10, IN_mmio:u1, IN_mmioData:u32, IN_ready:u1, IN_CACHE_ready:u1, IN_CACHE_data:u32) -> (OUT_ready:u1@[], OUT_valid:u1@[], OUT_id:u2@[], OUT_data:u128@[], OUT_last:u1@[], OUT_CACHE_ce:u1@[], OUT_CACHE_we:u1@[], OUT_CACHE_addr:u10@[], OUT_cacheReadValid:u1@[], OUT_cacheReadId:u2@[]) {
+  reg cur:u62
+  reg next:u62
+  reg accIdx_r:u3
+  reg acc:u128
+  reg readMetaSR:u74
+  mut accIdx_c = 0
+  mut FIFO_valid = 0
+  mut FIFO_data = 0
+  mut FIFO_id = 0
+  mut FIFO_last = 0
+  mut doAcc = 0
+  mut FIFO_free = 0
+  mut FIFO_ready = 0
+  mut inFlight = 0
+  mut _b2i_1 = 0
+  mut allowNewRead = 0
+  mut readMeta = 0
+  mut _b2i_3 = 0
+  mut readSucc = 0
+  mut _b2i_4 = 0
+  ___1 = readMetaSR#[37..=73]
+  ___2 = ___1 & 1
+  mut FIFO_id__w1 = 0ub??
+  mut FIFO_data__w1 = 0ub????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+  mut accIdx_c__w1 = accIdx_r
+  mut FIFO_last__w1 = 0ub?
+  FIFO_data = FIFO_data__w1
+  FIFO_id = FIFO_id__w1
+  FIFO_last = FIFO_last__w1
+  FIFO_valid = 0
+  ___3 = ___2 != 0
+  accIdx_c = accIdx_c__w1
+  doAcc = 0
+  if ___3 {
+    ___4 = accIdx_c + 1
+    ___5 = ___4#[0..=31]
+    ___6 = ___5#[0..=2]
+    ___7 = readMetaSR#[37..=73]
+    ___8 = ___7 >> 2
+    ___9 = ___8 & 1
+    ___10 = ___9 != 0
+    accIdx_c = ___6
+    if ___10 {
+      ___11 = readMetaSR#[37..=73]
+      ___12 = ___11#[5..=36]
+      ___13 = readMetaSR#[37..=73]
+      ___14 = ___13#[3..=4]
+      ___15 = readMetaSR#[37..=73]
+      ___16 = ___15 >> 1
+      ___17 = ___16 & 1
+      FIFO_data = 0
+      FIFO_data#[0..=31] = ___12
+      FIFO_id = ___14
+      FIFO_last = ___17
+      FIFO_valid = 1
+      accIdx_c = 0
+    } else {
+      ___18 = accIdx_c >> 2
+      ___19 = ___18 & 1
+      ___20 = ___19 != 0
+      if ___20 {
+        FIFO_data = acc
+        ___21 = readMetaSR#[37..=73]
+        ___22 = ___21#[3..=4]
+        ___23 = readMetaSR#[37..=73]
+        ___24 = ___23 >> 1
+        ___25 = ___24 & 1
+        FIFO_data#[96..=127] = IN_CACHE_data
+        FIFO_id = ___22
+        FIFO_last = ___25
+        FIFO_valid = 1
+        accIdx_c = 0
+      } else {
+        doAcc = 1
+      }
+    }
+  }
+  ___26 = rst != 0
+  if ___26 {
+    accIdx_r = 0
+  } else {
+    ___27 = doAcc != 0
+    accIdx_r = accIdx_c
+    if ___27 {
+      ___28 = accIdx_r * 32
+      ___29 = ___28#[0..=31]
+      ___30 = 0xffffffff << ___29
+      ___31 = ~___30
+      ___32 = acc & ___31
+      ___33 = IN_CACHE_data << ___29
+      ___34 = ___32 | ___33
+      acc = ___34
+    }
+  }
+  ___35 = FIFO_id << 128
+  ___37 = FIFO_data | ___35
+  ___36 = FIFO_last << 130
+  ___38 = ___37 | ___36
+  ___39 = FIFO(clk = clk, rst = rst, IN_valid = FIFO_valid, IN_data = ___38, IN_ready = IN_ready)
+  ___40 = ___39["free"]
+  FIFO_free = 0ub??????
+  mut FIFO_free__w1 = ___40
+  ___41 = ___39["OUT_ready"]
+  FIFO_ready = 0ub?
+  mut FIFO_ready__w1 = ___41
+  ___42 = ___39["OUT_valid"]
+  OUT_valid = ___42
+  ___43 = ___39["OUT_data"]
+  ___44 = ___43#[0..=127]
+  ___45 = ___43 >> 128
+  ___46 = ___45#[0..=1]
+  ___47 = ___43 >> 130
+  ___48 = ___47 & 1
+  ___49 = readMetaSR#[37..=73]
+  ___51 = readMetaSR#[0..=36]
+  ___50 = ___49 & 1
+  ___52 = ___51 & 1
+  ___53 = ___50 + ___52
+  ___54 = ___53#[0..=5]
+  ___55 = FIFO_free__w1 * 4
+  ___56 = ___55#[0..=31]
+  mut inFlight__w1 = ___54
+  OUT_data = ___44
+  OUT_id = ___46
+  OUT_last = ___48
+  ___57 = ___56 > inFlight__w1
+  inFlight = 0ub??????
+  if ___57 {
+    _b2i_1 = 1
+  } else {
+    _b2i_1 = 0
+  }
+  OUT_CACHE_ce = 1
+  OUT_CACHE_we = 1
+  mut allowNewRead__w1 = _b2i_1
+  ___59 = cur & 1
+  ___60 = ___59 != 0
+  ___58 = allowNewRead__w1 != 0
+  mut readMeta__w1 = 0ub????????????????????????????????????0
+  OUT_CACHE_addr = 0ub??????????
+  ___61 = ___60 and ___58
+  allowNewRead = 0ub?
+  readMeta = readMeta__w1
+  if ___61 {
+    OUT_CACHE_ce = 0
+    OUT_CACHE_we = 1
+    ___62 = cur#[3..=12]
+    ___64 = cur#[21..=28]
+    ___63 = ___62#[0..=3]
+    ___65 = ___64#[0..=3]
+    ___66 = ___63 + ___65
+    ___68 = cur#[3..=12]
+    ___69 = ___68#[4..=9]
+    ___67 = ___66#[0..=3]
+    ___70 = ___69 << 4
+    ___71 = ___67 | ___70
+    readMeta#[0..=0] = 1
+    ___72 = cur#[1..=2]
+    ___73 = cur >> 29
+    ___74 = ___73 & 1
+    ___76 = cur#[21..=28]
+    ___78 = cur#[13..=20]
+    ___77 = ___76#[0..=7]
+    ___79 = ___78#[0..=7]
+    ___80 = ___77 == ___79
+    ___75 = ___74 != 0
+    mut _b2i_2 = 0
+    OUT_CACHE_addr = ___71
+    ___81 = ___80 or ___75
+    readMeta#[3..=4] = ___72
+    if ___81 {
+      _b2i_2 = 1
+    } else {
+      _b2i_2 = 0
+    }
+    ___82 = cur >> 29
+    readMeta#[1..=1] = _b2i_2
+    ___83 = ___82 & 1
+    readMeta#[2..=2] = ___83
+    ___84 = cur#[30..=61]
+    readMeta#[5..=36] = ___84
+  }
+  ___85 = readMeta >> 2
+  ___86 = ___85 & 1
+  ___88 = IN_CACHE_ready != 0
+  ___87 = ___86 != 0
+  ___90 = readMeta & 1
+  ___91 = ___90 != 0
+  ___89 = ___88 or ___87
+  ___92 = ___91 and ___89
+  if ___92 {
+    _b2i_3 = 1
+  } else {
+    _b2i_3 = 0
+  }
+  ___93 = readMeta >> 1
+  ___94 = ___93 & 1
+  mut readSucc__w1 = _b2i_3
+  ___96 = readSucc__w1 != 0
+  ___95 = ___94 != 0
+  ___98 = next & 1
+  ___99 = ___98 == 0
+  ___97 = ___96 and ___95
+  ___100 = ___99 or ___97
+  readSucc = 0ub?
+  if ___100 {
+    _b2i_4 = 1
+  } else {
+    _b2i_4 = 0
+  }
+  OUT_cacheReadValid = 0
+  OUT_cacheReadId = 0ub??
+  OUT_ready = _b2i_4
+  ___101 = readSucc__w1 != 0
+  if ___101 {
+    OUT_cacheReadValid = 1
+    ___102 = readMeta#[3..=4]
+    OUT_cacheReadId = ___102
+  }
+  ___103 = rst != 0
+  if ___103 {
+    cur = 0ub?????????????????????????????????????????????????????????????0
+    next = 0ub?????????????????????????????????????????????????????????????0
+    readMetaSR = 0
+  } else {
+    mut incoming = 0
+    ___105 = IN_valid != 0
+    ___104 = OUT_ready != 0
+    ___106 = ___105 and ___104
+    incoming = 0ub?????????????????????????????????????????????????????????????0
+    if ___106 {
+      incoming#[0..=0] = 1
+      incoming#[1..=2] = IN_id
+      incoming#[3..=12] = IN_addr
+      incoming#[21..=28] = 0
+      incoming#[13..=20] = IN_len
+      incoming#[29..=29] = IN_mmio
+      incoming#[30..=61] = IN_mmioData
+    }
+    mut _mux_5:u37 = 0
+    ___107 = readSucc__w1 != 0
+    ___108 = readMeta#[0..=36]
+    _mux_5 = 0
+    if ___107 {
+      _mux_5 = ___108
+    }
+    ___110 = readMetaSR#[0..=36]
+    ___111 = ___110 << 37
+    ___112 = _mux_5 | ___111
+    ___113 = readSucc__w1 != 0
+    readMetaSR = ___112
+    if ___113 {
+      ___114 = readMeta >> 1
+      ___115 = ___114 & 1
+      ___116 = ___115 != 0
+      if ___116 {
+        ___117 = next & 1
+        ___118 = ___117 != 0
+        if ___118 {
+          cur = next
+          next = 0ub?????????????????????????????????????????????????????????????0
+        } else {
+          cur = incoming
+          incoming = 0ub?????????????????????????????????????????????????????????????0
+        }
+      } else {
+        ___119 = cur#[21..=28]
+        ___120 = ___119 + 1
+        ___121 = ___120#[0..=7]
+        cur#[21..=28] = ___121
+      }
+    }
+    ___122 = incoming & 1
+    ___123 = ___122 != 0
+    if ___123 {
+      ___124 = cur & 1
+      ___125 = ___124 == 0
+      if ___125 {
+        cur = incoming
+      } else {
+        next = incoming
+      }
+    }
+  }
+}

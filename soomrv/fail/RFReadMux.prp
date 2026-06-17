@@ -1,0 +1,111 @@
+pub mod RFReadMux::[lg="RFReadMux", hdl](clk:u1, IN_read:u28, IN_readData:u96) -> (OUT_readReady:u4@[], OUT_readData:u128@[], OUT_readEnable:u3@[], OUT_readAddress:u18@[]) {
+  mut i = 0
+  mut staticReadEnable = 0
+  mut genblk1_compReadIdx_c:u2 = 0
+  mut genblk1_compReadValid_c:u1 = 0
+  mut genblk1_compReadIdx_r:u2 = 0
+  mut genblk1_i = 0
+  mut genblk1_i_s1 = 0
+  mut genblk1_i_s2 = 0
+  mut genblk1_i_s3 = 0
+  ___1 = IN_read#[0..=6]
+  staticReadEnable = 0ub???
+  ___2 = ___1 & 1
+  ___3 = IN_read#[7..=13]
+  mut staticReadEnable__w1 = staticReadEnable
+  staticReadEnable__w1#[0..=0] = ___2
+  ___4 = ___3 & 1
+  ___5 = IN_read#[14..=20]
+  mut staticReadEnable__w2 = staticReadEnable__w1
+  staticReadEnable__w2#[1..=1] = ___4
+  ___6 = ___5 & 1
+  mut staticReadEnable__w3 = staticReadEnable__w2
+  staticReadEnable__w3#[2..=2] = ___6
+  ___7 = ~staticReadEnable__w3
+  ___8 = ___7#[0..=2]
+  i = 0sb?
+  ___9 = PriorityEncoder(IN_data = ___8)
+  ___10 = ___9["OUT_idx"]
+  genblk1_compReadIdx_c = ___10
+  ___11 = ___9["OUT_idxValid"]
+  ___12 = staticReadEnable__w3 & 1
+  ___13 = IN_read#[0..=6]
+  ___14 = ___13#[1..=6]
+  ___15 = staticReadEnable__w3 >> 1
+  OUT_readEnable#[0..=0] = ___12
+  ___16 = ___15 & 1
+  ___17 = IN_read#[7..=13]
+  OUT_readAddress#[0..=5] = ___14
+  ___18 = ___17#[1..=6]
+  OUT_readReady#[0..=0] = 1
+  ___19 = staticReadEnable__w3 >> 2
+  mut OUT_readEnable__w1 = OUT_readEnable
+  OUT_readEnable__w1#[1..=1] = ___16
+  ___20 = ___19 & 1
+  ___21 = IN_read#[14..=20]
+  mut OUT_readAddress__w1 = OUT_readAddress
+  OUT_readAddress__w1#[6..=11] = ___18
+  ___22 = ___21#[1..=6]
+  mut OUT_readReady__w1 = OUT_readReady
+  OUT_readReady__w1#[1..=1] = 1
+  mut OUT_readReady__w2 = OUT_readReady__w1
+  OUT_readReady__w2#[2..=2] = 1
+  ___23 = IN_read#[21..=27]
+  ___24 = ___23 & 1
+  genblk1_compReadValid_c = ___11
+  ___26 = genblk1_compReadValid_c & 1
+  ___27 = ___26 != 0
+  ___25 = ___24 != 0
+  mut OUT_readEnable__w2 = OUT_readEnable__w1
+  OUT_readEnable__w2#[2..=2] = ___20
+  mut OUT_readReady__w3 = OUT_readReady__w2
+  OUT_readReady__w3#[3..=3] = 0
+  mut OUT_readAddress__w2 = OUT_readAddress__w1
+  OUT_readAddress__w2#[12..=17] = ___22
+  OUT_readAddress = OUT_readAddress__w2
+  OUT_readEnable = OUT_readEnable__w2
+  OUT_readReady = OUT_readReady__w3
+  ___28 = ___27 and ___25
+  genblk1_compReadIdx_r = genblk1_compReadIdx_c
+  genblk1_i = 0sb?
+  genblk1_i_s1 = 0sb?
+  if ___28 {
+    ___29 = genblk1_compReadIdx_c#[0..=1]
+    ___30 = 1 << ___29
+    ___31 = ~___30
+    ___32 = OUT_readEnable & ___31
+    ___33 = 1 << ___29
+    ___34 = ___32 | ___33
+    ___35 = IN_read#[21..=27]
+    ___37 = genblk1_compReadIdx_c#[0..=1]
+    ___38 = ___37 * 6
+    ___39 = 63 << ___38
+    ___40 = ~___39
+    ___36 = ___35#[1..=6]
+    ___41 = OUT_readAddress & ___40
+    ___42 = ___36 << ___38
+    ___43 = ___41 | ___42
+    OUT_readAddress = ___43
+    OUT_readEnable = ___34
+    OUT_readReady#[3..=3] = 1
+  }
+  ___44 = IN_readData#[0..=31]
+  OUT_readData#[0..=31] = ___44
+  ___45 = IN_readData#[32..=63]
+  mut OUT_readData__w1 = OUT_readData
+  OUT_readData__w1#[32..=63] = ___45
+  ___46 = IN_readData#[64..=95]
+  ___47 = genblk1_compReadIdx_r#[0..=1]
+  ___48 = ___47 * 32
+  ___50 = IN_readData << 32
+  ___49 = ___48 + 32
+  ___51 = ___50 >> ___49
+  mut OUT_readData__w2 = OUT_readData__w1
+  OUT_readData__w2#[64..=95] = ___46
+  ___52 = ___51#[0..=31]
+  mut OUT_readData__w3 = OUT_readData__w2
+  OUT_readData__w3#[96..=127] = ___52
+  OUT_readData = OUT_readData__w3
+  genblk1_i_s2 = 0sb?
+  genblk1_i_s3 = 0sb?
+}

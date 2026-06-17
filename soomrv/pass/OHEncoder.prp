@@ -1,7 +1,7 @@
 pub comb OHEncoder::[lg="OHEncoder", hdl](IN_idxOH:u32) -> (OUT_idx:u5, OUT_valid:u1) {
-  mut genblk1_i
-  mut genblk1_i_s1
-  mut genblk1_j
+  mut genblk1_i = 0
+  mut genblk1_i_s1 = 0
+  mut genblk1_j = 0
   OUT_valid = 0
   ___1 = IN_idxOH & 1
   ___2 = 0 | ___1

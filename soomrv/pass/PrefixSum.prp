@@ -1,6 +1,6 @@
 pub comb PrefixSum::[lg="PrefixSum", hdl](IN_data:u32) -> (OUT_psum:u192) {
-  mut sum
-  mut i
+  mut sum = 0
+  mut i = 0
   ___1 = IN_data & 1
   ___2 = 0 + ___1
   ___3 = ___2#[0..=5]

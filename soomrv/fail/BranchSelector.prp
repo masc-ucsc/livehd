@@ -1,0 +1,89 @@
+pub mod BranchSelector::[lg="BranchSelector", hdl](clk:u1, rst:u1, IN_isUOps:u218, IN_branches:u296, IN_ROB_curSqN:u7, IN_RN_nextSqN:u7, IN_mispredFlush:u1) -> (OUT_branch:u74@[], OUT_PERFC_branchMispr:u1@[]) {
+  reg OUT_PERFC_branchMispr:u1
+  reg OUT_branch:u74
+  reg priorityPort:u1
+  mut _b2i_1 = 0
+  mut compBranches = 0
+  mut branch_c = 0
+  mut OUT_PERFC_branchMispr_c = 0
+  ___1 = IN_isUOps#[109..=217]
+  ___3 = IN_isUOps#[0..=108]
+  ___2 = ___1#[41..=47]
+  ___4 = ___3#[41..=47]
+  ___5 = ___2 - ___4
+  ___6 = ___5#[0..=6]
+  ___7 = ___6#sext[0..=6]
+  ___8 = ___7 > 0
+  if ___8 {
+    _b2i_1 = 1
+  } else {
+    _b2i_1 = 0
+  }
+  priorityPort = _b2i_1
+  ___10 = IN_branches#[74..=147]
+  ___11 = ___10 & 1
+  ___12 = ___11 == 0
+  ___9 = priorityPort != 0
+  ___14 = IN_branches#[0..=73]
+  ___15 = ___14 & 1
+  ___16 = ___15 != 0
+  ___13 = ___12 or ___9
+  ___17 = ___16 and ___13
+  if ___17 {
+    mut intPortBranch = 0
+    ___18 = IN_branches#[0..=73]
+    intPortBranch = ___18
+  } else {
+    ___19 = IN_branches#[74..=147]
+    intPortBranch = ___19
+  }
+  ___20 = IN_branches#[148..=221]
+  ___21 = ___20 << 74
+  ___22 = intPortBranch | ___21
+  mut branch_c__w1 = 0ub??????????????????????????????????????????????????????????????????????????
+  mut branch_c__w2 = branch_c__w1
+  branch_c__w2#[6..=6] = 0
+  mut compBranches__w1 = ___22
+  ___23 = compBranches__w1#[0..=73]
+  ___25 = compBranches__w1#[74..=147]
+  ___24 = ___23#[21..=27]
+  ___26 = ___25#[21..=27]
+  ___27 = ___24 - ___26
+  ___28 = ___27#[0..=6]
+  ___29 = ___28#sext[0..=6]
+  ___31 = compBranches__w1#[74..=147]
+  ___32 = ___31 & 1
+  ___33 = ___32 == 0
+  ___30 = ___29 < 0
+  ___35 = compBranches__w1#[0..=73]
+  ___36 = ___35 & 1
+  ___37 = ___36 != 0
+  ___34 = ___33 or ___30
+  mut branch_c__w3 = branch_c__w2
+  branch_c__w3#[0..=0] = 0
+  OUT_PERFC_branchMispr_c = 0
+  ___38 = ___37 and ___34
+  branch_c = branch_c__w3
+  compBranches = 0ub????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+  if ___38 {
+    ___39 = compBranches__w1#[0..=73]
+    ___40 = IN_mispredFlush == 0
+    branch_c = ___39
+    if ___40 {
+      OUT_PERFC_branchMispr_c = 1
+    }
+  } else {
+    ___41 = compBranches__w1#[74..=147]
+    branch_c = ___41
+  }
+  ___42 = IN_branches#[222..=295]
+  ___43 = ___42 & 1
+  ___44 = ___43 != 0
+  if ___44 {
+    ___45 = IN_branches#[222..=295]
+    OUT_PERFC_branchMispr_c = 0
+    branch_c = ___45
+  }
+  OUT_PERFC_branchMispr = OUT_PERFC_branchMispr_c
+  OUT_branch = branch_c
+}

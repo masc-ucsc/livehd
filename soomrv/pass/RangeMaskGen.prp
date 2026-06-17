@@ -1,31 +1,31 @@
 pub comb RangeMaskGen::[lg="RangeMaskGen", hdl](IN_allOnes:u1, IN_enable:u1, IN_startIdx:u4, IN_endIdx:u4) -> (OUT_range:u16) {
-  mut startIdxOH
-  mut endIdxOH
-  mut startIdxSh
-  mut endIdxSh
-  mut active
-  mut _b2i_1
-  mut _b2i_2
-  mut _mux_3:u1
-  mut i
-  mut doEnd
-  mut doStart
-  mut _b2i_4
-  mut _b2i_5
-  mut _b2i_6
-  mut _b2i_7
-  mut _b2i_8
-  mut _b2i_9
-  mut _b2i_10
-  mut _b2i_11
-  mut _b2i_12
-  mut _b2i_13
-  mut _b2i_14
-  mut _b2i_15
-  mut _b2i_16
-  mut _b2i_17
-  mut _b2i_18
-  mut _b2i_19
+  mut startIdxOH = 0
+  mut endIdxOH = 0
+  mut startIdxSh = 0
+  mut endIdxSh = 0
+  mut active = 0
+  mut _b2i_1 = 0
+  mut _b2i_2 = 0
+  mut _mux_3:u1 = 0
+  mut i = 0
+  mut doEnd = 0
+  mut doStart = 0
+  mut _b2i_4 = 0
+  mut _b2i_5 = 0
+  mut _b2i_6 = 0
+  mut _b2i_7 = 0
+  mut _b2i_8 = 0
+  mut _b2i_9 = 0
+  mut _b2i_10 = 0
+  mut _b2i_11 = 0
+  mut _b2i_12 = 0
+  mut _b2i_13 = 0
+  mut _b2i_14 = 0
+  mut _b2i_15 = 0
+  mut _b2i_16 = 0
+  mut _b2i_17 = 0
+  mut _b2i_18 = 0
+  mut _b2i_19 = 0
   ___1 = 1 << IN_startIdx
   ___2 = ___1#[0..=31]
   ___3 = ___2#sext[0..=31]

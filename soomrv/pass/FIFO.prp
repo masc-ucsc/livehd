@@ -1,24 +1,24 @@
 pub mod FIFO::[lg="FIFO", hdl](clk:u1, rst:u1, IN_valid:u1, IN_data:u32, IN_ready:u1) -> (free:u3@[], OUT_ready:u1@[], OUT_valid:u1@[], OUT_data:u32@[]) {
-  reg outDataReg:u32
-  reg indexIn:u2
   reg outValidReg:u1
+  reg indexIn:u2
+  reg outDataReg:u32
   reg fullCond:u1
   reg mem:[4]u32:[fwd=0]
   reg indexOut:u2
-  mut _b2i_1
-  mut equal
-  mut _b2i_2
-  mut empty
-  mut _b2i_3
-  mut full
-  mut _b2i_4
-  mut outputReady
-  mut _b2i_5
-  mut doExtract
-  mut _b2i_6
-  mut combPassthru
-  mut _b2i_7
-  mut doInsert
+  mut _b2i_1 = 0
+  mut equal = 0
+  mut _b2i_2 = 0
+  mut empty = 0
+  mut _b2i_3 = 0
+  mut full = 0
+  mut _b2i_4 = 0
+  mut outputReady = 0
+  mut _b2i_5 = 0
+  mut doExtract = 0
+  mut _b2i_6 = 0
+  mut combPassthru = 0
+  mut _b2i_7 = 0
+  mut doInsert = 0
   ___1 = indexIn == indexOut
   if ___1 {
     _b2i_1 = 1

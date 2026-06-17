@@ -1,0 +1,135 @@
+pub comb LoadSelector::[lg="LoadSelector", hdl](IN_aguLd:u202, IN_pwLd:u66, IN_ldUOpStall:u2) -> (OUT_aguLdStall:u2, OUT_pwLdStall:u2, OUT_ldUOp:u202) {
+  mut i = 0
+  mut i_s1 = 0
+  ___1 = IN_aguLd#[0..=100]
+  ___2 = ___1 & 1
+  OUT_aguLdStall#[0..=0] = 0
+  OUT_pwLdStall#[0..=0] = 0
+  ___3 = ___2 != 0
+  i = 0sb?
+  if ___3 {
+    ___4 = IN_ldUOpStall & 1
+    ___6 = IN_pwLd#[0..=32]
+    ___7 = ___6 & 1
+    ___8 = ___7 != 0
+    ___5 = ___4 != 0
+    mut _b2i_1 = 0
+    ___9 = ___8 or ___5
+    if ___9 {
+      _b2i_1 = 1
+    } else {
+      _b2i_1 = 0
+    }
+    OUT_aguLdStall#[0..=0] = _b2i_1
+  }
+  ___10 = IN_pwLd#[0..=32]
+  ___11 = ___10 & 1
+  ___12 = ___11 != 0
+  if ___12 {
+    ___13 = IN_ldUOpStall & 1
+    OUT_pwLdStall#[0..=0] = ___13
+  }
+  ___14 = IN_aguLd#[101..=201]
+  ___15 = ___14 & 1
+  mut OUT_aguLdStall__w1 = OUT_aguLdStall
+  OUT_aguLdStall__w1#[1..=1] = 0
+  OUT_aguLdStall = OUT_aguLdStall__w1
+  mut OUT_pwLdStall__w1 = OUT_pwLdStall
+  OUT_pwLdStall__w1#[1..=1] = 0
+  ___16 = ___15 != 0
+  if ___16 {
+    ___17 = IN_ldUOpStall >> 1
+    ___18 = ___17 & 1
+    ___20 = IN_pwLd#[33..=65]
+    ___21 = ___20 & 1
+    ___22 = ___21 != 0
+    ___19 = ___18 != 0
+    mut _b2i_2 = 0
+    ___23 = ___22 or ___19
+    if ___23 {
+      _b2i_2 = 1
+    } else {
+      _b2i_2 = 0
+    }
+    OUT_aguLdStall#[1..=1] = _b2i_2
+  }
+  ___24 = IN_pwLd#[33..=65]
+  ___25 = ___24 & 1
+  OUT_pwLdStall = OUT_pwLdStall__w1
+  ___26 = ___25 != 0
+  if ___26 {
+    ___27 = IN_ldUOpStall >> 1
+    ___28 = ___27 & 1
+    OUT_pwLdStall#[1..=1] = ___28
+  }
+  OUT_ldUOp#[0..=100] = 0ub?????????????????????????????????????????????????????????????????????????????????????????????????????
+  ___29 = IN_aguLd#[0..=100]
+  ___30 = ___29 & 1
+  mut OUT_ldUOp__w1 = OUT_ldUOp
+  OUT_ldUOp__w1#[0..=0] = 0
+  OUT_ldUOp = OUT_ldUOp__w1
+  ___31 = ___30 != 0
+  i_s1 = 0sb?
+  if ___31 {
+    ___32 = IN_aguLd#[0..=100]
+    OUT_ldUOp#[0..=100] = ___32
+  }
+  ___33 = IN_pwLd#[0..=32]
+  ___34 = ___33 & 1
+  ___35 = ___34 != 0
+  if ___35 {
+    OUT_ldUOp#[69..=100] = 0ub????????????????????????????????
+    ___36 = IN_pwLd#[0..=32]
+    OUT_ldUOp#[68..=68] = 0
+    ___37 = ___36#[1..=32]
+    OUT_ldUOp#[36..=67] = ___37
+    OUT_ldUOp#[35..=35] = 0
+    OUT_ldUOp#[33..=34] = 2
+    OUT_ldUOp#[5..=11] = 0
+    OUT_ldUOp#[12..=18] = 64
+    OUT_ldUOp#[19..=25] = 0
+    OUT_ldUOp#[26..=32] = 0
+    OUT_ldUOp#[3..=3] = 1
+    OUT_ldUOp#[4..=4] = 0
+    OUT_ldUOp#[2..=2] = 1
+    ___38 = IN_pwLd#[0..=32]
+    OUT_ldUOp#[1..=1] = 0
+    ___39 = ___38 & 1
+    OUT_ldUOp#[0..=0] = ___39
+  }
+  mut OUT_ldUOp__w2 = OUT_ldUOp
+  OUT_ldUOp__w2#[101..=201] = 0ub?????????????????????????????????????????????????????????????????????????????????????????????????????
+  ___40 = IN_aguLd#[101..=201]
+  ___41 = ___40 & 1
+  mut OUT_ldUOp__w3 = OUT_ldUOp__w2
+  OUT_ldUOp__w3#[101..=101] = 0
+  OUT_ldUOp = OUT_ldUOp__w3
+  ___42 = ___41 != 0
+  if ___42 {
+    ___43 = IN_aguLd#[101..=201]
+    OUT_ldUOp#[101..=201] = ___43
+  }
+  ___44 = IN_pwLd#[33..=65]
+  ___45 = ___44 & 1
+  ___46 = ___45 != 0
+  if ___46 {
+    OUT_ldUOp#[170..=201] = 0ub????????????????????????????????
+    ___47 = IN_pwLd#[33..=65]
+    OUT_ldUOp#[169..=169] = 0
+    ___48 = ___47#[1..=32]
+    OUT_ldUOp#[137..=168] = ___48
+    OUT_ldUOp#[136..=136] = 0
+    OUT_ldUOp#[134..=135] = 2
+    OUT_ldUOp#[106..=112] = 0
+    OUT_ldUOp#[113..=119] = 64
+    OUT_ldUOp#[120..=126] = 0
+    OUT_ldUOp#[127..=133] = 0
+    OUT_ldUOp#[104..=104] = 1
+    OUT_ldUOp#[105..=105] = 0
+    OUT_ldUOp#[103..=103] = 1
+    ___49 = IN_pwLd#[33..=65]
+    OUT_ldUOp#[102..=102] = 0
+    ___50 = ___49 & 1
+    OUT_ldUOp#[101..=101] = ___50
+  }
+}
