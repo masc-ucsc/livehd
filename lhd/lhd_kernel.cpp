@@ -1775,6 +1775,26 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   }
   merge_sets(opts, "upass", up);
 
+  // A user `--set upass.toln=0` keeps each tree's original (post-lnastfmt,
+  // pre-upass-rewrite) body in var.lnasts instead of the rewritten one, so
+  // pass.prp_writer re-emits Pyrope straight from the inou.slang / inou.prp
+  // LNAST. That pyrope emit is the one supported reason to force toln:0 from
+  // the CLI; with no pyrope emit nothing downstream consumes the un-rewritten
+  // tree, so it is a diagnostics/debug or unexpected flow — flag it.
+  bool user_toln_off = false;
+  for (const auto& [key, value] : opts.sets) {
+    if (key == "upass.toln" && (value == "0" || value == "false")) {
+      user_toln_off = true;
+    }
+  }
+  if (user_toln_off && find_slot(opts.emits, "pyrope") == nullptr && find_slot(opts.emit_dirs, "pyrope") == nullptr) {
+    livehd::diag::warn("lhd.elaborate", "toln-debug-flow", "io")
+        .msg("--set upass.toln=0 keeps the original pre-upass LNAST, but no pyrope emit (pass.prp_writer) consumes it")
+        .hint("toln:0 is meant for `--emit-dir pyrope:DIR/` (re-emit source from the inou.slang/inou.prp LNAST); "
+              "without a pyrope emit this is a debugging or unexpected flow")
+        .emit();
+  }
+
   // Iterate until converged. Units may import each other in any
   // order (no topological pre-ordering; liveness needs constprop), so:
   // each round runs pass.upass over everything; a file whose walk hit an

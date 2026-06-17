@@ -107,7 +107,8 @@ void Pass_upass::setup() {
                         "no-ops), the post-walk DCE, the coalescer, and the body swap when nothing downstream consumes "
                         "the LNAST (diagnostics-only runs, e.g. the LSP) — every pass still dispatches, so diagnostics "
                         "and io/bw side-channels are unchanged; forced back on while tolg:1 needs the rewritten tree. "
-                        "Default on.",
+                        "Pair toln:0 with `--emit-dir pyrope:` to re-emit Pyrope from the original pre-upass "
+                        "inou.slang/inou.prp LNAST. Default on.",
                         "true");
   m1.add_label_optional("reset_style",
                         "elaboration flag: sync|async reset wiring for implicit-reset flops (default sync — "
