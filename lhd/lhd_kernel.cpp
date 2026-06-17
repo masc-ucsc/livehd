@@ -390,6 +390,7 @@ constexpr std::pair<std::string_view, std::string_view> kSetPasses[] = {
     {  "pass.liberty",      "pass.liberty"},
     {           "lec",          "pass.lec"},
     {  "pass.semdiff",      "pass.semdiff"},
+    {    "prp_writer",    "pass.prp_writer"},
 };
 
 std::string_view set_pass_method(std::string_view set_name) {
@@ -845,13 +846,10 @@ void emit_pyrope_outputs(Options& opts, Result& res, Eprp_var& var) {
                       "pyrope output needs lnast/pyrope inputs (there is no LGraph -> LNAST decompiler)"};
     }
     ensure_dir(e.path);
-    run_step("pass.prp_writer",
-             var,
-             {
-                 {"odir", e.path}
-    },
-             opts,
-             res);
+    Eprp_var::Eprp_dict labels;
+    labels["odir"] = e.path;
+    merge_sets(opts, "prp_writer", labels);  // e.g. --set prp_writer.debug=true
+    run_step("pass.prp_writer", var, labels, opts, res);
 
     std::vector<std::string> names;
     names.reserve(var.lnasts.size());
@@ -903,13 +901,10 @@ void emit_pyrope_single_file(Options& opts, Result& res, Eprp_var& var) {
   }
   auto scratch = std::format("{}/prp_{:03d}", workdir(opts), ++step_counter);
   ensure_dir(scratch);
-  run_step("pass.prp_writer",
-           var,
-           {
-               {"odir", scratch}
-  },
-           opts,
-           res);
+  Eprp_var::Eprp_dict labels;
+  labels["odir"] = scratch;
+  merge_sets(opts, "prp_writer", labels);  // e.g. --set prp_writer.debug=true
+  run_step("pass.prp_writer", var, labels, opts, res);
   auto          src = std::format("{}/{}.prp", scratch, names.front());
   std::ifstream ifs(src);
   if (!ifs.is_open()) {

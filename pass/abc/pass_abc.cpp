@@ -22,7 +22,7 @@ void Pass_abc::setup() {
   m.add_label_optional("out", "output graph_library directory (the --emit-dir lg: slot)", "");
   m.add_label_optional("library", "Liberty .lib for read_lib (default $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib)", "");
   m.add_label_optional("flow", "ABC command string (empty => built-in comb/seq default)", "");
-  m.add_label_optional("seq", "true|false sequential vs combinational", "false");
+  m.add_label_optional("seq", "true|false sequential vs combinational", "true");
   m.add_label_optional("delay", "{D} substitution in flow", "");
   m.add_label_optional("load", "{L} substitution in flow", "");
   m.add_label_optional("verbose", "per-module ABC stats", "false");
@@ -55,7 +55,7 @@ void Pass_abc::work(Eprp_var& var) {
   auto out     = std::string{var.get("out", "")};
   auto library = std::string{var.get("library", "")};
   auto flow    = std::string{var.get("flow", "")};
-  bool seq     = truthy(var.get("seq", "false"));
+  bool seq     = truthy(var.get("seq", "true"));
   auto delay   = std::string{var.get("delay", "")};
   auto load    = std::string{var.get("load", "")};
   bool verbose = truthy(var.get("verbose", "false"));

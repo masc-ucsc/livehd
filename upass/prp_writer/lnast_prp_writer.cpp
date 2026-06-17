@@ -190,10 +190,12 @@ void Lnast_prp_writer::write_node() {
     case N::Lnast_ntype_func_call   : write_func_call(); break;
     case N::Lnast_ntype_func_def    : write_func_def(); break;
     case N::Lnast_ntype_tuple_add   : write_tuple_add(); break;
+    case N::Lnast_ntype_tuple_concat: write_tuple_concat(); break;
     case N::Lnast_ntype_attr_set    : write_attr_set(); break;
     case N::Lnast_ntype_delay_assign: write_delay_assign(); break;
     case N::Lnast_ntype_set_mask    : write_set_mask(); break;
     case N::Lnast_ntype_range       : write_range(); break;
+    case N::Lnast_ntype_type_spec   : write_type_spec(); break;
     // All value-producing ops share one statement wrapper; render_def_rhs()
     // spells the per-op RHS and inlines any single-use temp operands.
     case N::Lnast_ntype_plus        :
@@ -221,11 +223,23 @@ void Lnast_prp_writer::write_node() {
     case N::Lnast_ntype_tuple_get   :
     case N::Lnast_ntype_attr_get    : write_value_stmt(); break;
     default                         : {
-      // Unknown node — emit a comment so the output stays parseable.
-      println(std::format("/* TODO: unhandled node type {} */", static_cast<int>(current_ntype())));
+      // Unknown node — record it (the pass fails the compile unless debug) and
+      // emit a comment so the output stays parseable.
+      emit_unimplemented(std::format("unhandled node type {} ({})",
+                                     static_cast<int>(current_ntype()),
+                                     Lnast_ntype::to_sv(current_ntype())));
       break;
     }
   }
+}
+
+// Record an unimplemented construct and emit the parseable marker inline at the
+// cursor.  pass.prp_writer reads has_unimplemented() and, unless debug mode is
+// on, turns it into a fatal diagnostic so the compile does not silently pass
+// with a /* TODO */ stub in the generated Pyrope.
+void Lnast_prp_writer::emit_unimplemented(std::string_view what) {
+  unimplemented_.emplace_back(what);
+  print(std::format("/* TODO: {} */", what));
 }
 
 // ── Structural ────────────────────────────────────────────────────────────────
@@ -290,8 +304,8 @@ void Lnast_prp_writer::write_module() {
       cur = stmts_nid;
       if (move_to_child()) {  // push stmts, cur -> first statement
         do {
-          if (is_folded_node(cur)) {
-            continue;  // a temp def inlined at its single use
+          if (is_folded_node(cur) || emits_nothing_stmt(cur)) {
+            continue;  // a temp def inlined at its single use, or a folded type_spec/stage decl
           }
           const bool is_decl = current_ntype() == Lnast_ntype::Lnast_ntype_declare;
           if (is_decl != (pass == 0)) {
@@ -334,6 +348,11 @@ void Lnast_prp_writer::emit_module_header(Lnast_nid io_nid, bool is_mod) {
         }
         auto init_nid = lnast->get_sibling_next(name_nid);  // const(init|nil)
         auto type_nid = init_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(init_nid);
+        // The optional trailing `stages` child rides after the (optional) type;
+        // do not mistake it for the type slot.
+        if (!type_nid.is_invalid() && Lnast_ntype::is_stages(lnast->get_type(type_nid))) {
+          type_nid = Lnast_nid{};
+        }
         if (!first) {
           print(", ");
         }
@@ -347,12 +366,14 @@ void Lnast_prp_writer::emit_module_header(Lnast_nid io_nid, bool is_mod) {
             print(t);
           }
         }
-        // Every `mod` output must carry a landing-cycle annotation.  The slang
-        // reader leaves the stages node nil/nil (no explicit pipe depth), so
-        // opt out of the cycle check with `@[]` — it does not change lowering,
-        // only skips the interface-latency assertion.
+        // Every `mod` output carries a landing-cycle annotation.  A pipe output
+        // (`out:T@[N]`) keeps its declared depth via the trailing stages node;
+        // a plain output (slang regs, comb-depth outputs) opts out of the
+        // interface-latency assertion with `@[]` (inert — it does not change
+        // lowering).
         if (is_mod && is_output) {
-          print("@[]");
+          auto st = find_stages_child(port);
+          print(std::format("@[{}]", st.is_invalid() ? std::string{} : format_stages(st)));
         }
         first = false;
       }
@@ -500,8 +521,8 @@ void Lnast_prp_writer::write_stmts() {
   }
   if (move_to_child()) {
     do {
-      if (is_folded_node(cur)) {
-        continue;  // a temp def inlined at its single use — emit nothing
+      if (is_folded_node(cur) || emits_nothing_stmt(cur)) {
+        continue;  // a temp def inlined at its single use, or a folded type_spec/stage decl
       }
       print_indent();
       write_node();
@@ -585,6 +606,19 @@ void Lnast_prp_writer::write_if() {
 // write) is what keeps value-less declares — bare `var x:u8`, fully-folded
 // `const z` — present so later reads still resolve.
 void Lnast_prp_writer::write_declare() {
+  // A declare carrying a trailing `stages` node is the `stage[N] x = v`
+  // lowering (upass/pipe inserts `declare(x, type, reg, stages(min,max))` with
+  // no value child).  Record the depth and suppress the bare declare — the
+  // following store to `x` re-attaches it as `stage[N] x = v`.  Without this
+  // the stages node was mis-read as the init value (`reg out = 3`) and the
+  // pipeline depth was lost.
+  if (auto st = find_stages_child(cur); !st.is_invalid()) {
+    auto        var_nid = lnast->get_child(cur);
+    std::string lhs     = var_nid.is_invalid() ? std::string{} : std::string(strip_prefix(lnast->get_name(var_nid)));
+    stage_decls_[lhs]   = format_stages(st);
+    declared_.insert(lhs);
+    return;
+  }
   if (!move_to_child()) {
     return;
   }
@@ -885,8 +919,37 @@ void Lnast_prp_writer::write_store() {
     }
     cur = first;  // restore for the normal path
   }
-  print(decl_prefix(lhs));
+  // A store to a stage-declared variable re-attaches the pipeline depth that the
+  // suppressed `declare` carried: `stage[N] x = v`.  Only the first store
+  // declares the stage (later writes are plain assignments).
+  if (auto sit = stage_decls_.find(lhs); sit != stage_decls_.end()) {
+    print(std::format("stage[{}] ", sit->second));
+    stage_decls_.erase(sit);
+    print(lhs);
+    while (move_to_sibling() && !is_last_child()) {
+      print("[");
+      print(render_value(cur, /*operand_ctx=*/false));
+      print("]");
+    }
+    print(" = ");
+    print(render_value(cur, /*operand_ctx=*/false));
+    move_to_parent();
+    return;
+  }
+  // A scalar store (value is the lone RHS child, no index levels) that makes the
+  // first declaration of `lhs` carries any `type_spec`-recorded type onto the
+  // declaration: `mut x:T = v`.
+  auto       val_nid = lnast->get_sibling_next(first);
+  const bool scalar  = !val_nid.is_invalid() && lnast->is_last_child(val_nid);
+  std::string prefix = decl_prefix(lhs);
+  print(prefix);
   print(lhs);
+  if (scalar && !prefix.empty()) {
+    if (auto tit = type_specs_.find(lhs); tit != type_specs_.end() && !tit->second.empty()) {
+      print(":");
+      print(tit->second);
+    }
+  }
   while (move_to_sibling() && !is_last_child()) {
     print("[");
     print(render_value(cur, /*operand_ctx=*/false));
@@ -999,8 +1062,9 @@ void Lnast_prp_writer::write_func_call() {
 // ── func_def ──────────────────────────────────────────────────────────────────
 
 void Lnast_prp_writer::write_func_def() {
-  // Slice 4 not yet implemented — emit a TODO comment block.
-  print("/* TODO: func_def — Slice 4 not yet implemented */");
+  // Nested-lambda emission is not implemented; record it so the compile fails
+  // (unless debug mode) rather than silently producing a TODO stub.
+  emit_unimplemented("func_def — nested lambda emission not implemented");
 }
 
 // ── Tuples ────────────────────────────────────────────────────────────────────
@@ -1026,6 +1090,29 @@ void Lnast_prp_writer::write_tuple_add() {
     } else {
       print(render_value(cur, /*operand_ctx=*/false));
     }
+    first = false;
+  }
+  print(")");
+  move_to_parent();
+}
+
+void Lnast_prp_writer::write_tuple_concat() {
+  if (!move_to_child()) {
+    return;
+  }
+  auto lhs = strip_prefix(current_text());  // dst
+  print(decl_prefix(lhs));
+  print(lhs);
+  print(" = (");
+  // Each remaining child is a source tuple, splatted via the spread operator
+  // so the concatenation flattens into one literal (`(...a, ...b)`).
+  bool first = true;
+  while (move_to_sibling()) {
+    if (!first) {
+      print(", ");
+    }
+    print("...");
+    print(render_value(cur, /*operand_ctx=*/false));
     first = false;
   }
   print(")");
@@ -1264,6 +1351,7 @@ bool Lnast_prp_writer::defines_child0(Lnast_ntype::Lnast_ntype_int t) {
     case N::Lnast_ntype_delay_assign:
     case N::Lnast_ntype_range:
     case N::Lnast_ntype_tuple_add:
+    case N::Lnast_ntype_tuple_concat:
     case N::Lnast_ntype_tuple_get:
     case N::Lnast_ntype_attr_set:
     case N::Lnast_ntype_attr_get:
@@ -1316,6 +1404,29 @@ void Lnast_prp_writer::scan_node(Lnast_nid nid, int& index) {
   const auto t        = lnast->get_type(nid);
   const bool def0     = defines_child0(t);
 
+  // Record a `type_spec(ref(var), type)` so the variable's first declaration can
+  // fold the type in (`mut x:T = v`); the standalone statement emits nothing.
+  if (t == Lnast_ntype::Lnast_ntype_type_spec) {
+    auto var_nid = lnast->get_child(nid);
+    if (!var_nid.is_invalid()) {
+      auto type_nid = lnast->get_sibling_next(var_nid);
+      if (!type_nid.is_invalid()) {
+        type_specs_[std::string(strip_prefix(lnast->get_name(var_nid)))] = render_type_at(type_nid);
+      }
+    }
+  }
+  // Record a stage declare (`declare(var, type, reg, stages(min,max))`, the
+  // `stage[N] x = v` lowering) so the following store re-attaches the depth as
+  // `stage[N] x = v`; the bare declare itself emits nothing (skipped below).
+  if (t == Lnast_ntype::Lnast_ntype_declare) {
+    if (auto st = find_stages_child(nid); !st.is_invalid()) {
+      auto var_nid = lnast->get_child(nid);
+      if (!var_nid.is_invalid()) {
+        stage_decls_[std::string(strip_prefix(lnast->get_name(var_nid)))] = format_stages(st);
+      }
+    }
+  }
+
   int pos = 0;
   for (auto c = lnast->get_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c), ++pos) {
     if (lnast->get_type(c) == Lnast_ntype::Lnast_ntype_ref) {
@@ -1348,6 +1459,8 @@ void Lnast_prp_writer::analyze_folding() {
   folded_node_.clear();
   range_lohi_.clear();
   get_mask_nodes_.clear();
+  type_specs_.clear();
+  stage_decls_.clear();
 
   int index = 0;
   scan_node(lnast->get_root(), index);
@@ -1555,4 +1668,57 @@ void Lnast_prp_writer::write_range() {
   print(lhs);
   print(" = ");
   print(render_def_rhs(cur, /*operand_ctx=*/false));
+}
+
+// ── type_spec ───────────────────────────────────────────────────────────────
+// `type_spec(ref(var), type)` is a bare type assertion the runner emits for an
+// inlined-call temp.  scan_node pre-records the type in type_specs_, and the
+// variable's first declaration (write_store) folds it in as `mut x:T = v`, so
+// the standalone statement emits nothing here.  The annotation is inert (a
+// type check) — when no declaring write consumes it, dropping it is sound: the
+// recompile re-infers the same type.
+void Lnast_prp_writer::write_type_spec() {}
+
+// ── Pipeline stage annotations ──────────────────────────────────────────────
+
+Lnast_nid Lnast_prp_writer::find_stages_child(Lnast_nid nid) const {
+  for (auto c = lnast->get_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    if (Lnast_ntype::is_stages(lnast->get_type(c))) {
+      return c;
+    }
+  }
+  return {};
+}
+
+bool Lnast_prp_writer::emits_nothing_stmt(Lnast_nid nid) const {
+  auto t = lnast->get_type(nid);
+  if (t == Lnast_ntype::Lnast_ntype_type_spec) {
+    return true;  // folded into a declaration
+  }
+  if (t == Lnast_ntype::Lnast_ntype_declare && !find_stages_child(nid).is_invalid()) {
+    return true;  // stage declare — re-attached to its store as `stage[N] x = v`
+  }
+  return false;
+}
+
+std::string Lnast_prp_writer::format_stages(Lnast_nid stages_nid) const {
+  auto lo = lnast->get_child(stages_nid);
+  if (lo.is_invalid()) {
+    return {};
+  }
+  auto        hi  = lnast->get_sibling_next(lo);
+  std::string los(lnast->get_name(lo));
+  std::string his = hi.is_invalid() ? los : std::string(lnast->get_name(hi));
+  // The slang reader stamps a `stages(nil,nil)` on every output port (no
+  // explicit pipe depth); emit it as the opt-out `@[]`, not `@[nil]`.
+  if (los.empty() || los == "nil") {
+    return {};
+  }
+  if (los == his) {
+    return los;  // pipe[N] / @[N]
+  }
+  if (his == "0") {
+    return {};  // bare-pipe (min,0) sentinel: max unconstrained -> @[]
+  }
+  return los + "..=" + his;  // pipe[A..=B] / @[A..=B]
 }

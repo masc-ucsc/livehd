@@ -196,3 +196,39 @@ sh_test(
     )
     for v_file in glob(["tests/equiv/*.v"])
 ]
+
+# prp->prp round-trip: a Pyrope source re-emitted through pass.prp_writer must
+# recompile and LEC against its golden .v (the FORWARD companion of prp-v2prp).
+# This locks in the constructs the writer fully supports — the pipeline
+# (`stage[N]` / `@[N]`), `type_spec`, `tuple_concat`.  Curated allow-list: the
+# prp->prp writer path is still maturing (many equiv pairs emit clean Pyrope
+# that is not yet logically equivalent, and a handful hit unimplemented nodes
+# the safety net now hard-fails — both tracked in todo/livehd/2w-prp_writer).
+# Add a name here once its prp->prp round-trip LEC-passes.
+[
+    sh_test(
+        name = "prp-p2p-%s" % base,
+        srcs = ["tests/p2p_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:tests/equiv/%s.prp)" % base,
+        ],
+        data = [
+            "//inou/prp:tests/p2p_test.py",
+            "//inou/prp:tests/equiv/%s.prp" % base,
+            "//inou/prp:tests/equiv/%s.v" % base,
+            "//lhd",
+        ],
+        deps = ["//inou/yosys:scripts"],
+    )
+    for base in [
+        "mod_call_pipe",       # pipe inlined into a mod: stage[N] + @[N]
+        "pipe1_pass",          # bare pipe passthrough
+        "pipe2_two_out",       # multi-output pipe
+        "pipe3_mul",           # multi-stage arithmetic pipe
+        "pipe_range",          # pipe[A..=B] range depth
+        "pipe_state_acc",      # pipe with feedback state
+        "mod_delay3",          # @[N] landing-cycle on a mod output
+        "reg_out_feedforward",  # feedforward reg output
+    ]
+]

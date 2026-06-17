@@ -34,10 +34,25 @@ public:
   explicit Lnast_prp_writer(std::ostream& os, std::shared_ptr<Lnast> lnast);
   void write_all();
 
+  // Debug mode (pass option `prp_writer.debug=true`): when false (default) an
+  // unimplemented construct is recorded so the pass turns it into a fatal
+  // diagnostic (the compile must NOT silently succeed on a TODO-laden output);
+  // when true only a `/* TODO */` comment is emitted so a developer can inspect
+  // the partial output.  Either way the marker is written, the difference is
+  // whether the surrounding compile is allowed to pass.
+  void set_debug(bool d) { debug_ = d; }
+  // True if write_all() emitted any /* TODO */ for an unimplemented construct.
+  bool                            has_unimplemented() const { return !unimplemented_.empty(); }
+  const std::vector<std::string>& unimplemented() const { return unimplemented_; }
+
 private:
   std::ostream&          os;
   std::shared_ptr<Lnast> lnast;
   int                    depth{0};
+  bool                   debug_{false};
+  // Human-readable descriptions of every unimplemented construct hit (one per
+  // emitted /* TODO */); pass.prp_writer reads this to fail the compile.
+  std::vector<std::string> unimplemented_;
 
   std::stack<Lnast_nid> nid_stack;
   Lnast_nid             cur;
@@ -58,6 +73,10 @@ private:
   // ── Main dispatch ────────────────────────────────────────────────────────
   void write_node();
 
+  // Record an unimplemented construct in unimplemented_ and emit the parseable
+  // `/* TODO: <what> */` marker inline at the cursor.
+  void emit_unimplemented(std::string_view what);
+
   // ── Node writers ─────────────────────────────────────────────────────────
   void write_top();
   void write_module();  // slang-origin: io node + body -> comb|mod NAME(...) -> (...) { … }
@@ -71,6 +90,9 @@ private:
   void write_func_call();
   void write_func_def();
   void write_tuple_add();
+  // tuple_concat( dst, src0, src1, … ) -> `dst = (...src0, ...src1, …)` (spread
+  // concatenation): each source tuple is splatted into one combined literal.
+  void write_tuple_concat();
   // Renders a tuple_add node in EXPRESSION position (no LHS child) as a Pyrope
   // tuple literal `(v0, v1, …)` — used for a memory declare's initializer.
   void write_tuple_literal();
@@ -88,6 +110,30 @@ private:
   void write_range();
   // set_mask — emit a `dst#[lo..=hi] = ins` bit-range LHS assign (RMW)
   void write_set_mask();
+  // type_spec( ref(var), type ) is a bare type assertion the runner emits for
+  // inlined-call temps.  Its type is folded into the variable's first
+  // declaration (write_store), so the standalone statement emits nothing.
+  void write_type_spec();
+
+  // ── Pipeline (stage[N] / @[N]) ───────────────────────────────────────────
+  // Format a stages(min,max) node into a Pyrope cycle-annotation body: "N"
+  // when min==max, "A..=B" otherwise, "" for the unconstrained bare-pipe (1,0)
+  // sentinel (renders as `@[]`).  Cursor-independent.
+  std::string format_stages(Lnast_nid stages_nid) const;
+  // The first `stages` child of a node (io-port store / pipe declare), or an
+  // invalid nid when there is none.
+  Lnast_nid   find_stages_child(Lnast_nid nid) const;
+  // A statement that write_node() renders to nothing — a `type_spec` (folded
+  // into a declaration) or a stage `declare` (re-attached to its store as
+  // `stage[N] x = v`).  Skipped by the body emit loops so no blank line is left.
+  bool        emits_nothing_stmt(Lnast_nid nid) const;
+  // Per-variable pipeline depth recorded by a `reg` declare carrying a trailing
+  // stages node (the `stage[N] x = v` lowering): the next store to the var
+  // emits `stage[<depth>] x = v`; the bare declare itself is suppressed.
+  std::unordered_map<std::string, std::string> stage_decls_;
+  // Per-variable type recorded by a `type_spec` statement, folded into the
+  // variable's first declaration (`mut x:T = v`).
+  std::unordered_map<std::string, std::string> type_specs_;
 
   // Serialises a type node (cursor must sit on the type child) into a Pyrope
   // type suffix without moving the cursor: "" for prim_type_none, "bool",

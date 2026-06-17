@@ -78,7 +78,7 @@ TEST(abc_arith, add_all_architectures) {
     std::vector<uint64_t> samples = {0, 1, 2, 3, mask, mask / 2, mask / 3, mask - 1};
     for (uint64_t a : samples) {
       for (uint64_t b : samples) {
-        uint64_t A = a & mask;
+        uint64_t A  = a & mask;
         uint64_t B_ = b & mask;
         for (auto k : kKinds) {
           for (int bs : kBlocks) {
@@ -87,8 +87,8 @@ TEST(abc_arith, add_all_architectures) {
               uint64_t full     = A + B_ + static_cast<uint64_t>(cin);
               uint64_t exp_sum  = full & mask;
               B        exp_cout = static_cast<B>((full >> w) & 1U);
-              EXPECT_EQ(from_bits(r.sum), exp_sum) << "w=" << w << " A=" << A << " B=" << B_ << " cin=" << cin
-                                                   << " kind=" << static_cast<int>(k) << " bs=" << bs;
+              EXPECT_EQ(from_bits(r.sum), exp_sum)
+                  << "w=" << w << " A=" << A << " B=" << B_ << " cin=" << cin << " kind=" << static_cast<int>(k) << " bs=" << bs;
               EXPECT_EQ(r.carry_out, exp_cout) << "w=" << w << " A=" << A << " B=" << B_ << " cin=" << cin;
             }
           }
@@ -161,12 +161,38 @@ TEST(abc_arith, compare_signed) {
   }
 }
 
+TEST(abc_arith, shift_left) {
+  ByteOps ops;
+  for (int aw : {1, 3, 4, 8}) {
+    uint64_t amask = (uint64_t{1} << aw) - 1;
+    for (int amt_w : {1, 2, 3, 4}) {
+      // out_w sweeps: narrower than the value (truncating), and wide enough to
+      // hold the full shift (the real bitwidth-resolved result width).
+      for (int out_w : {aw, aw + 1, aw + ((1 << amt_w) - 1)}) {
+        if (out_w <= 0 || out_w > 30) {
+          continue;
+        }
+        uint64_t omask = (uint64_t{1} << out_w) - 1;
+        for (uint64_t a = 0; a <= amask; ++a) {
+          for (uint64_t amt = 0; amt < (uint64_t{1} << amt_w); ++amt) {
+            auto     r   = build_shl(ops, to_bits(a, aw), to_bits(amt, amt_w), out_w);
+            uint64_t exp = (amt >= 64 ? uint64_t{0} : (a << amt)) & omask;
+            EXPECT_EQ(from_bits(r), exp) << "aw=" << aw << " a=" << a << " amt=" << amt << " amt_w=" << amt_w << " out_w=" << out_w;
+          }
+        }
+      }
+    }
+  }
+  // No amount bits at all == identity (matches the LEC's no-amount SHL path).
+  EXPECT_EQ(from_bits(build_shl<B>(ops, to_bits(0x5A, 8), {}, 8)), 0x5Au);
+}
+
 TEST(abc_arith, eq_nary) {
   ByteOps ops;
   EXPECT_NE(build_eq<B>(ops, {}), 0);                              // 0 operands -> true
   EXPECT_NE(build_eq<B>(ops, {to_bits(5, 8)}), 0);                 // 1 operand -> true
   EXPECT_NE(build_eq<B>(ops, {to_bits(5, 8), to_bits(5, 8)}), 0);  // equal pair
   EXPECT_EQ(build_eq<B>(ops, {to_bits(5, 8), to_bits(6, 8)}), 0);
-  EXPECT_NE(build_eq<B>(ops, {to_bits(7, 8), to_bits(7, 8), to_bits(7, 8)}), 0);   // n-ary all equal
-  EXPECT_EQ(build_eq<B>(ops, {to_bits(7, 8), to_bits(7, 8), to_bits(8, 8)}), 0);   // one differs
+  EXPECT_NE(build_eq<B>(ops, {to_bits(7, 8), to_bits(7, 8), to_bits(7, 8)}), 0);  // n-ary all equal
+  EXPECT_EQ(build_eq<B>(ops, {to_bits(7, 8), to_bits(7, 8), to_bits(8, 8)}), 0);  // one differs
 }

@@ -14,6 +14,9 @@ static Pass_plugin sample("pass_prp_writer", Pass_prp_writer::setup);
 void Pass_prp_writer::setup() {
   Eprp_method m1("pass.prp_writer", "emit LNAST as Pyrope 3.0 source files", &Pass_prp_writer::work);
   m1.add_label_optional("odir", "output directory for .prp files", ".");
+  m1.add_label_optional("debug",
+                        "emit /* TODO */ for unimplemented constructs instead of failing the compile",
+                        "false");
   register_pass(m1);
 }
 
@@ -33,6 +36,13 @@ void Pass_prp_writer::work(Eprp_var& var) {
     out_dir = ".";
   }
 
+  // `prp_writer.debug=true` downgrades an unimplemented construct from a hard
+  // error to a `/* TODO */` comment in the output (for inspecting the partial
+  // emission).  Default false: any unimplemented construct fails the compile so
+  // it cannot silently succeed with a non-reparsable / lossy stub.
+  auto debug_opt = std::string(var.get("debug", "false"));
+  bool debug_on  = debug_opt == "true" || debug_opt == "1";
+
   if (!p.setup_directory(out_dir)) {
     livehd::diag::err("pass.prp_writer", "write-failed", "io").msg("could not create output directory: {}", out_dir).fatal();
     return;
@@ -49,6 +59,21 @@ void Pass_prp_writer::work(Eprp_var& var) {
     }
 
     Lnast_prp_writer writer(out, ln);
+    writer.set_debug(debug_on);
     writer.write_all();
+    out.close();
+
+    if (!debug_on && writer.has_unimplemented()) {
+      std::string feats;
+      for (const auto& f : writer.unimplemented()) {
+        feats += feats.empty() ? "" : "; ";
+        feats += f;
+      }
+      livehd::diag::err("pass.prp_writer", "unimplemented", "unsupported")
+          .msg("cannot emit Pyrope for '{}': unimplemented construct(s): {}", module_name, feats)
+          .hint("the .prp was written with /* TODO */ markers; pass --set prp_writer.debug=true to keep the partial "
+                "output and let the compile pass")
+          .emit();
+    }
   }
 }

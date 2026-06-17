@@ -107,9 +107,9 @@ inline Add_result<Bit> cska_add(Ops& ops, const std::vector<Bit>& a, const std::
   r.sum.resize(w);
   Bit block_cin = cin;
   for (int base = 0; base < w; base += block_size) {
-    int hi    = std::min(base + block_size, w);
-    Bit carry = block_cin;
-    Bit pall{};  // value-init: inner loop always runs (hi>base), so this is overwritten before use; silences -Wmaybe-uninitialized
+    int  hi    = std::min(base + block_size, w);
+    Bit  carry = block_cin;
+    Bit  pall{};  // value-init: inner loop always runs (hi>base), so this is overwritten before use; silences -Wmaybe-uninitialized
     bool first = true;
     for (int i = base; i < hi; ++i) {
       Bit p = ops.xor_(a[i], b[i]);
@@ -154,8 +154,8 @@ inline Add_result<Bit> cla_add(Ops& ops, const std::vector<Bit>& a, const std::v
     for (int k = 0; k < n; ++k) {
       r.sum[base + k] = ops.xor_(p[k], carry);
       // c_{k+1} = g_k | (p_k & g_{k-1}) | ... | (p_k..p_1 & g_0) | (p_k..p_0 & block_cin)
-      Bit acc   = g[k];
-      Bit prodp = p[k];
+      Bit acc         = g[k];
+      Bit prodp       = p[k];
       for (int j = k - 1; j >= 0; --j) {
         acc   = ops.or_(acc, ops.and_(prodp, g[j]));
         prodp = ops.and_(prodp, p[j]);
@@ -171,12 +171,12 @@ inline Add_result<Bit> cla_add(Ops& ops, const std::vector<Bit>& a, const std::v
 // Dispatch on the selected architecture. `a`, `b` equal length; `cin` the
 // incoming carry (one() for the +1 of a two's-complement subtract).
 template <class Bit, class Ops>
-inline Add_result<Bit> build_add(Adder_kind kind, int block_size, Ops& ops, const std::vector<Bit>& a,
-                                 const std::vector<Bit>& b, Bit cin) {
+inline Add_result<Bit> build_add(Adder_kind kind, int block_size, Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& b,
+                                 Bit cin) {
   switch (kind) {
     case Adder_kind::cska: return cska_add(ops, a, b, cin, block_size);
-    case Adder_kind::cla: return cla_add(ops, a, b, cin, block_size);
-    case Adder_kind::rca: break;
+    case Adder_kind::cla : return cla_add(ops, a, b, cin, block_size);
+    case Adder_kind::rca : break;
   }
   return rca_add(ops, a, b, cin);
 }
@@ -194,6 +194,41 @@ inline Bit build_lt(Adder_kind kind, int block_size, Ops& ops, const std::vector
     return ops.inv(diff.carry_out);
   }
   return diff.sum[a.size() - 1];
+}
+
+// Logical left shift `a << amount`, result truncated to `out_w` bits (out_w is
+// the bitwidth-resolved result width, already grown to hold the shift — the
+// cvc5 LEC encodes SHL the same way: fit `a` to W, BITVECTOR_SHL at W). `a` is
+// LSB-first; `amount` is the LSB-first shift-count bit vector, read UNSIGNED (a
+// shift count is a bit position; the negative-shift diagnostic lives in
+// upass.bitwidth, so any amount reaching here is non-negative). Built as a
+// barrel / log-shifter: one 2:1-mux level per amount bit k conditionally shifts
+// the running data by 2^k. A shift of 2^k >= out_w pushes the value entirely
+// out of the truncated result (=> 0), so high amount bits correctly force a 0
+// result. Needs only zero/inv/and_/or_ from Ops (mux built inline). A constant
+// amount works too (the muxes fold), but abc_map wires constants directly.
+template <class Bit, class Ops>
+inline std::vector<Bit> build_shl(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& amount, int out_w) {
+  std::vector<Bit> data(out_w);
+  int              aw = static_cast<int>(a.size());
+  for (int i = 0; i < out_w; ++i) {
+    data[i] = i < aw ? a[i] : ops.zero();  // a, zero-extended to the result width
+  }
+  int nb = static_cast<int>(amount.size());
+  for (int k = 0; k < nb; ++k) {
+    // sh = 2^k, capped to out_w (any shift >= out_w shifts everything out). The
+    // k >= 31 guard keeps 1<<k from overflowing int before the >= out_w compare.
+    int              sh   = (k >= 31 || (int64_t{1} << k) >= out_w) ? out_w : static_cast<int>(int64_t{1} << k);
+    Bit              sel  = amount[k];
+    Bit              nsel = ops.inv(sel);
+    std::vector<Bit> next(out_w);
+    for (int i = 0; i < out_w; ++i) {
+      Bit shifted = (i - sh) >= 0 ? data[i - sh] : ops.zero();                 // i-sh < out_w always (sh >= 1)
+      next[i]     = ops.or_(ops.and_(sel, shifted), ops.and_(nsel, data[i]));  // sel ? shifted : data
+    }
+    data = std::move(next);
+  }
+  return data;
 }
 
 // All operands equal the first, bitwise (n-ary ==). Operands equal length.

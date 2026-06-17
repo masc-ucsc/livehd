@@ -29,8 +29,11 @@ Per region (`Region_body` from the partition seam):
    (`ABC_NTK_NETLIST`/`ABC_FUNC_AIG`). Multi-bit module IO becomes per-bit ABC
    PIs/POs (the bit-blast boundary). Supported cells: `and/or/xor/not`,
    `mux/hotmux`, `get_mask/set_mask/sext` (constant mask/position), `sum` +
-   `lt/gt/eq` (via the selectable adder library, 2i-abc_arith), and constants.
-   Still `unsupported-cell`: `mult/div/mod` and variable shifts.
+   `lt/gt/eq` (via the selectable adder library, 2i-abc_arith), `shl` (a
+   constant amount becomes pure bit re-wiring, a runtime amount a combinational
+   barrel/log shifter; multi-driver one-hot amounts are ORed, matching the LEC),
+   and constants. Still `unsupported-cell`: `mult/div/mod` and `sra` (right
+   shift).
 2. **flow** — `Abc_NtkToLogic` → run `pass.abc.flow` (comb default
    `strash; &get -n; &fraig -x; &put; &get -n; &dch -f; &nf {D}; &put`; seq
    default adds `dretime`) against the `read_lib` Liberty → `Abc_NtkToNetlist`.
@@ -75,7 +78,7 @@ The option namespace matches the command path (`lhd pass abc`); after the
 |------|---------|---------|
 | `library` | Liberty `.lib` for `read_lib` | `$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib` |
 | `flow` | ABC command string (`{D}`/`{L}` substituted) | built-in comb/seq default |
-| `seq` | sequential mapping (flops→latches, memories/Subs blackboxed) | `false` |
+| `seq` | sequential mapping (flops→latches, memories/Subs blackboxed) — a superset that also maps purely combinational regions (no flops ⇒ `dretime` is a no-op), so it is the default | `true` |
 | `adder` | comb adder architecture for `sum`/cmp: `rca`/`cska`/`cla` | `rca` |
 | `block_size` | CSKA/CLA block width (`0` = auto) | `0` |
 | `delay` / `load` | `{D}` / `{L}` substitution | empty |
@@ -101,5 +104,7 @@ selectable `sum`/comparator bit-blast (`//lhd/tests:lhd_abc_arith_test`).
 Sequential mapping (`seq=true`) — flops↔latches with name preservation +
 single-root remap, and memory/`Sub` blackbox boundaries — is complete and
 LEC-verified (`//lhd/tests:lhd_abc_seq_test`: flops, memory, and a 3-level
-hierarchy). Not yet implemented: `mult/div/mod` + variable-shift bit-blast, and
-per-region `flow` overrides. See `todo/livehd/2a-abc.html`.
+hierarchy) and is the default (`seq=true`). The `shl` bit-blast (constant +
+runtime barrel shifter) is LEC-verified by the arith fixture's `shc`/`shv`
+outputs. Not yet implemented: `mult/div/mod` + `sra` (right-shift) bit-blast,
+and per-region `flow` overrides. See `todo/livehd/2a-abc.html`.
