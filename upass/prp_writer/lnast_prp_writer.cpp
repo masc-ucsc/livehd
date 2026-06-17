@@ -100,7 +100,33 @@ std::string Lnast_prp_writer::decl_prefix(std::string_view lhs) {
   return "mut ";
 }
 
-std::string_view Lnast_prp_writer::strip_prefix(std::string_view name) { return name; }
+std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
+  // Move the source's SSA-version names out of the recompile's PRIVATE `___ssa_`
+  // namespace.  The reader hands the writer POST-SSA LNAST whose versioned names
+  // (`active___ssa_1`) collide with the names the recompile's own SSA pass mints
+  // when it re-versions `active` (`active___ssa_1` again) — yielding a self-assign
+  // (`active___ssa_1 = active___ssa_1`, the "irrelevant assignment" error) or
+  // dropped writes.  Rename `<base>___ssa_<N>` -> `<base>__w<N>`: still DISTINCT
+  // per version (so a module that keeps two live versions, e.g. a FIFO, stays
+  // correct) but outside the `___ssa_` namespace, so the recompile re-versions it
+  // freely without collision.
+  auto pos = name.rfind("___ssa_");
+  if (pos == std::string_view::npos) {
+    return std::string(name);
+  }
+  for (size_t i = pos + 7; i < name.size(); ++i) {
+    if (name[i] < '0' || name[i] > '9') {
+      return std::string(name);  // not a pure-digit suffix — leave intact
+    }
+  }
+  if (pos + 7 >= name.size()) {
+    return std::string(name);  // bare `___ssa_` with no version — leave intact
+  }
+  std::string out(name.substr(0, pos));
+  out += "__w";
+  out += name.substr(pos + 7);
+  return out;
+}
 
 // ── Main dispatch ─────────────────────────────────────────────────────────────
 
@@ -132,6 +158,7 @@ void Lnast_prp_writer::write_node() {
     case N::Lnast_ntype_sra         : write_infix(">>"); break;
     case N::Lnast_ntype_sext        : write_sext(); break;
     case N::Lnast_ntype_get_mask    : write_get_mask(); break;
+    case N::Lnast_ntype_set_mask    : write_set_mask(); break;
     case N::Lnast_ntype_eq          : write_infix("=="); break;
     case N::Lnast_ntype_ne          : write_infix("!="); break;
     case N::Lnast_ntype_lt          : write_infix("<"); break;
@@ -767,7 +794,19 @@ void Lnast_prp_writer::write_store() {
   if (!move_to_child()) {
     return;
   }
-  auto lhs = strip_prefix(current_text());
+  auto        lhs   = std::string(strip_prefix(current_text()));
+  Lnast_nid   first = cur;
+  // Fold a redundant self-store `lhs = lhs` (a set_mask in-place collapse aliases
+  // its versioned result back to the base, so the reader's store-back becomes a
+  // no-op).  Only the simple two-child shape (no index levels) can be one.
+  if (move_to_sibling()) {
+    if (is_last_child() && lnast->get_type(cur) == Lnast_ntype::Lnast_ntype_ref
+        && std::string(strip_prefix(current_text())) == lhs) {
+      move_to_parent();
+      return;  // emit nothing — caller's print_indent left a blank line, harmless
+    }
+    cur = first;  // restore for the normal path
+  }
   print(decl_prefix(lhs));
   print(lhs);
   while (move_to_sibling() && !is_last_child()) {
@@ -1125,4 +1164,120 @@ void Lnast_prp_writer::write_get_mask() {
   // Non-contiguous / unparsable mask: fall back to a plain bitwise AND (lossy —
   // get_mask would compact the scattered bits, but the corpus has no such mask).
   os << std::format("{} & {}", src, mask_txt);
+}
+
+// Decompose a (hex- or decimal-) constant mask into its maximal contiguous runs
+// of set bits, LSB-first.  Empty when the mask is zero/unparsable.  Each run is
+// a closed `[lo..hi]` bit range.  set_mask places the inserted value LSB-first
+// across all selected bits, so run k consumes the next (hi-lo+1) bits of the
+// insert value after the runs below it.
+static std::vector<std::pair<int, int>> mask_runs(std::string_view s) {
+  std::vector<bool> bits;
+  if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+    std::string_view h = s.substr(2);
+    for (size_t i = h.size(); i-- > 0;) {  // LSB hex digit first
+      int d = hex_digit(h[i]);
+      if (d < 0) {
+        return {};
+      }
+      for (int b = 0; b < 4; ++b) {
+        bits.push_back((d >> b) & 1);
+      }
+    }
+  } else {
+    auto v = parse_int_const(s);
+    if (!v || *v <= 0) {
+      return {};
+    }
+    unsigned long long m = static_cast<unsigned long long>(*v);
+    for (int b = 0; b < 64; ++b) {
+      bits.push_back((m >> b) & 1ULL);
+    }
+  }
+  std::vector<std::pair<int, int>> runs;
+  int lo = -1;
+  for (int i = 0; i < static_cast<int>(bits.size()); ++i) {
+    if (bits[i]) {
+      if (lo < 0) {
+        lo = i;
+      }
+    } else if (lo >= 0) {
+      runs.emplace_back(lo, i - 1);
+      lo = -1;
+    }
+  }
+  if (lo >= 0) {
+    runs.emplace_back(lo, static_cast<int>(bits.size()) - 1);
+  }
+  return runs;
+}
+
+// set_mask( dst, val, mask, ins ) — dst = val with the bits selected by the
+// constant `mask` replaced by `ins` (placed LSB-first across the selected bits).
+// Reparsable spelling: a bit-range LHS assign `dst#[lo..=hi] = ins`, which
+// prp2lnast re-lowers to exactly this set_mask shape (read-modify-write).  The
+// slang reader emits dst==val (in-place RMW); when they differ (e.g. prp2lnast
+// minted a fresh result temp) a `dst = val` base copy is emitted first.  A
+// non-contiguous mask is split into one bit-range assign per contiguous run,
+// each consuming the next slice of `ins` (LSB-first), so scattered set_masks
+// stay correct rather than dropping logic.
+void Lnast_prp_writer::write_set_mask() {
+  if (!move_to_child()) {
+    return;
+  }
+  std::string dst = std::string(strip_prefix(current_text()));  // SSA suffix stripped
+  std::string val = dst;
+  if (move_to_sibling()) {  // val (base)
+    val = std::string(strip_prefix(current_text()));
+  }
+  std::string mask_txt;
+  if (move_to_sibling()) {  // mask const
+    mask_txt = std::string(current_text());
+  }
+  std::string ins;
+  if (move_to_sibling()) {  // insert value
+    ins = std::string(strip_prefix(current_text()));
+  }
+  move_to_parent();
+
+  // A set_mask is an in-place RMW.  After SSA stripping, the slang reader's
+  // versioned result (`set_mask(OUT___ssa_1, OUT, ..)`) collapses to dst==val,
+  // i.e. an in-place write on the base (the redundant `OUT = OUT___ssa_1`
+  // store-back then folds away in write_store).  When the base genuinely differs
+  // from the source value, copy it in first.
+  std::string target   = dst;
+  bool        need_sep = false;
+  if (dst != val) {
+    print(decl_prefix(target));
+    print(target);
+    os << std::format(" = {}", val);
+    need_sep = true;
+  }
+
+  auto runs = mask_runs(mask_txt);
+  if (runs.empty()) {
+    // Zero / unparsable mask: nothing to overwrite.  Emit a base copy if we
+    // haven't already (keeps the statement non-empty and the value flowing).
+    if (!need_sep) {
+      os << std::format("{} = {}", target, val);
+    }
+    return;
+  }
+
+  int ins_off = 0;  // LSB-first cursor into the insert value across runs
+  for (auto [lo, hi] : runs) {
+    if (need_sep) {
+      os << "\n";
+      print_indent();
+    }
+    int w = hi - lo + 1;
+    if (ins_off == 0 && runs.size() == 1) {
+      // Single run from bit 0 of `ins`: the slice width truncates `ins` itself.
+      os << std::format("{}#[{}..={}] = {}", target, lo, hi, ins);
+    } else {
+      os << std::format("{}#[{}..={}] = {}#[{}..={}]", target, lo, hi, ins, ins_off, ins_off + w - 1);
+    }
+    ins_off += w;
+    need_sep = true;
+  }
 }

@@ -1,0 +1,261 @@
+pub comb PrefixRed::[lg="PrefixRed", hdl](IN_data:u32) -> (OUT_pval:u32) {
+  mut red
+  mut i
+  i = 0sb?
+  red = 0
+  {
+    ___4 = IN_data & 1
+    ___5 = red | ___4
+    red = ___5
+  }
+  OUT_pval#[0..=0] = red
+  {
+    ___13 = IN_data >> 1
+    ___14 = ___13 & 1
+    ___15 = red | ___14
+    red = ___15
+  }
+  mut OUT_pval__w1 = OUT_pval
+  OUT_pval__w1#[1..=1] = red
+  {
+    ___25 = IN_data >> 2
+    ___26 = ___25 & 1
+    ___27 = red | ___26
+    red = ___27
+  }
+  mut OUT_pval__w2 = OUT_pval__w1
+  OUT_pval__w2#[2..=2] = red
+  {
+    ___37 = IN_data >> 3
+    ___38 = ___37 & 1
+    ___39 = red | ___38
+    red = ___39
+  }
+  mut OUT_pval__w3 = OUT_pval__w2
+  OUT_pval__w3#[3..=3] = red
+  {
+    ___49 = IN_data >> 4
+    ___50 = ___49 & 1
+    ___51 = red | ___50
+    red = ___51
+  }
+  mut OUT_pval__w4 = OUT_pval__w3
+  OUT_pval__w4#[4..=4] = red
+  {
+    ___61 = IN_data >> 5
+    ___62 = ___61 & 1
+    ___63 = red | ___62
+    red = ___63
+  }
+  mut OUT_pval__w5 = OUT_pval__w4
+  OUT_pval__w5#[5..=5] = red
+  {
+    ___73 = IN_data >> 6
+    ___74 = ___73 & 1
+    ___75 = red | ___74
+    red = ___75
+  }
+  mut OUT_pval__w6 = OUT_pval__w5
+  OUT_pval__w6#[6..=6] = red
+  {
+    ___85 = IN_data >> 7
+    ___86 = ___85 & 1
+    ___87 = red | ___86
+    red = ___87
+  }
+  mut OUT_pval__w7 = OUT_pval__w6
+  OUT_pval__w7#[7..=7] = red
+  {
+    ___97 = IN_data >> 8
+    ___98 = ___97 & 1
+    ___99 = red | ___98
+    red = ___99
+  }
+  mut OUT_pval__w8 = OUT_pval__w7
+  OUT_pval__w8#[8..=8] = red
+  {
+    ___109 = IN_data >> 9
+    ___110 = ___109 & 1
+    ___111 = red | ___110
+    red = ___111
+  }
+  mut OUT_pval__w9 = OUT_pval__w8
+  OUT_pval__w9#[9..=9] = red
+  {
+    ___121 = IN_data >> 10
+    ___122 = ___121 & 1
+    ___123 = red | ___122
+    red = ___123
+  }
+  mut OUT_pval__w10 = OUT_pval__w9
+  OUT_pval__w10#[10..=10] = red
+  {
+    ___133 = IN_data >> 11
+    ___134 = ___133 & 1
+    ___135 = red | ___134
+    red = ___135
+  }
+  mut OUT_pval__w11 = OUT_pval__w10
+  OUT_pval__w11#[11..=11] = red
+  {
+    ___145 = IN_data >> 12
+    ___146 = ___145 & 1
+    ___147 = red | ___146
+    red = ___147
+  }
+  mut OUT_pval__w12 = OUT_pval__w11
+  OUT_pval__w12#[12..=12] = red
+  {
+    ___157 = IN_data >> 13
+    ___158 = ___157 & 1
+    ___159 = red | ___158
+    red = ___159
+  }
+  mut OUT_pval__w13 = OUT_pval__w12
+  OUT_pval__w13#[13..=13] = red
+  {
+    ___169 = IN_data >> 14
+    ___170 = ___169 & 1
+    ___171 = red | ___170
+    red = ___171
+  }
+  mut OUT_pval__w14 = OUT_pval__w13
+  OUT_pval__w14#[14..=14] = red
+  {
+    ___181 = IN_data >> 15
+    ___182 = ___181 & 1
+    ___183 = red | ___182
+    red = ___183
+  }
+  mut OUT_pval__w15 = OUT_pval__w14
+  OUT_pval__w15#[15..=15] = red
+  {
+    ___193 = IN_data >> 16
+    ___194 = ___193 & 1
+    ___195 = red | ___194
+    red = ___195
+  }
+  mut OUT_pval__w16 = OUT_pval__w15
+  OUT_pval__w16#[16..=16] = red
+  {
+    ___205 = IN_data >> 17
+    ___206 = ___205 & 1
+    ___207 = red | ___206
+    red = ___207
+  }
+  mut OUT_pval__w17 = OUT_pval__w16
+  OUT_pval__w17#[17..=17] = red
+  {
+    ___217 = IN_data >> 18
+    ___218 = ___217 & 1
+    ___219 = red | ___218
+    red = ___219
+  }
+  mut OUT_pval__w18 = OUT_pval__w17
+  OUT_pval__w18#[18..=18] = red
+  {
+    ___229 = IN_data >> 19
+    ___230 = ___229 & 1
+    ___231 = red | ___230
+    red = ___231
+  }
+  mut OUT_pval__w19 = OUT_pval__w18
+  OUT_pval__w19#[19..=19] = red
+  {
+    ___241 = IN_data >> 20
+    ___242 = ___241 & 1
+    ___243 = red | ___242
+    red = ___243
+  }
+  mut OUT_pval__w20 = OUT_pval__w19
+  OUT_pval__w20#[20..=20] = red
+  {
+    ___253 = IN_data >> 21
+    ___254 = ___253 & 1
+    ___255 = red | ___254
+    red = ___255
+  }
+  mut OUT_pval__w21 = OUT_pval__w20
+  OUT_pval__w21#[21..=21] = red
+  {
+    ___265 = IN_data >> 22
+    ___266 = ___265 & 1
+    ___267 = red | ___266
+    red = ___267
+  }
+  mut OUT_pval__w22 = OUT_pval__w21
+  OUT_pval__w22#[22..=22] = red
+  {
+    ___277 = IN_data >> 23
+    ___278 = ___277 & 1
+    ___279 = red | ___278
+    red = ___279
+  }
+  mut OUT_pval__w23 = OUT_pval__w22
+  OUT_pval__w23#[23..=23] = red
+  {
+    ___289 = IN_data >> 24
+    ___290 = ___289 & 1
+    ___291 = red | ___290
+    red = ___291
+  }
+  mut OUT_pval__w24 = OUT_pval__w23
+  OUT_pval__w24#[24..=24] = red
+  {
+    ___301 = IN_data >> 25
+    ___302 = ___301 & 1
+    ___303 = red | ___302
+    red = ___303
+  }
+  mut OUT_pval__w25 = OUT_pval__w24
+  OUT_pval__w25#[25..=25] = red
+  {
+    ___313 = IN_data >> 26
+    ___314 = ___313 & 1
+    ___315 = red | ___314
+    red = ___315
+  }
+  mut OUT_pval__w26 = OUT_pval__w25
+  OUT_pval__w26#[26..=26] = red
+  {
+    ___325 = IN_data >> 27
+    ___326 = ___325 & 1
+    ___327 = red | ___326
+    red = ___327
+  }
+  mut OUT_pval__w27 = OUT_pval__w26
+  OUT_pval__w27#[27..=27] = red
+  {
+    ___337 = IN_data >> 28
+    ___338 = ___337 & 1
+    ___339 = red | ___338
+    red = ___339
+  }
+  mut OUT_pval__w28 = OUT_pval__w27
+  OUT_pval__w28#[28..=28] = red
+  {
+    ___349 = IN_data >> 29
+    ___350 = ___349 & 1
+    ___351 = red | ___350
+    red = ___351
+  }
+  mut OUT_pval__w29 = OUT_pval__w28
+  OUT_pval__w29#[29..=29] = red
+  {
+    ___361 = IN_data >> 30
+    ___362 = ___361 & 1
+    ___363 = red | ___362
+    red = ___363
+  }
+  mut OUT_pval__w30 = OUT_pval__w29
+  OUT_pval__w30#[30..=30] = red
+  {
+    ___373 = IN_data >> 31
+    ___374 = ___373 & 1
+    ___375 = red | ___374
+    red = ___375
+  }
+  mut OUT_pval__w31 = OUT_pval__w30
+  OUT_pval__w31#[31..=31] = red
+  OUT_pval = OUT_pval__w31
+}

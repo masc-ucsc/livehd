@@ -451,7 +451,13 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
         }
       };
 
-  for (auto child : lnast->children(stmts_nid)) {
+  // Per-statement processing of the straight-line body.  Defined as a recursive
+  // helper so a bare `{ }` lexical block (an unconditional nested `stmts`) can be
+  // INLINED into the current scope — its reads then follow the live rename_map
+  // and its writes version + carry out, instead of being copied verbatim (which
+  // disconnected the block's outer-variable writes from the SSA chain and
+  // dropped them after the block).
+  std::function<void(const Lnast_nid&)> process_child = [&](const Lnast_nid& child) {
     auto type = lnast->get_type(child);
 
     // A `store` with ≥3 children is the tuple_set form (an in-place
@@ -630,12 +636,25 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
         // net read here resolves to its driver, not its poison base); writes were
         // reset to base above so the Mux merge still works; regs aren't versioned.
         copy_with_rename(lnast, child, staging, new_stmts, rename_map);
+      } else if (Lnast_ntype::is_stmts(type)) {
+        // A bare `{ }` lexical block runs unconditionally: inline its statements
+        // into the straight-line scope (same rename_map) so reads see the live
+        // version and writes thread out.  (Copying verbatim left the block's
+        // outer writes on the stale base name, disconnected from the SSA chain —
+        // e.g. a `set_mask` bit-init/accumulate emitted inside an unrolled-loop
+        // block was dropped, scrambling the result.)
+        for (auto gc : lnast->children(child)) {
+          process_child(gc);
+        }
       } else {
         // Other structural nodes (func_def, …) own a separate name scope — the
         // outer rename_map must NOT leak in, so copy verbatim.
         copy_subtree(lnast, child, staging, new_stmts);
       }
     }
+  };
+  for (auto child : lnast->children(stmts_nid)) {
+    process_child(child);
   }
 
   // Final-version write-back for io outputs: a top-level reassignment was

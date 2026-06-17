@@ -864,18 +864,57 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
           break;
         }
         // Full contiguous-mask bit-insert (the bit-blast's output concat): out[i]
-        // = (rb<=i<re) ? value[i-rb] : a[i]. Enabled when a resolution library is
-        // present (an ABC standard-cell netlist), where the result width is the
-        // RAW net width — its unsigned nets carry no spare sign bit, so use
-        // bits_of(dpin), not the front-end magnitude+1 real_width.
-        if (sub_lib_ == nullptr) {
-          return fail("Set_mask (non-trivial) not supported (M1)");
-        }
-        int  Wm    = std::max(1, gu::bits_of(dpin));
+        // = (rb<=i<re) ? value[i-rb] : a[i].  Works for both the front-end path
+        // (W = magnitude+1 real_width) and an ABC standard-cell netlist (W = RAW
+        // net width — set above at the dpin width branch, its unsigned nets carry
+        // no spare sign bit).  `a` and `value` are already stored at their own
+        // real_widths; fit() reconciles them to the window/result widths.
+        int  Wm    = std::max(1, W);
         auto range = mask.get_mask_range();
         int  rb = range.first, re = range.second;
         if (rb < 0 || re <= rb) {
-          return fail("Set_mask non-contiguous mask not supported (M1)");
+          // Non-contiguous mask: insert value into each contiguous run, LSB-first
+          // (value's compacted bits map onto the set positions in ascending order).
+          auto runs = mask.get_mask_range_pairs();  // ascending [begin,end) runs
+          if (runs.empty()) {
+            result = fit(a, Wm);
+            break;
+          }
+          auto& vvec = pid(Ntype::get_sink_pid(op, "value"));
+          if (vvec.empty()) {
+            return fail("Set_mask missing value");
+          }
+          int total = 0;
+          for (auto& pr : runs) {
+            total += pr.second - pr.first;
+          }
+          Term aw  = fit(a, Wm);
+          Term val = fit(vvec[0], std::max(1, total));
+          int  vi  = 0;
+          for (auto& pr : runs) {
+            int b = pr.first, e = std::min(pr.second, Wm);
+            int w = pr.second - pr.first;
+            if (b >= Wm) {
+              vi += w;
+              continue;
+            }
+            std::vector<Term> parts;  // MSB first
+            if (e < Wm) {
+              parts.push_back(bv_extract(tm_, aw, Wm - 1, e));
+            }
+            parts.push_back(bv_extract(tm_, val, vi + (e - b) - 1, vi));
+            if (b > 0) {
+              parts.push_back(bv_extract(tm_, aw, b - 1, 0));
+            }
+            Term r = parts.front();
+            for (size_t k = 1; k < parts.size(); ++k) {
+              r = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {r, parts[k]});
+            }
+            aw = r;
+            vi += w;
+          }
+          result = fit(Val{aw, Wm, false}, W);
+          break;
         }
         if (rb >= Wm) {
           result = fit(a, Wm);  // replaced region entirely above the result

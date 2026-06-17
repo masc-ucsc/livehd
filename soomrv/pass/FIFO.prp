@@ -1,0 +1,178 @@
+pub mod FIFO::[lg="FIFO", hdl](clk:u1, rst:u1, IN_valid:u1, IN_data:u32, IN_ready:u1) -> (free:u3@[], OUT_ready:u1@[], OUT_valid:u1@[], OUT_data:u32@[]) {
+  reg outDataReg:u32
+  reg indexIn:u2
+  reg outValidReg:u1
+  reg fullCond:u1
+  reg mem:[4]u32:[fwd=0]
+  reg indexOut:u2
+  mut _b2i_1
+  mut equal
+  mut _b2i_2
+  mut empty
+  mut _b2i_3
+  mut full
+  mut _b2i_4
+  mut outputReady
+  mut _b2i_5
+  mut doExtract
+  mut _b2i_6
+  mut combPassthru
+  mut _b2i_7
+  mut doInsert
+  ___1 = indexIn == indexOut
+  if ___1 {
+    _b2i_1 = 1
+  } else {
+    _b2i_1 = 0
+  }
+  mut equal__w1 = _b2i_1
+  ___3 = fullCond == 0
+  ___2 = equal__w1 != 0
+  ___4 = ___3 and ___2
+  equal = 0ub?
+  if ___4 {
+    _b2i_2 = 1
+  } else {
+    _b2i_2 = 0
+  }
+  ___6 = fullCond != 0
+  ___5 = equal__w1 != 0
+  ___7 = ___6 and ___5
+  empty = 0ub?
+  mut empty__w1 = _b2i_2
+  if ___7 {
+    _b2i_3 = 1
+  } else {
+    _b2i_3 = 0
+  }
+  ___9 = outValidReg == 0
+  ___8 = IN_ready != 0
+  ___10 = ___9 or ___8
+  full = 0ub?
+  mut full__w1 = _b2i_3
+  if ___10 {
+    _b2i_4 = 1
+  } else {
+    _b2i_4 = 0
+  }
+  mut outputReady__w1 = _b2i_4
+  ___12 = empty__w1 == 0
+  ___11 = outputReady__w1 != 0
+  ___13 = ___12 and ___11
+  outputReady = 0ub?
+  if ___13 {
+    _b2i_5 = 1
+  } else {
+    _b2i_5 = 0
+  }
+  mut doExtract__w1 = _b2i_5
+  ___15 = full__w1 == 0
+  ___14 = doExtract__w1 != 0
+  ___16 = ___15 or ___14
+  doExtract = 0ub?
+  if ___16 {
+    _b2i_6 = 1
+  } else {
+    _b2i_6 = 0
+  }
+  OUT_ready = _b2i_6
+  ___17 = empty__w1 != 0
+  if ___17 {
+    free = 4
+  } else {
+    ___18 = indexOut - indexIn
+    ___19 = ___18#[0..=31]
+    ___20 = ___19 / 4
+    ___21 = ___20 * 4
+    ___22 = ___19 - ___21
+    ___23 = ___22#[0..=2]
+    free = ___23
+  }
+  OUT_valid = outValidReg
+  ___26 = OUT_valid == 0
+  ___25 = empty__w1 != 0
+  ___27 = ___26 and ___25
+  OUT_data = outDataReg
+  ___28 = ___27 and true
+  combPassthru = 0
+  if ___28 {
+    OUT_data = IN_data
+    OUT_valid = IN_valid
+    combPassthru = 1
+  }
+  ___30 = IN_valid != 0
+  ___29 = OUT_ready != 0
+  ___31 = ___30 and ___29
+  if ___31 {
+    _b2i_7 = 1
+  } else {
+    _b2i_7 = 0
+  }
+  ___32 = rst != 0
+  doInsert = 0ub?
+  mut doInsert__w1 = _b2i_7
+  if ___32 {
+    fullCond = 0
+    indexIn = 0
+    indexOut = 0
+    outDataReg = 0
+    outValidReg = 0
+  } else {
+    ___33 = outputReady__w1 != 0
+    if ___33 {
+      outDataReg = 0ub????????????????????????????????
+    }
+    ___34 = IN_ready != 0
+    if ___34 {
+      outValidReg = 0
+    }
+    ___36 = combPassthru != 0
+    ___35 = IN_ready != 0
+    ___37 = ___36 and ___35
+    if ___37 {
+    }
+
+    ___38 = not ___37
+    if ___38 {
+      ___42 = empty__w1 != 0
+      ___41 = doInsert__w1 != 0
+      ___43 = ___42 and ___41
+      ___40 = outputReady__w1 != 0
+      ___44 = ___43 and ___40
+      ___45 = ___44 and true
+      if ___45 {
+        outDataReg = IN_data
+        outValidReg = 1
+      } else {
+        ___46 = doInsert__w1 != 0
+        if ___46 {
+          mem[indexIn] = IN_data
+          ___47 = indexIn + 1
+          ___48 = ___47#[0..=31]
+          ___49 = ___48 / 4
+          ___50 = ___49 * 4
+          ___51 = ___48 - ___50
+          ___52 = ___51#[0..=1]
+          indexIn = ___52
+        }
+        ___53 = doExtract__w1 != 0
+        if ___53 {
+          ___54 = indexOut + 1
+          ___55 = ___54#[0..=31]
+          ___56 = ___55 / 4
+          ___57 = ___56 * 4
+          ___58 = ___55 - ___57
+          ___59 = ___58#[0..=1]
+          indexOut = ___59
+          ___60 = mem[indexOut]
+          outDataReg = ___60
+          outValidReg = 1
+        }
+        ___61 = doInsert__w1 != doExtract__w1
+        if ___61 {
+          fullCond = doInsert__w1
+        }
+      }
+    }
+  }
+}

@@ -84,6 +84,8 @@ private:
   void write_sext();
   // get_mask — emit a `src#[lo..=hi]` bit-select reconstructed from the mask
   void write_get_mask();
+  // set_mask — emit a `dst#[lo..=hi] = ins` bit-range LHS assign (RMW)
+  void write_set_mask();
 
   // Serialises a type node (cursor must sit on the type child) into a Pyrope
   // type suffix without moving the cursor: "" for prim_type_none, "bool",
@@ -146,5 +148,5 @@ private:
 
   // ── Utilities ────────────────────────────────────────────────────────────
   static bool             is_tmp(std::string_view name);
-  static std::string_view strip_prefix(std::string_view name);
+  std::string             strip_prefix(std::string_view name) const;  // renames ___ssa_N out of the SSA namespace
 };
