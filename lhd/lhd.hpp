@@ -87,7 +87,9 @@ struct Options {
   int         tool_max     = 200;
   int         tool_hier    = -1;
   int         tool_hops    = 0;
-  int         tool_context = 2;  // `tool diff -C n` text-line context
+  int         tool_context = 2;     // `tool diff -C n` text-line context
+  bool        tool_invert  = false; // `tool grep -v`: keep records that do NOT match
+  bool        tool_match   = false; // `tool diff --match`: visualize via the semdiff `match` attribute
 
   std::string impl_kind, impl_path, impl_top;  // lec --impl
   std::string ref_kind, ref_path, ref_top;     // lec --ref

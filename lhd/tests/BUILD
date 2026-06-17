@@ -97,6 +97,17 @@ sh_test(
     data = _FLOW_DATA + ["part_flat.v"],
 )
 
+# 2f-semdiff: `lhd semdiff` structurally matches two lg: libraries (marks the
+# `match` attribute), the diff is greppable (tool grep match=0 / -v) and
+# visualizable (tool diff --match); covers commutative full-match, an isolated
+# difference, the matching_names flop anchor, and id_granularity=region.
+sh_test(
+    name = "lhd_semdiff_test",
+    size = "large",
+    srcs = ["lhd_semdiff_test.sh"],
+    data = ["//lhd"],
+)
+
 # 2c-color / 2p hierarchical-input (prerequisite for 2a-abc): color + partition
 # descend a multi-module Pyrope hierarchy (combinational + sequential fixtures),
 # re-link Sub instances, and the partitioned design stays LEC-equivalent.

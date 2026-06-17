@@ -37,6 +37,8 @@ cc_library(
         "//pass/lec:lec_query",
         "//pass/lec:pass_lec",
         "//pass/partition:pass_partition",
+        "//pass/semdiff:pass_semdiff",
+        "//pass/semdiff:semdiff",
         "//pass/lnastfmt:pass_lnastfmt",
         "//pass/prp_writer:pass_prp_writer",
         "//pass/upass:pass_upass",

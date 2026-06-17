@@ -36,6 +36,7 @@
 #include "prp2lnast.hpp"
 #include "query.hpp"  // pass/lec L1 (lec::prove_equal) for the cross-check path
 #include "rapidjson/document.h"
+#include "semdiff.hpp"  // pass/semdiff (structural_match) for the `lhd semdiff` command
 #include "thread_pool.hpp"
 #include "upass_tolg.hpp"
 #include "woothash.hpp"
@@ -388,6 +389,7 @@ constexpr std::pair<std::string_view, std::string_view> kSetPasses[] = {
     {      "pass.abc",          "pass.abc"},
     {  "pass.liberty",      "pass.liberty"},
     {           "lec",          "pass.lec"},
+    {       "semdiff",      "pass.semdiff"},
 };
 
 std::string_view set_pass_method(std::string_view set_name) {
@@ -1043,7 +1045,7 @@ void validate_emits(const Options& opts) {
                      "pyrope",
                      {"unsupported", "there is no LGraph -> LNAST decompiler", "pyrope outputs need source/ln: inputs"});
   }
-  if (opts.command == "lec") {
+  if (opts.command == "lec" || opts.command == "semdiff") {
     for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump"}) {
       reject_emit_kind(opts, k, {"usage", std::format("{} has no outputs beyond the result", opts.command), ""});
     }
@@ -1066,7 +1068,7 @@ void validate_dumps(const Options& opts) {
   if (opts.dumps.empty()) {
     return;
   }
-  if (opts.command == "lec" || opts.command == "scan" || opts.command == "tool") {
+  if (opts.command == "lec" || opts.command == "semdiff" || opts.command == "scan" || opts.command == "tool") {
     throw Lhd_error{"usage", std::format("{} has no --dump observables", opts.command), "--dump applies to compile"};
   }
   if (opts.language == "verilog" && opts.reader != "slang" && (wants_dump(opts, "parse") || wants_dump(opts, "lnast"))) {
@@ -2501,6 +2503,100 @@ void lec_command(Options& opts, Result& res) {
   }
 }
 
+// ---- semdiff (structural diff/match: stamp the `match` attribute) -----------
+
+// `lhd semdiff --ref lg:A --impl lg:B [--top m]`: structural LEC. Mirrors
+// lec_command (two sides, per-side top pick) but instead of an SMT proof it
+// calls semdiff::structural_match to stamp corresponding nodes/pins of both
+// libraries with a shared `match` id (0 = no counterpart), then saves both lg:
+// back in place — so the diff is greppable (`lhd tool grep match=0 lg:B`) and
+// visualizable (`lhd tool diff lg:A lg:B --match`). v1 marks lg: libraries in
+// place, so both sides must be lg: (compile sources to lg: first); the
+// structural_match API itself is kind-agnostic (pass.semdiff / a future lec).
+void semdiff_command(Options& opts, Result& res) {
+  setup_diag(opts, "semdiff");
+  if (opts.impl_path.empty() || opts.ref_path.empty()) {
+    throw Lhd_error{"usage", "semdiff requires --ref lg:DIR and --impl lg:DIR", "e.g. `lhd semdiff --ref lg:gold --impl lg:opt --top adder`"};
+  }
+  if (opts.ref_kind != "lg" || opts.impl_kind != "lg") {
+    throw Lhd_error{"usage",
+                    "v1 semdiff marks lg: libraries in place, so both --ref and --impl must be lg:DIR",
+                    "compile sources to lg: first (e.g. `lhd compile a.v --emit-dir lg:gold`)"};
+  }
+  if (fs::weakly_canonical(opts.ref_path) == fs::weakly_canonical(opts.impl_path)) {
+    throw Lhd_error{"usage", "semdiff --ref and --impl must be different lg: libraries", ""};
+  }
+
+  // Each side loads from its OWN library instance, so the two graphs keep
+  // independent gids and attr stores (the cross-library trap) — hold the two
+  // Graph* directly.
+  Eprp_var ref_var;
+  Eprp_var impl_var;
+  load_side_graphs(opts, res, opts.ref_kind, opts.ref_path, "ref", ref_var);
+  load_side_graphs(opts, res, opts.impl_kind, opts.impl_path, "impl", impl_var);
+
+  // Pick the top module on each side (same rule as lec): explicit
+  // --{ref,impl}-top, else --top, else the sole module.
+  auto pick = [&](Eprp_var& v, const std::string& want, std::string_view side) -> std::shared_ptr<hhds::Graph> {
+    const std::string& t = !want.empty() ? want : opts.top;
+    if (!t.empty()) {
+      for (auto& g : v.graphs) {
+        if (g && g->get_name() == t) {
+          return g;
+        }
+      }
+      throw Lhd_error{"config", std::format("semdiff: {} top '{}' not found", side, t), ""};
+    }
+    if (v.graphs.size() == 1) {
+      return v.graphs.front();
+    }
+    throw Lhd_error{"usage", std::format("semdiff: {} has {} modules; pass --{}-top or --top", side, v.graphs.size(), side), ""};
+  };
+  auto ref_g  = pick(ref_var, opts.ref_top, "ref");
+  auto impl_g = pick(impl_var, opts.impl_top, "impl");
+
+  Eprp_var::Eprp_dict labels;
+  merge_sets(opts, "semdiff", labels);
+  auto label = [&](std::string_view k, std::string_view def) -> std::string {
+    auto it = labels.find(std::string{k});
+    return it == labels.end() ? std::string{def} : it->second;
+  };
+  livehd::semdiff::Semdiff_options o;
+  o.alg            = label("alg", "structural");
+  o.matching_names = label("matching_names", "false") != "false" && label("matching_names", "false") != "0";
+  o.id_granularity = label("id_granularity", "pair");
+  o.verbose        = false;  // the command prints its own summary below
+  if (o.id_granularity != "pair" && o.id_granularity != "region") {
+    throw Lhd_error{"usage", std::format("--set semdiff.id_granularity expects pair|region, got '{}'", o.id_granularity), ""};
+  }
+
+  res.recipe_steps.emplace_back(std::format("pass.semdiff alg:{} matching_names:{} id_granularity:{}", o.alg, o.matching_names, o.id_granularity));
+  auto r = livehd::semdiff::structural_match(ref_g.get(), impl_g.get(), o);
+
+  if (!opts.quiet) {
+    std::print("semdiff: ref '{}' {}/{} matched, impl '{}' {}/{} matched, {} regions, similarity {:.3f}\n",
+               ref_g->get_name(),
+               r.a_matched,
+               r.a_matched + r.a_unmatched,
+               impl_g->get_name(),
+               r.b_matched,
+               r.b_matched + r.b_unmatched,
+               r.regions,
+               r.similarity);
+    std::print("  inspect: `lhd tool diff lg:{} lg:{} --match`  |  `lhd tool grep match=0 lg:{}`\n",
+               opts.ref_path,
+               opts.impl_path,
+               opts.impl_path);
+  }
+
+  // v1 persistence: mark-in-place. Save both libraries back so the `match`
+  // attribute survives for the greppable / visualizable workflow.
+  livehd::Hhds_graph_library::save(opts.ref_path);
+  livehd::Hhds_graph_library::save(opts.impl_path);
+  res.outputs.push_back(opts.ref_path);
+  res.outputs.push_back(opts.impl_path);
+}
+
 // ---- pass (graph-pass plumbing: color / partition) --------------------------
 
 // Load every graph of an lg: library into `var` (mirrors synth's lg branch).
@@ -2679,7 +2775,7 @@ struct Tool_filter {
 };
 
 bool tool_is_numeric_field(std::string_view f) {
-  return f == "id" || f == "nid" || f == "color" || f == "bits" || f == "delay" || f == "hier_color";
+  return f == "id" || f == "nid" || f == "color" || f == "bits" || f == "delay" || f == "hier_color" || f == "match";
 }
 
 // The columns a `<field><sep><value>` filter may target. A token whose head is
@@ -2689,7 +2785,7 @@ bool tool_is_numeric_field(std::string_view f) {
 bool tool_is_known_field(std::string_view f) {
   return f == "nid" || f == "id" || f == "kind" || f == "name" || f == "color" || f == "src"
          || f == "partitionable" || f == "bits" || f == "signed" || f == "from" || f == "to" || f == "delay"
-         || f == "hier_color";
+         || f == "hier_color" || f == "match";
 }
 
 long tool_parse_long(std::string_view v, std::string_view ctx) {
@@ -2870,6 +2966,17 @@ std::string tool_color_str(const hhds::Node_class& node) {
   return gu::has_node_color(node) ? std::to_string(gu::node_color_of(node)) : std::string{"nil"};
 }
 
+// The pass/semdiff structural-correspondence id. "nil" until semdiff has run
+// (the attribute is absent); 0 is a real value meaning "no counterpart".
+std::string tool_match_str(const hhds::Node_class& node) {
+  namespace gu = livehd::graph_util;
+  return gu::has_match(node) ? std::to_string(gu::match_of(node)) : std::string{"nil"};
+}
+std::string tool_match_str(const hhds::Pin_class& pin) {
+  namespace gu = livehd::graph_util;
+  return gu::has_match(pin) ? std::to_string(gu::match_of(pin)) : std::string{"nil"};
+}
+
 std::string tool_pin_label(const hhds::Pin_class& pin) {
   auto pn = livehd::graph_util::pin_name_of(pin);
   return pn.empty() ? std::format("p{}", pin.get_port_id()) : std::string{pn};
@@ -2885,6 +2992,7 @@ Tool_record tool_node_record(hhds::Graph* g, const hhds::Node_class& node) {
   auto nm = gu::node_name_of(node);
   r.cols.emplace_back("name", nm.empty() ? std::string{"nil"} : std::string{nm});
   r.cols.emplace_back("color", tool_color_str(node));
+  r.cols.emplace_back("match", tool_match_str(node));
   r.cols.emplace_back("src", tool_node_src(g, node));
   r.cols.emplace_back("partitionable", livehd::color::is_partitionable(node) ? "1" : "0");
   return r;
@@ -2909,6 +3017,7 @@ void tool_pin_records(const hhds::Node_class& node, std::vector<Tool_record>& ou
     int32_t b = gu::bits_of(pin);
     r.cols.emplace_back("bits", b != 0 ? std::to_string(b) : std::string{"nil"});
     r.cols.emplace_back("signed", gu::is_unsign(pin) ? "0" : "1");
+    r.cols.emplace_back("match", tool_match_str(pin));
     out.push_back(std::move(r));
   }
 }
@@ -2962,10 +3071,10 @@ std::vector<std::string> tool_display_cols(const Options& opts, Tool_target tgt)
     return tool_split_csv(opts.tool_attr);
   }
   switch (tgt) {
-    case Tool_target::node: return {"color", "src"};
-    case Tool_target::pin: return {"bits", "signed"};
+    case Tool_target::node: return {"color", "match", "src"};
+    case Tool_target::pin: return {"bits", "signed", "match"};
     case Tool_target::edge: return {"bits"};
-    default: return {"color", "src", "bits", "signed"};  // target=all flat (grep)
+    default: return {"color", "match", "src", "bits", "signed"};  // target=all flat (grep)
   }
 }
 
@@ -3154,7 +3263,7 @@ void tool_grep_lg(Options& opts, const std::vector<std::string>& lg_dirs, const 
       std::vector<Tool_record> recs;
       tool_flat_records(g, tgt, recs);
       for (const auto& r : recs) {
-        if (!tool_match_all(r, filters)) {
+        if (tool_match_all(r, filters) == opts.tool_invert) {  // -v keeps the non-matching records
           continue;
         }
         if (budget == 0) {
@@ -3205,9 +3314,110 @@ std::vector<std::string> tool_diff_lines(const std::string& dir, Options& opts, 
   return lines;
 }
 
+// One node as seen by the match-aware diff: its correspondence id + a label.
+struct Match_node {
+  uint32_t    id;
+  std::string line;  // "<kind>  <ident>  src=…"
+};
+
+std::vector<Match_node> tool_match_nodes(hhds::Graph* g) {
+  namespace gu = livehd::graph_util;
+  std::vector<Match_node> v;
+  for (auto node : g->forward_class()) {
+    std::string src  = tool_node_src(g, node);
+    std::string line = std::format("{:<10}  {}", Ntype::get_name(gu::type_op_of(node)), gu::debug_name(node));
+    if (src != "nil") {
+      line += std::format("  src={}", src);
+    }
+    v.push_back({gu::match_of(node), std::move(line)});
+  }
+  return v;
+}
+
+// `tool diff lg:A lg:B --match` — semantic diff driven by the semdiff `match`
+// attribute: matched regions (shared id) are the common part (summarized);
+// unmatched nodes (match=0) are the actual differences, printed `-` for ref-only
+// and `+` for impl-only. Falls back with a hint when neither side was marked.
+void tool_diff_match_lg(Options& opts, const std::vector<std::string>& lg_dirs) {
+  auto   ga    = tool_select_graphs(lg_dirs[0], opts);
+  auto   gb    = tool_select_graphs(lg_dirs[1], opts);
+  size_t pairs = std::min(ga.size(), gb.size());
+
+  bool saw_match = false;
+  for (size_t i = 0; i < pairs; ++i) {
+    if (ga[i]->has_attr(livehd::attrs::match)) {  // a side was marked by semdiff
+      saw_match = true;
+    }
+  }
+  if (!saw_match) {
+    std::string hint =
+        "-- no `match` attribute found; run `lhd semdiff --ref lg:… --impl lg:…` first to mark correspondences, "
+        "then `lhd tool diff … --match`\n";
+    std::fwrite(hint.data(), 1, hint.size(), stdout);
+    std::fflush(stdout);
+    return;
+  }
+
+  std::string out;
+  for (size_t i = 0; i < pairs; ++i) {
+    hhds::Graph* a = ga[i].get();
+    hhds::Graph* b = gb[i].get();
+    auto         ra = tool_match_nodes(a);
+    auto         rb = tool_match_nodes(b);
+
+    // Matched ids on each side (id != 0); a node is part of the common region.
+    std::set<uint32_t> ids_a;
+    std::set<uint32_t> ids_b;
+    uint32_t           ma = 0;
+    uint32_t           mb = 0;
+    for (const auto& r : ra) {
+      if (r.id != 0) {
+        ids_a.insert(r.id);
+        ++ma;
+      }
+    }
+    for (const auto& r : rb) {
+      if (r.id != 0) {
+        ids_b.insert(r.id);
+        ++mb;
+      }
+    }
+    size_t shared = 0;
+    for (uint32_t id : ids_a) {
+      if (ids_b.contains(id)) {
+        ++shared;
+      }
+    }
+
+    out += std::format("//---- tool diff (match) {} vs {}\n", a->get_name(), b->get_name());
+    out += std::format("  matched: {} regions ({} ref nodes, {} impl nodes)\n", shared, ma, mb);
+    for (const auto& r : ra) {
+      if (r.id == 0) {
+        out += std::format("  - {}\n", r.line);
+      }
+    }
+    for (const auto& r : rb) {
+      if (r.id == 0) {
+        out += std::format("  + {}\n", r.line);
+      }
+    }
+    uint32_t ta = static_cast<uint32_t>(ra.size());
+    uint32_t tb = static_cast<uint32_t>(rb.size());
+    uint32_t tot = ta + tb;
+    double   sim = tot == 0 ? 1.0 : static_cast<double>(ma + mb) / static_cast<double>(tot);
+    out += std::format("  {}/{} ref matched, {}/{} impl matched, similarity {:.3f}\n", ma, ta, mb, tb, sim);
+  }
+  std::fwrite(out.data(), 1, out.size(), stdout);
+  std::fflush(stdout);
+}
+
 void tool_diff_lg(Options& opts, const std::vector<std::string>& lg_dirs, const std::vector<Tool_filter>& filters) {
   if (lg_dirs.size() != 2) {
     throw Lhd_error{"usage", "tool diff takes exactly two lg: inputs", "e.g. `lhd tool diff lg:before lg:after --attr color`"};
+  }
+  if (opts.tool_match) {  // semdiff `match`-attribute visualization
+    tool_diff_match_lg(opts, lg_dirs);
+    return;
   }
   Tool_target tgt   = parse_tool_target(opts.tool_target);
   auto        dcols = tool_display_cols(opts, tgt);
@@ -3565,6 +3775,8 @@ void run_engine_command(Options& opts, Result& res) {
     compile_command(opts, res);
   } else if (opts.command == "lec") {
     lec_command(opts, res);
+  } else if (opts.command == "semdiff") {
+    semdiff_command(opts, res);
   } else if (opts.command == "scan") {
     scan_command(opts, res);
   } else if (opts.command == "tool") {

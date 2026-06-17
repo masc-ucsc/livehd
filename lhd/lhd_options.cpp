@@ -353,6 +353,10 @@ Options parse_args(int argc, char** argv) {
       }
     } else if (a == "--attr") {  // explicit display column CSV
       opts.tool_attr = need_value(a, i, argc, argv);
+    } else if (a == "-v" || a == "--invert-match") {  // `tool grep -v`: keep non-matching records
+      opts.tool_invert = true;
+    } else if (a == "--match") {  // `tool diff --match`: visualize via the semdiff `match` attribute
+      opts.tool_match = true;
     } else if (a == "--max" || a == "--hops" || a == "-C" || a == "--context") {  // row cap / focus radius / diff context
       auto   v        = std::string{need_value(a, i, argc, argv)};
       size_t consumed = 0;
@@ -487,8 +491,8 @@ Options parse_args(int argc, char** argv) {
                         "the `check` command merged into `lec` — use `lhd lec ... --set lec.solver=lgyosys`",
                         "lec defaults to the in-process cvc5 solver; lgyosys is the yosys/lgcheck backend"};
       }
-      if (a == "compile" || a == "lec" || a == "scan" || a == "lsp" || a == "list" || a == "describe" || a == "version"
-          || a == "help" || a == "tool" || a == "pass") {
+      if (a == "compile" || a == "lec" || a == "semdiff" || a == "scan" || a == "lsp" || a == "list" || a == "describe"
+          || a == "version" || a == "help" || a == "tool" || a == "pass") {
         // tool keeps its positionals raw and ORDERED in opts.files: the verb
         // (cat/grep/diff/tree), the filter terms (name:/color:/from:…), and the
         // ln:/lg: inputs all keep their place — tool_command classifies them.

@@ -311,6 +311,32 @@ inline void del_hier_color(const hhds::Node_class& node) {
   }
 }
 
+// Per-node / per-pin structural-correspondence id (pass/semdiff). 0 is a real,
+// greppable value meaning "no counterpart" — distinct from the attribute being
+// absent. semdiff stamps every node/driver-pin (0 or a shared id) so the diff
+// is greppable end to end (`tool grep match=0`).
+inline void set_match(const hhds::Node_class& node, uint32_t id) { node.attr(livehd::attrs::match).set(id); }
+inline void set_match(const hhds::Pin_class& pin, uint32_t id) {
+  if (!pin.is_invalid()) {
+    pin.attr(livehd::attrs::match).set(id);
+  }
+}
+[[nodiscard]] inline bool     has_match(const hhds::Node_class& node) { return node.attr(livehd::attrs::match).has(); }
+[[nodiscard]] inline uint32_t match_of(const hhds::Node_class& node) {
+  auto a = node.attr(livehd::attrs::match);
+  return a.has() ? a.get() : 0;
+}
+[[nodiscard]] inline bool has_match(const hhds::Pin_class& pin) {
+  return !pin.is_invalid() && pin.attr(livehd::attrs::match).has();
+}
+[[nodiscard]] inline uint32_t match_of(const hhds::Pin_class& pin) {
+  if (pin.is_invalid()) {
+    return 0;
+  }
+  auto a = pin.attr(livehd::attrs::match);
+  return a.has() ? a.get() : 0;
+}
+
 // Unified color reader for pass/color + pass/partition: prefer the per-instance
 // hier color when present (hier mode), else fall back to the flat color. A
 // return of 0 (NO_COLOR) means uncolored.

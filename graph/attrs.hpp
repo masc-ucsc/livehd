@@ -108,6 +108,20 @@ struct coloring_info_t {
 };
 inline constexpr coloring_info_t coloring_info{};
 
+// Per-node / per-pin structural-correspondence id (pass/semdiff, task
+// 2f-semdiff). Two corresponding nodes across a ref/impl pair share one id; a
+// node with no counterpart gets 0. Stamped on the node AND its driver pin(s)
+// with the same id so both node-target and pin-target `tool grep` work.
+//
+// SPARSE layout (the flat_storage default), *not* dense: a dense store reserves
+// value_type{} (== 0) as the "absent" sentinel, but here 0 must be a real,
+// greppable value (the unmatched marker `match=0`), so it stays sparse.
+struct match_t {
+  using value_type = uint32_t;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr match_t match{};
+
 // Per-node source provenance is hhds::attrs::srcid (one uint64 SourceId
 // resolved through the graph's Source_locator) — the old livehd::attrs::loc
 // (with its pos1=line-vs-byte mismatch) and livehd::attrs::source string pair

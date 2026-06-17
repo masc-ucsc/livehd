@@ -16,7 +16,7 @@ namespace lhd {
 namespace {
 
 constexpr std::string_view kSteps =
-    R"json(["compile verilog","compile pyrope","lec","scan","tool","pass","lsp"])json";
+    R"json(["compile verilog","compile pyrope","lec","semdiff","scan","tool","pass","lsp"])json";
 constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
 constexpr std::string_view kEmitKinds =
     R"json(["ln","lg","verilog","pyrope","lnast-dump","graphviz","metadata","results","diagnostics"])json";
@@ -264,6 +264,11 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"lec","description":"Logic equivalence check (LEC): prove_equal(ref, impl). Sides are verilog:/pyrope:/ln:/lg: (or a bare .v/.sv/.prp; kind inferred), loaded/elaborated to LGraphs (verilog via --reader, default slang). The --set lec.solver knob picks the backend: cvc5 (default, in-process SMT), bitwuzla (in-process SMT), or lgyosys (inou/yosys/lgcheck, the former `lhd check`). Other engine knobs are --set lec.* (`lhd lec --help`)","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"set","type":"lec.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.v","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind","lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo"]})json");
     return 0;
   }
+  if (name == "semdiff") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"semdiff","description":"Structural diff/match (a structural LEC): structural_match(ref, impl) marks corresponding nodes/driver-pins of both lg: libraries with a shared `match` attribute (0 = no counterpart) and saves both back in place. v1 marks lg: libraries, so both sides must be lg:DIR (compile sources to lg: first). Inspect the diff with `lhd tool grep match=0 lg:impl` or visualize it with `lhd tool diff lg:ref lg:impl --match`. Knobs are --set semdiff.* (matching_names | id_granularity=pair|region)","args":{"required":[{"name":"impl","type":"lg:DIR"},{"name":"ref","type":"lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"set","type":"semdiff.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd semdiff --ref lg:gold --impl lg:opt --top adder","lhd semdiff --ref lg:gold --impl lg:opt --set semdiff.matching_names=true","lhd tool diff lg:gold lg:opt --match"]})json");
+    return 0;
+  }
   if (name == "compile" || name == "compile verilog" || name == "compile pyrope") {
     print_json_line(
         R"json({"schema_version":1,"name":"compile","description":"The single source->IR->netlist action (front-end + elaborate + synth fused: one action, one exit code). Takes Pyrope/(System)Verilog sources (language word optional: inferred from .prp/.v/.sv) and/or ln:/lg: IR inputs; positional ln:DIR supplies pre-elaborated imports, lg:DIR pre-compiled libraries; ln:/lg:-only inputs aggregate, optimize, or link. Verilog readers: yosys-verilog/yosys-slang go through yosys into lg:, slang is the direct SV -> LNAST front-end (ln:/lg: emits, the pyrope flow)","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"recipe","type":"enum","values":["O0","O1","O2"],"default":"O1"},{"name":"set","type":"pass.flag=value","repeatable":true},{"name":"depfile","type":"path"},{"name":"emit","type":"verilog:PATH|pyrope:PATH (or a bare .v/.sv/.prp; kind inferred)"},{"name":"emit-dir","type":"lg:DIR/|ln:DIR/|verilog:DIR/|pyrope:DIR/|lnast-dump:DIR/"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","ln","pyrope","lnast-dump"],"examples":["lhd compile foo.v --top foo --recipe O2 --emit verilog:net.v","lhd compile x.prp --emit net.v --emit-dir lg:x_lgs/","lhd compile x.prp --emit-dir ln:x_lns/","lhd compile ln:x_lns/ --recipe O1 --emit verilog:net.v","lhd compile lg:top_lgs/ --emit-dir lg:top_opt_lgs/"]})json");
@@ -315,7 +320,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "tool") {
     print_json_line(
-        R"json({"schema_version":1,"name":"tool","description":"Unified ln/lg inspector: `lhd tool <verb> [options] <inputs>` where a verb is cat|grep|diff|tree and inputs are ln:DIR / lg:DIR / verilog:FILE / pyrope:FILE (a bare .prp/.v/.sv source is the verilog:/pyrope: shortcut; the ln path takes sources). cat = structured dump; grep = filtered search (>=1 filter, may span libraries); diff = unified-diff of two inputs; tree = instance hierarchy (add --target kind:register / --target kind:memory, repeatable, to also list those nodes inside each module — registers/memories on the same hierarchy; any Ntype name also matches). lg options: --target node|pin|edge|all (default all) or tree's kind:<X>, --attr CSV, --max N, --hier [N], --top M; filters are field=value terms (name=/kind=/id=/color=/bits=/from=/to=; ':' also accepted but Pyrope reads it as a type; strings substring|==exact|~regex; numeric >,<,>=,<=,a..b; =nil; a bare term like 'get_mask' has no field and matches any column plus the node/pin identity). Prints to stdout (--diag-fmt jsonl for machine form). Replaces the former ln.cat/ln.diff","args":{"required":[{"name":"verb","type":"cat|grep|diff|tree","positional":true},{"name":"inputs","type":"ln:DIR|lg:DIR|verilog:FILE|pyrope:FILE|.prp|.v|.sv|field=value|term","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"target","type":"node|pin|edge|all|kind:<X>"},{"name":"attr","type":"csv"},{"name":"max","type":"int"},{"name":"hier","type":"int?"}]},"inputs":["ln","lg","pyrope","verilog"],"outputs":["stdout"],"examples":["lhd tool cat lg:dir --top m","lhd tool grep get_mask lg:dir","lhd tool grep color=nil lg:dir","lhd tool diff lg:before lg:after --attr color","lhd tool tree lg:dir --top m","lhd tool tree lg:dir --top m --target kind:register --target kind:memory","lhd tool cat x.prp","lhd tool diff old.prp new.prp"]})json");
+        R"json({"schema_version":1,"name":"tool","description":"Unified ln/lg inspector: `lhd tool <verb> [options] <inputs>` where a verb is cat|grep|diff|tree and inputs are ln:DIR / lg:DIR / verilog:FILE / pyrope:FILE (a bare .prp/.v/.sv source is the verilog:/pyrope: shortcut; the ln path takes sources). cat = structured dump; grep = filtered search (>=1 filter, may span libraries; -v inverts the match); diff = unified-diff of two inputs (--match: visualize the semdiff `match` attribute — matched regions summarized, unmatched nodes shown -/+ ); tree = instance hierarchy (add --target kind:register / --target kind:memory, repeatable, to also list those nodes inside each module — registers/memories on the same hierarchy; any Ntype name also matches). lg options: --target node|pin|edge|all (default all) or tree's kind:<X>, --attr CSV, --max N, --hier [N], --top M; filters are field=value terms (name=/kind=/id=/color=/match=/bits=/from=/to=; ':' also accepted but Pyrope reads it as a type; strings substring|==exact|~regex; numeric >,<,>=,<=,a..b; =nil; a bare term like 'get_mask' has no field and matches any column plus the node/pin identity). Prints to stdout (--diag-fmt jsonl for machine form). Replaces the former ln.cat/ln.diff","args":{"required":[{"name":"verb","type":"cat|grep|diff|tree","positional":true},{"name":"inputs","type":"ln:DIR|lg:DIR|verilog:FILE|pyrope:FILE|.prp|.v|.sv|field=value|term","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"target","type":"node|pin|edge|all|kind:<X>"},{"name":"attr","type":"csv"},{"name":"max","type":"int"},{"name":"hier","type":"int?"},{"name":"v","type":"flag (grep: invert match)"},{"name":"match","type":"flag (diff: visualize the semdiff match attribute)"}]},"inputs":["ln","lg","pyrope","verilog"],"outputs":["stdout"],"examples":["lhd tool cat lg:dir --top m","lhd tool grep get_mask lg:dir","lhd tool grep color=nil lg:dir","lhd tool grep -v match=0 lg:dir","lhd tool diff lg:before lg:after --attr color","lhd tool diff lg:gold lg:opt --match","lhd tool tree lg:dir --top m","lhd tool cat x.prp"]})json");
     return 0;
   }
   if (name == "dump") {
@@ -388,6 +393,10 @@ void print_general_help() {
       "               backend — cvc5 (default, in-process) | bitwuzla | lgyosys (yosys/lgcheck)\n"
       "               lhd lec --impl impl.prp --ref ref.v\n"
       "               lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo\n"
+      "  semdiff    structural diff/match (structural LEC): mark corresponding nodes of two lg: with a\n"
+      "               shared `match` attr (0 = no counterpart); grep/visualize the differing regions\n"
+      "               lhd semdiff --ref lg:gold --impl lg:opt --top adder\n"
+      "               lhd tool diff lg:gold lg:opt --match   # visualize  |  lhd tool grep match=0 lg:opt\n"
       "  scan       report each .prp file's import strings (the result's \"scan\" member)\n"
       "               lhd scan x.prp y.prp\n"
       "  tool       inspect ln:/lg: artifacts: cat | grep | diff | tree (stdout; --diag-fmt jsonl)\n"
@@ -566,6 +575,35 @@ int help_command(const Options& opts) {
     print_options_section({"lec."});
     return 0;
   }
+  if (topic == "semdiff") {
+    std::print(
+        "lhd semdiff — structural diff/match (a structural LEC)\n"
+        "\n"
+        "usage: lhd semdiff --ref lg:DIR --impl lg:DIR [flags]\n"
+        "  Establishes a structural correspondence between the two designs: corresponding\n"
+        "  nodes (and their driver pins) get a shared `match` id, a node with no counterpart\n"
+        "  gets 0. Anchored frontier propagation, meet-in-the-middle: forward from inputs\n"
+        "  (commutative-aware), then backward from outputs for whatever is still unmatched.\n"
+        "  Both lg: libraries are marked in place and saved, so the diff is greppable and\n"
+        "  visualizable. v1 marks lg: libraries, so both sides must be lg:DIR (compile first).\n"
+        "\n"
+        "flags:\n"
+        "  --ref lg:DIR   --impl lg:DIR\n"
+        "  --top T        --ref-top T   --impl-top T\n"
+        "  --set semdiff.matching_names=true   anchor internal flops/mems by hierarchical name\n"
+        "  --set semdiff.id_granularity=region one id per connected matched region (else pair)\n"
+        "\n"
+        "inspect the result:\n"
+        "  lhd tool grep match=0 lg:impl       # what in impl has no counterpart (the diff)\n"
+        "  lhd tool grep -v match=0 lg:ref     # what in ref matched\n"
+        "  lhd tool diff lg:ref lg:impl --match  # visualize: matched regions + -/+ differences\n"
+        "\n"
+        "examples:\n"
+        "  lhd semdiff --ref lg:gold --impl lg:opt --top adder\n"
+        "  lhd semdiff --ref lg:gold --impl lg:opt --set semdiff.matching_names=true\n");
+    print_options_section({"semdiff."});
+    return 0;
+  }
   if (topic == "scan") {
     std::print(
         "lhd scan — Pyrope import/dependency discovery (for depfile/BUILD generators)\n"
@@ -585,8 +623,8 @@ int help_command(const Options& opts) {
         "  inputs are ln:DIR / lg:DIR / verilog:FILE / pyrope:FILE (a bare .prp/.v/.sv\n"
         "  source is the verilog:/pyrope: shortcut; the ln path takes sources).\n"
         "  cat   structured dump of one input (attributes shown by default)\n"
-        "  grep  filtered search (>=1 filter; may span multiple lg: libraries)\n"
-        "  diff  unified-diff of two inputs (-C n text-line context)\n"
+        "  grep  filtered search (>=1 filter; may span multiple lg: libraries; -v inverts)\n"
+        "  diff  unified-diff of two inputs (-C n text-line context; --match: semdiff view)\n"
         "  tree  instance hierarchy rooted at --top\n"
         "\n"
         "lg options:\n"
@@ -601,14 +639,16 @@ int help_command(const Options& opts) {
         "  matches exactly. Default (no kind) = the bare instance tree.\n"
         "\n"
         "filters (AND-combined): a bare term matches any column + identity (grep get_mask),\n"
-        "  or field=value: name=Mult  kind=mux  id=12  color=nil  bits>8  bits=8..16  from=A\n"
-        "  ('=' preferred — Pyrope reads ':' as a type; ':' still works; strings ==exact, ~regex)\n"
+        "  or field=value: name=Mult  kind=mux  id=12  color=nil  match=0  bits>8  bits=8..16  from=A\n"
+        "  ('=' preferred — Pyrope reads ':' as a type; ':' still works; strings ==exact, ~regex).\n"
+        "  grep -v inverts (keep records that do NOT match — `grep -v match=0` = the matched part).\n"
         "\n"
         "examples:\n"
         "  lhd tool cat lg:dir --top m\n"
         "  lhd tool grep color=nil lg:dir            # nodes pass.color left uncolored\n"
+        "  lhd tool grep match=0 lg:dir              # nodes semdiff found no counterpart for\n"
         "  lhd tool diff lg:before lg:after --attr color\n"
-        "  lhd tool tree lg:dir --top m\n"
+        "  lhd tool diff lg:gold lg:opt --match      # visualize the semdiff structural diff\n"
         "  lhd tool tree lg:dir --top m --target kind:register --target kind:memory\n"
         "  lhd tool cat x.prp          lhd tool diff old.prp new.prp   # the former ln.cat/ln.diff\n");
     return 0;
