@@ -18,8 +18,6 @@ protected:
   std::map<std::string, Eprp_method, eprp_casecmp_str> methods;
 
   void parser_error_int(std::string_view text) const;
-  void parser_warn_int(std::string_view text) const;
-  void parser_info_int(std::string_view text) const;
 
 public:
   Eprp();
@@ -38,20 +36,6 @@ public:
       eprp.parser_error_int(what());
     };
   };
-
-  template <typename... Args>
-  void parser_warn(std::format_string<Args...> format, Args&&... args) const {
-    parser_warn_int(std::format(format, args...));
-  }
-  void parser_warn(std::string_view txt) const { parser_warn_int(txt); }
-
-  template <typename... Args>
-  void parser_info(std::format_string<Args...> format, Args&&... args) const {
-    parser_info_int(std::format(format, args...));
-  }
-  // NOTE: historical behavior — the string_view info overload routes through
-  // the WARNING path (diag sink severity warning), and callers depend on it.
-  void parser_info(std::string_view txt) const { parser_warn_int(txt); }
 
   void register_method(const Eprp_method& method) {
     assert(methods.find(std::string(method.get_name())) == methods.end());
