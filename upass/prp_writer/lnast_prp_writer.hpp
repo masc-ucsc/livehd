@@ -172,6 +172,9 @@ private:
   // write to such a name must carry a `mut`.  `___`-prefixed compiler temps
   // auto-declare and are never tracked.
   std::unordered_set<std::string> declared_;
+  // Vars whose nested `mut` declare was hoisted to a `mut X = 0` at the function
+  // top (see emit_module): write_declare drops the in-place nested declare.
+  std::unordered_set<std::string> suppress_decl_;
 
   // Storage-class prefix to print before an assignment LHS: a pending
   // attr_set-type keyword if one is queued, else "mut " on the first write to

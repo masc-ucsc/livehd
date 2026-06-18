@@ -2,9 +2,11 @@
 
 #include "lnast_prp_writer.hpp"
 
+#include <algorithm>
 #include <format>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -302,6 +304,68 @@ void Lnast_prp_writer::write_module() {
   auto stmts_nid = lnast->get_sibling_next(io_nid);
   collect_folded_attrs(stmts_nid);  // gather reg/mem attrs to fold into declares
   if (!stmts_nid.is_invalid()) {
+    // Pre-declare body `mut` vars that are WRITTEN but have no `declare` node.
+    // Their first write would otherwise emit `mut X` inside whatever (possibly
+    // nested) scope it lands in; a later write in a SIBLING scope then references
+    // an out-of-scope X ("assignment to undeclared variable"). Hoisting
+    // `mut X = 0` to the function top makes every write in-scope. Vars that DO
+    // have a declare node (regs, memories, explicit `mut`) are skipped — they
+    // are emitted by their declare (the reg/mem hoist pass below).
+    {
+      std::unordered_set<std::string> top_decl, nonmut_decl, nested_mut_decl, store_lhs;
+      auto                            scan = [&](auto&& self, Lnast_nid n, bool top) -> void {
+        for (auto c = lnast->get_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+          const auto t = lnast->get_type(c);
+          auto       v = lnast->get_child(c);
+          const bool v_ref = !v.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(v));
+          if (v_ref && Lnast_ntype::is_declare(t)) {
+            auto        nm   = std::string(strip_prefix(lnast->get_name(v)));
+            auto        c1   = lnast->get_sibling_next(v);
+            auto        c2   = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
+            std::string mode = (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2)))
+                                   ? std::string(lnast->get_name(c2))
+                                   : std::string("mut");
+            const bool  is_mut = mode.rfind("mut", 0) == 0;
+            if (top) {
+              top_decl.insert(nm);
+            }
+            if (!is_mut) {
+              nonmut_decl.insert(nm);  // reg/latch/const: never hoist as `mut`
+            } else if (!top) {
+              nested_mut_decl.insert(nm);
+            }
+          } else if (v_ref && Lnast_ntype::is_store(t) && !is_tmp(lnast->get_name(v))) {
+            store_lhs.insert(std::string(strip_prefix(lnast->get_name(v))));
+          }
+          self(self, c, false);
+        }
+      };
+      scan(scan, stmts_nid, true);
+      // A combinational `mut` var written/declared in a nested scope but used in
+      // SIBLING scopes must be declared at the function top (its first write
+      // otherwise emits `mut` inside one scope, leaving sibling writes out of
+      // scope). Hoist `mut X = 0` for: store-driven vars with no declare, and
+      // vars with a NESTED `mut` declare. Skip top-declared / io / reg|latch|const.
+      std::unordered_set<std::string> need;
+      for (const auto& nm : store_lhs) {
+        if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm)) {
+          need.insert(nm);
+        }
+      }
+      for (const auto& nm : nested_mut_decl) {
+        if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm)) {
+          need.insert(nm);
+          suppress_decl_.insert(nm);  // its in-place nested `mut` declare is dropped
+        }
+      }
+      std::vector<std::string> pre(need.begin(), need.end());
+      std::sort(pre.begin(), pre.end());
+      for (const auto& nm : pre) {
+        print_indent();
+        os << "mut " << nm << " = 0\n";
+        declared_.insert(nm);
+      }
+    }
     // Emit top-level `declare` statements first.  The slang reader places an
     // `attr_set` (e.g. `data.[fwd]=0`, a reg's `reset_pin`/`sync`/`initial`)
     // *before* the reg/memory `declare` it qualifies; Pyrope rejects an
@@ -616,6 +680,12 @@ void Lnast_prp_writer::write_if() {
 // write) is what keeps value-less declares — bare `var x:u8`, fully-folded
 // `const z` — present so later reads still resolve.
 void Lnast_prp_writer::write_declare() {
+  // This var's declaration was hoisted to a `mut X = 0` at the function top
+  // (it is written across sibling scopes); drop the in-place nested declare.
+  if (auto vc = lnast->get_child(cur); !vc.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(vc))
+      && suppress_decl_.count(std::string(strip_prefix(lnast->get_name(vc))))) {
+    return;
+  }
   // A declare carrying a trailing `stages` node is the `stage[N] x = v`
   // lowering (upass/pipe inserts `declare(x, type, reg, stages(min,max))` with
   // no value child).  Record the depth and suppress the bare declare — the
