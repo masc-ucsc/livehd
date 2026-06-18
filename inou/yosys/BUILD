@@ -75,8 +75,6 @@ VERILOG_TESTS = glob(
     ],
 )
 
-# The full corpus (fixme/long/nocheck included): the //inou/slang ladder pins
-# an expectation for EVERY source, so they all need exported labels.
 ALL_VERILOG_TESTS = glob(["tests/*.v"])
 
 filegroup(

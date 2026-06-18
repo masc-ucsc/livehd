@@ -23,7 +23,6 @@ cc_library(
 cc_test(
     name = "sample_test2",
     srcs = ["sample_test2.cpp"],
-    # tags = [ "fixme", ],
     deps = [
         ":pass_sample",
         "@googletest//:gtest_main",
