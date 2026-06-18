@@ -539,6 +539,28 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
       emit_unsupported(expr.sourceRange, "unsupported-member-access", "only packed-struct field access is supported");
       return "0";
     }
+    // Field read of a struct-element (tuple) memory: `mem[idx].field` lowers to
+    // a fused per-field tuple_get (detuple -> tuple_get(d, mem.field, idx)),
+    // avoiding a whole-element reconstruct + re-extract.
+    if (ma.value().kind == ExpressionKind::ElementSelect) {
+      const auto& es       = ma.value().as<slang::ast::ElementSelectExpression>();
+      const auto* base_sym = resolve_base_symbol(es.value());
+      if (base_sym != nullptr && !flat_port_syms_.contains(base_sym)) {
+        auto mit = mem_info_.find(base_sym);
+        if (mit != mem_info_.end() && mit->second.is_tuple) {
+          const auto& mi    = mit->second;
+          const auto& field = ma.member.as<slang::ast::FieldSymbol>();
+          if (const auto* f = find_tuple_field(mi, field.name)) {
+            auto idx = to_int_value(lower_rvalue(es.selector()));
+            if (mi.lower != 0) {
+              idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
+            }
+            auto d = emit_field_read_chain(lname_of(*base_sym), idx, f->name);
+            return f->is_signed ? builder_.create_sext_stmts(d, std::to_string(f->bits - 1)) : d;
+          }
+        }
+      }
+    }
     const auto& field = ma.member.as<slang::ast::FieldSymbol>();
     auto        bi    = tinfo(*ma.value().type);
     auto        p     = to_pattern(to_int_value(lower_rvalue(ma.value())), bi.bits, bi.is_signed);

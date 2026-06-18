@@ -349,6 +349,8 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   auto saved_bools         = std::move(bool_values_);
   auto saved_mem_info      = std::move(mem_info_);
   auto saved_reg_declared  = std::move(reg_declared_);
+  auto saved_tuple_names   = std::move(tuple_type_names_);
+  auto saved_emitted_types = std::move(emitted_tuple_types_);
   auto saved_local_cnt     = local_cnt_;
 
   builder_ = Lnast_builder();
@@ -368,6 +370,8 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   bool_values_.clear();
   mem_info_.clear();
   reg_declared_.clear();
+  tuple_type_names_.clear();
+  emitted_tuple_types_.clear();
   local_cnt_ = 0;
 
   body_ = body;
@@ -479,6 +483,8 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   bool_values_           = std::move(saved_bools);
   mem_info_              = std::move(saved_mem_info);
   reg_declared_          = std::move(saved_reg_declared);
+  tuple_type_names_      = std::move(saved_tuple_names);
+  emitted_tuple_types_   = std::move(saved_emitted_types);
   local_cnt_             = saved_local_cnt;
 
   return ok;
@@ -578,6 +584,54 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
     return true;
   }
 
+  // STRUCT-element memory -> a TUPLE-typed memory `reg mem:[N]T`. The reader
+  // emits a `type T=(...)` region + a `comp_type_array(ref T,[N])` declare;
+  // upass.detuple splits it into per-field scalar memories `mem.field:[N]w`.
+  // Every element access (field, and decomposed whole-element) lowers to
+  // field-level tuple ops, so detuple only ever sees field-level ops.
+  if (elem.isStruct()) {
+    const auto& st = elem.as<slang::ast::PackedStructType>();
+    Mem_info    mi;
+    mi.lower       = arr.range.lower();
+    mi.elem_bits   = ei.bits;
+    mi.elem_signed = false;
+    mi.size        = arr.range.width();
+    mi.is_tuple    = true;
+    mi.type_name   = tuple_type_name(elem);
+    for (const auto& f : st.membersOfType<slang::ast::FieldSymbol>()) {
+      auto fi = tinfo(f.getType());
+      mi.fields.push_back({std::string(f.name), static_cast<int64_t>(f.bitOffset), fi.bits, fi.is_signed});
+    }
+    mem_info_.emplace(&sym, mi);
+    mem_syms_.insert(&sym);
+
+    const auto& rec  = mem_info_.at(&sym);
+    auto        name = lname_of(sym);
+    auto&       ln   = *builder_.lnast;
+    set_pending_loc(sym.location);
+    emit_tuple_typedef(rec);
+    // Verilog nonblocking memory reads see old contents (fwd=0). detuple does
+    // not split attr_set, so emit the attr on each post-split `mem.field` name
+    // directly (it lands before the per-field declares detuple synthesizes).
+    if (is_reg) {
+      for (const auto& f : rec.fields) {
+        auto aidx = builder_.add_child(Lnast_ntype::create_attr_set());
+        ln.add_child(aidx, Lnast_node::create_ref(absl::StrCat(name, ".", f.name)));
+        ln.add_child(aidx, Lnast_node::create_const("fwd"));
+        ln.add_child(aidx, Lnast_node::create_const("0"));
+      }
+    }
+    auto didx = builder_.add_child(Lnast_ntype::create_declare());
+    ln.add_child(didx, Lnast_node::create_ref(name));
+    auto tidx = ln.add_child(didx, Lnast_ntype::create_comp_type_array());
+    ln.add_child(tidx, Lnast_node::create_ref(rec.type_name));
+    ln.add_child(tidx, Lnast_node::create_const(absl::StrCat("[", rec.size, "]")));
+    ln.add_child(didx, Lnast_node::create_const(is_reg ? "reg" : "mut"));
+    ln.add_child(didx, Lnast_node::create_const("nil"));
+    clear_pending_loc();
+    return true;
+  }
+
   Mem_info mi;
   mi.lower       = arr.range.lower();
   mi.elem_bits   = ei.bits;
@@ -622,6 +676,59 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
   }
   clear_pending_loc();
   return true;
+}
+
+// Stable per-module name for a struct element type (keyed by the canonical type
+// pointer so two memories of the same struct reuse one typedef). Uses the SV
+// type name when present; synthesizes a unique one for anonymous structs.
+std::string Slang_context::tuple_type_name(const slang::ast::Type& elem) {
+  auto [it, ins] = tuple_type_names_.try_emplace(&elem, std::string{});
+  if (ins) {
+    std::string n{elem.name};
+    if (n.empty()) {
+      n = absl::StrCat("__styp_", tuple_type_names_.size());
+    }
+    it->second = std::move(n);
+  }
+  return it->second;
+}
+
+// Emit a `type T=(...)` region (once per type per module) in the no-default form
+// upass.detuple's resolve_one_type recognizes:
+//   declare(ref T, prim_type_none, const 'type')
+//   type_spec(ref field, prim_type_int(max,min))            // one per field
+//   tuple_add(ref Ttemp, ref field0, ref field1, …)         // field order
+//   store(ref T, ref Ttemp)                                 // region terminator
+void Slang_context::emit_tuple_typedef(const Mem_info& mi) {
+  if (!mi.is_tuple || mi.type_name.empty() || mi.fields.empty()) {
+    return;
+  }
+  if (!emitted_tuple_types_.insert(mi.type_name).second) {
+    return;  // already emitted in this module
+  }
+  auto& ln = *builder_.lnast;
+
+  auto d = builder_.add_child(Lnast_ntype::create_declare());
+  ln.add_child(d, Lnast_node::create_ref(mi.type_name));
+  ln.add_child(d, Lnast_ntype::create_prim_type_none());
+  ln.add_child(d, Lnast_node::create_const("type"));
+
+  for (const auto& f : mi.fields) {
+    auto ts = builder_.add_child(Lnast_ntype::create_type_spec());
+    ln.add_child(ts, Lnast_node::create_ref(f.name));
+    emit_prim_type_int(ts, f.bits, f.is_signed);
+  }
+
+  auto ttemp = builder_.create_lnast_tmp();
+  auto ta    = builder_.add_child(Lnast_ntype::create_tuple_add());
+  ln.add_child(ta, Lnast_node::create_ref(ttemp));
+  for (const auto& f : mi.fields) {
+    ln.add_child(ta, Lnast_node::create_ref(f.name));
+  }
+
+  auto st = builder_.add_child(Lnast_ntype::create_store());
+  ln.add_child(st, Lnast_node::create_ref(mi.type_name));
+  ln.add_child(st, Lnast_node::create_ref(ttemp));
 }
 
 // State regs declare once at module start, output regs included (ports sit

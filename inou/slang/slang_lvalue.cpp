@@ -158,6 +158,30 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
         emit_unsupported(lhs.sourceRange, "unsupported-lhs-member", "only packed-struct field targets are supported");
         return;
       }
+      // Field write into a struct-element (tuple) memory: `mem[idx].field <= v`.
+      // Lower to a field store on the tuple memory (detuple -> store(mem.field,
+      // idx, v)); a memory base would otherwise fall through to the unsupported
+      // nested-lvalue diagnostic (resolve_packed_lvalue rejects a memory base).
+      if (ma.value().kind == ExpressionKind::ElementSelect) {
+        const auto& es       = ma.value().as<slang::ast::ElementSelectExpression>();
+        const auto* base_sym = resolve_base_symbol(es.value());
+        if (base_sym != nullptr && !flat_port_syms_.contains(base_sym)) {
+          auto mit = mem_info_.find(base_sym);
+          if (mit != mem_info_.end() && mit->second.is_tuple) {
+            const auto& mi    = mit->second;
+            const auto& field = ma.member.as<slang::ast::FieldSymbol>();
+            if (const auto* f = find_tuple_field(mi, field.name)) {
+              auto idx = to_int_value(lower_rvalue(es.selector()));
+              if (mi.lower != 0) {
+                idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
+              }
+              note_write(*base_sym, current_assign_nonblocking_, lhs.sourceRange.start());
+              emit_field_store(lname_of(*base_sym), idx, f->name, to_pattern(to_int_value(rhs), f->bits, f->is_signed));
+              return;
+            }
+          }
+        }
+      }
       Packed_lv lv;
       if (resolve_packed_lvalue(lhs, lv)) {
         emit_packed_rmw(lv, rhs, lhs.sourceRange);
@@ -225,6 +249,46 @@ void Slang_context::assign_to_pattern(const slang::ast::Expression& lhs,
   }
 }
 
+const Slang_context::Mem_info::Field* Slang_context::find_tuple_field(const Mem_info& mi, std::string_view name) const {
+  for (const auto& f : mi.fields) {
+    if (f.name == name) {
+      return &f;
+    }
+  }
+  return nullptr;
+}
+
+// store(ref 'mem', idx, const 'field', val): the PRE-detuple field-write shape
+// (detuple rewrites it to the 3-child store('mem.field', idx, val)).
+void Slang_context::emit_field_store(const std::string& mem_name, const std::string& idx, const std::string& field_name,
+                                     const std::string& val) {
+  auto& ln = *builder_.lnast;
+  auto  st = builder_.add_child(Lnast_ntype::create_store());
+  ln.add_child(st, Lnast_node::create_ref(mem_name));
+  builder_.add_value_child_pub(st, idx);
+  ln.add_child(st, Lnast_node::create_const(field_name));
+  builder_.add_value_child_pub(st, val);
+}
+
+// tuple_get(t, mem, idx); tuple_get(d, t, const 'field'): the PRE-detuple
+// field-read chain (detuple fuses it to tuple_get(d, 'mem.field', idx)).
+// Returns the unsigned field-width temp `d`.
+std::string Slang_context::emit_field_read_chain(const std::string& mem_name, const std::string& idx,
+                                                 const std::string& field_name) {
+  auto& ln  = *builder_.lnast;
+  auto  tg1 = builder_.add_child(Lnast_ntype::create_tuple_get());
+  auto  t1  = builder_.create_lnast_tmp();
+  ln.add_child(tg1, Lnast_node::create_ref(t1));
+  ln.add_child(tg1, Lnast_node::create_ref(mem_name));
+  builder_.add_value_child_pub(tg1, idx);
+  auto tg2 = builder_.add_child(Lnast_ntype::create_tuple_get());
+  auto t2  = builder_.create_lnast_tmp();
+  ln.add_child(tg2, Lnast_node::create_ref(t2));
+  ln.add_child(tg2, Lnast_node::create_ref(t1));
+  ln.add_child(tg2, Lnast_node::create_const(field_name));
+  return t2;
+}
+
 // Unpacked-array (memory) element access (2s-D). Reads lower to
 // tuple_get(dst, mem, idx) = one read port per site; writes to the 3-child
 // store(mem, idx, val) = one write port per site (enable = branch path
@@ -250,6 +314,23 @@ std::string Slang_context::lower_unpacked_read(const slang::ast::Expression& exp
   auto idx = to_int_value(lower_rvalue(es.selector()));
   if (mi.lower != 0) {
     idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
+  }
+
+  // Struct-element memory: reconstruct the packed element bus from per-field
+  // reads (the inverse of the whole-element write decomposition). The index is
+  // computed once and reused across the field reads.
+  if (mi.is_tuple) {
+    std::string acc;
+    auto        mem_name = lname_of(*base_sym);
+    for (const auto& f : mi.fields) {
+      auto fv     = emit_field_read_chain(mem_name, idx, f.name);  // unsigned f.bits temp
+      auto placed = to_pattern(fv, mi.elem_bits, false);
+      if (f.off != 0) {
+        placed = builder_.create_shl_stmts(placed, std::to_string(f.off));
+      }
+      acc = acc.empty() ? placed : builder_.create_bit_or_stmts({acc, placed});
+    }
+    return acc.empty() ? "0" : acc;
   }
 
   auto& ln  = *builder_.lnast;
@@ -288,6 +369,21 @@ void Slang_context::lower_unpacked_write(const slang::ast::Expression& lhs, cons
   if (mi.lower != 0) {
     idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
   }
+
+  // Struct-element memory whole-element write `mem[idx] <= rhs`: decompose into
+  // one field store per field. `rhs` is the packed element value (whatever its
+  // origin — struct literal, 'x, packed port bus, another element), so each
+  // field's value is the matching bit-slice. detuple routes each to mem.field.
+  if (mi.is_tuple) {
+    note_write(*base_sym, current_assign_nonblocking_, lhs.sourceRange.start());
+    auto p        = to_pattern(to_int_value(rhs), mi.elem_bits, false);
+    auto mem_name = lname_of(*base_sym);
+    for (const auto& f : mi.fields) {
+      emit_field_store(mem_name, idx, f.name, extract_field(p, f.off, f.bits));
+    }
+    return;
+  }
+
   auto val = to_pattern(to_int_value(rhs), mi.elem_bits, mi.elem_signed);
 
   note_write(*base_sym, current_assign_nonblocking_, lhs.sourceRange.start());

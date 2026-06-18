@@ -127,8 +127,39 @@ private:
     int     elem_bits   = 1;
     bool    elem_signed = false;
     int64_t size        = 0;
+    // A memory whose element is a packed STRUCT lowers to a TUPLE-typed memory
+    // (`reg mem:[N]T`); upass.detuple splits it into per-field scalar memories
+    // (`mem.field:[N]w`). The reader decomposes every element access into
+    // per-field tuple ops (4-child field `store`, 2-node `tuple_get` read
+    // chains) so detuple — which cannot bridge a packed port value — only ever
+    // sees field-level ops. `fields` carries each field's name, packed bit
+    // offset (slang FieldSymbol.bitOffset, LEC-critical), width and signedness.
+    struct Field {
+      std::string name;
+      int64_t     off       = 0;
+      int         bits      = 1;
+      bool        is_signed = false;
+    };
+    bool               is_tuple = false;
+    std::string        type_name;  // emitted typedef name (= comp_type_array element ref)
+    std::vector<Field> fields;
   };
   absl::flat_hash_map<const slang::ast::Symbol*, Mem_info> mem_info_;
+  // Per-module stable name for each struct element type (keyed by the canonical
+  // type pointer so two memories of the same struct share one typedef) and the
+  // set of typedef names already emitted into this module's stmts.
+  absl::flat_hash_map<const slang::ast::Type*, std::string> tuple_type_names_;
+  absl::flat_hash_set<std::string>                          emitted_tuple_types_;
+  std::string tuple_type_name(const slang::ast::Type& elem);
+  // Emit a `type T=(...)` region (once per type per module) in the no-default
+  // form upass.detuple resolves: declare(T,prim_type_none,'type') + per-field
+  // type_spec + tuple_add(Ttemp, field…) + store(T,Ttemp).
+  void emit_tuple_typedef(const Mem_info& mi);
+  // Per-field tuple-memory primitives (PRE-detuple shapes).
+  void        emit_field_store(const std::string& mem_name, const std::string& idx, const std::string& field_name,
+                               const std::string& val);
+  std::string emit_field_read_chain(const std::string& mem_name, const std::string& idx, const std::string& field_name);
+  const Mem_info::Field* find_tuple_field(const Mem_info& mi, std::string_view name) const;
   // Power-on memory contents harvested from `initial begin mem[k]=v; … end`
   // blocks (a pre-pass in lower_module, BEFORE the declares emit). Keyed by the
   // array symbol; the inner map is index→value. declare_unpacked emits these as
