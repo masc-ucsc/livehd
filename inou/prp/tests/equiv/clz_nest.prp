@@ -1,0 +1,30 @@
+/*
+:name: clz_nest
+:type: equiv
+:verilog_top: clz_nest.clz
+:pyrope_top: clz_nest.clz
+*/
+
+// Correct Pyrope reference for clz_nest.v (count-leading-zeros of a 10-bit
+// input).  Built as an ascending priority chain: the default is 10 (no bit
+// set), then each set bit overrides toward 0, with the MSB (io_in#[9]) checked
+// last so it wins -- the behavioral equivalent of the Verilog nested ternary.
+//
+// The Pyrope tolg path lowers this CORRECTLY, so prp-equiv-clz_nest LEC-PASSES
+// against the golden .v (read by yosys's own read_verilog), and prp-v2prp also
+// passes (slang reads the .v correctly).  Both PASS on purpose: they prove the
+// golden + the slang/pyrope path are right, isolating the bug to LiveHD's
+// `--reader yosys-verilog` front-end, which prp-yvr-clz_nest reproduces (REFUTED).
+comb clz(io_in:u10) -> (io_out:u4) {
+  io_out = 10                       // no leading 1 found -> all 10 bits are zero
+  if io_in#[0] { io_out = 9 }
+  if io_in#[1] { io_out = 8 }
+  if io_in#[2] { io_out = 7 }
+  if io_in#[3] { io_out = 6 }
+  if io_in#[4] { io_out = 5 }
+  if io_in#[5] { io_out = 4 }
+  if io_in#[6] { io_out = 3 }
+  if io_in#[7] { io_out = 2 }
+  if io_in#[8] { io_out = 1 }
+  if io_in#[9] { io_out = 0 }       // MSB checked last -> highest priority
+}

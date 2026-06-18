@@ -1,0 +1,28 @@
+/*
+:name: packed_assign
+:type: equiv_slang
+:verilog_top: packed_assign.pa
+:pyrope_top: packed_assign.pa
+*/
+
+// Correct Pyrope reference for packed_assign.v -- a packed 2-D array built with
+// a SystemVerilog `'{...}` assignment pattern, then runtime-indexed `g[sel]`.
+// For `wire [3:0][3:0] g = '{4'h2,4'h4,4'h8,4'h1}` the pattern fills index 3
+// first, so g[0]=1, g[1]=8, g[2]=4, g[3]=2 (verified against the slang reading).
+//
+// `:type: equiv_slang` (NOT plain equiv): yosys's own read_verilog CANNOT parse
+// the `'{...}` assignment pattern (`syntax error, unexpected OP_CAST`), so this
+// golden has NO yosys-readable form -- the same gap that makes the XiangShan
+// BlockCipherModule / HPerfCounter / UopInfoGen / SRT* / VFAlu / ... block
+// `--reader yosys-verilog` read-fails. It is excluded from prp-equiv / prp-v2prp
+// (both LEC via yosys read_verilog, which fails here) and is reproduced instead
+// by prp-yvr-packed_assign (the yosys-verilog read fails outright). `--reader
+// slang` and `--reader yosys-slang` read the `'{...}` pattern fine.
+comb pa(sel:u2) -> (z:u4) {
+  mut g:[4]u4 = (0, 0, 0, 0)   // mut-array init must be comptime; fill at runtime
+  g[0] = 1
+  g[1] = 8
+  g[2] = 4
+  g[3] = 2
+  z = g[sel]
+}
