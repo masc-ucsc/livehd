@@ -1,13 +1,13 @@
-# LoadBuffer — yosys+slang fails
+# LoadBuffer — prp gen fails
 
-kind=-
+kind=mod
 
 | stage | result |
 |---|---|
 | yosys+slang gate | FAIL |
-| --reader slang -> prp | FAIL |
-| slang -> lg | NA |
-| prp -> lg | NA |
+| --reader slang -> prp | PASS |
+| slang -> lg | PASS |
+| prp -> lg | FAIL |
 | yosys-slang -> lg | NA |
 | lec prp vs slang | NA |
 | lec prp vs yosys-slang | NA |
@@ -15,5 +15,5 @@ kind=-
 
 **First failure message:**
 ```
-nested non-variable assignment targets are not supported yet
+assignment to undeclared variable 'index' (declare it with `mut`/`const` first)
 ```

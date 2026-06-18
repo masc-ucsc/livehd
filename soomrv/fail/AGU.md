@@ -15,5 +15,5 @@ kind=-
 
 **First failure message:**
 ```
-nested non-variable assignment targets are not supported yet
+`!=` requires both operands to be the same type (isStore_s1:boolean vs <const>:integer)
 ```
