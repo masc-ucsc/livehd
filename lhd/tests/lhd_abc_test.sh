@@ -95,3 +95,19 @@ cat "$N/netv/"*.v "$N/modelsv/"*.v > "$N/impl.v"
 cat "$N/origv/"*.v > "$N/orig.v"
 run lec --set lec.solver=lgyosys --impl verilog:"$N/impl.v" --ref verilog:"$N/orig.v" --top "$TOP" --workdir "$N/c"
 echo "PASS: pass.abc runs WITHOUT a prior color pass (color-0 region, LEC-equivalent)"
+
+# ---------------------------------------------------------------------------
+# abc.rc script alias in `flow`: the library entry never sources abc.rc, so the
+# pass installs the standard scripts (resyn2, compress2rs, ...) as aliases. A
+# `flow="...resyn2..."` must resolve and still produce a LEC-equivalent netlist.
+# Reuses the colored lg + cell models + reference from the top of this test.
+# ---------------------------------------------------------------------------
+A="$W/alias"
+mkdir -p "$A"
+run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$A/net" --set abc.library="$LIB" \
+    --set abc.flow="strash; resyn2; &get -n; &dch -f; &nf {D}; &put" --workdir "$A/w1"
+run compile lg:"$A/net" --top "$TOP" --recipe O0 --emit-dir verilog:"$A/netv" --workdir "$A/w2"
+grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$A/netv/${TOP}__c"*.v || fail "no standard cells in the resyn2-mapped netlist (alias did not resolve?)"
+cat "$A/netv/"*.v "$W/modelsv/"*.v > "$A/impl.v"
+run lec --set lec.solver=lgyosys --impl verilog:"$A/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$A/c"
+echo "PASS: pass.abc resolves abc.rc script aliases in flow (resyn2, LEC-equivalent)"

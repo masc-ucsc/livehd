@@ -66,28 +66,46 @@ std::string brief_help(std::string_view help) {
   return out;
 }
 
-// Word-wrap `text` to `width` columns, each line prefixed with `indent`.
+// Word-wrap `text` to `width` columns, each line prefixed with `indent`. An
+// explicit '\n' in `text` is a hard break (kept as-is, then each segment is
+// independently word-wrapped) so a multi-line help string — e.g. the
+// pass.abc.flow command cheat-sheet — keeps its layout under `lhd describe`.
 void print_wrapped(std::string_view text, size_t width, std::string_view indent) {
-  std::string line;
-  size_t      pos = 0;
-  while (pos < text.size()) {
-    auto next = text.find(' ', pos);
-    auto word = text.substr(pos, next == std::string_view::npos ? std::string_view::npos : next - pos);
-    if (!line.empty() && line.size() + 1 + word.size() > width) {
-      std::print("{}{}\n", indent, line);
-      line.clear();
+  size_t seg_start = 0;
+  while (true) {
+    auto nl  = text.find('\n', seg_start);
+    auto seg = text.substr(seg_start, nl == std::string_view::npos ? std::string_view::npos : nl - seg_start);
+
+    if (seg.empty()) {
+      std::print("\n");  // a blank line in the source stays a blank line
+    } else {
+      std::string line;
+      size_t      pos = 0;
+      while (pos < seg.size()) {
+        auto next = seg.find(' ', pos);
+        auto word = seg.substr(pos, next == std::string_view::npos ? std::string_view::npos : next - pos);
+        if (!line.empty() && line.size() + 1 + word.size() > width) {
+          std::print("{}{}\n", indent, line);
+          line.clear();
+        }
+        if (!line.empty()) {
+          line += ' ';
+        }
+        line += word;
+        if (next == std::string_view::npos) {
+          break;
+        }
+        pos = next + 1;
+      }
+      if (!line.empty()) {
+        std::print("{}{}\n", indent, line);
+      }
     }
-    if (!line.empty()) {
-      line += ' ';
-    }
-    line += word;
-    if (next == std::string_view::npos) {
+
+    if (nl == std::string_view::npos) {
       break;
     }
-    pos = next + 1;
-  }
-  if (!line.empty()) {
-    std::print("{}{}\n", indent, line);
+    seg_start = nl + 1;
   }
 }
 
@@ -352,32 +370,72 @@ int describe_command(const Options& opts) {
   return 1;
 }
 
-// List the --set pass.flag options whose name starts with `prefix` (e.g.
-// "lec.") as one `name=default  # brief` line each — the discoverability
-// section under a command/subcommand --help. Reads the live EPRP registry, so
-// it can never drift from what --set actually accepts.
-void print_options(std::string_view prefix) {
-  const auto                     all = list_set_options();
+// The "options (--set …)" block under a command/subcommand --help: lists the
+// --set/--config flags that command accepts, read live from the EPRP registry so
+// it never drifts from what --set actually takes. The header names the actual
+// flag namespace (e.g. `pass.abc`) and points at `lhd list options <ns>` /
+// `lhd describe <ns>.flag`. At most kShown flags are listed inline; the rest are
+// summarized as a "… (+N more)" pointer so --help stays short. Every command
+// that has this block registers at least one flag, so a prefix that matches
+// NOTHING is a stale/typo'd prefix, not a real empty set — that is reported as an
+// error (returns non-zero) instead of silently rendering an empty list.
+int print_options_section(std::initializer_list<std::string_view> prefixes) {
+  constexpr size_t kShown = 5;
+  const auto       all    = list_set_options();
+
   std::vector<const Set_option*> sel;
-  size_t                         w = 0;
   for (const auto& o : all) {
-    if (o.name.starts_with(prefix)) {
-      sel.push_back(&o);
-      w = std::max(w, o.name.size() + 1 + o.default_value.size());
+    for (auto p : prefixes) {
+      if (o.name.starts_with(p)) {
+        sel.push_back(&o);
+        break;
+      }
     }
   }
-  for (const auto* o : sel) {
-    std::print("  {:<{}}  # {}\n", std::format("{}={}", o->name, o->default_value), w, brief_help(o->help));
-  }
-}
 
-// The "options (--set …)" block under a command's --help: the inline option
-// listing for every pass that command can run.
-void print_options_section(std::initializer_list<std::string_view> prefixes) {
-  std::print("\noptions (--set pass.flag=value; `lhd describe pass.flag` for the full text):\n");
+  // Namespace label(s) without the trailing '.'. `lhd list options` takes a
+  // regex, so several namespaces are OR-joined into one pattern.
+  std::string pattern;
   for (auto p : prefixes) {
-    print_options(p);
+    std::string_view ns = p;
+    if (ns.ends_with(".")) {
+      ns.remove_suffix(1);
+    }
+    if (!pattern.empty()) {
+      pattern += '|';
+    }
+    pattern += ns;
   }
+
+  if (sel.empty()) {
+    std::print(stderr, "lhd help: no --set options registered under '{}' (a stale or mistyped flag prefix)\n", pattern);
+    return 1;
+  }
+
+  // `lhd list options <arg>`: a bare namespace for one prefix, a quoted regex
+  // for several (so the shell keeps the '|' as one argument).
+  std::string list_arg = prefixes.size() == 1 ? pattern : std::format("'{}'", pattern);
+  if (prefixes.size() == 1) {
+    std::print(
+        "\noptions (--set {0}.flag=value; `lhd describe {0}.flag` for each listed flag option in `lhd list options {0}`):\n",
+        pattern);
+  } else {
+    std::print("\noptions (--set <flag>=value; `lhd describe <flag>` for each listed flag option in `lhd list options {}`):\n",
+               list_arg);
+  }
+
+  size_t shown = std::min(sel.size(), kShown);
+  size_t w     = 0;
+  for (size_t i = 0; i < shown; ++i) {
+    w = std::max(w, sel[i]->name.size() + 1 + sel[i]->default_value.size());
+  }
+  for (size_t i = 0; i < shown; ++i) {
+    std::print("  {:<{}}  # {}\n", std::format("{}={}", sel[i]->name, sel[i]->default_value), w, brief_help(sel[i]->help));
+  }
+  if (sel.size() > kShown) {
+    std::print("  … (+{} more; `lhd list options {}`)\n", sel.size() - kShown, list_arg);
+  }
+  return 0;
 }
 
 void print_general_help() {
@@ -511,8 +569,7 @@ int help_pass(const std::string& sub) {
         "\n"
         "example:\n"
         "  lhd pass color acyclic --top m lg:dir\n");
-    print_options_section({"color."});
-    return 0;
+    return print_options_section({"pass.color."});
   }
   if (sub == "partition") {
     std::print(
@@ -523,8 +580,7 @@ int help_pass(const std::string& sub) {
         "\n"
         "example:\n"
         "  lhd pass partition --top m lg:dir --emit-dir lg:parts\n");
-    print_options_section({"partition."});
-    return 0;
+    return print_options_section({"pass.partition."});
   }
   if (sub == "abc") {
     std::print(
@@ -535,8 +591,7 @@ int help_pass(const std::string& sub) {
         "\n"
         "example:\n"
         "  lhd pass abc --top m lg:dir --emit-dir lg:net\n");
-    print_options_section({"abc."});
-    return 0;
+    return print_options_section({"pass.abc."});
   }
   if (sub == "liberty") {
     std::print(
@@ -547,8 +602,7 @@ int help_pass(const std::string& sub) {
         "\n"
         "example:\n"
         "  lhd pass liberty gensim sky130.lib --emit-dir lg:models\n");
-    print_options_section({"liberty."});
-    return 0;
+    return print_options_section({"pass.liberty."});
   }
   if (sub == "semdiff") {
     std::print(
@@ -576,8 +630,7 @@ int help_pass(const std::string& sub) {
         "examples:\n"
         "  lhd pass semdiff --ref lg:gold --impl lg:opt --top adder\n"
         "  lhd pass semdiff --ref lg:gold --impl lg:opt --set pass.semdiff.matching_names=true\n");
-    print_options_section({"pass.semdiff."});
-    return 0;
+    return print_options_section({"pass.semdiff."});
   }
   if (!sub.empty()) {
     std::print(stderr, "lhd help: unknown pass subcommand '{}' (color | partition | abc | liberty | semdiff)\n", sub);
@@ -637,8 +690,7 @@ int help_command(const Options& opts) {
         "  lhd compile x.prp --emit-dir ln:x_lns/        # pre-elaborate for importers\n"
         "  lhd compile ln:x_lns/ --emit verilog:net.v    # synth from IR\n"
         "  lhd compile lg:foo_lgs/ --emit-dir lg:foo_opt_lgs/\n");
-    print_options_section({"upass.", "cprop.", "bitwidth.", "cgen."});
-    return 0;
+    return print_options_section({"upass.", "cprop.", "bitwidth.", "cgen."});
   }
   if (topic == "lec") {
     std::print(
@@ -663,8 +715,7 @@ int help_command(const Options& opts) {
         "  lhd lec --impl impl.prp --ref ref.v\n"
         "  lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind\n"
         "  lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo\n");
-    print_options_section({"lec."});
-    return 0;
+    return print_options_section({"lec."});
   }
   if (topic == "semdiff") {
     // `semdiff` moved under `pass`; keep `lhd help semdiff` as a convenience

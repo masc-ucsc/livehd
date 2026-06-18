@@ -58,6 +58,40 @@ constexpr std::string_view kCombFlow = "strash; &get -n; &fraig -x; &put; &get -
 // robust to that (per-latch reconstruction + single-root remap).
 constexpr std::string_view kSeqFlow = "strash; &get -n; &fraig -x; &put; dretime; &get -n; &dch -f; &nf {D}; &put";
 
+// Standard ABC synthesis scripts from berkeley-abc's abc.rc, installed as
+// aliases so a `--set pass.abc.flow="resyn2"` (or any other abc.rc script name)
+// works exactly as it does in an interactive ABC shell. LiveHD drives ABC
+// through the library entry (Abc_Start) which — unlike the `abc` binary — never
+// sources abc.rc, so the alias vocabulary is not present unless we install it.
+// Bodies are copied verbatim from abc.rc; the short-name building blocks
+// (b/rw/rs/...) MUST be registered too because the scripts expand to them
+// recursively when the alias is applied. ';' inside the quoted body is protected
+// by ABC's CmdSplitLine tokenizer (same path `source abc.rc` takes). Keep this
+// list in sync with the cheat-sheet in pass_abc.cpp's `flow` help text.
+constexpr std::string_view kAbcAliases[] = {
+    // building blocks: short name -> real ABC command
+    "alias b balance", "alias rw rewrite", "alias rwz rewrite -z", "alias rf refactor", "alias rfz refactor -z",
+    "alias rs resub", "alias rsz resub -z", "alias st strash", "alias f fraig", "alias dret dretime", "alias ret retime",
+    // AIG optimization scripts
+    R"(alias resyn   "b; rw; rwz; b; rwz; b")",
+    R"(alias resyn2  "b; rw; rf; b; rw; rwz; b; rfz; rwz; b")",
+    R"(alias resyn2a "b; rw; b; rw; rwz; b; rwz; b")",
+    R"(alias resyn3  "b; rs; rs -K 6; b; rsz; rsz -K 6; b; rsz -K 5; b")",
+    R"(alias compress  "b -l; rw -l; rwz -l; b -l; rwz -l; b -l")",
+    R"(alias compress2 "b -l; rw -l; rf -l; b -l; rw -l; rwz -l; b -l; rfz -l; rwz -l; b -l")",
+    R"(alias choice  "fraig_store; resyn; fraig_store; resyn2; fraig_store; fraig_restore")",
+    R"(alias choice2 "fraig_store; balance; fraig_store; resyn; fraig_store; resyn2; fraig_store; resyn2; fraig_store; fraig_restore")",
+    // resubstitution-heavy scripts
+    R"(alias src_rw  "st; rw -l; rwz -l; rwz -l")",
+    R"(alias src_rs  "st; rs -K 6 -N 2 -l; rs -K 9 -N 2 -l; rs -K 12 -N 2 -l")",
+    R"(alias src_rws "st; rw -l; rs -K 6 -N 2 -l; rwz -l; rs -K 9 -N 2 -l; rwz -l; rs -K 12 -N 2 -l")",
+    R"(alias resyn2rs    "b; rs -K 6; rw; rs -K 6 -N 2; rf; rs -K 8; b; rs -K 8 -N 2; rw; rs -K 10; rwz; rs -K 10 -N 2; b; rs -K 12; rfz; rs -K 12 -N 2; rwz; b")",
+    R"(alias compress2rs "b -l; rs -K 6 -l; rw -l; rs -K 6 -N 2 -l; rf -l; rs -K 8 -l; b -l; rs -K 8 -N 2 -l; rw -l; rs -K 10 -l; rwz -l; rs -K 10 -N 2 -l; b -l; rs -K 12 -l; rfz -l; rs -K 12 -N 2 -l; rwz -l; b -l")",
+    // GIA (& space) optimization scripts
+    R"(alias &dc3 "&b; &jf -K 6; &b; &jf -K 4; &b")",
+    R"(alias &dc4 "&b; &jf -K 7; &fx; &b; &jf -K 5; &fx; &b")",
+};
+
 std::string subst(std::string s, std::string_view tok, std::string_view val) {
   for (auto pos = s.find(tok); pos != std::string::npos; pos = s.find(tok, pos)) {
     s.replace(pos, tok.size(), val);
@@ -114,7 +148,13 @@ bool Mapper::start() {
     return false;
   }
   auto* frame = static_cast<Abc_Frame_t*>(pabc_);
-  auto  cmd   = std::string{"read_lib "} + opts_.library;
+  // Install the abc.rc synthesis-script aliases (resyn2, compress2rs, ...) so a
+  // user `--set pass.abc.flow="resyn2"` resolves. Best-effort: a malformed alias
+  // would only fail later when used in `flow`, so do not abort the run here.
+  for (auto a : kAbcAliases) {
+    Cmd_CommandExecute(frame, std::string{a}.c_str());
+  }
+  auto cmd = std::string{"read_lib "} + opts_.library;
   if (Cmd_CommandExecute(frame, cmd.c_str()) != 0) {
     livehd::diag::err("pass.abc", "read-lib", "unsupported")
         .msg("ABC could not read the Liberty library '{}'", opts_.library)

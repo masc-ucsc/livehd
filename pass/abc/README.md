@@ -81,12 +81,37 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | flag | meaning | default |
 |------|---------|---------|
 | `library` | Liberty `.lib` for `read_lib` | `$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib` |
-| `flow` | ABC command string (`{D}`/`{L}` substituted) | built-in comb/seq default |
+| `flow` | ABC command string (`{D}`/`{L}` substituted), run verbatim — see below | built-in comb/seq default |
 | `seq` | sequential mapping (flops→latches, memories/Subs blackboxed) — a superset that also maps purely combinational regions (no flops ⇒ `dretime` is a no-op), so it is the default | `true` |
 | `adder` | comb adder architecture for `sum`/cmp: `rca`/`cska`/`cla` | `rca` |
 | `block_size` | CSKA/CLA block width (`0` = auto) | `0` |
 | `delay` / `load` | `{D}` / `{L}` substitution | empty |
 | `verbose` | per-region gate count | `false` |
+
+### The `flow` string and abc.rc scripts
+
+`flow` is handed verbatim to ABC's `Cmd_CommandExecute`, one `;`-separated
+command at a time. Both the classic AIG commands (`balance`, `rewrite`,
+`refactor`, `resub`, `strash`, `fraig`, `dch`, `if`, `mfs`) and the GIA `&`-space
+commands (`&get`/`&put`, `&dch`, `&fraig`, `&if`, `&nf`, `&deepsyn`, `&resub`,
+`&mfs`) work as-is.
+
+LiveHD drives ABC through the library entry (`Abc_Start`), which — unlike the
+`abc` binary — never sources `abc.rc`, so its **named synthesis scripts are not
+present by default**. The pass therefore installs the standard `abc.rc` scripts
+as aliases at startup (`abc_map.cpp`, `kAbcAliases`), so a script name can be
+used directly in `flow`:
+
+- short building blocks: `b rw rwz rf rfz rs rsz st f dret`
+- AIG opt scripts: `resyn resyn2 resyn2a resyn3 compress compress2 choice choice2`
+- resub scripts: `resyn2rs compress2rs src_rw src_rs src_rws`
+- GIA scripts: `&dc3 &dc4`
+
+A custom `flow` replaces the whole built-in string, so it must still end with a
+technology-mapping step (`&nf {D}`) for the read-back to find cells, e.g.
+`--set pass.abc.flow="strash; resyn2; &get -n; &dch -f; &nf {D}; &put"`. Run
+`lhd describe pass.abc.flow` for the in-tool cheat-sheet + the upstream `abc.rc`
+link. Keep `kAbcAliases` and that help text in sync.
 
 ## Source-map carry-through
 

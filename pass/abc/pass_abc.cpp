@@ -21,7 +21,29 @@ void Pass_abc::setup() {
   m.add_label_optional("top", "top module whose coloring is mapped", "");
   m.add_label_optional("out", "output graph_library directory (the --emit-dir lg: slot)", "");
   m.add_label_optional("library", "Liberty .lib for read_lib (default $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib)", "");
-  m.add_label_optional("flow", "ABC command string (empty => built-in comb/seq default)", "");
+  m.add_label_optional(
+      "flow",
+      "ABC command string, run verbatim (empty => the built-in comb/seq default). "
+      "Commands run in order, ';'-separated; {D}/{L} are substituted from the delay/load options. "
+      "A custom flow must still include a technology-mapping step (`&nf {D}`) so the result is a cell netlist. "
+      "The standard abc.rc synthesis scripts and their short-name building blocks are pre-registered as aliases, "
+      "so flow=\"resyn2\" works just like in an interactive ABC shell.\n"
+      "\n"
+      "building blocks:  b=balance  rw=rewrite  rwz=rewrite -z  rf=refactor  rfz=refactor -z  rs=resub  rsz=resub -z  "
+      "st=strash  f=fraig  dret=dretime\n"
+      "AIG opt scripts:  resyn  resyn2  resyn2a  resyn3  compress  compress2  choice  choice2\n"
+      "resub scripts:    resyn2rs  compress2rs  src_rw  src_rs  src_rws    (raw form: rs -K <cut-size> -N <max-nodes>)\n"
+      "GIA (& space):    &get/&put move the AIG in/out; &dch &fraig &if &nf &deepsyn &resub &mfs &dc3 &dc4\n"
+      "                  (bound &deepsyn with -J <no-improve> and/or -T <seconds>: with neither it runs ~1e5 passes)\n"
+      "\n"
+      "examples:\n"
+      "  flow=\"strash; resyn2; &get -n; &dch -f; &nf {D}; &put\"            (AIG opt then map)\n"
+      "  flow=\"strash; resyn2rs; &get -n; &nf {D}; &put\"                   (resub-heavy)\n"
+      "  flow=\"b; rs -K 6; rw; rs -K 6 -N 2; rf; rs -K 8; &get -n; &nf {D}; &put\"   (hand-rolled resub)\n"
+      "  flow=\"strash; &get -n; &deepsyn -I 4 -J 20; &dch -f; &nf {D}; &put\"   (deepsyn, bounded)\n"
+      "command/alias reference: https://github.com/berkeley-abc/abc/blob/master/abc.rc "
+      "(and `<cmd> -h` inside an ABC shell for each command's switches)",
+      "");
   m.add_label_optional("seq", "true|false sequential vs combinational", "true");
   m.add_label_optional("delay", "{D} substitution in flow", "");
   m.add_label_optional("load", "{L} substitution in flow", "");

@@ -95,4 +95,15 @@ id_b=$(sed 's/.*"run_id":"\([^"]*\)".*/\1/' "$W/r9b.json")
 "$LHD" --help >/dev/null 2>&1 || fail "lhd --help must print the general help"
 "$LHD" --bogus list >/dev/null 2>&1 && fail "an unknown flag before the command must still error"
 
-echo "PASS: lhd list options / describe pass.flag / --set validation / flag-order freedom"
+# 10. per-command --help options block: namespaced header + the actual flags
+# (not the old silently-empty list), capped with a "more" pointer, and pointing
+# at `lhd list options <namespace>`. Guards the wrong-prefix bug that printed an
+# empty options section under `lhd pass <sub> --help`.
+help=$("$LHD" pass abc --help 2>&1)
+echo "$help" | grep -qF 'options (--set pass.abc.flag=value; `lhd describe pass.abc.flag` for each listed flag option in `lhd list options pass.abc`):' \
+  || fail "pass abc --help: namespaced options header missing -> $help"
+echo "$help" | grep -q 'pass.abc.flow=' || fail "pass abc --help: the flow flag must be listed (empty options block?) -> $help"
+echo "$help" | grep -q 'more; `lhd list options pass.abc`' || fail "pass abc --help: >5 flags must show a '... more' pointer -> $help"
+"$LHD" lec --help 2>&1 | grep -q 'options (--set lec.flag=value;' || fail "lec --help: namespaced options header missing"
+
+echo "PASS: lhd list options / describe pass.flag / --set validation / flag-order freedom / per-command --help options"
