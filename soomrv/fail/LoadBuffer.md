@@ -15,5 +15,5 @@ kind=mod
 
 **First failure message:**
 ```
-assignment to undeclared variable 'index' (declare it with `mut`/`const` first)
+upass.tolg: call to 'RangeMaskGen' has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending
 ```

@@ -15,5 +15,5 @@ kind=mod
 
 **First failure message:**
 ```
-assignment to undeclared variable 'k_s2' (declare it with `mut`/`const` first)
+upass.tolg: call to 'PriorityEncoder' has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending
 ```

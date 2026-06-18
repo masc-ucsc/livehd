@@ -1,13 +1,13 @@
-# AGU — --reader slang fails
+# AGU — prp gen fails
 
-kind=-
+kind=mod
 
 | stage | result |
 |---|---|
 | yosys+slang gate | PASS |
-| --reader slang -> prp | FAIL |
-| slang -> lg | NA |
-| prp -> lg | NA |
+| --reader slang -> prp | PASS |
+| slang -> lg | PASS |
+| prp -> lg | FAIL |
 | yosys-slang -> lg | PASS |
 | lec prp vs slang | NA |
 | lec prp vs yosys-slang | NA |
@@ -15,5 +15,5 @@ kind=-
 
 **First failure message:**
 ```
-`!=` requires both operands to be the same type (isStore_s1:boolean vs <const>:integer)
+`==` requires both operands to be the same type (___2887631468_0:boolean vs <const>:integer)
 ```

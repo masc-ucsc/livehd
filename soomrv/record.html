@@ -14,11 +14,11 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <h2>Primary classification (each module in exactly one bucket)</h2>
 <table><tr><th>category</th><th class=num>count</th><th>bar</th></tr>
 <tr><td style="color:#1a7f37;font-weight:700">PASS</td><td class=num>0</td><td><span class=bar style="width:0px"></span></td></tr>
-<tr><td>yosys+slang fails</td><td class=num>4</td><td><span class=bar style="width:24px;background:#cf222e"></span></td></tr>
-<tr><td>--reader slang fails</td><td class=num>5</td><td><span class=bar style="width:30px;background:#cf222e"></span></td></tr>
+<tr><td>yosys+slang fails</td><td class=num>3</td><td><span class=bar style="width:18px;background:#cf222e"></span></td></tr>
+<tr><td>--reader slang fails</td><td class=num>1</td><td><span class=bar style="width:6px;background:#cf222e"></span></td></tr>
 <tr><td>lg gen from slang fails</td><td class=num>0</td><td><span class=bar style="width:0px;background:#cf222e"></span></td></tr>
-<tr><td>prp gen fails</td><td class=num>3</td><td><span class=bar style="width:18px;background:#cf222e"></span></td></tr>
-<tr><td>lec prp vs from slang fails</td><td class=num>3</td><td><span class=bar style="width:18px;background:#cf222e"></span></td></tr>
+<tr><td>prp gen fails</td><td class=num>7</td><td><span class=bar style="width:42px;background:#cf222e"></span></td></tr>
+<tr><td>lec prp vs from slang fails</td><td class=num>4</td><td><span class=bar style="width:24px;background:#cf222e"></span></td></tr>
 <tr><td>lec inconclusive</td><td class=num>0</td><td><span class=bar style="width:0px;background:#cf222e"></span></td></tr>
 <tr><td>other</td><td class=num>0</td><td><span class=bar style="width:0px;background:#cf222e"></span></td></tr>
 <tr><th>total</th><th class=num>15</th><th></th></tr></table>
@@ -32,45 +32,16 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 </table>
 <h2>Dominant blocking issues (group by category + root-cause message)</h2>
 <table><tr><th>category</th><th>root-cause message</th><th class=num>#</th><th>modules</th></tr>
-<tr><td style="color:#cf222e">--reader slang fails</td><td><code>nested non-variable assignment targets are not supported yet</code></td><td class=num>4</td><td style="font-size:11px">BranchPredictor, MemoryController, TagePredictor, TageTable</td></tr>
-<tr><td style="color:#cf222e">lec prp vs from slang fails</td><td><code>(no message)</code></td><td class=num>3</td><td style="font-size:11px">BranchTargetBuffer, StoreQueueBackend, TLBMissQueue</td></tr>
-<tr><td style="color:#cf222e">prp gen fails</td><td><code>assignment to undeclared variable &#x27;X&#x27; (declare it with `mut`/`const` first)</code></td><td class=num>2</td><td style="font-size:11px">LoadBuffer, StoreDataIQ</td></tr>
+<tr><td style="color:#cf222e">prp gen fails</td><td><code>upass.tolg: call to &#x27;X&#x27; has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may n</code></td><td class=num>5</td><td style="font-size:11px">BranchPredictor, LoadBuffer, StoreDataIQ, TagePredictor, TageTable</td></tr>
+<tr><td style="color:#cf222e">lec prp vs from slang fails</td><td><code>(no message)</code></td><td class=num>4</td><td style="font-size:11px">BranchTargetBuffer, ReturnStack, StoreQueueBackend, TLBMissQueue</td></tr>
 <tr><td style="color:#cf222e">yosys+slang fails</td><td><code>nested non-variable assignment targets are not supported yet</code></td><td class=num>2</td><td style="font-size:11px">LoadResultBuffer, PrefetchIssuer</td></tr>
-<tr><td style="color:#cf222e">--reader slang fails</td><td><code>`!=` requires both operands to be the same type (isStore_s1:boolean vs &lt;const&gt;:integer)</code></td><td class=num>1</td><td style="font-size:11px">AGU</td></tr>
+<tr><td style="color:#cf222e">prp gen fails</td><td><code>`==` requires both operands to be the same type (___2887631468_0:boolean vs &lt;const&gt;:integer)</code></td><td class=num>1</td><td style="font-size:11px">AGU</td></tr>
+<tr><td style="color:#cf222e">--reader slang fails</td><td><code>nested non-variable assignment targets are not supported yet</code></td><td class=num>1</td><td style="font-size:11px">MemoryController</td></tr>
 <tr><td style="color:#cf222e">prp gen fails</td><td><code>`==` requires both operands to be the same type (___1399986047_0:boolean vs &lt;const&gt;:integer)</code></td><td class=num>1</td><td style="font-size:11px">Multiply</td></tr>
-<tr><td style="color:#cf222e">yosys+slang fails</td><td><code>`!=` requires both operands to be the same type (doPostRecSave:boolean vs &lt;const&gt;:integer)</code></td><td class=num>1</td><td style="font-size:11px">ReturnStack</td></tr>
-<tr><td style="color:#cf222e">yosys+slang fails</td><td><code>`!=` requires both operands to be the same type (ready___ssa_1:boolean vs &lt;const&gt;:integer)</code></td><td class=num>1</td><td style="font-size:11px">StoreQueue</td></tr>
+<tr><td style="color:#cf222e">yosys+slang fails</td><td><code>(no message)</code></td><td class=num>1</td><td style="font-size:11px">StoreQueue</td></tr>
 </table>
 <h2>Per-module results</h2>
 <table><tr><th>module</th><th>primary category</th><th>kind</th><th>yosys+slang</th><th>reader slang</th><th>slang&amp;rarr;lg</th><th>yosys-slang&amp;rarr;lg</th><th>prp&amp;rarr;lg</th><th>lec vs slang</th><th>lec vs ys-slang</th><th>abc</th><th>first-fail msg</th></tr>
-<tr>
-<td><b>AGU</b></td>
-<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
-<td>-</td>
-<td style="color:#1a7f37;font-weight:600">PASS</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#1a7f37;font-weight:600">PASS</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="`!=` requires both operands to be the same type (isStore_s1:boolean vs &lt;const&gt;:integer)">`!=` requires both operands to be the same type (isStore_s1:boolean vs &lt;const&gt;:integer)</td>
-</tr>
-<tr>
-<td><b>BranchPredictor</b></td>
-<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
-</tr>
 <tr>
 <td><b>MemoryController</b></td>
 <td style="color:#cf222e;font-weight:600">--reader slang fails</td>
@@ -79,34 +50,6 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#cf222e;font-weight:600">FAIL</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
-</tr>
-<tr>
-<td><b>TagePredictor</b></td>
-<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
-<td>-</td>
-<td style="color:#1a7f37;font-weight:600">PASS</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#1a7f37;font-weight:600">PASS</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
-</tr>
-<tr>
-<td><b>TageTable</b></td>
-<td style="color:#cf222e;font-weight:600">--reader slang fails</td>
-<td>-</td>
-<td style="color:#1a7f37;font-weight:600">PASS</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#1a7f37;font-weight:600">PASS</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
@@ -124,6 +67,20 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#1a7f37;font-weight:600">PASS</td>
 <td style="color:#cf222e;font-weight:600">REFUTED</td>
 <td style="color:#cf222e;font-weight:600">REFUTED</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title=""></td>
+</tr>
+<tr>
+<td><b>ReturnStack</b></td>
+<td style="color:#cf222e;font-weight:600">lec prp vs from slang fails</td>
+<td>mod</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#cf222e;font-weight:600">REFUTED</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td class=msg title=""></td>
 </tr>
@@ -156,6 +113,34 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td class=msg title=""></td>
 </tr>
 <tr>
+<td><b>AGU</b></td>
+<td style="color:#cf222e;font-weight:600">prp gen fails</td>
+<td>mod</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="`==` requires both operands to be the same type (___2887631468_0:boolean vs &lt;const&gt;:integer)">`==` requires both operands to be the same type (___2887631468_0:boolean vs &lt;const&gt;:intege</td>
+</tr>
+<tr>
+<td><b>BranchPredictor</b></td>
+<td style="color:#cf222e;font-weight:600">prp gen fails</td>
+<td>mod</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="upass.tolg: call to &#x27;RegFile&#x27; has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending">upass.tolg: call to &#x27;RegFile&#x27; has no hardware lowering yet — only pipe/mod calls become in</td>
+</tr>
+<tr>
 <td><b>LoadBuffer</b></td>
 <td style="color:#cf222e;font-weight:600">prp gen fails</td>
 <td>mod</td>
@@ -167,7 +152,7 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="assignment to undeclared variable &#x27;index&#x27; (declare it with `mut`/`const` first)">assignment to undeclared variable &#x27;index&#x27; (declare it with `mut`/`const` first)</td>
+<td class=msg title="upass.tolg: call to &#x27;RangeMaskGen&#x27; has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending">upass.tolg: call to &#x27;RangeMaskGen&#x27; has no hardware lowering yet — only pipe/mod calls beco</td>
 </tr>
 <tr>
 <td><b>Multiply</b></td>
@@ -195,7 +180,35 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="assignment to undeclared variable &#x27;k_s2&#x27; (declare it with `mut`/`const` first)">assignment to undeclared variable &#x27;k_s2&#x27; (declare it with `mut`/`const` first)</td>
+<td class=msg title="upass.tolg: call to &#x27;PriorityEncoder&#x27; has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending">upass.tolg: call to &#x27;PriorityEncoder&#x27; has no hardware lowering yet — only pipe/mod calls b</td>
+</tr>
+<tr>
+<td><b>TagePredictor</b></td>
+<td style="color:#cf222e;font-weight:600">prp gen fails</td>
+<td>mod</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="upass.tolg: call to &#x27;BranchPredictionTable&#x27; has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending">upass.tolg: call to &#x27;BranchPredictionTable&#x27; has no hardware lowering yet — only pipe/mod c</td>
+</tr>
+<tr>
+<td><b>TageTable</b></td>
+<td style="color:#cf222e;font-weight:600">prp gen fails</td>
+<td>mod</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#1a7f37;font-weight:600">PASS</td>
+<td style="color:#cf222e;font-weight:600">FAIL</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td style="color:#8c959f;font-weight:600">NA</td>
+<td class=msg title="upass.tolg: call to &#x27;BranchPredictionTable&#x27; has no hardware lowering yet — only pipe/mod calls become instances (note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending">upass.tolg: call to &#x27;BranchPredictionTable&#x27; has no hardware lowering yet — only pipe/mod c</td>
 </tr>
 <tr>
 <td><b>LoadResultBuffer</b></td>
@@ -226,20 +239,6 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td class=msg title="nested non-variable assignment targets are not supported yet">nested non-variable assignment targets are not supported yet</td>
 </tr>
 <tr>
-<td><b>ReturnStack</b></td>
-<td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
-<td>-</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#cf222e;font-weight:600">FAIL</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="`!=` requires both operands to be the same type (doPostRecSave:boolean vs &lt;const&gt;:integer)">`!=` requires both operands to be the same type (doPostRecSave:boolean vs &lt;const&gt;:integer)</td>
-</tr>
-<tr>
 <td><b>StoreQueue</b></td>
 <td style="color:#cf222e;font-weight:600">yosys+slang fails</td>
 <td>-</td>
@@ -251,6 +250,6 @@ code{background:#f6f8fa;padding:1px 4px;border-radius:3px;font-size:12px}
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
 <td style="color:#8c959f;font-weight:600">NA</td>
-<td class=msg title="`!=` requires both operands to be the same type (ready___ssa_1:boolean vs &lt;const&gt;:integer)">`!=` requires both operands to be the same type (ready___ssa_1:boolean vs &lt;const&gt;:integer)</td>
+<td class=msg title=""></td>
 </tr>
 </table>

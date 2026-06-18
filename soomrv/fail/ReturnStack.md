@@ -1,19 +1,19 @@
-# ReturnStack — yosys+slang fails
+# ReturnStack — lec prp vs from slang fails
 
-kind=-
+kind=mod
 
 | stage | result |
 |---|---|
 | yosys+slang gate | FAIL |
-| --reader slang -> prp | FAIL |
-| slang -> lg | NA |
-| prp -> lg | NA |
+| --reader slang -> prp | PASS |
+| slang -> lg | PASS |
+| prp -> lg | PASS |
 | yosys-slang -> lg | NA |
-| lec prp vs slang | NA |
+| lec prp vs slang | REFUTED |
 | lec prp vs yosys-slang | NA |
 | abc gen | NA |
 
 **First failure message:**
 ```
-`!=` requires both operands to be the same type (doPostRecSave:boolean vs <const>:integer)
+(none captured)
 ```

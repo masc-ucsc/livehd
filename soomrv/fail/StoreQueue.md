@@ -15,5 +15,5 @@ kind=-
 
 **First failure message:**
 ```
-`!=` requires both operands to be the same type (ready___ssa_1:boolean vs <const>:integer)
+(none captured)
 ```
