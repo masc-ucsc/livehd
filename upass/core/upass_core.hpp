@@ -16,7 +16,6 @@
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
 #include "lnast_ntype.hpp"
-#include "lnast_writer.hpp"
 #include "symbol_table.hpp"
 #include "upass_utils.hpp"
 
@@ -368,7 +367,6 @@ protected:
   auto get_raw_ntype() const { return lm->get_raw_ntype(); }
   bool is_invalid() const { return lm->is_invalid(); }
   bool is_last_child() const { return lm->is_last_child(); }
-  void write_node() { lm->write_node(); }
 
   template <class... Lnast_ntype_int>
   bool is_type(Lnast_ntype_int... ty) const {

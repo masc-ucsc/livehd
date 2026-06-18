@@ -14,14 +14,13 @@
 
 #include "hlop/dlop.hpp"
 #include "lnast.hpp"
-#include "lnast_writer.hpp"
 #include "upass_utils.hpp"
 
 namespace upass {
 
 struct Lnast_manager {
 public:
-  explicit Lnast_manager(const std::shared_ptr<Lnast>& ln) : lnast(ln), wr(std::cout, ln) {
+  explicit Lnast_manager(const std::shared_ptr<Lnast>& ln) : lnast(ln) {
     nid_stack   = {};
     current_nid = lnast->get_root();
   }
@@ -238,13 +237,6 @@ public:
     return lnast->is_last_child(current_nid);
   }
 
-  void write_node() {
-#ifndef NDEBUG
-    wr.write_nid(current_nid);
-    std::cout << "\n";
-#endif
-  }
-
 protected:
   // Owned (was a const ref) so an inline frame can swap the active read tree
   // to a callee body and restore the caller afterward (1i). Holding a
@@ -252,7 +244,6 @@ protected:
   std::shared_ptr<Lnast> lnast;
   std::stack<Lnast_nid>  nid_stack;
   Lnast_nid              current_nid;
-  Lnast_writer           wr;
 
   // Saved caller state for one level of inline-source nesting.
   struct Source_frame {
