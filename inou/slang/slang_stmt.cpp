@@ -66,7 +66,10 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
       declare_value_symbol(vds.symbol, /*force_reg=*/false);
       if (const auto* init = vds.symbol.getInitializer()) {
         set_pending_loc(stmt.sourceRange);
-        auto v = lower_rvalue(*init);
+        // Materialize to an integer like lower_assign: a local `reg b = x && y`
+        // initializer is an LNAST bool, but the variable is integer-typed, so
+        // store 0/1 (else a later integer use, e.g. `b != 0`, fails typecheck).
+        auto v = to_int_value(lower_rvalue(*init));
         note_write(vds.symbol, /*nonblocking=*/false, stmt.sourceRange.start());
         builder_.create_assign_stmts(lname_of(vds.symbol), v);
         clear_pending_loc();
