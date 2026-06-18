@@ -397,17 +397,13 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       collect_mem_inits(member.as<slang::ast::ProceduralBlockSymbol>().getBody());
     }
   }
-  // Hoist every state reg's declare to module start: drivers emit in
-  // dataflow order, so a comb reader sorted before the owning edge process
-  // must already see the declare (reg q-reads are order-free only once
-  // declared). Output regs declare here too - the q pin IS the output.
-  for (const auto* sym : reg_syms_) {
-    declare_reg(sym->as<slang::ast::ValueSymbol>());
-  }
   // Classify each unpacked array as constant- or runtime-indexed (a non-const
-  // selector anywhere makes it runtime-indexed). A comb plain-vector array that
-  // is never runtime-indexed is safe to flatten; a runtime-indexed one stays a
-  // memory.
+  // selector anywhere makes it runtime-indexed) BEFORE any declare runs:
+  // declare_unpacked (reg hoisting below, and the comb loop) consults
+  // runtime_indexed_arrays_ to choose flatten (const-indexed -> packed bus,
+  // matching yosys-slang) vs memory (runtime-indexed). A comb plain-vector
+  // array that is never runtime-indexed is safe to flatten; a runtime-indexed
+  // one stays a memory.
   {
     Array_index_collector aic;
     body->visit(aic);
@@ -424,6 +420,13 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
         runtime_indexed_arrays_.insert(sym);
       }
     }
+  }
+  // Hoist every state reg's declare to module start: drivers emit in
+  // dataflow order, so a comb reader sorted before the owning edge process
+  // must already see the declare (reg q-reads are order-free only once
+  // declared). Output regs declare here too - the q pin IS the output.
+  for (const auto* sym : reg_syms_) {
+    declare_reg(sym->as<slang::ast::ValueSymbol>());
   }
 
   // Pre-declare COMBINATIONAL flattenable arrays as flat packed buses
@@ -568,7 +571,19 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
   const bool    elem_struct  = elem.isStruct() || elem.isPackedUnion();
   const bool    const_indexed = !runtime_indexed_arrays_.contains(&sym);
   const int64_t flat_bits    = static_cast<int64_t>(ei.bits) * arr.range.width();
-  if (!is_reg && (elem_struct || const_indexed) && flat_bits > 0 && flat_bits <= 65536) {
+  const bool    has_init     = [&] {
+    auto it = mem_init_vals_.find(&sym);
+    return it != mem_init_vals_.end() && !it->second.empty();
+  }();
+  // FLATTEN to a single packed bus when the array is CONST-indexed (reg OR comb)
+  // — yosys-slang packs a const-indexed array into one wide word (SIZE=1), so a
+  // multi-entry memory would not LEC against it — or a comb aggregate array
+  // (its `.field` sub-writes compose via set_mask). Element/field/bit access
+  // then becomes a bit-slice on ONE variable (set_mask, the flat-port path). A
+  // RUNTIME-indexed array stays a memory (the FIFO/regfile/store path). A reg
+  // array with power-on contents keeps the memory path (the init becomes the
+  // mem declare initializer; flattening it would need a concatenated reset).
+  if ((const_indexed || (!is_reg && elem_struct)) && !(is_reg && has_init) && flat_bits > 0 && flat_bits <= 65536) {
     Mem_info fmi;
     fmi.lower       = arr.range.lower();
     fmi.elem_bits   = ei.bits;
@@ -579,7 +594,14 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
     flat_port_syms_.insert(&sym);  // reuse the flat bit-slice get/set machinery
     auto name = lname_of(sym);
     set_pending_loc(sym.location);
-    builder_.create_declare_stmts(name, "mut", mask_text(static_cast<int>(flat_bits)), "0");
+    if (is_reg) {
+      // A packed REG bus: unwritten bits hold (reg), set_mask writes compose in
+      // program order (later overrides win) — matching yosys-slang's flops+mux.
+      // No reset (the soomrv const-indexed reg banks reset explicitly in-body).
+      builder_.create_declare_stmts(name, "reg", mask_text(static_cast<int>(flat_bits)), "0", "nil");
+    } else {
+      builder_.create_declare_stmts(name, "mut", mask_text(static_cast<int>(flat_bits)), "0");
+    }
     clear_pending_loc();
     return true;
   }
