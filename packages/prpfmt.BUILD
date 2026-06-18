@@ -12,6 +12,25 @@
 # deliberately out-of-range obsolete-node enum ids trip -Wswitch).
 load("@rules_cc//cc:defs.bzl", "cc_library")
 
+# prpfmt/ts_symbols.h is generated (gitignored upstream, so absent from the
+# pinned archive). It lifts the authoritative `enum ts_symbol_identifiers` out of
+# the generated src/parser.c — the ids get renumbered on every grammar change, so
+# this must be regenerated rather than vendored. Mirrors prpfmt/gen_symbols.sh.
+genrule(
+    name = "gen_ts_symbols",
+    srcs = ["src/parser.c"],
+    outs = ["prpfmt/ts_symbols.h"],
+    cmd = "\n".join([
+        "{",
+        "  echo '/* AUTO-GENERATED from src/parser.c by gen_symbols.sh -- DO NOT EDIT. */'",
+        "  echo '#ifndef PRPFMT_TS_SYMBOLS_H'",
+        "  echo '#define PRPFMT_TS_SYMBOLS_H'",
+        "  sed -n '/^enum ts_symbol_identifiers {/,/^};/p' $(location src/parser.c)",
+        "  echo '#endif /* PRPFMT_TS_SYMBOLS_H */'",
+        "} > $@",
+    ]),
+)
+
 cc_library(
     name = "prpfmt",
     srcs = [
@@ -22,7 +41,7 @@ cc_library(
         # internal headers (resolved same-tree via the includes below)
         "prpfmt/ir.h",
         "prpfmt/prpfmt.h",
-        "prpfmt/ts_symbols.h",
+        ":gen_ts_symbols",  # generated prpfmt/ts_symbols.h
         # the generated parser's build headers (parser.h / array.h / alloc.h)
     ] + glob(["src/tree_sitter/*.h"]),
     # The only header an embedder needs; pulls in no tree-sitter types.

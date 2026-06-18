@@ -153,9 +153,9 @@ git_override(
 http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-IsGlDwwtVF335yxS1pvepUy3KUSSq/Pycn4DGFZtuis=",  # 2f-stream: Ast_arena::reset + Parser::parse_next
-    strip_prefix = "tree-sitter-pyrope-22b6977de30fb673a04f5ff8eaa1840b9ad3a971/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/22b6977de30fb673a04f5ff8eaa1840b9ad3a971.zip"],
+    integrity = "sha256-4DeUs3JM66pd2SSuooeIG9XJdBsXppSK2kPRoR3FTOk=",  # 2f-stream-parse-next top of tree
+    strip_prefix = "tree-sitter-pyrope-0efc1cbae9d44d127c91a0b6040bf0b81b2460b2/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/0efc1cbae9d44d127c91a0b6040bf0b81b2460b2.zip"],
 )
 # For local prpparse co-development, swap the http_archive above for:
 # new_local_repository(
@@ -182,21 +182,24 @@ http_archive(
 # (distinct from @prpparse, which roots at the prpparse/ subdir of the same
 # repo). LiveHD embeds prpfmt via prpfmt/prpfmt_api.h as `lhd pyrope fmt`.
 #
-# The formatter's embeddable C entry point (prpfmt_format_string) is a local
-# addition, so the local override below is the active form for now; restore the
-# http_archive pin (recompute integrity per the prpparse note above) once the
-# tree-sitter-pyrope change lands upstream.
-new_local_repository(
+# The formatter's embeddable C entry point (prpfmt_format_string) has landed
+# upstream, so this is pinned to top of tree (same archive as @prpparse above).
+# The one file the formatter needs that is *not* in the archive is the generated
+# prpfmt/ts_symbols.h (gitignored); //packages:prpfmt.BUILD regenerates it from
+# src/parser.c via a genrule, so no local checkout is required. Bump the pin per
+# the @prpparse note above (recompute integrity).
+http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    path = "../tree-sitter-pyrope",
+    integrity = "sha256-4DeUs3JM66pd2SSuooeIG9XJdBsXppSK2kPRoR3FTOk=",  # 2f-stream-parse-next top of tree
+    strip_prefix = "tree-sitter-pyrope-0efc1cbae9d44d127c91a0b6040bf0b81b2460b2",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/0efc1cbae9d44d127c91a0b6040bf0b81b2460b2.zip"],
 )
-# http_archive(
+# For local prpfmt co-development, swap the http_archive above for:
+# new_local_repository(
 #     name = "tree_sitter_pyrope",
 #     build_file = "//packages:prpfmt.BUILD",
-#     integrity = "sha256-...",  # archive of the tree-sitter-pyrope repo root
-#     strip_prefix = "tree-sitter-pyrope-<commit>",
-#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip"],
+#     path = "../tree-sitter-pyrope",
 # )
 
 # OpenTimer
