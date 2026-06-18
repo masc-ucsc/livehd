@@ -135,6 +135,13 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
         return;
       }
 
+      // `mem[addr][dyn-bit/slice] <= data` with a NON-constant in-word position
+      // (e.g. `useful[i][decrBit] <= 0`): no constant chunk to enable, so
+      // read-modify-write the addressed word.
+      if (lower_mem_element_dynamic_write(lhs, rhs)) {
+        return;
+      }
+
       // Any chain of packed `.field` / `[idx]` / `[hi:lo]` collapses to one
       // contiguous bit-slice of a root variable (handles arbitrary nesting,
       // e.g. `bus[i].field`, `s.sub.arr[j]`).
@@ -501,6 +508,94 @@ bool Slang_context::lower_mem_element_bitslice_write(const slang::ast::Expressio
   builder_.add_value_child_pub(st, idx);
   builder_.add_value_child_pub(st, din);
   builder_.add_value_child_pub(st, std::to_string(chunk));
+  return true;
+}
+
+bool Slang_context::lower_mem_element_dynamic_write(const slang::ast::Expression& lhs, const std::string& rhs) {
+  using slang::ast::RangeSelectionKind;
+
+  const auto& base = lhs.kind == ExpressionKind::ElementSelect ? lhs.as<slang::ast::ElementSelectExpression>().value()
+                                                               : lhs.as<slang::ast::RangeSelectExpression>().value();
+  if (base.kind != ExpressionKind::ElementSelect) {
+    return false;  // only `mem[addr][...]`
+  }
+  const auto& base_es = base.as<slang::ast::ElementSelectExpression>();
+  if (!base_es.value().type->getCanonicalType().isUnpackedArray()) {
+    return false;
+  }
+  const auto* mem_sym = resolve_base_symbol(base_es.value());
+  if (mem_sym == nullptr || flat_port_syms_.contains(mem_sym)) {
+    return false;  // flat-port arrays use the packed bit-slice path
+  }
+  auto mit = mem_info_.find(mem_sym);
+  if (mit == mem_info_.end() || mit->second.is_tuple) {
+    return false;  // struct (tuple) element field/bit writes handled elsewhere
+  }
+  const auto& mi      = mit->second;
+  const auto& elem_ty = base.type->getCanonicalType();  // the element word type
+  if (!elem_ty.isIntegral() || !elem_ty.hasFixedRange()) {
+    return false;
+  }
+  auto      range = elem_ty.getFixedRange();
+  auto      ti    = tinfo(*lhs.type);
+  const int width = ti.bits;
+  if (width <= 0) {
+    return false;
+  }
+
+  // Dynamic in-word low-bit offset of the slice. Mirrors resolve_packed_lvalue's
+  // normalize, but a memory-element base makes the packed path return false.
+  auto offset_of = [&](const slang::ast::Expression& sel, int64_t wdown, int64_t wup) -> std::string {
+    auto v = to_int_value(lower_rvalue(sel));
+    if (range.isDescending()) {
+      int64_t bias = range.lower() + (wdown - 1);
+      return bias == 0 ? v : builder_.create_minus_stmts(v, std::to_string(bias));
+    }
+    int64_t bias = range.upper() - (wup - 1);
+    return builder_.create_minus_stmts(std::to_string(bias), v);
+  };
+  std::string dyn_lo;
+  if (lhs.kind == ExpressionKind::ElementSelect) {
+    dyn_lo = offset_of(lhs.as<slang::ast::ElementSelectExpression>().selector(), 1, 1);
+  } else {
+    const auto& rs   = lhs.as<slang::ast::RangeSelectExpression>();
+    auto        kind = rs.getSelectionKind();
+    if (kind == RangeSelectionKind::IndexedUp) {
+      dyn_lo = offset_of(rs.left(), 1, width);
+    } else if (kind == RangeSelectionKind::IndexedDown) {
+      dyn_lo = offset_of(rs.left(), width, 1);
+    } else {
+      return false;  // a Simple range with non-constant bounds: unsupported here
+    }
+  }
+
+  // Memory index (biased), computed once for the read and the store.
+  auto idx = to_int_value(lower_rvalue(base_es.selector()));
+  if (mi.lower != 0) {
+    idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
+  }
+
+  // Read the addressed word (old contents, fwd=0), splice the new bits in at the
+  // dynamic offset, write the whole word back.
+  auto& ln  = *builder_.lnast;
+  auto  tg  = builder_.add_child(Lnast_ntype::create_tuple_get());
+  auto  cur = builder_.create_lnast_tmp();
+  ln.add_child(tg, Lnast_node::create_ref(cur));
+  ln.add_child(tg, Lnast_node::create_ref(lname_of(*mem_sym)));
+  builder_.add_value_child_pub(tg, idx);
+
+  auto cur_p    = to_pattern(cur, mi.elem_bits, false);
+  auto val      = to_pattern(rhs, width, ti.is_signed);
+  auto sel_mask = builder_.create_shl_stmts(mask_text(width), dyn_lo);
+  auto keep     = builder_.create_bit_and_stmts(cur_p, builder_.create_bit_not_stmts(sel_mask));
+  auto ins      = builder_.create_shl_stmts(val, dyn_lo);
+  auto next     = builder_.create_bit_or_stmts({keep, ins});
+
+  note_write(*mem_sym, current_assign_nonblocking_, lhs.sourceRange.start());
+  auto st = builder_.add_child(Lnast_ntype::create_store());
+  ln.add_child(st, Lnast_node::create_ref(lname_of(*mem_sym)));
+  builder_.add_value_child_pub(st, idx);
+  builder_.add_value_child_pub(st, next);
   return true;
 }
 

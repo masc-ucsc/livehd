@@ -283,6 +283,13 @@ private:
   // element (the caller then falls through to the existing diagnostic).
   bool lower_mem_element_bitslice_write(const slang::ast::Expression& lhs, const std::string& rhs);
 
+  // `mem[addr][dyn-bit/slice] <= data` where the in-word position is NOT
+  // constant (so the const-chunk wensize path does not apply): read-modify-write
+  // the addressed memory word (read old contents, splice the new bits in at the
+  // dynamic offset, write the whole word back). Returns false when lhs is not a
+  // bit/slice select of a (non-tuple) memory element.
+  bool lower_mem_element_dynamic_write(const slang::ast::Expression& lhs, const std::string& rhs);
+
   // ── types + conversions (slang_types.cpp) ─────────────────────────────────
   struct Tinfo {
     int  bits      = 0;
