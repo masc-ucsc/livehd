@@ -708,7 +708,10 @@ std::string Slang_context::tuple_type_name(const slang::ast::Type& elem) {
   if (ins) {
     std::string n{elem.name};
     if (n.empty()) {
-      n = absl::StrCat("__styp_", tuple_type_names_.size());
+      // Synthesized name for an anonymous struct element. Must NOT start with
+      // `__` (reserved for compiler temps; upass.bundle asserts on it) and must
+      // not collide with a user identifier — capitalized `Styp_` is type-like.
+      n = absl::StrCat("Styp_", tuple_type_names_.size());
     }
     it->second = std::move(n);
   }
