@@ -2939,8 +2939,16 @@ private:
       setup_sink_by_name(inner, (commutative || first) ? "a" : "b").connect_driver(leaf(c).pin);
       first = false;
     }
+    // The inner comparator (EQ/GT/LT) is a 1-bit boolean. Stamp it the same way
+    // lower_op() stamps a non-negated comparator result (mw=1 -> bits = mw+1
+    // under the sign-magnitude convention, unsigned). Without this the inner
+    // driver pin is left at bits==0 and leaks an unbounded cell past tolg into
+    // cprop/cgen (e.g. slang `!=` lowering to ~(a==b)).
+    auto inner_dp = inner.create_driver_pin(0);
+    set_bits(inner_dp, 2);
+    set_unsign(inner_dp);
     auto not_node = make_node(Ntype_op::Not);
-    setup_sink_by_name(not_node, "a").connect_driver(inner.create_driver_pin(0));
+    setup_sink_by_name(not_node, "a").connect_driver(inner_dp);
     bind_result(lnast_->get_name(dst), not_node.create_driver_pin(0), 1);
   }
 
@@ -3085,19 +3093,31 @@ private:
       int32_t mw = std::max({mw_lookup(var), pin_mw(cur), pin_mw(pre)});
       int n         = static_cast<int>(branches.size());
       int last_cond = has_else ? n - 2 : n - 1;
+      // Finalize the merged width BEFORE building the chain so every mux in it
+      // (not only the outermost one bind_result stamps) carries it. An if/elif
+      // with >=2 conditions builds a chain of muxes; leaving the inner muxes at
+      // bits==0 leaks an unbounded cell past tolg (e.g. an else-less `if/elif`
+      // whose fall-through arm is a nil `pre` value -- assert_ifelse2.pick_max).
+      for (int i = last_cond; i >= 0; --i) {
+        auto wr = branches[i].writes.find(var);
+        if (wr != branches[i].writes.end()) {
+          mw = std::max(mw, pin_mw(wr->second));
+        }
+      }
       for (int i = last_cond; i >= 0; --i) {
         auto& br       = branches[i];
         auto  wr       = br.writes.find(var);
         Pin   true_val = (wr != br.writes.end()) ? wr->second : pre;
-        if (wr != br.writes.end()) {
-          mw = std::max(mw, pin_mw(wr->second));
-        }
 
         auto mux = make_node(Ntype_op::Mux);
         mux.create_sink_pin(0).connect_driver(br.cond);   // selector
         mux.create_sink_pin(1).connect_driver(cur);       // false / else
         mux.create_sink_pin(2).connect_driver(true_val);  // true / then
         cur = mux.create_driver_pin(0);
+        if (i != 0) {  // inner mux; bind_result stamps the outermost (i==0) below
+          set_bits(cur, mw + 1);
+          set_unsign(cur);
+        }
       }
       bind_result(var, cur, mw);
     }
@@ -4520,5 +4540,13 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
   }
 
   g_shared->commit();
+
+#ifndef NDEBUG
+  // tolg output invariant (-c dbg): every value-producing cell must be sized.
+  // Self-check here (not only at cprop entry) so the guarantee holds even under
+  // --recipe O0, where no graph pass runs after tolg.
+  livehd::graph_util::debug_assert_cells_sized(*g_shared, "upass.tolg");
+#endif
+
   return g_shared;
 }

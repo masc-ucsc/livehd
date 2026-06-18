@@ -209,28 +209,24 @@ sh_test(
             # read_verilog cannot parse (OP_CAST), so the v2prp reference side
             # (lgcheck reads the golden via yosys) cannot be built. Its
             # `--reader slang` reading is checked by prp-equiv-packed_assign
-            # (:type: equiv_slang); the yosys-verilog read-fail it represents is
-            # reproduced by prp-yvr-packed_assign below.
+            # (:type: equiv_slang).
             "tests/equiv/packed_assign.v",
         ],
     )
 ]
 
 # prp-yvr: the `--reader yosys-verilog` direction. The slang/pyrope tests above
-# CANNOT catch the two XiangShan failure classes whose root cause is LiveHD's
-# yosys-verilog front end (slang reads both correctly — verified sl=OK yv=BAD by
+# CANNOT catch the XiangShan MISCOMPILE class whose root cause is LiveHD's
+# yosys-verilog front end (slang reads it correctly — verified sl=OK yv=BAD by
 # xs/attribute2.sh), so this drives each minimal golden through
 # `--reader yosys-verilog` and LECs the result vs the source:
 #   * MISCOMPILE — clz_nest: the terminal constant of a deep nested-ternary chain
 #                  is corrupted (CLZ_28/lzc/CMOUnit/... cluster, 68 LEC refutes).
-#   * READ-FAIL  — packed_assign: `'{...}` -> `unexpected OP_CAST` (BlockCipher /
-#                  HPerfCounter / UopInfoGen / SRT* / VFAlu / ... read-fails).
-# These reproduce KNOWN, currently-unfixed yosys-verilog reader bugs, so they FAIL
+# This reproduces a KNOWN, currently-unfixed yosys-verilog reader bug, so it FAILS
 # by design. Tagged `fixme` (the repo's known-broken convention; .bazelrc filters
-# `-fixme` so `bazel test //...` stays green). Run one to see the bug — clear the
+# `-fixme` so `bazel test //...` stays green). Run it to see the bug — clear the
 # tag filter so the fixme target is selected — and a fix flips it green:
-#   bazel test //inou/prp:prp-yvr-clz_nest      --test_tag_filters=
-#   bazel test //inou/prp:prp-yvr-packed_assign --test_tag_filters=
+#   bazel test //inou/prp:prp-yvr-clz_nest --test_tag_filters=
 [
     sh_test(
         name = "prp-yvr-%s" % base,
@@ -248,8 +244,7 @@ sh_test(
         deps = ["//inou/yosys:scripts"],
     )
     for base in [
-        "clz_nest",       # MISCOMPILE: deep nested-ternary terminal constant
-        "packed_assign",  # READ-FAIL:  '{...} assignment pattern (OP_CAST)
+        "clz_nest",  # MISCOMPILE: deep nested-ternary terminal constant
     ]
 ]
 

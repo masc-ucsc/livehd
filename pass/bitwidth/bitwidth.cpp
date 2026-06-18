@@ -105,7 +105,55 @@ void Bitwidth::do_trans(const std::shared_ptr<hhds::Graph>& g) {
     ctx.event()->set_name(absl::StrCat(converted_str, name));
   });
 
+#ifndef NDEBUG
+  // Debug self-check (-c dbg). Tier 1: validate every constant against the
+  // bits/sign declared on its pin before we recompute. Tier 2: snapshot the
+  // front-end-declared sign of each explicitly-sized driver pin so that, after
+  // range inference, we can flag any pin declared UNSIGNED whose independently
+  // inferred range can go negative -- the sext/zext/get_mask that the
+  // translation should have inserted is missing, so the unsigned attribute lies
+  // about the sign/upper bits.
+  absl::flat_hash_map<hhds::Class_index, bool> declared_unsigned;
+  for (auto node : g->forward_class()) {
+    if (Ntype::is_multi_driver(type_op_of(node))) {
+      continue;
+    }
+    auto dpin = node.create_driver_pin(0);
+    if (dpin.is_invalid()) {
+      continue;
+    }
+    livehd::graph_util::debug_check_const_pin(dpin);
+    if (bits_of(dpin) != 0) {
+      declared_unsigned.insert_or_assign(dpin.get_class_index(), livehd::graph_util::is_unsign(dpin));
+    }
+  }
+#endif
+
   bw_pass(g.get());
+
+#ifndef NDEBUG
+  for (auto node : g->forward_class()) {
+    if (Ntype::is_multi_driver(type_op_of(node))) {
+      continue;
+    }
+    auto dpin = node.create_driver_pin(0);
+    if (dpin.is_invalid()) {
+      continue;
+    }
+    auto dit = declared_unsigned.find(dpin.get_class_index());
+    if (dit == declared_unsigned.end() || !dit->second) {
+      continue;  // not explicitly sized at entry, or declared signed
+    }
+    auto rit = bwmap.find(dpin.get_class_index());
+    if (rit == bwmap.end() || rit->second.is_overflow()) {
+      continue;
+    }
+    I(rit->second.min >= 0,
+      std::format("bitwidth: pin '{}' declared unsigned but inferred range [{}..{}] is negative -- missing sext/zext/get_mask?",
+                  livehd::graph_util::wire_name(dpin), rit->second.min, rit->second.max)
+          .c_str());
+  }
+#endif
 }
 
 void Bitwidth::set_bw_1bit(hhds::Pin_class dpin) {

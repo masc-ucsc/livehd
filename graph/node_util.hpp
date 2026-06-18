@@ -12,6 +12,7 @@
 // the "%dot.name" wire-naming scheme, etc.).
 
 #include <cstdint>
+#include <format>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -250,6 +251,87 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
     return base;
   }
   return base + "_" + std::to_string(static_cast<uint32_t>(port_id));
+}
+
+// ---------------------------------------------------------------------------
+// Debug-only attribute self-checks (-c dbg). Tier 1: a constant driver pin must
+// be consistent with the bits/sign attributes stamped on it.
+// ---------------------------------------------------------------------------
+//
+// The per-pin `bits`/`pin_signed` attributes are an optimisation/codegen hint,
+// but if a front-end translation leaves a value on a pin whose *explicitly
+// declared* width/sign cannot hold it -- e.g. a $mux/concat const imported
+// signed so 4'hA reads as -6, or a value with a set bit above the declared
+// unsigned width -- the hint is a lie and downstream emit/LEC silently diverges.
+// `I(...)` is compiled out under NDEBUG (-c opt); the body is additionally
+// guarded so hydrate_const is not even built in a release compile.
+//
+// IMPORTANT: gated on bits>0 (an *explicit* declared width). Const pins with no
+// bits attr default to "unsigned" only by attribute absence, so an ungated sign
+// check would false-fire on every legitimately-signed negative literal. A pin
+// the front-end deliberately sized carries a real contract worth checking.
+inline void debug_check_const_pin([[maybe_unused]] const hhds::Pin_class& dpin) {
+#ifndef NDEBUG
+  if (dpin.is_invalid() || !is_const_pin(dpin)) {
+    return;
+  }
+  const int32_t nbits = bits_of(dpin);
+  if (nbits <= 0) {
+    return;  // no explicit declared width -> nothing to violate
+  }
+  const auto c = hydrate_const(dpin);
+  if (c.has_unknowns() || c.is_nil()) {
+    return;  // x/z/nil bits: no concrete value to range-check
+  }
+  const bool is_uns = is_unsign(dpin);
+
+  // (1) An unsigned pin must never carry a negative value (its sign bit / upper
+  // bits were not cleared -- a missing get_mask / zero-extend in translation).
+  // The message is only formatted when the assertion fails (it sits inside the
+  // iassert `if (!cond)` branch) and is dropped entirely under NDEBUG.
+  I(!is_uns || !c.is_negative(),
+    std::format("unsigned const pin '{}' (declared {} bits) holds a negative value -- missing get_mask/zext?",
+                wire_name(dpin), nbits)
+        .c_str());
+
+  // (2) The value must fit the declared width. For a non-negative value the
+  // highest set bit must lie below the declared unsigned width; a signed pin
+  // reserves one extra bit for the sign. get_last_bit_set() sidesteps the
+  // sign-magnitude get_bits()+1 wart.
+  if (!c.is_negative()) {
+    const int need = c.get_last_bit_set() + 1;  // unsigned magnitude bits
+    I(need <= (is_uns ? nbits : nbits - 1),
+      std::format("const pin '{}' needs {} magnitude bits but is declared {} {}signed bits",
+                  wire_name(dpin), need, nbits, is_uns ? "un" : "")
+          .c_str());
+  }
+#endif
+}
+
+// Debug-only (-c dbg) invariant: tolg / upass generation must leave every
+// value-producing cell with a resolved width. A driver pin still at bits==0 is
+// an unbounded cell the front-end failed to size -- a latent bug, since
+// cgen/LEC would silently infer a width. Exemptions: consts carry their width
+// in their value; multi-driver Sub/Memory/Flop carry it on their typed output
+// pins. `where` labels the producing stage in the assertion message. Compiled
+// out under NDEBUG (-c opt).
+inline void debug_assert_cells_sized([[maybe_unused]] hhds::Graph& g, [[maybe_unused]] std::string_view where) {
+#ifndef NDEBUG
+  for (auto node : g.forward_class()) {
+    auto op = type_op_of(node);
+    if (op == Ntype_op::Invalid || op == Ntype_op::Nconst || Ntype::is_multi_driver(op)) {
+      continue;
+    }
+    auto dpin = node.create_driver_pin(0);
+    if (dpin.is_invalid() || is_const_pin(dpin)) {
+      continue;
+    }
+    I(bits_of(dpin) != 0,
+      std::format("{} left cell '{}' ({}) at bits==0 -- unbounded width (front-end did not size it)",
+                  where, debug_name(node), Ntype::get_name(op))
+          .c_str());
+  }
+#endif
 }
 
 // ---------------------------------------------------------------------------

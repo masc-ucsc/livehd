@@ -894,9 +894,32 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
     ctx.event()->set_name(absl::StrCat(converted_str, name));
   });
 
+#ifndef NDEBUG
+  // Invariant (-c dbg): every value-producing cell must carry a resolved width
+  // at cprop ENTRY (i.e. as produced by tolg / upass generation). cprop is the
+  // only graph pass in the default O1 recipe, so checking here covers BOTH
+  // front-ends' tolg output (upass/tolg and inou/yosys/lgyosys_tolg). The lnast
+  // tolg additionally self-checks at its own output (covers O0, where no graph
+  // pass runs) -- see uPass_tolg::run.
+  livehd::graph_util::debug_assert_cells_sized(*g, "tolg/upass (seen at cprop entry)");
+#endif
+
   current_graph = g.get();
   scalar_pass(current_graph);
   current_graph = nullptr;
+
+#ifndef NDEBUG
+  // Debug self-check (Tier 1, -c dbg): every constant left in the graph must be
+  // consistent with the bits/sign attributes on its pin. cprop is the only
+  // graph pass that runs in the default O1 recipe, so this is the front line for
+  // catching front-end translation misses (a const stamped the wrong width/sign).
+  for (auto node : g->forward_class()) {
+    if (type_op_of(node) != Ntype_op::Nconst) {
+      continue;
+    }
+    livehd::graph_util::debug_check_const_pin(node.create_driver_pin(0));
+  }
+#endif
 }
 
 void Cprop::bwd_del_node(hhds::Node_class& node) {
