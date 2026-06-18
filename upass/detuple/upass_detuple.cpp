@@ -61,6 +61,10 @@ private:
     std::string        mode;     // declare mode ("reg"/"mut"/"const")
   };
   absl::flat_hash_map<std::string, Split> split_mem_;  // comp_type_array tuple memories
+  // Named types consumed ENTIRELY by split memories: their `type T=(...)` region
+  // is dead after the split and is dropped (else a re-emit — e.g. the Pyrope
+  // writer — serializes its bare field refs as undefined-variable reads).
+  absl::flat_hash_set<std::string> drop_types_;
   // Memory read fusion: index-step temp -> (mem var, index operand nid).
   struct Index_step {
     std::string var;
@@ -262,6 +266,7 @@ private:
           continue;  // not a (resolved) tuple element — leave alone
         }
         split_mem_[var] = Split{tit->second, dim, mode};
+        drop_types_.insert(std::string(name_of(elem)));
       }
     }
   }
@@ -353,7 +358,31 @@ private:
 
   // Recursively copy children of src_n under dst_parent, applying the rewrites.
   void copy_transformed(const Lnast_nid& src_n, const Lnast_nid& dst_parent) {
+    std::string drop_typedef_of;  // non-empty: dropping a dead `type T=(...)` region for this T
     for (auto c = src_->get_first_child(src_n); !c.is_invalid(); c = src_->get_sibling_next(c)) {
+      // Drop the contiguous `type T=(...)` region (declare(T,'type') .. store(T,Ttemp))
+      // for a type fully consumed by split memories — it is dead and re-emits as
+      // bare field refs.
+      if (!drop_typedef_of.empty()) {
+        if (Lnast_ntype::is_store(type_of(c))) {
+          auto a = src_->get_first_child(c);
+          if (!a.is_invalid() && Lnast_ntype::is_ref(type_of(a)) && name_of(a) == drop_typedef_of) {
+            drop_typedef_of.clear();  // this store(T,Ttemp) terminates the region
+          }
+        }
+        continue;  // drop every node of the region (incl. the terminator)
+      }
+      if (Lnast_ntype::is_declare(type_of(c))) {
+        auto t0 = src_->get_first_child(c);
+        auto t1 = t0.is_invalid() ? t0 : src_->get_sibling_next(t0);
+        auto t2 = t1.is_invalid() ? t1 : src_->get_sibling_next(t1);
+        if (!t0.is_invalid() && !t2.is_invalid() && Lnast_ntype::is_ref(type_of(t0))
+            && Lnast_ntype::is_const(type_of(t2)) && name_of(t2) == "type"
+            && drop_types_.contains(std::string(name_of(t0)))) {
+          drop_typedef_of = std::string(name_of(t0));
+          continue;  // drop the typedef declare; the region follows
+        }
+      }
       if (handle(c, dst_parent)) {
         continue;  // node was rewritten (or dropped) — do not copy verbatim
       }

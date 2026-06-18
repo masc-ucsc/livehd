@@ -155,22 +155,32 @@ std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
   // per version (so a module that keeps two live versions, e.g. a FIFO, stays
   // correct) but outside the `___ssa_` namespace, so the recompile re-versions it
   // freely without collision.
+  // Names that are not a plain Pyrope identifier (e.g. upass.detuple's per-field
+  // memories `mem.field`, which carry a `.`) must be emitted as a backtick-escaped
+  // identifier so the re-compile leg can re-parse them; the lexer strips the
+  // backticks back to the identical name, so the round-trip is exact.
+  // Only a `.` makes a body name a non-identifier here (upass.detuple's per-field
+  // `mem.field` memories). Integer constants that also flow through this helper
+  // (`6`, `0sb?`, `0xff`) must stay bare, so do NOT quote on other characters.
+  auto quote = [](std::string s) -> std::string {
+    return s.find('.') == std::string::npos ? s : "`" + s + "`";
+  };
   auto pos = name.rfind("___ssa_");
   if (pos == std::string_view::npos) {
-    return std::string(name);
+    return quote(std::string(name));
   }
   for (size_t i = pos + 7; i < name.size(); ++i) {
     if (name[i] < '0' || name[i] > '9') {
-      return std::string(name);  // not a pure-digit suffix — leave intact
+      return quote(std::string(name));  // not a pure-digit suffix — leave intact
     }
   }
   if (pos + 7 >= name.size()) {
-    return std::string(name);  // bare `___ssa_` with no version — leave intact
+    return quote(std::string(name));  // bare `___ssa_` with no version — leave intact
   }
   std::string out(name.substr(0, pos));
   out += "__w";
   out += name.substr(pos + 7);
-  return out;
+  return quote(out);
 }
 
 // ── Main dispatch ─────────────────────────────────────────────────────────────
