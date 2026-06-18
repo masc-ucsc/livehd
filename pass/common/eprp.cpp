@@ -5,10 +5,8 @@
 #include <print>
 
 #include "diag.hpp"
-#include "err_tracker.hpp"
 
 void Eprp::parser_error_int(std::string_view text) const {
-  err_tracker::logger(text);
   // Human + JSONL output go through the diag sink (livehd: error: …). A rich
   // diagnostic staged at the call site is emitted here; otherwise a generic
   // one. The exception (Eprp::parser_error) propagates to the EPRP command
@@ -17,12 +15,10 @@ void Eprp::parser_error_int(std::string_view text) const {
 }
 
 void Eprp::parser_warn_int(std::string_view text) const {
-  err_tracker::logger(text);
   livehd::diag::sink().flush(livehd::diag::Severity::warning, text);
 }
 
 void Eprp::parser_info_int(std::string_view text) const {
-  err_tracker::logger(text);
   std::print("info: {}\n", text);
 }
 

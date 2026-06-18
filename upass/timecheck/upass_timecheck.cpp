@@ -106,7 +106,6 @@ public:
         .span     = ln_ ? ln_->span_of(nid) : livehd::diag::Span{},
         .notes    = ln_ ? ln_->notes_of(nid, "reached via this site") : std::vector<livehd::diag::Note>{},
     });
-    err_tracker::logger(msg);
     throw Eprp::parser_error(Pass::eprp, msg);
   }
 

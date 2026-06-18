@@ -395,7 +395,6 @@ private:
   [[noreturn]] void error_at(const Lnast_nid& nid, livehd::diag::Id id, std::format_string<Args...> fmt, Args&&... args) {
     auto msg = std::format(fmt, std::forward<Args>(args)...);
     livehd::diag::sink().stage(locate_record(nid, livehd::diag::Severity::error, id.code, id.category, msg));
-    err_tracker::logger(msg);
     throw Eprp::parser_error(Pass::eprp, msg);
   }
 
@@ -3432,7 +3431,6 @@ public:
         .span     = std::move(span),
         .notes    = std::move(notes),
     });
-    err_tracker::logger(msg);
     throw Eprp::parser_error(Pass::eprp, msg);
   }
 

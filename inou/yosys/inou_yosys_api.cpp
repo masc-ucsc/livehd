@@ -166,7 +166,6 @@ void Inou_yosys_api::call_yosys(mustache::data& vars) {
     try {
       Yosys::Pass::call(&design, cmd);
     } catch (...) {
-      err_tracker::logger("inou.yosys cmd:{} failed\n", cmd);
       livehd::diag::err("inou.yosys", "yosys-failed", "io").msg("cmd:{} failed", cmd).fatal();
     }
   }
