@@ -1,0 +1,23 @@
+/*
+:name: mem_tuple_rw
+:type: equiv
+:verilog_top: mem_tuple_rw.mtr
+:pyrope_top: mem_tuple_rw.mtr
+*/
+
+// tuple-typed memory: `reg mem:[8]q_type` (q_type = (a,b)) is lowered by
+// upass.detuple into two per-field scalar memories `mem.a:[8]u8` and
+// `mem.b:[8]u4` BEFORE tolg (LGraph has no tuples). Runtime write/read
+// indices keep constprop from folding it away, so this exercises the real
+// field-write rewrite and the fused two-node field-read chain.
+type q_type = (a:u8, b:u4)
+
+mod mtr(wa:u8, wb:u4, wi:u3, ri:u3, we:bool) -> (za:u8@[0], zb:u4@[0]) {
+  reg mem:[8]q_type = nil
+  if we {
+    mem[wi].a = wa
+    mem[wi].b = wb
+  }
+  za = mem[ri].a
+  zb = mem[ri].b
+}

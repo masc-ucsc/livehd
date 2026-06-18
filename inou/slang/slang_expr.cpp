@@ -636,7 +636,19 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
     shamt = builder_.create_mult_stmts(shamt, std::to_string(stride));
   }
   const int bias = sel_bits;
-  shamt          = builder_.create_plus_stmts(shamt, std::to_string(bias));
+  // Resize the shift amount so `+ bias` cannot wrap. `dyn_low` carries only the
+  // index expression's (often tiny) width, but the real shift reaches bi.bits +
+  // bias. cgen inlines this `+ bias` into the shift operand, where Verilog's
+  // self-determined width is just max(operand widths) and the carry is dropped:
+  // a 4-bit idx makes `idx + 1 == 0` at idx==15, shifting by 0 and returning the
+  // wrong element. Widen `dyn_low` (zero-extend via get_mask) to a width that
+  // holds bi.bits + bias before adding the bias.
+  int amt_bits = 0;
+  for (int t = bi.bits + bias; t > 0; t >>= 1) {
+    ++amt_bits;
+  }
+  ++amt_bits;  // headroom for the +bias carry
+  shamt        = builder_.create_plus_stmts(trunc_to(shamt, amt_bits), std::to_string(bias));
   auto shifted = builder_.create_sra_stmts(builder_.create_shl_stmts(p, std::to_string(bias)), shamt);
   auto r       = trunc_to(shifted, sel_bits);
   return ti.is_signed ? builder_.create_sext_stmts(r, std::to_string(ti.bits - 1)) : r;

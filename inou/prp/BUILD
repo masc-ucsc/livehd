@@ -196,11 +196,13 @@ sh_test(
     )
     for v_file in glob(
         ["tests/equiv/*.v"],
-        # assign_pattern.v wires submodules through `'{...}` output-port patterns
-        # (hierarchical), so the v2prp round-trip (emit one Pyrope, recompile it
+        # assign_pattern.v is hierarchical: a parent wires two child modules
+        # through `'{...}` unpacked-array output-port patterns, so the v2prp
+        # round-trip (emit ONE Pyrope per module, recompile a submodule
         # standalone) does not apply — it is covered by its `:type: equiv_slang`
-        # prp-equiv target instead. hier_value.v IS a single module and stays
-        # here: this round-trip is what exercises --reader slang HierarchicalValue.
+        # prp-equiv target instead. (arr2d_dyn_sel.v / bitsel_dyn.v used to be
+        # excluded here too as known --reader slang dynamic-select miscompiles;
+        # that lowering is now fixed in slang_expr.cpp lower_select, so they run.)
         exclude = [
             "tests/equiv/assign_pattern.v",
         ],

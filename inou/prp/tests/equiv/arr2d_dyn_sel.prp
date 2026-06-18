@@ -1,0 +1,24 @@
+/*
+:name: arr2d_dyn_sel
+:type: equiv
+:verilog_top: arr2d_dyn_sel.sel2d
+:pyrope_top: arr2d_dyn_sel.sel2d
+*/
+
+// Pyrope reference for arr2d_dyn_sel.v: a runtime-indexed read of a 4-entry
+// array built from the inputs (g[0]=a .. g[3]=d), `z = g[sel]`.  This is the
+// behavioral equivalent of the Verilog packed 2-D array select `g[sel]`.
+//
+// The Pyrope tolg path lowers this dynamic select correctly, so prp-equiv
+// LEC-passes against the golden.  The companion prp-v2prp-arr2d_dyn_sel
+// (--reader slang reading the .v) is the one that fails: slang mis-lowers the
+// packed-array index.  Distilled from XiangShan MiscResultSelect /
+// ShiftResultSelect (`_GEN[io_func[2:1]]` over `wire [3:0][63:0] _GEN`).
+comb sel2d(sel:u2, a:u8, b:u8, c:u8, d:u8) -> (z:u8) {
+  mut g:[4]u8 = (0, 0, 0, 0)   // mut-array init must be comptime; fill at runtime
+  g[0] = a
+  g[1] = b
+  g[2] = c
+  g[3] = d
+  z = g[sel]
+}

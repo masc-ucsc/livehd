@@ -23,6 +23,7 @@ cc_library(
         "//upass/constprop:upass_constprop",
         "//upass/core:upass",
         "//upass/cyclecmd:upass_cyclecmd",
+        "//upass/detuple:upass_detuple",
         "//upass/func_extract:upass_func_extract",
         "//upass/noop:upass_noop",
         "//upass/pipe:upass_pipe",

@@ -19,6 +19,7 @@
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
 #include "upass_constprop.hpp"
+#include "upass_detuple.hpp"       // pre-split tuple-typed memory/var lowering
 #include "upass_func_extract.hpp"  // front-end lambda split (2g)
 #include "upass_pipe.hpp"
 #include "upass_runner.hpp"
@@ -390,6 +391,11 @@ void Pass_upass::work(Eprp_var& var) {
     const auto                  ln = var.lnasts.at(idx);
     // Excerpt provider for any diagnostic emitted while this unit is split.
     livehd::diag::Locator_scope diag_scope(&ln->source_locator());
+    // Lower tuple-typed memory/var declarations into per-field scalar leaves
+    // BEFORE the lambda split, while a file-scope named type and the module
+    // using it are still one tree (so the type's field layout resolves locally,
+    // with no symbol table this early). Tolg has no tuples.
+    uPass_detuple::run(ln);
     for (const auto& new_ln : upass::extract_lambda_functions(ln)) {
       var.add(new_ln);
     }
