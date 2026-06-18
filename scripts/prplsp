@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# prplsp -- launch the Pyrope/LiveHD LSP server (lhd lsp)
+# prplsp -- launch the Pyrope/LiveHD LSP server (lhd pyrope lsp)
 #
 # Picks which lhd to run based on the CURRENT WORKING DIRECTORY (the dir the
 # editor launched in), so neovim can use a single command everywhere:
@@ -9,7 +9,7 @@
 #   2. Otherwise fall back to the `lhd` found in $PATH (the default install).
 #
 # A livehd checkout is identified by an ancestor MODULE.bazel declaring
-# name = "livehd". Extra arguments are forwarded to lhd after lsp.
+# name = "livehd". Extra arguments are forwarded to lhd after `pyrope lsp`.
 
 set -euo pipefail
 
@@ -50,4 +50,4 @@ if [[ -z "${lhd:-}" ]]; then
   fi
 fi
 
-exec "${lhd}" lsp "$@"
+exec "${lhd}" pyrope lsp "$@"

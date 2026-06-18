@@ -18,6 +18,7 @@ cc_library(
         "//pass/common:pass",
         "//pass/partition:pass_partition",
         "@abc",
+        "@abseil-cpp//absl/container:node_hash_map",
     ],
     alwayslink = True,  # static Pass_plugin registration
 )

@@ -50,7 +50,11 @@ cc_library(
 
 cc_binary(
     name = "lhd",
-    srcs = ["lhd_main.cpp"],
+    srcs = [
+        "lhd_main.cpp",
+        "lhd_pyrope.cpp",
+        "lhd_pyrope.hpp",
+    ],
     additional_linker_inputs = ["lhd_export.lds"],
     copts = COPTS,
     data = [
@@ -73,5 +77,6 @@ cc_binary(
     deps = [
         ":lhd_lib",
         "//lsp",
+        "@tree_sitter_pyrope//:prpfmt",
     ],
 )

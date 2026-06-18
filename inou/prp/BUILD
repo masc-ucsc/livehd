@@ -211,9 +211,41 @@ sh_test(
             # `--reader slang` reading is checked by prp-equiv-packed_assign
             # (:type: equiv_slang).
             "tests/equiv/packed_assign.v",
+            # mclk_sram_2wclk.v has two write ports on DIFFERENT clocks. The
+            # front end (inou.slang -> upass.attributes) aborts before the
+            # writer because the Memory cell carries a single per-memory
+            # clock_pin (`clock_pin_refname` is add-only). Per-port memory
+            # clocks are a Memory-model feature tracked by 2m-multiport_mem,
+            # not prp_writer completeness — run the `fixme` target below to see
+            # the front-end abort. (todo/livehd/2w-prp_writer.html bucket C.)
+            "tests/equiv/mclk_sram_2wclk.v",
         ],
     )
 ]
+
+# 2w-prp_writer bucket C2 (DEFERRED to 2m-multiport_mem): a multi-clock SRAM
+# whose two write ports use different clocks. This aborts in the FRONT END
+# (upass.attributes: `clock_pin_refname` of the memory is add-only), never
+# reaching the writer — it needs a per-port memory-clock representation +
+# cgen's existing ware/rtl/cgen_memory_multiclock_*.v wrapper wiring. Tagged
+# `fixme` (repo known-broken convention; .bazelrc filters `-fixme` so
+# `bazel test //...` stays green):
+#   bazel test //inou/prp:prp-v2prp-mclk_sram_2wclk --test_tag_filters=
+sh_test(
+    name = "prp-v2prp-mclk_sram_2wclk",
+    srcs = ["tests/v2prp_test.py"],
+    args = [
+        "-i",
+        "$(location //inou/prp:tests/equiv/mclk_sram_2wclk.v)",
+    ],
+    data = [
+        "//inou/prp:tests/v2prp_test.py",
+        "//inou/prp:tests/equiv/mclk_sram_2wclk.v",
+        "//lhd",
+    ],
+    tags = ["fixme"],
+    deps = ["//inou/yosys:scripts"],
+)
 
 # prp-yvr: the `--reader yosys-verilog` direction. The slang/pyrope tests above
 # CANNOT catch the XiangShan MISCOMPILE class whose root cause is LiveHD's

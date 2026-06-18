@@ -1,0 +1,25 @@
+/*
+:name: mclk_derived
+:type: equiv
+:verilog_top: mclk_derived.derived
+:pyrope_top: mclk_derived.derived
+*/
+
+// Multi-clock registers with a DERIVED clock. `qa` is clocked by the default
+// `clock`; `qb` is clocked by `gclk`, an INTERNAL combinational signal (a gated
+// `clk_b & gate`) feeding the flop's `clock_pin`. Two bugs used to break this:
+//   1. upass/ssa did not SSA-rename the `attr_set ... clock_pin <wire>` value
+//      operand, so the clock_pin resolved to the declaration-time `gclk = 0ub?`
+//      poison instead of the live `gclk___ssa_1 = clk_b & gate` driver — the
+//      flop bound to an unknown const (cgen emitted `posedge invalid_*`).
+//   2. inou/cgen emitted the clock with `pin_wire_name` (dropping the `_u`
+//      unsigned suffix / not handling an inlined single-fanout clock node), so
+//      the `always @(posedge ...)` referenced an undeclared net.
+// Both are fixed; prp->verilog is LEC-equivalent to the golden below.
+mod derived(clk_b:bool, gate:bool, da:u8, db:u8) -> (qa:u8@[1], qb:u8@[1]) {
+  reg qa:u8 = 0
+  qa = da
+  mut gclk = clk_b and gate
+  reg qb:u8:[clock_pin=ref gclk] = 0
+  qb = db
+}

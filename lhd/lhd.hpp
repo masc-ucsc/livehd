@@ -9,7 +9,7 @@
 // the registered EPRP methods programmatically (Eprp::run_method_now) plus
 // the direct C++ entry points (Lnast::dump, uPass_tolg::run,
 // livehd::Hhds_graph_library). The legacy lgshell REPL was removed
-// 2026-06-04 (lhd is the only driver; `lhd lsp` serves the LSP).
+// 2026-06-04 (lhd is the only driver; `lhd pyrope lsp` serves the LSP).
 
 #include <string>
 #include <string_view>
@@ -37,7 +37,7 @@ enum class Diag_fmt { jsonl, pretty };
 Diag_fmt default_diag_fmt();
 
 struct Options {
-  std::string command;   // compile|lec|scan|lsp|tool|pass|list|describe|version|help
+  std::string command;   // compile|lec|scan|pyrope|tool|pass|list|describe|version|help
   std::string language;  // verilog|pyrope ("" for the IR/meta commands)
 
   std::vector<std::string> files;  // positional: source files / list pattern / describe name
@@ -93,6 +93,14 @@ struct Options {
 
   std::string impl_kind, impl_path, impl_top;  // lec --impl
   std::string ref_kind, ref_path, ref_top;     // lec --ref
+
+  // `lhd pyrope fmt` formatter knobs (clang-format-like). Consumed only by the
+  // pyrope command; harmless defaults elsewhere.
+  bool        fmt_inplace = false;  // -i / --inplace: rewrite each input file
+  std::string fmt_output;           // -o / --output FILE: write to FILE (one input)
+  int         fmt_indent  = 0;      // --indent N: spaces per level (0 => prpfmt default 4)
+  int         fmt_width   = 0;      // --width N: wrap column (0 => prpfmt default 80)
+  bool        fmt_verify  = false;  // --verify: re-parse the formatted output
 
   std::string result_json;
   std::string workdir;

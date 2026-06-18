@@ -8,7 +8,7 @@
 #include "diag.hpp"
 #include "iassert.hpp"
 #include "lhd.hpp"
-#include "livehd_lsp.hpp"
+#include "lhd_pyrope.hpp"
 
 namespace {
 
@@ -42,11 +42,14 @@ int main(int argc, char** argv) {
     return res.exit_code;
   }
 
-  // `lhd lsp` — the Pyrope LSP server. JSON-RPC owns stdio, so no
-  // result envelope is written; run_stdio() reassigns fd 1 internally and
-  // drives the front-end passes directly (no engine/registry init needed).
-  if (opts.command == "lsp") {
-    return livehd::lsp::run_stdio();
+  // `lhd pyrope <lsp|fmt>` — the Pyrope developer tools. `pyrope lsp` is the
+  // Pyrope LSP server (JSON-RPC owns stdio, so run_stdio() reassigns fd 1
+  // internally and drives the front-end passes directly); `pyrope fmt` is the
+  // prpfmt source formatter. Both run before the pass/inou engine is
+  // initialized and write no result envelope (fmt's output is the formatted
+  // source on stdout / the rewritten files).
+  if (opts.command == "pyrope") {
+    return livehd::pyrope::run(opts);
   }
 
   if (lhd::is_meta_command(opts)) {

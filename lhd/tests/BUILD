@@ -289,12 +289,21 @@ sh_test(
     data = _FLOW_DATA + ["writer_rich.prp"],
 )
 
-# `lhd lsp` scripted JSON-RPC session over stdio: initialize negotiation,
+# `lhd pyrope lsp` scripted JSON-RPC session over stdio: initialize negotiation,
 # didOpen/didChange/didSave/didClose, pull diagnostics on a broken buffer,
 # MethodNotFound, and clean shutdown/exit.
 sh_test(
     name = "lhd_lsp_test",
     srcs = ["lhd_lsp_test.py"],
+    data = ["//lhd"],
+)
+
+# `lhd pyrope fmt` — the Pyrope source formatter (prpfmt). Stdout default,
+# idempotence, -i in-place (and its no-op on formatted input), --indent, a
+# clean parse-error exit, the -i/-o guard, and the `pyrope lsp` alias.
+sh_test(
+    name = "lhd_fmt_test",
+    srcs = ["lhd_fmt_test.sh"],
     data = ["//lhd"],
 )
 

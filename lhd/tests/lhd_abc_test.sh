@@ -70,3 +70,28 @@ if "$LHD" lec --set lec.solver=lgyosys --impl verilog:"$W/impl.v" --ref verilog:
 fi
 
 echo "PASS: pass.abc tech-map LEC-equivalent to original logic (+ negative control)"
+
+# ---------------------------------------------------------------------------
+# No prior coloring: `pass abc` must run WITHOUT `pass color` first. Color 0 (an
+# uncolored design) is treated as just another color — the whole design folds
+# into one color-0 region — with a single non-fatal warning, and the tech-mapped
+# netlist stays LEC-equivalent to the original logic.
+# ---------------------------------------------------------------------------
+N="$W/nocolor"
+mkdir -p "$N"
+run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$N/lg" --workdir "$N/w1"
+# abc directly on the uncolored design (NO pass color) — must succeed + warn once
+"$LHD" pass abc --top "$TOP" lg:"$N/lg" --emit-dir lg:"$N/net" --set abc.library="$LIB" \
+    -q --result-json "$N/r.json" --workdir "$N/w2" || fail "pass abc without color failed -> $(cat "$N/r.json" 2>/dev/null)"
+grep -q '"diagnostics_count":{"errors":0,"warnings":1}' "$N/r.json" \
+  || fail "expected one uncolored-node warning, got $(grep -o '"diagnostics_count":{[^}]*}' "$N/r.json")"
+# behavioral cell models + original-design reference, then emit + LEC
+run pass liberty gensim "$LIB" --emit-dir lg:"$N/models" --workdir "$N/w3"
+run compile lg:"$N/net" --top "$TOP" --recipe O0 --emit-dir verilog:"$N/netv" --workdir "$N/w4"
+run compile lg:"$N/models" --recipe O0 --emit-dir verilog:"$N/modelsv" --workdir "$N/w5"
+run compile lg:"$N/lg" --top "$TOP" --recipe O0 --emit-dir verilog:"$N/origv" --workdir "$N/w6"
+grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$N/netv/${TOP}__c0"*.v || fail "no standard cells in the uncolored ABC netlist"
+cat "$N/netv/"*.v "$N/modelsv/"*.v > "$N/impl.v"
+cat "$N/origv/"*.v > "$N/orig.v"
+run lec --set lec.solver=lgyosys --impl verilog:"$N/impl.v" --ref verilog:"$N/orig.v" --top "$TOP" --workdir "$N/c"
+echo "PASS: pass.abc runs WITHOUT a prior color pass (color-0 region, LEC-equivalent)"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Scripted JSON-RPC session against `lhd lsp` (Pyrope LSP over stdio,
+# Scripted JSON-RPC session against `lhd pyrope lsp` (Pyrope LSP over stdio,
 # Content-Length framing): initialize negotiates utf-8 + pull diagnostics,
 # didOpen/didChange/didSave/didClose manage the in-memory buffer, the pull
 # request must report a syntax error for a broken .prp and none after the
@@ -55,7 +55,7 @@ def fail(why):
 
 
 def main():
-    proc = subprocess.Popen([LHD, 'lsp'], stdin=subprocess.PIPE,
+    proc = subprocess.Popen([LHD, 'pyrope', 'lsp'], stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     uri = 'file:///lsp_test/broken.prp'
 

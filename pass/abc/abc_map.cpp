@@ -20,6 +20,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/container/node_hash_map.h"
 #include "cell.hpp"
 #include "diag.hpp"
 #include "dlop.hpp"
@@ -136,8 +137,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   manNtk->pName = Extra_UtilStrsav(const_cast<char*>(rb.module_name.c_str()));
   auto* manFunc = static_cast<Hop_Man_t*>(manNtk->pManFunc);
 
-  // bit i of an original driver pin -> the ABC net carrying it.
-  absl::flat_hash_map<hhds::Pin_class, absl::flat_hash_map<int, Abc_Obj_t*>> bitnet;
+  // bit i of an original driver pin -> the ABC net carrying it. The OUTER map is
+  // a node_hash_map (pointer-stable values): several sites bind `auto& slots =
+  // bitnet[pin]` and then keep writing through it while `abc_bit` inserts *new*
+  // outer keys (input/const drivers). A flat_hash_map would rehash on those
+  // inserts and leave `slots` dangling — harmless for a small colored region but
+  // a use-after-free once an uncolored design folds the whole graph into one
+  // large region. node_hash_map keeps each inner map's address fixed across
+  // outer rehashes, so every held `slots` reference stays valid.
+  absl::node_hash_map<hhds::Pin_class, absl::flat_hash_map<int, Abc_Obj_t*>> bitnet;
   // Region node membership (handles into rb.src).
   absl::flat_hash_set<hhds::Node_class>                                      region;
   for (const auto& n : rb.nodes) {

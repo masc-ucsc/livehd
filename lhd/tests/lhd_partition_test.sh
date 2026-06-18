@@ -10,8 +10,10 @@
 #   lhd lec --set lec.solver=lgyosys  (partitioned verilog vs the original): LEC-equivalent
 #
 # Runs for the self-contained coloring algorithms (acyclic, synth); also checks
-# the stats-only mode and that an incomplete coloring is a clean error (not an
-# abort).
+# the stats-only mode and that an UNCOLORED design partitions cleanly: color 0
+# (no `pass.color` run) is treated as just another color — the whole design
+# folds into one color-0 region — with a single warning, and the result is still
+# LEC-equivalent to the original.
 
 set -u
 
@@ -53,8 +55,10 @@ run pass color acyclic --top "$TOP" --set color.continuous=true lg:"$SD/lg" --wo
 run pass partition --top "$TOP" lg:"$SD/lg" --workdir "$SD/w3"
 echo "PASS: partition stats-only mode"
 
-# clear: coloring removal must succeed, and partitioning afterwards is a clean
-# error (incomplete coloring), NOT a crash/abort.
+# clear: coloring removal must succeed, and partitioning an UNCOLORED design must
+# then succeed too — color 0 is treated as just another color (one color-0
+# region for the whole design), with a single non-fatal warning, and the
+# rebuild stays LEC-equivalent to the original.
 CD="$W/clear"
 mkdir -p "$CD"
 run compile verilog "$V0" --top "$TOP" --reader yosys-verilog --recipe O1 --emit-dir lg:"$CD/lg" --workdir "$CD/w1"
@@ -62,8 +66,16 @@ run pass color acyclic --top "$TOP" lg:"$CD/lg" --workdir "$CD/w2"
 run pass color clear --top "$TOP" lg:"$CD/lg" --workdir "$CD/w3"
 "$LHD" pass partition --top "$TOP" lg:"$CD/lg" --emit-dir lg:"$CD/lg2" -q --result-json "$CD/r.json" --workdir "$CD/w4"
 rc=$?
-[ "$rc" -ge 128 ] && fail "partition on a cleared (uncolored) design crashed (signal $((rc - 128))) instead of erroring cleanly"
-[ "$rc" -eq 0 ] && fail "partition on a cleared (uncolored) design unexpectedly succeeded"
-echo "PASS: cleared coloring -> partition errors cleanly (rc=$rc)"
+[ "$rc" -ge 128 ] && fail "partition on an uncolored design crashed (signal $((rc - 128)))"
+[ "$rc" -eq 0 ] || fail "partition on an uncolored design failed (rc=$rc) -> $(cat "$CD/r.json" 2>/dev/null)"
+# exactly one warning: the uncolored-node advisory (color 0 treated as a color)
+grep -q '"diagnostics_count":{"errors":0,"warnings":1}' "$CD/r.json" \
+  || fail "expected one uncolored-node warning, got $(grep -o '"diagnostics_count":{[^}]*}' "$CD/r.json")"
+# the whole design folded into a single color-0 region module
+run compile lg:"$CD/lg2" --top "$TOP" --recipe O0 --emit verilog:"$CD/part.v" --workdir "$CD/w5"
+grep -q "part_flat__c0" "$CD/part.v" || fail "uncolored partition produced no color-0 region module"
+# and it is still LEC-equivalent to the original
+run lec --set lec.solver=lgyosys --impl verilog:"$CD/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$CD/c"
+echo "PASS: uncolored design -> partition warns once + color-0 region, LEC-equivalent"
 
 echo "PASS: all pass.color/pass.partition flows"

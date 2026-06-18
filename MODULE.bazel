@@ -164,6 +164,41 @@ http_archive(
 #     path = "../tree-sitter-pyrope/prpparse",
 # )
 
+# tree-sitter runtime — the incremental-parsing C library (libtree-sitter).
+# Only the Pyrope *formatter* (`lhd pyrope fmt`, @tree_sitter_pyrope//:prpfmt)
+# needs it; the LiveHD front-end itself is the tree-sitter-free prpparse. v0.26.9
+# matches the generated grammar's ABI (LANGUAGE_VERSION 15). Built from the
+# single amalgamation TU lib/src/lib.c (see //packages:tree_sitter.BUILD).
+http_archive(
+    name = "tree_sitter",
+    build_file = "//packages:tree_sitter.BUILD",
+    integrity = "sha256-jhR4BQCTP0PYZmL8qhsM6Z6+nCIPRoC8kp3OCaDgz8Y=",
+    strip_prefix = "tree-sitter-0.26.9",
+    urls = ["https://github.com/tree-sitter/tree-sitter/archive/refs/tags/v0.26.9.tar.gz"],
+)
+
+# tree-sitter-pyrope (full repo) — the generated Pyrope grammar (src/parser.c +
+# src/scanner.c) plus the prpfmt formatter (prpfmt/). Rooted at the repo *root*
+# (distinct from @prpparse, which roots at the prpparse/ subdir of the same
+# repo). LiveHD embeds prpfmt via prpfmt/prpfmt_api.h as `lhd pyrope fmt`.
+#
+# The formatter's embeddable C entry point (prpfmt_format_string) is a local
+# addition, so the local override below is the active form for now; restore the
+# http_archive pin (recompute integrity per the prpparse note above) once the
+# tree-sitter-pyrope change lands upstream.
+new_local_repository(
+    name = "tree_sitter_pyrope",
+    build_file = "//packages:prpfmt.BUILD",
+    path = "../tree-sitter-pyrope",
+)
+# http_archive(
+#     name = "tree_sitter_pyrope",
+#     build_file = "//packages:prpfmt.BUILD",
+#     integrity = "sha256-...",  # archive of the tree-sitter-pyrope repo root
+#     strip_prefix = "tree-sitter-pyrope-<commit>",
+#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip"],
+# )
+
 # OpenTimer
 http_archive(
     name = "opentimer",

@@ -41,6 +41,9 @@ using Body_builder = std::function<void(const Region_body&)>;
 // pass.partition — build a new graph_library from the colors produced by
 // pass.color (task 2p-partition). One module per colored region, instantiated
 // once per region in a fresh top that is LEC-equivalent to the original.
+// A prior pass.color is optional: color 0 (an uncolored node) is treated as
+// just another color, so an uncolored design folds into one color-0 region
+// (with a single warning) instead of being rejected.
 class Pass_partition : public Pass {
 public:
   explicit Pass_partition(const Eprp_var& var);

@@ -126,7 +126,7 @@ the design and remaining phases in [`todo/livehd/2n.html`](todo/livehd/2n.html).
 
 ## Language server
 
-The server runs as `lhd lsp` over stdio (JSON-RPC). It is Pyrope-only
+The server runs as `lhd pyrope lsp` over stdio (JSON-RPC). It is Pyrope-only
 (`.prp`); it never touches the Verilog/Yosys path.
 
 Build it once:
@@ -139,7 +139,7 @@ bazel build -c dbg //lhd:lhd
 #### `prplsp` launcher
 
 Rather than hard-code a path, point your editor at the
-[`scripts/prplsp`](scripts/prplsp) wrapper. It runs `lhd lsp`, but picks
+[`scripts/prplsp`](scripts/prplsp) wrapper. It runs `lhd pyrope lsp`, but picks
 *which* `lhd` based on the directory the editor launched in:
 
 - **Inside a livehd checkout** → that checkout's freshly-built

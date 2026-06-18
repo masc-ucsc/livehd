@@ -201,6 +201,16 @@ void Lnast_prp_writer::write_node() {
     case N::Lnast_ntype_cassert     : write_cassert(); break;
     case N::Lnast_ntype_func_call   : write_func_call(); break;
     case N::Lnast_ntype_func_def    : write_func_def(); break;
+    case N::Lnast_ntype_for         : write_for(); break;
+    // timecheck (`x@[N]`) is an inert landing-cycle assertion. The timing it
+    // carries is ALREADY re-emitted by the writer as the `stage[N]` declaration
+    // and the `out:T@[N]` interface annotation, so the standalone statement is
+    // redundant; and its SSA-renamed ref often names a stage var not yet
+    // assigned at this point (`tmp@[3]` precedes `stage[3] tmp = …`), which
+    // would forward-reference an undeclared name on re-parse. Drop it (the
+    // `@[]` opt-out) — sound (inert) and loses no timing. See emits_nothing_stmt
+    // so the statement loop leaves no blank line.
+    case N::Lnast_ntype_timecheck   : break;
     case N::Lnast_ntype_tuple_add   : write_tuple_add(); break;
     case N::Lnast_ntype_tuple_concat: write_tuple_concat(); break;
     case N::Lnast_ntype_attr_set    : write_attr_set(); break;
@@ -304,6 +314,44 @@ void Lnast_prp_writer::write_module() {
   auto stmts_nid = lnast->get_sibling_next(io_nid);
   collect_folded_attrs(stmts_nid);  // gather reg/mem attrs to fold into declares
   if (!stmts_nid.is_invalid()) {
+    // Compute the clock/reset-pin dependency CONE: every body net that
+    // transitively feeds a `clock_pin`/`reset_pin` ref.  These are relocated
+    // ahead of the reg declares (and excluded from the mut-hoist) so the `ref`
+    // binds to a real driver, not a hoisted 0.  Closure over the combinational
+    // drivers' read sets catches a multi-level derived clock
+    // (`inv = ~gate; gclk = clk_b & inv`).
+    pin_cone_ = pin_dep_nets_;
+    if (!pin_dep_nets_.empty()) {
+      std::unordered_map<std::string, Lnast_nid> body_driver;  // stripped lhs -> its (first) combinational driver
+      for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+        auto c0 = lnast->get_child(c);
+        if (c0.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(c0)) || !defines_child0(lnast->get_type(c))) {
+          continue;
+        }
+        // A reg/latch declare is resolved in the declare pass, not relocatable;
+        // a clock that reads a flop Q keeps the declared reg ref.
+        if (lnast->get_type(c) == Lnast_ntype::Lnast_ntype_declare || is_folded_node(c) || emits_nothing_stmt(c)) {
+          continue;
+        }
+        body_driver.emplace(std::string(strip_prefix(lnast->get_name(c0))), c);
+      }
+      std::vector<std::string> work(pin_dep_nets_.begin(), pin_dep_nets_.end());
+      while (!work.empty()) {
+        auto nm = work.back();
+        work.pop_back();
+        auto it = body_driver.find(nm);
+        if (it == body_driver.end()) {
+          continue;  // an interface port / reg / has no combinational body driver
+        }
+        std::unordered_set<std::string> reads;
+        collect_driver_reads(it->second, reads);
+        for (const auto& r : reads) {
+          if (body_driver.count(r) && pin_cone_.insert(r).second) {
+            work.push_back(r);
+          }
+        }
+      }
+    }
     // Pre-declare body `mut` vars that are WRITTEN but have no `declare` node.
     // Their first write would otherwise emit `mut X` inside whatever (possibly
     // nested) scope it lands in; a later write in a SIBLING scope then references
@@ -334,7 +382,13 @@ void Lnast_prp_writer::write_module() {
             } else if (!top) {
               nested_mut_decl.insert(nm);
             }
-          } else if (v_ref && Lnast_ntype::is_store(t) && !is_tmp(lnast->get_name(v))) {
+          } else if (v_ref && Lnast_ntype::is_store(t) && !is_tmp(lnast->get_name(v))
+                     && lnast->get_type(n) == Lnast_ntype::Lnast_ntype_stmts) {
+            // Only a `store` whose PARENT is a `stmts` is a real statement write
+            // that may need a hoisted `mut`.  A store nested under a `func_call`
+            // (a `name = value` NAMED ARGUMENT) or a `tuple_add` (a named field)
+            // is NOT a statement — collecting it wrongly hoisted bogus `mut a/b/
+            // v/type = 0` lines from call sites like `mul(a=in1, b=in2)`.
             store_lhs.insert(std::string(strip_prefix(lnast->get_name(v))));
           }
           self(self, c, false);
@@ -348,12 +402,12 @@ void Lnast_prp_writer::write_module() {
       // vars with a NESTED `mut` declare. Skip top-declared / io / reg|latch|const.
       std::unordered_set<std::string> need;
       for (const auto& nm : store_lhs) {
-        if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm)) {
-          need.insert(nm);
+        if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm) && !pin_cone_.count(nm)) {
+          need.insert(nm);  // pin-cone nets are emitted (as `mut net = driver`) ahead of the declares, not hoisted to 0
         }
       }
       for (const auto& nm : nested_mut_decl) {
-        if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm)) {
+        if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm) && !pin_cone_.count(nm)) {
           need.insert(nm);
           suppress_decl_.insert(nm);  // its in-place nested `mut` declare is dropped
         }
@@ -364,6 +418,33 @@ void Lnast_prp_writer::write_module() {
         print_indent();
         os << "mut " << nm << " = 0\n";
         declared_.insert(nm);
+      }
+    }
+    // Clock/reset-pin dependency CONE (e.g. a derived clock `gclk = clk_b &
+    // gate`, or a multi-level `inv = ~gate; gclk = clk_b & inv`) must be DEFINED
+    // before the reg declares that bind it via `clock_pin=ref <net>`.  Emit each
+    // cone net's defining body statement now (in body order, so a dependency
+    // lands before its consumer) as its first write -> `mut <net> = <driver>`,
+    // and remember it so the body passes below skip it.
+    std::unordered_set<int64_t> pin_net_emitted;
+    if (!pin_cone_.empty()) {
+      for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+        auto c0 = lnast->get_child(c);
+        if (c0.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(c0)) || !defines_child0(lnast->get_type(c))) {
+          continue;
+        }
+        if (lnast->get_type(c) == Lnast_ntype::Lnast_ntype_declare || is_folded_node(c) || emits_nothing_stmt(c)) {
+          continue;
+        }
+        std::string lhs = std::string(strip_prefix(lnast->get_name(c0)));
+        if (!pin_cone_.count(lhs) || declared_.count(lhs)) {
+          continue;
+        }
+        print_indent();
+        cur = c;
+        write_node();  // decl_prefix sees the first write -> emits `mut <net> = <driver>`
+        os << "\n";
+        pin_net_emitted.insert(c.get_class_index().value);
       }
     }
     // Emit top-level `declare` statements first.  The slang reader places an
@@ -380,6 +461,9 @@ void Lnast_prp_writer::write_module() {
         do {
           if (is_folded_node(cur) || emits_nothing_stmt(cur)) {
             continue;  // a temp def inlined at its single use, or a folded type_spec/stage decl
+          }
+          if (pin_net_emitted.count(cur.get_class_index().value)) {
+            continue;  // a clock/reset-pin net driver already emitted ahead of the declares
           }
           const bool is_decl = current_ntype() == Lnast_ntype::Lnast_ntype_declare;
           if (is_decl != (pass == 0)) {
@@ -410,56 +494,63 @@ void Lnast_prp_writer::write_module() {
 // Emit `(in0:T0, in1:T1, …) -> (out0:T0, …)` from the io node.  The io node has
 // two `tuple_add` children: the first groups input ports, the second outputs.
 // Each port is `store(ref(name), const(init|nil), type, [stages])`.
-void Lnast_prp_writer::emit_module_header(Lnast_nid io_nid, bool is_mod) {
-  auto emit_group = [&](Lnast_nid tup_nid, bool is_output) {
-    print("(");
-    bool first = true;
-    if (!tup_nid.is_invalid()) {
-      for (auto port = lnast->get_child(tup_nid); !port.is_invalid(); port = lnast->get_sibling_next(port)) {
-        auto name_nid = lnast->get_child(port);  // ref(name)
-        if (name_nid.is_invalid()) {
-          continue;
-        }
-        auto init_nid = lnast->get_sibling_next(name_nid);  // const(init|nil)
-        auto type_nid = init_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(init_nid);
-        // The optional trailing `stages` child rides after the (optional) type;
-        // do not mistake it for the type slot.
-        if (!type_nid.is_invalid() && Lnast_ntype::is_stages(lnast->get_type(type_nid))) {
-          type_nid = Lnast_nid{};
-        }
-        if (!first) {
-          print(", ");
-        }
-        auto pname = strip_prefix(lnast->get_name(name_nid));
-        declared_.insert(std::string(pname));  // io ports are pre-declared; body writes skip `mut`
-        print(pname);
-        if (!type_nid.is_invalid()) {
-          auto t = render_type_at(type_nid);
-          if (!t.empty()) {
-            print(":");
-            print(t);
-          }
-        }
-        // Every `mod` output carries a landing-cycle annotation.  A pipe output
-        // (`out:T@[N]`) keeps its declared depth via the trailing stages node;
-        // a plain output (slang regs, comb-depth outputs) opts out of the
-        // interface-latency assertion with `@[]` (inert — it does not change
-        // lowering).
-        if (is_mod && is_output) {
-          auto st = find_stages_child(port);
-          print(std::format("@[{}]", st.is_invalid() ? std::string{} : format_stages(st)));
-        }
-        first = false;
+void Lnast_prp_writer::emit_port_group(Lnast_nid tup_nid, bool is_output, bool is_mod) {
+  print("(");
+  bool first = true;
+  if (!tup_nid.is_invalid()) {
+    for (auto port = lnast->get_child(tup_nid); !port.is_invalid(); port = lnast->get_sibling_next(port)) {
+      auto name_nid = lnast->get_child(port);  // ref(name)
+      if (name_nid.is_invalid()) {
+        continue;
       }
+      auto init_nid = lnast->get_sibling_next(name_nid);  // const(init|nil)
+      auto type_nid = init_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(init_nid);
+      // The optional trailing `stages` child rides after the (optional) type;
+      // do not mistake it for the type slot.
+      if (!type_nid.is_invalid() && Lnast_ntype::is_stages(lnast->get_type(type_nid))) {
+        type_nid = Lnast_nid{};
+      }
+      if (!first) {
+        print(", ");
+      }
+      // A var-arg param carries the `...` marker in its init const (pyrope
+      // lambda signature); re-emit the spread so the template lambda reparses.
+      const bool vararg = !init_nid.is_invalid() && lnast->get_type(init_nid) == Lnast_ntype::Lnast_ntype_const
+                          && lnast->get_name(init_nid) == "...";
+      if (vararg) {
+        print("...");
+      }
+      auto pname = strip_prefix(lnast->get_name(name_nid));
+      declared_.insert(std::string(pname));  // ports are pre-declared; body writes skip `mut`
+      print(pname);
+      if (!type_nid.is_invalid()) {
+        auto t = render_type_at(type_nid);
+        if (!t.empty()) {
+          print(":");
+          print(t);
+        }
+      }
+      // Every `mod` output carries a landing-cycle annotation.  A pipe output
+      // (`out:T@[N]`) keeps its declared depth via the trailing stages node;
+      // a plain output (slang regs, comb-depth outputs) opts out of the
+      // interface-latency assertion with `@[]` (inert — it does not change
+      // lowering).
+      if (is_mod && is_output) {
+        auto st = find_stages_child(port);
+        print(std::format("@[{}]", st.is_invalid() ? std::string{} : format_stages(st)));
+      }
+      first = false;
     }
-    print(")");
-  };
+  }
+  print(")");
+}
 
+void Lnast_prp_writer::emit_module_header(Lnast_nid io_nid, bool is_mod) {
   auto in_tup  = lnast->get_child(io_nid);
   auto out_tup = in_tup.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(in_tup);
-  emit_group(in_tup, /*is_output=*/false);
+  emit_port_group(in_tup, /*is_output=*/false, is_mod);
   print(" -> ");
-  emit_group(out_tup, /*is_output=*/true);
+  emit_port_group(out_tup, /*is_output=*/true, is_mod);
 }
 
 bool Lnast_prp_writer::body_has_state(Lnast_nid nid) const {
@@ -559,6 +650,17 @@ void Lnast_prp_writer::collect_folded_attrs(Lnast_nid stmts_nid) {
     auto        val_nid = lnast->get_sibling_next(key_nid);
     std::string val     = render_attr_value(val_nid);
 
+    // A clock/reset PIN attribute binds the flop to a NET (a derived clock such
+    // as `gclk = clk_b & gate`), so it must be written `clock_pin=ref <net>` —
+    // a bare `clock_pin=<net>` resolves to the net's VALUE at the declare point
+    // (the hoisted `0`), which tolg rejects ("names clock_pin '0'").  Record the
+    // net so write_module can emit its driver ahead of the reg declare.
+    const bool val_is_ref = !val_nid.is_invalid() && lnast->get_type(val_nid) == Lnast_ntype::Lnast_ntype_ref;
+    if (val_is_ref && (key == "clock_pin" || key == "reset_pin" || key.ends_with("_pin"))) {
+      pin_dep_nets_.insert(val);
+      val = "ref " + val;
+    }
+
     auto var0 = std::string(strip_prefix(lnast->get_name(var_nid)));
     folded_keys_.insert(var0 + "\x01" + key);  // record (var,orig-key) for write_attr_set skip
 
@@ -577,6 +679,39 @@ void Lnast_prp_writer::collect_folded_attrs(Lnast_nid stmts_nid) {
     } else {
       it->second += ", " + tok;
     }
+  }
+}
+
+void Lnast_prp_writer::collect_driver_reads(Lnast_nid def_node, std::unordered_set<std::string>& out) const {
+  auto c0 = lnast->get_child(def_node);
+  if (c0.is_invalid()) {
+    return;
+  }
+  // Recurse operands; an inlined single-use temp is replaced by the operands of
+  // ITS definition (so `gclk = clk_b & inv` whose `&` rides a folded temp still
+  // reports the real read `inv`).  Folds are acyclic (def precedes use), so this
+  // terminates.
+  auto rec = [&](auto&& self, Lnast_nid node) -> void {
+    if (Lnast_ntype::is_ref(lnast->get_type(node))) {
+      std::string raw(lnast->get_name(node));
+      auto        fit = fold_info_.find(raw);
+      if (foldable_.count(raw) && fit != fold_info_.end()) {
+        auto d0 = lnast->get_child(fit->second.def_node);
+        for (auto c = d0.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(d0); !c.is_invalid();
+             c      = lnast->get_sibling_next(c)) {
+          self(self, c);
+        }
+      } else {
+        out.insert(std::string(strip_prefix(raw)));
+      }
+      return;
+    }
+    for (auto c = lnast->get_child(node); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      self(self, c);
+    }
+  };
+  for (auto c = lnast->get_sibling_next(c0); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    rec(rec, c);
   }
 }
 
@@ -1141,10 +1276,134 @@ void Lnast_prp_writer::write_func_call() {
 
 // ── func_def ──────────────────────────────────────────────────────────────────
 
+// func_def( ref(name), const(kind), tuple_add(generics), tuple_add(inputs),
+//           tuple_add(outputs), stmts(body) ) — a pyrope-origin lambda the
+// runner did not flatten into the io+body form (a nested helper, or a top-level
+// lambda emitted through the minimal `noop` path).  Re-emit it as
+// `kind name[<generics>](in:T,…) -> (out:T,…) { body }`, reusing the shared
+// port-group/body machinery.  The top module is still emitted via write_module
+// (the slang io node); this handles the remaining func_def statements.
 void Lnast_prp_writer::write_func_def() {
-  // Nested-lambda emission is not implemented; record it so the compile fails
-  // (unless debug mode) rather than silently producing a TODO stub.
-  emit_unimplemented("func_def — nested lambda emission not implemented");
+  Lnast_nid fd = cur;
+
+  auto name_nid = lnast->get_child(fd);
+  if (name_nid.is_invalid()) {
+    return;
+  }
+  auto kind_nid = lnast->get_sibling_next(name_nid);
+  auto gen_nid  = kind_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(kind_nid);
+  auto in_nid   = gen_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(gen_nid);
+  auto out_nid  = in_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(in_nid);
+  auto body_nid = out_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(out_nid);
+
+  std::string kind   = kind_nid.is_invalid() ? std::string("comb") : std::string(lnast->get_name(kind_nid));
+  std::string name   = std::string(strip_prefix(lnast->get_name(name_nid)));
+  const bool  is_mod = (kind == "mod" || kind == "pipe");
+
+  print(kind);
+  print(" ");
+  print(name);
+  // Generic template parameters `<T, U>` (each a ref child of the generics
+  // tuple_add); absent when the tuple has no children.
+  if (!gen_nid.is_invalid() && !lnast->get_child(gen_nid).is_invalid()) {
+    print("<");
+    bool gfirst = true;
+    for (auto g = lnast->get_child(gen_nid); !g.is_invalid(); g = lnast->get_sibling_next(g)) {
+      if (!gfirst) {
+        print(", ");
+      }
+      print(strip_prefix(lnast->get_name(g)));
+      gfirst = false;
+    }
+    print(">");
+  }
+  emit_port_group(in_nid, /*is_output=*/false, is_mod);
+  print(" -> ");
+  emit_port_group(out_nid, /*is_output=*/true, is_mod);
+  print(" {\n");
+  ++depth;
+  if (!body_nid.is_invalid()) {
+    // Push the func_def so write_stmts sees a non-`stmts` parent (no extra
+    // braces — we just opened them); balanced by the pop below.
+    nid_stack.push(fd);
+    cur = body_nid;
+    write_node();  // body stmts
+    cur = nid_stack.top();
+    nid_stack.pop();
+  }
+  --depth;
+  print_indent();
+  print("}");
+  cur = fd;  // restore for the caller's move_to_sibling()
+}
+
+// ── for ───────────────────────────────────────────────────────────────────────
+
+// for( value_ref, iterable_ref, stmts(body), const(mode) [, idx_ref [, key_ref]] )
+// The metadata (value/iter/mode/idx/key) is read via direct tree accessors —
+// `mode` sits AFTER the body, so a pure left-to-right cursor walk could not emit
+// the `for … in …` header before the braced body.  The body is then emitted
+// through the shared cursor so nested folding/indentation behave exactly as in
+// any other block.
+void Lnast_prp_writer::write_for() {
+  Lnast_nid forn = cur;
+
+  auto value_nid = lnast->get_child(forn);
+  if (value_nid.is_invalid()) {
+    return;
+  }
+  auto iter_nid = lnast->get_sibling_next(value_nid);
+  auto body_nid = iter_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(iter_nid);
+  auto mode_nid = body_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(body_nid);
+
+  // Optional (idx[, key]) position/key bindings of `for (v, idx, key) in t`.
+  std::vector<std::string> extra;
+  for (auto e = mode_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(mode_nid); !e.is_invalid();
+       e      = lnast->get_sibling_next(e)) {
+    extra.emplace_back(strip_prefix(lnast->get_name(e)));
+  }
+
+  std::string value = std::string(strip_prefix(lnast->get_name(value_nid)));
+  std::string iter  = iter_nid.is_invalid() ? std::string{} : std::string(strip_prefix(lnast->get_name(iter_nid)));
+  std::string mode  = mode_nid.is_invalid() ? std::string{} : std::string(lnast->get_name(mode_nid));
+
+  // Pyrope binds the INDEX first: `for (index, value [, key]) in t` (prp2lnast
+  // sets value_ref = bind_refs[1], idx_ref = bind_refs[0]).  The LNAST for-node
+  // stores value at child0 and the trailing idx/key after `mode`, so re-emit as
+  // (idx, value[, key]) — emitting (value, idx) would swap their roles on
+  // re-parse (the index would be read as the value).
+  std::string binds = value;
+  if (!extra.empty()) {
+    binds = "(" + extra[0] + ", " + value;  // extra[0] = idx_ref
+    if (extra.size() > 1) {
+      binds += ", " + extra[1];  // extra[1] = key_ref
+    }
+    binds += ")";
+  }
+
+  print("for ");
+  print(binds);
+  print(" in ");
+  if (mode == "ref") {
+    print("ref ");  // mutable-element iteration: writes are reflected back into the source tuple
+  }
+  print(iter);
+  print(" {\n");
+  ++depth;
+  if (!body_nid.is_invalid()) {
+    // Push the `for` node so write_stmts sees a non-`stmts` parent and does NOT
+    // add its own braces (we just opened them); it still folds/indents each
+    // body statement.  The push is balanced by the pop below.
+    nid_stack.push(forn);
+    cur = body_nid;
+    write_node();  // body stmts
+    cur = nid_stack.top();
+    nid_stack.pop();
+  }
+  --depth;
+  print_indent();
+  print("}");
+  cur = forn;  // restore for the caller's move_to_sibling()
 }
 
 // ── Tuples ────────────────────────────────────────────────────────────────────
@@ -1774,6 +2033,9 @@ bool Lnast_prp_writer::emits_nothing_stmt(Lnast_nid nid) const {
   auto t = lnast->get_type(nid);
   if (t == Lnast_ntype::Lnast_ntype_type_spec) {
     return true;  // folded into a declaration
+  }
+  if (t == Lnast_ntype::Lnast_ntype_timecheck) {
+    return true;  // inert; dropped (timing already carried by stage[N]/@[N])
   }
   if (t == Lnast_ntype::Lnast_ntype_declare && !find_stages_child(nid).is_invalid()) {
     return true;  // stage declare — re-attached to its store as `stage[N] x = v`

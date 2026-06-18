@@ -12,8 +12,9 @@
 - **Build**: `bazel build -c dbg //...`
 - **Test**: `bazel test //...`
 - **lhd CLI**: `./bazel-bin/lhd/lhd` — the only driver, for all flows
-  (`lhd help`, `lhd describe <cmd>`); `lhd lsp` serves the Pyrope LSP. The
-  old `lgshell` REPL was **removed** (2026-06-04)
+  (`lhd help`, `lhd describe <cmd>`); `lhd pyrope lsp` serves the Pyrope LSP
+  and `lhd pyrope fmt` formats Pyrope source. The old `lgshell` REPL was
+  **removed** (2026-06-04)
 - C++ formatted with `clang-format`
 - **Contract tests/benchmarks**: Any test or benchmark file whose name contains the word `contract` is immutable to the coding agent. Do NOT modify these files — they define the expected behavior contract. If a contract test fails, fix the implementation, not the test.
 

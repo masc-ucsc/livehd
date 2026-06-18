@@ -89,6 +89,13 @@ private:
   void write_cassert();
   void write_func_call();
   void write_func_def();
+  // for( value_ref, iterable_ref, stmts(body), const(mode) [, idx_ref [, key_ref]] )
+  // -> `for <value> in [ref ]<iterable> { <body> }`, or with index/key binds
+  // `for (<idx>, <value>[, <key>]) in …` (Pyrope binds the INDEX first).  A runtime
+  // `for` only survives to the writer inside a generic/template lambda the
+  // runner could not monomorphize (the comptime unroll handles every concrete
+  // instantiation); re-emitting it keeps that template lambda parseable.
+  void write_for();
   void write_tuple_add();
   // tuple_concat( dst, src0, src1, … ) -> `dst = (...src0, ...src1, …)` (spread
   // concatenation): each source tuple is splatted into one combined literal.
@@ -147,6 +154,11 @@ private:
   // Emits the `comb|mod NAME(in:T, …) -> (out:T, …)` header from the io node
   // (cursor-independent; reads the io subtree via direct tree accessors).
   void        emit_module_header(Lnast_nid io_nid, bool is_mod);
+  // Emits one `(p0:T0, p1:T1, …)` parenthesised port list from a `tuple_add`
+  // of `store(ref(name), const(init|nil), [type], [stages])` entries.  Shared by
+  // emit_module_header (slang io node) and write_func_def (pyrope lambda
+  // signature).  is_output adds the `@[N]` landing-cycle annotation on a `mod`.
+  void        emit_port_group(Lnast_nid tup_nid, bool is_output, bool is_mod);
   // True if the module body declares state (a `reg`/`latch` declare, anywhere
   // in the stmts subtree) — selects `mod` over `comb`.
   bool        body_has_state(Lnast_nid stmts_nid) const;
@@ -193,6 +205,24 @@ private:
   // skips re-emitting a folded attr that occurs deeper than the top-level body
   // (e.g. a memory's `mem.[wensize]=N` written inside the always block).
   std::unordered_set<std::string>              folded_keys_;
+  // Body nets a reg binds as its clock/reset pin (`reg q:[clock_pin=ref <net>]`).
+  // A derived clock (`gclk = clk_b & gate`) is an internal combinational signal:
+  // the declare-first hoist would emit the reg ahead of `<net>`'s driver, so the
+  // `ref` would resolve to the net's pre-driver value (the `clock_pin '0'`
+  // tolg error). write_module emits each such net's driver BEFORE the reg
+  // declares and skips its in-body statement; the names are stripped (post-SSA).
+  std::unordered_set<std::string>              pin_dep_nets_;
+  // Transitive closure of pin_dep_nets_ over body-var operands: a derived clock
+  // can read ANOTHER internal wire (`inv = ~gate; gclk = clk_b & inv`), and that
+  // wire's driver must be relocated ahead of the declares too — otherwise the
+  // relocated `gclk` driver would read `inv` while it is still the hoisted 0
+  // (a silent dead clock).  Emitted in body order (combinational SSA defs
+  // precede their uses), so dependencies land before their consumers.
+  std::unordered_set<std::string>              pin_cone_;
+  // Collect the body-variable names a defining statement READS (operands after
+  // child0), following single-use folded temps into their definitions so a
+  // `gclk = clk_b & inv` whose `& ` is an inlined temp still reports `inv`.
+  void collect_driver_reads(Lnast_nid def_node, std::unordered_set<std::string>& out) const;
 
   // Walk the top-level body statements and populate folded_attrs_ (mapping the
   // slang attr vocabulary to the Pyrope source one: initial->init,

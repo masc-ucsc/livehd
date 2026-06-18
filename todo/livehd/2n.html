@@ -10,7 +10,7 @@
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
 <h1><strong class="item-id">2n</strong> Pyrope LSP server</h1>
-<p>Pyrope LSP server (<code>.prp</code> only — never Verilog): the <code>lhd lsp</code>
+<p>Pyrope LSP server (<code>.prp</code> only — never Verilog): the <code>lhd pyrope lsp</code>
   subcommand over LiveHD's front-end (<code>prp2lnast</code> + <code>upass</code>
   typecheck/bitwidth + <code>core/diag</code> <span class="xref xref-note" title="note: 1z">1z</span>).
   <strong>Primary consumer Claude Code's <code>LSP</code> tool</strong> (implement its op
@@ -41,7 +41,7 @@
 
 <h2>Subtasks — landed</h2>
 <ul class="subtasks">
-<li><strong>A — Phase A: lhd lsp over stdio.</strong> <span class="status landed">landed</span>
+<li><strong>A — Phase A: lhd pyrope lsp over stdio.</strong> <span class="status landed">landed</span>
   Lifecycle, <code>textDocumentSync</code> Full,
   <code>didOpen</code>/<code>didChange</code>/<code>didSave</code>/<code>didClose</code>,
   <code>publishDiagnostics</code> push + pull, <code>positionEncoding</code>.</li>
@@ -52,7 +52,7 @@
 <h3>Salvaged from <code>docs/contracts/pyrope_lsp.md</code> (now retired)</h3>
 
 <p>A Language Server for <strong>Pyrope only</strong> (<code>.prp</code>) built on LiveHD's existing
-front-end. <code>lhd lsp</code> runs the server over stdio (lifecycle + <code>textDocumentSync</code>
+front-end. <code>lhd pyrope lsp</code> runs the server over stdio (lifecycle + <code>textDocumentSync</code>
 Full + <code>didOpen</code>/<code>didChange</code>/<code>didSave</code>/<code>didClose</code> + <code>publishDiagnostics</code>
 push <strong>and</strong> <code>textDocument/diagnostic</code> pull, with <code>positionEncoding</code>
 negotiation). Diagnostics come from <code>inou.prp |> pass.upass</code> — <code>analyze()</code> runs
@@ -161,7 +161,7 @@ per-document</strong>, not rely on the throwaway converter.</p>
   TSNode spans)
 </code></pre>
 <ul>
-<li><strong>One lib, thin main</strong>: the <code>lsp/</code> library backs the <code>lhd lsp</code> subcommand
+<li><strong>One lib, thin main</strong>: the <code>lsp/</code> library backs the <code>lhd pyrope lsp</code> subcommand
   (and originally the <code>lgshell --lsp</code> flag, removed with the REPL).</li>
 <li><strong>Do NOT bolt onto an interactive REPL</strong>: JSON-RPC stdio framing + a line
   editor don't mix — the historical reason <code>lgshell --lsp</code> bypassed replxx.</li>
@@ -371,7 +371,7 @@ gracefully).</p>
 <p><strong>Phases:</strong></p>
 <ul>
 <li><strong>A — skeleton + diagnostics (primary value). ✅ LANDED 2026-06-02.</strong> JSON-RPC
-  stdio in <code>lsp/livehd_lsp.cpp</code> (<code>run_stdio</code>), wired to <code>lhd lsp</code>
+  stdio in <code>lsp/livehd_lsp.cpp</code> (<code>run_stdio</code>), wired to <code>lhd pyrope lsp</code>
   (<code>lhd/lhd_main.cpp</code>, 2026-06-04; originally <code>lgshell --lsp</code>, removed with
   the REPL); fd 1 repointed to fd 2 so stray stdout can't corrupt the stream.
   <code>initialize</code> returns <code>ServerCapabilities</code> (<code>textDocumentSync</code> Full, negotiated

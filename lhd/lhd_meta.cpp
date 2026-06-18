@@ -16,7 +16,7 @@ namespace lhd {
 namespace {
 
 constexpr std::string_view kSteps =
-    R"json(["compile verilog","compile pyrope","lec","scan","tool","pass","lsp"])json";
+    R"json(["compile verilog","compile pyrope","lec","scan","tool","pass","pyrope fmt","pyrope lsp"])json";
 constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
 constexpr std::string_view kEmitKinds =
     R"json(["ln","lg","verilog","pyrope","lnast-dump","graphviz","metadata","results","diagnostics"])json";
@@ -303,9 +303,14 @@ int describe_command(const Options& opts) {
         R"json({"schema_version":1,"name":"verilog","description":"Verilog source; as --emit a deterministic name-sorted concatenation of per-module cgen output","direction":"in/out"})json");
     return 0;
   }
-  if (name == "lsp") {
+  if (name == "pyrope fmt") {
     print_json_line(
-        R"json({"schema_version":1,"name":"lsp","description":"Pyrope LSP server (task 1n): JSON-RPC over stdio, Content-Length framed. Drives prp2lnast + pass.upass + core/diag per buffer; .prp only, ephemeral, no lgdb. stdio belongs to the protocol, so no result JSON is written","args":{},"examples":["lhd lsp"]})json");
+        R"json({"schema_version":1,"name":"pyrope fmt","description":"Format Pyrope source (a clang-format for Pyrope): the prpfmt formatter walks the tree-sitter-pyrope grammar and re-emits standardized Pyrope (indentation, spacing, alignment, smart wrapping). Prints to stdout by default; -i/--inplace rewrites each file; -o/--output writes one file. No result envelope (the output is the formatted source). Exit 0 ok; 1 if any file failed to parse, failed --verify, or could not be read/written","args":{"required":[{"name":"files","type":"path[]","positional":true}],"optional":[{"name":"inplace","type":"flag","aliases":["-i"]},{"name":"output","type":"path","aliases":["-o"]},{"name":"indent","type":"int","default":4},{"name":"width","type":"int","default":80},{"name":"verify","type":"flag"}]},"inputs":["pyrope"],"outputs":["stdout","pyrope"],"examples":["lhd pyrope fmt foo.prp","lhd pyrope fmt -i foo.prp bar.prp","lhd pyrope fmt foo.prp --indent 2 -o foo.fmt.prp"]})json");
+    return 0;
+  }
+  if (name == "pyrope lsp" || name == "lsp") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"pyrope lsp","description":"Pyrope LSP server (task 1n): JSON-RPC over stdio, Content-Length framed. Drives prp2lnast + pass.upass + core/diag per buffer; .prp only, ephemeral, no lgdb. stdio belongs to the protocol, so no result JSON is written","args":{},"examples":["lhd pyrope lsp"]})json");
     return 0;
   }
   if (name == "pass") {
@@ -400,7 +405,10 @@ void print_general_help() {
       "               lhd tool grep get_mask lg:dir     # filtered search (bare term -> any field)\n"
       "               lhd tool diff lg:before lg:after --attr color\n"
       "               lhd tool cat x.prp                # LNAST cat (was ln.cat)\n"
-      "  lsp        Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
+      "  pyrope     Pyrope developer tools: fmt (clang-format-like formatter) | lsp (the LSP server)\n"
+      "               lhd pyrope fmt -i foo.prp         # reformat in place\n"
+      "               lhd pyrope fmt foo.prp            # print formatted source to stdout\n"
+      "               lhd pyrope lsp                    # Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
       "  pass       run one graph pass over lg: inputs: color <alg> | partition | abc | liberty gensim | semdiff\n"
       "               lhd pass abc --top m lg:dir --emit-dir lg:net\n"
       "               lhd pass semdiff --ref lg:gold --impl lg:opt --top adder   # structural diff/match\n"
@@ -433,6 +441,61 @@ void print_general_help() {
       "\n"
       "Deterministic (content-hash run_id) and hermetic (undeclared input => missing_file)\n"
       "by contract.\n");
+}
+
+// `lhd pyrope [SUB] --help` — the Pyrope developer tools. `sub` is the
+// subcommand word ("fmt"/"lsp"), empty for the `pyrope` overview.
+int help_pyrope(const std::string& sub) {
+  if (sub == "fmt") {
+    std::print(
+        "lhd pyrope fmt — format Pyrope source (a clang-format for Pyrope, via prpfmt)\n"
+        "\n"
+        "usage: lhd pyrope fmt FILE… [flags]\n"
+        "  Re-emits standardized Pyrope (indentation, spacing, alignment, smart wrapping)\n"
+        "  by walking the tree-sitter-pyrope grammar. Prints to stdout by default.\n"
+        "\n"
+        "flags:\n"
+        "  -i, --inplace     rewrite each input file in place (unchanged files are left alone)\n"
+        "  -o, --output FILE write to FILE instead of stdout (a single input file)\n"
+        "      --indent N    spaces per indent level (default 4)\n"
+        "      --width N     wrap column / max line width (default 80)\n"
+        "      --verify      re-parse the formatted output and warn (exit 1) if it no longer parses\n"
+        "\n"
+        "exit: 0 ok; 1 if any file failed to parse, failed --verify, or could not be read/written\n"
+        "\n"
+        "examples:\n"
+        "  lhd pyrope fmt foo.prp                 # print formatted foo.prp to stdout\n"
+        "  lhd pyrope fmt -i foo.prp bar.prp      # reformat both files in place\n"
+        "  lhd pyrope fmt foo.prp --indent 2 -o foo.fmt.prp\n");
+    return 0;
+  }
+  if (sub == "lsp") {
+    std::print(
+        "lhd pyrope lsp — the Pyrope LSP server\n"
+        "\n"
+        "usage: lhd pyrope lsp\n"
+        "  JSON-RPC over stdio (Content-Length framed; .prp only). Drives prp2lnast +\n"
+        "  pass.upass + core/diag per buffer; ephemeral, no lgdb.\n");
+    return 0;
+  }
+  if (!sub.empty()) {
+    std::print(stderr, "lhd help: unknown pyrope subcommand '{}' (fmt | lsp)\n", sub);
+    return 1;
+  }
+  std::print(
+      "lhd pyrope — Pyrope developer tools (language-adjacent, not the compile/synth flow)\n"
+      "\n"
+      "usage: lhd pyrope <subcommand> [args]\n"
+      "\n"
+      "subcommands (run `lhd pyrope <subcommand> --help` for details):\n"
+      "  fmt FILE…   format Pyrope source (clang-format-like): -i in place, else stdout\n"
+      "  lsp         the Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
+      "\n"
+      "examples:\n"
+      "  lhd pyrope fmt -i foo.prp\n"
+      "  lhd pyrope fmt foo.prp --indent 2 --width 100\n"
+      "  lhd pyrope lsp\n");
+  return 0;
 }
 
 // `lhd pass [SUB] --help` — the graph-pass subcommands, each with its own
@@ -658,13 +721,12 @@ int help_command(const Options& opts) {
     return 0;
   }
   if (topic == "lsp") {
-    std::print(
-        "lhd lsp — Pyrope LSP server over stdio (JSON-RPC, Content-Length framed; .prp only)\n"
-        "\n"
-        "usage: lhd lsp\n"
-        "  Drives prp2lnast + pass.upass + core/diag per buffer; ephemeral, no lgdb. stdio\n"
-        "  belongs to the protocol, so no result JSON is written.\n");
-    return 0;
+    // The LSP server now lives under `pyrope`; keep `lhd help lsp` as a
+    // convenience pointer to the canonical `lhd pyrope lsp` help.
+    return help_pyrope("lsp");
+  }
+  if (topic == "pyrope") {
+    return help_pyrope(sub);
   }
   if (topic == "pass") {
     return help_pass(sub);

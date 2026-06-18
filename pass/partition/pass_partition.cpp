@@ -133,6 +133,7 @@ private:
   hhds::GraphLibrary*             outlib_;
   std::string                     top_;
   bool                            debug_color_;
+  bool                            saw_uncolored_ = false;  // any color-0 node seen in collect()
   livehd::partition::Body_builder hook_;
 
   Union_find uf_;
@@ -240,19 +241,20 @@ bool Partitioner::collect() {
     }
   }
 
-  // Regions = connected components of same-color partitionable nodes.
+  // Regions = connected components of same-color partitionable nodes. Color 0
+  // (NO_COLOR) means the node was never colored — either no `pass.color` ran, or
+  // it ran and left this node out. Color 0 is treated as just another color:
+  // uncolored nodes merge into their own color-0 region(s) exactly like any
+  // colored set, so the decomposition (and `pass.abc`) runs on an uncolored
+  // design without a prior color pass. We only warn once (below) so the implicit
+  // coloring is visible without being fatal.
   for (auto n : g_->forward_class()) {
     if (!is_partitionable(n)) {
       continue;
     }
     auto c = node_color_of(n);
     if (c == NO_COLOR) {
-      livehd::diag::err("pass.partition", "uncolored-node", "unsupported")
-          .msg("node {} in top '{}' has color 0; run pass.color first (the coloring must be complete and nonzero)",
-               gu::debug_name(n),
-               top_)
-          .fatal();
-      return false;
+      saw_uncolored_ = true;
     }
     uf_.find(n);
     for (const auto& e : n.out_edges()) {
@@ -261,6 +263,14 @@ bool Partitioner::collect() {
         uf_.merge(n, sn);
       }
     }
+  }
+  if (saw_uncolored_) {
+    // One warning per def (not per node): the dedup sink collapses repeats.
+    livehd::diag::warn("pass.partition", "uncolored-node", "io")
+        .msg("top '{}' has uncolored nodes (color 0); treating them as a single color-0 region — run pass.color "
+             "first for an explicit partitioning",
+             top_)
+        .emit();
   }
 
   // Region membership + color.
@@ -336,9 +346,15 @@ void Partitioner::name_ports() {
   for (auto& [r, nodes] : region_nodes_) {
     auto& set = internal_names[r];
     for (const auto& n : nodes) {
-      if (gu::has_name(n)) {
-        set.insert(sanitize(std::string{gu::node_name_of(n)}));
-      }
+      // Reserve the name cgen will ACTUALLY emit for this node, which is its
+      // user name OR — when unnamed — the synthetic `<type>_<nid>`
+      // (default_instance_name). Reserving only user-named nodes let an unnamed
+      // node's synthetic name (e.g. `mux_56`) collide with a same-named output
+      // port; cgen then declares the wire twice at mismatched widths and emits
+      // invalid Verilog. This only bit when a node and the port it drives land
+      // in the same region — rare under a per-node coloring, but the norm for an
+      // uncolored design that folds the whole graph into one color-0 region.
+      set.insert(sanitize(gu::default_instance_name(n)));
     }
   }
 

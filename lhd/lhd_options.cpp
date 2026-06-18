@@ -478,6 +478,29 @@ Options parse_args(int argc, char** argv) {
       opts.quiet = true;
     } else if (a == "--verbose") {
       opts.verbose = true;
+    } else if (a == "-i" || a == "--inplace") {  // `pyrope fmt`: rewrite the input file(s) in place
+      opts.fmt_inplace = true;
+    } else if (a == "-o" || a == "--output") {  // `pyrope fmt`: write to a file instead of stdout
+      opts.fmt_output = need_value(a, i, argc, argv);
+    } else if (a == "--indent" || a == "--width") {  // `pyrope fmt`: indent size / wrap column
+      auto   v        = std::string{need_value(a, i, argc, argv)};
+      size_t consumed = 0;
+      long   n        = 0;
+      try {
+        n = std::stol(v, &consumed);
+      } catch (const std::exception&) {
+        consumed = 0;
+      }
+      if (v.empty() || consumed != v.size() || n <= 0) {
+        throw Lhd_error{"usage", std::format("{} expects a positive integer, got '{}'", a, v), ""};
+      }
+      if (a == "--indent") {
+        opts.fmt_indent = static_cast<int>(n);
+      } else {
+        opts.fmt_width = static_cast<int>(n);
+      }
+    } else if (a == "--verify") {  // `pyrope fmt`: re-parse the formatted output
+      opts.fmt_verify = true;
     } else if (a == "-h" || a == "--help") {
       want_help = true;  // resolved after the loop, once the command word is known
     } else if (!a.empty() && a[0] == '-') {
@@ -498,7 +521,13 @@ Options parse_args(int argc, char** argv) {
                         "`semdiff` is now a `pass` subcommand — use `lhd pass semdiff --ref lg:… --impl lg:…`",
                         "e.g. `lhd pass semdiff --ref lg:gold --impl lg:opt --top adder`"};
       }
-      if (a == "compile" || a == "lec" || a == "scan" || a == "lsp" || a == "list" || a == "describe"
+      if (a == "lsp") {
+        // The LSP server is now a `pyrope` subcommand (next to `pyrope fmt`).
+        throw Lhd_error{"usage",
+                        "the LSP server is now `lhd pyrope lsp` (not `lhd lsp`)",
+                        "run `lhd pyrope lsp` (or point your editor's launcher at it)"};
+      }
+      if (a == "compile" || a == "lec" || a == "scan" || a == "pyrope" || a == "list" || a == "describe"
           || a == "version" || a == "help" || a == "tool" || a == "pass") {
         // tool keeps its positionals raw and ORDERED in opts.files: the verb
         // (cat/grep/diff/tree), the filter terms (name:/color:/from:…), and the

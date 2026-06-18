@@ -367,13 +367,12 @@ static std::string round_trip(std::string_view name, std::string_view src,
   return oss.str();
 }
 
-// ── Test 13: round-trip — comb block with params is parsed as func_def ────────
+// ── Test 13: round-trip — comb block with params emits as a lambda ───────────
 // A comb block with parameters is represented as a func_def node in LNAST.
-// func_def bodies are deferred to Slice 4, so the writer emits a TODO comment
-// in place of the body.  write_top() no longer adds a comb wrapper — that is
-// write_func_def()'s responsibility (Slice 4).  This test verifies:
+// write_func_def() now serialises it back as a `comb name(...) -> (...) { body }`
+// lambda (it is no longer a TODO stub).  This test verifies:
 //   1. The round-trip does not crash.
-//   2. The func_def TODO comment is present (expected current behavior).
+//   2. The lambda header + body are emitted, with no leftover TODO marker.
 TEST(LnastPrpWriter, RoundTripCombWithParamsIsFuncDef) {
   const char* src = R"prp(
 comb rt_simple(a) -> (out) {
@@ -383,24 +382,24 @@ comb rt_simple(a) -> (out) {
 
   auto output = round_trip("rt_simple", src, {"noop"});
   ASSERT_FALSE(output.empty()) << "round-trip produced no output";
-  // func_def bodies are not yet serialised (Slice 4); the writer emits a TODO.
-  EXPECT_NE(output.find("TODO: func_def"), std::string::npos) << "expected func_def TODO comment:\n" << output;
+  EXPECT_EQ(output.find("TODO"), std::string::npos) << "func_def must no longer emit a TODO stub:\n" << output;
+  EXPECT_NE(output.find("comb rt_simple"), std::string::npos) << "lambda header missing:\n" << output;
+  EXPECT_NE(output.find("-> (out"), std::string::npos) << "output port list missing:\n" << output;
+  EXPECT_NE(output.find("out = a"), std::string::npos) << "lambda body missing:\n" << output;
 }
 
 // ── Test 14: round-trip — constprop folds arithmetic, no raw + in output ──────
-// `const a = 2 + 3` — constprop folds the plus to 5 and DCEs the tmp.
-// The emitted Pyrope must not contain a bare `+` operator (folded away).
+// `const a = 2 + 3` at FILE SCOPE — constprop folds the plus and DCEs the tmp.
+// (The code must be at file scope, not inside a lambda: constprop does not run
+// inside an uninstantiated func_def body, so a `comb` wrapper would re-emit the
+// `2 + 3` verbatim.)  The emitted Pyrope must not contain a bare `+` operator.
 TEST(LnastPrpWriter, RoundTripConstpropFoldsArith) {
   const char* src = R"prp(
-comb rt_fold() -> () {
-  const a = 2 + 3
-  cassert(a == 5)
-}
-rt_fold()
+const a = 2 + 3
+cassert(a == 5)
 )prp";
 
   auto output = round_trip("rt_fold", src, {"constprop"});
-  // write_top() no longer adds a comb wrapper; write_func_def() (Slice 4) will.
   // The key invariant is that constprop folds `2 + 3` — no bare `+` survives.
   EXPECT_EQ(output.find(" + "), std::string::npos) << "unexpected `+` in output (should be folded):\n" << output;
 }
@@ -426,23 +425,21 @@ TEST(LnastPrpWriter, AttrSetTypeAnnotationSuppressed) {
 }
 
 // ── Test 15: round-trip — if(true) branch is pruned by constprop ─────────────
-// `if true { out = 1 } else { out = 2 }` — constprop prunes the dead else.
-// The emitted Pyrope must have no `if` keyword.
+// `if true { out = 1 } else { out = 2 }` at FILE SCOPE — constprop prunes the
+// dead else (the code is at file scope so constprop runs on it; inside a
+// lambda body it would be re-emitted verbatim).  No `if` keyword must survive.
 TEST(LnastPrpWriter, RoundTripIfTruePruned) {
   const char* src = R"prp(
-comb rt_if() -> (out) {
-  if true {
-    out = 1
-  } else {
-    out = 2
-  }
+mut out = 0
+if true {
+  out = 1
+} else {
+  out = 2
 }
-rt_if()
 )prp";
 
   auto output = round_trip("rt_if", src, {"constprop"});
   ASSERT_FALSE(output.empty()) << "round-trip produced no output";
-  // write_top() no longer adds a comb wrapper; write_func_def() (Slice 4) will.
   // The key invariant is that constprop prunes the dead else-branch — no "if".
   EXPECT_EQ(output.find("if "), std::string::npos) << "if should be pruned but still present:\n" << output;
 }

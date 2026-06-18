@@ -1,7 +1,11 @@
 # pass/abc — ABC technology mapping (task 2a-abc)
 
 `lhd pass abc --top <mod> lg:dir --emit-dir lg:netlist` technology-maps a
-**colored** design (run `pass color synth` first) to a standard-cell netlist.
+design to a standard-cell netlist. A prior coloring (`pass color synth`) is
+**optional**: it controls how the design is split into per-region modules. With
+no coloring (or for any node left at color 0), color 0 is treated as just
+another color — the uncolored logic becomes a single `<mod>__c0` region — and
+the pass emits one warning that it is partitioning an uncolored design.
 
 It reuses `pass.partition`'s decomposition seam
 (`Pass_partition::build_decomposition` + a body-builder hook): one module per

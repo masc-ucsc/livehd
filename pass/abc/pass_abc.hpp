@@ -8,6 +8,8 @@
 // color region, each body replaced by an ABC-mapped netlist of 1-bit blackbox
 // Sub cells named after the Liberty cells. The module structure mirrors
 // pass.partition exactly, so each netlist module LEC-checks against its twin.
+// A prior pass.color is optional — an uncolored design maps as a single
+// color-0 region (with a one-line warning), so `pass abc` runs standalone.
 class Pass_abc : public Pass {
 public:
   explicit Pass_abc(const Eprp_var& var);
