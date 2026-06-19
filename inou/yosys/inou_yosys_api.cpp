@@ -466,7 +466,7 @@ void Inou_yosys_api::setup() {
   Eprp_method m1("inou.yosys.tolg", "read verilog using yosys to lgraph", &Inou_yosys_api::tolg);
   m1.add_label_optional("files", "verilog files to process (comma separated)");
   m1.add_label_optional("filelist_file", "path to filelist file (.f/.F) containing additional source files for read_slang", "");
-  m1.add_label_optional("path", "path to build the lgraph[s]", "lgdb");
+  m1.add_label_optional("path", "path to build the lgraph[s]", "");  // empty: kernel passes an explicit path; no stray lgdb/
   m1.add_label_optional("frontend", "frontend to use: verilog or slang", "verilog");
   m1.add_label_optional("slang_flags", "comma- (or \\x1f-) separated flags for read_slang command", "");
   m1.add_label_optional("techmap", "Either full or alumac techmap or none from yosys. Cannot be used with liberty", "");
@@ -481,7 +481,7 @@ void Inou_yosys_api::setup() {
   register_inou("yosys", m1);
 
   Eprp_method m2("inou.yosys.fromlg", "write verilog from lgraph", &Inou_yosys_api::fromlg);
-  m2.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
+  m2.add_label_optional("path", "path to read the lgraph[s]", "");  // empty: avoids a stray lgdb/ from get_path
   m2.add_label_optional("odir", "output directory for generated verilog files", ".");
   m2.add_label_optional("script", "alternative custom inou_yosys_write.ys command");
   m2.add_label_optional("yosys", "path for yosys command", "");

@@ -1552,6 +1552,47 @@ void uPass_runner::emit_inline_sext(const std::string& dst, const std::string& s
   lm->pop_source();
 }
 
+void uPass_runner::emit_inline_get_mask(const std::string& dst, const Lnast_node& value, const std::string& mask_text) {
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-getmask");
+  auto s    = std::make_shared<Lnast>(body, "inl-getmask");
+  auto root = s->set_root(Lnast_ntype::create_get_mask());
+  stamp_scratch_srcid(s, root);
+  s->add_child(root, Lnast_node::create_ref(dst));     // dst
+  s->add_child(root, value);                           // value
+  s->add_child(root, Lnast_node::create_const(mask_text));  // const bitmask
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);
+  process_lnast();  // cursor at get_mask root → push path: dispatch + emit
+  flush_deferred_emits();
+  lm->pop_source();
+}
+
+void uPass_runner::emit_staging_op(Lnast_ntype::Lnast_ntype_int op, const std::string& dst,
+                                   const std::vector<Lnast_node>& operands) {
+  emit_push(op);
+  emit_leaf(Lnast_node::create_ref(dst));  // dst
+  for (const auto& o : operands) {
+    emit_leaf(o);
+  }
+  emit_pop();
+}
+
+void uPass_runner::emit_staging_guarded_store(const std::string& cond, const std::string& dst, const Lnast_node& value) {
+  // if(cond) { dst = value } — built straight into staging.
+  emit_push(Lnast_ntype::create_if());
+  emit_leaf(Lnast_node::create_ref(cond));        // cond
+  emit_push(Lnast_ntype::create_stmts());         // then arm
+  emit_push(Lnast_ntype::create_store());         // dst = value
+  emit_leaf(Lnast_node::create_ref(dst));
+  emit_leaf(value);
+  emit_pop();  // store
+  emit_pop();  // stmts
+  emit_pop();  // if
+}
+
 void uPass_runner::emit_inline_positional_tuple(const std::string& dst, const std::vector<Lnast_node>& children) {
   // `dst = (c0, c1, …)` — positional tuple_add (no store-wrapped field keys),
   // so tolg's memory-init path (which requires `named` empty) can consume it.
@@ -1746,6 +1787,184 @@ bool uPass_runner::try_materialize_array_init() {
   process_lnast();  // cursor at declare root → declare case (guard skips re-entry)
   flush_deferred_emits();
   lm->pop_source();
+  return true;
+}
+
+bool uPass_runner::try_lower_wrap_sat() {
+  using N = Lnast_ntype;
+  // Cursor is on the func_call. Walk children read-only; restore on every exit.
+  const auto saved = lm->save_cursor();
+  auto       bail   = [&]() {
+    lm->restore_cursor(saved);
+    return false;
+  };
+
+  if (!lm->has_child()) {
+    return bail();
+  }
+  lm->move_to_child();  // dst
+  if (!N::is_ref(lm->get_raw_ntype())) {
+    return bail();
+  }
+  const std::string dst(lm->current_text());
+
+  if (!lm->move_to_sibling()) {  // callee
+    return bail();
+  }
+  // Read RAW: an inlined body tag-prefixes the fname (`wrap` → `inlN_wrap`).
+  const auto callee  = lm->current_raw_text();
+  const bool is_wrap = callee == "wrap";
+  const bool is_sat  = callee == "sat" || callee == "saturate";
+  if (!is_wrap && !is_sat) {
+    return bail();
+  }
+
+  // Gather the `v=` value operand and the `type=` lhs ref.
+  std::optional<Lnast_node> value;
+  std::string               value_name;  // ref name (empty when the value is a const)
+  std::string               type_src;    // the lhs whose declared type we narrow to
+  while (lm->move_to_sibling()) {
+    if (lm->get_raw_ntype() != N::Lnast_ntype_store || !lm->has_child()) {
+      continue;
+    }
+    const auto inner = lm->save_cursor();
+    lm->move_to_child();
+    const std::string key(lm->current_text());
+    if (lm->move_to_sibling()) {
+      const auto vt = lm->get_raw_ntype();
+      if (key == "v") {
+        if (N::is_const(vt)) {
+          value_name.clear();
+          value = lm->current_node();
+        } else if (N::is_ref(vt)) {
+          value_name = std::string(lm->current_text());
+          value      = Lnast_node::create_ref(value_name);
+        }
+      } else if (key == "type" && N::is_ref(vt)) {
+        type_src = std::string(lm->current_text());
+      }
+    }
+    lm->restore_cursor(inner);
+  }
+  lm->restore_cursor(saved);  // back on the func_call
+
+  if (!value || type_src.empty()) {
+    return false;  // malformed — let the normal path emit/diagnose
+  }
+  // Comptime values are folded by the attributes pass (and the drop path
+  // retires the call); only RUNTIME values need hardware here.
+  if (value_name.empty()) {
+    return false;  // const value → comptime
+  }
+  if (symbol_table_.known_const_scalar(value_name).has_value()) {
+    return false;  // folds to a known scalar → comptime
+  }
+
+  // Target type envelope: bits, signedness, and the declared [min,max].
+  const auto facts = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), type_src);
+  if (!facts || facts->bits == 0) {
+    return false;  // unknown width → cannot lower (decline; old behavior diagnoses)
+  }
+  const auto     ub        = facts->bits;
+  const bool     is_signed = facts->kind == upass::decl_facts::Num::signed_int
+                         || (facts->range_min && facts->range_min->is_negative());
+  const Dlop tmax = facts->range_max ? *facts->range_max : upass::max_from_bits(ub, is_signed);
+  const Dlop tmin = facts->range_min ? *facts->range_min : upass::min_from_bits(ub, is_signed);
+
+  // Value range: the bitwidth-stamped binding (tightest), falling back to the
+  // value's DECLARED envelope (e.g. a module input never gets a per-write
+  // bw_*). Both are sound over-approximations — needed both to gate the clamps
+  // and to prove a no-op for the unnecessary-wrap/sat warning.
+  std::optional<Dlop> vmax;
+  std::optional<Dlop> vmin;
+  if (auto b = symbol_table_.get_bundle(value_name); b) {
+    const auto& e = b->get_entry("0");
+    if (!e.bw_max.is_invalid() && e.bw_max.is_integer()) {
+      vmax = e.bw_max;
+    }
+    if (!e.bw_min.is_invalid() && e.bw_min.is_integer()) {
+      vmin = e.bw_min;
+    }
+  }
+  if (!vmax || !vmin) {
+    if (auto vf = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), value_name)) {
+      if (!vmax && vf->range_max && vf->range_max->is_integer()) {
+        vmax = vf->range_max;
+      }
+      if (!vmin && vf->range_min && vf->range_min->is_integer()) {
+        vmin = vf->range_min;
+      }
+    }
+  }
+  // Need the upper clamp/mask unless the value provably stays ≤ max; the lower
+  // unless it provably stays ≥ min. (For an unsigned target min==0, so this is
+  // the "value may be negative → clamp to 0" case of saturate_unsigned.)
+  const bool need_hi = !(vmax && !vmax->gt_op(tmax)->is_known_true());
+  const bool need_lo = !(vmin && !vmin->lt_op(tmin)->is_known_true());
+
+  // Preserve the per-pass func_call side effects (bitwidth's wrap_sat_exempt_
+  // handshake in particular), mirroring process_drop_candidate's step 1, so
+  // the trailing store(lhs,dst) keeps skipping the does-not-fit check. The
+  // func_call itself is NOT emitted (we return true).
+  dispatch_to_passes(&upass::uPass::process_func_call);
+
+  if (!need_hi && !need_lo) {
+    // The value provably fits the target type — the wrap/sat narrows nothing.
+    // Warn (the keyword is dead) and emit a plain alias.
+    livehd::diag::Span span;
+    if (const auto& ln = lm->get_lnast()) {
+      span = ln->span_of(lm->get_current_nid());
+    }
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::warning,
+        .code     = is_wrap ? "unnecessary-wrap" : "unnecessary-sat",
+        .category = "bitwidth",
+        .pass     = "upass.runner",
+        .message  = std::format("unnecessary `{}`: the value already fits the target type", is_wrap ? "wrap" : "sat"),
+        .span     = std::move(span),
+        .hint     = "the value's range is within the target type, so the wrap/saturate has no effect",
+    });
+    emit_inline_binding(dst, *value);  // alias
+    return true;
+  }
+
+  if (is_wrap) {
+    // C/C++ truncation: keep the low N bits; sign-reinterpret per the type.
+    const std::string mask_text(Dlop::get_mask_value(static_cast<int>(ub))->to_pyrope());
+    if (is_signed) {
+      const std::string masked = dst + "_wm";
+      emit_inline_get_mask(masked, *value, mask_text);
+      emit_inline_sext(dst, masked, static_cast<int>(ub) - 1);
+    } else {
+      emit_inline_get_mask(dst, *value, mask_text);
+    }
+    return true;
+  }
+
+  // sat: seed then bw-gated clamps, built straight into staging (the `if` can't
+  // go through process_lnast — see emit_staging_op). A signed target re-signs
+  // the clamped low-N bits through a final sext (the clamp result lies in
+  // [min,max], so its low N bits are the correct two's-complement value); an
+  // unsigned target writes the mux result directly (values in [0,max], read
+  // unsigned).
+  const std::string clamp = is_signed ? dst + "_sc" : dst;
+  emit_staging_op(N::create_store(), clamp, {*value});  // seed: clamp = value
+  if (need_hi) {
+    const std::string cond = dst + "_sgt";
+    const Lnast_node  hi   = Lnast_node::create_const(std::string(tmax.to_pyrope()));
+    emit_staging_op(N::create_gt(), cond, {*value, hi});  // cond = value > max
+    emit_staging_guarded_store(cond, clamp, hi);          // if (cond) clamp = max
+  }
+  if (need_lo) {
+    const std::string cond = dst + "_slt";
+    const Lnast_node  lo   = Lnast_node::create_const(std::string(tmin.to_pyrope()));
+    emit_staging_op(N::create_lt(), cond, {*value, lo});  // cond = value < min
+    emit_staging_guarded_store(cond, clamp, lo);          // if (cond) clamp = min
+  }
+  if (is_signed) {
+    emit_staging_op(N::create_sext(), dst, {Lnast_node::create_ref(clamp),
+                                            Lnast_node::create_const(static_cast<int64_t>(ub) - 1)});
+  }
   return true;
 }
 
@@ -5295,7 +5514,7 @@ void uPass_runner::process_lnast() {
     // constprop can fold built-in typecasts (int/uint/uNN/sNN) and cell-ops;
     // anything it declines stays un-folded and the statement is emitted.
     case Ntype::Lnast_ntype_func_call:
-      if (!try_inline_func_call() && !try_construct_call()) {
+      if (!try_lower_wrap_sat() && !try_inline_func_call() && !try_construct_call()) {
         process_drop_candidate(&upass::uPass::process_func_call, /*fold_all=*/false);
       }
       break;

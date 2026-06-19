@@ -1,0 +1,13 @@
+/*
+:name: rt_sat_s
+:type: equiv
+:verilog_top: rt_sat_s.rt_sat_s
+:pyrope_top: rt_sat_s.rt_sat_s
+*/
+
+// Runtime (non-comptime) signed `sat`: clamp an 8-bit input to [-8, 7]. The
+// value can over- and under-flow, so two comparisons + muxes, then the clamped
+// low bits are re-signed (sext) to the s4 result.
+comb rt_sat_s(a:s8) -> (z:s4) {
+  sat z = a
+}

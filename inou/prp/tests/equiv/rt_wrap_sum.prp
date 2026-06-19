@@ -1,0 +1,12 @@
+/*
+:name: rt_wrap_sum
+:type: equiv
+:verilog_top: rt_wrap_sum.rt_wrap_sum
+:pyrope_top: rt_wrap_sum.rt_wrap_sum
+*/
+
+// Runtime `wrap` of a COMPUTED value (a tmp, not an input): the u5 sum a+b
+// (0..30) is wrapped into u4 — exercises the bitwidth-stamped range path.
+comb rt_wrap_sum(a:u4, b:u4) -> (z:u4) {
+  wrap z = a + b
+}

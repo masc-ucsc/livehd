@@ -1,0 +1,13 @@
+/*
+:name: rt_wrap_u
+:type: equiv
+:verilog_top: rt_wrap_u.rt_wrap_u
+:pyrope_top: rt_wrap_u.rt_wrap_u
+*/
+
+// Runtime (non-comptime) unsigned `wrap`: keep the low 4 bits of an 8-bit
+// input. C/C++ narrowing-conversion semantics — `wrap` to a uN type is a plain
+// truncation (get_mask of the low N bits, read unsigned).
+comb rt_wrap_u(a:u8) -> (z:u4) {
+  wrap z = a
+}

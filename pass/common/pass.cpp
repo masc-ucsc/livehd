@@ -28,16 +28,22 @@ std::string Pass::get_files(const Eprp_var& var) const {
 }
 
 std::string Pass::get_path(const Eprp_var& var) const {
-  std::string _path;
+  std::string _path = var.has_label("path") ? std::string{var.get("path")} : std::string{};
 
-  if (var.has_label("path")) {
-    _path = var.get("path");
-  } else {
-    _path = "lgdb";
+  // No explicit `path`: return the legacy default name but do NOT create a
+  // directory. Most passes (lnastfmt, prp_writer, cgen, the slang/prp readers,
+  // upass) never touch a graph library, and eagerly mkdir-ing the old default
+  // `lgdb/` for every constructed Pass left a stray empty dir in the cwd.
+  // Passes that actually persist a library receive an explicit `path` (the
+  // kernel routes it to the `lg:` emit dir or --workdir), and the directory is
+  // created lazily by whoever writes to it (Hhds_graph_library::save).
+  if (_path.empty()) {
+    return "lgdb";
   }
+
   if (!setup_directory(_path)) {
-    _path = "/INVALID";
     livehd::diag::err(pass_name, "missing-path", "io").msg("could not gain access to path:{}", _path).fatal();
+    _path = "/INVALID";
   }
 
   return _path;
@@ -75,7 +81,10 @@ void Pass::register_inou(std::string_view pname, Eprp_method& method) {
   // All the inou should start with inou.*
 
   if (method.get_name() == absl::StrCat("inou.", pname, ".tolg")) {
-    method.add_label_optional("path", "lgraph path", "lgdb");
+    // Empty default: do not inject "lgdb" into the var (eprp only injects
+    // non-empty defaults), so a pass run without an explicit path does not
+    // materialize a stray `lgdb/` via get_path/setup_directory.
+    method.add_label_optional("path", "lgraph path", "");
     method.add_label_required("files", "input file[s]");
   } else if (method.get_name() == absl::StrCat("inou.", pname, ".fromlg")) {
     method.add_label_optional("odir", "output directory", ".");
@@ -83,7 +92,7 @@ void Pass::register_inou(std::string_view pname, Eprp_method& method) {
     method.add_label_required("files", "input file[s]");
     method.add_label_optional("odir", "output directory", ".");
   } else if (method.get_name().rfind(absl::StrCat("inou.", pname), 0) == 0) {
-    method.add_label_optional("path", "lgraph path", "lgdb");
+    method.add_label_optional("path", "lgraph path", "");  // empty: see .tolg note above
     method.add_label_optional("files", "input file[s]");
     method.add_label_optional("odir", "output directory", ".");
   } else {

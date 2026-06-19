@@ -1,0 +1,14 @@
+/*
+:name: rt_wrap_noop
+:type: equiv
+:verilog_top: rt_wrap_noop.rt_wrap_noop
+:pyrope_top: rt_wrap_noop.rt_wrap_noop
+*/
+
+// A `wrap` whose value provably fits the target type is a no-op: the lowering
+// aliases `z = a` AND emits an `unnecessary-wrap` warning. This equiv test pins
+// the aliasing behavior (z == a, zero-extended); the warning is checked
+// separately.
+comb rt_wrap_noop(a:u4) -> (z:u8) {
+  wrap z = a
+}

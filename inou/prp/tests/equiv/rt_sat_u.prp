@@ -1,0 +1,12 @@
+/*
+:name: rt_sat_u
+:type: equiv
+:verilog_top: rt_sat_u.rt_sat_u
+:pyrope_top: rt_sat_u.rt_sat_u
+*/
+
+// Runtime (non-comptime) unsigned `sat`: clamp an 8-bit input to [0, 15]. The
+// value is unsigned so it can only overflow high — one comparison + mux.
+comb rt_sat_u(a:u8) -> (z:u4) {
+  sat z = a
+}

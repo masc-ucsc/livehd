@@ -1,0 +1,13 @@
+/*
+:name: rt_wrap_s
+:type: equiv
+:verilog_top: rt_wrap_s.rt_wrap_s
+:pyrope_top: rt_wrap_s.rt_wrap_s
+*/
+
+// Runtime (non-comptime) signed `wrap`: low 4 bits of an 8-bit input,
+// reinterpreted as a signed 4-bit value (two's-complement truncation, exactly
+// like a C/C++ narrowing conversion to a signed int). get_mask + sext.
+comb rt_wrap_s(a:s8) -> (z:s4) {
+  wrap z = a
+}

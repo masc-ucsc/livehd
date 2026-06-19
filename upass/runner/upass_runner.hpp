@@ -311,6 +311,27 @@ protected:
   // func_call node on every path.
   bool try_inline_func_call();
 
+  // Lower a RUNTIME `wrap`/`sat` narrowing call to primitive nodes. The call
+  // shape is func_call(dst, ref("wrap"|"sat"|"saturate"), store(ref("v"),
+  // value), store(ref("type"), ref(lhs))). When the value is a comptime
+  // constant the attributes pass already folds it (and the drop path retires
+  // the call), so this declines (returns false) for those. For a runtime
+  // value it reads the lhs's declared envelope (decl_facts::lookup) and the
+  // value's bitwidth-derived range, then emits:
+  //   * nothing-to-narrow (value range already fits the type) → `dst = value`.
+  //   * wrap → get_mask(dst, value, 2^N-1)  [+ sext(dst, .., N-1) when signed]
+  //     (C/C++ truncation: low N bits, sign-reinterpreted per the type).
+  //   * sat  → seed `dst = value`, then bw-gated clamps `if (value > max) dst =
+  //     max` / `if (value < min) dst = min` (signed targets re-sign the clamp
+  //     result through a final sext). Clamps to the DECLARED max/min (handles
+  //     non-pow2 `int(min,max)`).
+  // Runs the per-pass process_func_call hooks first (mirrors
+  // process_drop_candidate step 1) so bitwidth's wrap_sat_exempt_ handshake
+  // still suppresses the does-not-fit error on the trailing store(lhs,dst).
+  // Returns true (suppressing the func_call emit) iff it handled the call. The
+  // read cursor is left on the func_call node on every path.
+  bool try_lower_wrap_sat();
+
   // Var-arg access resolution. A `comb foo(...args)` call gathers its
   // leftover actuals here, keyed by the FRAME-TAGGED var-arg name (e.g.
   // "inl1_args"): positional leftovers under decimal keys "0","1",…, named
@@ -538,6 +559,25 @@ protected:
   // value (e.g. a get_mask bit-slice 0b1110 = 14) must be reinterpreted as its
   // declared width (s4 → -2). sign_bit is the top bit index (bits-1).
   void emit_inline_sext(const std::string& dst, const std::string& src, int sign_bit);
+
+  // Emits `dst = get_mask(value, mask_text)` through the walk. `mask_text` is a
+  // const bitmask in pyrope form (tolg's Get_mask requires a const/range mask).
+  // Used by runtime `wrap` to keep the low N bits (zero-extended) of `value`.
+  void emit_inline_get_mask(const std::string& dst, const Lnast_node& value, const std::string& mask_text);
+
+  // Append `op(ref(dst), operands...)` DIRECTLY into the staging tree (no
+  // process_lnast / pass dispatch). Used by the runtime `sat` lowering for the
+  // seed store / gt / lt / sext: emitting CONTROL FLOW (the clamp `if`) through
+  // process_lnast would re-enter the if-arm scope machinery from inside the
+  // func_call walk and corrupt the symbol-table scope chain (an infinite loop
+  // in find_decl_scope_read). Building the nodes straight into staging — like
+  // emit_subtree_verbatim — sidesteps that; tolg lowers them by structure.
+  void emit_staging_op(Lnast_ntype::Lnast_ntype_int op, const std::string& dst, const std::vector<Lnast_node>& operands);
+
+  // Append `if (cond) { dst = value }` (a single-arm if) directly into staging.
+  // With a prior staging `dst = <seed>` this is exactly one Mux(sel=cond,
+  // false=seed, true=value) in tolg — the only way to get a mux (no select node).
+  void emit_staging_guarded_store(const std::string& cond, const std::string& dst, const Lnast_node& value);
 
   // 2f-mem_comptime_init — when a reg-array declare's initializer is a ref to a
   // fully-comptime bundle (built by a loop, not a tuple literal), tolg can't
