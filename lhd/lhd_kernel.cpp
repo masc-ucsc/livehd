@@ -761,13 +761,20 @@ void emit_lnast_dump_outputs(const std::vector<std::shared_ptr<Lnast>>& units, O
 }
 
 // Generate per-module Verilog with inou.cgen.verilog into `odir`, returning
-// the sorted module names.
-std::vector<std::string> cgen_into(Options& opts, Result& res, Eprp_var& var, const std::string& odir) {
+// the sorted module names. `default_srcmap` seeds cgen.srcmap before the user's
+// --set is merged, so the directory emit path (where each `.map` lands adjacent
+// to its `.v`) ships the source map by default while `--set cgen.srcmap=0` can
+// still turn it off.
+std::vector<std::string> cgen_into(Options& opts, Result& res, Eprp_var& var, const std::string& odir,
+                                   bool default_srcmap = false) {
   ensure_dir(odir);
   Eprp_var::Eprp_dict labels{
       {"odir", odir}
   };
-  merge_sets(opts, "cgen", labels);  // e.g. --set cgen.srcmap=1
+  if (default_srcmap) {
+    labels["srcmap"] = "1";
+  }
+  merge_sets(opts, "cgen", labels);  // user --set cgen.srcmap=... overrides the seeded default
   run_step("inou.cgen.verilog", var, labels, opts, res);
 
   std::vector<std::string> names;
@@ -800,7 +807,7 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
     if (e.kind != "verilog") {
       continue;
     }
-    auto                                          names = cgen_into(opts, res, var, e.path);
+    auto                                          names = cgen_into(opts, res, var, e.path, /*default_srcmap=*/true);
     std::vector<std::pair<std::string, uint64_t>> manifest;
     for (const auto& n : names) {
       std::ifstream      ifs(std::format("{}/{}.v", e.path, n));

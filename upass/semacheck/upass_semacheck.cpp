@@ -115,6 +115,12 @@ void uPass_semacheck::check_attr_writes(const Lnast* ln) {
 // can't false-positive.
 void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts, const std::unordered_set<std::string>& visible) {
   std::unordered_set<std::string> here;
+  // `combined` = visible ∪ names declared so far in this scope. Maintained in
+  // place (one copy of `visible` per scope) and handed to nested scopes, rather
+  // than rebuilding visible∪here for every nested child -- the latter is
+  // O(children × names) and turns a declare-heavy module (large firtool output)
+  // into a near-hang.
+  std::unordered_set<std::string> combined = visible;
   for (auto c = ln->get_first_child(scope_stmts); !c.is_invalid(); c = ln->get_sibling_next(c)) {
     const auto ct = ln->get_type(c);
     if (Lnast_ntype::is_declare(ct)) {
@@ -141,6 +147,7 @@ void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts,
           return;
         }
         here.insert(name);
+        combined.insert(name);  // keep combined in sync for nested scopes
       }
     } else if (Lnast_ntype::is_store(ct)) {
       // An explicit `store name = nil` is a RELEASE (04-variables.md: nil
@@ -152,7 +159,13 @@ void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts,
       if (!c0.is_invalid() && Lnast_ntype::is_ref(ln->get_type(c0))) {
         auto c1 = ln->get_sibling_next(c0);
         if (!c1.is_invalid() && Lnast_ntype::is_const(ln->get_type(c1)) && ln->get_name(c1) == "nil") {
-          here.erase(std::string(ln->get_name(c0)));
+          // here ∩ visible == ∅ (a shadowing declare errors out above), so a
+          // released this-scope name is never also inherited from an outer
+          // scope -- dropping it from `combined` matches visible∪here exactly.
+          auto rel = std::string(ln->get_name(c0));
+          if (here.erase(rel) != 0) {
+            combined.erase(rel);
+          }
         }
       }
     }
@@ -162,8 +175,6 @@ void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts,
         if (is_func_body) {
           check_scope(ln, cc, {});
         } else {
-          std::unordered_set<std::string> combined = visible;
-          combined.insert(here.begin(), here.end());
           check_scope(ln, cc, combined);
         }
       }

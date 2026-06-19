@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -286,11 +287,21 @@ private:
 
   void record(std::string_view name, const Pin& pin, int32_t mw) {
     std::string key{name};
+    if (!branch_writes_.empty()) {
+      // First write to `key` in this branch: remember how to undo it on branch
+      // exit -- restore the pre-branch value, or erase if the name was absent.
+      // Capturing lazily here is O(writes); lower_branch used to snapshot the
+      // whole pin_map_ per branch, which is O(pin_map_) and turns quadratic on
+      // if/elif-heavy designs (e.g. firtool mux chains) -- a deep hang.
+      if (auto [it, inserted] = branch_writes_.back().try_emplace(key, pin); inserted) {
+        auto pit = pin_map_.find(key);
+        branch_restore_.back().emplace(key, pit != pin_map_.end() ? std::optional<Pin>{pit->second} : std::nullopt);
+      } else {
+        it->second = pin;  // keep the branch's latest value for the merge
+      }
+    }
     pin_map_[key] = pin;
     mw_map_[key]  = mw;
-    if (!branch_writes_.empty()) {
-      branch_writes_.back()[key] = pin;
-    }
     // 2f-defer — track the LOGICAL variable's most-recent driver (SSA versions
     // collapse to the root). Shadow keys (\x01din:/\x01en:) never name a defer
     // base, so skip them.
@@ -2952,10 +2963,12 @@ private:
   }
 
   // Lower an if-branch body into a fresh write scope; rolls pin_map_ back so
-  // branch-local writes don't leak. Returns the names the branch bound.
+  // branch-local writes don't leak. Returns the names the branch bound. The
+  // rollback restores only the names this branch wrote (recorded lazily in
+  // record()), so it is O(writes) -- no per-branch copy of the whole pin_map_.
   WriteMap lower_branch(const Lnast_nid& stmts) {
     branch_writes_.emplace_back();
-    auto snapshot = pin_map_;
+    branch_restore_.emplace_back();
     if (Lnast_ntype::is_stmts(lnast_->get_type(stmts))) {
       lower_stmts(stmts);
     } else {
@@ -2963,12 +2976,13 @@ private:
     }
     auto writes = std::move(branch_writes_.back());
     branch_writes_.pop_back();
-    for (const auto& [name, _] : writes) {
-      auto it = snapshot.find(name);
-      if (it == snapshot.end()) {
-        pin_map_.erase(name);
+    auto restore = std::move(branch_restore_.back());
+    branch_restore_.pop_back();
+    for (const auto& [name, old_val] : restore) {
+      if (old_val.has_value()) {
+        pin_map_[name] = *old_val;
       } else {
-        pin_map_[name] = it->second;
+        pin_map_.erase(name);
       }
     }
     return writes;
@@ -3200,6 +3214,10 @@ private:
   bool                                                          tget_final_ = false;
   absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> range_map_;
   std::vector<WriteMap>                                         branch_writes_;
+  // Parallel to branch_writes_: per active branch, the pre-branch value of each
+  // name it wrote (nullopt = absent before the branch). lower_branch replays
+  // this to roll pin_map_ back, avoiding a full per-branch copy of pin_map_.
+  std::vector<absl::flat_hash_map<std::string, std::optional<Pin>>> branch_restore_;
   std::vector<std::string>                                      out_names_;
   WriteMap                                                      empty_writes_;
 
