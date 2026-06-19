@@ -52,6 +52,10 @@ struct Options {
   std::vector<Typed_path> libs;
 
   std::string top;
+  // Shared across every pass that wants determinism (e.g. pass.color mincut):
+  // the `lhd.seed` kernel field, set via `--set lhd.seed=N` (default 0). One
+  // seed for the whole run rather than a per-pass `pass.X.seed` option.
+  std::string seed = "0";
   // Verilog front-end. Default `slang` — the direct inou.slang SV -> LNAST
   // front-end, so verilog joins the pyrope flow (ln:/lg: emits, in-process
   // lec). `--reader yosys-slang|yosys-verilog` overrides to the yosys path

@@ -19,6 +19,33 @@
   queries and the <code>prpfmt</code> formatter are a separate project). Phase A has
   landed; B–E remain.</p>
 
+<h2>Feature coverage — the Claude Code <code>LSP</code> tool list</h2>
+<p>The six operations the agent's <code>LSP</code> tool drives, mapped to the wire method,
+  the <code>ServerCapabilities</code> flag that gates each, the phase that lands it, and
+  today's status (audited 2026-06-18 against <code>lsp/livehd_lsp.cpp</code>). Only
+  diagnostics exists; the other five are <strong>entirely absent</strong> — not stubbed.</p>
+<table>
+<tr><th>Feature</th><th>LSP method</th><th>provider flag</th><th>phase</th><th>status</th></tr>
+<tr><td><code>getDiagnostics</code></td><td><code>textDocument/diagnostic</code> + push <code>publishDiagnostics</code></td><td><code>diagnosticProvider</code></td><td>A</td><td><span class="status landed">landed</span></td></tr>
+<tr><td><code>hover</code></td><td><code>textDocument/hover</code></td><td><code>hoverProvider</code></td><td>B</td><td><span class="status">missing</span></td></tr>
+<tr><td><code>documentSymbol</code></td><td><code>textDocument/documentSymbol</code></td><td><code>documentSymbolProvider</code></td><td>B</td><td><span class="status">missing</span></td></tr>
+<tr><td><code>goToDefinition</code></td><td><code>textDocument/definition</code></td><td><code>definitionProvider</code></td><td>C</td><td><span class="status">missing</span></td></tr>
+<tr><td><code>findReferences</code></td><td><code>textDocument/references</code></td><td><code>referencesProvider</code></td><td>C</td><td><span class="status">missing</span></td></tr>
+<tr><td><code>workspaceSymbol</code></td><td><code>workspace/symbol</code></td><td><code>workspaceSymbolProvider</code></td><td>D</td><td><span class="status">missing</span></td></tr>
+</table>
+<p>Today <code>handle_initialize</code> advertises only <code>textDocumentSync</code> +
+  <code>diagnosticProvider</code>, and the <code>run_stdio</code> dispatch handles only lifecycle +
+  <code>did{Open,Change,Save,Close}</code> + <code>textDocument/diagnostic</code>; <strong>any other
+  request carrying an <code>id</code> falls through to <code>-32601 MethodNotFound</code></strong>
+  (<code>respond_method_not_found</code>). Each missing feature therefore needs two coupled
+  edits: (a) flip its provider flag in <code>handle_initialize</code>, and (b) add its handler
+  to the dispatch. <strong>Flag and handler land together</strong> — advertising a provider with
+  no handler is a protocol bug (the client surfaces a dead action, then errors on
+  use). All five also share one foundation the diagnostics path never needed: a
+  <strong>position→node resolver</strong> (cursor → the identifier/def node at that span), since
+  analysis today keeps only <code>uri→text</code> (<code>g_docs</code>) and discards the parse/LNAST
+  after collecting diagnostics. Build that once (Phase B) and B–D are incremental.</p>
+
 <h2>Depends on</h2>
 <ul>
 <li><strong>1f</strong> (landed 2026-06-10) — diagnostic spans sharpen once
@@ -27,16 +54,29 @@
 </ul>
 
 <h2>Subtasks — pending</h2>
+<p>Phases match §10 and the coverage table above. The shared prerequisite for B–D
+  is the <strong>position→node resolver</strong> + a kept-alive <code>Prp2lnast</code> per document
+  (the converter currently gut-moves its LNAST out and is destroyed on the stack,
+  §3); land that with B, then C/D are incremental.</p>
 <ul class="subtasks">
-<li><strong>B — hover.</strong> Reads <code>bw_meta().ranges[name]</code> + typecheck kind
-  + declared type; needs the public accessors / kept-alive instance.</li>
-<li><strong>C — go-to-definition / references.</strong> references reuses
-  <code>read_sites_</code>; definition needs the new name→def index.</li>
-<li><strong>D — document symbols.</strong> documentSymbol (and workspaceSymbol + call
-  hierarchy as they follow).</li>
-<li><strong>E — workspace features.</strong> Packaging polish, the <code>.lsp.json</code>
-  plugin + install recipe, neovim pointer, and fold into <code>livehd lsp</code> when the
-  agent CLI lands.</li>
+<li><strong>B — hover + documentSymbol</strong> (flip <code>hoverProvider</code> +
+  <code>documentSymbolProvider</code>). <code>hover</code> reads <code>bw_meta().ranges[name]</code> +
+  typecheck kind + declared type at the cursor; <code>documentSymbol</code> walks the
+  LNAST <code>func_def</code>/declare/register/IO nodes into a symbol tree. Both need the
+  public accessors / kept-alive instance. <em>Test:</em>
+  <code>lsp_cli.py f.prp hover L C</code> / <code>documentSymbol</code> + new
+  <code>lhd_lsp_test</code> assertions.</li>
+<li><strong>C — goToDefinition + findReferences</strong> (flip <code>definitionProvider</code> +
+  <code>referencesProvider</code>). <code>references</code> reuses <code>read_sites_</code> (callee gap, §3);
+  <code>definition</code> needs the <strong>new</strong> name→def index (§3/§10). <em>Test:</em>
+  <code>lsp_cli.py f.prp definition L C</code> / <code>references L C</code>.</li>
+<li><strong>D — workspaceSymbol</strong> (flip <code>workspaceSymbolProvider</code>; call hierarchy
+  follows). documentSymbol indexed across the workspace <code>.prp</code> set — gated on the
+  workspace model (§12: single-file vs workspace-folder). <em>Test:</em>
+  <code>lsp_cli.py f.prp workspaceSymbol QUERY</code>.</li>
+<li><strong>E — packaging / workspace polish.</strong> The <code>.lsp.json</code> plugin + install
+  recipe, neovim pointer, debounced <code>didChange</code>, and fold into <code>livehd lsp</code>
+  when the agent CLI lands.</li>
 </ul>
 
 <h2>Subtasks — landed</h2>
@@ -45,6 +85,67 @@
   Lifecycle, <code>textDocumentSync</code> Full,
   <code>didOpen</code>/<code>didChange</code>/<code>didSave</code>/<code>didClose</code>,
   <code>publishDiagnostics</code> push + pull, <code>positionEncoding</code>.</li>
+</ul>
+
+<h2>Command-line testing</h2>
+<p>The server is plain JSON-RPC over stdio (Content-Length framing), so every
+  feature is exercisable from a shell — pipe framed requests into
+  <code>lhd pyrope lsp</code> and read the framed replies, no editor required. Two
+  harnesses live in <code>lhd/tests/</code>:</p>
+<ul>
+<li><strong>Automated regression — <code>lhd/tests/lhd_lsp_test.py</code></strong>
+  (bazel <code>//lhd/tests:lhd_lsp_test</code>). Drives a full lifecycle
+  (<code>initialize</code> negotiates utf-8 + pull diagnostics,
+  <code>didOpen</code>/<code>didChange</code>/<code>didSave</code>/<code>didClose</code>), asserts a broken
+  <code>.prp</code> yields an error diagnostic with a span and a fixed buffer clears it,
+  and that an unknown request returns <code>-32601</code>. <strong>Each new phase extends this
+  file</strong>: (1) assert <code>initialize</code> now advertises the phase's provider flag, (2)
+  fire the request against a known buffer, (3) assert the response shape. It is
+  the regression gate for B–D.</li>
+<li><strong>Interactive driver — <code>lhd/tests/lsp_cli.py</code></strong>. Fires ONE feature
+  request at a <code>.prp</code> buffer and prints the raw JSON reply (after first printing
+  the negotiated <code>capabilities</code>, so you can see which providers are on). It runs
+  the whole <code>initialize → didOpen → request → shutdown → exit</code> session for you
+  and <strong>exits non-zero when the server answers <code>MethodNotFound</code></strong> — i.e. the
+  feature isn't wired yet. <code>LINE</code>/<code>COL</code> are 0-based LSP wire coordinates
+  (line 0 = first line); the binary is <code>$LHD</code>, else <code>./bazel-bin/lhd/lhd</code>.</li>
+</ul>
+<pre><code>bazel build //lhd:lhd          # build the server once
+
+# diagnostics (works today) — a clean file reports empty items
+python3 lhd/tests/lsp_cli.py foo.prp diagnostic
+
+# the five pending features (each returns MethodNotFound until its phase lands):
+python3 lhd/tests/lsp_cli.py foo.prp hover           3 8    # textDocument/hover
+python3 lhd/tests/lsp_cli.py foo.prp documentSymbol         # textDocument/documentSymbol
+python3 lhd/tests/lsp_cli.py foo.prp definition      5 2    # textDocument/definition
+python3 lhd/tests/lsp_cli.py foo.prp references       5 2   # textDocument/references
+python3 lhd/tests/lsp_cli.py foo.prp workspaceSymbol myname # workspace/symbol
+
+# regression suite
+bazel test //lhd/tests:lhd_lsp_test
+</code></pre>
+<p>The raw wire form the driver sends (for a one-off check without the helper — a
+  single framed request after <code>initialize</code> + <code>didOpen</code>):</p>
+<pre><code>Content-Length: 130
+
+{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{
+  "textDocument":{"uri":"file:///abs/foo.prp"},"position":{"line":3,"character":8}}}
+</code></pre>
+<p><strong>Acceptance per feature</strong> — what the driver (and the extended bazel test)
+  should show once the phase lands:</p>
+<ul>
+<li><code>hover</code> → <code>{contents, range}</code> at a name position carrying the variable's
+  typecheck kind + bitwidth range (e.g. <code>a : u8  (0..255)</code> from
+  <code>bw_meta().ranges[name]</code>); <code>null</code> off a name.</li>
+<li><code>documentSymbol</code> → a tree of <code>{name, kind, range, selectionRange}</code> over the
+  file's <code>func_def</code>/declare/register/IO nodes.</li>
+<li><code>definition</code> → the <code>Location</code> of the declaration of the name under the
+  cursor (same buffer for v1; needs the new name→def index, §3/§10).</li>
+<li><code>references</code> → <code>Location[]</code> of every read of that name (from
+  <code>read_sites_</code>; the <code>func_call</code>-callee gap is noted in §3).</li>
+<li><code>workspaceSymbol</code> → matching symbols across the indexed <code>.prp</code> set (gated on
+  the workspace model, §12).</li>
 </ul>
 
 <h2>Design notes</h2>

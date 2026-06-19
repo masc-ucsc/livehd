@@ -374,23 +374,25 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
 // The set-name is the command-path namespace the option is reached under
 // (2h-set_path): standalone `lhd pass <sub>` commands take `pass.<sub>.*`,
 // `lhd lec` is a top-level command so it keeps `lec.*`, and the passes that
-// only run inside a recipe (upass/cprop/bitwidth/cgen — no bare command word
-// to anchor them) keep their short method-derived names. canonical_set_key()
+// only run inside `lhd compile` (upass/cprop/bitwidth/cgen/prp_writer — no
+// bare command word of their own) live under the `compile.*` namespace so the
+// option's owning command is always its leading segment. canonical_set_key()
 // lets a user drop any leading segment the command words to the left already
-// supply, so `--set pass.abc.adder`, `--set abc.adder` (after `pass`) and
-// `--set adder` (after `pass abc`) all resolve here to `pass.abc`.
+// supply, so after `lhd compile` `--set compile.cprop.hier`, `--set cprop.hier`
+// both resolve to `compile.cprop`, and after `lhd pass abc` `--set pass.abc.adder`,
+// `--set abc.adder`, `--set adder` all resolve to `pass.abc`.
 constexpr std::pair<std::string_view, std::string_view> kSetPasses[] = {
-    {         "upass",        "pass.upass"},
-    {         "cprop",        "pass.cprop"},
-    {      "bitwidth",     "pass.bitwidth"},
-    {          "cgen", "inou.cgen.verilog"},
-    {    "pass.color",        "pass.color"},
-    {"pass.partition",    "pass.partition"},
-    {      "pass.abc",          "pass.abc"},
-    {  "pass.liberty",      "pass.liberty"},
-    {           "lec",          "pass.lec"},
-    {  "pass.semdiff",      "pass.semdiff"},
-    {    "prp_writer",    "pass.prp_writer"},
+    {        "compile.upass",        "pass.upass"},
+    {        "compile.cprop",        "pass.cprop"},
+    {     "compile.bitwidth",     "pass.bitwidth"},
+    {         "compile.cgen", "inou.cgen.verilog"},
+    {   "compile.prp_writer",   "pass.prp_writer"},
+    {           "pass.color",        "pass.color"},
+    {       "pass.partition",    "pass.partition"},
+    {             "pass.abc",          "pass.abc"},
+    {         "pass.liberty",      "pass.liberty"},
+    {                  "lec",          "pass.lec"},
+    {         "pass.semdiff",      "pass.semdiff"},
 };
 
 std::string_view set_pass_method(std::string_view set_name) {
@@ -459,6 +461,17 @@ void check_known_set_passes(const Options& opts) {
       }
       continue;
     }
+    if (pass == "lhd") {
+      // The `lhd.*` kernel namespace: shared, cross-pass settings folded into
+      // Options by apply_lhd_settings (not consumed by any single pass). Keep
+      // this list in sync with apply_lhd_settings / list_set_options.
+      if (flag != "seed" && flag != "top") {
+        throw Lhd_error{"usage",
+                        std::format("--set/--config references unknown kernel flag 'lhd.{}'", flag),
+                        "the lhd.* namespace takes: seed, top (`lhd list options lhd`)"};
+      }
+      continue;
+    }
     auto method = set_pass_method(pass);
     if (method.empty()) {
       std::string known;
@@ -503,6 +516,22 @@ void apply_log_settings(const Options& opts) {
   }
 }
 
+// Fold the `lhd.*` kernel namespace (shared, cross-pass settings) into Options.
+// `lhd.seed` is the one RNG seed shared by every pass that wants determinism;
+// `lhd.top` is an alias for the `--top` flag (the dedicated flag wins when both
+// are given). Validated by check_known_set_passes; the keys stay in opts.sets
+// (so they still hash into run_id) and merge_sets never copies them into a
+// pass (their `pass` is "lhd", which matches no pass name).
+void apply_lhd_settings(Options& opts) {
+  for (const auto& [key, value] : opts.sets) {
+    if (key == "lhd.seed") {
+      opts.seed = value;
+    } else if (key == "lhd.top" && opts.top.empty()) {
+      opts.top = value;
+    }
+  }
+}
+
 // Recipe name -> ordered (set-name, EPRP method) graph passes.
 std::vector<std::pair<std::string, std::string>> recipe_graph_passes(const Options& opts, std::string_view def) {
   std::string r = opts.recipe.empty() ? std::string{def} : opts.recipe;
@@ -511,13 +540,13 @@ std::vector<std::pair<std::string, std::string>> recipe_graph_passes(const Optio
   }
   if (r == "O1") {
     return {
-        {"cprop", "pass.cprop"}
+        {"compile.cprop", "pass.cprop"}
     };
   }
   if (r == "O2") {
     return {
-        {   "cprop",    "pass.cprop"},
-        {"bitwidth", "pass.bitwidth"}
+        {   "compile.cprop",    "pass.cprop"},
+        {"compile.bitwidth", "pass.bitwidth"}
     };
   }
   throw Lhd_error{"usage", std::format("unknown recipe '{}'", r), "built-in recipes: O0, O1, O2 (`lhd list recipes`)"};
@@ -774,7 +803,7 @@ std::vector<std::string> cgen_into(Options& opts, Result& res, Eprp_var& var, co
   if (default_srcmap) {
     labels["srcmap"] = "1";
   }
-  merge_sets(opts, "cgen", labels);  // user --set cgen.srcmap=... overrides the seeded default
+  merge_sets(opts, "compile.cgen", labels);  // user --set compile.cgen.srcmap=... overrides the seeded default
   run_step("inou.cgen.verilog", var, labels, opts, res);
 
   std::vector<std::string> names;
@@ -855,7 +884,7 @@ void emit_pyrope_outputs(Options& opts, Result& res, Eprp_var& var) {
     ensure_dir(e.path);
     Eprp_var::Eprp_dict labels;
     labels["odir"] = e.path;
-    merge_sets(opts, "prp_writer", labels);  // e.g. --set prp_writer.debug=true
+    merge_sets(opts, "compile.prp_writer", labels);  // e.g. --set compile.prp_writer.debug=true
     run_step("pass.prp_writer", var, labels, opts, res);
 
     std::vector<std::string> names;
@@ -910,7 +939,7 @@ void emit_pyrope_single_file(Options& opts, Result& res, Eprp_var& var) {
   ensure_dir(scratch);
   Eprp_var::Eprp_dict labels;
   labels["odir"] = scratch;
-  merge_sets(opts, "prp_writer", labels);  // e.g. --set prp_writer.debug=true
+  merge_sets(opts, "compile.prp_writer", labels);  // e.g. --set compile.prp_writer.debug=true
   run_step("pass.prp_writer", var, labels, opts, res);
   auto          src = std::format("{}/{}.prp", scratch, names.front());
   std::ifstream ifs(src);
@@ -1780,7 +1809,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   if (!need_graphs && !emits_need_lnast(opts)) {
     up["toln"] = "0";
   }
-  merge_sets(opts, "upass", up);
+  merge_sets(opts, "compile.upass", up);
 
   // A user `--set upass.toln=0` keeps each tree's original (post-lnastfmt,
   // pre-upass-rewrite) body in var.lnasts instead of the rewritten one, so
@@ -1790,7 +1819,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   // tree, so it is a diagnostics/debug or unexpected flow — flag it.
   bool user_toln_off = false;
   for (const auto& [key, value] : opts.sets) {
-    if (key == "upass.toln" && (value == "0" || value == "false")) {
+    if (key == "compile.upass.toln" && (value == "0" || value == "false")) {
       user_toln_off = true;
     }
   }
@@ -2716,7 +2745,8 @@ void pass_command(Options& opts, Result& res) {
       throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};
     }
     Eprp_var::Eprp_dict labels;
-    labels["alg"] = alg;
+    labels["alg"]  = alg;
+    labels["seed"] = opts.seed;  // the shared `lhd.seed` (mincut RNG); no per-pass seed option
     if (!opts.top.empty()) {
       labels["top"] = opts.top;
     }
@@ -3740,6 +3770,13 @@ void tool_command(Options& opts, Result& res) {
 // check_known_set_passes still emits the standard unknown-pass error. Uses
 // only the constexpr kSetPasses table, so it is safe before init_engine().
 std::string canonical_set_key(std::string_view key, std::string_view ctx) {
+  // `<channel>.log=<level>` is the developer-logging namespace (livehd::log),
+  // orthogonal to the pass-flag registry — a channel name (e.g. `upass`,
+  // `cprop`) is NOT a pass name, so it must never collect a command-path
+  // prefix. Leave any `.log` key verbatim for apply_log_settings.
+  if (key.size() > 4 && key.substr(key.size() - 4) == ".log") {
+    return std::string{key};
+  }
   auto names_a_pass = [](std::string_view candidate) {
     auto pos = candidate.rfind('.');
     return pos != std::string_view::npos && !set_pass_method(candidate.substr(0, pos)).empty();
@@ -3799,6 +3836,13 @@ std::vector<Set_option> list_set_options() {
       out.push_back(Set_option{std::format("{}.{}", set_name, flag), std::string{method}, attr.default_value, attr.help});
     }
   }
+  // The `lhd.*` kernel namespace: shared, cross-pass settings the kernel folds
+  // into Options (apply_lhd_settings), not labels of any single EPRP method.
+  // Keep in sync with check_known_set_passes / apply_lhd_settings.
+  out.push_back(Set_option{"lhd.seed", "lhd", "0",
+                           "shared RNG seed for every pass that wants determinism (e.g. pass.color mincut); one seed per run"});
+  out.push_back(Set_option{"lhd.top", "lhd", "",
+                           "top module shared across passes; the canonical form of the --top flag (the flag wins if both are given)"});
   std::sort(out.begin(), out.end(), [](const Set_option& a, const Set_option& b) { return a.name < b.name; });
   return out;
 }
@@ -3808,6 +3852,7 @@ void run_engine_command(Options& opts, Result& res) {
   validate_dumps(opts);
   check_known_set_passes(opts);  // --set AND --config table names: a typo'd pass must error, not no-op
   apply_log_settings(opts);      // --set <channel>.log=<level> -> livehd::log (developer logging)
+  apply_lhd_settings(opts);      // --set lhd.seed / lhd.top -> the shared kernel Options fields
 
   // --depfile is supported on both frontends: the Verilog flow lists its
   // declared inputs, and the Pyrope flow additionally folds in every file the

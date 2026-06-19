@@ -18,7 +18,8 @@ Pass_abc::Pass_abc(const Eprp_var& var) : Pass("pass.abc", var) {}
 
 void Pass_abc::setup() {
   Eprp_method m("pass.abc", "Technology-map each colored region to a standard-cell netlist (ABC)", &Pass_abc::work);
-  m.add_label_optional("top", "top module whose coloring is mapped", "");
+  // The top module is the shared kernel `--top` flag (lhd plumbs it into the
+  // `top` label), not a per-pass --set option.
   m.add_label_optional("out", "output graph_library directory (the --emit-dir lg: slot)", "");
   m.add_label_optional("library", "Liberty .lib for read_lib (default $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib)", "");
   m.add_label_optional(

@@ -272,10 +272,13 @@ void load_config(Options& opts) {
       file_recipe = value;
       continue;
     }
-    // Canonicalize against the empty context: a config table name is already a
-    // full command-path namespace (2h-set_path), so this is a no-op for known
-    // passes and leaves an unknown one for check_known_set_passes to reject.
-    file_sets.emplace_back(canonical_set_key(std::format("{}.{}", table, key), ""), value);
+    // Canonicalize against the `compile` context: a config table is portable
+    // across commands, so a bare compile-pass table ([cprop]/[upass]/[cgen]…)
+    // resolves to its `compile.*` namespace just as `lhd compile --set cprop.x`
+    // does, while a fully-qualified table ([compile.cprop], [pass.abc], [lec])
+    // passes through unchanged. An unknown table is left for
+    // check_known_set_passes to reject.
+    file_sets.emplace_back(canonical_set_key(std::format("{}.{}", table, key), "compile"), value);
   }
 
   // File entries are defaults: prepend so later (CLI) --set entries overwrite

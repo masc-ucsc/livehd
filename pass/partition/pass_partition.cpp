@@ -35,7 +35,8 @@ Pass_partition::Pass_partition(const Eprp_var& var) : Pass("pass.partition", var
 
 void Pass_partition::setup() {
   Eprp_method m("pass.partition", "Build a new graph_library from the active coloring (one module per region)", &Pass_partition::partition);
-  m.add_label_optional("top", "top module whose coloring is partitioned", "");
+  // The top module is the shared kernel `--top` flag (lhd plumbs it into the
+  // `top` label), not a per-pass --set option.
   m.add_label_optional("out", "output graph_library directory (the --emit-dir lg: slot)", "");
   m.add_label_optional("debug_color", "diagnose same-color region interface mismatches", "false");
   register_pass(m);

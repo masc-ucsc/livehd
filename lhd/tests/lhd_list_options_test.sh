@@ -26,36 +26,52 @@ case "$out" in
   '{"schema_version":1,"pattern":"options"'*) ;;
   *) fail "piped list options must be the JSON line: $out" ;;
 esac
-echo "$out" | grep -q '"name":"cgen.srcmap"' || fail "cgen.srcmap missing: $out"
-echo "$out" | grep -q '"name":"upass.verifier"' || fail "upass.verifier missing: $out"
-echo "$out" | grep -q '"name":"upass.reset_style","method":"pass.upass","default":"sync"' \
+echo "$out" | grep -q '"name":"compile.cgen.srcmap"' || fail "compile.cgen.srcmap missing: $out"
+echo "$out" | grep -q '"name":"compile.upass.verifier"' || fail "compile.upass.verifier missing: $out"
+echo "$out" | grep -q '"name":"compile.upass.reset_style","method":"pass.upass","default":"sync"' \
   || fail "reset_style default/method missing: $out"
-echo "$out" | grep -q '"name":"cgen.odir"' && fail "kernel-managed odir must not be listed: $out"
+echo "$out" | grep -q '"name":"compile.cgen.odir"' && fail "kernel-managed odir must not be listed: $out"
+# Compile-only passes live under compile.*; lec/pass passes keep their own namespace.
+echo "$out" | grep -q '"name":"compile.cprop.hier"' || fail "compile.cprop.hier missing: $out"
+echo "$out" | grep -q '"name":"compile.bitwidth.max_iterations"' || fail "compile.bitwidth.* missing: $out"
+echo "$out" | grep -q '"name":"compile.prp_writer.debug"' || fail "compile.prp_writer.debug missing: $out"
+echo "$out" | grep -q '"name":"lec.solver"' || fail "lec.solver must stay top-level: $out"
+# The shared lhd.* kernel namespace (seed); the old per-pass top/seed are gone.
+echo "$out" | grep -q '"name":"lhd.seed"' || fail "shared lhd.seed missing: $out"
+echo "$out" | grep -q '"name":"pass.color.seed"' && fail "per-pass pass.color.seed must be gone (use lhd.seed): $out"
+echo "$out" | grep -q '"name":"pass.color.top"' && fail "per-pass pass.color.top must be gone (use --top): $out"
+echo "$out" | grep -q '"name":"pass.abc.top"' && fail "per-pass pass.abc.top must be gone (use --top): $out"
+echo "$out" | grep -q '"name":"pass.partition.top"' && fail "per-pass pass.partition.top must be gone (use --top): $out"
 
 # 2. The options pattern is advertised.
 "$LHD" list | grep -q '"name":"options"' || fail "bare lhd list must advertise the options pattern"
 
 # 3. --diag-fmt pretty: one `pass.flag=default  # help` line each.
 out=$("$LHD" list options --diag-fmt pretty)
-echo "$out" | grep -q '^cgen\.srcmap=false  *# emit an ECMA-426' || fail "pretty cgen.srcmap line missing: $out"
+echo "$out" | grep -q '^compile\.cgen\.srcmap=false  *# emit an ECMA-426' || fail "pretty compile.cgen.srcmap line missing: $out"
 echo "$out" | grep -q 'schema_version' && fail "pretty leaked JSON: $out"
 
 # 4. REGEX filter (regex_search over pass.flag names).
-out=$("$LHD" list options 'cgen\..*' --diag-fmt pretty)
-echo "$out" | grep -q '^cgen\.srcmap=' || fail "filter dropped cgen.srcmap: $out"
-echo "$out" | grep -q '^upass\.' && fail "filter leaked non-cgen options: $out"
+out=$("$LHD" list options 'compile\.cgen\..*' --diag-fmt pretty)
+echo "$out" | grep -q '^compile\.cgen\.srcmap=' || fail "filter dropped compile.cgen.srcmap: $out"
+echo "$out" | grep -q '^compile\.upass\.' && fail "filter leaked non-cgen options: $out"
 "$LHD" list options '[' >/dev/null 2>"$W/e4" && fail "a bad regex must fail"
 grep -q 'bad regex' "$W/e4" || fail "bad-regex error text missing: $(cat "$W/e4")"
 
 # 5. describe pass.flag: full help. jsonl when piped, prose with --diag-fmt pretty.
+#    An abbreviated key resolves to its compile.* namespace (2h-set_path), so
+#    `describe cgen.srcmap` still works and reports the canonical name.
 out=$("$LHD" describe cgen.srcmap)
 echo "$out" | grep -q '"kind":"option"' || fail "describe jsonl kind missing: $out"
+echo "$out" | grep -q '"name":"compile.cgen.srcmap"' || fail "describe must report the canonical name: $out"
 echo "$out" | grep -q '"method":"inou.cgen.verilog"' || fail "describe jsonl method missing: $out"
 out=$("$LHD" describe upass.toln --diag-fmt pretty)
-echo "$out" | grep -q 'upass.toln = true' || fail "describe pretty header missing: $out"
+echo "$out" | grep -q 'compile.upass.toln = true' || fail "describe pretty header missing: $out"
 echo "$out" | grep -q 'forced back on while tolg:1' || fail "describe pretty must show the FULL help: $out"
 "$LHD" describe cgen.bogus 2>"$W/e5" && fail "describe of an unknown flag must fail"
-grep -q "lhd list options cgen" "$W/e5" || fail "describe unknown-flag hint missing: $(cat "$W/e5")"
+grep -q "lhd list options compile.cgen" "$W/e5" || fail "describe unknown-flag hint missing: $(cat "$W/e5")"
+# The shared lhd.* namespace describes too.
+"$LHD" describe lhd.seed | grep -q '"name":"lhd.seed"' || fail "describe lhd.seed missing"
 
 # 6. --set validation: unknown pass, unknown flag, kernel-managed flag — all
 #    usage errors (envelope on stdout), checked before any work runs.
@@ -63,7 +79,7 @@ grep -q "lhd list options cgen" "$W/e5" || fail "describe unknown-flag hint miss
 grep -q '"class":"usage"' "$W/r6a.json" || fail "unknown pass must be a usage error: $(cat "$W/r6a.json")"
 grep -q "unknown pass 'foo'" "$W/r6a.json" || fail "unknown-pass message missing: $(cat "$W/r6a.json")"
 "$LHD" compile "$PRP" --set cgen.bogus=1 --workdir "$W/w6b" -q >"$W/r6b.json" 2>/dev/null && fail "--set cgen.bogus must fail"
-grep -q "unknown flag 'bogus' of pass 'cgen'" "$W/r6b.json" || fail "unknown-flag message missing: $(cat "$W/r6b.json")"
+grep -q "unknown flag 'bogus' of pass 'compile.cgen'" "$W/r6b.json" || fail "unknown-flag message missing: $(cat "$W/r6b.json")"
 "$LHD" compile "$PRP" --set cgen.odir=/tmp/zz --workdir "$W/w6c" -q >"$W/r6c.json" 2>/dev/null && fail "--set cgen.odir must fail"
 grep -q 'kernel-managed' "$W/r6c.json" || fail "kernel-managed message missing: $(cat "$W/r6c.json")"
 
@@ -73,7 +89,7 @@ cat >"$W/bad.toml" <<'EOF'
 bogus = true
 EOF
 "$LHD" compile "$PRP" --config "$W/bad.toml" --workdir "$W/w7" -q >"$W/r7.json" 2>/dev/null && fail "config typo must fail"
-grep -q "unknown flag 'bogus' of pass 'cgen'" "$W/r7.json" || fail "config typo message missing: $(cat "$W/r7.json")"
+grep -q "unknown flag 'bogus' of pass 'compile.cgen'" "$W/r7.json" || fail "config typo message missing: $(cat "$W/r7.json")"
 
 # 8. Listed flags really are settable end-to-end.
 "$LHD" compile "$PRP" --set cgen.srcmap=1 --set upass.verifier=false --emit-dir verilog:"$W/v8" --workdir "$W/w8" -q \
@@ -83,8 +99,8 @@ ls "$W"/v8/*.v.map >/dev/null 2>&1 || fail "cgen.srcmap=1 must still produce the
 # 9. Flag-order freedom: shared flags may come before the command word, with
 #    value-taking flags keeping their value; the run_id must not depend on
 #    flag order. The optional language word also survives intervening flags.
-out=$("$LHD" --diag-fmt pretty list options 'cgen\..*')
-echo "$out" | grep -q '^cgen\.srcmap=' || fail "flags-before-command list options failed: $out"
+out=$("$LHD" --diag-fmt pretty list options 'compile\.cgen\..*')
+echo "$out" | grep -q '^compile\.cgen\.srcmap=' || fail "flags-before-command list options failed: $out"
 "$LHD" --workdir "$W/w9a" -q compile "$PRP" >"$W/r9a.json" 2>/dev/null || fail "flags-before-command compile failed"
 "$LHD" compile "$PRP" --workdir "$W/w9b" -q >"$W/r9b.json" 2>/dev/null || fail "flags-after-command compile failed"
 id_a=$(sed 's/.*"run_id":"\([^"]*\)".*/\1/' "$W/r9a.json")

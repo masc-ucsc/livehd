@@ -358,9 +358,12 @@ int describe_command(const Options& opts) {
   }
 
   // `lhd describe pass.flag` — a --set/--config option (after the named
-  // commands above are not --set/--config options).
+  // commands above are not --set/--config options). Canonicalize against the
+  // `compile` context first, so an abbreviated key (`cgen.srcmap`,
+  // `upass.verifier`) resolves to its `compile.*` namespace just like
+  // `lhd compile --set` does (2h-set_path).
   if (name.find('.') != std::string::npos) {
-    int rc = describe_option(opts, name);
+    int rc = describe_option(opts, canonical_set_key(name, "compile"));
     if (rc >= 0) {
       return rc;
     }
@@ -471,9 +474,9 @@ void print_general_help() {
       "               lhd pass abc --top m lg:dir --emit-dir lg:net\n"
       "               lhd pass semdiff --ref lg:gold --impl lg:opt --top adder   # structural diff/match\n"
       "  list       steps | recipes | emit-kinds | error-classes | options [REGEX]\n"
-      "               lhd list options 'cgen\\..*'   # the --set/--config pass.flag vocabulary\n"
+      "               lhd list options 'compile\\..*'   # the --set/--config pass.flag vocabulary\n"
       "  describe   <command | recipe:NAME | emit-kind | pass.flag | dump | config>  (the JSON form)\n"
-      "               lhd describe cgen.srcmap      # one option, full help text\n"
+      "               lhd describe compile.cgen.srcmap   # one option, full help text\n"
       "  version | help [command]\n"
       "\n"
       "per-command help:  lhd <command> --help   (== `lhd help <command>`; lists that command's\n"
@@ -690,7 +693,7 @@ int help_command(const Options& opts) {
         "  lhd compile x.prp --emit-dir ln:x_lns/        # pre-elaborate for importers\n"
         "  lhd compile ln:x_lns/ --emit verilog:net.v    # synth from IR\n"
         "  lhd compile lg:foo_lgs/ --emit-dir lg:foo_opt_lgs/\n");
-    return print_options_section({"upass.", "cprop.", "bitwidth.", "cgen."});
+    return print_options_section({"compile."});
   }
   if (topic == "lec") {
     std::print(
@@ -805,7 +808,7 @@ int help_command(const Options& opts) {
         "  For readable per-command help use `lhd help <command>` / `lhd <command> --help`.\n"
         "\n"
         "examples:\n"
-        "  lhd describe cgen.srcmap\n"
+        "  lhd describe compile.cgen.srcmap\n"
         "  lhd describe lec\n");
     return 0;
   }

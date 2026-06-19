@@ -23,7 +23,8 @@ Pass_color::Pass_color(const Eprp_var& var) : Pass("pass.color", var) {}
 void Pass_color::setup() {
   Eprp_method m("pass.color", "Hierarchical node coloring (acyclic|synth|path|mincut|clear)", &Pass_color::color);
   m.add_label_optional("alg", "algorithm: acyclic|synth|path|mincut|clear", "acyclic");
-  m.add_label_optional("top", "top module: anchors the coloring metadata + hierarchy walk", "");
+  // The top module is the shared kernel `--top` flag (lhd plumbs it into the
+  // `top` label), not a per-pass --set option.
   m.add_label_optional("hier", "color every unique def in the hierarchy (else only the top)", "true");
   m.add_label_optional("verbose", "print per-graph coloring statistics", "false");
   m.add_label_optional("compact", "write the flat per-def color (default; false = per-instance hier color)", "true");
@@ -31,7 +32,8 @@ void Pass_color::setup() {
   m.add_label_optional("keep_colored", "preserve pre-existing colors on nodes the algorithm leaves uncolored", "false");
   m.add_label_optional("cutoff", "acyclic: small-partition node-count merge cutoff", "1");
   m.add_label_optional("merge", "acyclic: enable same/one-parent partition merging", "false");
-  m.add_label_optional("seed", "mincut: RNG seed", "0");
+  // The mincut RNG seed is the shared kernel `lhd.seed` (lhd plumbs it into the
+  // `seed` label), not a per-pass --set option.
   m.add_label_optional("iters", "mincut: how many times to run the cut", "1");
   m.add_label_optional("mincut_alg", "mincut: VieCut algorithm (vc, cactus, ...)", "vc");
   m.add_label_optional("synth_alg", "synth: pipe|synth boundary mode", "synth");
