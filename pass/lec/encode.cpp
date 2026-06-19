@@ -97,12 +97,17 @@ int real_width(const hhds::Pin_class& pin) {
 }
 
 int real_width_io(const hhds::Pin_class& pin, const hhds::GraphIO& gio, std::string_view name) {
-  int b = gu::bits_of(pin, gio, name);
-  if (b == 0) {
-    return 0;
-  }
-  bool uns = pin.is_invalid() ? gio.is_unsign(name) : gu::is_unsign(pin);
-  return uns ? b - 1 : b;
+  // A module PORT's `bits` attribute is the LITERAL declared bus width
+  // (`[3:0]` -> 4), NOT the internal magnitude+1 convention that real_width()
+  // assumes for ordinary nets. A port therefore carries exactly `bits`
+  // observable bits regardless of sign; subtracting a "spare sign bit" here
+  // would drop a REAL data bit (e.g. a 4-bit `output [3:0] io_out` driven by a
+  // signed net 0b1010 got truncated to 0b010 = 2, a false PROVEN). cgen
+  // declares every port as `signed [bits-1:0]` (full `bits` width), so the
+  // encoder must use the same width or the lg: LEC and the re-emitted-Verilog
+  // LEC disagree on the same design. (Readers that disagree on a port's width
+  // by a sign-bit slot are still reconciled at the max width in query.cpp.)
+  return gu::bits_of(pin, gio, name);
 }
 
 // Extend / truncate a value to exactly `width` bits.
@@ -795,10 +800,16 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
           return fail("Sext position too wide (M1)");
         }
         int pos = static_cast<int>(posc.to_just_i64());
-        if (pos < 1 || pos > a.width) {
+        if (pos < 1) {
           return fail("Sext position out of range (M1)");
         }
-        Term low = (pos == a.width) ? a.term : bv_extract(tm_, a.term, pos - 1, 0);
+        // pos may exceed the operand's stored width: the bits at/above a.width
+        // are a's natural extension (sign-replicated if signed, else zero), so
+        // widen `a` to cover [0,pos) rather than failing on an out-of-range
+        // slice (mirrors the Get_mask handling above). fit() extends per a's
+        // sign, so a[pos-1] then reads the correct new sign bit.
+        Term aw  = (pos > a.width) ? fit(a, pos) : a.term;
+        Term low = (pos == a.width) ? a.term : bv_extract(tm_, aw, pos - 1, 0);
         if (W <= pos) {
           result = (W == pos) ? low : bv_extract(tm_, low, W - 1, 0);
         } else {

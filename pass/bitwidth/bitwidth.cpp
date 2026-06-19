@@ -148,9 +148,11 @@ void Bitwidth::do_trans(const std::shared_ptr<hhds::Graph>& g) {
     if (rit == bwmap.end() || rit->second.is_overflow()) {
       continue;
     }
-    I(rit->second.min >= 0,
+    const int64_t rmin = rit->second.min;  // hoist out of the (packed) map slot before std::format binds by ref
+    const int64_t rmax = rit->second.max;
+    I(rmin >= 0,
       std::format("bitwidth: pin '{}' declared unsigned but inferred range [{}..{}] is negative -- missing sext/zext/get_mask?",
-                  livehd::graph_util::wire_name(dpin), rit->second.min, rit->second.max)
+                  livehd::graph_util::wire_name(dpin), rmin, rmax)
           .c_str());
   }
 #endif

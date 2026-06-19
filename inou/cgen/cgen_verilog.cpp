@@ -48,6 +48,29 @@ namespace {
 
 using livehd::graph_util::hydrate_const;
 
+// Emit a constant as Verilog. hlop's Dlop::to_verilog() formats a NEGATIVE
+// value as its bare magnitude ("{n}'sh{mag}", dropping the sign), so it
+// re-reads as +mag (e.g. -6 -> "4'sh6" == +6, a silent miscompile that broke
+// signed mux arms / reset values). Re-emit a known negative as its
+// two's-complement hex at the declared width so the bit pattern round-trips
+// through a Verilog re-read. (Wide non-i64 negatives are rare and left to the
+// upstream path.)
+template <typename C>
+std::string const_to_verilog(const C& c) {
+  if (c.is_negative() && !c.has_unknowns() && c.is_just_i64()) {
+    int nbits = c.get_bits();
+    if (nbits < 1) {
+      nbits = 1;
+    }
+    uint64_t tc = static_cast<uint64_t>(c.to_just_i64());
+    if (nbits < 64) {
+      tc &= (uint64_t{1} << nbits) - 1;
+    }
+    return absl::StrCat(nbits, "'sh", absl::Hex(tc));
+  }
+  return c.to_verilog();
+}
+
 // Sort edges by sink port_id (for mux iteration).
 void sort_by_sink_pid(std::vector<hhds::Edge_class>& edges) {
   std::sort(edges.begin(), edges.end(), [](const hhds::Edge_class& a, const hhds::Edge_class& b) {
@@ -142,7 +165,7 @@ std::string Cgen_verilog::get_wire_or_const(const hhds::Pin_class& dpin) const {
   }
 
   if (is_const_pin(dpin)) {
-    return hydrate_const(dpin).to_verilog();
+    return const_to_verilog(hydrate_const(dpin));
   }
 
   return get_scaped_name(pin_wire_name(dpin));
@@ -202,7 +225,7 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) const {
   // registered. HHDS's get_pin_name resolves both to the declared name; fall
   // back to that so the emitted Verilog references the right wire.
   if (is_const_pin(dpin)) {
-    return hydrate_const(dpin).to_verilog();
+    return const_to_verilog(hydrate_const(dpin));
   }
   auto wn = pin_wire_name(dpin);
   if (!wn.empty()) {
@@ -578,7 +601,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
             .fatal();
         return;
       }
-      parameters = absl::StrCat(parameters, " ,.INIT_EN(1) ,.INIT(", hydrate_const(mem_init_dpin).to_verilog(), ")");
+      parameters = absl::StrCat(parameters, " ,.INIT_EN(1) ,.INIT(", const_to_verilog(hydrate_const(mem_init_dpin)), ")");
     }
     fout->append(" #(", parameters, ") ");
 
@@ -677,7 +700,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       const auto mask     = Dlop::get_mask_value(mem_bits);
       for (int i = 0; i < mem_size; ++i) {
         auto entry = init_val.sra_op(*Dlop::create_integer(static_cast<int64_t>(i) * mem_bits))->and_op(*mask);
-        fout->append(aname, "[", std::to_string(i), "] = ", entry->to_verilog(), ";\n");
+        fout->append(aname, "[", std::to_string(i), "] = ", const_to_verilog(*entry), ";\n");
       }
     } else {
       fout->append("for (mem_loop_i=0;mem_loop_i < ", std::to_string(mem_size), ";mem_loop_i = mem_loop_i + 1) begin\n");
@@ -1340,7 +1363,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
       if (is_const_pin(reset_dpin)) {
         auto reset_const = hydrate_const(reset_dpin);
         if (!reset_const.is_known_false() && !reset_const.same_repr(*Dlop::from_string("false"))) {
-          reset = reset_const.to_verilog();
+          reset = const_to_verilog(reset_const);
         }
       } else {
         reset = get_wire_or_const(reset_dpin);
@@ -1504,10 +1527,29 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, const hhds:
     reg_str = "reg signed ";
   }
 
-  if (bits <= 1) {
-    fout->append(reg_str, name, ";\n");
-  } else {
-    fout->append(reg_str, "[", std::to_string(bits - 1), ":0] ", name, ";\n");
+  // A combinational driver that feeds a module output directly is named after
+  // that output port, which create_module_io already declared as `output reg
+  // <name>`. Emitting a body `reg <name>` here re-declares it (a Verilog
+  // compile error). Keep the pin2var mapping (process_mux / consumers resolve
+  // the name; an `output reg` is itself readable) but skip the duplicate
+  // declaration. (The Sub/Memory output path instead renames to a dedicated
+  // net; a simple node keeps the port name and assigns it in place.)
+  bool redeclares_output = false;
+  if (!dpin.is_invalid()) {
+    for (auto e : dpin.out_edges()) {
+      if (is_graph_output_pin(e.sink) && get_scaped_name(pin_wire_name(e.sink)) == name) {
+        redeclares_output = true;
+        break;
+      }
+    }
+  }
+
+  if (!redeclares_output) {
+    if (bits <= 1) {
+      fout->append(reg_str, name, ";\n");
+    } else {
+      fout->append(reg_str, "[", std::to_string(bits - 1), ":0] ", name, ";\n");
+    }
   }
 
   if (!dpin.is_invalid() && is_type_flop(dpin.get_master_node())) {
@@ -1635,7 +1677,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
     } else if (op == Ntype_op::Set_mask) {
       add_to_pin2var(fout, dpin, name, false);
     } else if (op == Ntype_op::Nconst || is_const_pin(dpin)) {
-      auto final_expr = hydrate_const(dpin).to_verilog();
+      auto final_expr = const_to_verilog(hydrate_const(dpin));
       pin2expr.emplace(dpin.get_class_index(), Expr(final_expr, false));
     } else if (op == Ntype_op::Get_mask) {
       auto a_spin  = find_sink_pin(node, "a");
