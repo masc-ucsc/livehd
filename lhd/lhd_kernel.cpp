@@ -391,6 +391,8 @@ constexpr std::pair<std::string_view, std::string_view> kSetPasses[] = {
     {     "compile.bitwidth",     "pass.bitwidth"},
     {       "compile.formal",       "pass.formal"},
     {         "compile.cgen", "inou.cgen.verilog"},
+    {        "compile.yosys",    "inou.yosys.tolg"},
+    {     "compile.isabelle",      "pass.isabelle"},
     {   "compile.prp_writer",   "pass.prp_writer"},
     {           "pass.color",        "pass.color"},
     {       "pass.partition",    "pass.partition"},
@@ -888,6 +890,27 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
   }
 }
 
+void emit_isabelle_outputs(Options& opts, Result& res, Eprp_var& var) {
+  for (const auto& e : opts.emit_dirs) {
+    if (e.kind != "isabelle") {
+      continue;
+    }
+    if (var.graphs.empty()) {
+      throw Lhd_error{"config",
+                      "no LGraphs to emit as Isabelle",
+                      "the input produced no synthesizable modules"};
+    }
+    ensure_dir(e.path);
+    Eprp_var::Eprp_dict labels{{"path", e.path}};
+    if (!opts.top.empty()) {
+      labels["top"] = opts.top;
+    }
+    merge_sets(opts, "compile.isabelle", labels);
+    run_step("pass.isabelle", var, labels, opts, res);
+    res.outputs.push_back(e.path);
+  }
+}
+
 // Pyrope source emission (LNAST -> .prp via pass.prp_writer). Variable
 // cardinality is inherent (one .prp per unit), so only --emit-dir pyrope:DIR/
 // is supported; validate_emits rejects the single-file form.
@@ -1057,15 +1080,15 @@ void validate_emits(const Options& opts) {
   reject_emit_kind(opts, "graphviz", {"unsupported", "--emit graphviz: is not implemented yet", ""});
   reject_emit_kind(opts, "metadata", {"unsupported", "--emit metadata: is not implemented yet (needs [3c] hashes)", ""});
 
-  // ln:/lg:/lnast-dump: outputs are directory containers (a Forest dir, a
+  // ln:/lg:/lnast-dump:/isabelle: outputs are directory containers (a Forest dir, a
   // GraphLibrary dir, one file per unit) — directory form only, never a single
   // file. (pyrope: is allowed as a single file for a one-unit design; the
   // multi-unit check lives in emit_pyrope_single_file.)
   for (const auto& e : opts.emits) {
-    if (e.kind == "ln" || e.kind == "lg" || e.kind == "lnast-dump") {
+    if (e.kind == "ln" || e.kind == "lg" || e.kind == "lnast-dump" || e.kind == "isabelle") {
       throw Lhd_error{"usage",
                       std::format("--emit {0}:PATH is a directory container; use --emit-dir {0}:DIR/", e.kind),
-                      "ln: is a Forest save dir, lg: a GraphLibrary save dir, lnast-dump: one file per unit"};
+                      "ln: is a Forest save dir, lg: a GraphLibrary save dir, lnast-dump:/isabelle: one file per unit"};
     }
   }
 
@@ -1106,12 +1129,12 @@ void validate_emits(const Options& opts) {
   }
   if (opts.command == "lec" || is_pass_semdiff(opts)) {
     const std::string_view what = opts.command == "lec" ? "lec" : "pass semdiff";
-    for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump"}) {
+    for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump", "isabelle"}) {
       reject_emit_kind(opts, k, {"usage", std::format("{} has no outputs beyond the result", what), ""});
     }
   }
   if (opts.command == "tool") {
-    for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump"}) {
+    for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump", "isabelle"}) {
       reject_emit_kind(opts,
                        k,
                        {"usage",
@@ -1474,6 +1497,7 @@ std::string verilog_frontend(Options& opts, Result& res, Eprp_var& var) {
     }
     labels["slang_flags"] = joined;
   }
+  merge_sets(opts, "compile.yosys", labels);
 
   run_step("inou.yosys.tolg", var, labels, opts, res);
 
@@ -1530,7 +1554,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
 // an observable like an emit, so it pulls the stage in too.
 bool emits_need_graphs(const Options& opts) {
   return find_slot(opts.emit_dirs, "lg") != nullptr || find_slot(opts.emits, "verilog") != nullptr
-         || find_slot(opts.emit_dirs, "verilog") != nullptr || wants_dump(opts, "lg");
+         || find_slot(opts.emit_dirs, "verilog") != nullptr || find_slot(opts.emit_dirs, "isabelle") != nullptr || wants_dump(opts, "lg");
 }
 
 // True when any requested observable consumes the post-upass LNAST (gates the
@@ -2178,6 +2202,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     res.outputs.push_back(lg_out->path);
   }
 
+  emit_isabelle_outputs(opts, res, var);
   emit_verilog_outputs(opts, res, var);
   // ln: emit is handled per-path by the caller (source publish vs plain forest),
   // so it is NOT done here.

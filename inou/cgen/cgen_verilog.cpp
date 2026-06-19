@@ -1134,12 +1134,12 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
             auto mask_v  = hydrate_const(mask_dpin);
             auto out_w   = bits_of(cmp_dpin);
             auto a_w     = bits_of(a_dpin);
-            bool all_one = mask_v.is_i() && mask_v.to_i() == -1;
-            if (!all_one && mask_v.is_i() && out_w > 0 && out_w <= 62) {
-              all_one = mask_v.to_i() == ((int64_t{1} << out_w) - 1);
+            bool all_one = mask_v.is_just_i64() && mask_v.to_just_i64() == -1;
+            if (!all_one && mask_v.is_just_i64() && out_w > 0 && out_w <= 62) {
+              all_one = mask_v.to_just_i64() == ((int64_t{1} << out_w) - 1);
             }
-            if (!all_one && mask_v.is_i() && a_w > 0 && a_w <= 62) {
-              all_one = mask_v.to_i() == ((int64_t{1} << a_w) - 1);
+            if (!all_one && mask_v.is_just_i64() && a_w > 0 && a_w <= 62) {
+              all_one = mask_v.to_just_i64() == ((int64_t{1} << a_w) - 1);
             }
 
             // get_unsigned_dpin() can leave a Get_mask(a,-1) wrapper around a
@@ -1735,9 +1735,18 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
       }
       fout->append(name, " <= ", stage_names.back(), ";\n");
     };
+    auto emit_enabled = [&]() {
+      if (enable.empty()) {
+        emit_chain();
+      } else {
+        fout->append("if (", enable, ") begin\n");
+        emit_chain();
+        fout->append("end\n");
+      }
+    };
 
     if (reset.empty()) {
-      emit_enabled(emit_chain);
+      emit_enabled();
     } else {
       if (negreset) {
         fout->append("if (!", reset, ") begin\n");
@@ -1749,7 +1758,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
       }
       fout->append(name, " <= ", reset_initial, ";\n");
       fout->append("end else begin\n");
-      emit_enabled(emit_chain);
+      emit_enabled();
       fout->append("end\n");
     }
 

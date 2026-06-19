@@ -417,7 +417,9 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
     if (setundef == "zero" || setundef == "true") {
       vars.set("setundef_zero", mustache::data::type::bool_true);
     } else {
-      error("unrecognized setundef {} option. Supported values: zero, true", setundef);
+      livehd::diag::err("inou.yosys", "bad-option", "io")
+          .msg("unrecognized setundef {} option. Supported values: zero, true", setundef)
+          .fatal();
       return;
     }
   }
@@ -428,7 +430,9 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
     } else if (memory_mode == "nomap" || memory_mode == "default") {
       // Existing flow: memory -nomap.
     } else {
-      error("unrecognized memory_mode {} option. Supported values: collect, preserve, nomap, default", memory_mode);
+      livehd::diag::err("inou.yosys", "bad-option", "io")
+          .msg("unrecognized memory_mode {} option. Supported values: collect, preserve, nomap, default", memory_mode)
+          .fatal();
       return;
     }
   }

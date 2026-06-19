@@ -661,9 +661,9 @@ static hhds::Pin_class unwrap_to_positive_for_signed_compare(const hhds::Pin_cla
   auto mask_v   = hydrate_const_pin(mask);
   auto dpin_bits = bits_of(dpin);
   auto a_bits    = bits_of(a);
-  bool all_ones  = mask_v.is_i() && mask_v.to_i() == -1;
-  if (!all_ones && mask_v.is_i() && dpin_bits > 0 && dpin_bits <= 62) {
-    all_ones = mask_v.to_i() == ((int64_t{1} << dpin_bits) - 1);
+  bool all_ones  = mask_v.is_just_i64() && mask_v.to_just_i64() == -1;
+  if (!all_ones && mask_v.is_just_i64() && dpin_bits > 0 && dpin_bits <= 62) {
+    all_ones = mask_v.to_just_i64() == ((int64_t{1} << dpin_bits) - 1);
   }
   if (!all_ones || a_bits != dpin_bits || is_unsign(a)) {
     return dpin;

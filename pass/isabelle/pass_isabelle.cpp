@@ -327,7 +327,7 @@ std::string isabelle_int_literal(std::string_view decimal) {
   return std::string(decimal);
 }
 
-std::string lit_const_decimal(const Const &v, uint32_t w) {
+std::string lit_const_decimal(const Dlop& v, uint32_t w) {
   return "((word_of_int " + isabelle_int_literal(v.to_decimal_string()) + ") :: " + std::to_string(w) + " word)";
 }
 
@@ -527,11 +527,11 @@ int64_t const_pin_int(const Ctx &ctx, const Node_pin &pin, const Node &owner, st
                    + std::string(field) + " policy pin.");
   }
   auto v = pin_const_value(pin);
-  if (!v.is_i()) {
+  if (!v.is_just_i64()) {
     fatal(ctx, "Memory node n_" + std::to_string(node_id(owner)) + " has non-integer "
                    + std::string(field) + " policy pin.");
   }
-  return v.to_i();
+  return v.to_just_i64();
 }
 
 std::string memory_policy_summary(const Memory_info &mi) {
@@ -748,11 +748,11 @@ std::string driver_expr_at(const Ctx& ctx, const Node_pin& dpin, uint32_t expect
   return driver_expr(ctx, dpin);
 }
 
-uint32_t minimal_unsigned_const_width(const Const &v) {
-  if (!v.is_i()) {
+uint32_t minimal_unsigned_const_width(const Dlop& v) {
+  if (!v.is_just_i64()) {
     return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_bits()));
   }
-  const int64_t iv = v.to_i();
+  const int64_t iv = v.to_just_i64();
   if (iv <= 0) {
     return 1;
   }
