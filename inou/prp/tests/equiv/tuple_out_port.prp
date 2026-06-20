@@ -1,0 +1,23 @@
+/*
+:name: tuple_out_port
+:type: equiv
+:verilog_top: top
+:pyrope_top: tuple_out_port.top
+*/
+
+// FAILING regression for 2i-issues D: a tuple/struct-typed OUTPUT port is valid,
+// documented Pyrope (docs/pyrope/06-functions.md `-> (p:(first,second))`). It
+// must flatten to leaf outputs p_first / p_second, and a whole-tuple write
+// `p = (first=1, second=2)` must drive those leaves.
+//
+// Today upass.tolg hard-errors:
+//   "output 'p.first' is never driven by the body of 'tuple_out_port.top'".
+// io_meta outputs = p.first, p.second, but the body builds a whole-tuple value
+// and does store(p, ...): tolg records a driver for `p` but not for the
+// flattened leaf names, so the output-finalize loop finds no pin for `p.first`.
+// (Per-field writes `p.first=1; p.second=2` fail the same way today.) Fix is to
+// split a whole-tuple write to a tuple-typed output into per-leaf drives in
+// upass.detuple or tolg's output binding. Pairs with C.
+pub comb top(c:bool) -> (p:(first:u8, second:u8)) {
+  p = (first=1, second=2)
+}

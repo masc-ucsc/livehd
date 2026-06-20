@@ -1,0 +1,22 @@
+/*
+:name: reserved_word_signal
+:type: equiv
+:verilog_top: top
+:pyrope_top: reserved_word_signal.top
+*/
+
+// FAILING regression for 2i-issues F: cgen must escape SystemVerilog-2012
+// reserved words used as signal names. `packed` is an IEEE-1800 keyword. cgen's
+// get_scaped_name (inou/cgen/cgen_verilog.cpp:87-100 / :174) only escapes ~14
+// classic Verilog-2001 keywords, so it emits a BARE `output ... packed`, which
+// yosys (unexpected TOK_PACKED), iverilog -g2012, and verilator all reject.
+//
+// This is purely combinational (no register) to isolate the cgen emission bug.
+// The `:type: equiv` harness re-reads the GENERATED verilog through lgcheck/
+// yosys, so this test is RED until cgen emits `\packed ` (escaped). Fix is to
+// extend the reserved_keyword set with the IEEE-1800 additions (packed, bit,
+// byte, int, shortint, longint, void, type, ref, return, automatic, static,
+// unique, priority, interface, modport, package, program, time, real).
+pub comb top(a:u8) -> (packed:u8) {
+  packed = a + 1
+}

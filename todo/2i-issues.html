@@ -19,6 +19,13 @@ Pyrope that today either <strong>hard-errors in lowering</strong> or
 <strong>emits a wrong / invalid netlist</strong>. Pick any one and work it
 end-to-end from its subtask below — they have no ordering between them.</p>
 
+<p><strong>Status 2026-06-20 (adversarial re-test):</strong> <strong>E</strong>
+(signed-shift idiom) is now <span class="status landed">resolved</span> — five
+remain open (A, B, C, D, F). Each open construct now ships a checked-in red
+regression under <code>inou/prp/tests/equiv/</code>
+(<code>tuple_in_port</code>, <code>tuple_out_port</code>,
+<code>reserved_word_signal</code>); they turn green as each fix lands.</p>
+
 <p><strong>Scope.</strong> This page deliberately excludes the LEC-engine
 precision issues (cvc5 false-refutes on hotmux / FSM-state / memory, the
 <code>\x01nxt:</code> phantom-output, the lgyosys no-reset-flop disagreement).
@@ -35,7 +42,7 @@ reading the source on <strong>2026-06-20</strong> against a fresh
 <tr><td><strong>B</strong></td><td>Hierarchical enum <code>enum E=(,a=(,x,,y),…)</code></td><td>hard error</td><td><code>read of undefined variable 'x'</code></td><td><code>inou/prp/prp2lnast.cpp:4362</code></td></tr>
 <tr><td><strong>C</strong></td><td>Tuple-typed <em>input</em> port <code>(ar:(x:u3,y:i4), …)</code></td><td>hard error</td><td><code>unresolved reference '___res_1' — no driver</code></td><td><code>upass/tolg/upass_tolg.cpp:2207</code></td></tr>
 <tr><td><strong>D</strong></td><td>Tuple-typed <em>output</em> port + whole-tuple write</td><td>hard error</td><td><code>output 'p.first' is never driven</code></td><td><code>upass/tolg/upass_tolg.cpp:277</code></td></tr>
-<tr><td><strong>E</strong></td><td>Signed-shift idiom <code>(a&lt;&lt;b)^(a&gt;&gt;b)</code> on <code>i8</code></td><td>wrong netlist</td><td>gen.v sim ≠ spec (384/1024)</td><td><code>inou/cgen/cgen_verilog.cpp:1086</code></td></tr>
+<tr><td><strong>E</strong></td><td>Signed-shift idiom <code>(a&lt;&lt;b)^(a&gt;&gt;b)</code> on <code>i8</code></td><td><span class="status landed">resolved 2026-06-20</span></td><td>0/1024 iverilog, cvc5+lgyosys equiv</td><td><code>inou/cgen/cgen_verilog.cpp:1086</code></td></tr>
 <tr><td><strong>F</strong></td><td>Reserved word as a signal name (<code>reg packed:…</code>)</td><td>invalid netlist</td><td>emits bare <code>packed</code> → SV parse error</td><td><code>inou/cgen/cgen_verilog.cpp:87</code></td></tr>
 </tbody>
 </table>
@@ -125,7 +132,9 @@ pub comb top(s:bool) -&gt; (r:u6) { r = int(Animal.bird.eagle) }   // == 0ub0000
   is a tuple-typed input directly to the flattened leaf input pin
   (<code>ar.x</code>), or have <code>upass/detuple</code> rewrite the field reads to
   dotted-leaf refs (the same flattening it already does for struct vars/regs).
-  Pairs with&nbsp;D.</li>
+  Pairs with&nbsp;D. <strong>Red regression:</strong>
+  <code>inou/prp/tests/equiv/tuple_in_port.prp</code> (+ golden <code>.v</code>) —
+  fails at the prp&rarr;verilog step today, goes green when this lowers.</li>
 
 <li><strong>D — tuple-typed <em>output</em> port driven by a whole-tuple write.</strong>
   Repro <code>unexpected_semantics/tup_out_port/impl.prp</code> (documented in
@@ -146,9 +155,16 @@ pub comb top(s:bool) -&gt; (r:u6) { r = int(Animal.bird.eagle) }   // == 0ub0000
   per-leaf drives (<code>p.first</code>←<code>___p_0.first</code>, etc.) matching the
   flattened output names — in <code>upass/detuple</code> (it already classifies
   whole-write tuples at <code>upass_detuple.cpp:517</code>) or in tolg's output
-  binding. Pairs with&nbsp;C.</li>
+  binding. Pairs with&nbsp;C. <strong>Red regression:</strong>
+  <code>inou/prp/tests/equiv/tuple_out_port.prp</code> (+ golden <code>.v</code>) —
+  fails at the prp&rarr;verilog step today (per-field writes fail the same way),
+  goes green when the whole-tuple write drives the flattened leaves.</li>
 
-<li><strong>E — cgen emits a wrong netlist for a signed-shift idiom.</strong>
+<li><span class="status landed">resolved 2026-06-20</span> <strong>E — cgen emits a wrong netlist for a signed-shift idiom.</strong>
+  Fixed exactly as proposed below (the SRA term now emits
+  <code>$signed($signed(a) &gt;&gt;&gt; amt)</code>): 0/1024 <code>iverilog</code>
+  mismatches and PROVEN equivalent under both cvc5 and lgyosys. Passing
+  regression <code>inou/prp/tests/equiv/shift_combo_i8.prp</code> (+ golden).
   Repro <code>lec_missmatch/shift_combo_i8/impl.prp</code> (a <code>cgen</code> bug,
   filed there only because it also makes the two LEC engines disagree):
   <pre><code>pub comb top(a:i8, b:u2) -&gt; (r:i8) { wrap r = (a &lt;&lt; b) ^ (a &gt;&gt; b) }</code></pre>
@@ -193,12 +209,30 @@ pub comb top(s:bool) -&gt; (r:u6) { r = int(Animal.bird.eagle) }   // == 0ub0000
   <code>:87-100</code> with the IEEE-1800 list (at least <code>packed, bit, byte,
   int, shortint, longint, void, type, ref, return, automatic, static, unique,
   priority, interface, modport, package, program, time, real</code>). No other change
-  needed — <code>get_scaped_name</code> already escapes anything in the set.</li>
+  needed — <code>get_scaped_name</code> already escapes anything in the set.
+  <strong>Red regression:</strong>
+  <code>inou/prp/tests/equiv/reserved_word_signal.prp</code> (a purely
+  combinational <code>-&gt; (packed:u8)</code> to isolate the cgen bug; + golden
+  with an escaped <code>\packed </code> port) — lgcheck rejects the bare
+  <code>packed</code> in the generated Verilog today; the reverse
+  <code>prp-v2prp-reserved_word_signal</code> fails on the same root cause. Both
+  go green when cgen escapes the keyword.</li>
 
 </ul>
 
 <h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<ul class="subtasks">
+<li><span class="status landed">2026-06-20</span> <strong>E — signed-shift idiom.</strong>
+  cgen now emits the arithmetic-right-shift term self-contained as
+  <code>$signed($signed(a) &gt;&gt;&gt; amt)</code>, so the unsigned SHL zero-extend
+  idiom in the XOR's other operand no longer demotes <code>&gt;&gt;&gt;</code> to a
+  logical shift. Verified 0/1024 <code>iverilog</code> mismatches and equivalent
+  under both LEC engines. Regression <code>inou/prp/tests/equiv/shift_combo_i8</code>.</li>
+</ul>
+<p>Also resolved in the index's hard-error table (tracked there, not a 2i row):
+<strong>overload-gathering call dispatch</strong> <code>const add=[f1,f2]; add(x)</code>
+now resolves the whole call including return binding — regressions
+<code>equiv/overload_dispatch</code> and <code>equiv/overload_return_dispatch</code>.</p>
 
 <h2>Verification</h2>
 <p>Each fix should both <strong>compile</strong> and prove <strong>equivalent</strong>

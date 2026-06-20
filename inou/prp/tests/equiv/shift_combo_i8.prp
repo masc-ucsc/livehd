@@ -1,0 +1,21 @@
+/*
+:name: shift_combo_i8
+:type: equiv
+:verilog_top: top
+:pyrope_top: shift_combo_i8.top
+*/
+
+// PASSING regression for 2i-issues E (now FIXED): a signed-shift idiom
+// `(a << b) ^ (a >> b)` on i8. In an 8-bit assignment context the left shift
+// wraps to the low 8 bits and the right shift is arithmetic (sign-preserving).
+//
+// cgen used to emit the SRA term bare (`a >>> amt`) next to the unsigned SHL
+// zero-extend idiom `({N{1'b0}} | a) << amt`; Verilog then evaluated the XOR in
+// unsigned context, demoting the `>>>` to a logical shift -> wrong for negative
+// a (was 384/1024 mismatches). cgen now emits the term self-contained as
+// `$signed($signed(a) >>> amt)`. Verified 0/1024 mismatches under iverilog and
+// PROVEN equivalent under both cvc5 (on the LGraph) and lgyosys (on the cgen
+// output).
+pub comb top(a:i8, b:u2) -> (r:i8) {
+  wrap r = (a << b) ^ (a >> b)
+}
