@@ -15,6 +15,21 @@
   and the attribute sugar <code>sig.[rising]</code>/<code>.[falling]</code>/<code>.[changed]</code>.
   Everything except <code>past</code> is debug-only. No semantic handling
   exists anywhere today (zero hits in prp2lnast/upass).</p>
+<p>This page owns the <strong>temporal-operator lowering</strong> (the flops behind
+  <code>past</code>/<code>next</code>, and the debug-block evaluation of
+  <code>rose</code>/<code>fell</code>/<code>eventually</code>/…). <strong>Formally
+  proving</strong> the assertions those operators feed
+  (<code>assert(rose(req) implies eventually[1..=10](rose(ack)))</code>) is the job of
+  <a class="xref" href="../livehd/2f-formal.html">2f-formal</a>, not this task. Its
+  initial flop-cut single-frame engine is only the substrate; bounded temporal proofs
+  require that task's deferred reachable-state BMC/k-induction extension.</p>
+<h2>Depends on</h2>
+<p><a class="xref" href="../livehd/2f-formal.html">2f-formal</a> (LiveHD, Group 2) — the
+  <code>assert</code>/<code>assume</code> formal-proof substrate. Temporal operators here
+  produce the <code>cond</code> signals. The initial single-frame tier can classify only
+  properties supported by that model; formally proving temporal
+  <code>eventually</code>/<code>always</code> windows over reachable states is gated on
+  <code>2f-formal</code>'s deferred BMC/k-induction track.</p>
 <h2>Failing example (pyrope/verilog pair)</h2>
 <pre><code>// delay2.prp
 mod delay2(a:u8) -&gt; (out:u8@[2]) {
