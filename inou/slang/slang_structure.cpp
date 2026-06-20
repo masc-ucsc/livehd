@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <functional>
+#include <vector>
 
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Statement.h"

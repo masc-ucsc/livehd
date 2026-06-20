@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <string>
+#include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "encode.hpp"
@@ -644,7 +645,10 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     if (opts.witness) {
       // Name the diverging output(s) first — the actionable part of the CEX —
       // then the satisfying input/current-state assignment.
-      std::string diffs;
+      // Collect-then-sort both token lists: re.outputs and `shared` are
+      // flat_hash_maps with run-to-run-varying iteration order, which would make
+      // the counterexample text non-reproducible (the verdict is unaffected).
+      std::vector<std::string> diff_toks;
       for (const auto& [name, rv] : re.outputs) {
         auto it = ie.outputs.find(name);
         if (it == ie.outputs.end()) {
@@ -654,22 +658,33 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         cvc5::Term rval = solver.getValue(fit_to(tm, rv, w));
         cvc5::Term ival = solver.getValue(fit_to(tm, it->second, w));
         if (!rval.isNull() && !ival.isNull() && rval.getBitVectorValue(10) != ival.getBitVectorValue(10)) {
-          if (!diffs.empty()) {
-            diffs += ", ";
-          }
-          diffs += name + "(ref=" + rval.getBitVectorValue(10) + " impl=" + ival.getBitVectorValue(10) + ")";
+          diff_toks.push_back(name + "(ref=" + rval.getBitVectorValue(10) + " impl=" + ival.getBitVectorValue(10) + ")");
         }
       }
-      std::string w;
+      std::sort(diff_toks.begin(), diff_toks.end());
+      std::string diffs;
+      for (const auto& t : diff_toks) {
+        if (!diffs.empty()) {
+          diffs += ", ";
+        }
+        diffs += t;
+      }
+
+      std::vector<std::string> toks;
       for (const auto& [name, v] : shared) {
         cvc5::Term val = solver.getValue(v.term);
         if (val.isNull()) {
           continue;
         }
+        toks.push_back(name + "=" + val.getBitVectorValue(10));
+      }
+      std::sort(toks.begin(), toks.end());
+      std::string w;
+      for (const auto& t : toks) {
         if (!w.empty()) {
           w += ", ";
         }
-        w += name + "=" + val.getBitVectorValue(10);
+        w += t;
       }
       res.witness = (diffs.empty() ? "" : "diff " + diffs + " @ ") + w;
     }

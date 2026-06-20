@@ -1,11 +1,13 @@
 // vcd_power.cpp
 #include "vcd_power.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <format>
 #include <iostream>
 #include <print>
+#include <vector>
 
 #include "absl/strings/str_cat.h"
 
@@ -34,6 +36,13 @@ void Vcd_power::on_value(const std::string& hier_name, std::string_view /*value*
 }
 
 void Vcd_power::compute(const std::string& out_dir) {
+  // Per-signal average-power contributions, summed in a canonical (sorted)
+  // order after the loop: channels_ is a hash map with run-to-run-varying
+  // iteration order and floating-point addition is not associative, so summing
+  // directly in iteration order makes the reported average vary in low-order
+  // bits between runs. Sorting also improves accuracy (small terms first).
+  std::vector<double> contribs;
+  contribs.reserve(channels_.size());
   // for each registered signal, produce its .power.trace
   for (auto& [name, channel] : channels_) {
     auto p_it = net_power_.find(name);
@@ -68,9 +77,14 @@ void Vcd_power::compute(const std::string& out_dir) {
     }
     std::fclose(f);
 
-    // accumulate for overall average
-    power_total_ += (sum / static_cast<double>(n_buckets_));
+    // accumulate for overall average (summed below in sorted order)
+    contribs.push_back(sum / static_cast<double>(n_buckets_));
     ++power_samples_;
+  }
+
+  std::sort(contribs.begin(), contribs.end());
+  for (double c : contribs) {
+    power_total_ += c;
   }
 }
 

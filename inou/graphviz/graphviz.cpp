@@ -3,11 +3,13 @@
 
 #include <fcntl.h>
 
+#include <algorithm>
 #include <format>
 #include <fstream>
 #include <iostream>
 #include <regex>
 #include <utility>
+#include <vector>
 
 #include "RGB.hpp"
 #include "absl/container/flat_hash_set.h"
@@ -177,7 +179,12 @@ void Graphviz::create_color_map(hhds::Graph* lg) {
   std::string data = "digraph {\n";
 
   color2rgb.clear();
-  for (auto e : color2id) {
+  // Emit legend lines in a deterministic order: color2id is a flat_hash_map and
+  // its iteration order varies run-to-run, which would reorder the `c{N}` lines
+  // in the .dot output (the values themselves are order-independent).
+  std::vector<std::pair<int, size_t>> entries(color2id.begin(), color2id.end());
+  std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) { return a.second < b.second; });
+  for (auto e : entries) {
     RGB color(static_cast<double>(e.second) / color2id.size());
     color2rgb[e.first] = color.to_s();
     data += std::format(" c{} [ label = <{}> , style = \"filled\" , fillcolor = \"{}\" ];\n", e.second, e.first, color.to_s());
