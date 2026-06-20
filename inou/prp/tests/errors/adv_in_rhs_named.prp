@@ -1,0 +1,11 @@
+/*
+:name: adv_in_rhs_named
+:type: error
+:error: unnamed tuple
+:help: positional tuple
+*/
+// The right operand of `in` must be an UNNAMED tuple/array. A named-field
+// tuple is a compile error (named-field membership was removed).
+mut t = (const a = 1, const b = 2)
+const x = 2 in t
+cassert(x)

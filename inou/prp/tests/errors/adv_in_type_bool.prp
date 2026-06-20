@@ -1,0 +1,10 @@
+/*
+:name: adv_in_type_bool
+:type: error
+:error: different types
+:help: same type as the left operand
+*/
+// `a in b` requires every element of b to have the SAME type as a. An integer
+// left operand against boolean elements is a compile error (no implicit cast).
+const x = 2 in (true, false)
+cassert(x)

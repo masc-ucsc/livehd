@@ -1,0 +1,13 @@
+/*
+:name: adv_in_cross_enum
+:type: error
+:error: different types
+:help: same type as the left operand
+*/
+// `x in (…)` over enum values requires the SAME enum type on both sides.
+// Comparing a `Color` value against `Dir` members is a compile error.
+enum Color = (Red, Blue)
+enum Dir = (Up, Down)
+const x = Color.Red
+const y = x in (Dir.Up, Dir.Down)
+cassert(y)
