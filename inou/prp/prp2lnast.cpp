@@ -6259,10 +6259,9 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
     if (kind == "op_in") {
       return make_binop(Lnast_ntype::create_func_in(), l, r);
     }
-    if (kind == "op_not_in") {
-      return wrap_not(make_binop(Lnast_ntype::create_func_in(), l, r));
-    }
-    // `op_is` / `op_not_is` were removed from the grammar (task 1f-is_typename,
+    // `!in` was removed from the grammar (`a !in b` is now a syntax error), so
+    // there is no `op_not_in` compare-op branch. `op_is` / `op_not_is` were
+    // likewise removed (task 1f-is_typename,
     // tree-sitter-pyrope daf3508): `a is b` is now a syntax error, so there is
     // no compare-op branch for it. Structural `does` / `equals` / `case` remain.
     if (kind == "op_does") {
@@ -6831,8 +6830,8 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
         // `does Person { … }` must lower to func_does (a superset receiver
         // satisfies `does` but never `eq`), `in (…)` to func_in.
         const bool use_does     = (pending_op == "does" || pending_op == "!does");
-        const bool use_in       = (pending_op == "in" || pending_op == "!in");
-        const bool negate       = (pending_op == "!case" || pending_op == "!=" || pending_op == "!does" || pending_op == "!in");
+        const bool use_in       = (pending_op == "in");  // `!in` was removed from the grammar
+        const bool negate       = (pending_op == "!case" || pending_op == "!=" || pending_op == "!does");
         // Emit `<compare> tmp = subject_ref rhs` and return the tmp ref,
         // wrapping in log_not when the operator is the negated form.
         auto       emit_compare = [&](const Lnast_node& rhs) {

@@ -87,6 +87,172 @@ namespace {
   throw std::runtime_error(msg);
 }
 
+// Emit a fatal `in`-operator diagnostic (category typecheck) and abort the walk,
+// mirroring fcall_arg_fail: the record is flushed crash-safe before the throw so
+// the error-test harness sees it. `a in b` is fully expanded here, so an
+// unfixable shape/type problem must be a hard error — never a silent nil.
+[[noreturn]] void in_op_fail(const livehd::diag::Span& span, std::string_view code, const std::string& msg,
+                             std::string_view hint) {
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                                     .code     = std::string{code},
+                                                     .category = "type",
+                                                     .pass     = "upass.runner",
+                                                     .message  = msg,
+                                                     .span     = span,
+                                                     .hint     = std::string{hint}});
+  throw std::runtime_error(msg);
+}
+
+// Coarse type of an `in` operand, used to reject comparisons between values that
+// can never be equal (06-operators: `a in b` is `a==b[0] or …`, and `==` between
+// e.g. an int and a bool / an int and an enum / a scalar and a tuple is a type
+// error). Integer width/signedness is intentionally NOT part of the identity
+// (`u4 in (s8, …)` is fine); two enums match only when the SAME enum type.
+struct In_type {
+  enum class K { unknown, integer, boolean, string, enumv, tuple } k = K::unknown;
+  std::string enum_type;  // for enumv: the enum TYPE name ("Color" of "Color.Red")
+};
+
+const char* in_kind_name(In_type::K k) {
+  switch (k) {
+    case In_type::K::integer: return "an integer";
+    case In_type::K::boolean: return "a boolean";
+    case In_type::K::string:  return "a string";
+    case In_type::K::enumv:   return "an enum";
+    case In_type::K::tuple:   return "a tuple";
+    case In_type::K::unknown: return "an unknown type";
+  }
+  return "an unknown type";
+}
+
+// A bundle's OWN enum identity ("Color.Red") → its enum TYPE name ("Color").
+// The parse-time `__enumentry` tag lands as the bare "enumentry" attr; a
+// scalar-carrier round-trip may intern it under positional layers
+// ("0.enumentry") — accept those; an enum-TYPE bundle's per-entry tag
+// ("Red.enumentry") has a NAMED prefix and is not the bundle's own.
+std::optional<std::string> bundle_enum_type(const std::shared_ptr<const Bundle>& b) {
+  if (!b) {
+    return std::nullopt;
+  }
+  for (const auto& [k, ep] : b->get_attrs()) {
+    if (Bundle::get_last_level(k) != battr::enumentry) {
+      continue;
+    }
+    std::string_view rest = Bundle::get_all_but_last_level(k);
+    bool             own  = true;
+    while (!rest.empty() && own) {
+      own  = (Bundle::get_first_level(rest) == "0");
+      rest = Bundle::get_all_but_first_level(rest);
+    }
+    if (!own || ep.trivial.is_invalid()) {
+      continue;
+    }
+    std::string id(ep.trivial.to_pyrope());  // e.g. 'Color.Red' / 'Animal.mammal.rat' (may be quoted)
+    if (id.size() >= 2 && (id.front() == '\'' || id.front() == '"')) {
+      id = id.substr(1, id.size() - 2);
+    }
+    // The enum TYPE is the TOP-LEVEL name (first segment): flat `Color.Red`→
+    // `Color`; hierarchical `Animal.mammal.rat`→`Animal`, so all values of one
+    // hierarchical enum share a type (and compare), while `Color` vs `Dir` differ.
+    const auto dot = id.find('.');
+    return dot == std::string::npos ? id : id.substr(0, dot);
+  }
+  return std::nullopt;
+}
+
+// The own bit-encoding of an enum VALUE: the `enumval` attr for a hierarchical
+// PARENT carrier (`Animal.bird`, whose bits ride an attr, not the scalar), else
+// the lone scalar of a leaf carrier (`Animal.mammal.rat`). nullopt when `b`
+// carries no extractable encoding. Mirrors constprop's enum_scalar_of so the
+// `in`-over-union fold agrees with `==`/string() on the same value.
+std::optional<Dlop> enum_encoding_of(const std::shared_ptr<const Bundle>& b) {
+  if (!b) {
+    return std::nullopt;
+  }
+  if (b->has_attr("enumval") && !b->get_attr("enumval").is_invalid()) {
+    return b->get_attr("enumval");
+  }
+  if (auto s = b->scalar(); s.has_value() && !s->is_invalid()) {
+    return s;
+  }
+  return std::nullopt;
+}
+
+// Classify a resolved `in` operand bundle (the `a` ref's bundle, or a per-element
+// `b[i]` pick). Enum identity first, then tuple shape (named top / >1 positional
+// / a single sub-bundle element), then the scalar Entry kind, falling back to the
+// scalar Dlop type. Returns unknown when nothing is decidable (caller skips the
+// type check rather than false-flag a mismatch).
+In_type classify_in_bundle(const std::shared_ptr<const Bundle>& b) {
+  In_type t;
+  if (!b) {
+    return t;
+  }
+  if (auto et = bundle_enum_type(b)) {
+    t.k         = In_type::K::enumv;
+    t.enum_type = std::move(*et);
+    return t;
+  }
+  if (b->has_named_top() || b->unnamed_top_count() > 1) {
+    t.k = In_type::K::tuple;
+    return t;
+  }
+  for (const auto& tl : b->top_levels()) {
+    if (tl.has_leafs) {
+      t.k = In_type::K::tuple;  // single element that is itself a sub-bundle
+      return t;
+    }
+  }
+  const auto& e = b->get_entry("0");
+  switch (e.kind) {
+    case upass::Kind::boolean: t.k = In_type::K::boolean; return t;
+    case upass::Kind::string:  t.k = In_type::K::string; return t;
+    case upass::Kind::integer: t.k = In_type::K::integer; return t;
+    case upass::Kind::enumv:   t.k = In_type::K::enumv; return t;  // identity normally caught above
+    default: break;
+  }
+  // Declared kind unset (e.g. a freshly picked const element): derive from the
+  // scalar value — the Dlop tracks bool / string distinctly from a 1-bit int,
+  // so `2 in (true,false)` is still caught as int-vs-bool.
+  if (auto sc = b->scalar(); sc && !sc->is_invalid()) {
+    if (sc->is_string()) {
+      t.k = In_type::K::string;
+    } else if (sc->is_bool()) {
+      t.k = In_type::K::boolean;
+    } else {
+      t.k = In_type::K::integer;
+    }
+  }
+  return t;
+}
+
+// A bare const operand on the left of `in` (`5 in (…)`, `'x' in (…)`). Enums are
+// always refs (Color.Red resolves to a bundle), so only int/bool/string land here.
+In_type classify_in_const(std::string_view text) {
+  In_type t;
+  if (text == "true" || text == "false") {
+    t.k = In_type::K::boolean;
+  } else if (!text.empty() && (text.front() == '\'' || text.front() == '"')) {
+    t.k = In_type::K::string;
+  } else {
+    t.k = In_type::K::integer;
+  }
+  return t;
+}
+
+bool in_types_compatible(const In_type& a, const In_type& b) {
+  if (a.k == In_type::K::unknown || b.k == In_type::K::unknown) {
+    return true;  // undecidable — defer to the emitted `==` rather than false-flag
+  }
+  if (a.k != b.k) {
+    return false;
+  }
+  if (a.k == In_type::K::enumv) {
+    return a.enum_type == b.enum_type;  // cross-enum membership is a type error
+  }
+  return true;  // both integer (any width) / boolean / string / tuple
+}
+
 bool prp_is_tmp_name(std::string_view n) { return n.size() >= 3 && n[0] == '_' && n[1] == '_' && n[2] == '_'; }
 
 // prp2lnast wraps the UFCS receiver of `obj.method(...)` in a
@@ -2356,6 +2522,184 @@ bool uPass_runner::try_lower_typecast() {
     }
   }
   return true;  // all Typecast_kind cases handled above
+}
+
+bool uPass_runner::lower_in() {
+  using N = Lnast_ntype;
+  // func_in(dst, a, b): dst (child 0), a (subject, child 1), b (rhs, child 2).
+  // Read children read-only; we never move the main cursor off the func_in (the
+  // inline emits below ride scratch sources), matching try_lower_wrap_sat.
+  const auto saved = lm->save_cursor();
+  auto       bail  = [&]() {
+    lm->restore_cursor(saved);
+    return false;
+  };
+
+  livehd::diag::Span span;
+  if (const auto& ln = lm->get_lnast()) {
+    span = ln->span_of(lm->get_current_nid());
+  }
+
+  if (!lm->has_child()) {
+    return bail();  // malformed — caller falls back
+  }
+  lm->move_to_child();  // dst
+  if (!N::is_ref(lm->get_raw_ntype())) {
+    return bail();
+  }
+  const std::string dst(lm->current_text());
+
+  if (!lm->move_to_sibling()) {  // a (subject)
+    return bail();
+  }
+  const bool a_is_ref   = N::is_ref(lm->get_raw_ntype());
+  const bool a_is_const = N::is_const(lm->get_raw_ntype());
+  if (!a_is_ref && !a_is_const) {
+    return bail();
+  }
+  const Lnast_node  a_node = lm->current_node();
+  const std::string a_name = a_is_ref ? std::string(lm->current_text()) : std::string{};
+  const std::string a_text = a_is_const ? std::string(lm->current_text()) : std::string{};
+
+  if (!lm->move_to_sibling()) {  // b (rhs)
+    return bail();
+  }
+  const bool        b_is_ref   = N::is_ref(lm->get_raw_ntype());
+  const bool        b_is_const = N::is_const(lm->get_raw_ntype());
+  const Lnast_node  b_node     = lm->current_node();
+  const std::string b_name     = b_is_ref ? std::string(lm->current_text()) : std::string{};
+  const std::string b_text     = b_is_const ? std::string(lm->current_text()) : std::string{};
+  if (!b_is_ref && !b_is_const) {
+    return bail();
+  }
+  lm->restore_cursor(saved);  // back on the func_in
+
+  const In_type a_type = a_is_const ? classify_in_const(a_text) : classify_in_bundle(symbol_table_.get_bundle(a_name));
+
+  // A bare const rhs (`a in 5`) is a one-element membership: `dst = (a == 5)`.
+  if (b_is_const) {
+    if (!in_types_compatible(a_type, classify_in_const(b_text))) {
+      in_op_fail(span, "in-type-mismatch",
+                 std::format("`in` compares values of different types: the left operand is {}, but the right is {}",
+                             in_kind_name(a_type.k), in_kind_name(classify_in_const(b_text).k)),
+                 "the right operand of `in` must have the same type as the left operand");
+    }
+    emit_inline_op(N::create_eq(), dst, {a_node, b_node});
+    return true;
+  }
+
+  // RHS must be a known, UNNAMED tuple/array (tuple shapes are always comptime).
+  auto b_bundle = symbol_table_.get_bundle(b_name);
+  if (!b_bundle) {
+    // No bundle for the RHS: this happens only in front-end-only modes (e.g.
+    // `upass.order=noop`, the parsing/lnast checks) where constprop never ran,
+    // so there is nothing to expand against. Decline — the caller emits the
+    // func_in verbatim; those modes never lower to tolg. In a REAL evaluation
+    // pipeline constprop has resolved the tuple shape, so b_bundle is non-null
+    // and the expansion below always runs.
+    return bail();
+  }
+  if (b_bundle->has_named_top()) {
+    in_op_fail(span, "in-rhs-named", "the right operand of `in` must be an unnamed tuple/array, but it has named fields",
+               "use a positional tuple like `(x, y, z)`; named-field membership is not supported");
+  }
+
+  // Enum membership over a bitwise UNION (03-bundle.md): `a in u`, where `a` is
+  // an enum value and `u` is a SINGLE union scalar, is bit-containment
+  // `(a & u) == a`. An array of enum literals carries a per-member `enumentry`
+  // tag on each element ("0.enumentry", …) — that falls through to the eq
+  // expansion below; a union scalar carries none, so it routes here.
+  if (a_type.k == In_type::K::enumv && b_bundle->scalar().has_value()) {
+    bool b_has_member_tags = false;
+    for (const auto& [k, ep] : b_bundle->get_attrs()) {
+      (void)ep;
+      if (Bundle::get_last_level(k) == battr::enumentry && Bundle::get_first_level(k) != k) {
+        b_has_member_tags = true;  // a member's own tag (keyed under "0."/name) ⇒ array of enum values
+        break;
+      }
+    }
+    if (!b_has_member_tags) {
+      // Comptime fold via the extracted encodings — needed for a hierarchical
+      // PARENT value (`Animal.bird`), whose bits live in the `enumval` attr, not
+      // the scalar, so a raw `a & b` LNAST op could not see them.
+      const auto ea = enum_encoding_of(symbol_table_.get_bundle(a_name));
+      const auto eb = b_bundle->scalar();
+      if (ea && ea->is_integer() && !ea->has_unknowns() && eb && eb->is_integer() && !eb->has_unknowns()) {
+        const bool contained = ea->and_op(*eb)->same_repr(*ea);  // a ⊆ b
+        emit_inline_op(N::create_store(), dst, {Lnast_node::create_const(contained ? "true" : "false")});
+        return true;
+      }
+      // Runtime fallback: a leaf/runtime value IS its encoding, so `(a & b) == a`.
+      const std::string andt = std::format("{}_iand", dst);
+      emit_inline_op(N::create_bit_and(), andt, {a_node, b_node});
+      emit_inline_op(N::create_eq(), dst, {Lnast_node::create_ref(andt), a_node});
+      return true;
+    }
+  }
+
+  // Expand `dst = (a==b[0]) or (a==b[1]) or … or (a==b[N-1])`. Each element is
+  // picked into its own ref (tuple_get → runtime copy or const fold), classified
+  // against `a`, then compared; the comparisons OR together. All emits go through
+  // the inline path so constprop folds the constant cases.
+  std::vector<Lnast_node> or_terms;
+  size_t                  idx = 0;
+  for (const auto& tl : b_bundle->top_levels()) {
+    // Classify the element from b's STRUCTURE (the sub-bundle), not from the
+    // picked value: comptime folding strips a value's enum-identity attr, so a
+    // picked enum element would misread as a bare integer. The sub-bundle keeps
+    // the `enumentry` tag, so hierarchical/flat enums classify correctly.
+    const In_type e_type = classify_in_bundle(b_bundle->get_bundle(std::to_string(tl.pos)));
+    if (!in_types_compatible(a_type, e_type)) {
+      in_op_fail(span, "in-type-mismatch",
+                 std::format("`in` compares values of different types: the left operand is {}, but element {} is {}",
+                             in_kind_name(a_type.k), idx, in_kind_name(e_type.k)),
+                 "every element on the right of `in` must have the same type as the left operand (integer "
+                 "width/signedness may differ; bool, integer, enum and tuple may not be mixed)");
+    }
+
+    const std::string pick = std::format("{}_in{}", dst, idx);
+    emit_inline_tuple_pick(pick, b_name, std::to_string(tl.pos));  // b[i] → runtime copy or const fold
+    const std::string cmp = std::format("{}_ic{}", dst, idx);
+    emit_inline_op(N::create_eq(), cmp, {a_node, Lnast_node::create_ref(pick)});
+    or_terms.emplace_back(Lnast_node::create_ref(cmp));
+    ++idx;
+  }
+
+  if (or_terms.empty()) {
+    emit_inline_op(N::create_store(), dst, {Lnast_node::create_const("false")});  // `a in ()` ⇒ false
+  } else if (or_terms.size() == 1) {
+    emit_inline_op(N::create_store(), dst, {or_terms.front()});  // `dst = (a == b[0])`
+  } else {
+    // Left-fold the comparisons into a chain of TWO-input `or`s rather than one
+    // n-ary `log_or`: downstream passes (the verifier in particular) assume a
+    // binary `log_or`, and tolg lowers the chain to the same OR-reduction.
+    for (size_t i = 1; i < or_terms.size(); ++i) {
+      const std::string out = (i + 1 == or_terms.size()) ? dst : std::format("{}_or{}", dst, i);
+      const Lnast_node  lhs = (i == 1) ? or_terms[0] : Lnast_node::create_ref(std::format("{}_or{}", dst, i - 1));
+      emit_inline_op(N::create_log_or(), out, {lhs, or_terms[i]});
+    }
+  }
+  return true;
+}
+
+void uPass_runner::emit_inline_op(Lnast_ntype::Lnast_ntype_int op, const std::string& dst,
+                                  const std::vector<Lnast_node>& operands) {
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-op");
+  auto s    = std::make_shared<Lnast>(body, "inl-op");
+  auto root = s->set_root(op);
+  stamp_scratch_srcid(s, root);
+  s->add_child(root, Lnast_node::create_ref(dst));
+  for (const auto& o : operands) {
+    s->add_child(root, o);
+  }
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);
+  process_lnast();  // cursor at op root → dispatch + emit/fold
+  flush_deferred_emits();
+  lm->pop_source();
 }
 
 bool uPass_runner::try_inline_func_call() {
@@ -5924,12 +6268,21 @@ void uPass_runner::process_lnast() {
         process_drop_candidate(&upass::uPass::process_func_call, /*fold_all=*/false);
       }
       break;
-    // does/in/has/case fold to a known boolean (or nil) → drop-candidate.
+    // does/has/case fold to a known boolean (or nil) → drop-candidate.
     A_OP(func_does)
     A_OP(func_equals)
-    A_OP(func_in)
     A_OP(func_has)
     A_OP(func_case)
+    // `in` is always fully expanded here into `a==b[0] or … or a==b[N-1]` (tuple
+    // shapes are comptime, so the element count is known); constprop folds the
+    // constant comparisons. tolg never sees a func_in. A malformed node (no
+    // operands) falls back to verbatim so it surfaces downstream rather than
+    // vanishing.
+    case Ntype::Lnast_ntype_func_in:
+      if (!lower_in()) {
+        emit_subtree_verbatim();
+      }
+      break;
     // break/continue/return. During a comptime loop unroll a `func_break`
     // reached on the taken path (process_if pruned to it) terminates the loop:
     // flag it and consume the node (don't emit) so no stray break lands in

@@ -1003,16 +1003,14 @@ upass::Vote uPass_constprop::process_log_and(std::string_view dst_name, Bundle& 
   // cassert/attribute-discharge combinators (`cassert(x.[debug] and …)` over an
   // unset/deferred attr), so nil propagates (keeps) for the verifier to resolve.
   (void)dst;
-  return push_binary_passthrough(
-      dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return log_result_as_bool(*n1.and_op(n2)); }, /*report_nil=*/false,
-      /*nil_operand_error=*/false);
+  return push_nary_passthrough(dst_name, src,
+                               [](Dlop n1, Dlop n2) -> Dlop { return log_result_as_bool(*n1.and_op(n2)); });
 }
 
 upass::Vote uPass_constprop::process_log_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_binary_passthrough(
-      dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return log_result_as_bool(*n1.or_op(n2)); }, /*report_nil=*/false,
-      /*nil_operand_error=*/false);
+  return push_nary_passthrough(dst_name, src,
+                               [](Dlop n1, Dlop n2) -> Dlop { return log_result_as_bool(*n1.or_op(n2)); });
 }
 
 upass::Vote uPass_constprop::process_log_not(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
@@ -2257,7 +2255,7 @@ void uPass_constprop::fold_does(const std::string& dst) {
   }
 }
 
-// Per-first-level summary used by fold_in / fold_has: groups a bundle's flat
+// Per-first-level summary used by fold_case / fold_has: groups a bundle's flat
 // (single-level) entries by their first-level key, marking sub-bundle entries
 // (multi-level keys like `a.0`) so the comparison can distinguish a scalar
 // `a=1` from a nested `a=(1,2)`.
@@ -2359,170 +2357,6 @@ static int match_case_value(const std::shared_ptr<Bundle const>& subj, const std
     defer = true;  // subject itself undecidable
   }
   return defer ? -1 : 1;
-}
-
-// Fold `dst = in(l, r)`. Cursor is on the const("in") marker. Walks forward
-// to read l and r, evaluates the membership predicate, and stores /*FIXME-LCONST-CTOR*/Lconst(0/1)
-// in the symbol table.
-//
-// Semantics for `lhs in rhs` (matches Pyrope tuple-membership):
-//   - Each first-level entry in lhs must be "satisfied" by rhs.
-//   - Named entry `name=v` in lhs: rhs must have a first-level entry with the
-//     same name whose scalar value equals v. nil-on-LHS acts as a wildcard.
-//     A sub-bundle on the rhs side at that name fails the scalar comparison
-//     (e.g. `(a=1) in (a=(1,2))` is false).
-//   - Unnamed entry `v` in lhs: there must exist some first-level rhs entry
-//     (named or unnamed) whose scalar value equals v.
-// Sub-bundle entries on lhs cause the fold to defer until they collapse.
-//
-// On exit the cursor is left on the last visited child; the caller
-// (process_func_call) is responsible for `move_to_parent`.
-void uPass_constprop::fold_in(const std::string& dst) {
-  if (!move_to_sibling()) {
-    return;
-  }
-  auto ba = current_ref_bundle();
-  if (!move_to_sibling()) {
-    return;
-  }
-  auto bb = current_ref_bundle();
-  if (!ba || !bb) {
-    return;  // need both sides as known bundles
-  }
-
-  // Enum membership: `r in Mammal` — enum VALUES carry a parse-time
-  // `__enumentry` identity attr ('Mammal.rat'), and the enum-TYPE bundle's
-  // entries each carry theirs as a dotted attr leaf ('rat.__enumentry').
-  // Membership is identity-based, never raw-value-based: one-hot encodings
-  // collide across enums (Bird.parroket == Mammal.rat == 1), so a value
-  // compare would claim cross-enum membership (enum_hier).
-  if (const auto* lid_p = enum_identity_of(ba); lid_p != nullptr) {
-    const Dlop& lid          = *lid_p;
-    bool        found        = false;
-    bool        rhs_has_tags = false;  // RHS is an enum-TYPE bundle (entry tags)
-    for (const auto& [k, ep] : bb->get_attrs()) {
-      if (Bundle::get_last_level(k) != "enumentry") {
-        continue;
-      }
-      if (Bundle::get_first_level(k) == k) {
-        continue;  // the rhs bundle's own top-level tag, not a member entry's
-      }
-      rhs_has_tags = true;
-      if (!ep.trivial.is_invalid() && ep.trivial.same_repr(lid)) {
-        found = true;
-        break;
-      }
-    }
-    if (rhs_has_tags) {
-      store_trivial(dst, *Dlop::create_bool(found));
-      return;
-    }
-    // RHS carries no entry tags: a bitwise UNION of enum encodings (`rat |
-    // human`). Membership is bit-containment — `x in u  ⇔  x.bits & u == x.bits`
-    // (03-bundle.md "Hierarchical enumerates"). The parent's bare bit lives in
-    // its `enumval` attr; a leaf's is its scalar.
-    const Dlop lhs_own = enum_scalar_of(ba);
-    if (auto rs = bb->scalar();
-        rs.has_value() && lhs_own.is_integer() && !lhs_own.has_unknowns() && rs->is_integer() && !rs->has_unknowns()) {
-      const bool contained = lhs_own.and_op(*rs)->same_repr(lhs_own);
-      store_trivial(dst, *Dlop::create_bool(contained));
-      return;
-    }
-    store_trivial(dst, *Dlop::create_bool(false));
-    return;
-  }
-
-  auto lhs_flat = collect_first_level(ba);
-  auto rhs_flat = collect_first_level(bb);
-
-  // Tri-state result: nullopt = defer until more info, true/false = decided.
-  std::optional<bool> outcome;
-  outcome = true;
-  for (const auto& le : lhs_flat) {
-    if (le.is_sub_bundle) {
-      outcome.reset();  // defer: nested-LHS not modelled yet
-      break;
-    }
-    if (le.value.is_invalid()) {
-      outcome.reset();  // defer: lhs entry not yet folded
-      break;
-    }
-
-    if (!le.name.empty()) {
-      // Named entry — wildcard if value is nil.
-      if (le.value.is_nil()) {
-        continue;
-      }
-      bool                found_name = false;
-      std::optional<bool> matched_value;
-      for (const auto& re : rhs_flat) {
-        if (re.name != le.name) {
-          continue;
-        }
-        found_name = true;
-        if (re.is_sub_bundle) {
-          matched_value = false;  // scalar lhs vs sub-bundle rhs → unequal
-          break;
-        }
-        if (re.value.is_invalid()) {
-          break;  // defer (matched_value stays nullopt)
-        }
-        const Dlop eq = *le.value.eq_op(re.value);
-        if (eq.is_known_true()) {
-          matched_value = true;
-        } else if (eq.is_known_false()) {
-          matched_value = false;
-        }
-        break;
-      }
-      if (!found_name) {
-        outcome = false;
-        break;
-      }
-      if (!matched_value.has_value()) {
-        outcome.reset();  // defer
-        break;
-      }
-      if (!*matched_value) {
-        outcome = false;
-        break;
-      }
-    } else {
-      // Unnamed entry — value must occur in any rhs first-level scalar.
-      bool any_unknown = false;
-      bool matched     = false;
-      for (const auto& re : rhs_flat) {
-        if (re.is_sub_bundle) {
-          continue;
-        }
-        if (re.value.is_invalid()) {
-          any_unknown = true;
-          continue;
-        }
-        const Dlop eq = *le.value.eq_op(re.value);
-        if (eq.is_known_true()) {
-          matched = true;
-          break;
-        }
-        if (!eq.is_known_false()) {
-          any_unknown = true;
-        }
-      }
-      if (!matched) {
-        if (any_unknown) {
-          outcome.reset();  // defer
-          break;
-        }
-        outcome = false;
-        break;
-      }
-    }
-  }
-
-  if (!outcome.has_value()) {
-    return;
-  }
-  store_trivial(dst, Dlop::create_bool(*outcome));
 }
 
 // Fold `dst = has(l, key)`. Cursor is on the const("has") marker.
@@ -2851,20 +2685,6 @@ upass::Vote uPass_constprop::process_func_equals(std::string_view dst_name, Bund
   return classify_vote();
 }
 
-upass::Vote uPass_constprop::process_func_in(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
-  // Push-form wrapper: the body still walks the node under the cursor
-  // (subtree operands — named-field stores / does-operands — don't ride the
-  // operand span; dispatch_push saves/restores the cursor).
-  (void)dst_name;
-  (void)dst;
-  (void)src;
-
-  move_to_child();
-  std::string dvar(current_text());
-  fold_in(dvar);
-  move_to_parent();
-  return classify_vote();
-}
 
 upass::Vote uPass_constprop::process_func_has(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   // Push-form wrapper: the body still walks the node under the cursor

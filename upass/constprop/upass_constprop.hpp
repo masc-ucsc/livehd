@@ -74,7 +74,6 @@ public:
   void        process_func_call() override;
   upass::Vote process_func_does(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_func_equals(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
-  upass::Vote process_func_in(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_func_has(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_func_case(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   void        process_range() override;
@@ -395,6 +394,34 @@ protected:
     }
     return classify_vote();
   }
+  // N-ary logical reduce for `and`/`or` (both are n-ary ops — `a in (x,y,z)`
+  // lowers to a single `log_or(a==x, a==y, a==z)`, and a multi-RHS match arm to
+  // one `log_or`). Left-folds `op` over EVERY operand; the binary form above
+  // silently dropped operands past the second. Folds only when all operands are
+  // known numerics — a nil/unknown operand is not an error (it keeps, unresolved,
+  // the cassert/attribute-discharge path), matching the binary `and`/`or`.
+  template <typename F>
+  upass::Vote push_nary_passthrough(std::string_view dst, upass::Src_span src, F op) {
+    if (dst.empty() || src.size() < 2) {
+      return upass::Vote::keep;
+    }
+    Dlop acc = operand_value(src[0]);
+    if (!is_numeric(acc)) {
+      return upass::Vote::keep;
+    }
+    for (size_t i = 1; i < src.size(); ++i) {
+      Dlop n = operand_value(src[i]);
+      if (!is_numeric(n)) {
+        return upass::Vote::keep;
+      }
+      acc = op(acc, n);
+      if (acc.is_invalid()) {
+        return upass::Vote::keep;
+      }
+    }
+    store_trivial(dst, acc);
+    return classify_vote();
+  }
   // Ordering comparisons (`<`, `<=`, …). A nil operand is rejected by
   // report_nil_operand (ordering a nil walks payload-less bits in three_way_cmp
   // and yields a garbage Less/Greater/Equal — and per 07-typesystem.md nil may
@@ -564,7 +591,6 @@ protected:
   upass::Vote process_eq_ne_impl(std::string_view dst_name, upass::Src_span srcs);
 
   void fold_does(const std::string& dst);
-  void fold_in(const std::string& dst);
   void fold_has(const std::string& dst);
   void fold_case(const std::string& dst);
 

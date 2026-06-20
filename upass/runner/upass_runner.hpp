@@ -355,6 +355,20 @@ protected:
   // declines (false, cursor restored) for non-casts and comptime operands.
   bool try_lower_typecast();
 
+  // Lower a `func_in` (`a in b`) node into hardware. The right operand `b` must
+  // be an UNNAMED tuple/array whose size is known at compile time (it always is
+  // in upass — tuple shapes are comptime), and every element must have the same
+  // type as `a` (int width/signedness may differ; bool/int/enum/tuple kinds may
+  // not). The node expands, in source order, to
+  //   dst = (a == b[0]) or (a == b[1]) or … or (a == b[N-1])
+  // emitted through the inline (scratch-tree) path so constprop folds the
+  // constant comparisons (`1 in (runtime,2)` ⇒ `1==runtime`). An empty `b` folds
+  // to `false`. A named/unresolved `b`, or a kind mismatch, is a COMPILE ERROR
+  // (never a silent nil) — the expansion is finished here, so tolg never sees a
+  // func_in. The read cursor is left on the func_in node. Returns false only on
+  // a structurally malformed node (so the caller can fall back).
+  bool lower_in();
+
   // Var-arg access resolution. A `comb foo(...args)` call gathers its
   // leftover actuals here, keyed by the FRAME-TAGGED var-arg name (e.g.
   // "inl1_args"): positional leftovers under decimal keys "0","1",…, named
@@ -591,6 +605,12 @@ protected:
   // Runtime `bool(x)` == `(x != 0)`: emit `ne(dst, value, 0)` so the passes run
   // (typecheck stamps the boolean result kind).
   void emit_inline_to_bool(const std::string& dst, const Lnast_node& value);
+
+  // Emits `dst = op(operands…)` through the walk (scratch tree → process_lnast)
+  // so constprop observes and folds it — unlike emit_staging_op which writes the
+  // node straight to staging unfolded. `op` may be n-ary (eq, log_or, store).
+  // Used by lower_in to build the `a==b[i]` comparisons and their `or`.
+  void emit_inline_op(Lnast_ntype::Lnast_ntype_int op, const std::string& dst, const std::vector<Lnast_node>& operands);
 
   // Append `op(ref(dst), operands...)` DIRECTLY into the staging tree (no
   // process_lnast / pass dispatch). Used by the runtime `sat` lowering for the

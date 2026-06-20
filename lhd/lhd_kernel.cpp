@@ -632,7 +632,10 @@ void write_manifest(const std::string& dir, std::string_view kind, const std::ve
   std::vector<Manifest_unit> rich;
   rich.reserve(units.size());
   for (const auto& [name, hash] : units) {
-    rich.push_back({.name = name, .hash = hash});
+    Manifest_unit mu;  // unit_kind/verilog_origin/pubs keep their defaults
+    mu.name = name;
+    mu.hash = hash;
+    rich.push_back(std::move(mu));
   }
   write_manifest(dir, kind, rich);
 }

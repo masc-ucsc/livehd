@@ -14,9 +14,8 @@ const h = Mammal.human
 const p = Bird.parroket
 
 cassert(r != h)
-cassert(r in Mammal)
-cassert(h in Mammal)
-
-cassert(not (p in Mammal))
-cassert(p in Bird)
+cassert(r in (Mammal.rat, Mammal.human))
+cassert(h in (Mammal.rat, Mammal.human))
+cassert(not (r in (Mammal.human,)))        // same-enum non-member
+cassert(p in (Bird.parroket, Bird.flinch))
 cassert(p == Bird.parroket)

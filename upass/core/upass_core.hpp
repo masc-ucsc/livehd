@@ -338,7 +338,6 @@ public:
   PROCESS_NODE_PUSH(ge)
   PROCESS_NODE_PUSH(func_does)
   PROCESS_NODE_PUSH(func_equals)
-  PROCESS_NODE_PUSH(func_in)
   PROCESS_NODE_PUSH(func_has)
   PROCESS_NODE_PUSH(func_case)
   PROCESS_NODE_PUSH(tuple_add)
