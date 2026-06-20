@@ -1,0 +1,18 @@
+/*
+:name: bitrange_open
+:type: equiv
+:verilog_top: bitrange_open.osel
+:pyrope_top: bitrange_open.osel
+*/
+
+// Open-ended bit slice `a#[k..]` with a COMPTIME offset (todo "Open-ended bit
+// slice"): selects bits k..MSB, packed LSB-first as an UNSIGNED value. tolg
+// closes the open range to `k..=(value bits-1)` using the source width, so the
+// offset is kept and the width/sign are right (previously it dropped the offset
+// and returned the LOW bits). Covers a real offset, the full slice (k==0, which
+// is the whole value like the bare `#[..]`), and the single top bit (k==msb).
+comb osel(a:u16) -> (zfull:u16, zoff:u11, zmsb:u1) {
+  zfull = a#[0..]
+  zoff  = a#[5..]
+  zmsb  = a#[15..]
+}
