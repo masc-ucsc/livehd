@@ -1,0 +1,28 @@
+/*
+:name: match_no_else
+:type: parsing lnast comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// B1-ergonomics: a `match` whose arms cover the full key space needs NO `else`.
+// At comptime the known selector always hits one arm, so the result folds
+// exactly as it would with an explicit (dead) `else`.
+const sel = 2
+
+const result = match sel {
+  == 0ub00 { 0ub0001 }
+  == 0ub01 { 0ub0010 }
+  == 0ub10 { 0ub0100 }
+  == 0ub11 { 0ub1000 }
+}
+cassert(result == 4)
+
+// `case` arms (structural equality) are equally exhaustive without an else.
+const result2 = match sel {
+  case 0ub00 { 0ub0001 }
+  case 0ub01 { 0ub0010 }
+  case 0ub10 { 0ub0100 }
+  case 0ub11 { 0ub1000 }
+}
+cassert(result == result2)

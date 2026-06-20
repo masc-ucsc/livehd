@@ -109,6 +109,7 @@ Enforced by `scripts/contracts/diff_no_compile_flags_touched.sh`.
   */
   comb foo( -> (z) { z = b#[1,4] }   // locate_error_here  (missing ')')
   ```
+- **Expected-warning tests** (`:type: warning`, in `inou/prp/tests/warnings/`): the lint counterpart of `tests/errors/`. The program **must compile cleanly** (exit 0, no `error` diagnostic) yet emit at least one **warning** diagnostic. The header's `:warning:` and `:help:` values are matched (same `re.search` + literal fallback) against the warning's `message` / `hint`; a `locate_warning_here` comment pins the warning's `start_line`. Each `tests/warnings/*.prp` auto-generates a `prp-warn-<name>` `bazel test` target. See `inou/prp/tests/warnings/README.md`. Example: a pure expression used as a statement (`a + 1`) triggers `unused-expression`.
 
 ## Debugging Yosys-to-LGraph Flow
 

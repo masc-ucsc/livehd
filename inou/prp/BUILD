@@ -97,6 +97,29 @@ cc_test(
     ])
 ]
 
+# Expected-warning tests (`:type: warning`, in tests/warnings/): the program
+# must COMPILE CLEANLY but emit a warning diagnostic whose message/hint match
+# the header :warning:/:help: regexes (the lint counterpart of tests/errors/).
+# A `locate_warning_here` comment pins the warning's line. Distinct `prp-warn-`
+# prefix so the target names cannot collide with the `prp-` glob above.
+[
+    sh_test(
+        name = "prp-warn-%s" % prp_file.split("/")[-1].split(".")[0],
+        srcs = ["tests/pyrope_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:%s)" % prp_file,
+        ],
+        data = [
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//inou/prp:%s" % prp_file,
+            "//lhd",
+        ],
+    )
+    for prp_file in glob(["tests/warnings/*.prp"])
+]
+
 # Import tests (2f-lnimport): multi-file — an importer plus the unit(s) it
 # imports. Each test names its inputs via the `:files:` header; every .prp in
 # tests/imports/ is bundled into data so the header's repo-relative paths

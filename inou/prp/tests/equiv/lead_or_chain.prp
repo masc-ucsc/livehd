@@ -1,0 +1,44 @@
+/*
+:name: lead_or_chain
+:type: equiv
+:verilog_top: lead_or_chain.top
+:pyrope_top: lead_or_chain.top
+*/
+
+// Regression for the line-leading word-operator continuation bug: a long boolean
+// chain whose `or`/`and` operators begin the continuation line used to be
+// mis-parsed — each leading `or (...)` became a stray `or(...)` call, so the
+// result kept ONLY the first term. The two outputs cross the spellings so that
+// whichever side (Pyrope front-end OR the shared upass that slang also feeds)
+// dropped a term would diverge from its golden:
+//
+//   out1 : Pyrope = CHAINED (leading-operator continuation)  | Verilog = split wires
+//   out2 : Pyrope = SPLIT named conditions                   | Verilog = inline chain
+//
+// Both outputs are logically the same function written two ways, so the LEC must
+// hold only when continuation parsing keeps every term.
+comb top(sel:u4, x:u8, y:u8) -> (out1:bool, out2:bool) {
+  // out1 — the chained form, operators starting each continuation line. This is
+  // the exact shape that used to silently collapse to `(sel == 0 and x == y)`.
+  out1 =
+       (sel == 0 and x == y)
+    or (sel == 1 and x != y)
+    or (sel == 2 and x <  y)
+    or (sel == 3 and x <= y)
+    or (sel == 4 and x >  y)
+    or (sel == 5 and x >= y)
+    or (sel == 6 and x == 0)
+    or (sel == 7 and y == 0)
+
+  // out2 — the same kind of wide function, but broken into named conditions and
+  // recombined. One condition also spans lines with a leading `and` to exercise
+  // that spelling too.
+  const d0 = sel == 8  and x == y
+  const d1 = sel == 9  and x != y
+  const d2 = sel == 10
+         and x <  y
+  const d3 = sel == 11 and x >= y
+  const d4 = sel == 12 and x == 0
+  const d5 = sel == 13 and y == 0
+  out2 = d0 or d1 or d2 or d3 or d4 or d5
+}

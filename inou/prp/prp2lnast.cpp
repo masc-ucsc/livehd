@@ -284,6 +284,54 @@ void Prp2lnast::report_error_at(uint32_t start_byte, uint32_t end_byte, uint32_t
   throw Eprp::parser_error(Pass::eprp, msg_copy);
 }
 
+void Prp2lnast::report_warning(const TSNode& node, std::string_view code, std::string_view category, std::string message,
+                               std::string_view hint) const {
+  livehd::diag::Span span;
+  span.file       = src_filename;
+  span.start_byte = ts_node_start_byte(node);
+  span.end_byte   = ts_node_end_byte(node);
+  auto sp         = ts_node_start_point(node);
+  auto ep         = ts_node_end_point(node);
+  span.start_line = sp.row + 1;
+  span.start_col  = sp.column + 1;
+  span.end_line   = ep.row + 1;
+  span.end_col    = ep.column + 1;
+
+  // A warning never aborts the parse — emit it straight to the sink (which
+  // writes the configured JSONL/human channels) and continue lowering.
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::warning,
+                                                     .code     = std::string(code),
+                                                     .category = std::string(category),
+                                                     .pass     = "inou.prp",
+                                                     .message  = std::move(message),
+                                                     .span     = std::move(span),
+                                                     .hint     = std::string(hint)});
+}
+
+bool Prp2lnast::expr_has_side_effects(TSNode n) const {
+  if (ts_node_is_null(n)) {
+    return false;
+  }
+  std::string_view t(ts_node_type(n));
+  // Node kinds that carry an observable effect on their own: a call may write
+  // `ref` params / instantiate hardware, an assignment / enum-assignment / spawn
+  // mutates state, an `expr::[attr=…]` set configures a port, a lambda is a
+  // definition, and an embedded scope / if / match / loop runs statements whose
+  // effects are not captured by the discarded top-level value.
+  if (t == "function_call_expression" || t == "assignment" || t == "enum_assignment" || t == "attribute_set"
+      || t == "spawn_statement" || t == "lambda" || t == "if_expression" || t == "match_expression" || t == "scope_statement"
+      || t == "while_statement" || t == "for_statement" || t == "loop_statement") {
+    return true;
+  }
+  const uint32_t cc = ts_node_named_child_count(n);
+  for (uint32_t i = 0; i < cc; i++) {
+    if (expr_has_side_effects(ts_node_named_child(n, i))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 hhds::SourceId Prp2lnast::mint_src(const TSNode& node) const {
   if (ts_node_is_null(node) || src_relpath.empty()) {
     return hhds::SourceId_invalid;
@@ -1491,6 +1539,21 @@ void Prp2lnast::process_statement(TSNode n) {
     }
   }
   if (expr_stmt.contains(t)) {
+    // A pure expression at statement position computes a value that is never
+    // used (e.g. `a + 1`, `a == b`, a bare `a`, `(x, y)`). Warn — unless the
+    // expression has an observable side effect somewhere inside it (a function
+    // call, an assignment, an `::[attr=…]` write, …), in which case the
+    // statement is run for that effect and the discarded value is not useless.
+    // Value-producing trailing expressions (a code-block / if / match value, a
+    // single-expression comb output) never reach here — they lower through
+    // expr_to_node directly, not process_statement.
+    if (!expr_has_side_effects(n)) {
+      report_warning(n,
+                     "unused-expression",
+                     "syntax",
+                     "expression result is unused (statement has no effect)",
+                     "remove the statement, or assign / use its value");
+    }
     (void)expr_to_node(n);
     return;
   }

@@ -1,0 +1,28 @@
+/*
+:name: comb_single_out_op
+:type: equiv
+:verilog_top: comb_single_out_op.csout
+:pyrope_top: comb_single_out_op.csout
+*/
+
+// 1i comb-inliner: a SINGLE-output `comb`'s call result must be usable in ANY
+// expression context — an operator operand, a comparison, an if-condition — not
+// just a bare flow-through or a whole-value if-branch read. Before the fix the
+// inliner held the runtime result as a nil seed, so any operator over it folded
+// to nil and raised a spurious "nil-operation" error (the call's only working
+// uses were `out = z` and `out = if c { z } else { 0 }`). Each output below
+// pins a different consuming context; the LEC proves the datapath value, not
+// just that the program compiles.
+
+comb one(a:u8) -> (r:u9) {
+  r = a + 1
+}
+
+comb csout(a:u8, b:u8) -> (s:u10, c:u9, d:u10, e:u9) {
+  const z = one(a=a)
+  s = z + 1                                 // arith on a SAVED result:   a+2
+  const w = one(a=b) == 6                   // compare directly on a result
+  c = if w { 7 } else { 9 }                 // (b==5) ? 7 : 9
+  d = one(a=a) + one(a=b)                   // two INLINED results in one op: a+b+2
+  e = if one(a=a) == 5 { 11 } else { 13 }   // inline compare in if-cond: (a==4)?11:13
+}

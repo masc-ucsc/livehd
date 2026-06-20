@@ -3318,27 +3318,49 @@ private:
     set_unsign(sel);
 
     for (const auto& var : all_vars) {
-      auto base     = pin_map_.find(var);
-      Pin  pre      = (base != pin_map_.end()) ? base->second : nil_pin();
-      auto ew       = else_writes.find(var);
-      Pin  else_val = (ew != else_writes.end()) ? ew->second : pre;
+      auto       base    = pin_map_.find(var);
+      const bool has_pre = base != pin_map_.end();
+      Pin        pre     = has_pre ? base->second : nil_pin();
+      auto       ew      = else_writes.find(var);
+      const bool has_ev  = ew != else_writes.end();
+      Pin        else_val = has_ev ? ew->second : pre;
 
-      // The Hotmux result width is the WIDEST among its arm sources, exactly as
-      // the Mux chain above sizes itself. mw_lookup alone holds whatever the
+      // The Hotmux result width is the WIDEST among its REAL arm sources, exactly
+      // as the Mux chain above sizes itself. mw_lookup alone holds whatever the
       // LAST recorded write left (or 1 for a const arm like a `match … else {0}`
       // slot), which under-sizes the result and truncates the wider arms (the
       // match-expression `o = match s {…else{0}}` 1-bit-output miscompile).
-      int32_t mw = std::max({mw_lookup(var), pin_mw_of(pre), pin_mw_of(else_val)});
+      //
+      // A SYNTHETIC nil fallback must never count toward the width. When a
+      // `match` omits its `else` and the result has no pre-match value (a fresh
+      // match-expression result tmp), the none-of slot is a pure don't-care; but
+      // nil_pin() is 64 bits wide, so counting it would balloon the whole Hotmux
+      // to 65 bits and truncate the real arms back down. Size from real sources
+      // only, then drive the none-of slot with a width-correct don't-care.
+      int32_t mw = mw_lookup(var);
+      if (has_pre) {
+        mw = std::max(mw, pin_mw_of(pre));
+      }
+      if (has_ev) {
+        mw = std::max(mw, pin_mw_of(else_val));
+      }
 
       auto hot = make_node(Ntype_op::Hotmux);
       hot.create_sink_pin(0).connect_driver(sel);
       for (int i = 0; i < n_conds; ++i) {
         auto wr  = branches[i].writes.find(var);
+        // A non-writing arm keeps the pre-match value; only real writes size.
         Pin  val = wr != branches[i].writes.end() ? wr->second : pre;
-        mw       = std::max(mw, pin_mw_of(val));
+        if (wr != branches[i].writes.end()) {
+          mw = std::max(mw, pin_mw_of(val));
+        }
         hot.create_sink_pin(static_cast<hhds::Port_id>(i + 1)).connect_driver(val);
       }
-      hot.create_sink_pin(static_cast<hhds::Port_id>(n_conds + 1)).connect_driver(else_val);
+      // none-of slot: explicit else / pre value when present; otherwise an
+      // exhaustive else-less match — drive the unreachable slot with a
+      // width-matched don't-care (`mw`-bit 0sb?) so it adds no width pressure.
+      const Pin none_val = (has_ev || has_pre) ? else_val : create_const(*g_, *Dlop::unknown(mw));
+      hot.create_sink_pin(static_cast<hhds::Port_id>(n_conds + 1)).connect_driver(none_val);
       bind_result(var, hot.create_driver_pin(0), mw);
     }
   }

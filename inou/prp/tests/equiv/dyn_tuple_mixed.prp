@@ -1,0 +1,15 @@
+/*
+:name: dyn_tuple_mixed
+:type: equiv
+:verilog_top: dyn_tuple_mixed.selm
+:pyrope_top: dyn_tuple_mixed.selm
+*/
+
+// A dynamic tuple select whose elements MIX runtime wires and a comptime
+// constant (`[a, 7, c, d]`). The constant slot becomes a constant mux arm; the
+// wire slots become wire arms. Still a comptime-known 4-entry shape, so it
+// lowers to the same balanced Hotmux.
+comb selm(sel:u2, a:u8, c:u8, d:u8) -> (z:u8) {
+  const choices = [a, 7, c, d]
+  z = choices[sel]
+}

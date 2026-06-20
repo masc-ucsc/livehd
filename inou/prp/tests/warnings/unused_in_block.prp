@@ -1,0 +1,15 @@
+/*
+:name: unused_in_block
+:type: warning
+:warning: unused
+*/
+// Inside a code-block expression only the LAST expression is the block's value.
+// A non-final bare expression is discarded, so it warns; the trailing `t + 1`
+// is the block value and is NOT flagged.
+comb foo(a:u8) -> (z:u8) {
+  z = {
+    mut t = a
+    t * 2    // locate_warning_here  (discarded; not the block value)
+    t + 1
+  }
+}

@@ -1,0 +1,19 @@
+/*
+:name: match_no_else
+:type: equiv
+:verilog_top: match_no_else.msel
+:pyrope_top: match_no_else.msel
+*/
+
+// B1-ergonomics: a `match` whose arms cover the full key space needs NO `else`.
+// A `u2` selector listing `== 0/1/2/3` is exhaustive, so the omitted else is an
+// unreachable don't-care (the Hotmux none-of slot keeps a width-matched 0sb?).
+// This is LEC-equivalent to the explicit four-way case in the golden Verilog.
+comb msel(x:u2, a:u8, b:u8, c:u8, d:u8) -> (res:u8) {
+  res = match x {
+    == 0 { a }
+    == 1 { b }
+    == 2 { c }
+    == 3 { d }
+  }
+}

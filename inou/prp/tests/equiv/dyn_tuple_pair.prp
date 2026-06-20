@@ -1,0 +1,13 @@
+/*
+:name: dyn_tuple_pair
+:type: equiv
+:verilog_top: dyn_tuple_pair.sel2
+:pyrope_top: dyn_tuple_pair.sel2
+*/
+
+// Smallest dynamic tuple select: a 2-entry tuple-of-wires with a 1-bit index
+// lowers to a single 2:1 mux (the Hotmux degenerates to one compare + else).
+comb sel2(sel:u1, a:u8, b:u8) -> (z:u8) {
+  const pair = [a, b]
+  z = pair[sel]
+}

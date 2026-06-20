@@ -159,6 +159,17 @@ upass::Emit_decision uPass_verifier::classify_statement() {
 
   const bool known = val && !val->is_invalid() && !val->has_unknowns();
   if (!known) {
+    // 1i comb-inliner: a cassert whose operand is (transitively) a runtime
+    // comb result — an inliner nil-seed (Symbol_table::nil_seeded, propagated
+    // through constprop's keep_runtime_seed) — has no comptime value to check.
+    // Discharge it as a pass, mirroring the comptime-nil discharge below (which
+    // is exactly what such an operand folded to before single-output comb
+    // results became usable in operators). The cassert node is still dropped
+    // here; the runtime datapath that produced the value is kept elsewhere.
+    if (runner_st != nullptr && runner_st->nil_seeded.contains(operand_text)) {
+      ++pass_count;
+      return upass::Emit_decision::drop();
+    }
     // Count as unknown so end_run can surface which cassert(s) the test
     // failed to resolve when expected counts don't match up.
     ++unknown_count;

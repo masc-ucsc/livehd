@@ -1,0 +1,12 @@
+/*
+:name: unused_add
+:type: warning
+:warning: unused
+:help: remove
+*/
+// A bare arithmetic expression at statement position computes a value that is
+// never used. The program still compiles (the warning does not abort it).
+comb foo(a:u8, b:u8) -> (z:u8) {
+  a + 1    // locate_warning_here  (result discarded — useless)
+  z = a + b
+}

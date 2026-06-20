@@ -85,6 +85,19 @@ protected:
                                     uint32_t end_line, uint32_t end_col, std::string_view code, std::string_view category,
                                     std::string message, std::string_view hint = {}) const;
 
+  // Emit a *warning* diagnostic (does NOT abort the parse — the program still
+  // compiles). Anchored at `node`'s source span like report_error. Used for
+  // lint-style findings such as a statement whose computed value is unused.
+  void report_warning(const TSNode& node, std::string_view code, std::string_view category, std::string message,
+                      std::string_view hint = {}) const;
+
+  // True when `n` (the CST subtree of a statement-position expression) can have
+  // an observable side effect — a function call, an assignment, an attribute
+  // write (`::[attr=…]`), a spawn, a lambda, or an embedded scope / control /
+  // if / match. A pure expression (arithmetic, reads, tuples, constants) has
+  // none, so discarding its value at statement position is useless.
+  [[nodiscard]] bool expr_has_side_effects(TSNode n) const;
+
   // Stamp `node`'s span as the LNAST node's SourceId (minted through
   // the Lnast's Source_locator), overriding the statement-level pending id
   // with a finer anchor — an `if` condition, a call site, a range expression —

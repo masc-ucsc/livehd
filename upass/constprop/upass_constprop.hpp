@@ -339,6 +339,49 @@ protected:
     return o.bundle ? o.bundle->lone_trivial() : Dlop();
   }
 
+  // 1i comb-inliner: true when any operand is a RUNTIME placeholder — an inliner
+  // nil-seed (Symbol_table::nil_seeded): a single-output comb's runtime-valued
+  // result, held in the symbol table as a nil (or, once it flows through an op
+  // kept by this same guard, as an unset/invalid slot) because its real driver
+  // is a kept structural op that tolg wires up. Such an operand carries NO
+  // comptime value, so an operator over it CANNOT fold; the caller must KEEP the
+  // op structural via keep_runtime_seed (no fold, no nil-result diagnostic),
+  // exactly as it does for a plain runtime io input. A seeded var that DID fold
+  // to a real value (e.g. a comptime-arg call) is non-nil/non-invalid here, so
+  // it still folds normally. Genuine user nils are caught earlier by
+  // report_nil_operand; only the inliner's seeds reach a fold template as a
+  // "legal" nil. Template bodies are exempt (they fold nil placeholders for
+  // unbound params, realized at the call site — mirrors report_nil_operand).
+  bool has_runtime_seed_operand(upass::Src_span src) {
+    if (in_template_body()) {
+      return false;
+    }
+    for (const auto& o : src) {
+      if (o.name.empty() || !st().nil_seeded.contains(std::string(o.name))) {
+        continue;
+      }
+      const auto v = operand_value(o);
+      if (v.is_nil() || v.is_invalid()) {  // seeded operand with no foldable value → runtime placeholder
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Keep an op structural because an operand is a runtime comb-result placeholder
+  // (has_runtime_seed_operand). The result is itself a runtime placeholder, so
+  // mark it nil-seeded too: this propagates the "cannot fold, drives a real
+  // wire" status down an operator chain, and lets the verifier discharge a
+  // cassert over it (it has no comptime value to check — same as the nil it
+  // folded to before this fix). No value is stored: storing a nil here would
+  // make a downstream `if (<this>) {…}` trip the runner's nil-condition error.
+  upass::Vote keep_runtime_seed(std::string_view dst) {
+    if (!dst.empty()) {
+      st().nil_seeded.insert(std::string(dst));
+    }
+    return upass::Vote::keep;
+  }
+
   // Push-form fold templates (the cursor-walking originals below die with
   // the cursor-walking originals).
   // report_nil (2f-nil_diag): true ONLY for genuine arithmetic ops (+ - * / %)
@@ -353,6 +396,9 @@ protected:
     }
     if (report_nil_operand(src)) {
       return classify_vote();
+    }
+    if (has_runtime_seed_operand(src)) {
+      return keep_runtime_seed(dst);  // runtime comb result → keep structural, do not fold to nil
     }
     Dlop r = operand_value(src[0]);
     if (!is_numeric(r)) {
@@ -383,6 +429,9 @@ protected:
     if (nil_operand_error && report_nil_operand(src)) {
       return classify_vote();
     }
+    if (has_runtime_seed_operand(src)) {
+      return keep_runtime_seed(dst);  // runtime comb result → keep structural, do not fold to nil
+    }
     Dlop n1 = operand_value(src[0]);
     Dlop n2 = operand_value(src[1]);
     if (!is_numeric(n1) || !is_numeric(n2)) {
@@ -404,6 +453,9 @@ protected:
   upass::Vote push_nary_passthrough(std::string_view dst, upass::Src_span src, F op) {
     if (dst.empty() || src.size() < 2) {
       return upass::Vote::keep;
+    }
+    if (has_runtime_seed_operand(src)) {
+      return keep_runtime_seed(dst);  // `and`/`or` over a runtime comb result → keep structural
     }
     Dlop acc = operand_value(src[0]);
     if (!is_numeric(acc)) {
@@ -434,6 +486,9 @@ protected:
     if (report_nil_operand(src)) {
       return classify_vote();
     }
+    if (has_runtime_seed_operand(src)) {
+      return keep_runtime_seed(dst);  // runtime comb result → keep structural, do not fold to nil
+    }
     Dlop n1 = operand_value(src[0]);
     Dlop n2 = operand_value(src[1]);
     if (!is_numeric(n1) || !is_numeric(n2)) {
@@ -455,6 +510,9 @@ protected:
     if (nil_operand_error && report_nil_operand(src)) {
       return classify_vote();
     }
+    if (has_runtime_seed_operand(src)) {
+      return keep_runtime_seed(dst);  // runtime comb result → keep structural, do not fold to nil
+    }
     Dlop r = operand_value(src[0]);
     if (!is_numeric(r)) {
       return upass::Vote::keep;
@@ -472,6 +530,9 @@ protected:
     }
     if (report_nil_operand(src)) {
       return classify_vote();
+    }
+    if (has_runtime_seed_operand(src)) {
+      return keep_runtime_seed(dst);  // runtime comb result → keep structural, do not fold to nil
     }
     Dlop v = operand_value(src[0]);
     if (!is_numeric(v)) {

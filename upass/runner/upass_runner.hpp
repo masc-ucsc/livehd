@@ -386,6 +386,15 @@ protected:
   // (try_tuple_slot_ref). False leaves the node to the normal fold/emit path
   // (nested access, dynamic index, comptime slot, or unknown ref).
   bool                                                                              try_resolve_tuple_get();
+  // `dst = src[idx]` with a RUNTIME index into a comptime fixed-size tuple of
+  // scalar wires (`const choices=[a,b,c,d]`) lowers to a balanced Hotmux —
+  // `match idx { ==0 {dst=e0} … else {dst=e_{n-1}} }` — instead of erroring in
+  // tolg (only memories/multi-out/comptime indices accept a dynamic index).
+  // Gated on >=1 slot being a genuine runtime-wire ref (tuple_slot_ref), which
+  // a `mut`/`reg` memory array never populates, so the memory path is untouched.
+  bool                                                                              try_lower_dynamic_tuple_index(const std::string& dst,
+                                                                                                                  const std::string& src,
+                                                                                                                  const std::string& idx_ref);
   // Source ref held at `slot` of tuple `name` (runtime-scalar slot). First pass
   // that provides wins. See uPass::provide_tuple_slot_ref.
   std::optional<std::string>                               try_tuple_slot_ref(std::string_view name, std::string_view slot);

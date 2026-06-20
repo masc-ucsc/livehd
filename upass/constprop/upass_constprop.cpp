@@ -914,6 +914,9 @@ upass::Vote uPass_constprop::process_shl(std::string_view dst_name, Bundle& dst,
   if (report_nil_operand(src)) {  // nil shift operand is illegal (07-typesystem.md)
     return classify_vote();
   }
+  if (has_runtime_seed_operand(src)) {
+    return keep_runtime_seed(dst_name);  // runtime comb result → keep structural, do not fold to nil
+  }
   const std::string var{dst_name};
   Dlop              n1 = operand_value(src[0]);
   if (!is_numeric(n1)) {
@@ -968,6 +971,9 @@ upass::Vote uPass_constprop::process_sra(std::string_view dst_name, Bundle& dst,
   }
   if (report_nil_operand(src)) {  // nil shift operand is illegal (07-typesystem.md)
     return classify_vote();
+  }
+  if (has_runtime_seed_operand(src)) {
+    return keep_runtime_seed(dst_name);  // runtime comb result → keep structural, do not fold to nil
   }
   const std::string var{dst_name};
   Dlop              n1 = operand_value(src[0]);
@@ -1249,6 +1255,17 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
 
   if (dst_name.empty() || srcs.size() < 2) {
     return classify_vote();
+  }
+  // 1i comb-inliner: a runtime comb result (an inliner nil-seed) feeding `==`/
+  // `!=` has no comptime value — keep the compare structural so tolg lowers it
+  // to hardware, instead of folding it to a nil result (which then surfaces as a
+  // nil-condition error in `if one(a) == 5 { … }`). Mark the result a runtime
+  // placeholder too so the verifier discharges a `cassert(one(a) == k)` as pass
+  // (it cannot be checked at compile time — same as the nil it used to fold to).
+  // A genuine `x == nil` literal (name-less is_const_nil operand) is NOT seeded,
+  // so it still folds below.
+  if (has_runtime_seed_operand(srcs)) {
+    return keep_runtime_seed(dst_name);
   }
   const std::string var{dst_name};
 

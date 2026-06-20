@@ -1,0 +1,19 @@
+/*
+:name: dyn_tuple_sel
+:type: equiv
+:verilog_top: dyn_tuple_sel.sel4
+:pyrope_top: dyn_tuple_sel.sel4
+*/
+
+// A runtime index into a COMPTIME fixed-size tuple-of-wires lowers to a
+// balanced Hotmux: `const choices = [a,b,c,d]; z = choices[sel]` becomes
+// `match sel { ==0 {a} ==1 {b} ==2 {c} else {d} }`. The tuple shape is known
+// at compile time (4 entries); only the index is dynamic. This is the
+// datapath-select idiom that previously required a hand-written `mut + match`
+// (the workaround the CPU forwarding/ALU muxes used). Unlike `mut g:[4]u8`
+// (which becomes a Memory), a `const`/tuple-literal of wires is not memory-
+// backed, so tolg used to reject the dynamic index.
+comb sel4(sel:u2, a:u8, b:u8, c:u8, d:u8) -> (z:u8) {
+  const choices = [a, b, c, d]
+  z = choices[sel]
+}

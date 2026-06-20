@@ -1,0 +1,54 @@
+/*
+:name: lead_word_op_cont
+:type: comptime
+*/
+
+// A continuation line that BEGINS with a binary word-operator (`or`, `and`,
+// `implies`, `in`, `does`, `equals`) must continue the previous expression —
+// just like a line beginning with a symbolic operator (`+`, `|`, `==`). Before
+// the lexer fix the leading word was mis-read as a new statement (`or(...)` as a
+// call), so the value kept only the first term. Each `const` below puts the
+// operator at column-1 of the continuation (top level, outside any bracket,
+// where the bug actually bit) and the cassert pins the full result.
+
+const r_or = false
+          or true
+cassert(r_or == true)
+
+const r_or3 = false
+           or false
+           or true
+cassert(r_or3 == true)
+
+const r_and = true
+           and false
+cassert(r_and == false)
+
+const r_and3 = true
+            and true
+            and false
+cassert(r_and3 == false)
+
+const r_mix = (1 == 1 and 2 == 3)
+           or (4 == 4 and 5 == 5)
+cassert(r_mix == true)
+
+const r_impl = true
+            implies false
+cassert(r_impl == false)
+
+const r_in_t = 3
+            in (1, 2, 3)
+cassert(r_in_t == true)
+
+const r_in_f = 9
+            in (1, 2, 3)
+cassert(r_in_f == false)
+
+const r_does = u8
+            does u4
+cassert(r_does == true)
+
+const r_eq = 5
+          equals 5
+cassert(r_eq == true)

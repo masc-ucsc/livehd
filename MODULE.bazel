@@ -150,19 +150,20 @@ git_override(
 # LiveHD's core diag.hpp / parser.hpp); see //packages:prpparse.BUILD.
 # To bump the pin, recompute integrity via:
 #   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip | openssl dgst -sha256 -binary | base64
-http_archive(
-    name = "prpparse",
-    build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-YtdwJ+khTnL7G/GIh+eOsCoyZwuR8JLexQ20win6U98=",  # 2f-stream-parse-next tip: line-leading word-op continuation fix
-    strip_prefix = "tree-sitter-pyrope-dc809dc1fb033e4d857f747251157ab58ea05363/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/dc809dc1fb033e4d857f747251157ab58ea05363.zip"],
-)
-# For local prpparse co-development, swap the http_archive above for:
-# new_local_repository(
+# http_archive(
 #     name = "prpparse",
 #     build_file = "//packages:prpparse.BUILD",
-#     path = "../tree-sitter-pyrope/prpparse",
+#     integrity = "sha256-YtdwJ+khTnL7G/GIh+eOsCoyZwuR8JLexQ20win6U98=",  # 2f-stream-parse-next tip: line-leading word-op continuation fix
+#     strip_prefix = "tree-sitter-pyrope-dc809dc1fb033e4d857f747251157ab58ea05363/prpparse",
+#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/dc809dc1fb033e4d857f747251157ab58ea05363.zip"],
 # )
+# LOCAL OVERRIDE for prpparse co-development (optional `else` in match). PIN
+# RESTORE PENDING: push the tsp commit, then revert to the http_archive above.
+new_local_repository(
+    name = "prpparse",
+    build_file = "//packages:prpparse.BUILD",
+    path = "../tree-sitter-pyrope/prpparse",
+)
 
 # tree-sitter runtime — the incremental-parsing C library (libtree-sitter).
 # Only the Pyrope *formatter* (`lhd pyrope fmt`, @tree_sitter_pyrope//:prpfmt)
@@ -188,19 +189,21 @@ http_archive(
 # prpfmt/ts_symbols.h (gitignored); //packages:prpfmt.BUILD regenerates it from
 # src/parser.c via a genrule, so no local checkout is required. Bump the pin per
 # the @prpparse note above (recompute integrity).
-http_archive(
-    name = "tree_sitter_pyrope",
-    build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-YtdwJ+khTnL7G/GIh+eOsCoyZwuR8JLexQ20win6U98=",  # 2f-stream-parse-next tip (same archive as @prpparse above)
-    strip_prefix = "tree-sitter-pyrope-dc809dc1fb033e4d857f747251157ab58ea05363",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/dc809dc1fb033e4d857f747251157ab58ea05363.zip"],
-)
-# For local prpfmt co-development, swap the http_archive above for:
-# new_local_repository(
+# http_archive(
 #     name = "tree_sitter_pyrope",
 #     build_file = "//packages:prpfmt.BUILD",
-#     path = "../tree-sitter-pyrope",
+#     integrity = "sha256-YtdwJ+khTnL7G/GIh+eOsCoyZwuR8JLexQ20win6U98=",  # 2f-stream-parse-next tip (same archive as @prpparse above)
+#     strip_prefix = "tree-sitter-pyrope-dc809dc1fb033e4d857f747251157ab58ea05363",
+#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/dc809dc1fb033e4d857f747251157ab58ea05363.zip"],
 # )
+# LOCAL OVERRIDE for prpfmt co-development (optional `else` in match → regenerated
+# src/parser.c). PIN RESTORE PENDING with @prpparse above: push the tsp commit,
+# then revert both to the http_archive form.
+new_local_repository(
+    name = "tree_sitter_pyrope",
+    build_file = "//packages:prpfmt.BUILD",
+    path = "../tree-sitter-pyrope",
+)
 
 # OpenTimer
 http_archive(

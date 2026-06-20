@@ -141,6 +141,14 @@ class PrpRunner:
                     'lg:{}/'.format(self._scratch(test, mode, '_lg'))]
         return cmd
 
+    def lhd_warning(self, test, mode):
+        # Expected-warning test: the program must COMPILE CLEANLY (no error) and
+        # the front-end must emit a warning diagnostic. The pipeline mirrors the
+        # upass smoke-test (constprop only, verifier off, no tolg) — the warning
+        # is produced during prp->lnast lowering, so the front-end stage alone is
+        # enough; run_warning() adds the --emit diagnostics: slot itself.
+        return self.lhd_upass(test, mode)
+
     def lhd_lgraph(self, test, mode):
         # LNAST->LGraph: the lg: emit gates the kernel's standalone tolg
         # lowering (the CLI-level tolg:1); --recipe O0 keeps the graph passes
@@ -267,6 +275,91 @@ class PrpRunner:
                 return 1
 
         print('{} - error - success (matched: {})'.format(name, messages))
+        return 0
+
+    def run_warning(self, tmp_dir, test: PrpTest):
+        # Expected-warning test (the warnings/ counterpart of run_error): the
+        # program MUST compile cleanly (no error, exit 0) AND emit at least one
+        # WARNING diagnostic whose message/hint match the header
+        # :warning:/:help: regexes. A `locate_warning_here` marker pins the
+        # warning's line. Diagnostics come from the same JSONL sink as errors.
+        cmd       = self.lhd_warning(test, 'warning')
+        safe_name = self._safe_name(test)
+        diag_path = os.path.join(tmp_dir, 'diag_{}.jsonl'.format(safe_name))
+        if os.path.exists(diag_path):
+            os.remove(diag_path)
+        cmd += ['--emit', 'diagnostics:' + diag_path]
+
+        proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        try:
+            log, _ = proc.communicate()
+            rc = proc.returncode
+        except Exception:
+            proc.kill()
+            log, rc = b'', 1
+
+        warnings, errors = [], []
+        if os.path.exists(diag_path):
+            with open(diag_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except ValueError:
+                        continue
+                    sev = rec.get('severity')
+                    if sev == 'warning':
+                        warnings.append(rec)
+                    elif sev == 'error':
+                        errors.append(rec)
+
+        name = test.params['name']
+        # A warning test pins a clean compile: an error means the program is
+        # broken, not merely lint-worthy (that case belongs in tests/errors/).
+        if errors or rc != 0:
+            emsg = ' || '.join(e.get('message', '') for e in errors) or '(no error diagnostic; rc={})'.format(rc)
+            print('{} - warning - FAILED: expected a clean compile, got error(s): {}'.format(name, emsg))
+            print(log.decode('utf-8', 'ignore'))
+            return 1
+        if not warnings:
+            print('{} - warning - FAILED: expected a compile warning, none was emitted'.format(name))
+            print(log.decode('utf-8', 'ignore'))
+            return 1
+
+        messages = ' || '.join(w.get('message', '') for w in warnings)
+        hints    = ' || '.join(w.get('hint', '') for w in warnings)
+
+        wpat = test.params.get('warning')
+        if wpat is not None and not self._pattern_matches(wpat, messages):
+            print('{} - warning - FAILED: :warning: /{}/ did not match emitted warning(s):'.format(name, wpat))
+            print('  emitted: {}'.format(messages))
+            return 1
+
+        hpat = test.params.get('help')
+        if hpat is not None and not self._pattern_matches(hpat, hints):
+            print('{} - warning - FAILED: :help: /{}/ did not match emitted hint(s):'.format(name, hpat))
+            print('  emitted: {}'.format(hints))
+            return 1
+
+        # Optional line check: a comment containing `locate_warning_here` marks
+        # the line where the warning is expected (marker, not a hard-coded line
+        # number — survives edits above it).
+        marker_lines = self._find_marker_lines(test, 'locate_warning_here')
+        if marker_lines:
+            warn_lines = set()
+            for w in warnings:
+                span = w.get('span') or {}
+                if isinstance(span, dict) and span.get('start_line') is not None:
+                    warn_lines.add(span['start_line'])
+            missing = [ln for ln in marker_lines if ln not in warn_lines]
+            if missing:
+                print('{} - warning - FAILED: locate_warning_here at line(s) {} but warning(s) reported at {}'.format(
+                    name, missing, sorted(warn_lines) if warn_lines else '(no located warning)'))
+                return 1
+
+        print('{} - warning - success (matched: {})'.format(name, messages))
         return 0
 
     @staticmethod
@@ -464,9 +557,9 @@ class PrpRunner:
         return 1
 
     @staticmethod
-    def _find_marker_lines(test: PrpTest):
-        # 1-based line numbers of any comment containing `locate_error_here`.
-        marker = 'locate_error_here'
+    def _find_marker_lines(test: PrpTest, marker='locate_error_here'):
+        # 1-based line numbers of any comment containing `marker` (default
+        # `locate_error_here`; warning tests pass `locate_warning_here`).
         lines = []
         for path in test.params['files']:
             try:
@@ -512,6 +605,9 @@ class PrpRunner:
         for mode in test.params['type']:
             if mode == 'error':
                 rc = self.run_error(tmp_dir, test)
+                continue
+            if mode == 'warning':
+                rc = self.run_warning(tmp_dir, test)
                 continue
             if mode == 'equiv':
                 rc = self.run_equiv(tmp_dir, test)

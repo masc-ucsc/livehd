@@ -3721,6 +3721,7 @@ bool uPass_runner::try_resolve_tuple_get() {
     return false;
   }
   std::string key;
+  std::string idx_ref;  // runtime index name, captured when the field is a non-folding ref
   if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
     if (auto v = Dlop::from_pyrope(lm->current_text()); v && !v->is_invalid()) {
       key = v->to_field();
@@ -3729,11 +3730,18 @@ bool uPass_runner::try_resolve_tuple_get() {
     // A comptime-known index (a folded loop var) resolves; anything else does not.
     if (auto fv = try_fold_ref(lm->current_text()); fv && fv->is_integer() && !fv->has_unknowns()) {
       key = fv->to_field();  // decimal at any width (to_just_i64 asserts past 62 bits)
+    } else {
+      idx_ref = std::string(lm->current_text());  // genuinely runtime — candidate for a dynamic mux
     }
   }
   const bool single_segment = lm->is_last_child();
   lm->restore_cursor(saved);
   if (key.empty() || !single_segment) {
+    // A runtime index into a comptime fixed-size tuple of scalar wires lowers
+    // to a balanced Hotmux (the only datapath select tolg otherwise rejects).
+    if (key.empty() && single_segment && !idx_ref.empty() && try_lower_dynamic_tuple_index(dst, src, idx_ref)) {
+      return true;
+    }
     return false;
   }
   // (1) var-arg gathered entries (keyed by the frame-tagged var-arg name).
@@ -3753,6 +3761,84 @@ bool uPass_runner::try_resolve_tuple_get() {
     return true;
   }
   return false;
+}
+
+bool uPass_runner::try_lower_dynamic_tuple_index(const std::string& dst, const std::string& src, const std::string& idx_ref) {
+  using N = Lnast_ntype;
+  // The source must be a comptime fixed-size tuple of scalar elements at
+  // contiguous positional slots 0..n-1. Each element resolves to either a
+  // runtime-wire ref (tuple_slot_ref) or a comptime constant (bundle trivial);
+  // a named field, a hole, or a nested sub-tuple slot declines.
+  auto shape = try_tuple_shape(src);
+  if (!shape || shape->size() < 2) {
+    return false;
+  }
+  const size_t            n      = shape->size();
+  const auto              bundle = symbol_table_.get_bundle(src);
+  std::vector<Lnast_node> elems;
+  elems.reserve(n);
+  bool any_runtime = false;
+  for (size_t k = 0; k < n; ++k) {
+    const auto& [slot, is_pos] = (*shape)[k];
+    if (!is_pos || slot != std::to_string(k)) {
+      return false;  // named or non-contiguous slot — not a plain indexable array
+    }
+    if (auto rname = try_tuple_slot_ref(src, slot)) {
+      elems.push_back(Lnast_node::create_ref(*rname));  // runtime wire
+      any_runtime = true;
+    } else if (bundle) {
+      const Dlop& t = bundle->get_trivial(slot);
+      if (t.is_invalid()) {
+        return false;  // runtime-unknown / nested sub-tuple slot with no recorded ref
+      }
+      elems.push_back(Lnast_node::create_const(std::string(t.to_pyrope())));  // comptime constant
+    } else {
+      return false;
+    }
+  }
+  // KEY GATE: at least one slot must be a genuine runtime wire. A `mut`/`reg`
+  // memory array never populates tuple_slot_ref, so this restricts the rewrite
+  // to true tuple-of-wires literals and leaves the dynamic-memory-read path to
+  // tolg untouched (a stale comptime-init array would otherwise mux to its init
+  // values, dropping the indexed runtime writes).
+  if (!any_runtime) {
+    return false;
+  }
+
+  // Materialize any parked producer of the index (or of an element) before the
+  // comparisons reference it — a computed index `t[i+1]` defers `i+1`, which
+  // would otherwise emit AFTER these `eq` nodes and dangle as a forward ref.
+  flush_deferred_emits();
+
+  // Emit `cmp_k = (idx == k)` for k in 0..n-2, then a unique_if whose arms bind
+  // `dst` to each element with the last element as the mandatory else — the
+  // exact match-chain shape tolg lowers to a single per-variable Hotmux.
+  const uint32_t           seq = ++inline_seq_;
+  std::vector<std::string> conds;
+  conds.reserve(n - 1);
+  for (size_t k = 0; k + 1 < n; ++k) {
+    std::string cmp = std::format("___dsel{}_{}", seq, k);
+    emit_staging_op(N::create_eq(), cmp, {Lnast_node::create_ref(idx_ref), Lnast_node::create_const(std::to_string(k))});
+    conds.push_back(std::move(cmp));
+  }
+  emit_push(N::create_unique_if());
+  for (size_t k = 0; k + 1 < n; ++k) {
+    emit_leaf(Lnast_node::create_ref(conds[k]));  // arm condition
+    emit_push(N::create_stmts());                 // arm body: dst = elems[k]
+    emit_push(N::create_store());
+    emit_leaf(Lnast_node::create_ref(dst));
+    emit_leaf(elems[k]);
+    emit_pop();  // store
+    emit_pop();  // stmts
+  }
+  emit_push(N::create_stmts());  // else arm: dst = elems[n-1]
+  emit_push(N::create_store());
+  emit_leaf(Lnast_node::create_ref(dst));
+  emit_leaf(elems[n - 1]);
+  emit_pop();  // store
+  emit_pop();  // stmts (else)
+  emit_pop();  // unique_if
+  return true;
 }
 
 // ── pipe/mod/fluid template specialization ──────────────────────────
