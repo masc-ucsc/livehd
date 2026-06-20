@@ -359,7 +359,11 @@ upass::Vote uPass_constprop::process_store(std::string_view dst_name, Bundle& ds
   // process_tuple_set, which would tuple-key the addr/din. A din that SSA-renamed
   // to a `___N` temp then trips the bundle's "no __ keys" invariant. Skip the
   // whole store for reg memories — tolg owns the memory's contents.
-  if (decl_mode_of(dst_name) == upass::Mode::reg_kind) {
+  //
+  // 2c-wire — a store to a wire is its single combinational driver, consumed by
+  // tolg as the net's value; never symbolically bind it (reads are
+  // position-independent runtime, resolved to the buffered net by tolg).
+  if (decl_mode_of(dst_name) == upass::Mode::reg_kind || decl_mode_of(dst_name) == upass::Mode::wire_kind) {
     return classify_vote();
   }
   if (src.size() <= 1) {
@@ -380,7 +384,10 @@ void uPass_constprop::process_assign() {
   // (Verilog `<=` semantics), not the value written this cycle, so folding
   // the written value into later reads — or dropping the store because the
   // value "is known" — corrupts the state machine. tolg consumes the store.
-  if (decl_mode_of(lhs_text) == upass::Mode::reg_kind) {
+  //
+  // 2c-wire — a store to a wire is its single combinational driver: tolg owns it
+  // and reads are position-independent, so never bind it here (same as reg).
+  if (decl_mode_of(lhs_text) == upass::Mode::reg_kind || decl_mode_of(lhs_text) == upass::Mode::wire_kind) {
     move_to_parent();
     return;
   }
@@ -1498,7 +1505,8 @@ void uPass_constprop::process_stmts_post() {
     for (const auto* scope : st().stack) {
       for (const auto& [var, bundle] : scope->varmap) {
         if (var.rfind("___", 0) == 0 || !bundle || bundle->get_mode() == upass::Mode::reg_kind
-            || bundle->get_mode() == upass::Mode::type_kind || !bundle->get_type_name().empty()) {
+            || bundle->get_mode() == upass::Mode::wire_kind || bundle->get_mode() == upass::Mode::type_kind
+            || !bundle->get_type_name().empty()) {
           // regs are runtime state; TYPE definitions (and named-type-shaped
           // values, whose nil fields are the declared-but-unset template
           // slots) are shapes, not values.
@@ -4159,7 +4167,9 @@ upass::Emit_decision uPass_constprop::classify_statement_impl() {
   // Writes to reg-declared names are next-state din writes; the
   // write itself is the payload (process_assign never binds them, so the ST
   // can't hold a value — this guard is belt-and-braces against stale state).
-  if (decl_mode_of(lhs_text) == upass::Mode::reg_kind) {
+  // 2c-wire — a wire's store is its single combinational driver: always keep it
+  // (tolg wires the net from it); never drop as a "known const".
+  if (decl_mode_of(lhs_text) == upass::Mode::reg_kind || decl_mode_of(lhs_text) == upass::Mode::wire_kind) {
     return upass::Emit_decision::emit_node();
   }
 

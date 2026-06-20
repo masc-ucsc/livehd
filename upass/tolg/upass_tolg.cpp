@@ -242,12 +242,16 @@ public:
     finalize_regs();
     // Sanity-check the per-memory port allocation.
     finalize_mems();
-    // 2f-defer — bind any deferred field reads (forward references to a call
-    // result lowered later, e.g. the defer feedback's `tmp.add`) now that every
-    // call's Sub result exists; then wire each `.[defer]` buffer to its base's
-    // final driver (incl. a reg's accumulated din).
+    // Bind any deferred field reads (forward references to a call result lowered
+    // later) now that every call's Sub result exists.
     resolve_pending_tgets();
-    resolve_defers();
+    // 2c-wire — wire each `wire` net's buffer input to its single accumulated
+    // driver (position-independent reads already bind to the buffer output), and
+    // enforce the single-driver / undriven / incomplete-driver rules. Runs after
+    // finalize_regs so a `reset_pin = <wire>` resolves the wire's buffer pin, and
+    // after resolve_pending_tgets so a driver that reads a forward call result is
+    // bound first.
+    finalize_wires();
 
     // Outputs: connect each output's bound driver to its graph output sink. The
     // GraphIO carries the port widths cgen emits; fetch it so an unbounded
@@ -368,9 +372,9 @@ private:
     }
     pin_map_[key] = pin;
     mw_map_[key]  = mw;
-    // 2f-defer — track the LOGICAL variable's most-recent driver (SSA versions
-    // collapse to the root). Shadow keys (\x01din:/\x01en:) never name a defer
-    // base, so skip them.
+    // Track the LOGICAL variable's most-recent driver (SSA versions collapse to
+    // the root) for derived reset_pin/clock_pin resolution and the wire buffer.
+    // Shadow keys (\x01din:/\x01en:) are not user names, so skip them.
     if (!key.empty() && key.front() != '\x01') {
       const auto pos = key.find("___ssa_");
       logical_last_[pos == std::string::npos ? key : key.substr(0, pos)] = {pin, mw};
@@ -588,8 +592,8 @@ private:
       // HARD error inside lower_func_call.
       lower_func_call(nid);
     } else if (N::is_attr_get(t)) {
-      // `.[defer]` end-of-cycle read (2f-defer). Other attribute reads fold in
-      // upass.attributes before tolg; an unhandled one keeps the warn inside.
+      // Every attribute read folds in upass.attributes before tolg; one that
+      // survives has no hardware lowering — a hard error inside.
       lower_attr_get(nid);
     } else if (N::is_attr_set(t)) {
       // Per-reg flop-attr overrides (reset_pin/sync/negreset/
@@ -635,50 +639,23 @@ private:
     }
   }
 
-  // attr_get(ref(dst), ref(base), const(attr)) — only `.[defer]` reaches tolg
-  // (every other attribute read folds in upass.attributes). `x.[defer]` is the
-  // end-of-cycle read: the value the base holds AFTER all in-cycle writes, as
-  // same-cycle wiring (no flop). The base's final dpin is not known at the read
-  // site (single walk), so emit a passthrough buffer whose OUTPUT consumers
-  // read now and whose INPUT is connected to the base's last dpin in
-  // resolve_defers() (after finalize_regs). A LHS `x.[defer] = …` write form is
-  // rejected upstream in prp2lnast — only the RHS read reaches here. (2f-defer)
+  // Every attribute read folds during elaboration (upass.attributes); one that
+  // survives to tolg has no hardware lowering, so it is a hard error.
   void lower_attr_get(const Lnast_nid& nid) {
-    auto dst = lnast_->get_first_child(nid);
-    if (dst.is_invalid()) {
-      return;
-    }
-    auto base = lnast_->get_sibling_next(dst);
+    auto dst  = lnast_->get_first_child(nid);
+    auto base = dst.is_invalid() ? dst : lnast_->get_sibling_next(dst);
     auto attr = base.is_invalid() ? base : lnast_->get_sibling_next(base);
     const std::string attr_name = attr.is_invalid() ? std::string{} : std::string(lnast_->get_name(attr));
-    if (attr_name != "defer") {
-      error_at(nid,
-               {"unhandled-node", "unsupported"},
-               "upass.tolg: attribute read '.[{}]' has no hardware lowering — it should have folded during elaboration "
-               "(only `.[defer]` reaches the netlist stage)",
-               attr_name);
-    }
-    if (base.is_invalid() || !Lnast_ntype::is_ref(lnast_->get_type(base))) {
-      error_here("upass.tolg: `.[defer]` must read a variable or field reference");
-      return;
-    }
-    std::string base_name(lnast_->get_name(base));
-    // Single-driver Or = a pure passthrough (cgen emits `out = a`). The input
-    // sink stays open until resolve_defers() wires the base's final driver.
-    auto buf  = make_node(Ntype_op::Or);
-    auto out  = buf.create_driver_pin(0);
-    set_bits(out, 1);  // provisional; restamped from the base width at resolve
-    set_unsign(out);
-    auto sink = setup_sink_by_name(buf, "a");
-    record(lnast_->get_name(dst), out, 1);
-    defer_cut_nids_.insert(buf.get_debug_nid());  // loop check cuts this node's in-edge
-    defer_pends_.push_back(Defer_pend{.sink = sink, .out = out, .base = std::move(base_name), .src = nid});
+    error_at(nid,
+             {"unhandled-node", "unsupported"},
+             "upass.tolg: attribute read '.[{}]' has no hardware lowering — it should have folded during elaboration",
+             attr_name);
   }
 
   // Re-resolve each deferred field read once the whole body (incl. later
   // calls) has lowered: by now the source name is a known Sub result / memory,
   // so lower_tuple_get binds the port driver. tget_final_ makes a genuinely
-  // unresolvable one warn rather than defer again. (2f-defer)
+  // unresolvable one warn rather than defer again.
   void resolve_pending_tgets() {
     tget_final_ = true;
     for (const auto& nid : pending_tgets_) {
@@ -687,37 +664,96 @@ private:
     pending_tgets_.clear();
   }
 
-  // Wire every pending `.[defer]` buffer to its base's last dpin: a reg's
-  // accumulated next-state (din) — never q — or a plain variable's final
-  // combinational driver. A genuine end-of-cycle feedback that is actually a
-  // combinational cycle (the base depends on the deferred value) surfaces as a
-  // graph loop downstream, not here. (2f-defer)
-  void resolve_defers() {
-    for (auto& dp : defer_pends_) {
-      Pin     drv;
-      int32_t mw = 1;
-      if (reg_map_.contains(dp.base)) {
-        if (auto dit = pin_map_.find(din_key(dp.base)); dit != pin_map_.end()) {
-          drv = dit->second;  // accumulated next-state (last in-cycle write)
-          mw  = mw_lookup(din_key(dp.base));
-        } else {
-          drv = resolve(dp.base);  // never written this cycle → holds q
-          mw  = mw_lookup(dp.base);
+  // ── 2c-wire — single-driver combinational nets ──────────────────────────────
+  // A `wire` declares a passthrough buffer (Or) whose OUTPUT every read binds to
+  // (record() at declare → position-independent: a read before the driver
+  // appears textually still sees the buffer), and whose INPUT finalize_wires()
+  // connects to the single accumulated driver (the din shadow the branch-mux
+  // machinery merges, exactly like a reg's din — but with no flop). The buffer
+  // is a transparent net, so the time-checker's SCC sees through it: a real comb
+  // loop is an error; a ring is legal only when a register breaks it.
+
+  // The single-driver / undriven / incomplete-driver rules are enforced in the
+  // FRONTEND (prp2lnast check_wire_drivers) on the pre-elaborate tree, before
+  // lnastfmt drops a dead first write (which would hide a double-drive). tolg
+  // only wires the net and lets the time-checker flag a real comb loop.
+
+  // Wire every declared wire's buffer input to its single accumulated driver
+  // (the din shadow the branch-mux machinery merged). The single-driver /
+  // undriven / incomplete-driver rules are enforced in the frontend; here a
+  // missing driver only survives for a Verilog net (legal X) or a loop-built
+  // Pyrope wire the frontend skipped — wire it to nil rather than miscompile.
+  void finalize_wires() {
+    const bool verilog = lnast_->is_verilog_origin();
+    for (const auto& name : wire_order_) {
+      auto& info = wire_info_.at(name);
+
+      // Anchor this wire's diagnostics at its declaration.
+      cur_srcid_ = hhds::SourceId_invalid;
+      if (const auto id = lnast_->get_srcid(info.decl_nid); id != hhds::SourceId_invalid) {
+        cur_srcid_ = g_->source_locator().import_from(lnast_->source_locator(), id);
+      }
+
+      // Wire the buffer input to the accumulated single driver, restamping the
+      // buffer output width from the driver when the wire was untyped.
+      Pin     din;
+      int32_t mw      = info.decl_mw;
+      bool    driven  = false;
+      if (auto dit = pin_map_.find(din_key(name)); dit != pin_map_.end()) {
+        din    = dit->second;
+        driven = true;
+        if (mw <= 0) {
+          mw = mw_lookup(din_key(name));
         }
-      } else if (const auto pos = dp.base.find("___ssa_"); true) {
-        // A plain variable's last dpin is its final SSA version's driver
-        // (logical_last_), not the read-site version pin_map_ holds for `base`.
-        const std::string logical = pos == std::string::npos ? dp.base : dp.base.substr(0, pos);
-        if (auto lit = logical_last_.find(logical); lit != logical_last_.end()) {
-          drv = lit->second.first;
-          mw  = lit->second.second;
-        } else {
-          drv = resolve(dp.base);  // never written — resolve reports + wires nil
-          mw  = mw_lookup(dp.base);
+      } else {
+        if (!verilog) {
+          error_here("upass.tolg: wire '{}' is never driven in '{}' — a `wire` must have exactly one driver",
+                     name,
+                     lnast_->get_top_module_name());
+        }
+        din = nil_pin();  // Verilog net defaults to X; a loop-built undriven wire falls here too
+        if (mw <= 0) {
+          mw = 1;
         }
       }
-      dp.sink.connect_driver(drv);
-      set_bits(dp.out, mw);
+      // A TYPED wire narrows its driver to the declared width/sign with a REAL
+      // Get_mask (Verilog continuous-assign net truncation). cprop collapses the
+      // single-input Or buffer, forwarding the driver UNCHANGED, so a width/sign
+      // stamp on the buffer output alone is dropped at O2 (an O0/O2 LEC
+      // divergence + miscompile). Get_mask is a real width-changing node cprop
+      // preserves, so the declared constraint reaches every consumer.
+      if (driven && info.decl_mw > 0) {
+        auto gm = make_node(Ntype_op::Get_mask);
+        setup_sink_by_name(gm, "a").connect_driver(din);
+        setup_sink_by_name(gm, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(info.decl_mw)));
+        auto gm_out = gm.create_driver_pin(0);
+        if (info.is_signed) {
+          set_bits(gm_out, info.decl_mw);
+          set_sign(gm_out);
+        } else {
+          set_bits(gm_out, info.decl_mw + 1);
+          set_unsign(gm_out);
+        }
+        din = gm_out;
+      }
+      setup_sink_by_name(info.buf, "a").connect_driver(din);
+      if (info.decl_mw <= 0) {
+        // Untyped wire: take the driver's width/sign so the passthrough is exact.
+        const int32_t dbits = livehd::graph_util::bits_of(din);
+        if (dbits > 0) {
+          set_bits(info.out, dbits);
+          if (livehd::graph_util::is_unsign(din)) {
+            set_unsign(info.out);
+          } else {
+            set_sign(info.out);
+          }
+          mw = livehd::graph_util::is_unsign(din) ? dbits - 1 : dbits;
+        } else {
+          set_bits(info.out, mw + 1);
+          set_unsign(info.out);
+        }
+        mw_map_[name] = mw;
+      }
     }
   }
 
@@ -838,9 +874,16 @@ private:
       // is why pin_map_-first is wrong), then fall back to pin_map_ for the
       // internal-wire case. get_input_pin would assert on a non-input.
       if (!info.clock_pin_name.empty()) {
-        if (g_->get_io()->has_input(info.clock_pin_name)) {
-          setup_sink_by_name(flop, "clock_pin").connect_driver(g_->get_input_pin(info.clock_pin_name));
-        } else if (auto cn = std::string(info.clock_pin_name); pin_map_.contains(cn)) {
+        // 2c-wire — a wire clock signal (a gated/derived clock): use its DRIVER
+        // (din) directly, not the passthrough buffer (cgen drops a buffer whose
+        // only consumer is a flop control pin).
+        std::string cn = info.clock_pin_name;
+        if (g_->get_io()->has_input(cn)) {
+          setup_sink_by_name(flop, "clock_pin").connect_driver(g_->get_input_pin(cn));
+        } else if (auto dit = wire_names_.contains(cn) ? pin_map_.find(din_key(cn)) : pin_map_.end();
+                   dit != pin_map_.end()) {
+          setup_sink_by_name(flop, "clock_pin").connect_driver(dit->second);
+        } else if (pin_map_.contains(cn)) {
           setup_sink_by_name(flop, "clock_pin").connect_driver(pin_map_.at(cn));
         } else {
           error_here("upass.tolg: reg '{}' names clock_pin '{}' but '{}' has no such input/wire",
@@ -911,7 +954,14 @@ private:
           if (auto p = base.find("___ssa_"); p != std::string::npos) {
             base.resize(p);
           }
-          if (auto lit = logical_last_.find(base); lit != logical_last_.end()) {
+          // 2c-wire — a wire reset signal: use its DRIVER (din) directly, not the
+          // passthrough buffer output. A buffer whose only consumer is a flop
+          // control pin is dropped by cgen (the reset would reference an
+          // undriven net); the din is the real combinational value.
+          if (auto dit = wire_names_.contains(base) ? pin_map_.find(din_key(base)) : pin_map_.end();
+              dit != pin_map_.end()) {
+            rpin = dit->second;
+          } else if (auto lit = logical_last_.find(base); lit != logical_last_.end()) {
             rpin = lit->second.first;
           } else {
             rpin = resolve(info.reset_pin_name);
@@ -1011,6 +1061,19 @@ private:
       record(en_key(lhs_name), en_const(true), 1);
       return;
     }
+    if (wire_names_.contains(std::string(lhs_name))) {
+      // 2c-wire — a store to a wire is (part of) its single combinational
+      // driver, recorded on the SHADOW din key (reads keep seeing the buffer
+      // output, so they stay position-independent). The branch-mux machinery
+      // merges conditional writes; finalize_wires() wires the buffer input. A
+      // `= nil` forward-declare is not a driver — skip it.
+      if (Lnast_ntype::is_const(lnast_->get_type(rhs)) && lnast_->get_name(rhs) == "nil") {
+        return;
+      }
+      auto v = leaf(rhs);
+      record(din_key(lhs_name), v.pin, v.mw);
+      return;
+    }
     // 1a-mem — a plain `name = <tuple-literal-ref>` / `name = <__memory
     // result>` aliases the record instead of binding a scalar pin (the
     // literal/result has no pin; its consumers resolve through the record).
@@ -1050,6 +1113,62 @@ private:
     record(lhs_name, v.pin, v.mw);
   }
 
+  // declare(ref(name), type, const("wire")): a single-driver combinational net
+  // (2c-wire). Create the passthrough buffer (Or) and bind the name to its
+  // OUTPUT so every read — including one before the driver appears textually —
+  // resolves to the net (position-independent). Stores record the din shadow;
+  // finalize_wires() wires the buffer input to the single accumulated driver and
+  // enforces the single-driver / undriven / incomplete-driver rules. No flop.
+  void lower_wire_declare(const Lnast_nid& name_nid, const Lnast_nid& type_nid, const Lnast_nid& decl_nid) {
+    auto name = lnast_->get_name(name_nid);
+    if (!type_nid.is_invalid() && Lnast_ntype::is_comp_type_array(lnast_->get_type(type_nid))) {
+      error_here("upass.tolg: array `wire` is not supported — declare an array as `mut`/`reg`; a `wire` is a scalar net");
+      return;
+    }
+    Wire_info info;
+    info.buf      = make_node(Ntype_op::Or);  // single-input Or = pure passthrough (cgen `out = a`)
+    info.out      = info.buf.create_driver_pin(0);
+    info.decl_nid = decl_nid;
+    if (!type_nid.is_invalid()) {
+      std::tie(info.decl_mw, info.is_signed) = declared_width(type_nid);
+    }
+    if (info.decl_mw > 0) {
+      if (info.is_signed) {
+        set_bits(info.out, info.decl_mw);
+        set_sign(info.out);
+      } else {
+        set_bits(info.out, info.decl_mw + 1);
+        set_unsign(info.out);
+      }
+      record(name, info.out, info.decl_mw);
+    } else {
+      set_bits(info.out, 1);  // provisional; finalize_wires restamps from the driver
+      set_unsign(info.out);
+      record(name, info.out, 1);
+    }
+    // Keep the net's RTL name on the buffer output (cgen / pass-lec readability).
+    {
+      std::string base{name};
+      if (auto p = base.find("___ssa_"); p != std::string::npos) {
+        base.resize(p);
+      }
+      if (!base.empty()) {
+        livehd::graph_util::set_pin_name(info.out, base);
+      }
+    }
+    wire_names_.insert(std::string(name));
+    wire_order_.emplace_back(name);
+    wire_info_.emplace(std::string(name), std::move(info));
+    // A Verilog-origin comb-cycle net may legally close a same-cycle ring (e.g.
+    // a ready/valid handshake whose dataflow loops through a submodule instance
+    // but is not a real comb loop). Cut its buffer in-edge for the loop check,
+    // preserving the pre-2c-wire leniency. Pyrope wires are NEVER cut, so a real
+    // comb loop through a wire surfaces as a hard error.
+    if (lnast_->is_verilog_origin()) {
+      wire_cut_nids_.insert(wire_info_.at(name).buf.get_debug_nid());
+    }
+  }
+
   // declare(ref(name), type, const("reg")) [+ stages(min,max)]:
   // create the Flop cell (the first Flop on the Pyrope->LG path). The name
   // binds to the q pin so subsequent READS see q; the din store above wires
@@ -1067,6 +1186,13 @@ private:
     auto       mode     = mode_nid.is_invalid() || !Lnast_ntype::is_const(lnast_->get_type(mode_nid))
                               ? std::string_view{}
                               : std::string_view(lnast_->get_name(mode_nid));
+    // 2c-wire — a single-driver combinational net: declare its passthrough
+    // buffer now so position-independent reads (a read before the driver) bind
+    // to it; finalize_wires() wires the buffer input to the single driver.
+    if (mode == "wire" || mode.starts_with("wire ")) {
+      lower_wire_declare(name_nid, type_nid, nid);
+      return;
+    }
     // 1a-mem — an array-typed declare is a Memory cell: reg → clocked async
     // memory; a mut/const array that survived to tolg (runtime-indexed) → a
     // comb type=2 array / ROM. Never a Flop, never a plain binding.
@@ -2143,11 +2269,11 @@ private:
         record(lnast_->get_name(dst), to_positive(dout, mr.bits), mr.bits);
         return;
       }
-      // 2f-defer — a single-field read (`src.field`) of a name that is not yet
-      // a known memory / Sub result. It may be a forward reference to a call
-      // result lowered later in the body (the defer feedback `tmp.add.[defer]`
-      // reads tmp.add before `tmp = add_sub(…)` runs). Defer the bind to
-      // end-of-pass; re-resolved with tget_final_, a still-unresolved one warns.
+      // A single-field read (`src.field`) of a name that is not yet a known
+      // memory / Sub result. It may be a forward reference to a call result
+      // lowered later in the body (`c = tmp.add` reads tmp.add before
+      // `tmp = add_sub(…)` runs). Defer the bind to end-of-pass; re-resolved
+      // with tget_final_, a still-unresolved one warns.
       if (!tget_final_ && Lnast_ntype::is_const(lnast_->get_type(idx)) && lnast_->get_sibling_next(idx).is_invalid()) {
         pending_tgets_.emplace_back(nid);
         return;
@@ -3372,14 +3498,14 @@ private:
 
   absl::flat_hash_map<std::string, Pin>                         pin_map_;
   absl::flat_hash_map<std::string, int32_t>                     mw_map_;
-  // 2f-defer — the last driver written to each LOGICAL variable (SSA versions
-  // x / x___ssa_1 / … collapsed to "x"): `x.[defer]` reads the value after ALL
-  // in-cycle writes, i.e. the last SSA version's driver, not the read-site one.
+  // The last driver written to each LOGICAL variable (SSA versions x /
+  // x___ssa_1 / … collapsed to "x"): the value after ALL in-cycle writes, used
+  // for a derived `reset_pin = <signal>` / `clock_pin = <signal>` resolution and
+  // for a `wire`'s buffer pin.
   absl::flat_hash_map<std::string, std::pair<Pin, int32_t>>     logical_last_;
-  // 2f-defer — a field read whose source is a Sub result created by a call
-  // lowered LATER in the body (`c = tmp.add.[defer]` reads tmp.add before
-  // `tmp = add_sub(…)` runs). Deferred to end-of-pass, then re-resolved with
-  // tget_final_ so a still-unresolved one warns instead of looping.
+  // A field read whose source is a Sub result created by a call lowered LATER in
+  // the body. Deferred to end-of-pass, then re-resolved with tget_final_ so a
+  // still-unresolved one warns instead of looping.
   std::vector<Lnast_nid>                                        pending_tgets_;
   bool                                                          tget_final_ = false;
   absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> range_map_;
@@ -3390,17 +3516,19 @@ private:
   std::vector<absl::flat_hash_map<std::string, std::optional<Pin>>> branch_restore_;
   WriteMap                                                      empty_writes_;
 
-  // 2f-defer — `x.[defer]` is an end-of-cycle read: the edge from the base's
-  // FINAL driver is added after every statement is processed (the runner's
-  // single walk doesn't know the final dpin at the read site). Each entry is a
-  // passthrough buffer's input sink waiting for its base's last dpin.
-  struct Defer_pend {
-    Pin         sink;  // the buffer's "A" input sink (consumers already read its output)
-    Pin         out;   // the buffer's output driver (restamped from the base width)
-    std::string base;  // the base variable / dotted field path
-    Lnast_nid   src;   // for diagnostics (the `.[defer]` site)
+  // 2c-wire — per-wire lowering state recorded at the declare; finalize_wires()
+  // wires the buffer input to the single accumulated driver (din shadow) and
+  // restamps the buffer output from the driver width when untyped.
+  struct Wire_info {
+    hhds::Node_class buf;             // the passthrough Or (cgen `out = a`)
+    Pin              out;             // the buffer output (what reads bind to)
+    Lnast_nid        decl_nid;        // diag anchor (the `wire x` site)
+    int32_t          decl_mw   = 0;   // declared width; 0 = untyped (restamp from driver)
+    bool             is_signed = false;
   };
-  std::vector<Defer_pend>                                       defer_pends_;
+  absl::flat_hash_set<std::string>            wire_names_;  // gates lower_store
+  std::vector<std::string>                    wire_order_;  // declaration order
+  absl::flat_hash_map<std::string, Wire_info> wire_info_;
 
   // Reg lowering state. reg_map_ holds each declared reg's Flop
   // node (reads resolve to its q via pin_map_; stores rebind the shadow
@@ -3462,11 +3590,13 @@ private:
   absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>> sub_time_;
   absl::flat_hash_map<uint64_t, std::string>                 plain_reg_flops_;
   absl::flat_hash_set<uint64_t>                              inserted_flops_;
-  // 2f-defer — the `.[defer]` passthrough buffers. A defer edge may legally
-  // close a same-cycle cycle (Verilog allows comb loops; a later lgraph pass
-  // detects/handles real ones), so the time-checker cuts these nodes' in-edges
-  // instead of flagging the loop.
-  absl::flat_hash_set<uint64_t>                              defer_cut_nids_;
+  // 2c-wire — Verilog-origin comb-cycle wire buffers (a net that may legally
+  // close a same-cycle ring through a submodule instance; a later lgraph pass
+  // detects/handles real ones). The time-checker cuts these nodes' in-edges
+  // instead of flagging the loop, preserving the pre-2c-wire leniency. PYROPE
+  // wire buffers are NEVER added here, so a real comb loop through a Pyrope wire
+  // is flagged as an error.
+  absl::flat_hash_set<uint64_t>                              wire_cut_nids_;
 
 public:
   // Lower the partition's declared per-output intervals as
@@ -3544,7 +3674,7 @@ public:
   [[nodiscard]] absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& take_sub_times() { return std::move(sub_time_); }
   [[nodiscard]] absl::flat_hash_map<uint64_t, std::string>&& take_plain_reg_flops() { return std::move(plain_reg_flops_); }
   [[nodiscard]] absl::flat_hash_set<uint64_t>&&              take_inserted_flops() { return std::move(inserted_flops_); }
-  [[nodiscard]] absl::flat_hash_set<uint64_t>&&              take_defer_cuts() { return std::move(defer_cut_nids_); }
+  [[nodiscard]] absl::flat_hash_set<uint64_t>&&              take_wire_cuts() { return std::move(wire_cut_nids_); }
 };
 
 // The combined pipe/mod LG time checker (written once for both kinds).
@@ -3585,7 +3715,7 @@ public:
                absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& flop_depth,
                absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>>&& sub_time,
                absl::flat_hash_map<uint64_t, std::string>&& plain_regs, absl::flat_hash_set<uint64_t>&& inserted,
-               absl::flat_hash_set<uint64_t>&& defer_cuts)
+               absl::flat_hash_set<uint64_t>&& wire_cuts)
       : g_(g)
       , ln_(ln)
       , pendings_(std::move(pendings))
@@ -3593,7 +3723,7 @@ public:
       , sub_time_(std::move(sub_time))
       , plain_regs_(std::move(plain_regs))
       , inserted_(std::move(inserted))
-      , defer_cuts_(std::move(defer_cuts)) {
+      , wire_cuts_(std::move(wire_cuts)) {
     for (const auto& [nid, name] : plain_regs_) {
       reg_flop_by_name_.emplace(name, nid);
     }
@@ -3674,10 +3804,12 @@ public:
       return it == idx.end() ? -1 : static_cast<int>(it->second);
     };
     for (size_t i = 0; i < nn; ++i) {
-      // 2f-defer — a `.[defer]` buffer is an end-of-cycle wire: cut its in-edge
-      // for loop detection (like a state flop's q). A defer feedback may legally
-      // form a same-cycle cycle; a later lgraph pass handles real comb loops.
-      if (defer_cuts_.contains(nodes[i].get_debug_nid())) {
+      // 2c-wire — a Verilog-origin comb-cycle wire buffer: cut its in-edge for
+      // loop detection (like a state flop's q). Such a net may legally close a
+      // same-cycle ring through a submodule; a later lgraph pass handles real
+      // comb loops. Pyrope wire buffers are never in this set, so a real comb
+      // loop through a Pyrope wire is flagged below.
+      if (wire_cuts_.contains(nodes[i].get_debug_nid())) {
         continue;
       }
       for (const auto& e : nodes[i].inp_edges()) {
@@ -3874,6 +4006,14 @@ public:
         }
       }
       error_at_node(rep, "upass.tolg: combinational loop in '{}'", ln_->get_top_module_name());
+    }
+
+    // 2c-wire — a `comb` runs steps 1-3 ONLY (acyclicity), to catch a comb loop
+    // through a self-feeding wire in a standalone-compiled comb top. It has no
+    // flops and no `@[N]` landing cycles, so the σ-timing phase below is
+    // pipe/mod-specific and skipped.
+    if (ln_->get_lambda_kind() == "comb") {
+      return;
     }
 
     // 4. Forward σ with state q pinned to σ(din). Pass 1 leaves state q
@@ -4229,7 +4369,7 @@ private:
   absl::flat_hash_map<uint64_t, std::pair<int64_t, int64_t>> sub_time_;
   absl::flat_hash_map<uint64_t, std::string>                 plain_regs_;
   absl::flat_hash_set<uint64_t>                              inserted_;
-  absl::flat_hash_set<uint64_t>                              defer_cuts_;  // 2f-defer: cut these in-edges
+  absl::flat_hash_set<uint64_t>                              wire_cuts_;  // 2c-wire: cut Verilog comb-cycle wire in-edges
   absl::flat_hash_map<std::string, uint64_t>                 reg_flop_by_name_;
   absl::flat_hash_set<uint64_t>                              state_;
   absl::flat_hash_map<uint64_t, TR>                          tr_;
@@ -4715,10 +4855,12 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
   Tolg builder(lnast, g_shared.get(), std::move(io_setup), &registry, &lib, reset_style == "async");
   builder.build();
 
-  // The combined pipe/mod time checker at the tolg seam.
+  // The combined pipe/mod time checker at the tolg seam. A `comb` runs it too
+  // (2c-wire) — but only its acyclicity phase — to catch a combinational loop
+  // through a self-feeding wire in a standalone-compiled comb top.
   {
     const auto kind = lnast->get_lambda_kind();
-    if (kind == "pipe" || kind == "mod") {
+    if (kind == "pipe" || kind == "mod" || kind == "comb") {
       Time_checker checker(g_shared.get(),
                            lnast,
                            builder.take_pending_checks(),
@@ -4726,7 +4868,7 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
                            builder.take_sub_times(),
                            builder.take_plain_reg_flops(),
                            builder.take_inserted_flops(),
-                           builder.take_defer_cuts());
+                           builder.take_wire_cuts());
       checker.run();
     }
   }

@@ -1,0 +1,15 @@
+/*
+:name: wire_double_drive
+:type: error
+:error: more than one driver
+*/
+
+// 2c-wire — a `wire` is a single-driver net. Two unconditional assignments are a
+// compile error (the first write is dead, but it is still a second driver). Use
+// `mut` for last-write-wins semantics.
+comb t(a:u8, b:u8) -> (o:u8) {
+  wire w = nil   // locate_error_here
+  w = a
+  w = b
+  o = w
+}

@@ -1,0 +1,18 @@
+/*
+:name: wire_reg
+:type: equiv
+:verilog_top: wire_reg.wreg
+:pyrope_top: wire_reg.wreg
+*/
+
+// 2c-wire — the next-state-read pattern that replaces a register's `.[defer]`:
+// name the next-state value as a `wire` (`nx`) and feed BOTH the register and
+// the consumer. `o` sees the in-cycle value (a+1) combinationally, while `r`
+// holds the registered (one-cycle-late) copy.
+mod wreg(a:u8) -> (o:u9@[0]) {
+  wire nx = nil
+  reg  r:u9 = 0
+  nx = a + 1
+  r  = nx
+  o  = nx
+}

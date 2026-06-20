@@ -81,6 +81,7 @@ private:
   absl::flat_hash_set<const slang::ast::Symbol*>              input_syms_;
   absl::flat_hash_set<const slang::ast::Symbol*>              output_syms_;
   absl::flat_hash_set<const slang::ast::Symbol*>              reg_syms_;   // clocked state vars
+  absl::flat_hash_set<const slang::ast::Symbol*>              wire_syms_;  // 2c-wire — comb-cycle nets: declared `wire` so reads are position-independent
   absl::flat_hash_set<const slang::ast::Symbol*>              latch_syms_; // level-sensitive latch state vars (subset of reg_syms_)
   absl::flat_hash_set<const slang::ast::Symbol*>              mem_syms_;   // unpacked arrays lowered as memories
   absl::flat_hash_set<const slang::ast::Symbol*>              mem_wensize_emitted_;  // memories whose wensize attr was emitted
@@ -110,7 +111,6 @@ private:
   // sequentially, while verilog wires are order-free nets. Combinational
   // cycles fall back to source order + settled reads (LNAST-tier only).
   void lower_members(const slang::ast::Scope& scope);
-  bool in_comb_cycle_ = false;  // current driver is part of a comb loop
   void        lower_process(const slang::ast::ProceduralBlockSymbol& pbs);
   void        lower_comb_process(const slang::ast::Statement& body);
   void        lower_ff_process(const slang::ast::SignalEventControl& clock, const slang::ast::Statement& body,

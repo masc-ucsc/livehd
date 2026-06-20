@@ -193,22 +193,14 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
     declare_value_symbol(sym, /*force_reg=*/false);
   }
 
-  // Drivers emit in dataflow dependency order (lower_members), so wire reads
-  // are plain. A combinational-cycle read uses a 2f-defer end-of-cycle read
-  // (attr_get .[defer]): tolg connects it to the wire's final driver as a
-  // delay-free feedback edge. This is LEC-exact, unlike the old settled read
-  // (delay_assign +1, LNAST-tier only, no tolg lowering) — important because
-  // most such "cycles" are false positives (e.g. a ready/valid handshake whose
-  // dataflow loops through a submodule instance but is not a true comb loop).
-  if (in_comb_cycle_) {
-    const auto* scope = sym.getParentScope();
-    const bool  module_level
-        = scope != nullptr && (&scope->asSymbol() == body_ || scope->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
-    if (module_level) {
-      return builder_.create_defer_read_stmts(name);
-    }
-  }
-
+  // Drivers emit in dataflow dependency order (lower_members), so most reads are
+  // plain. A combinational-cycle net is declared a `wire` (2c-wire): its reads
+  // are position-independent, so a forward reference (a read before the driver
+  // emits) binds to the resolved net — just read it by name. tolg wires the
+  // net's single driver as a delay-free feedback edge (LEC-exact). Most such
+  // "cycles" are false positives (e.g. a ready/valid handshake whose dataflow
+  // loops through a submodule instance but is not a true comb loop); a real comb
+  // loop surfaces as a tolg error.
   return name;
 }
 

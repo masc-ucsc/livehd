@@ -160,6 +160,12 @@ protected:
   // `create_ref` directly, so builtins like `cputs` are never recorded. Runs
   // on the producer tree, after the LNAST is built.
   void check_undefined_reads() const;
+  // 2c-wire — enforce the single-driver net rules on every `wire` declaration:
+  // exactly one driver (one assignment, or one if/match that covers every path);
+  // a second driver, an undriven wire, or an incompletely-driven wire are errors.
+  // Runs on the pre-elaborate tree (before lnastfmt drops a dead first write).
+  void check_wire_drivers() const;
+  void check_wire_scope(const Lnast_nid& node) const;
   // Names readable anywhere regardless of program order: function names
   // (func_def) and type/enum declarations — comptime entities, forward
   // references allowed.
@@ -226,10 +232,6 @@ protected:
     uint32_t    start_line = 0, start_col = 0, end_line = 0, end_col = 0;
     Lnast_nid   scope;
     Lnast_nid   before;
-    // 2f-defer — the base of an `x.[defer]` read: defer reads the END-of-cycle
-    // value, so it may legally reference a variable written later in the same
-    // cycle (or by the same statement). Exempt from the undefined-read check.
-    bool        defer_exempt = false;
   };
   std::vector<Read_site> read_sites_;
   // True iff `rs.name` is visible at the recorded site (see Read_site).

@@ -1,0 +1,18 @@
+/*
+:name: wire_reset
+:type: equiv
+:verilog_top: wire_reset.wreset
+:pyrope_top: wire_reset.wreset
+*/
+
+// 2c-wire — a computed clear wired into a register's `reset_pin` via a forward
+// `wire`: the driver of `clr` appears AFTER the reg declaration that uses it.
+// acc is a state accumulator; its synchronous reset is the computed net
+// `clr = rst or do_flush`.
+mod wreset(a:u8, rst:bool, do_flush:bool) -> (o:u8@[0]) {
+  wire clr = nil
+  reg  acc:u8:[reset_pin = clr] = 0
+  o   = acc
+  acc = acc + a
+  clr = rst or do_flush
+}

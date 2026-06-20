@@ -100,6 +100,7 @@ const uPass_attributes::Type_info* uPass_attributes::lookup_type_info_bundle(std
     case upass::Mode::mut_kind  : ti.decl = Decl_kind::mut_kind; break;
     case upass::Mode::const_kind: ti.decl = Decl_kind::const_kind; break;
     case upass::Mode::reg_kind  : ti.decl = Decl_kind::reg_kind; break;
+    case upass::Mode::wire_kind : ti.decl = Decl_kind::wire_kind; break;
     case upass::Mode::await_kind: ti.decl = Decl_kind::await_kind; break;
     case upass::Mode::type_kind : ti.decl = Decl_kind::type_kind; break;
     default                     : ti.decl = Decl_kind::unknown; break;
@@ -281,8 +282,9 @@ std::optional<Dlop> uPass_attributes::derive_comptime(std::string_view base, std
   // comptime even if its value happens to be known — only explicit
   // `comptime` markers or `const` (resolved) qualify. Mut variables with
   // a known type decl read as not-comptime (returns 0); for a variable
-  // with no decl_kind at all, leave unresolved.
-  if (auto* ti = lookup_type_info(base); ti && ti->decl == Decl_kind::mut_kind) {
+  // with no decl_kind at all, leave unresolved. A `wire` (2c-wire) is a runtime
+  // combinational net — never comptime, same as mut.
+  if (auto* ti = lookup_type_info(base); ti && (ti->decl == Decl_kind::mut_kind || ti->decl == Decl_kind::wire_kind)) {
     return *Dlop::create_integer(0);
   }
   // Fallback: any value that constprop has fully resolved is comptime
@@ -584,6 +586,8 @@ void uPass_attributes::process_declare() {
           decl = Decl_kind::const_kind;
         } else if (tok == "reg") {
           decl = Decl_kind::reg_kind;
+        } else if (tok == "wire") {
+          decl = Decl_kind::wire_kind;  // 2c-wire — single-driver combinational net
         } else if (tok == "await") {
           decl = Decl_kind::await_kind;
         } else if (tok == "type") {

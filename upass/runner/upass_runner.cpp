@@ -786,6 +786,7 @@ upass::uPass::Decl_storage uPass_runner::try_decl_storage(std::string_view name)
     case upass::Mode::mut_kind  : return upass::uPass::Decl_storage::mut_storage;
     case upass::Mode::const_kind: return upass::uPass::Decl_storage::const_storage;
     case upass::Mode::reg_kind  : return upass::uPass::Decl_storage::reg_storage;
+    case upass::Mode::wire_kind : return upass::uPass::Decl_storage::wire_storage;
     case upass::Mode::await_kind: return upass::uPass::Decl_storage::await_storage;
     case upass::Mode::type_kind : return upass::uPass::Decl_storage::type_storage;
     default                     : return upass::uPass::Decl_storage::unknown;
@@ -956,29 +957,11 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
   // the type with `a`'s value. Keep child 1 verbatim for these op-nodes.
   const bool type_slot_at_1 = Lnast_ntype::is_declare(op_ntype) || Lnast_ntype::is_type_spec(op_ntype);
 
-  // 2f-defer — `x.[defer]` (an attr_get whose attr name is "defer") is an
-  // end-of-cycle read: keep the BASE (child 1) as a `ref` so tolg can wire the
-  // base's FINAL dpin. Folding it here would capture the base's value AT THE
-  // READ SITE instead of its end-of-cycle value.
-  bool defer_base_at_1 = false;
-  if (Lnast_ntype::is_attr_get(op_ntype)) {
-    // Peek the attr name (the last child, a const) WITHOUT moving the cursor.
-    const auto& ln  = lm->get_lnast();
-    const auto  nid = lm->get_current_nid();
-    Lnast_nid   last;
-    for (auto c = ln->get_first_child(nid); !c.is_invalid(); c = ln->get_sibling_next(c)) {
-      last = c;
-    }
-    if (!last.is_invalid() && Lnast_ntype::is_const(ln->get_type(last)) && ln->get_name(last) == "defer") {
-      defer_base_at_1 = true;
-    }
-  }
-
   if (lm->has_child()) {
     lm->move_to_child();
     int idx = 0;
     do {
-      const bool is_lhs = ((idx == 0) && !fold_all) || (idx == 1 && (type_slot_at_1 || defer_base_at_1));
+      const bool is_lhs = ((idx == 0) && !fold_all) || (idx == 1 && type_slot_at_1);
       if (!is_lhs && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
         emit_ref_or_folded(lm->current_text());
       } else if (!is_lhs && Lnast_ntype::is_store(lm->get_raw_ntype())) {
@@ -1057,7 +1040,7 @@ void uPass_runner::process_drop_candidate(Pass_method fn, bool fold_all) {
       const auto name = lm->current_text();
       const auto b    = symbol_table_.get_bundle(name);
       const auto mode = b ? b->get_mode() : upass::Mode::unknown;
-      if (mode != upass::Mode::reg_kind && mode != upass::Mode::mut_kind) {
+      if (mode != upass::Mode::reg_kind && mode != upass::Mode::mut_kind && mode != upass::Mode::wire_kind) {
         drop = symbol_table_.known_const_scalar(name).has_value();
       }
     }
@@ -6579,6 +6562,8 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
           mode = upass::Mode::const_kind;
         } else if (tok == "reg") {
           mode = upass::Mode::reg_kind;
+        } else if (tok == "wire") {
+          mode = upass::Mode::wire_kind;  // 2c-wire — single-driver combinational net
         } else if (tok == "await") {
           mode = upass::Mode::await_kind;
         } else if (tok == "type") {

@@ -128,7 +128,7 @@ public:
   // `const` or `type` binding as a `ref` actual (incl. the UFCS receiver of
   // a `ref self` method): a ref param writes back, so the actual must be a
   // mut value. `unknown` = no declaration seen (temps, expressions).
-  enum class Decl_storage : uint8_t { unknown, mut_storage, const_storage, reg_storage, await_storage, type_storage };
+  enum class Decl_storage : uint8_t { unknown, mut_storage, const_storage, reg_storage, await_storage, type_storage, wire_storage };
 
   // The runner-owned scope-aware symbol table: ONE shared_ptr<Bundle>
   // per live name, shared by every pass. The runner owns every scope

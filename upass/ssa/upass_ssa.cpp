@@ -403,6 +403,12 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   // and every store is a next-state din write to the SAME flop. Versioning
   // them would split the din writes off the declared name (a dangling flop)
   // and rewrite q reads to the comb value.
+  //
+  // 2c-wire — a `wire` (single-driver combinational net) is treated the same:
+  // its reads are position-independent (every read sees the one resolved driver,
+  // even before it appears textually), so it must NOT be versioned either — a
+  // read before the driver must stay on the base name, not bind to a `nil`
+  // earlier version. tolg resolves the base name to the buffered net.
   absl::flat_hash_set<std::string> reg_names;
   for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
     if (nid.is_invalid() || !Lnast_ntype::is_declare(lnast->get_type(nid))) {
@@ -418,7 +424,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       continue;
     }
     auto mode = lnast->get_name(c2);
-    if (mode == "reg" || mode.starts_with("reg ")) {
+    if (mode == "reg" || mode.starts_with("reg ") || mode == "wire" || mode.starts_with("wire ")) {
       reg_names.emplace(lnast->get_name(c0));
     }
   }

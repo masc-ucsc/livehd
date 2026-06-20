@@ -338,6 +338,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   auto saved_inputs        = std::move(input_syms_);
   auto saved_outputs       = std::move(output_syms_);
   auto saved_regs          = std::move(reg_syms_);
+  auto saved_wires         = std::move(wire_syms_);
   auto saved_latches       = std::move(latch_syms_);
   auto saved_mems          = std::move(mem_syms_);
   auto saved_declared      = std::move(declared_);
@@ -359,6 +360,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   input_syms_.clear();
   output_syms_.clear();
   reg_syms_.clear();
+  wire_syms_.clear();
   latch_syms_.clear();
   mem_syms_.clear();
   declared_.clear();
@@ -475,6 +477,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   input_syms_            = std::move(saved_inputs);
   output_syms_           = std::move(saved_outputs);
   reg_syms_              = std::move(saved_regs);
+  wire_syms_            = std::move(saved_wires);
   latch_syms_           = std::move(saved_latches);
   mem_syms_             = std::move(saved_mems);
   declared_              = std::move(saved_declared);
@@ -815,6 +818,17 @@ void Slang_context::declare_value_symbol(const slang::ast::ValueSymbol& sym, boo
   auto ti   = tinfo(type);
   auto name = lname_of(sym);
 
+  // 2c-wire — a net in a combinational dependency cycle is a `wire`: its single
+  // continuous driver is the net's value, and reads of it are position-
+  // independent (a read before the driver binds to the resolved net). No poison
+  // init (that would be a competing driver) — the driver supplies the value.
+  if (wire_syms_.contains(&sym)) {
+    set_pending_loc(sym.location);
+    builder_.create_declare_stmts(name, "wire", "", "");
+    clear_pending_loc();
+    return;
+  }
+
   set_pending_loc(sym.location);
   {
     // No declared range on locals: the importer masks every op result to its
@@ -1101,15 +1115,37 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   if (!cyclic.empty()) {
     emit_warning(slang::SourceRange(drivers[cyclic.front()].member->location, drivers[cyclic.front()].member->location),
                  "comb-loop", "time",
-                 "combinational dependency cycle between drivers; falling back to source order with settled reads");
+                 "combinational dependency cycle between drivers; emitting cyclic nets as `wire` (position-independent reads)");
+    // 2c-wire — every net written by a cyclic driver is declared a `wire` so a
+    // read before its driver binds to the resolved net (position-independent),
+    // replacing the old `.[defer]` end-of-cycle read. A reg/input is never a
+    // wire (its read is already order-free).
+    for (size_t i : cyclic) {
+      for (const auto* w : drivers[i].writes) {
+        if (w == nullptr || reg_syms_.contains(w) || input_syms_.contains(w)) {
+          continue;
+        }
+        // Only a MODULE-LEVEL net becomes a `wire` (position-independent). A
+        // procedural-block-local var has no stable cut driver and needs its mut
+        // poison-init; declaring it `wire` would drop the init and miscompile.
+        const auto* sc           = w->getParentScope();
+        const bool  module_level = sc != nullptr
+                                   && (&sc->asSymbol() == body_
+                                       || sc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
+        if (module_level) {
+          wire_syms_.insert(w);
+        }
+      }
+    }
   }
 
   // ── pass 4: emit ──────────────────────────────────────────────────────────
-  auto emit_driver = [&](size_t i, bool cyclic_member) {
+  // Cyclic drivers emit last (after the topologically-ordered ones); their nets
+  // are declared `wire` (2c-wire), so a forward read binds to the resolved net.
+  auto emit_driver = [&](size_t i) {
     const auto& d            = drivers[i];
     auto        saved_prefix = genblk_prefix_;
     genblk_prefix_           = d.prefix;
-    in_comb_cycle_           = cyclic_member;
     switch (d.member->kind) {
       case SymbolKind::Net: {
         const auto& ns = d.member->as<slang::ast::NetSymbol>();
@@ -1131,15 +1167,14 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       case SymbolKind::Instance: lower_instance(d.member->as<slang::ast::InstanceSymbol>()); break;
       default: break;
     }
-    in_comb_cycle_ = false;
     genblk_prefix_ = saved_prefix;
   };
 
   for (size_t i : order) {
-    emit_driver(i, false);
+    emit_driver(i);
   }
   for (size_t i : cyclic) {
-    emit_driver(i, true);
+    emit_driver(i);
   }
 }
 
@@ -1568,17 +1603,13 @@ Slang_context::Tinfo Slang_context::flat_or_tinfo(const slang::ast::Type& t) {
 }
 
 void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
-  // lower_module() recursively lowers the callee body (lower_members), which
-  // resets in_comb_cycle_ to false on the way out. Save/restore it so that when
-  // THIS instance sits in a combinational cycle, its input port connections
-  // below still read through the 2f-defer path (a cyclic handshake's forward
-  // reference to a not-yet-lowered net must defer, not resolve to nil).
-  const bool saved_in_comb_cycle = in_comb_cycle_;
+  // 2c-wire — a cyclic handshake's forward reference to a not-yet-lowered net is
+  // handled by declaring that net a `wire` (position-independent reads), so no
+  // transient cycle flag needs preserving across the recursive lower_module.
   if (!lower_module(inst)) {
     return;  // diagnosed inside
   }
-  in_comb_cycle_ = saved_in_comb_cycle;
-  auto callee    = module_name_of(inst);
+  auto callee = module_name_of(inst);
 
   proc_kind_ = Proc_kind::none;
 

@@ -197,8 +197,8 @@ private:
   //     constprop's runner_fold_fn fallback).
 public:
   // Storage classification recorded by the `type` decl-attr that prp2lnast
-  // emits (`mut`/`const`/`reg`/`await`).
-  enum class Decl_kind : uint8_t { unknown, mut_kind, const_kind, reg_kind, await_kind, type_kind };
+  // emits (`mut`/`const`/`reg`/`wire`/`await`).
+  enum class Decl_kind : uint8_t { unknown, mut_kind, const_kind, reg_kind, await_kind, type_kind, wire_kind };
 
   // Numeric type carried by a type_spec node. Width 0 means the declaration
   // omitted the bit count (e.g. `int` / `uint`); concrete widths populate

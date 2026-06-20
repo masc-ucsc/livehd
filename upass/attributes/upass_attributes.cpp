@@ -425,6 +425,8 @@ void uPass_attributes::process_attr_set() {
         kind = Decl_kind::const_kind;
       } else if (value_text == "reg") {
         kind = Decl_kind::reg_kind;
+      } else if (value_text == "wire") {
+        kind = Decl_kind::wire_kind;  // 2c-wire — single-driver combinational net
       } else if (value_text == "await") {
         kind = Decl_kind::await_kind;
       } else if (value_text == "type") {
@@ -441,6 +443,7 @@ void uPass_attributes::process_attr_set() {
             case Decl_kind::mut_kind  : m = upass::Mode::mut_kind; break;
             case Decl_kind::const_kind: m = upass::Mode::const_kind; break;
             case Decl_kind::reg_kind  : m = upass::Mode::reg_kind; break;
+            case Decl_kind::wire_kind : m = upass::Mode::wire_kind; break;
             case Decl_kind::await_kind: m = upass::Mode::await_kind; break;
             case Decl_kind::type_kind : m = upass::Mode::type_kind; break;
             default                   : break;

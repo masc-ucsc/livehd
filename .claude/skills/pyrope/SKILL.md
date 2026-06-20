@@ -15,14 +15,15 @@ skill). Always verify generated code with `lhd` (last section).
 
 * Comments are `//` only. `;` is the same as a newline. No variable shadowing,
   anywhere. A continuation line must not start with an alphanumeric or `(`.
-* Every declaration starts with a kind keyword — data: `const` / `mut` / `reg`;
-  lambda: `comb` / `pipe` / `mod` / `fluid`. Prefix modifiers: `comptime`,
-  `pub`. Assignment prefixes: `wrap`, `sat`. `stage[N]` is a `mod`-only
-  declaration modifier.
+* Every declaration starts with a kind keyword — data: `const` / `mut` /
+  `wire` / `reg`; lambda: `comb` / `pipe` / `mod` / `fluid`. Prefix modifiers:
+  `comptime`, `pub`. Assignment prefixes: `wrap`, `sat`. `stage[N]` is a
+  `mod`-only declaration modifier.
 * Every data declaration needs `= value`:
     - a concrete value (`0`, `false`, `""`, `(x=1)`) — the normal case
     - `nil` — invalid / "no value yet"; *reading* it is an error; the default
-      for tuples; `reg x = nil` declares a register with **no reset**
+      for tuples; `reg x = nil` declares a register with **no reset**;
+      `wire x = nil` forward-declares an as-yet-undriven net (see Wire below)
     - `0sb?` / `0ub?` / `0ub10??01` — unknown bits (Verilog `x`); a valid
       integer value that x-propagates (`0sb? + 1 == 0sb??`, `0sb? | 1 == 1`)
     - There is **no bare `?`**, **no `_` default**, and **no `0b` prefix**
@@ -150,9 +151,15 @@ destination (no `{a,b}` form).
 
 * `if c { } elif { } else { }` — also an expression form. `unique if` asserts
   mutually exclusive conditions (one-hot mux; replaces tri-state).
-* `match` — **parallel-unique** case (implicit `assume` of mutual exclusivity),
-  **NOT priority**, with **the `else` arm mandatory** (parse error without it). A
-  bare value means `==`. Arms: `== v`, `in (2,3)`, `case (a=1)`, `< 5`, `else`.
+* `match` — **parallel-unique** case (implicit `assume` of mutual exclusivity
+  *and* exhaustiveness), **NOT priority**. The `else` arm is **optional**: omit
+  it when the arms already cover the whole key space (e.g. every value of a
+  bounded `uN`/`sN` selector). An omitted `else` behaves like an unreachable
+  `else { assert(false) }` — it lowers to a *don't-care* (the `__hotmux`
+  none-of slot is never selected), and a constant selector matching no arm
+  yields `nil` (exactly like an `if`/`elif` chain with no `else`). Add an
+  explicit `else` only for a real catch-all value or a `cassert(false)`. A bare
+  value means `==`. Arms: `== v`, `in (2,3)`, `case (a=1)`, `< 5`, `else`.
   If two arms can match the same value (e.g. `== 0` and `< 8`), the lowered
   `__hotmux` gets a non-one-hot select and the output is **X** — for
   priority/overlapping conditions use `if/elif/else`. The selector can declare
@@ -177,16 +184,12 @@ destination (no `{a,b}` form).
 reg counter:u8 = 0            // '= 0' is the RESET value (nil ⇒ no reset)
 const q   = counter           // bare name reads current q (snapshot first if needed)
 counter += 1                  // write with plain =/+=; lands at the cycle boundary
-const eoc = counter.[defer]   // RHS-ONLY end-of-cycle read — same-cycle wiring, no flop (TBD: not lowered yet)
 const old = past[2](counter)  // value 2 cycles ago (compiler inserts 2 flops) (TBD: not lowered yet)
 ```
 
-* There is **no `x.[defer] = ...` write form**, and no `@[-1]`/`@[1]` register
-  indexing — those are pre-3.0 forms.
-* `.[defer]` is *wiring, not time*: it lets an earlier statement use the value
-  produced by a later statement in the same cycle
-  (`f1 = ring(a=a, b=f4.[defer])` to close a module ring). It never crosses a
-  cycle.
+* There is no `@[-1]`/`@[1]` register indexing — those are pre-3.0 forms. The
+  old `.[defer]` end-of-cycle read **no longer exists** — use a `wire` (below)
+  for next-state reads and backward edges.
 * Register attributes at declaration:
   `reg c:u8:[clock_pin=ref clk2, reset_pin=ref rst2, sync=false, posclk=false, retime] = 3`.
   `_pin` attributes connect **wires** → they need `ref` (a comptime constant
@@ -194,6 +197,32 @@ const old = past[2](counter)  // value 2 cycles ago (compiler inserts 2 flops) (
   `sync=false`); `retime` lets synthesis move/merge the flop.
 * Multi-cycle reset code: assign a lambda **by name** (no parens):
   `reg arr:[1024]Tag = my_reset_mod`.
+
+## Wire — single-driver combinational nets
+
+`wire` declares ONE combinational net with **exactly one driver**, modeled on a
+Verilog continuous-assign / net. Unlike `mut` (whose value is the last write in
+*program order*, where a read-before-write is an error), a `wire` may be **read
+before its driver appears textually** — every read observes the single resolved
+driver, regardless of statement position. This is the construct for closing
+interconnect rings and feeding a register's next-state into a same-cycle
+consumer (it **replaces the removed `.[defer]` read**).
+
+```pyrope
+reg counter:u32 = 0
+wire nx:u32 = nil      // forward-declared, as-yet-undriven net
+nx = counter + 1       // the ONE driver (may appear later in program order)
+counter = nx           // registered write
+const also = nx + 1    // same-cycle consumer reads the same net
+```
+
+* **Exactly one driver.** A mux (an `if`/`match` *expression*, or
+  mutually-exclusive conditional writes) counts as one driver. A second
+  *unconditional* assignment, a never-driven net, or an incompletely-driven net
+  (driven on some paths only) is a compile error.
+* `wire` removes *textual* ordering only, **not cyclic dataflow**: a net that
+  combinationally feeds itself is a real comb loop and is rejected (SCC check).
+  A ring is legal only when a `reg` breaks it.
 
 ## Pipelining inside `mod`
 
@@ -234,7 +263,7 @@ mod accum(in1:u16, in2:u16) -> (out:u32@[3]) {
 reg mem:[256]u32 = 0       // async mem: 0-cycle read, fwd by default, reset to 0
 reg mem2:[16]i8 = nil      // no reset
 mut scratch:[] = nil       // plain array: no persistence across cycles
-mut m2:[4][8]u8 = 13       // multi-dimensional, row-major (TBD: not lowered yet)
+mut m2:[4][8]u8 = 13       // multi-dimensional, row-major
 ```
 
 Read `mem[addr]`; write `if we { mem[addr] = din }`. Indices can be enum- or
@@ -329,8 +358,9 @@ pipe[1] dpram(we:bool, waddr:u8, raddr:u8, wdata:u32) -> (rdata:u32) {
 | `module m(...)` | `mod m(...) -> (out:T@[N])` (or `pipe[N]`/`comb`) |
 | `input [7:0] x` / `output [7:0] y` | `x:u8` input / `y:u8@[N]` mod output |
 | `reg [7:0] x` + reset | `reg x:u8 = 0` |
-| `wire [7:0] x` / blocking `=` | `mut x:u8 = 0` |
-| `x <= y` (non-blocking) | `x = y` on a `reg` (defers automatically) |
+| `reg [7:0] x` / procedural blocking `=` | `mut x:u8 = 0` |
+| `wire [7:0] x` / continuous `assign` | `wire x:u8 = ...` (single-driver net) |
+| `x <= y` (non-blocking) | `x = y` on a `reg` (registered write) |
 | `parameter`/`localparam N = 8` | `comptime const N = 8` |
 | `always @(posedge clk)` / `@(*)` | implicit — `reg` vs `mut` |
 | `case (x) ... endcase` | `match x { == v {...} else {...} }` |
@@ -346,10 +376,13 @@ pipe[1] dpram(we:bool, waddr:u8, raddr:u8, wdata:u32) -> (rdata:u32) {
 1. `return X` is always wrong — assign the named output, then bare `return`.
 2. Outputs must be named in `-> (...)`; no positional returns; clause is
    mandatory (except `self` methods).
-3. `match` without a final `else` arm is a parse error.
+3. `match` `else` is **optional** — omit it when the arms exhaustively cover
+   the selector (an omitted `else` is an unreachable `assert(false)` /
+   don't-care). Add `else` only for a real catch-all.
 4. `when`/`unless` trailing gates no longer exist — `count += 1 when enable`
    is a syntax error; write `if enable { count += 1 }`.
-5. `.[defer]` is RHS-only; there is no deferred-write form.
+5. `.[defer]` no longer exists — use a `wire` (single-driver net, readable
+   before its driver) for backward edges and same-cycle next-state reads.
 6. `@[N]` never inserts flops (pure check); `stage[N]` inserts them
    (`mod`-only). `pipe` calls need `stage[N]` at the call site.
 7. A `mod` output without `@[N]`/`@[]` at the interface is a compile error;
@@ -377,7 +410,6 @@ Valid spec Pyrope that LiveHD does not lower yet (`15-tbd.md` in the docs is
 the authoritative list). Do not generate these unless explicitly asked:
 
 * `fluid` lambdas / valid-retry handshakes (parses only)
-* `.[defer]` end-of-cycle reads
 * Temporal library: `past[n]`/`next[n]`/`rose`/`fell`/`stable`/`changed`/
   `eventually`/`always`, `.[rising]`/`.[falling]`
 * Testbench extras: `peek`/`poke`, `waitfor`, `force`/`release`, `sigref`,
@@ -386,10 +418,10 @@ the authoritative list). Do not generate these unless explicitly asked:
   `init` overload sets resolve; prefer distinct names
 * `import("prp")` stdlib; `comptime`-computed / inferred-type memory init
   (`reg mem2 = reset_value` — literal/scalar init contents DO work);
-  `macro=` attribute; `covercase`, in-language `lec()`
+  `macro=` attribute; in-language `lec()`
 
-**Documented forms that do NOT lower (verified by differential LEC testing
-2026-06-19 — `upass.tolg` errors out; use the workaround):**
+**Documented forms that do NOT lower (re-verified against a fresh `lhd` build
+2026-06-20 — `upass.tolg` errors out; use the workaround):**
 
 * **Reduction operators** `a#|[..]` `a#&[..]` `a#^[..]` `a#+[..]` (popcount) —
   parse + elaborate, then `node type 'red_or'/.../'popcount' has no hardware
@@ -414,8 +446,9 @@ the authoritative list). Do not generate these unless explicitly asked:
 
 **Silently-WRONG lowerings (compile OK but the netlist is incorrect — avoid):**
 
-* `i8#[..]` (full-width slice of a *signed* value) collapses to 1 bit (`u8#[..]`
-  is fine). Slice an explicit range `a#[0..=7]`.
+* `i8#[..]` (full-width slice of a *signed* value) collapses to the wrong width
+  (e.g. `i8#[..]` → 2 bits; `u8#[..]` is fine). Slice an explicit range
+  `a#[0..=7]`.
 * Open-ended bit slice `a#[k..]` drops the offset (returns the low bits). Use the
   closed range `a#[k..=<msb>]`.
 * Two+ bit-slice writes to the *same register* (`r#[0..=7]=a; r#[8..=11]=b`) keep
@@ -453,8 +486,8 @@ JSONL stream (fields: `severity`, `code`, `category`, `pass`, `message`,
 `span`, `hint`). Triage by `category`:
 
 * `syntax` / `name` / `type` / `bitwidth` — the Pyrope source is wrong: fix it.
-* `unsupported` — valid Pyrope that LiveHD cannot lower *yet* (e.g.
-  `.[defer]`, temporal ops like `past[n]`, `fluid` lowering — see the
+* `unsupported` — valid Pyrope that LiveHD cannot lower *yet* (e.g. reduction
+  ops `a#|[..]`, temporal ops like `past[n]`, `fluid` lowering — see the
   not-yet-implemented list above). Rewrite around it for synthesis; do not
   "fix" correct source. The front-end usually still accepts it (the
   `unsupported` diagnostic comes from a later lowering stage).

@@ -1,0 +1,19 @@
+/*
+:name: wire_ring
+:type: equiv
+:verilog_top: wire_ring.ring
+:pyrope_top: wire_ring.ring
+*/
+
+// 2c-wire — a module-interconnect ring closed without ordering gymnastics: `sum`
+// reads `fb` BEFORE `fb`'s single driver appears textually (legal: a `wire` is
+// position-independent). The register `acc` breaks the loop, so `fb` is just a
+// net == acc (no flop for fb). out = acc, acc <= a + acc.
+mod ring(a:u8) -> (out:u8@[0]) {
+  wire fb = nil
+  reg  acc:u8 = 0
+  const sum = a + fb     // reads fb BEFORE it is driven (legal: wire)
+  out = acc
+  acc = sum              // the reg breaks the loop
+  fb  = acc              // fb's single driver, textually last
+}

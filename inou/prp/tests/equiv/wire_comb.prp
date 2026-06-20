@@ -1,0 +1,15 @@
+/*
+:name: wire_comb
+:type: equiv
+:verilog_top: wire_comb.wcomb
+:pyrope_top: wire_comb.wcomb
+*/
+
+// 2c-wire — a `wire` is a single-driver combinational net read
+// position-independently: `o` reads `x` BEFORE its driver appears textually and
+// sees the one resolved value (a+1), not nil. (Replaces the old `x.[defer]`.)
+comb wcomb(a:u8) -> (o:u9) {
+  wire x = nil
+  o = x
+  x = a + 1
+}

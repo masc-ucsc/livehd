@@ -1,0 +1,19 @@
+/*
+:name: wire_comb_loop
+:type: error
+:tolg: 1
+:error: combinational loop
+*/
+
+// 2c-wire — a `wire` removes only textual ordering, NOT cyclic dataflow. A wire
+// combinationally driven by a function of itself (here `w` and `v` form a comb
+// cycle with no register to break it) is a real combinational loop and is
+// rejected by the time-checker's SCC over combinational edges — including for a
+// standalone-compiled `comb` top (the acyclicity phase runs for comb too).
+comb t(a:u8) -> (o:u8) {
+  wire w = nil
+  wire v = nil
+  w = v + 1
+  v = w + a
+  o = w
+}

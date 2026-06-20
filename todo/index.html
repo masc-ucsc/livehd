@@ -34,9 +34,6 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 
 <h3 id="pyrope">Pyrope</h3>
 <ul>
-<li><em>Group 2:</em><ul>
-<li><a class="xref" href="pyrope/2c-wire.html">2c-wire</a> <code>wire</code> single-driver nets (replaces <code>.[defer]</code>): forward-declarable interconnect nets that decouple textual order from dataflow, plus computed <code>reset_pin</code> wiring.</li>
-</ul></li>
 <li><em>Group 3 — needs still-unspecified codegen/verification tasks first:</em><ul>
 <li><a class="xref" href="pyrope/3f-temporal.html">3f-temporal</a> Temporal library: <code>past[n]</code>/<code>next[n]</code>, <code>rose</code>/<code>fell</code>/<code>stable</code>/<code>changed</code>/<code>eventually</code>/<code>always</code>, <code>.[rising]</code> sugar.</li>
 <li><a class="xref" href="pyrope/3f-fluid.html">3f-fluid</a> <code>fluid</code> lambdas: valid/retry/fire elastic lowering (parses only today).</li>
@@ -50,6 +47,40 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 <li><a class="xref" href="pyrope/4b.html">4b</a> Emit <code>assert</code>/<code>assume</code>/<code>coverpoint</code> into slop.</li>
 </ul></li>
 </ul>
+
+<p><strong>Unimplemented / mis-lowering forms</strong> (re-verified 2026-06-20
+against a fresh <code>lhd</code> build — one todo page to be created per row).
+These are valid-spec Pyrope that either hard-errors in <code>upass.tolg</code> or
+lowers to a wrong netlist today. Temporal ops, <code>fluid</code>, and in-language
+<code>lec()</code>/<code>covercase</code> already have pages above
+(<a class="xref" href="pyrope/3f-temporal.html">3f-temporal</a>,
+<a class="xref" href="pyrope/3f-fluid.html">3f-fluid</a>,
+<a class="xref" href="pyrope/3f-verif_extras.html">3f-verif_extras</a>).</p>
+
+<p><em>Hard error — survives elaboration, no hardware lowering:</em></p>
+<table>
+<thead><tr><th>Form</th><th>Today (fresh <code>lhd</code>)</th><th>Workaround</th></tr></thead>
+<tbody>
+<tr><td>Reduction / popcount <code>a#|[..]</code> <code>a#&amp;[..]</code> <code>a#^[..]</code> <code>a#+[..]</code></td><td><code>node type 'red_or'/…/'popcount' has no hardware lowering</code></td><td>or-reduce <code>a != 0</code>; and-reduce <code>a#[lo..=hi] == ((1&lt;&lt;(hi-lo+1))-1)</code>; parity via XOR tree</td></tr>
+<tr><td><code>implies</code> as a hardware signal — <code>r = p implies q</code></td><td><code>call to 'implies' has no hardware lowering</code></td><td><code>r = (not p) or q</code> (<code>implies</code> still works inside <code>assert</code>/<code>cassert</code>)</td></tr>
+<tr><td>Registered-output interface <code>mod f(...) -&gt; (reg count:u8@[0])</code></td><td><code>state register 'count' homes at stage 0 … requires home -1</code></td><td>body register: <code>{ reg c:u8=0; count=c; … }</code></td></tr>
+<tr><td>Hierarchical enums <code>enum E=(,a=(,x,,y), ,b)</code></td><td><code>read of undefined variable 'x'</code> (nested names read as scope)</td><td>flat enum</td></tr>
+<tr><td>Tuple/struct-typed ports <code>comb f(ar:(x:u3,y:i4)) -&gt; (p:(q:u8,r:u8))</code></td><td><code>tuple/field store … has no hardware lowering</code></td><td>flatten to scalar ports (<code>ar_x:u3, ar_y:i4</code>)</td></tr>
+<tr><td>Runtime (non-comptime) bit index <code>a#[i]</code></td><td><code>get_mask mask operand is not a constant or range</code></td><td><code>(a &gt;&gt; i)#[0]</code></td></tr>
+<tr><td>Runtime index into a const-array <em>literal</em> <code>const arr=[..]; arr[i]</code></td><td><code>field/index read of 'arr' could not be resolved</code></td><td>typed <code>mut arr:[N]uW = …</code> or a <code>reg</code> memory (both lower a runtime index)</td></tr>
+<tr><td>Overload-gathering call dispatch <code>const add=[f1,f2]; add(x)</code></td><td><code>call to 'add' has no hardware lowering</code> (only <code>init</code> overload sets resolve)</td><td>distinct names per overload</td></tr>
+</tbody>
+</table>
+
+<p><em>Silently wrong — compiles OK but the emitted netlist is incorrect:</em></p>
+<table>
+<thead><tr><th>Form</th><th>Today (fresh <code>lhd</code>)</th><th>Workaround</th></tr></thead>
+<tbody>
+<tr><td>Full-width slice of a <em>signed</em> value <code>i8#[..]</code></td><td>collapses to the wrong width (<code>i8#[..]</code> → 2 bits; <code>u8#[..]</code> is fine)</td><td>explicit range <code>a#[0..=7]</code></td></tr>
+<tr><td>Open-ended bit slice <code>a#[k..]</code></td><td>drops the offset / wrong width+sign (returns the low bits)</td><td>closed range <code>a#[k..=&lt;msb&gt;]</code></td></tr>
+<tr><td>Two+ bit-slice writes to the <em>same register</em> <code>r#[0..=7]=a; r#[8..=11]=b</code></td><td>keeps only the last write (verified in emitted Verilog)</td><td>build the value in a <code>mut</code>, then assign the reg once</td></tr>
+</tbody>
+</table>
 
 <h3 id="livehd">LiveHD</h3>
 <ul>

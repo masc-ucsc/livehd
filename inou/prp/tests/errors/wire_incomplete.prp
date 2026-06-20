@@ -1,0 +1,16 @@
+/*
+:name: wire_incomplete
+:type: error
+:error: incompletely driven
+*/
+
+// 2c-wire — a conditional driver that leaves a path undriven is a compile error:
+// the `if` has no `else`, so when `c` is false `w` has no driver. A `wire` must
+// be driven on every control path.
+comb t(a:u8, c:bool) -> (o:u8) {
+  wire w = nil   // locate_error_here
+  if c {
+    w = a
+  }
+  o = w
+}

@@ -666,15 +666,6 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::u
       }
     } else if (Lnast_ntype::is_store(ct)) {
       auto name = first_ref_name(c);
-      // 2f-defer — `.[defer]` is an RHS-only end-of-cycle READ; there is no
-      // deferred-write form. A `x.[defer] = …` LHS is a clean error.
-      if (name.find(".[defer]") != std::string::npos || name.find("[defer]") != std::string::npos) {
-        report_error(c,
-                     "defer-lhs-write",
-                     "name",
-                     "`.[defer]` is an RHS-only end-of-cycle read — there is no `x.[defer] = …` write form",
-                     "write the variable directly (`x = …`); read its end-of-cycle value elsewhere with `x.[defer]`");
-      }
       if (!name.empty() && !prp_name_is_tmp(name) && !here.contains(name) && !visible.contains(name)) {
         report_error(c,
                      "assign-no-decl",
@@ -856,7 +847,7 @@ void Prp2lnast::check_undefined_reads() const {
   collect_hoisted_names(lnast->get_root(), hoisted);
 
   for (const auto& rs : read_sites_) {
-    if (rs.name.empty() || rs.name == "self" || rs.defer_exempt || prp_name_is_tmp(rs.name)
+    if (rs.name.empty() || rs.name == "self" || prp_name_is_tmp(rs.name)
         || prp_name_is_placeholder_arg(rs.name) || hoisted.contains(rs.name)) {
       continue;
     }
@@ -882,6 +873,227 @@ std::string_view Prp2lnast::trim(std::string_view s) {
     s.remove_suffix(1);
   }
   return s;
+}
+
+namespace {
+// 2c-wire — does `nid` store a (non-nil) value into wire `w`? A `wire w = nil`
+// forward-declare (a 2-child store of const nil) is NOT a driver.
+bool prp_wire_driver_store(const Lnast& ln, const Lnast_nid& nid, std::string_view w) {
+  if (!Lnast_ntype::is_store(ln.get_type(nid))) {
+    return false;
+  }
+  auto c0 = ln.get_first_child(nid);
+  if (c0.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(c0)) || ln.get_name(c0) != w) {
+    return false;
+  }
+  auto c1 = ln.get_sibling_next(c0);
+  if (c1.is_invalid()) {
+    return false;
+  }
+  if (ln.get_sibling_next(c1).is_invalid() && Lnast_ntype::is_const(ln.get_type(c1)) && ln.get_name(c1) == "nil") {
+    return false;  // `wire w = nil` forward-declare
+  }
+  return true;
+}
+
+// Is `nid` a statement-level `w = nil` (a 2-child store of const nil)? Such a
+// re-nil UN-drives w on its straight-line path (the `wire w = nil` declare emits
+// no store, so any store(w, nil) reaching here is a real re-assignment).
+bool prp_wire_nil_store(const Lnast& ln, const Lnast_nid& nid, std::string_view w) {
+  if (!Lnast_ntype::is_store(ln.get_type(nid))) {
+    return false;
+  }
+  auto c0 = ln.get_first_child(nid);
+  if (c0.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(c0)) || ln.get_name(c0) != w) {
+    return false;
+  }
+  auto c1 = ln.get_sibling_next(c0);
+  return !c1.is_invalid() && ln.get_sibling_next(c1).is_invalid() && Lnast_ntype::is_const(ln.get_type(c1))
+         && ln.get_name(c1) == "nil";
+}
+
+// Does any STATEMENT-LEVEL driver store to `w` exist in `nid`'s control subtree?
+// Traverses ONLY control structure (stmts / if / for / while branch bodies) and
+// matches a driver store only as a direct child of a stmts — a tuple-literal
+// field `(w = v)`, a func/io param, etc. lowers to the SAME `store(ref(w), v)`
+// shape nested under a tuple_add/func_def/io, and must NOT be mistaken for a
+// wire write (it would otherwise false-count an unrelated same-named field).
+bool prp_subtree_writes_wire(const Lnast& ln, const Lnast_nid& nid, std::string_view w) {
+  const auto t = ln.get_type(nid);
+  if (Lnast_ntype::is_stmts(t)) {
+    for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+      if (prp_wire_driver_store(ln, c, w)) {
+        return true;
+      }
+      const auto ct = ln.get_type(c);
+      if ((Lnast_ntype::is_if_like(ct) || Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct) || Lnast_ntype::is_stmts(ct))
+          && prp_subtree_writes_wire(ln, c, w)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (Lnast_ntype::is_if_like(t) || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t)) {
+    for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+      if (Lnast_ntype::is_stmts(ln.get_type(c)) && prp_subtree_writes_wire(ln, c, w)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool prp_stmts_cover_wire(const Lnast& ln, const Lnast_nid& stmts, std::string_view w);
+
+// An if/unique_if covers `w` iff it has an else arm (the all-conds-false slot is
+// driven) AND every branch body covers `w`. Children alternate cond, stmts, …;
+// an odd count whose last child is a bare stmts is the else arm.
+bool prp_if_covers_wire(const Lnast& ln, const Lnast_nid& if_nid, std::string_view w) {
+  int  n           = 0;
+  bool last_stmts  = false;
+  for (auto c = ln.get_first_child(if_nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+    ++n;
+    last_stmts = Lnast_ntype::is_stmts(ln.get_type(c));
+  }
+  if (!((n % 2 == 1) && last_stmts)) {
+    return false;  // no else → the fall-through path leaves `w` undriven
+  }
+  for (auto c = ln.get_first_child(if_nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+    if (Lnast_ntype::is_stmts(ln.get_type(c)) && !prp_stmts_cover_wire(ln, c, w)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Does executing `stmts` drive `w` on EVERY control path? Tracked straight-line:
+// a real driver sets covered; a `w = nil` re-assignment CLEARS it (matching
+// lnastfmt's last-write-wins DCE — a trailing nil leaves the net undriven, which
+// tolg would otherwise hard-error on). A non-covering if leaves coverage as-is.
+bool prp_stmts_cover_wire(const Lnast& ln, const Lnast_nid& stmts, std::string_view w) {
+  bool covered = false;
+  for (auto c = ln.get_first_child(stmts); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+    const auto t = ln.get_type(c);
+    if (prp_wire_nil_store(ln, c, w)) {
+      covered = false;  // `w = nil` un-drives on this straight-line path
+    } else if (prp_wire_driver_store(ln, c, w)) {
+      covered = true;
+    } else if (Lnast_ntype::is_if_like(t) && prp_if_covers_wire(ln, c, w)) {
+      covered = true;
+    } else if (Lnast_ntype::is_stmts(t) && prp_stmts_cover_wire(ln, c, w)) {
+      covered = true;
+    }
+  }
+  return covered;
+}
+
+// Count the top-level driver STATEMENTS of `w` (an if/match that writes `w`
+// anywhere counts as ONE driver; a nested plain stmts block recurses). Does NOT
+// descend into func_def bodies (nested lambdas are separate scopes).
+int prp_count_wire_drivers(const Lnast& ln, const Lnast_nid& stmts, std::string_view w) {
+  int cnt = 0;
+  for (auto c = ln.get_first_child(stmts); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+    const auto t = ln.get_type(c);
+    if (prp_wire_driver_store(ln, c, w)) {
+      ++cnt;
+    } else if (Lnast_ntype::is_if_like(t) && prp_subtree_writes_wire(ln, c, w)) {
+      ++cnt;
+    } else if (Lnast_ntype::is_stmts(t)) {
+      cnt += prp_count_wire_drivers(ln, c, w);
+    }
+  }
+  return cnt;
+}
+
+// Is `w` driven inside a `for`/`while` body? A loop is unrolled later (the
+// runner), so its driver count / coverage is unknowable here — skip the strict
+// frontend check for such a wire (a real comb loop / double-drive still surfaces
+// at tolg post-unroll). Conservative: avoids a false positive on a loop-built
+// net like `for i { if i==sel { w = data[i] } }`.
+bool prp_wire_written_under_loop(const Lnast& ln, const Lnast_nid& nid, std::string_view w, bool in_loop) {
+  const auto t = ln.get_type(nid);
+  if (Lnast_ntype::is_stmts(t)) {
+    for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+      if (in_loop && prp_wire_driver_store(ln, c, w)) {
+        return true;
+      }
+      const auto ct = ln.get_type(c);
+      if ((Lnast_ntype::is_if_like(ct) || Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct) || Lnast_ntype::is_stmts(ct))
+          && prp_wire_written_under_loop(ln, c, w, in_loop)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  // if/for/while: a for/while body's stmts are "under a loop"; recurse there only
+  // (NOT into cond exprs / tuple / func_def — those never hold a wire write).
+  if (Lnast_ntype::is_if_like(t) || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t)) {
+    const bool nl = in_loop || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t);
+    for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+      if (Lnast_ntype::is_stmts(ln.get_type(c)) && prp_wire_written_under_loop(ln, c, w, nl)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+}  // namespace
+
+void Prp2lnast::check_wire_drivers() const { check_wire_scope(lnast->get_root()); }
+
+void Prp2lnast::check_wire_scope(const Lnast_nid& node) const {
+  // At each `stmts` scope, enforce the single-driver rules on every `wire`
+  // declared directly in it (its drivers live in this scope; count/cover recurse
+  // into nested if/match and plain blocks).
+  if (Lnast_ntype::is_stmts(lnast->get_type(node))) {
+    for (auto c = lnast->get_first_child(node); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      if (!Lnast_ntype::is_declare(lnast->get_type(c))) {
+        continue;
+      }
+      auto name_n = lnast->get_first_child(c);
+      auto type_n = name_n.is_invalid() ? name_n : lnast->get_sibling_next(name_n);
+      auto mode_n = type_n.is_invalid() ? type_n : lnast->get_sibling_next(type_n);
+      if (mode_n.is_invalid() || !Lnast_ntype::is_const(lnast->get_type(mode_n))) {
+        continue;
+      }
+      const auto mode = lnast->get_name(mode_n);
+      if (mode != "wire" && !mode.starts_with("wire ")) {
+        continue;
+      }
+      const auto wname = lnast->get_name(name_n);
+      // A wire driven inside a loop is unrolled later — its coverage/multiplicity
+      // is unknowable here; defer to tolg's post-unroll checks.
+      if (prp_wire_written_under_loop(*lnast, node, wname, /*in_loop=*/false)) {
+        continue;
+      }
+      const int  drivers = prp_count_wire_drivers(*lnast, node, wname);
+      const bool covered = prp_stmts_cover_wire(*lnast, node, wname);
+      if (drivers > 1) {
+        report_error(c,
+                     "wire-multiple-drivers",
+                     "name",
+                     std::format("wire '{}' has more than one driver — a `wire` is a single-driver net", wname),
+                     "give it exactly one assignment, or one `if`/`match` that drives it on every path");
+      } else if (!covered) {
+        if (drivers == 0) {
+          report_error(c,
+                       "wire-undriven",
+                       "name",
+                       std::format("wire '{}' is declared but never driven", wname),
+                       "assign it (a `wire` must have exactly one driver), or remove the declaration");
+        } else {
+          report_error(c,
+                       "wire-incomplete-driver",
+                       "name",
+                       std::format("wire '{}' is incompletely driven — a control path leaves it undriven", wname),
+                       "drive it on every path (add an `else`, or cover every `match` case)");
+        }
+      }
+    }
+  }
+  for (auto c = lnast->get_first_child(node); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    check_wire_scope(c);
+  }
 }
 
 void Prp2lnast::dump_tree_sitter() const { dump_tree_sitter(ts_root_node, 1); }
@@ -972,6 +1184,10 @@ void Prp2lnast::process_description() {
   check_undeclared_writes();
   check_undefined_reads();
   rewrite_decls_to_declare();
+  // 2c-wire — enforce the single-driver rules AFTER the decl-merge (so each
+  // `wire` is a `declare(name, type, "wire")`) but on the pre-elaborate tree
+  // (before lnastfmt drops a dead first write, which would hide a double-drive).
+  check_wire_drivers();
 }
 
 namespace {
@@ -1590,6 +1806,11 @@ static std::string_view storage_kind_from_node_type(std::string_view t) {
   }
   if (t == "reg_decl") {
     return "reg";
+  }
+  if (t == "wire_decl") {
+    // 2c-wire — single-driver combinational net; like `mut` its value is built
+    // from if/match, but reads are position-independent (see Mode::wire_kind).
+    return "wire";
   }
   if (t == "stage_decl") {
     // `stage[N] lhs = rhs` (mod-only): lhs is rhs delivered N
@@ -5595,7 +5816,6 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
       "fwd",
       "wensize",
       "rdport",
-      "defer",
       "inputs",
       "outputs",
       // Category C — synthesis hints
@@ -7442,10 +7662,6 @@ Lnast_node Prp2lnast::attribute_read_to_node(TSNode n) {
   // of `attr_get` ops. Multiple chained reads (`x.[a].[b]`) chain through a
   // temporary.
   TSNode     arg  = child_by_field(n, "argument");
-  // 2f-defer — remember which read_sites the base expression records, so an
-  // `x.[defer]` can exempt them from the undefined-read check (defer reads the
-  // end-of-cycle value, which may be written later in the cycle).
-  const size_t base_reads_begin = read_sites_.size();
   Lnast_node base = expr_to_node(arg);
 
   uint32_t nnc = ts_node_named_child_count(n);
@@ -7481,13 +7697,6 @@ Lnast_node Prp2lnast::attribute_read_to_node(TSNode n) {
                      "type",
                      "the `.[typename]` attribute has been removed",
                      "use the structural `does` / `equals` / `case` operators for type comparison");
-      }
-      if (get_text(name_n) == "defer") {
-        // The end-of-cycle read may reference a variable defined later in the
-        // cycle — exempt the base expression's reads from the undefined check.
-        for (size_t k = base_reads_begin; k < read_sites_.size(); ++k) {
-          read_sites_[k].defer_exempt = true;
-        }
       }
       auto idx = builder.add_child(Lnast_ntype::create_attr_get());
       auto ref = builder.mint_tmp_ref();

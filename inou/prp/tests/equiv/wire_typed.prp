@@ -1,0 +1,16 @@
+/*
+:name: wire_typed
+:type: equiv
+:verilog_top: wire_typed.wt
+:pyrope_top: wire_typed.wt
+*/
+
+// 2c-wire — a TYPED wire narrows its driver to the declared width (Verilog net
+// truncation), and the constraint must survive cprop's buffer collapse (O0 == O2).
+// Two consumers so the buffer cannot be trivially inlined away.
+comb wt(a:u8) -> (o1:u4, o2:u4) {
+  wire x:u4 = nil
+  o1 = x
+  o2 = x ^ 0
+  x  = a
+}
