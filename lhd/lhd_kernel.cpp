@@ -575,7 +575,8 @@ struct Manifest_unit {
   std::string               name;
   uint64_t                  hash{0};
   std::string               unit_kind;
-  std::vector<Manifest_pub> pubs;  // file units only (the pub index)
+  bool                      verilog_origin{false};  // durable: a Verilog-read tree (open ports legal, etc.)
+  std::vector<Manifest_pub> pubs;                    // file units only (the pub index)
 };
 
 void write_manifest(const std::string& dir, std::string_view kind, const std::vector<Manifest_unit>& units) {
@@ -600,6 +601,9 @@ void write_manifest(const std::string& dir, std::string_view kind, const std::ve
     ofs << ",\"content_hash\":\"" << std::format("{:016x}", u.hash) << "\"";
     if (!u.unit_kind.empty()) {
       ofs << ",\"unit_kind\":\"" << json_escape_min(u.unit_kind) << "\"";
+    }
+    if (u.verilog_origin) {
+      ofs << ",\"verilog_origin\":true";
     }
     if (!u.pubs.empty()) {
       ofs << ",\"pub\":[";
@@ -628,7 +632,7 @@ void write_manifest(const std::string& dir, std::string_view kind, const std::ve
   std::vector<Manifest_unit> rich;
   rich.reserve(units.size());
   for (const auto& [name, hash] : units) {
-    rich.push_back({name, hash, "", {}});
+    rich.push_back({.name = name, .hash = hash});
   }
   write_manifest(dir, kind, rich);
 }
@@ -661,8 +665,9 @@ void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<L
     std::ostringstream oss;
     ln->dump(oss);  // hash the canonical text form (deterministic)
     Manifest_unit u;
-    u.name = name;
-    u.hash = hash_bytes(oss.str());
+    u.name           = name;
+    u.hash           = hash_bytes(oss.str());
+    u.verilog_origin = ln->is_verilog_origin();
     // Durable unit metadata: the lambda kind (an in-memory Lnast
     // member, lost across the forest save) and the file unit's pub index.
     if (name.size() > 6 && name.ends_with(".__pub")) {
@@ -727,6 +732,12 @@ std::vector<std::shared_ptr<Lnast>> load_ln_dir(const std::string& dir) {
       if (uk != "file" && uk != "pub") {
         ln->set_lambda_kind(uk);
       }
+    }
+    // A Verilog-read tree keeps Verilog semantics across the ln: round-trip
+    // (e.g. open output ports are legal — see the tolg undriven/unresolved
+    // origin gate), so a reloaded forest stays lenient.
+    if (u.HasMember("verilog_origin") && u["verilog_origin"].IsBool() && u["verilog_origin"].GetBool()) {
+      ln->set_verilog_origin(true);
     }
     if (u.HasMember("pub") && u["pub"].IsArray()) {
       for (const auto& p : u["pub"].GetArray()) {
@@ -1389,6 +1400,39 @@ bool emits_need_lnast(const Options& opts) {
          || find_slot(opts.emit_dirs, "lnast-dump") != nullptr || wants_dump(opts, "lnast") || opts.command == "tool";
 }
 
+// A *bare* `lhd compile FILE` (no --emit/--emit-dir at all) is the
+// maximum-diagnostics action: it should lower all the way to LGraphs (tolg +
+// recipe) so the LNAST->LGraph lowering and the graph passes surface every
+// warning/error, even though nothing is saved (graph_pipeline_and_emits is a
+// no-op without an emit slot: the lg-save guard needs a non-null lg slot and
+// every emit_* helper early-returns).
+//
+// Gated narrowly so it never changes a flow the user explicitly asked for:
+//   - When ANY emit/emit-dir is requested, the existing emits_need_graphs()
+//     decides — so `--emit-dir pyrope:`/`ln:`/`lnast-dump:` keep their no-tolg
+//     (pre-upass / toln:0) re-emit semantics.
+//   - The explicit front-end-only tier `--set upass.order=noop` guts the runner
+//     so the tree is never rewritten into a tolg-ready shape; lowering it would
+//     only produce spurious failures (prplib.py's `:type: parsing`/`lnast`
+//     tiers rely on this). Mirrors the user_toln_off scan in lower_lnasts.
+bool force_diag_graphs(const Options& opts) {
+  if (!opts.emits.empty() || !opts.emit_dirs.empty()) {
+    return false;  // a requested emit defines the flow — don't override it
+  }
+  for (const auto& [key, value] : opts.sets) {
+    if (key == "compile.upass.order" && value == "noop") {
+      return false;
+    }
+    // Explicit opt-out: `--set upass.tolg=false` means "front-end + upass only,
+    // don't lower to graphs" — the stage-scoped check the prplib comptime/upass
+    // test tiers want (a pure comptime program is not synthesizable hardware).
+    if (key == "compile.upass.tolg" && (value == "0" || value == "false")) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // ---- scan (pyrope import/dependency discovery) -------------------------------
 
 // Imports are comptime string literals (see the LiveHD docs),
@@ -2047,7 +2091,9 @@ void compile_ir(Options& opts, Result& res, const Ir_inputs& ir) {
       }
     }
     lib_path = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
-    lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts));
+    // Force the tolg lowering for diagnostics even with no lg: emit (bare
+    // `lhd compile ln:DIR`) — see force_diag_graphs.
+    lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts) || force_diag_graphs(opts));
     if (ln_out != nullptr) {  // re-publish the post-upass forest (the loaded units are the design)
       emit_ln_outputs(var.lnasts, opts, res);
     }
@@ -2145,7 +2191,9 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
         lib.load_merge(d);
       }
     }
-    lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts) || !ir.lg_dirs.empty());
+    // Bare `lhd compile FILE.prp` (no emit) still lowers to LGraphs for max
+    // diagnostics; the graphs are built and discarded (force_diag_graphs).
+    lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts) || force_diag_graphs(opts) || !ir.lg_dirs.empty());
     if (ln_out != nullptr) {
       publish_source_ln(opts, res, var, n_imports, ln_out->path);
     }
@@ -2160,7 +2208,8 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
       const auto* lg_out   = find_slot(opts.emit_dirs, "lg");
       const auto* ln_out   = find_slot(opts.emit_dirs, "ln");
       std::string lib_path = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
-      lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts));
+      // Bare `lhd compile FILE.sv` (no emit) still lowers for max diagnostics.
+      lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts) || force_diag_graphs(opts));
       if (ln_out != nullptr) {  // the slang units are the design (no imports) -> plain forest
         save_ln_dir(opts, res, filter_top(var.lnasts, opts.top), ln_out->path);
       }

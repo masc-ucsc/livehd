@@ -52,9 +52,11 @@
 #include "upass_runner.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <format>
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -65,6 +67,7 @@
 #include "decl_facts.hpp"
 #include "range_bits.hpp"
 #include "diag.hpp"
+#include "lsp_index.hpp"
 
 namespace {
 
@@ -1157,9 +1160,156 @@ void uPass_runner::process_drop_candidate_push(upass::Push_method fn, bool fold_
     rn.dst = std::make_shared<Bundle>("");
   }
   const bool vote_drop = dispatch_push(fn, rn);
+  // task 2n Phase B: record the just-defined variable into the LSP semantic
+  // index, now that this op's bitwidth/kind facts are written. Gated on the
+  // LSP-only global flag, so the normal CLI never enters record_lsp_def.
+  if (livehd::lsp_index::index().enabled()) {
+    record_lsp_def(rn.dst_name);
+  }
   if (!vote_drop && !any_pass_drops()) {
     emit_op_with_fold(fold_all);
   }
+}
+
+// task 2n Phase B — see the header. Statement-granularity span (operand refs
+// carry no SourceId; the enclosing op does), so selectionRange == range.
+void uPass_runner::record_lsp_def(std::string_view dst_name) {
+  if (dst_name.empty() || Lnast::is_tmp(dst_name)) {
+    return;  // throwaway dst or a compiler temporary: no user-visible name
+  }
+  const auto nid = lm->get_current_nid();
+  const auto sp  = lm->get_lnast()->span_of(nid);
+  if (!sp.start_line) {
+    return;  // synthesized / inlined node with no resolvable source location
+  }
+
+  // Source-level display name: strip the SSA suffix (x___ssa_2 -> x).
+  std::string_view base = dst_name;
+  if (const auto pos = base.find("___ssa_"); pos != std::string_view::npos) {
+    base = base.substr(0, pos);
+  }
+  if (base.empty() || Lnast::is_tmp(base)) {
+    return;
+  }
+
+  // Dlop const -> int64 (mirrors uPass_bitwidth::const_to_i64).
+  const auto to_i64 = [](const Dlop& v) -> std::optional<int64_t> {
+    if (v.is_invalid() || !v.is_integer() || v.has_unknowns() || v.get_bits() > 62) {
+      return std::nullopt;
+    }
+    return v.to_just_i64();
+  };
+  // Minimal bit width to hold a range, matching upass_bitwidth's storage rule.
+  const auto ubits = [](int64_t hi) -> int {
+    return hi <= 0 ? 0 : static_cast<int>(std::bit_width(static_cast<uint64_t>(hi)));
+  };
+  const auto sbits = [](int64_t lo, int64_t hi) -> int {
+    const auto sb = [](int64_t v) {
+      return v >= 0 ? static_cast<int>(std::bit_width(static_cast<uint64_t>(v))) + 1
+                    : static_cast<int>(std::bit_width(static_cast<uint64_t>(-v - 1))) + 1;
+    };
+    return std::max(sb(lo), sb(hi));
+  };
+
+  // Declared type/envelope. IO leaves carry it on the Lnast's io_meta
+  // side-channel (harvested by the SSA upass): the authoritative declared bits +
+  // sign + value range. For an internal (non-IO) declared var, fall back to the
+  // live bundle's declared envelope (decl_min/decl_max).
+  std::optional<int>     dbits;            // declared bit width (prefix)
+  bool                   dsigned = false;  // declared sign
+  std::optional<int64_t> dlo;              // declared value envelope
+  std::optional<int64_t> dhi;
+  {
+    const auto&                  io    = lm->get_lnast()->io_meta();
+    const Lnast_io_entry*        found = nullptr;
+    for (const auto& e : io.outputs) {
+      if (std::string_view(e.name) == base) {
+        found = &e;
+        break;
+      }
+    }
+    if (found == nullptr) {
+      for (const auto& e : io.inputs) {
+        if (std::string_view(e.name) == base) {
+          found = &e;
+          break;
+        }
+      }
+    }
+    if (found != nullptr) {
+      dsigned = found->is_signed;
+      if (found->bits > 0) {
+        dbits = found->bits;
+      }
+      if (found->has_range) {
+        dlo = found->range_min;
+        dhi = found->range_max;
+      } else if (found->bits > 0 && found->bits < 63) {
+        if (dsigned) {
+          dhi = (int64_t{1} << (found->bits - 1)) - 1;
+          dlo = -(int64_t{1} << (found->bits - 1));
+        } else {
+          dhi = (int64_t{1} << found->bits) - 1;
+          dlo = 0;
+        }
+      }
+    } else if (const auto b = symbol_table_.get_bundle(Bundle::get_first_level(dst_name)); b) {
+      const auto& e = b->get_entry("0");
+      dlo           = to_i64(e.decl_min);
+      dhi           = to_i64(e.decl_max);
+      if (dlo && dhi) {
+        dsigned = *dlo < 0;
+      }
+    }
+  }
+
+  // Inferred range live at this definition (per SSA version), from the bitwidth
+  // side-channel keyed by the post-SSA name. Unbounded for an unconstrained
+  // value (e.g. a raw input), in which case the declared envelope is shown.
+  std::optional<int64_t> ilo;
+  std::optional<int64_t> ihi;
+  const auto&            ranges = lm->get_lnast()->bw_meta().ranges;
+  if (const auto it = ranges.find(std::string(dst_name)); it != ranges.end() && !it->second.unbounded) {
+    ilo = it->second.min;
+    ihi = it->second.max;
+  }
+
+  const bool  have_decl = dlo && dhi;
+  const bool  have_inf  = ilo && ihi;
+  std::string render(base);
+  render += " : ";
+  if (!have_decl && !have_inf) {
+    render += "int";  // unbounded and undeclared: no width to show
+  } else {
+    // (min,max) shown = the inferred (possibly narrowed) range when known, else
+    // the declared envelope. Prefix bits/sign = the DECLARED width when declared
+    // (so `z:u8` narrowed to 0..15 renders u8(0,15)), else derived from the range.
+    const int64_t lo  = have_inf ? *ilo : *dlo;
+    const int64_t hi  = have_inf ? *ihi : *dhi;
+    const bool    sgn = have_decl ? dsigned : (lo < 0);
+    int           bits;
+    if (have_decl) {
+      bits = dbits ? *dbits : (dsigned ? sbits(*dlo, *dhi) : ubits(*dhi));
+    } else {
+      bits = sgn ? sbits(lo, hi) : ubits(hi);
+    }
+    render += sgn ? 'i' : 'u';
+    render += std::to_string(bits);
+    render += '(';
+    render += std::to_string(lo);
+    render += ',';
+    render += std::to_string(hi);
+    render += ')';
+  }
+
+  livehd::lsp_index::Entry e;
+  e.start_line = sp.start_line ? *sp.start_line : 0;
+  e.start_col  = sp.start_col ? *sp.start_col : 0;
+  e.end_line   = sp.end_line ? *sp.end_line : e.start_line;
+  e.end_col    = sp.end_col ? *sp.end_col : e.start_col;
+  e.name       = std::string(base);
+  e.render     = std::move(render);
+  livehd::lsp_index::index().record(std::move(e));
 }
 
 void uPass_runner::process_drop_candidate_verbatim(Pass_method fn) {
@@ -1966,6 +2116,218 @@ bool uPass_runner::try_lower_wrap_sat() {
                                             Lnast_node::create_const(static_cast<int64_t>(ub) - 1)});
   }
   return true;
+}
+
+bool uPass_runner::try_lower_typecast() {
+  using N = Lnast_ntype;
+  // Cursor on the func_call. Walk children read-only; restore on every decline.
+  const auto saved = lm->save_cursor();
+  auto       bail   = [&]() {
+    lm->restore_cursor(saved);
+    return false;
+  };
+
+  // Layout: ref(dst), ref(callee), <single positional operand>.
+  if (!lm->has_child()) {
+    return bail();
+  }
+  lm->move_to_child();  // dst
+  if (!N::is_ref(lm->get_raw_ntype())) {
+    return bail();
+  }
+  const std::string dst(lm->current_text());
+
+  if (!lm->move_to_sibling()) {  // callee
+    return bail();
+  }
+  // RAW name: an inlined body tag-prefixes the callee (`int` → `inlN_int`); the
+  // cast classifier keys on the un-renamed builtin name (mirrors constprop).
+  const std::string callee(lm->current_raw_text());
+  const auto        tc = upass::classify_typecast(callee);
+  if (!tc) {
+    return bail();  // not a built-in scalar cast (bool/boolean, user fn, cell-op…)
+  }
+
+  // Exactly one positional operand (a ref or const). A `store(...)` named actual
+  // or extra args means this is not a plain scalar cast — let the normal path run.
+  if (!lm->move_to_sibling()) {
+    return bail();
+  }
+  std::string arg_name;  // empty ⇒ const operand
+  Lnast_node  arg_node;
+  if (N::is_ref(lm->get_raw_ntype())) {
+    arg_name = std::string(lm->current_text());
+    arg_node = Lnast_node::create_ref(arg_name);
+  } else if (N::is_const(lm->get_raw_ntype())) {
+    arg_node = lm->current_node();
+  } else {
+    return bail();
+  }
+  if (lm->move_to_sibling()) {
+    return bail();  // arity > 1 — not a scalar cast
+  }
+  lm->restore_cursor(saved);  // back on the func_call
+
+  // A comptime operand folds in constprop (and the drop path retires the call);
+  // only a runtime value needs hardware here.
+  if (arg_name.empty()) {
+    return false;  // const operand → comptime
+  }
+  if (symbol_table_.known_const_scalar(arg_name).has_value()) {
+    return false;  // folds to a known scalar → comptime
+  }
+
+  // Operand kind + range: the bitwidth-stamped binding (tightest), falling back
+  // to the declared envelope (a module input never gets a per-write bw_*).
+  // Operand kind + range. bool-ness lives on the BUNDLE-level value kind
+  // (typecheck's set_value_kind — a runtime `a<b` stamps value_kind=boolean
+  // there, NOT on entry "0", whose range reads as a signed int(-1,0)); mirror
+  // uPass_typecheck::kind_of_bundle. Enums carry the `enumentry` attr.
+  bool                operand_is_bool = false;
+  bool                operand_is_enum = false;
+  upass::Kind         operand_kind    = upass::Kind::unknown;
+  std::optional<Dlop> vmax;
+  std::optional<Dlop> vmin;
+  if (auto b = symbol_table_.get_bundle(arg_name); b) {
+    const auto  vk = b->get_value_kind();
+    const auto& e  = b->get_entry("0");
+    operand_kind    = (vk != upass::Kind::unknown) ? vk : e.kind;
+    operand_is_bool = (operand_kind == upass::Kind::boolean);
+    for (const auto& attr : b->get_attrs()) {
+      if (Bundle::get_last_level(attr.first) == battr::enumentry) {
+        operand_is_enum = true;
+        break;
+      }
+    }
+    if (!e.bw_max.is_invalid() && e.bw_max.is_integer()) {
+      vmax = e.bw_max;
+    }
+    if (!e.bw_min.is_invalid() && e.bw_min.is_integer()) {
+      vmin = e.bw_min;
+    }
+  }
+  if (!operand_is_bool && !operand_is_enum) {
+    if (auto vf = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), arg_name)) {
+      if (vf->kind == upass::decl_facts::Num::boolean) {
+        operand_is_bool = true;
+        operand_kind    = upass::Kind::boolean;
+      } else if (operand_kind == upass::Kind::unknown
+                 && (vf->kind == upass::decl_facts::Num::unsigned_int || vf->kind == upass::decl_facts::Num::signed_int)) {
+        operand_kind = upass::Kind::integer;
+      }
+      if (!vmax && vf->range_max && vf->range_max->is_integer()) {
+        vmax = vf->range_max;
+      }
+      if (!vmin && vf->range_min && vf->range_min->is_integer()) {
+        vmin = vf->range_min;
+      }
+    }
+  }
+
+  // Only a genuine runtime hardware scalar (int/bool) is lowered here. Enums
+  // (`string(E.x)`/`int(E.x)`), comptime strings, tuples, ranges, nil — all
+  // constprop's domain — are declined so its richer fold runs (this hook fires
+  // BEFORE constprop on the func_call, so over-eager handling would corrupt
+  // them). `unknown` is kept: a runtime arithmetic result (`int(a+b)`) is often
+  // unstamped but is a real integer.
+  if (operand_is_enum
+      || (!operand_is_bool && operand_kind != upass::Kind::integer && operand_kind != upass::Kind::unknown)) {
+    return false;
+  }
+
+  // A CHECKED cast (uint/uN/sN) of an integer operand can only be proven safe
+  // with a range; int() never needs one (unbounded signed) and a bool operand
+  // always fits. Decline (let the normal path run) when the range is missing.
+  if (!operand_is_bool) {
+    if (tc->kind == upass::Typecast_kind::to_uint && !vmin) {
+      return false;
+    }
+    if (tc->kind == upass::Typecast_kind::to_sized && (!vmax || !vmin)) {
+      return false;
+    }
+  }
+
+  // Committed: run the per-pass func_call hooks first (mirrors
+  // process_drop_candidate step 1 / try_lower_wrap_sat) so any handshake the
+  // call carried still fires; the func_call node itself is NOT emitted.
+  dispatch_to_passes(&upass::uPass::process_func_call);
+
+  auto cast_error = [&](std::string_view code, std::string msg, std::string_view hint) {
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = std::string(code),
+        .category = "type",
+        .pass     = "upass.runner",
+        .message  = std::move(msg),
+        .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+        .hint     = std::string(hint),
+    });
+  };
+
+  // 1-bit unsigned mask, used to read a bool's bit as an unsigned 0/1.
+  const auto mask1 = std::string(Dlop::get_mask_value(1)->to_pyrope());
+
+  switch (tc->kind) {
+    case upass::Typecast_kind::to_string:
+      // A runtime value has no string form (strings are comptime-only).
+      cast_error("runtime-string-cast",
+                 "`string(...)` needs a compile-time value — a runtime signal has no string form",
+                 "build the string from comptime data, or print it via a debug statement");
+      return true;
+
+    case upass::Typecast_kind::to_int:
+      if (operand_is_bool) {
+        emit_inline_sext(dst, arg_name, 0);  // 1-bit signed: true = -1, false = 0
+      } else {
+        emit_inline_binding(dst, arg_node);  // `int` is unbounded → value-preserving
+      }
+      return true;
+
+    case upass::Typecast_kind::to_uint:
+      if (operand_is_bool) {
+        emit_inline_get_mask(dst, arg_node, mask1);  // unsigned bit: true = 1, false = 0
+        return true;
+      }
+      if (vmin && vmin->is_negative()) {
+        cast_error("cast-overflow",
+                   std::format("`{}(...)` of a possibly-negative value cannot be represented unsigned", callee),
+                   "ensure the value is non-negative, or use a `wrap`/`sat` prefix to drop bits");
+        return true;
+      }
+      emit_inline_binding(dst, arg_node);  // already ≥ 0 → value-preserving
+      return true;
+
+    case upass::Typecast_kind::to_sized: {
+      const auto ub  = static_cast<uint32_t>(tc->sized_bits);
+      const bool sgn = tc->sized_signed;
+      if (operand_is_bool) {
+        if (sgn) {
+          emit_inline_sext(dst, arg_name, 0);          // true = -1
+        } else {
+          emit_inline_get_mask(dst, arg_node, mask1);  // true = 1
+        }
+        emit_inline_typespec(dst, static_cast<int>(ub), sgn);
+        return true;
+      }
+      const Dlop tmax = upass::max_from_bits(ub, sgn);
+      const Dlop tmin = upass::min_from_bits(ub, sgn);
+      if (vmax->gt_op(tmax)->is_known_true() || vmin->lt_op(tmin)->is_known_true()) {
+        cast_error("cast-overflow",
+                   std::format("value range [{}, {}] does not fit the `{}` cast range [{}, {}]",
+                               vmin->to_decimal_string(),
+                               vmax->to_decimal_string(),
+                               callee,
+                               tmin.to_decimal_string(),
+                               tmax.to_decimal_string()),
+                   "a sized cast (`uN`/`sN`) is checked, not truncating; use a `wrap` or `sat` prefix to drop bits");
+        return true;
+      }
+      emit_inline_binding(dst, arg_node);  // fits → value-preserving
+      emit_inline_typespec(dst, static_cast<int>(ub), sgn);
+      return true;
+    }
+  }
+  return true;  // all Typecast_kind cases handled above
 }
 
 bool uPass_runner::try_inline_func_call() {
@@ -2918,11 +3280,15 @@ bool uPass_runner::try_inline_func_call() {
     // (`const inner = two_output_f()` — see the store handler).
     multi_output_results_.insert(dst_name);
     std::vector<std::pair<std::string, Lnast_node>> fields;
+    std::vector<std::pair<std::string, std::string>> scalar_slot_refs;  // recorded AFTER emit
     fields.reserve(logical_order.size());
     for (const auto& lname : logical_order) {
       auto& leaves = logical[lname];
       if (leaves.size() == 1 && leaves[0].first.empty()) {
         fields.emplace_back(lname, leaves[0].second);  // scalar logical output
+        if (leaves[0].second.is_ref()) {
+          scalar_slot_refs.emplace_back(lname, std::string(leaves[0].second.get_name()));
+        }
       } else {
         // A tuple-typed output among several: keep its dotted leaves so the
         // destructure / `.lname.sub` read still resolves (rare; one level).
@@ -2932,6 +3298,18 @@ bool uPass_runner::try_inline_func_call() {
       }
     }
     emit_inline_tuple(dst_name, fields);
+    // A RUNTIME scalar output is held in the ST only as a nil-seeded scalar
+    // bundle (output prologue, ~L2603); process_tuple_add (run by emit_inline_tuple
+    // above, which ERASES + rebuilds the slot map) re-reads its bogus comptime
+    // trivial (0) and the live wire `inl1_<out> = x+1` is lost — the destructure
+    // picks fold to 0/nil and the call's logic is orphaned (verilog: `os = 65'sb1???`).
+    // Record a runtime slot_ref so try_resolve_tuple_get rewrites `___2 = ___1.lname`
+    // into a direct copy `___2 = inl1_<out>`, the same path that makes a
+    // single-output comb work. Comptime outputs still fold (the destructure's
+    // tuple_get finds the trivial first; the slot_ref is the runtime fallback).
+    for (auto& [lname, src] : scalar_slot_refs) {
+      symbol_table_.tuple_slot_ref[dst_name][lname] = src;
+    }
   }
   for (auto& [caller_var, src] : writebacks) {
     emit_inline_binding(caller_var, src);
@@ -5514,7 +5892,7 @@ void uPass_runner::process_lnast() {
     // constprop can fold built-in typecasts (int/uint/uNN/sNN) and cell-ops;
     // anything it declines stays un-folded and the statement is emitted.
     case Ntype::Lnast_ntype_func_call:
-      if (!try_lower_wrap_sat() && !try_inline_func_call() && !try_construct_call()) {
+      if (!try_lower_wrap_sat() && !try_lower_typecast() && !try_inline_func_call() && !try_construct_call()) {
         process_drop_candidate(&upass::uPass::process_func_call, /*fold_all=*/false);
       }
       break;

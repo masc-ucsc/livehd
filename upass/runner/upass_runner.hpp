@@ -170,6 +170,14 @@ protected:
   // dispatch, combine the votes with the legacy classify_statement, emit.
   void process_drop_candidate_push(upass::Push_method fn, bool fold_all);
 
+  // task 2n Phase B: record one LSP semantic-index entry for the variable
+  // DEFINED at the current op node (its source-level name, resolved type/range,
+  // and statement span), for textDocument/hover. Only the caller's
+  // livehd::lsp_index::index().enabled() gate (set by the LSP, never the CLI)
+  // reaches here, so the normal pipeline pays one bool check per op and records
+  // nothing. dst_name is the resolved (post-SSA) destination name.
+  void record_lsp_def(std::string_view dst_name);
+
   // Declaration pre-step: read the TYPE subtree of a `declare`
   // (is_declare=true) or standalone `type_spec` ONCE and bake the persistent
   // facts into the destination's symbol-table bundle as TYPED fields (Kind +
@@ -331,6 +339,21 @@ protected:
   // Returns true (suppressing the func_call emit) iff it handled the call. The
   // read cursor is left on the func_call node on every path.
   bool try_lower_wrap_sat();
+
+  // Runtime scalar typecast lowering: `int(x)` / `uint(x)` / `uN(x)` / `sN(x)`
+  // on a RUNTIME operand (a comptime-constant operand is folded by constprop —
+  // this declines for those so the fold path runs). Mirrors try_lower_wrap_sat:
+  //   * int(bool)/sN(bool)  → sext(dst, x, 0)        — true = -1 (1-bit signed)
+  //   * uint(bool)/uN(bool) → get_mask(dst, x, 0b1)  — true = 1  (unsigned bit)
+  //   * int(intval)         → `dst = x` (signed is unbounded; value-preserving)
+  //   * uint/uN/sN(intval)  → the operand range must provably FIT the target
+  //     (a sized cast is CHECKED, not truncating); if it can overflow this is a
+  //     compile error (use `wrap`/`sat`). When it fits → `dst = x`.
+  //   * string()/bool() of a runtime value → compile error (no hardware form).
+  // Runs the per-pass process_func_call hooks first (like try_lower_wrap_sat)
+  // before emitting. Returns true iff it consumed the call (handled or errored);
+  // declines (false, cursor restored) for non-casts and comptime operands.
+  bool try_lower_typecast();
 
   // Var-arg access resolution. A `comb foo(...args)` call gathers its
   // leftover actuals here, keyed by the FRAME-TAGGED var-arg name (e.g.

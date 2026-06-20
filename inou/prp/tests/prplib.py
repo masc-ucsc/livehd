@@ -91,11 +91,16 @@ class PrpRunner:
         # attrs, ...) that fold some casserts incorrectly — so these tests just
         # assert the pipeline doesn't crash, never that the casserts hold. For
         # correctness checking, use `:type: comptime`.
-        # No emits -> inou.prp + lnastfmt + pass.upass, tolg skipped.
+        # No emits -> inou.prp + lnastfmt + pass.upass, tolg skipped. A bare
+        # `lhd compile FILE` now lowers to LGraphs for max diagnostics even
+        # without an emit (force_diag_graphs), so this stage-scoped tier opts
+        # out explicitly with `upass.tolg=false`: a comptime/upass test program
+        # is checked for evaluation, not synthesized (many are pure comptime
+        # programs that call combs with constant args — not hardware modules).
         cmd = [self.lhd, 'compile']
         cmd += test.params['files']
         cmd += ['--workdir', self._scratch(test, mode), '-q']
-        cmd += ['--set', 'upass.verifier=false']
+        cmd += ['--set', 'upass.verifier=false', '--set', 'upass.tolg=false']
         return cmd
 
     def lhd_comptime(self, test, mode):

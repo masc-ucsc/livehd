@@ -169,34 +169,83 @@ definition/references, and document symbols are planned (see the contract).
 
 ### Claude Code
 
-Claude Code consumes LSP servers through a plugin's `.lsp.json`. Create a small
-plugin directory (the LSP schema is evolving — verify against the current
-[plugin reference](https://code.claude.com/docs/en/plugins-reference)):
+> **"Install the LSP Pyrope server in Claude Code"** — follow the four numbered
+> steps below verbatim. They are idempotent; re-running them is safe.
 
+Claude Code picks up an LSP server from a **plugin**. The simplest and
+persistent way is a *skills-directory plugin*: a folder under
+`~/.claude/skills/` containing a `.claude-plugin/plugin.json`. Claude Code
+auto-loads it in **every** project as `pyrope-lsp@skills-dir` — no marketplace,
+no `/plugin install`, no per-session `--plugin-dir` flag.
+
+The same `~/.claude/skills/` directory also holds the **`pyrope` skill** (it
+teaches Claude how to write and check Pyrope), so Step 2 installs it alongside
+the LSP plugin — both become personal-scope and work in every project.
+
+**Step 1 — make sure `prplsp` and `lhd` are on your `$PATH`.** See
+[`prplsp` launcher](#prplsp-launcher) above. Quick check:
+
+```bash
+command -v prplsp && command -v lhd     # both must print a path
 ```
-pyrope-lsp-plugin/
-  plugin.json      # { "name": "pyrope-lsp", "version": "0.1.0" }
-  .lsp.json
+
+**Step 2 — install the `pyrope` skill (one time).** From the root of your
+livehd checkout, copy the bundled skill into your personal skills directory:
+
+```bash
+mkdir -p ~/.claude/skills
+cp -r .claude/skills/pyrope ~/.claude/skills/pyrope
 ```
 
-`.lsp.json`:
+**Step 3 — create the plugin (one time).** Copy-paste this whole block:
 
-```json
+```bash
+mkdir -p ~/.claude/skills/pyrope-lsp/.claude-plugin
+cat > ~/.claude/skills/pyrope-lsp/.claude-plugin/plugin.json <<'JSON'
 {
-  "pyrope": {
-    "command": "prplsp",
-    "args": [],
-    "transport": "stdio",
-    "extensionToLanguage": { ".prp": "pyrope" }
+  "name": "pyrope-lsp",
+  "description": "Pyrope language server (lhd pyrope lsp via the prplsp wrapper) — live compile diagnostics for .prp files",
+  "version": "0.1.0",
+  "lspServers": {
+    "pyrope": {
+      "command": "prplsp",
+      "args": [],
+      "extensionToLanguage": { ".prp": "pyrope" }
+    }
   }
 }
+JSON
 ```
 
-Then load it for development with `claude --plugin-dir ./pyrope-lsp-plugin` (or
-install it via `/plugin install`) and `/reload-plugins`. Editing a `.prp` file
-will then surface Pyrope diagnostics to Claude. For an in-IDE session (VS Code /
-JetBrains), Claude reads the editor's Problems panel via the built-in `ide` MCP
-server instead, so point your IDE's Pyrope LSP at `prplsp` too.
+**Step 4 — load and verify.** Restart Claude Code (or run `/reload-plugins`),
+then:
+
+```bash
+claude plugin validate ~/.claude/skills/pyrope-lsp   # → ✔ Validation passed
+claude plugin list                                   # → pyrope-lsp@skills-dir   ✔ loaded
+claude plugin details pyrope-lsp@skills-dir          # → LSP servers (1)  pyrope
+ls ~/.claude/skills/pyrope/SKILL.md                  # → the pyrope skill is installed
+```
+
+That's it. Editing a `.prp` file now surfaces Pyrope diagnostics to Claude
+automatically (error code, message, and line range), and the `pyrope` skill is
+available for writing/checking Pyrope. Both are **personal scope**, so they work
+in every project with no per-repo setup.
+
+Notes:
+
+- The `lspServers` config lives **inline** in `plugin.json` (current schema).
+  An equivalent standalone `.lsp.json` in the plugin root also works. The schema
+  evolves — if `claude plugin validate` complains, check the current
+  [plugin reference](https://code.claude.com/docs/en/plugins-reference).
+- `claude plugin init pyrope-lsp --with lsp` scaffolds the same folder via the
+  CLI; if you use it, replace the generated manifest with the block in Step 2.
+- To stop using it: `claude plugin disable pyrope-lsp@skills-dir` (or delete the
+  folder). There is no `uninstall` — nothing was installed from a marketplace.
+  To remove the skill too: `rm -rf ~/.claude/skills/pyrope`.
+- For an in-IDE session (VS Code / JetBrains), Claude reads the editor's Problems
+  panel via the built-in `ide` MCP server instead, so point your IDE's Pyrope
+  LSP at `prplsp` too (see the Neovim wiring below for the pattern).
 
 ### Neovim (0.11+)
 

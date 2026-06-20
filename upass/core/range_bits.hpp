@@ -2,6 +2,9 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
+#include <string>
+#include <string_view>
 
 #include "hlop/dlop.hpp"
 
@@ -56,6 +59,45 @@ inline Dlop max_from_bits(uint32_t bits, bool is_signed) {
 }
 inline Dlop min_from_bits(uint32_t bits, bool is_signed) {
   return is_signed ? signed_min_from_bits(bits) : unsigned_min_from_bits(bits);
+}
+
+// Built-in scalar typecast classification. Recognizes the callable names
+// prp2lnast emits for a type-constructor cast — `int`, `unsigned`/`uint`,
+// `string`, and the sized `uN`/`sN`/`iN` forms. Shared verbatim by the comptime
+// fold (constprop) and the runtime hardware lowering (runner) so the two never
+// disagree on what counts as a cast. nullopt for any other name (a user
+// function, a `__cellop`, an enum type, `bool`/`boolean`, …).
+enum class Typecast_kind : uint8_t { to_int, to_uint, to_string, to_sized };
+
+struct Typecast_info {
+  Typecast_kind kind{Typecast_kind::to_int};
+  bool          sized_signed = false;  // to_sized only: sN/iN (true) vs uN (false)
+  int           sized_bits   = 0;      // to_sized only: the N in uN/sN/iN
+};
+
+inline std::optional<Typecast_info> classify_typecast(std::string_view fname) {
+  if (fname == "int") {
+    return Typecast_info{Typecast_kind::to_int};
+  }
+  if (fname == "uint" || fname == "unsigned") {
+    return Typecast_info{Typecast_kind::to_uint};
+  }
+  if (fname == "string") {
+    return Typecast_info{Typecast_kind::to_string};
+  }
+  // u<num> / s<num> / i<num>: a one-letter sign tag followed by decimal digits.
+  if (fname.size() >= 2 && (fname[0] == 'u' || fname[0] == 's' || fname[0] == 'i')) {
+    for (size_t i = 1; i < fname.size(); ++i) {
+      if (fname[i] < '0' || fname[i] > '9') {
+        return std::nullopt;
+      }
+    }
+    Typecast_info ti{Typecast_kind::to_sized};
+    ti.sized_signed = (fname[0] == 's' || fname[0] == 'i');
+    ti.sized_bits   = std::stoi(std::string(fname.substr(1)));
+    return ti;
+  }
+  return std::nullopt;
 }
 
 }  // namespace upass

@@ -240,9 +240,20 @@ public:
       }
       auto it = pin_map_.find(name);
       if (it == pin_map_.end()) {
-        warn_at(Lnast_nid{}, {"undriven-output", "type"}, "output '{}' not driven by body — wiring nil (0sb?)", name);
-        sink.connect_driver(create_const(*g_, *Dlop::from_pyrope("0sb?")));
-        continue;
+        // An output the body never drives would otherwise be wired to nil
+        // (0sb?). For Pyrope that is a silent miscompile (a hard error — every
+        // output must be assigned); for a Verilog-origin module an undriven
+        // output is legal (defaults to X), so keep the warn + nil wiring.
+        if (lnast_->is_verilog_origin()) {
+          warn_at(Lnast_nid{}, {"undriven-output", "type"}, "output '{}' not driven by body — wiring nil (0sb?)", name);
+          sink.connect_driver(create_const(*g_, *Dlop::from_pyrope("0sb?")));
+          continue;
+        }
+        error_at(Lnast_nid{},
+                 {"undriven-output", "type"},
+                 "output '{}' is never driven by the body of '{}' — every declared output must be assigned",
+                 name,
+                 lnast_->get_top_module_name());
       }
       sink.connect_driver(it->second);
     }
@@ -322,20 +333,31 @@ private:
     if (it != pin_map_.end()) {
       return it->second;
     }
+    // A name that resolves to neither a driver nor a memory would be wired to
+    // nil (0sb?). For Pyrope that drops whatever the reference carried — a
+    // silent miscompile, so it is a hard error. A Verilog-origin module may
+    // legally read an undriven wire (it defaults to X), so keep the warn + nil.
+    const bool strict = !lnast_->is_verilog_origin();
     if (mem_map_.contains(key)) {
-      // A memory name never binds a scalar pin; only indexed
-      // accesses are supported. A warning (not an error): hardware regs may
-      // legitimately be observed by other means (scan chain, future regref).
+      // A memory name never binds a scalar pin; only indexed accesses lower.
+      if (strict) {
+        error_here(
+            "upass.tolg: memory '{}' used as a scalar value — whole-array reads are not supported; index it (`{}[addr]`)",
+            name,
+            name);
+      }
       warn_at(Lnast_nid{},
               {"memory-scalar-read", "unsupported"},
               "memory '{}' used as a scalar value — whole-array reads are unsupported, wiring nil (0sb?)",
               name);
-      auto p        = nil_pin();
-      pin_map_[key] = p;
-      mw_map_[key]  = 1;
-      return p;
+    } else if (strict) {
+      error_here(
+          "upass.tolg: unresolved reference '{}' — it has no driver (often an unassigned variable or a value that "
+          "resolved to nil)",
+          name);
+    } else {
+      warn_at(Lnast_nid{}, {"unresolved-ref", "name"}, "unresolved ref '{}' — wiring nil (0sb?)", name);
     }
-    warn_at(Lnast_nid{}, {"unresolved-ref", "name"}, "unresolved ref '{}' — wiring nil (0sb?)", name);
     auto p        = nil_pin();
     pin_map_[key] = p;
     mw_map_[key]  = 1;
@@ -540,8 +562,21 @@ private:
           "upass.tolg: non-comptime `for` loop in '{}' — the iterable did not resolve to a comptime range "
           "or tuple, so the loop could not unroll (Pyrope for-loops are comptime-only and must fully unroll)",
           lnast_->get_top_module_name());
+    } else if (N::is_type_spec(t) || N::is_cassert(t)) {
+      // Pure annotations with no datapath: a standalone `type_spec` (e.g. the
+      // comb inliner's emit_inline_typespec, or a folded type check) and a
+      // `cassert` that upass.verifier already discharged at comptime. They
+      // create no hardware, so skip them silently — NOT the dropped-logic error
+      // below (a leftover here is benign, not a miscompile).
     } else {
-      warn_at(Lnast_nid{}, {"unhandled-node", "unsupported"}, "unhandled node type '{}'", Lnast_ntype::to_sv(t));
+      // Any other node type reaching tolg has no LGraph lowering and would be
+      // silently dropped (→ undriven wires / nil). That is a miscompile, so it
+      // is a hard error, never a warning on an otherwise-"passing" run.
+      error_at(nid,
+               {"unhandled-node", "unsupported"},
+               "upass.tolg: node type '{}' has no hardware lowering — it survived elaboration but cannot be turned "
+               "into a netlist (this is usually an unresolved value or an unsupported runtime construct)",
+               Lnast_ntype::to_sv(t));
     }
   }
 
@@ -562,8 +597,11 @@ private:
     auto attr = base.is_invalid() ? base : lnast_->get_sibling_next(base);
     const std::string attr_name = attr.is_invalid() ? std::string{} : std::string(lnast_->get_name(attr));
     if (attr_name != "defer") {
-      warn_at(nid, {"unhandled-node", "unsupported"}, "unhandled attribute read '.[{}]'", attr_name);
-      return;
+      error_at(nid,
+               {"unhandled-node", "unsupported"},
+               "upass.tolg: attribute read '.[{}]' has no hardware lowering — it should have folded during elaboration "
+               "(only `.[defer]` reaches the netlist stage)",
+               attr_name);
     }
     if (base.is_invalid() || !Lnast_ntype::is_ref(lnast_->get_type(base))) {
       error_here("upass.tolg: `.[defer]` must read a variable or field reference");
@@ -886,11 +924,11 @@ private:
       return;
     }
     if (!lnast_->get_sibling_next(rhs).is_invalid()) {
-      warn_at(lhs,
-              {"tuple-store-unsupported", "unsupported"},
-              "tuple/field store not handled yet (lhs '{}')",
-              lnast_->get_name(lhs));
-      return;
+      error_at(lhs,
+               {"tuple-store-unsupported", "unsupported"},
+               "upass.tolg: tuple/field store to '{}' has no hardware lowering — the elaboration left a multi-element "
+               "store that cannot be turned into wires",
+               lnast_->get_name(lhs));
     }
     auto lhs_name = lnast_->get_name(lhs);
     // Deferred stage-reg creation: the din store knows the
@@ -935,14 +973,22 @@ private:
         mem_results_[std::string(lhs_name)] = rec_copy;
         return;
       }
-      // A multi-output call result bound to a named var (`mut tmp = add_sub(…)`):
-      // alias the Sub_result so `tmp.add`/`tmp.sub` resolve through the named
-      // var, not just the call's result temp. (Copy before insert — operator[]
-      // may rehash and invalidate the found iterator.)
+      // A call result bound to a named var (`mut tmp = add_sub(…)`): alias the
+      // Sub_result so `tmp.add`/`tmp.sub` resolve through the named var, not
+      // just the call's result temp. (Copy before insert — operator[] may
+      // rehash and invalidate the found iterator.) A MULTI-output result has no
+      // scalar pin, so the alias is the whole binding (return). A SINGLE-output
+      // result IS scalar-bindable (the result temp has a direct pin record), so
+      // alias it AND fall through to bind the scalar — otherwise a plain read of
+      // the named var (`s1 + s2`, no `.field`) would find no driver.
       if (auto srt = sub_results_.find(rhs_name); srt != sub_results_.end()) {
-        auto rec_copy                       = srt->second;
+        const bool multi                   = srt->second.outputs.size() > 1;
+        auto       rec_copy                = srt->second;
         sub_results_[std::string(lhs_name)] = std::move(rec_copy);
-        return;
+        if (multi) {
+          return;
+        }
+        // single-output: fall through to the scalar record below
       }
     }
     auto v = leaf(rhs);
@@ -1523,8 +1569,11 @@ private:
           continue;
         }
       }
-      warn_at(nid, {"unhandled-node", "unsupported"}, "unhandled node type 'tuple_add'");
-      return;
+      error_at(nid,
+               {"unhandled-node", "unsupported"},
+               "upass.tolg: tuple '{}' has an element that did not fold to a constant or wire — it has no hardware "
+               "lowering (tuples must be fully resolved at compile time)",
+               lnast_->get_name(dst));
     }
     tuple_recs_[std::string(lnast_->get_name(dst))] = std::move(rec);
   }
@@ -1572,8 +1621,11 @@ private:
           continue;
         }
       }
-      warn_at(nid, {"unhandled-node", "unsupported"}, "unhandled node type 'tuple_concat'");
-      return;
+      error_at(nid,
+               {"unhandled-node", "unsupported"},
+               "upass.tolg: concatenated tuple '{}' has an operand that did not fold to a constant or wire — it has no "
+               "hardware lowering (tuple `++`/`...` must be fully resolved at compile time)",
+               lnast_->get_name(dst));
     }
     tuple_recs_[std::string(lnast_->get_name(dst))] = std::move(rec);
   }
@@ -1963,8 +2015,10 @@ private:
     auto src = dst.is_invalid() ? dst : lnast_->get_sibling_next(dst);
     auto idx = src.is_invalid() ? src : lnast_->get_sibling_next(src);
     if (idx.is_invalid()) {
-      warn_at(nid, {"unhandled-node", "unsupported"}, "unhandled node type 'tuple_get'");
-      return;
+      error_at(nid,
+               {"unhandled-node", "unsupported"},
+               "upass.tolg: tuple/field read of '{}' has no index — it cannot be lowered to a netlist",
+               src.is_invalid() ? std::string_view{"?"} : lnast_->get_name(src));
     }
     auto it = mem_map_.find(std::string(lnast_->get_name(src)));
     if (it == mem_map_.end()) {
@@ -2038,8 +2092,13 @@ private:
         pending_tgets_.emplace_back(nid);
         return;
       }
-      warn_at(nid, {"unhandled-node", "unsupported"}, "unhandled node type 'tuple_get'");
-      return;
+      error_at(nid,
+               {"unhandled-node", "unsupported"},
+               "upass.tolg: field/index read of '{}' could not be resolved — '{}' is not a memory, a multi-output "
+               "instance result, or a resolved value (often an unassigned value/nil, or an unsupported runtime tuple "
+               "index)",
+               lnast_->get_name(src),
+               lnast_->get_name(src));
     }
     auto& mi = it->second;
     // Gather the full index chain (tuple_get(dst, mem, i, j, …) is FLAT).
@@ -2643,6 +2702,13 @@ private:
       set_sign(out_dpin);
       record(dst_name, to_positive(out_dpin, mw), mw);
     }
+    // Also expose the single output by name so an explicit field read of the
+    // result (`f(...).out`) resolves through lower_tuple_get, exactly like the
+    // multi-output case — without it a single-output instance whose result is
+    // read via `.out` left the field unbound (the port wire was dropped and the
+    // consumer wired to nil). The bare-result form (`r = f(...)`) keeps using
+    // the direct record above (resolve() reads pin_map_).
+    sub_results_[dst_name] = Sub_result{sub, {oe}};
     // The instance is a timed crossing: stamp its declared
     // latency interval (a following stage[N] re-stamps the pinned pick).
     // Bare-pipe unconstrained max (cmax<cmin) propagates as min (the
@@ -2785,11 +2851,11 @@ private:
       }
       return Dlop::get_mask_value(static_cast<int>(hi), static_cast<int>(lo));  // multi-word capable, no 63-bit cap
     }
-    warn_at(mask_op,
-            {"mask-not-const", "unsupported"},
-            "get_mask mask operand '{}' not const/range — using 0",
-            lnast_->get_name(mask_op));
-    return Dlop::create_integer(0);
+    error_at(mask_op,
+             {"mask-not-const", "unsupported"},
+             "upass.tolg: get_mask mask operand '{}' is not a constant or range — a runtime mask has no lowering here "
+             "(the mask must be comptime)",
+             lnast_->get_name(mask_op));
   }
 
   // Number of set bits in a (non-negative) mask = the get_mask result width.
@@ -2906,9 +2972,10 @@ private:
       return;
     }
     if (!Lnast_ntype::is_const(lnast_->get_type(b))) {
-      warn_at(b, {"sext-runtime-pos", "unsupported"}, "sext with a runtime sign position has no lowering — wiring nil");
-      bind_result(lnast_->get_name(dst), nil_pin(), 1);
-      return;
+      error_at(b,
+               {"sext-runtime-pos", "unsupported"},
+               "upass.tolg: sign-extend with a runtime sign position has no lowering — the sign-bit position must be a "
+               "compile-time constant");
     }
     const auto pos  = const_val(b);
     auto       av   = leaf(a);

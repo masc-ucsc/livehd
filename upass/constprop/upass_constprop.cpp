@@ -17,7 +17,7 @@
 #include "lnast_ntype.hpp"
 #include "str_tools.hpp"
 #include "upass_verifier.hpp"
-#include "wrap_sat.hpp"  // uN()/sN() constructor-cast wrap math (//upass/bitwidth)
+#include "range_bits.hpp"  // classify_typecast + max/min_from_bits for uN()/sN() casts
 
 // Registered once here (not in the header) to avoid duplicate-registration
 // errors when multiple TUs include upass_constprop.hpp.
@@ -3393,30 +3393,22 @@ void uPass_constprop::process_func_call() {
     return;
   }
 
-  // Enumerate known typecast dispatch.
+  // Enumerate known typecast dispatch (shared name classifier so the runtime
+  // hardware lowering in upass.runner stays in lock-step — see range_bits.hpp).
   enum class Cast { none, to_int, to_uint, to_string, to_sized };
   Cast kind       = Cast::none;
   bool sized_sig  = false;  // true for sN, false for uN
   int  sized_bits = 0;
-  if (fname == "int") {
-    kind = Cast::to_int;
-  } else if (fname == "uint" || fname == "unsigned") {
-    kind = Cast::to_uint;
-  } else if (fname == "string") {
-    kind = Cast::to_string;
-  } else if (fname.size() >= 2 && (fname[0] == 'u' || fname[0] == 's' || fname[0] == 'i')) {
-    // u32 / s32 / u8 ... — size suffix is decimal digits.
-    bool all_digits = true;
-    for (size_t i = 1; i < fname.size(); ++i) {
-      if (fname[i] < '0' || fname[i] > '9') {
-        all_digits = false;
+  if (auto tc = upass::classify_typecast(fname)) {
+    switch (tc->kind) {
+      case upass::Typecast_kind::to_int: kind = Cast::to_int; break;
+      case upass::Typecast_kind::to_uint: kind = Cast::to_uint; break;
+      case upass::Typecast_kind::to_string: kind = Cast::to_string; break;
+      case upass::Typecast_kind::to_sized:
+        kind       = Cast::to_sized;
+        sized_sig  = tc->sized_signed;
+        sized_bits = tc->sized_bits;
         break;
-      }
-    }
-    if (all_digits && fname.size() > 1) {
-      kind       = Cast::to_sized;
-      sized_sig  = (fname[0] == 's' || fname[0] == 'i');
-      sized_bits = std::stoi(fname.substr(1));
     }
   }
   if (kind == Cast::none) {
@@ -3509,7 +3501,12 @@ void uPass_constprop::process_func_call() {
       return;
     }
     if (kind == Cast::to_uint) {
-      if (v.is_string() || v.is_negative()) {
+      if (v.is_bool() && !v.has_unknowns()) {
+        // bool → unsigned: the lone bit reads as an unsigned magnitude, so
+        // `uint(true) == 1` and `uint(false) == 0` (NOT the signed
+        // `int(true) == -1` — the target's signedness decides).
+        v = *Dlop::from_pyrope(v.is_known_true() ? "1" : "0");
+      } else if (v.is_string() || v.is_negative()) {
         // Cast failure (non-numeric string or negative) → pyrope `nil`.
         v = Dlop::nil();
       }
@@ -3524,17 +3521,37 @@ void uPass_constprop::process_func_call() {
       }
       result = v;
     } else {
-      // sized constructor `uN(v)` / `sN(v)`: a CONVERTING cast — wrap (drop
-      // bits) into the target envelope, same math as the `wrap` assignment
-      // prefix (07-typesystem: `val = u8(0x1F0)` ≡ `wrap val = 0x1F0`).
+      // sized constructor `uN(v)` / `sN(v)`: a CHECKED cast — the value must
+      // provably FIT the target envelope. Overflow is a COMPILE ERROR (use
+      // `wrap`/`sat` to drop bits), never a silent truncation.
       if (v.is_string()) {
-        v = Dlop::nil();
-      } else if (sized_sig) {
-        v = upass::bitwidth::wrap_to_signed(v, static_cast<uint32_t>(sized_bits));
+        result = Dlop::nil();
+      } else if (v.is_bool() && !v.has_unknowns()) {
+        // bool → sized, per the target signedness: `s8(true) == -1` (1-bit
+        // signed all-ones, like `int`), `u8(true) == 1` (unsigned magnitude).
+        result = *Dlop::from_pyrope(v.is_known_true() ? (sized_sig ? "-1" : "1") : "0");
       } else {
-        v = upass::bitwidth::wrap_to_unsigned(v, static_cast<uint32_t>(sized_bits));
+        const Dlop tmax = upass::max_from_bits(static_cast<uint32_t>(sized_bits), sized_sig);
+        const Dlop tmin = upass::min_from_bits(static_cast<uint32_t>(sized_bits), sized_sig);
+        if (v.gt_op(tmax)->is_known_true() || v.lt_op(tmin)->is_known_true()) {
+          livehd::diag::sink().emit(livehd::diag::Diagnostic{
+              .severity = livehd::diag::Severity::error,
+              .code     = "cast-overflow",
+              .category = "type",
+              .pass     = "upass.constprop",
+              .message  = std::format("value {} does not fit the `{}` cast range [{}, {}]",
+                                      v.to_decimal_string(),
+                                      fname,
+                                      tmin.to_decimal_string(),
+                                      tmax.to_decimal_string()),
+              .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+              .hint     = "a sized cast (`uN`/`sN`) is checked, not truncating; use a `wrap` or `sat` "
+                          "prefix to drop bits intentionally",
+          });
+          return;  // dst left unbound (the call site is now an error)
+        }
+        result = v;  // fits → value-preserving
       }
-      result = v;
     }
   }
 

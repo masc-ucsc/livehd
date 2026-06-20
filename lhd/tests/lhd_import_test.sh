@@ -57,14 +57,14 @@ grep -q '"name":"add1","kind":"comb","url":"ln:explib.add1"' "$MAN" || fail "pub
 grep -q '"name":"local_only"' "$MAN" && fail "non-pub const leaked into the pub index: $(cat "$MAN")"
 
 "$LHD" compile "$W/consumer.prp" ln:"$W/explib_ln" \
-  --set upass.verifier=true --set upass.verifier_pass=4 --set upass.verifier_fail=0 \
+  --set upass.verifier=true --set upass.verifier_pass=4 --set upass.verifier_fail=0 --set upass.tolg=false \
   --workdir "$W/w2" -q --result-json "$W/r2.json" \
   || fail "two-invocation import failed: $(cat "$W/r2.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r2.json" || fail "importer result not pass: $(cat "$W/r2.json")"
 
 # ── 2. same-invocation, worst order (importer first → round 2 resolves) ───────
 "$LHD" compile "$W/consumer.prp" "$W/explib.prp" \
-  --set upass.verifier=true --set upass.verifier_pass=4 --set upass.verifier_fail=0 \
+  --set upass.verifier=true --set upass.verifier_pass=4 --set upass.verifier_fail=0 --set upass.tolg=false \
   --workdir "$W/w3" -q --result-json "$W/r3.json" \
   || fail "same-invocation worst-order import failed: $(cat "$W/r3.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r3.json" || fail "worst-order result not pass: $(cat "$W/r3.json")"
@@ -83,7 +83,7 @@ cat > "$W/chain_c.prp" <<'EOF'
 pub const base_val = 10
 EOF
 "$LHD" compile "$W/chain_a.prp" "$W/chain_b.prp" "$W/chain_c.prp" \
-  --set upass.verifier=true --set upass.verifier_pass=1 --set upass.verifier_fail=0 \
+  --set upass.verifier=true --set upass.verifier_pass=1 --set upass.verifier_fail=0 --set upass.tolg=false \
   --workdir "$W/w4" -q --result-json "$W/r4.json" \
   || fail "3-deep chain failed: $(cat "$W/r4.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r4.json" || fail "chain result not pass: $(cat "$W/r4.json")"
@@ -121,13 +121,13 @@ printf 'pub const v = 2\n' > "$W/dupB/dup.prp"
 "$LHD" compile "$W/dupA/dup.prp" --emit-dir ln:"$W/dupA_ln/" --workdir "$W/w8a" -q 2>/dev/null
 "$LHD" compile "$W/dupB/dup.prp" --emit-dir ln:"$W/dupB_ln/" --workdir "$W/w8b" -q 2>/dev/null
 printf 'const b = import("dup")\ncassert(b.v == 1)\n' > "$W/imp_dup.prp"
-"$LHD" compile "$W/imp_dup.prp" ln:"$W/dupA_ln" ln:"$W/dupB_ln" --set upass.verifier=true \
+"$LHD" compile "$W/imp_dup.prp" ln:"$W/dupA_ln" ln:"$W/dupB_ln" --set upass.verifier=true --set upass.tolg=false \
   --workdir "$W/w8" -q --result-json "$W/r8.json" 2>/dev/null
 [ $? -ne 0 ] || fail "ambiguous import must exit non-zero"
 grep -q 'ambiguous import' "$W/r8.json" || fail "expected ambiguity error: $(cat "$W/r8.json")"
 # Same two inputs, but nobody imports `dup` → tolerated.
 printf 'const k = 5\ncassert(k == 5)\n' > "$W/no_imp.prp"
-"$LHD" compile "$W/no_imp.prp" ln:"$W/dupA_ln" ln:"$W/dupB_ln" --set upass.verifier=true \
+"$LHD" compile "$W/no_imp.prp" ln:"$W/dupA_ln" ln:"$W/dupB_ln" --set upass.verifier=true --set upass.tolg=false \
   --workdir "$W/w8c" -q --result-json "$W/r8c.json" 2>/dev/null \
   || fail "non-imported collision must be tolerated: $(cat "$W/r8c.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r8c.json" || fail "non-imported collision should pass: $(cat "$W/r8c.json")"
@@ -157,7 +157,7 @@ if use_ext {
 }
 cassert(true)
 EOF
-"$LHD" compile "$W/dead.prp" --set upass.verifier=true --workdir "$W/w8" -q --result-json "$W/r8.json" \
+"$LHD" compile "$W/dead.prp" --set upass.verifier=true --set upass.tolg=false --workdir "$W/w8" -q --result-json "$W/r8.json" \
   || fail "dead-branch import must not error: $(cat "$W/r8.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r8.json" || fail "dead-branch result not pass: $(cat "$W/r8.json")"
 
@@ -184,7 +184,7 @@ cassert(addk(x=5)   == 105)
 EOF
 # same-invocation, worst order (importer first → capture resolves after a retry)
 "$LHD" compile "$W/capuse.prp" "$W/caplib.prp" \
-  --set upass.verifier=true --set upass.verifier_pass=3 --set upass.verifier_fail=0 \
+  --set upass.verifier=true --set upass.verifier_pass=3 --set upass.verifier_fail=0 --set upass.tolg=false \
   --workdir "$W/w10" -q --result-json "$W/r10.json" \
   || fail "2j capture (same-invocation) failed: $(cat "$W/r10.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r10.json" || fail "2j capture same-invocation not pass: $(cat "$W/r10.json")"
@@ -192,7 +192,7 @@ grep -q '"status":"pass"' "$W/r10.json" || fail "2j capture same-invocation not 
 "$LHD" compile "$W/caplib.prp" --emit-dir ln:"$W/caplib_ln/" --workdir "$W/w11" -q \
   || fail "2j capture exporter compile failed"
 "$LHD" compile "$W/capuse.prp" ln:"$W/caplib_ln" \
-  --set upass.verifier=true --set upass.verifier_pass=3 --set upass.verifier_fail=0 \
+  --set upass.verifier=true --set upass.verifier_pass=3 --set upass.verifier_fail=0 --set upass.tolg=false \
   --workdir "$W/w12" -q --result-json "$W/r12.json" \
   || fail "2j capture (two-invocation) failed: $(cat "$W/r12.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r12.json" || fail "2j capture two-invocation not pass: $(cat "$W/r12.json")"

@@ -17,6 +17,7 @@
 #include "diag.hpp"
 #include "eprp_var.hpp"
 #include "lnast.hpp"
+#include "lsp_index.hpp"
 #include "pass_upass.hpp"
 #include "prp2lnast.hpp"
 #include "rapidjson/document.h"
@@ -250,6 +251,12 @@ std::vector<livehd::diag::Diagnostic> analyze(std::string_view virtual_path, std
   sink.set_jsonl_path("off");    // in-memory only
   sink.set_step("lsp");
 
+  // task 2n Phase B: enable + reset the per-buffer semantic index. The upass
+  // runner records definition sites into it during this run (gated on
+  // enabled(), which only the LSP ever sets); hover reads it afterwards.
+  livehd::lsp_index::index().set_enabled(true);
+  livehd::lsp_index::index().clear();
+
   // Run `inou.prp |> pass.upass` — no lnastfmt stage (its user-facing
   // checks moved into upass/semacheck, so lnastfmt is a compiler-internal
   // structural validator with nothing to tell an end user). Every diagnostic
@@ -446,6 +453,8 @@ void handle_initialize(const rapidjson::Document& req) {
   w.Key("workspaceDiagnostics");
   w.Bool(false);
   w.EndObject();
+  w.Key("hoverProvider");  // task 2n Phase B (flag + handler land together)
+  w.Bool(true);
   w.EndObject();  // capabilities
   w.Key("serverInfo");
   w.StartObject();
@@ -588,6 +597,85 @@ void handle_pull_diagnostic(const rapidjson::Document& req) {
   send_message(sb.GetString());
 }
 
+// textDocument/hover (task 2n Phase B). Re-analyze the buffer (the upass runner
+// fills livehd::lsp_index during the run), then return the type+range of the
+// variable whose definition span covers the cursor. Per the 2n design the span
+// is statement-granularity, so selectionRange == range. result:null off a name.
+void handle_hover(const rapidjson::Document& req) {
+  std::string uri   = uri_of(req);
+  uint32_t    line0 = 0;
+  uint32_t    char0 = 0;
+  if (const auto* params = member(req, "params")) {
+    if (const auto* pos = member(*params, "position")) {
+      if (const auto* l = member(*pos, "line"); l && l->IsUint()) {
+        line0 = l->GetUint();
+      }
+      if (const auto* c = member(*pos, "character"); c && c->IsUint()) {
+        char0 = c->GetUint();
+      }
+    }
+  }
+
+  // Drive the front-end on the current buffer; populates lsp_index as a side
+  // effect (diagnostics discarded here — the pull/push path owns those). If the
+  // doc is not open, answer null rather than from a stale index of another buffer.
+  auto doc_it = g_docs.find(uri);
+  if (doc_it == g_docs.end()) {
+    respond_null(req);
+    return;
+  }
+  (void)diagnostics_for(uri, doc_it->second);
+
+  // First index entry whose 0-based [start,end] span covers the cursor.
+  const livehd::lsp_index::Entry* hit = nullptr;
+  for (const auto& e : livehd::lsp_index::index().entries()) {
+    const uint32_t sl = e.start_line ? e.start_line - 1 : 0;
+    const uint32_t sc = e.start_col ? e.start_col - 1 : 0;
+    const uint32_t el = e.end_line ? e.end_line - 1 : sl;
+    const uint32_t ec = e.end_col ? e.end_col - 1 : sc;
+    const bool     after_start = (line0 > sl) || (line0 == sl && char0 >= sc);
+    const bool     before_end  = (line0 < el) || (line0 == el && char0 <= ec);
+    if (after_start && before_end) {
+      hit = &e;
+      break;
+    }
+  }
+
+  rapidjson::StringBuffer sb;
+  Writer                  w(sb);
+  w.StartObject();
+  w.Key("jsonrpc");
+  w.String("2.0");
+  write_id(w, req);
+  w.Key("result");
+  if (hit == nullptr) {
+    w.Null();
+  } else {
+    w.StartObject();
+    w.Key("contents");
+    w.StartObject();
+    w.Key("kind");
+    w.String("plaintext");
+    w.Key("value");
+    w.String(hit->render.data(), static_cast<rapidjson::SizeType>(hit->render.size()));
+    w.EndObject();
+    const uint32_t sl = hit->start_line ? hit->start_line - 1 : 0;
+    const uint32_t sc = hit->start_col ? hit->start_col - 1 : 0;
+    const uint32_t el = hit->end_line ? hit->end_line - 1 : sl;
+    const uint32_t ec = hit->end_col ? hit->end_col - 1 : sc;
+    w.Key("range");
+    w.StartObject();
+    w.Key("start");
+    write_position(w, sl, sc);
+    w.Key("end");
+    write_position(w, el, ec);
+    w.EndObject();
+    w.EndObject();
+  }
+  w.EndObject();
+  send_message(sb.GetString());
+}
+
 }  // namespace
 
 int run_stdio() {
@@ -635,6 +723,8 @@ int run_stdio() {
       handle_did_close(doc);
     } else if (method == "textDocument/diagnostic") {
       handle_pull_diagnostic(doc);
+    } else if (method == "textDocument/hover") {
+      handle_hover(doc);  // task 2n Phase B
     } else if (method == "$/cancelRequest" || method == "$/setTrace") {
       // no-op (analysis is synchronous)
     } else if (has_id) {

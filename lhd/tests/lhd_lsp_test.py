@@ -9,10 +9,11 @@
 # Stdlib only.
 
 import json
+import os
 import subprocess
 import sys
 
-LHD = 'lhd/lhd'
+LHD = os.environ.get('LHD', 'lhd/lhd')
 
 GOOD = 'comb f(a:u8) -> (z:u8) { z = a }\n'
 BAD = 'comb f(a:u8 -> (z:u8) { z = a\n'  # missing ')' and '}'
@@ -69,6 +70,8 @@ def main():
         fail('utf-8 position encoding not negotiated: %r' % caps)
     if 'diagnosticProvider' not in caps:
         fail('server did not advertise pull diagnostics: %r' % caps)
+    if not caps.get('hoverProvider'):  # task 2n Phase B
+        fail('server did not advertise hoverProvider: %r' % caps)
     send(proc, {'jsonrpc': '2.0', 'method': 'initialized', 'params': {}})
 
     # Broken file -> at least one error diagnostic with a span.
@@ -96,6 +99,26 @@ def main():
     diag = read_response(proc, 3)
     if diag.get('result', {}).get('items'):
         fail('diagnostics did not clear after didChange fix: %r' % diag)
+
+    # Hover (task 2n Phase B) on the `z` store in GOOD
+    # ('comb f(a:u8) -> (z:u8) { z = a }'): z is at line 0, character 25. The
+    # server returns the variable's type + range and a covering range.
+    send(proc, {'jsonrpc': '2.0', 'id': 6, 'method': 'textDocument/hover',
+                'params': {'textDocument': {'uri': uri},
+                           'position': {'line': 0, 'character': 25}}})
+    hov = read_response(proc, 6).get('result')
+    if not hov or 'contents' not in hov or 'range' not in hov:
+        fail('hover missing contents/range on a name: %r' % hov)
+    value = hov.get('contents', {}).get('value', '')
+    if 'z' not in value or 'u8' not in value:
+        fail('hover did not report z : u8(...): %r' % hov)
+    # Hover off any name (column 2, inside the `comb` keyword) -> null.
+    send(proc, {'jsonrpc': '2.0', 'id': 7, 'method': 'textDocument/hover',
+                'params': {'textDocument': {'uri': uri},
+                           'position': {'line': 0, 'character': 2}}})
+    off = read_response(proc, 7).get('result', 'missing')
+    if off is not None:
+        fail('hover off a name should be null, got: %r' % off)
 
     # didSave keeps the good text; didClose drops the buffer.
     send(proc, {'jsonrpc': '2.0', 'method': 'textDocument/didSave',

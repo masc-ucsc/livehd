@@ -25,10 +25,12 @@ mut opt1:unsigned(max=300) = 0
 opt1 = 200
 cassert(opt1.[bw_max] == 200)
 
-// `wrap` narrows the running range back into the envelope, and the sized
-// constructor cast `u8(...)` is the same conversion (07-typesystem example).
+// `wrap` narrows the running range back into the envelope by dropping bits.
 mut val:u8 = 0
 wrap val = 0x1F0
 cassert(val == 240 and val.[bw_max] == 240)
-val = u8(0x1F0)
-cassert(val == 0xF0)
+// A sized cast `u8(...)` is CHECKED, not truncating: an overflowing operand is
+// a compile error (use `wrap`/`sat` — see errors/cast_overflow_const.prp). A
+// value that fits casts through unchanged.
+val = u8(200)
+cassert(val == 200)
