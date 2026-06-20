@@ -1,0 +1,16 @@
+/*
+:name: bitrange_open_write
+:type: error
+:tolg: 1
+:error: open-ended bit-range write
+*/
+
+// An open-ended bit-range WRITE `r#[k..] = b` has no upper bound to derive the
+// span from (the destination's declared width is not tracked per name in tolg),
+// so it is rejected rather than silently dropping/extending bits. The READ form
+// `a#[k..]` IS supported; give the write an explicit upper bound instead.
+comb f(b:u8) -> (z:u8) {
+  mut r:u8 = 0
+  r#[3..] = b   // locate_error_here
+  z = r
+}

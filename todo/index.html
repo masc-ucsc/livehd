@@ -74,7 +74,6 @@ lowers to a wrong netlist today. Temporal ops, <code>fluid</code>, and in-langua
 <thead><tr><th>Form</th><th>Today (fresh <code>lhd</code>)</th><th>Workaround</th></tr></thead>
 <tbody>
 <tr><td>Full-width slice of a <em>signed</em> value <code>i8#[..]</code></td><td>collapses to the wrong width (<code>i8#[..]</code> → 2 bits; <code>u8#[..]</code> is fine)</td><td>explicit range <code>a#[0..=7]</code></td></tr>
-<tr><td>Open-ended bit slice <code>a#[k..]</code></td><td>drops the offset / wrong width+sign (returns the low bits)</td><td>closed range <code>a#[k..=&lt;msb&gt;]</code></td></tr>
 <tr><td>Two+ bit-slice writes to the <em>same register</em> <code>r#[0..=7]=a; r#[8..=11]=b</code></td><td>keeps only the last write (verified in emitted Verilog)</td><td>build the value in a <code>mut</code>, then assign the reg once</td></tr>
 </tbody>
 </table>
