@@ -588,6 +588,10 @@ protected:
   // Used by runtime `wrap` to keep the low N bits (zero-extended) of `value`.
   void emit_inline_get_mask(const std::string& dst, const Lnast_node& value, const std::string& mask_text);
 
+  // Runtime `bool(x)` == `(x != 0)`: emit `ne(dst, value, 0)` so the passes run
+  // (typecheck stamps the boolean result kind).
+  void emit_inline_to_bool(const std::string& dst, const Lnast_node& value);
+
   // Append `op(ref(dst), operands...)` DIRECTLY into the staging tree (no
   // process_lnast / pass dispatch). Used by the runtime `sat` lowering for the
   // seed store / gt / lt / sext: emitting CONTROL FLOW (the clamp `if`) through

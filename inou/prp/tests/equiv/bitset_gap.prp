@@ -1,0 +1,34 @@
+/*
+:name: bitset_gap
+:type: equiv
+:verilog_top: bitset_gap.foo
+:pyrope_top: bitset_gap.foo
+*/
+
+// NON-contiguous / overlapping / reordered per-range bit-assembly. These three
+// shapes used to mis-lower: a write whose position sits ABOVE the accumulator's
+// current reach (a "gap") was silently dropped by cgen (it compared the write
+// start against the BASE width instead of the RESULT width). The original
+// contiguous RISC-V-immediate idiom happened to dodge it; any skipped or
+// out-of-order range hit it.
+//   out_gap : a low run then a lone HIGH bit, bits 5..11 left a zero gap
+//   out_over: a later range overwrites part of an earlier one (last write wins)
+//   out_rev : ranges written HIGH-to-LOW (assembly order must not matter)
+comb foo(i:u32) -> (out_gap:u16, out_over:u16, out_rev:u13) {
+  mut g:u16 = 0
+  g#[0..=4] = i#[0..=4]
+  g#[12]    = i#[31]
+  out_gap = g
+
+  mut o:u16 = 0
+  o#[0..=7]  = i#[0..=7]
+  o#[4..=11] = i#[8..=15]
+  out_over = o
+
+  mut r:u13 = 0
+  r#[12]     = i#[31]
+  r#[5..=10] = i#[25..=30]
+  r#[1..=4]  = i#[8..=11]
+  r#[0]      = i#[0]
+  out_rev = r
+}

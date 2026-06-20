@@ -1,0 +1,20 @@
+/*
+:name: match_const_else
+:type: equiv
+:verilog_top: match_const_else.t
+:pyrope_top: match_const_else.t
+*/
+
+// match expression with a comptime-CONST else arm. Regression guard for the
+// Hotmux output-width bug: lower_unique_merge sized the Hotmux to mw_lookup
+// (biased to 1 bit by the `else { 0 }` slot), truncating the 8-bit a/b arms so
+// `o` was 1-bit (LEC-refuted). The Hotmux now sizes to the widest arm, like the
+// Mux path. (match/unique-if always lower to Hotmux so the one-hot selector
+// check is preserved — never a plain Mux.)
+comb t(s:u2, a:u8, b:u8) -> (o:u8) {
+  o = match s {
+    == 0 { a }
+    == 1 { b }
+    else { 0 }
+  }
+}

@@ -1,0 +1,24 @@
+/*
+:name: multi_out_comb
+:type: equiv
+:verilog_top: multi_out_comb.top
+:pyrope_top: multi_out_comb.top
+*/
+
+// Regression (multi-output `comb` call destructure): `const (s,d) = dpair(x)`
+// inlines dpair, and the destructure must bind to the live inlined wires. The
+// runner used to leave the destructure tuple_gets unresolved (the inlined
+// runtime outputs were held as nil-seeded scalar bundles), so s/d folded to nil
+// and tolg wired the outputs to 0sb? — a silent wrong-hardware "pass". The
+// runner now records a runtime tuple_slot_ref per scalar output so the
+// destructure resolves to the inlined wire (the same path single-output uses).
+comb dpair(x:u8) -> (s:u9, d:u9) {
+  s = x + 1
+  d = x + 2
+}
+
+mod top(x:u8) -> (os:u9@[0], od:u9@[0]) {
+  const (s, d) = dpair(x)
+  os = s
+  od = d
+}

@@ -1,0 +1,13 @@
+/*
+:name: rt_bool_cast
+:type: equiv
+:verilog_top: rt_bool_cast.rt_bool_cast
+:pyrope_top: rt_bool_cast.rt_bool_cast
+*/
+
+// Runtime `bool(int)` lowers to `x != 0`. The second output also chains it
+// through `int(...)` so the LEC pins the value (int(true)=-1 → +2 = 1).
+comb rt_bool_cast(a:u8, b:u8) -> (zb:bool, zc:s4) {
+  zb = bool(a)              // a != 0
+  zc = int(bool(b)) + 2    // (b!=0) ? (-1+2=1) : (0+2=2)
+}

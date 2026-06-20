@@ -1,0 +1,21 @@
+/*
+:name: cast_bool_kinds
+:type: comptime
+:verifier_pass: 9
+:verifier_fail: 0
+*/
+
+// A bool's single bit is interpreted under the TARGET type's signedness:
+//   * to a SIGNED target (`int`, `sN`)   → the 1-bit signed value: true = -1.
+//   * to an UNSIGNED target (`uint`, `uN`) → the unsigned magnitude bit: true = 1.
+// (The runtime hardware lowering matches this exactly — see
+// inou/prp/tests/equiv/rt_typecast.prp.)
+cassert(int(true)   == -1)
+cassert(int(false)  ==  0)
+cassert(s8(true)    == -1)
+cassert(s8(false)   ==  0)
+cassert(uint(true)  ==  1)
+cassert(uint(false) ==  0)
+cassert(u8(true)    ==  1)
+cassert(u8(false)   ==  0)
+cassert(u1(true)    ==  1)

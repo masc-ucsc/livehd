@@ -890,7 +890,13 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
       auto value_dpin = get_driver(find_sink_pin(node, "value"));
       auto value      = get_expression(value_dpin);
 
-      if (a_bits > 0 && range_begin > static_cast<int>(a_bits)) {
+      if (range_begin >= static_cast<int>(bits_of(dpin))) {
+        // The write starts past the END of the result — nothing of it lands.
+        // (Must be gated on the RESULT width, not the base `a` width: a write
+        // above a NARROW base but still inside the result, e.g. `b#[0..=4]=…`
+        // then `b#[12]=…`, leaves a zero gap and the insert in the high bits —
+        // it must NOT be dropped. Comparing against `a_bits` silently dropped
+        // every non-contiguous set.)
         final_expr = a;
       } else if (range_begin < 0 || range_end < 0) {
         std::string sel;

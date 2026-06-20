@@ -3395,7 +3395,7 @@ void uPass_constprop::process_func_call() {
 
   // Enumerate known typecast dispatch (shared name classifier so the runtime
   // hardware lowering in upass.runner stays in lock-step — see range_bits.hpp).
-  enum class Cast { none, to_int, to_uint, to_string, to_sized };
+  enum class Cast { none, to_int, to_uint, to_string, to_sized, to_bool };
   Cast kind       = Cast::none;
   bool sized_sig  = false;  // true for sN, false for uN
   int  sized_bits = 0;
@@ -3404,6 +3404,7 @@ void uPass_constprop::process_func_call() {
       case upass::Typecast_kind::to_int: kind = Cast::to_int; break;
       case upass::Typecast_kind::to_uint: kind = Cast::to_uint; break;
       case upass::Typecast_kind::to_string: kind = Cast::to_string; break;
+      case upass::Typecast_kind::to_bool: kind = Cast::to_bool; break;
       case upass::Typecast_kind::to_sized:
         kind       = Cast::to_sized;
         sized_sig  = tc->sized_signed;
@@ -3520,6 +3521,26 @@ void uPass_constprop::process_func_call() {
         v = *Dlop::from_pyrope(v.is_known_true() ? "-1" : "0");
       }
       result = v;
+    } else if (kind == Cast::to_bool) {
+      // `bool(int)` == (v != 0); `bool(true/false)` is identity. Per
+      // 04-variables.md a typecast from an undefined (`?`) or `nil` value is a
+      // cast error. (A string operand was already re-parsed by to_scalar above.)
+      if (v.is_bool()) {
+        result = v;
+      } else if (v.has_unknowns() || v.is_nil()) {
+        livehd::diag::sink().emit(livehd::diag::Diagnostic{
+            .severity = livehd::diag::Severity::error,
+            .code     = "cast-undefined-bool",
+            .category = "type",
+            .pass     = "upass.constprop",
+            .message  = std::format("`{}(...)` of an undefined/nil value has no boolean meaning", fname),
+            .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+            .hint     = "a boolean cast needs a defined value; compare explicitly (`x != 0`) instead",
+        });
+        return;
+      } else {
+        result = *Dlop::create_bool(!v.is_known_zero());
+      }
     } else {
       // sized constructor `uN(v)` / `sN(v)`: a CHECKED cast — the value must
       // provably FIT the target envelope. Overflow is a COMPILE ERROR (use
@@ -3568,6 +3589,14 @@ void uPass_constprop::process_func_call() {
       e.decl_max      = upass::max_from_bits(static_cast<uint32_t>(sized_bits), sized_sig);
       e.decl_min      = upass::min_from_bits(static_cast<uint32_t>(sized_bits), sized_sig);
       b->set("0", std::move(e));
+    }
+  }
+  // A `bool(...)` result is boolean-kinded, not an integer literal — stamp the
+  // bundle value kind so `z:bool = bool(x)` is a bool==bool bind (typecheck
+  // reads value_kind first), not an int↔bool mismatch.
+  if (kind == Cast::to_bool && result.is_bool()) {
+    if (auto b = st().get_bundle_for_write(dst); b) {
+      b->set_value_kind(upass::Kind::boolean);
     }
   }
 }
@@ -4320,6 +4349,19 @@ upass::Emit_decision uPass_constprop::classify_statement_impl() {
     return upass::Emit_decision::emit_node();
   }
 
+  // Keep a comptime-const store made inside an uncertain (runtime) if-arm: it is
+  // one arm of a mux that tolg's lower_if merges, so all the arm writes must
+  // survive even when this arm's value happens to be a compile-time constant.
+  // Without this, `o = if c {a} elif d {b} else {0}` dropped the `else` arm's
+  // `___tmp = 0` store (the tmp was known-const at process time, and a tmp is
+  // not an io output), so the if-expression folded to the else constant and the
+  // runtime arms vanished. A runtime-rhs arm write is already kept by the
+  // is_known_const check above; this covers the comptime-rhs arm write. (A
+  // genuinely-dead duplicate is swept by LGraph cprop/DCE, so never pessimizes.)
+  if (st().in_uncertain_scope()) {
+    return upass::Emit_decision::emit_node();
+  }
+
   // RHS-aware guard: keep a 2-child `store(lhs, rhs)` whose RHS is a ref that
   // is NOT a genuine folded constant — i.e. either has no comptime value (a
   // runtime producer) or holds `nil` (an unset/poison marker). process_assign
@@ -4500,6 +4542,15 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
   }
 
   Dlop new_val = operand_value(src[2]);
+
+  // A `mut b:uN = nil` accumulator has no init store, so the first
+  // `b#[lo..=hi] = …` reads `b` as nil. That is NOT "unfoldable": the bits the
+  // mask covers are overwritten and any bit left uncovered is honestly UNKNOWN
+  // (0sb?), exactly as `= 0` would leave it 0. Substitute an unknown base so
+  // the masked writes still fold (mirrors the tolg lowering's nil_pin base).
+  if (input_val.is_nil()) {
+    input_val = *Dlop::from_pyrope("0sb?");
+  }
 
   // Delegate to Dlop: both the input being written into and the value being
   // written may carry unknown bits — set_mask_op tracks them bit-precisely.

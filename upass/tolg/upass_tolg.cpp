@@ -51,6 +51,24 @@ struct Val {
   return static_cast<int32_t>(std::bit_width(static_cast<uint64_t>(v)));
 }
 
+// Magnitude width of a driver pin: its stamped bits, or — for a const pin
+// (which carries no bits stamp) — the bits needed for its value. Used to size
+// a merged mux/hotmux to the WIDEST arm so a narrow (e.g. const) arm does not
+// truncate the wider ones. Returns 0 for an unstamped non-const pin.
+[[nodiscard]] int32_t pin_mw_of(const Pin& p) {
+  if (auto bb = livehd::graph_util::bits_of(p); bb > 0) {
+    return bb;
+  }
+  if (livehd::graph_util::is_const_pin(p)) {
+    auto v = livehd::graph_util::hydrate_const(p);
+    if (v.is_just_i64()) {
+      return mw_of_val(v.to_just_i64());
+    }
+    return std::max<int32_t>(1, static_cast<int32_t>(v.get_bits()));
+  }
+  return 0;
+}
+
 // Resolve a func_call callee name against the lnast registry the
 // same way the runner's lookup_callee does: exact top-module-name match, else
 // a UNIQUE "<module>.<name>" suffix match.
@@ -200,7 +218,6 @@ public:
       }
     }
     for (const auto& e : lnast_->io_meta().outputs) {
-      out_names_.push_back(e.name);
       if (cur_srcid_ != hhds::SourceId_invalid) {
         if (auto sink = g_->get_output_pin(e.name); !sink.is_invalid()) {
           sink.get_master_node().attr(hhds::attrs::srcid).set(cur_srcid_);
@@ -232,30 +249,68 @@ public:
     resolve_pending_tgets();
     resolve_defers();
 
-    // Outputs: connect each output's bound driver to its graph output sink.
-    for (const auto& name : out_names_) {
-      auto sink = g_->get_output_pin(name);
+    // Outputs: connect each output's bound driver to its graph output sink. The
+    // GraphIO carries the port widths cgen emits; fetch it so an unbounded
+    // output can be sized from its (now-lowered) driver below.
+    auto out_gio = lib_ != nullptr ? lib_->find_io(std::string(lnast_->get_graph_name())) : nullptr;
+    for (const auto& e : lnast_->io_meta().outputs) {
+      auto sink = g_->get_output_pin(e.name);
       if (sink.is_invalid()) {
         continue;
       }
-      auto it = pin_map_.find(name);
+      auto it = pin_map_.find(e.name);
       if (it == pin_map_.end()) {
         // An output the body never drives would otherwise be wired to nil
         // (0sb?). For Pyrope that is a silent miscompile (a hard error — every
         // output must be assigned); for a Verilog-origin module an undriven
         // output is legal (defaults to X), so keep the warn + nil wiring.
         if (lnast_->is_verilog_origin()) {
-          warn_at(Lnast_nid{}, {"undriven-output", "type"}, "output '{}' not driven by body — wiring nil (0sb?)", name);
+          warn_at(Lnast_nid{}, {"undriven-output", "type"}, "output '{}' not driven by body — wiring nil (0sb?)", e.name);
           sink.connect_driver(create_const(*g_, *Dlop::from_pyrope("0sb?")));
-          continue;
+        } else {
+          error_at(Lnast_nid{},
+                   {"undriven-output", "type"},
+                   "output '{}' is never driven by the body of '{}' — every declared output must be assigned",
+                   e.name,
+                   lnast_->get_top_module_name());
         }
-        error_at(Lnast_nid{},
-                 {"undriven-output", "type"},
-                 "output '{}' is never driven by the body of '{}' — every declared output must be assigned",
-                 name,
-                 lnast_->get_top_module_name());
+        continue;
       }
       sink.connect_driver(it->second);
+      // An UNBOUNDED output (`int`/`unsigned`, no declared width — io_meta bits
+      // == 0) takes its driver's width+sign: 07-typesystem says an unconstrained
+      // signal "uses whatever current value is found". Without this the GraphIO
+      // port kept the setup_io_impl default of 1 bit (io_meta e.bits==0) and the
+      // value was TRUNCATED to a single bit (e.g. `out:int = int(c)` for a wider
+      // `c`, or `out:int = a + 1`). The port width cgen emits lives on the
+      // GraphIO (set in setup_io_impl, before the body — and the driver width is
+      // only known now), so restamp it there. A declared width (uN/sN, or a
+      // bounded `int(max=…)`) keeps e.bits>0 and is left untouched — the
+      // constraint is the contract.
+      if (e.kind != Io_kind::boolean && e.bits == 0 && out_gio != nullptr) {
+        const bool uns   = livehd::graph_util::is_unsign(it->second);
+        int32_t    dbits = livehd::graph_util::bits_of(it->second);
+        if (dbits <= 0) {
+          // A const driver carries no `bits` attr; size from the constant's own
+          // width (the width cgen emits for the literal) so `out:int = 300` is
+          // not squeezed into a single bit.
+          if (livehd::graph_util::is_const_pin(it->second)) {
+            dbits = livehd::graph_util::hydrate_const(it->second).get_bits();
+          } else {
+            dbits = mw_lookup(e.name) + (uns ? 0 : 1);
+          }
+        }
+        if (dbits > 0) {
+          out_gio->set_bits(e.name, static_cast<uint32_t>(dbits));
+          out_gio->set_unsign(e.name, uns);
+          set_bits(sink, dbits);  // keep the sink pin attr consistent with the port
+          if (uns) {
+            set_unsign(sink);
+          } else {
+            set_sign(sink);
+          }
+        }
+      }
     }
 
     // Lower the declared per-output intervals as pendings.
@@ -1025,7 +1080,12 @@ private:
 
     if (!is_reg && !is_latch) {
       // mut/const/type declares carry no graph payload here (values arrive
-      // via their stores); nothing to lower.
+      // via their stores); nothing to lower. Remember the scalar name so a
+      // later `b#[lo..=hi] = …` whose base is a still-undriven `mut b = nil`
+      // can use a 0sb? base instead of erroring (see lower_set_mask).
+      if (mode == "mut" || mode == "const" || mode.starts_with("mut ") || mode.starts_with("const ")) {
+        scalar_decl_.insert(std::string(lnast_->get_name(name_nid)));
+      }
       return;
     }
 
@@ -2870,6 +2930,23 @@ private:
     return gb > 0 ? static_cast<int32_t>(gb - 1) : int32_t{0};
   }
 
+  // The base (`value`) operand of a set_mask. Normally `leaf(val)`, but a
+  // `mut b:uN = nil` emits no init store, so the first `b#[lo..=hi] = …`
+  // reads `b` with no driver. That is NOT an error: the bit-assignments
+  // overwrite the covered bits; whatever is left uncovered honestly stays
+  // unknown (0sb?), exactly as `= 0` would leave it 0. Only a name that was
+  // DECLARED as a scalar mut/const gets this 0sb? base — a genuine undriven
+  // reference (typo, dropped value) still errors through leaf()/resolve().
+  [[nodiscard]] Val set_mask_base(const Lnast_nid& val) {
+    if (Lnast_ntype::is_ref(lnast_->get_type(val))) {
+      std::string name{lnast_->get_name(val)};
+      if (!pin_map_.contains(name) && scalar_decl_.contains(name)) {
+        return {nil_pin(), 1};
+      }
+    }
+    return leaf(val);
+  }
+
   // set_mask(ref(dst), value, mask, ins).
   void lower_set_mask(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
@@ -2889,7 +2966,7 @@ private:
       return;
     }
     auto mask = mask_from_operand(mask_op);
-    auto vv   = leaf(val);
+    auto vv   = set_mask_base(val);
 
     auto node = make_node(Ntype_op::Set_mask);
     setup_sink_by_name(node, "a").connect_driver(vv.pin);
@@ -3156,21 +3233,9 @@ private:
       // mw_lookup alone holds whatever the LAST write recorded (or 1 for a
       // never-bound io output), which under-sizes the mux and truncates the
       // wider arms. Take the max over every contributing pin's stamped bits
-      // (bits >= mw by construction, so this only ever widens).
-      auto pin_mw = [](const Pin& p) -> int32_t {
-        if (auto bb = livehd::graph_util::bits_of(p); bb > 0) {
-          return bb;
-        }
-        if (livehd::graph_util::is_const_pin(p)) {  // const pins carry no bits stamp
-          auto v = livehd::graph_util::hydrate_const(p);
-          if (v.is_just_i64()) {
-            return mw_of_val(v.to_just_i64());
-          }
-          return std::max<int32_t>(1, static_cast<int32_t>(v.get_bits()));
-        }
-        return 0;
-      };
-      int32_t mw = std::max({mw_lookup(var), pin_mw(cur), pin_mw(pre)});
+      // (bits >= mw by construction, so this only ever widens). pin_mw_of shares
+      // this with the Hotmux path (lower_unique_merge).
+      int32_t mw = std::max({mw_lookup(var), pin_mw_of(cur), pin_mw_of(pre)});
       int n         = static_cast<int>(branches.size());
       int last_cond = has_else ? n - 2 : n - 1;
       // Finalize the merged width BEFORE building the chain so every mux in it
@@ -3181,7 +3246,7 @@ private:
       for (int i = last_cond; i >= 0; --i) {
         auto wr = branches[i].writes.find(var);
         if (wr != branches[i].writes.end()) {
-          mw = std::max(mw, pin_mw(wr->second));
+          mw = std::max(mw, pin_mw_of(wr->second));
         }
       }
       for (int i = last_cond; i >= 0; --i) {
@@ -3251,14 +3316,23 @@ private:
       auto ew       = else_writes.find(var);
       Pin  else_val = (ew != else_writes.end()) ? ew->second : pre;
 
+      // The Hotmux result width is the WIDEST among its arm sources, exactly as
+      // the Mux chain above sizes itself. mw_lookup alone holds whatever the
+      // LAST recorded write left (or 1 for a const arm like a `match … else {0}`
+      // slot), which under-sizes the result and truncates the wider arms (the
+      // match-expression `o = match s {…else{0}}` 1-bit-output miscompile).
+      int32_t mw = std::max({mw_lookup(var), pin_mw_of(pre), pin_mw_of(else_val)});
+
       auto hot = make_node(Ntype_op::Hotmux);
       hot.create_sink_pin(0).connect_driver(sel);
       for (int i = 0; i < n_conds; ++i) {
-        auto wr = branches[i].writes.find(var);
-        hot.create_sink_pin(static_cast<hhds::Port_id>(i + 1)).connect_driver(wr != branches[i].writes.end() ? wr->second : pre);
+        auto wr  = branches[i].writes.find(var);
+        Pin  val = wr != branches[i].writes.end() ? wr->second : pre;
+        mw       = std::max(mw, pin_mw_of(val));
+        hot.create_sink_pin(static_cast<hhds::Port_id>(i + 1)).connect_driver(val);
       }
       hot.create_sink_pin(static_cast<hhds::Port_id>(n_conds + 1)).connect_driver(else_val);
-      bind_result(var, hot.create_driver_pin(0), mw_lookup(var));
+      bind_result(var, hot.create_driver_pin(0), mw);
     }
   }
 
@@ -3285,7 +3359,6 @@ private:
   // name it wrote (nullopt = absent before the branch). lower_branch replays
   // this to roll pin_map_ back, avoiding a full per-branch copy of pin_map_.
   std::vector<absl::flat_hash_map<std::string, std::optional<Pin>>> branch_restore_;
-  std::vector<std::string>                                      out_names_;
   WriteMap                                                      empty_writes_;
 
   // 2f-defer — `x.[defer]` is an end-of-cycle read: the edge from the base's
@@ -3308,6 +3381,13 @@ private:
   absl::flat_hash_map<std::string, hhds::Node_class> reg_map_;
   absl::flat_hash_map<std::string, Reg_info>         reg_info_;
   std::vector<std::string>                           reg_order_;
+  // Scalar `mut`/`const` declares (NOT reg/latch/array). A `mut b:uN = nil`
+  // emits no init store, so its name never gets a driver — but using it as a
+  // `b#[lo..=hi] = …` bit-assembly base is legal (the covered bits are
+  // overwritten). lower_set_mask substitutes a 0sb? base for such a name; the
+  // set guards that only a DECLARED scalar gets the treatment (a genuine typo
+  // still errors). `= 0` never hits this — its base already folds to const 0.
+  absl::flat_hash_set<std::string>                   scalar_decl_;
   // Declared memories (array-typed regs + mut/const arrays), the
   // branch-path stack lower_if maintains for their write enables, the
   // recorded tuple literals (array initializers / __memory configs), and the

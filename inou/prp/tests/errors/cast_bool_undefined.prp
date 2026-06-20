@@ -1,0 +1,9 @@
+/*
+:name: cast_bool_undefined
+:type: error
+:error: undefined/nil value has no boolean meaning
+*/
+
+// A boolean cast of an undefined (`?`) value has no boolean meaning
+// (04-variables.md: int→boolean asserts on undefined/nil). Compare explicitly.
+cassert(bool(0sb?) == true)

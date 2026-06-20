@@ -329,12 +329,14 @@ void Symbol_table::mark_current_uncertain() {
 }
 
 void Symbol_table::record_uncertain_modification(std::string_view name) {
-  // Tmps (___N) are SSA values anchored at the function scope (see
-  // anchor_for). They aren't user-visible and shouldn't be invalidated when
-  // an uncertain arm exits, or downstream uses inside the arm itself break.
-  if (name.size() >= 3 && name.substr(0, 3) == "___") {
-    return;
-  }
+  // A tmp (___N) written under an uncertain arm IS conditionally divergent and
+  // must be invalidated on arm-exit just like a named var — otherwise an
+  // if-expression result tmp (`o = if c {a} elif d {b} else {0}` lowers the if
+  // to writes of `___o` then `o = ___o`) keeps the last arm's comptime value
+  // (the `else {0}`) and the whole expression folds to that constant, dropping
+  // the runtime arms. The invalidation fires at leave_scope, AFTER the arm body
+  // is walked, so in-arm reads (which already folded against the in-progress
+  // value) are unaffected; only post-arm reads see the runtime-divergent mux.
   // Innermost uncertain scope wins: when an outer uncertain scope eventually
   // leaves, anything set after the inner left will get re-recorded if the
   // outer arm is still active. No need to mark on every uncertain ancestor.

@@ -1,0 +1,19 @@
+/*
+:name: rt_int_output
+:type: equiv
+:verilog_top: rt_int_output.rt_int_output
+:pyrope_top: rt_int_output.rt_int_output
+*/
+
+// An UNBOUNDED `int`/`unsigned` output is sized to its computed value range
+// (07-typesystem: an unconstrained signal "uses whatever current value is
+// found"), NOT truncated to 1 bit. Regression for the io_mw=1 default that
+// silently dropped all but the low bit of `out:int = …` — runtime, constant,
+// and negative drivers.
+comb rt_int_output(a:u4, c:u4) -> (zi:int, zu:unsigned, zc:int, zk:int, zn:int) {
+  zi = a + 1     // 1..16 — needs >1 bit
+  zu = a + 1     // 1..16
+  zc = int(c)    // value-preserving 0..15
+  zk = 300       // a comptime constant wider than 1 bit
+  zn = int(c) - 100  // negative: -100..-85 (signed)
+}

@@ -1,0 +1,11 @@
+/*
+:name: cast_overflow_runtime
+:type: error
+:error: does not fit the .* cast range
+*/
+
+// Same checked-cast rule for a RUNTIME operand: a u16 cannot provably fit a u8,
+// so `u8(a)` is a compile error — use `wrap`/`sat` to drop bits.
+comb cast_overflow_runtime(a:u16) -> (z:u8) {
+  z = u8(a)
+}

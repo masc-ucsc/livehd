@@ -1720,6 +1720,24 @@ void uPass_runner::emit_inline_get_mask(const std::string& dst, const Lnast_node
   lm->pop_source();
 }
 
+void uPass_runner::emit_inline_to_bool(const std::string& dst, const Lnast_node& value) {
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-tobool");
+  auto s    = std::make_shared<Lnast>(body, "inl-tobool");
+  auto root = s->set_root(Lnast_ntype::create_ne());  // dst = (value != 0)
+  stamp_scratch_srcid(s, root);
+  s->add_child(root, Lnast_node::create_ref(dst));
+  s->add_child(root, value);
+  s->add_child(root, Lnast_node::create_const("0"));
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);
+  process_lnast();  // cursor at ne root → dispatch + emit (typecheck stamps bool)
+  flush_deferred_emits();
+  lm->pop_source();
+}
+
 void uPass_runner::emit_staging_op(Lnast_ntype::Lnast_ntype_int op, const std::string& dst,
                                    const std::vector<Lnast_node>& operands) {
   emit_push(op);
@@ -2280,6 +2298,16 @@ bool uPass_runner::try_lower_typecast() {
         emit_inline_sext(dst, arg_name, 0);  // 1-bit signed: true = -1, false = 0
       } else {
         emit_inline_binding(dst, arg_node);  // `int` is unbounded → value-preserving
+      }
+      return true;
+
+    case upass::Typecast_kind::to_bool:
+      // `bool(int)` == (x != 0); `bool(bool)` is identity. (Undefined/nil only
+      // exist at comptime — constprop errors there; a runtime signal has no `?`.)
+      if (operand_is_bool) {
+        emit_inline_binding(dst, arg_node);
+      } else {
+        emit_inline_to_bool(dst, arg_node);
       }
       return true;
 

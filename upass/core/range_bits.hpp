@@ -67,7 +67,7 @@ inline Dlop min_from_bits(uint32_t bits, bool is_signed) {
 // fold (constprop) and the runtime hardware lowering (runner) so the two never
 // disagree on what counts as a cast. nullopt for any other name (a user
 // function, a `__cellop`, an enum type, `bool`/`boolean`, …).
-enum class Typecast_kind : uint8_t { to_int, to_uint, to_string, to_sized };
+enum class Typecast_kind : uint8_t { to_int, to_uint, to_string, to_sized, to_bool };
 
 struct Typecast_info {
   Typecast_kind kind{Typecast_kind::to_int};
@@ -84,6 +84,9 @@ inline std::optional<Typecast_info> classify_typecast(std::string_view fname) {
   }
   if (fname == "string") {
     return Typecast_info{Typecast_kind::to_string};
+  }
+  if (fname == "bool" || fname == "boolean") {
+    return Typecast_info{Typecast_kind::to_bool};
   }
   // u<num> / s<num> / i<num>: a one-letter sign tag followed by decimal digits.
   if (fname.size() >= 2 && (fname[0] == 'u' || fname[0] == 's' || fname[0] == 'i')) {
