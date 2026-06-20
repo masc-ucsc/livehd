@@ -1081,9 +1081,29 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
     }
     final_expr = onehot;
   } else if (op == Ntype_op::SRA) {
-    auto val_expr = get_expression(get_driver(find_sink_pin(node, "a")));
+    auto a_dpin   = get_driver(find_sink_pin(node, "a"));
+    auto val_expr = get_expression(a_dpin);
     auto amt_expr = get_expression(get_driver(find_sink_pin(node, "b")));
-    final_expr    = absl::StrCat(val_expr, " >>> ", amt_expr);
+    // `>>>` is an *arithmetic* (sign-filling) shift only when its left operand
+    // is signed IN THE EVALUATION CONTEXT. Verilog makes the whole enclosing
+    // expression unsigned if ANY operand is unsigned (e.g. the deliberate SHL
+    // zero-extend idiom `({N{1'b0}} | a)`), and that unsigned context
+    // propagates DOWN into a context-determined `a >>> amt`, silently turning
+    // it into a logical (zero-fill) shift — wrong for negative `a`. A bare
+    // `$signed(a) >>> amt` does NOT survive: the shift's left operand is still
+    // context-determined, so the enclosing unsigned context wins (verified with
+    // iverilog). The fix is to isolate the whole shift in its own SELF-
+    // determined signed context — the argument of `$signed(...)` is self-
+    // determined — so the sign fill happens at the operand's natural width
+    // regardless of how the result is later used. The inner `$signed(val)`
+    // forces the left operand signed even when `val`'s text would otherwise read
+    // unsigned. Only do this for a genuinely signed operand: `$signed`-wrapping
+    // an unsigned value would sign-extend a value that should zero-fill.
+    if (is_unsign(a_dpin)) {
+      final_expr = absl::StrCat(val_expr, " >>> ", amt_expr);
+    } else {
+      final_expr = absl::StrCat("$signed($signed(", val_expr, ") >>> ", amt_expr, ")");
+    }
   } else if (op == Ntype_op::Nconst) {
     return;  // emitted as expr at create_locals time
   } else if (op == Ntype_op::AttrSet) {
@@ -1233,6 +1253,60 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
                    ") else $error(\"lgassert: descending bit-range select (hi < lo)",
                    loc.empty() ? std::string{} : absl::StrCat(" at ", loc),
                    "\");\n");
+      fout->append("end\n");
+      fout->append("// synthesis translate_on\n");
+      continue;
+    }
+
+    // User property materialized by pass.formal/tolg (`fproperty`): a recognized
+    // primitive carrying a 1-bit cond and a packed "<kind>\x1f<loc>\x1f<msg>" name
+    // attr. Skip emission when pass.formal proved it (no runtime check needed);
+    // otherwise emit an immediate assert/assume in synthesis-off (LEC-invisible).
+    if (sub_io->get_name() == livehd::graph_util::fproperty_module_name) {
+      if (livehd::graph_util::proven_of(node) != 0) {
+        continue;  // pass.formal discharged it -> elide the runtime check
+      }
+      auto cond = get_driver(node.get_sink_pin("cond"));
+      if (cond.is_invalid()) {
+        continue;
+      }
+      std::string kind = "assert";
+      std::string loc;
+      std::string msg;
+      if (auto nm = node.attr(hhds::attrs::name); nm.has()) {
+        std::string packed{nm.get()};
+        if (auto p1 = packed.find('\x1f'); p1 != std::string::npos) {
+          kind    = packed.substr(0, p1);
+          auto p2 = packed.find('\x1f', p1 + 1);
+          if (p2 == std::string::npos) {
+            loc = packed.substr(p1 + 1);
+          } else {
+            loc = packed.substr(p1 + 1, p2 - p1 - 1);
+            msg = packed.substr(p2 + 1);
+          }
+        }
+      }
+      // Sanitize the user message for a Verilog string literal.
+      for (auto& ch : msg) {
+        if (ch == '"' || ch == '\\' || ch == '\n' || ch == '\r') {
+          ch = ' ';
+        }
+      }
+      std::string detail = kind;
+      if (!loc.empty()) {
+        detail += absl::StrCat(" at ", loc);
+      }
+      if (!msg.empty()) {
+        detail += absl::StrCat(": ", msg);
+      }
+      note_src(fout, node);
+      fout->append("// synthesis translate_off\n");
+      fout->append("always_comb begin\n");
+      if (kind == "assume") {
+        fout->append("  assume (", get_wire_or_const(cond), ");\n");
+      } else {
+        fout->append("  assert (", get_wire_or_const(cond), ") else $error(\"", detail, "\");\n");
+      }
       fout->append("end\n");
       fout->append("// synthesis translate_on\n");
       continue;

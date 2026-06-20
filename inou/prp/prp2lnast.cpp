@@ -1717,7 +1717,7 @@ void Prp2lnast::process_statement(TSNode n) {
     TSNode func = child_by_field(n, "function");
     if (!ts_node_is_null(func)) {
       auto fname = trim(get_text(func));
-      if (fname == "cassert" || fname == "assert") {
+      if (fname == "cassert" || fname == "assert" || fname == "assume" || fname == "assert_always") {
         TSNode arg_tuple = child_by_field(n, "argument");
         if (!ts_node_is_null(arg_tuple)) {
           // The argument tuple is `(cond)` or `(cond, "msg")`. Lower the
@@ -1746,6 +1746,13 @@ void Prp2lnast::process_statement(TSNode n) {
           auto idx = builder.add_child(Lnast_ntype::create_cassert());
           attach_loc(idx, n);  // source span → verifier can point at this assertion
           lnast->add_child(idx, cond_ref);
+          // The cassert NODE name does not survive upass re-emission, but its
+          // CHILDREN do — so carry the obligation kind (assume / assert_always)
+          // as a sentinel const child ahead of the optional user message. A plain
+          // assert/cassert adds no sentinel (tolg then defaults the kind to assert).
+          if (fname == "assume" || fname == "assert_always") {
+            lnast->add_child(idx, Lnast_node::create_const(std::string("'__fkind__") + std::string{fname} + "'"));
+          }
           if (have_msg) {
             lnast->add_child(idx, msg_ref);
           }

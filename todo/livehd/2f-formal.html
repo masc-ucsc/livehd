@@ -81,17 +81,21 @@
   long-lived solver, so overlapping cones amortize their encoding.</p>
 
 <h2>C++ API — single-graph property prover (mirrors <code>lec::prove_equal</code> shape)</h2>
-<p>New <code>pass/lec/prove.{hpp,cpp}</code> in the existing <code>lec_query</code>
-  Bazel target (so callers just depend on <code>//pass/lec:lec_query</code> and inherit
-  all the cvc5 / width / sign / flop / memory machinery). Refactor the current eager,
-  encode-local <code>pin2val</code> table into a reusable lazy encoding context.
-  <code>val_of()</code> demand-encodes an arbitrary internal driver pin and the required
-  portion of its cone; it is not merely a getter over a prior whole-graph encode.</p>
+<p>New <code>pass/formal/prove.{hpp,cpp}</code> (target <code>//pass/formal:formal</code>),
+  depending on <code>//pass/lec:lec_query</code> for the cvc5 <code>Encoder</code> and its
+  width / sign / flop / memory machinery. The shared <code>Encoder</code> stays in
+  <code>pass/lec</code> for now; <code>pass/formal</code> adds the single-design
+  <code>Prover</code>. Refactor the current eager, encode-local <code>pin2val</code> table
+  into a reusable lazy encoding context. <code>val_of()</code> demand-encodes an arbitrary
+  internal driver pin and the required portion of its cone; it is not merely a getter over
+  a prior whole-graph encode.</p>
 <pre><code>namespace livehd::lec {
-
-// --- demand-driven extension/refactor of the existing Encoder (encode.hpp) ---
+// --- demand-driven extension/refactor of the existing Encoder (encode.hpp); stays in pass/lec ---
 // Encodes driver_pin and the required cone on first use; later calls reuse the Val.
 std::optional&lt;Val&gt; Encoder::val_of(hhds::Pin_class driver_pin);
+}  // namespace livehd::lec
+
+namespace livehd::formal {   // the new single-design pass (pass/formal)
 
 // --- the new single-graph property prover ---
 struct Prove_options {
@@ -105,7 +109,7 @@ enum class Reset_policy {
   ExcludeConeActive,   // normal assert: constrain every cone flop's reset inactive
 };
 
-enum class Verdict { Proven, Refuted, Unknown };   // reused from query.hpp
+using Verdict = lec::Verdict;   // { Proven, Refuted, Unknown } from query.hpp
 
 class Prover {
 public:
@@ -136,7 +140,7 @@ private:
   // each query: push / assert ¬property + assumes / set rlimit-per / checkSat / pop.
 };
 
-}  // namespace livehd::lec
+}  // namespace livehd::formal
 </code></pre>
 <p>Whether the property cone touches state (a stateful query may have an
   <em>unreachable</em> witness) is reported alongside <code>Refuted</code> so callers
@@ -210,8 +214,9 @@ private:
   <code>Memory</code> has initialization, not an intrinsic reset, so it contributes no
   reset guard; logic may still use a module reset to initialize an SRAM through normal
   writes. General library queries, built-in obligations, and checked
-  <code>assume</code>s include reset-active valuations. A future
-  <code>assert_always</code> also uses <code>Reset_policy::Include</code>.</li>
+  <code>assume</code>s include reset-active valuations. <code>assert_always</code> also
+  uses <code>Reset_policy::Include</code> — it must hold every cycle, reset included
+  (that is the only difference from a normal <code>assert</code>).</li>
 <li><strong>Deterministic budget = cvc5 <code>rlimit-per</code>, cone-scaled.</strong>
   Per query, <code>rlimit-per = budget_k × (#nodes in the effective query cone)</code>,
   including assumption and reset-guard cones used by that query.
@@ -244,24 +249,59 @@ private:
   emit a diagnostic <strong>warning</strong>: it now costs a runtime check formal could
   not discharge. Per-category codes (<code>formal-assert-deferred</code>,
   <code>formal-onehot-deferred</code>, …) so each is independently silenceable — a global
-  <code>--set upass.formal.warn_deferred=false</code> and per-category
-  <code>--set upass.formal.warn.&lt;cat&gt;=false</code> turn them off. Proven obligations
+  <code>--set pass.formal.warn_deferred=false</code> and per-category
+  <code>--set pass.formal.warn_&lt;cat&gt;=false</code> turn them off. Proven obligations
   are silent; errors stay errors. Reuses the existing diag <code>warnings/</code>
   harness (<code>:type: warning</code>).</li>
 </ul>
 
 <h2>Pipeline placement</h2>
 <ul class="subtasks">
-<li><strong>Library:</strong> caller-agnostic, lives in <code>pass/lec</code>
-  (<code>lec_query</code>). Always available to any pass.</li>
-<li><strong><code>assert</code>/<code>assume</code> driver:</strong> <strong>always-on</strong>
-  during <code>compile</code>, post-<code>tolg</code>, opt-out via
-  <code>--set upass.formal=false</code> (consistent with the bare-compile-max-diagnostics
-  philosophy). The deterministic cone-scaled budget keeps build time bounded, and
-  Unknown/budget never errors, so always-on is safe.</li>
+<li><strong><code>pass.formal</code> is its own pass</strong> — single-design reasoning,
+  distinct from <code>pass.lec</code> (two-design equivalence). It owns the
+  <code>Prover</code> library + the always-on drivers and orchestrates other passes
+  (feeds proven contracts to <code>pass.abc</code>, will call a future
+  <code>pass/memory</code>). It <em>reuses</em> <code>pass/lec</code>'s cvc5
+  <code>Encoder</code> via <code>//pass/lec:lec_query</code>; that shared encoder may
+  later relocate to a neutral target consumed by both.</li>
+<li><strong>Pipeline slot.</strong> Runs after bitwidths are final and before codegen:
+  <code>lnast → lgraph (tolg) → cprop → bitwidth → <strong>pass.formal</strong> → cgen</code>.
+  The cvc5 encoding needs resolved widths/signs, so <code>pass.formal</code> must follow
+  <code>bitwidth</code>; its proven contracts must be available to a later
+  <code>pass.abc</code>, and its removals/marks must land before <code>cgen</code>.</li>
+<li><strong>Always-on, opt-out.</strong> <code>pass.formal</code> is in the default
+  <code>compile</code> recipe, opt-out via <code>--set compile.formal.enabled=false</code>
+  (consistent with the bare-compile-max-diagnostics philosophy). The deterministic
+  cone-scaled budget keeps build time bounded, and Unknown/budget never errors, so
+  always-on is safe.</li>
+<li><strong>Library:</strong> caller-agnostic <code>Prover</code> in
+  <code>pass/formal</code>. Always available to any pass.</li>
 <li><strong>Future callers</strong> (<code>pass/memory</code> ports/banking,
   <code>pass.abc</code>) invoke the <em>library</em> directly to decide ports / memory /
   banking once they need bit-level property guarantees — their own pages.</li>
+</ul>
+
+<h2>ABC integration — proven assumes as don't-cares</h2>
+<p>A formally established <code>assume</code> is an input/state constraint: states that
+  violate it never occur, so they are <strong>don't-cares</strong> <code>pass.abc</code>
+  can exploit to synthesize smaller logic. For each discharged <code>assume</code>,
+  <code>pass.formal</code> records whether it was <em>proven</em> (UNSAT of its negation)
+  or merely <em>declared</em> (kept as a runtime contract), and hands the constraint set
+  to <code>pass.abc</code>.</p>
+<ul class="subtasks">
+<li><strong><code>--set pass.abc.use_proven_assume=true</code> (default true).</strong>
+  Feed only <em>formally proven</em> assumes to ABC as care-set constraints. Sound by
+  construction: the assumption provably holds on the design, so optimizing under it
+  changes nothing observable.</li>
+<li><strong><code>--set pass.abc.use_all_assume=false</code> (default false).</strong>
+  When enabled, also feed <em>declared-but-unproven</em> assumes (those deferred to
+  runtime). Aggressive mode: behavior outside the contract becomes undefined and the
+  runtime check can detect a violation but cannot recover logic optimized away. Off by
+  default — it trades soundness-without-the-contract for area.</li>
+<li><strong>Mechanism.</strong> Each fed assume constrains its bit-blasted cone true in
+  ABC's network, so violating minterms become don't-cares for the AIG / tech-map flow.
+  <code>pass.formal</code> emits the constraint list; <code>pass.abc</code> consumes it
+  under the flags above (both off ⇒ today's exact behavior).</li>
 </ul>
 
 <h2>Frontend + lowering changes</h2>
@@ -272,8 +312,11 @@ private:
   <code>cassert</code> with an <code>is_assume</code> flag.</li>
 <li><strong><code>tolg</code> materialization.</strong> Today <code>tolg</code>
   <em>silently drops</em> <code>cassert</code>. Change it to lower the <em>surviving</em>
-  (verifier-unknown) asserts/assumes into <code>assert</code>/<code>assume</code>
-  <strong>Sub-nodes</strong>, mirroring the existing <code>lower_range_assert</code> /
+  (verifier-unknown) asserts/assumes into
+  <code>assert</code>/<code>assert_always</code>/<code>assume</code>
+  <strong>Sub-nodes</strong> (the <code>assert_always</code> variant carries a flag so the
+  driver picks <code>Reset_policy::Include</code>), mirroring the existing
+  <code>lower_range_assert</code> /
   <code>lgassert</code> precedent (1-bit <code>cond</code> sink pin + source-loc; carry
   the <strong>message</strong> too — extend the current loc-only name attr, e.g.
   <code>loc\x1fmsg</code>, or a second attribute).</li>
@@ -309,7 +352,7 @@ private:
   Tests: overlapping <code>unique if</code> arms ⇒ compile error; provably-disjoint arms
   ⇒ proven (obligation dropped); unprovable selector ⇒ kept +
   <code>formal-onehot-deferred</code> warning (and a <code>warnings/</code> test that
-  <code>--set upass.formal.warn.onehot=false</code> silences it).</li>
+  <code>--set pass.formal.warn_onehot=false</code> silences it).</li>
 <li><strong>M4 — user <code>assert</code> driver + materialization + cgen.</strong>
   <code>tolg</code> emits <code>assert</code> sub-nodes for verifier-unknown survivors
   (cond + message + loc); cgen elides proven, emits the rest in
@@ -343,7 +386,7 @@ private:
   warning; budget-exceeded ⇒ kept (deterministic).</li>
 <li><code>inou/prp/tests/warnings/</code> — a deferred obligation emits its
   <code>formal-*-deferred</code> warning; the matching
-  <code>--set upass.formal.warn.*=false</code> silences exactly it
+  <code>--set pass.formal.warn_&lt;cat&gt;=false</code> silences exactly it
   (<code>:type: warning</code> harness).</li>
 </ul>
 
@@ -378,6 +421,74 @@ private:
 <li><strong>Only survivors reach here.</strong> The verifier already discharged
   comptime-constant asserts; don't re-prove them — <code>tolg</code> only materializes
   the unknowns.</li>
+</ul>
+
+<h2>Subtasks — landed (2026-06-20)</h2>
+<p>M1–M5 shipped and build green; full <code>//pass/... //inou/prp/... //graph/...
+  //upass/...</code> 713/713 (1 parallel-teardown flake passes in isolation), 0
+  regressions; <code>//pass/formal:prove_test</code> green.</p>
+<ul class="subtasks">
+<li><strong>Attributes.</strong> <code>proven</code> / <code>runtime_check</code>
+  (uint32 sparse, like <code>match</code>) in <code>graph/attrs.hpp</code>, registered in
+  <code>graph/cell.cpp</code>, accessors + the <code>fproperty_module_name</code> primitive
+  + <code>kFormal{Onehot,Assert,Assume,AssertAlways}</code> kind codes in
+  <code>graph/node_util.hpp</code>.</li>
+<li><strong>Prover (<code>pass/formal/prove.{hpp,cpp}</code>, target
+  <code>//pass/formal:formal</code>).</strong> A <em>self-contained</em> demand-driven
+  cone encoder reusing the exported <code>lec</code> helpers (<code>Val</code>,
+  <code>fit_to</code>, <code>real_width</code>, <code>flop_state_key</code>) — so
+  <code>pass/lec</code> is untouched (zero risk to its tests). Inputs pre-seeded from IO
+  decls; flops cut as free state; Memory/Sub/Fflop/Latch ⇒ Unknown. Primitives
+  <code>is_true</code>/<code>is_false</code>/<code>equal</code>/<code>is_onehot0</code>/
+  <code>is_onehot</code>/<code>assume</code>; deterministic per-query cvc5 <code>rlimit</code>
+  = <code>budget_k × cone-nodes</code> on a fresh QF_BV solver, + the <code>cone_max</code>
+  pre-gate. <strong>Verdict widths come from the cvc5 term sort, not the declared pin
+  width</strong> (a comparison op is 1-bit even on a wider pin). <strong>And/Or/Xor use the
+  Verilog effective-sign rule</strong> (any unsigned operand ⇒ zero-extend) — without it a
+  lone signed 1-bit selector bit sign-extends to all-ones and a one-hot check false-fires.</li>
+<li><strong>pass.formal plugin + pipeline.</strong> <code>pass_formal.{hpp,cpp}</code>
+  (clone of <code>pass_lec</code>); <code>compile.formal → pass.formal</code> in
+  <code>kSetPasses</code> + the O2 recipe (after <code>bitwidth</code>, before
+  <code>cgen</code>); <code>lhd pass formal</code> subcommand; opt out with
+  <code>--set compile.formal.enabled=false</code>.</li>
+<li><strong>Hotmux one-hot check (the hard-error path).</strong> Walks every
+  <code>Hotmux</code>, proves <code>is_onehot0(sel)</code>: proven ⇒ mark; stateless SAT ⇒
+  compile error with a counterexample (overlapping <code>unique if</code>/<code>match</code>
+  arms); else ⇒ keep + <code>formal-onehot-deferred</code> warning. Verified: a
+  mutually-exclusive chain compiles clean, an overlapping one errors with witness
+  <code>a=1,b=1</code>.</li>
+<li><strong>assert / assert_always / assume.</strong> <code>prp2lnast</code> recognizes the
+  three call names (no grammar change — they parse as calls); <code>tolg</code>
+  materializes the verifier-unknown survivors into <code>fproperty</code> Subs;
+  <code>pass.formal</code> proves them (proven ⇒ <code>cgen</code> elides; else ⇒ runtime
+  check + deferral warning); <code>cgen</code> emits an immediate <code>assert/assume</code>
+  in <code>translate_off</code>. Verified end-to-end (provable assert elided; unprovable
+  kept with file:line; assume emits <code>assume(...)</code>).</li>
+<li><strong>ABC flags.</strong> <code>--set pass.abc.use_proven_assume=true</code> (default)
+  + <code>pass.abc.use_all_assume=false</code> registered, plumbed to
+  <code>Map_options</code>; <code>map_region</code> gathers the proven (and, under
+  use_all_assume, declared) assume cond drivers per region.</li>
+</ul>
+<h3>Deviations from the plan above (intentional, documented)</h3>
+<ul class="subtasks">
+<li><strong>Kind carrier = sentinel const child, not the node name.</strong> The cassert
+  NODE name does not survive upass re-emission (its CHILDREN do), so the kind rides a
+  <code>'__fkind__assume'</code> / <code>'__fkind__assert_always'</code> const child ahead
+  of the user message.</li>
+<li><strong>User asserts defer on refutation (no hard error yet).</strong> Only the Hotmux
+  structural check hard-errors. A normal assert may legitimately fail during reset, so the
+  <code>Reset_policy::ExcludeConeActive</code> reset-exclusion is a prerequisite for
+  erroring user asserts — deferred. Refuted/Unknown user asserts keep a runtime check.</li>
+<li><strong>Only PROVEN assumes are assert hypotheses.</strong> Each assume is proved
+  independently (empty hypothesis set ⇒ no circular self-proof); only proven ones feed the
+  assert queries (sound), avoiding unsound assert removal under an unproven contract.</li>
+<li><strong>Encoder kept self-contained, not refactored.</strong> The demand encoder lives
+  in <code>pass/formal</code> reusing <code>lec</code>'s exported free functions; the
+  planned in-place refactor of <code>encode.cpp</code> into a shared lazy context is a
+  future de-dup.</li>
+<li><strong>ABC don't-care exploitation is the follow-on.</strong> The flags + gathering
+  ship; building the EXDC don't-care network that hands the constraints to ABC's
+  mfs/fraig is the remaining ABC-integration step.</li>
 </ul>
 
 <h2>Future / deferred (reuse this same library)</h2>

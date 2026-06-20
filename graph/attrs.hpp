@@ -122,6 +122,25 @@ struct match_t {
 };
 inline constexpr match_t match{};
 
+// Per-node formal-verification status (pass/formal, task 2f-formal). SPARSE
+// (like match) so 0 is a real value. `proven` marks an obligation (a user
+// assert / assume / a built-in Hotmux one-hotness) that pass.formal discharged
+// by SMT: cgen elides its runtime check, and pass.abc may exploit a proven
+// assume as a don't-care. `runtime_check` marks an obligation deferred to
+// runtime (Unknown / budget-exceeded / unreachable stateful refutation) so cgen
+// keeps emitting the check. Values are small enums (see graph_util below).
+struct proven_t {
+  using value_type = uint32_t;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr proven_t proven{};
+
+struct runtime_check_t {
+  using value_type = uint32_t;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr runtime_check_t runtime_check{};
+
 // Per-node source provenance is hhds::attrs::srcid (one uint64 SourceId
 // resolved through the graph's Source_locator) — the old livehd::attrs::loc
 // (with its pos1=line-vs-byte mismatch) and livehd::attrs::source string pair

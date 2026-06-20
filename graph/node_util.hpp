@@ -33,6 +33,21 @@ namespace livehd::graph_util {
 // needed and LEC (which only compares data outputs) is unaffected.
 inline constexpr std::string_view lgassert_module_name = "lgassert";
 
+// Reserved sub-module name for a materialized user property (pass/formal, task
+// 2f-formal): an `fproperty` Sub instance carries a 1-bit `cond` plus, packed in
+// its instance-name attr, "<kind>\x1f<loc>\x1f<msg>" (kind = assert |
+// assert_always | assume). pass.formal proves/defers it; cgen emits a runtime
+// check for the ones it could not prove (skipping any marked `proven`). Like
+// lgassert it is a recognized PRIMITIVE, not a real sub-graph, so LEC (which
+// compares data outputs) is unaffected.
+inline constexpr std::string_view fproperty_module_name = "fproperty";
+
+// pass/formal obligation-kind codes stored in the proven / runtime_check attrs.
+inline constexpr uint32_t kFormalOnehot       = 1;
+inline constexpr uint32_t kFormalAssert       = 2;
+inline constexpr uint32_t kFormalAssume       = 3;
+inline constexpr uint32_t kFormalAssertAlways = 4;
+
 // ---------------------------------------------------------------------------
 // Constant pins (HHDS Graph::CONST_NODE singleton, scheme-A encoded).
 // ---------------------------------------------------------------------------
@@ -424,6 +439,23 @@ inline void set_match(const hhds::Pin_class& pin, uint32_t id) {
     return 0;
   }
   auto a = pin.attr(livehd::attrs::match);
+  return a.has() ? a.get() : 0;
+}
+
+// Per-node formal-verification status (pass/formal, task 2f-formal). 0 == absent;
+// pass.formal sets a small non-zero enum (see Formal_status in pass/formal).
+inline void set_proven(const hhds::Node_class& node, uint32_t v) { node.attr(livehd::attrs::proven).set(v); }
+[[nodiscard]] inline bool     has_proven(const hhds::Node_class& node) { return node.attr(livehd::attrs::proven).has(); }
+[[nodiscard]] inline uint32_t proven_of(const hhds::Node_class& node) {
+  auto a = node.attr(livehd::attrs::proven);
+  return a.has() ? a.get() : 0;
+}
+inline void set_runtime_check(const hhds::Node_class& node, uint32_t v) { node.attr(livehd::attrs::runtime_check).set(v); }
+[[nodiscard]] inline bool has_runtime_check(const hhds::Node_class& node) {
+  return node.attr(livehd::attrs::runtime_check).has();
+}
+[[nodiscard]] inline uint32_t runtime_check_of(const hhds::Node_class& node) {
+  auto a = node.attr(livehd::attrs::runtime_check);
   return a.has() ? a.get() : 0;
 }
 

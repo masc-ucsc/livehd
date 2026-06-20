@@ -629,12 +629,14 @@ private:
           "upass.tolg: non-comptime `for` loop in '{}' — the iterable did not resolve to a comptime range "
           "or tuple, so the loop could not unroll (Pyrope for-loops are comptime-only and must fully unroll)",
           lnast_->get_top_module_name());
-    } else if (N::is_type_spec(t) || N::is_cassert(t)) {
-      // Pure annotations with no datapath: a standalone `type_spec` (e.g. the
-      // comb inliner's emit_inline_typespec, or a folded type check) and a
-      // `cassert` that upass.verifier already discharged at comptime. They
-      // create no hardware, so skip them silently — NOT the dropped-logic error
-      // below (a leftover here is benign, not a miscompile).
+    } else if (N::is_type_spec(t)) {
+      // Pure annotation, no datapath (the comb inliner's emit_inline_typespec, or
+      // a folded type check). No hardware — skip silently.
+    } else if (N::is_cassert(t)) {
+      // A cassert upass.verifier could NOT discharge at comptime (unknown cond)
+      // survives here. Materialize it as an `fproperty` Sub so pass.formal can
+      // try to prove it and cgen can emit a runtime check for whatever is left.
+      lower_cassert(nid);
     } else {
       // Any other node type reaching tolg has no LGraph lowering and would be
       // silently dropped (→ undriven wires / nil). That is a miscompile, so it
@@ -3241,6 +3243,59 @@ private:
       loc += ":" + std::to_string(*sp.start_line);
     }
     sub.attr(hhds::attrs::name).set(loc);
+  }
+
+  // Materialize a verifier-unknown cassert (assert / assert_always / assume) as
+  // an `fproperty` Sub: a recognized primitive carrying the 1-bit cond, with
+  // "<kind>\x1f<loc>\x1f<msg>" packed in the instance-name attr. pass.formal
+  // proves/defers it; cgen emits a runtime check for what it could not prove.
+  void lower_cassert(const Lnast_nid& nid) {
+    if (lib_ == nullptr) {
+      return;
+    }
+    auto cond_nid = lnast_->get_first_child(nid);
+    if (cond_nid.is_invalid()) {
+      return;
+    }
+    Val cond = leaf(cond_nid);
+    if (cond.pin.is_invalid()) {
+      return;
+    }
+    // Children after cond: an optional kind sentinel (assume / assert_always)
+    // followed by an optional user message (both are const children that survive
+    // upass re-emission, unlike the cassert node name).
+    std::string kind = "assert";
+    std::string msg;
+    auto        nxt = lnast_->get_sibling_next(cond_nid);
+    if (!nxt.is_invalid() && Lnast_ntype::is_const(lnast_->get_type(nxt))) {
+      std::string s{lnast_->get_name(nxt)};
+      if (s.find("__fkind__assert_always") != std::string::npos) {
+        kind = "assert_always";
+        nxt  = lnast_->get_sibling_next(nxt);
+      } else if (s.find("__fkind__assume") != std::string::npos) {
+        kind = "assume";
+        nxt  = lnast_->get_sibling_next(nxt);
+      }
+    }
+    if (!nxt.is_invalid() && Lnast_ntype::is_const(lnast_->get_type(nxt))) {
+      msg = std::string{lnast_->get_name(nxt)};
+    }
+    auto gio = lib_->find_io(livehd::graph_util::fproperty_module_name);
+    if (!gio) {
+      gio = lib_->create_io(livehd::graph_util::fproperty_module_name);
+      gio->add_input("cond", 1);
+      gio->set_bits("cond", 1);
+      gio->set_unsign("cond", true);
+    }
+    auto sub = make_node(Ntype_op::Sub);
+    sub.set_subnode(gio);
+    sub.create_sink_pin("cond").connect_driver(cond.pin);
+    const auto  sp  = lnast_->span_of(nid);
+    std::string loc = sp.file.empty() ? std::string{} : sp.file;
+    if (sp.start_line) {
+      loc += ":" + std::to_string(*sp.start_line);
+    }
+    sub.attr(hhds::attrs::name).set(kind + "\x1f" + loc + "\x1f" + msg);
   }
 
   // The mask of a get_mask/set_mask is a full Dlop, never an int64: a 64-bit

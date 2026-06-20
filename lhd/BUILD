@@ -36,6 +36,7 @@ cc_library(
         "//pass/isabelle:pass_isabelle",
         "//pass/lec:lec_query",
         "//pass/lec:pass_lec",
+        "//pass/formal:pass_formal",
         "//pass/partition:pass_partition",
         "//pass/semdiff:pass_semdiff",
         "//pass/semdiff:semdiff",

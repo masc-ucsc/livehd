@@ -24,6 +24,8 @@ struct Livehd_attr_init {
     hhds::register_attr_tag<livehd::attrs::hier_color_t>("livehd::attrs::hier_color");
     hhds::register_attr_tag<livehd::attrs::coloring_info_t>("livehd::attrs::coloring_info");
     hhds::register_attr_tag<livehd::attrs::match_t>("livehd::attrs::match");
+    hhds::register_attr_tag<livehd::attrs::proven_t>("livehd::attrs::proven");
+    hhds::register_attr_tag<livehd::attrs::runtime_check_t>("livehd::attrs::runtime_check");
     hhds::register_attr_tag<livehd::attrs::place_t>("livehd::attrs::place");
     // source provenance rides hhds::attrs::srcid (self-registering)
     hhds::register_attr_tag<livehd::attrs::const_value_t>("livehd::attrs::const_value");

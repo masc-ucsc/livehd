@@ -385,6 +385,7 @@ constexpr std::pair<std::string_view, std::string_view> kSetPasses[] = {
     {        "compile.upass",        "pass.upass"},
     {        "compile.cprop",        "pass.cprop"},
     {     "compile.bitwidth",     "pass.bitwidth"},
+    {       "compile.formal",       "pass.formal"},
     {         "compile.cgen", "inou.cgen.verilog"},
     {   "compile.prp_writer",   "pass.prp_writer"},
     {           "pass.color",        "pass.color"},
@@ -546,7 +547,8 @@ std::vector<std::pair<std::string, std::string>> recipe_graph_passes(const Optio
   if (r == "O2") {
     return {
         {   "compile.cprop",    "pass.cprop"},
-        {"compile.bitwidth", "pass.bitwidth"}
+        {"compile.bitwidth", "pass.bitwidth"},
+        {  "compile.formal",   "pass.formal"}
     };
   }
   throw Lhd_error{"usage", std::format("unknown recipe '{}'", r), "built-in recipes: O0, O1, O2 (`lhd list recipes`)"};
@@ -2858,8 +2860,21 @@ void pass_command(Options& opts, Result& res) {
       livehd::Hhds_graph_library::save(lg_out->path);
       res.outputs.push_back(lg_out->path);
     }
+  } else if (sub == "formal") {
+    Eprp_var var;
+    load_lg_into_var(lg_in, var);
+    if (var.graphs.empty()) {
+      throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};
+    }
+    Eprp_var::Eprp_dict labels;
+    if (!opts.top.empty()) {
+      labels["top"] = opts.top;
+    }
+    merge_sets(opts, "pass.formal", labels);
+    run_step("pass.formal", var, labels, opts, res);  // marks proven/runtime_check in place; errors on a real violation
   } else {
-    throw Lhd_error{"usage", std::format("unknown pass subcommand '{}'", sub), "use: color <alg> | partition | abc | liberty gensim | semdiff"};
+    throw Lhd_error{"usage", std::format("unknown pass subcommand '{}'", sub),
+                    "use: color <alg> | partition | abc | formal | liberty gensim | semdiff"};
   }
 }
 

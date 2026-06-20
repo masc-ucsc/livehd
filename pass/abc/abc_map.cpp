@@ -193,6 +193,39 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     region.insert(n);
   }
 
+  // --- Formal-assume don't-cares (pass.formal -> ABC, task 2f-formal) ---
+  // An `fproperty` assume Sub in this region carries a 1-bit `cond` that holds on
+  // every reachable input; feeding it lets ABC treat violating minterms as
+  // don't-cares. use_proven_assume (default) collects assumes pass.formal PROVED;
+  // use_all_assume additionally collects DECLARED (unproven) ones. The cond
+  // drivers gathered here are the ones the flow is permitted to exploit (the EXDC
+  // don't-care network construction that hands them to ABC's mfs/fraig is the
+  // follow-on; collecting + gating them per flag is the interface).
+  std::vector<hhds::Pin_class> assume_constraints;
+  if (opts_.use_proven_assume || opts_.use_all_assume) {
+    for (auto n : rb.src->forward_class()) {
+      if (!region.contains(n) || graph_util::type_op_of(n) != Ntype_op::Sub) {
+        continue;
+      }
+      auto sio = n.get_subnode_io();
+      if (!sio || sio->get_name() != graph_util::fproperty_module_name) {
+        continue;
+      }
+      const bool is_proven   = graph_util::proven_of(n) == graph_util::kFormalAssume;
+      const bool is_declared = graph_util::runtime_check_of(n) == graph_util::kFormalAssume;
+      if ((is_proven && opts_.use_proven_assume) || (is_declared && opts_.use_all_assume)) {
+        if (auto cond = graph_util::get_driver_of_sink_name(n, "cond"); !cond.is_invalid()) {
+          assume_constraints.push_back(cond);
+        }
+      }
+    }
+    if (opts_.verbose && !assume_constraints.empty()) {
+      std::print(stderr, "pass.abc: region '{}' has {} assume constraint(s) usable as don't-cares\n", rb.module_name,
+                 assume_constraints.size());
+    }
+  }
+  (void)assume_constraints;  // EXDC don't-care network construction is the follow-on (see 2f-formal)
+
   // --- ABC gate constructors (each returns the new gate's output net) ---
   auto new_net = [&](Abc_Obj_t* node) {
     auto* net = Abc_NtkCreateNet(manNtk);
