@@ -734,43 +734,58 @@ void Cprop::scalar_sext(hhds::Node_class& node, std::vector<hhds::Edge_class>& i
 hhds::Pin_class Cprop::try_find_single_driver_pin(hhds::Node_class& node, int64_t pos) {
   I(type_op_of(node) == Ntype_op::Set_mask);
 
-  auto a_pin    = livehd::graph_util::get_driver_of_sink_name(node, "a");
-  auto mask_pin = livehd::graph_util::get_driver_of_sink_name(node, "mask");
-  if (a_pin.is_invalid() || mask_pin.is_invalid()) {
-    return {};
-  }
-  if (!is_const_pin(mask_pin)) {
-    return {};
-  }
+  // Follow the Set_mask `a`-driver chain iteratively (the old recursion at the
+  // tail was a non-terminating stack-overflow risk: a combinational cycle
+  // through the `a` pins is structurally representable and the front-end does
+  // not guarantee acyclicity). `pos` is invariant along the chain, so this is a
+  // plain loop; the visited set breaks any `a`-pin cycle deterministically.
+  absl::flat_hash_set<hhds::Class_index> visited;
+  hhds::Node_class                       cur = node;
 
-  auto mask_const               = hydrate_const(mask_pin);
-  auto [range_begin, range_end] = mask_const.get_mask_range();
-  if (pos >= range_end || pos < range_begin) {
-    if (is_const_pin(a_pin)) {
-      // get_mask is Pyrope's default-ZEXT bit-select: a non-negative mask packs
-      // the selected bits LSB-first as an UNSIGNED value. Dlop::get_mask_op has a
-      // single-bit quirk that returns the signed 1-bit -1 for a lone set bit;
-      // `#[N]` zero-extends (a set bit is the unsigned 1), so correct it here to
-      // match cgen's plain `a[N]` part-select — same fix as upass get_mask_zext
-      // and pass/bitwidth's `gm`.
-      const auto pos_mask = Dlop::get_mask_value(pos);
-      auto       v        = hydrate_const(a_pin).get_mask_op(*pos_mask);
-      if (!pos_mask->is_negative() && v->is_integer() && !v->has_unknowns() && v->is_negative()) {
-        v = Dlop::create_integer(1);
-      }
-      return create_const(*current_graph, *v);
+  while (true) {
+    if (!visited.insert(cur.get_class_index()).second) {
+      return {};  // cycle in the Set_mask `a`-chain
     }
-    auto a_master = a_pin.get_master_node();
-    if (type_op_of(a_master) != Ntype_op::Set_mask) {
+
+    auto a_pin    = livehd::graph_util::get_driver_of_sink_name(cur, "a");
+    auto mask_pin = livehd::graph_util::get_driver_of_sink_name(cur, "mask");
+    if (a_pin.is_invalid() || mask_pin.is_invalid()) {
       return {};
     }
-    return try_find_single_driver_pin(a_master, pos);
-  }
-  if (range_begin == pos && range_end == (pos + 1)) {
-    return livehd::graph_util::get_driver_of_sink_name(node, "value");
-  }
+    if (!is_const_pin(mask_pin)) {
+      return {};
+    }
 
-  return {};
+    auto mask_const               = hydrate_const(mask_pin);
+    auto [range_begin, range_end] = mask_const.get_mask_range();
+    if (pos >= range_end || pos < range_begin) {
+      if (is_const_pin(a_pin)) {
+        // get_mask is Pyrope's default-ZEXT bit-select: a non-negative mask packs
+        // the selected bits LSB-first as an UNSIGNED value. Dlop::get_mask_op has a
+        // single-bit quirk that returns the signed 1-bit -1 for a lone set bit;
+        // `#[N]` zero-extends (a set bit is the unsigned 1), so correct it here to
+        // match cgen's plain `a[N]` part-select — same fix as upass get_mask_zext
+        // and pass/bitwidth's `gm`.
+        const auto pos_mask = Dlop::get_mask_value(pos);
+        auto       v        = hydrate_const(a_pin).get_mask_op(*pos_mask);
+        if (!pos_mask->is_negative() && v->is_integer() && !v->has_unknowns() && v->is_negative()) {
+          v = Dlop::create_integer(1);
+        }
+        return create_const(*current_graph, *v);
+      }
+      auto a_master = a_pin.get_master_node();
+      if (type_op_of(a_master) != Ntype_op::Set_mask) {
+        return {};
+      }
+      cur = a_master;  // walk to the next Set_mask in the chain
+      continue;
+    }
+    if (range_begin == pos && range_end == (pos + 1)) {
+      return livehd::graph_util::get_driver_of_sink_name(cur, "value");
+    }
+
+    return {};
+  }
 }
 
 bool Cprop::scalar_get_mask(hhds::Node_class& node) {

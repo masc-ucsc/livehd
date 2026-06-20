@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/node_hash_map.h"
@@ -389,8 +390,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     bb.node                                          = n;
     bb.op                                            = op;
     int                                       bb_idx = static_cast<int>(bboxes.size());
-    // outputs: distinct driver pins that feed region logic -> fresh PI sources
-    absl::flat_hash_map<int, hhds::Pin_class> out_pins;
+    // outputs: distinct driver pins that feed region logic -> fresh PI sources.
+    // btree_map (ascending port_id) so the fresh-PI creation order — hence ABC
+    // ObjId assignment and the read-back `g<id>_<cell>` gate names — is
+    // deterministic; a flat_hash_map iterates in run-to-run-varying order.
+    absl::btree_map<int, hhds::Pin_class> out_pins;
     for (const auto& e : n.out_edges()) {
       out_pins.emplace(static_cast<int>(e.driver.get_port_id()), e.driver);
     }
@@ -470,7 +474,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
     } else if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
       hhds::Pin_class                           sel;
-      absl::flat_hash_map<int, hhds::Pin_class> data;  // pid-1 (value) -> driver
+      absl::btree_map<int, hhds::Pin_class> data;  // pid-1 (value) -> driver; ordered so the OR-tree fed to ABC is deterministic
       int                                       max_v = -1;
       for (const auto& e : n.inp_edges()) {
         auto pid = e.sink.get_port_id();

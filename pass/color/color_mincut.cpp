@@ -4,12 +4,14 @@
 
 #include <sys/stat.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <memory>
 #include <print>
 #include <string>
+#include <vector>
 
 #include "algorithms/global_mincut/algorithms.h"
 #include "algorithms/global_mincut/minimum_cut.h"
@@ -45,7 +47,6 @@ void Color_mincut::gather_ids(hhds::Graph* g) {
 
 void Color_mincut::gather_neighs(hhds::Graph* g) {
   (void)g;
-  num_edges = 0;
   for (const auto& [curr_id, curr_node] : id2node) {
     if (!is_partitionable(curr_node)) {
       continue;
@@ -61,7 +62,6 @@ void Color_mincut::gather_neighs(hhds::Graph* g) {
       }
       if (curr_id != it->second) {
         id2neighs[curr_id].insert(it->second);
-        num_edges++;
       }
     }
     for (const auto& e : curr_node.inp_edges()) {
@@ -78,6 +78,16 @@ void Color_mincut::gather_neighs(hhds::Graph* g) {
       }
     }
   }
+  // METIS expects the UNDIRECTED edge count. The adjacency we emit is symmetric
+  // (each edge contributes a token on both endpoints' lines), so it is half the
+  // total adjacency tokens. Counting per out-edge insert (the old approach)
+  // both over-counted deduped parallel edges and ignored in-edge-only tokens,
+  // making the reader's `edge_counter == nmbEdges*2` check fail with exit(4).
+  size_t tokens = 0;
+  for (const auto& [id, neighs] : id2neighs) {
+    tokens += neighs.size();
+  }
+  num_edges = static_cast<int>(tokens / 2);
 }
 
 void Color_mincut::lg_to_metis(hhds::Graph* g, const std::string& metis_path) {
@@ -89,7 +99,13 @@ void Color_mincut::lg_to_metis(hhds::Graph* g, const std::string& metis_path) {
   for (int i = 0; i < num_nodes; i++) {
     auto it = id2neighs.find(i);
     if (it != id2neighs.end()) {
-      for (auto neigh : it->second) {
+      // Emit neighbors in sorted order: id2neighs values are flat_hash_set<int>
+      // whose iteration order abseil perturbs per process, so the METIS file —
+      // and hence VieCut's chosen min-cut / the resulting coloring — would
+      // otherwise vary run-to-run even with VieCut's RNG seed pinned.
+      std::vector<int> ns(it->second.begin(), it->second.end());
+      std::sort(ns.begin(), ns.end());
+      for (auto neigh : ns) {
         out_file << std::format(" {}", neigh);
       }
     }

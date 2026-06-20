@@ -357,7 +357,12 @@ void pass_submatch::find_subs(hhds::Graph* g) {
     for (size_t depth = 1; depth < depth_hash2node.size(); ++depth) {
       for (const auto& [hash, vec] : depth_hash2node[depth]) {
         int score = (static_cast<int>(vec.size()) - 1) * static_cast<int>(depth) * static_cast<int>(depth);
-        if (score >= best_score) {
+        // Deterministic selection: `>=` over a hash-ordered map kept the LAST
+        // tied entry in (run-to-run-varying) iteration order. Require a strict
+        // improvement, breaking ties by largest depth then smallest hash so the
+        // chosen candidate is reproducible regardless of map iteration order.
+        if (score > best_score
+            || (score == best_score && score > 0 && (depth > d_best || (depth == d_best && hash < h_best)))) {
           h_best     = hash;
           d_best     = static_cast<uint8_t>(depth);
           best_score = score;

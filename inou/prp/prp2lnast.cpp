@@ -7456,6 +7456,15 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
       return emit_range_node(Lnast_node::create_const("0"), Lnast_node::create_const("nil"));
     }
     if (!ts_node_is_null(open_from)) {
+      // `0..` selects from bit 0 to the top — exactly the whole value, the same
+      // as the bare `#[..]` full slice. Emit the all-ones mask directly (the
+      // `#[..]` path): width-independent, and it sidesteps the degenerate
+      // zero-start open `range` whose folded scalar collapses the select.
+      if (auto ft = get_text(open_from); !ft.empty() && (ft.front() >= '0' && ft.front() <= '9')) {
+        if (auto fv = Dlop::from_pyrope(ft); fv && fv->is_integer() && fv->is_just_i64() && fv->to_just_i64() == 0) {
+          return Lnast_node::create_const("-1");
+        }
+      }
       return emit_range_node(expr_to_node(open_from), Lnast_node::create_const("nil"));
     }
     if (!ts_node_is_null(fz_incl) || !ts_node_is_null(fz_excl)) {

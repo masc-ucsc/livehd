@@ -2984,7 +2984,12 @@ private:
   // A comptime range (both endpoints const) is folded to int bounds in
   // range_map_; a range with a runtime endpoint (`a#[n..=m]`) is kept as
   // (lo,hi) nids in range_dyn_map_ so lower_get_mask can synthesize the
-  // shift+mask hardware select.
+  // shift+mask hardware select. An OPEN range (`a#[lo..]` — hi is the const
+  // sentinel "nil") with a comptime lo goes to range_open_map_: its upper bound
+  // is the sliced VALUE's MSB, which is not known here (lower_range sees only
+  // the range, not which value indexes it), so the consuming get_mask/set_mask
+  // closes it to `lo..=(value bits-1)`. (A runtime-lo open range stays in
+  // range_dyn_map_, where lower_dynamic_range_select handles the nil hi.)
   void lower_range(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
@@ -2999,8 +3004,13 @@ private:
       return;
     }
     std::string name{lnast_->get_name(dst)};
+    const bool  open = Lnast_ntype::is_const(lnast_->get_type(hi)) && lnast_->get_name(hi) == "nil";
     if (Lnast_ntype::is_const(lnast_->get_type(lo)) && Lnast_ntype::is_const(lnast_->get_type(hi))) {
-      range_map_[name] = {const_val(lo), const_val(hi)};
+      if (open) {
+        range_open_map_[name] = lo;  // close to lo..=(MSB) where the value's width is known
+      } else {
+        range_map_[name] = {const_val(lo), const_val(hi)};
+      }
     } else {
       range_dyn_map_[name] = {lo, hi};
     }
@@ -3029,9 +3039,18 @@ private:
       return;
     }
 
+    // Open-ended slice with a comptime offset — `a#[lo..]`. lower_range stashed
+    // only the lo nid (the MSB is the sliced VALUE's, unknown until now); close
+    // it to `lo..=(value bits-1)` and emit the exact Get_mask. Without this the
+    // open range used to be recorded as a closed `{lo,0}` and selected the LOW
+    // bits (dropping the offset, wrong width+sign).
+    std::string mname{lnast_->get_name(mask_op)};
+    if (auto it = range_open_map_.find(mname); it != range_open_map_.end()) {
+      lower_open_range_select(dst, val, it->second);
+      return;
+    }
     // Runtime (non-comptime) bit index — `a#[n..=m]` with a non-const endpoint.
     // lower_range stashed the live lo/hi nids; build `(a>>n) & ((1<<(m-n+1))-1)`.
-    std::string mname{lnast_->get_name(mask_op)};
     if (auto it = range_dyn_map_.find(mname); it != range_dyn_map_.end()) {
       lower_dynamic_range_select(dst, val, it->second.first, it->second.second, nid);
       return;
@@ -3083,6 +3102,37 @@ private:
     auto ror = make_node(Ntype_op::Ror);  // |(a & (1<<i)) -> the selected bit
     setup_sink_by_name(ror, "a").connect_driver(and_dp);
     bind_result(lnast_->get_name(dst), ror.create_driver_pin(0), 1);
+  }
+
+  // Close an open-ended `lo..` slice to the constant bitmask of bits
+  // `lo..=msb`, where `msb` is the sliced value's most-significant bit. A `lo`
+  // that starts at or past the MSB (or a negative `lo`, already diagnosed
+  // upstream) leaves no bits, so the mask is 0 (an empty, zero slice).
+  [[nodiscard]] spool_ptr<Dlop> closed_open_mask(int64_t lo, int32_t msb) {
+    if (lo < 0 || lo > msb) {
+      return Dlop::create_integer(0);
+    }
+    return Dlop::get_mask_value(msb, static_cast<int>(lo));  // h==l (single bit) handled inside
+  }
+
+  // `a#[lo..]` with a COMPTIME offset — the open-ended slice. The upper bound is
+  // the sliced value's MSB (`a_val.mw-1`), so close the range to `lo..=msb` and
+  // emit the exact Get_mask: bits lo..msb packed LSB-first as an UNSIGNED value
+  // (`#[]` zero-extends), with the tight `msb-lo+1` width. This is identical to
+  // what the explicit `a#[lo..=msb]` workaround lowers to. (A runtime offset
+  // `a#[k..]` keeps its `a>>k` lowering via range_dyn_map_.)
+  void lower_open_range_select(const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& lo) {
+    auto          a_val = leaf(val);
+    const int32_t msb   = a_val.mw > 0 ? a_val.mw - 1 : 0;
+
+    auto    lo_c = Dlop::from_pyrope(lnast_->get_name(lo));
+    int64_t lo_i = lo_c->is_just_i64() ? lo_c->to_just_i64() : 0;
+    auto    mask = closed_open_mask(lo_i, msb);
+
+    auto node = make_node(Ntype_op::Get_mask);
+    setup_sink_by_name(node, "a").connect_driver(a_val.pin);
+    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *mask));
+    bind_result(lnast_->get_name(dst), node.create_driver_pin(0), mask_popcount(*mask));
   }
 
   // `a#[n..=m]` with a RUNTIME range — lower to `(a>>n) & ((1<<(m-n+1))-1)`,
@@ -3265,6 +3315,20 @@ private:
     auto ins = lnast_->get_sibling_next(mask_op);
     if (ins.is_invalid()) {
       return;
+    }
+    // An open-ended bit-range WRITE `dst#[lo..] = ins` would have to derive its
+    // top bit from the destination's DECLARED width, which is not tracked per
+    // logical name here (only the current value's width is). Closing it to the
+    // current width would silently drop or extend bits, so require the explicit
+    // upper bound instead. The READ form `a#[lo..]` IS supported
+    // (lower_open_range_select). (range_open_map_ holds only comptime-lo opens.)
+    if (auto it = range_open_map_.find(std::string{lnast_->get_name(mask_op)}); it != range_open_map_.end()) {
+      error_at(nid,
+               {"open-range-write", "unsupported"},
+               "upass.tolg: open-ended bit-range write `dst#[{}..] = …` is not supported — give the upper bound "
+               "explicitly, e.g. `dst#[{}..=<msb>]`",
+               lnast_->get_name(it->second),
+               lnast_->get_name(it->second));
     }
     auto mask = mask_from_operand(mask_op);
     auto vv   = set_mask_base(val);
@@ -3829,6 +3893,12 @@ private:
   // lower_get_mask can build the shift+mask select. An open `lo..` form stores
   // a const "nil" hi nid. (Comptime ranges stay in range_map_ as folded ints.)
   absl::flat_hash_map<std::string, std::pair<Lnast_nid, Lnast_nid>> range_dyn_map_;
+  // An open-ended `lo..` range with a COMPTIME lo (`a#[3..]`): only the lo nid
+  // is stashed (keyed by the range tmp name). The upper bound is the sliced
+  // value's MSB, known only at the consuming get_mask/set_mask, which closes the
+  // range to `lo..=(value bits-1)`. (A runtime-lo open range lives in
+  // range_dyn_map_ with a const "nil" hi.)
+  absl::flat_hash_map<std::string, Lnast_nid>                       range_open_map_;
   std::vector<WriteMap>                                         branch_writes_;
   // Parallel to branch_writes_: per active branch, the pre-branch value of each
   // name it wrote (nullopt = absent before the branch). lower_branch replays

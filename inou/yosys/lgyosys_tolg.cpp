@@ -1398,22 +1398,40 @@ static void connect_partial_dpin(hhds::Graph* g, hhds::Node_class& or_node, uint
   }
 }
 
+// Visit the partially-assigned wires in a deterministic wire-name order.
+// `partially_assigned` is keyed by RTLIL::Wire* (a heap pointer) and abseil
+// perturbs flat_hash_map iteration order by the table's heap address, so
+// iterating it directly creates the synthesized Or/And/Get_mask/SHL helper
+// nodes (and therefore their Class_index ids / cgen wire names) in a
+// run-to-run-varying order, yielding non-reproducible emitted Verilog.
+template <typename MapT>
+static std::vector<const RTLIL::Wire*> sorted_wire_keys(const MapT& m) {
+  std::vector<const RTLIL::Wire*> wires;
+  wires.reserve(m.size());
+  for (const auto& it : m) {
+    wires.push_back(it.first);
+  }
+  std::sort(wires.begin(), wires.end(),
+            [](const RTLIL::Wire* a, const RTLIL::Wire* b) { return a->name.str() < b->name.str(); });
+  return wires;
+}
+
 static void process_partially_assigned_other(hhds::Graph* g) {
-  for (const auto& it : partially_assigned) {
-    const RTLIL::Wire* wire = it.first;
-    I(it.second.size() == it.first->width);
+  for (const RTLIL::Wire* wire : sorted_wire_keys(partially_assigned)) {
+    const auto& pclasses = partially_assigned[wire];
+    I(pclasses.size() == wire->width);
 
     auto or_dpin = get_partial_dpin(g, wire);
     auto or_node = master_node(or_dpin);
 
     int i = 0;
-    while (i < (int)it.second.size()) {
+    while (i < (int)pclasses.size()) {
       auto width = partially_assigned_bits[wire][i];
       if (width == 0) {
         i++;
         continue;
       }
-      const auto& dpin = it.second[i];
+      const auto& dpin = pclasses[i];
       if (!dpin.is_invalid()) {
         connect_partial_dpin(g, or_node, i, width, dpin);
       }
@@ -1424,9 +1442,10 @@ static void process_partially_assigned_other(hhds::Graph* g) {
 }
 
 static void process_partially_assigned_self_chains(hhds::Graph* g) {
-  for (const auto& kv : partially_assigned_fwd) {
-    const RTLIL::Wire* wire = kv.first;
-
+  // Deterministic wire-name order (see sorted_wire_keys): the body creates graph
+  // nodes, so pointer-keyed hash iteration would make node ids run-to-run
+  // varying.
+  for (const RTLIL::Wire* wire : sorted_wire_keys(partially_assigned_fwd)) {
     bool pending_chain = true;
 
     std::set<int> processed_pos;
@@ -1438,13 +1457,16 @@ static void process_partially_assigned_self_chains(hhds::Graph* g) {
     }
 
     if ((int)processed_pos.size() == wire->width) {
-      return;
+      continue;  // this wire is fully resolved; was `return`, which wrongly
+                 // abandoned every remaining wire (which wires got dropped then
+                 // depended on hash iteration order — an intermittent miscompile)
     }
 
     while (pending_chain) {
       pending_chain = false;
       absl::flat_hash_set<int> ready_pos;
-      absl::flat_hash_set<int> shifts;
+      // ordered so the per-shift node creation below is deterministic
+      std::set<int> shifts;
 
       for (int pos = 0; pos < (int)partially_assigned_fwd[wire].size(); ++pos) {
         auto shift = partially_assigned_fwd[wire][pos];
@@ -1466,7 +1488,8 @@ static void process_partially_assigned_self_chains(hhds::Graph* g) {
       }
 
       if (shifts.empty()) {
-        return;
+        break;  // no position became ready this round: stop on THIS wire only
+                // (was `return`, which abandoned every remaining wire)
       }
 
       auto master_or_dpin = get_partial_dpin(g, wire);

@@ -1391,7 +1391,16 @@ void Bitwidth::debug_unconstrained_msg(hhds::Node_class& node, hhds::Pin_class& 
 }
 
 void Bitwidth::bw_pass(hhds::Graph* g) {
-  current_graph                            = g;
+  current_graph = g;
+  // bwmap is keyed by hhds::Class_index, the per-body node id, which is
+  // explicitly allowed to collide across graph bodies (hhds/index.hpp). A
+  // single Bitwidth object is reused for every graph in var.graphs, so without
+  // this clear a pin in graph B can read a STALE Bitwidth_range left by a
+  // same-index pin in graph A — corrupting inferred widths and perturbing
+  // control flow (not_finished, const-folding, AttrSet deletion). The set of
+  // collisions depends on cross-graph allocation/processing order, so the same
+  // module compiled alone vs. alongside others would otherwise differ.
+  bwmap.clear();
   discovered_some_backward_nodes_try_again = true;
   not_finished                             = false;
 

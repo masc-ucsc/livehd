@@ -427,8 +427,22 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   // dataflow order, so a comb reader sorted before the owning edge process
   // must already see the declare (reg q-reads are order-free only once
   // declared). Output regs declare here too - the q pin IS the output.
-  for (const auto* sym : reg_syms_) {
-    declare_reg(sym->as<slang::ast::ValueSymbol>());
+  // reg_syms_ is a pointer-keyed flat_hash_set whose iteration order abseil
+  // perturbs by the table's heap address (so it varies run-to-run under ASLR).
+  // Emitting the declares — and the order-sensitive lname_of `_sN` name
+  // uniquing — in that order makes the IR (and occasionally the generated
+  // signal names) nondeterministic. Emit in a stable source-location order.
+  {
+    std::vector<const slang::ast::Symbol*> regs(reg_syms_.begin(), reg_syms_.end());
+    std::sort(regs.begin(), regs.end(), [](const slang::ast::Symbol* a, const slang::ast::Symbol* b) {
+      if (a->location != b->location) {
+        return a->location < b->location;
+      }
+      return a->name < b->name;
+    });
+    for (const auto* sym : regs) {
+      declare_reg(sym->as<slang::ast::ValueSymbol>());
+    }
   }
 
   // Pre-declare COMBINATIONAL flattenable arrays as flat packed buses
@@ -1564,7 +1578,17 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
 
   if (!implicit_clk) {
     auto& ln = *builder_.lnast;
-    for (const auto* sym : wc.nonblocking) {
+    // Emit the clock_pin / posclk attr_set nodes in a stable source order:
+    // wc.nonblocking is a pointer-keyed flat_hash_set with run-to-run-varying
+    // iteration order, and this loop appends IR.
+    std::vector<const slang::ast::ValueSymbol*> ff_syms(wc.nonblocking.begin(), wc.nonblocking.end());
+    std::sort(ff_syms.begin(), ff_syms.end(), [](const slang::ast::ValueSymbol* a, const slang::ast::ValueSymbol* b) {
+      if (a->location != b->location) {
+        return a->location < b->location;
+      }
+      return a->name < b->name;
+    });
+    for (const auto* sym : ff_syms) {
       if (!reg_syms_.contains(sym)) {
         continue;
       }

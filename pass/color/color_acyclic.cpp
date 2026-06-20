@@ -280,11 +280,19 @@ void Color_acyclic::merge_partitions_one_parent() {
 
     if (id2incparts[*pivot].size() == 1) {
       merge_flag = true;
-      keep_going = true;
       merge_into = *pivot;
       merge_from = *id2incparts[*pivot].begin();
     }
 
+    // `keep_going` must be set only when the iteration makes real progress
+    // (a merge that shrinks pwi, or a pivot advance toward pwi.end()). Setting
+    // it the moment a size-1 incpart is seen — before the merge guard below is
+    // validated — caused an infinite loop: when the guard fails (e.g. a stale
+    // single-parent id whose partition was already merged away, so
+    // id2nodes.contains(merge_from) is false) AND pivot is the last element,
+    // neither branch runs yet keep_going stayed true, so the loop re-evaluated
+    // the same pivot forever. Whether that dangling id lands last depends on
+    // hash iteration order, making the hang intermittent.
     if (merge_flag && merge_from != merge_into && id2nodes.contains(merge_from)) {
       merge_op(merge_from, merge_into);
       for (auto* vec : {&pwi}) {
@@ -293,7 +301,8 @@ void Color_acyclic::merge_partitions_one_parent() {
           vec->erase(rm);
         }
       }
-      pivot = pwi.begin();
+      pivot      = pwi.begin();
+      keep_going = true;
     } else if ((pivot + 1) != pwi.end()) {
       ++pivot;
       keep_going = true;

@@ -194,7 +194,18 @@ public:
 
     wait_all();
 
-    finishing = true;
+    // Set `finishing` WHILE holding queue_mutex so the store cannot race a
+    // worker that is between its predicate check (under the lock) and parking
+    // on the cv. Per the std::condition_variable contract the state feeding the
+    // wait predicate must be mutated under the same mutex; otherwise a
+    // notify_all() issued here can land in that window and be lost, leaving a
+    // parked worker asleep forever and hanging the join() below at (static)
+    // destruction. `finishing` being atomic gives visibility but does NOT wake
+    // an already-parked waiter, so it is not enough on its own.
+    {
+      std::lock_guard<std::mutex> lk(queue_mutex);
+      finishing = true;
+    }
 
     job_available_var.notify_all();
 
