@@ -1203,11 +1203,42 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
       continue;
     }
 
-    auto iname  = get_scaped_name(default_instance_name(node));
     auto sub_io = node.get_subnode_io();
     if (!sub_io) {
       continue;
     }
+
+    // Runtime range-select guard (`a#[lo..=hi]`): an `lgassert` Sub is a
+    // recognized primitive, NOT a real sub-graph. Lower it to an inline
+    // SystemVerilog immediate assertion on its `cond` input. It drives no data
+    // output, so the equivalence check (which compares module outputs) is
+    // unaffected; the instance-name attr carries the file:line for the message.
+    // Wrapped in `synthesis translate_off`/`on` so synthesis + the yosys LEC
+    // reader skip the simulation-only `assert … else $error` action block
+    // (yosys cannot parse the `else`), while RTL simulators keep it live.
+    if (sub_io->get_name() == livehd::graph_util::lgassert_module_name) {
+      auto cond = get_driver(node.get_sink_pin("cond"));
+      if (cond.is_invalid()) {
+        continue;
+      }
+      std::string loc;
+      if (auto nm = node.attr(hhds::attrs::name); nm.has()) {
+        loc = std::string{nm.get()};
+      }
+      note_src(fout, node);
+      fout->append("// synthesis translate_off\n");
+      fout->append("always_comb begin\n");
+      fout->append("  assert (",
+                   get_wire_or_const(cond),
+                   ") else $error(\"lgassert: descending bit-range select (hi < lo)",
+                   loc.empty() ? std::string{} : absl::StrCat(" at ", loc),
+                   "\");\n");
+      fout->append("end\n");
+      fout->append("// synthesis translate_on\n");
+      continue;
+    }
+
+    auto iname = get_scaped_name(default_instance_name(node));
 
     note_src(fout, node);
     fout->append(get_scaped_name(sub_io->get_name()), " ", iname, "(\n");

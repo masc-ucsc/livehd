@@ -25,6 +25,14 @@
 
 namespace livehd::graph_util {
 
+// Reserved sub-module name for the runtime range-select guard `a#[lo..=hi]`
+// emits (see upass_tolg lower_range_assert). It is a recognized PRIMITIVE: a
+// Sub instance whose subnode names this module is NOT a real sub-graph — cgen
+// lowers it to an inline SystemVerilog immediate assertion (`assert(cond)`)
+// rather than a module instantiation, so no `lgassert` module body is ever
+// needed and LEC (which only compares data outputs) is unaffected.
+inline constexpr std::string_view lgassert_module_name = "lgassert";
+
 // ---------------------------------------------------------------------------
 // Constant pins (HHDS Graph::CONST_NODE singleton, scheme-A encoded).
 // ---------------------------------------------------------------------------

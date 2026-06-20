@@ -64,8 +64,6 @@ lowers to a wrong netlist today. Temporal ops, <code>fluid</code>, and in-langua
 <tr><td><code>implies</code> as a hardware signal — <code>r = p implies q</code></td><td><code>call to 'implies' has no hardware lowering</code></td><td><code>r = (not p) or q</code> (<code>implies</code> still works inside <code>assert</code>/<code>cassert</code>)</td></tr>
 <tr><td>Registered-output interface <code>mod f(...) -&gt; (reg count:u8@[0])</code></td><td><code>state register 'count' homes at stage 0 … requires home -1</code></td><td>body register: <code>{ reg c:u8=0; count=c; … }</code></td></tr>
 <tr><td>Hierarchical enums <code>enum E=(,a=(,x,,y), ,b)</code></td><td><code>read of undefined variable 'x'</code> (nested names read as scope)</td><td>flat enum</td></tr>
-<tr><td>Tuple/struct-typed ports <code>comb f(ar:(x:u3,y:i4)) -&gt; (p:(q:u8,r:u8))</code></td><td><code>tuple/field store … has no hardware lowering</code></td><td>flatten to scalar ports (<code>ar_x:u3, ar_y:i4</code>)</td></tr>
-<tr><td>Runtime (non-comptime) bit index <code>a#[i]</code></td><td><code>get_mask mask operand is not a constant or range</code></td><td><code>(a &gt;&gt; i)#[0]</code></td></tr>
 <tr><td>Runtime index into a const-array <em>literal</em> <code>const arr=[..]; arr[i]</code></td><td><code>field/index read of 'arr' could not be resolved</code></td><td>typed <code>mut arr:[N]uW = …</code> or a <code>reg</code> memory (both lower a runtime index)</td></tr>
 <tr><td>Overload-gathering call dispatch <code>const add=[f1,f2]; add(x)</code></td><td><code>call to 'add' has no hardware lowering</code> (only <code>init</code> overload sets resolve)</td><td>distinct names per overload</td></tr>
 </tbody>

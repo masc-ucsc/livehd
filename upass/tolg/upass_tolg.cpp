@@ -3033,7 +3033,7 @@ private:
     // lower_range stashed the live lo/hi nids; build `(a>>n) & ((1<<(m-n+1))-1)`.
     std::string mname{lnast_->get_name(mask_op)};
     if (auto it = range_dyn_map_.find(mname); it != range_dyn_map_.end()) {
-      lower_dynamic_range_select(dst, val, it->second.first, it->second.second);
+      lower_dynamic_range_select(dst, val, it->second.first, it->second.second, nid);
       return;
     }
     // Runtime single-bit index — `a#[i]`. prp2lnast emits the mask as `1<<i`
@@ -3090,7 +3090,8 @@ private:
   // by lower_range. The open form `a#[n..]` (hi == const "nil") selects every
   // bit from n upward, i.e. just `a>>n`. A descending range (m<n) violates the
   // select precondition; lower_get_mask's caller emits the lgassert(m>=n).
-  void lower_dynamic_range_select(const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& lo, const Lnast_nid& hi) {
+  void lower_dynamic_range_select(const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& lo, const Lnast_nid& hi,
+                                  const Lnast_nid& loc_nid) {
     auto a_val = leaf(val);
     auto n     = leaf(lo);
 
@@ -3145,13 +3146,52 @@ private:
     setup_sink_by_name(andn, "a").connect_driver(mask_dp);
     bind_result(lnast_->get_name(dst), andn.create_driver_pin(0), a_val.mw + 1);
 
-    lower_range_assert(lo, hi);
+    lower_range_assert(n, m, loc_nid);
   }
 
-  // Emit a runtime `lgassert(m >= n)` guarding a dynamic range select against a
-  // descending range. (Phase 2 wires this to an lgassert Sub instance; the
-  // stub keeps the data-path lowering self-contained for now.)
-  void lower_range_assert(const Lnast_nid& /*lo*/, const Lnast_nid& /*hi*/) {}
+  // Emit a runtime `lgassert(hi >= lo)` guarding a dynamic range select against
+  // a descending range (the select precondition). The check is an `lgassert`
+  // Sub instance: a recognized primitive cgen lowers to an inline SystemVerilog
+  // immediate assertion (no data-path output, so LEC is unaffected). `loc_nid`
+  // carries the `a#[lo..=hi]` source span for the assert message. Skipped when
+  // there is no GraphLibrary to register the primitive in (the data-path
+  // lowering is already complete and correct without the guard).
+  void lower_range_assert(const Val& lo, const Val& hi, const Lnast_nid& loc_nid) {
+    if (lib_ == nullptr) {
+      return;
+    }
+    // cond = (hi >= lo) = Not(LT(hi, lo))   [LT computes hi < lo].
+    auto lt = make_node(Ntype_op::LT);  // positional: "a" < "b"
+    setup_sink_by_name(lt, "a").connect_driver(hi.pin);
+    setup_sink_by_name(lt, "b").connect_driver(lo.pin);
+    auto lt_dp = lt.create_driver_pin(0);
+    set_bits(lt_dp, 2);
+    set_unsign(lt_dp);
+    auto notn = make_node(Ntype_op::Not);
+    setup_sink_by_name(notn, "a").connect_driver(lt_dp);
+    auto cond = notn.create_driver_pin(0);
+    set_bits(cond, 2);
+    set_unsign(cond);
+
+    auto gio = lib_->find_io(livehd::graph_util::lgassert_module_name);
+    if (!gio) {
+      gio = lib_->create_io(livehd::graph_util::lgassert_module_name);
+      gio->add_input("cond", 1);
+      gio->set_bits("cond", 1);
+      gio->set_unsign("cond", true);
+    }
+    auto sub = make_node(Ntype_op::Sub);
+    sub.set_subnode(gio);
+    sub.create_sink_pin("cond").connect_driver(cond);
+    // Carry the "line of code info" (file:line of the `a#[lo..=hi]`) on the
+    // instance-name attr so cgen can fold it into the assertion message.
+    const auto  sp  = lnast_->span_of(loc_nid);
+    std::string loc = sp.file.empty() ? std::string{"?"} : sp.file;
+    if (sp.start_line) {
+      loc += ":" + std::to_string(*sp.start_line);
+    }
+    sub.attr(hhds::attrs::name).set(loc);
+  }
 
   // The mask of a get_mask/set_mask is a full Dlop, never an int64: a 64-bit
   // (or wider) mask like 2^64-1 (`0x0ffffffffffffffff`, a full-width truncate)
