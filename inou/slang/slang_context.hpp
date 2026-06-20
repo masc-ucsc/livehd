@@ -318,6 +318,11 @@ private:
   // (truncate to bits, then sign-reinterpret) - the overflow boundary of
   // arithmetic/shift results.
   std::string fit_wrap(const std::string& v, int bits, bool is_signed);
+  // slang's effective (value-)width of a subexpression: the minimum bits needed
+  // to represent its value (sign-aware, transparent through implicit context
+  // conversions). nullopt when slang can't bound it (treat as "may overflow").
+  // Used to skip fit_wrap when an arithmetic result provably fits its type.
+  std::optional<int> value_width(const slang::ast::Expression& e) const;
   std::string mask_text(int bits) const;  // (1<<bits)-1 as a pyrope literal
   // Keep the low `bits` of a value as an UNSIGNED 0..2^bits-1 result. Never
   // uses a single-bit get_mask: Dlop's `x#[i]` contract makes those signed

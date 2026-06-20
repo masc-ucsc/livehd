@@ -214,8 +214,14 @@ void Cprop::try_collapse_forward(hhds::Node_class& node, std::vector<hhds::Edge_
 
   if (inp_edges_ordered.size() == 1) {
     auto prev_op = type_op_of(inp_edges_ordered[0].driver.get_master_node());
-    if (op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::Div || op == Ntype_op::And || op == Ntype_op::Or
-        || op == Ntype_op::Xor) {
+    // A single-input Sum whose lone driver is on the SUBTRACT (b) pin is a
+    // negation (0 - x = -x). collapse_forward_always_pin0 forwards the driver
+    // UNCHANGED, which would drop the sign (turning -x into +x). Leave the Sum
+    // node so cgen renders it as -(x).
+    const bool sum_subtract = op == Ntype_op::Sum && sink_pin_name(inp_edges_ordered[0].sink) == "b";
+    if ((op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::Div || op == Ntype_op::And || op == Ntype_op::Or
+         || op == Ntype_op::Xor)
+        && !sum_subtract) {
       collapse_forward_always_pin0(node, inp_edges_ordered);
       return;
     }
@@ -376,7 +382,10 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::
         } else {
           setup_sink_by_name(node, "b").connect_driver(dpin);
         }
-      } else if (npending == 1) {
+      } else if (npending == 1 && !(op == Ntype_op::Sum && sink_pin_name(edge_it2[0].sink) == "b")) {
+        // Same guard as the nconstants==0 case below: a lone pending operand on a
+        // Sum's subtract (b) pin is `0 - x` = -x, so forwarding x unchanged would
+        // drop the sign. Leave the Sum node (it now holds only the b driver).
         collapse_forward_always_pin0(node, edge_it2);
       }
     } else if (nconstants == 1 && npending >= 1

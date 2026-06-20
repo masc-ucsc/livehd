@@ -231,8 +231,16 @@ std::string Slang_context::lower_unary(const slang::ast::UnaryExpression& expr) 
   switch (expr.op) {
     case UnaryOperator::Plus: return lower_rvalue(operand);
     case UnaryOperator::Minus: {
-      auto v = to_int_value(lower_rvalue(operand));
-      return fit_wrap(builder_.create_minus_stmts("0", v), ti.bits, ti.is_signed);
+      auto v   = to_int_value(lower_rvalue(operand));
+      auto neg = builder_.create_minus_stmts("0", v);
+      // -x needs eff_width(x)+1 signed bits. Unsigned negation always wraps, so
+      // only the signed case may skip.
+      if (ti.is_signed) {
+        if (auto w = value_width(operand); w && *w + 1 <= ti.bits) {
+          return neg;
+        }
+      }
+      return fit_wrap(neg, ti.bits, ti.is_signed);
     }
     case UnaryOperator::BitwiseNot: {
       auto v   = to_int_value(lower_rvalue(operand));
@@ -304,6 +312,13 @@ std::string Slang_context::lower_unary(const slang::ast::UnaryExpression& expr) 
   }
 }
 
+std::optional<int> Slang_context::value_width(const slang::ast::Expression& e) const {
+  if (auto w = e.getEffectiveWidth()) {
+    return static_cast<int>(*w);
+  }
+  return std::nullopt;
+}
+
 std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr) {
   const auto& le = expr.left();
   const auto& re = expr.right();
@@ -350,9 +365,35 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
   }
 
   switch (expr.op) {
-    case BinaryOperator::Add: return fit_wrap(builder_.create_plus_stmts(lhs, rhs), ti.bits, ti.is_signed);
-    case BinaryOperator::Subtract: return fit_wrap(builder_.create_minus_stmts(lhs, rhs), ti.bits, ti.is_signed);
-    case BinaryOperator::Multiply: return fit_wrap(builder_.create_mult_stmts(lhs, rhs), ti.bits, ti.is_signed);
+    case BinaryOperator::Add: {
+      // a + b needs max(eff_width)+1 bits; skip the overflow wrap when slang
+      // proves that fits the result type (operands were context-widened to the
+      // result, so the only headroom is their value widths).
+      auto sum = builder_.create_plus_stmts(lhs, rhs);
+      if (auto wl = value_width(le), wr = value_width(re); wl && wr && std::max(*wl, *wr) + 1 <= ti.bits) {
+        return sum;
+      }
+      return fit_wrap(sum, ti.bits, ti.is_signed);
+    }
+    case BinaryOperator::Subtract: {
+      // Signed a - b fits when max(eff_width)+1 <= bits. UNSIGNED a - b can
+      // underflow to a negative value that must wrap, so only the signed case skips.
+      auto diff = builder_.create_minus_stmts(lhs, rhs);
+      if (ti.is_signed) {
+        if (auto wl = value_width(le), wr = value_width(re); wl && wr && std::max(*wl, *wr) + 1 <= ti.bits) {
+          return diff;
+        }
+      }
+      return fit_wrap(diff, ti.bits, ti.is_signed);
+    }
+    case BinaryOperator::Multiply: {
+      // a * b needs eff_width(a)+eff_width(b) bits; skip the wrap when that fits.
+      auto prod = builder_.create_mult_stmts(lhs, rhs);
+      if (auto wl = value_width(le), wr = value_width(re); wl && wr && *wl + *wr <= ti.bits) {
+        return prod;
+      }
+      return fit_wrap(prod, ti.bits, ti.is_signed);
+    }
     case BinaryOperator::Divide:
       if (ti.is_signed) {
         return fit_wrap(builder_.create_div_stmts(lhs, rhs), ti.bits, ti.is_signed);
@@ -385,8 +426,16 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
     case BinaryOperator::LessThanEqual: return mark_bool(builder_.create_le_stmts(lhs, rhs));
     case BinaryOperator::LogicalShiftLeft:
     case BinaryOperator::ArithmeticShiftLeft: {
-      auto amount = to_pattern(rhs, ri.bits, ri.is_signed);  // shift amounts are unsigned
-      return fit_wrap(builder_.create_shl_stmts(lhs, amount), ti.bits, ti.is_signed);
+      auto amount  = to_pattern(rhs, ri.bits, ri.is_signed);  // shift amounts are unsigned
+      auto shifted = builder_.create_shl_stmts(lhs, amount);
+      // A CONSTANT left shift grows by exactly the shift amount; skip the wrap
+      // when eff_width(lhs)+amount fits. A runtime amount keeps the wrap.
+      if (auto wl = value_width(le); wl) {
+        if (auto s = try_eval_int(re); s && *s >= 0 && *wl + static_cast<int>(*s) <= ti.bits) {
+          return shifted;
+        }
+      }
+      return fit_wrap(shifted, ti.bits, ti.is_signed);
     }
     case BinaryOperator::LogicalShiftRight: {
       auto amount = to_pattern(rhs, ri.bits, ri.is_signed);
