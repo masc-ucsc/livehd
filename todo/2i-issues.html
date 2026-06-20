@@ -11,20 +11,15 @@
 <main>
 <h1><strong class="item-id">2i-issues</strong> Pyrope lowering &amp; cgen emission defects (non-LEC)</h1>
 
-<p>Six independent compiler bugs surfaced by the differential test corpus in
+<p><span class="status landed">C, D, E landed 2026-06-20</span> — three of these
+six remain (A, B, F); see the landed section for C/D/E. Originally six
+independent compiler bugs surfaced by the differential test corpus in
 <code>unexpected_semantics/</code> and <code>unexpected_bugs/</code> (plus the one
 <code>cgen</code> emission bug filed under <code>lec_missmatch/shift_combo_i8</code> — it
 is a codegen defect, <em>not</em> a LEC-engine issue). Each is valid, documented
 Pyrope that today either <strong>hard-errors in lowering</strong> or
 <strong>emits a wrong / invalid netlist</strong>. Pick any one and work it
 end-to-end from its subtask below — they have no ordering between them.</p>
-
-<p><strong>Status 2026-06-20 (adversarial re-test):</strong> <strong>E</strong>
-(signed-shift idiom) is now <span class="status landed">resolved</span> — five
-remain open (A, B, C, D, F). Each open construct now ships a checked-in red
-regression under <code>inou/prp/tests/equiv/</code>
-(<code>tuple_in_port</code>, <code>tuple_out_port</code>,
-<code>reserved_word_signal</code>); they turn green as each fix lands.</p>
 
 <p><strong>Scope.</strong> This page deliberately excludes the LEC-engine
 precision issues (cvc5 false-refutes on hotmux / FSM-state / memory, the
@@ -40,9 +35,9 @@ reading the source on <strong>2026-06-20</strong> against a fresh
 <tbody>
 <tr><td><strong>A</strong></td><td>Registered-output interface <code>-&gt; (reg count:u8@[0])</code></td><td>hard error</td><td><code>homes at stage 0 … requires home -1</code></td><td><code>upass/tolg/upass_tolg.cpp:4525</code></td></tr>
 <tr><td><strong>B</strong></td><td>Hierarchical enum <code>enum E=(,a=(,x,,y),…)</code></td><td>hard error</td><td><code>read of undefined variable 'x'</code></td><td><code>inou/prp/prp2lnast.cpp:4362</code></td></tr>
-<tr><td><strong>C</strong></td><td>Tuple-typed <em>input</em> port <code>(ar:(x:u3,y:i4), …)</code></td><td>hard error</td><td><code>unresolved reference '___res_1' — no driver</code></td><td><code>upass/tolg/upass_tolg.cpp:2207</code></td></tr>
-<tr><td><strong>D</strong></td><td>Tuple-typed <em>output</em> port + whole-tuple write</td><td>hard error</td><td><code>output 'p.first' is never driven</code></td><td><code>upass/tolg/upass_tolg.cpp:277</code></td></tr>
-<tr><td><strong>E</strong></td><td>Signed-shift idiom <code>(a&lt;&lt;b)^(a&gt;&gt;b)</code> on <code>i8</code></td><td><span class="status landed">resolved 2026-06-20</span></td><td>0/1024 iverilog, cvc5+lgyosys equiv</td><td><code>inou/cgen/cgen_verilog.cpp:1086</code></td></tr>
+<tr><td><strong>C</strong></td><td>Tuple-typed <em>input</em> port <code>(ar:(x:u3,y:i4), …)</code></td><td><span class="status landed">landed 2026-06-20</span></td><td>compiles + LEC-equiv (see landed)</td><td><code>upass/ssa/upass_ssa.cpp</code></td></tr>
+<tr><td><strong>D</strong></td><td>Tuple-typed <em>output</em> port + whole-tuple write</td><td><span class="status landed">landed 2026-06-20</span></td><td>compiles + LEC-equiv (see landed)</td><td><code>upass/ssa/upass_ssa.cpp</code> + <code>upass/constprop/upass_constprop.hpp</code></td></tr>
+<tr><td><strong>E</strong></td><td>Signed-shift idiom <code>(a&lt;&lt;b)^(a&gt;&gt;b)</code> on <code>i8</code></td><td><span class="status landed">landed 2026-06-20</span></td><td>iverilog 0/1024 + LEC-equiv (see landed)</td><td><code>inou/cgen/cgen_verilog.cpp:1086</code></td></tr>
 <tr><td><strong>F</strong></td><td>Reserved word as a signal name (<code>reg packed:…</code>)</td><td>invalid netlist</td><td>emits bare <code>packed</code> → SV parse error</td><td><code>inou/cgen/cgen_verilog.cpp:87</code></td></tr>
 </tbody>
 </table>
@@ -57,8 +52,8 @@ two-writes-to-one-register slice merge (the netlist now computes <code>{b,a}</co
 correctly — but it exposed subtask&nbsp;F). Do not re-file these.</p>
 
 <h2>Depends on</h2>
-<p>None. C and D share one root cause (tuple-typed port flattening) and are best
-done together; A, B, E, F are each self-contained.</p>
+<p>None. C, D, E are <span class="status landed">landed 2026-06-20</span> (see
+below); A, B, F remain and are each self-contained.</p>
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
@@ -113,83 +108,6 @@ pub comb top(s:bool) -&gt; (r:u6) { r = int(Animal.bird.eagle) }   // == 0ub0000
   parent-bit / <code>__enumval</code> machinery so inner names go to fields, not
   <code>expr_to_node</code>.</li>
 
-<li><strong>C — tuple-typed <em>input</em> port.</strong>
-  Repro <code>unexpected_semantics/tup_in_port/impl.prp</code> — verbatim from
-  <code>docs/pyrope/06-functions.md:357</code>:
-  <pre><code>pub comb top(ar:(x:u3, y:i4), cond:bool) -&gt; (res:i5) {
-  res = if cond { ar.x + 1 } else { ar.y - 1 }
-}</code></pre>
-  Hard-errors <code>upass.tolg: unresolved reference '___res_1' — it has no
-  driver</code>. <strong>Root cause</strong> (confirmed from the post-upass LNAST):
-  the port <em>is</em> correctly flattened — <code>io_meta().inputs</code> =
-  <code>ar.x, ar.y, cond</code>, so the leaf input pins exist
-  (<code>upass/tolg/upass_tolg.cpp:183-184</code>). But the body reads them as
-  <code>tuple_get(___res_1, ar, 'x')</code> — a field read of the <em>whole tuple</em>
-  <code>ar</code>, which has no tuple driver (only the leaves do).
-  <code>lower_tuple_get</code> (<code>:2207</code>) can't resolve <code>ar.x</code>,
-  so <code>___res_1</code> is never bound and the undriven check fires at
-  <code>:414</code>. <strong>Fix:</strong> bind a <code>tuple_get</code> whose base
-  is a tuple-typed input directly to the flattened leaf input pin
-  (<code>ar.x</code>), or have <code>upass/detuple</code> rewrite the field reads to
-  dotted-leaf refs (the same flattening it already does for struct vars/regs).
-  Pairs with&nbsp;D. <strong>Red regression:</strong>
-  <code>inou/prp/tests/equiv/tuple_in_port.prp</code> (+ golden <code>.v</code>) —
-  fails at the prp&rarr;verilog step today, goes green when this lowers.</li>
-
-<li><strong>D — tuple-typed <em>output</em> port driven by a whole-tuple write.</strong>
-  Repro <code>unexpected_semantics/tup_out_port/impl.prp</code> (documented in
-  <code>docs/pyrope/06-functions.md</code>):
-  <pre><code>pub comb top(c:bool) -&gt; (p:(first:u8, second:u8)) {
-  p = (first=1, second=2)
-}</code></pre>
-  Hard-errors <code>output 'p.first' is never driven by the body of
-  'impl.top'</code>. <strong>Root cause</strong> (confirmed from LNAST):
-  <code>io_meta().outputs</code> = <code>p.first, p.second</code>, but the body
-  builds <code>___p_0 = tuple_add(first=1, second=2)</code> then
-  <code>store(p, ___p_0)</code> — a whole-tuple write to <code>p</code>. tolg records
-  a driver for <code>p</code>/<code>___p_0</code> but <strong>not</strong> for the
-  flattened leaf names, so the output finalize loop
-  (<code>upass/tolg/upass_tolg.cpp:260-283</code>) finds no <code>pin_map_</code>
-  entry for <code>p.first</code> → error at <code>:277</code>.
-  <strong>Fix:</strong> split a whole-tuple write to a tuple-typed output into
-  per-leaf drives (<code>p.first</code>←<code>___p_0.first</code>, etc.) matching the
-  flattened output names — in <code>upass/detuple</code> (it already classifies
-  whole-write tuples at <code>upass_detuple.cpp:517</code>) or in tolg's output
-  binding. Pairs with&nbsp;C. <strong>Red regression:</strong>
-  <code>inou/prp/tests/equiv/tuple_out_port.prp</code> (+ golden <code>.v</code>) —
-  fails at the prp&rarr;verilog step today (per-field writes fail the same way),
-  goes green when the whole-tuple write drives the flattened leaves.</li>
-
-<li><span class="status landed">resolved 2026-06-20</span> <strong>E — cgen emits a wrong netlist for a signed-shift idiom.</strong>
-  Fixed exactly as proposed below (the SRA term now emits
-  <code>$signed($signed(a) &gt;&gt;&gt; amt)</code>): 0/1024 <code>iverilog</code>
-  mismatches and PROVEN equivalent under both cvc5 and lgyosys. Passing
-  regression <code>inou/prp/tests/equiv/shift_combo_i8.prp</code> (+ golden).
-  Repro <code>lec_missmatch/shift_combo_i8/impl.prp</code> (a <code>cgen</code> bug,
-  filed there only because it also makes the two LEC engines disagree):
-  <pre><code>pub comb top(a:i8, b:u2) -&gt; (r:i8) { wrap r = (a &lt;&lt; b) ^ (a &gt;&gt; b) }</code></pre>
-  Independent <code>iverilog</code> sim shows the emitted <code>gen.v</code>
-  <strong>differs from spec in 384/1024</strong> input combos
-  (e.g. <code>a=0x80,b=1</code>: gen=<code>0x40</code>, correct=<code>0xC0</code>).
-  cvc5 (reasons on the LGraph) says EQUIV — i.e. the <strong>IR is correct</strong>;
-  lgyosys (reasons on <code>gen.v</code>) correctly refutes. So it is purely a
-  Verilog-text bug. cgen emits
-  <code>xor_28 = (({12{1'b0}} | a) &lt;&lt; amt) ^ (a &gt;&gt;&gt; amt);</code>
-  <strong>Root cause:</strong> the SHL operand is forced <em>unsigned</em> by the
-  deliberate zero-extend idiom <code>({N{1'b0}} | a)</code>
-  (<code>inou/cgen/cgen_verilog.cpp:1068</code>), while the SRA term
-  <code>a &gt;&gt;&gt; amt</code> (<code>:1083-1086</code>) is bare and relies on
-  <code>a</code> being signed; they are joined by the generic
-  <code>add_expression</code> (<code>:237-245</code>, used at <code>:1099-1108</code>)
-  with <strong>no</strong> per-operand <code>$signed</code>/<code>$unsigned</code>.
-  Verilog evaluates <code>^</code> in unsigned context if any operand is unsigned,
-  and that context propagates into the <code>&gt;&gt;&gt;</code> term, turning the
-  arithmetic shift into a logical (zero-fill) one → wrong for negative <code>a</code>.
-  <strong>Fix:</strong> make the SRA term self-contained — emit
-  <code>$signed(val) &gt;&gt;&gt; amt</code> at <code>:1086</code>. (Do not remove
-  the SHL zext; the broad fix is an explicit signedness cast on every operand of the
-  generic binary-op path.)</li>
-
 <li><strong>F — cgen emits a SystemVerilog reserved word as a signal name.</strong>
   Repro <code>unexpected_bugs/reg_multi_bitslice_drop/impl.prp</code> (variable named
   <code>packed</code>). The slice-merge logic itself is now correct, but the emitted
@@ -221,14 +139,59 @@ pub comb top(s:bool) -&gt; (r:u6) { r = int(Animal.bird.eagle) }   // == 0ub0000
 </ul>
 
 <h2>Subtasks — landed</h2>
-<ul class="subtasks">
-<li><span class="status landed">2026-06-20</span> <strong>E — signed-shift idiom.</strong>
-  cgen now emits the arithmetic-right-shift term self-contained as
-  <code>$signed($signed(a) &gt;&gt;&gt; amt)</code>, so the unsigned SHL zero-extend
-  idiom in the XOR's other operand no longer demotes <code>&gt;&gt;&gt;</code> to a
-  logical shift. Verified 0/1024 <code>iverilog</code> mismatches and equivalent
-  under both LEC engines. Regression <code>inou/prp/tests/equiv/shift_combo_i8</code>.</li>
-</ul>
+
+<p><span class="status landed">landed 2026-06-20</span> <strong>C — tuple-typed
+<em>input</em> port read inside an if/match expression.</strong> The io interface
+already flattened to dotted leaves (<code>ar.x</code>,<code>ar.y</code>), but the
+field reads sat inside the if-arm <code>stmts</code>, which the SSA upass copied
+verbatim with <code>copy_with_rename</code> — leaving a
+<code>tuple_get(ar,'x')</code> with no driver. <strong>Fix</strong>
+(<code>upass/ssa/upass_ssa.cpp</code>): a new <code>copy_branch_port_aware</code>
+deep-copy for if-arms rewrites the nested port-field reads to their flattened leaf
+(<code>store(dst, ref 'ar.x')</code>), the same rewrite the top-level path already
+did. Regression <code>inou/prp/tests/equiv/tup_in_port.{prp,v}</code> (if-expr) +
+<code>tup_in_match.{prp,v}</code> (match arms); iverilog 0/256, LEC-equiv.</p>
+
+<p><span class="status landed">landed 2026-06-20</span> <strong>D — tuple-typed
+<em>output</em> port driven by a whole-tuple write.</strong> Two bugs: (1) the
+body's 2-child <code>store(p, ___p_0)</code> whole-tuple write was never split into
+the flattened leaf drives — <strong>fix</strong>
+(<code>upass/ssa/upass_ssa.cpp</code> <code>try_rewrite_port_whole_store</code>):
+split into one <code>p.first = ___p_0.first</code>, … per output leaf (a
+<code>tuple_get</code> per leaf, or a leaf-to-leaf ref when the source is itself a
+tuple input port); <code>copy_branch_port_aware</code> also splits per-field writes
+nested in if-arms. (2) even per-field leaf writes with a <em>constant</em> value
+were dropped, because <code>is_io_output</code>
+(<code>upass/constprop/upass_constprop.hpp</code>) compared the store name's
+first-level (<code>p</code>) against the now-flattened output entry
+(<code>p.first</code>) and never matched — a computed store survived only via
+demand re-emit. <strong>Fix:</strong> match a store to a flattened output leaf
+(<code>name == oe.name</code>) as well as the whole-tuple/scalar case. Regression
+<code>tup_out_port.{prp,v}</code> (whole-write) + <code>tup_out_field_arms.{prp,v}</code>
+(per-field writes in if-arms); LEC-equiv. <em>Known gap (separate, pre-existing
+constprop limitation):</em> a whole-tuple write whose source nests a <em>runtime</em>
+field inside a sub-tuple (<code>p = (first=j, s=(m=2, n=j+3))</code>) still errors
+in tolg — constprop does not fold a multi-segment <code>tuple_get</code> to a
+nested runtime leaf. Per-field nested writes (<code>p.s.n = j+3</code>) and const /
+top-level-runtime nested whole-writes all work.</p>
+
+<p><span class="status landed">landed 2026-06-20</span> <strong>E — signed-shift
+idiom emits a wrong netlist.</strong> The SHL zero-extend idiom
+<code>({N{1'b0}} | a)</code> forces the whole <code>^</code> unsigned, and that
+unsigned context propagated into the bare <code>a &gt;&gt;&gt; amt</code> term,
+turning the arithmetic shift logical (zero-fill) — wrong for negative <code>a</code>
+(384/1024 combos). The TODO's suggested <code>$signed(val) &gt;&gt;&gt; amt</code>
+does <strong>not</strong> survive (the shift's left operand stays
+context-determined — verified with iverilog). <strong>Fix</strong>
+(<code>inou/cgen/cgen_verilog.cpp:1086</code>): isolate the SRA in its own
+self-determined signed context — <code>$signed($signed(val) &gt;&gt;&gt; amt)</code>
+— but only for a genuinely signed operand (<code>is_unsign</code> gate; an unsigned
+<code>&gt;&gt;</code> must stay logical). Regression
+<code>shift_combo_i8.{prp,v}</code> (i8) + <code>shift_sra_unsigned.{prp,v}</code>
+(u8 must stay logical); iverilog 0/1024, LEC-equiv. The yosys <code>srasll</code>
+round-trip (mixed signed/unsigned, arithmetic/logical) confirms the cast is
+selective.</p>
+
 <p>Also resolved in the index's hard-error table (tracked there, not a 2i row):
 <strong>overload-gathering call dispatch</strong> <code>const add=[f1,f2]; add(x)</code>
 now resolves the whole call including return binding — regressions

@@ -5,6 +5,16 @@ in, how to bump the pin, and what to re-check so an upstream update merges
 smoothly. Written 2026-06-20 alongside an upstream modernization pass (see
 "Recent upstream change" below).
 
+**Current pin (2026-06-20):** `@prpparse` and `@tree_sitter_pyrope` are both at
+tree-sitter-pyrope `ee587553d30a2b1d434c97808ad765df1469afb1`
+(integrity `sha256-0IZpOHnoe53LMAkviTThXWWBvj3Uh+V0uP+rtIzyI3E=`). That bump was
+behavior-preserving on the parser side (the modernization below) but carried a
+**C→C++ migration of the prpfmt formatter** — see "prpfmt C→C++" below for the
+overlay change it forced. `@hhds` was *not* bumped (no new hhds API). No
+`inou/prp` source change was needed (the changed prpparse pieces are all private;
+the prpfmt C ABI `prpfmt_format_string` is unchanged, so `lhd/lhd_pyrope.cpp`
+still compiles as-is).
+
 ## What prpparse is
 
 `prpparse` is the hand-written, recursive-descent **Pyrope parser** that became
@@ -73,12 +83,23 @@ commented in `MODULE.bazel`, pointing at `../tree-sitter-pyrope/prpparse`.
 1. Update `<commit>` in both `urls` and `strip_prefix`, then recompute `integrity`
    (one-liner is in the `MODULE.bazel` comment):
    `curl -sL .../archive/<commit>.zip | openssl dgst -sha256 -binary | base64`
+   **`@prpparse` and `@tree_sitter_pyrope` share this archive** (one roots at the
+   `prpparse/` subdir, the other at the repo root) — bump *both* stanzas to the
+   same commit + integrity in lockstep, or the formatter and the parser fall out
+   of sync.
 2. If the new prpparse uses new hhds API, bump the `@hhds` `git_override` commit too.
 3. **Diff upstream `prpparse/BUILD` against `//packages:prpparse.BUILD`** and port
    any changes (new srcs/globs, new deps, copts). This is the easiest step to
-   forget — the two BUILD files drift independently.
+   forget — the two BUILD files drift independently. Do the same for the prpfmt
+   side: `//packages:prpfmt.BUILD` is hand-maintained against `prpfmt/Makefile`
+   (there is no upstream `prpfmt/BUILD`); the C↔C++ split and `-std`/`_GNU_SOURCE`
+   handling live there — see "prpfmt C→C++" below.
 4. Verify:
-   - LiveHD: `bazel test //inou/prp/...` (includes `prpparse_stream_test`).
+   - LiveHD: `bazel test //inou/prp/... //lhd/tests:lhd_fmt_test` (the former
+     includes `prpparse_stream_test`; the latter is the authoritative formatter
+     test). NB: the full `//inou/prp/...` run is parallel-heavy — an occasional
+     `rc=-9` (SIGKILL sandbox flake) on a `comptime`/`v2prp` case clears on a
+     `--nocache_test_results` rerun in isolation; it is not a pin regression.
    - Upstream (in tree-sitter-pyrope): `make test-all` — bazel unit tests +
      corpus accept-parity vs tree-sitter (the differential oracle).
 
@@ -104,14 +125,39 @@ These mirror a parallel C→C++20 modernization of the sibling `prpfmt` formatte
 (in the same repo), where the wins were larger because that code was literal C.
 prpparse was already idiomatic C++23, so only these few items applied.
 
-## Hardening parity — optional LiveHD-side change
+## prpfmt C→C++ (the ee58755 bump's load-bearing overlay change)
 
-Upstream's `prpparse/BUILD` now bounds-checks the parser
-(`-D_GLIBCXX_ASSERTIONS`, traps OOB on `std::vector`/`string_view`/`array`) and
-adds `-fstack-protector-strong`. **Those flags do not reach LiveHD builds**,
-because LiveHD uses `//packages:prpparse.BUILD`, not the upstream `prpparse/BUILD`.
-To get the same safety posture for `@prpparse` inside LiveHD, add them to the
-overlay (warnings stay off; hardening is orthogonal to `-w`):
+The same archive backs `@tree_sitter_pyrope` (the `lhd pyrope fmt` formatter via
+`//packages:prpfmt.BUILD`). As of ee58755 the formatter is **C++** (`prpfmt/ir.cc`
++ `prpfmt/prpfmt.cc`, was `ir.c`/`prpfmt.c`); only the generated tree-sitter
+parser/scanner (`src/parser.c` + `src/scanner.c`) stay C. The overlay had to
+change two things:
+
+- **srcs:** `prpfmt/ir.c` → `prpfmt/ir.cc`, `prpfmt/prpfmt.c` → `prpfmt/prpfmt.cc`.
+- **copts:** drop the old `-std=gnu11`. The overlay now has *mixed* C/C++ TUs in
+  one `cc_library`; a per-target `-std=` is passed to *both* languages and would
+  reject one of them. Rely on `.bazelrc`'s global `BAZEL_CONLYOPTS=-std=gnu17`
+  (C) and `--cxxopt=-std=c++23` (C++) instead, and add `-D_GNU_SOURCE` so the
+  POSIX `open_memstream`/`clock_gettime` the formatter calls stay visible under
+  the strict-ANSI `-std=c++23` (they were visible before only because `-std=gnu11`
+  is a GNU dialect). `extern "C" tree_sitter_pyrope()` and the `extern "C"` guard
+  in `prpfmt_api.h` keep the C-parser link and the LiveHD embed working.
+
+The genrule (`gen_ts_symbols`) and `includes`/`deps` are unchanged. The grammar
+(`grammar.js`/`src/parser.c`) did **not** change across this bump, so the
+formatter's accept/reject set and `ts_symbols.h` are identical — the one corpus
+file the formatter rejects (`lead_word_op_cont.prp`) is a *pre-existing*
+front-end/grammar divergence (prpparse's hand-written lexer accepts line-leading
+`or`/`and` continuations; the tree-sitter grammar does not), not a bump
+regression. Authoritative check: `//lhd/tests:lhd_fmt_test`.
+
+## Hardening parity — LiveHD-side change (APPLIED in the ee58755 bump)
+
+Upstream's `prpparse/BUILD` bounds-checks the parser (`-D_GLIBCXX_ASSERTIONS`,
+traps OOB on `std::vector`/`string_view`/`array`) and adds
+`-fstack-protector-strong`. Those flags do **not** flow through the upstream
+`prpparse/BUILD` (LiveHD uses `//packages:prpparse.BUILD`), so they were ported
+into the overlay's `copts` (warnings stay off; hardening is orthogonal to `-w`):
 
 ```python
 copts = [
