@@ -153,9 +153,9 @@ git_override(
 http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-4DeUs3JM66pd2SSuooeIG9XJdBsXppSK2kPRoR3FTOk=",  # 2f-stream-parse-next top of tree
-    strip_prefix = "tree-sitter-pyrope-0efc1cbae9d44d127c91a0b6040bf0b81b2460b2/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/0efc1cbae9d44d127c91a0b6040bf0b81b2460b2.zip"],
+    integrity = "sha256-YtdwJ+khTnL7G/GIh+eOsCoyZwuR8JLexQ20win6U98=",  # 2f-stream-parse-next tip: line-leading word-op continuation fix
+    strip_prefix = "tree-sitter-pyrope-dc809dc1fb033e4d857f747251157ab58ea05363/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/dc809dc1fb033e4d857f747251157ab58ea05363.zip"],
 )
 # For local prpparse co-development, swap the http_archive above for:
 # new_local_repository(
@@ -191,9 +191,9 @@ http_archive(
 http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-4DeUs3JM66pd2SSuooeIG9XJdBsXppSK2kPRoR3FTOk=",  # 2f-stream-parse-next top of tree
-    strip_prefix = "tree-sitter-pyrope-0efc1cbae9d44d127c91a0b6040bf0b81b2460b2",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/0efc1cbae9d44d127c91a0b6040bf0b81b2460b2.zip"],
+    integrity = "sha256-YtdwJ+khTnL7G/GIh+eOsCoyZwuR8JLexQ20win6U98=",  # 2f-stream-parse-next tip (same archive as @prpparse above)
+    strip_prefix = "tree-sitter-pyrope-dc809dc1fb033e4d857f747251157ab58ea05363",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/dc809dc1fb033e4d857f747251157ab58ea05363.zip"],
 )
 # For local prpfmt co-development, swap the http_archive above for:
 # new_local_repository(
