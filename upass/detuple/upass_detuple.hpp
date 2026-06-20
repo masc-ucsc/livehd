@@ -23,11 +23,26 @@
 //   tuple_get(t, mem, idx)         (index step, dropped — fused below)
 //   tuple_get(d, t, 'a')           -> tuple_get(d, mem.a, idx)     (fused read)
 //
-// Scope is MEMORIES ONLY. A scalar tuple variable (`mut v:Named`) is left
-// alone: constprop already tracks and resolves it for the comptime case, and
-// splitting it this early breaks whole-tuple assignment, field defaults, and
-// the unknown-field error path. (Lowering a runtime-valued scalar tuple is a
-// separate, pre-existing gap, not addressed here.)
+// It ALSO splits a scalar tuple REGISTER `reg V:(x:u32,y:u20) = (20,40)` into one
+// scalar Flop per leaf, each carrying its slice of the reset value:
+//   declare(V, prim_type_none, reg, init)  +  store(V, shape)  +  type_spec(V.f,T)
+//     -> declare(V.x, u32, reg, 20)
+//        declare(V.y, u20, reg, 40)
+//   store(V, 'x', v)               -> store(V.x, v)               (runtime field write)
+//   tuple_get(t, V, 'x')           -> store(t, V.x)               (field read = q read)
+//   store(V, ref (x=1,y=2))        -> store(V.x,1) ; store(V.y,2)  (whole-tuple reassign)
+// constprop does NOT handle runtime tuple registers (the reset/field-write tuple
+// reaches tolg, which has no Flop lowering for tuples), so this split is the fix.
+// A register is split ONLY when EVERY use of whole-V is one of the rewrites above
+// (a safety gate); a whole-tuple read, a non-literal whole write, or V passed to a
+// call leaves the register verbatim — the prior (loud) tolg error stands, never a
+// silent miscompile. Both typed (`:(x:u32,…)`) and untyped-named (`= (x=20,…)`,
+// width inferred per leaf) forms are handled; positional-untyped is array-like and
+// left alone.
+//
+// A plain scalar tuple variable (`mut v:Named`) is still left to constprop, which
+// tracks and resolves it for the comptime case; splitting it this early breaks
+// whole-tuple assignment, field defaults, and the unknown-field error path.
 //
 // Anything it cannot fully resolve (a non-concrete field type, a nested tuple
 // field, a multi-dim tuple array, a whole-tuple element write, an index temp

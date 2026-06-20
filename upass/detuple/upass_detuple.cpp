@@ -2,6 +2,7 @@
 
 #include "upass_detuple.hpp"
 
+#include <algorithm>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -21,8 +22,9 @@ namespace {
 constexpr std::string_view kSep = ".";
 
 struct Field {
-  std::string name;     // e.g. "a"
-  Lnast_nid   type_nid; // the prim_type_* subtree (in the SOURCE tree) to copy
+  std::string name;      // e.g. "a"
+  Lnast_nid   type_nid;  // the prim_type_* subtree (in the SOURCE tree) to copy
+  Lnast_nid   reset_nid; // struct-reg only: the const reset subtree to copy (invalid = no reset)
 };
 
 class Detupler {
@@ -32,7 +34,7 @@ public:
   // Returns true if it rewrote the tree (and replaced the body).
   bool run() {
     analyze();
-    if (split_mem_.empty()) {
+    if (split_mem_.empty() && split_reg_.empty()) {
       return false;  // nothing to lower — leave the tree untouched
     }
 
@@ -61,6 +63,22 @@ private:
     std::string        mode;     // declare mode ("reg"/"mut"/"const")
   };
   absl::flat_hash_map<std::string, Split> split_mem_;  // comp_type_array tuple memories
+  // ── Struct (scalar tuple) REGISTERS: `reg V:(x:u32,y:u20) = (20,40)` ──
+  // LGraph (and tolg's Flop lowering) has no tuples, so a tuple-typed register
+  // must become one scalar Flop per leaf field, each carrying the matching
+  // slice of the reset value. constprop does NOT handle this (the runtime
+  // tuple-reg case is the pre-existing gap), so the split happens here.
+  struct Struct_reg {
+    std::vector<Field> fields;    // per leaf: name, type, reset value (invalid = no reset)
+    std::string        init_tmp;  // the reset-value `tuple_add(init_tmp, …)` temp (dropped)
+  };
+  absl::flat_hash_map<std::string, Struct_reg> split_reg_;
+  absl::flat_hash_set<std::string>             drop_temp_;      // tuple_add dst temps to drop (shape/init bundles)
+  absl::flat_hash_set<std::string>             drop_typespec_;  // dotted `type_spec(V.f)` targets to drop
+  absl::flat_hash_map<std::string, Lnast_nid>  tadd_of_temp_;   // tuple_add dst temp name -> its tuple_add nid
+  // Whole-tuple literal reassign `V = (a=1,b=2)`: bundle temp -> (field -> value nid).
+  // handle_struct_reg_store splits `store(V, temp)` into per-field `store(V.f, val)`.
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, Lnast_nid>> whole_write_;
   // Named types consumed ENTIRELY by split memories: their `type T=(...)` region
   // is dead after the split and is dropped (else a re-emit — e.g. the Pyrope
   // writer — serializes its bare field refs as undefined-variable reads).
@@ -116,6 +134,7 @@ private:
   void analyze() {
     resolve_types();
     collect_splits();
+    collect_struct_regs();
     collect_read_chains();
   }
 
@@ -222,7 +241,7 @@ private:
       if (!Lnast_ntype::is_prim_type_int(tt) && !Lnast_ntype::is_prim_type_bool(tt)) {
         return;  // nested tuple / non-scalar field — defer
       }
-      fields.push_back(Field{f, ty});
+      fields.push_back(Field{f, ty, Lnast_nid{}});
     }
     if (!fields.empty()) {
       type_fields_[tname] = std::move(fields);
@@ -269,6 +288,349 @@ private:
         drop_types_.insert(std::string(name_of(elem)));
       }
     }
+  }
+
+  // Find scalar tuple-typed REGISTERS (`reg V:(x:u32,y:u20) = (20,40)`) and the
+  // material to split them into one scalar Flop per field. At this (post-parse,
+  // pre-SSA) stage the cluster is, in one stmts block:
+  //   tuple_add(INIT, …)               // the reset value (positional consts or store(f,v))
+  //   declare(V, prim_type_none, reg, [ref INIT | const 'nil'])
+  //   type_spec(f0, T0) type_spec(f1, T1)        // bare-name field types (kept verbatim)
+  //   tuple_add(SHAPE, ref f0, ref f1) store(V, ref SHAPE)   // the tuple shape (dropped)
+  //   type_spec(V.f0, T0) type_spec(V.f1, T1)    // dotted field types (give the layout)
+  // The dotted `type_spec(V.f, T)` nodes carry the field order + concrete types;
+  // the reset `tuple_add` carries the per-field reset values. Names (V, INIT,
+  // SHAPE) are unique, so a global name-keyed scan is enough — no parent walk.
+  void collect_struct_regs() {
+    // Pass A: reg declares that are NOT memories (no comp_type_array type).
+    struct Cand {
+      Lnast_nid   type_nid;
+      std::string init_tmp;   // non-empty: ref-init reset bundle temp
+      bool        init_nil;   // declare init child is `const 'nil'` (no reset)
+      bool        bad;        // a non-const/unsupported reset → leave verbatim
+    };
+    absl::flat_hash_map<std::string, Cand> cand;
+    for (const auto n : src_->depth_preorder(src_->get_root())) {
+      if (n.is_invalid() || !Lnast_ntype::is_declare(type_of(n))) {
+        continue;
+      }
+      auto c0 = src_->get_first_child(n);                                 // var ref
+      auto c1 = c0.is_invalid() ? c0 : src_->get_sibling_next(c0);        // type
+      auto c2 = c1.is_invalid() ? c1 : src_->get_sibling_next(c1);        // mode const
+      if (c0.is_invalid() || c2.is_invalid() || !Lnast_ntype::is_ref(type_of(c0)) || !Lnast_ntype::is_const(type_of(c2))) {
+        continue;
+      }
+      const std::string mode{name_of(c2)};
+      if (mode != "reg" && !mode.starts_with("reg ")) {
+        continue;
+      }
+      if (Lnast_ntype::is_comp_type_array(type_of(c1))) {
+        continue;  // a memory — handled by collect_splits (or unsupported)
+      }
+      Cand cd;
+      cd.type_nid = c1;
+      cd.init_nil = false;
+      cd.bad      = false;
+      auto c3     = src_->get_sibling_next(c2);  // optional reset value
+      if (!c3.is_invalid()) {
+        if (Lnast_ntype::is_ref(type_of(c3))) {
+          cd.init_tmp = std::string(name_of(c3));
+        } else if (Lnast_ntype::is_const(type_of(c3)) && name_of(c3) == "nil") {
+          cd.init_nil = true;
+        } else {
+          cd.bad = true;  // a scalar non-nil const reset on a (would-be) struct — not ours
+        }
+      } else {
+        cd.init_nil = true;  // declared with no reset child
+      }
+      cand.emplace(std::string(name_of(c0)), std::move(cd));
+    }
+    if (cand.empty()) {
+      return;
+    }
+
+    // Pass B: dotted `type_spec(V.f, T)` → ordered (field,type) per candidate V.
+    absl::flat_hash_map<std::string, std::vector<Field>> fields;
+    for (const auto n : src_->depth_preorder(src_->get_root())) {
+      if (n.is_invalid() || !Lnast_ntype::is_type_spec(type_of(n))) {
+        continue;
+      }
+      auto a = src_->get_first_child(n);
+      auto b = a.is_invalid() ? a : src_->get_sibling_next(a);
+      if (a.is_invalid() || b.is_invalid() || !Lnast_ntype::is_ref(type_of(a))) {
+        continue;
+      }
+      const std::string tgt{name_of(a)};
+      const auto        dot = tgt.find('.');
+      if (dot == std::string::npos) {
+        continue;  // bare-name type_spec — not a dotted field
+      }
+      const std::string root{tgt.substr(0, dot)};
+      const std::string fld{tgt.substr(dot + 1)};
+      auto              cit = cand.find(root);
+      if (cit == cand.end() || fld.find('.') != std::string::npos) {
+        continue;  // not a candidate, or a NESTED field (defer that whole reg)
+      }
+      const auto tt = type_of(b);
+      if (!Lnast_ntype::is_prim_type_int(tt) && !Lnast_ntype::is_prim_type_bool(tt)) {
+        cit->second.bad = true;  // non-scalar field type — leave verbatim
+        continue;
+      }
+      auto& fv = fields[root];
+      if (std::none_of(fv.begin(), fv.end(), [&](const Field& f) { return f.name == fld; })) {
+        fv.push_back(Field{fld, b, Lnast_nid{}});
+      }
+    }
+
+    // Pass C: index every tuple_add by its dst temp (the shape/reset/whole-write
+    // bundles are looked up here and classified by content, not by position).
+    for (const auto n : src_->depth_preorder(src_->get_root())) {
+      if (n.is_invalid() || !Lnast_ntype::is_tuple_add(type_of(n))) {
+        continue;
+      }
+      auto r = src_->get_first_child(n);
+      if (!r.is_invalid() && Lnast_ntype::is_ref(type_of(r))) {
+        tadd_of_temp_[std::string(name_of(r))] = n;
+      }
+    }
+
+    // Finalize: a candidate becomes a split iff its leaf fields are known and
+    // its per-field reset resolves (nil = no reset, else all-const values).
+    for (auto& [v, cd] : cand) {
+      if (cd.bad) {
+        continue;
+      }
+      auto       fit   = fields.find(v);
+      const bool typed = (fit != fields.end() && !fit->second.empty());
+      std::vector<Field> fv;
+      if (typed) {
+        fv = fit->second;  // leaf names + concrete types from dotted type_specs
+      } else if (!cd.init_nil && !cd.init_tmp.empty()) {
+        // Untyped struct reg `reg V = (x=20, y=40)`: derive leaves from a NAMED
+        // init tuple. Each leaf is an untyped (prim_type_none) Flop whose width
+        // the bitwidth pass infers from its reset value + writes — exactly like an
+        // untyped scalar `reg foo = 55`. Positional untyped `(20,40)` is array-like
+        // and intentionally left alone.
+        auto ait = tadd_of_temp_.find(cd.init_tmp);
+        if (ait == tadd_of_temp_.end()) {
+          continue;
+        }
+        bool ok = true;
+        for (auto c = src_->get_sibling_next(src_->get_first_child(ait->second)); !c.is_invalid();
+             c      = src_->get_sibling_next(c)) {
+          auto k   = Lnast_ntype::is_store(type_of(c)) ? src_->get_first_child(c) : Lnast_nid{};
+          auto val = k.is_invalid() ? k : src_->get_sibling_next(k);
+          if (k.is_invalid() || val.is_invalid() || !Lnast_ntype::is_ref(type_of(k)) || !Lnast_ntype::is_const(type_of(val))) {
+            ok = false;  // positional / runtime / malformed entry — leave verbatim
+            break;
+          }
+          fv.push_back(Field{std::string(name_of(k)), Lnast_nid{}, val});  // type inferred; reset = val
+        }
+        if (!ok || fv.empty()) {
+          continue;
+        }
+      } else {
+        continue;  // no leaves to split (e.g. untyped nil reg)
+      }
+      // Distribute the reset value across the TYPED fields (the untyped branch set
+      // each field's reset above). Rides a tuple_add(init_tmp, …): positional bare
+      // consts, or named store(field, val) — every value must be a const.
+      if (typed && !cd.init_nil) {
+        auto ait = tadd_of_temp_.find(cd.init_tmp);
+        if (ait == tadd_of_temp_.end()) {
+          continue;  // can't find the reset bundle — defer
+        }
+        std::vector<Lnast_nid> pos;  // positional const values
+        absl::flat_hash_map<std::string, Lnast_nid> named;  // field -> const value
+        bool ok = true;
+        for (auto c = src_->get_sibling_next(src_->get_first_child(ait->second)); !c.is_invalid();
+             c      = src_->get_sibling_next(c)) {
+          const auto ct = type_of(c);
+          if (Lnast_ntype::is_const(ct)) {
+            pos.push_back(c);
+          } else if (Lnast_ntype::is_store(ct)) {
+            auto k = src_->get_first_child(c);                          // field name
+            auto val = k.is_invalid() ? k : src_->get_sibling_next(k);  // value
+            if (k.is_invalid() || val.is_invalid() || !Lnast_ntype::is_ref(type_of(k)) || !Lnast_ntype::is_const(type_of(val))) {
+              ok = false;
+              break;
+            }
+            named[std::string(name_of(k))] = val;
+          } else {
+            ok = false;  // a runtime (non-const) reset entry — not comptime
+            break;
+          }
+        }
+        if (!ok) {
+          continue;
+        }
+        if (!named.empty()) {
+          for (auto& f : fv) {
+            auto vit = named.find(f.name);
+            if (vit == named.end()) {
+              ok = false;
+              break;
+            }
+            f.reset_nid = vit->second;
+          }
+        } else {
+          if (pos.size() != fv.size()) {
+            continue;  // positional arity mismatch — defer
+          }
+          for (size_t i = 0; i < fv.size(); ++i) {
+            fv[i].reset_nid = pos[i];
+          }
+        }
+        if (!ok) {
+          continue;
+        }
+      }
+      Struct_reg sr;
+      sr.fields   = std::move(fv);
+      sr.init_tmp = cd.init_nil ? std::string{} : cd.init_tmp;
+      // SAFETY GATE: only split V when EVERY use of whole-V is one we fully
+      // rewrite. Anything else (a whole-tuple read `out = bank`, a non-literal
+      // whole write, V handed to a call) would be silently mis-lowered after the
+      // split — so leave such a V verbatim and let the prior (loud) tolg error
+      // stand. This never makes a working program silently wrong. The drops it
+      // discovers (shape/whole bundle temps, per-field whole-writes) commit only
+      // on success.
+      absl::flat_hash_set<std::string>                                       drop_t;
+      absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, Lnast_nid>> wholes;
+      if (!validate_struct_reg_uses(v, sr, drop_t, wholes)) {
+        continue;  // un-handleable whole-V use — do not split (no regression)
+      }
+      if (!sr.init_tmp.empty()) {
+        drop_temp_.insert(sr.init_tmp);
+      }
+      for (const auto& f : sr.fields) {
+        drop_typespec_.insert(v + std::string(kSep) + f.name);
+      }
+      drop_temp_.insert(drop_t.begin(), drop_t.end());  // shape + whole-write bundle temps
+      for (auto& [tmp, bf] : wholes) {
+        whole_write_[tmp] = std::move(bf);
+      }
+      split_reg_.emplace(v, std::move(sr));
+    }
+  }
+
+  // Classify a `store(V, ref tmp)` by the CONTENT of tmp's tuple_add literal:
+  //   shape  : entries are bare refs naming exactly V's fields (the type-shape store)
+  //   whole  : field VALUES (named `store(f,v)` or positional) covering ALL fields
+  //            -> `byfield` is filled with field -> value nid
+  //   unknown: tmp is not a literal / partial / malformed
+  enum class Vstore { shape, whole, unknown };
+  Vstore classify_v_store(const Struct_reg& sr, const std::string& tmp, absl::flat_hash_map<std::string, Lnast_nid>& byfield) {
+    auto tit = tadd_of_temp_.find(tmp);
+    if (tit == tadd_of_temp_.end()) {
+      return Vstore::unknown;  // RHS not a tuple literal (reg-to-reg copy, call, …)
+    }
+    std::vector<Lnast_nid>                      pos;        // positional entries (refs/consts)
+    absl::flat_hash_map<std::string, Lnast_nid> named;      // named store(f,val) entries
+    std::vector<std::string>                    ref_names;  // names of bare-ref entries
+    bool                                        all_ref = true;
+    for (auto e = src_->get_sibling_next(src_->get_first_child(tit->second)); !e.is_invalid();
+         e      = src_->get_sibling_next(e)) {
+      const auto et = type_of(e);
+      if (Lnast_ntype::is_ref(et)) {
+        ref_names.emplace_back(name_of(e));
+        pos.push_back(e);
+      } else if (Lnast_ntype::is_store(et)) {
+        all_ref  = false;
+        auto k   = src_->get_first_child(e);
+        auto val = k.is_invalid() ? k : src_->get_sibling_next(k);
+        if (k.is_invalid() || val.is_invalid() || !Lnast_ntype::is_ref(type_of(k))) {
+          return Vstore::unknown;
+        }
+        named[std::string(name_of(k))] = val;
+      } else {
+        all_ref = false;
+        pos.push_back(e);  // const value
+      }
+    }
+    // Shape store: all bare refs, one per field, naming exactly the fields.
+    if (all_ref && ref_names.size() == sr.fields.size()
+        && std::all_of(sr.fields.begin(), sr.fields.end(),
+                       [&](const Field& f) { return std::find(ref_names.begin(), ref_names.end(), f.name) != ref_names.end(); })) {
+      return Vstore::shape;
+    }
+    // Whole-tuple write: every field gets a value.
+    if (!named.empty()) {
+      for (const auto& f : sr.fields) {
+        auto it = named.find(f.name);
+        if (it == named.end()) {
+          return Vstore::unknown;  // partial named write — leave verbatim
+        }
+        byfield[f.name] = it->second;
+      }
+      return Vstore::whole;
+    }
+    if (pos.size() == sr.fields.size()) {
+      for (size_t i = 0; i < sr.fields.size(); ++i) {
+        byfield[sr.fields[i].name] = pos[i];
+      }
+      return Vstore::whole;
+    }
+    return Vstore::unknown;
+  }
+
+  // Verify every reference to whole-`v` is a form the split fully rewrites:
+  //   declare(v,…) | store(v, 'f', val) | tuple_get(t, v, 'f')
+  //   store(v, ref TMP)  where TMP is the type-shape bundle (dropped) OR a
+  //                      tuple-literal value covering all fields (split per-field)
+  // Returns false on ANY other use of `v` (then the reg is left un-split).
+  bool validate_struct_reg_uses(const std::string& v, const Struct_reg& sr, absl::flat_hash_set<std::string>& drop_t,
+                                absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, Lnast_nid>>& wholes) {
+    for (const auto n : src_->depth_preorder(src_->get_root())) {
+      if (n.is_invalid()) {
+        continue;
+      }
+      const auto t = type_of(n);
+      int        idx = 0;  // position-aware scan of v among this node's children
+      for (auto c = src_->get_first_child(n); !c.is_invalid(); c = src_->get_sibling_next(c), ++idx) {
+        if (!Lnast_ntype::is_ref(type_of(c)) || name_of(c) != v) {
+          continue;
+        }
+        if (Lnast_ntype::is_declare(t) && idx == 0) {
+          break;  // the declare of v
+        }
+        if (Lnast_ntype::is_tuple_get(t) && idx == 1) {
+          auto f = src_->get_sibling_next(c);  // field read tuple_get(t, v, 'f')
+          if (!f.is_invalid() && src_->get_sibling_next(f).is_invalid() && Lnast_ntype::is_const(type_of(f))
+              && reg_has_field(sr, name_of(f))) {
+            break;
+          }
+          return false;  // index step / non-field use of v as a base
+        }
+        if (Lnast_ntype::is_store(t) && idx == 0) {
+          std::vector<Lnast_nid> rest;
+          for (auto k = src_->get_sibling_next(c); !k.is_invalid(); k = src_->get_sibling_next(k)) {
+            rest.emplace_back(k);
+          }
+          if (rest.size() == 2 && Lnast_ntype::is_const(type_of(rest[0])) && reg_has_field(sr, name_of(rest[0]))) {
+            break;  // field write store(v, 'f', val)
+          }
+          if (rest.size() == 1 && Lnast_ntype::is_ref(type_of(rest[0]))) {
+            const std::string                           tmp{name_of(rest[0])};
+            absl::flat_hash_map<std::string, Lnast_nid> byfield;
+            const auto                                  kind = classify_v_store(sr, tmp, byfield);
+            if (kind == Vstore::shape) {
+              drop_t.insert(tmp);
+              break;
+            }
+            if (kind == Vstore::whole) {
+              drop_t.insert(tmp);
+              wholes[tmp] = std::move(byfield);
+              break;
+            }
+            return false;  // non-literal / partial whole write
+          }
+          return false;  // some other store shape on v
+        }
+        return false;  // v used as a value operand somewhere (whole read, arg, …)
+      }
+    }
+    return true;
   }
 
   // Identify the two-node memory read chain and which index temps are safe to
@@ -356,6 +718,24 @@ private:
     dst_->add_child(d, Lnast_node::create_const(s.mode));
   }
 
+  // Build `declare(V.f, TYPE, "reg"[, RESET])` for a struct register's leaf.
+  // The RESET const (when present) folds into the declare's optional 4th child
+  // exactly like a scalar reg's `= value`, so tolg wires it on the Flop's reset.
+  void emit_reg_field_declare(const Lnast_nid& orig, const Lnast_nid& dst_parent, std::string_view var, const Field& f) {
+    auto d = dst_->add_child(dst_parent, Lnast_ntype::create_declare());
+    carry(orig, d);
+    dst_->add_child(d, Lnast_node::create_ref(std::string(var) + std::string(kSep) + f.name));
+    if (f.type_nid.is_invalid()) {
+      dst_->add_child(d, Lnast_ntype::create_prim_type_none());  // untyped leaf — width inferred
+    } else {
+      copy_subtree(f.type_nid, d);
+    }
+    dst_->add_child(d, Lnast_node::create_const("reg"));
+    if (!f.reset_nid.is_invalid()) {
+      copy_subtree(f.reset_nid, d);  // power-on/reset value (nil-reset leaves this out)
+    }
+  }
+
   // Recursively copy children of src_n under dst_parent, applying the rewrites.
   void copy_transformed(const Lnast_nid& src_n, const Lnast_nid& dst_parent) {
     std::string drop_typedef_of;  // non-empty: dropping a dead `type T=(...)` region for this T
@@ -415,6 +795,20 @@ private:
     if (Lnast_ntype::is_tuple_get(t)) {
       return handle_tuple_get(c, dst_parent);
     }
+    // Struct-reg housekeeping: drop the now-dead shape/reset bundle temps and
+    // the dotted field type_specs (folded into the per-field declares).
+    if (Lnast_ntype::is_tuple_add(t) && !drop_temp_.empty()) {
+      auto r = src_->get_first_child(c);
+      if (!r.is_invalid() && Lnast_ntype::is_ref(type_of(r)) && drop_temp_.contains(std::string(name_of(r)))) {
+        return true;  // drop the bundle-building tuple_add
+      }
+    }
+    if (Lnast_ntype::is_type_spec(t) && !drop_typespec_.empty()) {
+      auto a = src_->get_first_child(c);
+      if (!a.is_invalid() && Lnast_ntype::is_ref(type_of(a)) && drop_typespec_.contains(std::string(name_of(a)))) {
+        return true;  // drop the dotted field type_spec
+      }
+    }
     return false;
   }
 
@@ -430,6 +824,12 @@ private:
       }
       return true;
     }
+    if (auto it = split_reg_.find(var); it != split_reg_.end()) {
+      for (const auto& f : it->second.fields) {
+        emit_reg_field_declare(c, dst_parent, var, f);
+      }
+      return true;
+    }
     return false;
   }
 
@@ -439,7 +839,10 @@ private:
       return false;
     }
     const std::string var{name_of(c0)};
-    auto              mit = split_mem_.find(var);
+    if (auto rit = split_reg_.find(var); rit != split_reg_.end()) {
+      return handle_struct_reg_store(c, dst_parent, var, rit->second);
+    }
+    auto mit = split_mem_.find(var);
     if (mit == split_mem_.end()) {
       return false;
     }
@@ -490,6 +893,53 @@ private:
     return true;
   }
 
+  static bool reg_has_field(const Struct_reg& sr, std::string_view f) {
+    return std::any_of(sr.fields.begin(), sr.fields.end(), [&](const Field& x) { return x.name == f; });
+  }
+
+  // Rewrites of a split struct register's stores:
+  //   store(V, ref SHAPE)     -> dropped (the tuple-shape bundle is now dead)
+  //   store(V, 'f', val)      -> store(V.f, val)            (runtime field write)
+  // Anything else (whole-tuple runtime assign) is left verbatim (deferred).
+  bool handle_struct_reg_store(const Lnast_nid& c, const Lnast_nid& dst_parent, std::string_view var, const Struct_reg& sr) {
+    auto c0 = src_->get_first_child(c);
+    std::vector<Lnast_nid> rest;
+    for (auto k = src_->get_sibling_next(c0); !k.is_invalid(); k = src_->get_sibling_next(k)) {
+      rest.emplace_back(k);
+    }
+    if (rest.size() == 2 && Lnast_ntype::is_const(type_of(rest[0])) && reg_has_field(sr, name_of(rest[0]))) {
+      const std::string field{name_of(rest[0])};  // field write store(V, 'f', val)
+      auto              st = dst_->add_child(dst_parent, Lnast_ntype::create_store());
+      carry(c, st);
+      dst_->add_child(st, Lnast_node::create_ref(std::string(var) + std::string(kSep) + field));
+      copy_subtree(rest[1], st);  // value
+      return true;
+    }
+    if (rest.size() == 1 && Lnast_ntype::is_ref(type_of(rest[0]))) {
+      const std::string tmp{name_of(rest[0])};
+      // The type-shape bundle `store(V, shape)` is dead after the split — drop it.
+      if (drop_temp_.contains(tmp) && whole_write_.find(tmp) == whole_write_.end()) {
+        return true;
+      }
+      // Whole-tuple literal reassign -> one store(V.f, val) per field (validation
+      // guaranteed the literal covers every field).
+      if (auto wit = whole_write_.find(tmp); wit != whole_write_.end()) {
+        for (const auto& f : sr.fields) {
+          auto vit = wit->second.find(f.name);
+          if (vit == wit->second.end()) {
+            continue;
+          }
+          auto st = dst_->add_child(dst_parent, Lnast_ntype::create_store());
+          carry(c, st);
+          dst_->add_child(st, Lnast_node::create_ref(std::string(var) + std::string(kSep) + f.name));
+          copy_subtree(vit->second, st);  // field value (const or runtime ref/expr)
+        }
+        return true;
+      }
+    }
+    return false;  // unrecognized shape — leave verbatim
+  }
+
   bool handle_tuple_get(const Lnast_nid& c, const Lnast_nid& dst_parent) {
     auto d = src_->get_first_child(c);
     auto s = d.is_invalid() ? d : src_->get_sibling_next(d);
@@ -500,6 +950,17 @@ private:
     }
     const std::string dst{name_of(d)};
     const std::string base{name_of(s)};
+
+    // Struct-reg field read `tuple_get(t, V, 'f')` -> plain copy `store(t, V.f)`
+    // (V.f is now a scalar Flop; reads of it are plain q reads).
+    if (auto rit = split_reg_.find(base); rit != split_reg_.end() && Lnast_ntype::is_const(type_of(x))
+        && reg_has_field(rit->second, name_of(x))) {
+      auto st = dst_->add_child(dst_parent, Lnast_ntype::create_store());
+      carry(c, st);
+      dst_->add_child(st, Lnast_node::create_ref(dst));
+      dst_->add_child(st, Lnast_node::create_ref(base + std::string(kSep) + std::string(name_of(x))));
+      return true;
+    }
 
     // Index step we are fusing away.
     if (drop_index_temp_.contains(dst)) {
