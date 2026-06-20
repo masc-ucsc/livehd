@@ -4543,15 +4543,6 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
 
   Dlop new_val = operand_value(src[2]);
 
-  // A `mut b:uN = nil` accumulator has no init store, so the first
-  // `b#[lo..=hi] = …` reads `b` as nil. That is NOT "unfoldable": the bits the
-  // mask covers are overwritten and any bit left uncovered is honestly UNKNOWN
-  // (0sb?), exactly as `= 0` would leave it 0. Substitute an unknown base so
-  // the masked writes still fold (mirrors the tolg lowering's nil_pin base).
-  if (input_val.is_nil()) {
-    input_val = *Dlop::from_pyrope("0sb?");
-  }
-
   // Delegate to Dlop: both the input being written into and the value being
   // written may carry unknown bits — set_mask_op tracks them bit-precisely.
   // Only the *mask* (which bits to write) must be concrete (see below).
