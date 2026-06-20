@@ -1,0 +1,20 @@
+/*
+:name: implies_truth
+:type: comptime
+:verifier_pass: 8
+:verifier_fail: 0
+*/
+
+// `a implies b` is boolean implication: false only when `a` is true and `b` is
+// false. prp2lnast lowers it to `!a or b` (Lgraph has no implies cell), so the
+// whole truth table folds at comptime. Pin every entry, then pin the identity
+// with the hand-written `!a or b` across all four input combinations.
+cassert((false implies false) == true)
+cassert((false implies true)  == true)
+cassert((true  implies false) == false)
+cassert((true  implies true)  == true)
+
+cassert((false implies false) == ((!false) or false))
+cassert((false implies true)  == ((!false) or true))
+cassert((true  implies false) == ((!true)  or false))
+cassert((true  implies true)  == ((!true)  or true))

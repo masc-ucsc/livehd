@@ -1,0 +1,53 @@
+/*
+:name: bitset_reg
+:type: equiv
+:verilog_top: bitset_reg.foo
+:pyrope_top: bitset_reg.foo
+*/
+
+// Per-range LHS bit-assembly into a `reg` (NOT a `mut`). Each registered output
+// is the flop next-state assembled from several `x#[lo..=hi] = src` partial
+// writes. A reg name is never SSA-versioned (every read is the flop q), so
+// consecutive `set_mask` writes USED TO each re-read q and only the LAST partial
+// write survived — every earlier write was silently dropped (the `mut`
+// accumulators in bitset_gap/bitset_imm dodge this via SSA versioning). upass.ssa
+// now threads the partial-write chain (each subsequent set_mask reads the prior
+// partial result, the FIRST keeps q for the bits it leaves alone) so every write
+// lands. The goldens build the SAME value with explicit, NON-overlapping
+// concatenation (no bit-range partial writes) so the LEC is an independent oracle
+// that does NOT route through the set_mask lowering under test (in either the
+// forward equiv or the reverse v2prp direction).
+//   o_cont : contiguous        [0..=7]=a then [8..=11]=b  -> {b[3:0], a}
+//   o_over : overlap last-wins  [0..=7]=a then [4..=11]=b  -> {b[7:0], a[3:0]}
+//   o_rev  : reordered hi->lo   [8..=11]=b then [0..=7]=a  -> {b[3:0], a}
+//   o_hold : partial; bits 4..=7 are never written, so they HOLD the flop q
+//   o_cond : a straight-line write then a CONDITIONAL one that must compose with
+//            it: [0..=7]=a then `if en { [8..=11]=b }` -> en ? {b[3:0],a} : {q[11:8],a}
+mod foo(a:u8, b:u8, en:bool) -> (o_cont:u12@[0], o_over:u12@[0], o_rev:u12@[0], o_hold:u12@[0], o_cond:u12@[0]) {
+  reg x_cont:u12 = 0
+  x_cont#[0..=7]  = a
+  x_cont#[8..=11] = b
+  o_cont = x_cont
+
+  reg x_over:u12 = 0
+  x_over#[0..=7]  = a
+  x_over#[4..=11] = b
+  o_over = x_over
+
+  reg x_rev:u12 = 0
+  x_rev#[8..=11] = b
+  x_rev#[0..=7]  = a
+  o_rev = x_rev
+
+  reg x_hold:u12 = 0
+  x_hold#[0..=3]  = a
+  x_hold#[8..=11] = b
+  o_hold = x_hold
+
+  reg x_cond:u12 = 0
+  x_cond#[0..=7] = a
+  if en {
+    x_cond#[8..=11] = b
+  }
+  o_cond = x_cond
+}

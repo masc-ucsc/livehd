@@ -411,6 +411,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   // read before the driver must stay on the base name, not bind to a `nil`
   // earlier version. tolg resolves the base name to the buffered net.
   absl::flat_hash_set<std::string> reg_names;
+  absl::flat_hash_set<std::string> reg_only_names;  // true `reg` (NOT `wire`) — for set_mask din threading below
   for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
     if (nid.is_invalid() || !Lnast_ntype::is_declare(lnast->get_type(nid))) {
       continue;
@@ -424,10 +425,114 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     if (c2.is_invalid() || !Lnast_ntype::is_const(lnast->get_type(c2))) {
       continue;
     }
-    auto mode = lnast->get_name(c2);
-    if (mode == "reg" || mode.starts_with("reg ") || mode == "wire" || mode.starts_with("wire ")) {
+    auto       mode    = lnast->get_name(c2);
+    const bool is_reg  = (mode == "reg" || mode.starts_with("reg "));
+    const bool is_wire = (mode == "wire" || mode.starts_with("wire "));
+    if (is_reg || is_wire) {
       reg_names.emplace(lnast->get_name(c0));
     }
+    if (is_reg) {
+      reg_only_names.emplace(lnast->get_name(c0));
+    }
+  }
+
+  // ── Reg partial-write (set_mask RMW) din threading ─────────────────────────
+  // `reg x; x#[lo..=hi] = a; x#[lo2..=hi2] = b` lowers (in prp2lnast) to a chain
+  // of read-modify-writes:
+  //   set_mask(___x_0, x, mask0, a) ; store(x, ___x_0)
+  //   set_mask(___x_1, x, mask1, b) ; store(x, ___x_1)
+  // Because reg names are NEVER SSA-versioned (every read is the flop q — see
+  // above), the SECOND set_mask re-reads q instead of the accumulating
+  // next-state ___x_0, so only the LAST partial write survives and every
+  // earlier one is silently dropped (a `mut` dodges this via SSA versioning).
+  // Fix it by threading the chain by hand on the SOURCE tree (before the staging
+  // rebuild, so the verbatim branch copy below inherits it): rewrite each
+  // SUBSEQUENT set_mask's BASE operand (child 1) from the reg name to the prior
+  // partial-write temp. The FIRST partial write keeps the reg name (= q, the
+  // hold value for the bits it does not write); plain reads `r = x` are left
+  // alone and still read q. Only true `reg`s participate — a `wire` is a
+  // single-driver net handled differently. A branch body inherits a COPY of the
+  // pre-branch din (so a conditional partial write still composes with the
+  // straight-line ones), and after a branch the reg's next-state is a mux, so
+  // its pending temp is dropped (subsequent set_masks fall back to q — the prior
+  // behavior, no regression).
+  if (!reg_only_names.empty()) {
+    auto is_temp_ref = [&](const Lnast_nid& nid) {
+      return Lnast_ntype::is_ref(lnast->get_type(nid)) && !is_user_var(lnast->get_name(nid));
+    };
+    // Reg names a subtree (re)writes via a 2-child store, recursively.
+    std::function<void(const Lnast_nid&, absl::flat_hash_set<std::string>&)> collect_reg_writes =
+        [&](const Lnast_nid& sub, absl::flat_hash_set<std::string>& out) {
+          for (auto c : lnast->children(sub)) {
+            if (Lnast_ntype::is_store(lnast->get_type(c))) {
+              auto d0 = lnast->get_first_child(c);
+              if (!d0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(d0)) && reg_only_names.contains(lnast->get_name(d0))) {
+                out.emplace(lnast->get_name(d0));
+              }
+            }
+            collect_reg_writes(c, out);
+          }
+        };
+    std::function<void(const Lnast_nid&, absl::flat_hash_map<std::string, std::string>&)> thread_stmts =
+        [&](const Lnast_nid& sblk, absl::flat_hash_map<std::string, std::string>& pending) {
+          for (auto c : lnast->children(sblk)) {
+            const auto ct = lnast->get_type(c);
+            if (Lnast_ntype::is_set_mask(ct)) {
+              // children: result, base, mask, value — rewrite base when it reads
+              // a reg that already has an in-flight next-state temp this scope.
+              auto res  = lnast->get_first_child(c);
+              auto base = res.is_invalid() ? res : lnast->get_sibling_next(res);
+              if (!base.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(base))) {
+                auto bn = lnast->get_name(base);
+                if (reg_only_names.contains(bn)) {
+                  if (auto it = pending.find(bn); it != pending.end()) {
+                    lnast->set_name(base, it->second);
+                  }
+                }
+              }
+            } else if (Lnast_ntype::is_store(ct)) {
+              // 2-child store to a reg whose value is a temp → record the din so
+              // the NEXT set_mask chains off it. Any other store shape (const /
+              // user-var value, a tuple_set) drops the chain (reads fall to q).
+              auto d0 = lnast->get_first_child(c);
+              auto d1 = d0.is_invalid() ? d0 : lnast->get_sibling_next(d0);
+              auto d2 = d1.is_invalid() ? d1 : lnast->get_sibling_next(d1);
+              if (!d0.is_invalid() && d2.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(d0))) {
+                auto nm = lnast->get_name(d0);
+                if (reg_only_names.contains(nm)) {
+                  if (!d1.is_invalid() && is_temp_ref(d1)) {
+                    pending[std::string(nm)] = std::string(lnast->get_name(d1));
+                  } else {
+                    pending.erase(nm);
+                  }
+                }
+              }
+            } else if (Lnast_ntype::is_if_like(ct) || Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct)) {
+              absl::flat_hash_set<std::string> rw;
+              collect_reg_writes(c, rw);
+              for (auto sub : lnast->children(c)) {
+                if (Lnast_ntype::is_stmts(lnast->get_type(sub))) {
+                  auto branch_pending = pending;  // copy: the pre-branch din flows in
+                  thread_stmts(sub, branch_pending);
+                }
+              }
+              for (const auto& r : rw) {
+                pending.erase(r);  // post-branch the next-state is a mux, not a single temp
+              }
+            } else if (Lnast_ntype::is_stmts(ct)) {
+              thread_stmts(c, pending);  // bare `{ }` block: unconditional continuation
+            } else if (Lnast_ntype::is_func_def(ct)) {
+              for (auto sub : lnast->children(c)) {
+                if (Lnast_ntype::is_stmts(lnast->get_type(sub))) {
+                  absl::flat_hash_map<std::string, std::string> fresh;  // separate name scope
+                  thread_stmts(sub, fresh);
+                }
+              }
+            }
+          }
+        };
+    absl::flat_hash_map<std::string, std::string> top_pending;
+    thread_stmts(stmts_nid, top_pending);
   }
 
   // Collect the BASE names that a branch subtree (re)writes — the scalar/wire

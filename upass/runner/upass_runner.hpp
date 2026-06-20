@@ -546,6 +546,24 @@ protected:
   // among gathered candidates; the winner still runs the full bind path, which
   // remains the authority for diagnostics.
   bool signature_matches(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool is_ctor_call);
+  // The RETURN half of the overload-dispatch callability test (so "can handle"
+  // means the WHOLE `c = f(b)` would be valid, not just the call side): true iff
+  // candidate `io`'s OUTPUTS can bind to how the call's result is consumed at the
+  // call site, mirroring 06-functions.md §"Binding return values". `req_fields`
+  // is the set of field names a destructure picks off the result (`(p1,p2)=f()`
+  // → {p1,p2}); `whole_used` is set when the result is bound/used as one value
+  // (`c=f()`). Without this, an input-compatible but return-incompatible
+  // candidate is silently selected — e.g. a single-output lambda destructured by
+  // name leaves `tuple_get(scalar,'p1')` to fold to garbage. Permissive (returns
+  // true) when the result is dropped or the output shape is one it cannot model,
+  // so a too-strict skip surfaces as a clean no-overload, never a wrong dispatch.
+  bool return_matches(const Lnast_tree_io& io, const absl::flat_hash_set<std::string>& req_fields, bool whole_used);
+  // Scan the func_call's following siblings (cursor restored to `fcall_cursor`)
+  // to learn how its result `dst_name` is consumed: each `tuple_get(dst_name,
+  // 'field')` adds to `req_fields`; any OTHER reference to `dst_name` sets
+  // `whole_used`. Cursor-neutral (saves/restores). Feeds return_matches.
+  void collect_return_consumption(const upass::Lnast_manager::Cursor_state& fcall_cursor, std::string_view dst_name,
+                                  absl::flat_hash_set<std::string>& req_fields, bool& whole_used);
   // >0 while a synthesized constructor call is being spliced.
   int                      init_construction_depth_ = 0;
   // Vars whose `declare` has been walked but whose declaration store hasn't

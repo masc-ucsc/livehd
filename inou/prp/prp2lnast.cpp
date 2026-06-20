@@ -6496,7 +6496,8 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
     return ref;
   };
   // Legacy marker-style call: `func_call(ref(tmp), const(name), l, r)` —
-  // still used by ops without a dedicated LNAST ntype (step / implies).
+  // still used by ops without a dedicated LNAST ntype (step). `implies` no
+  // longer uses it; it lowers to `!a or b` (log_not + log_or) in emit_logical.
   auto make_call = [&](const char* name, const Lnast_node& l, const Lnast_node& r) {
     auto idx = builder.add_child(Lnast_ntype::create_func_call());
     auto ref = builder.mint_tmp_ref();
@@ -6684,10 +6685,19 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
       return wrap_not(make_binop(Lnast_ntype::create_log_or(), l, r));
     }
     if (kind == "op_implies") {
-      return make_call("implies", l, r);
+      // `a implies b` is boolean implication: false only when a is true and b
+      // is false. Lgraph has no implies cell, so lower it to the equivalent
+      // `!a or b` here (same shape as op_log_nand/op_log_nor above). The
+      // log_not must be emitted before the log_or that consumes it, so bind it
+      // to a local rather than relying on argument evaluation order.
+      auto not_l = wrap_not(l);
+      return make_binop(Lnast_ntype::create_log_or(), not_l, r);
     }
     if (kind == "op_not_implies") {
-      return wrap_not(make_call("implies", l, r));
+      // `!(a implies b)` ≡ `!(!a or b)`. Defensive: tier-5 `binary_logical_op`
+      // only spells `and`/`or`/`implies`, so the grammar never emits `!implies`.
+      auto not_l = wrap_not(l);
+      return wrap_not(make_binop(Lnast_ntype::create_log_or(), not_l, r));
     }
     std::print("prp2lnast: unhandled `binary_logical_op` `{}`\n", kind);
     return builder.mint_tmp_ref();

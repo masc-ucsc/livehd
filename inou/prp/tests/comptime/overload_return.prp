@@ -1,0 +1,25 @@
+/*
+:name: overload_return
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// 2f-overload — dispatch honors the RETURN side. Among candidates that accept
+// the call on their inputs, the one whose OUTPUTS bind to how the result is
+// consumed is selected (06-functions.md §"Binding return values") — so "can
+// handle" is the whole `c = f(args)`, not just the call. Both casserts below
+// SKIP the first (input-matching) candidate because its return cannot bind,
+// proving dispatch is not plain input-side tuple order.
+
+comb mk_one(a:int) -> (r:int)          { r = a }
+comb mk_two(a:int) -> (p1:int, p2:int) { p1 = a ; p2 = a + 1 }
+
+const mk  = [mk_one, mk_two]   // single-output first
+const rev = [mk_two, mk_one]   // multi-output first
+
+const (p1, p2) = mk(a=5)
+cassert(p1 == 5 and p2 == 6)   // destructure (fields p1,p2) → mk_two; mk_one's lone `r` cannot bind
+
+const v = rev(a=9)
+cassert(v == 9)                // whole bind → mk_one; mk_two's two outputs cannot bind one var

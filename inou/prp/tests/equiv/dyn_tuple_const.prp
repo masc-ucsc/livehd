@@ -1,0 +1,19 @@
+/*
+:name: dyn_tuple_const
+:type: equiv
+:verilog_top: dyn_tuple_const.csel
+:pyrope_top: dyn_tuple_const.csel
+*/
+
+// A runtime index into a COMPTIME all-constant tuple (`const choices =
+// (10,20,30,40)`) lowers to the same balanced Hotmux as a tuple-of-WIRES.
+// Previously only a tuple holding at least one runtime wire was muxed; an
+// all-constant, non-array-typed tuple fell through both lowerings and tolg
+// rejected it ("field/index read of 'choices' could not be resolved"). A plain
+// `const`/`mut` tuple value is now muxed; a comp_type_array (`const t:[4]u8`)
+// still lowers to a Memory ROM (see mem_rom), so a large const table stays a
+// ROM instead of a giant mux tree.
+comb csel(sel:u2) -> (z:u8) {
+  const choices = (10, 20, 30, 40)
+  z = choices[sel]
+}

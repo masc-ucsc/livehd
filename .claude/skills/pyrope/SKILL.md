@@ -451,10 +451,12 @@ the authoritative list). Do not generate these unless explicitly asked:
   `a#[0..=7]`.
 * Open-ended bit slice `a#[k..]` drops the offset (returns the low bits). Use the
   closed range `a#[k..=<msb>]`.
-* Two+ bit-slice writes to the *same register* (`r#[0..=7]=a; r#[8..=11]=b`) keep
-  only the last. Build the value in a `mut`, then assign the reg once.
 
 Runtime `wrap`/`sat` and enum-typed register resets ARE implemented.
+Per-range LHS bit-assembly into a `reg` works (`reg r:u12=0; r#[0..=7]=a;
+r#[8..=11]=b` keeps BOTH writes; conditional partial writes compose too) — it
+USED to drop every write but the last; fixed in upass.ssa (reg set_mask din
+threading). Covered by the `bitset_reg`/`bitset_mut` equiv tests.
 Imports: `import("file")` (all pub) or `import("file.pub_name")` (one
 entry); directories use slashes; no glob patterns.
 

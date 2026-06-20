@@ -1,0 +1,27 @@
+/*
+:name: implies_cond
+:type: equiv
+:verilog_top: implies_cond.top
+:pyrope_top: implies_cond.top
+*/
+
+// Exercises `implies` (lowered to `!a or b`) in two contexts the scalar
+// implies_ops test does not: as the controlling condition of an if/else mux,
+// and as a self-check that `p implies q` is identical to the hand-written
+// `!p or q`. The Verilog golden hand-expands every implication.
+comb top(req:bool, ack:bool, x:u4, y:u4) -> (grant:bool, sel:u4, same:bool) {
+  // "an ack only happens when there was a req":  ack implies req
+  grant = ack implies req
+
+  // an implication steering a mux (parenthesized so the whole expression is
+  // unambiguously the if-condition)
+  if ((x < y) implies ack) {
+    sel = x
+  } else {
+    sel = y
+  }
+
+  // `p implies q` must be exactly `!p or q`; this is constant-true only when
+  // the lowering matches, so a wrong lowering diverges from the golden's 1.
+  same = (req implies ack) == ((!req) or ack)
+}

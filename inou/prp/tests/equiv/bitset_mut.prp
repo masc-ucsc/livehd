@@ -1,0 +1,39 @@
+/*
+:name: bitset_mut
+:type: equiv
+:verilog_top: bitset_mut.foo
+:pyrope_top: bitset_mut.foo
+*/
+
+// The `mut` twin of bitset_reg, and the exact shape from the original bug report
+// (`mut r:u12 = 0 ; r#[0..=7] = a ; r#[8..=11] = b`). A `mut` accumulator is
+// SSA-versioned, so each `r#[lo..=hi] = ...` partial write already chains off the
+// previous one — `mut` was NEVER affected by the dropped-write bug (that was reg
+// only; see bitset_reg). These cases lock that in. Goldens use explicit,
+// NON-overlapping concatenation so the LEC is an independent oracle.
+//   o_cont : contiguous        [0..=7]=a then [8..=11]=b  -> {b[3:0], a}
+//   o_over : overlap last-wins  [0..=7]=a then [4..=11]=b  -> {b[7:0], a[3:0]}
+//   o_rev  : reordered hi->lo   [8..=11]=b then [0..=7]=a  -> {b[3:0], a}
+//   o_gap  : non-contiguous     [0..=3]=a , [8..=11]=b ; the `= 0` init leaves
+//            bits 4..=7 zero (a `mut` re-inits every eval) -> {b[3:0], 4'b0, a[3:0]}
+comb foo(a:u8, b:u8) -> (o_cont:u12, o_over:u12, o_rev:u12, o_gap:u12) {
+  mut r_cont:u12 = 0
+  r_cont#[0..=7]  = a
+  r_cont#[8..=11] = b
+  o_cont = r_cont
+
+  mut r_over:u12 = 0
+  r_over#[0..=7]  = a
+  r_over#[4..=11] = b
+  o_over = r_over
+
+  mut r_rev:u12 = 0
+  r_rev#[8..=11] = b
+  r_rev#[0..=7]  = a
+  o_rev = r_rev
+
+  mut r_gap:u12 = 0
+  r_gap#[0..=3]  = a
+  r_gap#[8..=11] = b
+  o_gap = r_gap
+}

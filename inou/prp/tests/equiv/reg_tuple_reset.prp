@@ -1,0 +1,21 @@
+/*
+:name: reg_tuple_reset
+:type: equiv
+:verilog_top: reg_tuple_reset.rtr
+:pyrope_top: reg_tuple_reset.rtr
+*/
+
+// A tuple-typed register `reg bank:(x:u8,y:u4) = (20,3)` is lowered by
+// upass.detuple into per-field scalar Flops `bank.x:u8` and `bank.y:u4`, each
+// carrying its slice of the (positional) reset value — x resets to 20, y to 3.
+// Runtime field writes keep constprop from folding it away, so this exercises
+// the per-field reset distribution AND the field-write rewrite.
+mod rtr(en:bool, wx:u8, wy:u4) -> (ox:u8@[0], oy:u4@[0]) {
+  reg bank:(x:u8, y:u4) = (20, 3)
+  ox = bank.x
+  oy = bank.y
+  if en {
+    bank.x = wx
+    bank.y = wy
+  }
+}

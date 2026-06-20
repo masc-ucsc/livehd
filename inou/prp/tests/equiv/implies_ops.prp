@@ -1,0 +1,27 @@
+/*
+:name: implies_ops
+:type: equiv
+:verilog_top: implies_ops.top
+:pyrope_top: implies_ops.top
+*/
+
+// `a implies b` is boolean implication: it is false only when `a` is true and
+// `b` is false (when `a` is false, `b` may be anything). Lgraph has no implies
+// cell, so prp2lnast lowers `a implies b` to the equivalent `!a or b`. The
+// Verilog golden hand-expands every `implies` to the explicit `(!a) | b`, so
+// the formal LEC fails the moment that lowering drifts from the identity.
+comb top(a:bool, b:bool, c:bool, x:u4, y:u4) -> (out1:bool, out2:bool, out3:bool, out4:bool) {
+  // bare implication on scalar booleans
+  out1 = a implies b
+
+  // nested implication (explicit parens — implies is not associative):
+  //   (a implies b) implies c
+  out2 = (a implies b) implies c
+
+  // implication over comparison results (not a tautology: x==0 says nothing
+  // about y==0)
+  out3 = (x == 0) implies (y == 0)
+
+  // an implication result combined with ordinary boolean logic
+  out4 = (a implies b) and (x != y)
+}

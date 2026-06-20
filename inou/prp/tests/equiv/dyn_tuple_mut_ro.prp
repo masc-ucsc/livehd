@@ -1,0 +1,18 @@
+/*
+:name: dyn_tuple_mut_ro
+:type: equiv
+:verilog_top: dyn_tuple_mut_ro.msel
+:pyrope_top: dyn_tuple_mut_ro.msel
+*/
+
+// A read-only `mut` (non-array-typed) tuple of constants is also a muxable
+// value: with no indexed write its slot trivials are exact, so a runtime index
+// lowers to the balanced Hotmux. (A runtime-indexed WRITE to a non-array tuple
+// has no hardware lowering and errors at the store, so an all-constant tuple
+// reaching the dynamic-index lowering cannot be hiding a dropped write.) A
+// runtime-indexed `mut` *array* (`mut t:[4]u8`) still becomes a Memory cell —
+// see mem_mut_array.
+comb msel(sel:u2) -> (z:u8) {
+  mut choices = (5, 6, 7, 8)
+  z = choices[sel]
+}

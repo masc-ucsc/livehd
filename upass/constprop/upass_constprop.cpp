@@ -3117,8 +3117,8 @@ void uPass_constprop::process_func_call() {
   }
 
   if (!is_type(Lnast_ntype::Lnast_ntype_ref)) {
-    // Dlop-form callee (`import`, `step`, `implies` — see prp2lnast's
-    // make_call).
+    // Dlop-form callee (`import`, `step` — see prp2lnast's make_call;
+    // `implies` no longer reaches here, it lowers to `!a or b` in prp2lnast).
     //
     // A live `import("…")` resolves here (dead branches never
     // dispatch, so liveness is exactly "we got here"): the tuple form binds

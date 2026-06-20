@@ -2818,9 +2818,18 @@ bool uPass_runner::try_inline_func_call() {
         if (cands.size() == 1) {
           chosen = cands.front();  // single → defer to the normal precise-error path
         } else {
+          // "Can handle" is the WHOLE `dst = f(args)`: the candidate must accept
+          // the call (signature_matches, the input side) AND its return must
+          // bind to how the result is consumed (return_matches, the output
+          // side). Without the return check an input-compatible candidate whose
+          // outputs do not fit the destructure is silently picked.
+          absl::flat_hash_set<std::string> req_fields;
+          bool                             whole_used = false;
+          collect_return_consumption(saved, dst_name, req_fields, whole_used);
           for (const auto& fn : cands) {
             auto c = lookup_callee(fn);
-            if (c && signature_matches(c->io_meta(), ov_actuals, /*is_ctor_call=*/false)) {
+            if (c && signature_matches(c->io_meta(), ov_actuals, /*is_ctor_call=*/false)
+                && return_matches(c->io_meta(), req_fields, whole_used)) {
               chosen = fn;
               break;
             }
@@ -3806,13 +3815,30 @@ bool uPass_runner::try_lower_dynamic_tuple_index(const std::string& dst, const s
       return false;
     }
   }
-  // KEY GATE: at least one slot must be a genuine runtime wire. A `mut`/`reg`
-  // memory array never populates tuple_slot_ref, so this restricts the rewrite
-  // to true tuple-of-wires literals and leaves the dynamic-memory-read path to
-  // tolg untouched (a stale comptime-init array would otherwise mux to its init
-  // values, dropping the indexed runtime writes).
+  // GATE: a runtime index into a comptime fixed-size tuple lowers to a Hotmux.
+  // A tuple holding at least one genuine runtime wire (any_runtime) is always a
+  // plain tuple-of-wires literal — mux it. An ALL-constant tuple is also
+  // muxable, but ONLY when `src` is a plain (non-memory) tuple value:
+  //   * NOT a comp_type_array — those are Memory/ROM cells lowered by tolg;
+  //     muxing one would (a) drop a runtime-indexed write to a `mut`/`reg`
+  //     array (its constant init never reflects the write) and (b) blow a large
+  //     const ROM into a giant mux tree.
+  //   * a `const`/`mut` binding, never a `reg` — a reg carries cross-cycle
+  //     state, so its constant init is not the muxable value.
+  // (A runtime-indexed write to a non-array tuple has no hardware lowering and
+  // errors at the store, so an all-const tuple reaching here cannot be hiding a
+  // dropped write; const-index const-value writes already folded into the slot
+  // trivials, so the mux arms are exact.)
   if (!any_runtime) {
-    return false;
+    // A comp_type_array declare bakes an element envelope (__elem_max/__elem_min,
+    // present for every valid array — int and bool are the only legal element
+    // types); its absence is what tells a plain tuple value from a Memory/ROM.
+    const bool is_array_typed = bundle && !bundle->get_attr("__elem_max").is_invalid();
+    const auto facts          = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), src);
+    const bool muxable_mode   = facts && (facts->mode == upass::Mode::const_kind || facts->mode == upass::Mode::mut_kind);
+    if (is_array_typed || !muxable_mode) {
+      return false;
+    }
   }
 
   // Materialize any parked producer of the index (or of an element) before the
@@ -4994,6 +5020,100 @@ bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<
     }
   }
 
+  return true;
+}
+
+void uPass_runner::collect_return_consumption(const upass::Lnast_manager::Cursor_state& fcall_cursor, std::string_view dst_name,
+                                              absl::flat_hash_set<std::string>& req_fields, bool& whole_used) {
+  // The destructure `(p1,p2) = f()` lowers to `fcall(dst, …)` followed by
+  // sibling `tuple_get(tmp, dst, 'p1')` / `tuple_get(tmp, dst, 'p2')` picks
+  // (see the parse dump); a whole bind `c = f()` lowers to `store(c, dst)` and
+  // an operand use `c = f()+1` to `plus(c, dst, 1)`. So learn the result shape
+  // by walking the fcall's following siblings once: a tuple_get whose SRC (2nd
+  // child) is our dst contributes a required field; any other node that names
+  // dst as a child marks a whole-value use.
+  const auto here = lm->save_cursor();
+  lm->restore_cursor(fcall_cursor);  // cursor on the func_call node
+  while (lm->move_to_sibling()) {
+    const bool is_tget = Lnast_ntype::is_tuple_get(lm->get_raw_ntype());
+    const auto node    = lm->save_cursor();
+    if (!lm->move_to_child()) {
+      lm->restore_cursor(node);
+      continue;
+    }
+    // children in order: [dst, src/operand, field/operand, …]
+    std::size_t idx        = 0;
+    bool        names_dst  = false;  // dst_name appears as a non-leading child
+    std::size_t dst_at_idx = std::string::npos;
+    do {
+      if (idx > 0 && Lnast_ntype::is_ref(lm->get_raw_ntype()) && lm->current_text() == dst_name) {
+        names_dst  = true;
+        dst_at_idx = idx;
+      }
+      ++idx;
+    } while (lm->move_to_sibling());
+    if (is_tget && dst_at_idx == 1) {
+      // tuple_get(tmp, dst, field): read the field const (3rd child).
+      lm->restore_cursor(node);
+      lm->move_to_child();      // tmp
+      lm->move_to_sibling();    // dst
+      if (lm->move_to_sibling() && Lnast_ntype::is_const(lm->get_raw_ntype())) {
+        if (auto v = Dlop::from_pyrope(lm->current_text()); v && !v->is_invalid()) {
+          req_fields.insert(v->to_field());
+        }
+      }
+    } else if (names_dst) {
+      whole_used = true;
+    }
+    lm->restore_cursor(node);
+  }
+  lm->restore_cursor(here);
+}
+
+bool uPass_runner::return_matches(const Lnast_tree_io& io, const absl::flat_hash_set<std::string>& req_fields, bool whole_used) {
+  // Regroup the FLATTENED output leaves into LOGICAL outputs exactly as the real
+  // epilogue does (see the output-binding code: a tuple output `p:(first,
+  // second)` is io.outputs leaves `p.first`,`p.second`, one logical output `p`).
+  absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> logical;  // lname → top-level sub-field names
+  for (const auto& o : io.outputs) {
+    const auto  dp    = o.name.find('.');
+    std::string lname = dp == std::string::npos ? o.name : o.name.substr(0, dp);
+    auto&       subs  = logical[lname];
+    if (dp != std::string::npos) {
+      const auto rest = o.name.substr(dp + 1);
+      subs.insert(rest.substr(0, rest.find('.')));  // first sub-segment (one level)
+    }
+  }
+  const std::size_t n_logical = logical.size();
+
+  if (!req_fields.empty()) {
+    // Destructure: every picked field must be bindable. Two shapes resolve:
+    //   (a) ONE tuple output → dst IS that tuple, picks are its sub-fields;
+    //   (b) N logical outputs → splat, picks must be among the output names.
+    if (n_logical == 1) {
+      const auto& subs = logical.begin()->second;  // sub-fields of the lone output
+      for (const auto& f : req_fields) {
+        if (!subs.contains(f)) {
+          return false;  // a scalar (no sub-fields) or wrong-named tuple output
+        }
+      }
+      return true;
+    }
+    for (const auto& f : req_fields) {
+      if (!logical.contains(f)) {
+        return false;  // no output supplies this destructure name (no by-order)
+      }
+    }
+    return true;
+  }
+
+  if (whole_used) {
+    // Whole bind to one destination: a lone logical output (scalar or tuple)
+    // binds (name dropped); >1 outputs is the `multi-output-one-var` error, so
+    // such a candidate cannot handle this call — skip it (try the next).
+    return n_logical == 1;
+  }
+  // Result dropped (no consumer) — nothing to bind; stay permissive.
   return true;
 }
 
@@ -6547,6 +6667,14 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
             elem_min = *v;
           }
         }
+      } else if (Lnast_ntype::is_prim_type_bool(lm->get_raw_ntype())) {
+        // A bool array element has a fixed [0,1] envelope (the type node carries
+        // no const bounds). Baking it keeps __elem_max/__elem_min a COMPLETE
+        // is-array marker — sized integer and bool are the only valid array
+        // element types (tolg lower_mem_declare) — which the dynamic-index
+        // lowering relies on, and lets bitwidth check 1-bit element stores.
+        elem_max = *Dlop::create_integer(1);
+        elem_min = *Dlop::create_integer(0);
       }
       for (; depth > 0; --depth) {
         lm->move_to_parent();

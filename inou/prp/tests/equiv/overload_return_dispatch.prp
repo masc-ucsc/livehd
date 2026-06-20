@@ -1,0 +1,22 @@
+/*
+:name: overload_return_dispatch
+:type: equiv
+:verilog_top: overload_return_dispatch.ovret
+:pyrope_top: overload_return_dispatch.ovret
+*/
+
+// 2f-overload — dispatch resolves the WHOLE `c = f(args)`, return side included.
+// The gathered set lists the multi-output `mk_two` FIRST, and it accepts the
+// call on its inputs (u8 → u8). But the result is bound to a single output `s`,
+// and binding two outputs to one variable is illegal — so `mk_two` cannot
+// handle this call and dispatch SKIPS it for the single-output `mk_one`
+// (s = x+1). Selection is by the binding, not tuple order; the chosen body
+// inlines and lowers, so this LECs to a plain `s = x + 1`.
+
+comb mk_two(a:u8) -> (p1:u9, p2:u9) { p1 = a + 1 ; p2 = a + 2 }
+comb mk_one(a:u8) -> (r:u9)         { r = a + 1 }
+
+comb ovret(x:u8) -> (s:u9) {
+  const mk = [mk_two, mk_one]   // multi-output candidate first
+  s = mk(a=x)                   // whole bind → mk_one
+}

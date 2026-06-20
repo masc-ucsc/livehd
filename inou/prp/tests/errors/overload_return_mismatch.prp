@@ -1,0 +1,22 @@
+/*
+:name: overload_return_mismatch
+:type: error
+:error: no overload of `mk` matches the call
+:help: none of the 2 gathered lambdas accepts these arguments
+*/
+
+// 2f-overload — "can handle" is the WHOLE `c = f(b)`, not just the call side: a
+// candidate must accept the call AND its return must bind to how the result is
+// consumed (06-functions.md §"Binding return values"). Here both lambdas accept
+// `mk(a=5)` on the input side, but the destructure `(p1,p2) =` needs outputs
+// named p1,p2 — mk_one has a single output `r`, mk_two outputs q1,q2 — so
+// NEITHER return can bind. Dispatch fails LOUDLY rather than silently picking
+// the first input-match and folding `tuple_get(scalar,'p1')` to garbage.
+
+comb mk_one(a:int) -> (r:int)          { r = a }
+comb mk_two(a:int) -> (q1:int, q2:int) { q1 = a ; q2 = a }
+
+const mk = [mk_one, mk_two]
+
+const (p1, p2) = mk(a=5)  // locate_error_here
+cassert(p1 == 5 and p2 == 5)
