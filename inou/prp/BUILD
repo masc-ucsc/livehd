@@ -249,6 +249,17 @@ sh_test(
             "tests/equiv/tup_port_pipe.v",
             "tests/equiv/tup_port_mod.v",
             "tests/equiv/tup_port_nested.v",
+            # 2i-issues C/D goldens — same escaped dotted tuple PORTS as the
+            # tup_port_* group above (tup_in_port/tup_in_match read a tuple INPUT
+            # port; tup_out_port/tup_out_field_arms drive a tuple OUTPUT port).
+            # The FORWARD prp-equiv-* targets pass; the reverse tuple
+            # reconstruction is the same future work, so exclude. (The scalar-port
+            # shift_combo_i8.v / shift_sra_unsigned.v goldens round-trip fine and
+            # stay in.)
+            "tests/equiv/tup_in_port.v",
+            "tests/equiv/tup_in_match.v",
+            "tests/equiv/tup_out_port.v",
+            "tests/equiv/tup_out_field_arms.v",
         ],
     )
 ]

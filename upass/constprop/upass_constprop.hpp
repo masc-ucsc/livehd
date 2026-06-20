@@ -315,10 +315,15 @@ protected:
     return q;
   }
 
-  // True when `name` (root, dotted paths collapse to their first level) is a
-  // declared OUTPUT of the unit under fold (io_meta is populated by the SSA
-  // upass before constprop runs). Outputs are the unit's boundary contract:
-  // their stores must always materialize (see classify_statement_impl).
+  // True when `name` is (part of) a declared OUTPUT of the unit under fold
+  // (io_meta is populated by the SSA upass before constprop runs). Outputs are
+  // the unit's boundary contract: their stores must always materialize (see
+  // classify_statement_impl). A tuple-typed output is FLATTENED into dotted
+  // leaves by the SSA upass, so `io_meta().outputs` holds `p.first`, `p.second`
+  // — match a store to a flattened leaf (`name == oe.name`) as well as a write
+  // to the whole tuple / a scalar output (their first levels agree). Without the
+  // leaf match a *constant* store to a tuple-output leaf is silently dropped (a
+  // computed store survives only because a downstream read demand-re-emits it).
   bool is_io_output(std::string_view name) const {
     const auto& ln = lm ? lm->get_lnast() : nullptr;
     if (!ln) {
@@ -326,7 +331,7 @@ protected:
     }
     const auto root = Bundle::get_first_level(name);
     for (const auto& oe : ln->io_meta().outputs) {
-      if (oe.name == root) {
+      if (oe.name == name || Bundle::get_first_level(oe.name) == root) {
         return true;
       }
     }

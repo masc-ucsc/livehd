@@ -1,0 +1,11 @@
+/*
+:name: shift_sra_unsigned
+:type: equiv
+:verilog_top: shift_sra_unsigned.top
+:pyrope_top: shift_sra_unsigned.top
+*/
+
+// 2i-issues E (corner) — the SAME idiom on an UNSIGNED u8. The fix must NOT
+// `$signed`-wrap an unsigned operand: `a >> b` here is a logical (zero-fill)
+// shift. Guards against over-applying the SRA signedness cast (is_unsign gate).
+pub comb top(a:u8, b:u2) -> (r:u8) { r = (a << b) ^ (a >> b) }

@@ -1,0 +1,16 @@
+/*
+:name: tup_out_port
+:type: equiv
+:verilog_top: tup_out_port.top
+:pyrope_top: tup_out_port.top
+*/
+
+// 2i-issues D — a tuple/struct-typed OUTPUT port driven by a single WHOLE-tuple
+// write `p = (first=1, second=2)`. The io flattens to leaves `p.first`,
+// `p.second`, but the body is a 2-child `store(p, ___p_0)` whole-tuple write.
+// SSA (upass_ssa try_rewrite_port_whole_store) splits it into per-leaf drives
+// `p.first = ___p_0.first`, … and constprop keeps the (now constant) leaf store
+// because is_io_output matches the flattened leaf name. (Pairs with tup_in_port.)
+pub comb top(c:bool) -> (p:(first:u8, second:u8)) {
+  p = (first=1, second=2)
+}

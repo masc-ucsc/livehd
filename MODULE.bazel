@@ -153,9 +153,9 @@ git_override(
 http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-dABGB4rFE2YzODHVjrAFeRS7UezjrILo/Weg5rXhDCM=",  # 2f-stream-parse-next tip: wire + optional `else` in match
-    strip_prefix = "tree-sitter-pyrope-7b5ab8b7fd9201b986ee87d8fbc468fda5b622c7/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/7b5ab8b7fd9201b986ee87d8fbc468fda5b622c7.zip"],
+    integrity = "sha256-0IZpOHnoe53LMAkviTThXWWBvj3Uh+V0uP+rtIzyI3E=",  # ee58755: C++23 hygiene/hardening pass + prpfmt C->C++ (behavior-preserving)
+    strip_prefix = "tree-sitter-pyrope-ee587553d30a2b1d434c97808ad765df1469afb1/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/ee587553d30a2b1d434c97808ad765df1469afb1.zip"],
 )
 # LOCAL OVERRIDE for prpparse co-development — swap the http_archive above for:
 # new_local_repository(
@@ -182,8 +182,11 @@ http_archive(
 # (distinct from @prpparse, which roots at the prpparse/ subdir of the same
 # repo). LiveHD embeds prpfmt via prpfmt/prpfmt_api.h as `lhd pyrope fmt`.
 #
-# The formatter's embeddable C entry point (prpfmt_format_string) has landed
-# upstream, so this is pinned to top of tree (same archive as @prpparse above).
+# The formatter's embeddable entry point (prpfmt_format_string) keeps a stable C
+# ABI (extern "C" in prpfmt_api.h), so this is pinned to top of tree (same archive
+# as @prpparse above). As of ee58755 the formatter itself is C++ (prpfmt/ir.cc,
+# prpfmt/prpfmt.cc) linked against the C tree-sitter parser (src/parser.c +
+# src/scanner.c) — //packages:prpfmt.BUILD compiles the mixed C/C++ TU set.
 # The one file the formatter needs that is *not* in the archive is the generated
 # prpfmt/ts_symbols.h (gitignored); //packages:prpfmt.BUILD regenerates it from
 # src/parser.c via a genrule, so no local checkout is required. Bump the pin per
@@ -191,9 +194,9 @@ http_archive(
 http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-dABGB4rFE2YzODHVjrAFeRS7UezjrILo/Weg5rXhDCM=",  # 2f-stream-parse-next tip (same archive as @prpparse above)
-    strip_prefix = "tree-sitter-pyrope-7b5ab8b7fd9201b986ee87d8fbc468fda5b622c7",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/7b5ab8b7fd9201b986ee87d8fbc468fda5b622c7.zip"],
+    integrity = "sha256-0IZpOHnoe53LMAkviTThXWWBvj3Uh+V0uP+rtIzyI3E=",  # ee58755 (same archive as @prpparse above)
+    strip_prefix = "tree-sitter-pyrope-ee587553d30a2b1d434c97808ad765df1469afb1",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/ee587553d30a2b1d434c97808ad765df1469afb1.zip"],
 )
 # LOCAL OVERRIDE for prpfmt co-development — swap the http_archive above for:
 # new_local_repository(

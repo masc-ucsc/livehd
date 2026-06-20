@@ -1,0 +1,15 @@
+/*
+:name: shift_combo_i8
+:type: equiv
+:verilog_top: shift_combo_i8.top
+:pyrope_top: shift_combo_i8.top
+*/
+
+// 2i-issues E — the signed-shift idiom `(a<<b) ^ (a>>b)` on an i8. cgen forces
+// the SHL operand unsigned with the zero-extend idiom `({N{1'b0}} | a)` (to keep
+// dynamic bit-write masks correct), which makes the whole `^` unsigned in
+// Verilog — and that unsigned context turns the arithmetic `a >>> b` into a
+// logical (zero-fill) shift, wrong for negative `a`. cgen now isolates the SRA
+// in a self-determined signed context `$signed($signed(a) >>> b)`. Independent
+// iverilog sim was 384/1024 wrong before, 0/1024 after.
+pub comb top(a:i8, b:u2) -> (r:i8) { wrap r = (a << b) ^ (a >> b) }

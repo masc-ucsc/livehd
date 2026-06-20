@@ -1,0 +1,19 @@
+/*
+:name: tup_in_match
+:type: equiv
+:verilog_top: tup_in_match.top
+:pyrope_top: tup_in_match.top
+*/
+
+// 2i-issues C (corner) — tuple INPUT port fields read inside MATCH arms (each
+// arm is its own nested `stmts`, like an if-arm). Confirms copy_branch_port_aware
+// rewrites the nested `tuple_get(ar,'x')` reads to flattened leaves for every
+// arm of the unique-if/Hotmux the match lowers to.
+pub comb top(ar:(x:u4, y:u4), s:u2) -> (res:u5) {
+  res = match s {
+    == 0 { ar.x }
+    == 1 { ar.y }
+    == 2 { ar.x + ar.y }
+    else { 0 }
+  }
+}

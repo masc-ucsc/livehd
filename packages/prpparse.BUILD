@@ -22,9 +22,16 @@ cc_library(
     # `diag.hpp` was renamed `prp_diag.hpp` so the repo-root -iquote bazel adds
     # for this dep cannot shadow LiveHD's bare `#include "diag.hpp"`.)
     include_prefix = "prpparse",
+    # Mirror upstream prpparse/BUILD's buffer/stack hardening (ee58755). Orthogonal
+    # to -w (warnings stay off) and cheap at any -O: _GLIBCXX_ASSERTIONS bounds-
+    # checks std::vector/string_view/array (the lexer/token cursor use hand-rolled
+    # `< n` guards), -fstack-protector-strong catches stack overruns. (Upstream's
+    # third flag -D_FORTIFY_SOURCE=2 needs an optimized build, so it is left to -c opt.)
     copts = [
         "-std=c++23",
         "-w",
+        "-D_GLIBCXX_ASSERTIONS",
+        "-fstack-protector-strong",
     ],
     visibility = ["//visibility:public"],
     deps = ["@hhds//hhds:core"],

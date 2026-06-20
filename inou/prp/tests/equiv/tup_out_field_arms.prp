@@ -1,0 +1,15 @@
+/*
+:name: tup_out_field_arms
+:type: equiv
+:verilog_top: tup_out_field_arms.top
+:pyrope_top: tup_out_field_arms.top
+*/
+
+// 2i-issues D (corner) — a tuple OUTPUT port whose leaves are written by per-field
+// stores INSIDE if-arms (`if c { p.first=1 } else { p.first=3 }`). The 3-child
+// field stores `store(p,'first',v)` sit in the branch bodies; SSA
+// (copy_branch_port_aware) rewrites them to base-name leaf stores `p.first=v` so
+// tolg's branch lowering merges both arms into the output mux.
+pub comb top(c:bool) -> (p:(first:u8, second:u8)) {
+  if c { p.first = 1; p.second = 2 } else { p.first = 3; p.second = 4 }
+}
