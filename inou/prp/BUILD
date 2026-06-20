@@ -232,6 +232,23 @@ sh_test(
             # not prp_writer completeness — run the `fixme` target below to see
             # the front-end abort. (todo/livehd/2w-prp_writer.html bucket C.)
             "tests/equiv/mclk_sram_2wclk.v",
+            # bitrange_dyn.v is the golden for the NATIVE runtime bit-range
+            # select (forward prp-equiv-bitrange_dyn passes). Its behavioral
+            # `(a>>base) & ((1<<(len+1))-1)` reference round-trips badly through
+            # the slang reader (the variable shift + mask width is mis-lowered,
+            # the same width-fidelity class as packed_assign) — a slang concern,
+            # not the Pyrope dynamic-select feature this golden gates.
+            "tests/equiv/bitrange_dyn.v",
+            # tup_port_*.v are the goldens for tuple/struct-typed PORTS, which
+            # cgen emits as escaped dotted ports (`\ar.x `, `\p.q `). The FORWARD
+            # prp-equiv-tup_port_* targets pass (SSA flattens the tuple ports to
+            # those leaves). The REVERSE direction needs the slang reader to
+            # reconstruct a tuple `ar:(x,y)` from the dotted Verilog ports — the
+            # read-back tuple reconstruction is future work, so exclude for now.
+            "tests/equiv/tup_port_comb.v",
+            "tests/equiv/tup_port_pipe.v",
+            "tests/equiv/tup_port_mod.v",
+            "tests/equiv/tup_port_nested.v",
         ],
     )
 ]

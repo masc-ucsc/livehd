@@ -1,0 +1,12 @@
+/*
+:name: reduce_string
+:type: error
+:error: requires an integer or boolean operand
+:help: enum, string, tuple, or array
+*/
+// A bit reduction needs an integer/boolean operand. A string has no bits to
+// reduce, so `s#|[...]` is a compile error.
+comb foo() -> (z:u1) {
+  const s = "hello"
+  z = s#|[0..=2]   // locate_error_here
+}

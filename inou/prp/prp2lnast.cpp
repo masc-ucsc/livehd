@@ -7351,6 +7351,22 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
       return std::nullopt;
     }
 
+    // Only fold endpoints that are actual numeric literals. A bare identifier
+    // (`n`, `hi`) is a RUNTIME endpoint — Dlop::from_pyrope would otherwise
+    // mis-parse a single letter as a char literal (`"n"` -> 110) and bake a
+    // garbage constant mask. A non-literal endpoint returns nullopt so the
+    // caller routes `a#[n..=m]` through the dynamic `range` node path instead.
+    auto numeric_leading = [](std::string_view t) {
+      if (t.empty()) {
+        return false;
+      }
+      char c = t.front();
+      return (c >= '0' && c <= '9') || c == '-' || c == '+';
+    };
+    if (!numeric_leading(get_text(lo)) || !numeric_leading(get_text(hi))) {
+      return std::nullopt;
+    }
+
     auto lo_v = Dlop::from_pyrope(get_text(lo));
     auto hi_v = Dlop::from_pyrope(get_text(hi));
     if (lo_v->is_invalid() || hi_v->is_invalid() || !lo_v->is_integer() || !hi_v->is_integer()) {

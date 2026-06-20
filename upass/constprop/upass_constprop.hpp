@@ -24,6 +24,10 @@ public:
   uPass_constprop() = delete;
   virtual ~uPass_constprop() {}
 
+  // Per-run setup: drop the bit-select source-kind cache (tmp names are unique
+  // within a lambda walk, but a fresh run must start clean).
+  void begin_iteration() override { non_int_bitsel_.clear(); }
+
   // Store routes both arities; the cursor-walking assign/tuple_set
   // bodies stay as private helpers (subtree payloads don't ride the span).
   upass::Vote process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
@@ -117,6 +121,18 @@ public:
   // and returns true so the fold template bails (no fold/store). Template
   // bodies fold nil placeholders for unbound params, so they are exempt.
   bool report_nil_operand(upass::Src_span src);
+
+  // A bit reduction (`foo#|/&/^/+`) requires foo to be an integer/boolean. The
+  // reduction node only sees the get_mask result tmp, so process_get_mask
+  // records here the names of get_mask results whose SOURCE was a string / enum
+  // / tuple / array; push_reduction looks the tmp up and errors. Cleared per run
+  // in begin_iteration (tmp names are unique within a lambda walk).
+  absl::flat_hash_set<std::string> non_int_bitsel_;
+  bool report_reduction_nonint(upass::Src_span src);
+  // True when `o` may be bit-selected/reduced: an integer/boolean scalar, a
+  // range base, or a runtime value whose kind is not yet known. A string, enum
+  // value, tuple, or array returns false.
+  bool is_bitselectable_operand(const upass::Operand& o);
 
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
 
@@ -527,6 +543,9 @@ protected:
   upass::Vote push_reduction(std::string_view dst, upass::Src_span src, F op) {
     if (dst.empty() || src.empty()) {
       return upass::Vote::keep;
+    }
+    if (report_reduction_nonint(src)) {  // foo must be an integer/boolean
+      return classify_vote();
     }
     if (report_nil_operand(src)) {
       return classify_vote();

@@ -1,0 +1,18 @@
+/*
+:name: tup_port_comb
+:type: equiv
+:verilog_top: tup_port_comb.f
+:pyrope_top: tup_port_comb.f
+*/
+
+// Tuple/struct-typed comb PORTS flatten to dotted scalar leaves: a
+//   comb f(ar:(x,y)) -> (p:(q,r))
+// must lower EXACTLY like its hand-flattened twin f(ar.x, ar.y) -> (p.q, p.r).
+// SSA (upass_ssa) splits the io interface into the dotted leaves `ar.x`,`ar.y`,
+// `p.q`,`p.r` AND rewrites the body field read/write to those leaves, so no
+// tuple_* node referencing a port survives into tolg. The golden declares the
+// same escaped dotted ports; LEC pins the datapath value.
+comb f(ar:(x:u8, y:u8)) -> (p:(q:u9, r:u8)) {
+  p.q = ar.x + ar.y
+  p.r = ar.x
+}

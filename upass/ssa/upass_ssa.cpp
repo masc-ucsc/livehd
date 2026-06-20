@@ -7,6 +7,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -457,6 +458,158 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
         }
       };
 
+  // ── Tuple-typed PORT field-access flattening ───────────────────────────────
+  // The io DECLARATION was just flattened into dotted leaves (`ar.x`, `p.q`)
+  // above, but the body still talks to the WHOLE tuple port via `tuple_get`
+  // (field read) and a ≥3-child field `store` (field write). Those have no
+  // driver/sink once the port only exists as leaves. Rewrite them to the dotted
+  // leaf names so a `comb/pipe/mod f(ar:(x,y)) -> (p:(q,r))` lowers EXACTLY like
+  // its hand-flattened `f(ar.x, ar.y) -> (p.q, p.r)` twin — leaving no `tuple_*`
+  // node that references a tuple port for tolg. Mirrors detuple's struct
+  // reg/mem leaf rewrite (upass_detuple.cpp), but keyed on the io leaf set.
+  absl::flat_hash_set<std::string> port_in_leaf;   // full input leaf names ("ar.x")
+  absl::flat_hash_set<std::string> port_out_leaf;  // full output leaf names ("p.q")
+  absl::flat_hash_set<std::string> port_prefix;    // every proper prefix ("ar"; "p","p.q" for "p.q.a")
+  auto register_port_leaf = [&](const std::string& nm, bool is_in) {
+    if (nm.find('.') == std::string::npos) {
+      return;  // scalar port — already a plain leaf, nothing to flatten
+    }
+    (is_in ? port_in_leaf : port_out_leaf).insert(nm);
+    for (auto pos = nm.find('.'); pos != std::string::npos; pos = nm.find('.', pos + 1)) {
+      port_prefix.insert(nm.substr(0, pos));
+    }
+  };
+  for (const auto& f : flat_inputs) {
+    register_port_leaf(f.name, /*is_in=*/true);
+  }
+  for (const auto& f : flat_outputs) {
+    register_port_leaf(f.name, /*is_in=*/false);
+  }
+  const bool has_tuple_ports = !port_prefix.empty();
+
+  // A temp that aliases a (possibly interior) tuple-port path. A nested read
+  // `ar.x.a` lowers to a chain `t1 = ar['x']` (interior) ; `t2 = t1['a']` (leaf):
+  // the first records t1 -> "ar.x" and emits nothing; the second resolves
+  // through it to the leaf "ar.x.a".
+  absl::flat_hash_map<std::string, std::string> tget_alias;
+
+  // base/interior name -> its tuple-port dotted path (if it is one).
+  auto resolve_port_path = [&](std::string_view name) -> std::optional<std::string> {
+    if (port_prefix.contains(name)) {
+      return std::string(name);
+    }
+    if (auto it = tget_alias.find(name); it != tget_alias.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  };
+
+  // SSA-version a scalar LHS name (same rule as the has_dest LHS path below).
+  // Fills pending_* for the deferred rename_map update (applied AFTER the RHS).
+  auto version_lhs = [&](std::string_view lhs_view, std::string& pending_lhs, std::string& pending_ssa) -> std::string {
+    std::string out_name;
+    if (is_user_var(lhs_view) && !reg_names.contains(lhs_view)) {
+      if (auto seen_it = seen_lhs.find(lhs_view); seen_it != seen_lhs.end()) {
+        int n = ssa_count[*seen_it] + 1;
+        out_name.assign(lhs_view);
+        out_name.append("___ssa_");
+        out_name.append(std::to_string(n));
+        pending_lhs.assign(lhs_view);
+        pending_ssa = out_name;
+      } else {
+        std::string lhs_str{lhs_view};
+        seen_lhs.insert(lhs_str);
+        rename_map.try_emplace(lhs_str, lhs_str);
+        out_name = std::move(lhs_str);
+      }
+    } else {
+      out_name.assign(lhs_view);
+    }
+    return out_name;
+  };
+
+  // Rewrite `tuple_get(dst, port, 'f'[, 'g'...])` (a tuple-port field READ) into
+  // a scalar `store(dst, ref 'port.f.g')`. An interior (non-leaf) read records
+  // an alias and emits nothing (a deeper tuple_get resolves through it).
+  auto try_rewrite_port_tuple_get = [&](const Lnast_nid& child) -> bool {
+    std::vector<Lnast_nid> kids;
+    for (auto c : lnast->children(child)) {
+      kids.push_back(c);
+    }
+    if (kids.size() < 3 || !Lnast_ntype::is_ref(lnast->get_type(kids[0])) || !Lnast_ntype::is_ref(lnast->get_type(kids[1]))) {
+      return false;
+    }
+    auto base = resolve_port_path(lnast->get_name(kids[1]));
+    if (!base) {
+      return false;
+    }
+    std::string path = *base;
+    for (size_t i = 2; i < kids.size(); ++i) {
+      if (!Lnast_ntype::is_const(lnast->get_type(kids[i]))) {
+        return false;  // runtime index — not a static tuple-port field access
+      }
+      path.push_back('.');
+      path.append(lnast->get_name(kids[i]));
+    }
+    auto dst = std::string(lnast->get_name(kids[0]));
+    if (port_in_leaf.contains(path) || port_out_leaf.contains(path)) {
+      auto st = staging->add_child(new_stmts, Lnast_ntype::create_store());
+      if (Lnast::srcid_carries(Lnast_ntype::create_store())) {
+        staging->set_srcid(st, lnast->get_srcid(child));
+      }
+      staging->add_child(st, Lnast_node::create_ref(dst));
+      staging->add_child(st, Lnast_node::create_ref(path));
+      tget_alias.insert_or_assign(std::move(dst), std::move(path));
+      return true;
+    }
+    if (port_prefix.contains(path)) {
+      tget_alias.insert_or_assign(std::move(dst), std::move(path));  // interior — defer to the deeper read
+      return true;
+    }
+    return false;
+  };
+
+  // Rewrite a field `store(port, 'f'[, 'g'...], value)` (a tuple-port field
+  // WRITE) into a scalar leaf `store(port.f.g, value)` (SSA-versioned LHS).
+  auto try_rewrite_port_store = [&](const Lnast_nid& child) -> bool {
+    std::vector<Lnast_nid> kids;
+    for (auto c : lnast->children(child)) {
+      kids.push_back(c);
+    }
+    if (kids.size() < 3 || !Lnast_ntype::is_ref(lnast->get_type(kids[0]))) {
+      return false;  // 2-child scalar store (or odd shape) — normal path
+    }
+    auto base = resolve_port_path(lnast->get_name(kids[0]));
+    if (!base) {
+      return false;
+    }
+    std::string path = *base;
+    for (size_t i = 1; i + 1 < kids.size(); ++i) {
+      if (!Lnast_ntype::is_const(lnast->get_type(kids[i]))) {
+        return false;
+      }
+      path.push_back('.');
+      path.append(lnast->get_name(kids[i]));
+    }
+    if (!port_out_leaf.contains(path)) {
+      return false;  // not a known tuple-output leaf
+    }
+    std::string pending_lhs;
+    std::string pending_ssa;
+    auto        out_name = version_lhs(path, pending_lhs, pending_ssa);
+    auto        st       = staging->add_child(new_stmts, Lnast_ntype::create_store());
+    if (Lnast::srcid_carries(Lnast_ntype::create_store())) {
+      staging->set_srcid(st, lnast->get_srcid(child));
+    }
+    staging->add_child(st, Lnast_node::create_ref(out_name));
+    copy_with_rename(lnast, kids.back(), staging, st, rename_map);
+    if (!pending_lhs.empty()) {
+      ++ssa_count[pending_lhs];
+      rename_map[pending_lhs] = pending_ssa;
+    }
+    return true;
+  };
+
   // Per-statement processing of the straight-line body.  Defined as a recursive
   // helper so a bare `{ }` lexical block (an unconditional nested `stmts`) can be
   // INLINED into the current scope — its reads then follow the live rename_map
@@ -465,6 +618,17 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   // dropped them after the block).
   std::function<void(const Lnast_nid&)> process_child = [&](const Lnast_nid& child) {
     auto type = lnast->get_type(child);
+
+    // Tuple-typed PORT field accesses are flattened to their dotted leaf names
+    // (see the helpers above) so they lower like the hand-flattened twin.
+    if (has_tuple_ports) {
+      if (Lnast_ntype::is_tuple_get(type) && try_rewrite_port_tuple_get(child)) {
+        return;
+      }
+      if (Lnast_ntype::is_store(type) && try_rewrite_port_store(child)) {
+        return;
+      }
+    }
 
     // A `store` with ≥3 children is the tuple_set form (an in-place
     // field write `t.f = v`), which must NOT be SSA-versioned: both `t.x = …`

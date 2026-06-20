@@ -1,0 +1,13 @@
+/*
+:name: tup_port_pipe
+:type: equiv
+:verilog_top: tup_port_pipe.f
+:pyrope_top: tup_port_pipe.f
+*/
+
+// Tuple-typed PIPE ports: same leaf flattening as comb, plus the pipe[1]
+// latency lands one flop on EVERY flattened output leaf (`p.q`, `p.r`).
+pipe[1] f(ar:(x:u8, y:u8)) -> (p:(q:u9, r:u8)) {
+  p.q = ar.x + ar.y
+  p.r = ar.x
+}

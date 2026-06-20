@@ -4288,6 +4288,53 @@ upass::Vote uPass_constprop::process_sext(std::string_view dst_name, Bundle& dst
   return classify_vote();
 }
 
+bool uPass_constprop::is_bitselectable_operand(const upass::Operand& o) {
+  // A comptime string value is definitely not bit-selectable.
+  if (operand_value(o).is_string()) {
+    return false;
+  }
+  std::shared_ptr<const Bundle> b = o.name.empty() ? o.bundle : st().get_bundle(o.name);
+  if (b) {
+    if (!b->get_attr("rng_s").is_invalid()) {
+      return true;  // a range base reduces to its one-hot integer encoding
+    }
+    if (enum_identity_of(b) != nullptr) {
+      return false;  // enum value
+    }
+    if (b->has_named_top() || b->unnamed_top_count() > 1) {
+      return false;  // tuple / array
+    }
+    if (b->get_value_kind() == upass::Kind::string) {
+      return false;
+    }
+  }
+  return true;  // integer / boolean / runtime (kind unknown) → ok
+}
+
+// A reduction (`foo#|/&/^/+`) requires an integer/boolean foo. process_get_mask
+// recorded this get_mask result's name in non_int_bitsel_ when its source was a
+// string / enum / tuple / array; emit a clean compile error here (the reduction
+// node only carries the get_mask tmp, never foo). Template bodies are exempt —
+// an unbound param resolves to a real value when the body is realized.
+bool uPass_constprop::report_reduction_nonint(upass::Src_span src) {
+  if (in_template_body()) {
+    return false;
+  }
+  if (src.empty() || src[0].name.empty() || !non_int_bitsel_.contains(std::string(src[0].name))) {
+    return false;
+  }
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{
+      .severity = livehd::diag::Severity::error,
+      .code     = "reduce-non-integer",
+      .category = "type",
+      .pass     = "upass.constprop",
+      .message  = "bit reduction (`#|`/`#&`/`#^`/`#+`) requires an integer or boolean operand",
+      .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+      .hint     = "reductions operate on the bits of an integer/bool; an enum, string, tuple, or array has no bit reduction",
+  });
+  return true;
+}
+
 upass::Vote uPass_constprop::process_get_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   // Layout: ref(dst), ref(value), (const|ref)(mask)
   // The mask operand may be:
@@ -4302,6 +4349,13 @@ upass::Vote uPass_constprop::process_get_mask(std::string_view dst_name, Bundle&
     return classify_vote();
   }
   const std::string var{dst_name};
+  // A bit selection / reduction needs an integer or boolean `foo`. Record a
+  // string / enum / tuple / array source so a reduction over this result can
+  // emit a clean type error (the reduction node only sees this tmp, not foo).
+  // An integer, boolean, range base, or runtime value (kind unknown) is fine.
+  if (!is_bitselectable_operand(src[0])) {
+    non_int_bitsel_.insert(var);
+  }
   // A range BASE (`(1..=3)#[..]`) converts to its one-hot integer
   // (04-variables.md): the contiguous mask ((1<<(hi-lo+1))-1)<<lo. Without
   // this, operand_value would read the range's materialized field "0" (==lo)

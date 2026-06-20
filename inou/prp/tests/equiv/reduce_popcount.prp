@@ -1,0 +1,23 @@
+/*
+:name: reduce_popcount
+:type: equiv
+:verilog_top: reduce_popcount.foo
+:pyrope_top: reduce_popcount.foo
+*/
+
+// Popcount `foo#+[range]` lowers to a balanced binary adder tree over the
+// selected bits. Widths exercise power-of-2 (2, 4, 16) and non-power-of-2
+// (3, 5, 7, 11) leaf counts (odd-leaf carry-up), unsigned/signed operands,
+// the open `#[..]` form, and a single bit (k==1). Result is the set-bit count.
+comb foo(a:u16, b:s16) -> (
+  p2:u2, p4:u3, p3:u2, p5:u3, p7:u3, pf:u5, ps:u4, p1:u1
+) {
+  p2 = a#+[0..=1]    // 2 bits  (power of 2), max 2
+  p4 = a#+[0..=3]    // 4 bits  (power of 2), max 4
+  p3 = a#+[0..=2]    // 3 bits  (non-power of 2), max 3
+  p5 = a#+[0..=4]    // 5 bits  (non-power of 2), max 5
+  p7 = a#+[2..=8]    // 7 bits  (non-power of 2), max 7
+  pf = a#+[..]       // 16 bits (full type width), max 16
+  ps = b#+[1..=11]   // 11 bits, signed operand, max 11
+  p1 = a#+[9]        // single bit (k==1), max 1
+}

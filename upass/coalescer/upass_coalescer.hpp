@@ -277,6 +277,14 @@ public:
   // operand reflects whatever value the parked producer would have emitted.
   void process_cassert() override { flush_all(); }
 
+  // A `range` (`a#[lo..=hi]`) reads its lo/hi endpoints but is not a
+  // drop-candidate op, so handle_op never sees those reads. A computed endpoint
+  // (`a#[base..=(base+len)]`) would otherwise stay parked and drain at
+  // end-of-block — landing AFTER the get_mask that consumes the range, a
+  // forward reference tolg cannot resolve. Flush as a barrier so the endpoint
+  // producers emit before the range.
+  void process_range() override { flush_all(); }
+
   // Verbatim ops that touch tuple state — flush as a barrier for the same
   // reason. Bundle aliasing is hard to reason about across deferred writes.
   void process_tuple_set() override { flush_all(); }

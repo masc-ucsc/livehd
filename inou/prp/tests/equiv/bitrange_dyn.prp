@@ -1,0 +1,18 @@
+/*
+:name: bitrange_dyn
+:type: equiv
+:verilog_top: bitrange_dyn.rsel
+:pyrope_top: bitrange_dyn.rsel
+*/
+
+// Runtime (non-comptime) contiguous bit-range select via the NATIVE
+// `a#[lo..=hi]` syntax with runtime endpoints (todo "Runtime bit index").
+// prp2lnast keeps a `range` node (no comptime mask); tolg's
+// lower_dynamic_range_select emits `(a>>lo) & ((1<<(hi-lo+1))-1)`.
+//
+// The endpoints are `base ..= (base+len)` so `hi >= lo` always holds (the
+// select precondition the lgassert guards), making the golden a clean,
+// edge-case-free `(a>>base) & ((1<<(len+1))-1)`.
+comb rsel(a:u16, base:u4, len:u3) -> (z:u16) {
+  z = a#[base ..= (base+len)]
+}

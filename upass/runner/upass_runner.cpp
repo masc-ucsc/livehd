@@ -3013,6 +3013,67 @@ bool uPass_runner::try_inline_func_call() {
     }
     return nbind;
   };
+  // Expand a (possibly RUNTIME) tuple ACTUAL `tup` into the flattened leaf
+  // params `<prefix>.<field>`. A tuple-typed param `ar:(x,y)` is flattened in
+  // io_meta to `ar.x`,`ar.y`; a tuple actual binds field-by-field — a comptime
+  // field as a const, a runtime field as a ref to its tuple_slot_ref wire. This
+  // is what makes `comb f(ar:(x,y))` callable with a runtime tuple `f(ar=a)`
+  // exactly like its hand-flattened `f(ar_x, ar_y)` twin. All-or-nothing: binds
+  // nothing and returns false unless EVERY field maps onto an unset leaf param.
+  // Flat (one-level) tuples only.
+  auto expand_tuple_actual = [&](std::string_view tup, std::string_view prefix) -> bool {
+    const auto shape_opt = try_tuple_shape(tup);
+    if (!shape_opt || shape_opt->empty()) {
+      return false;
+    }
+    const auto& shape = *shape_opt;
+    // A genuine tuple has >1 field or a NAMED (non-positional) field; a 1-entry
+    // positional bundle is a scalar carrier, not a tuple worth expanding.
+    bool genuine = shape.size() > 1;
+    for (const auto& [fld, is_pos] : shape) {
+      if (!is_pos) {
+        genuine = true;
+        break;
+      }
+    }
+    if (!genuine) {
+      return false;
+    }
+    const auto comptime = try_bundle_fields(tup);
+    // Pre-resolve every field before committing (no partial bind on mismatch).
+    std::vector<std::tuple<std::size_t, bool, std::string>> binds;  // (leaf idx, is_const, payload)
+    binds.reserve(shape.size());
+    for (const auto& [fld, is_pos] : shape) {
+      const auto lidx = param_index(std::string(prefix) + "." + fld);
+      if (lidx >= nbind || param_set[lidx]) {
+        return false;
+      }
+      bool resolved = false;
+      if (comptime) {
+        for (const auto& [k, v] : *comptime) {
+          if (k == fld && !v.is_invalid()) {
+            binds.emplace_back(lidx, true, v.to_pyrope());
+            resolved = true;
+            break;
+          }
+        }
+      }
+      if (!resolved) {
+        if (auto rn = try_tuple_slot_ref(tup, fld)) {
+          binds.emplace_back(lidx, false, *rn);
+          resolved = true;
+        }
+      }
+      if (!resolved) {
+        return false;
+      }
+    }
+    for (const auto& [lidx, is_const, payload] : binds) {
+      param_val[lidx] = is_const ? Lnast_node::create_const(payload) : Lnast_node::create_ref(payload);
+      param_set[lidx] = true;
+    }
+    return true;
+  };
   // 06-functions.md §"Argument naming": every input must be named at the call
   // site. Unnamed (positional) actuals are allowed only under narrow exceptions:
   //   (1) exactly one non-self parameter (nothing to disambiguate),
@@ -3048,24 +3109,12 @@ bool uPass_runner::try_inline_func_call() {
           continue;
         }
         // A bundle-typed param is flattened in io_meta to dotted leaves
-        // (`ar` → `ar.x`, `ar.y`). A bundle-literal actual `ar=(x=2,y=11)`
-        // arrives under the un-flattened key `ar`; expand it into the leaf
-        // params from the caller-side bundle fields (shared ST).
+        // (`ar` → `ar.x`, `ar.y`). A bundle-literal actual `ar=(x=2,y=11)` (or a
+        // runtime tuple `ar=a`) arrives under the un-flattened key `ar`; expand
+        // it field-by-field into the leaf params (comptime const / runtime wire).
         bool expanded = false;
         if (a.node.is_ref()) {
-          if (auto bf = try_bundle_fields(a.node.get_name()); bf && !bf->empty()) {
-            expanded = true;
-            for (const auto& [fld, val] : *bf) {
-              const auto leaf = a.key + "." + fld;
-              const auto lidx = param_index(leaf);
-              if (lidx >= nbind || val.is_invalid()) {
-                expanded = false;
-                break;
-              }
-              param_val[lidx] = Lnast_node::create_const(val.to_pyrope());
-              param_set[lidx] = true;
-            }
-          }
+          expanded = expand_tuple_actual(a.node.get_name(), a.key);
         }
         if (!expanded) {
           fcall_arg_fail(call_span,
@@ -3155,59 +3204,37 @@ bool uPass_runner::try_inline_func_call() {
       // rejected candidates whose only params are scalars, so this only fires for
       // the genuine tuple-param candidate. (2f-arg_naming_tuple.)
       if (a.node.is_ref()) {
-        auto bf              = try_bundle_fields(a.node.get_name());
-        bool is_tuple_actual = false;
-        if (bf && !bf->empty()) {  // genuine tuple (named field or >1 entry), not a 1-entry scalar
-          is_tuple_actual = bf->size() > 1;
-          for (const auto& [fld, fv] : *bf) {
-            (void)fv;
-            if (fld.find_first_not_of("0123456789") != std::string::npos) {
+        const auto shape_opt       = try_tuple_shape(a.node.get_name());
+        bool       is_tuple_actual = false;
+        if (shape_opt) {
+          is_tuple_actual = shape_opt->size() > 1;
+          for (const auto& [fld, is_pos] : *shape_opt) {
+            if (!is_pos) {
               is_tuple_actual = true;
               break;
             }
           }
         }
         if (is_tuple_actual) {
-          absl::flat_hash_map<std::string, std::vector<std::size_t>> groups;
+          // Find the unset flattened tuple-param GROUP whose leaf count matches
+          // the actual's field count, then expand the fields into it (comptime
+          // const / runtime wire — the positional mirror of the named path).
+          absl::flat_hash_map<std::string, std::size_t> group_count;
           for (std::size_t i = (has_self ? 1u : 0u); i < nbind; ++i) {
             if (param_set[i]) {
               continue;
             }
             const auto& pn = io.inputs[i].name;
             if (auto dp = pn.rfind('.'); dp != std::string::npos) {
-              groups[pn.substr(0, dp)].push_back(i);
+              ++group_count[pn.substr(0, dp)];
             }
           }
           bool matched = false;
-          for (auto& [prefix, idxs] : groups) {
-            if (idxs.size() != bf->size()) {
-              continue;
+          for (const auto& [prefix, cnt] : group_count) {
+            if (cnt == shape_opt->size() && expand_tuple_actual(a.node.get_name(), prefix)) {
+              matched = true;
+              break;
             }
-            auto leaf_idx = [&](std::string_view fld) -> std::size_t {
-              for (std::size_t idx : idxs) {
-                if (io.inputs[idx].name.substr(prefix.size() + 1) == fld) {
-                  return idx;
-                }
-              }
-              return nbind;
-            };
-            bool ok = true;
-            for (const auto& [fld, val] : *bf) {
-              if (val.is_invalid() || leaf_idx(fld) >= nbind) {
-                ok = false;
-                break;
-              }
-            }
-            if (!ok) {
-              continue;
-            }
-            for (const auto& [fld, val] : *bf) {
-              const auto idx = leaf_idx(fld);
-              param_val[idx] = Lnast_node::create_const(val.to_pyrope());
-              param_set[idx] = true;
-            }
-            matched = true;
-            break;
           }
           if (matched) {
             continue;

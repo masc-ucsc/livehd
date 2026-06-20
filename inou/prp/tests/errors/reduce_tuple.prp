@@ -1,0 +1,12 @@
+/*
+:name: reduce_tuple
+:type: error
+:error: requires an integer or boolean operand
+:help: enum, string, tuple, or array
+*/
+// A bit reduction needs an integer/boolean operand. A tuple is not a single
+// integer value, so `t#&[...]` is a compile error.
+comb foo(a:u8, b:u8) -> (z:u1) {
+  const t = (a, b)
+  z = t#&[0..=2]   // locate_error_here
+}

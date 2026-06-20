@@ -570,6 +570,14 @@ private:
       lower_op(nid, Ntype_op::SRA, false, OpW::firstw);
     } else if (N::is_sext(t)) {
       lower_sext(nid);
+    } else if (N::is_red_or(t)) {
+      lower_red_or(nid);
+    } else if (N::is_red_and(t)) {
+      lower_red_and(nid);
+    } else if (N::is_red_xor(t)) {
+      lower_red_xor(nid);
+    } else if (N::is_popcount(t)) {
+      lower_popcount(nid);
     } else if (N::is_div(t)) {
       lower_op(nid, Ntype_op::Div, false, OpW::firstw);
     } else if (N::is_bit_not(t) || N::is_log_not(t)) {
@@ -2973,6 +2981,10 @@ private:
   }
 
   // range(ref(dst), lo, hi) — record [lo,hi] for a later get_mask; no node.
+  // A comptime range (both endpoints const) is folded to int bounds in
+  // range_map_; a range with a runtime endpoint (`a#[n..=m]`) is kept as
+  // (lo,hi) nids in range_dyn_map_ so lower_get_mask can synthesize the
+  // shift+mask hardware select.
   void lower_range(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
@@ -2986,7 +2998,12 @@ private:
     if (hi.is_invalid()) {
       return;
     }
-    range_map_[std::string{lnast_->get_name(dst)}] = {const_val(lo), const_val(hi)};
+    std::string name{lnast_->get_name(dst)};
+    if (Lnast_ntype::is_const(lnast_->get_type(lo)) && Lnast_ntype::is_const(lnast_->get_type(hi))) {
+      range_map_[name] = {const_val(lo), const_val(hi)};
+    } else {
+      range_dyn_map_[name] = {lo, hi};
+    }
   }
 
   [[nodiscard]] int64_t const_val(const Lnast_nid& nid) {
@@ -2994,7 +3011,10 @@ private:
     return c->is_just_i64() ? c->to_just_i64() : 0;
   }
 
-  // get_mask(ref(dst), value, mask) — mask is a const bitmask or a range ref.
+  // get_mask(ref(dst), value, mask) — mask is a const bitmask, a comptime range
+  // ref, OR (the runtime-index exception) a non-const single-bit mask `1<<i` or
+  // a runtime `range` ref. The runtime forms have no static bitmask, so they
+  // lower to an explicit shift+mask select instead of a Get_mask cell.
   void lower_get_mask(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
@@ -3008,6 +3028,24 @@ private:
     if (mask_op.is_invalid()) {
       return;
     }
+
+    // Runtime (non-comptime) bit index — `a#[n..=m]` with a non-const endpoint.
+    // lower_range stashed the live lo/hi nids; build `(a>>n) & ((1<<(m-n+1))-1)`.
+    std::string mname{lnast_->get_name(mask_op)};
+    if (auto it = range_dyn_map_.find(mname); it != range_dyn_map_.end()) {
+      lower_dynamic_range_select(dst, val, it->second.first, it->second.second);
+      return;
+    }
+    // Runtime single-bit index — `a#[i]`. prp2lnast emits the mask as `1<<i`
+    // (a one-hot SHL tmp), so it is neither a const nor a recorded range. Select
+    // bit i with `(a & (1<<i)) != 0` (== the `(a>>i)&1` workaround, reusing the
+    // already-built one-hot mask). Result is a 1-bit unsigned.
+    const bool runtime_mask = !Lnast_ntype::is_const(lnast_->get_type(mask_op)) && !range_map_.contains(mname);
+    if (runtime_mask) {
+      lower_dynamic_bit_select(dst, val, mask_op);
+      return;
+    }
+
     auto mask = mask_from_operand(mask_op);
 
     auto a_val = leaf(val);
@@ -3024,6 +3062,96 @@ private:
     int32_t mw = (mask->is_just_i64() && mask->to_just_i64() == -1) ? a_val.mw : mask_popcount(*mask);
     bind_result(lnast_->get_name(dst), drv, mw);
   }
+
+  // `a#[i]` with a RUNTIME index — the runtime single-bit select. prp2lnast
+  // already lowered the mask to the one-hot `1<<i` (the `mask_op` SHL tmp). A
+  // one-hot AND isolates bit i of `a`; OR-reducing it yields that bit as a
+  // 1-bit unsigned. This equals the documented `(a>>i)&1` workaround while
+  // reusing the mask that was already built (no second variable shifter).
+  void lower_dynamic_bit_select(const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& mask_op) {
+    auto a_val = leaf(val);
+    auto m     = leaf(mask_op);
+
+    auto andn = make_node(Ntype_op::And);  // commutative: both operands feed sink "a"
+    setup_sink_by_name(andn, "a").connect_driver(a_val.pin);
+    setup_sink_by_name(andn, "a").connect_driver(m.pin);
+    const int32_t and_mw = std::max(a_val.mw, m.mw);
+    auto          and_dp = andn.create_driver_pin(0);
+    set_bits(and_dp, and_mw + 1);
+    set_unsign(and_dp);
+
+    auto ror = make_node(Ntype_op::Ror);  // |(a & (1<<i)) -> the selected bit
+    setup_sink_by_name(ror, "a").connect_driver(and_dp);
+    bind_result(lnast_->get_name(dst), ror.create_driver_pin(0), 1);
+  }
+
+  // `a#[n..=m]` with a RUNTIME range — lower to `(a>>n) & ((1<<(m-n+1))-1)`,
+  // the contiguous-slice select. `lo`/`hi` are the live range endpoints stashed
+  // by lower_range. The open form `a#[n..]` (hi == const "nil") selects every
+  // bit from n upward, i.e. just `a>>n`. A descending range (m<n) violates the
+  // select precondition; lower_get_mask's caller emits the lgassert(m>=n).
+  void lower_dynamic_range_select(const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& lo, const Lnast_nid& hi) {
+    auto a_val = leaf(val);
+    auto n     = leaf(lo);
+
+    // shifted = a >> n   (arithmetic right shift; the only right shift cell —
+    // for an unsigned `a` cgen's `>>>` fills zeros, matching the workaround).
+    auto sra = make_node(Ntype_op::SRA);
+    setup_sink_by_name(sra, "a").connect_driver(a_val.pin);
+    setup_sink_by_name(sra, "b").connect_driver(n.pin);
+    auto sra_dp = sra.create_driver_pin(0);
+    set_bits(sra_dp, a_val.mw + 1);
+    set_unsign(sra_dp);
+
+    if (Lnast_ntype::is_const(lnast_->get_type(hi)) && lnast_->get_name(hi) == "nil") {
+      // Open range `a#[n..]`: bits n..msb are exactly `a>>n`; no mask, no
+      // m>=n precondition (there is no `m`).
+      bind_result(lnast_->get_name(dst), sra_dp, a_val.mw);
+      return;
+    }
+
+    auto m = leaf(hi);
+
+    // width = m - n + 1   (Sum sums sink "a", subtracts sink "b").
+    auto width = make_node(Ntype_op::Sum);
+    setup_sink_by_name(width, "a").connect_driver(m.pin);
+    setup_sink_by_name(width, "a").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(width, "b").connect_driver(n.pin);
+    const int32_t w_mw   = std::max(n.mw, m.mw) + 1;
+    auto          w_dp   = width.create_driver_pin(0);
+    set_bits(w_dp, w_mw + 1);
+    set_unsign(w_dp);
+
+    // pow = 1 << width  (sized to cover every bit of `a` plus the +1 of `-1`).
+    auto pow = make_node(Ntype_op::SHL);
+    setup_sink_by_name(pow, "a").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(pow, "b").connect_driver(w_dp);
+    const int32_t pow_mw = a_val.mw + 2;
+    auto          pow_dp = pow.create_driver_pin(0);
+    set_bits(pow_dp, pow_mw + 1);
+    set_unsign(pow_dp);
+
+    // mask = pow - 1   (the low (m-n+1) bits set).
+    auto maskn = make_node(Ntype_op::Sum);
+    setup_sink_by_name(maskn, "a").connect_driver(pow_dp);
+    setup_sink_by_name(maskn, "b").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    auto mask_dp = maskn.create_driver_pin(0);
+    set_bits(mask_dp, pow_mw + 1);
+    set_unsign(mask_dp);
+
+    // result = shifted & mask
+    auto andn = make_node(Ntype_op::And);  // commutative: both operands feed sink "a"
+    setup_sink_by_name(andn, "a").connect_driver(sra_dp);
+    setup_sink_by_name(andn, "a").connect_driver(mask_dp);
+    bind_result(lnast_->get_name(dst), andn.create_driver_pin(0), a_val.mw + 1);
+
+    lower_range_assert(lo, hi);
+  }
+
+  // Emit a runtime `lgassert(m >= n)` guarding a dynamic range select against a
+  // descending range. (Phase 2 wires this to an lgassert Sub instance; the
+  // stub keeps the data-path lowering self-contained for now.)
+  void lower_range_assert(const Lnast_nid& /*lo*/, const Lnast_nid& /*hi*/) {}
 
   // The mask of a get_mask/set_mask is a full Dlop, never an int64: a 64-bit
   // (or wider) mask like 2^64-1 (`0x0ffffffffffffffff`, a full-width truncate)
@@ -3237,6 +3365,153 @@ private:
     auto not_node = make_node(Ntype_op::Not);
     setup_sink_by_name(not_node, "a").connect_driver(inner_dp);
     bind_result(lnast_->get_name(dst), not_node.create_driver_pin(0), 1);
+  }
+
+  // ── Bit-insensitive reductions (`foo#|/&/^/+[range]`) ────────────────────────
+  //
+  // prp2lnast lowers every `foo#OP[range]` to a `get_mask` (which packs the
+  // selected bits LSB-first into an unsigned slice `rr` of width popcount(mask))
+  // followed by the reduction node over `rr`. A comptime `foo` folds in
+  // constprop; only a RUNTIME `foo` reaches tolg here, so the reduction's single
+  // operand is always the already-lowered get_mask result, whose magnitude width
+  // (`av.mw`) is the selected-bit count `k`. An open `#[..]` masks every bit, so
+  // `k` is then `foo`'s full width — the "use the type's number of bits" rule.
+
+  // Explode the low `mw` bits of `src` into individual 1-bit driver pins (bit i
+  // packed to position 0 via Get_mask). Shared by the parity (XOR) and popcount
+  // (adder) trees.
+  [[nodiscard]] std::vector<Pin> explode_bits(const Pin& src, int32_t mw) {
+    const int32_t  n = mw > 0 ? mw : 1;
+    std::vector<Pin> bits;
+    bits.reserve(static_cast<size_t>(n));
+    for (int32_t i = 0; i < n; ++i) {
+      auto gm = make_node(Ntype_op::Get_mask);
+      setup_sink_by_name(gm, "a").connect_driver(src);
+      setup_sink_by_name(gm, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(i, i)));  // bit i only
+      auto b = gm.create_driver_pin(0);
+      set_bits(b, 2);  // 1 magnitude bit + sign bit
+      set_unsign(b);
+      bits.push_back(b);
+    }
+    return bits;
+  }
+
+  // `foo#|[range]`: OR-reduce the selected bits → int 0/1. The graph Ror cell
+  // reduces every bit of its operand (cgen emits `|expr`).
+  void lower_red_or(const Lnast_nid& nid) {
+    auto dst = lnast_->get_first_child(nid);
+    if (dst.is_invalid()) {
+      return;
+    }
+    auto a = lnast_->get_sibling_next(dst);
+    if (a.is_invalid()) {
+      return;
+    }
+    auto av   = leaf(a);
+    auto node = make_node(Ntype_op::Ror);
+    setup_sink_by_name(node, "a").connect_driver(av.pin);
+    bind_result(lnast_->get_name(dst), node.create_driver_pin(0), 1);
+  }
+
+  // `foo#&[range]`: AND-reduce → int 0/1. Sign-extend the packed slice from its
+  // top bit so an all-ones slice reads as the signed -1, then compare `== -1`
+  // (a width-independent all-ones test; 1 iff every selected bit is set).
+  void lower_red_and(const Lnast_nid& nid) {
+    auto dst = lnast_->get_first_child(nid);
+    if (dst.is_invalid()) {
+      return;
+    }
+    auto a = lnast_->get_sibling_next(dst);
+    if (a.is_invalid()) {
+      return;
+    }
+    auto          av = leaf(a);
+    const int32_t k  = av.mw > 0 ? av.mw : 1;  // selected-bit count
+    // Sext cell `b` operand is the kept bit COUNT (cgen slices [b-1:0]); the
+    // result is signed with width k, == -1 exactly when bits 0..k-1 are all set.
+    auto sx = make_node(Ntype_op::Sext);
+    setup_sink_by_name(sx, "a").connect_driver(av.pin);
+    setup_sink_by_name(sx, "b").connect_driver(create_const(*g_, *Dlop::create_integer(k)));
+    auto srr = sx.create_driver_pin(0);
+    set_bits(srr, k);
+    set_sign(srr);
+    auto eq = make_node(Ntype_op::EQ);  // commutative: both operands feed sink "a"
+    setup_sink_by_name(eq, "a").connect_driver(srr);
+    setup_sink_by_name(eq, "a").connect_driver(create_const(*g_, *Dlop::create_integer(-1)));
+    bind_result(lnast_->get_name(dst), eq.create_driver_pin(0), 1);
+  }
+
+  // `foo#^[range]`: XOR-reduce (parity) → int 0/1, via a balanced binary tree of
+  // 2-input Xor cells over the exploded bits (an odd leaf carries up a level).
+  void lower_red_xor(const Lnast_nid& nid) {
+    auto dst = lnast_->get_first_child(nid);
+    if (dst.is_invalid()) {
+      return;
+    }
+    auto a = lnast_->get_sibling_next(dst);
+    if (a.is_invalid()) {
+      return;
+    }
+    auto av   = leaf(a);
+    auto bits = explode_bits(av.pin, av.mw);
+    while (bits.size() > 1) {
+      std::vector<Pin> next;
+      next.reserve((bits.size() + 1) / 2);
+      for (size_t i = 0; i + 1 < bits.size(); i += 2) {
+        auto x = make_node(Ntype_op::Xor);  // commutative: both into "a"
+        setup_sink_by_name(x, "a").connect_driver(bits[i]);
+        setup_sink_by_name(x, "a").connect_driver(bits[i + 1]);
+        auto d = x.create_driver_pin(0);
+        set_bits(d, 2);
+        set_unsign(d);
+        next.push_back(d);
+      }
+      if (bits.size() & 1) {
+        next.push_back(bits.back());  // odd leaf rides to the next level
+      }
+      bits = std::move(next);
+    }
+    bind_result(lnast_->get_name(dst), bits.front(), 1);
+  }
+
+  // `foo#+[range]`: popcount (number of set bits) → integer, via a balanced
+  // binary adder tree over the exploded bits. Each Sum grows the width by one;
+  // the final result holds 0..k.
+  void lower_popcount(const Lnast_nid& nid) {
+    auto dst = lnast_->get_first_child(nid);
+    if (dst.is_invalid()) {
+      return;
+    }
+    auto a = lnast_->get_sibling_next(dst);
+    if (a.is_invalid()) {
+      return;
+    }
+    auto             av   = leaf(a);
+    auto             bits = explode_bits(av.pin, av.mw);
+    std::vector<Val> terms;
+    terms.reserve(bits.size());
+    for (const auto& b : bits) {
+      terms.push_back({b, 1});
+    }
+    while (terms.size() > 1) {
+      std::vector<Val> next;
+      next.reserve((terms.size() + 1) / 2);
+      for (size_t i = 0; i + 1 < terms.size(); i += 2) {
+        auto s = make_node(Ntype_op::Sum);  // both operands ADD on sink "a"
+        setup_sink_by_name(s, "a").connect_driver(terms[i].pin);
+        setup_sink_by_name(s, "a").connect_driver(terms[i + 1].pin);
+        const int32_t mw = std::max(terms[i].mw, terms[i + 1].mw) + 1;
+        auto          d  = s.create_driver_pin(0);
+        set_bits(d, mw + 1);
+        set_unsign(d);
+        next.push_back({d, mw});
+      }
+      if (terms.size() & 1) {
+        next.push_back(terms.back());
+      }
+      terms = std::move(next);
+    }
+    bind_result(lnast_->get_name(dst), terms.front().pin, terms.front().mw);
   }
 
   // Lower an if-branch body into a fresh write scope; rolls pin_map_ back so
@@ -3509,6 +3784,11 @@ private:
   std::vector<Lnast_nid>                                        pending_tgets_;
   bool                                                          tget_final_ = false;
   absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> range_map_;
+  // A `range` whose endpoints are NOT comptime constants (`a#[n..=m]` with
+  // runtime n/m). Keyed by the range tmp name; carries the lo/hi LNAST nids so
+  // lower_get_mask can build the shift+mask select. An open `lo..` form stores
+  // a const "nil" hi nid. (Comptime ranges stay in range_map_ as folded ints.)
+  absl::flat_hash_map<std::string, std::pair<Lnast_nid, Lnast_nid>> range_dyn_map_;
   std::vector<WriteMap>                                         branch_writes_;
   // Parallel to branch_writes_: per active branch, the pre-branch value of each
   // name it wrote (nullopt = absent before the branch). lower_branch replays

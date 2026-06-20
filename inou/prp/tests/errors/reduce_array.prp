@@ -1,0 +1,12 @@
+/*
+:name: reduce_array
+:type: error
+:error: requires an integer or boolean operand
+:help: enum, string, tuple, or array
+*/
+// A bit reduction needs an integer/boolean operand. An array is not a single
+// integer value, so `arr#^[...]` is a compile error.
+comb foo(a:u8) -> (z:u1) {
+  const arr:[4]u8 = (a, a, a, a)
+  z = arr#^[0..=2]   // locate_error_here
+}

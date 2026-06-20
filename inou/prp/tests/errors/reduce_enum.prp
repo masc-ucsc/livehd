@@ -1,0 +1,13 @@
+/*
+:name: reduce_enum
+:type: error
+:error: requires an integer or boolean operand
+:help: enum, string, tuple, or array
+*/
+// A bit reduction needs an integer/boolean operand. An enum value is a nominal
+// symbol (compare against names), not a bit vector, so `e#+[...]` is an error.
+comb foo() -> (z:u4) {
+  enum E = (A, B, C)
+  const e = E.B
+  z = e#+[0..=2]   // locate_error_here
+}
