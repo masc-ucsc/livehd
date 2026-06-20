@@ -137,7 +137,7 @@ mut arr = [1, 2, 3]                    // [] = array: all entries same type
 ```pyrope
 v#[3]            // bit 3            v#[1..=4]    // bit slice (zext result)
 v#sext[0..=2]    // sign-extended slice
-v#|[..]  v#&[..]  v#^[..]  v#+[..]   // or/and/xor-reduce (int 0/1), popcount
+v#|[..]  v#&[..]  v#^[..]  v#+[..]   // or/and/xor-reduce, popcount — DO NOT LOWER (see end)
 trans#[0] = v#[1]   // LHS bit assign; every dest bit driven exactly once
 const onehot = 1 << (1, 4, 3)        // == 0ub01_1010
 ```
@@ -150,10 +150,13 @@ destination (no `{a,b}` form).
 
 * `if c { } elif { } else { }` — also an expression form. `unique if` asserts
   mutually exclusive conditions (one-hot mux; replaces tri-state).
-* `match` — exactly-one-branch semantics, **the `else` arm is mandatory**
-  (parse error without it). A bare value means `==`. Arms: `== v`, `in (2,3)`,
-  `case (a=1)`, `< 5`, `else`. The selector can declare locals:
-  `match const t = f(); t { ... }`.
+* `match` — **parallel-unique** case (implicit `assume` of mutual exclusivity),
+  **NOT priority**, with **the `else` arm mandatory** (parse error without it). A
+  bare value means `==`. Arms: `== v`, `in (2,3)`, `case (a=1)`, `< 5`, `else`.
+  If two arms can match the same value (e.g. `== 0` and `< 8`), the lowered
+  `__hotmux` gets a non-one-hot select and the output is **X** — for
+  priority/overlapping conditions use `if/elif/else`. The selector can declare
+  locals: `match const t = f(); t { ... }`.
 * There are **no `when`/`unless` trailing gates** (removed from the
   language). All gating — comptime or runtime — uses an `if` block:
   `if DEBUG { assert(x) }`, `if enable { count += 1 }`. A comptime-false
@@ -291,8 +294,8 @@ mod counter1(enable:bool) -> (value:u8@[0]) {
   value = count
   if enable { wrap count += 1 }
 }
-mod counter2(enable:bool) -> (reg count:u8@[0]) {  // registered output: q is the output
-  if enable { wrap count += 1 }
+mod counter2(enable:bool) -> (reg count:u8@[0]) {  // registered output (q is the output)
+  if enable { wrap count += 1 }                    //   — does NOT lower yet (home -1); prefer counter1
 }
 pipe[1] counter3(enable:bool) -> (reg count:u8) {  // pipe state output: home stage N-1
   if enable { wrap count += 1 }
@@ -385,6 +388,39 @@ the authoritative list). Do not generate these unless explicitly asked:
   (`reg mem2 = reset_value` — literal/scalar init contents DO work);
   `macro=` attribute; `covercase`, in-language `lec()`
 
+**Documented forms that do NOT lower (verified by differential LEC testing
+2026-06-19 — `upass.tolg` errors out; use the workaround):**
+
+* **Reduction operators** `a#|[..]` `a#&[..]` `a#^[..]` `a#+[..]` (popcount) —
+  parse + elaborate, then `node type 'red_or'/.../'popcount' has no hardware
+  lowering`. Build it explicitly: or-reduce `a != 0`; and-reduce-of-range
+  `a#[lo..=hi] == ((1<<(hi-lo+1))-1)`; parity via an XOR tree / chained `^`.
+* **`implies` as a hardware signal** — `r = p implies q` → `call to 'implies'
+  has no hardware lowering`. Write `r = (not p) or q`. (`implies` still works
+  inside `assert`/`cassert`.)
+* **Registered-output interface form** `mod f(...) -> (reg count:u8@[0])` →
+  `state register 'count' homes at stage 0 ... requires home -1`. Use a body
+  register: `mod f(...) -> (count:u8@[0]) { reg c:u8=0; count=c; ... }`.
+* **Hierarchical enums** `enum E=(,a=(,x,,y), ,b)` → `read of undefined
+  variable 'x'` (nested member names read as scope). Use a flat enum.
+* **Tuple/struct-typed ports** `comb f(ar:(x:u3,y:i4), ...)` and
+  `-> (p:(q:u8,r:u8))` → `unresolved reference` / `output 'p.q' is never
+  driven`. Flatten to scalar ports (`ar_x:u3, ar_y:i4`).
+* **Runtime (non-comptime) bit index** `a#[i]` → `get_mask mask operand is not
+  a constant or range`. Use `(a >> i)#[0]`.
+* **Runtime index into a const-array LITERAL** `const arr=[..]; arr[i]` → not
+  resolved. A typed `mut arr:[N]uW = ...` (or a `reg` memory) DOES lower a
+  runtime index.
+
+**Silently-WRONG lowerings (compile OK but the netlist is incorrect — avoid):**
+
+* `i8#[..]` (full-width slice of a *signed* value) collapses to 1 bit (`u8#[..]`
+  is fine). Slice an explicit range `a#[0..=7]`.
+* Open-ended bit slice `a#[k..]` drops the offset (returns the low bits). Use the
+  closed range `a#[k..=<msb>]`.
+* Two+ bit-slice writes to the *same register* (`r#[0..=7]=a; r#[8..=11]=b`) keep
+  only the last. Build the value in a `mut`, then assign the reg once.
+
 Runtime `wrap`/`sat` and enum-typed register resets ARE implemented.
 Imports: `import("file")` (all pub) or `import("file.pub_name")` (one
 entry); directories use slashes; no glob patterns.
@@ -400,7 +436,17 @@ lhd compile foo.prp                   # parse + lower + diagnostics (no emit; qu
 lhd compile foo.prp --top NAME --emit verilog:foo.v --workdir tmp   # full lowering + netlist
 lhd scan foo.prp                      # list the file's imports
 lhd lsp                               # Pyrope language server over stdio (prplsp wrapper)
+# equivalence-check a .prp against a golden .v (module names: prp = file.entity):
+lhd lec --impl foo.prp --ref gold.v --impl-top foo.top --ref-top gold --set lec.solver=cvc5
+lhd lec --impl foo.prp --ref gold.v --impl-top foo.top --ref-top gold --set lec.solver=lgyosys
 ```
+
+`lhd lec` has two backends and **they can disagree**: `cvc5` reasons on the
+LGraph directly; `lgyosys` reasons on the cgen-emitted Verilog — so a cgen bug,
+or cvc5 k-induction on a wide enum/state reg, or a no-reset flop, makes one
+pass while the other fails. When a verdict surprises you, get an independent
+oracle: emit the netlist (`--emit verilog`) and simulate it against the golden
+with `iverilog`/`verilator` over an exhaustive (small) or random input sweep.
 
 Diagnostics render clang-style on stderr; add `--emit diagnostics:PATH` for a
 JSONL stream (fields: `severity`, `code`, `category`, `pass`, `message`,

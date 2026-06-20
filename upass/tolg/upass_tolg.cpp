@@ -2884,11 +2884,18 @@ private:
     }
     auto mask = mask_from_operand(mask_op);
 
-    auto node = make_node(Ntype_op::Get_mask);
-    setup_sink_by_name(node, "a").connect_driver(leaf(val).pin);
+    auto a_val = leaf(val);
+    auto node  = make_node(Ntype_op::Get_mask);
+    setup_sink_by_name(node, "a").connect_driver(a_val.pin);
     setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *mask));
-    auto    drv = node.create_driver_pin(0);
-    int32_t mw  = mask_popcount(*mask);
+    auto drv = node.create_driver_pin(0);
+    // An all-ones mask (-1) is the open `#[..]` form: it selects EVERY bit of
+    // `a`, so the result width is `a`'s width. popcount(-1) is NOT a finite bit
+    // count (the spec mask is infinite ones); using it collapsed the result to
+    // ~1 bit, which OpW::firstw then propagated into a following shift and the
+    // SMT LEC truncated the shift operand (a false "not equivalent"). A finite
+    // (non-negative) mask packs popcount(mask) selected bits, LSB-first.
+    int32_t mw = (mask->is_just_i64() && mask->to_just_i64() == -1) ? a_val.mw : mask_popcount(*mask);
     bind_result(lnast_->get_name(dst), drv, mw);
   }
 
