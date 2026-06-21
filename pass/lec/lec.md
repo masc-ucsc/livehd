@@ -65,11 +65,13 @@ everything the encoder needs.
 - **Sequential — BMC from reset** (`lec.engine=bmc`): start from the reset state
   (each flop's constant `initial`, or a shared fresh symbol for a reset-less
   flop) and chain each design's own next-state forward `bound` cycles, so only
-  **reachable** states are checked. Reset-phase separation (`lec.phase`): `free`
-  (resets range freely), `reset` (hold every primary reset asserted each cycle
-  and miter — agreement under reset), `run` (hold reset `reset_cycles` cycles to
-  drive both into reset state, then deassert and miter the following cycles —
-  free-running agreement). Primary resets are auto-detected (inputs that drive a
+  **reachable** states are checked. Reset-phase separation (`lec.phase`):
+  `after_reset` (default; hold reset `reset_cycles` cycles to drive both into
+  reset state, then deassert and miter the following cycles — free-running
+  agreement), `just_reset` (hold every primary reset asserted each cycle and
+  miter — agreement during reset), `free_toreset` (resets range freely; the
+  solver may still assert them, exploring odd reset patterns), `full` (require
+  agreement in BOTH `just_reset` and `after_reset`). Primary resets are auto-detected (inputs that drive a
   flop `reset_pin`, plus canonical `rst`/`reset`/`*_n` names with polarity
   inferred) or given explicitly via `lec.reset`.
 - **Memory**: `Memory` cells → SMT **theory of arrays**. Corresponding memories
@@ -155,7 +157,7 @@ inline flattening.
 
 ```
 lhd lec --impl impl.prp --ref ref.v
-lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=bmc --set lec.phase=run
+lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=bmc --set lec.phase=after_reset
 lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo   # yosys/lgcheck backend
 ```
 
@@ -168,11 +170,11 @@ a silent no-op).
 |---|---|---|
 | `lec.engine` | discharge frame: `bmc` \| `ind` (inductive flop-cut) \| `ic3` | `ind` |
 | `lec.solver` | backend: `cvc5` (in-process) \| `bitwuzla` (opt-in, may be unbuilt) \| `lgyosys` (yosys/lgcheck) | `cvc5` |
-| `lec.bound` | BMC / induction depth bound `k` | `20` |
+| `lec.bound` | BMC / induction depth bound `k` | `6` |
 | `lec.timeout` | per-query wall-clock seconds (`0` = none) | `0` |
 | `lec.witness` | print the counterexample on `Refuted` | `true` |
-| `lec.phase` | BMC reset phase: `free` \| `reset` \| `run` | `free` |
-| `lec.reset_cycles` | `run` phase: reset-hold prologue length | `2` |
+| `lec.phase` | BMC reset phase: `after_reset` \| `just_reset` \| `free_toreset` \| `full` | `after_reset` |
+| `lec.reset_cycles` | `after_reset` phase: reset-hold prologue length | `2` |
 | `lec.reset` | explicit reset inputs `name[:lo\|:hi]`, comma-sep (else auto-detect) | `""` |
 | `lec.cross` | also run `lgcheck` and assert agreement (bring-up only) | `false` |
 

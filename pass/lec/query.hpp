@@ -35,22 +35,24 @@ struct Query_result {
 struct Lec_options {
   std::string engine  = "ind";   // bmc | ind (k-induction) | ic3
   std::string solver  = "cvc5";  // cvc5 | bitwuzla (not yet built)
-  int         bound   = 20;      // BMC / induction depth
+  int         bound   = 6;       // BMC / induction depth
   int         timeout = 0;       // per-query seconds (0 = none)
   bool        witness = true;    // print counterexample on Refuted
 
   // Reset-phase separation for the BMC engine (lec.phase). The reset-asserted
   // and the free-running behaviors are best checked SEPARATELY:
-  //   free  (default): reset input ranges freely; the unrolling mixes both.
-  //   reset : hold every primary reset input ASSERTED on every cycle and miter
-  //           each cycle — proves the two designs agree under reset.
-  //   run   : hold reset asserted for `reset_cycles` cycles (NO miter — just to
-  //           drive both into their reset state), then DEASSERT it and miter
-  //           the following `bound` cycles — proves free-running equivalence.
+  //   after_reset (default): hold reset asserted for `reset_cycles` cycles (NO
+  //           miter — just to drive both into their reset state), then DEASSERT
+  //           it and miter the following `bound` cycles — free-running equivalence.
+  //   just_reset : hold every primary reset input ASSERTED on every cycle and
+  //           miter each cycle — proves the two designs agree DURING reset.
+  //   free_toreset : reset input ranges freely; the unrolling mixes both (the
+  //           solver may still assert reset, so it explores odd reset patterns).
+  //   full : run BOTH just_reset and after_reset and require equivalence in each.
   // A primary reset input is one that drives some flop's reset_pin directly;
   // its asserted level follows the flop's negreset attribute (active-low -> 0).
-  std::string phase        = "free";  // free | reset | run
-  int         reset_cycles = 2;       // run phase: reset-hold prologue length
+  std::string phase        = "after_reset";  // after_reset | just_reset | free_toreset | full
+  int         reset_cycles = 2;               // after_reset phase: reset-hold prologue length
 
   // Optional explicit reset-input spec (lec.reset), comma-separated, each
   // `name` (polarity inferred from a _n/_ni suffix) or `name:lo` / `name:hi`.
@@ -86,6 +88,9 @@ inline std::string lec_options_range_error(const Lec_options& o) {
   }
   if (o.reset_cycles < 0 || o.reset_cycles > kLecMaxUnroll) {
     return "lec.reset_cycles out of range (0.." + std::to_string(kLecMaxUnroll) + "), got " + std::to_string(o.reset_cycles);
+  }
+  if (o.phase != "after_reset" && o.phase != "just_reset" && o.phase != "free_toreset" && o.phase != "full") {
+    return "lec.phase unknown '" + o.phase + "' (after_reset | just_reset | free_toreset | full)";
   }
   return {};
 }

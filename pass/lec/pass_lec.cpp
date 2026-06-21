@@ -29,14 +29,15 @@ void Pass_lec::setup() {
                        "equivalence backend: cvc5 (default, in-process SMT) | bitwuzla (in-process SMT) | "
                        "lgyosys (kernel-routed yosys/lgcheck; reads Verilog directly)",
                        "cvc5");
-  m.add_label_optional("bound", "BMC / induction depth bound k", "20");
+  m.add_label_optional("bound", "BMC / induction depth bound k", "6");
   m.add_label_optional("timeout", "per-query cvc5 wall-clock seconds (0 = unbounded; default bounds the CLI so a hard miter degrades to UNKNOWN instead of freezing)", "120");
   m.add_label_optional("witness", "print the counterexample/witness on Refuted", "true");
   m.add_label_optional("phase",
-                       "bmc reset-phase: free (default) | reset (hold reset asserted, check) | run "
-                       "(hold reset N cycles, then deassert and check)",
-                       "free");
-  m.add_label_optional("reset_cycles", "run phase: reset-hold prologue length before checking", "2");
+                       "bmc reset phase: after_reset (default; hold reset N cycles, deassert, check "
+                       "free-running) | just_reset (hold reset asserted, check during reset) | "
+                       "free_toreset (reset input unconstrained) | full (just_reset AND after_reset)",
+                       "after_reset");
+  m.add_label_optional("reset_cycles", "after_reset phase: reset-hold prologue length before checking", "2");
   m.add_label_optional("reset", "explicit reset inputs: name[:lo|:hi], comma-separated (else auto-detect)", "");
   m.add_label_optional("match",
                        "explicit state correspondence: 'ref=impl' flop pairs (comma/newline-separated) or @FILE; "
@@ -57,10 +58,10 @@ void Pass_lec::lec(Eprp_var& var) {
   lec::Lec_options o;
   o.engine  = std::string{var.get("engine", "ind")};
   o.solver  = std::string{var.get("solver", "cvc5")};
-  o.bound   = str_tools::to_i(var.get("bound", "20"));
+  o.bound   = str_tools::to_i(var.get("bound", "6"));
   o.timeout = str_tools::to_i(var.get("timeout", "120"));
   o.witness = parse_bool(var.get("witness", "true"));
-  o.phase        = std::string{var.get("phase", "free")};
+  o.phase        = std::string{var.get("phase", "after_reset")};
   o.reset_cycles = str_tools::to_i(var.get("reset_cycles", "2"));
   o.reset        = std::string{var.get("reset", "")};
   o.match        = lec::parse_match_pairs(var.get("match", ""));  // inline pairs (@FILE only via `lhd lec`)

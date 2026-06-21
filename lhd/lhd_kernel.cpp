@@ -2701,10 +2701,10 @@ void lec_command(Options& opts, Result& res) {
   livehd::lec::Lec_options o;
   o.engine  = label("engine", "ind");
   o.solver  = solver;  // cvc5 | bitwuzla
-  o.bound   = std::atoi(label("bound", "20").c_str());
+  o.bound   = std::atoi(label("bound", "6").c_str());
   o.timeout = std::atoi(label("timeout", "120").c_str());  // bound the CLI: hard miters degrade to UNKNOWN, never freeze (0 = unbounded)
   o.witness = label("witness", "true") != "false" && label("witness", "true") != "0";
-  o.phase        = label("phase", "free");
+  o.phase        = label("phase", "after_reset");
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
   o.reset        = label("reset", "");
 

@@ -65,13 +65,19 @@ expect() {  # $1=label $2=got $3=want
   else echo "ok: $1 -> $2"; fi
 }
 
-# pair A: equivalent only under reset
-expect "A reset" "$(verdict a2_lg a1_lg cnt reset)" "PROVEN equivalent"
-expect "A run"   "$(verdict a2_lg a1_lg cnt run)"   "REFUTED (not equivalent)"
+# pair A: equivalent only during reset
+expect "A just_reset"  "$(verdict a2_lg a1_lg cnt just_reset)"  "PROVEN equivalent"
+expect "A after_reset" "$(verdict a2_lg a1_lg cnt after_reset)" "REFUTED (not equivalent)"
 
-# pair B: equivalent only while running
-expect "B reset" "$(verdict b2_lg b1_lg dut reset)" "REFUTED (not equivalent)"
-expect "B run"   "$(verdict b2_lg b1_lg dut run)"   "PROVEN equivalent"
+# pair B: equivalent only while running (after reset)
+expect "B just_reset"  "$(verdict b2_lg b1_lg dut just_reset)"  "REFUTED (not equivalent)"
+expect "B after_reset" "$(verdict b2_lg b1_lg dut after_reset)" "PROVEN equivalent"
+
+# `full` = just_reset AND after_reset: each pair fails one stage, so full REFUTES both;
+# a design compared against itself is equivalent in BOTH stages, so full PROVES it.
+expect "A full"      "$(verdict a2_lg a1_lg cnt full)" "REFUTED (not equivalent)"
+expect "B full"      "$(verdict b2_lg b1_lg dut full)" "REFUTED (not equivalent)"
+expect "self full"   "$(verdict a1_lg a1_lg cnt full)" "PROVEN equivalent"
 
 if [ $fail -ne 0 ]; then echo "lec_phase_test: FAILED"; exit 1; fi
 echo "lec_phase_test: PASSED"

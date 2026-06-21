@@ -111,6 +111,31 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     return res;
   }
 
+  // `full` = require equivalence in BOTH the during-reset (just_reset) and the
+  // free-running (after_reset) windows. Run them as two self-contained sub-queries
+  // (each builds its own cvc5 solver, so they are independent) and AND the
+  // verdicts. Sequential + short-circuit: a bring-up bug usually trips just_reset
+  // first, and skipping the after_reset solve once it has already failed is faster
+  // than running both. They could run on two threads (hhds reads are thread-safe),
+  // but cvc5's cross-instance thread-safety is unverified, so we keep it serial.
+  if (opts.engine == "bmc" && opts.phase == "full") {
+    Lec_options  o1 = opts;
+    o1.phase        = "just_reset";
+    Query_result r1 = prove_equal(ref, impl, o1, sub_lib);
+    if (r1.verdict != Verdict::Proven) {
+      r1.detail = "full / just_reset stage: " + r1.detail;
+      return r1;
+    }
+    Lec_options  o2 = opts;
+    o2.phase        = "after_reset";
+    Query_result r2 = prove_equal(ref, impl, o2, sub_lib);
+    r2.detail       = (r2.verdict == Verdict::Proven
+                           ? "full: equivalent in BOTH just_reset and after_reset; after_reset stage: "
+                           : "full / after_reset stage (just_reset already PROVEN): ")
+                + r2.detail;
+    return r2;
+  }
+
   // Explicit state-correspondence (lec.match): canon(impl_name) -> canon(ref_name),
   // so a flop the user paired with a differently-named flop on the other design
   // collapses onto one shared cut key (the ref-side canon). `eff(hier)` is the
@@ -275,7 +300,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   // reachable within N cycles are explored — sound for that bound (this is what
   // yosys' own lgcheck does with its bounded miter).
   if (opts.engine == "bmc") {
-    const int N = opts.bound > 0 ? opts.bound : 20;
+    const int N = opts.bound > 0 ? opts.bound : 6;
     Encoder   enc(tm);
     enc.set_sub_lib(sub_lib);
     enc.set_name_alias(&name_alias);
@@ -359,8 +384,8 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       return true;
     };
 
-    const bool phase_reset = opts.phase == "reset";
-    const bool phase_run   = opts.phase == "run";
+    const bool phase_reset = opts.phase == "just_reset";
+    const bool phase_run   = opts.phase == "after_reset";
     if (phase_reset || phase_run) {
       if (!opts.reset.empty()) {
         // Explicit override: authoritative list of reset inputs + polarity.
@@ -458,6 +483,26 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 
     cvc5::Term bad;
     int        uid = 0;  // unique suffix for fresh per-cycle state vars
+
+    // Witness recording: keep each checked cycle's per-output (ref,impl) terms and
+    // each cycle's primary-input symbol, so a REFUTED BMC run can report WHICH
+    // output diverges at WHICH step under WHAT input trace (the BMC engine, unlike
+    // the inductive miter, otherwise emits no counterexample — leaving `lhd lec`
+    // with nothing to iterate on). Populated only when witnesses are requested.
+    struct Wit_out {
+      int         cyc;
+      std::string name;
+      cvc5::Term  rv;
+      cvc5::Term  iv;
+    };
+    struct Wit_in {
+      int         cyc;
+      std::string name;
+      cvc5::Term  t;
+    };
+    std::vector<Wit_out> wit_outs;
+    std::vector<Wit_in>  wit_ins;
+
     for (int cyc = 0; cyc < total_cyc; ++cyc) {
       // `run` phase: the first `reset_hold` cycles hold reset asserted and are
       // NOT mitered (prologue); the rest are the checked window. `reset` phase:
@@ -520,6 +565,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         Val v{t, info.w, info.sgn};
         sh_ref[name]  = v;
         sh_impl[name] = v;
+        if (opts.witness) {
+          wit_ins.push_back({cyc, name, t});
+        }
       }
       for (const auto& [k, v] : ref_state) {
         sh_ref[k] = v;
@@ -557,8 +605,13 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
             continue;
           }
           int        w    = std::max(rv.width, it->second.width);
-          cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, rv, w), fit_to(tm, it->second, w)});
+          cvc5::Term rfit = fit_to(tm, rv, w);
+          cvc5::Term ifit = fit_to(tm, it->second, w);
+          cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {rfit, ifit});
           bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
+          if (opts.witness) {
+            wit_outs.push_back({cyc, name, rfit, ifit});
+          }
         }
       }
 
@@ -583,7 +636,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 
     res.detail = "solver=cvc5 (bmc, phase=" + opts.phase + ", " + std::to_string(N) + " checked steps"
                + (reset_hold ? " after " + std::to_string(reset_hold) + " reset-hold" : "")
-               + (reset_negset.empty() && opts.phase != "free" ? "; WARNING no primary reset input found" : "") + ")";
+               + (reset_negset.empty() && opts.phase != "free_toreset" ? "; WARNING no primary reset input found" : "") + ")";
     if (bad.isNull()) {
       res.verdict = Verdict::Proven;
       return res;
@@ -594,6 +647,74 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       res.verdict = Verdict::Proven;
     } else if (r.isSat()) {
       res.verdict = Verdict::Refuted;
+      // Build the counterexample: the EARLIEST checked step that diverges (the
+      // origin of the bug — later steps just inherit it), the diverging outputs
+      // there (ref vs impl decimal values), and the primary-input trace driving
+      // them up to that step. This is what `lhd lec` surfaces so the user can
+      // localize the mismatch and replay it.
+      auto join_ordered = [](const std::vector<std::string>& toks, size_t cap) {
+        std::string out;
+        size_t      shown = std::min(cap, toks.size());
+        for (size_t i = 0; i < shown; ++i) {
+          if (!out.empty()) {
+            out += ", ";
+          }
+          out += toks[i];
+        }
+        if (toks.size() > cap) {
+          out += ", (+" + std::to_string(toks.size() - cap) + " more)";
+        }
+        return out;
+      };
+      int first_bad = -1;
+      for (const auto& o : wit_outs) {
+        cvc5::Term rval = solver.getValue(o.rv);
+        cvc5::Term ival = solver.getValue(o.iv);
+        if (rval.isNull() || ival.isNull()) {
+          continue;
+        }
+        if (rval.getBitVectorValue(10) != ival.getBitVectorValue(10) && (first_bad < 0 || o.cyc < first_bad)) {
+          first_bad = o.cyc;
+        }
+      }
+      if (first_bad >= 0) {
+        std::vector<std::string> dtoks;
+        for (const auto& o : wit_outs) {
+          if (o.cyc != first_bad) {
+            continue;
+          }
+          cvc5::Term rval = solver.getValue(o.rv);
+          cvc5::Term ival = solver.getValue(o.iv);
+          if (rval.isNull() || ival.isNull()) {
+            continue;
+          }
+          auto rs = rval.getBitVectorValue(10);
+          auto is = ival.getBitVectorValue(10);
+          if (rs != is) {
+            dtoks.push_back(display_name(o.name) + "(ref=" + rs + " impl=" + is + ")");
+          }
+        }
+        std::sort(dtoks.begin(), dtoks.end());
+        std::vector<std::string> itoks;
+        for (const auto& in : wit_ins) {
+          if (in.cyc > first_bad) {
+            continue;  // trace only up to the first diverging step
+          }
+          cvc5::Term v = solver.getValue(in.t);
+          if (v.isNull()) {
+            continue;
+          }
+          std::string lbl = in.cyc < reset_hold ? ("rst" + std::to_string(in.cyc))
+                                                : ("s" + std::to_string(in.cyc - reset_hold + 1));
+          itoks.push_back(lbl + "." + in.name + "=" + v.getBitVectorValue(10));
+        }
+        std::sort(itoks.begin(), itoks.end());
+        res.witness = "first divergence at checked step " + std::to_string(first_bad - reset_hold + 1) + "/"
+                    + std::to_string(N) + ": " + join_ordered(dtoks, 32);
+        if (!itoks.empty()) {
+          res.witness += " @ inputs " + join_ordered(itoks, 64);
+        }
+      }
     } else {
       res.verdict  = Verdict::Unknown;
       res.detail  += "; checkSat returned unknown";
