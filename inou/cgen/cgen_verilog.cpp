@@ -84,20 +84,55 @@ Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir, bool _srcmap)
     : verbose(_verbose), odir(_odir), srcmap(_srcmap), nrunning(0) {
   static std::once_flag init_once;
   std::call_once(init_once, [] {
-    reserved_keyword.insert("reg");
-    reserved_keyword.insert("input");
-    reserved_keyword.insert("output");
-    reserved_keyword.insert("wire");
-    reserved_keyword.insert("assign");
-    reserved_keyword.insert("always");
-    reserved_keyword.insert("posedge");
-    reserved_keyword.insert("negedge");
-    reserved_keyword.insert("module");
-    reserved_keyword.insert("if");
-    reserved_keyword.insert("else");
-    reserved_keyword.insert("begin");
-    reserved_keyword.insert("end");
-    reserved_keyword.insert("logic");
+    // Full Verilog-2005 (IEEE 1364) + SystemVerilog (IEEE 1800-2017, Annex B)
+    // reserved word set. A Pyrope signal/port/instance name that collides with
+    // any of these MUST be emitted as an escaped identifier (`\name `), or
+    // yosys / iverilog -g2012 / verilator reject the netlist (e.g. a signal
+    // named `packed`, `bit`, `type`). get_scaped_name() consults this set.
+    reserved_keyword.insert({
+        "accept_on",      "alias",        "always",       "always_comb",  "always_ff",    "always_latch",
+        "and",            "assert",       "assign",       "assume",       "automatic",    "before",
+        "begin",          "bind",         "bins",         "binsof",       "bit",          "break",
+        "buf",            "bufif0",       "bufif1",       "byte",         "case",         "casex",
+        "casez",          "cell",         "chandle",      "checker",      "class",        "clocking",
+        "cmos",           "config",       "const",        "constraint",   "context",      "continue",
+        "cover",          "covergroup",   "coverpoint",   "cross",        "deassign",     "default",
+        "defparam",       "design",       "disable",      "dist",         "do",           "edge",
+        "else",           "end",          "endcase",      "endchecker",   "endclass",     "endclocking",
+        "endconfig",      "endfunction",  "endgenerate",  "endgroup",     "endinterface", "endmodule",
+        "endpackage",     "endprimitive", "endprogram",   "endproperty",  "endspecify",   "endsequence",
+        "endtable",       "endtask",      "enum",         "event",        "eventually",   "expect",
+        "export",         "extends",      "extern",       "final",        "first_match",  "for",
+        "force",          "foreach",      "forever",      "fork",         "forkjoin",     "function",
+        "generate",       "genvar",       "global",       "highz0",       "highz1",       "if",
+        "iff",            "ifnone",       "ignore_bins",  "illegal_bins", "implements",   "implies",
+        "import",         "incdir",       "include",      "initial",      "inout",        "input",
+        "inside",         "instance",     "int",          "integer",      "interconnect", "interface",
+        "intersect",      "join",         "join_any",     "join_none",    "large",        "let",
+        "liblist",        "library",      "local",        "localparam",   "logic",        "longint",
+        "macromodule",    "matches",      "medium",       "modport",      "module",       "nand",
+        "negedge",        "nettype",      "new",          "nexttime",     "nmos",         "nor",
+        "noshowcancelled", "not",         "notif0",       "notif1",       "null",         "or",
+        "output",         "package",      "packed",       "parameter",    "pmos",         "posedge",
+        "primitive",      "priority",     "program",      "property",     "protected",    "pull0",
+        "pull1",          "pulldown",     "pullup",       "pulsestyle_ondetect", "pulsestyle_onevent", "pure",
+        "rand",           "randc",        "randcase",     "randsequence", "rcmos",        "real",
+        "realtime",       "ref",          "reg",          "reject_on",    "release",      "repeat",
+        "restrict",       "return",       "rnmos",        "rpmos",        "rtran",        "rtranif0",
+        "rtranif1",       "s_always",     "s_eventually", "s_nexttime",   "s_until",      "s_until_with",
+        "scalared",       "sequence",     "shortint",     "shortreal",    "showcancelled", "signed",
+        "small",          "soft",         "solve",        "specify",      "specparam",    "static",
+        "string",         "strong",       "strong0",      "strong1",      "struct",       "super",
+        "supply0",        "supply1",      "sync_accept_on", "sync_reject_on", "table",     "tagged",
+        "task",           "this",         "throughout",   "time",         "timeprecision", "timeunit",
+        "tran",           "tranif0",      "tranif1",      "tri",          "tri0",         "tri1",
+        "triand",         "trior",        "trireg",       "type",         "typedef",      "union",
+        "unique",         "unique0",      "unsigned",     "until",        "until_with",   "untyped",
+        "use",            "uwire",        "var",          "vectored",     "virtual",      "void",
+        "wait",           "wait_order",   "wand",         "weak",         "weak0",        "weak1",
+        "while",          "wildcard",     "wire",         "with",         "within",       "wor",
+        "xnor",           "xor",
+    });
   });
 }
 
@@ -196,6 +231,23 @@ std::string Cgen_verilog::get_scaped_name(std::string_view name) {
   }
 
   return res_name;
+}
+
+bool Cgen_verilog::sra_operand_signed(const hhds::Pin_class& dpin) {
+  if (dpin.is_invalid()) {
+    return false;
+  }
+  if (!is_unsign(dpin)) {
+    return true;
+  }
+  // The signed hint is dropped on every op output by tolg's bind_result, so a
+  // chained right shift `(a>>b)>>b` reads as unsigned at the outer SRA even
+  // though the inner SRA preserves the signed `a`. Walk through the SRA chain.
+  auto node = dpin.get_master_node();
+  if (!node.is_invalid() && type_op_of(node) == Ntype_op::SRA) {
+    return sra_operand_signed(get_driver(find_sink_pin(node, "a")));
+  }
+  return false;
 }
 
 std::string Cgen_verilog::get_append_to_name(std::string_view name, std::string_view ext) {
@@ -1099,9 +1151,12 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
     // forces the left operand signed even when `val`'s text would otherwise read
     // unsigned. Only do this for a genuinely signed operand: `$signed`-wrapping
     // an unsigned value would sign-extend a value that should zero-fill.
-    if (is_unsign(a_dpin)) {
+    if (!sra_operand_signed(a_dpin)) {
       final_expr = absl::StrCat(val_expr, " >>> ", amt_expr);
     } else {
+      // A nested SRA's operand also takes this branch (its inner shift already
+      // emitted self-contained signed text), so the outer `>>>` is isolated too
+      // and the enclosing unsigned context cannot demote it to a logical shift.
       final_expr = absl::StrCat("$signed($signed(", val_expr, ") >>> ", amt_expr, ")");
     }
   } else if (op == Ntype_op::Nconst) {

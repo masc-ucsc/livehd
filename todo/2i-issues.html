@@ -11,15 +11,21 @@
 <main>
 <h1><strong class="item-id">2i-issues</strong> Pyrope lowering &amp; cgen emission defects (non-LEC)</h1>
 
-<p><span class="status landed">C, D, E landed 2026-06-20</span> — three of these
-six remain (A, B, F); see the landed section for C/D/E. Originally six
-independent compiler bugs surfaced by the differential test corpus in
+<p><span class="status landed">C, E, F landed; D partial 2026-06-20</span> — after the
+latest fix round and an adversarial re-verification: <strong>C</strong> (tuple input
+port), <strong>E</strong> (signed-shift idiom, including its nested-SRA case) and
+<strong>F</strong> (reserved-word signal names — cgen now escapes the full IEEE-1800
+keyword set) are fully fixed and removed; <strong>D</strong> (tuple output port) is
+partially fixed — the canonical / flat / per-field writes land but a conditional or
+nested whole-tuple write still fails (see the D residual subtask); <strong>A</strong>
+and <strong>B</strong> remain fully open. Originally six independent
+compiler bugs surfaced by the differential test corpus in
 <code>unexpected_semantics/</code> and <code>unexpected_bugs/</code> (plus the one
 <code>cgen</code> emission bug filed under <code>lec_missmatch/shift_combo_i8</code> — it
 is a codegen defect, <em>not</em> a LEC-engine issue). Each is valid, documented
 Pyrope that today either <strong>hard-errors in lowering</strong> or
-<strong>emits a wrong / invalid netlist</strong>. Pick any one and work it
-end-to-end from its subtask below — they have no ordering between them.</p>
+<strong>emits a wrong / invalid netlist</strong>. Pick any open or residual row and
+work it end-to-end from its subtask below — they have no ordering between them.</p>
 
 <p><strong>Scope.</strong> This page deliberately excludes the LEC-engine
 precision issues (cvc5 false-refutes on hotmux / FSM-state / memory, the
@@ -35,10 +41,7 @@ reading the source on <strong>2026-06-20</strong> against a fresh
 <tbody>
 <tr><td><strong>A</strong></td><td>Registered-output interface <code>-&gt; (reg count:u8@[0])</code></td><td>hard error</td><td><code>homes at stage 0 … requires home -1</code></td><td><code>upass/tolg/upass_tolg.cpp:4525</code></td></tr>
 <tr><td><strong>B</strong></td><td>Hierarchical enum <code>enum E=(,a=(,x,,y),…)</code></td><td>hard error</td><td><code>read of undefined variable 'x'</code></td><td><code>inou/prp/prp2lnast.cpp:4362</code></td></tr>
-<tr><td><strong>C</strong></td><td>Tuple-typed <em>input</em> port <code>(ar:(x:u3,y:i4), …)</code></td><td><span class="status landed">landed 2026-06-20</span></td><td>compiles + LEC-equiv (see landed)</td><td><code>upass/ssa/upass_ssa.cpp</code></td></tr>
-<tr><td><strong>D</strong></td><td>Tuple-typed <em>output</em> port + whole-tuple write</td><td><span class="status landed">landed 2026-06-20</span></td><td>compiles + LEC-equiv (see landed)</td><td><code>upass/ssa/upass_ssa.cpp</code> + <code>upass/constprop/upass_constprop.hpp</code></td></tr>
-<tr><td><strong>E</strong></td><td>Signed-shift idiom <code>(a&lt;&lt;b)^(a&gt;&gt;b)</code> on <code>i8</code></td><td><span class="status landed">landed 2026-06-20</span></td><td>iverilog 0/1024 + LEC-equiv (see landed)</td><td><code>inou/cgen/cgen_verilog.cpp:1086</code></td></tr>
-<tr><td><strong>F</strong></td><td>Reserved word as a signal name (<code>reg packed:…</code>)</td><td>invalid netlist</td><td>emits bare <code>packed</code> → SV parse error</td><td><code>inou/cgen/cgen_verilog.cpp:87</code></td></tr>
+<tr><td><strong>D</strong></td><td>Tuple-typed <em>output</em> port — residual: conditional / nested whole-tuple write</td><td>partial</td><td>flat &amp; per-field writes land; conditional write silently drops the <code>if</code>; nested write hard-errors</td><td><code>upass/ssa/upass_ssa.cpp</code></td></tr>
 </tbody>
 </table>
 
@@ -52,8 +55,8 @@ two-writes-to-one-register slice merge (the netlist now computes <code>{b,a}</co
 correctly — but it exposed subtask&nbsp;F). Do not re-file these.</p>
 
 <h2>Depends on</h2>
-<p>None. C, D, E are <span class="status landed">landed 2026-06-20</span> (see
-below); A, B, F remain and are each self-contained.</p>
+<p>None. A and B are each self-contained; D has only a residual case left (see the D
+residual subtask). C, E, F are fully landed and removed.</p>
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
@@ -108,94 +111,39 @@ pub comb top(s:bool) -&gt; (r:u6) { r = int(Animal.bird.eagle) }   // == 0ub0000
   parent-bit / <code>__enumval</code> machinery so inner names go to fields, not
   <code>expr_to_node</code>.</li>
 
-<li><strong>F — cgen emits a SystemVerilog reserved word as a signal name.</strong>
-  Repro <code>unexpected_bugs/reg_multi_bitslice_drop/impl.prp</code> (variable named
-  <code>packed</code>). The slice-merge logic itself is now correct, but the emitted
-  <code>gen.v</code> contains <code>reg [11:0] packed;</code> → yosys
-  <code>unexpected TOK_PACKED</code>, iverilog <code>-g2012</code> <code>syntax
-  error</code>. This breaks the lgyosys LEC path (it re-reads the emitted
-  <code>check_impl.v</code>) and any SV-2012 consumer (verilator included).
-  <strong>Root cause:</strong> <code>get_scaped_name</code>
-  (<code>inou/cgen/cgen_verilog.cpp:174</code>, escape gate at <code>:185</code>)
-  escapes a name to <code>\name </code> only if it is in the
-  <code>reserved_keyword</code> set, but that set
-  (<code>:87-100</code>, declared <code>cgen_verilog.hpp:48</code>) lists only ~14
-  classic Verilog-2001 words and omits the IEEE-1800 additions. <code>packed</code>
-  isn't found, all its chars are legal, so the bare word is emitted. cgen <em>does</em>
-  escape names with special chars (that is why <code>\impl.top</code> is escaped) —
-  only reserved-word coverage is missing. <strong>Fix:</strong> extend the set at
-  <code>:87-100</code> with the IEEE-1800 list (at least <code>packed, bit, byte,
-  int, shortint, longint, void, type, ref, return, automatic, static, unique,
-  priority, interface, modport, package, program, time, real</code>). No other change
-  needed — <code>get_scaped_name</code> already escapes anything in the set.
-  <strong>Red regression:</strong>
-  <code>inou/prp/tests/equiv/reserved_word_signal.prp</code> (a purely
-  combinational <code>-&gt; (packed:u8)</code> to isolate the cgen bug; + golden
-  with an escaped <code>\packed </code> port) — lgcheck rejects the bare
-  <code>packed</code> in the generated Verilog today; the reverse
-  <code>prp-v2prp-reserved_word_signal</code> fails on the same root cause. Both
-  go green when cgen escapes the keyword.</li>
+<li><strong>D (residual) — conditional &amp; nested whole-tuple write to a tuple
+  output port.</strong> The flat unconditional whole-tuple write and per-field writes
+  now land (<code>try_rewrite_port_whole_store</code> in <code>upass/ssa/upass_ssa.cpp</code>),
+  but two cases remain: <strong>(1)</strong> a <em>conditional</em> whole-tuple write
+  <code>p = if c {(first=1,second=2)} else {(first=3,second=4)}</code> compiles with
+  <em>no diagnostic</em> yet <strong>silently miscompiles</strong> — cgen emits only
+  the else arm and drops the <code>if c</code> entirely (lgcheck REFUTES; iverilog:
+  c=1 → (3,4), should be (1,2)). <strong>(2)</strong> a <em>nested</em> whole-tuple
+  write <code>p = (lo=(hi=a, mid=a+1), hilvl=a&lt;&lt;1)</code> hard-errors in
+  upass.tolg (<code>field/index read of '___p_N' could not be resolved</code>) because
+  the split neither recurses into nested tuples nor handles a whole-store whose RHS is
+  an if-expression. Per-leaf writes (<code>p.lo.hi=…</code>) work.
+  <strong>Red regressions:</strong>
+  <code>inou/prp/tests/equiv/tup_out_cond_whole.{prp,v}</code> (silent miscompile) and
+  <code>tup_out_nested_whole.{prp,v}</code> (hard error).</li>
 
 </ul>
 
-<h2>Subtasks — landed</h2>
-
-<p><span class="status landed">landed 2026-06-20</span> <strong>C — tuple-typed
-<em>input</em> port read inside an if/match expression.</strong> The io interface
-already flattened to dotted leaves (<code>ar.x</code>,<code>ar.y</code>), but the
-field reads sat inside the if-arm <code>stmts</code>, which the SSA upass copied
-verbatim with <code>copy_with_rename</code> — leaving a
-<code>tuple_get(ar,'x')</code> with no driver. <strong>Fix</strong>
-(<code>upass/ssa/upass_ssa.cpp</code>): a new <code>copy_branch_port_aware</code>
-deep-copy for if-arms rewrites the nested port-field reads to their flattened leaf
-(<code>store(dst, ref 'ar.x')</code>), the same rewrite the top-level path already
-did. Regression <code>inou/prp/tests/equiv/tup_in_port.{prp,v}</code> (if-expr) +
-<code>tup_in_match.{prp,v}</code> (match arms); iverilog 0/256, LEC-equiv.</p>
-
-<p><span class="status landed">landed 2026-06-20</span> <strong>D — tuple-typed
-<em>output</em> port driven by a whole-tuple write.</strong> Two bugs: (1) the
-body's 2-child <code>store(p, ___p_0)</code> whole-tuple write was never split into
-the flattened leaf drives — <strong>fix</strong>
-(<code>upass/ssa/upass_ssa.cpp</code> <code>try_rewrite_port_whole_store</code>):
-split into one <code>p.first = ___p_0.first</code>, … per output leaf (a
-<code>tuple_get</code> per leaf, or a leaf-to-leaf ref when the source is itself a
-tuple input port); <code>copy_branch_port_aware</code> also splits per-field writes
-nested in if-arms. (2) even per-field leaf writes with a <em>constant</em> value
-were dropped, because <code>is_io_output</code>
-(<code>upass/constprop/upass_constprop.hpp</code>) compared the store name's
-first-level (<code>p</code>) against the now-flattened output entry
-(<code>p.first</code>) and never matched — a computed store survived only via
-demand re-emit. <strong>Fix:</strong> match a store to a flattened output leaf
-(<code>name == oe.name</code>) as well as the whole-tuple/scalar case. Regression
-<code>tup_out_port.{prp,v}</code> (whole-write) + <code>tup_out_field_arms.{prp,v}</code>
-(per-field writes in if-arms); LEC-equiv. <em>Known gap (separate, pre-existing
-constprop limitation):</em> a whole-tuple write whose source nests a <em>runtime</em>
-field inside a sub-tuple (<code>p = (first=j, s=(m=2, n=j+3))</code>) still errors
-in tolg — constprop does not fold a multi-segment <code>tuple_get</code> to a
-nested runtime leaf. Per-field nested writes (<code>p.s.n = j+3</code>) and const /
-top-level-runtime nested whole-writes all work.</p>
-
-<p><span class="status landed">landed 2026-06-20</span> <strong>E — signed-shift
-idiom emits a wrong netlist.</strong> The SHL zero-extend idiom
-<code>({N{1'b0}} | a)</code> forces the whole <code>^</code> unsigned, and that
-unsigned context propagated into the bare <code>a &gt;&gt;&gt; amt</code> term,
-turning the arithmetic shift logical (zero-fill) — wrong for negative <code>a</code>
-(384/1024 combos). The TODO's suggested <code>$signed(val) &gt;&gt;&gt; amt</code>
-does <strong>not</strong> survive (the shift's left operand stays
-context-determined — verified with iverilog). <strong>Fix</strong>
-(<code>inou/cgen/cgen_verilog.cpp:1086</code>): isolate the SRA in its own
-self-determined signed context — <code>$signed($signed(val) &gt;&gt;&gt; amt)</code>
-— but only for a genuinely signed operand (<code>is_unsign</code> gate; an unsigned
-<code>&gt;&gt;</code> must stay logical). Regression
-<code>shift_combo_i8.{prp,v}</code> (i8) + <code>shift_sra_unsigned.{prp,v}</code>
-(u8 must stay logical); iverilog 0/1024, LEC-equiv. The yosys <code>srasll</code>
-round-trip (mixed signed/unsigned, arithmetic/logical) confirms the cast is
-selective.</p>
-
-<p>Also resolved in the index's hard-error table (tracked there, not a 2i row):
-<strong>overload-gathering call dispatch</strong> <code>const add=[f1,f2]; add(x)</code>
-now resolves the whole call including return binding — regressions
-<code>equiv/overload_dispatch</code> and <code>equiv/overload_return_dispatch</code>.</p>
+<h2>Landed (removed)</h2>
+<p>Landed subtasks are deleted per the hub lifecycle. Fully landed this round:
+<strong>C</strong> (tuple input port; regressions <code>equiv/tup_in_port</code>,
+<code>equiv/tup_in_match</code>), <strong>E</strong> (signed-shift idiom, including the
+nested-SRA case — cgen now wraps every SRA operand in a self-determined
+<code>$signed(…)</code>; regressions <code>equiv/shift_combo_i8</code>,
+<code>equiv/shift_combo_i8b</code>, <code>equiv/shift_sra_unsigned</code>,
+<code>equiv/shift_nested_sra</code>), <strong>F</strong> (reserved-word signal names —
+cgen now escapes the full IEEE-1800 keyword set; regression
+<code>equiv/reserved_word_signal</code>), the <strong>D</strong> <em>canonical / flat /
+per-field</em> forms (<code>equiv/tup_out_port</code>,
+<code>equiv/tup_out_field_arms</code>), and overload-gathering dispatch
+(<code>equiv/overload_dispatch</code>, <code>equiv/overload_return_dispatch</code>).
+Only the <strong>D</strong> conditional / nested whole-tuple residual remains open
+above.</p>
 
 <h2>Verification</h2>
 <p>Each fix should both <strong>compile</strong> and prove <strong>equivalent</strong>
@@ -219,11 +167,12 @@ suite green (<code>bazel test //inou/prp/... //upass/... //pass/...</code>) and 
 for no regression in the other (already-passing) <code>unexpected_*</code> cases.</p>
 
 <h2>Done when</h2>
-<p>All six constructs compile (A–D) and/or emit a netlist that is
-<code>iverilog</code>-correct and LEC-equivalent to <code>ref.v</code> under
-<strong>both</strong> solvers (E, F); each has a checked-in regression pair; and the
-corresponding rows are removed from the index's "Unimplemented / mis-lowering
-forms" tables and this page is deleted.</p>
+<p>The remaining work is <strong>A</strong> and <strong>B</strong> (full) plus the
+<strong>D</strong> conditional / nested whole-tuple residual. Each must compile
+and/or emit a netlist that is <code>iverilog</code>-correct and LEC-equivalent to
+<code>ref.v</code> under <strong>both</strong> solvers, with its checked-in
+regression flipping green; then its row is removed from the index's "Unimplemented /
+mis-lowering forms" tables. This page is deleted when all rows clear.</p>
 </main>
 <footer><a href="index.html">← All tasks</a> · LiveHD TODO · <code>2i-issues</code></footer>
 </body>

@@ -1,0 +1,16 @@
+/*
+:name: tup_out_nested_whole
+:type: equiv
+:verilog_top: top
+:pyrope_top: tup_out_nested_whole.top
+*/
+
+// FAILING regression for 2i-issues D (residual): a NESTED tuple-typed OUTPUT port
+// driven by a whole-tuple literal. Per-leaf nested drives (p.lo.hi=..; p.lo.mid=..)
+// already work, but a single whole-tuple write with a nested literal hard-errors
+// in upass.tolg ("field/index read of '___p_N' could not be resolved") because
+// try_rewrite_port_whole_store does not recurse into nested tuples. RED until the
+// nested whole-tuple write splits into per-leaf drives.
+pub comb top(a:u8) -> (p:(lo:(hi:u8, mid:u8), hilvl:u8)) {
+  p = (lo=(hi=a, mid=a+1), hilvl=a<<1)
+}

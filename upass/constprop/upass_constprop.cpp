@@ -1651,6 +1651,31 @@ upass::Vote uPass_constprop::process_tuple_add(std::string_view dst_name, Bundle
   // bundle is rebuilt from the entries below).
   st().tuple_slot_ref.erase(dvar);
 
+  // When a field is itself a NESTED sub-tuple ref (`p = (lo=q, …)` where `q`
+  // is a tuple), its bundle is copied under the field key, but `q`'s runtime
+  // slot→ref entries (the carriers for `q`'s runtime leaves) live under `q`'s
+  // own name and would be lost. Re-home them under `dvar` with the field as a
+  // dotted prefix (`p.lo.hi` ← `q.hi`) so a later multi-segment read
+  // `p.lo.hi` resolves to the runtime wire instead of erroring in tolg.
+  auto propagate_sub_slot_refs = [&](const std::string& field, std::string_view src_var) {
+    auto it = st().tuple_slot_ref.find(std::string(src_var));
+    if (it == st().tuple_slot_ref.end()) {
+      return;
+    }
+    // Copy the source entries before writing into tuple_slot_ref[dvar]: that
+    // write can insert a NEW outer key, and tuple_slot_ref is an
+    // absl::flat_hash_map (inline values), so the insert may rehash and MOVE
+    // every value — invalidating both `it` and the `it->second` reference this
+    // loop iterates over. A dangling sub_key then has a garbage size and the
+    // StrCat below tries a multi-terabyte allocation → std::bad_alloc (seen on
+    // Linux; macOS's allocator/layout happened to hide it).
+    const std::map<std::string, std::string> entries = it->second;
+    auto&                                     dst_map = st().tuple_slot_ref[dvar];  // may rehash; safe now
+    for (const auto& [sub_key, ref] : entries) {
+      dst_map[absl::StrCat(field, ".", sub_key)] = ref;
+    }
+  };
+
   // Function-name detection helper: when a ref's text names a function in
   // the registry, store the qualified function name as a string Dlop into
   // the bundle slot so downstream method dispatch (x.method(...) where
@@ -1697,6 +1722,8 @@ upass::Vote uPass_constprop::process_tuple_add(std::string_view dst_name, Bundle
           // into a copy `dst = ref`. Comptime slots are left to the normal fold.
           if (!sub) {
             st().tuple_slot_ref[dvar][slot] = std::string(txt);
+          } else {
+            propagate_sub_slot_refs(slot, txt);  // nested sub-tuple: keep its runtime-leaf carriers
           }
         }
       }
@@ -1717,6 +1744,8 @@ upass::Vote uPass_constprop::process_tuple_add(std::string_view dst_name, Bundle
           bundle->set(key, sub);
           if (!sub) {
             st().tuple_slot_ref[dvar][key] = std::string(txt);  // Step 1: runtime named-slot ref
+          } else {
+            propagate_sub_slot_refs(key, txt);  // nested sub-tuple: keep its runtime-leaf carriers
           }
         }
       }

@@ -1,0 +1,19 @@
+/*
+:name: shift_nested_sra
+:type: equiv
+:verilog_top: top
+:pyrope_top: shift_nested_sra.top
+*/
+
+// Regression for 2i-issues E (now FIXED): a NESTED arithmetic right shift
+// `(a >> b) >> b` joined into an unsigned XOR context. cgen now wraps EVERY SRA
+// operand of a generic binary op in a self-determined `$signed(...)` — including
+// an SRA whose operand is itself an SRA result — so it emits
+//   xor = ($signed(($signed($signed(a) >>> amt)) >>> amt)) ^ ((unsigned) << amt)
+// keeping the outer arithmetic shift sign-filling in the unsigned XOR context
+// (previously the outer `>>>` was bare and demoted to logical → wrong for
+// negative a, e.g. a=-128,b=1). Verified cvc5 + lgyosys both PROVEN; guards
+// against a regression in the per-operand signedness isolation.
+pub comb top(a:i8, b:u2) -> (r:i8) {
+  wrap r = ((a >> b) >> b) ^ (a << b)
+}

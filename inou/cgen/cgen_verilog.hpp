@@ -66,6 +66,13 @@ private:
   // shadow.
   static hhds::Pin_class find_sink_pin(const hhds::Node_class& node, std::string_view name);
 
+  // Is an SRA's left operand arithmetically signed (sign-filling shift)? True if
+  // the pin carries the signed hint, or it is itself a (recursively signed) SRA
+  // result. SRA is the only right-shift cell, so it preserves its operand's
+  // signedness — but tolg's bind_result tags every op output unsigned, so a
+  // chained `(a>>b)>>b` loses the hint between shifts; recover it here.
+  static bool sra_operand_signed(const hhds::Pin_class& dpin);
+
   void process_flop(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
   void process_latch(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
   // Generate a cgen_memory_[multiclock_]<R>rd_<W>wr module body for a (R,W,clock)

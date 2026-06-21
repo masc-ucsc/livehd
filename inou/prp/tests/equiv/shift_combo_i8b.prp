@@ -1,8 +1,8 @@
 /*
-:name: shift_combo_i8
+:name: shift_combo_i8b
 :type: equiv
-:verilog_top: shift_combo_i8.top
-:pyrope_top: shift_combo_i8.top
+:verilog_top: shift_combo_i8b.top
+:pyrope_top: shift_combo_i8b.top
 */
 
 // 2i-issues E — the signed-shift idiom `(a<<b) ^ (a>>b)` on an i8. cgen forces

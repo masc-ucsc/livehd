@@ -394,7 +394,26 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
       // wire; the bitwidth pass re-derives the width from the LGraph mux. A
       // cassert over such a var no longer discharges at compile time — it is left
       // to the runtime check, which is correct for a value the compiler cannot pin.
-      it->second->set("0", invalid_lconst);
+      if (it->second->is_scalar()) {
+        it->second->set("0", invalid_lconst);
+      } else {
+        // A WHOLE-tuple write under an uncertain arm (`q = if c { (a=1,b=2) }
+        // else { (a=3,b=4) }`) leaves EVERY field runtime-divergent, not just
+        // the (absent) scalar slot "0". Invalidate each data leaf's trivial —
+        // keeping the tuple shape — so a later `q.a` read stays runtime and
+        // lowers to a mux, instead of folding to the value the textually-last
+        // arm happened to write (a silent miscompile that dropped the `if`).
+        // COW first: the slot may alias the arm temp it was assigned from.
+        unshare_for_write(it->second);
+        std::vector<std::string> leaves;
+        leaves.reserve(it->second->non_attr_entries().size());
+        for (const auto& [leaf, entry] : it->second->non_attr_entries()) {
+          leaves.emplace_back(leaf);
+        }
+        for (const auto& leaf : leaves) {
+          it->second->set(leaf, invalid_lconst);
+        }
+      }
     }
   }
 

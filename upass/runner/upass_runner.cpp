@@ -3734,47 +3734,65 @@ bool uPass_runner::try_resolve_tuple_get() {
     return false;
   }
   std::string src(lm->current_text());  // tuple name (frame-tagged inside an inline)
-  // Exactly one field segment; nested access falls through.
   if (!lm->move_to_sibling()) {
     lm->restore_cursor(saved);
     return false;
   }
-  std::string key;
-  std::string idx_ref;  // runtime index name, captured when the field is a non-folding ref
-  if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
-    if (auto v = Dlop::from_pyrope(lm->current_text()); v && !v->is_invalid()) {
-      key = v->to_field();
-    }
-  } else if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
-    // A comptime-known index (a folded loop var) resolves; anything else does not.
-    if (auto fv = try_fold_ref(lm->current_text()); fv && fv->is_integer() && !fv->has_unknowns()) {
-      key = fv->to_field();  // decimal at any width (to_just_i64 asserts past 62 bits)
+  // Gather the FULL field path. An all-comptime path (const / folded-ref
+  // segments) builds a dotted key (`lo.hi`) for a possibly-NESTED slot-ref
+  // lookup — `p = (lo=(hi=a, …), …)` stores `a`'s carrier under `p.lo.hi`
+  // (constprop's propagate_sub_slot_refs). A genuinely runtime segment is only
+  // handled for the single-segment dynamic-index (Hotmux) case below.
+  std::string key;      // dotted comptime path
+  std::string idx_ref;  // runtime index name (single-segment dynamic only)
+  size_t      n_seg        = 0;
+  bool        all_comptime = true;
+  do {
+    ++n_seg;
+    if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
+      if (auto v = Dlop::from_pyrope(lm->current_text()); v && !v->is_invalid()) {
+        absl::StrAppend(&key, key.empty() ? "" : ".", v->to_field());
+      } else {
+        all_comptime = false;
+      }
+    } else if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+      // A comptime-known index (a folded loop var) resolves; anything else does not.
+      if (auto fv = try_fold_ref(lm->current_text()); fv && fv->is_integer() && !fv->has_unknowns()) {
+        absl::StrAppend(&key, key.empty() ? "" : ".", fv->to_field());  // decimal at any width
+      } else {
+        idx_ref      = std::string(lm->current_text());  // genuinely runtime — candidate for a dynamic mux
+        all_comptime = false;
+      }
     } else {
-      idx_ref = std::string(lm->current_text());  // genuinely runtime — candidate for a dynamic mux
+      all_comptime = false;
     }
-  }
-  const bool single_segment = lm->is_last_child();
+  } while (!lm->is_last_child() && lm->move_to_sibling());
+  const bool single_segment = (n_seg == 1);
   lm->restore_cursor(saved);
-  if (key.empty() || !single_segment) {
+  if (!all_comptime || key.empty()) {
     // A runtime index into a comptime fixed-size tuple of scalar wires lowers
     // to a balanced Hotmux (the only datapath select tolg otherwise rejects).
-    if (key.empty() && single_segment && !idx_ref.empty() && try_lower_dynamic_tuple_index(dst, src, idx_ref)) {
+    if (single_segment && key.empty() && !idx_ref.empty() && try_lower_dynamic_tuple_index(dst, src, idx_ref)) {
       return true;
     }
     return false;
   }
   // (1) var-arg gathered entries (keyed by the frame-tagged var-arg name).
-  if (auto it = vararg_bindings_.find(src); it != vararg_bindings_.end()) {
-    for (const auto& [k, node] : it->second) {
-      if (k == key) {
-        emit_inline_binding(dst, node);  // dst already frame-tagged; emit literal
-        return true;
+  // Var-arg gather is single-level.
+  if (single_segment) {
+    if (auto it = vararg_bindings_.find(src); it != vararg_bindings_.end()) {
+      for (const auto& [k, node] : it->second) {
+        if (k == key) {
+          emit_inline_binding(dst, node);  // dst already frame-tagged; emit literal
+          return true;
+        }
       }
+      // Out-of-range var-arg pick: let constprop fold to nil / diagnose.
+      return false;
     }
-    // Out-of-range var-arg pick: let constprop fold to nil / diagnose.
-    return false;
   }
-  // (2) general tuple variable whose slot holds a runtime scalar ref.
+  // (2) general tuple variable whose slot holds a runtime scalar ref — the key
+  // may be a NESTED dotted path (`lo.hi`) re-homed by propagate_sub_slot_refs.
   if (auto rname = try_tuple_slot_ref(src, key)) {
     emit_inline_binding(dst, Lnast_node::create_ref(*rname));
     return true;

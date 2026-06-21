@@ -35,7 +35,7 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 <h3 id="pyrope">Pyrope</h3>
 <ul>
 <li><em>Group 2:</em><ul>
-<li><a class="xref" href="2i-issues.html">2i-issues</a> Five non-LEC compiler defects surfaced by the <code>unexpected_*</code> corpus (re-verified 2026-06-20): registered-output interface <code>-&gt; (reg x@[0])</code>, hierarchical enums, tuple-typed in/out ports (hard errors in <code>upass.tolg</code>/<code>prp2lnast</code>), plus one <code>cgen</code> emission bug (reserved-word signal names); each open row now ships a red regression under <code>inou/prp/tests/equiv/</code> (<code>tuple_in_port</code>, <code>tuple_out_port</code>, <code>reserved_word_signal</code>). The signed-shift cgen bug is <strong>resolved</strong> (see below). The mis-lowering rows below link here.</li>
+<li><a class="xref" href="2i-issues.html">2i-issues</a> Non-LEC compiler defects surfaced by the <code>unexpected_*</code> corpus (re-verified 2026-06-20 after the latest fix round): registered-output interface <code>-&gt; (reg x@[0])</code> (A) and hierarchical enums (B) remain fully open; tuple-typed <em>input</em> ports (C), the signed-shift idiom incl. its nested-SRA case (E) and reserved-word signal names (F) are now <strong>fixed</strong>; tuple-typed <em>output</em> ports (D) are <strong>partially</strong> fixed — the canonical / flat / per-field forms land but the residual conditional and nested whole-tuple writes still fail. The open + residual rows ship red regressions under <code>inou/prp/tests/equiv/</code>. The mis-lowering rows below link here.</li>
 </ul></li>
 <li><em>Group 3 — needs still-unspecified codegen/verification tasks first:</em><ul>
 <li><a class="xref" href="pyrope/3f-temporal.html">3f-temporal</a> Temporal library: <code>past[n]</code>/<code>next[n]</code>, <code>rose</code>/<code>fell</code>/<code>stable</code>/<code>changed</code>/<code>eventually</code>/<code>always</code>, <code>.[rising]</code> sugar. Formal proof of the resulting assertions is <a class="xref" href="livehd/2f-formal.html">2f-formal</a> (Group 2).</li>
@@ -59,14 +59,21 @@ still-open rows are consolidated in <a class="xref" href="2i-issues.html">2i-iss
 this round and removed from the tables: <code>implies</code>, runtime bit index
 <code>a#[i]</code>, runtime index into a const-array literal, full-width slice
 <code>i8#[..]</code>/<code>u8#[..]</code>, open-ended slice <code>a#[k..]</code>,
-reductions <code>a#|[..]</code>, the two-writes-to-one-register slice merge, the
-signed-shift idiom <code>(a&lt;&lt;b)^(a&gt;&gt;b)</code> on <code>i8</code> (cgen
-now emits the SRA term self-contained as <code>$signed($signed(a)&gt;&gt;&gt;amt)</code>
-— 0/1024 <code>iverilog</code> mismatches, LEC-equivalent under cvc5+lgyosys;
-regression <code>equiv/shift_combo_i8</code>), and overload-gathering call dispatch
-<code>const add=[f1,f2]; add(x)</code> (resolves the whole call, return binding
-included; regressions <code>equiv/overload_dispatch</code>,
-<code>equiv/overload_return_dispatch</code>).
+reductions <code>a#|[..]</code>, the two-writes-to-one-register slice merge,
+tuple-typed <em>input</em> ports (<a class="xref" href="2i-issues.html">2i-issues</a> C —
+now flatten to dotted leaf ports; regressions <code>equiv/tup_in_port</code>,
+<code>equiv/tup_in_match</code>), the signed-shift idiom including its nested-SRA case
+(<a class="xref" href="2i-issues.html">2i-issues</a> E; regressions
+<code>equiv/shift_combo_i8</code>, <code>equiv/shift_sra_unsigned</code>,
+<code>equiv/shift_nested_sra</code>), reserved-word signal names
+(<a class="xref" href="2i-issues.html">2i-issues</a> F — cgen now escapes the full
+IEEE-1800 keyword set; regression <code>equiv/reserved_word_signal</code>), and
+overload-gathering call dispatch <code>const add=[f1,f2]; add(x)</code> (resolves the
+whole call, return binding included; regressions <code>equiv/overload_dispatch</code>,
+<code>equiv/overload_return_dispatch</code>). Tuple-typed <em>output</em> ports (D) are
+only <strong>partially</strong> fixed — the canonical / flat / per-field forms land
+(green <code>equiv/tup_out_port</code>) but the conditional and nested whole-tuple
+writes still fail (the rows below).
 Temporal ops, <code>fluid</code>, and in-language
 <code>lec()</code>/<code>covercase</code> already have pages above
 (<a class="xref" href="pyrope/3f-temporal.html">3f-temporal</a>,
@@ -79,8 +86,7 @@ Temporal ops, <code>fluid</code>, and in-language
 <tbody>
 <tr><td>Registered-output interface <code>mod f(...) -&gt; (reg count:u8@[0])</code> — <a class="xref" href="2i-issues.html">2i-issues</a> A</td><td><code>state register 'count' homes at stage 0 … requires home -1</code></td><td>body register: <code>{ reg c:u8=0; count=c; … }</code></td><td>—</td></tr>
 <tr><td>Hierarchical enums <code>enum E=(,a=(,x,,y), ,b)</code> — <a class="xref" href="2i-issues.html">2i-issues</a> B</td><td><code>read of undefined variable 'x'</code> (nested names read as scope)</td><td>flat enum</td><td>—</td></tr>
-<tr><td>Tuple-typed <em>input</em> port <code>(ar:(x:u3,y:i4), …)</code> — <a class="xref" href="2i-issues.html">2i-issues</a> C</td><td><code>unresolved reference '___res_1' — no driver</code></td><td>flatten to scalar ports <code>ar_x</code>, <code>ar_y</code></td><td><a href="../inou/prp/tests/equiv/tuple_in_port.prp"><code>equiv/tuple_in_port</code></a> · <code>prp-equiv-tuple_in_port</code></td></tr>
-<tr><td>Tuple-typed <em>output</em> port + whole-tuple write — <a class="xref" href="2i-issues.html">2i-issues</a> D</td><td><code>output 'p.first' is never driven</code></td><td>per-field writes <code>p.first=…; p.second=…</code></td><td><a href="../inou/prp/tests/equiv/tuple_out_port.prp"><code>equiv/tuple_out_port</code></a> · <code>prp-equiv-tuple_out_port</code></td></tr>
+<tr><td>Tuple-typed <em>output</em> port — <em>nested</em> whole-tuple write <code>p=(lo=(hi,mid),…)</code> — <a class="xref" href="2i-issues.html">2i-issues</a> D (residual)</td><td><code>field/index read of '___p_N' could not be resolved</code> (flat &amp; per-leaf writes now work)</td><td>per-leaf writes <code>p.lo.hi=…</code></td><td><a href="../inou/prp/tests/equiv/tup_out_nested_whole.prp"><code>equiv/tup_out_nested_whole</code></a></td></tr>
 </tbody>
 </table>
 
@@ -88,7 +94,7 @@ Temporal ops, <code>fluid</code>, and in-language
 <table>
 <thead><tr><th>Form</th><th>Today (fresh <code>lhd</code>)</th><th>Workaround</th><th>Failing test</th></tr></thead>
 <tbody>
-<tr><td>Reserved word as a signal name <code>reg packed:u12</code> — <a class="xref" href="2i-issues.html">2i-issues</a> F</td><td>cgen emits bare <code>packed</code> → yosys/iverilog/verilator reject the netlist</td><td>rename the signal</td><td><a href="../inou/prp/tests/equiv/reserved_word_signal.prp"><code>equiv/reserved_word_signal</code></a> · <code>prp-equiv-reserved_word_signal</code> + reverse <code>prp-v2prp-reserved_word_signal</code></td></tr>
+<tr><td>Tuple-typed <em>output</em> port — <em>conditional</em> whole-tuple write <code>p = if c {…} else {…}</code> — <a class="xref" href="2i-issues.html">2i-issues</a> D (residual)</td><td>compiles with no diagnostic but drops the <code>if</code> (emits the else arm only)</td><td>per-field writes inside the arms</td><td><a href="../inou/prp/tests/equiv/tup_out_cond_whole.prp"><code>equiv/tup_out_cond_whole</code></a></td></tr>
 </tbody>
 </table>
 

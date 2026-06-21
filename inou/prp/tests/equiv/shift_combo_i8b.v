@@ -1,7 +1,7 @@
 // Golden for 2i-issues E: the signed-shift idiom (a<<b)^(a>>b) on i8.
 // `a << b` truncates to 8 bits (the `wrap`); `a >>> b` is the arithmetic
 // (sign-filling) right shift; their xor is the 8-bit result.
-module \shift_combo_i8.top (
+module \shift_combo_i8b.top (
    input  signed [7:0] a
   ,input         [1:0] b
   ,output signed [7:0] r
