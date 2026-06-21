@@ -97,7 +97,7 @@ bool Symbol_table::declare_bare(std::string_view var) {
   // guards rely on. Returns false (binding kept) on redeclaration.
   I(!stack.empty());
   assert_no_prefix(var);
-  I(var.find('.') == std::string_view::npos);
+  I(bundle_key::find_top_dot(var) == std::string_view::npos);  // a `` `a.b` `` quoted id has no TOP-level dot
 
   // ___ tmps anchor at the Function scope exactly like set() — a declare on
   // an extraction tmp (`declare(___3, …, mut)`, the per-field-mode lowering)
@@ -480,7 +480,7 @@ std::shared_ptr<Bundle> Symbol_table::get_bundle_for_write(std::string_view var)
   // first so the mutation never leaks into aliases created by whole-bundle
   // assignment (`p2 = p1`). Bare-var keys only — a dotted key would return a
   // sub-bundle whose mutation wouldn't write back into the flat parent map.
-  I(var.find('.') == std::string_view::npos);
+  I(bundle_key::find_top_dot(var) == std::string_view::npos);  // a `` `a.b` `` quoted id has no TOP-level dot
   auto* s = find_decl_scope(var);
   if (s == nullptr) {
     return nullptr;

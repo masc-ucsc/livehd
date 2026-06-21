@@ -18,10 +18,55 @@
 
 namespace bundle_key {
 
-inline bool is_single_level(std::string_view key) { return key.find('.') == std::string::npos; }
+// A '.' INSIDE a backtick-quoted identifier (`` `ar.x` `` — the dlop/LiveHD
+// quoted-string id, e.g. a slang-read escaped Verilog name) is part of the
+// literal name, NOT a tuple-field separator. So the level split must skip dots
+// inside `` `…` `` (a literal backtick rides as `` \` ``). For a key with no
+// backtick these reduce to plain find/rfind('.'), so non-quoted keys are
+// unaffected.
+inline size_t find_top_dot(std::string_view key) {
+  bool in_quote = false;
+  for (size_t i = 0; i < key.size(); ++i) {
+    const char c = key[i];
+    if (in_quote) {
+      if (c == '\\' && i + 1 < key.size()) {
+        ++i;  // escaped char inside the quote (e.g. \`)
+      } else if (c == '`') {
+        in_quote = false;
+      }
+    } else if (c == '`') {
+      in_quote = true;
+    } else if (c == '.') {
+      return i;
+    }
+  }
+  return std::string_view::npos;
+}
+
+inline size_t find_last_top_dot(std::string_view key) {
+  bool   in_quote = false;
+  size_t last     = std::string_view::npos;
+  for (size_t i = 0; i < key.size(); ++i) {
+    const char c = key[i];
+    if (in_quote) {
+      if (c == '\\' && i + 1 < key.size()) {
+        ++i;
+      } else if (c == '`') {
+        in_quote = false;
+      }
+    } else if (c == '`') {
+      in_quote = true;
+    } else if (c == '.') {
+      last = i;
+    }
+  }
+  return last;
+}
+
+inline bool is_single_level(std::string_view key) { return find_top_dot(key) == std::string::npos; }
 
 inline std::string_view get_first_level(std::string_view key) {
-  auto dot_pos = key.find('.');
+  auto dot_pos = find_top_dot(key);
   if (dot_pos == std::string::npos) {
     return key;
   }
@@ -37,7 +82,7 @@ inline std::string_view get_first_level_name(std::string_view key) {
 }
 
 inline std::string_view get_last_level(std::string_view key) {
-  auto n = key.rfind('.');
+  auto n = find_last_top_dot(key);
   if (n == std::string::npos) {
     return key;
   }
@@ -46,7 +91,7 @@ inline std::string_view get_last_level(std::string_view key) {
 }
 
 inline std::string_view get_all_but_last_level(std::string_view key) {
-  auto n = key.rfind('.');
+  auto n = find_last_top_dot(key);
   if (n != std::string::npos) {
     return key.substr(0, n);
   }
@@ -54,7 +99,7 @@ inline std::string_view get_all_but_last_level(std::string_view key) {
 }
 
 inline std::string_view get_all_but_first_level(std::string_view key) {
-  auto n = key.find('.');
+  auto n = find_top_dot(key);
   if (n != std::string::npos) {
     return key.substr(n + 1);
   }
