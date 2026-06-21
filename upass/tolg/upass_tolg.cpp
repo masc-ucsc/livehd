@@ -181,7 +181,8 @@ public:
     // Get_mask so signed-declared ports read with their unsigned value (e.g.
     // a 3-bit `a` = 0b111 reads as 7, not -1) — mirrors lgyosys tposs.
     for (const auto& e : lnast_->io_meta().inputs) {
-      auto raw = g_->get_input_pin(e.name);  // body driver pin for the port
+      const std::string ename{canon_io_name(e.name)};  // strip slang's `` `ar.x` `` marker
+      auto              raw = g_->get_input_pin(ename);  // body driver pin for the port
       if (cur_srcid_ != hhds::SourceId_invalid && !raw.is_invalid()) {
         raw.get_master_node().attr(hhds::attrs::srcid).set(cur_srcid_);
       }
@@ -219,7 +220,7 @@ public:
     }
     for (const auto& e : lnast_->io_meta().outputs) {
       if (cur_srcid_ != hhds::SourceId_invalid) {
-        if (auto sink = g_->get_output_pin(e.name); !sink.is_invalid()) {
+        if (auto sink = g_->get_output_pin(canon_io_name(e.name)); !sink.is_invalid()) {
           sink.get_master_node().attr(hhds::attrs::srcid).set(cur_srcid_);
         }
       }
@@ -258,11 +259,12 @@ public:
     // output can be sized from its (now-lowered) driver below.
     auto out_gio = lib_ != nullptr ? lib_->find_io(std::string(lnast_->get_graph_name())) : nullptr;
     for (const auto& e : lnast_->io_meta().outputs) {
-      auto sink = g_->get_output_pin(e.name);
+      const std::string ename{canon_io_name(e.name)};  // strip slang's `` `p.q` `` marker
+      auto              sink = g_->get_output_pin(ename);
       if (sink.is_invalid()) {
         continue;
       }
-      auto it = pin_map_.find(e.name);
+      auto it = pin_map_.find(ename);
       if (it == pin_map_.end()) {
         // An output the body never drives would otherwise be wired to nil
         // (0sb?). For Pyrope that is a silent miscompile (a hard error — every
@@ -305,8 +307,8 @@ public:
           }
         }
         if (dbits > 0) {
-          out_gio->set_bits(e.name, static_cast<uint32_t>(dbits));
-          out_gio->set_unsign(e.name, uns);
+          out_gio->set_bits(ename, static_cast<uint32_t>(dbits));
+          out_gio->set_unsign(ename, uns);
           set_bits(sink, dbits);  // keep the sink pin attr consistent with the port
           if (uns) {
             set_unsign(sink);
@@ -355,8 +357,34 @@ private:
     return drv;
   }
 
-  void record(std::string_view name, const Pin& pin, int32_t mw) {
-    std::string key{name};
+  // Backtick is LiveHD's general quoted-string IDENTIFIER syntax: `` `id` `` is a
+  // literal id whose content is any character (a literal backtick rides as `\`).
+  // It is the LNAST analogue of a Verilog escaped id `\id ` — slang emits it for
+  // `\ar.x ` so `.x` is not read as a tuple field access through upass. By tolg
+  // names are flat strings (no field-access parsing), so the quoting is no longer
+  // needed: recover the bare content as the canonical lg signal/IO name. The
+  // yosys-verilog and Pyrope readers already emit the bare `ar.x`, so unquoting
+  // makes the name identical across readers — without it a cross-reader LEC sees
+  // `` `ar.x` `` vs `ar.x` as two unrelated free inputs and falsely refutes. cgen
+  // re-escapes by content (the `.`), so the marker is redundant downstream.
+  // EXCEPTION: a content with WHITESPACE cannot be a bare lg name (library.txt is
+  // whitespace-delimited), so keep it quoted — those rare ids stay `` `a b` ``.
+  [[nodiscard]] static std::string_view canon_io_name(std::string_view name) {
+    if (name.size() >= 2 && name.front() == '`' && name.back() == '`') {
+      auto inner = name.substr(1, name.size() - 2);
+      for (const char c : inner) {
+        if (std::isspace(static_cast<unsigned char>(c))) {
+          return name;  // genuinely needs quoting (whitespace) — leave as-is
+        }
+      }
+      return inner;
+    }
+    return name;
+  }
+
+  void record(std::string_view name_in, const Pin& pin, int32_t mw) {
+    std::string_view name = canon_io_name(name_in);
+    std::string      key{name};
     if (!branch_writes_.empty()) {
       // First write to `key` in this branch: remember how to undo it on branch
       // exit -- restore the pre-branch value, or erase if the name was absent.
@@ -382,12 +410,13 @@ private:
   }
 
   [[nodiscard]] int32_t mw_lookup(std::string_view name) {
-    auto it = mw_map_.find(std::string{name});
+    auto it = mw_map_.find(std::string{canon_io_name(name)});
     return it != mw_map_.end() ? it->second : int32_t{1};
   }
 
-  [[nodiscard]] Pin resolve(std::string_view name) {
-    std::string key{name};
+  [[nodiscard]] Pin resolve(std::string_view name_in) {
+    std::string_view name = canon_io_name(name_in);
+    std::string      key{name};
     auto        it = pin_map_.find(key);
     if (it != pin_map_.end()) {
       return it->second;
@@ -5092,18 +5121,30 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
   // internal convention).
   hhds::Port_id pid     = 1;
   auto          declare = [&](const Lnast_io_entry& e, bool is_input) {
-    uint32_t bits = e.kind == Io_kind::boolean ? 1u : (e.bits > 0 ? static_cast<uint32_t>(e.bits) : 1u);
-    if (is_input) {
-      if (!gio->has_input(e.name) && !gio->has_output(e.name)) {
-        gio->add_input(e.name, pid);
-      }
-    } else {
-      if (!gio->has_output(e.name) && !gio->has_input(e.name)) {
-        gio->add_output(e.name, pid);
+    // Canonical external port name: unquote a slang-read escaped id's backtick
+    // form (`` `ar.x` `` -> `ar.x`) so the GraphIO port the LEC matches on is
+    // identical to the yosys / Pyrope readers' name. (Mirrors canon_io_name in
+    // the lowering class; this declare lambda is a free function so it inlines.)
+    // Keep a whitespace content quoted — it cannot be a bare lg name.
+    std::string_view nm = e.name;
+    if (nm.size() >= 2 && nm.front() == '`' && nm.back() == '`') {
+      auto inner = nm.substr(1, nm.size() - 2);
+      if (inner.find_first_of(" \t\n\r\f\v") == std::string_view::npos) {
+        nm = inner;
       }
     }
-    gio->set_bits(e.name, bits);
-    gio->set_unsign(e.name, !e.is_signed);
+    uint32_t bits = e.kind == Io_kind::boolean ? 1u : (e.bits > 0 ? static_cast<uint32_t>(e.bits) : 1u);
+    if (is_input) {
+      if (!gio->has_input(nm) && !gio->has_output(nm)) {
+        gio->add_input(nm, pid);
+      }
+    } else {
+      if (!gio->has_output(nm) && !gio->has_input(nm)) {
+        gio->add_output(nm, pid);
+      }
+    }
+    gio->set_bits(nm, bits);
+    gio->set_unsign(nm, !e.is_signed);
     ++pid;
   };
   for (const auto& e : lnast->io_meta().inputs) {
