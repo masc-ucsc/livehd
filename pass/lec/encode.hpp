@@ -12,6 +12,12 @@
 
 namespace livehd::lec {
 
+// Port/signal names are matched case-insensitively (LiveHD/Pyrope name policy):
+// the ref/impl IO pairing must fold case so a port `Clk` on one side pairs with
+// `clk` on the other. Reuses hhds::Ci_hash/Ci_eq (via hhds/graph.hpp).
+template <typename V>
+using Io_name_map = absl::flat_hash_map<std::string, V, hhds::Ci_hash, hhds::Ci_eq>;
+
 // L0 encoder: turns one *combinational* LiveHD LGraph (hhds::Graph) into cvc5
 // bit-vector terms, mirroring inou/cgen's process_simple_node semantics. It is
 // deterministic and side-effect free on the graph.
@@ -29,15 +35,15 @@ struct Encoded {
   bool        ok = true;
   std::string error;  // first unsupported-op / structural error, when !ok
 
-  // Graph IO, by declared port name.
-  absl::flat_hash_map<std::string, Val> inputs;
-  absl::flat_hash_map<std::string, Val> outputs;
+  // Graph IO, by declared port name (case-insensitive ref/impl pairing).
+  Io_name_map<Val> inputs;
+  Io_name_map<Val> outputs;
 
   // M4 memory state. Each Memory cell is cut like a Flop: its current contents
   // are an SMT array symbol (shared across the two designs by mem_state_key, so
   // corresponding memories "collapse"), and its post-cycle contents are the
   // next-state array. Read douts are ordinary BV terms in `outputs`/pin2val.
-  absl::flat_hash_map<std::string, cvc5::Term> next_mem;  // key -> next-state array
+  Io_name_map<cvc5::Term> next_mem;  // key -> next-state array
 
   // Side constraints the caller must assert (EQUAL lhs rhs). Used to tie an
   // async read dout (a fresh symbol seeded before the combinational loop so
@@ -108,7 +114,7 @@ public:
   // corresponding blackbox (matched by module name + occurrence order) — the
   // surrounding logic must drive identical inputs, and identical inputs yield the
   // identical (shared) outputs. Built once in query.cpp and reused by both encodes.
-  void set_shared_bbox(const absl::flat_hash_map<std::string, Val>* bb) { shared_bbox_ = bb; }
+  void set_shared_bbox(const Io_name_map<Val>* bb) { shared_bbox_ = bb; }
 
   // Encode the combinational logic of `g`.
   //
@@ -124,8 +130,8 @@ public:
   // array term for the memory's CURRENT contents. Memories whose key is present
   // reuse that array (this is how corresponding memories collapse across two
   // designs); memories not present get a fresh array `mkConst`.
-  Encoded encode(hhds::Graph* g, const absl::flat_hash_map<std::string, Val>* shared_inputs = nullptr,
-                 std::string_view prefix = "", const absl::flat_hash_map<std::string, cvc5::Term>* shared_mems = nullptr);
+  Encoded encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs = nullptr,
+                 std::string_view prefix = "", const Io_name_map<cvc5::Term>* shared_mems = nullptr);
 
 private:
   // Fit `v` to exactly `width` bits: sign/zero-extend (per v.is_signed) when
@@ -137,7 +143,7 @@ private:
 
   cvc5::TermManager&                                  tm_;
   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib_     = nullptr;
-  const absl::flat_hash_map<std::string, Val>*        shared_bbox_ = nullptr;
+  const Io_name_map<Val>*                             shared_bbox_ = nullptr;
   int                                                 sub_depth_   = 0;  // Sub flattening recursion guard
 };
 

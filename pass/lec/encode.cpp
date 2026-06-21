@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "cell.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/source_locator.hpp"
@@ -200,14 +201,31 @@ std::string mem_state_key(const Mem_sig& sig, int occ) {
   return std::format("\x01m:{}x{}:r{}w{}#{}", sig.size, sig.bits, sig.n_rd, sig.n_wr, occ);
 }
 
-Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, Val>* shared_inputs, std::string_view prefix,
-                        const absl::flat_hash_map<std::string, cvc5::Term>* shared_mems) {
+Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, std::string_view prefix,
+                        const Io_name_map<cvc5::Term>* shared_mems) {
   Encoded out;
   auto    gio = g->get_io();
 
-  // driver-pin Class_index -> Val (SSA value table)
-  absl::flat_hash_map<hhds::Class_index, Val> pin2val;
-  absl::flat_hash_map<std::string, int>       bbox_occ;  // blackbox Sub occurrence per def-name (forward_class order)
+  // driver-pin -> Val (SSA value table). Keyed by a HIER-stable string
+  // "gid:hier_pos:pid" so that, under forward_hier(), a producer deep in an
+  // instance and a consumer reading it across the boundary (inp_edges resolves
+  // the real leaf driver, carrying its instance hier_pos) agree on one key.
+  absl::flat_hash_map<std::string, Val> pin2val;
+  auto pinkey = [](const hhds::Pin_class& p) -> std::string {
+    // A top-level pin reached via the class API (g->get_output_pin, a node's
+    // driver pin outside a hier walk) carries hier_pos == INVALID, while the
+    // same node reached via forward_hier carries ROOT. Both denote the top
+    // frame, so canonicalize INVALID -> ROOT (a real sub-instance always has a
+    // distinct child tree_pos, so this never aliases two different pins).
+    auto hp = p.get_hier_pos();
+    if (hp == hhds::INVALID) {
+      hp = hhds::ROOT;
+    }
+    return std::to_string(static_cast<uint64_t>(p.get_current_gid())) + ":"
+           + std::to_string(static_cast<int64_t>(hp)) + ":"
+           + std::to_string(static_cast<uint64_t>(p.get_debug_pid()));
+  };
+  Io_name_map<int>       bbox_occ;  // blackbox Sub occurrence per def-name (forward_hier order)
 
   auto fail = [&](const std::string& msg) -> Encoded& {
     if (out.ok) {
@@ -246,12 +264,24 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
   };
 
   // Resolve a driver pin to its Val (constant literal or a computed SSA value).
+  // Under forward_hier(), inp_edges() resolves a sink across instance boundaries
+  // to the real LEAF driver: a constant, a top primary input (a pin on the root
+  // INPUT_NODE — resolved by port name from the seeded, cross-design-shared
+  // inputs), or an ordinary producer node (looked up by its hier pinkey).
   auto driver_val = [&](const hhds::Pin_class& dpin, bool& ok) -> Val {
     ok = true;
     if (gu::is_const_pin(dpin)) {
       return const_val(dpin);
     }
-    auto it = pin2val.find(dpin.get_class_index());
+    if (gu::is_graph_input_pin(dpin)) {
+      auto it = out.inputs.find(std::string(dpin.get_pin_name()));
+      if (it != out.inputs.end()) {
+        return it->second;
+      }
+      ok = false;
+      return {};
+    }
+    auto it = pin2val.find(pinkey(dpin));
     if (it == pin2val.end()) {
       ok = false;
       return {};
@@ -297,10 +327,7 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     if (v.term.isNull()) {
       v = Val{tm_.mkConst(bv(w), std::string(prefix) + d.name), w, sgn};
     }
-    out.inputs[d.name] = v;
-    if (!dpin.is_invalid()) {
-      pin2val[dpin.get_class_index()] = v;
-    }
+    out.inputs[d.name] = v;  // resolved by name in driver_val (graph-input pins)
   }
 
   // ---- M2 flop cut-points (register-correspondence SEC). Each Flop's Q (driver
@@ -309,8 +336,14 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
   // before the combinational loop, so downstream comb reads resolve it like an
   // input; the matching NEXT-STATE value is emitted as a synthetic output after
   // the loop, and the miter then compares next-states alongside primary outputs.
+  // forward_hier() descends the whole instance tree, so flops at EVERY level
+  // (e.g. a register inside a StageReg pipeline-register instance) are cut here.
+  // The cross-design correspondence key is the Verilog-style hierarchical name
+  // (get_hier_name = instance path + register name), matching query.cpp's shared
+  // current-state symbols. (`flops` keeps the hier Node_class for the post-loop
+  // next-state emission.)
   std::vector<hhds::Node_class> flops;
-  for (auto node : g->forward_class()) {
+  for (auto node : g->forward_hier()) {
     auto op = gu::type_op_of(node);
     if (op != Ntype_op::Flop) {
       continue;
@@ -324,7 +357,7 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
       w = 1;
     }
     bool        sgn = !gu::is_unsign(qpin);
-    std::string nm  = flop_state_key(*g, node);
+    std::string nm  = node.get_hier_name();
     Val         v;
     if (shared_inputs != nullptr) {
       if (auto it = shared_inputs->find(nm); it != shared_inputs->end()) {
@@ -338,8 +371,8 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     if (v.term.isNull()) {
       v = Val{tm_.mkConst(bv(w), std::string(prefix) + nm), w, sgn};
     }
-    pin2val[qpin.get_class_index()] = v;
-    out.inputs[nm]                  = v;
+    pin2val[pinkey(qpin)] = v;
+    out.inputs[nm]        = v;
     flops.push_back(node);
   }
 
@@ -368,8 +401,8 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     std::vector<hhds::Pin_class> rd_addr;
   };
   std::vector<MemCut>                   mem_cuts;
-  absl::flat_hash_map<std::string, int> mem_occ;  // per-signature occurrence -> stable key
-  for (auto node : g->forward_class()) {
+  Io_name_map<int> mem_occ;  // per-signature occurrence -> stable key
+  for (auto node : g->forward_hier()) {
     if (gu::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
       continue;
     }
@@ -424,11 +457,11 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
       if (!p.rd) {
         continue;
       }
-      auto dout_dpin = node.create_driver_pin(static_cast<hhds::Port_id>(mc.sig.n_wr + n_rd_pos));
+      auto dout_dpin = node.get_driver_pin(static_cast<hhds::Port_id>(mc.sig.n_wr + n_rd_pos));
       bool sgn       = dout_dpin.is_invalid() ? false : !gu::is_unsign(dout_dpin);
       Term fresh     = tm_.mkConst(bv(mc.sig.bits), std::string(prefix) + mc.key + ":rd" + std::to_string(n_rd_pos));
       if (!dout_dpin.is_invalid()) {
-        pin2val[dout_dpin.get_class_index()] = Val{fresh, mc.sig.bits, sgn};
+        pin2val[pinkey(dout_dpin)] = Val{fresh, mc.sig.bits, sgn};
       }
       mc.rd_fresh.push_back(fresh);
       mc.rd_addr.push_back(p.addr);
@@ -437,38 +470,70 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     mem_cuts.push_back(std::move(mc));
   }
 
-  // ---- Combinational nodes in topological order.
-  for (auto node : g->forward_class()) {
-    auto op = gu::type_op_of(node);
+  // ---- Combinational nodes. forward_hier() virtual-flattens the design: it
+  // descends into every sub-instance body (so a StageReg/ALU instance's internal
+  // nodes are visited here) and inp_edges() resolves drivers across instance
+  // boundaries. Flop/Memory state is cut (seeded above), so the combinational
+  // graph is ACYCLIC — but forward_hier() can still emit a node before a driver
+  // that lives in a loop_break sub-instance emitted earlier (e.g. a register
+  // file's combinational read, whose read-address is computed in the parent).
+  // So process to a FIXPOINT: a node whose operands are not yet resolved is
+  // deferred to a later pass; an acyclic graph converges, and a node still stuck
+  // after no-progress is a genuine error (a real comb cycle / missing driver).
+  absl::flat_hash_set<std::string> done;
+  auto nodekey = [&](const hhds::Node_class& n) -> std::string {
+    auto hp = n.get_hier_pos();
+    if (hp == hhds::INVALID) {
+      hp = hhds::ROOT;
+    }
+    return std::to_string(static_cast<uint64_t>(n.get_current_gid())) + ":"
+           + std::to_string(static_cast<int64_t>(hp)) + ":" + std::to_string(static_cast<uint64_t>(n.get_debug_nid()));
+  };
+  bool progress = true;
+  while (progress) {
+    progress = false;
+    for (auto node : g->forward_hier()) {
+      auto op = gu::type_op_of(node);
 
-    // Skip nodes with no consumers (cgen does the same). A memory with no read
-    // ports is unobservable (its contents are never sampled) -> sound to skip.
-    if (!node.has_out_edges()) {
-      continue;
-    }
-    // Constants are resolved on demand at use sites.
-    if (op == Ntype_op::Nconst) {
-      continue;
-    }
-    // Flops were cut above (Q seeded; next-state emitted below) — skip the cell.
-    if (op == Ntype_op::Flop) {
-      continue;
-    }
-    // Memory is cut in two phases (read douts seeded before this loop, writes +
-    // dout-tie emitted after) — like a flop. Skip the cell here.
-    if (op == Ntype_op::Memory) {
-      continue;
-    }
+      // Skip nodes with no consumers (cgen does the same). A memory with no read
+      // ports is unobservable (its contents are never sampled) -> sound to skip.
+      if (!node.has_out_edges()) {
+        continue;
+      }
+      // Constants are resolved on demand at use sites.
+      if (op == Ntype_op::Nconst) {
+        continue;
+      }
+      // Flops were cut above (Q seeded; next-state emitted below) — skip the cell.
+      if (op == Ntype_op::Flop) {
+        continue;
+      }
+      // Memory is cut in two phases (read douts seeded before this loop, writes +
+      // dout-tie emitted after) — like a flop. Skip the cell here.
+      if (op == Ntype_op::Memory) {
+        continue;
+      }
 
-    // Still out of scope: Fflop (no reset model yet), latches.
-    if (op == Ntype_op::Fflop || op == Ntype_op::Latch) {
-      return fail("sequential op '" + std::string(Ntype::get_name(op)) + "' not supported yet (M2 = Flop only)");
-    }
+      // Still out of scope: Fflop (no reset model yet), latches.
+      if (op == Ntype_op::Fflop || op == Ntype_op::Latch) {
+        return fail("sequential op '" + std::string(Ntype::get_name(op)) + "' not supported yet (M2 = Flop only)");
+      }
+      if (done.contains(nodekey(node))) {
+        continue;  // already encoded in an earlier fixpoint pass
+      }
     // Sub (instance) flattening (M5): encode the def inline with its inputs
     // bound to this instance's input Vals, and wire its outputs onto this
     // instance's output pins. Combinational defs only (e.g. ABC standard cells);
     // anything unresolved or stateful keeps the sound `Sub -> fail`.
     if (op == Ntype_op::Sub) {
+      // A design sub-instance whose body lives in the graph library is DESCENDED
+      // into by forward_hier (its internal nodes are visited and inp_edges()
+      // threads its boundary), so encode nothing here. Only a sub NOT in the
+      // library (an ABC cell-model from sub_lib_, or a true blackbox) is handled
+      // inline below.
+      if (node.get_subnode_graph() != nullptr) {
+        continue;
+      }
       auto                                            sub_io = node.get_subnode_io();
       absl::flat_hash_map<hhds::Port_id, std::string> in_name;
       absl::flat_hash_map<hhds::Port_id, int>         in_pw;  // declared input-port real width
@@ -505,7 +570,8 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
 
       if (def != nullptr) {
         // Bind the instance inputs by NAME and encode the def inline.
-        absl::flat_hash_map<std::string, Val> bound;
+        Io_name_map<Val> bound;
+        bool             sub_deferred = false;
         for (const auto& e : node.inp_edges()) {
           auto nit = in_name.find(e.sink.get_port_id());
           if (nit == in_name.end()) {
@@ -514,9 +580,13 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
           bool sok = true;
           Val  v   = driver_val(e.driver, sok);
           if (!sok) {
-            return fail("Sub instance '" + gu::debug_name(node) + "' input has no encodable driver");
+            sub_deferred = true;  // input not yet encoded — retry next fixpoint pass
+            break;
           }
           bound[nit->second] = v;
+        }
+        if (sub_deferred) {
+          continue;
         }
         ++sub_depth_;
         Encoded sub_out = encode(def, &bound, std::format("{}{}.", prefix, static_cast<uint64_t>(node.get_debug_nid())));
@@ -534,13 +604,31 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
           if (oit == sub_out.outputs.end()) {
             return fail("Sub def '" + std::string(def->get_name()) + "' has no output '" + nit->second + "'");
           }
-          pin2val[dp.get_class_index()] = oit->second;
+          pin2val[pinkey(dp)] = oit->second;
         }
+        done.insert(nodekey(node));
+        progress = true;
         continue;
       }
 
-      // ---- BLACKBOX COLLAPSE. Key by module name + occurrence (forward_class
+      // ---- BLACKBOX COLLAPSE. Key by module name + occurrence (forward_hier
       // order), reader-invariant so corresponding instances align across designs.
+      // Defer until all inputs are resolved so the occurrence counter and shared
+      // output symbols are emitted exactly once (no double-count across passes).
+      {
+        bool bb_deferred = false;
+        for (const auto& e : node.inp_edges()) {
+          bool sok = true;
+          driver_val(e.driver, sok);
+          if (!sok) {
+            bb_deferred = true;
+            break;
+          }
+        }
+        if (bb_deferred) {
+          continue;
+        }
+      }
       std::string defname(sub_io->get_name());
       std::string bk = defname + "#" + std::to_string(bbox_occ[defname]++);
       for (const auto& e : node.out_edges()) {  // outputs = shared free symbols
@@ -561,7 +649,7 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
           }
           ov = Val{tm_.mkConst(bv(w), "bb:" + key), w, !gu::is_unsign(dp)};
         }
-        pin2val[dp.get_class_index()] = ov;
+        pin2val[pinkey(dp)] = ov;
       }
       for (const auto& e : node.inp_edges()) {  // inputs = miter comparison points
         auto        pid  = e.sink.get_port_id();
@@ -581,6 +669,8 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
         }
         out.outputs[std::string("\x02") + "bbin:" + bk + ":" + port] = v;
       }
+      done.insert(nodekey(node));
+      progress = true;
       continue;
     }
 
@@ -602,14 +692,19 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     // Bucket input edges by sink port id, resolving every driver to a Val.
     absl::flat_hash_map<hhds::Port_id, std::vector<Val>> by_pid;
     std::vector<Val>                                     all;  // in edge order
-    bool                                                 ok = true;
+    bool                                                 ok       = true;
+    bool                                                 deferred = false;
     for (const auto& e : node.inp_edges()) {
       Val v = driver_val(e.driver, ok);
       if (!ok) {
-        return fail("operand of '" + gu::debug_name(node) + "' has no encodable driver");
+        deferred = true;  // operand not yet encoded — retry in a later fixpoint pass
+        break;
       }
       by_pid[e.sink.get_port_id()].push_back(v);
       all.push_back(v);
+    }
+    if (deferred) {
+      continue;
     }
 
     auto pid = [&](hhds::Port_id p) -> std::vector<Val>& {
@@ -990,10 +1085,28 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
       default: return fail("unsupported op '" + std::string(Ntype::get_name(op)) + "' (M1)");
     }
 
-    if (result.isNull()) {
-      return fail("op '" + std::string(Ntype::get_name(op)) + "' produced no term");
+      if (result.isNull()) {
+        return fail("op '" + std::string(Ntype::get_name(op)) + "' produced no term");
+      }
+      pin2val[pinkey(dpin)] = Val{result, W, out_signed};
+      done.insert(nodekey(node));
+      progress = true;
     }
-    pin2val[dpin.get_class_index()] = Val{result, W, out_signed};
+  }
+  // Fixpoint converged. Any combinational node still unresolved is a genuine
+  // structural error (a real combinational cycle, or a driver the encoder can't
+  // build) — surface it instead of silently dropping logic.
+  for (auto node : g->forward_hier()) {
+    auto op = gu::type_op_of(node);
+    if (!node.has_out_edges() || op == Ntype_op::Nconst || op == Ntype_op::Flop || op == Ntype_op::Memory) {
+      continue;
+    }
+    if (op == Ntype_op::Sub && node.get_subnode_graph() != nullptr) {
+      continue;  // descended
+    }
+    if (!done.contains(nodekey(node))) {
+      return fail("operand of '" + gu::debug_name(node) + "' has no encodable driver (combinational cycle?)");
+    }
   }
 
   // ---- M2 next-state functions. For each cut flop emit the value it latches
@@ -1002,6 +1115,20 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
   // inductive step: equal current state + equal inputs => equal next state &
   // outputs). N = reset_active ? initial : (enable ? din : Q). reset_pin is a
   // shared primary input, so the same query covers the reset/base case.
+  //
+  // A flop deep in a sub-instance has its din/enable/reset driven across the
+  // instance boundary, so resolve the named sink via the flop's HIER inp_edges()
+  // (which inp_edges() threads through the hierarchy) rather than the class-local
+  // get_driver_of_sink_name (which would stop at the sub's GraphIO pin).
+  auto hier_sink_driver = [](const hhds::Node_class& n, std::string_view sink_name) -> hhds::Pin_class {
+    auto pid = Ntype::get_sink_pid(Ntype_op::Flop, sink_name);
+    for (const auto& e : n.inp_edges()) {
+      if (e.sink.get_port_id() == pid) {
+        return e.driver;
+      }
+    }
+    return {};
+  };
   for (const auto& node : flops) {
     auto qpin = node.get_driver_pin(0);
     int  w    = real_width(qpin);
@@ -1009,11 +1136,11 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
       w = 1;
     }
     bool       sgn = !gu::is_unsign(qpin);
-    const Val& qv  = pin2val[qpin.get_class_index()];  // current-state symbol (seeded above)
+    const Val& qv  = pin2val[pinkey(qpin)];  // current-state symbol (seeded above)
     bool       ok  = true;
 
     Term nval;
-    if (auto din_d = gu::get_driver_of_sink_name(node, "din"); !din_d.is_invalid()) {
+    if (auto din_d = hier_sink_driver(node, "din"); !din_d.is_invalid()) {
       Val dv = driver_val(din_d, ok);
       if (!ok) {
         return fail("flop '" + gu::debug_name(node) + "' din not encodable");
@@ -1024,7 +1151,7 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     }
 
     // enable: a low write-enable holds Q (no din=q feedback mux in the graph).
-    if (auto en_d = gu::get_driver_of_sink_name(node, "enable"); !en_d.is_invalid()) {
+    if (auto en_d = hier_sink_driver(node, "enable"); !en_d.is_invalid()) {
       if (gu::is_const_pin(en_d)) {
         if (gu::hydrate_const(en_d).is_known_false()) {
           nval = qv.term;  // never writes
@@ -1040,19 +1167,19 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
     }
 
     // reset: a non-const reset overrides with the initial value when asserted.
-    if (auto rst_d = gu::get_driver_of_sink_name(node, "reset_pin"); !rst_d.is_invalid() && !gu::is_const_pin(rst_d)) {
+    if (auto rst_d = hier_sink_driver(node, "reset_pin"); !rst_d.is_invalid() && !gu::is_const_pin(rst_d)) {
       Val rv = driver_val(rst_d, ok);
       if (!ok) {
         return fail("flop '" + gu::debug_name(node) + "' reset not encodable");
       }
       Term rbit     = tm_.mkTerm(Kind::DISTINCT, {rv.term, bv_const(tm_, rv.width, 0)});
       bool negreset = false;
-      if (auto neg_d = gu::get_driver_of_sink_name(node, "negreset"); !neg_d.is_invalid() && gu::is_const_pin(neg_d)) {
+      if (auto neg_d = hier_sink_driver(node, "negreset"); !neg_d.is_invalid() && gu::is_const_pin(neg_d)) {
         negreset = !gu::hydrate_const(neg_d).is_known_false();
       }
       Term rst_hot = negreset ? tm_.mkTerm(Kind::NOT, {rbit}) : rbit;
       Term initv   = bv_const(tm_, w, 0);
-      if (auto init_d = gu::get_driver_of_sink_name(node, "initial"); !init_d.is_invalid()) {
+      if (auto init_d = hier_sink_driver(node, "initial"); !init_d.is_invalid()) {
         Val iv = driver_val(init_d, ok);
         if (ok) {
           initv = fit(iv, w);
@@ -1061,7 +1188,7 @@ Encoded Encoder::encode(hhds::Graph* g, const absl::flat_hash_map<std::string, V
       nval = tm_.mkTerm(Kind::ITE, {rst_hot, initv, nval});
     }
 
-    out.outputs[std::string("\x01nxt:") + flop_state_key(*g, node)] = Val{nval, w, sgn};
+    out.outputs[std::string("\x01nxt:") + node.get_hier_name()] = Val{nval, w, sgn};
   }
 
   // ---- M4 memory cut, phase 2: now that write addr/din/enable are resolved,

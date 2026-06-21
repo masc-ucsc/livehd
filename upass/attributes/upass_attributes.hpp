@@ -15,6 +15,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
 #include "hlop/dlop.hpp"
+#include "str_tools.hpp"  // str_tools::Ci_less: variable names match case-insensitively
 #include "upass_attributes_handler.hpp"
 #include "upass_core.hpp"
 
@@ -263,8 +264,8 @@ public:
 private:
   // lookup_type_info_bundle return scratch (per-call; do not hold across calls)
   mutable Type_info ti_scratch_;
-  std::map<std::string, std::pair<Dlop, Dlop>>            range_bounds;  // start, end keyed by tmp
-  std::map<std::string, Dlop>                              tmp_fold;      // attr_get dst → folded Dlop
+  std::map<std::string, std::pair<Dlop, Dlop>, str_tools::Ci_less> range_bounds;  // start, end keyed by tmp
+  std::map<std::string, Dlop, str_tools::Ci_less>                  tmp_fold;      // attr_get dst → folded Dlop
 
 public:
   // ── Tuple-shape side state (see upass_attributes_tuple.cpp) ──────────────
@@ -346,7 +347,7 @@ public:
   void record_assign(std::string_view lhs, bool rhs_is_nil);
 
 private:
-  std::map<std::string, std::string> range_source;  // var → `range` tmp from `assign var range_tmp` (h.[size] chain)
+  std::map<std::string, std::string, str_tools::Ci_less> range_source;  // var → `range` tmp (case-insensitive)
 
   // Assignment tracking (wrap_sat.cpp). flat_hash_* gives heterogeneous
   // string_view lookup and O(1) inserts; assigned_once grows to ~one entry per

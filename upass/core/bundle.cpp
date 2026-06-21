@@ -59,8 +59,11 @@ bool Bundle::Canonical_less::operator()(std::string_view a, std::string_view b) 
       if (ai != bi) {
         return ai < bi;
       }
-    } else if (a_seg != b_seg) {
-      return a_seg < b_seg;
+    } else if (!str_tools::ci_equal(a_seg, b_seg)) {
+      // Named/attr segments compare case-insensitively (Pyrope field names fold
+      // case): keys differing only by case collapse to one entry; the first
+      // spelling inserted wins as the stored key.
+      return str_tools::ci_less(a_seg, b_seg);
     }
     // Segments equal so far. Recurse / terminate.
     if (a_dot == std::string_view::npos && b_dot == std::string_view::npos) {

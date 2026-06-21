@@ -23,6 +23,17 @@ enums) are the only remaining work — both still <strong>hard-error in lowering
 their code paths). Each is valid, documented Pyrope; they have no ordering between them,
 so pick either and work it end-to-end from its subtask below.</p>
 
+<p><span class="status">re-verified again 2026-06-20</span> — direct compile of both
+repros confirms neither has cleared: <strong>A</strong> aborts with
+<code>reg-output-cycle</code> (<code>state register 'count' … homes at stage 0 but its
+declared landing cycle 0 requires home -1</code>) and <strong>B</strong> with
+<code>undefined-read</code> (<code>read of undefined variable 'eagle'</code>), so both
+rows stay open. This page now also folds in the companion <strong>TBD-feature audit</strong>
+(2026-06-20) — documented-but-<em>unimplemented</em> features, a category distinct from
+the A/B lowering defects: see <a href="#tbd-pending">TBD features still pending</a> below.
+<strong>B is itself a TBD</strong> (hierarchical enums) and is intentionally <em>not</em>
+given a new fail-by-design test there — it is already tracked as subtask&nbsp;B here.</p>
+
 <p><strong>Scope.</strong> This page deliberately excludes the LEC-engine
 precision issues (cvc5 false-refutes on hotmux / FSM-state / memory, the
 <code>\x01nxt:</code> phantom-output, the lgyosys no-reset-flop disagreement).
@@ -48,6 +59,39 @@ independent <code>iverilog</code> oracle): <code>implies</code>, runtime bit ind
 <code>a#[k..]</code>, or/and/xor/plus reductions <code>a#|[..]</code>, and the
 two-writes-to-one-register slice merge (the netlist now computes <code>{b,a}</code>
 correctly — but it exposed subtask&nbsp;F). Do not re-file these.</p>
+
+<h2 id="tbd-pending">TBD features still pending (2026-06-20 audit)</h2>
+<p>Separate from the A/B lowering defects above, these are features that are
+<strong>documented</strong> (see <code>docs/pyrope/15-tbd.md</code> and the per-feature
+<code>pyrope/3f-*</code> pages) but <strong>not yet implemented</strong>. Each documented
+TBD was re-tested against a fresh <code>bazel build -c dbg //lhd:lhd</code>; the table is
+the verdict. The not-done ones (except the two the audit was told to skip —
+<code>fluid</code> and hierarchical enums) now ship a <strong>fail-by-design</strong>
+regression under <code>inou/prp/tests/fixme/</code>, wired as a <code>fixme</code>-tagged
+<code>prp-tbd-*</code> target (<code>.bazelrc</code> filters <code>-fixme</code> so
+<code>bazel test //…</code> stays green; clear the filter to see the failure, e.g.
+<code>bazel test //inou/prp:prp-tbd-temporal_past --test_tag_filters=</code>). Each flips
+green and sheds its <code>fixme</code> tag once the feature lands.</p>
+<table>
+<thead><tr><th>Feature</th><th>Documented</th><th>Today (verified)</th><th>Regression</th></tr></thead>
+<tbody>
+<tr><td>Temporal library <code>past[n]</code>/<code>next[n]</code>/<code>rose</code>/<code>fell</code>/<code>stable</code>/<code>changed</code>/<code>eventually</code>/<code>always</code>, <code>.[rising]</code> sugar</td><td><a href="pyrope/3f-temporal.html">3f-temporal</a>, <code>09-verification.md</code></td><td><code>past[2]</code>→<code>lnast-malformed</code>; <code>rose(s)</code>→<code>tolg-error "no hardware lowering yet"</code>; <code>.[rising]</code>→<code>unhandled-node</code></td><td><code>prp-tbd-temporal_past</code></td></tr>
+<tr><td>Testbench extras <code>peek</code>/<code>poke</code>/<code>waitfor</code>/<code>force</code>/<code>release</code>/<code>sigref</code>/<code>spawn</code>/<code>join</code>/<code>cancel</code>, <code>step</code></td><td><a href="pyrope/3f-testbench.html">3f-testbench</a>, <code>09-verification.md</code></td><td><code>peek</code>/<code>poke</code> silent no-ops; bare <code>step</code>→<code>undefined-read 'step'</code> (not a statement in the grammar)</td><td><code>prp-tbd-testbench_step</code></td></tr>
+<tr><td>Standard library <code>import("prp")</code></td><td><code>13-stdlib.md</code> (no <code>3f-</code> page)</td><td><code>import-no-progress</code> — no <code>prp</code> unit exists; tuple/basic ops then <code>fcall-ufcs-no-self</code>; string helpers silent no-ops</td><td><code>prp-tbd-stdlib_import</code></td></tr>
+<tr><td>Verification extras <code>lec()</code>/<code>lec_valid()</code>/<code>covercase</code>/<code>requires</code>/<code>ensures</code></td><td><a href="pyrope/3f-verif_extras.html">3f-verif_extras</a>, <code>05-assert.md</code></td><td><code>lec</code>/<code>lec_valid</code>/<code>covercase</code> are silent no-ops (a non-equivalent pair / impossible group passes clean); <code>requires</code>→<code>tolg-error "no hardware lowering yet"</code></td><td><code>prp-tbd-verif_requires</code></td></tr>
+<tr><td><code>macro=</code> memory-compiler binding <code>reg ram:[1024]u32:[macro="sram_32kx32"]</code></td><td><a href="pyrope/3f-macro.html">3f-macro</a>, <code>08-memories.md</code></td><td>attribute is <em>silently accepted-and-ignored</em>: compiles clean (exit 0), emits the behavioral <code>cgen_memory_1rd_1wr</code> primitive — byte-identical with the attribute removed. <strong>No clean compile-failure path.</strong></td><td>none yet — needs an emitted-Verilog grep harness (assert it instantiates <code>sram_32kx32</code>, not <code>cgen_memory_*</code>), not a compile test</td></tr>
+<tr><td><code>fluid</code> lambdas (valid/retry/fire)</td><td><a href="pyrope/3f-fluid.html">3f-fluid</a>, <code>06d-fluid.md</code></td><td>parses only; no elastic lowering</td><td>skipped — pre-known TBD excluded from this audit</td></tr>
+<tr><td>Hierarchical (nested-tuple) enums</td><td><code>03-bundle.md:594</code></td><td><code>undefined-read 'eagle'</code> — see subtask <strong>B</strong> above</td><td>skipped — excluded from this audit; tracked as subtask B</td></tr>
+</tbody>
+</table>
+<p><span class="status landed">resolved 2026-06-20</span> The <code>lg</code> attribute
+(explicit lgraph/module name, <code>pub comb f::[lg="foo_mod"](…)</code>) was on this list
+but is <strong>implemented</strong> — verified end-to-end (two identical-bodied units with
+different <code>lg</code> names emit two distinct Verilog modules; default
+<code>\name.f</code> vs the override <code>foo_mod</code>; plus four validation error
+paths and the <code>lg_not_pub</code>/<code>lg_not_string</code>/<code>lg_not_lambda</code>
+fixtures). Its stale TBD markers were removed from <code>docs/pyrope/07-typesystem.md</code>
+and <code>docs/pyrope/15-tbd.md</code>.</p>
 
 <h2>Depends on</h2>
 <p>None. A and B are each self-contained and the only remaining work. C, D, E, F are

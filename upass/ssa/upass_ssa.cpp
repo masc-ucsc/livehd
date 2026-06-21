@@ -11,6 +11,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "ci_string.hpp"  // Ci_str_map/Ci_str_set: variable names match case-insensitively
 #include "diag.hpp"
 #include "hlop/dlop.hpp"
 #include "range_bits.hpp"
@@ -132,7 +133,7 @@ void uPass_ssa::copy_subtree(const std::shared_ptr<Lnast>& src, const Lnast_nid&
 
 // ── copy_with_rename ─────────────────────────────────────────────────────────
 void uPass_ssa::copy_with_rename(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
-                                 const Lnast_nid& dst_parent, const absl::flat_hash_map<std::string, std::string>& rename_map) {
+                                 const Lnast_nid& dst_parent, const Ci_str_map<std::string>& rename_map) {
   auto      type = src->get_type(src_nid);
   Lnast_nid new_nid;
   if (Lnast_ntype::is_ref(type)) {
@@ -392,12 +393,12 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   auto new_stmts = staging->add_child(new_root, Lnast_ntype::create_stmts());
 
   // SSA rename state (straight-line scope only; branches copied verbatim).
-  // absl::flat_hash_map<std::string, …> supports heterogeneous string_view
+  // Ci_str_map<…> supports heterogeneous string_view
   // lookup — the hot inner loop walks 1M+ refs and reads these via views,
   // never paying for a std::string temporary on the read path.
-  absl::flat_hash_map<std::string, std::string> rename_map;  // base → current SSA name
-  absl::flat_hash_map<std::string, int>         ssa_count;   // version counter
-  absl::flat_hash_set<std::string>              seen_lhs;    // first-seen tracker
+  Ci_str_map<std::string> rename_map;  // base → current SSA name
+  Ci_str_map<int>         ssa_count;   // version counter
+  Ci_str_set              seen_lhs;    // first-seen tracker
 
   // Reg-declared names are NEVER SSA-versioned: every read of a reg
   // sees the flop's q (Verilog `<=` semantics) regardless of program order,
@@ -410,8 +411,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   // even before it appears textually), so it must NOT be versioned either — a
   // read before the driver must stay on the base name, not bind to a `nil`
   // earlier version. tolg resolves the base name to the buffered net.
-  absl::flat_hash_set<std::string> reg_names;
-  absl::flat_hash_set<std::string> reg_only_names;  // true `reg` (NOT `wire`) — for set_mask din threading below
+  Ci_str_set reg_names;
+  Ci_str_set reg_only_names;  // true `reg` (NOT `wire`) — for set_mask din threading below
   for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
     if (nid.is_invalid() || !Lnast_ntype::is_declare(lnast->get_type(nid))) {
       continue;
@@ -461,8 +462,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       return Lnast_ntype::is_ref(lnast->get_type(nid)) && !is_user_var(lnast->get_name(nid));
     };
     // Reg names a subtree (re)writes via a 2-child store, recursively.
-    std::function<void(const Lnast_nid&, absl::flat_hash_set<std::string>&)> collect_reg_writes =
-        [&](const Lnast_nid& sub, absl::flat_hash_set<std::string>& out) {
+    std::function<void(const Lnast_nid&, Ci_str_set&)> collect_reg_writes =
+        [&](const Lnast_nid& sub, Ci_str_set& out) {
           for (auto c : lnast->children(sub)) {
             if (Lnast_ntype::is_store(lnast->get_type(c))) {
               auto d0 = lnast->get_first_child(c);
@@ -473,8 +474,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
             collect_reg_writes(c, out);
           }
         };
-    std::function<void(const Lnast_nid&, absl::flat_hash_map<std::string, std::string>&)> thread_stmts =
-        [&](const Lnast_nid& sblk, absl::flat_hash_map<std::string, std::string>& pending) {
+    std::function<void(const Lnast_nid&, Ci_str_map<std::string>&)> thread_stmts =
+        [&](const Lnast_nid& sblk, Ci_str_map<std::string>& pending) {
           for (auto c : lnast->children(sblk)) {
             const auto ct = lnast->get_type(c);
             if (Lnast_ntype::is_set_mask(ct)) {
@@ -508,7 +509,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
                 }
               }
             } else if (Lnast_ntype::is_if_like(ct) || Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct)) {
-              absl::flat_hash_set<std::string> rw;
+              Ci_str_set rw;
               collect_reg_writes(c, rw);
               for (auto sub : lnast->children(c)) {
                 if (Lnast_ntype::is_stmts(lnast->get_type(sub))) {
@@ -524,22 +525,22 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
             } else if (Lnast_ntype::is_func_def(ct)) {
               for (auto sub : lnast->children(c)) {
                 if (Lnast_ntype::is_stmts(lnast->get_type(sub))) {
-                  absl::flat_hash_map<std::string, std::string> fresh;  // separate name scope
+                  Ci_str_map<std::string> fresh;  // separate name scope
                   thread_stmts(sub, fresh);
                 }
               }
             }
           }
         };
-    absl::flat_hash_map<std::string, std::string> top_pending;
+    Ci_str_map<std::string> top_pending;
     thread_stmts(stmts_nid, top_pending);
   }
 
   // Collect the BASE names that a branch subtree (re)writes — the scalar/wire
   // 2-child store/dp_assign dests, recursively (nested ifs included), skipping
   // regs and tuple-set stores. Used for the branch carry-in below.
-  std::function<void(const Lnast_nid&, absl::flat_hash_set<std::string>&)> collect_branch_writes =
-      [&](const Lnast_nid& sub, absl::flat_hash_set<std::string>& out) {
+  std::function<void(const Lnast_nid&, Ci_str_set&)> collect_branch_writes =
+      [&](const Lnast_nid& sub, Ci_str_set& out) {
         for (auto c : lnast->children(sub)) {
           auto ct = lnast->get_type(c);
           if (stmt_has_dest(ct) && !Lnast_ntype::is_declare(ct)) {
@@ -572,9 +573,9 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   // its hand-flattened `f(ar.x, ar.y) -> (p.q, p.r)` twin — leaving no `tuple_*`
   // node that references a tuple port for tolg. Mirrors detuple's struct
   // reg/mem leaf rewrite (upass_detuple.cpp), but keyed on the io leaf set.
-  absl::flat_hash_set<std::string> port_in_leaf;   // full input leaf names ("ar.x")
-  absl::flat_hash_set<std::string> port_out_leaf;  // full output leaf names ("p.q")
-  absl::flat_hash_set<std::string> port_prefix;    // every proper prefix ("ar"; "p","p.q" for "p.q.a")
+  Ci_str_set port_in_leaf;   // full input leaf names ("ar.x")
+  Ci_str_set port_out_leaf;  // full output leaf names ("p.q")
+  Ci_str_set port_prefix;    // every proper prefix ("ar"; "p","p.q" for "p.q.a")
   auto register_port_leaf = [&](const std::string& nm, bool is_in) {
     if (nm.find('.') == std::string::npos) {
       return;  // scalar port — already a plain leaf, nothing to flatten
@@ -596,7 +597,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   // `ar.x.a` lowers to a chain `t1 = ar['x']` (interior) ; `t2 = t1['a']` (leaf):
   // the first records t1 -> "ar.x" and emits nothing; the second resolves
   // through it to the leaf "ar.x.a".
-  absl::flat_hash_map<std::string, std::string> tget_alias;
+  Ci_str_map<std::string> tget_alias;
 
   // A whole-tuple write to a tuple OUTPUT port driven CONDITIONALLY
   // (`p = if c { (first=1,..) } else { (first=3,..) }`) lowers as: each arm
@@ -607,8 +608,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   // (`p.first = ___pN.first`, ...) so tolg muxes each leaf - IDENTICAL to writing
   // the fields conditionally by hand. `port_split_armed` records which ports got
   // arm-driven so the now-redundant post-if whole-store is dropped.
-  absl::flat_hash_map<std::string, std::string> whole_port_split;  // src temp -> port prefix
-  absl::flat_hash_set<std::string>              port_split_armed;  // ports driven by arm distribution
+  Ci_str_map<std::string> whole_port_split;  // src temp -> port prefix
+  Ci_str_set              port_split_armed;  // ports driven by arm distribution
   int                                           arm_split_tmp = 0;
 
   // base/interior name -> its tuple-port dotted path (if it is one).
@@ -1151,7 +1152,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       // current version and reset the rename to base — so those writes stay on
       // the base for the Mux merge while everything else reads the live version.
       if (Lnast_ntype::is_if_like(type)) {
-        absl::flat_hash_set<std::string> bwrites;
+        Ci_str_set bwrites;
         collect_branch_writes(child, bwrites);
         for (const auto& var : bwrites) {
           auto it = rename_map.find(var);

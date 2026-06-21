@@ -586,14 +586,14 @@ void Partitioner::build_top() {
   auto src_gio = g_->get_io();
   auto tgio    = outlib_->create_io(top_);
   for (const auto& decl : src_gio->get_input_pin_decls()) {
-    tgio->add_input(decl.name, decl.port_id, decl.loop_last);
+    tgio->add_input(decl.name, decl.port_id, decl.loop_break);
     if (decl.bits != 0) {
       tgio->set_bits(decl.name, decl.bits);
     }
     tgio->set_unsign(decl.name, decl.unsign);
   }
   for (const auto& decl : src_gio->get_output_pin_decls()) {
-    tgio->add_output(decl.name, decl.port_id, decl.loop_last);
+    tgio->add_output(decl.name, decl.port_id, decl.loop_break);
     if (decl.bits != 0) {
       tgio->set_bits(decl.name, decl.bits);
     }

@@ -135,13 +135,13 @@ http_archive(
 
 # HHDS
 bazel_dep(name = "hhds", version = "0.2.0")
-git_override(
-    module_name = "hhds",
-    remote = "https://github.com/masc-ucsc/hhds.git",
-    commit = "879606c05e8c5f3495de6ab89fe4734d91d042f9",  # + Source_locator::span_minter/reserve (prpparse front-end)
-)
+# git_override(
+#     module_name = "hhds",
+#     remote = "https://github.com/masc-ucsc/hhds.git",
+#     commit = "b97246932570d72010c7c00a7efee6e50e68b822",  # new is_loop_break iterator (flop first/last/both) + hier inp/out_edges cross boundaries
+# )
 # For local debug/testing, swap the git_override above for:
-# local_path_override(module_name = "hhds", path = "../hhds") # sometimes useful for debug together with hhds
+local_path_override(module_name = "hhds", path = "../hhds")  # testing set_subnode loop_break body-scan locally
 
 # prpparse — hand-written recursive-descent Pyrope parser; the inou/prp front-end
 # (it replaced the tree-sitter-pyrope grammar, so neither @tree-sitter nor

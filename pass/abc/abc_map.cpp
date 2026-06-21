@@ -310,6 +310,34 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     return gu::is_unsign(p) ? std::max(1, b - 1) : b;
   };
 
+  // The "effective" width at which the LEC reads an OPERAND driver: a region
+  // INPUT port carries its full literal bus width (real_width_io == bits_of,
+  // every bit meaningful — e.g. the 9-bit-unsigned to-positive Get_mask port that
+  // feeds a shift), but an INTERNAL net is read at its magnitude width
+  // (real_width = bits_of-1 for unsigned, dropping the always-0 spare top slot).
+  // Reading an internal unsigned operand at raw bits_of would expose a spare slot
+  // an upstream op may have driven to 1 (a wrapped Sum, a Mux, ...), which the LEC
+  // drops — so shift/multiply operands must be read at this effective width.
+  absl::flat_hash_set<hhds::Pin_class> region_input_drivers;
+  for (const auto& p : rb.inputs) {
+    region_input_drivers.insert(p.src_driver);
+  }
+  auto eff_width = [&](const hhds::Pin_class& d) -> int {
+    if (region_input_drivers.contains(d)) {
+      return std::max(1, gu::bits_of(d));
+    }
+    return real_width(d);
+  };
+  // Bit i of an operand as the LEC sees it: the real bit below its effective
+  // width, then sign/zero extension above it (NOT the raw stored spare slot).
+  auto abc_eff_bit = [&](const hhds::Pin_class& d, int i) -> Abc_Obj_t* {
+    int ew = eff_width(d);
+    if (i < ew) {
+      return abc_bit(d, i);
+    }
+    return gu::is_unsign(d) ? abc_const_bit(false) : abc_bit(d, ew - 1);
+  };
+
   // arith::Ops view over the gate constructors, for the Sum/comparator builders.
   Abc_bit_ops ops;
   ops.konst  = abc_const_bit;
@@ -419,6 +447,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     int             port_id;
     hhds::Pin_class drv;
     int             bits;
+    bool            sign;  // operand signedness — load-bearing for a Div boundary (the LEC fit()s its operands by sign)
   };
   struct Bbox {
     hhds::Node_class                             node;
@@ -487,7 +516,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         if (w == 0) {
           w = 1;
         }
-        bb.ins.push_back({pid, e.driver, w});
+        bb.ins.push_back({pid, e.driver, w, !gu::is_unsign(e.driver)});
       }
     }
     bboxes.push_back(std::move(bb));
@@ -834,22 +863,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           }
         }
       }
-      bool a_sign = !gu::is_unsign(a_d);
-      // Operand width is the FULL declared bits of the driver (a region input port
-      // carries its literal bus width; an internal net's spare top bit is 0, so
-      // reading it is harmless): the LEC reads a shift operand at real_width_io
-      // (== bits_of) for a port, and a right shift needs every operand bit to pull
-      // the correct value down. The RESULT, by contrast, is an internal net sized
-      // at the magnitude width (real_width).
-      int a_width = gu::bits_of(a_d);
-      if (a_width <= 0) {
-        a_width = 1;
-      }
-      int out_w = real_width(out_pin);                   // result magnitude width (LEC W)
-      int cw    = std::max(a_width, std::max(out_w, 1));  // shift at the wider of the two
+      bool a_sign  = !gu::is_unsign(a_d);
+      int  a_width = eff_width(a_d);                      // operand width as the LEC reads it (port=bits_of, internal=real_width)
+      int  out_w   = real_width(out_pin);                 // result magnitude width (LEC W)
+      int  cw      = std::max(a_width, std::max(out_w, 1));  // shift at the wider of the two
       std::vector<Abc_Obj_t*> av(cw);
       for (int i = 0; i < cw; ++i) {
-        av[i] = abc_bit(a_d, i);  // a, sign/zero-extended to the shift width cw
+        av[i] = abc_eff_bit(a_d, i);  // a, sign/zero-extended (past its effective width) to the shift width cw
       }
       Abc_Obj_t*              fill = a_sign ? av[cw - 1] : abc_const_bit(false);  // sign bit (arith) or 0 (logical)
       std::vector<Abc_Obj_t*> res;                                               // cw-wide shifted value
@@ -864,20 +884,23 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           unsupported = true;
         } else {
           int64_t amt = amt_c.is_just_i64() ? amt_c.to_just_i64() : static_cast<int64_t>(cw);
+          // The LEC fits the amount to cw bits (BITVECTOR_ASHR/LSHR operands are
+          // same-width), so a count whose magnitude needs MORE than cw bits is read
+          // modulo 2^cw, not saturated. Mask to the low cw bits to match (cw>=63
+          // can't overflow an i64 amount, so it needs no mask).
+          if (cw < 63) {
+            amt &= (int64_t{1} << cw) - 1;
+          }
           res.resize(cw);
           for (int i = 0; i < cw; ++i) {
             res[i] = (amt < cw && i + amt < cw) ? av[static_cast<int>(i + amt)] : fill;  // amt >= cw => all fill
           }
         }
       } else {
-        int bw = gu::bits_of(b_d);
-        if (bw <= 0) {
-          bw = 1;
-        }
-        int                     nb = std::min(bw, cw);  // amount bits at/above cw are dropped (LEC fit-to-cw)
+        int                     nb = std::min(eff_width(b_d), cw);  // amount bits at/above its eff width or cw are 0 (LEC fit)
         std::vector<Abc_Obj_t*> bv(nb);
         for (int i = 0; i < nb; ++i) {
-          bv[i] = abc_bit(b_d, i);  // unsigned shift count
+          bv[i] = abc_bit(b_d, i);  // unsigned shift count (i < eff width, so the real bit)
         }
         res = arith::build_shr(ops, av, bv, fill);
       }
@@ -904,7 +927,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       auto extend = [&](const hhds::Pin_class& d) {
         std::vector<Abc_Obj_t*> v(out_w);
         for (int i = 0; i < out_w; ++i) {
-          v[i] = abc_bit(d, i);
+          v[i] = abc_eff_bit(d, i);  // operand fit to out_w at its effective width (no stray internal spare bit)
         }
         return v;
       };
@@ -1429,8 +1452,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
           dbit[b] = const0_pin();
         }
       }
-      if (w == 1) {
-        dbit[0].connect_sink(sink);
+      if (w == 1 && !bb.ins[ii].sign) {
+        dbit[0].connect_sink(sink);  // unsigned 1-bit: drive the sink directly
         continue;
       }
       hhds::Pin_class acc = gu::create_const(*body, *Dlop::create_integer(0));
@@ -1444,6 +1467,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         gu::set_unsign(acc);
       }
       gu::set_bits(acc, w);
+      // Preserve the operand's signedness on the reassembled value. For a Div the
+      // LEC fit()s each operand by its sign (SDIV/UDIV sign-extend vs zero-extend),
+      // so a signed operand narrower than the divider's width must stay signed or
+      // ref/impl diverge. Harmless for Sub/Memory (their LEC compare never extends
+      // an input up to a larger width). The intermediate accs stay unsigned; only
+      // the final value that reaches the sink carries the sign.
+      bb.ins[ii].sign ? gu::set_sign(acc) : gu::set_unsign(acc);
       acc.connect_sink(sink);
     }
   }

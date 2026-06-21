@@ -1,0 +1,22 @@
+/*
+:name: testbench_step
+:type: compile
+*/
+// TBD feature: testbench extras peek/poke/step (docs/pyrope/09-verification.md,
+// 15-tbd.md). `step` should advance the simulation one cycle and peek() read a
+// hierarchical signal. Today bare `step` is not a statement (parses as an
+// identifier read -> "read of undefined variable 'step'") and peek/poke are
+// silent no-ops. Tagged `fixme`: fails by design until the testbench runner exists.
+mod cnt(en:bool) -> (v:u8@[0]) {
+  reg c:u8 = 0
+  v = c
+  if en { wrap c += 1 }
+}
+test "peek_poke_step" {
+  const o = cnt(en=true)
+  step
+  assert(peek("cnt/c") == 1)
+  poke("cnt/c", 42)
+  step
+  assert(peek("cnt/c") == 43)
+}

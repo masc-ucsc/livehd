@@ -14,8 +14,8 @@ namespace upass::call_resolver {
 
 std::optional<std::vector<Call_actual>> collect_call_actuals(
     Lnast_manager& lm, const Symbol_table& st,
-    const std::unordered_map<std::string, std::shared_ptr<Lnast>>& function_registry,
-    const std::function<std::optional<Dlop>()>&                   resolve_scalar_at_cursor) {
+    const Ci_str_map<std::shared_ptr<Lnast>>&   function_registry,
+    const std::function<std::optional<Dlop>()>& resolve_scalar_at_cursor) {
   std::vector<Call_actual> actuals;
 
   const auto is_type = [&](Lnast_ntype::Lnast_ntype_int t) { return lm.get_raw_ntype() == t; };
@@ -142,11 +142,11 @@ std::optional<std::vector<Call_actual>> collect_call_actuals(
 }
 
 void process_import_call(Lnast_manager& lm, Symbol_table& st,
-                         const std::unordered_map<std::string, std::shared_ptr<Lnast>>& function_registry,
-                         const std::unordered_set<std::string>&                         ambiguous_units,
-                         const std::function<void(const std::string&)>&                 pend_import,
-                         const std::function<void(std::string_view, const Dlop&)>&     store_trivial,
-                         const std::string&                                             dst) {
+                         const Ci_str_map<std::shared_ptr<Lnast>>&      function_registry,
+                         const Ci_str_set&                              ambiguous_units,
+                         const std::function<void(const std::string&)>& pend_import,
+                         const std::function<void(std::string_view, const Dlop&)>& store_trivial,
+                         const std::string&                                        dst) {
   if (!lm.move_to_sibling()) {
     return;  // malformed call (no argument) — leave unfolded
   }
@@ -208,7 +208,7 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
       const auto&            src   = uit->second;
       const Lnast_pub_entry* found = nullptr;
       for (const auto& p : src->get_pub_list()) {
-        if (p.name == member) {
+        if (str_tools::ci_equal(p.name, member)) {
           found = &p;
           break;
         }
@@ -231,7 +231,7 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
           return;
         }
         for (const auto& [path, val_text] : src->get_pub_values()) {
-          if (path == member) {
+          if (str_tools::ci_equal(path, member)) {
             store_trivial(dst, *Dlop::from_pyrope(val_text));
             return;
           }

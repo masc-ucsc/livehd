@@ -55,7 +55,7 @@ void Color_synth::mark_ids(hhds::Graph* g) {
         if (!is_partitionable(node)) {
           continue;
         }
-        if (!node.is_loop_last()) {
+        if (!node.is_loop_break()) {
           set_id(node, get_free_id());
         }
       }
@@ -66,7 +66,7 @@ void Color_synth::mark_ids(hhds::Graph* g) {
     if (!is_partitionable(node)) {
       continue;
     }
-    if (node.is_loop_last()) {
+    if (node.is_loop_break()) {
       continue;
     }
 

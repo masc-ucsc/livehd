@@ -13,6 +13,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "ci_string.hpp"
 #include "hlop/dlop.hpp"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
@@ -93,7 +94,7 @@ protected:
   // so an fcall can switch the cursor into the callee instead of
   // running the dedicated func_extract pre-pass. Empty today; the
   // dedicated uPass_func_extract pass still populates Eprp_var::lnasts.
-  absl::flat_hash_map<std::string, std::shared_ptr<Lnast>> function_registry;
+  Ci_str_map<std::shared_ptr<Lnast>> function_registry;
 
   bool        configuration_error{false};
   std::string configuration_error_msg;
@@ -378,7 +379,7 @@ protected:
   // each such `tuple_get` into a direct `dst = <actual>` copy during the body
   // walk — avoiding a runtime tuple_add/tuple_get that tolg cannot lower.
   // Entries are registered in the prologue and erased after the body walk.
-  absl::flat_hash_map<std::string, std::vector<std::pair<std::string, Lnast_node>>> vararg_bindings_;
+  Ci_str_map<std::vector<std::pair<std::string, Lnast_node>>> vararg_bindings_;
   // Called from process_lnast's tuple_get case. Returns true (and emits a copy
   // `dst = <picked ref>`) iff the cursor's tuple_get is a single-segment pick
   // with a comptime-known index/name resolving to a known runtime ref — from a
@@ -475,7 +476,7 @@ protected:
   // Specialized-module names this runner already minted this run (avoid
   // re-cloning the same signature within one tree; cross-tree dedup is by name
   // in pass_upass's queue drain).
-  absl::flat_hash_set<std::string> specialized_emitted_;
+  Ci_str_set specialized_emitted_;
 
   // ── init constructor hook ───────────────────────────────────────────────
   // One named argument of a synthesized constructor call (positional when
@@ -557,22 +558,22 @@ protected:
   // name leaves `tuple_get(scalar,'p1')` to fold to garbage. Permissive (returns
   // true) when the result is dropped or the output shape is one it cannot model,
   // so a too-strict skip surfaces as a clean no-overload, never a wrong dispatch.
-  bool return_matches(const Lnast_tree_io& io, const absl::flat_hash_set<std::string>& req_fields, bool whole_used);
+  bool return_matches(const Lnast_tree_io& io, const Ci_str_set& req_fields, bool whole_used);
   // Scan the func_call's following siblings (cursor restored to `fcall_cursor`)
   // to learn how its result `dst_name` is consumed: each `tuple_get(dst_name,
   // 'field')` adds to `req_fields`; any OTHER reference to `dst_name` sets
   // `whole_used`. Cursor-neutral (saves/restores). Feeds return_matches.
   void collect_return_consumption(const upass::Lnast_manager::Cursor_state& fcall_cursor, std::string_view dst_name,
-                                  absl::flat_hash_set<std::string>& req_fields, bool& whole_used);
+                                  Ci_str_set& req_fields, bool& whole_used);
   // >0 while a synthesized constructor call is being spliced.
   int                      init_construction_depth_ = 0;
   // Vars whose `declare` has been walked but whose declaration store hasn't
   // arrived yet — the only store where construction may run.
-  absl::flat_hash_set<std::string> pending_ctor_store_;
+  Ci_str_set pending_ctor_store_;
   // Receivers currently mid-construction: their synthesized defaults-bind /
   // ref-self write-back stores must not re-enter try_init_construction
   // (nested constructions of OTHER vars inside an init body stay allowed).
-  absl::flat_hash_set<std::string> constructing_vars_;
+  Ci_str_set constructing_vars_;
   // One-shot: armed right before walking the synthesized ctor fcall so the
   // FIRST try_inline entry (the ctor itself, not calls nested in its body)
   // relaxes the arg-naming rules (construction args bind in tuple order) and
@@ -705,26 +706,26 @@ protected:
   // Registry keys (qualified names) whose bodies can reach themselves
   // (direct/mutual recursion). Bailed to the evaluator; computed in
   // set_function_registry.
-  absl::flat_hash_set<std::string>              recursive_callees_;
+  Ci_str_set                                   recursive_callees_;
   // Registry keys the runner can fully splice today (single output written by
   // name, no placeholders; recursion allowed under fuel). All other callees
   // route to the evaluator. Computed in set_function_registry.
-  absl::flat_hash_set<std::string>              inlinable_callees_;
+  Ci_str_set                                   inlinable_callees_;
   // Inlinable callees whose body uses positional placeholders (_0/_1/_); the
   // prologue binds those aliases for these only.
-  absl::flat_hash_set<std::string>              placeholder_callees_;
+  Ci_str_set                                   placeholder_callees_;
   // Result tmps of an inlined call that returned >1 LOGICAL output. Binding one
   // of these WHOLE to a single user variable (`const inner = two_output_f()`) is
   // an error — multiple outputs must be destructured (`const (o1,o2) = f()`).
   // A destructure consumes the tmp via tuple_gets, never a whole store, so it is
   // not flagged. (06-functions.md "Binding return values".)
-  absl::flat_hash_set<std::string>              multi_output_results_;
+  Ci_str_set                                   multi_output_results_;
   // Higher-order / closure support: maps a function-valued param's RAW name
   // (as read in the callee body, e.g. `f` in `r = f(x)`) to the registry
   // function it is bound to at this call site (e.g. `step_up`). Saved/restored
   // around each body walk so nested frames don't clobber each other. Consulted
   // by try_inline_func_call when a callee name isn't itself a registry entry.
-  absl::flat_hash_map<std::string, std::string> func_param_bindings_;
+  Ci_str_map<std::string> func_param_bindings_;
   // Phase D recursion fuel. Per-callee depth is capped at kInlineMaxDepth
   // (active frames of the same callee); inline_budget_ is a per-run total
   // splice cap so a non-terminating / exponential unroll bails instead of

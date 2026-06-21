@@ -14,6 +14,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_cat.h"
+#include "ci_string.hpp"  // Ci_str_map: signal-name-keyed side-channels fold case
 #include "diag.hpp"
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
@@ -90,8 +91,8 @@ struct BitwidthEntry {
 };
 
 struct Lnast_bitwidth_meta {
-  std::unordered_map<std::string, BitwidthEntry> ranges;
-  bool                                           empty() const noexcept { return ranges.empty(); }
+  Ci_str_map<BitwidthEntry> ranges;  // keyed by signal name (case-insensitive)
+  bool                      empty() const noexcept { return ranges.empty(); }
 };
 
 // ── I/O metadata side-channel (populated by upass/ssa when ssa:1 is set) ────

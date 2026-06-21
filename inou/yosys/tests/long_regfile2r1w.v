@@ -44,8 +44,8 @@ module regfile2r1w
      ,input [4-1:0]           raddr0
      ,input [4-1:0]           raddr1
 
-     ,output [3-1:0]         q0
-     ,output [3-1:0]         q1
+     ,output reg [3-1:0]         q0
+     ,output reg [3-1:0]         q1
 
      );
 
@@ -78,4 +78,3 @@ module regfile2r1w
    end
 
 endmodule
-

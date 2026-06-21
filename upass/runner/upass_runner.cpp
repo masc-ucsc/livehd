@@ -2762,7 +2762,7 @@ bool uPass_runner::try_inline_func_call() {
         }
         if (auto bf = try_bundle_fields(bundle_name)) {
           for (const auto& [fld, val] : *bf) {
-            if (fld == callee_name && val.is_string()) {
+            if (str_tools::ci_equal(fld, callee_name) && val.is_string()) {
               auto fn = val.to_pyrope();
               if (fn.size() >= 2 && fn.front() == '\'' && fn.back() == '\'') {
                 fn = fn.substr(1, fn.size() - 2);  // strip pyrope quotes
@@ -2823,8 +2823,8 @@ bool uPass_runner::try_inline_func_call() {
           // bind to how the result is consumed (return_matches, the output
           // side). Without the return check an input-compatible candidate whose
           // outputs do not fit the destructure is silently picked.
-          absl::flat_hash_set<std::string> req_fields;
-          bool                             whole_used = false;
+          Ci_str_set req_fields;
+          bool       whole_used = false;
           collect_return_consumption(saved, dst_name, req_fields, whole_used);
           for (const auto& fn : cands) {
             auto c = lookup_callee(fn);
@@ -2882,14 +2882,14 @@ bool uPass_runner::try_inline_func_call() {
         if (!recv_name.empty()) {
           if (auto bf = try_bundle_fields(recv_name)) {
             for (const auto& [fld, val] : *bf) {
-              if (fld != source_callee_name || !val.is_string()) {
+              if (!str_tools::ci_equal(fld, source_callee_name) || !val.is_string()) {
                 continue;
               }
               auto fn = val.to_pyrope();
               if (fn.size() >= 2 && fn.front() == '\'' && fn.back() == '\'') {
                 fn = fn.substr(1, fn.size() - 2);
               }
-              if (fn == callee->get_top_module_name() || lookup_callee(fn) == callee) {
+              if (str_tools::ci_equal(fn, callee->get_top_module_name()) || lookup_callee(fn) == callee) {
                 namespace_access = true;
               }
               break;
@@ -3016,7 +3016,7 @@ bool uPass_runner::try_inline_func_call() {
   std::vector<std::string>                        param_func(nparams);  // non-empty: function-valued param
   auto                                            param_index = [&](std::string_view k) -> std::size_t {
     for (std::size_t i = 0; i < nbind; ++i) {  // never match the var-arg slot by name
-      if (io.inputs[i].name == k) {
+      if (str_tools::ci_equal(io.inputs[i].name, k)) {
         return i;
       }
     }
@@ -4786,7 +4786,7 @@ bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<
 
   auto param_index = [&](std::string_view k) -> std::size_t {
     for (std::size_t i = 0; i < nbind; ++i) {
-      if (io.inputs[i].name == k) {
+      if (str_tools::ci_equal(io.inputs[i].name, k)) {
         return i;
       }
     }
@@ -5042,7 +5042,7 @@ bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<
 }
 
 void uPass_runner::collect_return_consumption(const upass::Lnast_manager::Cursor_state& fcall_cursor, std::string_view dst_name,
-                                              absl::flat_hash_set<std::string>& req_fields, bool& whole_used) {
+                                              Ci_str_set& req_fields, bool& whole_used) {
   // The destructure `(p1,p2) = f()` lowers to `fcall(dst, …)` followed by
   // sibling `tuple_get(tmp, dst, 'p1')` / `tuple_get(tmp, dst, 'p2')` picks
   // (see the parse dump); a whole bind `c = f()` lowers to `store(c, dst)` and
@@ -5088,11 +5088,11 @@ void uPass_runner::collect_return_consumption(const upass::Lnast_manager::Cursor
   lm->restore_cursor(here);
 }
 
-bool uPass_runner::return_matches(const Lnast_tree_io& io, const absl::flat_hash_set<std::string>& req_fields, bool whole_used) {
+bool uPass_runner::return_matches(const Lnast_tree_io& io, const Ci_str_set& req_fields, bool whole_used) {
   // Regroup the FLATTENED output leaves into LOGICAL outputs exactly as the real
   // epilogue does (see the output-binding code: a tuple output `p:(first,
   // second)` is io.outputs leaves `p.first`,`p.second`, one logical output `p`).
-  absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> logical;  // lname → top-level sub-field names
+  Ci_str_map<Ci_str_set> logical;  // lname → top-level sub-field names (case-insensitive)
   for (const auto& o : io.outputs) {
     const auto  dp    = o.name.find('.');
     std::string lname = dp == std::string::npos ? o.name : o.name.substr(0, dp);

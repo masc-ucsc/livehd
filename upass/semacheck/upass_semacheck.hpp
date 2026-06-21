@@ -5,6 +5,7 @@
 #include <string_view>
 #include <unordered_set>
 
+#include "ci_string.hpp"  // Ci_str_set: variable names match case-insensitively
 #include "upass_core.hpp"
 
 // uPass_semacheck — semantic-legality checks on the tree closest to user
@@ -36,7 +37,7 @@ private:
   bool ran_ = false;
 
   void check_attr_writes(const Lnast* ln);
-  void check_scope(const Lnast* ln, const Lnast_nid& scope_stmts, const std::unordered_set<std::string>& visible);
+  void check_scope(const Lnast* ln, const Lnast_nid& scope_stmts, const Ci_str_set& visible);
 
   // Located error: span from `nid`'s loc when the node carries one (declare /
   // attr_set via the loc-carry chain), else a null span (single-line render).

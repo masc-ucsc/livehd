@@ -1,0 +1,12 @@
+/*
+:name: stdlib_import
+:type: compile
+*/
+// TBD feature: standard library import("prp") (docs/pyrope/13-stdlib.md, 15-tbd.md).
+// Today LiveHD has no `prp` unit, so this errors with
+// "unit `stdlib_import` is blocked on unresolved import(s): \"prp\"" (import-no-progress).
+// Tagged `fixme`: fails by design until the standard library is implemented.
+const prp = import("prp")
+pub comb stdlib_import(a:u8) -> (r:u8) {
+  r = prp.plus(a, 1)
+}

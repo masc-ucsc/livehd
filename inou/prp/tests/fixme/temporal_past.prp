@@ -1,0 +1,12 @@
+/*
+:name: temporal_past
+:type: compile
+*/
+// TBD feature: temporal `past[n]` (docs/pyrope/09-verification.md, 15-tbd.md).
+// past[2](a) should insert two flops so `out` is `a` delayed by 2 cycles.
+// Today LiveHD cannot lower it (pass.lnastfmt: "ref text 'past[2]' is not a
+// valid identifier"; bare past(a) gives upass.tolg "no hardware lowering yet").
+// Tagged `fixme`: fails by design until the temporal library is implemented.
+mod temporal_past(a:u8) -> (out:u8@[2]) {
+  out = past[2](a)
+}

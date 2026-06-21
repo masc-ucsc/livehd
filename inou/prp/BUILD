@@ -121,6 +121,45 @@ cc_test(
     for prp_file in glob(["tests/warnings/*.prp"])
 ]
 
+# TBD-feature trackers (tests/fixme/): each `.prp` exercises a documented but
+# NOT-yet-implemented Pyrope feature (marked "TBD" in the docs / 15-tbd.md) and
+# is `:type: compile`, so it FAILS by design today (the feature has no lowering)
+# and will flip green once the feature lands — at which point drop the `fixme`
+# tag and move the file into the normal glob above. Tagged `fixme` so `.bazelrc`
+# (`-fixme`) keeps `bazel test //...` green; run one with the tag filter cleared
+# to see the failure:
+#   bazel test //inou/prp:prp-tbd-temporal_past --test_tag_filters=
+# Covered: temporal library (past[n]), standard library (import("prp")),
+# verification extras (requires/ensures), and testbench extras (step/peek/poke).
+# (The `lg` attribute used to be on this list but is now implemented — its TBD
+# markers were removed from the docs.) The `macro=` memory-compiler binding is
+# also still TBD but is silently accepted-and-ignored — it compiles clean today
+# (no diagnostic), so it needs an emitted-Verilog grep harness, not a compile
+# test, and is tracked in todo/pyrope/3f-macro.html instead.
+[
+    sh_test(
+        name = "prp-tbd-%s" % base,
+        srcs = ["tests/pyrope_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:tests/fixme/%s.prp)" % base,
+        ],
+        data = [
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//inou/prp:tests/fixme/%s.prp" % base,
+            "//lhd",
+        ],
+        tags = ["fixme"],
+    )
+    for base in [
+        "temporal_past",
+        "stdlib_import",
+        "verif_requires",
+        "testbench_step",
+    ]
+]
+
 # Import tests (2f-lnimport): multi-file — an importer plus the unit(s) it
 # imports. Each test names its inputs via the `:files:` header; every .prp in
 # tests/imports/ is bundled into data so the header's repo-relative paths

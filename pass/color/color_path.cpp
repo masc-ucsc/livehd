@@ -47,7 +47,7 @@ static bool add_color(std::vector<int>& colors, int color) {
 }
 
 // Loop-last regular nodes are the flops/registers/memories we seed from.
-static bool is_flop_like(const hhds::Node_class& node) { return is_partitionable(node) && node.is_loop_last(); }
+static bool is_flop_like(const hhds::Node_class& node) { return is_partitionable(node) && node.is_loop_break(); }
 
 std::vector<std::string> Color_path::parse_instance_names(std::string_view instance_csv) {
   std::vector<std::string> names;
@@ -93,7 +93,7 @@ void Color_path::propagate_fwd(const hhds::Node_class& node, int color) {
     if (!is_partitionable(succ)) {
       continue;
     }
-    if (succ.is_loop_last()) {
+    if (succ.is_loop_break()) {
       add_color(node2colors[succ], color);  // back-to-back flop: share color, stop
       continue;
     }
@@ -113,7 +113,7 @@ void Color_path::propagate_bwd(const hhds::Node_class& node, int color) {
     if (!is_partitionable(pred)) {
       continue;
     }
-    if (pred.is_loop_last()) {
+    if (pred.is_loop_break()) {
       add_color(node2colors[pred], color);  // back-to-back flop: share color
       continue;
     }

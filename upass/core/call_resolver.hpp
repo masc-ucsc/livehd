@@ -19,9 +19,11 @@
 #include <unordered_set>
 #include <vector>
 
+#include "ci_string.hpp"
 #include "hlop/dlop.hpp"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
+#include "str_tools.hpp"
 #include "symbol_table.hpp"
 
 namespace upass::call_resolver {
@@ -58,16 +60,18 @@ struct Call_actual {
 // resolve_current_scalar today).
 std::optional<std::vector<Call_actual>> collect_call_actuals(
     Lnast_manager& lm, const Symbol_table& st,
-    const std::unordered_map<std::string, std::shared_ptr<Lnast>>& function_registry,
-    const std::function<std::optional<Dlop>()>&                   resolve_scalar_at_cursor);
+    const Ci_str_map<std::shared_ptr<Lnast>>&   function_registry,
+    const std::function<std::optional<Dlop>()>& resolve_scalar_at_cursor);
 
 
 // Callee NAME resolution: the exact-name module plus any unique
 // "<module>.<name>" body; a candidate with a real comb signature (non-empty
 // io) wins over an empty-io top module of the same name (a file's top can
 // share its comb's name — the extracted body must win or the inline bails).
-// nullptr = not found / ambiguous suffix. Templated over the registry map
-// (the runner keys an absl::flat_hash_map, constprop a std::unordered_map).
+// nullptr = not found / ambiguous suffix. Templated over the registry map; BOTH
+// callers key a CASE-INSENSITIVE map (Ci_str_map = absl::flat_hash_map with
+// str_tools::Ci_hash/Ci_eq), so the exact `.find()` folds case; the suffix scan
+// uses str_tools::ci_ends_with to match `<module>.<name>` case-insensitively.
 template <typename Registry>
 std::shared_ptr<Lnast> lookup_callee(const Registry& function_registry, std::string_view name) {
   std::shared_ptr<Lnast> exact;
@@ -78,7 +82,7 @@ std::shared_ptr<Lnast> lookup_callee(const Registry& function_registry, std::str
   std::shared_ptr<Lnast> suffix_body;
   int                    suffix_matches = 0;
   for (const auto& [k, v] : function_registry) {
-    if (k.size() > suffix.size() && k.compare(k.size() - suffix.size(), suffix.size(), suffix) == 0) {
+    if (k.size() > suffix.size() && str_tools::ci_ends_with(k, suffix)) {
       suffix_body = v;
       ++suffix_matches;
     }
@@ -102,10 +106,10 @@ std::shared_ptr<Lnast> lookup_callee(const Registry& function_registry, std::str
 // unit's pub-namespace bundle on the dest. Ambiguity = permanent error;
 // unknown unit / values-pending = pend_import (kernel whole-file retry).
 void process_import_call(Lnast_manager& lm, Symbol_table& st,
-                         const std::unordered_map<std::string, std::shared_ptr<Lnast>>& function_registry,
-                         const std::unordered_set<std::string>&                         ambiguous_units,
-                         const std::function<void(const std::string&)>&                 pend_import,
-                         const std::function<void(std::string_view, const Dlop&)>&     store_trivial,
-                         const std::string&                                             dst);
+                         const Ci_str_map<std::shared_ptr<Lnast>>&      function_registry,
+                         const Ci_str_set&                              ambiguous_units,
+                         const std::function<void(const std::string&)>& pend_import,
+                         const std::function<void(std::string_view, const Dlop&)>& store_trivial,
+                         const std::string&                                        dst);
 
 }  // namespace upass::call_resolver

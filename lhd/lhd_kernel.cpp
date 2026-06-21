@@ -19,8 +19,10 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "ci_string.hpp"     // Ci_str_map/Ci_str_set: case-insensitive name matching
 #include "color_common.hpp"  // livehd::color::is_partitionable / NO_COLOR (lhd tool)
 #include "diag.hpp"
+#include "str_tools.hpp"  // str_tools::ci_equal / ci_ends_with / Ci_less
 #include "eprp.hpp"
 #include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
@@ -1329,21 +1331,50 @@ void discover_imports(Options& opts, Eprp_var& var, size_t n_imports) {
     auto            a = fs::absolute(fs::path(p), ec);
     return ec ? std::string(p) : a.lexically_normal().string();
   };
+  // Resolve `<stem>.prp` in `dir` case-insensitively (module/import names fold
+  // case). Always scans the directory and returns the REAL on-disk filename
+  // (original case preserved) so two import spellings of one file collapse to a
+  // single path — on a case-insensitive filesystem an exact-path probe would
+  // otherwise echo the caller's spelling and look like a distinct file. Empty
+  // when absent.
+  auto find_prp_ci = [](const std::string& dir, const std::string& stem) -> std::string {
+    // A stem may be path-qualified (`subdir/mod`): the directory portion rides
+    // verbatim onto `dir` and only the final component is case-folded against
+    // the on-disk filenames (matching the old `dir + "/" + stem + ".prp"` probe).
+    std::string scan_dir = dir;
+    std::string leaf     = stem;
+    if (const auto s = stem.rfind('/'); s != std::string::npos) {
+      scan_dir = dir + "/" + stem.substr(0, s);
+      leaf     = stem.substr(s + 1);
+    }
+    std::error_code it_ec;
+    for (fs::directory_iterator it(scan_dir, it_ec), end; !it_ec && it != end; it.increment(it_ec)) {
+      if (!it->is_regular_file()) {
+        continue;
+      }
+      const auto fn = it->path().filename().string();
+      if (fn.size() == leaf.size() + 4 && str_tools::ci_ends_with(fn, ".prp")
+          && str_tools::ci_equal(std::string_view(fn).substr(0, leaf.size()), leaf)) {
+        return it->path().string();
+      }
+    }
+    return {};
+  };
 
-  absl::flat_hash_map<std::string, std::string> unit_dir;      // unit -> source dir
-  absl::flat_hash_set<std::string>              parsed_paths;  // abs paths already parsed
+  Ci_str_map<std::string>          unit_dir;      // unit -> source dir (case-insensitive)
+  absl::flat_hash_set<std::string> parsed_paths;  // abs paths already parsed
   for (const auto& f : opts.files) {
     unit_dir[unit_name_of(f)] = dir_of(f);
     parsed_paths.insert(abspath_of(f));
   }
 
   while (true) {
-    absl::flat_hash_set<std::string> loaded;
+    Ci_str_set loaded;
     for (const auto& ln : var.lnasts) {
       loaded.insert(std::string(ln->get_top_module_name()));
     }
-    std::map<std::string, std::string>           found;       // logical name -> file to parse
-    std::map<std::string, std::set<std::string>> seen_paths;  // logical name -> resolved files
+    std::map<std::string, std::string, str_tools::Ci_less>           found;       // logical name -> file to parse
+    std::map<std::string, std::set<std::string>, str_tools::Ci_less> seen_paths;  // logical name -> resolved files
 
     for (size_t i = n_imports; i < var.lnasts.size(); ++i) {
       const auto& ln  = var.lnasts[i];
@@ -1376,9 +1407,8 @@ void discover_imports(Options& opts, Eprp_var& var, size_t n_imports) {
           continue;
         }
         for (const auto& c : names) {
-          std::string     path = dir + "/" + c + ".prp";
-          std::error_code ec;
-          if (fs::exists(path, ec) && !ec) {
+          std::string path = find_prp_ci(dir, c);
+          if (!path.empty()) {
             seen_paths[c].insert(abspath_of(path));
             found.try_emplace(c, path);
             break;

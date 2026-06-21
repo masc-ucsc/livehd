@@ -113,14 +113,14 @@ void uPass_semacheck::check_attr_writes(const Lnast* ln) {
 // checked here — that check runs in prp2lnast on the producer tree (see
 // Prp2lnast::check_undeclared_writes), where inliner/SSA-synthesized stores
 // can't false-positive.
-void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts, const std::unordered_set<std::string>& visible) {
-  std::unordered_set<std::string> here;
+void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts, const Ci_str_set& visible) {
+  Ci_str_set here;
   // `combined` = visible ∪ names declared so far in this scope. Maintained in
   // place (one copy of `visible` per scope) and handed to nested scopes, rather
   // than rebuilding visible∪here for every nested child -- the latter is
   // O(children × names) and turns a declare-heavy module (large firtool output)
   // into a near-hang.
-  std::unordered_set<std::string> combined = visible;
+  Ci_str_set combined = visible;
   for (auto c = ln->get_first_child(scope_stmts); !c.is_invalid(); c = ln->get_sibling_next(c)) {
     const auto ct = ln->get_type(c);
     if (Lnast_ntype::is_declare(ct)) {

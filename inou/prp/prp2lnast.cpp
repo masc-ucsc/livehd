@@ -525,7 +525,7 @@ bool prp_name_is_placeholder_arg(std::string_view n) {
 
 // Collect store/declare TARGET ref names within a func_def signature (the
 // func_def children other than the body `stmts`) — its params and outputs.
-void prp_collect_sig_targets(const Lnast* ln, const Lnast_nid& node, std::unordered_set<std::string>& out) {
+void prp_collect_sig_targets(const Lnast* ln, const Lnast_nid& node, Ci_str_set& out) {
   auto t = ln->get_type(node);
   if (Lnast_ntype::is_store(t) || Lnast_ntype::is_declare(t)) {
     auto v = ln->get_first_child(node);
@@ -555,15 +555,15 @@ void Prp2lnast::check_undeclared_writes() const {
 // param/output) visible in scope is `a = 3` with no prior declaration — an error.
 // `visible` carries names declared in enclosing frames; a func body is a fresh
 // namespace seeded with its params/outputs.
-void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::unordered_set<std::string>& visible,
-                                      const std::unordered_set<std::string>& seed_here) const {
-  std::unordered_set<std::string> here = seed_here;
+void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const Ci_str_set& visible,
+                                      const Ci_str_set& seed_here) const {
+  Ci_str_set here = seed_here;
   for (auto c = lnast->get_first_child(scope_stmts); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
     const auto ct = lnast->get_type(c);
 
     // A bare `stmts` block (e.g. the for-loop unroll wrapper) is a nested scope.
     if (Lnast_ntype::is_stmts(ct)) {
-      std::unordered_set<std::string> combined = visible;
+      Ci_str_set combined = visible;
       combined.insert(here.begin(), here.end());
       check_writes_in_scope(c, combined);
       continue;
@@ -576,7 +576,7 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::u
     // an enclosing name is variable shadowing (located at the `for`). Layout:
     // for(value, iterable, body, mode [, idx [, key]]).
     if (Lnast_ntype::is_for(ct)) {
-      std::unordered_set<std::string> binds;
+      Ci_str_set binds;
       Lnast_nid                       body_stmts;
       int                             pos = 0;
       for (auto cc = lnast->get_first_child(c); !cc.is_invalid(); cc = lnast->get_sibling_next(cc), ++pos) {
@@ -601,7 +601,7 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::u
         }
       }
       if (!body_stmts.is_invalid()) {
-        std::unordered_set<std::string> combined = visible;
+        Ci_str_set combined = visible;
         combined.insert(here.begin(), here.end());
         combined.insert(binds.begin(), binds.end());
         check_writes_in_scope(body_stmts, combined);
@@ -675,7 +675,7 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::u
     }
 
     const bool                      is_func_body = Lnast_ntype::is_func_def(ct);
-    std::unordered_set<std::string> sig;
+    Ci_str_set sig;
     if (is_func_body) {
       prp_collect_sig_targets(lnast.get(), c, sig);
     }
@@ -688,7 +688,7 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::u
           // vars). A NESTED re-declaration still shadows — `here` flows down.
           check_writes_in_scope(cc, {}, sig);
         } else {
-          std::unordered_set<std::string> combined = visible;
+          Ci_str_set combined = visible;
           combined.insert(here.begin(), here.end());
           check_writes_in_scope(cc, combined);
         }
@@ -701,7 +701,7 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const std::u
 // NAME(...)` — func_def child0, used as a value in higher-order calls like
 // `apply_each(add_1)`) and type/enum declarations (declare/attr_set with a
 // non-var mode). These are comptime entities — forward references are fine.
-void Prp2lnast::collect_hoisted_names(const Lnast_nid& node, std::unordered_set<std::string>& hoisted) const {
+void Prp2lnast::collect_hoisted_names(const Lnast_nid& node, Ci_str_set& hoisted) const {
   const auto t = lnast->get_type(node);
   if (Lnast_ntype::is_func_def(t)) {
     auto c0 = lnast->get_first_child(node);
@@ -741,7 +741,7 @@ void Prp2lnast::collect_hoisted_names(const Lnast_nid& node, std::unordered_set<
 bool Prp2lnast::read_is_visible(const Read_site& rs) const {
   auto first_ref_is_name = [&](const Lnast_nid& node) -> bool {
     auto c0 = lnast->get_first_child(node);
-    return !c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0)) && lnast->get_name(c0) == rs.name;
+    return !c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0)) && str_tools::ci_equal(lnast->get_name(c0), rs.name);
   };
   // A `for` node binds value (child0) plus the optional idx (child4) / key
   // (child5) of `for (value, idx, key) in t`. Any of them is visible in the body.
@@ -749,7 +749,8 @@ bool Prp2lnast::read_is_visible(const Read_site& rs) const {
   auto for_binds_name = [&](const Lnast_nid& node) -> bool {
     int pos = 0;
     for (auto c = lnast->get_first_child(node); !c.is_invalid(); c = lnast->get_sibling_next(c), ++pos) {
-      if ((pos == 0 || pos == 4 || pos == 5) && Lnast_ntype::is_ref(lnast->get_type(c)) && lnast->get_name(c) == rs.name) {
+      if ((pos == 0 || pos == 4 || pos == 5) && Lnast_ntype::is_ref(lnast->get_type(c))
+          && str_tools::ci_equal(lnast->get_name(c), rs.name)) {
         return true;
       }
     }
@@ -809,7 +810,7 @@ bool Prp2lnast::read_is_visible(const Read_site& rs) const {
     while (!p.is_invalid() && !lnast->is_root(p) && !Lnast_ntype::is_stmts(lnast->get_type(p))) {
       const auto pt = lnast->get_type(p);
       if (Lnast_ntype::is_func_def(pt)) {
-        std::unordered_set<std::string> sig;
+        Ci_str_set sig;
         prp_collect_sig_targets(lnast.get(), p, sig);
         if (sig.contains(rs.name)) {
           return true;
@@ -834,7 +835,7 @@ bool Prp2lnast::read_is_visible(const Read_site& rs) const {
 bool Prp2lnast::name_in_inflight_scope(std::string_view name) const {
   for (const auto& frame : inflight_name_scopes_) {
     for (const auto& s : frame) {
-      if (s == name) {
+      if (str_tools::ci_equal(s, name)) {
         return true;
       }
     }
@@ -843,7 +844,7 @@ bool Prp2lnast::name_in_inflight_scope(std::string_view name) const {
 }
 
 void Prp2lnast::check_undefined_reads() const {
-  std::unordered_set<std::string> hoisted;
+  Ci_str_set hoisted;
   collect_hoisted_names(lnast->get_root(), hoisted);
 
   for (const auto& rs : read_sites_) {
@@ -3908,8 +3909,8 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // Walk the input arg container looking for typed_identifier nodes whose
   // type carries a concrete uint_type/sint_type width. Each frame is a
   // lexical scope; outer scopes remain visible for nested lambdas.
-  std::unordered_map<std::string, int64_t> body_param_bits;
-  std::function<void(TSNode)>              capture_param_bits = [&](TSNode node) {
+  Ci_str_map<int64_t>         body_param_bits;
+  std::function<void(TSNode)> capture_param_bits = [&](TSNode node) {
     if (ts_node_is_null(node)) {
       return;
     }
@@ -7886,7 +7887,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
   // rejected: "each tuple field must be unique" (docs/docs/pyrope/03-bundle.md
   // "Concatenate fields"). Concatenation must be a separate post-declaration
   // statement (`y.ff ++= 2`), never a second field in the literal.
-  absl::flat_hash_set<std::string> seen_field_keys;
+  Ci_str_set seen_field_keys;
   for (uint32_t i = 0; i < nnc; i++) {
     TSNode           c = ts_node_named_child(n, i);
     std::string_view t(ts_node_type(c));

@@ -1,0 +1,14 @@
+/*
+:name: verif_requires
+:type: compile
+*/
+// TBD feature: requires()/ensures() lambda pre/postconditions
+// (docs/pyrope/05-assert.md, 15-tbd.md). Today `requires` is an unrecognized
+// call: upass.tolg reports "call to 'requires' has no hardware lowering yet".
+// (lec()/lec_valid()/covercase() are silent no-ops in the same family.)
+// Tagged `fixme`: fails by design until verification extras are implemented.
+pub comb verif_requires(a:u8) -> (q:u8) {
+  requires(a != 0)
+  q = a >> 3
+  ensures(q <= a)
+}

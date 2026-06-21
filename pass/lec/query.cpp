@@ -72,8 +72,8 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   // (the "collapse corresponding memories" assumption). Built once; the encoder
   // reuses the symbol for the matching memory in each design.
   auto build_shared_mems = [&](std::string_view tag) {
-    absl::flat_hash_map<std::string, cvc5::Term> sm;
-    absl::flat_hash_map<std::string, int>        occ;
+    Io_name_map<cvc5::Term> sm;
+    Io_name_map<int>        occ;
     auto                                         add = [&](hhds::Graph* g) {
       for (auto node : g->forward_class()) {
         if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
@@ -105,11 +105,11 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   // seen across the two designs (bit-width trap). A Sub is a blackbox unless the
   // resolution library has a purely-combinational def for it (mirrors encode.cpp).
   auto build_shared_bbox = [&]() {
-    absl::flat_hash_map<std::string, Val>  bb;
-    absl::flat_hash_map<std::string, int>  bw;   // key -> max real width
-    absl::flat_hash_map<std::string, bool> bsg;  // key -> signed
+    Io_name_map<Val>  bb;
+    Io_name_map<int>  bw;   // key -> max real width
+    Io_name_map<bool> bsg;  // key -> signed
     auto                                   add = [&](hhds::Graph* g) {
-      absl::flat_hash_map<std::string, int> occ;
+      Io_name_map<int> occ;
       for (auto node : g->forward_class()) {
         if (graph_util::type_op_of(node) != Ntype_op::Sub) {
           continue;
@@ -173,14 +173,14 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     const int N = opts.bound > 0 ? opts.bound : 20;
     Encoder   enc(tm);
     enc.set_sub_lib(sub_lib);
-    absl::flat_hash_map<std::string, Val> shared_bbox = build_shared_bbox();
+    Io_name_map<Val> shared_bbox = build_shared_bbox();
     enc.set_shared_bbox(&shared_bbox);
 
     struct In {
       int  w;
       bool sgn;
     };
-    absl::flat_hash_map<std::string, In> ins;
+    Io_name_map<In> ins;
     auto                                 collect_ins = [&](hhds::Graph* g) {
       auto gio = g->get_io();
       for (const auto& d : gio->get_input_pin_decls()) {
@@ -203,9 +203,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     // flop's reset_pin directly; its asserted level is 0 when that flop is
     // active-low (negreset), else 1. (Derived resets — driven by a mux, not a
     // primary input — are not directly controllable and are simply left free.)
-    absl::flat_hash_map<std::string, bool> reset_negset;  // name -> negreset
+    Io_name_map<bool> reset_negset;  // name -> negreset
     auto                                   collect_resets = [&](hhds::Graph* g) {
-      for (auto node : g->forward_class()) {
+      for (auto node : g->forward_hier()) {  // descend hierarchy: flops at every level
         if (graph_util::type_op_of(node) != Ntype_op::Flop) {
           continue;
         }
@@ -303,12 +303,12 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     // phase we instead start from a FRESH arbitrary equal state and let the
     // reset-hold prologue drive both designs into their reset state — so the
     // checked window genuinely exercises free-running behavior from reset.
-    absl::flat_hash_map<std::string, Val> ref_state, impl_state;
+    Io_name_map<Val> ref_state, impl_state;
     {
-      absl::flat_hash_map<std::string, int> fw;
-      absl::flat_hash_map<std::string, Val> init;
+      Io_name_map<int> fw;
+      Io_name_map<Val> init;
       auto                                  collect_flops = [&](hhds::Graph* g) {
-        for (auto node : g->forward_class()) {
+        for (auto node : g->forward_hier()) {  // descend hierarchy: cut flops at every level
           if (graph_util::type_op_of(node) != Ntype_op::Flop) {
             continue;
           }
@@ -316,7 +316,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           if (q.is_invalid()) {
             continue;
           }
-          auto key = flop_state_key(*g, node);
+          auto key = node.get_hier_name();  // hier correspondence key (matches encode())
           int  w   = real_width(q);
           if (w == 0) {
             w = 1;
@@ -347,8 +347,8 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 
     // Memory state[0]: one shared array per cut key (corresponding memories
     // collapse to the same initial contents); threaded forward like flop state.
-    absl::flat_hash_map<std::string, cvc5::Term> ref_mem = build_shared_mems("m0_");
-    absl::flat_hash_map<std::string, cvc5::Term> impl_mem = ref_mem;
+    Io_name_map<cvc5::Term> ref_mem = build_shared_mems("m0_");
+    Io_name_map<cvc5::Term> impl_mem = ref_mem;
 
     cvc5::Term bad;
     int        uid = 0;  // unique suffix for fresh per-cycle state vars
@@ -364,9 +364,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       // term walk then stack-overflows past ~13 steps). Fresh-var + assert keeps
       // every cycle's terms shallow; the unrolling lives in the assertion set.
       if (cyc > 0) {
-        absl::flat_hash_map<std::string, Val> ns_ref, ns_impl;
-        auto pin_state = [&](const absl::flat_hash_map<std::string, Val>& prev_next,
-                             absl::flat_hash_map<std::string, Val>&       cur) {
+        Io_name_map<Val> ns_ref, ns_impl;
+        auto pin_state = [&](const Io_name_map<Val>& prev_next,
+                             Io_name_map<Val>&       cur) {
           for (const auto& [key, pv] : prev_next) {
             cvc5::Term s = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(pv.width)), "st" + std::to_string(uid++));
             solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {s, pv.term}));
@@ -380,9 +380,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 
         // Same fresh-var pinning for memory arrays (keeps each cycle's array
         // terms shallow; the unrolling lives in the equality assertions).
-        absl::flat_hash_map<std::string, cvc5::Term> nm_ref, nm_impl;
-        auto pin_mem = [&](const absl::flat_hash_map<std::string, cvc5::Term>& prev_next,
-                           absl::flat_hash_map<std::string, cvc5::Term>&       cur) {
+        Io_name_map<cvc5::Term> nm_ref, nm_impl;
+        auto pin_mem = [&](const Io_name_map<cvc5::Term>& prev_next,
+                           Io_name_map<cvc5::Term>&       cur) {
           for (const auto& [key, pv] : prev_next) {
             cvc5::Term s = tm.mkConst(pv.getSort(), "ma" + std::to_string(uid++));
             solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {s, pv}));
@@ -395,7 +395,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         impl_mem = std::move(nm_impl);
       }
 
-      absl::flat_hash_map<std::string, Val> sh_ref, sh_impl;
+      Io_name_map<Val> sh_ref, sh_impl;
       for (const auto& [name, info] : ins) {
         cvc5::Term t = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(info.w)), "c" + std::to_string(cyc) + "_" + name);
         // Phase control: pin a primary reset input to its asserted level during
@@ -458,7 +458,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 
       // Stash each design's next-state terms (built on this cycle's shallow
       // current-state symbols) for the next cycle's fresh-var pinning.
-      absl::flat_hash_map<std::string, Val> rn, in;
+      Io_name_map<Val> rn, in;
       for (const auto& [name, rv] : re.outputs) {
         if (name.rfind("\x01nxt:", 0) == 0) {
           rn[name.substr(5)] = rv;
@@ -506,7 +506,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   // sharing at the max keeps the extra bit FREE (sound) — sharing at the min
   // would constrain it (false PROVE), truncating it in the encoder drops it
   // (false REFUTE, e.g. an input 0x80 -> 0).
-  absl::flat_hash_map<std::string, Val> shared;
+  Io_name_map<Val> shared;
   auto                                  add_inputs = [&](hhds::Graph* g) {
     auto gio = g->get_io();
     for (const auto& d : gio->get_input_pin_decls()) {
@@ -531,7 +531,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   // these, so the miter assumes equal current state and proves equal next state
   // + outputs (the M2 register-correspondence inductive step).
   auto add_flops = [&](hhds::Graph* g) {
-    for (auto node : g->forward_class()) {
+    for (auto node : g->forward_hier()) {  // descend hierarchy: cut flops at every level
       if (graph_util::type_op_of(node) != Ntype_op::Flop) {
         continue;
       }
@@ -539,7 +539,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       if (q.is_invalid()) {
         continue;
       }
-      std::string key = flop_state_key(*g, node);
+      std::string key = node.get_hier_name();  // hier correspondence key (matches encode())
       int         w   = real_width(q);
       if (w == 0) {
         w = 1;
@@ -557,8 +557,8 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 
   // Shared current-state memory arrays (M4 cut): corresponding memories collapse
   // to one array symbol, so the step proves equal next-state contents + douts.
-  absl::flat_hash_map<std::string, cvc5::Term> shared_mems = build_shared_mems("s_");
-  absl::flat_hash_map<std::string, Val>        shared_bbox = build_shared_bbox();
+  Io_name_map<cvc5::Term> shared_mems = build_shared_mems("s_");
+  Io_name_map<Val>        shared_bbox = build_shared_bbox();
 
   Encoder enc(tm);
   enc.set_sub_lib(sub_lib);

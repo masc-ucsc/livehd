@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "ci_string.hpp"  // Ci_str_map/Ci_str_set: variable names match case-insensitively
 #include "lnast.hpp"
 #include "lnast_builder.hpp"
 #include "lnast_ntype.hpp"
@@ -146,8 +147,8 @@ protected:
   // them here is shadowing); `seed_here` pre-populates the CURRENT scope (a func
   // body seeds its params/outputs — re-declaring those at the body top level is
   // the normal output-init pattern, not shadowing).
-  void check_writes_in_scope(const Lnast_nid& scope_stmts, const std::unordered_set<std::string>& visible,
-                             const std::unordered_set<std::string>& seed_here = {}) const;
+  void check_writes_in_scope(const Lnast_nid& scope_stmts, const Ci_str_set& visible,
+                             const Ci_str_set& seed_here = {}) const;
 
   // Reject reading a name that is not visible at the read site (04-variables.md
   // "Variable scope": a variable is visible from its declaration to the end of
@@ -169,7 +170,7 @@ protected:
   // Names readable anywhere regardless of program order: function names
   // (func_def) and type/enum declarations — comptime entities, forward
   // references allowed.
-  void collect_hoisted_names(const Lnast_nid& node, std::unordered_set<std::string>& hoisted) const;
+  void collect_hoisted_names(const Lnast_nid& node, Ci_str_set& hoisted) const;
 
   // LNAST output. `builder` co-owns `lnast` and is the canonical home for
   // the current `idx_stmts` cursor, tmp-ref minting, and frontend-agnostic
@@ -255,7 +256,7 @@ protected:
   // `x.[bits]` isn't a literal in the source — the producer knows the width
   // from the formal-parameter type. Outer frames are visible to inner scopes
   // (lexical lookup); inner frames shadow on name collision.
-  std::vector<std::unordered_map<std::string, int64_t>> param_bits_stack_;
+  std::vector<Ci_str_map<int64_t>> param_bits_stack_;
 
   // Top
   void process_description();
@@ -462,7 +463,7 @@ protected:
   // while/match/lambda body — see conditional_depth_). A timing slot then
   // resolves the value that was statically known AT THE LAMBDA DECLARATION
   // POINT; a mut that has since gone runtime is erased and the slot errors.
-  std::unordered_map<std::string, int64_t> const_int_bindings_;
+  Ci_str_map<int64_t> const_int_bindings_;
 
   // `const NAME = <string | tuple literal>` → the RHS CST node, kept so an
   // `enum(...NAME, …)` spread can splice NAME (a string becomes a field name; a
@@ -472,7 +473,7 @@ protected:
   // identifier lvalue. The RHS subtree is DEEP-COPIED into `retained_arena_`
   // (below) so it survives the streaming arena reset between constructs — the
   // spread can be in a LATER top-level statement than the const.
-  std::unordered_map<std::string, TSNode> const_rvalue_nodes_;
+  Ci_str_map<TSNode> const_rvalue_nodes_;
   // Persistent arena holding the cloned `const_rvalue_nodes_` RHS subtrees. The
   // streaming parser recycles its own arena per construct (2f-stream), so any
   // CST node a later statement still needs is cloned here instead, keyed off the
@@ -486,7 +487,7 @@ protected:
   // statement form is allowed. Recorded by name as definitions are lowered
   // (top-down, so a defined-before-use call is caught). See find_ref_param_call /
   // process_assignment (2f-ufcs).
-  std::unordered_set<std::string> ref_param_funcs_;
+  Ci_str_set ref_param_funcs_;
   // First call (anywhere in `n`) to a `ref`-param function, else a null node.
   TSNode find_ref_param_call(TSNode n) const;
 

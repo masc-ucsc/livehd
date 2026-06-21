@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "absl/container/flat_hash_map.h"
+#include "ci_string.hpp"  // Ci_str_map/Ci_str_set: variable names match case-insensitively
 #include "lnast.hpp"
 
 // Standalone pass that runs on a single Lnast (post-func_extract shape).
@@ -52,7 +53,7 @@ private:
   // string_view lookup so per-node copies skip the temporary std::string
   // allocation that std::unordered_map would force.
   static void copy_with_rename(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
-                               const Lnast_nid& dst_parent, const absl::flat_hash_map<std::string, std::string>& rename_map);
+                               const Lnast_nid& dst_parent, const Ci_str_map<std::string>& rename_map);
 
   // Returns true when `name` is a user variable that should participate in
   // SSA renaming (excludes compiler temps `___*`).

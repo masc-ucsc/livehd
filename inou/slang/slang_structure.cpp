@@ -1698,7 +1698,12 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   auto& ln = *builder_.lnast;
   set_pending_loc(inst.location);
   auto fcall_idx = builder_.add_child(Lnast_ntype::create_func_call());
-  auto result    = builder_.create_lnast_tmp();
+  // Use the RTL instance name (id_ex, if_id, …) as the call result ref so the
+  // tolg Sub instance gets named after the instance (mirrors Pyrope, where the
+  // call dst is the instance name). This is what `get_hier_name()` reports as
+  // the Verilog-style hierarchy component. Fall back to a temp for an unnamed
+  // instance.
+  auto result = inst.name.empty() ? builder_.create_lnast_tmp() : std::string(inst.name);
   ln.add_child(fcall_idx, Lnast_node::create_ref(result));
   ln.add_child(fcall_idx, Lnast_node::create_ref(callee));
   for (const auto& [pname, v] : in_args) {

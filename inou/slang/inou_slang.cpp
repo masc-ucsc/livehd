@@ -3,10 +3,14 @@
 // clang-format off
 
 #include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <optional>
 
 #include "absl/strings/str_split.h"
 
 #include "diag.hpp"
+#include "file_utils.hpp"
 #include "slang_context.hpp"
 #include "inou_slang.hpp"
 
@@ -17,6 +21,67 @@
 extern int slang_main(int argc, char** argv, Slang_context& tree);  // in slang_driver.cpp
 
 static Pass_plugin sample("inou.verilog", Inou_slang::setup);
+
+namespace {
+namespace fs = std::filesystem;
+
+// Locate LiveHD's built-in `ware/rtl` Verilog library: the cgen_memory_*.v RAM
+// wrappers that cgen emits ``\`include "cgen_memory_<R>rd_<W>wr.v"`` lines for.
+// cgen-generated Verilog read back through --reader slang (e.g. the `lhd lec`
+// re-check path) must find these, so the directory is added to slang's include
+// search path by default. Probed across the bazel runfiles layouts (a direct
+// ./bazel-bin invocation, `bazel run`, `bazel test`) and the source/install
+// tree; returns nullopt when no copy is found (the include then fails as before
+// — nothing to add). A directory only counts when it actually holds a wrapper.
+std::optional<std::string> find_ware_rtl_dir() {
+  auto is_ware_rtl = [](const fs::path& p) -> bool {
+    std::error_code ec;
+    return fs::is_regular_file(p / "cgen_memory_1rd_1wr.v", ec);
+  };
+  // A runfiles/exec root nests the workspace under `_main` (bzlmod) or `livehd`
+  // (legacy), but a plain source/exec root holds `ware/rtl` directly.
+  auto under = [&](const fs::path& base) -> std::optional<std::string> {
+    for (const char* ws : {"_main", "livehd"}) {
+      if (fs::path cand = base / ws / "ware" / "rtl"; is_ware_rtl(cand)) {
+        return cand.string();
+      }
+    }
+    if (fs::path direct = base / "ware" / "rtl"; is_ware_rtl(direct)) {
+      return direct.string();
+    }
+    return std::nullopt;
+  };
+
+  // 1. Runfiles dir from the environment (`bazel run` / `bazel test`).
+  for (const char* env : {"RUNFILES_DIR", "TEST_SRCDIR"}) {
+    if (const char* v = std::getenv(env); v != nullptr && *v != '\0') {
+      if (auto r = under(fs::path(v))) {
+        return r;
+      }
+    }
+  }
+
+  // 2. `<exe>.runfiles/...` sitting next to the binary (direct ./bazel-bin run).
+  const fs::path  exe_dir = file_utils::get_exe_path();
+  std::error_code ec;
+  for (const auto& e : fs::directory_iterator(exe_dir, ec)) {
+    if (e.path().extension() == ".runfiles") {
+      if (auto r = under(e.path())) {
+        return r;
+      }
+    }
+  }
+
+  // 3. Source / install tree relative to the exe, then the current directory.
+  for (const fs::path& base : {exe_dir, exe_dir.parent_path(), exe_dir.parent_path().parent_path(), fs::path{"."}}) {
+    if (auto r = under(base)) {
+      return r;
+    }
+  }
+
+  return std::nullopt;
+}
+}  // namespace
 
 void Inou_slang::setup() {
   Eprp_method m1("inou.verilog", "System verilog to LNAST using slang", &Inou_slang::work);
@@ -97,12 +162,51 @@ void Inou_slang::work(Eprp_var& var) {
     }
   }
 
-  if (var.has_label("includes")) {
-    auto txt = var.get("includes");
-    for (const auto f : absl::StrSplit(txt, ',')) {
-      argv.push_back(strdup("-I"));
-      argv.push_back(strdup(std::string(f).c_str()));
+  // `files` is optional: slang_flags (e.g. `-F filelist.f`) may supply the
+  // sources instead. The `files` label, when present, is a comma list; when
+  // absent the Pass base leaves a "/INVALID" sentinel, so read the label
+  // directly rather than `p.files`. Parsed up here so the input directories can
+  // seed the default include search path below.
+  std::vector<std::string> file_list;
+  if (var.has_label("files")) {
+    auto txt = var.get("files");
+    if (!txt.empty()) {
+      file_list = absl::StrSplit(txt, ',');
     }
+  }
+
+  // Include search path, in priority order: explicit `includes`, then the
+  // directory of every input source file (the documented "verilog paths"
+  // default — lets a source ``\`include`` a header sitting next to a sibling
+  // input), then LiveHD's built-in `ware/rtl` library (so cgen-generated
+  // Verilog, whose memories ``\`include "cgen_memory_*.v"``, reads back without
+  // the caller spelling out `-I ware/rtl`). slang searches a quoted include's
+  // own directory first, so these are pure fallbacks and never shadow a local
+  // file. De-duplicated to keep the argv tidy.
+  std::vector<std::string> inc_dirs;
+  const auto               add_inc = [&](std::string dir) {
+    if (dir.empty()) {
+      return;
+    }
+    if (std::find(inc_dirs.begin(), inc_dirs.end(), dir) == inc_dirs.end()) {
+      inc_dirs.emplace_back(std::move(dir));
+    }
+  };
+
+  if (var.has_label("includes")) {
+    for (const auto f : absl::StrSplit(var.get("includes"), ',')) {
+      add_inc(std::string(f));
+    }
+  }
+  for (const auto& f : file_list) {
+    add_inc(fs::path(f).parent_path().string());
+  }
+  if (auto ware = find_ware_rtl_dir()) {
+    add_inc(*ware);
+  }
+  for (const auto& dir : inc_dirs) {
+    argv.push_back(strdup("-I"));
+    argv.push_back(strdup(dir.c_str()));
   }
 
   if (var.has_label("defines")) {
@@ -175,18 +279,6 @@ void Inou_slang::work(Eprp_var& var) {
       free(ptr);
     }
   };
-
-  // `files` is optional: slang_flags (e.g. `-F filelist.f`) may supply the
-  // sources instead. The `files` label, when present, is a comma list; when
-  // absent the Pass base leaves a "/INVALID" sentinel, so read the label
-  // directly rather than `p.files`.
-  std::vector<std::string> file_list;
-  if (var.has_label("files")) {
-    auto txt = var.get("files");
-    if (!txt.empty()) {
-      file_list = absl::StrSplit(txt, ',');
-    }
-  }
 
   if (file_list.empty()) {
     if (!has_slang_flags) {

@@ -14,6 +14,7 @@
 #include <string_view>
 #include <vector>
 
+#include "ci_string.hpp"
 #include "diag.hpp"
 #include "log.hpp"                // LHD_LOG developer tracing on the "upass" channel
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
@@ -359,11 +360,11 @@ void Pass_upass::work(Eprp_var& var) {
   // sources) and hand the set to constprop, which errors only if an `import`
   // actually resolves to one (non-imported collisions stay tolerated).
   {
-    std::unordered_map<std::string, int> name_count;
+    Ci_str_map<int> name_count;  // case-insensitive: Module_Fo and MODULE_FO collide
     for (const auto& ln : var.lnasts) {
       ++name_count[std::string(ln->get_top_module_name())];
     }
-    std::unordered_set<std::string> ambiguous;
+    Ci_str_set ambiguous;
     for (const auto& [name, n] : name_count) {
       if (n > 1) {
         ambiguous.insert(name);
