@@ -62,6 +62,10 @@ TEST(abc_arith, parse_and_default_block_size) {
   EXPECT_EQ(parse_adder_kind("cla").value(), Adder_kind::cla);
   EXPECT_FALSE(parse_adder_kind("nope").has_value());
 
+  EXPECT_EQ(parse_mult_kind("array").value(), Mult_kind::array);
+  EXPECT_FALSE(parse_mult_kind("wallace").has_value());
+  EXPECT_FALSE(parse_mult_kind("").has_value());
+
   EXPECT_EQ(default_block_size(32), 8);  // >16 -> W/4
   EXPECT_EQ(default_block_size(24), 6);
   EXPECT_EQ(default_block_size(12), 6);  // >8 -> W/2
@@ -185,6 +189,74 @@ TEST(abc_arith, shift_left) {
   }
   // No amount bits at all == identity (matches the LEC's no-amount SHL path).
   EXPECT_EQ(from_bits(build_shl<B>(ops, to_bits(0x5A, 8), {}, 8)), 0x5Au);
+}
+
+TEST(abc_arith, shift_right_logical_and_arithmetic) {
+  ByteOps ops;
+  for (int w : {1, 2, 4, 8}) {
+    uint64_t mask = (uint64_t{1} << w) - 1;
+    for (int amt_w : {1, 2, 3, 4, 5}) {
+      for (uint64_t a = 0; a <= mask; ++a) {
+        for (uint64_t amt = 0; amt < (uint64_t{1} << amt_w); ++amt) {
+          B sign = static_cast<B>((a >> (w - 1)) & 1U);
+          // logical: fill 0
+          {
+            auto     r   = build_shr(ops, to_bits(a, w), to_bits(amt, amt_w), ops.zero());
+            uint64_t exp = (amt >= static_cast<uint64_t>(w)) ? uint64_t{0} : (a >> amt) & mask;
+            EXPECT_EQ(from_bits(r), exp) << "lsr w=" << w << " a=" << a << " amt=" << amt;
+          }
+          // arithmetic: fill the sign bit
+          {
+            auto     r = build_shr(ops, to_bits(a, w), to_bits(amt, amt_w), sign);
+            uint64_t exp;
+            if (amt >= static_cast<uint64_t>(w)) {
+              exp = sign ? mask : uint64_t{0};
+            } else {
+              exp = (a >> amt) & mask;
+              if (sign) {
+                exp |= mask & ~((uint64_t{1} << (w - amt)) - 1);  // sign-replicate the vacated top `amt` bits
+              }
+            }
+            EXPECT_EQ(from_bits(r), exp) << "asr w=" << w << " a=" << a << " amt=" << amt;
+          }
+        }
+      }
+    }
+  }
+  // No amount bits == identity.
+  EXPECT_EQ(from_bits(build_shr<B>(ops, to_bits(0x5A, 8), {}, /*fill=*/0)), 0x5Au);
+  // Spot-check a wider width (full enumeration is too slow at w=16).
+  EXPECT_EQ(from_bits(build_shr<B>(ops, to_bits(0x8001, 16), to_bits(4, 5), /*fill=*/1)), (0x0800u | 0xF000u));  // asr
+  EXPECT_EQ(from_bits(build_shr<B>(ops, to_bits(0x8001, 16), to_bits(4, 5), /*fill=*/0)), 0x0800u);             // lsr
+}
+
+TEST(abc_arith, multiply_array) {
+  ByteOps ops;
+  // Operands are already extended to out_w by the caller, so this checks the
+  // sign-agnostic unsigned array core: result == (A * B) mod 2^out_w, under every
+  // adder architecture / block size driving the partial-product additions.
+  for (int out_w : {1, 2, 4, 7, 8, 12, 16}) {
+    uint64_t              omask   = (uint64_t{1} << out_w) - 1;
+    std::vector<uint64_t> samples = {0, 1, 2, 3, omask, omask / 2, omask / 3, omask - 1, 5, 0xA, omask >> 1};
+    for (uint64_t a : samples) {
+      for (uint64_t b : samples) {
+        uint64_t A = a & omask;
+        uint64_t B_ = b & omask;
+        for (auto adder : kKinds) {
+          for (int bs : kBlocks) {
+            auto r = build_mul(Mult_kind::array, adder, bs, ops, to_bits(A, out_w), to_bits(B_, out_w), out_w);
+            EXPECT_EQ(from_bits(r), (A * B_) & omask)
+                << "out_w=" << out_w << " A=" << A << " B=" << B_ << " adder=" << static_cast<int>(adder) << " bs=" << bs;
+          }
+        }
+      }
+    }
+  }
+  // Operands narrower than out_w (the builder must honor a/b sizes, not out_w):
+  // 15 * 15 = 225, no truncation at out_w=8.
+  EXPECT_EQ(from_bits(build_mul<B>(Mult_kind::array, Adder_kind::rca, 4, ops, to_bits(0xF, 4), to_bits(0xF, 4), 8)), 225u);
+  // Truncating product: 0xFF * 0xFF = 0xFE01, low 8 bits = 0x01.
+  EXPECT_EQ(from_bits(build_mul<B>(Mult_kind::array, Adder_kind::cla, 2, ops, to_bits(0xFF, 8), to_bits(0xFF, 8), 8)), 0x01u);
 }
 
 TEST(abc_arith, eq_nary) {

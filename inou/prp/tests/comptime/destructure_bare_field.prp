@@ -1,0 +1,25 @@
+/*
+:name: destructure_bare_field
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// 2i-import (A8/5b): a single call on the RHS is unambiguous, so the rename
+// source may be a BARE output name (no callee prefix). `(r = q) = f(...)` binds
+// r to f's `q` output — same result as the verbose `(r = f.q) = f(...)` form.
+comb safe_div(x, y) -> (q, ok) {
+  q = 0
+  ok = false
+  if y == 0 { return }
+  q = x / y
+  ok = true
+}
+
+const (a_q = q, a_ok = ok) = safe_div(x=20, y=4)
+cassert(a_q == 5)
+cassert(a_ok == true)
+
+const (b_q = q, b_ok = ok) = safe_div(x=20, y=0)
+cassert(b_q == 0)
+cassert(b_ok == false)

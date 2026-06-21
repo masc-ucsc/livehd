@@ -108,6 +108,16 @@ sh_test(
     data = ["//lhd"],
 )
 
+# 2f-formal: a refuted assert/assume/Hotmux one-hotness is recorded as a build
+# error (exit != 0) but the compile CONTINUES so cgen still emits the design
+# with the failing check kept as a runtime check (never elided / optimized).
+sh_test(
+    name = "lhd_formal_fail_test",
+    size = "large",
+    srcs = ["lhd_formal_fail_test.sh"],
+    data = ["//lhd"],
+)
+
 # 2c-color / 2p hierarchical-input (prerequisite for 2a-abc): color + partition
 # descend a multi-module Pyrope hierarchy (combinational + sequential fixtures),
 # re-link Sub instances, and the partitioned design stays LEC-equivalent.
@@ -135,6 +145,17 @@ sh_test(
     name = "lhd_abc_arith_test",
     size = "large",
     srcs = ["lhd_abc_arith_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+# 2a-abc follow-on: the multiplier (array) + right-shift (sra) bit-blast and the
+# division blackbox. Maps mult/sra and keeps div native (with a div-blackbox
+# warning), proving every region LEC-equivalent to the original logic over signed
+# and unsigned operands, plus a non-default adder and a no-lib negative control.
+sh_test(
+    name = "lhd_abc_math_test",
+    size = "large",
+    srcs = ["lhd_abc_math_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 

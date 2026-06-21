@@ -337,7 +337,12 @@ void Sink::emit(Diagnostic d) {
     return;  // already reported this (code, span, message) in the current step
   }
   switch (d.severity) {
-    case Severity::error  : ++error_count_; break;
+    case Severity::error:
+      ++error_count_;
+      if (d.deferred) {
+        ++deferred_error_count_;  // recorded + fails the build, but does not halt the pipeline
+      }
+      break;
     case Severity::warning: ++warn_count_; break;
     case Severity::note   : ++note_count_; break;
   }
@@ -378,10 +383,11 @@ void Sink::clear() {
   records_.clear();
   seen_.clear();
   step_.clear();
-  seq_         = 0;
-  error_count_ = 0;
-  warn_count_  = 0;
-  note_count_  = 0;
+  seq_                  = 0;
+  error_count_          = 0;
+  deferred_error_count_ = 0;
+  warn_count_           = 0;
+  note_count_           = 0;
   staged_.reset();
   if (json_fp_ != nullptr) {
     std::fclose(json_fp_);

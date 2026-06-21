@@ -292,6 +292,24 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     return net;
   };
 
+  // LiveHD's magnitude+1 width convention (mirrors pass.lec's real_width): an
+  // unsigned net reserves its top bit as an always-0 sign slot, so its true
+  // operating width is bits-1; a signed net uses all its bits. Arithmetic that
+  // truncates/sign-fills (mult, shift-right) must be sized at THIS width, not the
+  // raw bits_of, or it diverges from the LEC on the spare bit when a region input
+  // is wider than its value range (e.g. the to-positive-signed Get_mask that
+  // feeds a shift/multiply makes a u8 a 9-bit signed port; the LEC drops the spare
+  // bit, so the bit-blast must produce a 0 there too). Add/and/or/xor/compare are
+  // bit-position-wise and already agree with the LEC's spare bit, so they keep
+  // bits_of. Always >= 1.
+  auto real_width = [&](const hhds::Pin_class& p) -> int {
+    int b = gu::bits_of(p);
+    if (b <= 0) {
+      return 1;
+    }
+    return gu::is_unsign(p) ? std::max(1, b - 1) : b;
+  };
+
   // arith::Ops view over the gate constructors, for the Sum/comparator builders.
   Abc_bit_ops ops;
   ops.konst  = abc_const_bit;
@@ -416,8 +434,20 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       continue;
     }
     auto op = gu::type_op_of(n);
-    if (op != Ntype_op::Sub && op != Ntype_op::Memory) {
+    if (op != Ntype_op::Sub && op != Ntype_op::Memory && op != Ntype_op::Div) {
       continue;
+    }
+    if (op == Ntype_op::Div) {
+      // Division (and modulo, which lowers to a - (a/b)*b, hence a Div) is not
+      // bit-blasted: a synthesizable divider is large and out of scope. The Div
+      // node is kept native as a blackbox boundary (its output feeds the AIG as a
+      // fresh PI, its inputs are cut as POs), exactly like a Sub/Memory instance,
+      // and rebuilt unchanged on read-back. Warn so the user knows this cone is
+      // not technology-mapped.
+      livehd::diag::warn("pass.abc", "div-blackbox", "unsupported")
+          .msg("pass.abc: division/modulo in region '{}' is blackboxed (kept as a native div, not technology-mapped)",
+               rb.module_name)
+          .emit();
     }
     Bbox bb;
     bb.node                                          = n;
@@ -470,8 +500,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       continue;
     }
     auto op = gu::type_op_of(n);
-    if (op == Ntype_op::Sub || op == Ntype_op::Memory) {
-      continue;  // blackbox boundary (Sub instance / memory) -- handled separately
+    if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Div) {
+      continue;  // blackbox boundary (Sub instance / memory / divider) -- handled separately
     }
     if (opts_.seq && gu::is_type_flop(n)) {
       continue;  // sequential register -- crosses into ABC as a latch (handled above)
@@ -780,11 +810,128 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       for (int b = 0; b < out_bits; ++b) {
         slots[b] = acc.empty() ? av[b] : acc[b];
       }
+    } else if (op == Ntype_op::SRA) {
+      // Right shift: pid 0 = value `a` (single), pid 1 = shift amount `b`
+      // (single). Arithmetic (sign-replicating) when `a` is signed, logical
+      // otherwise — mirroring Verilog `>>>` and the cvc5 LEC (BITVECTOR_ASHR vs
+      // BITVECTOR_LSHR). A right shift pulls bits DOWN from higher positions, so
+      // the value must be at its FULL width before shifting: the LEC shifts at
+      // cw = max(operand_width, output_width) and truncates the result to W, so
+      // `a` is sign/zero extended (by abc_bit) to cw, the amount is read unsigned
+      // and fit to cw (bits at/above cw are dropped, matching the LEC's fit), and
+      // the low out_bits become the result. A CONSTANT amount becomes pure bit
+      // re-wiring; a RUNTIME amount a combinational barrel shifter (build_shr).
+      hhds::Pin_class a_d;
+      hhds::Pin_class b_d;
+      for (const auto& e : n.inp_edges()) {
+        if (e.sink.get_port_id() == 0) {
+          if (a_d.is_invalid()) {
+            a_d = e.driver;
+          }
+        } else if (e.sink.get_port_id() == 1) {
+          if (b_d.is_invalid()) {
+            b_d = e.driver;  // first amount driver, matching the LEC's pid(1)[0]
+          }
+        }
+      }
+      bool a_sign = !gu::is_unsign(a_d);
+      // Operand width is the FULL declared bits of the driver (a region input port
+      // carries its literal bus width; an internal net's spare top bit is 0, so
+      // reading it is harmless): the LEC reads a shift operand at real_width_io
+      // (== bits_of) for a port, and a right shift needs every operand bit to pull
+      // the correct value down. The RESULT, by contrast, is an internal net sized
+      // at the magnitude width (real_width).
+      int a_width = gu::bits_of(a_d);
+      if (a_width <= 0) {
+        a_width = 1;
+      }
+      int out_w = real_width(out_pin);                   // result magnitude width (LEC W)
+      int cw    = std::max(a_width, std::max(out_w, 1));  // shift at the wider of the two
+      std::vector<Abc_Obj_t*> av(cw);
+      for (int i = 0; i < cw; ++i) {
+        av[i] = abc_bit(a_d, i);  // a, sign/zero-extended to the shift width cw
+      }
+      Abc_Obj_t*              fill = a_sign ? av[cw - 1] : abc_const_bit(false);  // sign bit (arith) or 0 (logical)
+      std::vector<Abc_Obj_t*> res;                                               // cw-wide shifted value
+      if (gu::is_const_pin(b_d)) {
+        auto amt_c = gu::hydrate_const(b_d);
+        if (amt_c.has_unknowns() || amt_c.is_negative()) {
+          // Unknown (x-bit) or negative constant shift: unmappable (ABC has no X;
+          // a negative shift is rejected upstream by upass.bitwidth). Mirrors SHL.
+          livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
+              .msg("pass.abc: sra with an unknown/negative constant shift amount in region '{}' is not supported", rb.module_name)
+              .emit();
+          unsupported = true;
+        } else {
+          int64_t amt = amt_c.is_just_i64() ? amt_c.to_just_i64() : static_cast<int64_t>(cw);
+          res.resize(cw);
+          for (int i = 0; i < cw; ++i) {
+            res[i] = (amt < cw && i + amt < cw) ? av[static_cast<int>(i + amt)] : fill;  // amt >= cw => all fill
+          }
+        }
+      } else {
+        int bw = gu::bits_of(b_d);
+        if (bw <= 0) {
+          bw = 1;
+        }
+        int                     nb = std::min(bw, cw);  // amount bits at/above cw are dropped (LEC fit-to-cw)
+        std::vector<Abc_Obj_t*> bv(nb);
+        for (int i = 0; i < nb; ++i) {
+          bv[i] = abc_bit(b_d, i);  // unsigned shift count
+        }
+        res = arith::build_shr(ops, av, bv, fill);
+      }
+      // result = low out_w bits of the cw-wide shift; the spare bit(s) above the
+      // magnitude width are 0 (an unsigned result is non-negative). A signed
+      // result has out_w == bits_of so there are no spare bits to fill.
+      for (int b = 0; b < out_bits; ++b) {
+        slots[b] = (b < out_w && b < static_cast<int>(res.size())) ? res[b] : abc_const_bit(false);
+      }
+    } else if (op == Ntype_op::Mult) {
+      // n-ary product of every input driver (all on pid 0), at width out_bits
+      // (the bitwidth-resolved result width). Each operand is sign/zero-extended
+      // to out_bits by abc_bit and the running product is kept mod 2^out_bits, so
+      // the low out_bits are correct for signed and unsigned operands alike —
+      // matching the LEC (fit each operand to W, then BITVECTOR_MULT). A simple
+      // single-cycle array multiplier (build_mul) reuses the selected adder for
+      // partial-product accumulation. An empty product is 1 (LEC convention).
+      std::vector<hhds::Pin_class> ds;
+      for (const auto& e : n.inp_edges()) {
+        ds.push_back(e.driver);
+      }
+      int  out_w  = real_width(out_pin);  // result magnitude width (LEC W); product is mod 2^out_w
+      int  bs     = opts_.block_size > 0 ? opts_.block_size : arith::default_block_size(out_w);
+      auto extend = [&](const hhds::Pin_class& d) {
+        std::vector<Abc_Obj_t*> v(out_w);
+        for (int i = 0; i < out_w; ++i) {
+          v[i] = abc_bit(d, i);
+        }
+        return v;
+      };
+      std::vector<Abc_Obj_t*> acc;
+      if (ds.empty()) {
+        acc.assign(out_w, abc_const_bit(false));
+        if (out_w > 0) {
+          acc[0] = abc_const_bit(true);  // empty product == 1
+        }
+      } else {
+        acc = extend(ds[0]);
+        for (size_t k = 1; k < ds.size(); ++k) {
+          acc = arith::build_mul(opts_.multiplier, opts_.adder, bs, ops, acc, extend(ds[k]), out_w);
+        }
+      }
+      // low out_w bits are the product; the spare bit(s) above the magnitude
+      // width are 0 (an unsigned product is non-negative; a signed product has
+      // out_w == bits_of so there are no spare bits to fill).
+      for (int b = 0; b < out_bits; ++b) {
+        slots[b] = (b < out_w && b < static_cast<int>(acc.size())) ? acc[b] : abc_const_bit(false);
+      }
     } else {
       livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
           .msg(
               "pass.abc: cell '{}' in region '{}' has no combinational bit-blast yet "
-              "(supported: and/or/xor/not/mux/hotmux/sum/lt/gt/eq/get_mask/set_mask/sext/shl/const)",
+              "(supported: and/or/xor/not/mux/hotmux/sum/mult/lt/gt/eq/get_mask/set_mask/sext/shl/sra/const; "
+              "div/mod are blackboxed)",
               Ntype::get_name(op),
               rb.module_name)
           .emit();

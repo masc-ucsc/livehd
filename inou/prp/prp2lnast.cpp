@@ -2063,10 +2063,16 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
             }
           };
           walk(src_node);
-          if (rhs_is_fcall) {
-            // Single fcall RHS: prefix must match the callee. Hard error
-            // otherwise (cross-function reuse).
-            if (prefix != rhs_fcall_name) {
+          if (rhs_is_fcall && prefix != rhs_fcall_name) {
+            // 2i-import (A8/5b): a single call on the RHS is unambiguous, so a
+            // bare output name needs no callee prefix — `(r = io_result) = f(…)`
+            // binds r to f's `io_result` output. Reinterpret the lone identifier
+            // as a field pick on the single call's return. A dotted source that
+            // still names a different callee (`g.b`) stays a hard error (genuine
+            // cross-function reuse).
+            if (path_keys.empty()) {
+              path_keys.emplace_back(std::move(prefix));
+            } else {
               report_error(inner,
                            "destructure-prefix",
                            "name",

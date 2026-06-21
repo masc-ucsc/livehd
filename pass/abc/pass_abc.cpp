@@ -51,6 +51,8 @@ void Pass_abc::setup() {
   m.add_label_optional("verbose", "per-module ABC stats", "false");
   m.add_label_optional("adder", "combinational adder architecture for Sum/comparators: rca|cska|cla", "rca");
   m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
+  m.add_label_optional("multiplier", "combinational multiplier architecture for Mult: array (partial-product adds use 'adder')",
+                       "array");
   m.add_label_optional("use_proven_assume", "true|false feed pass.formal-PROVEN assume conditions to ABC as don't-cares",
                        "true");
   m.add_label_optional("use_all_assume",
@@ -89,12 +91,18 @@ void Pass_abc::work(Eprp_var& var) {
   bool verbose = truthy(var.get("verbose", "false"));
   auto adder_s = std::string{var.get("adder", "rca")};
   auto bs_s    = std::string{var.get("block_size", "0")};
+  auto mult_s  = std::string{var.get("multiplier", "array")};
   bool use_proven_assume = truthy(var.get("use_proven_assume", "true"));
   bool use_all_assume    = truthy(var.get("use_all_assume", "false"));
 
   auto adder = livehd::abc::arith::parse_adder_kind(adder_s);
   if (!adder.has_value()) {
     livehd::diag::err("pass.abc", "bad-adder", "io").msg("pass.abc: unknown adder '{}' (use rca|cska|cla)", adder_s).fatal();
+    return;
+  }
+  auto multiplier = livehd::abc::arith::parse_mult_kind(mult_s);
+  if (!multiplier.has_value()) {
+    livehd::diag::err("pass.abc", "bad-multiplier", "io").msg("pass.abc: unknown multiplier '{}' (use array)", mult_s).fatal();
     return;
   }
   int block_size = 0;
@@ -118,6 +126,7 @@ void Pass_abc::work(Eprp_var& var) {
   opts.verbose    = verbose;
   opts.adder      = adder.value();
   opts.block_size = block_size;
+  opts.multiplier = multiplier.value();
   opts.use_proven_assume = use_proven_assume;
   opts.use_all_assume    = use_all_assume;
 

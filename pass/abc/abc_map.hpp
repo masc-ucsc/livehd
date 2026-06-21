@@ -23,6 +23,10 @@ struct Map_options {
   // CSKA/CLA block width (0 => auto from the operating width).
   arith::Adder_kind adder      = arith::Adder_kind::rca;
   int               block_size = 0;
+  // Combinational multiplier architecture for Mult (partial-product adds use the
+  // `adder`/`block_size` above). Only `array` today; the enum is the extension
+  // point for Booth/Wallace-tree variants.
+  arith::Mult_kind  multiplier = arith::Mult_kind::array;
   // Formal-assume don't-cares (pass.formal -> ABC, task 2f-formal). Feed assume
   // conditions to ABC so violating minterms become don't-cares (smaller logic).
   bool              use_proven_assume = true;   // feed assumes pass.formal PROVED (sound)

@@ -480,6 +480,24 @@ void Partitioner::build_module(const hhds::Node_class& r) {
 
   auto body = gio->create_graph();
 
+  // Stamp the per-pin `pin_signed` attribute on the materialized IO pins. The
+  // GraphIO declared sign (`gio->set_unsign` above) is NOT auto-propagated to the
+  // pin objects, and readers like pass.lec consult the per-pin attr
+  // (`gu::is_unsign(pin)`), not the declaration — so a signed region boundary
+  // (e.g. a signed shift/multiply operand crossing into a region) would otherwise
+  // default to unsigned and be mis-encoded (an arithmetic `>>` read as logical, a
+  // signed `*` read as unsigned). Mirrors the tolg front-end, which stamps the
+  // per-pin sign right after materializing each port. No-op for unsigned ports
+  // (the attr's absence IS unsigned).
+  for (auto& p : module_inputs_[r]) {
+    auto ip = body->get_input_pin(p.name);
+    gu::is_unsign(p.driver) ? gu::set_unsign(ip) : gu::set_sign(ip);
+  }
+  for (auto& p : module_outputs_[r]) {
+    auto op = body->get_output_pin(p.name);
+    gu::is_unsign(p.driver) ? gu::set_unsign(op) : gu::set_sign(op);
+  }
+
   // Body-builder hook (task 2a-abc): hand the region interface + contents to the
   // caller, which fills the body (e.g. an ABC-mapped netlist) instead of the
   // original logic. The IO pins are already materialized on `body`.

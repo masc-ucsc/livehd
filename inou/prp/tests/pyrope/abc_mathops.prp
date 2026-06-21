@@ -1,0 +1,26 @@
+/*
+:name: abc_mathops
+:type: lgraph compile
+*/
+
+// Flat combinational fixture for the pass.abc multiplier / right-shift bit-blast
+// and the division blackbox (task 2a-abc follow-on). No hierarchy and no
+// narrowing, so the design stays a clean combinational cone that `pass color
+// acyclic` colors in full (synth coloring deliberately excludes mult/div as
+// region seeds; acyclic does not, so every arithmetic op lands in a region and
+// is exercised end-to-end). Covers:
+//   * mult   : unsigned `a*b`, signed `c*e`, and an n-ary `a*b*a`
+//              (array multiplier; the partial-product adds use pass.abc.adder)
+//   * sra    : logical `a>>n` (unsigned operand) and arithmetic `c>>n` (signed)
+//   * div    : unsigned `a/b` and signed `c/e` — BLACKBOXED (kept native), so a
+//              `div-blackbox` warning fires and the divider is not tech-mapped.
+mod abc_mathops(a:u8, b:u8, c:s8, e:s8, n:u3) -> (mul:u16@[0], muls:s16@[0], mul3:u24@[0],
+                                                  srl:u8@[0], sra:s8@[0], dv:u8@[0], dvs:s8@[0]) {
+  mul  = a * b
+  muls = c * e
+  mul3 = a * b * a
+  srl  = a >> n
+  sra  = c >> n
+  dv   = a / b
+  dvs  = c / e
+}

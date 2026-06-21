@@ -361,7 +361,11 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
   if (opts.verbose) {
     mirror_log_to_stderr(log);
   }
-  if (livehd::diag::sink().has_errors()) {
+  // Halting errors abort the pipeline here; deferred errors (e.g. a refuted
+  // formal property) are recorded and fail the build at the end, but let the
+  // remaining passes / emits run so the design still compiles with its failing
+  // check kept as a runtime check.
+  if (livehd::diag::sink().has_halting_errors()) {
     throw classify_engine_failure(std::format("{} reported errors", method));
   }
 }
@@ -1274,6 +1278,135 @@ Ir_inputs gather_ir_inputs(const Options& opts, std::string_view cmd) {
   return ir;
 }
 
+// 2i-import S1 — on-disk import discovery. For each source unit's unresolved
+// import (a bare logical name, not `lg:`/`ln:`), search the *importing file's
+// own directory* for `<name>.prp`, parse it (named by its logical import path),
+// and repeat to a fixpoint. So `lhd compile foo/bar.prp` pulls in its siblings
+// without the caller listing every dependency, and the LSP (which opens a
+// single file) resolves the same way. Resolution is importer-directory relative
+// only — never the cwd, never an ancestor crawl. A logical name that resolves
+// to two distinct files is an error, never a silent first-hit.
+std::vector<std::string> collect_imports(const std::shared_ptr<Lnast>& ln);  // defined below
+
+void discover_imports(Options& opts, Eprp_var& var, size_t n_imports) {
+  auto dir_of = [](std::string_view p) -> std::string {
+    auto s = p.rfind('/');
+    return s == std::string_view::npos ? std::string(".") : std::string(p.substr(0, s));
+  };
+  // The unit name inou.prp gives a file: basename, cut at the first '.' (mirror
+  // inou_prp.cpp so our loaded-set keys line up with get_top_module_name()).
+  auto unit_name_of = [](std::string_view p) -> std::string {
+    auto s    = p.rfind('/');
+    auto base = s == std::string_view::npos ? p : p.substr(s + 1);
+    auto d    = base.find('.');
+    return std::string(d == std::string_view::npos ? base : base.substr(0, d));
+  };
+  auto abspath_of = [](std::string_view p) -> std::string {
+    std::error_code ec;
+    auto            a = fs::absolute(fs::path(p), ec);
+    return ec ? std::string(p) : a.lexically_normal().string();
+  };
+
+  absl::flat_hash_map<std::string, std::string> unit_dir;      // unit -> source dir
+  absl::flat_hash_set<std::string>              parsed_paths;  // abs paths already parsed
+  for (const auto& f : opts.files) {
+    unit_dir[unit_name_of(f)] = dir_of(f);
+    parsed_paths.insert(abspath_of(f));
+  }
+
+  while (true) {
+    absl::flat_hash_set<std::string> loaded;
+    for (const auto& ln : var.lnasts) {
+      loaded.insert(std::string(ln->get_top_module_name()));
+    }
+    std::map<std::string, std::string>           found;       // logical name -> file to parse
+    std::map<std::string, std::set<std::string>> seen_paths;  // logical name -> resolved files
+
+    for (size_t i = n_imports; i < var.lnasts.size(); ++i) {
+      const auto& ln  = var.lnasts[i];
+      auto        dit = unit_dir.find(std::string(ln->get_top_module_name()));
+      if (dit == unit_dir.end()) {
+        continue;  // a unit with no known on-disk origin (e.g. a derived tree)
+      }
+      const std::string dir = dit->second;
+      for (const auto& raw : collect_imports(ln)) {
+        if (raw.starts_with("lg:") || raw.starts_with("ln:")) {
+          continue;  // artifact imports resolve elsewhere, not on-disk source
+        }
+        // A trailing `.entry` after the last '/' selects a pub member, so the
+        // file is the stem; otherwise the whole string is the file path.
+        std::vector<std::string> names;
+        auto                     slash = raw.rfind('/');
+        auto                     dot   = raw.rfind('.');
+        if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) {
+          names.emplace_back(raw.substr(0, dot));
+        }
+        names.emplace_back(raw);
+        bool already = false;
+        for (const auto& c : names) {
+          if (loaded.contains(c)) {
+            already = true;
+            break;
+          }
+        }
+        if (already) {
+          continue;
+        }
+        for (const auto& c : names) {
+          std::string     path = dir + "/" + c + ".prp";
+          std::error_code ec;
+          if (fs::exists(path, ec) && !ec) {
+            seen_paths[c].insert(abspath_of(path));
+            found.try_emplace(c, path);
+            break;
+          }
+        }
+      }
+    }
+
+    bool ambiguous = false;
+    for (const auto& [name, paths] : seen_paths) {
+      if (paths.size() <= 1) {
+        continue;
+      }
+      ambiguous = true;
+      std::string list;
+      for (const auto& p : paths) {
+        if (!list.empty()) {
+          list += ", ";
+        }
+        list += p;
+      }
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "import-ambiguous",
+          .category = "name",
+          .pass     = "lhd.compile",
+          .message  = std::format("ambiguous import \"{}\": resolves to more than one file", name),
+          .hint     = std::format("candidates: {}; rename the file or import explicitly", list)});
+    }
+    if (ambiguous) {
+      throw classify_engine_failure("ambiguous import resolution");
+    }
+
+    bool progress = false;
+    for (const auto& [name, path] : found) {
+      if (!parsed_paths.insert(abspath_of(path)).second) {
+        continue;  // already parsed under some name — don't double-load the file
+      }
+      Prp2lnast converter(path, name);
+      var.add(converter.get_lnast());
+      unit_dir[name] = dir_of(path);
+      progress       = true;
+    }
+    if (!progress) {
+      break;
+    }
+  }
+  // A discovered file that fails to parse propagates its own diagnostic out of
+  // Prp2lnast (caught by the top-level compile handler), so no extra check here.
+}
+
 // Pyrope parse phase: load ln: import units (visible to upass/inliner), then
 // parse+validate the source files. Returns the number of imported units (the
 // source units are var.lnasts[n_imports..]).
@@ -1297,6 +1430,10 @@ size_t pyrope_parse(Options& opts, Result& res, Eprp_var& var, const std::vector
   },
            opts,
            res);
+  // 2i-import S1 — transitively pull in imported sibling sources from each
+  // importing file's own directory, so a single-file compile needs no
+  // dependency list (and the LSP resolves the same way).
+  discover_imports(opts, var, n_imports);
   run_step("pass.lnastfmt", var, {}, opts, res);
   if (wants_dump(opts, "parse")) {  // this invocation's source units only (imports are pre-elaborated)
     screen_dump_lnasts(std::vector<std::shared_ptr<Lnast>>(var.lnasts.begin() + static_cast<long>(n_imports), var.lnasts.end()),

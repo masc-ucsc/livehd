@@ -95,6 +95,12 @@ struct Diagnostic {
   std::string              hint{};   // optional one-line suggestion
   std::vector<std::string> see{};    // optional doc/spec pointers
   std::vector<Note>        notes{};  // optional secondary locations
+  // A "deferred" error is recorded and fails the build (counts in has_errors /
+  // count(error)) but does NOT halt the pass pipeline: the pipeline runs to
+  // completion (e.g. cgen still emits) instead of aborting after the step. Used
+  // for a refuted formal property — see pass/formal (the FAIL is reported and
+  // the design still compiles, with the failing check kept as a runtime check).
+  bool deferred = false;
 };
 
 // One JSONL line (no trailing newline). `seq` is the per-run monotonic id.
@@ -136,7 +142,13 @@ public:
   // Called by the parser error/warn sinks so every thrown error reports once.
   void flush(Severity sev, std::string_view text);
 
-  [[nodiscard]] bool   has_errors() const { return error_count_ > 0; }
+  // Any recorded error (halting or deferred) -> the build is a failure.
+  [[nodiscard]] bool has_errors() const { return error_count_ > 0; }
+  // Errors that abort the pass pipeline (excludes deferred errors, which are
+  // recorded + fail the build but let the pipeline run to completion). The
+  // per-step pipeline gate uses this so a refuted formal property does not
+  // suppress later passes / emits.
+  [[nodiscard]] bool   has_halting_errors() const { return error_count_ - deferred_error_count_ > 0; }
   [[nodiscard]] size_t count(Severity s) const;
 
   // Accumulated records this run (for tests, the verifier, and the renderer).
@@ -173,10 +185,11 @@ private:
   absl::flat_hash_set<size_t> seen_;  // per-step dedup keys
   std::optional<Diagnostic>   staged_;
   std::string                 step_;
-  uint64_t                    seq_         = 0;
-  size_t                      error_count_ = 0;
-  size_t                      warn_count_  = 0;
-  size_t                      note_count_  = 0;
+  uint64_t                    seq_                  = 0;
+  size_t                      error_count_          = 0;  // all errors (halting + deferred); drives has_errors / count
+  size_t                      deferred_error_count_ = 0;  // subset of error_count_ that does NOT halt the pipeline
+  size_t                      warn_count_           = 0;
+  size_t                      note_count_           = 0;
 
   enum class Json { uninit, none, stderr_, file };
   Json        json_out_ = Json::uninit;
@@ -262,6 +275,14 @@ public:
 
   Builder& note(std::string_view m, Span span = {}) {
     d_.notes.push_back(Note{std::string(m), std::move(span)});
+    return *this;
+  }
+
+  // Mark this (error) diagnostic as non-halting: it fails the build but lets the
+  // pass pipeline run to completion (see Diagnostic::deferred). Only meaningful
+  // at error severity.
+  Builder& deferred(bool on = true) {
+    d_.deferred = on;
     return *this;
   }
 

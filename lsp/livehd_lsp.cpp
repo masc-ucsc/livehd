@@ -8,15 +8,19 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "diag.hpp"
 #include "eprp_var.hpp"
 #include "lnast.hpp"
+#include "lnast_ntype.hpp"
 #include "lsp_index.hpp"
 #include "pass_upass.hpp"
 #include "prp2lnast.hpp"
@@ -243,6 +247,119 @@ std::string module_name_of(std::string_view path) {
 
 //============================ analysis ============================
 
+// 2i-import S1 — raw `import("…")` strings of a parsed unit (quotes stripped).
+std::vector<std::string> import_strings(const std::shared_ptr<Lnast>& ln) {
+  std::vector<std::string> out;
+  for (const auto& nid : ln->tree().pre_order()) {
+    if (!Lnast_ntype::is_func_call(ln->get_type(nid))) {
+      continue;
+    }
+    auto target = ln->get_first_child(nid);
+    auto fname  = ln->get_sibling_next(target);
+    if (fname.is_invalid() || ln->get_name(fname) != "import") {
+      continue;
+    }
+    auto mod = ln->get_sibling_next(fname);
+    if (mod.is_invalid()) {
+      continue;
+    }
+    std::string t{ln->get_name(mod)};
+    if (t.size() >= 2 && (t.front() == '"' || t.front() == '\'') && t.back() == t.front()) {
+      t = t.substr(1, t.size() - 2);
+    }
+    if (!t.empty()) {
+      out.push_back(std::move(t));
+    }
+  }
+  return out;
+}
+
+// 2i-import S1 — the LSP analyzes a single buffer, so cross-file imports would
+// otherwise all read as unresolved (the A7 false-squiggle). Mirror the
+// compile-time resolver: pull in importer-directory-relative sibling `.prp`
+// files from disk so imports resolve. Transitive to a fixpoint; reads siblings
+// from disk (the open buffer is only this file). Best-effort: a sibling that
+// fails to parse is skipped (the import simply stays unresolved for this file).
+void discover_sibling_imports(Eprp_var& var, std::string_view importer_path) {
+  auto dir_of = [](std::string_view p) -> std::string {
+    auto s = p.rfind('/');
+    return s == std::string_view::npos ? std::string(".") : std::string(p.substr(0, s));
+  };
+  auto abspath_of = [](std::string_view p) -> std::string {
+    std::error_code ec;
+    auto            a = std::filesystem::absolute(std::filesystem::path(p), ec);
+    return ec ? std::string(p) : a.lexically_normal().string();
+  };
+
+  std::unordered_map<std::string, std::string> unit_dir;      // unit -> source dir
+  std::unordered_set<std::string>              parsed_paths;  // abs paths already loaded
+  for (const auto& ln : var.lnasts) {
+    unit_dir[std::string(ln->get_top_module_name())] = dir_of(importer_path);
+  }
+  parsed_paths.insert(abspath_of(importer_path));
+
+  while (true) {
+    std::unordered_set<std::string> loaded;
+    for (const auto& ln : var.lnasts) {
+      loaded.insert(std::string(ln->get_top_module_name()));
+    }
+    std::vector<std::pair<std::string, std::string>> to_parse;  // (logical name, path)
+    for (const auto& ln : var.lnasts) {
+      auto dit = unit_dir.find(std::string(ln->get_top_module_name()));
+      if (dit == unit_dir.end()) {
+        continue;  // pre-loaded unit with no on-disk origin
+      }
+      const std::string dir = dit->second;
+      for (const auto& raw : import_strings(ln)) {
+        if (raw.starts_with("lg:") || raw.starts_with("ln:")) {
+          continue;  // artifact imports resolve elsewhere, not on-disk source
+        }
+        // A trailing `.entry` after the last '/' selects a pub member, so the
+        // file is the stem; otherwise the whole string is the file path.
+        std::vector<std::string> names;
+        auto                     slash = raw.rfind('/');
+        auto                     dot   = raw.rfind('.');
+        if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) {
+          names.push_back(raw.substr(0, dot));
+        }
+        names.push_back(raw);
+        bool already = false;
+        for (const auto& c : names) {
+          if (loaded.count(c)) {
+            already = true;
+            break;
+          }
+        }
+        if (already) {
+          continue;
+        }
+        for (const auto& c : names) {
+          std::string     path = dir + "/" + c + ".prp";
+          std::error_code ec;
+          if (std::filesystem::exists(path, ec) && !ec) {
+            if (parsed_paths.insert(abspath_of(path)).second) {
+              to_parse.emplace_back(c, path);
+            }
+            break;
+          }
+        }
+      }
+    }
+    if (to_parse.empty()) {
+      break;
+    }
+    for (const auto& [name, path] : to_parse) {
+      try {
+        Prp2lnast converter(path, name);
+        var.add(converter.get_lnast());
+        unit_dir[name] = dir_of(path);
+      } catch (...) {
+        // sibling did not parse — skip it (import stays unresolved for this file)
+      }
+    }
+  }
+}
+
 // Run the Pyrope front-end on `text` and return the collected diagnostics.
 std::vector<livehd::diag::Diagnostic> analyze(std::string_view virtual_path, std::string_view text) {
   auto& sink = livehd::diag::sink();
@@ -282,11 +399,20 @@ std::vector<livehd::diag::Diagnostic> analyze(std::string_view virtual_path, std
   if (lnast) {
     Eprp_var var;
     var.add(lnast);
+    // 2i-import S1 — resolve cross-file imports from this buffer's own directory
+    // (sibling .prp read from disk) so the editor stops flagging them. Order the
+    // exporters before the importing buffer (discovery appends siblings BFS, so
+    // reverse approximates leaf-first) → imports resolve in upass's single pass;
+    // import_defer makes any residual (an import cycle) defer silently instead
+    // of emitting a false `import-unresolved`.
+    discover_sibling_imports(var, virtual_path);
+    std::reverse(var.lnasts.begin(), var.lnasts.end());
     // Diagnostics-only run: tolg:0 (no LNAST→LGraph lowering — also the label
     // default, set explicitly for clarity) and toln:0 (don't materialize the
     // rewritten post-upass LNAST; nothing here consumes it).
     var.add("tolg", "false");
     var.add("toln", "false");
+    var.add("import_defer", "true");
 
     try {
       Pass_upass::work(var);  // semacheck / typecheck / constprop / bitwidth / verifier / assert / …

@@ -1,0 +1,16 @@
+/*
+:name: import_discover
+:type: comptime
+:files: inou/prp/tests/imports/import_discover.prp
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// 2i-import S1 — single-file compile must discover the sibling `lib_add.prp`
+// from THIS file's own directory. NOTE: :files: lists only this file (unlike
+// import_basic, which lists lib_add too) — the importer-directory-relative
+// resolver pulls lib_add in transitively.
+const lib = import("lib_add")
+cassert(lib.my_add(a=1, b=2) == 3)
+
+const f = import("lib_add.my_add")
+cassert(f(a=3, b=4) == 7)

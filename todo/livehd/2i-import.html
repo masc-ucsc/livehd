@@ -222,12 +222,34 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
   identical; never a silent clash.</li>
 </ul>
 
-<h2>Subtasks — pending (suggested slices, daily-win first)</h2>
+<h2>Subtasks — landed</h2>
 <ul class="subtasks">
-<li><strong>S1 — interactive resolver.</strong> Importer-directory-relative resolution +
-  transitive source parse so <code>lhd compile foo/bar.prp</code> needs no file list; LSP
-  reuses it; ambiguity → error with candidates. No hash/merge machinery — pure daily win,
-  kills A7/6a and the LSP false errors first.</li>
+<li><strong>S1 — interactive resolver (DONE 2026-06-20).</strong> Importer-directory-relative
+  transitive on-disk discovery: <code>lhd compile foo/bar.prp</code> now pulls in its imported
+  siblings with no dependency list (closes A7/6a), and the Pyrope LSP resolves the same way so
+  the permanent false <code>import-unresolved</code> squiggle is gone.
+  <strong>Compile:</strong> <code>discover_imports()</code> in <code>lhd/lhd_kernel.cpp</code>
+  (called inside <code>pyrope_parse</code> after <code>inou.prp</code>) — for each source
+  unit's unresolved bare import, search the importing file's <em>own directory</em> for
+  <code>&lt;name&gt;.prp</code> (a trailing <code>.entry</code> after the last <code>/</code>
+  selects a pub member → the file is the stem), parse it named by its logical import path, to
+  a fixpoint; <code>lg:</code>/<code>ln:</code> skipped; a name resolving to two files is
+  <code>import-ambiguous</code> (never a silent first-hit); files deduped by absolute path.
+  <strong>LSP:</strong> <code>discover_sibling_imports()</code> in <code>lsp/livehd_lsp.cpp</code>
+  reads siblings from disk, orders exporters-before-importer (reverse of the BFS discovery
+  order) for single-pass resolution, and enables <code>import_defer</code> so a residual (an
+  import cycle, or an import it can't resolve without build context) defers silently rather
+  than false-flagging. <strong>Tests:</strong> <code>inou/prp/tests/imports/import_discover.prp</code>
+  (single file; the sibling <code>lib_add</code> is NOT in <code>:files:</code>) plus manual
+  transitive / not-found / genuine-error LSP checks; 701/705 prp+lsp green (the 4 reds are the
+  pre-existing <a class="xref" href="../pyrope/2i-issues.html">2i-issues</a> tuple-port defects,
+  import-unrelated). <strong>Not yet:</strong> an explicit <code>-I</code> root (same-directory
+  resolution only — the daily-win case; <code>lhd scan</code> + declared deps cover the build
+  side).</li>
+</ul>
+
+<h2>Subtasks — pending (suggested slices)</h2>
+<ul class="subtasks">
 <li><strong>S2 — bare-name emit + collision rename.</strong> Drop the
   <code>file_stem + "." + func_name</code> default
   (<code>upass/func_extract/upass_func_extract.cpp</code>); emit bare names; turn
@@ -250,15 +272,19 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
 </ul>
 
 <h2>Remaining items</h2>
-<p><strong>Resolved this round (was the one open design gap) — cross-module multi-output
-  binding &amp; rename (A8 / 5b).</strong> A rename rides the existing re-export mechanism: a
-  module is aliased to a new <code>lg</code> name (<code>pub fast = import("lg:alu")</code>),
-  the very stamp the merge uses — so there is no special rename machinery at any level. For
-  the output-name clash (two imported modules both exporting <code>io_result</code>), a single
-  call on the RHS is unambiguous, so the bare output name is a valid rename source:
-  <code>const (r = io_result) = alu(…)</code> needs no full-call-path prefix. (Binding a
-  multi-output call to one bare var stays a deliberate compile error, 5a.) Left to do is just
-  the implementation: drop the require-full-prefix rule in the destructure matcher.</p>
+<p><strong>Cross-module multi-output binding &amp; rename (A8 / 5b) — DONE 2026-06-20.</strong>
+  A rename rides the existing re-export mechanism: a module is aliased to a new <code>lg</code>
+  name (<code>pub fast = import("lg:alu")</code>), the very stamp the merge uses — so there is
+  no special rename machinery at any level. For the output-name clash (two imported modules both
+  exporting <code>io_result</code>), a single call on the RHS is unambiguous, so the bare output
+  name is now a valid rename source: <code>const (r = io_result) = alu(…)</code> needs no
+  full-call-path prefix (was a hard <code>destructure-prefix</code> error). Implemented in
+  <code>inou/prp/prp2lnast.cpp</code> — in the single-fcall-RHS rename path, a lone identifier
+  whose name isn't the callee is reinterpreted as a field pick on the return (a dotted source
+  naming a <em>different</em> callee, <code>g.b</code>, still errors — genuine cross-function
+  reuse). Binding a multi-output call to one bare var stays a deliberate compile error (5a).
+  Test: <code>inou/prp/tests/comptime/destructure_bare_field.prp</code>; existing
+  <code>callee.field</code> rename tests unchanged.</p>
 <ul>
 <li><strong>Still genuinely open:</strong> emitted ports are all <code>signed</code> even when
   the source type is unsigned (6d — <code>cgen_verilog.cpp</code> hardcodes

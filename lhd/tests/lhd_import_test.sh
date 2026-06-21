@@ -89,8 +89,15 @@ EOF
 grep -q '"status":"pass"' "$W/r4.json" || fail "chain result not pass: $(cat "$W/r4.json")"
 
 # ── 3. failure modes ──────────────────────────────────────────────────────────
-# Missing unit: hard error naming the import string.
-"$LHD" compile "$W/consumer.prp" --workdir "$W/w5" -q --result-json "$W/r5.json" 2>/dev/null
+# Missing unit: hard error naming the import string. (2i-import S1: a single-file
+# compile now discovers sibling .prp sources from the importing file's own
+# directory, so the unit must GENUINELY have no file anywhere — not merely be
+# unlisted. `explib.prp` sits next to consumer.prp and is now auto-discovered.)
+cat > "$W/orphan.prp" <<'EOF'
+const z = import("truly_absent_unit")
+cassert(z.v == 1)
+EOF
+"$LHD" compile "$W/orphan.prp" --workdir "$W/w5" -q --result-json "$W/r5.json" 2>/dev/null
 [ $? -ne 0 ] || fail "missing-unit import must exit non-zero"
 grep -q 'unresolved import' "$W/r5.json" || fail "expected unresolved-import error: $(cat "$W/r5.json")"
 

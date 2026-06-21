@@ -33,11 +33,22 @@ Per region (`Region_body` from the partition seam):
    (`ABC_NTK_NETLIST`/`ABC_FUNC_AIG`). Multi-bit module IO becomes per-bit ABC
    PIs/POs (the bit-blast boundary). Supported cells: `and/or/xor/not`,
    `mux/hotmux`, `get_mask/set_mask/sext` (constant mask/position), `sum` +
-   `lt/gt/eq` (via the selectable adder library, 2i-abc_arith), `shl` (a
-   constant amount becomes pure bit re-wiring, a runtime amount a combinational
-   barrel/log shifter; multi-driver one-hot amounts are ORed, matching the LEC),
-   and constants. Still `unsupported-cell`: `mult/div/mod` and `sra` (right
-   shift).
+   `lt/gt/eq` (via the selectable adder library, 2i-abc_arith), `mult` (a simple
+   single-cycle array multiplier whose partial-product additions reuse the
+   selectable adder; sign/zero-extended to the magnitude width then multiplied
+   mod 2^W, matching the LEC for signed and unsigned alike), `shl` (a constant
+   amount becomes pure bit re-wiring, a runtime amount a combinational barrel/log
+   shifter; multi-driver one-hot amounts are ORed, matching the LEC), `sra` (right
+   shift: arithmetic for a signed operand, logical otherwise — a constant amount
+   re-wires, a runtime amount is a barrel shifter), and constants. `div` (and
+   `mod`, which lowers to `a-(a/b)*b`, hence a `div`) is **blackboxed**: a
+   synthesizable divider is large and out of scope, so the `div` node is kept
+   native as a boundary (like a `Sub`/memory) and a `div-blackbox` warning fires.
+   Anything else is still an `unsupported-cell` error.
+
+   Magnitude-width note: `mult`/`sra` size their result at the LEC's `real_width`
+   (LiveHD reserves the top bit of an *unsigned* net as an always-0 sign slot), so
+   the spare bit is held at 0 rather than carrying a stray product/sign bit.
 2. **flow** — `Abc_NtkToLogic` → run `pass.abc.flow` (comb default
    `strash; &get -n; &fraig -x; &put; &get -n; &dch -f; &nf {D}; &put`; seq
    default adds `dretime`) against the `read_lib` Liberty → `Abc_NtkToNetlist`.
@@ -83,10 +94,16 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `library` | Liberty `.lib` for `read_lib` | `$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib` |
 | `flow` | ABC command string (`{D}`/`{L}` substituted), run verbatim — see below | built-in comb/seq default |
 | `seq` | sequential mapping (flops→latches, memories/Subs blackboxed) — a superset that also maps purely combinational regions (no flops ⇒ `dretime` is a no-op), so it is the default | `true` |
-| `adder` | comb adder architecture for `sum`/cmp: `rca`/`cska`/`cla` | `rca` |
+| `adder` | comb adder architecture for `sum`/cmp (also the `mult` partial-product adds): `rca`/`cska`/`cla` | `rca` |
 | `block_size` | CSKA/CLA block width (`0` = auto) | `0` |
+| `multiplier` | comb multiplier architecture for `mult`: `array` (the only option today; the enum is the extension point for Booth/Wallace) | `array` |
 | `delay` / `load` | `{D}` / `{L}` substitution | empty |
 | `verbose` | per-region gate count | `false` |
+
+> Known limitation: `adder=cla` with the auto block width on a wide `mult`
+> produces an AIG that ABC's default `&dch` step aborts on (an ABC-internal
+> failure that exits without a diagnostic). Use the default `adder=rca` (or
+> `cska`, or a small `block_size`) for multiplier-heavy designs.
 
 ### The `flow` string and abc.rc scripts
 

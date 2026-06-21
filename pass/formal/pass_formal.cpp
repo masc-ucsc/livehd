@@ -32,16 +32,68 @@ int  to_int(std::string_view v, int dflt) {
     return dflt;
   }
 }
-// Parse the kind ("assert" | "assert_always" | "assume") packed in an fproperty
-// Sub's instance-name attr ("<kind>\x1f<loc>\x1f<msg>").
-std::string fprop_kind(const hhds::Node_class& node) {
-  auto nm = node.attr(hhds::attrs::name);
+// The decoded fproperty instance-name attr ("<kind>\x1f<loc>\x1f<msg>"): the
+// kind ("assert" | "assert_always" | "assume") plus the optional source
+// location and user message carried for diagnostics.
+struct Fprop {
+  std::string kind = "assert";
+  std::string loc;
+  std::string msg;
+};
+Fprop fprop_parts(const hhds::Node_class& node) {
+  Fprop f;
+  auto  nm = node.attr(hhds::attrs::name);
   if (!nm.has()) {
-    return "assert";
+    return f;
   }
   std::string s{nm.get()};
-  auto        p = s.find('\x1f');
-  return (p == std::string::npos) ? s : s.substr(0, p);
+  auto        p1 = s.find('\x1f');
+  if (p1 == std::string::npos) {
+    f.kind = s;
+    return f;
+  }
+  f.kind  = s.substr(0, p1);
+  auto p2 = s.find('\x1f', p1 + 1);
+  if (p2 == std::string::npos) {
+    f.loc = s.substr(p1 + 1);
+    return f;
+  }
+  f.loc = s.substr(p1 + 1, p2 - p1 - 1);
+  f.msg = s.substr(p2 + 1);
+  return f;
+}
+
+// A refuted property (the solver found a definitive counterexample). Per
+// 2f-formal the FAIL is RECORDED but the compile CONTINUES (non-fatal .emit()),
+// and the caller keeps the runtime check without ever eliding it or using it to
+// optimize. The proof reasons over free module inputs (and any cut register
+// state) in ISOLATION, so a different top-level instantiation may constrain them
+// and flip the result -> the hint says so. A surprising refutation may instead
+// be a compiler bug worth reporting (so a human / coding agent can check).
+void report_refuted(std::string_view code, const std::string& what, std::string_view module, const std::string& loc,
+                    const std::string& msg, const formal::Query_out& out) {
+  std::string detail;
+  if (!loc.empty()) {
+    detail += " at " + loc;
+  }
+  if (!msg.empty()) {
+    detail += ": " + msg;
+  }
+  std::string cex = out.witness.empty() ? std::string{} : (" (counterexample: " + out.witness + ")");
+  std::string hint
+      = out.stateful
+            ? "checked over free module inputs and free (cut) register state in isolation; a different top-level "
+              "instantiation, or an unreachable register state, may explain it — re-check at the intended top, or "
+              "report a compiler bug if it should already hold"
+            : "checked over free module inputs in isolation; a different top-level instantiation may constrain them so "
+              "it holds — re-check at the intended top, or report a compiler bug if it should already hold";
+  // Deferred: record + fail the build, but let the pipeline finish so cgen still
+  // emits the design with the failing property kept as a runtime check.
+  livehd::diag::err("pass.formal", code, "comptime")
+      .msg("{} in '{}'{}{}", what, module, detail, cex)
+      .hint(hint)
+      .deferred()
+      .emit();
 }
 }  // namespace
 
@@ -99,18 +151,17 @@ void Pass_formal::work(Eprp_var& var) {
       auto out = prover.is_onehot0(sel);
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, gu::kFormalOnehot);  // one-hotness obligation discharged
-      } else if (out.verdict == formal::Verdict::Refuted && !out.stateful) {
-        // Stateless cone + concrete falsifying assignment => a real reachable bug:
-        // two arms can fire at once. Hard compile error.
-        livehd::diag::err("pass.formal", "onehot-violated", "comptime")
-            .msg("Hotmux selector can have two or more bits set at once in '{}' — overlapping `unique if`/`match` "
-                 "conditions{}{}",
-                 std::string{g->get_name()},
-                 out.witness.empty() ? std::string{} : std::string{" (counterexample: "},
-                 out.witness.empty() ? std::string{} : (out.witness + ")"))
-            .fatal();
+      } else if (out.verdict == formal::Verdict::Refuted) {
+        // FAIL: a concrete assignment sets two or more selector bits at once.
+        // Record a (non-fatal) compile error and continue; keep the runtime
+        // check and never elide it or expose the selector as a don't-care to
+        // pass.abc (using a refuted property to optimize would be unsound).
+        report_refuted("onehot-violated",
+                       "Hotmux selector can have two or more bits set at once (overlapping `unique if`/`match`)",
+                       g->get_name(), "", "", out);
+        gu::set_runtime_check(node, gu::kFormalOnehot);
       } else {
-        // Unknown / budget / unreachable-stateful refutation: keep a runtime check.
+        // Unknown / budget: undecided (no counterexample) -> keep a runtime check.
         gu::set_runtime_check(node, gu::kFormalOnehot);
         if (warn_onehot) {
           livehd::diag::warn("pass.formal", "onehot-deferred", "comptime")
@@ -142,7 +193,8 @@ void Pass_formal::work(Eprp_var& var) {
     // (sound: proven facts) and are exposed to pass.abc as don't-cares.
     std::vector<hhds::Pin_class> proven_assumes;
     for (auto& node : props) {
-      if (fprop_kind(node) != "assume") {
+      auto parts = fprop_parts(node);
+      if (parts.kind != "assume") {
         continue;
       }
       auto cond = gu::get_driver_of_sink_name(node, "cond");
@@ -152,9 +204,17 @@ void Pass_formal::work(Eprp_var& var) {
       auto out = prover.is_true(cond);
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, gu::kFormalAssume);
-        proven_assumes.push_back(cond);
+        proven_assumes.push_back(cond);  // only PROVEN assumes become hypotheses (sound)
+      } else if (out.verdict == formal::Verdict::Refuted) {
+        // FAIL: the assumed contract can be false. Record + continue; keep the
+        // runtime check and do NOT add it as a hypothesis (a refuted assume must
+        // never be used to optimize, or every assert/abc query built on it is
+        // unsound).
+        report_refuted("assume-refuted", "assume is refuted (a concrete input makes it false)", g->get_name(),
+                       parts.loc, parts.msg, out);
+        gu::set_runtime_check(node, gu::kFormalAssume);
       } else {
-        gu::set_runtime_check(node, gu::kFormalAssume);  // declared contract, checked at runtime
+        gu::set_runtime_check(node, gu::kFormalAssume);  // undecided: declared contract, checked at runtime
         if (warn_assume) {
           livehd::diag::warn("pass.formal", "assume-deferred", "comptime")
               .msg("assume could not be proven in '{}' — kept as a runtime contract check", std::string{g->get_name()})
@@ -167,27 +227,34 @@ void Pass_formal::work(Eprp_var& var) {
     }
 
     // Pass 2: prove asserts / assert_always under the proven-assume hypotheses.
-    // Refutations defer to runtime (NOT a hard error yet — a normal assert may
-    // legitimately fail during reset, and reset-exclusion is a future refinement;
-    // the Hotmux structural check above is the only hard-error path for now).
+    // Verdict policy (2f-formal): PROVEN -> elide; REFUTED -> record a non-fatal
+    // error and keep the runtime check (never elide it, never use it as a
+    // hypothesis); UNKNOWN -> keep the runtime check + a deferral warning. A
+    // FAIL is reported but the design still compiles (continue); the hint notes
+    // that a different top-level may change the result (inputs are free here).
     for (auto& node : props) {
-      std::string kind = fprop_kind(node);
-      if (kind == "assume") {
+      auto parts = fprop_parts(node);
+      if (parts.kind == "assume") {
         continue;
       }
       auto cond = gu::get_driver_of_sink_name(node, "cond");
       if (cond.is_invalid()) {
         continue;
       }
-      uint32_t code = (kind == "assert_always") ? gu::kFormalAssertAlways : gu::kFormalAssert;
+      uint32_t code = (parts.kind == "assert_always") ? gu::kFormalAssertAlways : gu::kFormalAssert;
       auto     out  = prover.is_true(cond);
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, code);  // cgen elides the runtime check
+      } else if (out.verdict == formal::Verdict::Refuted) {
+        report_refuted("assert-refuted", parts.kind + " is refuted (a concrete input makes it false)", g->get_name(),
+                       parts.loc, parts.msg, out);
+        gu::set_runtime_check(node, code);  // keep: never elide a failing assert
       } else {
         gu::set_runtime_check(node, code);
         if (warn_assert) {
           livehd::diag::warn("pass.formal", "assert-deferred", "comptime")
-              .msg("{} could not be proven in '{}' — deferring to a runtime check", kind, std::string{g->get_name()})
+              .msg("{} could not be proven in '{}' — deferring to a runtime check", parts.kind,
+                   std::string{g->get_name()})
               .emit();
         }
       }
