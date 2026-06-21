@@ -56,8 +56,8 @@ private:
   static std::string         get_scaped_name(std::string_view name);
   static std::string         get_append_to_name(std::string_view name, std::string_view ext);
   std::string                get_unique_decl_name(std::string_view name);
-  std::string                get_expression(const hhds::Pin_class& dpin) const;
-  std::string                add_expression(std::string_view txt_seq, std::string_view txt_op, const hhds::Pin_class& dpin) const;
+  std::string                get_expression(const hhds::Pin_class& dpin);
+  std::string                add_expression(std::string_view txt_seq, std::string_view txt_op, const hhds::Pin_class& dpin);
 
   // Resolve the "driver of this sink pin": walk inp_edges and return the
   // first edge's driver. Returns an invalid Pin_class if not connected.
@@ -75,6 +75,7 @@ private:
   // chained `(a>>b)>>b` loses the hint between shifts; recover it here.
   static bool sra_operand_signed(const hhds::Pin_class& dpin);
 
+  std::string build_simple_expr(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
   void process_flop(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
   void process_latch(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
   // Generate a cgen_memory_[multiclock_]<R>rd_<W>wr module body for a (R,W,clock)

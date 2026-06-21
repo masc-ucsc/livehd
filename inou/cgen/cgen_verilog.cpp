@@ -275,7 +275,7 @@ std::string Cgen_verilog::get_unique_decl_name(std::string_view name) {
   return absl::StrCat(base, suffix);
 }
 
-std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) const {
+std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) {
   auto var_it = pin2var.find(dpin.get_class_index());
   if (var_it != pin2var.end()) {
     return var_it->second;
@@ -296,6 +296,34 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) const {
   if (is_const_pin(dpin)) {
     return const_to_verilog(hydrate_const(dpin));
   }
+
+  // Single-use unnamed nodes are intentionally not declared in create_locals:
+  // process_simple_node normally caches them in pin2expr before consumers ask
+  // for them. Large imported graphs can still present a consumer before such a
+  // producer in forward_class() order. Do not emit a bare, undeclared net in
+  // that case; inline the same local expression the producer would have cached.
+  if (!dpin.is_invalid()) {
+    auto node = dpin.get_master_node();
+    if (!node.is_invalid()) {
+      switch (type_op_of(node)) {
+        case Ntype_op::Sum:
+        case Ntype_op::Ror:
+        case Ntype_op::Div:
+        case Ntype_op::Not:
+        case Ntype_op::LT:
+        case Ntype_op::GT:
+        case Ntype_op::SHL:
+        case Ntype_op::SRA:
+        case Ntype_op::Mult:
+        case Ntype_op::And:
+        case Ntype_op::Or:
+        case Ntype_op::Xor:
+        case Ntype_op::EQ: return absl::StrCat("(", build_simple_expr(nullptr, node), ")");
+        default: break;
+      }
+    }
+  }
+
   auto wn = pin_wire_name(dpin);
   if (!wn.empty()) {
     return get_scaped_name(wn);
@@ -303,7 +331,7 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) const {
   return "'hx /*cgen-miss*/";
 }
 
-std::string Cgen_verilog::add_expression(std::string_view txt_seq, std::string_view txt_op, const hhds::Pin_class& dpin) const {
+std::string Cgen_verilog::add_expression(std::string_view txt_seq, std::string_view txt_op, const hhds::Pin_class& dpin) {
   auto expr = get_expression(dpin);
 
   if (txt_seq.empty()) {
@@ -897,7 +925,7 @@ void Cgen_verilog::process_hotmux(std::shared_ptr<File_output> fout, const hhds:
   fout->append("   endcase\n");
 }
 
-void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const hhds::Node_class& node) {
+std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, const hhds::Node_class& node) {
   auto dpin = node.get_driver_pin(0);
   auto op   = type_op_of(node);
   I(!Ntype::is_multi_driver(op));
@@ -942,7 +970,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
     auto     lhs_dpin = get_driver(find_sink_pin(node, "a"));
     auto     lhs      = get_expression(lhs_dpin);
     auto     var_pre  = pin2var.find(dpin.get_class_index());
-    if (var_pre != pin2var.end() && var_pre->second != lhs) {
+    if (fout && var_pre != pin2var.end() && var_pre->second != lhs) {
       // Bitwise NOT is evaluated at the node output width. Assign through the
       // destination-width temporary first, so a narrow expression like addr[3:0]
       // becomes 5'b0_addr before ~ is applied.
@@ -1012,7 +1040,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
         auto var_it = pin2var.find(dpin.get_class_index());
         assert(var_it != pin2var.end());
         if (value_bits_to_use < bits_of(dpin)) {
-          if (var_it->second != a) {
+          if (fout && var_it->second != a) {
             note_src(fout, node);
             fout->append("  ", var_it->second, " = ", a, ";\n");
           }
@@ -1023,9 +1051,12 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
         } else {
           replace = absl::StrCat("[", range_end - 1, ":", range_begin, "] = ");
         }
-        note_src(fout, node);
-        fout->append("  ", var_it->second, replace, value, ";\n");
-        return;
+        if (fout) {
+          note_src(fout, node);
+          fout->append("  ", var_it->second, replace, value, ";\n");
+          return {};
+        }
+        return absl::StrCat("(", a, ")");  // Set_mask inlining is intentionally conservative.
       }
     }
   } else if (op == Ntype_op::Get_mask) {
@@ -1241,9 +1272,9 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
       final_expr = absl::StrCat("$signed($signed(", val_expr, ") >>> ", amt_expr, ")");
     }
   } else if (op == Ntype_op::Nconst) {
-    return;  // emitted as expr at create_locals time
+    return {};  // emitted as expr at create_locals time
   } else if (op == Ntype_op::AttrSet) {
-    return;  // drop
+    return {};  // drop
   } else {
     std::string txt_op;
     if (op == Ntype_op::Mult) {
@@ -1279,6 +1310,16 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
 
   if (has_color(node)) {
     absl::StrAppend(&final_expr, " /* color:", std::to_string(color_of(node)), "*/");
+  }
+
+  return final_expr;
+}
+
+void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const hhds::Node_class& node) {
+  auto dpin       = node.get_driver_pin(0);
+  auto final_expr = build_simple_expr(fout, node);
+  if (final_expr.empty()) {
+    return;
   }
 
   auto var_it = pin2var.find(dpin.get_class_index());
@@ -1649,7 +1690,11 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
     std::string reset_initial = "'h0";
     auto        initial_dpin  = get_driver(find_sink_pin(node, "initial"));
     if (!initial_dpin.is_invalid()) {
-      reset_initial = get_wire_or_const(initial_dpin);
+      // Value context: use get_expression (not get_wire_or_const) so a computed,
+      // single-fanout reset/initial driver that was inlined into pin2expr is
+      // emitted inline. get_wire_or_const ignores pin2expr and would return a
+      // bare, undriven wire name (X). Matches how the flop's din is referenced.
+      reset_initial = get_expression(initial_dpin);
     }
 
     // Pipeline depth: the pipe_min/pipe_max comptime pins make one
