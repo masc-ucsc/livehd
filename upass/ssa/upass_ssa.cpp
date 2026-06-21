@@ -598,6 +598,19 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   // through it to the leaf "ar.x.a".
   absl::flat_hash_map<std::string, std::string> tget_alias;
 
+  // A whole-tuple write to a tuple OUTPUT port driven CONDITIONALLY
+  // (`p = if c { (first=1,..) } else { (first=3,..) }`) lowers as: each arm
+  // writes a whole-tuple temp (`___p0 = ___pN`), then a post-if `store(p,___p0)`.
+  // A whole-tuple copy carries no per-field driver, so the arm writes cannot be
+  // muxed per leaf. Pre-scan maps the post-if whole-store's source temp -> its
+  // port prefix; the in-arm whole-tuple copy is then distributed per output leaf
+  // (`p.first = ___pN.first`, ...) so tolg muxes each leaf - IDENTICAL to writing
+  // the fields conditionally by hand. `port_split_armed` records which ports got
+  // arm-driven so the now-redundant post-if whole-store is dropped.
+  absl::flat_hash_map<std::string, std::string> whole_port_split;  // src temp -> port prefix
+  absl::flat_hash_set<std::string>              port_split_armed;  // ports driven by arm distribution
+  int                                           arm_split_tmp = 0;
+
   // base/interior name -> its tuple-port dotted path (if it is one).
   auto resolve_port_path = [&](std::string_view name) -> std::optional<std::string> {
     if (port_prefix.contains(name)) {
@@ -733,6 +746,9 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       return false;  // not a plain 2-child `store(dst, src)`
     }
     std::string prefix(lnast->get_name(kids[0]));
+    if (port_split_armed.contains(prefix)) {
+      return true;  // a conditional whole-tuple write already drove the leaves per arm
+    }
     if (!port_prefix.contains(prefix)) {
       return false;  // dest is not a tuple-port prefix — normal scalar store
     }
@@ -841,6 +857,60 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
           // fall through: a non-port tuple_get is copied generically
         }
         if (Lnast_ntype::is_store(type)) {
+          // A WHOLE-tuple copy to a temp that feeds a post-if whole-store to a
+          // tuple-output port (`___p0 = ___pN`, with a later `store(p,___p0)`):
+          // distribute it into one per-leaf write `store(p.first, ___pN.first)`,
+          // ... so each output leaf is driven in BOTH arms and tolg muxes it. This
+          // is exactly the hand-written conditional per-field form. The post-if
+          // whole-store is then dropped (port_split_armed, below).
+          {
+            std::vector<Lnast_nid> kids;
+            for (auto c : lnast->children(src_nid)) {
+              kids.push_back(c);
+            }
+            if (kids.size() == 2 && Lnast_ntype::is_ref(lnast->get_type(kids[0]))
+                && Lnast_ntype::is_ref(lnast->get_type(kids[1]))) {
+              if (auto pit = whole_port_split.find(std::string(lnast->get_name(kids[0]))); pit != whole_port_split.end()) {
+                const std::string& port     = pit->second;
+                const std::string  dot_port = port + ".";
+                std::string        src_name(lnast->get_name(kids[1]));
+                if (auto rit = rename_map.find(src_name); rit != rename_map.end()) {
+                  src_name = rit->second;
+                }
+                bool any = false;
+                for (const auto& f : flat_outputs) {
+                  if (f.name.size() <= dot_port.size() || f.name.compare(0, dot_port.size(), dot_port) != 0) {
+                    continue;  // not a leaf under this port
+                  }
+                  any                   = true;
+                  const std::string sub = f.name.substr(dot_port.size());  // "first" | "lo.hi"
+                  std::string       tmp = absl::StrCat("___aws_", arm_split_tmp++);
+                  auto              tg  = staging->add_child(dst_parent, Lnast_ntype::create_tuple_get());
+                  if (Lnast::srcid_carries(Lnast_ntype::create_tuple_get())) {
+                    staging->set_srcid(tg, lnast->get_srcid(src_nid));
+                  }
+                  staging->add_child(tg, Lnast_node::create_ref(tmp));
+                  staging->add_child(tg, Lnast_node::create_ref(src_name));
+                  for (size_t pos = 0; pos != std::string::npos;) {
+                    size_t      dot   = sub.find('.', pos);
+                    std::string field = (dot == std::string::npos) ? sub.substr(pos) : sub.substr(pos, dot - pos);
+                    staging->add_child(tg, Lnast_node::create_const(field));
+                    pos = (dot == std::string::npos) ? std::string::npos : dot + 1;
+                  }
+                  auto st = staging->add_child(dst_parent, Lnast_ntype::create_store());
+                  if (Lnast::srcid_carries(Lnast_ntype::create_store())) {
+                    staging->set_srcid(st, lnast->get_srcid(src_nid));
+                  }
+                  staging->add_child(st, Lnast_node::create_ref(f.name));  // BASE leaf name (branch write)
+                  staging->add_child(st, Lnast_node::create_ref(tmp));
+                }
+                if (any) {
+                  port_split_armed.insert(port);
+                  return;
+                }
+              }
+            }
+          }
           // A field WRITE to a tuple-output leaf nested in an if-arm
           // (`store(p,'first',v)`) → a 2-child `store(p.first, v)` on the BASE
           // leaf name. tolg's lower_branch merges the same base-name writes from
@@ -1121,6 +1191,41 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       }
     }
   };
+  // Pre-scan: map a post-if whole-store's source temp to its tuple-OUTPUT-port
+  // prefix (`store(p, ___p0)` -> ___p0 maps to "p"), so a conditional whole-tuple
+  // write building ___p0 in if-arms can be distributed per output leaf (see
+  // copy_branch_port_aware / port_split_armed). Only ports with output leaves.
+  if (has_tuple_ports) {
+    for (auto child : lnast->children(stmts_nid)) {
+      if (!Lnast_ntype::is_store(lnast->get_type(child))) {
+        continue;
+      }
+      std::vector<Lnast_nid> kids;
+      for (auto c : lnast->children(child)) {
+        kids.push_back(c);
+      }
+      if (kids.size() != 2 || !Lnast_ntype::is_ref(lnast->get_type(kids[0]))
+          || !Lnast_ntype::is_ref(lnast->get_type(kids[1]))) {
+        continue;
+      }
+      std::string_view dst_nm = lnast->get_name(kids[0]);
+      if (!port_prefix.contains(dst_nm)) {
+        continue;
+      }
+      const std::string dot_port = std::string(dst_nm) + ".";
+      bool              has_leaf = false;
+      for (const auto& f : flat_outputs) {
+        if (f.name.size() > dot_port.size() && f.name.compare(0, dot_port.size(), dot_port) == 0) {
+          has_leaf = true;
+          break;
+        }
+      }
+      if (has_leaf) {
+        whole_port_split[std::string(lnast->get_name(kids[1]))] = std::string(dst_nm);
+      }
+    }
+  }
+
   for (auto child : lnast->children(stmts_nid)) {
     process_child(child);
   }
