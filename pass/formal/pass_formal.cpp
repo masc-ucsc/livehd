@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "cell.hpp"
 #include "diag.hpp"
 #include "hhds/graph.hpp"
@@ -95,15 +96,61 @@ void report_refuted(std::string_view code, const std::string& what, std::string_
       .deferred()
       .emit();
 }
+
+// A property that was NOT confirmed-real (or was downgraded) is kept as a runtime
+// check and reported as a LOUD `DEFERRED` warning (never silently masked) — the
+// build still passes. Reasons, in priority order: the user downgraded refutations
+// with on_refute=warn; a refutation in a non-top (instantiated) module = "not
+// enough top"; a refutation resting on possibly-unreachable register state
+// (fast/induction, needs BMC); or simply undecided (budget/unknown).
+void warn_deferred(bool enabled, std::string_view code, std::string_view subject, std::string_view module,
+                   const formal::Query_out& out, bool is_top, bool downgraded) {
+  if (!enabled) {
+    return;
+  }
+  std::string m{module};
+  if (out.verdict == formal::Verdict::Refuted && downgraded) {
+    livehd::diag::warn("pass.formal", code, "comptime")
+        .msg("DEFERRED: {} in '{}' is refuted but downgraded to a warning by --set compile.formal.on_refute=warn; "
+             "kept as a runtime check",
+             subject, m)
+        .emit();
+  } else if (out.verdict == formal::Verdict::Refuted && !is_top) {
+    livehd::diag::warn("pass.formal", code, "comptime")
+        .msg("DEFERRED: {} in '{}' refuted only in module-isolation — its inputs are constrained by a parent "
+             "instantiation (not enough top); kept as a runtime check",
+             subject, m)
+        .emit();
+  } else if (out.verdict == formal::Verdict::Refuted) {
+    livehd::diag::warn("pass.formal", code, "comptime")
+        .msg("DEFERRED: {} in '{}' refuted only under a possibly-unreachable register state — kept as a runtime check "
+             "(use --set compile.formal.mode=normal for a BMC check)",
+             subject, m)
+        .emit();
+  } else {
+    livehd::diag::warn("pass.formal", code, "comptime")
+        .msg("DEFERRED: {} in '{}' could not be proven — kept as a runtime check", subject, m)
+        .emit();
+  }
+}
 }  // namespace
 
 void Pass_formal::setup() {
   Eprp_method m("pass.formal",
                 "Single-design formal property checks (assert / assume / Hotmux one-hotness) on the cvc5 prover",
                 &Pass_formal::work);
-  m.add_label_optional("enabled", "true|false run the pass (always-on by default; opt out with false)", "true");
-  m.add_label_optional("budget_k", "deterministic per-query cvc5 rlimit = budget_k * cone-node-count", "256");
-  m.add_label_optional("cone_max", "skip (defer to runtime) cones larger than this many nodes", "50000");
+  m.add_label_optional(
+      "mode",
+      "none|fast|normal — none skips; fast=induction (trusts combinational refutations, defers stateful ones); "
+      "normal=BMC-intent (also trusts stateful refutations)",
+      "normal");
+  m.add_label_optional("on_refute",
+                       "error|warn — a refutation at the top boundary fails the build (error, default) or is downgraded "
+                       "to a warning (warn). A proven/passing property is always sound; only a 'fail' can be spurious.",
+                       "error");
+  m.add_label_optional("enabled", "true|false run the pass (opt out with false, same as mode=none)", "true");
+  m.add_label_optional("budget_k", "deterministic per-query cvc5 rlimit = budget_k * cone-node-count (0 = default 256)", "0");
+  m.add_label_optional("cone_max", "skip (defer to runtime) cones larger than this many nodes (0 = default 50000)", "0");
   m.add_label_optional("warn_deferred", "true|false warn whenever any obligation is deferred to runtime", "true");
   m.add_label_optional("warn_onehot", "true|false warn on a deferred Hotmux one-hot check", "true");
   m.add_label_optional("warn_assert", "true|false warn on a deferred assert", "true");
@@ -112,21 +159,88 @@ void Pass_formal::setup() {
 }
 
 void Pass_formal::work(Eprp_var& var) {
-  if (!truthy(var.get("enabled", "true"))) {
-    return;  // opt-out: --set pass.formal.enabled=false (or compile.formal=false in the recipe loop)
+  const std::string_view mode = var.get("mode", "normal");
+  if (mode == "none" || !truthy(var.get("enabled", "true"))) {
+    return;  // opt-out: --set compile.formal.mode=none (or pass.formal.enabled=false)
   }
+  if (mode != "fast" && mode != "normal") {
+    livehd::diag::err("pass.formal", "bad-mode", "comptime")
+        .msg("pass.formal mode must be none|fast|normal, got '{}'", mode)
+        .emit();
+    return;
+  }
+  // Engine semantics (mirrors LEC's IND vs BMC), NOT a clause-budget knob:
+  //   fast   = induction: the Prover cuts flops/memories as free inputs, so a
+  //            PROVEN holds for every reachable state (sound) and a purely
+  //            COMBINATIONAL refutation is exact. But a refutation whose cone cut
+  //            a flop/memory ("stateful") may rest on an unreachable state, so
+  //            fast DEFERS it to a runtime check — confirming it needs BMC.
+  //   normal = BMC-intent: also trusts stateful refutations. (Today this is still
+  //            the induction over-approximation — the real BMC unroll engine is
+  //            not built yet — so a stateful counterexample carries the existing
+  //            "may be unreachable" caveat. A future BMC mode confirms reachability.)
+  // budget_k/cone_max are independent of the mode (0 = built-in default); the
+  // default budget already discharges the easy combinational obligations.
+  const bool trust_stateful_refute = (mode == "normal");
+
+  // on_refute: a PROVEN property is always sound, so only a "fail" (refutation)
+  // can be spurious. At the committed top boundary a refutation FAILS the build
+  // (error, default); `warn` downgrades every refutation to a warning — the escape
+  // hatch when a design is checked without enough top context.
+  const std::string_view on_refute = var.get("on_refute", "error");
+  if (on_refute != "error" && on_refute != "warn") {
+    livehd::diag::err("pass.formal", "bad-on-refute", "comptime")
+        .msg("pass.formal on_refute must be error|warn, got '{}'", on_refute)
+        .emit();
+    return;
+  }
+  const bool downgrade_refute = (on_refute == "warn");
+  // An explicit --top names the committed design boundary, so that graph is always
+  // treated as a root for the FAIL decision (even if a parent that happens to be
+  // in the same compilation instantiates it).
+  const std::string_view designated_top = var.get("top", "");
+
   formal::Prove_options opts;
-  opts.budget_k = to_int(var.get("budget_k", "256"), 256);
-  opts.cone_max = to_int(var.get("cone_max", "50000"), 50000);
+  const int budget_k = to_int(var.get("budget_k", "0"), 0);
+  const int cone_max = to_int(var.get("cone_max", "0"), 0);
+  opts.budget_k = budget_k > 0 ? budget_k : 256;
+  opts.cone_max = cone_max > 0 ? cone_max : 50000;
 
   const bool warn_def    = truthy(var.get("warn_deferred", "true"));
   const bool warn_onehot = warn_def && truthy(var.get("warn_onehot", "true"));
+
+  // "Not enough top": a graph that some Sub instantiates is a SUBMODULE whose
+  // inputs are constrained by its parent, so a refutation found over its free
+  // ports in isolation is NOT a confirmed bug — it is reported as a loud warning,
+  // never a build failure. Only a ROOT graph (nothing instantiates it — the real
+  // design boundary, incl. an explicit --top) can fail the build on a refutation.
+  absl::flat_hash_set<hhds::Gid> instantiated_gids;
+  for (auto& gp2 : var.graphs) {
+    auto* g2 = gp2.get();
+    if (g2 == nullptr) {
+      continue;
+    }
+    for (auto node : g2->forward_class()) {
+      if (gu::type_op_of(node) == Ntype_op::Sub) {
+        if (auto gid = node.get_subnode_gid(); gid != hhds::Gid_invalid) {
+          instantiated_gids.insert(gid);
+        }
+      }
+    }
+  }
 
   for (auto& gp : var.graphs) {
     auto* g = gp.get();
     if (g == nullptr) {
       continue;
     }
+    // is_top: the graph is the design boundary — the explicit --top (by module
+    // name, tolerating a "unit." prefix) or, absent that, a root no Sub instantiates.
+    std::string_view gname = g->get_name();
+    auto             dot   = gname.rfind('.');
+    std::string_view gmod  = (dot == std::string_view::npos) ? gname : gname.substr(dot + 1);
+    const bool matches_top = !designated_top.empty() && (gname == designated_top || gmod == designated_top);
+    const bool is_top      = matches_top || !instantiated_gids.contains(g->get_gid());
     formal::Prover prover(g, opts);
 
     // Built-in obligation: every Hotmux selector must be one-hot-or-zero. Collect
@@ -151,24 +265,22 @@ void Pass_formal::work(Eprp_var& var) {
       auto out = prover.is_onehot0(sel);
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, gu::kFormalOnehot);  // one-hotness obligation discharged
-      } else if (out.verdict == formal::Verdict::Refuted) {
-        // FAIL: a concrete assignment sets two or more selector bits at once.
-        // Record a (non-fatal) compile error and continue; keep the runtime
-        // check and never elide it or expose the selector as a don't-care to
-        // pass.abc (using a refuted property to optimize would be unsound).
+      } else if (out.verdict == formal::Verdict::Refuted && is_top && (trust_stateful_refute || !out.stateful)
+                 && !downgrade_refute) {
+        // FAIL: a concrete assignment sets two or more selector bits at once, in
+        // a ROOT module (no missing top context). Record a (non-fatal) compile
+        // error and continue; keep the runtime check and never elide it or expose
+        // the selector as a don't-care to pass.abc (a refuted property is unsound
+        // to optimize with).
         report_refuted("onehot-violated",
                        "Hotmux selector can have two or more bits set at once (overlapping `unique if`/`match`)",
                        g->get_name(), "", "", out);
         gu::set_runtime_check(node, gu::kFormalOnehot);
       } else {
-        // Unknown / budget: undecided (no counterexample) -> keep a runtime check.
+        // Undecided, a non-top module ("not enough top"), or (fast) a stateful
+        // refutation -> keep the runtime check + a loud DEFERRED warning.
         gu::set_runtime_check(node, gu::kFormalOnehot);
-        if (warn_onehot) {
-          livehd::diag::warn("pass.formal", "onehot-deferred", "comptime")
-              .msg("Hotmux selector one-hotness could not be proven in '{}' — deferring to a runtime check",
-                   std::string{g->get_name()})
-              .emit();
-        }
+        warn_deferred(warn_onehot, "onehot-deferred", "Hotmux selector one-hotness", g->get_name(), out, is_top, downgrade_refute);
       }
     }
 
@@ -205,21 +317,21 @@ void Pass_formal::work(Eprp_var& var) {
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, gu::kFormalAssume);
         proven_assumes.push_back(cond);  // only PROVEN assumes become hypotheses (sound)
-      } else if (out.verdict == formal::Verdict::Refuted) {
-        // FAIL: the assumed contract can be false. Record + continue; keep the
-        // runtime check and do NOT add it as a hypothesis (a refuted assume must
-        // never be used to optimize, or every assert/abc query built on it is
-        // unsound).
+      } else if (out.verdict == formal::Verdict::Refuted && is_top && (trust_stateful_refute || !out.stateful)
+                 && !downgrade_refute) {
+        // FAIL: the assumed contract can be false at a ROOT boundary. Record +
+        // continue; keep the runtime check and do NOT add it as a hypothesis (a
+        // refuted assume must never optimize, or every assert/abc query built on
+        // it is unsound).
         report_refuted("assume-refuted", "assume is refuted (a concrete input makes it false)", g->get_name(),
                        parts.loc, parts.msg, out);
         gu::set_runtime_check(node, gu::kFormalAssume);
       } else {
-        gu::set_runtime_check(node, gu::kFormalAssume);  // undecided: declared contract, checked at runtime
-        if (warn_assume) {
-          livehd::diag::warn("pass.formal", "assume-deferred", "comptime")
-              .msg("assume could not be proven in '{}' — kept as a runtime contract check", std::string{g->get_name()})
-              .emit();
-        }
+        // Undecided, a non-top module ("not enough top"), or (fast) a stateful
+        // refutation: the declared contract is kept as a runtime check (never a
+        // hypothesis) + a loud DEFERRED warning.
+        gu::set_runtime_check(node, gu::kFormalAssume);
+        warn_deferred(warn_assume, "assume-deferred", "assume", g->get_name(), out, is_top, downgrade_refute);
       }
     }
     for (auto& c : proven_assumes) {
@@ -245,18 +357,17 @@ void Pass_formal::work(Eprp_var& var) {
       auto     out  = prover.is_true(cond);
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, code);  // cgen elides the runtime check
-      } else if (out.verdict == formal::Verdict::Refuted) {
+      } else if (out.verdict == formal::Verdict::Refuted && is_top && (trust_stateful_refute || !out.stateful)
+                 && !downgrade_refute) {
         report_refuted("assert-refuted", parts.kind + " is refuted (a concrete input makes it false)", g->get_name(),
                        parts.loc, parts.msg, out);
         gu::set_runtime_check(node, code);  // keep: never elide a failing assert
       } else {
+        // Unknown, a non-top module ("not enough top"), or (fast) a stateful
+        // refutation whose witness may be an unreachable state -> keep the runtime
+        // check + a loud DEFERRED warning; only a root + BMC (normal) trusts it.
         gu::set_runtime_check(node, code);
-        if (warn_assert) {
-          livehd::diag::warn("pass.formal", "assert-deferred", "comptime")
-              .msg("{} could not be proven in '{}' — deferring to a runtime check", parts.kind,
-                   std::string{g->get_name()})
-              .emit();
-        }
+        warn_deferred(warn_assert, "assert-deferred", parts.kind, g->get_name(), out, is_top, downgrade_refute);
       }
     }
   }

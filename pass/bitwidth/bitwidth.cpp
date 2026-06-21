@@ -561,7 +561,13 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
         int32_t dbits = 0;
         if (it != bwmap.end()) {
           dbits = it->second.get_sbits();
-          if (n_addr && it->second.is_always_positive()) {
+          // get_sbits() is the SIGNED width (magnitude + sign bit). A memory's
+          // width (mem_bits) and depth (mem_size) are unsigned, so for an
+          // always-positive addr OR din the comparison must use the magnitude,
+          // which is one bit narrower. (The din arm used to skip this, so a
+          // 3-bit unsigned din reported sbits=4 and tripped the width check
+          // below against a legitimate 3-bit memory.)
+          if ((n_addr || n_din) && it->second.is_always_positive()) {
             --dbits;
           }
         } else {
@@ -589,7 +595,11 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
         if (it == bwmap.end()) {
           continue;
         }
-        if (it->second.get_sbits() <= mem_bits) {
+        auto need = it->second.get_sbits();
+        if (it->second.is_always_positive()) {
+          --need;  // compare the unsigned magnitude against the unsigned memory width
+        }
+        if (need <= mem_bits) {
           continue;
         }
         livehd::diag::err("pass.bitwidth", "mem-width-mismatch", "bitwidth")

@@ -1,0 +1,28 @@
+/*
+:name: gen_type_cast
+:type: equiv
+:verilog_top: gen_type_cast.top
+:pyrope_top: gen_type_cast.top
+*/
+
+// FAILING regression repro (generics lowering gap): a generic type parameter
+// used as a CONSTRUCTOR / cast inside the lambda body — `T(a)` — does not lower.
+// The generic-binding pass inlines the body but leaves `T(...)` as a call to a
+// value named `T` (renamed `inl1_T`), so `lnast.tolg` aborts with:
+//
+//   upass.tolg: call to 'inl1_T' has no hardware lowering yet —
+//   only pipe/mod calls become instances
+//
+// Using `T` purely as a *type annotation* (`mut tmp:T = a`) DOES lower today;
+// only the `T(x)` constructor form is broken. Once the binding pass substitutes
+// the concrete type into constructor calls too, `widen<u8>(a)` is
+// `u32(u8(a)) + 1` == `a + 1` (32-bit) — proven equivalent to the golden below
+// (validated by LEC against the `mut tmp:u8 = a; r = u32(tmp) + 1` form).
+
+comb widen<T>(a:T) -> (r:u32) {
+  r = u32(T(a)) + 1
+}
+
+comb top(x:u8) -> (r:u32) {
+  r = widen<u8>(a=x)
+}

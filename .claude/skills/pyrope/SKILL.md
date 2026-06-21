@@ -15,6 +15,13 @@ skill). Always verify generated code with `lhd` (last section).
 
 * Comments are `//` only. `;` is the same as a newline. No variable shadowing,
   anywhere. A continuation line must not start with an alphanumeric or `(`.
+* **Names are case-insensitive** (matched case-folded; the original spelling is
+  preserved in the emitted netlist). `myVal` and `MYVAL` are the same name — so
+  a type and a variable that differ only in case **collide**. Never name a
+  variable the lowercase of a type you use: `enum State` + `reg state` is a
+  compile error (`unresolved reference '___state'`); write `reg st:State`.
+  Convention: types are `Capitalized`, everything else lowercase; `comptime` is
+  never inferred from casing.
 * Every declaration starts with a kind keyword — data: `const` / `mut` /
   `wire` / `reg`; lambda: `comb` / `pipe` / `mod` / `fluid`. Prefix modifiers:
   `comptime`, `pub`. Assignment prefixes: `wrap`, `sat`. `stage[N]` is a
@@ -81,6 +88,10 @@ expansion. Bind explicitly (`f<u8>(a=1, b=2)`, one type per generic, in
 order) or let T infer (unify) from the actuals' declared types; bare
 literals leave T as the unbounded kind (`f(a=1, b=2)` → T = int). A
 generic `mod`/`pipe` mints one module per binding (`madd__u8_u8`).
+Both overloading and generics are **enabled** — emit them when they fit. They
+are still lightly tested (generics more than gathered-set dispatch), so if a
+call hits `tolg-error: call to '<set>' has no hardware lowering` or a wrong
+dispatch, that is a LiveHD bug to report, not a reason to avoid the construct.
 Comptime parameters live in the `[...]`
 slot: `comb g[n:int=1](x) -> (r)`, called as `g[3](x=2)`. Varargs `(...args)`
 gather leftovers (`args[i]` / `args.NAME`). There is **no placeholder lambda
@@ -138,7 +149,7 @@ mut arr = [1, 2, 3]                    // [] = array: all entries same type
 ```pyrope
 v#[3]            // bit 3            v#[1..=4]    // bit slice (zext result)
 v#sext[0..=2]    // sign-extended slice
-v#|[..]  v#&[..]  v#^[..]  v#+[..]   // or/and/xor-reduce, popcount — DO NOT LOWER (see end)
+v#|[..]  v#&[..]  v#^[..]  v#+[..]   // or/and/xor-reduce, popcount (lower to int 0/1)
 trans#[0] = v#[1]   // LHS bit assign; every dest bit driven exactly once
 const onehot = 1 << (1, 4, 3)        // == 0ub01_1010
 ```
@@ -330,16 +341,17 @@ pipe[1] counter3(enable:bool) -> (reg count:u8) {  // pipe state output: home st
   if enable { wrap count += 1 }
 }
 
-// FSM — match needs else; runtime gating uses if
+// FSM — names are case-insensitive, so the reg can't be `state` (collides with
+// the `State` type); use `st`. The `else` here is the Done/catch-all arm.
 enum State = (Idle, Run, Done)
 
 mod fsm(start:bool, fin:bool) -> (busy:bool@[0]) {
-  reg state:State = State.Idle
-  busy = state == State.Run
-  match state {
-    == State.Idle { if start { state = State.Run  } }
-    == State.Run  { if fin   { state = State.Done } }
-    else          { state = State.Idle }
+  reg st:State = State.Idle
+  busy = st == State.Run
+  match st {
+    == State.Idle { if start { st = State.Run  } }
+    == State.Run  { if fin   { st = State.Done } }
+    else          { st = State.Idle }
   }
 }
 
@@ -403,6 +415,8 @@ pipe[1] dpram(we:bool, waddr:u8, raddr:u8, wdata:u32) -> (rdata:u32) {
 15. `_pin` register attributes need `ref` (`clock_pin=ref clk`); reset value
     is the `= expr` initializer; `sync=false` for async reset.
 16. Enum comparisons use names (`State.Idle`), never the underlying integer.
+17. Names are case-insensitive — a variable that is the lowercase of a type
+    collides (`enum State` + `reg state` is an error; use `reg st:State`).
 
 ## Not yet implemented (avoid emitting)
 
@@ -414,43 +428,34 @@ the authoritative list). Do not generate these unless explicitly asked:
   `eventually`/`always`, `.[rising]`/`.[falling]`
 * Testbench extras: `peek`/`poke`, `waitfor`, `force`/`release`, `sigref`,
   `spawn`/`join`/`cancel` (plain `test`/`step` works)
-* Overload-gathering call dispatch (`const add = [f1, f2]; add(x)`) — only
-  `init` overload sets resolve; prefer distinct names
 * `import("prp")` stdlib; `comptime`-computed / inferred-type memory init
   (`reg mem2 = reset_value` — literal/scalar init contents DO work);
   `macro=` attribute; in-language `lec()`
 
-**Documented forms that do NOT lower (re-verified against a fresh `lhd` build
-2026-06-20 — `upass.tolg` errors out; use the workaround):**
+**Documented forms that still do NOT lower (re-verified against a fresh `lhd`
+build 2026-06-21 — `upass.tolg` errors out; use the workaround):**
 
-* **Reduction operators** `a#|[..]` `a#&[..]` `a#^[..]` `a#+[..]` (popcount) —
-  parse + elaborate, then `node type 'red_or'/.../'popcount' has no hardware
-  lowering`. Build it explicitly: or-reduce `a != 0`; and-reduce-of-range
-  `a#[lo..=hi] == ((1<<(hi-lo+1))-1)`; parity via an XOR tree / chained `^`.
-* **`implies` as a hardware signal** — `r = p implies q` → `call to 'implies'
-  has no hardware lowering`. Write `r = (not p) or q`. (`implies` still works
-  inside `assert`/`cassert`.)
 * **Registered-output interface form** `mod f(...) -> (reg count:u8@[0])` →
   `state register 'count' homes at stage 0 ... requires home -1`. Use a body
   register: `mod f(...) -> (count:u8@[0]) { reg c:u8=0; count=c; ... }`.
 * **Hierarchical enums** `enum E=(,a=(,x,,y), ,b)` → `read of undefined
   variable 'x'` (nested member names read as scope). Use a flat enum.
-* **Tuple/struct-typed ports** `comb f(ar:(x:u3,y:i4), ...)` and
-  `-> (p:(q:u8,r:u8))` → `unresolved reference` / `output 'p.q' is never
-  driven`. Flatten to scalar ports (`ar_x:u3, ar_y:i4`).
-* **Runtime (non-comptime) bit index** `a#[i]` → `get_mask mask operand is not
-  a constant or range`. Use `(a >> i)#[0]`.
-* **Runtime index into a const-array LITERAL** `const arr=[..]; arr[i]` → not
-  resolved. A typed `mut arr:[N]uW = ...` (or a `reg` memory) DOES lower a
-  runtime index.
 
-**Silently-WRONG lowerings (compile OK but the netlist is incorrect — avoid):**
+**Recently fixed — these NOW lower correctly (safe to emit; older builds and
+earlier revisions of this skill told you to avoid them):**
 
-* `i8#[..]` (full-width slice of a *signed* value) collapses to the wrong width
-  (e.g. `i8#[..]` → 2 bits; `u8#[..]` is fine). Slice an explicit range
-  `a#[0..=7]`.
-* Open-ended bit slice `a#[k..]` drops the offset (returns the low bits). Use the
-  closed range `a#[k..=<msb>]`.
+* **Reduction operators** `a#|[..]` `a#&[..]` `a#^[..]` `a#+[..]` (popcount) —
+  lower to Verilog `(|x)`/`(&x)`/`(^x)`/adder-tree. Result is still **int 0/1**,
+  never bool.
+* **`implies` as a hardware signal** `r = p implies q` → `(~p)|q`.
+* **Tuple/struct-typed ports** `comb f(ar:(x:u3,y:i4)) -> (p:(q:u8,r:u8))` — the
+  SSA flatten is automatic; reads/writes of the dotted leaves lower.
+* **Runtime (non-comptime) bit index** `a#[i]`, and **runtime index into a
+  const-array literal** `const arr=[..]; arr[i]` (lowers to a `__hotmux`).
+* **Runtime typecasts** `int(a<b)`, `u8(x)`, `bool(x)` (range-checked, e.g.
+  `u8(0x1F0)` errors).
+* **Full-width signed slice** `i8#[..]` (now all bits) and **open-ended slice**
+  `a#[k..]` (now keeps the offset) — both were previously silently wrong.
 
 Runtime `wrap`/`sat` and enum-typed register resets ARE implemented.
 Per-range LHS bit-assembly into a `reg` works (`reg r:u12=0; r#[0..=7]=a;

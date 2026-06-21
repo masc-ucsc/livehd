@@ -6,8 +6,11 @@
 # build fails (exit != 0), but the compile CONTINUES so cgen still emits the
 # design with the failing check kept as a runtime check (never elided, never
 # used to optimize). The diagnostic carries the counterexample and a hint that a
-# different top-level instantiation may change the result. pass.formal runs in
-# the O2 graph recipe.
+# different top-level instantiation may change the result. pass.formal runs as a
+# none|fast|normal mode step in `lhd compile` (default fast; none under -O0): fast
+# = induction (catches combinational refutations, defers stateful ones to runtime);
+# normal = BMC-intent (also trusts stateful refutations). Cases 1-4 use --recipe
+# O2 (which also runs cprop/bitwidth); cases 5-7 pin the mode behavior.
 
 set -u
 
@@ -28,6 +31,19 @@ compile_o2() {
   VOUT="$W/$n.v"
   "$LHD" compile "$W/$n.prp" --recipe O2 --workdir "$W/$n" \
     --emit "verilog:$VOUT" --emit "diagnostics:$DIAG" >/dev/null 2>&1
+  RC=$?
+}
+
+# compile_case <prp> <tag> <extra args...> : compile $W/<prp>.prp tagged <tag>
+# (no --recipe, so the default fast formal mode runs unless overridden).
+# Sets globals: RC, DIAG, VOUT.
+compile_case() {
+  local prp="$1" tag="$2"
+  shift 2
+  DIAG="$W/$tag.jsonl"
+  VOUT="$W/$tag.v"
+  "$LHD" compile "$W/$prp.prp" --workdir "$W/$tag" \
+    --emit "verilog:$VOUT" --emit "diagnostics:$DIAG" "$@" >/dev/null 2>&1
   RC=$?
 }
 
@@ -98,4 +114,100 @@ compile_o2 onehot_ok
 grep -q '"severity":"error"' "$DIAG" && fail "proven one-hot must emit no error: $(cat "$DIAG")"
 [ -s "$VOUT" ] || fail "proven one-hot must still emit the netlist"
 
-echo "PASS: 2f-formal FAIL policy (assert/assume/hotmux record+continue+emit; proven clean)"
+# ---------------------------------------------------------------------------
+# 5. DEFAULT `lhd compile` (no --recipe) runs formal in `fast` mode: a purely
+#    COMBINATIONAL refuted assert is caught (induction is exact for comb logic).
+# ---------------------------------------------------------------------------
+cat >"$W/comb_ref.prp" <<'EOF'
+comb chk(a:u8, b:u8) -> (x:u8) {
+  assert(a != b)
+  x = a + b
+}
+EOF
+compile_case comb_ref comb_default
+[ "$RC" -ne 0 ] || fail "default (fast) compile must catch a combinational refuted assert (got rc=0): $(cat "$DIAG")"
+grep -q '"code":"assert-refuted"' "$DIAG" || fail "default fast must record assert-refuted: $(cat "$DIAG")"
+[ -s "$VOUT" ] || fail "default fast must CONTINUE and still emit the netlist"
+
+# ---------------------------------------------------------------------------
+# 6. `--set compile.formal.mode=none` skips the pass entirely: the same refuted
+#    assert compiles clean (the runtime check is still emitted, just unverified).
+# ---------------------------------------------------------------------------
+compile_case comb_ref comb_none --set compile.formal.mode=none
+[ "$RC" -eq 0 ] || fail "mode=none must skip formal and compile clean (got rc=$RC): $(cat "$DIAG")"
+grep -q '"code":"assert-refuted"' "$DIAG" && fail "mode=none must NOT run the formal check: $(cat "$DIAG")"
+[ -s "$VOUT" ] || fail "mode=none must still emit the netlist"
+
+# ---------------------------------------------------------------------------
+# 7. A SEQUENTIAL (flop-cut) refutation: `fast`/induction can only find the
+#    counterexample over free register state, which may be unreachable, so it
+#    DEFERS to a runtime check; `normal` (BMC-intent) trusts it and fails.
+# ---------------------------------------------------------------------------
+cat >"$W/seq_ref.prp" <<'EOF'
+mod chk(d:u4) -> (q:u4@[1]) {
+  reg r:u4 = 0
+  assert(r != 5)
+  r = d
+  q = r
+}
+EOF
+compile_case seq_ref seq_fast --top chk
+[ "$RC" -eq 0 ] || fail "fast must DEFER a stateful refutation, not fail the build (got rc=$RC): $(cat "$DIAG")"
+grep -q '"code":"assert-deferred"' "$DIAG" || fail "fast must warn assert-deferred on a stateful refutation: $(cat "$DIAG")"
+[ -s "$VOUT" ] || fail "fast must still emit the netlist on a deferred stateful refutation"
+
+compile_case seq_ref seq_normal --top chk --set compile.formal.mode=normal
+[ "$RC" -ne 0 ] || fail "normal must CATCH the stateful refutation (got rc=0): $(cat "$DIAG")"
+grep -q '"code":"assert-refuted"' "$DIAG" || fail "normal must record assert-refuted for the stateful refutation: $(cat "$DIAG")"
+
+# ---------------------------------------------------------------------------
+# 8. "Not enough top": a refuted assert in a SUBMODULE (instantiated by a parent
+#    that constrains its inputs) is a NON-ERROR — reported as a loud DEFERRED
+#    warning, never a build failure. The SAME module compiled ALONE (a genuine
+#    root / design boundary) DOES fail. (don't mask, but don't false-fail.)
+# ---------------------------------------------------------------------------
+cat >"$W/hier_ref.prp" <<'EOF'
+mod leaf(a:u4) -> (b:u4@[0]) {
+  assert(a != 5)
+  b = a + 1
+}
+mod root(c:u4) -> (d:u4@[0]) {
+  const s = leaf(a = 3)
+  d = s
+}
+EOF
+compile_case hier_ref hier_top --top root
+[ "$RC" -eq 0 ] || fail "a submodule refutation (not enough top) must NOT fail the build (got rc=$RC): $(cat "$DIAG")"
+grep -q '"code":"assert-deferred"' "$DIAG" || fail "submodule refutation must emit a deferred warning: $(cat "$DIAG")"
+grep -q 'not enough top' "$DIAG" || fail "deferred warning must explain the missing top context: $(cat "$DIAG")"
+grep -q '"code":"assert-refuted"' "$DIAG" && fail "a non-top submodule refutation must NOT be a build-failing error: $(cat "$DIAG")"
+
+cat >"$W/leaf_solo.prp" <<'EOF'
+mod leaf(a:u4) -> (b:u4@[0]) {
+  assert(a != 5)
+  b = a + 1
+}
+EOF
+compile_case leaf_solo leaf_solo --top leaf
+[ "$RC" -ne 0 ] || fail "the same module compiled ALONE (a real root) must fail on the refuted assert (got rc=0): $(cat "$DIAG")"
+grep -q '"code":"assert-refuted"' "$DIAG" || fail "a root refutation must be a build-failing error: $(cat "$DIAG")"
+
+# ---------------------------------------------------------------------------
+# 9. on_refute=warn DOWNGRADES even a confirmed (root, combinational) refutation
+#    to a loud warning instead of failing the build — the escape hatch when a
+#    design is checked without enough top context. (A proven property is always
+#    sound; only a 'fail' can be spurious, so only a 'fail' is downgradable.)
+# ---------------------------------------------------------------------------
+cat >"$W/downgrade_ref.prp" <<'EOF'
+comb chk(a:u8, b:u8) -> (x:u8) {
+  assert(a != b)
+  x = a + b
+}
+EOF
+compile_case downgrade_ref downgrade_warn --set compile.formal.on_refute=warn
+[ "$RC" -eq 0 ] || fail "on_refute=warn must downgrade a refutation to a warning (got rc=$RC): $(cat "$DIAG")"
+grep -q '"code":"assert-deferred"' "$DIAG" || fail "on_refute=warn must emit a deferred warning: $(cat "$DIAG")"
+grep -q 'on_refute=warn' "$DIAG" || fail "the downgrade warning must name the on_refute=warn knob: $(cat "$DIAG")"
+grep -q '"severity":"error"' "$DIAG" && fail "on_refute=warn must NOT emit any error: $(cat "$DIAG")"
+
+echo "PASS: 2f-formal FAIL policy (record+continue+emit; proven clean; modes; not-enough-top defers; on_refute downgrade)"

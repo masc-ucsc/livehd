@@ -392,6 +392,7 @@ constexpr std::pair<std::string_view, std::string_view> kSetPasses[] = {
     {        "compile.cprop",        "pass.cprop"},
     {     "compile.bitwidth",     "pass.bitwidth"},
     {       "compile.formal",       "pass.formal"},
+    {          "pass.formal",       "pass.formal"},  // standalone `lhd pass formal --set` mirrors compile.formal.*
     {         "compile.cgen", "inou.cgen.verilog"},
     {        "compile.yosys",    "inou.yosys.tolg"},
     {     "compile.isabelle",      "pass.isabelle"},
@@ -553,10 +554,12 @@ std::vector<std::pair<std::string, std::string>> recipe_graph_passes(const Optio
     };
   }
   if (r == "O2") {
+    // pass.formal is NOT a recipe pass: it runs as a dedicated none|fast|normal
+    // mode step in graph_pipeline_and_emits (default fast, none under O0), so it
+    // is independent of the O-level optimization recipe below.
     return {
         {   "compile.cprop",    "pass.cprop"},
-        {"compile.bitwidth", "pass.bitwidth"},
-        {  "compile.formal",   "pass.formal"}
+        {"compile.bitwidth", "pass.bitwidth"}
     };
   }
   throw Lhd_error{"usage", std::format("unknown recipe '{}'", r), "built-in recipes: O0, O1, O2 (`lhd list recipes`)"};
@@ -2216,6 +2219,31 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     Eprp_var::Eprp_dict labels;
     merge_sets(opts, set_name, labels);
     run_step(method, var, labels, opts, res);
+  }
+
+  // pass.formal — single-design property checks (assert / assume / Hotmux
+  // one-hotness) on the cvc5 prover. A dedicated none|fast|normal mode step,
+  // independent of the O-level recipe above: default `fast` (small cvc5 budget),
+  // `none` under -O0/--recipe O0, override with --set compile.formal.mode=...
+  // It stamps proven / runtime-check attributes, so it precedes the lg save and
+  // cgen below.
+  if (!var.graphs.empty()) {
+    Eprp_var::Eprp_dict labels;
+    merge_sets(opts, "compile.formal", labels);
+    const std::string recipe = opts.recipe.empty() ? "O1" : opts.recipe;
+    const std::string mode   = labels.count("mode") ? labels["mode"] : (recipe == "O0" ? "none" : "fast");
+    if (mode != "none" && mode != "fast" && mode != "normal") {
+      throw Lhd_error{"usage", std::format("--set compile.formal.mode must be none|fast|normal, got '{}'", mode), ""};
+    }
+    if (mode != "none") {
+      labels["mode"] = mode;
+      // The committed design boundary: a refutation at --top fails the build,
+      // refutations in instantiated submodules ("not enough top") only warn.
+      if (!opts.top.empty() && opts.top != "-auto-top" && !labels.count("top")) {
+        labels["top"] = opts.top;
+      }
+      run_step("pass.formal", var, labels, opts, res);
+    }
   }
 
   if (wants_dump(opts, "lg")) {

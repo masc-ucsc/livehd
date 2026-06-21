@@ -118,6 +118,18 @@ run_one() { # <tier> <file>
       return 1
       ;;
   esac
+  # A pass below the strongest `lec` tier is a DEFERRED/CAPPED verification (a
+  # tracked LEC or lowering gap), not a clean pass — never let it slip by
+  # silently. Print a loud banner so `bazel test` output flags it for follow-up.
+  case "$tier" in
+    verilog | lnast)
+      echo "################################################################" >&2
+      echo "## ⚠️  DEFERRED: ${base} passes only at tier='${tier}' (NOT lec) ##" >&2
+      echo "## formal/LEC equivalence is CAPPED here — see slang_ladder.bzl,  " >&2
+      echo "## promote to 'lec' once the tracked gap is fixed.                 " >&2
+      echo "################################################################" >&2
+      ;;
+  esac
   echo "PASS(${base}) tier=${tier}"
   return 0
 }

@@ -57,8 +57,8 @@ SLANG_LADDER = {
     "long_mem": "verilog",  # LEC-capable but memory LEC is slow on big arrays; small-array coverage rides simple_rf1/rf2/tuplish
     "long_mem3": "verilog",  # capped: slow memory LEC (see long_mem)
     "long_nocheck_iwls_square": "verilog",  # compiles; LEC gap tracked
-    "long_regfile1r1w": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
-    "long_regfile2r1w": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
+    "long_regfile1r1w": "lec",  # `output reg` port: procedural <= is a legal NBA-to-variable
+    "long_regfile2r1w": "lec",  # ports are `output reg` (variables), so the procedural <= is a legal NBA-to-variable (unlike long_regfile1r1w's net `output`)
     "long_shared_ports": "error",  # nested dynamic lvalue (mem element part-select)
     "loop_in_lg": "lec",
     "loop_in_lg2": "lec",
