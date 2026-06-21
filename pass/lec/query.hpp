@@ -2,6 +2,8 @@
 #pragma once
 
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "hhds/graph.hpp"
@@ -17,6 +19,16 @@ struct Query_result {
   Verdict     verdict = Verdict::Unknown;
   std::string witness;  // satisfying input assignment when Refuted
   std::string detail;   // engine / bound / encode error, for diagnostics
+
+  // Structural-correspondence report (so `lhd lec` can ITERATE instead of bailing
+  // on the first unmatched cut point). When the two designs don't expose the same
+  // set of state/outputs, the miter still runs over the COMMON ones and these list
+  // what is unmatched on each side (human-readable, control prefixes stripped).
+  // Non-empty `unmatched_*` ⇒ the verdict cannot be a definitive Proven (the
+  // correspondence is incomplete); the engine reports Unknown but `detail`/`witness`
+  // still carry the matched-portion result + the per-output divergences found.
+  std::vector<std::string> unmatched_ref;   // in ref, no corresponding impl signal
+  std::vector<std::string> unmatched_impl;  // in impl, no corresponding ref signal
 };
 
 // Discharge / engine knobs (filled from the lec.* set-options).
@@ -48,6 +60,17 @@ struct Lec_options {
   // (synchronous resets, which the front-end folds into din rather than a
   // reset_pin so they have no structural marker).
   std::string reset;  // e.g. "rst_ni,clr_i:hi"
+
+  // Explicit register/state CORRESPONDENCE (`lhd lec --match FILE` / lec.match):
+  // {ref_state_name, impl_state_name} pairs that name the SAME state element when
+  // the two front-ends chose unrelated names — e.g. a firtool stage register
+  // `id_ex_ctrl.reg_ex_ctrl_aluop` vs a flat reimplementation `idex_aluop`. Each
+  // side is canonicalized (canon_flop_name) and collapsed onto ONE shared cut
+  // symbol, so the inductive miter shares their current state and compares their
+  // next states directly. Names that already agree (after canon) need no entry;
+  // the register-file flop-bank <-> Memory case is bridged structurally, no entry
+  // needed there either.
+  std::vector<std::pair<std::string, std::string>> match;
 };
 
 // The BMC engine unrolls `bound` (+ `reset_cycles`) SMT copies of the design;
@@ -77,5 +100,11 @@ inline std::string lec_options_range_error(const Lec_options& o) {
 // to gensim models); nullptr keeps the sound Sub -> Unknown.
 Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts = {},
                          const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib = nullptr);
+
+// Parse a lec.match correspondence spec into {ref_name, impl_name} pairs. Pure (no
+// file IO — a caller resolves any leading "@FILE" to its text first). Pairs are
+// separated by commas / semicolons / newlines; the two names within a pair by "="
+// or whitespace; blank lines and "#" comments are skipped.
+std::vector<std::pair<std::string, std::string>> parse_match_pairs(std::string_view text);
 
 }  // namespace livehd::lec

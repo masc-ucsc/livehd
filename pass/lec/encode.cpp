@@ -49,6 +49,33 @@ static std::string normalize_reg_name(std::string_view raw) {
   return std::string{s};
 }
 
+std::string canon_flop_name(std::string_view hier_name) {
+  std::string_view sv = hier_name;
+  // A leading yosys "$decoration$" (e.g. "$driver$ex_mem_ex_result", left by the
+  // yosys-slang reader when it flattens an instance hierarchy) and a trailing
+  // "___ssa_N" SSA suffix are reader noise — strip them so the flattened name
+  // matches the native flat spelling. (normalize_reg_name does the same for the
+  // flop_state_key path; this is the get_hier_name path.)
+  if (!sv.empty() && sv.front() == '$') {
+    if (auto e = sv.find('$', 1); e != std::string_view::npos) {
+      sv.remove_prefix(e + 1);
+    }
+  }
+  if (auto p = sv.find("___ssa_"); p != std::string_view::npos) {
+    sv = sv.substr(0, p);
+  }
+  std::string s(sv);
+  // ".reg_" (the CIRCT single-field stage-register flop name) -> "_" first, so the
+  // collapse survives the generic "." -> "_" flatten that follows. (A register file
+  // bank "registers.regs_7" has ".regs_", not ".reg_", so it is left for the dot
+  // flatten -> "registers_regs_7", which the bank detector then splits on "_<idx>".)
+  for (std::string::size_type p = s.find(".reg_"); p != std::string::npos; p = s.find(".reg_", p)) {
+    s.replace(p, 5, "_");
+  }
+  std::replace(s.begin(), s.end(), '.', '_');
+  return s;
+}
+
 std::string flop_state_key(const hhds::Graph& g, const hhds::Node_class& node) {
   auto pn = gu::pin_name_of(node.get_driver_pin(0));
   if (pn.empty()) {
@@ -127,6 +154,16 @@ Term fit_to(cvc5::TermManager& tm, const Val& v, int width) {
 Sort Encoder::bv(int width) { return tm_.mkBitVectorSort(width < 1 ? 1 : width); }
 
 Term Encoder::fit(const Val& v, int width) { return fit_to(tm_, v, width); }
+
+std::string Encoder::flop_key(std::string_view hier) const {
+  std::string c = canon_flop_name(hier);
+  if (name_alias_ != nullptr) {
+    if (auto it = name_alias_->find(c); it != name_alias_->end()) {
+      return it->second;
+    }
+  }
+  return c;
+}
 
 // Concrete reset/initial value of a flop's `initial` pin (the reset value), as a
 // `width`-bit BV. Returns nullopt for a reset-less flop (no constant initial) —
@@ -312,12 +349,19 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       auto it = shared_inputs->find(d.name);
       if (it != shared_inputs->end()) {
         v = it->second;
-        // Reconcile a width disagreement across the two designs by EXTENDING up
-        // to the wider view, never truncating: the readers can undercount an
-        // input's bus width by a sign-bit slot (the "bit-width trap"), and
-        // truncating the shared symbol to the narrower side would drop the top
-        // bit (e.g. d=0x80 -> 0), a spurious mismatch. The shared symbol is built
-        // at the max width in query.cpp, so this only ever extends (defensively).
+        // The shared symbol's VALUE (bits) is shared across designs, but its SIGN
+        // is THIS design's interpretation — the two front-ends can disagree on a
+        // port's signedness (e.g. yosys-slang stamps a 32-bit reg `signed`, native
+        // slang `unsigned`), and each must extend the bus by ITS OWN sign downstream
+        // (a u64() cast of an unsigned source zero-extends; of a signed source
+        // sign-extends). Adopt the local sign so the same value isn't sign-extended
+        // on one side and zero-extended on the other.
+        v.is_signed = sgn;
+        // Reconcile a width disagreement by EXTENDING up to the wider view, never
+        // truncating: the readers can undercount a bus width by a sign-bit slot
+        // (the "bit-width trap"); truncating to the narrower side would drop the top
+        // bit (e.g. d=0x80 -> 0). The shared symbol is built at the max width in
+        // query.cpp, so this only ever extends (defensively).
         if (v.width < w) {
           v.term  = fit(v, w);
           v.width = w;
@@ -357,11 +401,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       w = 1;
     }
     bool        sgn = !gu::is_unsign(qpin);
-    std::string nm  = node.get_hier_name();
+    std::string nm  = flop_key(node.get_hier_name());
     Val         v;
     if (shared_inputs != nullptr) {
       if (auto it = shared_inputs->find(nm); it != shared_inputs->end()) {
-        v = it->second;
+        v           = it->second;
+        v.is_signed = sgn;  // shared VALUE, but THIS design's sign for downstream extension
         if (v.width < w) {  // extend up only; never truncate (see input note above)
           v.term  = fit(v, w);
           v.width = w;
@@ -1073,6 +1118,16 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         if (arms.empty()) {
           return fail("Mux/Hotmux has no arms");
         }
+        // A multiplexer's result is exactly as wide as its (equal-width) arms — the
+        // declared output-pin width is advisory and a reader may UNDER-stamp it. The
+        // native slang reader stamps a `casez` result width from the SELECTOR (e.g. a
+        // 2-bit forwardB) rather than the 64-bit data arms, so real_width(dpin) came
+        // back 1 and the arms were truncated to bit 0 (`casez_tmp = data[0]`), a false
+        // REFUTE against a reader that keeps full width. Take the max of the declared
+        // width and the widest arm so the data is never narrowed by a bad pin stamp.
+        for (const auto& a : arms) {
+          W = std::max(W, a.width);  // never narrow the data below its arms
+        }
         // default else = last arm (covers in-range exactly + out-of-range det.)
         result = fit(arms.back(), W);
         for (int k = static_cast<int>(arms.size()) - 2; k >= 0; --k) {
@@ -1188,7 +1243,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       nval = tm_.mkTerm(Kind::ITE, {rst_hot, initv, nval});
     }
 
-    out.outputs[std::string("\x01nxt:") + node.get_hier_name()] = Val{nval, w, sgn};
+    out.outputs[std::string("\x01nxt:") + flop_key(node.get_hier_name())] = Val{nval, w, sgn};
   }
 
   // ---- M4 memory cut, phase 2: now that write addr/din/enable are resolved,

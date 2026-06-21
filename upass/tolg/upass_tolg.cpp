@@ -4231,6 +4231,31 @@ public:
     for (const auto& [nid, name] : plain_regs_) {
       reg_flop_by_name_.emplace(name, nid);
     }
+    // Regs with an explicit declared cycle (`reg q@[N]` output, or an `@[N]`
+    // assertion) are LEGITIMATELY feedforward — their landing cycle is part of the
+    // contract. They must NOT be force-classified as cycle-0 state (the mod default
+    // below), or a `q@[1]` delay reg would collapse to a pass-through. Collect them.
+    for (const auto& rec : pendings_) {
+      // Map the declared-cycle record to its flop. A `@[N]` assertion pins a value
+      // pin (its master node); a `reg q@[N]` output pin is DRIVEN by the reg flop
+      // (the output port name need not equal the internal reg name, so match by the
+      // driver node, not the name). Mark the flop iff it is a plain reg.
+      auto consider = [&](const hhds::Node_class& mn) {
+        if (!mn.is_invalid() && plain_regs_.contains(mn.get_debug_nid())) {
+          decl_cycle_regs_.insert(mn.get_debug_nid());
+        }
+      };
+      if (rec.is_sink) {
+        if (auto e = rec.pin.inp_edges(); !e.empty()) {
+          consider(e.front().driver.get_master_node());
+        }
+      } else if (!rec.pin.is_invalid()) {
+        consider(rec.pin.get_master_node());
+      }
+      if (auto it = reg_flop_by_name_.find(rec.name); it != reg_flop_by_name_.end()) {
+        decl_cycle_regs_.insert(it->second);  // name match too (defensive)
+      }
+    }
   }
 
   // Stage a Diagnostic located via the graph node's srcid (stamped
@@ -4398,7 +4423,17 @@ public:
       // spurious stage-1 that tripped the "mixes values at different cycles"
       // check when the reg's output was combined with a stage-0 value (e.g. a
       // concat field). For a Verilog-origin module, all plain regs are state.
+      //
+      // The SAME holds for a pyrope `mod`: a `mod` is Mealy/Moore, so its plain
+      // `reg`s are cycle-0 STATE and its only structural latency is from explicit
+      // `stage[N]` decls (NOT plain_regs_, untouched here). Only a `pipe` infers a
+      // feedforward stage from a plain reg written purely from inputs/earlier regs.
+      // Without this, an unconditionally-written `mod` pipeline register (a
+      // flush-or-capture stage reg with no hold path) was mis-classified as a
+      // +1-cycle stage, forcing a spurious runtime enable that diverged from the
+      // Verilog it mirrors (issues.txt A3).
       const bool verilog_origin = ln_->is_verilog_origin();
+      const bool mod_default    = ln_->get_lambda_kind() == "mod";
       const auto en_pid         = static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, "enable"));
       for (size_t i = 0; i < nn; ++i) {
         if (!is_type_flop(nodes[i])) {
@@ -4414,7 +4449,10 @@ public:
               break;
             }
           }
-          if (verilog_origin || en_driven || nontrivial[static_cast<size_t>(scc_id[i])]) {
+          // A mod's plain regs default to cycle-0 state — UNLESS the reg carries an
+          // explicit @[N]/interface cycle (then it is a declared feedforward stage).
+          const bool state_default = verilog_origin || (mod_default && !decl_cycle_regs_.contains(nid));
+          if (state_default || en_driven || nontrivial[static_cast<size_t>(scc_id[i])]) {
             state_.insert(nid);
           }
         }
@@ -4874,6 +4912,7 @@ private:
   absl::flat_hash_set<uint64_t>                              inserted_;
   absl::flat_hash_set<uint64_t>                              wire_cuts_;  // 2c-wire: cut Verilog comb-cycle wire in-edges
   Ci_str_map<uint64_t>                 reg_flop_by_name_;
+  absl::flat_hash_set<uint64_t>                              decl_cycle_regs_;  // regs with an explicit @[N]/interface cycle (feedforward)
   absl::flat_hash_set<uint64_t>                              state_;
   absl::flat_hash_map<uint64_t, TR>                          tr_;
 };

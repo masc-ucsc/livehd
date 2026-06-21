@@ -82,6 +82,16 @@ int real_width_io(const hhds::Pin_class& pin, const hhds::GraphIO& gio, std::str
 // current-state symbol across the two designs). See M2 in lec.md.
 std::string flop_state_key(const hhds::Graph& g, const hhds::Node_class& node);
 
+// Canonicalize a flop's hierarchical name so a HIERARCHICAL stage register on
+// one side pairs with a FLATTENED reimplementation on the other. CIRCT/firtool
+// emits each single-field pipeline register as instance "<inst>.reg_<field>";
+// a hand-flattened design names the same state "<inst>_<field>". This collapses
+// ".reg_" → "_" and then flattens any remaining instance separator "." → "_", so
+// both converge to one key. Deterministic and applied identically to both designs
+// (names that already agree stay equal), so it never breaks an existing match.
+// Used by the encoder (current/next-state keys) and prove_equal (shared symbols).
+std::string canon_flop_name(std::string_view hier_name);
+
 // Concrete reset value of a flop (its constant `initial` pin), as a width-bit
 // BV; nullopt for a reset-less flop. Used by the BMC engine to seed the
 // reachable-from-reset initial state. See M2/BMC in lec.md.
@@ -116,6 +126,13 @@ public:
   // identical (shared) outputs. Built once in query.cpp and reused by both encodes.
   void set_shared_bbox(const Io_name_map<Val>* bb) { shared_bbox_ = bb; }
 
+  // Explicit state-correspondence alias (lec.match): maps a CANONICALIZED flop
+  // name (canon_flop_name of this design's hier name) to the shared cut key it
+  // collapses onto. Applied to both the current-state lookup and the next-state
+  // output key, so a flop the user paired with a differently-named flop on the
+  // other design shares one symbol. Unset / key-absent ⇒ the canon name is used.
+  void set_name_alias(const Io_name_map<std::string>* a) { name_alias_ = a; }
+
   // Encode the combinational logic of `g`.
   //
   // `shared_inputs` (optional): a map from input-port name to an already-built
@@ -141,9 +158,14 @@ private:
   // Bit-vector sort of `width` bits (clamped to >= 1).
   cvc5::Sort bv(int width);
 
+  // canon_flop_name(hier) then the lec.match alias collapse: the shared cut key
+  // for a flop. Used for both its current-state lookup and its next-state output.
+  std::string flop_key(std::string_view hier) const;
+
   cvc5::TermManager&                                  tm_;
   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib_     = nullptr;
   const Io_name_map<Val>*                             shared_bbox_ = nullptr;
+  const Io_name_map<std::string>*                     name_alias_  = nullptr;
   int                                                 sub_depth_   = 0;  // Sub flattening recursion guard
 };
 

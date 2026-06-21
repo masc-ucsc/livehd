@@ -38,6 +38,10 @@ void Pass_lec::setup() {
                        "free");
   m.add_label_optional("reset_cycles", "run phase: reset-hold prologue length before checking", "2");
   m.add_label_optional("reset", "explicit reset inputs: name[:lo|:hi], comma-separated (else auto-detect)", "");
+  m.add_label_optional("match",
+                       "explicit state correspondence: 'ref=impl' flop pairs (comma/newline-separated) or @FILE; "
+                       "collapses differently-named registers onto one cut so the inductive miter compares them",
+                       "");
   m.add_label_optional("cross", "also run lgcheck and assert agreement (bring-up only)", "false");
   register_pass(m);
 }
@@ -59,6 +63,7 @@ void Pass_lec::lec(Eprp_var& var) {
   o.phase        = std::string{var.get("phase", "free")};
   o.reset_cycles = str_tools::to_i(var.get("reset_cycles", "2"));
   o.reset        = std::string{var.get("reset", "")};
+  o.match        = lec::parse_match_pairs(var.get("match", ""));  // inline pairs (@FILE only via `lhd lec`)
 
   if (auto e = lec::lec_options_range_error(o); !e.empty()) {
     livehd::diag::err("pass.lec", "bad-bound", "io").msg("pass.lec: {}", e).fatal();

@@ -2708,6 +2708,22 @@ void lec_command(Options& opts, Result& res) {
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
   o.reset        = label("reset", "");
 
+  // lec.match: explicit register correspondence, inline or @FILE.
+  if (std::string match_spec = label("match", ""); !match_spec.empty()) {
+    std::string text = match_spec;
+    if (match_spec.front() == '@') {
+      std::string path = match_spec.substr(1);
+      if (!fs::is_regular_file(path)) {
+        throw Lhd_error{"missing_file", std::format("lec.match file not found: {}", path), ""};
+      }
+      std::ifstream     f(path);
+      std::stringstream ss;
+      ss << f.rdbuf();
+      text = ss.str();
+    }
+    o.match = livehd::lec::parse_match_pairs(text);
+  }
+
   if (auto e = livehd::lec::lec_options_range_error(o); !e.empty()) {
     throw Lhd_error{"usage", e, "the BMC engine unrolls one SMT copy of the design per cycle"};
   }
@@ -2744,7 +2760,10 @@ void lec_command(Options& opts, Result& res) {
 
   const char* verdict = lec_known ? (lec_equiv ? "PROVEN equivalent" : "REFUTED (not equivalent)") : "UNKNOWN";
   std::print("lec: '{}' {} ({})\n", impl_g->get_name(), verdict, r.detail);
-  if (r.verdict == livehd::lec::Verdict::Refuted && !r.witness.empty()) {
+  // The witness names the diverging COMMON outputs; print it on Refuted AND on the
+  // Unknown-because-incomplete-correspondence case (where a matched-portion diff is
+  // still the actionable iteration signal), not only on a clean Refuted.
+  if (!r.witness.empty()) {
     std::print("  counterexample: {}\n", r.witness);
   }
 
@@ -2755,7 +2774,8 @@ void lec_command(Options& opts, Result& res) {
                       r.witness.empty() ? "" : std::format("counterexample: {}", r.witness)};
     }
     if (r.verdict == livehd::lec::Verdict::Unknown) {
-      throw Lhd_error{"unsupported", std::format("lec could not decide equivalence of '{}'", impl_g->get_name()), r.detail};
+      throw Lhd_error{"unsupported", std::format("lec could not decide equivalence of '{}'", impl_g->get_name()),
+                      r.witness.empty() ? r.detail : std::format("{}; witness: {}", r.detail, r.witness)};
     }
     return;  // Proven
   }

@@ -10,10 +10,95 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "encode.hpp"
 #include "node_util.hpp"
 
 namespace livehd::lec {
+
+namespace {
+// Strip the encoder's internal control prefixes so an unmatched cut point / output
+// reads cleanly in a diagnostic. Next-state outputs are "\x01nxt:<hier>", other
+// synthetic keys lead with a control byte; primary outputs are already clean.
+std::string display_name(std::string_view name) {
+  if (name.rfind("\x01nxt:", 0) == 0) {
+    return "nxt:" + std::string(name.substr(5));
+  }
+  if (!name.empty() && static_cast<unsigned char>(name.front()) < 0x20) {
+    // "\x01n:foo" / "\x01m:..." etc. -> drop the control byte and the kind tag.
+    auto rest = name.substr(1);
+    if (rest.size() >= 2 && rest[1] == ':') {
+      return std::string(rest.substr(2));
+    }
+    return std::string(rest);
+  }
+  return std::string(name);
+}
+
+// Join a (sorted) token list, capping the count so a 1000-flop bank doesn't bury
+// the message; appends "(+N more)" when truncated.
+std::string join_capped(std::vector<std::string> toks, size_t cap = 24) {
+  std::sort(toks.begin(), toks.end());
+  std::string out;
+  size_t      shown = std::min(cap, toks.size());
+  for (size_t i = 0; i < shown; ++i) {
+    if (!out.empty()) {
+      out += ", ";
+    }
+    out += toks[i];
+  }
+  if (toks.size() > cap) {
+    out += ", (+" + std::to_string(toks.size() - cap) + " more)";
+  }
+  return out;
+}
+}  // namespace
+
+std::vector<std::pair<std::string, std::string>> parse_match_pairs(std::string_view text) {
+  std::vector<std::pair<std::string, std::string>> out;
+  size_t                                           i = 0;
+  while (i < text.size()) {
+    size_t end = text.find_first_of(",;\n", i);
+    if (end == std::string_view::npos) {
+      end = text.size();
+    }
+    std::string_view line = text.substr(i, end - i);
+    i                     = end + 1;
+    // trim surrounding whitespace
+    while (!line.empty() && std::isspace(static_cast<unsigned char>(line.front()))) {
+      line.remove_prefix(1);
+    }
+    while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back()))) {
+      line.remove_suffix(1);
+    }
+    if (line.empty() || line.front() == '#') {
+      continue;
+    }
+    // split on '=' (preferred) or whitespace into exactly two names
+    size_t sep = line.find('=');
+    if (sep == std::string_view::npos) {
+      sep = line.find_first_of(" \t");
+    }
+    if (sep == std::string_view::npos) {
+      continue;  // a lone token is not a correspondence; ignore
+    }
+    auto trim = [](std::string_view s) {
+      while (!s.empty() && (std::isspace(static_cast<unsigned char>(s.front())) || s.front() == '=')) {
+        s.remove_prefix(1);
+      }
+      while (!s.empty() && (std::isspace(static_cast<unsigned char>(s.back())) || s.back() == '=')) {
+        s.remove_suffix(1);
+      }
+      return s;
+    };
+    std::string_view a = trim(line.substr(0, sep));
+    std::string_view b = trim(line.substr(sep + 1));
+    if (!a.empty() && !b.empty()) {
+      out.emplace_back(std::string(a), std::string(b));
+    }
+  }
+  return out;
+}
 
 Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
                          const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
@@ -25,6 +110,26 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     res.detail  += "; solver backend '" + opts.solver + "' not built (cvc5 only)";
     return res;
   }
+
+  // Explicit state-correspondence (lec.match): canon(impl_name) -> canon(ref_name),
+  // so a flop the user paired with a differently-named flop on the other design
+  // collapses onto one shared cut key (the ref-side canon). `eff(hier)` is the
+  // canonical key used everywhere a flop is keyed (shared symbols + encoder).
+  Io_name_map<std::string> name_alias;
+  for (const auto& [ref_name, impl_name] : opts.match) {
+    std::string rc = canon_flop_name(ref_name);
+    std::string ic = canon_flop_name(impl_name);
+    if (!ic.empty() && ic != rc) {
+      name_alias[ic] = rc;
+    }
+  }
+  auto eff = [&](std::string_view hier) -> std::string {
+    std::string c = canon_flop_name(hier);
+    if (auto it = name_alias.find(c); it != name_alias.end()) {
+      return it->second;
+    }
+    return c;
+  };
 
   cvc5::TermManager tm;
   cvc5::Solver      solver(tm);
@@ -173,6 +278,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     const int N = opts.bound > 0 ? opts.bound : 20;
     Encoder   enc(tm);
     enc.set_sub_lib(sub_lib);
+    enc.set_name_alias(&name_alias);
     Io_name_map<Val> shared_bbox = build_shared_bbox();
     enc.set_shared_bbox(&shared_bbox);
 
@@ -316,7 +422,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           if (q.is_invalid()) {
             continue;
           }
-          auto key = node.get_hier_name();  // hier correspondence key (matches encode())
+          auto key = eff(node.get_hier_name());  // hier correspondence key (matches encode())
           int  w   = real_width(q);
           if (w == 0) {
             w = 1;
@@ -539,7 +645,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       if (q.is_invalid()) {
         continue;
       }
-      std::string key = node.get_hier_name();  // hier correspondence key (matches encode())
+      std::string key = eff(node.get_hier_name());  // hier correspondence key (matches encode())
       int         w   = real_width(q);
       if (w == 0) {
         w = 1;
@@ -560,8 +666,176 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   Io_name_map<cvc5::Term> shared_mems = build_shared_mems("s_");
   Io_name_map<Val>        shared_bbox = build_shared_bbox();
 
+  // ── Memory <-> flop-bank correspondence bridge ────────────────────────────
+  // A behavioral memory (one Memory cell / SMT array) on one side often appears
+  // as a synthesized BANK of identically-shaped flops "<base>_0..<base>_{N-1}" on
+  // the other — the register file is the canonical case (Pyrope lowers a dynamic
+  // `reg regs:[32]u64` to a Memory; firtool flattens RegisterFile to 32 flops
+  // `registers.regs_N`). The inductive flop-cut miter can't match a flop against an
+  // array, so when one side has an unmatched Memory of size N and the other an
+  // unmatched COMPLETE bank of N same-width flops, collapse the bank onto the
+  // array: every flop_i shares select(A, i) as current state, and the post-cycle
+  // miter compares flop_i's next state against select(A_next, i). `bridges` is
+  // resolved here (current-state wiring) and consumed after encode (next-state).
+  struct Bridge {
+    std::string              mem_key;     // shared-array cut key
+    int                      addr_w = 1;  // index width
+    int                      bits   = 0;  // array element width
+    bool                     mem_in_impl = true;  // which design owns the Memory
+    std::vector<std::string> flop_keys;   // canon flop key per index 0..N-1
+    std::vector<int>         flop_w;       // real width per index
+    std::vector<bool>        flop_sgn;
+  };
+  std::vector<Bridge> bridges;
+  {
+    struct FlopRec {
+      int  w;
+      bool sgn;
+    };
+    auto collect_flops = [&](hhds::Graph* g) {
+      Io_name_map<FlopRec> out;
+      for (auto node : g->forward_hier()) {
+        if (graph_util::type_op_of(node) != Ntype_op::Flop) {
+          continue;
+        }
+        auto q = node.get_driver_pin(0);
+        if (q.is_invalid()) {
+          continue;
+        }
+        int w = real_width(q);
+        if (w == 0) {
+          w = 1;
+        }
+        out[eff(node.get_hier_name())] = FlopRec{w, !graph_util::is_unsign(q)};
+      }
+      return out;
+    };
+    struct MemRec {
+      Mem_sig sig;
+    };
+    auto collect_mems = [&](hhds::Graph* g) {
+      Io_name_map<MemRec> out;
+      Io_name_map<int>    occ;
+      for (auto node : g->forward_class()) {
+        if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
+          continue;
+        }
+        Mem_sig sig = read_mem_sig(node);
+        if (sig.bits <= 0 || sig.size <= 0) {
+          continue;
+        }
+        std::string sg  = std::to_string(sig.size) + "x" + std::to_string(sig.bits) + ":r" + std::to_string(sig.n_rd) + "w"
+                       + std::to_string(sig.n_wr);
+        std::string key = mem_state_key(sig, occ[sg]++);
+        out[key]        = MemRec{sig};
+      }
+      return out;
+    };
+    auto ref_flops  = collect_flops(ref);
+    auto impl_flops = collect_flops(impl);
+    auto ref_mems   = collect_mems(ref);
+    auto impl_mems  = collect_mems(impl);
+
+    // Banks among the flops that have NO counterpart on the other side: group keys
+    // by stripping a trailing "_<idx>"; a base with a contiguous 0..N-1 of uniform
+    // width is a bank candidate.
+    auto detect_banks = [](const Io_name_map<FlopRec>& flops, const Io_name_map<FlopRec>& other) {
+      struct Elt {
+        std::string key;
+        int         w;
+        bool        sgn;
+      };
+      absl::flat_hash_map<std::string, absl::flat_hash_map<int, Elt>> by_base;
+      for (const auto& [key, rec] : flops) {
+        if (other.count(key)) {
+          continue;  // already matches a flop on the other side -> not a bridge bank
+        }
+        auto us = key.rfind('_');
+        if (us == std::string::npos || us + 1 >= key.size()) {
+          continue;
+        }
+        std::string idx = key.substr(us + 1);
+        if (idx.empty() || !std::all_of(idx.begin(), idx.end(), [](unsigned char c) { return std::isdigit(c); })) {
+          continue;
+        }
+        by_base[key.substr(0, us)][std::stoi(idx)] = Elt{key, rec.w, rec.sgn};
+      }
+      struct Bank {
+        int                      n;
+        int                      w;
+        bool                     sgn;
+        std::vector<std::string> keys;
+      };
+      std::vector<Bank> banks;
+      for (auto& [base, elts] : by_base) {
+        int  n        = static_cast<int>(elts.size());
+        bool complete = n > 1;
+        int  w        = elts.begin()->second.w;
+        bool sgn      = elts.begin()->second.sgn;
+        for (int i = 0; i < n; ++i) {
+          auto it = elts.find(i);
+          if (it == elts.end() || it->second.w != w) {
+            complete = false;
+            break;
+          }
+        }
+        if (!complete) {
+          continue;
+        }
+        Bank b{n, w, sgn, {}};
+        for (int i = 0; i < n; ++i) {
+          b.keys.push_back(elts.at(i).key);
+        }
+        banks.push_back(std::move(b));
+      }
+      return banks;
+    };
+
+    // Pair a bank (one side) with an unmatched Memory of equal size on the other.
+    auto pair_side = [&](const Io_name_map<FlopRec>& bank_flops, const Io_name_map<FlopRec>& other_flops,
+                         const Io_name_map<MemRec>& bank_mems, const Io_name_map<MemRec>& mem_mems, bool mem_in_impl) {
+      for (auto& b : detect_banks(bank_flops, other_flops)) {
+        for (const auto& [mkey, mrec] : mem_mems) {
+          if (bank_mems.count(mkey)) {
+            continue;  // memory matches a memory on the bank side -> not a bridge
+          }
+          if (mrec.sig.size != b.n) {
+            continue;
+          }
+          if (!shared_mems.count(mkey)) {
+            continue;
+          }
+          Bridge br;
+          br.mem_key     = mkey;
+          br.addr_w      = mrec.sig.addr_w;
+          br.bits        = mrec.sig.bits;
+          br.mem_in_impl = mem_in_impl;
+          br.flop_keys   = b.keys;
+          br.flop_w.assign(b.keys.size(), b.w);
+          br.flop_sgn.assign(b.keys.size(), b.sgn);
+          bridges.push_back(std::move(br));
+          break;  // one bank -> one memory
+        }
+      }
+    };
+    pair_side(ref_flops, impl_flops, ref_mems, impl_mems, /*mem_in_impl=*/true);   // ref bank <-> impl memory
+    pair_side(impl_flops, ref_flops, impl_mems, ref_mems, /*mem_in_impl=*/false);  // impl bank <-> ref memory
+
+    // Wire each bank flop's CURRENT state to select(A, i) so the two designs start
+    // the step from the same register-file contents.
+    for (auto& br : bridges) {
+      cvc5::Term A = shared_mems.at(br.mem_key);
+      for (size_t i = 0; i < br.flop_keys.size(); ++i) {
+        cvc5::Term sel = tm.mkTerm(cvc5::Kind::SELECT, {A, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i))});
+        Val        cur = Val{fit_to(tm, Val{sel, br.bits, false}, br.flop_w[i]), br.flop_w[i], br.flop_sgn[i]};
+        shared[br.flop_keys[i]] = cur;
+      }
+    }
+  }
+
   Encoder enc(tm);
   enc.set_sub_lib(sub_lib);
+  enc.set_name_alias(&name_alias);
   enc.set_shared_bbox(&shared_bbox);
   Encoded re = enc.encode(ref, &shared, "", &shared_mems);
   if (!re.ok) {
@@ -583,110 +857,189 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
   }
 
-  // Miter over common outputs: bad = Or_i (ref_out_i != impl_out_i).
+  // ── Bridge miter: bank-flop next state vs select(memory_next, i) ──────────
+  // Consume the memory<->flop-bank bridges resolved above. The bank-flop next
+  // states and the paired memory's next array are pulled from whichever design
+  // owns each, and these keys are recorded so the generic miter below does NOT
+  // re-report them as unmatched cut points.
+  absl::flat_hash_set<std::string> bridged_ref_out, bridged_impl_out, bridged_ref_mem, bridged_impl_mem;
+  std::vector<cvc5::Term>          bridge_diffs;
+  for (const auto& br : bridges) {
+    const Encoded& bank_enc = br.mem_in_impl ? re : ie;  // design holding the flop bank
+    const Encoded& mem_enc  = br.mem_in_impl ? ie : re;  // design holding the Memory
+    auto&          bank_out_set = br.mem_in_impl ? bridged_ref_out : bridged_impl_out;
+    auto&          mem_set      = br.mem_in_impl ? bridged_impl_mem : bridged_ref_mem;
+    auto           mem_it       = mem_enc.next_mem.find(br.mem_key);
+    if (mem_it == mem_enc.next_mem.end()) {
+      continue;  // memory had no next-state (shouldn't happen) -> leave unmatched
+    }
+    mem_set.insert(br.mem_key);
+    for (size_t i = 0; i < br.flop_keys.size(); ++i) {
+      std::string nxt_key = std::string("\x01nxt:") + br.flop_keys[i];
+      bank_out_set.insert(nxt_key);
+      auto fit_it = bank_enc.outputs.find(nxt_key);
+      if (fit_it == bank_enc.outputs.end()) {
+        continue;
+      }
+      cvc5::Term sel = tm.mkTerm(cvc5::Kind::SELECT,
+                                 {mem_it->second, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i))});
+      int        w   = std::max(br.flop_w[i], br.bits);
+      cvc5::Term bnk = fit_to(tm, fit_it->second, w);
+      cvc5::Term mem = fit_to(tm, Val{sel, br.bits, false}, w);
+      bridge_diffs.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {bnk, mem}));
+    }
+  }
+
+  // ── Structural correspondence + miter over the COMMON outputs ─────────────
+  // Rather than bail on the FIRST unmatched cut point (which made `lhd lec`
+  // un-iterable when two designs don't yet expose the same state set), collect
+  // ALL unmatched outputs / memories on each side and STILL miter the ones that
+  // DO correspond. A non-empty unmatched set blocks a definitive Proven (the
+  // correspondence is incomplete), but the matched-portion result + per-output
+  // divergences are exactly the signal needed to drive the design — and the LEC's
+  // own cut-correspondence — toward agreement.
   cvc5::Term bad;
+  for (const auto& t : bridge_diffs) {  // bank<->memory next-state equalities
+    bad = bad.isNull() ? t : tm.mkTerm(cvc5::Kind::OR, {bad, t});
+  }
   for (const auto& [name, rv] : re.outputs) {
+    if (bridged_ref_out.count(name)) {
+      continue;  // bank-flop next state -> compared via the memory bridge above
+    }
     auto it = ie.outputs.find(name);
     if (it == ie.outputs.end()) {
-      res.verdict  = Verdict::Unknown;
-      res.detail  += "; output '" + name + "' present in ref but not impl";
-      return res;
+      res.unmatched_ref.push_back(display_name(name));
+      continue;
     }
     int        w    = std::max(rv.width, it->second.width);
-    cvc5::Term a    = fit_to(tm, rv, w);
-    cvc5::Term b    = fit_to(tm, it->second, w);
-    cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {a, b});
+    cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, rv, w), fit_to(tm, it->second, w)});
     bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
   }
-  // also flag impl-only outputs
   for (const auto& [name, iv] : ie.outputs) {
+    if (bridged_impl_out.count(name)) {
+      continue;
+    }
     if (!re.outputs.count(name)) {
-      res.verdict  = Verdict::Unknown;
-      res.detail  += "; output '" + name + "' present in impl but not ref";
-      return res;
+      res.unmatched_impl.push_back(display_name(name));
     }
   }
   // Memory next-state contents: corresponding memories must hold equal contents
-  // after the step (DISTINCT over array sort). A memory present in only one side
-  // is an unmatched cut -> sound Unknown.
+  // after the step (DISTINCT over array sort). A memory present on only one side
+  // is an unmatched cut — unless it was paired with a flop bank above.
   for (const auto& [key, rmem] : re.next_mem) {
+    if (bridged_ref_mem.count(key)) {
+      continue;
+    }
     auto it = ie.next_mem.find(key);
     if (it == ie.next_mem.end()) {
-      res.verdict  = Verdict::Unknown;
-      res.detail  += "; memory '" + key + "' present in ref but not impl";
-      return res;
+      res.unmatched_ref.push_back("mem:" + display_name(key));
+      continue;
     }
     cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {rmem, it->second});
     bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
   }
   for (const auto& [key, imem] : ie.next_mem) {
+    if (bridged_impl_mem.count(key)) {
+      continue;
+    }
     if (!re.next_mem.count(key)) {
-      res.verdict  = Verdict::Unknown;
-      res.detail  += "; memory '" + key + "' present in impl but not ref";
-      return res;
+      res.unmatched_impl.push_back("mem:" + display_name(key));
     }
   }
+
+  const bool incomplete = !res.unmatched_ref.empty() || !res.unmatched_impl.empty();
+  if (!res.unmatched_ref.empty()) {
+    res.detail += "; " + std::to_string(res.unmatched_ref.size()) + " ref-only cut point(s) {" + join_capped(res.unmatched_ref) + "}";
+  }
+  if (!res.unmatched_impl.empty()) {
+    res.detail += "; " + std::to_string(res.unmatched_impl.size()) + " impl-only cut point(s) {" + join_capped(res.unmatched_impl) + "}";
+  }
+
   if (bad.isNull()) {
-    res.verdict  = Verdict::Proven;  // no outputs to compare -> vacuously equal
-    res.detail  += "; no comparable outputs";
+    // Nothing common to compare. Vacuously equal only if the sets also fully
+    // matched (both empty); otherwise the comparison is empty AND incomplete.
+    if (incomplete) {
+      res.verdict  = Verdict::Unknown;
+      res.detail  += "; no COMMON outputs to compare (correspondence incomplete)";
+    } else {
+      res.verdict  = Verdict::Proven;
+      res.detail  += "; no comparable outputs";
+    }
     return res;
   }
 
-  // Combinational equivalence: the miter is UNSAT iff the designs agree on every
-  // common output for all inputs. No state, no unrolling -- a single SMT query.
-  // (opts.engine / opts.bound are sequential-model-checking knobs, unused here.)
+  // Combinational / inductive miter: UNSAT iff the designs agree on every COMMON
+  // output for all inputs (and assumed-equal current state). One SMT query.
   solver.assertFormula(bad);
   cvc5::Result r = solver.checkSat();
 
-  if (r.isUnsat()) {
-    res.verdict = Verdict::Proven;
-  } else if (r.isSat()) {
-    res.verdict = Verdict::Refuted;
-    if (opts.witness) {
-      // Name the diverging output(s) first — the actionable part of the CEX —
-      // then the satisfying input/current-state assignment.
-      // Collect-then-sort both token lists: re.outputs and `shared` are
-      // flat_hash_maps with run-to-run-varying iteration order, which would make
-      // the counterexample text non-reproducible (the verdict is unaffected).
-      std::vector<std::string> diff_toks;
-      for (const auto& [name, rv] : re.outputs) {
-        auto it = ie.outputs.find(name);
-        if (it == ie.outputs.end()) {
-          continue;
-        }
-        int        w    = std::max(rv.width, it->second.width);
-        cvc5::Term rval = solver.getValue(fit_to(tm, rv, w));
-        cvc5::Term ival = solver.getValue(fit_to(tm, it->second, w));
-        if (!rval.isNull() && !ival.isNull() && rval.getBitVectorValue(10) != ival.getBitVectorValue(10)) {
-          diff_toks.push_back(name + "(ref=" + rval.getBitVectorValue(10) + " impl=" + ival.getBitVectorValue(10) + ")");
-        }
+  // Witness = diverging COMMON outputs + the satisfying assignment. Built on every
+  // SAT (useful for iteration even when the verdict is gated to Unknown by an
+  // incomplete correspondence). Collect-then-sort: `re.outputs`/`shared` are
+  // flat_hash_maps with run-varying order, which would make the text irreproducible.
+  auto build_witness = [&]() -> std::string {
+    if (!opts.witness) {
+      return {};
+    }
+    std::vector<std::string> diff_toks;
+    for (const auto& [name, rv] : re.outputs) {
+      auto it = ie.outputs.find(name);
+      if (it == ie.outputs.end()) {
+        continue;
       }
-      std::sort(diff_toks.begin(), diff_toks.end());
-      std::string diffs;
-      for (const auto& t : diff_toks) {
-        if (!diffs.empty()) {
-          diffs += ", ";
-        }
-        diffs += t;
+      int        w    = std::max(rv.width, it->second.width);
+      cvc5::Term rval = solver.getValue(fit_to(tm, rv, w));
+      cvc5::Term ival = solver.getValue(fit_to(tm, it->second, w));
+      if (!rval.isNull() && !ival.isNull() && rval.getBitVectorValue(10) != ival.getBitVectorValue(10)) {
+        diff_toks.push_back(display_name(name) + "(ref=" + rval.getBitVectorValue(10) + " impl=" + ival.getBitVectorValue(10) + ")");
       }
+    }
+    std::sort(diff_toks.begin(), diff_toks.end());
+    std::string diffs;
+    for (const auto& t : diff_toks) {
+      if (!diffs.empty()) {
+        diffs += ", ";
+      }
+      diffs += t;
+    }
+    std::vector<std::string> toks;
+    for (const auto& [name, v] : shared) {
+      cvc5::Term val = solver.getValue(v.term);
+      if (val.isNull()) {
+        continue;
+      }
+      toks.push_back(display_name(name) + "=" + val.getBitVectorValue(10));
+    }
+    std::sort(toks.begin(), toks.end());
+    std::string w;
+    for (const auto& t : toks) {
+      if (!w.empty()) {
+        w += ", ";
+      }
+      w += t;
+    }
+    return (diffs.empty() ? "" : "diff " + diffs + " @ ") + w;
+  };
 
-      std::vector<std::string> toks;
-      for (const auto& [name, v] : shared) {
-        cvc5::Term val = solver.getValue(v.term);
-        if (val.isNull()) {
-          continue;
-        }
-        toks.push_back(name + "=" + val.getBitVectorValue(10));
-      }
-      std::sort(toks.begin(), toks.end());
-      std::string w;
-      for (const auto& t : toks) {
-        if (!w.empty()) {
-          w += ", ";
-        }
-        w += t;
-      }
-      res.witness = (diffs.empty() ? "" : "diff " + diffs + " @ ") + w;
+  if (r.isUnsat()) {
+    // COMMON outputs agree. Proven only if the correspondence is also complete.
+    if (incomplete) {
+      res.verdict  = Verdict::Unknown;
+      res.detail  += "; matched portion EQUIVALENT (only the unmatched cut points above remain)";
+    } else {
+      res.verdict = Verdict::Proven;
+    }
+  } else if (r.isSat()) {
+    res.witness = build_witness();
+    // A divergence on a COMMON output is a genuine refutation when the
+    // correspondence is complete. With unmatched cut points the engine cannot
+    // attribute the divergence soundly (a matched ref output may read a ref-only
+    // flop), so it reports Unknown but still surfaces the witness for iteration.
+    if (incomplete) {
+      res.verdict  = Verdict::Unknown;
+      res.detail  += "; matched portion DIFFERS (witness below; may be an artifact of the unmatched cut points)";
+    } else {
+      res.verdict = Verdict::Refuted;
     }
   } else {
     res.verdict  = Verdict::Unknown;

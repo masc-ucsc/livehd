@@ -88,7 +88,7 @@ void Inou_slang::setup() {
 
   m1.add_label_optional("files", "input verilog files (optional when slang_flags supplies the sources, e.g. -F filelist.f)");
   m1.add_label_optional("top", "elaborate only this top module's hierarchy (forwarded to slang as --top)");
-  m1.add_label_optional("includes", "comma separated include paths (otherwise, verilog paths)");
+  m1.add_label_optional("includes", "extra comma separated include paths (the input file dirs and the built-in ware/rtl library are always searched too)");
   m1.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
   m1.add_label_optional("undefines", "comma separated undefines");
   m1.add_label_optional("timecheck", "true to keep timechecks on generated mods (default: suppressed for slang input)");
@@ -101,7 +101,7 @@ void Inou_slang::setup() {
   Eprp_method m2("inou.slang", "alias for inou.verilog (System verilog to LNAST using slang)", &Inou_slang::work);
   m2.add_label_optional("files", "input verilog files (optional when slang_flags supplies the sources, e.g. -F filelist.f)");
   m2.add_label_optional("top", "elaborate only this top module's hierarchy (forwarded to slang as --top)");
-  m2.add_label_optional("includes", "comma separated include paths (otherwise, verilog paths)");
+  m2.add_label_optional("includes", "extra comma separated include paths (the input file dirs and the built-in ware/rtl library are always searched too)");
   m2.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
   m2.add_label_optional("undefines", "comma separated undefines");
   m2.add_label_optional("timecheck", "true to keep timechecks on generated mods (default: suppressed for slang input)");
