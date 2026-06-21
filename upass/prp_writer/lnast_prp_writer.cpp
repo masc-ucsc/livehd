@@ -165,6 +165,13 @@ std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
   // `mem.field` memories). Integer constants that also flow through this helper
   // (`6`, `0sb?`, `0xff`) must stay bare, so do NOT quote on other characters.
   auto quote = [](std::string s) -> std::string {
+    // A name read from an escaped Verilog id arrives ALREADY backtick-quoted
+    // (`` `ar.x` `` — the dlop quoted-identifier form). Emit it verbatim; wrapping
+    // it again yields `` ``ar.x`` `` which the Pyrope lexer rejects (the v2prp
+    // round-trip then fails to re-parse). Only a bare `.`-name needs quoting.
+    if (s.size() >= 2 && s.front() == '`' && s.back() == '`') {
+      return s;
+    }
     return s.find('.') == std::string::npos ? s : "`" + s + "`";
   };
   auto pos = name.rfind("___ssa_");
