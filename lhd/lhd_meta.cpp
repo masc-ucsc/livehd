@@ -19,7 +19,7 @@ constexpr std::string_view kSteps =
     R"json(["compile verilog","compile pyrope","lec","scan","tool","pass","pyrope fmt","pyrope lsp"])json";
 constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
 constexpr std::string_view kEmitKinds =
-    R"json(["ln","lg","verilog","pyrope","lnast-dump","isabelle","graphviz","metadata","results","diagnostics"])json";
+    R"json(["ln","lg","verilog","pyrope","lnast-dump","isabelle","lean","graphviz","metadata","results","diagnostics"])json";
 constexpr std::string_view kErrorClasses =
     R"json(["usage","syntax","internal","equiv_fail","signal","timeout","missing_file","config","dependency","unsupported"])json";
 
@@ -289,7 +289,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "compile" || name == "compile verilog" || name == "compile pyrope") {
     print_json_line(
-        R"json({"schema_version":1,"name":"compile","description":"The single source->IR->netlist action (front-end + elaborate + synth fused: one action, one exit code). Takes Pyrope/(System)Verilog sources (language word optional: inferred from .prp/.v/.sv) and/or ln:/lg: IR inputs; positional ln:DIR supplies pre-elaborated imports, lg:DIR pre-compiled libraries; ln:/lg:-only inputs aggregate, optimize, or link. Verilog readers: yosys-verilog/yosys-slang go through yosys into lg:, slang is the direct SV -> LNAST front-end (ln:/lg: emits, the pyrope flow)","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"recipe","type":"enum","values":["O0","O1","O2"],"default":"O1"},{"name":"set","type":"pass.flag=value","repeatable":true},{"name":"depfile","type":"path"},{"name":"emit","type":"verilog:PATH|pyrope:PATH (or a bare .v/.sv/.prp; kind inferred)"},{"name":"emit-dir","type":"lg:DIR/|ln:DIR/|verilog:DIR/|pyrope:DIR/|lnast-dump:DIR/|isabelle:DIR/"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","ln","pyrope","lnast-dump","isabelle"],"examples":["lhd compile foo.v --top foo --recipe O2 --emit verilog:net.v","lhd compile x.prp --emit net.v --emit-dir lg:x_lgs/","lhd compile x.prp --emit-dir ln:x_lns/","lhd compile ln:x_lns/ --recipe O1 --emit verilog:net.v","lhd compile lg:top_lgs/ --emit-dir lg:top_opt_lgs/","lhd compile lg:top_lgs/ --emit-dir isabelle:top_thy/"]})json");
+        R"json({"schema_version":1,"name":"compile","description":"The single source->IR->netlist action (front-end + elaborate + synth fused: one action, one exit code). Takes Pyrope/(System)Verilog sources (language word optional: inferred from .prp/.v/.sv) and/or ln:/lg: IR inputs; positional ln:DIR supplies pre-elaborated imports, lg:DIR pre-compiled libraries; ln:/lg:-only inputs aggregate, optimize, or link. Verilog readers: yosys-verilog/yosys-slang go through yosys into lg:, slang is the direct SV -> LNAST front-end (ln:/lg: emits, the pyrope flow)","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"recipe","type":"enum","values":["O0","O1","O2"],"default":"O1"},{"name":"set","type":"pass.flag=value","repeatable":true},{"name":"depfile","type":"path"},{"name":"emit","type":"verilog:PATH|pyrope:PATH (or a bare .v/.sv/.prp; kind inferred)"},{"name":"emit-dir","type":"lg:DIR/|ln:DIR/|verilog:DIR/|pyrope:DIR/|lnast-dump:DIR/|isabelle:DIR/|lean:DIR/"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","ln","pyrope","lnast-dump","isabelle","lean"],"examples":["lhd compile foo.v --top foo --recipe O2 --emit verilog:net.v","lhd compile x.prp --emit net.v --emit-dir lg:x_lgs/","lhd compile x.prp --emit-dir ln:x_lns/","lhd compile ln:x_lns/ --recipe O1 --emit verilog:net.v","lhd compile lg:top_lgs/ --emit-dir lg:top_opt_lgs/","lhd compile lg:top_lgs/ --emit-dir isabelle:top_thy/ --emit-dir lean:top_lean/"]})json");
     return 0;
   }
   if (name == "recipe:O0" || name == "O0") {
@@ -483,7 +483,7 @@ void print_general_help() {
       "  --set options too) — e.g. `lhd lec --help`, `lhd pass --help`, `lhd pass partition --help`\n"
       "\n"
       "typed I/O (KIND:PATH):  ln: = Forest dir (LNAST units)   lg: = GraphLibrary dir (LGraphs)\n"
-      "  ln:/lg:/lnast-dump:/isabelle: are directory containers (--emit-dir only);\n"
+      "  ln:/lg:/lnast-dump:/isabelle:/lean: are directory containers (--emit-dir only);\n"
       "  verilog: / pyrope: are --emit (one file; pyrope needs a one-unit design) or --emit-dir\n"
       "  (one file per module). --emit also infers the kind from a bare .v/.sv/.prp path\n"
       "\n"
@@ -684,7 +684,7 @@ int help_command(const Options& opts) {
         "  --top T              --reader R   slang | yosys-slang | yosys-verilog (default slang)\n"
         "  --recipe O0|O1|O2    (default O1; `lhd list recipes`)\n"
         "  --emit verilog:PATH | pyrope:PATH   (or a bare .v/.sv/.prp — kind inferred)\n"
-        "  --emit-dir K:DIR/    lg: | ln: | verilog: | pyrope: | lnast-dump: | isabelle:\n"
+        "  --emit-dir K:DIR/    lg: | ln: | verilog: | pyrope: | lnast-dump: | isabelle: | lean:\n"
         "  --set pass.flag=value   --config lhd.toml   --depfile PATH   --workdir DIR\n"
         "\n"
         "examples:\n"

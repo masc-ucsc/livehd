@@ -1,0 +1,5 @@
+name = "lean_semantic_primitives"
+defaultTargets = ["LeanSemanticPrimitives"]
+
+[[lean_lib]]
+name = "LeanSemanticPrimitives"
