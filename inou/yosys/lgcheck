@@ -348,6 +348,7 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
                design -copy-from gate -as gate gate
                miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter
                async2sync
+               dffunmap; proc; opt_clean
                hierarchy -top miter
                ${bmc_sat_cmds}
                " \
