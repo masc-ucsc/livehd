@@ -18,9 +18,9 @@ const r_or  = A#|[..]
 const r_xor = A#^[..]
 const pop   = A#+[..]
 
-cassert(int(r_and) == 0)
-cassert(int(r_or) == -1)   // r_or is bool true; int(true) == -1 (2f-string_cast)
-cassert(int(r_xor) == -1)  // r_xor is bool true; int(true) == -1
+cassert(signed(r_and) == 0)
+cassert(signed(r_or) == -1)   // r_or is bool true; signed(true) == -1 (2f-string_cast)
+cassert(signed(r_xor) == -1)  // r_xor is bool true; signed(true) == -1
 cassert(pop == 5)
 
 mut acc = 0

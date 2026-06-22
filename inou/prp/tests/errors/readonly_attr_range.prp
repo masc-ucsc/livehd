@@ -5,8 +5,8 @@
 */
 
 // `range` is not an attribute: bounds are declared through a TYPE
-// (`:int(max=,min=)`, `:uN`/`:sN`). `:[range=…]` was legacy sugar for
+// (`:signed(max=,min=)`, `:uN`/`:sN`). `:[range=…]` was legacy sugar for
 // max/min and is rejected the same way as `:[max=]`/`:[min=]`.
 
-mut x:int:[range = 0..=15] = 1 // locate_error_here
+mut x:signed:[range = 0..=15] = 1 // locate_error_here
 cassert(x == 1)

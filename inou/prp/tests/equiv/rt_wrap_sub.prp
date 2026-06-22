@@ -1,0 +1,16 @@
+/*
+:name: rt_wrap_sub
+:type: equiv
+:verilog_top: rt_wrap_sub.rt_wrap_sub
+:pyrope_top: rt_wrap_sub.rt_wrap_sub
+*/
+
+// Runtime `wrap` of a SUBTRACTION narrowed into u32. The bit-selects give each
+// operand the derived range [0, 2^32-1], so `x - y` ranges over
+// [-(2^32-1), 2^32-1] — a value that does NOT fit u32 without a policy (the
+// bare form is a `does not fit its declared range [0, 4294967295]` error). The
+// `wrap` prefix masks the low 32 bits, exactly Verilog's modular subtraction,
+// so this LECs against `assign d = x - y`.
+comb rt_wrap_sub(x:u32, y:u32) -> (d:u32) {
+  wrap d = x#[0..=31] - y#[0..=31]
+}

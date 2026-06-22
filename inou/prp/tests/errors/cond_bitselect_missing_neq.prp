@@ -1,0 +1,14 @@
+/*
+:name: cond_bitselect_missing_neq
+:type: error
+:error: condition must be boolean, got integer
+*/
+
+// A bit select is a `u1` VALUE, not a boolean, so it cannot gate an `if`
+// (write `if x#[0] != 0`). The hint points at the likely `!= 0` fix.
+
+pub comb p(x:u8) -> (r:u8) {
+  mut o:u8 = 0
+  if x#[0] { o = 1 }
+  r = o
+}

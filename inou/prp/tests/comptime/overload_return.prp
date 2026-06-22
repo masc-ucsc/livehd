@@ -12,8 +12,8 @@
 // SKIP the first (input-matching) candidate because its return cannot bind,
 // proving dispatch is not plain input-side tuple order.
 
-comb mk_one(a:int) -> (r:int)          { r = a }
-comb mk_two(a:int) -> (p1:int, p2:int) { p1 = a ; p2 = a + 1 }
+comb mk_one(a:signed) -> (r:signed)          { r = a }
+comb mk_two(a:signed) -> (p1:signed, p2:signed) { p1 = a ; p2 = a + 1 }
 
 const mk  = [mk_one, mk_two]   // single-output first
 const rev = [mk_two, mk_one]   // multi-output first

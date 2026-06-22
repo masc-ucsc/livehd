@@ -13,8 +13,8 @@
 // NEITHER return can bind. Dispatch fails LOUDLY rather than silently picking
 // the first input-match and folding `tuple_get(scalar,'p1')` to garbage.
 
-comb mk_one(a:int) -> (r:int)          { r = a }
-comb mk_two(a:int) -> (q1:int, q2:int) { q1 = a ; q2 = a }
+comb mk_one(a:signed) -> (r:signed)          { r = a }
+comb mk_two(a:signed) -> (q1:signed, q2:signed) { q1 = a ; q2 = a }
 
 const mk = [mk_one, mk_two]
 

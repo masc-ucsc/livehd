@@ -1,0 +1,20 @@
+/*
+:name: rt_wrap_reassign
+:type: equiv
+:verilog_top: rt_wrap_reassign.rt_wrap_reassign
+:pyrope_top: rt_wrap_reassign.rt_wrap_reassign
+*/
+
+// Runtime `wrap` of a subtraction into a u32 LOCAL that was ALREADY ASSIGNED
+// before the wrap. The prior write versions the lvalue (`d___ssa_N` in SSA),
+// and only the BASE name carries the declared u32 envelope — so the wrap
+// lowering must strip the SSA suffix to resolve the target type. Without that
+// it cannot find the width, declines, and the `wrap` call leaks to tolg
+// unlowered ("call to 'wrap' has no hardware lowering yet") — the wrap never
+// clamps. With the fix it masks the low 32 bits == Verilog modular `x - y`.
+comb rt_wrap_reassign(x:u32, y:u32) -> (o:u32) {
+  mut d:u32 = 0
+  d = x#[0..=31]                     // prior write → versions `d`
+  wrap d = x#[0..=31] - y#[0..=31]   // narrows into d's *declared* u32 type
+  o = d
+}

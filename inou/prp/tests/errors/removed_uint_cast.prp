@@ -1,0 +1,12 @@
+/*
+:name: removed_uint_cast
+:type: error
+:tolg: 1
+:error: cast was removed
+*/
+
+// The `uint(x)` cast was removed. Use `unsigned(x)` or a sized `uN(x)`.
+
+pub comb t(a:u8) -> (r:u8) {
+  r = uint(a)
+}

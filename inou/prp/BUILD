@@ -222,9 +222,31 @@ sh_test(
         # no test header, no golden .v — it goes live with the call-site phase.
         exclude = [
             "tests/equiv/accum.prp",
+            # signed_one_bit_cmp: known-failing miscompile tracker (1-bit signed
+            # ordered compare reads unsigned). Run via the fixme target below.
+            "tests/equiv/signed_one_bit_cmp.prp",
         ],
     )
 ]
+
+# Known-failing equiv tracker (fixme): a MISCOMPILE that compiles clean but LECs
+# wrong, so it cannot live in tests/fixme/ (compile-only). Excluded from the
+# globs above; tagged `fixme` so `bazel test //... (-fixme)` stays green. Run it:
+#   bazel test //inou/prp:prp-equiv-signed_one_bit_cmp --test_tag_filters=
+sh_test(
+    name = "prp-equiv-signed_one_bit_cmp",
+    srcs = ["tests/pyrope_test.py"],
+    args = ["-i", "$(location //inou/prp:tests/equiv/signed_one_bit_cmp.prp)"],
+    data = [
+        "//inou/prp:tests/prplib.py",
+        "//inou/prp:tests/pyrope_test.py",
+        "//inou/prp:tests/equiv/signed_one_bit_cmp.prp",
+        "//inou/prp:tests/equiv/signed_one_bit_cmp.v",
+        "//lhd",
+    ],
+    deps = ["//inou/yosys:scripts"],
+    tags = ["fixme"],
+)
 
 # 2f-v2prp: the REVERSE direction over the same equiv corpus — the slang reader
 # lowers each golden <name>.v to Pyrope (upass/prp_writer), `lhd lec`
@@ -258,6 +280,9 @@ sh_test(
         # that lowering is now fixed in slang_expr.cpp lower_select, so they run.)
         exclude = [
             "tests/equiv/assign_pattern.v",
+            # signed_one_bit_cmp.v is the golden for the known-failing fixme equiv
+            # tracker (1-bit signed ordered compare) — no v2prp target for it.
+            "tests/equiv/signed_one_bit_cmp.v",
             # packed_assign.v uses a `'{...}` assignment pattern that yosys
             # read_verilog cannot parse (OP_CAST), so the v2prp reference side
             # (lgcheck reads the golden via yosys) cannot be built. Its

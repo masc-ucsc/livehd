@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -27,6 +28,7 @@
 namespace {
 
 using livehd::graph_util::create_const;
+using livehd::graph_util::is_unsign;
 using livehd::graph_util::set_bits;
 using livehd::graph_util::set_sign;
 using livehd::graph_util::set_unsign;
@@ -621,6 +623,11 @@ private:
       lower_popcount(nid);
     } else if (N::is_div(t)) {
       lower_op(nid, Ntype_op::Div, false, OpW::firstw);
+    } else if (N::is_mod(t)) {
+      // `a % b` has no general hardware lowering; lower_mod handles only the
+      // easy/unambiguous cases (power-of-two, range-fit, `% 3`) to shift/mask
+      // and HARD-errors the rest.
+      lower_mod(nid);
     } else if (N::is_bit_not(t) || N::is_log_not(t)) {
       lower_unary(nid, Ntype_op::Not);
     } else if (N::is_ne(t)) {
@@ -1396,6 +1403,27 @@ private:
                "\x01"
                "en:")
         .append(n);
+  }
+
+  // The "hold" value for a reg's din shadow on an unwritten conditional path:
+  // the reg's q (current value), so a conditional write auto-holds (Verilog
+  // non-blocking `<=` semantics) even when no branch reads the reg (a pure
+  // write). Without it the unwritten path falls back to a don't-care, which is
+  // only masked by the enable shadow — fragile, and it balloons the merge width
+  // (nil_pin() is 64 bits). Returns nullopt for a NON-reg merge var (e.g. a
+  // combinational match-expression result), which legitimately keeps its
+  // don't-care none-of slot. `var` is a din shadow key iff it carries the
+  // din_key() `\x01din:` prefix.
+  [[nodiscard]] std::optional<Pin> reg_hold_pin(std::string_view var) {
+    constexpr std::string_view din_prefix{"\x01" "din:"};
+    if (!var.starts_with(din_prefix)) {
+      return std::nullopt;
+    }
+    std::string name(var.substr(din_prefix.size()));
+    if (auto it = reg_map_.find(name); it != reg_map_.end()) {
+      return it->second.create_driver_pin(0);  // flop q = current registered value
+    }
+    return std::nullopt;
   }
 
   // Cached 1/0 const pins for the enable shadow (node identity doubles as the
@@ -2748,13 +2776,19 @@ private:
       }
       kind = callee ? callee->get_lambda_kind() : std::string_view{};
       if (!callee || (kind != "pipe" && kind != "mod")) {
-        // Unresolvable (runtime wrap/sat builtin, recursion-kept comb, …):
-        // HARD error — the pre-1r behavior silently wired the call's outputs
-        // to nil and emitted a broken netlist.
-        error_here(
-            "upass.tolg: call to '{}' has no hardware lowering yet — only pipe/mod calls become instances "
-            "(note `comb` may not call a `pipe`/`mod`), and runtime `wrap`/`sat` lowering is pending",
-            callee_name);
+        // An unresolved call is ALWAYS a hard error: it is neither a defined
+        // pipe/mod/comb, a built-in scalar cast (`signed`/`unsigned`/`uN`/`sN`/
+        // `bool`/`string`), nor a `__cellop`. (`comb` may not call a `pipe`/`mod`.)
+        const std::string_view cn = callee_name;
+        if (cn == "int" || cn == "uint" || cn == "integer") {
+          // Tailored guidance for the removed `int`/`uint` cast.
+          error_here(
+              "the `{}(...)` cast was removed — use `signed(x)`/`unsigned(x)` to reinterpret a value's sign, "
+              "or a sized cast `uN(x)`/`sN(x)`",
+              callee_name);
+        } else {
+          error_here("call to undefined function '{}' — no such pipe/mod/comb or built-in cast", callee_name);
+        }
         return;
       }
 
@@ -3732,6 +3766,281 @@ private:
     bind_result(lnast_->get_name(dst), terms.front().pin, terms.front().mw);
   }
 
+  // ── `a % b` (modulo) — the easy, unambiguous cases only ─────────────────────
+  // Pyrope has no general hardware modulo: the signed semantics differ across
+  // languages and a full divider is expensive (docs pyrope/02-basics). LiveHD
+  // uses TRUNCATED semantics (the remainder's sign follows the dividend,
+  // matching Dlop::mod_op and Verilog `%`). We lower the cases that collapse to
+  // shift/mask and HARD-error the rest:
+  //   (2) |a| < |b| over their whole ranges          → a            (no remainder)
+  //   (1) b a comptime power-of-two, a non-negative   → a & (|b|-1) (low bits)
+  //   (3) |b| == 3 (comptime),       a non-negative   → base-4 digit-sum reduce
+  void lower_mod(const Lnast_nid& nid) {
+    auto dst = lnast_->get_first_child(nid);
+    if (dst.is_invalid()) {
+      return;
+    }
+    auto a = lnast_->get_sibling_next(dst);
+    if (a.is_invalid()) {
+      return;
+    }
+    auto b = lnast_->get_sibling_next(a);
+    if (b.is_invalid()) {
+      error_here("upass.tolg: modulo in '{}' is missing its divisor operand", lnast_->get_top_module_name());
+      return;
+    }
+
+    const std::string dst_name{lnast_->get_name(dst)};
+    auto              av      = leaf(a);
+    const auto        a_range = range_of_operand(a);
+    const auto        b_range = range_of_operand(b);
+
+    // `a` is non-negative when its pin is unsigned (the common case — every
+    // typed unsigned port and every computed result reads unsigned) or its
+    // published range proves min >= 0.
+    const bool a_nonneg = is_unsign(av.pin) || (a_range && a_range->first >= 0);
+
+    // (2) Range fit. If |a| < |b| for every (a,b) pair then `a % b == a` under
+    // truncated semantics (the quotient truncates to 0), regardless of sign.
+    if (a_range && b_range && a_range->first != std::numeric_limits<int64_t>::min()
+        && a_range->second != std::numeric_limits<int64_t>::min()) {
+      const int64_t a_absmax = std::max(iabs64(a_range->first), iabs64(a_range->second));
+      // Smallest |b| over b's range. 0 when the range straddles 0 (a possible
+      // divisor of 0/±1 is not a guaranteed no-op), which fails the test below.
+      int64_t b_absmin = 0;
+      if (b_range->first >= 1) {
+        b_absmin = b_range->first;
+      } else if (b_range->second <= -1 && b_range->second != std::numeric_limits<int64_t>::min()) {
+        b_absmin = -b_range->second;
+      }
+      if (b_absmin >= 2 && a_absmax < b_absmin) {
+        record(dst_name, av.pin, av.mw);  // `a % b == a` — alias the dividend
+        return;
+      }
+    }
+
+    // The remaining lowerings all need a comptime-constant divisor.
+    if (!Lnast_ntype::is_const(lnast_->get_type(b))) {
+      error_at(b,
+               {"mod-runtime-divisor", "unsupported"},
+               "upass.tolg: `a % b` with a runtime divisor has no hardware lowering — only a comptime power-of-two "
+               "divisor, `% 3`, or a divisor provably larger than `a` lowers to shift/mask");
+      return;
+    }
+    const int64_t bval = const_val(b);
+    if (bval == 0) {  // constprop already errors comptime mod-by-zero; guard anyway.
+      error_at(b, {"mod-by-zero", "type"}, "upass.tolg: modulo by zero is an illegal operation");
+      return;
+    }
+    const int64_t babs = iabs64(bval);
+    if (babs == 1) {  // `a % ±1 == 0` for any sign of `a`.
+      record(dst_name, create_const(*g_, *Dlop::create_integer(0)), 1);
+      return;
+    }
+
+    if (!a_nonneg) {
+      error_at(a,
+               {"mod-signed-dividend", "unsupported"},
+               "upass.tolg: `a % {}` with a possibly-negative `a` has no hardware lowering — signed modulo semantics "
+               "are language-dependent (constrain `a` to a non-negative range)",
+               bval);
+      return;
+    }
+
+    // (1) Power-of-two divisor → mask off the low log2(|b|) bits.
+    if ((babs & (babs - 1)) == 0) {
+      int32_t k = 0;  // |b| == 2^k
+      while ((int64_t{1} << k) < babs) {
+        ++k;
+      }
+      auto andn = make_node(Ntype_op::And);  // commutative: both operands feed sink "a"
+      setup_sink_by_name(andn, "a").connect_driver(av.pin);
+      setup_sink_by_name(andn, "a").connect_driver(create_const(*g_, *Dlop::create_integer(babs - 1)));
+      bind_result(dst_name, andn.create_driver_pin(0), k > 0 ? k : 1);
+      return;
+    }
+
+    // (3) Modulo 3 → base-4 digit-sum reduction. Needs a SOUND int64 upper bound
+    // on `a` (the digit-sum loop's termination + width bound is int64 math): a
+    // non-negative published range, else the stored width when it fits in 62
+    // bits. A wider untyped dividend has no reliable int64 bound — hard error.
+    if (babs == 3) {
+      int64_t init_max = 0;
+      if (a_range && a_range->first >= 0) {
+        init_max = a_range->second;  // exact, sound
+      } else if (av.mw > 0 && av.mw <= 62) {
+        init_max = (int64_t{1} << av.mw) - 1;  // sound for ≤ 62 bits
+      } else {
+        error_at(a,
+                 {"mod-three-too-wide", "unsupported"},
+                 "upass.tolg: `a % 3` on a dividend wider than 62 bits has no hardware lowering — constrain `a` to a "
+                 "non-negative range that fits 62 bits");
+        return;
+      }
+      bind_result(dst_name, lower_mod3(av, init_max), 2);  // result in [0, 2]
+      return;
+    }
+
+    error_at(b,
+             {"mod-unsupported-divisor", "unsupported"},
+             "upass.tolg: `a % {}` has no hardware lowering — only a power-of-two divisor, `% 3`, or a divisor "
+             "provably larger than `a` lowers to shift/mask",
+             bval);
+  }
+
+  // `a % 3` for a non-negative `a` whose max value is `init_max`. Because
+  // 4 ≡ 1 (mod 3), `a ≡ Σ(base-4 digits of a)  (mod 3)`. Each round splits the
+  // value into 2-bit base-4 digits and sums them with a balanced adder tree;
+  // the running max strictly shrinks while it is ≥ 4 (max_base4_digit_sum(M) < M
+  // for M ≥ 4), so the generation loop terminates. Once the value is in [0, 3]
+  // a single correction maps the one non-reduced point 3 → 0.
+  [[nodiscard]] Pin lower_mod3(const Val& av, int64_t init_max) {
+    Pin     cur     = av.pin;
+    int64_t cur_max = init_max < 0 ? 0 : init_max;
+    int32_t cur_mw  = mw_of_val(cur_max);
+    if (cur_mw > av.mw && av.mw > 0) {
+      cur_mw = av.mw;  // never read past the dividend's stored bits
+    }
+    while (cur_max >= 4) {
+      std::vector<Val> digits;
+      digits.reserve(static_cast<size_t>((cur_mw + 1) / 2));
+      for (int32_t lo = 0; lo < cur_mw; lo += 2) {
+        const int32_t hi  = std::min(lo + 1, cur_mw - 1);
+        auto          gm  = make_node(Ntype_op::Get_mask);
+        setup_sink_by_name(gm, "a").connect_driver(cur);
+        setup_sink_by_name(gm, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(hi, lo)));
+        auto          d   = gm.create_driver_pin(0);
+        const int32_t dmw = hi - lo + 1;  // 1 or 2 bits per base-4 digit
+        set_bits(d, dmw + 1);
+        set_unsign(d);
+        digits.push_back({d, dmw});
+      }
+      cur     = adder_tree(std::move(digits)).pin;
+      cur_max = max_base4_digit_sum(cur_max);
+      cur_mw  = mw_of_val(cur_max);
+    }
+    // `cur` ∈ [0, 3]: result = (cur == 3) ? 0 : cur  ==  cur - 3*(cur == 3).
+    auto eq = make_node(Ntype_op::EQ);  // commutative: both operands feed sink "a"
+    setup_sink_by_name(eq, "a").connect_driver(cur);
+    setup_sink_by_name(eq, "a").connect_driver(create_const(*g_, *Dlop::create_integer(3)));
+    auto eqp = eq.create_driver_pin(0);
+    set_bits(eqp, 2);
+    set_unsign(eqp);
+    auto mul = make_node(Ntype_op::Mult);  // 3 * (cur == 3) ∈ {0, 3}
+    setup_sink_by_name(mul, "a").connect_driver(eqp);
+    setup_sink_by_name(mul, "a").connect_driver(create_const(*g_, *Dlop::create_integer(3)));
+    auto mulp = mul.create_driver_pin(0);
+    set_bits(mulp, 3);
+    set_unsign(mulp);
+    auto sub = make_node(Ntype_op::Sum);  // cur - 3*(cur == 3)
+    setup_sink_by_name(sub, "a").connect_driver(cur);
+    setup_sink_by_name(sub, "b").connect_driver(mulp);
+    auto subp = sub.create_driver_pin(0);
+    set_bits(subp, 3);
+    set_unsign(subp);
+    return subp;
+  }
+
+  // Balanced binary adder tree over `terms` (each a non-negative value). Mirrors
+  // the popcount tree: every Sum grows the width by one bit; an odd leaf rides up
+  // a level untouched. Requires at least one term.
+  [[nodiscard]] Val adder_tree(std::vector<Val> terms) {
+    while (terms.size() > 1) {
+      std::vector<Val> next;
+      next.reserve((terms.size() + 1) / 2);
+      for (size_t i = 0; i + 1 < terms.size(); i += 2) {
+        auto s = make_node(Ntype_op::Sum);  // both operands ADD on sink "a"
+        setup_sink_by_name(s, "a").connect_driver(terms[i].pin);
+        setup_sink_by_name(s, "a").connect_driver(terms[i + 1].pin);
+        const int32_t mw = std::max(terms[i].mw, terms[i + 1].mw) + 1;
+        auto          d  = s.create_driver_pin(0);
+        set_bits(d, mw + 1);
+        set_unsign(d);
+        next.push_back({d, mw});
+      }
+      if (terms.size() & 1) {
+        next.push_back(terms.back());  // odd leaf rides to the next level
+      }
+      terms = std::move(next);
+    }
+    return terms.front();
+  }
+
+  // Maximum base-4 digit sum over [0, M] (the standard "max digit sum of numbers
+  // ≤ N" DP). Strictly less than M for M ≥ 4, which is what makes lower_mod3's
+  // loop terminate.
+  [[nodiscard]] static int64_t max_base4_digit_sum(int64_t M) {
+    if (M < 0) {
+      return 0;
+    }
+    int top = 0;  // highest base-4 digit position
+    while (top < 31 && (int64_t{1} << (2 * (top + 1))) <= M) {
+      ++top;
+    }
+    int64_t best = 0, prefix = 0;
+    for (int pos = top; pos >= 0; --pos) {
+      const int64_t d = (M >> (2 * pos)) & 3;
+      if (d > 0) {  // drop this digit to d-1 and fill the rest with 3s
+        best = std::max(best, prefix + (d - 1) + int64_t{3} * pos);
+      }
+      prefix += d;  // keep this digit tight
+    }
+    return std::max(best, prefix);  // ...or M itself
+  }
+
+  // |v| with INT64_MIN guarded (callers exclude it before reaching here).
+  [[nodiscard]] static int64_t iabs64(int64_t v) {
+    if (v == std::numeric_limits<int64_t>::min()) {
+      return std::numeric_limits<int64_t>::max();
+    }
+    return v < 0 ? -v : v;
+  }
+
+  // Published value range of an operand: exact for a comptime const, else the
+  // bitwidth pass' derived [min, max] (bw_meta), else — for a never-written
+  // input port — its declared envelope from io_meta. nullopt = unbounded.
+  [[nodiscard]] std::optional<std::pair<int64_t, int64_t>> range_of_operand(const Lnast_nid& nid) {
+    if (Lnast_ntype::is_const(lnast_->get_type(nid))) {
+      auto c = Dlop::from_pyrope(lnast_->get_name(nid));
+      if (c->is_just_i64()) {
+        const int64_t v = c->to_just_i64();
+        return std::make_pair(v, v);
+      }
+      return std::nullopt;
+    }
+    const std::string nm{lnast_->get_name(nid)};
+    const auto&       meta = lnast_->bw_meta();
+    auto              it   = meta.ranges.find(nm);
+    if (it == meta.ranges.end()) {
+      it = meta.ranges.find(std::string{canon_io_name(nm)});  // unquoted slang `` `x` `` form
+    }
+    if (it != meta.ranges.end() && !it->second.unbounded) {
+      return std::make_pair(it->second.min, it->second.max);
+    }
+    // A read-only input param has no derived bw_meta entry — fall back to its
+    // declared envelope (io_meta), mirroring uPass_bitwidth::envelope_of_operand.
+    std::string_view base = canon_io_name(nm);
+    if (const auto pos = base.find("___ssa_"); pos != std::string_view::npos) {
+      base = base.substr(0, pos);
+    }
+    for (const auto& in : lnast_->io_meta().inputs) {
+      if (in.name != base || in.kind != Io_kind::integer) {
+        continue;
+      }
+      if (in.has_range) {
+        return std::make_pair(in.range_min, in.range_max);  // exact `int(min,max)`
+      }
+      if (in.bits > 0 && in.bits <= 62) {
+        if (in.is_signed) {
+          return std::make_pair(-(int64_t{1} << (in.bits - 1)), (int64_t{1} << (in.bits - 1)) - 1);
+        }
+        return std::make_pair(int64_t{0}, (int64_t{1} << in.bits) - 1);
+      }
+      break;
+    }
+    return std::nullopt;
+  }
+
   // Lower an if-branch body into a fresh write scope; rolls pin_map_ back so
   // branch-local writes don't leak. Returns the names the branch bound. The
   // rollback restores only the names this branch wrote (recorded lazily in
@@ -3851,7 +4160,17 @@ private:
       // reg's enable shadow this collapsed a conditional enable into constant
       // true (write-every-cycle); for its din it forced the else value.
       auto base      = pin_map_.find(var);
-      const Pin pre  = (base != pin_map_.end()) ? base->second : nil_pin();
+      // A non-writing branch falls back to `pre`. For a reg's din shadow with
+      // no recorded pre-value (a pure conditional write, no prior write and no
+      // read), `pre` is the reg's q (hold) — NOT a don't-care.
+      Pin pre;
+      if (base != pin_map_.end()) {
+        pre = base->second;
+      } else if (auto hold = reg_hold_pin(var)) {
+        pre = *hold;
+      } else {
+        pre = nil_pin();
+      }
       auto      ew   = else_writes.find(var);
       Pin       cur  = (ew != else_writes.end()) ? ew->second : pre;
 
@@ -3937,9 +4256,22 @@ private:
     set_unsign(sel);
 
     for (const auto& var : all_vars) {
-      auto       base    = pin_map_.find(var);
-      const bool has_pre = base != pin_map_.end();
-      Pin        pre     = has_pre ? base->second : nil_pin();
+      auto base    = pin_map_.find(var);
+      bool has_pre = base != pin_map_.end();
+      // A reg's din shadow with no recorded pre-value still HOLDS on an
+      // unwritten / none-of arm: fall back to the reg's q (current value), not a
+      // don't-care. Treat that q as a real pre-value so the none-of slot below
+      // drives the hold instead of `Dlop::unknown`. A non-reg var (combinational
+      // match-expression result) keeps has_pre=false → don't-care none-of slot.
+      Pin pre;
+      if (has_pre) {
+        pre = base->second;
+      } else if (auto hold = reg_hold_pin(var)) {
+        pre     = *hold;
+        has_pre = true;
+      } else {
+        pre = nil_pin();
+      }
       auto       ew      = else_writes.find(var);
       const bool has_ev  = ew != else_writes.end();
       Pin        else_val = has_ev ? ew->second : pre;

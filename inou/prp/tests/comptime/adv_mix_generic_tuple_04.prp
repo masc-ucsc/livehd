@@ -20,10 +20,10 @@ cassert(sum == 10)
 cassert(prod == 30)
 
 // Boundary: zeros and a one keep prod==0, sum tracks.
-const (sum2 = fold3.sum, prod2 = fold3.prod) = fold3<int>(xs = (0, 7, 1))
+const (sum2 = fold3.sum, prod2 = fold3.prod) = fold3<signed>(xs = (0, 7, 1))
 cassert(sum2 == 8)
 cassert(prod2 == 0)
 
 // Negative element via signed generic
-const (sum3 = fold3.sum, prod3 = fold3.prod) = fold3<i8>(xs = (-2, 3, 4))
+const (sum3 = fold3.sum, prod3 = fold3.prod) = fold3<s8>(xs = (-2, 3, 4))
 cassert(prod3 == -24)

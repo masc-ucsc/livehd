@@ -118,6 +118,28 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Regression for the cvc5 LEC/formal encoder's `#sext` sign propagation: a
+# partial sign-extend slice must sign-extend (not zero-extend) when widened,
+# arithmetic-shifted, or signed-compared. cvc5-only (in-process), so just //lhd.
+sh_test(
+    name = "lec_sext_sign_test",
+    size = "large",
+    srcs = ["lec_sext_sign_test.sh"],
+    data = ["//lhd"],
+)
+
+# Regression for the "conditional reg write with no covering else does NOT
+# auto-hold" trap: an unwritten conditional path must HOLD the flop q, not lower
+# to a don't-care. Covers the empty-`elif` (PC stall), pure-write (register
+# file), and `unique if`/match forms. Asserts no don't-care in the next-state
+# AND cvc5-proves equivalence to an explicit-hold Verilog reference (just //lhd).
+sh_test(
+    name = "reg_cond_hold_test",
+    size = "large",
+    srcs = ["reg_cond_hold_test.sh"],
+    data = ["//lhd"],
+)
+
 # 2c-color / 2p hierarchical-input (prerequisite for 2a-abc): color + partition
 # descend a multi-module Pyrope hierarchy (combinational + sequential fixtures),
 # re-link Sub instances, and the partitioned design stays LEC-equivalent.

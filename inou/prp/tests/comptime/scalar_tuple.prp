@@ -35,14 +35,14 @@ mut d = 2
 const goat = d + 1
 d = 3
 d[0] = 5
-mut dt = (d, 60)      // new var: a variable's type cannot change (int -> tuple)
+mut dt = (d, 60)      // new var: a variable's type cannot change (signed -> tuple)
 d = dt[0] + 1
 const horse = d + 1
 
 cassert(goat + horse == 3 + 7 == 10)
 
 mut e = 1
-mut et = (e, 3)       // new var: no type change (int -> tuple)
+mut et = (e, 3)       // new var: no type change (signed -> tuple)
 const f = et[1] + 4
 
 cassert(f == 7)

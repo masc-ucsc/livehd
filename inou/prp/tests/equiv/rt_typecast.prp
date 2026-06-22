@@ -11,9 +11,9 @@
 //   * u8(bool)/uint(bool) → unsigned bit: true = 1, false = 0   (zero-extend)
 //   * int(x)/u8(x) on an integer that provably FITS → value-preserving
 comb rt_typecast(a:u8, b:u8, c:u4) -> (zi:s4, zu:u4, zs:s4, zc:u8, zd:s8) {
-  zi = int(a < b) + 1   // int(true)=-1 → 0 ; int(false)=0 → 1
+  zi = signed(a < b) + 1   // signed(true)=-1 → 0 ; signed(false)=0 → 1
   zu = u8(a < b) + 1    // u8(true)=1   → 2 ; u8(false)=0  → 1
   zs = s8(a < b) + 2    // s8(true)=-1  → 1 ; s8(false)=0  → 2
   zc = u8(c) + 1        // u8(c)=c (u4 fits u8) → c+1
-  zd = int(c) - 3       // int(c)=c → c-3
+  zd = unsigned(c) - 3       // unsigned(c)=c (u4 non-neg) → c-3
 }

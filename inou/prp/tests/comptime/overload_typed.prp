@@ -10,8 +10,8 @@
 // literal that overflows the declared width) is skipped, and the next is tried.
 
 // (1) kind dispatch: bool vs int
-comb on_bool(a:bool) -> (r:int) { r = if a { 1 } else { 0 } }
-comb on_int(a:int)   -> (r:int) { r = a + 100 }
+comb on_bool(a:bool) -> (r:signed) { r = if a { 1 } else { 0 } }
+comb on_int(a:signed)   -> (r:signed) { r = a + 100 }
 const k = [on_bool, on_int]
 
 cassert(k(true) == 1)    // bool actual → on_bool (on_int's int param rejects bool)

@@ -5,7 +5,7 @@
 */
 
 // bool and int do NOT interoperate (zero implicit conversions). A boolean
-// operand in a bitwise op is a type error — write `int(true) ^ 1`.
+// operand in a bitwise op is a type error — write `unsigned(true) ^ 1`.
 // Doc: ../docs/docs/pyrope/04-variables.md "logical and arithmetic … can not mix".
 
 mut b = true

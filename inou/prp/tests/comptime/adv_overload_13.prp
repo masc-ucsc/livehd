@@ -5,17 +5,20 @@
 :verifier_fail: 0
 */
 
-// int(min,max) range candidates with adjacent, non-overlapping windows.
-// The literal must pick the candidate whose declared range contains it.
-comb lo(a:int(min=0, max=99))    -> (r:int) { r = a + 1 }
-comb hi(a:int(min=100, max=199)) -> (r:int) { r = a + 2 }
+// Range-typed candidates with nested, distinguishable windows. The literal
+// must pick the candidate whose declared range contains it. (The old custom
+// `int(min,max)` windows relied on the now-removed 'int' type; power-of-two
+// `uN` ranges are enforced for overload dispatch, so they exercise the same
+// range-based-dispatch behavior.)
+comb lo(a:u7)  -> (r:signed) { r = a + 1 }   // fits 0..=127
+comb hi(a:u8)  -> (r:signed) { r = a + 2 }   // 0..=255
 
 const p = [lo, hi]
 
-const at99  = p(99)    // fits lo
-const at100 = p(100)   // overflows lo (max 99) -> hi
+const at99  = p(99)    // fits lo (u7)
+const at200 = p(200)   // overflows lo (max 127) -> hi (u8)
 const at0   = p(0)     // fits lo
 
 cassert(at99 == 100)
-cassert(at100 == 102)
+cassert(at200 == 202)
 cassert(at0 == 1)

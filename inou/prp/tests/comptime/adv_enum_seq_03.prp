@@ -6,8 +6,8 @@
 */
 
 // Integer type on the enum forces sequential numbering even with no explicit value
-enum V:int = (a, b, c)
-cassert(int(V.a) == 0)
-cassert(int(V.b) == 1)
-cassert(int(V.c) == 2)
-cassert(int(V.c) == int(V.a) + 2)
+enum V:signed = (a, b, c)
+cassert(u8(V.a) == 0)
+cassert(u8(V.b) == 1)
+cassert(u8(V.c) == 2)
+cassert(u8(V.c) == u8(V.a) + 2)

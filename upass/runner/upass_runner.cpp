@@ -2168,6 +2168,16 @@ bool uPass_runner::try_lower_wrap_sat() {
   if (!value || type_src.empty()) {
     return false;  // malformed — let the normal path emit/diagnose
   }
+  // The `type=` ref names the lvalue whose DECLARED envelope we narrow into.
+  // When that lvalue was re-assigned before the wrap (`mut d:u32=0; d=0;
+  // wrap d = …`) SSA reads it as the version `d___ssa_N`, whose per-version
+  // binding carries NO declared envelope — only the BASE name `d` does. Strip
+  // the suffix so decl_facts resolves the type; otherwise the lookup fails,
+  // the runner declines, and the call leaks to tolg ("call to 'wrap' has no
+  // hardware lowering yet") instead of clamping.
+  if (const auto pos = type_src.find("___ssa_"); pos != std::string::npos) {
+    type_src.resize(pos);
+  }
   // Comptime values are folded by the attributes pass (and the drop path
   // retires the call); only RUNTIME values need hardware here.
   if (value_name.empty()) {
@@ -2373,6 +2383,7 @@ bool uPass_runner::try_lower_typecast() {
       vmin = e.bw_min;
     }
   }
+  uint32_t reinterpret_W = 0;  // signed()/unsigned() reinterpret: the input's declared width
   if (!operand_is_bool && !operand_is_enum) {
     if (auto vf = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), arg_name)) {
       if (vf->kind == upass::decl_facts::Num::boolean) {
@@ -2388,6 +2399,17 @@ bool uPass_runner::try_lower_typecast() {
       if (!vmin && vf->range_min && vf->range_min->is_integer()) {
         vmin = vf->range_min;
       }
+      reinterpret_W = vf->bits;
+    }
+  }
+  // Fallback: a slice (`x#[0..=31]`) or arithmetic result has no DECLARED width,
+  // but the bitwidth pass stamped a range — derive the reinterpret width from it
+  // so `signed(x#[0..=31])` / `signed(a + b)` work, not just declared variables.
+  if (!operand_is_bool && reinterpret_W == 0 && vmax && vmin) {
+    if (!vmin->is_negative()) {
+      reinterpret_W = vmax->is_known_zero() ? 0u : static_cast<uint32_t>(vmax->get_bits() - 1);
+    } else {
+      reinterpret_W = static_cast<uint32_t>(std::max<int64_t>(vmax->get_bits(), vmin->get_bits()));
     }
   }
 
@@ -2402,13 +2424,12 @@ bool uPass_runner::try_lower_typecast() {
     return false;
   }
 
-  // A CHECKED cast (uint/uN/sN) of an integer operand can only be proven safe
-  // with a range; int() never needs one (unbounded signed) and a bool operand
-  // always fits. Decline (let the normal path run) when the range is missing.
+  // A CHECKED cast (uN/sN) of an integer operand can only be proven safe with a
+  // range; a bool operand always fits. Decline (let the normal path run) when
+  // the range is missing. The signed()/unsigned() REINTERPRETS instead need the
+  // input's declared width (reinterpret_W) — that is enforced in their switch
+  // arms below.
   if (!operand_is_bool) {
-    if (tc->kind == upass::Typecast_kind::to_uint && !vmin) {
-      return false;
-    }
     if (tc->kind == upass::Typecast_kind::to_sized && (!vmax || !vmin)) {
       return false;
     }
@@ -2442,11 +2463,23 @@ bool uPass_runner::try_lower_typecast() {
                  "build the string from comptime data, or print it via a debug statement");
       return true;
 
-    case upass::Typecast_kind::to_int:
+    case upass::Typecast_kind::to_signed:
+      // REINTERPRET as signed (Verilog $signed): keep the input's bits, re-tag
+      // the sign. A `uN` value's bit N-1 becomes the sign (no gate — just a wire
+      // alias + a signed typespec).
       if (operand_is_bool) {
         emit_inline_sext(dst, arg_name, 0);  // 1-bit signed: true = -1, false = 0
+        emit_inline_typespec(dst, 1, true);
       } else {
-        emit_inline_binding(dst, arg_node);  // `int` is unbounded → value-preserving
+        if (reinterpret_W == 0) {
+          cast_error("cast-not-typed",
+                     std::format("`{}(...)` reinterpret needs a fully-typed input (a known bit width)", callee),
+                     "give the operand a sized type (`:uN`/`:sN`) before reinterpreting its sign");
+          return true;
+        }
+        // Read bit W-1 as the sign: same W bits, now a signed value/range.
+        emit_inline_sext(dst, arg_name, static_cast<int>(reinterpret_W) - 1);
+        emit_inline_typespec(dst, static_cast<int>(reinterpret_W), true);
       }
       return true;
 
@@ -2461,17 +2494,22 @@ bool uPass_runner::try_lower_typecast() {
       return true;
 
     case upass::Typecast_kind::to_uint:
+      // REINTERPRET as unsigned (Verilog $unsigned): keep the input's bits,
+      // re-tag the sign. A negative `sN` value reads as its 2^N magnitude.
       if (operand_is_bool) {
         emit_inline_get_mask(dst, arg_node, mask1);  // unsigned bit: true = 1, false = 0
+        emit_inline_typespec(dst, 1, false);
         return true;
       }
-      if (vmin && vmin->is_negative()) {
-        cast_error("cast-overflow",
-                   std::format("`{}(...)` of a possibly-negative value cannot be represented unsigned", callee),
-                   "ensure the value is non-negative, or use a `wrap`/`sat` prefix to drop bits");
+      if (reinterpret_W == 0) {
+        cast_error("cast-not-typed",
+                   std::format("`{}(...)` reinterpret needs a fully-typed input (a known bit width)", callee),
+                   "give the operand a sized type (`:uN`/`:sN`) before reinterpreting its sign");
         return true;
       }
-      emit_inline_binding(dst, arg_node);  // already ≥ 0 → value-preserving
+      // Mask to the low W bits: same bits, now an unsigned value/range.
+      emit_inline_get_mask(dst, arg_node, std::string(Dlop::get_mask_value(reinterpret_W)->to_pyrope()));
+      emit_inline_typespec(dst, static_cast<int>(reinterpret_W), false);
       return true;
 
     case upass::Typecast_kind::to_sized: {
@@ -6207,7 +6245,18 @@ void uPass_runner::dead_code_eliminate_staging() {
       const bool parent_is_stmts = staging->get_type(parent) == N::Lnast_ntype_stmts;
       auto       t               = staging->get_type(node);
 
-      // Empty stmts subtree (other than the body shell directly under top).
+      // Empty stmts subtree. Droppable ONLY when it is a block-scope wrapper
+      // sitting directly inside another `stmts` block — that is the noise
+      // constprop's dead-branch elimination leaves behind. An empty stmts that
+      // is a POSITIONAL child of an `if`/`for`/`while` (an arm body / loop
+      // body) must be preserved: an if node's children are (cond, stmts) pairs
+      // plus an optional trailing else-stmts, so deleting an empty arm body
+      // SHIFTS every following sibling — e.g. `if a {…} elif b {} else {…}`
+      // would lose the empty `elif b` body and slide the `else` into the `elif`
+      // slot. For a conditional reg write that turns the intended hold into a
+      // garbage write (the `else` value lands on the elif path), which is
+      // exactly the no-auto-hold trap. Gating on parent==stmts keeps the
+      // dead-branch cleanup (those wrappers are emitted as stmts-under-stmts).
       if (t == N::Lnast_ntype_stmts) {
         bool has_live_child = false;
         for (auto c = node.first_child(); c.is_valid(); c = c.next_sibling()) {
@@ -6216,7 +6265,7 @@ void uPass_runner::dead_code_eliminate_staging() {
             break;
           }
         }
-        if (!has_live_child && staging->get_type(parent) != N::Lnast_ntype_top) {
+        if (!has_live_child && parent_is_stmts) {
           dead_stmts.insert(key);
           changed = true;
         }

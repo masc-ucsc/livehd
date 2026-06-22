@@ -32,7 +32,7 @@ cassert(__mult(a=(1, 99)) == 99)
 
 // Sext vs Zext on the same value highlight the sign-bit handling.
 comb cell_sext_top(a:u8) -> (y:sint) { y = a#sext[0..=7] }
-comb cell_zext_top(a:u8) -> (y:uint) { y = a#zext[0..=7] }
+comb cell_zext_top(a:u8) -> (y:unsigned) { y = a#zext[0..=7] }
 cassert(cell_sext_top(0x80) == -128)
 cassert(cell_zext_top(0x80) == 128)
 cassert(cell_sext_top(0x7f) == 127)

@@ -1,0 +1,12 @@
+/*
+:name: mod_runtime_divisor
+:type: error
+:tolg: 1
+:error: runtime divisor
+*/
+// `a % b` with a RUNTIME divisor has no hardware lowering — only a comptime
+// power-of-two divisor, `% 3`, or a divisor provably larger than `a` lowers to
+// shift/mask (tolg lower_mod).
+comb foo(a:u8, b:u8) -> (r) {
+  r = a % b
+}

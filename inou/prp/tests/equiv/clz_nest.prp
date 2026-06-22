@@ -17,14 +17,14 @@
 // `--reader yosys-verilog` front-end, which prp-yvr-clz_nest reproduces (REFUTED).
 comb clz(io_in:u10) -> (io_out:u4) {
   io_out = 10                       // no leading 1 found -> all 10 bits are zero
-  if io_in#[0] { io_out = 9 }
-  if io_in#[1] { io_out = 8 }
-  if io_in#[2] { io_out = 7 }
-  if io_in#[3] { io_out = 6 }
-  if io_in#[4] { io_out = 5 }
-  if io_in#[5] { io_out = 4 }
-  if io_in#[6] { io_out = 3 }
-  if io_in#[7] { io_out = 2 }
-  if io_in#[8] { io_out = 1 }
-  if io_in#[9] { io_out = 0 }       // MSB checked last -> highest priority
+  if io_in#[0] != 0 { io_out = 9 }
+  if io_in#[1] != 0 { io_out = 8 }
+  if io_in#[2] != 0 { io_out = 7 }
+  if io_in#[3] != 0 { io_out = 6 }
+  if io_in#[4] != 0 { io_out = 5 }
+  if io_in#[5] != 0 { io_out = 4 }
+  if io_in#[6] != 0 { io_out = 3 }
+  if io_in#[7] != 0 { io_out = 2 }
+  if io_in#[8] != 0 { io_out = 1 }
+  if io_in#[9] != 0 { io_out = 0 }       // MSB checked last -> highest priority
 }

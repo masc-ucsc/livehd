@@ -10,8 +10,8 @@
 // (negative ⇒ signed). These attributes are populated only when a
 // concrete type pins them; otherwise they read nil.
 
-const a:int  = 3
-cassert(a.[bits] == nil)        // `int` is unbounded
+const a:signed  = 3
+cassert(a.[bits] == nil)        // `signed` is unbounded
 cassert(a.[max]  == nil)
 cassert(a.[min]  == nil)
 

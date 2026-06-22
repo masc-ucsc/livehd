@@ -21,7 +21,7 @@
 //
 // Cases that would require a compile-error path (writing a `const`,
 // implicit basic-type conversion, writing a `const` field, value
-// outside `int(max=N)`) are described in comments but not exercised —
+// outside `signed(max=N)`) are described in comments but not exercised —
 // the test harness has no `:expect_fail:` flag yet, so each negative
 // path is left commented out next to the positive assertion it pairs
 // with.
@@ -107,11 +107,11 @@ cassert(rec.tg.[bits] == nil)   // complex field — no numeric envelope
 cassert(rec.[bits]    == nil)   // aggregate poisoned
 
 
-// ── 9. `int(max=N)` pins only `max`. `min` and `bits` stay nil. A
+// ── 9. `signed(max=N)` pins only `max`. `min` and `bits` stay nil. A
 //       value exceeding the bound would fail at use; we only assert
 //       the in-range case here.
-const bounded:int(max=3) = 2
+const bounded:signed(max=3) = 2
 cassert(bounded.[max]  == 3)
 cassert(bounded.[min]  == nil)
 cassert(bounded.[bits] == nil)
-// const overflow:int(max=3) = 4   // would compile error: value > max
+// const overflow:signed(max=3) = 4   // would compile error: value > max

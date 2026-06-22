@@ -21,7 +21,7 @@ const total = sum_pair<u9>(p = inner)
 cassert(total == 150)
 
 // Fully nested in one expression.
-const total2 = sum_pair<int>(p = pair<int>(a = 3, b = 4))
+const total2 = sum_pair<signed>(p = pair<signed>(a = 3, b = 4))
 cassert(total2 == 7)
 
 // Inference all the way through.

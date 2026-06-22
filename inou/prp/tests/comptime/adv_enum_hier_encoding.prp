@@ -10,12 +10,12 @@ enum Animal = (
   bird   = enum(eagle, parrot),
   mammal = enum(rat, human)
 )
-cassert(int(Animal.bird)         == 0ub000001)
-cassert(int(Animal.bird.eagle)   == 0ub000011)
-cassert(int(Animal.bird.parrot)  == 0ub000101)
-cassert(int(Animal.mammal)       == 0ub001000)
-cassert(int(Animal.mammal.rat)   == 0ub011000)
-cassert(int(Animal.mammal.human) == 0ub101000)
+cassert(u8(Animal.bird)         == 0ub000001)
+cassert(u8(Animal.bird.eagle)   == 0ub000011)
+cassert(u8(Animal.bird.parrot)  == 0ub000101)
+cassert(u8(Animal.mammal)       == 0ub001000)
+cassert(u8(Animal.mammal.rat)   == 0ub011000)
+cassert(u8(Animal.mammal.human) == 0ub101000)
 const human_rat = Animal.mammal.rat | Animal.mammal.human
 cassert(Animal.mammal     in human_rat)
 cassert(Animal.mammal.rat in human_rat)

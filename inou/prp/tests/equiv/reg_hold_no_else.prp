@@ -1,0 +1,26 @@
+/*
+:name: reg_hold_no_else
+:type: equiv
+:verilog_top: reg_hold_no_else.regfile
+:pyrope_top: reg_hold_no_else.regfile
+*/
+
+// Regression for the "conditional reg write with no covering else does NOT
+// auto-hold" trap, pure-write form (the register-file write). The reg is never
+// READ inside the if, so there was no read to force the hold path to the flop
+// q — the unwritten path fell back to a DON'T-CARE next-state instead of
+// holding. It must auto-hold (read q on the unwritten path) like Verilog's
+// non-blocking `<=`, matching the golden's implicit hold when neither write
+// enable fires.
+//   we_b -> r = bdata   (higher priority)
+//   we_a -> r = adata
+//   none -> HOLD
+mod regfile(we_a:bool, we_b:bool, adata:u8, bdata:u8) -> (q:u8@[0]) {
+  reg r:u8 = 0
+  if we_b {
+    r = bdata
+  } elif we_a {
+    r = adata
+  }
+  q = r
+}

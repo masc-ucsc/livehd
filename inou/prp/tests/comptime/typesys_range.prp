@@ -23,8 +23,8 @@ cassert(b == 3)
 cassert(b.[max] >= 3)
 
 // Bounded type: declared max/min envelope derives bits.
-// (`:[range=…]`/`int(range=…)` are compile errors — see errors/readonly_attr_range.)
-const c:int(max=15, min=0) = 5
+// (`:[range=…]`/`signed(range=…)` are compile errors — see errors/readonly_attr_range.)
+const c:signed(max=15, min=0) = 5
 cassert(c.[bits] == 4)
 cassert(c.[max] == 15)
 cassert(c.[min] == 0)
@@ -42,7 +42,7 @@ cassert(s.[bits] == nil)
 
 // Arithmetic narrows the *effective* range to the declared type's bound,
 // not to the runtime expression's value.
-mut d:int(max = 15) = 1
+mut d:signed(max = 15) = 1
 d = d + 14
 cassert(d == 15)
 cassert(d.[max] == 15)

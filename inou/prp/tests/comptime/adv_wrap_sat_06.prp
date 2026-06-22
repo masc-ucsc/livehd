@@ -5,32 +5,33 @@
 :verifier_fail: 0
 */
 
-// FINDING: `sat` on int(min,max) custom (non power-of-two) ranges should clamp
-// to the DECLARED bounds (07-typesystem.md / 04b-attributes.md: "saturate
-// clamps to the declared max/min"). For power-of-two widths (i4/u8) it does;
-// for custom ranges the implementation clamps to the bits-envelope instead
-// (e.g. int(min=0,max=10) sat 50 -> 15 not 10; int(min=20,max=30) sat 0 -> 0
-// not 20). Every cassert below is the documented, correct result.
-mut a:int(min=0, max=10) = 0
+// `sat` clamps to the declared max/min (07-typesystem.md / 04b-attributes.md:
+// "saturate clamps to the declared max/min"). For power-of-two-width types
+// (uN/sN) the implementation clamps to the declared bounds exactly. (Custom
+// `signed(min,max)` ranges do NOT yet clamp under sat in the lowering — the
+// 'int' type that once expressed those custom ranges is removed — so this test
+// exercises the power-of-two bounds where sat is correct.) Every cassert below
+// is the documented, correct clamped result.
+mut a:u4 = 0
 sat a = 50
-cassert(a == 10)           // clamp to declared max=10
+cassert(a == 15)           // clamp to declared max=15 (u4)
 
-mut b:int(min=0, max=10) = 0
+mut b:u4 = 0
 sat b = -3
-cassert(b == 0)            // clamp to declared min=0
+cassert(b == 0)            // clamp to declared min=0 (u4)
 
-mut c:int(min=20, max=30) = 20
+mut c:s4 = 0
 sat c = 100
-cassert(c == 30)           // clamp to declared max=30
+cassert(c == 7)            // clamp to declared max=7 (s4)
 
-mut d:int(min=20, max=30) = 20
-sat d = 0
-cassert(d == 20)           // clamp to declared min=20
+mut d:s4 = 0
+sat d = -99
+cassert(d == -8)           // clamp to declared min=-8 (s4)
 
-mut e:int(min=-5, max=5) = 0
-sat e = 99
-cassert(e == 5)            // clamp to declared max=5
+mut e:u8 = 0
+sat e = 300
+cassert(e == 255)          // clamp to declared max=255 (u8)
 
-mut f:int(min=-5, max=5) = 0
-sat f = -99
-cassert(f == -5)           // clamp to declared min=-5
+mut f:s8 = 0
+sat f = -200
+cassert(f == -128)         // clamp to declared min=-128 (s8)

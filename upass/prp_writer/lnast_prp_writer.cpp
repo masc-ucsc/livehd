@@ -1080,11 +1080,11 @@ std::string Lnast_prp_writer::render_type_at(Lnast_nid type_nid) {
       // prim_type_int( [max], [min] ) — both children optional (absent ⇒ unbounded).
       auto c_max = lnast->get_child(type_nid);
       if (c_max.is_invalid()) {
-        return "int";  // unbounded integer
+        return "signed";  // unbounded signed (was `int`)
       }
       auto c_min = lnast->get_sibling_next(c_max);
       if (c_min.is_invalid()) {
-        return "int";  // single-sided bound — no clean uN/sN spelling
+        return "signed";  // single-sided bound — no clean uN/sN spelling
       }
       auto max_t = lnast->get_name(c_max);
       auto min_t = lnast->get_name(c_min);
@@ -1101,7 +1101,7 @@ std::string Lnast_prp_writer::render_type_at(Lnast_nid type_nid) {
           return "s" + std::to_string(m + 1);
         }
       }
-      return "int";  // safe, lossy fallback — `int` accepts any value and re-parses
+      return "signed";  // safe, lossy fallback — `signed` (unbounded) accepts any value
     }
     case N::Lnast_ntype_comp_type_array: {
       // comp_type_array( elem_type, const("[N]") ) -> "[N]elemtype".  The size

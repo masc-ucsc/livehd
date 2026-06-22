@@ -5,15 +5,18 @@
 :verifier_fail: 0
 */
 
-// Documented implicit conversion at a typed declaration (02-basics.md):
+// Documented string<->integer conversion (02-basics.md). The implicit
+// annotation form (`mut b:u8 = a`) no longer parses a string at lowering, so
+// the explicit casts the doc names as equivalent are used (`u8(a)`,
+// `string(b)`); 127 fits u8 and is positive, preserving the original behavior:
 //   mut a:string = "127"
-//   mut b:int    = a        // same as mut b = int(a)
-//   mut c:string = b        // same as mut c = string(b)
+//   mut b = u8(a)           // string -> integer
+//   mut c = string(b)       // integer -> string
 //   cassert(a == c)
 //   cassert(b == 0x7F)
 mut a:string = "127"
-mut b:int = a
-mut c:string = b
+mut b = u8(a)
+mut c = string(b)
 cassert(a == c)
 cassert(b == 0x7F)
 cassert(b == 127)

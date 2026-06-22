@@ -1,0 +1,12 @@
+/*
+:name: mod_signed_dividend
+:type: error
+:tolg: 1
+:error: possibly-negative
+*/
+// `a % 8` with a possibly-negative `a` has no hardware lowering: signed modulo
+// semantics are language-dependent, so the easy power-of-two mask only applies
+// to a non-negative dividend (tolg lower_mod).
+comb foo(a:s8) -> (r) {
+  r = a % 8
+}

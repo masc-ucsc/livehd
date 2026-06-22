@@ -14,7 +14,7 @@
 // `s` additionally exercises a SIGNED source slice: `i#sext[28..=31]` is a
 // 4-bit signed value dropped into an 8-bit slot (bits 5..12), so the sign bit
 // fans out across bits 9..12 — then a `#sext` read sign-extends the whole 13.
-comb foo(i:u32) -> (io_sextImm:i64, io_direct:u13, s_sext:i64) {
+comb foo(i:u32) -> (io_sextImm:s64, io_direct:u13, s_sext:s64) {
   mut b:u13 = nil
   b#[0]      = i#[0]
   b#[1..=4]  = i#[8..=11]

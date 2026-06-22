@@ -148,7 +148,7 @@ void uPass_typecheck::require_all(Kind required, Kind result, std::string_view s
   } else if (bad) {
     std::string_view hint = (required == Kind::boolean)
                                 ? "logical ops need boolean operands; use `&`/`|`/`^` for bitwise integers"
-                                : "no implicit conversion — cast explicitly (e.g. `int(b)`, `int(true)==-1`)";
+                                : "no implicit conversion — cast explicitly (e.g. `signed(b)`, `signed(true)==-1`)";
     emit_type_error(code, std::format("operator `{}` requires {} operands", sym, kind_name(required)), hint);
   }
   set_dst_kind(dst, result);
@@ -180,7 +180,7 @@ void uPass_typecheck::require_shift(std::string_view sym, Bundle& dst, upass::Sr
   } else if (bad) {
     emit_type_error("type-mismatch-arith",
                     std::format("operator `{}` requires integer operands", sym),
-                    "no implicit conversion — cast explicitly (e.g. `int(b)`, `int(true)==-1`)");
+                    "no implicit conversion — cast explicitly (e.g. `signed(b)`, `signed(true)==-1`)");
   }
   set_dst_kind(dst, Kind::integer);
 }
@@ -219,7 +219,7 @@ void uPass_typecheck::require_same(Kind result, std::string_view sym, std::strin
       }
       emit_type_error(code,
                       std::format("`{}` requires both operands to be the same type ({})", sym, ops),
-                      "no implicit conversion — cast explicitly (e.g. `int(b)`, `x == false`)");
+                      "no implicit conversion — cast explicitly (e.g. `signed(b)`/`unsigned(b)`, `x == false`)");
     }
   }
   set_dst_kind(dst, result);
@@ -290,7 +290,7 @@ upass::Vote uPass_typecheck::process_store(std::string_view dst_name, Bundle& ds
                                 kind_name(rhs),
                                 dst_name,
                                 kind_name(cur)),
-                    "use a new variable, or cast explicitly (e.g. `int(x)`)");
+                    "use a new variable, or cast explicitly (e.g. `signed(x)`/`unsigned(x)`)");
   }
   return Vote::keep;
 }
@@ -317,7 +317,10 @@ void uPass_typecheck::process_if() {
       } else if (k != Kind::unknown && k != Kind::boolean) {
         emit_type_error("cond-not-bool",
                         std::format("condition must be boolean, got {}", kind_name(k)),
-                        "compare explicitly, e.g. `if x != 0`",
+                        k == Kind::integer
+                            ? "an integer (e.g. a bit select `x#[0]`) is a value, not a condition — "
+                              "did you mean `!= 0`? (write `if x#[0] != 0`)"
+                            : "compare explicitly, e.g. `if x != 0`",
                         span_from_nid(if_nid));
       }
     }
@@ -342,7 +345,10 @@ void uPass_typecheck::process_while() {
     } else if (k != Kind::unknown && k != Kind::boolean) {
       emit_type_error("cond-not-bool",
                       std::format("while condition must be boolean, got {}", kind_name(k)),
-                      "compare explicitly, e.g. `while x != 0`",
+                      k == Kind::integer
+                          ? "an integer (e.g. a bit select `x#[0]`) is a value, not a condition — "
+                            "did you mean `!= 0`? (write `while x#[0] != 0`)"
+                          : "compare explicitly, e.g. `while x != 0`",
                       span_from_nid(while_nid));
     }
   }
@@ -401,7 +407,7 @@ void uPass_typecheck::process_range() {
   if (bad) {
     emit_type_error("type-mismatch-range",
                     "operator `..=` requires integer operands",
-                    "no implicit conversion — cast explicitly (e.g. `int(b)`, `int(true)==-1`)");
+                    "no implicit conversion — cast explicitly (e.g. `signed(b)`, `signed(true)==-1`)");
   }
   if (!dst_name.empty() && runner_st != nullptr) {
     if (auto b = runner_st->get_bundle_for_write(dst_name); b) {

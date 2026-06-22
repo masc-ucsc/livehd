@@ -4,8 +4,8 @@
 :error: settable only through a type|cannot write
 */
 
-// `max`/`min` may only be set through a TYPE (`:int(max=,min=)`, `:uN`/`:sN`),
+// `max`/`min` may only be set through a TYPE (`:signed(max=,min=)`, `:uN`/`:sN`),
 // never via an attribute write. Enforced by upass/semacheck (goal 1h).
 
-mut x:int:[max=3] = 1 // locate_error_here
+mut x:signed:[max=3] = 1 // locate_error_here
 cassert(x == 1)

@@ -1,0 +1,23 @@
+/*
+:name: mod_lower
+:type: equiv
+:verilog_top: mod_lower.foo
+:pyrope_top: mod_lower.foo
+*/
+
+// `a % b` lowered to shift/mask for the easy, unambiguous cases (tolg
+// lower_mod). LiveHD uses truncated modulo semantics (sign of the dividend),
+// matching Verilog `%`, so the golden simply uses `%` and yosys/lgcheck proves
+// the lowering bit-exact:
+//   rp2      = a % 8    power-of-two divisor → a & 7   (mask the low 3 bits)
+//   rp2b     = a % 64   power-of-two divisor → a & 63
+//   rfit     = c % 8    c:u3 max 7 < 8       → c       (no remainder, passthrough)
+//   rfit_big = c % 100  c < 100              → c       (passthrough, divisor > a)
+//   rone     = a % 1    always 0
+comb foo(a:u8, c:u3) -> (rp2:u3, rp2b:u6, rfit:u3, rfit_big:u8, rone:u1) {
+  rp2      = a % 8
+  rp2b     = a % 64
+  rfit     = c % 8
+  rfit_big = c % 100
+  rone     = a % 1
+}

@@ -11,8 +11,8 @@
 // exception-3 (unique-kind) binding the same way in both: the probe accepting a
 // candidate that the real bind would reject is the divergence this guards.
 
-comb f1(flag:bool, n:u8) -> (r:int) { r = if flag { int(n) } else { 0 } }
-comb f2(s:u16, t:u16)    -> (r:int) { r = int(s) + int(t) }
+comb f1(flag:bool, n:u8) -> (r:signed) { r = if flag { signed(n) } else { 0 } }
+comb f2(s:u16, t:u16)    -> (r:signed) { r = signed(s) + signed(t) }
 const ovl = [f1, f2]
 
 const b = true            // a bool VARIABLE (not a literal at the call site)

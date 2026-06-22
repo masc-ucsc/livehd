@@ -12,7 +12,7 @@ comb twice<T>(x:T) -> (r) { r = x + x }
 comb quad<T>(x:T) -> (r) { r = twice<T>(x=x) + twice<T>(x=x) }
 
 const a = quad<u8>(x=3)    // (3+3)+(3+3) == 12
-const b = quad<i8>(x=-2)   // (-2-2)+(-2-2) == -8
+const b = quad<s8>(x=-2)   // (-2-2)+(-2-2) == -8
 const c = quad<u16>(x=100) // 400
 
 cassert(a == 12)

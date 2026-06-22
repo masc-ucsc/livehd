@@ -16,13 +16,13 @@ comb init_from_bool(ref self, b:bool) {
   self.tag = 1
   self.kind = "bool"
 }
-comb init_from_int(ref self, n:int) {
+comb init_from_int(ref self, n:signed) {
   self.tag = n
   self.kind = "int"
 }
 
 type Cell = (
-  mut tag:int = nil,
+  mut tag:signed = nil,
   mut kind:string = "",
   const init = [init_from_bool, init_from_int]
 )

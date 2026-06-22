@@ -10,8 +10,8 @@
 // share the SAME argument rules, so same-kind args are named (`a=...`); the
 // arity then selects the overload.
 
-comb add2(a:int, b:int) -> (r:int) { r = a + b }
-comb add3(a:int, b:int, c:int) -> (r:int) { r = a + b + c }
+comb add2(a:signed, b:signed) -> (r:signed) { r = a + b }
+comb add3(a:signed, b:signed, c:signed) -> (r:signed) { r = a + b + c }
 
 const add = [add2, add3]
 

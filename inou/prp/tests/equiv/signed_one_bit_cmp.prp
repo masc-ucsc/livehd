@@ -1,0 +1,27 @@
+/*
+:name: signed_one_bit_cmp
+:type: equiv
+:verilog_top: signed_one_bit_cmp.p
+:pyrope_top: signed_one_bit_cmp.p
+*/
+
+// KNOWN-FAILING (fixme tracker). Ordered comparison of a 1-bit SIGNED value is
+// computed UNSIGNED, so this REFUTES today.
+//
+//   signed(x#[3]) reinterprets the u1 bit as s1 = {-1, 0}; a set bit is -1, so
+//   `signed(x#[3]) < 0` MUST equal x[3]. It does not.
+//
+// ROOT CAUSE (debugged): LiveHD stores a value's width as `bits = magnitude+1`
+// and re-derives signedness from it (tolg `bind_result` drops the per-op signed
+// hint). A 1-bit value has 0 magnitude bits, so its sign is dropped — it reads
+// UNSIGNED everywhere. pass/lec/encode.cpp LT then uses BITVECTOR_ULT (signed
+// only when BOTH operands are signed), and cgen emits an unsigned `reg`.
+//   * EQUALITY (== -1), WIDENING (s8 + s1), and ROUND-TRIP (unsigned(signed(b)))
+//     are all CORRECT — only ordered compares (< <= > >=) of a 1-bit signed are
+//     wrong, and only at W==1 (W>=2 is correct).
+//   * Fixing it means letting a 1-bit value carry a sign (touches the core
+//     bits/sign convention + pass/lec/encode.cpp + cgen) — deferred.
+//   * Related declared-`:s1` range bug ([1,1] -> [-1,0]) was FIXED in prp2lnast.
+comb p(x:u8) -> (b:bool) {
+  b = signed(x#[3]) < 0
+}

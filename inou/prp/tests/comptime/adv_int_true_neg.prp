@@ -6,6 +6,6 @@
 */
 // bool -> int: true is the all-ones (1-bit signed) value = -1; false = 0.
 // Hence string(int(true)) is the decimal "-1".
-cassert(int(true)  == -1)
-cassert(int(false) == 0)
-cassert(string(int(true)) == "-1")
+cassert(signed(true)  == -1)
+cassert(signed(false) == 0)
+cassert(string(signed(true)) == "-1")

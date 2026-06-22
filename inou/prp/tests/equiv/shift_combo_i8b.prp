@@ -12,4 +12,4 @@
 // logical (zero-fill) shift, wrong for negative `a`. cgen now isolates the SRA
 // in a self-determined signed context `$signed($signed(a) >>> b)`. Independent
 // iverilog sim was 384/1024 wrong before, 0/1024 after.
-pub comb top(a:i8, b:u2) -> (r:i8) { wrap r = (a << b) ^ (a >> b) }
+pub comb top(a:s8, b:u2) -> (r:s8) { wrap r = (a << b) ^ (a >> b) }

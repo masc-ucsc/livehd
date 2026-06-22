@@ -18,6 +18,8 @@
 #include "str_tools.hpp"
 #include "upass_verifier.hpp"
 #include "range_bits.hpp"  // classify_typecast + max/min_from_bits for uN()/sN() casts
+#include "wrap_sat.hpp"    // wrap_to_signed/unsigned for signed()/unsigned() reinterpret
+#include "decl_facts.hpp"  // lookup() recovers the reinterpret input's declared width
 
 // Registered once here (not in the header) to avoid duplicate-registration
 // errors when multiple TUs include upass_constprop.hpp.
@@ -3269,13 +3271,13 @@ void uPass_constprop::process_func_call() {
 
   // Enumerate known typecast dispatch (shared name classifier so the runtime
   // hardware lowering in upass.runner stays in lock-step — see range_bits.hpp).
-  enum class Cast { none, to_int, to_uint, to_string, to_sized, to_bool };
+  enum class Cast { none, to_signed, to_uint, to_string, to_sized, to_bool };
   Cast kind       = Cast::none;
   bool sized_sig  = false;  // true for sN, false for uN
   int  sized_bits = 0;
   if (auto tc = upass::classify_typecast(fname)) {
     switch (tc->kind) {
-      case upass::Typecast_kind::to_int: kind = Cast::to_int; break;
+      case upass::Typecast_kind::to_signed: kind = Cast::to_signed; break;
       case upass::Typecast_kind::to_uint: kind = Cast::to_uint; break;
       case upass::Typecast_kind::to_string: kind = Cast::to_string; break;
       case upass::Typecast_kind::to_bool: kind = Cast::to_bool; break;
@@ -3342,6 +3344,11 @@ void uPass_constprop::process_func_call() {
     }
     args.push_back(actual.value);
   }
+  // A `signed`/`unsigned` REINTERPRET needs the originating variable's declared
+  // width (it operates only on a fully-typed input); capture its name now (the
+  // value-only `args` pipeline below drops it).
+  const std::string cast_arg_var
+      = (actuals->size() == 1 && !(*actuals)[0].is_named) ? (*actuals)[0].var_name : std::string{};
   move_to_parent();
 
   // Parse a scalar from either a string (re-parse its textual content) or an
@@ -3361,6 +3368,8 @@ void uPass_constprop::process_func_call() {
   };
 
   Dlop result;
+  int  reinterpret_bits = 0;      // signed/unsigned reinterpret: the recovered input width
+  bool reinterpret_sign = false;  // and its new sign tag (for the typespec stamp below)
   if (kind == Cast::to_string) {
     auto stringified = stringify_concat_trivials(args);
     if (!stringified.has_value()) {
@@ -3375,26 +3384,43 @@ void uPass_constprop::process_func_call() {
     if (v.is_invalid()) {
       return;
     }
-    if (kind == Cast::to_uint) {
-      if (v.is_bool() && !v.has_unknowns()) {
-        // bool → unsigned: the lone bit reads as an unsigned magnitude, so
-        // `uint(true) == 1` and `uint(false) == 0` (NOT the signed
-        // `int(true) == -1` — the target's signedness decides).
-        v = *Dlop::from_pyrope(v.is_known_true() ? "1" : "0");
-      } else if (v.is_string() || v.is_negative()) {
-        // Cast failure (non-numeric string or negative) → pyrope `nil`.
-        v = Dlop::nil();
-      }
-      result = v;
-    } else if (kind == Cast::to_int) {
+    if (kind == Cast::to_uint || kind == Cast::to_signed) {
+      // `signed`/`unsigned` REINTERPRET (Verilog $signed/$unsigned): keep the
+      // input's bits and width, flip only the sign tag. Operates ONLY on a
+      // fully-typed input (a known bit width). A `uN` value reinterpreted signed
+      // reads bit N-1 as a sign (0xFF:u8 -> -1:s8); a negative `sN` value
+      // reinterpreted unsigned wraps to its magnitude (-1:s8 -> 255:u8).
+      const bool want_signed = (kind == Cast::to_signed);
       if (v.is_string()) {
-        v = Dlop::nil();
+        result = Dlop::nil();
       } else if (v.is_bool() && !v.has_unknowns()) {
-        // `int(true) == -1` (true is the 1-bit signed all-ones value);
-        // `int(false) == 0`. (2f-string_cast ruling.)
-        v = *Dlop::from_pyrope(v.is_known_true() ? "-1" : "0");
+        // a bool is a 1-bit value: unsigned(bool) -> {0,1}; signed(bool) -> {0,-1}.
+        result           = *Dlop::from_pyrope(v.is_known_true() ? (want_signed ? "-1" : "1") : "0");
+        reinterpret_bits = 1;
+        reinterpret_sign = want_signed;
+      } else {
+        uint32_t W = 0;
+        if (!cast_arg_var.empty()) {
+          if (auto f = upass::decl_facts::lookup(st(), lm->get_lnast().get(), cast_arg_var); f) {
+            W = f->bits;
+          }
+        }
+        if (W == 0) {
+          livehd::diag::sink().emit(livehd::diag::Diagnostic{
+              .severity = livehd::diag::Severity::error,
+              .code     = "cast-not-typed",
+              .category = "type",
+              .pass     = "upass.constprop",
+              .message  = std::format("`{}(...)` reinterpret needs a fully-typed input (a known bit width)", fname),
+              .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+              .hint     = "give the operand a sized type (`:uN`/`:sN`) before reinterpreting its sign",
+          });
+          return;
+        }
+        result = want_signed ? upass::bitwidth::wrap_to_signed(v, W) : upass::bitwidth::wrap_to_unsigned(v, W);
+        reinterpret_bits = static_cast<int>(W);
+        reinterpret_sign = want_signed;
       }
-      result = v;
     } else if (kind == Cast::to_bool) {
       // `bool(int)` == (v != 0); `bool(true/false)` is identity. Per
       // 04-variables.md a typecast from an undefined (`?`) or `nil` value is a
@@ -3452,16 +3478,25 @@ void uPass_constprop::process_func_call() {
 
   store_trivial(dst, result);
 
-  // The sized cast also TYPES its result (`u8(1)` is a u8-typed value, not a
-  // bare literal — the generics inference and `.[max]` reads key on the
-  // declared envelope). Stamp the dst entry's declared range.
-  if (kind == Cast::to_sized && sized_bits > 0 && !result.is_string() && !result.is_nil()) {
+  // A sized cast (`u8(1)`) OR a signed/unsigned reinterpret TYPES its result —
+  // not a bare literal — so the generics inference and `.[max]` reads key on the
+  // declared envelope. Stamp the dst entry's declared range (width + sign).
+  int  type_bits = 0;
+  bool type_sign = false;
+  if (kind == Cast::to_sized && sized_bits > 0) {
+    type_bits = sized_bits;
+    type_sign = sized_sig;
+  } else if ((kind == Cast::to_signed || kind == Cast::to_uint) && reinterpret_bits > 0) {
+    type_bits = reinterpret_bits;
+    type_sign = reinterpret_sign;
+  }
+  if (type_bits > 0 && !result.is_string() && !result.is_nil()) {
     if (auto b = st().get_bundle_for_write(dst); b && (b->is_empty() || b->has_trivial("0"))) {
       Bundle::Entry e = b->get_entry("0");
       e.immutable     = false;
       e.kind          = upass::Kind::integer;
-      e.decl_max      = upass::max_from_bits(static_cast<uint32_t>(sized_bits), sized_sig);
-      e.decl_min      = upass::min_from_bits(static_cast<uint32_t>(sized_bits), sized_sig);
+      e.decl_max      = upass::max_from_bits(static_cast<uint32_t>(type_bits), type_sign);
+      e.decl_min      = upass::min_from_bits(static_cast<uint32_t>(type_bits), type_sign);
       b->set("0", std::move(e));
     }
   }

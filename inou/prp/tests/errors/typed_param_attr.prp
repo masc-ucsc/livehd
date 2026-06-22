@@ -4,7 +4,7 @@
 :error: open argument list
 */
 // A `[...]` slot after a lambda name is an attribute / comptime parameter, and
-// attributes carry NO type. `comb g[n:int=1](x)` is therefore invalid — a typed
+// attributes carry NO type. `comb g[n:signed=1](x)` is therefore invalid — a typed
 // parameter is not allowed. (Pass the value as a regular `(name)` parameter.)
-comb g[n:int=1](x) -> (r) { r = x * n }
+comb g[n:signed=1](x) -> (r) { r = x * n }
 const a = g[3](x=2)

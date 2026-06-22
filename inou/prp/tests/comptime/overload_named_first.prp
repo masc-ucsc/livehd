@@ -8,8 +8,8 @@
 // 2f-overload — named-argument dispatch and tuple-order (first-match) priority.
 
 // Named arguments bind by name; arity still selects the overload.
-comb sub2(a:int, b:int)        -> (r:int) { r = a - b }
-comb sub3(a:int, b:int, c:int) -> (r:int) { r = a - b - c }
+comb sub2(a:signed, b:signed)        -> (r:signed) { r = a - b }
+comb sub3(a:signed, b:signed, c:signed) -> (r:signed) { r = a - b - c }
 const sub = [sub2, sub3]
 
 cassert(sub(a=10, b=3) == 7)
@@ -17,8 +17,8 @@ cassert(sub(a=10, b=3, c=2) == 5)
 
 // First-match: when more than one candidate would accept the call, the earliest
 // in the gather wins (no ambiguity error — declaration order is the tie-break).
-comb pick_first(a:int, b:int)  -> (r:int) { r = 1 }
-comb pick_second(a:int, b:int) -> (r:int) { r = 2 }
+comb pick_first(a:signed, b:signed)  -> (r:signed) { r = 1 }
+comb pick_second(a:signed, b:signed) -> (r:signed) { r = 2 }
 const pick = [pick_first, pick_second]
 
 cassert(pick(a=4, b=5) == 1)   // both match → first wins

@@ -14,6 +14,6 @@
 // (previously the outer `>>>` was bare and demoted to logical → wrong for
 // negative a, e.g. a=-128,b=1). Verified cvc5 + lgyosys both PROVEN; guards
 // against a regression in the per-operand signedness isolation.
-pub comb top(a:i8, b:u2) -> (r:i8) {
+pub comb top(a:s8, b:u2) -> (r:s8) {
   wrap r = ((a >> b) >> b) ^ (a << b)
 }

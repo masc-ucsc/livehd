@@ -1,0 +1,13 @@
+/*
+:name: removed_int_cast
+:type: error
+:tolg: 1
+:error: cast was removed
+*/
+
+// The `int(x)` cast was removed. Use `signed(x)`/`unsigned(x)` (sign reinterpret)
+// or a sized `uN(x)`/`sN(x)`.
+
+pub comb t(a:u8) -> (r:u8) {
+  r = int(a)
+}

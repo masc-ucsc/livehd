@@ -7,7 +7,7 @@
 
 // FAILING regression for 2i-issues C: a tuple/struct-typed INPUT port is valid,
 // documented Pyrope (docs/pyrope/06-functions.md:357 shows exactly
-// `comb pick(ar:(x:u3, y:i4), cond:bool) -> (res:i5)`). It must flatten to leaf
+// `comb pick(ar:(x:u3, y:s4), cond:bool) -> (res:s5)`). It must flatten to leaf
 // ports ar_x / ar_y, and the body's `ar.x` / `ar.y` reads must bind to those
 // flattened leaves.
 //
@@ -18,6 +18,6 @@
 // leaves do — so lower_tuple_get cannot resolve `ar.x`. Fix is to bind a
 // tuple_get whose base is a tuple-typed input to the flattened leaf pin (or have
 // upass.detuple rewrite the field reads to dotted-leaf refs). Pairs with D.
-pub comb top(ar:(x:u3, y:i4), cond:bool) -> (res:i5) {
+pub comb top(ar:(x:u3, y:s4), cond:bool) -> (res:s5) {
   res = if cond { ar.x + 1 } else { ar.y - 1 }
 }

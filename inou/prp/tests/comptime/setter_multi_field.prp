@@ -14,7 +14,7 @@
 //   - method bound via tuple field captures `self` correctly when called
 //     through two different instances (no cross-talk)
 
-comb set_pair(ref self, a:int, b:int) {
+comb set_pair(ref self, a:signed, b:signed) {
   self.x = a
   self.y = b
 }
@@ -24,15 +24,15 @@ comb get_pair(self) -> (r) {
 }
 
 // Conditional mutator: only updates `x` when `flag` is true.
-comb maybe_set_x(ref self, v:int, flag:bool) {
+comb maybe_set_x(ref self, v:signed, flag:bool) {
   if flag {
     self.x = v
   }
 }
 
 comptime const Pair = (
-  mut x:int = 0,
-  mut y:int = 0,
+  mut x:signed = 0,
+  mut y:signed = 0,
   const init = set_pair,  // constructor, runs at construction
   const set  = set_pair,  // same comb as explicit method
   const get  = get_pair,

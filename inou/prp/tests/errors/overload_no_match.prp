@@ -9,8 +9,8 @@
 // arguments for either the 2-arg or the 3-arg candidate), dispatch fails with
 // a clear compile error rather than silently picking one.
 
-comb add2(a:int, b:int) -> (r:int) { r = a + b }
-comb add3(a:int, b:int, c:int) -> (r:int) { r = a + b + c }
+comb add2(a:signed, b:signed) -> (r:signed) { r = a + b }
+comb add3(a:signed, b:signed, c:signed) -> (r:signed) { r = a + b + c }
 
 const add = [add2, add3]
 

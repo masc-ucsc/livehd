@@ -441,7 +441,7 @@ void Prp2lnast::check_decl_init_kind(std::string_view name, const Lnast_node& va
                            scalar_kind_name(vk),
                            value.get_name()),
                "no implicit conversion — the initializer must match the declared type, or cast explicitly "
-               "(e.g. `int(x)`, `x == false`)");
+               "(e.g. `signed(x)`/`unsigned(x)`, `x == false`)");
 }
 
 
@@ -2362,20 +2362,17 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     if (has_decl && reg_decl_head.is_invalid() && overflow_kind.empty() && !ts_node_is_null(tc)) {
       const TSNode      ty = child_by_field(tc, "type");
       const Scalar_kind dk = declared_scalar_kind(ty);
-      // Bounded int types carry a trailing width digit (`u3`/`s8`) or range args
-      // (children, e.g. `int(min=0,max=3)`); bare `int`/`uint`/`sint` is unbounded.
-      const bool is_unbounded_int
-          = dk == Scalar_kind::integer && ts_node_named_child_count(ty) == 0 && [&] {
-              std::string_view tt = trim(get_text(ty));
-              return tt == "int" || tt == "uint" || tt == "sint";
-            }();
+      // An UNBOUNDED `string` declaration normalizes its literal initializer with
+      // an idempotent `string(...)` wrap. (The old unbounded-`int` wrap is gone:
+      // there is no value-preserving integer cast anymore — `signed`/`unsigned`
+      // are sign reinterprets that need a fully-typed input — so a bare
+      // `:signed`/`:unsigned`/`:uint` integer initializer is bound directly.)
       const bool is_nil_init = store_value.is_const() && store_value.get_name() == "nil";
-      if ((is_unbounded_int || dk == Scalar_kind::string) && extract_array_dims(tc).empty() && !is_nil_init) {
-        const char* cast   = (dk == Scalar_kind::integer) ? "int" : "string";
-        Lnast_node  casted = builder.mint_tmp_ref();
-        auto        fc     = builder.add_child(Lnast_ntype::create_func_call());
+      if (dk == Scalar_kind::string && extract_array_dims(tc).empty() && !is_nil_init) {
+        Lnast_node casted = builder.mint_tmp_ref();
+        auto       fc     = builder.add_child(Lnast_ntype::create_func_call());
         lnast->add_child(fc, casted);
-        lnast->add_child(fc, Lnast_node::create_ref(cast));
+        lnast->add_child(fc, Lnast_node::create_ref("string"));
         lnast->add_child(fc, store_value);
         store_value = casted;
       }
@@ -5460,8 +5457,10 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
   }
   auto bits_to_bounds = [&](int n, std::string& maxt, std::string& mint) {
     if (signed_base) {
-      maxt = std::string(Dlop::get_mask_value(n - 1)->to_pyrope());
-      mint = std::string(Dlop::get_neg_mask_value(n - 1)->to_pyrope());
+      // Narrow-width warts: get_mask_value(0) and get_neg_mask_value(0/1) return
+      // 1, so s1 would mis-range to [1,1]. s1 is {-1,0}, s2 is {-2..1}.
+      maxt = (n <= 1) ? "0" : std::string(Dlop::get_mask_value(n - 1)->to_pyrope());
+      mint = (n == 1) ? "-1" : (n == 2) ? "-2" : std::string(Dlop::get_neg_mask_value(n - 1)->to_pyrope());
     } else {
       maxt = std::string(Dlop::get_mask_value(n)->to_pyrope());
       mint = "0";
@@ -5727,8 +5726,10 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
       const int  n         = *w;
       const bool is_signed = (t == "sint_type");
       if (is_signed) {
-        max_txt = std::string(Dlop::get_mask_value(n - 1)->to_pyrope());
-        min_txt = std::string(Dlop::get_neg_mask_value(n - 1)->to_pyrope());
+        // s1 is {-1,0}, s2 is {-2..1}: dodge the get_mask_value(0)/
+        // get_neg_mask_value(0,1) wart that returns 1 (would give s1 = [1,1]).
+        max_txt = (n <= 1) ? "0" : std::string(Dlop::get_mask_value(n - 1)->to_pyrope());
+        min_txt = (n == 1) ? "-1" : (n == 2) ? "-2" : std::string(Dlop::get_neg_mask_value(n - 1)->to_pyrope());
       } else {
         max_txt = std::string(Dlop::get_mask_value(n)->to_pyrope());
         min_txt = "0";
@@ -7552,6 +7553,29 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
   lnast->add_child(idx, ref);
   lnast->add_child(idx, base);
   lnast->add_child(idx, mask_ref);
+
+  // A constant, non-negative mask selects a fixed width W = popcount(mask): type
+  // the result `uW` so `signed(x#[lo..=hi])`/`unsigned(...)` see a first-class
+  // width — even a high slice (`x#[32..=63]`, mask 0xFFFF_FFFF_0000_0000) whose
+  // mask exceeds int64 and so is invisible to the bitwidth pass. Open carve-outs
+  // (negative mask) and dynamic ranges keep their source-derived width.
+  if (mask_ref.is_const()) {
+    auto mv = Dlop::from_pyrope(mask_ref.get_name());
+    if (!mv->is_invalid() && mv->is_integer() && !mv->is_negative()) {
+      const int w = mv->popcount();
+      // Type every constant-mask slice, single bit included: `x#[3]` is `u1`, a
+      // bit VALUE — not a boolean. `if x#[0] { ... }` is therefore a type error
+      // (write `if x#[0] != 0`), matching `if 5 { }` being rejected. This keeps
+      // bool and int from silently mixing.
+      if (w >= 1) {
+        auto ts_idx = builder.add_child(Lnast_ntype::create_type_spec());
+        lnast->add_child(ts_idx, ref);
+        auto pt = lnast->add_child(ts_idx, Lnast_ntype::create_prim_type_int());
+        lnast->add_child(pt, Lnast_node::create_const(std::string(Dlop::get_mask_value(w)->to_pyrope())));  // max = 2^w-1
+        lnast->add_child(pt, Lnast_node::create_const("0"));                                                // min = 0
+      }
+    }
+  }
 
   if (!ts_node_is_null(type_node)) {
     std::string_view rt(ts_node_type(type_node));

@@ -5,17 +5,19 @@
 :verifier_fail: 0
 */
 
-cassert(3 == int("3"))
-cassert("-4".int() == -4)
+// String->number parsing now rides on the sized casts (`uN`/`sN`); `int`/`uint`
+// were removed (`signed`/`unsigned` are sign reinterprets and need bit-typed input).
+cassert(3 == s8("3"))
+cassert(s8("-4") == -4)
 
 cassert(string(1+2) == "3")
 const v = u32("33")
 cassert(v == 33)
 
-cassert("0ub010101".uint() == 0ub10101)
+cassert(u8("0ub010101") == 0ub10101)
 
-cassert("-1".uint() == nil)
+cassert(s8("-1") == -1)
 
 cassert(string("hello ", "world ", 4) == string(string("hello"), string(" world "), string(4)) == "hello world 4")
 
-cassert(uint("0xFF") == 255)
+cassert(u8("0xFF") == 255)

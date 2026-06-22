@@ -7,19 +7,19 @@
 
 // Phase 8 — partial pinning. Only the attributes the type explicitly
 // constrains become readable; the rest stay nil. The bounds are pinned with
-// the type-call `:int(max=N[, min=M])` (the `:[max=N]` size-attribute form is
+// the type-call `:signed(max=N[, min=M])` (the `:[max=N]` size-attribute form is
 // gone — `attr_set` of max/min/bits/size is rejected by lnastfmt; sizing is
 // only through the type).
 
-const x:int(max=3) = 2
+const x:signed(max=3) = 2
 cassert(x.[max]  == 3)
 cassert(x.[min]  == nil)
 cassert(x.[bits] == nil)
 
-// Fully-bounded range: `int(min=-8, max=7)` is exactly `s4`, so the width is
-// derivable and `.[bits]` reports it. (Contrast the half-bounded `int(max=3)`
+// Fully-bounded range: `signed(min=-8, max=7)` is exactly `s4`, so the width is
+// derivable and `.[bits]` reports it. (Contrast the half-bounded `signed(max=3)`
 // above, whose envelope is incomplete, so its `.[bits]` stays nil.)
-const y:int(min=-8, max=7) = 0
+const y:signed(min=-8, max=7) = 0
 cassert(y.[min]  == -8)
 cassert(y.[max]  == 7)
 cassert(y.[bits] == 4)

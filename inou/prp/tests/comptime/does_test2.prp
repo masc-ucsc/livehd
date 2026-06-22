@@ -27,9 +27,9 @@ cassert(not (a does bool))
 cassert(u32 does u16)         // u32 ⊇ u16
 cassert(not (u16 does u32))   // u16 ⊉ u32
 cassert(not (u32 does string))
-cassert(int does u32)         // unbounded signed ⊇ u32
-cassert(not (u32 does int))   // u32 ⊉ unbounded
-cassert(a does int(max=0xffffffff, min=0))  // int-call type literal
+cassert(uint does u32)         // unbounded unsigned ⊇ u32
+cassert(not (u32 does uint))   // u32 ⊉ unbounded unsigned
+cassert(s33 does u32)          // wider signed type s33 ⊇ u32 (signed typed envelope)
 
 // ── typed equals (does both ways, types included) ───────────────────────
 cassert(u32 equals u32)

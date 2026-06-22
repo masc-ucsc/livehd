@@ -1,0 +1,11 @@
+/*
+:name: removed_int_type
+:type: error
+:error: type was removed
+*/
+
+// The `int` type was removed. Use `signed` (unbounded) or a sized `sN`.
+
+pub comb t(a:int) -> (r:u8) {
+  r = 0
+}

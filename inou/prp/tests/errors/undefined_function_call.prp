@@ -1,0 +1,13 @@
+/*
+:name: undefined_function_call
+:type: error
+:tolg: 1
+:error: undefined function
+*/
+
+// Any call to a name that is not a defined pipe/mod/comb or a built-in cast is a
+// hard error (it used to silently wire the outputs to nil).
+
+pub comb t(a:u8) -> (r:u8) {
+  r = no_such_fn(a)
+}

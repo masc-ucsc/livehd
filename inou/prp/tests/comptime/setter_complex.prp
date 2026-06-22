@@ -5,7 +5,7 @@
 :verifier_fail: 0
 */
 
-const fint:int = 0
+const fint:signed = 0
 cassert(fint == 0)
 
 mut fbool:bool = false

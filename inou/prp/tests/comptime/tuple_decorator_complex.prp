@@ -5,7 +5,7 @@
 :verifier_fail: 0
 */
 
-comb init_xy(ref self, x:int, y:int) {
+comb init_xy(ref self, x:signed, y:signed) {
   self._x = x
   self._y = y
 }

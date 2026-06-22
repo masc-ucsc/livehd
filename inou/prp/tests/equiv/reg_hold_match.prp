@@ -1,0 +1,23 @@
+/*
+:name: reg_hold_match
+:type: equiv
+:verilog_top: reg_hold_match.selreg
+:pyrope_top: reg_hold_match.selreg
+*/
+
+// Regression for the auto-hold trap on the `unique if` / `match` lowering path
+// (Hotmux per variable). With no `else`/default arm and no in-if read, the
+// none-of-the-conds slot used to be a width-matched don't-care; for a reg it
+// must instead HOLD the flop q, matching the golden's `default` hold.
+//   sel==0 -> r = a
+//   sel==1 -> r = b
+//   else   -> HOLD
+mod selreg(sel:u2, a:u8, b:u8) -> (q:u8@[0]) {
+  reg r:u8 = 0
+  unique if sel == 0 {
+    r = a
+  } elif sel == 1 {
+    r = b
+  }
+  q = r
+}

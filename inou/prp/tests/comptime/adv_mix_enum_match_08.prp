@@ -18,4 +18,4 @@ cassert(not (Perm.ex in mask))
 
 const view = (const acl=mask)
 cassert(Perm.rd in view.acl)
-cassert(int(Perm.rd) | int(Perm.wr) == int(mask))
+cassert((u3(Perm.rd) | u3(Perm.wr)) == u3(mask))

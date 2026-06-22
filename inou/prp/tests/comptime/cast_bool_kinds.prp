@@ -10,12 +10,12 @@
 //   * to an UNSIGNED target (`uint`, `uN`) → the unsigned magnitude bit: true = 1.
 // (The runtime hardware lowering matches this exactly — see
 // inou/prp/tests/equiv/rt_typecast.prp.)
-cassert(int(true)   == -1)
-cassert(int(false)  ==  0)
+cassert(signed(true)   == -1)
+cassert(signed(false)  ==  0)
 cassert(s8(true)    == -1)
 cassert(s8(false)   ==  0)
-cassert(uint(true)  ==  1)
-cassert(uint(false) ==  0)
+cassert(unsigned(true)  ==  1)
+cassert(unsigned(false) ==  0)
 cassert(u8(true)    ==  1)
 cassert(u8(false)   ==  0)
 cassert(u1(true)    ==  1)

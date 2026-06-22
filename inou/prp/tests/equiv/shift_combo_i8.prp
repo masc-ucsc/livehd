@@ -16,6 +16,6 @@
 // `$signed($signed(a) >>> amt)`. Verified 0/1024 mismatches under iverilog and
 // PROVEN equivalent under both cvc5 (on the LGraph) and lgyosys (on the cgen
 // output).
-pub comb top(a:i8, b:u2) -> (r:i8) {
+pub comb top(a:s8, b:u2) -> (r:s8) {
   wrap r = (a << b) ^ (a >> b)
 }

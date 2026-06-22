@@ -1,0 +1,28 @@
+/*
+:name: reg_hold_empty_elif
+:type: equiv
+:verilog_top: reg_hold_empty_elif.pcunit
+:pyrope_top: reg_hold_empty_elif.pcunit
+*/
+
+// Regression for the "conditional reg write with no covering else does NOT
+// auto-hold" trap. An EMPTY `elif` arm (the classic PC stall idiom) must keep
+// its position in the if/elif/else chain: the runner's dead-code elimination
+// used to drop the empty `elif stall {}` body, which slid the trailing `else`
+// into the stall slot — so the PC took the `else` value while stalled and held
+// (garbage) otherwise. The empty arm must instead HOLD the flop (read q on the
+// unwritten path), matching the golden's explicit `pcr <= pcr` on stall.
+//   taken  -> pcr = tgt
+//   stall  -> HOLD  (empty arm)
+//   else   -> pcr = nx
+mod pcunit(taken:bool, stall:bool, tgt:u8, nx:u8) -> (pc:u8@[0]) {
+  reg pcr:u8 = 0
+  if taken {
+    pcr = tgt
+  } elif stall {
+    // intentionally empty: hold pcr while stalled
+  } else {
+    pcr = nx
+  }
+  pc = pcr
+}

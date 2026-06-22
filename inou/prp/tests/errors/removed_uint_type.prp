@@ -1,0 +1,11 @@
+/*
+:name: removed_uint_type
+:type: error
+:error: type was removed
+*/
+
+// The `uint` type was removed. Use `unsigned` (unbounded) or a sized `uN`.
+
+pub comb t(a:uint) -> (r:u8) {
+  r = 0
+}

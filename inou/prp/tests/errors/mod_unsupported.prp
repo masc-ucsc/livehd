@@ -1,0 +1,12 @@
+/*
+:name: mod_unsupported
+:type: error
+:tolg: 1
+:error: only a power-of-two divisor
+*/
+// `a % 5` (a non-power-of-two, non-3 divisor that is not provably larger than
+// `a`) has no hardware lowering — Pyrope has no general hardware modulo (tolg
+// lower_mod).
+comb foo(a:u8) -> (r) {
+  r = a % 5
+}

@@ -5,8 +5,8 @@
 :help: max=
 */
 
-// `int(range=…)` would be pure sugar for `int(max=,min=)`, so it is not a
-// type argument — one way to bound an integer type.
+// `unsigned(range=…)` would be pure sugar for `unsigned(max=,min=)`, so it is not
+// a type argument — one way to bound an integer type.
 
-const c:int(range = 0..=15) = 5 // locate_error_here
+const c:unsigned(range = 0..=15) = 5 // locate_error_here
 cassert(c == 5)
