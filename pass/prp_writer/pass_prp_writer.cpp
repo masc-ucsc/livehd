@@ -6,6 +6,8 @@
 #include <fstream>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <vector>
 
 #include "lnast_prp_writer.hpp"
 
@@ -48,6 +50,19 @@ void Pass_prp_writer::work(Eprp_var& var) {
     return;
   }
 
+  // Cross-unit signature scan: a multi-output `comb` callee is INLINED on
+  // re-compile, so `r = C(...)` is the rejected `multi-output-one-var` whole-bind
+  // — the writer must destructure it.  Pre-scan every unit so each per-unit
+  // writer knows which callees need that treatment (and their output names).
+  std::unordered_map<std::string, std::vector<std::string>> multi_out_combs;
+  for (const auto& ln : var.lnasts) {
+    std::string              nm;
+    std::vector<std::string> outs;
+    if (Lnast_prp_writer::scan_multi_out_comb(ln, nm, outs)) {
+      multi_out_combs.emplace(std::move(nm), std::move(outs));
+    }
+  }
+
   for (const auto& ln : var.lnasts) {
     auto module_name = ln->get_top_module_name();
     auto fname       = std::format("{}/{}.prp", out_dir, module_name);
@@ -60,6 +75,7 @@ void Pass_prp_writer::work(Eprp_var& var) {
 
     Lnast_prp_writer writer(out, ln);
     writer.set_debug(debug_on);
+    writer.set_multi_out_combs(&multi_out_combs);
     writer.write_all();
     out.close();
 

@@ -1957,9 +1957,12 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
     I(op != Ntype_op::Sub && op != Ntype_op::Memory);
 
     auto out_count = node.out_edges().size();
-    if (out_count == 0) {
+    if (out_count == 0 && !is_type_flop(node)) {
       continue;
     }
+    // A flop whose Q has no readers is still emitted by create_registers (it always
+    // assigns `q <= ___next_q`), so it MUST get its `reg` declaration here too —
+    // otherwise the netlist references an undeclared name (e.g. a_exmem_valid).
 
     auto        dpin         = node.get_driver_pin(0);
     std::string name         = get_scaped_name(pin_wire_name(dpin));

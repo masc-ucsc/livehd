@@ -866,6 +866,19 @@ private:
       // `init` is the Pyrope-source spelling; `initial` the importer's.  Both
       // override the declare's reset value.
       info.initial_txt = std::string(val);
+    } else if (str_tools::ci_equal(key, "name")) {
+      // Explicit local flop name (`reg x:[name="reg_x"]`) — overrides the
+      // declared variable name; finalize_regs combines it with any hier prefix.
+      // The value is a Pyrope string literal, so strip the surrounding quotes.
+      std::string_view nm = val;
+      if (nm.size() >= 2 && ((nm.front() == '\'' && nm.back() == '\'') || (nm.front() == '"' && nm.back() == '"'))) {
+        nm = nm.substr(1, nm.size() - 2);
+      }
+      info.name_override = std::string(nm);
+    } else if (key == "__hier") {
+      // Runner-stamped instance-path prefix for a reg inside an inlined comb
+      // (`pipeB_ex_mem`); finalize_regs prepends it (dotted) to the local name.
+      info.hier_prefix = std::string(val);
     } else if (str_tools::ci_equal(key, "type") || str_tools::ci_equal(key, "comptime")) {
       // storage-class markers — already consumed by the declare
     } else {
@@ -884,6 +897,42 @@ private:
     for (const auto& name : reg_order_) {
       auto& info = reg_info_.at(name);
       auto& flop = info.flop;
+
+      // Hierarchical / overridden flop name. `name_override` (`reg x::[name=…]`)
+      // replaces the local name; `hier_prefix` (runner `__hier`, the instance
+      // path of the inlined comb) is prepended dotted — so an inlined reg reads
+      // `pipeB_ex_mem.reg_x`, the same get_hier_name() a non-inlined Sub gives.
+      if (!info.hier_prefix.empty() || !info.name_override.empty()) {
+        // Recover the clean source-local name from the connectivity name by
+        // stripping the inliner's frame tag (`inl<salt>_`) and any SSA suffix.
+        auto strip_inl_tag = [](std::string_view s) -> std::string_view {
+          if (s.size() > 4 && s.compare(0, 3, "inl") == 0) {
+            std::size_t i = 3;
+            while (i < s.size() && s[i] >= '0' && s[i] <= '9') {
+              ++i;
+            }
+            if (i > 3 && i < s.size() && s[i] == '_') {
+              return s.substr(i + 1);
+            }
+          }
+          return s;
+        };
+        std::string local;
+        if (!info.name_override.empty()) {
+          local = info.name_override;
+        } else {
+          local = std::string(strip_inl_tag(name));
+          if (auto p = local.find("___ssa_"); p != std::string::npos) {
+            local.resize(p);
+          }
+        }
+        const std::string final_name = info.hier_prefix.empty() ? local : (info.hier_prefix + "." + local);
+        if (!final_name.empty()) {
+          auto qn = flop.create_driver_pin(0);
+          livehd::graph_util::set_pin_name(qn, final_name);
+          flop.set_name(final_name);
+        }
+      }
 
       // Runs after the walk: anchor this reg's diagnostics at its declaration
       // instead of whatever statement the walk ended on.
@@ -1390,6 +1439,9 @@ private:
     bool             negreset = false;
     std::string      initial_txt;  // explicit initial=N (overrides init_txt)
     bool             is_latch = false;  // mode "latch": Ntype_op::Latch, wire din+enable only
+    // Hierarchical naming (call-site `name=` on an inlined comb / `reg x::[name=]`):
+    std::string      name_override;  // explicit `name=` — replaces the local flop name
+    std::string      hier_prefix;    // runner-stamped `__hier` instance path (e.g. "pipeB_ex_mem")
   };
 
   // Shadow pin_map_ keys for a reg's next-state value and write-enable. The
@@ -2836,13 +2888,31 @@ private:
       // instance name (Pyrope `id_ex = Mod(...)`; slang now passes inst.name as
       // the dst). Strip an SSA suffix. Only an anonymous/temp dst falls back to
       // the synthesized unique `u_<module>_<id>` name.
+      // A call-site `name=` (reserved `__inst_name` actual) takes precedence
+      // over the dst-derived name — the explicit instance/hierarchy name.
+      std::string callsite_inst;
+      for (auto a = lnast_->get_sibling_next(callee_n); !a.is_invalid(); a = lnast_->get_sibling_next(a)) {
+        if (!Lnast_ntype::is_store(lnast_->get_type(a))) {
+          continue;
+        }
+        auto an = lnast_->get_first_child(a);
+        if (an.is_invalid() || lnast_->get_name(an) != "__inst_name") {
+          continue;
+        }
+        if (auto v = lnast_->get_sibling_next(an); !v.is_invalid()) {
+          callsite_inst = std::string(lnast_->get_name(v));
+        }
+        break;
+      }
       std::string dst_txt(lnast_->get_name(dst));
       bool        is_tmp = dst_txt.size() >= 3 && dst_txt.substr(0, 3) == "___";
       std::string inst_name = dst_txt;
       if (auto p = inst_name.find("___ssa_"); p != std::string::npos) {
         inst_name = inst_name.substr(0, p);
       }
-      if (!is_tmp && !inst_name.empty()) {
+      if (!callsite_inst.empty()) {
+        sub.set_name(callsite_inst);
+      } else if (!is_tmp && !inst_name.empty()) {
         sub.set_name(inst_name);
       } else {
         std::string suffix = is_tmp ? dst_txt.substr(3) : dst_txt;
@@ -2872,6 +2942,11 @@ private:
         // callee. (A true `ref self` mod method splices in the runner and
         // never reaches the Sub path.)
         if (pname == "__ufcs_arg" && (cio.inputs.empty() || cio.inputs[0].name != "self")) {
+          continue;
+        }
+        // Reserved call-site instance name — already consumed for sub.set_name
+        // above; never a callee port (don't bind, don't count toward arity).
+        if (pname == "__inst_name") {
           continue;
         }
       } else {

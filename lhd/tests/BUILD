@@ -140,6 +140,17 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Call-site `name=` (`f::[name=inst](args)`) sets the Sub instance name and
+# `reg x:[name="..."]` sets the local flop name, so a `mod` instantiated twice
+# yields the hierarchical flop names (pipeA_ex_mem.reg_mem_writedata, …) LEC
+# uses to correspond state with a hierarchical Verilog reference (cvc5-proven).
+sh_test(
+    name = "callsite_name_test",
+    size = "large",
+    srcs = ["callsite_name_test.sh"],
+    data = ["//lhd"],
+)
+
 # 2c-color / 2p hierarchical-input (prerequisite for 2a-abc): color + partition
 # descend a multi-module Pyrope hierarchy (combinational + sequential fixtures),
 # re-link Sub instances, and the partitioned design stays LEC-equivalent.

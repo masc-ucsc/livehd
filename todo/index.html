@@ -40,7 +40,6 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 <li><a class="xref" href="pyrope/3f-fluid.html">3f-fluid</a> <code>fluid</code> lambdas: valid/retry/fire elastic lowering (parses only today).</li>
 <li><a class="xref" href="pyrope/3f-testbench.html">3f-testbench</a> Testbench extras: <code>peek</code>/<code>poke</code>, <code>waitfor</code>, <code>force</code>/<code>release</code>, <code>sigref</code>, <code>spawn</code>/<code>join</code>/<code>cancel</code> (plain <code>test</code>/<code>step</code> works).</li>
 <li><a class="xref" href="pyrope/3f-macro.html">3f-macro</a> <code>macro=</code> memory-compiler binding (<code>reg ram:[1024]u32:[macro="sram_32kx32"]</code>).</li>
-<li><a class="xref" href="pyrope/3f-verif_extras.html">3f-verif_extras</a> <code>covercase</code>, in-language <code>lec()</code>, <code>requires</code>/<code>ensures</code>.</li>
 <li><a class="xref" href="pyrope/3p.html">3p</a> Pyrope standard hardware library (<code>prplib.ware</code>) for common pipelined and non-pipelined designs: adders, multipliers, shifters, GCD, and debug/experimental blocks; includes deciding where <code>prplib</code> resides and how imports resolve. Also owns the comptime/software stdlib <code>import("prp")</code>: plus/len/map/filter/reduce, strings, math.</li>
 </ul></li>
 <li><em>Group 4:</em><ul>
@@ -57,11 +56,10 @@ file:lines, and fixes). The implemented forms previously listed here landed and 
 removed — <code>implies</code>, runtime bit/array index, full-width / open-ended
 slices, reductions, the slice-merge, tuple-typed <em>input</em> and <em>output</em>
 ports (2i-issues C, D), the signed-shift idiom (E), reserved-word signal names (F),
-and overload-gathering call dispatch — do not re-file. Temporal ops, <code>fluid</code>,
-and in-language <code>lec()</code>/<code>covercase</code> have their own pages above
+and overload-gathering call dispatch — do not re-file. Temporal ops and <code>fluid</code>
+have their own pages above
 (<a class="xref" href="pyrope/3f-temporal.html">3f-temporal</a>,
-<a class="xref" href="pyrope/3f-fluid.html">3f-fluid</a>,
-<a class="xref" href="pyrope/3f-verif_extras.html">3f-verif_extras</a>).</p>
+<a class="xref" href="pyrope/3f-fluid.html">3f-fluid</a>).</p>
 
 <p><em>Hard error — survives elaboration, no hardware lowering:</em></p>
 <table>
@@ -84,6 +82,7 @@ and in-language <code>lec()</code>/<code>covercase</code> have their own pages a
 <li><a class="xref" href="livehd/lec.html">lec</a> Relational equivalence engine roadmap — combinational, sequential (inductive flop-cut + BMC reset phases), memory arrays, and combinational <code>Sub</code> flattening have landed on the cvc5-direct backend (reference: <code>pass/lec/lec.md</code>); remaining is the fast-incremental def-diff reduction (M3, on <a class="xref" href="livehd/2f-semdiff.html">2f-semdiff</a>), sequential/black-box assume-guarantee + CEGAR (M5), and the persistent certificate cache (M6).</li>
 <li><a class="xref" href="livehd/2p-piper.html">2p-piper</a> <code>pass.piper</code> — the lgraph pipeline-timing pass that <em>verifies</em> <code>@[N]</code> (exact cycle-count type check) and <em>inserts</em> <code>stage[N]</code> flops, decided where the global &sigma; timing lives. A new <code>Ntype_op::Stage</code> cell marks an <strong>undecided</strong> stage (allowed <code>0..n</code> flop range; codegen is illegal while one survives); tolg shrinks to emitting <code>Stage</code> cells + attrs, and piper resolves them (min-legal depth, LEC-checked) — consolidating the timing logic that today is smeared across <code>upass.timecheck</code> (kept as best-effort early diagnostics), the inline tolg <code>Time_checker</code> (deleted), and <code>upass.pipe</code> (folded in).</li>
 <li><a class="xref" href="livehd/2f-formal.html">2f-formal</a> Single-graph formal property engine on the <a class="xref" href="livehd/lec.html">lec</a> Encoder — encode-once + collapse, deterministic cone-scaled <code>rlimit</code> budget. A reusable library (<code>is_true</code>/<code>equal</code>/<code>bits_equal</code>/<code>is_constant</code>) for future <code>pass/memory</code> &amp; <code>pass.abc</code> callers, plus an always-on tier proving user <code>assert</code>/<code>assume</code> <em>and</em> built-in obligations — first up <strong>Hotmux selector one-hotness</strong> (no frontend work) — with the same prove ⇒ remove / disprove-over-free-inputs ⇒ error / else keep-for-runtime cascade, and a silenceable warning whenever something is deferred to runtime.</li>
+<li><a class="xref" href="livehd/2d-cex_debug.html">2d-cex_debug</a> Actionable <a class="xref" href="livehd/lec.html">lec</a> counterexamples for the REFUTE case: report the <strong>first diverging internal cut</strong> (not the output it propagated to) <strong>source-mapped</strong> to a <code>file:line</code> (via <code>flop_state_key()</code>'s <code>SourceId</code> path + the cgen sourcemap), the full per-cycle primary-input trace, a machine-readable <code>cex.json</code>, and a one-command <code>lhd lec --replay</code> that re-simulates BOTH netlists and VCD-diffs them (reusing <code>core/vcd_reader</code>). Plus auto flop-correspondence from <a class="xref" href="livehd/2f-semdiff.html">2f-semdiff</a> stamps so differently-named pipelines need no hand-built <code>match.txt</code>. Filed from the <code>lec_flow.txt</code> debugging retrospective.</li>
 </ul></li>
 <li><em>Group 3:</em><ul>
 <li><a class="xref" href="livehd/3l.html">3l</a> Demand-driven (lazy) emit + dead-code elimination for upass — remaining sea-of-nodes subtask.</li>

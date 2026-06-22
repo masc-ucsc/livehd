@@ -114,3 +114,12 @@ sh_test(
     data = ["//lhd"],
     tags = ["no-sandbox"],  # runs the in-process cvc5 solver under a time limit
 )
+
+# Verdict -> exit-code policy: PROVEN/UNKNOWN exit 0 (UNKNOWN with a loud
+# inconclusive warning), REFUTED and `--set lec.strict` UNKNOWN exit non-zero.
+sh_test(
+    name = "lec_verdict_policy_test",
+    srcs = ["tests/lec_verdict_policy_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # runs the in-process cvc5 solver
+)

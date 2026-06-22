@@ -40,6 +40,12 @@ static constexpr std::string_view call_generic_arg_marker = "__generic_arg";
 // resolution, so `foo(a=1, ...rest)` binds rest's fields to the matching
 // params. The value child is the spread bundle's ref.
 static constexpr std::string_view call_spread_arg_marker = "__spread_arg";
+// Marks a call-site instance name (`alu::[name=pipeB_ex_mem](…)`): the value
+// child is a const string with the user-chosen instance name. Consumed (never
+// bound to a callee port) by the runner inliner — which uses it as the
+// hierarchical prefix for the inlined regs/mems — and by tolg, which uses it
+// as the Sub instance name when the callee is a non-inlined pipe/mod.
+static constexpr std::string_view call_inst_name_marker = "__inst_name";
 
 namespace {
 std::string slurp_file(std::string_view filename) {
@@ -7805,6 +7811,53 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   TSNode func = child_by_field(n, "function");
   TSNode arg  = child_by_field(n, "argument");  // tuple
 
+  // Call-site attribute `callee::[name=X](args)` parses with the callee wrapped
+  // in an `attribute_set` (parser.cpp made `attribute_set` callable). Peel it:
+  // resolve the bare callee below, and remember name=X so it rides along as the
+  // reserved `__inst_name` actual — consumed by the runner inliner as the
+  // hierarchical prefix for the inlined regs/mems, or by tolg as the Sub
+  // instance name for a non-inlined pipe/mod. Only `name` is supported today.
+  std::string_view callsite_inst_name;
+  if (!ts_node_is_null(func) && std::string_view(ts_node_type(func)) == "attribute_set") {
+    for (uint32_t i = 0, nnc = ts_node_named_child_count(func); i < nnc; ++i) {
+      TSNode           sq = ts_node_named_child(func, i);
+      std::string_view sqt(ts_node_type(sq));
+      if (sqt != "attribute_sq" && sqt != "tuple_sq") {
+        continue;  // the `argument` child (the callee) — handled below
+      }
+      for (uint32_t j = 0, snc = ts_node_named_child_count(sq); j < snc; ++j) {
+        TSNode           item = ts_node_named_child(sq, j);
+        std::string_view it(ts_node_type(item));
+        if (it != "assignment" && it != "attribute_assignment") {
+          report_error(item,
+                       "callsite-attribute",
+                       "name",
+                       "a call-site attribute must be `name=<instance>` — bare flags are not allowed here",
+                       "write `f::[name=my_inst](args)`");
+        }
+        TSNode           lv  = child_by_field(item, "lvalue");
+        TSNode           rv  = child_by_field(item, "rvalue");
+        std::string_view key = ts_node_is_null(lv) ? std::string_view{} : trim(get_text(lv));
+        if (key != "name") {
+          report_error(item,
+                       "callsite-attribute",
+                       "name",
+                       std::format("unsupported call-site attribute '{}' — only `name=<instance>` is allowed", key),
+                       "the call-site `name` sets the instance/hierarchy name for the call");
+        }
+        if (ts_node_is_null(rv)) {
+          report_error(item, "callsite-attribute", "name", "call-site `name` attribute needs a value: `name=<instance>`", "");
+        }
+        std::string_view v = trim(get_text(rv));
+        if (v.size() >= 2 && ((v.front() == '"' && v.back() == '"') || (v.front() == '\'' && v.back() == '\''))) {
+          v = v.substr(1, v.size() - 2);  // accept a quoted form `name='my_inst'` / `name="my_inst"` too
+        }
+        callsite_inst_name = v;
+      }
+    }
+    func = child_by_field(func, "argument");  // the bare callee
+  }
+
   // Method-call form `receiver.method(args)`: the `function` field is a
   // `dot_expression` (receiver '.' identifier). Split it so the call lowers
   // to `fcall(method, receiver, ...args)` — otherwise the whole dotted path
@@ -7849,6 +7902,15 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
 
   auto call_args    = collect_call_args(arg);
   auto generic_args = collect_generic_args(n);
+  if (!callsite_inst_name.empty()) {
+    // Reserved actual: `store(__inst_name, const "X")`. Position-independent
+    // (the runner / tolg match it by name and never bind it to a port).
+    Call_arg ia;
+    ia.is_assign  = true;
+    ia.assign_key = std::string(call_inst_name_marker);
+    ia.value      = Lnast_node::create_const(callsite_inst_name);
+    call_args.push_back(std::move(ia));
+  }
   if (has_receiver) {
     Call_arg receiver_arg;
     receiver_arg.value   = receiver_ref;

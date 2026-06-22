@@ -367,8 +367,9 @@ void Lnast_prp_writer::write_module() {
     // have a declare node (regs, memories, explicit `mut`) are skipped — they
     // are emitted by their declare (the reg/mem hoist pass below).
     {
-      std::unordered_set<std::string> top_decl, nonmut_decl, nested_mut_decl, store_lhs;
-      auto                            scan = [&](auto&& self, Lnast_nid n, bool top) -> void {
+      std::unordered_set<std::string>              top_decl, nonmut_decl, nested_mut_decl, store_lhs;
+      std::unordered_map<std::string, std::string> nested_wire_decl;  // name -> rendered type (or "")
+      auto                                         scan = [&](auto&& self, Lnast_nid n, bool top) -> void {
         for (auto c = lnast->get_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
           const auto t = lnast->get_type(c);
           auto       v = lnast->get_child(c);
@@ -386,6 +387,16 @@ void Lnast_prp_writer::write_module() {
             }
             if (!is_mut) {
               nonmut_decl.insert(nm);  // reg/latch/const: never hoist as `mut`
+              // A `wire` is a module-scope net (it connects a driver to readers
+              // across blocks), but the slang reader declares it at its first
+              // textual READ — which may land inside a nested `if`, leaving the
+              // module-scope store ("X = submod[...]") referencing an
+              // out-of-scope name.  Hoist a nested `wire X:T` to the function top
+              // (declaration only — the store stays the sole, position-
+              // independent driver) and drop the in-place nested declare.
+              if (!top && mode == "wire" && !nested_wire_decl.count(nm)) {
+                nested_wire_decl.emplace(nm, c1.is_invalid() ? std::string{} : render_type_at(c1));
+              }
             } else if (!top) {
               nested_mut_decl.insert(nm);
             }
@@ -426,6 +437,30 @@ void Lnast_prp_writer::write_module() {
         os << "mut " << nm << " = 0\n";
         declared_.insert(nm);
       }
+      // Hoist nested `wire` declares to the function top as a bare `wire X:T`
+      // (no `= 0` — the body store is the wire's single, position-independent
+      // driver; a default init would make it multi-driven).  The in-place nested
+      // declare is dropped via suppress_decl_.
+      std::vector<std::string> wpre;
+      for (const auto& [nm, ty] : nested_wire_decl) {
+        if (!top_decl.count(nm) && !declared_.count(nm) && !pin_cone_.count(nm)) {
+          wpre.push_back(nm);
+        }
+      }
+      std::sort(wpre.begin(), wpre.end());
+      for (const auto& nm : wpre) {
+        print_indent();
+        os << "wire " << nm;
+        if (const auto& ty = nested_wire_decl[nm]; !ty.empty()) {
+          os << ":" << ty;
+        }
+        os << "\n";
+        declared_.insert(nm);
+        suppress_decl_.insert(nm);
+      }
+      // Any `wire` that has a real-statement store driver must not receive
+      // write_declare's combinational `= 0` default (it is single-driver).
+      wire_stored_.insert(store_lhs.begin(), store_lhs.end());
     }
     // Clock/reset-pin dependency CONE (e.g. a derived clock `gclk = clk_b &
     // gate`, or a multi-level `inv = ~gate; gclk = clk_b & inv`) must be DEFINED
@@ -890,11 +925,14 @@ void Lnast_prp_writer::write_declare() {
     } else {
       print(render_value(cur, /*operand_ctx=*/false));
     }
-  } else if (!has_value && kw != "reg" && kw != "latch" && !kw.starts_with("reg ")) {
+  } else if (!has_value && kw != "reg" && kw != "latch" && !kw.starts_with("reg ")
+             && !(kw == "wire" && wire_stored_.count(std::string(lhs)))) {
     // A combinational var declared without an initializer (e.g. a Verilog
     // `BranchProv x;` wire/var) still needs a value in Pyrope — default to 0
     // (the var is unconditionally assigned before any read).  Regs keep their
-    // bare form (no initializer = no reset pin).
+    // bare form (no initializer = no reset pin).  A `wire` that already has a
+    // store driver is single-driver: a `= 0` here would make it multi-driven, so
+    // emit the bare `wire X:T` and let the body store be its sole driver.
     print(" = 0");
   }
   move_to_parent();
@@ -1242,18 +1280,128 @@ void Lnast_prp_writer::write_cassert() {
 
 // ── func_call ─────────────────────────────────────────────────────────────────
 
+// Scan a unit's top to detect a slang-origin multi-output `comb` (see the header
+// note).  Mirrors write_module's `is_mod = body_has_state(body)` decision and
+// emit_port_group's output-port walk, but as a pure read over an arbitrary unit.
+bool Lnast_prp_writer::scan_multi_out_comb(const std::shared_ptr<Lnast>& ln, std::string& name,
+                                           std::vector<std::string>& outputs) {
+  using N   = Lnast_ntype;
+  auto root = ln->get_root();
+  if (root.is_invalid()) {
+    return false;
+  }
+  auto io = ln->get_child(root);
+  if (io.is_invalid() || ln->get_type(io) != N::Lnast_ntype_io) {
+    return false;  // pyrope-origin bare file (func_defs), not a slang io module
+  }
+  auto body = ln->get_sibling_next(io);
+  // `is_mod`: a body with state (reg/latch) OR a submodule func_call must be a
+  // `mod`; only a stateless, instantiation-free body is an inlined `comb`.
+  auto has_state = [&](auto&& self, Lnast_nid nid) -> bool {
+    if (nid.is_invalid()) {
+      return false;
+    }
+    if (ln->get_type(nid) == N::Lnast_ntype_func_call) {
+      return true;
+    }
+    if (ln->get_type(nid) == N::Lnast_ntype_declare) {
+      auto c0 = ln->get_child(nid);
+      auto c1 = c0.is_invalid() ? c0 : ln->get_sibling_next(c0);
+      auto c2 = c1.is_invalid() ? c1 : ln->get_sibling_next(c1);
+      if (!c2.is_invalid() && ln->get_type(c2) == N::Lnast_ntype_const) {
+        auto q = ln->get_name(c2);
+        if (q == "reg" || q == "latch") {
+          return true;
+        }
+      }
+    }
+    for (auto c = ln->get_child(nid); !c.is_invalid(); c = ln->get_sibling_next(c)) {
+      if (self(self, c)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  if (has_state(has_state, body)) {
+    return false;  // a mod: stays a Sub instance, no destructure needed
+  }
+  // Output port names: the io node's SECOND tuple_add child; each port is
+  // `store(ref(name), …)`.
+  auto in_tup  = ln->get_child(io);
+  auto out_tup = in_tup.is_invalid() ? Lnast_nid{} : ln->get_sibling_next(in_tup);
+  if (out_tup.is_invalid()) {
+    return false;
+  }
+  for (auto port = ln->get_child(out_tup); !port.is_invalid(); port = ln->get_sibling_next(port)) {
+    auto name_nid = ln->get_child(port);
+    if (name_nid.is_invalid()) {
+      continue;
+    }
+    auto pn = ln->get_name(name_nid);
+    if (!pn.empty() && pn[0] == '\\') {
+      pn = pn.substr(1);  // strip the SSA/escape prefix the same way strip_prefix does for refs
+    }
+    outputs.emplace_back(pn);
+  }
+  if (outputs.size() <= 1) {
+    return false;  // single-output comb binds to one var fine — no destructure
+  }
+  std::string_view full = ln->get_top_module_name();
+  auto             dot  = full.rfind('.');
+  name                  = std::string(dot == std::string_view::npos ? full : full.substr(dot + 1));
+  return true;
+}
+
 void Lnast_prp_writer::write_func_call() {
   if (!move_to_child()) {
     return;
   }
-  // LHS
-  auto lhs = strip_prefix(current_text());
-  print(decl_prefix(lhs));
-  print(lhs);
-  print(" = ");
-  // function name
+  // LHS (the result/instance variable)
+  auto lhs = std::string(strip_prefix(current_text()));
+  // function name (next sibling)
   move_to_sibling();
-  print(current_text());
+  std::string call_name(current_text());
+  std::string call_tail = call_name;
+  if (auto p = call_tail.rfind('.'); p != std::string::npos) {
+    call_tail = call_tail.substr(p + 1);
+  }
+
+  // A multi-output COMB bound to a real var is rejected by the runner as
+  // `multi-output-one-var` (combs are inlined, so the whole-bind keeps all
+  // returns).  Emit a destructure instead — `mut (r__o0 = C.o0, …) = C(args)` —
+  // and record r__o<i> so the body's `r["o<i>"]` tuple_gets rewrite to it.
+  const std::vector<std::string>* outs = nullptr;
+  if (multi_out_combs_ && !is_tmp(lhs)) {
+    if (auto it = multi_out_combs_->find(call_tail); it != multi_out_combs_->end()) {
+      outs = &it->second;
+    }
+  }
+
+  if (outs != nullptr) {
+    mocomb_dst_.insert(lhs);
+    print("mut (");
+    bool firstd = true;
+    for (const auto& o : *outs) {
+      if (!firstd) {
+        print(", ");
+      }
+      std::string tgt = lhs + "__" + o;
+      mocomb_field_[lhs + std::string(1, '\x01') + o] = tgt;
+      print(tgt);
+      print(" = ");
+      print(call_name);
+      print(".");
+      print(o);
+      firstd = false;
+    }
+    print(") = ");
+    print(call_name);
+  } else {
+    print(decl_prefix(lhs));
+    print(lhs);
+    print(" = ");
+    print(call_name);
+  }
   print("(");
   // arguments — positional args are ref/const nodes; named args are assign
   // nodes (name = value) that must NOT carry the "mut" keyword in call context.
@@ -1961,8 +2109,28 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
       return wrap(std::format("{} & {}", s, mv), /*loose=*/true);
     }
     case N::Lnast_ntype_tuple_get: {
-      auto        base = lnast->get_sibling_next(c0);
-      std::string s    = base.is_invalid() ? std::string{} : render_value(base, /*operand_ctx=*/true);
+      auto base = lnast->get_sibling_next(c0);
+      // Multi-output-comb rewrite: `r["o"]` where `r` is a destructured comb
+      // result becomes the per-output temp `r__o` (see write_func_call).  Only a
+      // single constant field index (a named output) rewrites; any other index
+      // (bit-slice / multi-level) falls through to the normal postfix form.
+      if (!base.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(base))) {
+        std::string bn(strip_prefix(lnast->get_name(base)));
+        if (mocomb_dst_.count(bn) != 0u) {
+          auto idx = lnast->get_sibling_next(base);
+          if (!idx.is_invalid() && lnast->get_sibling_next(idx).is_invalid()
+              && lnast->get_type(idx) == N::Lnast_ntype_const) {
+            std::string field(lnast->get_name(idx));
+            if (field.size() >= 2 && (field.front() == '\'' || field.front() == '"') && field.back() == field.front()) {
+              field = field.substr(1, field.size() - 2);
+            }
+            if (auto it = mocomb_field_.find(bn + std::string(1, '\x01') + field); it != mocomb_field_.end()) {
+              return it->second;
+            }
+          }
+        }
+      }
+      std::string s = base.is_invalid() ? std::string{} : render_value(base, /*operand_ctx=*/true);
       for (auto idx = base.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(base); !idx.is_invalid();
            idx      = lnast->get_sibling_next(idx)) {
         s += "[" + render_value(idx, /*operand_ctx=*/false) + "]";

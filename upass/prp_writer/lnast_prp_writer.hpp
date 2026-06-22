@@ -45,6 +45,17 @@ public:
   bool                            has_unimplemented() const { return !unimplemented_.empty(); }
   const std::vector<std::string>& unimplemented() const { return unimplemented_; }
 
+  // Cross-unit map (callee unit name -> its ordered output port names) for the
+  // multi-output COMB units in the same emit batch.  A `comb` with >1 output is
+  // INLINED by the runner, so `r = C(...)` (whole-bind of multiple returns) is
+  // the rejected `multi-output-one-var` form; the writer instead destructures it
+  // (`(t = C.o, …) = C(...)`).  Mods stay `r = M(...)` (Sub instances).  Owned by
+  // the pass; must outlive write_all().
+  void set_multi_out_combs(const std::unordered_map<std::string, std::vector<std::string>>* m) { multi_out_combs_ = m; }
+  // Scan a unit's LNAST top; if it is a slang-origin multi-output `comb`, set
+  // `name`/`outputs` (ordered output port names) and return true (else false).
+  static bool scan_multi_out_comb(const std::shared_ptr<Lnast>& ln, std::string& name, std::vector<std::string>& outputs);
+
 private:
   std::ostream&          os;
   std::shared_ptr<Lnast> lnast;
@@ -187,6 +198,20 @@ private:
   // Vars whose nested `mut` declare was hoisted to a `mut X = 0` at the function
   // top (see emit_module): write_declare drops the in-place nested declare.
   std::unordered_set<std::string> suppress_decl_;
+  // `wire` net names that have a real-statement store driver somewhere in the
+  // body (populated by write_module's pre-scan).  A `wire` is a single-driver
+  // net, so write_declare must NOT add the combinational `= 0` default to such a
+  // wire — the store is its sole driver and a `= 0` would make it multi-driven.
+  std::unordered_set<std::string> wire_stored_;
+
+  // Multi-output-comb destructuring (see set_multi_out_combs).  When a call to a
+  // multi-output comb binds to a var `r`, the func_call is emitted as a
+  // destructure into per-output temps; `mocomb_dst_` records `r` and
+  // `mocomb_field_` maps `r\x01<output>` -> the temp that received it, so the
+  // later `r["<output>"]` tuple_get reads rewrite to that temp.
+  const std::unordered_map<std::string, std::vector<std::string>>* multi_out_combs_{nullptr};
+  std::unordered_set<std::string>                                  mocomb_dst_;
+  std::unordered_map<std::string, std::string>                     mocomb_field_;
 
   // Storage-class prefix to print before an assignment LHS: a pending
   // attr_set-type keyword if one is queued, else "mut " on the first write to

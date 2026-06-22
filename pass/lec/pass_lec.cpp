@@ -48,6 +48,10 @@ void Pass_lec::setup() {
                        "prove each cut/output equivalence as a separate focused query instead of one "
                        "monolithic OR-miter; isolates and reports the hard cones cvc5 cannot discharge",
                        "false");
+  m.add_label_optional("strict",
+                       "treat an inconclusive UNKNOWN (no counterexample, solver incomplete) as a hard "
+                       "failure; default false (REFUTED fails, witness-free UNKNOWN is a deferred warning)",
+                       "false");
   register_pass(m);
 }
 
@@ -70,6 +74,7 @@ void Pass_lec::lec(Eprp_var& var) {
   o.reset        = std::string{var.get("reset", "")};
   o.match        = lec::parse_match_pairs(var.get("match", ""));  // inline pairs (@FILE only via `lhd lec`)
   o.decompose    = parse_bool(var.get("decompose", "false"));
+  o.strict       = parse_bool(var.get("strict", "false"));
 
   if (auto e = lec::lec_options_range_error(o); !e.empty()) {
     livehd::diag::err("pass.lec", "bad-bound", "io").msg("pass.lec: {}", e).fatal();

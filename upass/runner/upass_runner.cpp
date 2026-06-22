@@ -270,6 +270,10 @@ constexpr std::string_view call_generic_arg_marker = "__generic_arg";
 // `store(__spread_arg, rest)` marker; the runner expands rest's bundle fields
 // into named (non-numeric key) / positional (numeric key) actuals at gather.
 constexpr std::string_view call_spread_arg_marker = "__spread_arg";
+// prp2lnast emits a call-site instance name (`alu::[name=X](…)`) as a reserved
+// `store(__inst_name, const "X")` actual; gather_actuals consumes it (never an
+// argument) and try_inline uses it as the hierarchical-prefix level.
+constexpr std::string_view call_inst_name_marker = "__inst_name";
 
 // Collect the NON-temporary variables that the `while` CONDITION reads
 // (transitively). `cond_ref` is the while's child-0 ref name; we trace its
@@ -1735,6 +1739,24 @@ void uPass_runner::emit_inline_binding(const std::string& lhs, const Lnast_node&
   lm->pop_source();
 }
 
+void uPass_runner::emit_inline_attr(const std::string& target, std::string_view key, const std::string& value) {
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-attr");
+  auto s    = std::make_shared<Lnast>(body, "inl-attr");
+  auto root = s->set_root(Lnast_ntype::create_attr_set());
+  stamp_scratch_srcid(s, root);
+  s->add_child(root, Lnast_node::create_ref(target));  // literal — already frame-renamed
+  s->add_child(root, Lnast_node::create_const(key));
+  s->add_child(root, Lnast_node::create_const(value));
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);  // literal names; no rename
+  process_lnast();            // cursor at attr_set root → C_OP(attr_set): dispatch + emit
+  flush_deferred_emits();
+  lm->pop_source();
+}
+
 void uPass_runner::emit_inline_tuple(const std::string& dst, const std::vector<std::pair<std::string, Lnast_node>>& fields) {
   // Build `dst = (k0=v0, k1=v1, …)` as a tuple_add and run it through the walk
   // so constprop builds dst's bundle (multi-output return splat). Layout:
@@ -2748,7 +2770,8 @@ bool uPass_runner::try_inline_func_call() {
     lm->restore_cursor(saved);
     return false;
   }
-  std::string dst_name(lm->current_text());  // dst lives in the caller/frame scope
+  std::string dst_name(lm->current_text());          // dst lives in the caller/frame scope
+  std::string dst_raw_name(lm->current_raw_text());  // un-renamed source dst — the hier level
 
   if (!lm->move_to_sibling() || lm->get_raw_ntype() != Lnast_ntype::Lnast_ntype_ref) {
     lm->restore_cursor(saved);
@@ -3025,6 +3048,7 @@ bool uPass_runner::try_inline_func_call() {
     return false;
   }
   lm->restore_cursor(saved);  // back on the func_call node (gather left it on the callee ref)
+  const std::string call_inst_name = gathered_inst_name_;  // call-site name= (if any); stable past later gathers
 
   const auto& io = callee->io_meta();
   // io.empty() is allowed: a void comb (`comb top() { … }`) has no signature
@@ -3613,9 +3637,26 @@ bool uPass_runner::try_inline_func_call() {
     emit_inline_binding(oname, Lnast_node::create_const("nil"));
   }
 
+  // Hierarchical instance level for this inline: the call-site `name=` if given,
+  // else the source dst variable name (mirrors tolg's Sub-instance naming, so a
+  // reg's hierarchical name is identical whether inlined or kept as a Sub). An
+  // anonymous/temp dst falls back to a synthesized unique name, like tolg does.
+  std::string inline_level;
+  if (!call_inst_name.empty()) {
+    inline_level = call_inst_name;
+  } else {
+    std::string d = dst_raw_name;
+    if (auto p = d.find("___ssa_"); p != std::string::npos) {
+      d.resize(p);
+    }
+    const bool is_tmp = d.size() >= 3 && d.compare(0, 3, "___") == 0;
+    inline_level      = (!is_tmp && !d.empty()) ? d : ("u_" + callee_name + "_" + std::to_string(salt));
+  }
+
   // Body: walk the callee stmts in place (names rewritten by the frame tag)
   // straight into the caller's current staging stmts. pop_source resets the
   // cursor regardless of how the body walk left it.
+  hier_prefix_stack_.push_back(inline_level);
   active_inline_callees_.push_back(callee.get());
   flush_deferred_emits();  // flush caller-tree parked writes before entering
   // Call-site id, re-minted into the root locator (the calling
@@ -3644,6 +3685,7 @@ bool uPass_runner::try_inline_func_call() {
   lm->pop_source();
   inline_call_sites_.pop_back();
   active_inline_callees_.pop_back();
+  hier_prefix_stack_.pop_back();
   // Drop this frame's var-arg gather (the tag is unique per call
   // site, so this only prunes stale state; nested frames used distinct tags).
   if (has_vararg) {
@@ -4617,6 +4659,7 @@ bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& 
   // are its following siblings. The cursor is saved/restored here so this can
   // be called twice (overload probe + real bind) without disturbing the caller.
   const auto entry = lm->save_cursor();
+  gathered_inst_name_.clear();  // reset; set below if `__inst_name` is present
 
   // A ref actual whose raw name is itself a registry function is a higher-order
   // / closure argument: capture the function name so the body's `f(x)` can
@@ -4660,6 +4703,19 @@ bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& 
         }
         a.is_named = false;
         a.key.clear();
+      }
+      // Call-site instance name (`alu::[name=X](…)`) — consumed here, never an
+      // actual. The value is a const string literal; remember it as this call's
+      // hierarchical-prefix level (try_inline reads gathered_inst_name_).
+      if (a.key == call_inst_name_marker) {
+        if (!lm->move_to_sibling()) {
+          shape_ok = false;
+          lm->restore_cursor(here);
+          break;
+        }
+        gathered_inst_name_ = std::string(lm->current_raw_text());
+        lm->restore_cursor(here);
+        continue;
       }
       // Explicit generic binding — consumed here, never an actual. The value
       // ref is frame-renamed text, so current_text(), not raw.
@@ -6497,7 +6553,42 @@ void uPass_runner::process_lnast() {
         lm->restore_cursor(here);
       }
       bake_decl_pre_step(/*is_declare=*/true);  // Bake type/mode into the bundle first
-      process_verbatim(&upass::uPass::process_declare);
+      // Inside an inlined comb body, stamp the hierarchical instance-path prefix
+      // on each reg/latch/memory declare so tolg names the flop/mem
+      // hierarchically (`pipeB_ex_mem.reg_x`) — matching what a non-inlined Sub
+      // instance would report via get_hier_name() (inline/not-inline parity).
+      {
+        std::string hier_target;
+        if (!hier_prefix_stack_.empty() && lm->has_child()) {
+          const auto here = lm->save_cursor();
+          lm->move_to_child();                       // name (ref)
+          std::string nm(lm->current_text());        // renamed (frame tag applied)
+          bool        is_state = false;
+          if (lm->move_to_sibling() && lm->move_to_sibling()) {  // skip type → mode const
+            const auto mode = lm->current_raw_text();
+            // Only state declares (reg/latch) get a hierarchical name. Combs
+            // (the only thing inlined) cannot declare reg/latch today, so this
+            // is dormant for combs; it fires for any future inlined body (e.g.
+            // a `ref self` mod method) that carries state.
+            is_state = mode == "reg" || mode == "latch" || mode.starts_with("reg ");
+          }
+          if (is_state && !nm.empty()) {
+            hier_target = std::move(nm);
+          }
+          lm->restore_cursor(here);
+        }
+        process_verbatim(&upass::uPass::process_declare);
+        if (!hier_target.empty()) {
+          std::string prefix;
+          for (const auto& lvl : hier_prefix_stack_) {
+            if (!prefix.empty()) {
+              prefix += '.';
+            }
+            prefix += lvl;
+          }
+          emit_inline_attr(hier_target, "__hier", prefix);
+        }
+      }
       break;
 
     // Bitwidth

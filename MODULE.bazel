@@ -153,11 +153,11 @@ git_override(
 http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-eSIW9Rq/ni6GR9m+EsfWdsH9Z77PlzwwnzoCYCo2c4s=",  # 186f908 (top of tree; same archive as @tree_sitter_pyrope below)
-    strip_prefix = "tree-sitter-pyrope-186f908968961a3532b4f329083323a7fdb0dd91/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/186f908968961a3532b4f329083323a7fdb0dd91.zip"],
+    integrity = "sha256-UlgKnCnoBg/lU2sJXxZnlhvYh67qGlTa6JopIcWJAso=",  # e792e9b (same archive as @tree_sitter_pyrope below)
+    strip_prefix = "tree-sitter-pyrope-e792e9b64679fb6623b569324dcbb8edda261e39/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/e792e9b64679fb6623b569324dcbb8edda261e39.zip"],
 )
-# LOCAL OVERRIDE for prpparse co-development — swap the http_archive above for:
+# For local prpparse co-development, swap the http_archive above for:
 # new_local_repository(
 #     name = "prpparse",
 #     build_file = "//packages:prpparse.BUILD",
@@ -194,9 +194,9 @@ http_archive(
 http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-eSIW9Rq/ni6GR9m+EsfWdsH9Z77PlzwwnzoCYCo2c4s=",  # 186f908 (same archive as @prpparse above)
-    strip_prefix = "tree-sitter-pyrope-186f908968961a3532b4f329083323a7fdb0dd91",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/186f908968961a3532b4f329083323a7fdb0dd91.zip"],
+    integrity = "sha256-UlgKnCnoBg/lU2sJXxZnlhvYh67qGlTa6JopIcWJAso=",  # e792e9b (same archive as @prpparse above)
+    strip_prefix = "tree-sitter-pyrope-e792e9b64679fb6623b569324dcbb8edda261e39",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/e792e9b64679fb6623b569324dcbb8edda261e39.zip"],
 )
 # LOCAL OVERRIDE for prpfmt co-development — swap the http_archive above for:
 # new_local_repository(

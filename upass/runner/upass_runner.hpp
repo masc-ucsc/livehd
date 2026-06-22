@@ -606,6 +606,13 @@ protected:
   // are otherwise lost once the signature is gone). No-op when bits<=0.
   void emit_inline_typespec(const std::string& name, int bits, bool is_signed);
 
+  // Emits `attr_set(target, key, value)` straight into staging (literal names,
+  // no frame rename). Used by the inliner to stamp a `__hier` instance-path
+  // prefix onto each reg/mem declared in an inlined comb body, so tolg can name
+  // the resulting flop hierarchically (`pipeB_ex_mem.reg_x`) — matching what a
+  // non-inlined Sub instance would report via get_hier_name().
+  void emit_inline_attr(const std::string& target, std::string_view key, const std::string& value);
+
   // Same, but from an explicit prim_type_int `(max,min)` range — used to
   // re-type an untyped param from the actual's declared range (preserves
   // non-pow2 / partial ranges exactly, where bits alone would round up the
@@ -703,6 +710,15 @@ protected:
   // Callee bodies currently being spliced (innermost last). Re-entering one
   // means recursion — bailed to the evaluator until Phase D adds fuel.
   std::vector<const Lnast*>                     active_inline_callees_;
+  // Hierarchical instance-name prefix stack (innermost last), pushed per
+  // inlined comb. The level is the call-site `name=` (if any) else the dst
+  // variable name — mirroring tolg's Sub-instance naming so a reg's
+  // hierarchical name is the same whether its comb is inlined or kept as a Sub.
+  // join('.') of this stack is stamped as the `__hier` attr on inlined regs/mems.
+  std::vector<std::string>                      hier_prefix_stack_;
+  // Set by gather_actuals when a call carries the reserved `__inst_name` actual
+  // (`alu::[name=X](…)`); consumed by try_inline as the hier-prefix level.
+  std::string                                   gathered_inst_name_;
   // Registry keys (qualified names) whose bodies can reach themselves
   // (direct/mutual recursion). Bailed to the evaluator; computed in
   // set_function_registry.

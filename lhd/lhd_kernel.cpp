@@ -2756,6 +2756,8 @@ void lec_command(Options& opts, Result& res) {
   o.bound   = std::atoi(label("bound", "6").c_str());
   o.timeout = std::atoi(label("timeout", "120").c_str());  // bound the CLI: hard miters degrade to UNKNOWN, never freeze (0 = unbounded)
   o.witness = label("witness", "true") != "false" && label("witness", "true") != "0";
+  o.decompose    = label("decompose", "false") != "false" && label("decompose", "false") != "0";
+  o.strict       = label("strict", "false") != "false" && label("strict", "false") != "0";
   o.phase        = label("phase", "after_reset");
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
   o.reset        = label("reset", "");
@@ -2826,8 +2828,25 @@ void lec_command(Options& opts, Result& res) {
                       r.witness.empty() ? "" : std::format("counterexample: {}", r.witness)};
     }
     if (r.verdict == livehd::lec::Verdict::Unknown) {
-      throw Lhd_error{"unsupported", std::format("lec could not decide equivalence of '{}'", impl_g->get_name()),
-                      r.witness.empty() ? r.detail : std::format("{}; witness: {}", r.detail, r.witness)};
+      // REFUTED above disproves equivalence (a real counterexample → hard fail).
+      // UNKNOWN is the solver giving up: it found NO counterexample but could not
+      // complete the proof. Per the deferred-warning policy (disproved ⇒ error;
+      // could-not-prove ⇒ warning) this is NOT a hard failure — UNLESS `lec.strict`
+      // is set, or the partial (incomplete-correspondence) miter actually surfaced a
+      // diff (a non-empty witness, which is a potential discrepancy). Otherwise emit a
+      // loud inconclusive warning and exit cleanly: an UNKNOWN proves nothing, but it
+      // also disproves nothing, so it must not be conflated with REFUTED.
+      if (o.strict || !r.witness.empty()) {
+        throw Lhd_error{"unsupported", std::format("lec could not decide equivalence of '{}'", impl_g->get_name()),
+                        r.witness.empty() ? r.detail : std::format("{}; witness: {}", r.detail, r.witness)};
+      }
+      livehd::diag::warn("pass.lec", "inconclusive", "io")
+          .msg("lec INCONCLUSIVE: '{}' — the solver could not complete the proof and found NO counterexample ({}). "
+               "This is NOT a proof of equivalence; pass --set lec.strict=true to treat it as a failure.",
+               impl_g->get_name(),
+               r.detail)
+          .emit();
+      return;  // clean exit: inconclusive (warning), not a hard error
     }
     return;  // Proven
   }

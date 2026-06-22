@@ -149,9 +149,24 @@ void uPass_typecheck::require_all(Kind required, Kind result, std::string_view s
     std::string_view hint = (required == Kind::boolean)
                                 ? "logical ops need boolean operands; use `&`/`|`/`^` for bitwise integers"
                                 : "no implicit conversion — cast explicitly (e.g. `signed(b)`, `signed(true)==-1`)";
-    emit_type_error(code, std::format("operator `{}` requires {} operands", sym, kind_name(required)), hint);
+    emit_type_error(code,
+                    std::format("operator `{}` requires {} operands ({})", sym, kind_name(required), name_operands(src)),
+                    hint);
   }
   set_dst_kind(dst, result);
+}
+
+// Format the operands as "name:kind, name:kind" so an op with no source span
+// (most lowered arithmetic) can still be localized by the operand names.
+std::string uPass_typecheck::name_operands(upass::Src_span src) const {
+  std::string ops;
+  for (const auto& o : src) {
+    if (!ops.empty()) {
+      ops += ", ";
+    }
+    ops += absl::StrCat(o.name.empty() ? "<const>" : o.name, ":", kind_name(kind_of_operand(o)));
+  }
+  return ops;
 }
 
 void uPass_typecheck::require_shift(std::string_view sym, Bundle& dst, upass::Src_span src) {
@@ -179,7 +194,7 @@ void uPass_typecheck::require_shift(std::string_view sym, Bundle& dst, upass::Sr
                                 sym));
   } else if (bad) {
     emit_type_error("type-mismatch-arith",
-                    std::format("operator `{}` requires integer operands", sym),
+                    std::format("operator `{}` requires integer operands ({})", sym, name_operands(src)),
                     "no implicit conversion — cast explicitly (e.g. `signed(b)`, `signed(true)==-1`)");
   }
   set_dst_kind(dst, Kind::integer);

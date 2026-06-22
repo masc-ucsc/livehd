@@ -45,6 +45,11 @@ struct Lec_options {
                                  // Reports "N/M cuts PROVEN" + the unresolved residue
                                  // when cvc5 cannot discharge every cone (e.g. a wide
                                  // ALU/barrel-shift equivalence that needs SAT-sweeping).
+  bool        strict = false;    // treat an inconclusive UNKNOWN (no counterexample, the
+                                 // solver merely could not complete the proof) as a hard
+                                 // failure. Default false: REFUTED (a real counterexample)
+                                 // hard-fails, but a witness-free UNKNOWN is a deferred
+                                 // warning that exits cleanly (it disproves nothing).
 
   // Reset-phase separation for the BMC engine (lec.phase). The reset-asserted
   // and the free-running behaviors are best checked SEPARATELY:
