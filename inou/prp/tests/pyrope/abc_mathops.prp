@@ -13,15 +13,20 @@
 //              (array multiplier; the partial-product adds use pass.abc.adder)
 //   * sra    : logical `a>>n` (unsigned operand) and arithmetic `c>>n` (signed)
 //   * div    : unsigned `a/b`, signed equal-width `c/e`, and signed `cw/e` with a
-//              divisor (e:s8) NARROWER than the dividend (cw:s16) — BLACKBOXED
+//              divisor (e:s4) NARROWER than the dividend (cw:s8) — BLACKBOXED
 //              (kept native), so a `div-blackbox` warning fires and the divider is
 //              not tech-mapped. The narrower-signed-operand case exercises the
 //              blackbox read-back's operand-sign preservation (the LEC fit()s a
 //              Div operand by sign, so dropping it would zero- instead of
 //              sign-extend the divisor and diverge for negatives).
-mod abc_mathops(a:u8, b:u8, c:s8, e:s8, cw:s16, n:u3) -> (mul:u16@[0], muls:s16@[0], mul3:u24@[0],
-                                                          srl:u8@[0], sra:s8@[0],
-                                                          dv:u8@[0], dvs:s8@[0], dwide:s16@[0]) {
+//
+// Widths are deliberately small (u4/s4, n:u2): the cvc5 LEC of a bit-blasted
+// array multiplier scales steeply with operand width, and these widths still
+// exercise every feature/plumbing path above. The exhaustive multiplier/shifter
+// math over wider operands is proven separately by //pass/abc:abc_arith_test.
+mod abc_mathops(a:u4, b:u4, c:s4, e:s4, cw:s8, n:u2) -> (mul:u8@[0], muls:s8@[0], mul3:u12@[0],
+                                                          srl:u4@[0], sra:s4@[0],
+                                                          dv:u4@[0], dvs:s4@[0], dwide:s8@[0]) {
   mul   = a * b
   muls  = c * e
   mul3  = a * b * a

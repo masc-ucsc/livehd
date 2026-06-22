@@ -248,94 +248,86 @@ sh_test(
     tags = ["fixme"],
 )
 
-# 2f-v2prp: the REVERSE direction over the same equiv corpus — the slang reader
-# lowers each golden <name>.v to Pyrope (upass/prp_writer), `lhd lec`
-# re-compiles that Pyrope and LECs it against the same <name>.v. `lhd lec
-# --set lec.solver=lgyosys` (yosys) is the authoritative gate; a timeout is inconclusive (not a
-# fail). Driven off the .v files (every equiv pair ships one). All current pairs
-# run < 20 s, so none are tagged `long`/`manual`.
+# 2f-v2prp: the REVERSE direction over the same equiv corpus. The slang reader
+# lowers each golden <name>.v to Pyrope (upass/prp_writer); `lhd lec` recompiles
+# that Pyrope and proves it equivalent to the ORIGINAL hand-written <name>.prp
+# (NOT the .v) via the in-process cvc5 BMC engine (the default since the
+# ind->bmc flip). Proving against the .prp directly sidesteps yosys read_verilog
+# gaps on the reference side (e.g. the `'{...}` assignment pattern that blocked
+# packed_assign/bitrange_dyn under the old lgyosys/.v gate, both of which now
+# pass). Per-side tops come from the reference's :verilog_top: (the emitted
+# module) and :pyrope_top: (the original lambda) headers; a timeout is
+# inconclusive (not a fail). Driven off the .v files (every pair ships one).
+# 129/138 prove today.
+#
+# The remaining gaps still REFUTE for reasons OUTSIDE the prp_writer (the emitted
+# Pyrope is correct — lgyosys proves every one of them equivalent). They are
+# tagged `fixme` (the repo's known-broken convention; .bazelrc filters `-fixme`
+# so `bazel test //...` stays green) with the specific root cause; flipping one
+# green is the fix:
+#   bazel test //inou/prp:prp-v2prp-mem_rom --test_tag_filters=
+_V2PRP_FIXME = [
+    # cvc5 mem-cut encoder: a memory read's latency / init contents / write
+    # semantics differ from the slang-emitted reconstruction (lgyosys proves all
+    # four equivalent, so the emitted Pyrope is correct — the gap is the SMT
+    # memory model). Tracked on the lec roadmap (todo/livehd/lec.html, M4 arrays).
+    "mem_const_idx",
+    "mem_mut_array",
+    "mem_pending_sync_init",
+    "mem_rom",
+    # multi-module hierarchical recompile: the writer emits one .prp per module
+    # (apat_top + apat_enc + apat_split); reading them back as a library
+    # (`pyrope:DIR/`) hits a create_io assertion on the `'{...}` unpacked-array
+    # output-port wiring. The FORWARD prp-equiv-assign_pattern passes.
+    "assign_pattern",
+    # the original .prp is a DELIBERATELY-broken generics repro (the `T(a)`
+    # constructor does not lower — see the file header); the emitted Pyrope is
+    # correct, but the reference itself will not compile, so it cannot be the LEC
+    # ref. Tracked by 3g (generics).
+    "gen_type_cast",
+    # known 1-bit signed ordered-compare fixme tracker (the same gap the forward
+    # prp-equiv side carries).
+    "signed_one_bit_cmp",
+]
+
 [
     sh_test(
-        name = "prp-v2prp-%s" % v_file.split("/")[-1].split(".")[0],
+        name = "prp-v2prp-%s" % base,
         srcs = ["tests/v2prp_test.py"],
         args = [
             "-i",
-            "$(location //inou/prp:%s)" % v_file,
+            "$(location //inou/prp:tests/equiv/%s.v)" % base,
         ],
+        # The harness LECs the emitted Pyrope against the original .prp, so BOTH
+        # the golden .v (the input) and the .prp (the reference) are runfiles.
         data = [
             "//inou/prp:tests/v2prp_test.py",
-            "//inou/prp:%s" % v_file,
+            "//inou/prp:tests/equiv/%s.v" % base,
+            "//inou/prp:tests/equiv/%s.prp" % base,
             "//lhd",
         ],
+        tags = ["fixme"] if base in _V2PRP_FIXME else [],
         deps = ["//inou/yosys:scripts"],
     )
-    for v_file in glob(
-        ["tests/equiv/*.v"],
-        # assign_pattern.v is hierarchical: a parent wires two child modules
-        # through `'{...}` unpacked-array output-port patterns, so the v2prp
-        # round-trip (emit ONE Pyrope per module, recompile a submodule
-        # standalone) does not apply — it is covered by its `:type: equiv_slang`
-        # prp-equiv target instead. (arr2d_dyn_sel.v / bitsel_dyn.v used to be
-        # excluded here too as known --reader slang dynamic-select miscompiles;
-        # that lowering is now fixed in slang_expr.cpp lower_select, so they run.)
-        exclude = [
-            "tests/equiv/assign_pattern.v",
-            # signed_one_bit_cmp.v is the golden for the known-failing fixme equiv
-            # tracker (1-bit signed ordered compare) — no v2prp target for it.
-            "tests/equiv/signed_one_bit_cmp.v",
-            # packed_assign.v uses a `'{...}` assignment pattern that yosys
-            # read_verilog cannot parse (OP_CAST), so the v2prp reference side
-            # (lgcheck reads the golden via yosys) cannot be built. Its
-            # `--reader slang` reading is checked by prp-equiv-packed_assign
-            # (:type: equiv_slang).
-            "tests/equiv/packed_assign.v",
-            # mclk_sram_2wclk.v has two write ports on DIFFERENT clocks. The
-            # front end (inou.slang -> upass.attributes) aborts before the
-            # writer because the Memory cell carries a single per-memory
-            # clock_pin (`clock_pin_refname` is add-only). Per-port memory
-            # clocks are a Memory-model feature tracked by 2m-multiport_mem,
-            # not prp_writer completeness — run the `fixme` target below to see
-            # the front-end abort. (todo/livehd/2w-prp_writer.html bucket C.)
-            "tests/equiv/mclk_sram_2wclk.v",
-            # bitrange_dyn.v is the golden for the NATIVE runtime bit-range
-            # select (forward prp-equiv-bitrange_dyn passes). Its behavioral
-            # `(a>>base) & ((1<<(len+1))-1)` reference round-trips badly through
-            # the slang reader (the variable shift + mask width is mis-lowered,
-            # the same width-fidelity class as packed_assign) — a slang concern,
-            # not the Pyrope dynamic-select feature this golden gates.
-            "tests/equiv/bitrange_dyn.v",
-            # tup_port_*.v are the goldens for tuple/struct-typed PORTS, which
-            # cgen emits as escaped dotted ports (`\ar.x `, `\p.q `). The FORWARD
-            # prp-equiv-tup_port_* targets pass (SSA flattens the tuple ports to
-            # those leaves). The REVERSE direction needs the slang reader to
-            # reconstruct a tuple `ar:(x,y)` from the dotted Verilog ports — the
-            # read-back tuple reconstruction is future work, so exclude for now.
-            "tests/equiv/tup_port_comb.v",
-            "tests/equiv/tup_port_pipe.v",
-            "tests/equiv/tup_port_mod.v",
-            "tests/equiv/tup_port_nested.v",
-            # 2i-issues C/D goldens — same escaped dotted tuple PORTS as the
-            # tup_port_* group above (tup_in_port/tup_in_match read a tuple INPUT
-            # port; tup_out_port/tup_out_field_arms drive a tuple OUTPUT port).
-            # The FORWARD prp-equiv-* targets pass; the reverse tuple
-            # reconstruction is the same future work, so exclude. (The scalar-port
-            # shift_combo_i8.v / shift_sra_unsigned.v goldens round-trip fine and
-            # stay in.)
-            "tests/equiv/tup_in_port.v",
-            "tests/equiv/tup_in_match.v",
-            "tests/equiv/tup_out_port.v",
-            "tests/equiv/tup_out_field_arms.v",
-        ],
-    )
+    # Every golden ships a matching .prp except mclk_sram_2wclk (its own fixme
+    # target below — multi-clock memory has no Pyrope reference yet).
+    for base in [
+        f.split("/")[-1][:-2]
+        for f in glob(
+            ["tests/equiv/*.v"],
+            exclude = ["tests/equiv/mclk_sram_2wclk.v"],
+        )
+    ]
 ]
 
 # 2w-prp_writer bucket C2 (DEFERRED to 2m-multiport_mem): a multi-clock SRAM
 # whose two write ports use different clocks. This aborts in the FRONT END
 # (upass.attributes: `clock_pin_refname` of the memory is add-only), never
 # reaching the writer — it needs a per-port memory-clock representation +
-# cgen's existing ware/rtl/cgen_memory_multiclock_*.v wrapper wiring. Tagged
-# `fixme` (repo known-broken convention; .bazelrc filters `-fixme` so
-# `bazel test //...` stays green):
+# cgen's existing ware/rtl/cgen_memory_multiclock_*.v wrapper wiring. It is also
+# the ONE golden with no <name>.prp reference, so the v2prp harness has nothing
+# to LEC against either. Tagged `fixme` (repo known-broken convention; .bazelrc
+# filters `-fixme` so `bazel test //...` stays green):
 #   bazel test //inou/prp:prp-v2prp-mclk_sram_2wclk --test_tag_filters=
 sh_test(
     name = "prp-v2prp-mclk_sram_2wclk",

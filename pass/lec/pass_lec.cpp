@@ -24,7 +24,7 @@ void Pass_lec::setup() {
   Eprp_method m("pass.lec",
                 "Relational equivalence: prove_equal(ref=graph0, impl=graph1) under assume_equal(inputs)",
                 &Pass_lec::lec);
-  m.add_label_optional("engine", "discharge engine: bmc | ind (k-induction) | ic3", "ind");
+  m.add_label_optional("engine", "discharge engine: bmc (default) | ind (k-induction) | ic3", "bmc");
   m.add_label_optional("solver",
                        "equivalence backend: cvc5 (default, in-process SMT) | bitwuzla (in-process SMT) | "
                        "lgyosys (kernel-routed yosys/lgcheck; reads Verilog directly)",
@@ -44,6 +44,10 @@ void Pass_lec::setup() {
                        "collapses differently-named registers onto one cut so the inductive miter compares them",
                        "");
   m.add_label_optional("cross", "also run lgcheck and assert agreement (bring-up only)", "false");
+  m.add_label_optional("decompose",
+                       "prove each cut/output equivalence as a separate focused query instead of one "
+                       "monolithic OR-miter; isolates and reports the hard cones cvc5 cannot discharge",
+                       "false");
   register_pass(m);
 }
 
@@ -56,7 +60,7 @@ void Pass_lec::lec(Eprp_var& var) {
   }
 
   lec::Lec_options o;
-  o.engine  = std::string{var.get("engine", "ind")};
+  o.engine  = std::string{var.get("engine", "bmc")};
   o.solver  = std::string{var.get("solver", "cvc5")};
   o.bound   = str_tools::to_i(var.get("bound", "6"));
   o.timeout = str_tools::to_i(var.get("timeout", "120"));
@@ -65,6 +69,7 @@ void Pass_lec::lec(Eprp_var& var) {
   o.reset_cycles = str_tools::to_i(var.get("reset_cycles", "2"));
   o.reset        = std::string{var.get("reset", "")};
   o.match        = lec::parse_match_pairs(var.get("match", ""));  // inline pairs (@FILE only via `lhd lec`)
+  o.decompose    = parse_bool(var.get("decompose", "false"));
 
   if (auto e = lec::lec_options_range_error(o); !e.empty()) {
     livehd::diag::err("pass.lec", "bad-bound", "io").msg("pass.lec: {}", e).fatal();

@@ -839,7 +839,14 @@ void Slang_context::declare_value_symbol(const slang::ast::ValueSymbol& sym, boo
   // init (that would be a competing driver) — the driver supplies the value.
   if (wire_syms_.contains(&sym)) {
     set_pending_loc(sym.location);
-    builder_.create_declare_stmts(name, "wire", "", "");
+    // Declare the cyclic net at its real width/sign (a Verilog net has a known
+    // type). An untyped wire gets provisional width 1, restamped from its driver
+    // only at finalize_wires() — AFTER any consumer is built, so a FORWARD read
+    // (the whole reason this net is a `wire`) sizes against width 1. A Hotmux/Mux
+    // merging that forward-ref arm then truncates to the narrow placeholder (a
+    // 64-bit forwarded value collapsed to 2 bits), miscompiling the cone. Stamping
+    // the declared width up front lets every forward consumer size correctly.
+    builder_.create_declare_stmts(name, "wire", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
     clear_pending_loc();
     return;
   }
@@ -927,6 +934,114 @@ struct Dep_collector : public slang::ast::ASTVisitor<Dep_collector, slang::ast::
 
 }  // namespace
 
+// External nets connected to an instance's PURELY-REGISTERED output ports — an
+// output whose internal driver is a submodule register q (so it is
+// combinationally independent of every input, exactly like a flop q at this
+// level). A read of such a net is order-free: it must NOT make the reader depend
+// on the instance. Otherwise a pipeline-register feedback — a forward path reads
+// `stage_reg.out`, whose `stage_reg.in = f(forwarded)` — is mistaken for a comb
+// loop, and the cyclic-net `wire` fallback then routes the (now position-
+// independent) read through the wrong driver (the forwarding mux), miscompiling
+// every consumer of that stage register's output (e.g. io_dmem_address reading a
+// don't-care instead of the ex/mem result).
+static void collect_registered_outputs(const slang::ast::InstanceSymbol&               inst,
+                                        absl::flat_hash_set<const slang::ast::Symbol*>& ext_nets) {
+  // The INSTANCE's own body (NOT getCanonicalBody) so the reg set computed below
+  // and this instance's port.internalSymbol reference the same per-instance
+  // symbols. With the canonical (first-instance) body, every non-first instance
+  // — e.g. pipeB_* mirroring pipeA_* — would find no port match and keep its
+  // false comb-loop back-edges.
+  const auto* body = &inst.body;
+
+  // (1) submodule reg set: vars written nonblocking in an edge-sensitive always.
+  absl::flat_hash_set<const slang::ast::Symbol*> regs;
+  for (const auto& member : body->members()) {
+    if (member.kind != SymbolKind::ProceduralBlock) {
+      continue;
+    }
+    const auto& pbs     = member.as<slang::ast::ProceduralBlockSymbol>();
+    bool        is_edge = false;
+    if (pbs.procedureKind == slang::ast::ProceduralBlockKind::Always
+        || pbs.procedureKind == slang::ast::ProceduralBlockKind::AlwaysFF) {
+      const auto& stmt = pbs.getBody();
+      if (stmt.kind == StatementKind::Timed) {
+        const auto& timing = stmt.as<slang::ast::TimedStatement>().timing;
+        auto        scan   = [&](const slang::ast::TimingControl& tc) {
+          if (tc.kind == slang::ast::TimingControlKind::SignalEvent) {
+            auto edge = tc.as<slang::ast::SignalEventControl>().edge;
+            is_edge |= edge == slang::ast::EdgeKind::PosEdge || edge == slang::ast::EdgeKind::NegEdge;
+          }
+        };
+        if (timing.kind == slang::ast::TimingControlKind::EventList) {
+          for (const auto* ev : timing.as<slang::ast::EventListControl>().events) {
+            scan(*ev);
+          }
+        } else {
+          scan(timing);
+        }
+      }
+    }
+    if (!is_edge) {
+      continue;
+    }
+    Write_collector wc;
+    pbs.getBody().visit(wc);
+    for (const auto* s : wc.nonblocking) {
+      regs.insert(s);
+    }
+  }
+
+  // (2) internal output nets that are a pure reg q: the net IS a reg, or is
+  //     driven by exactly `assign net = reg_q` (a bare reference, modulo casts).
+  absl::flat_hash_set<const slang::ast::Symbol*> reg_driven;
+  for (const auto& member : body->members()) {
+    if (member.kind != SymbolKind::ContinuousAssign) {
+      continue;
+    }
+    const auto& as = member.as<slang::ast::ContinuousAssignSymbol>().getAssignment();
+    if (as.kind != ExpressionKind::Assignment) {
+      continue;
+    }
+    const auto& ae  = as.as<slang::ast::AssignmentExpression>();
+    const auto* lhs = lhs_base_symbol(ae.left());
+    if (lhs == nullptr) {
+      continue;
+    }
+    const slang::ast::Expression* rhs = &ae.right();
+    while (rhs->kind == ExpressionKind::Conversion) {
+      rhs = &rhs->as<slang::ast::ConversionExpression>().operand();
+    }
+    if (rhs->kind == ExpressionKind::NamedValue && regs.contains(&rhs->as<slang::ast::ValueExpressionBase>().symbol)) {
+      reg_driven.insert(lhs);
+    }
+  }
+
+  // (3) mark the external net of every output port whose internal symbol is a
+  //     pure reg q. Conservative: any output we cannot prove registered keeps
+  //     its combinational dependency (the prior behavior), so this never breaks
+  //     a real comb path — it only removes false back-edges.
+  for (const auto* conn : inst.getPortConnections()) {
+    const auto* expr = conn->getExpression();
+    if (expr == nullptr || conn->port.kind != SymbolKind::Port) {
+      continue;
+    }
+    const auto& port = conn->port.as<slang::ast::PortSymbol>();
+    if (port.direction != slang::ast::ArgumentDirection::Out || port.internalSymbol == nullptr) {
+      continue;
+    }
+    if (!regs.contains(port.internalSymbol) && !reg_driven.contains(port.internalSymbol)) {
+      continue;
+    }
+    const auto* target = expr;
+    if (const auto* assign = target->as_if<slang::ast::AssignmentExpression>()) {
+      target = &assign->left();
+    }
+    if (const auto* sym = lhs_base_symbol(*target)) {
+      ext_nets.insert(sym);
+    }
+  }
+}
+
 void Slang_context::lower_members(const slang::ast::Scope& scope) {
   // ── pass 1: collect drivers (recursing through generate blocks) ───────────
   struct Driver {
@@ -936,6 +1051,9 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     absl::flat_hash_set<const slang::ast::ValueSymbol*> writes;
   };
   std::vector<Driver> drivers;
+  // External nets driven by purely-registered instance outputs; reads of them are
+  // order-free (see collect_registered_outputs) so pass 2 skips their back-edges.
+  absl::flat_hash_set<const slang::ast::Symbol*> seq_out_nets;
 
   std::function<void(const slang::ast::Scope&)> collect = [&](const slang::ast::Scope& sc) {
     for (const auto& member : sc.members()) {
@@ -1001,6 +1119,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         }
 
         case SymbolKind::Instance: {
+          collect_registered_outputs(member.as<slang::ast::InstanceSymbol>(), seq_out_nets);
           Driver d{&member, genblk_prefix_, {}, {}};
           for (const auto* conn : member.as<slang::ast::InstanceSymbol>().getPortConnections()) {
             const auto* expr = conn->getExpression();
@@ -1080,7 +1199,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   std::vector<absl::flat_hash_set<size_t>> deps(drivers.size());
   for (size_t i = 0; i < drivers.size(); ++i) {
     for (const auto* r : drivers[i].reads) {
-      if (reg_syms_.contains(r) || input_syms_.contains(r)) {
+      if (reg_syms_.contains(r) || input_syms_.contains(r) || seq_out_nets.contains(r)) {
         continue;
       }
       auto it = writers_of.find(r);
@@ -1151,6 +1270,19 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
           wire_syms_.insert(w);
         }
       }
+    }
+  }
+
+  // A registered instance output (seq_out_nets) is order-free, so pass 2 dropped
+  // its back-edges — but that also drops the "instance before reader" ordering, so
+  // a reader may now precede the instance. Declare these nets `wire` too, so such a
+  // forward read binds to the resolved net (position-independent) exactly like the
+  // cyclic-net wires above — without which the read resolves to nil (e.g. the pc's
+  // forward read of `_pipeB_ex_mem_io_data_nextpc` froze the PC at 0).
+  for (const auto* w : seq_out_nets) {
+    const auto* sc = w->getParentScope();
+    if (sc != nullptr && (&sc->asSymbol() == body_ || sc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock)) {
+      wire_syms_.insert(w);
     }
   }
 

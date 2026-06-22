@@ -2751,7 +2751,7 @@ void lec_command(Options& opts, Result& res) {
   // non-cross path; in cross mode we additionally run lgcheck and assert
   // agreement (the strongest encoder check).
   livehd::lec::Lec_options o;
-  o.engine  = label("engine", "ind");
+  o.engine  = label("engine", "bmc");
   o.solver  = solver;  // cvc5 | bitwuzla
   o.bound   = std::atoi(label("bound", "6").c_str());
   o.timeout = std::atoi(label("timeout", "120").c_str());  // bound the CLI: hard miters degrade to UNKNOWN, never freeze (0 = unbounded)

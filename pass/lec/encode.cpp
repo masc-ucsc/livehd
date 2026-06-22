@@ -191,6 +191,23 @@ std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Node_class& n
   return Val{fit_to(tm, v, width), width, c.is_negative()};
 }
 
+// Pipeline depth of a flop: the comptime `pipe_min` pin makes one Flop cell
+// model a depth-d shift register (cgen expands it to d chained flops, see
+// inou/cgen/cgen_verilog.cpp). Unset/<=1 => the plain single flop. The encoder
+// must honor it or it UNDER-counts the latency — reading a `stage[3]`/`@[3]`
+// pipeline flop as a single 1-cycle delay, which false-REFUTEs the v->prp miter
+// (the emitted side expands the stages into d real flops).
+static int flop_depth(const hhds::Node_class& node) {
+  auto pm = gu::get_driver_of_sink_name(node, "pipe_min");
+  if (!pm.is_invalid() && gu::is_const_pin(pm)) {
+    auto d = gu::hydrate_const(pm).to_just_i64();
+    if (d > 1) {
+      return static_cast<int>(d);
+    }
+  }
+  return 1;
+}
+
 // Index width to address `size` entries: clog2(size), at least 1.
 static int mem_addr_width(int size) {
   int w = 1;
@@ -387,6 +404,31 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // current-state symbols. (`flops` keeps the hier Node_class for the post-loop
   // next-state emission.)
   std::vector<hhds::Node_class> flops;
+  std::vector<int>              flop_depths;     // pipe_min depth per flop (>=1)
+  std::vector<std::vector<Val>> flop_internals;  // depth>1: the d-1 INTERNAL stage
+                                                 // current-states, din-side -> Q-side
+  // Internal pipeline-stage current-state for a depth-d flop with output key K:
+  // K (the Q stage, seeded below like any flop) plus d-1 hidden stages keyed
+  // "K\x02p<i>". Shared/threaded by key exactly like Q (the BMC unroll re-seeds
+  // them from each cycle's emitted next-state; the power-on cycle gets a fresh
+  // arbitrary value, sound for a reset-less pipeline register).
+  auto seed_state = [&](const std::string& key, int w, bool sgn) -> Val {
+    Val v;
+    if (shared_inputs != nullptr) {
+      if (auto it = shared_inputs->find(key); it != shared_inputs->end()) {
+        v           = it->second;
+        v.is_signed = sgn;
+        if (v.width < w) {
+          v.term  = fit(v, w);
+          v.width = w;
+        }
+      }
+    }
+    if (v.term.isNull()) {
+      v = Val{tm_.mkConst(bv(w), std::string(prefix) + key), w, sgn};
+    }
+    return v;
+  };
   for (auto node : g->forward_hier()) {
     auto op = gu::type_op_of(node);
     if (op != Ntype_op::Flop) {
@@ -402,23 +444,26 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     }
     bool        sgn = !gu::is_unsign(qpin);
     std::string nm  = flop_key(node.get_hier_name());
-    Val         v;
-    if (shared_inputs != nullptr) {
-      if (auto it = shared_inputs->find(nm); it != shared_inputs->end()) {
-        v           = it->second;
-        v.is_signed = sgn;  // shared VALUE, but THIS design's sign for downstream extension
-        if (v.width < w) {  // extend up only; never truncate (see input note above)
-          v.term  = fit(v, w);
-          v.width = w;
-        }
-      }
-    }
-    if (v.term.isNull()) {
-      v = Val{tm_.mkConst(bv(w), std::string(prefix) + nm), w, sgn};
+    Val         v   = seed_state(nm, w, sgn);
+    bool        was_shared
+        = shared_inputs != nullptr && shared_inputs->find(nm) != shared_inputs->end();
+    if (std::getenv("LEC_DUMP_ENC") != nullptr && nm.find("registers_regs_0") != std::string::npos
+        && nm.find("registers_regs_0_") == std::string::npos) {
+      std::fprintf(stderr, "[LEC_ENC pfx=%s] flop hier='%s' key='%s' shared=%d term=%s\n", std::string(prefix).c_str(),
+                   node.get_hier_name().c_str(), nm.c_str(), was_shared ? 1 : 0, v.term.toString().c_str());
     }
     pin2val[pinkey(qpin)] = v;
     out.inputs[nm]        = v;
     flops.push_back(node);
+
+    int depth = flop_depth(node);
+    flop_depths.push_back(depth);
+    std::vector<Val> internals;  // [s0 .. s(d-2)], din-side -> Q-side
+    internals.reserve(depth > 1 ? static_cast<size_t>(depth - 1) : 0);
+    for (int s = 0; s + 1 < depth; ++s) {
+      internals.push_back(seed_state(nm + "\x02p" + std::to_string(s), w, sgn));
+    }
+    flop_internals.push_back(std::move(internals));
   }
 
   // ---- M4 memory cut, phase 1: decode each Memory and SEED its read douts with
@@ -806,9 +851,17 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         if (pid(0).size() != 1 || pid(1).size() != 1) {
           return fail("Div expects single a/b drivers");
         }
-        Term a = fit(pid(0)[0], W);
-        Term b = fit(pid(1)[0], W);
-        result = tm_.mkTerm(out_signed ? Kind::BITVECTOR_SDIV : Kind::BITVECTOR_UDIV, {a, b});
+        // Division is NOT modular like add/mult: fitting the operands to the
+        // (often tiny) output width W corrupts it. Bitwidth analysis stamps the
+        // QUOTIENT width on the Div pin — e.g. `c/100` with c:u3 has a quotient
+        // that is always 0, so W is ~1 bit; `fit(100, 1)` would truncate the
+        // divisor to 0 => UDIV-by-zero => all-ones garbage. Compute the quotient
+        // at a width that holds both operands, then narrow to the output width.
+        int  dw = std::max({pid(0)[0].width, pid(1)[0].width, W});
+        Term a  = fit(pid(0)[0], dw);
+        Term b  = fit(pid(1)[0], dw);
+        Term q  = tm_.mkTerm(out_signed ? Kind::BITVECTOR_SDIV : Kind::BITVECTOR_UDIV, {a, b});
+        result  = fit(Val{q, dw, out_signed}, W);
         break;
       }
       case Ntype_op::Not: {
@@ -868,14 +921,25 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         Term acc;
         for (const auto& a : as) {
           for (const auto& b : bs) {
-            // Signed compare only if BOTH operands are signed; the extension must
-            // match (zero-extend both when the compare is unsigned).
-            bool both_signed = a.is_signed && b.is_signed;
-            int  cw          = std::max(a.width, b.width);
-            Term la          = fit_to(tm_, Val{a.term, a.width, both_signed}, cw);
-            Term lb          = fit_to(tm_, Val{b.term, b.width, both_signed}, cw);
-            Kind cmp = (op == Ntype_op::LT) ? (both_signed ? Kind::BITVECTOR_SLT : Kind::BITVECTOR_ULT)
-                                            : (both_signed ? Kind::BITVECTOR_SGT : Kind::BITVECTOR_UGT);
+            // Pyrope compares by VALUE, so the comparison is signed whenever
+            // EITHER operand is signed (not only when BOTH are) — a signed value
+            // vs a non-negative constant (which the front end stamps unsigned)
+            // must still order by signed value, else e.g. the saturation guard
+            // `(s8)-24 > 7` reads -24 as unsigned 232 and wrongly holds. Extend
+            // each operand per ITS OWN sign (sign-extend the signed one,
+            // zero-extend the unsigned one); for a MIXED pair add one bit of
+            // headroom so the unsigned operand's top bit is not misread as a
+            // sign bit under the signed compare. This matches the cgen/yosys
+            // (value) semantics the lgyosys backend proves against.
+            bool use_signed = a.is_signed || b.is_signed;
+            int  cw         = std::max(a.width, b.width);
+            if (a.is_signed != b.is_signed) {
+              cw += 1;  // mixed sign: keep the unsigned operand non-negative
+            }
+            Term la  = fit_to(tm_, Val{a.term, a.width, a.is_signed}, cw);
+            Term lb  = fit_to(tm_, Val{b.term, b.width, b.is_signed}, cw);
+            Kind cmp = (op == Ntype_op::LT) ? (use_signed ? Kind::BITVECTOR_SLT : Kind::BITVECTOR_ULT)
+                                            : (use_signed ? Kind::BITVECTOR_SGT : Kind::BITVECTOR_UGT);
             Term one = tm_.mkTerm(cmp, {la, lb});
             acc      = acc.isNull() ? one : tm_.mkTerm(Kind::AND, {acc, one});
           }
@@ -1153,6 +1217,30 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         return fail("op '" + std::string(Ntype::get_name(op)) + "' produced no term");
       }
       pin2val[pinkey(dpin)] = Val{result, W, out_signed};
+      {
+        static const std::set<uint64_t> dbg_nodes = [] {
+          std::set<uint64_t> s;
+          if (const char* e = std::getenv("LEC_DBG_NIDS")) {
+            std::string str(e), cur;
+            for (char c : str) {
+              if (c == ',') {
+                if (!cur.empty()) s.insert(std::stoull(cur));
+                cur.clear();
+              } else {
+                cur += c;
+              }
+            }
+            if (!cur.empty()) s.insert(std::stoull(cur));
+          }
+          return s;
+        }();
+        if (!dbg_nodes.empty()) {
+          uint64_t nid = static_cast<uint64_t>(node.get_debug_nid());
+          if (dbg_nodes.count(nid)) {
+            out.outputs[std::string("\x03" "dbg:") + std::string(prefix) + std::to_string(nid)] = Val{result, W, out_signed};
+          }
+        }
+      }
       done.insert(nodekey(node));
       progress = true;
     }
@@ -1193,44 +1281,53 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     }
     return {};
   };
-  for (const auto& node : flops) {
-    auto qpin = node.get_driver_pin(0);
-    int  w    = real_width(qpin);
+  for (size_t fi = 0; fi < flops.size(); ++fi) {
+    const auto& node  = flops[fi];
+    const int   depth = flop_depths[fi];
+    auto        qpin  = node.get_driver_pin(0);
+    int         w     = real_width(qpin);
     if (w == 0) {
       w = 1;
     }
     bool       sgn = !gu::is_unsign(qpin);
-    const Val& qv  = pin2val[pinkey(qpin)];  // current-state symbol (seeded above)
+    const Val& qv  = pin2val[pinkey(qpin)];  // Q (output stage) current-state, seeded above
     bool       ok  = true;
 
-    Term nval;
+    // din: the value the FIRST stage latches each cycle (no enable/reset yet).
+    bool has_din = false;
+    Term din;
     if (auto din_d = hier_sink_driver(node, "din"); !din_d.is_invalid()) {
       Val dv = driver_val(din_d, ok);
       if (!ok) {
         return fail("flop '" + gu::debug_name(node) + "' din not encodable");
       }
-      nval = fit(dv, w);
-    } else {
-      nval = qv.term;  // no din -> the register holds
+      din     = fit(dv, w);
+      has_din = true;
     }
 
-    // enable: a low write-enable holds Q (no din=q feedback mux in the graph).
+    // enable: a low write-enable holds the whole shift register (no din=q
+    // feedback mux in the graph). const-false => the register never writes.
+    bool enable_const_false = false;
+    bool has_enable         = false;
+    Term en_hot;
     if (auto en_d = hier_sink_driver(node, "enable"); !en_d.is_invalid()) {
       if (gu::is_const_pin(en_d)) {
-        if (gu::hydrate_const(en_d).is_known_false()) {
-          nval = qv.term;  // never writes
-        }
+        enable_const_false = gu::hydrate_const(en_d).is_known_false();
       } else {
         Val ev = driver_val(en_d, ok);
         if (!ok) {
           return fail("flop '" + gu::debug_name(node) + "' enable not encodable");
         }
-        Term en_hot = tm_.mkTerm(Kind::DISTINCT, {ev.term, bv_const(tm_, ev.width, 0)});
-        nval        = tm_.mkTerm(Kind::ITE, {en_hot, nval, qv.term});
+        en_hot     = tm_.mkTerm(Kind::DISTINCT, {ev.term, bv_const(tm_, ev.width, 0)});
+        has_enable = true;
       }
     }
 
-    // reset: a non-const reset overrides with the initial value when asserted.
+    // reset: a non-const reset overrides every stage with the initial value when
+    // asserted (cgen resets all stages identically).
+    bool has_reset = false;
+    Term rst_hot;
+    Term initv;
     if (auto rst_d = hier_sink_driver(node, "reset_pin"); !rst_d.is_invalid() && !gu::is_const_pin(rst_d)) {
       Val rv = driver_val(rst_d, ok);
       if (!ok) {
@@ -1241,18 +1338,41 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (auto neg_d = hier_sink_driver(node, "negreset"); !neg_d.is_invalid() && gu::is_const_pin(neg_d)) {
         negreset = !gu::hydrate_const(neg_d).is_known_false();
       }
-      Term rst_hot = negreset ? tm_.mkTerm(Kind::NOT, {rbit}) : rbit;
-      Term initv   = bv_const(tm_, w, 0);
+      rst_hot = negreset ? tm_.mkTerm(Kind::NOT, {rbit}) : rbit;
+      initv   = bv_const(tm_, w, 0);
       if (auto init_d = hier_sink_driver(node, "initial"); !init_d.is_invalid()) {
         Val iv = driver_val(init_d, ok);
         if (ok) {
           initv = fit(iv, w);
         }
       }
-      nval = tm_.mkTerm(Kind::ITE, {rst_hot, initv, nval});
+      has_reset = true;
     }
 
-    out.outputs[std::string("\x01nxt:") + flop_key(node.get_hier_name())] = Val{nval, w, sgn};
+    // Stage current-state values, din-side -> Q-side: [internals..., Q]. A
+    // depth-1 flop is just [Q] (the original single-flop behavior). Each stage k
+    // latches the previous stage's value (stage 0 latches din), gated by the
+    // shared enable/reset.
+    const std::vector<Val>& internals = flop_internals[fi];
+    auto                    stage_cur = [&](int k) -> const Term& {
+      return (k + 1 < depth) ? internals[static_cast<size_t>(k)].term : qv.term;
+    };
+    const std::string nm = flop_key(node.get_hier_name());
+    for (int k = 0; k < depth; ++k) {
+      const Term& self   = stage_cur(k);
+      Term        source = (k == 0) ? (has_din ? din : self) : stage_cur(k - 1);
+      Term        nval   = source;
+      if (enable_const_false) {
+        nval = self;  // never writes -> hold
+      } else if (has_enable) {
+        nval = tm_.mkTerm(Kind::ITE, {en_hot, source, self});
+      }
+      if (has_reset) {
+        nval = tm_.mkTerm(Kind::ITE, {rst_hot, initv, nval});
+      }
+      std::string key = (k + 1 < depth) ? (nm + "\x02p" + std::to_string(k)) : nm;
+      out.outputs[std::string("\x01nxt:") + key] = Val{nval, w, sgn};
+    }
   }
 
   // ---- M4 memory cut, phase 2: now that write addr/din/enable are resolved,

@@ -1,14 +1,28 @@
 #!/usr/bin/env python3
-"""2f-v2prp gated test: a single golden `.v` round-trips through Pyrope.
+"""2f-v2prp gated test: a golden `.v` round-trips through Pyrope and is proven
+equivalent to its ORIGINAL Pyrope reference.
 
-    lhd compile foo.v --emit-dir pyrope:DIR/                         # slang -> Pyrope
-    lhd lec --set lec.solver=lgyosys --impl pyrope:DIR/foo.prp --ref verilog:foo.v  # recompile + LEC
+    lhd compile --reader slang foo.v --emit-dir pyrope:DIR/         # slang -> Pyrope
+    lhd lec --impl pyrope:DIR/<vtop>.prp --ref pyrope:equiv/foo.prp \
+            --impl-top <vtop> --ref-top <ptop>                      # recompile + LEC
 
-`lhd lec --set lec.solver=lgyosys` (yosys/lgcheck) is the authoritative gate:
-equivalent => pass, not-equivalent => fail, and a TIMEOUT => inconclusive (exit 0, NOT a fail
-— per the task's gate semantics).  This is the per-file form driven by the
-`prp-v2prp-<name>` bazel targets; inou/prp/tests/v2prp_census.py is the
-whole-corpus census.
+The reference is the ORIGINAL `equiv/<name>.prp` (the hand-written Pyrope the
+golden `.v` mirrors), NOT the `.v` itself.  This proves the slang->Pyrope
+emission preserves the design directly against its Pyrope source, and sidesteps
+yosys `read_verilog` gaps on the reference side (e.g. `'{...}` assignment
+patterns).  The backend is the in-process cvc5 BMC engine (the default since the
+`ind`->`bmc` flip): for the v->prp direction the two sides name their flops
+differently, so the inductive miter (which corresponds flops by name) cannot be
+used; BMC unrolls each design from reset and compares I/O, no name matching
+needed.
+
+Per-side tops come from the reference's `:verilog_top:` (the emitted module,
+== the `.v` module name) and `:pyrope_top:` (the original lambda) headers.
+
+`lhd lec` is the authoritative gate: equivalent => pass, not-equivalent => fail,
+and a TIMEOUT => inconclusive (exit 0, NOT a fail — per the task's gate
+semantics).  This is the per-file form driven by the `prp-v2prp-<name>` bazel
+targets; inou/prp/tests/v2prp_census.py is the whole-corpus census.
 
   python3 inou/prp/tests/v2prp_test.py -i inou/prp/tests/equiv/trivial_if.v
 """
@@ -21,7 +35,17 @@ import shutil
 import subprocess
 import sys
 
-CHECK_TIMEOUT = 20  # seconds; a timeout is inconclusive, not a failure
+CHECK_TIMEOUT = 60  # seconds; a timeout is inconclusive, not a failure
+
+
+def _header(prp_path, key):
+    """Return the `:key: value` header field from a Pyrope reference, or None."""
+    try:
+        with open(prp_path) as f:
+            m = re.search(r":%s:\s*([^\s*]+)" % re.escape(key), f.read())
+            return m.group(1).strip() if m else None
+    except OSError:
+        return None
 
 
 def _modules(vpath):
@@ -41,8 +65,20 @@ def main():
 
     v = args.input
     name = os.path.splitext(os.path.basename(v))[0]
-    mods = _modules(v)
-    top = mods[0] if mods else name
+    ref_prp = os.path.join(os.path.dirname(v), name + ".prp")
+    if not os.path.exists(ref_prp):
+        print("{} - v2prp - FAILED: no original .prp reference next to {}".format(name, v))
+        return 1
+
+    # Per-side tops from the reference headers: :verilog_top: is the emitted
+    # module (the .v module name), :pyrope_top: the original lambda.
+    vtop = _header(ref_prp, "verilog_top")
+    ptop = _header(ref_prp, "pyrope_top")
+    if not vtop or not ptop:
+        # Fall back to the .v's first module name for both (legacy goldens).
+        mods = _modules(v)
+        vtop = vtop or (mods[0] if mods else name)
+        ptop = ptop or vtop
 
     work = "tmp_v2prp_" + re.sub(r"\W+", "_", name)
     shutil.rmtree(work, ignore_errors=True)
@@ -63,32 +99,39 @@ def main():
     if not prps:
         print("{} - v2prp - FAILED: no .prp emitted".format(name))
         return 1
-    # Prefer the .prp whose module matches the reference top; else the sole file.
-    prp = next((p for p in prps if os.path.splitext(os.path.basename(p))[0] == top), prps[0])
-    with open(prp) as f:
-        emitted = f.read()
-    if "/* TODO" in emitted or "unhandled node" in emitted:
-        print("{} - v2prp - FAILED: writer left a TODO/unhandled node:\n{}".format(name, emitted))
+    # The emitted top file is <vtop>.prp; fall back to the sole file.
+    emitted = os.path.join(prp_dir, vtop + ".prp")
+    if not os.path.exists(emitted):
+        emitted = prps[0]
+    with open(emitted) as f:
+        text = f.read()
+    if "/* TODO" in text or "unhandled node" in text:
+        print("{} - v2prp - FAILED: writer left a TODO/unhandled node:\n{}".format(name, text))
         return 1
 
-    # 2. Recompile the emitted Pyrope and LEC it against the golden .v.
-    #    The re-compiled module name equals the .v module name (<file>.<top>),
-    #    so a single --top pins both sides.
+    # The impl side: when the top instantiates sibling-file submodules (the
+    # writer emits one .prp per module), read the whole emit dir so the call
+    # targets resolve; otherwise the single top file is enough.
+    impl_arg = "pyrope:" + prp_dir + "/" if len(prps) > 1 else "pyrope:" + emitted
+
+    # 2. Recompile the emitted Pyrope and LEC it against the ORIGINAL .prp.
+    #    Default engine = bmc, default solver = cvc5 (no --set needed).
     try:
         chk = subprocess.run(
-            [lhd, "lec", "--set", "lec.solver=lgyosys", "--impl", "pyrope:" + prp, "--ref", "verilog:" + v, "--top", top,
+            [lhd, "lec", "--impl", impl_arg, "--ref", "pyrope:" + ref_prp,
+             "--impl-top", vtop, "--ref-top", ptop,
              "--workdir", os.path.join(work, "w_check")],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=CHECK_TIMEOUT)
     except subprocess.TimeoutExpired:
         # Authoritative gate is inconclusive on timeout — pass (run `lhd lec`
-        # by hand for the cvc5 cross-check).
+        # by hand for a deeper bound / cross-check).
         print("{} - v2prp - inconclusive (lhd lec timeout >{}s, NOT a fail)".format(name, CHECK_TIMEOUT))
         return 0
 
     if chk.returncode == 0:
-        print("{} - v2prp - success (top:{})".format(name, top))
+        print("{} - v2prp - success (impl-top:{} ref-top:{})".format(name, vtop, ptop))
         return 0
-    print("{} - v2prp - FAILED: not equivalent (top:{})".format(name, top))
+    print("{} - v2prp - FAILED: not equivalent (impl-top:{} ref-top:{})".format(name, vtop, ptop))
     print(chk.stdout.decode("utf-8", "ignore"))
     return 1
 

@@ -33,11 +33,18 @@ struct Query_result {
 
 // Discharge / engine knobs (filled from the lec.* set-options).
 struct Lec_options {
-  std::string engine  = "ind";   // bmc | ind (k-induction) | ic3
+  std::string engine  = "bmc";   // bmc (default) | ind (k-induction) | ic3
   std::string solver  = "cvc5";  // cvc5 | bitwuzla (not yet built)
   int         bound   = 6;       // BMC / induction depth
   int         timeout = 0;       // per-query seconds (0 = none)
   bool        witness = true;    // print counterexample on Refuted
+  bool        decompose = false; // prove each cut/output diff as a separate UNSAT query
+                                 // instead of one monolithic OR-miter. Same proof, but
+                                 // each query is a small focused cone, so the easy cuts
+                                 // discharge instantly and the hard ones are isolated.
+                                 // Reports "N/M cuts PROVEN" + the unresolved residue
+                                 // when cvc5 cannot discharge every cone (e.g. a wide
+                                 // ALU/barrel-shift equivalence that needs SAT-sweeping).
 
   // Reset-phase separation for the BMC engine (lec.phase). The reset-asserted
   // and the free-running behaviors are best checked SEPARATELY:

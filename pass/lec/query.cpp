@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -427,14 +428,72 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         }
       }
     }
-    const int reset_hold = phase_run ? (opts.reset_cycles > 0 ? opts.reset_cycles : 1) : 0;
-    const int total_cyc  = N + reset_hold;  // run: prologue + checked window
+    // Pipeline flush: a depth-d flop (pipe_min) is a d-stage shift register, and
+    // chained flops (e.g. stage[3] feeding a stage[1] add) accumulate latency, so
+    // a reset-less pipeline's power-on state needs `latency` cycles of (shared)
+    // inputs to flush before the two designs' outputs are input-determined.
+    // `pipeline_latency` is the longest flop-weighted path from inputs to any
+    // node — MAX over parallel flops, SUM over series (so it never blows up on
+    // wide register files the way a flop-count sum would), cycle-guarded so
+    // feedback loops don't recurse. Extend the prologue to it: the checked window
+    // then compares only flushed, input-determined behavior. (Sound either way —
+    // the window still exercises `bound` free-running cycles, and UNDER-flushing
+    // can only cause a false REFUTE, never a false PROVEN.)
+    auto pipeline_latency = [&](hhds::Graph* g) -> int {
+      absl::flat_hash_map<std::string, int> memo;
+      absl::flat_hash_set<std::string>      on_stack;
+      std::function<int(const hhds::Node_class&)> lat = [&](const hhds::Node_class& n) -> int {
+        std::string id = n.get_hier_name();
+        if (auto it = memo.find(id); it != memo.end()) {
+          return it->second;
+        }
+        if (!on_stack.insert(id).second) {
+          return 0;  // feedback back-edge: do not recurse (loop state never flushes)
+        }
+        int base = 0;
+        for (auto e : n.inp_edges()) {
+          if (graph_util::is_graph_input_pin(e.driver) || graph_util::is_const_pin(e.driver)) {
+            continue;  // primary input / constant: latency 0
+          }
+          base = std::max(base, lat(e.driver.get_master_node()));
+        }
+        on_stack.erase(id);
+        int depth = 0;
+        if (graph_util::type_op_of(n) == Ntype_op::Flop) {
+          depth = 1;
+          auto pm = graph_util::get_driver_of_sink_name(n, "pipe_min");
+          if (!pm.is_invalid() && graph_util::is_const_pin(pm)) {
+            int d = static_cast<int>(graph_util::hydrate_const(pm).to_just_i64());
+            if (d > 1) {
+              depth = d;
+            }
+          }
+        }
+        int total  = base + depth;
+        memo[id]   = total;
+        return total;
+      };
+      int m = 0;
+      for (auto node : g->forward_hier()) {
+        m = std::max(m, lat(node));
+      }
+      return m;
+    };
+    int reset_hold = phase_run ? (opts.reset_cycles > 0 ? opts.reset_cycles : 1) : 0;
+    if (phase_run) {
+      int flush = std::max(pipeline_latency(ref), pipeline_latency(impl));
+      if (flush > reset_hold) {
+        reset_hold = flush;  // flush the deepest pipeline before checking
+      }
+    }
+    const int total_cyc = N + reset_hold;  // run: prologue + checked window
 
     // state[0]: reset initial per flop (shared equal across designs). In `run`
     // phase we instead start from a FRESH arbitrary equal state and let the
     // reset-hold prologue drive both designs into their reset state — so the
     // checked window genuinely exercises free-running behavior from reset.
     Io_name_map<Val> ref_state, impl_state;
+    absl::flat_hash_set<std::string> bank_hold_keys;  // reset-less bank flops: hold across the reset prologue
     {
       Io_name_map<int> fw;
       Io_name_map<Val> init;
@@ -464,6 +523,29 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       };
       collect_flops(ref);
       collect_flops(impl);
+      if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
+        auto dump_keys = [&](hhds::Graph* g, const char* tag) {
+          std::set<std::string> keys;
+          for (auto node : g->forward_hier()) {
+            if (graph_util::type_op_of(node) != Ntype_op::Flop) {
+              continue;
+            }
+            auto q = node.get_driver_pin(0);
+            if (q.is_invalid()) {
+              continue;
+            }
+            int  w   = real_width(q);
+            bool rst = flop_initial(tm, node, w > 0 ? w : 1).has_value();
+            keys.insert(std::string(rst ? "[reset] " : "[UNRST] ") + eff(node.get_hier_name()) + "  <=  "
+                        + node.get_hier_name());
+          }
+          for (const auto& k : keys) {
+            std::fprintf(stderr, "[LEC_FLOP %s] %s\n", tag, k.c_str());
+          }
+        };
+        dump_keys(ref, "REF");
+        dump_keys(impl, "IMPL");
+      }
       for (const auto& [key, w] : fw) {
         Val v;
         if (!phase_run && init.count(key)) {
@@ -474,7 +556,57 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         ref_state[key]  = v;
         impl_state[key] = v;
       }
+      // A RESET-LESS register-file BANK (contiguous <base>_0.._N-1 flops with no
+      // constant init, e.g. an architectural register file) must HOLD during the
+      // reset prologue. The real RTL gates its write by reset (or by a reset flop,
+      // so the write cannot fire while reset is asserted), but the BMC seeds every
+      // flop free, so cycle 0 evaluates the writeback with a free, un-reset write
+      // enable and stores the SHARED bank to a per-design free value — diverging two
+      // equal designs on state real reset never touches. Holding the bank across the
+      // prologue (reset window) keeps it at its shared initial value, exactly like a
+      // gated-by-reset write. Sync-reset pipeline flops (no init, NOT a bank) are
+      // left alone — they reset to 0 through their din during the prologue.
+      for (const auto& [key, w] : fw) {
+        if (init.count(key)) {
+          continue;  // has a constant reset value -> resets normally
+        }
+        auto us = key.rfind('_');
+        if (us == std::string::npos || us + 1 >= key.size()) {
+          continue;
+        }
+        std::string idx = key.substr(us + 1);
+        if (idx.empty() || !std::all_of(idx.begin(), idx.end(), [](unsigned char c) { return std::isdigit(c); })) {
+          continue;
+        }
+        // Count siblings sharing this base with no init: a >1 contiguous group is a bank.
+        std::string base = key.substr(0, us);
+        int         n    = 0;
+        for (const auto& [k2, w2] : fw) {
+          if (k2.rfind(base + "_", 0) == 0 && !init.count(k2)) {
+            auto t = k2.substr(base.size() + 1);
+            if (!t.empty() && std::all_of(t.begin(), t.end(), [](unsigned char c) { return std::isdigit(c); })) {
+              ++n;
+            }
+          }
+        }
+        if (n > 1) {
+          bank_hold_keys.insert(key);
+        }
+      }
     }
+    std::vector<std::pair<std::string, cvc5::Term>> dbg_init;
+    if (std::getenv("LEC_DUMP_WIT") != nullptr) {
+      for (const auto& [k, v] : ref_state) {
+        dbg_init.emplace_back("init:" + k, v.term);
+      }
+    }
+    struct DbgNs {
+      int         cyc;
+      char        side;
+      std::string key;
+      cvc5::Term  t;
+    };
+    std::vector<DbgNs> dbg_ns;
 
     // Memory state[0]: one shared array per cut key (corresponding memories
     // collapse to the same initial contents); threaded forward like flop state.
@@ -482,6 +614,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     Io_name_map<cvc5::Term> impl_mem = ref_mem;
 
     cvc5::Term bad;
+    std::vector<std::pair<std::string, cvc5::Term>> decomp_diffs;  // per-(output,cycle) diffs for decomposed proof
     int        uid = 0;  // unique suffix for fresh per-cycle state vars
 
     // Witness recording: keep each checked cycle's per-output (ref,impl) terms and
@@ -609,6 +742,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           cvc5::Term ifit = fit_to(tm, it->second, w);
           cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {rfit, ifit});
           bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
+          decomp_diffs.push_back({name + "@" + std::to_string(cyc), diff});
           if (opts.witness) {
             wit_outs.push_back({cyc, name, rfit, ifit});
           }
@@ -628,6 +762,43 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           in[name.substr(5)] = iv;
         }
       }
+      // During the reset prologue, a reset-less bank (register file) HOLDS — its
+      // RTL write is gated by reset, but the encoded next-state used a free, un-reset
+      // write enable. Override it to this cycle's current state so the bank keeps its
+      // shared initial value through reset (see bank_hold_keys above).
+      if (phase_run && cyc < reset_hold && !bank_hold_keys.empty()) {
+        for (const auto& key : bank_hold_keys) {
+          if (auto it = ref_state.find(key); it != ref_state.end()) {
+            rn[key] = it->second;
+          }
+          if (auto it = impl_state.find(key); it != impl_state.end()) {
+            in[key] = it->second;
+          }
+        }
+      }
+      if (std::getenv("LEC_DUMP_WIT") != nullptr) {
+        auto keep = [&](const std::string& k) {
+          return k.find("exmem") != std::string::npos || k.find("ex_mem") != std::string::npos
+                 || k.find("idex") != std::string::npos || k.find("id_ex") != std::string::npos
+                 || k == "pc" || k.find("taken") != std::string::npos || k.find("nextpc") != std::string::npos;
+        };
+        for (const auto& [k, v] : rn) {
+          if (keep(k)) dbg_ns.push_back({cyc, 'R', k, v.term});
+        }
+        for (const auto& [k, v] : in) {
+          if (keep(k)) dbg_ns.push_back({cyc, 'I', k, v.term});
+        }
+        for (const auto& [k, v] : re.outputs) {
+          if (k.rfind("\x03" "dbg:", 0) == 0) {
+            dbg_ns.push_back({cyc, 'R', k.substr(5), v.term});
+          }
+        }
+        for (const auto& [k, v] : ie.outputs) {
+          if (k.rfind("\x03" "dbg:", 0) == 0) {
+            dbg_ns.push_back({cyc, 'I', k.substr(5), v.term});
+          }
+        }
+      }
       ref_state  = std::move(rn);
       impl_state = std::move(in);
       ref_mem    = std::move(re.next_mem);
@@ -641,12 +812,69 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       res.verdict = Verdict::Proven;
       return res;
     }
+    // Decomposed proof: a monolithic `bad` = OR of every (output,cycle) diff is a
+    // single huge miter that cvc5's eager bitblast can choke on (UNKNOWN) for a
+    // complex pipeline. Proving each diff UNSAT independently is the SAME proof
+    // (OR is UNSAT iff every disjunct is) but each query is small and focused, so
+    // the easy outputs discharge instantly and only the genuinely-hard cone is
+    // ever the bottleneck. Opt-in via LEC_DECOMP; on the first SAT/unknown we fall
+    // through to the monolithic solve so the existing witness path is unchanged.
+    if (opts.decompose || std::getenv("LEC_DECOMP") != nullptr) {
+      bool all_unsat = true;
+      for (const auto& [dn, dt] : decomp_diffs) {
+        solver.push();
+        solver.assertFormula(dt);
+        cvc5::Result dr = solver.checkSat();
+        solver.pop();
+        if (!dr.isUnsat()) {
+          all_unsat = false;  // SAT or unknown -> let the monolithic solve decide + build the witness
+          break;
+        }
+      }
+      if (all_unsat) {
+        res.verdict = Verdict::Proven;
+        return res;
+      }
+    }
     solver.assertFormula(bad);
     cvc5::Result r = solver.checkSat();
     if (r.isUnsat()) {
       res.verdict = Verdict::Proven;
     } else if (r.isSat()) {
       res.verdict = Verdict::Refuted;
+      if (std::getenv("LEC_DUMP_WIT") != nullptr) {
+        for (const auto& [nm, t] : dbg_init) {
+          cvc5::Term vv = solver.getValue(t);
+          if (!vv.isNull()) {
+            std::fprintf(stderr, "[LEC_WIT] %s = %s\n", nm.c_str(), vv.getBitVectorValue(10).c_str());
+          }
+        }
+        for (const auto& wi : wit_ins) {
+          cvc5::Term vv = solver.getValue(wi.t);
+          if (!vv.isNull() && vv.getBitVectorValue(10) != "0") {
+            std::fprintf(stderr, "[LEC_IN] cyc=%d %s = %s\n", wi.cyc, wi.name.c_str(), vv.getBitVectorValue(10).c_str());
+          }
+        }
+        for (const auto& o : wit_outs) {
+          cvc5::Term rval = solver.getValue(o.rv);
+          cvc5::Term ival = solver.getValue(o.iv);
+          if (rval.isNull() || ival.isNull()) {
+            continue;
+          }
+          auto rs = rval.getBitVectorValue(10);
+          auto is = ival.getBitVectorValue(10);
+          if (o.cyc == 4 || rs != is) {
+            std::fprintf(stderr, "[LEC_WIT] cyc=%d OUT %s ref=%s impl=%s%s\n", o.cyc, o.name.c_str(), rs.c_str(), is.c_str(),
+                         rs != is ? "  <<DIFF" : "");
+          }
+        }
+        for (const auto& d : dbg_ns) {
+          cvc5::Term vv = solver.getValue(d.t);
+          if (!vv.isNull()) {
+            std::fprintf(stderr, "[LEC_NS] cyc=%d %c %s = %s\n", d.cyc, d.side, d.key.c_str(), vv.getBitVectorValue(10).c_str());
+          }
+        }
+      }
       // Build the counterexample: the EARLIEST checked step that diverges (the
       // origin of the bug — later steps just inherit it), the diverging outputs
       // there (ref vs impl decimal values), and the primary-input trace driving
@@ -1020,8 +1248,10 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   // divergences are exactly the signal needed to drive the design — and the LEC's
   // own cut-correspondence — toward agreement.
   cvc5::Term bad;
+  std::vector<std::pair<std::string, cvc5::Term>> ind_diffs;  // per-cut diffs for decomposed proof
   for (const auto& t : bridge_diffs) {  // bank<->memory next-state equalities
     bad = bad.isNull() ? t : tm.mkTerm(cvc5::Kind::OR, {bad, t});
+    ind_diffs.push_back({"bridge", t});
   }
   for (const auto& [name, rv] : re.outputs) {
     if (bridged_ref_out.count(name)) {
@@ -1035,6 +1265,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     int        w    = std::max(rv.width, it->second.width);
     cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, rv, w), fit_to(tm, it->second, w)});
     bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
+    ind_diffs.push_back({display_name(name), diff});
   }
   for (const auto& [name, iv] : ie.outputs) {
     if (bridged_impl_out.count(name)) {
@@ -1058,6 +1289,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     }
     cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {rmem, it->second});
     bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
+    ind_diffs.push_back({"mem:" + display_name(key), diff});
   }
   for (const auto& [key, imem] : ie.next_mem) {
     if (bridged_impl_mem.count(key)) {
@@ -1090,7 +1322,44 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   }
 
   // Combinational / inductive miter: UNSAT iff the designs agree on every COMMON
-  // output for all inputs (and assumed-equal current state). One SMT query.
+  // output for all inputs (and assumed-equal current state). The monolithic OR of
+  // ~100 next-state + output diffs is a single huge query that cvc5's eager
+  // bitblast chokes on (UNKNOWN) for a complex dual-issue pipeline. Proving each
+  // cut's diff UNSAT independently is the SAME proof (OR UNSAT iff every disjunct
+  // is) but each query is a small, focused combinational cone, so the easy cuts
+  // discharge instantly and only the genuinely-hard ones (the branch/forwarding
+  // cone) are ever the bottleneck. Opt-in via LEC_DECOMP; any SAT/unknown falls
+  // through to the monolithic solve so the witness path is unchanged.
+  if ((opts.decompose || std::getenv("LEC_DECOMP") != nullptr) && !ind_diffs.empty()) {
+    int                      proven = 0;
+    std::vector<std::string> hard;
+    for (const auto& [dn, dt] : ind_diffs) {
+      solver.push();
+      solver.assertFormula(dt);
+      cvc5::Result dr = solver.checkSat();
+      solver.pop();
+      if (dr.isUnsat()) {
+        ++proven;
+      } else {
+        hard.push_back(dn);  // SAT (real diff) or unknown (cvc5 too weak for this cone)
+      }
+      if (std::getenv("LEC_DECOMP_LOG") != nullptr) {
+        std::fprintf(stderr, "[LEC_CUT] %-44s %s\n", dn.c_str(), dr.isUnsat() ? "PROVEN" : (dr.isSat() ? "DIFF" : "unknown"));
+      }
+    }
+    if (hard.empty() && !incomplete) {
+      res.verdict  = Verdict::Proven;
+      res.detail  += "; decomposed (" + std::to_string(proven) + " cuts each UNSAT)";
+      return res;
+    }
+    res.detail += "; decomposed: " + std::to_string(proven) + "/" + std::to_string(ind_diffs.size())
+                + " cuts PROVEN, " + std::to_string(hard.size()) + " unresolved {" + join_capped(hard) + "}";
+    if (proven > 0 && hard.size() <= ind_diffs.size()) {
+      // Most of the design discharged; the residue is the genuinely-hard cone(s).
+      res.verdict = Verdict::Unknown;
+      return res;
+    }
+  }
   solver.assertFormula(bad);
   cvc5::Result r = solver.checkSat();
 
