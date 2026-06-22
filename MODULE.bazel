@@ -150,10 +150,12 @@ git_override(
 # LiveHD's core diag.hpp / parser.hpp); see //packages:prpparse.BUILD.
 # To bump the pin, recompute integrity via:
 #   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip | openssl dgst -sha256 -binary | base64
-new_local_repository(
+http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    path = "../tree-sitter-pyrope/prpparse",
+    integrity = "sha256-eSIW9Rq/ni6GR9m+EsfWdsH9Z77PlzwwnzoCYCo2c4s=",  # 186f908 (top of tree; same archive as @tree_sitter_pyrope below)
+    strip_prefix = "tree-sitter-pyrope-186f908968961a3532b4f329083323a7fdb0dd91/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/186f908968961a3532b4f329083323a7fdb0dd91.zip"],
 )
 # LOCAL OVERRIDE for prpparse co-development — swap the http_archive above for:
 # new_local_repository(
@@ -192,9 +194,9 @@ http_archive(
 http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-0IZpOHnoe53LMAkviTThXWWBvj3Uh+V0uP+rtIzyI3E=",  # ee58755 (same archive as @prpparse above)
-    strip_prefix = "tree-sitter-pyrope-ee587553d30a2b1d434c97808ad765df1469afb1",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/ee587553d30a2b1d434c97808ad765df1469afb1.zip"],
+    integrity = "sha256-eSIW9Rq/ni6GR9m+EsfWdsH9Z77PlzwwnzoCYCo2c4s=",  # 186f908 (same archive as @prpparse above)
+    strip_prefix = "tree-sitter-pyrope-186f908968961a3532b4f329083323a7fdb0dd91",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/186f908968961a3532b4f329083323a7fdb0dd91.zip"],
 )
 # LOCAL OVERRIDE for prpfmt co-development — swap the http_archive above for:
 # new_local_repository(

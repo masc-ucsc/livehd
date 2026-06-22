@@ -1211,15 +1211,6 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
   } else if (op == Ntype_op::SHL) {
     auto val_dpin = get_driver(find_sink_pin(node, "a"));
     auto val_expr = get_expression(val_dpin);
-    auto out_bits = bits_of(dpin);
-    auto val_bits = bits_of(val_dpin);
-    if (out_bits > val_bits && val_bits > 0) {
-      // Verilog shifts keep the left operand width. LiveHD/Isabelle SHL
-      // semantics shift at the node output width, so explicitly zero-extend
-      // before shifting. This matters for demux lowering, e.g. a 32-bit lane
-      // shifted into a 512-bit memory word.
-      val_expr = absl::StrCat("{{", out_bits - val_bits, "{1'b0}},", val_expr, "}");
-    }
 
     // Verilog `a << b` is self-determined by `a`'s width: a narrow left operand
     // (e.g. a 1-bit const `1`, or a 1-bit signal) shifts WITHIN that narrow
@@ -1228,6 +1219,12 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     // (`~(1<<idx)` for `data[idx]=…` zero-extends to all-but-low-bits instead
     // of all-but-bit-idx). Pad the left operand to this node's full inferred
     // width (and force unsigned) so the shift happens at the correct width.
+    //
+    // Widen via this CONTEXT-determined OR, NOT a concatenation `{{N{1'b0}},val}`.
+    // A concat makes `val` self-determined, so an inlined arithmetic operand (a
+    // single-fanout `a+b` folded inline) would be evaluated at its own narrow
+    // operand width and WRAP before the zero-pad — e.g. `(in1+in2+7) << 1` would
+    // truncate the sum to 8 bits. The OR's context width propagates into the add.
     auto        obits    = bits_of(node.get_driver_pin(0));
     std::string wide_val = absl::StrCat("({", std::to_string(obits), "{1'b0}} | ", val_expr, ")");
 

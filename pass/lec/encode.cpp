@@ -1125,6 +1125,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // back 1 and the arms were truncated to bit 0 (`casez_tmp = data[0]`), a false
         // REFUTE against a reader that keeps full width. Take the max of the declared
         // width and the widest arm so the data is never narrowed by a bad pin stamp.
+        // A mux selects whole arms, so its result is the full declared bus width,
+        // NOT the sign-magnitude-reduced real_width(dpin) (which drops the spare
+        // sign bit for an unsigned pin). Without this, an unsigned output fed a
+        // narrower SIGNED arm — e.g. yosys-slang lowers `we ? 8'hFF : 8'h00` with a
+        // true-arm `1'sh1` (1-bit signed -1) — sign-extends into the dropped MSB and
+        // truncates (0xFF -> 0x7F), a false REFUTE. Clamp up to bits_of (widen only).
+        if (int db = gu::bits_of(dpin); db > W) {
+          W = db;
+        }
         for (const auto& a : arms) {
           W = std::max(W, a.width);  // never narrow the data below its arms
         }

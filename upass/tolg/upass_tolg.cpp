@@ -628,8 +628,10 @@ private:
       // easy/unambiguous cases (power-of-two, range-fit, `% 3`) to shift/mask
       // and HARD-errors the rest.
       lower_mod(nid);
-    } else if (N::is_bit_not(t) || N::is_log_not(t)) {
+    } else if (N::is_bit_not(t)) {
       lower_unary(nid, Ntype_op::Not);
+    } else if (N::is_log_not(t)) {
+      lower_log_not(nid);
     } else if (N::is_ne(t)) {
       lower_negated(nid, Ntype_op::EQ, true);
     } else if (N::is_le(t)) {
@@ -3594,6 +3596,30 @@ private:
     bind_result(lnast_->get_name(dst), node.create_driver_pin(0), v.mw);
   }
 
+  // `!x` is a LOGICAL (boolean) not: a clean 1-bit boolean, lowered as `x == 0`
+  // — NOT a bitwise Not (that is `~x`, handled by lower_unary). The operand is a
+  // boolean carried in 2-bit sign-magnitude form (mw=1 + an always-0 sign bit);
+  // a bitwise `~` would flip the sign bit too, yielding {2,3} instead of {0,1},
+  // so any downstream nonzero-test (an `if`/mux/flop-enable select) reads it as
+  // always-true. EQ-against-0 sidesteps that, exactly like lower_negated. (The
+  // `!x`-on-a-non-boolean type error is a front-end/typecheck concern; by tolg
+  // only a legal boolean operand reaches here.)
+  void lower_log_not(const Lnast_nid& nid) {
+    auto dst = lnast_->get_first_child(nid);
+    if (dst.is_invalid()) {
+      return;
+    }
+    auto a = lnast_->get_sibling_next(dst);
+    if (a.is_invalid()) {
+      return;
+    }
+    auto v   = leaf(a);
+    auto neg = make_node(Ntype_op::EQ);  // commutative: both operands feed sink "a"
+    setup_sink_by_name(neg, "a").connect_driver(v.pin);
+    setup_sink_by_name(neg, "a").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+    bind_result(lnast_->get_name(dst), neg.create_driver_pin(0), 1);
+  }
+
   // ne/le/ge = Not(eq/gt/lt(...)). Result is 1-bit boolean.
   void lower_negated(const Lnast_nid& nid, Ntype_op inner_op, bool commutative) {
     auto dst = lnast_->get_first_child(nid);
@@ -3614,9 +3640,16 @@ private:
     auto inner_dp = inner.create_driver_pin(0);
     set_bits(inner_dp, 2);
     set_unsign(inner_dp);
-    auto not_node = make_node(Ntype_op::Not);
-    setup_sink_by_name(not_node, "a").connect_driver(inner_dp);
-    bind_result(lnast_->get_name(dst), not_node.create_driver_pin(0), 1);
+    // Logically negate the comparator with EQ-against-0 — NOT a bitwise Not. The
+    // inner result is a boolean in 2-bit sign-magnitude form (mw=1 + an always-0
+    // sign bit). A bitwise `~` flips the sign bit too, so the result becomes
+    // {2,3} instead of {0,1}; any downstream nonzero-test (an `if`/mux select,
+    // e.g. `if a != b`) then reads it as always-true. EQ against 0 yields a
+    // clean 1-bit boolean, stamped like any comparator (matches lower_none_eq).
+    auto neg = make_node(Ntype_op::EQ);  // commutative: both operands feed sink "a"
+    setup_sink_by_name(neg, "a").connect_driver(inner_dp);
+    setup_sink_by_name(neg, "a").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+    bind_result(lnast_->get_name(dst), neg.create_driver_pin(0), 1);
   }
 
   // ── Bit-insensitive reductions (`foo#|/&/^/+[range]`) ────────────────────────
