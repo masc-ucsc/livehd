@@ -80,24 +80,48 @@ if [ "$$(uname)" = "Darwin" ]; then
   ar rcs $@ "$$work/combined.o"
 else
   ld -r -o "$$work/combined.o" --whole-archive $(SRCS) --no-whole-archive
-  # Localize every strong (T/D/B/R, not weak) global symbol defined by cvc5's
-  # bundled CaDiCaL, by name extracted from libcadical.a. ld -r has already
-  # bound cvc5's internal references into combined.o, so making these file-local
-  # keeps cvc5's private CaDiCaL intact while removing them from the link's
-  # global namespace (abc keeps its own copy).
+  # Collect the CaDiCaL symbols to privatize. Start with every strong global
+  # (T/D/B/R) that libcadical.a defines, by name. ld -r has already bound cvc5's
+  # internal references within combined.o, so privatizing these keeps cvc5's own
+  # CaDiCaL intact while taking it out of the global namespace it shares with abc.
   nm --defined-only --extern-only $(location lib/libcadical.a) \
     | awk '$$2 ~ /^[TDBR]$$/ {print $$3}' | sort -u > "$$work/cad.syms"
-  # CaDiCaL's Reap class and the ipasir_/ccadical C API are NOT inside
-  # libcadical.a in this cvc5 layout (they ride a separate object), so the
-  # libcadical.a sweep above misses them and they stay GLOBAL -> duplicate-clash
-  # with abc's vendored CaDiCaL, and cvc5's subsume/elim then segfaults using
-  # the wrong Reap. Localize them by their actual names in the combined object
-  # (the same set the macOS -unexported_symbol patterns cover).
+  # The libcadical.a sweep above is NOT enough: cvc5's own code (the
+  # `cvc5::internal::prop::cadical` CadicalPropagator/tracers) #includes
+  # CaDiCaL headers, so it instantiates CaDiCaL templates (heap<>, rsort<>),
+  # emits CaDiCaL vtables/typeinfo (StatTracer, ClauseCopier/Writer/Counter,
+  # ...) and the Reap class + ipasir_/ccadical C API DIRECTLY INTO libcvc5.a,
+  # NOT libcadical.a. These are WEAK (COMDAT) symbols, so they do not trip a
+  # duplicate-symbol link error -- instead they silently COMDAT-fold with
+  # abc's own vendored CaDiCaL (its `class Reap` is also global-namespace and
+  # it uses `namespace CaDiCaL`). The linker keeps ONE arbitrary copy; cvc5's
+  # solver then dispatches through abc's incompatible CaDiCaL vtables/heaps and
+  # corrupts memory -> SIGSEGV deep in inprocessing (vivify/subsume/elim) on the
+  # larger SAT instances (e.g. BMC of memory equivalence). macOS's
+  # `-unexported_symbol '*CaDiCaL*'` wildcard already hides this whole surface,
+  # so it was Mac-green / Linux-crash. Localize the same surface here: every
+  # symbol whose mangled name carries the CaDiCaL `7CaDiCaL` namespace tag
+  # (covers `_ZN7CaDiCaL...`, vtables `_ZTVN7CaDiCaL`, typeinfo `_ZTIN/_ZTSN`,
+  # thunks, and cvc5's own cadical glue -- all cvc5-private after `ld -r`),
+  # plus the global-namespace Reap class and the ipasir_/ccadical C APIs.
   nm --defined-only --extern-only "$$work/combined.o" \
     | awk '$$2 ~ /^[TDBRVW]$$/ {print $$3}' \
-    | grep -E '^(ipasir_|ccadical|_ZN4Reap)' >> "$$work/cad.syms"
+    | grep -E 'CaDiCaL|^ipasir_|^ccadical|^_ZN4Reap' >> "$$work/cad.syms"
   sort -u "$$work/cad.syms" -o "$$work/cad.syms"
-  objcopy --localize-symbols="$$work/cad.syms" \
+  # RENAME, don't just localize: CaDiCaL's WEAK template/vtable/typeinfo symbols
+  # live in ELF COMDAT groups keyed by the symbol NAME. objcopy --localize-symbols
+  # changes a symbol's binding but NOT its name, so cvc5's group keeps the same
+  # signature as abc's identically-named group; lld then discards one of the two
+  # groups and cvc5's (now local) relocations dangle into the discarded section
+  # ("relocation refers to a symbol in a discarded section"). Renaming each
+  # CaDiCaL symbol to a cvc5-private name also renames its COMDAT group
+  # signature, so cvc5's groups never collide with abc's -- both copies survive
+  # and each side binds to its own CaDiCaL. objcopy rewrites the matching
+  # relocations (which reference symbols by index), so combined.o stays
+  # self-consistent. (The macOS branch above instead -unexported_symbol's them:
+  # Mach-O has no COMDAT-group discard, so localizing is sufficient there.)
+  awk '{print $$1, "lhdcvc5priv_" $$1}' "$$work/cad.syms" > "$$work/cad.redef"
+  objcopy --redefine-syms="$$work/cad.redef" \
     "$$work/combined.o" "$$work/local.o"
   rm -f $@
   ar rcs $@ "$$work/local.o"
