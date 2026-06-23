@@ -136,6 +136,11 @@ void Pass_upass::setup() {
                         "task 1m: surface unresolved live imports on the pass var (kernel iterate loop) instead of "
                         "hard-erroring (default false)",
                         "false");
+  m1.add_label_optional("inline",
+                        "true|false: inline fully-defined `comb` calls (default true); false instead emits a "
+                        "sub-module instance, preserving the comb boundary for debug/optimization (stateful "
+                        "`mod`/`pipe`, recursive, `ref`/var-arg, and template combs always stay as instances/inline)",
+                        "true");
   register_pass(m1);
 }
 
@@ -177,6 +182,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   capture_opt("verifier_fail");
   capture_opt("coalescer");
   capture_opt("import_defer");
+  capture_opt("inline");  // compile.upass.inline=false -> runner emits comb instances instead of inlining
 
   if (!upass_order.empty()) {
     return;

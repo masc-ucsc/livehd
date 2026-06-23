@@ -386,6 +386,13 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
     std::print("\n");
   }
 
+  // compile.upass.inline=false: keep fully-defined combs as Sub instances
+  // (set_function_registry consults this when populating inlinable_callees_).
+  if (auto it = options.find("inline"); it != options.end()) {
+    const auto& v     = it->second;
+    inlining_enabled_ = !(v == "false" || v == "0" || v == "no" || v == "off");
+  }
+
   for (const auto& name : resolved) {
     const auto it = upass_registry.find(name);
     if (it == upass_registry.end()) {
@@ -1547,6 +1554,7 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
   auto is_placeholder = [](std::string_view n) { return n == "_" || (n.size() >= 2 && n[0] == '_' && n[1] >= '0' && n[1] <= '9'); };
   inlinable_callees_.clear();
   placeholder_callees_.clear();
+  sub_convertible_combs_.clear();
   for (const auto& [name, ln] : function_registry) {
     const auto& io        = ln->io_meta();
     // Recursion stays on the evaluator. Pure emit+fold recurses in the
@@ -1700,6 +1708,28 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
       // needed (avoids emitting dead alias assigns for ordinary callees).
       if (has_placeholder) {
         placeholder_callees_.insert(name);
+      }
+      // compile.upass.inline=false: which of these callees are a fully-typed,
+      // pure-dataflow `comb` that tolg can lower to a Sub module instance (its
+      // standalone GraphIO already exists — every non-template comb compiles on
+      // its own). A DIRECT by-name call to one of these is left as a func_call
+      // instead of inlined (try_inline_func_call consults this set). Excluded —
+      // these have no standalone interface, or their semantics can't survive
+      // instantiation, so they keep inlining: templates (no GraphIO), var-arg /
+      // `ref` params (no port form, ref needs write-back), zero-output side-
+      // effect combs (no outputs to bind), positional-placeholder bodies, and
+      // recursion. Computed unconditionally; only read when the flag is off.
+      const auto lk      = ln->get_lambda_kind();
+      const bool is_comb = lk.empty() || lk == "comb";
+      bool       special = has_placeholder;
+      for (const auto& e : io.inputs) {
+        if (e.is_ref || e.is_varargs) {
+          special = true;
+          break;
+        }
+      }
+      if (is_comb && !ln->is_template() && !io.outputs.empty() && !special && !recursive_callees_.contains(name)) {
+        sub_convertible_combs_.insert(name);
       }
     }
   }
@@ -2783,14 +2813,29 @@ bool uPass_runner::try_inline_func_call() {
   // function-valued param resolves to the function bound at the outer call
   // site (closure_capture / fcall6). func_param_bindings_ is keyed by the raw
   // param name as it appears in the body.
+  bool via_param_binding = false;
   if (auto fb = func_param_bindings_.find(callee_name); fb != func_param_bindings_.end()) {
-    callee_name = fb->second;
+    callee_name        = fb->second;
+    via_param_binding  = true;
   }
   // The callee identifier as written at the call site (method dispatch and
   // the import-namespace exemption below need it after callee_name rebinds).
   const std::string source_callee_name(callee_name);
 
   auto callee = lookup_callee(callee_name);
+
+  // compile.upass.inline=false: a DIRECTLY-resolved, Sub-convertible `comb` is
+  // left as a func_call so tolg lowers it to a module instance instead of
+  // inlining (preserving the comb boundary for debug/optimization). Only a
+  // plain by-name call qualifies: a callee reached through a function-valued
+  // param (closure), or through the method/overload/lambda-array fallbacks
+  // below (which run only when this initial lookup fails), has no Sub form and
+  // must always inline. The cursor is untouched, so the func_call emits as-is.
+  if (!inlining_enabled_ && callee && !via_param_binding
+      && sub_convertible_combs_.contains(std::string(callee->get_top_module_name()))) {
+    lm->restore_cursor(saved);
+    return false;
+  }
 
   // Method dispatch: `obj.method(args)` lowers to `func_call[dst, method,
   // store(__ufcs_arg, obj), args…]` — `method` is not itself a registry

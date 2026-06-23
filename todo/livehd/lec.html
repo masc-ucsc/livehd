@@ -15,50 +15,149 @@
   <code>pass/lec/lec.md</code> (cvc5-direct: combinational miter, inductive
   flop-cut + BMC-from-reset sequential, memory arrays, combinational <code>Sub</code>
   inline flattening — all landed). This page tracks the <strong>remaining</strong>
-  work: the "fast incremental" reduction and the sequential/cross-run scaling that
-  turn it from a whole-design checker into a change-scoped one.</p>
+  work. The near-term plan is to stop solving the whole design as one flat miter and
+  instead run a <strong>bottom-up hierarchical decomposition</strong>: race the two
+  engines as a portfolio (<code>lec.engine=auto</code>), prove each module def
+  leaves-first, and turn every proven def into a <strong>black-box collapse point</strong>
+  for its parents (<code>lec.hierarchical=true</code>). This pulls the expensive
+  deep-state modules (e.g. the register file) and large combinational cones out of
+  every parent proof, and — just as importantly — it fixes the
+  <em>correspondence-incompleteness</em> that makes a flat whole-design proof give up
+  (per-module the flop/IO names match exactly ⇒ complete correspondence ⇒ a real
+  <code>Proven</code>; the parent then only needs instance-boundary correspondence).</p>
 
-<h2>Depends on</h2>
-<p><a class="xref" href="2f-semdiff.html">2f-semdiff</a> — the structural MATCH
-  pre-pass. The LEC reduction plan is "create the PARTITION and MATCH first":
-  <code>semdiff</code> marks corresponding structure across <code>--ref</code>/<code>--impl</code>,
-  so <code>lec</code> can assume the matched region equal and hand only the
-  unmatched gaps to cvc5.</p>
+<h2>Correspondence — no hard semdiff dependency</h2>
+<p>The bottom-up flow relies on <strong>name-based</strong> correspondence, which the
+  encoder already has: I/O ports matched by name case-insensitively
+  (<code>Io_name_map</code>), flops matched by canonical hierarchical name
+  (<code>canon_flop_name</code> strips Yosys decoration + <code>___ssa_</code> suffixes),
+  plus explicit <code>--match ref=impl</code> overrides. Whenever the two designs share
+  the same call structure (e.g. dino's surviving <code>registers</code> + 14
+  <code>StageReg_*</code> instances carry identical, 1:1 names), this pairs everything
+  with <strong>no semdiff needed</strong>.</p>
+<p><a class="xref" href="2f-semdiff.html">2f-semdiff</a> is therefore an
+  <strong>optional accelerator, not a prerequisite</strong>: its structural MATCH only
+  earns its keep by letting <code>lec</code> <em>skip</em> the solver on
+  structurally-identical subtrees (the M3 def-diff reduction below). The conservative v1
+  is "every module in the hierarchy gets its own LEC"; semdiff is the later optimization
+  that drops the ones it can prove identical for free.</p>
 
-<h2>Subtasks — pending</h2>
+<h2>Subtasks — near-term: bottom-up hierarchical decomposition</h2>
+<p>These supersede the old single "M5 (remaining)" bullet. They compose: every
+  per-module proof and the collapsed parent proof each run under the <code>auto</code>
+  portfolio, the driver wires them bottom-up, and each block emits a machine-parseable
+  progress line (last bullet) the moment it resolves.</p>
 <ul class="subtasks">
-<li><strong>M3 — structural def-diff reduction (the "fast incremental" headline).</strong>
-  Canonical per-def hash (op + params + sorted connectivity + interface), stable
-  across two independent builds of an unchanged def. Compare the <code>--ref</code>
-  and <code>--impl</code> libraries def-by-def; identical defs are dropped with
-  <strong>no solver call</strong>; only changed defs (and parents whose child
-  <em>interface</em> changed) become queries — a 1000-def design with a 1-def edit
-  checks ≈1 def. Builds directly on <a class="xref" href="2f-semdiff.html">2f-semdiff</a>
-  (per-node MATCH) plus a def-level PARTITION of matched vs changed regions. Test:
-  the existing <code>hier_*</code> fixtures with a single-def edit; assert only that
-  def was solved.</li>
-<li><strong>M5 (remaining) — sequential/black-box assume-guarantee + CEGAR.</strong>
-  Combinational <code>Sub</code> inline flattening already landed (see lec.md). The
-  remaining piece: prove a changed leaf def equivalent <strong>in isolation with free
-  inputs</strong> (conservative ⇒ always sound; a reachable-input-only proof is
-  <em>unsound</em> for congruence), then black-box it in the parent (inputs become
-  compare points, outputs free source points on both sides) and conclude the parent
-  equivalent without re-proof. Auto-checked soundness side-conditions (identical
-  interface + timing, no new comb path across the boundary, discharged environment
-  assumptions, full I/O equivalence) else flatten the region. On a spurious CEX from
-  an isolated/abstracted proof, expand the cone / un-black-box / re-add the cut-point
-  and retry (CEGAR).</li>
+<li><strong>agentic progress reporting (per-block <code>info</code> diag).</strong> A full
+  bottom-up run is long, so emit a machine-parseable progress line every time a block (leaf
+  or parent) resolves to <strong>pass / fail / inconclusive</strong> — an agent driving the
+  flow stream-parses it instead of waiting for the end. Reuse the existing diag pretty/jsonl
+  rendering (<code>--diag-fmt jsonl</code>, <code>LIVEHD_DIAG</code>) at a <strong>new
+  <code>info</code> severity</strong> that — unlike <code>error</code>/<code>warning</code> —
+  does <em>not</em> touch <code>has_errors()</code> or the exit code (today the enum is only
+  <code>error</code>/<code>warning</code>/<code>note</code>, and <code>note</code> is a
+  secondary-location attachment only, <code>core/diag.hpp:27</code>; this adds a standalone
+  <code>info</code> + an <code>info()</code> builder). Each record carries the block name, the
+  verdict, and <strong>which engine reached the inference fastest</strong>: under
+  <code>auto</code>, the engine that returned the trustworthy verdict first
+  (inductive-<code>Proven</code> or BMC-<code>Refuted</code>) plus its elapsed ms; for
+  <em>inconclusive</em> there is no winner, so list the attempted engines with their
+  times/bounds. The <code>Diagnostic</code> struct is fixed today (no arbitrary key/value,
+  <code>core/diag.hpp:88-104</code>), so this needs ~2–3 new optional fields
+  (<code>verdict</code>, <code>engine</code>, <code>duration_ms</code> — or a small generic
+  <code>attrs</code> map to also carry bound / witness path / node count) serialized in
+  <code>to_jsonl()</code>. <code>pass/lec</code> already emits <code>pass.lec</code> diags
+  (e.g. <code>not-equivalent</code> via <code>err().fatal()</code>), so the emit site and
+  <code>code</code>/<code>category</code> conventions exist; add stable codes like
+  <code>lec-block-proven</code> / <code>lec-block-refuted</code> /
+  <code>lec-block-inconclusive</code> (category: a new <code>lec</code>/<code>progress</code>
+  or reuse <code>internal</code>).</li>
+<li><strong>auto — parallel portfolio engine (<code>lec.engine=auto</code>).</strong>
+  Race the two real engines on the same <code>--ref</code>/<code>--impl</code> pair and
+  take the first <em>trustworthy</em> verdict. (Today only <code>bmc</code> and the
+  single-step inductive miter exist; <code>ind</code>/<code>ic3</code>/<code>auto</code>
+  silently fall through to the inductive miter — <code>query.cpp:122,303</code>.) The
+  pairing is complementary: the inductive miter is good at <em>proving</em> equivalence
+  (deep state, e.g. the register file), BMC-from-reset is good at finding <em>shallow
+  real bugs</em>. The core correctness content is the <strong>verdict-trust
+  asymmetry</strong>, which the current exit-code mapping does <em>not</em> encode:
+  <ul>
+    <li>inductive <strong>Proven</strong> (UNSAT + complete correspondence) ⇒ trust as PASS, kill BMC;</li>
+    <li>BMC <strong>Refuted</strong> (CEX within bound, from reset) ⇒ trust as FAIL + witness, kill inductive;</li>
+    <li>inductive <strong>Refuted</strong> ⇒ <em>not</em> a real bug (single-step assumes arbitrary equal state ⇒ may be an unreachable step-case CEX; the code can't tell base- from step-case, <code>query.cpp:1414-1440</code>) — hint only;</li>
+    <li>BMC bounded-<strong>Proven</strong> (no CEX ≤ <code>N</code>, default 6) ⇒ <em>not</em> a full PASS;</li>
+    <li>inductive non-Proven and BMC non-Refuted ⇒ <strong>inconclusive</strong>.</li>
+  </ul>
+  Mechanics: cvc5 cross-instance thread-safety is explicitly unverified
+  (<code>query.cpp:120-121</code>), so race as <strong>separate processes</strong> (fork
+  two <code>lhd lec</code> workers, first conclusive wins, kill the other) — free
+  timeout/kill, no threading landmine. Generalizes the existing sequential
+  <code>phase=full</code> two-query orchestration.</li>
+<li><strong>proven-module black-box collapse (the <code>--collapse</code> knob).</strong>
+  The encoder already collapses opaque <code>Sub</code> instances to a sound black-box —
+  shared output symbols keyed by <code>defname#occurrence</code> with inputs as compare
+  points (<code>encode.cpp:704-765</code>, <code>set_shared_bbox</code>) — but only when
+  a <code>Sub</code> is unresolved/stateful/not in <code>--lib</code>. Add a knob
+  (<code>--collapse &lt;def&gt;</code> / a proven-set the driver passes in) that
+  <em>forces</em> that same path on for a def the driver has <strong>already proven
+  equivalent</strong>, even when it could be flattened. For a combinational leaf this is
+  directly sound: outputs become <code>UF(inputs)</code>, identical on both sides, and
+  the full free-input isolation proof discharges "equal inputs ⇒ equal outputs". Effect:
+  the parent stops re-solving the leaf's internals.</li>
+<li><strong>sequential black-box (stateful collapse points).</strong> Today's black-box
+  models outputs as a pure function of inputs (no state) — sound only for
+  <em>combinational</em> leaves. To collapse a <em>stateful</em> leaf (the register file,
+  the <code>StageReg_*</code> set — exactly the deep-state modules that are slow and
+  BMC-hostile), extend the box to be state-aware: outputs = <code>UF(inputs, state)</code>,
+  next_state = <code>UF2(inputs, state)</code>, with the leaf's state cut
+  <strong>corresponding on both sides</strong> and <strong>matched reset/init</strong>.
+  Then equal inputs + equal corresponding state ⇒ equal outputs + equal next-state by
+  congruence. Sound in the inductive (assume-equal-state) frame directly; under
+  BMC-from-reset it additionally needs the matched-reset init so the box doesn't lose the
+  leaf's reset behavior. This is what lets the register file be pulled out of the top
+  proof — the single biggest win for the dino case.</li>
+<li><strong>bottom-up hierarchical driver (<code>lec.hierarchical=true</code>).</strong>
+  Build the module-def dependency DAG, topo-order it, and LEC defs <strong>leaves-first,
+  each under <code>auto</code>, in parallel</strong>. Record the proven set; for each
+  parent, force-black-box its <em>proven</em> child instances (via the collapse knob) and
+  LEC the parent. A child that is <strong>not</strong> provable in isolation with free
+  inputs (context-dependent equivalence — only equal under the inputs its parent drives)
+  is <strong>not</strong> collapsed: un-black-box it and <strong>flatten it into the
+  parent</strong>, proving it in context (this is the M5 "CEGAR / un-black-box" fallback,
+  now in v1). Correspondence is name-based (above) — no semdiff required when call
+  structures match. Worked example (dino, 2 levels): round 1 proves
+  <code>DualIssueRegisterFile</code> + the <code>StageReg_*</code> set (and the
+  combinational defs) in parallel; round 2 proves <code>PipelinedDualIssueCPU</code> with
+  the 15 stateful instances collapsed and the inlined combinational logic left
+  flat-but-cheap. Note the asymmetry: <code>dino_p1</code> inlined the 12 combinational
+  modules, so only the stateful instances exist as collapse boundaries at the top — fine,
+  the inlined combinational cones stay flattened.</li>
+</ul>
+
+<h2>Subtasks — later (further speedups, layered on the bottom-up flow)</h2>
+<ul class="subtasks">
+<li><strong>M3 — structural def-diff reduction (semdiff-based skip).</strong> Once the
+  bottom-up driver works, layer on a canonical per-def hash (op + params + sorted
+  connectivity + interface), stable across two independent builds of an unchanged def, so
+  structurally-identical defs are dropped with <strong>no solver call</strong> at all — a
+  1000-def design with a 1-def edit checks ≈1 def. This is a <em>further</em> speedup on
+  top of the bottom-up flow, <strong>not a prerequisite</strong>: when the two call
+  structures match, name-based correspondence already pairs everything, so the driver runs
+  without semdiff; semdiff only earns its keep by letting you <em>skip</em> LEC on matched
+  subtrees. Builds on <a class="xref" href="2f-semdiff.html">2f-semdiff</a> (per-node
+  MATCH) + a def-level partition of matched vs changed regions. Test: the existing
+  <code>hier_*</code> fixtures with a single-def edit; assert only that def was solved.</li>
 <li><strong>M6 — persistent certificate cache.</strong> Key = canonical hash +
   interface hash + assumptions; value = a certificate. "Prove once, reuse forever"
   across runs and passes; future optimization passes consult the cache before calling
-  cvc5. Deferred until M3/M5 prove out.</li>
+  cvc5. Deferred until the bottom-up flow + M3 prove out.</li>
 <li><strong>bitwuzla backend (opt-in).</strong> <code>lec.solver=bitwuzla</code> is
   declared but not built. Vendoring is awkward (Meson, auto-downloads CaDiCaL/SymFPU
   → breaks the hermetic sandbox); revisit only if cvc5's BV/array performance proves
-  insufficient on M3/M5 proofs.</li>
+  insufficient.</li>
 <li><strong>Provenance-based matching (optional hint source).</strong> Every
   optimization that preserves <code>derived_from</code> / transformation id gives the
-  MATCH pass strong correspondence hints, so cvc5 stays the last resort, not the
+  correspondence pass strong hints, so cvc5 stays the last resort, not the
   first. Wire once provenance attributes exist.</li>
 </ul>
 
@@ -66,10 +165,13 @@
 <ul class="subtasks">
 <li><strong>M1 — combinational equivalence.</strong> Encoder (LGraph → cvc5 BV
   terms) + miter + single <code>checkSat</code>; cross-checked vs <code>lgcheck</code>.</li>
-<li><strong>M2 — sequential via register correspondence.</strong> Inductive flop-cut
-  miter (default <code>ind</code>) matching flops by preserved name, plus the
-  <code>bmc</code> unroll-from-reset engine with reset-phase separation
-  (<code>free</code>/<code>reset</code>/<code>run</code>) and reset auto-detection.</li>
+<li><strong>M2 — sequential via register correspondence.</strong> Single-step inductive
+  flop-cut miter (the default engine when <code>lec.engine</code> ≠ <code>bmc</code>)
+  matching flops by preserved name, plus the <code>bmc</code> unroll-from-reset engine
+  (default bound 6) with reset-phase separation (<code>free_toreset</code> /
+  <code>just_reset</code> / <code>after_reset</code> [default] / <code>full</code>) and
+  reset auto-detection. (Note: the <code>ind</code>/<code>ic3</code> options are not yet
+  real k-induction/PDR — they fall through to the single-step miter.)</li>
 <li><strong>M4 — memory as SMT arrays.</strong> Corresponding memories collapse to a
   shared array symbol (signature + occurrence key); <code>select</code>/<code>store</code>
   next-state.</li>

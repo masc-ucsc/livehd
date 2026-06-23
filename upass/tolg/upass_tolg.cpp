@@ -2835,7 +2835,13 @@ private:
         callee = resolve_callee_lnast(callee_name, *registry_);
       }
       kind = callee ? callee->get_lambda_kind() : std::string_view{};
-      if (!callee || (kind != "pipe" && kind != "mod")) {
+      // A `comb` callee normally inlines in the runner, but with
+      // compile.upass.inline=false a fully-defined comb survives as a func_call
+      // and lowers here to a Sub instance of its standalone module (same Sub
+      // machinery as pipe/mod; a comb carries no clock/reset, so the minted-
+      // clock/reset wiring below stays inert). An empty kind ("") is the lg:
+      // black-box path handled above, never reached here.
+      if (!callee || (kind != "pipe" && kind != "mod" && kind != "comb")) {
         // An unresolved call is ALWAYS a hard error: it is neither a defined
         // pipe/mod/comb, a built-in scalar cast (`signed`/`unsigned`/`uN`/`sN`/
         // `bool`/`string`), nor a `__cellop`. (`comb` may not call a `pipe`/`mod`.)
@@ -2852,11 +2858,13 @@ private:
         return;
       }
 
-      // Only a `mod` may instantiate pipe/mod callees (06-functions.md: `comb`
+      // Only a `mod` may instantiate a pipe/mod callee (06-functions.md: `comb`
       // may not call a `pipe`/`mod`; pipe bodies use stage inference, not
       // instantiation). Without this gate a comb would silently grow a
-      // latency-carrying instance.
-      if (lnast_->get_lambda_kind() != "mod") {
+      // latency-carrying instance. A `comb` callee is exempt: it is
+      // combinational (latency-0, stateless), so any body — comb, mod, or a top
+      // — may instantiate it (compile.upass.inline=false path).
+      if (kind != "comb" && lnast_->get_lambda_kind() != "mod") {
         error_here("upass.tolg: '{}' (a {}) calls the {} '{}' — only `mod` bodies may instantiate pipe/mod",
                    lnast_->get_top_module_name(),
                    lnast_->get_lambda_kind().empty() ? std::string_view{"comb"} : lnast_->get_lambda_kind(),
@@ -3091,7 +3099,12 @@ private:
     // A callee output declared `@[]` (stages -1) carries no interval: the
     // instance propagates like a comb crossing and stage[] picks over it
     // fall back to the plain-RHS path.
-    if (oe.stages_min >= 0) {
+    // A `comb` callee (compile.upass.inline=false) is purely combinational —
+    // latency 0, stateless — so it carries NO interval either: it propagates
+    // like a comb crossing, so `stage[N] x = comb(...)` adds its flops over the
+    // instance exactly as it would over the inlined logic (its stages_min is
+    // the unannotated default 0, which must not pin the result to cycle 0).
+    if (kind != "comb" && oe.stages_min >= 0) {
       const int64_t cmin = oe.stages_min;
       const int64_t cmax = oe.stages_max < oe.stages_min ? oe.stages_min : oe.stages_max;
       sub.attr(livehd::attrs::time_range).set({cmin, cmax});

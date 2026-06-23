@@ -727,6 +727,17 @@ protected:
   // name, no placeholders; recursion allowed under fuel). All other callees
   // route to the evaluator. Computed in set_function_registry.
   Ci_str_set                                   inlinable_callees_;
+  // compile.upass.inline (default true). When false, a DIRECT by-name call to a
+  // fully-typed pure-dataflow `comb` is NOT spliced — it is left as a func_call
+  // so tolg lowers it to a Sub module instance (preserving the comb boundary for
+  // debug/optimization). Overload/method/closure dispatch (no Sub form) always
+  // inlines. Read from options["inline"] in the constructor.
+  bool                                         inlining_enabled_ = true;
+  // Registry keys of the combs the above flag converts to Sub instances: a
+  // fully-typed, pure-dataflow comb with its own standalone GraphIO. A subset of
+  // inlinable_callees_; computed unconditionally in set_function_registry, read
+  // at the call site only when inlining_enabled_ is false.
+  Ci_str_set                                   sub_convertible_combs_;
   // Inlinable callees whose body uses positional placeholders (_0/_1/_); the
   // prologue binds those aliases for these only.
   Ci_str_set                                   placeholder_callees_;
