@@ -4,6 +4,7 @@
 
 #include <algorithm>
 
+#include "cgen_sim.hpp"
 #include "cgen_verilog.hpp"
 #include "file_utils.hpp"
 #include "perf_tracing.hpp"
@@ -24,6 +25,14 @@ void Inou_cgen::setup() {
   m1.add_label_optional("verbose", "dump bits and wirename (true/false)", "false");
   m1.add_label_optional("srcmap", "emit an ECMA-426 source-map sidecar (.v.map + sourceMappingURL comment)", "false");
   register_inou("cgen", m1);
+
+  // inou.cgen.sim — executable Slop C++ from an Lgraph (TODO 3d). Per-module
+  // <name>.hpp written into `odir`; the standalone Bazel module scaffold around
+  // them is written by the kernel's emit_sim_outputs.
+  Eprp_method m2("inou.cgen.sim", "export executable slop C++ from an Lgraph", &Inou_cgen::to_cgen_sim);
+  m2.add_label_optional("vcd", "VCD trace file baked into the sim (compile.sim.vcd); empty = no VCD", "");
+  m2.add_label_optional("top", "top module name; only it emits VCD (avoids file collisions)", "");
+  register_inou("cgen", m2);
 }
 
 void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
@@ -69,5 +78,24 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
       Cgen_verilog p(verbose, dir, srcmap);
       p.do_from_graph(g);
     });
+  }
+}
+
+void Inou_cgen::to_cgen_sim(Eprp_var& var) {
+  TRACE_EVENT("inou", "sim_gen");
+
+  Inou_cgen pp(var);
+  auto      dir     = pp.get_odir(var);
+  auto      vcd_out = var.get("vcd");
+  auto      top     = var.get("top");
+
+  // Synchronous (one .hpp per module): the designs are small and the kernel's
+  // sim_into() checks each <module>.hpp exists right after this returns.
+  for (const auto& g : var.graphs) {
+    if (!g) {
+      continue;
+    }
+    Cgen_sim p(dir, vcd_out, top);
+    p.do_from_graph(g);
   }
 }

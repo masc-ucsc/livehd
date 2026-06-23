@@ -19,7 +19,7 @@ constexpr std::string_view kSteps =
     R"json(["compile verilog","compile pyrope","lec","scan","tool","pass","pyrope fmt","pyrope lsp"])json";
 constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
 constexpr std::string_view kEmitKinds =
-    R"json(["ln","lg","verilog","pyrope","lnast-dump","isabelle","lean","graphviz","metadata","results","diagnostics"])json";
+    R"json(["ln","lg","verilog","pyrope","lnast-dump","isabelle","lean","sim","graphviz","metadata","results","diagnostics"])json";
 constexpr std::string_view kErrorClasses =
     R"json(["usage","syntax","internal","equiv_fail","signal","timeout","missing_file","config","dependency","unsupported"])json";
 
@@ -319,6 +319,11 @@ int describe_command(const Options& opts) {
   if (name == "verilog") {
     print_json_line(
         R"json({"schema_version":1,"name":"verilog","description":"Verilog source; as --emit a deterministic name-sorted concatenation of per-module cgen output","direction":"in/out"})json");
+    return 0;
+  }
+  if (name == "sim") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"sim","description":"Executable C++ simulation (inou.cgen.sim): a standalone Bazel module of per-module Slop<N> structs (functional Out cycle(In)) over the ../hlop library. --emit-dir only; `cd DIR && bazel build //:sim`","direction":"out"})json");
     return 0;
   }
   if (name == "pyrope fmt") {

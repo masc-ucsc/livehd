@@ -59,10 +59,11 @@ bazel_dep(name = "hlop", version = "0.2.0")
 git_override(
     module_name = "hlop",
     remote = "https://github.com/masc-ucsc/hlop.git",
-    commit = "d0578d197f9d07744d7562932bd08f9c70f3649c",  # several cleanup around hlop (on top of issue_057 part-select fold fix + is_mask multi-word)
+    commit = "ce83af7a8f96250bc48be6dd5a647500f1930e06",  # update VCD dump (incl. Slop<M>->Slop<N> cross-width converter for inou.cgen.sim / TODO 3d)
 )
-# For local debug/testing, swap the git_override above for:
-# local_path_override(module_name = "hlop", path = "../hlop")  # WIP on top of d0578d1
+# For local debug/testing (e.g. WIP slop.hpp changes not yet pushed), swap the
+# git_override above for:
+# local_path_override(module_name = "hlop", path = "../hlop")
 
 # slang (fmt required by slang CMake)
 http_archive(
