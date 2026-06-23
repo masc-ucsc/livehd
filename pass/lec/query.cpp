@@ -105,6 +105,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
                          const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
   Query_result res;
   res.detail = "solver=" + opts.solver + " (cvc5 direct, flop-cut inductive miter)";
+  res.engine = opts.engine;  // the auto portfolio overrides this with the winning engine
 
   if (opts.solver != "cvc5") {
     res.verdict  = Verdict::Unknown;

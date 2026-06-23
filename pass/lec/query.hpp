@@ -20,6 +20,14 @@ struct Query_result {
   std::string witness;  // satisfying input assignment when Refuted
   std::string detail;   // engine / bound / encode error, for diagnostics
 
+  // Which engine produced this verdict + how long it took (for the per-block
+  // progress/info record). Normally just the requested engine; under the `auto`
+  // portfolio it is the engine that reached the trustworthy verdict FIRST
+  // (inductive-Proven or BMC-Refuted) — and for an inconclusive auto run it lists
+  // the attempted engines. `elapsed_ms` is that engine's wall-clock (-1 = unset).
+  std::string engine;
+  long long   elapsed_ms = -1;
+
   // Structural-correspondence report (so `lhd lec` can ITERATE instead of bailing
   // on the first unmatched cut point). When the two designs don't expose the same
   // set of state/outputs, the miter still runs over the COMMON ones and these list

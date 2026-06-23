@@ -18,6 +18,7 @@ std::string_view to_string(Severity s) {
     case Severity::error  : return "error";
     case Severity::warning: return "warning";
     case Severity::note   : return "note";
+    case Severity::info   : return "info";
   }
   return "error";
 }
@@ -170,6 +171,30 @@ std::string to_jsonl(const Diagnostic& d, uint64_t seq) {
     }
     out += ']';
   }
+  // Optional structured progress payload (omitted unless set), so a plain
+  // error/warning serializes byte-identically to before.
+  if (!d.verdict.empty()) {
+    out += ',';
+    append_kv_str(out, "verdict", d.verdict);
+  }
+  if (!d.engine.empty()) {
+    out += ',';
+    append_kv_str(out, "engine", d.engine);
+  }
+  if (d.duration_ms >= 0) {
+    out += ",\"duration_ms\":";
+    out += std::to_string(d.duration_ms);
+  }
+  if (!d.attrs.empty()) {
+    out += ",\"attrs\":{";
+    for (size_t i = 0; i < d.attrs.size(); ++i) {
+      if (i) {
+        out += ',';
+      }
+      append_kv_str(out, d.attrs[i].first, d.attrs[i].second);
+    }
+    out += '}';
+  }
   out += ",\"seq\":";
   out += std::to_string(seq);
   out += '}';
@@ -235,6 +260,33 @@ std::string to_text(const Diagnostic& d, const hhds::Source_locator* sl) {
   out += to_string(d.severity);
   out += ':';
   out += d.message;
+  // Compact human suffix for a progress/info record: ` [verdict=… engine=… …ms]`.
+  if (!d.verdict.empty() || !d.engine.empty() || d.duration_ms >= 0) {
+    out += " [";
+    bool first = true;
+    auto sep   = [&] {
+      if (!first) {
+        out += ' ';
+      }
+      first = false;
+    };
+    if (!d.verdict.empty()) {
+      sep();
+      out += "verdict=";
+      out += d.verdict;
+    }
+    if (!d.engine.empty()) {
+      sep();
+      out += "engine=";
+      out += d.engine;
+    }
+    if (d.duration_ms >= 0) {
+      sep();
+      out += std::to_string(d.duration_ms);
+      out += "ms";
+    }
+    out += ']';
+  }
   if (auto ex = excerpt(d.span); !ex.empty()) {
     out += '\n';
     out += ex;
@@ -345,6 +397,7 @@ void Sink::emit(Diagnostic d) {
       break;
     case Severity::warning: ++warn_count_; break;
     case Severity::note   : ++note_count_; break;
+    case Severity::info   : ++info_count_; break;  // never an error / exit-code change
   }
   init_output();
   if (json_out_ != Json::none) {
@@ -375,6 +428,7 @@ size_t Sink::count(Severity s) const {
     case Severity::error  : return error_count_;
     case Severity::warning: return warn_count_;
     case Severity::note   : return note_count_;
+    case Severity::info   : return info_count_;
   }
   return 0;
 }
@@ -388,6 +442,7 @@ void Sink::clear() {
   deferred_error_count_ = 0;
   warn_count_           = 0;
   note_count_           = 0;
+  info_count_           = 0;
   staged_.reset();
   if (json_fp_ != nullptr) {
     std::fclose(json_fp_);

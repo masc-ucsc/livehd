@@ -457,6 +457,7 @@ int severity_to_lsp(livehd::diag::Severity s) {
     case livehd::diag::Severity::error  : return 1;
     case livehd::diag::Severity::warning: return 2;
     case livehd::diag::Severity::note   : return 3;  // information
+    case livehd::diag::Severity::info   : return 3;  // information (progress)
   }
   return 1;
 }

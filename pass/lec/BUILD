@@ -123,3 +123,13 @@ sh_test(
     data = ["//lhd"],
     tags = ["no-sandbox"],  # runs the in-process cvc5 solver
 )
+
+# Agentic per-block progress: every resolved block emits one machine-parseable
+# `info`-severity diagnostic (lec-block-proven / -refuted / -inconclusive) with a
+# verdict, the winning engine, and duration_ms, without touching the exit code.
+sh_test(
+    name = "lec_progress_test",
+    srcs = ["tests/lec_progress_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # runs the in-process cvc5 solver
+)

@@ -17,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
@@ -24,7 +25,12 @@
 
 namespace livehd::diag {
 
-enum class Severity { error, warning, note };
+// `info` is a STANDALONE record at a severity below warning: unlike error /
+// warning it does NOT touch has_errors() / the exit code, and unlike `note` it
+// is a primary diagnostic in its own right (not a secondary location attached to
+// another). Used for machine-parseable progress that an agent stream-parses
+// (e.g. pass.lec emits one per resolved block — proven / refuted / inconclusive).
+enum class Severity { error, warning, note, info };
 
 std::string_view to_string(Severity s);
 
@@ -73,8 +79,9 @@ struct Id {
 //   io          - files, paths, options, emit targets
 //   unsupported - recognized but not implemented
 //   internal    - compiler invariant broke (a livehd bug, not a user error)
-inline constexpr std::array<std::string_view, 9> kCategories
-    = {"syntax", "name", "type", "bitwidth", "comptime", "time", "io", "unsupported", "internal"};
+//   progress    - long-running-pass per-block progress (info severity only)
+inline constexpr std::array<std::string_view, 10> kCategories
+    = {"syntax", "name", "type", "bitwidth", "comptime", "time", "io", "unsupported", "internal", "progress"};
 
 [[nodiscard]] inline bool is_known_category(std::string_view c) {
   for (const auto k : kCategories) {
@@ -101,6 +108,21 @@ struct Diagnostic {
   // for a refuted formal property — see pass/formal (the FAIL is reported and
   // the design still compiles, with the failing check kept as a runtime check).
   bool deferred = false;
+
+  // Optional structured payload for machine-parseable progress/info records (a
+  // long-running pass emits one per resolved unit; pass.lec emits one per block).
+  // Each is omitted from to_jsonl when unset (empty string / -1 / empty vector),
+  // so an ordinary error/warning serializes exactly as before.
+  //   verdict     - "pass" | "fail" | "inconclusive" (the block outcome)
+  //   engine      - the engine that REACHED the verdict (the portfolio winner);
+  //                 for an inconclusive block, the attempted engines
+  //   duration_ms - elapsed wall-clock to reach the verdict (-1 = unset)
+  //   attrs       - any extra key/value (bound, witness path, node count, the
+  //                 per-engine times) so the struct need not grow per consumer
+  std::string                                      verdict;
+  std::string                                      engine;
+  int64_t                                          duration_ms = -1;
+  std::vector<std::pair<std::string, std::string>> attrs;
 };
 
 // One JSONL line (no trailing newline). `seq` is the per-run monotonic id.
@@ -190,6 +212,7 @@ private:
   size_t                      deferred_error_count_ = 0;  // subset of error_count_ that does NOT halt the pipeline
   size_t                      warn_count_           = 0;
   size_t                      note_count_           = 0;
+  size_t                      info_count_           = 0;  // progress/info records (never an error)
 
   enum class Json { uninit, none, stderr_, file };
   Json        json_out_ = Json::uninit;
@@ -286,6 +309,24 @@ public:
     return *this;
   }
 
+  // Structured-payload chains for an info/progress record (see Diagnostic).
+  Builder& verdict(std::string_view v) {
+    d_.verdict = std::string(v);
+    return *this;
+  }
+  Builder& engine(std::string_view e) {
+    d_.engine = std::string(e);
+    return *this;
+  }
+  Builder& duration_ms(int64_t ms) {
+    d_.duration_ms = ms;
+    return *this;
+  }
+  Builder& attr(std::string_view k, std::string_view v) {
+    d_.attrs.emplace_back(std::string(k), std::string(v));
+    return *this;
+  }
+
   Diagnostic build() { return std::move(d_); }
 
   void              emit();
@@ -302,6 +343,13 @@ inline Builder err(std::string_view pass, std::string_view code, std::string_vie
 
 inline Builder warn(std::string_view pass, std::string_view code, std::string_view category) {
   return Builder(Severity::warning, pass, code, category);
+}
+
+// A standalone progress/info record (below warning: never an error, never an
+// exit-code change). Chain `.verdict()`/`.engine()`/`.duration_ms()`/`.attr()`
+// for the machine-parseable payload, then `.emit()`.
+inline Builder info(std::string_view pass, std::string_view code, std::string_view category) {
+  return Builder(Severity::info, pass, code, category);
 }
 
 }  // namespace livehd::diag

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -2812,6 +2813,40 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
   }
 }
 
+// Emit the machine-parseable per-block progress line (info severity: never an
+// error or exit-code change) the moment a block resolves, so an agent driving a
+// long bottom-up run stream-parses pass/fail/inconclusive instead of waiting for
+// the end. Reuses the diag jsonl/pretty rendering; the record carries the block
+// name, the verdict, the engine that reached it (the portfolio winner r.engine
+// when the auto engine set one, else the requested engine), and the elapsed ms.
+static void emit_lec_block_progress(std::string_view block, const livehd::lec::Query_result& r,
+                                    const livehd::lec::Lec_options& o, long long elapsed_ms) {
+  const char* code;
+  const char* verdict;
+  switch (r.verdict) {
+    case livehd::lec::Verdict::Proven : code = "lec-block-proven";       verdict = "pass";         break;
+    case livehd::lec::Verdict::Refuted: code = "lec-block-refuted";      verdict = "fail";         break;
+    default                           : code = "lec-block-inconclusive"; verdict = "inconclusive"; break;
+  }
+  const std::string eng = r.engine.empty() ? o.engine : r.engine;
+  const long long   ms  = r.elapsed_ms >= 0 ? r.elapsed_ms : elapsed_ms;
+  auto              b   = livehd::diag::info("pass.lec", code, "progress")
+               .msg("lec block '{}' {}", block, verdict)
+               .verdict(verdict)
+               .engine(eng)
+               .duration_ms(ms);
+  if (!r.detail.empty()) {
+    b.attr("detail", r.detail);
+  }
+  if (!r.witness.empty()) {
+    b.attr("witness", r.witness);
+  }
+  if (o.engine == "bmc" || o.engine == "auto") {
+    b.attr("bound", std::to_string(o.bound));
+  }
+  b.emit();
+}
+
 void lec_command(Options& opts, Result& res) {
   setup_diag(opts, "lec");
   if (opts.impl_path.empty() || opts.ref_path.empty()) {
@@ -2929,9 +2964,14 @@ void lec_command(Options& opts, Result& res) {
   const auto* sub_lib_ptr = sub_lib.empty() ? nullptr : &sub_lib;
 
   res.recipe_steps.emplace_back(std::format("pass.lec engine:{} solver:{} phase:{}", o.engine, o.solver, o.phase));
-  auto r         = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), o, sub_lib_ptr);
-  bool lec_equiv = r.verdict == livehd::lec::Verdict::Proven;
-  bool lec_known = r.verdict != livehd::lec::Verdict::Unknown;
+  auto       t0      = std::chrono::steady_clock::now();
+  auto       r       = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), o, sub_lib_ptr);
+  const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+  bool lec_equiv     = r.verdict == livehd::lec::Verdict::Proven;
+  bool lec_known     = r.verdict != livehd::lec::Verdict::Unknown;
+
+  // Per-block progress (info severity): stream the verdict the moment it resolves.
+  emit_lec_block_progress(impl_g->get_name(), r, o, ms);
 
   const char* verdict = lec_known ? (lec_equiv ? "PROVEN equivalent" : "REFUTED (not equivalent)") : "UNKNOWN";
   std::print("lec: '{}' {} ({})\n", impl_g->get_name(), verdict, r.detail);

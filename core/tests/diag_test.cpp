@@ -229,6 +229,65 @@ TEST(diag, locator_scope_restores_previous) {
   EXPECT_EQ(s.locator(), nullptr);
 }
 
+TEST(diag, info_is_not_an_error) {
+  // Builder terminals go through the process-global sink (like builder_fatal_*).
+  auto& s = livehd::diag::sink();
+  s.clear();
+  s.set_jsonl_path("off");
+  s.set_human_stderr(false);
+  // A progress/info record is below warning: it counts in its own bucket but
+  // never flips has_errors() (so the exit code is unaffected).
+  livehd::diag::info("pass.lec", "lec-block-proven", "progress")
+      .msg("lec block 'adder' pass")
+      .verdict("pass")
+      .engine("ind")
+      .duration_ms(42)
+      .attr("bound", "6")
+      .emit();
+  EXPECT_FALSE(s.has_errors());
+  EXPECT_EQ(s.count(Severity::error), 0u);
+  EXPECT_EQ(s.count(Severity::info), 1u);
+  ASSERT_EQ(s.records().size(), 1u);
+  EXPECT_EQ(s.records()[0].verdict, "pass");
+  EXPECT_EQ(s.records()[0].engine, "ind");
+  EXPECT_EQ(s.records()[0].duration_ms, 42);
+  s.clear();
+}
+
+TEST(diag, info_severity_string_and_jsonl_payload) {
+  EXPECT_EQ(livehd::diag::to_string(Severity::info), "info");
+  Diagnostic d{.severity    = Severity::info,
+               .code        = "lec-block-refuted",
+               .category    = "progress",
+               .pass        = "pass.lec",
+               .message     = "lec block 'cpu' fail"};
+  d.verdict     = "fail";
+  d.engine      = "bmc";
+  d.duration_ms = 1234;
+  d.attrs       = {{"bound", "6"}, {"witness", "step 2"}};
+  auto line     = livehd::diag::to_jsonl(d, 3);
+  EXPECT_NE(line.find("\"severity\":\"info\""), std::string::npos);
+  EXPECT_NE(line.find("\"verdict\":\"fail\""), std::string::npos);
+  EXPECT_NE(line.find("\"engine\":\"bmc\""), std::string::npos);
+  EXPECT_NE(line.find("\"duration_ms\":1234"), std::string::npos);
+  EXPECT_NE(line.find("\"attrs\":{\"bound\":\"6\",\"witness\":\"step 2\"}"), std::string::npos);
+  // The human channel carries a compact suffix.
+  auto txt = livehd::diag::to_text(d);
+  EXPECT_NE(txt.find("livehd:info:"), std::string::npos);
+  EXPECT_NE(txt.find("[verdict=fail engine=bmc 1234ms]"), std::string::npos);
+}
+
+TEST(diag, error_without_payload_serializes_unchanged) {
+  // A plain error must not gain any of the new optional keys.
+  auto line = livehd::diag::to_jsonl(make_error(), 1);
+  EXPECT_EQ(line.find("\"verdict\""), std::string::npos);
+  EXPECT_EQ(line.find("\"engine\""), std::string::npos);
+  EXPECT_EQ(line.find("\"duration_ms\""), std::string::npos);
+  EXPECT_EQ(line.find("\"attrs\""), std::string::npos);
+}
+
+TEST(diag, progress_category_is_known) { EXPECT_TRUE(livehd::diag::is_known_category("progress")); }
+
 TEST(diag, category_vocabulary_is_pinned) {
   EXPECT_TRUE(livehd::diag::is_known_category("bitwidth"));
   EXPECT_TRUE(livehd::diag::is_known_category("io"));
