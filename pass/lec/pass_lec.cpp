@@ -51,6 +51,11 @@ void Pass_lec::setup() {
                        "proven-module black-box collapse: comma-separated def names forced to the sound "
                        "blackbox path even when --lib could flatten them (the bottom-up driver's proven set)",
                        "");
+  m.add_label_optional("hierarchical",
+                       "bottom-up hierarchical decomposition: topo-order the module-def DAG, LEC each def "
+                       "leaves-first under the auto portfolio, and collapse already-proven children into "
+                       "their parents (a child unprovable in isolation stays flattened)",
+                       "false");
   m.add_label_optional("cross", "also run lgcheck and assert agreement (bring-up only)", "false");
   m.add_label_optional("decompose",
                        "prove each cut/output equivalence as a separate focused query instead of one "

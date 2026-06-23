@@ -165,3 +165,13 @@ sh_test(
     data = ["//lhd"],
     tags = ["no-sandbox"],  # runs the in-process cvc5 UF+BV solver on compiled RTL
 )
+
+# Bottom-up hierarchical driver (lec.hierarchical=true): topo-order the def DAG,
+# LEC leaves-first under auto, collapse proven children into parents, and flatten
+# an unprovable child into its parent (CEGAR fallback).
+sh_test(
+    name = "lec_hier_test",
+    srcs = ["tests/lec_hier_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # forks the in-process cvc5 solver per def
+)

@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -2847,6 +2848,137 @@ static void emit_lec_block_progress(std::string_view block, const livehd::lec::Q
   b.emit();
 }
 
+// Bottom-up hierarchical LEC driver (lec.hierarchical=true). Build the module-def
+// dependency DAG over the defs present BY NAME in both libraries, topo-order it
+// leaves-first, and LEC each def under the `auto` portfolio. Record the proven
+// set; for each parent, force-black-box its PROVEN child instances (--collapse) so
+// the parent proof stops re-solving them, while a child NOT provable in isolation
+// stays FLATTENED into the parent (descended) — the M5 CEGAR / un-black-box
+// fallback, now in v1. Correspondence is name-based (no semdiff needed when the
+// call structures match). Each def emits a per-block progress line the instant it
+// resolves, so an agent stream-parses the long run. Returns the TOP def's result.
+static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var, Eprp_var& impl_var,
+                                                  const std::string&        top_name,
+                                                  const livehd::lec::Lec_options& base,
+                                                  const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  using livehd::lec::Verdict;
+  namespace gu = livehd::graph_util;
+
+  // name -> def graph (case-insensitive, LiveHD/Pyrope name policy).
+  Ci_str_map<hhds::Graph*> ref_by_name, impl_by_name;
+  for (auto& g : ref_var.graphs) {
+    if (g) {
+      ref_by_name[std::string(g->get_name())] = g.get();
+    }
+  }
+  for (auto& g : impl_var.graphs) {
+    if (g) {
+      impl_by_name[std::string(g->get_name())] = g.get();
+    }
+  }
+
+  // The LEC-able defs are those present on BOTH sides; children[def] = the child
+  // def-NAMES it instantiates (taken from the ref-side Subs, name-matched).
+  Ci_str_map<std::vector<std::string>> children;
+  std::vector<std::string>             defs;
+  for (auto& [name, g] : ref_by_name) {
+    if (impl_by_name.find(name) == impl_by_name.end()) {
+      continue;
+    }
+    defs.push_back(name);
+    Ci_str_set seen;
+    for (auto node : g->forward_class()) {
+      if (gu::type_op_of(node) != Ntype_op::Sub) {
+        continue;
+      }
+      auto        sio = node.get_subnode_io();
+      std::string cn(sio->get_name());
+      if (ref_by_name.find(cn) != ref_by_name.end() && impl_by_name.find(cn) != impl_by_name.end() && !seen.count(cn)) {
+        children[name].push_back(cn);
+        seen.insert(cn);
+      }
+    }
+  }
+
+  // Topo-order leaves-first (DFS post-order; the in-progress mark guards cycles).
+  std::vector<std::string> order;
+  Ci_str_map<int>          mark;  // 0 unvisited, 1 in-progress, 2 done
+  std::function<void(const std::string&)> dfs = [&](const std::string& n) {
+    int& m = mark[n];
+    if (m != 0) {
+      return;  // done, or a cycle back-edge (modules form a DAG)
+    }
+    m = 1;
+    if (auto it = children.find(n); it != children.end()) {
+      for (const auto& c : it->second) {
+        dfs(c);
+      }
+    }
+    m = 2;
+    order.push_back(n);
+  };
+  for (const auto& name : defs) {
+    dfs(name);
+  }
+
+  // LEC each def leaves-first; collapse its already-proven children.
+  Ci_str_set                proven;
+  livehd::lec::Query_result top_result;
+  bool                      have_top = false;
+  std::vector<std::string>  proven_list, collapsed_note;
+  for (const auto& name : order) {
+    livehd::lec::Lec_options o = base;
+    o.engine                   = "auto";  // every def races the portfolio
+    o.collapse.clear();
+    std::vector<std::string> coll;
+    if (auto it = children.find(name); it != children.end()) {
+      for (const auto& c : it->second) {
+        if (proven.count(c)) {
+          o.collapse.push_back(c);  // proven child -> sound black-box collapse
+          coll.push_back(c);
+        }
+        // a non-proven child is left OUT of the collapse set -> flattened (descended)
+      }
+    }
+    auto            t0 = std::chrono::steady_clock::now();
+    auto            r  = livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], o, sub_lib);
+    const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+    emit_lec_block_progress(name, r, o, ms);
+    if (r.verdict == Verdict::Proven) {
+      proven.insert(name);
+      proven_list.push_back(name);
+    }
+    if (!coll.empty()) {
+      collapsed_note.push_back(name + "<-{" + [&] {
+        std::string s;
+        for (const auto& c : coll) {
+          s += (s.empty() ? "" : ",") + c;
+        }
+        return s;
+      }() + "}");
+    }
+    std::print("lec[hier]: '{}' {} ({} child collapse{})\n",
+               name,
+               r.verdict == Verdict::Proven ? "PROVEN" : (r.verdict == Verdict::Refuted ? "REFUTED" : "UNKNOWN"),
+               coll.size(),
+               coll.size() == 1 ? "" : "s");
+    if (str_tools::ci_equal(name, top_name)) {
+      top_result = r;
+      have_top   = true;
+    }
+  }
+
+  std::print("lec[hier]: {}/{} def(s) proven leaves-first\n", proven_list.size(), order.size());
+  res.recipe_steps.emplace_back(
+      std::format("pass.lec hierarchical defs:{} proven:{}", order.size(), proven_list.size()));
+
+  if (!have_top) {
+    top_result.verdict = Verdict::Unknown;
+    top_result.detail  = std::format("hierarchical: top '{}' not found in both libraries", top_name);
+  }
+  return top_result;
+}
+
 void lec_command(Options& opts, Result& res) {
   setup_diag(opts, "lec");
   if (opts.impl_path.empty() || opts.ref_path.empty()) {
@@ -2978,15 +3110,22 @@ void lec_command(Options& opts, Result& res) {
   }
   const auto* sub_lib_ptr = sub_lib.empty() ? nullptr : &sub_lib;
 
-  res.recipe_steps.emplace_back(std::format("pass.lec engine:{} solver:{} phase:{}", o.engine, o.solver, o.phase));
-  auto       t0      = std::chrono::steady_clock::now();
-  auto       r       = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), o, sub_lib_ptr);
-  const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
-  bool lec_equiv     = r.verdict == livehd::lec::Verdict::Proven;
-  bool lec_known     = r.verdict != livehd::lec::Verdict::Unknown;
-
-  // Per-block progress (info severity): stream the verdict the moment it resolves.
-  emit_lec_block_progress(impl_g->get_name(), r, o, ms);
+  livehd::lec::Query_result r;
+  if (label("hierarchical", "false") == "true" || label("hierarchical", "false") == "1") {
+    // Bottom-up: LEC every def leaves-first under `auto`, collapsing proven
+    // children. The driver emits a per-def progress line itself; the TOP def's
+    // verdict drives the exit policy below (like the single-design path).
+    r = lec_hierarchical(res, ref_var, impl_var, std::string(ref_g->get_name()), o, sub_lib_ptr);
+  } else {
+    res.recipe_steps.emplace_back(std::format("pass.lec engine:{} solver:{} phase:{}", o.engine, o.solver, o.phase));
+    auto            t0 = std::chrono::steady_clock::now();
+    r                  = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), o, sub_lib_ptr);
+    const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+    // Per-block progress (info severity): stream the verdict the moment it resolves.
+    emit_lec_block_progress(impl_g->get_name(), r, o, ms);
+  }
+  bool lec_equiv = r.verdict == livehd::lec::Verdict::Proven;
+  bool lec_known = r.verdict != livehd::lec::Verdict::Unknown;
 
   const char* verdict = lec_known ? (lec_equiv ? "PROVEN equivalent" : "REFUTED (not equivalent)") : "UNKNOWN";
   std::print("lec: '{}' {} ({})\n", impl_g->get_name(), verdict, r.detail);

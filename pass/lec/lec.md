@@ -110,6 +110,17 @@ everything the encoder needs.
   same-library submodule (one `forward_hier` would descend into + the edge
   resolver would thread through) uses the hhds `Hier_opaque_scope` so the leaf is
   opaque to BOTH the walk and the cross-boundary edge resolution.
+- **Bottom-up hierarchical** (`lec.hierarchical=true`): build the module-def
+  dependency DAG over the defs present BY NAME in both libraries, topo-order it
+  **leaves-first**, and LEC each def under the `auto` portfolio. Record the proven
+  set; for each parent, force-black-box its **proven** child instances (collapse,
+  above) so the parent proof stops re-solving them. A child **not** provable in
+  isolation with free inputs (context-dependent equivalence) is **not** collapsed
+  — it stays flattened into the parent and is proven in context (the M5 CEGAR /
+  un-black-box fallback). Correspondence is name-based, so no semdiff is needed
+  when the call structures match. Each def emits a per-block progress line the
+  instant it resolves; the TOP def's verdict is the result. (v1 walks the DAG
+  sequentially; proving independent leaves in parallel is a later speedup.)
 
 ## Encoder reference (L0) — LiveHD graph facts
 
@@ -201,6 +212,8 @@ a silent no-op).
 | `lec.phase` | BMC reset phase: `after_reset` \| `just_reset` \| `free_toreset` \| `full` | `after_reset` |
 | `lec.reset_cycles` | `after_reset` phase: reset-hold prologue length | `2` |
 | `lec.reset` | explicit reset inputs `name[:lo\|:hi]`, comma-sep (else auto-detect) | `""` |
+| `lec.collapse` | proven-module collapse: comma-sep def names forced to the sound blackbox | `""` |
+| `lec.hierarchical` | bottom-up: LEC every def leaves-first under `auto`, collapsing proven children | `false` |
 | `lec.cross` | also run `lgcheck` and assert agreement (bring-up only) | `false` |
 
 The `lgyosys` solver shells out to `inou/yosys/lgcheck` (yosys `equiv`, the
