@@ -103,6 +103,15 @@ struct Lec_options {
   // discharged when the leaf was proven). Matched case-insensitively (name policy).
   // The bottom-up hierarchical driver fills this with its per-round proven set.
   std::vector<std::string> collapse;
+
+  // Structural def-diff reduction (`lec.semdiff`, M3): the semdiff matching
+  // algorithm to run per module BEFORE the solver — `none` (default, always LEC)
+  // or `structural` (pass/semdiff::structural_match). A def whose ref/impl are
+  // structurally IDENTICAL (no unmatched node on either side) AND whose children
+  // are all already proven needs NO solver call — it is dropped as proven. Only
+  // the changed defs reach cvc5. The driver (lhd lec --set lec.hierarchical=true)
+  // consumes this; prove_equal itself ignores it.
+  std::string semdiff = "none";
 };
 
 // The BMC engine unrolls `bound` (+ `reset_cycles`) SMT copies of the design;
@@ -124,6 +133,9 @@ inline std::string lec_options_range_error(const Lec_options& o) {
   }
   if (o.engine != "bmc" && o.engine != "ind" && o.engine != "ic3" && o.engine != "auto") {
     return "lec.engine unknown '" + o.engine + "' (bmc | ind | ic3 | auto)";
+  }
+  if (o.semdiff != "none" && o.semdiff != "structural") {
+    return "lec.semdiff unknown '" + o.semdiff + "' (none | structural)";
   }
   return {};
 }

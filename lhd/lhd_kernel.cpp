@@ -2924,11 +2924,55 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // LEC each def leaves-first; collapse its already-proven children.
   Ci_str_set                proven;
   livehd::lec::Query_result top_result;
-  bool                      have_top = false;
+  bool                      have_top      = false;
+  int                       semdiff_count = 0;  // defs dropped structurally (no solver)
   std::vector<std::string>  proven_list, collapsed_note;
   for (const auto& name : order) {
     livehd::lec::Lec_options o = base;
     o.engine                   = "auto";  // every def races the portfolio
+
+    // M3 structural def-diff reduction: a def whose ref/impl are structurally
+    // IDENTICAL (no unmatched node on either side) and whose children are ALL
+    // proven is equivalent with NO solver call. A parent's own-structure match
+    // does NOT cover a child's internals (the child Sub matches by name regardless),
+    // so require the children proven first — leaves-first guarantees they are settled.
+    if (o.semdiff != "none") {
+      bool kids_proven = true;
+      if (auto it = children.find(name); it != children.end()) {
+        for (const auto& c : it->second) {
+          if (!proven.count(c)) {
+            kids_proven = false;
+            break;
+          }
+        }
+      }
+      if (kids_proven) {
+        auto                            t0 = std::chrono::steady_clock::now();
+        livehd::semdiff::Semdiff_options so;
+        so.alg            = o.semdiff;
+        so.matching_names = true;  // anchor flops/mems by hier name (lec's correspondence basis)
+        auto m            = livehd::semdiff::structural_match(ref_by_name[name], impl_by_name[name], so);
+        const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+        if (m.a_unmatched == 0 && m.b_unmatched == 0) {
+          livehd::lec::Query_result sr;
+          sr.verdict    = Verdict::Proven;
+          sr.engine     = "semdiff";
+          sr.elapsed_ms = ms;
+          sr.detail     = std::format("structurally identical ({}: {} matched node(s), no solver call)", so.alg, m.a_matched);
+          emit_lec_block_progress(name, sr, o, ms);
+          proven.insert(name);
+          proven_list.push_back(name);
+          ++semdiff_count;
+          std::print("lec[hier]: '{}' MATCHED (semdiff {}, no solver)\n", name, so.alg);
+          if (str_tools::ci_equal(name, top_name)) {
+            top_result = sr;
+            have_top   = true;
+          }
+          continue;  // skip the solver for this def
+        }
+      }
+    }
+
     o.collapse.clear();
     std::vector<std::string> coll;
     if (auto it = children.find(name); it != children.end()) {
@@ -2968,9 +3012,15 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     }
   }
 
-  std::print("lec[hier]: {}/{} def(s) proven leaves-first\n", proven_list.size(), order.size());
-  res.recipe_steps.emplace_back(
-      std::format("pass.lec hierarchical defs:{} proven:{}", order.size(), proven_list.size()));
+  std::print("lec[hier]: {}/{} def(s) proven leaves-first ({} via semdiff, {} via solver)\n",
+             proven_list.size(),
+             order.size(),
+             semdiff_count,
+             static_cast<int>(proven_list.size()) - semdiff_count);
+  res.recipe_steps.emplace_back(std::format("pass.lec hierarchical defs:{} proven:{} semdiff:{}",
+                                            order.size(),
+                                            proven_list.size(),
+                                            semdiff_count));
 
   if (!have_top) {
     top_result.verdict = Verdict::Unknown;
@@ -3046,6 +3096,7 @@ void lec_command(Options& opts, Result& res) {
   o.witness = label("witness", "true") != "false" && label("witness", "true") != "0";
   o.decompose    = label("decompose", "false") != "false" && label("decompose", "false") != "0";
   o.strict       = label("strict", "false") != "false" && label("strict", "false") != "0";
+  o.semdiff      = label("semdiff", "none");
   o.phase        = label("phase", "after_reset");
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
   o.reset        = label("reset", "");

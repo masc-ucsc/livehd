@@ -140,7 +140,11 @@
 
 <h2>Subtasks — later (further speedups, layered on the bottom-up flow)</h2>
 <ul class="subtasks">
-<li><strong>M3 — structural def-diff reduction (semdiff-based skip).</strong> Once the
+<li><em style="color:#2a7">✓ LANDED (v1)</em> (<code>lec.semdiff=none|structural</code>; the
+  hierarchical driver runs <code>pass/semdiff::structural_match</code> per module first and
+  drops a fully-matched def whose children are all proven, with no solver call; children-proven
+  guard keeps it sound; <code>lec_semdiff_test</code>). The canonical-hash form below is a future
+  refinement. <strong>M3 — structural def-diff reduction (semdiff-based skip).</strong> Once the
   bottom-up driver works, layer on a canonical per-def hash (op + params + sorted
   connectivity + interface), stable across two independent builds of an unchanged def, so
   structurally-identical defs are dropped with <strong>no solver call</strong> at all — a

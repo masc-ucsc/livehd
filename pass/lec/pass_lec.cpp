@@ -56,6 +56,11 @@ void Pass_lec::setup() {
                        "leaves-first under the auto portfolio, and collapse already-proven children into "
                        "their parents (a child unprovable in isolation stays flattened)",
                        "false");
+  m.add_label_optional("semdiff",
+                       "structural def-diff reduction (M3): none (default) | structural. Run "
+                       "pass.semdiff per module first; a def whose ref/impl are structurally identical "
+                       "(and whose children are all proven) is dropped as proven with NO solver call",
+                       "none");
   m.add_label_optional("cross", "also run lgcheck and assert agreement (bring-up only)", "false");
   m.add_label_optional("decompose",
                        "prove each cut/output equivalence as a separate focused query instead of one "
@@ -88,6 +93,7 @@ void Pass_lec::lec(Eprp_var& var) {
   o.match        = lec::parse_match_pairs(var.get("match", ""));  // inline pairs (@FILE only via `lhd lec`)
   o.decompose    = parse_bool(var.get("decompose", "false"));
   o.strict       = parse_bool(var.get("strict", "false"));
+  o.semdiff      = std::string{var.get("semdiff", "none")};
   // lec.collapse: comma-separated proven-module def names to force-blackbox.
   if (std::string cs{var.get("collapse", "")}; !cs.empty()) {
     size_t pos = 0;

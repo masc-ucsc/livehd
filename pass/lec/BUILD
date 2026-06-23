@@ -175,3 +175,14 @@ sh_test(
     data = ["//lhd"],
     tags = ["no-sandbox"],  # forks the in-process cvc5 solver per def
 )
+
+# Structural def-diff reduction (lec.semdiff=structural, M3): a def whose ref/impl
+# are structurally identical (and whose children are proven) is dropped with no
+# solver call; only the changed def is solved, and a non-equivalent edit still
+# refutes (the skip is children-guarded).
+sh_test(
+    name = "lec_semdiff_test",
+    srcs = ["tests/lec_semdiff_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # runs pass.semdiff + the in-process cvc5 solver
+)

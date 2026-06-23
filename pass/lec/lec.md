@@ -125,6 +125,18 @@ everything the encoder needs.
   when the call structures match. Each def emits a per-block progress line the
   instant it resolves; the TOP def's verdict is the result. (v1 walks the DAG
   sequentially; proving independent leaves in parallel is a later speedup.)
+- **Structural def-diff skip** (`lec.semdiff=structural`, M3): in the bottom-up
+  flow, run `pass/semdiff::structural_match` per module BEFORE the solver. A def
+  whose ref/impl are **structurally identical** (no unmatched node on either side,
+  flops anchored by name) **and whose children are all already proven** is dropped
+  as proven with **no solver call** — only the *changed* defs reach cvc5 (a
+  1000-def design with a 1-def edit checks ≈1 def). The children-proven guard
+  keeps it sound: a parent's own-structure match does not cover a child's internal
+  diff, so a non-equivalent child is never masked (it fails to match, is solved,
+  refutes, and blocks the parent's skip). Cross-front-end pairs (slang vs pyrope)
+  are usually *functionally* equivalent but *structurally* different, so semdiff
+  skips nothing there and every def is solved — it pays off on re-builds of the
+  same source.
 
 ## Encoder reference (L0) — LiveHD graph facts
 
@@ -218,6 +230,7 @@ a silent no-op).
 | `lec.reset` | explicit reset inputs `name[:lo\|:hi]`, comma-sep (else auto-detect) | `""` |
 | `lec.collapse` | proven-module collapse: comma-sep def names forced to the sound blackbox | `""` |
 | `lec.hierarchical` | bottom-up: LEC every def leaves-first under `auto`, collapsing proven children | `false` |
+| `lec.semdiff` | structural def-diff skip: `none` \| `structural` (drop a structurally-identical def with no solver) | `none` |
 | `lec.cross` | also run `lgcheck` and assert agreement (bring-up only) | `false` |
 
 The `lgyosys` solver shells out to `inou/yosys/lgcheck` (yosys `equiv`, the
