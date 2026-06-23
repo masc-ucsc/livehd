@@ -136,16 +136,13 @@ http_archive(
 
 # HHDS
 bazel_dep(name = "hhds", version = "0.2.0")
-# NOTE (pin-restore pending): switched to the local override to carry the
-# forward_hier(opaque) descent hook used by pass/lec --collapse (todo/livehd/lec.html
-# bottom-up decomposition). Restore the git_override + bump the commit once the
-# hhds change lands upstream.
-# git_override(
-#     module_name = "hhds",
-#     remote = "https://github.com/masc-ucsc/hhds.git",
-#     commit = "4a769af6df35fa147b3c45dba10bf0ee20674c51",  # update HHDS with cleanup (graph/attr/tree/source_locator)
-# )
-local_path_override(module_name = "hhds", path = "../hhds")
+git_override(
+    module_name = "hhds",
+    remote = "https://github.com/masc-ucsc/hhds.git",
+    commit = "a2a1c39857308c76e17daa9ca20258d8f2584c01",  # forward_hier(opaque) descent hook for pass/lec --collapse (lec bottom-up decomposition)
+)
+# For local debug/testing, swap the git_override above for:
+# local_path_override(module_name = "hhds", path = "../hhds")
 
 # prpparse — hand-written recursive-descent Pyrope parser; the inou/prp front-end
 # (it replaced the tree-sitter-pyrope grammar, so neither @tree-sitter nor
