@@ -93,6 +93,16 @@ struct Lec_options {
   // the register-file flop-bank <-> Memory case is bridged structurally, no entry
   // needed there either.
   std::vector<std::pair<std::string, std::string>> match;
+
+  // Proven-module black-box collapse (`lhd lec --collapse <def>` / lec.collapse):
+  // module-def names the driver has ALREADY proven equivalent in isolation, which
+  // are FORCED to the sound black-box path even when they could be flattened (a
+  // combinational def supplied via --lib). Their outputs become shared UF(inputs)
+  // symbols and their inputs become miter compare points, so the parent proof
+  // stops re-solving the leaf's internals ("equal inputs => equal outputs", already
+  // discharged when the leaf was proven). Matched case-insensitively (name policy).
+  // The bottom-up hierarchical driver fills this with its per-round proven set.
+  std::vector<std::string> collapse;
 };
 
 // The BMC engine unrolls `bound` (+ `reset_cycles`) SMT copies of the design;

@@ -143,3 +143,14 @@ sh_test(
     data = ["//lhd"],
     tags = ["no-sandbox"],  # forks the in-process cvc5 solver as race workers
 )
+
+# Proven-module black-box collapse (lhd lec --collapse <def>): force a same-library
+# submodule to the sound UF black-box (hide its internals) while still refuting on
+# diverging leaf inputs or out-of-leaf logic. Exercises the hhds forward_hier +
+# edge-resolver opacity (Hier_opaque_scope).
+sh_test(
+    name = "lec_collapse_test",
+    srcs = ["tests/lec_collapse_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # runs the in-process cvc5 solver on compiled RTL
+)

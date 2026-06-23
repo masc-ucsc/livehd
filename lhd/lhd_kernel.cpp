@@ -2934,6 +2934,21 @@ void lec_command(Options& opts, Result& res) {
     o.match = livehd::lec::parse_match_pairs(text);
   }
 
+  // lec.collapse: proven module defs to force-blackbox. Union of the --collapse
+  // flags and a comma-separated `--set lec.collapse=a,b,c`.
+  o.collapse = opts.collapse;
+  if (std::string cs = label("collapse", ""); !cs.empty()) {
+    size_t pos = 0;
+    while (pos < cs.size()) {
+      size_t c   = cs.find(',', pos);
+      size_t end = c == std::string::npos ? cs.size() : c;
+      if (end > pos) {
+        o.collapse.emplace_back(cs.substr(pos, end - pos));
+      }
+      pos = end + 1;
+    }
+  }
+
   if (auto e = livehd::lec::lec_options_range_error(o); !e.empty()) {
     throw Lhd_error{"usage", e, "the BMC engine unrolls one SMT copy of the design per cycle"};
   }

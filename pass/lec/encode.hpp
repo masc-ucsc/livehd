@@ -133,6 +133,14 @@ public:
   // other design shares one symbol. Unset / key-absent ⇒ the canon name is used.
   void set_name_alias(const Io_name_map<std::string>* a) { name_alias_ = a; }
 
+  // Proven-module black-box collapse set (lec.collapse): def-NAMES (case-insensitive)
+  // that must be FORCED to the blackbox path even when sub_lib_ has a combinational
+  // def that could be flattened inline. A def the driver already proved equivalent
+  // becomes a sound UF(inputs) box, so the parent stops re-solving its internals.
+  // query.cpp's shared-bbox builder must apply the SAME predicate so the forced
+  // box's output symbols are pre-built and shared across the two designs.
+  void set_collapse_defs(const Io_name_map<bool>* c) { collapse_defs_ = c; }
+
   // Encode the combinational logic of `g`.
   //
   // `shared_inputs` (optional): a map from input-port name to an already-built
@@ -163,9 +171,10 @@ private:
   std::string flop_key(std::string_view hier) const;
 
   cvc5::TermManager&                                  tm_;
-  const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib_     = nullptr;
-  const Io_name_map<Val>*                             shared_bbox_ = nullptr;
-  const Io_name_map<std::string>*                     name_alias_  = nullptr;
+  const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib_       = nullptr;
+  const Io_name_map<Val>*                             shared_bbox_   = nullptr;
+  const Io_name_map<std::string>*                     name_alias_    = nullptr;
+  const Io_name_map<bool>*                            collapse_defs_ = nullptr;
   int                                                 sub_depth_   = 0;  // Sub flattening recursion guard
 };
 

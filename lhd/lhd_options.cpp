@@ -345,6 +345,17 @@ Options parse_args(int argc, char** argv) {
       opts.in_dirs.emplace_back(parse_typed(a, need_value(a, i, argc, argv), false));
     } else if (a == "--lib") {
       opts.libs.emplace_back(parse_typed(a, need_value(a, i, argc, argv), false));
+    } else if (a == "--collapse") {  // lec: proven def(s) to force-blackbox (repeatable / comma-sep)
+      std::string v{need_value(a, i, argc, argv)};
+      size_t      pos = 0;
+      while (pos < v.size()) {
+        size_t c   = v.find(',', pos);
+        size_t end = c == std::string::npos ? v.size() : c;
+        if (end > pos) {
+          opts.collapse.emplace_back(v.substr(pos, end - pos));
+        }
+        pos = end + 1;
+      }
     } else if (a == "--top") {
       opts.top = need_value(a, i, argc, argv);
     } else if (a == "--target") {  // `lhd tool`: node|pin|edge|all, or tree's kind:<X>

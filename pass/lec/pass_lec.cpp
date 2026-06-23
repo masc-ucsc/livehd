@@ -47,6 +47,10 @@ void Pass_lec::setup() {
                        "explicit state correspondence: 'ref=impl' flop pairs (comma/newline-separated) or @FILE; "
                        "collapses differently-named registers onto one cut so the inductive miter compares them",
                        "");
+  m.add_label_optional("collapse",
+                       "proven-module black-box collapse: comma-separated def names forced to the sound "
+                       "blackbox path even when --lib could flatten them (the bottom-up driver's proven set)",
+                       "");
   m.add_label_optional("cross", "also run lgcheck and assert agreement (bring-up only)", "false");
   m.add_label_optional("decompose",
                        "prove each cut/output equivalence as a separate focused query instead of one "
@@ -79,6 +83,18 @@ void Pass_lec::lec(Eprp_var& var) {
   o.match        = lec::parse_match_pairs(var.get("match", ""));  // inline pairs (@FILE only via `lhd lec`)
   o.decompose    = parse_bool(var.get("decompose", "false"));
   o.strict       = parse_bool(var.get("strict", "false"));
+  // lec.collapse: comma-separated proven-module def names to force-blackbox.
+  if (std::string cs{var.get("collapse", "")}; !cs.empty()) {
+    size_t pos = 0;
+    while (pos < cs.size()) {
+      size_t c   = cs.find(',', pos);
+      size_t end = c == std::string::npos ? cs.size() : c;
+      if (end > pos) {
+        o.collapse.emplace_back(cs.substr(pos, end - pos));
+      }
+      pos = end + 1;
+    }
+  }
 
   if (auto e = lec::lec_options_range_error(o); !e.empty()) {
     livehd::diag::err("pass.lec", "bad-bound", "io").msg("pass.lec: {}", e).fatal();

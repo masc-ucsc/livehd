@@ -403,6 +403,31 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // (get_hier_name = instance path + register name), matching query.cpp's shared
   // current-state symbols. (`flops` keeps the hier Node_class for the post-loop
   // next-state emission.)
+  // Subnode Gids the hierarchical walks treat as OPAQUE: any Sub whose def name
+  // is in the proven-module collapse set. forward_hier(&opaque) then yields them
+  // as leaf Subs (not descended), so the blackbox path collapses them instead of
+  // flattening — and their internal state is NOT cut here (the box models it).
+  // Found via a flat top-level scan; gids are name-hash stable, so one instance
+  // pins the gid for every (incl. nested) instance of the same def.
+  ankerl::unordered_dense::set<hhds::Gid> opaque_subs;
+  if (collapse_defs_ != nullptr) {
+    for (auto sn : g->forward_class()) {
+      if (gu::type_op_of(sn) != Ntype_op::Sub) {
+        continue;
+      }
+      auto sio = sn.get_subnode_io();
+      if (sio != nullptr && collapse_defs_->count(std::string(sio->get_name())) > 0) {
+        opaque_subs.insert(sn.get_subnode_gid());
+      }
+    }
+  }
+  const ankerl::unordered_dense::set<hhds::Gid>* opaque = opaque_subs.empty() ? nullptr : &opaque_subs;
+  // Make the opacity AMBIENT for the whole encode: forward_hier(opaque) below
+  // skips descent, and the cross-boundary edge resolver (inp_edges threading) must
+  // ALSO stop at a collapsed sub's boundary, or a consumer would read its
+  // un-encoded internal driver. The scope covers every walk + inp_edges() here.
+  hhds::Hier_opaque_scope opaque_scope(opaque);
+
   std::vector<hhds::Node_class> flops;
   std::vector<int>              flop_depths;     // pipe_min depth per flop (>=1)
   std::vector<std::vector<Val>> flop_internals;  // depth>1: the d-1 INTERNAL stage
@@ -429,7 +454,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     }
     return v;
   };
-  for (auto node : g->forward_hier()) {
+  for (auto node : g->forward_hier(true, false, opaque)) {
     auto op = gu::type_op_of(node);
     if (op != Ntype_op::Flop) {
       continue;
@@ -492,7 +517,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   };
   std::vector<MemCut>                   mem_cuts;
   Io_name_map<int> mem_occ;  // per-signature occurrence -> stable key
-  for (auto node : g->forward_hier()) {
+  for (auto node : g->forward_hier(true, false, opaque)) {
     if (gu::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
       continue;
     }
@@ -582,7 +607,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   bool progress = true;
   while (progress) {
     progress = false;
-    for (auto node : g->forward_hier()) {
+    for (auto node : g->forward_hier(true, false, opaque)) {
       auto op = gu::type_op_of(node);
 
       // Skip nodes with no consumers (cgen does the same). A memory with no read
@@ -616,15 +641,24 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // instance's output pins. Combinational defs only (e.g. ABC standard cells);
     // anything unresolved or stateful keeps the sound `Sub -> fail`.
     if (op == Ntype_op::Sub) {
+      auto sub_io = node.get_subnode_io();
+      // Proven-module collapse (lec.collapse): a def the driver already proved
+      // equivalent is FORCED to the blackbox path even if it could be flattened,
+      // so the parent stops re-solving its internals. query.cpp's shared-bbox
+      // builder applies the identical predicate so the box's outputs are shared,
+      // and forward_hier(opaque) does NOT descend into it (so the body below is
+      // not double-encoded). Matched case-insensitively (name policy).
+      const bool force_collapse
+          = collapse_defs_ != nullptr && sub_io != nullptr && collapse_defs_->count(std::string(sub_io->get_name())) > 0;
+
       // A design sub-instance whose body lives in the graph library is DESCENDED
       // into by forward_hier (its internal nodes are visited and inp_edges()
       // threads its boundary), so encode nothing here. Only a sub NOT in the
-      // library (an ABC cell-model from sub_lib_, or a true blackbox) is handled
-      // inline below.
-      if (node.get_subnode_graph() != nullptr) {
+      // library (an ABC cell-model from sub_lib_, or a true blackbox) — or one
+      // FORCE-COLLAPSED, which forward_hier left undescended — is handled inline.
+      if (node.get_subnode_graph() != nullptr && !force_collapse) {
         continue;
       }
-      auto                                            sub_io = node.get_subnode_io();
       absl::flat_hash_map<hhds::Port_id, std::string> in_name;
       absl::flat_hash_map<hhds::Port_id, int>         in_pw;  // declared input-port real width
       absl::flat_hash_map<hhds::Port_id, std::string> out_name;
@@ -645,7 +679,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // instance is a BLACKBOX and is collapsed below (shared outputs / mitered
       // inputs) — sound when both designs carry the corresponding instance.
       hhds::Graph* def = nullptr;
-      if (sub_lib_ != nullptr && sub_depth_ <= 32) {
+      if (!force_collapse && sub_lib_ != nullptr && sub_depth_ <= 32) {
         if (auto git = sub_lib_->find(node.get_subnode_gid()); git != sub_lib_->end() && git->second != nullptr) {
           def        = git->second;
           for (auto dn : def->forward_class()) {  // combinational defs only (sound)
@@ -1248,7 +1282,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // Fixpoint converged. Any combinational node still unresolved is a genuine
   // structural error (a real combinational cycle, or a driver the encoder can't
   // build) — surface it instead of silently dropping logic.
-  for (auto node : g->forward_hier()) {
+  for (auto node : g->forward_hier(true, false, opaque)) {
     auto op = gu::type_op_of(node);
     if (!node.has_out_edges() || op == Ntype_op::Nconst || op == Ntype_op::Flop || op == Ntype_op::Memory) {
       continue;

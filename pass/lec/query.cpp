@@ -496,6 +496,17 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     return c;
   };
 
+  // Proven-module collapse set (lec.collapse): def-NAMES forced to the blackbox
+  // path (case-insensitive). Applied identically by the encoder (skip flatten)
+  // and build_shared_bbox below (pre-build the box's shared output symbols).
+  Io_name_map<bool> collapse_defs;
+  for (const auto& d : opts.collapse) {
+    if (!d.empty()) {
+      collapse_defs[d] = true;
+    }
+  }
+  const Io_name_map<bool>* collapse_ptr = collapse_defs.empty() ? nullptr : &collapse_defs;
+
   cvc5::TermManager tm;
   cvc5::Solver      solver(tm);
   solver.setLogic("QF_ABV");  // bit-vectors + arrays (M4 memory cut)
@@ -584,8 +595,16 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         if (graph_util::type_op_of(node) != Ntype_op::Sub) {
           continue;
         }
+        auto        sub_io  = node.get_subnode_io();
+        std::string defname(sub_io->get_name());
+        // Mirror encode.cpp's blackbox predicate EXACTLY so the box's shared
+        // symbols are pre-built for every sub the encoder will blackbox: a forced
+        // collapse (proven module), else a sub with no flattenable combinational
+        // def in the resolution library.
         bool blackbox = true;
-        if (sub_lib != nullptr) {
+        if (collapse_ptr != nullptr && collapse_ptr->count(defname) > 0) {
+          blackbox = true;  // proven-module collapse: always a blackbox
+        } else if (sub_lib != nullptr) {
           if (auto git = sub_lib->find(node.get_subnode_gid()); git != sub_lib->end() && git->second != nullptr) {
             blackbox = false;
             for (auto dn : git->second->forward_class()) {
@@ -600,9 +619,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         if (!blackbox) {
           continue;
         }
-        auto                                            sub_io = node.get_subnode_io();
-        std::string                                     defname(sub_io->get_name());
-        std::string                                     bk = defname + "#" + std::to_string(occ[defname]++);
+        std::string bk = defname + "#" + std::to_string(occ[defname]++);
         absl::flat_hash_map<hhds::Port_id, std::string> out_name;
         for (const auto& d : sub_io->get_output_pin_decls()) {
           out_name[sub_io->get_output_port_id(d.name)] = d.name;
@@ -644,6 +661,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     Encoder   enc(tm);
     enc.set_sub_lib(sub_lib);
     enc.set_name_alias(&name_alias);
+    enc.set_collapse_defs(collapse_ptr);
     Io_name_map<Val> shared_bbox = build_shared_bbox();
     enc.set_shared_bbox(&shared_bbox);
 
@@ -1524,6 +1542,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   Encoder enc(tm);
   enc.set_sub_lib(sub_lib);
   enc.set_name_alias(&name_alias);
+  enc.set_collapse_defs(collapse_ptr);
   enc.set_shared_bbox(&shared_bbox);
   Encoded re = enc.encode(ref, &shared, "", &shared_mems);
   if (!re.ok) {

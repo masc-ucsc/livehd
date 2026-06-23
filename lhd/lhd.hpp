@@ -97,6 +97,10 @@ struct Options {
 
   std::string impl_kind, impl_path, impl_top;  // lec --impl
   std::string ref_kind, ref_path, ref_top;     // lec --ref
+  // lec --collapse <def> (repeatable): module-def names the driver has already
+  // proven equivalent, forced to the sound black-box path even when --lib could
+  // flatten them (proven-module collapse — the parent stops re-solving them).
+  std::vector<std::string> collapse;
 
   // `lhd pyrope fmt` formatter knobs (clang-format-like). Consumed only by the
   // pyrope command; harmless defaults elsewhere.
