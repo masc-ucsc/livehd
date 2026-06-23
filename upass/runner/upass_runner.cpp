@@ -253,7 +253,7 @@ bool in_types_compatible(const In_type& a, const In_type& b) {
   return true;  // both integer (any width) / boolean / string / tuple
 }
 
-bool prp_is_tmp_name(std::string_view n) { return n.size() >= 3 && n[0] == '_' && n[1] == '_' && n[2] == '_'; }
+bool prp_is_tmp_name(std::string_view n) { return Lnast::is_tmp(n); }
 
 // prp2lnast wraps the UFCS receiver of `obj.method(...)` in a
 // `store(__ufcs_arg, obj)` marker (positional, like __ref_arg) so the runner
@@ -1957,7 +1957,7 @@ std::string uPass_runner::materialize_array_literal(const std::vector<int64_t>& 
                                                     const std::vector<Dlop>& flat, size_t start) {
   // Outer dim first (dims[0]); inner tuples are emitted BEFORE the outer so
   // they are recorded (tuple_recs_) and staged ahead of the reference to them.
-  const std::string name = "___marrayinit_" + std::to_string(inline_seq_) + "_" + std::to_string(level) + "_"
+  const std::string name = "%marrayinit_" + std::to_string(inline_seq_) + "_" + std::to_string(level) + "_"
                            + std::to_string(start);
   std::vector<Lnast_node> children;
   if (level + 1 == dims.size()) {
@@ -2017,7 +2017,7 @@ bool uPass_runner::try_materialize_array_init() {
   if (mode.find("reg") == std::string::npos) {
     return false;
   }
-  if (init_ref.starts_with("___marrayinit_")) {
+  if (init_ref.starts_with("%marrayinit_")) {
     return false;
   }
   if (!type_is_array && !type_is_none) {
@@ -3649,7 +3649,7 @@ bool uPass_runner::try_inline_func_call() {
     if (auto p = d.find("___ssa_"); p != std::string::npos) {
       d.resize(p);
     }
-    const bool is_tmp = d.size() >= 3 && d.compare(0, 3, "___") == 0;
+    const bool is_tmp = Lnast::is_tmp(d);
     inline_level      = (!is_tmp && !d.empty()) ? d : ("u_" + callee_name + "_" + std::to_string(salt));
   }
 
@@ -3951,7 +3951,7 @@ bool uPass_runner::try_lower_dynamic_tuple_index(const std::string& dst, const s
   std::vector<std::string> conds;
   conds.reserve(n - 1);
   for (size_t k = 0; k + 1 < n; ++k) {
-    std::string cmp = std::format("___dsel{}_{}", seq, k);
+    std::string cmp = std::format("%dsel{}_{}", seq, k);
     emit_staging_op(N::create_eq(), cmp, {Lnast_node::create_ref(idx_ref), Lnast_node::create_const(std::to_string(k))});
     conds.push_back(std::move(cmp));
   }
@@ -5324,7 +5324,7 @@ void uPass_runner::splice_init_call(const std::string& receiver, const std::stri
   auto s    = std::make_shared<Lnast>(body, "init-call");
   auto root = s->set_root(Lnast_ntype::create_func_call());
   stamp_scratch_srcid(s, root);
-  s->add_child(root, Lnast_node::create_ref(std::format("___ctor{}", ++inline_seq_)));
+  s->add_child(root, Lnast_node::create_ref(std::format("%ctor{}", ++inline_seq_)));
   s->add_child(root, Lnast_node::create_ref(init_fn));
   auto recv = s->add_child(root, Lnast_ntype::create_store());
   s->add_child(recv, Lnast_node::create_ref(call_ufcs_arg_marker));

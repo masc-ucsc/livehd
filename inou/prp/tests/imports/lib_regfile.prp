@@ -1,0 +1,10 @@
+// 2i-import fixture: a stateful `mod` (file name == lambda name, the shape the
+// prp_writer emits for a Verilog-origin unit). Imported by mod_import.prp via
+// the dotted `import("lib_regfile.lib_regfile")` form. The `reg` makes it
+// reset-carrying, so the importer must forward clock+reset even though it
+// declares no reg of its own.
+pub mod lib_regfile(clock:u1, wen:u1, wdata:u8) -> (rdata:u8@[]) {
+  reg acc:u8 = 0
+  if wen { acc = wdata }
+  rdata = acc
+}

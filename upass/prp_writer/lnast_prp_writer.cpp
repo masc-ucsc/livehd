@@ -73,8 +73,44 @@ void Lnast_prp_writer::println(std::string_view s) {
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
-bool Lnast_prp_writer::is_tmp(std::string_view name) {
-  return name.size() >= 3 && name[0] == '_' && name[1] == '_' && name[2] == '_';
+bool Lnast_prp_writer::is_tmp(std::string_view name) const {
+  // A raw compiler temp (`%`-prefix), OR a name strip_prefix already mapped to
+  // its emittable `t<id>` form.
+  if (!name.empty() && name[0] == '%') {
+    return true;
+  }
+  return emitted_tmp_names_.contains(std::string(name));
+}
+
+std::string Lnast_prp_writer::emit_name_for(std::string_view tmp) const {
+  // One-time seed: every NON-temp ref name in the tree is reserved, so a
+  // synthesised `t<id>` can never collide with a user identifier or port.
+  if (!emit_names_seeded_) {
+    emit_names_seeded_ = true;
+    for (const auto& nid : lnast->depth_preorder()) {
+      if (!Lnast_ntype::is_ref(lnast->get_type(nid))) {
+        continue;
+      }
+      auto nm = lnast->get_name(nid);
+      if (nm.empty() || is_tmp(nm)) {
+        continue;  // a compiler temp — gets mapped to `t<id>`, not a reserved user name
+      }
+      used_emit_names_.insert(std::string(nm));
+    }
+  }
+  auto cached = tmp_emit_names_.find(std::string(tmp));
+  if (cached != tmp_emit_names_.end()) {
+    return cached->second;
+  }
+  std::string base = "t" + std::string(tmp.substr(1));  // %pipe_o -> tpipe_o
+  std::string cand = base;
+  for (int m = 1; used_emit_names_.contains(cand); ++m) {
+    cand = base + "_" + std::to_string(m);
+  }
+  used_emit_names_.insert(cand);
+  emitted_tmp_names_.insert(cand);
+  tmp_emit_names_.emplace(std::string(tmp), cand);
+  return cand;
 }
 
 std::string_view Lnast_prp_writer::infix_symbol(Lnast_ntype::Lnast_ntype_int t) {
@@ -138,7 +174,20 @@ std::string Lnast_prp_writer::decl_prefix(std::string_view lhs) {
     return kw + " ";
   }
   if (is_tmp(lhs)) {
-    return {};  // `___` compiler temps auto-declare
+    // An EMITTED compiler-temp — a multi-use `___x` net the writer did NOT inline
+    // (folded single-use temps are inlined and never reach decl_prefix) — must be
+    // DECLARED, not left as a bare `___x = …`.  A bare reserved-namespace name
+    // re-parses as a compiler tmp and flows through the SSA tmp-rename /
+    // value-number machinery, where it ALIASES an internally-minted temp and
+    // silently inherits ITS kind (e.g. a single-bit `(x>>N)&1` net reads back as
+    // `boolean`, so a later `(net) << k` fails typecheck).  Emit `const` to make
+    // it an explicit, single-assignment external net — these `___x` are SSA temps
+    // (written exactly once).
+    if (declared_.count(std::string(lhs))) {
+      return {};
+    }
+    declared_.insert(std::string(lhs));
+    return "const ";
   }
   if (declared_.count(std::string(lhs))) {
     return {};
@@ -174,6 +223,17 @@ std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
     }
     return s.find('.') == std::string::npos ? s : "`" + s + "`";
   };
+  // A `%`-prefixed compiler temp is not a legal Pyrope identifier — map it to an
+  // emittable `t<id>` (collision-checked). A trailing `.field` (e.g. a detuple
+  // temp `%t0.0`) keeps its field path on the mapped head, then quotes if needed.
+  if (!name.empty() && name[0] == '%') {
+    auto        dot  = name.find('.');
+    std::string head = emit_name_for(dot == std::string_view::npos ? name : name.substr(0, dot));
+    if (dot != std::string_view::npos) {
+      head += std::string(name.substr(dot));
+    }
+    return quote(head);
+  }
   auto pos = name.rfind("___ssa_");
   if (pos == std::string_view::npos) {
     return quote(std::string(name));
@@ -300,6 +360,26 @@ void Lnast_prp_writer::write_top() {
 void Lnast_prp_writer::write_module() {
   Lnast_nid io_nid = cur;
 
+  // File top-scope imports: one per instantiated submodule (a func_call callee
+  // that is itself an emitted module).  `const X = import("X.X")` binds the
+  // single pub entry so the cross-module call `X(...)` resolves on re-compile.
+  if (known_modules_ != nullptr) {
+    std::string              self(lnast->get_top_module_name());
+    std::vector<std::string> imports;
+    for (const auto& c : func_call_callees_) {
+      if (c != self && known_modules_->count(c) != 0u) {
+        imports.push_back(c);
+      }
+    }
+    std::sort(imports.begin(), imports.end());
+    for (const auto& nm : imports) {
+      os << "const " << nm << " = import(\"" << nm << "." << nm << "\")\n";
+    }
+    if (!imports.empty()) {
+      os << "\n";
+    }
+  }
+
   const bool is_mod = body_has_state(lnast->get_sibling_next(io_nid));
   // `pub … ::[lg="<name>"]` pins the generated module name to the source module
   // name verbatim, so the re-compile leg and LEC see the SAME identifier as the
@@ -359,6 +439,9 @@ void Lnast_prp_writer::write_module() {
         }
       }
     }
+    // With the clock/reset cone known, decide which submodule output-port reads
+    // collapse to `inst.port` at their uses (vs stay a feedback `wire`).
+    analyze_instance_inline();
     // Pre-declare body `mut` vars that are WRITTEN but have no `declare` node.
     // Their first write would otherwise emit `mut X` inside whatever (possibly
     // nested) scope it lands in; a later write in a SIBLING scope then references
@@ -420,12 +503,14 @@ void Lnast_prp_writer::write_module() {
       // vars with a NESTED `mut` declare. Skip top-declared / io / reg|latch|const.
       std::unordered_set<std::string> need;
       for (const auto& nm : store_lhs) {
-        if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm) && !pin_cone_.count(nm)) {
+        if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm) && !pin_cone_.count(nm)
+            && !instance_output_inlined_.count(nm)) {
           need.insert(nm);  // pin-cone nets are emitted (as `mut net = driver`) ahead of the declares, not hoisted to 0
         }
       }
       for (const auto& nm : nested_mut_decl) {
-        if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm) && !pin_cone_.count(nm)) {
+        if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm) && !pin_cone_.count(nm)
+            && !instance_output_inlined_.count(nm)) {
           need.insert(nm);
           suppress_decl_.insert(nm);  // its in-place nested `mut` declare is dropped
         }
@@ -443,7 +528,7 @@ void Lnast_prp_writer::write_module() {
       // declare is dropped via suppress_decl_.
       std::vector<std::string> wpre;
       for (const auto& [nm, ty] : nested_wire_decl) {
-        if (!top_decl.count(nm) && !declared_.count(nm) && !pin_cone_.count(nm)) {
+        if (!top_decl.count(nm) && !declared_.count(nm) && !pin_cone_.count(nm) && !instance_output_inlined_.count(nm)) {
           wpre.push_back(nm);
         }
       }
@@ -1280,6 +1365,53 @@ void Lnast_prp_writer::write_cassert() {
 
 // ── func_call ─────────────────────────────────────────────────────────────────
 
+// The single mod-vs-comb predicate: a subtree carries module state if it holds a
+// `reg`/`latch` declare or a submodule `func_call` (a nested instantiation makes
+// the enclosing unit a `mod`).  Shared by scan_multi_out_comb (destructure
+// decision) and module_is_stateful (call-site instance-name decision).
+bool Lnast_prp_writer::subtree_has_state(const std::shared_ptr<Lnast>& ln, Lnast_nid nid) {
+  using N = Lnast_ntype;
+  if (nid.is_invalid()) {
+    return false;
+  }
+  if (ln->get_type(nid) == N::Lnast_ntype_func_call) {
+    return true;
+  }
+  if (ln->get_type(nid) == N::Lnast_ntype_declare) {
+    auto c0 = ln->get_child(nid);
+    auto c1 = c0.is_invalid() ? c0 : ln->get_sibling_next(c0);
+    auto c2 = c1.is_invalid() ? c1 : ln->get_sibling_next(c1);
+    if (!c2.is_invalid() && ln->get_type(c2) == N::Lnast_ntype_const) {
+      auto q = ln->get_name(c2);
+      if (q == "reg" || q == "latch") {
+        return true;
+      }
+    }
+  }
+  for (auto c = ln->get_child(nid); !c.is_invalid(); c = ln->get_sibling_next(c)) {
+    if (subtree_has_state(ln, c)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// True if `ln` is a slang-origin module (has an io node) whose body has state —
+// it lowers to a `mod` (a Sub instance) rather than an inlined `comb`.  The pass
+// builds the set of such names so write_func_call can annotate instantiations.
+bool Lnast_prp_writer::module_is_stateful(const std::shared_ptr<Lnast>& ln) {
+  using N   = Lnast_ntype;
+  auto root = ln->get_root();
+  if (root.is_invalid()) {
+    return false;
+  }
+  auto io = ln->get_child(root);
+  if (io.is_invalid() || ln->get_type(io) != N::Lnast_ntype_io) {
+    return false;  // pyrope-origin bare file (func_defs), not a slang io module
+  }
+  return subtree_has_state(ln, ln->get_sibling_next(io));
+}
+
 // Scan a unit's top to detect a slang-origin multi-output `comb` (see the header
 // note).  Mirrors write_module's `is_mod = body_has_state(body)` decision and
 // emit_port_group's output-port walk, but as a pure read over an arbitrary unit.
@@ -1297,32 +1429,7 @@ bool Lnast_prp_writer::scan_multi_out_comb(const std::shared_ptr<Lnast>& ln, std
   auto body = ln->get_sibling_next(io);
   // `is_mod`: a body with state (reg/latch) OR a submodule func_call must be a
   // `mod`; only a stateless, instantiation-free body is an inlined `comb`.
-  auto has_state = [&](auto&& self, Lnast_nid nid) -> bool {
-    if (nid.is_invalid()) {
-      return false;
-    }
-    if (ln->get_type(nid) == N::Lnast_ntype_func_call) {
-      return true;
-    }
-    if (ln->get_type(nid) == N::Lnast_ntype_declare) {
-      auto c0 = ln->get_child(nid);
-      auto c1 = c0.is_invalid() ? c0 : ln->get_sibling_next(c0);
-      auto c2 = c1.is_invalid() ? c1 : ln->get_sibling_next(c1);
-      if (!c2.is_invalid() && ln->get_type(c2) == N::Lnast_ntype_const) {
-        auto q = ln->get_name(c2);
-        if (q == "reg" || q == "latch") {
-          return true;
-        }
-      }
-    }
-    for (auto c = ln->get_child(nid); !c.is_invalid(); c = ln->get_sibling_next(c)) {
-      if (self(self, c)) {
-        return true;
-      }
-    }
-    return false;
-  };
-  if (has_state(has_state, body)) {
+  if (subtree_has_state(ln, body)) {
     return false;  // a mod: stays a Sub instance, no destructure needed
   }
   // Output port names: the io node's SECOND tuple_add child; each port is
@@ -1401,6 +1508,18 @@ void Lnast_prp_writer::write_func_call() {
     print(lhs);
     print(" = ");
     print(call_name);
+    // Preserve the hierarchical instance name.  A call to a stateful module
+    // becomes a Sub instance on re-compile; without an explicit name tolg
+    // synthesises `u_<callee>_<tmp>` (the bound var is a temp in the parsed
+    // LNAST), losing correspondence with the original v2prp source hierarchy.
+    // Annotate `Callee::[name=<lhs>]` so the Sub takes the bound variable's
+    // name.  Only for a real (non-temp) LHS bound to a known stateful module —
+    // an inlined `comb` produces no Sub, so the name would be inert noise.
+    if (!is_tmp(lhs) && stateful_modules_ != nullptr && stateful_modules_->count(call_tail) != 0u) {
+      print("::[name=");
+      print(lhs);
+      print("]");
+    }
   }
   print("(");
   // arguments — positional args are ref/const nodes; named args are assign
@@ -1937,6 +2056,9 @@ void Lnast_prp_writer::scan_node(Lnast_nid nid, int& index) {
       } else {
         fi.use_count++;
         fi.use_index = my_index;
+        if (my_index < fi.min_use_index) {
+          fi.min_use_index = my_index;
+        }
       }
     }
     scan_node(c, index);  // pre-order recurse (leaves just advance the counter)
@@ -1944,15 +2066,31 @@ void Lnast_prp_writer::scan_node(Lnast_nid nid, int& index) {
   if (t == Lnast_ntype::Lnast_ntype_get_mask) {
     get_mask_nodes_.push_back(nid);
   }
+  if (t == Lnast_ntype::Lnast_ntype_tuple_get) {
+    tuple_get_nodes_.emplace_back(nid, my_index);
+  }
+  if (t == Lnast_ntype::Lnast_ntype_store) {
+    store_nodes_.emplace_back(nid, my_index);
+  }
+  if (t == Lnast_ntype::Lnast_ntype_func_call) {
+    auto fc0    = lnast->get_child(nid);                                          // result
+    auto callee = fc0.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(fc0);  // callee name
+    if (!callee.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(callee))) {
+      func_call_callees_.insert(std::string(strip_prefix(lnast->get_name(callee))));
+    }
+  }
 }
 
 void Lnast_prp_writer::analyze_folding() {
   fold_info_.clear();
+  func_call_callees_.clear();
   write_idx_.clear();
   foldable_.clear();
   folded_node_.clear();
   range_lohi_.clear();
   get_mask_nodes_.clear();
+  tuple_get_nodes_.clear();
+  store_nodes_.clear();
   type_specs_.clear();
   stage_decls_.clear();
 
@@ -2018,6 +2156,125 @@ void Lnast_prp_writer::analyze_folding() {
     }
     foldable_.insert(name);
     folded_node_.insert(fi.def_node.get_class_index().value);
+  }
+}
+
+// Inline submodule output-port reads.  A multi-output instance's outputs are
+// extracted as `_t = inst["port"]` and read elsewhere by the temp name.  When
+// the instance is declared (positionally) before EVERY use of `_t`, drop the
+// temp (and its hoisted `wire`) and read `inst.port` directly at each use.  A
+// use that PRECEDES the instance declaration is genuine pipeline feedback
+// (hazard / forwarding / writeback) — there the temp stays a position-
+// independent `wire` driven by `_t = inst.port`.  Must run after the clock/reset
+// pin cone is known (a cone net needs a real name and is never inlined).
+void Lnast_prp_writer::analyze_instance_inline() {
+  using N = Lnast_ntype;
+  instance_results_.clear();
+  instance_output_inlined_.clear();
+
+  // Names defined by a single module-instance call: their outputs print as
+  // `inst.port` (also enables dot rendering for the kept `wire` drivers).
+  for (const auto& [name, fi] : fold_info_) {
+    if (fi.def_count == 1 && fi.def_type == N::Lnast_ntype_func_call) {
+      instance_results_.insert(std::string(strip_prefix(name)));
+    }
+  }
+  if (instance_results_.empty()) {
+    return;
+  }
+
+  // The instance whose output a tuple_get reads, or invalid if the tuple_get is
+  // not a single-port read `___x = inst["port"]` of a known instance result.
+  auto instance_of_tuple_get = [&](Lnast_nid tg) -> Lnast_nid {
+    auto c0 = lnast->get_child(tg);
+    if (c0.is_invalid() || !N::is_ref(lnast->get_type(c0))) {
+      return Lnast_nid{};
+    }
+    auto base = lnast->get_sibling_next(c0);
+    if (base.is_invalid() || !N::is_ref(lnast->get_type(base))) {
+      return Lnast_nid{};
+    }
+    auto idx = lnast->get_sibling_next(base);
+    if (idx.is_invalid() || !lnast->get_sibling_next(idx).is_invalid() || lnast->get_type(idx) != N::Lnast_ntype_const) {
+      return Lnast_nid{};  // need exactly one constant field index (a named output port)
+    }
+    return instance_results_.count(std::string(strip_prefix(lnast->get_name(base)))) != 0u ? base : Lnast_nid{};
+  };
+
+  // Mark the named extraction temp `_t` (defined once, at `def_node`/`def_index`,
+  // by a read of `inst`'s output) for inlining as `inst.port` at every use — when
+  // every use follows `inst`'s declaration.  A use that precedes it is pipeline
+  // feedback, where `_t` stays a position-independent `wire`.
+  auto try_inline = [&](Lnast_nid def_node, int def_index, Lnast_nid inst, N::Lnast_ntype_int def_type) {
+    auto c0 = lnast->get_child(def_node);  // _t
+    if (c0.is_invalid() || !N::is_ref(lnast->get_type(c0))) {
+      return;
+    }
+    std::string base_name(strip_prefix(lnast->get_name(inst)));
+    auto        bwit = write_idx_.find(std::string(lnast->get_name(inst)));
+    if (bwit == write_idx_.end() || bwit->second.size() != 1) {
+      return;  // instance reassigned (or odd) — leave alone
+    }
+    int inst_def_index = bwit->second.front();
+
+    std::string raw_name(lnast->get_name(c0));
+    std::string tname(strip_prefix(raw_name));
+    // `_t` is written exactly once — by THIS def (its `wire` declare is not a
+    // write, so write_idx_ excludes it).
+    auto twit = write_idx_.find(raw_name);
+    if (twit == write_idx_.end() || twit->second.size() != 1 || twit->second.front() != def_index) {
+      return;
+    }
+    auto fit = fold_info_.find(raw_name);
+    if (fit == fold_info_.end() || fit->second.use_count < 1) {
+      return;  // nothing to inline (leave a dead read alone)
+    }
+    if (pin_cone_.count(tname) != 0u || pin_cone_.count(base_name) != 0u) {
+      return;  // a clock/reset-cone net keeps its name (`clock_pin=ref <net>`)
+    }
+    if (fit->second.min_use_index <= inst_def_index) {
+      return;  // a use precedes the instance decl -> genuine feedback, keep wire
+    }
+    // render_value inlines `fold_info_[name].def_node`; point it at this def (a
+    // trailing `wire` declare may otherwise be the recorded def).
+    fit->second.def_node = def_node;
+    fit->second.def_type = def_type;
+    foldable_.insert(raw_name);                              // render_value inlines `inst.port` at each use
+    folded_node_.insert(def_node.get_class_index().value);   // skip the extraction statement
+    suppress_decl_.insert(tname);                            // drop any in-place declare
+    instance_output_inlined_.insert(tname);                  // drop the hoisted `wire`/`mut`
+  };
+
+  // Case 1: a direct `_t = inst["port"]` (the tuple_get defines the named temp).
+  for (const auto& [tg, tg_index] : tuple_get_nodes_) {
+    if (auto inst = instance_of_tuple_get(tg); !inst.is_invalid()) {
+      try_inline(tg, tg_index, inst, N::Lnast_ntype_tuple_get);
+    }
+  }
+  // Case 2: `_t = ___tmp` (a pure copy) where `___tmp` folds to `inst["port"]`.
+  // The slang reader emits the read into a `___tmp`, then copies it to the named
+  // net; the single-use folder inlines `___tmp`, so the copy's RHS reads the
+  // instance output.
+  for (const auto& [st, st_index] : store_nodes_) {
+    auto c0 = lnast->get_child(st);  // _t
+    if (c0.is_invalid() || !N::is_ref(lnast->get_type(c0))) {
+      continue;
+    }
+    auto val = lnast->get_sibling_next(c0);  // the copied value
+    if (val.is_invalid() || !lnast->get_sibling_next(val).is_invalid() || !N::is_ref(lnast->get_type(val))) {
+      continue;  // not a pure single-ref copy
+    }
+    std::string val_raw(lnast->get_name(val));
+    if (foldable_.count(val_raw) == 0u) {
+      continue;  // RHS is not an inlined temp
+    }
+    auto vit = fold_info_.find(val_raw);
+    if (vit == fold_info_.end() || vit->second.def_type != N::Lnast_ntype_tuple_get) {
+      continue;  // RHS does not fold to a tuple_get
+    }
+    if (auto inst = instance_of_tuple_get(vit->second.def_node); !inst.is_invalid()) {
+      try_inline(st, st_index, inst, N::Lnast_ntype_store);
+    }
   }
 }
 
@@ -2127,6 +2384,35 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
             if (auto it = mocomb_field_.find(bn + std::string(1, '\x01') + field); it != mocomb_field_.end()) {
               return it->second;
             }
+          }
+        }
+      }
+      // A submodule output read `inst["port"]` prints as `inst.port` (dot field
+      // access) when `inst` is a module-instance result and `port` is a bare
+      // identifier.  This covers both the inlined uses and any remaining `wire`
+      // driver.  Non-instance tuple reads keep the bracket-string form.
+      if (!base.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(base))) {
+        std::string bn(strip_prefix(lnast->get_name(base)));
+        auto        idx0 = lnast->get_sibling_next(base);
+        if (instance_results_.count(bn) != 0u && mocomb_dst_.count(bn) == 0u && !idx0.is_invalid()
+            && lnast->get_sibling_next(idx0).is_invalid() && lnast->get_type(idx0) == N::Lnast_ntype_const) {
+          std::string field(lnast->get_name(idx0));
+          if (field.size() >= 2 && (field.front() == '\'' || field.front() == '"') && field.back() == field.front()) {
+            field = field.substr(1, field.size() - 2);
+          }
+          auto is_ident = [](const std::string& f) {
+            if (f.empty() || !((f[0] >= 'a' && f[0] <= 'z') || (f[0] >= 'A' && f[0] <= 'Z') || f[0] == '_')) {
+              return false;
+            }
+            for (char ch : f) {
+              if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_')) {
+                return false;
+              }
+            }
+            return true;
+          };
+          if (is_ident(field)) {
+            return bn + "." + field;  // postfix dot access (binds tight, never wrapped)
           }
         }
       }

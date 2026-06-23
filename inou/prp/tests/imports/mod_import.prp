@@ -1,0 +1,19 @@
+/*
+:name: mod_import
+:type: lgraph
+:files: inou/prp/tests/imports/mod_import.prp
+*/
+// 2i-import — a `mod` callee imported via the dotted `import("unit.entity")`
+// form must lower at tolg. constprop folds the callee ref to the string Dlop
+// 'lib_regfile.lib_regfile' (QUOTED, unlike a same-file ref callee), so tolg
+// has to strip the surrounding quotes to resolve the instance — otherwise it
+// reports "call to undefined function 'lib_regfile.lib_regfile'". The importer
+// declares no reg of its own, so it must also forward the imported mod's
+// clock+reset (the transitive needs_reset walk has to see the const callee).
+// `:files:` lists only this file: the sibling lib_regfile.prp is pulled in by
+// importer-directory discovery, mirroring a single-file `lhd compile`.
+const RegFile = import("lib_regfile.lib_regfile")
+
+pub mod mod_import(clock:u1, wen:u1, wdata:u8) -> (rdata:u8@[]) {
+  rdata = RegFile(clock=clock, wen=wen, wdata=wdata)
+}

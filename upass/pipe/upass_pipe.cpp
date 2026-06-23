@@ -87,7 +87,7 @@ void uPass_pipe::run(const std::shared_ptr<Lnast>& lnast) {
       continue;  // reg-as-output: the reg IS the pipeline stage
     }
 
-    const std::string reg_name = "___pipe_" + e.name;
+    const std::string reg_name = "%pipe_" + e.name;
 
     // declare(ref(reg), prim_type_none, const("reg")) + stages(min,max)
     auto d = lnast->add_child(stmts_nid, Lnast_ntype::create_declare());

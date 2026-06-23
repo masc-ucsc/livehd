@@ -507,7 +507,10 @@ void Prp2lnast::report_error(const Lnast_nid& nid, std::string_view code, std::s
 }
 
 namespace {
-bool prp_name_is_tmp(std::string_view n) { return n.size() >= 3 && n[0] == '_' && n[1] == '_' && n[2] == '_'; }
+// Compiler SSA temps are `%`-prefixed (parser-impossible). A user-written
+// `___6` is therefore NOT a temp — it is an ordinary name the scope checks
+// (check_writes_in_scope / check_undefined_reads) must validate like any other.
+bool prp_name_is_tmp(std::string_view n) { return Lnast::is_tmp(n); }
 
 // `_` (sole arg) and `_0`/`_1`/… (positional args) are the implicit
 // placeholder-lambda parameters (`comb add(a,b){ _0 + _1 }`). They are never

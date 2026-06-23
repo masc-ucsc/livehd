@@ -52,9 +52,31 @@ public:
   // (`(t = C.o, …) = C(...)`).  Mods stay `r = M(...)` (Sub instances).  Owned by
   // the pass; must outlive write_all().
   void set_multi_out_combs(const std::unordered_map<std::string, std::vector<std::string>>* m) { multi_out_combs_ = m; }
+  // The names of every module emitted in this run.  A func_call callee that is
+  // one of them becomes a file-top `const X = import("X.X")` so the cross-module
+  // call resolves on re-compile.  Owned by the pass; must outlive write_all().
+  void set_known_modules(const std::unordered_set<std::string>* m) { known_modules_ = m; }
+  // The names (last `.`-component) of every STATEFUL module emitted in this run —
+  // a unit that lowers to a `mod` (a Sub instance) rather than an inlined `comb`.
+  // A func_call whose callee is one of these is a real instantiation, so the
+  // writer annotates it with `::[name=<lhs>]` to preserve the bound variable's
+  // hierarchical instance name on re-compile (else tolg synthesises `u_<callee>_…`,
+  // breaking name correspondence with the original v2prp source).  Owned by the
+  // pass; must outlive write_all().
+  void set_stateful_modules(const std::unordered_set<std::string>* m) { stateful_modules_ = m; }
   // Scan a unit's LNAST top; if it is a slang-origin multi-output `comb`, set
   // `name`/`outputs` (ordered output port names) and return true (else false).
   static bool scan_multi_out_comb(const std::shared_ptr<Lnast>& ln, std::string& name, std::vector<std::string>& outputs);
+  // True if `ln` is a slang-origin module whose body has state — a `reg`/`latch`
+  // declare or a submodule `func_call` — i.e. it lowers to a `mod` (a Sub
+  // instance) instead of an inlined `comb`.  False for a pyrope-origin bare file
+  // (no io node).
+  static bool module_is_stateful(const std::shared_ptr<Lnast>& ln);
+  // True if `nid`'s subtree contains module state (a `reg`/`latch` declare or a
+  // submodule `func_call`).  The single mod-vs-comb predicate, shared by
+  // scan_multi_out_comb (destructure decision) and module_is_stateful (call-site
+  // instance-name decision).
+  static bool subtree_has_state(const std::shared_ptr<Lnast>& ln, Lnast_nid nid);
 
 private:
   std::ostream&          os;
@@ -210,6 +232,15 @@ private:
   // `mocomb_field_` maps `r\x01<output>` -> the temp that received it, so the
   // later `r["<output>"]` tuple_get reads rewrite to that temp.
   const std::unordered_map<std::string, std::vector<std::string>>* multi_out_combs_{nullptr};
+  // Set of all module names emitted in this run (see set_known_modules); a
+  // func_call callee in this set is emitted as a file-top import.
+  const std::unordered_set<std::string>* known_modules_{nullptr};
+  // Set of stateful (mod) module names emitted in this run (see
+  // set_stateful_modules); a func_call to one of these is a Sub instance and the
+  // writer emits a `::[name=<lhs>]` call-site instance-name annotation.
+  const std::unordered_set<std::string>* stateful_modules_{nullptr};
+  // Distinct func_call callee names seen in this unit (populated in scan_node).
+  std::unordered_set<std::string> func_call_callees_;
   std::unordered_set<std::string>                                  mocomb_dst_;
   std::unordered_map<std::string, std::string>                     mocomb_field_;
 
@@ -269,6 +300,7 @@ private:
     int                          use_count = 0;   // reads of this name
     int                          def_index = -1;  // pre-order index of the (single) def
     int                          use_index = -1;  // pre-order index of the (single) use
+    int                          min_use_index = 1 << 30;  // pre-order index of the FIRST (earliest) use
   };
   std::unordered_map<std::string, Fold_info>                           fold_info_;    // by raw name
   std::unordered_map<std::string, std::vector<int>>                    write_idx_;    // name -> sorted write pre-order indices
@@ -276,11 +308,24 @@ private:
   std::unordered_set<int64_t>                                          folded_node_;  // def-node keys (get_class_index) to skip
   std::unordered_map<std::string, std::pair<std::string, std::string>> range_lohi_;   // range-temp name -> "lo","hi"
   std::vector<Lnast_nid> get_mask_nodes_;                                             // every get_mask, for range-mask resolution
+  std::vector<std::pair<Lnast_nid, int>> tuple_get_nodes_;                            // every tuple_get + its pre-order index
+  std::vector<std::pair<Lnast_nid, int>> store_nodes_;                                // every store + its pre-order index
+  // Module-instance results (`mut inst = Mod(args)`), stripped names: their output
+  // ports may print with dot notation `inst.port` (instead of `inst["port"]`).
+  std::unordered_set<std::string> instance_results_;
+  // Instance-output extraction temps (`_t = inst["port"]`) selected to be inlined
+  // as `inst.port` at every use; their hoisted `wire`/`mut` declaration is dropped.
+  std::unordered_set<std::string> instance_output_inlined_;
 
   // Pre-pass: walk the whole tree, populate the maps above, and decide which
   // temps are foldable.  Called once at the start of write_all().
   void        analyze_folding();
   void        scan_node(Lnast_nid nid, int& index);  // recursive pre-order populate
+  // Decide which submodule output-port reads (`_t = inst["port"]`) to inline as
+  // `inst.port` at their uses (backward-only), vs keep as a `wire` (a use that
+  // precedes the instance declaration — genuine pipeline feedback).  Runs inside
+  // write_module after the clock/reset pin cone is known.
+  void        analyze_instance_inline();
   // True if a node type writes its child0 (an LHS def).  if/cassert/loop and the
   // pseudo-func_* nodes read child0 instead, so they return false.
   static bool defines_child0(Lnast_ntype::Lnast_ntype_int t);
@@ -309,11 +354,28 @@ private:
   std::string const_text(Lnast_nid node) const;
 
   // ── Utilities ────────────────────────────────────────────────────────────
-  static bool             is_tmp(std::string_view name);
+  // True for a compiler SSA temp: a raw `%`-prefixed name (or legacy `___`
+  // during the migration), OR a name this writer already mapped to an emittable
+  // `t…` form (so post-strip_prefix call sites still recognise it as a temp).
+  bool                    is_tmp(std::string_view name) const;
   // The infix symbol for a binary/n-ary op ntype ("+", "==", "and", …) or "" if
   // the type is not an infix op.
   static std::string_view infix_symbol(Lnast_ntype::Lnast_ntype_int t);
   // True if `t` is a value-producing op whose single-use temp can be inlined.
   static bool             is_foldable_optype(Lnast_ntype::Lnast_ntype_int t);
-  std::string             strip_prefix(std::string_view name) const;  // renames ___ssa_N out of the SSA namespace
+  std::string             strip_prefix(std::string_view name) const;  // renames ___ssa_N out, maps %temp -> emittable
+
+  // ── %temp -> emittable Pyrope identifier ─────────────────────────────────
+  // A `%`-prefixed compiler temp is parser-impossible, so a non-inlined temp
+  // that must be EMITTED as source is renamed to a legal `t<suffix>` identifier
+  // (`%pipe_o` -> `tpipe_o`, `%3439_0` -> `t3439_0`), collision-checked against
+  // every name in the tree (and previously synthesised names) so it can never
+  // alias a user variable / port: on collision the suffix `_<M>` is appended
+  // until free.  Stable (the `%` suffix derives from the content hash) and
+  // consistent (def and use share the cached mapping).
+  std::string emit_name_for(std::string_view tmp) const;
+  mutable std::unordered_map<std::string, std::string> tmp_emit_names_;     // %head -> t<id>
+  mutable std::unordered_set<std::string>              used_emit_names_;    // every output name taken
+  mutable std::unordered_set<std::string>              emitted_tmp_names_;  // mapped t<id> that ARE temps
+  mutable bool                                         emit_names_seeded_{false};
 };

@@ -49,18 +49,19 @@ public:
   Lnast_node       mint_tmp_ref() { return Lnast_node::create_ref(create_lnast_tmp()); }
 
   // ── tmp-id scoping (stable SSA/tmp ids) ──────────────────────────────────
-  // create_lnast_tmp() mints intermediate/SSA temps. To keep ids stable under
-  // small source edits, a temp is named after the *current scope* — typically
-  // the destination variable of the statement being lowered — plus a per-scope
-  // running counter: `___<label>_<n>`. Editing or adding a statement then only
-  // renumbers temps that share its destination, instead of cascading a single
-  // global counter through the whole function (which renumbered everything
-  // after an inserted line). When no scope is open (statement kinds with no
-  // natural destination, e.g. an `if` condition), it falls back to a global
-  // `___N` — which stabilize_fallback_tmps() rewrites to `___<hash>_<n>` at
-  // the end of the build. All forms keep the leading `___` so every
-  // downstream `is_tmp` check (lnast_manager, ssa, constprop, prp_writer, …)
-  // is unaffected.
+  // create_lnast_tmp() mints intermediate/SSA temps in the parser-impossible
+  // `%` namespace (so a temp never collides with a user identifier). To keep
+  // ids stable under small source edits, a temp is named after the *current
+  // scope* — typically the destination variable of the statement being lowered
+  // — plus a per-scope running counter: `%<label>_<n>`. Editing or adding a
+  // statement then only renumbers temps that share its destination, instead of
+  // cascading a single global counter through the whole function (which
+  // renumbered everything after an inserted line). When no scope is open
+  // (statement kinds with no natural destination, e.g. an `if` condition), it
+  // falls back to a global `%N` — which stabilize_fallback_tmps() rewrites to
+  // `%<hash>_<n>` at the end of the build. All forms keep the leading `%` so
+  // every downstream `is_tmp` check (lnast_manager, ssa, constprop, prp_writer,
+  // …) is unaffected.
   //
   // The label is the leading identifier run of `dest`; surrounding syntax (a
   // type annotation, field path, or brackets) is dropped so it does not churn
@@ -69,7 +70,7 @@ public:
   std::string_view tmp_scope() const { return tmp_scope_; }
 
   // End-of-build rewrite of the remaining global-counter fallbacks: every
-  // `___<digits>` ref is renamed to `___<site-hash>_<occurrence>`, where the
+  // `%<digits>` ref is renamed to `%<site-hash>_<occurrence>`, where the
   // hash covers the parent node type plus the sibling ref/const texts at the
   // tmp's first (defining) occurrence — see Lnast::tmp_site_hash — and the
   // occurrence counter orders same-hash repeats within this lnast. The id
@@ -167,8 +168,8 @@ private:
 
   std::stack<Lnast_nid> stmts_stack_;
 
-  // tmp-id scoping state (see set_tmp_scope). tmp_scope_ empty => global ___N
-  // fallback via tmp_var_cnt; otherwise temps are `___<tmp_scope_>_<counter>`
+  // tmp-id scoping state (see set_tmp_scope). tmp_scope_ empty => global %N
+  // fallback via tmp_var_cnt; otherwise temps are `%<tmp_scope_>_<counter>`
   // where the counter is per-label and monotonic for the whole lnast.
   std::string                              tmp_scope_;
   absl::flat_hash_map<std::string, int>    tmp_label_cnt_;

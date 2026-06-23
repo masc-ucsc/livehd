@@ -101,8 +101,9 @@ bool uPass_ssa::is_user_var(std::string_view name) {
   if (name.empty()) {
     return false;
   }
-  // Compiler-generated temporaries — already unique per func_extract.
-  if (name.size() >= 3 && name[0] == '_' && name[1] == '_' && name[2] == '_') {
+  // Compiler-generated temporaries (`%`-prefixed) — already unique per
+  // func_extract, and never re-versioned.
+  if (Lnast::is_tmp(name)) {
     return false;
   }
   return true;
@@ -776,7 +777,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
         // resolves a multi-segment path in a single node (a chained
         // `t1 = src['s'] ; t2 = t1['n']` left the intermediate sub-tuple temp
         // unresolved for a runtime field).
-        std::string tmp = absl::StrCat("___ws_", whole_store_tmp++);
+        std::string tmp = absl::StrCat("%ws_", whole_store_tmp++);
         auto        tg  = staging->add_child(new_stmts, Lnast_ntype::create_tuple_get());
         if (Lnast::srcid_carries(Lnast_ntype::create_tuple_get())) {
           staging->set_srcid(tg, lnast->get_srcid(child));
@@ -885,7 +886,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
                   }
                   any                   = true;
                   const std::string sub = f.name.substr(dot_port.size());  // "first" | "lo.hi"
-                  std::string       tmp = absl::StrCat("___aws_", arm_split_tmp++);
+                  std::string       tmp = absl::StrCat("%aws_", arm_split_tmp++);
                   auto              tg  = staging->add_child(dst_parent, Lnast_ntype::create_tuple_get());
                   if (Lnast::srcid_carries(Lnast_ntype::create_tuple_get())) {
                     staging->set_srcid(tg, lnast->get_srcid(src_nid));

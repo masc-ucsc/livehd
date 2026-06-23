@@ -264,15 +264,25 @@ std::string Cgen_verilog::get_unique_decl_name(std::string_view name) {
   if (inserted) {
     return base;
   }
+  int n = it->second;  // copy out: a later insert() may rehash and invalidate `it`
 
-  const auto suffix = absl::StrCat("_cgen", it->second++);
-  if (!base.empty() && base.front() == '\\') {
-    while (!base.empty() && base.back() == ' ') {
-      base.pop_back();
+  // Escaped Verilog id (`\name `): the `_cgen<N>` suffix goes before the
+  // trailing space. Keep bumping N until the candidate is itself unused, then
+  // RESERVE it — so a suffixed name can never alias a user signal, a port (the
+  // io decls are pre-seeded in do_from_graph), or a previously-emitted name.
+  const bool  escaped = !base.empty() && base.front() == '\\';
+  std::string core    = base;
+  if (escaped) {
+    while (!core.empty() && core.back() == ' ') {
+      core.pop_back();
     }
-    return absl::StrCat(base, suffix, " ");
   }
-  return absl::StrCat(base, suffix);
+  std::string result;
+  do {
+    result = escaped ? absl::StrCat(core, "_cgen", n++, " ") : absl::StrCat(core, "_cgen", n++);
+  } while (!declared_name_counts.insert({result, 1}).second);
+  declared_name_counts[base] = n;  // persist the advanced counter for the next call
+  return result;
 }
 
 std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) {

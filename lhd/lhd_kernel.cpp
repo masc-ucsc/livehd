@@ -3999,6 +3999,165 @@ void tool_tree_lg(Options& opts, const std::vector<std::string>& lg_dirs) {
   std::fflush(stdout);
 }
 
+// ── `tool tree ln:` — the LNAST counterpart of the lg instance tree ─────────
+// `tool cat ln:` already dumps every node; `tool tree ln:` is the SUMMARY: only
+// the scope / control-flow / call / def nodes that give the tree its shape, each
+// annotated with the total LNAST node count of its subtree (the "[N nodes]" stat,
+// like the lg tree). Everything else (declares, stores, operators, refs, consts,
+// types) is collapsed. `--target kind:<verbal>` adds extra node kinds; `--hier N`
+// limits depth; `--max N` caps rows. Rendered with box-drawing connectors.
+struct Ln_tree_row {
+  std::string              label;
+  std::vector<Ln_tree_row> children;
+};
+
+bool tool_tree_ln_skeleton(Lnast_ntype::Lnast_ntype_int t) {
+  using L = Lnast_ntype;
+  return L::is_top(t) || L::is_stmts(t) || L::is_if(t) || L::is_unique_if(t) || L::is_for(t) || L::is_while(t)
+         || L::is_func_def(t) || L::is_func_call(t) || L::is_io(t);
+}
+
+// `--target kind:<X>` for the ln tree: X names an Lnast verbal (store, declare,
+// if, …), matched exactly. Additive — the skeleton set is always shown too.
+bool tool_tree_ln_kind_match(Lnast_ntype::Lnast_ntype_int t, const std::vector<std::string>& kinds) {
+  if (kinds.empty()) {
+    return false;
+  }
+  std::string_view name = Lnast_ntype::to_sv(t);
+  for (const auto& k : kinds) {
+    if (k == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// fcall/fdef carry their identity in the leading ref/const children (fcall:
+// instance, callee, arg-stores…; fdef: name, …). Surface them the way the lg
+// tree shows `instance : Module`. Other nodes append their own name if any.
+std::string tool_tree_ln_label(const Lnast& ln, const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int type, size_t total) {
+  std::string head{Lnast_ntype::to_sv(type)};
+  if (Lnast_ntype::is_func_call(type) || Lnast_ntype::is_func_def(type)) {
+    std::vector<std::string_view> names;
+    for (auto c = ln.get_first_child(nid); !c.is_invalid() && names.size() < 2; c = ln.get_sibling_next(c)) {
+      auto ct = ln.get_type(c);
+      if (!Lnast_ntype::is_ref(ct) && !Lnast_ntype::is_const(ct)) {
+        break;  // leading name run ended
+      }
+      names.push_back(ln.get_name(c));
+    }
+    if (names.size() >= 2) {
+      head += std::format(" {} : {}", names[0], names[1]);
+    } else if (names.size() == 1) {
+      head += std::format(" {}", names[0]);
+    }
+  } else if (auto n = ln.get_name(nid); !n.empty()) {
+    head += std::format(" {}", n);
+  }
+  return std::format("{}  [{} nodes]", head, total);
+}
+
+// Build the skeleton for the subtree at `nid` into `sink` (each shown node
+// attaches to its nearest shown ancestor). Returns the total LNAST node count of
+// the subtree — ALL nodes, shown or collapsed — so a scope's count reflects
+// everything it holds. `sink == nullptr` ⇒ count only (over depth / suppressed).
+size_t tool_tree_ln_collect(const Lnast& ln, const Lnast_nid& nid, int depth, int maxdepth,
+                            const std::vector<std::string>& kinds, std::vector<Ln_tree_row>* sink) {
+  auto type  = ln.get_type(nid);
+  bool shown = tool_tree_ln_skeleton(type) || tool_tree_ln_kind_match(type, kinds);
+
+  std::vector<Ln_tree_row>  kids;
+  std::vector<Ln_tree_row>* child_sink = sink;  // non-shown nodes are transparent (pass through)
+  bool                      emit       = false;
+  if (shown) {
+    if (sink != nullptr && depth < maxdepth) {
+      emit       = true;
+      child_sink = &kids;
+    } else {
+      child_sink = nullptr;  // over depth (or already suppressed): count only
+    }
+  }
+  int child_depth = shown ? depth + 1 : depth;  // only shown nodes consume a level
+
+  size_t total = 1;
+  for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+    total += tool_tree_ln_collect(ln, c, child_depth, maxdepth, kinds, child_sink);
+  }
+  if (emit) {
+    sink->push_back(Ln_tree_row{tool_tree_ln_label(ln, nid, type, total), std::move(kids)});
+  }
+  return total;
+}
+
+void tool_tree_ln_print(const Ln_tree_row& row, const std::string& prefix, bool last, std::string& out, size_t& budget,
+                        bool& truncated) {
+  if (budget == 0) {
+    truncated = true;
+    return;
+  }
+  out += prefix;
+  out += last ? "└── " : "├── ";
+  out += row.label;
+  out += '\n';
+  --budget;
+  std::string child_prefix = prefix + (last ? "    " : "│   ");
+  for (size_t i = 0; i < row.children.size(); ++i) {
+    tool_tree_ln_print(row.children[i], child_prefix, i + 1 == row.children.size(), out, budget, truncated);
+    if (truncated) {
+      return;
+    }
+  }
+}
+
+void tool_tree_ln(Options& opts, Result& res, const std::vector<std::string>& ln_tokens) {
+  auto in = classify_ln_inputs(ln_tokens, "tool tree");
+  for (const auto& d : opts.in_dirs) {  // --in-dir ln:DIR spelling
+    if (d.kind == "ln") {
+      in.ln_dirs.push_back(d.path);
+    }
+  }
+  auto units = sorted_by_name(filter_top(ln_tool_units(opts, res, in), opts.top));
+  if (units.empty()) {
+    throw Lhd_error{"config", "ln: input holds no matching units", "check --top"};
+  }
+
+  int         maxdepth  = opts.tool_hier < 0 ? std::numeric_limits<int>::max() : opts.tool_hier;  // tree: full by default
+  size_t      budget    = tool_budget(opts);
+  bool        truncated = false;
+  std::string out;
+  for (const auto& ln : units) {
+    // The unit's root (top/stmts/func_def) is the header; its children are the
+    // box-tree body — so the count beside the header is the whole-unit total.
+    std::vector<Ln_tree_row> body;
+    size_t                   total = 1;  // the root node itself
+    for (auto c = ln->get_first_child(ln->get_root()); !c.is_invalid(); c = ln->get_sibling_next(c)) {
+      total += tool_tree_ln_collect(*ln, c, 0, maxdepth, opts.tool_kinds, &body);
+    }
+    std::string suffix{ln->get_lambda_kind()};
+    if (ln->is_verilog_origin()) {
+      suffix += suffix.empty() ? "verilog" : ", verilog";
+    }
+    out += std::format("{}  [{} nodes]{}\n",
+                       ln->get_top_module_name(),
+                       total,
+                       suffix.empty() ? std::string{} : std::format("  ({})", suffix));
+    for (size_t i = 0; i < body.size(); ++i) {
+      tool_tree_ln_print(body[i], "", i + 1 == body.size(), out, budget, truncated);
+      if (truncated) {
+        break;
+      }
+    }
+    if (truncated) {
+      break;
+    }
+  }
+  if (truncated) {
+    out += std::format("-- output truncated at --max {} rows; raise --max (0 = unlimited)\n", opts.tool_max);
+  }
+  std::fwrite(out.data(), 1, out.size(), stdout);
+  std::fflush(stdout);
+}
+
 // A positional token's input kind: "lg" / "ln" / "src" (.prp/.v/.sv) / "" (a
 // filter term). lg: prefix strips to a directory; ln:/source keep the raw token
 // for classify_ln_inputs.
@@ -4067,8 +4226,14 @@ void tool_command(Options& opts, Result& res) {
   }
 
   if (verb == "tree") {
+    if (have_ln) {
+      tool_tree_ln(opts, res, ln_tokens);  // LNAST structural skeleton
+      return;
+    }
     if (!have_lg) {
-      throw Lhd_error{"usage", "tool tree needs an lg: input", "e.g. `lhd tool tree lg:dir --top m`"};
+      throw Lhd_error{"usage",
+                      "tool tree needs an lg: or ln:/source input",
+                      "e.g. `lhd tool tree lg:dir --top m` or `lhd tool tree ln:dir`"};
     }
     tool_tree_lg(opts, lg_dirs);
     return;

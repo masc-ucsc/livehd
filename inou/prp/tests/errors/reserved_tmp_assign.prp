@@ -1,0 +1,17 @@
+/*
+:name: reserved_tmp_assign
+:type: error
+:error: undeclared variable
+*/
+
+// A `___`-prefixed name is an ORDINARY user identifier (the compiler's SSA
+// temporaries live in the parser-impossible `%` namespace — see Lnast::is_tmp),
+// so `___6 = …` with no prior declaration is a plain assignment to an
+// undeclared variable and must be rejected like any other.  (Before the SSA
+// rename, `___6` was silently swept into the compiler-temp namespace and
+// aliased an internally-minted temp.)
+
+pub comb sb(a:u64) -> (z:u64) {
+  ___6 = a & 1   // locate_error_here
+  z = ___6
+}

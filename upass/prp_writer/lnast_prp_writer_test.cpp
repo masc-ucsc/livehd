@@ -58,10 +58,10 @@ TEST(LnastPrpWriter, AssignEmittedAsMut) {
 }
 
 // ── Test 2: add_trivial pattern — constprop DCEs all-tmp intermediates ───────
-// LNAST:  assign x=1, assign y=2, ___c = x+y, eq ___1 = ___c==3, cassert ___1
-// After constprop: all three-underscore temps (___c, ___1) are eliminated
+// LNAST:  assign x=1, assign y=2, %c = x+y, eq %1 = %c==3, cassert %1
+// After constprop: all three-underscore temps (%c, %1) are eliminated
 // because they are provably constant and only used in further constant folds.
-// The comb block header must appear; no ___ temp tokens should remain.
+// The comb block header must appear; no % temp tokens should remain.
 TEST(LnastPrpWriter, TmpsAreDCEdByConstprop) {
   auto ln = std::make_shared<Lnast>("add_trivial");
   ln->set_root(Lnast_ntype::create_top());
@@ -77,26 +77,26 @@ TEST(LnastPrpWriter, TmpsAreDCEdByConstprop) {
   ln->add_child(ay, Lnast_node::create_ref("y"));
   ln->add_child(ay, Lnast_node::create_const("2"));
 
-  // ___c = x + y
+  // %c = x + y
   auto plus = ln->add_child(stmts, Lnast_ntype::create_plus());
-  ln->add_child(plus, Lnast_node::create_ref("___c"));
+  ln->add_child(plus, Lnast_node::create_ref("%c"));
   ln->add_child(plus, Lnast_node::create_ref("x"));
   ln->add_child(plus, Lnast_node::create_ref("y"));
 
-  // cassert ___c == 3  →  eq node: ___1 = ___c == 3
+  // cassert %c == 3  →  eq node: %1 = %c == 3
   auto eq = ln->add_child(stmts, Lnast_ntype::create_eq());
-  ln->add_child(eq, Lnast_node::create_ref("___1"));
-  ln->add_child(eq, Lnast_node::create_ref("___c"));
+  ln->add_child(eq, Lnast_node::create_ref("%1"));
+  ln->add_child(eq, Lnast_node::create_ref("%c"));
   ln->add_child(eq, Lnast_node::create_const("3"));
 
   auto ca = ln->add_child(stmts, Lnast_ntype::create_cassert());
-  ln->add_child(ca, Lnast_node::create_ref("___1"));
+  ln->add_child(ca, Lnast_node::create_ref("%1"));
 
   auto output = run_and_emit(ln, {"constprop"});
 
   // Bare LNASTs (no func_def) have no comb wrapper — write_top() just emits
   // the statements directly.  The key invariant is that tmp tokens are DCE'd.
-  EXPECT_EQ(output.find("___"), std::string::npos) << "Tmps should be DCE'd: " << output;
+  EXPECT_EQ(output.find('%'), std::string::npos) << "Tmps should be DCE'd: " << output;
 }
 
 // ── Test 3: plus node emits infix a + b ──────────────────────────────────────

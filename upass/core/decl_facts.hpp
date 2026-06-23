@@ -118,7 +118,8 @@ inline std::optional<Facts> lookup(const Symbol_table& st, const Lnast* ln, std:
   // valued fields carry mode/comptime as per-field attrs (no entry). A bare
   // ___ tmp is never a DECLARED name — mode riding its binding via value
   // copies / carrier sharing must not read back as a storage class.
-  const bool  bare_tmp = field.empty() && root.size() >= 3 && root.substr(0, 3) == "___";
+  // A bare compiler temp (`%`-prefixed; see Lnast::is_tmp).
+  const bool  bare_tmp = field.empty() && !root.empty() && root[0] == '%';
   upass::Mode m        = bare_tmp ? upass::Mode::unknown : e.mode;
   if (b && m == upass::Mode::unknown && field.empty() && !bare_tmp) {
     m = b->get_mode();

@@ -68,6 +68,25 @@ dse_stores=$(grep -c '^[[:space:]]*[├└].* store' "$W/dse.out")
 [ "$dse_stores" -eq 1 ] || fail "DSE: expected 1 surviving store, got $dse_stores: $(cat "$W/dse.out")"
 grep -q "const '4'" "$W/dse.out" || fail "DSE: surviving store must hold the final value 4: $(cat "$W/dse.out")"
 
+# 5c. tool tree (ln): the structural SKELETON of the stored forest — the scope /
+#     control / call / def nodes with per-subtree node counts, drawn with box
+#     connectors. cat dumps every node; tree is the summary, so expression leaves
+#     (get_mask, plus, …) are collapsed. Reuses the ln: dir from section 2.
+"$LHD" tool tree ln:"$W/lns/" -q >"$W/tree.out" 2>/dev/null || fail "tool tree ln: exited nonzero"
+grep -qE '^old\.fun3  \[[0-9]+ nodes\]  \(comb\)' "$W/tree.out" \
+  || fail "tree ln: must head each unit with name + node count + kind: $(cat "$W/tree.out")"
+grep -qE '[├└]── ' "$W/tree.out" || fail "tree ln: must draw box-drawing connectors: $(cat "$W/tree.out")"
+grep -qE '[├└]── if  \[[0-9]+ nodes\]' "$W/tree.out" || fail "tree ln: must show the if scope row: $(cat "$W/tree.out")"
+grep -q 'get_mask' "$W/tree.out" && fail "tree ln: default must collapse expression leaves (no get_mask): $(cat "$W/tree.out")"
+
+# 5d. --target kind:<verbal> additively spotlights an otherwise-collapsed kind.
+"$LHD" tool tree ln:"$W/lns/" --target kind:store -q >"$W/treek.out" 2>/dev/null || fail "tool tree ln: --target nonzero"
+grep -qE '[├└]── store  \[' "$W/treek.out" || fail "tree ln: --target kind:store must surface store rows: $(cat "$W/treek.out")"
+
+# 5e. --max caps the rows and prints the truncation footer (shared with lg tree).
+"$LHD" tool tree ln:"$W/lns/" --max 2 -q >"$W/treem.out" 2>/dev/null || fail "tool tree ln: --max nonzero"
+grep -q 'truncated at --max 2' "$W/treem.out" || fail "tree ln: --max must print a truncation footer: $(cat "$W/treem.out")"
+
 # 6. Usage validation: one-input diff and a missing verb are usage errors.
 "$LHD" tool diff "$W/old.prp" -q >"$W/e2.json" 2>/dev/null
 grep -q '"class":"usage"' "$W/e2.json" || fail "tool diff with one input must be a usage error: $(cat "$W/e2.json")"

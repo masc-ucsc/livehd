@@ -1,6 +1,7 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 # buildifier: disable=load
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
@@ -12,6 +13,18 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//lnast",
+    ],
+)
+
+# Slang->Pyrope emit regression for submodule output-port inlining (no LEC, so
+# it sidesteps the pre-existing multi-module library-read gaps).
+sh_test(
+    name = "inst_out_inline_test",
+    srcs = ["tests/inst_out_inline_test.py"],
+    args = ["-i", "$(location tests/inst_out_inline.v)"],
+    data = [
+        "tests/inst_out_inline.v",
+        "//lhd",
     ],
 )
 

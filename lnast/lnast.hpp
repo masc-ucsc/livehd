@@ -395,14 +395,19 @@ public:
   Lnast_bitwidth_meta&       bw_meta() noexcept { return bw_meta_; }
 
   // ── name predicates (work off the textual name only) ────────────────────
-  static bool is_tmp(std::string_view name) { return name.size() >= 3 && name.substr(0, 3) == "___"; }
+  // Compiler SSA temporaries are `%`-prefixed (`%<hash>_<n>`) — `%` is
+  // parser-impossible, so a temp never collides with a user identifier (and a
+  // user-written `___6` is now an ordinary, scope-checked name). PREFIX test
+  // only — never matches the user-SSA *infix* `<base>___ssa_<N>` (that starts
+  // with the user base, not `%`).
+  static bool is_tmp(std::string_view name) { return !name.empty() && name[0] == '%'; }
 
   // Stable id of the statement "shape" around a tmp ref: FNV-1a over the
   // parent's node type name plus every *other* child's leaf kind+text.
   // Deterministic across processes/platforms (unlike absl/std hashing), so
   // names derived from it survive recompiles and unrelated source edits —
-  // the basis of the hash-named tmps `___<hash>_<n>` (builder fallback
-  // stabilization) and `___<hash>_i<n>` (inline/unroll rename). Repeats of
+  // the basis of the hash-named tmps `%<hash>_<n>` (builder fallback
+  // stabilization) and `%<hash>_i<n>` (inline/unroll rename). Repeats of
   // the same hash within one lnast are disambiguated by the caller's
   // occurrence counter, so cross-site hash collisions only cost stability,
   // never uniqueness. `remap` (optional) translates sibling texts that are

@@ -609,15 +609,15 @@ TEST(UpassConstprop, SextSignExtendNarrows) {
 // tuple_add + tuple_get: first positional field (index 0).
 TEST(UpassConstpropTuple, TupleAddAndGetFirstField) {
   ConstpropFixture f;
-  auto             add_op = f.add_tuple_add_node("___t0", {3, 7});
-  auto             get_op = f.add_tuple_get_node("dst", "___t0", "0");
+  auto             add_op = f.add_tuple_add_node("%t0", {3, 7});
+  auto             get_op = f.add_tuple_get_node("dst", "%t0", "0");
 
   TestableConstprop cp(f.lm);
   cp.position(add_op);
-  cp.push_from_cursor(&uPass_constprop::process_tuple_add);  // ___t0 = (3, 7)
+  cp.push_from_cursor(&uPass_constprop::process_tuple_add);  // %t0 = (3, 7)
 
   cp.position(get_op);
-  cp.process_tuple_get();  // dst = ___t0[0] = 3
+  cp.process_tuple_get();  // dst = %t0[0] = 3
 
   EXPECT_EQ(cp.get_result("dst").to_just_i64(), 3);
 }
@@ -625,15 +625,15 @@ TEST(UpassConstpropTuple, TupleAddAndGetFirstField) {
 // tuple_add + tuple_get: second positional field (index 1).
 TEST(UpassConstpropTuple, TupleAddAndGetSecondField) {
   ConstpropFixture f;
-  auto             add_op = f.add_tuple_add_node("___t0", {3, 7});
-  auto             get_op = f.add_tuple_get_node("dst", "___t0", "1");
+  auto             add_op = f.add_tuple_add_node("%t0", {3, 7});
+  auto             get_op = f.add_tuple_get_node("dst", "%t0", "1");
 
   TestableConstprop cp(f.lm);
   cp.position(add_op);
   cp.push_from_cursor(&uPass_constprop::process_tuple_add);
 
   cp.position(get_op);
-  cp.process_tuple_get();  // dst = ___t0[1] = 7
+  cp.process_tuple_get();  // dst = %t0[1] = 7
 
   EXPECT_EQ(cp.get_result("dst").to_just_i64(), 7);
 }
@@ -653,12 +653,12 @@ TEST(UpassConstpropTuple, TupleGetMissingSourceNoStore) {
 // tuple_get with a runtime ref index not in the symbol table: can't fold → no store.
 TEST(UpassConstpropTuple, TupleGetUnknownRuntimeIndexNoStore) {
   ConstpropFixture f;
-  auto             add_op = f.add_tuple_add_node("___t0", {42});
-  auto             get_op = f.add_tuple_get_ref_idx_node("dst", "___t0", "runtime_idx");
+  auto             add_op = f.add_tuple_add_node("%t0", {42});
+  auto             get_op = f.add_tuple_get_ref_idx_node("dst", "%t0", "runtime_idx");
 
   TestableConstprop cp(f.lm);
   cp.position(add_op);
-  cp.push_from_cursor(&uPass_constprop::process_tuple_add);  // ___t0 = (42) — bundle populated
+  cp.push_from_cursor(&uPass_constprop::process_tuple_add);  // %t0 = (42) — bundle populated
 
   cp.position(get_op);
   cp.process_tuple_get();  // runtime_idx not in st → cannot fold
@@ -669,8 +669,8 @@ TEST(UpassConstpropTuple, TupleGetUnknownRuntimeIndexNoStore) {
 // Re-running tuple_add + tuple_get is idempotent: the field value is stable.
 TEST(UpassConstpropTuple, TupleGetConvergesOnRepeat) {
   ConstpropFixture f;
-  auto             add_op = f.add_tuple_add_node("___t0", {5});
-  auto             get_op = f.add_tuple_get_node("dst", "___t0", "0");
+  auto             add_op = f.add_tuple_add_node("%t0", {5});
+  auto             get_op = f.add_tuple_get_node("dst", "%t0", "0");
 
   TestableConstprop cp(f.lm);
   cp.position(add_op);
@@ -691,14 +691,14 @@ TEST(UpassConstpropTuple, TupleGetConvergesOnRepeat) {
 // tuple_set writes a scalar value into the bundle and marks changed.
 TEST(UpassConstpropTuple, TupleSetWritesField) {
   ConstpropFixture f;
-  auto             set_op = f.add_tuple_set_node("___t0", "0", 99);
+  auto             set_op = f.add_tuple_set_node("%t0", "0", 99);
 
   TestableConstprop cp(f.lm);
   cp.position(set_op);
   cp.process_tuple_set();
 
-  // The symbol table key "___t0.0" should now hold 99.
-  EXPECT_EQ(cp.get_result("___t0.0").to_just_i64(), 99);
+  // The symbol table key "%t0.0" should now hold 99.
+  EXPECT_EQ(cp.get_result("%t0.0").to_just_i64(), 99);
 }
 
 // tuple_set with a __bits attribute field must be silently skipped — the
@@ -717,30 +717,30 @@ TEST(UpassConstpropTuple, TupleSetAttributeFieldSkipped) {
 // Re-running tuple_set with an identical value is idempotent.
 TEST(UpassConstpropTuple, TupleSetConvergesOnRepeat) {
   ConstpropFixture f;
-  auto             set_op = f.add_tuple_set_node("___t0", "0", 42);
+  auto             set_op = f.add_tuple_set_node("%t0", "0", 42);
 
   TestableConstprop cp(f.lm);
   cp.position(set_op);
   cp.process_tuple_set();
-  ASSERT_EQ(cp.get_result("___t0.0").to_just_i64(), 42);
+  ASSERT_EQ(cp.get_result("%t0.0").to_just_i64(), 42);
 
   cp.position(set_op);
   cp.process_tuple_set();
-  EXPECT_EQ(cp.get_result("___t0.0").to_just_i64(), 42);
+  EXPECT_EQ(cp.get_result("%t0.0").to_just_i64(), 42);
 }
 
 // tuple_set followed by tuple_get propagates the written value end-to-end.
 TEST(UpassConstpropTuple, TupleSetThenGetRoundTrip) {
   ConstpropFixture f;
-  auto             set_op = f.add_tuple_set_node("___t0", "0", 77);
-  auto             get_op = f.add_tuple_get_node("dst", "___t0", "0");
+  auto             set_op = f.add_tuple_set_node("%t0", "0", 77);
+  auto             get_op = f.add_tuple_get_node("dst", "%t0", "0");
 
   TestableConstprop cp(f.lm);
   cp.position(set_op);
-  cp.process_tuple_set();  // ___t0[0] = 77
+  cp.process_tuple_set();  // %t0[0] = 77
 
   cp.position(get_op);
-  cp.process_tuple_get();  // dst = ___t0[0] = 77
+  cp.process_tuple_get();  // dst = %t0[0] = 77
 
   EXPECT_EQ(cp.get_result("dst").to_just_i64(), 77);
 }
@@ -777,13 +777,13 @@ TEST(UpassConstpropST, IsKnownConstInvalidLconstReturnsFalse) {
 TEST(UpassConstpropST, ClassifyDropsKnownConstTemp) {
   ConstpropFixture f;
 
-  // Build:  ___tmp = 7
+  // Build:  %tmp = 7
   auto assign_op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_store());
-  f.ln->add_child(assign_op, Lnast_node::create_ref("___tmp"));
+  f.ln->add_child(assign_op, Lnast_node::create_ref("%tmp"));
   f.ln->add_child(assign_op, Lnast_node::create_const("7"));
 
   TestableConstprop cp(f.lm);
-  cp.st_set("___tmp", Dlop::create_integer(7));
+  cp.st_set("%tmp", Dlop::create_integer(7));
 
   cp.position(assign_op);
   auto decision = cp.classify();

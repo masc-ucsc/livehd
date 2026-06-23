@@ -6,7 +6,7 @@
 // and (b) stable under small source edits: a temp's id depends only on its
 // scope (the statement's destination) and a per-scope counter, never on a
 // single global counter that renumbers the whole function when a line is
-// inserted ahead. The `___` prefix is always preserved so downstream `is_tmp`
+// inserted ahead. The `%` prefix marks every compiler temp so downstream `is_tmp`
 // checks keep working.
 
 #include <algorithm>
@@ -44,17 +44,17 @@ std::vector<std::string> mint_function(bool lead) {
   std::vector<std::string> ids;
   if (lead) {
     Lnast_builder::Tmp_scope_guard g(b, "w");
-    ids.push_back(b.create_lnast_tmp());  // ___w_0
-    ids.push_back(b.create_lnast_tmp());  // ___w_1
+    ids.push_back(b.create_lnast_tmp());  // %w_0
+    ids.push_back(b.create_lnast_tmp());  // %w_1
   }
   {
     Lnast_builder::Tmp_scope_guard g(b, "x:u8");  // type annotation must not leak into the label
-    ids.push_back(b.create_lnast_tmp());          // ___x_0
-    ids.push_back(b.create_lnast_tmp());          // ___x_1
+    ids.push_back(b.create_lnast_tmp());          // %x_0
+    ids.push_back(b.create_lnast_tmp());          // %x_1
   }
   {
     Lnast_builder::Tmp_scope_guard g(b, "y");
-    ids.push_back(b.create_lnast_tmp());  // ___y_0
+    ids.push_back(b.create_lnast_tmp());  // %y_0
   }
   return ids;
 }
@@ -68,9 +68,9 @@ int main() {
   // ── 2. Scope label + per-scope counter shape ──────────────────────────────
   {
     auto ids = mint_function(false);
-    check_eq(ids[0], "___x_0", "first x temp");
-    check_eq(ids[1], "___x_1", "second x temp");
-    check_eq(ids[2], "___y_0", "first y temp (independent counter)");
+    check_eq(ids[0], "%x_0", "first x temp");
+    check_eq(ids[1], "%x_1", "second x temp");
+    check_eq(ids[2], "%y_0", "first y temp (independent counter)");
   }
 
   // ── 3. Stable under a line inserted ahead ─────────────────────────────────
@@ -83,7 +83,7 @@ int main() {
       bool kept = std::find(lead.begin(), lead.end(), id) != lead.end();
       check(kept, std::string("inserting a statement ahead preserves id ") + id);
     }
-    check_eq(lead[0], "___w_0", "inserted statement gets its own scope");
+    check_eq(lead[0], "%w_0", "inserted statement gets its own scope");
   }
 
   // ── 4. Re-opening a scope keeps minting unique (monotonic) ids ─────────────
@@ -104,10 +104,10 @@ int main() {
       Lnast_builder::Tmp_scope_guard g(b, "a");  // same label again
       a2 = b.create_lnast_tmp();
     }
-    check_eq(a0, "___a_0", "a counter start");
-    check_eq(a1, "___a_1", "a counter 1");
-    check_eq(b0, "___b_0", "b counter independent");
-    check_eq(a2, "___a_2", "re-opened a scope stays unique (no reset)");
+    check_eq(a0, "%a_0", "a counter start");
+    check_eq(a1, "%a_1", "a counter 1");
+    check_eq(b0, "%b_0", "b counter independent");
+    check_eq(a2, "%a_2", "re-opened a scope stays unique (no reset)");
   }
 
   // ── 5. Global fallback when no scope is open ───────────────────────────────
@@ -116,12 +116,12 @@ int main() {
     b.new_lnast("t");
     auto f0 = b.create_lnast_tmp();
     auto f1 = b.create_lnast_tmp();
-    check_eq(f0, "___1", "fallback id 1");
-    check_eq(f1, "___2", "fallback id 2");
+    check_eq(f0, "%1", "fallback id 1");
+    check_eq(f1, "%2", "fallback id 2");
     // A scoped id can never collide with a fallback id: scoped ids always have
-    // a non-digit immediately after `___`.
+    // a non-digit immediately after `%`.
     Lnast_builder::Tmp_scope_guard g(b, "1abc");  // leading digit is dropped -> no scope
-    check_eq(b.create_lnast_tmp(), "___3", "non-identifier dest falls back to global counter");
+    check_eq(b.create_lnast_tmp(), "%3", "non-identifier dest falls back to global counter");
   }
 
   // ── 6. new_lnast() resets all id state ─────────────────────────────────────
@@ -131,16 +131,16 @@ int main() {
     { Lnast_builder::Tmp_scope_guard g(b, "z"); b.create_lnast_tmp(); }
     b.create_lnast_tmp();  // fallback bumps global counter
     b.new_lnast("t2");
-    check_eq(b.create_lnast_tmp(), "___1", "new_lnast resets the global counter");
+    check_eq(b.create_lnast_tmp(), "%1", "new_lnast resets the global counter");
     Lnast_builder::Tmp_scope_guard g(b, "z");
-    check_eq(b.create_lnast_tmp(), "___z_0", "new_lnast resets per-label counters");
+    check_eq(b.create_lnast_tmp(), "%z_0", "new_lnast resets per-label counters");
   }
 
   // ── 7. stabilize_fallback_tmps(): hash-named fallbacks ────────────────────
-  // Build `plus(___1, p, q); minus(___2, ___1, r)` twice, with an unrelated
+  // Build `plus(%1, p, q); minus(%2, %1, r)` twice, with an unrelated
   // statement prepended the second time. After stabilization the fallback ids
   // must (a) derive from each def site (so they match across both builds even
-  // though the raw counters differ), (b) keep the `___` prefix with a digit
+  // though the raw counters differ), (b) keep the `%` prefix with a digit
   // right after it (no scoped-name collision), and (c) stay consistent
   // between def and use.
   {
@@ -150,11 +150,11 @@ int main() {
       if (lead) {
         // An unrelated fallback temp ahead: shifts the raw global counter.
         auto idx = b.add_child(Lnast_ntype::create_eq());
-        b.add_child(idx, Lnast_node::create_ref(b.create_lnast_tmp()));  // ___1
+        b.add_child(idx, Lnast_node::create_ref(b.create_lnast_tmp()));  // %1
         b.add_child(idx, Lnast_node::create_ref("s"));
         b.add_child(idx, Lnast_node::create_const("0"));
       }
-      auto t0  = b.create_lnast_tmp();  // ___1 or ___2
+      auto t0  = b.create_lnast_tmp();  // %1 or %2
       auto idx = b.add_child(Lnast_ntype::create_plus());
       b.add_child(idx, Lnast_node::create_ref(t0));
       b.add_child(idx, Lnast_node::create_ref("p"));
@@ -180,8 +180,8 @@ int main() {
     check_eq(base[2], base[0], "def and use of a fallback tmp get the same stabilized name");
     check(base[0] != base[1], "different def sites get different ids");
     for (const auto& n : base) {
-      check(n.size() > 4 && n.substr(0, 3) == "___" && n[3] >= '0' && n[3] <= '9' && n.find('_', 3) != std::string::npos,
-            std::string("stabilized id '") + n + "' has the ___<digits>_<n> shape");
+      check(n.size() > 2 && n[0] == '%' && n[1] >= '0' && n[1] <= '9' && n.find('_', 1) != std::string::npos,
+            std::string("stabilized id '") + n + "' has the %<digits>_<n> shape");
     }
   }
 

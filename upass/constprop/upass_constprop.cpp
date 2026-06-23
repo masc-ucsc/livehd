@@ -1506,7 +1506,7 @@ void uPass_constprop::process_stmts_post() {
     // always carry one), and never read (field_reads_) is dead weight.
     for (const auto* scope : st().stack) {
       for (const auto& [var, bundle] : scope->varmap) {
-        if (var.rfind("___", 0) == 0 || !bundle || bundle->get_mode() == upass::Mode::reg_kind
+        if ((!var.empty() && var[0] == '%') || !bundle || bundle->get_mode() == upass::Mode::reg_kind
             || bundle->get_mode() == upass::Mode::wire_kind || bundle->get_mode() == upass::Mode::type_kind
             || !bundle->get_type_name().empty()) {
           // regs are runtime state; TYPE definitions (and named-type-shaped

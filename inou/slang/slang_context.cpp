@@ -71,13 +71,13 @@ std::string Slang_context::lname_of(const slang::ast::Symbol& sym) {
   if (base.empty()) {
     base = "_anon";
   }
-  // A user symbol whose sanitized name begins with "___" sits in LiveHD's
-  // reserved tmp namespace (Lnast::is_tmp). Every "<base>_sN" uniquing candidate
-  // would then also start with "___", so the loop below would spin forever
-  // (observed on `___x` signals and on escaped names in trace0.v/trace1.v).
-  // Push such a name out of the tmp namespace once, before uniquing.
+  // A user symbol whose sanitized name sits in LiveHD's reserved tmp namespace
+  // (Lnast::is_tmp — a leading `%`, e.g. from an escaped Verilog id `\%x`) would
+  // make every "<base>_sN" uniquing candidate also a temp, so the loop below
+  // would spin forever. Push such a name out of the tmp namespace once, before
+  // uniquing. (A `___`-leading name is now an ordinary identifier, not a temp.)
   if (Lnast::is_tmp(base)) {
-    base.insert(0, "usr");  // "___x" -> "usr___x"
+    base.insert(0, "usr");  // "%x" -> "usr%x"
   }
   std::string name = base;
   int         n    = 0;

@@ -50,8 +50,7 @@ public:
       // but sets a fresh per-iteration salt so the body can be re-walked once
       // per iteration. Rename tmps under that salt so iterations don't collide
       // on `___N`; user vars stay raw (they resolve to the enclosing scope).
-      if (active_salt_ != 0 && raw.size() >= 3 && raw[0] == '_' && raw[1] == '_' && raw[2] == '_'
-          && !is_tuple_field_key(current_nid)) {
+      if (active_salt_ != 0 && Lnast::is_tmp(raw) && !is_tuple_field_key(current_nid)) {
         return rename_tmp(raw);
       }
       return raw;
@@ -69,12 +68,12 @@ public:
     if (is_call_arg_key(current_nid)) {
       return raw;
     }
-    // Tmps (`___*`) must keep the `___` prefix — several ops (attr_get dst,
+    // Tmps (`%*`) must stay in the tmp namespace — several ops (attr_get dst,
     // etc.) and DCE key on it — so remap to a fresh stable tmp id rather
-    // than `<tag>___N`. User vars get the readable `<tag>name`.
+    // than `<tag>%N`. User vars get the readable `<tag>name`.
     // (The salt keys rename_tmp, so a fresh per-iteration salt under the same
     // tag — push_iteration inside an inlined body — also gives fresh tmps.)
-    if (raw.size() >= 3 && raw[0] == '_' && raw[1] == '_' && raw[2] == '_') {
+    if (Lnast::is_tmp(raw)) {
       return rename_tmp(raw);
     }
     return intern(make_inlined_name(active_tag_, raw));
@@ -316,13 +315,13 @@ protected:
   // must be unique in the emitted tree yet stable under unrelated source
   // edits — the old global-counter scheme (`___<900000+n>`) renumbered every
   // downstream tmp whenever anything upstream added a rename. Instead the
-  // id is `___<site-hash>_i<n>`: the hash of the statement that first reads
+  // id is `%<site-hash>_i<n>`: the hash of the statement that first reads
   // the tmp (in practice its def — see Lnast::tmp_site_hash), and a per-hash
   // occurrence counter, so the N unrolled copies of one statement get
   // _i0.._iN-1 in walk order. The `_i<digits>` tail keeps the namespace
   // disjoint from frontend names, whose final `_` segment is digits-only
-  // (scoped `___<label>_<n>`, stabilized `___<hash>_<n>`) or absent
-  // (legacy bare `___<digits>`).
+  // (scoped `%<label>_<n>`, stabilized `%<hash>_<n>`) or absent
+  // (interim bare `%<digits>`).
   std::string_view rename_tmp(std::string_view raw) const {
     std::string key = std::to_string(active_salt_) + ":" + std::string(raw);
     auto        it  = tmp_remap_.find(key);
@@ -330,7 +329,7 @@ protected:
       return std::string_view(it->second);
     }
     const auto  h     = lnast->tmp_site_hash(current_nid);
-    std::string fresh = "___" + std::to_string(h) + "_i" + std::to_string(tmp_hash_occ_[h]++);
+    std::string fresh = "%" + std::to_string(h) + "_i" + std::to_string(tmp_hash_occ_[h]++);
     auto        ins   = tmp_remap_.emplace(std::move(key), std::move(fresh)).first;
     return std::string_view(ins->second);
   }

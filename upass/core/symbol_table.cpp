@@ -9,12 +9,13 @@
 // Reject the legacy I/O / register prefixes ($, %, #) at every write site.
 // Pyrope no longer carries direction or register-ness in the textual name —
 // those are tracked structurally by lnast_to_lgraph / the attribute pass.
-// Names with these prefixes only show up when an upstream pass forgot to
-// normalize; surface that early instead of silently accepting them.
+// `$`/`#` prefixes only show up when an upstream pass forgot to normalize;
+// surface that early. `%` is the legitimate compiler-temp namespace (parser-
+// impossible; see Lnast::is_tmp), so it is allowed.
 static void assert_no_prefix(std::string_view key) {
   auto var = Bundle::get_first_level(key);
-  I(var.empty() || (var.front() != '#' && var.front() != '$' && var.front() != '%'),
-    "symbol_table: variable name carries a legacy $/%/# prefix; upstream pass must normalize");
+  I(var.empty() || (var.front() != '#' && var.front() != '$'),
+    "symbol_table: variable name carries a legacy $/# prefix; upstream pass must normalize");
 }
 
 // Function scopes are WRITE barriers but READ-transparent:
@@ -137,7 +138,9 @@ static std::shared_ptr<Bundle>& unshare_for_write(std::shared_ptr<Bundle>& slot)
 // Anchor every tmp at the nearest Function scope so it stays visible until
 // the surrounding function returns.
 static Symbol_table::Scope* anchor_for(Symbol_table::Scope* innermost, std::string_view var) {
-  if (var.size() < 3 || var.substr(0, 3) != "___") {
+  // Compiler temps (`%`-prefixed; see Lnast::is_tmp) anchor at the function
+  // scope; ordinary names live in the innermost scope.
+  if (!Lnast::is_tmp(var)) {
     return innermost;
   }
   Symbol_table::Scope* s = innermost;
@@ -329,7 +332,7 @@ void Symbol_table::mark_current_uncertain() {
 }
 
 void Symbol_table::record_uncertain_modification(std::string_view name) {
-  // A tmp (___N) written under an uncertain arm IS conditionally divergent and
+  // A tmp (%N) written under an uncertain arm IS conditionally divergent and
   // must be invalidated on arm-exit just like a named var — otherwise an
   // if-expression result tmp (`o = if c {a} elif d {b} else {0}` lowers the if
   // to writes of `___o` then `o = ___o`) keeps the last arm's comptime value

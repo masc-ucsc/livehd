@@ -190,8 +190,9 @@ public:
 private:
   // If any active scope was marked uncertain via mark_current_uncertain,
   // record `name` on the innermost such scope so leave_scope can invalidate
-  // it once the arm exits. Tmps (___N) are skipped — they're SSA values
-  // anchored at the function scope, not user-visible state.
+  // it once the arm exits. Compiler temps (`%N`) are recorded too — an
+  // if-expression result tmp written under an uncertain arm is conditionally
+  // divergent and must be invalidated like a named var (see the .cpp comment).
   void record_uncertain_modification(std::string_view name);
 
   static std::pair<std::string_view, std::string_view> get_var_field(std::string_view key) {

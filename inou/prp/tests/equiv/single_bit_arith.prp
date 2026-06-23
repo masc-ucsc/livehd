@@ -1,0 +1,35 @@
+/*
+:name: single_bit_arith
+:type: equiv
+:verilog_top: single_bit_arith.sb
+:pyrope_top: single_bit_arith.sb
+*/
+
+// Single-bit extract -> sign replication.  `(io_instruction >> 31) & 1` selects
+// ONE bit; it must read as an UNSIGNED `u1` in [0, 1] — a plain integer usable
+// in shift / OR — so `(s | (s << 1)) << 32` replicates it into bits [33:32].
+//
+// This is the trimmed core of the slang->pyrope re-emission of dino's
+// (PipelinedDualIssueCPU) RISC-V ImmediateGenerator sign-extension idiom.  The
+// extracted bit is bound to a HAND-NAMED `mut s` — the previous version used a
+// `___6` net to mimic the compiler-temp shape the writer emits, but `___` (now
+// `%`) is the reserved compiler-temp namespace: a user-written `___6` is an
+// ordinary identifier and `___6 = …` with no declaration is correctly rejected
+// as an undeclared-variable error (see tests/errors/reserved_tmp_assign).
+//
+// LECs equal to the golden, which codes the SAME value with a DIRECT bit-select
+// (`io_instruction[31]`) + replication — a different LNAST path that does not
+// hit the shift/mask datapath.
+
+pub comb sb(io_instruction:u64) -> (io_sextImm:u64) {
+  mut _mux_10:u64 = 0
+  mut s = (io_instruction >> 31) & 1
+  if io_instruction#[0..=6] == 111 {
+  }
+  if io_instruction#[0..=6] == 23 {
+  }
+  if io_instruction#[0..=6] == 55 {
+    _mux_10 = ((s | (s << 1)) << 32)#[0..=63]
+  }
+  io_sextImm = _mux_10
+}

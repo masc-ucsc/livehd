@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "lnast_prp_writer.hpp"
@@ -63,6 +64,27 @@ void Pass_prp_writer::work(Eprp_var& var) {
     }
   }
 
+  // Every module emitted in this run, by name.  A unit's file-top `import`s are
+  // generated for its instantiated submodules that are themselves emitted here,
+  // so the per-file output names its cross-module dependencies.
+  std::unordered_set<std::string> emitted_modules;
+  for (const auto& ln : var.lnasts) {
+    emitted_modules.emplace(std::string(ln->get_top_module_name()));
+  }
+
+  // Stateful (mod) module names, keyed by the last `.`-component (the spelling a
+  // call site uses).  A func_call to one of these is a Sub instance, so the
+  // writer annotates it `Callee::[name=<lhs>]` to keep the bound variable's
+  // hierarchical instance name through a re-compile (v2prp name correspondence).
+  std::unordered_set<std::string> stateful_modules;
+  for (const auto& ln : var.lnasts) {
+    if (Lnast_prp_writer::module_is_stateful(ln)) {
+      std::string_view full = ln->get_top_module_name();
+      auto             dot  = full.rfind('.');
+      stateful_modules.emplace(std::string(dot == std::string_view::npos ? full : full.substr(dot + 1)));
+    }
+  }
+
   for (const auto& ln : var.lnasts) {
     auto module_name = ln->get_top_module_name();
     auto fname       = std::format("{}/{}.prp", out_dir, module_name);
@@ -76,6 +98,8 @@ void Pass_prp_writer::work(Eprp_var& var) {
     Lnast_prp_writer writer(out, ln);
     writer.set_debug(debug_on);
     writer.set_multi_out_combs(&multi_out_combs);
+    writer.set_known_modules(&emitted_modules);
+    writer.set_stateful_modules(&stateful_modules);
     writer.write_all();
     out.close();
 

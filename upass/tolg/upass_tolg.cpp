@@ -2724,7 +2724,7 @@ private:
     flop_depth_[flop.get_debug_nid()] = {emin, emax};
     // The LN-inserted pipe output flop (vs a user `stage[N]` reg) is
     // the narrowing target: LG pass1 rewrites its depth to (min−σ, max−σ).
-    if (name.starts_with("___pipe_")) {
+    if (name.starts_with("%pipe_")) {
       inserted_flops_.insert(flop.get_debug_nid());
     }
     setup_sink_by_name(flop, "pipe_min").connect_driver(create_const(*g_, *Dlop::create_integer(emin)));
@@ -2780,6 +2780,18 @@ private:
     std::string_view               kind;    // callee lambda kind ("" for an lg: black box)
     std::shared_ptr<Lnast>         callee;  // kept alive: cio_ptr may point into its io_meta()
 
+    // An import-bound pipe/mod callee arrives as a string Dlop, so constprop
+    // renders it QUOTED (`'unit.entity'` / `'lg:foo'`) when it folds the call's
+    // callee ref to its value — unlike a by-name (same-file) callee, which stays
+    // an unquoted ref (`file.entity`). A `comb` is unquoted-ref-resolved and
+    // inlined by the runner before tolg, but pipe/mod calls reach here as the
+    // folded const, so strip the surrounding quotes once so the registry lookup,
+    // lg: detection, Sub instance name, and diagnostics all see the bare callee
+    // name (mirrors the comb inliner's lambda-ref unquoting).
+    if (callee_name.size() >= 2 && callee_name.front() == '\'' && callee_name.back() == '\'') {
+      callee_name = callee_name.substr(1, callee_name.size() - 2);
+    }
+
     // An `import("lg:foo")` binding folds the callee to the string
     // 'lg:foo'. Instantiate the foreign graph as a BLACK BOX: its GraphIO (the
     // kernel load_merge'd the lg: inputs into lib_) supplies the IO to wire by
@@ -2787,14 +2799,8 @@ private:
     // assembled library. There is no ln: lambda — synthesize the io_meta the
     // shared wiring below expects from the GraphIO's declared pins.
     std::string lg_name;
-    {
-      std::string s = callee_name;
-      if (s.size() >= 2 && s.front() == '\'' && s.back() == '\'') {
-        s = s.substr(1, s.size() - 2);
-      }
-      if (s.rfind("lg:", 0) == 0) {
-        lg_name = s.substr(3);
-      }
+    if (callee_name.rfind("lg:", 0) == 0) {
+      lg_name = callee_name.substr(3);
     }
     if (!lg_name.empty()) {
       gio = lib_ != nullptr ? lib_->find_io(lg_name) : nullptr;
@@ -2905,7 +2911,10 @@ private:
         break;
       }
       std::string dst_txt(lnast_->get_name(dst));
-      bool        is_tmp = dst_txt.size() >= 3 && dst_txt.substr(0, 3) == "___";
+      // A `%`-prefixed compiler temp (1-char prefix); strip the `%` when building
+      // the fallback instance name. The `___ssa_` infix below is the unrelated
+      // user-var SSA convention — keep it.
+      const bool  is_tmp = !dst_txt.empty() && dst_txt[0] == '%';
       std::string inst_name = dst_txt;
       if (auto p = inst_name.find("___ssa_"); p != std::string::npos) {
         inst_name = inst_name.substr(0, p);
@@ -2915,7 +2924,7 @@ private:
       } else if (!is_tmp && !inst_name.empty()) {
         sub.set_name(inst_name);
       } else {
-        std::string suffix = is_tmp ? dst_txt.substr(3) : dst_txt;
+        std::string suffix = is_tmp ? dst_txt.substr(1) : dst_txt;
         sub.set_name("u_" + callee_name + "_" + suffix);
       }
     }
@@ -5423,8 +5432,17 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
       auto c0 = lnast->get_first_child(nid);
       if (!c0.is_invalid()) {
         auto c1 = lnast->get_sibling_next(c0);
-        if (!c1.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c1))) {
-          out.emplace_back(lnast->get_name(c1));
+        // A by-name (same-file) callee is an unquoted ref; an import-bound
+        // pipe/mod callee folds to a QUOTED const string (`'unit.entity'`).
+        // Accept both and unquote, so the transitive clock/reset walk reaches
+        // imported stateful children too (else the parent skips registering the
+        // clock/reset it must forward — the "needs_reset bug" at instantiation).
+        if (!c1.is_invalid() && (Lnast_ntype::is_ref(lnast->get_type(c1)) || Lnast_ntype::is_const(lnast->get_type(c1)))) {
+          std::string nm(lnast->get_name(c1));
+          if (nm.size() >= 2 && nm.front() == '\'' && nm.back() == '\'') {
+            nm = nm.substr(1, nm.size() - 2);
+          }
+          out.emplace_back(std::move(nm));
         }
       }
     }
@@ -5844,7 +5862,20 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
 
   auto& lib      = livehd::Hhds_graph_library::instance(lib_path);
   auto  gio      = lib.find_io(std::string(lnast->get_graph_name()));  // 2f-lg: lg override or mangled name
-  auto  g_shared = gio->has_graph() ? gio->get_graph() : gio->create_graph();
+  // Re-emitting into a --emit-dir that already holds a prior build: instance()
+  // deserializes the persisted bodies from disk (GraphLibrary::load materializes
+  // every graph_<gid>/body.bin), so gio->has_graph() is true here even though we
+  // are about to rebuild this module from its LNAST — the source of truth.
+  // Reusing that stale body would make builder.build() append a SECOND copy of
+  // the whole module on top of it, fabricating register-feedback cycles the
+  // Time_checker then mis-reports as "register feedback through stage registers"
+  // (so a clean design crashes on the 2nd `compile` into the same lg: dir). Drop
+  // the loaded body but keep the gid + IO decls (set up just above) so the
+  // rebuilt graph reuses the same stable IDs across runs.
+  if (gio->has_graph()) {
+    lib.delete_graph(gio->get_gid());
+  }
+  auto g_shared = gio->create_graph();
 
   Tolg builder(lnast, g_shared.get(), std::move(io_setup), &registry, &lib, reset_style == "async");
   builder.build();

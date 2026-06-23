@@ -10,13 +10,16 @@
 Lnast_builder::Lnast_builder() {}
 
 std::string Lnast_builder::create_lnast_tmp() {
+  // Compiler SSA temps live in the `%` namespace — `%` is parser-impossible, so
+  // a temp can never collide with a user identifier (and a user-written `___6`
+  // is now an ordinary, scope-checked name). See Lnast::is_tmp.
   if (tmp_scope_.empty()) {
-    return absl::StrCat("___", ++tmp_var_cnt);
+    return absl::StrCat("%", ++tmp_var_cnt);
   }
-  // `___<label>_<n>` with a per-label monotonic counter. The label always
-  // starts with a non-digit (set_tmp_scope keeps only a leading identifier
-  // run), so a scoped id can never collide with a `___<digits>` fallback id.
-  return absl::StrCat("___", tmp_scope_, "_", tmp_label_cnt_[tmp_scope_]++);
+  // `%<label>_<n>` with a per-label monotonic counter. The label always starts
+  // with a non-digit (set_tmp_scope keeps only a leading identifier run), so a
+  // scoped id can never collide with a `%<digits>` fallback id.
+  return absl::StrCat("%", tmp_scope_, "_", tmp_label_cnt_[tmp_scope_]++);
 }
 
 void Lnast_builder::set_tmp_scope(std::string_view dest) {
@@ -37,13 +40,14 @@ void Lnast_builder::set_tmp_scope(std::string_view dest) {
 }
 
 void Lnast_builder::stabilize_fallback_tmps() {
-  // A global-counter fallback id: `___` followed by digits only. Scoped ids
-  // (`___<label>_<n>`, label starts with a non-digit) never match.
+  // A global-counter fallback id: `%` followed by digits only. Scoped ids
+  // (`%<label>_<n>`, label starts with a non-digit) and already-stabilized ids
+  // (`%<hash>_<n>`, they contain a `_`) never match.
   auto is_fallback = [](std::string_view name) {
-    if (name.size() < 4 || name.substr(0, 3) != "___") {
+    if (name.size() < 2 || name[0] != '%') {
       return false;
     }
-    for (size_t i = 3; i < name.size(); ++i) {
+    for (size_t i = 1; i < name.size(); ++i) {
       if (name[i] < '0' || name[i] > '9') {
         return false;
       }
@@ -69,7 +73,7 @@ void Lnast_builder::stabilize_fallback_tmps() {
       // whose siblings are earlier fallback tmps anchored to their *stable*
       // new names, so stability propagates through chained expressions.
       const auto h = lnast->tmp_site_hash(it, &renamed);
-      found        = renamed.emplace(std::string(name), absl::StrCat("___", h, "_", occurrence[h]++)).first;
+      found        = renamed.emplace(std::string(name), absl::StrCat("%", h, "_", occurrence[h]++)).first;
     }
     lnast->set_name(it, found->second);
   }

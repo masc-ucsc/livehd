@@ -145,20 +145,20 @@ static bool is_valid_ref_text(std::string_view name) {
     return true;
   }
   size_t i = 0;
-  // tmp form: `___<suffix>`, where suffix is a stable scoped id
-  // `___<label>_<n>` (label = a destination identifier), a hash-stabilized
-  // id (`___<hash>_<n>` from the builder, `___<hash>_i<n>` from the inline/
-  // unroll rename), or a bare legacy counter (`___5`, slang frontend). All
-  // are restricted to identifier chars after the `___`.
-  if (name.size() - i >= 4 && name.substr(i, 3) == "___") {
-    for (size_t j = i + 3; j < name.size(); ++j) {
+  // Canonical tmp form: `%<suffix>` — a `%`-prefixed compiler SSA temporary
+  // (`%<hash>_<n>` from the builder, `%<hash>_i<n>` from the inline/unroll
+  // rename, `%<label>_<n>` scoped, or a bare `%<digits>` interim). `%` is
+  // parser-impossible, so it never collides with a user identifier. The suffix
+  // is restricted to identifier chars after the `%`.
+  if (name.front() == '%') {
+    for (size_t j = 1; j < name.size(); ++j) {
       const char ch = name[j];
       const bool ok = (ch == '_') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9');
       if (!ok) {
         return false;
       }
     }
-    return name.size() > i + 3;
+    return name.size() > 1;
   }
   // Dotted identifier path
   bool start_of_segment = true;
