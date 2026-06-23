@@ -53,6 +53,33 @@ struct Encoded {
   std::vector<std::pair<cvc5::Term, cvc5::Term>> equalities;
 };
 
+// State-aware black-box for a SEQUENTIAL collapse (lec.html "sequential
+// black-box"). A combinational box models outputs as a pure function of inputs —
+// sound only for a stateless leaf. To collapse a STATEFUL proven leaf (a register
+// file, a pipeline-stage register) soundly, the box becomes state-aware:
+//   outputs    = UF_out(inputs, state)
+//   next_state = UF_next(inputs, state)
+// with ONE state cut per leaf instance corresponding on both designs (shared UF
+// symbols + a shared state symbol) and a matched-reset shared init. Then equal
+// inputs + equal corresponding state => equal outputs + equal next-state by
+// congruence — sound in the inductive (assume-equal-state) frame directly, and
+// under BMC-from-reset the threaded state makes the leaf output VARY per cycle
+// (a constant combinational box would false-prove a timing difference).
+//
+// The state SYMBOL is not stored here: it threads through the ordinary flop-cut
+// machinery under the key "\x01leafstate:<defname>#<occ>" (a shared current-state
+// in query.cpp's `shared`, next-state emitted with the "\x01nxt:" prefix), so the
+// inductive miter corresponds it and the BMC unroll threads it. Only the shared
+// UF symbols + domain widths live here; built once in query.cpp, applied by both
+// encodes. Keyed "<defname>#<occ>" (the blackbox occurrence key).
+struct State_box {
+  int                                                          in_w    = 0;  // concatenated input width (UF domain)
+  int                                                          state_w = 0;  // state width (UF domain + next codomain)
+  cvc5::Term                                                   next_fn;      // UF (inputs, state) -> state
+  absl::flat_hash_map<std::string, cvc5::Term>                 out_fn;       // output port -> UF (inputs, state) -> out
+  absl::flat_hash_map<std::string, int>                        out_w;        // output port -> width
+};
+
 // Reader-invariant signature of a Memory cell (the same RTL array read through
 // two front-ends yields the same signature). Drives both the shared-array sort
 // in query.cpp and the cut key here.
@@ -141,6 +168,12 @@ public:
   // box's output symbols are pre-built and shared across the two designs.
   void set_collapse_defs(const Io_name_map<bool>* c) { collapse_defs_ = c; }
 
+  // Shared state-aware boxes for STATEFUL collapsed leaves (keyed defname#occ).
+  // When a collapsed leaf has an entry here, its outputs/next-state are encoded
+  // as UF(inputs, state) instead of the stateless shared-symbol box — see
+  // State_box. Built once in query.cpp so both designs share the UF symbols.
+  void set_state_boxes(const absl::flat_hash_map<std::string, State_box>* s) { state_boxes_ = s; }
+
   // Encode the combinational logic of `g`.
   //
   // `shared_inputs` (optional): a map from input-port name to an already-built
@@ -175,6 +208,7 @@ private:
   const Io_name_map<Val>*                             shared_bbox_   = nullptr;
   const Io_name_map<std::string>*                     name_alias_    = nullptr;
   const Io_name_map<bool>*                            collapse_defs_ = nullptr;
+  const absl::flat_hash_map<std::string, State_box>*  state_boxes_   = nullptr;
   int                                                 sub_depth_   = 0;  // Sub flattening recursion guard
 };
 

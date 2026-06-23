@@ -98,6 +98,18 @@ everything the encoder needs.
   gensim` models. Unresolved / stateful / too-deep `Sub`s become a sound
   **blackbox** (inputs = compare points, outputs = free symbols, keyed by
   def-name + occurrence so both sides line up).
+- **Proven-module collapse** (`lhd lec --collapse <def>` / `lec.collapse`): a def
+  the driver has already proven equivalent is **forced** to the blackbox path
+  even when it could be flattened (so the parent stops re-solving its internals).
+  A *combinational* leaf becomes shared `UF(inputs)` outputs (inputs as compare
+  points) — directly sound. A **stateful** leaf becomes a **state-aware** box:
+  `outputs = UF(inputs, state)`, `next_state = UF2(inputs, state)` over one shared
+  state cut corresponding on both designs (matched-reset shared init, threaded by
+  the BMC unroll), so the leaf output varies per cycle — a constant combinational
+  box would false-prove a timing difference through a stateful leaf. Collapsing a
+  same-library submodule (one `forward_hier` would descend into + the edge
+  resolver would thread through) uses the hhds `Hier_opaque_scope` so the leaf is
+  opaque to BOTH the walk and the cross-boundary edge resolution.
 
 ## Encoder reference (L0) — LiveHD graph facts
 

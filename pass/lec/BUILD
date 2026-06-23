@@ -154,3 +154,14 @@ sh_test(
     data = ["//lhd"],
     tags = ["no-sandbox"],  # runs the in-process cvc5 solver on compiled RTL
 )
+
+# Sequential black-box (stateful collapse): outputs = UF(inputs, state), next =
+# UF2(inputs, state) with a shared state cut threaded across BMC cycles, so a
+# collapsed stateful leaf's output varies per cycle and a timing difference is
+# refuted (a combinational box would force it constant and false-prove).
+sh_test(
+    name = "lec_seqbox_test",
+    srcs = ["tests/lec_seqbox_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # runs the in-process cvc5 UF+BV solver on compiled RTL
+)

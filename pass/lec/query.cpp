@@ -509,7 +509,91 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 
   cvc5::TermManager tm;
   cvc5::Solver      solver(tm);
-  solver.setLogic("QF_ABV");  // bit-vectors + arrays (M4 memory cut)
+
+  // Subnode Gids of collapsed leaves (top-level), so the inductive/BMC flop
+  // collection below can skip descending into them (their state is the box's, not
+  // a set of internal flop cuts). gids are name-hash stable across designs.
+  ankerl::unordered_dense::set<hhds::Gid> collapse_gids;
+  if (collapse_ptr != nullptr) {
+    for (auto* g : {ref, impl}) {
+      for (auto node : g->forward_class()) {
+        if (graph_util::type_op_of(node) != Ntype_op::Sub) {
+          continue;
+        }
+        auto sio = node.get_subnode_io();
+        if (sio != nullptr && collapse_ptr->count(std::string(sio->get_name())) > 0) {
+          collapse_gids.insert(node.get_subnode_gid());
+        }
+      }
+    }
+  }
+  const ankerl::unordered_dense::set<hhds::Gid>* collapse_gids_ptr = collapse_gids.empty() ? nullptr : &collapse_gids;
+
+  // Shared state-aware boxes for STATEFUL collapsed leaves (sequential collapse).
+  // For each collapsed leaf instance whose def has state, build the shared UF
+  // symbols (out per port + next) over (concatenated-inputs, state). Both designs
+  // share these, so equal inputs + equal corresponding state => equal outputs +
+  // next-state. Keyed defname#occ to align with the encoder's blackbox occurrence.
+  absl::flat_hash_map<std::string, State_box> state_boxes;
+  if (collapse_ptr != nullptr) {
+    auto add_boxes = [&](hhds::Graph* g) {
+      Io_name_map<int> occ;
+      for (auto node : g->forward_class()) {
+        if (graph_util::type_op_of(node) != Ntype_op::Sub) {
+          continue;
+        }
+        auto        sio = node.get_subnode_io();
+        std::string defname(sio->get_name());
+        if (collapse_ptr->count(defname) == 0) {
+          continue;
+        }
+        std::string bk = defname + "#" + std::to_string(occ[defname]++);
+        if (state_boxes.count(bk)) {
+          continue;
+        }
+        auto def      = node.get_subnode_graph();
+        bool stateful = false;
+        if (def != nullptr) {
+          for (auto dn : def->forward_class()) {
+            auto dop = graph_util::type_op_of(dn);
+            if (dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Latch || dop == Ntype_op::Memory) {
+              stateful = true;
+              break;
+            }
+          }
+        }
+        if (!stateful) {
+          continue;  // combinational leaf -> the stateless shared-symbol box suffices
+        }
+        State_box box;
+        for (const auto& d : sio->get_input_pin_decls()) {
+          box.in_w += std::max(1, static_cast<int>(d.bits));
+        }
+        box.state_w = 64;  // abstract state width (the same for both designs -> sound)
+        std::vector<cvc5::Sort> dom;
+        if (box.in_w > 0) {
+          dom.push_back(tm.mkBitVectorSort(static_cast<uint32_t>(box.in_w)));
+        }
+        dom.push_back(tm.mkBitVectorSort(static_cast<uint32_t>(box.state_w)));
+        for (const auto& d : sio->get_output_pin_decls()) {
+          int ow              = std::max(1, static_cast<int>(d.bits));
+          box.out_w[d.name]   = ow;
+          box.out_fn[d.name]  = tm.mkConst(tm.mkFunctionSort(dom, tm.mkBitVectorSort(static_cast<uint32_t>(ow))),
+                                          "uf_out:" + bk + ":" + d.name);
+        }
+        box.next_fn = tm.mkConst(tm.mkFunctionSort(dom, tm.mkBitVectorSort(static_cast<uint32_t>(box.state_w))), "uf_next:" + bk);
+        state_boxes[bk] = std::move(box);
+      }
+    };
+    add_boxes(ref);
+    add_boxes(impl);
+  }
+  const auto* state_boxes_ptr = state_boxes.empty() ? nullptr : &state_boxes;
+
+  // A stateful collapse adds uninterpreted functions; widen the logic to include
+  // UF (and keep arrays for the memory cut). The eager internal bit-blaster has
+  // no UF/array theory, so a UF query keeps the default solver (below).
+  solver.setLogic(state_boxes_ptr != nullptr ? "QF_AUFBV" : "QF_ABV");  // BV + arrays (+UF)
 
   // Per-checkSat wall-clock bound (lec.timeout seconds; 0 = unbounded). Hard
   // nonlinear miters (a chain of two multiplies — associativity, distributivity,
@@ -542,8 +626,8 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       break;
     }
   }
-  if (!has_mem) {
-    solver.setOption("bv-solver", "bitblast-internal");
+  if (!has_mem && state_boxes_ptr == nullptr) {
+    solver.setOption("bv-solver", "bitblast-internal");  // UF/array queries keep the default solver
   }
   if (opts.witness) {
     solver.setOption("produce-models", "true");
@@ -662,6 +746,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     enc.set_sub_lib(sub_lib);
     enc.set_name_alias(&name_alias);
     enc.set_collapse_defs(collapse_ptr);
+    enc.set_state_boxes(state_boxes_ptr);
     Io_name_map<Val> shared_bbox = build_shared_bbox();
     enc.set_shared_bbox(&shared_bbox);
 
@@ -878,8 +963,11 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           }
         }
       };
-      collect_flops(ref);
-      collect_flops(impl);
+      {
+        hhds::Hier_opaque_scope sc(collapse_gids_ptr);  // a collapsed leaf's state is the box's, not its flops'
+        collect_flops(ref);
+        collect_flops(impl);
+      }
       if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
         auto dump_keys = [&](hhds::Graph* g, const char* tag) {
           std::set<std::string> keys;
@@ -912,6 +1000,16 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         }
         ref_state[key]  = v;
         impl_state[key] = v;
+      }
+      // Matched-reset shared init for each STATEFUL collapsed leaf: both designs
+      // start the box's state cut at the SAME symbol (so the box doesn't lose the
+      // leaf's reset behavior), then the next-state UF threads it forward — making
+      // the leaf's output VARY per cycle (a constant box false-proves a timing diff).
+      for (const auto& [bk, box] : state_boxes) {
+        std::string state_key = std::string("\x01") + "leafstate:" + bk;
+        Val         v{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(box.state_w)), "s0_" + state_key), box.state_w, false};
+        ref_state[state_key]  = v;
+        impl_state[state_key] = v;
       }
       // A RESET-LESS register-file BANK (contiguous <base>_0.._N-1 flops with no
       // constant init, e.g. an architectural register file) must HOLD during the
@@ -1364,8 +1462,20 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       shared[key]    = Val{t, w, sgn};
     }
   };
-  add_flops(ref);
-  add_flops(impl);
+  {
+    // Skip the flops INSIDE a collapsed leaf — its state is the box's one cut,
+    // not a set of internal flop cuts.
+    hhds::Hier_opaque_scope sc(collapse_gids_ptr);
+    add_flops(ref);
+    add_flops(impl);
+  }
+  // One shared current-state symbol per STATEFUL collapsed leaf (the box's state
+  // cut), corresponding on both designs: the inductive miter assumes it equal and
+  // proves the box's next-state (UF) equal alongside the parent's.
+  for (const auto& [bk, box] : state_boxes) {
+    std::string state_key = std::string("\x01") + "leafstate:" + bk;
+    shared[state_key]     = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(box.state_w)), state_key), box.state_w, false};
+  }
 
   // Shared current-state memory arrays (M4 cut): corresponding memories collapse
   // to one array symbol, so the step proves equal next-state contents + douts.
@@ -1543,6 +1653,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   enc.set_sub_lib(sub_lib);
   enc.set_name_alias(&name_alias);
   enc.set_collapse_defs(collapse_ptr);
+  enc.set_state_boxes(state_boxes_ptr);
   enc.set_shared_bbox(&shared_bbox);
   Encoded re = enc.encode(ref, &shared, "", &shared_mems);
   if (!re.ok) {

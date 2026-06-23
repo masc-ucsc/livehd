@@ -755,27 +755,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       std::string defname(sub_io->get_name());
       std::string bk = defname + "#" + std::to_string(bbox_occ[defname]++);
-      for (const auto& e : node.out_edges()) {  // outputs = shared free symbols
-        auto        dp   = e.driver;
-        auto        nit  = out_name.find(dp.get_port_id());
-        std::string port = nit != out_name.end() ? nit->second : std::to_string(dp.get_port_id());
-        std::string key  = bk + ":" + port;
-        Val         ov;
-        if (shared_bbox_ != nullptr) {
-          if (auto it = shared_bbox_->find(key); it != shared_bbox_->end()) {
-            ov = it->second;
-          }
-        }
-        if (ov.term.isNull()) {  // fallback (query should have pre-built it): fresh
-          int w = real_width(dp);
-          if (w == 0) {
-            w = 1;
-          }
-          ov = Val{tm_.mkConst(bv(w), "bb:" + key), w, !gu::is_unsign(dp)};
-        }
-        pin2val[pinkey(dp)] = ov;
-      }
-      for (const auto& e : node.inp_edges()) {  // inputs = miter comparison points
+
+      // Resolve every blackbox input ONCE: a miter compare point (so divergent
+      // inputs refute) AND, for a state-aware box, a piece of the UF input.
+      Io_name_map<Val> bb_in_by_port;
+      for (const auto& e : node.inp_edges()) {
         auto        pid  = e.sink.get_port_id();
         auto        nit  = in_name.find(pid);
         std::string port = nit != in_name.end() ? nit->second : std::to_string(pid);
@@ -792,6 +776,81 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           v = Val{fit(v, pit->second), pit->second, v.is_signed};
         }
         out.outputs[std::string("\x02") + "bbin:" + bk + ":" + port] = v;
+        bb_in_by_port[port] = v;
+      }
+
+      const State_box* sbox = nullptr;
+      if (state_boxes_ != nullptr) {
+        if (auto it = state_boxes_->find(bk); it != state_boxes_->end()) {
+          sbox = &it->second;
+        }
+      }
+
+      if (sbox != nullptr) {
+        // ---- STATE-AWARE box (sequential collapse): outputs = UF_out(inputs,
+        // state), next = UF_next(inputs, state). Concatenate the inputs in the
+        // def's declared port order (identical on both designs) into one BV of
+        // width sbox->in_w, then seed/thread a corresponding state cut.
+        Term in_concat;
+        for (const auto& d : sub_io->get_input_pin_decls()) {
+          int piece_w = std::max(1, static_cast<int>(d.bits));
+          Val pv;
+          if (auto it = bb_in_by_port.find(d.name); it != bb_in_by_port.end()) {
+            pv = it->second;
+          } else {
+            pv = Val{bv_const(tm_, piece_w, 0), piece_w, false};  // unconnected port -> 0
+          }
+          Term piece = fit(pv, piece_w);
+          in_concat  = in_concat.isNull() ? piece : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {in_concat, piece});
+        }
+        std::string state_key = std::string("\x01") + "leafstate:" + bk;
+        Val         S         = seed_state(state_key, sbox->state_w, false);
+        auto        uf_args   = [&](const Term& fn) {
+          std::vector<Term> a{fn};
+          if (sbox->in_w > 0 && !in_concat.isNull()) {
+            a.push_back(in_concat);
+          }
+          a.push_back(S.term);
+          return a;
+        };
+        for (const auto& e : node.out_edges()) {  // outputs = UF_out(inputs, state)
+          auto        dp   = e.driver;
+          auto        nit  = out_name.find(dp.get_port_id());
+          std::string port = nit != out_name.end() ? nit->second : std::to_string(dp.get_port_id());
+          auto        ofn  = sbox->out_fn.find(port);
+          if (ofn == sbox->out_fn.end()) {
+            return fail("state box for '" + defname + "' has no output UF for port '" + port + "'");
+          }
+          int ow = sbox->out_w.count(port) ? sbox->out_w.at(port) : std::max(1, real_width(dp));
+          pin2val[pinkey(dp)] = Val{tm_.mkTerm(Kind::APPLY_UF, uf_args(ofn->second)), ow, !gu::is_unsign(dp)};
+        }
+        // next-state UF, emitted as a synthetic flop next-state: the inductive
+        // miter compares it (trivially equal: shared UF + shared state + equal
+        // inputs) and the BMC unroll threads it across cycles.
+        Term nxt = tm_.mkTerm(Kind::APPLY_UF, uf_args(sbox->next_fn));
+        out.outputs[std::string("\x01") + "nxt:" + state_key] = Val{nxt, sbox->state_w, false};
+      } else {
+        // ---- stateless box: outputs = shared free symbols (combinational leaf).
+        for (const auto& e : node.out_edges()) {
+          auto        dp   = e.driver;
+          auto        nit  = out_name.find(dp.get_port_id());
+          std::string port = nit != out_name.end() ? nit->second : std::to_string(dp.get_port_id());
+          std::string key  = bk + ":" + port;
+          Val         ov;
+          if (shared_bbox_ != nullptr) {
+            if (auto it = shared_bbox_->find(key); it != shared_bbox_->end()) {
+              ov = it->second;
+            }
+          }
+          if (ov.term.isNull()) {  // fallback (query should have pre-built it): fresh
+            int w = real_width(dp);
+            if (w == 0) {
+              w = 1;
+            }
+            ov = Val{tm_.mkConst(bv(w), "bb:" + key), w, !gu::is_unsign(dp)};
+          }
+          pin2val[pinkey(dp)] = ov;
+        }
       }
       done.insert(nodekey(node));
       progress = true;
