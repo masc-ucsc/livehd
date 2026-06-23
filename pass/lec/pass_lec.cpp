@@ -24,7 +24,11 @@ void Pass_lec::setup() {
   Eprp_method m("pass.lec",
                 "Relational equivalence: prove_equal(ref=graph0, impl=graph1) under assume_equal(inputs)",
                 &Pass_lec::lec);
-  m.add_label_optional("engine", "discharge engine: bmc (default) | ind (k-induction) | ic3", "bmc");
+  m.add_label_optional("engine",
+                       "discharge engine: bmc (default) | ind (inductive flop-cut miter) | ic3 | "
+                       "auto (parallel portfolio: race ind+bmc as forked workers, take the first "
+                       "trustworthy verdict — ind-Proven=PASS, bmc-Refuted=FAIL)",
+                       "bmc");
   m.add_label_optional("solver",
                        "equivalence backend: cvc5 (default, in-process SMT) | bitwuzla (in-process SMT) | "
                        "lgyosys (kernel-routed yosys/lgcheck; reads Verilog directly)",

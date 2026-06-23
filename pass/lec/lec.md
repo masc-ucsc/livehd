@@ -55,7 +55,7 @@ everything the encoder needs.
 
 - **Combinational** (default for stateless cones): encode both designs sharing
   the primary-input symbols, miter the outputs, one `checkSat`.
-- **Sequential — inductive flop-cut miter** (`lec.engine=ind`, the default):
+- **Sequential — inductive flop-cut miter** (`lec.engine=ind`):
   flops are **cut points** matched across designs by preserved name
   (`flop_state_key()` normalizes Yosys `$…$` decorations + SSA suffixes → a
   stable 1:1 state map). Assume the mapped current-state equal, prove next-state
@@ -74,6 +74,19 @@ everything the encoder needs.
   agreement in BOTH `just_reset` and `after_reset`). Primary resets are auto-detected (inputs that drive a
   flop `reset_pin`, plus canonical `rst`/`reset`/`*_n` names with polarity
   inferred) or given explicitly via `lec.reset`.
+- **auto — parallel portfolio** (`lec.engine=auto`): race the inductive miter and
+  the BMC-from-reset engine as **two forked worker processes** (cvc5 cross-instance
+  thread-safety is unverified, so separate processes — free kill of the loser),
+  and take the first **trustworthy** verdict. The pairing is complementary
+  (inductive *proves* deep state; BMC finds *shallow real bugs*); the content is
+  the **verdict-trust asymmetry**: inductive **Proven** (UNSAT + complete
+  correspondence) ⇒ PASS, kill BMC; BMC **Refuted** (reachable CEX from reset) ⇒
+  FAIL + witness, kill inductive; inductive **Refuted** ⇒ a *hint only* (single-step
+  assumes an arbitrary equal state, so the CEX may be an unreachable step-case — it
+  must never hard-fail the build); BMC bounded-**Proven** (no CEX ≤ bound) ⇒ *not*
+  a full PASS; neither trustworthy ⇒ **inconclusive**. The per-query `lec.timeout`
+  bounds each worker, so a hard miter self-limits and the portfolio degrades to
+  inconclusive rather than hanging.
 - **Memory**: `Memory` cells → SMT **theory of arrays**. Corresponding memories
   (matched by signature + `forward_class()` occurrence via `mem_state_key()`)
   collapse to **one shared array symbol**; `dout = select(array, addr)`,
@@ -168,7 +181,7 @@ a silent no-op).
 
 | Flag | Meaning | Default |
 |---|---|---|
-| `lec.engine` | discharge frame: `bmc` \| `ind` (inductive flop-cut) \| `ic3` | `ind` |
+| `lec.engine` | discharge frame: `bmc` \| `ind` (inductive flop-cut) \| `ic3` \| `auto` (parallel portfolio) | `bmc` |
 | `lec.solver` | backend: `cvc5` (in-process) \| `bitwuzla` (opt-in, may be unbuilt) \| `lgyosys` (yosys/lgcheck) | `cvc5` |
 | `lec.bound` | BMC / induction depth bound `k` | `6` |
 | `lec.timeout` | per-query wall-clock seconds (`0` = none) | `0` |

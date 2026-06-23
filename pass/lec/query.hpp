@@ -112,6 +112,9 @@ inline std::string lec_options_range_error(const Lec_options& o) {
   if (o.phase != "after_reset" && o.phase != "just_reset" && o.phase != "free_toreset" && o.phase != "full") {
     return "lec.phase unknown '" + o.phase + "' (after_reset | just_reset | free_toreset | full)";
   }
+  if (o.engine != "bmc" && o.engine != "ind" && o.engine != "ic3" && o.engine != "auto") {
+    return "lec.engine unknown '" + o.engine + "' (bmc | ind | ic3 | auto)";
+  }
   return {};
 }
 

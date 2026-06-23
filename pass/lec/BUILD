@@ -133,3 +133,13 @@ sh_test(
     data = ["//lhd"],
     tags = ["no-sandbox"],  # runs the in-process cvc5 solver
 )
+
+# auto parallel portfolio (lec.engine=auto): race ind + bmc as forked workers,
+# take the first trustworthy verdict (ind-Proven=PASS, bmc-Refuted=FAIL); an
+# inductive false-refute on an unreachable state is a HINT, never a hard fail.
+sh_test(
+    name = "lec_auto_test",
+    srcs = ["tests/lec_auto_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # forks the in-process cvc5 solver as race workers
+)

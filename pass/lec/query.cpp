@@ -3,9 +3,17 @@
 #include "query.hpp"
 
 #include <cvc5/cvc5.h>
+#include <poll.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
+#include <chrono>
+#include <cstdint>
+#include <cstring>
 #include <functional>
 #include <string>
 #include <vector>
@@ -101,6 +109,327 @@ std::vector<std::pair<std::string, std::string>> parse_match_pairs(std::string_v
   return out;
 }
 
+namespace {
+
+// ── auto portfolio (lec.engine=auto) ────────────────────────────────────────
+// Race the inductive flop-cut miter and the BMC-from-reset engine, and take the
+// first TRUSTWORTHY verdict. The pairing is complementary: the inductive miter
+// PROVES (deep state — e.g. a register file), BMC finds shallow REAL bugs. The
+// content is the verdict-trust asymmetry (see todo/livehd/lec.html):
+//   inductive Proven (UNSAT + complete correspondence) -> trust as PASS;
+//   BMC Refuted (reachable CEX from reset)             -> trust as FAIL + witness;
+//   inductive Refuted (single-step assumes ARBITRARY equal state, so the CEX may
+//        be an unreachable step-case)                  -> a HINT, never a FAIL;
+//   BMC bounded-Proven (no CEX <= bound)               -> NOT a full PASS;
+//   neither trustworthy                                -> inconclusive.
+// cvc5 cross-instance thread-safety is unverified, so we race separate PROCESSES
+// (fork two workers) — free timeout/kill, no threading landmine — and the
+// per-query lec.timeout already bounds each child's checkSat so it self-limits.
+
+void put_u32(std::string& b, uint32_t v) { b.append(reinterpret_cast<const char*>(&v), sizeof v); }
+void put_str(std::string& b, std::string_view s) {
+  put_u32(b, static_cast<uint32_t>(s.size()));
+  b.append(s.data(), s.size());
+}
+
+// Serialize a Query_result over the worker pipe (same binary on both ends, so
+// native-endian POD is fine). Layout: verdict byte, witness, detail, engine,
+// elapsed_ms (i64), then the two unmatched-cut-point lists.
+std::string serialize_result(const Query_result& r) {
+  std::string b;
+  b.push_back(static_cast<char>(static_cast<uint8_t>(r.verdict)));
+  put_str(b, r.witness);
+  put_str(b, r.detail);
+  put_str(b, r.engine);
+  int64_t ms = r.elapsed_ms;
+  b.append(reinterpret_cast<const char*>(&ms), sizeof ms);
+  put_u32(b, static_cast<uint32_t>(r.unmatched_ref.size()));
+  for (const auto& s : r.unmatched_ref) {
+    put_str(b, s);
+  }
+  put_u32(b, static_cast<uint32_t>(r.unmatched_impl.size()));
+  for (const auto& s : r.unmatched_impl) {
+    put_str(b, s);
+  }
+  return b;
+}
+
+bool get_u32(std::string_view& b, uint32_t& v) {
+  if (b.size() < sizeof v) {
+    return false;
+  }
+  std::memcpy(&v, b.data(), sizeof v);
+  b.remove_prefix(sizeof v);
+  return true;
+}
+bool get_str(std::string_view& b, std::string& s) {
+  uint32_t n = 0;
+  if (!get_u32(b, n) || b.size() < n) {
+    return false;
+  }
+  s.assign(b.data(), n);
+  b.remove_prefix(n);
+  return true;
+}
+bool deserialize_result(std::string_view b, Query_result& r) {
+  if (b.empty()) {
+    return false;
+  }
+  auto v = static_cast<uint8_t>(b.front());
+  b.remove_prefix(1);
+  if (v > static_cast<uint8_t>(Verdict::Unknown)) {
+    return false;
+  }
+  r.verdict = static_cast<Verdict>(v);
+  if (!get_str(b, r.witness) || !get_str(b, r.detail) || !get_str(b, r.engine)) {
+    return false;
+  }
+  int64_t ms = 0;
+  if (b.size() < sizeof ms) {
+    return false;
+  }
+  std::memcpy(&ms, b.data(), sizeof ms);
+  b.remove_prefix(sizeof ms);
+  r.elapsed_ms = ms;
+  uint32_t n = 0;
+  if (!get_u32(b, n)) {
+    return false;
+  }
+  r.unmatched_ref.clear();
+  for (uint32_t i = 0; i < n; ++i) {
+    std::string s;
+    if (!get_str(b, s)) {
+      return false;
+    }
+    r.unmatched_ref.push_back(std::move(s));
+  }
+  if (!get_u32(b, n)) {
+    return false;
+  }
+  r.unmatched_impl.clear();
+  for (uint32_t i = 0; i < n; ++i) {
+    std::string s;
+    if (!get_str(b, s)) {
+      return false;
+    }
+    r.unmatched_impl.push_back(std::move(s));
+  }
+  return true;
+}
+
+void write_all(int fd, const char* p, size_t n) {
+  while (n > 0) {
+    ssize_t w = ::write(fd, p, n);
+    if (w <= 0) {
+      if (w < 0 && errno == EINTR) {
+        continue;
+      }
+      break;
+    }
+    p += w;
+    n -= static_cast<size_t>(w);
+  }
+}
+
+long long now_ms(std::chrono::steady_clock::time_point t0) {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+}
+
+const char* vname(Verdict v) { return v == Verdict::Proven ? "Proven" : (v == Verdict::Refuted ? "Refuted" : "Unknown"); }
+
+// Build the inconclusive verdict from two completed engine results. Neither was
+// trustworthy here (no BMC-Refuted, no inductive-Proven). The inductive CEX (if
+// any) is surfaced as a HINT in `detail` only — NOT in `witness` — so the CLI's
+// inconclusive policy (loud warning + clean exit, unless lec.strict) applies
+// rather than the hard-fail-on-witness path: a single-step CEX may be unreachable.
+Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc, const Lec_options& opts, long long total_ms) {
+  Query_result r;
+  r.verdict    = Verdict::Unknown;
+  r.engine     = "auto(ind|bmc)";
+  r.elapsed_ms = total_ms;
+  std::string d = "auto INCONCLUSIVE: ind=" + std::string(vname(ind.verdict)) + "(" + std::to_string(ind.elapsed_ms) + "ms)";
+  if (ind.verdict == Verdict::Refuted) {
+    d += " [single-step CEX — may be an UNREACHABLE step-case, treated as a HINT not a failure: "
+         + (ind.witness.empty() ? std::string("(no witness)") : ind.witness) + "]";
+  }
+  d += ", bmc=" + std::string(vname(bmc.verdict)) + "(" + std::to_string(bmc.elapsed_ms) + "ms)";
+  if (bmc.verdict == Verdict::Proven) {
+    d += " [no CEX up to bound " + std::to_string(opts.bound) + " — bounded, NOT a full proof]";
+  }
+  r.detail = d;
+  // Propagate the best-available correspondence info for iteration (not a witness).
+  const Query_result& src = (!ind.unmatched_ref.empty() || !ind.unmatched_impl.empty()) ? ind : bmc;
+  r.unmatched_ref         = src.unmatched_ref;
+  r.unmatched_impl        = src.unmatched_impl;
+  return r;
+}
+
+// Sequential fallback when fork/pipe is unavailable: run ind, then bmc, applying
+// the same trust asymmetry. Used only on a (rare) fork failure.
+Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
+                                 const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  auto         t0 = std::chrono::steady_clock::now();
+  Lec_options  oi = opts;
+  oi.engine       = "ind";
+  auto         ti = std::chrono::steady_clock::now();
+  Query_result ri = prove_equal(ref, impl, oi, sub_lib);
+  ri.engine       = "ind";
+  ri.elapsed_ms   = now_ms(ti);
+  if (ri.verdict == Verdict::Proven) {
+    ri.detail = "auto(seq): ind Proven (k=1 induction); " + ri.detail;
+    return ri;
+  }
+  Lec_options ob = opts;
+  ob.engine      = "bmc";
+  auto         tb = std::chrono::steady_clock::now();
+  Query_result rb = prove_equal(ref, impl, ob, sub_lib);
+  rb.engine       = "bmc";
+  rb.elapsed_ms   = now_ms(tb);
+  if (rb.verdict == Verdict::Refuted) {
+    rb.detail = "auto(seq): bmc Refuted (reachable CEX); " + rb.detail;
+    return rb;
+  }
+  return make_inconclusive(ri, rb, opts, now_ms(t0));
+}
+
+Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
+                                const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  const char* const engines[2] = {"ind", "bmc"};  // index 0 = inductive, 1 = bmc
+  int               p0[2]       = {-1, -1};
+  int               p1[2]       = {-1, -1};
+  if (::pipe(p0) != 0 || ::pipe(p1) != 0) {
+    if (p0[0] >= 0) {
+      ::close(p0[0]);
+      ::close(p0[1]);
+    }
+    return run_auto_sequential(ref, impl, opts, sub_lib);
+  }
+  int   rfd[2] = {p0[0], p1[0]};
+  int   wfd[2] = {p0[1], p1[1]};
+  pid_t pid[2] = {-1, -1};
+
+  auto t0 = std::chrono::steady_clock::now();
+  for (int i = 0; i < 2; ++i) {
+    pid_t c = ::fork();
+    if (c < 0) {
+      // fork failed: clean up everything spawned so far and fall back.
+      for (int j = 0; j < 2; ++j) {
+        if (rfd[j] >= 0) {
+          ::close(rfd[j]);
+        }
+        if (wfd[j] >= 0) {
+          ::close(wfd[j]);
+        }
+      }
+      for (int j = 0; j < i; ++j) {
+        if (pid[j] > 0) {
+          ::kill(pid[j], SIGKILL);
+          int st = 0;
+          ::waitpid(pid[j], &st, 0);
+        }
+      }
+      return run_auto_sequential(ref, impl, opts, sub_lib);
+    }
+    if (c == 0) {
+      // ── child i: run exactly one engine, serialize, _exit (no atexit/dtors).
+      ::close(rfd[0]);
+      ::close(rfd[1]);
+      ::close(wfd[1 - i]);
+      Lec_options  o = opts;
+      o.engine       = engines[i];
+      auto         ci = std::chrono::steady_clock::now();
+      Query_result r  = prove_equal(ref, impl, o, sub_lib);
+      r.engine        = engines[i];
+      r.elapsed_ms    = now_ms(ci);
+      std::string blob = serialize_result(r);
+      write_all(wfd[i], blob.data(), blob.size());
+      ::close(wfd[i]);
+      ::_exit(0);
+    }
+    pid[i] = c;
+  }
+  // ── parent: poll both pipes; first TRUSTWORTHY verdict wins, kill the loser.
+  ::close(wfd[0]);
+  ::close(wfd[1]);
+  std::string  buf[2];
+  bool         done[2] = {false, false};
+  Query_result got[2];
+  int          remaining = 2;
+  int          winner    = -1;
+  while (remaining > 0) {
+    struct pollfd pfds[2];
+    int           map[2];
+    int           nf = 0;
+    for (int i = 0; i < 2; ++i) {
+      if (!done[i]) {
+        pfds[nf].fd     = rfd[i];
+        pfds[nf].events = POLLIN;
+        map[nf]         = i;
+        ++nf;
+      }
+    }
+    int pr = ::poll(pfds, static_cast<nfds_t>(nf), -1);
+    if (pr < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      break;
+    }
+    for (int k = 0; k < nf && winner < 0; ++k) {
+      if (pfds[k].revents == 0) {
+        continue;
+      }
+      int  i = map[k];
+      char tmp[8192];
+      ssize_t n = ::read(rfd[i], tmp, sizeof tmp);
+      if (n > 0) {
+        buf[i].append(tmp, static_cast<size_t>(n));
+        continue;  // worker may still be writing; EOF (n==0) marks done
+      }
+      done[i] = true;
+      --remaining;
+      if (!deserialize_result(buf[i], got[i])) {
+        got[i]         = Query_result{};
+        got[i].verdict = Verdict::Unknown;
+        got[i].engine  = engines[i];
+        got[i].detail  = std::string(engines[i]) + " worker terminated without a result";
+      }
+      const bool is_ind      = i == 0;
+      const bool trustworthy = (is_ind && got[i].verdict == Verdict::Proven) || (!is_ind && got[i].verdict == Verdict::Refuted);
+      if (trustworthy) {
+        winner    = i;
+        remaining = 0;
+      }
+    }
+  }
+  // Reap: kill any worker still running (the loser), wait on both (no zombies).
+  for (int i = 0; i < 2; ++i) {
+    if (!done[i] && pid[i] > 0) {
+      ::kill(pid[i], SIGKILL);
+    }
+    if (rfd[i] >= 0) {
+      ::close(rfd[i]);
+    }
+  }
+  for (int i = 0; i < 2; ++i) {
+    if (pid[i] > 0) {
+      int st = 0;
+      ::waitpid(pid[i], &st, 0);
+    }
+  }
+
+  if (winner >= 0) {
+    Query_result r = got[winner];
+    r.engine       = engines[winner];
+    r.detail       = "auto: " + std::string(engines[winner]) + " reached " + vname(r.verdict) + " first in "
+             + std::to_string(r.elapsed_ms) + "ms (raced ind|bmc); " + r.detail;
+    return r;
+  }
+  return make_inconclusive(got[0], got[1], opts, now_ms(t0));
+}
+
+}  // namespace
+
 Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
                          const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
   Query_result res;
@@ -111,6 +440,15 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     res.verdict  = Verdict::Unknown;
     res.detail  += "; solver backend '" + opts.solver + "' not built (cvc5 only)";
     return res;
+  }
+
+  // `auto` = parallel portfolio: race the inductive miter and BMC as two forked
+  // workers and take the first trustworthy verdict (inductive-Proven => PASS,
+  // BMC-Refuted => FAIL; everything else is a hint / bounded / inconclusive).
+  // Must short-circuit BEFORE any cvc5 TermManager exists in this process, so the
+  // children fork from a clean state and each build their own solver.
+  if (opts.engine == "auto") {
+    return run_auto_portfolio(ref, impl, opts, sub_lib);
   }
 
   // `full` = require equivalence in BOTH the during-reset (just_reset) and the
