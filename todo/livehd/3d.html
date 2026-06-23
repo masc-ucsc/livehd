@@ -3,24 +3,260 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TODO 3d — New upass lnast_to_slop</title>
+<title>TODO 3d — inou.cgen.sim: LGraph → executable slop</title>
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">3d</strong> New upass lnast_to_slop</h1>
-<p>New upass <code>lnast_to_slop</code> (parallel to <code>lnast_to_lgraph</code>) producing
-  executable slop.</p>
+<h1><strong class="item-id">3d</strong> <code>inou.cgen.sim</code>: LGraph → executable slop</h1>
+<p>A new LGraph code generator <code>inou.cgen.sim</code> — a second emit target
+  on the <code>inou.cgen</code> plugin, beside <code>inou.cgen.verilog</code> and
+  sharing its graph-walking machinery — that lowers each compiled
+  <code>hhds::Graph</code> to C++ which links the <code>../hlop</code>
+  <code>Slop&lt;N&gt;</code> value type, driven by a new
+  <code>--emit-dir sim:DIR/</code>.  The emitted directory is a
+  <strong>self-contained Bazel module</strong>: <code>cd DIR &amp;&amp; bazel build
+  //:sim</code> compiles the design into a simulation <code>cc_library</code>.</p>
+
+<h2>Design pivot — read the LGraph, not the LNAST</h2>
+<p>This task was originally filed as a <em>upass</em> <code>lnast_to_slop</code>
+  running parallel to <code>lnast_to_lgraph</code> (<code>upass/tolg</code>),
+  walking the post-upass LNAST.  It is re-scoped to a <strong>graph pass over the
+  lowered LGraph</strong> because the LGraph is a strict subset of the LNAST and
+  has already solved the three hard problems a slop generator would otherwise
+  re-derive:</p>
+<ul>
+<li><strong>bits / sign are resolved per pin.</strong> Every driver pin carries
+  <code>livehd::attrs::bits</code> (<code>bits_of(pin)</code>) and
+  <code>pin_signed</code> (<code>is_unsign(pin)</code>), so a value lowers
+  directly to <code>Slop&lt;N&gt;</code> — no bitwidth inference in the
+  generator.</li>
+<li><strong>pipe / comb are gone.</strong> The Pyrope lambda kinds
+  (<code>comb</code>/<code>pipe</code>/<code>mod</code>) are an LNAST concept;
+  by the LGraph stage there are <strong>only <code>mod</code></strong> (modules
+  built of nodes + flops + <code>Sub</code> instances).  A <code>comb</code> was
+  inlined; a <code>pipe</code> output is a concrete <code>Flop</code> whose depth
+  rides the <code>pipe_min</code> sink pin (a shift-register depth, default 1 —
+  the same thing <code>cgen_verilog</code> reads).  The generator
+  <em>keeps whatever the flops say</em>; it does not interpret a latency range.</li>
+<li><strong>the op set maps 1:1 onto <code>Slop</code>.</strong> The
+  <code>Ntype_op</code> dispatch is the same one <code>cgen_verilog</code> walks,
+  and almost every op has a named <code>Slop</code> method (table below).</li>
+</ul>
+<p><strong>Latency selection is a separate, future pass</strong> (see subtask F):
+  an LGraph→LGraph pass that picks a concrete depth within a declared
+  <code>[pipe_min,&nbsp;pipe_max]</code> range (seed-driven) and rewrites the
+  flops <em>before</em> <code>inou.cgen.sim</code> runs.  Until it exists,
+  <code>inou.cgen.sim</code> stays latency-agnostic.</p>
 
 <h2>Depends on</h2>
-<p>None.</p>
+<p>None for milestone 1 (the LGraph + <code>@hlop//hlop</code> already exist).
+  <code>hlop</code> is a pinned <code>bazel_dep</code> of livehd
+  (<code>MODULE.bazel</code>, git_override @<code>d0578d1</code>).</p>
+
+<h2>Pipeline wiring</h2>
+<p>Order in a <code>lhd compile … --emit-dir sim:DIR/</code> run:
+  front-end → <code>pass.upass</code> (toln) → <code>upass.tolg</code>
+  (LNAST→LGraph) → recipe passes → <strong><code>inou.cgen.sim</code></strong>.
+  Concrete insertion points (verified):</p>
+<ul>
+<li><strong>emit-kind vocabulary.</strong> Add <code>"sim"</code> to
+  <code>kEmitKinds</code> (<code>lhd/lhd_meta.cpp:22</code>) and describe it in
+  <code>lhd describe sim</code> / the <code>compile</code> emit-dir list.  It is a
+  directory container (<code>--emit-dir</code> only, never a single
+  <code>--emit</code> file).  Parsing is automatic via <code>parse_typed</code>
+  (<code>lhd/lhd_options.cpp:340</code>) → <code>Typed_path{kind:"sim",path:DIR}</code>.</li>
+<li><strong>graph gate.</strong> Add <code>find_slot(opts.emit_dirs, "sim")</code>
+  to <code>emits_need_graphs()</code> (<code>lhd/lhd_kernel.cpp:1610</code>) so a
+  <code>sim:</code> request pulls in the tolg lowering + recipe (it needs real
+  LGraphs).</li>
+<li><strong>emit hook.</strong> Add <code>emit_sim_outputs(opts, res, var)</code>
+  in <code>graph_pipeline_and_emits()</code> right after
+  <code>emit_verilog_outputs</code> (<code>lhd/lhd_kernel.cpp:2288</code>),
+  modeled on <code>emit_verilog_outputs</code>
+  (<code>lhd/lhd_kernel.cpp:852</code>): loop <code>opts.emit_dirs</code>
+  filtering <code>e.kind=="sim"</code>, <code>ensure_dir(e.path)</code>, run the
+  generator into it, <code>write_manifest(e.path,"sim",…)</code> (hashing each
+  <code>.hpp</code> with <code>hash_bytes</code>), <code>res.outputs.push_back</code>.</li>
+<li><strong>the generator.</strong> Register a second method
+  <code>inou.cgen.sim</code> on the <em>existing</em> <code>inou_cgen</code>
+  plugin — in <code>Inou_cgen::setup()</code>
+  (<code>inou/cgen/inou_cgen.cpp</code>), beside <code>inou.cgen.verilog</code>,
+  add <code>Eprp_method("inou.cgen.sim", …, &amp;Inou_cgen::to_cgen_sim)</code>
+  (it inherits the <code>odir</code> label from <code>register_inou</code>).
+  Invoke it from a <code>sim_into()</code> helper that mirrors
+  <code>cgen_into()</code> (<code>lhd/lhd_kernel.cpp:825</code>): seed the
+  <code>odir</code> label, <code>merge_sets(opts,"compile.cgen",labels)</code>,
+  <code>run_step("inou.cgen.sim", …)</code>, then assert each
+  <code>&lt;module&gt;.hpp</code> exists.  The generator class <code>Cgen_sim</code>
+  (<code>inou/cgen/cgen_sim.{hpp,cpp}</code>) iterates <code>var.graphs</code> via
+  <code>graph-&gt;forward_class()</code> and dispatches on <code>Ntype_op</code>,
+  exactly like <code>Cgen_verilog::do_from_graph</code>.</li>
+</ul>
+
+<h2>Code sharing with <code>inou.cgen.verilog</code></h2>
+<p>The two generators overlap on <em>structure</em>, not on <em>emission</em>.
+  Share the first, keep the second per-target:</p>
+<ul>
+<li><strong>Already shared (free).</strong> The semantic helpers live in
+  <code>graph/node_util.hpp</code> (<code>livehd::graph_util::*</code>):
+  <code>bits_of</code>, <code>is_unsign</code>,
+  <code>is_type_flop</code>/<code>is_type_register</code>/<code>is_type_sub</code>,
+  <code>type_op_of</code>, <code>hydrate_const</code>,
+  <code>const_value_of</code>, <code>wire_name</code>,
+  <code>pin_name_of</code>, <code>is_graph_input_pin</code>/<code>output_pin</code>.
+  <code>Cgen_sim</code> just <code>using</code>-imports them, exactly as
+  <code>cgen_verilog.cpp</code> does — bits/sign/type-classification cost nothing
+  to reuse.</li>
+<li><strong>Promote a few cgen-local statics</strong> into
+  <code>node_util</code> (where their siblings already live) or a small
+  <code>inou/cgen/cgen_common.hpp</code>: <code>pin_wire_name</code>,
+  <code>get_scaped_name</code>/<code>get_unique_decl_name</code>,
+  <code>find_sink_pin</code>, <code>get_driver</code>,
+  <code>sra_operand_signed</code>, and the
+  <code>create_module_io / create_subs / create_registers / create_memories /
+  create_combinational</code> traversal <em>skeleton</em>.</li>
+<li><strong>Keep per-target (do NOT force-share).</strong> The expression model
+  diverges: <code>cgen_verilog</code> inlines parenthesized expressions
+  (<code>Expr</code>/<code>pin2expr</code>, <code>needs_parenthesis</code>) and
+  emits <code>always</code> blocks + SV <code>reserved_keyword</code> escaping;
+  <code>cgen_sim</code> emits flat SSA bindings (<code>auto v = a.add_op(b);</code>)
+  + a functional <code>cycle()</code>.  A backend-parameterized
+  <code>do_from_graph</code> would couple two unlike emitters for no gain — each
+  owns its <code>process_*</code> / <code>build_*</code> methods.</li>
+</ul>
+
+<h2>Generated artifact layout</h2>
+<pre><code>DIR/
+├── MODULE.bazel     # bazel_dep(name="hlop", …) + git_override pinned to
+│                    #   the SAME commit livehd uses (d0578d1); pulls iassert/abseil transitively
+├── BUILD            # cc_library(name="sim", hdrs=glob(["*.hpp"]),
+│                    #   copts=["-std=c++23"], deps=["@hlop//hlop"])
+├── &lt;top&gt;.hpp        # one header per module graph (struct + cycle/reset_cycle)
+├── &lt;sub_a&gt;.hpp      # …submodules, #included by their parent
+├── manifest.json    # {kind:"sim", units:[{name,hash}]} — same shape as verilog/ln
+└── (later) main.cpp + sim_main target — runnable driver, see subtask E</code></pre>
+
+<h2>Per-module C++ shape (functional <code>cycle(in)→out</code>)</h2>
+<p>One <code>struct</code> per module graph.  Registers (<code>Flop</code>/
+  <code>Latch</code>) and submodule (<code>Sub</code>) instances are
+  <strong>members</strong>; inputs are <code>cycle()</code> arguments, outputs a
+  returned struct.  The body computes each flop's next value into a local, drives
+  the outputs from the <em>current</em> state, then commits the flops on the way
+  out (Slop is a value type, so staging in locals is trivial):</p>
+<pre><code>// graph "Counter": input en:u1, output count_o:u8, one u8 flop
+struct Counter {
+  Slop&lt;8&gt; count_q;                          // Flop state (member)
+
+  struct In  { Slop&lt;1&gt; en; };
+  struct Out { Slop&lt;8&gt; count_o; };
+
+  void reset_cycle() { count_q = Slop&lt;8&gt;::create_integer(0); }   // reset value from the Flop's reset_pin
+
+  Out cycle(In in) {
+    auto count_d = in.en.is_known_true()
+                 ? count_q.add_op(Slop&lt;8&gt;::create_integer(1))
+                 : count_q;
+    Out o{ .count_o = count_q };           // comb output from current Q
+    count_q = count_d;                     // commit flop at the edge
+    return o;
+  }
+};</code></pre>
+<p>Each <code>Slop&lt;N&gt;</code> width <code>N</code> comes from
+  <code>bits_of(pin)</code>; signedness from <code>is_unsign(pin)</code>.
+  (Slop is always signed and is a superset of unsigned, so unsigned pins lower as
+  the same type — masking only where a width boundary needs it, via
+  <code>get_mask_op</code>.)</p>
+
+<h3>Ntype_op → Slop&lt;N&gt; mapping (verified against <code>cgen_verilog.cpp</code> + <code>slop.hpp</code>)</h3>
+<table>
+<tr><th>Ntype_op</th><th>Slop method</th></tr>
+<tr><td>Sum (add/sub)</td><td><code>add_op</code> / <code>sub_op</code> / <code>sum_op(adds, subs)</code></td></tr>
+<tr><td>Mult / Div / Mod</td><td><code>mult_op</code> / <code>div_op</code> / <code>mod_op</code></td></tr>
+<tr><td>And / Or / Xor / Not</td><td><code>and_op</code> / <code>or_op</code> / <code>xor_op</code> / <code>not_op</code></td></tr>
+<tr><td>LT / GT / EQ</td><td><code>lt_op</code> / <code>gt_op</code> / <code>eq_op</code> (→ bool Slop)</td></tr>
+<tr><td>SHL / SRA</td><td><code>shl_op</code> / <code>sra_op</code> (int or Slop amount)</td></tr>
+<tr><td>Get_mask / Set_mask</td><td><code>get_mask_op</code> / <code>set_mask_op</code></td></tr>
+<tr><td>Sext</td><td><code>sext_op(from_bit)</code></td></tr>
+<tr><td>Ror</td><td><code>ror_op</code> (OR-reduce to 1 bit)</td></tr>
+<tr><td>Mux / Hotmux</td><td><code>mux_op(sel, values)</code> / <code>hotmux_op(sel, values)</code></td></tr>
+<tr><td>LUT</td><td><code>lut_op(table, addr)</code></td></tr>
+<tr><td>Nconst / Const</td><td><code>create_integer</code> / <code>create_bool</code> / <code>from_pyrope</code> (factory, not an op)</td></tr>
+<tr><td>Flop / Fflop / Sflop / Latch</td><td><em>not a Slop op</em> — register member + reset_cycle/cycle commit (subtask B)</td></tr>
+<tr><td>Memory</td><td><em>not a Slop op</em> — <code>std::array&lt;Slop&lt;bits&gt;, size&gt;</code> member + port logic (subtask B)</td></tr>
+<tr><td>Sub</td><td><em>not a Slop op</em> — nested struct member; parent calls <code>child.cycle(…)</code> (subtask C)</td></tr>
+<tr><td>AttrSet</td><td>dropped (metadata; not emitted, same as cgen)</td></tr>
+</table>
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
-<li><strong>A — lnast_to_slop upass.</strong> New upass parallel to
-  <code>lnast_to_lgraph</code> producing executable slop.</li>
-<li><strong>B — pipe/mod cell.</strong> Seed-picked latency.</li>
+<li><strong>A — <code>inou.cgen.sim</code> skeleton + emit wiring.</strong> The
+  <code>sim</code> emit-kind, the <code>emits_need_graphs</code> gate, the
+  <code>emit_sim_outputs</code>/<code>sim_into</code> hook, the pass
+  registration, and the combinational lowering (the op table above: walk
+  <code>forward_class()</code>, name each driver pin, emit one <code>auto</code>
+  binding per node).  Plus the standalone-module writer (<code>MODULE.bazel</code>
+  + <code>BUILD</code> + per-module <code>.hpp</code> + manifest).
+  <strong>Milestone 1 success = <code>cd DIR &amp;&amp; bazel build //:sim</code>
+  compiles</strong> for the combinational + single-flop designs.  No driver, no
+  LEC yet.</li>
+<li><strong>B — sequential elements.</strong> <code>Flop</code>/<code>Latch</code>
+  as members: read <code>din</code> (<code>find_sink_pin(node,"din")</code>), the
+  <code>q</code> driver (<code>get_driver_pin(0)</code>), the reset value/polarity
+  (<code>reset_pin</code> + <code>negreset</code>/<code>async</code> consts) into
+  <code>reset_cycle()</code>, and honor the <code>pipe_min</code> depth as a
+  shift-register of that many stages.  Slop has no unknowns, so a flop with no
+  reset randomizes (<code>Slop::unknown(N)</code>/<code>rand_op</code>) at
+  <code>reset_cycle()</code> instead of carrying X.  <code>Memory</code> →
+  <code>std::array&lt;Slop&lt;bits&gt;, size&gt;</code> with the read/write ports
+  modeled by <code>mem_type</code> (0 sync / 1 async / 2 array) inside
+  <code>cycle()</code>.</li>
+<li><strong>C — hierarchy (<code>Sub</code> instances).</strong> A <code>Sub</code>
+  node becomes a nested struct member typed by its callee module name
+  (<code>node.get_subnode_io()-&gt;get_name()</code>); the parent's
+  <code>cycle()</code> calls <code>child.cycle({…})</code>, wiring the callee's
+  input port decls from the Sub's sink pins and reading its outputs back from the
+  returned struct (the <code>get_input_pin_decls()</code>/
+  <code>get_output_pin_decls()</code> ordering cgen already uses).  Header
+  <code>#include</code>s follow the instance graph; the <code>--top</code> graph
+  is the root struct.</li>
+<li><strong>D — name↔member checkpoint table.</strong> Emit, per module, a
+  <code>{canonical-name → member}</code> map and each register's
+  <strong>declared width</strong> (<code>fit_to</code>), so the
+  <a class="xref" href="2d-cex_debug.html">2d-cex_debug</a> <code>cex.json</code>
+  replay can <code>load_state</code>/<code>dump_state</code>/<code>set_inputs</code>
+  by name across layout/version.  This generator is the natural source — no C++
+  reflection on the structs (see <code>hlop/todo_checkpoint.md</code> items 7–8).
+  Reuses <code>Slop::from_pyrope</code>/<code>to_pyrope</code> for the values.</li>
+<li><strong>E — runnable driver + benchmark.</strong> A <code>main.cpp</code> +
+  <code>sim_main</code> <code>cc_binary</code> in the emitted module: a
+  reset/cycle loop with a register-state hash mode, the
+  <code>benchref/sample/slop</code> design from <code>hlop/todo.md</code> item 3
+  as the first vehicle.  Then LEC/cross-check against verilator / icarus /
+  <code>cpp_native</code> (state-hash equality), and a perf number
+  (cycles/sec).</li>
+<li><strong>F — latency selection (separate future pass, NOT in <code>inou.cgen.sim</code>).</strong>
+  An LGraph→LGraph pass that, for a flop carrying a declared
+  <code>[pipe_min,&nbsp;pipe_max]</code> range, seed-picks one concrete depth
+  (<code>--set …seed=N</code>; default deterministic = min) and rewrites the flop
+  so re-emitting explores legal timings to stress latency-insensitive / retiming
+  logic.  <code>inou.cgen.sim</code> consumes whatever depth the flops carry, so this
+  pass composes in front of it with no changes to the generator.  Relates to the
+  combined LG pass1 stage checker (it narrows the range by sigma today).</li>
+</ul>
+
+<h2>Relates to</h2>
+<ul>
+<li><a class="xref" href="2d-cex_debug.html">2d-cex_debug</a> — the
+  <code>cex.json</code> consumer that needs subtask D's name↔member map.</li>
+<li><a class="xref" href="../pyrope/4a.html">4a</a> /
+  <a class="xref" href="../pyrope/4b.html">4b</a> — test harness
+  (<code>test::[…]</code>) and <code>assert</code>/<code>assume</code>/
+  <code>coverpoint</code> emission, both built on top of slop.</li>
+<li><code>inou.cgen.verilog</code> — the structural twin (same
+  <code>forward_class()</code> walk + <code>Ntype_op</code> dispatch, emitting
+  Verilog text instead of Slop C++); the cleanest reference implementation.</li>
 </ul>
 
 <h2>Subtasks — landed</h2>
