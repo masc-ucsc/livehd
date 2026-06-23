@@ -49,7 +49,10 @@ using livehd::graph_util::wire_name;
 namespace {
 
 // Sort inp_edges by sink port_id (LiveHD's inp_edges_ordered behaviour).
-void sort_inp(std::vector<hhds::Edge_class>& edges) {
+// Container-agnostic: inp_edges() now returns absl::InlinedVector (heap-free for
+// the common low-degree pin); accept any edge container by reference.
+template <typename EdgeVec>
+void sort_inp(EdgeVec& edges) {
   std::sort(edges.begin(), edges.end(), [](const hhds::Edge_class& a, const hhds::Edge_class& b) {
     return a.sink.get_port_id() < b.sink.get_port_id();
   });
@@ -152,7 +155,9 @@ void Bitwidth::do_trans(const std::shared_ptr<hhds::Graph>& g) {
     const int64_t rmax = rit->second.max;
     I(rmin >= 0,
       std::format("bitwidth: pin '{}' declared unsigned but inferred range [{}..{}] is negative -- missing sext/zext/get_mask?",
-                  livehd::graph_util::wire_name(dpin), rmin, rmax)
+                  livehd::graph_util::wire_name(dpin),
+                  rmin,
+                  rmax)
           .c_str());
   }
 #endif
@@ -285,12 +290,12 @@ void Bitwidth::process_flop(hhds::Node_class& node) {
   adjust_bw(dpin, bw);
 }
 
-void Bitwidth::process_ror(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
+void Bitwidth::process_ror(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(inp_edges.size());
   set_bw_1bit(node.create_driver_pin(0));
 }
 
-void Bitwidth::process_not(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
+void Bitwidth::process_not(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(inp_edges.size());
 
   Dlop max_val;
@@ -324,7 +329,7 @@ void Bitwidth::process_not(hhds::Node_class& node, std::vector<hhds::Edge_class>
   adjust_bw(node.create_driver_pin(0), Bitwidth_range(min_val, max_val));
 }
 
-void Bitwidth::process_mux(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
+void Bitwidth::process_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(inp_edges.size());
   Bitwidth_range bw;
 
@@ -349,7 +354,7 @@ void Bitwidth::process_mux(hhds::Node_class& node, std::vector<hhds::Edge_class>
 // Hotmux: sink 0 is a one-hot selector over the N data arms (p1..pN), so its
 // envelope is the unsigned N-bit range; the output unions the data arms like
 // Mux. One-hot-ness itself is a runtime property — never narrow on it.
-void Bitwidth::process_hotmux(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
+void Bitwidth::process_hotmux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(inp_edges.size());
   Bitwidth_range bw;
 
@@ -371,7 +376,7 @@ void Bitwidth::process_hotmux(hhds::Node_class& node, std::vector<hhds::Edge_cla
   adjust_bw(node.create_driver_pin(0), bw);
 }
 
-void Bitwidth::process_shl(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
+void Bitwidth::process_shl(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(inp_edges.size() == 2);
 
   auto a_dpin = get_driver_of_sink_name(node, "a");
@@ -421,18 +426,16 @@ void Bitwidth::process_shl(hhds::Node_class& node, std::vector<hhds::Edge_class>
     return;
   }
 
-  auto max = a_bw.get_max();
-  auto min = a_bw.get_min();
+  auto       max = a_bw.get_max();
+  auto       min = a_bw.get_min();
   // a<<n = a*2^n is monotonic in n per fixed operand (UP for a>0, MORE NEGATIVE
   // for a<0). The range envelope is the min/max over the four corner shifts —
   // NOT max<<nmax / min<<nmin, which leaves a negative `min` at min<<nmin and so
   // under-estimates the (more negative) true lower bound for signed inputs.
-  const Dlop corners[4] = {*max.shl_op(n_bw.get_max()),
-                           *max.shl_op(n_bw.get_min()),
-                           *min.shl_op(n_bw.get_max()),
-                           *min.shl_op(n_bw.get_min())};
-  Dlop       lo         = corners[0];
-  Dlop       hi         = corners[0];
+  const Dlop corners[4]
+      = {*max.shl_op(n_bw.get_max()), *max.shl_op(n_bw.get_min()), *min.shl_op(n_bw.get_max()), *min.shl_op(n_bw.get_min())};
+  Dlop lo = corners[0];
+  Dlop hi = corners[0];
   for (const auto& c : corners) {
     if (c.lt_op(lo)->is_known_true()) {
       lo = c;
@@ -446,7 +449,7 @@ void Bitwidth::process_shl(hhds::Node_class& node, std::vector<hhds::Edge_class>
   adjust_bw(node.create_driver_pin(0), bw);
 }
 
-void Bitwidth::process_sra(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
+void Bitwidth::process_sra(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(inp_edges.size() == 2);
 
   auto a_dpin = get_driver_of_sink_name(node, "a");
@@ -469,8 +472,8 @@ void Bitwidth::process_sra(hhds::Node_class& node, std::vector<hhds::Edge_class>
   auto n_bw = n_it->second;
 
   if (n_bw.get_min().is_positive() && n_bw.get_min().is_just_i64()) {
-    auto max = a_bw.get_max();
-    auto min = a_bw.get_min();
+    auto max     = a_bw.get_max();
+    auto min     = a_bw.get_min();
     // Arithmetic >> (rounds toward -inf), NOT division (rounds toward zero): the
     // two differ for negative operands (`-3 sra 1` == -2, but `-3 / 2` == -1), so
     // division gives an unsoundly tight lower bound. Shifting by the SMALLEST
@@ -485,7 +488,7 @@ void Bitwidth::process_sra(hhds::Node_class& node, std::vector<hhds::Edge_class>
   }
 }
 
-void Bitwidth::process_sum(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
+void Bitwidth::process_sum(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(inp_edges.size());
 
   Dlop max_val;
@@ -704,7 +707,7 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
   }
 }
 
-void Bitwidth::process_mult(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
+void Bitwidth::process_mult(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(inp_edges.size());
 
   Dlop max_val;
@@ -909,7 +912,7 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
   adjust_bw(node.create_driver_pin(0), Bitwidth_range(res_min, res_max));
 }
 
-void Bitwidth::process_sext(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
+void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   // inp_edges may not be in pid order — sort by sink port_id so [0]==a, [1]==b.
   sort_inp(inp_edges);
   I(inp_edges.size() >= 2);
@@ -996,7 +999,7 @@ void Bitwidth::process_sext(hhds::Node_class& node, std::vector<hhds::Edge_class
 
 void Bitwidth::process_comparator(hhds::Node_class& node) { set_bw_1bit(node.create_driver_pin(0)); }
 
-void Bitwidth::process_assignment_or(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
+void Bitwidth::process_assignment_or(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(inp_edges.size() == 1);
 
   auto it = bwmap.find(inp_edges[0].driver.get_class_index());
@@ -1011,7 +1014,7 @@ void Bitwidth::process_assignment_or(hhds::Node_class& node, std::vector<hhds::E
   node.del_node();
 }
 
-void Bitwidth::process_bit_or(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
+void Bitwidth::process_bit_or(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(inp_edges.size() > 1);
   int32_t max_bits     = 0;
   bool    any_negative = false;
@@ -1051,7 +1054,7 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, std::vector<hhds::Edge_cla
   adjust_bw(node.create_driver_pin(0), Bitwidth_range(min_val, max_val));
 }
 
-void Bitwidth::process_bit_xor(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
+void Bitwidth::process_bit_xor(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(inp_edges.size() > 1);
   int32_t max_bits = 0;
 
@@ -1079,7 +1082,7 @@ void Bitwidth::process_bit_xor(hhds::Node_class& node, std::vector<hhds::Edge_cl
   adjust_bw(node.create_driver_pin(0), Bitwidth_range(min_val, max_val));
 }
 
-void Bitwidth::process_bit_and(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges) {
+void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges) {
   I(!inp_edges.empty());
 
   int mask_pos          = -1;

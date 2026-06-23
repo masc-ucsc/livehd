@@ -34,13 +34,13 @@ using livehd::graph_util::type_op_of;
 
 namespace {
 
-void sort_inp(std::vector<hhds::Edge_class>& edges) {
+void sort_inp(livehd::graph_util::Edge_vec& edges) {
   std::sort(edges.begin(), edges.end(), [](const hhds::Edge_class& a, const hhds::Edge_class& b) {
     return a.sink.get_port_id() < b.sink.get_port_id();
   });
 }
 
-std::vector<hhds::Edge_class> ordered_inp_edges(const hhds::Node_class& node) {
+livehd::graph_util::Edge_vec ordered_inp_edges(const hhds::Node_class& node) {
   auto e = node.inp_edges();
   sort_inp(e);
   return e;
@@ -86,7 +86,7 @@ using livehd::graph_util::hydrate_const;
 
 Cprop::Cprop(bool _hier) : hier(_hier) {}
 
-void Cprop::collapse_forward_same_op(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges_ordered) {
+void Cprop::collapse_forward_same_op(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
   auto op = type_op_of(node);
 
   bool all_done = true;
@@ -124,7 +124,7 @@ void Cprop::collapse_forward_same_op(hhds::Node_class& node, std::vector<hhds::E
   }
 }
 
-void Cprop::collapse_forward_sum(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges_ordered) {
+void Cprop::collapse_forward_sum(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
   if (inp_edges_ordered.size() > 32) {
     return;
   }
@@ -159,7 +159,7 @@ void Cprop::collapse_forward_sum(hhds::Node_class& node, std::vector<hhds::Edge_
   }
 }
 
-void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges_ordered) {
+void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
   auto op = type_op_of(node);
 
   for (auto& out : node.out_edges()) {
@@ -205,7 +205,7 @@ void Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new
   bwd_del_node(node);
 }
 
-bool Cprop::try_constant_prop(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges_ordered) {
+bool Cprop::try_constant_prop(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
   int n_inputs_constant = 0;
   int n_inputs          = 0;
   for (auto& e : inp_edges_ordered) {
@@ -227,11 +227,11 @@ bool Cprop::try_constant_prop(hhds::Node_class& node, std::vector<hhds::Edge_cla
   return false;
 }
 
-void Cprop::try_collapse_forward(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges_ordered) {
+void Cprop::try_collapse_forward(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
   auto op = type_op_of(node);
 
   if (inp_edges_ordered.size() == 1) {
-    auto prev_op = type_op_of(inp_edges_ordered[0].driver.get_master_node());
+    auto       prev_op      = type_op_of(inp_edges_ordered[0].driver.get_master_node());
     // A single-input Sum whose lone driver is on the SUBTRACT (b) pin is a
     // negation (0 - x = -x). collapse_forward_always_pin0 forwards the driver
     // UNCHANGED, which would drop the sign (turning -x into +x). Leave the Sum
@@ -273,7 +273,7 @@ void Cprop::try_collapse_forward(hhds::Node_class& node, std::vector<hhds::Edge_
   }
 }
 
-void Cprop::replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges_ordered) {
+void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
   auto op = type_op_of(node);
   if (op == Ntype_op::Mux) {
     auto& s_pin = inp_edges_ordered[0].driver;
@@ -356,7 +356,7 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::
     Dlop result;
     result = Dlop::create_integer(op == Ntype_op::And ? -1 : 0);
 
-    std::vector<hhds::Edge_class> edge_it2;
+    livehd::graph_util::Edge_vec edge_it2;
     for (auto& i : inp_edges_ordered) {
       if (!is_const_pin(i.driver)) {
         if (npending == 0) {
@@ -439,7 +439,7 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, std::vector<hhds::
   }
 }
 
-void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges_ordered) {
+void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
   auto op = type_op_of(node);
   if (op == Ntype_op::SHL) {
     auto a_pin = livehd::graph_util::get_driver_of_sink_name(node, "a");
@@ -453,7 +453,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
 
     bool zero_shifts = true;
     for (auto& amt_dpin : livehd::graph_util::inp_drivers_of(node, "b")) {
-      Dlop amt   = hydrate_const(amt_dpin);
+      Dlop amt    = hydrate_const(amt_dpin);
       result      = result.or_op(val.shl_op(amt));  // pass the Dlop shift amount
       zero_shifts = false;
     }
@@ -524,7 +524,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
     replace_node(node, result);
 
   } else if (op == Ntype_op::EQ) {
-    bool eq = true;
+    bool eq    = true;
     // EQ is a single-port, multi-edge "all drivers on port a are equal" cell.
     // When both comparator operands resolve to the SAME driver pin (e.g.
     // const==const), HHDS collapses the duplicate driver->sink edges into one,
@@ -577,9 +577,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, std::vector<hhds::E
 
     auto sel = sel_const.to_just_i64();
     if (sel <= 0 || (sel & (sel - 1)) != 0) {
-      Pass::info("WARNING: hotmux:{} selector:{} is not one-hot (unique-if assume violated); not folding\n",
-                 debug_name(node),
-                 sel);
+      Pass::info("WARNING: hotmux:{} selector:{} is not one-hot (unique-if assume violated); not folding\n", debug_name(node), sel);
       return;
     }
     size_t arm = 0;
@@ -657,7 +655,7 @@ void Cprop::replace_logic_node(hhds::Node_class& node, const Dlop& result) {
   node.del_node();
 }
 
-bool Cprop::scalar_mux(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges_ordered) {
+bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
   if (inp_edges_ordered.size() != 3) {
     return false;
   }
@@ -689,7 +687,7 @@ bool Cprop::scalar_mux(hhds::Node_class& node, std::vector<hhds::Edge_class>& in
   return false;
 }
 
-void Cprop::scalar_sext(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges_ordered) {
+void Cprop::scalar_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
   const auto& pos_dpin = inp_edges_ordered[1].driver;
   if (!is_const_pin(pos_dpin)) {
     return;
@@ -807,8 +805,8 @@ hhds::Pin_class Cprop::try_find_single_driver_pin(hhds::Node_class& node, int64_
 }
 
 bool Cprop::scalar_get_mask(hhds::Node_class& node) {
-  auto a_pin     = livehd::graph_util::get_driver_of_sink_name(node, "a");
-  auto mask_pin  = livehd::graph_util::get_driver_of_sink_name(node, "mask");
+  auto a_pin    = livehd::graph_util::get_driver_of_sink_name(node, "a");
+  auto mask_pin = livehd::graph_util::get_driver_of_sink_name(node, "mask");
   if (a_pin.is_invalid() || mask_pin.is_invalid() || !node.has_out_edges()) {
     node.del_node();
     return true;
@@ -840,8 +838,7 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
       nonneg = false;
     } else {
       auto a_master = a_pin.get_master_node();
-      nonneg        = (!a_master.is_invalid() && type_op_of(a_master) == Ntype_op::Get_mask)
-               || livehd::graph_util::is_unsign(a_pin);
+      nonneg = (!a_master.is_invalid() && type_op_of(a_master) == Ntype_op::Get_mask) || livehd::graph_util::is_unsign(a_pin);
     }
     if (!nonneg) {
       return false;

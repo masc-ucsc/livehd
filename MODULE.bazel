@@ -139,7 +139,7 @@ bazel_dep(name = "hhds", version = "0.2.0")
 git_override(
     module_name = "hhds",
     remote = "https://github.com/masc-ucsc/hhds.git",
-    commit = "a2a1c39857308c76e17daa9ca20258d8f2584c01",  # forward_hier(opaque) descent hook for pass/lec --collapse (lec bottom-up decomposition)
+    commit = "ccfbf742d30b67081fde33468c15a6a28214058b",  # InlinedVector edges + pin.get_driver_pin() fast 0/1-driver accessor
 )
 # For local debug/testing, swap the git_override above for:
 # local_path_override(module_name = "hhds", path = "../hhds")

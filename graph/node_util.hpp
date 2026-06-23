@@ -15,6 +15,7 @@
 #include <format>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "attrs.hpp"
@@ -24,6 +25,12 @@
 #include "hlop/dlop.hpp"
 
 namespace livehd::graph_util {
+
+// The exact container hhds inp_edges()/out_edges() return — an
+// absl::InlinedVector (heap-free for the common low-degree pin). Aliased via
+// decltype so it tracks hhds's choice (inline size, element type) and can never
+// drift out of sync with the accessor it must bind to.
+using Edge_vec = decltype(std::declval<hhds::Node_class>().inp_edges());
 
 // Reserved sub-module name for the runtime range-select guard `a#[lo..=hi]`
 // emits (see upass_tolg lower_range_assert). It is a recognized PRIMITIVE: a
@@ -314,7 +321,8 @@ inline void debug_check_const_pin([[maybe_unused]] const hhds::Pin_class& dpin) 
   // iassert `if (!cond)` branch) and is dropped entirely under NDEBUG.
   I(!is_uns || !c.is_negative(),
     std::format("unsigned const pin '{}' (declared {} bits) holds a negative value -- missing get_mask/zext?",
-                wire_name(dpin), nbits)
+                wire_name(dpin),
+                nbits)
         .c_str());
 
   // (2) The value must fit the declared width. For a non-negative value the
@@ -325,7 +333,10 @@ inline void debug_check_const_pin([[maybe_unused]] const hhds::Pin_class& dpin) 
     const int need = c.get_last_bit_set() + 1;  // unsigned magnitude bits
     I(need <= (is_uns ? nbits : nbits - 1),
       std::format("const pin '{}' needs {} magnitude bits but is declared {} {}signed bits",
-                  wire_name(dpin), need, nbits, is_uns ? "un" : "")
+                  wire_name(dpin),
+                  need,
+                  nbits,
+                  is_uns ? "un" : "")
           .c_str());
   }
 #endif
@@ -351,7 +362,9 @@ inline void debug_assert_cells_sized([[maybe_unused]] hhds::Graph& g, [[maybe_un
     }
     I(bits_of(dpin) != 0,
       std::format("{} left cell '{}' ({}) at bits==0 -- unbounded width (front-end did not size it)",
-                  where, debug_name(node), Ntype::get_name(op))
+                  where,
+                  debug_name(node),
+                  Ntype::get_name(op))
           .c_str());
   }
 #endif
@@ -367,35 +380,47 @@ inline void debug_assert_cells_sized([[maybe_unused]] hhds::Graph& g, [[maybe_un
 // the same to subsequent migrated readers as if it had been mutated through
 // the Lgraph wrapper.
 
-// Per-pin bit width (plain int32). Storing 0 leaves
-// the attribute untouched logically.
-//
-// `bits` is a property of the DRIVER pin (the signal source); a sink pin's width
-// is its driver's width, read via `bits_of(driver_of(sink))`. The per-pin attr key
-// folds the driver/sink bit (graph.hpp Pin_class::attr masks Pid 0x2), so a sink
-// and a same-port driver would SHARE this slot — stamping a sink would silently
-// corrupt the driver's width (and vice versa). Assert driver-only so that mistake
-// fails loudly at the call site instead of leaking a bogus sink width downstream.
+// Assert the pin role required by attribute `Tag` (livehd::attrs::attr_kind) at a
+// pin-setter call site. The per-pin attr key folds the driver/sink bit (graph.hpp
+// Pin_class::attr masks Pid 0x2), so a same-port driver and sink SHARE one slot;
+// stamping the wrong role silently aliases the other's value (e.g. a mux's 66-bit
+// output width leaking onto its 2-bit select sink). Classifying each attribute
+// (attrs.hpp) lets the setter catch that:
+//   driver_pin -> the signal source; assert is_driver  (bits, signed, …)
+//   sink       -> assert is_sink
+//   edge/any   -> no driver/sink restriction (shared wire name, IO offsets, …)
+//   node       -> static error: a node attribute must not go through a pin setter.
+// Call only on a VALID pin (the setters early-return on invalid first).
+template <typename Tag>
+inline void assert_pin_attr_role([[maybe_unused]] const hhds::Pin_class& pin) {
+  static_assert(livehd::attrs::attr_kind<Tag> != livehd::attrs::Attr_kind::node,
+                "node attribute set through a pin setter — use the node overload");
+  if constexpr (livehd::attrs::attr_kind<Tag> == livehd::attrs::Attr_kind::driver_pin) {
+    I(pin.is_driver(), "this attribute is a DRIVER-pin property; got a sink pin (write it on the driver / read the driver)");
+  } else if constexpr (livehd::attrs::attr_kind<Tag> == livehd::attrs::Attr_kind::sink) {
+    I(pin.is_sink(), "this attribute is a SINK-pin property; got a driver pin");
+  }
+}
+
+// Per-pin bit width (plain int32). Storing 0 leaves the attribute untouched
+// logically. `bits` is a DRIVER-pin property; a sink's width is its driver's,
+// read via `bits_of(driver_of(sink))` (see assert_pin_attr_role above).
 inline void set_bits(const hhds::Pin_class& pin, int32_t b) {
   if (pin.is_invalid()) {
     return;
   }
-  I(pin.is_driver(), "set_bits: bits is a driver-pin property; got a sink pin (read the driver's bits instead)");
+  assert_pin_attr_role<livehd::attrs::bits_t>(pin);
   pin.attr(livehd::attrs::bits).set(b);
 }
 
-// Per-pin sign hint. Presence means signed; absence means unsigned. Mirrors
-// `Node_pin::set_sign` / `set_unsign`.
-//
-// Like `bits`, `signed` is a DRIVER-pin property (a sink's sign is its driver's);
-// the per-pin attr key folds the driver/sink bit, so stamping a sink would alias
-// (corrupt) a same-port driver's sign. Assert driver-only — read a sink's sign via
-// its driver (`is_unsign(driver_of(sink))`), don't replicate it onto the sink.
+// Per-pin sign hint. Presence means signed; absence means unsigned. Like `bits`,
+// `signed` is a DRIVER-pin property (a sink's sign is its driver's), enforced via
+// assert_pin_attr_role<pin_signed_t>.
 inline void set_unsign(const hhds::Pin_class& pin) {
   if (pin.is_invalid()) {
     return;
   }
-  I(pin.is_driver(), "set_unsign: signed is a driver-pin property; got a sink pin (read the driver's sign instead)");
+  assert_pin_attr_role<livehd::attrs::pin_signed_t>(pin);
   pin.attr(livehd::attrs::pin_signed).del();
 }
 
@@ -403,7 +428,7 @@ inline void set_sign(const hhds::Pin_class& pin) {
   if (pin.is_invalid()) {
     return;
   }
-  I(pin.is_driver(), "set_sign: signed is a driver-pin property; got a sink pin (read the driver's sign instead)");
+  assert_pin_attr_role<livehd::attrs::pin_signed_t>(pin);
   pin.attr(livehd::attrs::pin_signed).set(livehd::attrs::pin_signed_t::value_type{});
 }
 
@@ -438,6 +463,7 @@ inline void del_hier_color(const hhds::Node_class& node) {
 inline void set_match(const hhds::Node_class& node, uint32_t id) { node.attr(livehd::attrs::match).set(id); }
 inline void set_match(const hhds::Pin_class& pin, uint32_t id) {
   if (!pin.is_invalid()) {
+    assert_pin_attr_role<livehd::attrs::match_t>(pin);  // pin matches are stamped on driver pins
     pin.attr(livehd::attrs::match).set(id);
   }
 }
@@ -459,16 +485,14 @@ inline void set_match(const hhds::Pin_class& pin, uint32_t id) {
 
 // Per-node formal-verification status (pass/formal, task 2f-formal). 0 == absent;
 // pass.formal sets a small non-zero enum (see Formal_status in pass/formal).
-inline void set_proven(const hhds::Node_class& node, uint32_t v) { node.attr(livehd::attrs::proven).set(v); }
+inline void                   set_proven(const hhds::Node_class& node, uint32_t v) { node.attr(livehd::attrs::proven).set(v); }
 [[nodiscard]] inline bool     has_proven(const hhds::Node_class& node) { return node.attr(livehd::attrs::proven).has(); }
 [[nodiscard]] inline uint32_t proven_of(const hhds::Node_class& node) {
   auto a = node.attr(livehd::attrs::proven);
   return a.has() ? a.get() : 0;
 }
 inline void set_runtime_check(const hhds::Node_class& node, uint32_t v) { node.attr(livehd::attrs::runtime_check).set(v); }
-[[nodiscard]] inline bool has_runtime_check(const hhds::Node_class& node) {
-  return node.attr(livehd::attrs::runtime_check).has();
-}
+[[nodiscard]] inline bool has_runtime_check(const hhds::Node_class& node) { return node.attr(livehd::attrs::runtime_check).has(); }
 [[nodiscard]] inline uint32_t runtime_check_of(const hhds::Node_class& node) {
   auto a = node.attr(livehd::attrs::runtime_check);
   return a.has() ? a.get() : 0;
@@ -492,6 +516,7 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   if (pin.is_invalid()) {
     return;
   }
+  assert_pin_attr_role<livehd::attrs::pin_name_t>(pin);  // edge (wire name): no driver/sink restriction
   if (name.empty()) {
     pin.attr(livehd::attrs::pin_name).del();
   } else {
@@ -541,11 +566,13 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   if (sink.is_invalid()) {
     return {};
   }
-  auto edges = sink.inp_edges();
-  if (edges.empty()) {
+  // get_driver_pins() is the direct sink-fan-in accessor (no Edge_class vector
+  // materialized) — a sink's fan-in is small, usually a single driver.
+  auto drivers = sink.get_driver_pins();
+  if (drivers.empty()) {
     return {};
   }
-  return edges.front().driver;
+  return drivers.front();
 }
 
 // Cell-type mutation. The Ntype_op encoding values already bake in the
@@ -601,11 +628,13 @@ inline void set_type_const_serialized(const hhds::Node_class& node, std::string_
   return node;
 }
 
-// Per-pin offset (used by Get_mask / Set_mask / Sext positional ops).
+// Per-pin offset (used by Get_mask / Set_mask / Sext positional ops, and IO-port
+// wire offsets on either end). any_pin: no driver/sink restriction.
 inline void set_pin_offset(const hhds::Pin_class& pin, int32_t off) {
   if (pin.is_invalid()) {
     return;
   }
+  assert_pin_attr_role<livehd::attrs::pin_offset_t>(pin);
   if (off == 0) {
     pin.attr(livehd::attrs::pin_offset).del();
   } else {
@@ -624,26 +653,15 @@ inline void set_pin_offset(const hhds::Pin_class& pin, int32_t off) {
   if (node.is_invalid()) {
     return result;
   }
-  auto          op = type_op_of(node);
-  hhds::Port_id target;
-  if (op == Ntype_op::Sub) {
-    auto pin = node.get_sink_pin(name);
-    if (pin.is_invalid()) {
-      return result;
-    }
-    target = pin.get_port_id();
-  } else {
-    auto pid = Ntype::get_sink_pid(op, name);
-    if (pid == livehd::Port_invalid) {
-      return result;
-    }
-    target = pid;
+  // Go straight to the named sink's fan-in (get_driver_pins) instead of scanning
+  // every input edge of the node and filtering by port_id — a sink's fan-in is
+  // materialized directly, with no Edge_class vector for the other ports.
+  auto sink = find_sink_pin(node, name);
+  if (sink.is_invalid()) {
+    return result;
   }
-  for (const auto& e : node.inp_edges()) {
-    if (e.sink.get_port_id() == target) {
-      result.push_back(e.driver);
-    }
-  }
+  auto drivers = sink.get_driver_pins();
+  result.assign(drivers.begin(), drivers.end());
   return result;
 }
 

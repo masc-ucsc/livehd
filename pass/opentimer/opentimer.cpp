@@ -110,10 +110,10 @@ inline void  del_delay(const hhds::Pin_class& pin) {
 // Drivers feeding a named sink port — like inp_drivers_of but returning the
 // (driver, edge) pairs in inp_edges order. opentimer iterates all "b" drivers
 // of an SHL node.
-[[nodiscard]] std::vector<hhds::Edge_class> inp_edges_of_sink(const hhds::Node_class& node, std::string_view name) {
-  std::vector<hhds::Edge_class> out;
-  auto                          op = type_op_of(node);
-  hhds::Port_id                 target;
+[[nodiscard]] livehd::graph_util::Edge_vec inp_edges_of_sink(const hhds::Node_class& node, std::string_view name) {
+  livehd::graph_util::Edge_vec out;
+  auto                         op = type_op_of(node);
+  hhds::Port_id                target;
   if (op == Ntype_op::Sub) {
     auto pin = node.get_sink_pin(name);
     if (pin.is_invalid()) {

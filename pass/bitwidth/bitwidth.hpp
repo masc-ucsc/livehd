@@ -23,7 +23,7 @@ protected:
 
   static Attr get_key_attr(std::string_view key);
 
-  bool                                                 not_finished;
+  bool                                                   not_finished;
   absl::flat_hash_map<hhds::Class_index, Bitwidth_range> bwmap;  // keyed by driver pin's class_index
 
   // Nodes added by attr_set processing (Get_mask insertions) that must be
@@ -37,24 +37,24 @@ protected:
   void adjust_bw(hhds::Pin_class dpin, const Bitwidth_range& bw);
 
   void process_const(hhds::Node_class& node);
-  void process_not(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
+  void process_not(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
   void process_flop(hhds::Node_class& node);
   void process_memory(hhds::Node_class& node);
-  void process_mux(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
-  void process_hotmux(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
-  void process_sra(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
-  void process_shl(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
-  void process_sum(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
-  void process_mult(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
+  void process_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
+  void process_hotmux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
+  void process_sra(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
+  void process_shl(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
+  void process_sum(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
+  void process_mult(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
   void process_get_mask(hhds::Node_class& node);
   void process_set_mask(hhds::Node_class& node);
-  void process_sext(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
+  void process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
   void process_comparator(hhds::Node_class& node);
-  void process_bit_or(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
-  void process_bit_xor(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
-  void process_bit_and(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
-  void process_assignment_or(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
-  void process_ror(hhds::Node_class& node, std::vector<hhds::Edge_class>& inp_edges);
+  void process_bit_or(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
+  void process_bit_xor(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
+  void process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
+  void process_assignment_or(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
+  void process_ror(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges);
   void process_attr_set_dp_assign(hhds::Node_class& node);
   void process_attr_set_bw(hhds::Node_class& node, Bitwidth::Attr attr);
   void process_attr_set(hhds::Node_class& node);

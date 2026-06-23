@@ -72,7 +72,7 @@ std::string const_to_verilog(const C& c) {
 }
 
 // Sort edges by sink port_id (for mux iteration).
-void sort_by_sink_pid(std::vector<hhds::Edge_class>& edges) {
+void sort_by_sink_pid(livehd::graph_util::Edge_vec& edges) {
   std::sort(edges.begin(), edges.end(), [](const hhds::Edge_class& a, const hhds::Edge_class& b) {
     return a.sink.get_port_id() < b.sink.get_port_id();
   });
@@ -90,48 +90,254 @@ Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir, bool _srcmap)
     // yosys / iverilog -g2012 / verilator reject the netlist (e.g. a signal
     // named `packed`, `bit`, `type`). get_scaped_name() consults this set.
     reserved_keyword.insert({
-        "accept_on",      "alias",        "always",       "always_comb",  "always_ff",    "always_latch",
-        "and",            "assert",       "assign",       "assume",       "automatic",    "before",
-        "begin",          "bind",         "bins",         "binsof",       "bit",          "break",
-        "buf",            "bufif0",       "bufif1",       "byte",         "case",         "casex",
-        "casez",          "cell",         "chandle",      "checker",      "class",        "clocking",
-        "cmos",           "config",       "const",        "constraint",   "context",      "continue",
-        "cover",          "covergroup",   "coverpoint",   "cross",        "deassign",     "default",
-        "defparam",       "design",       "disable",      "dist",         "do",           "edge",
-        "else",           "end",          "endcase",      "endchecker",   "endclass",     "endclocking",
-        "endconfig",      "endfunction",  "endgenerate",  "endgroup",     "endinterface", "endmodule",
-        "endpackage",     "endprimitive", "endprogram",   "endproperty",  "endspecify",   "endsequence",
-        "endtable",       "endtask",      "enum",         "event",        "eventually",   "expect",
-        "export",         "extends",      "extern",       "final",        "first_match",  "for",
-        "force",          "foreach",      "forever",      "fork",         "forkjoin",     "function",
-        "generate",       "genvar",       "global",       "highz0",       "highz1",       "if",
-        "iff",            "ifnone",       "ignore_bins",  "illegal_bins", "implements",   "implies",
-        "import",         "incdir",       "include",      "initial",      "inout",        "input",
-        "inside",         "instance",     "int",          "integer",      "interconnect", "interface",
-        "intersect",      "join",         "join_any",     "join_none",    "large",        "let",
-        "liblist",        "library",      "local",        "localparam",   "logic",        "longint",
-        "macromodule",    "matches",      "medium",       "modport",      "module",       "nand",
-        "negedge",        "nettype",      "new",          "nexttime",     "nmos",         "nor",
-        "noshowcancelled", "not",         "notif0",       "notif1",       "null",         "or",
-        "output",         "package",      "packed",       "parameter",    "pmos",         "posedge",
-        "primitive",      "priority",     "program",      "property",     "protected",    "pull0",
-        "pull1",          "pulldown",     "pullup",       "pulsestyle_ondetect", "pulsestyle_onevent", "pure",
-        "rand",           "randc",        "randcase",     "randsequence", "rcmos",        "real",
-        "realtime",       "ref",          "reg",          "reject_on",    "release",      "repeat",
-        "restrict",       "return",       "rnmos",        "rpmos",        "rtran",        "rtranif0",
-        "rtranif1",       "s_always",     "s_eventually", "s_nexttime",   "s_until",      "s_until_with",
-        "scalared",       "sequence",     "shortint",     "shortreal",    "showcancelled", "signed",
-        "small",          "soft",         "solve",        "specify",      "specparam",    "static",
-        "string",         "strong",       "strong0",      "strong1",      "struct",       "super",
-        "supply0",        "supply1",      "sync_accept_on", "sync_reject_on", "table",     "tagged",
-        "task",           "this",         "throughout",   "time",         "timeprecision", "timeunit",
-        "tran",           "tranif0",      "tranif1",      "tri",          "tri0",         "tri1",
-        "triand",         "trior",        "trireg",       "type",         "typedef",      "union",
-        "unique",         "unique0",      "unsigned",     "until",        "until_with",   "untyped",
-        "use",            "uwire",        "var",          "vectored",     "virtual",      "void",
-        "wait",           "wait_order",   "wand",         "weak",         "weak0",        "weak1",
-        "while",          "wildcard",     "wire",         "with",         "within",       "wor",
-        "xnor",           "xor",
+        "accept_on",
+        "alias",
+        "always",
+        "always_comb",
+        "always_ff",
+        "always_latch",
+        "and",
+        "assert",
+        "assign",
+        "assume",
+        "automatic",
+        "before",
+        "begin",
+        "bind",
+        "bins",
+        "binsof",
+        "bit",
+        "break",
+        "buf",
+        "bufif0",
+        "bufif1",
+        "byte",
+        "case",
+        "casex",
+        "casez",
+        "cell",
+        "chandle",
+        "checker",
+        "class",
+        "clocking",
+        "cmos",
+        "config",
+        "const",
+        "constraint",
+        "context",
+        "continue",
+        "cover",
+        "covergroup",
+        "coverpoint",
+        "cross",
+        "deassign",
+        "default",
+        "defparam",
+        "design",
+        "disable",
+        "dist",
+        "do",
+        "edge",
+        "else",
+        "end",
+        "endcase",
+        "endchecker",
+        "endclass",
+        "endclocking",
+        "endconfig",
+        "endfunction",
+        "endgenerate",
+        "endgroup",
+        "endinterface",
+        "endmodule",
+        "endpackage",
+        "endprimitive",
+        "endprogram",
+        "endproperty",
+        "endspecify",
+        "endsequence",
+        "endtable",
+        "endtask",
+        "enum",
+        "event",
+        "eventually",
+        "expect",
+        "export",
+        "extends",
+        "extern",
+        "final",
+        "first_match",
+        "for",
+        "force",
+        "foreach",
+        "forever",
+        "fork",
+        "forkjoin",
+        "function",
+        "generate",
+        "genvar",
+        "global",
+        "highz0",
+        "highz1",
+        "if",
+        "iff",
+        "ifnone",
+        "ignore_bins",
+        "illegal_bins",
+        "implements",
+        "implies",
+        "import",
+        "incdir",
+        "include",
+        "initial",
+        "inout",
+        "input",
+        "inside",
+        "instance",
+        "int",
+        "integer",
+        "interconnect",
+        "interface",
+        "intersect",
+        "join",
+        "join_any",
+        "join_none",
+        "large",
+        "let",
+        "liblist",
+        "library",
+        "local",
+        "localparam",
+        "logic",
+        "longint",
+        "macromodule",
+        "matches",
+        "medium",
+        "modport",
+        "module",
+        "nand",
+        "negedge",
+        "nettype",
+        "new",
+        "nexttime",
+        "nmos",
+        "nor",
+        "noshowcancelled",
+        "not",
+        "notif0",
+        "notif1",
+        "null",
+        "or",
+        "output",
+        "package",
+        "packed",
+        "parameter",
+        "pmos",
+        "posedge",
+        "primitive",
+        "priority",
+        "program",
+        "property",
+        "protected",
+        "pull0",
+        "pull1",
+        "pulldown",
+        "pullup",
+        "pulsestyle_ondetect",
+        "pulsestyle_onevent",
+        "pure",
+        "rand",
+        "randc",
+        "randcase",
+        "randsequence",
+        "rcmos",
+        "real",
+        "realtime",
+        "ref",
+        "reg",
+        "reject_on",
+        "release",
+        "repeat",
+        "restrict",
+        "return",
+        "rnmos",
+        "rpmos",
+        "rtran",
+        "rtranif0",
+        "rtranif1",
+        "s_always",
+        "s_eventually",
+        "s_nexttime",
+        "s_until",
+        "s_until_with",
+        "scalared",
+        "sequence",
+        "shortint",
+        "shortreal",
+        "showcancelled",
+        "signed",
+        "small",
+        "soft",
+        "solve",
+        "specify",
+        "specparam",
+        "static",
+        "string",
+        "strong",
+        "strong0",
+        "strong1",
+        "struct",
+        "super",
+        "supply0",
+        "supply1",
+        "sync_accept_on",
+        "sync_reject_on",
+        "table",
+        "tagged",
+        "task",
+        "this",
+        "throughout",
+        "time",
+        "timeprecision",
+        "timeunit",
+        "tran",
+        "tranif0",
+        "tranif1",
+        "tri",
+        "tri0",
+        "tri1",
+        "triand",
+        "trior",
+        "trireg",
+        "type",
+        "typedef",
+        "union",
+        "unique",
+        "unique0",
+        "unsigned",
+        "until",
+        "until_with",
+        "untyped",
+        "use",
+        "uwire",
+        "var",
+        "vectored",
+        "virtual",
+        "void",
+        "wait",
+        "wait_order",
+        "wand",
+        "weak",
+        "weak0",
+        "weak1",
+        "while",
+        "wildcard",
+        "wire",
+        "with",
+        "within",
+        "wor",
+        "xnor",
+        "xor",
     });
   });
 }
@@ -328,8 +534,8 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) {
         case Ntype_op::And:
         case Ntype_op::Or:
         case Ntype_op::Xor:
-        case Ntype_op::EQ: return absl::StrCat("(", build_simple_expr(nullptr, node), ")");
-        default: break;
+        case Ntype_op::EQ  : return absl::StrCat("(", build_simple_expr(nullptr, node), ")");
+        default            : break;
       }
     }
   }
@@ -448,13 +654,13 @@ void Cgen_verilog::process_latch(std::shared_ptr<File_output> fout, const hhds::
 // on a macro that may not be in scope when emitted inline.
 std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd, int n_wr, bool single_clock) {
   std::string s;
-  s += absl::StrCat("module ", mod_name, "\n");
-  s += "  #(parameter BITS = 4, SIZE=128, FWD=1, LATENCY_0=1, WENSIZE=1,\n";
-  s += "    parameter INIT_EN=0, parameter [BITS*SIZE-1:0] INIT=0)\n  (\n";
-  bool first = true;
-  auto port  = [&](const std::string& decl) {
-    s += (first ? "    " : "   ,") + decl + "\n";
-    first = false;
+  s          += absl::StrCat("module ", mod_name, "\n");
+  s          += "  #(parameter BITS = 4, SIZE=128, FWD=1, LATENCY_0=1, WENSIZE=1,\n";
+  s          += "    parameter INIT_EN=0, parameter [BITS*SIZE-1:0] INIT=0)\n  (\n";
+  bool first  = true;
+  auto port   = [&](const std::string& decl) {
+    s     += (first ? "    " : "   ,") + decl + "\n";
+    first  = false;
   };
   if (single_clock) {
     port("input clk");
@@ -475,16 +681,16 @@ std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd,
     }
     port(absl::StrCat("input [BITS-1:0] wr_din_", j));
   }
-  s += "  );\n";
-  s += "localparam MASKSIZE = BITS/WENSIZE;\n";
-  s += "reg [BITS-1:0] data[SIZE-1:0];\n";
-  s += "generate if (INIT_EN) begin:BLOCK_INIT\n";
-  s += "  integer ii;\n  initial for(ii=0;ii<SIZE;ii=ii+1) data[ii] = INIT[ii*BITS +: BITS];\n";
-  s += "end endgenerate\n";
+  s            += "  );\n";
+  s            += "localparam MASKSIZE = BITS/WENSIZE;\n";
+  s            += "reg [BITS-1:0] data[SIZE-1:0];\n";
+  s            += "generate if (INIT_EN) begin:BLOCK_INIT\n";
+  s            += "  integer ii;\n  initial for(ii=0;ii<SIZE;ii=ii+1) data[ii] = INIT[ii*BITS +: BITS];\n";
+  s            += "end endgenerate\n";
   // WRITE: single-clock = one always with all ports (port-order priority);
   // multiclock = one always per write clock.
-  s += "integer i;\n";
-  auto wr_body = [&](int j) {
+  s            += "integer i;\n";
+  auto wr_body  = [&](int j) {
     s += absl::StrCat("  for(i=0;i<WENSIZE;i=i+1) if(wr_enable_",
                       j,
                       "[i]) data[wr_addr_",
@@ -511,17 +717,45 @@ std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd,
     s += absl::StrCat("reg [BITS-1:0] d", k, "_mem; reg [BITS-1:0] d", k, "_fwd;\n");
     s += absl::StrCat("always_comb d", k, "_mem = rd_enable_", k, " ? data[rd_addr_", k, "] : {BITS{1'bx}};\n");
     s += absl::StrCat("genvar fwd_j", k, ";\n");
-    s += absl::StrCat("generate for(fwd_j", k, "=0;fwd_j", k, "<WENSIZE;fwd_j", k, "=fwd_j", k, "+1) begin:FWD_BLOCK_CALC_", k, "\n");
+    s += absl::StrCat("generate for(fwd_j",
+                      k,
+                      "=0;fwd_j",
+                      k,
+                      "<WENSIZE;fwd_j",
+                      k,
+                      "=fwd_j",
+                      k,
+                      "+1) begin:FWD_BLOCK_CALC_",
+                      k,
+                      "\n");
     s += absl::StrCat("  always_comb d", k, "_fwd[fwd_j", k, "*MASKSIZE +: MASKSIZE] =\n");
     for (int j = 0; j < n_wr; ++j) {
-      s += absl::StrCat("    (((FWD >> ", j, ") & 1) != 0 && wr_enable_", j, "[fwd_j", k, "] && (wr_addr_", j, " == rd_addr_", k,
-                        ")) ? wr_din_", j, "[fwd_j", k, "*MASKSIZE +: MASKSIZE] :\n");
+      s += absl::StrCat("    (((FWD >> ",
+                        j,
+                        ") & 1) != 0 && wr_enable_",
+                        j,
+                        "[fwd_j",
+                        k,
+                        "] && (wr_addr_",
+                        j,
+                        " == rd_addr_",
+                        k,
+                        ")) ? wr_din_",
+                        j,
+                        "[fwd_j",
+                        k,
+                        "*MASKSIZE +: MASKSIZE] :\n");
     }
     s += absl::StrCat("    d", k, "_mem[fwd_j", k, "*MASKSIZE +: MASKSIZE];\n");
     s += "end endgenerate\n";
     s += absl::StrCat("generate if (LATENCY_0==1) begin:BLOCK_RD_LAT_", k, "\n");
-    s += absl::StrCat("  always @(posedge ", single_clock ? std::string("clk") : absl::StrCat("rd_clock_", k), ") rd_dout_", k,
-                      " <= d", k, "_fwd;\n");
+    s += absl::StrCat("  always @(posedge ",
+                      single_clock ? std::string("clk") : absl::StrCat("rd_clock_", k),
+                      ") rd_dout_",
+                      k,
+                      " <= d",
+                      k,
+                      "_fwd;\n");
     s += absl::StrCat("end else begin:BLOCK_RD_COMB_", k, "\n  assign rd_dout_", k, " = d", k, "_fwd;\nend endgenerate\n");
   }
   s += "endmodule\n";
@@ -668,10 +902,9 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     // ware/rtl carries a fixed wrapper family; anything beyond it (e.g. a
     // big reset-restored reg array minting one restore port per entry) needs
     // a new cgen_memory_<R>rd_<W>wr.v variant.
-    const bool have_wrapper
-        = single_clock
-              ? ((eff_rd >= 1 && eff_rd <= 4 && eff_wr >= 1 && eff_wr <= 2) || (eff_rd == 1 && (eff_wr == 3 || eff_wr == 4)))
-              : (eff_rd == 1 && eff_wr == 1);
+    const bool  have_wrapper = single_clock ? ((eff_rd >= 1 && eff_rd <= 4 && eff_wr >= 1 && eff_wr <= 2)
+                                               || (eff_rd == 1 && (eff_wr == 3 || eff_wr == 4)))
+                                            : (eff_rd == 1 && eff_wr == 1);
     std::string name;
     name = absl::StrCat(name, "cgen_memory_", single_clock ? "" : "multiclock_");
     name = absl::StrCat(name, eff_rd, "rd_");
@@ -977,9 +1210,9 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     auto rhs   = get_expression(get_driver(find_sink_pin(node, "b")));
     final_expr = absl::StrCat(lhs, "/", rhs);
   } else if (op == Ntype_op::Not) {
-    auto     lhs_dpin = get_driver(find_sink_pin(node, "a"));
-    auto     lhs      = get_expression(lhs_dpin);
-    auto     var_pre  = pin2var.find(dpin.get_class_index());
+    auto lhs_dpin = get_driver(find_sink_pin(node, "a"));
+    auto lhs      = get_expression(lhs_dpin);
+    auto var_pre  = pin2var.find(dpin.get_class_index());
     if (fout && var_pre != pin2var.end() && var_pre->second != lhs) {
       // Bitwise NOT is evaluated at the node output width. Assign through the
       // destination-width temporary first, so a narrow expression like addr[3:0]
@@ -1164,8 +1397,8 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
   } else if (op == Ntype_op::LT || op == Ntype_op::GT) {
     std::vector<std::string> lhs;
     std::vector<std::string> rhs;
-    bool signed_compare = !is_unsign(dpin);
-    auto cmp_expr = [&](hhds::Pin_class cmp_dpin) {
+    bool                     signed_compare = !is_unsign(dpin);
+    auto                     cmp_expr       = [&](hhds::Pin_class cmp_dpin) {
       if (signed_compare && !cmp_dpin.is_invalid() && !is_const_pin(cmp_dpin)) {
         auto cmp_node = cmp_dpin.get_master_node();
         if (type_op_of(cmp_node) == Ntype_op::Get_mask) {
@@ -1916,7 +2149,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
             }
           }
           for (auto& e2 : node.out_edges()) {
-            auto dout = node.create_driver_pin(e2.driver.get_port_id());
+            auto dout            = node.create_driver_pin(e2.driver.get_port_id());
             // Escape the FULL derived name as one unit: a memory instance name
             // can carry verilog-special chars (e.g. the '.' of a flattened
             // hierarchical name), so escaping iname first and then appending
@@ -1943,7 +2176,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
           // pin2var identically to the edge.driver a consumer's inp_edges loop
           // uses — otherwise the same instance-output net is declared twice
           // (once here, once by the consumer) and lookups miss this entry.
-          auto cdpin = node.create_driver_pin(dpin2.get_port_id());
+          auto cdpin           = node.create_driver_pin(dpin2.get_port_id());
           // Use a DEDICATED net name (like the Memory dout above), never the wire
           // name: a Sub output that drives a module output directly is otherwise
           // named after that port, and declaring it here re-declares the port

@@ -26,6 +26,20 @@
 
 namespace livehd::attrs {
 
+// Where an attribute legitimately lives — used by the graph_util pin setters to
+// assert (and, for `node`, statically reject) the wrong pin role at the call
+// site. The per-pin attr key folds the driver/sink bit (hhds Pin_class::attr
+// masks Pid 0x2), so a same-port driver and sink SHARE a slot; stamping the
+// wrong role then silently aliases the other's value. Classifying each attr lets
+// the setters catch that:
+//   node        - per node; never set through a pin setter (compile error if so)
+//   driver_pin  - per DRIVER pin (the signal source): bits, signed, … (assert is_driver)
+//   sink        - per SINK pin (arrival-style)                         (assert is_sink)
+//   edge        - shared driver<->sink across the net (the wire name); read on
+//                 either end via the shared slot, so no driver/sink restriction
+//   any_pin     - any pin, no driver/sink restriction (IO-port offsets, mixed)
+enum class Attr_kind { node, driver_pin, edge, sink, any_pin };
+
 // Per-pin bitwidth (driver pin), plain int32; storage uses uint32_t
 // for the flat_storage value to avoid signed-int hashmap key issues.
 struct bits_t {
@@ -199,6 +213,50 @@ struct pending_time_t {
   using storage = hhds::flat_storage;
 };
 inline constexpr pending_time_t pending_time{};
+
+// Pin-role of each attribute (see Attr_kind). The graph_util pin setters consult
+// this to assert the right pin role at the call site. Every attribute is listed
+// explicitly so a new one that forgets its kind is a visible omission (the
+// default is the most permissive any_pin). `match` is BOTH a node and a driver-pin
+// attribute; the entry classifies its PIN overload (driver), and the node overload
+// (set_match(node)) takes a Node so it never reaches a pin-role assertion.
+template <typename Tag>
+inline constexpr Attr_kind attr_kind = Attr_kind::any_pin;
+
+template <>
+inline constexpr Attr_kind attr_kind<bits_t> = Attr_kind::driver_pin;
+template <>
+inline constexpr Attr_kind attr_kind<pin_signed_t> = Attr_kind::driver_pin;
+template <>
+inline constexpr Attr_kind attr_kind<pin_delay_t> = Attr_kind::driver_pin;
+template <>
+inline constexpr Attr_kind attr_kind<pin_const_value_t> = Attr_kind::driver_pin;
+template <>
+inline constexpr Attr_kind attr_kind<match_t> = Attr_kind::driver_pin;
+template <>
+inline constexpr Attr_kind attr_kind<pin_name_t> = Attr_kind::edge;
+template <>
+inline constexpr Attr_kind attr_kind<pin_offset_t> = Attr_kind::any_pin;
+template <>
+inline constexpr Attr_kind attr_kind<time_range_t> = Attr_kind::any_pin;
+template <>
+inline constexpr Attr_kind attr_kind<pending_time_t> = Attr_kind::any_pin;
+template <>
+inline constexpr Attr_kind attr_kind<color_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<place_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<hier_color_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<coloring_info_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<proven_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<runtime_check_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<const_value_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
 
 }  // namespace livehd::attrs
 
