@@ -570,18 +570,28 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           box.in_w += std::max(1, static_cast<int>(d.bits));
         }
         box.state_w = 64;  // abstract state width (the same for both designs -> sound)
-        std::vector<cvc5::Sort> dom;
-        if (box.in_w > 0) {
-          dom.push_back(tm.mkBitVectorSort(static_cast<uint32_t>(box.in_w)));
-        }
-        dom.push_back(tm.mkBitVectorSort(static_cast<uint32_t>(box.state_w)));
+        cvc5::Sort bv_state = tm.mkBitVectorSort(static_cast<uint32_t>(box.state_w));
+        // Outputs are MOORE — UF_out(state) ONLY, not (inputs, state). A Mealy box
+        // (output depends on the current input) adds a combinational input->output
+        // path through the leaf; in a pipeline a stage register's q feeds glue that
+        // feeds its own d (stall/enable), so q=UF(d,..) -> d -> q is a FALSE
+        // combinational cycle that the encoder cannot resolve. Output-from-state-only
+        // matches the registered output exactly and stays sound (both designs share
+        // UF_out + state; divergent leaf inputs are still caught by the bbin compare
+        // points). The next-state transition keeps its (inputs, state) dependence —
+        // it feeds the state cut a cycle later, never a combinational loop.
         for (const auto& d : sio->get_output_pin_decls()) {
-          int ow              = std::max(1, static_cast<int>(d.bits));
-          box.out_w[d.name]   = ow;
-          box.out_fn[d.name]  = tm.mkConst(tm.mkFunctionSort(dom, tm.mkBitVectorSort(static_cast<uint32_t>(ow))),
+          int ow             = std::max(1, static_cast<int>(d.bits));
+          box.out_w[d.name]  = ow;
+          box.out_fn[d.name] = tm.mkConst(tm.mkFunctionSort({bv_state}, tm.mkBitVectorSort(static_cast<uint32_t>(ow))),
                                           "uf_out:" + bk + ":" + d.name);
         }
-        box.next_fn = tm.mkConst(tm.mkFunctionSort(dom, tm.mkBitVectorSort(static_cast<uint32_t>(box.state_w))), "uf_next:" + bk);
+        std::vector<cvc5::Sort> next_dom;  // next_state = UF_next(inputs, state)
+        if (box.in_w > 0) {
+          next_dom.push_back(tm.mkBitVectorSort(static_cast<uint32_t>(box.in_w)));
+        }
+        next_dom.push_back(bv_state);
+        box.next_fn = tm.mkConst(tm.mkFunctionSort(next_dom, bv_state), "uf_next:" + bk);
         state_boxes[bk] = std::move(box);
       }
     };

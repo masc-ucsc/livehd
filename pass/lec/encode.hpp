@@ -57,14 +57,21 @@ struct Encoded {
 // black-box"). A combinational box models outputs as a pure function of inputs —
 // sound only for a stateless leaf. To collapse a STATEFUL proven leaf (a register
 // file, a pipeline-stage register) soundly, the box becomes state-aware:
-//   outputs    = UF_out(inputs, state)
+//   outputs    = UF_out(state)            (MOORE — see below)
 //   next_state = UF_next(inputs, state)
 // with ONE state cut per leaf instance corresponding on both designs (shared UF
 // symbols + a shared state symbol) and a matched-reset shared init. Then equal
-// inputs + equal corresponding state => equal outputs + equal next-state by
-// congruence — sound in the inductive (assume-equal-state) frame directly, and
-// under BMC-from-reset the threaded state makes the leaf output VARY per cycle
-// (a constant combinational box would false-prove a timing difference).
+// corresponding state => equal outputs, and equal inputs + state => equal
+// next-state, by congruence — sound in the inductive (assume-equal-state) frame
+// directly, and under BMC-from-reset the threaded state makes the leaf output VARY
+// per cycle (a constant combinational box would false-prove a timing difference).
+//
+// The OUTPUT is MOORE (state ONLY, NOT the current inputs): a Mealy output adds a
+// combinational input->output path that closes a FALSE combinational cycle when a
+// collapsed stage register's output feeds glue back to its own stall/enable input.
+// Output-from-state matches a registered output and stays sound — divergent leaf
+// inputs are still mitered via the bbin compare points. (The encoder also emits the
+// outputs BEFORE resolving the inputs, so that feedback cannot deadlock its fixpoint.)
 //
 // The state SYMBOL is not stored here: it threads through the ordinary flop-cut
 // machinery under the key "\x01leafstate:<defname>#<occ>" (a shared current-state
@@ -76,7 +83,7 @@ struct State_box {
   int                                                          in_w    = 0;  // concatenated input width (UF domain)
   int                                                          state_w = 0;  // state width (UF domain + next codomain)
   cvc5::Term                                                   next_fn;      // UF (inputs, state) -> state
-  absl::flat_hash_map<std::string, cvc5::Term>                 out_fn;       // output port -> UF (inputs, state) -> out
+  absl::flat_hash_map<std::string, cvc5::Term>                 out_fn;       // output port -> UF (state) -> out  [Moore]
   absl::flat_hash_map<std::string, int>                        out_w;        // output port -> width
 };
 

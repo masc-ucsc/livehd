@@ -36,9 +36,19 @@ module top(input clk, input [7:0] x, output [7:0] o);
   reg [7:0] r; always @(posedge clk) r <= m; assign o = r;
 endmodule
 EOF
+# a STALL feedback: the register output q feeds back to its own input d (d = en ?
+# x : q). Collapsing sleaf must NOT deadlock — a Mealy box (q=UF(d,..)) would close
+# a false combinational cycle (q -> d -> q); a Moore box (q=UF(state)) + emitting
+# the output before the inputs breaks it.
+cat > "$WORK/t_stall.v" <<'EOF'
+module top(input clk, input en, input [7:0] x, output [7:0] o);
+  wire [7:0] q; sleaf u(.clk(clk), .d(en ? x : q), .q(q)); assign o = q;
+endmodule
+EOF
 C() { "$LHD" compile "$@" >/dev/null 2>&1; }
 C "$WORK/t_d1.v" "$WORK/sleaf.v" --top top --emit-dir "lg:$WORK/td1" --workdir "$WORK/c1"
 C "$WORK/t_d2.v" "$WORK/sleaf.v" --top top --emit-dir "lg:$WORK/td2" --workdir "$WORK/c2"
+C "$WORK/t_stall.v" "$WORK/sleaf.v" --top top --emit-dir "lg:$WORK/tstall" --workdir "$WORK/c3"
 
 run() {  # $1=label ; $2..=lhd lec args ; sets RC/OUT
   OUT=$("$LHD" lec "${@:2}" --top top --workdir "$WORK/w_$1" 2>&1); RC=$?
@@ -57,6 +67,13 @@ run diff --impl "lg:$WORK/td1" --ref "lg:$WORK/td2" --collapse sleaf --set lec.e
 if [ "$RC" -eq 0 ]; then echo "FAIL: stateful collapse FALSE-PROVED a timing diff (rc=0)"; fail=1
 elif ! echo "$OUT" | grep -q "REFUTED"; then echo "FAIL: stateful collapse timing-diff: not REFUTED: $OUT"; fail=1
 else echo "ok: stateful collapse refutes a timing diff (state threaded per cycle)"; fi
+
+# 3) collapse a register whose output feeds back to its own input (stall). The box
+#    must not deadlock the encoder on a false combinational cycle -> self PROVEN.
+run stall --impl "lg:$WORK/tstall" --ref "lg:$WORK/tstall" --collapse sleaf --set lec.engine=ind
+if [ "$RC" -ne 0 ] || ! echo "$OUT" | grep -q "PROVEN equivalent"; then
+  echo "FAIL: stall-feedback stateful collapse not PROVEN (false cycle?) rc=$RC: $OUT"; fail=1
+else echo "ok: stall-feedback stateful collapse -> PROVEN (no false combinational cycle)"; fi
 
 if [ $fail -ne 0 ]; then echo "lec_seqbox_test: FAILED"; exit 1; fi
 echo "lec_seqbox_test: PASSED"; exit 0

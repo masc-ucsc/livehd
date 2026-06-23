@@ -280,6 +280,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
            + std::to_string(static_cast<uint64_t>(p.get_debug_pid()));
   };
   Io_name_map<int>       bbox_occ;  // blackbox Sub occurrence per def-name (forward_hier order)
+  // Two-phase blackbox bookkeeping (keyed by structural nodekey): the assigned
+  // occurrence key once its OUTPUTS are emitted, and the seeded state symbol for a
+  // state-aware box. Outputs emit on the first visit (they need only the state /
+  // nothing); the input-dependent bbin + next-state are emitted in a later pass.
+  absl::flat_hash_map<std::string, std::string> bb_outkey;
+  absl::flat_hash_map<std::string, Val>          bb_state_sym;
 
   auto fail = [&](const std::string& msg) -> Encoded& {
     if (out.ok) {
@@ -735,62 +741,103 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         continue;
       }
 
-      // ---- BLACKBOX COLLAPSE. Key by module name + occurrence (forward_hier
-      // order), reader-invariant so corresponding instances align across designs.
-      // Defer until all inputs are resolved so the occurrence counter and shared
-      // output symbols are emitted exactly once (no double-count across passes).
-      {
-        bool bb_deferred = false;
-        for (const auto& e : node.inp_edges()) {
-          bool sok = true;
-          driver_val(e.driver, sok);
-          if (!sok) {
-            bb_deferred = true;
-            break;
+      // ---- BLACKBOX COLLAPSE (two-phase). Key by module name + occurrence
+      // (forward_hier first-visit order), reader-invariant so corresponding
+      // instances align across designs. The OUTPUTS need only the state cut (a
+      // state-aware Moore box) or nothing (a stateless box) — NEVER the current
+      // inputs — so emit them on the FIRST visit, before the inputs resolve. This
+      // breaks a false combinational cycle where a collapsed stage register's
+      // output must be available to resolve its own (stall-fed) input. The
+      // input-dependent bbin compare points + next-state are deferred to a later
+      // pass (synthetic outputs, read by no combinational node, so they block none).
+      std::string      nk = nodekey(node);
+      std::string      defname(sub_io->get_name());
+      std::string      bk;
+      const State_box* sbox = nullptr;
+      if (auto okit = bb_outkey.find(nk); okit == bb_outkey.end()) {
+        bk            = defname + "#" + std::to_string(bbox_occ[defname]++);
+        bb_outkey[nk] = bk;
+        if (state_boxes_ != nullptr) {
+          if (auto it = state_boxes_->find(bk); it != state_boxes_->end()) {
+            sbox = &it->second;
           }
         }
-        if (bb_deferred) {
-          continue;
+        if (sbox != nullptr) {  // state-aware: outputs are MOORE — UF_out(state).
+          Val S = seed_state(std::string("\x01") + "leafstate:" + bk, sbox->state_w, false);
+          bb_state_sym[nk] = S;
+          for (const auto& e : node.out_edges()) {
+            auto        dp   = e.driver;
+            auto        nit  = out_name.find(dp.get_port_id());
+            std::string port = nit != out_name.end() ? nit->second : std::to_string(dp.get_port_id());
+            auto        ofn  = sbox->out_fn.find(port);
+            if (ofn == sbox->out_fn.end()) {
+              return fail("state box for '" + defname + "' has no output UF for port '" + port + "'");
+            }
+            int ow = sbox->out_w.count(port) ? sbox->out_w.at(port) : std::max(1, real_width(dp));
+            pin2val[pinkey(dp)] = Val{tm_.mkTerm(Kind::APPLY_UF, {ofn->second, S.term}), ow, !gu::is_unsign(dp)};
+          }
+        } else {  // stateless: outputs are shared free symbols.
+          for (const auto& e : node.out_edges()) {
+            auto        dp   = e.driver;
+            auto        nit  = out_name.find(dp.get_port_id());
+            std::string port = nit != out_name.end() ? nit->second : std::to_string(dp.get_port_id());
+            std::string key  = bk + ":" + port;
+            Val         ov;
+            if (shared_bbox_ != nullptr) {
+              if (auto it = shared_bbox_->find(key); it != shared_bbox_->end()) {
+                ov = it->second;
+              }
+            }
+            if (ov.term.isNull()) {  // fallback (query should have pre-built it): fresh
+              int w = real_width(dp);
+              if (w == 0) {
+                w = 1;
+              }
+              ov = Val{tm_.mkConst(bv(w), "bb:" + key), w, !gu::is_unsign(dp)};
+            }
+            pin2val[pinkey(dp)] = ov;
+          }
+        }
+        progress = true;
+      } else {
+        bk = okit->second;
+        if (state_boxes_ != nullptr) {
+          if (auto it = state_boxes_->find(bk); it != state_boxes_->end()) {
+            sbox = &it->second;
+          }
         }
       }
-      std::string defname(sub_io->get_name());
-      std::string bk = defname + "#" + std::to_string(bbox_occ[defname]++);
 
-      // Resolve every blackbox input ONCE: a miter compare point (so divergent
-      // inputs refute) AND, for a state-aware box, a piece of the UF input.
+      // Phase 2: resolve the inputs; defer (blocking no one — outputs are out)
+      // until they ALL resolve, then emit the bbin compare points + next-state.
       Io_name_map<Val> bb_in_by_port;
+      bool             all_in = true;
       for (const auto& e : node.inp_edges()) {
+        bool sok = true;
+        Val  v   = driver_val(e.driver, sok);
+        if (!sok) {
+          all_in = false;
+          break;
+        }
         auto        pid  = e.sink.get_port_id();
         auto        nit  = in_name.find(pid);
         std::string port = nit != in_name.end() ? nit->second : std::to_string(pid);
-        bool        sok  = true;
-        Val         v    = driver_val(e.driver, sok);
-        if (!sok) {
-          return fail("blackbox Sub '" + defname + "' input '" + port + "' has no encodable driver");
-        }
-        // Compare only the bits the blackbox port actually receives: a driver
-        // wider than the declared port is truncated by the connection, so a reader
-        // that leaves an extra high bit on the net (e.g. a 6-bit addr into a 5-bit
-        // SRAM port) must not spuriously diverge from one that doesn't.
+        // Compare only the bits the blackbox port actually receives (a wider driver
+        // is truncated by the connection — see the SRAM addr note).
         if (auto pit = in_pw.find(pid); pit != in_pw.end() && pit->second > 0 && pit->second < v.width) {
           v = Val{fit(v, pit->second), pit->second, v.is_signed};
         }
-        out.outputs[std::string("\x02") + "bbin:" + bk + ":" + port] = v;
         bb_in_by_port[port] = v;
       }
-
-      const State_box* sbox = nullptr;
-      if (state_boxes_ != nullptr) {
-        if (auto it = state_boxes_->find(bk); it != state_boxes_->end()) {
-          sbox = &it->second;
-        }
+      if (!all_in) {
+        continue;  // inputs not ready; outputs already emitted, so nothing is blocked
       }
-
+      for (const auto& [port, v] : bb_in_by_port) {  // inputs = miter compare points
+        out.outputs[std::string("\x02") + "bbin:" + bk + ":" + port] = v;
+      }
       if (sbox != nullptr) {
-        // ---- STATE-AWARE box (sequential collapse): outputs = UF_out(inputs,
-        // state), next = UF_next(inputs, state). Concatenate the inputs in the
-        // def's declared port order (identical on both designs) into one BV of
-        // width sbox->in_w, then seed/thread a corresponding state cut.
+        // next-state = UF_next(inputs, state): the state TRANSITION depends on the
+        // inputs, but it feeds the state cut a cycle later (no combinational loop).
         Term in_concat;
         for (const auto& d : sub_io->get_input_pin_decls()) {
           int piece_w = std::max(1, static_cast<int>(d.bits));
@@ -803,56 +850,14 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           Term piece = fit(pv, piece_w);
           in_concat  = in_concat.isNull() ? piece : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {in_concat, piece});
         }
-        std::string state_key = std::string("\x01") + "leafstate:" + bk;
-        Val         S         = seed_state(state_key, sbox->state_w, false);
-        auto        uf_args   = [&](const Term& fn) {
-          std::vector<Term> a{fn};
-          if (sbox->in_w > 0 && !in_concat.isNull()) {
-            a.push_back(in_concat);
-          }
-          a.push_back(S.term);
-          return a;
-        };
-        for (const auto& e : node.out_edges()) {  // outputs = UF_out(inputs, state)
-          auto        dp   = e.driver;
-          auto        nit  = out_name.find(dp.get_port_id());
-          std::string port = nit != out_name.end() ? nit->second : std::to_string(dp.get_port_id());
-          auto        ofn  = sbox->out_fn.find(port);
-          if (ofn == sbox->out_fn.end()) {
-            return fail("state box for '" + defname + "' has no output UF for port '" + port + "'");
-          }
-          int ow = sbox->out_w.count(port) ? sbox->out_w.at(port) : std::max(1, real_width(dp));
-          pin2val[pinkey(dp)] = Val{tm_.mkTerm(Kind::APPLY_UF, uf_args(ofn->second)), ow, !gu::is_unsign(dp)};
+        std::vector<Term> next_args{sbox->next_fn};
+        if (sbox->in_w > 0 && !in_concat.isNull()) {
+          next_args.push_back(in_concat);
         }
-        // next-state UF, emitted as a synthetic flop next-state: the inductive
-        // miter compares it (trivially equal: shared UF + shared state + equal
-        // inputs) and the BMC unroll threads it across cycles.
-        Term nxt = tm_.mkTerm(Kind::APPLY_UF, uf_args(sbox->next_fn));
-        out.outputs[std::string("\x01") + "nxt:" + state_key] = Val{nxt, sbox->state_w, false};
-      } else {
-        // ---- stateless box: outputs = shared free symbols (combinational leaf).
-        for (const auto& e : node.out_edges()) {
-          auto        dp   = e.driver;
-          auto        nit  = out_name.find(dp.get_port_id());
-          std::string port = nit != out_name.end() ? nit->second : std::to_string(dp.get_port_id());
-          std::string key  = bk + ":" + port;
-          Val         ov;
-          if (shared_bbox_ != nullptr) {
-            if (auto it = shared_bbox_->find(key); it != shared_bbox_->end()) {
-              ov = it->second;
-            }
-          }
-          if (ov.term.isNull()) {  // fallback (query should have pre-built it): fresh
-            int w = real_width(dp);
-            if (w == 0) {
-              w = 1;
-            }
-            ov = Val{tm_.mkConst(bv(w), "bb:" + key), w, !gu::is_unsign(dp)};
-          }
-          pin2val[pinkey(dp)] = ov;
-        }
+        next_args.push_back(bb_state_sym[nk].term);
+        out.outputs[std::string("\x01") + "nxt:\x01leafstate:" + bk] = Val{tm_.mkTerm(Kind::APPLY_UF, next_args), sbox->state_w, false};
       }
-      done.insert(nodekey(node));
+      done.insert(nk);
       progress = true;
       continue;
     }

@@ -103,10 +103,14 @@ everything the encoder needs.
   even when it could be flattened (so the parent stops re-solving its internals).
   A *combinational* leaf becomes shared `UF(inputs)` outputs (inputs as compare
   points) — directly sound. A **stateful** leaf becomes a **state-aware** box:
-  `outputs = UF(inputs, state)`, `next_state = UF2(inputs, state)` over one shared
+  `outputs = UF(state)` (Moore), `next_state = UF2(inputs, state)` over one shared
   state cut corresponding on both designs (matched-reset shared init, threaded by
   the BMC unroll), so the leaf output varies per cycle — a constant combinational
-  box would false-prove a timing difference through a stateful leaf. Collapsing a
+  box would false-prove a timing difference through a stateful leaf. The output is
+  Moore (state only, not the current inputs) and is emitted *before* the inputs are
+  resolved, so a collapsed stage register whose output feeds glue back to its own
+  stall/enable input does not close a false combinational cycle; divergent leaf
+  inputs are still caught by the compare points. Collapsing a
   same-library submodule (one `forward_hier` would descend into + the edge
   resolver would thread through) uses the hhds `Hier_opaque_scope` so the leaf is
   opaque to BOTH the walk and the cross-boundary edge resolution.
