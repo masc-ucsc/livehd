@@ -56,26 +56,21 @@ public:
   // one of them becomes a file-top `const X = import("X.X")` so the cross-module
   // call resolves on re-compile.  Owned by the pass; must outlive write_all().
   void set_known_modules(const std::unordered_set<std::string>* m) { known_modules_ = m; }
-  // The names (last `.`-component) of every STATEFUL module emitted in this run —
-  // a unit that lowers to a `mod` (a Sub instance) rather than an inlined `comb`.
-  // A func_call whose callee is one of these is a real instantiation, so the
-  // writer annotates it with `::[name=<lhs>]` to preserve the bound variable's
-  // hierarchical instance name on re-compile (else tolg synthesises `u_<callee>_…`,
-  // breaking name correspondence with the original v2prp source).  Owned by the
+  // The names (last `.`-component) of every module emitted in this run.  A
+  // func_call whose callee is one of these is a real submodule instantiation, so
+  // the writer annotates it with `::[name=<lhs>]` to preserve the bound
+  // variable's hierarchical instance name on re-compile (else tolg synthesises
+  // `u_<callee>_…`, breaking name correspondence with the original v2prp source).
+  // Covers stateless `comb`s too: with `upass.inline=false` they stay Sub
+  // instances, and the annotation is inert when a comb is inlined.  Owned by the
   // pass; must outlive write_all().
-  void set_stateful_modules(const std::unordered_set<std::string>* m) { stateful_modules_ = m; }
+  void set_instantiated_modules(const std::unordered_set<std::string>* m) { instantiated_modules_ = m; }
   // Scan a unit's LNAST top; if it is a slang-origin multi-output `comb`, set
   // `name`/`outputs` (ordered output port names) and return true (else false).
   static bool scan_multi_out_comb(const std::shared_ptr<Lnast>& ln, std::string& name, std::vector<std::string>& outputs);
-  // True if `ln` is a slang-origin module whose body has state — a `reg`/`latch`
-  // declare or a submodule `func_call` — i.e. it lowers to a `mod` (a Sub
-  // instance) instead of an inlined `comb`.  False for a pyrope-origin bare file
-  // (no io node).
-  static bool module_is_stateful(const std::shared_ptr<Lnast>& ln);
   // True if `nid`'s subtree contains module state (a `reg`/`latch` declare or a
-  // submodule `func_call`).  The single mod-vs-comb predicate, shared by
-  // scan_multi_out_comb (destructure decision) and module_is_stateful (call-site
-  // instance-name decision).
+  // submodule `func_call`).  The mod-vs-comb predicate used by scan_multi_out_comb
+  // (destructure decision).
   static bool subtree_has_state(const std::shared_ptr<Lnast>& ln, Lnast_nid nid);
 
 private:
@@ -235,10 +230,11 @@ private:
   // Set of all module names emitted in this run (see set_known_modules); a
   // func_call callee in this set is emitted as a file-top import.
   const std::unordered_set<std::string>* known_modules_{nullptr};
-  // Set of stateful (mod) module names emitted in this run (see
-  // set_stateful_modules); a func_call to one of these is a Sub instance and the
-  // writer emits a `::[name=<lhs>]` call-site instance-name annotation.
-  const std::unordered_set<std::string>* stateful_modules_{nullptr};
+  // Set of every module name emitted in this run, tail-keyed (see
+  // set_instantiated_modules); a func_call to one of these is a real submodule
+  // instantiation and the writer emits a `::[name=<lhs>]` call-site
+  // instance-name annotation.
+  const std::unordered_set<std::string>* instantiated_modules_{nullptr};
   // Distinct func_call callee names seen in this unit (populated in scan_node).
   std::unordered_set<std::string> func_call_callees_;
   std::unordered_set<std::string>                                  mocomb_dst_;

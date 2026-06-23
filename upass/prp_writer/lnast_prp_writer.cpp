@@ -1365,10 +1365,10 @@ void Lnast_prp_writer::write_cassert() {
 
 // ── func_call ─────────────────────────────────────────────────────────────────
 
-// The single mod-vs-comb predicate: a subtree carries module state if it holds a
+// The mod-vs-comb predicate: a subtree carries module state if it holds a
 // `reg`/`latch` declare or a submodule `func_call` (a nested instantiation makes
-// the enclosing unit a `mod`).  Shared by scan_multi_out_comb (destructure
-// decision) and module_is_stateful (call-site instance-name decision).
+// the enclosing unit a `mod`).  Used by scan_multi_out_comb (destructure
+// decision).
 bool Lnast_prp_writer::subtree_has_state(const std::shared_ptr<Lnast>& ln, Lnast_nid nid) {
   using N = Lnast_ntype;
   if (nid.is_invalid()) {
@@ -1394,22 +1394,6 @@ bool Lnast_prp_writer::subtree_has_state(const std::shared_ptr<Lnast>& ln, Lnast
     }
   }
   return false;
-}
-
-// True if `ln` is a slang-origin module (has an io node) whose body has state —
-// it lowers to a `mod` (a Sub instance) rather than an inlined `comb`.  The pass
-// builds the set of such names so write_func_call can annotate instantiations.
-bool Lnast_prp_writer::module_is_stateful(const std::shared_ptr<Lnast>& ln) {
-  using N   = Lnast_ntype;
-  auto root = ln->get_root();
-  if (root.is_invalid()) {
-    return false;
-  }
-  auto io = ln->get_child(root);
-  if (io.is_invalid() || ln->get_type(io) != N::Lnast_ntype_io) {
-    return false;  // pyrope-origin bare file (func_defs), not a slang io module
-  }
-  return subtree_has_state(ln, ln->get_sibling_next(io));
 }
 
 // Scan a unit's top to detect a slang-origin multi-output `comb` (see the header
@@ -1484,6 +1468,19 @@ void Lnast_prp_writer::write_func_call() {
     }
   }
 
+  // Preserve the hierarchical instance name.  A call to an emitted module becomes
+  // a Sub instance on re-compile (every module with `upass.inline=false`; a
+  // stateful `mod` always); without an explicit name tolg synthesises
+  // `u_<callee>_<tmp>` (the bound var is a temp in the parsed LNAST), losing
+  // correspondence with the original v2prp source hierarchy.  Annotate
+  // `Callee::[name=<lhs>]` so the Sub takes the bound variable's name.  Emitted
+  // for any real (non-temp) LHS bound to a known module — stateless `comb`s
+  // included: when such a comb is actually inlined the runner consumes the name
+  // as the inline hierarchy level (identical to the dst-name fallback), so it is
+  // never harmful.
+  const bool name_instance = !is_tmp(lhs) && instantiated_modules_ != nullptr
+                             && instantiated_modules_->count(call_tail) != 0u;
+
   if (outs != nullptr) {
     mocomb_dst_.insert(lhs);
     print("mut (");
@@ -1508,18 +1505,11 @@ void Lnast_prp_writer::write_func_call() {
     print(lhs);
     print(" = ");
     print(call_name);
-    // Preserve the hierarchical instance name.  A call to a stateful module
-    // becomes a Sub instance on re-compile; without an explicit name tolg
-    // synthesises `u_<callee>_<tmp>` (the bound var is a temp in the parsed
-    // LNAST), losing correspondence with the original v2prp source hierarchy.
-    // Annotate `Callee::[name=<lhs>]` so the Sub takes the bound variable's
-    // name.  Only for a real (non-temp) LHS bound to a known stateful module —
-    // an inlined `comb` produces no Sub, so the name would be inert noise.
-    if (!is_tmp(lhs) && stateful_modules_ != nullptr && stateful_modules_->count(call_tail) != 0u) {
-      print("::[name=");
-      print(lhs);
-      print("]");
-    }
+  }
+  if (name_instance) {
+    print("::[name=");
+    print(lhs);
+    print("]");
   }
   print("(");
   // arguments — positional args are ref/const nodes; named args are assign

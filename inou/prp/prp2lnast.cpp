@@ -2882,6 +2882,14 @@ void Prp2lnast::process_assignment(TSNode n) {
     TSNode fn = child_by_field(rv, "function");
     if (!ts_node_is_null(fn)) {
       rhs_fcall_name = std::string(trim(get_text(fn)));
+      // A call-site instance-name attribute (`Callee::[name=x]`) is part of the
+      // function node's text, but the destructure field-extractions on the LHS
+      // (`Callee.field`) name the BARE callee. Compare against that base name so
+      // a named multi-output instantiation `(t = C.o, …) = C::[name=i](…)` is
+      // accepted (the annotation only sets the Sub's hierarchical name).
+      if (auto p = rhs_fcall_name.find("::["); p != std::string::npos) {
+        rhs_fcall_name = std::string(trim(std::string_view(rhs_fcall_name).substr(0, p)));
+      }
     }
   }
   // A destructure RHS is "name-bindable" unless it is an UNNAMED positional

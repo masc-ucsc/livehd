@@ -151,6 +151,19 @@ sh_test(
     data = ["//lhd"],
 )
 
+# compile.upass.inline=false leaves a fully-defined `comb` as a Sub module
+# INSTANCE (tolg lowers it) instead of inlining it into the caller — preserving
+# the comb boundary for debug/optimization. Asserts the flatten-vs-instance
+# structural split, that the two builds are LEC-equivalent, and that
+# overload/closure dispatch (no Sub form) and the comb-can't-instantiate-mod
+# rule are unaffected.
+sh_test(
+    name = "inline_disable_test",
+    size = "large",
+    srcs = ["inline_disable_test.sh"],
+    data = ["//lhd"],
+)
+
 # 2c-color / 2p hierarchical-input (prerequisite for 2a-abc): color + partition
 # descend a multi-module Pyrope hierarchy (combinational + sequential fixtures),
 # re-link Sub instances, and the partitioned design stays LEC-equivalent.

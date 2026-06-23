@@ -28,6 +28,19 @@ sh_test(
     ],
 )
 
+# A stateless multi-output `comb` instance must keep its hierarchical name
+# through the destructure emit + re-compile (parser must accept the named
+# destructure `(t = C.o, …) = C::[name=i](…)`).
+sh_test(
+    name = "comb_inst_name_test",
+    srcs = ["tests/comb_inst_name_test.py"],
+    args = ["-i", "$(location tests/comb_inst_name.v)"],
+    data = [
+        "tests/comb_inst_name.v",
+        "//lhd",
+    ],
+)
+
 cc_test(
     name = "upass_prp_writer_test",
     srcs = ["lnast_prp_writer_test.cpp"],

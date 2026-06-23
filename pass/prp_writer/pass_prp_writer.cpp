@@ -72,17 +72,17 @@ void Pass_prp_writer::work(Eprp_var& var) {
     emitted_modules.emplace(std::string(ln->get_top_module_name()));
   }
 
-  // Stateful (mod) module names, keyed by the last `.`-component (the spelling a
-  // call site uses).  A func_call to one of these is a Sub instance, so the
-  // writer annotates it `Callee::[name=<lhs>]` to keep the bound variable's
-  // hierarchical instance name through a re-compile (v2prp name correspondence).
-  std::unordered_set<std::string> stateful_modules;
+  // Every emitted module name, keyed by the last `.`-component (the spelling a
+  // call site uses).  A func_call to one of these is a real submodule
+  // instantiation, so the writer annotates it `Callee::[name=<lhs>]` to keep the
+  // bound variable's hierarchical instance name through a re-compile (v2prp name
+  // correspondence).  Stateless `comb`s are included: with `upass.inline=false`
+  // they stay Sub instances, and the annotation is inert when a comb is inlined.
+  std::unordered_set<std::string> instantiated_modules;
   for (const auto& ln : var.lnasts) {
-    if (Lnast_prp_writer::module_is_stateful(ln)) {
-      std::string_view full = ln->get_top_module_name();
-      auto             dot  = full.rfind('.');
-      stateful_modules.emplace(std::string(dot == std::string_view::npos ? full : full.substr(dot + 1)));
-    }
+    std::string_view full = ln->get_top_module_name();
+    auto             dot  = full.rfind('.');
+    instantiated_modules.emplace(std::string(dot == std::string_view::npos ? full : full.substr(dot + 1)));
   }
 
   for (const auto& ln : var.lnasts) {
@@ -99,7 +99,7 @@ void Pass_prp_writer::work(Eprp_var& var) {
     writer.set_debug(debug_on);
     writer.set_multi_out_combs(&multi_out_combs);
     writer.set_known_modules(&emitted_modules);
-    writer.set_stateful_modules(&stateful_modules);
+    writer.set_instantiated_modules(&instantiated_modules);
     writer.write_all();
     out.close();
 
