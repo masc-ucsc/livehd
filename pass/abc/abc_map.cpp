@@ -1380,7 +1380,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         break;
       }
       auto spin = sub.create_sink_pin(pins[k]);
-      gu::set_bits(spin, 1);
+      // No set_bits on this cell-input SINK: `bits` is a driver-pin property (the
+      // 1-bit width lives on the gate's GraphIO port + the 1-bit driver net).
       auto it = net2drv.find(fin);
       if (it != net2drv.end()) {
         it->second.connect_sink(spin);

@@ -3954,11 +3954,13 @@ void tool_cat_all_pretty(hhds::Graph* g, const std::vector<Tool_filter>& filters
       return;
     }
     for (const auto& e : node.inp_edges()) {
-      int32_t b = gu::bits_of(e.sink);
+      // A sink pin has no width of its own — its width is the DRIVER's (`bits` is a
+      // driver-pin property; see graph/node_util.hpp set_bits). Read the driver.
+      int32_t b = gu::bits_of(e.driver);
       if (!take(std::format("    .{}  bits={}{}  <- {}",
                             tool_pin_label(e.sink),
                             b != 0 ? std::to_string(b) : std::string{"nil"},
-                            gu::is_unsign(e.sink) ? "" : " signed",
+                            gu::is_unsign(e.driver) ? "" : " signed",
                             tool_endpoint_name(e.driver)))) {
         return;
       }

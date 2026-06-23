@@ -369,19 +369,33 @@ inline void debug_assert_cells_sized([[maybe_unused]] hhds::Graph& g, [[maybe_un
 
 // Per-pin bit width (plain int32). Storing 0 leaves
 // the attribute untouched logically.
+//
+// `bits` is a property of the DRIVER pin (the signal source); a sink pin's width
+// is its driver's width, read via `bits_of(driver_of(sink))`. The per-pin attr key
+// folds the driver/sink bit (graph.hpp Pin_class::attr masks Pid 0x2), so a sink
+// and a same-port driver would SHARE this slot — stamping a sink would silently
+// corrupt the driver's width (and vice versa). Assert driver-only so that mistake
+// fails loudly at the call site instead of leaking a bogus sink width downstream.
 inline void set_bits(const hhds::Pin_class& pin, int32_t b) {
   if (pin.is_invalid()) {
     return;
   }
+  I(pin.is_driver(), "set_bits: bits is a driver-pin property; got a sink pin (read the driver's bits instead)");
   pin.attr(livehd::attrs::bits).set(b);
 }
 
 // Per-pin sign hint. Presence means signed; absence means unsigned. Mirrors
 // `Node_pin::set_sign` / `set_unsign`.
+//
+// Like `bits`, `signed` is a DRIVER-pin property (a sink's sign is its driver's);
+// the per-pin attr key folds the driver/sink bit, so stamping a sink would alias
+// (corrupt) a same-port driver's sign. Assert driver-only — read a sink's sign via
+// its driver (`is_unsign(driver_of(sink))`), don't replicate it onto the sink.
 inline void set_unsign(const hhds::Pin_class& pin) {
   if (pin.is_invalid()) {
     return;
   }
+  I(pin.is_driver(), "set_unsign: signed is a driver-pin property; got a sink pin (read the driver's sign instead)");
   pin.attr(livehd::attrs::pin_signed).del();
 }
 
@@ -389,6 +403,7 @@ inline void set_sign(const hhds::Pin_class& pin) {
   if (pin.is_invalid()) {
     return;
   }
+  I(pin.is_driver(), "set_sign: signed is a driver-pin property; got a sink pin (read the driver's sign instead)");
   pin.attr(livehd::attrs::pin_signed).set(livehd::attrs::pin_signed_t::value_type{});
 }
 

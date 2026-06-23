@@ -490,12 +490,12 @@ void Partitioner::build_module(const hhds::Node_class& r) {
   // per-pin sign right after materializing each port. No-op for unsigned ports
   // (the attr's absence IS unsigned).
   for (auto& p : module_inputs_[r]) {
+    // The input port, inside the body, is a DRIVER (it sources the internal logic,
+    // which reads its sign) — stamp it. The output port is a SINK; its sign is on
+    // the GraphIO (set_unsign above) for the declaration, never read off the sink,
+    // so we do NOT stamp it (signed is a driver-pin property; node_util asserts it).
     auto ip = body->get_input_pin(p.name);
     gu::is_unsign(p.driver) ? gu::set_unsign(ip) : gu::set_sign(ip);
-  }
-  for (auto& p : module_outputs_[r]) {
-    auto op = body->get_output_pin(p.name);
-    gu::is_unsign(p.driver) ? gu::set_unsign(op) : gu::set_sign(op);
   }
 
   // Body-builder hook (task 2a-abc): hand the region interface + contents to the
@@ -642,13 +642,11 @@ void Partitioner::build_top() {
       continue;
     }
     for (const auto& p : it->second) {
+      // The sub's GraphIO input port already carries the width+sign (create_io
+      // above); cgen declares the port from there and sizes the connecting wire
+      // from the driver. `bits`/`signed` are driver-pin properties, so do NOT
+      // stamp this boundary SINK (node_util.hpp set_bits asserts driver-only).
       auto spin = sub_of[r].create_sink_pin(p.name);
-      if (auto b = gu::bits_of(p.driver); b != 0) {
-        gu::set_bits(spin, b);
-      }
-      if (!gu::is_unsign(p.driver)) {
-        gu::set_sign(spin);
-      }
       if (p.from_primary) {
         t->get_input_pin(p.primary_name).connect_sink(spin);
       } else {

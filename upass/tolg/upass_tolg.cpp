@@ -321,14 +321,13 @@ public:
           }
         }
         if (dbits > 0) {
+          // The output port's width+sign live on the GraphIO (authoritative; the
+          // bits_of(pin, gio, name) overload falls back to it). `bits`/`signed` are
+          // DRIVER-pin properties, so do NOT stamp them on this output-port SINK —
+          // its width is its driver's, read through the driver (see node_util.hpp
+          // set_bits, which now asserts driver-only).
           out_gio->set_bits(ename, static_cast<uint32_t>(dbits));
           out_gio->set_unsign(ename, uns);
-          set_bits(sink, dbits);  // keep the sink pin attr consistent with the port
-          if (uns) {
-            set_unsign(sink);
-          } else {
-            set_sign(sink);
-          }
         }
       }
     }
