@@ -15,16 +15,17 @@
   <code>pass/lec/lec.md</code> (cvc5-direct: combinational miter, inductive
   flop-cut + BMC-from-reset sequential, memory arrays, combinational <code>Sub</code>
   inline flattening — all landed). This page tracks the <strong>remaining</strong>
-  work. The near-term plan is to stop solving the whole design as one flat miter and
-  instead run a <strong>bottom-up hierarchical decomposition</strong>: race the two
-  engines as a portfolio (<code>lec.engine=auto</code>), prove each module def
-  leaves-first, and turn every proven def into a <strong>black-box collapse point</strong>
-  for its parents (<code>lec.hierarchical=true</code>). This pulls the expensive
-  deep-state modules (e.g. the register file) and large combinational cones out of
-  every parent proof, and — just as importantly — it fixes the
-  <em>correspondence-incompleteness</em> that makes a flat whole-design proof give up
-  (per-module the flop/IO names match exactly ⇒ complete correspondence ⇒ a real
-  <code>Proven</code>; the parent then only needs instance-boundary correspondence).</p>
+  work. The <strong>bottom-up hierarchical decomposition</strong> is now
+  <strong>landed</strong> (see the section below): stop solving the whole design as
+  one flat miter and instead race the two engines as a portfolio
+  (<code>lec.engine=auto</code>), prove each module def leaves-first, and turn every
+  proven def into a <strong>black-box collapse point</strong> for its parents
+  (<code>lec.hierarchical=true</code>). This pulls the expensive deep-state modules
+  (e.g. the register file) and large combinational cones out of every parent proof,
+  and — just as importantly — it fixes the <em>correspondence-incompleteness</em>
+  that makes a flat whole-design proof give up (per-module the flop/IO names match
+  exactly ⇒ complete correspondence ⇒ a real <code>Proven</code>; the parent then
+  only needs instance-boundary correspondence).</p>
 
 <h2>Correspondence — no hard semdiff dependency</h2>
 <p>The bottom-up flow relies on <strong>name-based</strong> correspondence, which the
@@ -42,13 +43,16 @@
   is "every module in the hierarchy gets its own LEC"; semdiff is the later optimization
   that drops the ones it can prove identical for free.</p>
 
-<h2>Subtasks — near-term: bottom-up hierarchical decomposition</h2>
-<p>These supersede the old single "M5 (remaining)" bullet. They compose: every
-  per-module proof and the collapsed parent proof each run under the <code>auto</code>
-  portfolio, the driver wires them bottom-up, and each block emits a machine-parseable
-  progress line (last bullet) the moment it resolves.</p>
+<h2>Subtasks — bottom-up hierarchical decomposition <span style="color:#2a7">(LANDED)</span></h2>
+<p>These supersede the old single "M5 (remaining)" bullet, and are now all
+  <strong>landed</strong> (see <code>pass/lec/lec.md</code> + the <code>lec_*_test</code>
+  suite). They compose: every per-module proof and the collapsed parent proof each run
+  under the <code>auto</code> portfolio, the driver wires them bottom-up, and each block
+  emits a machine-parseable progress line the moment it resolves. The remaining items
+  are the <em>later</em> speedups in the next section (M3 def-diff skip, M6 certificate
+  cache, bitwuzla, provenance hints).</p>
 <ul class="subtasks">
-<li><strong>agentic progress reporting (per-block <code>info</code> diag).</strong> A full
+<li><em style="color:#2a7">✓ LANDED</em> (new <code>info</code> Severity + builder, <code>lec-block-*</code> diags; <code>core:diag_test</code>, <code>lec_progress_test</code>). <strong>agentic progress reporting (per-block <code>info</code> diag).</strong> A full
   bottom-up run is long, so emit a machine-parseable progress line every time a block (leaf
   or parent) resolves to <strong>pass / fail / inconclusive</strong> — an agent driving the
   flow stream-parses it instead of waiting for the end. Reuse the existing diag pretty/jsonl
@@ -72,7 +76,7 @@
   <code>lec-block-proven</code> / <code>lec-block-refuted</code> /
   <code>lec-block-inconclusive</code> (category: a new <code>lec</code>/<code>progress</code>
   or reuse <code>internal</code>).</li>
-<li><strong>auto — parallel portfolio engine (<code>lec.engine=auto</code>).</strong>
+<li><em style="color:#2a7">✓ LANDED</em> (forked ind‖bmc workers, verdict-trust asymmetry; <code>lec_auto_test</code>). <strong>auto — parallel portfolio engine (<code>lec.engine=auto</code>).</strong>
   Race the two real engines on the same <code>--ref</code>/<code>--impl</code> pair and
   take the first <em>trustworthy</em> verdict. (Today only <code>bmc</code> and the
   single-step inductive miter exist; <code>ind</code>/<code>ic3</code>/<code>auto</code>
@@ -93,7 +97,7 @@
   two <code>lhd lec</code> workers, first conclusive wins, kill the other) — free
   timeout/kill, no threading landmine. Generalizes the existing sequential
   <code>phase=full</code> two-query orchestration.</li>
-<li><strong>proven-module black-box collapse (the <code>--collapse</code> knob).</strong>
+<li><em style="color:#2a7">✓ LANDED</em> (<code>--collapse</code> / <code>lec.collapse</code>; hhds <code>Hier_opaque_scope</code> for same-library leaves; <code>lec_collapse_test</code>). <strong>proven-module black-box collapse (the <code>--collapse</code> knob).</strong>
   The encoder already collapses opaque <code>Sub</code> instances to a sound black-box —
   shared output symbols keyed by <code>defname#occurrence</code> with inputs as compare
   points (<code>encode.cpp:704-765</code>, <code>set_shared_bbox</code>) — but only when
@@ -104,7 +108,7 @@
   directly sound: outputs become <code>UF(inputs)</code>, identical on both sides, and
   the full free-input isolation proof discharges "equal inputs ⇒ equal outputs". Effect:
   the parent stops re-solving the leaf's internals.</li>
-<li><strong>sequential black-box (stateful collapse points).</strong> Today's black-box
+<li><em style="color:#2a7">✓ LANDED</em> (<code>State_box</code> UF(inputs,state)/next; shared state cut threaded across BMC; <code>lec_seqbox_test</code>). <strong>sequential black-box (stateful collapse points).</strong> Today's black-box
   models outputs as a pure function of inputs (no state) — sound only for
   <em>combinational</em> leaves. To collapse a <em>stateful</em> leaf (the register file,
   the <code>StageReg_*</code> set — exactly the deep-state modules that are slow and
@@ -116,7 +120,7 @@
   BMC-from-reset it additionally needs the matched-reset init so the box doesn't lose the
   leaf's reset behavior. This is what lets the register file be pulled out of the top
   proof — the single biggest win for the dino case.</li>
-<li><strong>bottom-up hierarchical driver (<code>lec.hierarchical=true</code>).</strong>
+<li><em style="color:#2a7">✓ LANDED</em> (def DAG topo-order, leaves-first under <code>auto</code>, collapse proven children, CEGAR-flatten the rest; <code>lec_hier_test</code>. v1 sequential; parallel-leaves is a later speedup). <strong>bottom-up hierarchical driver (<code>lec.hierarchical=true</code>).</strong>
   Build the module-def dependency DAG, topo-order it, and LEC defs <strong>leaves-first,
   each under <code>auto</code>, in parallel</strong>. Record the proven set; for each
   parent, force-black-box its <em>proven</em> child instances (via the collapse knob) and
