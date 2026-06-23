@@ -255,7 +255,7 @@ void Graphviz::populate_lg_data(hhds::Graph* g, std::string_view dot_postfix) {
   std::string data = "digraph {\n";
 
   for (auto node : g->fast_class()) {
-    if (node.inp_edges().empty() && node.out_edges().empty()) {
+    if (!node.has_inp_edges() && !node.has_out_edges()) {  // fast: don't materialize the edge vectors
       continue;
     }
     std::string node_info;

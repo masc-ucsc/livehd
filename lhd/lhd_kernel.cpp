@@ -221,7 +221,7 @@ void dump_graph_text(std::ostream& os, hhds::Graph* g) {
     }
   }
   for (auto node : g->fast_class()) {
-    if (node.inp_edges().empty() && node.out_edges().empty()) {
+    if (!node.has_inp_edges() && !node.has_out_edges()) {  // fast: don't materialize the edge vectors
       continue;
     }
     if (gu::type_op_of(node) == Ntype_op::Nconst) {

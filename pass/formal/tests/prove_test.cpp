@@ -66,7 +66,7 @@ std::shared_ptr<hhds::Graph> build_eq_same(hhds::GraphLibrary& lib, const std::s
   return g;
 }
 
-hhds::Pin_class out_drv(const std::shared_ptr<hhds::Graph>& g) { return g->get_output_pin("out").inp_edges()[0].driver; }
+hhds::Pin_class out_drv(const std::shared_ptr<hhds::Graph>& g) { return g->get_output_pin("out").get_driver_pins()[0]; }
 
 }  // namespace
 
