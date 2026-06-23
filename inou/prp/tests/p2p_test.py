@@ -60,8 +60,14 @@ def main():
 
     # 1. Pyrope -> upass -> Pyrope via pass.prp_writer (safety net fails on any
     #    unimplemented construct).
+    #    Pin compile.upass.inline=true: this gate recompiles only the single
+    #    emitted `<top>.prp`, so it needs a self-contained (flat) re-emission.
+    #    With the default (inline=false) a `comb` called with runtime args is
+    #    emitted as a separate Sub module, and the single-file recompile cannot
+    #    resolve it (the hierarchical multi-file roundtrip is a separate flow).
     comp = subprocess.run(
-        [lhd, "compile", prp, "--emit-dir", "pyrope:" + out_dir + "/", "--workdir", os.path.join(work, "w_emit")],
+        [lhd, "compile", prp, "--set", "compile.upass.inline=true",
+         "--emit-dir", "pyrope:" + out_dir + "/", "--workdir", os.path.join(work, "w_emit")],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if comp.returncode != 0:
         print("{} - p2p - FAILED: prp->prp emission rc={}".format(name, comp.returncode))

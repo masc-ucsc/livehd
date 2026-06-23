@@ -2824,18 +2824,18 @@ bool uPass_runner::try_inline_func_call() {
 
   auto callee = lookup_callee(callee_name);
 
-  // compile.upass.inline=false: a DIRECTLY-resolved, Sub-convertible `comb` is
-  // left as a func_call so tolg lowers it to a module instance instead of
-  // inlining (preserving the comb boundary for debug/optimization). Only a
-  // plain by-name call qualifies: a callee reached through a function-valued
-  // param (closure), or through the method/overload/lambda-array fallbacks
-  // below (which run only when this initial lookup fails), has no Sub form and
-  // must always inline. The cursor is untouched, so the func_call emits as-is.
-  if (!inlining_enabled_ && callee && !via_param_binding
-      && sub_convertible_combs_.contains(std::string(callee->get_top_module_name()))) {
-    lm->restore_cursor(saved);
-    return false;
-  }
+  // compile.upass.inline=false: a DIRECTLY-resolved, Sub-convertible `comb`
+  // whose call produces RUNTIME hardware is left as a func_call so tolg lowers
+  // it to a module instance instead of inlining (preserving the comb boundary
+  // for debug/optimization). Only a plain by-name call qualifies: a callee
+  // reached through a function-valued param (closure), or through the
+  // method/overload/lambda-array fallbacks below (which run only when this
+  // initial lookup fails), has no Sub form and must always inline. The actual
+  // runtime-vs-comptime decision is deferred to the post-gather check below: an
+  // all-constant call still inlines so it folds to a comptime value (casserts /
+  // comptime evaluation keep working — there is no runtime instance to keep).
+  const bool consider_sub_instance = !inlining_enabled_ && callee && !via_param_binding
+                                     && sub_convertible_combs_.contains(std::string(callee->get_top_module_name()));
 
   // Method dispatch: `obj.method(args)` lowers to `func_call[dst, method,
   // store(__ufcs_arg, obj), args…]` — `method` is not itself a registry
@@ -3527,42 +3527,65 @@ bool uPass_runner::try_inline_func_call() {
                    "a `ref` parameter writes back into the caller's variable; use a `mut` value");
   }
 
+  // Whether a numeric actual is a comptime constant. Drives two gates: the
+  // recursion base-case (a recursive callee only unrolls when every actual
+  // folds) and the inline=false Sub decision (a call with a runtime actual is
+  // the one that produces hardware worth keeping as an instance).
+  auto actual_is_const = [&](std::size_t i) -> bool {
+    if (!param_set[i] || !param_func[i].empty()) {
+      return true;  // unset or function-valued param — not a numeric driver
+    }
+    const auto& pv = param_val[i];
+    if (pv.is_const()) {
+      return true;
+    }
+    if (pv.is_ref()) {
+      auto fv = try_fold_ref(pv.get_name());
+      if (fv && !fv->is_invalid() && !fv->has_unknowns()) {
+        return true;
+      }
+      // A bundle actual (e.g. `tree_sum(v = data4, …)`) folds via the shared
+      // ST instead of scalar fold_ref: const when every field is a concrete
+      // comptime value.
+      if (auto bf = try_bundle_fields(pv.get_name()); bf && !bf->empty()) {
+        for (const auto& [k, v] : *bf) {
+          if (v.is_invalid() || v.has_unknowns()) {
+            return false;
+          }
+        }
+        return true;
+      }
+    }
+    return false;
+  };
+  const bool is_recursive_callee = recursive_callees_.contains(std::string(callee->get_top_module_name()));
+  bool       all_actuals_const   = true;
+  if (is_recursive_callee || consider_sub_instance) {
+    for (std::size_t i = 0; i < nparams; ++i) {
+      if (!actual_is_const(i)) {
+        all_actuals_const = false;
+        break;
+      }
+    }
+  }
+
   // Recursive callees may only be spliced when every actual is a comptime
   // constant — only then does the body's base-case condition fold so
   // process_if prunes the recursive arm and the unroll terminates. With a
   // non-const arg (e.g. the standalone function body, where the param is an
   // unbound input) the recursion would never bottom out and just runs to the
   // fuel cap; leave those as a runtime func_call (→ evaluator / real call).
-  if (recursive_callees_.contains(std::string(callee->get_top_module_name()))) {
-    for (std::size_t i = 0; i < nparams; ++i) {
-      if (!param_set[i] || !param_func[i].empty()) {
-        continue;  // unset or function-valued param — not a numeric base-case driver
-      }
-      const auto& pv         = param_val[i];
-      bool        is_const_a = pv.is_const();
-      if (pv.is_ref()) {
-        auto fv    = try_fold_ref(pv.get_name());
-        is_const_a = fv && !fv->is_invalid() && !fv->has_unknowns();
-        // A bundle actual (e.g. `tree_sum(v = data4, …)`) folds via the shared
-        // ST instead of scalar fold_ref: treat it as const when every field is
-        // a concrete comptime value so the recursion's base case still folds.
-        if (!is_const_a) {
-          if (auto bf = try_bundle_fields(pv.get_name()); bf && !bf->empty()) {
-            is_const_a = true;
-            for (const auto& [k, v] : *bf) {
-              if (v.is_invalid() || v.has_unknowns()) {
-                is_const_a = false;
-                break;
-              }
-            }
-          }
-        }
-      }
-      if (!is_const_a) {
-        lm->restore_cursor(saved);
-        return false;
-      }
-    }
+  if (is_recursive_callee && !all_actuals_const) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+
+  // compile.upass.inline=false (see consider_sub_instance above): decline the
+  // splice for a runtime-argument call so tolg emits a Sub module instance. An
+  // all-constant call falls through and inlines, folding to a comptime value.
+  if (consider_sub_instance && !all_actuals_const) {
+    lm->restore_cursor(saved);
+    return false;
   }
 
   // ── Splice ───────────────────────────────────────────────────────────────

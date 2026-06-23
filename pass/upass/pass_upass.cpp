@@ -137,10 +137,11 @@ void Pass_upass::setup() {
                         "hard-erroring (default false)",
                         "false");
   m1.add_label_optional("inline",
-                        "true|false: inline fully-defined `comb` calls (default true); false instead emits a "
-                        "sub-module instance, preserving the comb boundary for debug/optimization (stateful "
-                        "`mod`/`pipe`, recursive, `ref`/var-arg, and template combs always stay as instances/inline)",
-                        "true");
+                        "true|false: inline fully-defined `comb` calls. Default FALSE — a directly-named comb is "
+                        "emitted as a sub-module instance, preserving the comb boundary for debug/optimization; the "
+                        "O2 compile recipe sets it true to flatten. (stateful `mod`/`pipe`, recursive, `ref`/var-arg, "
+                        "and template combs always stay as instances/inline regardless.)",
+                        "false");
   register_pass(m1);
 }
 

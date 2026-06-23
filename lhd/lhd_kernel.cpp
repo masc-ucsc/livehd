@@ -2066,6 +2066,12 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
       {"constprop",    "1"},
       { "verifier", "true"}
   };
+  // comb inlining is OFF by default (a directly-named, fully-defined comb is
+  // emitted as a Sub module instance, preserving the comb boundary for
+  // debug/optimization); only the O2 recipe flattens by inlining. Bare `compile`
+  // and O0/O1 keep the boundary. A user `--set compile.upass.inline=…` overrides
+  // (merge_sets below runs after this).
+  up["inline"] = (opts.recipe == "O2") ? "true" : "false";
   // Derived toln gate (the dual of the emit-derived tolg gate): when neither
   // the lnast.tolg stage below (need_graphs) nor any post-upass LNAST emit
   // (ln:/pyrope:/lnast-dump:) consumes the rewritten tree, skip materializing
