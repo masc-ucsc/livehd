@@ -238,11 +238,11 @@ private:
   // Distinct func_call callee names seen in this unit (populated in scan_node).
   std::unordered_set<std::string> func_call_callees_;
   // Import-const alias per callee module name, used when the natural import name
-  // (`const X = import("X.X")`) would case-INSENSITIVELY collide with a submodule
-  // instance variable (firtool names instances as camelCase of the type, e.g.
-  // `subModule` for `SubModule`; Pyrope identifiers are case-insensitive, so the
-  // instance read would otherwise resolve to the import const).  Maps module name
-  // -> emitted alias (== module name when no collision).  Cleared per module.
+  // (`const X = import("X.X")`) would EXACTLY collide with a submodule instance
+  // variable of the same spelling.  Names are case-sensitive, so the firtool
+  // camelCase instance `subModule` does NOT collide with the import const
+  // `SubModule`.  Maps module name -> emitted alias (== module name when no
+  // collision).  Cleared per module.
   std::unordered_map<std::string, std::string>                     import_alias_;
   std::unordered_set<std::string>                                  mocomb_dst_;
   std::unordered_map<std::string, std::string>                     mocomb_field_;

@@ -12,11 +12,11 @@
 
 namespace livehd::lec {
 
-// Port/signal names are matched case-insensitively (LiveHD/Pyrope name policy):
-// the ref/impl IO pairing must fold case so a port `Clk` on one side pairs with
-// `clk` on the other. Reuses hhds::Ci_hash/Ci_eq (via hhds/graph.hpp).
+// Port/signal names are matched case-sensitively (LiveHD/Pyrope name policy):
+// the ref/impl IO pairing requires identical spelling, so a port `Clk` on one
+// side does NOT pair with `clk` on the other.
 template <typename V>
-using Io_name_map = absl::flat_hash_map<std::string, V, hhds::Ci_hash, hhds::Ci_eq>;
+using Io_name_map = absl::flat_hash_map<std::string, V>;
 
 // L0 encoder: turns one *combinational* LiveHD LGraph (hhds::Graph) into cvc5
 // bit-vector terms, mirroring inou/cgen's process_simple_node semantics. It is
@@ -35,7 +35,7 @@ struct Encoded {
   bool        ok = true;
   std::string error;  // first unsupported-op / structural error, when !ok
 
-  // Graph IO, by declared port name (case-insensitive ref/impl pairing).
+  // Graph IO, by declared port name (case-sensitive ref/impl pairing).
   Io_name_map<Val> inputs;
   Io_name_map<Val> outputs;
 
@@ -167,7 +167,7 @@ public:
   // other design shares one symbol. Unset / key-absent ⇒ the canon name is used.
   void set_name_alias(const Io_name_map<std::string>* a) { name_alias_ = a; }
 
-  // Proven-module black-box collapse set (lec.collapse): def-NAMES (case-insensitive)
+  // Proven-module black-box collapse set (lec.collapse): def-NAMES (case-sensitive)
   // that must be FORCED to the blackbox path even when sub_lib_ has a combinational
   // def that could be flattened inline. A def the driver already proved equivalent
   // becomes a sound UF(inputs) box, so the parent stops re-solving its internals.

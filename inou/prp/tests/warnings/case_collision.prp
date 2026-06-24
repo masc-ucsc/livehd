@@ -1,0 +1,15 @@
+/*
+:name: case_collision
+:type: warning
+:warning: differ only in letter case
+:help:    rename one of them
+*/
+// Two distinct variables whose names differ ONLY by letter case. Names are
+// case-sensitive, so `total` and `Total` are separate nets — but because the
+// old policy folded them, the compiler warns that the program's meaning may
+// have changed.
+comb foo(a:u8) -> (z:u8) {
+  mut total:u8 = a
+  mut Total:u8 = a + 1    // locate_warning_here  (differs only by case from `total`)
+  z = total + Total
+}

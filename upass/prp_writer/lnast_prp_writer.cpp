@@ -413,23 +413,15 @@ void Lnast_prp_writer::write_module() {
       }
     }
     std::sort(imports.begin(), imports.end());
-    // Pyrope identifiers are case-INSENSITIVE.  firtool names a submodule instance
-    // as the camelCase of its type (`subModule` for `SubModule`), so the natural
-    // import binding `const SubModule = import("SubModule.SubModule")` collides with
-    // the instance variable `subModule` — reading the instance then resolves to the
-    // import const (the whole module is emitted with a dangling output and a string
-    // driver).  Detect such collisions against the instance-result variable names
-    // and emit a non-colliding alias instead, referenced at the call sites.
-    auto lower = [](std::string s) {
-      for (auto& ch : s) {
-        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-      }
-      return s;
-    };
-    std::unordered_set<std::string> inst_lc;  // lowercased single-func_call-def var names
+    // Names are CASE-SENSITIVE.  firtool names a submodule instance as the
+    // camelCase of its type (`subModule` for `SubModule`), so the import binding
+    // `const SubModule = import("SubModule.SubModule")` and the instance variable
+    // `subModule` are DISTINCT and never collide — the alias below only fires on
+    // an EXACT same-spelling clash between an import const and an instance var.
+    std::unordered_set<std::string> inst_names;  // single-func_call-def var names
     for (const auto& [name, fi] : fold_info_) {
       if (fi.def_count == 1 && fi.def_type == Lnast_ntype::Lnast_ntype_func_call) {
-        inst_lc.insert(lower(std::string(strip_prefix(name))));
+        inst_names.insert(std::string(strip_prefix(name)));
       }
     }
     import_alias_.clear();
@@ -443,10 +435,10 @@ void Lnast_prp_writer::write_module() {
       // bare-instance-read form (`mut inst = Callee(...); x = inst`) hits the bug, so
       // alias only non-multi-out callees.
       const bool multi_out = multi_out_combs_ != nullptr && multi_out_combs_->count(nm) != 0u;
-      if (!multi_out && inst_lc.count(lower(nm)) != 0u) {   // would collide with an instance var
+      if (!multi_out && inst_names.count(nm) != 0u) {   // would collide with an instance var
         do {
-          alias += "_t";                                    // PascalCase + "_t": no camelCase clash
-        } while (inst_lc.count(lower(alias)) != 0u || (known_modules_ != nullptr && known_modules_->count(alias) != 0u));
+          alias += "_t";                                 // disambiguating suffix
+        } while (inst_names.count(alias) != 0u || (known_modules_ != nullptr && known_modules_->count(alias) != 0u));
       }
       import_alias_[nm] = alias;
       os << "const " << alias << " = import(\"" << nm << "." << nm << "\")\n";

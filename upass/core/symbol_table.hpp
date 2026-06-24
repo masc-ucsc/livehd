@@ -9,7 +9,6 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "bundle.hpp"
-#include "ci_string.hpp"  // Ci_str_map/Ci_str_set: variable names match case-insensitively
 #include "hlop/dlop.hpp"
 #include "str_tools.hpp"
 
@@ -27,7 +26,7 @@ public:
     std::string                                               func_id;
     std::string                                               scope;  // 0.0.1 ...
     std::vector<std::string>           declared;
-    Ci_str_map<std::shared_ptr<Bundle>> varmap;  // field, value, path_scope (case-insensitive)
+    absl::flat_hash_map<std::string, std::shared_ptr<Bundle>> varmap;  // field, value, path_scope (case-sensitive)
     Scope*                                                    parent{nullptr};
     // Set by the caller (constprop's process_stmts) when this scope is the
     // body of an if-arm whose condition is not a comptime-known true/false.
@@ -104,20 +103,20 @@ public:
     Dlop        decl_min;
     bool        comptime{false};
   };
-  Ci_str_map<Pending_decl> pending_decl_facts;
+  absl::flat_hash_map<std::string, Pending_decl> pending_decl_facts;
 
   // Extraction origin: tuple_get dst tmp → "src.field" path. The
   // runner's declare/type_spec bake back-flows per-field declared facts to
   // the SOURCE field through this (the typed-tuple-literal lowering types
   // the extraction tmp, not the field). Transient; cleared with the stash.
-  Ci_str_map<std::string> tget_origin;
+  absl::flat_hash_map<std::string, std::string> tget_origin;
 
   // Names whose nil initializer was SYNTHESIZED by the runner's
   // inliner (output seeds, untyped-param prologues). The typecheck rule
   // "an unset/nil scalar destination does not infer a tuple shape from a
   // tuple RHS" exempts these — the prologue legally binds a tuple over its
   // own nil seed. Transient; cleared with the other per-run state.
-  Ci_str_set nil_seeded;
+  absl::flat_hash_set<std::string> nil_seeded;
 
   // The strict comptime-fold read (ex runner_fold_fn / fold_ref):
   // a concrete (no-unknowns) value on a TRIVIAL-SCALAR binding. A
@@ -140,7 +139,7 @@ public:
   // slot → source ref name, for slots whose value is runtime (the bundle
   // stores null there). The runner rewrites `t[slot]` / `for x in t` into a
   // copy from the ref. Erased wholesale when the dst tuple is rebuilt.
-  Ci_str_map<std::map<std::string, std::string>> tuple_slot_ref;
+  absl::flat_hash_map<std::string, std::map<std::string, std::string>> tuple_slot_ref;
 
   bool set(std::string_view key, std::shared_ptr<Bundle> bundle);
   bool set(std::string_view key, const Dlop& trivial);

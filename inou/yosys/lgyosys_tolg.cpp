@@ -1360,8 +1360,20 @@ static void process_assigns(RTLIL::Module* mod, hhds::Graph* g) {
               int delta = (lhs_off + lhs_pos) - (rhs_off + rhs_pos);
               for (int pos = 0; pos < rchunk.width; ++pos) {
                 I(lhs_off + lhs_pos < lhs_wire->width);
-                I(partially_assigned_fwd[lhs_wire][lhs_off + lhs_pos] == 0);
-                partially_assigned_fwd[lhs_wire][lhs_off + lhs_pos] = delta;
+                // process_assigns runs TWICE per module (an alias re-resolution
+                // pass was added alongside process_cell_drivers_intialization so
+                // partial slices bind to real cell/flop drivers instead of
+                // placeholders). The second pass re-walks the same connections,
+                // so a self-referencing partial (e.g. `y[3:0] = y[27:24]`) records
+                // the same per-bit shift again. Tolerate an identical re-record;
+                // only a CONFLICTING shift to the same bit (two distinct
+                // self-references overlapping) is a real error. partially_assigned
+                // is NOT cleared between the two passes (it also accumulates the
+                // cell-driver-init slices), so this slot can legitimately be
+                // pre-set to `delta` here.
+                auto& fwd_slot = partially_assigned_fwd[lhs_wire][lhs_off + lhs_pos];
+                I(fwd_slot == 0 || fwd_slot == delta);
+                fwd_slot = delta;
                 ++lhs_pos;
                 ++rhs_pos;
                 ++global_lhs_pos;

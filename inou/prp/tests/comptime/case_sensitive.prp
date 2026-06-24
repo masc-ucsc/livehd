@@ -1,0 +1,20 @@
+/*
+:name: case_sensitive
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+// Names are CASE-SENSITIVE: spellings differing only by letter case are
+// DISTINCT bindings (the old case-insensitive fold has been removed).
+// `Adder` and `adder` are two different modules; `myVar` and `MyVar` are two
+// different consts.
+
+comb Adder(a, b) -> (r) { r = a + b }
+comb adder(a, b) -> (r) { r = a + b + 1 }
+cassert(Adder(a=1, b=2) == 3)
+cassert(adder(a=1, b=2) == 4)
+
+const myVar = 7
+const MyVar = 8
+cassert(myVar == 7)
+cassert(MyVar == 8)

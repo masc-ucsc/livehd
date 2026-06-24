@@ -19,7 +19,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include "ci_string.hpp"
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "hlop/dlop.hpp"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
@@ -60,7 +61,7 @@ struct Call_actual {
 // resolve_current_scalar today).
 std::optional<std::vector<Call_actual>> collect_call_actuals(
     Lnast_manager& lm, const Symbol_table& st,
-    const Ci_str_map<std::shared_ptr<Lnast>>&   function_registry,
+    const absl::flat_hash_map<std::string, std::shared_ptr<Lnast>>&   function_registry,
     const std::function<std::optional<Dlop>()>& resolve_scalar_at_cursor);
 
 
@@ -69,16 +70,16 @@ std::optional<std::vector<Call_actual>> collect_call_actuals(
 // io) wins over an empty-io top module of the same name (a file's top can
 // share its comb's name — the extracted body must win or the inline bails).
 // nullptr = not found / ambiguous suffix. Templated over the registry map; BOTH
-// callers key a CASE-INSENSITIVE map (Ci_str_map = absl::flat_hash_map with
-// str_tools::Ci_hash/Ci_eq), so the exact `.find()` folds case; the suffix scan
-// uses str_tools::ci_ends_with to match `<module>.<name>` case-insensitively.
+// callers key a case-sensitive map, so the exact `.find()` matches the full
+// name verbatim; the suffix scan uses str_tools::ends_with to match
+// `<module>.<name>` case-sensitively.
 template <typename Registry>
 std::shared_ptr<Lnast> lookup_callee(const Registry& function_registry, std::string_view name) {
   // Prefer a candidate carrying a real comb signature (non-empty io).
   auto has_sig = [](const std::shared_ptr<Lnast>& l) { return l && !l->io_meta().empty(); };
 
   std::shared_ptr<Lnast> exact;
-  if (auto it = function_registry.find(name); it != function_registry.end()) {  // transparent Ci_hash/Ci_eq: no std::string alloc
+  if (auto it = function_registry.find(name); it != function_registry.end()) {  // heterogeneous string_view lookup: no std::string alloc
     exact = it->second;
   }
   // Fast path: an exact name match WITH a signature always wins (see the
@@ -94,7 +95,7 @@ std::shared_ptr<Lnast> lookup_callee(const Registry& function_registry, std::str
   std::shared_ptr<Lnast> suffix_body;
   int                    suffix_matches = 0;
   for (const auto& [k, v] : function_registry) {
-    if (k.size() > suffix.size() && str_tools::ci_ends_with(k, suffix)) {
+    if (k.size() > suffix.size() && str_tools::ends_with(k, suffix)) {
       suffix_body = v;
       ++suffix_matches;
     }
@@ -113,8 +114,8 @@ std::shared_ptr<Lnast> lookup_callee(const Registry& function_registry, std::str
 // unit's pub-namespace bundle on the dest. Ambiguity = permanent error;
 // unknown unit / values-pending = pend_import (kernel whole-file retry).
 void process_import_call(Lnast_manager& lm, Symbol_table& st,
-                         const Ci_str_map<std::shared_ptr<Lnast>>&      function_registry,
-                         const Ci_str_set&                              ambiguous_units,
+                         const absl::flat_hash_map<std::string, std::shared_ptr<Lnast>>&      function_registry,
+                         const absl::flat_hash_set<std::string>&                              ambiguous_units,
                          const std::function<void(const std::string&)>& pend_import,
                          const std::function<void(std::string_view, const Dlop&)>& store_trivial,
                          const std::string&                                        dst);

@@ -225,6 +225,12 @@ sh_test(
             # signed_one_bit_cmp: known-failing miscompile tracker (1-bit signed
             # ordered compare reads unsigned). Run via the fixme target below.
             "tests/equiv/signed_one_bit_cmp.prp",
+            # gen_type_cast: DELIBERATELY-broken generics repro — the `T(a)`
+            # constructor on a generic param does not lower yet (see the file
+            # header, tracked by 3g). It cannot compile, so the forward equiv
+            # test can never pass; run it via the fixme target below. The reverse
+            # direction is already fixme-tagged through _V2PRP_FIXME.
+            "tests/equiv/gen_type_cast.prp",
         ],
     )
 ]
@@ -242,6 +248,27 @@ sh_test(
         "//inou/prp:tests/pyrope_test.py",
         "//inou/prp:tests/equiv/signed_one_bit_cmp.prp",
         "//inou/prp:tests/equiv/signed_one_bit_cmp.v",
+        "//lhd",
+    ],
+    deps = ["//inou/yosys:scripts"],
+    tags = ["fixme"],
+)
+
+# Known-failing equiv tracker (fixme): gen_type_cast.prp is a DELIBERATELY-broken
+# generics repro — the `T(a)` constructor on a generic parameter does not lower
+# yet (the binding pass leaves it as a call to `inl1_T`; see the file header,
+# tracked by 3g). The .prp cannot compile, so the forward equiv pair can never
+# pass. Excluded from the glob above; tagged `fixme` so `bazel test //... (-fixme)`
+# stays green. Run it: bazel test //inou/prp:prp-equiv-gen_type_cast --test_tag_filters=
+sh_test(
+    name = "prp-equiv-gen_type_cast",
+    srcs = ["tests/pyrope_test.py"],
+    args = ["-i", "$(location //inou/prp:tests/equiv/gen_type_cast.prp)"],
+    data = [
+        "//inou/prp:tests/prplib.py",
+        "//inou/prp:tests/pyrope_test.py",
+        "//inou/prp:tests/equiv/gen_type_cast.prp",
+        "//inou/prp:tests/equiv/gen_type_cast.v",
         "//lhd",
     ],
     deps = ["//inou/yosys:scripts"],

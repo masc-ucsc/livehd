@@ -653,7 +653,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // so the parent stops re-solving its internals. query.cpp's shared-bbox
       // builder applies the identical predicate so the box's outputs are shared,
       // and forward_hier(opaque) does NOT descend into it (so the body below is
-      // not double-encoded). Matched case-insensitively (name policy).
+      // not double-encoded). Matched case-sensitively (name policy).
       const bool force_collapse
           = collapse_defs_ != nullptr && sub_io != nullptr && collapse_defs_->count(std::string(sub_io->get_name())) > 0;
 

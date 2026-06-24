@@ -107,19 +107,19 @@ inline std::string_view get_all_but_first_level(std::string_view key) {
 }
 
 inline bool match(std::string_view a, std::string_view b) {
-  // Canonical keys, matched case-insensitively (Pyrope names fold case).
-  return str_tools::ci_equal(a, b);
+  // Canonical keys, matched case-sensitively (Pyrope names are case-sensitive).
+  return (a == b);
 }
 
 inline size_t match_first_partial(std::string_view a, std::string_view b) {
   // a is a "partial prefix match" of b iff a == b (full match — return
   // a.size()) or b starts with a followed by a `.` segment separator
   // (prefix match — return a.size()+1 to skip the dot). Otherwise 0.
-  // Names fold case (ASCII), so the compares are case-insensitive.
-  if (str_tools::ci_equal(a, b)) {
+  // Names are case-sensitive, so the compares are exact.
+  if ((a == b)) {
     return a.size();
   }
-  if (b.size() > a.size() && b[a.size()] == '.' && str_tools::ci_starts_with(b, a)) {
+  if (b.size() > a.size() && b[a.size()] == '.' && b.starts_with(a)) {
     return a.size() + 1;
   }
   return 0;

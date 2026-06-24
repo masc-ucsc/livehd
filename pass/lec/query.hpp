@@ -117,7 +117,7 @@ struct Lec_options {
   // combinational def supplied via --lib). Their outputs become shared UF(inputs)
   // symbols and their inputs become miter compare points, so the parent proof
   // stops re-solving the leaf's internals ("equal inputs => equal outputs", already
-  // discharged when the leaf was proven). Matched case-insensitively (name policy).
+  // discharged when the leaf was proven). Matched case-sensitively (name policy).
   // The bottom-up hierarchical driver fills this with its per-round proven set.
   std::vector<std::string> collapse;
 

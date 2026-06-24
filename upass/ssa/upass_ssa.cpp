@@ -1,4 +1,5 @@
-//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for
+//  details.
 
 #include "upass_ssa.hpp"
 
@@ -11,36 +12,39 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "ci_string.hpp"  // Ci_str_map/Ci_str_set: variable names match case-insensitively
 #include "diag.hpp"
 #include "hlop/dlop.hpp"
-#include "range_bits.hpp"
 #include "lnast_ntype.hpp"
+#include "range_bits.hpp"
+#include "str_tools.hpp"
 
 namespace {
 // Returns true for LNAST statement types whose first child is the write
 // destination (LHS) and whose remaining children are read operands (RHS).
 // This range covers: dp_assign, declare, store, delay_assign, all arithmetic/
 // logic/comparison/shift/bit-manipulation ops up to `ge` inclusive.
-// (`assign` was deleted; `dp_assign` is now the low anchor. store/declare are in
-// range; the caller excludes declare + store-as-tuple_set from versioning.)
+// (`assign` was deleted; `dp_assign` is now the low anchor. store/declare are
+// in range; the caller excludes declare + store-as-tuple_set from versioning.)
 // Excluded: if, for, while, func_*, stmts, io, top, ref, const, tuple_*,
 // attr_*, cassert, type_*, and all type-leaf nodes.
 constexpr bool stmt_has_dest(Lnast_ntype::Lnast_ntype_int t) {
-  return t >= Lnast_ntype::Lnast_ntype_dp_assign && t <= Lnast_ntype::Lnast_ntype_ge;
+  return t >= Lnast_ntype::Lnast_ntype_dp_assign &&
+         t <= Lnast_ntype::Lnast_ntype_ge;
 }
 
 // Parse the bits/is_signed from a prim_type_uint/prim_type_sint subtree
 // (or any other type ntype). Returns {bits=0, is_signed=true} on miss.
 struct Type_info {
-  int32_t bits      = 0;
-  bool    is_signed = true;
-  Io_kind kind      = Io_kind::none;
-  bool    has_range = false;  // explicit `int(min,max)` bounds (both known, fit i64)
+  int32_t bits = 0;
+  bool is_signed = true;
+  Io_kind kind = Io_kind::none;
+  bool has_range =
+      false; // explicit `int(min,max)` bounds (both known, fit i64)
   int64_t range_min = 0;
   int64_t range_max = 0;
 };
-Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid) {
+Type_info type_info_from(const std::shared_ptr<Lnast> &lnast,
+                         Lnast_nid type_nid) {
   Type_info ti;
   if (type_nid.is_invalid()) {
     return ti;
@@ -55,33 +59,39 @@ Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid
     return ti;
   }
   if (Lnast_ntype::is_prim_type_int(tty)) {
-    ti.kind                     = Io_kind::integer;
+    ti.kind = Io_kind::integer;
     // Canonical integer: derive bits/signed from the (max,min)
     // range children ("nil" = unbounded). signed ⇐ min<0; bits ⇐ both known.
-    auto                max_nid = lnast->get_first_child(type_nid);
+    auto max_nid = lnast->get_first_child(type_nid);
     std::optional<Dlop> max_v;
     std::optional<Dlop> min_v;
-    if (!max_nid.is_invalid() && Lnast_ntype::is_const(lnast->get_type(max_nid))) {
+    if (!max_nid.is_invalid() &&
+        Lnast_ntype::is_const(lnast->get_type(max_nid))) {
       auto v = Dlop::from_pyrope(lnast->get_name(max_nid));
       if (v->is_integer()) {
         max_v = *v;
       }
       auto min_nid = lnast->get_sibling_next(max_nid);
-      if (!min_nid.is_invalid() && Lnast_ntype::is_const(lnast->get_type(min_nid))) {
+      if (!min_nid.is_invalid() &&
+          Lnast_ntype::is_const(lnast->get_type(min_nid))) {
         auto mv = Dlop::from_pyrope(lnast->get_name(min_nid));
         if (mv->is_integer()) {
           min_v = *mv;
         }
       }
     }
-    ti.is_signed = !(min_v && !min_v->is_negative());  // unsigned only when min known ≥ 0
+    ti.is_signed =
+        !(min_v && !min_v->is_negative()); // unsigned only when min known ≥ 0
     // bits from the bound Consts via get_bits() (signed width; drop the sign
     // bit when unsigned) — no to_i, handles >64-bit bounds.
     if (max_v && min_v && max_v->is_integer() && min_v->is_integer()) {
       if (!min_v->is_negative()) {
-        ti.bits = max_v->is_known_zero() ? 0 : static_cast<int32_t>(max_v->get_bits() - 1);
+        ti.bits = max_v->is_known_zero()
+                      ? 0
+                      : static_cast<int32_t>(max_v->get_bits() - 1);
       } else {
-        ti.bits = static_cast<int32_t>(std::max<int64_t>(max_v->get_bits(), min_v->get_bits()));
+        ti.bits = static_cast<int32_t>(
+            std::max<int64_t>(max_v->get_bits(), min_v->get_bits()));
       }
       // Keep the EXACT declared bounds for range-precise overload dispatch (the
       // `bits` window above only approximates `int(min,max)`).
@@ -94,7 +104,7 @@ Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid
   }
   return ti;
 }
-}  // namespace
+} // namespace
 
 // ── is_user_var ──────────────────────────────────────────────────────────────
 bool uPass_ssa::is_user_var(std::string_view name) {
@@ -110,14 +120,18 @@ bool uPass_ssa::is_user_var(std::string_view name) {
 }
 
 // ── copy_subtree ─────────────────────────────────────────────────────────────
-void uPass_ssa::copy_subtree(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
-                             const Lnast_nid& dst_parent) {
-  auto      type = src->get_type(src_nid);
+void uPass_ssa::copy_subtree(const std::shared_ptr<Lnast> &src,
+                             const Lnast_nid &src_nid,
+                             const std::shared_ptr<Lnast> &dst,
+                             const Lnast_nid &dst_parent) {
+  auto type = src->get_type(src_nid);
   Lnast_nid new_nid;
   if (Lnast_ntype::is_ref(type)) {
-    new_nid = dst->add_child(dst_parent, Lnast_node::create_ref(src->get_name(src_nid)));
+    new_nid = dst->add_child(dst_parent,
+                             Lnast_node::create_ref(src->get_name(src_nid)));
   } else if (Lnast_ntype::is_const(type)) {
-    new_nid = dst->add_child(dst_parent, Lnast_node::create_const(src->get_name(src_nid)));
+    new_nid = dst->add_child(dst_parent,
+                             Lnast_node::create_const(src->get_name(src_nid)));
   } else if (Lnast_ntype::is_invalid(type)) {
     new_nid = dst->add_child(dst_parent, Lnast_node::create_invalid());
   } else {
@@ -133,17 +147,23 @@ void uPass_ssa::copy_subtree(const std::shared_ptr<Lnast>& src, const Lnast_nid&
 }
 
 // ── copy_with_rename ─────────────────────────────────────────────────────────
-void uPass_ssa::copy_with_rename(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
-                                 const Lnast_nid& dst_parent, const Ci_str_map<std::string>& rename_map) {
-  auto      type = src->get_type(src_nid);
+void uPass_ssa::copy_with_rename(
+    const std::shared_ptr<Lnast> &src, const Lnast_nid &src_nid,
+    const std::shared_ptr<Lnast> &dst, const Lnast_nid &dst_parent,
+    const absl::flat_hash_map<std::string, std::string> &rename_map) {
+  auto type = src->get_type(src_nid);
   Lnast_nid new_nid;
   if (Lnast_ntype::is_ref(type)) {
     // Heterogeneous lookup: no temporary std::string allocation per ref.
     std::string_view name = src->get_name(src_nid);
-    auto             it   = rename_map.find(name);
-    new_nid = dst->add_child(dst_parent, Lnast_node::create_ref(it != rename_map.end() ? std::string_view{it->second} : name));
+    auto it = rename_map.find(name);
+    new_nid = dst->add_child(
+        dst_parent, Lnast_node::create_ref(it != rename_map.end()
+                                               ? std::string_view{it->second}
+                                               : name));
   } else if (Lnast_ntype::is_const(type)) {
-    new_nid = dst->add_child(dst_parent, Lnast_node::create_const(src->get_name(src_nid)));
+    new_nid = dst->add_child(dst_parent,
+                             Lnast_node::create_const(src->get_name(src_nid)));
   } else if (Lnast_ntype::is_invalid(type)) {
     new_nid = dst->add_child(dst_parent, Lnast_node::create_invalid());
   } else {
@@ -159,28 +179,28 @@ void uPass_ssa::copy_with_rename(const std::shared_ptr<Lnast>& src, const Lnast_
 }
 
 // ── run ──────────────────────────────────────────────────────────────────────
-void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
+void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast) {
   auto root = lnast->get_root();
 
   // ── Detect post-func_extract shape: top must have an 'io' child ──────────
-  bool      found_io    = false;
-  bool      found_stmts = false;
+  bool found_io = false;
+  bool found_stmts = false;
   Lnast_nid io_nid;
   Lnast_nid stmts_nid;
 
   for (auto child : lnast->children(root)) {
     const auto t = lnast->get_type(child);
     if (Lnast_ntype::is_io(t)) {
-      io_nid   = child;
+      io_nid = child;
       found_io = true;
     }
     if (Lnast_ntype::is_stmts(t)) {
-      stmts_nid   = child;
+      stmts_nid = child;
       found_stmts = true;
     }
   }
   if (!found_io || !found_stmts) {
-    return;  // Not a post-func_extract function LNAST — nothing to do.
+    return; // Not a post-func_extract function LNAST — nothing to do.
   }
 
   // ── Walk io's two tuple_add children (inputs, outputs) ──────────────────
@@ -195,7 +215,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   Lnast_nid in_tup_nid;
   Lnast_nid out_tup_nid;
   {
-    auto it  = lnast->children(io_nid).begin();
+    auto it = lnast->children(io_nid).begin();
     auto end = lnast->children(io_nid).end();
     if (it != end) {
       in_tup_nid = *it;
@@ -206,7 +226,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     }
   }
 
-  Lnast_tree_io& meta = lnast->io_meta();
+  Lnast_tree_io &meta = lnast->io_meta();
 
   // Build flat (name, bits, is_signed, is_ref) tuples. Recursive helper:
   // when an assign's type slot is a `tuple_add`, expand each field with a
@@ -222,18 +242,20 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   auto read_stages = [&](Lnast_nid st_nid) -> std::pair<int32_t, int32_t> {
     int32_t smin = 0;
     int32_t smax = 0;
-    auto    c    = lnast->get_first_child(st_nid);
+    auto c = lnast->get_first_child(st_nid);
     if (!c.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c))) {
       if (lnast->get_name(c) == "nil") {
         smin = -1;
-      } else if (auto v = Dlop::from_pyrope(lnast->get_name(c)); v && v->is_integer() && v->is_just_i64()) {
+      } else if (auto v = Dlop::from_pyrope(lnast->get_name(c));
+                 v && v->is_integer() && v->is_just_i64()) {
         smin = static_cast<int32_t>(v->to_just_i64());
       }
       auto c2 = lnast->get_sibling_next(c);
       if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
         if (lnast->get_name(c2) == "nil") {
           smax = -1;
-        } else if (auto v2 = Dlop::from_pyrope(lnast->get_name(c2)); v2 && v2->is_integer() && v2->is_just_i64()) {
+        } else if (auto v2 = Dlop::from_pyrope(lnast->get_name(c2));
+                   v2 && v2->is_integer() && v2->is_just_i64()) {
           smax = static_cast<int32_t>(v2->to_just_i64());
         }
       }
@@ -241,25 +263,26 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     return {smin, smax};
   };
 
-  std::function<void(Lnast_nid, const std::string&, bool, std::vector<Flat_field>&, int32_t, int32_t)> flatten_assign;
-  flatten_assign = [&](Lnast_nid                assign_nid,
-                       const std::string&       prefix,
-                       bool                     collect_is_ref,
-                       std::vector<Flat_field>& out,
-                       int32_t                  inh_smin,
-                       int32_t                  inh_smax) {
+  std::function<void(Lnast_nid, const std::string &, bool,
+                     std::vector<Flat_field> &, int32_t, int32_t)>
+      flatten_assign;
+  flatten_assign = [&](Lnast_nid assign_nid, const std::string &prefix,
+                       bool collect_is_ref, std::vector<Flat_field> &out,
+                       int32_t inh_smin, int32_t inh_smax) {
     if (!Lnast_ntype::is_store(lnast->get_type(assign_nid))) {
       return;
     }
     auto name_nid = lnast->get_first_child(assign_nid);
-    if (name_nid.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(name_nid))) {
+    if (name_nid.is_invalid() ||
+        !Lnast_ntype::is_ref(lnast->get_type(name_nid))) {
       return;
     }
     auto leaf_name = std::string(lnast->get_name(name_nid));
-    auto full      = prefix.empty() ? leaf_name : prefix + "." + leaf_name;
+    auto full = prefix.empty() ? leaf_name : prefix + "." + leaf_name;
 
-    auto rhs_nid  = lnast->get_sibling_next(name_nid);
-    auto type_nid = rhs_nid.is_invalid() ? rhs_nid : lnast->get_sibling_next(rhs_nid);
+    auto rhs_nid = lnast->get_sibling_next(name_nid);
+    auto type_nid =
+        rhs_nid.is_invalid() ? rhs_nid : lnast->get_sibling_next(rhs_nid);
 
     // The trailing stages(min,max) annotation either follows the
     // optional type child or stands in its place (untyped entry). Identify
@@ -268,39 +291,46 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     // flop at the same depth).
     int32_t smin = inh_smin;
     int32_t smax = inh_smax;
-    if (!type_nid.is_invalid() && Lnast_ntype::is_stages(lnast->get_type(type_nid))) {
+    if (!type_nid.is_invalid() &&
+        Lnast_ntype::is_stages(lnast->get_type(type_nid))) {
       std::tie(smin, smax) = read_stages(type_nid);
       // A type may still FOLLOW the stages child: trees are append-only, so
       // the generic specializer injects `-> (r:T@[N])`'s concrete type after
       // the re-emitted stages slot (store(r, nil, stages, prim_type_int)).
       auto after = lnast->get_sibling_next(type_nid);
-      if (!after.is_invalid() && !Lnast_ntype::is_stages(lnast->get_type(after))) {
+      if (!after.is_invalid() &&
+          !Lnast_ntype::is_stages(lnast->get_type(after))) {
         type_nid = after;
       } else {
-        type_nid = Lnast_nid();  // no real type child
+        type_nid = Lnast_nid(); // no real type child
       }
     } else if (!type_nid.is_invalid()) {
       auto st_nid = lnast->get_sibling_next(type_nid);
-      if (!st_nid.is_invalid() && Lnast_ntype::is_stages(lnast->get_type(st_nid))) {
+      if (!st_nid.is_invalid() &&
+          Lnast_ntype::is_stages(lnast->get_type(st_nid))) {
         std::tie(smin, smax) = read_stages(st_nid);
       }
     }
 
     // Composite tuple type → recurse on each inner assign with a dotted prefix.
-    if (!type_nid.is_invalid() && Lnast_ntype::is_tuple_add(lnast->get_type(type_nid))) {
+    if (!type_nid.is_invalid() &&
+        Lnast_ntype::is_tuple_add(lnast->get_type(type_nid))) {
       // An INLINE tuple type on `self` would flatten it into dotted
       // leaves (`self.a`, `self.b`) and break the inliner's `has_self`
       // detection (io.inputs[0].name == "self"). Only named self types are
       // supported; reject with a clean error instead of mis-binding later.
       if (collect_is_ref && prefix.empty() && leaf_name == "self") {
-        const auto msg = std::format("`self` cannot use an inline tuple type in `{}`", lnast->get_top_module_name());
-        livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
-                                                           .code     = "self-inline-type",
-                                                           .category = "type",
-                                                           .pass     = "upass.ssa",
-                                                           .message  = msg,
-                                                           .span     = lnast->span_of(type_nid),
-                                                           .hint     = "declare the tuple as a named type and use `self:Name`"});
+        const auto msg =
+            std::format("`self` cannot use an inline tuple type in `{}`",
+                        lnast->get_top_module_name());
+        livehd::diag::sink().emit(livehd::diag::Diagnostic{
+            .severity = livehd::diag::Severity::error,
+            .code = "self-inline-type",
+            .category = "type",
+            .pass = "upass.ssa",
+            .message = msg,
+            .span = lnast->span_of(type_nid),
+            .hint = "declare the tuple as a named type and use `self:Name`"});
         throw std::runtime_error(msg);
       }
       for (auto inner : lnast->children(type_nid)) {
@@ -310,26 +340,30 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     }
 
     bool is_ref = false;
-    if (collect_is_ref && !rhs_nid.is_invalid() && Lnast_ntype::is_const(lnast->get_type(rhs_nid))
-        && lnast->get_name(rhs_nid) == "ref") {
+    if (collect_is_ref && !rhs_nid.is_invalid() &&
+        Lnast_ntype::is_const(lnast->get_type(rhs_nid)) &&
+        lnast->get_name(rhs_nid) == "ref") {
       is_ref = true;
     }
     // Var-arg param: the default-value slot carries the `...`
     // sentinel (mirrors the `ref` marker above). Only meaningful on an input.
     bool is_vararg = false;
-    if (collect_is_ref && !rhs_nid.is_invalid() && Lnast_ntype::is_const(lnast->get_type(rhs_nid))
-        && lnast->get_name(rhs_nid) == "...") {
+    if (collect_is_ref && !rhs_nid.is_invalid() &&
+        Lnast_ntype::is_const(lnast->get_type(rhs_nid)) &&
+        lnast->get_name(rhs_nid) == "...") {
       is_vararg = true;
     }
     // A NAMED type annotation (`self:t1`, `x:Point`) arrives as a
     // `ref` type child (prp2lnast emit_type_expr). Record the typename so the
     // inliner's typed-self does-check can resolve the declared fields.
     std::string type_name;
-    if (!type_nid.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(type_nid))) {
+    if (!type_nid.is_invalid() &&
+        Lnast_ntype::is_ref(lnast->get_type(type_nid))) {
       type_name = std::string(lnast->get_name(type_nid));
     }
     auto ti = type_info_from(lnast, type_nid);
-    out.push_back({full, ti.bits, ti.is_signed, is_ref, is_vararg, ti.kind, smin, smax, std::move(type_name)});
+    out.push_back({full, ti.bits, ti.is_signed, is_ref, is_vararg, ti.kind,
+                   smin, smax, std::move(type_name)});
     out.back().has_range = ti.has_range;
     out.back().range_min = ti.range_min;
     out.back().range_max = ti.range_max;
@@ -337,43 +371,56 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
 
   if (!in_tup_nid.is_invalid()) {
     for (auto entry : lnast->children(in_tup_nid)) {
-      flatten_assign(entry, std::string{}, /*collect_is_ref=*/true, flat_inputs, 0, 0);
+      flatten_assign(entry, std::string{}, /*collect_is_ref=*/true, flat_inputs,
+                     0, 0);
     }
   }
   if (!out_tup_nid.is_invalid()) {
     for (auto entry : lnast->children(out_tup_nid)) {
-      flatten_assign(entry, std::string{}, /*collect_is_ref=*/false, flat_outputs, 0, 0);
+      flatten_assign(entry, std::string{}, /*collect_is_ref=*/false,
+                     flat_outputs, 0, 0);
     }
   }
-  meta.inputs  = flat_inputs;
+  meta.inputs = flat_inputs;
   meta.outputs = flat_outputs;
 
   // ── Build staging tree with SSA renaming ─────────────────────────────────
-  auto staging_body = lnast->forest()->create_tree_temp(std::format("ssa-{}", lnast->get_top_module_name()));
-  auto staging      = std::make_shared<Lnast>(staging_body, lnast->get_top_module_name());
-  auto new_root     = staging->set_root(Lnast_ntype::create_top());
+  auto staging_body = lnast->forest()->create_tree_temp(
+      std::format("ssa-{}", lnast->get_top_module_name()));
+  auto staging =
+      std::make_shared<Lnast>(staging_body, lnast->get_top_module_name());
+  auto new_root = staging->set_root(Lnast_ntype::create_top());
   // Module anchor: replace_body swaps the whole tree — re-stamp the
   // unit-declaration id (func_extract put it on the source root; the id
   // lives in `lnast`'s locator, which survives replace_body).
-  if (const auto id = lnast->get_srcid(lnast->get_root()); id != hhds::SourceId_invalid) {
+  if (const auto id = lnast->get_srcid(lnast->get_root());
+      id != hhds::SourceId_invalid) {
     staging->set_srcid(new_root, id);
   }
 
   // Re-emit the io node with flattened leaf entries (no nested tuple_add
   // type subtree). Width/signedness for each entry come from io_meta.
-  auto new_io       = staging->add_child(new_root, Lnast_ntype::create_io());
-  auto emit_section = [&](const std::vector<Flat_field>& fields, bool is_input) {
+  auto new_io = staging->add_child(new_root, Lnast_ntype::create_io());
+  auto emit_section = [&](const std::vector<Flat_field> &fields,
+                          bool is_input) {
     auto tup = staging->add_child(new_io, Lnast_ntype::create_tuple_add());
-    for (const auto& f : fields) {
+    for (const auto &f : fields) {
       auto a = staging->add_child(tup, Lnast_ntype::create_store());
       staging->add_child(a, Lnast_node::create_ref(f.name));
-      staging->add_child(a, Lnast_node::create_const(is_input && f.is_varargs ? "..." : is_input && f.is_ref ? "ref" : "nil"));
+      staging->add_child(
+          a, Lnast_node::create_const(is_input && f.is_varargs ? "..."
+                                      : is_input && f.is_ref   ? "ref"
+                                                               : "nil"));
       if (f.bits > 0) {
         // Re-emit the canonical prim_type_int(max,min) from the
         // flat field's (bits, signed).
         auto ty = staging->add_child(a, Lnast_ntype::create_prim_type_int());
-        staging->add_child(ty, Lnast_node::create_const(std::string(upass::max_from_bits(f.bits, f.is_signed).to_pyrope())));
-        staging->add_child(ty, Lnast_node::create_const(std::string(upass::min_from_bits(f.bits, f.is_signed).to_pyrope())));
+        staging->add_child(
+            ty, Lnast_node::create_const(std::string(
+                    upass::max_from_bits(f.bits, f.is_signed).to_pyrope())));
+        staging->add_child(
+            ty, Lnast_node::create_const(std::string(
+                    upass::min_from_bits(f.bits, f.is_signed).to_pyrope())));
       }
       // Re-emit the trailing stages(min,max) annotation so the
       // post-SSA io tree keeps the pipe contract visible (the LN pipe upass
@@ -381,25 +428,130 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       // A mod re-emits EVERY output's slot: `@[0]` (0,0) is a real check the
       // LG checker must see, and the `@[]` opt-out (-1) re-emits as `nil` so
       // tolg skips the pending record (1a-mem follow-up).
-      if (!is_input && (f.stages_min > 0 || lnast->get_lambda_kind() == "mod")) {
+      if (!is_input &&
+          (f.stages_min > 0 || lnast->get_lambda_kind() == "mod")) {
         auto st = staging->add_child(a, Lnast_ntype::create_stages());
-        staging->add_child(st, Lnast_node::create_const(f.stages_min < 0 ? "nil" : std::to_string(f.stages_min)));
-        staging->add_child(st, Lnast_node::create_const(f.stages_max < 0 ? "nil" : std::to_string(f.stages_max)));
+        staging->add_child(
+            st, Lnast_node::create_const(
+                    f.stages_min < 0 ? "nil" : std::to_string(f.stages_min)));
+        staging->add_child(
+            st, Lnast_node::create_const(
+                    f.stages_max < 0 ? "nil" : std::to_string(f.stages_max)));
       }
     }
   };
   emit_section(flat_inputs, /*is_input=*/true);
   emit_section(flat_outputs, /*is_input=*/false);
 
+  // ── name-case-collision lint ────────────────────────────────────────────
+  // LiveHD/Pyrope names are CASE-SENSITIVE. Two VALUE variables (or a variable
+  // and an IO port) whose names differ ONLY in letter case used to alias under
+  // the old case-insensitive policy; now they are distinct. Warn once per
+  // colliding name so a program that silently relied on the fold gets flagged
+  // rather than changing meaning. Type/enum/func names live in a separate
+  // namespace (they never aliased a value var), so they are excluded. Runs on
+  // the ORIGINAL (pre-SSA-rename) body.
+  {
+    auto base_of = [](std::string_view n) -> std::string_view {
+      const auto dot = n.find('.');
+      return dot == std::string_view::npos ? n : n.substr(0, dot);
+    };
+
+    // Names bound as a comptime entity — `declare/attr_set(name, …, mode)` with
+    // a non-value mode (`type`/`enum`/`fun`, not mut/const/reg/stage). `enum E`
+    // and a value `const e` are NOT a collision (different namespaces).
+    absl::flat_hash_set<std::string> type_names;
+    std::function<void(const Lnast_nid &)> collect_types =
+        [&](const Lnast_nid &nid) {
+          const auto t = lnast->get_type(nid);
+          if (Lnast_ntype::is_declare(t) || Lnast_ntype::is_attr_set(t)) {
+            auto c0 = lnast->get_first_child(nid);
+            if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0))) {
+              auto c1 = lnast->get_sibling_next(c0);
+              auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
+              if (!c2.is_invalid() && (Lnast_ntype::is_declare(t) ||
+                                       lnast->get_name(c1) == "type")) {
+                const auto mode = lnast->get_name(c2);
+                if (mode != "mut" && mode != "const" && mode != "reg" &&
+                    mode != "stage") {
+                  type_names.insert(std::string(base_of(lnast->get_name(c0))));
+                }
+              }
+            }
+          }
+          for (auto c : lnast->children(nid)) {
+            collect_types(c);
+          }
+        };
+    collect_types(stmts_nid);
+
+    absl::flat_hash_map<std::string, std::string>
+        first_spelling;                      // folded base → first spelling
+    absl::flat_hash_set<std::string> warned; // folds already reported
+
+    auto note = [&](std::string_view name, const Lnast_nid &at) {
+      const auto base = base_of(name);
+      if (base.empty() || !is_user_var(base) || type_names.contains(base)) {
+        return;
+      }
+      auto fold = str_tools::ascii_fold(base);
+      const auto &kept = first_spelling.try_emplace(fold, base).first->second;
+      if (kept == base || warned.contains(fold)) {
+        return; // identical spelling, or already reported this fold
+      }
+      warned.insert(fold);
+      const auto msg =
+          std::format("variables `{}` and `{}` differ only in letter case; "
+                      "Pyrope is case sensitive, but this feels wrong" kept,
+                      base);
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::warning,
+          .code = "name-case-collision",
+          .category = "name",
+          .pass = "upass.ssa",
+          .message = msg,
+          .span = lnast->span_of(at),
+          .hint =
+              "rename one of them if they were meant to be the same variable"});
+    };
+
+    // Seed with IO port base names: an input `Foo` and a local `foo` used to
+    // alias.
+    for (const auto &f : flat_inputs) {
+      note(f.name, io_nid);
+    }
+    for (const auto &f : flat_outputs) {
+      note(f.name, io_nid);
+    }
+    // Every assignment target in the body (the LHS is the first child of a
+    // dest-carrying statement; reads on the RHS are not inspected). The span
+    // anchor is the STATEMENT node — a `ref` LHS carries no srcid of its own.
+    std::function<void(const Lnast_nid &)> scan_collisions =
+        [&](const Lnast_nid &nid) {
+          if (stmt_has_dest(lnast->get_type(nid))) {
+            auto lhs = lnast->get_first_child(nid);
+            if (!lhs.is_invalid() &&
+                Lnast_ntype::is_ref(lnast->get_type(lhs))) {
+              note(lnast->get_name(lhs), nid);
+            }
+          }
+          for (auto c : lnast->children(nid)) {
+            scan_collisions(c);
+          }
+        };
+    scan_collisions(stmts_nid);
+  }
+
   auto new_stmts = staging->add_child(new_root, Lnast_ntype::create_stmts());
 
   // SSA rename state (straight-line scope only; branches copied verbatim).
-  // Ci_str_map<…> supports heterogeneous string_view
+  // absl::flat_hash_map<std::string, …> supports heterogeneous string_view
   // lookup — the hot inner loop walks 1M+ refs and reads these via views,
   // never paying for a std::string temporary on the read path.
-  Ci_str_map<std::string> rename_map;  // base → current SSA name
-  Ci_str_map<int>         ssa_count;   // version counter
-  Ci_str_set              seen_lhs;    // first-seen tracker
+  absl::flat_hash_map<std::string, std::string>
+      rename_map;                                  // base → current SSA name
+  absl::flat_hash_map<std::string, int> ssa_count; // version counter
+  absl::flat_hash_set<std::string> seen_lhs;       // first-seen tracker
 
   // Reg-declared names are NEVER SSA-versioned: every read of a reg
   // sees the flop's q (Verilog `<=` semantics) regardless of program order,
@@ -408,13 +560,15 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   // and rewrite q reads to the comb value.
   //
   // 2c-wire — a `wire` (single-driver combinational net) is treated the same:
-  // its reads are position-independent (every read sees the one resolved driver,
-  // even before it appears textually), so it must NOT be versioned either — a
-  // read before the driver must stay on the base name, not bind to a `nil`
-  // earlier version. tolg resolves the base name to the buffered net.
-  Ci_str_set reg_names;
-  Ci_str_set reg_only_names;  // true `reg` (NOT `wire`) — for set_mask din threading below
-  for (const auto& nid : lnast->depth_preorder(lnast->get_root())) {
+  // its reads are position-independent (every read sees the one resolved
+  // driver, even before it appears textually), so it must NOT be versioned
+  // either — a read before the driver must stay on the base name, not bind to a
+  // `nil` earlier version. tolg resolves the base name to the buffered net.
+  absl::flat_hash_set<std::string> reg_names;
+  absl::flat_hash_set<std::string>
+      reg_only_names; // true `reg` (NOT `wire`) — for set_mask din threading
+                      // below
+  for (const auto &nid : lnast->depth_preorder(lnast->get_root())) {
     if (nid.is_invalid() || !Lnast_ntype::is_declare(lnast->get_type(nid))) {
       continue;
     }
@@ -427,8 +581,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     if (c2.is_invalid() || !Lnast_ntype::is_const(lnast->get_type(c2))) {
       continue;
     }
-    auto       mode    = lnast->get_name(c2);
-    const bool is_reg  = (mode == "reg" || mode.starts_with("reg "));
+    auto mode = lnast->get_name(c2);
+    const bool is_reg = (mode == "reg" || mode.starts_with("reg "));
     const bool is_wire = (mode == "wire" || mode.starts_with("wire "));
     if (is_reg || is_wire) {
       reg_names.emplace(lnast->get_name(c0));
@@ -439,182 +593,212 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   }
 
   // ── Reg partial-write (set_mask RMW) din threading ─────────────────────────
-  // `reg x; x#[lo..=hi] = a; x#[lo2..=hi2] = b` lowers (in prp2lnast) to a chain
-  // of read-modify-writes:
+  // `reg x; x#[lo..=hi] = a; x#[lo2..=hi2] = b` lowers (in prp2lnast) to a
+  // chain of read-modify-writes:
   //   set_mask(___x_0, x, mask0, a) ; store(x, ___x_0)
   //   set_mask(___x_1, x, mask1, b) ; store(x, ___x_1)
   // Because reg names are NEVER SSA-versioned (every read is the flop q — see
   // above), the SECOND set_mask re-reads q instead of the accumulating
   // next-state ___x_0, so only the LAST partial write survives and every
   // earlier one is silently dropped (a `mut` dodges this via SSA versioning).
-  // Fix it by threading the chain by hand on the SOURCE tree (before the staging
-  // rebuild, so the verbatim branch copy below inherits it): rewrite each
-  // SUBSEQUENT set_mask's BASE operand (child 1) from the reg name to the prior
-  // partial-write temp. The FIRST partial write keeps the reg name (= q, the
-  // hold value for the bits it does not write); plain reads `r = x` are left
-  // alone and still read q. Only true `reg`s participate — a `wire` is a
+  // Fix it by threading the chain by hand on the SOURCE tree (before the
+  // staging rebuild, so the verbatim branch copy below inherits it): rewrite
+  // each SUBSEQUENT set_mask's BASE operand (child 1) from the reg name to the
+  // prior partial-write temp. The FIRST partial write keeps the reg name (= q,
+  // the hold value for the bits it does not write); plain reads `r = x` are
+  // left alone and still read q. Only true `reg`s participate — a `wire` is a
   // single-driver net handled differently. A branch body inherits a COPY of the
   // pre-branch din (so a conditional partial write still composes with the
   // straight-line ones), and after a branch the reg's next-state is a mux, so
-  // its pending temp is dropped (subsequent set_masks fall back to q — the prior
-  // behavior, no regression).
+  // its pending temp is dropped (subsequent set_masks fall back to q — the
+  // prior behavior, no regression).
   if (!reg_only_names.empty()) {
-    auto is_temp_ref = [&](const Lnast_nid& nid) {
-      return Lnast_ntype::is_ref(lnast->get_type(nid)) && !is_user_var(lnast->get_name(nid));
+    auto is_temp_ref = [&](const Lnast_nid &nid) {
+      return Lnast_ntype::is_ref(lnast->get_type(nid)) &&
+             !is_user_var(lnast->get_name(nid));
     };
     // Reg names a subtree (re)writes via a 2-child store, recursively.
-    std::function<void(const Lnast_nid&, Ci_str_set&)> collect_reg_writes =
-        [&](const Lnast_nid& sub, Ci_str_set& out) {
-          for (auto c : lnast->children(sub)) {
-            if (Lnast_ntype::is_store(lnast->get_type(c))) {
-              auto d0 = lnast->get_first_child(c);
-              if (!d0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(d0)) && reg_only_names.contains(lnast->get_name(d0))) {
-                out.emplace(lnast->get_name(d0));
+    std::function<void(const Lnast_nid &, absl::flat_hash_set<std::string> &)>
+        collect_reg_writes =
+            [&](const Lnast_nid &sub, absl::flat_hash_set<std::string> &out) {
+              for (auto c : lnast->children(sub)) {
+                if (Lnast_ntype::is_store(lnast->get_type(c))) {
+                  auto d0 = lnast->get_first_child(c);
+                  if (!d0.is_invalid() &&
+                      Lnast_ntype::is_ref(lnast->get_type(d0)) &&
+                      reg_only_names.contains(lnast->get_name(d0))) {
+                    out.emplace(lnast->get_name(d0));
+                  }
+                }
+                collect_reg_writes(c, out);
               }
-            }
-            collect_reg_writes(c, out);
-          }
-        };
-    std::function<void(const Lnast_nid&, Ci_str_map<std::string>&)> thread_stmts =
-        [&](const Lnast_nid& sblk, Ci_str_map<std::string>& pending) {
-          for (auto c : lnast->children(sblk)) {
-            const auto ct = lnast->get_type(c);
-            if (Lnast_ntype::is_set_mask(ct)) {
-              // children: result, base, mask, value — rewrite base when it reads
-              // a reg that already has an in-flight next-state temp this scope.
-              auto res  = lnast->get_first_child(c);
-              auto base = res.is_invalid() ? res : lnast->get_sibling_next(res);
-              if (!base.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(base))) {
-                auto bn = lnast->get_name(base);
-                if (reg_only_names.contains(bn)) {
-                  if (auto it = pending.find(bn); it != pending.end()) {
-                    lnast->set_name(base, it->second);
+            };
+    std::function<void(const Lnast_nid &,
+                       absl::flat_hash_map<std::string, std::string> &)>
+        thread_stmts =
+            [&](const Lnast_nid &sblk,
+                absl::flat_hash_map<std::string, std::string> &pending) {
+              for (auto c : lnast->children(sblk)) {
+                const auto ct = lnast->get_type(c);
+                if (Lnast_ntype::is_set_mask(ct)) {
+                  // children: result, base, mask, value — rewrite base when it
+                  // reads a reg that already has an in-flight next-state temp
+                  // this scope.
+                  auto res = lnast->get_first_child(c);
+                  auto base =
+                      res.is_invalid() ? res : lnast->get_sibling_next(res);
+                  if (!base.is_invalid() &&
+                      Lnast_ntype::is_ref(lnast->get_type(base))) {
+                    auto bn = lnast->get_name(base);
+                    if (reg_only_names.contains(bn)) {
+                      if (auto it = pending.find(bn); it != pending.end()) {
+                        lnast->set_name(base, it->second);
+                      }
+                    }
+                  }
+                } else if (Lnast_ntype::is_store(ct)) {
+                  // 2-child store to a reg whose value is a temp → record the
+                  // din so the NEXT set_mask chains off it. Any other store
+                  // shape (const / user-var value, a tuple_set) drops the chain
+                  // (reads fall to q).
+                  auto d0 = lnast->get_first_child(c);
+                  auto d1 = d0.is_invalid() ? d0 : lnast->get_sibling_next(d0);
+                  auto d2 = d1.is_invalid() ? d1 : lnast->get_sibling_next(d1);
+                  if (!d0.is_invalid() && d2.is_invalid() &&
+                      Lnast_ntype::is_ref(lnast->get_type(d0))) {
+                    auto nm = lnast->get_name(d0);
+                    if (reg_only_names.contains(nm)) {
+                      if (!d1.is_invalid() && is_temp_ref(d1)) {
+                        pending[std::string(nm)] =
+                            std::string(lnast->get_name(d1));
+                      } else {
+                        pending.erase(nm);
+                      }
+                    }
+                  }
+                } else if (Lnast_ntype::is_if_like(ct) ||
+                           Lnast_ntype::is_for(ct) ||
+                           Lnast_ntype::is_while(ct)) {
+                  absl::flat_hash_set<std::string> rw;
+                  collect_reg_writes(c, rw);
+                  for (auto sub : lnast->children(c)) {
+                    if (Lnast_ntype::is_stmts(lnast->get_type(sub))) {
+                      auto branch_pending =
+                          pending; // copy: the pre-branch din flows in
+                      thread_stmts(sub, branch_pending);
+                    }
+                  }
+                  for (const auto &r : rw) {
+                    pending.erase(r); // post-branch the next-state is a mux,
+                                      // not a single temp
+                  }
+                } else if (Lnast_ntype::is_stmts(ct)) {
+                  thread_stmts(
+                      c,
+                      pending); // bare `{ }` block: unconditional continuation
+                } else if (Lnast_ntype::is_func_def(ct)) {
+                  for (auto sub : lnast->children(c)) {
+                    if (Lnast_ntype::is_stmts(lnast->get_type(sub))) {
+                      absl::flat_hash_map<std::string, std::string>
+                          fresh; // separate name scope
+                      thread_stmts(sub, fresh);
+                    }
                   }
                 }
               }
-            } else if (Lnast_ntype::is_store(ct)) {
-              // 2-child store to a reg whose value is a temp → record the din so
-              // the NEXT set_mask chains off it. Any other store shape (const /
-              // user-var value, a tuple_set) drops the chain (reads fall to q).
-              auto d0 = lnast->get_first_child(c);
-              auto d1 = d0.is_invalid() ? d0 : lnast->get_sibling_next(d0);
-              auto d2 = d1.is_invalid() ? d1 : lnast->get_sibling_next(d1);
-              if (!d0.is_invalid() && d2.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(d0))) {
-                auto nm = lnast->get_name(d0);
-                if (reg_only_names.contains(nm)) {
-                  if (!d1.is_invalid() && is_temp_ref(d1)) {
-                    pending[std::string(nm)] = std::string(lnast->get_name(d1));
-                  } else {
-                    pending.erase(nm);
-                  }
-                }
-              }
-            } else if (Lnast_ntype::is_if_like(ct) || Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct)) {
-              Ci_str_set rw;
-              collect_reg_writes(c, rw);
-              for (auto sub : lnast->children(c)) {
-                if (Lnast_ntype::is_stmts(lnast->get_type(sub))) {
-                  auto branch_pending = pending;  // copy: the pre-branch din flows in
-                  thread_stmts(sub, branch_pending);
-                }
-              }
-              for (const auto& r : rw) {
-                pending.erase(r);  // post-branch the next-state is a mux, not a single temp
-              }
-            } else if (Lnast_ntype::is_stmts(ct)) {
-              thread_stmts(c, pending);  // bare `{ }` block: unconditional continuation
-            } else if (Lnast_ntype::is_func_def(ct)) {
-              for (auto sub : lnast->children(c)) {
-                if (Lnast_ntype::is_stmts(lnast->get_type(sub))) {
-                  Ci_str_map<std::string> fresh;  // separate name scope
-                  thread_stmts(sub, fresh);
-                }
-              }
-            }
-          }
-        };
-    Ci_str_map<std::string> top_pending;
+            };
+    absl::flat_hash_map<std::string, std::string> top_pending;
     thread_stmts(stmts_nid, top_pending);
   }
 
   // Collect the BASE names that a branch subtree (re)writes — the scalar/wire
   // 2-child store/dp_assign dests, recursively (nested ifs included), skipping
   // regs and tuple-set stores. Used for the branch carry-in below.
-  std::function<void(const Lnast_nid&, Ci_str_set&)> collect_branch_writes =
-      [&](const Lnast_nid& sub, Ci_str_set& out) {
-        for (auto c : lnast->children(sub)) {
-          auto ct = lnast->get_type(c);
-          if (stmt_has_dest(ct) && !Lnast_ntype::is_declare(ct)) {
-            size_t nchild = 0;
-            for (auto x : lnast->children(c)) {
-              (void)x;
-              ++nchild;
-            }
-            bool scalar_store = !Lnast_ntype::is_store(ct) || nchild <= 2;
-            if (scalar_store) {
-              auto d0 = lnast->get_first_child(c);
-              if (!d0.is_invalid()) {
-                auto nm = lnast->get_name(d0);
-                if (is_user_var(nm) && !reg_names.contains(nm)) {
-                  out.emplace(nm);
+  std::function<void(const Lnast_nid &, absl::flat_hash_set<std::string> &)>
+      collect_branch_writes =
+          [&](const Lnast_nid &sub, absl::flat_hash_set<std::string> &out) {
+            for (auto c : lnast->children(sub)) {
+              auto ct = lnast->get_type(c);
+              if (stmt_has_dest(ct) && !Lnast_ntype::is_declare(ct)) {
+                size_t nchild = 0;
+                for (auto x : lnast->children(c)) {
+                  (void)x;
+                  ++nchild;
+                }
+                bool scalar_store = !Lnast_ntype::is_store(ct) || nchild <= 2;
+                if (scalar_store) {
+                  auto d0 = lnast->get_first_child(c);
+                  if (!d0.is_invalid()) {
+                    auto nm = lnast->get_name(d0);
+                    if (is_user_var(nm) && !reg_names.contains(nm)) {
+                      out.emplace(nm);
+                    }
+                  }
                 }
               }
+              collect_branch_writes(c, out); // recurse (nested stmts/ifs)
             }
-          }
-          collect_branch_writes(c, out);  // recurse (nested stmts/ifs)
-        }
-      };
+          };
 
   // ── Tuple-typed PORT field-access flattening ───────────────────────────────
   // The io DECLARATION was just flattened into dotted leaves (`ar.x`, `p.q`)
   // above, but the body still talks to the WHOLE tuple port via `tuple_get`
   // (field read) and a ≥3-child field `store` (field write). Those have no
   // driver/sink once the port only exists as leaves. Rewrite them to the dotted
-  // leaf names so a `comb/pipe/mod f(ar:(x,y)) -> (p:(q,r))` lowers EXACTLY like
-  // its hand-flattened `f(ar.x, ar.y) -> (p.q, p.r)` twin — leaving no `tuple_*`
-  // node that references a tuple port for tolg. Mirrors detuple's struct
-  // reg/mem leaf rewrite (upass_detuple.cpp), but keyed on the io leaf set.
-  Ci_str_set port_in_leaf;   // full input leaf names ("ar.x")
-  Ci_str_set port_out_leaf;  // full output leaf names ("p.q")
-  Ci_str_set port_prefix;    // every proper prefix ("ar"; "p","p.q" for "p.q.a")
-  auto register_port_leaf = [&](const std::string& nm, bool is_in) {
+  // leaf names so a `comb/pipe/mod f(ar:(x,y)) -> (p:(q,r))` lowers EXACTLY
+  // like its hand-flattened `f(ar.x, ar.y) -> (p.q, p.r)` twin — leaving no
+  // `tuple_*` node that references a tuple port for tolg. Mirrors detuple's
+  // struct reg/mem leaf rewrite (upass_detuple.cpp), but keyed on the io leaf
+  // set.
+  absl::flat_hash_set<std::string>
+      port_in_leaf; // full input leaf names ("ar.x")
+  absl::flat_hash_set<std::string>
+      port_out_leaf; // full output leaf names ("p.q")
+  absl::flat_hash_set<std::string>
+      port_prefix; // every proper prefix ("ar"; "p","p.q" for "p.q.a")
+  auto register_port_leaf = [&](const std::string &nm, bool is_in) {
     if (nm.find('.') == std::string::npos) {
-      return;  // scalar port — already a plain leaf, nothing to flatten
+      return; // scalar port — already a plain leaf, nothing to flatten
     }
     (is_in ? port_in_leaf : port_out_leaf).insert(nm);
-    for (auto pos = nm.find('.'); pos != std::string::npos; pos = nm.find('.', pos + 1)) {
+    for (auto pos = nm.find('.'); pos != std::string::npos;
+         pos = nm.find('.', pos + 1)) {
       port_prefix.insert(nm.substr(0, pos));
     }
   };
-  for (const auto& f : flat_inputs) {
+  for (const auto &f : flat_inputs) {
     register_port_leaf(f.name, /*is_in=*/true);
   }
-  for (const auto& f : flat_outputs) {
+  for (const auto &f : flat_outputs) {
     register_port_leaf(f.name, /*is_in=*/false);
   }
   const bool has_tuple_ports = !port_prefix.empty();
 
   // A temp that aliases a (possibly interior) tuple-port path. A nested read
-  // `ar.x.a` lowers to a chain `t1 = ar['x']` (interior) ; `t2 = t1['a']` (leaf):
-  // the first records t1 -> "ar.x" and emits nothing; the second resolves
-  // through it to the leaf "ar.x.a".
-  Ci_str_map<std::string> tget_alias;
+  // `ar.x.a` lowers to a chain `t1 = ar['x']` (interior) ; `t2 = t1['a']`
+  // (leaf): the first records t1 -> "ar.x" and emits nothing; the second
+  // resolves through it to the leaf "ar.x.a".
+  absl::flat_hash_map<std::string, std::string> tget_alias;
 
   // A whole-tuple write to a tuple OUTPUT port driven CONDITIONALLY
   // (`p = if c { (first=1,..) } else { (first=3,..) }`) lowers as: each arm
-  // writes a whole-tuple temp (`___p0 = ___pN`), then a post-if `store(p,___p0)`.
-  // A whole-tuple copy carries no per-field driver, so the arm writes cannot be
-  // muxed per leaf. Pre-scan maps the post-if whole-store's source temp -> its
-  // port prefix; the in-arm whole-tuple copy is then distributed per output leaf
-  // (`p.first = ___pN.first`, ...) so tolg muxes each leaf - IDENTICAL to writing
-  // the fields conditionally by hand. `port_split_armed` records which ports got
-  // arm-driven so the now-redundant post-if whole-store is dropped.
-  Ci_str_map<std::string> whole_port_split;  // src temp -> port prefix
-  Ci_str_set              port_split_armed;  // ports driven by arm distribution
-  int                                           arm_split_tmp = 0;
+  // writes a whole-tuple temp (`___p0 = ___pN`), then a post-if
+  // `store(p,___p0)`. A whole-tuple copy carries no per-field driver, so the
+  // arm writes cannot be muxed per leaf. Pre-scan maps the post-if
+  // whole-store's source temp -> its port prefix; the in-arm whole-tuple copy
+  // is then distributed per output leaf
+  // (`p.first = ___pN.first`, ...) so tolg muxes each leaf - IDENTICAL to
+  // writing the fields conditionally by hand. `port_split_armed` records which
+  // ports got arm-driven so the now-redundant post-if whole-store is dropped.
+  absl::flat_hash_map<std::string, std::string>
+      whole_port_split; // src temp -> port prefix
+  absl::flat_hash_set<std::string>
+      port_split_armed; // ports driven by arm distribution
+  int arm_split_tmp = 0;
 
   // base/interior name -> its tuple-port dotted path (if it is one).
-  auto resolve_port_path = [&](std::string_view name) -> std::optional<std::string> {
+  auto resolve_port_path =
+      [&](std::string_view name) -> std::optional<std::string> {
     if (port_prefix.contains(name)) {
       return std::string(name);
     }
@@ -626,7 +810,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
 
   // SSA-version a scalar LHS name (same rule as the has_dest LHS path below).
   // Fills pending_* for the deferred rename_map update (applied AFTER the RHS).
-  auto version_lhs = [&](std::string_view lhs_view, std::string& pending_lhs, std::string& pending_ssa) -> std::string {
+  auto version_lhs = [&](std::string_view lhs_view, std::string &pending_lhs,
+                         std::string &pending_ssa) -> std::string {
     std::string out_name;
     if (is_user_var(lhs_view) && !reg_names.contains(lhs_view)) {
       if (auto seen_it = seen_lhs.find(lhs_view); seen_it != seen_lhs.end()) {
@@ -648,15 +833,17 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     return out_name;
   };
 
-  // Rewrite `tuple_get(dst, port, 'f'[, 'g'...])` (a tuple-port field READ) into
-  // a scalar `store(dst, ref 'port.f.g')`. An interior (non-leaf) read records
-  // an alias and emits nothing (a deeper tuple_get resolves through it).
-  auto try_rewrite_port_tuple_get = [&](const Lnast_nid& child) -> bool {
+  // Rewrite `tuple_get(dst, port, 'f'[, 'g'...])` (a tuple-port field READ)
+  // into a scalar `store(dst, ref 'port.f.g')`. An interior (non-leaf) read
+  // records an alias and emits nothing (a deeper tuple_get resolves through
+  // it).
+  auto try_rewrite_port_tuple_get = [&](const Lnast_nid &child) -> bool {
     std::vector<Lnast_nid> kids;
     for (auto c : lnast->children(child)) {
       kids.push_back(c);
     }
-    if (kids.size() < 3 || !Lnast_ntype::is_ref(lnast->get_type(kids[0])) || !Lnast_ntype::is_ref(lnast->get_type(kids[1]))) {
+    if (kids.size() < 3 || !Lnast_ntype::is_ref(lnast->get_type(kids[0])) ||
+        !Lnast_ntype::is_ref(lnast->get_type(kids[1]))) {
       return false;
     }
     auto base = resolve_port_path(lnast->get_name(kids[1]));
@@ -666,7 +853,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     std::string path = *base;
     for (size_t i = 2; i < kids.size(); ++i) {
       if (!Lnast_ntype::is_const(lnast->get_type(kids[i]))) {
-        return false;  // runtime index — not a static tuple-port field access
+        return false; // runtime index — not a static tuple-port field access
       }
       path.push_back('.');
       path.append(lnast->get_name(kids[i]));
@@ -683,7 +870,9 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       return true;
     }
     if (port_prefix.contains(path)) {
-      tget_alias.insert_or_assign(std::move(dst), std::move(path));  // interior — defer to the deeper read
+      tget_alias.insert_or_assign(
+          std::move(dst),
+          std::move(path)); // interior — defer to the deeper read
       return true;
     }
     return false;
@@ -691,13 +880,13 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
 
   // Rewrite a field `store(port, 'f'[, 'g'...], value)` (a tuple-port field
   // WRITE) into a scalar leaf `store(port.f.g, value)` (SSA-versioned LHS).
-  auto try_rewrite_port_store = [&](const Lnast_nid& child) -> bool {
+  auto try_rewrite_port_store = [&](const Lnast_nid &child) -> bool {
     std::vector<Lnast_nid> kids;
     for (auto c : lnast->children(child)) {
       kids.push_back(c);
     }
     if (kids.size() < 3 || !Lnast_ntype::is_ref(lnast->get_type(kids[0]))) {
-      return false;  // 2-child scalar store (or odd shape) — normal path
+      return false; // 2-child scalar store (or odd shape) — normal path
     }
     auto base = resolve_port_path(lnast->get_name(kids[0]));
     if (!base) {
@@ -712,12 +901,12 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       path.append(lnast->get_name(kids[i]));
     }
     if (!port_out_leaf.contains(path)) {
-      return false;  // not a known tuple-output leaf
+      return false; // not a known tuple-output leaf
     }
     std::string pending_lhs;
     std::string pending_ssa;
-    auto        out_name = version_lhs(path, pending_lhs, pending_ssa);
-    auto        st       = staging->add_child(new_stmts, Lnast_ntype::create_store());
+    auto out_name = version_lhs(path, pending_lhs, pending_ssa);
+    auto st = staging->add_child(new_stmts, Lnast_ntype::create_store());
     if (Lnast::srcid_carries(Lnast_ntype::create_store())) {
       staging->set_srcid(st, lnast->get_srcid(child));
     }
@@ -732,61 +921,71 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
 
   // Split a WHOLE-tuple write to a tuple-typed OUTPUT port — a 2-child
   // `store(p, src)` whose dest `p` is an output prefix — into one scalar store
-  // per flattened output leaf: `p.first = src.first`, `p.second = src.second`, …
-  // The per-leaf value is pulled from `src` with a `tuple_get` (`src` is a normal
-  // tuple temp/var, e.g. a `(first=1, second=2)` literal built by `tuple_add`);
-  // if `src` is itself a tuple INPUT port the leaves are bound leaf-to-leaf.
-  // Without this split tolg records a driver for `p`/`src` but none for the
-  // flattened leaf names, so the output finalize loop reports `p.first` undriven.
-  int  whole_store_tmp = 0;
-  auto try_rewrite_port_whole_store = [&](const Lnast_nid& child) -> bool {
+  // per flattened output leaf: `p.first = src.first`, `p.second = src.second`,
+  // … The per-leaf value is pulled from `src` with a `tuple_get` (`src` is a
+  // normal tuple temp/var, e.g. a `(first=1, second=2)` literal built by
+  // `tuple_add`); if `src` is itself a tuple INPUT port the leaves are bound
+  // leaf-to-leaf. Without this split tolg records a driver for `p`/`src` but
+  // none for the flattened leaf names, so the output finalize loop reports
+  // `p.first` undriven.
+  int whole_store_tmp = 0;
+  auto try_rewrite_port_whole_store = [&](const Lnast_nid &child) -> bool {
     std::vector<Lnast_nid> kids;
     for (auto c : lnast->children(child)) {
       kids.push_back(c);
     }
-    if (kids.size() != 2 || !Lnast_ntype::is_ref(lnast->get_type(kids[0])) || !Lnast_ntype::is_ref(lnast->get_type(kids[1]))) {
-      return false;  // not a plain 2-child `store(dst, src)`
+    if (kids.size() != 2 || !Lnast_ntype::is_ref(lnast->get_type(kids[0])) ||
+        !Lnast_ntype::is_ref(lnast->get_type(kids[1]))) {
+      return false; // not a plain 2-child `store(dst, src)`
     }
     std::string prefix(lnast->get_name(kids[0]));
     if (port_split_armed.contains(prefix)) {
-      return true;  // a conditional whole-tuple write already drove the leaves per arm
+      return true; // a conditional whole-tuple write already drove the leaves
+                   // per arm
     }
     if (!port_prefix.contains(prefix)) {
-      return false;  // dest is not a tuple-port prefix — normal scalar store
+      return false; // dest is not a tuple-port prefix — normal scalar store
     }
     const std::string dot_prefix = prefix + ".";
-    // src may need a rename (a reassigned comb net); also resolve whether src is
-    // itself a tuple input port (then the leaves are read directly, not via get).
+    // src may need a rename (a reassigned comb net); also resolve whether src
+    // is itself a tuple input port (then the leaves are read directly, not via
+    // get).
     std::string src_name(lnast->get_name(kids[1]));
     if (auto it = rename_map.find(src_name); it != rename_map.end()) {
       src_name = it->second;
     }
     auto src_port = resolve_port_path(lnast->get_name(kids[1]));
-    bool any      = false;
-    for (const auto& f : flat_outputs) {
-      if (f.name.size() <= dot_prefix.size() || f.name.compare(0, dot_prefix.size(), dot_prefix) != 0) {
-        continue;  // not a leaf under this prefix
+    bool any = false;
+    for (const auto &f : flat_outputs) {
+      if (f.name.size() <= dot_prefix.size() ||
+          f.name.compare(0, dot_prefix.size(), dot_prefix) != 0) {
+        continue; // not a leaf under this prefix
       }
-      any                  = true;
-      const std::string sub = f.name.substr(dot_prefix.size());  // "first" | "s.n"
-      std::string       value_ref;                               // the per-leaf RHS ref name
+      any = true;
+      const std::string sub =
+          f.name.substr(dot_prefix.size()); // "first" | "s.n"
+      std::string value_ref;                // the per-leaf RHS ref name
       if (src_port) {
-        value_ref = *src_port + "." + sub;  // leaf-to-leaf from a tuple input port
+        value_ref =
+            *src_port + "." + sub; // leaf-to-leaf from a tuple input port
       } else {
-        // One multi-field `tuple_get(tmp, src, 's', 'n', …)` per leaf — constprop
-        // resolves a multi-segment path in a single node (a chained
+        // One multi-field `tuple_get(tmp, src, 's', 'n', …)` per leaf —
+        // constprop resolves a multi-segment path in a single node (a chained
         // `t1 = src['s'] ; t2 = t1['n']` left the intermediate sub-tuple temp
         // unresolved for a runtime field).
         std::string tmp = absl::StrCat("%ws_", whole_store_tmp++);
-        auto        tg  = staging->add_child(new_stmts, Lnast_ntype::create_tuple_get());
+        auto tg =
+            staging->add_child(new_stmts, Lnast_ntype::create_tuple_get());
         if (Lnast::srcid_carries(Lnast_ntype::create_tuple_get())) {
           staging->set_srcid(tg, lnast->get_srcid(child));
         }
         staging->add_child(tg, Lnast_node::create_ref(tmp));
         staging->add_child(tg, Lnast_node::create_ref(src_name));
         for (size_t pos = 0; pos != std::string::npos;) {
-          size_t      dot   = sub.find('.', pos);
-          std::string field = (dot == std::string::npos) ? sub.substr(pos) : sub.substr(pos, dot - pos);
+          size_t dot = sub.find('.', pos);
+          std::string field = (dot == std::string::npos)
+                                  ? sub.substr(pos)
+                                  : sub.substr(pos, dot - pos);
           staging->add_child(tg, Lnast_node::create_const(field));
           pos = (dot == std::string::npos) ? std::string::npos : dot + 1;
         }
@@ -794,8 +993,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       }
       std::string pending_lhs;
       std::string pending_ssa;
-      auto        out_name = version_lhs(f.name, pending_lhs, pending_ssa);
-      auto        st       = staging->add_child(new_stmts, Lnast_ntype::create_store());
+      auto out_name = version_lhs(f.name, pending_lhs, pending_ssa);
+      auto st = staging->add_child(new_stmts, Lnast_ntype::create_store());
       if (Lnast::srcid_carries(Lnast_ntype::create_store())) {
         staging->set_srcid(st, lnast->get_srcid(child));
       }
@@ -815,23 +1014,26 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   // 'ar.x')`) so a port read used inside an if-EXPRESSION (`res = if c { ar.x }
   // …`) lowers to the flattened leaf, exactly like the same read at the top
   // level. Interior reads (`ar.x.a` chains) record an alias and emit nothing,
-  // resolved by the deeper read — matching the top-level try_rewrite_port_tuple_get.
-  std::function<void(const Lnast_nid&, const Lnast_nid&)> copy_branch_port_aware =
-      [&](const Lnast_nid& src_nid, const Lnast_nid& dst_parent) {
+  // resolved by the deeper read — matching the top-level
+  // try_rewrite_port_tuple_get.
+  std::function<void(const Lnast_nid &, const Lnast_nid &)>
+      copy_branch_port_aware = [&](const Lnast_nid &src_nid,
+                                   const Lnast_nid &dst_parent) {
         auto type = lnast->get_type(src_nid);
         if (Lnast_ntype::is_tuple_get(type)) {
           std::vector<Lnast_nid> kids;
           for (auto c : lnast->children(src_nid)) {
             kids.push_back(c);
           }
-          if (kids.size() >= 3 && Lnast_ntype::is_ref(lnast->get_type(kids[0]))
-              && Lnast_ntype::is_ref(lnast->get_type(kids[1]))) {
+          if (kids.size() >= 3 &&
+              Lnast_ntype::is_ref(lnast->get_type(kids[0])) &&
+              Lnast_ntype::is_ref(lnast->get_type(kids[1]))) {
             if (auto base = resolve_port_path(lnast->get_name(kids[1]))) {
               std::string path = *base;
-              bool        ok   = true;
+              bool ok = true;
               for (size_t i = 2; i < kids.size(); ++i) {
                 if (!Lnast_ntype::is_const(lnast->get_type(kids[i]))) {
-                  ok = false;  // runtime index — not a static field access
+                  ok = false; // runtime index — not a static field access
                   break;
                 }
                 path.push_back('.');
@@ -839,8 +1041,10 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
               }
               if (ok) {
                 auto dst = std::string(lnast->get_name(kids[0]));
-                if (port_in_leaf.contains(path) || port_out_leaf.contains(path)) {
-                  auto st = staging->add_child(dst_parent, Lnast_ntype::create_store());
+                if (port_in_leaf.contains(path) ||
+                    port_out_leaf.contains(path)) {
+                  auto st = staging->add_child(dst_parent,
+                                               Lnast_ntype::create_store());
                   if (Lnast::srcid_carries(Lnast_ntype::create_store())) {
                     staging->set_srcid(st, lnast->get_srcid(src_nid));
                   }
@@ -850,7 +1054,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
                   return;
                 }
                 if (port_prefix.contains(path)) {
-                  tget_alias.insert_or_assign(std::move(dst), std::move(path));  // interior
+                  tget_alias.insert_or_assign(std::move(dst),
+                                              std::move(path)); // interior
                   return;
                 }
               }
@@ -861,49 +1066,63 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
         if (Lnast_ntype::is_store(type)) {
           // A WHOLE-tuple copy to a temp that feeds a post-if whole-store to a
           // tuple-output port (`___p0 = ___pN`, with a later `store(p,___p0)`):
-          // distribute it into one per-leaf write `store(p.first, ___pN.first)`,
-          // ... so each output leaf is driven in BOTH arms and tolg muxes it. This
-          // is exactly the hand-written conditional per-field form. The post-if
-          // whole-store is then dropped (port_split_armed, below).
+          // distribute it into one per-leaf write `store(p.first,
+          // ___pN.first)`,
+          // ... so each output leaf is driven in BOTH arms and tolg muxes it.
+          // This is exactly the hand-written conditional per-field form. The
+          // post-if whole-store is then dropped (port_split_armed, below).
           {
             std::vector<Lnast_nid> kids;
             for (auto c : lnast->children(src_nid)) {
               kids.push_back(c);
             }
-            if (kids.size() == 2 && Lnast_ntype::is_ref(lnast->get_type(kids[0]))
-                && Lnast_ntype::is_ref(lnast->get_type(kids[1]))) {
-              if (auto pit = whole_port_split.find(std::string(lnast->get_name(kids[0]))); pit != whole_port_split.end()) {
-                const std::string& port     = pit->second;
-                const std::string  dot_port = port + ".";
-                std::string        src_name(lnast->get_name(kids[1]));
-                if (auto rit = rename_map.find(src_name); rit != rename_map.end()) {
+            if (kids.size() == 2 &&
+                Lnast_ntype::is_ref(lnast->get_type(kids[0])) &&
+                Lnast_ntype::is_ref(lnast->get_type(kids[1]))) {
+              if (auto pit = whole_port_split.find(
+                      std::string(lnast->get_name(kids[0])));
+                  pit != whole_port_split.end()) {
+                const std::string &port = pit->second;
+                const std::string dot_port = port + ".";
+                std::string src_name(lnast->get_name(kids[1]));
+                if (auto rit = rename_map.find(src_name);
+                    rit != rename_map.end()) {
                   src_name = rit->second;
                 }
                 bool any = false;
-                for (const auto& f : flat_outputs) {
-                  if (f.name.size() <= dot_port.size() || f.name.compare(0, dot_port.size(), dot_port) != 0) {
-                    continue;  // not a leaf under this port
+                for (const auto &f : flat_outputs) {
+                  if (f.name.size() <= dot_port.size() ||
+                      f.name.compare(0, dot_port.size(), dot_port) != 0) {
+                    continue; // not a leaf under this port
                   }
-                  any                   = true;
-                  const std::string sub = f.name.substr(dot_port.size());  // "first" | "lo.hi"
-                  std::string       tmp = absl::StrCat("%aws_", arm_split_tmp++);
-                  auto              tg  = staging->add_child(dst_parent, Lnast_ntype::create_tuple_get());
+                  any = true;
+                  const std::string sub =
+                      f.name.substr(dot_port.size()); // "first" | "lo.hi"
+                  std::string tmp = absl::StrCat("%aws_", arm_split_tmp++);
+                  auto tg = staging->add_child(dst_parent,
+                                               Lnast_ntype::create_tuple_get());
                   if (Lnast::srcid_carries(Lnast_ntype::create_tuple_get())) {
                     staging->set_srcid(tg, lnast->get_srcid(src_nid));
                   }
                   staging->add_child(tg, Lnast_node::create_ref(tmp));
                   staging->add_child(tg, Lnast_node::create_ref(src_name));
                   for (size_t pos = 0; pos != std::string::npos;) {
-                    size_t      dot   = sub.find('.', pos);
-                    std::string field = (dot == std::string::npos) ? sub.substr(pos) : sub.substr(pos, dot - pos);
+                    size_t dot = sub.find('.', pos);
+                    std::string field = (dot == std::string::npos)
+                                            ? sub.substr(pos)
+                                            : sub.substr(pos, dot - pos);
                     staging->add_child(tg, Lnast_node::create_const(field));
-                    pos = (dot == std::string::npos) ? std::string::npos : dot + 1;
+                    pos = (dot == std::string::npos) ? std::string::npos
+                                                     : dot + 1;
                   }
-                  auto st = staging->add_child(dst_parent, Lnast_ntype::create_store());
+                  auto st = staging->add_child(dst_parent,
+                                               Lnast_ntype::create_store());
                   if (Lnast::srcid_carries(Lnast_ntype::create_store())) {
                     staging->set_srcid(st, lnast->get_srcid(src_nid));
                   }
-                  staging->add_child(st, Lnast_node::create_ref(f.name));  // BASE leaf name (branch write)
+                  staging->add_child(
+                      st, Lnast_node::create_ref(
+                              f.name)); // BASE leaf name (branch write)
                   staging->add_child(st, Lnast_node::create_ref(tmp));
                 }
                 if (any) {
@@ -915,18 +1134,19 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
           }
           // A field WRITE to a tuple-output leaf nested in an if-arm
           // (`store(p,'first',v)`) → a 2-child `store(p.first, v)` on the BASE
-          // leaf name. tolg's lower_branch merges the same base-name writes from
-          // both arms into the output Mux, so (unlike a top-level field write)
-          // this is NOT SSA-versioned — it stays on `p.first` exactly like any
-          // other in-branch comb write.
+          // leaf name. tolg's lower_branch merges the same base-name writes
+          // from both arms into the output Mux, so (unlike a top-level field
+          // write) this is NOT SSA-versioned — it stays on `p.first` exactly
+          // like any other in-branch comb write.
           std::vector<Lnast_nid> kids;
           for (auto c : lnast->children(src_nid)) {
             kids.push_back(c);
           }
-          if (kids.size() >= 3 && Lnast_ntype::is_ref(lnast->get_type(kids[0]))) {
+          if (kids.size() >= 3 &&
+              Lnast_ntype::is_ref(lnast->get_type(kids[0]))) {
             if (auto base = resolve_port_path(lnast->get_name(kids[0]))) {
               std::string path = *base;
-              bool        ok   = true;
+              bool ok = true;
               for (size_t i = 1; i + 1 < kids.size(); ++i) {
                 if (!Lnast_ntype::is_const(lnast->get_type(kids[i]))) {
                   ok = false;
@@ -936,12 +1156,14 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
                 path.append(lnast->get_name(kids[i]));
               }
               if (ok && port_out_leaf.contains(path)) {
-                auto st = staging->add_child(dst_parent, Lnast_ntype::create_store());
+                auto st =
+                    staging->add_child(dst_parent, Lnast_ntype::create_store());
                 if (Lnast::srcid_carries(Lnast_ntype::create_store())) {
                   staging->set_srcid(st, lnast->get_srcid(src_nid));
                 }
                 staging->add_child(st, Lnast_node::create_ref(path));
-                copy_branch_port_aware(kids.back(), st);  // value: rename + nested port reads
+                copy_branch_port_aware(kids.back(),
+                                       st); // value: rename + nested port reads
                 return;
               }
             }
@@ -951,13 +1173,18 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
         Lnast_nid new_nid;
         if (Lnast_ntype::is_ref(type)) {
           std::string_view name = lnast->get_name(src_nid);
-          auto             it   = rename_map.find(name);
-          new_nid = staging->add_child(dst_parent,
-                                       Lnast_node::create_ref(it != rename_map.end() ? std::string_view{it->second} : name));
+          auto it = rename_map.find(name);
+          new_nid = staging->add_child(
+              dst_parent,
+              Lnast_node::create_ref(it != rename_map.end()
+                                         ? std::string_view{it->second}
+                                         : name));
         } else if (Lnast_ntype::is_const(type)) {
-          new_nid = staging->add_child(dst_parent, Lnast_node::create_const(lnast->get_name(src_nid)));
+          new_nid = staging->add_child(
+              dst_parent, Lnast_node::create_const(lnast->get_name(src_nid)));
         } else if (Lnast_ntype::is_invalid(type)) {
-          new_nid = staging->add_child(dst_parent, Lnast_node::create_invalid());
+          new_nid =
+              staging->add_child(dst_parent, Lnast_node::create_invalid());
         } else {
           new_nid = staging->add_child(dst_parent, type);
         }
@@ -970,18 +1197,20 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       };
 
   // Per-statement processing of the straight-line body.  Defined as a recursive
-  // helper so a bare `{ }` lexical block (an unconditional nested `stmts`) can be
-  // INLINED into the current scope — its reads then follow the live rename_map
-  // and its writes version + carry out, instead of being copied verbatim (which
-  // disconnected the block's outer-variable writes from the SSA chain and
-  // dropped them after the block).
-  std::function<void(const Lnast_nid&)> process_child = [&](const Lnast_nid& child) {
+  // helper so a bare `{ }` lexical block (an unconditional nested `stmts`) can
+  // be INLINED into the current scope — its reads then follow the live
+  // rename_map and its writes version + carry out, instead of being copied
+  // verbatim (which disconnected the block's outer-variable writes from the SSA
+  // chain and dropped them after the block).
+  std::function<void(const Lnast_nid &)> process_child = [&](const Lnast_nid
+                                                                 &child) {
     auto type = lnast->get_type(child);
 
     // Tuple-typed PORT field accesses are flattened to their dotted leaf names
     // (see the helpers above) so they lower like the hand-flattened twin.
     if (has_tuple_ports) {
-      if (Lnast_ntype::is_tuple_get(type) && try_rewrite_port_tuple_get(child)) {
+      if (Lnast_ntype::is_tuple_get(type) &&
+          try_rewrite_port_tuple_get(child)) {
         return;
       }
       if (Lnast_ntype::is_store(type) && try_rewrite_port_store(child)) {
@@ -1029,7 +1258,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       // Defer rename_map update until after RHS is fully copied so that a
       // self-referencing assignment like `t = t + 1` (second assignment)
       // reads the *previous* SSA version of `t` on the RHS, not the new one.
-      std::string pending_lhs;  // empty = no deferred update
+      std::string pending_lhs; // empty = no deferred update
       std::string pending_ssa;
 
       bool first = true;
@@ -1039,10 +1268,11 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
           // Read via string_view; only materialize std::string when we have
           // to insert into the rename/ssa maps.
           std::string_view lhs_view = lnast->get_name(sub);
-          std::string      out_name;
+          std::string out_name;
 
           if (is_user_var(lhs_view) && !reg_names.contains(lhs_view)) {
-            if (auto seen_it = seen_lhs.find(lhs_view); seen_it != seen_lhs.end()) {
+            if (auto seen_it = seen_lhs.find(lhs_view);
+                seen_it != seen_lhs.end()) {
               // Preview next SSA version — do NOT touch rename_map yet.
               int n = ssa_count[*seen_it] + 1;
               out_name.reserve(lhs_view.size() + 6 + 6);
@@ -1088,42 +1318,46 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       int pos = 0;
       for (auto sub : lnast->children(child)) {
         if (pos < 2) {
-          copy_subtree(lnast, sub, staging, stmt_node);  // dst tmp + callee name
+          copy_subtree(lnast, sub, staging, stmt_node); // dst tmp + callee name
         } else if (Lnast_ntype::is_store(lnast->get_type(sub))) {
-          auto arg_node = staging->add_child(stmt_node, Lnast_ntype::create_store());
+          auto arg_node =
+              staging->add_child(stmt_node, Lnast_ntype::create_store());
           if (Lnast::srcid_carries(Lnast_ntype::create_store())) {
             staging->set_srcid(arg_node, lnast->get_srcid(sub));
           }
           bool first_arg_child = true;
           for (auto a2 : lnast->children(sub)) {
             if (first_arg_child) {
-              copy_subtree(lnast, a2, staging, arg_node);  // formal param name
+              copy_subtree(lnast, a2, staging, arg_node); // formal param name
               first_arg_child = false;
             } else {
               copy_with_rename(lnast, a2, staging, arg_node, rename_map);
             }
           }
         } else {
-          copy_with_rename(lnast, sub, staging, stmt_node, rename_map);  // positional arg
+          copy_with_rename(lnast, sub, staging, stmt_node,
+                           rename_map); // positional arg
         }
         ++pos;
       }
-    } else if (Lnast_ntype::is_tuple_get(type) || Lnast_ntype::is_tuple_add(type)
-               || Lnast_ntype::is_attr_get(type) || Lnast_ntype::is_attr_set(type)) {
+    } else if (Lnast_ntype::is_tuple_get(type) ||
+               Lnast_ntype::is_tuple_add(type) ||
+               Lnast_ntype::is_attr_get(type) ||
+               Lnast_ntype::is_attr_set(type)) {
       // dst/tuple_get/tuple_add/attr_get/attr_set: the first child is the
       // target (a temp/user var being read, or — for attr_set — the entity
       // being attributed) copied VERBATIM (these aren't SSA-versioned, as
       // before), but the remaining children are READS that must follow the live
       // rename_map — e.g. a `tuple_get` memory-read index, or a `tuple_add`
-      // field, that reads an SSA-versioned comb net (a wire reassigned after its
-      // declaration-time poison) must resolve to the live driver, not the stale
-      // base. (mem_multidim_rw: `data[raddr]` read the poison `raddr` base
-      // instead of `raddr___ssa_1 = {ri,rj}`.) For `attr_set` the value operand
-      // is likewise a read: a `clock_pin`/`reset_pin` driven by an INTERNAL wire
-      // (a gated/derived/buffered clock — `attr_set q clock_pin gclk`) must
-      // resolve to the wire's live SSA driver (`gclk___ssa_1 = clk`), not the
-      // declaration-time `gclk = 0ub?` poison — otherwise the flop clock binds
-      // to an invalid/unknown const.
+      // field, that reads an SSA-versioned comb net (a wire reassigned after
+      // its declaration-time poison) must resolve to the live driver, not the
+      // stale base. (mem_multidim_rw: `data[raddr]` read the poison `raddr`
+      // base instead of `raddr___ssa_1 = {ri,rj}`.) For `attr_set` the value
+      // operand is likewise a read: a `clock_pin`/`reset_pin` driven by an
+      // INTERNAL wire (a gated/derived/buffered clock — `attr_set q clock_pin
+      // gclk`) must resolve to the wire's live SSA driver (`gclk___ssa_1 =
+      // clk`), not the declaration-time `gclk = 0ub?` poison — otherwise the
+      // flop clock binds to an invalid/unknown const.
       auto stmt_node = staging->add_child(new_stmts, type);
       if (Lnast::srcid_carries(type)) {
         staging->set_srcid(stmt_node, lnast->get_srcid(child));
@@ -1131,10 +1365,11 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       bool first = true;
       for (auto sub : lnast->children(child)) {
         if (first) {
-          copy_subtree(lnast, sub, staging, stmt_node);  // write target — verbatim
+          copy_subtree(lnast, sub, staging,
+                       stmt_node); // write target — verbatim
           first = false;
         } else {
-          copy_with_rename(lnast, sub, staging, stmt_node, rename_map);  // reads
+          copy_with_rename(lnast, sub, staging, stmt_node, rename_map); // reads
         }
       }
     } else {
@@ -1142,8 +1377,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       // The lowerer's lower_branch() + Mux logic merges base-name WRITES, so a
       // branch body must keep its write targets on the BASE name. But its READS
       // must follow the live rename_map: another scope (always_ff, nested if)
-      // that reads a comb net the straight-line scope already SSA-versioned must
-      // see the versioned driver, not the net's declaration-time poison —
+      // that reads a comb net the straight-line scope already SSA-versioned
+      // must see the versioned driver, not the net's declaration-time poison —
       // copying verbatim left those reads on the stale base (the bug that
       // dropped the FIFO `outDataReg <= IN_data` override: its guards
       // `empty`/`outputReady`/`doInsert` read the `0ub?` poison and folded to
@@ -1151,38 +1386,41 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       // semantics) so reg writes stay base; for comb vars (re)written in this
       // branch we first do the carry-in below — bind the base name to its
       // current version and reset the rename to base — so those writes stay on
-      // the base for the Mux merge while everything else reads the live version.
+      // the base for the Mux merge while everything else reads the live
+      // version.
       if (Lnast_ntype::is_if_like(type)) {
-        Ci_str_set bwrites;
+        absl::flat_hash_set<std::string> bwrites;
         collect_branch_writes(child, bwrites);
-        for (const auto& var : bwrites) {
+        for (const auto &var : bwrites) {
           auto it = rename_map.find(var);
           if (it != rename_map.end() && it->second != var) {
-            auto st = staging->add_child(new_stmts, Lnast_ntype::create_store());
+            auto st =
+                staging->add_child(new_stmts, Lnast_ntype::create_store());
             staging->add_child(st, Lnast_node::create_ref(var));
             staging->add_child(st, Lnast_node::create_ref(it->second));
-            it->second = var;  // branch writes + post-branch reads use the merged base
+            it->second =
+                var; // branch writes + post-branch reads use the merged base
           }
         }
-        // Reads inside the branch follow the live rename_map (so a versioned comb
-        // net read here resolves to its driver, not its poison base); writes were
-        // reset to base above so the Mux merge still works; regs aren't versioned.
-        // With tuple-typed ports, also rewrite tuple-port field READS nested in
-        // the arms (a port read used inside an if-EXPRESSION) to their flattened
-        // leaf — copy_with_rename alone would leave the `tuple_get(ar,'x')` with
-        // no driver.
+        // Reads inside the branch follow the live rename_map (so a versioned
+        // comb net read here resolves to its driver, not its poison base);
+        // writes were reset to base above so the Mux merge still works; regs
+        // aren't versioned. With tuple-typed ports, also rewrite tuple-port
+        // field READS nested in the arms (a port read used inside an
+        // if-EXPRESSION) to their flattened leaf — copy_with_rename alone would
+        // leave the `tuple_get(ar,'x')` with no driver.
         if (has_tuple_ports) {
           copy_branch_port_aware(child, new_stmts);
         } else {
           copy_with_rename(lnast, child, staging, new_stmts, rename_map);
         }
       } else if (Lnast_ntype::is_stmts(type)) {
-        // A bare `{ }` lexical block runs unconditionally: inline its statements
-        // into the straight-line scope (same rename_map) so reads see the live
-        // version and writes thread out.  (Copying verbatim left the block's
-        // outer writes on the stale base name, disconnected from the SSA chain —
-        // e.g. a `set_mask` bit-init/accumulate emitted inside an unrolled-loop
-        // block was dropped, scrambling the result.)
+        // A bare `{ }` lexical block runs unconditionally: inline its
+        // statements into the straight-line scope (same rename_map) so reads
+        // see the live version and writes thread out.  (Copying verbatim left
+        // the block's outer writes on the stale base name, disconnected from
+        // the SSA chain — e.g. a `set_mask` bit-init/accumulate emitted inside
+        // an unrolled-loop block was dropped, scrambling the result.)
         for (auto gc : lnast->children(child)) {
           process_child(gc);
         }
@@ -1194,9 +1432,10 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
     }
   };
   // Pre-scan: map a post-if whole-store's source temp to its tuple-OUTPUT-port
-  // prefix (`store(p, ___p0)` -> ___p0 maps to "p"), so a conditional whole-tuple
-  // write building ___p0 in if-arms can be distributed per output leaf (see
-  // copy_branch_port_aware / port_split_armed). Only ports with output leaves.
+  // prefix (`store(p, ___p0)` -> ___p0 maps to "p"), so a conditional
+  // whole-tuple write building ___p0 in if-arms can be distributed per output
+  // leaf (see copy_branch_port_aware / port_split_armed). Only ports with
+  // output leaves.
   if (has_tuple_ports) {
     for (auto child : lnast->children(stmts_nid)) {
       if (!Lnast_ntype::is_store(lnast->get_type(child))) {
@@ -1206,8 +1445,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
       for (auto c : lnast->children(child)) {
         kids.push_back(c);
       }
-      if (kids.size() != 2 || !Lnast_ntype::is_ref(lnast->get_type(kids[0]))
-          || !Lnast_ntype::is_ref(lnast->get_type(kids[1]))) {
+      if (kids.size() != 2 || !Lnast_ntype::is_ref(lnast->get_type(kids[0])) ||
+          !Lnast_ntype::is_ref(lnast->get_type(kids[1]))) {
         continue;
       }
       std::string_view dst_nm = lnast->get_name(kids[0]);
@@ -1215,15 +1454,17 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
         continue;
       }
       const std::string dot_port = std::string(dst_nm) + ".";
-      bool              has_leaf = false;
-      for (const auto& f : flat_outputs) {
-        if (f.name.size() > dot_port.size() && f.name.compare(0, dot_port.size(), dot_port) == 0) {
+      bool has_leaf = false;
+      for (const auto &f : flat_outputs) {
+        if (f.name.size() > dot_port.size() &&
+            f.name.compare(0, dot_port.size(), dot_port) == 0) {
           has_leaf = true;
           break;
         }
       }
       if (has_leaf) {
-        whole_port_split[std::string(lnast->get_name(kids[1]))] = std::string(dst_nm);
+        whole_port_split[std::string(lnast->get_name(kids[1]))] =
+            std::string(dst_nm);
       }
     }
   }
@@ -1237,7 +1478,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast) {
   // BASE output name, so without a trailing rebind every write after the
   // first is dead and the first write wins. (Reg-mode outputs are exempt
   // from versioning above and need no rebind.)
-  for (const auto& f : flat_outputs) {
+  for (const auto &f : flat_outputs) {
     auto it = rename_map.find(f.name);
     if (it != rename_map.end() && it->second != f.name) {
       auto st = staging->add_child(new_stmts, Lnast_ntype::create_store());

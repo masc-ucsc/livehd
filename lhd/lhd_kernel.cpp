@@ -21,10 +21,10 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
-#include "ci_string.hpp"     // Ci_str_map/Ci_str_set: case-insensitive name matching
+#include "absl/container/flat_hash_map.h"
 #include "color_common.hpp"  // livehd::color::is_partitionable / NO_COLOR (lhd tool)
 #include "diag.hpp"
-#include "str_tools.hpp"  // str_tools::ci_equal / ci_ends_with / Ci_less
+#include "str_tools.hpp"
 #include "eprp.hpp"
 #include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
@@ -1472,16 +1472,15 @@ void discover_imports(Options& opts, Eprp_var& var, size_t n_imports) {
     auto            a = fs::absolute(fs::path(p), ec);
     return ec ? std::string(p) : a.lexically_normal().string();
   };
-  // Resolve `<stem>.prp` in `dir` case-insensitively (module/import names fold
-  // case). Always scans the directory and returns the REAL on-disk filename
-  // (original case preserved) so two import spellings of one file collapse to a
-  // single path — on a case-insensitive filesystem an exact-path probe would
-  // otherwise echo the caller's spelling and look like a distinct file. Empty
-  // when absent.
-  auto find_prp_ci = [](const std::string& dir, const std::string& stem) -> std::string {
+  // Resolve `<stem>.prp` in `dir` case-SENSITIVELY (names are case-sensitive).
+  // Scans the directory and returns the on-disk path only when a filename
+  // matches `<stem>.prp` exactly — FS-independent (a case-insensitive host FS
+  // does not let `import("stem")` resolve a file named `Stem.prp`). Empty when
+  // absent.
+  auto find_prp = [](const std::string& dir, const std::string& stem) -> std::string {
     // A stem may be path-qualified (`subdir/mod`): the directory portion rides
-    // verbatim onto `dir` and only the final component is case-folded against
-    // the on-disk filenames (matching the old `dir + "/" + stem + ".prp"` probe).
+    // verbatim onto `dir` and only the final component is matched against the
+    // on-disk filenames.
     std::string scan_dir = dir;
     std::string leaf     = stem;
     if (const auto s = stem.rfind('/'); s != std::string::npos) {
@@ -1494,15 +1493,15 @@ void discover_imports(Options& opts, Eprp_var& var, size_t n_imports) {
         continue;
       }
       const auto fn = it->path().filename().string();
-      if (fn.size() == leaf.size() + 4 && str_tools::ci_ends_with(fn, ".prp")
-          && str_tools::ci_equal(std::string_view(fn).substr(0, leaf.size()), leaf)) {
+      if (fn.size() == leaf.size() + 4 && str_tools::ends_with(fn, ".prp")
+          && (std::string_view(fn).substr(0, leaf.size()) == leaf)) {
         return it->path().string();
       }
     }
     return {};
   };
 
-  Ci_str_map<std::string>          unit_dir;      // unit -> source dir (case-insensitive)
+  absl::flat_hash_map<std::string, std::string>          unit_dir;      // unit -> source dir (case-sensitive)
   absl::flat_hash_set<std::string> parsed_paths;  // abs paths already parsed
   for (const auto& f : opts.files) {
     unit_dir[unit_name_of(f)] = dir_of(f);
@@ -1510,12 +1509,12 @@ void discover_imports(Options& opts, Eprp_var& var, size_t n_imports) {
   }
 
   while (true) {
-    Ci_str_set loaded;
+    absl::flat_hash_set<std::string> loaded;
     for (const auto& ln : var.lnasts) {
       loaded.insert(std::string(ln->get_top_module_name()));
     }
-    std::map<std::string, std::string, str_tools::Ci_less>           found;       // logical name -> file to parse
-    std::map<std::string, std::set<std::string>, str_tools::Ci_less> seen_paths;  // logical name -> resolved files
+    std::map<std::string, std::string>           found;       // logical name -> file to parse
+    std::map<std::string, std::set<std::string>> seen_paths;  // logical name -> resolved files
 
     for (size_t i = n_imports; i < var.lnasts.size(); ++i) {
       const auto& ln  = var.lnasts[i];
@@ -1548,7 +1547,7 @@ void discover_imports(Options& opts, Eprp_var& var, size_t n_imports) {
           continue;
         }
         for (const auto& c : names) {
-          std::string path = find_prp_ci(dir, c);
+          std::string path = find_prp(dir, c);
           if (!path.empty()) {
             seen_paths[c].insert(abspath_of(path));
             found.try_emplace(c, path);
@@ -2864,8 +2863,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   using livehd::lec::Verdict;
   namespace gu = livehd::graph_util;
 
-  // name -> def graph (case-insensitive, LiveHD/Pyrope name policy).
-  Ci_str_map<hhds::Graph*> ref_by_name, impl_by_name;
+  // name -> def graph (case-sensitive, LiveHD/Pyrope name policy).
+  absl::flat_hash_map<std::string, hhds::Graph*> ref_by_name, impl_by_name;
   for (auto& g : ref_var.graphs) {
     if (g) {
       ref_by_name[std::string(g->get_name())] = g.get();
@@ -2879,14 +2878,14 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
 
   // The LEC-able defs are those present on BOTH sides; children[def] = the child
   // def-NAMES it instantiates (taken from the ref-side Subs, name-matched).
-  Ci_str_map<std::vector<std::string>> children;
+  absl::flat_hash_map<std::string, std::vector<std::string>> children;
   std::vector<std::string>             defs;
   for (auto& [name, g] : ref_by_name) {
     if (impl_by_name.find(name) == impl_by_name.end()) {
       continue;
     }
     defs.push_back(name);
-    Ci_str_set seen;
+    absl::flat_hash_set<std::string> seen;
     for (auto node : g->forward_class()) {
       if (gu::type_op_of(node) != Ntype_op::Sub) {
         continue;
@@ -2902,7 +2901,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
 
   // Topo-order leaves-first (DFS post-order; the in-progress mark guards cycles).
   std::vector<std::string> order;
-  Ci_str_map<int>          mark;  // 0 unvisited, 1 in-progress, 2 done
+  absl::flat_hash_map<std::string, int>          mark;  // 0 unvisited, 1 in-progress, 2 done
   std::function<void(const std::string&)> dfs = [&](const std::string& n) {
     int& m = mark[n];
     if (m != 0) {
@@ -2922,7 +2921,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   }
 
   // LEC each def leaves-first; collapse its already-proven children.
-  Ci_str_set                proven;
+  absl::flat_hash_set<std::string>                proven;
   livehd::lec::Query_result top_result;
   bool                      have_top      = false;
   int                       semdiff_count = 0;  // defs dropped structurally (no solver)
@@ -2966,7 +2965,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           proven_list.push_back(name);
           ++semdiff_count;
           std::print("lec[hier]: '{}' MATCHED (semdiff {}, no solver)\n", name, so.alg);
-          if (str_tools::ci_equal(name, top_name)) {
+          if ((name == top_name)) {
             top_result = sr;
             have_top   = true;
           }
@@ -3008,7 +3007,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                r.verdict == Verdict::Proven ? "PROVEN" : (r.verdict == Verdict::Refuted ? "REFUTED" : "UNKNOWN"),
                coll.size(),
                coll.size() == 1 ? "" : "s");
-    if (str_tools::ci_equal(name, top_name)) {
+    if ((name == top_name)) {
       top_result = r;
       have_top   = true;
     }

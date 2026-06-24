@@ -5,7 +5,8 @@
 #include <string_view>
 #include <unordered_set>
 
-#include "ci_string.hpp"  // Ci_str_set: variable names match case-insensitively
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "upass_core.hpp"
 
 // uPass_semacheck — semantic-legality checks on the tree closest to user
@@ -39,7 +40,7 @@ private:
   void check_attr_writes(const Lnast* ln);
   // `visible` is mutated in place (insert-on-descend / erase-on-return) and
   // shared by reference across the whole non-function subtree — see the body.
-  void check_scope(const Lnast* ln, const Lnast_nid& scope_stmts, Ci_str_set& visible);
+  void check_scope(const Lnast* ln, const Lnast_nid& scope_stmts, absl::flat_hash_set<std::string>& visible);
 
   // Located error: span from `nid`'s loc when the node carries one (declare /
   // attr_set via the loc-carry chain), else a null span (single-line render).

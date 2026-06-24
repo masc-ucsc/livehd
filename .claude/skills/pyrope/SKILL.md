@@ -14,14 +14,7 @@ skill). Always verify generated code with `lhd` (last section).
 ## Ground rules
 
 * Comments are `//` only. `;` is the same as a newline. No variable shadowing,
-  anywhere. A continuation line must not start with an alphanumeric or `(`.
-* **Names are case-insensitive** (matched case-folded; the original spelling is
-  preserved in the emitted netlist). `myVal` and `MYVAL` are the same name — so
-  a type and a variable that differ only in case **collide**. Never name a
-  variable the lowercase of a type you use: `enum State` + `reg state` is a
-  compile error (`unresolved reference '___state'`); write `reg st:State`.
-  Convention: types are `Capitalized`, everything else lowercase; `comptime` is
-  never inferred from casing.
+  anywhere.
 * Every declaration starts with a kind keyword — data: `const` / `mut` /
   `wire` / `reg`; lambda: `comb` / `pipe` / `mod` / `fluid`. Prefix modifiers:
   `comptime`, `pub`. Assignment prefixes: `wrap`, `sat`. `stage[N]` is a
@@ -42,7 +35,7 @@ skill). Always verify generated code with `lhd` (last section).
   (`u<N>` max is 2^N−1). `1K == 1024`, also `M`/`G`/`T`.
 * bool and int never mix: `if x != 0 {}`, casts `int(true)`, `boolean(v#[3])`.
   `and`/`or`/`implies`/`not` are boolean-only (short-circuit); `& | ^ ~ ~& ~|
-  ~^` are bitwise integer ops. There is no `%` (modulo) and no exponent op.
+  ~^` are bitwise integer ops. There are only easy `%` (modulo power 2) and no exponent op.
 * Precedence is shallow — parenthesize: `3 & 4*4` is a compile error; write
   `3 & (4*4)`. Comparisons chain in one direction (`a <= b < c`).
 
@@ -118,9 +111,7 @@ mut arr = [1, 2, 3]                    // [] = array: all entries same type
 
 * Access: `p.x`, `t[0]`, `a['r1']`. Integer indices select *positional*
   entries only; named fields are name-access only.
-* `a ++ b` concatenates (same-named fields merge into a subtuple);
-  `(...a, b=2)` splices in place (duplicate name = error); append to a field
-  *after* the literal with `y.f ++= v` (never inside it).
+* `(...a, b=2)` splices in place (duplicate name = error).
 * A selector `[...]` takes ONE expression (int, string, range, or a
   conditional) — `a[0,1]` is not allowed.
 * Mutability: outer `const` freezes every field; inner `const` pins one field

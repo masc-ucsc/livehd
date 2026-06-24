@@ -11,7 +11,6 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "ci_string.hpp"  // Ci_str_map/Ci_str_set: signal names match case-insensitively
 #include "diag.hpp"
 #include "hlop/dlop.hpp"
 #include "lnast_ntype.hpp"
@@ -539,10 +538,10 @@ private:
 
   std::shared_ptr<Lnast>                     ln_;
   const uPass_timecheck::Registry&           registry_;
-  Ci_str_map<Cyc>      known_;
-  Ci_str_map<Stg>      pending_;
-  Ci_str_map<CallInfo> calls_;
-  Ci_str_set           plain_regs_;  // sigma owned by the LG checker
+  absl::flat_hash_map<std::string, Cyc>      known_;
+  absl::flat_hash_map<std::string, Stg>      pending_;
+  absl::flat_hash_map<std::string, CallInfo> calls_;
+  absl::flat_hash_set<std::string>           plain_regs_;  // sigma owned by the LG checker
   std::vector<Queued_check>                  queued_checks_;
 };
 

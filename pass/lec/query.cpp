@@ -497,7 +497,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   };
 
   // Proven-module collapse set (lec.collapse): def-NAMES forced to the blackbox
-  // path (case-insensitive). Applied identically by the encoder (skip flatten)
+  // path (case-sensitive). Applied identically by the encoder (skip flatten)
   // and build_shared_bbox below (pre-build the box's shared output symbols).
   Io_name_map<bool> collapse_defs;
   for (const auto& d : opts.collapse) {

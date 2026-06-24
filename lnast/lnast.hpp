@@ -15,7 +15,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_cat.h"
-#include "ci_string.hpp"  // Ci_str_map: signal-name-keyed side-channels fold case
+#include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
@@ -92,7 +92,7 @@ struct BitwidthEntry {
 };
 
 struct Lnast_bitwidth_meta {
-  Ci_str_map<BitwidthEntry> ranges;  // keyed by signal name (case-insensitive)
+  absl::flat_hash_map<std::string, BitwidthEntry> ranges;  // keyed by signal name (case-sensitive)
   bool                      empty() const noexcept { return ranges.empty(); }
 };
 

@@ -14,7 +14,8 @@
 #include <string_view>
 #include <vector>
 
-#include "ci_string.hpp"
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
 #include "log.hpp"                // LHD_LOG developer tracing on the "upass" channel
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
@@ -367,11 +368,11 @@ void Pass_upass::work(Eprp_var& var) {
   // sources) and hand the set to constprop, which errors only if an `import`
   // actually resolves to one (non-imported collisions stay tolerated).
   {
-    Ci_str_map<int> name_count;  // case-insensitive: Module_Fo and MODULE_FO collide
+    absl::flat_hash_map<std::string, int> name_count;  // case-sensitive: Module_Fo and MODULE_FO are distinct
     for (const auto& ln : var.lnasts) {
       ++name_count[std::string(ln->get_top_module_name())];
     }
-    Ci_str_set ambiguous;
+    absl::flat_hash_set<std::string> ambiguous;
     for (const auto& [name, n] : name_count) {
       if (n > 1) {
         ambiguous.insert(name);
@@ -439,7 +440,7 @@ void Pass_upass::work(Eprp_var& var) {
   // specializations below (was an O(lnasts) linear scan per spawn — O(M^2) on a
   // specialization-heavy design). Seeded from the current queue (entry points +
   // the pre-walk lambda split); kept in sync on every var.add inside the loop.
-  Ci_str_set seen_module_names;
+  absl::flat_hash_set<std::string> seen_module_names;
   for (const auto& ln : var.lnasts) {
     if (ln) {
       seen_module_names.insert(std::string(ln->get_top_module_name()));

@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include <algorithm>
 #include <array>
 #include <cctype>
 #include <charconv>
@@ -91,70 +90,23 @@ namespace str_tools {
 }
 
 // ---------------------------------------------------------------------------
-// ASCII case-insensitive name matching (LiveHD/Pyrope names are matched
-// case-insensitively while the original spelling is preserved for emission).
-// Only 'A'..'Z' fold; digits, '_', '0sb?', backticks, and '.' are untouched.
+// ASCII lowercase fold. LiveHD/Pyrope names are matched CASE-SENSITIVELY; this
+// helper exists only so passes can detect names that differ solely by letter
+// case (e.g. the upass.ssa `name-case-collision` lint) — it is NOT used for
+// name lookup. Only 'A'..'Z' fold; all other bytes pass through unchanged.
 // ---------------------------------------------------------------------------
 
 [[nodiscard]] inline char ascii_tolower(char c) {
   return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
 }
 
-[[nodiscard]] inline bool ci_equal(std::string_view a, std::string_view b) {
-  if (a.size() != b.size()) {
-    return false;
+// ASCII-lowercased copy of `s`, for case-collision detection only.
+[[nodiscard]] inline std::string ascii_fold(std::string_view s) {
+  std::string out(s);
+  for (auto& c : out) {
+    c = ascii_tolower(c);
   }
-  for (size_t i = 0; i < a.size(); ++i) {
-    if (ascii_tolower(a[i]) != ascii_tolower(b[i])) {
-      return false;
-    }
-  }
-  return true;
+  return out;
 }
-
-[[nodiscard]] inline bool ci_less(std::string_view a, std::string_view b) {
-  const size_t n = std::min(a.size(), b.size());
-  for (size_t i = 0; i < n; ++i) {
-    const auto ca = static_cast<unsigned char>(ascii_tolower(a[i]));
-    const auto cb = static_cast<unsigned char>(ascii_tolower(b[i]));
-    if (ca != cb) {
-      return ca < cb;
-    }
-  }
-  return a.size() < b.size();
-}
-
-[[nodiscard]] inline bool ci_starts_with(std::string_view str, std::string_view prefix) {
-  return prefix.size() <= str.size() && ci_equal(str.substr(0, prefix.size()), prefix);
-}
-
-[[nodiscard]] inline bool ci_ends_with(std::string_view str, std::string_view suffix) {
-  return suffix.size() <= str.size() && ci_equal(str.substr(str.size() - suffix.size()), suffix);
-}
-
-// FNV-1a over ASCII-lowercased bytes: case-insensitive and allocation-free.
-[[nodiscard]] inline size_t ci_hash(std::string_view s) {
-  uint64_t h = 1469598103934665603ull;
-  for (char c : s) {
-    h ^= static_cast<unsigned char>(ascii_tolower(c));
-    h *= 1099511628211ull;
-  }
-  return static_cast<size_t>(h);
-}
-
-// Transparent functors for case-insensitive std::string-keyed hash and ordered
-// containers (string_view lookups work without allocating an std::string).
-struct Ci_hash {
-  using is_transparent = void;
-  [[nodiscard]] size_t operator()(std::string_view s) const { return ci_hash(s); }
-};
-struct Ci_eq {
-  using is_transparent = void;
-  [[nodiscard]] bool operator()(std::string_view a, std::string_view b) const { return ci_equal(a, b); }
-};
-struct Ci_less {
-  using is_transparent = void;
-  [[nodiscard]] bool operator()(std::string_view a, std::string_view b) const { return ci_less(a, b); }
-};
 
 }  // namespace str_tools

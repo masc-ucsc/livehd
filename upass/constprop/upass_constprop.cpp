@@ -2363,7 +2363,7 @@ static int match_case_value(const std::shared_ptr<Bundle const>& subj, const std
   for (const auto& re : pat_flat) {
     const Bundle_flat_entry* lmatch = nullptr;
     for (const auto& le : subj_flat) {
-      const bool hit = re.name.empty() ? (le.name.empty() && le.pos == re.pos) : str_tools::ci_equal(le.name, re.name);
+      const bool hit = re.name.empty() ? (le.name.empty() && le.pos == re.pos) : (le.name == re.name);
       if (hit) {
         lmatch = &le;
         break;
@@ -2455,7 +2455,7 @@ void uPass_constprop::fold_has(const std::string& dst) {
     // the bare name used as the canonical key.
     const std::string s = strip_pyrope_quotes(key_val.to_pyrope());
     for (const auto& e : entries) {
-      if (str_tools::ci_equal(e.name, s)) {
+      if ((e.name == s)) {
         found = true;
         break;
       }
@@ -2571,7 +2571,7 @@ void uPass_constprop::fold_case(const std::string& dst) {
     const Bundle_flat_entry* lmatch = nullptr;
     if (!re.name.empty()) {
       for (const auto& le : lhs_flat) {
-        if (str_tools::ci_equal(le.name, re.name)) {
+        if ((le.name == re.name)) {
           lmatch = &le;
           break;
         }

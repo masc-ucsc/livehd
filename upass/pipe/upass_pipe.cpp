@@ -5,7 +5,7 @@
 #include <string>
 
 #include "absl/container/flat_hash_set.h"
-#include "ci_string.hpp"  // Ci_str_set: register names match case-insensitively
+#include "absl/container/flat_hash_map.h"
 #include "lnast_ntype.hpp"
 
 void uPass_pipe::run(const std::shared_ptr<Lnast>& lnast) {
@@ -49,7 +49,7 @@ void uPass_pipe::run(const std::shared_ptr<Lnast>& lnast) {
   // child): a reg-as-output (the counter idiom) must NOT get a second flop —
   // the reg itself is the pipeline stage (home stage min−1, checked by the
   // tolg Time_checker).
-  Ci_str_set reg_decls;
+  absl::flat_hash_set<std::string> reg_decls;
   for (const auto& nid : lnast->depth_preorder(root)) {
     if (nid.is_invalid() || !Lnast_ntype::is_declare(lnast->get_type(nid))) {
       continue;

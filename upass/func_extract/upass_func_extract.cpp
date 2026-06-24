@@ -20,7 +20,8 @@
 #include <utility>
 #include <vector>
 
-#include "ci_string.hpp"  // Ci_str_map/Ci_str_set: variable names match case-insensitively
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "dlop.hpp"
 #include "hhds/tree.hpp"
 #include "lnast_manager.hpp"
@@ -35,8 +36,8 @@ namespace {
 // temp_scalar_value (SSA temps). Returns nullopt on anything we can't statically
 // resolve. (Verbatim from the old func_extract pass.)
 std::optional<Dlop> resolve_child_scalar(const std::string& name, bool is_ref, bool is_const,
-                                         const Ci_str_map<Dlop>& latest,
-                                         const Ci_str_map<Dlop>& temps) {
+                                         const absl::flat_hash_map<std::string, Dlop>& latest,
+                                         const absl::flat_hash_map<std::string, Dlop>& temps) {
   if (is_const) {
     try {
       return *Dlop::from_pyrope(name);
@@ -67,7 +68,7 @@ struct Lambda_extractor {
   std::shared_ptr<Lnast_manager> lm;
 
   std::vector<std::shared_ptr<Lnast>> extracted_lnasts;
-  Ci_str_set     extracted_names;
+  absl::flat_hash_set<std::string>     extracted_names;
   // Class-index keys of the func_def nodes pulled out — the rebuild skips these
   // subtrees (and only these) when copying the module body.
   std::unordered_set<uint64_t> drop_keys;
@@ -77,13 +78,13 @@ struct Lambda_extractor {
   // latest_outer_value/bundle/import hold the comptime constants visible at the
   // current def site, temp_* recover SSA-temp values, outer_non_const records
   // names disqualified from capture.
-  Ci_str_map<Dlop>                                  latest_outer_value;
-  Ci_str_map<Ci_str_map<Dlop>> latest_outer_bundle;
-  Ci_str_map<Dlop>                                  temp_scalar_value;
-  Ci_str_map<Ci_str_map<Dlop>> temp_bundle_value;
-  Ci_str_map<std::string>                           temp_import_text;
-  Ci_str_map<std::string>                           latest_outer_import;
-  Ci_str_set                                        outer_non_const;
+  absl::flat_hash_map<std::string, Dlop>                                  latest_outer_value;
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, Dlop>> latest_outer_bundle;
+  absl::flat_hash_map<std::string, Dlop>                                  temp_scalar_value;
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, Dlop>> temp_bundle_value;
+  absl::flat_hash_map<std::string, std::string>                           temp_import_text;
+  absl::flat_hash_map<std::string, std::string>                           latest_outer_import;
+  absl::flat_hash_set<std::string>                                        outer_non_const;
 
   int  stmts_depth{0};
   bool drop_current_func_def{false};
@@ -259,7 +260,7 @@ struct Lambda_extractor {
       lm->restore_cursor(peek);
     }
 
-    Ci_str_map<Dlop> fields;
+    absl::flat_hash_map<std::string, Dlop> fields;
     while (lm->move_to_sibling()) {
       if (!Lnast_ntype::is_store(lm->current_type()) || !lm->has_child()) {
         lm->restore_cursor(saved);
@@ -494,7 +495,7 @@ struct Lambda_extractor {
 
     if (move_to_sibling()) {
       if (!latest_outer_value.empty() || !latest_outer_bundle.empty() || !latest_outer_import.empty()) {
-        Ci_str_set body_refs;
+        absl::flat_hash_set<std::string> body_refs;
         {
           const auto&                           src      = lm->get_lnast();
           const auto                            body_nid = lm->get_current_nid();
@@ -511,7 +512,7 @@ struct Lambda_extractor {
           };
           walk(body_nid);
         }
-        Ci_str_set local_io;
+        absl::flat_hash_set<std::string> local_io;
         for (auto sig : new_lnast->children(io_idx)) {
           for (auto entry : new_lnast->children(sig)) {
             if (!Lnast_ntype::is_store(new_lnast->get_type(entry))) {

@@ -113,17 +113,17 @@ void uPass_semacheck::check_attr_writes(const Lnast* ln) {
 // checked here — that check runs in prp2lnast on the producer tree (see
 // Prp2lnast::check_undeclared_writes), where inliner/SSA-synthesized stores
 // can't false-positive.
-void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts, Ci_str_set& visible) {
+void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts, absl::flat_hash_set<std::string>& visible) {
   // `visible` holds every name in scope from ENCLOSING frames. It is shared by
   // reference across the whole (non-function) subtree and mutated IN PLACE: a
   // scope inserts the names it declares so nested scopes see them, and erases
   // them again on the way out (the `added` undo log). The old code instead
-  // COPIED the whole `visible` set once per scope (`Ci_str_set combined =
+  // COPIED the whole `visible` set once per scope (`absl::flat_hash_set<std::string> combined =
   // visible;`) — O(scopes × names), which on a declare-heavy flattened module
   // (firtool / XSCore output: thousands of declares × thousands of nested
   // if/case scopes) is quadratic and looked like a multi-minute hang. This is
   // now O(total declares).
-  Ci_str_set               here;   // names declared in THIS scope (redeclaration check)
+  absl::flat_hash_set<std::string>               here;   // names declared in THIS scope (redeclaration check)
   std::vector<std::string> added;  // names THIS scope pushed into `visible` (undo on return)
 
   // Restore `visible` to the caller's state on EVERY exit path — including the
@@ -131,7 +131,7 @@ void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts,
   // this scope's names. erase() of an already-absent name (e.g. one released by
   // `store nil` below, or pushed twice across a release+redeclare) is a no-op.
   struct Scope_undo {
-    Ci_str_set&                     visible;
+    absl::flat_hash_set<std::string>&                     visible;
     const std::vector<std::string>& added;
     ~Scope_undo() {
       for (const auto& n : added) {
@@ -197,7 +197,7 @@ void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts,
     for (auto cc = ln->get_first_child(c); !cc.is_invalid(); cc = ln->get_sibling_next(cc)) {
       if (Lnast_ntype::is_stmts(ln->get_type(cc))) {
         if (is_func_body) {
-          Ci_str_set fresh;  // a comb body is a fresh namespace (Pyrope closure rule)
+          absl::flat_hash_set<std::string> fresh;  // a comb body is a fresh namespace (Pyrope closure rule)
           check_scope(ln, cc, fresh);
         } else {
           check_scope(ln, cc, visible);  // shared in place — no per-scope copy
@@ -229,7 +229,7 @@ void uPass_semacheck::begin_iteration() {
   }
   for (auto c = ln->get_first_child(root); !c.is_invalid(); c = ln->get_sibling_next(c)) {
     if (Lnast_ntype::is_stmts(ln->get_type(c))) {
-      Ci_str_set visible;  // fresh outer namespace per top-level stmts block
+      absl::flat_hash_set<std::string> visible;  // fresh outer namespace per top-level stmts block
       check_scope(ln, c, visible);
     }
   }

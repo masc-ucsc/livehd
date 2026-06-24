@@ -17,7 +17,6 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"
-#include "ci_string.hpp"  // Ci_str_map/Ci_str_set: variable/signal names match case-insensitively
 #include "graph_library_singleton.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "hlop/dlop.hpp"
@@ -35,17 +34,17 @@ using livehd::graph_util::set_unsign;
 using livehd::graph_util::setup_sink_by_name;
 
 using Pin      = hhds::Pin_class;
-using WriteMap = Ci_str_map<Pin>;
+using WriteMap = absl::flat_hash_map<std::string, Pin>;
 
 // Reserved clock/reset port-name recognition. Pyrope matches names
-// case-insensitively, so these conventional signal names fold case (Clk,
+// case-sensitively, so these conventional signal names must match exactly (clk,
 // RESET_N, … are all recognized). The `_n` suffix (active-low) folds too.
 [[nodiscard]] inline bool is_clock_port_name(std::string_view n) {
-  return str_tools::ci_equal(n, "clock") || str_tools::ci_equal(n, "clk");
+  return (n == "clock") || (n == "clk");
 }
 [[nodiscard]] inline bool is_reset_port_name(std::string_view n) {
-  return str_tools::ci_equal(n, "reset") || str_tools::ci_equal(n, "rst") || str_tools::ci_equal(n, "reset_n")
-         || str_tools::ci_equal(n, "rst_n");
+  return (n == "reset") || (n == "rst") || (n == "reset_n")
+         || (n == "rst_n");
 }
 
 // One lowered value: its driver pin + meaningful (unsigned) bit width `mw`.
@@ -97,9 +96,9 @@ struct Val {
       continue;
     }
     auto n = ln->get_top_module_name();
-    if (str_tools::ci_equal(n, name)) {
+    if ((n == name)) {
       exact = ln;
-    } else if (n.size() > suffix.size() && str_tools::ci_ends_with(n, suffix)) {
+    } else if (n.size() > suffix.size() && str_tools::ends_with(n, suffix)) {
       suffix_hit = ln;
       ++suffix_matches;
     }
@@ -844,28 +843,28 @@ private:
     auto  key   = lnast_->get_name(key_n);
     auto  val_n = lnast_->get_sibling_next(key_n);
     auto  val   = val_n.is_invalid() ? std::string_view{"true"} : std::string_view(lnast_->get_name(val_n));
-    if (str_tools::ci_equal(key, "reset_pin")) {
+    if ((key == "reset_pin")) {
       info.reset_pin_name = std::string(val);
-    } else if (str_tools::ci_equal(key, "clock_pin")) {
+    } else if ((key == "clock_pin")) {
       info.clock_pin_name = std::string(val);
-    } else if (str_tools::ci_equal(key, "posclk")) {
+    } else if ((key == "posclk")) {
       info.has_posclk = true;
       info.posclk_val = val != "false" && val != "0";
-    } else if (str_tools::ci_equal(key, "sync")) {
+    } else if ((key == "sync")) {
       info.has_sync = true;
       info.sync_val = val != "false" && val != "0";
-    } else if (str_tools::ci_equal(key, "async")) {
+    } else if ((key == "async")) {
       // Canonical Pyrope-source spelling (04b-attributes.md known_attrs): the
       // inverse of the importer's `sync`.  `async=true` => async reset.
       info.has_sync = true;
       info.sync_val = val == "false" || val == "0";
-    } else if (str_tools::ci_equal(key, "negreset")) {
+    } else if ((key == "negreset")) {
       info.negreset = val != "false" && val != "0";
-    } else if (str_tools::ci_equal(key, "initial") || str_tools::ci_equal(key, "init")) {
+    } else if ((key == "initial") || (key == "init")) {
       // `init` is the Pyrope-source spelling; `initial` the importer's.  Both
       // override the declare's reset value.
       info.initial_txt = std::string(val);
-    } else if (str_tools::ci_equal(key, "name")) {
+    } else if ((key == "name")) {
       // Explicit local flop name (`reg x:[name="reg_x"]`) — overrides the
       // declared variable name; finalize_regs combines it with any hier prefix.
       // The value is a Pyrope string literal, so strip the surrounding quotes.
@@ -878,7 +877,7 @@ private:
       // Runner-stamped instance-path prefix for a reg inside an inlined comb
       // (`pipeB_ex_mem`); finalize_regs prepends it (dotted) to the local name.
       info.hier_prefix = std::string(val);
-    } else if (str_tools::ci_equal(key, "type") || str_tools::ci_equal(key, "comptime")) {
+    } else if ((key == "type") || (key == "comptime")) {
       // storage-class markers — already consumed by the declare
     } else {
       warn_at(tgt,
@@ -1075,7 +1074,7 @@ private:
             rpin = resolve(info.reset_pin_name);
           }
         }
-        if (str_tools::ci_ends_with(info.reset_pin_name, "_n")) {
+        if (str_tools::ends_with(info.reset_pin_name, "_n")) {
           neg = true;
         }
       } else if (!reset_name_.empty()) {
@@ -1866,7 +1865,7 @@ private:
   // __memory(cfg) builtin (named fields + per-port positional lists).
   struct Tuple_rec {
     std::vector<Lnast_nid>                      elems;
-    Ci_str_map<Lnast_nid> named;
+    absl::flat_hash_map<std::string, Lnast_nid> named;
   };
 
   // tuple_add(ref dst, e0 | store(name, v), …) — record the literal. Any
@@ -2354,7 +2353,7 @@ private:
         const auto&           pname = lnast_->get_name(idx);
         const Lnast_io_entry* oe    = nullptr;
         for (const auto& e : srt->second.outputs) {
-          if (str_tools::ci_equal(e.name, pname)) {
+          if ((e.name == pname)) {
             oe = &e;
             break;
           }
@@ -2812,7 +2811,7 @@ private:
       }
       auto kind_of_bits = [](uint32_t b) { return b == 1 ? Io_kind::boolean : Io_kind::integer; };
       for (const auto& d : gio->get_input_pin_decls()) {
-        if (str_tools::ci_equal(d.name, "clock") || str_tools::ci_equal(d.name, "reset")) {
+        if ((d.name == "clock") || (d.name == "reset")) {
           continue;  // implicit; wired from the parent below, not an argument
         }
         cio_lg.inputs.push_back(Lnast_io_entry{.name      = d.name,
@@ -4284,7 +4283,7 @@ private:
       child = lnast_->get_sibling_next(child);
     }
 
-    Ci_str_set all_vars;
+    absl::flat_hash_set<std::string> all_vars;
     for (auto& br : branches) {
       for (auto& [name, _] : br.writes) {
         all_vars.insert(name);
@@ -4368,7 +4367,7 @@ private:
   // "none of the conds" — the else / fall-through slot. Hotmux pins:
   // 0 = one-hot selector, p(i+1) = arm i's value, p(n_conds+1) = else value
   // (the variable's pre-if value when the arm / else doesn't write it).
-  void lower_unique_merge(const std::vector<Branch>& branches, const Ci_str_set& all_vars, bool has_else,
+  void lower_unique_merge(const std::vector<Branch>& branches, const absl::flat_hash_set<std::string>& all_vars, bool has_else,
                           const WriteMap& else_writes) {
     const int n_conds = static_cast<int>(branches.size()) - (has_else ? 1 : 0);
     I(n_conds >= 1);
@@ -4471,35 +4470,35 @@ private:
   const uPass_tolg::Registry* registry_ = nullptr;
   hhds::GraphLibrary*         lib_      = nullptr;
 
-  Ci_str_map<Pin>                         pin_map_;
-  Ci_str_map<int32_t>                     mw_map_;
+  absl::flat_hash_map<std::string, Pin>                         pin_map_;
+  absl::flat_hash_map<std::string, int32_t>                     mw_map_;
   // The last driver written to each LOGICAL variable (SSA versions x /
   // x___ssa_1 / … collapsed to "x"): the value after ALL in-cycle writes, used
   // for a derived `reset_pin = <signal>` / `clock_pin = <signal>` resolution and
   // for a `wire`'s buffer pin.
-  Ci_str_map<std::pair<Pin, int32_t>>     logical_last_;
+  absl::flat_hash_map<std::string, std::pair<Pin, int32_t>>     logical_last_;
   // A field read whose source is a Sub result created by a call lowered LATER in
   // the body. Deferred to end-of-pass, then re-resolved with tget_final_ so a
   // still-unresolved one warns instead of looping.
   std::vector<Lnast_nid>                                        pending_tgets_;
   bool                                                          tget_final_ = false;
-  Ci_str_map<std::pair<int64_t, int64_t>> range_map_;
+  absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> range_map_;
   // A `range` whose endpoints are NOT comptime constants (`a#[n..=m]` with
   // runtime n/m). Keyed by the range tmp name; carries the lo/hi LNAST nids so
   // lower_get_mask can build the shift+mask select. An open `lo..` form stores
   // a const "nil" hi nid. (Comptime ranges stay in range_map_ as folded ints.)
-  Ci_str_map<std::pair<Lnast_nid, Lnast_nid>> range_dyn_map_;
+  absl::flat_hash_map<std::string, std::pair<Lnast_nid, Lnast_nid>> range_dyn_map_;
   // An open-ended `lo..` range with a COMPTIME lo (`a#[3..]`): only the lo nid
   // is stashed (keyed by the range tmp name). The upper bound is the sliced
   // value's MSB, known only at the consuming get_mask/set_mask, which closes the
   // range to `lo..=(value bits-1)`. (A runtime-lo open range lives in
   // range_dyn_map_ with a const "nil" hi.)
-  Ci_str_map<Lnast_nid>                       range_open_map_;
+  absl::flat_hash_map<std::string, Lnast_nid>                       range_open_map_;
   std::vector<WriteMap>                                         branch_writes_;
   // Parallel to branch_writes_: per active branch, the pre-branch value of each
   // name it wrote (nullopt = absent before the branch). lower_branch replays
   // this to roll pin_map_ back, avoiding a full per-branch copy of pin_map_.
-  std::vector<Ci_str_map<std::optional<Pin>>> branch_restore_;
+  std::vector<absl::flat_hash_map<std::string, std::optional<Pin>>> branch_restore_;
   WriteMap                                                      empty_writes_;
 
   // 2c-wire — per-wire lowering state recorded at the declare; finalize_wires()
@@ -4512,17 +4511,17 @@ private:
     int32_t          decl_mw   = 0;   // declared width; 0 = untyped (restamp from driver)
     bool             is_signed = false;
   };
-  Ci_str_set            wire_names_;  // gates lower_store
+  absl::flat_hash_set<std::string>            wire_names_;  // gates lower_store
   std::vector<std::string>                    wire_order_;  // declaration order
-  Ci_str_map<Wire_info> wire_info_;
+  absl::flat_hash_map<std::string, Wire_info> wire_info_;
 
   // Reg lowering state. reg_map_ holds each declared reg's Flop
   // node (reads resolve to its q via pin_map_; stores rebind the shadow
   // din/enable keys). clock_*/reset_* lazily bind the clock/reset graph
   // inputs. reg_info_/reg_order_ carry the finalize metadata for
   // PLAIN regs (stage regs live only in reg_map_/flop_depth_).
-  Ci_str_map<hhds::Node_class> reg_map_;
-  Ci_str_map<Reg_info>         reg_info_;
+  absl::flat_hash_map<std::string, hhds::Node_class> reg_map_;
+  absl::flat_hash_map<std::string, Reg_info>         reg_info_;
   std::vector<std::string>                           reg_order_;
   // Scalar `mut`/`const` declares (NOT reg/latch/array). A `mut b:uN = nil`
   // emits no init store, so its name never gets a driver — but using it as a
@@ -4530,18 +4529,18 @@ private:
   // overwritten). lower_set_mask substitutes a 0sb? base for such a name; the
   // set guards that only a DECLARED scalar gets the treatment (a genuine typo
   // still errors). `= 0` never hits this — its base already folds to const 0.
-  Ci_str_set                   scalar_decl_;
+  absl::flat_hash_set<std::string>                   scalar_decl_;
   // Declared memories (array-typed regs + mut/const arrays), the
   // branch-path stack lower_if maintains for their write enables, the
   // recorded tuple literals (array initializers / __memory configs), and the
   // bound __memory results.
-  Ci_str_map<Mem_info>         mem_map_;
+  absl::flat_hash_map<std::string, Mem_info>         mem_map_;
   std::vector<std::string>                           mem_order_;
   std::vector<Pin>                                   path_cond_;
-  Ci_str_map<Tuple_rec>        tuple_recs_;
-  Ci_str_map<Mem_result>       mem_results_;
+  absl::flat_hash_map<std::string, Tuple_rec>        tuple_recs_;
+  absl::flat_hash_map<std::string, Mem_result>       mem_results_;
   // attr_set seen before its target's declare (memory fwd overrides etc).
-  Ci_str_map<Ci_str_map<std::string>> pending_attrs_;
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, std::string>> pending_attrs_;
   std::string                                        clock_name_;
   bool                                               clock_minted_ = false;
   Pin                                                clock_pin_;
@@ -4557,15 +4556,15 @@ private:
   bool                                               en_true_valid_  = false;
   bool                                               en_false_valid_ = false;
 
-  Ci_str_map<Pending_stage> pending_stage_;
-  Ci_str_map<Sub_out>       sub_out_stages_;
+  absl::flat_hash_map<std::string, Pending_stage> pending_stage_;
+  absl::flat_hash_map<std::string, Sub_out>       sub_out_stages_;
   // Multi-output instance results: fcall dst name -> (Sub node, callee
   // outputs); consumed by tuple_get field reads.
   struct Sub_result {
     hhds::Node_class            sub;
     std::vector<Lnast_io_entry> outputs;
   };
-  Ci_str_map<Sub_result> sub_results_;
+  absl::flat_hash_map<std::string, Sub_result> sub_results_;
 
   // Checker inputs gathered while building: pending records,
   // per-Flop effective crossing depth, per-Sub pinned latency interval.
@@ -5415,7 +5414,7 @@ private:
   absl::flat_hash_map<uint64_t, std::string>                 plain_regs_;
   absl::flat_hash_set<uint64_t>                              inserted_;
   absl::flat_hash_set<uint64_t>                              wire_cuts_;  // 2c-wire: cut Verilog comb-cycle wire in-edges
-  Ci_str_map<uint64_t>                 reg_flop_by_name_;
+  absl::flat_hash_map<std::string, uint64_t>                 reg_flop_by_name_;
   absl::flat_hash_set<uint64_t>                              decl_cycle_regs_;  // regs with an explicit @[N]/interface cycle (feedforward)
   absl::flat_hash_set<uint64_t>                              state_;
   absl::flat_hash_map<uint64_t, TR>                          tr_;
@@ -5435,7 +5434,7 @@ private:
   // A reg whose `clock_pin=NAME` attr names its clock explicitly does not
   // need the implicit `clock` input (the slang reader stamps these for
   // non-clk/clock Verilog clock names); collect the covered names first.
-  Ci_str_set      clocked_elsewhere;
+  absl::flat_hash_set<std::string>      clocked_elsewhere;
   std::function<void(const Lnast_nid&)> scan_attrs = [&](const Lnast_nid& nid) {
     if (Lnast_ntype::is_attr_set(lnast->get_type(nid))) {
       auto tgt = lnast->get_first_child(nid);
@@ -5528,7 +5527,7 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
 }
 
 [[nodiscard]] bool needs_clock_rec(const std::shared_ptr<Lnast>& lnast, const uPass_tolg::Registry& registry,
-                                   Ci_str_map<bool>& memo, Ci_str_set& visiting) {
+                                   absl::flat_hash_map<std::string, bool>& memo, absl::flat_hash_set<std::string>& visiting) {
   const std::string key(lnast->get_top_module_name());
   if (auto it = memo.find(key); it != memo.end()) {
     return it->second;
@@ -5563,7 +5562,7 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
 // `reset_pin` attr override (those bind their own reset input). A ref init is
 // counted (tolg later requires it const; the reset NEED is already real).
 [[nodiscard]] bool tree_declares_reset_reg_impl(const std::shared_ptr<Lnast>& lnast) {
-  Ci_str_set      explicit_rp;
+  absl::flat_hash_set<std::string>      explicit_rp;
   std::function<void(const Lnast_nid&)> collect_rp = [&](const Lnast_nid& nid) {
     if (Lnast_ntype::is_attr_set(lnast->get_type(nid))) {
       auto c0 = lnast->get_first_child(nid);
@@ -5680,7 +5679,7 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
 }
 
 [[nodiscard]] bool needs_reset_rec(const std::shared_ptr<Lnast>& lnast, const uPass_tolg::Registry& registry,
-                                   Ci_str_map<bool>& memo, Ci_str_set& visiting) {
+                                   absl::flat_hash_map<std::string, bool>& memo, absl::flat_hash_set<std::string>& visiting) {
   const std::string key(lnast->get_top_module_name());
   if (auto it = memo.find(key); it != memo.end()) {
     return it->second;
@@ -5773,8 +5772,8 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
   std::string clock_name;
   bool        clock_minted = false;
   {
-    Ci_str_map<bool> memo;
-    Ci_str_set       visiting;
+    absl::flat_hash_map<std::string, bool> memo;
+    absl::flat_hash_set<std::string>       visiting;
     if (needs_clock_rec(lnast, registry, memo, visiting)) {
       // Reuse a declared clk/clock input only when it can actually be a
       // clock (bool or <=1-bit; untyped bits==0 included) — a multi-bit
@@ -5790,7 +5789,7 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
         // Minting the implicit "clock" input collides with any existing
         // multi-bit clock-named port — diagnose instead of double-driving.
         for (const auto& e : lnast->io_meta().inputs) {
-          if (str_tools::ci_equal(e.name, "clock")) {
+          if ((e.name == "clock")) {
             livehd::diag::err("upass.tolg", "clock-collision", "time")
                 .msg(
                     "input 'clock' of '{}' is not usable as the pipeline clock (multi-bit data port) "
@@ -5800,7 +5799,7 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
           }
         }
         for (const auto& e : lnast->io_meta().outputs) {
-          if (str_tools::ci_equal(e.name, "clock")) {
+          if ((e.name == "clock")) {
             livehd::diag::err("upass.tolg", "clock-collision", "time")
                 .msg("output 'clock' of '{}' collides with the implicit pipeline clock — rename it", mod_name)
                 .fatal();
@@ -5838,7 +5837,7 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
         ++candidates;
         if (reset_name.empty()) {
           reset_name = e.name;
-          reset_neg  = e.name.size() > 2 && str_tools::ci_ends_with(e.name, "_n");
+          reset_neg  = e.name.size() > 2 && str_tools::ends_with(e.name, "_n");
         }
       }
       if (candidates > 1) {
@@ -5848,13 +5847,13 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
             .fatal();
       }
     };
-    Ci_str_map<bool> memo;
-    Ci_str_set       visiting;
+    absl::flat_hash_map<std::string, bool> memo;
+    absl::flat_hash_set<std::string>       visiting;
     if (needs_reset_rec(lnast, registry, memo, visiting)) {
       bind_reset_candidate();
       if (reset_name.empty()) {
         for (const auto& e : lnast->io_meta().inputs) {
-          if (str_tools::ci_equal(e.name, "reset")) {
+          if ((e.name == "reset")) {
             livehd::diag::err("upass.tolg", "reset-collision", "time")
                 .msg(
                     "input 'reset' of '{}' is not usable as the register reset (multi-bit data port) "
@@ -5864,7 +5863,7 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
           }
         }
         for (const auto& e : lnast->io_meta().outputs) {
-          if (str_tools::ci_equal(e.name, "reset")) {
+          if ((e.name == "reset")) {
             livehd::diag::err("upass.tolg", "reset-collision", "time")
                 .msg("output 'reset' of '{}' collides with the implicit register reset — rename it", mod_name)
                 .fatal();

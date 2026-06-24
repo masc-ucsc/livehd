@@ -136,13 +136,15 @@ http_archive(
 
 # HHDS
 bazel_dep(name = "hhds", version = "0.2.0")
-git_override(
-    module_name = "hhds",
-    remote = "https://github.com/masc-ucsc/hhds.git",
-    commit = "abdd0c55372276c782bc8a28867cda4c710cee3f",  # attr slot-vector + try_get/get_or; GraphLibrary writer-preferring registry lock (fixes high-core create/find livelock)
-)
-# For local debug/testing, swap the git_override above for:
-# local_path_override(module_name = "hhds", path = "../hhds")
+# PIN-RESTORE PENDING: local override carries the case-sensitive name-map revert
+# (str_ci.hpp -> str_hash.hpp, Name_hash/Name_eq). Restore the git_override below
+# once ../hhds is committed + pushed and the pin bumped.
+local_path_override(module_name = "hhds", path = "../hhds")
+# git_override(
+#     module_name = "hhds",
+#     remote = "https://github.com/masc-ucsc/hhds.git",
+#     commit = "abdd0c55372276c782bc8a28867cda4c710cee3f",  # attr slot-vector + try_get/get_or; GraphLibrary writer-preferring registry lock (fixes high-core create/find livelock)
+# )
 
 # prpparse — hand-written recursive-descent Pyrope parser; the inou/prp front-end
 # (it replaced the tree-sitter-pyrope grammar, so neither @tree-sitter nor

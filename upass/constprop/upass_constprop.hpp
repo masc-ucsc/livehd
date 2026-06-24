@@ -127,7 +127,7 @@ public:
   // records here the names of get_mask results whose SOURCE was a string / enum
   // / tuple / array; push_reduction looks the tmp up and errors. Cleared per run
   // in begin_iteration (tmp names are unique within a lambda walk).
-  Ci_str_set non_int_bitsel_;
+  absl::flat_hash_set<std::string> non_int_bitsel_;
   bool report_reduction_nonint(upass::Src_span src);
   // True when `o` may be bit-selected/reduced: an integer/boolean scalar, a
   // range base, or a runtime value whose kind is not yet known. A string, enum
@@ -151,11 +151,11 @@ public:
   // An `import` that resolves to one of these is an ambiguity error (§2);
   // a non-imported collision is tolerated (never consulted). Set by
   // pass.upass from the duplicate top_module_names in var.lnasts.
-  static void set_ambiguous_units(Ci_str_set s) { ambiguous_units_ = std::move(s); }
+  static void set_ambiguous_units(absl::flat_hash_set<std::string> s) { ambiguous_units_ = std::move(s); }
 
 protected:
   static inline std::vector<Pending_import> pending_imports_;
-  static inline Ci_str_set                  ambiguous_units_;
+  static inline absl::flat_hash_set<std::string>                  ambiguous_units_;
 
   // Resolve a live `import` call (the LiveHD docs):
   // cursor sits on the const "import" callee; binds `dst` (tuple form → pub
@@ -285,7 +285,7 @@ protected:
   void check_field_store_kind(std::string_view field_key, const Dlop& value);
 
   // Field paths read via tuple_get this walk (unused-unset warning).
-  Ci_str_set field_reads_;
+  absl::flat_hash_set<std::string> field_reads_;
 
   // Local replacement for the deleted runner_type_query_fn seam:
   // inferred scalar KIND off the binding + declared integer ENVELOPE from
@@ -733,7 +733,7 @@ protected:
   // (inliner binding, cell folds, import handling) source-compatible.
   using Call_actual = upass::call_resolver::Call_actual;
 
-  static inline Ci_str_map<std::shared_ptr<Lnast>> function_registry;
+  static inline absl::flat_hash_map<std::string, std::shared_ptr<Lnast>> function_registry;
 
   std::optional<Dlop>                     resolve_current_scalar() const;
   std::optional<std::vector<Call_actual>> collect_call_actuals();

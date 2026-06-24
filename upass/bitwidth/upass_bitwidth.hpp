@@ -7,7 +7,7 @@
 #include <string_view>
 
 #include "absl/container/flat_hash_set.h"
-#include "ci_string.hpp"  // Ci_str_set: variable names match case-insensitively
+#include "absl/container/flat_hash_map.h"
 #include "hlop/dlop.hpp"
 #include "diag.hpp"
 #include "lnast_range.hpp"
@@ -92,7 +92,7 @@ private:
   // exemption at that store so later ordinary writes are checked normally.
   // (Deliberately transient walk state, like the coalescer's pending set: a
   // one-shot per-write policy handshake, not a per-name fact.)
-  Ci_str_set wrap_sat_exempt_;
+  absl::flat_hash_set<std::string> wrap_sat_exempt_;
 
   // ── Lnast_range ↔ bundle-Entry conversion ─────────────────────────────────
   static std::optional<int64_t> const_to_i64(const Dlop& v);
