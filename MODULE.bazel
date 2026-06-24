@@ -232,7 +232,7 @@ http_archive(
 new_git_repository(
     name = "abc",
     build_file = "//packages:abc.BUILD",  # relative to external path
-    commit = "68bf7cba8eebe9ea7a5d1d78820f95ffb51417a5",
+    commit = "3ce53c361f6017153a0f9bb3c91f4d04eb820fc2",
     patches = ["//packages:abc.patch"],
     remote = "https://github.com/berkeley-abc/abc.git",
     shallow_since = "1554534526 -1000",
