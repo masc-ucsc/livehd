@@ -145,11 +145,10 @@ Lnast_ntype::Lnast_ntype_int Lnast::get_type(const Lnast_nid& nid) const {
 void Lnast::set_type(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int t) { nid.set_type(static_cast<hhds::Type>(t)); }
 
 std::string_view Lnast::get_name(const Lnast_nid& nid) const {
-  auto ref = nid.attr(hhds::attrs::name);
-  if (!ref.has()) {
-    return {};
-  }
-  return ref.get();
+  // Single store+map lookup (was has()+get() == two). get_name is one of the
+  // hottest lnast calls, so the doubled probe showed up in profiles.
+  const auto* p = nid.attr(hhds::attrs::name).try_get();
+  return p != nullptr ? std::string_view{*p} : std::string_view{};
 }
 
 void Lnast::set_name(const Lnast_nid& nid, std::string_view name) {
@@ -209,11 +208,7 @@ uint32_t Lnast::tmp_site_hash(const Lnast_nid& ref_nid, const absl::flat_hash_ma
 }
 
 hhds::SourceId Lnast::get_srcid(const Lnast_nid& nid) const {
-  auto ref = nid.attr(hhds::attrs::srcid);
-  if (!ref.has()) {
-    return hhds::SourceId_invalid;
-  }
-  return ref.get();
+  return nid.attr(hhds::attrs::srcid).get_or(hhds::SourceId_invalid);  // single lookup
 }
 
 void Lnast::set_srcid(const Lnast_nid& nid, hhds::SourceId id) {

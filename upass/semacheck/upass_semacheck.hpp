@@ -37,7 +37,9 @@ private:
   bool ran_ = false;
 
   void check_attr_writes(const Lnast* ln);
-  void check_scope(const Lnast* ln, const Lnast_nid& scope_stmts, const Ci_str_set& visible);
+  // `visible` is mutated in place (insert-on-descend / erase-on-return) and
+  // shared by reference across the whole non-function subtree — see the body.
+  void check_scope(const Lnast* ln, const Lnast_nid& scope_stmts, Ci_str_set& visible);
 
   // Located error: span from `nid`'s loc when the node carries one (declare /
   // attr_set via the loc-carry chain), else a null span (single-line render).

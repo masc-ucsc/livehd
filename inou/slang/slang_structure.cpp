@@ -1247,9 +1247,9 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     }
   }
   if (!cyclic.empty()) {
-    emit_warning(slang::SourceRange(drivers[cyclic.front()].member->location, drivers[cyclic.front()].member->location),
-                 "comb-loop", "time",
-                 "combinational dependency cycle between drivers; emitting cyclic nets as `wire` (position-independent reads)");
+    // emit_warning(slang::SourceRange(drivers[cyclic.front()].member->location, drivers[cyclic.front()].member->location),
+    //              "comb-loop", "time",
+    //              "combinational dependency cycle between drivers; emitting cyclic nets as `wire` (position-independent reads)");
     // 2c-wire — every net written by a cyclic driver is declared a `wire` so a
     // read before its driver binds to the resolved net (position-independent),
     // replacing the old `.[defer]` end-of-cycle read. A reg/input is never a

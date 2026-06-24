@@ -427,11 +427,31 @@ void Pass_upass::work(Eprp_var& var) {
 
   uPass_constprop::set_function_registry(var.lnasts);
 
+  // Shared comb-call-inliner registry, built ONCE and reused by every per-unit
+  // runner below. ensure() walks each lnast body exactly once across the whole
+  // pass; calling it per iteration is an O(1) no-op unless a runner appended new
+  // lnasts (template specializations), which it then folds in incrementally.
+  // (The old code rebuilt this from scratch inside every runner, re-walking
+  // every lnast's whole tree per unit — O(units^2 * tree), the XSCore "hang".)
+  uPass_function_registry function_registry;
+
+  // Module names already in the queue, for O(1) dedup of runner-spawned
+  // specializations below (was an O(lnasts) linear scan per spawn — O(M^2) on a
+  // specialization-heavy design). Seeded from the current queue (entry points +
+  // the pre-walk lambda split); kept in sync on every var.add inside the loop.
+  Ci_str_set seen_module_names;
+  for (const auto& ln : var.lnasts) {
+    if (ln) {
+      seen_module_names.insert(std::string(ln->get_top_module_name()));
+    }
+  }
+
   // Walk as a queue: structural passes can append new LNASTs (e.g. extracted
   // comb functions), and those generated trees should run through the same
   // configured upass pipeline before downstream stages see them.
   for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
     const auto ln = var.lnasts.at(idx);
+    function_registry.ensure(var.lnasts);  // folds in any newly-appended lnasts
 
     // Excerpt provider: diagnostics emitted while this unit is walked render
     // their caret excerpt through the unit's locator (hash-validated bytes).
@@ -466,7 +486,7 @@ void Pass_upass::work(Eprp_var& var) {
     // materializing (the main walk consumes its rewrite).
     runner.set_materialize(up.run_toln && !is_template);  // never rewrite a template body
     runner.set_is_function_body(is_function_body);
-    runner.set_function_registry(var.lnasts);  // 1i: comb bodies to inline from
+    runner.set_function_registry(function_registry);  // 1i: comb bodies to inline from (shared, built once)
     if (runner.has_configuration_error()) {
       fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
     }
@@ -495,15 +515,9 @@ void Pass_upass::work(Eprp_var& var) {
       // here to populate io_meta before the queue walk reaches it
       // (typecheck/bitwidth/pipe/tolg all read io_meta). Dedup by module name:
       // an identical signature minted from another call site (any tree) yields
-      // the same mangled name — keep the first, the call resolves to it.
-      bool already = false;
-      for (const auto& existing : var.lnasts) {
-        if (existing->get_top_module_name() == new_ln->get_top_module_name()) {
-          already = true;
-          break;
-        }
-      }
-      if (already) {
+      // the same mangled name — keep the first, the call resolves to it. O(1)
+      // membership test (insert.second is false when the name is already queued).
+      if (!seen_module_names.insert(std::string(new_ln->get_top_module_name())).second) {
         continue;
       }
       if (up.run_ssa) {

@@ -74,10 +74,22 @@ std::optional<std::vector<Call_actual>> collect_call_actuals(
 // uses str_tools::ci_ends_with to match `<module>.<name>` case-insensitively.
 template <typename Registry>
 std::shared_ptr<Lnast> lookup_callee(const Registry& function_registry, std::string_view name) {
+  // Prefer a candidate carrying a real comb signature (non-empty io).
+  auto has_sig = [](const std::shared_ptr<Lnast>& l) { return l && !l->io_meta().empty(); };
+
   std::shared_ptr<Lnast> exact;
   if (auto it = function_registry.find(std::string(name)); it != function_registry.end()) {
     exact = it->second;
   }
+  // Fast path: an exact name match WITH a signature always wins (see the
+  // has_sig(exact) return below), so skip the O(registry) suffix scan entirely
+  // for it. This is the overwhelmingly common case — a plain by-name comb call —
+  // and this resolver runs once per func_call from the inliner, tolg, and
+  // timecheck, so the scan made callee resolution O(calls * registry).
+  if (has_sig(exact)) {
+    return exact;
+  }
+
   const std::string      suffix = "." + std::string(name);
   std::shared_ptr<Lnast> suffix_body;
   int                    suffix_matches = 0;
@@ -86,11 +98,6 @@ std::shared_ptr<Lnast> lookup_callee(const Registry& function_registry, std::str
       suffix_body = v;
       ++suffix_matches;
     }
-  }
-  // Prefer a candidate carrying a real comb signature (non-empty io).
-  auto has_sig = [](const std::shared_ptr<Lnast>& l) { return l && !l->io_meta().empty(); };
-  if (has_sig(exact)) {
-    return exact;
   }
   if (suffix_matches == 1 && has_sig(suffix_body)) {
     return suffix_body;

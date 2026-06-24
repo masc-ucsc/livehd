@@ -20,6 +20,47 @@
 #include "lnast_ntype.hpp"
 #include "upass_core.hpp"
 
+// ── Shared comb-call-inliner registry ───────────────────────────────────────
+// Built ONCE per Pass_upass::work and shared (by const pointer) with every
+// per-unit uPass_runner instance, instead of being recomputed from scratch
+// inside each runner. The old per-runner rebuild walked EVERY lnast's whole
+// tree on EVERY unit, making the upass walk O(units^2 * tree) — minutes-long
+// "hangs" on large designs (XSCore). ensure() is incremental: it walks each
+// lnast body exactly once across the whole pass (caching the per-body facts),
+// even as runner-spawned template specializations grow var.lnasts. The derived
+// global sets (recursion closure + sub-convertible filter) are tree-walk-free
+// and recomputed cheaply whenever the lnast count grows.
+struct uPass_function_registry {
+  // Module/function name -> its already-extracted body lnast.
+  Ci_str_map<std::shared_ptr<Lnast>> function_registry;
+  // Keys whose bodies can reach themselves (direct/mutual recursion).
+  Ci_str_set recursive_callees;
+  // Keys the runner can fully splice (single output written by name, etc.).
+  Ci_str_set inlinable_callees;
+  // Inlinable callees whose body uses positional placeholders (_0/_1/_).
+  Ci_str_set placeholder_callees;
+  // Inlinable pure-dataflow combs convertible to a Sub module instance.
+  Ci_str_set sub_convertible_combs;
+
+  // Per-lnast facts, all PURELY LOCAL to one body (so they can be cached and a
+  // body never re-walked). The recursion-dependent part is recomputed globally.
+  struct Lnast_facts {
+    std::vector<std::string> callee_names;          // raw func_call callee refs
+    bool                     inlinable     = false;  // all declared outputs written
+    bool                     placeholder   = false;  // inlinable AND uses _0/_1/_
+    bool                     sub_candidate = false;  // sub-convertible modulo recursion
+  };
+  Ci_str_map<Lnast_facts> facts;        // keyed by registry name
+  std::size_t             built_count = 0;  // #lnasts already folded in
+
+  // Idempotent. Folds any lnasts past built_count into the registry (one tree
+  // walk each), then recomputes the global recursion closure + derived sets.
+  // No-op when lnasts.size() == built_count.
+  void ensure(const std::vector<std::shared_ptr<Lnast>>& lnasts);
+
+  std::shared_ptr<Lnast> lookup_callee(std::string_view name) const;
+};
+
 struct uPass_runner : public upass::uPass_struct {
 public:
   uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std::vector<std::string>& upass_names,
@@ -36,13 +77,12 @@ public:
   // sets this flag for every LNAST past the original entry-point count.
   void set_is_function_body(bool v) { is_function_body_ = v; }
 
-  // Populate the comb-body registry the runner inlines from. Keyed by
-  // the body's top-module name (e.g. "pp3.count_bits"). pass_upass passes
-  // the same var.lnasts it hands constprop's set_function_registry; the
-  // runner picks the function bodies (everything past the entry points) and
-  // the top modules alike — only names that actually appear as a func_call
-  // callee are ever inlined.
-  void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
+  // Point this runner at the shared comb-body registry (built once by
+  // pass_upass and reused by every per-unit runner; see uPass_function_registry
+  // above). Only names that actually appear as a func_call callee are inlined.
+  // The pointer must outlive the runner; nullptr means "no inlining" (the
+  // bitwidth-only runner never calls this — reg() then returns an empty set).
+  void set_function_registry(const uPass_function_registry& reg) { registry_ = &reg; }
 
   // Hands the freshly-built staging LNAST to the caller; after this the
   // runner no longer owns it. Call once per run(), after run() returns.
@@ -88,13 +128,11 @@ protected:
   // Passes that expose shared-ST reads (provide_bundle_fields /
   // provide_typename), consulted by try_bundle_fields / try_typename.
 
-  // Step L of upass redesign — function-body registry the runner owns
-  // once func_extract collapses into the main walk. Maps function name
-  // to its already-extracted dest Lnast (allocated in dest_forest_)
-  // so an fcall can switch the cursor into the callee instead of
-  // running the dedicated func_extract pre-pass. Empty today; the
-  // dedicated uPass_func_extract pass still populates Eprp_var::lnasts.
-  Ci_str_map<std::shared_ptr<Lnast>> function_registry;
+  // Shared comb-call-inliner registry, built once and owned by pass_upass (see
+  // uPass_function_registry above). nullptr for runners that never inline
+  // (e.g. the bitwidth-only runner); reg() returns an empty registry then.
+  const uPass_function_registry* registry_ = nullptr;
+  const uPass_function_registry& reg() const;
 
   bool        configuration_error{false};
   std::string configuration_error_msg;
@@ -719,28 +757,14 @@ protected:
   // Set by gather_actuals when a call carries the reserved `__inst_name` actual
   // (`alu::[name=X](…)`); consumed by try_inline as the hier-prefix level.
   std::string                                   gathered_inst_name_;
-  // Registry keys (qualified names) whose bodies can reach themselves
-  // (direct/mutual recursion). Bailed to the evaluator; computed in
-  // set_function_registry.
-  Ci_str_set                                   recursive_callees_;
-  // Registry keys the runner can fully splice today (single output written by
-  // name, no placeholders; recursion allowed under fuel). All other callees
-  // route to the evaluator. Computed in set_function_registry.
-  Ci_str_set                                   inlinable_callees_;
   // compile.upass.inline (default true). When false, a DIRECT by-name call to a
   // fully-typed pure-dataflow `comb` is NOT spliced — it is left as a func_call
   // so tolg lowers it to a Sub module instance (preserving the comb boundary for
   // debug/optimization). Overload/method/closure dispatch (no Sub form) always
   // inlines. Read from options["inline"] in the constructor.
+  // (The recursion / inlinable / placeholder / sub-convertible sets these used
+  // to sit beside now live in the shared uPass_function_registry — see reg().)
   bool                                         inlining_enabled_ = true;
-  // Registry keys of the combs the above flag converts to Sub instances: a
-  // fully-typed, pure-dataflow comb with its own standalone GraphIO. A subset of
-  // inlinable_callees_; computed unconditionally in set_function_registry, read
-  // at the call site only when inlining_enabled_ is false.
-  Ci_str_set                                   sub_convertible_combs_;
-  // Inlinable callees whose body uses positional placeholders (_0/_1/_); the
-  // prologue binds those aliases for these only.
-  Ci_str_set                                   placeholder_callees_;
   // Result tmps of an inlined call that returned >1 LOGICAL output. Binding one
   // of these WHOLE to a single user variable (`const inner = two_output_f()`) is
   // an error — multiple outputs must be destructured (`const (o1,o2) = f()`).

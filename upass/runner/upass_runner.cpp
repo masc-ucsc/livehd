@@ -1493,20 +1493,44 @@ void uPass_runner::process_verbatim(Pass_method fn) {
 
 // ── comb-call inliner ──────────────────────────────────────────────────────
 
-void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts) {
-  function_registry.clear();
-  for (const auto& ln : lnasts) {
-    if (ln) {
-      function_registry.emplace(std::string(ln->get_top_module_name()), ln);
-    }
+const uPass_function_registry& uPass_runner::reg() const {
+  // A runner that never had a registry pointed at it (e.g. the bitwidth-only
+  // runner) sees an immortal empty registry — no inlining, no crashes.
+  static const uPass_function_registry empty;
+  return registry_ != nullptr ? *registry_ : empty;
+}
+
+std::shared_ptr<Lnast> uPass_function_registry::lookup_callee(std::string_view name) const {
+  return upass::call_resolver::lookup_callee(function_registry, name);
+}
+
+void uPass_function_registry::ensure(const std::vector<std::shared_ptr<Lnast>>& lnasts) {
+  if (lnasts.size() == built_count) {
+    return;  // nothing new since the last fold-in — O(1) fast path
   }
 
-  // Build the call graph and mark callees that can reach themselves (direct or
-  // mutual recursion). The inliner bails those to the evaluator, which fully unrolls
-  // comptime-bounded recursion; runner-side fuel-bounded recursion remains a follow-up.
-  recursive_callees_.clear();
-  absl::flat_hash_map<std::string, std::vector<std::string>> edges;
-  for (const auto& [name, ln] : function_registry) {
+  auto is_placeholder = [](std::string_view n) { return n == "_" || (n.size() >= 2 && n[0] == '_' && n[1] >= '0' && n[1] <= '9'); };
+
+  // ── Phase 1: fold in each NEW lnast, walking its body EXACTLY ONCE. Every
+  // fact computed here is purely local to the one body, so it is cached and the
+  // body is never re-walked — even as runner-spawned specializations grow
+  // var.lnasts. (The recursion-dependent decision is made globally in phase 2.)
+  for (std::size_t i = built_count; i < lnasts.size(); ++i) {
+    const auto& ln = lnasts[i];
+    if (!ln) {
+      continue;
+    }
+    std::string name(ln->get_top_module_name());
+    if (!function_registry.emplace(name, ln).second) {
+      continue;  // duplicate name — the first body wins (as the old rebuild did)
+    }
+
+    Lnast_facts f;
+
+    // (a) Call-graph out-edges — the raw callee names referenced by func_calls.
+    // Resolution to a registered module is deferred to phase 2 so a forward
+    // reference (callee folded in by a later ensure) still resolves, matching
+    // the old full-registry rebuild.
     for (const auto& nid : ln->depth_preorder(ln->get_root())) {
       if (nid.is_invalid() || ln->get_type(nid) != Lnast_ntype::Lnast_ntype_func_call) {
         continue;
@@ -1519,65 +1543,28 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
       if (!c1.is_valid() || ln->get_type(c1) != Lnast_ntype::Lnast_ntype_ref) {
         continue;
       }
-      if (auto tgt = lookup_callee(ln->get_name(c1))) {
-        edges[name].emplace_back(tgt->get_top_module_name());
-      }
+      f.callee_names.emplace_back(ln->get_name(c1));
     }
-  }
-  for (const auto& [name, _] : function_registry) {
-    absl::flat_hash_set<std::string> seen;
-    std::vector<std::string>         stack;
-    if (auto it = edges.find(name); it != edges.end()) {
-      stack = it->second;
-    }
-    while (!stack.empty()) {
-      auto cur = std::move(stack.back());
-      stack.pop_back();
-      if (cur == name) {
-        recursive_callees_.insert(name);
-        break;
-      }
-      if (!seen.insert(cur).second) {
-        continue;
-      }
-      if (auto it = edges.find(cur); it != edges.end()) {
-        stack.insert(stack.end(), it->second.begin(), it->second.end());
-      }
-    }
-  }
 
-  // Mark which callees the runner can fully splice today (everything else is
-  // routed to the evaluator). Phase C supports: a real signature, exactly one
-  // output written by name in the body, non-recursive, and no positional
-  // placeholder params (`_`, `_0`…) / implicit returns. Multi-output, method
-  // dispatch, closures, and comptime-attr queries land in later phases.
-  auto is_placeholder = [](std::string_view n) { return n == "_" || (n.size() >= 2 && n[0] == '_' && n[1] >= '0' && n[1] <= '9'); };
-  inlinable_callees_.clear();
-  placeholder_callees_.clear();
-  sub_convertible_combs_.clear();
-  for (const auto& [name, ln] : function_registry) {
+    // (b) Inlinability classification. Phase C supports: a real signature, every
+    // declared output written by name, and no positional-placeholder params /
+    // implicit returns. Multi-output is allowed (epilogue splats a bundle);
+    // recursion is allowed (gated at the call site on constant args). The dead
+    // tuple_dsts/tuple_param/ref_aliases bookkeeping the old code computed then
+    // `(void)`'d is dropped here — it also shed a pile of get_name calls.
     const auto& io        = ln->io_meta();
-    // Recursion stays on the evaluator. Pure emit+fold recurses in the
-    // runner's own C++ call stack (process_lnast → try_inline → …), so deep
-    // comptime recursion (e.g. fib(10)) stack-overflows; the evaluator folds
-    // to a constant without emitting/recursing the runner. Revisit only with
-    // an iterative work-stack rewrite of process_lnast.
-    // Recursion is allowed here (gated at the call site on constant args, which
-    // is what lets the base case fold and terminate the unroll). Multi-output
-    // is allowed too (epilogue splats a bundle); require at least one output.
     auto        reg_stmts = ln->get_first_child(ln->get_root());
     if (reg_stmts.is_valid() && ln->get_type(reg_stmts) == Lnast_ntype::Lnast_ntype_io) {
       reg_stmts = ln->get_sibling_next(reg_stmts);
     }
     if (!reg_stmts.is_valid() || !ln->get_first_child(reg_stmts).is_valid()) {
+      facts.emplace(std::move(name), std::move(f));
       continue;  // no body to inline
     }
-    // A zero-output comb is only worth splicing when it has an observable side
-    // effect: a cassert/cputs (`comb top() { cassert(…) } top()`) OR a `ref`
-    // param it mutates (`comb set_pair(ref self, …) { self.x = … }`). Requiring
-    // one avoids mis-inlining an *implicit-return* comb whose result io_meta
-    // doesn't capture as a declared output (e.g. `comb top() { x = (…) }`
-    // consumed by `const a = top()` — see named_tuple.prp), binding nothing back.
+    // A zero-output comb is only worth splicing with an observable side effect:
+    // a cassert/cputs OR a mutated `ref` param. Requiring one avoids mis-inlining
+    // an implicit-return comb whose result io_meta doesn't capture as a declared
+    // output (named_tuple.prp), binding nothing back.
     if (io.outputs.empty()) {
       bool has_side_effect = false;
       for (const auto& e : io.inputs) {
@@ -1608,25 +1595,19 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
         }
       }
       if (!has_side_effect) {
+        facts.emplace(std::move(name), std::move(f));
         continue;  // pure / implicit-return zero-output comb — leave as a call
       }
     }
-    absl::flat_hash_set<std::string> params;
-    for (const auto& e : io.inputs) {
-      params.insert(e.name);
-    }
-    // Scan the body STMTS only (skip the io node — its `-> (a,b)` output
-    // declaration is itself a tuple node and would otherwise mark every
-    // multi-output comb as touching a tuple).
+    // Scan the body STMTS only (skip the io node — its `-> (a,b)` output decl is
+    // itself a tuple node). We need just `defined` (written dsts) + whether a
+    // positional placeholder appears.
     auto stmts_nid = ln->get_first_child(ln->get_root());
     if (stmts_nid.is_valid() && ln->get_type(stmts_nid) == Lnast_ntype::Lnast_ntype_io) {
       stmts_nid = ln->get_sibling_next(stmts_nid);
     }
-    absl::flat_hash_set<std::string>                 defined;
-    absl::flat_hash_set<std::string>                 tuple_dsts;   // dsts assigned a tuple/bundle value
-    std::vector<std::pair<std::string, std::string>> ref_aliases;  // (lhs, rhs-ref) plain assigns
-    bool                                             has_placeholder = false;
-    bool                                             tuple_param     = false;
+    absl::flat_hash_set<std::string> defined;
+    bool                             has_placeholder = false;
     if (stmts_nid.is_valid()) {
       for (const auto& nid : ln->depth_preorder(stmts_nid)) {
         if (nid.is_invalid()) {
@@ -1639,49 +1620,14 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
         auto fc = ln->get_first_child(nid);
         if (fc.is_valid() && ln->get_type(fc) == Lnast_ntype::Lnast_ntype_ref) {
           defined.insert(std::string(ln->get_name(fc)));
-          // A tuple_add/concat dst is assigned a bundle value.
-          if (nt == Lnast_ntype::Lnast_ntype_tuple_add || nt == Lnast_ntype::Lnast_ntype_tuple_concat) {
-            tuple_dsts.insert(std::string(ln->get_name(fc)));
-          }
-          // Plain `lhs = rhs` (single ref rhs) — record for alias propagation
-          // so `foo = ___t` inherits ___t's tuple-valued-ness. This is
-          // a 0-level `store` (exactly ref+value children; `assign` was deleted).
-          if (nt == Lnast_ntype::Lnast_ntype_store && ln->get_sibling_next(fc).is_valid()
-              && !ln->get_sibling_next(ln->get_sibling_next(fc)).is_valid()) {
-            auto rhs = ln->get_sibling_next(fc);
-            if (rhs.is_valid() && ln->get_type(rhs) == Lnast_ntype::Lnast_ntype_ref) {
-              ref_aliases.emplace_back(std::string(ln->get_name(fc)), std::string(ln->get_name(rhs)));
-            }
-          }
-        }
-        // A param read as a tuple_get source is a tuple-typed param — the runner
-        // can't bind/propagate bundle actuals yet (Phase E), so leave those to
-        // the evaluator. tuple_get layout: dst, src, field...
-        if (nt == Lnast_ntype::Lnast_ntype_tuple_get && fc.is_valid()) {
-          auto src = ln->get_sibling_next(fc);
-          if (src.is_valid() && ln->get_type(src) == Lnast_ntype::Lnast_ntype_ref && params.contains(ln->get_name(src))) {
-            tuple_param = true;
-          }
-        }
-      }
-    }
-    // Propagate tuple-valued-ness across plain ref aliases to a fixpoint, so a
-    // post-SSA `___t = (…); foo = ___t` marks `foo` as tuple-valued.
-    bool grew = true;
-    while (grew) {
-      grew = false;
-      for (const auto& [lhs, rhs] : ref_aliases) {
-        if (tuple_dsts.contains(rhs) && tuple_dsts.insert(lhs).second) {
-          grew = true;
         }
       }
     }
     bool all_outputs_written = true;
     for (const auto& o : io.outputs) {
       // A tuple-typed output is flattened to leaves `p.first`/`p.second`, but the
-      // body writes the LOGICAL output `p` (as a tuple). Accept the leaf OR its
-      // top-level (pre-dot) prefix — but only when the leaf IS dotted (a genuine
-      // flattened tuple output), so a plain scalar output keeps the strict check.
+      // body writes the LOGICAL output `p`. Accept the leaf OR its pre-dot prefix,
+      // but only when the leaf IS dotted (a genuine flattened tuple output).
       bool ok = defined.contains(o.name);
       if (!ok) {
         if (const auto dp = o.name.find('.'); dp != std::string::npos) {
@@ -1693,32 +1639,13 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
         break;
       }
     }
-    // A tuple-VALUED output (`foo = (bar=…)`, possibly through the SSA tmp
-    // alias `___t=(…); foo=___t`) is now handled: the epilogue splats it as a
-    // bundle-ref field and the field-key/value-fold emit rebuilds the nested
-    // shape (fcall5b / fcall_rename_deep). tuple_param (a param read as a
-    // bundle via tuple_get, e.g. tree_sum's `v[lo]`) is allowed too — a bundle
-    // actual binds via the bundle-alias assign path.
-    (void)tuple_param;
-    (void)tuple_dsts;
     if (all_outputs_written) {
-      inlinable_callees_.insert(name);
-      // Positional-placeholder callees (body uses _0/_1/_) need the prologue to
-      // bind those aliases too — record so try_inline only does that work when
-      // needed (avoids emitting dead alias assigns for ordinary callees).
-      if (has_placeholder) {
-        placeholder_callees_.insert(name);
-      }
-      // compile.upass.inline=false: which of these callees are a fully-typed,
-      // pure-dataflow `comb` that tolg can lower to a Sub module instance (its
-      // standalone GraphIO already exists — every non-template comb compiles on
-      // its own). A DIRECT by-name call to one of these is left as a func_call
-      // instead of inlined (try_inline_func_call consults this set). Excluded —
-      // these have no standalone interface, or their semantics can't survive
-      // instantiation, so they keep inlining: templates (no GraphIO), var-arg /
-      // `ref` params (no port form, ref needs write-back), zero-output side-
-      // effect combs (no outputs to bind), positional-placeholder bodies, and
-      // recursion. Computed unconditionally; only read when the flag is off.
+      f.inlinable   = true;
+      f.placeholder = has_placeholder;
+      // sub-convertible candidate (subset of inlinable): a fully-typed,
+      // pure-dataflow comb with its own standalone GraphIO. Excludes templates,
+      // var-arg / `ref` params, zero-output side-effect combs, placeholder
+      // bodies. The recursion exclusion is applied in phase 2.
       const auto lk      = ln->get_lambda_kind();
       const bool is_comb = lk.empty() || lk == "comb";
       bool       special = has_placeholder;
@@ -1728,16 +1655,66 @@ void uPass_runner::set_function_registry(const std::vector<std::shared_ptr<Lnast
           break;
         }
       }
-      if (is_comb && !ln->is_template() && !io.outputs.empty() && !special && !recursive_callees_.contains(name)) {
-        sub_convertible_combs_.insert(name);
+      f.sub_candidate = is_comb && !ln->is_template() && !io.outputs.empty() && !special;
+    }
+    facts.emplace(std::move(name), std::move(f));
+  }
+  built_count = lnasts.size();
+
+  // ── Phase 2: tree-walk-free. Resolve the cached out-edges against the FULL
+  // registry, run the recursion closure, then derive the global sets. The old
+  // inliner bailed self-reaching callees to the evaluator (it fully unrolls
+  // comptime-bounded recursion). Cheap enough to redo wholesale on each growth.
+  recursive_callees.clear();
+  absl::flat_hash_map<std::string, std::vector<std::string>> edges;
+  for (const auto& [name, f] : facts) {
+    for (const auto& cn : f.callee_names) {
+      if (auto tgt = lookup_callee(cn)) {
+        edges[name].emplace_back(tgt->get_top_module_name());
       }
+    }
+  }
+  for (const auto& [name, _] : function_registry) {
+    absl::flat_hash_set<std::string> seen;
+    std::vector<std::string>         stack;
+    if (auto it = edges.find(name); it != edges.end()) {
+      stack = it->second;
+    }
+    while (!stack.empty()) {
+      auto cur = std::move(stack.back());
+      stack.pop_back();
+      if (cur == name) {
+        recursive_callees.insert(name);
+        break;
+      }
+      if (!seen.insert(cur).second) {
+        continue;
+      }
+      if (auto it = edges.find(cur); it != edges.end()) {
+        stack.insert(stack.end(), it->second.begin(), it->second.end());
+      }
+    }
+  }
+
+  inlinable_callees.clear();
+  placeholder_callees.clear();
+  sub_convertible_combs.clear();
+  for (const auto& [name, f] : facts) {
+    if (f.inlinable) {
+      inlinable_callees.insert(name);
+    }
+    if (f.placeholder) {
+      placeholder_callees.insert(name);
+    }
+    if (f.sub_candidate && !recursive_callees.contains(name)) {
+      sub_convertible_combs.insert(name);
     }
   }
 }
 
 std::shared_ptr<Lnast> uPass_runner::lookup_callee(std::string_view name) const {
   // Delegated to the resolver (name resolution is its job).
-  return upass::call_resolver::lookup_callee(function_registry, name);
+  return upass::call_resolver::lookup_callee(reg().function_registry, name);
 }
 
 void uPass_runner::flush_deferred_emits() { dispatch_to_passes(&upass::uPass::flush_deferred); }
@@ -2835,7 +2812,7 @@ bool uPass_runner::try_inline_func_call() {
   // all-constant call still inlines so it folds to a comptime value (casserts /
   // comptime evaluation keep working — there is no runtime instance to keep).
   const bool consider_sub_instance = !inlining_enabled_ && callee && !via_param_binding
-                                     && sub_convertible_combs_.contains(std::string(callee->get_top_module_name()));
+                                     && reg().sub_convertible_combs.contains(std::string(callee->get_top_module_name()));
 
   // Method dispatch: `obj.method(args)` lowers to `func_call[dst, method,
   // store(__ufcs_arg, obj), args…]` — `method` is not itself a registry
@@ -3072,7 +3049,7 @@ bool uPass_runner::try_inline_func_call() {
   // Single gate: only splice callees the runner fully supports today
   // (precomputed in set_function_registry). Everything else — multi-output,
   // placeholders/implicit-return, no-signature — routes to the evaluator.
-  if (!inlinable_callees_.contains(std::string(callee->get_top_module_name()))) {
+  if (!reg().inlinable_callees.contains(std::string(callee->get_top_module_name()))) {
     lm->restore_cursor(saved);
     return false;
   }
@@ -3564,7 +3541,7 @@ bool uPass_runner::try_inline_func_call() {
     }
     return false;
   };
-  const bool is_recursive_callee = recursive_callees_.contains(std::string(callee->get_top_module_name()));
+  const bool is_recursive_callee = reg().recursive_callees.contains(std::string(callee->get_top_module_name()));
   bool       all_actuals_const   = true;
   if (is_recursive_callee || consider_sub_instance) {
     for (std::size_t i = 0; i < nparams; ++i) {
@@ -3600,7 +3577,7 @@ bool uPass_runner::try_inline_func_call() {
 
   // Prologue: declare param + output widths (so `<tag>x.[bits]` folds), then
   // bind param values. Ref-param actuals are remembered for write-back.
-  const bool uses_placeholders = placeholder_callees_.contains(std::string(callee->get_top_module_name()));
+  const bool uses_placeholders = reg().placeholder_callees.contains(std::string(callee->get_top_module_name()));
   std::vector<std::pair<std::string, Lnast_node>>                 writebacks;
   // Function-valued params: record the body-local name → bound function so the
   // body's `f(x)` resolves; restored after the body walk. No value is emitted.

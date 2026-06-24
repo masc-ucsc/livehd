@@ -113,14 +113,33 @@ void uPass_semacheck::check_attr_writes(const Lnast* ln) {
 // checked here — that check runs in prp2lnast on the producer tree (see
 // Prp2lnast::check_undeclared_writes), where inliner/SSA-synthesized stores
 // can't false-positive.
-void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts, const Ci_str_set& visible) {
-  Ci_str_set here;
-  // `combined` = visible ∪ names declared so far in this scope. Maintained in
-  // place (one copy of `visible` per scope) and handed to nested scopes, rather
-  // than rebuilding visible∪here for every nested child -- the latter is
-  // O(children × names) and turns a declare-heavy module (large firtool output)
-  // into a near-hang.
-  Ci_str_set combined = visible;
+void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts, Ci_str_set& visible) {
+  // `visible` holds every name in scope from ENCLOSING frames. It is shared by
+  // reference across the whole (non-function) subtree and mutated IN PLACE: a
+  // scope inserts the names it declares so nested scopes see them, and erases
+  // them again on the way out (the `added` undo log). The old code instead
+  // COPIED the whole `visible` set once per scope (`Ci_str_set combined =
+  // visible;`) — O(scopes × names), which on a declare-heavy flattened module
+  // (firtool / XSCore output: thousands of declares × thousands of nested
+  // if/case scopes) is quadratic and looked like a multi-minute hang. This is
+  // now O(total declares).
+  Ci_str_set               here;   // names declared in THIS scope (redeclaration check)
+  std::vector<std::string> added;  // names THIS scope pushed into `visible` (undo on return)
+
+  // Restore `visible` to the caller's state on EVERY exit path — including the
+  // early returns on a first violation — so siblings and the parent never see
+  // this scope's names. erase() of an already-absent name (e.g. one released by
+  // `store nil` below, or pushed twice across a release+redeclare) is a no-op.
+  struct Scope_undo {
+    Ci_str_set&                     visible;
+    const std::vector<std::string>& added;
+    ~Scope_undo() {
+      for (const auto& n : added) {
+        visible.erase(n);
+      }
+    }
+  } undo{visible, added};
+
   for (auto c = ln->get_first_child(scope_stmts); !c.is_invalid(); c = ln->get_sibling_next(c)) {
     const auto ct = ln->get_type(c);
     if (Lnast_ntype::is_declare(ct)) {
@@ -136,6 +155,8 @@ void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts,
                           c);
           return;
         }
+        // Not in `here`, so a hit in `visible` can only come from an ENCLOSING
+        // frame (this scope's own names are all in `here`) — i.e. shadowing.
         if (visible.contains(name)) {
           emit_sema_error(
               "variable-shadowing",
@@ -147,7 +168,9 @@ void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts,
           return;
         }
         here.insert(name);
-        combined.insert(name);  // keep combined in sync for nested scopes
+        if (visible.insert(name).second) {  // make visible to nested scopes; log for undo
+          added.emplace_back(std::move(name));
+        }
       }
     } else if (Lnast_ntype::is_store(ct)) {
       // An explicit `store name = nil` is a RELEASE (04-variables.md: nil
@@ -159,12 +182,13 @@ void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts,
       if (!c0.is_invalid() && Lnast_ntype::is_ref(ln->get_type(c0))) {
         auto c1 = ln->get_sibling_next(c0);
         if (!c1.is_invalid() && Lnast_ntype::is_const(ln->get_type(c1)) && ln->get_name(c1) == "nil") {
-          // here ∩ visible == ∅ (a shadowing declare errors out above), so a
-          // released this-scope name is never also inherited from an outer
-          // scope -- dropping it from `combined` matches visible∪here exactly.
+          // here ∩ (enclosing visible) == ∅ (a shadowing declare errors out
+          // above), so a released this-scope name is never inherited from an
+          // outer scope — dropping it from `visible` is safe. The stale `added`
+          // entry stays; the undo's erase of an absent name is a harmless no-op.
           auto rel = std::string(ln->get_name(c0));
           if (here.erase(rel) != 0) {
-            combined.erase(rel);
+            visible.erase(rel);
           }
         }
       }
@@ -173,9 +197,10 @@ void uPass_semacheck::check_scope(const Lnast* ln, const Lnast_nid& scope_stmts,
     for (auto cc = ln->get_first_child(c); !cc.is_invalid(); cc = ln->get_sibling_next(cc)) {
       if (Lnast_ntype::is_stmts(ln->get_type(cc))) {
         if (is_func_body) {
-          check_scope(ln, cc, {});
+          Ci_str_set fresh;  // a comb body is a fresh namespace (Pyrope closure rule)
+          check_scope(ln, cc, fresh);
         } else {
-          check_scope(ln, cc, combined);
+          check_scope(ln, cc, visible);  // shared in place — no per-scope copy
         }
       }
     }
@@ -204,7 +229,8 @@ void uPass_semacheck::begin_iteration() {
   }
   for (auto c = ln->get_first_child(root); !c.is_invalid(); c = ln->get_sibling_next(c)) {
     if (Lnast_ntype::is_stmts(ln->get_type(c))) {
-      check_scope(ln, c, {});
+      Ci_str_set visible;  // fresh outer namespace per top-level stmts block
+      check_scope(ln, c, visible);
     }
   }
 }
