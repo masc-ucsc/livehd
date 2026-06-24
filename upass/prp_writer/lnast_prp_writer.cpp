@@ -3,6 +3,7 @@
 #include "lnast_prp_writer.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <format>
 #include <optional>
 #include <string>
@@ -412,8 +413,43 @@ void Lnast_prp_writer::write_module() {
       }
     }
     std::sort(imports.begin(), imports.end());
+    // Pyrope identifiers are case-INSENSITIVE.  firtool names a submodule instance
+    // as the camelCase of its type (`subModule` for `SubModule`), so the natural
+    // import binding `const SubModule = import("SubModule.SubModule")` collides with
+    // the instance variable `subModule` — reading the instance then resolves to the
+    // import const (the whole module is emitted with a dangling output and a string
+    // driver).  Detect such collisions against the instance-result variable names
+    // and emit a non-colliding alias instead, referenced at the call sites.
+    auto lower = [](std::string s) {
+      for (auto& ch : s) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+      }
+      return s;
+    };
+    std::unordered_set<std::string> inst_lc;  // lowercased single-func_call-def var names
+    for (const auto& [name, fi] : fold_info_) {
+      if (fi.def_count == 1 && fi.def_type == Lnast_ntype::Lnast_ntype_func_call) {
+        inst_lc.insert(lower(std::string(strip_prefix(name))));
+      }
+    }
+    import_alias_.clear();
     for (const auto& nm : imports) {
-      os << "const " << nm << " = import(\"" << nm << "." << nm << "\")\n";
+      std::string alias = nm;
+      // Multi-output combs are consumed via a destructure `mut (r__o = Callee.o, …) =
+      // Callee(args)` whose field-ref prefix MUST match the call callee (the runner
+      // pairs them by name) and which RELIES on the (benign) type==instance-name
+      // collision to read the instance ports.  Aliasing those would both break the
+      // prefix match and re-introduce the import-const read.  Only the SINGLE-output
+      // bare-instance-read form (`mut inst = Callee(...); x = inst`) hits the bug, so
+      // alias only non-multi-out callees.
+      const bool multi_out = multi_out_combs_ != nullptr && multi_out_combs_->count(nm) != 0u;
+      if (!multi_out && inst_lc.count(lower(nm)) != 0u) {   // would collide with an instance var
+        do {
+          alias += "_t";                                    // PascalCase + "_t": no camelCase clash
+        } while (inst_lc.count(lower(alias)) != 0u || (known_modules_ != nullptr && known_modules_->count(alias) != 0u));
+      }
+      import_alias_[nm] = alias;
+      os << "const " << alias << " = import(\"" << nm << "." << nm << "\")\n";
     }
     if (!imports.empty()) {
       os << "\n";
@@ -1496,6 +1532,15 @@ void Lnast_prp_writer::write_func_call() {
   if (auto p = call_tail.rfind('.'); p != std::string::npos) {
     call_tail = call_tail.substr(p + 1);
   }
+  // Reference the (possibly aliased) import const for the callee — see the import
+  // emission in write_module(): a case-collision with the instance var name forces
+  // a non-colliding alias.  Only a plain (non-dotted) module callee is aliased.
+  std::string callee_ref = call_name;
+  if (call_name == call_tail) {
+    if (auto ait = import_alias_.find(call_tail); ait != import_alias_.end()) {
+      callee_ref = ait->second;
+    }
+  }
 
   // A multi-output COMB bound to a real var is rejected by the runner as
   // `multi-output-one-var` (combs are inlined, so the whole-bind keeps all
@@ -1533,18 +1578,18 @@ void Lnast_prp_writer::write_func_call() {
       mocomb_field_[lhs + std::string(1, '\x01') + o] = tgt;
       print(tgt);
       print(" = ");
-      print(call_name);
+      print(callee_ref);
       print(".");
       print(o);
       firstd = false;
     }
     print(") = ");
-    print(call_name);
+    print(callee_ref);
   } else {
     print(decl_prefix(lhs));
     print(lhs);
     print(" = ");
-    print(call_name);
+    print(callee_ref);
   }
   if (name_instance) {
     print("::[name=");
