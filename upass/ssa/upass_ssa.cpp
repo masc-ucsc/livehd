@@ -502,8 +502,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast) {
       warned.insert(fold);
       const auto msg =
           std::format("variables `{}` and `{}` differ only in letter case; "
-                      "Pyrope is case sensitive, but this feels wrong" kept,
-                      base);
+                      "Pyrope is case sensitive, but this feels wrong",
+                      kept, base);
       livehd::diag::sink().emit(livehd::diag::Diagnostic{
           .severity = livehd::diag::Severity::warning,
           .code = "name-case-collision",

@@ -76,6 +76,46 @@ static std::optional<Dlop> stringify_concat_trivials(const std::vector<Dlop>& va
   return acc;
 }
 
+// Render a comptime tuple/struct Bundle to its Pyrope textual form for
+// `string(...)` / interpolation: "(3,4)", "(a=1,b=2)", nested "(1,(2,3))",
+// empty "()". Returns nullopt when the bundle is null or any leaf is not a
+// concrete comptime value — a runtime tuple has no string form, so the caller
+// leaves the cast unfolded (and the verifier reports "not comptime-known").
+// Mirrors stringify_concat_trivials: each piece is a String-typed Dlop so
+// concat_op text-concatenates (returning the value itself would bit-concat).
+static std::optional<Dlop> stringify_bundle(const std::shared_ptr<Bundle const>& b) {
+  if (!b) {
+    return std::nullopt;
+  }
+  Dlop acc   = *Dlop::from_string("(");
+  bool first = true;
+  for (const auto& tl : b->top_levels()) {
+    if (!first) {
+      acc = *acc.concat_op(*Dlop::from_string(","));
+    }
+    first = false;
+    if (tl.pos == -1) {  // a named field renders `name=value`
+      acc = *acc.concat_op(*Dlop::from_string(std::string(tl.name)));
+      acc = *acc.concat_op(*Dlop::from_string("="));
+    }
+    if (tl.leaf_count == 1 && !tl.has_leafs) {  // a bare scalar leaf
+      if (tl.scalar.is_invalid() || tl.scalar.has_unknowns()) {
+        return std::nullopt;  // a runtime / x-carrying field cannot be stringified
+      }
+      acc = *acc.concat_op(stringify_one(tl.scalar));
+    } else {  // a sub-bundle: recurse into it
+      const std::string seg = tl.pos == -1 ? std::string(tl.name) : std::to_string(tl.pos);
+      auto              sub = stringify_bundle(b->get_bundle(seg));
+      if (!sub.has_value()) {
+        return std::nullopt;
+      }
+      acc = *acc.concat_op(*sub);
+    }
+  }
+  acc = *acc.concat_op(*Dlop::from_string(")"));
+  return acc;
+}
+
 // Group an MSB-first binary string (from Dlop::to_binary) into a power-of-two
 // base, `bpd` bits per digit, dropping leading zeros. Used by the `:b`/`:o`/
 // `:x`/`:X` interpolation specs so they share one two's-complement bit view.
@@ -1231,7 +1271,19 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
     Dlop                          scalar;
     bool                          is_const_nil = false;
   };
-  auto resolve = [this](const upass::Operand& in) -> Operand {
+  // True when THIS unit still has an unresolved import this round: an empty
+  // bundle is then ambiguous (genuine empty tuple vs deferred import-dependent
+  // value), so resolve() leaves it an invalid scalar (compare stays unknown,
+  // deferred) instead of folding it as `()`. Mirrors harvest_pub_values' skip.
+  const auto current_unit       = std::string(lm->get_top_module_name());
+  bool       unit_import_pending = false;
+  for (const auto& p : pending_imports_) {
+    if (p.unit == current_unit) {
+      unit_import_pending = true;
+      break;
+    }
+  }
+  auto resolve = [this, unit_import_pending](const upass::Operand& in) -> Operand {
     Operand o;
     if (!in.name.empty()) {
       const auto name = in.name;
@@ -1250,6 +1302,23 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
         auto v = b->lone_trivial();
         if (!v.is_invalid()) {
           o.scalar = v;
+        } else if (b->non_attr_entries().empty() && !unit_import_pending) {
+          // An EMPTY bundle is the empty tuple, NOT a scalar (Bundle::is_scalar
+          // is true for size<=1, so a 0-entry tuple lands in this is_scalar
+          // arm). Keep it as a bundle so compare_bundles_eq decides by shape:
+          // `() == ()` is true, `() == (x)` / `[] == [3,4]` is false. Without
+          // this it resolves to an invalid scalar and the compare stays unknown
+          // (a `cassert([] != [3,4])` would silently never discharge).
+          //
+          // BUT only when THIS unit has no pending import: an empty bundle is
+          // ALSO how a value that depends on a not-yet-resolved import looks on
+          // a deferred round (e.g. `top_val = m.mid_val + 1` with `m` an
+          // unresolved import) — folding it as the empty tuple would discharge
+          // `cassert(top_val == 22)` as a concrete FALSE and hard-error before
+          // the kernel can retry. Staying an invalid scalar keeps the compare
+          // unknown (deferred); the converged round (import resolved, value now
+          // a real scalar, no pending import) folds it correctly.
+          o.bundle = b;
         }
       } else if (st().has_trivial(name)) {
         o.scalar = st().get_trivial(name);
@@ -1359,9 +1428,12 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
         result = *Dlop::create_bool(Negate);
       }
     }
-  } else if (a.bundle && !b.scalar.is_invalid() && bundle_count_non_attr(a.bundle) > 1) {
+  } else if (a.bundle && !b.scalar.is_invalid() && bundle_count_non_attr(a.bundle) != 1) {
+    // A 0-entry (empty) or multi-entry tuple never structurally equals a lone
+    // scalar; only a 1-entry tuple `(v,)` does (and it resolves to its scalar
+    // above, so a.bundle is never a 1-tuple here). `!= 1` folds both ends.
     result = *Dlop::create_bool(Negate);
-  } else if (b.bundle && !a.scalar.is_invalid() && bundle_count_non_attr(b.bundle) > 1) {
+  } else if (b.bundle && !a.scalar.is_invalid() && bundle_count_non_attr(b.bundle) != 1) {
     result = *Dlop::create_bool(Negate);
   } else if (!a.bundle && !b.bundle && !a.scalar.is_invalid() && !b.scalar.is_invalid()) {
     // Pyrope forbids MIXING TYPES across a comparison: a known `bool` vs a known
@@ -3327,6 +3399,18 @@ void uPass_constprop::process_func_call() {
     if (kind == Cast::to_string && !actual.var_name.empty()) {
       if (const auto* id = enum_identity_of(st().get_bundle(actual.var_name)); id != nullptr) {
         args.push_back(*id);
+        continue;
+      }
+    }
+    // A comptime TUPLE/struct operand stringifies to its Pyrope textual form
+    // (`(3,4)`, `(a=1,b=2)`, empty `()`). The docs: `format`/`string` converts
+    // any tuple to a string, and `"{t}"` interpolation lowers to this string()
+    // concat. A scalar has a valid `actual.value` and takes the value path
+    // below; only a non-scalar (tuple) or a runtime value lands here, and
+    // stringify_bundle yields nullopt for the latter (then we bail like before).
+    if (kind == Cast::to_string && actual.value.is_invalid() && !actual.var_name.empty()) {
+      if (auto s = stringify_bundle(st().get_bundle(actual.var_name)); s.has_value()) {
+        args.push_back(*s);
         continue;
       }
     }
