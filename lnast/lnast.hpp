@@ -5,6 +5,7 @@
 #include <iostream>
 #include <memory>
 #include <print>
+#include <optional>
 #include <stack>
 #include <stdexcept>
 #include <string>
@@ -162,6 +163,15 @@ struct Lnast_pub_entry {
 
 class Lnast {
 private:
+  // Memo for upass.tolg's pure per-tree scans (see tolg_scan_cache()).
+  struct Tolg_scan_cache {
+    std::optional<bool>                     declares_reg;
+    std::optional<bool>                     declares_reset_reg;
+    std::optional<bool>                     declares_init_reg_array;
+    std::optional<std::vector<std::string>> callee_names;
+  };
+  mutable Tolg_scan_cache                          tolg_scan_cache_;
+
   // Forest must outlive the tree — HHDS Tree::forest_ptr is a raw pointer
   // and TreeIO::forest_owner_ is weak, so dropping our shared_ptr would
   // leave forest_ptr dangling.
@@ -362,6 +372,17 @@ public:
   // top_module_name. This is the GraphIO/library key and the emitted module
   // name; it is NOT the `import("file.entity")` key (that stays top_module_name).
   std::string_view get_graph_name() const noexcept { return lg_name_.empty() ? std::string_view(top_module_name) : std::string_view(lg_name_); }
+
+  // ── tolg phase memo ───────────────────────────────────────────────────────
+  // Lazily-filled cache of the pure tree-scan analyses upass.tolg runs while
+  // registering GraphIO and lowering (whether the tree declares a reg / a reg
+  // needing reset / an initialized reg-array, and the unquoted callee names).
+  // Each is a deterministic function of this (immutable-during-tolg) tree, yet
+  // the analyses are otherwise re-walked once per phase (register_io + run) and
+  // once per ancestor that reaches this module as a clock/reset callee. The
+  // cache collapses all of that to a single walk. In-memory only; not cloned
+  // (a fresh clone re-derives lazily — the scans are cheap on first touch).
+  Tolg_scan_cache& tolg_scan_cache() const noexcept { return tolg_scan_cache_; }
 
   // ── deferred template (stamped by func_extract; cleared on a
   //     specialized clone). True ⇒ no LGraph at definition time. ───────────

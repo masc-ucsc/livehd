@@ -78,7 +78,7 @@ std::shared_ptr<Lnast> lookup_callee(const Registry& function_registry, std::str
   auto has_sig = [](const std::shared_ptr<Lnast>& l) { return l && !l->io_meta().empty(); };
 
   std::shared_ptr<Lnast> exact;
-  if (auto it = function_registry.find(std::string(name)); it != function_registry.end()) {
+  if (auto it = function_registry.find(name); it != function_registry.end()) {  // transparent Ci_hash/Ci_eq: no std::string alloc
     exact = it->second;
   }
   // Fast path: an exact name match WITH a signature always wins (see the

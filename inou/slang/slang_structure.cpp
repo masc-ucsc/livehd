@@ -145,7 +145,21 @@ std::string Slang_context::module_name_of(const slang::ast::InstanceSymbol& symb
 
 void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, const Lnast_nid& in_tup,
                                    const Lnast_nid& out_tup) {
-  for (const auto& p : symbol.body.getPortList()) {
+  // Register the ports of the CANONICAL body — the same body lower_module walks
+  // (line: `body = symbol.getCanonicalBody()`). slang deduplicates structurally
+  // identical instances and shares one canonical body; the port `internalSymbol`
+  // the module body actually references belongs to that canonical body. When the
+  // lowering of a module is triggered by a NON-canonical duplicate (common in a
+  // large, multi-threaded elaboration where the first instance reached in our
+  // depth-first walk is not the one slang picked as canonical), symbol.body's
+  // port nets are DIFFERENT symbols than the canonical body's — same name, other
+  // pointer. Registering symbol.body's nets here while the body resolves to the
+  // canonical ones makes lname_of collide every port (clock/reads) into a
+  // `<name>_sN` uniquified name, so tolg later rejects the dangling clock_pin
+  // ("reg names clock_pin 'RW0_clk_s1' but module has no such input/wire").
+  const auto* canon = symbol.getCanonicalBody();
+  const auto& body  = canon != nullptr ? *canon : symbol.body;
+  for (const auto& p : body.getPortList()) {
     if (p->kind == SymbolKind::Port) {
       const auto& port = p->as<slang::ast::PortSymbol>();
 

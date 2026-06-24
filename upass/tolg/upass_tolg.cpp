@@ -4887,7 +4887,14 @@ public:
       }
       // self-loops count as non-trivial too
       std::vector<bool> nontrivial(static_cast<size_t>(next_scc), false);
+      // Bucket each node by its SCC id in this same O(nn) pass (ascending i, so
+      // members[s][0] is the lowest-index member == the diag-anchor rep). The
+      // offending-SCC scan below then iterates only the members of each
+      // nontrivial SCC instead of re-scanning all nn nodes per SCC (was
+      // O(nontrivial_scc * nn); XSCore has many register-feedback rings).
+      std::vector<std::vector<int>> scc_members(static_cast<size_t>(next_scc));
       for (size_t i = 0; i < nn; ++i) {
+        scc_members[static_cast<size_t>(scc_id[i])].push_back(static_cast<int>(i));
         if (scc_size[static_cast<size_t>(scc_id[i])] > 1) {
           nontrivial[static_cast<size_t>(scc_id[i])] = true;
         }
@@ -4956,10 +4963,8 @@ public:
         bool             has_state = false;
         bool             has_flop  = false;
         hhds::Node_class rep;  // a member of the offending SCC, for the diag anchor
-        for (size_t i = 0; i < nn; ++i) {
-          if (scc_id[i] != s) {
-            continue;
-          }
+        for (const int mi : scc_members[static_cast<size_t>(s)]) {
+          const size_t i = static_cast<size_t>(mi);
           if (rep.is_invalid()) {
             rep = nodes[i];
           }
@@ -5056,6 +5061,23 @@ public:
     };
     for (const size_t i : order) {
       eval_node(nodes[i]);
+    }
+    // Fast exit for modules with no declared timing (the Verilog-origin case,
+    // e.g. every XSCore module). The σ-fixpoint below and phases 5/6
+    // produce/consume tr_ ONLY through pendings_ (declared `@[N]` / interface
+    // cycles) and inserted_ (LN-minted `%pipe_` flops), so with both empty
+    // nothing reads the fixpoint's result. The fixpoint is also the only thing
+    // that pins a STATE flop's σ from `any` to a concrete cycle (re-walking
+    // every node's inp_edges() once per pass, O(state_count * nn)); skipping it
+    // can only hide a "mixes values at different cycles" error if some node
+    // actually carries a non-zero σ. Non-zero σ requires a feedforward path: an
+    // explicit stage depth (flop_depth_ non-empty) or a `pipe`'s plain regs
+    // (which default to +1). When there is none — no flop_depth_ and a non-pipe
+    // lambda (a `mod`/Verilog reg is cycle-0 state) — every σ is 0, so the
+    // single eval pass above already ran an exhaustive mix check and the
+    // fixpoint is pure dead work.
+    if (pendings_.empty() && inserted_.empty() && flop_depth_.empty() && ln_->get_lambda_kind() != "pipe") {
+      return;
     }
     const size_t state_count = state_.size();
     for (size_t pass = 0; pass <= state_count; ++pass) {
@@ -5406,6 +5428,10 @@ private:
 // (illegal mutual hierarchy) breaks false so we never hang — the real
 // recursion diagnostic belongs to a later phase.
 [[nodiscard]] bool tree_declares_reg(const std::shared_ptr<Lnast>& lnast) {
+  auto& cache_slot = lnast->tolg_scan_cache().declares_reg;
+  if (cache_slot.has_value()) {
+    return *cache_slot;
+  }
   // A reg whose `clock_pin=NAME` attr names its clock explicitly does not
   // need the implicit `clock` input (the slang reader stamps these for
   // non-clk/clock Verilog clock names); collect the covered names first.
@@ -5456,10 +5482,12 @@ private:
     }
     return false;
   };
-  return has_reg(lnast->get_root());
+  const bool result = has_reg(lnast->get_root());
+  cache_slot         = result;
+  return result;
 }
 
-void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::string>& out) {
+void collect_callee_names_impl(const std::shared_ptr<Lnast>& lnast, std::vector<std::string>& out) {
   std::function<void(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) {
     if (Lnast_ntype::is_func_call(lnast->get_type(nid))) {
       auto c0 = lnast->get_first_child(nid);
@@ -5486,6 +5514,19 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
   walk(lnast->get_root());
 }
 
+// Cached callee-name list. The unquoted by-name/import callees are a pure
+// function of this immutable-during-tolg tree, queried by needs_clock_rec /
+// needs_reset_rec once per ancestor and phase — compute once.
+const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast>& lnast) {
+  auto& cache_slot = lnast->tolg_scan_cache().callee_names;
+  if (!cache_slot.has_value()) {
+    std::vector<std::string> names;
+    collect_callee_names_impl(lnast, names);
+    cache_slot = std::move(names);
+  }
+  return *cache_slot;
+}
+
 [[nodiscard]] bool needs_clock_rec(const std::shared_ptr<Lnast>& lnast, const uPass_tolg::Registry& registry,
                                    Ci_str_map<bool>& memo, Ci_str_set& visiting) {
   const std::string key(lnast->get_top_module_name());
@@ -5497,9 +5538,7 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
   }
   bool needs = tree_declares_reg(lnast);
   if (!needs) {
-    std::vector<std::string> callees;
-    collect_callee_names(lnast, callees);
-    for (const auto& cn : callees) {
+    for (const auto& cn : collect_callee_names(lnast)) {
       auto callee = resolve_callee_lnast(cn, registry);
       if (!callee) {
         continue;
@@ -5523,7 +5562,7 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
 // declare's trailing const [value] child) without an explicit per-reg
 // `reset_pin` attr override (those bind their own reset input). A ref init is
 // counted (tolg later requires it const; the reset NEED is already real).
-[[nodiscard]] bool tree_declares_reset_reg(const std::shared_ptr<Lnast>& lnast) {
+[[nodiscard]] bool tree_declares_reset_reg_impl(const std::shared_ptr<Lnast>& lnast) {
   Ci_str_set      explicit_rp;
   std::function<void(const Lnast_nid&)> collect_rp = [&](const Lnast_nid& nid) {
     if (Lnast_ntype::is_attr_set(lnast->get_type(nid))) {
@@ -5586,7 +5625,15 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
 // reset, but if the module already has a reset-candidate input it binds it:
 // the memory lowering adds per-entry restore write ports (reset re-loads the
 // init contents in one cycle).
-[[nodiscard]] bool tree_declares_init_reg_array(const std::shared_ptr<Lnast>& lnast) {
+[[nodiscard]] bool tree_declares_reset_reg(const std::shared_ptr<Lnast>& lnast) {
+  auto& slot = lnast->tolg_scan_cache().declares_reset_reg;
+  if (!slot.has_value()) {
+    slot = tree_declares_reset_reg_impl(lnast);
+  }
+  return *slot;
+}
+
+[[nodiscard]] bool tree_declares_init_reg_array_impl(const std::shared_ptr<Lnast>& lnast) {
   std::function<bool(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) -> bool {
     if (Lnast_ntype::is_declare(lnast->get_type(nid))) {
       auto c0 = lnast->get_first_child(nid);
@@ -5624,6 +5671,14 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
   return walk(lnast->get_root());
 }
 
+[[nodiscard]] bool tree_declares_init_reg_array(const std::shared_ptr<Lnast>& lnast) {
+  auto& slot = lnast->tolg_scan_cache().declares_init_reg_array;
+  if (!slot.has_value()) {
+    slot = tree_declares_init_reg_array_impl(lnast);
+  }
+  return *slot;
+}
+
 [[nodiscard]] bool needs_reset_rec(const std::shared_ptr<Lnast>& lnast, const uPass_tolg::Registry& registry,
                                    Ci_str_map<bool>& memo, Ci_str_set& visiting) {
   const std::string key(lnast->get_top_module_name());
@@ -5635,9 +5690,7 @@ void collect_callee_names(const std::shared_ptr<Lnast>& lnast, std::vector<std::
   }
   bool needs = tree_declares_reset_reg(lnast);
   if (!needs) {
-    std::vector<std::string> callees;
-    collect_callee_names(lnast, callees);
-    for (const auto& cn : callees) {
+    for (const auto& cn : collect_callee_names(lnast)) {
       auto callee = resolve_callee_lnast(cn, registry);
       if (!callee) {
         continue;

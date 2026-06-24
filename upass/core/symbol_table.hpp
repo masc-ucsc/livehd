@@ -196,12 +196,14 @@ private:
   void record_uncertain_modification(std::string_view name);
 
   static std::pair<std::string_view, std::string_view> get_var_field(std::string_view key) {
-    auto var   = Bundle::get_first_level(key);
-    auto field = Bundle::get_all_but_first_level(key);
-    if (field.empty()) {
-      field = "0";
+    // Single quote-aware scan (was two: get_first_level + get_all_but_first_level
+    // each re-ran find_top_dot). Byte-identical: npos -> {key,"0"}; else split at
+    // the top dot, empty tail -> "0".
+    const auto dot = bundle_key::find_top_dot(key);
+    if (dot == std::string_view::npos) {
+      return std::make_pair(key, std::string_view("0"));
     }
-
-    return std::make_pair(var, field);
+    auto field = key.substr(dot + 1);
+    return std::make_pair(key.substr(0, dot), field.empty() ? std::string_view("0") : field);
   }
 };
