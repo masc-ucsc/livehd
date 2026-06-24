@@ -2,6 +2,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -41,18 +42,34 @@ struct Query_result {
 
 // Discharge / engine knobs (filled from the lec.* set-options).
 struct Lec_options {
-  std::string engine  = "bmc";   // bmc (default) | ind (k-induction) | ic3
+  std::string engine  = "bmc";   // bmc | ind (k-induction) | ic3 | auto (portfolio). This is
+                                 // the programmatic-API fallback (a single, fork-free engine for
+                                 // in-pass design-queries); the `lhd lec` CLI defaults to `auto`.
   std::string solver  = "cvc5";  // cvc5 | bitwuzla (not yet built)
   int         bound   = 6;       // BMC / induction depth
   int         timeout = 0;       // per-query seconds (0 = none)
   bool        witness = true;    // print counterexample on Refuted
-  bool        decompose = false; // prove each cut/output diff as a separate UNSAT query
-                                 // instead of one monolithic OR-miter. Same proof, but
-                                 // each query is a small focused cone, so the easy cuts
-                                 // discharge instantly and the hard ones are isolated.
-                                 // Reports "N/M cuts PROVEN" + the unresolved residue
-                                 // when cvc5 cannot discharge every cone (e.g. a wide
-                                 // ALU/barrel-shift equivalence that needs SAT-sweeping).
+  std::string decompose = "auto"; // prove each cut/output diff as a separate UNSAT query
+                                 // instead of one monolithic OR-miter. Same proof (an OR
+                                 // is UNSAT iff every disjunct is), but each query is a
+                                 // small focused cone, so the easy cuts discharge instantly
+                                 // and only the genuinely-hard one is the bottleneck.
+                                 //   auto  (default): run the per-cut sweep AND fall back
+                                 //          to the monolithic solve on any cut that does not
+                                 //          discharge — fast when it proves, definitive (+a
+                                 //          witness on a real diff) otherwise. The intended
+                                 //          everyday mode: same verdict as monolithic, but it
+                                 //          turns a 60s monolithic miter into ~1s when the cuts
+                                 //          are easy (a name-matched register-correspondence
+                                 //          proof of two large front-end netlists is the case).
+                                 //   true  : decompose ONLY — report "N/M cuts PROVEN" + the
+                                 //          unresolved residue as Unknown, NEVER run the
+                                 //          monolithic solve (the diagnostic mode to isolate the
+                                 //          hard cone fast, e.g. a wide ALU/barrel-shift cone
+                                 //          that needs SAT-sweeping). LEC_DECOMP_LOG=1 logs each
+                                 //          cut's PROVEN/DIFF/unknown verdict.
+                                 //   false : monolithic OR-miter only (one big checkSat).
+                                 // on/1 == true, off/0 == false.
   bool        strict = false;    // treat an inconclusive UNKNOWN (no counterexample, the
                                  // solver merely could not complete the proof) as a hard
                                  // failure. Default false: REFUTED (a real counterexample)
@@ -114,6 +131,28 @@ struct Lec_options {
   std::string semdiff = "none";
 };
 
+// lec.decompose mode predicates (auto | true | false; on/1==true, off/0==false).
+// `lec_decompose_try` = run the per-cut sweep; `lec_decompose_fallback` = on a cut
+// that does not discharge, fall back to the monolithic solve for a definitive
+// verdict + witness (only `auto`). `true` runs the sweep but never the monolithic
+// solve (the diagnostic mode). See Lec_options::decompose.
+inline bool lec_decompose_try(std::string_view m) {
+  return m == "auto" || m == "true" || m == "on" || m == "1";
+}
+inline bool lec_decompose_fallback(std::string_view m) { return m == "auto"; }
+
+// Normalize a lec.semdiff value to the canonical {none, structural}. `true`/`on`/
+// `1` are accepted as ergonomic aliases for `structural` (the only algorithm),
+// everything else (false/off/0/none/empty) maps to `none`. Applied at the CLI
+// read sites so downstream (the validator + the hierarchical driver) only ever
+// sees the canonical pair.
+inline std::string lec_canon_semdiff(std::string_view v) {
+  if (v == "structural" || v == "true" || v == "on" || v == "1") {
+    return "structural";
+  }
+  return "none";
+}
+
 // The BMC engine unrolls `bound` (+ `reset_cycles`) SMT copies of the design;
 // an absurd value (e.g. from `--set lec.bound=2000000000`) builds billions of
 // cycles and hangs. Callers validate against this ceiling and reject out-of-range
@@ -136,6 +175,10 @@ inline std::string lec_options_range_error(const Lec_options& o) {
   }
   if (o.semdiff != "none" && o.semdiff != "structural") {
     return "lec.semdiff unknown '" + o.semdiff + "' (none | structural)";
+  }
+  if (o.decompose != "auto" && o.decompose != "true" && o.decompose != "false" && o.decompose != "on"
+      && o.decompose != "off" && o.decompose != "1" && o.decompose != "0") {
+    return "lec.decompose unknown '" + o.decompose + "' (auto | true | false)";
   }
   return {};
 }

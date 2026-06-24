@@ -30,7 +30,7 @@ EOF
 
 run() {  # $1=label $2..=lhd args ; sets RC and DIAG=path-to-jsonl
   DIAG="$WORK/$1.jsonl"
-  OUT=$("$LHD" lec "${@:2}" --top foo --set lec.timeout=20 \
+  OUT=$("$LHD" lec "${@:2}" --top foo --set lec.hierarchical=false --set lec.timeout=20 \
         --emit "diagnostics:$DIAG" --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 

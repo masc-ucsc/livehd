@@ -3039,7 +3039,13 @@ bool uPass_runner::try_inline_func_call() {
     const auto out_tup = callee->get_sibling_next(in_tup);
     return out_tup.is_invalid() || callee->get_first_child(out_tup).is_invalid();
   };
-  if (!is_ctor_call && callee_has_no_outputs()) {
+  // An HDL-origin (verilog→pyrope) module is INSTANTIATED, not value-called:
+  // `mut inst = Mod(...)` binds an instance handle, and a zero-output sink
+  // (e.g. a XiangShan `DiffExt*` DPI observer under -DSYNTHESIS) legitimately
+  // has no fields to read.  The leak this gate guards against is the removed
+  // native-pyrope implicit-return sugar, so only native (`!verilog_origin`)
+  // callees are checked; an HDL sink lowers to a Sub instance in tolg.
+  if (!is_ctor_call && !callee->is_verilog_origin() && callee_has_no_outputs()) {
     const auto& src_ln  = lm->get_lnast();
     const auto  dst_raw = src_ln->get_name(src_ln->get_first_child(call_nid));
     if (prp_is_tmp_name(dst_raw)) {

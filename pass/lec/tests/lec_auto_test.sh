@@ -50,7 +50,7 @@ endmodule
 EOF
 
 run() {  # $1=label ; $2..=lhd args ; sets RC/OUT
-  OUT=$("$LHD" lec "${@:2}" --top foo --set lec.timeout=20 --workdir "$WORK/w_$1" 2>&1); RC=$?
+  OUT=$("$LHD" lec "${@:2}" --top foo --set lec.hierarchical=false --set lec.timeout=20 --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
 # 1) auto on the equal pair -> PROVEN via the inductive engine, exit 0

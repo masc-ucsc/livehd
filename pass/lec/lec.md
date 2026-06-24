@@ -220,7 +220,7 @@ a silent no-op).
 
 | Flag | Meaning | Default |
 |---|---|---|
-| `lec.engine` | discharge frame: `bmc` \| `ind` (inductive flop-cut) \| `ic3` \| `auto` (parallel portfolio) | `bmc` |
+| `lec.engine` | discharge frame: `auto` (parallel portfolio) \| `bmc` \| `ind` (inductive flop-cut) \| `ic3` | `auto` |
 | `lec.solver` | backend: `cvc5` (in-process) \| `bitwuzla` (opt-in, may be unbuilt) \| `lgyosys` (yosys/lgcheck) | `cvc5` |
 | `lec.bound` | BMC / induction depth bound `k` | `6` |
 | `lec.timeout` | per-query wall-clock seconds (`0` = none) | `0` |
@@ -229,8 +229,9 @@ a silent no-op).
 | `lec.reset_cycles` | `after_reset` phase: reset-hold prologue length | `2` |
 | `lec.reset` | explicit reset inputs `name[:lo\|:hi]`, comma-sep (else auto-detect) | `""` |
 | `lec.collapse` | proven-module collapse: comma-sep def names forced to the sound blackbox | `""` |
-| `lec.hierarchical` | bottom-up: LEC every def leaves-first under `auto`, collapsing proven children | `false` |
-| `lec.semdiff` | structural def-diff skip: `none` \| `structural` (drop a structurally-identical def with no solver) | `none` |
+| `lec.hierarchical` | bottom-up: LEC every def leaves-first under `lec.engine`, collapsing proven children (`false` = flat single LEC) | `true` |
+| `lec.semdiff` | structural def-diff skip: `structural` (drop a structurally-identical def with no solver; `true`/`on` alias) \| `none`. NB cross-front-end pairs never match | `structural` |
+| `lec.decompose` | split the miter into per-cut queries: `auto` (sweep, fall back to the monolithic solve on a non-discharging cut) \| `true` (sweep only, report the hard residue, no monolithic solve) \| `false` (monolithic only) | `auto` |
 | `lec.cross` | also run `lgcheck` and assert agreement (bring-up only) | `false` |
 
 The `lgyosys` solver shells out to `inou/yosys/lgcheck` (yosys `equiv`, the

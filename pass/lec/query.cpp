@@ -1284,7 +1284,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     // the easy outputs discharge instantly and only the genuinely-hard cone is
     // ever the bottleneck. Opt-in via LEC_DECOMP; on the first SAT/unknown we fall
     // through to the monolithic solve so the existing witness path is unchanged.
-    if (opts.decompose || std::getenv("LEC_DECOMP") != nullptr) {
+    if (lec_decompose_try(opts.decompose) || std::getenv("LEC_DECOMP") != nullptr) {
       bool all_unsat = true;
       for (const auto& [dn, dt] : decomp_diffs) {
         solver.push();
@@ -1300,6 +1300,14 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         res.verdict = Verdict::Proven;
         return res;
       }
+      if (!lec_decompose_fallback(opts.decompose)) {
+        // decompose=true (diagnostic): a cut did not discharge; do NOT spend time on
+        // the monolithic solve (this mode exists to isolate the hard cone fast).
+        res.verdict  = Verdict::Unknown;
+        res.detail  += "; decomposed: a cut did not discharge (monolithic skipped, decompose=true)";
+        return res;
+      }
+      // auto: fall through to the monolithic solve for a definitive verdict + witness.
     }
     solver.assertFormula(bad);
     cvc5::Result r = solver.checkSat();
@@ -1809,8 +1817,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   // discharge instantly and only the genuinely-hard ones (the branch/forwarding
   // cone) are ever the bottleneck. Opt-in via LEC_DECOMP; any SAT/unknown falls
   // through to the monolithic solve so the witness path is unchanged.
-  if ((opts.decompose || std::getenv("LEC_DECOMP") != nullptr) && !ind_diffs.empty()) {
-    int                      proven = 0;
+  if ((lec_decompose_try(opts.decompose) || std::getenv("LEC_DECOMP") != nullptr) && !ind_diffs.empty()) {
+    int                      proven  = 0;
+    bool                     any_sat = false;
     std::vector<std::string> hard;
     for (const auto& [dn, dt] : ind_diffs) {
       solver.push();
@@ -1821,6 +1830,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         ++proven;
       } else {
         hard.push_back(dn);  // SAT (real diff) or unknown (cvc5 too weak for this cone)
+        if (dr.isSat()) {
+          any_sat = true;
+        }
       }
       if (std::getenv("LEC_DECOMP_LOG") != nullptr) {
         std::fprintf(stderr, "[LEC_CUT] %-44s %s\n", dn.c_str(), dr.isUnsat() ? "PROVEN" : (dr.isSat() ? "DIFF" : "unknown"));
@@ -1831,13 +1843,25 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       res.detail  += "; decomposed (" + std::to_string(proven) + " cuts each UNSAT)";
       return res;
     }
-    res.detail += "; decomposed: " + std::to_string(proven) + "/" + std::to_string(ind_diffs.size())
-                + " cuts PROVEN, " + std::to_string(hard.size()) + " unresolved {" + join_capped(hard) + "}";
-    if (proven > 0 && hard.size() <= ind_diffs.size()) {
-      // Most of the design discharged; the residue is the genuinely-hard cone(s).
-      res.verdict = Verdict::Unknown;
+    res.detail += "; decomposed: " + std::to_string(proven) + "/" + std::to_string(ind_diffs.size()) + " cuts PROVEN"
+                + (hard.empty() ? std::string{} : ", " + std::to_string(hard.size()) + " unresolved {" + join_capped(hard) + "}");
+    if (!lec_decompose_fallback(opts.decompose)) {
+      // decompose=true (diagnostic): report the per-cut residue, do NOT run the
+      // monolithic solve. (proven==0 && complete learned nothing -> fall through.)
+      if (proven > 0 || incomplete) {
+        res.verdict = Verdict::Unknown;
+        return res;
+      }
+    } else if (!any_sat && !hard.empty()) {
+      // auto, but every residual cut was UNKNOWN (cvc5 too weak): the larger
+      // monolithic OR is only harder, so skip it and report Unknown directly.
+      res.verdict  = Verdict::Unknown;
+      res.detail  += "; monolithic skipped (residual cuts UNKNOWN, larger miter no easier)";
       return res;
     }
+    // auto with a SAT cut, or all cuts proven but the correspondence is incomplete
+    // (a cheap monolithic UNSAT yields the right "matched portion" verdict): fall
+    // through to the monolithic solve for the definitive verdict + witness.
   }
   solver.assertFormula(bad);
   cvc5::Result r = solver.checkSat();

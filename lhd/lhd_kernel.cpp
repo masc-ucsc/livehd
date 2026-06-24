@@ -2929,7 +2929,9 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   std::vector<std::string>  proven_list, collapsed_note;
   for (const auto& name : order) {
     livehd::lec::Lec_options o = base;
-    o.engine                   = "auto";  // every def races the portfolio
+    // Each def is LEC'd under the requested engine (lec.engine, default `auto` =
+    // the ind+bmc portfolio). Honor an explicit engine so `--set lec.engine=bmc`
+    // (e.g. a reset-phase proof) is not silently overridden by the hierarchical driver.
 
     // M3 structural def-diff reduction: a def whose ref/impl are structurally
     // IDENTICAL (no unmatched node on either side) and whose children are ALL
@@ -3089,14 +3091,14 @@ void lec_command(Options& opts, Result& res) {
   // non-cross path; in cross mode we additionally run lgcheck and assert
   // agreement (the strongest encoder check).
   livehd::lec::Lec_options o;
-  o.engine  = label("engine", "bmc");
+  o.engine  = label("engine", "auto");
   o.solver  = solver;  // cvc5 | bitwuzla
   o.bound   = std::atoi(label("bound", "6").c_str());
   o.timeout = std::atoi(label("timeout", "120").c_str());  // bound the CLI: hard miters degrade to UNKNOWN, never freeze (0 = unbounded)
   o.witness = label("witness", "true") != "false" && label("witness", "true") != "0";
-  o.decompose    = label("decompose", "false") != "false" && label("decompose", "false") != "0";
+  o.decompose    = label("decompose", "auto");
   o.strict       = label("strict", "false") != "false" && label("strict", "false") != "0";
-  o.semdiff      = label("semdiff", "none");
+  o.semdiff      = livehd::lec::lec_canon_semdiff(label("semdiff", "structural"));
   o.phase        = label("phase", "after_reset");
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
   o.reset        = label("reset", "");
@@ -3162,7 +3164,7 @@ void lec_command(Options& opts, Result& res) {
   const auto* sub_lib_ptr = sub_lib.empty() ? nullptr : &sub_lib;
 
   livehd::lec::Query_result r;
-  if (label("hierarchical", "false") == "true" || label("hierarchical", "false") == "1") {
+  if (label("hierarchical", "true") != "false" && label("hierarchical", "true") != "0") {
     // Bottom-up: LEC every def leaves-first under `auto`, collapsing proven
     // children. The driver emits a per-def progress line itself; the TOP def's
     // verdict drives the exit policy below (like the single-design path).

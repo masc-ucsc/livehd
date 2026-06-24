@@ -2885,10 +2885,10 @@ private:
       cio_ptr = &callee->io_meta();
     }
     const auto& cio = *cio_ptr;
-    if (cio.outputs.empty()) {
-      error_here("upass.tolg: call to '{}' has no outputs — nothing to bind", callee_full);
-      return;
-    }
+    // A zero-output callee is a legitimate SINK instance (e.g. a verification /
+    // DPI observer module — XiangShan `DiffExt*` / `DummyDPICWrapper` — which
+    // under -DSYNTHESIS carries inputs but no outputs). It binds its inputs and
+    // produces no result; handled below after the input/clock/reset wiring.
 
     // NOTE: set_subnode RE-STAMPS the raw hhds type to its own 2/3 loop-hint
     // encoding — type_op_of() recognizes Subs by the subnode LINK, never by
@@ -3048,6 +3048,12 @@ private:
     }
 
     std::string dst_name(lnast_->get_name(dst));
+
+    if (cio.outputs.empty()) {
+      // Sink instance (no outputs): inputs/clock/reset are wired above; there is
+      // no result pin to create and nothing for the caller to bind.
+      return;
+    }
 
     if (cio.outputs.size() > 1) {
       // Multi-output callee: the fcall result is a tuple; each

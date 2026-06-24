@@ -32,7 +32,10 @@ EOF
 "$LHD" compile "$WORK/d3_or.v" --top top --emit-dir "lg:$WORK/lib3_or" --workdir "$WORK/c2" >/dev/null 2>&1
 
 H() {  # $1=label ; $2..=lhd lec args ; sets RC/OUT
-  OUT=$("$LHD" lec "${@:2}" --top top --set lec.hierarchical=true --workdir "$WORK/w_$1" 2>&1); RC=$?
+  # semdiff=none: this test validates the hierarchical SOLVER + child-collapse path,
+  # so the structurally-identical self-lec must reach the solver (not be skipped by
+  # the default semdiff=structural pre-check — that path is covered by lec_semdiff_test).
+  OUT=$("$LHD" lec "${@:2}" --top top --set lec.hierarchical=true --set lec.semdiff=none --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
 # 1) self-lec: every def proves leaves-first; mid collapses leaf, top collapses mid.

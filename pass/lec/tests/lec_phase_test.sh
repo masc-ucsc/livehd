@@ -55,7 +55,7 @@ compile b2.v b2_lg dut
 # verdict $impl $ref $top $phase  -> echoes PROVEN | REFUTED | UNKNOWN
 verdict() {
   $LHD lec --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top "$3" \
-       --set lec.engine=bmc --set lec.bound=8 --set "lec.phase=$4" \
+       --set lec.hierarchical=false --set lec.engine=bmc --set lec.bound=8 --set "lec.phase=$4" \
        --workdir "$WORK/q_${3}_$4_$$_$RANDOM" 2>&1 \
     | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN" | head -1
 }

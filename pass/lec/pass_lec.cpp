@@ -25,10 +25,10 @@ void Pass_lec::setup() {
                 "Relational equivalence: prove_equal(ref=graph0, impl=graph1) under assume_equal(inputs)",
                 &Pass_lec::lec);
   m.add_label_optional("engine",
-                       "discharge engine: bmc (default) | ind (inductive flop-cut miter) | ic3 | "
-                       "auto (parallel portfolio: race ind+bmc as forked workers, take the first "
-                       "trustworthy verdict — ind-Proven=PASS, bmc-Refuted=FAIL)",
-                       "bmc");
+                       "discharge engine: auto (default; parallel portfolio: race ind+bmc as forked "
+                       "workers, take the first trustworthy verdict — ind-Proven=PASS, bmc-Refuted=FAIL) | "
+                       "bmc | ind (inductive flop-cut miter) | ic3",
+                       "auto");
   m.add_label_optional("solver",
                        "equivalence backend: cvc5 (default, in-process SMT) | bitwuzla (in-process SMT) | "
                        "lgyosys (kernel-routed yosys/lgcheck; reads Verilog directly)",
@@ -52,20 +52,24 @@ void Pass_lec::setup() {
                        "blackbox path even when --lib could flatten them (the bottom-up driver's proven set)",
                        "");
   m.add_label_optional("hierarchical",
-                       "bottom-up hierarchical decomposition: topo-order the module-def DAG, LEC each def "
-                       "leaves-first under the auto portfolio, and collapse already-proven children into "
-                       "their parents (a child unprovable in isolation stays flattened)",
-                       "false");
+                       "bottom-up hierarchical decomposition (default true): topo-order the module-def DAG, "
+                       "LEC each def leaves-first under the engine, and collapse already-proven children into "
+                       "their parents (a child unprovable in isolation stays flattened). false = flat single LEC",
+                       "true");
   m.add_label_optional("semdiff",
-                       "structural def-diff reduction (M3): none (default) | structural. Run "
+                       "structural def-diff reduction (M3): structural (default; true/on = alias) | none. Run "
                        "pass.semdiff per module first; a def whose ref/impl are structurally identical "
-                       "(and whose children are all proven) is dropped as proven with NO solver call",
-                       "none");
+                       "(and whose children are all proven) is dropped as proven with NO solver call. NOTE: "
+                       "cross-front-end pairs (slang vs pyrope) never match structurally, so it only helps "
+                       "same-source rebuilds",
+                       "structural");
   m.add_label_optional("cross", "also run lgcheck and assert agreement (bring-up only)", "false");
   m.add_label_optional("decompose",
-                       "prove each cut/output equivalence as a separate focused query instead of one "
-                       "monolithic OR-miter; isolates and reports the hard cones cvc5 cannot discharge",
-                       "false");
+                       "split the cut/output miter into per-cut focused queries: auto (default; sweep, then "
+                       "fall back to the monolithic solve on any cut that does not discharge — fast when it "
+                       "proves, definitive otherwise) | true (sweep ONLY, report the hard residue, no "
+                       "monolithic solve — the diagnostic mode) | false (monolithic only)",
+                       "auto");
   m.add_label_optional("strict",
                        "treat an inconclusive UNKNOWN (no counterexample, solver incomplete) as a hard "
                        "failure; default false (REFUTED fails, witness-free UNKNOWN is a deferred warning)",
@@ -82,7 +86,7 @@ void Pass_lec::lec(Eprp_var& var) {
   }
 
   lec::Lec_options o;
-  o.engine  = std::string{var.get("engine", "bmc")};
+  o.engine  = std::string{var.get("engine", "auto")};
   o.solver  = std::string{var.get("solver", "cvc5")};
   o.bound   = str_tools::to_i(var.get("bound", "6"));
   o.timeout = str_tools::to_i(var.get("timeout", "120"));
@@ -91,9 +95,9 @@ void Pass_lec::lec(Eprp_var& var) {
   o.reset_cycles = str_tools::to_i(var.get("reset_cycles", "2"));
   o.reset        = std::string{var.get("reset", "")};
   o.match        = lec::parse_match_pairs(var.get("match", ""));  // inline pairs (@FILE only via `lhd lec`)
-  o.decompose    = parse_bool(var.get("decompose", "false"));
+  o.decompose    = std::string{var.get("decompose", "auto")};
   o.strict       = parse_bool(var.get("strict", "false"));
-  o.semdiff      = std::string{var.get("semdiff", "none")};
+  o.semdiff      = lec::lec_canon_semdiff(var.get("semdiff", "structural"));
   // lec.collapse: comma-separated proven-module def names to force-blackbox.
   if (std::string cs{var.get("collapse", "")}; !cs.empty()) {
     size_t pos = 0;

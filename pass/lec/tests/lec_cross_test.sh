@@ -52,7 +52,7 @@ fail=0
 
 # Equivalent pair: both engine and lgcheck must say equivalent -> exit 0.
 out=$($LHD lec --impl "lg:$WORK/eq_lg" --ref "lg:$WORK/a_lg" --top foo \
-        --set lec.cross=true --workdir "$WORK/c_eq" 2>&1)
+        --set lec.hierarchical=false --set lec.cross=true --workdir "$WORK/c_eq" 2>&1)
 rc=$?
 echo "$out" | grep -i "cross-check" || true
 if echo "$out" | grep -qi "DISAGREE"; then
@@ -64,7 +64,7 @@ fi
 
 # Different pair: both must say different -> equiv_fail (exit 1), NO disagreement.
 out=$($LHD lec --impl "lg:$WORK/ne_lg" --ref "lg:$WORK/a_lg" --top foo \
-        --set lec.cross=true --workdir "$WORK/c_ne" 2>&1)
+        --set lec.hierarchical=false --set lec.cross=true --workdir "$WORK/c_ne" 2>&1)
 rc=$?
 echo "$out" | grep -i "cross-check" || true
 if echo "$out" | grep -qi "DISAGREE"; then

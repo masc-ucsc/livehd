@@ -138,6 +138,27 @@ std::string_view Lnast_prp_writer::infix_symbol(Lnast_ntype::Lnast_ntype_int t) 
   }
 }
 
+// True for infix operators that are fully associative, so a same-operator
+// chain `(((a op b) op c) op d)` can drop its redundant parens and print flat
+// as `a op b op c op d`.  This keeps a wide N-operand reduction (e.g. a 4096-bit
+// next-state bit-assembly) from nesting parens N levels deep and tripping the
+// prp parser's recursion guard (inou/prp/prp2lnast.cpp kMaxParseNesting).  Only
+// operators where re-association is value-preserving qualify; `-`, `/`, `%`,
+// shifts and comparisons are intentionally excluded.
+static bool is_associative_optype(Lnast_ntype::Lnast_ntype_int t) {
+  using N = Lnast_ntype;
+  switch (t) {
+    case N::Lnast_ntype_plus:
+    case N::Lnast_ntype_mult:
+    case N::Lnast_ntype_bit_and:
+    case N::Lnast_ntype_bit_or:
+    case N::Lnast_ntype_bit_xor:
+    case N::Lnast_ntype_log_and:
+    case N::Lnast_ntype_log_or: return true;
+    default                  : return false;
+  }
+}
+
 bool Lnast_prp_writer::is_foldable_optype(Lnast_ntype::Lnast_ntype_int t) {
   using N = Lnast_ntype;
   if (!infix_symbol(t).empty()) {
@@ -196,6 +217,25 @@ std::string Lnast_prp_writer::decl_prefix(std::string_view lhs) {
   return "mut ";
 }
 
+// A bare Pyrope reserved word used as a variable identifier (e.g. a Verilog
+// signal named `wrap`/`sat`/`reg`/`enum`) re-parses as a keyword and breaks the
+// recompile leg (`wrap = x` parses as the overflow modifier + a broken
+// assignment -> "expected an expression").  Such a name must be backtick-escaped
+// on emit; the lexer strips the backticks back to the identical name, so the lg
+// name (and LEC matching) is unaffected.  The list is the keyword set that
+// actually breaks as an identifier (confirmed empirically) plus the obvious
+// type/contextual keywords for safety — over-quoting a non-keyword is harmless.
+static bool is_pyrope_reserved_ident(std::string_view s) {
+  static const absl::flat_hash_set<std::string_view> kw = {
+      "wrap",  "sat",   "not",      "ref",      "enum",     "and",    "or",     "in",       "else",
+      "elif",  "for",   "while",    "mod",      "comb",     "pipe",   "reg",    "mut",      "const",
+      "wire",  "type",  "import",   "return",   "pub",      "test",   "spawn",  "true",     "false",
+      "nil",   "break", "continue", "loop",     "impl",     "comptime", "fluid", "if",      "match",
+      "where", "step",  "as",       "unique",   "priority", "defer",  "int",    "uint",     "bool",
+      "string"};
+  return kw.contains(s);
+}
+
 std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
   // Move the source's SSA-version names out of the recompile's PRIVATE `___ssa_`
   // namespace.  The reader hands the writer POST-SSA LNAST whose versioned names
@@ -221,7 +261,7 @@ std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
     if (s.size() >= 2 && s.front() == '`' && s.back() == '`') {
       return s;
     }
-    return s.find('.') == std::string::npos ? s : "`" + s + "`";
+    return (s.find('.') == std::string::npos && !is_pyrope_reserved_ident(s)) ? s : "`" + s + "`";
   };
   // A `%`-prefixed compiler temp is not a legal Pyrope identifier — map it to an
   // emittable `t<id>` (collision-checked). A trailing `.field` (e.g. a detuple
@@ -2305,6 +2345,7 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
 
   // Infix arithmetic / bitwise / logical / comparison: `a <op> b [<op> c …]`.
   if (auto sym = infix_symbol(t); !sym.empty()) {
+    const bool  assoc = is_associative_optype(t);
     std::string out;
     bool        first = true;
     for (auto c = lnast->get_sibling_next(c0); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
@@ -2313,8 +2354,24 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
         out += sym;
         out += " ";
       }
-      out   += render_value(c, /*operand_ctx=*/true);
-      first  = false;
+      // A same-operator associative operand is inlined WITHOUT its own parens
+      // (operand_ctx=false) so the chain stays flat: `a op b op c …` instead of
+      // `((a op b) op c) …`.  Its own sub-operands still parenthesize as needed.
+      bool flattened = false;
+      if (assoc && lnast->get_type(c) == Lnast_ntype::Lnast_ntype_ref) {
+        std::string nm(lnast->get_name(c));
+        if (is_foldable(nm)) {
+          auto fdef = fold_info_.at(nm).def_node;
+          if (lnast->get_type(fdef) == t) {
+            out       += render_def_rhs(fdef, /*operand_ctx=*/false);
+            flattened  = true;
+          }
+        }
+      }
+      if (!flattened) {
+        out += render_value(c, /*operand_ctx=*/true);
+      }
+      first = false;
     }
     return wrap(out, /*loose=*/true);
   }

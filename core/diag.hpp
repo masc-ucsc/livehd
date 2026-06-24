@@ -119,10 +119,10 @@ struct Diagnostic {
   //   duration_ms - elapsed wall-clock to reach the verdict (-1 = unset)
   //   attrs       - any extra key/value (bound, witness path, node count, the
   //                 per-engine times) so the struct need not grow per consumer
-  std::string                                      verdict;
-  std::string                                      engine;
+  std::string                                      verdict{};
+  std::string                                      engine{};
   int64_t                                          duration_ms = -1;
-  std::vector<std::pair<std::string, std::string>> attrs;
+  std::vector<std::pair<std::string, std::string>> attrs{};
 };
 
 // One JSONL line (no trailing newline). `seq` is the per-run monotonic id.
