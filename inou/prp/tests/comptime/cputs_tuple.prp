@@ -1,0 +1,46 @@
+/*
+:name: cputs_tuple
+:type: comptime
+:verifier_pass: 8
+:verifier_fail: 0
+*/
+
+// A comptime tuple (an array's size is an unnamed tuple) must constant-
+// propagate, so `cputs`/`cassert` over it work at compile time.
+//
+// Two regressions are locked in here:
+//   1. `cputs("{t}")` wrongly reported a multi-element comptime tuple as
+//      "not comptime-known" — the `string(...)`/interpolation cast now
+//      stringifies a tuple to its Pyrope textual form.
+//   2. A comparison with an EMPTY tuple folded to "unknown" (silently never
+//      discharged) — an empty bundle is now treated as the empty tuple, so
+//      `[] != [3,4]` / `[] == []` decide by shape.
+
+// Spread builds NEW tuples without mutating the source.
+const a:[] = nil
+const c = (...a, 3)        // (3) -> auto-unwraps to scalar 3
+const d = (...c, 4)        // (3, 4)
+
+cputs("a:{a}")             // prp:a:()      (empty tuple)
+cputs("d:{d}")             // prp:d:(3,4)
+cassert(a != [3, 4])       // a is unmodified (still empty) -> empty vs 2-elem
+cassert(d == [3, 4])
+cassert(c == 3)
+
+// Empty-tuple comparisons decide by shape (regression #2).
+const e:[] = nil
+cassert(a == e)            // empty == empty
+cassert(a != (3))          // empty != scalar
+
+// Positional, named, and nested tuples all stringify (regression #1).
+const p = (5, 6)
+cputs("p={p}")             // prp:p=(5,6)
+cassert(p == (5, 6))
+
+const n = (const x = 1, const y = 2)
+cputs("n={n}")             // prp:n=(x=1,y=2)
+cassert(n.x == 1)
+
+const nest = (1, (2, 3))
+cputs("nest={nest}")       // prp:nest=(1,(2,3))
+cassert(nest[1] == (2, 3))
