@@ -136,14 +136,13 @@ http_archive(
 
 # HHDS
 bazel_dep(name = "hhds", version = "0.2.0")
-# TEMP local override to validate the attr slot-vector + try_get/get_or change
-# in ../hhds before pushing it and bumping the pin below back to git_override.
-local_path_override(module_name = "hhds", path = "../hhds")
-# git_override(
-#     module_name = "hhds",
-#     remote = "https://github.com/masc-ucsc/hhds.git",
-#     commit = "0102bec1b1f0226cd17e30ff15df3a62f0b0b287",  # out_edges() lazy auto-scaling OutEdgeRange view (huge-fanout safe); inp_edges() stays eager InlinedVector
-# )
+git_override(
+    module_name = "hhds",
+    remote = "https://github.com/masc-ucsc/hhds.git",
+    commit = "abdd0c55372276c782bc8a28867cda4c710cee3f",  # attr slot-vector + try_get/get_or; GraphLibrary writer-preferring registry lock (fixes high-core create/find livelock)
+)
+# For local debug/testing, swap the git_override above for:
+# local_path_override(module_name = "hhds", path = "../hhds")
 
 # prpparse — hand-written recursive-descent Pyrope parser; the inou/prp front-end
 # (it replaced the tree-sitter-pyrope grammar, so neither @tree-sitter nor
