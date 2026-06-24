@@ -353,7 +353,7 @@ inline void debug_assert_cells_sized([[maybe_unused]] hhds::Graph& g, [[maybe_un
 #ifndef NDEBUG
   for (auto node : g.forward_class()) {
     auto op = type_op_of(node);
-    if (op == Ntype_op::Invalid || op == Ntype_op::Nconst || Ntype::is_multi_driver(op)) {
+    if (op == Ntype_op::Invalid || op == Ntype_op::Nconst || Ntype::has_multiple_driver_pins(op)) {
       continue;
     }
     auto dpin = node.create_driver_pin(0);
@@ -559,7 +559,8 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
 }
 
 // Returns the (single) driver pin feeding a named sink. If the sink is
-// unconnected, returns an invalid pin. Multiple drivers (multi-driver sinks)
+// unconnected, returns an invalid pin. The multi-driver sinks (those where
+// Ntype::is_sink_single_driver is false -- the 's'-suffixed "as"/"bs" pins)
 // require inp_drivers_of instead.
 [[nodiscard]] inline hhds::Pin_class get_driver_of_sink_name(const hhds::Node_class& node, std::string_view name) {
   auto sink = find_sink_pin(node, name);
@@ -572,9 +573,9 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   if (drivers.empty()) {
     return {};
   }
-  // Single-driver contract: a multi-driver sink (Sum a/b, bit_or, memory ports)
-  // must read every driver via inp_drivers_of — silently taking the first would
-  // drop fan-in. Assert callers honor it.
+  // Single-driver contract: a multi-driver sink (the "as"/"bs" pins -- Sum as/bs,
+  // Or as, SHL bs, ...) must read every driver via inp_drivers_of — silently
+  // taking the first would drop fan-in. Assert callers honor it.
   I(drivers.size() == 1, "get_driver_of_sink_name on a multi-driver sink; use inp_drivers_of");
   return drivers.front();
 }

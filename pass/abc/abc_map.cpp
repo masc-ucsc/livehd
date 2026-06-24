@@ -770,74 +770,61 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         slots[b] = abc_const_bit(false);
       }
     } else if (op == Ntype_op::SHL) {
-      // Logical left shift, in a single combinational cone. pid 0 = value `a`
-      // (single driver); pid 1 = shift amount(s) `b`. A multi-driver `b` is the
-      // one-hot construction `n<<(b0,b1,…) == (n<<b0)|(n<<b1)|…` (cell.cpp /
-      // 04-variables.md §<<), so each `a<<bi` is ORed together. The cvc5 LEC
-      // encodes SHL identically (fit `a` to the result width, shift unsigned, OR
-      // the amounts). A CONSTANT amount becomes pure bit re-wiring; a RUNTIME
-      // amount becomes a barrel/log shifter (arith::build_shl). `a` is sign/zero
-      // extended to out_bits by abc_bit, matching the LEC's fit-to-W.
-      hhds::Pin_class              a_d;
-      std::vector<hhds::Pin_class> b_drv;
+      // Logical left shift, in a single combinational cone. pid 0 = value `a`,
+      // pid 1 = shift amount `b` (both single-driver; the old one-hot multi-shift
+      // `n<<(b0,b1,…)` form was removed). The cvc5 LEC encodes SHL identically
+      // (fit `a` to the result width, shift unsigned). A CONSTANT amount becomes
+      // pure bit re-wiring; a RUNTIME amount becomes a barrel/log shifter
+      // (arith::build_shl). `a` is sign/zero extended to out_bits by abc_bit,
+      // matching the LEC's fit-to-W.
+      hhds::Pin_class a_d;
+      hhds::Pin_class b_d;
       for (const auto& e : n.inp_edges()) {
         if (e.sink.get_port_id() == 0) {
           a_d = e.driver;
         } else if (e.sink.get_port_id() == 1) {
-          b_drv.push_back(e.driver);
+          b_d = e.driver;
         }
       }
       std::vector<Abc_Obj_t*> av(out_bits);
       for (int i = 0; i < out_bits; ++i) {
         av[i] = abc_bit(a_d, i);
       }
-      std::vector<Abc_Obj_t*> acc;  // empty => still a (no amount), else the running OR
-      auto                    or_into = [&](const std::vector<Abc_Obj_t*>& sh) {
-        if (acc.empty()) {
-          acc = sh;
-          return;
-        }
-        for (int i = 0; i < out_bits; ++i) {
-          acc[i] = abc_bin(acc[i], sh[i], '|');
-        }
-      };
-      for (const auto& bd : b_drv) {
-        if (gu::is_const_pin(bd)) {
-          auto amt_c = gu::hydrate_const(bd);
+      std::vector<Abc_Obj_t*> sh;  // empty => no amount (result == a)
+      if (!b_d.is_invalid()) {
+        if (gu::is_const_pin(b_d)) {
+          auto amt_c = gu::hydrate_const(b_d);
           if (amt_c.has_unknowns() || amt_c.is_negative()) {
             // An unknown (x-bit) or negative constant shift amount cannot be
             // soundly technology-mapped (ABC has no X; a negative shift is
-            // rejected upstream by upass.bitwidth). This only arises from a
-            // degenerate fold (e.g. a runtime one-hot `a<<(d,e)` collapsed to an
-            // unknown const), never from a clean `a<<N`.
+            // rejected upstream by upass.bitwidth), never from a clean `a<<N`.
             livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
                 .msg("pass.abc: shl with an unknown/negative constant shift amount in region '{}' is not supported", rb.module_name)
                 .emit();
             unsupported = true;
-            continue;
+          } else {
+            // Clean non-negative integer: out[i] = a[i-amt], 0 below. A value too
+            // big for i64 (or simply >= out_bits) shifts everything out -> 0.
+            int64_t amt = amt_c.is_just_i64() ? amt_c.to_just_i64() : static_cast<int64_t>(out_bits);
+            sh.resize(out_bits);
+            for (int i = 0; i < out_bits; ++i) {
+              sh[i] = (i - amt >= 0) ? av[static_cast<int>(i - amt)] : abc_const_bit(false);
+            }
           }
-          // Clean non-negative integer: out[i] = a[i-amt], 0 below. A value too
-          // big for i64 (or simply >= out_bits) shifts everything out -> 0.
-          int64_t                 amt = amt_c.is_just_i64() ? amt_c.to_just_i64() : static_cast<int64_t>(out_bits);
-          std::vector<Abc_Obj_t*> sh(out_bits);
-          for (int i = 0; i < out_bits; ++i) {
-            sh[i] = (i - amt >= 0) ? av[static_cast<int>(i - amt)] : abc_const_bit(false);
-          }
-          or_into(sh);
         } else {
-          int bw = gu::bits_of(bd);
+          int bw = gu::bits_of(b_d);
           if (bw <= 0) {
             bw = 1;
           }
           std::vector<Abc_Obj_t*> bv(bw);
           for (int i = 0; i < bw; ++i) {
-            bv[i] = abc_bit(bd, i);  // unsigned shift count
+            bv[i] = abc_bit(b_d, i);  // unsigned shift count
           }
-          or_into(arith::build_shl(ops, av, bv, out_bits));
+          sh = arith::build_shl(ops, av, bv, out_bits);
         }
       }
       for (int b = 0; b < out_bits; ++b) {
-        slots[b] = acc.empty() ? av[b] : acc[b];
+        slots[b] = sh.empty() ? av[b] : sh[b];
       }
     } else if (op == Ntype_op::SRA) {
       // Right shift: pid 0 = value `a` (single), pid 1 = shift amount `b`

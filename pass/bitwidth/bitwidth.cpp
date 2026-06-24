@@ -118,7 +118,7 @@ void Bitwidth::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   // about the sign/upper bits.
   absl::flat_hash_map<hhds::Class_index, bool> declared_unsigned;
   for (auto node : g->forward_class()) {
-    if (Ntype::is_multi_driver(type_op_of(node))) {
+    if (Ntype::has_multiple_driver_pins(type_op_of(node))) {
       continue;
     }
     auto dpin = node.create_driver_pin(0);
@@ -136,7 +136,7 @@ void Bitwidth::do_trans(const std::shared_ptr<hhds::Graph>& g) {
 
 #ifndef NDEBUG
   for (auto node : g->forward_class()) {
-    if (Ntype::is_multi_driver(type_op_of(node))) {
+    if (Ntype::has_multiple_driver_pins(type_op_of(node))) {
       continue;
     }
     auto dpin = node.create_driver_pin(0);
@@ -202,7 +202,7 @@ void Bitwidth::adjust_bw(hhds::Pin_class dpin, const Bitwidth_range& bw) {
   // multi-driver type.
   auto master = dpin.get_master_node();
   auto op     = type_op_of(master);
-  if (!not_finished && !bw.is_overflow() && !Ntype::is_multi_driver(op)) {
+  if (!not_finished && !bw.is_overflow() && !Ntype::has_multiple_driver_pins(op)) {
     if (bw.get_min().same_repr(bw.get_max())) {
       // Disconnect all inputs and retype to Nconst with the resolved value.
       clear_all_sinks(master);
@@ -390,35 +390,29 @@ void Bitwidth::process_shl(hhds::Node_class& node, livehd::graph_util::Edge_vec&
   }
   a_bw = a_it->second;
 
-  Bitwidth_range n_bw{};
-  bool           n_bw_initialized = false;
-
-  for (auto& n_dpin : inp_drivers_of(node, "b")) {
-    auto n_it = bwmap.find(n_dpin.get_class_index());
-    if (unlikely(n_it == bwmap.end())) {
-      debug_unconstrained_msg(node, n_dpin);
-      not_finished = true;
-      return;
-    }
-    if (unlikely(!n_it->second.is_always_positive())) {
-      livehd::diag::err("pass.bitwidth", "negative-shift", "bitwidth")
-          .msg("SHL B input can be negative (only positive allowed)")
-          .fatal();
-    }
-    if (n_bw_initialized) {
-      n_bw.set_wider_range(n_it->second);
-    } else {
-      n_bw             = n_it->second;
-      n_bw_initialized = true;
-    }
+  // SHL b is single-driver (the one-hot multi-shift form was removed).
+  auto n_dpin = get_driver_of_sink_name(node, "b");
+  auto n_it   = bwmap.find(n_dpin.get_class_index());
+  if (unlikely(n_it == bwmap.end())) {
+    debug_unconstrained_msg(node, n_dpin);
+    not_finished = true;
+    return;
   }
+  if (unlikely(!n_it->second.is_always_positive())) {
+    livehd::diag::err("pass.bitwidth", "negative-shift", "bitwidth")
+        .msg("SHL B input can be negative (only positive allowed)")
+        .fatal();
+  }
+  Bitwidth_range n_bw = n_it->second;
 
   if (n_bw.get_sbits() == 0 || a_bw.get_sbits() == 0) {
     auto zero_dpin = create_const(*current_graph, *Dlop::create_integer(0));
-    while (node.has_out_edges()) {  // drain: redirect each consumer to const-0, no fan-out copy
-      auto e = node.out_edges().front();
+    // Reconnect every consumer to const-0, then del_node (below) drops all of
+    // node's edges in one bulk op (no per-edge del_edge lookup). Iterating the
+    // live out_edges while connecting is safe: connect_sink only grows
+    // zero_dpin/sink storage, never node's out-edge set.
+    for (const auto& e : node.out_edges()) {
       zero_dpin.connect_sink(e.sink);
-      e.del_edge();
     }
     node.del_node();
     return;
@@ -504,7 +498,7 @@ void Bitwidth::process_sum(hhds::Node_class& node, livehd::graph_util::Edge_vec&
       return;
     }
     auto pid = e.sink.get_port_id();
-    // Sum: sink "a" (pid 0) adds, sink "b" (pid 1) subtracts.
+    // Sum: sink "as" (pid 0) adds, sink "bs" (pid 1) subtracts.
     if (pid == 0) {
       max_val = max_val.add_op(it->second.get_max());
       min_val = min_val.add_op(it->second.get_min());
@@ -904,10 +898,12 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
 
   if (res_min.is_known_zero() && res_max.is_known_zero() && !not_finished) {
     auto zero_dpin = create_const(*current_graph, *Dlop::create_integer(0));
-    while (node.has_out_edges()) {  // drain: redirect each consumer to const-0, no fan-out copy
-      auto e = node.out_edges().front();
+    // Reconnect every consumer to const-0, then del_node (below) drops all of
+    // node's edges in one bulk op (no per-edge del_edge lookup). Iterating the
+    // live out_edges while connecting is safe: connect_sink only grows
+    // zero_dpin/sink storage, never node's out-edge set.
+    for (const auto& e : node.out_edges()) {
       zero_dpin.connect_sink(e.sink);
-      e.del_edge();
     }
     node.del_node();
     return;
@@ -952,10 +948,10 @@ void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec
     auto b = wire_it->second.get_sbits();
     if (b <= sign_max) {
       sign_max = b;
-      while (node.has_out_edges()) {  // drain: bypass Sext to its source, no fan-out copy
-        auto e = node.out_edges().front();
+      // live-reconnect each consumer to the Sext source; del_node bulk-drops
+      // node's edges (no per-edge find). connect only grows the source/sink.
+      for (const auto& e : node.out_edges()) {
         e.sink.connect_driver(inp_edges[0].driver);
-        e.del_edge();
       }
       node.del_node();
     }
@@ -969,10 +965,10 @@ void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec
   auto wire_op   = type_op_of(wire_node);
   if (wire_op == Ntype_op::Sext || wire_op == Ntype_op::And) {
     if (wire_it->second.get_sbits() <= sign_max) {
-      while (node.has_out_edges()) {  // drain: bypass to wire driver, no fan-out copy
-        auto e = node.out_edges().front();
+      // live-reconnect each consumer to wire_dpin; del_node bulk-drops node's
+      // edges (no per-edge find).
+      for (const auto& e : node.out_edges()) {
         e.sink.connect_driver(wire_dpin);
-        e.del_edge();
       }
       node.del_node();
     } else {
@@ -1016,10 +1012,10 @@ void Bitwidth::process_assignment_or(hhds::Node_class& node, livehd::graph_util:
     not_finished = true;
     return;
   }
-  while (node.has_out_edges()) {  // drain: forward the single input to each consumer, no fan-out copy
-    auto out = node.out_edges().front();
+  // live-reconnect each consumer to the single input; del_node bulk-drops node's
+  // edges (no per-edge find).
+  for (const auto& out : node.out_edges()) {
     inp_edges[0].driver.connect_sink(out.sink);
-    out.del_edge();
   }
   node.del_node();
 }
@@ -1044,10 +1040,12 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, livehd::graph_util::Edge_v
 
   if (max_bits == 0) {
     auto zero_dpin = create_const(*current_graph, *Dlop::create_integer(0));
-    while (node.has_out_edges()) {  // drain: redirect each consumer to const-0, no fan-out copy
-      auto e = node.out_edges().front();
+    // Reconnect every consumer to const-0, then del_node (below) drops all of
+    // node's edges in one bulk op (no per-edge del_edge lookup). Iterating the
+    // live out_edges while connecting is safe: connect_sink only grows
+    // zero_dpin/sink storage, never node's out-edge set.
+    for (const auto& e : node.out_edges()) {
       zero_dpin.connect_sink(e.sink);
-      e.del_edge();
     }
     node.del_node();
     return;
@@ -1113,10 +1111,10 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
     int32_t bw_sbits = it->second.get_sbits();
     if (bw_sbits == 0) {
       auto zero_dpin = create_const(*current_graph, *Dlop::create_integer(0));
-      while (node.has_out_edges()) {  // drain: redirect each consumer to const-0, no fan-out copy
-        auto e2 = node.out_edges().front();
+      // live-reconnect each consumer to const-0; del_node bulk-drops node's
+      // edges (no per-edge find).
+      for (const auto& e2 : node.out_edges()) {
         zero_dpin.connect_sink(e2.sink);
-        e2.del_edge();
       }
       node.del_node();
       return;
@@ -1157,10 +1155,10 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
         if (is_graph_input_pin(inp_edges[pos].driver) || is_graph_output_pin(inp_edges[pos].driver)) {
           mask_pos = -1;
         } else {
-          while (node.has_out_edges()) {  // drain: forward the surviving input to each consumer, no fan-out copy
-            auto out = node.out_edges().front();
+          // live-reconnect each consumer to the surviving input; del_node
+          // bulk-drops node's edges (no per-edge find).
+          for (const auto& out : node.out_edges()) {
             inp_edges[pos].driver.connect_sink(out.sink);
-            out.del_edge();
           }
           node.del_node();
           return;
@@ -1300,10 +1298,10 @@ void Bitwidth::process_attr_set_bw(hhds::Node_class& node_attr, Bitwidth::Attr a
         parent_dpin    = create_const(*current_graph, *Dlop::create_integer(0));
         parent_pending = false;
       }
-      while (node_attr.has_out_edges()) {  // drain: forward parent to each consumer, no fan-out copy
-        auto e = node_attr.out_edges().front();
+      // live-reconnect each consumer to parent_dpin; del_node bulk-drops
+      // node_attr's edges (no per-edge find).
+      for (const auto& e : node_attr.out_edges()) {
         parent_dpin.connect_sink(e.sink);
-        e.del_edge();
       }
       node_attr.del_node();
     } else {
@@ -1515,7 +1513,7 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
       if (op == Ntype_op::Nconst) {
         process_const(node);
         continue;
-      } else if (!Ntype::is_multi_driver(op)) {
+      } else if (!Ntype::has_multiple_driver_pins(op)) {
         auto dpin = node.create_driver_pin(0);
         auto bits = bits_of(dpin);
         if (bits) {
@@ -1638,7 +1636,7 @@ void Bitwidth::report_unbounded(hhds::Graph* g) {
   std::vector<std::string> unbounded;
   for (auto node : g->fast_class()) {
     auto op = type_op_of(node);
-    if (op == Ntype_op::Invalid || op == Ntype_op::Nconst || Ntype::is_multi_driver(op)) {
+    if (op == Ntype_op::Invalid || op == Ntype_op::Nconst || Ntype::has_multiple_driver_pins(op)) {
       continue;
     }
 
@@ -1734,23 +1732,22 @@ void Bitwidth::try_delete_attr_node(hhds::Node_class& node) {
       auto all_one_dpin = create_const(*current_graph, *mask_const);
 
       bwmap.insert_or_assign(mask_dpin.get_class_index(), Bitwidth_range(Dlop::create_integer(0), mask_const));
-      dpin_rhs.connect_sink(setup_sink_by_name(mask_node, "a"));
-      all_one_dpin.connect_sink(setup_sink_by_name(mask_node, "a"));
-      while (node.has_out_edges()) {  // drain: feed each consumer the masked value, no fan-out copy
-        auto e = node.out_edges().front();
+      dpin_rhs.connect_sink(setup_sink_by_name(mask_node, "as"));
+      all_one_dpin.connect_sink(setup_sink_by_name(mask_node, "as"));
+      // live-reconnect each consumer to the masked value; del_node bulk-drops
+      // node's edges (no per-edge find).
+      for (const auto& e : node.out_edges()) {
         mask_dpin.connect_sink(e.sink);
-        e.del_edge();
       }
       node.del_node();
       return;
     } else {
-      // drain: forward rhs to each port-0 consumer (node.del_node drops the rest)
-      while (node.has_out_edges()) {
-        auto e = node.out_edges().front();
+      // live-reconnect rhs to each port-0 consumer; del_node bulk-drops all of
+      // node's edges, including any non-port-0 (no per-edge find).
+      for (const auto& e : node.out_edges()) {
         if (e.driver.get_port_id() == 0) {
           e.sink.connect_driver(dpin_rhs);
         }
-        e.del_edge();
       }
       node.del_node();
       return;
@@ -1759,18 +1756,18 @@ void Bitwidth::try_delete_attr_node(hhds::Node_class& node) {
 
   if (is_sink_connected(node, "parent")) {
     auto data_dpin = get_driver_of_sink_name(node, "parent");
-    while (node.has_out_edges()) {  // drain: forward parent driver to each consumer, no fan-out copy
-      auto e = node.out_edges().front();
+    // live-reconnect each consumer to the parent driver; the shared del_node
+    // below bulk-drops node's edges (no per-edge find).
+    for (const auto& e : node.out_edges()) {
       I(e.driver.get_port_id() == 0);
       e.sink.connect_driver(data_dpin);
-      e.del_edge();
     }
   } else {
     auto data_dpin = create_const(*current_graph, *Dlop::create_integer(0));
-    while (node.has_out_edges()) {  // drain: forward const-0 to each consumer, no fan-out copy
-      auto e = node.out_edges().front();
+    // live-reconnect each consumer to const-0; the shared del_node bulk-drops
+    // node's edges (no per-edge find).
+    for (const auto& e : node.out_edges()) {
       e.sink.connect_driver(data_dpin);
-      e.del_edge();
     }
   }
   node.del_node();

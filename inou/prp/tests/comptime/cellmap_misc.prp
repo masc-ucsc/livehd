@@ -8,7 +8,7 @@
 // Corner cases beyond cellmap_comb.prp, restricted to the stateless cells
 // that actually exist in graph/cell.cpp. cellmap_comb walks the common cases;
 // this file fills the gaps:
-//   - Sum subtract pin (Sum has A=add and B=subtract)
+//   - Sum subtract pin (Sum has as=add and bs=subtract)
 //   - Edge cases: shift-by-zero, mul-by-one identities
 //   - Sext sign-flip vs Zext (zero-extend) compared on the same value
 //   - Mux selector at the high end (last slot fallthrough)
@@ -18,17 +18,17 @@
 // (mod has no cell; GE/LE/NE are derived from LT/GT/EQ via negation), so they
 // have no direct `__<cell>` call and are intentionally out of scope here.
 
-// Sum subtract — wrap helper uses Pyrope `-` (Ntype_op::Sum B pin).
+// Sum subtract — wrap helper uses Pyrope `-` (Ntype_op::Sum bs pin).
 comb cell_sub(a:s32, b:s32) -> (y) { y = a - b }
 cassert(cell_sub(a=10, b=3) == 7)
-cassert(  __sum(a=10, b=3) == 7)   // direct call: B pin is the subtract input
+cassert(  __sum(as=10, bs=3) == 7)   // direct call: bs pin is the subtract input
 cassert(cell_sub(a=0, b=5) == -5)
 
 // Identity: shift-by-zero and multiply-by-one.
 cassert(__shl(a=123, b=0) == 123)
 cassert(__sra(a=123, b=0) == 123)
-cassert(__mult(a=(7, 1))  == 7)
-cassert(__mult(a=(1, 99)) == 99)
+cassert(__mult(as=(7, 1))  == 7)
+cassert(__mult(as=(1, 99)) == 99)
 
 // Sext vs Zext on the same value highlight the sign-bit handling.
 comb cell_sext_top(a:u8) -> (y:sint) { y = a#sext[0..=7] }

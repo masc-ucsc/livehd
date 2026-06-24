@@ -101,6 +101,9 @@ Ntype::_init::_init() {
     (void)pid;
     // Check that common case is fine
 
+    // First-char slot invariant. Multi-driver sinks rename a/b -> "as"/"bs"
+    // (see get_sink_name_slow) but their leading char is still 'a'/'b', so the
+    // pid stays 0/1 here and the get_sink_pid fast path is unaffected.
     pid = sink_name2pid['a'][op];
     assert(pid == livehd::Port_invalid || pid == 0);
 
@@ -118,12 +121,6 @@ Ntype::_init::_init() {
 
     pid = sink_name2pid['f'][op];
     assert(pid == livehd::Port_invalid || pid == 5);
-
-    pid = sink_name2pid['A'][op];
-    assert(pid == livehd::Port_invalid || pid == 0);
-
-    pid = sink_name2pid['B'][op];
-    assert(pid == livehd::Port_invalid || pid == 1);
   }
 
   // cell_name_sv is sparse; "invalid" placeholders at gap indices must not
@@ -144,10 +141,12 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
     case Ntype_op::Sum:
     case Ntype_op::LT:
     case Ntype_op::GT:
+      // a,b are multi-driver sinks (drivers folded: Sum sums, LT/GT reduce) ->
+      // 's'-suffixed names. Keep in sync with Ntype::is_sink_single_driver.
       if (pid == 0) {
-        return "a";
+        return "as";
       } else if (pid == 1) {
-        return "b";
+        return "bs";
       }
       return "invalid";
       break;
@@ -157,8 +156,9 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
     case Ntype_op::Xor:
     case Ntype_op::Ror:
     case Ntype_op::EQ:
+      // single multi-driver sink a -> "as".
       if (pid == 0) {
-        return "a";
+        return "as";
       }
       return "invalid";
       break;
@@ -171,14 +171,9 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
     case Ntype_op::Sext:
     case Ntype_op::Div:
     case Ntype_op::SRA:
-      if (pid == 0) {
-        return "a";
-      } else if (pid == 1) {
-        return "b";
-      }
-      return "invalid";
-      break;
-    case Ntype_op::SHL:  // n<<(a,b) == (n<<a)|(n<<b) : useful for onehot encoding for lgtuple inputs
+    case Ntype_op::SHL:
+      // a,b are single-driver positional operands -> plain names. (SHL no longer
+      // folds multiple one-hot shift amounts on b; that runtime form was removed.)
       if (pid == 0) {
         return "a";
       } else if (pid == 1) {

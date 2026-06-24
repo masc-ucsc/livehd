@@ -3033,6 +3033,13 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
 
 void lec_command(Options& opts, Result& res) {
   setup_diag(opts, "lec");
+#ifndef NDEBUG
+  // NDEBUG is only defined under `-c opt`; a dbg/fastbuild binary runs the SMT
+  // discharge far slower, so nudge the user toward an optimized build first.
+  livehd::diag::info("pass.lec", "lec-debug-build-slow", "progress")
+      .msg("lec is slow and you compile without optimizations. Maybe `bazel build -c opt //...`")
+      .emit();
+#endif
   if (opts.impl_path.empty() || opts.ref_path.empty()) {
     throw Lhd_error{"usage",
                     "lec requires --impl KIND:PATH and --ref KIND:PATH",

@@ -5356,17 +5356,15 @@ Lnast_node Prp2lnast::constant_text_to_node(std::string_view text) {
   return Lnast_node::create_const(std::string(text));
 }
 
-Lnast_node Prp2lnast::identifier_to_node(TSNode n, bool for_lvalue) {
-  auto name = trim(get_text(n));
-  // Keyword constants that fell through as identifiers.
-  if (name == "true" || name == "false" || name == "nil") {
-    return Lnast_node::create_const(name);
-  }
-  // Pyrope's `…` escape lets identifiers carry spaces/punctuation. When the
-  // escaped text is a plain alnum/underscore identifier (the common case in
-  // tests like ``a`` ↔ `a`), strip the backticks so the LNAST ref text is
-  // the canonical name. The escape stays only when it actually carries a
-  // special character.
+// Pyrope's `…` escape lets identifiers carry spaces/punctuation. When the escaped
+// text is a plain alnum/underscore identifier (`` `a` `` ↔ `a`), the canonical
+// symbol name drops the backticks so a DECLARATION and every READ resolve to the
+// SAME name — a `` `name` `` port (e.g. a reserved word like `in` emitted by
+// prp_writer) must round-trip. The escape is kept only when it actually carries a
+// special character (or the inner text starts with a digit). Shared by
+// identifier_to_node (reads) and the param/port declaration sites (emit_arg_assign
+// / typed_field) so both ends canonicalize identically.
+[[nodiscard]] static std::string_view canonical_escaped_ident(std::string_view name) {
   if (name.size() >= 2 && name.front() == '`' && name.back() == '`') {
     auto inner = name.substr(1, name.size() - 2);
     bool ok    = !inner.empty();
@@ -5377,11 +5375,19 @@ Lnast_node Prp2lnast::identifier_to_node(TSNode n, bool for_lvalue) {
       }
     }
     if (ok && !(inner[0] >= '0' && inner[0] <= '9')) {
-      // `inner` is a substring view of `name` (same backing buffer), so the
-      // string_view stays valid after rebind.
-      name = inner;
+      return inner;  // substring view of `name` (same backing buffer)
     }
   }
+  return name;
+}
+
+Lnast_node Prp2lnast::identifier_to_node(TSNode n, bool for_lvalue) {
+  auto name = trim(get_text(n));
+  // Keyword constants that fell through as identifiers.
+  if (name == "true" || name == "false" || name == "nil") {
+    return Lnast_node::create_const(name);
+  }
+  name = canonical_escaped_ident(name);
   if (for_lvalue) {
     return Lnast_node::create_ref(name);
   }
@@ -5932,7 +5938,9 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
     return;
   }
   auto aidx = lnast->add_child(tuple_parent, Lnast_ntype::create_store());
-  lnast->add_child(aidx, Lnast_node::create_ref(get_text(id)));
+  // Canonicalize a `` `name` `` param/output exactly as a read does, so the
+  // declaration and its body reads resolve to the same symbol (round-trip).
+  lnast->add_child(aidx, Lnast_node::create_ref(canonical_escaped_ident(get_text(id))));
   // Default-value slot. Encoding choice for the absent case:
   //   `...` mod          -> const "..."  (var-args marker)
   //   `ref` mod          -> const "ref"  (write-back marker for the inliner)
@@ -6195,7 +6203,7 @@ void Prp2lnast::emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node) 
             continue;
           }
           auto aidx = lnast->add_child(tup_idx, Lnast_ntype::create_store());
-          lnast->add_child(aidx, Lnast_node::create_ref(trim(get_text(arg))));
+          lnast->add_child(aidx, Lnast_node::create_ref(canonical_escaped_ident(trim(get_text(arg)))));
           lnast->add_child(aidx, Lnast_node::create_const("nil"));
           if (!ts_node_is_null(ty)) {
             emit_arg_type(aidx, ty);

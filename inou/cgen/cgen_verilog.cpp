@@ -1177,7 +1177,7 @@ void Cgen_verilog::process_hotmux(std::shared_ptr<File_output> fout, const hhds:
 std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, const hhds::Node_class& node) {
   auto dpin = node.get_driver_pin(0);
   auto op   = type_op_of(node);
-  I(!Ntype::is_multi_driver(op));
+  I(!Ntype::has_multiple_driver_pins(op));
 
   std::string final_expr;
 
@@ -1441,7 +1441,7 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       return expr;
     };
     for (const auto& e : node.inp_edges()) {
-      if (Ntype::get_sink_name(op, e.sink.get_port_id()) == "a") {
+      if (Ntype::get_sink_name(op, e.sink.get_port_id()) == "as") {
         lhs.emplace_back(cmp_expr(e.driver));
       } else {
         rhs.emplace_back(cmp_expr(e.driver));
@@ -1477,19 +1477,10 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     auto        obits    = bits_of(node.get_driver_pin(0));
     std::string wide_val = absl::StrCat("({", std::to_string(obits), "{1'b0}} | ", val_expr, ")");
 
-    // SHL "b" is a multi-driver sink (LiveHD: all drivers represent one-hot
-    // shift amounts ORed together). Walk inp_edges and filter by sink name.
-    std::string onehot;
-    bool        first = true;
-    for (const auto& e : node.inp_edges()) {
-      if (Ntype::get_sink_name(op, e.sink.get_port_id()) != "b") {
-        continue;
-      }
-      auto amt_expr = get_expression(e.driver);
-      onehot        = absl::StrCat(onehot, first ? "(" : " | (", wide_val, " << ", amt_expr, ")");
-      first         = false;
-    }
-    final_expr = onehot;
+    // SHL b is single-driver (the one-hot multi-shift `(n<<b0)|(n<<b1)` form
+    // was removed).
+    auto amt_expr = get_expression(get_driver(find_sink_pin(node, "b")));
+    final_expr    = absl::StrCat("(", wide_val, " << ", amt_expr, ")");
   } else if (op == Ntype_op::SRA) {
     auto a_dpin   = get_driver(find_sink_pin(node, "a"));
     auto val_expr = get_expression(a_dpin);
@@ -1798,11 +1789,11 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds:
 
   for (auto node : graph->forward_class()) {
     auto op = type_op_of(node);
-    if (Ntype::is_multi_driver(op)) {
+    if (Ntype::has_multiple_driver_pins(op)) {
       continue;
     }
     // is_type_register excludes Flop/Fflop/Latch/Memory from combinational
-    // expression emission (Memory is already handled by is_multi_driver above);
+    // expression emission (Memory is already handled by has_multiple_driver_pins above);
     // a Latch is emitted as a level-sensitive block in create_registers.
     if (!node.has_out_edges() || is_type_register(node)) {
       continue;
@@ -2125,7 +2116,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
   for (auto node : graph->fast_class()) {
     auto op = type_op_of(node);
 
-    if (Ntype::is_multi_driver(op)) {
+    if (Ntype::has_multiple_driver_pins(op)) {
       if (op == Ntype_op::Sub || op == Ntype_op::Memory) {
         for (auto& e : node.inp_edges()) {
           auto name2 = get_scaped_name(pin_wire_name(e.driver));

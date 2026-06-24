@@ -157,9 +157,9 @@ void Cprop::collapse_forward_sum(hhds::Node_class& node, livehd::graph_util::Edg
         } else if (inp.sink.get_port_id() == 0 && out.sink.get_port_id() == 1) {
           out.sink.connect_driver(inp.driver);
         } else if (inp.sink.get_port_id() == 1 && out.sink.get_port_id() == 0) {
-          setup_sink_by_name(next_sum_node, "b").connect_driver(inp.driver);
+          setup_sink_by_name(next_sum_node, "bs").connect_driver(inp.driver);
         } else {
-          setup_sink_by_name(next_sum_node, "a").connect_driver(inp.driver);
+          setup_sink_by_name(next_sum_node, "as").connect_driver(inp.driver);
         }
       }
       out.del_edge();
@@ -186,12 +186,12 @@ void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, livehd::graph_u
     }
   }
 
-  // Drain the lazy out_edges view one edge at a time (front + del_edge) instead
-  // of snapshotting it: splice this node's inputs onto each consumer sink, drop
-  // the edge. Re-fetching front() holds no iterator across the mutation, so a
-  // huge fan-out is walked in place with no copy.
-  while (node.has_out_edges()) {
-    auto out = node.out_edges().front();
+  // Splice this node's inputs onto every consumer sink, then bwd_del_node
+  // deletes the node in one shot (del_node bulk-drops its edges — no per-edge
+  // del_edge lookup). Iterating the live out_edges while connecting is safe:
+  // connect_driver/del_sink only touch the input/consumer pins, never node's
+  // out-edge storage, and no node/pin is created to realloc the tables.
+  for (const auto& out : node.out_edges()) {
     for (auto& inp : inp_edges_ordered) {
       if (op == Ntype_op::Xor) {
         if (is_driver_connected_to_sink(inp.driver, out.sink)) {
@@ -203,7 +203,6 @@ void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, livehd::graph_u
         out.sink.connect_driver(inp.driver);
       }
     }
-    out.del_edge();
   }
 
   bwd_del_node(node);
@@ -218,12 +217,11 @@ void Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new
     }
   }
 
-  // Drain the lazy view (front + del_edge): redirect every consumer to new_dpin
-  // with no fan-out copy.
-  while (node.has_out_edges()) {
-    auto out = node.out_edges().front();
+  // Redirect every consumer to new_dpin, then bwd_del_node deletes the node in
+  // one shot (del_node bulk-drops its edges — no per-edge find). connect_sink
+  // only grows new_dpin/sink storage, so the live walk stays valid.
+  for (const auto& out : node.out_edges()) {
     new_dpin.connect_sink(out.sink);
-    out.del_edge();
   }
 
   bwd_del_node(node);
@@ -260,7 +258,7 @@ void Cprop::try_collapse_forward(hhds::Node_class& node, livehd::graph_util::Edg
     // negation (0 - x = -x). collapse_forward_always_pin0 forwards the driver
     // UNCHANGED, which would drop the sign (turning -x into +x). Leave the Sum
     // node so cgen renders it as -(x).
-    const bool sum_subtract = op == Ntype_op::Sum && sink_pin_name(inp_edges_ordered[0].sink) == "b";
+    const bool sum_subtract = op == Ntype_op::Sum && sink_pin_name(inp_edges_ordered[0].sink) == "bs";
     if ((op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::Div || op == Ntype_op::And || op == Ntype_op::Or
          || op == Ntype_op::Xor)
         && !sum_subtract) {
@@ -395,10 +393,10 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
       ++nconstants;
 
       if (op == Ntype_op::Sum) {
-        if (sink_pin_name(i.sink) == "a") {
+        if (sink_pin_name(i.sink) == "as") {
           result = result.add_op(c);
         } else {
-          I(sink_pin_name(i.sink) == "b");
+          I(sink_pin_name(i.sink) == "bs");
           result = result.sub_op(c);
         }
       } else if (op == Ntype_op::Or) {
@@ -420,11 +418,11 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
       if (!result.is_known_zero()) {
         auto dpin = create_const(*current_graph, result);
         if (result.is_positive() || op == Ntype_op::Or) {
-          setup_sink_by_name(node, "a").connect_driver(dpin);
+          setup_sink_by_name(node, "as").connect_driver(dpin);
         } else {
-          setup_sink_by_name(node, "b").connect_driver(dpin);
+          setup_sink_by_name(node, "bs").connect_driver(dpin);
         }
-      } else if (npending == 1 && !(op == Ntype_op::Sum && sink_pin_name(edge_it2[0].sink) == "b")) {
+      } else if (npending == 1 && !(op == Ntype_op::Sum && sink_pin_name(edge_it2[0].sink) == "bs")) {
         // Same guard as the nconstants==0 case below: a lone pending operand on a
         // Sum's subtract (b) pin is `0 - x` = -x, so forwarding x unchanged would
         // drop the sign. Leave the Sum node (it now holds only the b driver).
@@ -444,7 +442,7 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
     } else if (npending == 0 && nconstants == 1) {
       collapse_forward_always_pin0(node, inp_edges_ordered);
     } else if (npending == 1 && nconstants == 0) {
-      if (!(op == Ntype_op::Sum && sink_pin_name(edge_it2[0].sink) == "b")) {
+      if (!(op == Ntype_op::Sum && sink_pin_name(edge_it2[0].sink) == "bs")) {
         collapse_forward_always_pin0(node, edge_it2);
       }
     }
@@ -466,27 +464,19 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, livehd::graph_util
 void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
   auto op = type_op_of(node);
   if (op == Ntype_op::SHL) {
+    // SHL b is single-driver (the one-hot multi-shift form was removed).
     auto a_pin = livehd::graph_util::get_driver_of_sink_name(node, "a");
-    if (a_pin.is_invalid()) {
+    auto b_pin = livehd::graph_util::get_driver_of_sink_name(node, "b");
+    if (a_pin.is_invalid() || b_pin.is_invalid()) {
       return;
     }
     Dlop val = hydrate_const(a_pin);
+    Dlop amt = hydrate_const(b_pin);
 
     Dlop result;
     result = Dlop::create_integer(0);
-
-    bool zero_shifts = true;
-    for (auto& amt_dpin : livehd::graph_util::inp_drivers_of(node, "b")) {
-      Dlop amt    = hydrate_const(amt_dpin);
-      result      = result.or_op(val.shl_op(amt));  // pass the Dlop shift amount
-      zero_shifts = false;
-    }
-
-    if (zero_shifts) {
-      replace_node(node, Dlop::create_integer(-1));
-    } else {
-      replace_node(node, result);
-    }
+    result = result.or_op(val.shl_op(amt));  // val << amt
+    replace_node(node, result);
 
   } else if (op == Ntype_op::Ror) {
     Dlop result;
@@ -649,40 +639,41 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
 }
 
 void Cprop::replace_node(hhds::Node_class& node, const Dlop& result) {
-  auto dpin = create_const(*current_graph, result);
+  auto dpin     = create_const(*current_graph, result);
+  auto new_bits = bits_of(dpin);
 
-  // Drain the lazy out_edges view (front + del_edge): rewire each consumer to the
-  // const driver with no fan-out copy. create_const() below may grow the node
-  // table, but re-fetching front() holds no iterator across that mutation.
-  while (node.has_out_edges()) {
-    auto out      = node.out_edges().front();
+  // Reconnect every consumer to the const, then bulk-delete the node (del_node
+  // drops all of node's edges with no per-edge del_edge lookup). Width-mismatched
+  // consumers need a freshly bit-adjusted const, but creating one mid-walk could
+  // realloc the node/pin tables and invalidate the live iterator — so defer those
+  // (rare) sinks and wire them after the walk. The deferred buffer is bounded by
+  // the number of mismatches, never the full fan-out.
+  absl::InlinedVector<std::pair<hhds::Pin_class, int32_t>, 2> mismatched;
+  for (const auto& out : node.out_edges()) {
     auto out_bits = bits_of(out.driver);
-    auto new_bits = bits_of(dpin);
     if (new_bits == out_bits || out_bits == 0) {
       dpin.connect_sink(out.sink);
     } else {
-      auto result2 = result.adjust_bits(out_bits);
-      auto dpin2   = create_const(*current_graph, *result2);
-      dpin2.connect_sink(out.sink);
+      mismatched.emplace_back(out.sink, out_bits);
     }
-    out.del_edge();
+  }
+  for (const auto& [sink, out_bits] : mismatched) {
+    auto result2 = result.adjust_bits(out_bits);
+    auto dpin2   = create_const(*current_graph, *result2);
+    dpin2.connect_sink(sink);
   }
 
   node.del_node();
 }
 
 void Cprop::replace_logic_node(hhds::Node_class& node, const Dlop& result) {
-  hhds::Pin_class dpin_0;
-
-  // Drain the lazy view (front + del_edge): rewire every consumer to one shared
-  // const driver with no fan-out copy.
-  while (node.has_out_edges()) {
-    auto out = node.out_edges().front();
-    if (dpin_0.is_invalid()) {
-      dpin_0 = create_const(*current_graph, result);
-    }
+  // Create the shared const up front (NOT lazily mid-walk: a create_const there
+  // could realloc the node/pin tables and invalidate the live iterator), then
+  // reconnect every consumer and delete the node in one shot — del_node drops
+  // all of node's edges with no per-edge del_edge lookup.
+  auto dpin_0 = create_const(*current_graph, result);
+  for (const auto& out : node.out_edges()) {
     dpin_0.connect_sink(out.sink);
-    out.del_edge();
   }
 
   node.del_node();

@@ -21,8 +21,8 @@ using livehd::lec::Verdict;
 namespace {
 
 // Build `out = a <op> b` over two `bits`-bit unsigned inputs. For reduce-style
-// ops (And/Or/Xor) and Sum-add, both operands land on sink "a"; `swap` flips
-// the edge order (to exercise commutativity in the equal case).
+// ops (And/Or/Xor) and Sum-add, both operands land on the multi-driver sink
+// "as"; `swap` flips the edge order (to exercise commutativity in the equal case).
 std::shared_ptr<hhds::Graph> build_binop(hhds::GraphLibrary& lib, const std::string& mod, Ntype_op op, int bits,
                                          bool swap = false) {
   auto gio = lib.create_io(mod);
@@ -39,7 +39,7 @@ std::shared_ptr<hhds::Graph> build_binop(hhds::GraphLibrary& lib, const std::str
   auto g    = gio->create_graph();
   auto node = graph_util::create_typed_node(*g, op);
 
-  auto sink_a = graph_util::setup_sink_by_name(node, "a");
+  auto sink_a = graph_util::setup_sink_by_name(node, "as");
   auto a      = g->get_input_pin("a");
   auto b      = g->get_input_pin("b");
   if (swap) {
@@ -70,7 +70,7 @@ std::shared_ptr<hhds::Graph> build_add_const(hhds::GraphLibrary& lib, const std:
   auto g    = gio->create_graph();
   auto node = graph_util::create_typed_node(*g, Ntype_op::Sum);
 
-  auto sink_a = graph_util::setup_sink_by_name(node, "a");
+  auto sink_a = graph_util::setup_sink_by_name(node, "as");
   g->get_input_pin("a").connect_sink(sink_a);
   auto cval = Dlop::create_integer(k);
   auto cpin = graph_util::create_const(*g, *cval);

@@ -17,15 +17,15 @@
 // out of scope. LUT has no direct Pyrope syntax (the compiler folds
 // small match/Mux into LUTs when profitable), so it is covered via Mux.
 
-// Ntype_op::Sum -- pins A (add) and B (subtract); only A used here.
+// Ntype_op::Sum -- pins as (add) and bs (subtract); only as used here.
 comb cell_sum(a:u32, b:u32) -> (y) { y = a + b }
 
 cassert(cell_sum(a=1, b=2) == 3)
-cassert(  __sum(a=(1, 2)) == 3)
+cassert(  __sum(as=(1, 2)) == 3)
 cassert(cell_sum(a=100, b=200) == 300)
-cassert(  __sum(a=(100, 200)) == 300)
+cassert(  __sum(as=(100, 200)) == 300)
 cassert(cell_sum(a=0, b=0) == 0)
-cassert(  __sum(a=(0, 0)) == 0)
+cassert(  __sum(as=(0, 0)) == 0)
 
 comb cell_sum2(...a:u32) -> (y) {
   y = 0
@@ -33,17 +33,17 @@ comb cell_sum2(...a:u32) -> (y) {
     y += x
   }
 }
-cassert(cell_sum2(10, 11, 20) == __sum(a=(10, 11, 20)))
+cassert(cell_sum2(10, 11, 20) == __sum(as=(10, 11, 20)))
 
-// Ntype_op::Mult -- repeated A pin
+// Ntype_op::Mult -- repeated as pin
 comb cell_mult(a:u32, b:u32) -> (y) { y = a * b }
 
 cassert(cell_mult(a=3, b=4) == 12)
-cassert(  __mult(a=(3, 4)) == 12)
+cassert(  __mult(as=(3, 4)) == 12)
 cassert(cell_mult(a=0, b=99) == 0)
-cassert(  __mult(a=(0, 99)) == 0)
+cassert(  __mult(as=(0, 99)) == 0)
 cassert(cell_mult(a=7, b=7) == 49)
-cassert(  __mult(a=(7, 7)) == 49)
+cassert(  __mult(as=(7, 7)) == 49)
 
 // Ntype_op::Div -- pins a, b
 comb cell_div(a:u32, b:u32) -> (y) { y = a / b }
@@ -55,45 +55,45 @@ cassert(  __div(a=15, b=4) == 3)
 cassert(cell_div(a=0, b=5) == 0)
 cassert(  __div(a=0, b=5) == 0)
 
-// Ntype_op::And (bitwise) -- repeated A pin
+// Ntype_op::And (bitwise) -- repeated as pin
 comb cell_and(a:u8, b:u8) -> (y) { y = a & b }
 
 cassert(cell_and(a=0ub1100, b=0ub1010) == 0ub1000)
-cassert(  __and(a=(0ub1100, 0ub1010)) == 0ub1000)
+cassert(  __and(as=(0ub1100, 0ub1010)) == 0ub1000)
 cassert(cell_and(a=0xff, b=0x0f) == 0x0f)
-cassert(  __and(a=(0xff, 0x0f)) == 0x0f)
+cassert(  __and(as=(0xff, 0x0f)) == 0x0f)
 cassert(cell_and(a=0, b=0xff) == 0)
-cassert(  __and(a=(0, 0xff)) == 0)
+cassert(  __and(as=(0, 0xff)) == 0)
 
-// Ntype_op::Or (bitwise) -- repeated A pin
+// Ntype_op::Or (bitwise) -- repeated as pin
 comb cell_or(a:u8, b:u8) -> (y) { y = a | b }
 
 cassert(cell_or(a=0ub1100, b=0ub1010) == 0ub1110)
-cassert(   __or(a=(0ub1100, 0ub1010)) == 0ub1110)
+cassert(   __or(as=(0ub1100, 0ub1010)) == 0ub1110)
 cassert(cell_or(a=0, b=0xff) == 0xff)
-cassert(   __or(a=(0, 0xff)) == 0xff)
+cassert(   __or(as=(0, 0xff)) == 0xff)
 cassert(cell_or(a=0x55, b=0xaa) == 0xff)
-cassert(   __or(a=(0x55, 0xaa)) == 0xff)
+cassert(   __or(as=(0x55, 0xaa)) == 0xff)
 
-// Ntype_op::Xor -- repeated A pin
+// Ntype_op::Xor -- repeated as pin
 comb cell_xor(a:u8, b:u8) -> (y) { y = a ^ b }
 
 cassert(cell_xor(a=0ub1100, b=0ub1010) == 0ub0110)
-cassert(  __xor(a=(0ub1100, 0ub1010)) == 0ub0110)
+cassert(  __xor(as=(0ub1100, 0ub1010)) == 0ub0110)
 cassert(cell_xor(a=0xff, b=0xff) == 0)
-cassert(  __xor(a=(0xff, 0xff)) == 0)
+cassert(  __xor(as=(0xff, 0xff)) == 0)
 cassert(cell_xor(a=0x55, b=0xaa) == 0xff)
-cassert(  __xor(a=(0x55, 0xaa)) == 0xff)
+cassert(  __xor(as=(0x55, 0xaa)) == 0xff)
 
-// Ntype_op::Ror (reduce OR) -- single input pin a
+// Ntype_op::Ror (reduce OR) -- single input pin as
 comb cell_ror(a:u8) -> (y) { y = a#|[..] }
 
 cassert(cell_ror(0) == false)
-cassert(  __ror(a=0) == false)
+cassert(  __ror(as=0) == false)
 cassert(cell_ror(0ub0001) == true)
-cassert(  __ror(a=0ub0001) == true)
+cassert(  __ror(as=0ub0001) == true)
 cassert(cell_ror(0xff) == true)
-cassert(  __ror(a=0xff) == true)
+cassert(  __ror(as=0xff) == true)
 
 // Ntype_op::Not (bitwise) -- single input pin a. Every dlop/cell const is a
 // signed integer (no unsigned const), so `~a == -a-1` with no implicit width
@@ -142,35 +142,35 @@ cassert(  __sext(a=0ub0111, b=3) == 7)
 cassert(cell_sext(0ub1111) == -1)
 cassert(  __sext(a=0ub1111, b=3) == -1)
 
-// Ntype_op::LT -- pins a (left) and b (right)
+// Ntype_op::LT -- pins as (left) and bs (right)
 comb cell_lt(a:sint, b:sint) -> (y:bool) { y = a < b }
 
 cassert(cell_lt(a=1, b=2) == true)
-cassert(   __lt(a=1, b=2) == true)
+cassert(   __lt(as=1, bs=2) == true)
 cassert(cell_lt(a=2, b=1) == false)
-cassert(   __lt(a=2, b=1) == false)
+cassert(   __lt(as=2, bs=1) == false)
 cassert(cell_lt(a=-3, b=0) == true)
-cassert(   __lt(a=-3, b=0) == true)
+cassert(   __lt(as=-3, bs=0) == true)
 
-// Ntype_op::GT -- pins a (left) and b (right)
+// Ntype_op::GT -- pins as (left) and bs (right)
 comb cell_gt(a:sint, b:sint) -> (y:bool) { y = a > b }
 
 cassert(cell_gt(a=2, b=1) == true)
-cassert(   __gt(a=2, b=1) == true)
+cassert(   __gt(as=2, bs=1) == true)
 cassert(cell_gt(a=1, b=2) == false)
-cassert(   __gt(a=1, b=2) == false)
+cassert(   __gt(as=1, bs=2) == false)
 cassert(cell_gt(a=0, b=-3) == true)
-cassert(   __gt(a=0, b=-3) == true)
+cassert(   __gt(as=0, bs=-3) == true)
 
-// Ntype_op::EQ -- repeated A pin
+// Ntype_op::EQ -- repeated as pin
 comb cell_eq(a:u32, b:u32) -> (y:bool) { y = a == b }
 
 cassert(cell_eq(a=3, b=3) == true)
-cassert(   __eq(a=(3, 3)) == true)
+cassert(   __eq(as=(3, 3)) == true)
 cassert(cell_eq(a=3, b=4) == false)
-cassert(   __eq(a=(3, 4)) == false)
+cassert(   __eq(as=(3, 4)) == false)
 cassert(cell_eq(a=0, b=0) == true)
-cassert(   __eq(a=(0, 0)) == true)
+cassert(   __eq(as=(0, 0)) == true)
 
 // Ntype_op::SHL -- pins a, b
 comb cell_shl(a:u32, n:u8) -> (y) { y = a << n }

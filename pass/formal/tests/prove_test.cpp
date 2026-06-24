@@ -34,7 +34,7 @@ std::shared_ptr<hhds::Graph> build_binop(hhds::GraphLibrary& lib, const std::str
 
   auto g      = gio->create_graph();
   auto node   = graph_util::create_typed_node(*g, op);
-  auto sink_a = graph_util::setup_sink_by_name(node, "a");
+  auto sink_a = graph_util::setup_sink_by_name(node, "as");
   g->get_input_pin("a").connect_sink(sink_a);
   g->get_input_pin("b").connect_sink(sink_a);
   auto dpin = node.create_driver_pin(0);
@@ -56,7 +56,7 @@ std::shared_ptr<hhds::Graph> build_eq_same(hhds::GraphLibrary& lib, const std::s
 
   auto g      = gio->create_graph();
   auto node   = graph_util::create_typed_node(*g, Ntype_op::EQ);
-  auto sink_a = graph_util::setup_sink_by_name(node, "a");
+  auto sink_a = graph_util::setup_sink_by_name(node, "as");
   g->get_input_pin("a").connect_sink(sink_a);
   g->get_input_pin("a").connect_sink(sink_a);  // a == a
   auto dpin = node.create_driver_pin(0);

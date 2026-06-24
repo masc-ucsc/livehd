@@ -192,7 +192,36 @@ public:
   static inline constexpr bool is_unlimited_driver(Ntype_op op) {
     return op == Ntype_op::Memory || op == Ntype_op::Sub || op == Ntype_op::IO;
   }
-  static inline constexpr bool is_multi_driver(Ntype_op op) { return is_unlimited_driver(op); }
+  // True when the CELL exposes more than one driver (output) pin, so callers
+  // must address an output by <PID> instead of the single "Y" driver name.
+  // (Memory/Sub/IO.) This is about the cell's output arity -- NOT about a sink
+  // pin being fed by several drivers; for that, see is_sink_single_driver().
+  static inline constexpr bool has_multiple_driver_pins(Ntype_op op) { return is_unlimited_driver(op); }
+
+  // True when a given SINK pin accepts at most one driver pin. The handful of
+  // sinks that legally take several drivers fold them with the cell's identity
+  // op (Sum sums, And/Or/Xor reduce):
+  //   Sum/LT/GT               a (pid 0) and b (pid 1)
+  //   Mult/And/Or/Xor/Ror/EQ  a (pid 0)
+  // These multi-driver sinks carry an 's'-suffixed name ("as"/"bs") so the
+  // distinction is visible at every use. Every other sink is single-driver --
+  // including SHL/SRA b (the shift amount takes exactly one driver; the old
+  // one-hot `a<<(b0,b1)` multi-driver SHL form was removed, comptime-folded
+  // only). Keep this op/pid list in sync with get_sink_name_slow's 's' suffixes.
+  static inline constexpr bool is_sink_single_driver(Ntype_op op, hhds::Port_id pid) {
+    switch (op) {
+      case Ntype_op::Sum:
+      case Ntype_op::LT:
+      case Ntype_op::GT: return pid != 0 && pid != 1;  // as, bs
+      case Ntype_op::Mult:
+      case Ntype_op::And:
+      case Ntype_op::Or:
+      case Ntype_op::Xor:
+      case Ntype_op::Ror:
+      case Ntype_op::EQ: return pid != 0;  // as
+      default: return true;
+    }
+  }
 
   // Returns the hhds::Port_id for a LiveHD sink name on the given op, or
   // livehd::Port_invalid when the name is not a valid sink for this op.
@@ -246,7 +275,7 @@ public:
 
   static inline constexpr std::string_view get_driver_name(Ntype_op op) {
     (void)op;
-    assert(!is_multi_driver(op));  // use <PID> for multidriveer pins
+    assert(!has_multiple_driver_pins(op));  // use <PID> for multi-driver-pin cells
     return {"Y"};
   }
 

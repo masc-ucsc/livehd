@@ -107,33 +107,6 @@ inline void  del_delay(const hhds::Pin_class& pin) {
   pin.attr(livehd::attrs::pin_delay).del();
 }
 
-// Drivers feeding a named sink port — like inp_drivers_of but returning the
-// (driver, edge) pairs in inp_edges order. opentimer iterates all "b" drivers
-// of an SHL node.
-[[nodiscard]] livehd::graph_util::Edge_vec inp_edges_of_sink(const hhds::Node_class& node, std::string_view name) {
-  livehd::graph_util::Edge_vec out;
-  auto                         op = type_op_of(node);
-  hhds::Port_id                target;
-  if (op == Ntype_op::Sub) {
-    auto pin = node.get_sink_pin(name);
-    if (pin.is_invalid()) {
-      return out;
-    }
-    target = pin.get_port_id();
-  } else {
-    target = Ntype::get_sink_pid(op, name);
-    if (target == livehd::Port_invalid) {
-      return out;
-    }
-  }
-  for (const auto& e : node.inp_edges()) {
-    if (e.sink.get_port_id() == target) {
-      out.push_back(e);
-    }
-  }
-  return out;
-}
-
 }  // namespace
 
 void Pass_opentimer::time_work(Eprp_var& var) {
@@ -371,16 +344,16 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
               .fatal();
           return;
         }
-        for (auto e : inp_edges_of_sink(node, "b")) {
-          if (!is_const_pin(e.driver)) {
-            livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
-                .msg("opentimer can not handle non-constant SHL on node {} (cprop/tmap first)", debug_name(node))
-                .fatal();
-            return;
-          }
-          auto b_const = hydrate_const(e.driver);
-          pin_tracker.add_shl(wname, pin_net_name(a_dpin), bits_of(a_dpin), b_const);
+        // SHL b is single-driver (the one-hot multi-shift form was removed).
+        auto b_dpin = get_driver_of_sink_name(node, "b");
+        if (!is_const_pin(b_dpin)) {
+          livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+              .msg("opentimer can not handle non-constant SHL on node {} (cprop/tmap first)", debug_name(node))
+              .fatal();
+          return;
         }
+        auto b_const = hydrate_const(b_dpin);
+        pin_tracker.add_shl(wname, pin_net_name(a_dpin), bits_of(a_dpin), b_const);
       } else if (op == Ntype_op::Or) {
         for (auto e : node.inp_edges()) {
           pin_tracker.add_or(wname, pin_net_name(e.driver));

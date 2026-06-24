@@ -630,7 +630,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       continue;
     }
-    if (Ntype::is_multi_driver(op)) {
+    if (Ntype::has_multiple_driver_pins(op)) {
       continue;
     }
     if (!node.has_out_edges() || is_type_register(node)) {

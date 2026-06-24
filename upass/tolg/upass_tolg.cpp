@@ -795,7 +795,7 @@ private:
         }
         din = gm_out;
       }
-      setup_sink_by_name(info.buf, "a").connect_driver(din);
+      setup_sink_by_name(info.buf, "as").connect_driver(din);
       if (info.decl_mw <= 0) {
         // Untyped wire: take the driver's width/sign so the passthrough is exact.
         const int32_t dbits = livehd::graph_util::bits_of(din);
@@ -1628,8 +1628,8 @@ private:
       }
       if (d != 1) {
         auto mul = make_node(Ntype_op::Mult);
-        setup_sink_by_name(mul, "a").connect_driver(acc_p);
-        setup_sink_by_name(mul, "a").connect_driver(create_const(*g_, *Dlop::create_integer(d)));
+        setup_sink_by_name(mul, "as").connect_driver(acc_p);
+        setup_sink_by_name(mul, "as").connect_driver(create_const(*g_, *Dlop::create_integer(d)));
         auto md = mul.create_driver_pin(0);
         acc_mw += mw_of_val(d);
         set_bits(md, acc_mw + 1);
@@ -1650,8 +1650,8 @@ private:
         imw = v.mw;
       }
       auto add = make_node(Ntype_op::Sum);
-      setup_sink_by_name(add, "a").connect_driver(acc_p);
-      setup_sink_by_name(add, "a").connect_driver(ip);
+      setup_sink_by_name(add, "as").connect_driver(acc_p);
+      setup_sink_by_name(add, "as").connect_driver(ip);
       auto ad = add.create_driver_pin(0);
       acc_mw  = std::max(acc_mw, imw) + 1;
       set_bits(ad, acc_mw + 1);
@@ -3291,15 +3291,15 @@ private:
     auto m     = leaf(mask_op);
 
     auto andn = make_node(Ntype_op::And);  // commutative: both operands feed sink "a"
-    setup_sink_by_name(andn, "a").connect_driver(a_val.pin);
-    setup_sink_by_name(andn, "a").connect_driver(m.pin);
+    setup_sink_by_name(andn, "as").connect_driver(a_val.pin);
+    setup_sink_by_name(andn, "as").connect_driver(m.pin);
     const int32_t and_mw = std::max(a_val.mw, m.mw);
     auto          and_dp = andn.create_driver_pin(0);
     set_bits(and_dp, and_mw + 1);
     set_unsign(and_dp);
 
     auto ror = make_node(Ntype_op::Ror);  // |(a & (1<<i)) -> the selected bit
-    setup_sink_by_name(ror, "a").connect_driver(and_dp);
+    setup_sink_by_name(ror, "as").connect_driver(and_dp);
     bind_result(lnast_->get_name(dst), ror.create_driver_pin(0), 1);
   }
 
@@ -3364,9 +3364,9 @@ private:
 
     // width = m - n + 1   (Sum sums sink "a", subtracts sink "b").
     auto width = make_node(Ntype_op::Sum);
-    setup_sink_by_name(width, "a").connect_driver(m.pin);
-    setup_sink_by_name(width, "a").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
-    setup_sink_by_name(width, "b").connect_driver(n.pin);
+    setup_sink_by_name(width, "as").connect_driver(m.pin);
+    setup_sink_by_name(width, "as").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(width, "bs").connect_driver(n.pin);
     const int32_t w_mw   = std::max(n.mw, m.mw) + 1;
     auto          w_dp   = width.create_driver_pin(0);
     set_bits(w_dp, w_mw + 1);
@@ -3383,16 +3383,16 @@ private:
 
     // mask = pow - 1   (the low (m-n+1) bits set).
     auto maskn = make_node(Ntype_op::Sum);
-    setup_sink_by_name(maskn, "a").connect_driver(pow_dp);
-    setup_sink_by_name(maskn, "b").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(maskn, "as").connect_driver(pow_dp);
+    setup_sink_by_name(maskn, "bs").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
     auto mask_dp = maskn.create_driver_pin(0);
     set_bits(mask_dp, pow_mw + 1);
     set_unsign(mask_dp);
 
     // result = shifted & mask
     auto andn = make_node(Ntype_op::And);  // commutative: both operands feed sink "a"
-    setup_sink_by_name(andn, "a").connect_driver(sra_dp);
-    setup_sink_by_name(andn, "a").connect_driver(mask_dp);
+    setup_sink_by_name(andn, "as").connect_driver(sra_dp);
+    setup_sink_by_name(andn, "as").connect_driver(mask_dp);
     bind_result(lnast_->get_name(dst), andn.create_driver_pin(0), a_val.mw + 1);
 
     lower_range_assert(n, m, loc_nid);
@@ -3411,8 +3411,8 @@ private:
     }
     // cond = (hi >= lo) = Not(LT(hi, lo))   [LT computes hi < lo].
     auto lt = make_node(Ntype_op::LT);  // positional: "a" < "b"
-    setup_sink_by_name(lt, "a").connect_driver(hi.pin);
-    setup_sink_by_name(lt, "b").connect_driver(lo.pin);
+    setup_sink_by_name(lt, "as").connect_driver(hi.pin);
+    setup_sink_by_name(lt, "bs").connect_driver(lo.pin);
     auto lt_dp = lt.create_driver_pin(0);
     set_bits(lt_dp, 2);
     set_unsign(lt_dp);
@@ -3609,6 +3609,7 @@ private:
     int32_t second_mw = 0;       // shift-amount magnitude width (shlw)
     int64_t shl_amt   = -1;      // shift-amount value when constant (shlw); <0 = dynamic
     bool    first     = true;
+    int     opnd_idx  = 0;
     for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       auto v  = leaf(c);
       max_mw  = std::max(max_mw, v.mw);
@@ -3624,8 +3625,20 @@ private:
           }
         }
       }
-      setup_sink_by_name(node, (commutative || first) ? "a" : "b").connect_driver(v.pin);
+      // SHL b is single-driver: the runtime one-hot `a << (b0, b1, …)` form was
+      // removed (comptime cases fold in upass.constprop before reaching tolg).
+      // A 3rd+ operand would build a multi-driver b, so reject it cleanly.
+      if (op == Ntype_op::SHL && opnd_idx >= 2) {
+        livehd::diag::err("upass.tolg", "shl-onehot-removed", "unsupported")
+            .msg("runtime one-hot shift 'a << (b0, b1, ...)' is no longer supported; shift by a single amount")
+            .emit();
+        break;
+      }
+      // op varies (Sum/Mult/And/.../Div/SHL/SRA): address by pid so the right
+      // sink name resolves per op (pid 0 = a/as, pid 1 = b) without hardcoding.
+      node.create_sink_pin((commutative || first) ? 0 : 1).connect_driver(v.pin);
       first = false;
+      ++opnd_idx;
     }
     int32_t mw = 1;
     switch (wmode) {
@@ -3717,8 +3730,8 @@ private:
     }
     auto v   = leaf(a);
     auto neg = make_node(Ntype_op::EQ);  // commutative: both operands feed sink "a"
-    setup_sink_by_name(neg, "a").connect_driver(v.pin);
-    setup_sink_by_name(neg, "a").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+    setup_sink_by_name(neg, "as").connect_driver(v.pin);
+    setup_sink_by_name(neg, "as").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
     bind_result(lnast_->get_name(dst), neg.create_driver_pin(0), 1);
   }
 
@@ -3731,7 +3744,9 @@ private:
     auto inner = make_node(inner_op);
     bool first = true;
     for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
-      setup_sink_by_name(inner, (commutative || first) ? "a" : "b").connect_driver(leaf(c).pin);
+      // inner_op is EQ/GT/LT; address by pid (0 = a/as, 1 = bs) so the right
+      // multi-driver sink name resolves per op without hardcoding.
+      inner.create_sink_pin((commutative || first) ? 0 : 1).connect_driver(leaf(c).pin);
       first = false;
     }
     // The inner comparator (EQ/GT/LT) is a 1-bit boolean. Stamp it the same way
@@ -3749,8 +3764,8 @@ private:
     // e.g. `if a != b`) then reads it as always-true. EQ against 0 yields a
     // clean 1-bit boolean, stamped like any comparator (matches lower_none_eq).
     auto neg = make_node(Ntype_op::EQ);  // commutative: both operands feed sink "a"
-    setup_sink_by_name(neg, "a").connect_driver(inner_dp);
-    setup_sink_by_name(neg, "a").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+    setup_sink_by_name(neg, "as").connect_driver(inner_dp);
+    setup_sink_by_name(neg, "as").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
     bind_result(lnast_->get_name(dst), neg.create_driver_pin(0), 1);
   }
 
@@ -3796,7 +3811,7 @@ private:
     }
     auto av   = leaf(a);
     auto node = make_node(Ntype_op::Ror);
-    setup_sink_by_name(node, "a").connect_driver(av.pin);
+    setup_sink_by_name(node, "as").connect_driver(av.pin);
     bind_result(lnast_->get_name(dst), node.create_driver_pin(0), 1);
   }
 
@@ -3823,8 +3838,8 @@ private:
     set_bits(srr, k);
     set_sign(srr);
     auto eq = make_node(Ntype_op::EQ);  // commutative: both operands feed sink "a"
-    setup_sink_by_name(eq, "a").connect_driver(srr);
-    setup_sink_by_name(eq, "a").connect_driver(create_const(*g_, *Dlop::create_integer(-1)));
+    setup_sink_by_name(eq, "as").connect_driver(srr);
+    setup_sink_by_name(eq, "as").connect_driver(create_const(*g_, *Dlop::create_integer(-1)));
     bind_result(lnast_->get_name(dst), eq.create_driver_pin(0), 1);
   }
 
@@ -3846,8 +3861,8 @@ private:
       next.reserve((bits.size() + 1) / 2);
       for (size_t i = 0; i + 1 < bits.size(); i += 2) {
         auto x = make_node(Ntype_op::Xor);  // commutative: both into "a"
-        setup_sink_by_name(x, "a").connect_driver(bits[i]);
-        setup_sink_by_name(x, "a").connect_driver(bits[i + 1]);
+        setup_sink_by_name(x, "as").connect_driver(bits[i]);
+        setup_sink_by_name(x, "as").connect_driver(bits[i + 1]);
         auto d = x.create_driver_pin(0);
         set_bits(d, 2);
         set_unsign(d);
@@ -3885,8 +3900,8 @@ private:
       next.reserve((terms.size() + 1) / 2);
       for (size_t i = 0; i + 1 < terms.size(); i += 2) {
         auto s = make_node(Ntype_op::Sum);  // both operands ADD on sink "a"
-        setup_sink_by_name(s, "a").connect_driver(terms[i].pin);
-        setup_sink_by_name(s, "a").connect_driver(terms[i + 1].pin);
+        setup_sink_by_name(s, "as").connect_driver(terms[i].pin);
+        setup_sink_by_name(s, "as").connect_driver(terms[i + 1].pin);
         const int32_t mw = std::max(terms[i].mw, terms[i + 1].mw) + 1;
         auto          d  = s.create_driver_pin(0);
         set_bits(d, mw + 1);
@@ -3989,8 +4004,8 @@ private:
         ++k;
       }
       auto andn = make_node(Ntype_op::And);  // commutative: both operands feed sink "a"
-      setup_sink_by_name(andn, "a").connect_driver(av.pin);
-      setup_sink_by_name(andn, "a").connect_driver(create_const(*g_, *Dlop::create_integer(babs - 1)));
+      setup_sink_by_name(andn, "as").connect_driver(av.pin);
+      setup_sink_by_name(andn, "as").connect_driver(create_const(*g_, *Dlop::create_integer(babs - 1)));
       bind_result(dst_name, andn.create_driver_pin(0), k > 0 ? k : 1);
       return;
     }
@@ -4056,20 +4071,20 @@ private:
     }
     // `cur` ∈ [0, 3]: result = (cur == 3) ? 0 : cur  ==  cur - 3*(cur == 3).
     auto eq = make_node(Ntype_op::EQ);  // commutative: both operands feed sink "a"
-    setup_sink_by_name(eq, "a").connect_driver(cur);
-    setup_sink_by_name(eq, "a").connect_driver(create_const(*g_, *Dlop::create_integer(3)));
+    setup_sink_by_name(eq, "as").connect_driver(cur);
+    setup_sink_by_name(eq, "as").connect_driver(create_const(*g_, *Dlop::create_integer(3)));
     auto eqp = eq.create_driver_pin(0);
     set_bits(eqp, 2);
     set_unsign(eqp);
     auto mul = make_node(Ntype_op::Mult);  // 3 * (cur == 3) ∈ {0, 3}
-    setup_sink_by_name(mul, "a").connect_driver(eqp);
-    setup_sink_by_name(mul, "a").connect_driver(create_const(*g_, *Dlop::create_integer(3)));
+    setup_sink_by_name(mul, "as").connect_driver(eqp);
+    setup_sink_by_name(mul, "as").connect_driver(create_const(*g_, *Dlop::create_integer(3)));
     auto mulp = mul.create_driver_pin(0);
     set_bits(mulp, 3);
     set_unsign(mulp);
     auto sub = make_node(Ntype_op::Sum);  // cur - 3*(cur == 3)
-    setup_sink_by_name(sub, "a").connect_driver(cur);
-    setup_sink_by_name(sub, "b").connect_driver(mulp);
+    setup_sink_by_name(sub, "as").connect_driver(cur);
+    setup_sink_by_name(sub, "bs").connect_driver(mulp);
     auto subp = sub.create_driver_pin(0);
     set_bits(subp, 3);
     set_unsign(subp);
@@ -4085,8 +4100,8 @@ private:
       next.reserve((terms.size() + 1) / 2);
       for (size_t i = 0; i + 1 < terms.size(); i += 2) {
         auto s = make_node(Ntype_op::Sum);  // both operands ADD on sink "a"
-        setup_sink_by_name(s, "a").connect_driver(terms[i].pin);
-        setup_sink_by_name(s, "a").connect_driver(terms[i + 1].pin);
+        setup_sink_by_name(s, "as").connect_driver(terms[i].pin);
+        setup_sink_by_name(s, "as").connect_driver(terms[i + 1].pin);
         const int32_t mw = std::max(terms[i].mw, terms[i + 1].mw) + 1;
         auto          d  = s.create_driver_pin(0);
         set_bits(d, mw + 1);
