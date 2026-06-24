@@ -89,37 +89,44 @@ Cprop::Cprop(bool _hier) : hier(_hier) {}
 void Cprop::collapse_forward_same_op(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
   auto op = type_op_of(node);
 
-  bool all_done = true;
-  for (auto& out : node.out_edges()) {
-    if (type_op_of(out.sink.get_master_node()) != op) {
-      all_done = false;
-      continue;
-    }
+  // out_edges() is a lazy view; rewriting an edge (connect_driver/del_edge)
+  // invalidates an in-flight iterator. Rather than snapshot the (possibly huge)
+  // fan-out into a vector, re-scan from the front after each rewrite: find the
+  // next same-op consumer, splice this node's inputs into it, drop the edge, and
+  // restart. Edges to a different op (or mismatched port) are left in place;
+  // once none remain the node is fully collapsed and can be deleted.
+  bool progressed = true;
+  while (progressed) {
+    progressed = false;
+    for (const auto& out : node.out_edges()) {
+      if (type_op_of(out.sink.get_master_node()) != op) {
+        continue;
+      }
+      if (out.driver.get_port_id() != out.sink.get_port_id()) {
+        continue;
+      }
 
-    if (out.driver.get_port_id() != out.sink.get_port_id()) {
-      all_done = false;
-      continue;
-    }
-
-    for (auto& inp : inp_edges_ordered) {
-      if (op == Ntype_op::Xor) {
-        if (is_driver_connected_to_sink(inp.driver, out.sink)) {
-          out.sink.del_sink(inp.driver);
+      for (auto& inp : inp_edges_ordered) {
+        if (op == Ntype_op::Xor) {
+          if (is_driver_connected_to_sink(inp.driver, out.sink)) {
+            out.sink.del_sink(inp.driver);
+          } else {
+            out.sink.connect_driver(inp.driver);
+          }
+        } else if (op == Ntype_op::Or || op == Ntype_op::And) {
+          out.sink.connect_driver(inp.driver);
         } else {
+          I(op != Ntype_op::Sum);
           out.sink.connect_driver(inp.driver);
         }
-      } else if (op == Ntype_op::Or || op == Ntype_op::And) {
-        out.sink.connect_driver(inp.driver);
-      } else {
-        I(op != Ntype_op::Sum);
-        out.sink.connect_driver(inp.driver);
       }
-    }
 
-    out.del_edge();
+      out.del_edge();
+      progressed = true;
+      break;  // iterator invalidated by the rewrite; restart the scan
+    }
   }
-  if (all_done) {
-    I(!node.has_out_edges());
+  if (!node.has_out_edges()) {  // every consumer collapsed -> node is dead
     node.del_node();
   }
 }
@@ -130,31 +137,38 @@ void Cprop::collapse_forward_sum(hhds::Node_class& node, livehd::graph_util::Edg
   }
 
   I(type_op_of(node) == Ntype_op::Sum);
-  bool all_edges_deleted = true;
-  for (auto& out : node.out_edges()) {
-    auto next_sum_node = out.sink.get_master_node();
-    if (type_op_of(next_sum_node) != Ntype_op::Sum) {
-      all_edges_deleted = false;
-      continue;
-    }
-
-    for (auto& inp : inp_edges_ordered) {
-      // Sum(A,Sum(B,C))  = Sum(A+C,B)
-      // Sum(Sum(A,B),C)) = Sum(A+C,B)
-      if (inp.sink.get_port_id() == 0 && out.sink.get_port_id() == 0) {
-        out.sink.connect_driver(inp.driver);
-      } else if (inp.sink.get_port_id() == 0 && out.sink.get_port_id() == 1) {
-        out.sink.connect_driver(inp.driver);
-      } else if (inp.sink.get_port_id() == 1 && out.sink.get_port_id() == 0) {
-        setup_sink_by_name(next_sum_node, "b").connect_driver(inp.driver);
-      } else {
-        setup_sink_by_name(next_sum_node, "a").connect_driver(inp.driver);
+  // Restart-scan the lazy out_edges view after each rewrite (no fan-out copy):
+  // splice into the next Sum consumer, drop its edge, restart. Non-Sum consumers
+  // stay; once all Sum edges are gone the node is fully merged forward.
+  bool progressed = true;
+  while (progressed) {
+    progressed = false;
+    for (const auto& out : node.out_edges()) {
+      auto next_sum_node = out.sink.get_master_node();
+      if (type_op_of(next_sum_node) != Ntype_op::Sum) {
+        continue;
       }
+
+      for (auto& inp : inp_edges_ordered) {
+        // Sum(A,Sum(B,C))  = Sum(A+C,B)
+        // Sum(Sum(A,B),C)) = Sum(A+C,B)
+        if (inp.sink.get_port_id() == 0 && out.sink.get_port_id() == 0) {
+          out.sink.connect_driver(inp.driver);
+        } else if (inp.sink.get_port_id() == 0 && out.sink.get_port_id() == 1) {
+          out.sink.connect_driver(inp.driver);
+        } else if (inp.sink.get_port_id() == 1 && out.sink.get_port_id() == 0) {
+          setup_sink_by_name(next_sum_node, "b").connect_driver(inp.driver);
+        } else {
+          setup_sink_by_name(next_sum_node, "a").connect_driver(inp.driver);
+        }
+      }
+      out.del_edge();
+      progressed = true;
+      break;  // iterator invalidated by the rewrite; restart the scan
     }
-    out.del_edge();
   }
 
-  if (all_edges_deleted) {
+  if (!node.has_out_edges()) {  // every Sum consumer merged forward -> node dead
     bwd_del_node(node);
   }
 }
@@ -162,7 +176,7 @@ void Cprop::collapse_forward_sum(hhds::Node_class& node, livehd::graph_util::Edg
 void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
   auto op = type_op_of(node);
 
-  for (auto& out : node.out_edges()) {
+  for (const auto& out : node.out_edges()) {  // read-only width check
     auto out_bits = bits_of(out.driver);
     for (auto& inp : inp_edges_ordered) {
       auto inp_bits = bits_of(inp.driver);
@@ -172,7 +186,12 @@ void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, livehd::graph_u
     }
   }
 
-  for (auto& out : node.out_edges()) {
+  // Drain the lazy out_edges view one edge at a time (front + del_edge) instead
+  // of snapshotting it: splice this node's inputs onto each consumer sink, drop
+  // the edge. Re-fetching front() holds no iterator across the mutation, so a
+  // huge fan-out is walked in place with no copy.
+  while (node.has_out_edges()) {
+    auto out = node.out_edges().front();
     for (auto& inp : inp_edges_ordered) {
       if (op == Ntype_op::Xor) {
         if (is_driver_connected_to_sink(inp.driver, out.sink)) {
@@ -184,6 +203,7 @@ void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, livehd::graph_u
         out.sink.connect_driver(inp.driver);
       }
     }
+    out.del_edge();
   }
 
   bwd_del_node(node);
@@ -191,15 +211,19 @@ void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, livehd::graph_u
 
 void Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new_dpin) {
   auto new_bits = bits_of(new_dpin);
-  for (auto& out : node.out_edges()) {
+  for (const auto& out : node.out_edges()) {  // read-only width check
     auto out_bits = bits_of(out.driver);
     if (out_bits > 0 && new_bits > 0 && out_bits != new_bits) {
       return;
     }
   }
 
-  for (auto& out : node.out_edges()) {
+  // Drain the lazy view (front + del_edge): redirect every consumer to new_dpin
+  // with no fan-out copy.
+  while (node.has_out_edges()) {
+    auto out = node.out_edges().front();
     new_dpin.connect_sink(out.sink);
+    out.del_edge();
   }
 
   bwd_del_node(node);
@@ -627,7 +651,11 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, livehd::graph_util:
 void Cprop::replace_node(hhds::Node_class& node, const Dlop& result) {
   auto dpin = create_const(*current_graph, result);
 
-  for (auto& out : node.out_edges()) {
+  // Drain the lazy out_edges view (front + del_edge): rewire each consumer to the
+  // const driver with no fan-out copy. create_const() below may grow the node
+  // table, but re-fetching front() holds no iterator across that mutation.
+  while (node.has_out_edges()) {
+    auto out      = node.out_edges().front();
     auto out_bits = bits_of(out.driver);
     auto new_bits = bits_of(dpin);
     if (new_bits == out_bits || out_bits == 0) {
@@ -637,6 +665,7 @@ void Cprop::replace_node(hhds::Node_class& node, const Dlop& result) {
       auto dpin2   = create_const(*current_graph, *result2);
       dpin2.connect_sink(out.sink);
     }
+    out.del_edge();
   }
 
   node.del_node();
@@ -645,11 +674,15 @@ void Cprop::replace_node(hhds::Node_class& node, const Dlop& result) {
 void Cprop::replace_logic_node(hhds::Node_class& node, const Dlop& result) {
   hhds::Pin_class dpin_0;
 
-  for (auto& out : node.out_edges()) {
+  // Drain the lazy view (front + del_edge): rewire every consumer to one shared
+  // const driver with no fan-out copy.
+  while (node.has_out_edges()) {
+    auto out = node.out_edges().front();
     if (dpin_0.is_invalid()) {
       dpin_0 = create_const(*current_graph, result);
     }
     dpin_0.connect_sink(out.sink);
+    out.del_edge();
   }
 
   node.del_node();
@@ -710,10 +743,18 @@ void Cprop::scalar_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec& in
   // multi-bit value to the 1-bit Mux selector, which cgen then emits as a
   // reduction-OR (`if (x)` instead of `if (x[0])`) — selecting the wrong arm.
   if (self_pos == 1 && bits_of(wire_dpin) == 1) {
-    for (auto& e : node.out_edges()) {
-      if (type_op_of(e.sink.get_master_node()) == Ntype_op::Mux) {
-        e.sink.connect_driver(wire_dpin);
-        e.del_edge();
+    // Restart-scan the lazy view: bypass each Mux consumer (rewrite + drop edge)
+    // and restart; non-Mux consumers stay. No fan-out copy.
+    bool progressed = true;
+    while (progressed) {
+      progressed = false;
+      for (const auto& e : node.out_edges()) {
+        if (type_op_of(e.sink.get_master_node()) == Ntype_op::Mux) {
+          e.sink.connect_driver(wire_dpin);
+          e.del_edge();
+          progressed = true;
+          break;  // iterator invalidated by the rewrite; restart the scan
+        }
       }
     }
   }

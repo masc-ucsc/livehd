@@ -409,13 +409,8 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
         return std::nullopt;
       }
       const Val&      a = pid(0)[0];
-      hhds::Pin_class mask_pin;
-      for (const auto& e : node.inp_edges()) {
-        if (e.sink.get_port_id() == Ntype::get_sink_pid(op, "mask")) {
-          mask_pin = e.driver;
-          break;
-        }
-      }
+      // mask is a single const driver; read it directly (no inp_edges scan).
+      hhds::Pin_class mask_pin = gu::get_driver_of_sink_name(node, "mask");
       if (mask_pin.is_invalid() || !gu::is_const_pin(mask_pin)) {
         enc_unsupported_ = true;
         return std::nullopt;
@@ -437,13 +432,8 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
       break;
     }
     case Ntype_op::Set_mask: {
-      hhds::Pin_class mask_pin;
-      for (const auto& e : node.inp_edges()) {
-        if (e.sink.get_port_id() == Ntype::get_sink_pid(op, "mask")) {
-          mask_pin = e.driver;
-          break;
-        }
-      }
+      // mask is a single const driver; read it directly (no inp_edges scan).
+      hhds::Pin_class mask_pin = gu::get_driver_of_sink_name(node, "mask");
       if (mask_pin.is_invalid() || !gu::is_const_pin(mask_pin) || pid(0).empty()) {
         enc_unsupported_ = true;
         return std::nullopt;

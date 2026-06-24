@@ -82,16 +82,23 @@ void Color_acyclic::gather_roots(hhds::Graph* g) {
     if (!is_partitionable(n)) {
       continue;
     }
-    bool       root      = false;
-    const auto out_edges = n.out_edges();
-    if (out_edges.size() > 1) {
-      root = true;
-    } else if (out_edges.empty()) {
-      root = true;
-    } else {  // exactly one out edge: a root if that single sink is a primary output
-      if (is_graph_output_pin(out_edges.front().sink)) {
-        root = true;
+    bool root = false;
+    // Classify fan-out as 0 / 1 / >1 with an early-break cap (never size() the
+    // lazy out_edges view); capture the lone sink for the exactly-one case.
+    size_t          fanout = 0;
+    hhds::Pin_class one_sink;
+    for (const auto& e : n.out_edges()) {
+      ++fanout;
+      if (fanout == 1) {
+        one_sink = e.sink;
+      } else {
+        break;  // fan-out >= 2
       }
+    }
+    if (fanout != 1) {  // 0 or >1 out edges
+      root = true;
+    } else if (is_graph_output_pin(one_sink)) {  // single edge to a primary output
+      root = true;
     }
     if (root) {
       add_root(n);

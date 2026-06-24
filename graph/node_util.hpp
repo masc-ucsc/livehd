@@ -572,6 +572,10 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   if (drivers.empty()) {
     return {};
   }
+  // Single-driver contract: a multi-driver sink (Sum a/b, bit_or, memory ports)
+  // must read every driver via inp_drivers_of — silently taking the first would
+  // drop fan-in. Assert callers honor it.
+  I(drivers.size() == 1, "get_driver_of_sink_name on a multi-driver sink; use inp_drivers_of");
   return drivers.front();
 }
 

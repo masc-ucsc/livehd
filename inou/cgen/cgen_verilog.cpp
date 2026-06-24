@@ -361,11 +361,17 @@ hhds::Pin_class Cgen_verilog::get_driver(const hhds::Pin_class& sink) {
   if (sink.is_invalid()) {
     return {};
   }
-  auto edges = sink.inp_edges();
-  if (edges.empty()) {
+  // get_driver_pins() reads the sink's fan-in directly (no Edge_class vector);
+  // a sink's fan-in is 0-1 for the vast majority of pins.
+  auto drivers = sink.get_driver_pins();
+  if (drivers.empty()) {
     return {};
   }
-  return edges.front().driver;
+  // Single-driver accessor: correct for max-1-driver sinks (e.g. SRA "a", flop
+  // "din"), but a multi-driver port (Sum a/b, bit_or, memory) must read ALL
+  // drivers (inp_drivers_of). Assert the caller is not silently dropping fan-in.
+  I(drivers.size() == 1);
+  return drivers.front();
 }
 
 hhds::Pin_class Cgen_verilog::find_sink_pin(const hhds::Node_class& node, std::string_view name) {
@@ -2088,7 +2094,7 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, const hhds:
   // net; a simple node keeps the port name and assigns it in place.)
   bool redeclares_output = false;
   if (!dpin.is_invalid()) {
-    for (auto e : dpin.out_edges()) {
+    for (const auto& e : dpin.out_edges()) {
       if (is_graph_output_pin(e.sink) && get_scaped_name(pin_wire_name(e.sink)) == name) {
         redeclares_output = true;
         break;
@@ -2148,7 +2154,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
               break;
             }
           }
-          for (auto& e2 : node.out_edges()) {
+          for (const auto& e2 : node.out_edges()) {
             auto dout            = node.create_driver_pin(e2.driver.get_port_id());
             // Escape the FULL derived name as one unit: a memory instance name
             // can carry verilog-special chars (e.g. the '.' of a flattened
@@ -2199,8 +2205,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
     }
     I(op != Ntype_op::Sub && op != Ntype_op::Memory);
 
-    auto out_count = node.out_edges().size();
-    if (out_count == 0 && !is_type_flop(node)) {
+    if (!node.has_out_edges() && !is_type_flop(node)) {
       continue;
     }
     // A flop whose Q has no readers is still emitted by create_registers (it always
@@ -2271,7 +2276,17 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
       if (!nname.empty() && nname.front() != '_') {
         continue;
       }
-      if (out_count < 2) {
+      // Declare a named wire only for a fanout of >=2 (single-use nets inline).
+      // Cap the walk at 2: never iterate a high-fanout driver's full out-edge
+      // set just to learn it has "more than one" reader.
+      int fanout = 0;
+      for (const auto& e : node.out_edges()) {
+        (void)e;
+        if (++fanout >= 2) {
+          break;
+        }
+      }
+      if (fanout < 2) {
         continue;
       }
     }

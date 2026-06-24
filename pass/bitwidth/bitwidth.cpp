@@ -415,8 +415,10 @@ void Bitwidth::process_shl(hhds::Node_class& node, livehd::graph_util::Edge_vec&
 
   if (n_bw.get_sbits() == 0 || a_bw.get_sbits() == 0) {
     auto zero_dpin = create_const(*current_graph, *Dlop::create_integer(0));
-    for (auto& e : node.out_edges()) {
+    while (node.has_out_edges()) {  // drain: redirect each consumer to const-0, no fan-out copy
+      auto e = node.out_edges().front();
       zero_dpin.connect_sink(e.sink);
+      e.del_edge();
     }
     node.del_node();
     return;
@@ -700,7 +702,7 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
 
   // Out-connected pins: walk out_edges, collect unique driver pins.
   absl::flat_hash_set<hhds::Class_index> seen;
-  for (auto& e : node.out_edges()) {
+  for (const auto& e : node.out_edges()) {  // read-only: adjust_bw sets a bitwidth attr
     if (seen.insert(e.driver.get_class_index()).second) {
       adjust_bw(e.driver, bw_din);
     }
@@ -902,8 +904,10 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
 
   if (res_min.is_known_zero() && res_max.is_known_zero() && !not_finished) {
     auto zero_dpin = create_const(*current_graph, *Dlop::create_integer(0));
-    for (auto& e : node.out_edges()) {
+    while (node.has_out_edges()) {  // drain: redirect each consumer to const-0, no fan-out copy
+      auto e = node.out_edges().front();
       zero_dpin.connect_sink(e.sink);
+      e.del_edge();
     }
     node.del_node();
     return;
@@ -948,8 +952,10 @@ void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec
     auto b = wire_it->second.get_sbits();
     if (b <= sign_max) {
       sign_max = b;
-      for (auto& e : node.out_edges()) {
+      while (node.has_out_edges()) {  // drain: bypass Sext to its source, no fan-out copy
+        auto e = node.out_edges().front();
         e.sink.connect_driver(inp_edges[0].driver);
+        e.del_edge();
       }
       node.del_node();
     }
@@ -963,8 +969,10 @@ void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec
   auto wire_op   = type_op_of(wire_node);
   if (wire_op == Ntype_op::Sext || wire_op == Ntype_op::And) {
     if (wire_it->second.get_sbits() <= sign_max) {
-      for (auto& e : node.out_edges()) {
+      while (node.has_out_edges()) {  // drain: bypass to wire driver, no fan-out copy
+        auto e = node.out_edges().front();
         e.sink.connect_driver(wire_dpin);
+        e.del_edge();
       }
       node.del_node();
     } else {
@@ -1008,8 +1016,10 @@ void Bitwidth::process_assignment_or(hhds::Node_class& node, livehd::graph_util:
     not_finished = true;
     return;
   }
-  for (auto& out : node.out_edges()) {
+  while (node.has_out_edges()) {  // drain: forward the single input to each consumer, no fan-out copy
+    auto out = node.out_edges().front();
     inp_edges[0].driver.connect_sink(out.sink);
+    out.del_edge();
   }
   node.del_node();
 }
@@ -1034,8 +1044,10 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, livehd::graph_util::Edge_v
 
   if (max_bits == 0) {
     auto zero_dpin = create_const(*current_graph, *Dlop::create_integer(0));
-    for (auto& e : node.out_edges()) {
+    while (node.has_out_edges()) {  // drain: redirect each consumer to const-0, no fan-out copy
+      auto e = node.out_edges().front();
       zero_dpin.connect_sink(e.sink);
+      e.del_edge();
     }
     node.del_node();
     return;
@@ -1101,8 +1113,10 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
     int32_t bw_sbits = it->second.get_sbits();
     if (bw_sbits == 0) {
       auto zero_dpin = create_const(*current_graph, *Dlop::create_integer(0));
-      for (auto& e2 : node.out_edges()) {
+      while (node.has_out_edges()) {  // drain: redirect each consumer to const-0, no fan-out copy
+        auto e2 = node.out_edges().front();
         zero_dpin.connect_sink(e2.sink);
+        e2.del_edge();
       }
       node.del_node();
       return;
@@ -1143,8 +1157,10 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
         if (is_graph_input_pin(inp_edges[pos].driver) || is_graph_output_pin(inp_edges[pos].driver)) {
           mask_pos = -1;
         } else {
-          for (auto& out : node.out_edges()) {
+          while (node.has_out_edges()) {  // drain: forward the surviving input to each consumer, no fan-out copy
+            auto out = node.out_edges().front();
             inp_edges[pos].driver.connect_sink(out.sink);
+            out.del_edge();
           }
           node.del_node();
           return;
@@ -1225,7 +1241,7 @@ void Bitwidth::process_attr_set_dp_assign(hhds::Node_class& node_dp) {
   const Bitwidth_range                   lhs_bw = it->second;
   // Walk out_connected_pins (unique drivers from out_edges).
   absl::flat_hash_set<hhds::Class_index> seen_out;
-  for (auto& e : node_dp.out_edges()) {
+  for (const auto& e : node_dp.out_edges()) {  // read-only: records driver bitwidth in a side map
     if (seen_out.insert(e.driver.get_class_index()).second) {
       bwmap.insert_or_assign(e.driver.get_class_index(), lhs_bw);
     }
@@ -1284,8 +1300,10 @@ void Bitwidth::process_attr_set_bw(hhds::Node_class& node_attr, Bitwidth::Attr a
         parent_dpin    = create_const(*current_graph, *Dlop::create_integer(0));
         parent_pending = false;
       }
-      for (auto& e : node_attr.out_edges()) {
+      while (node_attr.has_out_edges()) {  // drain: forward parent to each consumer, no fan-out copy
+        auto e = node_attr.out_edges().front();
         parent_dpin.connect_sink(e.sink);
+        e.del_edge();
       }
       node_attr.del_node();
     } else {
@@ -1312,7 +1330,9 @@ void Bitwidth::process_attr_set_bw(hhds::Node_class& node_attr, Bitwidth::Attr a
   if (!node_attr.is_invalid()) {
     set_bits_sign(attr_dpin, bw);
     bwmap.insert_or_assign(attr_dpin.get_class_index(), bw);
-    for (auto& e : attr_dpin.out_edges()) {
+    // read-only over the lazy view: annotates flop consumers' Q bitwidth (the
+    // flop's port-0 driver already exists, so create_driver_pin(0) is a lookup).
+    for (const auto& e : attr_dpin.out_edges()) {
       auto sink_node = e.sink.get_master_node();
       if (!is_type_flop(sink_node)) {
         continue;
@@ -1344,30 +1364,51 @@ void Bitwidth::insert_tposs_nodes(hhds::Node_class& node_attr, int32_t ubits) {
 
   hhds::Node_class ntposs;
 
-  for (auto& e : node_attr.out_edges()) {
-    I(e.driver.get_port_id() == 0);
-    auto sink_node = e.sink.get_master_node();
-    auto sink_type = type_op_of(sink_node);
+  // Restart-scan the lazy out_edges view after each rewrite (no fan-out copy):
+  // splice a tposs Get_mask in front of the next consumer that needs one, drop
+  // the edge, restart. Consumers that already mask (Or-with-single-use / matching
+  // Get_mask) are left in place.
+  bool progressed = true;
+  while (progressed) {
+    progressed = false;
+    for (const auto& e : node_attr.out_edges()) {
+      I(e.driver.get_port_id() == 0);
+      auto sink_node = e.sink.get_master_node();
+      auto sink_type = type_op_of(sink_node);
 
-    if (sink_type == Ntype_op::Or && sink_node.out_edges().size() == 1) {
-      continue;
-    }
-    if (sink_type == Ntype_op::Get_mask) {
-      auto m = hydrate_const(get_driver_of_sink_name(sink_node, "mask"));
-      if (m.same_repr(*mask)) {
-        continue;
+      if (sink_type == Ntype_op::Or) {
+        // skip a single-use Or consumer. Cap the walk at 2 instead of size()-ing
+        // the lazy view (only the "exactly one out edge" distinction matters).
+        size_t fanout = 0;
+        for (const auto& se : sink_node.out_edges()) {
+          (void)se;
+          if (++fanout >= 2) {
+            break;
+          }
+        }
+        if (fanout == 1) {
+          continue;
+        }
       }
-    }
+      if (sink_type == Ntype_op::Get_mask) {
+        auto m = hydrate_const(get_driver_of_sink_name(sink_node, "mask"));
+        if (m.same_repr(*mask)) {
+          continue;
+        }
+      }
 
-    if (ntposs.is_invalid()) {
-      ntposs          = create_typed_node(*current_graph, Ntype_op::Get_mask);
-      auto mask_cnode = create_const(*current_graph, *mask);
-      setup_sink_by_name(ntposs, "mask").connect_driver(mask_cnode);
-      setup_sink_by_name(ntposs, "a").connect_driver(name_dpin);
-    }
+      if (ntposs.is_invalid()) {
+        ntposs          = create_typed_node(*current_graph, Ntype_op::Get_mask);
+        auto mask_cnode = create_const(*current_graph, *mask);
+        setup_sink_by_name(ntposs, "mask").connect_driver(mask_cnode);
+        setup_sink_by_name(ntposs, "a").connect_driver(name_dpin);
+      }
 
-    ntposs.create_driver_pin(0).connect_sink(e.sink);
-    e.del_edge();
+      ntposs.create_driver_pin(0).connect_sink(e.sink);
+      e.del_edge();
+      progressed = true;
+      break;  // iterator invalidated by the rewrite; restart the scan
+    }
   }
 
   if (!ntposs.is_invalid()) {
@@ -1695,16 +1736,21 @@ void Bitwidth::try_delete_attr_node(hhds::Node_class& node) {
       bwmap.insert_or_assign(mask_dpin.get_class_index(), Bitwidth_range(Dlop::create_integer(0), mask_const));
       dpin_rhs.connect_sink(setup_sink_by_name(mask_node, "a"));
       all_one_dpin.connect_sink(setup_sink_by_name(mask_node, "a"));
-      for (auto e : node.out_edges()) {
+      while (node.has_out_edges()) {  // drain: feed each consumer the masked value, no fan-out copy
+        auto e = node.out_edges().front();
         mask_dpin.connect_sink(e.sink);
+        e.del_edge();
       }
       node.del_node();
       return;
     } else {
-      for (auto e : node.out_edges()) {
+      // drain: forward rhs to each port-0 consumer (node.del_node drops the rest)
+      while (node.has_out_edges()) {
+        auto e = node.out_edges().front();
         if (e.driver.get_port_id() == 0) {
           e.sink.connect_driver(dpin_rhs);
         }
+        e.del_edge();
       }
       node.del_node();
       return;
@@ -1713,14 +1759,18 @@ void Bitwidth::try_delete_attr_node(hhds::Node_class& node) {
 
   if (is_sink_connected(node, "parent")) {
     auto data_dpin = get_driver_of_sink_name(node, "parent");
-    for (auto e : node.out_edges()) {
+    while (node.has_out_edges()) {  // drain: forward parent driver to each consumer, no fan-out copy
+      auto e = node.out_edges().front();
       I(e.driver.get_port_id() == 0);
       e.sink.connect_driver(data_dpin);
+      e.del_edge();
     }
   } else {
     auto data_dpin = create_const(*current_graph, *Dlop::create_integer(0));
-    for (auto e : node.out_edges()) {
+    while (node.has_out_edges()) {  // drain: forward const-0 to each consumer, no fan-out copy
+      auto e = node.out_edges().front();
       e.sink.connect_driver(data_dpin);
+      e.del_edge();
     }
   }
   node.del_node();

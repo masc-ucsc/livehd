@@ -144,7 +144,16 @@ void pass_submatch::find_mffc_group(hhds::Graph* g) {
   });
 
   for (auto node : g->forward_class()) {
-    if (node.out_edges().size() == 1) {
+    // Skip a single-fanout node. Cap the walk at 2 instead of size()-ing the
+    // lazy out_edges view (only the "exactly one out edge" distinction matters).
+    size_t fanout = 0;
+    for (const auto& e : node.out_edges()) {
+      (void)e;
+      if (++fanout >= 2) {
+        break;
+      }
+    }
+    if (fanout == 1) {
       continue;
     }
     auto ci                         = node.get_class_index();
@@ -317,13 +326,12 @@ void pass_submatch::find_subs(hhds::Graph* g) {
     node2height_hash[ci]        = {Root_hash(ci, h)};
     for (uint64_t height = 1; has_output; ++height) {
       has_output = false;
-      // Only trace one output edge
-      // TODO: Better way to get the first out_edges()?
-      for (auto e : node.out_edges()) {
+      // Only trace one output edge: take the first (front() re-walks to begin()).
+      if (node.has_out_edges()) {
+        auto e     = node.out_edges().front();
         node       = e.sink.get_master_node();
         pid        = e.sink.get_port_id();
         has_output = true;
-        break;
       }
       if (!has_output) {
         break;

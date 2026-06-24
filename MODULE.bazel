@@ -139,7 +139,7 @@ bazel_dep(name = "hhds", version = "0.2.0")
 git_override(
     module_name = "hhds",
     remote = "https://github.com/masc-ucsc/hhds.git",
-    commit = "ccfbf742d30b67081fde33468c15a6a28214058b",  # InlinedVector edges + pin.get_driver_pin() fast 0/1-driver accessor
+    commit = "0102bec1b1f0226cd17e30ff15df3a62f0b0b287",  # out_edges() lazy auto-scaling OutEdgeRange view (huge-fanout safe); inp_edges() stays eager InlinedVector
 )
 # For local debug/testing, swap the git_override above for:
 # local_path_override(module_name = "hhds", path = "../hhds")

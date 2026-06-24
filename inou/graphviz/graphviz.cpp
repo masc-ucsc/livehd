@@ -196,7 +196,7 @@ void Graphviz::create_color_map(hhds::Graph* lg) {
       continue;
     }
     auto c = color_of(node);
-    for (auto e : node.out_edges()) {
+    for (const auto& e : node.out_edges()) {
       auto snode = e.sink.get_master_node();
       if (!has_color(snode)) {
         continue;
