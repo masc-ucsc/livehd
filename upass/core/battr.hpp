@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <algorithm>
+#include <initializer_list>
 #include <string_view>
 
 // battr — the RESIDUAL Bundle attribute-key vocabulary (1b/D).
@@ -25,5 +27,25 @@ inline constexpr std::string_view debug{"_debug"};         // canonical sticky s
 // since '_' sorts apart from letter-named attrs under Canonical_less, the
 // sticky subset is one contiguous run per level.
 inline constexpr bool is_sticky(std::string_view attr_name) { return !attr_name.empty() && attr_name.front() == '_'; }
+
+// The canonical set of BUILT-IN attribute names (Category A/B/C). A name here is
+// a `.[name]` attribute, never a tuple/struct dot-field — used both to decide
+// aggregate→field attr inheritance (uPass_attributes::is_builtin_attr delegates
+// here) and to reject a `x.bits`-for-`x.[bits]` dot-field mistake on a scalar
+// (constprop process_tuple_get). Keep in sync with the per-pass attribute
+// registry.
+inline bool is_builtin_attr_name(std::string_view name) {
+  static constexpr std::initializer_list<std::string_view> names = {
+      // Category A — LNAST/upass attrs
+      "max", "min", "bw_max", "bw_min", "bits", "wrap", "saturate", "sat", "comptime", "const", "mut", "typename",
+      "private", "size", "sign", "key", "crand", "rand", "loc", "file", "type",
+      // Category B — LGraph wiring attrs
+      "clock", "reset", "debug", "_debug", "async", "init", "clock_pin", "din", "enable", "negreset", "posclk",
+      "reset_pin", "valid", "stop", "lat", "num", "addr", "fwd", "wensize", "rdport", "defer", "inputs", "outputs",
+      // Category C — synthesis hints
+      "critical", "delay", "donttouch", "keep", "inp_delay", "out_delay", "max_delay", "min_delay", "max_load",
+      "max_fanout", "max_cap", "left_of", "right_of", "top_of", "bottom_of", "align_with"};
+  return std::find(names.begin(), names.end(), name) != names.end();
+}
 
 }  // namespace battr

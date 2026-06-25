@@ -1,0 +1,12 @@
+/*
+:name: dot_attr_as_field_scalar
+:type: error
+:error: (no field|has no field)
+:help: (built-in attribute|\.\[bits\])
+*/
+
+// BUG (silent wrong result) variant on a plain scalar: `b.bits` reads the
+// built-in `bits` attribute as if it were a tuple field. A scalar has no
+// fields — this must error and point at `b.[bits]`.
+const b:u4 = 3
+const z = b.bits   // locate_error_here

@@ -1,0 +1,12 @@
+/*
+:name: array_elem_int_into_bool
+:type: error
+:error: (boolean|integer value)
+*/
+
+// BUG (type check) symmetric variant: a boolean array (`[]bool`) must NOT accept
+// a plain integer element, even one whose value fits [0,1]. `a[1] = 1` keeps the
+// range but changes the kind (int into a bool element) — a compile error.
+mut a:[]bool = nil
+
+a[1] = 1   // int into a bool element; value fits [0,1] but kind differs

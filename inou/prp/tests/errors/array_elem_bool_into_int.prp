@@ -1,0 +1,15 @@
+/*
+:name: array_elem_bool_into_int
+:type: error
+:error: (boolean|type cannot change)
+:help: (u1|unsigned)
+*/
+
+// BUG (type check): an array of integers (`[]u4`) must NOT silently accept a
+// boolean element. bool and int never mix in Pyrope — storing `true` into a
+// u4 element is a compile error; convert explicitly with `u1(v)`/`unsigned(v)`.
+// (Previously the bool store was silently accepted.)
+mut a:[]u4 = nil
+
+a[0] = 1
+a[1] = true   // bool into an integer element

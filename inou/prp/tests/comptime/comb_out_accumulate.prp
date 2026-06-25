@@ -1,0 +1,29 @@
+/*
+:name: comb_out_accumulate
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+// The fix side of the read-before-write bug: once the accumulator output is
+// explicitly initialized (`res = 0`), the vararg concat works. `x.[bits]` (the
+// ATTRIBUTE form, with brackets) yields each argument's declared width, so the
+// shift-and-or lands the two fields at 0x3AA. Contrast errors/dot_attr_as_field
+// (`x.bits` without brackets) and errors/comb_out_uninit_arith (no `res = 0`).
+comb concat(...a)->(res:unsigned) {
+  res = 0
+  for x in a {
+     cputs("bits:{x.[bits]}")
+     res <<= x.[bits]
+     res  |= x
+  }
+}
+
+const b:u4 = 3
+const c:u8 = 0xAA
+
+const x = concat(b,c)
+
+cputs("x:{x:x}")
+
+cassert(x == 0x3AA)

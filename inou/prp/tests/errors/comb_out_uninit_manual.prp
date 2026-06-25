@@ -1,0 +1,15 @@
+/*
+:name: comb_out_uninit_manual
+:type: error
+:error: nil
+*/
+
+// BUG (read-before-write) variant without a loop: the same rule applies to a
+// plain `comb` body. `res <<= 4` reads `res` before it is ever written, and an
+// arithmetic/shift op on a nil (uninitialized) operand is a compile error.
+comb f()->(res:unsigned) {
+  res <<= 4
+  res  |= 3
+}
+
+const y = f()

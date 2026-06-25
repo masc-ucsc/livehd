@@ -1,0 +1,23 @@
+/*
+:name: dot_attr_as_field
+:type: error
+:error: (no field|has no field)
+:help: (built-in attribute|\.\[bits\])
+*/
+
+// BUG (silent wrong result): `x.bits` is a DOT-FIELD read, but a scalar integer
+// has no fields — `bits` is a built-in ATTRIBUTE, read with `x.[bits]`. The
+// dotted form used to silently return x's own value (so `res <<= x.bits`
+// quietly computed garbage); it must be a compile error.
+comb concat(...a)->(res:unsigned) {
+  res = 0
+  for x in a {
+     res <<= x.bits   // NO `bits` field; meant `x.[bits]`
+     res  |= x
+  }
+}
+
+const b:u4 = 3
+const c:u8 = 0xAA
+
+const x = concat(b,c)

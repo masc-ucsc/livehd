@@ -29,6 +29,7 @@
 #include <utility>
 #include <vector>
 
+#include "battr.hpp"
 #include "hlop/dlop.hpp"
 #include "lnast_ntype.hpp"
 #include "upass_attributes.hpp"
@@ -57,73 +58,9 @@ Dlop pyrope_string(std::string_view raw) {
 
 bool uPass_attributes::is_builtin_attr(std::string_view name) {
   // Category A/B/C built-ins. All other names are category-D (user / unknown)
-  // and inherit from aggregate to field.
-  static constexpr std::string_view names[] = {
-      // Category A — LNAST/upass attrs
-      "max",
-      "min",
-      "bw_max",
-      "bw_min",
-      "bits",
-      "wrap",
-      "saturate",
-      "sat",
-      "comptime",
-      "const",
-      "mut",
-      "typename",
-      "private",
-      "size",
-      "sign",
-      "key",
-      "crand",
-      "rand",
-      "loc",
-      "file",
-      "type",
-      // Category B — LGraph wiring attrs
-      "clock",
-      "reset",
-      "debug",
-      "_debug",
-      "async",
-      "init",
-      "clock_pin",
-      "din",
-      "enable",
-      "negreset",
-      "posclk",
-      "reset_pin",
-      "valid",
-      "stop",
-      "lat",
-      "num",
-      "addr",
-      "fwd",
-      "wensize",
-      "rdport",
-      "defer",
-      "inputs",
-      "outputs",
-      // Category C — synthesis hints
-      "critical",
-      "delay",
-      "donttouch",
-      "keep",
-      "inp_delay",
-      "out_delay",
-      "max_delay",
-      "min_delay",
-      "max_load",
-      "max_fanout",
-      "max_cap",
-      "left_of",
-      "right_of",
-      "top_of",
-      "bottom_of",
-      "align_with",
-  };
-  return std::find(std::begin(names), std::end(names), name) != std::end(names);
+  // and inherit from aggregate to field. The canonical list lives in
+  // battr.hpp (shared with constprop's `x.bits`-for-`x.[bits]` reject).
+  return battr::is_builtin_attr_name(name);
 }
 
 upass::Vote uPass_attributes::process_tuple_add(std::string_view dst_name, Bundle& dst, upass::Src_span src) {

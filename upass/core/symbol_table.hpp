@@ -118,6 +118,15 @@ public:
   // own nil seed. Transient; cleared with the other per-run state.
   absl::flat_hash_set<std::string> nil_seeded;
 
+  // A subset of nil_seeded: the RAW, never-yet-written scalar integer/bool
+  // output seed (the inliner's `res = nil` before the body runs). Reading such
+  // a name in an arithmetic/shift op is a read-before-write — a compile error
+  // (the result of an op with nil is illegal), unlike a runtime-DRIVEN nil
+  // placeholder (which stays nil_seeded and folds structurally). The first real
+  // store to the name clears it (constprop process_store); only the
+  // never-written case survives to be rejected by report_nil_operand. Transient.
+  absl::flat_hash_set<std::string> uninitialized;
+
   // The strict comptime-fold read (ex runner_fold_fn / fold_ref):
   // a concrete (no-unknowns) value on a TRIVIAL-SCALAR binding. A
   // multi-entry tuple or named 1-tuple never inlines (position-0 truncation),

@@ -3661,7 +3661,20 @@ bool uPass_runner::try_inline_func_call() {
       emit_inline_typespec_range(upass::Lnast_manager::make_inlined_name(tag, g), gb.max, gb.min);
     }
   }
+  // An output may share the Pyrope name of an input (`comb f(x) -> (x)`):
+  // 06-functions.md says reads before the output assignment use the INPUT
+  // value, and the assignment binds the output. The param binding above already
+  // established that value, so DO NOT re-seed such an output to nil — the seed
+  // would clobber the input and a read-before-write (`c = a + b + x`) would
+  // wrongly fold over nil.
+  absl::flat_hash_set<std::string_view> input_names;
+  for (const auto& ie : io.inputs) {
+    input_names.insert(ie.name);
+  }
   for (const auto& o : io.outputs) {
+    if (input_names.contains(o.name)) {
+      continue;  // shared input/output name: input binding stands (see above)
+    }
     const auto oname = upass::Lnast_manager::make_inlined_name(tag, o.name);
     if (o.bits == 0 && !o.type_name.empty()) {
       if (auto it = gbinds.find(o.type_name); it != gbinds.end() && it->second.type_name.empty()) {
@@ -3686,6 +3699,19 @@ bool uPass_runner::try_inline_func_call() {
     // discarded on block-leave — before the epilogue can read it. A nil init
     // here is harmless: a taken branch overwrites it in this same top scope.
     emit_inline_binding(oname, Lnast_node::create_const("nil"));
+    // emit_inline_binding marks `oname` as a nil RUNTIME placeholder so that an
+    // op over an unwritten-but-runtime-DRIVEN output (`r = a + b`, kept
+    // structural for tolg) stays structural instead of erroring. That mark must
+    // stay. But a SCALAR integer/bool output that is read in an arithmetic op
+    // BEFORE its first write (`res:unsigned` then `res <<= n` with no `res = 0`)
+    // is a genuine read-before-write: the result of an op with that raw nil is a
+    // compile error. Flag the raw seed as `uninitialized`; the first real store
+    // (runtime or comptime) clears it (process_store). Reads while still flagged
+    // are rejected by report_nil_operand even though the name is also nil_seeded.
+    // Tuple / named-type / string outputs are not arithmetic accumulators — skip.
+    if (o.type_name.empty() && (o.kind == Io_kind::integer || o.kind == Io_kind::boolean)) {
+      symbol_table_.uninitialized.insert(oname);
+    }
   }
 
   // Hierarchical instance level for this inline: the call-site `name=` if given,
@@ -6035,6 +6061,7 @@ void uPass_runner::run() {
   symbol_table_.pending_decl_facts.clear();  // dotted-bake stash is per-run state
   symbol_table_.tget_origin.clear();
   symbol_table_.nil_seeded.clear();
+  symbol_table_.uninitialized.clear();
 
   // Step H — allocate the dest (staging) body in a runner-owned Forest
   // (conceptually the "lgdb/optimized" forest the plan describes; today
@@ -6846,6 +6873,7 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   Dlop        decl_min;
   Dlop        elem_max;  // array declares: the ELEMENT envelope ([4][8]u8 → u8)
   Dlop        elem_min;
+  upass::Kind elem_kind = upass::Kind::unknown;  // array declares: the element KIND (integer vs boolean)
   std::string type_name;
   upass::Mode mode     = upass::Mode::unknown;
   bool        comptime = false;
@@ -6864,6 +6892,7 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
         ++depth;
       }
       if (Lnast_ntype::is_prim_type_int(lm->get_raw_ntype()) && lm->has_child()) {
+        elem_kind = upass::Kind::integer;
         lm->move_to_child();
         ++depth;
         if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
@@ -6882,8 +6911,11 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
         // is-array marker — sized integer and bool are the only valid array
         // element types (tolg lower_mem_declare) — which the dynamic-index
         // lowering relies on, and lets bitwidth check 1-bit element stores.
-        elem_max = *Dlop::create_integer(1);
-        elem_min = *Dlop::create_integer(0);
+        // The KIND distinguishes `[]bool` from `[]u1` (both envelope [0,1]) so
+        // an element store can reject a bool↔int kind mismatch (review cat 3).
+        elem_kind = upass::Kind::boolean;
+        elem_max  = *Dlop::create_integer(1);
+        elem_min  = *Dlop::create_integer(0);
       }
       for (; depth > 0; --depth) {
         lm->move_to_parent();
@@ -7032,6 +7064,9 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   }
   if (!elem_min.is_invalid()) {
     bundle->set_attr("__elem_min", elem_min);
+  }
+  if (elem_kind != upass::Kind::unknown) {
+    bundle->set_attr("__elem_kind", *Dlop::create_integer(static_cast<int64_t>(elem_kind)));
   }
 
   // Back-flow: when this dst is a tuple_get extraction tmp (`___2 = ___1.a`

@@ -1,0 +1,23 @@
+/*
+:name: comb_out_uninit_arith
+:type: error
+:error: nil
+*/
+
+// BUG (read-before-write): the `res` output is never initialized, yet the loop
+// body reads it (`res <<= …`) before the first write. The result of an
+// arithmetic/shift operation with a nil (uninitialized) operand is a compile
+// error. Initialize `res = 0` first (see comptime/comb_out_accumulate). The
+// vararg `comb` is a template, but the error must still fire when it is inlined
+// at the concrete `concat(b, c)` call site.
+comb concat(...a)->(res:unsigned) {
+  for x in a {
+     res <<= x.[bits]   // locate_error_here  (reads uninitialized res)
+     res  |= x
+  }
+}
+
+const b:u4 = 3
+const c:u8 = 0xAA
+
+const x = concat(b,c)

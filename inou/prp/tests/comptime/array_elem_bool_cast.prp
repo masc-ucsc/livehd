@@ -1,0 +1,23 @@
+/*
+:name: array_elem_bool_cast
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// The fix side of the array-element type-check bug: a boolean cannot be stored
+// raw into an integer array element (see errors/array_elem_bool_into_int), but
+// an EXPLICIT cast converts it. `u1(true)`/`unsigned(true)` are the integer 1;
+// `signed(false)` is 0 (non-negative, so it fits an unsigned element). Plain
+// integers store as usual.
+mut a:[]u4 = nil
+
+a[0] = u1(true)         // 1
+a[1] = unsigned(true)   // 1
+a[2] = signed(false)    // 0 (zero is in range for an unsigned element)
+a[3] = 7
+
+cassert(a[0] == 1)
+cassert(a[1] == 1)
+cassert(a[2] == 0)
+cassert(a[3] == 7)

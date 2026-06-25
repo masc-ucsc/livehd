@@ -1,0 +1,13 @@
+/*
+:name: array_elem_signed_into_unsigned
+:type: error
+:error: (does not fit|unsigned)
+*/
+
+// BUG (type check) variant: `signed(true)` is the 1-bit signed value -1.
+// Storing it into an unsigned `[]u4` element is out of range. The value's
+// inferred range is unbounded, so the bitwidth element-fit check skips it; the
+// folded value (-1) is concrete, so constprop rejects it here.
+mut a:[]u4 = nil
+
+a[1] = signed(true)   // -1 into an unsigned element

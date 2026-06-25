@@ -152,6 +152,15 @@ public:
     frames_.pop_back();
   }
 
+  // True while a CONCRETE inline frame is active (push_source with a non-empty
+  // rename tag): the body of a callee is being elaborated in place at a real
+  // call site, with its params bound to actuals. The abstract template
+  // definition walk (func_extract diagnostics) and plain scratch emits
+  // (push_source with an empty tag) leave the tag empty. Lets a pass tell a
+  // genuine concrete-call fold (where a leftover nil is a real error) apart
+  // from an unbound-param template walk (where nils are placeholders).
+  bool in_inline_frame() const { return !active_tag_.empty(); }
+
   // Re-enter the CURRENT tree at the CURRENT cursor under a fresh rename salt,
   // keeping the active tag — used by the runner's comptime loop unroller to
   // re-walk a loop body once per iteration. The fresh salt gives each

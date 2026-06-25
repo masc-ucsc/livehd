@@ -12,6 +12,7 @@
 #include <span>
 #include <unordered_map>
 
+#include "battr.hpp"  // is_builtin_attr_name (reject `x.bits` for `x.[bits]`)
 #include "cell.hpp"
 #include "diag.hpp"
 #include "lnast_ntype.hpp"
@@ -340,6 +341,71 @@ void uPass_constprop::check_field_store_kind(std::string_view field_key, const D
   if (value.is_invalid() || value.is_nil()) {
     return;
   }
+
+  // Array element store `b[i] = v`: the declared element KIND/sign rides the
+  // ROOT bundle's __elem_kind / __elem_min attrs (baked by the runner's array
+  // declare). An element store must keep that kind. The scalar store path
+  // (typecheck) already rejects a bool↔int change; arrays go through this
+  // field-store path instead, so mirror it here (review cat 3):
+  //   * a boolean into an int element (`[]u4` <- true)   → cast `u1(v)`/`unsigned(v)`
+  //   * an int into a bool element     (`[]bool` <- 3)   → compare `v != 0`
+  //   * a negative into an unsigned element (`[]u4` <- signed(true) == -1) →
+  //     out of range (the value's derived range is unbounded, so the bitwidth
+  //     element-fit check skips it; the folded value here is concrete).
+  if (const auto root_dot = field_key.find('.'); root_dot != std::string_view::npos) {
+    if (const auto rb = st().get_bundle(field_key.substr(0, root_dot)); rb) {
+      if (const auto& ek = rb->get_attr("__elem_kind"); !ek.is_invalid() && ek.is_just_i64()) {
+        const auto elem_kind = static_cast<upass::Kind>(ek.to_just_i64());
+        const bool v_bool    = value.is_bool();
+        if (elem_kind == upass::Kind::integer && v_bool) {
+          livehd::diag::sink().emit(livehd::diag::Diagnostic{
+              .severity = livehd::diag::Severity::error,
+              .code     = "assign-type-mismatch",
+              .category = "type",
+              .pass     = "upass.constprop",
+              .message  = std::format("array element `{}` is an integer but is written a boolean value "
+                                      "(a variable's type cannot change)",
+                                      field_key),
+              .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+              .hint     = "cast the boolean explicitly, e.g. `u1(v)` or `unsigned(v)`",
+          });
+          return;
+        }
+        if (elem_kind == upass::Kind::boolean && value.is_integer() && !v_bool) {
+          livehd::diag::sink().emit(livehd::diag::Diagnostic{
+              .severity = livehd::diag::Severity::error,
+              .code     = "assign-type-mismatch",
+              .category = "type",
+              .pass     = "upass.constprop",
+              .message  = std::format("array element `{}` is a boolean but is written an integer value "
+                                      "(a variable's type cannot change)",
+                                      field_key),
+              .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+              .hint     = "compare to make a boolean, e.g. `v != 0`",
+          });
+          return;
+        }
+        if (elem_kind == upass::Kind::integer && value.is_integer() && !v_bool && value.is_negative()) {
+          if (const auto& mn = rb->get_attr("__elem_min"); !mn.is_invalid() && !mn.is_negative()) {
+            livehd::diag::sink().emit(livehd::diag::Diagnostic{
+                .severity = livehd::diag::Severity::error,
+                .code     = "bitwidth-overflow",
+                .category = "bitwidth",
+                .pass     = "upass.constprop",
+                .message  = std::format("array element `{}` (value {}) does not fit its declared range "
+                                        "(the element type is unsigned)",
+                                        field_key,
+                                        value.to_decimal_string()),
+                .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+                .hint     = "widen to a signed element type, or store a non-negative value",
+            });
+            return;
+          }
+        }
+      }
+    }
+  }
+
   const bool v_str = value.is_string();
   const bool v_int = value.is_integer();
   if (v_str == v_int) {
@@ -393,6 +459,13 @@ upass::Vote uPass_constprop::process_store(std::string_view dst_name, Bundle& ds
   // under the cursor (store payloads include subtree initializers that the
   // operand span carries only as placeholders).
   (void)dst;
+  // First real write to a scalar output clears its read-before-write flag (the
+  // raw nil seed was flagged `uninitialized` by the inliner). The inliner marks
+  // the flag AFTER emitting the `= nil` seed store, so this clear is a no-op for
+  // the seed itself and only fires on the body's first write.
+  if (!dst_name.empty()) {
+    st().uninitialized.erase(std::string(dst_name));
+  }
   // A store to a reg-declared name (scalar reg OR a `reg` memory/array) is a
   // next-state write consumed by tolg; constprop must not symbolically bind it
   // (reads see the flop's q, not the value written this cycle). process_assign
@@ -830,10 +903,12 @@ bool uPass_constprop::report_arith_nil(const Dlop& r) {
   // 2f-nil_diag — an arithmetic op that folds to a nil (Type::Nil) result is
   // an illegal/unsupported/degenerate operation on comptime operands (a nil
   // operand, an unsupported mix, a 0-width result, …). Report it and let the
-  // template skip the store, so the garbage nil never propagates. A template
-  // body folds nil placeholders for unbound params, so it is exempt — the real
-  // error resurfaces when the body is realized at a concrete call site.
-  if (!r.is_nil() || in_template_body()) {
+  // template skip the store, so the garbage nil never propagates. The ABSTRACT
+  // template-definition walk folds nil placeholders for unbound params, so it
+  // is exempt — but a CONCRETE inline frame (params bound at a real call site,
+  // lm->in_inline_frame()) is exactly where that deferred error must resurface,
+  // so the exemption lifts there even though the body lnast is still a template.
+  if (!r.is_nil() || (in_template_body() && !lm->in_inline_frame())) {
     return false;
   }
   livehd::diag::sink().emit(livehd::diag::Diagnostic{
@@ -854,9 +929,11 @@ bool uPass_constprop::report_nil_operand(upass::Src_span src) {
   // only as a direct-assignment RHS or inside an equality test. Reaching an
   // arithmetic/logic/shift/compare/reduce operator means an uninitialized or
   // illegal value flows into real computation → compile error (the op does not
-  // fold). A template body folds nil placeholders for unbound params, so it is
-  // exempt; the real error resurfaces when the body is realized at a call site.
-  if (in_template_body()) {
+  // fold). The ABSTRACT template-definition walk folds nil placeholders for
+  // unbound params, so it is exempt; the real error resurfaces when the body is
+  // realized at a CONCRETE call site (lm->in_inline_frame()), so the exemption
+  // lifts there even though the body lnast is still flagged as a template.
+  if (in_template_body() && !lm->in_inline_frame()) {
     return false;
   }
   for (const auto& o : src) {
@@ -864,7 +941,10 @@ bool uPass_constprop::report_nil_operand(upass::Src_span src) {
     // placeholders for a runtime-valued call output (the body binds a real value
     // the ST can't fold), NOT a genuine illegal nil. They flow into ops legally;
     // tolg wires the real producer. A user's `const a = nil` is not seeded here.
-    if (!o.name.empty() && st().nil_seeded.contains(std::string(o.name))) {
+    // EXCEPTION: a still-`uninitialized` scalar output seed (read in an op before
+    // its first write) IS a genuine read-before-write — do not skip it.
+    if (!o.name.empty() && st().nil_seeded.contains(std::string(o.name))
+        && !st().uninitialized.contains(std::string(o.name))) {
       continue;
     }
     if (operand_value(o).is_nil()) {
@@ -3895,6 +3975,33 @@ void uPass_constprop::process_tuple_get() {
     });
     store_trivial(dst, *Dlop::nil());
   } else if (st().has_trivial(src)) {
+    // A NAMED field read on a bare scalar with no such field. The one legal
+    // case is the single-output callee unwrap (`comb f()->(res){…}` stored as a
+    // trivial scalar, then `f().res` reads that scalar). But a BUILTIN ATTRIBUTE
+    // name here (`x.bits`, `x.max`, `x.sign`, …) is the `.bits`-for-`.[bits]`
+    // mistake: a scalar integer has attributes (read with `.[name]`), never
+    // dot-fields. Reject it with a pointed hint instead of silently returning
+    // the scalar value (which made `res <<= x.bits` quietly compute garbage).
+    if (!first_is_index && battr::is_builtin_attr_name(first_seg)) {
+      // Prefer the un-renamed source name for the message (`x`, not `inl1_x`).
+      const std::string& shown = src_raw.empty() ? src : src_raw;
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "unknown-field",
+          .category = "type",
+          .pass     = "upass.constprop",
+          .message  = std::format("`{}` has no field `{}` (a scalar has no fields)", shown, first_seg),
+          .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+          .hint     = std::format("`{}` is a built-in attribute — read it with `{}.[{}]`, not `{}.{}`",
+                                  first_seg,
+                                  shown,
+                                  first_seg,
+                                  shown,
+                                  first_seg),
+      });
+      store_trivial(dst, *Dlop::nil());
+      return;
+    }
     // Single-output callee fallback: an inliner result like
     // `comb f(...) -> (res:T) { res = ... }` is stored as a trivial scalar
     // on the caller's dst (so `x == 2` works). The dotted form `x.res`
