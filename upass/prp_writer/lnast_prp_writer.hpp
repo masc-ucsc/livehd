@@ -323,6 +323,29 @@ private:
   // regs, the clock/reset cone, or instance temps) so their def statements are
   // dropped. firtool SSA+poison-init emits a dead base per versioned signal.
   void compute_dead_signals(Lnast_nid io_nid, Lnast_nid stmts_nid);
+
+  // ── mux collapse ──────────────────────────────────────────────────────────
+  // An if/unique-if whose every arm is a single value-def to the SAME scalar `x`
+  // is a mux: `x=D; if c {x=v}` (Verilog `x = c ? v : D`). Collapse it to one
+  // conditional-expression assignment `x = if c0 {v0} elif c1 {v1} … else {D}`,
+  // matching the RTL's size AND data-flow complexity. An n-way unique-if (Verilog
+  // parallel/`unique case` -> hotmux) becomes the if/elif chain.
+  struct Mux_arm {
+    Lnast_nid cond;  // condition ref/const
+    Lnast_nid def;   // the arm's single value-def stmt (render_def_rhs gives the value)
+  };
+  struct Mux_info {
+    std::string          lhs;            // target scalar (stripped)
+    bool                 unique = false; // was a unique-if
+    std::vector<Mux_arm> arms;
+    Lnast_nid            else_def;       // else value-def: the else arm, or the preceding default store
+  };
+  std::unordered_map<int64_t, Mux_info> mux_info_;  // keyed by if-node class index
+  void                                  analyze_muxes(Lnast_nid stmts_nid);
+  // The single value-def stmt of a stmts block that writes ONLY scalar `out_lhs`
+  // (returns its node), or invalid. If `expect` is non-empty the target must equal
+  // it; otherwise the target is reported in out_lhs.
+  Lnast_nid arm_value_def(Lnast_nid stmts_node, std::string expect, std::string& out_lhs) const;
   std::unordered_map<std::string, std::pair<std::string, std::string>> range_lohi_;   // range-temp name -> "lo","hi"
   std::vector<Lnast_nid> get_mask_nodes_;                                             // every get_mask, for range-mask resolution
   std::vector<std::pair<Lnast_nid, int>> tuple_get_nodes_;                            // every tuple_get + its pre-order index

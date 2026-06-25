@@ -542,6 +542,8 @@ void Lnast_prp_writer::write_module() {
     // intermediates. These are pure cruft (LEC compares OUTPUTS, which they never
     // reach). Excluded: io ports, regs/mems, the clock/reset cone, instance temps.
     compute_dead_signals(io_nid, stmts_nid);
+    // Collapse mux-shaped if/unique-if into conditional-expression assignments.
+    analyze_muxes(stmts_nid);
     // Pre-declare body `mut` vars that are WRITTEN but have no `declare` node.
     // Their first write would otherwise emit `mut X` inside whatever (possibly
     // nested) scope it lands in; a later write in a SIBLING scope then references
@@ -1076,6 +1078,29 @@ void Lnast_prp_writer::write_stmts() {
 // ── if ────────────────────────────────────────────────────────────────────────
 
 void Lnast_prp_writer::write_if() {
+  // Mux collapse: render `x = if c0 {v0} elif c1 {v1} … else {D}` instead of the
+  // statement-if. The cursor stays on the if-node (no navigation) so the caller's
+  // move_to_sibling still advances correctly. x is already declared (its poison
+  // declare / hoist precedes this if); the default store was suppressed.
+  if (auto mit = mux_info_.find(cur.get_class_index().value); mit != mux_info_.end()) {
+    const Mux_info& mi = mit->second;
+    std::string     lhs(strip_prefix(mi.lhs));
+    std::string     s;
+    if (!declared_.count(lhs)) {
+      s += "mut ";  // defensive: type inferred from the RHS
+      declared_.insert(lhs);
+    }
+    s += lhs + " = ";
+    for (size_t k = 0; k < mi.arms.size(); ++k) {
+      s += (k == 0 ? "if " : " elif ");
+      s += render_value(mi.arms[k].cond, /*operand_ctx=*/false);
+      s += " { " + render_def_rhs(mi.arms[k].def, /*operand_ctx=*/false) + " }";
+    }
+    s += " else { " + render_def_rhs(mi.else_def, /*operand_ctx=*/false) + " }";
+    print(s);
+    return;
+  }
+
   const bool unique = Lnast_ntype::is_unique_if(current_ntype());
   if (!move_to_child()) {
     return;
@@ -2372,6 +2397,153 @@ void Lnast_prp_writer::compute_dead_signals(Lnast_nid io_nid, Lnast_nid stmts_ni
     }
   };
   mark(stmts_nid);
+}
+
+Lnast_nid Lnast_prp_writer::arm_value_def(Lnast_nid stmts_node, std::string expect, std::string& out_lhs) const {
+  if (stmts_node.is_invalid() || lnast->get_type(stmts_node) != Lnast_ntype::Lnast_ntype_stmts) {
+    return Lnast_nid{};
+  }
+  // The arm's LAST statement is the value-def to x; any PRECEDING statements must
+  // be foldable-temp defs (e.g. `%7 = a & b` feeding `store x = %7`), which are
+  // inlined into the value when render_def_rhs spells the final RHS — so they need
+  // not be emitted. A preceding non-foldable / non-temp statement means the arm
+  // does real extra work and is NOT a pure mux arm.
+  std::vector<Lnast_nid> ss;
+  for (auto cc = lnast->get_child(stmts_node); !cc.is_invalid(); cc = lnast->get_sibling_next(cc)) {
+    ss.push_back(cc);
+  }
+  if (ss.empty()) {
+    return Lnast_nid{};
+  }
+  for (size_t k = 0; k + 1 < ss.size(); ++k) {
+    const auto pt = lnast->get_type(ss[k]);
+    if (!defines_child0(pt)) {
+      return Lnast_nid{};
+    }
+    auto px = lnast->get_child(ss[k]);
+    if (px.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(px)) || !is_foldable(std::string(lnast->get_name(px)))) {
+      return Lnast_nid{};  // a preceding stmt whose result is NOT inlined would be lost
+    }
+  }
+  auto       c = ss.back();
+  const auto t = lnast->get_type(c);
+  // Must be a render_def_rhs-able value def (store copy or an infix/unary/select
+  // op). Exclude statement-forms / control flow / instances.
+  if (!defines_child0(t) || t == Lnast_ntype::Lnast_ntype_func_call || t == Lnast_ntype::Lnast_ntype_attr_set
+      || t == Lnast_ntype::Lnast_ntype_set_mask || t == Lnast_ntype::Lnast_ntype_range
+      || t == Lnast_ntype::Lnast_ntype_declare || t == Lnast_ntype::Lnast_ntype_delay_assign
+      || Lnast_ntype::is_if_like(t) || t == Lnast_ntype::Lnast_ntype_tuple_add) {
+    return Lnast_nid{};
+  }
+  auto x0 = lnast->get_child(c);
+  if (x0.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(x0))) {
+    return Lnast_nid{};
+  }
+  std::string nm(strip_prefix(lnast->get_name(x0)));
+  if (nm.find('.') != std::string::npos) {
+    return Lnast_nid{};  // scalar only (a bundle leaf keeps its own form)
+  }
+  if (!expect.empty() && nm != expect) {
+    return Lnast_nid{};
+  }
+  out_lhs = nm;
+  return c;
+}
+
+// Find if/unique-if nodes that are pure muxes of one scalar and record them for
+// write_if to render as a single conditional-expression assignment.
+void Lnast_prp_writer::analyze_muxes(Lnast_nid stmts_nid) {
+  if (stmts_nid.is_invalid()) {
+    return;
+  }
+  std::function<void(Lnast_nid)> rec = [&](Lnast_nid blk) {
+    std::vector<Lnast_nid> kids;
+    for (auto c = lnast->get_child(blk); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      kids.push_back(c);
+    }
+    for (size_t i = 0; i < kids.size(); ++i) {
+      const auto c = kids[i];
+      if (Lnast_ntype::is_if_like(lnast->get_type(c))) {
+        // children: [cond, stmts, cond, stmts, …, (else_stmts)]
+        std::vector<Lnast_nid> ic;
+        for (auto cc = lnast->get_child(c); !cc.is_invalid(); cc = lnast->get_sibling_next(cc)) {
+          ic.push_back(cc);
+        }
+        const bool   has_else = (ic.size() % 2) == 1;
+        const size_t npairs   = ic.size() / 2;
+        Mux_info     mi;
+        mi.unique = Lnast_ntype::is_unique_if(lnast->get_type(c));
+        bool ok    = npairs >= 1;
+        for (size_t p = 0; ok && p < npairs; ++p) {
+          std::string lhs;
+          auto        def = arm_value_def(ic[2 * p + 1], mi.lhs, lhs);
+          if (def.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(ic[2 * p]))) {
+            ok = false;
+            break;
+          }
+          if (mi.lhs.empty()) {
+            mi.lhs = lhs;
+          }
+          mi.arms.push_back({ic[2 * p], def});
+        }
+        if (ok) {
+          std::string dummy;
+          if (has_else) {
+            mi.else_def = arm_value_def(ic.back(), mi.lhs, dummy);
+            if (mi.else_def.is_invalid()) {
+              ok = false;
+            }
+          } else if (i > 0) {
+            // the immediately-preceding sibling must be the unconditional default
+            // `store lhs = D`; it becomes the else value and is dropped.
+            std::string pl;
+            auto        pdef = (lnast->get_type(kids[i - 1]) == Lnast_ntype::Lnast_ntype_stmts)
+                                   ? Lnast_nid{}
+                                   : (defines_child0(lnast->get_type(kids[i - 1])) ? kids[i - 1] : Lnast_nid{});
+            // reuse arm_value_def shape check via a one-statement wrapper is awkward;
+            // validate kids[i-1] directly as a scalar value-def to lhs
+            if (!pdef.is_invalid()) {
+              auto x0 = lnast->get_child(pdef);
+              const auto t = lnast->get_type(pdef);
+              if (!x0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(x0))
+                  && std::string(strip_prefix(lnast->get_name(x0))) == mi.lhs && t != Lnast_ntype::Lnast_ntype_func_call
+                  && t != Lnast_ntype::Lnast_ntype_attr_set && t != Lnast_ntype::Lnast_ntype_set_mask
+                  && t != Lnast_ntype::Lnast_ntype_range && t != Lnast_ntype::Lnast_ntype_declare
+                  && !Lnast_ntype::is_if_like(t)) {
+                mi.else_def = pdef;
+              } else {
+                ok = false;
+              }
+            } else {
+              ok = false;
+            }
+          } else {
+            ok = false;  // no else, no preceding default
+          }
+        }
+        if (ok && !mi.else_def.is_invalid()) {
+          // success: record + suppress the preceding default store if it is the else.
+          if (i > 0 && mi.else_def == kids[i - 1]) {
+            folded_node_.insert(kids[i - 1].get_class_index().value);
+          } else if (i > 0) {
+            // has explicit else: an immediately-preceding redundant store to lhs is dead.
+            std::string pl;
+            auto        prev = kids[i - 1];
+            const auto  t    = lnast->get_type(prev);
+            auto        x0   = lnast->get_child(prev);
+            if (defines_child0(t) && !x0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(x0))
+                && std::string(strip_prefix(lnast->get_name(x0))) == mi.lhs && t != Lnast_ntype::Lnast_ntype_func_call
+                && !Lnast_ntype::is_if_like(t)) {
+              folded_node_.insert(prev.get_class_index().value);
+            }
+          }
+          mux_info_.emplace(c.get_class_index().value, std::move(mi));
+        }
+      }
+      rec(c);  // recurse nested scopes
+    }
+  };
+  rec(stmts_nid);
 }
 
 void Lnast_prp_writer::analyze_folding() {
