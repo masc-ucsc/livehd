@@ -1,0 +1,31 @@
+/*
+:name: adv_tuple_concat_op
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+// `a ++ b` is the tuple-concat (splice) operator: an alias for `(...a, ...b)`.
+// Field names and positions are preserved, and named-field order does not
+// matter for equality.
+const a = (1, const foo=2)
+const b = (3, const bar=4)
+
+const x = a ++ b
+const y = (...a, ...b)
+
+cassert(x == y)
+cassert(x == (1, 3, foo=2, bar=4))
+cassert(x == (1, bar=4, foo=2, 3))
+
+// chained concat (same associative operator) left-folds
+const c = (5, 6)
+cassert(((1, 2) ++ c) == (1, 2, 5, 6))
+
+// `++=` accumulator (compound assign, lowers to a tuple_concat)
+mut acc = (0,)
+acc ++= (1, 2)
+acc ++= c
+cassert(acc == (0, 1, 2, 5, 6))
+
+// concatenating an empty tuple is the identity
+cassert((a ++ ()) == a)
