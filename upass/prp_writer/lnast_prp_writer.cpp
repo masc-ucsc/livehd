@@ -1086,11 +1086,17 @@ void Lnast_prp_writer::write_if() {
     const Mux_info& mi = mit->second;
     std::string     lhs(strip_prefix(mi.lhs));
     std::string     s;
-    if (!declared_.count(lhs)) {
-      s += "mut ";  // defensive: type inferred from the RHS
+    if (mi.fold_decl || !declared_.count(lhs)) {
+      s += "mut ";  // the poison declare was dropped — declare here
       declared_.insert(lhs);
+      s += lhs;
+      if (!mi.decl_type.empty()) {
+        s += ":" + mi.decl_type;
+      }
+      s += " = ";
+    } else {
+      s += lhs + " = ";
     }
-    s += lhs + " = ";
     for (size_t k = 0; k < mi.arms.size(); ++k) {
       s += (k == 0 ? "if " : " elif ");
       s += render_value(mi.arms[k].cond, /*operand_ctx=*/false);
@@ -2456,6 +2462,19 @@ void Lnast_prp_writer::analyze_muxes(Lnast_nid stmts_nid) {
   if (stmts_nid.is_invalid()) {
     return;
   }
+  // Top-level `mut` declares, by target — a mux target's poison declare
+  // (`mut x:T = 0`) is dead once x is assigned unconditionally by the mux, so it
+  // is folded into the mux assignment (`mut x:T = if…`).
+  std::unordered_map<std::string, Lnast_nid> top_decl_node;
+  for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    if (lnast->get_type(c) != Lnast_ntype::Lnast_ntype_declare) {
+      continue;
+    }
+    auto v = lnast->get_child(c);
+    if (!v.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(v))) {
+      top_decl_node.emplace(std::string(strip_prefix(lnast->get_name(v))), c);
+    }
+  }
   std::function<void(Lnast_nid)> rec = [&](Lnast_nid blk) {
     std::vector<Lnast_nid> kids;
     for (auto c = lnast->get_child(blk); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
@@ -2535,6 +2554,26 @@ void Lnast_prp_writer::analyze_muxes(Lnast_nid stmts_nid) {
                 && std::string(strip_prefix(lnast->get_name(x0))) == mi.lhs && t != Lnast_ntype::Lnast_ntype_func_call
                 && !Lnast_ntype::is_if_like(t)) {
               folded_node_.insert(prev.get_class_index().value);
+            }
+          }
+          // Fold the target's poison declare (`mut x:T = 0`) into the mux assign:
+          // x is now assigned unconditionally by the mux, so the placeholder init
+          // is dead. Only a plain value-less `mut` declare with no reg/mem attrs.
+          if (auto dit = top_decl_node.find(mi.lhs); dit != top_decl_node.end()
+              && !folded_node_.count(dit->second.get_class_index().value) && !folded_attrs_.count(mi.lhs)
+              && find_stages_child(dit->second).is_invalid()) {
+            auto d   = dit->second;
+            auto vr  = lnast->get_child(d);                                          // ref
+            auto ty  = vr.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(vr);  // type
+            auto kwn = ty.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(ty);  // const(kw)
+            auto val = kwn.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(kwn);
+            const bool plain_mut = !kwn.is_invalid() && lnast->get_name(kwn) == "mut";
+            if (plain_mut && val.is_invalid()) {  // value-less `mut x:T` (write_declare would emit `= 0`)
+              mi.fold_decl = true;
+              if (!ty.is_invalid()) {
+                mi.decl_type = render_type_at(ty);
+              }
+              folded_node_.insert(d.get_class_index().value);
             }
           }
           mux_info_.emplace(c.get_class_index().value, std::move(mi));

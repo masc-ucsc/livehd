@@ -335,10 +335,12 @@ private:
     Lnast_nid def;   // the arm's single value-def stmt (render_def_rhs gives the value)
   };
   struct Mux_info {
-    std::string          lhs;            // target scalar (stripped)
-    bool                 unique = false; // was a unique-if
+    std::string          lhs;             // target scalar (stripped)
+    bool                 unique = false;  // was a unique-if
     std::vector<Mux_arm> arms;
-    Lnast_nid            else_def;       // else value-def: the else arm, or the preceding default store
+    Lnast_nid            else_def;        // else value-def: the else arm, or the preceding default store
+    bool                 fold_decl = false;  // emit `mut lhs[:T] = if…` (the poison `mut lhs = 0` declare was dropped)
+    std::string          decl_type;          // type suffix for the folded declare (may be empty)
   };
   std::unordered_map<int64_t, Mux_info> mux_info_;  // keyed by if-node class index
   void                                  analyze_muxes(Lnast_nid stmts_nid);
