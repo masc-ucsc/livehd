@@ -1015,6 +1015,37 @@ int prp_count_wire_drivers(const Lnast& ln, const Lnast_nid& stmts, std::string_
   return cnt;
 }
 
+// A `wire` whose drivers are PER-FIELD stores (`store(w, 'f', v)`, ≥3 children) is
+// a TUPLE BUNDLE: it is single-driver PER LEAF, not per base. The base-level
+// driver count is meaningless here — every field write looks like a separate
+// driver of `w`, and `w` is never wholly "covered". upass.detuple splits the
+// bundle into one `wire w.f` per leaf, each a genuine single-driver net whose
+// constraint is enforced downstream. Detect any field store on `w` (a const field
+// selector sits between the base ref and the value) and skip the base check. Does
+// not descend into nested `func_def` bodies (separate scopes).
+bool prp_wire_has_field_store(const Lnast& ln, const Lnast_nid& nid, std::string_view w) {
+  const auto t = ln.get_type(nid);
+  if (Lnast_ntype::is_func_def(t)) {
+    return false;
+  }
+  if (Lnast_ntype::is_store(t)) {
+    auto c0 = ln.get_first_child(nid);
+    if (!c0.is_invalid() && Lnast_ntype::is_ref(ln.get_type(c0)) && ln.get_name(c0) == w) {
+      auto c1 = ln.get_sibling_next(c0);
+      auto c2 = c1.is_invalid() ? c1 : ln.get_sibling_next(c1);
+      if (!c2.is_invalid() && Lnast_ntype::is_const(ln.get_type(c1))) {
+        return true;  // store(w, 'field', value, …) — a per-field write
+      }
+    }
+  }
+  for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+    if (prp_wire_has_field_store(ln, c, w)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Is `w` driven inside a `for`/`while` body? A loop is unrolled later (the
 // runner), so its driver count / coverage is unknowable here — skip the strict
 // frontend check for such a wire (a real comb loop / double-drive still surfaces
@@ -1071,6 +1102,12 @@ void Prp2lnast::check_wire_scope(const Lnast_nid& node) const {
         continue;
       }
       const auto wname = lnast->get_name(name_n);
+      // A tuple-bundle wire (`wire io:(a,b)` driven by per-field `io.a = …`) is
+      // single-driver PER LEAF; the base-level count is meaningless. detuple
+      // splits it into per-leaf `wire io.a` nets, each checked downstream.
+      if (prp_wire_has_field_store(*lnast, node, wname)) {
+        continue;
+      }
       // A wire driven inside a loop is unrolled later — its coverage/multiplicity
       // is unknowable here; defer to tolg's post-unroll checks.
       if (prp_wire_written_under_loop(*lnast, node, wname, /*in_loop=*/false)) {

@@ -128,6 +128,19 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Regression for the slang reader lowering a scalar packed-struct variable as a
+# per-field BUNDLE (independent nets) instead of one flat packed bus: a struct
+# whose '{...} write computes a field from reads of its OTHER fields (the
+# dual-issue ALU `io`) becomes a false combinational self-loop as one node, which
+# the cvc5 LEC/formal encoder cannot encode. Asserts the bundle representation
+# AND cvc5-proves equivalence to the struct-free twin (just //lhd).
+sh_test(
+    name = "lec_packed_struct_test",
+    size = "large",
+    srcs = ["lec_packed_struct_test.sh"],
+    data = ["//lhd"],
+)
+
 # Regression for the "conditional reg write with no covering else does NOT
 # auto-hold" trap: an unwritten conditional path must HOLD the flop q, not lower
 # to a don't-care. Covers the empty-`elif` (PC stall), pure-write (register

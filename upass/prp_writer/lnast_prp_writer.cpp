@@ -190,6 +190,12 @@ std::string Lnast_prp_writer::take_decl_keyword(std::string_view lhs) {
 }
 
 std::string Lnast_prp_writer::decl_prefix(std::string_view lhs) {
+  // A bundle-field leaf (`io.result`) is already declared via its base bundle
+  // (`wire io:(...)`); a write to it is a plain field assignment, never a new
+  // `mut io.result` declaration (which is an illegal tuple-path lvalue decl).
+  if (is_bundle_field(lhs)) {
+    return {};
+  }
   auto kw = take_decl_keyword(lhs);
   if (!kw.empty()) {
     declared_.insert(std::string(lhs));
@@ -237,6 +243,18 @@ static bool is_pyrope_reserved_ident(std::string_view s) {
   return kw.contains(s);
 }
 
+bool Lnast_prp_writer::is_bundle_field(std::string_view name) const {
+  const auto dot = name.find('.');
+  if (dot == std::string_view::npos) {
+    return false;
+  }
+  auto it = bundle_fields_.find(std::string(name.substr(0, dot)));
+  if (it == bundle_fields_.end()) {
+    return false;
+  }
+  return it->second.count(std::string(name.substr(dot + 1))) != 0;
+}
+
 std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
   // Move the source's SSA-version names out of the recompile's PRIVATE `___ssa_`
   // namespace.  The reader hands the writer POST-SSA LNAST whose versioned names
@@ -254,12 +272,18 @@ std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
   // Only a `.` makes a body name a non-identifier here (upass.detuple's per-field
   // `mem.field` memories). Integer constants that also flow through this helper
   // (`6`, `0sb?`, `0xff`) must stay bare, so do NOT quote on other characters.
-  auto quote = [](std::string s) -> std::string {
+  auto quote = [this](std::string s) -> std::string {
     // A name read from an escaped Verilog id arrives ALREADY backtick-quoted
     // (`` `ar.x` `` — the dlop quoted-identifier form). Emit it verbatim; wrapping
     // it again yields `` ``ar.x`` `` which the Pyrope lexer rejects (the v2prp
     // round-trip then fails to re-parse). Only a bare `.`-name needs quoting.
     if (s.size() >= 2 && s.front() == '`' && s.back() == '`') {
+      return s;
+    }
+    // A reconstructed bundle field (`io.operation`) is a REAL tuple-field access,
+    // not an opaque dotted leaf name — emit the bare dotted path so it re-parses
+    // as `io.operation` (detuple re-splits it), instead of a quoted leaf.
+    if (is_bundle_field(s)) {
       return s;
     }
     return (s.find('.') == std::string::npos && !is_pyrope_reserved_ident(s)) ? s : "`" + s + "`";
@@ -517,6 +541,106 @@ void Lnast_prp_writer::write_module() {
     // `mut X = 0` to the function top makes every write in-scope. Vars that DO
     // have a declare node (regs, memories, explicit `mut`) are skipped — they
     // are emitted by their declare (the reg/mem hoist pass below).
+    // ── Bundle reconstruction ──────────────────────────────────────────────
+    // upass.detuple split a scalar tuple `wire io:(...)` into dotted leaf nets
+    // (`io.operation`, `io.inputx`, …). Regroup them into ONE
+    // `wire io:(operation:u5, …) = nil` declaration and render each `io.field`
+    // access as the bare dotted path (the quote() bundle check above) — so the
+    // struct/bundle info surfaces in the emitted Pyrope instead of escaped
+    // `` `io.field` `` leaves. On recompile detuple re-splits it. Populate
+    // bundle_fields_ + suppress_decl_ BEFORE the hoist scan so strip_prefix is
+    // bundle-consistent throughout. Only homogeneous-mode wire/mut leaf sets are
+    // bundled (a leaf with a nested dot or a mixed mode leaves its base alone).
+    {
+      std::vector<std::string>                                             base_order;
+      std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>> bf;  // base -> [(field,type)]
+      std::unordered_map<std::string, std::string>                        base_mode;
+      std::unordered_set<std::string>                                     base_bad;
+      for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+        if (!Lnast_ntype::is_declare(lnast->get_type(c))) {
+          continue;
+        }
+        auto v = lnast->get_child(c);
+        if (v.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(v))) {
+          continue;
+        }
+        std::string raw(lnast->get_name(v));  // RAW dotted leaf name (no strip_prefix escaping)
+        auto        dot = raw.find('.');
+        if (dot == std::string::npos || raw[0] == '%') {
+          continue;
+        }
+        auto        c1   = lnast->get_sibling_next(v);
+        auto        c2   = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
+        std::string mode = (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2)))
+                               ? std::string(lnast->get_name(c2))
+                               : std::string("mut");
+        if (mode != "wire") {
+          continue;  // only a plain `wire` leaf bundles — detuple re-splits a `wire`
+                     // tuple; a `mut` tuple is left to constprop (kind/overflow checks)
+        }
+        std::string base  = raw.substr(0, dot);
+        std::string field = raw.substr(dot + 1);
+        if (field.find('.') != std::string::npos) {
+          base_bad.insert(base);  // nested leaf — leave the whole base unbundled
+          continue;
+        }
+        auto bit = bf.find(base);
+        if (bit == bf.end()) {
+          base_order.push_back(base);
+          base_mode[base] = mode;
+        } else if (base_mode[base] != mode) {
+          base_bad.insert(base);  // mixed wire/mut under one base — unbundle it
+        }
+        bf[base].emplace_back(field, c1.is_invalid() ? std::string{} : render_type_at(c1));
+      }
+      // A base WRITTEN WHOLE (`store(base, value)` — a 2-child store of the base
+      // itself, e.g. an instance-result struct `_pipeA_if_id_io_data = inst`) is
+      // NOT a detuple-split tuple: bundling it would emit `wire base:(...) = nil`
+      // over a whole-net driver, which the re-compile rejects (multi-driver). Such
+      // a base keeps its flat per-leaf form. Scan the body for whole-base stores.
+      std::function<void(Lnast_nid)> scan_whole = [&](Lnast_nid n) {
+        for (auto c = lnast->get_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+          if (Lnast_ntype::is_store(lnast->get_type(c))) {
+            auto f0 = lnast->get_child(c);
+            if (!f0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(f0))) {
+              std::string nm(lnast->get_name(f0));
+              auto        f1 = lnast->get_sibling_next(f0);
+              // exactly 2 children (ref + value) AND the ref is a bare base name
+              if (!f1.is_invalid() && lnast->get_sibling_next(f1).is_invalid() && nm.find('.') == std::string::npos) {
+                base_bad.insert(nm);
+              }
+            }
+          }
+          scan_whole(c);
+        }
+      };
+      scan_whole(stmts_nid);
+      for (const auto& base : base_order) {
+        if (base_bad.count(base) || bf[base].empty() || declared_.count(base)) {
+          continue;
+        }
+        print_indent();
+        os << base_mode[base] << " " << base << ":(";
+        bool first = true;
+        for (const auto& [f, t] : bf[base]) {
+          if (!first) {
+            os << ", ";
+          }
+          os << f;
+          if (!t.empty()) {
+            os << ":" << t;
+          }
+          bundle_fields_[base].insert(f);
+          first = false;
+        }
+        os << ") = nil\n";
+        declared_.insert(base);
+        for (const auto& [f, t] : bf[base]) {
+          suppress_decl_.insert(std::string(strip_prefix(base + "." + f)));  // drop the per-leaf declare
+        }
+      }
+    }
+
     {
       std::unordered_set<std::string>              top_decl, nonmut_decl, nested_mut_decl, store_lhs;
       std::unordered_map<std::string, std::string> nested_wire_decl;  // name -> rendered type (or "")

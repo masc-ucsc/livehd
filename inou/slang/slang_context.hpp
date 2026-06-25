@@ -190,6 +190,66 @@ private:
   std::string flat_port_read(const slang::ast::ElementSelectExpression& es, const Mem_info& mi);
   void        flat_port_write(const slang::ast::ElementSelectExpression& es, const Mem_info& mi, const std::string& rhs);
 
+  // ── scalar packed-struct vars as per-field BUNDLES ─────────────────────────
+  // A scalar (non-array, non-reg, non-port) packed-struct variable lowers to one
+  // independent LEAF net per field (`io.operation`, `io.inputx`, …) instead of a
+  // single flat packed bus + bit-slices. Field reads/writes become plain scalar
+  // reads/writes of the dotted leaf — so a struct that mixes input-fed fields and
+  // computed fields no longer collapses into ONE LGraph node whose driver reads
+  // itself (the false combinational self-loop that made `io.operation[4]` a
+  // bit-slice of a self-referential `io` bus and broke LEC encoding). The dotted
+  // leaf survives to cgen as the escaped id `\io.operation`. Mirrors the
+  // post-SSA tuple-PORT flatten shape (plain scalar stores to dotted leaves).
+  struct Struct_info {
+    struct Field {
+      std::string name;
+      int64_t     off       = 0;  // packed bit offset (for whole-struct reconstruct)
+      int         bits      = 1;
+      bool        is_signed = false;
+    };
+    std::vector<Field> fields;
+    bool               is_wire = false;  // declared `wire` (position-independent leaf reads)
+    // Emitted as a REAL tuple (`wire io:(...)`, field reads/writes via
+    // tuple_get/field-store, upass.detuple splits it). Only a cyclic (wire) struct
+    // whose fields are ALL scalar — detuple cannot split a NESTED struct field, and
+    // a non-cyclic struct keeps its flat-leaf form. Otherwise the per-field flat
+    // leaf nets are used (still a bundle in the LGraph, just not a tuple in LNAST).
+    bool               is_tuple = false;
+  };
+  absl::flat_hash_map<const slang::ast::Symbol*, Struct_info> struct_var_info_;
+  // Scalar packed-struct vars assigned a whole `'{...}` pattern somewhere (i.e.
+  // driven per-field, like the ALU `io`). Only such a struct is emitted as a real
+  // tuple — one whose drivers are NOT per-field (an instance-output net, a whole
+  // expression copy) cannot be detuple-split, so it keeps the flat-leaf form.
+  // Populated by a pre-scan in lower_module; reset per module.
+  absl::flat_hash_set<const slang::ast::Symbol*> struct_pattern_assigned_;
+  void collect_struct_pattern_assigns(const slang::ast::Scope& scope);
+  // True for a scalar packed-struct VARIABLE we lower per-field (excludes ports,
+  // clocked regs, and arrays — those keep their existing lowering).
+  bool is_scalar_struct_var(const slang::ast::ValueSymbol& sym) const;
+  const Struct_info::Field* find_struct_field(const Struct_info& si, std::string_view name) const;
+  // Declare the per-field leaf nets (called from declare_value_symbol).
+  void declare_struct_leaves(const slang::ast::ValueSymbol& sym);
+  // Raw (non-splitting) scalar store / read of a dotted leaf net. `create_*_stmts`
+  // split a dotted name on '.' into tuple_get/tuple_set ops (the LNAST bundle-path
+  // split); these build the store node directly so the dotted name stays ONE flat
+  // ref that tolg resolves as a wire net (the same shape the SSA port-flatten and
+  // the tuple-memory path emit).
+  void        emit_leaf_store(const std::string& leaf, const std::string& value);
+  std::string read_leaf(const std::string& leaf);
+  // Wire-tuple (cyclic) struct field write / read via tuple_get + field-store ops
+  // (detuple splits them to leaf nets). A non-cyclic (mut) struct uses the flat
+  // emit_leaf_store / read_leaf forms instead.
+  void        emit_struct_field_set(const std::string& base, const std::string& field, const std::string& value);
+  std::string read_struct_field_get(const std::string& base, const std::string& field);
+  // `io = '{...}` / `io = other_struct` whole-struct write → one leaf write per
+  // field (each leaf gets its OWN driver value, NOT a re-slice of the
+  // concatenated whole — that would reintroduce the field↔field self-loop).
+  // Returns false for an unhandled RHS shape (caller falls back to the bus path).
+  bool assign_struct_whole(const slang::ast::ValueSymbol& sym, const slang::ast::Expression& rhs);
+  // Reconstruct the packed value of a whole-struct read from its leaves.
+  std::string read_struct_whole(const slang::ast::ValueSymbol& sym);
+
   // ── statements (slang_stmt.cpp) ────────────────────────────────────────────
   void lower_statement(const slang::ast::Statement& stmt);
   void lower_conditional(const slang::ast::ConditionalStatement& stmt);

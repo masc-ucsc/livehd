@@ -9,6 +9,8 @@
 #include "slang/ast/expressions/AssignmentExpressions.h"
 #include "slang/ast/expressions/ConversionExpression.h"
 #include "slang/ast/types/AllTypes.h"
+
+#include "absl/strings/str_cat.h"
 #include "slang_context.hpp"
 
 using slang::ast::ExpressionKind;
@@ -50,6 +52,24 @@ void Slang_context::lower_assign(const slang::ast::AssignmentExpression& expr) {
   }
 
   const auto& lhs = expr.left();
+
+  // Whole-struct write to a per-field bundle var (`io = '{...}'` / `io = other`):
+  // split into one leaf write per field. Done BEFORE lowering the RHS so a
+  // struct literal's per-field values bind directly to each leaf — NOT a re-slice
+  // of the concatenated whole (which would make `io.result` depend on the
+  // concat's `io.operation` read, reintroducing the false self-loop).
+  if (!expr.isCompound()) {
+    const slang::ast::Expression* l = &lhs;
+    while (l->kind == ExpressionKind::Conversion) {
+      l = &l->as<slang::ast::ConversionExpression>().operand();
+    }
+    if (l->kind == ExpressionKind::NamedValue && is_scalar_struct_var(l->as<slang::ast::NamedValueExpression>().symbol)) {
+      current_assign_nonblocking_ = expr.isNonBlocking();
+      if (assign_struct_whole(l->as<slang::ast::NamedValueExpression>().symbol, expr.right())) {
+        return;
+      }
+    }
+  }
 
   // Compound assigns (a += b): slang represents the RHS as op(LValueReference, b).
   // Lower the current target value first so LValueReference can read it.
@@ -189,6 +209,32 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
           }
         }
       }
+      // Field write of a scalar packed-struct VARIABLE lowered as a bundle:
+      // `io.operation = v` is a plain scalar write of the leaf net.
+      if (ma.value().kind == ExpressionKind::NamedValue) {
+        const auto& bsym = ma.value().as<slang::ast::NamedValueExpression>().symbol;
+        if (is_scalar_struct_var(bsym)) {
+          if (!declared_.contains(&bsym)) {
+            declare_value_symbol(bsym, /*force_reg=*/false);
+          }
+          const auto& field = ma.member.as<slang::ast::FieldSymbol>();
+          if (auto it = struct_var_info_.find(&bsym); it != struct_var_info_.end()) {
+            if (const auto* f = find_struct_field(it->second, field.name)) {
+              note_write(bsym, current_assign_nonblocking_, lhs.sourceRange.start());
+              // fit_wrap (truncate + sign-reinterpret), not to_pattern: the leaf
+              // is declared at the field's width/sign, so a signed field must land
+              // in its signed range (to_pattern would leave an unsigned pattern).
+              auto val = fit_wrap(to_int_value(rhs), f->bits, f->is_signed);
+              if (it->second.is_tuple) {
+                emit_struct_field_set(lname_of(bsym), f->name, val);  // tuple field store
+              } else {
+                emit_leaf_store(absl::StrCat(lname_of(bsym), ".", f->name), val);  // flat leaf
+              }
+              return;
+            }
+          }
+        }
+      }
       Packed_lv lv;
       if (resolve_packed_lvalue(lhs, lv)) {
         emit_packed_rmw(lv, rhs, lhs.sourceRange);
@@ -223,6 +269,98 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
 //     (Verilator/yosys flatten unpacked ports identically, so LEC lines up).
 //   - packed (integral) target: slang resolves elements MSB-first, like a
 //     `{...}` concatenation (element 0 occupies the high bits).
+// Whole-struct write to a per-field bundle var. Each field's leaf net gets its
+// OWN driver value (a struct literal's per-field expression, a sibling struct's
+// matching leaf, or — for any other packed RHS — a slice of that whole value).
+bool Slang_context::assign_struct_whole(const slang::ast::ValueSymbol& sym, const slang::ast::Expression& rhs) {
+  if (!declared_.contains(&sym)) {
+    declare_value_symbol(sym, /*force_reg=*/false);
+  }
+  auto it = struct_var_info_.find(&sym);
+  if (it == struct_var_info_.end()) {
+    return false;
+  }
+  const auto& si   = it->second;
+  auto        base = lname_of(sym);
+  // Write field `f` of this struct: a wire struct is a real tuple (field-store
+  // op, detuple-split); a mut struct is flat leaves.
+  auto put = [&](const std::string& field, const std::string& value) {
+    if (si.is_tuple) {
+      emit_struct_field_set(base, field, value);
+    } else {
+      emit_leaf_store(absl::StrCat(base, ".", field), value);
+    }
+  };
+
+  const slang::ast::Expression* r = &rhs;
+  while (r->kind == ExpressionKind::Conversion) {
+    r = &r->as<slang::ast::ConversionExpression>().operand();
+  }
+
+  // `io = '{...}` assignment pattern: slang resolves elements in field order, so
+  // element[i] is field[i]'s value. Write each leaf from its element directly.
+  std::span<const slang::ast::Expression* const> elems;
+  bool                                           is_pattern = true;
+  switch (r->kind) {
+    case ExpressionKind::SimpleAssignmentPattern:
+      elems = r->as<slang::ast::SimpleAssignmentPatternExpression>().elements();
+      break;
+    case ExpressionKind::StructuredAssignmentPattern:
+      elems = r->as<slang::ast::StructuredAssignmentPatternExpression>().elements();
+      break;
+    case ExpressionKind::ReplicatedAssignmentPattern:
+      elems = r->as<slang::ast::ReplicatedAssignmentPatternExpression>().elements();
+      break;
+    default: is_pattern = false; break;
+  }
+  if (is_pattern && elems.size() == si.fields.size()) {
+    note_write(sym, current_assign_nonblocking_, rhs.sourceRange.start());
+    for (size_t i = 0; i < si.fields.size(); ++i) {
+      const auto& f = si.fields[i];
+      // fit_wrap (not to_pattern): land each value in the leaf's declared
+      // width/sign — a signed field must stay in its signed range.
+      auto v = fit_wrap(to_int_value(lower_rvalue(*elems[i])), f.bits, f.is_signed);
+      put(f.name, v);
+    }
+    return true;
+  }
+
+  // `io = io2` whole copy from a sibling bundle struct: copy matching leaves.
+  if (r->kind == ExpressionKind::NamedValue) {
+    const auto& osym = r->as<slang::ast::NamedValueExpression>().symbol;
+    if (is_scalar_struct_var(osym)) {
+      if (!declared_.contains(&osym)) {
+        declare_value_symbol(osym, /*force_reg=*/false);
+      }
+      auto oit = struct_var_info_.find(&osym);
+      note_write(sym, current_assign_nonblocking_, rhs.sourceRange.start());
+      for (const auto& f : si.fields) {
+        // Read the source field per the SOURCE struct's representation.
+        auto src = (oit != struct_var_info_.end() && oit->second.is_tuple)
+                       ? read_struct_field_get(lname_of(osym), f.name)
+                       : read_leaf(absl::StrCat(lname_of(osym), ".", f.name));
+        put(f.name, src);
+      }
+      return true;
+    }
+  }
+
+  // Any other packed RHS (a function result, a ?: of structs, …): lower the whole
+  // value once and slice each field out of it. The RHS does not read `io`'s own
+  // fields, so this slice introduces no self-dependency.
+  auto bi = tinfo(sym.getType());
+  auto p  = to_pattern(to_int_value(lower_rvalue(rhs)), bi.bits, false);
+  note_write(sym, current_assign_nonblocking_, rhs.sourceRange.start());
+  for (const auto& f : si.fields) {
+    auto fv = extract_field(p, f.off, f.bits);
+    if (f.is_signed) {
+      fv = builder_.create_sext_stmts(fv, std::to_string(f.bits - 1));
+    }
+    put(f.name, fv);
+  }
+  return true;
+}
+
 void Slang_context::assign_to_pattern(const slang::ast::Expression& lhs,
                                       std::span<const slang::ast::Expression* const> elems, const std::string& rhs) {
   const auto& ct = lhs.type->getCanonicalType();

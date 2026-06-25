@@ -15,6 +15,8 @@
 #include "slang/ast/symbols/SubroutineSymbols.h"
 #include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/ast/types/AllTypes.h"
+
+#include "absl/strings/str_cat.h"
 #include "slang_context.hpp"
 
 using slang::ast::BinaryOperator;
@@ -181,6 +183,12 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
     if (cv.isInteger()) {
       return const_text(cv.integer());
     }
+  }
+
+  // A whole read of a per-field bundle struct: reconstruct the packed value from
+  // its leaves (field accesses are intercepted before reaching here).
+  if (is_scalar_struct_var(sym)) {
+    return read_struct_whole(sym);
   }
 
   auto name = lname_of(sym);
@@ -598,6 +606,26 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
             }
             auto d = emit_field_read_chain(lname_of(*base_sym), idx, f->name);
             return f->is_signed ? builder_.create_sext_stmts(d, std::to_string(f->bits - 1)) : d;
+          }
+        }
+      }
+    }
+    // Field read of a scalar packed-struct VARIABLE lowered as a bundle:
+    // `io.operation` is just the leaf net (an independent wire), not a bit-slice
+    // of a flat `io` bus. (`io.operation[4]` then bit-selects this leaf.)
+    if (ma.value().kind == ExpressionKind::NamedValue) {
+      const auto& bsym = ma.value().as<slang::ast::NamedValueExpression>().symbol;
+      if (is_scalar_struct_var(bsym)) {
+        if (!declared_.contains(&bsym)) {
+          declare_value_symbol(bsym, /*force_reg=*/false);
+        }
+        const auto& field = ma.member.as<slang::ast::FieldSymbol>();
+        if (auto it = struct_var_info_.find(&bsym); it != struct_var_info_.end()) {
+          if (const auto* f = find_struct_field(it->second, field.name)) {
+            // A real-tuple struct reads the field via tuple_get; a flat-leaf struct
+            // (mut, or a wire with nested fields) uses its leaf net directly.
+            return it->second.is_tuple ? read_struct_field_get(lname_of(bsym), f->name)
+                                       : read_leaf(absl::StrCat(lname_of(bsym), ".", f->name));
           }
         }
       }

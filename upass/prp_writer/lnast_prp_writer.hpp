@@ -220,6 +220,15 @@ private:
   // net, so write_declare must NOT add the combinational `= 0` default to such a
   // wire — the store is its sole driver and a `= 0` would make it multi-driven.
   std::unordered_set<std::string> wire_stored_;
+  // Bundle reconstruction: a base name (`io`) -> its leaf field set (`operation`,
+  // `inputx`, …). upass.detuple split a scalar tuple `wire io:(...)` into dotted
+  // leaf nets (`io.operation`); the writer regroups them back into ONE
+  // `wire io:(operation:u5, …)` declaration and renders every `io.field` access as
+  // the bare dotted path (not an escaped `` `io.field` ``), so the bundle/struct
+  // info surfaces in the emitted Pyrope. On recompile detuple re-splits it.
+  std::unordered_map<std::string, std::unordered_set<std::string>> bundle_fields_;
+  // True if `name` is a known bundle field `base.field` (rendered unescaped).
+  bool is_bundle_field(std::string_view name) const;
 
   // Multi-output-comb destructuring (see set_multi_out_combs).  When a call to a
   // multi-output comb binds to a var `r`, the func_call is emitted as a

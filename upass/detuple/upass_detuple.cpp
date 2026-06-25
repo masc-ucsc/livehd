@@ -71,6 +71,7 @@ private:
   struct Struct_reg {
     std::vector<Field> fields;    // per leaf: name, type, reset value (invalid = no reset)
     std::string        init_tmp;  // the reset-value `tuple_add(init_tmp, …)` temp (dropped)
+    std::string        mode;      // declare mode: "reg" (Flop+reset) or "wire"/"mut" (a scalar net per leaf, NO reset)
   };
   absl::flat_hash_map<std::string, Struct_reg> split_reg_;
   absl::flat_hash_set<std::string>             drop_temp_;      // tuple_add dst temps to drop (shape/init bundles)
@@ -308,6 +309,8 @@ private:
       std::string init_tmp;   // non-empty: ref-init reset bundle temp
       bool        init_nil;   // declare init child is `const 'nil'` (no reset)
       bool        bad;        // a non-const/unsupported reset → leave verbatim
+      std::string mode;       // "reg" | "wire" | "mut"
+      bool        is_reg;     // mode is reg (gets a Flop + reset); else a plain net per leaf
     };
     absl::flat_hash_map<std::string, Cand> cand;
     for (const auto n : src_->depth_preorder(src_->get_root())) {
@@ -321,7 +324,17 @@ private:
         continue;
       }
       const std::string mode{name_of(c2)};
-      if (mode != "reg" && !mode.starts_with("reg ")) {
+      const bool        is_reg  = (mode == "reg" || mode.starts_with("reg "));
+      const bool        is_wire = (mode == "wire" || mode.starts_with("wire "));
+      // A scalar tuple register splits into per-leaf Flops (with reset); a scalar
+      // tuple WIRE splits into per-leaf nets (no reset — the value arrives via the
+      // field stores / the wire's single driver). Both share the same shape
+      // (declare(prim_type_none) + dotted type_specs + field stores/tuple_gets).
+      // A scalar tuple `mut` is intentionally LEFT ALONE — constprop resolves it
+      // (and emits the field-kind / overflow diagnostics on the bundle); splitting
+      // it here would bypass those checks. A flattened-struct bundle that needs
+      // hardware lowering is always emitted as a `wire` (slang reader / prp_writer).
+      if (!is_reg && !is_wire) {
         continue;
       }
       if (Lnast_ntype::is_comp_type_array(type_of(c1))) {
@@ -331,8 +344,12 @@ private:
       cd.type_nid = c1;
       cd.init_nil = false;
       cd.bad      = false;
+      cd.mode     = mode;
+      cd.is_reg   = is_reg;
       auto c3     = src_->get_sibling_next(c2);  // optional reset value
-      if (!c3.is_invalid()) {
+      if (!is_reg) {
+        cd.init_nil = true;  // wire/mut: no reset child — init/drivers are body stores
+      } else if (!c3.is_invalid()) {
         if (Lnast_ntype::is_ref(type_of(c3))) {
           cd.init_tmp = std::string(name_of(c3));
         } else if (Lnast_ntype::is_const(type_of(c3)) && name_of(c3) == "nil") {
@@ -488,6 +505,7 @@ private:
       Struct_reg sr;
       sr.fields   = std::move(fv);
       sr.init_tmp = cd.init_nil ? std::string{} : cd.init_tmp;
+      sr.mode     = cd.mode;
       // SAFETY GATE: only split V when EVERY use of whole-V is one we fully
       // rewrite. Anything else (a whole-tuple read `out = bank`, a non-literal
       // whole write, V handed to a call) would be silently mis-lowered after the
@@ -609,6 +627,10 @@ private:
           }
           if (rest.size() == 2 && Lnast_ntype::is_const(type_of(rest[0])) && reg_has_field(sr, name_of(rest[0]))) {
             break;  // field write store(v, 'f', val)
+          }
+          if (rest.size() == 1 && Lnast_ntype::is_const(type_of(rest[0]))
+              && (name_of(rest[0]) == "nil" || name_of(rest[0]) == "0sb?")) {
+            break;  // whole nil/poison init (wire forward-declare or mut poison) — handled in store rewrite
           }
           if (rest.size() == 1 && Lnast_ntype::is_ref(type_of(rest[0]))) {
             const std::string                           tmp{name_of(rest[0])};
@@ -736,6 +758,26 @@ private:
     }
   }
 
+  // Build `declare(V.f, TYPE, mode)` for a scalar tuple WIRE/MUT leaf. Unlike a
+  // reg leaf there is NO reset child: a `wire` leaf's value is its single
+  // continuous driver and a `mut` leaf's is its body stores (both arrive as the
+  // per-field stores handle_struct_reg_store / handle_tuple_get rewrite). This is
+  // what lets a `wire io:(operation:u5, …)` tuple lower as independent nets — and
+  // what makes the slang packed-struct bundle and the prp_writer's re-emitted
+  // bundle round-trip through tolg (which has no tuple concept).
+  void emit_net_field_declare(const Lnast_nid& orig, const Lnast_nid& dst_parent, std::string_view var, const Field& f,
+                              std::string_view mode) {
+    auto d = dst_->add_child(dst_parent, Lnast_ntype::create_declare());
+    carry(orig, d);
+    dst_->add_child(d, Lnast_node::create_ref(std::string(var) + std::string(kSep) + f.name));
+    if (f.type_nid.is_invalid()) {
+      dst_->add_child(d, Lnast_ntype::create_prim_type_none());  // untyped leaf — width inferred
+    } else {
+      copy_subtree(f.type_nid, d);
+    }
+    dst_->add_child(d, Lnast_node::create_const(std::string(mode)));
+  }
+
   // Recursively copy children of src_n under dst_parent, applying the rewrites.
   void copy_transformed(const Lnast_nid& src_n, const Lnast_nid& dst_parent) {
     std::string drop_typedef_of;  // non-empty: dropping a dead `type T=(...)` region for this T
@@ -825,8 +867,13 @@ private:
       return true;
     }
     if (auto it = split_reg_.find(var); it != split_reg_.end()) {
+      const bool is_reg = it->second.mode == "reg" || it->second.mode.starts_with("reg ");
       for (const auto& f : it->second.fields) {
-        emit_reg_field_declare(c, dst_parent, var, f);
+        if (is_reg) {
+          emit_reg_field_declare(c, dst_parent, var, f);
+        } else {
+          emit_net_field_declare(c, dst_parent, var, f, it->second.mode);  // wire/mut leaf — no reset
+        }
       }
       return true;
     }
@@ -906,6 +953,25 @@ private:
     std::vector<Lnast_nid> rest;
     for (auto k = src_->get_sibling_next(c0); !k.is_invalid(); k = src_->get_sibling_next(k)) {
       rest.emplace_back(k);
+    }
+    // Whole nil / poison init `store(V, nil|0sb?)`: a `wire V:(...) = nil` is a
+    // forward-declare placeholder whose real drivers are the per-field writes, so
+    // DROP it (each leaf wire keeps its single field driver). A `mut V:(...) = nil`
+    // poison-inits every leaf (mirrors the scalar mut path).
+    if (rest.size() == 1 && Lnast_ntype::is_const(type_of(rest[0]))) {
+      const auto txt = name_of(rest[0]);
+      if (txt == "nil" || txt == "0sb?") {
+        const bool is_wire = sr.mode == "wire" || sr.mode.starts_with("wire ");
+        if (!is_wire) {
+          for (const auto& f : sr.fields) {
+            auto st = dst_->add_child(dst_parent, Lnast_ntype::create_store());
+            carry(c, st);
+            dst_->add_child(st, Lnast_node::create_ref(std::string(var) + std::string(kSep) + f.name));
+            dst_->add_child(st, Lnast_node::create_const(txt));
+          }
+        }
+        return true;  // wire: dropped (field writes drive each leaf)
+      }
     }
     if (rest.size() == 2 && Lnast_ntype::is_const(type_of(rest[0])) && reg_has_field(sr, name_of(rest[0]))) {
       const std::string field{name_of(rest[0])};  // field write store(V, 'f', val)

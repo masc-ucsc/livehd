@@ -406,6 +406,8 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
 
   emit_module_io(symbol, in_tup, out_tup);
   collect_state_vars(*body);
+  struct_pattern_assigned_.clear();
+  collect_struct_pattern_assigns(*body);
   // Harvest `initial begin mem[k]=v; end` power-on contents before the declares
   // emit (declare_unpacked folds them into the reg array's initializer).
   for (const auto& member : body->members()) {
@@ -838,6 +840,12 @@ void Slang_context::declare_value_symbol(const slang::ast::ValueSymbol& sym, boo
     declare_unpacked(sym, /*is_reg=*/false);
     return;
   }
+  // A scalar packed-struct variable lowers to per-field leaf nets (bundle),
+  // never a flat packed bus — so each field is an independent LGraph net.
+  if (is_scalar_struct_var(sym)) {
+    declare_struct_leaves(sym);
+    return;
+  }
   if (!type.isIntegral()) {
     emit_unsupported(sym.location, "unsupported-var-type",
                      std::string("variable '") + std::string(sym.name) + "' has a non-integral type");
@@ -880,6 +888,197 @@ void Slang_context::declare_value_symbol(const slang::ast::ValueSymbol& sym, boo
     }
   }
   clear_pending_loc();
+}
+
+bool Slang_context::is_scalar_struct_var(const slang::ast::ValueSymbol& sym) const {
+  // Ports are already flat (CIRCT/firtool flattens struct ports to scalars), and
+  // a clocked struct keeps the existing flat-reg-bus path; only a comb/wire/mut
+  // scalar packed struct becomes a per-field bundle.
+  if (input_syms_.contains(&sym) || output_syms_.contains(&sym) || reg_syms_.contains(&sym)) {
+    return false;
+  }
+  const auto& ct = sym.getType().getCanonicalType();
+  return ct.isStruct() && ct.isIntegral();  // packed struct (unpacked structs are non-integral)
+}
+
+const Slang_context::Struct_info::Field* Slang_context::find_struct_field(const Struct_info& si,
+                                                                          std::string_view  name) const {
+  for (const auto& f : si.fields) {
+    if (f.name == name) {
+      return &f;
+    }
+  }
+  return nullptr;
+}
+
+void Slang_context::collect_struct_pattern_assigns(const slang::ast::Scope& scope) {
+  using slang::ast::ExpressionKind;
+  for (const auto& member : scope.members()) {
+    if (member.kind == slang::ast::SymbolKind::ContinuousAssign) {
+      const auto& as = member.as<slang::ast::ContinuousAssignSymbol>().getAssignment();
+      if (as.kind != ExpressionKind::Assignment) {
+        continue;
+      }
+      const auto&                   ae  = as.as<slang::ast::AssignmentExpression>();
+      const slang::ast::Expression* lhs = &ae.left();
+      while (lhs->kind == ExpressionKind::Conversion) {
+        lhs = &lhs->as<slang::ast::ConversionExpression>().operand();
+      }
+      const slang::ast::Expression* rhs = &ae.right();
+      while (rhs->kind == ExpressionKind::Conversion) {
+        rhs = &rhs->as<slang::ast::ConversionExpression>().operand();
+      }
+      const bool is_pat = rhs->kind == ExpressionKind::SimpleAssignmentPattern
+                          || rhs->kind == ExpressionKind::StructuredAssignmentPattern
+                          || rhs->kind == ExpressionKind::ReplicatedAssignmentPattern;
+      if (is_pat && lhs->kind == ExpressionKind::NamedValue) {
+        struct_pattern_assigned_.insert(&lhs->as<slang::ast::NamedValueExpression>().symbol);
+      }
+    } else if (member.kind == slang::ast::SymbolKind::GenerateBlock) {
+      const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
+      if (!gen.isUninstantiated) {
+        collect_struct_pattern_assigns(gen);
+      }
+    } else if (member.kind == slang::ast::SymbolKind::GenerateBlockArray) {
+      for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
+        collect_struct_pattern_assigns(*entry);
+      }
+    }
+  }
+}
+
+void Slang_context::declare_struct_leaves(const slang::ast::ValueSymbol& sym) {
+  const auto& st = sym.getType().getCanonicalType().as<slang::ast::PackedStructType>();
+  Struct_info si;
+  si.is_wire = wire_syms_.contains(&sym);
+  // A REAL tuple only when cyclic (wire) AND every field is scalar: upass.detuple
+  // cannot split a NESTED struct field (it defers the whole bundle), so a struct
+  // with a struct-typed field keeps the flat-leaf form (the field accesses then
+  // bit-slice the nested leaf, as before).
+  bool all_scalar = true;
+  for (const auto& f : st.membersOfType<slang::ast::FieldSymbol>()) {
+    if (f.getType().getCanonicalType().isStruct()) {
+      all_scalar = false;
+      break;
+    }
+  }
+  // A real tuple only when it is cyclic (wire), all-scalar, AND per-field driven
+  // (a `'{...}` pattern assignment) — so detuple can split it. An instance-output
+  // net or a whole-expression-driven struct is not pattern-assigned and stays flat.
+  si.is_tuple = si.is_wire && all_scalar && struct_pattern_assigned_.contains(&sym);
+  auto  base = lname_of(sym);
+  auto& ln   = *builder_.lnast;
+  set_pending_loc(sym.location);
+  // A cyclic (wire) struct is emitted as a REAL tuple — `declare(io, prim_type_none,
+  // wire)` + a dotted `type_spec(io.field)` per field — which upass.detuple splits
+  // into per-field wire leaf nets (field reads/writes are tuple_get / field-store
+  // ops). This carries the bundle/struct info through the IR (the LNAST dump and the
+  // re-emitted Pyrope both show `io:(operation:u5, …)`) AND routes the slang→lg path
+  // through the SAME detuple split the prp_writer's re-emitted bundle takes, so the
+  // two are structurally identical for LEC. A NON-cyclic (mut) struct keeps the
+  // per-field flat-leaf form (detuple leaves `mut` tuples to constprop).
+  if (si.is_tuple) {
+    auto d = builder_.add_child(Lnast_ntype::create_declare());
+    ln.add_child(d, Lnast_node::create_ref(base));
+    ln.add_child(d, Lnast_ntype::create_prim_type_none());
+    ln.add_child(d, Lnast_node::create_const("wire"));
+  }
+  for (const auto& f : st.membersOfType<slang::ast::FieldSymbol>()) {
+    auto fi = tinfo(f.getType());
+    si.fields.push_back({std::string(f.name), static_cast<int64_t>(f.bitOffset), fi.bits, fi.is_signed});
+    if (si.is_tuple) {
+      // Dotted field type_spec (detuple reads these for the field layout).
+      auto ts = builder_.add_child(Lnast_ntype::create_type_spec());
+      ln.add_child(ts, Lnast_node::create_ref(absl::StrCat(base, ".", std::string(f.name))));
+      emit_prim_type_int(ts, fi.bits, fi.is_signed);
+    } else if (si.is_wire) {
+      // A cyclic-net leaf (NOT a tuple — e.g. a nested struct): declared `wire`
+      // so a forward read binds to the resolved net.
+      auto leaf = absl::StrCat(base, ".", std::string(f.name));
+      builder_.create_declare_stmts(leaf, "wire", int_max_str(fi.bits, fi.is_signed), int_min_str(fi.bits, fi.is_signed));
+    } else {
+      // A non-cyclic leaf: a `mut` net with a poison init so a read of a
+      // never-assigned field is x, not a silent 0 (mirrors the scalar path).
+      auto leaf = absl::StrCat(base, ".", std::string(f.name));
+      builder_.create_declare_stmts(leaf, "mut", "", "");
+      if (fi.is_signed) {
+        builder_.create_assign_stmts(leaf, "0sb?");
+      } else {
+        std::string qmarks(static_cast<size_t>(fi.bits), '?');
+        builder_.create_assign_stmts(leaf, absl::StrCat("0ub", qmarks));
+      }
+    }
+  }
+  clear_pending_loc();
+  struct_var_info_.emplace(&sym, std::move(si));
+}
+
+// A field WRITE of a wire-tuple struct: `store(io, 'field', value)` (the detuple
+// field-store shape, rewritten to `store(io.field, value)`).
+void Slang_context::emit_struct_field_set(const std::string& base, const std::string& field, const std::string& value) {
+  auto& ln = *builder_.lnast;
+  auto  st = builder_.add_child(Lnast_ntype::create_store());
+  ln.add_child(st, Lnast_node::create_ref(base));
+  ln.add_child(st, Lnast_node::create_const(field));
+  builder_.add_value_child_pub(st, value);
+}
+
+// A field READ of a wire-tuple struct: `tuple_get(tmp, io, 'field')` → temp (the
+// detuple field-read shape, rewritten to `tmp = io.field`).
+std::string Slang_context::read_struct_field_get(const std::string& base, const std::string& field) {
+  auto& ln  = *builder_.lnast;
+  auto  tg  = builder_.add_child(Lnast_ntype::create_tuple_get());
+  auto  tmp = builder_.create_lnast_tmp();
+  ln.add_child(tg, Lnast_node::create_ref(tmp));
+  ln.add_child(tg, Lnast_node::create_ref(base));
+  ln.add_child(tg, Lnast_node::create_const(field));
+  return tmp;
+}
+
+void Slang_context::emit_leaf_store(const std::string& leaf, const std::string& value) {
+  auto& ln = *builder_.lnast;
+  auto  st = builder_.add_child(Lnast_ntype::create_store());
+  ln.add_child(st, Lnast_node::create_ref(leaf));
+  builder_.add_value_child_pub(st, value);
+}
+
+std::string Slang_context::read_leaf(const std::string& leaf) {
+  // Copy the leaf net into a fresh `%` temp via a raw 2-child store(tmp, ref leaf)
+  // — the same read shape the SSA port-flatten emits. The temp is a plain
+  // single-level name, so a consumer (op operand OR `create_assign_stmts`) never
+  // re-splits the dotted leaf path.
+  auto& ln  = *builder_.lnast;
+  auto  tmp = builder_.create_lnast_tmp();
+  auto  st  = builder_.add_child(Lnast_ntype::create_store());
+  ln.add_child(st, Lnast_node::create_ref(tmp));
+  ln.add_child(st, Lnast_node::create_ref(leaf));
+  return tmp;
+}
+
+std::string Slang_context::read_struct_whole(const slang::ast::ValueSymbol& sym) {
+  // Reconstruct the packed value from the per-field leaves (the inverse of the
+  // whole-struct write decomposition): OR each leaf, shifted to its bit offset.
+  if (!declared_.contains(&sym) && !input_syms_.contains(&sym)) {
+    declare_value_symbol(sym, /*force_reg=*/false);
+  }
+  auto it = struct_var_info_.find(&sym);
+  if (it == struct_var_info_.end()) {
+    return "0";
+  }
+  auto        base     = lname_of(sym);
+  const bool  is_tuple = it->second.is_tuple;
+  std::string acc;
+  for (const auto& f : it->second.fields) {
+    // Read each field per the struct's representation (tuple_get for a real
+    // tuple, flat leaf copy otherwise), then place it at its bit offset.
+    auto raw    = is_tuple ? read_struct_field_get(base, f.name) : read_leaf(absl::StrCat(base, ".", f.name));
+    auto placed = to_pattern(raw, f.bits, f.is_signed);
+    if (f.off != 0) {
+      placed = builder_.create_shl_stmts(placed, std::to_string(f.off));
+    }
+    acc = acc.empty() ? placed : builder_.create_bit_or_stmts({acc, placed});
+  }
+  return acc.empty() ? std::string{"0"} : acc;
 }
 
 namespace {
