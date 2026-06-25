@@ -57,7 +57,13 @@ static int driverMain(int argc, TArgs argv, Slang_context& slang_tree) {
 
     auto compilation = driver.createCompilation();
     driver.reportCompilation(*compilation, quietMode);
-    driver.runAnalysis(*compilation);
+    // NOTE: driver.runAnalysis() is intentionally NOT called. It runs slang's
+    // data-flow/lint analysis (unused/undriven-signal etc.) whose warnings LiveHD
+    // discards — it never feeds process_root's lowering, and parse/elaboration
+    // errors are already reported by reportDiagnostics below. On large designs
+    // (XiangShan XSCore) its IntervalMap DataFlowAnalysis state-copy is quadratic
+    // and dominated ~85% of the whole-design V->LG compile (a profiled regression
+    // after a slang pin bump), blowing a ~2-minute compile up to >10 minutes.
     ok &= driver.reportDiagnostics(quietMode);
 
     if (ok) {
