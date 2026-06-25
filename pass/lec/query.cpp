@@ -658,8 +658,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         if (sig.bits <= 0 || sig.size <= 0) {
           continue;
         }
-        std::string sg  = std::to_string(sig.size) + "x" + std::to_string(sig.bits) + ":r" + std::to_string(sig.n_rd)
-                       + "w" + std::to_string(sig.n_wr);
+        std::string sg  = std::to_string(sig.size) + "x" + std::to_string(sig.bits);  // shape only; occ matches by RTL order
         std::string key = mem_state_key(sig, occ[sg]++);
         if (sm.count(key)) {
           continue;

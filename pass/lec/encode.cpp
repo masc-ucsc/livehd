@@ -251,8 +251,18 @@ Mem_sig read_mem_sig(const hhds::Node_class& node) {
 // count of prior same-signature memories in forward_class() order) disambiguates
 // multiple identical memories. Both designs enumerate in the same RTL order, so
 // corresponding memories collapse to one shared array symbol. See M4 in lec.md.
+// NOTE: the key is the size×bits SHAPE + occurrence ONLY — deliberately NOT the
+// read/write PORT COUNTS. The shared symbol is the memory's INITIAL CONTENTS, which
+// depend only on the array shape, not on how many ports access it. firtool unrolls a
+// dynamic write `regs[wr]<=d` into ~N const-address write ports, so the same RTL array
+// can present a very different port count across front-ends (e.g. r4w65 vs r4w2); keying
+// the init cut on port counts wrongly prevented those corresponding memories from sharing
+// one initial array (a false-refute on any uninitialized-read). Matching by shape+order
+// (both designs enumerate memories in the same RTL order) is the same premise already used
+// for flop-state correspondence; the per-design read/write topology is still honored when
+// building each side's next-state relation.
 std::string mem_state_key(const Mem_sig& sig, int occ) {
-  return std::format("\x01m:{}x{}:r{}w{}#{}", sig.size, sig.bits, sig.n_rd, sig.n_wr, occ);
+  return std::format("\x01m:{}x{}#{}", sig.size, sig.bits, occ);
 }
 
 Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, std::string_view prefix,
@@ -533,8 +543,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     if (mc.sig.bits <= 0 || mc.sig.size <= 0) {
       return fail("memory '" + gu::debug_name(node) + "' missing bits/size");
     }
-    std::string sg = std::to_string(mc.sig.size) + "x" + std::to_string(mc.sig.bits) + ":r" + std::to_string(mc.sig.n_rd)
-                   + "w" + std::to_string(mc.sig.n_wr);
+    std::string sg = std::to_string(mc.sig.size) + "x" + std::to_string(mc.sig.bits);  // shape only; occ matches by RTL order
     mc.key = mem_state_key(mc.sig, mem_occ[sg]++);
     for (auto e : node.inp_edges()) {
       auto        raw_pid = static_cast<int>(e.sink.get_port_id());
