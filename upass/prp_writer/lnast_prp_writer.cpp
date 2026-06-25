@@ -2475,6 +2475,7 @@ void Lnast_prp_writer::analyze_muxes(Lnast_nid stmts_nid) {
       top_decl_node.emplace(std::string(strip_prefix(lnast->get_name(v))), c);
     }
   }
+  std::unordered_set<std::string> post_dead;  // signals orphaned by a suppressed default store
   std::function<void(Lnast_nid)> rec = [&](Lnast_nid blk) {
     std::vector<Lnast_nid> kids;
     for (auto c = lnast->get_child(blk); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
@@ -2546,14 +2547,28 @@ void Lnast_prp_writer::analyze_muxes(Lnast_nid stmts_nid) {
             folded_node_.insert(kids[i - 1].get_class_index().value);
           } else if (i > 0) {
             // has explicit else: an immediately-preceding redundant store to lhs is dead.
-            std::string pl;
-            auto        prev = kids[i - 1];
-            const auto  t    = lnast->get_type(prev);
-            auto        x0   = lnast->get_child(prev);
+            auto       prev = kids[i - 1];
+            const auto t    = lnast->get_type(prev);
+            auto       x0   = lnast->get_child(prev);
             if (defines_child0(t) && !x0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(x0))
                 && std::string(strip_prefix(lnast->get_name(x0))) == mi.lhs && t != Lnast_ntype::Lnast_ntype_func_call
                 && !Lnast_ntype::is_if_like(t)) {
               folded_node_.insert(prev.get_class_index().value);
+              // If that store was a plain copy `lhs = Y` and Y's ONLY read was it
+              // (use_count==1), Y is now dead — its sole consumer is gone. Targeted
+              // & safe: we know exactly which read disappeared. Skip regs/mems.
+              if (t == Lnast_ntype::Lnast_ntype_store) {
+                auto yv = lnast->get_sibling_next(x0);
+                if (!yv.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(yv)) && lnast->get_sibling_next(yv).is_invalid()) {
+                  std::string yn(lnast->get_name(yv));
+                  std::string ys(strip_prefix(yn));
+                  auto        fit = fold_info_.find(yn);
+                  if (fit != fold_info_.end() && fit->second.use_count == 1 && !folded_attrs_.count(ys)
+                      && ys.find('.') == std::string::npos) {
+                    post_dead.insert(ys);
+                  }
+                }
+              }
             }
           }
           // Fold the target's poison declare (`mut x:T = 0`) into the mux assign:
@@ -2583,6 +2598,25 @@ void Lnast_prp_writer::analyze_muxes(Lnast_nid stmts_nid) {
     }
   };
   rec(stmts_nid);
+
+  // Drop signals orphaned by a suppressed default store (their sole read is gone).
+  if (!post_dead.empty()) {
+    dead_signals_.insert(post_dead.begin(), post_dead.end());
+    std::function<void(Lnast_nid)> mark = [&](Lnast_nid n) {
+      for (auto c = lnast->get_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+        const auto t = lnast->get_type(c);
+        if (defines_child0(t) && t != Lnast_ntype::Lnast_ntype_func_call) {
+          auto c0 = lnast->get_child(c);
+          if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0))
+              && post_dead.count(std::string(strip_prefix(lnast->get_name(c0))))) {
+            folded_node_.insert(c.get_class_index().value);
+          }
+        }
+        mark(c);
+      }
+    };
+    mark(stmts_nid);
+  }
 }
 
 void Lnast_prp_writer::analyze_folding() {
