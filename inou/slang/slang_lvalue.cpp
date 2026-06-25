@@ -280,12 +280,19 @@ bool Slang_context::assign_struct_whole(const slang::ast::ValueSymbol& sym, cons
   if (it == struct_var_info_.end()) {
     return false;
   }
-  const auto& si   = it->second;
-  auto        base = lname_of(sym);
+  // SNAPSHOT the struct info: the lower_rvalue()/declare_value_symbol() calls
+  // below can declare further structs and INSERT into struct_var_info_, rehashing
+  // it and dangling any reference into it. A dangling `si.fields.size()` re-read
+  // each loop iteration over-ran `elems` (observed SIGABRT on DstMgu). Copy what
+  // we need up front. (Same flat_hash_map rehash-invalidation class as the
+  // tuple_slot_ref bug.)
+  const bool is_tuple = it->second.is_tuple;
+  const auto fields    = it->second.fields;  // copy
+  auto       base      = lname_of(sym);
   // Write field `f` of this struct: a wire struct is a real tuple (field-store
   // op, detuple-split); a mut struct is flat leaves.
   auto put = [&](const std::string& field, const std::string& value) {
-    if (si.is_tuple) {
+    if (is_tuple) {
       emit_struct_field_set(base, field, value);
     } else {
       emit_leaf_store(absl::StrCat(base, ".", field), value);
@@ -313,10 +320,10 @@ bool Slang_context::assign_struct_whole(const slang::ast::ValueSymbol& sym, cons
       break;
     default: is_pattern = false; break;
   }
-  if (is_pattern && elems.size() == si.fields.size()) {
+  if (is_pattern && elems.size() == fields.size()) {
     note_write(sym, current_assign_nonblocking_, rhs.sourceRange.start());
-    for (size_t i = 0; i < si.fields.size(); ++i) {
-      const auto& f = si.fields[i];
+    for (size_t i = 0; i < fields.size(); ++i) {
+      const auto& f = fields[i];
       // fit_wrap (not to_pattern): land each value in the leaf's declared
       // width/sign — a signed field must stay in its signed range.
       auto v = fit_wrap(to_int_value(lower_rvalue(*elems[i])), f.bits, f.is_signed);
@@ -332,13 +339,13 @@ bool Slang_context::assign_struct_whole(const slang::ast::ValueSymbol& sym, cons
       if (!declared_.contains(&osym)) {
         declare_value_symbol(osym, /*force_reg=*/false);
       }
-      auto oit = struct_var_info_.find(&osym);
+      auto       oit        = struct_var_info_.find(&osym);
+      const bool o_is_tuple = oit != struct_var_info_.end() && oit->second.is_tuple;
       note_write(sym, current_assign_nonblocking_, rhs.sourceRange.start());
-      for (const auto& f : si.fields) {
+      for (const auto& f : fields) {
         // Read the source field per the SOURCE struct's representation.
-        auto src = (oit != struct_var_info_.end() && oit->second.is_tuple)
-                       ? read_struct_field_get(lname_of(osym), f.name)
-                       : read_leaf(absl::StrCat(lname_of(osym), ".", f.name));
+        auto src = o_is_tuple ? read_struct_field_get(lname_of(osym), f.name)
+                              : read_leaf(absl::StrCat(lname_of(osym), ".", f.name));
         put(f.name, src);
       }
       return true;
@@ -351,7 +358,7 @@ bool Slang_context::assign_struct_whole(const slang::ast::ValueSymbol& sym, cons
   auto bi = tinfo(sym.getType());
   auto p  = to_pattern(to_int_value(lower_rvalue(rhs)), bi.bits, false);
   note_write(sym, current_assign_nonblocking_, rhs.sourceRange.start());
-  for (const auto& f : si.fields) {
+  for (const auto& f : fields) {
     auto fv = extract_field(p, f.off, f.bits);
     if (f.is_signed) {
       fv = builder_.create_sext_stmts(fv, std::to_string(f.bits - 1));

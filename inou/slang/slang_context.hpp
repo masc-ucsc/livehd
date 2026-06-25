@@ -224,6 +224,12 @@ private:
   // Populated by a pre-scan in lower_module; reset per module.
   absl::flat_hash_set<const slang::ast::Symbol*> struct_pattern_assigned_;
   void collect_struct_pattern_assigns(const slang::ast::Scope& scope);
+  // Base symbols read via member-access (`x.field`) anywhere in the module.
+  // A net-initializer struct (`wire struct{...} x = '{...}`) is split into
+  // per-field leaves only when x is field-read (else the whole-net assign is
+  // kept — splitting a whole-read-only nested struct breaks its reassembly).
+  // Populated by a body-wide pre-scan in lower_module; reset per module.
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> struct_field_read_;
   // True for a scalar packed-struct VARIABLE we lower per-field (excludes ports,
   // clocked regs, and arrays — those keep their existing lowering).
   bool is_scalar_struct_var(const slang::ast::ValueSymbol& sym) const;
@@ -394,6 +400,16 @@ private:
   // ── constant evaluation ────────────────────────────────────────────────────
   std::optional<slang::ConstantValue> try_eval(const slang::ast::Expression& expr);
   std::optional<int64_t>              try_eval_int(const slang::ast::Expression& expr);
+  // Like try_eval, but folds references to constant nets/vars by chasing their
+  // single constant driver (a `wire x = <const>` initializer or an
+  // `assign x = <const>`), recursively. firtool factors async-reset *values*
+  // into named constant wires (e.g. `enqPtr <= enqPtr_ptr;` where
+  // `enqPtr_ptr = '{...:0}`), which plain expr.eval() cannot fold.
+  std::optional<slang::ConstantValue> try_eval_const_net(const slang::ast::Expression& expr, int depth = 0);
+  // True iff sym is a packed struct whose every field is scalar (no nested struct
+  // field) — the case where a per-field leaf split round-trips cleanly even for a
+  // whole-struct read.
+  bool struct_is_all_scalar(const slang::ast::ValueSymbol& sym) const;
   static std::string                  const_text(const slang::SVInt& svint);
 
   // ── naming + reads ─────────────────────────────────────────────────────────

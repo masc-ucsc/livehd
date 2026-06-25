@@ -119,7 +119,122 @@ struct Static_selector_scan : public slang::ast::ASTVisitor<Static_selector_scan
   }
 };
 
+// Collect every NamedValue leaf symbol referenced by an expression subtree.
+struct Named_value_collector : public slang::ast::ASTVisitor<Named_value_collector, slang::ast::VisitFlags::AllGood> {
+  std::vector<const slang::ast::ValueSymbol*> syms;
+  void handle(const slang::ast::NamedValueExpression& e) {
+    syms.push_back(&e.symbol);
+    visitDefault(e);
+  }
+};
+
+// Collect the base symbol of every member-access (`x.field`) in the module, so
+// the caller knows which struct nets are read by-field (vs only whole).
+struct Member_read_collector : public slang::ast::ASTVisitor<Member_read_collector, slang::ast::VisitFlags::AllGood> {
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>* out = nullptr;
+  void handle(const slang::ast::MemberAccessExpression& ma) {
+    if (const auto* sym = lhs_base_symbol(ma.value())) {
+      out->insert(sym);
+    }
+    visitDefault(ma);
+  }
+};
+
+// Single constant-style whole-net driver of a net/var: a `wire x = <expr>`
+// initializer or an `assign x = <expr>` (whole net, not a partial select).
+// Returns nullptr when none / ambiguous.
+const slang::ast::Expression* whole_net_driver(const slang::ast::ValueSymbol& sym) {
+  if (const auto* init = sym.getInitializer()) {
+    return init;
+  }
+  const auto* scope = sym.getParentScope();
+  if (scope == nullptr) {
+    return nullptr;
+  }
+  for (const auto& member : scope->members()) {
+    if (member.kind != slang::ast::SymbolKind::ContinuousAssign) {
+      continue;
+    }
+    const auto& asn = member.as<slang::ast::ContinuousAssignSymbol>().getAssignment();
+    if (asn.kind != ExpressionKind::Assignment) {
+      continue;
+    }
+    const auto& ax = asn.as<slang::ast::AssignmentExpression>();
+    if (ax.left().kind != ExpressionKind::NamedValue) {
+      continue;  // partial-select driver is not a whole-net constant
+    }
+    if (&ax.left().as<slang::ast::NamedValueExpression>().symbol != &sym) {
+      continue;
+    }
+    return &ax.right();
+  }
+  return nullptr;
+}
+
+// Seed a net/var's constant value into `ctx` (as an EvalContext local) by
+// chasing its whole-net driver, recursively seeding the driver's own net
+// leaves first. Best-effort: returns true if `sym` got a constant value.
+bool seed_const_net(const slang::ast::ValueSymbol& sym, slang::ast::EvalContext& ctx,
+                    absl::flat_hash_set<const slang::ast::ValueSymbol*>& visiting, int depth) {
+  if (ctx.findLocal(&sym) != nullptr) {
+    return true;
+  }
+  if (depth > 64 || !visiting.insert(&sym).second) {
+    return false;  // depth cap / cycle
+  }
+  bool ok = false;
+  if (const auto* drv = whole_net_driver(sym)) {
+    Named_value_collector col;
+    drv->visit(col);
+    for (const auto* dep : col.syms) {
+      if (dep != &sym) {
+        seed_const_net(*dep, ctx, visiting, depth + 1);  // best-effort
+      }
+    }
+    auto cv = drv->eval(ctx);
+    if (!cv.bad()) {
+      ctx.createLocal(&sym, std::move(cv));
+      ok = true;
+    }
+  }
+  visiting.erase(&sym);
+  return ok;
+}
+
 }  // namespace
+
+// Fold a constant expression, chasing constant net/var drivers. firtool factors
+// async-reset *values* through named constant wires (`commitStack <=
+// _commitStack_WIRE;` where `_commitStack_WIRE = {e15,...,e0}` and each
+// `e = '{retAddr: addr_n, ctr: 0}` and `addr_n = _GEN` and `_GEN = '{addr: 0}`):
+// the RHS is a composite expression (concat / struct pattern) whose *leaves* are
+// constant nets that plain expr.eval() returns `bad` for. We seed every reachable
+// constant net leaf into an IsScript EvalContext (so NamedValue::eval consults
+// the seeded locals) and let slang fold the whole composite with correct
+// width/packing semantics. Genuinely runtime leaves stay unseeded -> eval bad ->
+// nullopt -> the caller emits unsupported-async-load.
+std::optional<slang::ConstantValue> Slang_context::try_eval_const_net(const slang::ast::Expression& expr, int /*depth*/) {
+  if (auto cv = try_eval(expr); cv) {
+    return cv;  // already fully constant
+  }
+  if (body_ == nullptr) {
+    return std::nullopt;
+  }
+  // IsScript bypasses NamedValueExpression::checkConstant so seeded module-level
+  // nets resolve via findLocal.
+  slang::ast::EvalContext ctx(body_->asSymbol(), slang::ast::EvalFlags::IsScript);
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> visiting;
+  Named_value_collector col;
+  expr.visit(col);
+  for (const auto* dep : col.syms) {
+    seed_const_net(*dep, ctx, visiting, 0);
+  }
+  auto cv = expr.eval(ctx);
+  if (cv.bad()) {
+    return std::nullopt;
+  }
+  return cv;
+}
 
 std::string Slang_context::module_name_of(const slang::ast::InstanceSymbol& symbol) {
   const auto* body = symbol.getCanonicalBody();
@@ -408,6 +523,12 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   collect_state_vars(*body);
   struct_pattern_assigned_.clear();
   collect_struct_pattern_assigns(*body);
+  struct_field_read_.clear();
+  {
+    Member_read_collector mrc;
+    mrc.out = &struct_field_read_;
+    body->visit(mrc);
+  }
   // Harvest `initial begin mem[k]=v; end` power-on contents before the declares
   // emit (declare_unpacked folds them into the reg array's initializer).
   for (const auto& member : body->members()) {
@@ -888,6 +1009,19 @@ void Slang_context::declare_value_symbol(const slang::ast::ValueSymbol& sym, boo
     }
   }
   clear_pending_loc();
+}
+
+bool Slang_context::struct_is_all_scalar(const slang::ast::ValueSymbol& sym) const {
+  const auto& ct = sym.getType().getCanonicalType();
+  if (!ct.isStruct()) {
+    return false;
+  }
+  for (const auto& f : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
+    if (f.getType().getCanonicalType().isStruct()) {
+      return false;  // nested struct field — flat-leaf whole-read does not reassemble cleanly
+    }
+  }
+  return true;
 }
 
 bool Slang_context::is_scalar_struct_var(const slang::ast::ValueSymbol& sym) const {
@@ -1511,13 +1645,31 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         const auto& ns = d.member->as<slang::ast::NetSymbol>();
         proc_kind_     = Proc_kind::none;
         set_pending_loc(ns.getInitializer()->sourceRange);
+        if (!declared_.contains(&ns) && !input_syms_.contains(&ns)) {
+          declare_value_symbol(ns, false);
+        }
+        // A scalar-struct-var net declares per-field leaves and ALL its reads
+        // (whole or by-field) go through those leaves, but the whole-net initializer
+        // never wrote them -> reads resolve to nil (collect_struct_pattern_assigns
+        // only scans ContinuousAssign, missing the initializer form). Split the
+        // initializer into per-field writes like the continuous-`assign x = '{...}`
+        // path. Safe when the struct is ALL-SCALAR (leaf<->whole round-trips cleanly,
+        // e.g. RvcExpander `_GEN` read whole). For a NESTED struct, split only when
+        // it is read BY-FIELD (StdExeUnit) — a nested whole-read-only struct
+        // (NewPipelineConnectPipe `_GEN` in `io = '{in: _GEN}`) keeps the whole-net
+        // assign, since splitting then re-reading it whole does not reassemble the
+        // nested field cleanly.
+        if (is_scalar_struct_var(ns) && (struct_is_all_scalar(ns) || struct_field_read_.contains(&ns))) {
+          current_assign_nonblocking_ = false;
+          if (assign_struct_whole(ns, *ns.getInitializer())) {
+            clear_pending_loc();
+            break;
+          }
+        }
         // A net is an integer lvalue, so a bool initializer (e.g. `wire x =
         // a == b;`) materializes to 0/1 — the same rule lower_assign applies to
         // the continuous-`assign` path.
         auto v = to_int_value(lower_rvalue(*ns.getInitializer()));
-        if (!declared_.contains(&ns) && !input_syms_.contains(&ns)) {
-          declare_value_symbol(ns, false);
-        }
         builder_.create_assign_stmts(lname_of(ns), v);
         clear_pending_loc();
         break;
@@ -1836,7 +1988,7 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
           if (sym == nullptr || as.left().kind != ExpressionKind::NamedValue || !reg_syms_.contains(sym)) {
             return false;
           }
-          auto cv = try_eval(as.right());
+          auto cv = try_eval_const_net(as.right());
           if (!cv || !cv->isInteger()) {
             return false;
           }
