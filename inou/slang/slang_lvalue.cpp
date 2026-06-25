@@ -148,6 +148,20 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
         return;
       }
 
+      // `regs[idx] <= data` of a memory-ized packed 2-D reg (register file): a
+      // whole-ELEMENT write routes to the memory write path even though the base
+      // is a packed array. Only a single-element select (`regs[idx]`, not a
+      // sub-bit/range select of an element) — those keep the bit-slice RMW path.
+      if (lhs.kind == ExpressionKind::ElementSelect && base.kind != ExpressionKind::ElementSelect
+          && base.kind != ExpressionKind::RangeSelect) {
+        const auto* base_sym = resolve_base_symbol(base);
+        if (base_sym != nullptr && !flat_port_syms_.contains(base_sym) && mem_info_.contains(base_sym)
+            && packed_mem_regs_.contains(base_sym)) {
+          lower_unpacked_write(lhs, rhs);
+          return;
+        }
+      }
+
       // `mem[addr][const-chunk] <= data`: a chunked masked memory write (the
       // base is a packed element of an unpacked array). Lowered via the memory
       // write-enable-granularity (wensize) path before the packed-root attempt.

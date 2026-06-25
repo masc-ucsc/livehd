@@ -185,6 +185,18 @@ private:
   // runtime-indexed one must stay a memory (dynamic-shift flattening mismatches
   // — see the `tuplish` regression). Populated by a pre-pass in lower_module.
   absl::flat_hash_set<const slang::ast::Symbol*> runtime_indexed_arrays_;
+  // PACKED 2-D reg arrays (`reg [N-1:0][W-1:0]`, W>1) that are RUNTIME-indexed
+  // somewhere — a firtool-style register file. These memory-ize (one `__memory`
+  // node) instead of flattening to a single N*W-bit flop, so they LEC against an
+  // equivalent Pyrope memory. Populated by the runtime-index pre-pass; the
+  // declare + element read/write consult it to route through the memory path.
+  absl::flat_hash_set<const slang::ast::Symbol*> packed_mem_regs_;
+  // True iff `sym`'s canonical type is a packed 2-D array of an integral element
+  // wider than 1 bit (a true `reg [N-1:0][W-1:0]`, W>1 — NOT a 1-D packed vector
+  // whose element is a single bit). Fills N (size), W (elem_bits), the element
+  // signedness and the outer range lower bound when it returns true.
+  static bool is_packed_2d_array(const slang::ast::Type& type, int64_t& size, int& elem_bits, bool& elem_signed,
+                                 int64_t& lower);
   // Flat bit-slice read/write of an unpacked-array port element (reuses the
   // packed set_mask / shift+mask machinery).
   std::string flat_port_read(const slang::ast::ElementSelectExpression& es, const Mem_info& mi);

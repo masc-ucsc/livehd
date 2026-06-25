@@ -74,6 +74,10 @@ struct Write_collector : public slang::ast::ASTVisitor<Write_collector, slang::a
 // the reader unrolls). Recurses through generate instances.
 struct Array_index_collector : public slang::ast::ASTVisitor<Array_index_collector, slang::ast::VisitFlags::AllGood> {
   std::vector<std::pair<const slang::ast::ValueSymbol*, const slang::ast::Expression*>> selects;
+  // Element-selects whose base is a PACKED array with a >1-bit element (a true
+  // `[N][W]`, W>1) — a candidate register file. Classified the same way as
+  // unpacked selects; a runtime selector marks the base for memory-ization.
+  std::vector<std::pair<const slang::ast::ValueSymbol*, const slang::ast::Expression*>> packed_selects;
   absl::flat_hash_set<const slang::ast::Symbol*>                                        loop_vars;
 
   void handle(const slang::ast::ForLoopStatement& f) {
@@ -92,9 +96,17 @@ struct Array_index_collector : public slang::ast::ASTVisitor<Array_index_collect
   }
 
   void handle(const slang::ast::ElementSelectExpression& es) {
-    if (es.value().type->getCanonicalType().isUnpackedArray()) {
+    const auto& bct = es.value().type->getCanonicalType();
+    if (bct.isUnpackedArray()) {
       if (const auto* sym = lhs_base_symbol(es.value())) {
         selects.emplace_back(sym, &es.selector());
+      }
+    } else if (bct.isPackedArray() && bct.kind == slang::ast::SymbolKind::PackedArrayType
+               && bct.as<slang::ast::PackedArrayType>().elementType.getCanonicalType().getBitWidth() > 1) {
+      // Element-select of a packed 2-D array (`[N][W]`, W>1): an element access,
+      // not a bit-select. A runtime selector makes this a memory candidate.
+      if (const auto* sym = lhs_base_symbol(es.value())) {
+        packed_selects.emplace_back(sym, &es.selector());
       }
     }
     visitDefault(es);
@@ -504,6 +516,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   reg_declared_.clear();
   tuple_type_names_.clear();
   emitted_tuple_types_.clear();
+  packed_mem_regs_.clear();
   local_cnt_ = 0;
 
   body_ = body;
@@ -547,17 +560,33 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   {
     Array_index_collector aic;
     body->visit(aic);
-    for (const auto& [sym, sel] : aic.selects) {
+    auto is_runtime_sel = [&](const slang::ast::Expression* sel) {
       if (try_eval_int(*sel)) {
-        continue;  // folds to a constant (genvar/param/const index)
+        return false;  // folds to a constant (genvar/param/const index)
       }
       // Not directly foldable: still constant after unroll if it references only
-      // loop-induction vars / params / genvars. A runtime signal makes it a memory.
+      // loop-induction vars / params / genvars. A runtime signal makes it dynamic.
       Static_selector_scan ss;
       ss.loop_vars = &aic.loop_vars;
       sel->visit(ss);
-      if (!ss.all_static) {
+      return !ss.all_static;
+    };
+    for (const auto& [sym, sel] : aic.selects) {
+      if (is_runtime_sel(sel)) {
         runtime_indexed_arrays_.insert(sym);
+      }
+    }
+    // A PACKED 2-D reg `[N][W]` (W>1) that is RUNTIME-indexed somewhere is a
+    // register file: memory-ize it (one __memory node) so it LECs against an
+    // equivalent Pyrope memory, instead of flattening to one wide N*W-bit flop.
+    // A const-indexed-only packed 2-D reg keeps the flat-bus path (yosys-slang
+    // compatibility); any runtime select anywhere marks the whole array.
+    for (const auto& [sym, sel] : aic.packed_selects) {
+      int64_t n = 0, lo = 0;
+      int     w = 0;
+      bool    sg = false;
+      if (reg_syms_.contains(sym) && is_packed_2d_array(sym->getType(), n, w, sg, lo) && is_runtime_sel(sel)) {
+        packed_mem_regs_.insert(sym);
       }
     }
   }
@@ -911,6 +940,31 @@ void Slang_context::emit_tuple_typedef(const Mem_info& mi) {
   ln.add_child(st, Lnast_node::create_ref(ttemp));
 }
 
+// A packed 2-D array `reg [N-1:0][W-1:0]` (W>1): canonical type is a
+// PackedArrayType whose ELEMENT canonical type is itself an integral vector of
+// width > 1. A 1-D packed vector `reg [W-1:0]` has a single-bit element (an
+// element-select is a bit-select) — excluded. Reports N/W/sign/lower on hit.
+bool Slang_context::is_packed_2d_array(const slang::ast::Type& type, int64_t& size, int& elem_bits, bool& elem_signed,
+                                       int64_t& lower) {
+  const auto& ct = type.getCanonicalType();
+  if (!ct.isPackedArray() || ct.kind != slang::ast::SymbolKind::PackedArrayType) {
+    return false;
+  }
+  const auto& pa   = ct.as<slang::ast::PackedArrayType>();
+  const auto& elem = pa.elementType.getCanonicalType();
+  // The element must be a >1-bit integral value: a packed vector/array/struct.
+  // (A struct element falls through too — but the regfile case is a plain
+  // vector; struct-element packed arrays are rare and still bit-slice fine.)
+  if (!elem.isIntegral() || elem.getBitWidth() <= 1) {
+    return false;
+  }
+  size        = pa.range.width();
+  elem_bits   = static_cast<int>(elem.getBitWidth());
+  elem_signed = elem.isSigned();
+  lower       = pa.range.lower();
+  return true;
+}
+
 // State regs declare once at module start, output regs included (ports sit
 // in declared_ from the io emission, hence the dedicated reg_declared_ set).
 void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
@@ -924,6 +978,63 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
   if (type.getCanonicalType().isUnpackedArray()) {
     declare_unpacked(sym, /*is_reg=*/true);
     return;
+  }
+  // A runtime-indexed PACKED 2-D reg `[N-1:0][W-1:0]` (W>1) is a register file:
+  // declare it as a scalar-element MEMORY `reg name:[N]uW = nil` (mirrors the
+  // non-flatten scalar branch of declare_unpacked) so element reads/writes route
+  // through the __memory path and LEC against an equivalent Pyrope memory. A
+  // plain flat flop (the fall-through below) cannot align with a memory node.
+  if (packed_mem_regs_.contains(&sym)) {
+    int64_t n = 0, lo = 0;
+    int     w = 0;
+    bool    sg = false;
+    if (is_packed_2d_array(type, n, w, sg, lo)) {
+      Mem_info mi;
+      mi.lower       = lo;
+      mi.elem_bits   = w;
+      mi.elem_signed = sg;
+      mi.size        = n;
+      mi.is_tuple    = false;
+      mem_info_.emplace(&sym, mi);
+      mem_syms_.insert(&sym);  // NOT flat_port_syms_: this routes via store/tuple_get
+
+      auto  name = lname_of(sym);
+      auto& ln   = *builder_.lnast;
+      set_pending_loc(sym.location);
+      // Verilog nonblocking memory reads see old (committed) contents — fwd=0.
+      {
+        auto aidx = builder_.add_child(Lnast_ntype::create_attr_set());
+        ln.add_child(aidx, Lnast_node::create_ref(name));
+        ln.add_child(aidx, Lnast_node::create_const("fwd"));
+        ln.add_child(aidx, Lnast_node::create_const("0"));
+      }
+      auto didx = builder_.add_child(Lnast_ntype::create_declare());
+      ln.add_child(didx, Lnast_node::create_ref(name));
+      auto tidx = ln.add_child(didx, Lnast_ntype::create_comp_type_array());
+      emit_prim_type_int(tidx, w, sg);
+      ln.add_child(tidx, Lnast_node::create_const(absl::StrCat("[", n, "]")));
+      ln.add_child(didx, Lnast_node::create_const("reg"));
+      // Power-on contents from an `initial` block (same shape as declare_unpacked):
+      // uniform fill -> scalar broadcast, per-entry fill -> tuple literal, else nil.
+      if (auto iit = mem_init_vals_.find(&sym); iit != mem_init_vals_.end() && !iit->second.empty()) {
+        const auto& vals    = iit->second;
+        const bool  uniform = std::all_of(vals.begin(), vals.end(),
+                                          [&](const auto& kv) { return kv.second == vals.begin()->second; });
+        if (uniform && static_cast<int64_t>(vals.size()) == mi.size) {
+          ln.add_child(didx, Lnast_node::create_const(absl::StrCat(vals.begin()->second)));
+        } else {
+          auto vidx = ln.add_child(didx, Lnast_ntype::create_tuple_add());
+          for (int64_t k = 0; k < mi.size; ++k) {
+            auto vit = vals.find(k);
+            ln.add_child(vidx, Lnast_node::create_const(absl::StrCat(vit != vals.end() ? vit->second : int64_t{0})));
+          }
+        }
+      } else {
+        ln.add_child(didx, Lnast_node::create_const("nil"));  // no power-on contents
+      }
+      clear_pending_loc();
+      return;
+    }
   }
   if (!type.isIntegral()) {
     emit_unsupported(sym.location, "unsupported-var-type",

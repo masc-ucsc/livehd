@@ -646,6 +646,19 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
     return lower_unpacked_read(expr);
   }
 
+  // An ELEMENT-select of a packed 2-D reg that was memory-ized (register file):
+  // route to the memory read path even though the base is a packed array. Only
+  // a single-element select of the memory-ized base — a sub-bit/range select of
+  // an element keeps the bit-slice path (it would resolve a deeper base).
+  if (expr.kind == ExpressionKind::ElementSelect && base.kind != ExpressionKind::ElementSelect
+      && base.kind != ExpressionKind::RangeSelect) {
+    const auto* base_sym = resolve_base_symbol(base);
+    if (base_sym != nullptr && !flat_port_syms_.contains(base_sym) && mem_info_.contains(base_sym)
+        && packed_mem_regs_.contains(base_sym)) {
+      return lower_unpacked_read(expr);
+    }
+  }
+
   if (!base_ty.isIntegral() || !base_ty.hasFixedRange()) {
     emit_unsupported(expr.sourceRange, "unsupported-select-base", "selects are only supported on packed integral values");
     return "0";
