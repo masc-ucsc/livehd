@@ -318,6 +318,11 @@ private:
   std::unordered_map<std::string, std::vector<int>>                    write_idx_;    // name -> sorted write pre-order indices
   std::unordered_set<std::string>                                      foldable_;     // temp names to inline at their use
   std::unordered_set<int64_t>                                          folded_node_;  // def-node keys (get_class_index) to skip
+  std::unordered_set<std::string>                                      dead_signals_; // stripped names written but never read (dropped)
+  // Mark/collect signals that are assigned but never read (and are not ports,
+  // regs, the clock/reset cone, or instance temps) so their def statements are
+  // dropped. firtool SSA+poison-init emits a dead base per versioned signal.
+  void compute_dead_signals(Lnast_nid io_nid, Lnast_nid stmts_nid);
   std::unordered_map<std::string, std::pair<std::string, std::string>> range_lohi_;   // range-temp name -> "lo","hi"
   std::vector<Lnast_nid> get_mask_nodes_;                                             // every get_mask, for range-mask resolution
   std::vector<std::pair<Lnast_nid, int>> tuple_get_nodes_;                            // every tuple_get + its pre-order index

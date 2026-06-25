@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <format>
+#include <limits>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -534,6 +535,13 @@ void Lnast_prp_writer::write_module() {
     // With the clock/reset cone known, decide which submodule output-port reads
     // collapse to `inst.port` at their uses (vs stay a feedback `wire`).
     analyze_instance_inline();
+    // Drop dead signals: nets written but NEVER read anywhere (fold_info use_count
+    // == 0 counts every ref — expressions, conditions, instance ports, asserts).
+    // firtool's SSA + poison-init split each versioned signal into a live version
+    // (`x__w1`) plus a dead base (`mut x = 0; x = 0ub?`); plus dead `_GEN`/probe
+    // intermediates. These are pure cruft (LEC compares OUTPUTS, which they never
+    // reach). Excluded: io ports, regs/mems, the clock/reset cone, instance temps.
+    compute_dead_signals(io_nid, stmts_nid);
     // Pre-declare body `mut` vars that are WRITTEN but have no `declare` node.
     // Their first write would otherwise emit `mut X` inside whatever (possibly
     // nested) scope it lands in; a later write in a SIBLING scope then references
@@ -696,13 +704,13 @@ void Lnast_prp_writer::write_module() {
       std::unordered_set<std::string> need;
       for (const auto& nm : store_lhs) {
         if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm) && !pin_cone_.count(nm)
-            && !instance_output_inlined_.count(nm)) {
+            && !instance_output_inlined_.count(nm) && !dead_signals_.count(nm)) {
           need.insert(nm);  // pin-cone nets are emitted (as `mut net = driver`) ahead of the declares, not hoisted to 0
         }
       }
       for (const auto& nm : nested_mut_decl) {
         if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm) && !pin_cone_.count(nm)
-            && !instance_output_inlined_.count(nm)) {
+            && !instance_output_inlined_.count(nm) && !dead_signals_.count(nm)) {
           need.insert(nm);
           suppress_decl_.insert(nm);  // its in-place nested `mut` declare is dropped
         }
@@ -2272,6 +2280,100 @@ void Lnast_prp_writer::scan_node(Lnast_nid nid, int& index) {
   }
 }
 
+// An LNAST name `<base>___ssa_<N>` is a single-static-assignment VERSION of
+// `<base>` (rendered as `<base>__wN`). Multi-assigned signals — and any signal
+// with a poison-init `mut x = 0` — get versioned; the version is an internal
+// write-once intermediate.
+static bool ends_with_ssa_version(std::string_view n) {
+  auto p = n.rfind("___ssa_");
+  if (p == std::string_view::npos) {
+    return false;
+  }
+  auto digits = n.substr(p + 7);
+  return !digits.empty() && std::all_of(digits.begin(), digits.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+}
+static std::string_view ssa_base(std::string_view n) {
+  auto p = n.rfind("___ssa_");
+  if (p == std::string_view::npos) {
+    return n;
+  }
+  // strip a leading `%` compiler-temp marker so `%foo___ssa_1` -> `foo`
+  auto b = n.substr(0, p);
+  if (!b.empty() && b.front() == '%') {
+    b = b.substr(1);
+  }
+  return b;
+}
+
+void Lnast_prp_writer::compute_dead_signals(Lnast_nid io_nid, Lnast_nid stmts_nid) {
+  dead_signals_.clear();
+  if (stmts_nid.is_invalid()) {
+    return;
+  }
+  // Names that are externally observable / structurally required — never dropped.
+  std::unordered_set<std::string> keep;
+  auto add_ports = [&](Lnast_nid tup) {
+    if (tup.is_invalid()) {
+      return;
+    }
+    for (auto p = lnast->get_child(tup); !p.is_invalid(); p = lnast->get_sibling_next(p)) {
+      auto nn = lnast->get_child(p);
+      if (!nn.is_invalid()) {
+        keep.insert(std::string(strip_prefix(lnast->get_name(nn))));
+      }
+    }
+  };
+  auto in_tup = io_nid.is_invalid() ? Lnast_nid{} : lnast->get_child(io_nid);
+  add_ports(in_tup);
+  add_ports(in_tup.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(in_tup));
+  for (const auto& k : folded_keys_) {  // reg/mem vars (have folded flop/mem attrs)
+    auto p = k.find('\x01');
+    if (p != std::string::npos) {
+      keep.insert(k.substr(0, p));
+    }
+  }
+  for (const auto& nm : pin_cone_) {  // clock/reset dependency cone
+    keep.insert(nm);
+  }
+  for (const auto& nm : instance_results_) {
+    keep.insert(nm);
+  }
+
+  for (const auto& [name, fi] : fold_info_) {
+    if (fi.use_count != 0 || fi.def_count < 1) {
+      continue;  // read somewhere, or never defined
+    }
+    std::string s(strip_prefix(name));
+    if (s.find('.') != std::string::npos) {
+      continue;  // a bundle-field leaf: leave bundle reconstruction alone
+    }
+    if (keep.count(s)) {
+      continue;
+    }
+    dead_signals_.insert(s);
+  }
+  if (dead_signals_.empty()) {
+    return;
+  }
+  // Mark every def-statement (declare + pure dataflow assign) of a dead signal so
+  // the existing folded-node skip drops it. func_call (instance) statements are
+  // kept — instantiation has side effects even if its result is unread.
+  std::function<void(Lnast_nid)> mark = [&](Lnast_nid n) {
+    for (auto c = lnast->get_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      const auto t = lnast->get_type(c);
+      if (defines_child0(t) && t != Lnast_ntype::Lnast_ntype_func_call) {
+        auto c0 = lnast->get_child(c);
+        if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0))
+            && dead_signals_.count(std::string(strip_prefix(lnast->get_name(c0))))) {
+          folded_node_.insert(c.get_class_index().value);
+        }
+      }
+      mark(c);
+    }
+  };
+  mark(stmts_nid);
+}
+
 void Lnast_prp_writer::analyze_folding() {
   fold_info_.clear();
   func_call_callees_.clear();
@@ -2323,17 +2425,52 @@ void Lnast_prp_writer::analyze_folding() {
     }
   }
 
-  // Select the single-def / single-use temps whose value-producing definition
-  // can be inlined back into the (one) use.
+  // Select the single-def names whose value-producing definition can be inlined
+  // back into its use(s). Policy (mirrors the inou.cgen Verilog "don't materialise
+  // a bare bar[x]" rule):
+  //   * EXPRESSION def (has operator work): inline only a `%`/`___` compiler temp,
+  //     at a SINGLE use (duplicating arbitrary logic is not worth it).
+  //   * PURE INDEX/SELECT def (tuple_get `a[i]` or a bit-slice `get_mask`,
+  //     `a#[lo..=hi]` — no operator):
+  //       - a TEMP (`%`/`___`, or a firtool `_`-prefixed intermediate, incl. its
+  //         `___ssa_N` SSA versions): inline ALWAYS — a meaningless temp should
+  //         never get its own line.
+  //       - a REAL named signal that is an SSA version (`base___ssa_N`): inline at
+  //         up to TWO uses (readable cleanup; SSA-version reads are all inlined,
+  //         incl. the one that resolves the base/port, so it stays correct).
+  //       - a BARE real name (no SSA version) is NEVER folded: it may be a module
+  //         port / reg / output whose externally-visible driver must remain.
   for (auto& [name, fi] : fold_info_) {
-    if (!is_tmp(name)) {
-      continue;  // only `___` compiler temps are inlined
+    if (fi.def_count != 1) {
+      continue;  // must be written exactly once
     }
-    if (fi.def_count != 1 || fi.use_count != 1) {
-      continue;  // must be written once and read once
+    const bool pure_index = (fi.def_type == Lnast_ntype::Lnast_ntype_tuple_get
+                             || fi.def_type == Lnast_ntype::Lnast_ntype_get_mask);
+    const bool ssa_ver   = ends_with_ssa_version(name);
+    const auto base       = ssa_base(name);
+    const bool temp_like = is_tmp(name) || (!base.empty() && base.front() == '_');
+
+    int max_uses;
+    if (pure_index) {
+      if (temp_like) {
+        max_uses = std::numeric_limits<int>::max();  // temp index/select: always inline
+      } else if (ssa_ver) {
+        max_uses = 2;  // real SSA-version index/select: inline at <=2 uses
+      } else {
+        continue;  // bare real name (possible port/reg/output) — keep
+      }
+    } else {
+      if (!is_tmp(name)) {
+        continue;  // expression: only `%`/`___` compiler temps fold
+      }
+      max_uses = 1;
     }
-    if (fi.def_index < 0 || fi.use_index < 0 || fi.def_index >= fi.use_index) {
-      continue;  // need a forward def-before-use
+
+    if (fi.use_count < 1 || fi.use_count > max_uses) {
+      continue;
+    }
+    if (fi.def_index < 0 || fi.def_index >= fi.min_use_index) {
+      continue;  // need a forward def-before-FIRST-use
     }
     bool ok = is_foldable_optype(fi.def_type);
     if (fi.def_type == Lnast_ntype::Lnast_ntype_store) {
@@ -2342,6 +2479,9 @@ void Lnast_prp_writer::analyze_folding() {
     if (!ok) {
       continue;
     }
+    // operands must be stable from the def through the LAST use (use_index), so an
+    // N-use inline reads the same operand values at every site. (In SSA every
+    // operand is itself write-once, so this is the common-case fast path.)
     if (!operands_stable(fi.def_node, fi.def_index, fi.use_index)) {
       continue;
     }
