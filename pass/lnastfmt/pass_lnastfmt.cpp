@@ -227,14 +227,17 @@ static bool parent_writes_pos0(Lnast_ntype::Lnast_ntype_int pt) {
 // Tmps are LNAST-internal: every tmp consumer must have a matching producer
 // in the same tree.
 static void check_unwritten_tmps(const Lnast* ln) {
-  std::unordered_set<std::string>                                    written;
-  std::unordered_map<std::string, std::pair<Lnast_nid, std::string>> read_first;
+  // Keys are string_views into the LNAST name attr-store, which is stable for
+  // this read-only walk (the validator never mutates the tree); hashing/compare
+  // are by content, so no per-node std::string allocation is needed.
+  std::unordered_set<std::string_view>                                         written;
+  std::unordered_map<std::string_view, std::pair<Lnast_nid, std::string_view>> read_first;
 
   for (const Lnast_nid& it : ln->depth_preorder()) {
     if (!Lnast_ntype::is_ref(ln->get_type(it))) {
       continue;
     }
-    auto name = std::string(ln->get_name(it));
+    auto name = ln->get_name(it);
     if (!Lnast::is_tmp(name)) {
       continue;
     }
@@ -250,27 +253,21 @@ static void check_unwritten_tmps(const Lnast* ln) {
     // but skip just in case so we don't over-flag.
     if (Lnast_ntype::is_store(pt) && is_first_child) {
       auto grand = ln->get_parent(parent);
-      if (!grand.is_invalid()) {
-        auto gt = ln->get_type(grand);
-        if (Lnast_ntype::is_tuple_add(gt)) {
-          continue;
-        }
+      if (!grand.is_invalid() && Lnast_ntype::is_tuple_add(ln->get_type(grand))) {
+        continue;
       }
     }
 
     if (is_first_child && parent_writes_pos0(pt)) {
-      written.insert(std::string(name));
-    } else {
-      auto key = std::string(name);
-      if (!read_first.contains(key)) {
-        read_first.emplace(key, std::make_pair(it, std::string(Lnast_ntype::debug_name(ln->get_type(parent)))));
-      }
+      written.insert(name);
+    } else if (!read_first.contains(name)) {
+      read_first.emplace(name, std::make_pair(it, Lnast_ntype::debug_name(pt)));
     }
   }
 
   // Sort for deterministic error reporting (the unordered_map iteration order
   // varies, which would make CI failures non-reproducible by name).
-  std::set<std::string> dangling;
+  std::set<std::string_view> dangling;
   for (const auto& kv : read_first) {
     if (!written.contains(kv.first)) {
       dangling.insert(kv.first);

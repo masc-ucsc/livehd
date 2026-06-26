@@ -486,6 +486,18 @@ void check_known_set_passes(const Options& opts) {
       }
       continue;
     }
+    if (pass == "compile" && flag == "lnast_fmt") {
+      // Kernel gate (not a pass option): whether the pass.lnastfmt LNAST
+      // self-check runs. Default is build-mode (on in dbg, off in opt); this
+      // overrides it. Folded into the run decision by lnastfmt_enabled(), and
+      // merge_sets never copies it into a pass (its `pass` matches none).
+      if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
+        throw Lhd_error{"usage",
+                        std::format("--set/--config compile.lnast_fmt expects true|false, got '{}'", value),
+                        ""};
+      }
+      continue;
+    }
     auto method = set_pass_method(pass);
     if (method.empty()) {
       std::string known;
@@ -510,6 +522,30 @@ void check_known_set_passes(const Options& opts) {
                       std::format("`lhd list options {}\\..*` shows what {} accepts", pass, pass)};
     }
   }
+}
+
+// pass.lnastfmt is a compiler self-check: it walks the LNAST verifying the
+// producer built a well-formed tree and ONLY ever emits internal
+// `lnast-malformed` diagnostics (never anything a user can act on). On a correct
+// build it is pure overhead, so default it ON in debug builds (catch producer
+// bugs early) and OFF in release. `--set compile.lnast_fmt=true|false` (or the
+// bare `lnast_fmt`) overrides either default; validated by check_known_set_passes.
+bool lnastfmt_enabled(const Options& opts) {
+#ifdef NDEBUG
+  bool enabled = false;
+#else
+  bool enabled = true;
+#endif
+  for (const auto& [key, value] : opts.sets) {
+    std::string_view k{key};
+    auto             pos  = k.rfind('.');
+    auto             flag = pos == std::string_view::npos ? k : k.substr(pos + 1);
+    auto             pass = pos == std::string_view::npos ? std::string_view{} : k.substr(0, pos);
+    if (flag == "lnast_fmt" && (pass.empty() || pass == "compile")) {
+      enabled = (value == "true" || value == "1" || value == "on");
+    }
+  }
+  return enabled;
 }
 
 // Apply every `--set <channel>.log=<level>` to the livehd::log registry (the
@@ -1627,7 +1663,9 @@ size_t pyrope_parse(Options& opts, Result& res, Eprp_var& var, const std::vector
   // importing file's own directory, so a single-file compile needs no
   // dependency list (and the LSP resolves the same way).
   discover_imports(opts, var, n_imports);
-  run_step("pass.lnastfmt", var, {}, opts, res);
+  if (lnastfmt_enabled(opts)) {
+    run_step("pass.lnastfmt", var, {}, opts, res);
+  }
   if (wants_dump(opts, "parse")) {  // this invocation's source units only (imports are pre-elaborated)
     screen_dump_lnasts(std::vector<std::shared_ptr<Lnast>>(var.lnasts.begin() + static_cast<long>(n_imports), var.lnasts.end()),
                        "post-parse");
@@ -1711,7 +1749,9 @@ void slang_parse(Options& opts, Result& res, Eprp_var& var) {
   }
 
   run_step("inou.slang", var, labels, opts, res);
-  run_step("pass.lnastfmt", var, {}, opts, res);
+  if (lnastfmt_enabled(opts)) {
+    run_step("pass.lnastfmt", var, {}, opts, res);
+  }
   if (wants_dump(opts, "parse")) {
     screen_dump_lnasts(var.lnasts, "post-parse");
   }
@@ -2169,7 +2209,9 @@ void tool_diff_ln(Options& opts, Result& res, const std::vector<std::string>& to
 // terminal LNAST->LGraph sub-pass into the library at lib_path — the
 // CLI-level tolg:0|1 gate, derived from the requested emits.
 void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool need_graphs) {
-  run_step("pass.lnastfmt", var, {}, opts, res);
+  if (lnastfmt_enabled(opts)) {
+    run_step("pass.lnastfmt", var, {}, opts, res);
+  }
 
   // The verifier runs by default: it prints `cputs` and, crucially, turns a
   // comptime-false `cassert` into a compile error during elaborate/synth. No
