@@ -66,6 +66,20 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
       declare_value_symbol(vds.symbol, /*force_reg=*/false);
       if (const auto* init = vds.symbol.getInitializer()) {
         set_pending_loc(stmt.sourceRange);
+        // A scalar packed-struct local (`automatic wb_t _GEN = '{...}`, e.g.
+        // firtool StageReg `_GEN`/`_GEN_1`) is lowered to per-field leaf nets,
+        // so its initializer must write each LEAF — exactly like the continuous
+        // `assign x = '{...}` / net-initializer paths (slang_structure.cpp). A
+        // whole `create_assign_stmts(_GEN, …)` would write the bundle NAME but
+        // leave the leaves (`_GEN.toreg`, …) undriven; a later whole read
+        // (`read_struct_whole`, used when the struct is a field value of an
+        // outer `'{…, wb_ctrl: _GEN}`) reassembles from those leaves and gets
+        // nil/poison. assign_struct_whole splits the literal/expression RHS into
+        // the matching per-field leaf stores.
+        if (is_scalar_struct_var(vds.symbol) && assign_struct_whole(vds.symbol, *init)) {
+          clear_pending_loc();
+          return;
+        }
         // Materialize to an integer like lower_assign: a local `reg b = x && y`
         // initializer is an LNAST bool, but the variable is integer-typed, so
         // store 0/1 (else a later integer use, e.g. `b != 0`, fails typecheck).
