@@ -46,7 +46,7 @@ public:
     auto dst_root = dst_->set_root(src_->get_type(src_root));
     carry(src_root, dst_root);
     copy_transformed(src_root, dst_root);
-    src_->replace_body(dst_->tree_ptr());
+    src_->replace_body(dst_);  // adopts dst_'s name pool with the body
     return true;
   }
 

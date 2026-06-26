@@ -681,7 +681,7 @@ struct Lambda_extractor {
       }
       copy_skipping(ln, src_root, out, dst_root);
 
-      ln->replace_body(out->tree_ptr());
+      ln->replace_body(out);  // adopts out's name pool with the body
     }
 
     return std::move(extracted_lnasts);

@@ -503,7 +503,7 @@ void Pass_upass::work(Eprp_var& var) {
     if (up.run_toln && !is_template) {
       auto staged = runner.take_staging();
       if (staged) {
-        ln->replace_body(staged->tree_ptr());
+        ln->replace_body(staged);  // adopts staged's name pool with the body
       }
     }
     if (is_template) {

@@ -1478,7 +1478,7 @@ void Prp2lnast::rewrite_decls_to_declare() {
   for (auto c : lnast->children(src_root)) {
     copy_merge(c, dst_root);
   }
-  lnast->replace_body(staging->tree_ptr());
+  lnast->replace_body(staging);  // adopts staging's name pool with the body
 }
 
 // True if `s` is a bare `return` (control_statement wrapping return_statement).

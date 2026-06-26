@@ -20,7 +20,11 @@ namespace {
 // branch.
 struct Lnast_attr_init {
   Lnast_attr_init() {
+    // hhds::attrs::name stays the std::string LGraph instance name; lnast trees
+    // carry it only transiently on the export clone (int->string for the on-disk
+    // `ln:` format). The live in-memory name is the int32 lnast_attrs::lnast_name.
     hhds::register_attr_tag<hhds::attrs::name_t>("hhds::attrs::name");
+    hhds::register_attr_tag<lnast_attrs::lnast_name_t>("lnast_attrs::lnast_name");
     // hhds::attrs::srcid self-registers (srcid.hpp), so no entry here.
   }
 };
@@ -28,6 +32,20 @@ struct Lnast_attr_init {
 }  // namespace
 
 void Lnast_node::dump() const { std::print("{}, {}\n", Lnast_ntype::debug_name(get_type()), get_name()); }
+
+const std::shared_ptr<Lnast_name_pool>& Lnast::active_name_pool() {
+  // One pool per thread. A module compile is single-threaded (the upass O(N)
+  // invariant), so every Lnast it builds — the unit, its staging rebuilds,
+  // scratch inline bodies, specialization clones, and any sibling unit pulled
+  // in by import resolution — shares this pool with no locks. Name ids are
+  // pool-relative and get_name resolves via the Lnast object's pool, so this
+  // shared pool is what keeps a cross-unit `lnastA->get_name(nidB)` correct.
+  // A separately-spawned parallel module thread gets its own pool; each Lnast
+  // captures its thread's pool by shared_ptr at construction, so a unit built
+  // on another thread still resolves through its own.
+  static thread_local std::shared_ptr<Lnast_name_pool> pool = std::make_shared<Lnast_name_pool>();
+  return pool;
+}
 
 Lnast::Lnast(std::string_view _module_name) : forest_(hhds::Forest::create()), top_module_name(_module_name) {
   // Each Lnast owns one tree body in its private forest. The TreeIO carries
@@ -63,6 +81,16 @@ void Lnast::replace_body(std::shared_ptr<hhds::Tree> new_body) {
   tree_ = treeio_->get_tree();
 }
 
+void Lnast::replace_body(const std::shared_ptr<Lnast>& staging) {
+  I(staging, "replace_body: null staging Lnast");
+  // Adopt the pool the staging interned its names into FIRST: the body about to
+  // be installed carries int32 name ids relative to staging->name_pool_, so the
+  // pool must travel with the tree or get_name would resolve against this
+  // Lnast's stale pool.
+  name_pool_ = staging->name_pool_;
+  replace_body(staging->tree_ptr());
+}
+
 void Lnast::export_into(hhds::Forest& forest) const {
   auto tio = forest.find_io(top_module_name);
   if (!tio) {
@@ -71,8 +99,26 @@ void Lnast::export_into(hhds::Forest& forest) const {
     auto writable = tio->create_tree();
   }
   // clone() deep-copies the body INCLUDING the flat-storage attribute stores
-  // (name/srcid), so the exported unit is a faithful copy.
+  // (srcid), so the exported unit is a faithful copy.
   auto body = tree_->clone();
+  // Names live in memory as interner-relative int32 ids (lnast_name) that are
+  // meaningless once this Lnast's pool is gone. Materialize them as resolved
+  // std::string hhds::attrs::name on the clone (the on-disk `ln:` format and
+  // what LGraph consumers expect) and drop the int ids. The live tree keeps the
+  // ints. Attr-store mutation does not move tree nodes, so the pre-order walk is
+  // safe to mutate during.
+  for (auto nid : body->pre_order()) {
+    auto       ref = nid.attr(lnast_attrs::lnast_name);
+    const auto id  = ref.get_or(int32_t{0});
+    if (id == 0) {
+      continue;
+    }
+    const auto sv = name_pool_->resolve(id);
+    if (!sv.empty()) {
+      nid.attr(hhds::attrs::name).set(std::string(sv));
+    }
+    ref.del();
+  }
   // Union this unit's locator into the forest-level table (Forest::save only
   // writes it — the tree-side union is the exporter's job) and rewrite the
   // clone's srcid values through the remap. Matching spans re-mint to the same
@@ -104,6 +150,21 @@ std::shared_ptr<Lnast> Lnast::adopt(std::shared_ptr<hhds::Forest> forest, std::s
   lnast->treeio_         = std::move(tio);
   lnast->tree_           = lnast->treeio_->get_tree();
   lnast->top_module_name = std::string{module_name};
+  // The on-disk body carries names as std::string hhds::attrs::name (see
+  // export_into). Re-intern them into this Lnast's pool as int32 lnast_name and
+  // drop the strings, so the in-memory representation matches a freshly-built
+  // Lnast (int ids, lean per-node storage).
+  if (lnast->tree_) {
+    for (auto nid : lnast->tree_->pre_order()) {
+      auto        ref = nid.attr(hhds::attrs::name);
+      const auto* p   = ref.try_get();
+      if (p == nullptr || p->empty()) {
+        continue;
+      }
+      lnast->set_name(nid, *p);  // interns -> sets lnast_name
+      ref.del();
+    }
+  }
   // Loaded srcids live in the Forest's table (srcmap.txt); chain to it as a
   // read-only base so span_of resolves them. forest_ is co-owned, so the base
   // outlives this Lnast.
@@ -145,10 +206,15 @@ Lnast_ntype::Lnast_ntype_int Lnast::get_type(const Lnast_nid& nid) const {
 void Lnast::set_type(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int t) { nid.set_type(static_cast<hhds::Type>(t)); }
 
 std::string_view Lnast::get_name(const Lnast_nid& nid) const {
-  // Single store+map lookup (was has()+get() == two). get_name is one of the
-  // hottest lnast calls, so the doubled probe showed up in profiles.
-  const auto* p = nid.attr(hhds::attrs::name).try_get();
-  return p != nullptr ? std::string_view{*p} : std::string_view{};
+  // One store+map lookup for the id, then a pool index. get_name is one of the
+  // hottest lnast calls; the int id keeps the hot probe a 4-byte fetch and the
+  // resolve a deque index (no per-node std::string).
+  const auto id = nid.attr(lnast_attrs::lnast_name).get_or(int32_t{0});
+  return id == 0 ? std::string_view{} : name_pool_->resolve(id);
+}
+
+int32_t Lnast::get_name_id(const Lnast_nid& nid) const {
+  return nid.attr(lnast_attrs::lnast_name).get_or(int32_t{0});
 }
 
 const Dlop& Lnast::get_const_value(std::string_view const_text) const {
@@ -162,13 +228,13 @@ const Dlop& Lnast::get_const_value(std::string_view const_text) const {
 
 void Lnast::set_name(const Lnast_nid& nid, std::string_view name) {
   if (name.empty()) {
-    auto ref = nid.attr(hhds::attrs::name);
+    auto ref = nid.attr(lnast_attrs::lnast_name);
     if (ref.has()) {
       ref.del();
     }
     return;
   }
-  nid.attr(hhds::attrs::name).set(std::string(name));
+  nid.attr(lnast_attrs::lnast_name).set(name_pool_->intern(name));
 }
 
 uint32_t Lnast::tmp_site_hash(const Lnast_nid& ref_nid, const absl::flat_hash_map<std::string, std::string>* remap) const {

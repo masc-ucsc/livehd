@@ -1487,6 +1487,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast) {
     }
   }
 
-  // Commit: replace the original LNAST body with the staging tree.
-  lnast->replace_body(staging->tree_ptr());
+  // Commit: replace the original LNAST body with the staging tree (and its
+  // name pool — names are pool-relative int ids).
+  lnast->replace_body(staging);
 }

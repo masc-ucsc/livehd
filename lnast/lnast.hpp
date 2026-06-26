@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cstdint>
+#include <deque>
 #include <format>
 #include <iostream>
 #include <memory>
@@ -77,6 +79,49 @@ private:
 
   Kind        kind{Kind::invalid};
   std::string text;
+};
+
+// ── Per-Lnast name interner ─────────────────────────────────────────────────
+// Maps node-name strings to a signed int32 id and back. One pool per Lnast (the
+// single-writer unit — no locks, mirrors hhds::Source_locator's ownership). The
+// id is a SIGNED index into `strings_`: 0 = empty, +idx = an ordinary name,
+// -idx = a `%`-prefixed SSA temp. Both signs resolve to the SAME pooled string
+// (resolve = strings_[abs(id)]); the sign only classifies tmp-ness, so
+// Lnast::is_tmp collapses to `id < 0` (no per-char prefix scan). intern() dedups
+// BOTH families — the same string always yields the same id, which is what lets
+// passes compare/key on the int instead of the text (a renamed tmp set on a def
+// and its uses must share one id). The id is in-memory only: export_into writes
+// resolved strings to hhds::attrs::name and adopt re-interns them.
+class Lnast_name_pool {
+public:
+  Lnast_name_pool() { strings_.emplace_back(); }  // index 0 = empty sentinel ("")
+
+  // Dedup-intern `s`. Empty → 0. A leading '%' (parser-impossible, the SSA
+  // temp marker) → negative id; any other name → positive id.
+  int32_t intern(std::string_view s) {
+    if (s.empty()) {
+      return 0;
+    }
+    if (const auto it = map_.find(s); it != map_.end()) {
+      return it->second;
+    }
+    const auto idx = static_cast<int32_t>(strings_.size());
+    strings_.emplace_back(s);  // deque: addresses stable, so the view key below never dangles
+    const int32_t id = (s.front() == '%') ? -idx : idx;
+    map_.emplace(std::string_view{strings_.back()}, id);
+    return id;
+  }
+
+  // Stable string for an id (valid for the Lnast's lifetime — the pool only
+  // grows, entries are never erased). 0 / out-of-range → empty.
+  [[nodiscard]] std::string_view resolve(int32_t id) const {
+    const auto idx = static_cast<size_t>(id < 0 ? -id : id);
+    return idx != 0 && idx < strings_.size() ? std::string_view{strings_[idx]} : std::string_view{};
+  }
+
+private:
+  std::deque<std::string>                  strings_;  // index 0 = ""; element addresses stable (deque)
+  absl::flat_hash_map<std::string_view, int32_t> map_;  // keys view into strings_ (one copy per unique name)
 };
 
 // ── Bitwidth metadata side-channel (populated by upass/bitwidth) ─────────────
@@ -245,6 +290,18 @@ private:
   // enclosing statement's span). Only producers (prp2lnast) drive it; copies
   // and staging rebuilds leave it 0 and carry srcid explicitly.
   hhds::SourceId                                   pending_srcid_{0};
+  // Name interner. Node names ride as an int32 id (attrs::lnast_name) resolved
+  // through here. The id is POOL-RELATIVE, and trees/nodes move freely between
+  // Lnasts within a compile (staging swaps, cross-unit import resolution,
+  // scratch builds, clones) — and get_name resolves via the Lnast OBJECT's pool,
+  // not the node's. So every Lnast built during one compile must share ONE pool
+  // or `lnastA->get_name(nidB)` (a routine cross-unit read) resolves against the
+  // wrong table. The pool is thread-local (active_name_pool()): one per compile
+  // (single-threaded), shared by every Lnast on the thread, with no locks; a
+  // separate parallel module-compile thread gets its own. Each Lnast still HOLDS
+  // its pool by shared_ptr, so a unit built on another thread resolves via its
+  // own. In memory only — export_into materializes strings, adopt re-interns.
+  std::shared_ptr<Lnast_name_pool>                 name_pool_{active_name_pool()};
 
 public:
   static constexpr char version[] = "0.1.0";
@@ -280,6 +337,14 @@ public:
   // other holder of this Lnast picks up the new body on next access.
   // Asserts when called on a Lnast constructed without a TreeIO.
   void replace_body(std::shared_ptr<hhds::Tree> new_body);
+  // Install `staging`'s body AND adopt its name pool. Node names are interned
+  // int32 ids relative to the pool they were built against, so a staging tree
+  // built by a pass (prp2lnast / ssa / detuple / func_extract / the upass
+  // runner) MUST bring its pool along — swapping only the tree would leave the
+  // ids resolving against this Lnast's stale pool. Prefer this over
+  // replace_body(staging->tree_ptr()) whenever the new body came from a
+  // separately-built Lnast.
+  void replace_body(const std::shared_ptr<Lnast>& staging);
 
   Lnast_nid get_root() const { return tree_->get_root_node(); }
 
@@ -317,6 +382,21 @@ public:
   void                         set_type(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int t);
   std::string_view             get_name(const Lnast_nid& nid) const;
   void                         set_name(const Lnast_nid& nid, std::string_view name);
+
+  // Interned int32 name id of a node (0 when unnamed). This is the value passes
+  // should compare / use as a map key instead of the resolved string: negative
+  // ⇒ SSA temp, positive ⇒ ordinary name, and equality of ids ⇔ equality of
+  // names (intern dedups). get_name(nid) resolves the same id back to a string.
+  int32_t                      get_name_id(const Lnast_nid& nid) const;
+  // Intern a bare string to its id (for building int-keyed lookups off names
+  // that are not yet on a node). Same dedup/sign rules as set_name.
+  int32_t                      intern_name(std::string_view name) const { return name_pool_->intern(name); }
+  // Resolve an id back to its string (edge use: tolg lowering, diagnostics).
+  std::string_view             resolve_name(int32_t id) const { return name_pool_->resolve(id); }
+  // The interner shared by every Lnast on the current thread (= one per
+  // single-threaded compile). New Lnasts default their name pool to this so
+  // node-name ids stay valid as trees move between Lnasts within a compile.
+  static const std::shared_ptr<Lnast_name_pool>& active_name_pool();
 
   // Parsed value of a `const` node's literal text, parsed ONCE per distinct
   // literal and memoized on this Lnast (const_value_cache_). Constants live in
@@ -431,6 +511,11 @@ public:
   // only — never matches the user-SSA *infix* `<base>___ssa_<N>` (that starts
   // with the user base, not `%`).
   static bool is_tmp(std::string_view name) { return !name.empty() && name[0] == '%'; }
+  // Sign-test overload over an interned name id (see get_name_id): the SSA
+  // `%`-prefix is encoded in the id's sign at intern time, so this is the fast
+  // path — no string resolve, no per-char scan. Equivalent to
+  // is_tmp(get_name(nid)) but cheaper.
+  static bool is_tmp(int32_t name_id) { return name_id < 0; }
 
   // Stable id of the statement "shape" around a tmp ref: FNV-1a over the
   // parent's node type name plus every *other* child's leaf kind+text.

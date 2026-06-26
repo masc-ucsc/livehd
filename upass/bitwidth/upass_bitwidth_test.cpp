@@ -204,8 +204,8 @@ static void run_bw(const std::shared_ptr<Lnast>& ln) {
   auto         lm = std::make_shared<upass::Lnast_manager>(ln);
   uPass_runner runner(lm, {"bitwidth"});
   runner.run();
-  // Commit the staging tree back.
-  ln->replace_body(runner.take_staging()->tree_ptr());
+  // Commit the staging tree back (and its name pool — names are pool-relative).
+  ln->replace_body(runner.take_staging());
 }
 
 }  // namespace
