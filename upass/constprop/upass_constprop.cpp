@@ -1382,13 +1382,27 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
         auto v = b->lone_trivial();
         if (!v.is_invalid()) {
           o.scalar = v;
-        } else if (b->non_attr_entries().empty() && !unit_import_pending) {
+        } else if (b->non_attr_entries().empty() && !unit_import_pending && b->get_mode() != upass::Mode::unknown) {
           // An EMPTY bundle is the empty tuple, NOT a scalar (Bundle::is_scalar
           // is true for size<=1, so a 0-entry tuple lands in this is_scalar
           // arm). Keep it as a bundle so compare_bundles_eq decides by shape:
           // `() == ()` is true, `() == (x)` / `[] == [3,4]` is false. Without
           // this it resolves to an invalid scalar and the compare stays unknown
           // (a `cassert([] != [3,4])` would silently never discharge).
+          //
+          // get_mode() != unknown — the bundle is a DECLARED variable/shape (a
+          // `()`/`[]` empty tuple carries its decl mode), NOT a temp. A RUNTIME
+          // scalar that merely lacks a recorded bw-range data leaf has the SAME
+          // zero-data-leaf shape but is a mode-less intermediate: e.g. the temp
+          // `%t = io.fl` where `io.fl` is a 1-bit packed-struct leaf (the
+          // bitwidth pass skips a dotted-name store — see upass_bitwidth
+          // write_bw's `.`-guard — so the leaf, and any copy of it, record no bw
+          // entry). Treating that as `()` made `io.fl != 0` fold to a constant
+          // (empty-tuple-vs-scalar is always unequal), collapsing a runtime
+          // ternary `io.flush ? a : b` to one arm at compile time (firtool
+          // nested-struct StageRegs read 1-bit control through an `io`
+          // aggregate). A mode-less empty-data bundle must stay an invalid scalar
+          // so the compare stays runtime.
           //
           // BUT only when THIS unit has no pending import: an empty bundle is
           // ALSO how a value that depends on a not-yet-resolved import looks on
