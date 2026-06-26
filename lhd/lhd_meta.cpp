@@ -289,7 +289,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "compile" || name == "compile verilog" || name == "compile pyrope") {
     print_json_line(
-        R"json({"schema_version":1,"name":"compile","description":"The single source->IR->netlist action (front-end + elaborate + synth fused: one action, one exit code). Takes Pyrope/(System)Verilog sources (language word optional: inferred from .prp/.v/.sv) and/or ln:/lg: IR inputs; positional ln:DIR supplies pre-elaborated imports, lg:DIR pre-compiled libraries; ln:/lg:-only inputs aggregate, optimize, or link. Verilog readers: yosys-verilog/yosys-slang go through yosys into lg:, slang is the direct SV -> LNAST front-end (ln:/lg: emits, the pyrope flow)","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"recipe","type":"enum","values":["O0","O1","O2"],"default":"O1"},{"name":"set","type":"pass.flag=value","repeatable":true},{"name":"depfile","type":"path"},{"name":"emit","type":"verilog:PATH|pyrope:PATH (or a bare .v/.sv/.prp; kind inferred)"},{"name":"emit-dir","type":"lg:DIR/|ln:DIR/|verilog:DIR/|pyrope:DIR/|lnast-dump:DIR/|isabelle:DIR/|lean:DIR/"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","ln","pyrope","lnast-dump","isabelle","lean"],"examples":["lhd compile foo.v --top foo --recipe O2 --emit verilog:net.v","lhd compile x.prp --emit net.v --emit-dir lg:x_lgs/","lhd compile x.prp --emit-dir ln:x_lns/","lhd compile ln:x_lns/ --recipe O1 --emit verilog:net.v","lhd compile lg:top_lgs/ --emit-dir lg:top_opt_lgs/","lhd compile lg:top_lgs/ --emit-dir isabelle:top_thy/ --emit-dir lean:top_lean/"]})json");
+        R"json({"schema_version":1,"name":"compile","description":"The single source->IR->netlist action (front-end + elaborate + synth fused: one action, one exit code). Takes Pyrope/(System)Verilog sources (language word optional: inferred from .prp/.v/.sv) and/or ln:/lg: IR inputs; positional ln:DIR supplies pre-elaborated imports, lg:DIR pre-compiled libraries; ln:/lg:-only inputs aggregate, optimize, or link. Verilog readers: yosys-verilog/yosys-slang go through yosys into lg:, slang is the direct SV -> LNAST front-end (ln:/lg: emits, the pyrope flow)","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"recipe","type":"enum","values":["O0","O1","O2"],"default":"O1"},{"name":"set","type":"pass.flag=value","repeatable":true},{"name":"depfile","type":"path"},{"name":"emit","type":"verilog:PATH|pyrope:PATH (or a bare .v/.sv/.prp; kind inferred)"},{"name":"emit-dir","type":"lg:DIR/|ln:DIR/|verilog:DIR/|pyrope:DIR/|lnast-dump:DIR/|isabelle:DIR/|lean:DIR/|sim:DIR/"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","ln","pyrope","lnast-dump","isabelle","lean","sim"],"examples":["lhd compile foo.v --top foo --recipe O2 --emit verilog:net.v","lhd compile x.prp --emit net.v --emit-dir lg:x_lgs/","lhd compile x.prp --emit-dir ln:x_lns/","lhd compile ln:x_lns/ --recipe O1 --emit verilog:net.v","lhd compile lg:top_lgs/ --emit-dir lg:top_opt_lgs/","lhd compile lg:top_lgs/ --emit-dir isabelle:top_thy/ --emit-dir lean:top_lean/","lhd compile x.prp --emit-dir sim:x_sim/"]})json");
     return 0;
   }
   if (name == "recipe:O0" || name == "O0") {
@@ -323,7 +323,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "sim") {
     print_json_line(
-        R"json({"schema_version":1,"name":"sim","description":"Executable C++ simulation (inou.cgen.sim): a standalone Bazel module of per-module Slop<N> structs (functional Out cycle(In)) over the ../hlop library. --emit-dir only; `cd DIR && bazel build //:sim`","direction":"out"})json");
+        R"json({"schema_version":1,"name":"sim","description":"Executable C++ simulation (inou.cgen.sim): a standalone Bazel module of per-module Slop<N> structs (functional Out cycle(In)) over the ../hlop library. Each module is a small <name>.hpp interface plus a <name>.cpp body, so a body edit recompiles only that .o. --emit-dir only; `cd DIR && bazel build //:sim`","direction":"out"})json");
     return 0;
   }
   if (name == "pyrope fmt") {
@@ -488,7 +488,8 @@ void print_general_help() {
       "  --set options too) — e.g. `lhd lec --help`, `lhd pass --help`, `lhd pass partition --help`\n"
       "\n"
       "typed I/O (KIND:PATH):  ln: = Forest dir (LNAST units)   lg: = GraphLibrary dir (LGraphs)\n"
-      "  ln:/lg:/lnast-dump:/isabelle:/lean: are directory containers (--emit-dir only);\n"
+      "  ln:/lg:/lnast-dump:/isabelle:/lean:/sim: are directory containers (--emit-dir only;\n"
+      "    sim: is an executable C++ simulation, inou.cgen.sim);\n"
       "  verilog: / pyrope: are --emit (one file; pyrope needs a one-unit design) or --emit-dir\n"
       "  (one file per module). --emit also infers the kind from a bare .v/.sv/.prp path\n"
       "\n"
@@ -689,7 +690,8 @@ int help_command(const Options& opts) {
         "  --top T              --reader R   slang | yosys-slang | yosys-verilog (default slang)\n"
         "  --recipe O0|O1|O2    (default O1; `lhd list recipes`)\n"
         "  --emit verilog:PATH | pyrope:PATH   (or a bare .v/.sv/.prp — kind inferred)\n"
-        "  --emit-dir K:DIR/    lg: | ln: | verilog: | pyrope: | lnast-dump: | isabelle: | lean:\n"
+        "  --emit-dir K:DIR/    lg: | ln: | verilog: | pyrope: | lnast-dump: | isabelle: | lean: | sim:\n"
+        "                       (sim: = executable C++ simulation; `cd DIR && bazel build //:sim`)\n"
         "  --set pass.flag=value   --config lhd.toml   --depfile PATH   --workdir DIR\n"
         "\n"
         "examples:\n"
@@ -697,7 +699,8 @@ int help_command(const Options& opts) {
         "  lhd compile x.prp --emit net.v --emit-dir lg:x_lgs/\n"
         "  lhd compile x.prp --emit-dir ln:x_lns/        # pre-elaborate for importers\n"
         "  lhd compile ln:x_lns/ --emit verilog:net.v    # synth from IR\n"
-        "  lhd compile lg:foo_lgs/ --emit-dir lg:foo_opt_lgs/\n");
+        "  lhd compile lg:foo_lgs/ --emit-dir lg:foo_opt_lgs/\n"
+        "  lhd compile x.prp --emit-dir sim:x_sim/        # C++ sim (cd x_sim && bazel build //:sim)\n");
     return print_options_section({"compile."});
   }
   if (topic == "lec") {

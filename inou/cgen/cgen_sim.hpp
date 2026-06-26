@@ -10,13 +10,16 @@
 #include "hhds/graph.hpp"
 #include "hhds/index.hpp"
 
-// Cgen_sim — lower one hhds::Graph to a C++ header of Slop<N> structs that link
-// the ../hlop library (TODO 3d, inou.cgen.sim). Structural twin of Cgen_verilog
-// (same forward_class() walk + Ntype_op dispatch via livehd::graph_util), but
-// emits a functional `Out cycle(In)` struct instead of inlined Verilog: one flat
-// SSA binding (Slop<W> v = a.op(b);) per node, registers as struct members. The
-// standalone Bazel module scaffold (MODULE.bazel / BUILD / manifest) around the
-// emitted headers is written by the kernel's emit_sim_outputs.
+// Cgen_sim — lower one hhds::Graph to a C++ Slop<N> struct over the ../hlop
+// library (TODO 3d, inou.cgen.sim). Structural twin of Cgen_verilog (same
+// forward_class() walk + Ntype_op dispatch via livehd::graph_util), but emits a
+// functional `Out cycle(In)` struct instead of inlined Verilog: one flat SSA
+// binding (Slop<W> v = a.op(b);) per node, registers as struct members. Each
+// module is split into <name>.hpp (the interface: data members, In/Out, method
+// declarations — what an instantiating module #includes) and <name>.cpp (the
+// bodies, "the slop") so a body edit recompiles one .o and a module appears once
+// however many times it is instantiated. The standalone Bazel module scaffold
+// (MODULE.bazel / BUILD / manifest) is written by the kernel's emit_sim_outputs.
 class Cgen_sim {
 private:
   std::string_view odir;
