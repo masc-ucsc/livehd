@@ -584,4 +584,15 @@ public:
   void                   dump_tree_sitter() const;
   void                   dump_tree_sitter(TSNode n, int level) const;
   void                   dump() const;
+
+  // Fast import discovery for `lhd scan` / depfile + BUILD generators: runs ONLY
+  // the prpparse LEXER (no recursive-descent parse, no LNAST build, no
+  // elaboration) and returns the raw import module strings (sorted, unique).
+  // Linear in file size — milliseconds even on multi-MB sources, where a full
+  // get_lnast() takes minutes. Handles both import forms:
+  //   foo = import("[path/]file[.member...]")   (call; the literal's raw text)
+  //   import file[.member...] as alias          (statement; the dotted module path)
+  // Comments and string bodies are correctly ignored (they are not keyword
+  // tokens). Throws Parse_error only on an unterminated string/backtick.
+  static std::vector<std::string> scan_imports(const std::string& path);
 };

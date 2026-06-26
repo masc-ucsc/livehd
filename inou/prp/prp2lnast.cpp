@@ -19,8 +19,11 @@
 #include "absl/strings/str_cat.h"
 #include "diag.hpp"
 #include "pass.hpp"
+#include "prpparse/lexer.hpp"
 #include "prpparse/parser.hpp"
 #include "prpparse/prp_diag.hpp"
+#include "prpparse/source_buffer.hpp"
+#include "prpparse/token.hpp"
 #include "source_path.hpp"
 #include "str_tools.hpp"
 
@@ -8425,6 +8428,64 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
   // field in a spread literal (`(...xs, a:u4=3)`) keeps its type/attr/mut.
   decorate_fields(ref);
   return ref;
+}
+
+// ---------------- Fast import scan (lexer-only; see prp2lnast.hpp) ----------------
+// Runs ONLY the prpparse lexer — no recursive-descent parse, no LNAST build, no
+// elaboration — so it is linear in file size (ms even on multi-MB sources). The
+// lexer drops comments/trivia and lexes a string body into one `string` token, so
+// an `import` inside a comment or string is never a keyword token and is ignored.
+std::vector<std::string> Prp2lnast::scan_imports(const std::string& path) {
+  using namespace prpparse;
+  std::vector<std::string> out;
+
+  Source_buffer      buf  = Source_buffer::from_file(path);
+  std::vector<Token> toks = Lexer(buf).tokenize();  // throws Parse_error on an unterminated string
+
+  auto strip = [](std::string_view t) -> std::string {
+    if (t.size() >= 2 && (t.front() == '"' || t.front() == '\'') && t.back() == t.front()) {
+      return std::string(t.substr(1, t.size() - 2));
+    }
+    return std::string(t);
+  };
+
+  for (size_t i = 0; i < toks.size(); ++i) {
+    if (!toks[i].is_kw(Keyword::kw_import)) {
+      continue;
+    }
+    size_t j = i + 1;
+    if (j < toks.size() && toks[j].is(Token_kind::lparen)) {
+      // call form: `… = import("[path/]file[.member…]")` — dep is the literal's body.
+      ++j;
+      if (j < toks.size() && (toks[j].is(Token_kind::string) || toks[j].is(Token_kind::istring))) {
+        auto s = strip(toks[j].text);
+        if (!s.empty()) {
+          out.push_back(std::move(s));
+        }
+      }
+    } else {
+      // statement form: `import file[.member…] as alias` — dep is the dotted module path.
+      // (`as` is an ident-kw, so test it before the generic ident branch.)
+      std::string mod;
+      for (; j < toks.size(); ++j) {
+        if (toks[j].is_kw(Keyword::kw_as)) {
+          break;
+        }
+        if (toks[j].is(Token_kind::ident) || toks[j].is(Token_kind::dot)) {
+          mod += std::string(toks[j].text);
+        } else {
+          break;
+        }
+      }
+      if (!mod.empty()) {
+        out.push_back(std::move(mod));
+      }
+    }
+  }
+
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
+  return out;
 }
 
 // ---------------- Factory hook ----------------

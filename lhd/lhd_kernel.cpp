@@ -1913,14 +1913,27 @@ void scan_command(Options& opts, Result& res) {
       throw Lhd_error{"usage", std::format("cannot derive a module name from '{}'", f), ""};
     }
 
-    std::shared_ptr<Lnast> ln;
-    {
-      Stdout_to_log redirect(next_log_path(opts, "scan.prp"));
-      Prp2lnast     conv(f, base);
-      ln = conv.get_lnast();
-    }
-    if (livehd::diag::sink().has_errors()) {
-      throw classify_engine_failure(std::format("scan: {} does not parse", f));
+    // Dependency discovery only needs the import strings, so run the prpparse
+    // LEXER (Prp2lnast::scan_imports) — NOT a full parse/elaborate. This is the
+    // whole point of `lhd scan`: it stays linear/fast (ms even on multi-MB files),
+    // where building the LNAST per file took minutes. A malformed file (lex error,
+    // e.g. an unterminated string) is reported and skipped with empty imports so
+    // one bad file in a multi-file scan does not abort the rest.
+    // Lexer-only: a file that LEXES but would not PARSE still yields its imports
+    // (scan deliberately does no parse/elaborate). Only a genuine LEX failure
+    // (unterminated string/comment) is an error — reported per-file (category
+    // syntax) so it exits non-zero with error.class=syntax, while the loop still
+    // finishes and res.scan_json is written for every other file (lhd_main turns
+    // the error diag into the fail status; write_result emits scan_json regardless).
+    std::vector<std::string> imports;
+    try {
+      imports = Prp2lnast::scan_imports(f);
+    } catch (const std::exception& e) {
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                                         .code     = "scan-lex-error",
+                                                         .category = "syntax",
+                                                         .pass     = "scan",
+                                                         .message  = std::format("scan: {} did not lex: {}", f, e.what())});
     }
 
     if (!first) {
@@ -1929,7 +1942,7 @@ void scan_command(Options& opts, Result& res) {
     first        = false;
     payload     += std::format("{{\"file\":\"{}\",\"imports\":[", json_escape_min(f));
     bool ifirst  = true;
-    for (const auto& imp : collect_imports(ln)) {
+    for (const auto& imp : imports) {
       if (!ifirst) {
         payload += ',';
       }
