@@ -1,4 +1,6 @@
 .claude
 cov
 samples
+sim_alu
+sim_cpu
 tmp

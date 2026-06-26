@@ -972,37 +972,6 @@ bool prp_wire_nil_store(const Lnast& ln, const Lnast_nid& nid, std::string_view 
          && ln.get_name(c1) == "nil";
 }
 
-// Does any STATEMENT-LEVEL driver store to `w` exist in `nid`'s control subtree?
-// Traverses ONLY control structure (stmts / if / for / while branch bodies) and
-// matches a driver store only as a direct child of a stmts — a tuple-literal
-// field `(w = v)`, a func/io param, etc. lowers to the SAME `store(ref(w), v)`
-// shape nested under a tuple_add/func_def/io, and must NOT be mistaken for a
-// wire write (it would otherwise false-count an unrelated same-named field).
-bool prp_subtree_writes_wire(const Lnast& ln, const Lnast_nid& nid, std::string_view w) {
-  const auto t = ln.get_type(nid);
-  if (Lnast_ntype::is_stmts(t)) {
-    for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
-      if (prp_wire_driver_store(ln, c, w)) {
-        return true;
-      }
-      const auto ct = ln.get_type(c);
-      if ((Lnast_ntype::is_if_like(ct) || Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct) || Lnast_ntype::is_stmts(ct))
-          && prp_subtree_writes_wire(ln, c, w)) {
-        return true;
-      }
-    }
-    return false;
-  }
-  if (Lnast_ntype::is_if_like(t) || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t)) {
-    for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
-      if (Lnast_ntype::is_stmts(ln.get_type(c)) && prp_subtree_writes_wire(ln, c, w)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 bool prp_stmts_cover_wire(const Lnast& ln, const Lnast_nid& stmts, std::string_view w);
 
 // An if/unique_if covers `w` iff it has an else arm (the all-conds-false slot is
@@ -1047,87 +1016,6 @@ bool prp_stmts_cover_wire(const Lnast& ln, const Lnast_nid& stmts, std::string_v
   return covered;
 }
 
-// Count the top-level driver STATEMENTS of `w` (an if/match that writes `w`
-// anywhere counts as ONE driver; a nested plain stmts block recurses). Does NOT
-// descend into func_def bodies (nested lambdas are separate scopes).
-int prp_count_wire_drivers(const Lnast& ln, const Lnast_nid& stmts, std::string_view w) {
-  int cnt = 0;
-  for (auto c = ln.get_first_child(stmts); !c.is_invalid(); c = ln.get_sibling_next(c)) {
-    const auto t = ln.get_type(c);
-    if (prp_wire_driver_store(ln, c, w)) {
-      ++cnt;
-    } else if (Lnast_ntype::is_if_like(t) && prp_subtree_writes_wire(ln, c, w)) {
-      ++cnt;
-    } else if (Lnast_ntype::is_stmts(t)) {
-      cnt += prp_count_wire_drivers(ln, c, w);
-    }
-  }
-  return cnt;
-}
-
-// A `wire` whose drivers are PER-FIELD stores (`store(w, 'f', v)`, ≥3 children) is
-// a TUPLE BUNDLE: it is single-driver PER LEAF, not per base. The base-level
-// driver count is meaningless here — every field write looks like a separate
-// driver of `w`, and `w` is never wholly "covered". upass.detuple splits the
-// bundle into one `wire w.f` per leaf, each a genuine single-driver net whose
-// constraint is enforced downstream. Detect any field store on `w` (a const field
-// selector sits between the base ref and the value) and skip the base check. Does
-// not descend into nested `func_def` bodies (separate scopes).
-bool prp_wire_has_field_store(const Lnast& ln, const Lnast_nid& nid, std::string_view w) {
-  const auto t = ln.get_type(nid);
-  if (Lnast_ntype::is_func_def(t)) {
-    return false;
-  }
-  if (Lnast_ntype::is_store(t)) {
-    auto c0 = ln.get_first_child(nid);
-    if (!c0.is_invalid() && Lnast_ntype::is_ref(ln.get_type(c0)) && ln.get_name(c0) == w) {
-      auto c1 = ln.get_sibling_next(c0);
-      auto c2 = c1.is_invalid() ? c1 : ln.get_sibling_next(c1);
-      if (!c2.is_invalid() && Lnast_ntype::is_const(ln.get_type(c1))) {
-        return true;  // store(w, 'field', value, …) — a per-field write
-      }
-    }
-  }
-  for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
-    if (prp_wire_has_field_store(ln, c, w)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// Is `w` driven inside a `for`/`while` body? A loop is unrolled later (the
-// runner), so its driver count / coverage is unknowable here — skip the strict
-// frontend check for such a wire (a real comb loop / double-drive still surfaces
-// at tolg post-unroll). Conservative: avoids a false positive on a loop-built
-// net like `for i { if i==sel { w = data[i] } }`.
-bool prp_wire_written_under_loop(const Lnast& ln, const Lnast_nid& nid, std::string_view w, bool in_loop) {
-  const auto t = ln.get_type(nid);
-  if (Lnast_ntype::is_stmts(t)) {
-    for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
-      if (in_loop && prp_wire_driver_store(ln, c, w)) {
-        return true;
-      }
-      const auto ct = ln.get_type(c);
-      if ((Lnast_ntype::is_if_like(ct) || Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct) || Lnast_ntype::is_stmts(ct))
-          && prp_wire_written_under_loop(ln, c, w, in_loop)) {
-        return true;
-      }
-    }
-    return false;
-  }
-  // if/for/while: a for/while body's stmts are "under a loop"; recurse there only
-  // (NOT into cond exprs / tuple / func_def — those never hold a wire write).
-  if (Lnast_ntype::is_if_like(t) || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t)) {
-    const bool nl = in_loop || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t);
-    for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
-      if (Lnast_ntype::is_stmts(ln.get_type(c)) && prp_wire_written_under_loop(ln, c, w, nl)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
 }  // namespace
 
 namespace {
