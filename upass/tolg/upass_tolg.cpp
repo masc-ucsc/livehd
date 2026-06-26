@@ -3582,14 +3582,50 @@ private:
                lnast_->get_name(it->second));
     }
     auto mask = mask_from_operand(mask_op);
-    auto vv   = set_mask_base(val);
+
+    // A partial bit-range WRITE of a declared reg/wire is a next-state
+    // read-modify-write: the destination NAME stays bound to q (a reg) / the
+    // buffer output (a wire) so OTHER reads keep Verilog `<=` semantics, while
+    // the masked result accumulates on the SHADOW din key. Without this the old
+    // `bind_result(dst)` rebound the name to the combinational set_mask result:
+    // the reg/wire din was never set (finalize_regs then wired din=q, an
+    // identity `___next = q`), so EVERY partial write (`r.field <= …`,
+    // `r[hi:lo] <= …`) was silently dropped. The din shadow also lets a chain of
+    // partial writes ACCUMULATE: the 2nd `r[..]<=` must read the 1st write's
+    // result, not q — so when the base operand is the destination itself, read
+    // the current din accumulator (if any) instead of resolving the name to q.
+    const std::string dst_name{lnast_->get_name(dst)};
+    const bool is_reg  = reg_map_.contains(dst_name) && reg_info_.contains(dst_name);
+    const bool is_wire = !is_reg && wire_names_.contains(dst_name);
+    Val        vv;
+    if ((is_reg || is_wire) && Lnast_ntype::is_ref(lnast_->get_type(val)) && lnast_->get_name(val) == dst_name) {
+      // RMW base = current din accumulator if a prior partial write set it,
+      // else the committed value (q / buffer output) via the name.
+      auto dit = pin_map_.find(din_key(dst_name));
+      vv       = dit != pin_map_.end() ? Val{dit->second, mw_lookup(din_key(dst_name))} : set_mask_base(val);
+    } else {
+      vv = set_mask_base(val);
+    }
 
     auto node = make_node(Ntype_op::Set_mask);
     setup_sink_by_name(node, "a").connect_driver(vv.pin);
     setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *mask));
     setup_sink_by_name(node, "value").connect_driver(leaf(ins).pin);
     int32_t mask_mw = mask_high_bit(*mask);
-    bind_result(lnast_->get_name(dst), node.create_driver_pin(0), std::max(vv.mw, mask_mw));
+    auto    drv     = node.create_driver_pin(0);
+    int32_t res_mw  = std::max(vv.mw, mask_mw);
+    set_bits(drv, res_mw + 1);
+    set_unsign(drv);
+    if (is_reg) {
+      record(din_key(dst_name), drv, res_mw);
+      record(en_key(dst_name), en_const(true), 1);
+      return;
+    }
+    if (is_wire) {
+      record(din_key(dst_name), drv, res_mw);
+      return;
+    }
+    record(dst_name, drv, res_mw);
   }
 
   enum class OpW { add, mul, maxw, firstw, boolw, shlw };
