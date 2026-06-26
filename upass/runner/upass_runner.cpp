@@ -1098,8 +1098,10 @@ bool uPass_runner::resolve_node_operands(Resolved_node& out) {
       // double-quoted literal is a string (single-quoted chars parse as
       // integers), anything integer-parseable is an integer.
       const auto txt = lm->current_text();
-      // Cache the parse: Dlop::from_pyrope is shln-heavy for wide literals and
-      // the same texts recur on every dispatched node (see const_parse_cache_).
+      // Per-run cache of the const's {value, Kind, pattern}. The shln-heavy parse
+      // itself is owned by the Lnast (get_const_value, memoized there); this layer
+      // additionally caches the upass Kind/pattern derivation and the
+      // unparseable-literal fallback so neither is recomputed per dispatched node.
       auto cit = const_parse_cache_.find(txt);
       if (cit == const_parse_cache_.end()) {
         upass::Kind k = upass::Kind::unknown;
@@ -1114,7 +1116,7 @@ bool uPass_runner::resolve_node_operands(Resolved_node& out) {
         }
         Dlop v;
         try {
-          v = *Dlop::from_pyrope(txt);
+          v = lm->get_lnast()->get_const_value(txt);  // Lnast-memoized from_pyrope
           if (k == upass::Kind::unknown && txt != "0sb?" && txt != "0ub?") {
             k = v.is_string() ? upass::Kind::string : (v.is_integer() ? upass::Kind::integer : upass::Kind::unknown);
           }

@@ -59,10 +59,9 @@ bazel_dep(name = "hlop", version = "0.2.0")
 git_override(
     module_name = "hlop",
     remote = "https://github.com/masc-ucsc/hlop.git",
-    commit = "ce83af7a8f96250bc48be6dd5a647500f1930e06",  # update VCD dump (incl. Slop<M>->Slop<N> cross-width converter for inou.cgen.sim / TODO 3d)
+    commit = "e50b703f918fd7a9d406c49fd1d17591a8da2531",  # add cache support (Dlop::from_pyrope_cached / const_parse_cache_)
 )
-# For local debug/testing (e.g. WIP slop.hpp changes not yet pushed), swap the
-# git_override above for:
+# For local hlop co-development, swap the git_override above for:
 # local_path_override(module_name = "hlop", path = "../hlop")
 
 # slang (fmt required by slang CMake)

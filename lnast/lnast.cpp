@@ -151,6 +151,15 @@ std::string_view Lnast::get_name(const Lnast_nid& nid) const {
   return p != nullptr ? std::string_view{*p} : std::string_view{};
 }
 
+const Dlop& Lnast::get_const_value(std::string_view const_text) const {
+  // The parse memo lives in hlop (Dlop::from_pyrope_cached) so EVERY Dlop client
+  // shares one cache, not just LNAST. The cost being dodged is from_pyrope ->
+  // init_from_pyrope -> Blop::shln (per-digit), which re-ran on every operand/
+  // pass access of the same constant. Throws like from_pyrope on a malformed
+  // literal (callers handle non-numeric text as they did around from_pyrope).
+  return Dlop::from_pyrope_cached(const_text);
+}
+
 void Lnast::set_name(const Lnast_nid& nid, std::string_view name) {
   if (name.empty()) {
     auto ref = nid.attr(hhds::attrs::name);

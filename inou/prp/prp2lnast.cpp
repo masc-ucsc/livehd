@@ -556,28 +556,50 @@ void prp_collect_sig_targets(const Lnast* ln, const Lnast_nid& node, absl::flat_
 }  // namespace
 
 void Prp2lnast::check_undeclared_writes() const {
+  std::vector<absl::flat_hash_set<std::string>> scope_stack;
   for (auto c = lnast->get_first_child(lnast->get_root()); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
     if (Lnast_ntype::is_stmts(lnast->get_type(c))) {
-      check_writes_in_scope(c, {});
+      check_writes_in_scope(c, scope_stack, /*barrier=*/0);
     }
   }
 }
 
 // A statement-level `store` to a non-tmp name with no `mut`/`const`/declare (or
 // param/output) visible in scope is `a = 3` with no prior declaration — an error.
-// `visible` carries names declared in enclosing frames; a func body is a fresh
-// namespace seeded with its params/outputs.
-void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const absl::flat_hash_set<std::string>& visible,
-                                      const absl::flat_hash_set<std::string>& seed_here) const {
-  absl::flat_hash_set<std::string> here = seed_here;
+// A `mut`/`const`/`reg` declaration (or a `for` iterator) reusing a name from an
+// ENCLOSING scope is variable shadowing. Both resolved against `scope_stack` (a
+// scoped symbol table built in this single walk); see the header.
+void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, std::vector<absl::flat_hash_set<std::string>>& scope_stack,
+                                      size_t barrier, const absl::flat_hash_set<std::string>& seed_here) const {
+  scope_stack.emplace_back(seed_here.begin(), seed_here.end());
+  const size_t lvl = scope_stack.size() - 1;
+
+  // Declared in a STRICTLY enclosing frame (>= barrier, < this scope) — shadowing.
+  auto in_enclosing = [&](std::string_view name) {
+    for (size_t i = lvl; i-- > barrier;) {
+      if (scope_stack[i].contains(name)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  // Declared in any live frame (this scope or enclosing, >= barrier) — for
+  // assign-no-decl.
+  auto is_declared = [&](std::string_view name) {
+    for (size_t i = lvl + 1; i-- > barrier;) {
+      if (scope_stack[i].contains(name)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   for (auto c = lnast->get_first_child(scope_stmts); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
     const auto ct = lnast->get_type(c);
 
     // A bare `stmts` block (e.g. the for-loop unroll wrapper) is a nested scope.
     if (Lnast_ntype::is_stmts(ct)) {
-      absl::flat_hash_set<std::string> combined = visible;
-      combined.insert(here.begin(), here.end());
-      check_writes_in_scope(c, combined);
+      check_writes_in_scope(c, scope_stack, barrier);
       continue;
     }
 
@@ -599,10 +621,9 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const absl::
           if (name.empty() || prp_name_is_tmp(name)) {
             continue;
           }
-          // Shadows if the name is already declared in an ENCLOSING scope
-          // (`visible`) or earlier in THIS scope (`here`) — `mut c` then
-          // `for c …` at the same level both forbid reusing `c`.
-          if (visible.contains(name) || here.contains(name)) {
+          // Shadows if the name is already declared in this-or-an-enclosing scope
+          // — `mut c` then `for c …` at the same level both forbid reusing `c`.
+          if (is_declared(name)) {
             report_error(c,
                          "variable-shadowing",
                          "name",
@@ -613,10 +634,7 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const absl::
         }
       }
       if (!body_stmts.is_invalid()) {
-        absl::flat_hash_set<std::string> combined = visible;
-        combined.insert(here.begin(), here.end());
-        combined.insert(binds.begin(), binds.end());
-        check_writes_in_scope(body_stmts, combined);
+        check_writes_in_scope(body_stmts, scope_stack, barrier, binds);
       }
       continue;
     }
@@ -651,7 +669,7 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const absl::
     // it is a `store`, not a declaration. `type`/enum/func declarations are not
     // shadow-checked here.) Located via the span attached to the declaring node.
     auto check_shadowing = [&](const Lnast_nid& node, const std::string& name) {
-      if (!name.empty() && is_var_mode(third_child_name(node)) && visible.contains(name)) {
+      if (!name.empty() && is_var_mode(third_child_name(node)) && in_enclosing(name)) {
         report_error(node,
                      "variable-shadowing",
                      "name",
@@ -664,7 +682,7 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const absl::
       auto name = first_ref_name(c);
       if (!name.empty()) {
         check_shadowing(c, name);
-        here.insert(name);
+        scope_stack[lvl].insert(name);
       }
     } else if (Lnast_ntype::is_attr_set(ct)) {
       // Legacy declaration form still emitted by some lowerings (e.g. the
@@ -674,11 +692,11 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const absl::
       if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0)) && !c1.is_invalid() && lnast->get_name(c1) == "type") {
         auto name = std::string(lnast->get_name(c0));
         check_shadowing(c, name);
-        here.insert(name);
+        scope_stack[lvl].insert(name);
       }
     } else if (Lnast_ntype::is_store(ct)) {
       auto name = first_ref_name(c);
-      if (!name.empty() && !prp_name_is_tmp(name) && !here.contains(name) && !visible.contains(name)) {
+      if (!name.empty() && !prp_name_is_tmp(name) && !is_declared(name)) {
         report_error(c,
                      "assign-no-decl",
                      "name",
@@ -694,19 +712,18 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, const absl::
     for (auto cc = lnast->get_first_child(c); !cc.is_invalid(); cc = lnast->get_sibling_next(cc)) {
       if (Lnast_ntype::is_stmts(lnast->get_type(cc))) {
         if (is_func_body) {
-          // Params/outputs belong to the body's OWN scope: seed `here` (so a
-          // body-level `mut res = …` initializing an output is not shadowing),
-          // with no enclosing `visible` (a lambda does not see outer runtime
-          // vars). A NESTED re-declaration still shadows — `here` flows down.
-          check_writes_in_scope(cc, {}, sig);
+          // Params/outputs belong to the body's OWN scope: seed it with `sig`, and
+          // make the body a FRESH namespace (barrier = its frame) — a lambda does
+          // not see outer runtime vars. A NESTED re-declaration still shadows.
+          check_writes_in_scope(cc, scope_stack, /*barrier=*/scope_stack.size(), sig);
         } else {
-          absl::flat_hash_set<std::string> combined = visible;
-          combined.insert(here.begin(), here.end());
-          check_writes_in_scope(cc, combined);
+          // An if/match arm: a nested scope that still sees the enclosing frames.
+          check_writes_in_scope(cc, scope_stack, barrier);
         }
       }
     }
   }
+  scope_stack.pop_back();
 }
 
 // Collect the order-independent names: function names (`comb/pipe/mod
@@ -750,11 +767,33 @@ void Prp2lnast::collect_hoisted_names(const Lnast_nid& node, absl::flat_hash_set
 // comptime-constant is the runner's closure-capture check (entry 1x, see
 // closure_capture.prp), not a parse-time rule. Crossing a `for` node makes
 // its iterator visible (the runner-unroll form carries no attr_set decl).
+namespace {
+// Names a statement-level child declares (mirror of read_is_visible's
+// stmt_declares lambda). Used to precompute read_scope_decls_.
+void prp_collect_stmt_decls(const Lnast& ln, const Lnast_nid& c, absl::flat_hash_set<std::string>& out) {
+  const auto ct = ln.get_type(c);
+  auto       c0 = ln.get_first_child(c);
+  const bool c0_ref = !c0.is_invalid() && Lnast_ntype::is_ref(ln.get_type(c0));
+  if (Lnast_ntype::is_declare(ct)) {
+    if (c0_ref) {
+      out.insert(std::string(ln.get_name(c0)));
+    }
+  } else if (Lnast_ntype::is_attr_set(ct)) {
+    auto c1 = c0.is_invalid() ? c0 : ln.get_sibling_next(c0);
+    if (c0_ref && !c1.is_invalid() && ln.get_name(c1) == "type") {
+      out.insert(std::string(ln.get_name(c0)));
+    }
+  } else if (Lnast_ntype::is_if_like(ct)) {
+    for (auto gc = ln.get_first_child(c); !gc.is_invalid(); gc = ln.get_sibling_next(gc)) {
+      if (!Lnast_ntype::is_stmts(ln.get_type(gc))) {
+        prp_collect_stmt_decls(ln, gc, out);
+      }
+    }
+  }
+}
+}  // namespace
+
 bool Prp2lnast::read_is_visible(const Read_site& rs) const {
-  auto first_ref_is_name = [&](const Lnast_nid& node) -> bool {
-    auto c0 = lnast->get_first_child(node);
-    return !c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0)) && (lnast->get_name(c0) == rs.name);
-  };
   // A `for` node binds value (child0) plus the optional idx (child4) / key
   // (child5) of `for (value, idx, key) in t`. Any of them is visible in the body.
   // Layout: for(value, iterable, body, mode [, idx [, key]]).
@@ -768,48 +807,27 @@ bool Prp2lnast::read_is_visible(const Read_site& rs) const {
     }
     return false;
   };
-  auto second_child_name = [&](const Lnast_nid& node) -> std::string_view {
-    auto c0 = lnast->get_first_child(node);
-    if (c0.is_invalid()) {
-      return {};
-    }
-    auto c1 = lnast->get_sibling_next(c0);
-    return c1.is_invalid() ? std::string_view{} : lnast->get_name(c1);
-  };
-
-  // Does this statement-level node declare rs.name? Look through `if` nodes'
-  // direct (non-stmts) children too — historic flat-if shapes declared into
-  // the surrounding scope. Regular if/while arms live inside `stmts` wrappers
-  // (their own scope), which this deliberately does not descend into.
-  std::function<bool(const Lnast_nid&)> stmt_declares = [&](const Lnast_nid& c) -> bool {
-    const auto ct = lnast->get_type(c);
-    if (Lnast_ntype::is_declare(ct) && first_ref_is_name(c)) {
-      return true;
-    }
-    if (Lnast_ntype::is_attr_set(ct) && first_ref_is_name(c) && second_child_name(c) == "type") {
-      return true;
-    }
-    if (Lnast_ntype::is_if_like(ct)) {
-      for (auto gc = lnast->get_first_child(c); !gc.is_invalid(); gc = lnast->get_sibling_next(gc)) {
-        if (!Lnast_ntype::is_stmts(lnast->get_type(gc)) && stmt_declares(gc)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  };
+  // Per-frame declaration lookups now use the precomputed read_scope_decls_ /
+  // read_child_index_ (see check_undefined_reads); the old per-read sibling scan
+  // (stmt_declares over every child up to the boundary) is gone.
 
   Lnast_nid frame    = rs.scope;
   Lnast_nid boundary = rs.before;  // inclusive; invalid = frame was empty at read time
 
   while (!frame.is_invalid()) {
+    // O(1) frame resolution (was an O(siblings) scan per read): `rs.name` is
+    // declared in this frame at or before the read iff its earliest declaring
+    // child index is <= the boundary child's index. read_scope_decls_ /
+    // read_child_index_ are precomputed in check_undefined_reads; this matches the
+    // old scan exactly (which returned at the first declaring child up to and
+    // including `boundary`).
     if (!boundary.is_invalid()) {
-      for (auto c = lnast->get_first_child(frame); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-        if (stmt_declares(c)) {
+      const auto sd = read_scope_decls_.find(frame);
+      if (sd != read_scope_decls_.end()) {
+        const auto di = sd->second.find(rs.name);
+        const auto bi = read_child_index_.find(boundary);
+        if (di != sd->second.end() && bi != read_child_index_.end() && di->second <= bi->second) {
           return true;
-        }
-        if (c == boundary) {
-          break;
         }
       }
     }
@@ -858,6 +876,35 @@ bool Prp2lnast::name_in_inflight_scope(std::string_view name) const {
 void Prp2lnast::check_undefined_reads() const {
   absl::flat_hash_set<std::string> hoisted;
   collect_hoisted_names(lnast->get_root(), hoisted);
+
+  // Precompute, per stmts scope, name -> earliest declaring child index (and each
+  // child's index), so read_is_visible resolves a frame in O(1) instead of an
+  // O(siblings) scan per read (see read_scope_decls_ / read_child_index_). O(N).
+  read_scope_decls_.clear();
+  read_child_index_.clear();
+  {
+    std::function<void(const Lnast_nid&)> build = [&](const Lnast_nid& n) {
+      if (Lnast_ntype::is_stmts(lnast->get_type(n))) {
+        auto& decls = read_scope_decls_[n];
+        int   idx   = 0;
+        for (auto c = lnast->get_first_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c), ++idx) {
+          read_child_index_[c] = idx;
+          absl::flat_hash_set<std::string> names;
+          prp_collect_stmt_decls(*lnast, c, names);
+          for (const auto& nm : names) {
+            auto it = decls.find(nm);
+            if (it == decls.end()) {
+              decls.emplace(nm, idx);  // earliest declaring position
+            }
+          }
+        }
+      }
+      for (auto c = lnast->get_first_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+        build(c);
+      }
+    };
+    build(lnast->get_root());
+  }
 
   for (const auto& rs : read_sites_) {
     if (rs.name.empty() || rs.name == "self" || prp_name_is_tmp(rs.name)
@@ -1083,6 +1130,166 @@ bool prp_wire_written_under_loop(const Lnast& ln, const Lnast_nid& nid, std::str
 }
 }  // namespace
 
+namespace {
+// ── Multi-wire gatherers ─────────────────────────────────────────────────────
+// One walk of a scope collects the wire metrics for EVERY wire at once, instead
+// of the prp_*_wire helpers above which each re-walked the whole scope subtree
+// PER wire (O(wires * nodes) -> O(nodes) per scope). Each gatherer mirrors the
+// descent rules of its single-wire counterpart exactly (and reuses the same
+// prp_wire_driver_store / prp_wire_nil_store predicates), so the diagnostics are
+// unchanged — only their cost is.
+
+// driver-store target name of `c` (empty if `c` is not a `store(ref, …)`).
+std::string_view prp_store_ref_name(const Lnast& ln, const Lnast_nid& c) {
+  if (!Lnast_ntype::is_store(ln.get_type(c))) {
+    return {};
+  }
+  auto c0 = ln.get_first_child(c);
+  if (c0.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(c0))) {
+    return {};
+  }
+  return ln.get_name(c0);
+}
+
+// Mirror of prp_wire_has_field_store, for all wires: a `store(w, 'field', v)`
+// (>=3 children, const selector) anywhere except inside a func_def body.
+void gather_field_store_wires(const Lnast& ln, const Lnast_nid& nid, absl::flat_hash_set<std::string>& out) {
+  if (Lnast_ntype::is_func_def(ln.get_type(nid))) {
+    return;
+  }
+  if (Lnast_ntype::is_store(ln.get_type(nid))) {
+    auto c0 = ln.get_first_child(nid);
+    if (!c0.is_invalid() && Lnast_ntype::is_ref(ln.get_type(c0))) {
+      auto c1 = ln.get_sibling_next(c0);
+      auto c2 = c1.is_invalid() ? c1 : ln.get_sibling_next(c1);
+      if (!c2.is_invalid() && Lnast_ntype::is_const(ln.get_type(c1))) {
+        out.insert(std::string(ln.get_name(c0)));
+      }
+    }
+  }
+  for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+    gather_field_store_wires(ln, c, out);
+  }
+}
+
+// Mirror of prp_wire_written_under_loop, for all wires.
+void gather_loop_driven_wires(const Lnast& ln, const Lnast_nid& nid, bool in_loop, absl::flat_hash_set<std::string>& out) {
+  const auto t = ln.get_type(nid);
+  if (Lnast_ntype::is_stmts(t)) {
+    for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+      if (in_loop) {
+        const auto w = prp_store_ref_name(ln, c);
+        if (!w.empty() && prp_wire_driver_store(ln, c, w)) {
+          out.insert(std::string(w));
+        }
+      }
+      const auto ct = ln.get_type(c);
+      if (Lnast_ntype::is_if_like(ct) || Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct) || Lnast_ntype::is_stmts(ct)) {
+        gather_loop_driven_wires(ln, c, in_loop, out);
+      }
+    }
+    return;
+  }
+  if (Lnast_ntype::is_if_like(t) || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t)) {
+    const bool nl = in_loop || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t);
+    for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+      if (Lnast_ntype::is_stmts(ln.get_type(c))) {
+        gather_loop_driven_wires(ln, c, nl, out);
+      }
+    }
+  }
+}
+
+// Mirror of prp_subtree_writes_wire, for all wires: every statement-level driver
+// store anywhere in the control subtree.
+void gather_subtree_write_wires(const Lnast& ln, const Lnast_nid& nid, absl::flat_hash_set<std::string>& out) {
+  const auto t = ln.get_type(nid);
+  if (Lnast_ntype::is_stmts(t)) {
+    for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+      const auto w = prp_store_ref_name(ln, c);
+      if (!w.empty() && prp_wire_driver_store(ln, c, w)) {
+        out.insert(std::string(w));
+      }
+      const auto ct = ln.get_type(c);
+      if (Lnast_ntype::is_if_like(ct) || Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct) || Lnast_ntype::is_stmts(ct)) {
+        gather_subtree_write_wires(ln, c, out);
+      }
+    }
+    return;
+  }
+  if (Lnast_ntype::is_if_like(t) || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t)) {
+    for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+      if (Lnast_ntype::is_stmts(ln.get_type(c))) {
+        gather_subtree_write_wires(ln, c, out);
+      }
+    }
+  }
+}
+
+// Mirror of prp_count_wire_drivers + prp_stmts_cover_wire, for all wires in one
+// straight-line pass over `stmts`. `count` = top-level driver-statement count;
+// `cover` = wires driven on EVERY straight-line path through `stmts`.
+void gather_count_cover_wires(const Lnast& ln, const Lnast_nid& stmts, absl::flat_hash_map<std::string, int>& count,
+                              absl::flat_hash_set<std::string>& cover) {
+  for (auto c = ln.get_first_child(stmts); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+    const auto t = ln.get_type(c);
+    const auto w = prp_store_ref_name(ln, c);
+    if (!w.empty() && prp_wire_nil_store(ln, c, w)) {
+      cover.erase(std::string(w));  // `w = nil` un-drives this straight-line path
+    } else if (!w.empty() && prp_wire_driver_store(ln, c, w)) {
+      ++count[std::string(w)];
+      cover.insert(std::string(w));
+    } else if (Lnast_ntype::is_if_like(t)) {
+      // An if/match that writes a wire (any arm) is ONE driver of that wire.
+      absl::flat_hash_set<std::string> writes;
+      gather_subtree_write_wires(ln, c, writes);
+      for (const auto& ww : writes) {
+        ++count[ww];
+      }
+      // It covers a wire iff it has an else arm AND every arm-stmts covers it
+      // (mirror prp_if_covers_wire) — i.e. the intersection of per-arm covers.
+      int  nch        = 0;
+      bool last_stmts = false;
+      for (auto a = ln.get_first_child(c); !a.is_invalid(); a = ln.get_sibling_next(a)) {
+        ++nch;
+        last_stmts = Lnast_ntype::is_stmts(ln.get_type(a));
+      }
+      if ((nch % 2 == 1) && last_stmts) {
+        absl::flat_hash_set<std::string> inter;
+        bool                             first = true;
+        for (auto a = ln.get_first_child(c); !a.is_invalid(); a = ln.get_sibling_next(a)) {
+          if (!Lnast_ntype::is_stmts(ln.get_type(a))) {
+            continue;
+          }
+          absl::flat_hash_map<std::string, int> ac;
+          absl::flat_hash_set<std::string>      acov;
+          gather_count_cover_wires(ln, a, ac, acov);
+          if (first) {
+            inter = std::move(acov);
+            first = false;
+          } else {
+            absl::erase_if(inter, [&](const std::string& k) { return !acov.contains(k); });
+          }
+        }
+        for (const auto& ww : inter) {
+          cover.insert(ww);
+        }
+      }
+    } else if (Lnast_ntype::is_stmts(t)) {
+      absl::flat_hash_map<std::string, int> nc;
+      absl::flat_hash_set<std::string>      ncov;
+      gather_count_cover_wires(ln, c, nc, ncov);
+      for (const auto& [ww, k] : nc) {
+        count[ww] += k;
+      }
+      for (const auto& ww : ncov) {
+        cover.insert(ww);
+      }
+    }
+  }
+}
+}  // namespace
+
 void Prp2lnast::check_wire_drivers() const { check_wire_scope(lnast->get_root()); }
 
 void Prp2lnast::check_wire_scope(const Lnast_nid& node) const {
@@ -1090,6 +1297,10 @@ void Prp2lnast::check_wire_scope(const Lnast_nid& node) const {
   // declared directly in it (its drivers live in this scope; count/cover recurse
   // into nested if/match and plain blocks).
   if (Lnast_ntype::is_stmts(lnast->get_type(node))) {
+    // Collect the wires declared directly in this scope first, then gather every
+    // wire's driver metrics in ONE walk of the scope (was a full-subtree walk per
+    // wire — O(wires * nodes); see the gatherers above).
+    std::vector<std::pair<Lnast_nid, std::string_view>> scope_wires;
     for (auto c = lnast->get_first_child(node); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
       if (!Lnast_ntype::is_declare(lnast->get_type(c))) {
         continue;
@@ -1104,39 +1315,51 @@ void Prp2lnast::check_wire_scope(const Lnast_nid& node) const {
       if (mode != "wire" && !mode.starts_with("wire ")) {
         continue;
       }
-      const auto wname = lnast->get_name(name_n);
-      // A tuple-bundle wire (`wire io:(a,b)` driven by per-field `io.a = …`) is
-      // single-driver PER LEAF; the base-level count is meaningless. detuple
-      // splits it into per-leaf `wire io.a` nets, each checked downstream.
-      if (prp_wire_has_field_store(*lnast, node, wname)) {
-        continue;
-      }
-      // A wire driven inside a loop is unrolled later — its coverage/multiplicity
-      // is unknowable here; defer to tolg's post-unroll checks.
-      if (prp_wire_written_under_loop(*lnast, node, wname, /*in_loop=*/false)) {
-        continue;
-      }
-      const int  drivers = prp_count_wire_drivers(*lnast, node, wname);
-      const bool covered = prp_stmts_cover_wire(*lnast, node, wname);
-      if (drivers > 1) {
-        report_error(c,
-                     "wire-multiple-drivers",
-                     "name",
-                     std::format("wire '{}' has more than one driver — a `wire` is a single-driver net", wname),
-                     "give it exactly one assignment, or one `if`/`match` that drives it on every path");
-      } else if (!covered) {
-        if (drivers == 0) {
+      scope_wires.emplace_back(c, lnast->get_name(name_n));
+    }
+    if (!scope_wires.empty()) {
+      absl::flat_hash_set<std::string>      field_wires;
+      absl::flat_hash_set<std::string>      loop_wires;
+      absl::flat_hash_map<std::string, int> driver_count;
+      absl::flat_hash_set<std::string>      covered_wires;
+      gather_field_store_wires(*lnast, node, field_wires);
+      gather_loop_driven_wires(*lnast, node, /*in_loop=*/false, loop_wires);
+      gather_count_cover_wires(*lnast, node, driver_count, covered_wires);
+      for (const auto& [c, wname] : scope_wires) {
+        // A tuple-bundle wire (`wire io:(a,b)` driven by per-field `io.a = …`) is
+        // single-driver PER LEAF; the base-level count is meaningless. detuple
+        // splits it into per-leaf `wire io.a` nets, each checked downstream.
+        if (field_wires.contains(wname)) {
+          continue;
+        }
+        // A wire driven inside a loop is unrolled later — its coverage/multiplicity
+        // is unknowable here; defer to tolg's post-unroll checks.
+        if (loop_wires.contains(wname)) {
+          continue;
+        }
+        const auto dit     = driver_count.find(wname);
+        const int  drivers = dit == driver_count.end() ? 0 : dit->second;
+        const bool covered = covered_wires.contains(wname);
+        if (drivers > 1) {
           report_error(c,
-                       "wire-undriven",
+                       "wire-multiple-drivers",
                        "name",
-                       std::format("wire '{}' is declared but never driven", wname),
-                       "assign it (a `wire` must have exactly one driver), or remove the declaration");
-        } else {
-          report_error(c,
-                       "wire-incomplete-driver",
-                       "name",
-                       std::format("wire '{}' is incompletely driven — a control path leaves it undriven", wname),
-                       "drive it on every path (add an `else`, or cover every `match` case)");
+                       std::format("wire '{}' has more than one driver — a `wire` is a single-driver net", wname),
+                       "give it exactly one assignment, or one `if`/`match` that drives it on every path");
+        } else if (!covered) {
+          if (drivers == 0) {
+            report_error(c,
+                         "wire-undriven",
+                         "name",
+                         std::format("wire '{}' is declared but never driven", wname),
+                         "assign it (a `wire` must have exactly one driver), or remove the declaration");
+          } else {
+            report_error(c,
+                         "wire-incomplete-driver",
+                         "name",
+                         std::format("wire '{}' is incompletely driven — a control path leaves it undriven", wname),
+                         "drive it on every path (add an `else`, or cover every `match` case)");
+          }
         }
       }
     }

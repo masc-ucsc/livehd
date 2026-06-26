@@ -148,8 +148,15 @@ protected:
   // them here is shadowing); `seed_here` pre-populates the CURRENT scope (a func
   // body seeds its params/outputs — re-declaring those at the body top level is
   // the normal output-init pattern, not shadowing).
-  void check_writes_in_scope(const Lnast_nid& scope_stmts, const absl::flat_hash_set<std::string>& visible,
-                             const absl::flat_hash_set<std::string>& seed_here = {}) const;
+  // Minimal scoped symbol table done in ONE walk: each scope pushes a frame of
+  // its declared names onto `scope_stack`; a `declare` reusing a name in an
+  // ENCLOSING frame is shadowing, a `store` to a name in NO live frame is
+  // undeclared. Sibling scopes (if/else arms, separate blocks) push independent
+  // frames, so reusing a name across branches is fine. `barrier` is the lowest
+  // visible frame index (a func body is a fresh namespace → barrier = its frame).
+  // O(N * depth), no per-scope set copy.
+  void check_writes_in_scope(const Lnast_nid& scope_stmts, std::vector<absl::flat_hash_set<std::string>>& scope_stack,
+                             size_t barrier, const absl::flat_hash_set<std::string>& seed_here = {}) const;
 
   // Reject reading a name that is not visible at the read site (04-variables.md
   // "Variable scope": a variable is visible from its declaration to the end of
@@ -236,6 +243,16 @@ protected:
     Lnast_nid   before;
   };
   std::vector<Read_site> read_sites_;
+  // Per-scope (stmts node) declaration index: name -> EARLIEST child position that
+  // declares it (the same declarations read_is_visible's stmt_declares matches).
+  // Built once in check_undefined_reads so read_is_visible resolves a frame in
+  // O(1) — `earliest_decl_idx <= boundary_idx` — instead of scanning the scope's
+  // siblings up to the read per read (which was O(reads * scope) on big scopes).
+  // Keyed by the scope node (hhds::Node_class is abseil-hashable).
+  mutable absl::flat_hash_map<Lnast_nid, absl::flat_hash_map<std::string, int>> read_scope_decls_;
+  // Child position of each direct child of a stmts scope (the boundary nodes
+  // read_is_visible compares against). Built in the same walk.
+  mutable absl::flat_hash_map<Lnast_nid, int>                                   read_child_index_;
   // True iff `rs.name` is visible at the recorded site (see Read_site).
   bool                   read_is_visible(const Read_site& rs) const;
 

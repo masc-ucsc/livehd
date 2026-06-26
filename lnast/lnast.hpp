@@ -21,6 +21,7 @@
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/source_locator.hpp"
 #include "hhds/tree.hpp"
+#include "hlop/dlop.hpp"
 #include "lnast_attrs.hpp"
 #include "lnast_ntype.hpp"
 
@@ -316,6 +317,14 @@ public:
   void                         set_type(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int t);
   std::string_view             get_name(const Lnast_nid& nid) const;
   void                         set_name(const Lnast_nid& nid, std::string_view name);
+
+  // Parsed value of a `const` node's literal text, parsed ONCE per distinct
+  // literal and memoized on this Lnast (const_value_cache_). Constants live in
+  // the tree as pyrope text and Dlop::from_pyrope is shln-heavy, so re-parsing
+  // the same literal on every pass/operand access dominated big-module compiles.
+  // Pass the node's text (get_name(nid)); throws like from_pyrope on a malformed
+  // literal (callers that tolerate non-numeric text must catch, as before).
+  const Dlop& get_const_value(std::string_view const_text) const;
 
   // ── source provenance ──────────────────────────────────────────
   // The old per-node `lnast.loc` struct + `lnast.fname` string attributes are
