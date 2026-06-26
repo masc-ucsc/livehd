@@ -34,7 +34,12 @@ public:
     // invalidated in its declaring scope so the unknown side-effects of the
     // arm don't leak out. See record_uncertain_modification().
     bool                                                      uncertain_cond{false};
-    std::vector<std::string>                                  modified_under_uncertainty;
+    // Vars modified inside this (uncertain) arm, invalidated on leave_scope.
+    // A SET, not a vector: record_uncertain_modification dedups on every set()
+    // inside the arm, and a linear vector scan there was O(writes^2) per arm
+    // (string compares) on big always-blocks. Order does not matter (each entry
+    // is invalidated independently on exit).
+    absl::flat_hash_set<std::string>                          modified_under_uncertainty;
   };
 
   static inline Dlop invalid_lconst{};  // default Dlop is Type::Invalid
@@ -104,6 +109,13 @@ public:
     bool        comptime{false};
   };
   absl::flat_hash_map<std::string, Pending_decl> pending_decl_facts;
+  // Reverse index: root var name → the full pending_decl_facts keys (root.field)
+  // stashed under it. leave_scope() uses it to drop a scope's still-unapplied
+  // field facts in O(scope vars) when their root goes out of write-scope —
+  // without rescanning the whole stash. Keeps apply_pending_field_facts O(N)
+  // total (the stash never accumulates dead entries). May hold stale keys
+  // (already applied, or re-stashed): erasing a missing key is a harmless no-op.
+  absl::flat_hash_map<std::string, std::vector<std::string>> pending_keys_by_root;
 
   // Extraction origin: tuple_get dst tmp → "src.field" path. The
   // runner's declare/type_spec bake back-flows per-field declared facts to
@@ -168,6 +180,13 @@ public:
   // returning it, so writes don't leak into whole-bundle-assignment aliases
   // (`p2 = p1` stores the same pointer). Bare variable names only.
   std::shared_ptr<Bundle> get_bundle_for_write(std::string_view var);
+
+  // Read-only companion to get_bundle_for_write: same write-scope search
+  // (find_decl_scope, stops at the Function barrier) but NEVER unshares /
+  // clones. Returns a borrowed pointer to the live slot bundle, or nullptr
+  // when `var` has no live declaring scope. For probing a binding before
+  // deciding whether to take the (cloning) write path. Bare variable names.
+  const Bundle* peek_writable_bundle(std::string_view var) const;
 
   void dump() const;
 

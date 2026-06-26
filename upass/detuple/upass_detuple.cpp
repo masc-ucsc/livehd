@@ -92,6 +92,18 @@ private:
   absl::flat_hash_map<std::string, Index_step> index_step_;
   absl::flat_hash_set<std::string>             drop_index_temp_;  // index steps safe to drop
 
+  // One use-site of a struct-reg candidate root: the FIRST child-ref naming the
+  // root within a node (matches validate_struct_reg_uses' per-node `break`).
+  struct Use {
+    Lnast_nid node;
+    Lnast_nid child;
+    int       idx;
+  };
+  // root name -> its use-sites, built in ONE tree walk (collect_struct_regs) so
+  // validate_struct_reg_uses is O(uses) per candidate instead of re-walking the
+  // whole tree each time — that per-candidate full walk was O(candidates * nodes).
+  absl::flat_hash_map<std::string, std::vector<Use>> cand_uses_;
+
   // ── helpers ────────────────────────────────────────────────────────────────
   std::string_view name_of(const Lnast_nid& n) const { return src_->get_name(n); }
   Lnast_ntype::Lnast_ntype_int type_of(const Lnast_nid& n) const { return src_->get_type(n); }
@@ -411,6 +423,35 @@ private:
       }
     }
 
+    // Use-site index: ONE walk records, per node, the first child-ref naming
+    // each candidate root. validate_struct_reg_uses then scans only a
+    // candidate's own use-sites (was a full-tree walk per candidate → O(K*N)).
+    cand_uses_.clear();
+    {
+      std::vector<std::string_view> seen_here;  // first-ref-per-node per name (reused)
+      for (const auto n : src_->depth_preorder(src_->get_root())) {
+        if (n.is_invalid()) {
+          continue;
+        }
+        seen_here.clear();
+        int idx = 0;
+        for (auto c = src_->get_first_child(n); !c.is_invalid(); c = src_->get_sibling_next(c), ++idx) {
+          if (!Lnast_ntype::is_ref(type_of(c))) {
+            continue;
+          }
+          const auto nm = name_of(c);
+          if (cand.find(nm) == cand.end()) {
+            continue;
+          }
+          if (std::find(seen_here.begin(), seen_here.end(), nm) != seen_here.end()) {
+            continue;  // only the first ref of this name in this node (matches old `break`)
+          }
+          seen_here.emplace_back(nm);
+          cand_uses_[std::string(nm)].push_back(Use{n, c, idx});
+        }
+      }
+    }
+
     // Finalize: a candidate becomes a split iff its leaf fields are known and
     // its per-field reset resolves (nil = no reset, else all-const values).
     for (auto& [v, cd] : cand) {
@@ -599,58 +640,57 @@ private:
   // Returns false on ANY other use of `v` (then the reg is left un-split).
   bool validate_struct_reg_uses(const std::string& v, const Struct_reg& sr, absl::flat_hash_set<std::string>& drop_t,
                                 absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, Lnast_nid>>& wholes) {
-    for (const auto n : src_->depth_preorder(src_->get_root())) {
-      if (n.is_invalid()) {
-        continue;
+    auto uit = cand_uses_.find(v);
+    if (uit == cand_uses_.end()) {
+      return true;  // no use of whole-v anywhere — trivially splittable
+    }
+    // Each use-site is the first child-ref naming v within a node (matches the
+    // old per-node `break`). Every such use must be a form the split rewrites.
+    for (const auto& u : uit->second) {
+      const auto t   = type_of(u.node);
+      const auto c   = u.child;
+      const int  idx = u.idx;
+      if (Lnast_ntype::is_declare(t) && idx == 0) {
+        continue;  // the declare of v
       }
-      const auto t = type_of(n);
-      int        idx = 0;  // position-aware scan of v among this node's children
-      for (auto c = src_->get_first_child(n); !c.is_invalid(); c = src_->get_sibling_next(c), ++idx) {
-        if (!Lnast_ntype::is_ref(type_of(c)) || name_of(c) != v) {
+      if (Lnast_ntype::is_tuple_get(t) && idx == 1) {
+        auto f = src_->get_sibling_next(c);  // field read tuple_get(t, v, 'f')
+        if (!f.is_invalid() && src_->get_sibling_next(f).is_invalid() && Lnast_ntype::is_const(type_of(f))
+            && reg_has_field(sr, name_of(f))) {
           continue;
         }
-        if (Lnast_ntype::is_declare(t) && idx == 0) {
-          break;  // the declare of v
-        }
-        if (Lnast_ntype::is_tuple_get(t) && idx == 1) {
-          auto f = src_->get_sibling_next(c);  // field read tuple_get(t, v, 'f')
-          if (!f.is_invalid() && src_->get_sibling_next(f).is_invalid() && Lnast_ntype::is_const(type_of(f))
-              && reg_has_field(sr, name_of(f))) {
-            break;
-          }
-          return false;  // index step / non-field use of v as a base
-        }
-        if (Lnast_ntype::is_store(t) && idx == 0) {
-          std::vector<Lnast_nid> rest;
-          for (auto k = src_->get_sibling_next(c); !k.is_invalid(); k = src_->get_sibling_next(k)) {
-            rest.emplace_back(k);
-          }
-          if (rest.size() == 2 && Lnast_ntype::is_const(type_of(rest[0])) && reg_has_field(sr, name_of(rest[0]))) {
-            break;  // field write store(v, 'f', val)
-          }
-          if (rest.size() == 1 && Lnast_ntype::is_const(type_of(rest[0]))
-              && (name_of(rest[0]) == "nil" || name_of(rest[0]) == "0sb?")) {
-            break;  // whole nil/poison init (wire forward-declare or mut poison) — handled in store rewrite
-          }
-          if (rest.size() == 1 && Lnast_ntype::is_ref(type_of(rest[0]))) {
-            const std::string                           tmp{name_of(rest[0])};
-            absl::flat_hash_map<std::string, Lnast_nid> byfield;
-            const auto                                  kind = classify_v_store(sr, tmp, byfield);
-            if (kind == Vstore::shape) {
-              drop_t.insert(tmp);
-              break;
-            }
-            if (kind == Vstore::whole) {
-              drop_t.insert(tmp);
-              wholes[tmp] = std::move(byfield);
-              break;
-            }
-            return false;  // non-literal / partial whole write
-          }
-          return false;  // some other store shape on v
-        }
-        return false;  // v used as a value operand somewhere (whole read, arg, …)
+        return false;  // index step / non-field use of v as a base
       }
+      if (Lnast_ntype::is_store(t) && idx == 0) {
+        std::vector<Lnast_nid> rest;
+        for (auto k = src_->get_sibling_next(c); !k.is_invalid(); k = src_->get_sibling_next(k)) {
+          rest.emplace_back(k);
+        }
+        if (rest.size() == 2 && Lnast_ntype::is_const(type_of(rest[0])) && reg_has_field(sr, name_of(rest[0]))) {
+          continue;  // field write store(v, 'f', val)
+        }
+        if (rest.size() == 1 && Lnast_ntype::is_const(type_of(rest[0]))
+            && (name_of(rest[0]) == "nil" || name_of(rest[0]) == "0sb?")) {
+          continue;  // whole nil/poison init (wire forward-declare or mut poison) — handled in store rewrite
+        }
+        if (rest.size() == 1 && Lnast_ntype::is_ref(type_of(rest[0]))) {
+          const std::string                           tmp{name_of(rest[0])};
+          absl::flat_hash_map<std::string, Lnast_nid> byfield;
+          const auto                                  kind = classify_v_store(sr, tmp, byfield);
+          if (kind == Vstore::shape) {
+            drop_t.insert(tmp);
+            continue;
+          }
+          if (kind == Vstore::whole) {
+            drop_t.insert(tmp);
+            wholes[tmp] = std::move(byfield);
+            continue;
+          }
+          return false;  // non-literal / partial whole write
+        }
+        return false;  // some other store shape on v
+      }
+      return false;  // v used as a value operand somewhere (whole read, arg, …)
     }
     return true;
   }

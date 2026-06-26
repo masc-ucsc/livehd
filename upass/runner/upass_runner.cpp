@@ -1097,32 +1097,39 @@ bool uPass_runner::resolve_node_operands(Resolved_node& out) {
       // single-unknown-bit `0sb?`/`0ub?` is TYPELESS (wildcard), a
       // double-quoted literal is a string (single-quoted chars parse as
       // integers), anything integer-parseable is an integer.
-      const auto  txt = lm->current_text();
-      upass::Kind k   = upass::Kind::unknown;
-      if (txt == "nil") {
-        k = upass::Kind::nil;
-      } else if (txt == "true" || txt == "false") {
-        k = upass::Kind::boolean;
-      } else if (txt == "0sb?" || txt == "0ub?") {
-        k = upass::Kind::unknown;
-      } else if (!txt.empty() && txt.front() == '"') {
-        k = upass::Kind::string;
-      }
-      Dlop v;
-      try {
-        v = *Dlop::from_pyrope(txt);
-        if (k == upass::Kind::unknown && txt != "0sb?" && txt != "0ub?") {
-          k = v.is_string() ? upass::Kind::string : (v.is_integer() ? upass::Kind::integer : upass::Kind::unknown);
-        }
-      } catch (...) {
-        // Unparseable literal (selector words etc.): keep it as a string.
-        v = *Dlop::from_string(txt);
-        if (k == upass::Kind::unknown) {
+      const auto txt = lm->current_text();
+      // Cache the parse: Dlop::from_pyrope is shln-heavy for wide literals and
+      // the same texts recur on every dispatched node (see const_parse_cache_).
+      auto cit = const_parse_cache_.find(txt);
+      if (cit == const_parse_cache_.end()) {
+        upass::Kind k = upass::Kind::unknown;
+        if (txt == "nil") {
+          k = upass::Kind::nil;
+        } else if (txt == "true" || txt == "false") {
+          k = upass::Kind::boolean;
+        } else if (txt == "0sb?" || txt == "0ub?") {
+          k = upass::Kind::unknown;
+        } else if (!txt.empty() && txt.front() == '"') {
           k = upass::Kind::string;
         }
+        Dlop v;
+        try {
+          v = *Dlop::from_pyrope(txt);
+          if (k == upass::Kind::unknown && txt != "0sb?" && txt != "0ub?") {
+            k = v.is_string() ? upass::Kind::string : (v.is_integer() ? upass::Kind::integer : upass::Kind::unknown);
+          }
+        } catch (...) {
+          // Unparseable literal (selector words etc.): keep it as a string.
+          v = *Dlop::from_string(txt);
+          if (k == upass::Kind::unknown) {
+            k = upass::Kind::string;
+          }
+        }
+        const bool pattern = txt.size() >= 3 && txt[0] == '0' && (txt[1] == 's' || txt[1] == 'u') && txt[2] == 'b';
+        cit = const_parse_cache_.emplace(std::string(txt), Parsed_const{std::move(v), k, pattern}).first;
       }
-      const bool pattern = txt.size() >= 3 && txt[0] == '0' && (txt[1] == 's' || txt[1] == 'u') && txt[2] == 'b';
-      out.src.push_back(upass::Operand{std::string_view{}, Bundle::make_const(v, k), pattern});
+      const auto& pc = cit->second;
+      out.src.push_back(upass::Operand{std::string_view{}, Bundle::make_const(pc.value, pc.kind), pc.pattern});
     } else if (Lnast_ntype::is_ref(t)) {
       const auto              name = lm->current_text();
       std::shared_ptr<Bundle> b    = symbol_table_.get_bundle(name);
@@ -1225,11 +1232,19 @@ void uPass_runner::apply_pending_field_facts() {
   for (auto it = pending.begin(); it != pending.end();) {
     const auto root  = Bundle::get_first_level(it->first);
     const auto fpath = Bundle::get_all_but_first_level(it->first);
-    auto       rb    = symbol_table_.get_bundle_for_write(root);
-    if (!rb || !rb->has_trivial(fpath)) {
+    // READ-ONLY probe first: never clone just to poll. This stash is drained
+    // once per dispatched node, and the COW unshare inside get_bundle_for_write
+    // (the old probe) cloned the whole root bundle on every poll — O(N^2) on a
+    // large module. A null root binding means the field has no live write-scope
+    // (its declaring scope was left): skip; the entry is dropped at the root's
+    // scope exit (Symbol_table::leave_scope) so the stash stays bounded.
+    const Bundle* rb_ro = symbol_table_.peek_writable_bundle(root);
+    if (rb_ro == nullptr || !rb_ro->has_trivial(fpath)) {
       ++it;
       continue;
     }
+    // Field materialized → apply. Unshare for the write only now (rare path).
+    auto          rb = symbol_table_.get_bundle_for_write(root);
     const auto&   pf = it->second;
     Bundle::Entry fe = rb->get_entry(fpath);
     fe.immutable     = false;
@@ -6059,6 +6074,8 @@ void uPass_runner::run() {
     return;
   }
   symbol_table_.pending_decl_facts.clear();  // dotted-bake stash is per-run state
+  symbol_table_.pending_keys_by_root.clear();
+  const_parse_cache_.clear();
   symbol_table_.tget_origin.clear();
   symbol_table_.nil_seeded.clear();
   symbol_table_.uninitialized.clear();
@@ -7006,14 +7023,24 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
       }
       fe.comptime = fe.comptime || comptime;
       rb->set(fpath, std::move(fe));
-    } else {
+    } else if (rb != nullptr) {
+      // Root binding is live but the field has no value yet: stash the fact and
+      // apply it at the field's first write (or drop it when the root's
+      // write-scope exits, via leave_scope). Indexed under the root so that
+      // drop is O(scope vars), keeping apply_pending_field_facts O(N) total.
       auto& pf    = symbol_table_.pending_decl_facts[var];
       pf.kind     = kind;
       pf.mode     = mode;
       pf.decl_max = decl_max;
       pf.decl_min = decl_min;
       pf.comptime = comptime;
+      symbol_table_.pending_keys_by_root[std::string(root)].emplace_back(var);
     }
+    // else (rb == nullptr): the root has no live write-scope binding (an
+    // undeclared / dangling SSA temp). The fact can never apply — there is no
+    // bundle to write it onto — so do NOT stash it. The old code stashed these
+    // and re-scanned them on every dispatched node (they never drained), which
+    // made apply_pending_field_facts O(N^2) on large modules.
     return;
   }
 

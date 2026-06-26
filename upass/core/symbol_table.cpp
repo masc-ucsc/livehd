@@ -345,13 +345,7 @@ void Symbol_table::record_uncertain_modification(std::string_view name) {
   // outer arm is still active. No need to mark on every uncertain ancestor.
   for (auto it = stack.rbegin(); it != stack.rend(); ++it) {
     if ((*it)->uncertain_cond) {
-      auto& mods = (*it)->modified_under_uncertainty;
-      for (const auto& existing : mods) {
-        if (existing == name) {
-          return;
-        }
-      }
-      mods.emplace_back(name);
+      (*it)->modified_under_uncertainty.emplace(name);  // set dedups in O(1)
       return;
     }
   }
@@ -428,7 +422,31 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
   // Pop the active pointer; the underlying Scope stays in scope_storage so
   // the next iteration can re-enter it (block_scope) and accumulated state
   // remains consistent.
+  Scope* popped = stack.back();
   stack.pop_back();
+
+  // Drop this scope's still-unapplied dotted-field facts (pending_decl_facts)
+  // whose root no longer resolves in any live write-scope. Without this the
+  // stash accumulates dead entries for every temp/field that left scope, and
+  // apply_pending_field_facts (polled once per dispatched node) rescans them
+  // all → O(N^2). Bounded by the popped scope's own var count. A var still
+  // visible through an outer scope (shadowing) keeps its facts. On loop
+  // re-entry the body re-runs and re-stashes, so dropping here is safe.
+  if (!pending_keys_by_root.empty()) {
+    for (const auto& [v, slot] : popped->varmap) {
+      (void)slot;
+      auto it = pending_keys_by_root.find(v);
+      if (it == pending_keys_by_root.end()) {
+        continue;
+      }
+      if (peek_writable_bundle(v) == nullptr) {
+        for (const auto& k : it->second) {
+          pending_decl_facts.erase(k);
+        }
+        pending_keys_by_root.erase(it);
+      }
+    }
+  }
   return nullptr;
 }
 
@@ -489,6 +507,15 @@ std::shared_ptr<Bundle> Symbol_table::get_bundle_for_write(std::string_view var)
     return nullptr;
   }
   return unshare_for_write(s->varmap.find(var)->second);
+}
+
+const Bundle* Symbol_table::peek_writable_bundle(std::string_view var) const {
+  I(bundle_key::find_top_dot(var) == std::string_view::npos);
+  const auto* s = find_decl_scope(var);
+  if (s == nullptr) {
+    return nullptr;
+  }
+  return s->varmap.find(var)->second.get();
 }
 
 bool Symbol_table::has_bundle(std::string_view key) const {

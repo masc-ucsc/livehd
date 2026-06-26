@@ -115,6 +115,17 @@ protected:
   Symbol_table symbol_table_;
   bool         next_block_uncertain_{false};
 
+  // Cache of parsed const-operand literals (resolve_node_operands). Dlop::from_pyrope
+  // is a pure function of the literal text but is shln-heavy for wide values, and
+  // the SAME literals ("0", "1", wide masks, …) are re-parsed on every dispatched
+  // node. Key = literal text → its parsed value/kind/pattern. Cleared per run().
+  struct Parsed_const {
+    Dlop        value;
+    upass::Kind kind{upass::Kind::unknown};
+    bool        pattern{false};
+  };
+  absl::flat_hash_map<std::string, Parsed_const> const_parse_cache_;
+
   // Perf: pre-cached subsets of `upasses`.
   //   fold_capable_passes — passes that override fold_ref(). try_fold_ref
   //     iterates only these instead of every pass.
