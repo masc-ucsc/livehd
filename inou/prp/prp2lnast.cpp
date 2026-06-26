@@ -972,50 +972,6 @@ bool prp_wire_nil_store(const Lnast& ln, const Lnast_nid& nid, std::string_view 
          && ln.get_name(c1) == "nil";
 }
 
-bool prp_stmts_cover_wire(const Lnast& ln, const Lnast_nid& stmts, std::string_view w);
-
-// An if/unique_if covers `w` iff it has an else arm (the all-conds-false slot is
-// driven) AND every branch body covers `w`. Children alternate cond, stmts, …;
-// an odd count whose last child is a bare stmts is the else arm.
-bool prp_if_covers_wire(const Lnast& ln, const Lnast_nid& if_nid, std::string_view w) {
-  int  n           = 0;
-  bool last_stmts  = false;
-  for (auto c = ln.get_first_child(if_nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
-    ++n;
-    last_stmts = Lnast_ntype::is_stmts(ln.get_type(c));
-  }
-  if (!((n % 2 == 1) && last_stmts)) {
-    return false;  // no else → the fall-through path leaves `w` undriven
-  }
-  for (auto c = ln.get_first_child(if_nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
-    if (Lnast_ntype::is_stmts(ln.get_type(c)) && !prp_stmts_cover_wire(ln, c, w)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-// Does executing `stmts` drive `w` on EVERY control path? Tracked straight-line:
-// a real driver sets covered; a `w = nil` re-assignment CLEARS it (matching
-// lnastfmt's last-write-wins DCE — a trailing nil leaves the net undriven, which
-// tolg would otherwise hard-error on). A non-covering if leaves coverage as-is.
-bool prp_stmts_cover_wire(const Lnast& ln, const Lnast_nid& stmts, std::string_view w) {
-  bool covered = false;
-  for (auto c = ln.get_first_child(stmts); !c.is_invalid(); c = ln.get_sibling_next(c)) {
-    const auto t = ln.get_type(c);
-    if (prp_wire_nil_store(ln, c, w)) {
-      covered = false;  // `w = nil` un-drives on this straight-line path
-    } else if (prp_wire_driver_store(ln, c, w)) {
-      covered = true;
-    } else if (Lnast_ntype::is_if_like(t) && prp_if_covers_wire(ln, c, w)) {
-      covered = true;
-    } else if (Lnast_ntype::is_stmts(t) && prp_stmts_cover_wire(ln, c, w)) {
-      covered = true;
-    }
-  }
-  return covered;
-}
-
 }  // namespace
 
 namespace {
