@@ -439,6 +439,14 @@ public:
   livehd::diag::Span                   span_of(const Lnast_nid& nid) const;
   std::vector<livehd::diag::Note>      notes_of(const Lnast_nid& nid, std::string_view message = "related source") const;
 
+  // Like span_of, but when `nid` carries no resolvable SourceId (a ref/const
+  // operand, a stmts/type node, or a node the parser minted no location for)
+  // it walks UP to the nearest ancestor that does. A diagnostic anchored on an
+  // operand child thus reports the enclosing statement's line instead of
+  // nothing — the closest real source location beats a null span. Still null
+  // only when neither the node nor any ancestor carries a location.
+  livehd::diag::Span                   span_of_nearest(const Lnast_nid& nid) const;
+
   // set_data: write-side helpers used by add_child / set_root. On the
   // read side, callers go through get_type/get_name.
   void set_data(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int type);

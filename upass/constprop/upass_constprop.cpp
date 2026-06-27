@@ -264,7 +264,7 @@ Dlop uPass_constprop::apply_range_mask(const Dlop& value, const Dlop& start, con
           .category = "type",
           .pass     = "upass.constprop",
           .message  = std::format("{} is not allowed", what),
-          .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+          .span     = lm->current_span(),
           .hint     = "bit/array/cycle indices are non-negative and ranges increasing; "
                       "select to the end with an open range like `x#[lo..]`",
       });
@@ -332,6 +332,7 @@ void uPass_constprop::check_unsigned_positive_overflow(std::string_view lhs, con
       .category = "bitwidth",
       .pass     = "upass.constprop",
       .message  = msg,
+      .span     = lm->current_span(),
       .hint     = "widen the declared type, force fewer bits with a bit-select, or apply a wrap/saturate policy",
   });
 }
@@ -366,7 +367,7 @@ void uPass_constprop::check_field_store_kind(std::string_view field_key, const D
               .message  = std::format("array element `{}` is an integer but is written a boolean value "
                                       "(a variable's type cannot change)",
                                       field_key),
-              .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+              .span     = lm->current_span(),
               .hint     = "cast the boolean explicitly, e.g. `u1(v)` or `unsigned(v)`",
           });
           return;
@@ -380,7 +381,7 @@ void uPass_constprop::check_field_store_kind(std::string_view field_key, const D
               .message  = std::format("array element `{}` is a boolean but is written an integer value "
                                       "(a variable's type cannot change)",
                                       field_key),
-              .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+              .span     = lm->current_span(),
               .hint     = "compare to make a boolean, e.g. `v != 0`",
           });
           return;
@@ -396,7 +397,7 @@ void uPass_constprop::check_field_store_kind(std::string_view field_key, const D
                                         "(the element type is unsigned)",
                                         field_key,
                                         value.to_decimal_string()),
-                .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+                .span     = lm->current_span(),
                 .hint     = "widen to a signed element type, or store a non-negative value",
             });
             return;
@@ -438,7 +439,7 @@ void uPass_constprop::check_field_store_kind(std::string_view field_key, const D
                                 field_key,
                                 cur_str ? "a string" : "an integer",
                                 v_str ? "string" : "integer"),
-        .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+        .span     = lm->current_span(),
         .hint     = "keep the field's declared kind, or declare it with the intended type",
     });
   }
@@ -917,7 +918,7 @@ bool uPass_constprop::report_arith_nil(const Dlop& r) {
       .category = "type",
       .pass     = "upass.constprop",
       .message  = "illegal or unsupported operation: the result is nil",
-      .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+      .span     = lm->current_span(),
       .hint     = "an operand is nil/uninitialized or the operation is undefined for these values",
   });
   return true;
@@ -954,7 +955,7 @@ bool uPass_constprop::report_nil_operand(upass::Src_span src) {
           .category = "type",
           .pass     = "upass.constprop",
           .message  = "nil used as an operand of a non-equality operation",
-          .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+          .span     = lm->current_span(),
           .hint = "nil is only valid in `==`/`!=` or a direct assignment; it cannot feed an arithmetic/logic/shift/compare/reduce operator",
       });
       return true;
@@ -978,7 +979,7 @@ upass::Vote uPass_constprop::process_div(std::string_view dst_name, Bundle& dst,
           .category = "type",
           .pass     = "upass.constprop",
           .message  = "division by zero is an illegal operation (the result is nil)",
-          .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+          .span     = lm->current_span(),
           .hint     = "guard the divisor so it is non-zero at compile time",
       });
       return classify_vote();  // do not fold/store the nil
@@ -1021,7 +1022,7 @@ upass::Vote uPass_constprop::process_mod(std::string_view dst_name, Bundle& dst,
           .category = "type",
           .pass     = "upass.constprop",
           .message  = "modulo by zero is an illegal operation (the result is nil)",
-          .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+          .span     = lm->current_span(),
           .hint     = "guard the divisor so it is non-zero at compile time",
       });
       return classify_vote();  // do not fold/store the nil
@@ -1510,7 +1511,7 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
       store_trivial(var, *Dlop::create_bool(!Negate));
       return classify_vote();
     }
-    if (auto eq = compare_bundles_eq(a.bundle, b.bundle, lm->get_lnast()->span_of(lm->get_current_nid())); eq.has_value()) {
+    if (auto eq = compare_bundles_eq(a.bundle, b.bundle, lm->current_span()); eq.has_value()) {
       // Tri-state: nil propagates verbatim (the
       // structural-match-with-value-mismatch case discharges as pass via
       // cassert); concrete bool flips for Negate.
@@ -1545,7 +1546,7 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
           .category = "type",
           .pass     = "upass.constprop",
           .message  = "comparison mixes a bool with an int/string — types must match (no implicit convert)",
-          .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+          .span     = lm->current_span(),
           .hint     = std::format("compare the integer side to zero to get a bool, e.g. `expr {} 0`", suggest)});
       throw std::runtime_error("comparison mixes a bool with an int/string");
     }
@@ -1979,7 +1980,7 @@ upass::Vote uPass_constprop::process_tuple_concat(std::string_view dst_name, Bun
   // Snapshot the concat's source span before the cursor walks the operands
   // (prp2lnast stamps the tuple_concat node's SourceId) so the overlap
   // diagnostic below can point at the `a ++ b` / `(...a, ...)` site.
-  livehd::diag::Span concat_span = lm->get_lnast()->span_of(lm->get_current_nid());
+  livehd::diag::Span concat_span = lm->current_span();
 
   move_to_child();
   auto dvar = std::string(current_text());
@@ -3346,6 +3347,7 @@ void uPass_constprop::process_func_call() {
                 .category = "type",
                 .pass     = "upass.constprop",
                 .message  = std::format("range step must be a positive integer (got {})", amount.to_decimal_string()),
+                .span     = lm->current_span(),
                 .hint     = "ranges only ascend; use a positive step, e.g. `0..=10 step 2`",
             });
           } else if (amount.is_just_i64()) {
@@ -3419,7 +3421,7 @@ void uPass_constprop::process_func_call() {
       if (!val.is_invalid() && !val.has_unknowns() && spec.is_string()) {
         store_trivial(
             dst,
-            *Dlop::from_string(format_interp_value(val, spec.to_string(), lm->get_lnast()->span_of(lm->get_current_nid()))));
+            *Dlop::from_string(format_interp_value(val, spec.to_string(), lm->current_span())));
       }
     }
     move_to_parent();
@@ -3590,7 +3592,7 @@ void uPass_constprop::process_func_call() {
               .category = "type",
               .pass     = "upass.constprop",
               .message  = std::format("`{}(...)` reinterpret needs a fully-typed input (a known bit width)", fname),
-              .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+              .span     = lm->current_span(),
               .hint     = "give the operand a sized type (`:uN`/`:sN`) before reinterpreting its sign",
           });
           return;
@@ -3612,7 +3614,7 @@ void uPass_constprop::process_func_call() {
             .category = "type",
             .pass     = "upass.constprop",
             .message  = std::format("`{}(...)` of an undefined/nil value has no boolean meaning", fname),
-            .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+            .span     = lm->current_span(),
             .hint     = "a boolean cast needs a defined value; compare explicitly (`x != 0`) instead",
         });
         return;
@@ -3643,7 +3645,7 @@ void uPass_constprop::process_func_call() {
                                       fname,
                                       tmin.to_decimal_string(),
                                       tmax.to_decimal_string()),
-              .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+              .span     = lm->current_span(),
               .hint     = "a sized cast (`uN`/`sN`) is checked, not truncating; use a `wrap` or `sat` "
                           "prefix to drop bits intentionally",
           });
@@ -3737,10 +3739,7 @@ void uPass_constprop::process_range() {
   if (start.is_integer() && end.is_integer() && !start.has_unknowns() && !end.has_unknowns()
       && end.sub_op(start)->add_op(*Dlop::create_integer(1))->is_negative()) {
     if (!in_template_body()) {
-      livehd::diag::Span span;
-      if (const auto& ln = lm->get_lnast()) {
-        span = ln->span_of(lm->get_current_nid());
-      }
+      livehd::diag::Span span = lm->current_span();
       livehd::diag::sink().emit(livehd::diag::Diagnostic{
           .severity = livehd::diag::Severity::error,
           .code     = "invalid-descending-range",
@@ -3980,6 +3979,7 @@ void uPass_constprop::process_tuple_get() {
         .category = "type",
         .pass     = "upass.constprop",
         .message  = std::format("unknown field `{}` on tuple `{}`", first_seg, src),
+        .span     = lm->current_span(),
         .hint     = std::format("`{}` has no field `{}` — check existence with `{} has '{}'` "
                                 "(reading an absent field is a compile error)",
                                 src,
@@ -4005,7 +4005,7 @@ void uPass_constprop::process_tuple_get() {
           .category = "type",
           .pass     = "upass.constprop",
           .message  = std::format("`{}` has no field `{}` (a scalar has no fields)", shown, first_seg),
-          .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+          .span     = lm->current_span(),
           .hint     = std::format("`{}` is a built-in attribute — read it with `{}.[{}]`, not `{}.{}`",
                                   first_seg,
                                   shown,
@@ -4060,6 +4060,7 @@ void uPass_constprop::check_tuple_access(const std::string& base, const std::str
         .category = "type",
         .pass     = "upass.constprop",
         .message  = std::format("tuple `{}` is name-access only; positional index `{}` is not allowed", base, idx),
+        .span     = lm->current_span(),
         .hint     = "access named fields by name (e.g. `t.field`)",
     });
     return;
@@ -4071,6 +4072,7 @@ void uPass_constprop::check_tuple_access(const std::string& base, const std::str
         .category = "type",
         .pass     = "upass.constprop",
         .message  = std::format("out of bounds access: index {} on tuple `{}` of size {}", idx, base, n_unnamed),
+        .span     = lm->current_span(),
         .hint     = std::format("valid index range is [0, {}]", n_unnamed - 1),
     });
   }
@@ -4154,6 +4156,7 @@ out_of_bounds:
       .category = "type",
       .pass     = "upass.constprop",
       .message  = std::format("out of bounds access: `{}[{}]` does not exist", base, bracket_path),
+      .span     = lm->current_span(),
       .hint     = "every index must be inside its dimension's declared size",
   });
 }
@@ -4167,6 +4170,13 @@ void uPass_constprop::process_tuple_set() {
   // must be skipped. The "__attr" spelling is LNAST-level text; Bundle storage
   // keeps attributes in a separate bare-name attr map, and attribute
   // annotations are not values that constprop propagates.
+  //
+  // The tuple_set node is the def-bearing statement: it carries the SourceId
+  // (the field-path/value children are refs/consts and carry none). The
+  // sibling walk below leaves the cursor INVALID, so a diagnostic emitted from
+  // the value-store section (check_field_store_kind, ...) would resolve a null
+  // span. Capture the node here and restore the cursor to it before the stores.
+  const auto set_nid = lm->get_current_nid();
   move_to_child();
   auto tuple_var = std::string(current_text());
 
@@ -4284,6 +4294,12 @@ void uPass_constprop::process_tuple_set() {
   };
 
   bool use_named_positional = path.size() == 1 && !is_decimal(path[0]) && !path[0].empty();
+
+  // Re-anchor the read cursor on the tuple_set node (the sibling walk left it
+  // invalid) so the kind/overflow checks below resolve a real source span.
+  // Harmless for the early-return branches above: move_to_parent() restores
+  // from nid_stack, not from current_nid.
+  lm->move_to_nid(set_nid);
 
   const auto& val_child     = path_and_val.back();
   auto        resolve_value = [&]() -> std::optional<Dlop> {
@@ -4598,7 +4614,7 @@ bool uPass_constprop::report_reduction_nonint(upass::Src_span src) {
       .category = "type",
       .pass     = "upass.constprop",
       .message  = "bit reduction (`#|`/`#&`/`#^`/`#+`) requires an integer or boolean operand",
-      .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+      .span     = lm->current_span(),
       .hint     = "reductions operate on the bits of an integer/bool; an enum, string, tuple, or array has no bit reduction",
   });
   return true;

@@ -551,7 +551,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast) {
           .category = "name",
           .pass = "upass.ssa",
           .message = msg,
-          .span = lnast->span_of(at),
+          .span = lnast->span_of_nearest(at),  // IO-seed anchor (io_nid) may lack a srcid; walk up to one
           .hint =
               "rename one of them if they were meant to be the same variable"});
     };

@@ -300,6 +300,18 @@ livehd::diag::Span Lnast::span_of(const Lnast_nid& nid) const {
   return srcloc_.resolve_span(get_srcid(nid));
 }
 
+livehd::diag::Span Lnast::span_of_nearest(const Lnast_nid& nid) const {
+  // Walk the ancestor chain (the node itself first) until one resolves a span.
+  // get_parent of the root is invalid, which terminates the loop.
+  for (auto n = nid; !n.is_invalid(); n = get_parent(n)) {
+    auto sp = span_of(n);
+    if (!sp.is_null()) {
+      return sp;
+    }
+  }
+  return {};
+}
+
 std::vector<livehd::diag::Note> Lnast::notes_of(const Lnast_nid& nid, std::string_view message) const {
   if (nid.is_invalid()) {
     return {};

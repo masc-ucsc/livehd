@@ -1205,7 +1205,7 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
                                         e0.trivial.to_decimal_string(),
                                         e0.bw_min.to_decimal_string(),
                                         e0.bw_max.to_decimal_string()),
-                .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+                .span     = lm->current_span(),
                 .hint     = "widen the declared type, force fewer bits with a bit-select, or adjust the value",
             });
           }
@@ -2293,10 +2293,7 @@ bool uPass_runner::try_lower_wrap_sat() {
   if (!need_hi && !need_lo) {
     // The value provably fits the target type — the wrap/sat narrows nothing.
     // Warn (the keyword is dead) and emit a plain alias.
-    livehd::diag::Span span;
-    if (const auto& ln = lm->get_lnast()) {
-      span = ln->span_of(lm->get_current_nid());
-    }
+    livehd::diag::Span span = lm->current_span();
     livehd::diag::sink().emit(livehd::diag::Diagnostic{
         .severity = livehd::diag::Severity::warning,
         .code     = is_wrap ? "unnecessary-wrap" : "unnecessary-sat",
@@ -2502,7 +2499,7 @@ bool uPass_runner::try_lower_typecast() {
         .category = "type",
         .pass     = "upass.runner",
         .message  = std::move(msg),
-        .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+        .span     = lm->current_span(),
         .hint     = std::string(hint),
     });
   };
@@ -2611,10 +2608,7 @@ bool uPass_runner::lower_in() {
     return false;
   };
 
-  livehd::diag::Span span;
-  if (const auto& ln = lm->get_lnast()) {
-    span = ln->span_of(lm->get_current_nid());
-  }
+  livehd::diag::Span span = lm->current_span();
 
   if (!lm->has_child()) {
     return bail();  // malformed — caller falls back
@@ -5509,7 +5503,7 @@ bool uPass_runner::try_init_construction() {
     if (tn.empty()) {
       return false;  // untyped binding — a plain function-value alias, allowed
     }
-    livehd::diag::Span span = lm->get_lnast()->span_of(lm->get_current_nid());
+    livehd::diag::Span span = lm->current_span();
     const auto         msg  = std::format("cannot assign function reference `{}` to typed variable `{}`:{}", v_raw, x, tn);
     livehd::diag::sink().emit(
         livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
@@ -5989,7 +5983,7 @@ void uPass_runner::unroll_while() {
   absl::flat_hash_set<std::string> seen_states;
 
   // Span for any loop diagnostic below — the `while` node carries the SourceId.
-  auto while_span = [&]() { return lm->get_lnast()->span_of(lm->get_current_nid()); };
+  auto while_span = [&]() { return lm->current_span(); };
 
   const bool saved_break = loop_break_hit_;
   loop_break_hit_        = false;
@@ -6605,7 +6599,7 @@ void uPass_runner::process_lnast() {
                 .category = "type",
                 .pass     = "upass.runner",
                 .message  = std::format("a call returning multiple outputs cannot bind to the single variable `{}`", self_dst),
-                .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+                .span     = lm->current_span(),
                 .hint     = "destructure into the output names, e.g. `const (o1, o2) = f(...)` (or remap `(x=f.o1, …)`)",
             });
           }
@@ -6616,6 +6610,7 @@ void uPass_runner::process_lnast() {
                 .category = "syntax",
                 .pass     = "upass",
                 .message  = std::format("irrelevant assignment: `{}` is assigned to itself", self_dst),
+                .span     = lm->current_span(),
                 .hint     = "likely an error or delete this assignment",
             });
           }
@@ -7218,7 +7213,7 @@ void uPass_runner::report_cond_nil(std::string_view which) {
       .category = "type",
       .pass     = "upass.runner",
       .message  = std::format("a nil value is used as the `{}` condition", which),
-      .span     = lm->get_lnast()->span_of(lm->get_current_nid()),
+      .span     = lm->current_span(),
       .hint     = "the condition folds to nil (a nil/uninitialized operand or an illegal operation)",
   });
 }

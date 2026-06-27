@@ -269,10 +269,9 @@ void uPass_bitwidth::record_overflow(std::string_view name, const Lnast_range& v
   // the store/op during dispatch, so its SourceId (resolved through the
   // owning Lnast's locator) is the span. An error-severity diag
   // fails the compile; no end_run throw, no deferral.
-  livehd::diag::Span              span;
+  livehd::diag::Span              span = lm->current_span();
   std::vector<livehd::diag::Note> notes;
   if (const auto& ln = lm->get_lnast()) {
-    span  = ln->span_of(lm->get_current_nid());
     notes = ln->notes_of(lm->get_current_nid(), "reached via this site");
   }
   livehd::diag::sink().emit(livehd::diag::Diagnostic{
@@ -339,10 +338,7 @@ void uPass_bitwidth::check_shift_amount(const Lnast_range& amt) {
     return;
   }
   const bool         always_negative = amt.max < 0;
-  livehd::diag::Span span;
-  if (const auto& ln = lm->get_lnast()) {
-    span = ln->span_of(lm->get_current_nid());
-  }
+  livehd::diag::Span span = lm->current_span();
   livehd::diag::sink().emit(livehd::diag::Diagnostic{
       .severity = always_negative ? livehd::diag::Severity::error : livehd::diag::Severity::warning,
       .code     = "negative-shift",
@@ -365,10 +361,7 @@ void uPass_bitwidth::check_index_nonneg(const Lnast_range& idx) {
   if (const auto& ln = lm->get_lnast(); ln && ln->is_template()) {
     return;
   }
-  livehd::diag::Span span;
-  if (const auto& ln = lm->get_lnast()) {
-    span = ln->span_of(lm->get_current_nid());
-  }
+  livehd::diag::Span span = lm->current_span();
   livehd::diag::sink().emit(livehd::diag::Diagnostic{
       .severity = livehd::diag::Severity::error,
       .code     = "negative-index",

@@ -20,7 +20,7 @@ void uPass_assert::process_func_call() {
     // An invalid/unknown Dlop (val.is_invalid()) means the argument is not
     // constpropagated yet — we cannot statically decide, so do not throw.
     if (!val.is_invalid() && val.is_known_false()) {
-      upass::error(lm->get_lnast()->span_of(lm->get_current_nid()),
+      upass::error(lm->current_span(),
                    "assert: cassert condition is statically false at '{}'\n",
                    current_text());
     }

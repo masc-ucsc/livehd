@@ -218,9 +218,10 @@ static std::string strip_pyrope_quotes(std::string s) {
 }
 
 static livehd::diag::Span span_from_nid(const std::shared_ptr<upass::Lnast_manager>& lm, const Lnast_nid& nid) {
-  // SourceId resolved through the owning Lnast's locator.
+  // SourceId resolved through the owning Lnast's locator, falling back to the
+  // nearest located ancestor when `nid` itself carries none.
   if (const auto& ln = lm->get_lnast()) {
-    return ln->span_of(nid);
+    return ln->span_of_nearest(nid);
   }
   return {};
 }

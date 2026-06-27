@@ -113,6 +113,14 @@ uPass_typecheck::Kind uPass_typecheck::kind_of_operand_at_cursor() {
 
 void uPass_typecheck::emit_type_error(std::string_view code, const std::string& msg, std::string_view hint,
                                       livehd::diag::Span span) {
+  // Anchor on the current op/store node when the caller passes no explicit span.
+  // current_span() resolves the cursor's def node (or its nearest srcid-bearing
+  // ancestor), so the diagnostic gets a file/line even from an operand child.
+  // Null only when nothing in the cursor's ancestry carries a location, so this
+  // can only add location info, never remove it.
+  if (span.is_null()) {
+    span = lm->current_span();
+  }
   livehd::diag::sink().emit(livehd::diag::Diagnostic{
       .severity = livehd::diag::Severity::error,
       .code     = std::string{code},
@@ -435,7 +443,7 @@ void uPass_typecheck::process_range() {
 // owning Lnast's locator. Mirrors uPass_verifier::span_from_nid.
 livehd::diag::Span uPass_typecheck::span_from_nid(const Lnast_nid& nid) const {
   if (const auto& ln = lm->get_lnast()) {
-    return ln->span_of(nid);
+    return ln->span_of_nearest(nid);  // fall back to the nearest located ancestor
   }
   return {};
 }

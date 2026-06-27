@@ -32,6 +32,28 @@ public:
 
   void move_to_nid(const Lnast_nid& nid) { current_nid = nid; }
 
+  // Best-effort source span for a diagnostic emitted from the current cursor.
+  // This is THE common entry point for diag spans in the per-op passes —
+  // prefer it over a raw `get_lnast()->span_of(get_current_nid())`, which is
+  // null whenever the cursor sits on a ref/const operand (no SourceId) or has
+  // run off the end of a sibling walk. Resolution order:
+  //   1. the cursor node itself, then its nearest srcid-bearing ANCESTOR
+  //      (span_of_nearest) — an operand child reports its enclosing statement;
+  //   2. when the cursor has gone INVALID (the classic `while (move_to_sibling())`
+  //      exit), the node we descended from (nid_stack top) and its ancestors.
+  // Null only when neither the cursor's subtree root nor any ancestor carries a
+  // location. The closest real source line always beats a null span.
+  livehd::diag::Span current_span() const {
+    if (!lnast) {
+      return {};
+    }
+    Lnast_nid anchor = current_nid;
+    if (anchor.is_invalid() && !nid_stack.empty()) {
+      anchor = nid_stack.top();
+    }
+    return lnast->span_of_nearest(anchor);
+  }
+
   // Returns a string_view backed by the persistent attribute store, so it
   // stays valid until the LNAST mutates that node's text. Cheaper than
   // copying. While an inline frame is active (push_source) the name of a

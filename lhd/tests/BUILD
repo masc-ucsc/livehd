@@ -118,6 +118,17 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Regression: a kind-change ("a variable's type cannot change") diagnostic must
+# report its source span (file + line), not "span":null. Guards both the
+# constprop array/field store path (cursor left invalid by the sibling walk) and
+# the typecheck scalar store path (emit helper's empty default span).
+sh_test(
+    name = "lhd_diag_span_test",
+    size = "large",
+    srcs = ["lhd_diag_span_test.sh"],
+    data = ["//lhd"],
+)
+
 # Regression for the cvc5 LEC/formal encoder's `#sext` sign propagation: a
 # partial sign-extend slice must sign-extend (not zero-extend) when widened,
 # arithmetic-shifted, or signed-compared. cvc5-only (in-process), so just //lhd.
