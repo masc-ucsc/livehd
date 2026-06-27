@@ -1,18 +1,18 @@
 /*
 :name: testbench_step
-:type: compile
+:type: simulation
 */
-// TBD feature: testbench extras peek/poke/step (docs/pyrope/09-verification.md,
-// 15-tbd.md). `step` should advance the simulation one cycle and peek() read a
-// hierarchical signal. Today bare `step` is not a statement (parses as an
-// identifier read -> "read of undefined variable 'step'") and peek/poke are
-// silent no-ops. Tagged `fixme`: fails by design until the testbench runner exists.
+// TBD feature: testbench extras peek/poke (docs/pyrope/09-verification.md,
+// 15-tbd.md). `peek()` should read a hierarchical signal and `poke()` force one.
+// `step` now parses as a statement (advance the simulation a cycle) but the
+// `lhd sim` backend does not execute it yet; `peek`/`poke` remain undefined.
+// Tagged `fixme`: fails by design until the interactive testbench runner exists.
 mod cnt(en:bool) -> (v:u8@[0]) {
   reg c:u8 = 0
   v = c
   if en { wrap c += 1 }
 }
-test "peek_poke_step" {
+test peek_poke_step {
   const o = cnt(en=true)
   step
   assert(peek("cnt/c") == 1)

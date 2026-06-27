@@ -257,15 +257,38 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
   reject) into the symmetric rename-both resolution — a rename is just stamping the existing
   <code>lg</code> name (the <code>::[lg=…]</code> / <code>import("lg:…")</code> re-export
   path), so no new naming mechanism. Closes 6c.</li>
-<li><strong>S3 — <code>canonical_hash</code> export.</strong> Add
+<li><strong>S3 — <code>canonical_hash</code> export.</strong>
+  <span class="status">partial — re-verified 2026-06-27</span> Add
   <code>semdiff::canonical_hash(graph)</code> to <a class="xref" href="2f-semdiff.html">2f-semdiff</a>
-  and the bottom-up Merkle driver over the instance DAG.</li>
-<li><strong>S4 — multi-<code>lg:</code> link inside <code>lhd compile</code>.</strong> Lift
+  and the bottom-up Merkle driver over the instance DAG.
+  <em>Today:</em> only the confirm step <code>structural_match</code> is exported
+  (<code>pass/semdiff/semdiff.hpp:42</code>); there is no exported single-graph digest, and the
+  internal <code>fsig</code>/<code>bsig</code> node signatures are only run-deterministic (they
+  fold in library-scoped gids / debug nids), not the required process-independent digest.
+  <em>Remaining:</em> the exported process-independent <code>canonical_hash</code> plus the
+  bottom-up Merkle driver that injects each resolved child's digest at its instance boundary.</li>
+<li><strong>S4 — multi-<code>lg:</code> link inside <code>lhd compile</code>.</strong>
+  <span class="status">partial — re-verified 2026-06-27</span> Lift
   the one-<code>lg:</code> cap (no separate <code>lhd link</code> verb); when given several
   <code>lg:</code> inputs <code>lhd compile</code> runs the merge = load → digest → bucket →
-  <code>structural_match</code> confirm → dedup/rename → emit, with a report.</li>
-<li><strong>S5 — artifact format.</strong> Digest + port signature per module, by-digest
-  instance refs in the <code>lg:</code> manifest.</li>
+  <code>structural_match</code> confirm → dedup/rename → emit, with a report.
+  <em>Today:</em> the <code>ln:</code>+<code>lg:</code> linker (<code>compile_link_ir</code>) and
+  the source+<code>lg:</code> path already <code>load_merge</code> several <code>lg:</code> inputs,
+  but that merge is hhds <strong>name-hash</strong> dedup only (no per-module digest, no
+  <code>structural_match</code> confirm, no rename, no report), and the pure
+  <code>lg:</code>-only path is still capped (<code>lhd/lhd_kernel.cpp:2632</code>
+  <code>compile_ir</code>: <em>"multiple lg: inputs are not supported yet"</em>).
+  <em>Remaining:</em> lift the pure-<code>lg:</code> cap and replace the name-hash dedup with the
+  digest → bucket → <code>structural_match</code> confirm → dedup/rename pipeline.</li>
+<li><strong>S5 — artifact format.</strong>
+  <span class="status">partial — re-verified 2026-06-27</span> Digest + port signature per module,
+  by-digest instance refs in the <code>lg:</code> manifest.
+  <em>Today:</em> the <code>lg:</code> <code>library.txt</code> already records the
+  <strong>port signature</strong> per module (names, port-id order, <code>bits</code>, sign); there
+  is no per-module digest, no <code>lg:</code> manifest, and <code>Sub</code> instances still bind
+  by name-hash gid (a hard name binding).
+  <em>Remaining:</em> the per-module forward-canonical digest and the by-digest <code>Sub</code>
+  instance refs.</li>
 <li><strong>S6 — <code>prp_library</code> / <code>prp_link</code> + gazelle.</strong> Bazel
   rules driving parallel per-library <code>lhd compile</code> from <code>lhd scan</code>
   output, then the link target.</li>

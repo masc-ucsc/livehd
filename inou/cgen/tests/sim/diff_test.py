@@ -6,7 +6,7 @@
 # outputs -> pulse the clock (commit). Implicit `clock` is driven by the harness;
 # `reset` is held high for a short warmup then released. Where iverilog shows
 # x/z (e.g. pre-reset flops) the bit is skipped; Slop has no unknowns.
-import os, re, sys, subprocess, random
+import os, re, sys, subprocess, random, tempfile
 
 prp, top = sys.argv[1], sys.argv[2]
 nvec = int(sys.argv[3]) if len(sys.argv) > 3 else 64
@@ -14,7 +14,10 @@ WARMUP = 3  # reset-high cycles before stimulus
 
 SP = os.path.dirname(os.path.abspath(__file__))
 LIVEHD = os.path.abspath(os.path.join(SP, "../../../.."))  # repo root
-work = os.path.join(SP, f"difftest_{top}")
+# Generated artifacts (tb.v, a.vvp, the sim/ module + its nested bazel build)
+# live in an OS temp dir, never next to this script -- a repo must not accumulate
+# auto-generated code. Override with $LHD_DIFFTEST_DIR to inspect the output.
+work = os.environ.get("LHD_DIFFTEST_DIR") or os.path.join(tempfile.gettempdir(), f"lhd_difftest_{top}")
 os.system(f"rm -rf {work}; mkdir -p {work}")
 LHD = subprocess.check_output(["bazel", "info", "bazel-bin"], cwd=LIVEHD).decode().strip() + "/lhd/lhd"
 

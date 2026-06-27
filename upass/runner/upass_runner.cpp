@@ -1542,6 +1542,15 @@ void uPass_function_registry::ensure(const std::vector<std::shared_ptr<Lnast>>& 
       continue;  // duplicate name — the first body wins (as the old rebuild did)
     }
 
+    // A pre-elaborated import is a black box: registered above so call sites bind
+    // to it (via its restored io_meta), but never inlined and its internal call
+    // graph is irrelevant to this compile. Skip the full body walk — it is the
+    // dominant per-import cost on a large design (the loaded bodies are big).
+    if (ln->is_pre_elaborated()) {
+      facts.emplace(std::move(name), Lnast_facts{});
+      continue;
+    }
+
     Lnast_facts f;
 
     // (a) Call-graph out-edges — the raw callee names referenced by func_calls.

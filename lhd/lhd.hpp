@@ -119,6 +119,13 @@ struct Options {
   bool quiet   = false;
   bool verbose = false;
 
+  // `sim` command modifiers
+  bool sim_setup_only = false;  // generate the C++ sim (+bazel module), do NOT build/run
+  bool sim_run_only   = false;  // build/run an already-generated sim (needs --workdir), no regen
+  // `sim --arg key=value` (repeatable): bind a `test name(params)` parameter; an
+  // override wins over the parameter's default. A param with neither is an error.
+  std::vector<std::pair<std::string, std::string>> sim_args;
+
   Diag_fmt diag_fmt = default_diag_fmt();
 };
 

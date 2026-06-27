@@ -25,6 +25,9 @@ void Pass_lnastfmt::fmt_begin(Eprp_var& var) {
   Pass_lnastfmt p(var);
 
   for (const auto& ln : var.lnasts) {
+    if (ln->is_pre_elaborated()) {
+      continue;  // a loaded import is already validated/formatted (post-upass body)
+    }
     p.validate(ln.get());
   }
 }

@@ -398,6 +398,9 @@ void Pass_upass::work(Eprp_var& var) {
   // and carry no func_def to split. SSA below harvests io_meta from them.
   for (std::size_t idx = 0; idx < original_lnast_count; ++idx) {
     const auto                  ln = var.lnasts.at(idx);
+    if (ln->is_pre_elaborated()) {
+      continue;  // a loaded import is already detupled + lambda-split
+    }
     // Excerpt provider for any diagnostic emitted while this unit is split.
     livehd::diag::Locator_scope diag_scope(&ln->source_locator());
     // Lower tuple-typed memory/var declarations into per-field scalar leaves
@@ -422,6 +425,9 @@ void Pass_upass::work(Eprp_var& var) {
   // io+stmts layout; run() is a no-op on top-level LNASTs.
   if (up.run_ssa) {
     for (const auto& ln : var.lnasts) {
+      if (ln->is_pre_elaborated()) {
+        continue;  // io_meta restored from the ln: manifest; body already SSA'd
+      }
       uPass_ssa::run(ln);
     }
   }
@@ -453,6 +459,15 @@ void Pass_upass::work(Eprp_var& var) {
   for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
     const auto ln = var.lnasts.at(idx);
     function_registry.ensure(var.lnasts);  // folds in any newly-appended lnasts
+
+    // A pre-elaborated import is reused as-is: it stays REGISTERED above (so
+    // callers resolve it through its restored io_meta) and is lowered by the
+    // tolg step below, but its body is NOT re-walked — re-running constprop/
+    // runner on an already-elaborated tree is the dominant redundant cost and
+    // re-versions its private `___ssa_` names.
+    if (ln->is_pre_elaborated()) {
+      continue;
+    }
 
     // Excerpt provider: diagnostics emitted while this unit is walked render
     // their caret excerpt through the unit's locator (hash-validated bytes).
@@ -535,8 +550,8 @@ void Pass_upass::work(Eprp_var& var) {
   // toln so the LSP pipeline gets the errors too. Whatever stays underived
   // lowers into the LG pending checks.
   for (const auto& ln : var.lnasts) {
-    if (ln->is_template()) {
-      continue;  // a template has no concrete timing until specialized
+    if (ln->is_template() || ln->is_pre_elaborated()) {
+      continue;  // template: no timing yet; pre-elaborated: already timecheck'd
     }
     uPass_timecheck::run(ln, var.lnasts);
   }
@@ -550,8 +565,9 @@ void Pass_upass::work(Eprp_var& var) {
   // LSP) skips it along with everything else that shapes the output tree.
   if (up.run_toln) {
     for (const auto& ln : var.lnasts) {
-      if (ln->is_template()) {
-        continue;  // no output flop on a template; specialize first
+      if (ln->is_template() || ln->is_pre_elaborated()) {
+        continue;  // template: specialize first; pre-elaborated: output flop is
+                   // already in the loaded post-pipe body (re-running doubles it)
       }
       uPass_pipe::run(ln);
     }

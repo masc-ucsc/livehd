@@ -248,6 +248,13 @@ private:
   // signature is not fully typed; cleared on a specialized clone. tolg + the
   // no-LGraph gate read it. In-memory only (sibling to lambda_kind_).
   bool                                             template_       = false;
+  // Pre-elaborated import: a unit LOADED from an `ln:` directory as an import
+  // (its io_meta/bw_meta were restored from the manifest, its body is already
+  // the post-upass form). pass.upass SKIPS re-elaborating it (no SSA / runner /
+  // bitwidth re-walk — that would both waste time and re-version its private
+  // `___ssa_` names) but still registers it for call resolution and lowers it
+  // via tolg. In-memory only; set by the kernel ln: import loader.
+  bool                                             pre_elaborated_ = false;
   // todo/ 1s subtask E — when set, uPass_timecheck skips this tree. Stamped on
   // by inou.slang on every tree it produces (the direct SV reader lowers
   // sequential `always` as comb and predates the timing conventions, so a
@@ -477,6 +484,10 @@ public:
   //     specialized clone). True ⇒ no LGraph at definition time. ───────────
   bool is_template() const noexcept { return template_; }
   void set_template(bool t) noexcept { template_ = t; }
+
+  // ── pre-elaborated import (loaded post-upass; skip re-elaboration) ─────────
+  bool is_pre_elaborated() const noexcept { return pre_elaborated_; }
+  void set_pre_elaborated(bool v) noexcept { pre_elaborated_ = v; }
 
   // ── timecheck suppression (todo/ 1s subtask E; stamped by inou.slang) ─────
   bool get_skip_timecheck() const noexcept { return skip_timecheck_; }

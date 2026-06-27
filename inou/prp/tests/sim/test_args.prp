@@ -1,0 +1,33 @@
+/*
+:name: test_args
+:type: simulation
+:args: gain=3 count=4
+*/
+// Simulation example exercising `test name(params)` runtime parameters and the
+// `--arg key=value` binding (here via the `:args:` header tag, which the runner
+// turns into `lhd sim ... --arg gain=3 --arg count=4`). The three parameters
+// cover every binding case:
+//
+//   * `base`  has a default (10) and is NOT in `:args:`  -> stays 10
+//   * `gain`  has NO default and IS set by `--arg`       -> 3 (required arg)
+//   * `count` has a default (5) but IS overwritten        -> 4 (override wins)
+//
+// A parameter with no default that is never passed via `--arg` is a hard error.
+
+mod adder(a:u8, b:u8) -> (s:u8@[0]) {
+  s = a + b
+}
+
+test adder.params(base:u8 = 10, gain:u8, count:u8 = 5) {
+  // Accumulate `gain` into `base` for `count` cycles (adder is combinational).
+  mut acc = base
+  tick count {
+    const v = adder(a=acc, b=gain)
+    acc = v
+  }
+  // acc == base + count*gain holds for any binding of the parameters ...
+  assert(acc == base + count * gain, "acc must equal base + count*gain")
+  // ... and resolves to a concrete number for THIS test's bindings:
+  // base=10 (default), count=4 (override), gain=3 (--arg) -> 10 + 4*3 = 22.
+  assert(acc == 22, "base=10 default, count=4 override, gain=3 arg => 22")
+}

@@ -26,6 +26,6 @@ type Tr = (mut a:u8 = 0)
 type Ty = (mut b:u8 = 0)
 impl Tr for Ty (a = 1)
 
-test "spawn_smoke" {
+test spawn_smoke {
   spawn job = { assert(true) }
 }

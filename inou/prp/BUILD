@@ -2,6 +2,7 @@
 
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//tools:cc_headers.bzl", "cc_direct_headers")
 load("//tools:copt_default.bzl", "COPTS")
 
 exports_files([
@@ -122,12 +123,13 @@ cc_test(
 ]
 
 # TBD-feature trackers (tests/fixme/): each `.prp` exercises a documented but
-# NOT-yet-implemented Pyrope feature (marked "TBD" in the docs / 15-tbd.md) and
-# is `:type: compile`, so it FAILS by design today (the feature has no lowering)
-# and will flip green once the feature lands — at which point drop the `fixme`
-# tag and move the file into the normal glob above. Tagged `fixme` so `.bazelrc`
-# (`-fixme`) keeps `bazel test //...` green; run one with the tag filter cleared
-# to see the failure:
+# NOT-yet-implemented Pyrope feature (marked "TBD" in the docs / 15-tbd.md). Most
+# are `:type: compile` (the feature has no lowering, so the compile FAILS by
+# design); `testbench_step` is `:type: simulation` (it parses, but the `lhd sim`
+# backend does not execute `step`/`peek`/`poke` yet). Each flips green once the
+# feature lands — at which point drop the `fixme` tag and move the file into the
+# normal glob above. Tagged `fixme` so `.bazelrc` (`-fixme`) keeps `bazel test
+# //...` green; run one with the tag filter cleared to see the failure:
 #   bazel test //inou/prp:prp-tbd-temporal_past --test_tag_filters=
 # Covered: temporal library (past[n]), standard library (import("prp")),
 # verification extras (requires/ensures), and testbench extras (step/peek/poke).
@@ -193,6 +195,42 @@ sh_test(
     data = ["//lhd"],
     deps = ["//inou/yosys:scripts"],
 )
+
+# Simulation tests (tests/sim/*.prp, `:type: simulation`): a synthesizable DUT
+# driven from `test` blocks that end-of-sim `assert` the result. The harness
+# (`lhd sim --setup-only`) lowers each DUT to header-only Slop<N> C++ and emits
+# a driver per test; prplib then compiles each driver with the HOST C++ compiler
+# and runs it (a non-zero exit == an assert fired). The Slop/Blop runtime is
+# header-only and, with -DNDEBUG, has no link deps — so this needs NO nested
+# bazel, just hlop's + iassert's headers staged into runfiles (the
+# `sim_runtime_hdrs` data dep below), discovered by name at runtime.
+cc_direct_headers(
+    name = "sim_runtime_hdrs",
+    deps = [
+        "@hlop//hlop",
+        "@iassert",
+    ],
+    visibility = ["//visibility:private"],
+)
+
+[
+    sh_test(
+        name = "prp-sim-%s" % prp_file.split("/")[-1].split(".")[0],
+        srcs = ["tests/pyrope_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:%s)" % prp_file,
+        ],
+        data = [
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//inou/prp:%s" % prp_file,
+            "//inou/prp:sim_runtime_hdrs",
+            "//lhd",
+        ],
+    )
+    for prp_file in glob(["tests/sim/*.prp"])
+]
 
 # Equivalence pairs (tests/equiv/<name>.prp + golden <name>.v): the harness
 # lowers the .prp to Verilog (tolg path) and formally LECs it against the

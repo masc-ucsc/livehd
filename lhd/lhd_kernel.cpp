@@ -38,6 +38,7 @@
 #include "node_util.hpp"
 #include "pass.hpp"
 #include "prp2lnast.hpp"
+#include "prp_sim.hpp"  // `lhd sim`: generate C++ test drivers from `test` blocks
 #include "query.hpp"  // pass/lec L1 (lec::prove_equal) for the cross-check path
 #include "rapidjson/document.h"
 #include "semdiff.hpp"  // pass/semdiff (structural_match) for the `lhd pass semdiff` command
@@ -498,6 +499,14 @@ void check_known_set_passes(const Options& opts) {
       }
       continue;
     }
+    if (pass == "sim") {
+      // `sim.*` is the sim-command namespace (consumed by sim_command, not a pass).
+      if (flag != "vcd") {
+        throw Lhd_error{"usage", std::format("--set/--config references unknown sim flag 'sim.{}'", flag),
+                        "the sim.* namespace takes: vcd (true|false)"};
+      }
+      continue;
+    }
     auto method = set_pass_method(pass);
     if (method.empty()) {
       std::string known;
@@ -630,7 +639,55 @@ struct Manifest_unit {
   std::string               unit_kind;
   bool                      verilog_origin{false};  // durable: a Verilog-read tree (open ports legal, etc.)
   std::vector<Manifest_pub> pubs;                    // file units only (the pub index)
+  // For `ln:` units: the live Lnast, so write_manifest can persist the
+  // post-upass io_meta/bw_meta side-channels (otherwise empty on adopt, see
+  // lnast.hpp). A loaded import restores them and skips re-elaboration.
+  const Lnast*              ln{nullptr};
 };
+
+// Persist the SSA io_meta side-channel as JSON. Each entry uses short keys to
+// keep big manifests compact; defaults are omitted on read.
+void write_io_entry(std::ofstream& ofs, const Lnast_io_entry& e) {
+  ofs << "{\"n\":\"" << json_escape_min(e.name) << "\",\"b\":" << e.bits << ",\"s\":" << (e.is_signed ? 1 : 0)
+      << ",\"r\":" << (e.is_ref ? 1 : 0) << ",\"v\":" << (e.is_varargs ? 1 : 0) << ",\"k\":" << static_cast<int>(e.kind)
+      << ",\"smin\":" << e.stages_min << ",\"smax\":" << e.stages_max << ",\"t\":\"" << json_escape_min(e.type_name)
+      << "\",\"hr\":" << (e.has_range ? 1 : 0) << ",\"rmin\":" << e.range_min << ",\"rmax\":" << e.range_max << "}";
+}
+
+void write_unit_meta(std::ofstream& ofs, const Lnast& ln) {
+  const auto& io = ln.io_meta();
+  if (!io.empty()) {
+    ofs << ",\"io_meta\":{\"in\":[";
+    for (size_t i = 0; i < io.inputs.size(); ++i) {
+      if (i) {
+        ofs << ',';
+      }
+      write_io_entry(ofs, io.inputs[i]);
+    }
+    ofs << "],\"out\":[";
+    for (size_t i = 0; i < io.outputs.size(); ++i) {
+      if (i) {
+        ofs << ',';
+      }
+      write_io_entry(ofs, io.outputs[i]);
+    }
+    ofs << "]}";
+  }
+  const auto& bw = ln.bw_meta();
+  if (!bw.empty()) {
+    ofs << ",\"bw_meta\":[";
+    bool first = true;
+    for (const auto& [name, e] : bw.ranges) {
+      if (!first) {
+        ofs << ',';
+      }
+      first = false;
+      ofs << "{\"n\":\"" << json_escape_min(name) << "\",\"mn\":" << e.min << ",\"mx\":" << e.max
+          << ",\"u\":" << (e.unbounded ? 1 : 0) << "}";
+    }
+    ofs << "]";
+  }
+}
 
 void write_manifest(const std::string& dir, std::string_view kind, const std::vector<Manifest_unit>& units) {
   std::ofstream ofs(dir + "/manifest.json");
@@ -673,6 +730,9 @@ void write_manifest(const std::string& dir, std::string_view kind, const std::ve
         ofs << "}";
       }
       ofs << "]";
+    }
+    if (u.ln != nullptr) {
+      write_unit_meta(ofs, *u.ln);  // persist post-upass io_meta/bw_meta (ln: units)
     }
     ofs << "}";
   }
@@ -724,6 +784,7 @@ void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<L
     u.name           = name;
     u.hash           = hash_bytes(oss.str());
     u.verilog_origin = ln->is_verilog_origin();
+    u.ln             = ln.get();  // persist io_meta/bw_meta for fast import reuse
     // Durable unit metadata: the lambda kind (an in-memory Lnast
     // member, lost across the forest save) and the file unit's pub index.
     if (name.size() > 6 && name.ends_with(".__pub")) {
@@ -747,6 +808,54 @@ void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<L
   forest->save(dir);
   write_manifest(dir, "ln", manifest);
   res.outputs.push_back(dir);
+}
+
+// Restore the post-upass io_meta/bw_meta side-channels a unit entry carries
+// (written by write_unit_meta). adopt() loads them empty; restoring them lets a
+// pre-elaborated import skip re-elaboration (it already holds its final body).
+void restore_unit_meta(const rapidjson::Value& u, Lnast& ln) {
+  auto read_entries = [](const rapidjson::Value& arr, std::vector<Lnast_io_entry>& out) {
+    for (const auto& e : arr.GetArray()) {
+      if (!e.IsObject() || !e.HasMember("n")) {
+        continue;
+      }
+      Lnast_io_entry x;
+      x.name       = e["n"].GetString();
+      x.bits       = e.HasMember("b") ? e["b"].GetInt() : 0;
+      x.is_signed  = !e.HasMember("s") || e["s"].GetInt() != 0;
+      x.is_ref     = e.HasMember("r") && e["r"].GetInt() != 0;
+      x.is_varargs = e.HasMember("v") && e["v"].GetInt() != 0;
+      x.kind       = e.HasMember("k") ? static_cast<Io_kind>(e["k"].GetInt()) : Io_kind::none;
+      x.stages_min = e.HasMember("smin") ? e["smin"].GetInt() : 0;
+      x.stages_max = e.HasMember("smax") ? e["smax"].GetInt() : 0;
+      x.type_name  = e.HasMember("t") ? e["t"].GetString() : "";
+      x.has_range  = e.HasMember("hr") && e["hr"].GetInt() != 0;
+      x.range_min  = e.HasMember("rmin") ? e["rmin"].GetInt64() : 0;
+      x.range_max  = e.HasMember("rmax") ? e["rmax"].GetInt64() : 0;
+      out.push_back(std::move(x));
+    }
+  };
+  if (u.HasMember("io_meta") && u["io_meta"].IsObject()) {
+    const auto& m = u["io_meta"];
+    if (m.HasMember("in") && m["in"].IsArray()) {
+      read_entries(m["in"], ln.io_meta().inputs);
+    }
+    if (m.HasMember("out") && m["out"].IsArray()) {
+      read_entries(m["out"], ln.io_meta().outputs);
+    }
+  }
+  if (u.HasMember("bw_meta") && u["bw_meta"].IsArray()) {
+    for (const auto& e : u["bw_meta"].GetArray()) {
+      if (!e.IsObject() || !e.HasMember("n")) {
+        continue;
+      }
+      BitwidthEntry be;
+      be.min       = e.HasMember("mn") ? e["mn"].GetInt64() : 0;
+      be.max       = e.HasMember("mx") ? e["mx"].GetInt64() : 0;
+      be.unbounded = !e.HasMember("u") || e["u"].GetInt() != 0;
+      ln.bw_meta().ranges.emplace(e["n"].GetString(), be);
+    }
+  }
 }
 
 // Load every unit of an `ln:` directory. The units share the loaded forest.
@@ -802,6 +911,7 @@ std::vector<std::shared_ptr<Lnast>> load_ln_dir(const std::string& dir) {
         }
       }
     }
+    restore_unit_meta(u, *ln);  // io_meta/bw_meta (empty on adopt) for import reuse
     out.push_back(std::move(ln));
   }
   if (out.empty()) {
@@ -953,7 +1063,15 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
   std::vector<std::string> names;
   names.reserve(var.graphs.size());
   for (const auto& g : var.graphs) {
-    names.emplace_back(g->get_name());
+    std::string gn     = std::string{g->get_name()};
+    auto        entity = gn.substr(gn.rfind('.') + 1);
+    // Skip compiler-minted (`%`-named) graphs: a `test` block lowers to one, and
+    // inou.cgen.sim does not emit it (it is a testbench, not hardware), so it
+    // must not appear in the build's source list or the manifest either.
+    if (!entity.empty() && entity.front() == '%') {
+      continue;
+    }
+    names.emplace_back(std::move(gn));
   }
   std::sort(names.begin(), names.end());
   for (const auto& n : names) {
@@ -1657,6 +1775,19 @@ size_t pyrope_parse(Options& opts, Result& res, Eprp_var& var, const std::vector
   for (const auto& d : ln_import_dirs) {
     res.inputs.push_back(d);
     for (auto& ln : load_ln_dir(d)) {
+      // A loaded import whose post-upass io_meta was restored is reused as-is:
+      // pass.upass skips re-elaborating it (it already holds its final body),
+      // resolving callers through the restored interface. Restricted to STATEFUL
+      // `mod`/`pipe` entities: those are always Sub instances — never inlined,
+      // never comptime-evaluated — so the importer needs only their interface. A
+      // `comb` (even when emitted as a Sub) can still be inlined or called at
+      // comptime (`cassert(f(3)==4)`), which needs its body, so leave it to
+      // re-elaborate. The file/__pub wrappers carry no io_meta. Older ln: dirs
+      // without persisted io_meta also fall back to re-elaboration.
+      const auto lk = ln->get_lambda_kind();
+      if (!ln->io_meta().empty() && (lk == "mod" || lk == "pipe")) {
+        ln->set_pre_elaborated(true);
+      }
       var.add(ln);
       ++n_imports;
     }
@@ -2683,6 +2814,216 @@ void compile_command(Options& opts, Result& res) {
     return;
   }
   compile_ir(opts, res, ir);  // ln:-only or lg:-only
+}
+
+// ---- sim --------------------------------------------------------------------
+
+std::string shell_quote(const std::string& s);  // defined below (check section)
+
+// `lhd sim <file.prp> [test.name] [--arg k=v ...]` — lower the design's DUT
+// modules to Slop<N> structs (inou.cgen.sim) and, for each `test` block,
+// generate a C++ driver that runs the `tick` loop and turns `assert`s into
+// runtime checks, then bazel-build + run them and report pass/fail.
+void sim_command(Options& opts, Result& res) {
+  res.command = "sim pyrope";
+  if (opts.files.empty()) {
+    throw Lhd_error{"usage", "sim requires a .prp file", "e.g. `lhd sim foo.prp` or `lhd sim foo.prp test.name`"};
+  }
+  const std::string file       = opts.files[0];
+  const std::string test_sel   = opts.files.size() > 1 ? opts.files[1] : "";
+  const bool        setup_only = opts.sim_setup_only;
+  const bool        run_only   = opts.sim_run_only;
+  const bool        pretty     = opts.diag_fmt == Diag_fmt::pretty;
+  if (setup_only && run_only) {
+    throw Lhd_error{"usage", "--setup-only and --run-only are mutually exclusive", ""};
+  }
+
+  // The sim build dir: --workdir if given (REUSED in place — generated files are
+  // overwritten, nothing is deleted), else a fresh OS-temp dir. The temp dir is
+  // OUTSIDE any workspace, so a later `bazel build //...` in the user's repo
+  // never sweeps the nested BUILD package or follows its convenience symlinks.
+  // The generated MODULE.bazel pins hlop by ABSOLUTE path, so the location is
+  // irrelevant to the sim's own build.
+  std::string simroot;
+  if (!opts.workdir.empty()) {
+    simroot = opts.workdir;
+  } else {
+    if (run_only) {
+      throw Lhd_error{"usage", "--run-only needs --workdir pointing at a prior --setup-only build", ""};
+    }
+    auto              tmpl = (fs::temp_directory_path() / "lhd_sim_XXXXXX").string();
+    std::vector<char> buf(tmpl.c_str(), tmpl.c_str() + tmpl.size() + 1);
+    if (::mkdtemp(buf.data()) == nullptr) {
+      throw Lhd_error{"config", "could not create a temp dir for the sim build", "set $TMPDIR or pass --workdir"};
+    }
+    simroot = buf.data();
+  }
+  const std::string simdir = simroot + "/sim";
+
+  // --set sim.vcd=true: dump one VCD per test, `<workdir>/<test.name>.vcd`. The
+  // path is absolute (the driver runs under `bazel run` with a different cwd).
+  bool vcd_on = false;
+  for (const auto& [k, v] : opts.sets) {
+    if (k == "sim.vcd") {
+      vcd_on = (v == "true" || v == "1" || v == "on");
+    }
+  }
+  const std::string vcd_dir = vcd_on ? fs::absolute(simroot).string() : std::string{};
+
+  std::vector<prp_sim::Driver> drivers;
+
+  // ---- setup: lower DUT -> Slop, generate a driver per test, write the module
+  if (!run_only) {
+    ensure_dir(simdir);
+    opts.language = "pyrope";
+    opts.files    = {file};  // keep only the source from the positional list
+    if (vcd_on) {
+      opts.sets.emplace_back("compile.sim.vcd", "1");  // make cgen_sim emit the VCD machinery
+    }
+    // `sim` is DYNAMIC verification: each `test` block's asserts are checked by
+    // running the generated driver, not formally. Skip pass.formal — a `test`
+    // lowers to a never-instantiated comb whose runtime parameters become free
+    // inputs, so a concrete-valued assert (`assert(acc == 22)`) would otherwise
+    // be "refuted" over those free inputs even though the bound run satisfies it.
+    opts.sets.emplace_back("compile.formal.mode", "none");
+    opts.emit_dirs.push_back(Typed_path{"sim", simdir});
+    auto ir = gather_ir_inputs(opts, "sim");
+    compile_sources(opts, res, ir);
+    if (res.status != "pass") {
+      return;
+    }
+    std::map<std::string, std::string> sim_args(opts.sim_args.begin(), opts.sim_args.end());
+    std::string                        err;
+    if (prp_sim::generate(file, simdir, test_sel, vcd_dir, sim_args, drivers, err) != 0) {
+      res.status        = "fail";
+      res.error_class   = "unsupported";
+      res.error_message = err;
+      res.exit_code     = 1;
+      return;
+    }
+    std::ofstream bf(std::format("{}/BUILD", simdir), std::ios::app);
+    bf << "\nload(\"@rules_cc//cc:defs.bzl\", \"cc_binary\")\n";
+    for (const auto& d : drivers) {
+      bf << std::format(
+          "cc_binary(\n    name = \"{0}\",\n    srcs = [\"{0}.cpp\"],\n    copts = [\"-std=c++23\"],\n"
+          "    deps = [\":sim\", \"@hlop//hlop\"],\n)\n",
+          d.basename);
+    }
+    bf.close();
+    res.recipe_steps.push_back(std::format("sim setup: {} driver(s) in {}", drivers.size(), simdir));
+  }
+
+  if (setup_only) {
+    res.outputs.push_back(simdir);
+    if (pretty) {
+      std::print("  sim setup complete: {} driver(s) generated in {}\n", drivers.size(), simdir);
+      std::print("  run with: lhd sim {} --run-only --workdir {}\n", file, simroot);
+      std::fflush(stdout);
+    }
+    return;  // status stays pass
+  }
+
+  // ---- run: build + run each driver, capturing output (no raw spew to stdout)
+  // For --run-only, recover the driver list from the BUILD cc_binary targets.
+  if (run_only) {
+    std::ifstream bf(std::format("{}/BUILD", simdir));
+    if (!bf) {
+      res.status        = "fail";
+      res.error_class   = "usage";
+      res.error_message = std::format("no generated sim in {} (run with --setup-only --workdir {} first)", simdir, simroot);
+      res.exit_code     = 1;
+      return;
+    }
+    std::string line;
+    while (std::getline(bf, line)) {
+      auto p = line.find("name = \"drv_");
+      if (p == std::string::npos) {
+        continue;
+      }
+      auto s = line.find('"', p);
+      auto e = line.find('"', s + 1);
+      if (s != std::string::npos && e != std::string::npos) {
+        std::string base = line.substr(s + 1, e - s - 1);
+        drivers.push_back(prp_sim::Driver{base.substr(4), base});  // test name = basename minus "drv_"
+      }
+    }
+    if (drivers.empty()) {
+      res.status        = "fail";
+      res.error_class   = "usage";
+      res.error_message = std::format("no drivers found in {}/BUILD", simdir);
+      res.exit_code     = 1;
+      return;
+    }
+  }
+
+  auto capture = [](const std::string& c, int& rc) {
+    std::string out;
+    char        buf[4096];
+    FILE*       p = ::popen(c.c_str(), "r");
+    if (p == nullptr) {
+      rc = -1;
+      return out;
+    }
+    size_t n = 0;
+    while ((n = std::fread(buf, 1, sizeof buf, p)) > 0) {
+      out.append(buf, n);
+    }
+    rc = ::pclose(p);
+    return out;
+  };
+
+  int    n_fail = 0;
+  size_t n_run  = 0;
+  for (const auto& d : drivers) {
+    if (run_only && !test_sel.empty() && d.test_name != test_sel) {
+      continue;  // --run-only honors a test selector
+    }
+    ++n_run;
+    // Capture the DRIVER's stdout (its runtime `puts` output + any ASSERT
+    // FAILED lines) via popen; send bazel's own build noise to a side file so it
+    // never spews. --experimental_convenience_symlinks=ignore: no bazel-* links.
+    const auto berr = std::format("{}/.bazel.stderr", simdir);
+    auto       cmd  = std::format("cd {} && bazel run -c opt --experimental_convenience_symlinks=ignore //:{} 2>{}",
+                                 shell_quote(simdir), d.basename, shell_quote(berr));
+    int        rc   = 0;
+    auto       out  = capture(cmd, rc);
+    bool       ok   = rc == 0;
+    if (!ok) {
+      ++n_fail;
+    }
+    res.recipe_steps.push_back(std::format("sim {} ({})", d.test_name, ok ? "pass" : "fail"));
+    if (pretty) {
+      // The test's runtime output (puts + ASSERT FAILED), then the verdict.
+      std::istringstream iss(out);
+      std::string        ln;
+      while (std::getline(iss, ln)) {
+        std::print("    {}\n", ln);
+      }
+      if (!ok && out.empty()) {  // a bazel build failure (no driver output): show its errors
+        std::ifstream ef(berr);
+        std::string   el;
+        while (std::getline(ef, el)) {
+          if (el.find("error:") != std::string::npos || el.find("ERROR:") != std::string::npos) {
+            std::print("    {}\n", el);
+          }
+        }
+      }
+      std::print("  {} {}\n", ok ? "PASS" : "FAIL", d.test_name);
+      std::fflush(stdout);
+    }
+  }
+  res.outputs.push_back(simdir);
+  if (n_run == 0) {
+    res.status        = "fail";
+    res.error_class   = "usage";
+    res.error_message = std::format("no test matched '{}' in {}", test_sel, file);
+    res.exit_code     = 1;
+  } else if (n_fail != 0) {
+    res.status        = "fail";
+    res.error_class   = "assert";
+    res.error_message = std::format("{} of {} test(s) failed", n_fail, n_run);
+    res.exit_code     = 1;
+  }
 }
 
 // ---- check ------------------------------------------------------------------
@@ -4825,6 +5166,8 @@ void run_engine_command(Options& opts, Result& res) {
     tool_command(opts, res);
   } else if (opts.command == "pass") {
     pass_command(opts, res);
+  } else if (opts.command == "sim") {
+    sim_command(opts, res);
   } else {
     throw Lhd_error{"usage", std::format("unknown command '{}'", opts.command), ""};
   }

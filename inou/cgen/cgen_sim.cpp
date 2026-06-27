@@ -232,8 +232,23 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         }
         vals += operand(e[i].driver, wbits);
       }
-      const char* m = (op == Ntype_op::Mux) ? "mux_op" : "hotmux_op";
-      return absl::StrCat("Slop<", tw, ">::", m, "(", operand(e[0].driver, wbits), ", {", vals, "})");
+      const char* m   = (op == Ntype_op::Mux) ? "mux_op" : "hotmux_op";
+      std::string sel = operand(e[0].driver, wbits);  // Slop<tw> selector
+      if (op == Ntype_op::Mux) {
+        // A binary Mux selector is an INDEX (0..n-1). Slop encodes a boolean
+        // `true` as all-ones, which as a wide selector value falls outside
+        // [0,n) -> mux_op returns invalid and the mux never picks. Keep only
+        // the ceil(log2(n)) low index bits (then re-widen to tw): all-ones -> 1.
+        size_t n_vals = e.size() - 1;
+        int    sel_w  = 1;
+        while ((static_cast<size_t>(1) << sel_w) < n_vals) {
+          ++sel_w;
+        }
+        if (sel_w < wbits) {
+          sel = absl::StrCat("(", sel, ").zext_to<", sel_w, ">().zext_to<", wbits, ">()");
+        }
+      }
+      return absl::StrCat("Slop<", tw, ">::", m, "(", sel, ", {", vals, "})");
     }
     default:
       // Compiling fallback: pass the first input through at the node width (the
@@ -256,6 +271,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // VCD trace (compile.sim.vcd=FILE): only the --top module emits it (so a
   // hierarchy writes one file). top empty -> single-module run, emit anyway.
   const auto entity  = gname.substr(gname.rfind('.') + 1);
+  // A `test` block lowers to a compiler-minted (`%`-named) comb — a testbench,
+  // not synthesizable hardware. Its asserts are checked by running the `lhd sim`
+  // driver (prp_sim), never by emitting a Slop unit (which would pull in the
+  // formal-property header it does not need). Skip it; the kernel's sim_into()
+  // drops it from the build's source list too so the two stay consistent.
+  if (!entity.empty() && entity.front() == '%') {
+    return;
+  }
   const bool vcd_on  = !vcd_file.empty() && (top.empty() || entity == top);
 
   const std::string base = odir.empty() ? std::string{gname} : absl::StrCat(odir, "/", gname);
@@ -502,6 +525,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         add(s, f.bits, s);
       }
     }
+    // Runtime-settable VCD output path. Defaults to the compile-time
+    // `compile.sim.vcd=FILE` path; a sentinel ("1"/"true", used by `lhd sim`)
+    // leaves it empty so the driver sets a per-test path before the first cycle.
+    std::string vcd_baked = (vcd_file == "1" || vcd_file == "true") ? std::string{} : vcd_file;
+    hout->append(absl::StrCat("  std::string __vcd_path = \"", vcd_baked, "\";\n"));
     hout->append("  std::unique_ptr<vcd::VCDWriter> __vcd;\n  unsigned __vcd_cycle = 0;\n");
     for (const auto& v : vsig) {
       hout->append(absl::StrCat("  vcd::VarPtr ", v.var, ";\n"));
@@ -514,12 +542,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
   hout->append("  void reset_cycle();\n");
   hout->append("  Out cycle(In in);\n");
+  hout->append("  Out peek(In in);  // post-edge outputs (current state); restores state, no VCD\n");
   hout->append("};\n");
 
   // ---- __vcd_init definition (source) ----
   if (vcd_on) {
     fout->append("void ", mod, "::__vcd_init() {\n");
-    fout->append(absl::StrCat("  __vcd = std::make_unique<vcd::VCDWriter>(\"", vcd_file, "\", vcd::makeVCDHeader());\n"));
+    fout->append("  __vcd = std::make_unique<vcd::VCDWriter>(__vcd_path, vcd::makeVCDHeader());\n");
     for (const auto& v : vsig) {
       fout->append(
           absl::StrCat("  ", v.var, " = __vcd->register_var(\"", mod, "\", \"", v.vname, "\", vcd::VariableType::wire, ", v.bits, ");\n"));
@@ -725,14 +754,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
 
-  // VCD dump (pre-commit, current-state values at this cycle's timestamp)
+  // VCD dump (pre-commit, current-state values at this cycle's timestamp).
+  // Guarded by `if (__vcd)` so a path-less instance (e.g. peek(), which clears
+  // the path to suppress dumping) never derefs a null writer.
   if (vcd_on) {
-    fout->append("    if (!__vcd) __vcd_init();\n");
-    fout->append("    vcd::global_timestamp = __vcd_cycle * 10;\n");
+    fout->append("    if (!__vcd && !__vcd_path.empty()) __vcd_init();\n");
+    fout->append("    if (__vcd) {\n");
+    fout->append("      vcd::global_timestamp = __vcd_cycle * 10;\n");
     for (const auto& v : vsig) {
-      fout->append(absl::StrCat("    __vcd->change(", v.var, ", vcd::to_vcd_bits(", v.accessor, ", ", v.bits, "));\n"));
+      fout->append(absl::StrCat("      __vcd->change(", v.var, ", vcd::to_vcd_bits(", v.accessor, ", ", v.bits, "));\n"));
     }
-    fout->append("    ++__vcd_cycle;\n");
+    fout->append("      ++__vcd_cycle;\n");
+    fout->append("    }\n");
   }
 
   // commit flops (+ pipe stages) at the clock edge
@@ -773,6 +806,41 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       fout->append(absl::StrCat("    { size_t __a = static_cast<size_t>((", operand(p.addr, ab), ").to_just_i64()); if (", guard,
                                 " && __a < ", m.size, ") ", m.member, "[__a] = ", operand(p.din, m.bits), "; }\n"));
     }
+  }
+  fout->append("    return o;\n}\n");
+
+  // peek(): the outputs implied by the CURRENT (post-last-edge) state, with NO
+  // net effect. It runs cycle() (which computes the outputs from the current
+  // state, then advances) but saves the flop/memory state first and restores it
+  // after, and suppresses VCD for the duration — so a `tick` driver can do
+  // cycle() to advance the clock, then peek() to observe the post-edge value
+  // without perturbing state or the waveform. (A non-copying save/restore is
+  // required because the VCD writer member is move-only.)
+  fout->append(mod, "::Out ", mod, "::peek(In in) {\n");
+  for (const auto& f : flops) {
+    fout->append(absl::StrCat("    auto _pk_", f.member, " = ", f.member, ";\n"));
+    for (const auto& s : f.stages) {
+      fout->append(absl::StrCat("    auto _pk_", s, " = ", s, ";\n"));
+    }
+  }
+  for (const auto& m : mems) {
+    fout->append(absl::StrCat("    auto _pk_", m.member, " = ", m.member, ";\n"));
+  }
+  if (vcd_on) {
+    fout->append("    auto _pk_vcd = std::move(__vcd); auto _pk_vp = __vcd_path; auto _pk_vc = __vcd_cycle; __vcd_path.clear();\n");
+  }
+  fout->append("    Out o = cycle(in);\n");
+  for (const auto& f : flops) {
+    fout->append(absl::StrCat("    ", f.member, " = _pk_", f.member, ";\n"));
+    for (const auto& s : f.stages) {
+      fout->append(absl::StrCat("    ", s, " = _pk_", s, ";\n"));
+    }
+  }
+  for (const auto& m : mems) {
+    fout->append(absl::StrCat("    ", m.member, " = _pk_", m.member, ";\n"));
+  }
+  if (vcd_on) {
+    fout->append("    __vcd = std::move(_pk_vcd); __vcd_path = _pk_vp; __vcd_cycle = _pk_vc;\n");
   }
   fout->append("    return o;\n}\n");
 }

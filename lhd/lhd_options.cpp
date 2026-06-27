@@ -495,6 +495,18 @@ Options parse_args(int argc, char** argv) {
       opts.quiet = true;
     } else if (a == "--verbose") {
       opts.verbose = true;
+    } else if (a == "--setup-only") {  // `sim`: generate the C++ sim, do not build/run
+      opts.sim_setup_only = true;
+    } else if (a == "--run-only") {  // `sim`: build/run an existing sim (needs --workdir)
+      opts.sim_run_only = true;
+    } else if (a == "--arg") {  // `sim`: bind a test parameter, repeatable: --arg key=value
+      auto v  = std::string{need_value(a, i, argc, argv)};
+      auto eq = v.find('=');
+      if (eq == std::string::npos || eq == 0) {
+        throw Lhd_error{"usage", std::format("--arg expects key=value, got '{}'", v),
+                        "e.g. `lhd sim foo.prp foo.bar --arg max_cycles=30`"};
+      }
+      opts.sim_args.emplace_back(v.substr(0, eq), v.substr(eq + 1));
     } else if (a == "-i" || a == "--inplace") {  // `pyrope fmt`: rewrite the input file(s) in place
       opts.fmt_inplace = true;
     } else if (a == "-o" || a == "--output") {  // `pyrope fmt`: write to a file instead of stdout
@@ -545,7 +557,7 @@ Options parse_args(int argc, char** argv) {
                         "run `lhd pyrope lsp` (or point your editor's launcher at it)"};
       }
       if (a == "compile" || a == "lec" || a == "scan" || a == "pyrope" || a == "list" || a == "describe"
-          || a == "version" || a == "help" || a == "tool" || a == "pass") {
+          || a == "version" || a == "help" || a == "tool" || a == "pass" || a == "sim") {
         // tool keeps its positionals raw and ORDERED in opts.files: the verb
         // (cat/grep/diff/tree), the filter terms (name:/color:/from:…), and the
         // ln:/lg: inputs all keep their place — tool_command classifies them.
@@ -600,7 +612,8 @@ Options parse_args(int argc, char** argv) {
   load_config(opts);
 
   // Infer the source language from the file extensions when not given.
-  if ((opts.command == "elaborate" || opts.command == "compile") && opts.language.empty() && !opts.files.empty()) {
+  if ((opts.command == "elaborate" || opts.command == "compile" || opts.command == "sim") && opts.language.empty()
+      && !opts.files.empty()) {
     bool any_prp = false;
     bool any_v   = false;
     for (const auto& f : opts.files) {

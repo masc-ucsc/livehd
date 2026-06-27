@@ -5024,13 +5024,55 @@ void Prp2lnast::process_import_statement(TSNode n) {
 }
 
 void Prp2lnast::process_test_statement(TSNode n) {
-  TSNode code   = child_by_field(n, "code");
+  TSNode code = child_by_field(n, "code");
+  // The grammar splits the dotted test selector (f_name: `test_name`, e.g.
+  // `counter.held_high`) from the optional runtime parameter list (f_input: an
+  // `arg_list`, typed-with-defaults exactly like a comb's inputs). The selector
+  // lets the sim runner pick a test; the parameters are bound per `--arg`.
+  std::string test_name;
+  if (TSNode name = child_by_field(n, "name"); !ts_node_is_null(name)) {
+    test_name = std::string(trim(get_text(name)));
+  }
   auto   fd_idx = builder.add_child(Lnast_ntype::create_func_def());
   auto   tmp    = builder.mint_tmp_ref();
   lnast->add_child(fd_idx, tmp);
   lnast->add_child(fd_idx, Lnast_node::create_const("comb"));
-  lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());  // generics
-  lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());  // inputs
+  lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());                // generics
+  auto in_idx = lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());  // inputs
+  // Lower the test's `(params)` into the comb's inputs so body reads of a
+  // parameter resolve (its visibility comes from the func_def signature, see
+  // read_is_visible / prp_collect_sig_targets). The default-value expression is
+  // the parameter's value when `--arg` does not override it. An in-flight
+  // signature frame lets a later default read an earlier parameter.
+  inflight_name_scopes_.emplace_back();
+  if (TSNode inp = child_by_field(n, "input"); !ts_node_is_null(inp)) {
+    TSNode pending_typed{};
+    TSNode pending_def{};
+    auto   flush = [&]() {
+      if (!ts_node_is_null(pending_typed)) {
+        emit_arg_assign(in_idx, pending_typed, pending_def, /*is_ref_mod=*/false, nullptr, "comb", /*is_io_output=*/false);
+        if (TSNode id = child_by_field(pending_typed, "identifier"); !ts_node_is_null(id)) {
+          inflight_name_scopes_.back().emplace_back(get_text(id));
+        }
+      }
+      pending_typed = TSNode{};
+      pending_def   = TSNode{};
+    };
+    uint32_t nc = child_count(inp);
+    for (uint32_t i = 0; i < nc; i++) {
+      TSNode           ci    = child(inp, i);
+      const char*      fname = ts_node_field_name_for_child(inp, i);
+      std::string_view ct(ts_node_type(ci));
+      if (ct == "typed_identifier") {
+        flush();
+        pending_typed = ci;
+      } else if (fname && std::string_view(fname) == "definition" && ct != "=") {
+        pending_def = ci;
+      }
+    }
+    flush();
+  }
+  inflight_name_scopes_.pop_back();
   lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());  // outputs
   auto body_idx = lnast->add_child(fd_idx, Lnast_ntype::create_stmts());
   builder.push_stmts(body_idx);
@@ -5042,6 +5084,12 @@ void Prp2lnast::process_test_statement(TSNode n) {
   lnast->add_child(aidx, tmp);
   lnast->add_child(aidx, Lnast_node::create_const("test"));
   lnast->add_child(aidx, Lnast_node::create_const("true"));
+  if (!test_name.empty()) {
+    auto nidx = builder.add_child(Lnast_ntype::create_attr_set());
+    lnast->add_child(nidx, tmp);
+    lnast->add_child(nidx, Lnast_node::create_const("test_name"));
+    lnast->add_child(nidx, Lnast_node::create_const(absl::StrCat("'", test_name, "'")));
+  }
 }
 
 void Prp2lnast::process_spawn_statement(TSNode n) {

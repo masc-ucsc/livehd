@@ -31,15 +31,40 @@ Each file pairs a synthesizable design with one or more `test` blocks:
 | `accumulator.prp` | running-sum            | `accum.sum`                             | `tick N`, changing input |
 | `fsm_runner.prp`  | Idle→Run→Done FSM      | `runner.until_done`, `runner.watchdog`  | `tick { break }`, `tick N` watchdog |
 | `seq_detect.prp`  | "11" sequence detector | `detect.stream`                         | `tick N`, streamed pattern, golden |
+| `test_args.prp`   | adder                  | `adder.params`                          | `test name(params)` + `--arg`, default/required/override |
+
+## Runtime parameters (`test name(params)` + `--arg`)
+
+A `test` may declare runtime parameters — `test add.checked(base:u32=10, gain:u32)`
+— that drive the DUT, size a `tick` loop, or seed a model (see
+[Testing](../../../../../docs/docs/pyrope/05b-statements.md#testing-test)). A
+parameter with a default is optional; one with no default (or `=nil`) is
+required. Bind them on the command line with `--arg name=value` (repeatable),
+which wins over the default; a required parameter left unset is an error, never
+a silent `0`:
+
+```bash
+lhd sim test_args.prp adder.params --arg gain=3 --arg count=4
+```
+
+In a `:type: simulation` test the bindings come from the `:args: k=v k=v` header
+tag (the runner forwards each as `--arg k=v`).
+
+## Running
+
+These run as part of `bazel test //inou/prp:all` (targets `prp-sim-<name>`).
+The harness (`prplib.py`, `:type: simulation`) drives `lhd sim --setup-only` to
+lower each DUT to header-only `Slop<N>` C++ and emit one driver per `test`
+block, then compiles each driver with the host C++ compiler and runs it — a
+non-zero exit means an `assert` fired. Because `Slop`/`Blop` are header-only and
+`-DNDEBUG` drops the `iassert` checks, a driver has **no link dependencies** (no
+nested bazel, no abseil, no network); only hlop's and iassert's headers are
+staged into the test runfiles (the `sim_runtime_hdrs` data dep in `BUILD`).
+
+To run one directly: `bazel test //inou/prp:prp-sim-counter --test_output=all`.
 
 ## Status notes
 
-* `tick` is not parsed by the current LiveHD frontend yet (this is the
-  infrastructure being built); a stock `lhd compile` reports `tick` as an
-  unknown statement. The **design modules** all lower cleanly today and were
-  validated against `iverilog` for the cycle-by-cycle behavior the asserts
-  check; the `test`-block driving uses the `tick` cycle-loop semantics the
-  runner is being built around.
 * `fsm_runner` integer-encodes its state with named `comptime const`s instead of
   an `enum`: an enum-typed register used as a branch/`match` selector does not
   lower in LiveHD yet (`upass.tolg` "unresolved reference"). Compare against the

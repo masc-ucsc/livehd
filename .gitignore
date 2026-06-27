@@ -48,3 +48,6 @@ diag*.jsonl
 # local agent worktrees / scratch
 .claude/worktrees/
 tmp_v2prp_census/
+
+# inou/cgen/tests/sim/diff_test.py writes here only if $LHD_DIFFTEST_DIR points back into the repo
+difftest_*/
