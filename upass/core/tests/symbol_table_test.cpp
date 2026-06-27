@@ -135,13 +135,13 @@ TEST_F(Symbol_table_test, ordered_check) {
   bundle->dump();
 
   // Named access — name-only.
-  EXPECT_DLOP_EQ(bundle->get_trivial("bar"), Dlop::create_integer(1));
-  EXPECT_DLOP_EQ(bundle->get_trivial("xxx"), Dlop::create_integer(2));
+  EXPECT_DLOP_EQ(bundle->get_trivial(bundle_path::of_string("bar")), Dlop::create_integer(1));
+  EXPECT_DLOP_EQ(bundle->get_trivial(bundle_path::of_string("xxx")), Dlop::create_integer(2));
   // Unnamed access by decimal index — entries stored at their position-key.
-  EXPECT_DLOP_EQ(bundle->get_trivial("2"), Dlop::create_integer(3));
-  EXPECT_DLOP_EQ(bundle->get_trivial("99"), Dlop::create_integer(4));
+  EXPECT_DLOP_EQ(bundle->get_trivial(bundle_path::of_string("2")), Dlop::create_integer(3));
+  EXPECT_DLOP_EQ(bundle->get_trivial(bundle_path::of_string("99")), Dlop::create_integer(4));
   // Decision 1: "0" no longer aliases the first named slot.
-  EXPECT_FALSE(bundle->has_trivial("0"));
+  EXPECT_FALSE(bundle->has_trivial(bundle_path::of_string("0")));
 
   // Copy-on-write field stores (Pyrope value semantics — `p2 = p1` copies):
   // a dotted st.set un-shares the varmap slot when the bundle pointer is
@@ -149,7 +149,7 @@ TEST_F(Symbol_table_test, ordered_check) {
   // later ST writes. Re-fetch after each mutation batch.
   st.set("foo.bar", Dlop::create_integer(4));  // replace stored "bar"
   bundle = st.get_bundle("foo");
-  EXPECT_DLOP_EQ(bundle->get_trivial("bar"), Dlop::create_integer(4));
+  EXPECT_DLOP_EQ(bundle->get_trivial(bundle_path::of_string("bar")), Dlop::create_integer(4));
 
   st.leave_scope();
 }
@@ -231,10 +231,10 @@ TEST_F(Symbol_table_test, top_levels_collapse_and_has_leafs) {
   auto bundle = std::make_shared<Bundle>("tlcollapse");
 
   // scalar 'a', single-named-sub 'f.foo', multi-unnamed 'x.0' + 'x.1'.
-  bundle->set("a",     *Dlop::create_integer(3));
-  bundle->set("f.foo", *Dlop::create_integer(44));
-  bundle->set("x.0",   *Dlop::create_integer(10));
-  bundle->set("x.1",   *Dlop::create_integer(20));
+  bundle->set(bundle_path::of_string("a"),     *Dlop::create_integer(3));
+  bundle->set(bundle_path::of_string("f.foo"), *Dlop::create_integer(44));
+  bundle->set(bundle_path::of_string("x.0"),   *Dlop::create_integer(10));
+  bundle->set(bundle_path::of_string("x.1"),   *Dlop::create_integer(20));
 
   auto tls = bundle->top_levels();
   ASSERT_EQ(tls.size(), 3u);
@@ -263,8 +263,8 @@ TEST_F(Symbol_table_test, top_levels_collapse_and_has_leafs) {
 TEST_F(Symbol_table_test, top_levels_named_and_unnamed_orthogonal) {
   auto bundle = std::make_shared<Bundle>("orthogonal");
 
-  bundle->set("b", *Dlop::create_integer(3));
-  bundle->set("0", *Dlop::create_integer(0));
+  bundle->set(bundle_path::of_string("b"), *Dlop::create_integer(3));
+  bundle->set(bundle_path::of_string("0"), *Dlop::create_integer(0));
 
   auto tls = bundle->top_levels();
   ASSERT_EQ(tls.size(), 2u);
@@ -289,9 +289,9 @@ TEST_F(Symbol_table_test, top_levels_named_and_unnamed_orthogonal) {
 TEST_F(Symbol_table_test, entries_view_skips_attrs) {
   auto bundle = std::make_shared<Bundle>("attrs_skip");
 
-  bundle->set("a",              *Dlop::create_integer(3));
+  bundle->set(bundle_path::of_string("a"),              *Dlop::create_integer(3));
   bundle->set_attr("a", "bits",  *Dlop::create_integer(8));
-  bundle->set("b",              *Dlop::create_integer(5));
+  bundle->set(bundle_path::of_string("b"),              *Dlop::create_integer(5));
 
   auto all = bundle->entries();
   auto na  = bundle->non_attr_entries();

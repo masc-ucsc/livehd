@@ -82,7 +82,7 @@ bool Symbol_table::var(std::string_view key) {
   }
 
   auto bundle = std::make_shared<Bundle>(var);
-  bundle->var(field, invalid_lconst);
+  bundle->var(bundle_path::of_string(field), invalid_lconst);
   cur.varmap.emplace(var, bundle);
   cur.declared.emplace_back(std::string(var));
   return true;
@@ -186,9 +186,9 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
       // clone before writing facts onto it — never contaminate the source.
       const auto& old = it->second;
       if (old && old.get() != bundle.get()) {
-        const auto& oe        = old->get_entry("0");
-        const auto& ne        = bundle->get_entry("0");
-        const bool  scalar_ok = bundle->is_empty() || bundle->has_trivial("0");
+        const auto& oe        = old->get_entry(bundle_path::of_string("0"));
+        const auto& ne        = bundle->get_entry(bundle_path::of_string("0"));
+        const bool  scalar_ok = bundle->is_empty() || bundle->has_trivial(bundle_path::of_string("0"));
         const bool  need_mode = old->get_mode() != upass::Mode::unknown && bundle->get_mode() != old->get_mode();
         const bool  need_tn   = !old->get_type_name().empty() && bundle->get_type_name().empty();
         // Declared facts are NAME facts: when the old binding carries them
@@ -229,7 +229,7 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
             bundle->set_type_name(old->get_type_name());
           }
           if (need_decl || need_kind) {
-            Bundle::Entry e = bundle->get_entry("0");
+            Bundle::Entry e = bundle->get_entry(bundle_path::of_string("0"));
             e.immutable     = false;
             if (!oe.decl_max.is_invalid()) {
               e.decl_max = oe.decl_max;  // declared envelope: old wins
@@ -240,7 +240,7 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
             if (oe.kind != upass::Kind::unknown) {
               e.kind = oe.kind;
             }
-            bundle->set("0", std::move(e));
+            bundle->set(bundle_path::of_string("0"), std::move(e));
           }
         }
       }
@@ -250,7 +250,7 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
     var_bundle = unshare_for_write(it->second);
   }
 
-  var_bundle->set(field, bundle);
+  var_bundle->set(bundle_path::of_string(field), bundle);
 
   return true;
 }
@@ -276,7 +276,7 @@ bool Symbol_table::set(std::string_view key, const Dlop& trivial) {
     bundle = unshare_for_write(it->second);
   }
 
-  bundle->set(field, trivial);
+  bundle->set(bundle_path::of_string(field), trivial);
 
   return true;
 }
@@ -392,7 +392,7 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
       // cassert over such a var no longer discharges at compile time — it is left
       // to the runtime check, which is correct for a value the compiler cannot pin.
       if (it->second->is_scalar()) {
-        it->second->set("0", invalid_lconst);
+        it->second->set(bundle_path::of_string("0"), invalid_lconst);
       } else {
         // A WHOLE-tuple write under an uncertain arm (`q = if c { (a=1,b=2) }
         // else { (a=3,b=4) }`) leaves EVERY field runtime-divergent, not just
@@ -408,7 +408,7 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
           leaves.emplace_back(leaf);
         }
         for (const auto& leaf : leaves) {
-          it->second->set(leaf, invalid_lconst);
+          it->second->set(bundle_path::of_string(leaf), invalid_lconst);
         }
       }
     }
@@ -466,7 +466,7 @@ bool Symbol_table::has_trivial(std::string_view key) const {
     return false;
   }
   const auto it = s->varmap.find(var);
-  return it->second->has_trivial(field);
+  return it->second->has_trivial(bundle_path::of_string(field));
 }
 
 const Dlop& Symbol_table::get_trivial(std::string_view key) const {
@@ -477,7 +477,7 @@ const Dlop& Symbol_table::get_trivial(std::string_view key) const {
     return invalid_lconst;
   }
   const auto it = s->varmap.find(var);
-  return it->second->get_trivial(field);
+  return it->second->get_trivial(bundle_path::of_string(field));
 }
 
 std::shared_ptr<Bundle> Symbol_table::get_bundle(std::string_view key) const {
@@ -492,7 +492,7 @@ std::shared_ptr<Bundle> Symbol_table::get_bundle(std::string_view key) const {
   if (var == key) {
     return it->second;
   }
-  return it->second->get_bundle(field);
+  return it->second->get_bundle(bundle_path::of_string(field));
 }
 
 std::shared_ptr<Bundle> Symbol_table::get_bundle_for_write(std::string_view var) {
@@ -526,7 +526,7 @@ bool Symbol_table::has_bundle(std::string_view key) const {
     return false;
   }
   const auto it = s->varmap.find(var);
-  return var == key || it->second->has_bundle(field);
+  return var == key || it->second->has_bundle(bundle_path::of_string(field));
 }
 
 void Symbol_table::dump() const {

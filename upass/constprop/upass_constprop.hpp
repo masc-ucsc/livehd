@@ -295,7 +295,7 @@ protected:
     if (const auto b = st().get_bundle(name); b && !(b->has_named_top() || b->unnamed_top_count() > 1)) {
       upass::Kind k = b->get_value_kind();
       if (k == upass::Kind::unknown) {
-        k = b->get_entry("0").kind;
+        k = b->get_entry(bundle_path::of_string("0")).kind;
       }
       switch (k) {
         case upass::Kind::integer: q.kind = Io_kind::integer; break;

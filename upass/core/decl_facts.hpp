@@ -66,8 +66,9 @@ inline std::optional<Facts> lookup(const Symbol_table& st, const Lnast* ln, std:
   // A multi-shaped bundle (named top / >1 positional) has no scalar self:
   // its "0" entry is FIELD ZERO, not the variable's own facts.
   const bool           multi = b && (b->has_named_top() || b->unnamed_top_count() > 1);
-  const Bundle::Entry& e     = (b && !(field.empty() && multi)) ? b->get_entry(field.empty() ? std::string_view{"0"} : field)
-                                                                : kEmpty_entry;
+  const Bundle::Entry& e     = (b && !(field.empty() && multi))
+                                   ? b->get_entry(bundle_path::of_string(field.empty() ? std::string_view{"0"} : field))
+                                   : kEmpty_entry;
 
   Facts ti;
   bool  any = false;

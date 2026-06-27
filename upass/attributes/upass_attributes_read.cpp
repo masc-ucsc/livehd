@@ -160,7 +160,7 @@ std::optional<Dlop> uPass_attributes::derive_bw(std::string_view base, bool want
   // has no per-field range and reads nil.
   if (runner_st != nullptr && base.find('.') == std::string_view::npos) {
     if (const auto b = runner_st->get_bundle(base); b) {
-      const auto& e = b->get_entry("0");
+      const auto& e = b->get_entry(bundle_path::of_string("0"));
       const auto& v = want_max ? e.bw_max : e.bw_min;
       if (!v.is_invalid() && !v.is_nil()) {
         return v;

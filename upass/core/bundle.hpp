@@ -208,17 +208,7 @@ public:
   void                                  set(Path path, const std::shared_ptr<Bundle const>& tup);
   void                                  set(Path path, Entry entry);
 
-  // ── dotted-string adapters (split via bundle_path; removed post-migration) ─
-  [[nodiscard]] bool         has_trivial(std::string_view key) const { return has_trivial(bundle_path::of_string(key)); }
-  [[nodiscard]] const Entry& get_entry(std::string_view key) const { return get_entry(bundle_path::of_string(key)); }
-  [[nodiscard]] const Dlop&  get_trivial(Path path) const { return get_entry(path).trivial; }
-  [[nodiscard]] const Dlop&  get_trivial(std::string_view key) const { return get_entry(key).trivial; }
-  [[nodiscard]] bool         has_bundle(std::string_view key) const { return has_bundle(bundle_path::of_string(key)); }
-  [[nodiscard]] std::shared_ptr<Bundle> get_bundle(std::string_view key) const {
-    return get_bundle(bundle_path::of_string(key));
-  }
-  void set(std::string_view key, const std::shared_ptr<Bundle const>& tup) { set(bundle_path::of_string(key), tup); }
-  void set(std::string_view key, Entry entry) { set(bundle_path::of_string(key), std::move(entry)); }
+  [[nodiscard]] const Dlop& get_trivial(Path path) const { return get_entry(path).trivial; }
 
   // The LONE non-attr entry's value regardless of depth (a 1-element
   // tuple-of-tuple flattens); invalid when not single-entry.
@@ -234,15 +224,10 @@ public:
     e.bw_min    = invalid_lconst;
     return e;
   }
-  Entry value_entry(std::string_view key, bool immutable_flag, const Dlop& trivial) const {
-    return value_entry(bundle_path::of_string(key), immutable_flag, trivial);
-  }
-
   void set(Path path, const Dlop& trivial) { set(path, value_entry(path, false, trivial)); }
-  void set(std::string_view key, const Dlop& trivial) { set(key, value_entry(key, false, trivial)); }
-  void var(std::string_view key, const Dlop& trivial) {
+  void var(Path path, const Dlop& trivial) {
     I(!immutable);
-    set(key, value_entry(key, false, trivial));
+    set(path, value_entry(path, false, trivial));
   }
   void set(const Dlop& trivial) {  // clear everything that is not pos-0; set pos-0
     const Seg s = bundle_path::make_unnamed(0);

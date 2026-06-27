@@ -97,7 +97,7 @@ Lnast_range uPass_bitwidth::range_of_operand(const upass::Operand& o) const {
     return Lnast_range::make_unbounded();
   }
   // The bundle's derived range facts.
-  const auto& e = o.bundle->get_entry("0");
+  const auto& e = o.bundle->get_entry(bundle_path::of_string("0"));
   auto        r = range_from_entry(e.bw_max, e.bw_min);
   if (!r.is_unbounded()) {
     return r;
@@ -113,7 +113,7 @@ Lnast_range uPass_bitwidth::read_range(std::string_view name) const {
   }
   if (runner_st != nullptr) {
     if (auto b = runner_st->get_bundle(name); b) {
-      const auto& e = b->get_entry("0");
+      const auto& e = b->get_entry(bundle_path::of_string("0"));
       auto        r = range_from_entry(e.bw_max, e.bw_min);
       if (!r.is_unbounded()) {
         return r;
@@ -140,15 +140,15 @@ void uPass_bitwidth::write_bw(std::string_view name, Bundle& dst, Lnast_range r,
   check_declared_fit(name, r);
 
   // Narrow-vs-replace against what the bundle already holds.
-  const auto& e0  = dst.get_entry("0");
+  const auto& e0  = dst.get_entry(bundle_path::of_string("0"));
   const auto  cur = range_from_entry(e0.bw_max, e0.bw_min);
   if (!replace && !cur.is_unbounded() && !r.is_narrower_than(cur)) {
     return;
   }
   if (cur.min == r.min && cur.max == r.max && cur.is_unbounded() == r.is_unbounded()) {
     // bw fields unchanged; still write through to bw_meta below on first sight.
-  } else if (dst.is_empty() || dst.has_trivial("0")) {
-    Bundle::Entry e = dst.get_entry("0");
+  } else if (dst.is_empty() || dst.has_trivial(bundle_path::of_string("0"))) {
+    Bundle::Entry e = dst.get_entry(bundle_path::of_string("0"));
     e.immutable     = false;
     if (r.is_unbounded()) {
       e.bw_max = Bundle::invalid_lconst;
@@ -157,7 +157,7 @@ void uPass_bitwidth::write_bw(std::string_view name, Bundle& dst, Lnast_range r,
       e.bw_max = *Dlop::create_integer(r.max);
       e.bw_min = *Dlop::create_integer(r.min);
     }
-    dst.set("0", std::move(e));
+    dst.set(bundle_path::of_string("0"), std::move(e));
   }
 
   // Write-through to lnast->bw_meta() — the tolg/LSP interface, and the
@@ -175,12 +175,12 @@ void uPass_bitwidth::clear_range(std::string_view name) {
     return;
   }
   if (runner_st != nullptr) {
-    if (auto b = runner_st->get_bundle_for_write(name); b && (b->is_empty() || b->has_trivial("0"))) {
-      Bundle::Entry e = b->get_entry("0");
+    if (auto b = runner_st->get_bundle_for_write(name); b && (b->is_empty() || b->has_trivial(bundle_path::of_string("0")))) {
+      Bundle::Entry e = b->get_entry(bundle_path::of_string("0"));
       e.immutable     = false;
       e.bw_max        = Bundle::invalid_lconst;
       e.bw_min        = Bundle::invalid_lconst;
-      b->set("0", std::move(e));
+      b->set(bundle_path::of_string("0"), std::move(e));
     }
   }
   lm->get_lnast()->bw_meta().ranges.erase(std::string(name));
@@ -197,7 +197,7 @@ std::optional<Lnast_range> uPass_bitwidth::decl_envelope_of(std::string_view nam
   if (!b) {
     return std::nullopt;
   }
-  const auto& e = b->get_entry("0");
+  const auto& e = b->get_entry(bundle_path::of_string("0"));
   auto        r = range_from_entry(e.decl_max, e.decl_min);
   if (r.is_unbounded()) {
     return std::nullopt;
@@ -661,12 +661,12 @@ void uPass_bitwidth::process_type_spec() {
     (void)runner_st->set(var, std::make_shared<Bundle>(var));
   }
   auto b = runner_st->get_bundle_for_write(var);
-  if (!b || (!b->is_empty() && !b->has_trivial("0"))) {
+  if (!b || (!b->is_empty() && !b->has_trivial(bundle_path::of_string("0")))) {
     return;
   }
-  Bundle::Entry e = b->get_entry("0");
+  Bundle::Entry e = b->get_entry(bundle_path::of_string("0"));
   e.immutable     = false;
   e.decl_max      = *dmax;
   e.decl_min      = *dmin;
-  b->set("0", std::move(e));
+  b->set(bundle_path::of_string("0"), std::move(e));
 }

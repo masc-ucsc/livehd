@@ -203,7 +203,7 @@ In_type classify_in_bundle(const std::shared_ptr<const Bundle>& b) {
       return t;
     }
   }
-  const auto& e = b->get_entry("0");
+  const auto& e = b->get_entry(bundle_path::of_string("0"));
   switch (e.kind) {
     case upass::Kind::boolean: t.k = In_type::K::boolean; return t;
     case upass::Kind::string:  t.k = In_type::K::string; return t;
@@ -741,7 +741,7 @@ Io_kind uPass_runner::try_scalar_kind(std::string_view name) {
   if (const auto b = symbol_table_.get_bundle(name); b && !(b->has_named_top() || b->unnamed_top_count() > 1)) {
     upass::Kind k = b->get_value_kind();
     if (k == upass::Kind::unknown) {
-      k = b->get_entry("0").kind;
+      k = b->get_entry(bundle_path::of_string("0")).kind;
     }
     switch (k) {
       case upass::Kind::integer: return Io_kind::integer;
@@ -1189,7 +1189,7 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
       // (skip if an upstream pass already flagged the design) and let the run
       // fail cleanly instead of tripping a hard invariant abort.
       {
-        const Bundle::Entry& e0 = now->get_entry("0");
+        const Bundle::Entry& e0 = now->get_entry(bundle_path::of_string("0"));
         if (!e0.trivial.is_invalid() && e0.trivial.is_integer() && !e0.trivial.has_unknowns() && !e0.bw_max.is_invalid()
             && !e0.bw_min.is_invalid()) {
           const bool over  = e0.trivial.gt_op(e0.bw_max)->is_known_true();
@@ -1241,14 +1241,14 @@ void uPass_runner::apply_pending_field_facts() {
     // (its declaring scope was left): skip; the entry is dropped at the root's
     // scope exit (Symbol_table::leave_scope) so the stash stays bounded.
     const Bundle* rb_ro = symbol_table_.peek_writable_bundle(root);
-    if (rb_ro == nullptr || !rb_ro->has_trivial(fpath)) {
+    if (rb_ro == nullptr || !rb_ro->has_trivial(bundle_path::of_string(fpath))) {
       ++it;
       continue;
     }
     // Field materialized → apply. Unshare for the write only now (rare path).
     auto          rb = symbol_table_.get_bundle_for_write(root);
     const auto&   pf = it->second;
-    Bundle::Entry fe = rb->get_entry(fpath);
+    Bundle::Entry fe = rb->get_entry(bundle_path::of_string(fpath));
     fe.immutable     = false;
     if (pf.kind != upass::Kind::unknown) {
       fe.kind = pf.kind;
@@ -1263,7 +1263,7 @@ void uPass_runner::apply_pending_field_facts() {
       fe.decl_min = pf.decl_min;
     }
     fe.comptime = fe.comptime || pf.comptime;
-    rb->set(fpath, std::move(fe));
+    rb->set(bundle_path::of_string(fpath), std::move(fe));
     pending.erase(it++);
   }
 }
@@ -1288,13 +1288,13 @@ void uPass_runner::merge_fact_fields(Bundle& bound, const Bundle& from) {
   // the "0" key is field 0, so bundle-level facts must not land there.
   const bool bound_scalar = !bound.has_named_top() && bound.unnamed_top_count() <= 1;
   for (const auto& [key, fe] : from.non_attr_entries()) {
-    if (!bound.has_trivial(key)) {
+    if (!bound.has_trivial(bundle_path::of_string(key))) {
       continue;  // facts ride only onto entries the binding actually has
     }
     if (key == "0" && !bound_scalar) {
       continue;
     }
-    Bundle::Entry e   = bound.get_entry(key);
+    Bundle::Entry e   = bound.get_entry(bundle_path::of_string(key));
     bool          dif = false;
     if (e.kind == upass::Kind::unknown && fe.kind != upass::Kind::unknown) {
       e.kind = fe.kind;
@@ -1324,7 +1324,7 @@ void uPass_runner::merge_fact_fields(Bundle& bound, const Bundle& from) {
       dif        = true;
     }
     if (dif) {
-      bound.set(key, std::move(e));
+      bound.set(bundle_path::of_string(key), std::move(e));
     }
   }
 }
@@ -1431,7 +1431,7 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
         }
       }
     } else if (const auto b = symbol_table_.get_bundle(Bundle::get_first_level(dst_name)); b) {
-      const auto& e = b->get_entry("0");
+      const auto& e = b->get_entry(bundle_path::of_string("0"));
       dlo           = to_i64(e.decl_min);
       dhi           = to_i64(e.decl_max);
       if (dlo && dhi) {
@@ -2251,7 +2251,7 @@ bool uPass_runner::try_lower_wrap_sat() {
   std::optional<Dlop> vmax;
   std::optional<Dlop> vmin;
   if (auto b = symbol_table_.get_bundle(value_name); b) {
-    const auto& e = b->get_entry("0");
+    const auto& e = b->get_entry(bundle_path::of_string("0"));
     if (!e.bw_max.is_invalid() && e.bw_max.is_integer()) {
       vmax = e.bw_max;
     }
@@ -2413,7 +2413,7 @@ bool uPass_runner::try_lower_typecast() {
   std::optional<Dlop> vmin;
   if (auto b = symbol_table_.get_bundle(arg_name); b) {
     const auto  vk = b->get_value_kind();
-    const auto& e  = b->get_entry("0");
+    const auto& e  = b->get_entry(bundle_path::of_string("0"));
     operand_kind    = (vk != upass::Kind::unknown) ? vk : e.kind;
     operand_is_bool = (operand_kind == upass::Kind::boolean);
     for (const auto& attr : b->get_attrs()) {
@@ -2715,7 +2715,7 @@ bool uPass_runner::lower_in() {
     // picked value: comptime folding strips a value's enum-identity attr, so a
     // picked enum element would misread as a bare integer. The sub-bundle keeps
     // the `enumentry` tag, so hierarchical/flat enums classify correctly.
-    const In_type e_type = classify_in_bundle(b_bundle->get_bundle(std::to_string(tl.pos)));
+    const In_type e_type = classify_in_bundle(b_bundle->get_bundle(bundle_path::of_string(std::to_string(tl.pos))));
     if (!in_types_compatible(a_type, e_type)) {
       in_op_fail(span, "in-type-mismatch",
                  std::format("`in` compares values of different types: the left operand is {}, but element {} is {}",
@@ -3998,7 +3998,7 @@ bool uPass_runner::try_lower_dynamic_tuple_index(const std::string& dst, const s
       elems.push_back(Lnast_node::create_ref(*rname));  // runtime wire
       any_runtime = true;
     } else if (bundle) {
-      const Dlop& t = bundle->get_trivial(slot);
+      const Dlop& t = bundle->get_trivial(bundle_path::of_string(slot));
       if (t.is_invalid()) {
         return false;  // runtime-unknown / nested sub-tuple slot with no recorded ref
       }
@@ -7008,8 +7008,8 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
     const auto root  = Bundle::get_first_level(var);
     const auto fpath = Bundle::get_all_but_first_level(var);
     auto       rb    = symbol_table_.get_bundle_for_write(root);
-    if (rb && rb->has_trivial(fpath)) {
-      Bundle::Entry fe = rb->get_entry(fpath);
+    if (rb && rb->has_trivial(bundle_path::of_string(fpath))) {
+      Bundle::Entry fe = rb->get_entry(bundle_path::of_string(fpath));
       fe.immutable     = false;
       if (kind != upass::Kind::unknown) {
         fe.kind = kind;
@@ -7024,7 +7024,7 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
         fe.decl_min = decl_min;
       }
       fe.comptime = fe.comptime || comptime;
-      rb->set(fpath, std::move(fe));
+      rb->set(bundle_path::of_string(fpath), std::move(fe));
     } else if (rb != nullptr) {
       // Root binding is live but the field has no value yet: stash the fact and
       // apply it at the field's first write (or drop it when the root's
@@ -7068,10 +7068,10 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   // The "0" Entry carries the scalar facts. Only touch it when the bundle has
   // a scalar slot (or is empty) — writing a "0" leaf next to named tuple
   // fields would corrupt the shape.
-  const bool has_scalar_slot = bundle->is_empty() || bundle->has_trivial("0");
+  const bool has_scalar_slot = bundle->is_empty() || bundle->has_trivial(bundle_path::of_string("0"));
   const bool has_entry_facts = kind != upass::Kind::unknown || !decl_max.is_invalid() || !decl_min.is_invalid() || comptime;
   if (has_scalar_slot && has_entry_facts) {
-    Bundle::Entry e = bundle->get_entry("0");
+    Bundle::Entry e = bundle->get_entry(bundle_path::of_string("0"));
     e.immutable     = false;  // get_entry's missing-key sentinel is immutable; a decl entry is writable
     if (kind != upass::Kind::unknown) {
       e.kind = kind;
@@ -7086,7 +7086,7 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
       e.decl_min = decl_min;
     }
     e.comptime = e.comptime || comptime;
-    bundle->set("0", std::move(e));
+    bundle->set(bundle_path::of_string("0"), std::move(e));
   }
   if (!elem_max.is_invalid()) {
     bundle->set_attr("__elem_max", elem_max);
@@ -7113,8 +7113,8 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
       const auto         fpath = Bundle::get_all_but_first_level(path);
       if (!fpath.empty()) {
         if (auto src_b = symbol_table_.get_bundle_for_write(root); src_b) {
-          if (src_b->has_trivial(fpath)) {
-            Bundle::Entry fe = src_b->get_entry(fpath);
+          if (src_b->has_trivial(bundle_path::of_string(fpath))) {
+            Bundle::Entry fe = src_b->get_entry(bundle_path::of_string(fpath));
             fe.immutable     = false;
             if (kind != upass::Kind::unknown) {
               fe.kind = kind;
@@ -7129,7 +7129,7 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
               fe.decl_min = decl_min;
             }
             fe.comptime = fe.comptime || comptime;
-            src_b->set(fpath, std::move(fe));
+            src_b->set(bundle_path::of_string(fpath), std::move(fe));
           } else if (src_b->has_top_named(fpath)) {
             // BUNDLE-valued field (`mut b = (…)` inside a literal): there is
             // no scalar entry to carry mode/comptime — use per-field attrs.

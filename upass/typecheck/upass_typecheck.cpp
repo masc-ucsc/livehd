@@ -81,7 +81,7 @@ uPass_typecheck::Kind uPass_typecheck::kind_of_bundle(const Bundle& b) {
   if (b.get_value_kind() != Kind::unknown) {
     return b.get_value_kind();
   }
-  return b.get_entry("0").kind;
+  return b.get_entry(bundle_path::of_string("0")).kind;
 }
 
 uPass_typecheck::Kind uPass_typecheck::kind_of(std::string_view name) const {
@@ -263,7 +263,7 @@ upass::Vote uPass_typecheck::process_store(std::string_view dst_name, Bundle& ds
   // marks its own synthesized nil seeds (Symbol_table::nil_seeded) — those
   // prologues legally bind a tuple over the seed.
   if (cur == Kind::unknown && rhs == Kind::tuple && runner_st != nullptr) {
-    const auto& t0 = dst.get_entry("0").trivial;
+    const auto& t0 = dst.get_entry(bundle_path::of_string("0")).trivial;
     if (!t0.is_invalid() && t0.is_nil() && !runner_st->nil_seeded.contains(std::string(dst_name))) {
       emit_type_error("nil-shape-infer",
                       std::format("`{}` was initialized to nil as a scalar; a tuple value cannot re-shape it", dst_name),

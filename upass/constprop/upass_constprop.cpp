@@ -106,7 +106,7 @@ static std::optional<Dlop> stringify_bundle(const std::shared_ptr<Bundle const>&
       acc = *acc.concat_op(stringify_one(tl.scalar));
     } else {  // a sub-bundle: recurse into it
       const std::string seg = tl.pos == -1 ? std::string(tl.name) : std::to_string(tl.pos);
-      auto              sub = stringify_bundle(b->get_bundle(seg));
+      auto              sub = stringify_bundle(b->get_bundle(bundle_path::of_string(seg)));
       if (!sub.has_value()) {
         return std::nullopt;
       }
@@ -419,7 +419,7 @@ void uPass_constprop::check_field_store_kind(std::string_view field_key, const D
   if (!b) {
     return;
   }
-  const Dlop& cur = b->get_trivial(std::string(field_key.substr(dot + 1)));
+  const Dlop& cur = b->get_trivial(bundle_path::of_string(std::string(field_key.substr(dot + 1))));
   if (cur.is_invalid() || cur.is_nil()) {
     return;  // field not yet established — nothing to compare against
   }
@@ -559,7 +559,7 @@ void uPass_constprop::process_assign() {
           if (base && base.get() != rhs_bundle.get() && !base->non_attr_entries().empty()) {
             auto merged = std::make_shared<Bundle>(std::string(lhs_text));
             for (const auto& [bk, bep] : base->non_attr_entries()) {
-              merged->set(bk, bep);  // the named type's default fields/values
+              merged->set(bundle_path::of_string(bk), bep);  // the named type's default fields/values
             }
             std::vector<std::string> base_named;  // canonical-order named slots
             for (const auto& tl : base->top_levels()) {
@@ -578,13 +578,13 @@ void uPass_constprop::process_assign() {
               }
               if (numeric) {  // positional init entry → bind to next named slot
                 if (pidx < base_named.size()) {
-                  merged->set(base_named[pidx], rep);
+                  merged->set(bundle_path::of_string(base_named[pidx]), rep);
                   ++pidx;
                 } else {
-                  merged->set(rk, rep);
+                  merged->set(bundle_path::of_string(rk), rep);
                 }
               } else {  // named init field → overlay by name
-                merged->set(rk, rep);
+                merged->set(bundle_path::of_string(rk), rep);
               }
             }
             st().set(lhs_text, merged);
@@ -627,16 +627,16 @@ void uPass_constprop::process_assign() {
         // Start by copying LHS shape verbatim (incl. nil placeholders and
         // any nested sub-entries).
         for (const auto& [lhs_key, lhs_ep] : existing->non_attr_entries()) {
-          merged->set(lhs_key, lhs_ep);
+          merged->set(bundle_path::of_string(lhs_key), lhs_ep);
         }
         // Bind each RHS positional value to the next LHS named slot.
         size_t idx = 0;
         for (const auto& name : lhs_named_order) {
           auto pos_key = std::to_string(idx);
-          if (!rhs_bundle->has_trivial(pos_key)) {
+          if (!rhs_bundle->has_trivial(bundle_path::of_string(pos_key))) {
             break;
           }
-          merged->set(name, rhs_bundle->get_trivial(pos_key));
+          merged->set(bundle_path::of_string(name), rhs_bundle->get_trivial(bundle_path::of_string(pos_key)));
           ++idx;
         }
         // RHS positions beyond LHS shape append as unnamed slots after
@@ -645,10 +645,10 @@ void uPass_constprop::process_assign() {
         size_t append_pos = 0;
         for (;; ++append_pos) {
           auto pos_key = std::to_string(idx + append_pos);
-          if (!rhs_bundle->has_trivial(pos_key)) {
+          if (!rhs_bundle->has_trivial(bundle_path::of_string(pos_key))) {
             break;
           }
-          merged->set(std::to_string(append_pos), rhs_bundle->get_trivial(pos_key));
+          merged->set(bundle_path::of_string(std::to_string(append_pos)), rhs_bundle->get_trivial(bundle_path::of_string(pos_key)));
         }
         st().set(lhs_text, merged);
       } else {
@@ -712,7 +712,7 @@ void uPass_constprop::process_assign() {
           if (base && !base->non_attr_entries().empty() && enum_identity_of(base) == nullptr) {
             auto merged = std::make_shared<Bundle>(std::string(lhs_text));
             for (const auto& [bk, bep] : base->non_attr_entries()) {
-              merged->set(bk, bep);  // tn's default fields + per-field values
+              merged->set(bundle_path::of_string(bk), bep);  // tn's default fields + per-field values
             }
             st().set(lhs_text, merged);
             move_to_parent();
@@ -1210,16 +1210,16 @@ static std::optional<Dlop> compare_bundles_eq(const std::shared_ptr<Bundle const
         // Both sides agreeing a slot is undefined (e.g. the value-less
         // `mut c:u24` field of a payload type) is a match on that key, not
         // an undecidable — payload-enum compares would otherwise never fold.
-        if (other->has_trivial(k) && other->get_trivial(k).is_invalid()) {
+        if (other->has_trivial(bundle_path::of_string(k)) && other->get_trivial(bundle_path::of_string(k)).is_invalid()) {
           continue;
         }
         worst = '?';
         continue;
       }
-      if (!other->has_trivial(k)) {
+      if (!other->has_trivial(bundle_path::of_string(k))) {
         return 'f';
       }
-      const Dlop& ov = other->get_trivial(k);
+      const Dlop& ov = other->get_trivial(bundle_path::of_string(k));
       if (ov.is_invalid()) {
         worst = '?';
         continue;
@@ -1292,7 +1292,7 @@ static bool structural_does(const std::shared_ptr<Bundle const>& a, const std::s
   // of an int-valued field of the same name. Derive a leaf's kind from its
   // typed Entry, falling back to the collapsed scalar's representation.
   auto leaf_kind = [](const std::shared_ptr<Bundle const>& bnd, std::string_view name, const Dlop& scalar) -> upass::Kind {
-    const auto k = bnd->get_entry(name).kind;
+    const auto k = bnd->get_entry(bundle_path::of_string(name)).kind;
     if (k != upass::Kind::unknown) {
       return k;
     }
@@ -1315,7 +1315,7 @@ static bool structural_does(const std::shared_ptr<Bundle const>& a, const std::s
         return false;
       }
       const auto bk = leaf_kind(b, tb.name, tb.scalar);
-      const auto ak = leaf_kind(a, tb.name, a->get_trivial(tb.name));
+      const auto ak = leaf_kind(a, tb.name, a->get_trivial(bundle_path::of_string(tb.name)));
       if (ak != upass::Kind::unknown && bk != upass::Kind::unknown && ak != bk) {
         return false;  // same-named field of an incompatible kind — not a superset
       }
@@ -1853,14 +1853,14 @@ upass::Vote uPass_constprop::process_tuple_add(std::string_view dst_name, Bundle
     if (!function_registry.count(qualified)) {
       return false;
     }
-    bundle->set(key, *Dlop::from_string(qualified));
+    bundle->set(bundle_path::of_string(key), *Dlop::from_string(qualified));
     return true;
   };
 
   int unnamed_pos = 0;  // advances only on unnamed entries
   while (move_to_sibling()) {
     if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-      bundle->set(std::to_string(unnamed_pos), *Dlop::from_pyrope(current_text()));
+      bundle->set(bundle_path::of_string(std::to_string(unnamed_pos)), *Dlop::from_pyrope(current_text()));
       ++unnamed_pos;
 
     } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
@@ -1881,9 +1881,9 @@ upass::Vote uPass_constprop::process_tuple_add(std::string_view dst_name, Bundle
           }
         }
         if (xfold) {
-          bundle->set(slot, *xfold);
+          bundle->set(bundle_path::of_string(slot), *xfold);
         } else {
-          bundle->set(slot, sub);
+          bundle->set(bundle_path::of_string(slot), sub);
           // Loop-migration (Step 1): a RUNTIME scalar slot (no sub-bundle, no
           // comptime fold) — the bundle just stored null, so remember the
           // source ref. The runner rewrites a later `t[slot]` / `for x in t`
@@ -1904,12 +1904,12 @@ upass::Vote uPass_constprop::process_tuple_add(std::string_view dst_name, Bundle
       auto key = std::string(current_text());
       move_to_sibling();
       if (is_type(Lnast_ntype::Lnast_ntype_const)) {
-        bundle->set(key, *Dlop::from_pyrope(current_text()));
+        bundle->set(bundle_path::of_string(key), *Dlop::from_pyrope(current_text()));
       } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
         const auto txt = current_text();
         if (!try_store_fn_name(key, txt)) {
           auto sub = st().get_bundle(txt);
-          bundle->set(key, sub);
+          bundle->set(bundle_path::of_string(key), sub);
           if (!sub) {
             st().tuple_slot_ref[dvar][key] = std::string(txt);  // Step 1: runtime named-slot ref
           } else {
@@ -2003,7 +2003,7 @@ upass::Vote uPass_constprop::process_tuple_concat(std::string_view dst_name, Bun
   // appends it as a slot instead of mishandling the bare key.
   auto wrap_trivial = [&](const Dlop& val) -> std::shared_ptr<Bundle> {
     auto b = std::make_shared<Bundle>(dvar);
-    b->set("0", val);
+    b->set(bundle_path::of_string("0"), val);
     return b;
   };
 
@@ -2195,7 +2195,7 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::decode_prim_type_t
 
 std::shared_ptr<Bundle> uPass_constprop::single_positional_bundle(const Dlop& v) {
   auto b = std::make_shared<Bundle>("__does_scalar");
-  b->set("0", v);
+  b->set(bundle_path::of_string("0"), v);
   return b;
 }
 
@@ -2265,7 +2265,7 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_does_opera
   // type query, not the bundle shape.
   const bool                      bundle_is_tuple = bundle && is_tuple_shaped(bundle);
   Dlop                            folded          = *Dlop::invalid();
-  if (bundle && !bundle_is_tuple && bundle->has_trivial("0")) {
+  if (bundle && !bundle_is_tuple && bundle->has_trivial(bundle_path::of_string("0"))) {
     folded = bundle->lone_trivial();
   } else if (st().has_trivial(name)) {
     folded = st().get_trivial(name);
@@ -2351,8 +2351,8 @@ uPass_constprop::Does_operand uPass_constprop::build_scalar_operand(const upass:
 // coerced literal) and the field carries no value.
 std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_field_operand(std::string_view base, const Bundle& b,
                                                                                     std::string_view field, bool declared_only) {
-  if (b.has_bundle(field)) {
-    if (auto sub = b.get_bundle(field); sub && !sub->is_scalar()) {
+  if (b.has_bundle(bundle_path::of_string(field))) {
+    if (auto sub = b.get_bundle(bundle_path::of_string(field)); sub && !sub->is_scalar()) {
       Does_operand op;
       op.kind   = Does_operand::Kind::tuple;
       op.bundle = sub;
@@ -2369,7 +2369,7 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_field_oper
   if (declared_only && q.kind == Io_kind::none) {
     return std::nullopt;  // untyped field — no type constraint to enforce
   }
-  Dlop folded = b.has_trivial(field) ? b.get_trivial(field) : *Dlop::invalid();
+  Dlop folded = b.has_trivial(bundle_path::of_string(field)) ? b.get_trivial(bundle_path::of_string(field)) : *Dlop::invalid();
   if (q.kind == Io_kind::none && folded.is_invalid()) {
     return std::nullopt;
   }
@@ -2547,7 +2547,7 @@ static int match_case_value(const std::shared_ptr<Bundle const>& subj, const std
         return 0;  // a concrete scalar subject can never match a tuple pattern
       }
       const std::string key = re.name.empty() ? std::to_string(re.pos) : std::string(re.name);
-      const int         r   = match_case_value(subj->get_bundle(key), pat->get_bundle(key));
+      const int         r   = match_case_value(subj->get_bundle(bundle_path::of_string(key)), pat->get_bundle(bundle_path::of_string(key)));
       if (r == 0) {
         return 0;
       }
@@ -2785,8 +2785,8 @@ void uPass_constprop::fold_case(const std::string& dst) {
         store_trivial(dst, *Dlop::create_bool(false));
         return;
       }
-      const int r = match_case_value(lhs_bundle ? lhs_bundle->get_bundle(key) : nullptr,
-                                     rhs_bundle ? rhs_bundle->get_bundle(key) : nullptr);
+      const int r = match_case_value(lhs_bundle ? lhs_bundle->get_bundle(bundle_path::of_string(key)) : nullptr,
+                                     rhs_bundle ? rhs_bundle->get_bundle(bundle_path::of_string(key)) : nullptr);
       if (r == 0) {
         store_trivial(dst, *Dlop::create_bool(false));
         return;
@@ -3669,13 +3669,13 @@ void uPass_constprop::process_func_call() {
     type_sign = reinterpret_sign;
   }
   if (type_bits > 0 && !result.is_string() && !result.is_nil()) {
-    if (auto b = st().get_bundle_for_write(dst); b && (b->is_empty() || b->has_trivial("0"))) {
-      Bundle::Entry e = b->get_entry("0");
+    if (auto b = st().get_bundle_for_write(dst); b && (b->is_empty() || b->has_trivial(bundle_path::of_string("0")))) {
+      Bundle::Entry e = b->get_entry(bundle_path::of_string("0"));
       e.immutable     = false;
       e.kind          = upass::Kind::integer;
       e.decl_max      = upass::max_from_bits(static_cast<uint32_t>(type_bits), type_sign);
       e.decl_min      = upass::min_from_bits(static_cast<uint32_t>(type_bits), type_sign);
-      b->set("0", std::move(e));
+      b->set(bundle_path::of_string("0"), std::move(e));
     }
   }
   // A `bool(...)` result is boolean-kinded, not an integer literal — stamp the
@@ -3780,7 +3780,7 @@ void uPass_constprop::process_range() {
       auto bundle = std::make_shared<Bundle>(dst);
       int  pos    = 0;
       for (int64_t v = lo; v <= hi; ++v, ++pos) {
-        bundle->set(std::to_string(pos), *Dlop::create_integer(v));
+        bundle->set(bundle_path::of_string(std::to_string(pos)), *Dlop::create_integer(v));
       }
       st().set(dst, bundle);
     }
@@ -3932,12 +3932,12 @@ void uPass_constprop::process_tuple_get() {
     // lookup_type_info answers for `t.a`-style reads (`.[bits]` derivation).
     if (auto sb = st().get_bundle(src); sb && key.size() > src.size() + 1) {
       const auto           fpath = std::string_view(key).substr(src.size() + 1);
-      const Bundle::Entry& fe    = sb->get_entry(fpath);
+      const Bundle::Entry& fe    = sb->get_entry(bundle_path::of_string(fpath));
       const bool           facts = fe.kind != upass::Kind::unknown || fe.mode != upass::Mode::unknown || !fe.decl_max.is_invalid()
                                    || !fe.decl_min.is_invalid() || fe.comptime;
       if (facts) {
-        if (auto db = st().get_bundle_for_write(dst); db && db->has_trivial("0")) {
-          Bundle::Entry e = db->get_entry("0");
+        if (auto db = st().get_bundle_for_write(dst); db && db->has_trivial(bundle_path::of_string("0"))) {
+          Bundle::Entry e = db->get_entry(bundle_path::of_string("0"));
           e.immutable     = false;
           if (e.kind == upass::Kind::unknown) {
             e.kind = fe.kind;
@@ -3952,7 +3952,7 @@ void uPass_constprop::process_tuple_get() {
             e.decl_min = fe.decl_min;
           }
           e.comptime = e.comptime || fe.comptime;
-          db->set("0", std::move(e));
+          db->set(bundle_path::of_string("0"), std::move(e));
         }
       }
     }
@@ -4121,7 +4121,7 @@ void uPass_constprop::check_nested_tuple_access(const std::string& base, const s
       cur += '.';
     }
     cur += segs[i];
-    if (b->has_trivial(cur)) {
+    if (b->has_trivial(bundle_path::of_string(cur))) {
       // A leaf: any remaining segments must be the [0]-on-scalar sugar.
       for (size_t j = i + 1; j < segs.size(); ++j) {
         if (segs[j] != "0") {
@@ -4318,11 +4318,11 @@ void uPass_constprop::process_tuple_set() {
       check_field_store_kind(tuple_var + "." + name, *v);             // field write must keep its kind (cat 3)
       check_unsigned_positive_overflow(tuple_var + "." + name, *v);   // ... and fit its declared range (cat 3)
       // Update bundle in place; scalar values are propagated by tuple_get.
-      bundle->set(name, *v);
+      bundle->set(bundle_path::of_string(name), *v);
     } else if (val_child.is_ref && st().has_bundle(val_child.text)) {
       auto sub = st().get_bundle(val_child.text);
       if (sub) {
-        bundle->set(name, sub);
+        bundle->set(bundle_path::of_string(name), sub);
       }
     }
     move_to_parent();

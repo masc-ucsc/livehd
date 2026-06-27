@@ -455,13 +455,13 @@ void uPass_attributes::process_attr_set() {
               if (wb->get_mode() == upass::Mode::unknown) {
                 wb->set_mode(m);
               }
-            } else if (wb->has_trivial(fpath)) {
-              Bundle::Entry fe = wb->get_entry(fpath);
+            } else if (wb->has_trivial(bundle_path::of_string(fpath))) {
+              Bundle::Entry fe = wb->get_entry(bundle_path::of_string(fpath));
               fe.immutable     = false;
               if (fe.mode == upass::Mode::unknown) {
                 fe.mode = m;
               }
-              wb->set(fpath, std::move(fe));
+              wb->set(bundle_path::of_string(fpath), std::move(fe));
             }
           }
         }
@@ -476,11 +476,11 @@ void uPass_attributes::process_attr_set() {
           if (auto wb = runner_st->get_bundle_for_write(root); wb) {
             const auto key   = fpath.empty() ? std::string_view{"0"} : fpath;
             const bool multi = fpath.empty() && (wb->has_named_top() || wb->unnamed_top_count() > 1);
-            if (!multi && wb->has_trivial(key)) {
-              Bundle::Entry fe = wb->get_entry(key);
+            if (!multi && wb->has_trivial(bundle_path::of_string(key))) {
+              Bundle::Entry fe = wb->get_entry(bundle_path::of_string(key));
               fe.immutable     = false;
               fe.comptime      = true;
-              wb->set(key, std::move(fe));
+              wb->set(bundle_path::of_string(key), std::move(fe));
             }
           }
         }

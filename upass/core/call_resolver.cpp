@@ -252,13 +252,13 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
                              const std::vector<Lnast_pub_entry>&                     pubs) {
     auto b = std::make_shared<Bundle>(dst);
     for (const auto& [path, val_text] : values) {
-      b->set(path, *Dlop::from_pyrope(val_text));
+      b->set(bundle_path::of_string(path), *Dlop::from_pyrope(val_text));
     }
     for (const auto& p : pubs) {
       if (p.kind == "value") {
         continue;
       }
-      b->set(p.name, str_const(absl::StrCat(unit, ".", p.name)));
+      b->set(bundle_path::of_string(p.name), str_const(absl::StrCat(unit, ".", p.name)));
       b->set_attr(p.name, "pub", str_const(p.kind));
     }
     // Marks "import namespace" (the runner's UFCS check exempts these; the

@@ -136,7 +136,7 @@ private:
       // inliner's synthesized nil seeds.
       const std::string name{o.name};
       if (runner_st->tget_origin.contains(name) && !runner_st->nil_seeded.contains(name)) {
-        const auto& t = o.bundle->get_entry("0").trivial;
+        const auto& t = o.bundle->get_entry(bundle_path::of_string("0")).trivial;
         if (!t.is_invalid() && t.is_nil()) {
           return Kind::nil;
         }
