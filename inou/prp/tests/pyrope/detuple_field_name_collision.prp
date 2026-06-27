@@ -1,0 +1,29 @@
+/*
+:name: detuple_field_name_collision
+:type: lgraph compile
+*/
+// Regression (upass.detuple): a tuple FIELD name that collides with a same-named
+// top-level tuple must keep separate namespaces.  The Chisel idiom of an `io`
+// bundle with a field `resp` PLUS an internal `resp:(valid, bits)` wire — and a
+// `req`/`req` pair — previously made detuple count the field-name token (in the
+// other tuple's shape bundle / bare field type_spec) as a use of the top-level
+// tuple, rejecting its split: "cannot assign tuple value to `resp` (it is
+// integer); a variable's type cannot change".  All fields are driven so no `wire`
+// is left undriven.
+pub comb detuple_field_name_collision(a:u8, b:u8, v:u1, w:u1) -> (o1:u8, o2:u8, o3:u1, o4:u8, o5:u1) {
+  wire io:(resp:u8, req:u8, other:u8) = nil
+  wire resp:(valid:u1, bits:u8) = nil
+  wire req:(valid:u1, bits:u8) = nil
+  io.resp  = a
+  io.req   = b
+  io.other = a ^ b
+  resp.bits  = io.resp
+  resp.valid = v
+  req.bits   = io.req
+  req.valid  = w
+  o1 = io.other
+  o2 = resp.bits
+  o3 = resp.valid
+  o4 = req.bits
+  o5 = req.valid
+}

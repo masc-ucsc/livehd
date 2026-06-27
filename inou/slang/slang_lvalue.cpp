@@ -580,12 +580,16 @@ bool Slang_context::lower_mem_element_bitslice_write(const slang::ast::Expressio
     return false;
   }
   const auto& base_es = base.as<slang::ast::ElementSelectExpression>();
-  if (!base_es.value().type->getCanonicalType().isUnpackedArray()) {
-    return false;
-  }
   const auto* mem_sym = resolve_base_symbol(base_es.value());
   if (mem_sym == nullptr || flat_port_syms_.contains(mem_sym)) {
     return false;  // flat-port arrays use the bit-slice path elsewhere
+  }
+  // The base must index a single memory element: an UNPACKED-array memory, OR a
+  // memory-ized packed 2-D reg (register file, `logic [N:0][W:0][..]`). Both
+  // store one word per index; this write targets a constant sub-chunk of that
+  // word.  The read path (lower_rvalue) already routes packed_mem_regs_ here.
+  if (!base_es.value().type->getCanonicalType().isUnpackedArray() && !packed_mem_regs_.contains(mem_sym)) {
+    return false;
   }
   auto mit = mem_info_.find(mem_sym);
   if (mit == mem_info_.end()) {
@@ -602,6 +606,11 @@ bool Slang_context::lower_mem_element_bitslice_write(const slang::ast::Expressio
   auto          range = elem_ty.getFixedRange();
   auto          ti    = tinfo(*lhs.type);
   const int64_t width = ti.bits;
+  // A packed element word (`[3:0][1:0]`) indexes ELEMENTS, each spanning `stride`
+  // bits; the index/range below is in element units and is scaled to a bit offset
+  // after.  A flat word (`[31:0]`) has stride 1, so the register-file lowering is
+  // unchanged.  Mirrors the read path (slang_expr.cpp lower_rvalue).
+  const int     stride = elem_ty.isPackedArray() ? static_cast<int>(elem_ty.getArrayElementType()->getBitWidth()) : 1;
 
   // Constant low bit of the slice within the word; a dynamic in-word offset
   // returns false (the caller then diagnoses it as nested-lvalue).
@@ -626,6 +635,9 @@ bool Slang_context::lower_mem_element_bitslice_write(const slang::ast::Expressio
         lo_bit = range.isDescending() ? (*b - range.lower() - (width - 1)) : (range.upper() - *b);
       }
     }
+  }
+  if (lo_bit) {
+    *lo_bit *= stride;  // element index -> bit offset within the word (stride 1 for a flat word)
   }
   if (!lo_bit || *lo_bit < 0 || width <= 0 || *lo_bit + width > word_bits) {
     return false;

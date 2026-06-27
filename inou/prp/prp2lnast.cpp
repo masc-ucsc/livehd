@@ -60,6 +60,12 @@ std::string slurp_file(std::string_view filename) {
 }
 }  // namespace
 
+// Canonicalize a Pyrope escaped identifier (`` `name` `` → `name` when the inner
+// text is a plain alnum/underscore word). Defined below; forward-declared here so
+// the early lvalue-path lowering (member/dot field names) can canonicalize field
+// keys identically to the read path. See the definition for the full contract.
+[[nodiscard]] static std::string_view canonical_escaped_ident(std::string_view name);
+
 // File-backed entry: read `filename` from disk, then delegate to the buffer ctor.
 // Largest bracket-nesting depth we let reach the recursive-descent parser. The
 // prpparse expression grammar recurses several stack frames per nesting level
@@ -2672,7 +2678,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
             TSNode           c = ts_node_named_child(n, i);
             std::string_view ct(ts_node_type(c));
             if (ct == "identifier") {
-              path.push_back(Lnast_node::create_const(trim(get_text(c))));
+              path.push_back(Lnast_node::create_const(canonical_escaped_ident(trim(get_text(c)))));
             } else {
               path.push_back(expr_to_node(c));
             }
@@ -2687,7 +2693,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
             }
             std::string_view ct(ts_node_type(c));
             if (ct == "identifier") {
-              path.push_back(Lnast_node::create_const(trim(get_text(c))));
+              path.push_back(Lnast_node::create_const(canonical_escaped_ident(trim(get_text(c)))));
             } else {
               path.push_back(expr_to_node(c));
             }
@@ -5775,7 +5781,7 @@ void Prp2lnast::emit_type_spec(const Lnast_node& target, TSNode type_cast_node) 
               if (ts_node_is_null(fid) || ts_node_is_null(ftc)) {
                 continue;
               }
-              const std::string fname{trim(get_text(fid))};
+              const std::string fname{canonical_escaped_ident(trim(get_text(fid)))};
               if (fname.empty() || fname.find('.') != std::string::npos) {
                 continue;
               }
@@ -7928,7 +7934,10 @@ Lnast_node Prp2lnast::dot_expression_to_node(TSNode n) {
   lnast->add_child(idx, base);
   for (uint32_t i = 1; i < nnc; i++) {
     TSNode c = ts_node_named_child(n, i);
-    lnast->add_child(idx, Lnast_node::create_const(trim(get_text(c))));
+    // Canonicalize escaped field names (`` `in` `` → `in`) so the tuple_get key
+    // matches the field as declared; a pure-alnum backtick name left unnormalized
+    // is rejected downstream as an invalid ref.
+    lnast->add_child(idx, Lnast_node::create_const(canonical_escaped_ident(trim(get_text(c)))));
   }
   return ref;
 }
@@ -8344,10 +8353,13 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/) {
         // Type-tuple field intro (`type Complex = (v1:string, …)`): the
         // field name DECLARES the field — it is not a read of `v1`, and it
         // is readable by the later fields. Register it before lowering so
-        // identifier_to_node resolves it in-flight.
+        // identifier_to_node resolves it in-flight. Canonicalize the escaped
+        // form (`` `in` `` → `in`) so the registered name matches the read's
+        // canonical name (identifier_to_node), else a backtick-escaped field
+        // name is flagged as an undefined read of itself.
         TSNode id = child_by_field(c, "identifier");
         if (!ts_node_is_null(id) && std::string_view(ts_node_type(id)) == "identifier") {
-          inflight_name_scopes_.back().emplace_back(trim(get_text(id)));
+          inflight_name_scopes_.back().emplace_back(canonical_escaped_ident(trim(get_text(id))));
         }
       }
       Item it;

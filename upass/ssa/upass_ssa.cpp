@@ -182,6 +182,47 @@ void uPass_ssa::copy_with_rename(
 void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast) {
   auto root = lnast->get_root();
 
+  // ── Demote stale SSA versions from a prior run ──────────────────────────
+  // A reloaded forest (an `ln:` import, or a `lhd compile ln:DIR` recompile)
+  // carries body names from a PRIOR SSA pass (`<base>___ssa_<N>`). The
+  // `___ssa_` namespace is PRIVATE to a single SSA run: this run re-mints
+  // `<base>___ssa_<N>` for the same base, so a merge-back store aliases the
+  // stale version onto the freshly-minted one and collapses to a self-store
+  // (`_mux_3___ssa_1 = _mux_3___ssa_1` -> the "irrelevant assignment" error
+  // in the runner). A freshly-parsed body never contains `___ssa_` (only SSA
+  // mints it), so any `___ssa_<digits>` seen at SSA entry is necessarily
+  // stale — demote it out of the private namespace (`___ssa_<N>` -> `__w<N>`,
+  // the same move pass.prp_writer makes on emit) so this run versions freely
+  // without collision. A consistent rename keeps every def/use linked.
+  for (auto nid : lnast->depth_preorder(root)) {
+    if (nid.is_invalid()) {
+      continue;
+    }
+    std::string_view nm  = lnast->get_name(nid);
+    auto             pos = nm.rfind("___ssa_");
+    if (pos == std::string_view::npos) {
+      continue;
+    }
+    const size_t d = pos + 7;  // first char past "___ssa_"
+    if (d >= nm.size()) {
+      continue;  // bare "___ssa_" with no version — leave intact
+    }
+    bool all_digits = true;
+    for (size_t i = d; i < nm.size(); ++i) {
+      if (nm[i] < '0' || nm[i] > '9') {
+        all_digits = false;
+        break;
+      }
+    }
+    if (!all_digits) {
+      continue;  // not a pure-digit SSA suffix — not our version form
+    }
+    std::string demoted(nm.substr(0, pos));
+    demoted += "__w";
+    demoted += nm.substr(d);
+    lnast->set_name(nid, demoted);  // interns the demoted name
+  }
+
   // ── Detect post-func_extract shape: top must have an 'io' child ──────────
   bool found_io = false;
   bool found_stmts = false;

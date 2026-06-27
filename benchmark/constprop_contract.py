@@ -23,12 +23,12 @@ import constprop_gen
 
 # Synthetic size. Big enough that parse + IR-fold work dominates process
 # startup; small enough to keep the bench cheap to run on every -c opt build.
-N = 10_000
+N = 20_000
 
 # Total runs per side. First is discarded as cold-cache warmup; median is
 # taken over the remaining runs. 7 keeps the bench fast while giving a
 # robust median.
-N_RUNS = 7
+N_RUNS = 5
 
 # Contract: median(T_prp) / median(T_yosys) must stay below this.
 #

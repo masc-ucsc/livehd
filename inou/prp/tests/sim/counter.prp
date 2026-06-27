@@ -1,0 +1,46 @@
+/*
+:name: counter
+:type: simulation
+*/
+// Simulation example: a free-running up-counter driven from a `test` block.
+//
+// The DUT is *called inside* the `tick` loop, once per cycle: each `tick`
+// iteration advances one clock, so the call returns that cycle's output (no
+// `step` inside a `tick` -- that would advance a second clock). The output is
+// captured into an outer `mut` and checked with an `assert` at the end of
+// simulation. No poke/sigref are used.
+
+mod counter(enable:bool) -> (value:u8@[0]) {
+  reg count:u8 = 0
+
+  value = count                 // combinational read of count.q -> @[0]
+
+  if enable { wrap count += 1 }
+}
+
+// Test 1: enable held high for 20 cycles -> count must be exactly 20.
+test counter.held_high {
+  mut v_final = nil
+  tick 20 {                          // 20 cycles, one clock per iteration
+    const v = counter(enable=true)   // this cycle's output
+    v_final = v
+  }
+  assert(v_final == 20, "after 20 enabled cycles the count must be 20")
+}
+
+// Test 2: enable toggled every cycle for 20 cycles. A test-local golden value
+// mirrors the register's next-state so the end-of-sim assert is self-checking.
+test counter.gated {
+  mut en = false
+  mut expected = 0
+  mut v_final = nil
+  tick 20 {
+    en = not en                       // this cycle's enable
+    if en { expected = expected + 1 } // golden mirror of count
+    const v = counter(enable=en)
+    v_final = v
+  }
+  // enable was high on 10 of the 20 cycles
+  assert(v_final == expected, "gated counter disagrees with golden model")
+  assert(v_final == 10)
+}

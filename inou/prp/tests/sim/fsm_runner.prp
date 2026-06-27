@@ -1,0 +1,70 @@
+/*
+:name: fsm_runner
+:type: simulation
+*/
+// Simulation example: a small Idle -> Run -> Done FSM with a countdown.
+//
+// Demonstrates the two `tick` shapes (the DUT is called inside the loop, once
+// per cycle, with no inner `step`):
+//   * `tick N { ... break }` : run until a runtime condition, with a watchdog
+//   * `tick N { ... }`       : run a fixed cycle budget
+// Both check the machine reached Done with an assert at the end of simulation.
+//
+// State is integer-encoded with named comptime constants instead of an `enum`:
+// an enum-typed register used as a branch/`match` selector does not lower in
+// LiveHD yet (upass.tolg "unresolved reference" on the enum reg), while the
+// integer encoding lowers cleanly. Compare against the names, never the raw
+// numbers.
+
+comptime const ST_IDLE = 0
+comptime const ST_RUN  = 1
+comptime const ST_DONE = 2
+
+mod runner(start:bool, len:u8) -> (busy:bool@[0], done:bool@[0]) {
+  reg st:u2  = ST_IDLE
+  reg cnt:u8 = 0
+
+  busy = st == ST_RUN
+  done = st == ST_DONE
+
+  if st == ST_IDLE {
+    if start { st = ST_RUN; cnt = len }
+  } elif st == ST_RUN {
+    if cnt == 0 { st = ST_DONE } else { wrap cnt -= 1 }
+  } else {                       // ST_DONE: terminal, hold the state
+    st = ST_DONE
+  }
+}
+
+// Test 1: pulse start, then run until `done` rises (100-cycle watchdog).
+test runner.until_done {
+  comptime const LEN = 5
+
+  mut start = true              // one-cycle start pulse
+  mut done_final = false
+  tick 100 {                    // watchdog bound: never spin forever
+    const o = runner(start=start, len=LEN)
+    start = false               // deassert after the first cycle
+    done_final = o.done
+    if o.done { break }
+  }
+  assert(done_final, "runner never reached Done within 100 cycles")
+}
+
+// Test 2: bounded run of a known-sufficient budget; confirm Done was observed
+// and the machine still reports Done at the end of simulation.
+test runner.watchdog {
+  comptime const LEN = 3
+
+  mut start = true
+  mut seen_done = false
+  mut done_final = false
+  tick 16 {                     // fixed cycle budget
+    const o = runner(start=start, len=LEN)
+    start = false
+    if o.done { seen_done = true }
+    done_final = o.done
+  }
+  assert(seen_done, "runner did not finish within the 16-cycle budget")
+  assert(done_final, "runner should still be Done at end of simulation")
+}

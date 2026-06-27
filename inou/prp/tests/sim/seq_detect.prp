@@ -1,0 +1,41 @@
+/*
+:name: seq_detect
+:type: simulation
+*/
+// Simulation example: a "11" sequence detector that counts every pair of
+// consecutive 1 bits in the input stream.
+//
+// A fixed bit pattern in a const array is streamed one bit per cycle: each
+// `tick` iteration calls the detector with this cycle's bit and advances one
+// clock. A test-local golden model mirrors the detector, and the end-of-sim
+// `assert` checks the final detection count.
+
+mod seq_detect(din:bool) -> (count:u8@[0]) {
+  reg prev:bool = false
+  reg cnt:u8    = 0
+
+  count = cnt                       // combinational read of cnt.q -> @[0]
+
+  if prev and din { wrap cnt += 1 } // saw two consecutive 1s
+  prev = din
+}
+
+test detect.stream {
+  const pattern = [true, true, true, false, true, true]  // 6-cycle stimulus
+
+  mut idx:u8 = 0
+  mut gprev = false                 // golden: previous bit
+  mut gcnt  = 0                     // golden: detection count
+  mut c_final = nil
+  tick 6 {
+    const s = pattern[idx]                 // this cycle's bit
+    if gprev and s { gcnt = gcnt + 1 }     // golden mirror of cnt
+    const c = seq_detect(din=s)
+    gprev = s
+    c_final = c
+    wrap idx = idx + 1
+  }
+  // pattern 1,1,1,0,1,1 has three "11" pairs (cycles 2,3,6)
+  assert(c_final == gcnt, "detector disagrees with golden model")
+  assert(c_final == 3)
+}

@@ -26,3 +26,21 @@ sh_test(
         "//lhd",
     ],
 )
+
+sh_test(
+    name = "prp_writer_kw_bundle_test.sh",
+    srcs = ["tests/prp_writer_kw_bundle_test.sh"],
+    data = [
+        "tests/kw_bundle_base.prp",
+        "//lhd",
+    ],
+)
+
+sh_test(
+    name = "prp_writer_kw_fields_test.sh",
+    srcs = ["tests/prp_writer_kw_fields_test.sh"],
+    data = [
+        "tests/kw_bundle_keywords.prp",
+        "//lhd",
+    ],
+)

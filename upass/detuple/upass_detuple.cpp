@@ -423,6 +423,62 @@ private:
       }
     }
 
+    // Pass C2: a `wire/reg W:(f0, f1, …)` shape bundle is the tuple_add
+    // `tuple_add(SHAPE, ref f0, ref f1, …)` whose entries are W's FIELD NAMES as
+    // bare refs.  When a field name COLLIDES with a same-named top-level struct
+    // candidate (a Chisel `io.store_req` field plus an internal `store_req`
+    // bundle, very common), that field-name ref would be miscounted as a use of
+    // the top-level candidate in the scan below and wrongly reject its split
+    // (leaving it half-lowered → "a variable's type cannot change").  Collect the
+    // SHAPE tuple_add dst temps so the scan skips their field-name tokens. Only a
+    // genuine shape (all bare refs naming exactly W's fields) qualifies — a
+    // positional value tuple `W = (a, b)` of real reads is left intact.
+    // Every field name across all candidates.  A candidate `wire/reg W:(…)` lists
+    // its fields BOTH as dotted `type_spec(W.f, T)` (consumed by Pass B) AND as a
+    // BARE `type_spec(f, T)` token (the field name as a bare ref, kept verbatim).
+    // When a field name `f` collides with a same-named top-level candidate, that
+    // bare type_spec would also be miscounted as a use — exclude it below.
+    absl::flat_hash_set<std::string> field_names;
+    for (const auto& [v, fv] : fields) {
+      for (const auto& f : fv) {
+        field_names.insert(f.name);
+      }
+    }
+    absl::flat_hash_set<std::string> shape_temps;
+    for (const auto n : src_->depth_preorder(src_->get_root())) {
+      if (n.is_invalid() || !Lnast_ntype::is_store(type_of(n))) {
+        continue;
+      }
+      auto v0  = src_->get_first_child(n);                           // stored var
+      auto tmp = v0.is_invalid() ? v0 : src_->get_sibling_next(v0);  // ref TMP
+      if (v0.is_invalid() || tmp.is_invalid() || !src_->get_sibling_next(tmp).is_invalid() || !Lnast_ntype::is_ref(type_of(v0))
+          || !Lnast_ntype::is_ref(type_of(tmp))) {
+        continue;
+      }
+      auto fit = fields.find(std::string(name_of(v0)));
+      if (cand.find(name_of(v0)) == cand.end() || fit == fields.end() || fit->second.empty()) {
+        continue;
+      }
+      auto tit = tadd_of_temp_.find(std::string(name_of(tmp)));
+      if (tit == tadd_of_temp_.end()) {
+        continue;
+      }
+      std::vector<std::string_view> refs;
+      bool                          all_ref = true;
+      for (auto e = src_->get_sibling_next(src_->get_first_child(tit->second)); !e.is_invalid(); e = src_->get_sibling_next(e)) {
+        if (!Lnast_ntype::is_ref(type_of(e))) {
+          all_ref = false;
+          break;
+        }
+        refs.push_back(name_of(e));
+      }
+      if (all_ref && refs.size() == fit->second.size() && std::all_of(fit->second.begin(), fit->second.end(), [&](const Field& f) {
+            return std::find(refs.begin(), refs.end(), f.name) != refs.end();
+          })) {
+        shape_temps.insert(std::string(name_of(tmp)));
+      }
+    }
+
     // Use-site index: ONE walk records, per node, the first child-ref naming
     // each candidate root. validate_struct_reg_uses then scans only a
     // candidate's own use-sites (was a full-tree walk per candidate → O(K*N)).
@@ -432,6 +488,23 @@ private:
       for (const auto n : src_->depth_preorder(src_->get_root())) {
         if (n.is_invalid()) {
           continue;
+        }
+        // Skip a struct shape bundle's tuple_add: its children are field-NAME
+        // tokens (see Pass C2), never real uses of a same-named candidate.
+        if (Lnast_ntype::is_tuple_add(type_of(n))) {
+          auto d = src_->get_first_child(n);
+          if (!d.is_invalid() && Lnast_ntype::is_ref(type_of(d)) && shape_temps.contains(std::string(name_of(d)))) {
+            continue;
+          }
+        }
+        // Skip a BARE field type_spec `type_spec(f, T)`: `f` is a field-NAME token
+        // of some candidate, not a real use of a same-named top-level candidate
+        // (a tuple candidate's own type annotations are DOTTED `type_spec(v.f,T)`).
+        if (Lnast_ntype::is_type_spec(type_of(n))) {
+          auto d = src_->get_first_child(n);
+          if (!d.is_invalid() && Lnast_ntype::is_ref(type_of(d)) && field_names.contains(std::string(name_of(d)))) {
+            continue;
+          }
         }
         seen_here.clear();
         int idx = 0;

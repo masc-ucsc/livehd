@@ -1,0 +1,30 @@
+// Regression fixture for prp_writer per-component keyword escaping.
+//
+// A reconstructed bundle is emitted as a bare dotted path so it re-parses as
+// tuple-field access.  When the BASE *and/or* the FIELD names collide with
+// Pyrope reserved words, EACH colliding component must be backtick-escaped
+// individually — `` wire `in`:(`reg`:u8, …) `` and `` `in`.`reg` `` — not the
+// whole path quoted and not left bare (which would re-lex as the keyword).
+//
+// Several reserved words are used here as BOTH tuple names (`in`, `wire`) and
+// field names (`reg`, `mut`, `match`, `type`, `for`); `valid` is an ordinary
+// (non-keyword) field that must stay bare.  Written `` `kw` `` only because this
+// fixture is itself Pyrope source — the lexer strips the backticks, so the
+// internal names are the bare keywords the writer must re-escape on emit.
+pub comb kw_bundle_keywords(a:u8, b:u8, c:u8, d:u8, v:u1, w:u1)
+    -> (o1:u8, o2:u8, o3:u8, o4:u8, o5:u1, o6:u1) {
+  wire `in`:(`reg`:u8, `mut`:u8, `match`:u1) = nil
+  wire `wire`:(`type`:u8, `for`:u8, valid:u1) = nil
+  `in`.`reg`    = a
+  `in`.`mut`    = b
+  `in`.`match`  = v
+  `wire`.`type` = c
+  `wire`.`for`  = d
+  `wire`.valid  = w
+  o1 = `in`.`reg`
+  o2 = `in`.`mut`
+  o3 = `wire`.`type`
+  o4 = `wire`.`for`
+  o5 = `in`.`match`
+  o6 = `wire`.valid
+}

@@ -1,0 +1,22 @@
+// Regression fixture for prp_writer keyword-bundle escaping.
+//
+// `in` is a Pyrope reserved word (the membership / for-loop operator), but a
+// Verilog/Chisel design (e.g. the XiangShan DCache CtrlUnit) routinely names a
+// decoupled bundle `in:(ready, valid, bits)`.  After upass.detuple splits the
+// tuple into dotted leaf nets, pass.prp_writer regroups them into one
+// `wire in:(...)` declaration plus `in.field` accesses.  Those MUST be emitted
+// backtick-escaped (`` wire `in`:(...) `` / `` `in`.bits ``) so the re-compile
+// leg does not re-lex `in` AS the keyword ("expected an expression" at the `.`).
+//
+// The base is written `` `in` `` here only because this fixture is itself
+// Pyrope source (the bare keyword would not parse); the lexer strips the
+// backticks, so the internal net name is the bare `in` the writer must escape.
+pub comb kw_bundle_base(a:u8, v:u1, r:u1) -> (o:u8, ov:u1, orr:u1) {
+  wire `in`:(ready:u1, valid:u1, bits:u8) = nil
+  `in`.bits  = a
+  `in`.valid = v
+  `in`.ready = r
+  o   = `in`.bits
+  ov  = `in`.valid
+  orr = `in`.ready
+}

@@ -244,16 +244,56 @@ static bool is_pyrope_reserved_ident(std::string_view s) {
   return kw.contains(s);
 }
 
+// A reconstructed bundle path (`in.bits`) is emitted as the BARE dotted path so
+// it re-parses as tuple-field access (not a quoted opaque leaf).  But a base or
+// field component that collides with a Pyrope keyword (`in.bits`, `x.reg`) would
+// then re-lex AS the keyword and break the path ("expected an expression" at the
+// `.`).  Backtick-escape each keyword component INDIVIDUALLY — `` `in`.bits `` —
+// so the dots stay field separators; the lexer strips the backticks, so the lg
+// name (and LEC matching) is unchanged.  Non-keyword components stay bare, so a
+// normal path (`io.operation`) is emitted byte-identical to before.
+static std::string quote_kw_path(std::string_view path) {
+  std::string out;
+  size_t      start = 0;
+  for (;;) {
+    auto             dot  = path.find('.', start);
+    std::string_view comp = path.substr(start, dot == std::string_view::npos ? std::string_view::npos : dot - start);
+    if (is_pyrope_reserved_ident(comp)) {
+      out.push_back('`');
+      out.append(comp);
+      out.push_back('`');
+    } else {
+      out.append(comp);
+    }
+    if (dot == std::string_view::npos) {
+      break;
+    }
+    out.push_back('.');
+    start = dot + 1;
+  }
+  return out;
+}
+
 bool Lnast_prp_writer::is_bundle_field(std::string_view name) const {
   const auto dot = name.find('.');
   if (dot == std::string_view::npos) {
     return false;
   }
-  auto it = bundle_fields_.find(std::string(name.substr(0, dot)));
+  // The caller may hand us either the RAW path (`in.bits`, from the quote lambda)
+  // or the already-escaped path (`` `in`.bits ``, from decl_prefix on a
+  // strip_prefix'd lhs).  bundle_fields_ is keyed by the BARE base/field, so peel
+  // a component's surrounding backticks before the lookup.
+  auto unquote = [](std::string_view s) -> std::string_view {
+    if (s.size() >= 2 && s.front() == '`' && s.back() == '`') {
+      return s.substr(1, s.size() - 2);
+    }
+    return s;
+  };
+  auto it = bundle_fields_.find(std::string(unquote(name.substr(0, dot))));
   if (it == bundle_fields_.end()) {
     return false;
   }
-  return it->second.count(std::string(name.substr(dot + 1))) != 0;
+  return it->second.count(std::string(unquote(name.substr(dot + 1)))) != 0;
 }
 
 std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
@@ -283,9 +323,11 @@ std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
     }
     // A reconstructed bundle field (`io.operation`) is a REAL tuple-field access,
     // not an opaque dotted leaf name — emit the bare dotted path so it re-parses
-    // as `io.operation` (detuple re-splits it), instead of a quoted leaf.
+    // as `io.operation` (detuple re-splits it), instead of a quoted leaf.  A
+    // keyword base/field (`in.bits`) still needs its colliding component escaped
+    // (`` `in`.bits ``) so the path re-parses, hence quote_kw_path not bare `s`.
     if (is_bundle_field(s)) {
-      return s;
+      return quote_kw_path(s);
     }
     return (s.find('.') == std::string::npos && !is_pyrope_reserved_ident(s)) ? s : "`" + s + "`";
   };
@@ -630,13 +672,13 @@ void Lnast_prp_writer::write_module() {
           continue;
         }
         print_indent();
-        os << base_mode[base] << " " << base << ":(";
+        os << base_mode[base] << " " << quote_kw_path(base) << ":(";
         bool first = true;
         for (const auto& [f, t] : bf[base]) {
           if (!first) {
             os << ", ";
           }
-          os << f;
+          os << quote_kw_path(f);
           if (!t.empty()) {
             os << ":" << t;
           }
@@ -2891,33 +2933,52 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
 
   // Infix arithmetic / bitwise / logical / comparison: `a <op> b [<op> c …]`.
   if (auto sym = infix_symbol(t); !sym.empty()) {
-    const bool  assoc = is_associative_optype(t);
-    std::string out;
-    bool        first = true;
-    for (auto c = lnast->get_sibling_next(c0); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-      if (!first) {
-        out += " ";
-        out += sym;
-        out += " ";
+    const bool assoc       = is_associative_optype(t);
+    // A same-operator associative operand is inlined WITHOUT its own parens so the
+    // chain stays flat: `a op b op c …` instead of `((a op b) op c) …`.  Expand
+    // such operands ITERATIVELY via an explicit worklist — a deep associative
+    // chain (e.g. a 4096-wide reduction in a fully-unrolled decoder) would
+    // overflow the stack if flattened by recursion.  Non-same-op operands render
+    // through render_value (whose own recursion is bounded by expression nesting
+    // depth, not chain length).
+    auto       operands_of = [&](Lnast_nid d, std::vector<Lnast_nid>& rev_stack) {
+      std::vector<Lnast_nid> ops;
+      for (auto c = lnast->get_sibling_next(lnast->get_child(d)); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+        ops.push_back(c);
       }
-      // A same-operator associative operand is inlined WITHOUT its own parens
-      // (operand_ctx=false) so the chain stays flat: `a op b op c …` instead of
-      // `((a op b) op c) …`.  Its own sub-operands still parenthesize as needed.
-      bool flattened = false;
+      for (auto it = ops.rbegin(); it != ops.rend(); ++it) {  // reverse-push: back() pops leftmost
+        rev_stack.push_back(*it);
+      }
+    };
+    std::vector<std::string> parts;
+    std::vector<Lnast_nid>   work;
+    operands_of(def, work);
+    while (!work.empty()) {
+      auto c = work.back();
+      work.pop_back();
+      bool expanded = false;
       if (assoc && lnast->get_type(c) == Lnast_ntype::Lnast_ntype_ref) {
         std::string nm(lnast->get_name(c));
         if (is_foldable(nm)) {
           auto fdef = fold_info_.at(nm).def_node;
           if (lnast->get_type(fdef) == t) {
-            out       += render_def_rhs(fdef, /*operand_ctx=*/false);
-            flattened  = true;
+            operands_of(fdef, work);  // splice the same-op chain in place
+            expanded = true;
           }
         }
       }
-      if (!flattened) {
-        out += render_value(c, /*operand_ctx=*/true);
+      if (!expanded) {
+        parts.push_back(render_value(c, /*operand_ctx=*/true));
       }
-      first = false;
+    }
+    std::string out;
+    for (size_t i = 0; i < parts.size(); ++i) {
+      if (i) {
+        out += " ";
+        out += sym;
+        out += " ";
+      }
+      out += parts[i];
     }
     return wrap(out, /*loose=*/true);
   }
