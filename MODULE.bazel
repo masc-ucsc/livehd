@@ -56,13 +56,14 @@ git_override(
 
 # hlop (Dlop value type + slop/dlop execution layer)
 bazel_dep(name = "hlop", version = "0.2.0")
-git_override(
-    module_name = "hlop",
-    remote = "https://github.com/masc-ucsc/hlop.git",
-    commit = "d29d20ec2a469a4a30802f071807e76631e088c2",  # from_chars fast path in from_pyrope (int64-fitting literals)
-)
-# For local hlop co-development, swap the git_override above for:
-# local_path_override(module_name = "hlop", path = "../hlop")
+# Pointing at top of tree (../hlop) for ongoing co-development. Restore the
+# git_override below once ../hlop is at a pushed commit and the pin is bumped.
+local_path_override(module_name = "hlop", path = "../hlop")
+# git_override(
+#     module_name = "hlop",
+#     remote = "https://github.com/masc-ucsc/hlop.git",
+#     commit = "d29d20ec2a469a4a30802f071807e76631e088c2",  # from_chars fast path in from_pyrope (int64-fitting literals)
+# )
 
 # slang (fmt required by slang CMake)
 http_archive(
