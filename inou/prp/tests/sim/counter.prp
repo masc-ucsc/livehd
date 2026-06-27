@@ -19,11 +19,12 @@ mod counter(enable:bool) -> (value:u8@[0]) {
 }
 
 // Test 1: enable held high for 20 cycles -> count must be exactly 20.
-test counter.held_high {
+test counter.held_high(cycles:u20=20) {
   mut v_final = nil
-  tick 20 {                          // 20 cycles, one clock per iteration
+  tick cycles {                          // 20 cycles, one clock per iteration
     const v = counter(enable=true)   // this cycle's output
     v_final = v
+    puts("counter v:{v}")
   }
   assert(v_final == 20, "after 20 enabled cycles the count must be 20")
 }

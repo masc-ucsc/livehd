@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "prp2lnast.hpp"
+#include "prp_builtins.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -922,12 +923,42 @@ void Prp2lnast::check_undefined_reads() const {
     }
     // report_error throws — the first undefined read aborts the parse. The
     // pre-captured span (2f-stream: the originating TSNode is gone) locates it.
-    report_error_at(rs.start_byte, rs.end_byte, rs.start_line, rs.start_col, rs.end_line, rs.end_col,
-                    "undefined-read",
-                    "name",
-                    std::format("read of undefined variable '{}' (not visible here: declared later, out of scope, or never)", rs.name),
-                    "declare it with `mut`/`const`/`reg` before use — a variable is visible from its "
-                    "declaration to the end of its scope");
+    if (rs.is_call) {
+      if (prp_builtins::is_removed_int_keyword(rs.name)) {
+        // `int(x)`/`uint(x)`/`integer(x)` were removed in favor of explicit
+        // sign. Tailored guidance (mirrors the upass.tolg note) rather than a
+        // generic "undefined function".
+        report_error_at(rs.start_byte, rs.end_byte, rs.start_line, rs.start_col, rs.end_line, rs.end_col,
+                        "removed-int-cast",
+                        "type",
+                        std::format("the `{}(...)` cast was removed — use `signed(x)`/`unsigned(x)` to reinterpret a "
+                                    "value's sign, or a sized cast `uN(x)`/`sN(x)`",
+                                    rs.name),
+                        "Pyrope spells sign intent explicitly: `signed`/`unsigned` (or `sN`/`uN`)");
+      } else {
+        report_error_at(rs.start_byte, rs.end_byte, rs.start_line, rs.start_col, rs.end_line, rs.end_col,
+                        "undefined-call",
+                        "name",
+                        std::format("call to undefined function '{}' (no such `comb`/`mod`/`pipe`, variable, or built-in)",
+                                    rs.name),
+                        "define it with `comb`/`mod`/`pipe`, import it, or check the spelling");
+      }
+    } else if (rs.is_type) {
+      report_error_at(rs.start_byte, rs.end_byte, rs.start_line, rs.start_col, rs.end_line, rs.end_col,
+                      "unknown-type",
+                      "type",
+                      std::format("`{}` is not a type (no such `type`/`enum` is declared or in scope)", rs.name),
+                      std::format("declare it with `type {0} = …` / `enum {0} = …`, or use a built-in type "
+                                  "like `u4`/`bool`/`string`",
+                                  rs.name));
+    } else {
+      report_error_at(rs.start_byte, rs.end_byte, rs.start_line, rs.start_col, rs.end_line, rs.end_col,
+                      "undefined-read",
+                      "name",
+                      std::format("read of undefined variable '{}' (not visible here: declared later, out of scope, or never)", rs.name),
+                      "declare it with `mut`/`const`/`reg` before use — a variable is visible from its "
+                      "declaration to the end of its scope");
+    }
   }
 }
 
@@ -5878,6 +5909,48 @@ attrs:
   }
 }
 
+void Prp2lnast::record_type_name_read(const TSNode& type_node) {
+  // A named type is a read of the type SYMBOL: route it through the same
+  // undefined-read check as value reads. Record only the LEADING identifier —
+  // the symbol that must resolve — stripping any `.field` (dotted/import),
+  // `(args)` (generic call), or trailing syntax, mirroring how a value read of
+  // `a.b` only records the base `a`.
+  auto raw = trim(get_text(type_node));
+  size_t n = 0;
+  while (n < raw.size()) {
+    const unsigned char c = static_cast<unsigned char>(raw[n]);
+    if (std::isalnum(c) || c == '_' || c == '$' || c == '%' || c == '#' || c == '`') {
+      ++n;
+    } else {
+      break;
+    }
+  }
+  const std::string base{canonical_escaped_ident(trim(raw.substr(0, n)))};
+  if (base.empty() || name_in_inflight_scope(base)) {
+    return;
+  }
+  // Only validate type references in plain statement contexts (top-level and
+  // lambda BODIES, where inflight_name_scopes_ is empty). Skip while a lambda
+  // SIGNATURE or tuple literal is being built (non-empty stack): a signature's
+  // param/output types may name GENERIC parameters (`comb f<T>(a:T)`) that
+  // resolve during instantiation, not via the symbol table — checking them
+  // here would be a false positive.
+  if (!inflight_name_scopes_.empty()) {
+    return;
+  }
+  const auto sp = ts_node_start_point(type_node);
+  read_sites_.push_back(Read_site{.name       = base,
+                                  .start_byte = ts_node_start_byte(type_node),
+                                  .end_byte   = ts_node_start_byte(type_node) + static_cast<uint32_t>(n),
+                                  .start_line = sp.row + 1,
+                                  .start_col  = sp.column + 1,
+                                  .end_line   = sp.row + 1,
+                                  .end_col    = sp.column + 1 + static_cast<uint32_t>(n),
+                                  .scope      = builder.idx_stmts,
+                                  .before     = lnast->get_last_child(builder.idx_stmts),
+                                  .is_type    = true});
+}
+
 void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
   std::string_view t(ts_node_type(type_node));
   if (t == "uint_type" || t == "sint_type") {
@@ -5937,9 +6010,25 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
       lnast->add_child(idx, expr_to_node(len));
     }
   } else if (t == "expression_type" || t == "dot_expression_type" || t == "function_call_type") {
+    // A bare literal used as a type — `:3333`, `:[4]3333`, `:true`, `:"s"` —
+    // is a value, never a type. The parser wraps it as `expression_type`
+    // containing a `constant`; a real named type wraps an `identifier` (and may
+    // resolve late, via import/generic/forward-ref, so it is NOT validated
+    // here). Reject the unambiguous constant form now with a clean error
+    // instead of letting the bogus `ref("3333")` reach lnastfmt as an internal
+    // "not a valid identifier" malformation (or slip through silently).
+    if (t == "expression_type" && ts_node_named_child_count(type_node) >= 1
+        && std::string_view(ts_node_type(ts_node_named_child(type_node, 0))) == "constant") {
+      report_error(type_node,
+                   "not-a-type",
+                   "type",
+                   std::format("`{}` is a value, not a type", trim(get_text(type_node))),
+                   "use a type here, e.g. `u4`/`bool`/`string` or a declared `type`/`enum` name");
+    }
     // A named type is a `ref` to its symbol-table binding (resolved
     // via that name's bundle); the typename is still tracked by the separate
     // `attr_set(typename,…)` emitted in emit_type_spec. Replaces expr_type.
+    record_type_name_read(type_node);  // `:potato` / `:[N]potato` must resolve to a real type
     lnast->add_child(parent, Lnast_node::create_ref(trim(get_text(type_node))));
   } else {
     lnast->add_child(parent, Lnast_ntype::create_prim_type_none());
@@ -8108,6 +8197,31 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   add_generic_args_to_fcall(idx, generic_args);
   add_call_args_to_fcall(idx, call_args);
   attach_loc(idx, n);  // call-site span → upass argument-naming diagnostics point here
+
+  // Validate the callee EXISTS (like a value/type read): a free call `foo(...)`
+  // must name a defined `comb`/`mod`/`pipe`, a function-valued variable/param,
+  // or a built-in. Record it as a call Read_site so check_undefined_reads
+  // resolves it through the normal visibility/hoisting logic. EXCLUDED:
+  //   * methods / UFCS (`x.f()`) — has_receiver; resolved via the receiver type,
+  //   * built-ins (assert/cputs/import/casts/…) — the central whitelist,
+  //   * signature contexts (default-value calls) — generic params resolve late.
+  if (!has_receiver && func_ref.is_ref() && inflight_name_scopes_.empty()) {
+    const auto callee = func_ref.get_name();
+    if (!callee.empty() && !prp_name_is_tmp(callee) && callee.find('.') == std::string::npos
+        && !prp_builtins::is_builtin_callee(callee)) {
+      const auto sp = ts_node_start_point(func);
+      read_sites_.push_back(Read_site{.name       = std::string{callee},
+                                      .start_byte = ts_node_start_byte(func),
+                                      .end_byte   = ts_node_end_byte(func),
+                                      .start_line = sp.row + 1,
+                                      .start_col  = sp.column + 1,
+                                      .end_line   = sp.row + 1,
+                                      .end_col    = sp.column + 1 + static_cast<uint32_t>(callee.size()),
+                                      .scope      = builder.idx_stmts,
+                                      .before     = lnast->get_last_child(builder.idx_stmts),
+                                      .is_call    = true});
+    }
+  }
   return ref;
 }
 

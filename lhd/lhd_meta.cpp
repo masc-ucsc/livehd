@@ -460,6 +460,9 @@ void print_general_help() {
       "               lhd compile x.prp --emit-dir ln:x_lns/      # pre-elaborate for importers\n"
       "               lhd compile ln:x_lns/ --emit verilog:net.v  # synth from IR\n"
       "               lhd compile lg:foo_lgs/ --emit-dir lg:foo_opt_lgs/\n"
+      "  sim        build + run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify)\n"
+      "               lhd sim foo.prp                  # build + run every test block\n"
+      "               lhd sim foo.prp my_test --arg n=4\n"
       "  lec        logic equivalence (LEC): verilog:/pyrope:/ln:/lg: sides, --set lec.solver picks the\n"
       "               backend — cvc5 (default, in-process) | bitwuzla | lgyosys (yosys/lgcheck)\n"
       "               lhd lec --impl impl.prp --ref ref.v\n"
@@ -492,11 +495,6 @@ void print_general_help() {
       "    sim: is an executable C++ simulation, inou.cgen.sim);\n"
       "  verilog: / pyrope: are --emit (one file; pyrope needs a one-unit design) or --emit-dir\n"
       "  (one file per module). --emit also infers the kind from a bare .v/.sv/.prp path\n"
-      "\n"
-      "debug dumps (printed to stderr; a dump forces the stage that produces it):\n"
-      "  --dump parse|lnast|lg   post-parse LNAST | post-upass LNAST | textual LGraph\n"
-      "               lhd compile x.prp --dump parse,lnast\n"
-      "               lhd compile x.prp --recipe O0 --dump lg\n"
       "\n"
       "shared flags:\n"
       "  --top T   --reader slang|yosys-slang|yosys-verilog   --recipe O0|O1|O2\n"
@@ -694,6 +692,11 @@ int help_command(const Options& opts) {
         "                       (sim: = executable C++ simulation; `cd DIR && bazel build //:sim`)\n"
         "  --set pass.flag=value   --config lhd.toml   --depfile PATH   --workdir DIR\n"
         "\n"
+        "debug dumps (printed to stderr; a dump forces the stage that produces it):\n"
+        "  --dump parse|lnast|lg   post-parse LNAST | post-upass LNAST | textual LGraph\n"
+        "               lhd compile x.prp --dump parse,lnast\n"
+        "               lhd compile x.prp --recipe O0 --dump lg\n"
+        "\n"
         "examples:\n"
         "  lhd compile foo.v --top foo --recipe O2 --emit verilog:net.v\n"
         "  lhd compile x.prp --emit net.v --emit-dir lg:x_lgs/\n"
@@ -792,6 +795,31 @@ int help_command(const Options& opts) {
   }
   if (topic == "pass") {
     return help_pass(sub);
+  }
+  if (topic == "sim") {
+    std::print(
+        "lhd sim — build and run a C++ simulation of a Pyrope design's `test` blocks\n"
+        "\n"
+        "usage: lhd sim <file.prp> [test.name] [flags]\n"
+        "  Lowers the design's DUT to a Slop<N> struct (inou.cgen.sim, over ../hlop),\n"
+        "  generates one C++ driver per `test` block, builds them with bazel, and runs\n"
+        "  them — each `test`'s asserts are checked dynamically (by running), not formally.\n"
+        "  An optional second positional selects a single test by name.\n"
+        "\n"
+        "flags:\n"
+        "  --arg key=value      bind a test runtime parameter (repeatable)\n"
+        "  --setup-only         generate the C++ sim + bazel module, do not build/run\n"
+        "  --run-only           build/run an existing sim (needs --workdir from a prior --setup-only)\n"
+        "  --workdir DIR        reuse DIR as the build dir (else a fresh temp dir)\n"
+        "  --set sim.vcd=true   dump one VCD per test to <workdir>/<test.name>.vcd\n"
+        "\n"
+        "examples:\n"
+        "  lhd sim foo.prp                                # build + run every test in foo.prp\n"
+        "  lhd sim foo.prp my_test                        # run just the `my_test` block\n"
+        "  lhd sim foo.prp my_test --arg n=4              # bind the test parameter n=4\n"
+        "  lhd sim foo.prp --setup-only --workdir build/  # generate, then build it yourself\n"
+        "  lhd sim foo.prp --run-only --workdir build/    # rebuild/run a prior --setup-only\n");
+    return 0;
   }
   if (topic == "list") {
     std::print(

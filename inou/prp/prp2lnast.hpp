@@ -241,6 +241,15 @@ protected:
     uint32_t    start_line = 0, start_col = 0, end_line = 0, end_col = 0;
     Lnast_nid   scope;
     Lnast_nid   before;
+    // A named-type reference (`x:T`, `x:[N]T`) routed through the same
+    // visibility check as value reads — an undefined type errors, while hoisted
+    // types, forward refs, generic params, and imports resolve normally. Only
+    // the error wording differs (unknown-type vs undefined-read).
+    bool        is_type = false;
+    // A free-function call CALLEE (`foo(...)`, not a method/UFCS, not a
+    // built-in). Validated like a read so a never-defined callee errors; only
+    // the wording differs (undefined-call).
+    bool        is_call = false;
   };
   std::vector<Read_site> read_sites_;
   // Per-scope (stmts node) declaration index: name -> EARLIEST child position that
@@ -266,6 +275,11 @@ protected:
   // params via the func_def signature in read_is_visible, not this stack.
   std::vector<std::vector<std::string>> inflight_name_scopes_;
   bool                                  name_in_inflight_scope(std::string_view name) const;
+
+  // Record a named-type reference (`x:T`, array base `x:[N]T`) as a type
+  // Read_site so check_undefined_reads validates that the type symbol exists
+  // (an undefined `:potato` errors; hoisted/forward/generic/import names pass).
+  void                                  record_type_name_read(const TSNode& type_node);
 
   // Stack of "formal parameter widths in scope" — pushed by process_lambda_statement
   // before emitting the body, popped after. Each frame maps a typed argument

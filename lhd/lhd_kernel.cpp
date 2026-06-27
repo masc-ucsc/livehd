@@ -584,7 +584,8 @@ void apply_log_settings(const Options& opts) {
 void apply_lhd_settings(Options& opts) {
   for (const auto& [key, value] : opts.sets) {
     if (key == "lhd.seed") {
-      opts.seed = value;
+      opts.seed          = value;
+      opts.seed_explicit = true;
     } else if (key == "lhd.top" && opts.top.empty()) {
       opts.top = value;
     }
@@ -2892,9 +2893,8 @@ void sim_command(Options& opts, Result& res) {
     if (res.status != "pass") {
       return;
     }
-    std::map<std::string, std::string> sim_args(opts.sim_args.begin(), opts.sim_args.end());
-    std::string                        err;
-    if (prp_sim::generate(file, simdir, test_sel, vcd_dir, sim_args, drivers, err) != 0) {
+    std::string err;
+    if (prp_sim::generate(file, simdir, test_sel, vcd_dir, drivers, err) != 0) {
       res.status        = "fail";
       res.error_class   = "unsupported";
       res.error_message = err;
@@ -2972,6 +2972,19 @@ void sim_command(Options& opts, Result& res) {
     return out;
   };
 
+  // Arguments forwarded to every driver binary (after a `--` separator): an
+  // explicit `--seed` (when the user passed one; otherwise the driver keeps its
+  // built-in default seed) and every `lhd sim --arg key=value` rendered as
+  // `--key value`. The driver parses these (see prp_sim); an unknown key makes
+  // the driver print its usage and fail, surfacing as a test failure.
+  std::string sim_fwd;
+  if (opts.seed_explicit) {
+    sim_fwd += std::format(" --seed {}", shell_quote(opts.seed));
+  }
+  for (const auto& [k, v] : opts.sim_args) {
+    sim_fwd += std::format(" --{} {}", k, shell_quote(v));
+  }
+
   int    n_fail = 0;
   size_t n_run  = 0;
   for (const auto& d : drivers) {
@@ -2983,8 +2996,9 @@ void sim_command(Options& opts, Result& res) {
     // FAILED lines) via popen; send bazel's own build noise to a side file so it
     // never spews. --experimental_convenience_symlinks=ignore: no bazel-* links.
     const auto berr = std::format("{}/.bazel.stderr", simdir);
-    auto       cmd  = std::format("cd {} && bazel run -c opt --experimental_convenience_symlinks=ignore //:{} 2>{}",
-                                 shell_quote(simdir), d.basename, shell_quote(berr));
+    auto       cmd  = std::format("cd {} && bazel run -c opt --experimental_convenience_symlinks=ignore //:{}{}{} 2>{}",
+                                 shell_quote(simdir), d.basename, (sim_fwd.empty() ? "" : " --"), sim_fwd,
+                                 shell_quote(berr));
     int        rc   = 0;
     auto       out  = capture(cmd, rc);
     bool       ok   = rc == 0;

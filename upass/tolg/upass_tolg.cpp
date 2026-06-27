@@ -5953,9 +5953,28 @@ void uPass_tolg::detect_lg_collisions(const Registry& registry) {
   }
 }
 
+// A compiler-minted (`%`-named entity) unit — the comb a `test` block lowers to,
+// or a `spawn` block — is simulation-only: its body holds `tick`/`step`/`assert`
+// that the `lhd sim` driver (prp_sim) runs, never synthesizable hardware. The
+// front-end even drops the `tick` body (an unhandled statement), so a value
+// written only inside the loop stays nil and its `assert` reads a driverless
+// temp. `inou.cgen.sim` already skips these on the same `%`-entity signal; tolg
+// must too. The io_meta().empty() guards below only catch a *parameterless*
+// testbench — once a `test` declares a parameter (`test t(cycles:u20=20)`) it
+// gains io_meta, defeating that guard, and the sim-only body would otherwise be
+// lowered and fail with a dangling `cassert` reference.
+static bool is_sim_only_unit(const std::shared_ptr<Lnast>& lnast) {
+  const auto name   = lnast->get_graph_name();
+  const auto entity = name.substr(name.rfind('.') + 1);
+  return !entity.empty() && entity.front() == '%';
+}
+
 void uPass_tolg::register_io(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path, const Registry& registry) {
   if (!lnast || lnast->io_meta().empty()) {
     return;  // not a lowerable module (e.g. the empty file-root tree)
+  }
+  if (is_sim_only_unit(lnast)) {
+    return;  // testbench / spawn comb — never reserve a GraphIO for it
   }
   // A deferred template (untyped/var-args/generic signature) emits no
   // LGraph: it is realized per call site (comb inlines, pipe/mod/fluid
@@ -5971,6 +5990,9 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
                                              const Registry& registry, std::string_view reset_style) {
   if (!lnast || lnast->io_meta().empty()) {
     return nullptr;  // not a lowerable module (e.g. the empty file-root tree)
+  }
+  if (is_sim_only_unit(lnast)) {
+    return nullptr;  // testbench / spawn comb — checked by `lhd sim`, not lowered to hardware
   }
   // A deferred template produces no LGraph (see register_io). A
   // template selected as a synthesis top simply yields no module; it is never

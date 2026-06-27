@@ -11,7 +11,6 @@
 // `tick N { ... }` driving a single DUT + end-of-sim `assert`s. Unsupported
 // constructs return a clear error rather than emitting bad C++.
 
-#include <map>
 #include <string>
 #include <vector>
 
@@ -29,9 +28,10 @@ struct Driver {
 // non-zero and sets `err`.
 // `vcd_dir` (empty = no VCD): when set, each driver points its DUT at
 // `<vcd_dir>/<test_name>.vcd` so every test dumps its own waveform.
-// `args` (`--arg key=value`): overrides for `test name(params)` parameters; an
-// override wins over the param's default, and a param with neither is an error.
+// `test name(params)` parameters are NOT baked in: each becomes a `--<name>`
+// flag on the generated driver (alongside `--seed` and `--help`), bound at run
+// time. `lhd sim --arg key=value` is forwarded to the driver as `--key value`.
 int generate(const std::string& file, const std::string& simdir, const std::string& test_sel, const std::string& vcd_dir,
-             const std::map<std::string, std::string>& args, std::vector<Driver>& out, std::string& err);
+             std::vector<Driver>& out, std::string& err);
 
 }  // namespace prp_sim

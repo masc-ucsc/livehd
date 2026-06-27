@@ -53,9 +53,13 @@ struct Options {
 
   std::string top;
   // Shared across every pass that wants determinism (e.g. pass.color mincut):
-  // the `lhd.seed` kernel field, set via `--set lhd.seed=N` (default 0). One
-  // seed for the whole run rather than a per-pass `pass.X.seed` option.
-  std::string seed = "0";
+  // the `lhd.seed` kernel field, set via `--set lhd.seed=N` or `--seed N`
+  // (default 0). One seed for the whole run rather than a per-pass
+  // `pass.X.seed` option. `lhd sim` forwards it to each test driver as `--seed`
+  // (the driver seeds hlop's PRNG) only when `seed_explicit` — otherwise the
+  // driver keeps its own default seed.
+  std::string seed          = "0";
+  bool        seed_explicit = false;  // user passed `--seed`/`--set lhd.seed=`
   // Verilog front-end. Default `slang` — the direct inou.slang SV -> LNAST
   // front-end, so verilog joins the pyrope flow (ln:/lg: emits, in-process
   // lec). `--reader yosys-slang|yosys-verilog` overrides to the yosys path

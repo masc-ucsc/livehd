@@ -323,8 +323,13 @@ Options parse_args(int argc, char** argv) {
   // "pass.<sub>" once a `pass` sub-command is read. Each --set key to its
   // right is canonicalized against this so abbreviated keys resolve.
   std::string cmd_path;
+  // Count the logical tokens the user typed (one per loop turn; a value-flag's
+  // value is consumed via ++i, so it is not counted separately). A command word
+  // is one token, so `n_user_tokens == 1` means the command was typed bare.
+  int n_user_tokens = 0;
   for (int i = 1; i < argc; ++i) {
     std::string_view a{argv[i]};
+    ++n_user_tokens;
 
     if (raw_mode) {
       opts.raw_args.emplace_back(a);
@@ -507,6 +512,9 @@ Options parse_args(int argc, char** argv) {
                         "e.g. `lhd sim foo.prp foo.bar --arg max_cycles=30`"};
       }
       opts.sim_args.emplace_back(v.substr(0, eq), v.substr(eq + 1));
+    } else if (a == "--seed") {  // shared RNG seed (alias for `--set lhd.seed=N`); `sim` forwards it to drivers
+      opts.seed          = std::string{need_value(a, i, argc, argv)};
+      opts.seed_explicit = true;
     } else if (a == "-i" || a == "--inplace") {  // `pyrope fmt`: rewrite the input file(s) in place
       opts.fmt_inplace = true;
     } else if (a == "-o" || a == "--output") {  // `pyrope fmt`: write to a file instead of stdout
@@ -587,6 +595,18 @@ Options parse_args(int argc, char** argv) {
     } else {
       opts.files.emplace_back(a);
     }
+  }
+
+  // A command that needs an argument to do anything, typed bare (`lhd compile`
+  // with nothing else), is treated as a request for that command's help — show
+  // `lhd <cmd> --help` rather than erroring on the missing input. A wrong or
+  // extra argument/option does NOT trigger this: an unknown option already threw
+  // above, and a stray positional leaves n_user_tokens > 1, so the command runs
+  // and reports its own real error.
+  if (!want_help && n_user_tokens == 1
+      && (opts.command == "compile" || opts.command == "lec" || opts.command == "scan" || opts.command == "tool"
+          || opts.command == "pass" || opts.command == "sim")) {
+    want_help = true;
   }
 
   if (want_help) {
