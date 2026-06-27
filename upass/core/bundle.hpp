@@ -1,26 +1,47 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
 #include <print>
+#include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include "absl/strings/str_cat.h"
 #include "battr.hpp"
 #include "bundle_key.hpp"
+#include "bundle_path.hpp"
 #include "hlop/dlop.hpp"
 #include "kind.hpp"
 
+// Bundle (indexed nested tree). A binding's value as a tree of fields instead of
+// a flat dotted-string map:
+//   - the dominant case is a bare SCALAR (one value) — stored inline (scalar_),
+//     no field vector, no nodes;
+//   - a nested bundle keeps a small `fields_` vector (counts are tiny — <~20
+//     total, 1-10 per level, 1-3 deep), each field NAMED (a positive LNAST
+//     name-id reused as the field id) or UNNAMED (a positional index), holding a
+//     leaf value or a sub-Bundle. Linear scan beats a map/binary-search here.
+// Data keys are int32 segment-id PATHS (bundle_path::Seg): a caller splits a
+// dotted LNAST name once via bundle_path::of_name and navigates by ids — no
+// dotted string touches data storage. The dotted-string data methods remain as
+// thin adapters (split via bundle_path) during the caller migration.
+//
+// Attributes are RARE residuals (battr) and stay string-keyed in attr_map (their
+// Canonical_less cost is negligible at attr volumes, and the sticky / enum-
+// identity / inheritance / relocation semantics stay exact). Only the data path
+// — the hot one — is indexed.
 class Bundle : std::enable_shared_from_this<Bundle> {
 public:
-  // One Entry per leaf (1b/D): the value plus the always-present,
-  // single-writer pass facts as TYPED fields — never string-keyed attrs.
-  // The per-pass attribute responsibilities (see upass/README.md) are the
-  // authoritative registry of these fields (one writer each); extend the
-  // struct and that table together. Default Dlop is Type::Invalid =
-  // "unset/unknown" for every Dlop-typed fact.
+  using Seg  = bundle_path::Seg;
+  using Path = std::span<const Seg>;
+
+  // One Entry per leaf: the value plus the single-writer pass facts as TYPED
+  // fields (never string-keyed). Default Dlop is Type::Invalid = "unset".
   struct Entry {
     Entry() = default;
     Entry(bool i, const Dlop& t) : trivial(t), immutable(i) {}
@@ -30,47 +51,46 @@ public:
     Dlop bw_max, bw_min;      // derived range (bitwidth; per-write)
 
     upass::Kind kind      = upass::Kind::unknown;  // typecheck / type-bake
-    upass::Mode mode      = upass::Mode::unknown;  // per-field mut/const (type-bake; rides entry copies)
+    upass::Mode mode      = upass::Mode::unknown;  // per-field mut/const (type-bake)
     bool        immutable = false;
     bool        comptime  = false;
   };
 
   static inline Dlop invalid_lconst{};  // default Dlop is Type::Invalid
 
-  // Canonical key ordering used by Bundle storage. Per dotted segment:
-  // attrs (`__foo`) < named (alphabetical) < unnamed (numeric, not lex).
-  // Walks segment-by-segment; shorter prefix sorts before its extensions
-  // at any given level. is_transparent enables string_view lookups in maps.
+  // A field of a nested bundle: a leaf value (sub == nullptr) or a sub-Bundle.
+  struct Field {
+    Seg                     seg{0};  // > 0 named (LNAST name-id); < 0 unnamed pos = -(p+1)
+    Entry                   leaf;    // valid when sub == nullptr
+    std::shared_ptr<Bundle> sub;     // non-null => sub-bundle field
+  };
+
+  // Canonical key ordering for the ATTR map. Per dotted segment: attrs (`__`/`_`)
+  // < named (alphabetical) < unnamed (numeric). is_transparent enables
+  // string_view lookups.
   struct Canonical_less {
     using is_transparent = void;
     bool operator()(std::string_view a, std::string_view b) const;
   };
+  using Attr_map = std::map<std::string, Entry, Canonical_less>;
 
-  // Per top-level summary yielded by Bundle::top_levels(). Exactly one
-  // entry per distinct top-level segment in the bundle's non-attribute
-  // data:
-  //   - `name`       = top-level segment when named (pos == -1)
-  //   - `pos`        = top-level unnamed index when unnamed (>= 0)
-  //   - `leaf_count` = number of leaves under this top-level
-  //   - `has_leafs`  = true iff any leaf has a dotted suffix under it
-  //                    (i.e., top-level is a sub-bundle, not a bare scalar)
-  //   - `scalar`     = collapsed scalar value when leaf_count == 1
-  //                    (matches pyrope's `f.foo=44 ⇒ f == 44` rule);
-  //                    invalid otherwise.
+  // Per top-level summary yielded by top_levels(). Exactly one per distinct
+  // top-level field of the bundle's data.
   struct Top_level_entry {
-    std::string_view name;
-    int              pos        = -1;
+    std::string_view name;             // top-level segment when named (pos == -1)
+    int              pos        = -1;  // top-level unnamed index when unnamed (>= 0)
     size_t           leaf_count = 0;
-    bool             has_leafs  = false;
-    Dlop             scalar;
+    bool             has_leafs  = false;  // top-level is a sub-bundle, not a bare scalar
+    Dlop             scalar;            // collapsed value when leaf_count == 1
   };
 
-  // Sorted-iteration views over Bundle data. Materialized on each call
-  // (Phase 1: adapters over the underlying key_map storage). Cheap value
-  // semantics; callers typically range-for or read by index.
+  // Materialized sorted-iteration views. Data keys are dotted strings
+  // reconstructed at the edge (OWNED by the view); attr items view attr_map.
   class Entries_view {
   public:
-    using Item           = std::pair<std::string_view, const Entry*>;
+    // Entry BY VALUE (these views are materialized): a leaf's `e.trivial` and a
+    // `set(k, e)` round-trip read like the old map-backed iteration.
+    using Item           = std::pair<std::string, Entry>;
     using const_iterator = std::vector<Item>::const_iterator;
     const_iterator    begin() const { return items_.begin(); }
     const_iterator    end() const { return items_.end(); }
@@ -90,194 +110,146 @@ public:
   };
 
 protected:
-  // Storage is TWO sorted maps sharing Canonical_less:
-  //   key_map  — data leaves only, keyed by canonical dotted path
-  //              ("name", "0", "a.b", "a.0", …). No attribute keys.
-  //   attr_map — attribute leaves, keyed by BARE attr name (no "__")
-  //              with the attr name as the LAST segment: a whole-bundle
-  //              attr is "bits"; a per-field attr is "a.b.bits". Sticky
-  //              attrs carry their canonical leading "_" ("_foo");
-  //              "debug" normalizes to "_debug" on the way in (canon_attr),
-  //              so the sticky subset is one contiguous run per level.
-  // Membership in attr_map IS what makes a key an attribute — the old
-  // per-key "__" prefix sniff (is_attribute / is_root_attribute /
-  // get_attribute and the triple-underscore guards) is gone.
-  // Lookups by exact key are O(log N); sub-tree scans use
-  // lower_bound("prefix.") + walk.
-  using Key_map_type = std::map<std::string, Entry, Canonical_less>;
+  // ── data storage ─────────────────────────────────────────────────────────
+  // Dominant case: a bare scalar (the unnamed pos-0 leaf) lives inline, fields_
+  // empty. Any other data write spills scalar_ into fields_[0] (seg == -1) first.
+  Entry scalar_;
+  bool  has_scalar_ = false;  // has_scalar_ ⇒ fields_.empty()
 
-  // Binding-level typed facts (1b/D): mode is a property of the NAME
-  // (mut/const/reg), type_name the nominal identity for `is` (empty =
-  // anonymous). Per-leaf facts live on Entry.
-  upass::Mode mode_ = upass::Mode::unknown;
-  std::string type_name_;
-  // The kind of the VALUE this bundle holds, stamped by producer ops
-  // (typecheck). Distinct from Entry.kind, which is per-leaf (the "0" entry's
-  // kind describes FIELD 0 on a multi-entry bundle — constprop copies field
-  // entries wholesale, so entry kinds travel with fields). Needed for the
-  // shapes the entry can't express: a 0/1-entry tuple (`mut d=(); d=d++(i,)`)
-  // is scalar-SHAPED yet kind `tuple`.
-  upass::Kind value_kind_ = upass::Kind::unknown;
+  std::vector<Field> fields_;  // nested fields; named (+id) and unnamed (−pos) mixed, insertion order
 
-  // correct mark as mutable to do not allow tup updates, just to mark the
-  // tuple as incorrect (not allow to mark correct once it is incorrect)
-  mutable bool         immutable;
-  mutable bool         correct;
-  mutable Key_map_type key_map;
-  mutable Key_map_type attr_map;
+  // ── rare residual attributes (battr) — string-keyed ───────────────────────
+  // Whole-bundle attr keys on the bare name ("bits"); per-field on "a.b.bits".
+  // Sticky attrs carry the canonical leading "_". Membership IS attribute-ness.
+  mutable Attr_map attr_map;
 
-  // 1b/E — inline root Entry: while a bundle is a bare scalar, its single
-  // "0" leaf lives here and key_map stays EMPTY (zero map nodes for the
-  // dominant scalar case). Invariant: has_root_ ⇒ key_map.empty(). Any
-  // other data insert — or any whole-map view/iteration — spills the root
-  // into key_map["0"] first (ensure_view_materialized; the map is mutable,
-  // so const query paths may spill too). Whole-bundle attrs are unaffected
-  // (they live in attr_map under bare names either way).
-  mutable Entry root_;
-  mutable bool  has_root_ = false;
+  // Binding-level typed facts. mode = property of the NAME (mut/const/reg);
+  // type_name = nominal identity for `is` (0 = anonymous). value_kind = kind of
+  // the VALUE this bundle holds (distinct from per-leaf Entry.kind).
+  upass::Mode mode_         = upass::Mode::unknown;
+  int32_t     type_name_id_ = 0;  // interned type name (LNAST pool); 0 = anonymous
+  upass::Kind value_kind_   = upass::Kind::unknown;
 
-  void ensure_view_materialized() const {
-    if (has_root_) {
-      key_map.emplace(std::string("0"), root_);
-      has_root_ = false;
-    }
-  }
+  mutable bool immutable;
+  mutable bool correct;
 
-  // Canonical attribute-name spelling: stickiness is encoded in the name
-  // (leading '_'); the builtin alias "debug" stores as "_debug".
+  // ── navigation primitives (linear scan; counts are tiny) ──────────────────
+  [[nodiscard]] const Field* find_field(Seg s) const;
+  [[nodiscard]] Field*       find_field(Seg s);
+  void                       spill_scalar();  // scalar_ → fields_[0] (seg -1) when has_scalar_
+  [[nodiscard]] std::shared_ptr<Bundle> clone() const;  // deep copy (subs cloned recursively)
+
+public:
+  static std::string seg_text(Seg s);  // a single seg back to its source text ("a" / "0")
+
+protected:
+
+  // Descend `path[0..n-1]` into sub-bundles; create when asked. Returns the
+  // innermost Bundle and writes the last seg to *last; nullptr when a non-create
+  // walk hits a missing/leaf node (or path empty).
+  [[nodiscard]] const Bundle* descend(Path path, Seg* last) const;
+  [[nodiscard]] Bundle*       descend_or_create(Path path, Seg* last);
+
+  // Flatten this bundle's data leaves into (dotted-key, Entry*) pairs in
+  // insertion order — the materialized view backing the data adapters.
+  void flatten_into(const std::string& prefix, std::vector<Entries_view::Item>& out) const;
+
+  // Canonical attribute-name spelling: stickiness encoded in the name (leading
+  // '_'); the builtin alias "debug" stores as "_debug".
   static std::string_view canon_attr(std::string_view attr_name) {
     return attr_name == "debug" ? std::string_view{"_debug"} : attr_name;
   }
-
-  const Entry& attr_entry(std::string_view attr_key) const {
-    const auto it = attr_map.find(attr_key);
-    if (it == attr_map.end()) {
-      static Entry invalid(true, invalid_lconst);
-      return invalid;
-    }
-    return it->second;
-  }
-
-  // Normalize the textual key on the way into the bundle. The canonical
-  // storage convention is:
-  //   - named first-segment kept as-is: "name"
-  //   - unnamed first-segment is the bare decimal index: "0", "1", …
-  //   - attribute first-segment: "__attr"
-  // Producers have been migrated to the canonical form; in NDEBUG-off
-  // builds normalize_key asserts that no legacy `:N:` keys are passed in.
-  // The function itself is the identity on canonical keys.
-  static std::string normalize_key(std::string_view key) { return bundle_key::normalize_key(key); }
-
-  static bool   match(std::string_view a, std::string_view b) { return bundle_key::match(a, b); }
-  static size_t match_first_partial(std::string_view a, std::string_view b) { return bundle_key::match_first_partial(a, b); }
-
-  void del_int(std::string_view key);  // data leaves only; attrs are never deleted by data writes
+  const Entry& attr_entry(std::string_view attr_key) const;
 
 public:
-  // The name member is gone (its last cross-pass reader died with
-  // runner_type_query_fn); the runner passes names to the hooks for
-  // diagnostics. The ctor still ACCEPTS a name and discards it so the ~30
-  // construction sites stay readable about WHAT they build.
+  // The ctor accepts (and discards) a name so the ~30 construction sites stay
+  // readable about WHAT they build.
   Bundle() : immutable(false), correct(true) {}
   explicit Bundle(std::string_view /*name — discarded*/) : Bundle() {}
 
   bool is_correct() const { return correct; }
   void set_issue() const { correct = false; }
 
-  // Binding-level typed facts (1b/D).
+  // Binding-level typed facts.
   upass::Mode      get_mode() const { return mode_; }
   void             set_mode(upass::Mode m) { mode_ = m; }
-  std::string_view get_type_name() const { return type_name_; }
-  void             set_type_name(std::string_view tn) { type_name_ = std::string(tn); }
+  std::string_view get_type_name() const { return Lnast::active_name_pool()->resolve(type_name_id_); }
+  void             set_type_name(std::string_view tn) { type_name_id_ = Lnast::active_name_pool()->intern(tn); }
   upass::Kind      get_value_kind() const { return value_kind_; }
   void             set_value_kind(upass::Kind k) { value_kind_ = k; }
 
-  // The hot "this operand's comptime value, or unknown" read (1b/D+E).
-  // Defined only for scalar bundles (≤1 data leaf); nullopt when the
-  // value is absent or unknown. Reads the inline root Entry — never spills.
+  // The hot "this operand's comptime value, or unknown" read. Defined only for
+  // scalar bundles (≤1 data leaf); nullopt when absent/unknown. Reads the inline
+  // scalar — never spills.
   std::optional<Dlop> scalar() const {
-    if (has_root_) {
-      if (root_.trivial.is_invalid()) {
-        return std::nullopt;
-      }
-      return root_.trivial;
+    if (has_scalar_) {
+      return scalar_.trivial.is_invalid() ? std::nullopt : std::optional<Dlop>(scalar_.trivial);
     }
-    if (key_map.size() != 1 || key_map.begin()->second.trivial.is_invalid()) {
+    if (fields_.size() != 1 || fields_.front().sub || fields_.front().leaf.trivial.is_invalid()) {
       return std::nullopt;
     }
-    return key_map.begin()->second.trivial;
+    return fields_.front().leaf.trivial;
   }
 
-  // Dlop-operand factory for the runner's operand resolution (one wrapper
-  // per const operand per node). One allocation, zero map nodes (inline root).
+  // Dlop-operand factory for the runner's operand resolution.
   static std::shared_ptr<Bundle> make_const(const Dlop& v, upass::Kind k) {
-    auto b        = std::make_shared<Bundle>("");
-    b->root_      = Entry(false, v);
-    b->root_.kind = k;
-    b->has_root_  = true;
+    auto b          = std::make_shared<Bundle>("");
+    b->scalar_      = Entry(false, v);
+    b->scalar_.kind = k;
+    b->has_scalar_  = true;
     return b;
   }
 
-  // For whole-bundle scalar reads prefer scalar(); the keyed
-  // forms are for FIELD reads. NOTE: has_trivial is EXISTENCE-only — an
-  // entry with an INVALID trivial (a runtime-unknown marker) still counts;
-  // first-write gates must test get_trivial(key).is_invalid() instead.
-  bool has_trivial(std::string_view key) const;
+  // ── indexed (seg-path) data API — the migration target ────────────────────
+  [[nodiscard]] bool                    has_trivial(Path path) const;
+  [[nodiscard]] const Entry&            get_entry(Path path) const;
+  [[nodiscard]] bool                    has_bundle(Path path) const;
+  [[nodiscard]] std::shared_ptr<Bundle> get_bundle(Path path) const;
+  void                                  set(Path path, const std::shared_ptr<Bundle const>& tup);
+  void                                  set(Path path, Entry entry);
 
-  const Entry& get_entry(std::string_view key) const;
-  const Dlop&  get_trivial(std::string_view key) const { return get_entry(key).trivial; }
-  // The LONE non-attr entry's value regardless of key depth (a 1-element
-  // tuple-of-tuple flattens); invalid when the bundle isn't single-entry.
-  // (The explicit spelling — a no-arg get_trivial() was ambiguous with the
-  // "0"-keyed form, which means FIELD ZERO on a multi-shaped bundle.)
-  const Dlop&  lone_trivial() const;
+  // ── dotted-string adapters (split via bundle_path; removed post-migration) ─
+  [[nodiscard]] bool         has_trivial(std::string_view key) const { return has_trivial(bundle_path::of_string(key)); }
+  [[nodiscard]] const Entry& get_entry(std::string_view key) const { return get_entry(bundle_path::of_string(key)); }
+  [[nodiscard]] const Dlop&  get_trivial(Path path) const { return get_entry(path).trivial; }
+  [[nodiscard]] const Dlop&  get_trivial(std::string_view key) const { return get_entry(key).trivial; }
+  [[nodiscard]] bool         has_bundle(std::string_view key) const { return has_bundle(bundle_path::of_string(key)); }
+  [[nodiscard]] std::shared_ptr<Bundle> get_bundle(std::string_view key) const {
+    return get_bundle(bundle_path::of_string(key));
+  }
+  void set(std::string_view key, const std::shared_ptr<Bundle const>& tup) { set(bundle_path::of_string(key), tup); }
+  void set(std::string_view key, Entry entry) { set(bundle_path::of_string(key), std::move(entry)); }
 
-  bool                    has_bundle(std::string_view key) const;
-  std::shared_ptr<Bundle> get_bundle(std::string_view key) const;
+  // The LONE non-attr entry's value regardless of depth (a 1-element
+  // tuple-of-tuple flattens); invalid when not single-entry.
+  [[nodiscard]] const Dlop& lone_trivial() const;
 
-  // set a trivial/sub tuple. If already existed anything, it is deleted (not attributes)
-
-  void set(std::string_view key, const std::shared_ptr<Bundle const>& tup);
-  void set(std::string_view key, const Entry&& entry);
-  void set(std::string_view key, const Entry& entry) { set(key, Entry(entry)); }
-
-  // A VALUE write preserves the entry's typed fact fields (kind,
-  // declared envelope, derived range, comptime): only the value slice and the
-  // mutability flag change. "Metadata that must not change across assignments
-  // remains declaration-persistent."
-  Entry value_entry(std::string_view key, bool immutable_flag, const Dlop& trivial) const {
-    Entry e     = get_entry(key);  // copies the facts; invalid sentinel when missing
+  // A VALUE write preserves the entry's typed facts (kind, declared envelope,
+  // comptime, mode): only the value slice and mutability change.
+  Entry value_entry(Path path, bool immutable_flag, const Dlop& trivial) const {
+    Entry e     = get_entry(path);  // copies the facts; invalid sentinel when missing
     e.trivial   = trivial;
     e.immutable = immutable_flag;
-    // The DERIVED range describes the previous value — a new value
-    // invalidates it (bitwidth re-stamps the fresh derivation right after;
-    // a binding must never hold a range that does not contain its value).
-    // Declared facts (kind / decl envelope / comptime / mode) persist.
-    e.bw_max    = invalid_lconst;
+    e.bw_max    = invalid_lconst;  // derived range describes the old value
     e.bw_min    = invalid_lconst;
     return e;
   }
+  Entry value_entry(std::string_view key, bool immutable_flag, const Dlop& trivial) const {
+    return value_entry(bundle_path::of_string(key), immutable_flag, trivial);
+  }
 
+  void set(Path path, const Dlop& trivial) { set(path, value_entry(path, false, trivial)); }
   void set(std::string_view key, const Dlop& trivial) { set(key, value_entry(key, false, trivial)); }
   void var(std::string_view key, const Dlop& trivial) {
-    I(!immutable);  // FIXME: use llog library
+    I(!immutable);
     set(key, value_entry(key, false, trivial));
   }
-
-  void set(const Dlop& trivial) {  // clear everything that is not 0.__attr. set 0
-    return set("0", trivial);
+  void set(const Dlop& trivial) {  // clear everything that is not pos-0; set pos-0
+    const Seg s = bundle_path::make_unnamed(0);
+    set(Path(&s, 1), value_entry(Path(&s, 1), false, trivial));
   }
 
-  // Direct attribute access — routes to the dedicated attr_map.
-  // Bare attribute names throughout (no "__"); a whole-bundle attr keys on
-  // the name alone, a per-field attr on "field.attr_name". "debug" is
-  // normalized to its canonical sticky spelling "_debug" on both reads and
-  // writes (canon_attr).
-  //
-  // DEPRECATION NOTE (1b/F): these are for the RESIDUAL attrs only
-  // (battr.hpp). The promoted pass facts — kind, declared max/min,
-  // bw_max/bw_min, comptime, mode, typename — are typed Entry/Bundle
-  // FIELDS; never store them through this string-keyed API.
+  // ── attribute access (rare residual attrs; battr) ─────────────────────────
   bool has_attr(std::string_view attr_name) const { return attr_map.find(canon_attr(attr_name)) != attr_map.end(); }
   bool has_attr(std::string_view field, std::string_view attr_name) const {
     return attr_map.find(absl::StrCat(field, ".", canon_attr(attr_name))) != attr_map.end();
@@ -297,75 +269,39 @@ public:
     attr_map.erase(absl::StrCat(field, ".", canon_attr(attr_name)));
   }
 
-  // Pyrope `a ++ b` (03-bundle.md). A colliding named field merges only when
-  // one side is `nil`, both leaves carry the same comptime value, or both
-  // sides are sub-tuples (recursive merge). Any other leaf overlap returns
-  // false with *conflict set to the colliding canonical path — the caller
-  // diagnoses; `this` may be left partially merged, so discard it on failure.
-  bool concat(const std::shared_ptr<Bundle const>& tup2, std::string* conflict = nullptr);
+  // Pyrope `a ++ b`: merge tup into this. A colliding named field merges only
+  // when one side is nil, both carry the same comptime value, or both are
+  // sub-tuples (recursive). Other overlap → false with *conflict set; `this` may
+  // be left partial, so discard on failure.
+  bool concat(const std::shared_ptr<Bundle const>& tup, std::string* conflict = nullptr);
 
-  bool is_empty() const { return !has_root_ && key_map.empty() && attr_map.empty(); }
-  bool is_scalar() const { return has_root_ || key_map.size() <= 1; }
+  bool is_empty() const { return !has_scalar_ && fields_.empty() && attr_map.empty(); }
+  bool is_scalar() const { return has_scalar_ || fields_.size() <= 1; }
   bool is_trivial_scalar() const;
 
-  // bundle_flat_storage query API. All counts and presence checks
-  // compute on demand; named/unnamed counted by distinct top-level
-  // segment of the data map.
+  // Counts by distinct top-level field.
   size_t unnamed_top_count() const;
   size_t named_top_count() const;
   bool   has_named_top() const { return named_top_count() > 0; }
   bool   has_unnamed_top() const { return unnamed_top_count() > 0; }
 
-  // Sorted iteration views over the bundle (1b/C — zero-copy where the
-  // storage already IS the view):
-  //
-  //   entries()          — all leaves (attrs first, then data); materialized
-  //   non_attr_entries() — the data map itself (no copy, no per-call vector)
-  //   get_attrs()        — the attr map itself (bare attr names)
-  //   top_levels()       — one Top_level_entry per distinct top-level
-  //                        segment of the data map, in canonical order
-  Entries_view        entries() const;
-  const Key_map_type& non_attr_entries() const {
-    ensure_view_materialized();  // 1b/E: iteration spills the inline root
-    return key_map;
-  }
-  const Key_map_type& get_attrs() const { return attr_map; }
-  Top_levels_view     top_levels() const;
+  // Sorted iteration views.
+  Entries_view    entries() const;
+  Entries_view    non_attr_entries() const;
+  const Attr_map& get_attrs() const { return attr_map; }
+  Top_levels_view top_levels() const;
+  Entries_view    sticky_attributes() const;
 
-  // Sticky subset of the attrs: canonical leading-'_' names
-  // (battr::is_sticky on the attr-name segment). The propagation rule is
-  // "merge each src's sticky_attributes() into dst". Small materialized
-  // view — sticky sets are tiny; '_' sorts apart from letter-named attrs,
-  // so per level the subset is one contiguous run.
-  Entries_view sticky_attributes() const {
-    Entries_view v;
-    for (const auto& kv : attr_map) {
-      if (battr::is_sticky(get_last_level(kv.first))) {
-        v.items_.emplace_back(std::string_view(kv.first), &kv.second);
-      }
-    }
-    return v;
-  }
-
-  // Top-level membership queries. has_top_named checks whether any
-  // non-attribute leaf has the given top-level NAME. has_top_unnamed
-  // checks for an unnamed top-level at the given decimal position.
   bool has_top_named(std::string_view name) const;
   bool has_top_unnamed(int pos) const;
 
   void dump(std::string_view name = "?") const;
 
-  // Dotted-key string helpers — implementations live in lnast/bundle_key.hpp
-  // (shared with lnast_builder without a lnast→upass dependency); these
-  // statics delegate to keep the public Bundle API unchanged (1b/A).
+  // Dotted-key string helpers (delegate to bundle_key; parse SOURCE notation).
   static std::string_view get_last_level(std::string_view key) { return bundle_key::get_last_level(key); }
   static std::string_view get_all_but_last_level(std::string_view key) { return bundle_key::get_all_but_last_level(key); }
   static std::string_view get_all_but_first_level(std::string_view key) { return bundle_key::get_all_but_first_level(key); }
   static std::string_view get_first_level(std::string_view key) { return bundle_key::get_first_level(key); }
   static std::string_view get_first_level_name(std::string_view key) { return bundle_key::get_first_level_name(key); }
-
-  static bool is_single_level(std::string_view key) { return bundle_key::is_single_level(key); }
-
-  // is_root_attribute / is_attribute / get_attribute are GONE:
-  // attribute-ness is membership in attr_map, not a "__" spelling.
+  static bool             is_single_level(std::string_view key) { return bundle_key::is_single_level(key); }
 };

@@ -3,26 +3,23 @@
 
 #include "bundle.hpp"
 
-#include <set>
+#include <string>
 #include <unordered_map>
-#include <unordered_set>
 
 #include "likely.hpp"
 #include "lnast.hpp"
 #include "str_tools.hpp"
 
 using namespace std::literals;
+using bundle_path::is_named;
+using bundle_path::is_unnamed;
+using bundle_path::make_unnamed;
+using bundle_path::unnamed_pos;
 
-// Canonical ordering for stored keys, per dotted segment:
-//   named ("name…")         — alphabetical by segment ('_'-named sticky
-//                             attrs sort before letter-named ones, so the
-//                             sticky run is contiguous in attr_map)
-//   unnamed ("0", "1", …)   — by integer value of the segment
-//
-// segment_category keeps the legacy "__" attribute category (0) so the
-// comparator's documented total order is stable for arbitrary strings
-// (the ordering unit tests pin it), but no stored key in either
-// map ever carries a "__" prefix.
+// ─────────────────────────────────────────────────────────────────────────────
+// Attr-map ordering (data is nested+indexed now; attrs stay string-keyed).
+// Per dotted segment: attrs ('_'…) < named (alphabetical) < unnamed (numeric).
+// ─────────────────────────────────────────────────────────────────────────────
 static std::string_view first_segment_view(std::string_view k) {
   auto dot = k.find('.');
   return dot == std::string_view::npos ? k : k.substr(0, dot);
@@ -30,7 +27,7 @@ static std::string_view first_segment_view(std::string_view k) {
 
 static int segment_category(std::string_view seg) {
   if (seg.size() >= 2 && seg[0] == '_' && seg[1] == '_') {
-    return 0;  // legacy attribute spelling — never stored
+    return 0;
   }
   if (!seg.empty() && std::isdigit(static_cast<unsigned char>(seg.front()))) {
     return 2;  // unnamed (decimal index)
@@ -38,10 +35,6 @@ static int segment_category(std::string_view seg) {
   return 1;  // named
 }
 
-// bundle_flat_storage §3 — recursive segment-aware comparator. Walks
-// dotted segments left-to-right; at each level uses the category order
-// above (attrs < named alpha < unnamed numeric) as a true per-level
-// recursive compare suitable for use as a std::map ordering.
 bool Bundle::Canonical_less::operator()(std::string_view a, std::string_view b) const {
   while (true) {
     auto a_dot = a.find('.');
@@ -60,16 +53,13 @@ bool Bundle::Canonical_less::operator()(std::string_view a, std::string_view b) 
         return ai < bi;
       }
     } else if (!(a_seg == b_seg)) {
-      // Named/attr segments compare case-sensitively (Pyrope field names are
-      // case-sensitive): spellings differing only by case are distinct keys.
       return (a_seg < b_seg);
     }
-    // Segments equal so far. Recurse / terminate.
     if (a_dot == std::string_view::npos && b_dot == std::string_view::npos) {
-      return false;  // exactly equal keys
+      return false;
     }
     if (a_dot == std::string_view::npos) {
-      return true;  // a is a strict prefix → sorts first
+      return true;
     }
     if (b_dot == std::string_view::npos) {
       return false;
@@ -79,631 +69,442 @@ bool Bundle::Canonical_less::operator()(std::string_view a, std::string_view b) 
   }
 }
 
-// Both maps are std::map ordered by Canonical_less, so iteration is
-// already in canonical order — the views just project entries into the
-// Entries_view::Item shape. entries() lists attribute leaves first
-// (bare names), then data leaves.
-Bundle::Entries_view Bundle::entries() const {
-  ensure_view_materialized();  // 1b/E
-  Entries_view v;
-  v.items_.reserve(attr_map.size() + key_map.size());
-  for (const auto& kv : attr_map) {
-    v.items_.emplace_back(std::string_view(kv.first), &kv.second);
+// ─────────────────────────────────────────────────────────────────────────────
+// seg helpers
+// ─────────────────────────────────────────────────────────────────────────────
+std::string Bundle::seg_text(Seg s) {
+  if (is_unnamed(s)) {
+    return std::to_string(unnamed_pos(s));
   }
-  for (const auto& kv : key_map) {
-    v.items_.emplace_back(std::string_view(kv.first), &kv.second);
-  }
-  return v;
+  return std::string(Lnast::active_name_pool()->resolve(s));
 }
 
-Bundle::Top_levels_view Bundle::top_levels() const {
-  ensure_view_materialized();  // 1b/E
-  // Walk data entries in canonical order; group contiguous runs by their
-  // first segment. Each run becomes one Top_level_entry.
-  Top_levels_view  tv;
-  std::string_view cur_seg;
-  for (const auto& [k, e] : key_map) {
-    auto seg = first_segment_view(k);
-    if (tv.items_.empty() || seg != cur_seg) {
-      cur_seg = seg;
-      Top_level_entry tl;
-      if (segment_category(seg) == 2) {
-        tl.pos = str_tools::to_i(seg);
-      } else {
-        tl.name = seg;
-      }
-      tv.items_.emplace_back(std::move(tl));
+static std::string path_to_string(Bundle::Path path) {
+  std::string out;
+  for (size_t i = 0; i < path.size(); ++i) {
+    if (i != 0) {
+      out.push_back('.');
     }
-    auto& tl = tv.items_.back();
-    ++tl.leaf_count;
-    if (k.size() > seg.size()) {
-      tl.has_leafs = true;
-    }
-    if (tl.leaf_count == 1) {
-      tl.scalar = e.trivial;  // candidate; invalidated below if more leaves follow
-    }
+    out += Bundle::seg_text(path[i]);
   }
-  // Collapse rule: scalar valid only when leaf_count == 1.
-  for (auto& tl : tv.items_) {
-    if (tl.leaf_count != 1) {
-      tl.scalar = invalid_lconst;
-    }
-  }
-  return tv;
+  return out;
 }
 
-bool Bundle::has_top_named(std::string_view name) const {
-  if (has_root_) {
-    return false;  // sole leaf is the unnamed "0"
+// ─────────────────────────────────────────────────────────────────────────────
+// navigation primitives
+// ─────────────────────────────────────────────────────────────────────────────
+const Bundle::Field* Bundle::find_field(Seg s) const {
+  for (const auto& f : fields_) {
+    if (f.seg == s) {
+      return &f;
+    }
   }
-  // All keys sharing a first segment form one contiguous run; lower_bound
-  // lands at the run's start (a strict prefix sorts before its extensions).
-  auto it = key_map.lower_bound(name);
-  return it != key_map.end() && first_segment_view(it->first) == name;
+  return nullptr;
+}
+Bundle::Field* Bundle::find_field(Seg s) {
+  for (auto& f : fields_) {
+    if (f.seg == s) {
+      return &f;
+    }
+  }
+  return nullptr;
 }
 
-bool Bundle::has_top_unnamed(int pos) const {
-  if (has_root_) {
-    return pos == 0;  // 1b/E: the inline root is slot 0
+void Bundle::spill_scalar() {
+  if (!has_scalar_) {
+    return;
   }
-  auto key = std::to_string(pos);
-  auto it  = key_map.lower_bound(std::string_view{key});
-  if (it == key_map.end()) {
+  has_scalar_ = false;
+  fields_.push_back(Field{make_unnamed(0), scalar_, nullptr});
+  scalar_ = Entry();
+}
+
+std::shared_ptr<Bundle> Bundle::clone() const {
+  auto b          = std::make_shared<Bundle>();
+  b->scalar_      = scalar_;
+  b->has_scalar_  = has_scalar_;
+  b->fields_.reserve(fields_.size());
+  for (const auto& f : fields_) {
+    b->fields_.push_back(Field{f.seg, f.leaf, f.sub ? f.sub->clone() : nullptr});
+  }
+  b->attr_map      = attr_map;
+  b->mode_         = mode_;
+  b->type_name_id_ = type_name_id_;
+  b->value_kind_   = value_kind_;
+  b->correct       = correct;
+  b->immutable     = immutable;
+  return b;
+}
+
+const Bundle* Bundle::descend(Path path, Seg* last) const {
+  if (path.empty()) {
+    return nullptr;
+  }
+  const Bundle* cur = this;
+  for (size_t i = 0; i + 1 < path.size(); ++i) {
+    if (cur->has_scalar_) {
+      return nullptr;  // a bare scalar has no sub-fields
+    }
+    const Field* f = cur->find_field(path[i]);
+    if (f == nullptr || !f->sub) {
+      return nullptr;  // missing, or a leaf we cannot descend into
+    }
+    cur = f->sub.get();
+  }
+  *last = path.back();
+  return cur;
+}
+
+Bundle* Bundle::descend_or_create(Path path, Seg* last) {
+  Bundle* cur = this;
+  for (size_t i = 0; i + 1 < path.size(); ++i) {
+    cur->spill_scalar();
+    Field* f = cur->find_field(path[i]);
+    if (f == nullptr) {
+      cur->fields_.push_back(Field{path[i], Entry(), std::make_shared<Bundle>()});
+      f = &cur->fields_.back();
+    } else if (!f->sub) {
+      // promote a scalar leaf to a sub-bundle holding the old value at pos-0
+      auto sub          = std::make_shared<Bundle>();
+      sub->scalar_      = f->leaf;
+      sub->has_scalar_  = true;
+      f->sub            = std::move(sub);
+      f->leaf           = Entry();
+    }
+    cur = f->sub.get();
+  }
+  *last = path.back();
+  return cur;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// reads
+// ─────────────────────────────────────────────────────────────────────────────
+bool Bundle::has_trivial(Path path) const {
+  if (path.empty()) {
     return false;
   }
-  auto seg = first_segment_view(it->first);
-  return segment_category(seg) == 2 && str_tools::to_i(seg) == pos;
+  if (has_scalar_) {
+    return path.size() == 1 && path[0] == make_unnamed(0);
+  }
+  Seg           last  = 0;
+  const Bundle* owner = descend(path, &last);
+  if (owner == nullptr) {
+    return false;
+  }
+  const Field* f = owner->find_field(last);
+  return f != nullptr && !f->sub;  // a leaf exists (sub-bundle is not a trivial)
 }
 
-size_t Bundle::named_top_count() const {
-  if (has_root_) {
-    return 0;
-  }
-  // The map is sorted with contiguous first-segment runs — count run
-  // boundaries instead of dedup'ing through a std::set.
-  size_t           n = 0;
-  std::string_view cur;
-  for (const auto& [k, _] : key_map) {
-    auto seg = first_segment_view(k);
-    if (segment_category(seg) != 1) {
-      continue;
-    }
-    if (n == 0 || seg != cur) {
-      cur = seg;
-      ++n;
-    }
-  }
-  return n;
-}
-
-size_t Bundle::unnamed_top_count() const {
-  if (has_root_) {
-    return 1;  // 1b/E: the inline root is slot 0
-  }
-  size_t           n = 0;
-  std::string_view cur;
-  for (const auto& [k, _] : key_map) {
-    auto seg = first_segment_view(k);
-    if (segment_category(seg) != 2) {
-      continue;
-    }
-    if (n == 0 || seg != cur) {
-      cur = seg;
-      ++n;
-    }
-  }
-  return n;
-}
-
-// normalize_key / match / match_first_partial / match_either_partial and
-// the get_*_level* helpers live in lnast/bundle_key.hpp (1b/A) — the hpp
-// statics delegate.
-
-void Bundle::del_int(std::string_view key) {
-  // Data leaves only: attribute leaves live in attr_map and are
-  // never deleted by a data write ("set deletes what existed — not
-  // attributes").
-  if (key.empty()) {
-    key_map.clear();
-    has_root_ = false;
-    return;
-  }
-  if (has_root_) {  // 1b/E: the only data leaf is the inline root ("0")
-    if (key == "0") {
-      has_root_ = false;
-    }
-    return;
-  }
-
-  // Bounded run erase (1b/C): every key matching `key` fully or as a
-  // dot-boundary prefix sits in one contiguous run starting at
-  // lower_bound(key).
-  auto it = key_map.lower_bound(key);
-  while (it != key_map.end() && match_first_partial(key, it->first) != 0) {
-    it = key_map.erase(it);
-  }
-}
-
-const Bundle::Entry& Bundle::get_entry(std::string_view key) const {
+const Bundle::Entry& Bundle::get_entry(Path path) const {
   static Entry invalid(true, invalid_lconst);
-
-  if (has_root_) {  // 1b/E: the only data leaf is the inline root ("0")
-    return key == "0" ? root_ : invalid;
+  if (path.empty()) {
+    return invalid;
   }
-  const auto it = key_map.find(key);
-  if (it != key_map.end()) {
-    return it->second;
+  if (has_scalar_) {
+    return (path.size() == 1 && path[0] == make_unnamed(0)) ? scalar_ : invalid;
   }
-
-  return invalid;
+  Seg           last  = 0;
+  const Bundle* owner = descend(path, &last);
+  if (owner == nullptr) {
+    return invalid;
+  }
+  const Field* f = owner->find_field(last);
+  if (f == nullptr || f->sub) {
+    return invalid;
+  }
+  return f->leaf;
 }
 
 const Dlop& Bundle::lone_trivial() const {
-  if (has_root_) {
-    return root_.trivial;
+  if (has_scalar_) {
+    return scalar_.trivial;
   }
-  I(key_map.size() <= 1);  // only scalars, so trivial can not be defined twice
-  if (key_map.empty()) {
+  if (fields_.empty()) {
     return invalid_lconst;
   }
-  return key_map.begin()->second.trivial;
-}
-
-bool Bundle::has_trivial(std::string_view key) const {
-  if (has_root_) {
-    return key == "0";
+  I(fields_.size() == 1);
+  const Field* f = &fields_.front();
+  while (f->sub) {  // a 1-element tuple-of-tuple flattens to its lone leaf
+    I(f->sub->fields_.size() == 1 || f->sub->has_scalar_);
+    if (f->sub->has_scalar_) {
+      return f->sub->scalar_.trivial;
+    }
+    f = &f->sub->fields_.front();
   }
-  return key_map.find(key) != key_map.end();
+  return f->leaf.trivial;
 }
 
-bool Bundle::has_bundle(std::string_view key) const {
-  if (key.empty()) {
+bool Bundle::has_bundle(Path path) const {
+  if (path.empty()) {
     return false;
   }
-  if (has_root_) {  // 1b/E: only the "0" leaf exists (exact hit counts, as before)
-    if (key == "0") {
+  if (has_scalar_) {
+    return path.size() == 1 && path[0] == make_unnamed(0);
+  }
+  Seg           last  = 0;
+  const Bundle* owner = descend(path, &last);
+  if (owner != nullptr && owner->find_field(last) != nullptr) {
+    return true;
+  }
+  // A field that carries only attributes (no data leaf) still "has" a bundle.
+  const std::string dotted = path_to_string(path);
+  auto              it     = attr_map.lower_bound(dotted);
+  if (it != attr_map.end() && it->first == dotted) {
+    ++it;  // exact = whole-bundle attr, not a field
+  }
+  if (it != attr_map.end()) {
+    const auto e_pos = bundle_key::match_first_partial(dotted, it->first);
+    if (e_pos != 0 && e_pos < it->first.size()) {
       return true;
     }
   }
-
-  // Bounded probes (1b/C): the run for `key` starts at lower_bound(key).
-  {
-    auto it = key_map.lower_bound(key);
-    if (it != key_map.end() && match_first_partial(key, it->first) != 0) {
-      return true;
-    }
-  }
-  // A field that carries only attributes (no data leaf yet) still "has" a
-  // bundle — matches the pre-split behavior where attr leaves shared the
-  // data keyspace. Exact-key hits are whole-bundle attrs, not fields.
-  {
-    auto it = attr_map.lower_bound(key);
-    if (it != attr_map.end() && it->first == key) {
-      ++it;  // exact match = whole-bundle attr, not a field
-    }
-    if (it != attr_map.end()) {
-      auto e_pos = match_first_partial(key, it->first);
-      if (e_pos != 0 && e_pos < it->first.size()) {
-        return true;
-      }
-    }
-  }
-
   return false;
 }
 
-std::shared_ptr<Bundle> Bundle::get_bundle(std::string_view key) const {
-  if (key.empty()) {
-    return std::make_shared<Bundle>(*this);
+std::shared_ptr<Bundle> Bundle::get_bundle(Path path) const {
+  if (path.empty()) {
+    return clone();
   }
-  ensure_view_materialized();  // 1b/E: sub-bundle extraction walks the map
-
-  std::shared_ptr<Bundle> tup;
-  auto                    lazy_tup = [&]() -> Bundle& {
-    if (!tup) {
-      tup = std::make_shared<Bundle>();
+  std::shared_ptr<Bundle> result;
+  if (has_scalar_) {
+    if (path.size() == 1 && path[0] == make_unnamed(0)) {
+      result             = std::make_shared<Bundle>();
+      result->scalar_    = scalar_;
+      result->has_scalar_ = true;
     }
-    return *tup;
-  };
-
-  // Bounded run walks (1b/C): matching keys are contiguous from lower_bound.
-  for (auto it = key_map.lower_bound(key); it != key_map.end(); ++it) {
-    const auto& e     = *it;
-    auto        e_pos = match_first_partial(key, e.first);
-    if (e_pos == 0) {
-      break;
-    }
-    GI(e_pos < e.first.size(), e.first[e_pos] != '.');  // . not included
-
-    if (e_pos >= e.first.size()) {
-      lazy_tup().key_map.insert_or_assign(std::string("0"), e.second);
-    } else {
-      auto key2 = e.first.substr(e_pos);
-      I(!key2.empty());
-      lazy_tup().key_map.insert_or_assign(std::string(key2), e.second);
+  } else {
+    Seg           last  = 0;
+    const Bundle* owner = descend(path, &last);
+    if (owner != nullptr) {
+      const Field* f = owner->find_field(last);
+      if (f != nullptr) {
+        if (f->sub) {
+          result = f->sub->clone();
+        } else {
+          result             = std::make_shared<Bundle>();
+          result->scalar_    = f->leaf;
+          result->has_scalar_ = true;
+        }
+      }
     }
   }
 
   // Attribute leaves under the selected path travel with the sub-bundle:
-  // "key.attr" becomes the sub's whole-bundle attr "attr"; "key.f.attr"
-  // becomes its per-field "f.attr". An exact-key attr match is a
-  // whole-bundle attr of THIS bundle, not of the field — skipped.
-  for (auto it = attr_map.lower_bound(key); it != attr_map.end(); ++it) {
-    const auto& e     = *it;
-    auto        e_pos = match_first_partial(key, e.first);
+  // "path.attr" → the sub's "attr"; an exact-key match is a whole-bundle attr
+  // of THIS bundle, not the field, so it is skipped.
+  const std::string dotted = path_to_string(path);
+  for (auto it = attr_map.lower_bound(dotted); it != attr_map.end(); ++it) {
+    const auto e_pos = bundle_key::match_first_partial(dotted, it->first);
     if (e_pos == 0) {
       break;
     }
-    if (e_pos >= e.first.size()) {
-      continue;
+    if (e_pos >= it->first.size()) {
+      continue;  // exact = whole-bundle attr of this bundle
     }
-    lazy_tup().attr_map.insert_or_assign(std::string(e.first.substr(e_pos)), e.second);
+    if (!result) {
+      result = std::make_shared<Bundle>();
+    }
+    result->attr_map.insert_or_assign(std::string(std::string_view(it->first).substr(e_pos)), it->second);
   }
 
-  if (tup && !is_correct()) {
-    tup->set_issue();
+  if (result && !is_correct()) {
+    result->set_issue();
   }
-
-  return tup;
+  return result;
 }
 
-void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const>& tup) {
-  I(!key.empty());
-
-  if (tup == nullptr) {
-    set(key, invalid_lconst);
+// ─────────────────────────────────────────────────────────────────────────────
+// writes
+// ─────────────────────────────────────────────────────────────────────────────
+void Bundle::set(Path path, Entry entry) {
+  I(!path.empty());
+  // Bare-scalar fast path: a single unnamed-pos-0 write into a leaf-less bundle.
+  if (path.size() == 1 && path[0] == make_unnamed(0) && fields_.empty()) {
+    scalar_     = std::move(entry);
+    has_scalar_ = true;
     return;
   }
+  spill_scalar();
+  Seg     last  = 0;
+  Bundle* owner = descend_or_create(path, &last);
+  owner->spill_scalar();
+  Field* f = owner->find_field(last);
+  if (f != nullptr) {
+    f->leaf = std::move(entry);
+    f->sub  = nullptr;  // set replaces any existing subtree
+  } else {
+    owner->fields_.push_back(Field{last, std::move(entry), nullptr});
+  }
+}
 
+void Bundle::set(Path path, const std::shared_ptr<Bundle const>& tup) {
+  I(!path.empty());
+  if (tup == nullptr) {
+    set(path, value_entry(path, false, invalid_lconst));
+    return;
+  }
   correct = correct && tup->correct;
 
-  I(get_last_level(key).substr(0, 2) != "__");  // attr writes go through set_attr
+  const std::string dotted = path_to_string(path);
 
-  bool tup_scalar = tup->is_scalar();
+  // A BARE scalar (the inline scalar, or a lone UNNAMED pos-0 leaf) collapses to
+  // a leaf at `path` — the implicit "0" is dropped. A single NAMED field (e.g.
+  // `(zero=0)`) is NOT a bare scalar: it must stay a sub-bundle so the field name
+  // survives (else `a ++ b` over `lane=(zero=0)` would lose `zero`).
+  const bool bare_scalar
+      = tup->has_scalar_
+        || (tup->fields_.size() == 1 && tup->fields_.front().seg == make_unnamed(0) && !tup->fields_.front().sub);
 
-  tup->ensure_view_materialized();  // 1b/E
-  for (const auto& e : tup->key_map) {
-    std::string key2;
-    // Remove 0. from tup if tup is scalar
-    if (tup_scalar && e.first.front() == '0' && (e.first.size() == 1 || e.first[1] == '.')) {
-      if (e.first.size() == 1) {
-        key2 = "";  // remove "0"
-      } else {
-        key2 = e.first.substr(2);  // remove "0."
-      }
-    } else {
-      key2 = e.first;
+  if (bare_scalar) {
+    Entry e;
+    if (tup->has_scalar_) {
+      e = tup->scalar_;
+    } else if (!tup->fields_.empty()) {
+      e = tup->fields_.front().leaf;
     }
-
-    if (key2.empty()) {
-      set(key, e.second);
+    set(path, std::move(e));
+  } else {
+    // Non-scalar tup → the field at `path` becomes a deep copy of tup.
+    spill_scalar();
+    Seg     last  = 0;
+    Bundle* owner = descend_or_create(path, &last);
+    owner->spill_scalar();
+    if (Field* f = owner->find_field(last); f != nullptr) {
+      f->leaf = Entry();
+      f->sub  = tup->clone();
     } else {
-      auto key3 = absl::StrCat(key, ".", key2);
-      set(key3, e.second);
+      owner->fields_.push_back(Field{last, Entry(), tup->clone()});
     }
   }
 
-  // Attribute leaves ride along under the destination path: the source's
-  // whole-bundle attr "x" becomes "key.x"; its per-field "f.x" becomes
-  // "key.f.x".
-  for (const auto& e : tup->attr_map) {
-    attr_map.insert_or_assign(absl::StrCat(key, ".", e.first), e.second);
+  // Attribute leaves ride under the destination path.
+  for (const auto& [k, e] : tup->attr_map) {
+    attr_map.insert_or_assign(absl::StrCat(dotted, ".", k), e);
   }
 }
 
-void Bundle::set(std::string_view key_in, const Entry&& entry) {
-  I(!key_in.empty());
-
-  // normalize_key asserts the canonical form and otherwise returns the
-  // key as-is; producers no longer emit `:N:` annotations.
-  auto             normalized_key = normalize_key(key_in);
-  std::string_view key{normalized_key};
-  I(!key.empty());
-  I(get_last_level(key).substr(0, 2) != "__");  // attr writes go through set_attr
-
-  // 1b/E — bare-scalar fast path: the "0" leaf of a leaf-less bundle lives
-  // in the inline root Entry; no map node, no promotion scan.
-  if (key == "0" && key_map.empty()) {
-    root_     = entry;
-    has_root_ = true;
-    return;
+// ─────────────────────────────────────────────────────────────────────────────
+// attrs
+// ─────────────────────────────────────────────────────────────────────────────
+const Bundle::Entry& Bundle::attr_entry(std::string_view attr_key) const {
+  const auto it = attr_map.find(attr_key);
+  if (it == attr_map.end()) {
+    static Entry invalid(true, invalid_lconst);
+    return invalid;
   }
-  ensure_view_materialized();  // any other data write spills the root first
-
-  del_int(key);
-
-  // Promotion pass: any scalar data entry whose key is a strict prefix of
-  // `key` (at a dot boundary) becomes `prefix.0` so the new deeper insert
-  // can coexist. The same rename applies to attribute leaves scoped under
-  // the promoted path ("f.attr" → "f.0.attr"; whole-bundle attrs are
-  // single-level and never promoted). Collect targets first, then rename
-  // via extract/reinsert — std::map keys are immutable in place.
-  std::vector<std::pair<std::string, std::string>> renames;  // {old_key, new_key}
-  for (const auto& e : key_map) {
-    std::string_view fpart{e.first};
-    if (fpart.size() >= key.size()) {
-      continue;
-    }
-    if (key[fpart.size()] == '.' && fpart == key.substr(0, fpart.size())) {
-      renames.emplace_back(e.first, absl::StrCat(fpart, ".0"));
-    }
-  }
-  bool fixed_overwritten = false;
-  for (auto& [old_key, new_key] : renames) {
-    auto node = key_map.extract(old_key);
-    I(!node.empty());
-    node.key() = new_key;
-    // If the promoted key collides with the incoming key, store the new
-    // entry and skip the final emplace below.
-    if (new_key == key) {
-      node.mapped()     = entry;
-      fixed_overwritten = true;
-    }
-    key_map.insert(std::move(node));
-  }
-
-  std::vector<std::pair<std::string, std::string>> attr_renames;
-  for (const auto& e : attr_map) {
-    auto fpart = get_all_but_last_level(e.first);
-    if (fpart.empty() || fpart.size() >= key.size()) {
-      continue;
-    }
-    if (key[fpart.size()] == '.' && fpart == key.substr(0, fpart.size())) {
-      // Rename only when the DATA entry at this prefix was actually promoted
-      // above. An attr scoped to a bundle-valued field ("b.fmode" while
-      // "b.c"/"b.d" data keys exist) coexists with deeper inserts — renaming
-      // it to "b.0.fmode" would orphan the field fact.
-      const bool promoted = std::any_of(renames.begin(), renames.end(), [&](const auto& r) { return r.first == fpart; });
-      if (!promoted) {
-        continue;
-      }
-      attr_renames.emplace_back(e.first, absl::StrCat(fpart, ".0.", get_last_level(e.first)));
-    }
-  }
-  for (auto& [old_key, new_key] : attr_renames) {
-    auto node = attr_map.extract(old_key);
-    I(!node.empty());
-    node.key() = new_key;
-    attr_map.insert(std::move(node));
-  }
-
-  if (fixed_overwritten) {
-    return;
-  }
-
-  I(!has_trivial(key));
-  key_map.insert_or_assign(std::string(key), entry);
-
-#ifdef DEBUG_SLOW
-  for (const auto& e : key_map) {
-    auto lower = get_all_but_last_level(e.first);
-    while (!lower.empty()) {
-      if (has_trivial(lower)) {
-        dump();
-        std::print("OOPPPS (bundle is corrupted). Time to debug!!! {} {}\n", e.first, lower);
-        exit(-3);
-        return;
-      }
-      lower = get_all_but_last_level(lower);
-    }
-  }
-#endif
+  return it->second;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// concat (join) — field-list merge (03-bundle.md)
+// ─────────────────────────────────────────────────────────────────────────────
 bool Bundle::concat(const std::shared_ptr<Bundle const>& tup, std::string* conflict) {
-  // Pyrope tuple concat (`a ++ b`, 03-bundle.md) in canonical-key form:
-  //   - attrs: rhs wins on collision; per-field attrs follow their field's
-  //     relocation (same name / renumbered position / recursive merge).
-  //   - named: per-name merge — a `nil` scalar from either side yields to
-  //     the other; tuple+tuple merges recursively under the same rules;
-  //     equal comptime leaf values dedup (rhs entry wins). Any other leaf
-  //     overlap is a compile error: return false with *conflict = the
-  //     colliding canonical path (callers discard `this` on failure, so a
-  //     partial merge is fine).
-  //   - unnamed: appended at the next free position (densely renumbered).
+  spill_scalar();
 
-  ensure_view_materialized();  // 1b/E: concat grows the bundle
-  tup->ensure_view_materialized();
+  // Effective top-level fields of tup (a bare scalar reads as one unnamed-0 leaf).
+  std::vector<Field> rhs_fields;
+  if (tup->has_scalar_) {
+    rhs_fields.push_back(Field{make_unnamed(0), tup->scalar_, nullptr});
+  } else {
+    rhs_fields = tup->fields_;  // shallow copy of the field list (subs shared until cloned below)
+  }
 
-  auto seg = [](std::string_view k) -> std::string_view { return first_segment_view(k); };
-  auto cat = [&](std::string_view k) -> int { return segment_category(seg(k)); };
-
-  // Snapshot LHS shape: names already present and the next free decimal slot.
-  std::unordered_set<std::string> lhs_named;
-  int                             next_unnamed = 0;
-  for (const auto& e : key_map) {
-    auto c = cat(e.first);
-    if (c == 1) {
-      lhs_named.emplace(std::string(seg(e.first)));
-    } else if (c == 2) {
-      int n = str_tools::to_i(seg(e.first));
-      if (n + 1 > next_unnamed) {
-        next_unnamed = n + 1;
-      }
+  // Next free unnamed slot on the LHS.
+  int next_unnamed = 0;
+  for (const auto& f : fields_) {
+    if (is_unnamed(f.seg)) {
+      next_unnamed = std::max(next_unnamed, unnamed_pos(f.seg) + 1);
     }
   }
 
-  // Group RHS data entries by first segment, preserving first-seen order.
-  struct Rhs_group {
-    std::string                                first_seg;  // canonical first segment
-    int                                        category;   // 1 named / 2 unnamed
-    std::vector<std::pair<std::string, Entry>> entries;    // (suffix incl. leading ".", entry)
-  };
-  std::vector<Rhs_group>                  groups;
-  std::unordered_map<std::string, size_t> group_idx;
-  for (const auto& it : tup->key_map) {
-    auto        seg_sv = seg(it.first);
-    std::string seg_s(seg_sv);
-    std::string suffix;
-    if (it.first.size() > seg_sv.size()) {
-      I(it.first[seg_sv.size()] == '.');
-      suffix = it.first.substr(seg_sv.size());  // keep leading '.'
-    }
-    auto [iter, inserted] = group_idx.try_emplace(seg_s, groups.size());
-    if (inserted) {
-      groups.push_back({seg_s, segment_category(seg_sv), {}});
-    }
-    groups[iter->second].entries.emplace_back(std::move(suffix), it.second);
-  }
-
-  // Where each RHS top segment landed: same name, "name.K" sub-slot, or a
-  // renumbered decimal. Used to relocate the RHS's per-field attrs.
+  // old first-segment text → landed first-segment text (for attr relocation).
   std::unordered_map<std::string, std::string> seg_landed;
 
-  // Emit an RHS group under a chosen first-segment.
-  auto emit_group = [&](const std::vector<std::pair<std::string, Entry>>& entries, std::string_view new_seg) {
-    for (const auto& [suffix, ent] : entries) {
-      std::string new_key(new_seg);
-      new_key.append(suffix);
-      key_map.insert_or_assign(std::move(new_key), ent);
-    }
-  };
-
-  // Erase every LHS data entry whose first segment equals `s` — one
-  // contiguous run starting at lower_bound(s) (1b/C).
-  auto erase_top = [&](std::string_view s) {
-    auto it = key_map.lower_bound(s);
-    while (it != key_map.end() && seg(it->first) == s) {
-      it = key_map.erase(it);
-    }
-  };
-
-  // Top segments merged via tuple+tuple recursion: their RHS per-field attrs
-  // were consumed by the recursive concat, so the post-loop attr pass must
-  // skip them (a relocated inner slot would otherwise resurrect the old path).
-  std::unordered_set<std::string> recursed_segs;
-
-  for (auto& g : groups) {
-    if (g.category == 1) {  // named
-      bool rhs_is_nil_scalar = g.entries.size() == 1 && g.entries[0].first.empty() && g.entries[0].second.trivial.is_nil();
-      if (rhs_is_nil_scalar) {
-        continue;  // RHS nil drops itself.
+  for (const auto& g : rhs_fields) {
+    if (is_named(g.seg)) {
+      const bool g_scalar  = !g.sub;
+      if (g_scalar && g.leaf.trivial.is_nil()) {
+        continue;  // a nil scalar from the RHS drops itself
       }
-      if (!lhs_named.count(g.first_seg)) {
-        emit_group(g.entries, g.first_seg);
-        lhs_named.emplace(g.first_seg);
-        seg_landed.emplace(g.first_seg, g.first_seg);
+      Field* lf = find_field(g.seg);
+      if (lf == nullptr) {
+        fields_.push_back(Field{g.seg, g.leaf, g.sub ? g.sub->clone() : nullptr});
+        seg_landed.emplace(seg_text(g.seg), seg_text(g.seg));
         continue;
       }
-      // Collision — merge per the leaf rules (03-bundle.md): a nil scalar
-      // yields, tuple+tuple recurses, equal comptime leaves dedup, and any
-      // other final-field overlap is an error (never accumulate both values).
-      const auto lhs_scalar_it = key_map.find(g.first_seg);
-      const bool lhs_is_scalar = lhs_scalar_it != key_map.end();
-      if (lhs_is_scalar && lhs_scalar_it->second.trivial.is_nil()) {
-        erase_top(g.first_seg);
-        emit_group(g.entries, g.first_seg);
-        seg_landed.emplace(g.first_seg, g.first_seg);
+      const bool lhs_scalar = !lf->sub;
+      if (lhs_scalar && lf->leaf.trivial.is_nil()) {
+        lf->leaf = g.leaf;
+        lf->sub  = g.sub ? g.sub->clone() : nullptr;
+        seg_landed.emplace(seg_text(g.seg), seg_text(g.seg));
         continue;
       }
-      const bool rhs_is_scalar = g.entries.size() == 1 && g.entries[0].first.empty();
-      if (lhs_is_scalar && rhs_is_scalar) {
-        const auto& lv = lhs_scalar_it->second.trivial;
-        const auto& rv = g.entries[0].second.trivial;
+      if (lhs_scalar && g_scalar) {
+        const auto& lv = lf->leaf.trivial;
+        const auto& rv = g.leaf.trivial;
         if (!lv.is_invalid() && !rv.is_invalid() && lv.is_known_eq(rv)) {
-          erase_top(g.first_seg);  // provably the same value — rhs entry wins
-          emit_group(g.entries, g.first_seg);
-          seg_landed.emplace(g.first_seg, g.first_seg);
+          lf->leaf = g.leaf;  // provably equal — rhs wins
+          seg_landed.emplace(seg_text(g.seg), seg_text(g.seg));
           continue;
         }
         if (conflict != nullptr) {
-          *conflict = g.first_seg;
+          *conflict = seg_text(g.seg);
         }
         return false;
       }
-      if (!lhs_is_scalar && !rhs_is_scalar) {
-        // Both sides are sub-tuples: recursive merge under the same rules.
-        // Lift each side's entries (and per-field attrs) under this segment
-        // into a temp Bundle, concat, and reinstall the merged result.
-        Bundle lhs_sub;
-        for (auto it = key_map.lower_bound(g.first_seg); it != key_map.end() && seg(it->first) == g.first_seg; ++it) {
-          lhs_sub.key_map.emplace(it->first.substr(g.first_seg.size() + 1), it->second);
-        }
-        for (auto it = attr_map.lower_bound(g.first_seg); it != attr_map.end() && seg(it->first) == g.first_seg; ++it) {
-          if (it->first.size() > g.first_seg.size()) {
-            lhs_sub.attr_map.emplace(it->first.substr(g.first_seg.size() + 1), it->second);
-          }
-        }
-        auto rhs_sub = std::make_shared<Bundle>();
-        for (const auto& [suffix, ent] : g.entries) {
-          rhs_sub->key_map.emplace(suffix.substr(1), ent);  // drop leading '.'
-        }
-        for (auto it = tup->attr_map.lower_bound(g.first_seg); it != tup->attr_map.end() && seg(it->first) == g.first_seg; ++it) {
-          if (it->first.size() > g.first_seg.size()) {
-            rhs_sub->attr_map.emplace(it->first.substr(g.first_seg.size() + 1), it->second);
-          }
-        }
+      if (!lhs_scalar && !g_scalar) {
         std::string sub_conflict;
-        if (!lhs_sub.concat(rhs_sub, &sub_conflict)) {
+        if (!lf->sub->concat(g.sub, &sub_conflict)) {
           if (conflict != nullptr) {
-            *conflict = absl::StrCat(g.first_seg, ".", sub_conflict);
+            *conflict = absl::StrCat(seg_text(g.seg), ".", sub_conflict);
           }
           return false;
         }
-        erase_top(g.first_seg);
-        for (auto it = attr_map.lower_bound(g.first_seg); it != attr_map.end() && seg(it->first) == g.first_seg;) {
-          if (it->first.size() > g.first_seg.size()) {
-            it = attr_map.erase(it);  // replaced by the merged set below
-          } else {
-            ++it;  // a whole-bundle attr that happens to share the name
-          }
-        }
-        for (const auto& e : lhs_sub.key_map) {
-          key_map.insert_or_assign(absl::StrCat(g.first_seg, ".", e.first), e.second);
-        }
-        for (const auto& e : lhs_sub.attr_map) {
-          attr_map.insert_or_assign(absl::StrCat(g.first_seg, ".", e.first), e.second);
-        }
-        recursed_segs.insert(g.first_seg);
-        seg_landed.emplace(g.first_seg, g.first_seg);
+        seg_landed.emplace(seg_text(g.seg), seg_text(g.seg));
         continue;
       }
-      // A non-nil scalar against a sub-tuple — no merge is defined.
+      // scalar vs sub-tuple — no merge is defined
       if (conflict != nullptr) {
-        *conflict = g.first_seg;
+        *conflict = seg_text(g.seg);
       }
       return false;
     }
 
-    // category == 2 (unnamed): re-number at the next free slot.
-    auto new_seg = std::to_string(next_unnamed);
-    emit_group(g.entries, new_seg);
-    seg_landed.emplace(g.first_seg, new_seg);
+    // unnamed: renumber at the next free slot
+    const Seg new_seg = make_unnamed(next_unnamed);
+    fields_.push_back(Field{new_seg, g.leaf, g.sub ? g.sub->clone() : nullptr});
+    seg_landed.emplace(seg_text(g.seg), seg_text(new_seg));
     ++next_unnamed;
   }
 
-  // Attribute merge — rhs wins. Whole-bundle attrs (single-level) copy as
-  // they are; per-field attrs follow their field's landing spot. An attr
-  // for a field with no RHS data leaf (attr-only field) copies under its
-  // original path.
-  for (const auto& e : tup->attr_map) {
-    if (is_single_level(e.first)) {
-      attr_map.insert_or_assign(e.first, e.second);
+  // Attribute merge — rhs wins. Whole-bundle attrs copy as-is; per-field attrs
+  // follow their field's landing spot.
+  for (const auto& [k, e] : tup->attr_map) {
+    if (is_single_level(k)) {
+      attr_map.insert_or_assign(k, e);
       continue;
     }
-    auto first = seg(e.first);
-    if (recursed_segs.count(std::string(first))) {
-      continue;  // already merged by the recursive tuple+tuple concat
-    }
-    auto rest = std::string_view(e.first).substr(first.size());  // incl. leading '.'
-    auto it   = seg_landed.find(std::string(first));
+    const auto first = first_segment_view(k);
+    const auto rest  = std::string_view(k).substr(first.size());  // incl. leading '.'
+    const auto it    = seg_landed.find(std::string(first));
     if (it == seg_landed.end()) {
-      attr_map.insert_or_assign(e.first, e.second);
+      attr_map.insert_or_assign(k, e);
     } else {
-      attr_map.insert_or_assign(absl::StrCat(it->second, rest), e.second);
+      attr_map.insert_or_assign(absl::StrCat(it->second, rest), e);
     }
   }
 
   return true;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// shape predicates / counts
+// ─────────────────────────────────────────────────────────────────────────────
 bool Bundle::is_trivial_scalar() const {
-  // A trivial scalar holds at most the single "0" data leaf (the inline
-  // root after 1b/E); whole-bundle attrs (single-level keys) don't break
-  // trivial-ness, a per-field attr does.
-  if (!has_root_) {
-    for (const auto& e : key_map) {
-      if (e.first != "0") {
+  if (!has_scalar_) {
+    for (const auto& f : fields_) {
+      if (f.seg != make_unnamed(0) || f.sub) {
         return false;
       }
     }
@@ -716,18 +517,168 @@ bool Bundle::is_trivial_scalar() const {
   return true;
 }
 
-void Bundle::dump(std::string_view name) const {
-  // The bundle no longer stores a name; the caller supplies one for
-  // the printout (the table knows the binding's name).
-  std::print("bundle_name: {}{}\n", name, correct ? "" : " ISSUES");
+size_t Bundle::named_top_count() const {
+  if (has_scalar_) {
+    return 0;
+  }
+  size_t n = 0;
+  for (const auto& f : fields_) {
+    if (is_named(f.seg)) {
+      ++n;
+    }
+  }
+  return n;
+}
 
+size_t Bundle::unnamed_top_count() const {
+  if (has_scalar_) {
+    return 1;
+  }
+  size_t n = 0;
+  for (const auto& f : fields_) {
+    if (is_unnamed(f.seg)) {
+      ++n;
+    }
+  }
+  return n;
+}
+
+bool Bundle::has_top_named(std::string_view name) const {
+  if (has_scalar_) {
+    return false;
+  }
+  const int32_t id = Lnast::active_name_pool()->intern(name);
+  return find_field(id) != nullptr;
+}
+
+bool Bundle::has_top_unnamed(int pos) const {
+  if (has_scalar_) {
+    return pos == 0;
+  }
+  return find_field(make_unnamed(pos)) != nullptr;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// iteration views
+// ─────────────────────────────────────────────────────────────────────────────
+// Fields in CANONICAL iteration order: named (alphabetical by resolved name)
+// before unnamed (numeric by position). Storage stays insertion-order (fast
+// linear scan); only iteration is sorted, so two equal tuples built in different
+// field orders flatten identically (tuple equality zips positionally).
+static std::vector<const Bundle::Field*> sorted_fields(const std::vector<Bundle::Field>& fields) {
+  std::vector<std::pair<std::string, const Bundle::Field*>> keyed;
+  keyed.reserve(fields.size());
+  for (const auto& f : fields) {
+    keyed.emplace_back(bundle_path::is_named(f.seg) ? Bundle::seg_text(f.seg) : std::string(), &f);
+  }
+  std::sort(keyed.begin(), keyed.end(), [](const auto& a, const auto& b) {
+    const bool an = bundle_path::is_named(a.second->seg);
+    const bool bn = bundle_path::is_named(b.second->seg);
+    if (an != bn) {
+      return an;  // named before unnamed
+    }
+    if (an) {
+      return a.first < b.first;  // alphabetical by resolved name
+    }
+    return bundle_path::unnamed_pos(a.second->seg) < bundle_path::unnamed_pos(b.second->seg);  // numeric
+  });
+  std::vector<const Bundle::Field*> out;
+  out.reserve(keyed.size());
+  for (const auto& [k, f] : keyed) {
+    out.push_back(f);
+  }
+  return out;
+}
+
+void Bundle::flatten_into(const std::string& prefix, std::vector<Entries_view::Item>& out) const {
+  if (has_scalar_) {
+    out.emplace_back(prefix.empty() ? std::string("0") : prefix, scalar_);
+    return;
+  }
+  for (const Field* f : sorted_fields(fields_)) {
+    std::string key = prefix.empty() ? seg_text(f->seg) : absl::StrCat(prefix, ".", seg_text(f->seg));
+    if (f->sub) {
+      f->sub->flatten_into(key, out);
+    } else {
+      out.emplace_back(std::move(key), f->leaf);
+    }
+  }
+}
+
+Bundle::Entries_view Bundle::non_attr_entries() const {
+  Entries_view v;
+  flatten_into("", v.items_);
+  return v;
+}
+
+Bundle::Entries_view Bundle::entries() const {
+  Entries_view v;
+  for (const auto& kv : attr_map) {
+    v.items_.emplace_back(kv.first, kv.second);
+  }
+  flatten_into("", v.items_);
+  return v;
+}
+
+Bundle::Entries_view Bundle::sticky_attributes() const {
+  Entries_view v;
+  for (const auto& kv : attr_map) {
+    if (battr::is_sticky(get_last_level(kv.first))) {
+      v.items_.emplace_back(kv.first, kv.second);
+    }
+  }
+  return v;
+}
+
+Bundle::Top_levels_view Bundle::top_levels() const {
+  Top_levels_view tv;
+  if (has_scalar_) {
+    Top_level_entry tl;
+    tl.pos        = 0;
+    tl.leaf_count = 1;
+    tl.scalar     = scalar_.trivial;
+    tv.items_.push_back(std::move(tl));
+    return tv;
+  }
+  // The name_ holder strings must outlive the view (Top_level_entry.name is a
+  // string_view); they are pool-resolved (stable) for named, and parked here
+  // for unnamed decimals.
+  for (const Field* f : sorted_fields(fields_)) {
+    Top_level_entry tl;
+    if (is_named(f->seg)) {
+      tl.name = Lnast::active_name_pool()->resolve(f->seg);  // stable pool string
+    } else {
+      tl.pos = unnamed_pos(f->seg);
+    }
+    if (f->sub) {
+      tl.has_leafs = true;
+      // leaf_count = number of data leaves under this top-level
+      std::vector<Entries_view::Item> leaves;
+      f->sub->flatten_into("", leaves);
+      tl.leaf_count = leaves.size();
+      if (tl.leaf_count == 1) {
+        tl.scalar = leaves.front().second.trivial;
+      }
+    } else {
+      tl.leaf_count = 1;
+      tl.scalar     = f->leaf.trivial;
+    }
+    tv.items_.push_back(std::move(tl));
+  }
+  return tv;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// dump
+// ─────────────────────────────────────────────────────────────────────────────
+void Bundle::dump(std::string_view name) const {
+  std::print("bundle_name: {}{}\n", name, correct ? "" : " ISSUES");
   for (const auto& it : attr_map) {
     std::print("  attr:{} trivial:{}\n", it.first, it.second.trivial);
   }
-  if (has_root_) {
-    std::print("  key:0 trivial:{} {} (inline root)\n", root_.trivial, root_.immutable ? "let" : "mut");
-  }
-  for (const auto& it : key_map) {
-    std::print("  key:{} trivial:{} {}\n", it.first, it.second.trivial, it.second.immutable ? "let" : "mut");
+  std::vector<Entries_view::Item> leaves;
+  flatten_into("", leaves);
+  for (const auto& [k, e] : leaves) {
+    std::print("  key:{} trivial:{} {}\n", k, e.trivial, e.immutable ? "let" : "mut");
   }
 }
