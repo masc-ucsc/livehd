@@ -59,7 +59,7 @@ bazel_dep(name = "hlop", version = "0.2.0")
 git_override(
     module_name = "hlop",
     remote = "https://github.com/masc-ucsc/hlop.git",
-    commit = "e50b703f918fd7a9d406c49fd1d17591a8da2531",  # add cache support (Dlop::from_pyrope_cached / const_parse_cache_)
+    commit = "d29d20ec2a469a4a30802f071807e76631e088c2",  # from_chars fast path in from_pyrope (int64-fitting literals)
 )
 # For local hlop co-development, swap the git_override above for:
 # local_path_override(module_name = "hlop", path = "../hlop")
