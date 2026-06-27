@@ -42,7 +42,7 @@ bazel_dep(name = "libffi", version = "3.4.7.bcr.4")
 # GMP symbols undefined (they are not bundled, to avoid the LGPL libgmp.a); they
 # are satisfied at the final `lhd` link by this hermetic BCR build of GMP (no
 # dependency on a system/homebrew libgmp). See packages/cvc5.BUILD.
-bazel_dep(name = "gmp", version = "6.3.0.bcr.1")
+bazel_dep(name = "gmp", version = "6.3.0.bcr.2")
 
 # iassert
 bazel_dep(name = "iassert", version = "0.1.0")
