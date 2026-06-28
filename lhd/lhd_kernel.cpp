@@ -2972,17 +2972,70 @@ void sim_command(Options& opts, Result& res) {
     return out;
   };
 
-  // Arguments forwarded to every driver binary (after a `--` separator): an
-  // explicit `--seed` (when the user passed one; otherwise the driver keeps its
-  // built-in default seed) and every `lhd sim --arg key=value` rendered as
-  // `--key value`. The driver parses these (see prp_sim); an unknown key makes
-  // the driver print its usage and fail, surfacing as a test failure.
-  std::string sim_fwd;
-  if (opts.seed_explicit) {
-    sim_fwd += std::format(" --seed {}", shell_quote(opts.seed));
-  }
-  for (const auto& [k, v] : opts.sim_args) {
-    sim_fwd += std::format(" --{} {}", k, shell_quote(v));
+  // The `--<flag>` names a generated driver accepts (its `--seed` plus one per
+  // test parameter), scraped from its source. A file-level `--arg` that names a
+  // parameter some test does not declare is then NOT forwarded to that test's
+  // driver (which would reject the unknown flag) — mirroring the old per-driver
+  // bind, where a non-matching `--arg` was simply ignored.
+  auto driver_flags = [&](const std::string& base) {
+    std::set<std::string> flags;
+    std::ifstream         df(std::format("{}/{}.cpp", simdir, base));
+    std::stringstream     ss;
+    ss << df.rdbuf();
+    const std::string s = ss.str();
+    const std::string marker = "_key == \"--";
+    for (size_t p = s.find(marker); p != std::string::npos; p = s.find(marker, p + 1)) {
+      size_t b = p + marker.size();
+      size_t e = b;
+      while (e < s.size() && (std::isalnum(static_cast<unsigned char>(s[e])) != 0 || s[e] == '_')) {
+        ++e;
+      }
+      auto flag = s.substr(b, e - b);
+      // Only the driver's TEST-PARAMETER flags are `--arg`-bindable; the built-in
+      // `--seed`/`--help` are not (otherwise `--arg help=x` would forward `--help
+      // x`, making the driver print usage and exit 0 — a vacuous pass).
+      if (flag != "seed" && flag != "help" && flag != "h") {
+        flags.insert(std::move(flag));
+      }
+    }
+    return flags;
+  };
+  // Arguments forwarded to a driver binary (after a `--` separator): an explicit
+  // `--seed` (else the driver keeps its built-in default) and every matching
+  // `lhd sim --arg key=value` rendered as `--key value`.
+  auto forward_args = [&](const std::string& base) {
+    std::string fwd;
+    if (opts.seed_explicit) {
+      fwd += std::format(" --seed {}", shell_quote(opts.seed));
+    }
+    const auto accepts = driver_flags(base);
+    for (const auto& [k, v] : opts.sim_args) {
+      if (accepts.count(k) != 0) {
+        fwd += std::format(" --{} {}", k, shell_quote(v));
+      }
+    }
+    return fwd;
+  };
+
+  // Warn about a `--arg key=value` that NO driver in this run declares (a typo
+  // or a parameter that does not exist) — otherwise it is silently dropped and
+  // the user believes an override took effect when the test ran with its
+  // default. (Mirrors `--set`, which rejects unknown keys.)
+  if (!opts.sim_args.empty()) {
+    std::set<std::string> all_accepted;
+    for (const auto& d : drivers) {
+      if (run_only && !test_sel.empty() && d.test_name != test_sel) {
+        continue;
+      }
+      for (const auto& f : driver_flags(d.basename)) {
+        all_accepted.insert(f);
+      }
+    }
+    for (const auto& [k, v] : opts.sim_args) {
+      if (all_accepted.count(k) == 0) {
+        std::print(stderr, "lhd sim: warning: --arg {}={} matches no test parameter (ignored)\n", k, v);
+      }
+    }
   }
 
   int    n_fail = 0;
@@ -2995,8 +3048,9 @@ void sim_command(Options& opts, Result& res) {
     // Capture the DRIVER's stdout (its runtime `puts` output + any ASSERT
     // FAILED lines) via popen; send bazel's own build noise to a side file so it
     // never spews. --experimental_convenience_symlinks=ignore: no bazel-* links.
-    const auto berr = std::format("{}/.bazel.stderr", simdir);
-    auto       cmd  = std::format("cd {} && bazel run -c opt --experimental_convenience_symlinks=ignore //:{}{}{} 2>{}",
+    const auto berr    = std::format("{}/.bazel.stderr", simdir);
+    const auto sim_fwd = forward_args(d.basename);
+    auto       cmd     = std::format("cd {} && bazel run -c opt --experimental_convenience_symlinks=ignore //:{}{}{} 2>{}",
                                  shell_quote(simdir), d.basename, (sim_fwd.empty() ? "" : " --"), sim_fwd,
                                  shell_quote(berr));
     int        rc   = 0;

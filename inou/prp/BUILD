@@ -223,6 +223,7 @@ cc_direct_headers(
         ],
         data = [
             "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/prpsim.py",
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:%s" % prp_file,
             "//inou/prp:sim_runtime_hdrs",

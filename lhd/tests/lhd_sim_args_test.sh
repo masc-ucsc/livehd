@@ -1,0 +1,84 @@
+#!/bin/bash
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#
+# `lhd sim` runtime test parameters: each `test name(params)` parameter becomes
+# a `--<name>` flag on the generated driver (bound at run time, not baked in),
+# alongside `--seed` and `--help`. This test drives only `lhd sim --setup-only`
+# (no nested bazel / host compiler needed) and asserts on the generated driver
+# source + the diagnostics, covering:
+#   * a valid parameter generates a `--<name>` flag, `--seed`/`--help`, and the
+#     validating numeric parsers (`_to_i64`/`_to_u64`);
+#   * a parameter name that is unsafe as a C++ identifier / collides with a
+#     reserved driver flag is rejected at setup with a clear message
+#     (C++ keyword, `argc`, leading-underscore, backtick — review #1-#5);
+#   * `lhd sim --seed <non-numeric>` is a CLI usage error (review #8).
+
+set -u
+
+LHD=lhd/lhd
+W="${TEST_TMPDIR:-/tmp/lhd_sim_args_$$}"
+mkdir -p "$W"
+
+fail() {
+  echo "FAIL: $*" >&2
+  exit 1
+}
+
+# ---- a valid parameterized test sets up + generates the expected driver ------
+cat > "$W/good.prp" <<'EOF'
+/*
+:name: good
+:type: simulation
+*/
+mod nn(a:u8) -> (s:u8@[0]) { s = a }
+test nn.t(cycles:u20 = 20) {
+  mut v = 0
+  tick cycles { const r = nn(a=1); v = r }
+  assert(v == 1, "v must be 1")
+}
+EOF
+"$LHD" sim "$W/good.prp" --setup-only --workdir "$W/good" -q >/dev/null 2>&1 \
+  || fail "valid parameterized test failed to set up"
+DRV="$W/good/sim/drv_nn_t.cpp"
+[ -f "$DRV" ] || fail "expected driver not generated: $DRV"
+grep -q -- '--cycles' "$DRV" || fail "driver missing the --cycles parameter flag"
+grep -q -- '"--seed"'  "$DRV" || fail "driver missing the --seed flag"
+grep -q -- '"--help"'  "$DRV" || fail "driver missing the --help flag"
+grep -q    '_to_i64'   "$DRV" || fail "driver missing the validating integer parser"
+grep -q    '_to_u64'   "$DRV" || fail "driver missing the validating seed parser"
+grep -q    'hlop_set_random_seed' "$DRV" || fail "driver does not seed the hlop PRNG"
+
+# ---- reserved / unsafe parameter names are rejected at setup -----------------
+# $1 = parameter declaration text, $2 = a label for messages
+reject_param() {
+  local decl="$1" label="$2"
+  cat > "$W/bad.prp" <<EOF
+/*
+:name: bad
+:type: simulation
+*/
+mod nn(a:u8) -> (s:u8@[0]) { s = a }
+test nn.t($decl) { const v = nn(a=1); assert(v == 1, "x") }
+EOF
+  local out
+  out="$("$LHD" sim "$W/bad.prp" --setup-only --workdir "$W/bad" -q 2>&1)" \
+    && fail "reserved parameter name ($label) was NOT rejected"
+  echo "$out" | grep -q 'not a usable simulation parameter name' \
+    || fail "rejection of $label lacked the explanatory message: $out"
+}
+reject_param 'default:u8 = 2' 'C++ keyword'
+reject_param 'argc:u8 = 2'    'main argument argc'
+reject_param '_seed:u8 = 2'   'leading-underscore driver-local collision'
+reject_param '`my param`:u8 = 2' 'backtick-escaped identifier'
+
+# ---- `--seed` must be numeric (CLI usage error otherwise) ---------------------
+SEED_OUT="$("$LHD" sim "$W/good.prp" --seed nope --setup-only --workdir "$W/s" -q 2>&1)" \
+  && fail "non-numeric --seed was accepted"
+echo "$SEED_OUT" | grep -q 'seed expects a non-negative integer' \
+  || fail "non-numeric --seed lacked the usage message: $SEED_OUT"
+
+# a numeric --seed is fine
+"$LHD" sim "$W/good.prp" --seed 42 --setup-only --workdir "$W/s2" -q >/dev/null 2>&1 \
+  || fail "numeric --seed 42 was rejected"
+
+echo "PASS: lhd sim runtime test-parameter flags + validation"

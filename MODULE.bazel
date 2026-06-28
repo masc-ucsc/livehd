@@ -156,13 +156,21 @@ local_path_override(module_name = "hhds", path = "../hhds")
 # Pinned to 00f1df0 (sim test-syntax: dotted `test name(params)`, `tick`, `step`).
 # For local co-development swap this for:
 #   new_local_repository(name = "prpparse", build_file = "//packages:prpparse.BUILD", path = "../tree-sitter-pyrope/prpparse")
-http_archive(
+# LOCAL CO-DEVELOPMENT OVERRIDE (sim VCD clock/reset work, 2026-06-28) — RESTORE
+# the http_archive pin below once the prpparse `tick clocks=/resets=` change is
+# committed upstream and the integrity recomputed.
+new_local_repository(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-AxeMfrMJxojFGmNsMsy2FjHPkcct+MInjxq+HrOZUYo=",  # 00f1df0 (same archive as @tree_sitter_pyrope below)
-    strip_prefix = "tree-sitter-pyrope-00f1df07ad5542f6bc67d7531ee1995c031e2019/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/00f1df07ad5542f6bc67d7531ee1995c031e2019.zip"],
+    path = "../tree-sitter-pyrope/prpparse",
 )
+# http_archive(
+#     name = "prpparse",
+#     build_file = "//packages:prpparse.BUILD",
+#     integrity = "sha256-AxeMfrMJxojFGmNsMsy2FjHPkcct+MInjxq+HrOZUYo=",  # 00f1df0 (same archive as @tree_sitter_pyrope below)
+#     strip_prefix = "tree-sitter-pyrope-00f1df07ad5542f6bc67d7531ee1995c031e2019/prpparse",
+#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/00f1df07ad5542f6bc67d7531ee1995c031e2019.zip"],
+# )
 
 # tree-sitter runtime — the incremental-parsing C library (libtree-sitter).
 # Only the Pyrope *formatter* (`lhd pyrope fmt`, @tree_sitter_pyrope//:prpfmt)

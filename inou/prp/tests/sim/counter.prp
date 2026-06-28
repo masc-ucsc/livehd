@@ -9,6 +9,14 @@
 // `step` inside a `tick` -- that would advance a second clock). The output is
 // captured into an outer `mut` and checked with an `assert` at the end of
 // simulation. No poke/sigref are used.
+//
+// VCD (`--set sim.vcd=true`): the clock toggles once per period and the
+// optional `clocks=(name=ratio)` / `resets=(name=ticks)` clauses on `tick`
+// shape the waveform. `held_high` below asks for a 1-tick clock named `clock`
+// and a reset named `reset` held active for 2 ticks; `gated` omits the clauses
+// and still gets the default toggling clock. The clock/reset are real input
+// ports (otherwise forced to 0); the reset is driven from the window, so it
+// actually zeroes `count` for those 2 ticks -- the assert below relies on it.
 
 mod counter(enable:bool) -> (value:u8@[0]) {
   reg count:u8 = 0
@@ -18,15 +26,17 @@ mod counter(enable:bool) -> (value:u8@[0]) {
   if enable { wrap count += 1 }
 }
 
-// Test 1: enable held high for 20 cycles -> count must be exactly 20.
+// Test 1: enable held high, with the reset asserted for the first 2 ticks. The
+// reset port is real (it zeroes `count`), so `count` stays 0 during the 2-tick
+// reset window and then counts for the remaining cycles -> cycles - 2.
 test counter.held_high(cycles:u20=20) {
   mut v_final = nil
-  tick cycles {                          // 20 cycles, one clock per iteration
+  tick cycles clocks=(clock=1) resets=(reset=2) {  // reset held high for 2 ticks, then count
     const v = counter(enable=true)   // this cycle's output
     v_final = v
     puts("counter v:{v}")
   }
-  assert(v_final == 20, "after 20 enabled cycles the count must be 20")
+  assert(v_final == cycles - 2, "count must be (cycles - reset_ticks) = cycles - 2")
 }
 
 // Test 2: enable toggled every cycle for 20 cycles. A test-local golden value

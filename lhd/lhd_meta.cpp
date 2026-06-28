@@ -806,8 +806,15 @@ int help_command(const Options& opts) {
         "  them — each `test`'s asserts are checked dynamically (by running), not formally.\n"
         "  An optional second positional selects a single test by name.\n"
         "\n"
+        "  Each `test name(params)` parameter becomes a `--<name>` flag on the generated\n"
+        "  driver binary (defaulting to its signature default; a parameter with no default\n"
+        "  is required). Every driver also accepts `--seed N` (hlop PRNG seed for random /\n"
+        "  unknown bits) and `--help`. `--arg key=value` / `--seed N` here are forwarded to\n"
+        "  each driver, and the built binary can also be re-run directly with those flags.\n"
+        "\n"
         "flags:\n"
-        "  --arg key=value      bind a test runtime parameter (repeatable)\n"
+        "  --arg key=value      bind a test runtime parameter, forwarded as `--key value` (repeatable)\n"
+        "  --seed N             PRNG seed forwarded to every driver (else each keeps its default)\n"
         "  --setup-only         generate the C++ sim + bazel module, do not build/run\n"
         "  --run-only           build/run an existing sim (needs --workdir from a prior --setup-only)\n"
         "  --workdir DIR        reuse DIR as the build dir (else a fresh temp dir)\n"
@@ -817,7 +824,9 @@ int help_command(const Options& opts) {
         "  lhd sim foo.prp                                # build + run every test in foo.prp\n"
         "  lhd sim foo.prp my_test                        # run just the `my_test` block\n"
         "  lhd sim foo.prp my_test --arg n=4              # bind the test parameter n=4\n"
+        "  lhd sim foo.prp my_test --seed 42             # reproducible randomized run\n"
         "  lhd sim foo.prp --setup-only --workdir build/  # generate, then build it yourself\n"
+        "  ./build/.../drv_my_test --cycles 8 --seed 7    # run a built driver directly\n"
         "  lhd sim foo.prp --run-only --workdir build/    # rebuild/run a prior --setup-only\n");
     return 0;
   }

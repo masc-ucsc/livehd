@@ -204,148 +204,6 @@ class PrpRunner:
         return cmd
 
     @staticmethod
-    def _sim_compiler():
-        # Host C++ compiler for the hermetic driver build. The Slop runtime needs
-        # C++23 (<print>, std::format); the repo already requires a C++23 toolchain
-        # to build lhd, so the host compiler has it. $CXX wins for CI overrides.
-        for c in (os.environ.get('CXX'), 'clang++', 'c++', 'g++'):
-            if c and shutil.which(c):
-                return c
-        return 'c++'
-
-    @staticmethod
-    def _sim_include_dirs(tmp_dir):
-        # Locate the hlop + iassert header dirs. Under `bazel test` the
-        # `cc_direct_headers` data dep stages slop.hpp/blop.hpp (hlop) and
-        # iassert.hpp (iassert) into the test runfiles; find them by name and
-        # return their directories. Returns [] when not found (manual run with no
-        # runfiles) so the caller can fall back to the nested-bazel build.
-        roots = []
-        for env in ('TEST_SRCDIR', 'RUNFILES_DIR'):
-            v = os.environ.get(env)
-            if v and os.path.isdir(v):
-                roots.append(v)
-        roots.append(tmp_dir)
-        wanted = ('slop.hpp', 'iassert.hpp')
-        found = {}
-        for root in roots:
-            for dirpath, _dirs, files in os.walk(root):
-                for w in wanted:
-                    if w not in found and w in files:
-                        found[w] = dirpath
-            if len(found) == len(wanted):
-                break
-        if len(found) != len(wanted):
-            return []
-        # dedup while preserving order
-        dirs, seen = [], set()
-        for w in wanted:
-            d = found[w]
-            if d not in seen:
-                seen.add(d)
-                dirs.append(d)
-        return dirs
-
-    def run_simulation(self, tmp_dir, test: PrpTest):
-        # `:type: simulation`: lower the design's DUT(s) to Slop<N> C++ and
-        # generate a driver per `test` block (`lhd sim --setup-only`), then build
-        # each driver HERMETICALLY with the host C++ compiler and run it. The
-        # Slop/Blop runtime is header-only (blop.cpp is empty) and with -DNDEBUG
-        # the iassert checks compile out, so a driver has NO link dependencies —
-        # no nested bazel, no abseil, no network. A non-zero driver exit means an
-        # `assert` fired in that test. (When the header runfiles are absent — a
-        # manual harness run outside bazel — fall back to `lhd sim`'s own nested
-        # bazel build so the manual flow still works.)
-        name    = test.params['name']
-        prp     = test.params['files'][0]
-        simroot = self._scratch(test, 'simulation')
-        simdir  = os.path.join(simroot, 'sim')
-
-        setup = [self.lhd, 'sim', prp, '--setup-only', '--workdir', simroot, '-q']
-        # `:args: k=v k=v` header tag -> `--arg k=v` per token, binding the
-        # test's `(params)` (an override wins over the parameter's default).
-        for tok in test.params.get('args', '').split():
-            setup += ['--arg', tok]
-        proc  = subprocess.Popen(setup, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        try:
-            log, _ = proc.communicate()
-            rc = proc.returncode
-        except Exception:
-            proc.kill()
-            rc, log = 1, b''
-        if rc != 0:
-            print('{} - simulation - FAILED: `lhd sim --setup-only` rc={}'.format(name, rc))
-            print(log.decode('utf-8', 'ignore'))
-            return 1
-
-        abs_simdir = simdir if os.path.isabs(simdir) else os.path.join(tmp_dir, simdir)
-        drivers = sorted(glob.glob(os.path.join(abs_simdir, 'drv_*.cpp')))
-        if not drivers:
-            print('{} - simulation - FAILED: no `test` drivers generated in {}'.format(name, abs_simdir))
-            print(log.decode('utf-8', 'ignore'))
-            return 1
-
-        incs = self._sim_include_dirs(tmp_dir)
-        if not incs:
-            # No header runfiles (manual run): use lhd sim's nested-bazel build of
-            # the already-generated setup so the manual flow still works.
-            print('{} - simulation - (no header runfiles; nested-bazel fallback)'.format(name))
-            cmd  = [self.lhd, 'sim', prp, '--run-only', '--workdir', simroot]
-            proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            try:
-                log, _ = proc.communicate()
-                rc = proc.returncode
-            except Exception:
-                proc.kill()
-                rc, log = 1, b''
-            if rc == 0:
-                print('{} - simulation - success ({} test(s), nested-bazel)'.format(name, len(drivers)))
-            else:
-                print('{} - simulation - FAILED (nested-bazel rc={})'.format(name, rc))
-                print(log.decode('utf-8', 'ignore'))
-            return 0 if rc == 0 else 1
-
-        cxx    = self._sim_compiler()
-        cflags = ['-std=c++23', '-DNDEBUG', '-O1', '-I' + abs_simdir]
-        for d in incs:
-            cflags.append('-I' + d)
-
-        failed = 0
-        for drv in drivers:
-            base = os.path.splitext(os.path.basename(drv))[0]
-            tn   = base[len('drv_'):] if base.startswith('drv_') else base
-            exe  = os.path.join(abs_simdir, base + '.bin')
-            # The driver `#include`s exactly the DUT header(s) it drives -> compile
-            # only those DUT bodies (NOT every emitted unit: a `test` block also
-            # lowers to a Slop unit that pulls in formal-only headers it never uses).
-            with open(drv) as f:
-                incs_h = set(re.findall(r'#include\s+"([^"]+\.hpp)"', f.read()))
-            bodies = [os.path.join(abs_simdir, h[:-4] + '.cpp') for h in sorted(incs_h)
-                      if os.path.exists(os.path.join(abs_simdir, h[:-4] + '.cpp'))]
-            cc   = [cxx] + cflags + bodies + [drv, '-o', exe]
-            cp   = subprocess.run(cc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            if cp.returncode != 0:
-                print('{} - simulation - {} FAILED: driver did not compile'.format(name, tn))
-                print('  cmd: {}'.format(' '.join(cc)))
-                print(cp.stdout.decode('utf-8', 'ignore'))
-                failed += 1
-                continue
-            rp  = subprocess.run([exe], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            out = rp.stdout.decode('utf-8', 'ignore')
-            if rp.returncode != 0:
-                print('{} - simulation - {} FAILED (assert):'.format(name, tn))
-                print(out)
-                failed += 1
-            else:
-                print('{} - simulation - {} success'.format(name, tn))
-
-        if failed:
-            print('{} - simulation - FAILED: {} of {} test(s) failed'.format(name, failed, len(drivers)))
-            return 1
-        print('{} - simulation - success ({} test(s))'.format(name, len(drivers)))
-        return 0
-
-    @staticmethod
     def _pattern_matches(pattern, text):
         # The header :error:/:help: value is a regex (re.search). If it is not a
         # valid regex (e.g. `')'` has an unbalanced paren), fall back to a literal
@@ -769,7 +627,10 @@ class PrpRunner:
                 rc = self.run_equiv_slang(tmp_dir, test)
                 continue
             if mode == 'simulation':
-                rc = self.run_simulation(tmp_dir, test)
+                # The `:type: simulation` flow lives in its own module (prpsim);
+                # import lazily so only the `prp-sim-*` targets need it staged.
+                from prpsim import run_simulation
+                rc = run_simulation(self, tmp_dir, test)
                 continue
 
             cmd = self.gen_lhd_cmd(test, mode)

@@ -513,7 +513,19 @@ Options parse_args(int argc, char** argv) {
       }
       opts.sim_args.emplace_back(v.substr(0, eq), v.substr(eq + 1));
     } else if (a == "--seed") {  // shared RNG seed (alias for `--set lhd.seed=N`); `sim` forwards it to drivers
-      opts.seed          = std::string{need_value(a, i, argc, argv)};
+      auto   v        = std::string{need_value(a, i, argc, argv)};
+      size_t consumed = 0;
+      try {
+        (void)std::stoull(v, &consumed, 0);  // base 0: decimal or 0x.. ; validate the whole token
+      } catch (const std::exception&) {
+        consumed = 0;
+      }
+      // stoull silently wraps a leading `-` to a huge value — reject it so the
+      // "non-negative" contract holds (and matches the driver's _to_u64).
+      if (v.empty() || consumed != v.size() || v.front() == '-') {
+        throw Lhd_error{"usage", std::format("--seed expects a non-negative integer, got '{}'", v), ""};
+      }
+      opts.seed          = v;
       opts.seed_explicit = true;
     } else if (a == "-i" || a == "--inplace") {  // `pyrope fmt`: rewrite the input file(s) in place
       opts.fmt_inplace = true;

@@ -87,6 +87,29 @@ sh_test(
     data = _FLOW_DATA + ["scan_imports.prp"],
 )
 
+# `lhd sim` runtime test-parameter flags: each `test name(params)` parameter is a
+# `--<name>` flag on the generated driver (+ `--seed`/`--help`/validating
+# parsers); unsafe/reserved parameter names are rejected with a clear message,
+# and `--seed` must be numeric. Drives only `lhd sim --setup-only` (no nested
+# bazel / host compiler), asserting on the generated driver source + diagnostics.
+sh_test(
+    name = "lhd_sim_args_test",
+    srcs = ["lhd_sim_args_test.sh"],
+    data = ["//lhd"],
+)
+
+# `lhd sim` VCD clock/reset waveforms + the `tick clocks=(name=ratio)
+# resets=(name=ticks)` clause: the generated DUT body traces a toggling clock + a
+# reset window, drives the reset port functionally, and advances the period
+# counter independent of VCD; the driver configures the ratio/window; >1 clock or
+# reset is rejected. Drives only `lhd sim --setup-only` (no nested bazel / host
+# compiler), asserting on the generated sim body + driver source + diagnostics.
+sh_test(
+    name = "lhd_sim_clock_reset_test",
+    srcs = ["lhd_sim_clock_reset_test.sh"],
+    data = ["//lhd"],
+)
+
 # 2c-color / 2p-partition: `lhd pass color <alg>` colors a flat top, `lhd pass
 # partition` rebuilds it as one-module-per-region + a new top, and the
 # partitioned Verilog is LEC-equivalent to the original (acyclic + synth).
