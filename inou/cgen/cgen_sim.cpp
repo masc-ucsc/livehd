@@ -365,25 +365,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     flops.push_back(std::move(f));
   }
 
-  // VCD reset polarity is taken from the design: if any flop has an active-low
-  // reset (`negreset` known-true) the reset waveform is active-low (starts at 0,
-  // deasserts to 1). Mixed polarities are not split yet (single reset for now).
-  bool reset_active_low = false;
-  for (const auto& f : flops) {
-    if (auto np = get_driver(find_sink_pin(f.node, "negreset"));
-        !np.is_invalid() && is_const_pin(np) && !hydrate_const(np).is_known_false()) {
-      reset_active_low = true;
-      break;
-    }
-  }
-
-  // Identify the top-level clock / reset INPUT ports -- the nets feeding the
-  // flops' clock_pin / reset_pin. In a cycle-based sim they are normally just
-  // input ports forced to 0 by the driver (which is exactly why the clock never
-  // toggled and the reset never asserted). We instead trace them as a dedicated
-  // clock waveform + reset waveform (not as ordinary io signals), and drive the
-  // reset port from the configured window so the reset is functional.
-  std::string clk_field, rst_field;
+  // Identify the top-level clock INPUT port -- the net feeding the flops'
+  // clock_pin. In a cycle-based sim it is otherwise just an input forced to 0
+  // (which is why the clock never toggled), so we trace it as a dedicated clock
+  // waveform driven by `step` rather than as an ordinary io signal. Reset is NOT
+  // special: it is an ordinary input the testbench pokes (`acc.reset = ...`) and
+  // is traced like any other input.
+  std::string clk_field;
   {
     absl::flat_hash_map<pin_key_t, std::string> in_pin_field;
     for (const auto& io : ios) {
@@ -395,46 +383,28 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         in_pin_field[p.get_class_index()] = io.field;
       }
     }
-    auto resolve = [&](const hhds::Node_class& node, std::string_view pin) -> std::string {
-      auto d = get_driver(find_sink_pin(node, pin));
-      if (d.is_invalid()) {
-        return {};
-      }
-      auto it = in_pin_field.find(d.get_class_index());
-      return it == in_pin_field.end() ? std::string{} : it->second;
-    };
     for (const auto& f : flops) {
-      if (clk_field.empty()) {
-        clk_field = resolve(f.node, "clock_pin");
-      }
-      if (rst_field.empty()) {
-        rst_field = resolve(f.node, "reset_pin");
-      }
-      if (!clk_field.empty() && !rst_field.empty()) {
-        break;
-      }
-    }
-    // Name fallback for the common `clock`/`reset` ports if the trace missed.
-    auto has_input = [&](std::string_view nm) {
-      for (const auto& io : ios) {
-        if (io.is_input && io.field == nm) {
-          return true;
+      auto d = get_driver(find_sink_pin(f.node, "clock_pin"));
+      if (!d.is_invalid()) {
+        auto it = in_pin_field.find(d.get_class_index());
+        if (it != in_pin_field.end()) {
+          clk_field = it->second;
+          break;
         }
       }
-      return false;
-    };
-    if (clk_field.empty() && has_input("clock")) {
-      clk_field = "clock";
     }
-    if (rst_field.empty() && has_input("reset")) {
-      rst_field = "reset";
+    if (clk_field.empty()) {  // name fallback for the common `clock` port
+      for (const auto& io : ios) {
+        if (io.is_input && io.field == "clock") {
+          clk_field = "clock";
+          break;
+        }
+      }
     }
   }
-  // The VCD clock/reset waveform labels default to the real port names (so a
-  // plain `tick N {}` already shows the right names); a `tick clocks=()/resets=()`
-  // clause can override the label at run time.
+  // The VCD clock waveform label defaults to the real port name; a `tick
+  // clocks=(name=ratio)` clause can override the label at run time.
   const std::string clk_label = clk_field.empty() ? "clock" : clk_field;
-  const std::string rst_label = rst_field.empty() ? "reset" : rst_field;
 
   // ---- memories (Ntype_op::Memory -> std::array<Slop<bits>,size> member) ----
   struct MemPort {
@@ -579,8 +549,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
   hout->append("  };\n");
 
+  // Persistent input latch + last-output snapshot. The testbench pokes inputs
+  // (`acc.x = v` -> __in.x), advances with `step()`, and peeks outputs
+  // (`acc.y` -> __out.y); internal registers are read as plain members
+  // (`acc.total`). Keeping these in the instance (not the driver) means a future
+  // state copy / checkpoint captures them too.
+  hout->append("  In  __in{};\n");
+  hout->append("  Out __out{};\n");
+
   // ---- VCD trace state (compile.sim.vcd): traces In, Out, and flop state of
-  // this (top) module. Lazily opens the file on the first cycle(). ----
+  // this (top) module. Lazily opens the file on the first cycle(). The clock is
+  // the one signal NOT traced as an ordinary io port -- it gets the synthetic
+  // `__vv_clk` waveform driven by `step`; reset and every other input trace
+  // normally (reset is just a poked input now). ----
   struct VcdSig {
     std::string var, vname, accessor;
     int         bits;
@@ -597,8 +578,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
     };
     for (const auto& io : ios) {
-      if (io.is_input && io.field != clk_field && io.field != rst_field) {
-        add(io.field, io.bits, absl::StrCat("in.", io.field));  // clock/reset get the dedicated waveform
+      if (io.is_input && io.field != clk_field) {
+        add(io.field, io.bits, absl::StrCat("in.", io.field));  // clock gets the dedicated waveform
       }
     }
     for (const auto& io : ios) {
@@ -612,31 +593,46 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         add(s, f.bits, s, f.posedge);
       }
     }
-    // Runtime-settable VCD output path. Defaults to the compile-time
-    // `compile.sim.vcd=FILE` path; a sentinel ("1"/"true", used by `lhd sim`)
-    // leaves it empty so the driver sets a per-test path before the first cycle.
-    std::string vcd_baked = (vcd_file == "1" || vcd_file == "true") ? std::string{} : vcd_file;
-    hout->append(absl::StrCat("  std::string __vcd_path = \"", vcd_baked, "\";\n"));
     hout->append("  std::unique_ptr<vcd::VCDWriter> __vcd;\n");
-    hout->append("  vcd::VarPtr __vv_clk;\n  vcd::VarPtr __vv_rst;\n");
+    hout->append("  vcd::VarPtr __vv_clk;\n");
     for (const auto& v : vsig) {
       hout->append(absl::StrCat("  vcd::VarPtr ", v.var, ";\n"));
     }
   }
 
-  // Clock/reset waveform CONFIG + the functional reset window. Emitted for the
-  // top module whether or not a VCD is dumped, so the reset asserts identically
-  // in both cases (the driver sets ratio/window/names from a `tick clocks=(..)
-  // resets=(..)` clause). __vcd_tick is the period counter (advances every
-  // cycle() on the top); it doubles as the VCD time base when tracing.
-  if (is_top) {
+  // Uniquify the clock waveform LABEL against the traced signal names, so a user
+  // signal literally named e.g. "clock" can't duplicate the synthetic clock var
+  // at VCD registration (vsig is empty unless tracing, so this is a no-op without
+  // VCD).
+  auto uniquify_label = [&](const std::string& label) {
+    auto taken = [&](const std::string& s) {
+      for (const auto& v : vsig) {
+        if (v.vname == s) {
+          return true;
+        }
+      }
+      return false;
+    };
+    if (!taken(label)) {
+      return label;
+    }
+    for (int i = 0;; ++i) {
+      auto cand = absl::StrCat(label, "_vcd", i);
+      if (!taken(cand)) {
+        return cand;
+      }
+    }
+  };
+  const std::string clk_name_baked = uniquify_label(clk_label);
+
+  // Clock waveform config + the VCD path / period counter. Plain scalars on every
+  // module; the driver sets the path + clock ratio/name on each instance.
+  {
+    std::string vcd_baked = (vcd_file == "1" || vcd_file == "true") ? std::string{} : vcd_file;
+    hout->append(absl::StrCat("  std::string __vcd_path = \"", vcd_baked, "\";\n"));
     hout->append("  unsigned __vcd_tick = 0;       // clock periods elapsed (10 VCD time-units each)\n");
-    hout->append(absl::StrCat("  std::string __clk_name = \"", clk_label, "\";\n"));
-    hout->append(absl::StrCat("  std::string __rst_name = \"", rst_label, "\";\n"));
+    hout->append(absl::StrCat("  std::string __clk_name = \"", clk_name_baked, "\";\n"));
     hout->append("  unsigned __clk_ratio = 1;      // VCD ticks per clock period\n");
-    hout->append("  unsigned __rst_ticks = 0;      // ticks the reset stays asserted\n");
-    hout->append("  unsigned __rst_base  = 0;      // tick at which the reset window starts\n");
-    hout->append(absl::StrCat("  bool __rst_active_low = ", reset_active_low ? "true" : "false", ";\n"));
   }
 
   // ---- method declarations, then close the struct (bodies follow in the .cpp) ----
@@ -645,6 +641,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
   hout->append("  void reset_cycle();\n");
   hout->append("  Out cycle(In in);\n");
+  // one clock edge: cycle() commits next-state (and dumps the pre-edge VCD
+  // sample), then peek() recomputes the outputs from the just-committed state so
+  // `acc.<out>` reads the POST-edge value. (peek saves/restores flops+mems and
+  // suppresses VCD, so it has no net effect besides refreshing __out.)
+  hout->append("  void step() { cycle(__in); __out = peek(__in); }\n");
   hout->append("  Out peek(In in);  // post-edge outputs (current state); restores state, no VCD\n");
   hout->append("};\n");
 
@@ -653,7 +654,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     fout->append("void ", mod, "::__vcd_init() {\n");
     fout->append("  __vcd = std::make_unique<vcd::VCDWriter>(__vcd_path, vcd::makeVCDHeader());\n");
     fout->append(absl::StrCat("  __vv_clk = __vcd->register_var(\"", mod, "\", __clk_name, vcd::VariableType::wire, 1);\n"));
-    fout->append(absl::StrCat("  __vv_rst = __vcd->register_var(\"", mod, "\", __rst_name, vcd::VariableType::wire, 1);\n"));
     for (const auto& v : vsig) {
       fout->append(
           absl::StrCat("  ", v.var, " = __vcd->register_var(\"", mod, "\", \"", v.vname, "\", vcd::VariableType::wire, ", v.bits, ");\n"));
@@ -686,18 +686,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   fout->append("}\n");
 
   // ---- cycle ----
+  // Reset is an ordinary input the testbench pokes into `in` (via step()/__in);
+  // no special override here. The flop next-state logic reads it through the
+  // normal reset_pin path below.
   fout->append(mod, "::Out ", mod, "::cycle(In in) {\n");
-  if (is_top && !rst_field.empty()) {
-    // Structural reset: override the reset port from the configured window so the
-    // flops actually reset while the reset is asserted (the testbench leaves it
-    // at 0). __vcd_tick is this period's tick (it only advances at the very end
-    // of cycle()), so the value matches the reset waveform dumped this cycle.
-    fout->append("    {\n");
-    fout->append("      const bool __rst_on = (__vcd_tick - __rst_base) < __rst_ticks;\n");
-    fout->append(absl::StrCat("      in.", rst_field,
-                              " = decltype(in.", rst_field, ")::create_integer((__rst_on != __rst_active_low) ? 1 : 0);\n"));
-    fout->append("    }\n");
-  }
   // map input ports and flop q outputs into pin2var
   for (const auto& io : ios) {
     if (!io.is_input) {
@@ -881,19 +873,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   //   base + 3      : posedge-sourced data settles (just after the rising edge)
   //   base + half   : clock falls 1->0   (half = ratio*5, the period midpoint)
   //   base + half+3 : negedge-sourced data settles (just after the falling edge)
-  // change() only writes when a value differs from the previous timestamp, so
-  // re-emitting the (held) reset level every period is free.
+  // change() only writes when a value differs from the previous timestamp.
   if (vcd_on) {
     fout->append("    if (!__vcd && !__vcd_path.empty()) __vcd_init();\n");
     fout->append("    if (__vcd) {\n");
     fout->append("      const unsigned __b    = __vcd_tick * 10;\n");
     fout->append("      const unsigned __half = (__clk_ratio > 0 ? __clk_ratio : 1) * 5;\n");
-    fout->append("      const bool  __rst_on = (__vcd_tick - __rst_base) < __rst_ticks;\n");
-    fout->append("      const char* __rstv   = (__rst_on != __rst_active_low) ? \"1\" : \"0\";\n");
-    // rising clock edge + this period's reset level
+    // rising clock edge (reset and other inputs are ordinary traced signals)
     fout->append("      vcd::global_timestamp = __b;\n");
     fout->append("      __vcd->change(__vv_clk, \"1\");\n");
-    fout->append("      __vcd->change(__vv_rst, __rstv);\n");
     // posedge-sourced data, just after the rising edge
     fout->append("      vcd::global_timestamp = __b + 3;\n");
     for (const auto& v : vsig) {
@@ -915,12 +903,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     fout->append("    }\n");
   }
-  // Advance the period counter every cycle on the top -- independent of VCD, so
-  // the reset window (read at the top of cycle()) tracks identically whether or
-  // not a trace is dumped.
-  if (is_top) {
-    fout->append("    __vcd_tick += (__clk_ratio > 0 ? __clk_ratio : 1);\n");
-  }
+  // Advance the period counter every cycle -- independent of VCD and of is_top,
+  // so the reset window (read at the top of cycle()) tracks identically whether
+  // or not a trace is dumped. The member exists on every module.
+  fout->append("    __vcd_tick += (__clk_ratio > 0 ? __clk_ratio : 1);\n");
 
   // commit flops (+ pipe stages) at the clock edge
   for (const auto& f : flops) {
@@ -980,9 +966,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   for (const auto& m : mems) {
     fout->append(absl::StrCat("    auto _pk_", m.member, " = ", m.member, ";\n"));
   }
-  if (is_top) {
-    fout->append("    auto _pk_tick = __vcd_tick;\n");  // peek must not perturb the period counter
-  }
+  fout->append("    auto _pk_tick = __vcd_tick;\n");  // peek must not perturb the period counter
   if (vcd_on) {
     fout->append("    auto _pk_vcd = std::move(__vcd); auto _pk_vp = __vcd_path; __vcd_path.clear();\n");
   }
@@ -996,9 +980,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   for (const auto& m : mems) {
     fout->append(absl::StrCat("    ", m.member, " = _pk_", m.member, ";\n"));
   }
-  if (is_top) {
-    fout->append("    __vcd_tick = _pk_tick;\n");
-  }
+  fout->append("    __vcd_tick = _pk_tick;\n");
   if (vcd_on) {
     fout->append("    __vcd = std::move(_pk_vcd); __vcd_path = _pk_vp;\n");
   }

@@ -32,8 +32,9 @@ cat > "$W/good.prp" <<'EOF'
 */
 mod nn(a:u8) -> (s:u8@[0]) { s = a }
 test nn.t(cycles:u20 = 20) {
+  mut acc = nn
   mut v = 0
-  tick cycles { const r = nn(a=1); v = r }
+  tick cycles { acc.a = 1; step; v = acc.s }
   assert(v == 1, "v must be 1")
 }
 EOF

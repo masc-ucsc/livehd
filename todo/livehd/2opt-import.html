@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2opt-import — Lazy --top resolution: open only the inputs XXX needs</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2opt-import</strong> Lazy <code>--top</code> resolution — open only the inputs <code>XXX</code> needs</h1>
+
+<p><code>lhd compile --top XXX file1 file2 ln:ln1 ln:ln2 …</code> today
+  <strong>parses and elaborates every input</strong>, then picks <code>XXX</code> out of the
+  result with a pure post-elaboration name filter
+  (<code>filter_top</code>, <a href="../../lhd/lhd_kernel.cpp"><code>lhd_kernel.cpp:1487-1505</code></a>).
+  There is <em>no</em> early pruning: <code>pyrope_parse</code> parses all of
+  <code>opts.files</code> and fully <code>Forest::load</code>s every <code>ln:</code> directory
+  before <code>--top</code> is even consulted. With many <code>ln:</code> inputs this
+  body-loads forests that <code>XXX</code> never instantiates.</p>
+
+<p><strong>2opt-import</strong> adds a cheap <em>resolve pre-pass</em> in front of the
+  compile pipeline. From <code>--top XXX</code> it finds the <strong>single input that
+  declares <code>XXX</code></strong> (a <code>pub</code> decl in a <code>.prp</code>, or an
+  exported unit in an <code>ln:</code> manifest), then walks the <strong>transitive import
+  closure</strong> from that seed — opening an input only when it is actually reachable.
+  Everything unreachable costs at most a <code>manifest.json</code> read (for <code>ln:</code>)
+  or a lexer pass (for <code>.prp</code>), never a forest body load or a full parse. The
+  pipeline downstream is unchanged; it just receives a pruned input set.</p>
+
+<h2>Mental model (one line)</h2>
+<p>Resolve <code>--top</code> <strong>before</strong> elaboration, not after: locate the one
+  input that declares <code>XXX</code>, then chase only the imports it transitively needs —
+  unreachable <code>ln:</code> forests are never body-loaded, unreachable <code>.prp</code>
+  files are never parsed.</p>
+
+<h2>Cost model (the constraint that shapes this)</h2>
+<ul>
+<li><strong>Parsing a <code>.prp</code> is acceptable.</strong> The expensive thing to avoid
+  is body-loading <code>ln:</code> forests that the top never touches.</li>
+<li><strong>One <code>ln:</code> open is cheap, but there can be many.</strong> The cost is
+  <em>aggregate</em>: eagerly <code>Forest::load</code>-ing 50 <code>ln:</code> dirs when
+  <code>XXX</code> reaches 3 of them is the waste. So the design must body-load only the
+  reachable subset.</li>
+<li><strong>The lever already on disk:</strong> every <code>ln:</code> directory carries a
+  <code>manifest.json</code> sibling of <code>forest.txt</code> with a per-unit <code>pub</code>
+  index (<code>name</code>, <code>kind</code>, <code>url</code>) and the unit names
+  (<code>write_manifest</code>, <a href="../../lhd/lhd_kernel.cpp"><code>lhd_kernel.cpp:721-731</code></a>;
+  populated from <code>ln-&gt;get_pub_list()</code> at <code>798-806</code>). Reading that JSON
+  answers <em>"does this <code>ln:</code> export <code>XXX</code>?"</em> with <strong>zero
+  <code>Forest::load</code></strong>. That is the cheap index this task is built on.</li>
+</ul>
+
+<h2>Depends on / relates to</h2>
+<ul>
+<li><a class="xref" href="2i-import.html">2i-import</a> — its landed subtask <strong>S1</strong>
+  already built the lazy transitive <code>.prp</code> discovery this task reuses
+  (<code>discover_imports</code>, <a href="../../lhd/lhd_kernel.cpp"><code>lhd_kernel.cpp:1640-1759</code></a>):
+  a fixpoint that parses a seed, collects its imports, resolves each to a sibling
+  <code>&lt;name&gt;.prp</code>, parses the new file, repeats. 2opt-import changes only
+  <em>what seeds it</em> and teaches it to cross <code>ln:</code> boundaries. The two tasks
+  are orthogonal: 2i-import is about <em>link-time identity / dedup / rename</em>; 2opt-import
+  is about <em>not opening inputs you don't need to reach the top</em>.</li>
+<li><code>lhd scan</code> — the lexer-only import-discovery primitive
+  (<code>Prp2lnast::scan_imports</code>, <a href="../../inou/prp/prp2lnast.cpp"><code>prp2lnast.cpp:8565-8616</code></a>,
+  <code>Lexer(buf).tokenize()</code> at <code>8570</code>). This task adds its sibling — a
+  lexer-only <code>scan_pubs</code> for <em>declared</em> names — and starts using both on the
+  compile path (compile currently ignores <code>scan_imports</code> and walks the
+  fully-parsed LNAST instead, via <code>collect_imports</code>,
+  <a href="../../lhd/lhd_kernel.cpp"><code>lhd_kernel.cpp:1961-1991</code></a>).</li>
+<li>The <code>ln:</code> persisted side-channels (<code>io_meta</code> / <code>bw_meta</code> in
+  the manifest, <a href="../../lhd/lhd_kernel.cpp"><code>lhd_kernel.cpp:650-654, 814-858</code></a>)
+  — already let a loaded <code>mod</code>/<code>pipe</code> import skip re-elaboration
+  (<code>set_pre_elaborated</code>, <code>1787-1790</code>). Orthogonal but adjacent: this task
+  decides <em>whether</em> to load a forest at all; pre-elaboration decides how cheaply to use
+  one once loaded.</li>
+</ul>
+
+<h2>What already exists (the 80%)</h2>
+<ul class="subtasks">
+<li><strong>Lazy transitive <code>.prp</code> closure.</strong> <code>discover_imports</code>
+  is already a fixpoint loop (seed → <code>collect_imports</code> → <code>find_prp</code> in the
+  importer's own directory → parse the new file → repeat,
+  <a href="../../lhd/lhd_kernel.cpp"><code>lhd_kernel.cpp:1640-1759</code></a>). The "follow
+  only what you import" machinery for source is built — it is just <strong>seeded with all of
+  <code>opts.files</code></strong> (<code>1670-1673</code>) and <strong>skips
+  <code>ln:</code>/<code>lg:</code> edges</strong> (<code>continue</code> at <code>1693-1695</code>).</li>
+<li><strong>Cheap <code>ln:</code> export index.</strong> <code>manifest.json</code> lists unit
+  names + per-unit <code>pub</code> entries (name/kind/url) without touching any
+  <code>body.bin</code> (<code>write_manifest</code>, <code>721-731</code>; read back in
+  <code>load_ln_dir</code> at <code>893-907</code>). <code>forest.txt</code> independently lists
+  <code>tree_io &lt;idx&gt; &lt;name&gt;</code> declarations, so unit existence is cheap too.</li>
+<li><strong>Lexer-only scan.</strong> <code>scan_imports</code> tokenizes a <code>.prp</code> and
+  returns its raw import strings without a parse or an LNAST build; import args are comptime
+  string literals, statically extractable.</li>
+<li><strong><code>--top</code> is a name filter.</strong> <code>filter_top</code> selects from the
+  already-elaborated units by <code>get_top_module_name()==XXX</code> and throws if absent.
+  Nothing about it prunes inputs.</li>
+</ul>
+
+<h2>What's missing (the new surface)</h2>
+<ul class="subtasks">
+<li><strong>No declared-name scan for <code>.prp</code>.</strong> <code>scan_imports</code>
+  extracts <em>imports</em>, not <em>exports</em>. There is no <code>scan_pubs</code>. But
+  <code>pub</code> is a real lexer keyword (<code>Keyword::kw_pub</code>,
+  <code>prpparse/prp_keywords.def</code>), so a lexer-only declared-name scan is a direct
+  mirror of <code>scan_imports</code>.</li>
+<li><strong><code>discover_imports</code> is seeded wide and stops at <code>ln:</code>.</strong> It
+  starts from every file and never follows <code>ln:</code>/<code>lg:</code> import edges, so an
+  <code>ln:</code> dependency must be listed on the CLI and is fully loaded.</li>
+<li><strong><code>ln:</code> import <em>edges</em> are not persisted.</strong> The manifest carries
+  names/pubs/<code>io_meta</code>/<code>bw_meta</code> but <em>no</em> import list. To learn what an
+  <code>ln:</code> unit imports you must <code>Forest::load</code> its body and run
+  <code>collect_imports</code> — so <code>ln:</code>→<code>ln:</code> chasing is not cheap today.</li>
+<li><strong><code>Forest::load</code> is all-or-nothing.</strong> It loads every
+  <code>body.bin</code> in the directory (<a href="../../hhds/tree_serial.cpp"><code>tree_serial.cpp:512-524</code></a>);
+  there is no load-one-unit-by-name API. So once you decide you need <em>one</em> unit from an
+  <code>ln:</code> dir, you currently pull all of that dir's bodies. (Skipping the
+  <em>unreachable dirs</em> is the main win regardless; this is a finer-grained follow-on.)</li>
+</ul>
+
+<h2>Design — the resolve pre-pass</h2>
+
+<h3>Phase 0 — build a <code>name → provider</code> index (no bodies, no full parse)</h3>
+<p>For each CLI input, record which top-level names it provides and what it imports, using only
+  cheap reads:</p>
+<ul>
+<li><strong><code>ln:DIR</code>:</strong> read <em>only</em> <code>DIR/manifest.json</code> →
+  each <code>pub</code> name → <code>(ln:DIR, unit)</code>, plus its <code>kind</code> /
+  <code>lg</code> / <code>url</code>. No <code>Forest::load</code>.</li>
+<li><strong><code>.prp</code>:</strong> run <code>scan_pubs</code> (new, lexer-only) → each
+  <code>pub</code> name (and its <code>lg="…"</code> override, if any) → the <code>.prp</code> file;
+  and reuse <code>scan_imports</code> for that file's import strings.</li>
+</ul>
+<p>The result is a provider map over <em>all</em> inputs, built from manifests + lexer passes
+  only — no forest bodies, no elaboration.</p>
+
+<h3>Phase 1 — locate the top, early and precisely</h3>
+<p>Look up <code>XXX</code> in the index. <strong>Not found</strong> → a fast, exact error
+  (<em>"top <code>XXX</code> is not declared by any input"</em>) <em>before</em> any heavy work —
+  strictly better than today's "parse everything, then <code>filter_top</code> throws."
+  <strong>Found</strong> → the single seed: one <code>.prp</code> file, or one <code>ln:</code> unit
+  and its dir.</p>
+
+<h3>Phase 2 — lazy transitive closure from the seed</h3>
+<p>This is the existing <code>discover_imports</code> fixpoint with two edits:</p>
+<ul>
+<li>Seed it with the <strong>one</strong> declaring input from Phase 1, not all
+  <code>opts.files</code>.</li>
+<li>Teach it to <strong>follow <code>ln:</code> edges</strong> (instead of <code>continue</code>):
+  resolve each import through the Phase-0 index, and <code>Forest::load</code> <em>only</em> the
+  <code>ln:</code> dirs on the path. For an <code>ln:</code> unit's own transitive deps, recover its
+  imports — either from a manifest import-edge list (decision <strong>D1</strong>) or by loading its
+  body and running <code>collect_imports</code>.</li>
+</ul>
+
+<h3>Phase 3 — hand the pruned set to the existing pipeline</h3>
+<p><code>pyrope_parse</code> / <code>lower_lnasts</code> / <code>tolg</code> run on only the reached
+  files and <code>ln:</code> units. Unreached inputs were never parsed or body-loaded. The rest of
+  compile is untouched; <code>filter_top</code> still selects <code>XXX</code> at the end (now from a
+  smaller set).</p>
+
+<h2>Decisions to settle</h2>
+<ul class="subtasks">
+<li><strong>D1 — persist <code>ln:</code> import edges, or full-load each touched dir?</strong>
+  To chase an <code>ln:</code> unit's transitive deps you need its imports, which are not in the
+  manifest today. <em>Option A:</em> accept a full <code>Forest::load</code> per <em>touched</em>
+  <code>ln:</code> dir + <code>collect_imports</code> (still skips all unreachable dirs — the main
+  win). <em>Option B (recommended):</em> add a per-unit <code>import</code> edge list to
+  <code>write_manifest</code> (a small additive change) so the <em>entire</em> closure is computable
+  from manifests, and bodies load only for the final reachable set. B makes the design fully lazy,
+  which is the whole point when there are many <code>ln:</code> inputs.</li>
+<li><strong>D2 — does <code>--top XXX</code> match the entity name or the <code>lg=</code> artifact
+  name?</strong> <code>filter_top</code> matches <code>get_top_module_name()</code> (the entity),
+  <em>not</em> <code>get_graph_name()</code> (the <code>lg=</code> override,
+  <a href="../../lnast/lnast.hpp"><code>lnast.hpp:468-470</code></a>). So an <code>lg</code>-renamed
+  top is not selectable by its <code>lg</code> name today. <code>scan_pubs</code> should index
+  <em>both</em>; decide whether <code>--top</code> may match the <code>lg</code> name and keep the
+  index and <code>filter_top</code> consistent. (Likely yes — the artifact name is what a user
+  thinks of as the module.)</li>
+<li><strong>D3 — selective <code>ln:</code> body load (later).</strong> If <code>ln:</code> dirs hold
+  many units and you need one, a load-one-unit-by-name path (<code>load_body</code> is already
+  per-tree, just not exposed by name) avoids loading siblings. Treat as an optional optimization
+  after the dir-level pruning lands, not part of v1.</li>
+<li><strong>D4 — <code>scan_pubs</code> lexer-only vs full streaming parse.</strong> The user
+  accepts parsing <code>.prp</code>, but for the Phase-0 index (run over <em>all</em> <code>.prp</code>
+  inputs) a lexer-only scan is much cheaper and is a trivial mirror of <code>scan_imports</code>.
+  Recommended: lexer-only <code>scan_pubs</code> for the index; full parse only the reachable files
+  in Phase 2.</li>
+</ul>
+
+<h2>Traps</h2>
+<ul class="subtasks">
+<li><strong>The reachable set must be a <em>superset</em> of what is actually instantiated.</strong>
+  Over-opening is fine; under-opening is a missing-module miscompile. When the seed-finder or the
+  closure is unsure, include. Equivalence with today's eager path is the correctness bar.</li>
+<li><strong>Imports are over-approximated, by design.</strong> <code>scan_imports</code> /
+  <code>collect_imports</code> return imports under <code>if false { … }</code> and nested scopes
+  (<code>collect_imports</code> walks the whole <code>pre_order</code>,
+  <a href="../../lhd/lhd_kernel.cpp"><code>lhd_kernel.cpp:1955-1991</code></a>). The closure may open
+  a few files a constprop-dead branch would have skipped — acceptable, and it matches the existing
+  behavior. Conditional imports cannot be pruned without elaboration.</li>
+<li><strong>Re-export bundles need no special handling at the index level.</strong> A
+  <code>pub const my_reexport = (f1=my_exp1, f2=xx)</code> is recorded simply as the file exporting
+  <code>my_reexport</code>; its dependency on the imported <code>xx</code> is captured because
+  <code>xx = import("…")</code> is one of that file's <em>imports</em>. The transitive closure over
+  imports pulls the re-exported pieces in for free — do not try to resolve bundle members in the
+  index.</li>
+<li><strong>Names are case-sensitive / FS-independent.</strong> Import resolution deliberately does
+  not let <code>import("stem")</code> bind a file named <code>Stem.prp</code>
+  (<code>find_prp</code>, <a href="../../lhd/lhd_kernel.cpp"><code>lhd_kernel.cpp:1639-1666</code></a>).
+  Keep <code>scan_pubs</code> and the provider index exact-match — consistent with the
+  case-sensitive-names rule already in the frontend.</li>
+<li><strong>No freshness check on reused <code>ln:</code> interfaces.</strong> <code>content_hash</code>
+  is written but never validated on load; <code>restore_unit_meta</code> trusts persisted
+  <code>io_meta</code> blindly (<a href="../../lhd/lhd_kernel.cpp"><code>lhd_kernel.cpp:711, 814-858</code></a>).
+  This task inherits that hazard but does not fix it; flag it if D1 grows the manifest's authority.</li>
+<li><strong>Ambiguity stays an error.</strong> If <code>XXX</code> (or any followed import name)
+  is provided by two distinct inputs, keep the existing <code>import-ambiguous</code> behavior
+  (<a href="../../lhd/lhd_kernel.cpp"><code>lhd_kernel.cpp:1724-1747</code></a>) — never silent
+  first-hit — now detected at index time instead of after parse.</li>
+</ul>
+
+<h2>Files / where to touch</h2>
+<ul>
+<li><a href="../../inou/prp/prp2lnast.cpp"><code>inou/prp/prp2lnast.cpp</code></a> /
+  <a href="../../inou/prp/prp2lnast.hpp"><code>prp2lnast.hpp</code></a> — new
+  <code>scan_pubs</code> next to <code>scan_imports</code> (<code>8565-8616</code>): lexer-only,
+  match <code>Keyword::kw_pub</code>, capture the declared name + the optional
+  <code>::[lg="…"]</code> override, plus reuse the import strings.</li>
+<li><a href="../../lhd/lhd_kernel.cpp"><code>lhd/lhd_kernel.cpp</code></a> — the resolve pre-pass:
+  a Phase-0 provider index (read <code>ln:</code> <code>manifest.json</code> + <code>scan_pubs</code>
+  over <code>.prp</code>), Phase-1 seed lookup, and the two edits to <code>discover_imports</code>
+  (<code>1640-1759</code>): seed from the declaring input, follow <code>ln:</code> edges. The
+  <code>load_ln_dir</code> call (<code>862-921</code>) becomes demand-driven (only reachable dirs).</li>
+<li><a href="../../lhd/lhd_kernel.cpp"><code>write_manifest</code></a> (<code>692-742</code>) — if
+  D1=Option B, add a per-unit <code>import</code> edge array; <code>load_ln_dir</code> reads it.</li>
+<li><a href="../../lhd/lhd_options.cpp"><code>lhd/lhd_options.cpp</code></a> — no change to
+  positional routing (<code>73-92</code>); the pre-pass consumes the existing
+  <code>opts.files</code> / <code>opts.in_dirs</code> split.</li>
+<li>(D3, later) <a href="../../hhds/tree_serial.cpp"><code>hhds/tree_serial.cpp</code></a> — a
+  selective load-one-tree-by-name path alongside the all-bodies <code>load</code> (<code>512-524</code>).</li>
+</ul>
+
+<h2>Subtasks — suggested slices</h2>
+<ul class="subtasks">
+<li><strong>S1 — <code>scan_pubs</code> + provider index.</strong> Add the lexer-only declared-name
+  scan and build the in-memory <code>name → provider</code> map from <code>.prp</code>
+  <code>scan_pubs</code> + <code>ln:</code> manifest reads. Unit-test it against fixtures with mixed
+  <code>.prp</code> and <code>ln:</code> inputs (assert the right provider, including an
+  <code>lg</code>-renamed one and an ambiguity error). No pipeline change yet — pure index +
+  diagnostics.</li>
+<li><strong>S2 — seed <code>discover_imports</code> from the top.</strong> Use the index to find the
+  declaring input for <code>--top XXX</code> and seed the existing <code>.prp</code> fixpoint with just
+  that file (still <code>ln:</code>-blind). Reachable <code>.prp</code> set shrinks; unreachable files
+  are no longer parsed. Equivalence test: same emitted Verilog as the eager path on a multi-file
+  project.</li>
+<li><strong>S3 — follow <code>ln:</code> edges + demand-load.</strong> Resolve imports that point at
+  <code>ln:</code> units through the index and <code>Forest::load</code> only the reachable dirs
+  (D1 Option A: load-then-<code>collect_imports</code>). Now unreachable <code>ln:</code> forests are
+  never body-loaded — the headline win. Test with many <code>ln:</code> inputs where the top reaches
+  a few (assert the others' bodies are never loaded — e.g. a load counter / log).</li>
+<li><strong>S4 (D1 Option B) — persist <code>ln:</code> import edges.</strong> Add the per-unit
+  import list to the manifest so the whole closure is computable from manifests; body-load only the
+  final reachable set. Round-trip test: edges survive save/load and the closure matches S3's.</li>
+<li><strong>S5 (D3, optional) — selective <code>ln:</code> body load.</strong> Load one unit by name
+  instead of the whole forest, for large multi-unit <code>ln:</code> dirs.</li>
+</ul>
+
+<h2>Tests</h2>
+<ul>
+<li><strong>Equivalence (the correctness bar):</strong> for a project with several <code>.prp</code>
+  files and several <code>ln:</code> inputs, <code>lhd compile --top XXX …</code> through the lazy
+  pre-pass emits <strong>byte-identical</strong> Verilog (and identical <code>ln:</code>) to the eager
+  path. Run across a top that reaches all inputs (no pruning) and a top that reaches a subset.</li>
+<li><strong>Pruning proof:</strong> a multi-<code>ln:</code> case where <code>XXX</code> reaches only
+  some dirs — assert (via a load counter or a log line in <code>load_ln_dir</code>) that the
+  unreachable forests are never body-loaded and the unreachable <code>.prp</code> files are never
+  parsed.</li>
+<li><strong>Seed-not-found:</strong> <code>--top XXX</code> with no input declaring <code>XXX</code>
+  errors fast, before any parse/load, with a precise message listing where it looked.</li>
+<li><strong>Ambiguity:</strong> <code>XXX</code> (or a followed import) provided by two inputs →
+  <code>import-ambiguous</code> at index time, candidates listed (parity with
+  <code>lhd_kernel.cpp:1724-1747</code>).</li>
+<li><strong><code>lg</code>-rename selection (D2):</strong> a top declared
+  <code>pub comb f::[lg="chip_top"]</code> selected by whichever name D2 settles on, resolved without
+  parsing unrelated files.</li>
+<li><strong>Over-approximation safety:</strong> an <code>import</code> under <code>if false</code> is
+  still followed (no under-open); a re-export bundle's pieces are reached through the file's imports.</li>
+</ul>
+</main>
+<footer>LiveHD TODO · <a href="../index.html">index</a></footer>
+</body>
+</html>

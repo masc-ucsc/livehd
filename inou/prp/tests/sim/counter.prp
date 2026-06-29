@@ -2,21 +2,12 @@
 :name: counter
 :type: simulation
 */
-// Simulation example: a free-running up-counter driven from a `test` block.
-//
-// The DUT is *called inside* the `tick` loop, once per cycle: each `tick`
-// iteration advances one clock, so the call returns that cycle's output (no
-// `step` inside a `tick` -- that would advance a second clock). The output is
-// captured into an outer `mut` and checked with an `assert` at the end of
-// simulation. No poke/sigref are used.
-//
-// VCD (`--set sim.vcd=true`): the clock toggles once per period and the
-// optional `clocks=(name=ratio)` / `resets=(name=ticks)` clauses on `tick`
-// shape the waveform. `held_high` below asks for a 1-tick clock named `clock`
-// and a reset named `reset` held active for 2 ticks; `gated` omits the clauses
-// and still gets the default toggling clock. The clock/reset are real input
-// ports (otherwise forced to 0); the reset is driven from the window, so it
-// actually zeroes `count` for those 2 ticks -- the assert below relies on it.
+// Simulation example: a free-running up-counter, driven in the instance/`step`
+// style. The DUT is a persistent instance (`mut acc = counter`): each `tick`
+// iteration pokes this cycle's inputs, advances one clock with `step`, then
+// peeks the output. `clock` is the 0-based cycle index; reset is just an input
+// (`acc.reset = clock < 2`). VCD (`--set sim.vcd=true`) shows the clock toggling
+// and reset/inputs as ordinary traced signals.
 
 mod counter(enable:bool) -> (value:u8@[0]) {
   reg count:u8 = 0
@@ -26,30 +17,34 @@ mod counter(enable:bool) -> (value:u8@[0]) {
   if enable { wrap count += 1 }
 }
 
-// Test 1: enable held high, with the reset asserted for the first 2 ticks. The
-// reset port is real (it zeroes `count`), so `count` stays 0 during the 2-tick
-// reset window and then counts for the remaining cycles -> cycles - 2.
+// Test 1: enable held high, reset asserted for the first 2 cycles. The reset
+// input zeroes `count`, so it stays 0 during the 2-cycle window and then counts
+// for the remaining cycles -> cycles - 2.
 test counter.held_high(cycles:u20=20) {
+  mut acc     = counter
   mut v_final = nil
-  tick cycles clocks=(clock=1) resets=(reset=2) {  // reset held high for 2 ticks, then count
-    const v = counter(enable=true)   // this cycle's output
-    v_final = v
-    puts("counter v:{v}")
+  tick cycles {
+    acc.enable = true
+    acc.reset  = clock < 2        // hold reset for cycles 0 and 1
+    step
+    v_final = acc.value
   }
-  assert(v_final == cycles - 2, "count must be (cycles - reset_ticks) = cycles - 2")
+  assert(v_final == cycles - 2, "count must be (cycles - reset_cycles) = cycles - 2")
 }
 
-// Test 2: enable toggled every cycle for 20 cycles. A test-local golden value
-// mirrors the register's next-state so the end-of-sim assert is self-checking.
+// Test 2: enable toggled every cycle. A test-local golden value mirrors the
+// register's next-state so the end-of-sim assert is self-checking.
 test counter.gated {
-  mut en = false
+  mut acc      = counter
+  mut en       = false
   mut expected = 0
-  mut v_final = nil
+  mut v_final  = nil
   tick 20 {
     en = not en                       // this cycle's enable
     if en { expected = expected + 1 } // golden mirror of count
-    const v = counter(enable=en)
-    v_final = v
+    acc.enable = en
+    step
+    v_final = acc.value
   }
   // enable was high on 10 of the 20 cycles
   assert(v_final == expected, "gated counter disagrees with golden model")

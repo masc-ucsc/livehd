@@ -2,12 +2,10 @@
 :name: fsm_runner
 :type: simulation
 */
-// Simulation example: a small Idle -> Run -> Done FSM with a countdown.
-//
-// Demonstrates the two `tick` shapes (the DUT is called inside the loop, once
-// per cycle, with no inner `step`):
-//   * `tick N { ... break }` : run until a runtime condition, with a watchdog
-//   * `tick N { ... }`       : run a fixed cycle budget
+// Simulation example: a small Idle -> Run -> Done FSM with a countdown, driven
+// in the instance/`step` style. Demonstrates the two `tick` shapes:
+//   * `tick N { ... step ... break }` : run until a runtime condition (watchdog)
+//   * `tick N { ... step ... }`       : run a fixed cycle budget
 // Both check the machine reached Done with an assert at the end of simulation.
 //
 // State is integer-encoded with named comptime constants instead of an `enum`:
@@ -40,13 +38,16 @@ mod runner(start:bool, len:u8) -> (busy:bool@[0], done:bool@[0]) {
 test runner.until_done {
   comptime const LEN = 5
 
-  mut start = true              // one-cycle start pulse
+  mut r          = runner
+  mut start      = true         // one-cycle start pulse
   mut done_final = false
   tick 100 {                    // watchdog bound: never spin forever
-    const o = runner(start=start, len=LEN)
-    start = false               // deassert after the first cycle
-    done_final = o.done
-    if o.done { break }
+    r.start = start
+    r.len   = LEN
+    step
+    start      = false          // deassert after the first cycle
+    done_final = r.done
+    if r.done { break }
   }
   assert(done_final, "runner never reached Done within 100 cycles")
 }
@@ -56,14 +57,17 @@ test runner.until_done {
 test runner.watchdog {
   comptime const LEN = 3
 
-  mut start = true
-  mut seen_done = false
+  mut r          = runner
+  mut start      = true
+  mut seen_done  = false
   mut done_final = false
   tick 16 {                     // fixed cycle budget
-    const o = runner(start=start, len=LEN)
+    r.start = start
+    r.len   = LEN
+    step
     start = false
-    if o.done { seen_done = true }
-    done_final = o.done
+    if r.done { seen_done = true }
+    done_final = r.done
   }
   assert(seen_done, "runner did not finish within the 16-cycle budget")
   assert(done_final, "runner should still be Done at end of simulation")

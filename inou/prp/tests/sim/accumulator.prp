@@ -2,12 +2,10 @@
 :name: accumulator
 :type: simulation
 */
-// Simulation example: a running-sum accumulator fed a changing input.
-//
-// Each `tick` iteration is one cycle: the accumulator is called with this
-// cycle's `din`, the loop advances the clock, and the returned `sum` is
-// captured. A test-local golden value mirrors the accumulated total so the
-// end-of-sim `assert` is self-checking.
+// Simulation example: a running-sum accumulator fed a changing input, driven in
+// the instance/`step` style. Each `tick` iteration pokes `din`, advances the
+// clock with `step`, and peeks `sum`. A test-local golden value mirrors the
+// accumulated total so the end-of-sim `assert` is self-checking.
 
 mod accumulator(din:u8) -> (sum:u32@[0]) {
   reg total:u32 = 0
@@ -18,14 +16,14 @@ mod accumulator(din:u8) -> (sum:u32@[0]) {
 }
 
 test accum.sum {
-  mut i:u8 = 0
+  mut acc      = accumulator
   mut expected = 0
-  mut s_final = nil
+  mut s_final  = nil
   tick 8 {
-    expected = expected + i           // golden mirror: total += din
-    const s = accumulator(din=i)      // this cycle's input is i
-    s_final = s
-    wrap i = i + 1
+    acc.din  = clock            // this cycle's input is the cycle index
+    expected = expected + clock // golden mirror: total += din
+    step
+    s_final = acc.sum
   }
   // total == 0 + 1 + 2 + ... + 7 == 28 after 8 cycles
   assert(s_final == expected, "accumulator disagrees with golden model")

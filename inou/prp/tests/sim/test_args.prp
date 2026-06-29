@@ -19,11 +19,15 @@ mod adder(a:u8, b:u8) -> (s:u8@[0]) {
 }
 
 test adder.params(base:u8 = 10, gain:u8, count:u8 = 5) {
-  // Accumulate `gain` into `base` for `count` cycles (adder is combinational).
+  // Accumulate `gain` into `base` for `count` cycles (adder is combinational, so
+  // each `step` just re-evaluates s = a + b with the current pokes).
+  mut add = adder
   mut acc = base
   tick count {
-    const v = adder(a=acc, b=gain)
-    acc = v
+    add.a = acc
+    add.b = gain
+    step
+    acc = add.s
   }
   // acc == base + count*gain holds for any binding of the parameters ...
   assert(acc == base + count * gain, "acc must equal base + count*gain")
