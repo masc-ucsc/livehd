@@ -122,4 +122,37 @@ echo "$help" | grep -q 'pass.abc.flow=' || fail "pass abc --help: the flow flag 
 echo "$help" | grep -q 'more; `lhd list options pass.abc`' || fail "pass abc --help: >5 flags must show a '... more' pointer -> $help"
 "$LHD" lec --help 2>&1 | grep -q 'options (--set lec.flag=value;' || fail "lec --help: namespaced options header missing"
 
-echo "PASS: lhd list options / describe pass.flag / --set validation / flag-order freedom / per-command --help options"
+# 11. The `sim.*` command namespace (sim_command, not an EPRP pass) lives in the
+# SAME registry as the pass flags, so `lhd list options` / `lhd describe` /
+# `lhd sim --help` all see it (single source of truth = kSimSetOptions). It must
+# stay DISTINCT from the `compile.sim.*` cgen labels, and must never collect a
+# command-path prefix the way an abbreviated pass key does.
+out=$("$LHD" list options)
+echo "$out" | grep -q '"name":"sim.vcd","method":"sim","default":"false"' || fail "sim.vcd namespace option missing/wrong: $out"
+echo "$out" | grep -q '"name":"sim.checkpoint","method":"sim","default":"true"' || fail "sim.checkpoint missing/wrong: $out"
+echo "$out" | grep -q '"name":"sim.checkpoint_min_secs","method":"sim","default":"10"' || fail "sim.checkpoint_min_secs missing/wrong: $out"
+# The cgen `compile.sim.*` labels stay separate (different method, distinct knob).
+echo "$out" | grep -q '"name":"compile.sim.vcd","method":"inou.cgen.sim"' || fail "compile.sim.vcd cgen label missing: $out"
+# `lhd list options sim` (regex) surfaces BOTH namespaces in one place.
+simlist=$("$LHD" list options sim --diag-fmt pretty)
+echo "$simlist" | grep -q '^sim\.checkpoint_min_secs=10' || fail "list options sim dropped sim.checkpoint_min_secs: $simlist"
+echo "$simlist" | grep -q '^compile\.sim\.vcd=' || fail "list options sim dropped compile.sim.vcd: $simlist"
+# describe resolves `sim.flag` to the sim namespace, NOT compile.sim.* (regression:
+# canonical_set_key used to prepend `compile.` because `compile.sim` is a pass).
+"$LHD" describe sim.checkpoint_min_secs | grep -q '"name":"sim.checkpoint_min_secs","kind":"option","method":"sim"' \
+  || fail "describe sim.checkpoint_min_secs must resolve to the sim namespace"
+"$LHD" describe sim.vcd | grep -q '"name":"sim.vcd","kind":"option","method":"sim"' \
+  || fail "describe sim.vcd must be the sim namespace, not compile.sim.vcd"
+"$LHD" describe compile.sim.vcd | grep -q '"name":"compile.sim.vcd","kind":"option","method":"inou.cgen.sim"' \
+  || fail "describe compile.sim.vcd must still reach the distinct cgen label"
+# `lhd sim --help` ends with the standardized options block (like lec/compile),
+# enumerating the sim.* flags instead of a hand-maintained list.
+simhelp=$("$LHD" sim --help 2>&1)
+echo "$simhelp" | grep -qF 'options (--set sim.flag=value; `lhd describe sim.flag` for each listed flag option in `lhd list options sim`):' \
+  || fail "sim --help: standardized options header missing -> $simhelp"
+echo "$simhelp" | grep -q '^  sim.checkpoint_min_secs=10 ' || fail "sim --help: sim.checkpoint_min_secs not listed -> $simhelp"
+# Validation drives off the same table: an unknown sim flag is a usage error.
+"$LHD" sim "$PRP" --set sim.bogus=1 --workdir "$W/w11" -q >"$W/r11.json" 2>/dev/null && fail "--set sim.bogus must fail"
+grep -q "unknown sim flag 'sim.bogus'" "$W/r11.json" || fail "unknown sim-flag message missing: $(cat "$W/r11.json")"
+
+echo "PASS: lhd list options / describe pass.flag / --set validation / flag-order freedom / per-command --help options / sim namespace"

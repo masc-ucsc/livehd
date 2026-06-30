@@ -137,6 +137,14 @@ struct Options {
   long sim_vcd_to     = -1;  // --vcd-to Z: trace VCD up to cycle Z (with --vcd-from)
   bool sim_vcd_on_fail     = false;  // --vcd-on-fail: re-run a failed test with a VCD of the failure region
   long sim_vcd_fail_window = 20;     // --vcd-fail-window N: cycles before the failure to trace
+  // `sim` observability: query signal values without re-instrumenting (the driver
+  // snapshots scalar signals by hierarchical name). Results land in the result
+  // envelope's "debug" member (and `--result-json`).
+  bool        sim_list_signals = false;  // --list-signals: enumerate observable signals, then exit
+  std::string sim_probe;                 // --probe SIG,...: per-cycle JSON trajectory of these signals
+  long        sim_probe_from = -1;       // --probe-from A
+  long        sim_probe_to   = -1;       // --probe-to B
+  std::string sim_break_when;            // --break-when 'SIG OP VALUE|SIG': first cycle the condition holds
 
   Diag_fmt diag_fmt = default_diag_fmt();
 };
@@ -161,6 +169,11 @@ struct Result {
   // [{test,status,cycle,failing_assert,prp_file,line,msg}, ...] read back from
   // the driver's sidecar, embedded verbatim as the result's "tests" member.
   std::string sim_tests_json;
+
+  // `lhd sim` observability payload (--list-signals / --probe / --break-when): a
+  // pre-serialized JSON object {signals?, probe?, break?} read back from the
+  // driver's debug sidecar, embedded verbatim as the result's "debug" member.
+  std::string sim_debug_json;
 
   std::string error_class;  // empty when status == pass (future_cli.md taxonomy)
   std::string error_message;
@@ -194,6 +207,37 @@ std::string canonical_set_key(std::string_view key, std::string_view ctx);
 // themselves (the option vocabulary lives on the registered EPRP labels).
 bool is_meta_command(const Options& opts);
 int  run_meta_command(const Options& opts);
+
+// The `sim.*` command-namespace options. NOT pass labels — the `lhd sim`
+// command (sim_command) consumes them directly — but they ride the same
+// --set/--config syntax, so they must appear in `lhd list options` /
+// `lhd describe` and validate like any pass flag. THIS array is their single
+// source of truth: check_known_set_passes (validation), list_set_options (the
+// `lhd list options` vocabulary), and the `lhd sim --help` options block all
+// derive from it, so the three can never drift. `inline constexpr` so it is one
+// shared definition across translation units.
+struct Sim_set_option {
+  enum class Kind { boolean, non_neg_num };  // value grammar enforced on --set
+  std::string_view name;                     // flag under sim.*, e.g. "checkpoint_min_secs"
+  std::string_view default_value;            // shown by `lhd list options`
+  Kind             kind;
+  std::string_view help;  // full help (also `lhd describe sim.flag`)
+};
+
+inline constexpr Sim_set_option kSimSetOptions[] = {
+    {"vcd", "false", Sim_set_option::Kind::boolean,
+     "dump one VCD per test to <workdir>/<test.name>.vcd (links the VCD writer)"},
+    {"checkpoint", "true", Sim_set_option::Kind::boolean,
+     "periodic editable state checkpoints of the DUT + testbench (default on; --restart-at needs them)"},
+    {"checkpoint_min_secs", "10", Sim_set_option::Kind::non_neg_num,
+     "wall-clock floor in seconds between checkpoints (a short run writes none)"},
+    {"checkpoint_max", "10", Sim_set_option::Kind::non_neg_num,
+     "max checkpoints kept per test, evenly spaced (older ones are pruned)"},
+    {"checkpoint_max_overhead", "0.10", Sim_set_option::Kind::non_neg_num,
+     "target checkpoint cost as a fraction of run time (caps how often they are taken)"},
+    {"checkpoint_every", "0", Sim_set_option::Kind::non_neg_num,
+     "deterministic cadence: checkpoint every N cycles (0 = time-based, the default)"},
+};
 
 // One --set/--config option in the `pass.flag` vocabulary: an EPRP label of
 // the method that consumes it. Enumerated from the live registry, so

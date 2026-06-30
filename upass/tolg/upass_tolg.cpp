@@ -1514,6 +1514,14 @@ private:
     // bus rides the (now runtime-capable) `init` sink + the `reset` cond pin.
     bool has_update = false;  // an update bus is wired (whole-array memory)
     Pin  read_all_pin{};      // cached async read_all driver pin
+    // Accumulator for MULTIPLE conditional whole-array stores (e.g. a reset arm
+    // and a flush arm). Each later store folds into one `update`/`update_enable`
+    // pair via a priority mux: `update_val = en ? this : update_val` (later store
+    // wins where its path-cond holds) and `update_en = update_en | en`. The
+    // if/else-if path conditions already encode source priority (later arms negate
+    // earlier conditions), so "later wins" matches Verilog nonblocking semantics.
+    Pin update_val{};  // current accumulated update bus value
+    Pin update_en{};   // current accumulated update enable (invalid => always-on)
   };
 
   static constexpr int kMemPortStride = static_cast<int>(Ntype::Memory_port_stride);
@@ -1548,6 +1556,22 @@ private:
       return a;
     }
     auto node = make_node(Ntype_op::And);
+    node.create_sink_pin(0).connect_driver(a);
+    node.create_sink_pin(0).connect_driver(b);
+    auto d = node.create_driver_pin(0);
+    set_bits(d, 1);
+    set_unsign(d);
+    return d;
+  }
+
+  [[nodiscard]] Pin or2(const Pin& a, const Pin& b) {
+    if (a.is_invalid()) {
+      return b;
+    }
+    if (b.is_invalid()) {
+      return a;
+    }
+    auto node = make_node(Ntype_op::Or);
     node.create_sink_pin(0).connect_driver(a);
     node.create_sink_pin(0).connect_driver(b);
     auto d = node.create_driver_pin(0);
@@ -1777,49 +1801,84 @@ private:
     // whole-array store instead.
     spool_ptr<Dlop>              reg_init;
     std::vector<spool_ptr<Dlop>> init_entries;
-    if (!is_array) {
-      for (auto c = lnast_->get_sibling_next(mode_nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
-        const auto ct = lnast_->get_type(c);
-        if (Lnast_ntype::is_stages(ct)) {
-          error_here("upass.tolg: memory '{}' cannot carry a stage[] qualifier", name);
-          return;
-        }
-        if (Lnast_ntype::is_const(ct)) {
-          auto txt = lnast_->get_name(c);
-          if (txt == "nil" || txt == "0sb?") {
-            break;
+    // Read an INLINE init child on the declare. The Pyrope frontend gives
+    // mut/const arrays their init via a separate whole-array store (so an array
+    // declare has no child after `mode`, and this loop is a no-op for it); the
+    // slang reader instead emits the `initial` contents INLINE as a scalar const
+    // or a tuple_add literal on the declare — for BOTH regs and arrays. Reading
+    // it here for arrays too lands the contents on the type==2 `init` pin with
+    // NO reset-restore (wants_restore is gated on !is_array below), i.e. pure
+    // power-on init — a memory carries no ASIC-unimplementable reset value.
+    // Flatten an inline tuple literal's constant leaves row-major into entries.
+    std::function<bool(const Lnast_nid&)> flatten_lit = [&](const Lnast_nid& tnid) -> bool {
+      for (auto ch = lnast_->get_first_child(tnid); !ch.is_invalid(); ch = lnast_->get_sibling_next(ch)) {
+        const auto cht = lnast_->get_type(ch);
+        if (Lnast_ntype::is_tuple_add(cht)) {
+          if (!flatten_lit(ch)) {
+            return false;
           }
-          auto v = Dlop::from_pyrope(txt);
+        } else if (Lnast_ntype::is_const(cht)) {
+          auto v = Dlop::from_pyrope(lnast_->get_name(ch));
           if (!v || !v->is_just_i64()) {
-            error_here("upass.tolg: memory '{}' initializer '{}' is not an integer constant", name, txt);
-            return;
+            error_here("upass.tolg: memory '{}' initializer '{}' is not an integer constant", name, lnast_->get_name(ch));
+            return false;
           }
-          // Scalar broadcast: every entry = value (masked to the element).
-          auto mask  = Dlop::get_mask_value(elem_mw);
-          auto entry = v->and_op(*mask);
-          reg_init   = Dlop::create_integer(0);
-          for (int64_t i = 0; i < size; ++i) {
-            reg_init = reg_init->or_op(*entry->shl_op(*Dlop::create_integer(i * elem_mw)));
-            init_entries.emplace_back(entry);
-          }
-          break;
+          init_entries.emplace_back(v->and_op(*Dlop::get_mask_value(elem_mw)));
+        } else if (!Lnast_ntype::is_ref(cht)) {  // a leading self-ref (tuple target) is skipped
+          error_here("upass.tolg: memory '{}' initializer must be a comptime constant or tuple literal", name);
+          return false;
         }
-        if (Lnast_ntype::is_ref(ct)) {
-          auto tit = tuple_recs_.find(std::string(lnast_->get_name(c)));
-          if (tit == tuple_recs_.end() || !tit->second.named.empty()) {
-            error_here("upass.tolg: memory '{}' initializer must be a comptime constant or tuple literal", name);
-            return;
-          }
-          // Row-major flatten; nested literals must match the dims chain.
-          if (!flatten_init_values(tit->second, dims, 0, name, elem_mw, init_entries)) {
-            return;  // flatten_init_values reported
-          }
-          reg_init = pack_entries(init_entries, elem_mw);
-          break;
-        }
-        error_here("upass.tolg: memory '{}' initializer must be a comptime constant or tuple literal", name);
+      }
+      return true;
+    };
+    for (auto c = lnast_->get_sibling_next(mode_nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
+      const auto ct = lnast_->get_type(c);
+      if (Lnast_ntype::is_stages(ct)) {
+        error_here("upass.tolg: memory '{}' cannot carry a stage[] qualifier", name);
         return;
       }
+      if (Lnast_ntype::is_const(ct)) {
+        auto txt = lnast_->get_name(c);
+        if (txt == "nil" || txt == "0sb?") {
+          break;
+        }
+        auto v = Dlop::from_pyrope(txt);
+        if (!v || !v->is_just_i64()) {
+          error_here("upass.tolg: memory '{}' initializer '{}' is not an integer constant", name, txt);
+          return;
+        }
+        // Scalar broadcast: every entry = value (masked to the element).
+        auto mask  = Dlop::get_mask_value(elem_mw);
+        auto entry = v->and_op(*mask);
+        reg_init   = Dlop::create_integer(0);
+        for (int64_t i = 0; i < size; ++i) {
+          reg_init = reg_init->or_op(*entry->shl_op(*Dlop::create_integer(i * elem_mw)));
+          init_entries.emplace_back(entry);
+        }
+        break;
+      }
+      if (Lnast_ntype::is_ref(ct)) {
+        auto tit = tuple_recs_.find(std::string(lnast_->get_name(c)));
+        if (tit == tuple_recs_.end() || !tit->second.named.empty()) {
+          error_here("upass.tolg: memory '{}' initializer must be a comptime constant or tuple literal", name);
+          return;
+        }
+        // Row-major flatten; nested literals must match the dims chain.
+        if (!flatten_init_values(tit->second, dims, 0, name, elem_mw, init_entries)) {
+          return;  // flatten_init_values reported
+        }
+        reg_init = pack_entries(init_entries, elem_mw);
+        break;
+      }
+      if (Lnast_ntype::is_tuple_add(ct)) {  // slang's INLINE per-entry init literal
+        if (!flatten_lit(c)) {
+          return;  // flatten_lit reported
+        }
+        reg_init = pack_entries(init_entries, elem_mw);
+        break;
+      }
+      error_here("upass.tolg: memory '{}' initializer must be a comptime constant or tuple literal", name);
+      return;
     }
 
     const int     user_sites    = count_mem_write_sites(name);
@@ -1965,51 +2024,143 @@ private:
     tuple_recs_[std::string(lnast_->get_name(dst))] = std::move(rec);
   }
 
-  // store(ref mem, rhs) — the whole-array form. For a mut/const array this
-  // is its initializer: pack the recorded tuple consts into one wide const
-  // (entry 0 in the low `bits`, row-major) on the `init` sink. `= nil` means
-  // zero-filled (cgen's default). reg memories reject the shape outright.
-  // store(mem, <runtime bus>) — the whole-array `update` write. The rhs bus is
-  // size*elem_mw wide (entry 0 in the low `elem_mw`, row-major) and drives the
-  // cell's `update` sink; a conditional whole-write (`if(c) mem=<bus>`) carries
-  // the branch path-condition into `update_enable` (absent => always-on). The
-  // ladder reset > per-port write > (update_enable? update : hold) is realized by
-  // cgen/cgen_sim/lec. Reset is wired separately (init sink + `reset` cond pin).
-  void lower_mem_update_store(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
-    if (mi.has_update) {
-      error_here("upass.tolg: memory '{}' has more than one whole-array `update` write — combine them upstream", name);
-      return;
+  // The size*elem_mw-bit value bus a whole-array store contributes to `update`.
+  // A runtime ref is the bus itself (leaf). A const scalar broadcasts to every
+  // entry (each masked to the element, row-major); a comptime tuple literal
+  // packs row-major; `nil`/`0sb?` is zero-filled. Returns an invalid Pin after
+  // reporting (an unsupported value shape).
+  [[nodiscard]] Pin mem_whole_value_pin(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
+    const auto rt = lnast_->get_type(rhs);
+    const bool is_tuple_lit
+        = Lnast_ntype::is_ref(rt) && tuple_recs_.find(std::string(lnast_->get_name(rhs))) != tuple_recs_.end();
+    if (!Lnast_ntype::is_const(rt) && !is_tuple_lit) {
+      return leaf(rhs).pin;  // runtime whole-array bus
     }
-    auto v = leaf(rhs);
-    if (v.pin.is_invalid()) {
-      error_here("upass.tolg: whole-array update of '{}' has no driver", name);
-      return;
+    if (Lnast_ntype::is_const(rt)) {
+      auto txt = lnast_->get_name(rhs);
+      if (txt == "nil" || txt == "0sb?") {
+        return create_const(*g_, *Dlop::create_integer(0));  // zero-filled
+      }
+      auto v = Dlop::from_pyrope(txt);
+      if (!v || !v->is_just_i64()) {
+        error_here("upass.tolg: whole-array value '{}' for memory '{}' is not supported — use an integer, a tuple literal or nil",
+                   txt,
+                   name);
+        return {};
+      }
+      auto entry  = v->and_op(*Dlop::get_mask_value(mi.elem_mw));
+      auto packed = Dlop::create_integer(0);
+      for (int64_t i = 0; i < mi.size; ++i) {
+        packed = packed->or_op(*entry->shl_op(*Dlop::create_integer(i * mi.elem_mw)));
+      }
+      return create_const(*g_, *packed);
     }
-    setup_sink_by_name(mi.node, "update").connect_driver(v.pin);
-    mi.has_update = true;
-    auto en = current_path_cond();
-    if (!en.is_invalid()) {
-      setup_sink_by_name(mi.node, "update_enable").connect_driver(en);
+    auto tit = tuple_recs_.find(std::string(lnast_->get_name(rhs)));
+    if (tit == tuple_recs_.end() || !tit->second.named.empty()) {
+      error_here("upass.tolg: whole-array value for memory '{}' must be a comptime tuple literal", name);
+      return {};
     }
-    // A whole-array read sees COMMITTED state: the clocked bulk update is the
-    // next-state, never forwarded to a same-cycle read, and a per-entry write to
-    // a registered array is likewise not forwarded (cgen emits `assign dout =
-    // data[addr]`). Force fwd=0 so the cvc5 encoder reads a_cur, matching cgen.
-    for (const auto& e2 : mi.node.inp_edges()) {
-      if (!e2.sink.is_invalid() && static_cast<int>(e2.sink.get_port_id()) == 5) {  // fwd (pid 5)
-        e2.del_edge();
+    std::vector<spool_ptr<Dlop>> entries;
+    if (!flatten_init_values(tit->second, mi.dims, 0, name, mi.elem_mw, entries)) {
+      return {};  // flatten_init_values reported
+    }
+    return create_const(*g_, *pack_entries(entries, mi.elem_mw));
+  }
+
+  // Delete the single existing edge to the memory cell's sink `pid` (if any),
+  // then drive it with `d` when `d` is valid (invalid => leave it unconnected).
+  void redrive_mem_sink(Mem_info& mi, int pid, const Pin& d) {
+    for (const auto& e : mi.node.inp_edges()) {
+      if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == pid) {
+        e.del_edge();
         break;
       }
     }
-    setup_sink_by_name(mi.node, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+    if (!d.is_invalid()) {
+      mi.node.create_sink_pin(static_cast<hhds::Port_id>(pid)).connect_driver(d);
+    }
+  }
+
+  // store(ref mem, rhs) — the whole-array form. For a mut/const array this
+  // is its initializer: pack the recorded tuple consts into one wide const
+  // (entry 0 in the low `bits`, row-major) on the `init` sink. `= nil` means
+  // zero-filled (cgen's default).
+  // store(mem, <value>) — the whole-array `update` write (runtime bus, const
+  // broadcast, or comptime tuple literal). The size*elem_mw bus (entry 0 in the
+  // low `elem_mw`, row-major) drives the cell's `update` sink; a conditional
+  // whole-write (`if(c) mem=<value>`) carries the branch path-condition into
+  // `update_enable` (absent => always-on). MULTIPLE conditional whole-array
+  // stores (a reset arm + a flush arm) accumulate into one `update`/`update_enable`
+  // pair: the later-lowered store wins where its enable holds (priority mux), and
+  // `update_enable` is the OR of every enable; the if/else-if path conditions
+  // already encode source priority. The ladder reset > per-port write >
+  // (update_enable? update : hold) is realized by cgen/cgen_sim/lec.
+  void lower_mem_update_store(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
+    auto v = mem_whole_value_pin(rhs, name, mi);
+    if (v.is_invalid()) {
+      return;  // reported, or an empty driver
+    }
+    auto en = current_path_cond();  // invalid => unconditional
+    if (!mi.has_update) {
+      setup_sink_by_name(mi.node, "update").connect_driver(v);
+      if (!en.is_invalid()) {
+        setup_sink_by_name(mi.node, "update_enable").connect_driver(en);
+      }
+      mi.has_update = true;
+      mi.update_val = v;
+      mi.update_en  = en;
+      // A whole-array read sees COMMITTED state: the clocked bulk update is the
+      // next-state, never forwarded to a same-cycle read, and a per-entry write to
+      // a registered array is likewise not forwarded (cgen emits `assign dout =
+      // data[addr]`). Force fwd=0 so the cvc5 encoder reads a_cur, matching cgen.
+      for (const auto& e2 : mi.node.inp_edges()) {
+        if (!e2.sink.is_invalid() && static_cast<int>(e2.sink.get_port_id()) == 5) {  // fwd (pid 5)
+          e2.del_edge();
+          break;
+        }
+      }
+      setup_sink_by_name(mi.node, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+      return;
+    }
+    // A subsequent conditional whole-array write: later store wins where `en`,
+    // else the previously-accumulated value. An unconditional later store
+    // (`en` invalid) fully replaces the prior value and makes the bus always-on.
+    Pin merged_val;
+    if (en.is_invalid()) {
+      merged_val = v;
+    } else {
+      auto mux = make_node(Ntype_op::Mux);
+      mux.create_sink_pin(0).connect_driver(en);             // selector
+      mux.create_sink_pin(1).connect_driver(mi.update_val);  // false / else = previous value
+      mux.create_sink_pin(2).connect_driver(v);              // true / then = this store
+      merged_val = mux.create_driver_pin(0);
+      set_bits(merged_val, static_cast<int>(mi.size * mi.elem_mw));
+      set_unsign(merged_val);
+    }
+    // Combined enable: always-on (invalid) if either contributor is always-on.
+    Pin merged_en = (mi.update_en.is_invalid() || en.is_invalid()) ? Pin{} : or2(mi.update_en, en);
+    redrive_mem_sink(mi, 12, merged_val);  // update (pid 12)
+    redrive_mem_sink(mi, 13, merged_en);   // update_enable (pid 13); invalid => leave unconnected (always-on)
+    mi.update_val = merged_val;
+    mi.update_en  = merged_en;
   }
 
   void lower_mem_init_store(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
     const auto rt = lnast_->get_type(rhs);
-    // A RUNTIME whole-array value (`mem = <bus>` where the rhs is a wire/leaf, not
+    // A registered (`reg`) memory has NO declaration initializer through this
+    // path — its declared init rides lower_mem_declare. Every whole-array store
+    // to it is therefore a CONDITIONAL bulk write (a reset arm, a flush arm, a
+    // runtime refill, …): route it to the `update` bus regardless of whether the
+    // value is a runtime bus, a const broadcast, or a comptime tuple literal.
+    // Multiple such stores accumulate (priority mux in lower_mem_update_store).
+    if (!mi.is_array) {
+      lower_mem_update_store(rhs, name, mi);
+      return;
+    }
+    // A RUNTIME whole-array value (`arr = <bus>` where the rhs is a wire/leaf, not
     // a constant and not a recorded comptime tuple literal) drives the cell's
-    // `update` bus: the whole array is (re)written each cycle (registered `reg`) or
-    // combinationally (`mut`/`const` array), instead of minting per-entry ports.
+    // `update` bus: the whole array is (re)written each cycle combinationally
+    // (`mut`/`const` array), instead of minting per-entry ports.
     const bool is_tuple_lit
         = Lnast_ntype::is_ref(rt) && tuple_recs_.find(std::string(lnast_->get_name(rhs))) != tuple_recs_.end();
     if (!Lnast_ntype::is_const(rt) && !is_tuple_lit) {
@@ -2017,10 +2168,6 @@ private:
       return;
     }
     // ---- declaration initializer (comptime const / tuple literal) ----
-    if (!mi.is_array) {
-      error_here("upass.tolg: whole-array assignment to memory '{}' is not supported — write one entry at a time", name);
-      return;
-    }
     if (mi.init_wired) {
       error_here("upass.tolg: array '{}' is re-initialized — only the declaration initializer is supported", name);
       return;

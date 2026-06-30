@@ -93,6 +93,13 @@ sh_test(
 )
 
 sh_test(
+    name = "lec_mem_init_test",
+    srcs = ["tests/lec_mem_init_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # type==2 init-contents tie via the in-process cvc5 array engine
+)
+
+sh_test(
     name = "lec_arrfield_test",
     srcs = ["tests/lec_arrfield_test.sh"],
     data = ["//lhd"],

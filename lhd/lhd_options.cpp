@@ -539,6 +539,16 @@ Options parse_args(int argc, char** argv) {
       opts.sim_vcd_on_fail = true;
     } else if (a == "--vcd-fail-window") {  // `sim`: cycles before the failure to trace (with --vcd-on-fail)
       opts.sim_vcd_fail_window = parse_nonneg(a, need_value(a, i, argc, argv));
+    } else if (a == "--list-signals") {  // `sim`: enumerate observable signals, then exit
+      opts.sim_list_signals = true;
+    } else if (a == "--probe") {  // `sim`: per-cycle JSON trajectory of SIG,... (no re-instrumenting)
+      opts.sim_probe = need_value(a, i, argc, argv);
+    } else if (a == "--probe-from") {  // `sim`: probe trajectory start cycle
+      opts.sim_probe_from = parse_nonneg(a, need_value(a, i, argc, argv));
+    } else if (a == "--probe-to") {  // `sim`: probe trajectory end cycle
+      opts.sim_probe_to = parse_nonneg(a, need_value(a, i, argc, argv));
+    } else if (a == "--break-when") {  // `sim`: first cycle a `SIG OP VALUE|SIG` condition holds
+      opts.sim_break_when = need_value(a, i, argc, argv);
     } else if (a == "--seed") {  // shared RNG seed (alias for `--set lhd.seed=N`); `sim` forwards it to drivers
       auto   v        = std::string{need_value(a, i, argc, argv)};
       size_t consumed = 0;

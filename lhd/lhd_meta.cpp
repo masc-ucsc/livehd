@@ -388,7 +388,7 @@ int describe_command(const Options& opts) {
 // NOTHING is a stale/typo'd prefix, not a real empty set — that is reported as an
 // error (returns non-zero) instead of silently rendering an empty list.
 int print_options_section(std::initializer_list<std::string_view> prefixes) {
-  constexpr size_t kShown = 5;
+  constexpr size_t kShown = 10;
   const auto       all    = list_set_options();
 
   std::vector<const Set_option*> sel;
@@ -823,14 +823,13 @@ int help_command(const Options& opts) {
         "  --restart-at N       resume from the nearest checkpoint <= cycle N (debug a long run)\n"
         "  --vcd-from Y [--vcd-to Z]  trace a VCD over just cycles [Y, Z] (restarts near Y; implies VCD)\n"
         "  --vcd-on-fail [--vcd-fail-window N]  on an assert fire, auto-dump a VCD of the last N cycles\n"
+        "  --list-signals       list the observable scalar signals (hierarchical names) as JSON, then exit\n"
+        "  --probe SIG,... [--probe-from A --probe-to B]  per-cycle JSON trajectory of SIG (no re-instrumenting)\n"
+        "  --break-when 'SIG OP V'  report the first cycle a `SIG >|<|>=|<=|==|!= VALUE|SIG` condition holds\n"
         "  --setup-only         generate the C++ sim driver, do not build/run\n"
         "  --run-only           host-compile + run an existing sim (needs --workdir from --setup-only)\n"
         "  --workdir DIR        reuse DIR as the build dir (else a fresh temp dir)\n"
-        "  --set sim.vcd=true   dump one VCD per test to <workdir>/<test.name>.vcd (links the VCD writer)\n"
-        "  --set sim.checkpoint=false          disable periodic state checkpoints (default on)\n"
-        "  --set sim.checkpoint_min_secs=N     wall-clock floor between checkpoints (default 10)\n"
-        "  --set sim.checkpoint_max=N          max checkpoints kept per test, evenly spaced (default 10)\n"
-        "  --set sim.checkpoint_every=N        deterministic: checkpoint every N cycles (default time-based)\n"
+        "  --set sim.flag=value VCD + checkpoint knobs (the options block below; `lhd describe sim.flag`)\n"
         "\n"
         "examples:\n"
         "  lhd sim foo.prp                                # build + run every test in foo.prp\n"
@@ -844,7 +843,7 @@ int help_command(const Options& opts) {
         "  ./build/sim/drv.bin --test my_test --seed 7    # run the built driver directly\n"
         "  ./build/sim/drv.bin --list-tests               # list tests from the built binary\n"
         "  lhd sim foo.prp --run-only --workdir build/    # rebuild/run a prior --setup-only\n");
-    return 0;
+    return print_options_section({"sim."});
   }
   if (topic == "list") {
     std::print(

@@ -90,7 +90,15 @@ everything the encoder needs.
 - **Memory**: `Memory` cells → SMT **theory of arrays**. Corresponding memories
   (matched by signature + `forward_class()` occurrence via `mem_state_key()`)
   collapse to **one shared array symbol**; `dout = select(array, addr)`,
-  next-state `array' = store(array, addr, din)` applied in port order.
+  next-state `array' = store(array, addr, din)` applied in port order. Read ports
+  need no explicit cross-design pairing — `select` at a shared array + equal
+  addresses makes douts correspond via the compared (name-matched) outputs; only
+  same-cycle same-address WRITE collisions are port-order-sensitive. A `type==2`
+  array (runtime-indexed comb array / ROM) has **no cross-cycle persistence**: its
+  base contents are rebuilt each cycle from the whole-array `update` bus or the
+  comptime `init` constant — built **per design** (not pinned onto the shared
+  symbol, which would be a vacuous proof when the two inits differ), so equal
+  inits prove and differing inits refute.
 - **Hierarchy**: a **combinational** `Sub` whose def is supplied via `lhd lec
   --lib lg:DIR` is **flattened inline** (def encoded with inputs bound to the
   instance's input Vals, outputs wired onto its output pins) — the prime use is
@@ -190,12 +198,14 @@ reset_pin, 8 pipe_min, 9 pipe_max`. `next = enable ? din : q` (enable false =
 hold); `reset_pin` active → `q' = initial` (default 0); `pipe_min`>1 models an
 N-deep shift register (N state vars). Output `q = driver_pin(0)`.
 
-**Memory (`Ntype_op::Memory`)** → SMT theory of arrays. **12-pin port stride**:
-port *k*'s pins are at `pid + 12*k` (`get_sink_name` does `pid % 12`); per-port
-logical pins `0 addr, 2 clock_pin, 3 din, 4 enable, 10 rdport (1=read/0=write)`;
-comptime pins `1 bits, 5 fwd, 6 posclk, 7 type (0 async-rd / 1 sync-rd / 2
-array-ROM), 8 wensize, 9 size, 11 init`. Read-data output for read port *N* =
-`driver_pin(wr_ports + N)`.
+**Memory (`Ntype_op::Memory`)** → SMT theory of arrays. **16-pin port stride**
+(`Ntype::Memory_port_stride`): port *k*'s pins are at `pid + 16*k`
+(`get_sink_name` does `pid % 16`); per-port logical pins `0 addr, 2 clock_pin,
+3 din, 4 enable, 10 rdport (1=read/0=write)`; comptime / cell-global pins (block
+0 only) `1 bits, 5 fwd, 6 posclk, 7 type (0 async-rd / 1 sync-rd / 2 array-ROM),
+8 wensize, 9 size, 11 init, 12 update, 13 update_enable, 14 reset` (15 reserved).
+Read-data output for read port *N* = `driver_pin(wr_ports + N)`; the whole-array
+async read uses the reserved driver pid `Memory_readall_pid`.
 
 ## `lhd lec` CLI & options
 

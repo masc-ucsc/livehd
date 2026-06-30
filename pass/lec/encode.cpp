@@ -527,6 +527,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     std::vector<MPort>  ports;
     int                 wensize = 0;
     int                 fwd     = 0;
+    int                 mtype   = -1;
+    bool                is_rom  = false;
     cvc5::Term          a_cur;
     std::vector<Term>   rd_fresh;  // fresh dout symbol per read port (port order)
     std::vector<hhds::Pin_class> rd_addr;
@@ -592,19 +594,33 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
       }
     }
-    // A combinational whole-array (type==2 + update) has NO persistent state: its
-    // contents ARE this cycle's update bus, so it gets no shared `a_cur` and no
-    // next_mem, and its reads/read_all are tied to the post-update array (phase 2).
-    mc.is_comb = mc.is_whole && (mtype == 2);
+    // A type==2 array has NO cross-cycle persistence (a runtime-indexed comb
+    // array / ROM): its contents are rebuilt each cycle from either the
+    // whole-array `update` bus (is_whole) or the comptime `init` constant
+    // (per-port-write arrays / ROMs, applied in phase 2), so it gets no shared
+    // persistent `a_cur` and no next_mem; reads/read_all see the post-write
+    // array (phase 2). This was gated on is_whole, which silently DROPPED the
+    // init contents of non-whole type==2 arrays (ROM / mut-array) -> the array
+    // stayed a free symbol -> reads diverged across designs -> false refute.
+    mc.mtype   = mtype;
+    mc.is_comb = (mtype == 2);
     for (const auto& e2 : node.out_edges()) {  // read_all is a DRIVER pin (not in inp_edges)
       if (static_cast<hhds::Port_id>(e2.driver.get_port_id()) == Ntype::Memory_readall_pid) {
         mc.ra_pin = node.create_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
         break;
       }
     }
-    // Current contents: shared array symbol (collapse) or fresh.
-    Sort asort = tm_.mkArraySort(bv(mc.sig.addr_w), bv(mc.sig.bits));
-    if (shared_mems != nullptr) {
+    // Current contents: shared array symbol (collapse) or fresh. A no-write
+    // PERSISTENT memory with comptime init is a ROM: its contents are the const
+    // init forever (the type==2 path already rebuilds from init each cycle; this
+    // is the persistent type==0/1 analogue — sync/async ROM). It must NOT share a
+    // free symbol: phase 2 pins its (fresh, PER-DESIGN) a_cur to the init
+    // constant. Sharing one symbol and then pinning each side to its own init
+    // would be a vacuous proof when the two inits differ; per-design + compared
+    // outputs makes equal inits PROVE and differing inits REFUTE.
+    Sort asort  = tm_.mkArraySort(bv(mc.sig.addr_w), bv(mc.sig.bits));
+    mc.is_rom   = (!mc.is_comb && !mc.is_whole && mc.sig.n_wr == 0 && !mc.init.is_invalid());
+    if (shared_mems != nullptr && !mc.is_rom) {
       if (auto it = shared_mems->find(mc.key); it != shared_mems->end()) {
         mc.a_cur = it->second;
       }
@@ -1557,7 +1573,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (!ok) {
         return fail("memory '" + gu::debug_name(mc.node) + "' update bus not encodable");
       }
-      Term a_upd = array_from_bus(mc.a_cur, uv.term);
+      // Fit the bus to the full size*bits width before the per-entry scatter: a
+      // const-broadcast update (e.g. a reset/flush arm writing all-zeros) folds to
+      // a NARROW const, and array_from_bus would then extract past its end. cgen
+      // (wire [busw-1:0]) and cgen_sim (operand(.,W)) zero-extend the same way.
+      Term a_upd = array_from_bus(mc.a_cur, fit_unsigned(uv, mc.sig.size * mc.sig.bits));
       if (!mc.update_enable.is_invalid()) {
         Val ev = driver_val(mc.update_enable, ok);
         if (ok) {
@@ -1566,6 +1586,31 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
       }
       a_next = a_upd;
+    } else if (mc.is_comb && !mc.init.is_invalid()) {
+      // type==2 combinational array / ROM: the base contents each cycle are the
+      // comptime `init` constant, built PER-DESIGN (not the shared free symbol),
+      // so a read with no covering write this cycle returns the initial value.
+      // Soundness: pinning the SHARED symbol to each side's init would be unsound
+      // when the two inits differ (contradictory assumptions -> vacuous proof);
+      // building per-design and comparing OUTPUTS makes equal inits PROVE and
+      // differing inits REFUTE. Per-port writes below override within the cycle;
+      // reads see the post-write array (rd_src == a_next for is_comb). No next_mem.
+      Val iv = driver_val(mc.init, ok);
+      if (!ok) {
+        return fail("memory '" + gu::debug_name(mc.node) + "' init contents not encodable");
+      }
+      a_next = array_from_bus(mc.a_cur, fit_unsigned(iv, mc.sig.size * mc.sig.bits));
+    } else if (mc.is_rom) {
+      // no-write PERSISTENT ROM (type==0/1): pin the per-design a_cur to the
+      // comptime init constant so committed reads (rd_src == a_cur) return init.
+      // a_cur is fresh per design here (not the shared symbol), so this is sound —
+      // equal inits prove, differing inits refute via the compared outputs /
+      // next-state. a_next stays a_cur (no writes) -> a constant next-state.
+      Val iv = driver_val(mc.init, ok);
+      if (!ok) {
+        return fail("memory '" + gu::debug_name(mc.node) + "' init contents not encodable");
+      }
+      out.equalities.emplace_back(mc.a_cur, array_from_bus(mc.a_cur, fit_unsigned(iv, mc.sig.size * mc.sig.bits)));
     }
     for (auto& p : mc.ports) {
       if (p.rd || p.din.is_invalid()) {

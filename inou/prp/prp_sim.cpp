@@ -67,6 +67,9 @@ bool parse_hpp(const std::string& path, Dut& d) {
       auto rest = line.substr(sw + 7);
       auto sp   = rest.find_first_of(" {");
       auto name = rest.substr(0, sp);
+      if (name.find(';') != std::string::npos) {
+        continue;  // a forward declaration (e.g. `struct Signal;`), not the DUT struct
+      }
       if (name == "In") {
         in_block = 1;
         continue;
@@ -499,12 +502,36 @@ public:
     // ---- checkpoint cadence scaffolding (only meaningful with a DUT instance):
     // periodic fork-checkpoints of the DUT state + this testbench frame are
     // written under <dir>/<test>/ckp<cycle>/ from inside the tick loop.
+    // --list-signals: enumerate the observable signals after reset, then return (no
+    // body run) — the agent learns the --probe/--break-when vocabulary. Hoisted out
+    // of the instance guard so a test with no DUT instance also short-circuits
+    // (describing nothing) instead of running the whole testbench.
+    o << "  if (_dbg.list_signals) {\n";
+    for (const auto& [var, m] : inst_of_var) {
+      o << "    " << var << ".describe_signals(\"" << var << ".\", _dbg.sigs);\n";
+    }
+    o << "    return _fails;\n  }\n";
     if (!inst_of_var.empty()) {
       o << "  hlop::ckpt::Cadence _cad; _cad.init(_ckpt.enabled, _ckpt.min_secs, _ckpt.max_overhead);\n";
       o << "  std::string _ckpt_base = _ckpt.dir.empty() ? std::string() : (_ckpt.dir + \"/" << sanitize(name)
         << "\");\n";
       // No upfront mkdir: the first due checkpoint's make_dirs(_cdir) creates the
       // base recursively, so a short run that never checkpoints leaves no dirs.
+      // Validate the requested --probe / --break-when signal names against the real
+      // signal set ONCE (a typo would otherwise read as a silent 0). Warn, don't fail.
+      o << "  if (_dbg.active()) {\n";
+      o << "    std::vector<hlop::ckpt::Signal> _av; std::set<std::string> _known;\n";
+      for (const auto& [var, m] : inst_of_var) {
+        o << "    " << var << ".describe_signals(\"" << var << ".\", _av);\n";
+      }
+      o << "    for (const auto& _s : _av) _known.insert(_s.name);\n";
+      o << "    for (const auto& _p : _dbg.probe) if (!_known.count(_p)) std::fprintf(stderr, \"lhd sim: warning: "
+           "--probe signal '%s' is not observable (see --list-signals)\\n\", _p.c_str());\n";
+      o << "    if (_dbg.has_break && !_known.count(_dbg.b_lhs)) std::fprintf(stderr, \"lhd sim: warning: --break-when "
+           "signal '%s' is not observable (see --list-signals)\\n\", _dbg.b_lhs.c_str());\n";
+      o << "    if (_dbg.has_break && _dbg.b_rhs_is_sig && !_known.count(_dbg.b_rhs)) std::fprintf(stderr, \"lhd sim: "
+           "warning: --break-when signal '%s' is not observable (see --list-signals)\\n\", _dbg.b_rhs.c_str());\n";
+      o << "  }\n";
     }
     for (auto s : stmts) {
       gen_stmt(o, s, 1);
@@ -1192,6 +1219,39 @@ private:
     o << ind << "}\n";
   }
 
+  // Emit the per-cycle observability block at the END of a tick body (so it sees
+  // the post-step state, matching the located-assert / puts semantics): snapshot
+  // every scalar signal once, then record a --probe trajectory row (within the
+  // window) and/or test the --break-when condition (first hit only).
+  void emit_debug_block(std::ostringstream& o, const std::string& ind, const std::string& clk) {
+    if (inst_of_var.empty()) {
+      return;
+    }
+    // `window_only` marks the verdict-discarded --vcd-on-fail re-run — skip probing
+    // there so the trajectory is not double-appended / the break not re-evaluated.
+    o << ind << "if (_dbg.active() && !_ckpt.window_only) {\n";
+    o << ind << "  std::map<std::string, long> _sn;\n";
+    for (const auto& [var, m] : inst_of_var) {
+      o << ind << "  " << var << ".probe_signals(\"" << var << ".\", _sn);\n";
+    }
+    o << ind << "  if (!_dbg.probe.empty() && " << clk << " >= (_dbg.probe_from < 0 ? 0 : _dbg.probe_from) && "
+                "(_dbg.probe_to < 0 || " << clk << " <= _dbg.probe_to)) {\n";
+    o << ind << "    _DbgRow _r; _r.cycle = " << clk
+      << "; for (const auto& _s : _dbg.probe) { auto _it = _sn.find(_s); if (_it != _sn.end()) _r.vals[_s] = "
+         "_it->second; } _dbg.rows.push_back(std::move(_r));\n";
+    o << ind << "  }\n";
+    // Only evaluate the break when BOTH operands resolve to real signals — a
+    // missing name must NOT default to 0 (that would fire a spurious cycle-0 hit).
+    o << ind << "  if (_dbg.has_break && !_dbg.break_hit && _sn.count(_dbg.b_lhs) && (!_dbg.b_rhs_is_sig || "
+                "_sn.count(_dbg.b_rhs))) {\n";
+    o << ind << "    long _lv = _sn[_dbg.b_lhs];\n";
+    o << ind << "    long _rv = _dbg.b_rhs_is_sig ? _sn[_dbg.b_rhs] : _dbg.b_rhs_val;\n";
+    o << ind << "    if (_dbg_cmp(_lv, _dbg.b_op, _rv)) { _dbg.break_hit = true; _dbg.break_cycle = " << clk
+      << "; _dbg.break_state = _sn; }\n";
+    o << ind << "  }\n";
+    o << ind << "}\n";
+  }
+
   void gen_tick(std::ostringstream& o, TSNode n, int depth) {
     std::string ind(depth * 2, ' ');
     TSNode      cnt  = field(n, "value");
@@ -1252,6 +1312,7 @@ private:
     for (auto s : body) {
       gen_stmt(o, s, depth + 1);
     }
+    emit_debug_block(o, ind + "  ", clk_name);  // --probe / --break-when (post-step state)
     // Only the verdict-discarded --vcd-on-fail re-run (window_only) stops at vcd_to;
     // an explicit --vcd-from/--vcd-to window runs full-length so the test verdict +
     // result-json reflect the WHOLE run (the VCD is still just the window).
@@ -1532,7 +1593,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
     // For vcd::global_timestamp — reset between tests (see main()).
     o << "#include \"vcd_writer.hpp\"\n";
   }
-  o << "#include <cstdio>\n#include <cstdint>\n#include <cstdlib>\n#include <cerrno>\n"
+  o << "#include <cstdio>\n#include <cstdint>\n#include <cstdlib>\n#include <cerrno>\n#include <cctype>\n"
        "#include <string>\n#include <map>\n#include <set>\n#include <vector>\n#include <fstream>\n#include <chrono>\n\n";
 
   // Checkpoint configuration (sim.checkpoint*): periodic fork-checkpoints of the
@@ -1544,6 +1605,57 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "bool vcd_on_fail = false; long vcd_fail_window = 20; bool window_only = false; };\n";
   o << "static _CkptCfg _ckpt;\n";
   o << "static unsigned long long _seed_used = " << kDefaultSeed << ";\n";
+
+  // ---- observability (--list-signals / --probe / --break-when) ----
+  // The driver snapshots scalar signals (probe_signals) by hierarchical name each
+  // active cycle; --probe records a per-cycle trajectory, --break-when finds the
+  // first cycle a `SIG OP VALUE|SIG` condition holds, --list-signals enumerates
+  // the observable signals. Results go to the --debug-json sidecar.
+  o << "struct _DbgRow { long cycle; std::map<std::string, long> vals; };\n";
+  o << "struct _DbgState {\n"
+       "  bool list_signals = false;\n"
+       "  std::vector<std::string> probe; long probe_from = -1, probe_to = -1;\n"
+       "  std::string out;\n"
+       "  std::vector<hlop::ckpt::Signal> sigs;\n"
+       "  std::vector<_DbgRow> rows;\n"
+       "  bool break_hit = false; long break_cycle = -1; std::map<std::string, long> break_state;\n"
+       "  bool has_break = false; std::string b_lhs, b_op, b_rhs; bool b_rhs_is_sig = false; long b_rhs_val = 0;\n"
+       "  bool active() const { return !probe.empty() || has_break; }\n"
+       "};\n";
+  o << "static _DbgState _dbg;\n";
+  o << "static bool _dbg_cmp(long _a, const std::string& _op, long _b) {\n"
+       "  if (_op == \">\") return _a > _b; if (_op == \"<\") return _a < _b;\n"
+       "  if (_op == \">=\") return _a >= _b; if (_op == \"<=\") return _a <= _b;\n"
+       "  if (_op == \"==\") return _a == _b; if (_op == \"!=\") return _a != _b;\n"
+       "  return false;\n}\n";
+  // Parse `SIG OP VALUE|SIG` into _dbg.{b_lhs,b_op,b_rhs,...}. A 2-char operator is
+  // checked before its 1-char prefix; the RHS is a number iff it starts 0-9/-/+.
+  o << "static void _dbg_parse_break(const std::string& _s) {\n"
+       "  static const char* _ops2[] = {\">=\", \"<=\", \"==\", \"!=\"};\n"
+       "  static const char* _ops1[] = {\">\", \"<\"};\n"
+       "  size_t _pos = std::string::npos; std::string _op;\n"
+       "  for (auto _o : _ops2) { auto _p = _s.find(_o); if (_p != std::string::npos) { _pos = _p; _op = _o; break; } }\n"
+       "  if (_pos == std::string::npos) for (auto _o : _ops1) { auto _p = _s.find(_o); if (_p != std::string::npos) { "
+       "_pos = _p; _op = _o; break; } }\n"
+       "  if (_pos == std::string::npos) { std::fprintf(stderr, \"lhd sim: --break-when needs a comparison "
+       "(SIG >|<|>=|<=|==|!= VALUE), got '%s'\\n\", _s.c_str()); std::exit(2); }\n"
+       "  auto _trim = [](std::string _t) { size_t _b = _t.find_first_not_of(\" \\t\"); size_t _e = "
+       "_t.find_last_not_of(\" \\t\"); return _b == std::string::npos ? std::string() : _t.substr(_b, _e - _b + 1); };\n"
+       "  _dbg.b_lhs = _trim(_s.substr(0, _pos)); _dbg.b_op = _op; _dbg.b_rhs = _trim(_s.substr(_pos + _op.size()));\n"
+       "  if (_dbg.b_lhs.empty()) { std::fprintf(stderr, \"lhd sim: --break-when needs a signal on the left of '%s', "
+       "got '%s'\\n\", _op.c_str(), _s.c_str()); std::exit(2); }\n"
+       // A numeric RHS is parsed (and VALIDATED) as 64-bit; strtoull also negates a
+       // leading '-' mod 2^64, so `sig == -1` / `sig == 0xffffffffffffffff` both match
+       // a high-bit-set probed value (to_just_i64's bit pattern). A non-numeric RHS
+       // is another signal name.
+       "  if (!_dbg.b_rhs.empty() && (std::isdigit((unsigned char)_dbg.b_rhs[0]) || _dbg.b_rhs[0] == '-' || _dbg.b_rhs[0] "
+       "== '+')) {\n"
+       "    errno = 0; char* _e = nullptr; unsigned long long _u = std::strtoull(_dbg.b_rhs.c_str(), &_e, 0);\n"
+       "    if (_e == _dbg.b_rhs.c_str() || *_e != '\\0' || errno == ERANGE) { std::fprintf(stderr, \"lhd sim: "
+       "--break-when value '%s' is not a valid integer\\n\", _dbg.b_rhs.c_str()); std::exit(2); }\n"
+       "    _dbg.b_rhs_val = (long)_u; _dbg.b_rhs_is_sig = false;\n"
+       "  } else { _dbg.b_rhs_is_sig = true; }\n"
+       "  _dbg.has_break = true;\n}\n";
 
   // First-failing-assert record per test run (located message + structured
   // --result-json). Shared by every run-function (passed by reference) and main().
@@ -1659,6 +1771,15 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "    else if (_key == \"--vcd-to\") { _ckpt.vcd_to = _to_i64(\"vcd-to\", _need()); }\n"
        "    else if (_key == \"--vcd-on-fail\") { _ckpt.vcd_on_fail = true; }\n"
        "    else if (_key == \"--vcd-fail-window\") { _ckpt.vcd_fail_window = _to_i64(\"vcd-fail-window\", _need()); }\n"
+       "    else if (_key == \"--list-signals\") { _dbg.list_signals = true; }\n"
+       "    else if (_key == \"--probe\") { std::string _v = _need(), _t; auto _push = [&]() { size_t _b = "
+       "_t.find_first_not_of(\" \\t\"); if (_b != std::string::npos) { size_t _e = _t.find_last_not_of(\" \\t\"); "
+       "_dbg.probe.push_back(_t.substr(_b, _e - _b + 1)); } _t.clear(); }; for (char _c : _v) { if (_c == ',') _push(); "
+       "else _t += _c; } _push(); }\n"
+       "    else if (_key == \"--probe-from\") { _dbg.probe_from = _to_i64(\"probe-from\", _need()); }\n"
+       "    else if (_key == \"--probe-to\") { _dbg.probe_to = _to_i64(\"probe-to\", _need()); }\n"
+       "    else if (_key == \"--break-when\") { _dbg_parse_break(_need()); }\n"
+       "    else if (_key == \"--debug-json\") { _dbg.out = _need(); }\n"
        "    else if (_key == \"--test\") { _selected.push_back(_need()); }\n"
        "    else if (_key.size() > 2 && _key[0] == '-' && _key[1] == '-') { _args[_key.substr(2)] = _need(); }\n"
        "    else { std::fprintf(stderr, \"lhd sim: unknown argument '%s'\\n\", _key.c_str()); _usage(argv[0]); return "
@@ -1672,6 +1793,13 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "  else { for (const auto& _nm : _selected) { const _Test* _f = nullptr; for (const auto& _t : _tests) if (_nm "
        "== _t.name) { _f = &_t; break; } if (_f == nullptr) { std::fprintf(stderr, \"lhd sim: no test named '%s'\\n\", "
        "_nm.c_str()); _usage(argv[0]); return 2; } _torun.push_back(_f); } }\n"
+       // Observability (--list-signals/--probe/--break-when) is a single-run query —
+       // the debug envelope holds ONE result, and the global _dbg would otherwise mix
+       // signals/rows across tests. Require exactly one test.
+       "  if ((_dbg.list_signals || _dbg.active()) && _torun.size() != 1) {\n"
+       "    std::fprintf(stderr, \"lhd sim: --list-signals/--probe/--break-when need a single test; select one by name "
+       "(`lhd sim file.prp <test>`) -- this run has %zu\\n\", _torun.size());\n"
+       "    return 2;\n  }\n"
        "  long _fail_tests = 0;\n"
        "  std::set<std::string> _consumed;\n"
        // A bare JSON array of per-test results, so `lhd sim` can embed it verbatim
@@ -1742,6 +1870,44 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "  }\n"
        "  for (const auto& _kv : _args) if (_declared_params.find(_kv.first) == _declared_params.end()) std::fprintf(stderr, \"lhd "
        "sim: warning: --%s matches no test parameter (ignored)\\n\", _kv.first.c_str());\n"
+       // ---- observability output (--list-signals / --probe / --break-when) ----
+       "  if (_dbg.has_break && _dbg.break_hit) std::fprintf(stderr, \"lhd sim: break-when '%s %s %s' first held at "
+       "clock %ld\\n\", _dbg.b_lhs.c_str(), _dbg.b_op.c_str(), _dbg.b_rhs.c_str(), _dbg.break_cycle);\n"
+       "  else if (_dbg.has_break) std::fprintf(stderr, \"lhd sim: break-when '%s %s %s' never held\\n\", "
+       "_dbg.b_lhs.c_str(), _dbg.b_op.c_str(), _dbg.b_rhs.c_str());\n"
+       "  if (!_dbg.out.empty()) {\n"
+       "    std::string _dj = \"{\"; bool _df = true;\n"
+       "    if (_dbg.list_signals) {\n"
+       "      _dj += \"\\\"signals\\\":[\";\n"
+       "      for (size_t _i = 0; _i < _dbg.sigs.size(); ++_i) { if (_i) _dj += \",\"; _dj += \"{\\\"name\\\":\\\"\"; "
+       "_dj += _json_esc(_dbg.sigs[_i].name); _dj += \"\\\",\\\"bits\\\":\"; _dj += std::to_string(_dbg.sigs[_i].bits); "
+       "_dj += \",\\\"kind\\\":\\\"\"; _dj += _json_esc(_dbg.sigs[_i].kind); _dj += \"\\\"}\"; }\n"
+       "      _dj += \"]\"; _df = false;\n"
+       "    }\n"
+       "    if (!_dbg.probe.empty()) {\n"
+       "      if (!_df) _dj += \",\"; _df = false;\n"
+       "      _dj += \"\\\"probe\\\":{\\\"signals\\\":[\";\n"
+       "      for (size_t _i = 0; _i < _dbg.probe.size(); ++_i) { if (_i) _dj += \",\"; _dj += \"\\\"\"; _dj += "
+       "_json_esc(_dbg.probe[_i]); _dj += \"\\\"\"; }\n"
+       "      _dj += \"],\\\"from\\\":\"; _dj += std::to_string(_dbg.probe_from); _dj += \",\\\"to\\\":\"; _dj += "
+       "std::to_string(_dbg.probe_to); _dj += \",\\\"rows\\\":[\";\n"
+       "      for (size_t _i = 0; _i < _dbg.rows.size(); ++_i) { if (_i) _dj += \",\"; _dj += \"{\\\"cycle\\\":\"; _dj "
+       "+= std::to_string(_dbg.rows[_i].cycle); for (const auto& _kv : _dbg.rows[_i].vals) { _dj += \",\\\"\"; _dj += "
+       "_json_esc(_kv.first); _dj += \"\\\":\"; _dj += std::to_string(_kv.second); } _dj += \"}\"; }\n"
+       "      _dj += \"]}\";\n"
+       "    }\n"
+       "    if (_dbg.has_break) {\n"
+       "      if (!_df) _dj += \",\"; _df = false;\n"
+       "      _dj += \"\\\"break\\\":{\\\"cond\\\":\\\"\"; _dj += _json_esc(_dbg.b_lhs + \" \" + _dbg.b_op + \" \" + "
+       "_dbg.b_rhs); _dj += \"\\\",\\\"hit\\\":\"; _dj += (_dbg.break_hit ? \"true\" : \"false\");\n"
+       "      if (_dbg.break_hit) { _dj += \",\\\"cycle\\\":\"; _dj += std::to_string(_dbg.break_cycle); _dj += "
+       "\",\\\"state\\\":{\"; bool _sf = true; for (const auto& _kv : _dbg.break_state) { if (!_sf) _dj += \",\"; _sf = "
+       "false; _dj += \"\\\"\"; _dj += _json_esc(_kv.first); _dj += \"\\\":\"; _dj += std::to_string(_kv.second); } _dj "
+       "+= \"}\"; }\n"
+       "      _dj += \"}\";\n"
+       "    }\n"
+       "    _dj += \"}\"; std::ofstream _dofs(_dbg.out); if (_dofs) _dofs << _dj << \"\\n\";\n"
+       "  }\n"
        "  hlop::ckpt::drain_checkpoints();  // block until in-flight checkpoint children finish (write _done)\n"
        "  return _fail_tests ? 1 : 0;\n}\n";
 

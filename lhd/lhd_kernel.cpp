@@ -500,27 +500,31 @@ void check_known_set_passes(const Options& opts) {
     }
     if (pass == "sim") {
       // `sim.*` is the sim-command namespace (consumed by sim_command, not a pass).
-      static const std::set<std::string_view> sim_flags = {
-          "vcd",                       // true|false: dump one VCD per test
-          "checkpoint",                // true|false: periodic state checkpoints (default true)
-          "checkpoint_min_secs",       // wall-clock floor between checkpoints (default 10)
-          "checkpoint_max",            // max checkpoints kept per test, evenly spaced (default 10)
-          "checkpoint_max_overhead",   // target checkpoint cost fraction (default 0.10)
-          "checkpoint_every",          // deterministic: checkpoint every N cycles (0 = time-based)
-      };
-      if (!sim_flags.count(flag)) {
-        throw Lhd_error{"usage", std::format("--set/--config references unknown sim flag 'sim.{}'", flag),
-                        "the sim.* namespace takes: vcd, checkpoint, checkpoint_min_secs, checkpoint_max, "
-                        "checkpoint_max_overhead, checkpoint_every"};
+      // Single source of truth = kSimSetOptions (also feeds list_set_options and
+      // the `lhd sim --help` options block, so the three never drift).
+      const Sim_set_option* opt = nullptr;
+      for (const auto& s : kSimSetOptions) {
+        if (s.name == flag) {
+          opt = &s;
+          break;
+        }
       }
-      if ((flag == "vcd" || flag == "checkpoint") && value != "true" && value != "false" && value != "1"
+      if (opt == nullptr) {
+        std::string known;
+        for (const auto& s : kSimSetOptions) {
+          known += known.empty() ? "" : ", ";
+          known += s.name;
+        }
+        throw Lhd_error{"usage", std::format("--set/--config references unknown sim flag 'sim.{}'", flag),
+                        std::format("the sim.* namespace takes: {}", known)};
+      }
+      if (opt->kind == Sim_set_option::Kind::boolean && value != "true" && value != "false" && value != "1"
           && value != "0" && value != "on" && value != "off") {
         throw Lhd_error{"usage", std::format("--set/--config sim.{} expects true|false, got '{}'", flag, value), ""};
       }
       // The numeric checkpoint knobs must be non-negative numbers, else a typo would
       // silently reach the driver as 0 (checkpoint every cycle / divide-by-zero cadence).
-      if (flag == "checkpoint_min_secs" || flag == "checkpoint_max_overhead" || flag == "checkpoint_max"
-          || flag == "checkpoint_every") {
+      if (opt->kind == Sim_set_option::Kind::non_neg_num) {
         errno         = 0;
         char*  endp   = nullptr;
         double parsed = std::strtod(value.c_str(), &endp);
@@ -3259,6 +3263,32 @@ void sim_command(Options& opts, Result& res) {
   if (opts.sim_vcd_on_fail) {
     run_args += " --vcd-on-fail --vcd-fail-window " + shell_quote(std::to_string(opts.sim_vcd_fail_window));
   }
+  // Observability: --list-signals / --probe / --break-when. Results go to the
+  // debug sidecar, read back below and embedded as the envelope's "debug" member.
+  const std::string sim_debug_path = std::format("{}/sim_debug.json", simdir);
+  {
+    std::error_code ec_rm2;
+    fs::remove(sim_debug_path, ec_rm2);
+  }
+  const bool debug_requested = opts.sim_list_signals || !opts.sim_probe.empty() || !opts.sim_break_when.empty();
+  if (debug_requested) {
+    run_args += " --debug-json " + shell_quote(sim_debug_path);
+    if (opts.sim_list_signals) {
+      run_args += " --list-signals";
+    }
+    if (!opts.sim_probe.empty()) {
+      run_args += " --probe " + shell_quote(opts.sim_probe);
+      if (opts.sim_probe_from >= 0) {
+        run_args += " --probe-from " + shell_quote(std::to_string(opts.sim_probe_from));
+      }
+      if (opts.sim_probe_to >= 0) {
+        run_args += " --probe-to " + shell_quote(std::to_string(opts.sim_probe_to));
+      }
+    }
+    if (!opts.sim_break_when.empty()) {
+      run_args += " --break-when " + shell_quote(opts.sim_break_when);
+    }
+  }
   // Forward each `--arg key=value` as `--key value`, but ONLY when `key` is a
   // parameter of a SELECTED test (`selected_params`). Two reasons:
   //  * a key that is a driver control flag (`--arg help=1` -> `--help`, `--arg
@@ -3325,6 +3355,21 @@ void sim_command(Options& opts, Result& res) {
     }
     if (tj.size() >= 2 && tj.front() == '[') {  // a well-formed array, never a partial write
       res.sim_tests_json = tj;
+    }
+  }
+
+  // Read back the observability sidecar ({signals?, probe?, break?}); embedded as
+  // the envelope's "debug" member.
+  if (std::error_code ec_dbg; debug_requested && fs::exists(sim_debug_path, ec_dbg)) {
+    std::ifstream     ifs(sim_debug_path);
+    std::stringstream ss;
+    ss << ifs.rdbuf();
+    std::string dj = ss.str();
+    while (!dj.empty() && (dj.back() == '\n' || dj.back() == '\r' || dj.back() == ' ' || dj.back() == '\t')) {
+      dj.pop_back();
+    }
+    if (dj.size() >= 2 && dj.front() == '{') {
+      res.sim_debug_json = dj;
     }
   }
 
@@ -5434,6 +5479,18 @@ std::string canonical_set_key(std::string_view key, std::string_view ctx) {
   if (key.size() > 4 && key.substr(key.size() - 4) == ".log") {
     return std::string{key};
   }
+  // The `sim.*` command namespace (sim_command, kSimSetOptions) is its own
+  // vocabulary, distinct from the `compile.sim.*` cgen labels. Like `.log`, it
+  // must never collect a command-path prefix — else `sim.vcd` would be rewritten
+  // to the unrelated `compile.sim.vcd` under a `compile`/describe context.
+  if (key.size() > 4 && key.substr(0, 4) == "sim.") {
+    auto flag = key.substr(4);
+    for (const auto& s : kSimSetOptions) {
+      if (s.name == flag) {
+        return std::string{key};
+      }
+    }
+  }
   auto names_a_pass = [](std::string_view candidate) {
     auto pos = candidate.rfind('.');
     return pos != std::string_view::npos && !set_pass_method(candidate.substr(0, pos)).empty();
@@ -5500,6 +5557,12 @@ std::vector<Set_option> list_set_options() {
                            "shared RNG seed for every pass that wants determinism (e.g. pass.color mincut); one seed per run"});
   out.push_back(Set_option{"lhd.top", "lhd", "",
                            "top module shared across passes; the canonical form of the --top flag (the flag wins if both are given)"});
+  // The `sim.*` command namespace (consumed by sim_command, not an EPRP method):
+  // keep `lhd list options` / `lhd describe` complete. Single source of truth =
+  // kSimSetOptions, which also drives check_known_set_passes / the sim --help block.
+  for (const auto& s : kSimSetOptions) {
+    out.push_back(Set_option{std::format("sim.{}", s.name), "sim", std::string{s.default_value}, std::string{s.help}});
+  }
   std::sort(out.begin(), out.end(), [](const Set_option& a, const Set_option& b) { return a.name < b.name; });
   return out;
 }

@@ -172,6 +172,18 @@ sh_test(
     data = ["//lhd"],
 )
 
+# `lhd sim` OBSERVABILITY (sim_checkpoint_debug_plan): query signal values without
+# re-instrumenting. cgen emits describe_signals/probe_signals per module; the
+# result envelope's "debug" member carries --list-signals (the observable signal
+# set), --probe (a per-cycle JSON trajectory), and --break-when (the first cycle a
+# SIG OP V condition holds). Structural checks run hermetically; the run checks
+# need the sibling ../hlop/../iassert headers.
+sh_test(
+    name = "lhd_sim_observe_test",
+    srcs = ["lhd_sim_observe_test.sh"],
+    data = ["//lhd"],
+)
+
 # 2c-color / 2p-partition: `lhd pass color <alg>` colors a flat top, `lhd pass
 # partition` rebuilds it as one-module-per-region + a new top, and the
 # partitioned Verilog is LEC-equivalent to the original (acyclic + synth).

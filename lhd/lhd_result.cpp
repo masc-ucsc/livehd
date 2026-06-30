@@ -116,6 +116,9 @@ void write_pretty(const Options& opts, const Result& res) {
   if (opts.verbose && !res.sim_tests_json.empty()) {
     std::print("  tests: {}\n", res.sim_tests_json);
   }
+  if (!res.sim_debug_json.empty()) {  // --list-signals/--probe/--break-when: explicitly requested, always shown
+    std::print("  debug: {}\n", res.sim_debug_json);
+  }
   if (res.status != "pass") {
     std::print("  {}error[{}]{}: {}\n", bad, res.error_class, off, res.error_message);
     if (!res.error_hint.empty()) {
@@ -257,6 +260,11 @@ void write_result(const Options& opts, const Result& res) {
   if (!res.sim_tests_json.empty()) {
     w.Key("tests");
     w.RawValue(res.sim_tests_json.data(), res.sim_tests_json.size(), rapidjson::kArrayType);
+  }
+
+  if (!res.sim_debug_json.empty()) {
+    w.Key("debug");
+    w.RawValue(res.sim_debug_json.data(), res.sim_debug_json.size(), rapidjson::kObjectType);
   }
 
   if (res.status != "pass") {
