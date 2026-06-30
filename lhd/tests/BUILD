@@ -110,6 +110,68 @@ sh_test(
     data = ["//lhd"],
 )
 
+# `lhd sim` single fast run path + `--list-tests`: `--list-tests` emits the dotted
+# test names + parameters as JSON (a pure parse, no build); `--setup-only`
+# generates ONE driver (drv.cpp) holding every `test` block with the registry +
+# embedded JSON + `--test`/`--seed` flags; `--set sim.vcd=true` resets the VCD
+# timeline per test. The structural checks run hermetically; when the sibling
+# ../hlop + ../iassert headers are present it also host-compiles + runs the binary
+# (binary `--list-tests` == `lhd sim --list-tests`, `--test` selection, two-test
+# VCD run produces both .vcd without crashing).
+sh_test(
+    name = "lhd_sim_list_tests_test",
+    srcs = ["lhd_sim_list_tests_test.sh"],
+    data = ["//lhd"],
+)
+
+# `lhd sim` structured + LOCATED assert failures: a failed `assert` prints the
+# source location (prp:line), the cycle (the `clock` value, which survives the
+# tick loop), and both operand VALUES of a top-level comparison (a literal operand
+# prints only its source); `lhd sim --result-json` enriches the result envelope
+# with a per-test {test,status,cycle,failing_assert,prp_file,line,msg} array. The
+# structural checks run hermetically; when the sibling ../hlop + ../iassert headers
+# are present it also host-compiles + runs and checks the located stdout + array.
+sh_test(
+    name = "lhd_sim_located_assert_test",
+    srcs = ["lhd_sim_located_assert_test.sh"],
+    data = ["//lhd"],
+)
+
+# `lhd sim` CHECKPOINT creation (sim_checkpoint_debug_plan, Stage B): cgen emits
+# dump_state/load_state/design_hash per module; the driver runs a periodic
+# fork-checkpoint cadence in the tick loop writing <workdir>/ckpt/<test>/ckp<N>/
+# {regs.json,*.hex,tb.json,meta.json}, pruned to `sim.checkpoint_max` and evenly
+# spaced; `sim.checkpoint=false` disables it. Structural checks run hermetically;
+# the run checks need the sibling ../hlop + ../iassert headers.
+sh_test(
+    name = "lhd_sim_checkpoint_test",
+    srcs = ["lhd_sim_checkpoint_test.sh"],
+    data = ["//lhd"],
+)
+
+# `lhd sim` RESTART + windowed VCD (sim_checkpoint_debug_plan, Stage C):
+# `--restart-at N` loads the nearest checkpoint <= N (DUT + testbench frame) and
+# resumes there, so an accumulating tb local matches a full run bit-exactly and
+# only cycles >= the checkpoint re-run; a target before any checkpoint replays
+# from 0; `--vcd-from Y --vcd-to Z` traces a VCD over just [Y, Z]. Structural
+# checks run hermetically; the run checks need the sibling ../hlop/../iassert.
+sh_test(
+    name = "lhd_sim_restart_test",
+    srcs = ["lhd_sim_restart_test.sh"],
+    data = ["//lhd"],
+)
+
+# `lhd sim --vcd-on-fail` (sim_checkpoint_debug_plan, Stage D): on an assert fire,
+# the driver re-runs the failed test from the nearest checkpoint with a VCD window
+# around the failing cycle (reusing Stage C), producing `<test>.vcd` of the failure
+# region with its stdout suppressed (the verdict is unchanged). Structural checks
+# run hermetically; the run checks need the sibling ../hlop/../iassert headers.
+sh_test(
+    name = "lhd_sim_vcd_on_fail_test",
+    srcs = ["lhd_sim_vcd_on_fail_test.sh"],
+    data = ["//lhd"],
+)
+
 # 2c-color / 2p-partition: `lhd pass color <alg>` colors a flat top, `lhd pass
 # partition` rebuilds it as one-module-per-region + a new top, and the
 # partitioned Verilog is LEC-equivalent to the original (acyclic + synth).

@@ -2,13 +2,10 @@
 
 #include "inou_cgen.hpp"
 
-#include <algorithm>
-
 #include "cgen_sim.hpp"
 #include "cgen_verilog.hpp"
 #include "file_utils.hpp"
 #include "perf_tracing.hpp"
-#include "thread_pool.hpp"
 
 static Pass_plugin sample("inou_cgen", Inou_cgen::setup);
 
@@ -44,40 +41,19 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
   auto verbose = pp.verbose;
   auto srcmap  = pp.srcmap;
 
-  // Migrated to consume var.graphs (HHDS handle). Eprp_var::add(Lgraph*)
-  // pushes the paired shadow into var.graphs, so legacy producers
-  // (yosys.tolg, lgraph.match) automatically feed this path.
-  std::vector<std::shared_ptr<hhds::Graph>> graphs;
-  graphs.reserve(var.graphs.size());
+  // Consume var.graphs (HHDS handle): Eprp_var::add(Lgraph*) pushes the paired
+  // shadow into var.graphs, so legacy producers (yosys.tolg, lgraph.match)
+  // automatically feed this path. One .v per module, generated inline.
+  // (Per-module Verilog cgen used to be dispatched onto a custom thread pool,
+  // but that was an unused performance optimization; build-level parallelism
+  // comes from independent lhd invocations. If sim/cgen ever needs
+  // intra-process parallelism it will be reintroduced via taskflow.)
   for (const auto& g : var.graphs) {
-    if (g) {
-      graphs.push_back(g);
+    if (!g) {
+      continue;
     }
-  }
-
-  // Estimate "size" via node_table — proxy for LiveHD's lg->size(). We sort
-  // largest-first so the thread pool gets the heavy work in flight early.
-  // Use forward_class iteration size as an approximation; if it's not cheap
-  // enough at scale we can stash a node count on Graph and read it here.
-  std::sort(graphs.begin(), graphs.end(), [](const std::shared_ptr<hhds::Graph>& a, const std::shared_ptr<hhds::Graph>& b) {
-    size_t a_n = 0;
-    for (auto _ : a->fast_class()) {
-      (void)_;
-      ++a_n;
-    }
-    size_t b_n = 0;
-    for (auto _ : b->fast_class()) {
-      (void)_;
-      ++b_n;
-    }
-    return a_n > b_n;
-  });
-
-  for (auto& g : graphs) {
-    thread_pool.add([g, verbose, dir, srcmap]() -> void {
-      Cgen_verilog p(verbose, dir, srcmap);
-      p.do_from_graph(g);
-    });
+    Cgen_verilog p(verbose, dir, srcmap);
+    p.do_from_graph(g);
   }
 }
 

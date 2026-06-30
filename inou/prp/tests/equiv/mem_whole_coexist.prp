@@ -1,0 +1,19 @@
+/*
+:name: mem_whole_coexist
+:type: equiv
+:verilog_top: mem_whole_coexist.coexist
+:pyrope_top: mem_whole_coexist.coexist
+*/
+
+// A whole-array `update` (`arr = inp`) COEXISTING with a per-entry write
+// (`arr[waddr] = wdata` under `we`). The per-entry write OVERRIDES the bulk
+// update for the entry it touches (priority: per-port write > update).
+mod coexist(inp:u80, waddr:u3, wdata:u10, we:bool, idx:u3) -> (r:u10@[0], allout:u80@[0]) {
+  reg arr:[8]u10 = nil
+  arr = inp
+  if we {
+    arr[waddr] = wdata
+  }
+  r = arr[idx]
+  allout = arr
+}

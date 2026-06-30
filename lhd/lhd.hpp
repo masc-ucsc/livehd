@@ -124,11 +124,19 @@ struct Options {
   bool verbose = false;
 
   // `sim` command modifiers
-  bool sim_setup_only = false;  // generate the C++ sim (+bazel module), do NOT build/run
+  bool sim_setup_only = false;  // generate the C++ sim, do NOT build/run
   bool sim_run_only   = false;  // build/run an already-generated sim (needs --workdir), no regen
+  bool sim_list_tests = false;  // print the design's tests + parameters as JSON, then exit (no build)
   // `sim --arg key=value` (repeatable): bind a `test name(params)` parameter; an
   // override wins over the parameter's default. A param with neither is an error.
   std::vector<std::pair<std::string, std::string>> sim_args;
+  // `sim` debug-replay flags (sim_checkpoint_debug_plan). The driver loads the
+  // nearest checkpoint <= the target and resumes from there. -1 = not requested.
+  long sim_restart_at = -1;  // --restart-at/--restart-cycle N: jump to cycle N
+  long sim_vcd_from   = -1;  // --vcd-from Y: trace VCD starting at cycle Y
+  long sim_vcd_to     = -1;  // --vcd-to Z: trace VCD up to cycle Z (with --vcd-from)
+  bool sim_vcd_on_fail     = false;  // --vcd-on-fail: re-run a failed test with a VCD of the failure region
+  long sim_vcd_fail_window = 20;     // --vcd-fail-window N: cycles before the failure to trace
 
   Diag_fmt diag_fmt = default_diag_fmt();
 };
@@ -148,6 +156,11 @@ struct Result {
   // `lhd scan` payload: a pre-serialized JSON array of per-file import lists,
   // embedded verbatim as the result's "scan" member.
   std::string scan_json;
+
+  // `lhd sim` payload: a pre-serialized JSON array of per-test results
+  // [{test,status,cycle,failing_assert,prp_file,line,msg}, ...] read back from
+  // the driver's sidecar, embedded verbatim as the result's "tests" member.
+  std::string sim_tests_json;
 
   std::string error_class;  // empty when status == pass (future_cli.md taxonomy)
   std::string error_message;

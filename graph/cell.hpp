@@ -119,6 +119,20 @@ static_assert((static_cast<uint8_t>(Ntype_op::Invalid) & 1) == 0);
 static_assert((static_cast<uint8_t>(Ntype_op::Hotmux) & 1) == 0);
 
 class Ntype {
+public:
+  // Memory cell sink pins are laid out in PORT BLOCKS of this stride: port `i`'s
+  // per-port pin at base offset `off` lives at raw_pid = i*Memory_port_stride + off.
+  // The 0..Memory_port_stride-1 block also holds the cell-global/singleton pins.
+  // Keep in lockstep with get_sink_name's `% Memory_port_stride` wrap and every
+  // consumer that decodes a Memory raw_pid (tolg, cgen_verilog, cgen_sim, bitwidth,
+  // pass/lec). Was 12; widened to 16 to fit the whole-array pins update(12)/
+  // update_enable(13)/reset(14) (pid 15 reserved).
+  static constexpr hhds::Port_id Memory_port_stride = 16;
+  // Reserved DRIVER pid for the async whole-array `read_all` output (width
+  // size*bits). Driver pids are sparse, so a high reserved value cannot collide
+  // with the sequential read-dout pids (n_wr_total + r). Well below Port_invalid.
+  static constexpr hhds::Port_id Memory_readall_pid = (hhds::Port_id{1} << 20);
+
 protected:
   // Sparse: indexed by Ntype_op underlying value. Unused slots ("invalid")
   // never round-trip through cell_name_map (see the init in cell.cpp).
@@ -167,7 +181,7 @@ protected:
 
   // NOTE: order of operands to maximize code gen when "name" is known (typical case)
   inline static std::array<std::array<hhds::Port_id, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 256> sink_name2pid;
-  inline static std::array<std::array<std::string, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 12>    sink_pid2name;
+  inline static std::array<std::array<std::string, static_cast<std::size_t>(Ntype_op::Last_invalid)>, Memory_port_stride> sink_pid2name;
   inline static std::array<bool, static_cast<std::size_t>(Ntype_op::Last_invalid)>                           ntype2single_input;
   inline static absl::flat_hash_map<std::string, hhds::Port_id>                                              name2pid;
 
@@ -260,8 +274,8 @@ public:
   }
 
   static inline std::string get_sink_name(Ntype_op op, hhds::Port_id pid) {
-    if (pid > 11) {
-      auto pid_index = pid % 12;  // wrap names around for multi inputs like memory cell (12-pin port stride)
+    if (pid >= Memory_port_stride) {
+      auto pid_index = pid % Memory_port_stride;  // wrap names for multi inputs like the memory cell (port stride)
       auto name      = sink_pid2name[pid_index][static_cast<std::size_t>(op)];
       assert(name != "invalid");
 

@@ -16,7 +16,7 @@
 # runs (NOT baked in at setup), so a parameter with no default that is never
 # given makes the driver print its usage and fail.
 
-import glob
+import json
 import os
 import re
 import shutil
@@ -78,14 +78,16 @@ def _parse_args(test):
 
 def run_simulation(runner, tmp_dir, test):
     # `:type: simulation`: lower the design's DUT(s) to Slop<N> C++ and generate
-    # a driver per `test` block (`lhd sim --setup-only`), then build each driver
-    # HERMETICALLY with the host C++ compiler and run it. The Slop/Blop runtime
-    # is header-only (blop.cpp is empty) and with -DNDEBUG the iassert checks
-    # compile out, so a driver has NO link dependencies — no nested bazel, no
-    # abseil, no network. A non-zero driver exit means an `assert` fired in that
-    # test. (When the header runfiles are absent — a manual harness run outside
-    # bazel — fall back to `lhd sim`'s own nested bazel build so the manual flow
-    # still works.)
+    # the single `drv.cpp` driver holding every `test` block (`lhd sim
+    # --setup-only`), then build it HERMETICALLY with the host C++ compiler and
+    # run it. The Slop/Blop runtime is header-only (blop.cpp is empty) and with
+    # -DNDEBUG the iassert checks compile out, so the driver has NO link
+    # dependencies — no nested bazel, no abseil, no network. The binary runs every
+    # test (filtering each test's `--<param>` flags itself), prints `PASS <name>`
+    # / `FAIL <name>` per test, and exits non-zero if any test's `assert` fired.
+    # (When the header runfiles are absent — a manual harness run outside bazel —
+    # fall back to `lhd sim`'s own host-compile of the design, which finds the
+    # sibling ../hlop / ../iassert headers, so the manual flow still works.)
     name    = test.params['name']
     prp     = test.params['files'][0]
     simroot = runner._scratch(test, 'simulation')
@@ -107,17 +109,17 @@ def run_simulation(runner, tmp_dir, test):
         return 1
 
     abs_simdir = simdir if os.path.isabs(simdir) else os.path.join(tmp_dir, simdir)
-    drivers = sorted(glob.glob(os.path.join(abs_simdir, 'drv_*.cpp')))
-    if not drivers:
-        print('{} - simulation - FAILED: no `test` drivers generated in {}'.format(name, abs_simdir))
+    drv = os.path.join(abs_simdir, 'drv.cpp')
+    if not os.path.exists(drv):
+        print('{} - simulation - FAILED: no `drv.cpp` driver generated in {}'.format(name, abs_simdir))
         print(log.decode('utf-8', 'ignore'))
         return 1
 
     incs = _sim_include_dirs(tmp_dir)
     if not incs:
-        # No header runfiles (manual run): use lhd sim's nested-bazel build of
-        # the already-generated setup so the manual flow still works.
-        print('{} - simulation - (no header runfiles; nested-bazel fallback)'.format(name))
+        # No header runfiles (manual run): let `lhd sim` host-compile the existing
+        # setup itself (it finds the sibling ../hlop / ../iassert headers).
+        print('{} - simulation - (no header runfiles; lhd sim host-compile fallback)'.format(name))
         cmd  = [runner.lhd, 'sim', prp, '--run-only', '--workdir', simroot]
         for k, v in sim_args:
             cmd += ['--arg', '{}={}'.format(k, v)]
@@ -129,9 +131,9 @@ def run_simulation(runner, tmp_dir, test):
             proc.kill()
             rc, log = 1, b''
         if rc == 0:
-            print('{} - simulation - success ({} test(s), nested-bazel)'.format(name, len(drivers)))
+            print('{} - simulation - success (lhd sim host-compile)'.format(name))
         else:
-            print('{} - simulation - FAILED (nested-bazel rc={})'.format(name, rc))
+            print('{} - simulation - FAILED (lhd sim host-compile rc={})'.format(name, rc))
             print(log.decode('utf-8', 'ignore'))
         return 0 if rc == 0 else 1
 
@@ -140,45 +142,56 @@ def run_simulation(runner, tmp_dir, test):
     for d in incs:
         cflags.append('-I' + d)
 
-    failed = 0
-    for drv in drivers:
-        base = os.path.splitext(os.path.basename(drv))[0]
-        tn   = base[len('drv_'):] if base.startswith('drv_') else base
-        exe  = os.path.join(abs_simdir, base + '.bin')
-        # The driver `#include`s exactly the DUT header(s) it drives -> compile
-        # only those DUT bodies (NOT every emitted unit: a `test` block also
-        # lowers to a Slop unit that pulls in formal-only headers it never uses).
-        with open(drv) as f:
-            drv_src = f.read()
-        incs_h = set(re.findall(r'#include\s+"([^"]+\.hpp)"', drv_src))
-        bodies = [os.path.join(abs_simdir, h[:-4] + '.cpp') for h in sorted(incs_h)
-                  if os.path.exists(os.path.join(abs_simdir, h[:-4] + '.cpp'))]
-        cc   = [cxx] + cflags + bodies + [drv, '-o', exe]
-        cp   = subprocess.run(cc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        if cp.returncode != 0:
-            print('{} - simulation - {} FAILED: driver did not compile'.format(name, tn))
-            print('  cmd: {}'.format(' '.join(cc)))
-            print(cp.stdout.decode('utf-8', 'ignore'))
-            failed += 1
+    # The driver `#include`s the DUT header(s) every test drives; a DUT header in
+    # turn `#include`s its sub-module headers (hierarchical designs). Walk the
+    # include graph transitively (within simdir) and compile every reachable DUT
+    # body -- NOT every emitted unit (a `test` block also lowers to a Slop unit
+    # that pulls in formal-only headers it never uses).
+    with open(drv) as f:
+        drv_src = f.read()
+    incs_h  = set()
+    pending = list(re.findall(r'#include\s+"([^"]+\.hpp)"', drv_src))
+    while pending:
+        h = pending.pop()
+        if h in incs_h:
             continue
-        # Bind the `:args:` this driver actually accepts (each test may have a
-        # different parameter set; pass only the flags this driver declares).
-        accepts = set(re.findall(r'_key == "--([A-Za-z_]\w*)"', drv_src))
-        run_args = []
-        for k, v in sim_args:
-            if k in accepts:
-                run_args += ['--' + k, v]
-        rp  = subprocess.run([exe] + run_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        out = rp.stdout.decode('utf-8', 'ignore')
-        if rp.returncode != 0:
-            print('{} - simulation - {} FAILED (assert):'.format(name, tn))
-            print(out)
-            failed += 1
-        else:
-            print('{} - simulation - {} success'.format(name, tn))
-
-    if failed:
-        print('{} - simulation - FAILED: {} of {} test(s) failed'.format(name, failed, len(drivers)))
+        hp = os.path.join(abs_simdir, h)
+        if not os.path.exists(hp):
+            continue  # a runtime/header (slop.hpp, vcd_writer.hpp, ...) on the -I path
+        incs_h.add(h)
+        with open(hp) as hf:
+            pending += re.findall(r'#include\s+"([^"]+\.hpp)"', hf.read())
+    bodies = [os.path.join(abs_simdir, h[:-4] + '.cpp') for h in sorted(incs_h)
+              if os.path.exists(os.path.join(abs_simdir, h[:-4] + '.cpp'))]
+    exe = os.path.join(abs_simdir, 'drv.bin')
+    cc  = [cxx] + cflags + bodies + [drv, '-o', exe]
+    cp  = subprocess.run(cc, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if cp.returncode != 0:
+        print('{} - simulation - FAILED: driver did not compile'.format(name))
+        print('  cmd: {}'.format(' '.join(cc)))
+        print(cp.stdout.decode('utf-8', 'ignore'))
         return 1
-    print('{} - simulation - success ({} test(s))'.format(name, len(drivers)))
+
+    # Run the one binary over every test. The `:args:` are passed verbatim as
+    # `--<key> <value>`; the binary applies each per test (warning about a flag no
+    # test uses) and exits non-zero if any test's `assert` fired.
+    run_args = []
+    for k, v in sim_args:
+        run_args += ['--' + k, v]
+    rp  = subprocess.run([exe] + run_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    out = rp.stdout.decode('utf-8', 'ignore')
+    if rp.returncode != 0:
+        print('{} - simulation - FAILED (assert):'.format(name))
+        print(out)
+        return 1
+    # rc == 0 means every test passed. Report the count from the binary's own
+    # registry (`--list-tests` JSON) rather than scanning stdout for "PASS " lines
+    # (a test's own `puts("PASS ...")` would otherwise miscount).
+    n_tests = 0
+    try:
+        lt = subprocess.run([exe, '--list-tests'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        n_tests = len(json.loads(lt.stdout.decode('utf-8', 'ignore')).get('tests', []))
+    except Exception:
+        n_tests = out.count('\nPASS ') + (1 if out.startswith('PASS ') else 0)
+    print('{} - simulation - success ({} test(s))'.format(name, n_tests))
     return 0

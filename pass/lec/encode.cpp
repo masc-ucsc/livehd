@@ -530,6 +530,14 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     cvc5::Term          a_cur;
     std::vector<Term>   rd_fresh;  // fresh dout symbol per read port (port order)
     std::vector<hhds::Pin_class> rd_addr;
+    // Whole-array support (the `update` bus is driven): one update/read_all bus
+    // instead of N per-entry ports. `is_comb` (type==2, no clock) => no persistent
+    // state (no next_mem); reads/read_all reflect the post-update array.
+    hhds::Pin_class update, update_enable, reset, init;
+    bool             is_whole = false;
+    bool             is_comb  = false;
+    hhds::Pin_class  ra_pin;    // async read_all driver pin (size*bits)
+    cvc5::Term       ra_fresh;  // deferred read_all symbol (tied in phase 2)
   };
   std::vector<MemCut>                   mem_cuts;
   Io_name_map<int> mem_occ;  // per-signature occurrence -> stable key
@@ -545,16 +553,29 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     }
     std::string sg = std::to_string(mc.sig.size) + "x" + std::to_string(mc.sig.bits);  // shape only; occ matches by RTL order
     mc.key = mem_state_key(mc.sig, mem_occ[sg]++);
+    int mtype = -1;
     for (auto e : node.inp_edges()) {
       auto        raw_pid = static_cast<int>(e.sink.get_port_id());
       std::string pn      = Ntype::get_sink_name(Ntype_op::Memory, raw_pid);
-      size_t      pid     = static_cast<size_t>(raw_pid) / 12;
+      size_t      pid     = static_cast<size_t>(raw_pid) / Ntype::Memory_port_stride;
       if (pn == "wensize") {
         mc.wensize = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
       } else if (pn == "fwd") {
         mc.fwd = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
-      } else if (pn == "bits" || pn == "size" || pn == "type" || pn == "init" || pn == "posclk"
-                 || ends_with(pn, "clock_pin")) {
+      } else if (pn == "update") {
+        mc.update   = e.driver;
+        mc.is_whole = true;
+      } else if (pn == "update_enable") {  // MUST precede ends_with("enable") below
+        mc.update_enable = e.driver;
+      } else if (pn == "reset") {
+        mc.reset = e.driver;
+      } else if (pn == "init") {
+        mc.init = e.driver;  // whole-array runtime reset-value bus
+      } else if (pn == "type") {
+        if (gu::is_const_pin(e.driver)) {
+          mtype = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
+        }
+      } else if (pn == "bits" || pn == "size" || pn == "posclk" || ends_with(pn, "clock_pin")) {
         // config / clock: abstracted out of the relational encoding
       } else {
         if (mc.ports.size() <= pid) {
@@ -569,6 +590,16 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         } else if (ends_with(pn, "rdport")) {
           mc.ports[pid].rd = !gu::hydrate_const(e.driver).is_known_false();
         }
+      }
+    }
+    // A combinational whole-array (type==2 + update) has NO persistent state: its
+    // contents ARE this cycle's update bus, so it gets no shared `a_cur` and no
+    // next_mem, and its reads/read_all are tied to the post-update array (phase 2).
+    mc.is_comb = mc.is_whole && (mtype == 2);
+    for (const auto& e2 : node.out_edges()) {  // read_all is a DRIVER pin (not in inp_edges)
+      if (static_cast<hhds::Port_id>(e2.driver.get_port_id()) == Ntype::Memory_readall_pid) {
+        mc.ra_pin = node.create_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
+        break;
       }
     }
     // Current contents: shared array symbol (collapse) or fresh.
@@ -596,6 +627,24 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       mc.rd_fresh.push_back(fresh);
       mc.rd_addr.push_back(p.addr);
       ++n_rd_pos;
+    }
+    // Async read_all: registered reflects the CURRENT committed array (computable
+    // now from a_cur); combinational reflects the post-update array (deferred to
+    // phase 2 via a fresh symbol, like the read douts).
+    if (!mc.ra_pin.is_invalid()) {
+      bool sgn = !gu::is_unsign(mc.ra_pin);
+      int  rw  = mc.sig.size * mc.sig.bits;
+      if (mc.is_comb) {
+        mc.ra_fresh                = tm_.mkConst(bv(rw), std::string(prefix) + mc.key + ":ra");
+        pin2val[pinkey(mc.ra_pin)] = Val{mc.ra_fresh, rw, sgn};
+      } else {
+        Term bus = tm_.mkTerm(Kind::SELECT, {mc.a_cur, bv_const(tm_, mc.sig.addr_w, 0)});  // entry 0 (low bits)
+        for (int i = 1; i < mc.sig.size; ++i) {
+          Term ei = tm_.mkTerm(Kind::SELECT, {mc.a_cur, bv_const(tm_, mc.sig.addr_w, static_cast<uint64_t>(i))});
+          bus     = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {ei, bus});  // CONCAT arg0 = high
+        }
+        pin2val[pinkey(mc.ra_pin)] = Val{bus, rw, sgn};
+      }
     }
     mem_cuts.push_back(std::move(mc));
   }
@@ -1486,10 +1535,38 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // build the next-state array and tie each fresh read dout to its real value.
   for (auto& mc : mem_cuts) {
     auto fit_unsigned = [&](const Val& v, int wd) -> Term { return fit_to(tm_, Val{v.term, v.width, false}, wd); };
+    bool ok           = true;
 
-    // Apply writes in port order: array' = store(array, addr, masked_din).
+    // Scatter a size*bits bus into an array: entry i = bus[(i+1)*bits-1 : i*bits]
+    // (entry 0 in the low bits), STOREd over `base`.
+    auto array_from_bus = [&](const Term& base, const Term& bus) -> Term {
+      Term arr = base;
+      for (int i = 0; i < mc.sig.size; ++i) {
+        Term slice = bv_extract(tm_, bus, (i + 1) * mc.sig.bits - 1, i * mc.sig.bits);
+        arr        = tm_.mkTerm(Kind::STORE, {arr, bv_const(tm_, mc.sig.addr_w, static_cast<uint64_t>(i)), slice});
+      }
+      return arr;
+    };
+
+    // Whole-array bulk `update` is the BASE next-state (lowest priority); per-port
+    // writes below STORE on top of it (per-port wins). update_enable gates the
+    // whole array (hold = a_cur). A plain memory starts from a_cur unchanged.
     Term a_next = mc.a_cur;
-    bool ok     = true;
+    if (mc.is_whole) {
+      Val uv = driver_val(mc.update, ok);
+      if (!ok) {
+        return fail("memory '" + gu::debug_name(mc.node) + "' update bus not encodable");
+      }
+      Term a_upd = array_from_bus(mc.a_cur, uv.term);
+      if (!mc.update_enable.is_invalid()) {
+        Val ev = driver_val(mc.update_enable, ok);
+        if (ok) {
+          Term en_hot = tm_.mkTerm(Kind::DISTINCT, {ev.term, bv_const(tm_, ev.width, 0)});
+          a_upd       = tm_.mkTerm(Kind::ITE, {en_hot, a_upd, mc.a_cur});
+        }
+      }
+      a_next = a_upd;
+    }
     for (auto& p : mc.ports) {
       if (p.rd || p.din.is_invalid()) {
         continue;
@@ -1526,9 +1603,30 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       a_next        = tm_.mkTerm(Kind::STORE, {a_next, addr, new_word});
     }
 
-    // Tie each fresh read dout to select(read-source, addr). fwd!=0 reads see
-    // this cycle's writes (a_next); else the pre-write contents (a_cur).
-    const Term& rd_src = (mc.fwd != 0) ? a_next : mc.a_cur;
+    // Reset (highest priority) overrides per-port + update for a registered
+    // whole-array: a_next = reset ? <init bus array> : a_next. The init bus may be
+    // runtime (e.g. enqPtrVec resets to a computed wire), or absent (=> zero).
+    if (mc.is_whole && !mc.reset.is_invalid()) {
+      Val rv = driver_val(mc.reset, ok);
+      if (ok) {
+        Term rst_hot = tm_.mkTerm(Kind::DISTINCT, {rv.term, bv_const(tm_, rv.width, 0)});
+        Term init_bus;
+        if (!mc.init.is_invalid()) {
+          Val iv   = driver_val(mc.init, ok);
+          init_bus = ok ? iv.term : bv_const(tm_, mc.sig.size * mc.sig.bits, 0);
+        } else {
+          init_bus = bv_const(tm_, mc.sig.size * mc.sig.bits, 0);
+        }
+        Term a_init = array_from_bus(mc.a_cur, init_bus);
+        a_next      = tm_.mkTerm(Kind::ITE, {rst_hot, a_init, a_next});
+      }
+    }
+
+    // Tie each fresh read dout to select(read-source, addr). A combinational
+    // whole-array reads its POST-update contents (a_next == the live array); a
+    // registered whole-array and plain memory read committed state (a_cur, since
+    // fwd is forced 0 for whole-arrays); fwd!=0 plain memories forward writes.
+    const Term& rd_src = mc.is_comb ? a_next : ((mc.fwd != 0) ? a_next : mc.a_cur);
     for (size_t k = 0; k < mc.rd_fresh.size(); ++k) {
       Val av = driver_val(mc.rd_addr[k], ok);
       if (!ok) {
@@ -1538,8 +1636,21 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       Term real = tm_.mkTerm(Kind::SELECT, {rd_src, addr});
       out.equalities.emplace_back(mc.rd_fresh[k], real);
     }
+    // Combinational read_all: tie its deferred symbol to CONCAT(SELECT(rd_src,i)).
+    if (mc.is_comb && !mc.ra_fresh.isNull()) {
+      Term bus = tm_.mkTerm(Kind::SELECT, {rd_src, bv_const(tm_, mc.sig.addr_w, 0)});
+      for (int i = 1; i < mc.sig.size; ++i) {
+        Term ei = tm_.mkTerm(Kind::SELECT, {rd_src, bv_const(tm_, mc.sig.addr_w, static_cast<uint64_t>(i))});
+        bus     = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {ei, bus});
+      }
+      out.equalities.emplace_back(mc.ra_fresh, bus);
+    }
 
-    out.next_mem[mc.key] = a_next;
+    // A combinational whole-array has no persistent state -> no next_mem (its
+    // contents are a pure function of this cycle's update, compared as outputs).
+    if (!mc.is_comb) {
+      out.next_mem[mc.key] = a_next;
+    }
   }
 
   // ---- Outputs: value driving each output sink, fit to the declared width.

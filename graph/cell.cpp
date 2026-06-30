@@ -57,7 +57,7 @@ Ntype::_init::_init() {
     }
 
     int n_sinks = 0;
-    for (hhds::Port_id pid = 0; pid < 12; ++pid) {
+    for (hhds::Port_id pid = 0; pid < Ntype::Memory_port_stride; ++pid) {
       auto pin_name = Ntype::get_sink_name_slow(static_cast<Ntype_op>(op), pid);
       if (pin_name.empty() || pin_name == "invalid") {
         continue;
@@ -225,7 +225,13 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 10: return "rdport";     // comptime x n_ports (1 rd, 0 wr)
         case 11:
           return "init";  // comptime x 1 -- contents (entry 0 in the low `bits`, row-major); a reg array with a bound reset
-                          // restores it via per-entry write ports (tolg)
+                          // restores it via per-entry write ports (tolg). For a WHOLE-ARRAY cell (the `update` pin is
+                          // driven) `init` is RUNTIME-capable and carries the reset-value bus (entry 0 in the low `bits`).
+        // Whole-array pins (cell has these driven => one `update`/`read_all` bus instead of N per-entry ports).
+        case 12: return "update";         // runtime  x 1 -- whole-array next-state bus (size*bits, entry 0 low)
+        case 13: return "update_enable";  // runtime  x 1 -- optional bulk-update enable (absent => always-on)
+        case 14: return "reset";          // runtime  x 1 -- 1-bit reset condition (active high; tolg pre-inverts negreset)
+        // pid 15 reserved (keeps Memory_port_stride a power of two).
         default: return "invalid";
       }
       break;

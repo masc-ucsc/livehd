@@ -1,0 +1,16 @@
+/*
+:name: mem_whole_comb
+:type: equiv
+:verilog_top: mem_whole_comb.combarr
+:pyrope_top: mem_whole_comb.combarr
+*/
+
+// Pure COMBINATIONAL whole-array: the whole `arr` is written from one bus
+// (`arr = inp`, the cell's `update` pin), read whole (`allout = arr`, the async
+// `read_all` output) and per-entry with a runtime index (`arr[idx]`). No clock.
+comb combarr(inp:u80, idx:u3) -> (r:u10, allout:u80) {
+  mut arr:[8]u10
+  arr = inp
+  r = arr[idx]
+  allout = arr
+}

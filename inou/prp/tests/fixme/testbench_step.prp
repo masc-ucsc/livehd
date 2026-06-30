@@ -2,21 +2,22 @@
 :name: testbench_step
 :type: simulation
 */
-// TBD feature: testbench extras peek/poke (docs/pyrope/09-verification.md,
-// 15-tbd.md). `peek()` should read a hierarchical signal and `poke()` force one.
-// `step` now parses as a statement (advance the simulation a cycle) but the
-// `lhd sim` backend does not execute it yet; `peek`/`poke` remain undefined.
-// Tagged `fixme`: fails by design until the interactive testbench runner exists.
+// Remaining TBD: the string-path `peek("a/b")` / `poke("a/b", v)` accessors for
+// arbitrary hierarchical signals (docs/pyrope/09-verification.md, 15-tbd.md).
+// The instance/`step`/field-poke model below (mut dut = cnt; dut.en = true; step;
+// dut.v) runs today -- only the string-path `peek`/`poke` are unimplemented, so
+// this fails by design. Tagged `fixme` until the arbitrary-path probe lands.
 mod cnt(en:bool) -> (v:u8@[0]) {
   reg c:u8 = 0
   v = c
   if en { wrap c += 1 }
 }
-test peek_poke_step {
-  const o = cnt(en=true)
+test peek_poke_path {
+  mut dut = cnt
+  dut.en = true
   step
-  assert(peek("cnt/c") == 1)
-  poke("cnt/c", 42)
+  assert(peek("cnt/c") == 1)     // string-path peek -- still TBD
+  poke("cnt/c", 42)              // string-path poke -- still TBD
   step
   assert(peek("cnt/c") == 43)
 }

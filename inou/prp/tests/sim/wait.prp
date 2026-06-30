@@ -1,0 +1,37 @@
+/*
+:name: wait
+:type: simulation
+*/
+// The new testbench idioms (docs/pyrope/09-verification.md), with NO `waitfor`
+// or `spawn` primitives -- everything is one `tick`/`step` loop:
+//   * wait on a condition: `step` each cycle, `if not <cond> { continue }`, then
+//     `break`; the `tick N` bound is the timeout and the post-loop `assert`
+//     turns a timeout into a failure;
+//   * inline monitor: an `if`-block that checks an invariant every cycle, sharing
+//     the loop's `mut`s (here: the sum never decreases).
+
+mod accumulator(din:u8) -> (sum:u32@[0]) {
+  reg total:u32 = 0
+  sum = total                   // combinational read of total.q -> @[0]
+  wrap total = total + din      // registered next-state
+}
+
+test accum.reach_30 {
+  mut acc  = accumulator
+  mut prev = 0                  // inline-monitor state (previous sum)
+
+  tick 300 {
+    acc.din = 3
+    step
+
+    // inline monitor: the accumulated sum is monotonic non-decreasing
+    assert(acc.sum >= prev, "sum went backwards")
+    prev = acc.sum
+
+    if acc.sum < 30 { continue }   // wait until the sum reaches 30
+    break                          // reached it
+  }
+  // 3 per cycle -> 30 after 10 cycles, well within the 300-cycle watchdog
+  assert(acc.sum >= 30, "accumulator did not reach 30 within 300 cycles")
+  assert(acc.sum == 30, "should stop exactly at 30")
+}

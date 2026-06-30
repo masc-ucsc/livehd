@@ -15,7 +15,7 @@
 
 set -u
 
-LHD=lhd/lhd
+LHD="${LHD:-lhd/lhd}"
 W="${TEST_TMPDIR:-/tmp/lhd_sim_args_$$}"
 mkdir -p "$W"
 
@@ -40,14 +40,18 @@ test nn.t(cycles:u20 = 20) {
 EOF
 "$LHD" sim "$W/good.prp" --setup-only --workdir "$W/good" -q >/dev/null 2>&1 \
   || fail "valid parameterized test failed to set up"
-DRV="$W/good/sim/drv_nn_t.cpp"
+# One driver per design (drv.cpp) holds every `test` block; each `test`-parameter
+# is bound from the central `--<name>` arg map inside its run function.
+DRV="$W/good/sim/drv.cpp"
 [ -f "$DRV" ] || fail "expected driver not generated: $DRV"
-grep -q -- '--cycles' "$DRV" || fail "driver missing the --cycles parameter flag"
+grep -q '_args.find("cycles")' "$DRV" || fail "driver does not bind the cycles parameter"
 grep -q -- '"--seed"'  "$DRV" || fail "driver missing the --seed flag"
-grep -q -- '"--help"'  "$DRV" || fail "driver missing the --help flag"
+grep -q -- '"--list-tests"' "$DRV" || fail "driver missing the --list-tests flag"
+grep -q -- '"--test"'  "$DRV" || fail "driver missing the --test selector flag"
 grep -q    '_to_i64'   "$DRV" || fail "driver missing the validating integer parser"
 grep -q    '_to_u64'   "$DRV" || fail "driver missing the validating seed parser"
 grep -q    'hlop_set_random_seed' "$DRV" || fail "driver does not seed the hlop PRNG"
+grep -q    '_tests_json' "$DRV" || fail "driver missing the embedded --list-tests JSON"
 
 # ---- reserved / unsafe parameter names are rejected at setup -----------------
 # $1 = parameter declaration text, $2 = a label for messages
@@ -70,7 +74,15 @@ EOF
 reject_param 'default:u8 = 2' 'C++ keyword'
 reject_param 'argc:u8 = 2'    'main argument argc'
 reject_param '_seed:u8 = 2'   'leading-underscore driver-local collision'
+reject_param 'test:u8 = 2'    'reserved --test selector flag'
 reject_param '`my param`:u8 = 2' 'backtick-escaped identifier'
+
+# ---- `--list-tests` emits the dotted name + params as JSON (no build) ---------
+LT="$("$LHD" sim "$W/good.prp" --list-tests --diag-fmt jsonl 2>/dev/null | head -1)" \
+  || fail "--list-tests failed"
+echo "$LT" | grep -q '"name":"nn.t"' || fail "--list-tests JSON missing the dotted test name: $LT"
+echo "$LT" | grep -q '"name":"cycles"' || fail "--list-tests JSON missing the cycles parameter: $LT"
+echo "$LT" | grep -q '"default":"20"' || fail "--list-tests JSON missing the cycles default: $LT"
 
 # ---- `--seed` must be numeric (CLI usage error otherwise) ---------------------
 SEED_OUT="$("$LHD" sim "$W/good.prp" --seed nope --setup-only --workdir "$W/s" -q 2>&1)" \

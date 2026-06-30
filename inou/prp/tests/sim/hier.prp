@@ -1,0 +1,30 @@
+/*
+:name: hier
+:type: simulation
+*/
+// Hierarchical regression: a top instantiates a stateful sub-module. Each `step`
+// must advance the sub EXACTLY once. (peek() recomputes outputs by re-running
+// cycle(), which recurses into the sub; peek therefore has to snapshot/restore
+// the sub too, or the sub would double-advance. This test guards that.)
+
+mod subcnt(en:bool) -> (o:u8@[0]) {
+  reg c:u8 = 0
+  o = c
+  if en { wrap c += 1 }
+}
+
+mod topcnt(en:bool) -> (o:u8@[0]) {
+  o = subcnt(en=en)
+}
+
+test topcnt.run {
+  mut acc = topcnt
+  mut v   = 0
+  tick 6 {
+    acc.en = true
+    step
+    v = acc.o
+  }
+  // 6 cycles, sub increments once per cycle -> 6 (would be 12 if peek double-advanced)
+  assert(v == 6, "sub-module must advance exactly once per step")
+}

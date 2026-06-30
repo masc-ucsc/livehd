@@ -57,19 +57,6 @@ cc_library(
     }),
 )
 
-cc_test(
-    name = "thread_pool_test",
-    srcs = [
-        "tests/concurrentqueue.hpp",
-        "tests/thread_pool_test.cpp",
-    ],
-    # tags = ["long1"], # Run only with long1 set of tests
-    deps = [
-        ":core",
-        "@googletest//:gtest_main",
-    ],
-)
-
 cc_binary(
     name = "vcd_sample",
     srcs = [
@@ -111,18 +98,6 @@ cc_test(
     deps = [
         ":core",
         "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "pool_bench",
-    srcs = [
-        "tests/concurrentqueue.hpp",
-        "tests/pool_bench.cpp",
-    ],
-    deps = [
-        ":core",
-        "@google_benchmark//:benchmark",
     ],
 )
 

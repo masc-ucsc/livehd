@@ -1,0 +1,16 @@
+/*
+:name: mem_whole_reg
+:type: equiv
+:verilog_top: mem_whole_reg.regarr
+:pyrope_top: mem_whole_reg.regarr
+*/
+
+// REGISTERED whole-array: the whole `arr` is registered from one bus each cycle
+// (`arr = inp`, the cell's clocked `update` pin), read whole (`allout = arr`, the
+// async `read_all` output) and per-entry with a runtime index (`arr[idx]`).
+mod regarr(inp:u80, idx:u3) -> (r:u10@[0], allout:u80@[0]) {
+  reg arr:[8]u10 = nil
+  arr = inp
+  r = arr[idx]
+  allout = arr
+}

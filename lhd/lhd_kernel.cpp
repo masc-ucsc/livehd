@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <fcntl.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -42,7 +43,6 @@
 #include "query.hpp"  // pass/lec L1 (lec::prove_equal) for the cross-check path
 #include "rapidjson/document.h"
 #include "semdiff.hpp"  // pass/semdiff (structural_match) for the `lhd pass semdiff` command
-#include "thread_pool.hpp"
 #include "upass_tolg.hpp"
 #include "woothash.hpp"
 
@@ -360,7 +360,6 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
   {
     Stdout_to_log redirect(log);
     Pass::eprp.run_method_now(method, var, labels);
-    thread_pool.wait_all();
   }
   res.recipe_steps.emplace_back(step_desc(method, labels));
   if (opts.verbose) {
@@ -501,9 +500,34 @@ void check_known_set_passes(const Options& opts) {
     }
     if (pass == "sim") {
       // `sim.*` is the sim-command namespace (consumed by sim_command, not a pass).
-      if (flag != "vcd") {
+      static const std::set<std::string_view> sim_flags = {
+          "vcd",                       // true|false: dump one VCD per test
+          "checkpoint",                // true|false: periodic state checkpoints (default true)
+          "checkpoint_min_secs",       // wall-clock floor between checkpoints (default 10)
+          "checkpoint_max",            // max checkpoints kept per test, evenly spaced (default 10)
+          "checkpoint_max_overhead",   // target checkpoint cost fraction (default 0.10)
+          "checkpoint_every",          // deterministic: checkpoint every N cycles (0 = time-based)
+      };
+      if (!sim_flags.count(flag)) {
         throw Lhd_error{"usage", std::format("--set/--config references unknown sim flag 'sim.{}'", flag),
-                        "the sim.* namespace takes: vcd (true|false)"};
+                        "the sim.* namespace takes: vcd, checkpoint, checkpoint_min_secs, checkpoint_max, "
+                        "checkpoint_max_overhead, checkpoint_every"};
+      }
+      if ((flag == "vcd" || flag == "checkpoint") && value != "true" && value != "false" && value != "1"
+          && value != "0" && value != "on" && value != "off") {
+        throw Lhd_error{"usage", std::format("--set/--config sim.{} expects true|false, got '{}'", flag, value), ""};
+      }
+      // The numeric checkpoint knobs must be non-negative numbers, else a typo would
+      // silently reach the driver as 0 (checkpoint every cycle / divide-by-zero cadence).
+      if (flag == "checkpoint_min_secs" || flag == "checkpoint_max_overhead" || flag == "checkpoint_max"
+          || flag == "checkpoint_every") {
+        errno         = 0;
+        char*  endp   = nullptr;
+        double parsed = std::strtod(value.c_str(), &endp);
+        if (value.empty() || endp == value.c_str() || *endp != '\0' || parsed < 0.0 || errno == ERANGE) {
+          throw Lhd_error{"usage", std::format("--set/--config sim.{} expects a non-negative number, got '{}'", flag, value),
+                          ""};
+        }
       }
       continue;
     }
@@ -1097,6 +1121,73 @@ std::string sim_hlop_path(const Options& opts) {
   std::error_code ec;
   auto            p = std::filesystem::weakly_canonical(std::filesystem::current_path(ec) / ".." / "hlop", ec);
   return p.empty() ? std::string{"../hlop"} : p.string();
+}
+
+// The `-I` directory that resolves `#include "slop.hpp"` (and blop.hpp /
+// vcd_writer.hpp): the `hlop/` subdir of the hlop module root. Falls back to the
+// module root itself in case `--set compile.cgen.sim_hlop=` already points at the
+// header dir. Empty result -> slop.hpp not located (the caller reports it).
+std::string sim_hlop_include_dir(const Options& opts) {
+  const auto root = sim_hlop_path(opts);
+  for (const auto& cand : {root + "/hlop", root}) {
+    if (::access((cand + "/slop.hpp").c_str(), R_OK) == 0) {
+      return cand;
+    }
+  }
+  return "";
+}
+
+// The `-I` directory that resolves `#include "iassert.hpp"` (slop.hpp pulls it
+// in). `--set compile.cgen.sim_iassert=DIR` wins; else the sibling `../iassert`
+// of the hlop root / CWD, where the header lives under `src/`. Empty -> not found.
+std::string sim_iassert_include_dir(const Options& opts) {
+  std::vector<std::string> cands;
+  for (const auto& [k, v] : opts.sets) {
+    if (k == "compile.cgen.sim_iassert" && !v.empty()) {
+      cands.push_back(v);
+    }
+  }
+  std::error_code ec;
+  const auto      hlop_root = std::filesystem::path(sim_hlop_path(opts));
+  for (const auto& base : {hlop_root.parent_path(), std::filesystem::current_path(ec) / ".."}) {
+    cands.push_back((base / "iassert" / "src").string());
+    cands.push_back((base / "iassert").string());
+  }
+  for (const auto& cand : cands) {
+    if (::access((cand + "/iassert.hpp").c_str(), R_OK) == 0) {
+      return cand;
+    }
+  }
+  return "";
+}
+
+// Host C++ compiler for the fast (header-only + optional VCD) sim build. The Slop
+// runtime needs C++23; the repo already requires a C++23 toolchain to build lhd,
+// so the host compiler has it. $CXX wins (CI override), then the usual names.
+std::string sim_host_cxx() {
+  std::vector<std::string> cands;
+  if (const char* cxx = std::getenv("CXX"); cxx != nullptr && cxx[0] != '\0') {
+    cands.emplace_back(cxx);
+  }
+  cands.insert(cands.end(), {"clang++", "c++", "g++"});
+  const char* path = std::getenv("PATH");
+  for (const auto& c : cands) {
+    if (c.find('/') != std::string::npos) {  // an explicit path ($CXX)
+      if (::access(c.c_str(), X_OK) == 0) {
+        return c;
+      }
+      continue;
+    }
+    for (std::string_view dirs = (path != nullptr ? path : ""); !dirs.empty();) {
+      auto             sep = dirs.find(':');
+      std::string_view d   = dirs.substr(0, sep);
+      if (!d.empty() && ::access((std::string(d) + "/" + c).c_str(), X_OK) == 0) {
+        return c;  // on PATH
+      }
+      dirs = (sep == std::string_view::npos) ? std::string_view{} : dirs.substr(sep + 1);
+    }
+  }
+  return "c++";  // last resort (POSIX): let exec resolve it
 }
 
 // `--emit-dir sim:DIR/` — inou.cgen.sim (TODO 3d). Writes a standalone Bazel
@@ -2540,7 +2631,6 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
         var.add(g);
       }
     }
-    thread_pool.wait_all();
   }
   res.recipe_steps.emplace_back("lnast.tolg");
   if (livehd::diag::sink().has_errors()) {
@@ -2834,17 +2924,53 @@ void sim_command(Options& opts, Result& res) {
   const std::string test_sel   = opts.files.size() > 1 ? opts.files[1] : "";
   const bool        setup_only = opts.sim_setup_only;
   const bool        run_only   = opts.sim_run_only;
+  const bool        list_only  = opts.sim_list_tests;
   const bool        pretty     = opts.diag_fmt == Diag_fmt::pretty;
   if (setup_only && run_only) {
     throw Lhd_error{"usage", "--setup-only and --run-only are mutually exclusive", ""};
+  }
+
+  // ---- --list-tests: a pure parse of the source's `test` blocks -> the dotted
+  // names + parameters. No DUT lowering / build, so tooling can enumerate the
+  // tests cheaply (and even when the design does not compile). Output honors
+  // --diag-fmt like every other command: JSON (machine-readable, the SAME shape
+  // the built binary's `--list-tests` prints) by default when piped, or a
+  // human-readable listing in pretty mode; `--diag-fmt` overrides the auto-pick.
+  if (list_only) {
+    std::vector<prp_sim::Test_info> tests;
+    std::string                     err;
+    if (prp_sim::list_tests(file, test_sel, tests, err) != 0) {
+      res.status        = "fail";
+      res.error_class   = "usage";
+      res.error_message = err;
+      res.exit_code     = 1;
+      return;
+    }
+    if (pretty) {
+      std::print("{} test(s) in {}:\n", tests.size(), file);
+      for (const auto& t : tests) {
+        std::print("  {}", t.name);
+        for (size_t i = 0; i < t.params.size(); ++i) {
+          const auto& p = t.params[i];
+          std::print("{}{}{}", i == 0 ? "(" : ", ", p.name,
+                     p.required ? std::string(": required") : std::format(" = {}", p.default_text));
+        }
+        if (!t.params.empty()) {
+          std::print(")");
+        }
+        std::print("\n");
+      }
+    } else {
+      std::print("{}\n", prp_sim::tests_to_json(file, tests));
+    }
+    std::fflush(stdout);
+    return;  // status stays pass (a pure query — no output artifact)
   }
 
   // The sim build dir: --workdir if given (REUSED in place — generated files are
   // overwritten, nothing is deleted), else a fresh OS-temp dir. The temp dir is
   // OUTSIDE any workspace, so a later `bazel build //...` in the user's repo
   // never sweeps the nested BUILD package or follows its convenience symlinks.
-  // The generated MODULE.bazel pins hlop by ABSOLUTE path, so the location is
-  // irrelevant to the sim's own build.
   std::string simroot;
   if (!opts.workdir.empty()) {
     simroot = opts.workdir;
@@ -2862,18 +2988,58 @@ void sim_command(Options& opts, Result& res) {
   const std::string simdir = simroot + "/sim";
 
   // --set sim.vcd=true: dump one VCD per test, `<workdir>/<test.name>.vcd`. The
-  // path is absolute (the driver runs under `bazel run` with a different cwd).
+  // path is absolute (the driver binary is run from the caller's cwd), and when
+  // on, the fast build also links hlop's VCD writer (vcd_writer.cpp).
   bool vcd_on = false;
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.vcd") {
       vcd_on = (v == "true" || v == "1" || v == "on");
     }
   }
+  // A `--vcd-from` window or `--vcd-on-fail` implies VCD: the driver needs the
+  // trace machinery emitted (the first run still produces none until a window opens).
+  if (opts.sim_vcd_from >= 0 || opts.sim_vcd_on_fail) {
+    vcd_on = true;
+  }
   const std::string vcd_dir = vcd_on ? fs::absolute(simroot).string() : std::string{};
 
-  std::vector<prp_sim::Driver> drivers;
+  // --set sim.checkpoint* : periodic editable checkpoints of DUT + testbench state
+  // under <simroot>/ckpt/<test>/ckp<cycle>/ (regs.json + *.hex + tb.json +
+  // meta.json). Default ON; a short run (< the min-secs floor) writes none. The
+  // settings are forwarded to the driver, which owns the fork cadence + prune.
+  bool        ckpt_on = true;
+  std::string ckpt_min_secs, ckpt_max, ckpt_max_overhead, ckpt_every;
+  for (const auto& [k, v] : opts.sets) {
+    if (k == "sim.checkpoint") {
+      ckpt_on = (v == "true" || v == "1" || v == "on");
+    } else if (k == "sim.checkpoint_min_secs") {
+      ckpt_min_secs = v;
+    } else if (k == "sim.checkpoint_max") {
+      ckpt_max = v;
+    } else if (k == "sim.checkpoint_max_overhead") {
+      ckpt_max_overhead = v;
+    } else if (k == "sim.checkpoint_every") {
+      ckpt_every = v;
+    }
+  }
+  const std::string ckpt_dir = ckpt_on ? (fs::absolute(simroot).string() + "/ckpt") : std::string{};
 
-  // ---- setup: lower DUT -> Slop, generate a driver per test, write the module
+  // Debug-flag sanity (sim_checkpoint_debug_plan): catch contradictory combinations
+  // up front instead of silently producing a degenerate run.
+  if (opts.sim_vcd_to >= 0 && opts.sim_vcd_from < 0) {
+    throw Lhd_error{"usage", "--vcd-to needs --vcd-from (the window start)", "e.g. --vcd-from 100 --vcd-to 140"};
+  }
+  if (opts.sim_vcd_from >= 0 && opts.sim_vcd_to >= 0 && opts.sim_vcd_from > opts.sim_vcd_to) {
+    throw Lhd_error{"usage", std::format("--vcd-from {} is after --vcd-to {}", opts.sim_vcd_from, opts.sim_vcd_to), ""};
+  }
+  if (ckpt_dir.empty() && opts.sim_restart_at >= 0) {
+    throw Lhd_error{"usage", "--restart-at needs checkpoints — do not combine it with --set sim.checkpoint=false",
+                    "run once with checkpointing on to create them, then --restart-at"};
+  }
+
+  std::vector<prp_sim::Test_info> tests;
+
+  // ---- setup: lower DUT -> Slop, generate the single driver (drv.cpp)
   if (!run_only) {
     ensure_dir(simdir);
     opts.language = "pyrope";
@@ -2894,66 +3060,34 @@ void sim_command(Options& opts, Result& res) {
       return;
     }
     std::string err;
-    if (prp_sim::generate(file, simdir, test_sel, vcd_dir, drivers, err) != 0) {
+    if (prp_sim::generate(file, simdir, test_sel, vcd_dir, tests, err) != 0) {
       res.status        = "fail";
       res.error_class   = "unsupported";
       res.error_message = err;
       res.exit_code     = 1;
       return;
     }
+    // Also append a single `drv` cc_binary so the generated dir stays
+    // bazel-buildable (`cd <simdir> && bazel run //:drv -- --test ...`); the
+    // default `lhd sim` flow runs it via the fast host-compile below, no bazel.
     std::ofstream bf(std::format("{}/BUILD", simdir), std::ios::app);
     bf << "\nload(\"@rules_cc//cc:defs.bzl\", \"cc_binary\")\n";
-    for (const auto& d : drivers) {
-      bf << std::format(
-          "cc_binary(\n    name = \"{0}\",\n    srcs = [\"{0}.cpp\"],\n    copts = [\"-std=c++23\"],\n"
-          "    deps = [\":sim\", \"@hlop//hlop\"],\n)\n",
-          d.basename);
-    }
+    bf << std::format(
+        "cc_binary(\n    name = \"{0}\",\n    srcs = [\"{0}.cpp\"],\n    copts = [\"-std=c++23\"],\n"
+        "    deps = [\":sim\", \"@hlop//hlop\"],\n)\n",
+        prp_sim::kDriverBasename);
     bf.close();
-    res.recipe_steps.push_back(std::format("sim setup: {} driver(s) in {}", drivers.size(), simdir));
+    res.recipe_steps.push_back(std::format("sim setup: {} test(s) in {}", tests.size(), simdir));
   }
 
   if (setup_only) {
     res.outputs.push_back(simdir);
     if (pretty) {
-      std::print("  sim setup complete: {} driver(s) generated in {}\n", drivers.size(), simdir);
+      std::print("  sim setup complete: {} test(s) generated in {}\n", tests.size(), simdir);
       std::print("  run with: lhd sim {} --run-only --workdir {}\n", file, simroot);
       std::fflush(stdout);
     }
     return;  // status stays pass
-  }
-
-  // ---- run: build + run each driver, capturing output (no raw spew to stdout)
-  // For --run-only, recover the driver list from the BUILD cc_binary targets.
-  if (run_only) {
-    std::ifstream bf(std::format("{}/BUILD", simdir));
-    if (!bf) {
-      res.status        = "fail";
-      res.error_class   = "usage";
-      res.error_message = std::format("no generated sim in {} (run with --setup-only --workdir {} first)", simdir, simroot);
-      res.exit_code     = 1;
-      return;
-    }
-    std::string line;
-    while (std::getline(bf, line)) {
-      auto p = line.find("name = \"drv_");
-      if (p == std::string::npos) {
-        continue;
-      }
-      auto s = line.find('"', p);
-      auto e = line.find('"', s + 1);
-      if (s != std::string::npos && e != std::string::npos) {
-        std::string base = line.substr(s + 1, e - s - 1);
-        drivers.push_back(prp_sim::Driver{base.substr(4), base});  // test name = basename minus "drv_"
-      }
-    }
-    if (drivers.empty()) {
-      res.status        = "fail";
-      res.error_class   = "usage";
-      res.error_message = std::format("no drivers found in {}/BUILD", simdir);
-      res.exit_code     = 1;
-      return;
-    }
   }
 
   auto capture = [](const std::string& c, int& rc) {
@@ -2968,128 +3102,286 @@ void sim_command(Options& opts, Result& res) {
     while ((n = std::fread(buf, 1, sizeof buf, p)) > 0) {
       out.append(buf, n);
     }
-    rc = ::pclose(p);
+    int st = ::pclose(p);
+    rc     = (WIFEXITED(st) ? WEXITSTATUS(st) : -1);
     return out;
   };
 
-  // The `--<flag>` names a generated driver accepts (its `--seed` plus one per
-  // test parameter), scraped from its source. A file-level `--arg` that names a
-  // parameter some test does not declare is then NOT forwarded to that test's
-  // driver (which would reject the unknown flag) — mirroring the old per-driver
-  // bind, where a non-matching `--arg` was simply ignored.
-  auto driver_flags = [&](const std::string& base) {
-    std::set<std::string> flags;
-    std::ifstream         df(std::format("{}/{}.cpp", simdir, base));
-    std::stringstream     ss;
-    ss << df.rdbuf();
-    const std::string s = ss.str();
-    const std::string marker = "_key == \"--";
-    for (size_t p = s.find(marker); p != std::string::npos; p = s.find(marker, p + 1)) {
-      size_t b = p + marker.size();
-      size_t e = b;
-      while (e < s.size() && (std::isalnum(static_cast<unsigned char>(s[e])) != 0 || s[e] == '_')) {
-        ++e;
-      }
-      auto flag = s.substr(b, e - b);
-      // Only the driver's TEST-PARAMETER flags are `--arg`-bindable; the built-in
-      // `--seed`/`--help` are not (otherwise `--arg help=x` would forward `--help
-      // x`, making the driver print usage and exit 0 — a vacuous pass).
-      if (flag != "seed" && flag != "help" && flag != "h") {
-        flags.insert(std::move(flag));
-      }
-    }
-    return flags;
-  };
-  // Arguments forwarded to a driver binary (after a `--` separator): an explicit
-  // `--seed` (else the driver keeps its built-in default) and every matching
-  // `lhd sim --arg key=value` rendered as `--key value`.
-  auto forward_args = [&](const std::string& base) {
-    std::string fwd;
-    if (opts.seed_explicit) {
-      fwd += std::format(" --seed {}", shell_quote(opts.seed));
-    }
-    const auto accepts = driver_flags(base);
-    for (const auto& [k, v] : opts.sim_args) {
-      if (accepts.count(k) != 0) {
-        fwd += std::format(" --{} {}", k, shell_quote(v));
-      }
-    }
-    return fwd;
-  };
-
-  // Warn about a `--arg key=value` that NO driver in this run declares (a typo
-  // or a parameter that does not exist) — otherwise it is silently dropped and
-  // the user believes an override took effect when the test ran with its
-  // default. (Mirrors `--set`, which rejects unknown keys.)
-  if (!opts.sim_args.empty()) {
-    std::set<std::string> all_accepted;
-    for (const auto& d : drivers) {
-      if (run_only && !test_sel.empty() && d.test_name != test_sel) {
-        continue;
-      }
-      for (const auto& f : driver_flags(d.basename)) {
-        all_accepted.insert(f);
-      }
-    }
-    for (const auto& [k, v] : opts.sim_args) {
-      if (all_accepted.count(k) == 0) {
-        std::print(stderr, "lhd sim: warning: --arg {}={} matches no test parameter (ignored)\n", k, v);
-      }
+  // ---- the single fast run path: host-compile drv.cpp + the DUT bodies (+ the
+  // VCD writer when sim.vcd) with the host C++ compiler, then run the one binary.
+  // The Slop runtime is header-only and, with -DNDEBUG, has no link deps — so
+  // there is no nested bazel, no abseil, no network. (For --run-only the driver +
+  // bodies are reused from a prior --setup-only; only the compile + run happen.)
+  const std::string drv_cpp = std::format("{}/{}.cpp", simdir, prp_sim::kDriverBasename);
+  if (::access(drv_cpp.c_str(), R_OK) != 0) {
+    res.status        = "fail";
+    res.error_class   = "usage";
+    res.error_message = std::format("no generated sim driver in {} (run --setup-only --workdir {} first)", simdir, simroot);
+    res.exit_code     = 1;
+    return;
+  }
+  // A VCD request against a prior --setup-only that was generated WITHOUT VCD (the
+  // driver lacks the trace machinery) would silently produce no waveform — reject
+  // it so the user regenerates instead. The `vcd::global_timestamp` line is emitted
+  // iff VCD codegen was on (prp_sim).
+  if (run_only && vcd_on) {
+    std::ifstream     dfs(drv_cpp);
+    std::stringstream dss;
+    dss << dfs.rdbuf();
+    if (dss.str().find("vcd::global_timestamp") == std::string::npos) {
+      res.status        = "fail";
+      res.error_class   = "usage";
+      res.error_message = "this --run-only sim was generated without VCD; re-run without --run-only (or "
+                          "--setup-only --set sim.vcd=true) so the driver gets the trace machinery";
+      res.exit_code     = 1;
+      return;
     }
   }
-
-  int    n_fail = 0;
-  size_t n_run  = 0;
-  for (const auto& d : drivers) {
-    if (run_only && !test_sel.empty() && d.test_name != test_sel) {
-      continue;  // --run-only honors a test selector
-    }
-    ++n_run;
-    // Capture the DRIVER's stdout (its runtime `puts` output + any ASSERT
-    // FAILED lines) via popen; send bazel's own build noise to a side file so it
-    // never spews. --experimental_convenience_symlinks=ignore: no bazel-* links.
-    const auto berr    = std::format("{}/.bazel.stderr", simdir);
-    const auto sim_fwd = forward_args(d.basename);
-    auto       cmd     = std::format("cd {} && bazel run -c opt --experimental_convenience_symlinks=ignore //:{}{}{} 2>{}",
-                                 shell_quote(simdir), d.basename, (sim_fwd.empty() ? "" : " --"), sim_fwd,
-                                 shell_quote(berr));
-    int        rc   = 0;
-    auto       out  = capture(cmd, rc);
-    bool       ok   = rc == 0;
-    if (!ok) {
-      ++n_fail;
-    }
-    res.recipe_steps.push_back(std::format("sim {} ({})", d.test_name, ok ? "pass" : "fail"));
+  const std::string hlop_inc    = sim_hlop_include_dir(opts);
+  const std::string iassert_inc = sim_iassert_include_dir(opts);
+  if (hlop_inc.empty() || iassert_inc.empty()) {
+    res.status        = "fail";
+    res.error_class   = "dependency";
+    res.error_message = std::format("could not locate the sim runtime headers (slop.hpp: {}, iassert.hpp: {})",
+                                    hlop_inc.empty() ? "<not found>" : hlop_inc, iassert_inc.empty() ? "<not found>" : iassert_inc);
+    res.exit_code     = 1;
     if (pretty) {
-      // The test's runtime output (puts + ASSERT FAILED), then the verdict.
-      std::istringstream iss(out);
+      std::print("  hint: --set compile.cgen.sim_hlop=/path/to/hlop  --set compile.cgen.sim_iassert=/path/to/iassert/src\n");
+      std::fflush(stdout);
+    }
+    return;
+  }
+  const std::string cxx = sim_host_cxx();
+
+  // The DUT bodies: every non-driver *.cpp in simdir. inou.cgen.sim does NOT emit
+  // the `%`-named `test` units, so these are exactly the real module bodies.
+  std::vector<std::string> bodies;
+  {
+    std::error_code ec;
+    for (auto& de : fs::directory_iterator(simdir, ec)) {
+      if (!de.is_regular_file()) {
+        continue;
+      }
+      auto fn = de.path().filename().string();
+      if (fn.size() < 5 || fn.substr(fn.size() - 4) != ".cpp") {
+        continue;
+      }
+      if (fn == std::string(prp_sim::kDriverBasename) + ".cpp") {
+        continue;  // the driver itself (exact name — a prefix skip would also drop a `drv*.prp` design's DUT bodies)
+      }
+      bodies.push_back(de.path().string());
+    }
+    std::sort(bodies.begin(), bodies.end());
+  }
+
+  const std::string exe = std::format("{}/{}.bin", simdir, prp_sim::kDriverBasename);
+  std::string       cc  = std::format("{} -std=c++23 -DNDEBUG -O1 -I{} -I{} -I{}", shell_quote(cxx), shell_quote(simdir),
+                                       shell_quote(hlop_inc), shell_quote(iassert_inc));
+  for (const auto& b : bodies) {
+    cc += " " + shell_quote(b);
+  }
+  cc += " " + shell_quote(drv_cpp);
+  if (vcd_on) {
+    cc += " " + shell_quote(hlop_inc + "/vcd_writer.cpp");  // link the VCD writer
+  }
+  cc += " -o " + shell_quote(exe) + " 2>&1";  // merge compiler diagnostics into the capture
+  int  build_rc  = 0;
+  auto build_out = capture(cc, build_rc);
+  if (build_rc != 0) {
+    res.status        = "fail";
+    res.error_class   = "compile";
+    res.error_message = "the sim driver failed to compile (see the compiler output)";
+    res.exit_code     = 1;
+    if (pretty) {
+      std::istringstream iss(build_out);
       std::string        ln;
       while (std::getline(iss, ln)) {
         std::print("    {}\n", ln);
       }
-      if (!ok && out.empty()) {  // a bazel build failure (no driver output): show its errors
-        std::ifstream ef(berr);
-        std::string   el;
-        while (std::getline(ef, el)) {
-          if (el.find("error:") != std::string::npos || el.find("ERROR:") != std::string::npos) {
-            std::print("    {}\n", el);
-          }
-        }
-      }
-      std::print("  {} {}\n", ok ? "PASS" : "FAIL", d.test_name);
       std::fflush(stdout);
     }
+    return;
+  }
+
+  // Run the one binary. A test selector (`lhd sim foo.prp my.test`) becomes
+  // `--test`; an explicit `--seed` and every `lhd sim --arg key=value` are
+  // forwarded (the binary itself filters per-test params + warns on a `--arg`
+  // that no run test consumes).
+  std::string run_args;
+  if (!test_sel.empty()) {
+    run_args += " --test " + shell_quote(test_sel);
+  }
+  if (opts.seed_explicit) {
+    run_args += " --seed " + shell_quote(opts.seed);
+  }
+  // Always ask the driver for its per-test result array (a sidecar JSON file);
+  // it is read back below and embedded verbatim as the envelope's "tests" member
+  // (so `lhd sim --result-json r.json` carries {test,status,cycle,failing_assert,
+  // prp_file,line,msg} per test). Remove any stale sidecar from a reused workdir.
+  const std::string sim_tests_path = std::format("{}/sim_tests.json", simdir);
+  {
+    std::error_code ec_rm;
+    fs::remove(sim_tests_path, ec_rm);
+  }
+  run_args += " --result-json " + shell_quote(sim_tests_path);
+  // Checkpoint creation (sim.checkpoint*): enabled by default; the driver owns the
+  // fork cadence / prune and only writes once the min-secs floor elapses.
+  if (!ckpt_dir.empty()) {
+    run_args += " --ckpt-dir " + shell_quote(ckpt_dir);
+    if (!ckpt_min_secs.empty()) {
+      run_args += " --checkpoint-min-secs " + shell_quote(ckpt_min_secs);
+    }
+    if (!ckpt_max.empty()) {
+      run_args += " --checkpoint-max " + shell_quote(ckpt_max);
+    }
+    if (!ckpt_max_overhead.empty()) {
+      run_args += " --checkpoint-max-overhead " + shell_quote(ckpt_max_overhead);
+    }
+    if (!ckpt_every.empty()) {
+      run_args += " --checkpoint-every " + shell_quote(ckpt_every);
+    }
+  } else {
+    run_args += " --no-checkpoint";
+  }
+  // Debug replay: jump to the failure region (loads the nearest checkpoint <= N).
+  if (opts.sim_restart_at >= 0) {
+    run_args += " --restart-at " + shell_quote(std::to_string(opts.sim_restart_at));
+  }
+  // Windowed VCD: restart near Y, run silent to Y, trace [Y, Z].
+  if (opts.sim_vcd_from >= 0) {
+    run_args += " --vcd-from " + shell_quote(std::to_string(opts.sim_vcd_from));
+    if (opts.sim_vcd_to >= 0) {
+      run_args += " --vcd-to " + shell_quote(std::to_string(opts.sim_vcd_to));
+    }
+  }
+  // On an assert fire, auto-dump a VCD of the failure region (re-run from the
+  // nearest checkpoint with a window around the failing cycle).
+  if (opts.sim_vcd_on_fail) {
+    run_args += " --vcd-on-fail --vcd-fail-window " + shell_quote(std::to_string(opts.sim_vcd_fail_window));
+  }
+  // Forward each `--arg key=value` as `--key value`, but ONLY when `key` is a
+  // parameter of a SELECTED test (`selected_params`). Two reasons:
+  //  * a key that is a driver control flag (`--arg help=1` -> `--help`, `--arg
+  //    test=x` -> `--test x`, `--arg seed=N`) would otherwise be intercepted by
+  //    the binary and silently skip / restrict the run — a false green;
+  //  * a key that is a real parameter of some test but not a selected one is
+  //    irrelevant to this run, so it is dropped silently (not forwarded).
+  // A key that is a parameter of NO test in the file (`all_params`) is a genuine
+  // typo and is warned about unconditionally (visible in JSON mode too). This
+  // restores the pre-single-driver two-layer guard. `tests` lists the SELECTED
+  // tests' parameters (generate / list_tests already filtered by `test_sel`); for
+  // --run-only re-derive them from the source.
+  if (run_only && tests.empty()) {
+    std::vector<prp_sim::Test_info> lt;
+    std::string                     lerr;
+    if (prp_sim::list_tests(file, test_sel, lt, lerr) == 0) {
+      tests = std::move(lt);
+    }
+  }
+  std::set<std::string> selected_params;
+  for (const auto& t : tests) {
+    for (const auto& p : t.params) {
+      selected_params.insert(p.name);
+    }
+  }
+  std::set<std::string> all_params = selected_params;  // == selected when no test_sel
+  if (!test_sel.empty()) {
+    std::vector<prp_sim::Test_info> allt;
+    std::string                     aerr;
+    if (prp_sim::list_tests(file, "", allt, aerr) == 0) {
+      for (const auto& t : allt) {
+        for (const auto& p : t.params) {
+          all_params.insert(p.name);
+        }
+      }
+    }
+  }
+  for (const auto& [k, v] : opts.sim_args) {
+    if (selected_params.count(k) != 0) {
+      run_args += " " + shell_quote("--" + k) + " " + shell_quote(v);
+    } else if (all_params.count(k) == 0) {
+      std::print(stderr, "lhd sim: warning: --arg {}={} matches no test parameter (ignored)\n", k, v);
+    }
+    // else: a real parameter of an unselected test — valid but not for this run.
+  }
+  // Capture the binary's STDOUT (its `puts` output + the per-test PASS/FAIL
+  // verdict lines) for parsing + the pretty relay, but let its STDERR pass
+  // through to the user's stderr UNCHANGED — that is where the driver prints its
+  // warnings (e.g. a `--arg` that matches no test parameter) and usage errors, so
+  // they stay visible in JSON mode too (not only in the pretty relay below).
+  int  rc  = 0;
+  auto out = capture(std::format("{}{}", shell_quote(exe), run_args), rc);
+
+  // Read back the per-test result array (present whenever the driver ran, even on
+  // assert failure); embedded as the envelope's "tests" member. Absent if the
+  // driver crashed before writing it.
+  if (std::error_code ec_st; fs::exists(sim_tests_path, ec_st)) {
+    std::ifstream     ifs(sim_tests_path);
+    std::stringstream ss;
+    ss << ifs.rdbuf();
+    std::string tj = ss.str();
+    while (!tj.empty() && (tj.back() == '\n' || tj.back() == '\r' || tj.back() == ' ' || tj.back() == '\t')) {
+      tj.pop_back();
+    }
+    if (tj.size() >= 2 && tj.front() == '[') {  // a well-formed array, never a partial write
+      res.sim_tests_json = tj;
+    }
+  }
+
+  // The binary's EXIT CODE is the authoritative verdict (0 = all selected tests
+  // passed, 1 = a test failed, 2 = a usage error, <0 = the driver crashed). The
+  // per-test `PASS <name>` / `FAIL <name> (...)` lines are parsed only for the
+  // structured recipe detail (best-effort: a test that itself `puts` a line
+  // starting with "PASS "/"FAIL " adds a cosmetic recipe entry but never changes
+  // the verdict, which is rc-driven).
+  int    n_fail = 0;
+  size_t n_run  = 0;
+  {
+    std::istringstream iss(out);
+    std::string        ln;
+    while (std::getline(iss, ln)) {
+      const bool pass = ln.rfind("PASS ", 0) == 0;
+      const bool fail = ln.rfind("FAIL ", 0) == 0;
+      if (!pass && !fail) {
+        continue;
+      }
+      ++n_run;
+      std::string name = ln.substr(5);
+      if (auto sp = name.find(" ("); sp != std::string::npos) {
+        name = name.substr(0, sp);
+      }
+      res.recipe_steps.push_back(std::format("sim {} ({})", name, pass ? "pass" : "fail"));
+      if (fail) {
+        ++n_fail;
+      }
+    }
+  }
+  if (pretty) {
+    std::istringstream iss(out);
+    std::string        ln;
+    while (std::getline(iss, ln)) {
+      std::print("    {}\n", ln);
+    }
+    std::fflush(stdout);
   }
   res.outputs.push_back(simdir);
-  if (n_run == 0) {
+  if (rc == 0) {
+    // every selected test passed — status stays pass.
+  } else if (rc == 2) {
+    // a usage error inside the binary (unknown flag / unknown `--test` name /
+    // missing value / bad `--arg` value); the binary printed the specific reason
+    // (relayed above in pretty mode).
     res.status        = "fail";
     res.error_class   = "usage";
-    res.error_message = std::format("no test matched '{}' in {}", test_sel, file);
+    res.error_message = (!test_sel.empty() && n_run == 0) ? std::format("no test matched '{}' in {}", test_sel, file)
+                                                          : std::format("the sim driver rejected an argument in {}", file);
     res.exit_code     = 1;
-  } else if (n_fail != 0) {
+  } else {
+    // rc == 1 (a test's assert fired) or rc < 0 (the driver crashed / signaled).
     res.status        = "fail";
     res.error_class   = "assert";
-    res.error_message = std::format("{} of {} test(s) failed", n_fail, n_run);
+    res.error_message = (n_fail > 0 && n_run > 0) ? std::format("{} of {} test(s) failed", n_fail, n_run)
+                                                  : std::format("the sim driver exited with code {}", rc);
     res.exit_code     = 1;
   }
 }

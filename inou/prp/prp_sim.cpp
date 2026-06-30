@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <set>
 #include <sstream>
@@ -207,14 +208,111 @@ struct Gen_error {
 // One `test name(params)` parameter. The generated driver exposes each as a
 // `--<name> <value>` command-line flag, defaulting to `default_expr` (the
 // signature's default) when present; a parameter with no default (or `=nil`)
-// is required, and the driver prints its usage and exits non-zero if it is
-// not supplied. Values are bound at RUN time (argv), never baked in, so one
-// built driver can be re-run with different parameters.
+// is required, and the driver reports a clear error if it is not supplied.
+// Values are bound at RUN time (argv), never baked in, so one built driver can
+// be re-run with different parameters.
 struct Param {
   std::string name;
   bool        has_default{false};
   std::string default_expr;  // C++ expression for the default (valid iff has_default)
 };
+
+// A `test`'s parameter as it appears in the source: name, required (no default
+// or `=nil`), and the default's AST node (null iff required). The single walker
+// over the `test`'s arg_list; both the driver codegen (which translates the
+// default to a C++ expression) and the parse-only `list_tests` JSON (which uses
+// the default's source text) read it.
+struct Param_raw {
+  std::string name;
+  bool        required{false};
+  TSNode      default_node{};
+};
+
+std::vector<Param_raw> read_params_raw(const std::string& src, TSNode test) {
+  std::vector<Param_raw> out;
+  TSNode                 inp = field(test, "input");
+  if (ts_node_is_null(inp)) {
+    return out;
+  }
+  // arg_list named children are: typed_identifier [, default-expr], repeated.
+  // A parameter with no default is immediately followed by the next param.
+  Param_raw cur;
+  bool      have = false;
+  auto      flush = [&]() {
+    if (!have) {
+      return;
+    }
+    // `param:T=nil` declares an explicit NO default — same as omitting `=...`
+    // (05b-statements.md): the value MUST be supplied at run time.
+    cur.required = ts_node_is_null(cur.default_node) || text_of(src, cur.default_node) == "nil";
+    out.push_back(cur);
+    have = false;
+  };
+  for (uint32_t i = 0; i < ts_node_named_child_count(inp); ++i) {
+    TSNode ci = ts_node_named_child(inp, i);
+    if (ntype(ci) == "typed_identifier") {
+      flush();
+      cur       = Param_raw{};
+      TSNode id = field(ci, "identifier");
+      cur.name  = ts_node_is_null(id) ? std::string{} : std::string(text_of(src, id));
+      have      = true;
+    } else if (have) {
+      cur.default_node = ci;  // the parameter's default expression (next named child)
+    }
+  }
+  flush();
+  return out;
+}
+
+// Escape a string for a plain C++/JSON `"..."` literal (backslash, quote, and the
+// control characters). Unlike c_str_lit (printf format), `%` is NOT doubled.
+std::string cpp_str_lit(std::string_view s) {
+  std::string o;
+  for (char c : s) {
+    switch (c) {
+      case '\\': o += "\\\\"; break;
+      case '"': o += "\\\""; break;
+      case '\n': o += "\\n"; break;
+      case '\r': o += "\\r"; break;
+      case '\t': o += "\\t"; break;
+      default: o += c;
+    }
+  }
+  return o;
+}
+
+// Render the tests + parameters as a single-line JSON object — the canonical
+// `--list-tests` payload. Shared by `lhd sim --list-tests` (parse-only) and the
+// generated binary's embedded `--list-tests`, so both emit byte-identical JSON.
+// (Defined as the public prp_sim::tests_to_json below; declared here so the
+// in-namespace generate() can use it.)
+std::string tests_to_json_impl(const std::string& file, const std::vector<Test_info>& tests) {
+  std::string j = "{\"file\":\"";
+  j += cpp_str_lit(file);
+  j += "\",\"tests\":[";
+  for (size_t ti = 0; ti < tests.size(); ++ti) {
+    const auto& t = tests[ti];
+    j += (ti != 0 ? ",{\"name\":\"" : "{\"name\":\"");
+    j += cpp_str_lit(t.name);
+    j += "\",\"params\":[";
+    for (size_t pi = 0; pi < t.params.size(); ++pi) {
+      const auto& p = t.params[pi];
+      j += (pi != 0 ? ",{\"name\":\"" : "{\"name\":\"");
+      j += cpp_str_lit(p.name);
+      j += "\",\"required\":";
+      j += (p.required ? "true" : "false");
+      if (!p.required) {
+        j += ",\"default\":\"";
+        j += cpp_str_lit(p.default_text);
+        j += "\"";
+      }
+      j += "}";
+    }
+    j += "]}";
+  }
+  j += "]}";
+  return j;
+}
 
 // hlop's runtime PRNG default seed (hlop_random_seed()); the driver's `--seed`
 // defaults here so an unseeded run matches hlop's historical behavior.
@@ -251,12 +349,14 @@ bool is_reserved_param_name(std::string_view n) {
   };
   // Other identifiers the driver references at the same (function) scope but that
   // are NOT `_`-prefixed (so the leading-underscore bar in is_valid_param_name
-  // does not catch them): `main`'s parameters, the reserved CLI flags, the libc
-  // macros from <cerrno> (a param named `errno` would expand `long errno = …`
-  // to `long (*__error()) = …` — a hard error), and the free functions the
-  // driver calls unqualified. The driver's own `_`-prefixed locals need no entry.
+  // does not catch them): `main`'s parameters, the reserved CLI flags
+  // (`--test NAME`, `--seed`, `--help`/`-h` — a param named like one would be
+  // swallowed by that flag instead of binding), the libc macros from <cerrno> (a
+  // param named `errno` would expand `long errno = …` to `long (*__error()) = …`
+  // — a hard error), and the free functions the driver calls unqualified. The
+  // driver's own `_`-prefixed locals need no entry.
   static const std::set<std::string_view> driver_reserved = {
-      "argc", "argv", "main", "seed", "help", "h", "errno", "ERANGE", "hlop_set_random_seed",
+      "argc", "argv", "main", "seed", "help", "h", "test", "errno", "ERANGE", "hlop_set_random_seed",
   };
   return cpp_keywords.count(n) != 0 || driver_reserved.count(n) != 0;
 }
@@ -278,12 +378,25 @@ bool is_valid_param_name(std::string_view n) {
 
 class Driver_gen {
 public:
-  Driver_gen(const std::string& src, const std::map<std::string, Dut>& duts, const std::string& vcd_dir)
-      : src_(src), duts_(duts), vcd_dir_(vcd_dir) {}
+  Driver_gen(const std::string& src, const std::map<std::string, Dut>& duts, const std::string& vcd_dir,
+             const std::string& file)
+      : src_(src), duts_(duts), vcd_dir_(vcd_dir), file_(file) {
+    auto slash  = file_.find_last_of("/\\");
+    file_short_ = (slash == std::string::npos) ? file_ : file_.substr(slash + 1);
+  }
 
-  // Emit a complete driver main() for one test_statement. `name` is the dotted
-  // selector. Returns the C++ source; throws Gen_error on an unsupported form.
-  std::string emit(TSNode test, const std::string& name) {
+  // Emit one test's run-function into the shared driver:
+  //   static long <fn_id>(const std::map<std::string,std::string>& _args,
+  //                       std::set<std::string>& _consumed, std::string& _err, _Fail& _ff);
+  // It binds the test's parameters from `_args` (marking each consumed key, so
+  // main() can warn about leftover `--key`s), runs the body, and returns the
+  // count of failed asserts — or -1 with `_err` set when a required parameter is
+  // missing. `name` is the dotted selector. `params_out` receives the test's
+  // parameter list (for the registry JSON + the kernel's `--arg` forwarding);
+  // `includes_out` collects the DUT header(s) this test drives. Throws Gen_error
+  // on an unsupported form.
+  std::string emit_run_fn(TSNode test, const std::string& name, const std::string& fn_id,
+                          std::vector<Param_info>& params_out, std::set<std::string>& includes_out) {
     TSNode code = field(test, "code");
     if (ts_node_is_null(code)) {
       fail("test '" + name + "' has no body");
@@ -294,121 +407,83 @@ public:
       stmts.push_back(ts_node_named_child(code, i));
     }
     // pass 1: discover scalar locals (every assigned lvalue identifier) and the
-    // DUT instances used (a function_call whose callee is a known mod).
+    // DUT instances used (a `mut acc = Module` declaration).
     discover(stmts);
 
-    const auto params = read_params(test);
-    // A parameter name is emitted verbatim as a driver C++ identifier + CLI flag
-    // (see is_valid_param_name). Reject anything unsafe — a backtick/`$`/Unicode
-    // identifier, a C++ keyword (`default`, `class`, …), a reserved flag
-    // (`seed`/`help`/`h`), `main`'s `argc`/`argv`, or a leading-underscore name
-    // that could shadow a driver-internal local — with a clear message rather
-    // than silently miscompiling the generated driver.
-    for (const auto& p : params) {
-      if (!is_valid_param_name(p.name)) {
-        fail("test parameter '" + p.name
+    // Parameters: name + default. A name is emitted verbatim as a driver C++
+    // identifier (see is_valid_param_name); reject anything unsafe — a
+    // backtick/`$`/Unicode identifier, a C++ keyword (`default`, `class`, …), a
+    // reserved flag (`seed`/`help`/`h`), `main`'s `argc`/`argv`, or a
+    // leading-underscore name that could shadow a driver-internal local — with a
+    // clear message rather than silently miscompiling the generated driver.
+    std::vector<Param> params;
+    for (const auto& r : read_params_raw(src_, test)) {
+      if (!is_valid_param_name(r.name)) {
+        fail("test parameter '" + r.name
              + "' is not a usable simulation parameter name: it must be a plain identifier "
                "(a letter followed by letters/digits/underscores), not a leading-underscore name, "
                "a C++ keyword, or a reserved driver flag (seed/help/h/argc/argv) — rename it");
       }
+      param_names_.insert(r.name);  // for the tick clock-name collision check
+      Param p;
+      p.name        = r.name;
+      p.has_default = !r.required;
+      if (p.has_default) {
+        p.default_expr = expr(r.default_node);  // the parameter's default expression (C++)
+      }
+      params.push_back(p);
+      Param_info pi;
+      pi.name     = r.name;
+      pi.required = r.required;
+      if (!r.required) {
+        pi.default_text = text_of(src_, r.default_node);  // source text (for --list-tests JSON)
+      }
+      params_out.push_back(std::move(pi));
     }
 
     std::ostringstream o;
-    o << "// Generated by lhd sim (prp_sim) for test `" << name << "`. Do not edit.\n";
-    std::set<std::string> _incs;
-    for (const auto& [var, m] : inst_of_var) {
-      if (_incs.insert(duts_.at(m).hpp).second) {
-        o << "#include \"" << duts_.at(m).hpp << "\"\n";
-      }
-    }
-    // slop.hpp brings in hlop_set_random_seed() even for a test with no DUT
-    // include (it is transitively included by every DUT header otherwise).
-    o << "#include \"slop.hpp\"\n";
-    o << "#include <cstdio>\n#include <cstdint>\n#include <cstdlib>\n#include <cerrno>\n#include <string>\n\n";
-    o << "int main(int argc, char** argv) {\n";
+    o << "// ---- test `" << name << "` ----\n";
+    o << "static long " << fn_id
+      << "(const std::map<std::string, std::string>& _args, std::set<std::string>& _consumed, std::string& _err, "
+         "[[maybe_unused]] _Fail& _ff) {\n";
     o << "  long _fails = 0;\n";
+    // `_clk` tracks the current cycle (the active tick loop variable) so a located
+    // assert can report it even AFTER the tick loop (e.g. a `wait`-timeout assert),
+    // where the loop variable is out of C++ scope. -1 means "before any clock edge".
+    o << "  [[maybe_unused]] long _clk = -1;\n";
 
-    // ---- Runtime arguments. Every driver accepts `--seed N` (hlop PRNG seed)
-    // and `--help`; each test parameter becomes a `--<name> N` flag. Values are
-    // bound here from argv, never baked in, so one built binary re-runs with any
-    // parameters / seed. A parameter defaults to its signature default; one with
-    // no default is required (missing -> usage + nonzero exit).
-    o << "\n  unsigned long long _seed = " << kDefaultSeed << ";  // hlop PRNG seed (--seed N)\n";
+    // ---- Parameters bound from the shared `_args` map (`--<name> N`). A
+    // parameter defaults to its signature default; one with no default (or
+    // `=nil`) is required — when absent, the test reports a clear error rather
+    // than running with a silent 0. Each consumed `--key` is recorded so main()
+    // can warn about a `--key` that no test uses.
     for (const auto& p : params) {
-      o << "  long " << p.name << " = " << (p.has_default ? p.default_expr : "0") << ";  bool _set_" << p.name
-        << " = " << (p.has_default ? "true" : "false") << ";\n";
-      locals_.erase(p.name);  // bound as an argument, not a zero-init body local
-    }
-    // --help / usage text, columns aligned to the widest flag.
-    std::vector<std::pair<std::string, std::string>> rows;
-    rows.emplace_back("--seed N", std::string("hlop PRNG seed for random/unknown bits (default ") + kDefaultSeedShown + ")");
-    for (const auto& p : params) {
-      rows.emplace_back("--" + p.name + " N",
-                        p.has_default ? ("test parameter (default " + p.default_expr + ")")
-                                      : std::string("test parameter (required)"));
-    }
-    rows.emplace_back("--help, -h", "show this message and exit");
-    size_t flag_w = 0;
-    for (const auto& [flag, desc] : rows) {
-      flag_w = std::max(flag_w, flag.size());
-    }
-    o << "\n  auto _usage = [&]() {\n";
-    o << "    std::printf(\"usage: %s [options]   (test `" << c_str_lit(name) << "`)\\n\", argv[0]);\n";
-    o << "    std::printf(\"options:\\n\");\n";
-    for (const auto& [flag, desc] : rows) {
-      const std::string pad(flag_w - flag.size() + 2, ' ');
-      o << "    std::printf(\"  " << c_str_lit(flag) << pad << c_str_lit(desc) << "\\n\");\n";
-    }
-    o << "  };\n";
-    // Argument loop: accepts `--key value` and `--key=value`.
-    o << "  for (int _i = 1; _i < argc; ++_i) {\n";
-    o << "    std::string _arg = argv[_i], _key = _arg, _val;\n";
-    o << "    bool _has_val = false;\n";
-    o << "    if (auto _eq = _arg.find('='); _eq != std::string::npos) { _key = _arg.substr(0, _eq); _val = "
-         "_arg.substr(_eq + 1); _has_val = true; }\n";
-    o << "    auto _need = [&]() -> std::string { if (_has_val) return _val; if (_i + 1 < argc) return argv[++_i]; "
-         "std::fprintf(stderr, \"lhd sim: missing value for %s\\n\", _key.c_str()); _usage(); std::exit(2); };\n";
-    // Numeric parse with full validation: the whole token must convert (base 0,
-    // so 0x.. / decimal) and stay in range. A typo or out-of-range value exits
-    // with a clear message instead of silently becoming 0 / clamped. `_to_i64`
-    // is emitted only when there is a parameter to use it (every driver still
-    // needs `_to_u64` for `--seed`).
-    if (!params.empty()) {
-      o << "    auto _to_i64 = [&](const std::string& _s) -> long { errno = 0; char* _e = nullptr; long _r = "
-           "std::strtol(_s.c_str(), &_e, 0); if (_e == _s.c_str() || *_e != '\\0' || errno == ERANGE) { "
-           "std::fprintf(stderr, \"lhd sim: %s expects an integer, got '%s'\\n\", _key.c_str(), _s.c_str()); _usage(); "
-           "std::exit(2); } return _r; };\n";
-    }
-    // `--seed` is non-negative: reject a leading `-` (strtoull would wrap it).
-    o << "    auto _to_u64 = [&](const std::string& _s) -> unsigned long long { errno = 0; char* _e = nullptr; "
-         "unsigned long long _r = std::strtoull(_s.c_str(), &_e, 0); if (_s.empty() || _s[0] == '-' || _e == "
-         "_s.c_str() || *_e != '\\0' || errno == ERANGE) { std::fprintf(stderr, \"lhd sim: %s expects a non-negative "
-         "integer, got '%s'\\n\", _key.c_str(), _s.c_str()); _usage(); std::exit(2); } return _r; };\n";
-    o << "    if (_key == \"--help\" || _key == \"-h\") { _usage(); return 0; }\n";
-    o << "    else if (_key == \"--seed\") { _seed = _to_u64(_need()); }\n";
-    for (const auto& p : params) {
-      o << "    else if (_key == \"--" << c_str_lit(p.name) << "\") { " << p.name << " = _to_i64(_need()); _set_"
-        << p.name << " = true; }\n";
-    }
-    o << "    else { std::fprintf(stderr, \"lhd sim: unknown argument '%s'\\n\", _key.c_str()); _usage(); return 2; }\n";
-    o << "  }\n";
-    for (const auto& p : params) {
+      locals_.erase(p.name);  // bound as a parameter, not a zero-init body local
+      o << "  long " << p.name << " = " << (p.has_default ? p.default_expr : "0") << ";\n";
+      o << "  { auto _it = _args.find(\"" << cpp_str_lit(p.name) << "\");\n";
+      o << "    if (_it != _args.end()) { " << p.name << " = _to_i64(\"" << cpp_str_lit(p.name)
+        << "\", _it->second); _consumed.insert(\"" << cpp_str_lit(p.name) << "\"); }\n";
       if (!p.has_default) {
-        o << "  if (!_set_" << p.name << ") { std::fprintf(stderr, \"lhd sim: test `" << c_str_lit(name) << "` requires --"
-          << c_str_lit(p.name) << " <value>\\n\"); _usage(); return 2; }\n";
+        o << "    else { _err = \"test `" << cpp_str_lit(name) << "` requires --" << cpp_str_lit(p.name)
+          << " <value>\"; return -1; }\n";
       }
+      o << "  }\n";
     }
-    // Seed BEFORE any Slop/Dlop randomness — reset_cycle() below may draw it.
-    o << "  hlop_set_random_seed(_seed);\n\n";
 
-    // ---- DUT instances (after the seed so reset uses the seeded PRNG). One
-    // persistent instance per `mut acc = Module` declaration.
+    // ---- DUT instances. One persistent instance per `mut acc = Module`
+    // declaration (the seed is set once by main() before any test runs).
     for (const auto& [var, m] : inst_of_var) {
+      includes_out.insert(duts_.at(m).hpp);
       o << "  " << duts_.at(m).cls << " " << var << "; " << var << ".reset_cycle();\n";
       if (!vcd_dir_.empty()) {
-        // one VCD per test: <vcd_dir>/<test>.vcd (suffixed by instance when >1)
+        // one VCD per test: <vcd_dir>/<test>.vcd (suffixed by instance when >1).
+        // Stash the path; set it immediately for a whole-run trace, but for a
+        // `--vcd-from`/`--vcd-to` window the tick loop sets it at vcd_from instead.
         std::string vf = vcd_dir_ + "/" + name + (inst_of_var.size() > 1 ? ("." + var) : std::string{}) + ".vcd";
-        o << "  " << var << ".__vcd_path = \"" << vf << "\";\n";
+        o << "  std::string _vcdp_" << var << " = \"" << cpp_str_lit(vf) << "\";\n";
+        // Whole-run trace only for a plain `sim.vcd` (no window, not on-fail mode);
+        // a window sets the path at vcd_from, on-fail sets it only on the re-run.
+        o << "  if (_ckpt.vcd_from < 0 && !_ckpt.vcd_on_fail) " << var << ".__vcd_path = _vcdp_" << var << ";\n";
       }
     }
     for (const auto& v : locals_) {
@@ -421,13 +496,22 @@ public:
       }
       o << "};\n";
     }
+    // ---- checkpoint cadence scaffolding (only meaningful with a DUT instance):
+    // periodic fork-checkpoints of the DUT state + this testbench frame are
+    // written under <dir>/<test>/ckp<cycle>/ from inside the tick loop.
+    if (!inst_of_var.empty()) {
+      o << "  hlop::ckpt::Cadence _cad; _cad.init(_ckpt.enabled, _ckpt.min_secs, _ckpt.max_overhead);\n";
+      o << "  std::string _ckpt_base = _ckpt.dir.empty() ? std::string() : (_ckpt.dir + \"/" << sanitize(name)
+        << "\");\n";
+      // No upfront mkdir: the first due checkpoint's make_dirs(_cdir) creates the
+      // base recursively, so a short run that never checkpoints leaves no dirs.
+    }
     for (auto s : stmts) {
       gen_stmt(o, s, 1);
     }
-    // The driver's stdout is the test's runtime output (puts + any ASSERT
-    // FAILED lines); the exit code is the verdict. The `lhd sim` runner renders
-    // the per-test pass/fail + overall status (consistent with --diag-fmt).
-    o << "  return _fails ? 1 : 0;\n}\n";
+    // The function's stdout is the test's runtime output (puts + any ASSERT
+    // FAILED lines); the returned count is the verdict main() renders.
+    o << "  return _fails;\n}\n";
     return o.str();
   }
 
@@ -450,57 +534,15 @@ private:
     return o;
   }
 
-  // The test's `(params)` in declaration order. Values are bound at run time
-  // (the generated `--<name>` flags), so this only records each parameter's
-  // name and its default (a `param:T` / `param:T=nil` form has no default and
-  // is required).
-  std::vector<Param> read_params(TSNode test) {
-    std::vector<Param> out;
-    TSNode             inp = field(test, "input");
-    if (ts_node_is_null(inp)) {
-      return out;
-    }
-    std::string pname;
-    TSNode      pdef{};
-    bool        have = false;
-    auto        flush = [&]() {
-      if (!have) {
-        return;
-      }
-      // `param:T=nil` declares an explicit NO default — same as omitting `=...`
-      // (05b-statements.md): the value MUST be supplied at run time, a `nil`
-      // reaching the body is an error, never a silent 0.
-      Param p;
-      p.name        = pname;
-      p.has_default = !ts_node_is_null(pdef) && text_of(src_, pdef) != "nil";
-      if (p.has_default) {
-        p.default_expr = expr(pdef);  // the parameter's default expression
-      }
-      out.push_back(std::move(p));
-      have = false;
-      pdef = TSNode{};
-    };
-    // arg_list named children are: typed_identifier [, default-expr], repeated.
-    // A parameter with no default is immediately followed by the next param.
-    for (uint32_t i = 0; i < ts_node_named_child_count(inp); ++i) {
-      TSNode ci = ts_node_named_child(inp, i);
-      if (ntype(ci) == "typed_identifier") {
-        flush();
-        TSNode id = field(ci, "identifier");
-        pname     = ts_node_is_null(id) ? std::string{} : std::string(text_of(src_, id));
-        have      = true;
-      } else if (have) {
-        pdef = ci;  // the parameter's default expression (next named child)
-      }
-    }
-    flush();
-    return out;
-  }
-
   const std::string&                src_;
   const std::map<std::string, Dut>& duts_;
-  std::string                       vcd_dir_;  // empty = no VCD; else <vcd_dir>/<test>.vcd per test
+  std::string                       vcd_dir_;     // empty = no VCD; else <vcd_dir>/<test>.vcd per test
+  std::string                       file_;        // source .prp path (for failing_assert file:line)
+  std::string                       file_short_;  // basename of file_ (the inline located message)
+  bool                              in_tick_ = false;  // inside a tick body (reject nested ticks)
+  bool                              restart_block_emitted_ = false;  // --restart-at handled by the first tick
   std::set<std::string>                           locals_;      // scalar driver vars
+  std::set<std::string>                           param_names_; // test parameter names
   std::map<std::string, std::string>              inst_of_var;  // instance var -> module name (`mut acc = M`)
   std::map<std::string, std::vector<std::string>> arrays_;      // array name -> element exprs
 
@@ -544,7 +586,9 @@ private:
       if (write) {
         fail("cannot poke output '" + var + "." + fld + "' (outputs are read-only)");
       }
-      return var + ".__out." + fld;
+      // recompute the output from the current committed state (correct before the
+      // first step, and after a poke without a step, too -- peek has no net effect)
+      return var + ".peek(" + var + ".__in)." + fld;
     }
     if (d.has_reg(fld)) {
       return var + "." + fld;
@@ -626,7 +670,7 @@ private:
         TSNode c  = ts_node_named_child(n, i);
         auto   ct = ntype(c);
         if (ct == "integer_literal") {
-          return text_of(src_, c);
+          return strip_sep(text_of(src_, c));
         }
         if (ct == "bool_literal") {
           return text_of(src_, c) == "true" ? "1" : "0";
@@ -635,7 +679,7 @@ private:
       return text_of(src_, n);
     }
     if (t == "integer_literal") {
-      return text_of(src_, n);
+      return strip_sep(text_of(src_, n));
     }
     if (t == "bool_literal") {
       return text_of(src_, n) == "true" ? "1" : "0";
@@ -649,7 +693,11 @@ private:
       for (uint32_t i = 0; i < ts_node_named_child_count(n); ++i) {
         TSNode c  = ts_node_named_child(n, i);
         auto   ct = ntype(c);
-        if (ct == "op_log_not" || ct == "op_not" || ct == "op_sub" || ct == "unary_operator") {
+        // prpparse unary operator node kinds (see prp2lnast.cpp): `!`/`not` ->
+        // op_log_not, `~` -> op_bit_not, unary `-` -> op_unary_minus. Matching the
+        // wrong names silently DROPS the operator -> a corrupted guard (e.g.
+        // `assert(-x == 6)` would test `x == 6`), so this must track prpparse.
+        if (ct == "op_log_not" || ct == "op_bit_not" || ct == "op_unary_minus") {
           op = map_op(text_of(src_, c));
         } else {
           opnd = expr(c);
@@ -696,7 +744,7 @@ private:
       if (t == "binary_compare_op" || t == "binary_other_op" || t == "binary_times_op" || t == "binary_logical_op"
           || t == "binary_step_op") {
         out += " " + map_op(text_of(src_, c)) + " ";
-      } else if (t == "unary_operator" || t == "op_not") {
+      } else if (t == "op_log_not" || t == "op_bit_not" || t == "op_unary_minus") {
         out += map_op(text_of(src_, c));
       } else {
         out += expr(c);
@@ -719,6 +767,139 @@ private:
     return std::string{s};  // == != < > <= >= + - * & | ^
   }
 
+  // ---- located-assert helpers -----------------------------------------------
+  // 1-based source line of a node (counted from byte offset, so it needs no
+  // tree-sitter point API — keeps this independent of the facade shim).
+  int line_of(TSNode n) const {
+    if (ts_node_is_null(n)) {
+      return 0;
+    }
+    uint32_t off  = ts_node_start_byte(n);
+    int      line = 1;
+    for (uint32_t i = 0; i < off && i < src_.size(); ++i) {
+      if (src_[i] == '\n') {
+        ++line;
+      }
+    }
+    return line;
+  }
+  static std::string trim(std::string_view s) {
+    size_t b = s.find_first_not_of(" \t\r\n");
+    if (b == std::string_view::npos) {
+      return {};
+    }
+    size_t e = s.find_last_not_of(" \t\r\n");
+    return std::string(s.substr(b, e - b + 1));
+  }
+  // A bare literal operand (`30`, `0xff`, `true`) prints its own value, so the
+  // located message shows just the source (`v_final=10 == 30`, not `30=30`).
+  static bool is_literal_operand(const std::string& s) {
+    if (s == "true" || s == "false") {
+      return true;
+    }
+    size_t i = 0;
+    if (i < s.size() && (s[i] == '-' || s[i] == '+')) {
+      ++i;
+    }
+    if (i >= s.size()) {
+      return false;
+    }
+    if (i + 2 < s.size() && s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X')) {
+      for (size_t j = i + 2; j < s.size(); ++j) {
+        if (s[j] != '_' && std::isxdigit(static_cast<unsigned char>(s[j])) == 0) {  // allow digit separators
+          return false;
+        }
+      }
+      return true;
+    }
+    for (; i < s.size(); ++i) {
+      if (s[i] != '_' && std::isdigit(static_cast<unsigned char>(s[i])) == 0) {  // allow digit separators
+        return false;
+      }
+    }
+    return true;
+  }
+  // Pyrope integer literals allow `_` digit separators (`1_000`, `0xFF_00`), which
+  // are NOT valid C++ — strip them before emitting the literal into the driver.
+  static std::string strip_sep(std::string s) {
+    s.erase(std::remove(s.begin(), s.end(), '_'), s.end());
+    return s;
+  }
+  // Unwrap single-child `expression_item`/`paren_group` wrappers to the operative node.
+  TSNode unwrap(TSNode n) const {
+    while (!ts_node_is_null(n)) {
+      auto t = ntype(n);
+      if ((t == "expression_item" || t == "paren_group") && ts_node_named_child_count(n) == 1) {
+        n = ts_node_named_child(n, 0);
+        continue;
+      }
+      break;
+    }
+    return n;
+  }
+  // Render named children [b,e) of `parent` as a C++ (long) sub-expression — the
+  // operand-range half of expr_seq, so `acc.total` / `cycles - 2` each render on
+  // their own side of a top-level comparison.
+  std::string expr_range(TSNode parent, uint32_t b, uint32_t e) {
+    if (e - b == 1) {
+      return expr(ts_node_named_child(parent, b));
+    }
+    std::string out = "(";
+    for (uint32_t i = b; i < e; ++i) {
+      TSNode c = ts_node_named_child(parent, i);
+      auto   t = ntype(c);
+      if (t == "binary_compare_op" || t == "binary_other_op" || t == "binary_times_op" || t == "binary_logical_op"
+          || t == "binary_step_op") {
+        out += " " + map_op(text_of(src_, c)) + " ";
+      } else if (t == "op_log_not" || t == "op_bit_not" || t == "op_unary_minus") {
+        out += map_op(text_of(src_, c));
+      } else {
+        out += expr(c);
+      }
+    }
+    out += ")";
+    return out;
+  }
+  // Source text spanning named children [b,e).
+  std::string src_range(TSNode parent, uint32_t b, uint32_t e) const {
+    TSNode first = ts_node_named_child(parent, b);
+    TSNode last  = ts_node_named_child(parent, e - 1);
+    auto   s     = ts_node_start_byte(first);
+    auto   en    = ts_node_end_byte(last);
+    if (en > src_.size() || s > en) {
+      return {};
+    }
+    return src_.substr(s, en - s);
+  }
+  // If `cond` is a single top-level comparison (`lhs <cmp> rhs`), split it so the
+  // assert can print both operand values. Returns false for a bare boolean, a
+  // logical-combined condition (`a and b`), or a chained compare — those fall
+  // back to printing the whole condition source.
+  bool decompose_compare(TSNode cond, std::string& lhs_cpp, std::string& lhs_src, std::string& op,
+                         std::string& rhs_cpp, std::string& rhs_src) {
+    TSNode   u  = unwrap(cond);
+    uint32_t nc = ts_node_named_child_count(u);
+    if (nc < 3) {
+      return false;
+    }
+    int k = -1, cnt = 0;
+    for (uint32_t i = 0; i < nc; ++i) {
+      if (ntype(ts_node_named_child(u, i)) == "binary_compare_op") {
+        k = static_cast<int>(i);
+        ++cnt;
+      }
+    }
+    if (cnt != 1 || k <= 0 || k >= static_cast<int>(nc) - 1) {
+      return false;
+    }
+    op      = text_of(src_, ts_node_named_child(u, static_cast<uint32_t>(k)));
+    lhs_cpp = expr_range(u, 0, static_cast<uint32_t>(k));
+    lhs_src = trim(src_range(u, 0, static_cast<uint32_t>(k)));
+    rhs_cpp = expr_range(u, static_cast<uint32_t>(k) + 1, nc);
+    rhs_src = trim(src_range(u, static_cast<uint32_t>(k) + 1, nc));
+    return true;
+  }
+
   // ---- statements -----------------------------------------------------------
   void gen_stmt(std::ostringstream& o, TSNode n, int depth) {
     std::string ind(depth * 2, ' ');
@@ -735,13 +916,21 @@ private:
       return;
     }
     if (t == "step_statement") {
-      // one clock edge: advance every declared instance (exactly one edge per
-      // `step` in the single-clock model; a `step N` count is not supported yet).
+      // advance every declared instance one clock; `step N` advances N edges.
       if (inst_of_var.empty()) {
         fail("`step` with no instance declared (use `mut acc = Module` first)");
       }
-      for (const auto& [var, m] : inst_of_var) {
-        o << ind << var << ".step();\n";
+      TSNode cnt = field(n, "value");
+      if (ts_node_is_null(cnt)) {
+        for (const auto& [var, m] : inst_of_var) {
+          o << ind << var << ".step();\n";
+        }
+      } else {
+        o << ind << "for (long _s = 0; _s < (long)(" << expr(cnt) << "); ++_s) {\n";
+        for (const auto& [var, m] : inst_of_var) {
+          o << ind << "  " << var << ".step();\n";
+        }
+        o << ind << "}\n";
       }
       return;
     }
@@ -888,6 +1077,121 @@ private:
     return true;
   }
 
+  // Emit the periodic-checkpoint block at the top of a tick body: when the
+  // cadence is due (or every N cycles, `--checkpoint-every`), fork a child that
+  // writes ckp<cycle>/{regs.json, <mem>.hex, tb.json, meta.json}; the parent
+  // creates the dir first (so prune sees this cycle) and prunes to max after.
+  void emit_checkpoint_block(std::ostringstream& o, const std::string& ind, const std::string& clk) {
+    if (inst_of_var.empty()) {
+      return;
+    }
+    o << ind << "if (_ckpt.enabled && !_ckpt_base.empty() && " << clk << " > 0 && (_ckpt.every > 0 ? (" << clk
+      << " % _ckpt.every == 0) : _cad.due())) {\n";
+    o << ind << "  std::string _cdir = hlop::ckpt::ckpt_path(_ckpt_base, " << clk << ");\n";
+    o << ind << "  auto _t0 = std::chrono::steady_clock::now();\n";
+    o << ind << "  hlop::ckpt::fork_checkpoint([&]() {\n";
+    o << ind << "    hlop::ckpt::make_dirs(_cdir);\n";
+    o << ind << "    std::map<std::string, std::string> _regs;\n";
+    for (const auto& [var, m] : inst_of_var) {
+      o << ind << "    " << var << ".dump_state(\"" << var << ".\", _regs, _cdir);\n";
+    }
+    o << ind << "    hlop::ckpt::write_str_map(_cdir + \"/regs.json\", _regs);\n";
+    o << ind << "    std::map<std::string, std::string> _tb;\n";
+    for (const auto& v : locals_) {
+      o << ind << "    _tb[\"" << v << "\"] = std::to_string(" << v << ");\n";
+    }
+    o << ind << "    hlop::ckpt::write_str_map(_cdir + \"/tb.json\", _tb);\n";
+    o << ind << "    std::map<std::string, std::string> _meta;\n";
+    o << ind << "    _meta[\"cycle\"] = std::to_string(" << clk << ");\n";
+    o << ind << "    unsigned long long _dh = hlop::ckpt::kFnvOffset;\n";
+    for (const auto& [var, m] : inst_of_var) {
+      o << ind << "    _dh = hlop::ckpt::fnv1a_u64(_dh, " << var << ".design_hash());\n";
+    }
+    o << ind << "    _meta[\"design_hash\"] = std::to_string(_dh);\n";
+    o << ind << "    _meta[\"seed\"] = std::to_string(_seed_used);\n";
+    o << ind << "    _meta[\"rng_draws\"] = std::to_string(hlop_random_draws());\n";
+    o << ind << "    _meta[\"clock\"] = \"" << clk << "\";\n";
+    o << ind << "    hlop::ckpt::write_str_map(_cdir + \"/meta.json\", _meta);\n";
+    o << ind << "    hlop::ckpt::mark_complete(_cdir);  // LAST: makes the checkpoint visible to prune/restart\n";
+    o << ind << "  });\n";
+    o << ind << "  hlop::ckpt::prune_checkpoints(_ckpt_base, _ckpt.max);\n";
+    o << ind << "  _cad.taken(std::chrono::duration<double>(std::chrono::steady_clock::now() - _t0).count());\n";
+    o << ind << "}\n";
+  }
+
+  // Emit the restart prologue before the FIRST tick loop: if `--restart-at X`,
+  // load the nearest checkpoint <= X (DUT state + this testbench frame), warn on a
+  // design_hash mismatch (cross-version reload), and resume the loop at that cycle
+  // instead of 0. Only the first tick restarts (the single-clock model has one
+  // primary loop); later ticks run normally. No-op when no checkpoint is <= X.
+  void emit_restart_block(std::ostringstream& o, const std::string& ind, const std::string& clk) {
+    if (inst_of_var.empty() || restart_block_emitted_) {
+      return;
+    }
+    restart_block_emitted_ = true;
+    // Effective restart target: --restart-at, else the --vcd-from window start.
+    o << ind << "long _rt = _ckpt.restart_at >= 0 ? _ckpt.restart_at : _ckpt.vcd_from;\n";
+    o << ind << "if (_rt >= 0 && !_ckpt_base.empty()) {\n";
+    o << ind << "  long _nc = hlop::ckpt::nearest_checkpoint_cycle(_ckpt_base, _rt);\n";
+    o << ind << "  if (_nc >= 0) {\n";
+    o << ind << "    std::string _cdir = hlop::ckpt::ckpt_path(_ckpt_base, _nc);\n";
+    o << ind << "    auto _rregs = hlop::ckpt::read_str_map(_cdir + \"/regs.json\");\n";
+    for (const auto& [var, m] : inst_of_var) {
+      o << ind << "    " << var << ".load_state(\"" << var << ".\", _rregs, _cdir);\n";
+    }
+    o << ind << "    auto _rtb = hlop::ckpt::read_str_map(_cdir + \"/tb.json\");\n";
+    for (const auto& v : locals_) {
+      o << ind << "    if (auto _it = _rtb.find(\"" << v << "\"); _it != _rtb.end()) " << v
+        << " = std::strtol(_it->second.c_str(), nullptr, 0);\n";
+    }
+    o << ind << "    { unsigned long long _dh = hlop::ckpt::kFnvOffset;\n";
+    for (const auto& [var, m] : inst_of_var) {
+      o << ind << "      _dh = hlop::ckpt::fnv1a_u64(_dh, " << var << ".design_hash());\n";
+    }
+    o << ind << "      auto _rmeta = hlop::ckpt::read_str_map(_cdir + \"/meta.json\");\n";
+    o << ind << "      auto _mh = _rmeta.find(\"design_hash\");\n";
+    o << ind << "      if (_mh != _rmeta.end() && _mh->second != std::to_string(_dh)) std::fprintf(stderr, \"lhd sim: "
+                "warning: checkpoint design_hash mismatch at cycle %ld (cross-version reload; missing regs keep their "
+                "reset value)\\n\", _nc);\n";
+    // The PRNG stream position is NOT checkpointed (the thread_local engine resumes
+    // at position 0). If the checkpointed run used randomness, warn that randomized
+    // stimulus will diverge after restart (deterministic runs are unaffected).
+    o << ind << "      auto _rd = _rmeta.find(\"rng_draws\");\n";
+    o << ind << "      if (_rd != _rmeta.end() && _rd->second != \"0\" && !_rd->second.empty()) std::fprintf(stderr, "
+                "\"lhd sim: warning: checkpoint used randomness (%s draws); PRNG stream is not restored, so randomized "
+                "stimulus will diverge after restart\\n\", _rd->second.c_str()); }\n";
+    o << ind << "    " << clk << " = _nc;\n";
+    if (!vcd_dir_.empty()) {
+      // Align the VCD time axis with the absolute cycle (the period counter is not
+      // checkpointed; reset_cycle zeroed it), so a windowed trace timestamps at ~cycle*10.
+      for (const auto& [var, m] : inst_of_var) {
+        o << ind << "    " << var << ".__vcd_tick = (unsigned)_nc;\n";
+      }
+    }
+    o << ind << "    std::fprintf(stderr, \"lhd sim: restarted from checkpoint cycle %ld (target %ld)\\n\", _nc, _rt);\n";
+    o << ind << "  } else if (_rt > 0) {\n";
+    o << ind << "    std::fprintf(stderr, \"lhd sim: no checkpoint <= %ld; replaying from cycle 0\\n\", _rt);\n";
+    o << ind << "  }\n";
+    o << ind << "}\n";
+  }
+
+  // Emit the windowed-VCD enable/disable at the top of a tick body (only when VCD
+  // is on): start tracing at cycle vcd_from, stop after vcd_to. Combined with the
+  // restart prologue (which jumps to ~vcd_from), this yields a VCD covering just
+  // [vcd_from, vcd_to] of a long run.
+  void emit_vcd_window_block(std::ostringstream& o, const std::string& ind, const std::string& clk) {
+    if (vcd_dir_.empty() || inst_of_var.empty()) {
+      return;
+    }
+    o << ind << "if (_ckpt.vcd_from >= 0) {\n";
+    for (const auto& [var, m] : inst_of_var) {
+      o << ind << "  if (" << clk << " == _ckpt.vcd_from) " << var << ".__vcd_path = _vcdp_" << var << ";\n";
+      o << ind << "  if (_ckpt.vcd_to >= 0 && " << clk << " == _ckpt.vcd_to + 1) { " << var << ".__vcd.reset(); " << var
+        << ".__vcd_path.clear(); }\n";
+    }
+    o << ind << "}\n";
+  }
+
   void gen_tick(std::ostringstream& o, TSNode n, int depth) {
     std::string ind(depth * 2, ' ');
     TSNode      cnt  = field(n, "value");
@@ -895,6 +1199,14 @@ private:
     if (ts_node_is_null(cnt) || ts_node_is_null(code)) {
       fail("tick requires a count and a body (unbounded `tick {}` not yet supported)");
     }
+    // A nested tick would emit a second `for (long clock ...)` that shadows the
+    // outer clock and clobber the single function-scope `_clk`, so an outer-body
+    // assert after the inner tick would report the inner cycle. The single-clock
+    // model gives nesting no meaning -- reject it (flatten into one tick loop).
+    if (in_tick_) {
+      fail("a `tick` cannot be nested inside another `tick` (single-clock model) -- flatten into one tick loop");
+    }
+    in_tick_ = true;
     // Optional clocks=(name=ratio): name the clock + set its VCD time ratio on
     // each instance. (Multiclock is parsed but not lowered here; reset is no
     // longer a tick clause -- it is poked as an ordinary input.) The clock's name
@@ -907,14 +1219,32 @@ private:
         o << ind << var << ".__clk_name = \"" << clk_name << "\";\n";
       }
     }
+    // The clock name is emitted as the C++ loop variable, so it must be a usable
+    // identifier and must not collide with a test param / local / instance / array
+    // (it would silently shadow it -> wrong value, 0 iterations, or a confusing
+    // C++ error). Mirrors the parameter-name guard.
+    if (!is_valid_param_name(clk_name)) {
+      fail("tick clock name '" + clk_name + "' is not a usable identifier (C++ keyword / reserved / not a plain name) -- rename it");
+    }
+    if (param_names_.count(clk_name) != 0 || locals_.count(clk_name) != 0 || inst_of_var.count(clk_name) != 0
+        || arrays_.count(clk_name) != 0) {
+      fail("tick clock variable '" + clk_name + "' collides with a test parameter/local/instance of the same name -- rename one");
+    }
     if (!inst_of_var.empty() && !subtree_has_step(code)) {
       fail("a `tick` body must advance the clock with `step` (none found)");
     }
     // `clock` (the clock's name) is the 0-based cycle index, stable across the
     // whole iteration (see newtick.md).
     std::string count = expr(cnt);
-    o << ind << "for (long " << clk_name << " = 0; " << clk_name << " < (long)(" << count << "); ++" << clk_name
-      << ") {\n";
+    // Block-scope the clock loop variable so SEQUENTIAL ticks in one test each get
+    // their own `clock` (it is declared outside the for now, for the restart jump).
+    o << ind << "{\n";
+    o << ind << "long " << clk_name << " = 0;\n";
+    emit_restart_block(o, ind, clk_name);  // --restart-at: load nearest ckpt, resume at its cycle
+    o << ind << "for (; " << clk_name << " < (long)(" << count << "); ++" << clk_name << ") {\n";
+    o << ind << "  _clk = " << clk_name << ";\n";  // current cycle, for located asserts (survives the loop)
+    emit_vcd_window_block(o, ind + "  ", clk_name);  // --vcd-from/--vcd-to: enable/disable trace
+    emit_checkpoint_block(o, ind + "  ", clk_name);  // periodic DUT+tb checkpoint
     std::vector<TSNode> body;
     for (uint32_t i = 0; i < ts_node_named_child_count(code); ++i) {
       body.push_back(ts_node_named_child(code, i));
@@ -922,7 +1252,15 @@ private:
     for (auto s : body) {
       gen_stmt(o, s, depth + 1);
     }
+    // Only the verdict-discarded --vcd-on-fail re-run (window_only) stops at vcd_to;
+    // an explicit --vcd-from/--vcd-to window runs full-length so the test verdict +
+    // result-json reflect the WHOLE run (the VCD is still just the window).
+    if (!vcd_dir_.empty()) {
+      o << ind << "  if (_ckpt.window_only && _ckpt.vcd_to >= 0 && " << clk_name << " >= _ckpt.vcd_to) break;\n";
+    }
     o << ind << "}\n";
+    o << ind << "}\n";
+    in_tick_ = false;
   }
 
   void gen_assert(std::ostringstream& o, TSNode n, int depth) {
@@ -931,8 +1269,8 @@ private:
     if (ts_node_is_null(args) || ts_node_named_child_count(args) < 1) {
       fail("assert needs a condition");
     }
-    TSNode cond = ts_node_named_child(args, 0);
-    std::string msg = "assertion failed";
+    TSNode      cond = ts_node_named_child(args, 0);
+    std::string msg;
     if (ts_node_named_child_count(args) >= 2) {
       msg = text_of(src_, ts_node_named_child(args, 1));
       // strip surrounding quotes for the format string
@@ -940,8 +1278,47 @@ private:
         msg = msg.substr(1, msg.size() - 2);
       }
     }
-    o << ind << "if (!(" << expr(cond) << ")) { std::printf(\"  ASSERT FAILED: %s\\n\", \"" << msg
-      << "\"); ++_fails; }\n";
+    int         line     = line_of(n);
+    std::string loc      = file_short_ + ":" + std::to_string(line);
+    std::string cond_src = trim(text_of(src_, cond));
+
+    // The guard always uses the full condition (correctness); the message
+    // decomposes a top-level comparison into both operand values so a failure is
+    // self-explanatory: `acc.total=27 != 30` instead of just the message.
+    std::string lhs_cpp, lhs_src, op, rhs_cpp, rhs_src;
+    bool        cmp = decompose_compare(cond, lhs_cpp, lhs_src, op, rhs_cpp, rhs_src);
+    o << ind << "if (!(" << expr(cond) << ")) {\n";
+    if (cmp) {
+      bool        lhs_lit = is_literal_operand(lhs_src);
+      bool        rhs_lit = is_literal_operand(rhs_src);
+      std::string fmt     = "  ASSERT FAILED (" + c_str_lit(loc) + ") clock=%ld: " + c_str_lit(lhs_src)
+                        + (lhs_lit ? "" : "=%ld") + " " + c_str_lit(op) + " " + c_str_lit(rhs_src)
+                        + (rhs_lit ? "" : "=%ld");
+      if (!msg.empty()) {
+        fmt += "  [" + c_str_lit(msg) + "]";
+      }
+      o << ind << "  std::printf(\"" << fmt << "\\n\", _clk";
+      if (!lhs_lit) {
+        o << ", (long)(" << lhs_cpp << ")";
+      }
+      if (!rhs_lit) {
+        o << ", (long)(" << rhs_cpp << ")";
+      }
+      o << ");\n";
+    } else {
+      std::string fmt = "  ASSERT FAILED (" + c_str_lit(loc) + ") clock=%ld: condition `" + c_str_lit(cond_src)
+                        + "` is false";
+      if (!msg.empty()) {
+        fmt += "  [" + c_str_lit(msg) + "]";
+      }
+      o << ind << "  std::printf(\"" << fmt << "\\n\", _clk);\n";
+    }
+    // First failing assert -> structured result (--result-json {test,status,cycle,failing_assert,prp_file,line,msg}).
+    o << ind << "  if (!_ff.has) { _ff.has = true; _ff.cycle = _clk; _ff.assertion = \"" << cpp_str_lit(cond_src)
+      << "\"; _ff.file = \"" << cpp_str_lit(file_) << "\"; _ff.line = " << line << "; _ff.msg = \"" << cpp_str_lit(msg)
+      << "\"; _ff.loc = \"" << cpp_str_lit(loc) << "\"; }\n";
+    o << ind << "  ++_fails;\n";
+    o << ind << "}\n";
   }
 
   // `puts("text {var} {}", expr)` — runtime print. The interpolated string is
@@ -1004,10 +1381,55 @@ private:
   }
 };
 
+// Parse `file` and invoke `on_test(test_node, dotted_name)` for each
+// `test_statement` whose name matches `test_sel` (empty = all). Returns the match
+// count, or -1 on a read/parse error (with `err` set). The parsed source text is
+// stored in `src_out`; the TSNodes handed to the callback reference it, so it
+// must outlive the callback (the caller owns it).
+int for_each_test(const std::string& file, const std::string& test_sel, std::string& src_out, std::string& err,
+                  const std::function<void(TSNode, const std::string&)>& on_test) {
+  src_out = slurp(file);
+  if (src_out.empty()) {
+    err = "could not read source file: " + file;
+    return -1;
+  }
+  prpparse::Source_buffer buf(file, src_out);
+  prpparse::Parser        parser(buf);
+  prpparse::Ast*          root = nullptr;
+  try {
+    root = parser.parse_ast();
+  } catch (...) {
+    err = "parse error in " + file;
+    return -1;
+  }
+  TSNode root_node{root, &buf};
+  int    matched = 0;
+  for (uint32_t i = 0; i < ts_node_named_child_count(root_node); ++i) {
+    TSNode c = ts_node_named_child(root_node, i);
+    if (ntype(c) != "test_statement") {
+      continue;
+    }
+    TSNode name_node = field(c, "name");
+    if (ts_node_is_null(name_node)) {
+      continue;
+    }
+    std::string name = text_of(src_out, name_node);
+    if (!test_sel.empty() && name != test_sel) {
+      continue;
+    }
+    if (std::getenv("PRP_SIM_DUMP") != nullptr) {
+      dump_node(src_out, c, 0);
+    }
+    on_test(c, name);
+    ++matched;
+  }
+  return matched;
+}
+
 }  // namespace
 
 int generate(const std::string& file, const std::string& simdir, const std::string& test_sel, const std::string& vcd_dir,
-             std::vector<Driver>& out, std::string& err) {
+             std::vector<Test_info>& tests, std::string& err) {
   // 1. read DUT interfaces from the cgen_sim headers in simdir
   std::map<std::string, Dut> duts;
   std::error_code            ec;
@@ -1019,7 +1441,10 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
     if (fn.size() < 5 || fn.substr(fn.size() - 4) != ".hpp") {
       continue;
     }
-    if (fn.rfind("drv_", 0) == 0) {
+    // Skip ONLY the generated driver itself, by exact name (no driver `.hpp` is
+    // ever emitted, but stay precise) — a prefix skip would also drop a real DUT
+    // unit from a `drv*.prp` source (cgen names units `<file_stem>.<module>.hpp`).
+    if (fn == std::string(kDriverBasename) + ".hpp" || fn == std::string(kDriverBasename) + ".cpp") {
       continue;
     }
     Dut d;
@@ -1033,54 +1458,321 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
     return 1;
   }
 
-  // 2. parse the source for its test blocks
-  std::string src = slurp(file);
-  if (src.empty()) {
-    err = "could not read source file: " + file;
-    return 1;
-  }
-  prpparse::Source_buffer buf(file, src);
-  prpparse::Parser        parser(buf);
-  prpparse::Ast*          root = nullptr;
-  try {
-    root = parser.parse_ast();
-  } catch (...) {
-    err = "parse error in " + file;
-    return 1;
-  }
-  TSNode root_node{root, &buf};
+  // 2. parse the source and emit one run-function per `test`, accumulating the
+  // sources, the registry order, and the union of DUT headers used. State is
+  // per-test (a fresh Driver_gen each time), so tests never contaminate one
+  // another's locals/instances.
+  std::ostringstream       fns;          // run-function bodies, registry order
+  std::vector<std::string> fn_ids;       // run-function names, registry order
+  std::set<std::string>    includes;     // DUT headers any test drives
+  std::set<std::string>    used_ids;     // for fn_id uniqueness
+  std::string              src;          // owns the text the TSNodes reference
+  bool                     gen_failed = false;
+  std::string              gen_err;
 
-  Driver_gen gen(src, duts, vcd_dir);
-  int        matched = 0;
-  for (uint32_t i = 0; i < ts_node_named_child_count(root_node); ++i) {
-    TSNode c = ts_node_named_child(root_node, i);
-    if (ntype(c) != "test_statement") {
-      continue;
+  int matched = for_each_test(file, test_sel, src, err, [&](TSNode test, const std::string& name) {
+    if (gen_failed) {
+      return;  // stop emitting after the first error (err already captured)
     }
-    TSNode name_node = field(c, "name");
-    if (ts_node_is_null(name_node)) {
-      continue;
+    // Unique C++ function id per test (two dotted names can sanitize alike).
+    std::string fn_id = "_run_" + sanitize(name);
+    for (int suffix = 2; used_ids.count(fn_id) != 0; ++suffix) {
+      fn_id = "_run_" + sanitize(name) + "_" + std::to_string(suffix);
     }
-    std::string name = text_of(src, name_node);
-    if (!test_sel.empty() && name != test_sel) {
-      continue;
-    }
-    if (std::getenv("PRP_SIM_DUMP") != nullptr) {
-      dump_node(src, c, 0);
-    }
-    ++matched;
-    std::string code;
+    used_ids.insert(fn_id);
+
+    Driver_gen              gen(src, duts, vcd_dir, file);  // fresh per-test state
+    std::vector<Param_info> pinfo;
     try {
-      code = gen.emit(c, name);
+      fns << gen.emit_run_fn(test, name, fn_id, pinfo, includes) << "\n";
     } catch (const Gen_error& ge) {
-      err = "test '" + name + "': " + ge.msg;
-      return 1;
+      gen_failed = true;
+      gen_err    = "test '" + name + "': " + ge.msg;
+      return;
     }
-    std::string base = "drv_" + sanitize(name);
-    std::ofstream ofs(simdir + "/" + base + ".cpp");
-    ofs << code;
-    ofs.close();
-    out.push_back(Driver{name, base});
+    fn_ids.push_back(fn_id);
+    tests.push_back(Test_info{name, std::move(pinfo)});
+  });
+  if (matched < 0) {
+    return 1;  // err set by for_each_test
+  }
+  if (gen_failed) {
+    err = gen_err;
+    return 1;
+  }
+  if (matched == 0) {
+    err = test_sel.empty() ? ("no test blocks found in " + file) : ("no test named '" + test_sel + "' in " + file);
+    return 1;
+  }
+
+  bool any_param = false;
+  for (const auto& t : tests) {
+    any_param |= !t.params.empty();
+  }
+
+  // 3. assemble the single driver. Includes -> shared validating parsers -> the
+  // run-functions -> the registry + embedded `--list-tests` JSON -> main().
+  std::ostringstream o;
+  o << "// Generated by lhd sim (prp_sim). Do not edit.\n";
+  o << "// One driver for every `test` block of " << file << ":\n";
+  o << "//   --list-tests          print the tests + parameters as JSON, then exit\n";
+  o << "//   --test NAME           run only test NAME (repeatable; default = all)\n";
+  o << "//   --seed N              hlop PRNG seed for random / unknown bits\n";
+  o << "//   --<param> N           bind a `test name(params)` parameter\n";
+  o << "//   --help, -h            usage\n";
+  for (const auto& h : includes) {
+    o << "#include \"" << h << "\"\n";
+  }
+  // slop.hpp brings in hlop_set_random_seed() even for a test with no DUT include
+  // (it is transitively included by every DUT header otherwise).
+  o << "#include \"slop.hpp\"\n";
+  o << "#include \"checkpoint.hpp\"  // periodic DUT-state checkpoint cadence/fork/prune\n";
+  const bool vcd_on = !vcd_dir.empty();
+  if (vcd_on) {
+    // For vcd::global_timestamp — reset between tests (see main()).
+    o << "#include \"vcd_writer.hpp\"\n";
+  }
+  o << "#include <cstdio>\n#include <cstdint>\n#include <cstdlib>\n#include <cerrno>\n"
+       "#include <string>\n#include <map>\n#include <set>\n#include <vector>\n#include <fstream>\n#include <chrono>\n\n";
+
+  // Checkpoint configuration (sim.checkpoint*): periodic fork-checkpoints of the
+  // DUT state + testbench frame, written under <dir>/<test>/ckp<cycle>/, pruned to
+  // `max` and spaced ~min_secs apart (or every `every` cycles when set). main()
+  // fills this from the CLI; the run-functions read it. seed is mirrored for meta.
+  o << "struct _CkptCfg { bool enabled = true; double min_secs = 10.0; long max = 10; double max_overhead = 0.10; "
+       "long every = 0; std::string dir; long restart_at = -1; long vcd_from = -1; long vcd_to = -1; "
+       "bool vcd_on_fail = false; long vcd_fail_window = 20; bool window_only = false; };\n";
+  o << "static _CkptCfg _ckpt;\n";
+  o << "static unsigned long long _seed_used = " << kDefaultSeed << ";\n";
+
+  // First-failing-assert record per test run (located message + structured
+  // --result-json). Shared by every run-function (passed by reference) and main().
+  o << "struct _Fail { bool has = false; long cycle = -1; std::string assertion; std::string file; int line = 0; "
+       "std::string msg; std::string loc; };\n";
+  o << "static std::string _json_esc(const std::string& _s) {\n"
+       "  static const char _hex[] = \"0123456789abcdef\";\n"
+       "  std::string _o;\n"
+       "  for (char _c : _s) { unsigned char _u = (unsigned char)_c; switch (_c) {\n"
+       "    case '\\\\': _o += \"\\\\\\\\\"; break; case '\"': _o += \"\\\\\\\"\"; break;\n"
+       "    case '\\n': _o += \"\\\\n\"; break; case '\\r': _o += \"\\\\r\"; break; case '\\t': _o += \"\\\\t\"; break;\n"
+       "    default: if (_u < 0x20) { _o += \"\\\\u00\"; _o += _hex[_u >> 4]; _o += _hex[_u & 0xf]; } else _o += _c; } }\n"
+       "  return _o;\n}\n\n";
+
+  // Validating numeric parsers, shared by every run-function (params) + main
+  // (`--seed`). The whole token must convert (base 0: 0x.. / decimal) and stay in
+  // range; a typo / out-of-range value exits with a clear message rather than
+  // silently becoming 0 / clamped. `_to_i64` is always emitted now (the
+  // `--checkpoint-*` flags use it too). `--seed`/params are non-negative for _to_u64.
+  (void)any_param;
+  o << "static long _to_i64(const std::string& _key, const std::string& _s) {\n"
+       "  errno = 0; char* _e = nullptr; long _r = std::strtol(_s.c_str(), &_e, 0);\n"
+       "  if (_e == _s.c_str() || *_e != '\\0' || errno == ERANGE) {\n"
+       "    std::fprintf(stderr, \"lhd sim: --%s expects an integer, got '%s'\\n\", _key.c_str(), _s.c_str());\n"
+       "    std::exit(2);\n  }\n  return _r;\n}\n";
+  o << "static unsigned long long _to_u64(const std::string& _key, const std::string& _s) {\n"
+       "  errno = 0; char* _e = nullptr; unsigned long long _r = std::strtoull(_s.c_str(), &_e, 0);\n"
+       "  if (_s.empty() || _s[0] == '-' || _e == _s.c_str() || *_e != '\\0' || errno == ERANGE) {\n"
+       "    std::fprintf(stderr, \"lhd sim: --%s expects a non-negative integer, got '%s'\\n\", _key.c_str(), "
+       "_s.c_str());\n    std::exit(2);\n  }\n  return _r;\n}\n\n";
+
+  o << fns.str();
+
+  // Registry + the canonical `--list-tests` JSON (identical to what
+  // `lhd sim --list-tests` prints, since both render tests_to_json()).
+  o << "\nstruct _Test { const char* name; long (*run)(const std::map<std::string, std::string>&, "
+       "std::set<std::string>&, std::string&, _Fail&); };\n";
+  o << "static const _Test _tests[] = {\n";
+  for (size_t i = 0; i < fn_ids.size(); ++i) {
+    o << "  {\"" << cpp_str_lit(tests[i].name) << "\", &" << fn_ids[i] << "},\n";
+  }
+  o << "};\n";
+  // Every test parameter declared in this binary (union over all tests). The
+  // end-of-run check warns about an unknown `--key` against THIS set (not the
+  // per-run `_consumed`), so a declared-but-unbound parameter — e.g. one a test
+  // fail-fasts past on an earlier required parameter — is not falsely flagged.
+  {
+    std::set<std::string> decl;
+    for (const auto& t : tests) {
+      for (const auto& p : t.params) {
+        decl.insert(p.name);
+      }
+    }
+    o << "static const std::set<std::string> _declared_params = {";
+    bool first = true;
+    for (const auto& p : decl) {
+      o << (first ? "" : ", ") << "\"" << cpp_str_lit(p) << "\"";
+      first = false;
+    }
+    o << "};\n";
+  }
+  o << "static const char* _tests_json = \"" << cpp_str_lit(tests_to_json_impl(file, tests)) << "\";\n\n";
+
+  o << "static void _usage(const char* _argv0) {\n"
+       "  std::printf(\"usage: %s [--list-tests] [--test NAME]... [--seed N] [--result-json PATH] [--<param> "
+       "N]...\\n\", _argv0);\n"
+       "  std::printf(\"  Runs the lhd-sim test(s) compiled into this binary (default: all).\\n\");\n"
+       "  std::printf(\"options:\\n\");\n"
+       "  std::printf(\"  --list-tests       print the tests + parameters as JSON and exit\\n\");\n"
+       "  std::printf(\"  --test NAME        run only test NAME (repeatable; default: all)\\n\");\n"
+       "  std::printf(\"  --seed N           hlop PRNG seed for random/unknown bits (default "
+    << kDefaultSeedShown
+    << ")\\n\");\n"
+       "  std::printf(\"  --result-json PATH write a JSON {test,status,cycle,failing_assert,prp_file,line} report\\n\");\n"
+       "  std::printf(\"  --<param> N        bind a test parameter (see --list-tests)\\n\");\n"
+       "  std::printf(\"  --help, -h         show this message and exit\\n\");\n"
+       "  std::printf(\"tests:\\n\");\n"
+       "  for (const auto& _t : _tests) std::printf(\"  %s\\n\", _t.name);\n"
+       "}\n\n";
+
+  // main(): central argument parsing (--list-tests / --test / --seed / --help and
+  // the generic `--<param> value` test flags), then run the selected test(s). The
+  // seed is set once (hlop's PRNG latches its thread_local engine on first use, so
+  // it is process-wide, not re-applied per test). A required-parameter-missing
+  // test reports FAIL and the run continues; an unknown `--key` that no run test
+  // consumes is warned about at the end.
+  o << "int main(int argc, char** argv) {\n"
+       "  unsigned long long _seed = "
+    << kDefaultSeed
+    << ";\n"
+       "  bool _list = false;\n"
+       "  std::string _result_json;\n"
+       "  std::vector<std::string> _selected;\n"
+       "  std::map<std::string, std::string> _args;\n"
+       "  for (int _i = 1; _i < argc; ++_i) {\n"
+       "    std::string _arg = argv[_i], _key = _arg, _val; bool _has_val = false;\n"
+       "    if (auto _eq = _arg.find('='); _eq != std::string::npos) { _key = _arg.substr(0, _eq); _val = "
+       "_arg.substr(_eq + 1); _has_val = true; }\n"
+       "    auto _need = [&]() -> std::string { if (_has_val) return _val; if (_i + 1 < argc) return argv[++_i]; "
+       "std::fprintf(stderr, \"lhd sim: missing value for %s\\n\", _key.c_str()); _usage(argv[0]); std::exit(2); };\n"
+       "    if (_key == \"--help\" || _key == \"-h\") { _usage(argv[0]); return 0; }\n"
+       "    else if (_key == \"--list-tests\") { _list = true; }\n"
+       "    else if (_key == \"--seed\") { _seed = _to_u64(\"seed\", _need()); }\n"
+       "    else if (_key == \"--result-json\") { _result_json = _need(); }\n"
+       "    else if (_key == \"--ckpt-dir\") { _ckpt.dir = _need(); }\n"
+       "    else if (_key == \"--no-checkpoint\") { _ckpt.enabled = false; }\n"
+       "    else if (_key == \"--checkpoint-min-secs\") { _ckpt.min_secs = std::strtod(_need().c_str(), nullptr); }\n"
+       "    else if (_key == \"--checkpoint-max\") { _ckpt.max = _to_i64(\"checkpoint-max\", _need()); }\n"
+       "    else if (_key == \"--checkpoint-max-overhead\") { _ckpt.max_overhead = std::strtod(_need().c_str(), nullptr); }\n"
+       "    else if (_key == \"--checkpoint-every\") { _ckpt.every = _to_i64(\"checkpoint-every\", _need()); }\n"
+       "    else if (_key == \"--restart-at\" || _key == \"--restart-cycle\") { _ckpt.restart_at = _to_i64(\"restart-at\", _need()); }\n"
+       "    else if (_key == \"--vcd-from\") { _ckpt.vcd_from = _to_i64(\"vcd-from\", _need()); }\n"
+       "    else if (_key == \"--vcd-to\") { _ckpt.vcd_to = _to_i64(\"vcd-to\", _need()); }\n"
+       "    else if (_key == \"--vcd-on-fail\") { _ckpt.vcd_on_fail = true; }\n"
+       "    else if (_key == \"--vcd-fail-window\") { _ckpt.vcd_fail_window = _to_i64(\"vcd-fail-window\", _need()); }\n"
+       "    else if (_key == \"--test\") { _selected.push_back(_need()); }\n"
+       "    else if (_key.size() > 2 && _key[0] == '-' && _key[1] == '-') { _args[_key.substr(2)] = _need(); }\n"
+       "    else { std::fprintf(stderr, \"lhd sim: unknown argument '%s'\\n\", _key.c_str()); _usage(argv[0]); return "
+       "2; }\n"
+       "  }\n"
+       "  if (_list) { std::printf(\"%s\\n\", _tests_json); return 0; }\n"
+       "  hlop_set_random_seed(_seed);\n"
+       "  _seed_used = _seed;  // mirrored into checkpoint meta.json\n"
+       "  std::vector<const _Test*> _torun;\n"
+       "  if (_selected.empty()) { for (const auto& _t : _tests) _torun.push_back(&_t); }\n"
+       "  else { for (const auto& _nm : _selected) { const _Test* _f = nullptr; for (const auto& _t : _tests) if (_nm "
+       "== _t.name) { _f = &_t; break; } if (_f == nullptr) { std::fprintf(stderr, \"lhd sim: no test named '%s'\\n\", "
+       "_nm.c_str()); _usage(argv[0]); return 2; } _torun.push_back(_f); } }\n"
+       "  long _fail_tests = 0;\n"
+       "  std::set<std::string> _consumed;\n"
+       // A bare JSON array of per-test results, so `lhd sim` can embed it verbatim
+       // as the result envelope's "tests" member (and a direct binary run gets a
+       // standalone array).
+       "  std::string _rj = \"[\";\n"
+       "  bool _rj_first = true;\n"
+       "  for (const auto* _t : _torun) {\n"
+       "    std::string _err; _Fail _ff;\n"
+    << (vcd_on ? "    vcd::global_timestamp = 0;  // each test gets an independent VCD timeline (#0..)\n" : "")
+    << "    long _f = _t->run(_args, _consumed, _err, _ff);\n"
+       "    const char* _status = (_f < 0) ? \"error\" : (_f > 0 ? \"fail\" : \"pass\");\n"
+       "    if (_f < 0) { std::printf(\"FAIL %s (%s)\\n\", _t->name, _err.c_str()); ++_fail_tests; }\n"
+       "    else if (_f > 0) {\n"
+       "      if (_ff.has) std::printf(\"FAIL %s (%ld assert(s) failed; first at %s clock=%ld)\\n\", _t->name, _f, "
+       "_ff.loc.c_str(), _ff.cycle);\n"
+       "      else std::printf(\"FAIL %s (%ld assert(s) failed)\\n\", _t->name, _f);\n"
+       "      ++_fail_tests;\n"
+       "    } else { std::printf(\"PASS %s\\n\", _t->name); }\n"
+    // --vcd-on-fail: re-run a failed test with a VCD window around the failure
+    // cycle (the restart prologue jumps to ~vcd_from, the early break stops at
+    // vcd_to), suppressing the re-run's stdout. Only emitted when VCD is on.
+    << (vcd_on
+            ? "    if (_ckpt.vcd_on_fail && _f > 0 && _ff.has) {\n"
+              "      long _vf = _ff.cycle > _ckpt.vcd_fail_window ? _ff.cycle - _ckpt.vcd_fail_window : 0;\n"
+              // Save/override the relevant config: trace [_vf, fail_cycle], discard the
+              // verdict (window_only -> early break), and DO NOT checkpoint during the
+              // re-run (it would pollute/prune the checkpoint set).
+              "      long _of = _ckpt.vcd_from, _ot = _ckpt.vcd_to; bool _oe = _ckpt.enabled, _ow = _ckpt.window_only;\n"
+              "      _ckpt.vcd_from = _vf; _ckpt.vcd_to = _ff.cycle; _ckpt.enabled = false; _ckpt.window_only = true;\n"
+              // Suppress the re-run's stdout (the located assert already printed once).
+              // If the redirect can't be set up, run WITHOUT suppression rather than lose output.
+              "      std::fflush(stdout); int _sfd = dup(fileno(stdout)); FILE* _nul = std::fopen(\"/dev/null\", \"w\");\n"
+              "      bool _red = (_sfd >= 0 && _nul != nullptr && dup2(fileno(_nul), fileno(stdout)) >= 0);\n"
+              "      std::string _e2; _Fail _f2; _t->run(_args, _consumed, _e2, _f2);\n"
+              "      std::fflush(stdout);\n"
+              "      if (_red) dup2(_sfd, fileno(stdout));\n"
+              "      if (_nul != nullptr) std::fclose(_nul); if (_sfd >= 0) close(_sfd);\n"
+              "      _ckpt.vcd_from = _of; _ckpt.vcd_to = _ot; _ckpt.enabled = _oe; _ckpt.window_only = _ow;\n"
+              "      std::fprintf(stderr, \"lhd sim: %s failed at clock %ld -> wrote failure VCD (cycles %ld..%ld)\\n\", "
+              "_t->name, _ff.cycle, _vf, _ff.cycle);\n"
+              "    }\n"
+            : "")
+    << "    if (!_result_json.empty()) {\n"
+       "      _rj += _rj_first ? \"\" : \",\"; _rj_first = false;\n"
+       "      _rj += \"{\\\"test\\\":\\\"\"; _rj += _json_esc(_t->name); _rj += \"\\\",\\\"status\\\":\\\"\"; _rj += "
+       "_status; _rj += \"\\\"\";\n"
+       "      if (_f < 0) { _rj += \",\\\"error\\\":\\\"\"; _rj += _json_esc(_err); _rj += \"\\\"\"; }\n"
+       "      else if (_f > 0 && _ff.has) {\n"
+       "        _rj += \",\\\"cycle\\\":\"; _rj += std::to_string(_ff.cycle);\n"
+       "        _rj += \",\\\"failing_assert\\\":\\\"\"; _rj += _json_esc(_ff.assertion); _rj += \"\\\"\";\n"
+       "        _rj += \",\\\"prp_file\\\":\\\"\"; _rj += _json_esc(_ff.file); _rj += \"\\\"\";\n"
+       "        _rj += \",\\\"line\\\":\"; _rj += std::to_string(_ff.line);\n"
+       "        if (!_ff.msg.empty()) { _rj += \",\\\"msg\\\":\\\"\"; _rj += _json_esc(_ff.msg); _rj += \"\\\"\"; }\n"
+       "      }\n"
+       "      _rj += \"}\";\n"
+       "    }\n"
+       "  }\n"
+       "  _rj += \"]\";\n"
+       // A sidecar-write failure is only a bookkeeping problem -- WARN, but keep the
+       // exit code the tests' real verdict (else a passing run would look like a
+       // usage error, exit 2; the lhd kernel tolerates a missing result file).
+       "  if (!_result_json.empty()) {\n"
+       "    std::ofstream _ofs(_result_json);\n"
+       "    if (!_ofs) { std::fprintf(stderr, \"lhd sim: warning: cannot write --result-json '%s'\\n\", "
+       "_result_json.c_str()); }\n"
+       "    else { _ofs << _rj << \"\\n\"; }\n"
+       "  }\n"
+       "  for (const auto& _kv : _args) if (_declared_params.find(_kv.first) == _declared_params.end()) std::fprintf(stderr, \"lhd "
+       "sim: warning: --%s matches no test parameter (ignored)\\n\", _kv.first.c_str());\n"
+       "  hlop::ckpt::drain_checkpoints();  // block until in-flight checkpoint children finish (write _done)\n"
+       "  return _fail_tests ? 1 : 0;\n}\n";
+
+  std::ofstream ofs(simdir + "/" + kDriverBasename + ".cpp");
+  ofs << o.str();
+  ofs.close();
+  return 0;
+}
+
+std::string tests_to_json(const std::string& file, const std::vector<Test_info>& tests) {
+  return tests_to_json_impl(file, tests);
+}
+
+int list_tests(const std::string& file, const std::string& test_sel, std::vector<Test_info>& tests, std::string& err) {
+  std::string src;
+  int         matched = for_each_test(file, test_sel, src, err, [&](TSNode test, const std::string& name) {
+    Test_info ti;
+    ti.name = name;
+    for (const auto& r : read_params_raw(src, test)) {
+      Param_info pi;
+      pi.name     = r.name;
+      pi.required = r.required;
+      if (!r.required) {
+        pi.default_text = text_of(src, r.default_node);
+      }
+      ti.params.push_back(std::move(pi));
+    }
+    tests.push_back(std::move(ti));
+  });
+  if (matched < 0) {
+    return 1;  // err set
   }
   if (matched == 0) {
     err = test_sel.empty() ? ("no test blocks found in " + file) : ("no test named '" + test_sel + "' in " + file);

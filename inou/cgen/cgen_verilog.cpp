@@ -790,15 +790,20 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   int mem_type    = 2;  // array by default
   int mem_wensize = 0;
 
-  hhds::Pin_class mem_init_dpin;  // comptime contents (entry 0 in the low bits, row-major)
+  hhds::Pin_class mem_init_dpin;  // comptime contents OR (whole-array) runtime reset-value bus (entry 0 in the low bits)
+  // Whole-array pins (driven => this cell is a whole-array memory: one `update`
+  // bus instead of N per-entry write ports; an async `read_all` output).
+  hhds::Pin_class mem_update_dpin;         // whole-array next-state bus (size*bits, entry 0 low)
+  hhds::Pin_class mem_update_enable_dpin;  // optional bulk-update enable (absent => always-on)
+  hhds::Pin_class mem_reset_dpin;          // 1-bit reset condition (registered whole-array)
 
   for (auto e : node.inp_edges()) {
     // HHDS does not store LiveHD's per-sink-name convention; derive the
     // name from the port_id via Ntype::get_sink_name. For memory the names
-    // wrap with `pid % 12` (see Ntype::get_sink_name).
+    // wrap with `pid % Memory_port_stride` (see Ntype::get_sink_name).
     auto   raw_pid  = static_cast<int>(e.sink.get_port_id());
     auto   pin_name = Ntype::get_sink_name(Ntype_op::Memory, raw_pid);
-    size_t port_id  = static_cast<size_t>(raw_pid) / 12;
+    size_t port_id  = static_cast<size_t>(raw_pid) / Ntype::Memory_port_stride;
 
     if (port_vector.size() <= port_id) {
       port_vector.resize(1 + port_id);
@@ -845,13 +850,17 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       }
       mem_fwd = hydrate_const(e.driver).to_just_i64();
     } else if (pin_name == "init") {
-      if (!is_const_pin(e.driver)) {
-        livehd::diag::err("inou.cgen", "mem-malformed", "internal")
-            .msg("memory {} should have a constant for init not {}", debug_name(node), debug_name(e.driver.get_master_node()))
-            .fatal();
-        return;
-      }
+      // For a plain memory `init` is the comptime power-on contents; for a
+      // whole-array cell (the `update` pin is driven) it is the RUNTIME reset
+      // value bus, so do not force a constant here — the const-consuming paths
+      // (wrapper INIT param, type-2 default fill) only run when there is no update.
       mem_init_dpin = e.driver;
+    } else if (pin_name == "update") {
+      mem_update_dpin = e.driver;
+    } else if (pin_name == "update_enable") {  // MUST precede the ends_with("enable") per-port branch below
+      mem_update_enable_dpin = e.driver;
+    } else if (pin_name == "reset") {
+      mem_reset_dpin = e.driver;
     } else if (str_tools::ends_with(pin_name, "clock_pin")) {
       port_vector[port_id].clock = e.driver;
     } else if (str_tools::ends_with(pin_name, "addr")) {
@@ -876,6 +885,126 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         ++n_wr_ports;
       }
     }
+  }
+
+  // ── Whole-array memory (the `update` bus is driven) ─────────────────────────
+  // The entire array is (re)written from one `update` bus instead of N per-entry
+  // write ports: registered (clocked, reset to the runtime `init` bus) when a
+  // clock is present, else combinational. Per-port writes still apply and OVERRIDE
+  // the bulk update (emitted after it => last-write wins). An async `read_all`
+  // driver (reserved pid) exposes the whole array. Emitted inline as a reg-array;
+  // the cgen_memory_* wrappers cannot carry a runtime reset bus / update / read_all.
+  if (!mem_update_dpin.is_invalid()) {
+    const auto aname      = absl::StrCat(iname, "_data");
+    const auto clock_dpin = port_vector.empty() ? hhds::Pin_class{} : port_vector[0].clock;
+    const bool registered = !clock_dpin.is_invalid();
+    const int  busw       = mem_size * mem_bits;
+
+    fout->append(absl::StrCat("reg [", mem_bits - 1, ":0] ", aname, "[", mem_size - 1, ":0];\n"));
+    // Bind the buses to nets so per-entry part-selects are always legal.
+    const auto updbus = absl::StrCat(aname, "_upd");
+    fout->append(absl::StrCat("wire [", busw - 1, ":0] ", updbus, " = ", get_wire_or_const(mem_update_dpin), ";\n"));
+    std::string initbus;
+    if (!mem_init_dpin.is_invalid()) {
+      initbus = absl::StrCat(aname, "_rst");
+      fout->append(absl::StrCat("wire [", busw - 1, ":0] ", initbus, " = ", get_wire_or_const(mem_init_dpin), ";\n"));
+    }
+    auto entry_sel = [&](const std::string& bus, int i) {
+      return absl::StrCat(bus, "[", (i + 1) * mem_bits - 1, ":", i * mem_bits, "]");
+    };
+
+    if (registered) {
+      fout->append(absl::StrCat("always @(posedge ", get_wire_or_const(clock_dpin), ") begin\n"));
+      std::string ind = "  ";
+      if (!mem_reset_dpin.is_invalid()) {  // sync reset to the runtime init/reset bus (highest priority)
+        fout->append(absl::StrCat("  if (", get_wire_or_const(mem_reset_dpin), ") begin\n"));
+        for (int i = 0; i < mem_size; ++i) {
+          fout->append(
+              absl::StrCat("    ", aname, "[", i, "] <= ", initbus.empty() ? std::string("'b0") : entry_sel(initbus, i), ";\n"));
+        }
+        fout->append("  end else begin\n");
+        ind = "    ";
+      }
+      const bool gated = !mem_update_enable_dpin.is_invalid();
+      if (gated) {
+        fout->append(absl::StrCat(ind, "if (", get_wire_or_const(mem_update_enable_dpin), ") begin\n"));
+      }
+      for (int i = 0; i < mem_size; ++i) {  // bulk update (default); per-port writes below override
+        fout->append(absl::StrCat(ind, gated ? "  " : "", aname, "[", i, "] <= ", entry_sel(updbus, i), ";\n"));
+      }
+      if (gated) {
+        fout->append(absl::StrCat(ind, "end\n"));
+      }
+      for (auto& p : port_vector) {  // per-port writes OVERRIDE the bulk update (later <= wins)
+        if (p.rdport || p.addr.is_invalid() || p.din.is_invalid()) {
+          continue;
+        }
+        auto w = absl::StrCat(aname, "[", get_wire_or_const(p.addr), "] <= ", get_wire_or_const(p.din), ";\n");
+        fout->append(p.enable.is_invalid() ? absl::StrCat(ind, w) : absl::StrCat(ind, "if (", get_wire_or_const(p.enable), ") ", w));
+      }
+      if (!mem_reset_dpin.is_invalid()) {
+        fout->append("  end\n");
+      }
+      fout->append("end\n");
+    } else {  // combinational whole-array (no clock); update_enable n/a (no hold state)
+      fout->append("always_comb begin\n");
+      for (int i = 0; i < mem_size; ++i) {
+        fout->append(absl::StrCat("  ", aname, "[", i, "] = ", entry_sel(updbus, i), ";\n"));
+      }
+      for (auto& p : port_vector) {
+        if (p.rdport || p.addr.is_invalid() || p.din.is_invalid()) {
+          continue;
+        }
+        auto w = absl::StrCat(aname, "[", get_wire_or_const(p.addr), "] = ", get_wire_or_const(p.din), ";\n");
+        fout->append(p.enable.is_invalid() ? absl::StrCat("  ", w) : absl::StrCat("  if (", get_wire_or_const(p.enable), ") ", w));
+      }
+      fout->append("end\n");
+    }
+
+    // Async reads: per-entry douts (read port N => pid n_wr_ports+N) + read_all.
+    // Registered douts are `wire` (create_locals, type!=2) -> continuous assign;
+    // combinational douts are `reg` -> drive inside an always_comb.
+    const bool reads_in_comb = !registered;
+    if (reads_in_comb) {
+      fout->append("always_comb begin\n");
+    }
+    auto drive = [&](const std::string& dest, const std::string& rhs) {
+      fout->append(reads_in_comb ? absl::StrCat("  ", dest, " = ", rhs, ";\n") : absl::StrCat("assign ", dest, " = ", rhs, ";\n"));
+    };
+    int n_rd_pos = 0;
+    for (auto& p : port_vector) {
+      if (!p.rdport) {
+        continue;
+      }
+      if (p.addr.is_invalid()) {
+        livehd::diag::err("inou.cgen", "mem-malformed", "internal")
+            .msg("array {} read port is not correctly configured", debug_name(node))
+            .fatal();
+      }
+      auto dout_dpin = node.create_driver_pin(static_cast<hhds::Port_id>(n_wr_ports + n_rd_pos));
+      drive(get_wire_or_const(dout_dpin), absl::StrCat(aname, "[", get_wire_or_const(p.addr), "]"));
+      ++n_rd_pos;
+    }
+    bool has_read_all = false;
+    for (const auto& e2 : node.out_edges()) {
+      if (static_cast<hhds::Port_id>(e2.driver.get_port_id()) == Ntype::Memory_readall_pid) {
+        has_read_all = true;
+        break;
+      }
+    }
+    if (has_read_all) {  // {data[size-1], ..., data[0]} (entry 0 in the low bits)
+      std::string cat = "{";
+      for (int i = mem_size - 1; i >= 0; --i) {
+        cat += absl::StrCat(aname, "[", std::to_string(i), "]", i ? "," : "");
+      }
+      cat += "}";
+      auto ra = node.create_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
+      drive(get_wire_or_const(ra), cat);
+    }
+    if (reads_in_comb) {
+      fout->append("end\n");
+    }
+    return;
   }
 
   if (mem_type == 0 || mem_type == 1) {  // sync or async memory

@@ -9,6 +9,7 @@
 #include "iassert.hpp"
 #include "lhd.hpp"
 #include "lhd_pyrope.hpp"
+#include "perf_tracing.hpp"
 
 namespace {
 
@@ -20,10 +21,20 @@ void mark_failed(lhd::Result& res, const lhd::Lhd_error& e) {
   res.error_hint    = e.hint;
 }
 
+// Perfetto tracing lifetime (LIVEHD_PROFILING builds only; both calls compile
+// to no-ops otherwise). Used to be anchored to the global Thread_pool's
+// constructor/destructor; that pool was removed, so the process scope lives
+// here as an RAII guard covering every main() exit path.
+struct Trace_guard {
+  Trace_guard() { start_tracing(); }
+  ~Trace_guard() { stop_tracing(); }
+};
+
 }  // namespace
 
 int main(int argc, char** argv) {
   I_setup();
+  Trace_guard trace_guard;
 
   lhd::Options opts;
   lhd::Result  res;

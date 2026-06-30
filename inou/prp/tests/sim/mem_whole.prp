@@ -1,0 +1,44 @@
+/*
+:name: mem_whole
+:type: simulation
+*/
+// Simulation of whole-array read/write, BOTH variants in one module:
+//  * REGISTERED `arr`: each cycle the whole array is registered from one bus
+//    (`arr = inp`, clocked `update`); `r` per-entry read, `allout` async read_all.
+//  * COMBINATIONAL `carr`: the whole array is written combinationally
+//    (`carr = cinp`, no clock) and read same-cycle (`cr`, `call`).
+// Exercises cgen_sim `slop_apply_update` (edge + combinational) and `slop_read_all`.
+mod whole_sim(inp:u80, idx:u3, cinp:u80, cidx:u3) -> (r:u10@[0], allout:u80@[0], cr:u10@[0], call:u80@[0]) {
+  reg arr:[8]u10 = nil
+  arr    = inp
+  r      = arr[idx]
+  allout = arr
+
+  mut carr:[8]u10
+  carr = cinp
+  cr   = carr[cidx]
+  call = carr
+}
+
+test whole_sim.r {
+  mut acc    = whole_sim
+  mut r_last = nil
+  mut a_last = nil
+  mut cr_v   = nil
+  mut call_v = nil
+  tick 6 {
+    acc.inp  = clock          // registered: entry 0 = clock
+    acc.idx  = 0
+    acc.cinp = clock + 1      // combinational: entry 0 = clock+1, same-cycle
+    acc.cidx = 0
+    step
+    r_last = acc.r
+    a_last = acc.allout
+    cr_v   = acc.cr           // combinational read tracks THIS cycle's cinp
+    call_v = acc.call
+  }
+  assert(r_last == 5, "registered per-entry read")
+  assert(a_last == 5, "registered read_all bus")
+  assert(cr_v == 6, "combinational per-entry read (cinp=clock+1, last clock=5 -> 6)")
+  assert(call_v == 6, "combinational read_all bus")
+}

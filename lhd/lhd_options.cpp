@@ -99,6 +99,21 @@ std::string_view need_value(std::string_view flag, int& i, int argc, char** argv
   return argv[i];
 }
 
+// A non-negative integer flag value (cycle counts: --restart-at/--vcd-from/-to).
+long parse_nonneg(std::string_view flag, std::string_view val) {
+  size_t consumed = 0;
+  long   n        = 0;
+  try {
+    n = std::stol(std::string{val}, &consumed, 0);  // base 0: decimal or 0x..
+  } catch (const std::exception&) {
+    consumed = 0;
+  }
+  if (val.empty() || consumed != val.size() || n < 0) {
+    throw Lhd_error{"usage", std::format("{} expects a non-negative integer, got '{}'", flag, val), ""};
+  }
+  return n;
+}
+
 bool ends_with(std::string_view s, std::string_view suffix) {
   return s.size() >= suffix.size() && s.substr(s.size() - suffix.size()) == suffix;
 }
@@ -504,6 +519,8 @@ Options parse_args(int argc, char** argv) {
       opts.sim_setup_only = true;
     } else if (a == "--run-only") {  // `sim`: build/run an existing sim (needs --workdir)
       opts.sim_run_only = true;
+    } else if (a == "--list-tests") {  // `sim`: print the tests + parameters as JSON, then exit (no build)
+      opts.sim_list_tests = true;
     } else if (a == "--arg") {  // `sim`: bind a test parameter, repeatable: --arg key=value
       auto v  = std::string{need_value(a, i, argc, argv)};
       auto eq = v.find('=');
@@ -512,6 +529,16 @@ Options parse_args(int argc, char** argv) {
                         "e.g. `lhd sim foo.prp foo.bar --arg max_cycles=30`"};
       }
       opts.sim_args.emplace_back(v.substr(0, eq), v.substr(eq + 1));
+    } else if (a == "--restart-at" || a == "--restart-cycle") {  // `sim`: resume from the nearest checkpoint <= N
+      opts.sim_restart_at = parse_nonneg(a, need_value(a, i, argc, argv));
+    } else if (a == "--vcd-from") {  // `sim`: trace VCD starting at cycle N (restart to N first)
+      opts.sim_vcd_from = parse_nonneg(a, need_value(a, i, argc, argv));
+    } else if (a == "--vcd-to") {  // `sim`: trace VCD up to cycle N (with --vcd-from)
+      opts.sim_vcd_to = parse_nonneg(a, need_value(a, i, argc, argv));
+    } else if (a == "--vcd-on-fail") {  // `sim`: re-run a failed test with a VCD of the failure region
+      opts.sim_vcd_on_fail = true;
+    } else if (a == "--vcd-fail-window") {  // `sim`: cycles before the failure to trace (with --vcd-on-fail)
+      opts.sim_vcd_fail_window = parse_nonneg(a, need_value(a, i, argc, argv));
     } else if (a == "--seed") {  // shared RNG seed (alias for `--set lhd.seed=N`); `sim` forwards it to drivers
       auto   v        = std::string{need_value(a, i, argc, argv)};
       size_t consumed = 0;
@@ -577,12 +604,13 @@ Options parse_args(int argc, char** argv) {
                         "run `lhd pyrope lsp` (or point your editor's launcher at it)"};
       }
       if (a == "compile" || a == "lec" || a == "scan" || a == "pyrope" || a == "list" || a == "describe"
-          || a == "version" || a == "help" || a == "tool" || a == "pass" || a == "sim") {
+          || a == "version" || a == "help" || a == "tool" || a == "tools" || a == "pass" || a == "sim") {
         // tool keeps its positionals raw and ORDERED in opts.files: the verb
         // (cat/grep/diff/tree), the filter terms (name:/color:/from:…), and the
         // ln:/lg: inputs all keep their place — tool_command classifies them.
-        opts.command = a;
-        cmd_path     = a;  // command-path root for --set abbreviation (2h-set_path)
+        // `tools` is silently accepted as an alias for `tool` (common typo).
+        opts.command = (a == "tools") ? std::string{"tool"} : std::string{a};
+        cmd_path     = opts.command;  // command-path root for --set abbreviation (2h-set_path)
       } else {
         throw Lhd_error{"usage", std::format("unknown command '{}'", a), "run `lhd help` for the command list"};
       }

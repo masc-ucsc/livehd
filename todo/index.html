@@ -38,12 +38,10 @@ agent build/process rules live in <code>AGENTS.md</code>.</p>
 <li><em>Group 3 — needs still-unspecified codegen/verification tasks first:</em><ul>
 <li><a class="xref" href="pyrope/3f-temporal.html">3f-temporal</a> Temporal library: <code>past[n]</code>/<code>next[n]</code>, <code>rose</code>/<code>fell</code>/<code>stable</code>/<code>changed</code>/<code>eventually</code>/<code>always</code>, <code>.[rising]</code> sugar. Formal proof of the resulting assertions is <a class="xref" href="livehd/2f-formal.html">2f-formal</a> (Group 2).</li>
 <li><a class="xref" href="pyrope/3f-fluid.html">3f-fluid</a> <code>fluid</code> lambdas: valid/retry/fire elastic lowering (parses only today).</li>
-<li><a class="xref" href="pyrope/3f-testbench.html">3f-testbench</a> Testbench extras: <code>peek</code>/<code>poke</code>, <code>waitfor</code>, <code>force</code>/<code>release</code>, <code>sigref</code>, <code>spawn</code>/<code>join</code>/<code>cancel</code> (plain <code>test</code>/<code>step</code> works).</li>
 <li><a class="xref" href="pyrope/3f-macro.html">3f-macro</a> <code>macro=</code> memory-compiler binding (<code>reg ram:[1024]u32:[macro="sram_32kx32"]</code>).</li>
 <li><a class="xref" href="pyrope/3p.html">3p</a> Pyrope standard hardware library (<code>prplib.ware</code>) for common pipelined and non-pipelined designs: adders, multipliers, shifters, GCD, and debug/experimental blocks; includes deciding where <code>prplib</code> resides and how imports resolve. Also owns the comptime/software stdlib <code>import("prp")</code>: plus/len/map/filter/reduce, strings, math.</li>
 </ul></li>
 <li><em>Group 4:</em><ul>
-<li><a class="xref" href="pyrope/4a.html">4a</a> Test functionality on top of slop (<code>test::[…]</code> blocks, runtime harness).</li>
 <li><a class="xref" href="pyrope/4b.html">4b</a> Emit <code>assert</code>/<code>assume</code>/<code>coverpoint</code> into slop.</li>
 </ul></li>
 </ul>
@@ -65,7 +63,7 @@ green and sheds its <code>fixme</code> tag once the feature lands.</p>
 <thead><tr><th>Feature</th><th>Documented</th><th>Today (verified)</th><th>Regression</th></tr></thead>
 <tbody>
 <tr><td>Temporal library <code>past[n]</code>/<code>next[n]</code>/<code>rose</code>/<code>fell</code>/<code>stable</code>/<code>changed</code>/<code>eventually</code>/<code>always</code>, <code>.[rising]</code> sugar</td><td><a href="pyrope/3f-temporal.html">3f-temporal</a>, <code>09-verification.md</code></td><td><code>past[2]</code>→<code>lnast-malformed</code>; <code>rose(s)</code>→<code>tolg-error "no hardware lowering yet"</code>; <code>.[rising]</code>→<code>unhandled-node</code></td><td><code>prp-tbd-temporal_past</code></td></tr>
-<tr><td>Testbench extras <code>peek</code>/<code>poke</code>/<code>waitfor</code>/<code>force</code>/<code>release</code>/<code>sigref</code>/<code>spawn</code>/<code>join</code>/<code>cancel</code>, <code>step</code></td><td><a href="pyrope/3f-testbench.html">3f-testbench</a>, <code>09-verification.md</code></td><td><code>peek</code>/<code>poke</code> silent no-ops; bare <code>step</code>→<code>undefined-read 'step'</code> (not a statement in the grammar)</td><td><code>prp-tbd-testbench_step</code></td></tr>
+<tr><td>Testbench: string-path <code>peek("a/b")</code>/<code>poke("a/b",v)</code>/<code>sigref</code> + <code>force</code>/<code>release</code> + unbounded <code>tick { }</code></td><td><code>09-verification.md</code>, <code>15-tbd.md</code></td><td><strong>Done:</strong> the instance/<code>step</code> model — <code>mut acc=M</code> + field poke/peek (<code>acc.x=v</code>/<code>acc.y</code>) + <code>tick N</code>/<code>step</code>, waiting via <code>if</code>/<code>continue</code>, inline <code>if</code>-block monitors (<code>waitfor</code>/<code>spawn</code>/<code>join</code>/<code>cancel</code> dropped). <strong>Left:</strong> string-path <code>peek</code>/<code>poke</code> remain unhandled in expr</td><td><code>prp-sim-*</code> (incl. <code>prp-sim-wait</code>, <code>prp-sim-hier</code>); leftover: <code>prp-tbd-testbench_step</code></td></tr>
 <tr><td>Standard library <code>import("prp")</code></td><td><code>13-stdlib.md</code> (no <code>3f-</code> page)</td><td><code>import-no-progress</code> — no <code>prp</code> unit exists; tuple/basic ops then <code>fcall-ufcs-no-self</code>; string helpers silent no-ops</td><td><code>prp-tbd-stdlib_import</code></td></tr>
 <tr><td><code>macro=</code> memory-compiler binding <code>reg ram:[1024]u32:[macro="sram_32kx32"]</code></td><td><a href="pyrope/3f-macro.html">3f-macro</a>, <code>08-memories.md</code></td><td>attribute is <em>silently accepted-and-ignored</em>: compiles clean (exit 0), emits the behavioral <code>cgen_memory_1rd_1wr</code> primitive — byte-identical with the attribute removed. <strong>No clean compile-failure path.</strong></td><td>none yet — needs an emitted-Verilog grep harness (assert it instantiates <code>sram_32kx32</code>, not <code>cgen_memory_*</code>), not a compile test</td></tr>
 <tr><td><code>fluid</code> lambdas (valid/retry/fire)</td><td><a href="pyrope/3f-fluid.html">3f-fluid</a>, <code>06d-fluid.md</code></td><td>parses only; no elastic lowering</td><td>skipped — pre-known TBD excluded from this audit</td></tr>
@@ -104,7 +102,6 @@ and <code>docs/pyrope/15-tbd.md</code>.</p>
 </ul></li>
 <li><em>Group 4:</em><ul>
 <li><a class="xref" href="livehd/4c.html">4c</a> Checkpoint format + reload validator (partition-keyed via <code>state_shape_hash</code>) + hot-probe injection at replay (no recompile) — absorbs 4g.</li>
-<li><a class="xref" href="livehd/4d.html">4d</a> What-if <code>poke(signal, value)</code> engine with safety semantics.</li>
 <li><a class="xref" href="livehd/4e.html">4e</a> Queryable indexed trace store (slice/transition/distribution queries).</li>
 <li><a class="xref" href="livehd/4f.html">4f</a> Invariant-detector codegen → emits agent-editable <code>debug.prp</code>.</li>
 </ul></li>

@@ -125,9 +125,10 @@ cc_test(
 # TBD-feature trackers (tests/fixme/): each `.prp` exercises a documented but
 # NOT-yet-implemented Pyrope feature (marked "TBD" in the docs / 15-tbd.md). Most
 # are `:type: compile` (the feature has no lowering, so the compile FAILS by
-# design); `testbench_step` is `:type: simulation` (it parses, but the `lhd sim`
-# backend does not execute `step`/`peek`/`poke` yet). Each flips green once the
-# feature lands — at which point drop the `fixme` tag and move the file into the
+# design); `testbench_step` is `:type: simulation` (the instance/`step`/field-poke
+# model runs, but the string-path `peek("a/b")`/`poke("a/b",v)` accessors are
+# still unimplemented). Each flips green once the feature lands — at which point
+# drop the `fixme` tag and move the file into the
 # normal glob above. Tagged `fixme` so `.bazelrc` (`-fixme`) keeps `bazel test
 # //...` green; run one with the tag filter cleared to see the failure:
 #   bazel test //inou/prp:prp-tbd-temporal_past --test_tag_filters=

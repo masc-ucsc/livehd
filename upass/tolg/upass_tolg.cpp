@@ -433,24 +433,16 @@ private:
     if (it != pin_map_.end()) {
       return it->second;
     }
+    // Whole-array read (`x = mem`): materialize the cell's async read_all output.
+    if (auto mit = mem_map_.find(key); mit != mem_map_.end()) {
+      return get_or_make_read_all(mit->second);
+    }
     // A name that resolves to neither a driver nor a memory would be wired to
     // nil (0sb?). For Pyrope that drops whatever the reference carried — a
     // silent miscompile, so it is a hard error. A Verilog-origin module may
     // legally read an undriven wire (it defaults to X), so keep the warn + nil.
     const bool strict = !lnast_->is_verilog_origin();
-    if (mem_map_.contains(key)) {
-      // A memory name never binds a scalar pin; only indexed accesses lower.
-      if (strict) {
-        error_here(
-            "upass.tolg: memory '{}' used as a scalar value — whole-array reads are not supported; index it (`{}[addr]`)",
-            name,
-            name);
-      }
-      warn_at(Lnast_nid{},
-              {"memory-scalar-read", "unsupported"},
-              "memory '{}' used as a scalar value — whole-array reads are unsupported, wiring nil (0sb?)",
-              name);
-    } else if (strict) {
+    if (strict) {
       error_here(
           "upass.tolg: unresolved reference '{}' — it has no driver (often an unassigned variable or a value that "
           "resolved to nil)",
@@ -1515,9 +1507,31 @@ private:
     // user ports' enables with !reset. Restore ports stay OUT of the fwd
     // mask: a read during reset returns the committed (old) contents.
     std::vector<spool_ptr<Dlop>> restore_vals;
+    // Whole-array support: a runtime `mem = <bus>` store drives the cell's
+    // `update` sink (size*elem_mw bus) instead of minting per-entry write ports.
+    // A whole `x = mem` read materializes the async `read_all` driver pin (cached
+    // so repeated reads share one output). For a registered array the reset value
+    // bus rides the (now runtime-capable) `init` sink + the `reset` cond pin.
+    bool has_update = false;  // an update bus is wired (whole-array memory)
+    Pin  read_all_pin{};      // cached async read_all driver pin
   };
 
-  static constexpr int kMemPortStride = 12;  // == Memory sink count, graph/cell.cpp
+  static constexpr int kMemPortStride = static_cast<int>(Ntype::Memory_port_stride);
+
+  // Get-or-create the cell's async `read_all` driver pin (the whole-array read,
+  // size*elem_mw bits wide, entry 0 in the low elem_mw). Cached on the Mem_info so
+  // repeated whole reads share one output. Sits at the reserved driver pid
+  // Memory_readall_pid (never collides with the sequential read douts).
+  [[nodiscard]] Pin get_or_make_read_all(Mem_info& mi) {
+    if (!mi.read_all_pin.is_invalid()) {
+      return mi.read_all_pin;
+    }
+    auto d = mi.node.create_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
+    set_bits(d, static_cast<int>(mi.size * mi.elem_mw));
+    set_unsign(d);
+    mi.read_all_pin = d;
+    return d;
+  }  // Memory per-port sink stride, graph/cell.hpp
 
   // Branch path conditions for memory write enables. Maintained by lower_if
   // only while a memory exists (mem_map_ non-empty); each entry is the full
@@ -1955,7 +1969,54 @@ private:
   // is its initializer: pack the recorded tuple consts into one wide const
   // (entry 0 in the low `bits`, row-major) on the `init` sink. `= nil` means
   // zero-filled (cgen's default). reg memories reject the shape outright.
+  // store(mem, <runtime bus>) — the whole-array `update` write. The rhs bus is
+  // size*elem_mw wide (entry 0 in the low `elem_mw`, row-major) and drives the
+  // cell's `update` sink; a conditional whole-write (`if(c) mem=<bus>`) carries
+  // the branch path-condition into `update_enable` (absent => always-on). The
+  // ladder reset > per-port write > (update_enable? update : hold) is realized by
+  // cgen/cgen_sim/lec. Reset is wired separately (init sink + `reset` cond pin).
+  void lower_mem_update_store(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
+    if (mi.has_update) {
+      error_here("upass.tolg: memory '{}' has more than one whole-array `update` write — combine them upstream", name);
+      return;
+    }
+    auto v = leaf(rhs);
+    if (v.pin.is_invalid()) {
+      error_here("upass.tolg: whole-array update of '{}' has no driver", name);
+      return;
+    }
+    setup_sink_by_name(mi.node, "update").connect_driver(v.pin);
+    mi.has_update = true;
+    auto en = current_path_cond();
+    if (!en.is_invalid()) {
+      setup_sink_by_name(mi.node, "update_enable").connect_driver(en);
+    }
+    // A whole-array read sees COMMITTED state: the clocked bulk update is the
+    // next-state, never forwarded to a same-cycle read, and a per-entry write to
+    // a registered array is likewise not forwarded (cgen emits `assign dout =
+    // data[addr]`). Force fwd=0 so the cvc5 encoder reads a_cur, matching cgen.
+    for (const auto& e2 : mi.node.inp_edges()) {
+      if (!e2.sink.is_invalid() && static_cast<int>(e2.sink.get_port_id()) == 5) {  // fwd (pid 5)
+        e2.del_edge();
+        break;
+      }
+    }
+    setup_sink_by_name(mi.node, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+  }
+
   void lower_mem_init_store(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
+    const auto rt = lnast_->get_type(rhs);
+    // A RUNTIME whole-array value (`mem = <bus>` where the rhs is a wire/leaf, not
+    // a constant and not a recorded comptime tuple literal) drives the cell's
+    // `update` bus: the whole array is (re)written each cycle (registered `reg`) or
+    // combinationally (`mut`/`const` array), instead of minting per-entry ports.
+    const bool is_tuple_lit
+        = Lnast_ntype::is_ref(rt) && tuple_recs_.find(std::string(lnast_->get_name(rhs))) != tuple_recs_.end();
+    if (!Lnast_ntype::is_const(rt) && !is_tuple_lit) {
+      lower_mem_update_store(rhs, name, mi);
+      return;
+    }
+    // ---- declaration initializer (comptime const / tuple literal) ----
     if (!mi.is_array) {
       error_here("upass.tolg: whole-array assignment to memory '{}' is not supported — write one entry at a time", name);
       return;
@@ -1964,7 +2025,6 @@ private:
       error_here("upass.tolg: array '{}' is re-initialized — only the declaration initializer is supported", name);
       return;
     }
-    const auto rt = lnast_->get_type(rhs);
     if (Lnast_ntype::is_const(rt)) {
       auto txt = lnast_->get_name(rhs);
       if (txt == "nil" || txt == "0sb?") {
@@ -2565,6 +2625,56 @@ private:
         } else {
           warn_at(Lnast_nid{}, {"no-clock", "time"}, "memory '{}' has no clock input to bind", name);
         }
+      }
+
+      // Whole-array reset: a registered whole-array (`update` driven) loads its
+      // reset value on reset via the cell's `reset` + runtime `init` pins (cgen /
+      // cgen_sim / lec emit `if(reset) data[i] <= init[i]`). The slang reader
+      // harvested the reset into `initial` (the reset-value bus const) + `reset_pin`
+      // (+ `negreset`) attrs; consume them here (the per-entry restore-port path is
+      // for non-whole-array regs only).
+      if (mi.has_update) {
+        if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
+          auto&            attrs = pit->second;
+          std::string_view rpn;
+          if (auto rit = attrs.find("reset_pin"); rit != attrs.end()) {
+            rpn = rit->second;
+          }
+          if (!rpn.empty() && rpn != "false") {
+            // Reset value bus -> init sink (overrides any declare-time const init).
+            if (auto iit = attrs.find("initial"); iit != attrs.end() && iit->second != "false") {
+              if (auto iv = Dlop::from_pyrope(iit->second)) {
+                for (const auto& e : mi.node.inp_edges()) {
+                  if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == 11) {  // init (pid 11)
+                    e.del_edge();
+                    break;
+                  }
+                }
+                setup_sink_by_name(mi.node, "init").connect_driver(create_const(*g_, *iv));
+              }
+            }
+            // Reset condition -> reset sink (active-high; pre-invert negreset).
+            Pin rp = g_->get_io()->has_input(std::string(rpn)) ? g_->get_input_pin(std::string(rpn)) : reset_pin();
+            if (!rp.is_invalid()) {
+              const bool neg = (attrs.count("negreset") && attrs.at("negreset") != "false") || reset_neg_;
+              if (neg) {
+                rp = not1(rp);
+              }
+              setup_sink_by_name(mi.node, "reset").connect_driver(rp);
+            }
+          }
+        }
+      }
+
+      // Coexistence: a whole-array `update` bus AND per-entry write ports on the
+      // same cell is well-defined (per-port writes OVERRIDE the bulk update), but
+      // surface it so an accidental mix is visible.
+      if (mi.has_update && mi.n_user_wr > 0) {
+        warn_at(Lnast_nid{},
+                {"memory-update-and-write", "time"},
+                "memory '{}' mixes a whole-array `update` with {} per-entry write port(s); per-entry writes take priority",
+                name,
+                mi.n_user_wr);
       }
 
       // A read-less (or access-less) memory is a WARNING at most — its state
@@ -5341,7 +5451,7 @@ private:
       // exactly like a scalar reg read — @[0] from the read address. Only a
       // SYNC read (type=1, registered dout) charges the +1 crossing. The
       // clock sinks are excluded from the meet either way.
-      constexpr int kStride = 12;  // == uPass_tolg kMemPortStride (Memory sink count)
+      constexpr int kStride = static_cast<int>(Ntype::Memory_port_stride);  // Memory per-port sink stride, graph/cell.hpp
       for (const auto& e : node.inp_edges()) {
         if (e.sink.is_invalid()) {
           continue;
