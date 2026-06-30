@@ -1,0 +1,26 @@
+/*
+:name: mem_whole_cond_const
+:type: equiv
+:verilog_top: mem_whole_cond_const.condconst
+:pyrope_top: mem_whole_cond_const.condconst
+*/
+
+// CONDITIONAL whole-array CONST stores to a REGISTERED array: a clear-all arm
+// (`arr = 0`) and a fill-all arm (`arr = 0x3ff`) each bulk-write every entry,
+// coexisting with a per-entry write (`arr[waddr] = wdata`). The two whole-array
+// const stores accumulate into one clocked `update` bus via a priority mux (the
+// later `fill` arm wins where its path-cond holds), gated by `clr | fill`; the
+// per-entry write OVERRIDES the bulk update. This is the XiangShan
+// `validArray <= '{0,..}` (reset/flush) + per-set write idiom: a const/tuple-lit
+// whole-array store to a reg memory (lower_mem_init_store -> lower_mem_update_store).
+mod condconst(clr:bool, fill:bool, we:bool, waddr:u3, wdata:u10, idx:u3) -> (r:u10@[0]) {
+  reg arr:[8]u10 = nil
+  if clr {
+    arr = 0
+  } elif fill {
+    arr = 0x3ff
+  } elif we {
+    arr[waddr] = wdata
+  }
+  r = arr[idx]
+}

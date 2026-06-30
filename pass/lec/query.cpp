@@ -151,6 +151,8 @@ std::string serialize_result(const Query_result& r) {
   for (const auto& s : r.unmatched_impl) {
     put_str(b, s);
   }
+  put_u32(b, static_cast<uint32_t>(r.checked_steps));
+  put_u32(b, static_cast<uint32_t>(r.output_checks));
   return b;
 }
 
@@ -214,6 +216,13 @@ bool deserialize_result(std::string_view b, Query_result& r) {
     }
     r.unmatched_impl.push_back(std::move(s));
   }
+  uint32_t cs = 0, oc = 0;
+  if (get_u32(b, cs)) {
+    r.checked_steps = static_cast<int>(cs);
+  }
+  if (get_u32(b, oc)) {
+    r.output_checks = static_cast<int>(oc);
+  }
   return true;
 }
 
@@ -264,6 +273,24 @@ Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc,
   return r;
 }
 
+// Bounded-BMC PASS policy: a BMC that found no CEX up to the bound AND actually
+// compared outputs is a BOUNDED proof — `auto` reports it as PROVEN (clearly
+// labelled bounded), not inconclusive. Deeper-than-bound cycles are out of scope
+// by design (see todo/livehd/2d-cex_debug, lec). An inductive FULL proof, if found,
+// already won earlier in the race; this is the fallback when ind is Unknown.
+bool try_bounded_proven(const Query_result& bmc, Query_result& out) {
+  if (bmc.verdict != Verdict::Proven || bmc.output_checks <= 0) {
+    return false;  // Unknown, or vacuous (no outputs compared) -> not a PASS
+  }
+  out        = bmc;
+  out.engine = "bmc";
+  out.detail = "auto: bmc BOUNDED-Proven (no CEX up to bound " + std::to_string(bmc.checked_steps) + ", "
+             + std::to_string(bmc.output_checks) + " output checks; PASS by bounded-proof policy — "
+               "cycles beyond the bound are unproven); "
+             + bmc.detail;
+  return true;
+}
+
 // Sequential fallback when fork/pipe is unavailable: run ind, then bmc, applying
 // the same trust asymmetry. Used only on a (rare) fork failure.
 Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
@@ -288,6 +315,11 @@ Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_
   if (rb.verdict == Verdict::Refuted) {
     rb.detail = "auto(seq): bmc Refuted (reachable CEX); " + rb.detail;
     return rb;
+  }
+  Query_result bp;
+  if (try_bounded_proven(rb, bp)) {
+    bp.elapsed_ms = now_ms(t0);
+    return bp;
   }
   return make_inconclusive(ri, rb, opts, now_ms(t0));
 }
@@ -424,6 +456,11 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     r.detail       = "auto: " + std::string(engines[winner]) + " reached " + vname(r.verdict) + " first in "
              + std::to_string(r.elapsed_ms) + "ms (raced ind|bmc); " + r.detail;
     return r;
+  }
+  Query_result bp;
+  if (try_bounded_proven(got[1], bp)) {
+    bp.elapsed_ms = now_ms(t0);
+    return bp;
   }
   return make_inconclusive(got[0], got[1], opts, now_ms(t0));
 }
@@ -1099,6 +1136,18 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     };
     std::vector<Wit_out> wit_outs;
     std::vector<Wit_in>  wit_ins;
+    // Stage-0 cex-debug: per-cycle, per-flop NEXT-state of BOTH sides, paired by
+    // canonical key (identical on both designs). On REFUTE the EARLIEST diverging
+    // state cut is the ROOT that a diverging output merely inherits. Pure read-only
+    // (getValue on already-solved terms — no new SMT terms, no UNKNOWN risk), so it
+    // replaces the env-gated LEC_DUMP_WIT/keep() debug path for localization.
+    struct Wit_state {
+      int         cyc;
+      std::string key;
+      cvc5::Term  rv;
+      cvc5::Term  iv;
+    };
+    std::vector<Wit_state> wit_state;
 
     for (int cyc = 0; cyc < total_cyc; ++cyc) {
       // `run` phase: the first `reset_hold` cycles hold reset asserted and are
@@ -1263,6 +1312,15 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           }
         }
       }
+      if (opts.witness) {
+        // Capture every flop's paired next-state for the Stage-0 first-diverging-cut
+        // scan (no keep() filter — all flops, both sides, by canonical key).
+        for (const auto& [k, rv] : rn) {
+          if (auto it = in.find(k); it != in.end()) {
+            wit_state.push_back({cyc, k, rv.term, it->second.term});
+          }
+        }
+      }
       ref_state  = std::move(rn);
       impl_state = std::move(in);
       ref_mem    = std::move(re.next_mem);
@@ -1272,6 +1330,10 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     res.detail = "solver=cvc5 (bmc, phase=" + opts.phase + ", " + std::to_string(N) + " checked steps"
                + (reset_hold ? " after " + std::to_string(reset_hold) + " reset-hold" : "")
                + (reset_negset.empty() && opts.phase != "free_toreset" ? "; WARNING no primary reset input found" : "") + ")";
+    // Bound bookkeeping for the auto bounded-Proven policy: N checked cycles and
+    // the count of (output,cycle) comparisons actually run (0 => vacuous, no PASS).
+    res.checked_steps = N;
+    res.output_checks = static_cast<int>(decomp_diffs.size());
     if (bad.isNull()) {
       res.verdict = Verdict::Proven;
       return res;
@@ -1409,7 +1471,36 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           itoks.push_back(lbl + "." + in.name + "=" + v.getBitVectorValue(10));
         }
         std::sort(itoks.begin(), itoks.end());
-        res.witness = "first divergence at checked step " + std::to_string(first_bad - reset_hold + 1) + "/"
+        // Stage-0: the EARLIEST diverging internal STATE cut — the ROOT a diverging
+        // output merely inherits. A state computed at cycle C is the value going
+        // INTO cycle C+1; report it as the root when it diverges no later than the
+        // inherited output (state_bad+1 <= first_bad). Pure getValue, no new terms.
+        int         state_bad = -1;
+        std::string state_tok;
+        for (const auto& s : wit_state) {
+          if (state_bad >= 0 && s.cyc >= state_bad) {
+            continue;  // can't beat the current earliest
+          }
+          cvc5::Term rval = solver.getValue(s.rv);
+          cvc5::Term ival = solver.getValue(s.iv);
+          if (rval.isNull() || ival.isNull()) {
+            continue;
+          }
+          auto rs = rval.getBitVectorValue(10);
+          auto is = ival.getBitVectorValue(10);
+          if (rs != is) {
+            state_bad = s.cyc;
+            state_tok = display_name(s.key) + "(ref=" + rs + " impl=" + is + ")";
+          }
+        }
+        std::string root;
+        if (state_bad >= 0 && state_bad + 1 <= first_bad) {
+          std::string slbl = state_bad < reset_hold ? ("rst" + std::to_string(state_bad))
+                                                    : ("s" + std::to_string(state_bad - reset_hold + 1));
+          root = "first diverging STATE cut (root): " + state_tok + " — state after step " + slbl
+               + " (the diverging output inherits it); ";
+        }
+        res.witness = root + "first divergence at checked step " + std::to_string(first_bad - reset_hold + 1) + "/"
                     + std::to_string(N) + ": " + join_ordered(dtoks, 32);
         if (!itoks.empty()) {
           res.witness += " @ inputs " + join_ordered(itoks, 64);

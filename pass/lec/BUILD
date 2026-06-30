@@ -100,6 +100,13 @@ sh_test(
 )
 
 sh_test(
+    name = "cex_debug_test",
+    srcs = ["tests/cex_debug_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # in-process cvc5 BMC + first-diverging-cut readback
+)
+
+sh_test(
     name = "lec_arrfield_test",
     srcs = ["tests/lec_arrfield_test.sh"],
     data = ["//lhd"],

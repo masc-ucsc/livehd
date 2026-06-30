@@ -29,6 +29,14 @@ struct Query_result {
   std::string engine;
   long long   elapsed_ms = -1;
 
+  // BMC bound bookkeeping for the `auto` portfolio's bounded-Proven policy: the
+  // checked-window size and the number of (output,cycle) comparisons actually run.
+  // A BMC `Proven` with output_checks>0 is a BOUNDED proof (no CEX <= bound), which
+  // `auto` reports as PASS (transparently labelled) rather than inconclusive —
+  // deeper-than-bound cycles are out of scope by design.
+  int checked_steps = 0;
+  int output_checks = 0;
+
   // Structural-correspondence report (so `lhd lec` can ITERATE instead of bailing
   // on the first unmatched cut point). When the two designs don't expose the same
   // set of state/outputs, the miter still runs over the COMMON ones and these list

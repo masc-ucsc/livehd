@@ -7,7 +7,7 @@
 #   inductive Proven (UNSAT + complete correspondence) -> PASS (kill bmc)
 #   BMC Refuted (reachable CEX from reset)             -> FAIL (kill ind) + witness
 #   inductive Refuted (single-step, maybe-unreachable) -> HINT only, never a FAIL
-#   BMC bounded-Proven (no CEX <= bound)               -> not a full PASS
+#   BMC bounded-Proven (no CEX <= bound, outputs cmp)  -> BOUNDED PASS (exit 0)
 #   neither trustworthy                                -> inconclusive (exit 0)
 # The headline property: on a design that ind FALSE-refutes (an unreachable
 # step-case) auto must NOT hard-fail, even though `engine=ind` alone exits 1.
@@ -72,13 +72,15 @@ run ur_ind --ref "$WORK/ur_ref.v" --impl "$WORK/ur_impl.v" --set lec.engine=ind
 if [ "$RC" -eq 0 ]; then echo "FAIL: ind-only unreachable rc=0 (expected a FALSE refute, non-zero)"; fail=1
 else echo "ok: ind-only unreachable -> REFUTED (the false refute auto must not trust)"; fi
 
-# 3b) auto on the SAME design must NOT hard-fail: ind-Refuted is a HINT, bmc
-#     only bounded-Proves -> inconclusive, exit 0 (the headline property).
+# 3b) auto on the SAME design must NOT hard-fail on the unreachable ind-CEX. bmc
+#     finds no REACHABLE CEX up to the bound, so under the bounded-Proven policy
+#     auto reports a BOUNDED PASS (exit 0), never a refute (the headline property:
+#     an unreachable single-step ind-Refuted is never trusted as a hard failure).
 run ur_auto --ref "$WORK/ur_ref.v" --impl "$WORK/ur_impl.v" --set lec.engine=auto
-if [ "$RC" -ne 0 ]; then echo "FAIL: auto unreachable rc=$RC (want 0 — ind-Refuted is only a hint)"; fail=1
+if [ "$RC" -ne 0 ]; then echo "FAIL: auto unreachable rc=$RC (want 0 — ind-Refuted must not hard-fail)"; fail=1
 elif echo "$OUT" | grep -q "REFUTED"; then echo "FAIL: auto unreachable reported REFUTED (must not trust the ind CEX)"; fail=1
-elif ! echo "$OUT" | grep -qi "HINT"; then echo "FAIL: auto unreachable: ind CEX not labelled a hint"; fail=1
-else echo "ok: auto unreachable -> inconclusive, NOT a hard fail"; fi
+elif ! echo "$OUT" | grep -qi "bounded-Proven\|PROVEN equivalent"; then echo "FAIL: auto unreachable: expected a bounded PASS"; fail=1
+else echo "ok: auto unreachable -> bmc BOUNDED-Proven (PASS, not a false refute)"; fi
 
 if [ $fail -ne 0 ]; then echo "lec_auto_test: FAILED"; exit 1; fi
 echo "lec_auto_test: PASSED"; exit 0
