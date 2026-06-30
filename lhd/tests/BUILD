@@ -98,6 +98,19 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Stage 0 of the cgen_sim false-combinational-loop fix: a combinational
+# sub-instance whose output feeds back through parent comb logic into one of its
+# own inputs is a FALSE comb loop the single-pass sim schedule cannot order.
+# inou.cgen.sim used to silently emit create_integer(0) for the fed-back input
+# (wrong sim, exit 0); Stage 0 makes it a loud, located build failure. Asserts the
+# bug designs fail with the diagnostic AND legitimate hierarchy still compiles
+# clean (no false positive). See inou/cgen/tests/comb_loop/README.md.
+sh_test(
+    name = "cgen_sim_comb_loop_test",
+    srcs = ["cgen_sim_comb_loop_test.sh"],
+    data = ["//lhd"],
+)
+
 # `lhd sim` VCD clock/reset waveforms + the `tick clocks=(name=ratio)
 # resets=(name=ticks)` clause: the generated DUT body traces a toggling clock + a
 # reset window, drives the reset port functionally, and advances the period

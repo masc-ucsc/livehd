@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "color_acyclic.hpp"
+#include "color_cgen.hpp"
 #include "color_common.hpp"
 #include "color_mincut.hpp"
 #include "color_path.hpp"
@@ -21,8 +22,8 @@ static Pass_plugin sample("pass_color", Pass_color::setup);
 Pass_color::Pass_color(const Eprp_var& var) : Pass("pass.color", var) {}
 
 void Pass_color::setup() {
-  Eprp_method m("pass.color", "Hierarchical node coloring (acyclic|synth|path|mincut|clear)", &Pass_color::color);
-  m.add_label_optional("alg", "algorithm: acyclic|synth|path|mincut|clear", "acyclic");
+  Eprp_method m("pass.color", "Hierarchical node coloring (acyclic|cgen|synth|path|mincut|clear)", &Pass_color::color);
+  m.add_label_optional("alg", "algorithm: acyclic|cgen|synth|path|mincut|clear", "acyclic");
   // The top module is the shared kernel `--top` flag (lhd plumbs it into the
   // `top` label), not a per-pass --set option.
   m.add_label_optional("hier", "color every unique def in the hierarchy (else only the top)", "true");
@@ -72,6 +73,9 @@ void run_one(std::string_view alg, hhds::Graph* g, const Color_opts& opts, const
   if (alg == "acyclic") {
     Color_acyclic c(opts, str_tools::to_i(var.get("cutoff", "1")), parse_bool(var.get("merge", "false")));
     c.label(g);
+  } else if (alg == "cgen") {
+    Color_cgen c(opts);
+    c.label(g);
   } else if (alg == "synth") {
     Color_synth c(opts, var.get("synth_alg", "synth"));
     c.label(g);
@@ -99,9 +103,9 @@ void Pass_color::color(Eprp_var& var) {
     return;
   }
 
-  if (alg != "acyclic" && alg != "synth" && alg != "path" && alg != "mincut") {
+  if (alg != "acyclic" && alg != "cgen" && alg != "synth" && alg != "path" && alg != "mincut") {
     livehd::diag::err("pass.color", "bad-alg", "unsupported")
-        .msg("unknown algorithm '{}' (expected acyclic|synth|path|mincut|clear)", alg)
+        .msg("unknown algorithm '{}' (expected acyclic|cgen|synth|path|mincut|clear)", alg)
         .fatal();
   }
 

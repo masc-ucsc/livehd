@@ -1,0 +1,141 @@
+/*
+:name: cgen_cones
+:type: simulation
+*/
+// Convoluted hierarchy that exercises, in one design, every structure the cgen
+// per-output-cone coloring has to get right so inou.cgen.sim schedules a module
+// correctly (the false-combinational-loop-through-an-instance work):
+//
+//   * split2  -- DISJOINT output cones: p depends only on {a,b}, q only on {c,d}
+//                (the subadd shape; the per-output split must keep them apart).
+//   * shared2 -- a SHARED sub-cone: t=a+b feeds BOTH outputs (cgen gives `t` its
+//                own color so it is computed once, not duplicated/mis-scheduled).
+//   * acc2    -- STATE + a pure COMB PASSTHROUGH in one module (`sum_o` is
+//                registered, `echo` is combinational): the state cone and the
+//                passthrough cone must not be conflated.
+//   * top     -- instantiates split2 TWICE (module sharing: one cgen def, two
+//                instances) and forwards one instance's outputs into the next
+//                (multi-level dataflow), so the schedule order across the cones
+//                actually matters.
+//
+// The testbench carries a self-checking golden model: each output (disjoint-cone
+// `od`, shared-cone `ob`, passthrough `oc`, stateful `oa`) is asserted against
+// the value its TRUE cone should produce. If a future cgen change mis-colors or
+// mis-schedules a cone (computes an output from the wrong inputs, conflates the
+// shared/state cones, or feeds a stale cross-instance value), these asserts fail.
+//
+// NOTE: a *literal* false combinational loop can only be written with a Verilog
+// `wire` (order-independent); Pyrope's SSA serializes assignments and cannot
+// express one. Those live in inou/cgen/tests/comb_loop/ (Verilog). This test
+// guards the per-output-cone scheduling that breaks them.
+
+mod split2(a:u8, b:u8, c:u8, d:u8) -> (p:u9@[0], q:u9@[0]) {
+  p = a + b                 // cone {a, b}
+  q = c + d                 // cone {c, d}  -- disjoint from p
+}
+
+mod shared2(a:u8, b:u8, e:u8) -> (x:u10@[0], y:u10@[0]) {
+  const t = a + b           // shared sub-cone
+  x = t + e
+  y = t + b
+}
+
+mod acc2(din:u8, en:bool) -> (sum_o:u16@[0], echo:u9@[0]) {
+  reg s:u16 = 0
+  sum_o = s                 // registered output (reads the current reg)
+  echo  = din + din         // pure combinational passthrough, cone {din}
+  if en { wrap s += din }
+}
+
+mod top(i0:u8, i1:u8, i2:u8, i3:u8, en:bool)
+     -> (oa:u16@[0], ob:u10@[0], oc:u9@[0], od:u9@[0]) {
+  const r1 = split2(a=i0, b=i1, c=i2, d=i3)                       // instance 1
+  const r2 = split2(a=r1.p#[0..=7], b=i2, c=r1.q#[0..=7], d=i3)   // instance 2 (shared def)
+  const sh = shared2(a=r2.p#[0..=7], b=i0, e=i1)
+  const ac = acc2(din=r2.q#[0..=7], en=en)
+  oa = ac.sum_o             // stateful
+  ob = sh.x                 // shared-cone
+  oc = ac.echo              // comb passthrough
+  od = r1.q                 // disjoint-cone output, straight from instance 1
+}
+
+// Small inputs (< 7): the #[0..=7] truncations are exercised but value-preserving,
+// keeping the golden model arithmetic plain. The accumulator toggles via EN.
+test top.cones {
+  const I0 = [1, 3, 5, 2, 4, 6]
+  const I1 = [2, 1, 0, 3, 5, 1]
+  const I2 = [0, 4, 2, 1, 3, 2]
+  const I3 = [3, 2, 1, 4, 0, 5]
+  const EN = [true, true, false, true, true, false]
+
+  mut dut = top
+  mut s   = 0                            // golden accumulator mirror
+  tick 6 {
+    const a0 = I0[clock]
+    const a1 = I1[clock]
+    const a2 = I2[clock]
+    const a3 = I3[clock]
+    const e  = EN[clock]
+    dut.i0 = a0
+    dut.i1 = a1
+    dut.i2 = a2
+    dut.i3 = a3
+    dut.en = e
+
+    const gp1 = a0 + a1
+    const gq1 = a2 + a3
+    const gp2 = gp1 + a2
+    const gq2 = gq1 + a3
+    const gt  = gp2 + a0
+    const gx1 = gt + a1
+    const gec = gq2 + gq2
+
+    step
+    // peek after step reads POST-edge state -> advance the golden accumulator first
+    if e { s = s + gq2 }
+
+    assert(dut.oa == s,   "oa (stateful sum) disagrees with golden")
+    assert(dut.ob == gx1, "ob (shared-cone x) disagrees with golden")
+    assert(dut.oc == gec, "oc (comb passthrough echo) disagrees with golden")
+    assert(dut.od == gq1, "od (disjoint-cone q1) disagrees with golden")
+  }
+}
+
+// Large inputs (> 255 at the split2 outputs): now the #[0..=7] truncations bite,
+// so the golden model masks with 0xff. The accumulator is frozen (en=false), so
+// the registered output must stay 0 -- a state/comb cone conflation would leak.
+test top.trunc {
+  const J0 = [200, 250, 130, 255]
+  const J1 = [100, 200,  90, 255]
+  const J2 = [ 50,  60, 200,   1]
+  const J3 = [ 40, 220, 100,   2]
+
+  mut dut = top
+  tick 4 {
+    const a0 = J0[clock]
+    const a1 = J1[clock]
+    const a2 = J2[clock]
+    const a3 = J3[clock]
+    dut.i0 = a0
+    dut.i1 = a1
+    dut.i2 = a2
+    dut.i3 = a3
+    dut.en = false                       // accumulator frozen
+
+    const gp1 = a0 + a1
+    const gq1 = a2 + a3
+    const gp2 = (gp1 & 0xff) + a2        // r2.a = r1.p truncated to 8 bits
+    const gq2 = (gq1 & 0xff) + a3        // r2.c = r1.q truncated to 8 bits
+    const gt  = (gp2 & 0xff) + a0        // shared2.a = r2.p truncated
+    const gx1 = gt + a1
+    const dn  = gq2 & 0xff               // acc2.din = r2.q truncated
+    const gec = dn + dn
+
+    step
+
+    assert(dut.ob == gx1, "trunc: shared-cone x disagrees with golden")
+    assert(dut.oc == gec, "trunc: passthrough echo disagrees with golden")
+    assert(dut.od == gq1, "trunc: disjoint q1 disagrees with golden")
+    assert(dut.oa == 0,   "trunc: accumulator must stay 0 when en=false")
+  }
+}

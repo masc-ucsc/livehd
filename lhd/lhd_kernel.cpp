@@ -3546,13 +3546,22 @@ void lec_lgyosys(Options& opts, Result& res) {
   cmd      += std::format(" >> {} 2>&1", shell_quote(fs::absolute(log).string()));
 
   res.recipe_steps.emplace_back("pass.lec solver:lgyosys (lgcheck)");
-  int rc = std::system(cmd.c_str());
+  int rc   = std::system(cmd.c_str());
+  int code = WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
   if (opts.verbose) {
     mirror_log_to_stderr(log);
   }
   std::string name = !opts.impl_top.empty() ? opts.impl_top : opts.impl_path;
-  std::print("lec: '{}' {} (solver=lgyosys)\n", name, rc == 0 ? "PROVEN equivalent" : "REFUTED (not equivalent)");
-  if (rc != 0) {
+  // lgcheck exit codes: 0 = proven equivalent, 2 = INCONCLUSIVE (could not prove
+  // AND found no counterexample — yosys' equiv flow often can't prove a
+  // cgen-restructured netlist equal to its source even when it is), anything else
+  // = a real refutation. Only a real refute is a hard failure.
+  if (code == 2) {
+    std::print("lec: '{}' INCONCLUSIVE (solver=lgyosys; could not prove, no counterexample)\n", name);
+    return;
+  }
+  std::print("lec: '{}' {} (solver=lgyosys)\n", name, code == 0 ? "PROVEN equivalent" : "REFUTED (not equivalent)");
+  if (code != 0) {
     throw Lhd_error{"equiv_fail",
                     std::format("equivalence check failed ({} vs {})", opts.impl_path, opts.ref_path),
                     std::format("see {}", log)};

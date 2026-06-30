@@ -152,6 +152,57 @@ struct Member_read_collector : public slang::ast::ASTVisitor<Member_read_collect
   }
 };
 
+// Flags a packed-struct VAR accessed BELOW its top level (`c0.field[i]`,
+// `c0.field.sub`): the per-field bundle path only resolves single-level
+// `c0.field`, so a deeper access roots at a FLAT bus and collides with the bundle
+// leaves. Such vars must stay a flat bus.
+struct Deep_struct_access_collector
+    : public slang::ast::ASTVisitor<Deep_struct_access_collector, slang::ast::VisitFlags::AllGood> {
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>* out = nullptr;
+  void note(const slang::ast::Expression& base) {
+    if (base.kind == slang::ast::ExpressionKind::MemberAccess) {
+      if (const auto* sym = lhs_base_symbol(base.as<slang::ast::MemberAccessExpression>().value())) {
+        out->insert(sym);
+      }
+    }
+  }
+  void handle(const slang::ast::ElementSelectExpression& e) {
+    note(e.value());
+    visitDefault(e);
+  }
+  void handle(const slang::ast::RangeSelectExpression& e) {
+    note(e.value());
+    visitDefault(e);
+  }
+  void handle(const slang::ast::MemberAccessExpression& ma) {
+    note(ma.value());
+    visitDefault(ma);
+  }
+};
+
+// Flags a packed-struct VAR that is WHOLE-COPIED (`a = b` as bare names): the
+// per-field bundle path detuples the copy per-top-level-field, silently DROPPING
+// a field that is a nested struct / array. Flattening keeps the copy intact. Only
+// whole-copied structs pay the flat-bus cost (field-access-only structs stay
+// bundled).
+struct Struct_whole_copy_collector
+    : public slang::ast::ASTVisitor<Struct_whole_copy_collector, slang::ast::VisitFlags::AllGood> {
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>* out = nullptr;
+  void note(const slang::ast::Expression& e) {
+    if (e.kind == slang::ast::ExpressionKind::NamedValue) {
+      const auto& nv = e.as<slang::ast::NamedValueExpression>();
+      if (nv.symbol.getType().getCanonicalType().isStruct()) {
+        out->insert(&nv.symbol);
+      }
+    }
+  }
+  void handle(const slang::ast::AssignmentExpression& a) {
+    note(a.left());
+    note(a.right());
+    visitDefault(a);
+  }
+};
+
 // Single constant-style whole-net driver of a net/var: a `wire x = <expr>`
 // initializer or an `assign x = <expr>` (whole net, not a partial select).
 // Returns nullptr when none / ambiguous.
@@ -541,6 +592,18 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
     Member_read_collector mrc;
     mrc.out = &struct_field_read_;
     body->visit(mrc);
+  }
+  struct_deep_accessed_.clear();
+  {
+    Deep_struct_access_collector dac;
+    dac.out = &struct_deep_accessed_;
+    body->visit(dac);
+  }
+  struct_whole_copied_.clear();
+  {
+    Struct_whole_copy_collector swc;
+    swc.out = &struct_whole_copied_;
+    body->visit(swc);
   }
   // Harvest `initial begin mem[k]=v; end` power-on contents before the declares
   // emit (declare_unpacked folds them into the reg array's initializer).
@@ -1143,7 +1206,24 @@ bool Slang_context::is_scalar_struct_var(const slang::ast::ValueSymbol& sym) con
     return false;
   }
   const auto& ct = sym.getType().getCanonicalType();
-  return ct.isStruct() && ct.isIntegral();  // packed struct (unpacked structs are non-integral)
+  if (!(ct.isStruct() && ct.isIntegral())) {  // packed struct (unpacked structs are non-integral)
+    return false;
+  }
+  // A struct whose whole-copy is dropped in the per-field bundle path (a field that
+  // is a nested struct / multi-dim array / array-of-struct) must stay a consistent
+  // FLAT bus — but only when it is actually WHOLE-COPIED or accessed BELOW the top
+  // level (the cases that break; Dispatcher's `io_out_0_bits_ctrl_0 = io_in_bits_ctrl_0`
+  // became all-zero). Scoping to those vars avoids flattening every such struct in a
+  // struct-heavy design. (The proper fix is to make assign_struct_whole recurse into
+  // nested/array fields so no flattening is needed — todo.)
+  if (struct_whole_copied_.contains(&sym) || struct_deep_accessed_.contains(&sym)) {
+    for (const auto& f : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
+      if (!f.getType().getCanonicalType().isSimpleBitVector()) {
+        return false;  // nested struct / multi-dim array / array-of-struct field
+      }
+    }
+  }
+  return true;
 }
 
 const Slang_context::Struct_info::Field* Slang_context::find_struct_field(const Struct_info& si,

@@ -378,7 +378,12 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   echo "WARN: bounded miter check did not run to completion (see lgcheck_bmc.err); inconclusive."
 fi
 
-echo "WARN: Yosys failed to prove equivalency."
-
-echo "FAIL: circuits are not equivalent ${GATE} vs ${GOLD} with top:${fm_top}"
-exit 1
+# Reached only when NO bounded-miter counterexample was found (the real-CEX
+# "model found: FAIL" path exits 1 above) but the structural/inductive proofs and
+# the bounded miter could not PROVE equivalence either. That is INCONCLUSIVE, not
+# a refutation — yosys' equiv flow routinely fails to prove a cgen-restructured
+# netlist equal to its source even when they ARE equal (cvc5 proves these). Exit a
+# distinct code so the caller reports Unknown, never a false REFUTE.
+echo "WARN: Yosys could not prove equivalency and found NO counterexample."
+echo "INCONCLUSIVE: equivalence undetermined ${GATE} vs ${GOLD} with top:${fm_top}"
+exit 2

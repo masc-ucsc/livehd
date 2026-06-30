@@ -2423,6 +2423,29 @@ void Lnast_prp_writer::compute_dead_signals(Lnast_nid io_nid, Lnast_nid stmts_ni
     if (keep.count(s)) {
       continue;
     }
+    // A whole-bundle write (`bundle = tuple`) writes ALL of the base's fields, so
+    // the base name itself reads 0 times — but if any FIELD `bundle.X` is read
+    // (e.g. a later pack `(bundle.a<<N)|...`), the store is NOT dead. Dropping it
+    // would lose the bundle copy and leave every field at its `=0` default — a
+    // real miscompile (e.g. Dispatcher's `io_out_0_bits_ctrl_0 = io_in_bits_ctrl_0`
+    // becoming all-zero), which LEC then refutes against the (correct) cgen output.
+    bool field_read = false;
+    for (const auto& [fname, ffi] : fold_info_) {
+      if (ffi.use_count == 0) {
+        continue;
+      }
+      std::string fs(strip_prefix(fname));
+      if (!fs.empty() && fs.front() == '`') {  // bundle-field leaves render as `base.field`
+        fs = fs.substr(1, fs.size() >= 2 ? fs.size() - 2 : std::string::npos);
+      }
+      if (fs.size() > s.size() + 1 && fs.compare(0, s.size(), s) == 0 && fs[s.size()] == '.') {
+        field_read = true;
+        break;
+      }
+    }
+    if (field_read) {
+      continue;
+    }
     dead_signals_.insert(s);
   }
   if (dead_signals_.empty()) {

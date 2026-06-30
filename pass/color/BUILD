@@ -33,6 +33,7 @@ cc_library(
     ],
 ) for test_name in [
     "acyclic_test",
+    "cgen_test",
     "synth_test",
     "path_test",
     "mincut_test",

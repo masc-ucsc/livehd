@@ -30,6 +30,17 @@ private:
   absl::flat_hash_map<pin_key_t, std::string> pin2var;
   int                                          tmp_cnt = 0;
 
+  // Stage 0 combinational-loop safety net. A sim module is ONE sequential
+  // `cycle()` schedule, so a combinational cycle -- a real loop, or a FALSE loop
+  // through an atomic Sub call (sub output feeds back through parent comb logic
+  // into one of the sub's own inputs) -- has no valid emission order. operand()
+  // would otherwise silently substitute `create_integer(0)` for an unschedulable
+  // back-edge sink, producing a WRONG simulation with no diagnostic. These flags
+  // turn that into a loud, located build failure.
+  bool        cycle_unresolved_ = false;  // hit an unschedulable comb-cycle back-edge this graph
+  bool        cycle_reported_   = false;  // a located error was already emitted for this graph
+  std::string cycle_first_label_;         // first offending value (for the generic message)
+
   static std::string     cpp_id(std::string_view name);  // sanitize to a valid C++ identifier
   static hhds::Pin_class get_driver(const hhds::Pin_class& sink);
   static hhds::Pin_class find_sink_pin(const hhds::Node_class& node, std::string_view name);

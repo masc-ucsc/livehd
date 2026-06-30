@@ -242,6 +242,12 @@ private:
   // kept — splitting a whole-read-only nested struct breaks its reassembly).
   // Populated by a body-wide pre-scan in lower_module; reset per module.
   absl::flat_hash_set<const slang::ast::ValueSymbol*> struct_field_read_;
+  // Packed-struct vars accessed BELOW top level (`c0.field[i]`, `c0.field.sub`) or
+  // WHOLE-COPIED (`a = b` as bare names): a nested/array-field struct in either case
+  // is mis-lowered by the per-field bundle path, so it must stay a flat bus. Scoped
+  // to those vars (not every nested/array struct) to keep struct-heavy designs fast.
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> struct_deep_accessed_;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> struct_whole_copied_;
   // True for a scalar packed-struct VARIABLE we lower per-field (excludes ports,
   // clocked regs, and arrays — those keep their existing lowering).
   bool is_scalar_struct_var(const slang::ast::ValueSymbol& sym) const;

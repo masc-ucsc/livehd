@@ -9,10 +9,12 @@
 
 #include "absl/strings/str_cat.h"
 #include "cell.hpp"        // Ntype / Ntype_op
+#include "diag.hpp"        // livehd::diag::err — Stage 0 comb-loop safety net
 #include "node_util.hpp"  // //graph:graph — livehd::graph_util::* helpers
 #include "str_tools.hpp"  // str_tools::ends_with
 
 using livehd::graph_util::bits_of;
+using livehd::graph_util::debug_name;
 using livehd::graph_util::default_instance_name;
 using livehd::graph_util::hydrate_const;
 using livehd::graph_util::is_const_pin;
@@ -122,7 +124,16 @@ std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int 
   }
   auto it = pin2var.find(dpin.get_class_index());
   if (it == pin2var.end()) {
-    return absl::StrCat("Slop<", tw, ">::create_integer(0) /*UNRESOLVED*/");  // already a Slop<tw> expr
+    // A VALID, NON-CONST driver with no pin2var binding can only be a combinational
+    // cycle back-edge: its producer node sorts AFTER this use in forward_class (a
+    // real comb loop, or a FALSE loop through an atomic Sub call). There is no valid
+    // schedule; record it so do_from_graph() fails loudly instead of silently
+    // simulating 0. (A genuinely undriven pin already returned at is_invalid above.)
+    cycle_unresolved_ = true;
+    if (cycle_first_label_.empty()) {
+      cycle_first_label_ = absl::StrCat("`", debug_name(dpin.get_master_node()), "` (a combinational-cycle back-edge)");
+    }
+    return absl::StrCat("Slop<", tw, ">::create_integer(0) /*UNRESOLVED-CYCLE*/");  // already a Slop<tw> expr
   }
   const std::string& base     = it->second;
   const bool         unsigned_ = (sign_mode == -1) || (sign_mode == 0 && is_unsign(dpin));
@@ -261,7 +272,10 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
 
 void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   pin2var.clear();
-  tmp_cnt = 0;
+  tmp_cnt           = 0;
+  cycle_unresolved_ = false;
+  cycle_reported_   = false;
+  cycle_first_label_.clear();
 
   hhds::Graph* g   = graph.get();
   auto         gio = g->get_io();
@@ -829,6 +843,23 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         for (const auto& d : sio->get_input_pin_decls()) {
           auto drv = get_driver(node.get_sink_pin(d.name));
           int  wb  = d.bits > 0 ? static_cast<int>(d.bits) : 1;
+          // Stage 0: a valid, non-const driver feeding this instance input that is
+          // not yet bound is a combinational cycle threading THROUGH this atomic Sub
+          // call (the false-loop-through-instance case). Report it precisely.
+          if (!drv.is_invalid() && !is_const_pin(drv) && !pin2var.contains(drv.get_class_index()) && !cycle_reported_) {
+            livehd::diag::err("inou.cgen.sim", "comb-loop-through-instance", "unsupported")
+                .msg(
+                    "combinational loop through instance `{}` ({}::{}): input `{}` is fed by logic that depends on "
+                    "this instance's own output",
+                    s.inst, gname, s.callee_struct, d.name)
+                .hint(
+                    "a sub-instance is simulated atomically (all inputs -> all outputs), so an output that feeds back "
+                    "into one of its inputs forms a cycle the single-pass schedule cannot break; restructure so the "
+                    "cone feeding this input is computed before the call, split the sub by output cone, or flatten "
+                    "this instance for sim")
+                .emit();
+            cycle_reported_ = true;
+          }
           fout->append(absl::StrCat("    ", s.inst, "__i.", cpp_id(d.name), " = ", operand(drv, wb), ";\n"));
         }
         fout->append(absl::StrCat("    auto ", s.inst, "__o = ", s.inst, ".cycle(", s.inst, "__i);\n"));
@@ -853,6 +884,22 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     auto var  = absl::StrCat("cg_", std::to_string(tmp_cnt++));
     fout->append(absl::StrCat("    Slop<", wb, "> ", var, " = ", node_expr(node, wb), ";  // ", op_name(op), "\n"));
     pin2var[dpin.get_class_index()] = var;
+  }
+
+  // Stage 0: if a combinational cycle survivor was hit anywhere above but the
+  // precise Sub-input site did not already name it (a pure-cell comb loop with no
+  // Sub on it), fail loudly with the best label we captured rather than emit a
+  // silently-wrong sim that substitutes 0.
+  if (cycle_unresolved_ && !cycle_reported_) {
+    livehd::diag::err("inou.cgen.sim", "combinational-loop", "unsupported")
+        .msg("module `{}` has a combinational loop the single-pass sim schedule cannot order: {} was read before it "
+             "could be computed",
+             gname, cycle_first_label_.empty() ? std::string{"a value"} : cycle_first_label_)
+        .hint(
+            "inou.cgen.sim emits one sequential `cycle()` per module; a combinational cycle (a real loop, or a false "
+            "loop through an atomic Sub instance) has no valid emission order")
+        .emit();
+    cycle_reported_ = true;
   }
 
   // flop next-state (all computed from current state before any commit). Each
