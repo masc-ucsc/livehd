@@ -1,0 +1,35 @@
+/*
+:name: const_bit_select
+:type: equiv_slang
+:verilog_top: const_bit_select.top
+:pyrope_top: const_bit_select.top
+*/
+
+// Minimal repro of the verification.html "lhd lec ERROR" category
+// InvalidSelectExpression (small_todo_working.md "Still open" #3): cgen emits a
+// bit-select applied directly to a CONSTANT literal, e.g.
+//   get_mask_20_u = (9'sb1????????)[15:12];
+// which slang's semantic checker rejects ("select expression is not allowed
+// here" / "cannot select range of [15:12] from 'logic signed[8:0]'"), so the
+// LEC that reads the regenerated Verilog ERRORS instead of proving.
+//
+// The trigger: a signed const with a known sign bit and UNKNOWN low bits
+// (`cur = 0sb1????????`) bit-selected ABOVE its width (`#[12..=15]`, entirely in
+// the sign-extension region) INSIDE a mux arm — cprop keeps the Get_mask
+// structural (a const `a` operand with unknowns) instead of folding it, and cgen
+// emits `(const)[hi:lo]`. The select is fully determined (all sign bits ⇒ 0xf),
+// so the fix is to compute the sliced constant at cgen time. This mirrors the
+// XiangShan ExceptionGen/CVT32/DataPath families (a `#[97..=115]` slice of a
+// 65-bit signed const-with-unknowns in a dead mux arm).
+//
+// FIXED (2026-07-01) in inou/cgen/cgen_verilog.cpp: the Get_mask handler now
+// folds a const `a` operand via `Dlop::get_mask_op(mask)` and emits the resulting
+// literal (`5'shf`) instead of `(const)[range]`. Guards prp-equiv-const_bit_select.
+pub comb top(sel:u1, b:s9) -> (o:u4) {
+  mut cur:s9 = 0sb1????????
+  if sel {
+    o = cur#[12..=15]
+  } else {
+    o = b#[12..=15]
+  }
+}

@@ -1,0 +1,22 @@
+/*
+:name: sim_dontcare_state
+:type: equiv
+:verilog_top: sim_dontcare_state.hold
+:pyrope_top: sim_dontcare_state.hold
+*/
+
+// State counterpart of sim_dontcare_ctrl: Verilog can push X into a hidden
+// register on invalid cycles while the Pyrope side stores a concrete value.
+// LEC passes because the observable payload is don't-care when valid is false,
+// but an exact SIM checkpoint compare reports both output and register-state
+// differences unless unknown/invalid bits are masked.
+mod hold(valid:bool, d:u8) -> (valid_o:bool@[0], q:u8@[0]) {
+  reg r:u8 = 0
+  r = d
+  valid_o = valid
+  if valid {
+    q = r
+  } else {
+    q = 0
+  }
+}

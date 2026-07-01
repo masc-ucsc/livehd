@@ -1,0 +1,18 @@
+/*
+:name: sim_lg_atomic_feedback
+:type: equiv
+:verilog_top: sim_lg_atomic_feedback_top
+:pyrope_top: sim_lg_atomic_feedback.top
+*/
+
+// LEC-equivalent flattened form of sim_lg_atomic_feedback.v. The golden keeps
+// a hierarchy where a submodule output feeds logic that drives another input of
+// the same submodule. There is no real bit-level cycle because the submodule's
+// output cones are independent, but cgen.sim treats the sub-instance atomically
+// and reports `comb-loop-through-instance`.
+pub comb top(a:u8, b:u8, d:u8, topx:u8) -> (x_out:u9, y_out:u9) {
+  const x = a + b
+  const c:u8 = (x#[0..=7] + topx)#[0..=7]
+  x_out = x
+  y_out = c + d
+}

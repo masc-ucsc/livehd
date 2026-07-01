@@ -1,0 +1,16 @@
+/*
+:name: latch_enable_hold
+:type: equiv
+:verilog_top: latch_enable_hold.latch8
+:pyrope_top: latch_enable_hold.latch8
+*/
+
+// KNOWN-FAILING (fixme tracker): Pyrope has no intentional level-sensitive
+// latch construct yet. This source captures the closest current surface shape:
+// a combinational output assigned only when `en` is true. The golden is the
+// Verilog latch this pattern represents in RTL.
+comb latch8(en:bool, d:u8) -> (q:u8) {
+  if en {
+    q = d
+  }
+}

@@ -1,0 +1,16 @@
+/*
+:name: sim_dontcare_ctrl
+:type: equiv
+:verilog_top: sim_dontcare_ctrl.pick
+:pyrope_top: sim_dontcare_ctrl.pick
+*/
+
+// Repro for the Dispatcher/EnqEntry SIM-vs-LEC category: the Verilog/LGraph
+// side can leave payload bits as don't-care when the valid bit is false, while
+// the Pyrope equivalent computes a concrete payload. LEC should pass because
+// the payload is only meaningful under `valid`; an exact end-of-cycle SIM
+// compare must mask the invalid payload bits or it reports a false mismatch.
+comb pick(valid:bool, ctrl:u8) -> (valid_o:bool, ctrl_o:u8) {
+  valid_o = valid
+  ctrl_o  = ctrl
+}

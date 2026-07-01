@@ -1,0 +1,20 @@
+/*
+:name: async_reset_enable
+:type: equiv
+:verilog_top: async_reset_enable.pipe
+:pyrope_top: async_reset_enable.pipe
+*/
+
+// KNOWN-FAILING (fixme tracker): explicit data-path async resets from Verilog
+// do not have a matching Pyrope surface construct. This models `arst` as a
+// synchronous conditional write, so it should not be equivalent to the golden's
+// always @(posedge clock or posedge arst) behavior.
+pub mod pipe(en:bool, arst:bool, d:u8) -> (q:u8@[0]) {
+  reg r:u8 = 0
+  if arst {
+    r = 0
+  } elif en {
+    r = d
+  }
+  q = r
+}
