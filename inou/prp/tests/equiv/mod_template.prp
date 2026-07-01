@@ -13,7 +13,7 @@ mod inner(a) -> (x:u8@[2]) {
   stage[2] x = a
 }
 
-mod top(a:u8) -> (out:u8@[2]) {
+pub mod top(a:u8) -> (out:u8@[2]) {
   stage[2] t = inner(a)
   out = t
 }

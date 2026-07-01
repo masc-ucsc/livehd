@@ -11,7 +11,7 @@
 // runtime arm UNCONDITIONALLY (`o = a`, no mux) — the constant arm silently
 // vanished. The io-output keep guard preserves both arm stores so tolg
 // builds the mux.
-comb mixedarm(s:bool, a:u2) -> (o:u2) {
+pub comb mixedarm(s:bool, a:u2) -> (o:u2) {
   if s {
     o = 1
   } else {

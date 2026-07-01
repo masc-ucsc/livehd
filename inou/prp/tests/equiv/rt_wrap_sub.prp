@@ -11,6 +11,6 @@
 // bare form is a `does not fit its declared range [0, 4294967295]` error). The
 // `wrap` prefix masks the low 32 bits, exactly Verilog's modular subtraction,
 // so this LECs against `assign d = x - y`.
-comb rt_wrap_sub(x:u32, y:u32) -> (d:u32) {
+pub comb rt_wrap_sub(x:u32, y:u32) -> (d:u32) {
   wrap d = x#[0..=31] - y#[0..=31]
 }

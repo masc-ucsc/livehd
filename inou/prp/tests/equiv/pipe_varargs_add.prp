@@ -17,6 +17,6 @@ pipe add_all(...args) -> (r:u10) {
   r = acc
 }
 
-mod top(a:u8, b:u8, c:u8) -> (z:u10@[1]) {
+pub mod top(a:u8, b:u8, c:u8) -> (z:u10@[1]) {
   stage[1] z = add_all(a, b, c)
 }

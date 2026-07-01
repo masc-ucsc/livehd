@@ -10,7 +10,7 @@
 // found"), NOT truncated to 1 bit. Regression for the io_mw=1 default that
 // silently dropped all but the low bit of `out:int = …` — runtime, constant,
 // and negative drivers.
-comb rt_int_output(a:u4, c:u4) -> (zi:signed, zu:unsigned, zc:signed, zk:signed, zn:signed) {
+pub comb rt_int_output(a:u4, c:u4) -> (zi:signed, zu:unsigned, zc:signed, zk:signed, zn:signed) {
   zi = a + 1     // 1..16 — needs >1 bit
   zu = a + 1     // 1..16
   zc = unsigned(c)    // value-preserving 0..15

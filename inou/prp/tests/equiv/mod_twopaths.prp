@@ -10,7 +10,7 @@
 // never adds path depth, the arm intervals UNION to (1,2). The declaration
 // either covers the interval (`@[1..=2]` / `@[1..<3]`) or opts out (`@[]`);
 // a single `@[N]` would be rejected. Inline `@[...]` asserts work the same.
-mod twopaths(a:u32, opt:bool) -> (o:u32@[], o2:u32@[1..=2]) {
+pub mod twopaths(a:u32, opt:bool) -> (o:u32@[], o2:u32@[1..=2]) {
   reg tmp1:u32 = nil
   reg tmp2:u32 = nil
 

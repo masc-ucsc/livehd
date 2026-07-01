@@ -12,7 +12,7 @@
 // it cannot find the width, declines, and the `wrap` call leaks to tolg
 // unlowered ("call to 'wrap' has no hardware lowering yet") — the wrap never
 // clamps. With the fix it masks the low 32 bits == Verilog modular `x - y`.
-comb rt_wrap_reassign(x:u32, y:u32) -> (o:u32) {
+pub comb rt_wrap_reassign(x:u32, y:u32) -> (o:u32) {
   mut d:u32 = 0
   d = x#[0..=31]                     // prior write → versions `d`
   wrap d = x#[0..=31] - y#[0..=31]   // narrows into d's *declared* u32 type

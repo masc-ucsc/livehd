@@ -11,7 +11,7 @@
 // offset is kept and the width/sign are right (previously it dropped the offset
 // and returned the LOW bits). Covers a real offset, the full slice (k==0, which
 // is the whole value like the bare `#[..]`), and the single top bit (k==msb).
-comb osel(a:u16) -> (zfull:u16, zoff:u11, zmsb:u1) {
+pub comb osel(a:u16) -> (zfull:u16, zoff:u11, zmsb:u1) {
   zfull = a#[0..]
   zoff  = a#[5..]
   zmsb  = a#[15..]

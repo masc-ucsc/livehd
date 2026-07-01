@@ -16,7 +16,7 @@
 // check take ~60s. u8 keeps the SAME structural property under test while
 // the BMC stays well under the harness timeout. Still wrap-free:
 // `tmp < 200` => tmp + a + b <= 199 + 15 + 15 = 229 <= 255 (u8 max).
-pipe[1] acc_mix(a:u4, b:u4) -> (x:u9) {
+pub pipe[1] acc_mix(a:u4, b:u4) -> (x:u9) {
   reg tmp:u8 = 0
   if tmp < 200 {
     tmp = tmp + a + b

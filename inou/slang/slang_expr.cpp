@@ -185,9 +185,10 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
     }
   }
 
-  // A whole read of a per-field bundle struct: reconstruct the packed value from
-  // its leaves (field accesses are intercepted before reaching here).
-  if (is_scalar_struct_var(sym)) {
+  // A whole read of a per-field bundle struct OR a per-element bundle array:
+  // reconstruct the packed value from its leaves (field/element accesses are
+  // intercepted before reaching here).
+  if (is_scalar_struct_var(sym) || is_packed_array_bundle_var(sym)) {
     return read_struct_whole(sym);
   }
 
@@ -669,6 +670,29 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
   int  stride = 1;
   if (base_ty.isPackedArray()) {
     stride = static_cast<int>(base_ty.getArrayElementType()->getBitWidth());
+  }
+
+  // A whole-element select `vec[const]` of a per-element bundle array routes to
+  // the element's independent leaf net (breaks the Type C false self-loop). A
+  // sub-element / dynamic / range select falls through to the generic path, which
+  // reconstructs the whole value from the leaves via lower_rvalue(base) below.
+  if (expr.kind == ExpressionKind::ElementSelect && base.kind == ExpressionKind::NamedValue) {
+    const auto& bsym = base.as<slang::ast::NamedValueExpression>().symbol;
+    if (is_packed_array_bundle_var(bsym) && ti.bits == stride) {
+      const auto& es = expr.as<slang::ast::ElementSelectExpression>();
+      if (auto ci = try_eval_int(es.selector())) {
+        int64_t idx = range.isDescending() ? (*ci - range.lower()) : (range.upper() - *ci);
+        if (!declared_.contains(&bsym)) {
+          declare_value_symbol(bsym, /*force_reg=*/false);
+        }
+        if (auto it = struct_var_info_.find(&bsym); it != struct_var_info_.end()) {
+          if (const auto* f = find_struct_field(it->second, absl::StrCat("e", idx))) {
+            auto v = read_leaf(absl::StrCat(lname_of(bsym), ".", f->name));
+            return f->is_signed ? builder_.create_sext_stmts(v, std::to_string(f->bits - 1)) : v;
+          }
+        }
+      }
+    }
   }
 
   auto p = to_pattern(to_int_value(lower_rvalue(base)), bi.bits, bi.is_signed);

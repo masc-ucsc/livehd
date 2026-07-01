@@ -7,6 +7,6 @@
 
 // The 06c-pipelining.md canonical fixed-latency pipe: every result arrives
 // exactly 3 cycles after its inputs.
-pipe[3] mul(a:u16, b:u16) -> (c:u32) {
+pub pipe[3] mul(a:u16, b:u16) -> (c:u32) {
   c = a * b
 }

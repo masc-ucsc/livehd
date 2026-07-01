@@ -9,7 +9,7 @@
 // A `u2` selector listing `== 0/1/2/3` is exhaustive, so the omitted else is an
 // unreachable don't-care (the Hotmux none-of slot keeps a width-matched 0sb?).
 // This is LEC-equivalent to the explicit four-way case in the golden Verilog.
-comb msel(x:u2, a:u8, b:u8, c:u8, d:u8) -> (res:u8) {
+pub comb msel(x:u2, a:u8, b:u8, c:u8, d:u8) -> (res:u8) {
   res = match x {
     == 0 { a }
     == 1 { b }

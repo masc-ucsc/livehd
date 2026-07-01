@@ -135,8 +135,24 @@ std::string Cgen_sim::operand(const hhds::Pin_class& dpin, int target_bits, int 
     }
     return absl::StrCat("Slop<", tw, ">::create_integer(0) /*UNRESOLVED-CYCLE*/");  // already a Slop<tw> expr
   }
-  const std::string& base     = it->second;
-  const bool         unsigned_ = (sign_mode == -1) || (sign_mode == 0 && is_unsign(dpin));
+  const std::string& base = it->second;
+  // A Sum with a subtrahend (a `-` operand, sink pid != 0) can go negative; its
+  // value wraps at the node width, so WIDENING it must sign-extend to propagate
+  // the borrow -- matching Verilog re-evaluating `a - b` at the consumer width.
+  // Safe: a non-negative sum has top bit 0, so sext == zext there.
+  bool sum_with_sub = false;
+  if (sign_mode == 0 && is_unsign(dpin)) {
+    auto mn = dpin.get_master_node();
+    if (!mn.is_invalid() && type_op_of(mn) == Ntype_op::Sum) {
+      for (const auto& ie : mn.inp_edges()) {
+        if (ie.sink.get_port_id() != 0) {
+          sum_with_sub = true;
+          break;
+        }
+      }
+    }
+  }
+  const bool unsigned_ = !sum_with_sub && ((sign_mode == -1) || (sign_mode == 0 && is_unsign(dpin)));
   if (unsigned_) {
     return absl::StrCat(base, ".zext_to<", tw, ">()");  // zero-extend / mask
   }
@@ -175,6 +191,21 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
     case Ntype_op::Or: return fold("or_op");
     case Ntype_op::Xor: return fold("xor_op");
     case Ntype_op::Mult: return fold("mult_op");
+    case Ntype_op::Ror: {
+      // OR-reduction: 1 iff ANY bit of ANY operand is set. Each operand must be
+      // read at its OWN full width (not the 1-bit node width), then reduced --
+      // `a.ror_op()` is the unary reduce, `a.ror_op(b)` reduces both. Matches the
+      // Verilog cgen `|a` / `|{a|b|...}`.
+      if (e.empty()) {
+        return absl::StrCat("Slop<", tw, ">::create_integer(0)");
+      }
+      auto ow = [&](size_t i) { return operand(e[i].driver, std::max(wbits_of(e[i].driver), 1)); };
+      std::string s = (e.size() == 1) ? absl::StrCat(ow(0), ".ror_op()") : ow(0);
+      for (size_t i = 1; i < e.size(); ++i) {
+        s = absl::StrCat(s, ".ror_op(", ow(i), ")");
+      }
+      return absl::StrCat("(", s, ").zext_to<", tw, ">()");
+    }
     case Ntype_op::Not:
       return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)") : absl::StrCat(operand(e[0].driver, wbits), ".not_op()");
     case Ntype_op::LT:
@@ -184,8 +215,21 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         return absl::StrCat("Slop<", tw, ">::create_integer(0)");
       }
       int cw = std::max({wbits_of(e[0].driver), wbits_of(e[1].driver), 1});
+      // An ORDERED compare (LT/GT) is sign-aware: a signed operand read at its OWN
+      // width is not sign-extended, so its stored value stays a positive magnitude
+      // (0xF8 == 248, not -8) and the compare goes wrong. Give one extra bit of
+      // headroom when EITHER side is signed so `operand()`'s signed read actually
+      // sign-extends. EQ is a bit-pattern compare -- no headroom (would break the
+      // signed-vs-unsigned same-bits case).
+      if (op != Ntype_op::EQ && (!is_unsign(e[0].driver) || !is_unsign(e[1].driver))) {
+        cw += 1;
+      }
       const char* m = (op == Ntype_op::LT) ? "lt_op" : (op == Ntype_op::GT) ? "gt_op" : "eq_op";
-      return absl::StrCat(operand(e[0].driver, cw), ".", m, "(", operand(e[1].driver, cw), ").zext_to<", tw, ">()");
+      // Slop's compare ops return a Bool whose true value is all-ones (-1); a bare
+      // zext_to<tw> would leave `tw` all-ones (e.g. 3 for a 2-bit consumer) instead
+      // of 1. Clamp to a single bit first so the boolean is 0/1 in any width.
+      return absl::StrCat(operand(e[0].driver, cw), ".", m, "(", operand(e[1].driver, cw), ").zext_to<1>().zext_to<", tw,
+                          ">()");
     }
     case Ntype_op::SHL:
       if (e.size() < 2) {
@@ -199,9 +243,8 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       // arithmetic shift: the shifted operand must be read as signed
       return absl::StrCat(operand(e[0].driver, wbits, /*signed=*/1), ".sra_op(", operand(e[1].driver, wbits), ")");
     case Ntype_op::Get_mask: {
-      // value (e[0]) + optional mask (e[1]). Result is a non-negative magnitude,
-      // so read operands UNSIGNED (zero-extend). The unary form is the common
-      // tolg width-adjust; lower it to a plain zext.
+      // value (e[0]) + optional mask (e[1]). The unary form is the common tolg
+      // width-adjust; lower it to a plain zext.
       if (e.empty()) {
         return absl::StrCat("Slop<", tw, ">::create_integer(0)");
       }
@@ -209,16 +252,37 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         return operand(e[0].driver, wbits, /*unsigned=*/-1);
       }
       int cw = std::max({wbits_of(e[0].driver), wbits_of(e[1].driver), wbits, 1});
-      return absl::StrCat("(", operand(e[0].driver, cw, -1), ".get_mask_op(", operand(e[1].driver, cw, -1), ")).zext_to<", tw,
-                          ">()");
+      // The value is normally read UNSIGNED (get_mask yields a non-negative
+      // magnitude). Two corrections, both keyed off a CONSTANT mask:
+      //  * A finite mask that reaches past the value width extracts the value's
+      //    SIGN bits (e.g. `(x#sext[..])#[0..=63]`), so read the value per its
+      //    declared sign -- EXCEPT the mask==-1 "to positive" idiom stays unsigned.
+      //  * A single selected bit makes get_mask_op return the SIGNED 1-bit value
+      //    (-1 when set), so clamp the packed result to one bit -> magnitude 0/1.
+      int  val_sign   = -1;
+      bool single_bit = false;
+      if (is_const_pin(e[1].driver)) {
+        auto mv  = hydrate_const(e[1].driver);
+        val_sign = (mv.is_just_i64() && mv.to_just_i64() == -1) ? -1 : 0;
+        single_bit = !mv.is_negative() && mv.popcount() == 1;
+      }
+      std::string gm = absl::StrCat("(", operand(e[0].driver, cw, val_sign), ".get_mask_op(",
+                                    operand(e[1].driver, cw, -1), "))");
+      if (single_bit) {
+        gm = absl::StrCat(gm, ".zext_to<1>()");
+      }
+      return absl::StrCat(gm, ".zext_to<", tw, ">()");
     }
     case Ntype_op::Set_mask: {
-      // value.set_mask_op(mask, newbits) — best effort at the node width.
+      // value.set_mask_op(mask, newbits) — best effort at the node width. The
+      // inserted bits (e[2]) are read per their declared sign so a SIGNED source
+      // sign-fills a slot wider than its width (e.g. `s#[5..=12] = i#sext[28..=31]`);
+      // an unsigned source is unchanged (is_unsign -> zero-extend).
       if (e.size() < 3) {
         return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)") : operand(e[0].driver, wbits, -1);
       }
       return absl::StrCat(operand(e[0].driver, wbits, -1), ".set_mask_op(", operand(e[1].driver, wbits, -1), ", ",
-                          operand(e[2].driver, wbits, -1), ")");
+                          operand(e[2].driver, wbits), ")");
     }
     case Ntype_op::Sext: {
       // value sign-extended from a bit position (2nd input, normally constant).
@@ -227,9 +291,15 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       }
       int frombit = wbits - 1;
       if (e.size() > 1 && is_const_pin(e[1].driver)) {
-        frombit = static_cast<int>(hydrate_const(e[1].driver).to_just_i64());
+        // LGraph Sext(a, b) keeps b bits [b-1:0] (cgen_verilog emits `a[b-1:0]`),
+        // i.e. the sign bit is at b-1. Slop::sext_op(fb) takes fb as the sign-bit
+        // position, so pass b-1 (NOT b) or the value stays unsigned/off-by-one.
+        frombit = static_cast<int>(hydrate_const(e[1].driver).to_just_i64()) - 1;
       }
-      return absl::StrCat(operand(e[0].driver, wbits, /*signed=*/1), ".sext_op(", std::to_string(frombit), ")");
+      // read the source wide enough to preserve the sign bit before extending
+      int sw = std::max({wbits, frombit + 1, wbits_of(e[0].driver)});
+      return absl::StrCat("Slop<", tw, ">{", operand(e[0].driver, sw, /*signed=*/1), ".sext_op(",
+                          std::to_string(frombit), ")}");
     }
     case Ntype_op::Mux:
     case Ntype_op::Hotmux: {
@@ -726,7 +796,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     fout->append("    ", f.member, " = ", rv, ";\n");
   }
   for (const auto& m : mems) {
-    fout->append("    for (auto& __e : ", m.member, ") __e = Slop<", std::to_string(m.bits), ">::create_integer(0);\n");
+    // Power-on contents: apply the comptime `init` bus (ROM / `const`/`mut` array
+    // reset value) instead of zero-filling, so first-cycle reads see the real
+    // contents. A runtime/absent init keeps the zero-fill.
+    if (!m.init.is_invalid() && is_const_pin(m.init)) {
+      fout->append(absl::StrCat("    slop_apply_update(", m.member, ", ", operand(m.init, m.bits * m.size), ");\n"));
+    } else {
+      fout->append("    for (auto& __e : ", m.member, ") __e = Slop<", std::to_string(m.bits), ">::create_integer(0);\n");
+    }
     for (const auto& p : m.ports) {
       if (p.rd && m.type == 1) {
         fout->append(absl::StrCat("    ", m.member, "_q", p.rdidx, " = Slop<", m.bits, ">::create_integer(0);\n"));

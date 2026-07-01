@@ -22,6 +22,6 @@
 //   * Fixing it means letting a 1-bit value carry a sign (touches the core
 //     bits/sign convention + pass/lec/encode.cpp + cgen) — deferred.
 //   * Related declared-`:s1` range bug ([1,1] -> [-1,0]) was FIXED in prp2lnast.
-comb p(x:u8) -> (b:bool) {
+pub comb p(x:u8) -> (b:bool) {
   b = signed(x#[3]) < 0
 }

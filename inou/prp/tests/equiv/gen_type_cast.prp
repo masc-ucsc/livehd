@@ -23,6 +23,6 @@ comb widen<T>(a:T) -> (r:u32) {
   r = u32(T(a)) + 1
 }
 
-comb top(x:u8) -> (r:u32) {
+pub comb top(x:u8) -> (r:u32) {
   r = widen<u8>(a=x)
 }

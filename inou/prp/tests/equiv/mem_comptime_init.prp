@@ -11,7 +11,7 @@
 // so tolg can pack it onto the Memory `init` pin (entry 0 in the low bits),
 // row-major. `reset` restores the per-entry contents — same model as the
 // literal-init multidim test. iv (comptime) carries no hardware of its own.
-mod mci(reset:bool, i:u1, j:u1) -> (z:u4@[0]) {
+pub mod mci(reset:bool, i:u1, j:u1) -> (z:u4@[0]) {
   comptime mut iv:[2][2]u4 = nil
   for a in 0..<2 {
     for b in 0..<2 {

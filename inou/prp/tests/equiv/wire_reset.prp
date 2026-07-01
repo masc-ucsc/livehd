@@ -9,7 +9,7 @@
 // `wire`: the driver of `clr` appears AFTER the reg declaration that uses it.
 // acc is a state accumulator; its synchronous reset is the computed net
 // `clr = rst or do_flush`.
-mod wreset(a:u8, rst:bool, do_flush:bool) -> (o:u8@[0]) {
+pub mod wreset(a:u8, rst:bool, do_flush:bool) -> (o:u8@[0]) {
   wire clr = nil
   reg  acc:u8:[reset_pin = clr] = 0
   o   = acc

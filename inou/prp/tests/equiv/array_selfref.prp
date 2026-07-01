@@ -7,9 +7,9 @@
 
 // Pyrope reference for array_selfref.v: `z = a_0 ^ a_1` (substituting
 // vec[0]=a_0 into vec[1]'s expression -- see the .v header for why the
-// literal Verilog shape is NOT actually cyclic). KNOWN BROKEN:
-// prp-v2prp-array_selfref currently REFUTES (a concrete counterexample, not
-// a timeout/inconclusive) -- see small_todo_working.md "Type C".
-comb top(a_0:u2, a_1:u2) -> (z:u2) {
+// literal Verilog shape is NOT actually cyclic). FIXED (2026-06-30): the
+// self-referencing packed array now splits into per-element wire leaf nets, so
+// prp-v2prp-array_selfref PROVES equivalent (see the .v header for the fix).
+pub comb top(a_0:u2, a_1:u2) -> (z:u2) {
   z = a_0 ^ a_1
 }

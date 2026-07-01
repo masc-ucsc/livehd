@@ -1451,7 +1451,16 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     auto a_dpin = get_driver(find_sink_pin(node, "a"));
     auto a_bits = bits_of(a_dpin);
     auto a      = get_expression(a_dpin);
-    if (mask_v.is_just_i64() && mask_v.to_just_i64() == -1) {
+    if (is_const_pin(a_dpin)) {
+      // A bit-select of a CONSTANT operand: get_expression returns a parenthesized
+      // literal `(N'sb1?...)`, and appending `[hi:lo]` produces invalid Verilog — a
+      // part-select of a parenthesized constant, often out of range (slang rejects
+      // it: "select expression is not allowed here"; the verification.html
+      // InvalidSelectExpression / "lhd lec ERROR" category). The select is fully
+      // determined at generation time, so apply the mask to the constant directly
+      // and emit the resulting literal (the value cprop would have folded to).
+      final_expr = const_to_verilog(*hydrate_const(a_dpin).get_mask_op(mask_v));
+    } else if (mask_v.is_just_i64() && mask_v.to_just_i64() == -1) {
       if (a_bits > 0 && !is_unsign(a_dpin)) {
         // To-positive of a signed driver: a plain copy sign-extends when the
         // unsigned LHS is wider (e.g. 1-bit signed ~(|b) into a 2-bit reg).

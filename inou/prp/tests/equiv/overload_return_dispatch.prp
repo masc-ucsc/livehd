@@ -16,7 +16,7 @@
 comb mk_two(a:u8) -> (p1:u9, p2:u9) { p1 = a + 1 ; p2 = a + 2 }
 comb mk_one(a:u8) -> (r:u9)         { r = a + 1 }
 
-comb ovret(x:u8) -> (s:u9) {
+pub comb ovret(x:u8) -> (s:u9) {
   const mk = [mk_two, mk_one]   // multi-output candidate first
   s = mk(a=x)                   // whole bind → mk_one
 }

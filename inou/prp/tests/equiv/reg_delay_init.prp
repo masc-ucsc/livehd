@@ -9,7 +9,7 @@
 // mints the implicit `reset` input and ties reset_pin/initial (sync by
 // default). Body sigma=1 in pipe[1], so the LN-inserted output flop narrows
 // to (0,0) and realizes as a wire — exactly ONE flop in the netlist.
-pipe[1] delay(a:u8) -> (o:u9) {
+pub pipe[1] delay(a:u8) -> (o:u9) {
   reg r:u9 = 7
   r = a
   o = r

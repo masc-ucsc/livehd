@@ -261,6 +261,9 @@ cc_direct_headers(
         # accum.prp is the aspirational call-site-phase file (stage[N]/@[N]):
         # no test header, no golden .v — it goes live with the call-site phase.
         exclude = [
+            # `*_tb.prp` are the generated differential-sim testbenches (prp-simeq-*
+            # below), NOT equiv pairs — never let the equiv glob pick them up.
+            "tests/equiv/*_tb.prp",
             "tests/equiv/accum.prp",
             # signed_one_bit_cmp: known-failing miscompile tracker (1-bit signed
             # ordered compare reads unsigned). Run via the fixme target below.
@@ -278,6 +281,9 @@ cc_direct_headers(
             # targets below.
             "tests/equiv/io_bundle_nested.prp",
             "tests/equiv/array_selfref.prp",
+            # Known-failing semantic trackers. Run via the fixme targets below.
+            "tests/equiv/async_reset_enable.prp",
+            "tests/equiv/latch_enable_hold.prp",
         ],
     )
 ]
@@ -359,6 +365,27 @@ sh_test(
     tags = ["fixme"],
 )
 
+[
+    sh_test(
+        name = "prp-equiv-%s" % base,
+        srcs = ["tests/pyrope_test.py"],
+        args = ["-i", "$(location //inou/prp:tests/equiv/%s.prp)" % base],
+        data = [
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//inou/prp:tests/equiv/%s.prp" % base,
+            "//inou/prp:tests/equiv/%s.v" % base,
+            "//lhd",
+        ],
+        deps = ["//inou/yosys:scripts"],
+        tags = ["fixme"],
+    )
+    for base in [
+        "async_reset_enable",
+        "latch_enable_hold",
+    ]
+]
+
 # 2f-v2prp: the REVERSE direction over the same equiv corpus. The slang reader
 # lowers each golden <name>.v to Pyrope (upass/prp_writer); `lhd lec` recompiles
 # that Pyrope and proves it equivalent to the ORIGINAL hand-written <name>.prp
@@ -399,6 +426,19 @@ _V2PRP_FIXME = [
     # known 1-bit signed ordered-compare fixme tracker (the same gap the forward
     # prp-equiv side carries).
     "signed_one_bit_cmp",
+    # Reverse v2prp proves against the concrete Pyrope source and does not mask
+    # the Verilog X payload under valid=false. The forward lgyosys equiv test
+    # passes and pins the intended don't-care semantics.
+    "sim_dontcare_ctrl",
+    "sim_dontcare_state",
+    # Pyrope cgen.sim false word-level cycle: packed self-reference where the
+    # read slice and written slice are independent, but SIM schedules the whole
+    # packed value as one object. Forward LEC passes.
+    "sim_prp_packed_selfref",
+    # Golden Verilog intentionally preserves hierarchy with feedback through a
+    # sub-instance; reverse reconstruction is not the point of this cgen.sim
+    # tracker.
+    "sim_lg_atomic_feedback",
     # "false comb cycle" family (small_todo_working.md Type B / Type C): a
     # struct/array field self-reference within one `'{...}` pattern assignment
     # miscompiles through --reader slang. REFUTES with a concrete
@@ -406,6 +446,10 @@ _V2PRP_FIXME = [
     # XiangShan modules instead see an `lhd lec` encode failure).
     "io_bundle_nested",
     "array_selfref",
+    # Known-failing semantic trackers: latch inference and explicit data-path
+    # async resets do not have a supported Pyrope source equivalent yet.
+    "async_reset_enable",
+    "latch_enable_hold",
 ]
 
 [
@@ -433,9 +477,45 @@ _V2PRP_FIXME = [
         f.split("/")[-1][:-2]
         for f in glob(
             ["tests/equiv/*.v"],
-            exclude = ["tests/equiv/mclk_sram_2wclk.v"],
+            # `*_tb.v` are the generated differential-sim golden drivers
+            # (prp-simeq-*), not equiv goldens — keep them out of the v2prp glob.
+            exclude = [
+                "tests/equiv/mclk_sram_2wclk.v",
+                "tests/equiv/*_tb.v",
+            ],
         )
     ]
+]
+
+# lhd-sim known-failing trackers. These are separate from `prp-equiv-*`: the
+# paired .prp/.v files live in tests/equiv and LEC where possible, but these
+# fixme targets exercise the actual SIM failure category.
+[
+    sh_test(
+        name = "prp-simfail-%s" % name,
+        srcs = ["tests/equiv_sim_fail_test.py"],
+        args = [
+            "--mode",
+            mode,
+            "--prp",
+            "$(location //inou/prp:tests/equiv/%s.prp)" % name,
+        ],
+        data = [
+            "//inou/prp:tests/equiv_sim_fail_test.py",
+            "//inou/prp:tests/equiv/%s.prp" % name,
+            "//inou/prp:tests/equiv/%s.v" % name,
+            "//inou/prp:sim_runtime_hdrs",
+            "//lhd",
+        ],
+        deps = ["//inou/yosys:scripts"],
+        tags = ["fixme"],
+    )
+    for name, mode in {
+        "sim_dontcare_ctrl": "exact-diff",
+        "sim_dontcare_state": "exact-diff",
+        "sim_prp_packed_selfref": "prp-emit",
+        "sim_lg_atomic_feedback": "lg-emit",
+    }.items()
 ]
 
 # 2w-prp_writer bucket C2 (DEFERRED to 2m-multiport_mem): a multi-clock SRAM
@@ -530,4 +610,88 @@ sh_test(
         "mod_delay3",          # @[N] landing-cycle on a mod output
         "reg_out_feedforward",  # feedforward reg output
     ]
+]
+
+# Differential simulation equivalence (prp-simeq-<name>): for each equiv pair a
+# generated `<name>_tb.v` (Icarus) + `<name>_tb.prp` (`lhd sim`) drive the DUT
+# and its golden Verilog with the SAME 64-bit-LCG constrained-random stimulus for
+# 1000 cycles and fold every cycle's outputs into one 62-bit rolling signature.
+# The `<name>_tb.prp` (a `:type: simulation` test that imports the `pub` DUT
+# lambda) bakes the Icarus golden signature and asserts equality -- so this is the
+# `lhd sim` C++ codegen (inou.cgen.sim) checked against an independent oracle.
+#
+# TWO PHASES (see tests/equiv/README_simeq.md): SETUP regenerates both `_tb`
+# files + the baked golden via `inou/prp/tests/gen_equiv_tb.py --setup` (needs
+# iverilog; only when a pair is added or its logic/interface changes). The
+# regression below is phase RUN -- it recompiles the DUT to C++ and checks the
+# baked golden, no Verilog needed. Same hermetic host-compile as prp-sim (the
+# `sim_runtime_hdrs` headers; NO nested bazel). The `_tb.prp` imports its sibling
+# `<name>.prp`, so BOTH are runfiles.
+_SIMEQ = [
+    "arr2d_dyn_sel", "array_selfref", "bit_sel_sext", "bitrange_dyn", "bitrange_open",
+    "bitsel_dyn", "bitsel_idx", "bitset_gap", "bitset_imm", "bitset_mut", "bitset_nil",
+    "bitset_reg", "clz_nest", "codeblock_expr", "comb_single_out_op", "cond_modified_read",
+    "condout_const_arms", "condout_mixed_arms", "condout_seed_uncertain", "dyn_tuple_const",
+    "dyn_tuple_idxexpr", "dyn_tuple_mixed", "dyn_tuple_mut_ro", "dyn_tuple_pair",
+    "dyn_tuple_sel", "generic_mod", "hier_value", "hotmux_match", "hotmux_match_partial",
+    "hotmux_unique", "if_expr_rhs", "implies_cond", "implies_ops", "lead_or_chain", "loop_accum",
+    "match_const_else", "match_no_else", "mem_const_idx", "mem_init", "mem_init_scalar",
+    "mem_init_tuple", "mem_pending_sync_init", "mem_rom", "mem_whole_cond_const",
+    "mem_write_only", "mod_acc_state", "mod_call_mod", "mod_call_pipe", "mod_call_pipe2",
+    "mod_comp", "mod_counter", "mod_delay3", "mod_lower", "mod_mixed_out", "mod_mul_add",
+    "mod_mut_delay", "mod_mux_aligned", "mod_passthru", "mod_template", "mod_three",
+    "mod_twopaths", "mod_varargs_add", "mod_varargs_csa", "multi_out_comb", "overload_dispatch",
+    "overload_return_dispatch", "packed_assign", "pipe1_pass", "pipe2_two_out", "pipe3_mul",
+    "pipe_bare", "pipe_range", "pipe_stage_reg", "pipe_state_acc", "pipe_varargs_add",
+    "reduce_and", "reduce_or", "reduce_popcount", "reduce_xor", "reg_async_flag",
+    "reg_attr_override", "reg_delay_init", "reg_hold_empty_elif", "reg_hold_match",
+    "reg_hold_no_else", "reg_out_feedforward", "reg_tuple_reset", "rt_bool_cast",
+    "rt_int_output", "rt_sat_s", "rt_sat_u", "rt_typecast", "rt_wrap_noop", "rt_wrap_reassign",
+    "rt_wrap_s", "rt_wrap_sub", "rt_wrap_sum", "rt_wrap_u", "shift_combo_i8", "shift_combo_i8b",
+    "shift_nested_sra", "shift_sra_unsigned", "signed_one_bit_cmp", "splice_merge", "trivial_if",
+    "varargs_add", "wire_comb", "wire_reg", "wire_reset", "wire_ring", "wire_typed",
+]
+
+# Known-failing differential-sim trackers (tagged `fixme` so `bazel test //...`
+# (-fixme) stays green). Each is a real inou.cgen.sim gap the harness SURFACES --
+# fixing the codegen (not the test) flips it green:
+#   * mem_comptime_init* / mem_multidim_* / mem_pending_reset_restore /
+#       sim_lg_atomic_feedback : the single-pass sim schedule cannot order a
+#       combinational cycle (a real loop, or a false loop through an atomic Sub /
+#       memory read-before-write). Tracked in cgen_sim_false_comb_loop.
+#   * mem_mut_array / mem_whole_coexist / mem_whole_reg : combinational per-port
+#       array write-persistence / whole-array re-init semantics (re-applying the
+#       comptime init default each cycle also broke input-driven comb arrays, so
+#       it is deferred rather than force-fit).
+#   * const_bit_select : a don't-care const (`0sb1????????`) has no single concrete
+#       sim value that matches the LEC don't-care semantics.
+#   * async_reset_enable / gen_type_cast / lg_rename : pre-existing fixme DUTs
+#       (async data-path reset; broken-generics repro; lg= rename makes the
+#       Verilog module name differ from the importable Pyrope lambda).
+#   * sim_prp_packed_selfref : packed self-reference the sim cannot yet order.
+# Run one: bazel test //inou/prp:prp-simeq-mem_mut_array --test_tag_filters=
+_SIMEQ_FIXME = [
+    "async_reset_enable", "const_bit_select", "gen_type_cast", "lg_rename", "mem_comptime_init",
+    "mem_comptime_init_inferred", "mem_multidim_init", "mem_multidim_rw", "mem_mut_array",
+    "mem_pending_reset_restore", "mem_whole_coexist", "mem_whole_comb", "mem_whole_reg",
+    "sim_lg_atomic_feedback", "sim_prp_packed_selfref",
+]
+
+[
+    sh_test(
+        name = "prp-simeq-%s" % base,
+        srcs = ["tests/pyrope_test.py"],
+        args = ["-i", "$(location //inou/prp:tests/equiv/%s_tb.prp)" % base],
+        data = [
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/prpsim.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//inou/prp:tests/equiv/%s_tb.prp" % base,
+            "//inou/prp:tests/equiv/%s.prp" % base,
+            "//inou/prp:sim_runtime_hdrs",
+            "//lhd",
+        ],
+        tags = [] if base in _SIMEQ else ["fixme"],
+    )
+    for base in _SIMEQ + _SIMEQ_FIXME
 ]

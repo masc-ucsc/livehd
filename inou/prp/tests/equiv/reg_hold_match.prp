@@ -12,7 +12,7 @@
 //   sel==0 -> r = a
 //   sel==1 -> r = b
 //   else   -> HOLD
-mod selreg(sel:u2, a:u8, b:u8) -> (q:u8@[0]) {
+pub mod selreg(sel:u2, a:u8, b:u8) -> (q:u8@[0]) {
   reg r:u8 = 0
   unique if sel == 0 {
     r = a

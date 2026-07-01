@@ -10,7 +10,7 @@
 // the init contents are the per-cycle default (the Memory `init` pin), a
 // write overrides its entry for the rest of the cycle, reads are
 // combinational. No clock.
-mod mutarr(a:u8, wsel:u2, rsel:u2) -> (z:u8@[0]) {
+pub mod mutarr(a:u8, wsel:u2, rsel:u2) -> (z:u8@[0]) {
   mut t:[4]u8 = (1,2,3,4)
   t[wsel] = a
   z = t[rsel]

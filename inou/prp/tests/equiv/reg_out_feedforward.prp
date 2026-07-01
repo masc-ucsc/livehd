@@ -9,6 +9,6 @@
 // the q pin is the output; the unconditional write makes it a stage
 // crossing, so sigma(q) = 1 matches the declared landing cycle. No init =>
 // NO reset input is minted.
-mod addreg(a:u8, b:u8) -> (reg q:u9@[1]) {
+pub mod addreg(a:u8, b:u8) -> (reg q:u9@[1]) {
   q = a + b
 }

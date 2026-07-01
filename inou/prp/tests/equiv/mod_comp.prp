@@ -10,7 +10,7 @@
 // the bitwidth pass (bw_meta) rather than the io_meta declared envelope — a
 // distinct path in tolg lower_mod. Covers the power-of-two and `% 3` lowerings
 // over a sum/xor dividend. lgcheck proves it bit-exact against native `%`.
-comb foo(a:u8, b:u8) -> (rp2:u4, r3:u2) {
+pub comb foo(a:u8, b:u8) -> (rp2:u4, r3:u2) {
   rp2 = (a + b) % 8
   r3  = (a ^ b) % 3
 }

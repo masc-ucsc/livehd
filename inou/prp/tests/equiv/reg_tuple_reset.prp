@@ -10,7 +10,7 @@
 // carrying its slice of the (positional) reset value — x resets to 20, y to 3.
 // Runtime field writes keep constprop from folding it away, so this exercises
 // the per-field reset distribution AND the field-write rewrite.
-mod rtr(en:bool, wx:u8, wy:u4) -> (ox:u8@[0], oy:u4@[0]) {
+pub mod rtr(en:bool, wx:u8, wy:u4) -> (ox:u8@[0], oy:u4@[0]) {
   reg bank:(x:u8, y:u4) = (20, 3)
   ox = bank.x
   oy = bank.y

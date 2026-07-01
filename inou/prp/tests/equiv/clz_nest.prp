@@ -15,7 +15,7 @@
 // passes (slang reads the .v correctly).  Both PASS on purpose: they prove the
 // golden + the slang/pyrope path are right, isolating the bug to LiveHD's
 // `--reader yosys-verilog` front-end, which prp-yvr-clz_nest reproduces (REFUTED).
-comb clz(io_in:u10) -> (io_out:u4) {
+pub comb clz(io_in:u10) -> (io_out:u4) {
   io_out = 10                       // no leading 1 found -> all 10 bits are zero
   if io_in#[0] != 0 { io_out = 9 }
   if io_in#[1] != 0 { io_out = 8 }

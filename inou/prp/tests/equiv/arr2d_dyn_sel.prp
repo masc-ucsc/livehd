@@ -14,7 +14,7 @@
 // (--reader slang reading the .v) is the one that fails: slang mis-lowers the
 // packed-array index.  Distilled from XiangShan MiscResultSelect /
 // ShiftResultSelect (`_GEN[io_func[2:1]]` over `wire [3:0][63:0] _GEN`).
-comb sel2d(sel:u2, a:u8, b:u8, c:u8, d:u8) -> (z:u8) {
+pub comb sel2d(sel:u2, a:u8, b:u8, c:u8, d:u8) -> (z:u8) {
   mut g:[4]u8 = (0, 0, 0, 0)   // mut-array init must be comptime; fill at runtime
   g[0] = a
   g[1] = b

@@ -9,7 +9,7 @@
 // top bit (so an all-ones slice reads as the signed -1) then compared `== -1`.
 // Covers unsigned/signed operands, closed range and the open `#[..]` form,
 // plus a single-bit range (k==1). Result is int 0/1.
-comb foo(a:u8, b:s8) -> (an_ur:u1, an_sr:u1, an_uf:u1, an_sf:u1, an_1:u1) {
+pub comb foo(a:u8, b:s8) -> (an_ur:u1, an_sr:u1, an_uf:u1, an_sf:u1, an_1:u1) {
   an_ur = a#&[2..=4]   // unsigned, bits 2..4
   an_sr = b#&[2..=4]   // signed,   bits 2..4
   an_uf = a#&[..]      // unsigned, all 8 type bits

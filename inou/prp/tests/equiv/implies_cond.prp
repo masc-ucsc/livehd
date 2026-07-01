@@ -9,7 +9,7 @@
 // implies_ops test does not: as the controlling condition of an if/else mux,
 // and as a self-check that `p implies q` is identical to the hand-written
 // `!p or q`. The Verilog golden hand-expands every implication.
-comb top(req:bool, ack:bool, x:u4, y:u4) -> (grant:bool, sel:u4, same:bool) {
+pub comb top(req:bool, ack:bool, x:u4, y:u4) -> (grant:bool, sel:u4, same:bool) {
   // "an ack only happens when there was a req":  ack implies req
   grant = ack implies req
 

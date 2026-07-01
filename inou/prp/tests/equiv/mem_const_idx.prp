@@ -9,7 +9,7 @@
 // ALWAYS a Memory cell; memory<->flop conversion is a later LG pass), and two
 // write sites in one branch mint two write ports sharing the path-condition
 // enable. An async memory read lands @[0] (committed state, like a reg).
-mod cidx(a:u8, b:u8, we:bool) -> (z:u8@[0]) {
+pub mod cidx(a:u8, b:u8, we:bool) -> (z:u8@[0]) {
   reg t:[2]u8 = nil
   if we {
     t[0] = a

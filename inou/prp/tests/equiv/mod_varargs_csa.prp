@@ -42,6 +42,6 @@ mod csa(...args) -> (z:u10@[0]) {
   z = acc
 }
 
-mod top(a:u8, b:u8, c:u8) -> (z:u10@[0]) {
+pub mod top(a:u8, b:u8, c:u8) -> (z:u10@[0]) {
   z = csa(a, b, c)
 }

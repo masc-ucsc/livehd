@@ -18,7 +18,7 @@ comb one(a:u8) -> (r:u9) {
   r = a + 1
 }
 
-comb csout(a:u8, b:u8) -> (s:u10, c:u9, d:u10, e:u9) {
+pub comb csout(a:u8, b:u8) -> (s:u10, c:u9, d:u10, e:u9) {
   const z = one(a=a)
   s = z + 1                                 // arith on a SAVED result:   a+2
   const w = one(a=b) == 6                   // compare directly on a result

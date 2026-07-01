@@ -11,7 +11,7 @@
 // divider/`mod` cell is produced — only get_mask (shift), `+`, `==`. Covers a
 // narrow (u4) and a wide (u16) dividend so the multi-round reduction is
 // exercised. lgcheck proves it bit-exact against native Verilog `%`.
-comb foo(a:u4, w:u16) -> (r4:u2, r16:u2) {
+pub comb foo(a:u4, w:u16) -> (r4:u2, r16:u2) {
   r4  = a % 3
   r16 = w % 3
 }

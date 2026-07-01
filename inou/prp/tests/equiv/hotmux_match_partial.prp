@@ -9,7 +9,7 @@
 // (the else arm writes only `lo`). Both variables merge through their own
 // Hotmux sharing the one selector; an arm that doesn't write a variable
 // feeds that arm's slot from the variable's pre-match value.
-comb msel2(x:u2, a:u8, b:u8) -> (lo:u8, hi:u8) {
+pub comb msel2(x:u2, a:u8, b:u8) -> (lo:u8, hi:u8) {
   mut lo:u8 = 0
   mut hi:u8 = 0
   match x {

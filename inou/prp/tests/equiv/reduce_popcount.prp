@@ -9,7 +9,7 @@
 // selected bits. Widths exercise power-of-2 (2, 4, 16) and non-power-of-2
 // (3, 5, 7, 11) leaf counts (odd-leaf carry-up), unsigned/signed operands,
 // the open `#[..]` form, and a single bit (k==1). Result is the set-bit count.
-comb foo(a:u16, b:s16) -> (
+pub comb foo(a:u16, b:s16) -> (
   p2:u2, p4:u3, p3:u2, p5:u3, p7:u3, pf:u5, ps:u4, p1:u1
 ) {
   p2 = a#+[0..=1]    // 2 bits  (power of 2), max 2

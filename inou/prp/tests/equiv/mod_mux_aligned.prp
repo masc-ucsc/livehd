@@ -9,7 +9,7 @@
 // never adds path depth): the arm union at the Mux cell is the single cycle
 // 1, matching the declared landing. Arms at DIFFERENT cycles union into a
 // range instead — see mod_twopaths.
-mod pick(sel:bool, a:u8, b:u8) -> (out:u9@[1]) {
+pub mod pick(sel:bool, a:u8, b:u8) -> (out:u9@[1]) {
   stage[1] sd = sel
   stage[1] ad = a
   stage[1] bd = b

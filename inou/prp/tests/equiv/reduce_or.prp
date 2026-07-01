@@ -8,7 +8,7 @@
 // OR-reduction `foo#|[range]` lowers to the graph Ror cell over the get_mask
 // slice (cgen emits `|slice`). Covers unsigned/signed operands and the closed
 // range vs the open `#[..]` "reduce every type bit" form. Result is int 0/1.
-comb foo(a:u8, b:s8) -> (or_ur:u1, or_sr:u1, or_uf:u1, or_sf:u1) {
+pub comb foo(a:u8, b:s8) -> (or_ur:u1, or_sr:u1, or_uf:u1, or_sf:u1) {
   or_ur = a#|[2..=4]   // unsigned, bits 2..4
   or_sr = b#|[2..=4]   // signed,   bits 2..4
   or_uf = a#|[..]      // unsigned, all 8 type bits

@@ -10,6 +10,6 @@
 // mask `1<<idx`; tolg's lower_dynamic_bit_select turns the runtime get_mask
 // into `|(g & (1<<idx))` — equal to the documented `(g>>idx)&1` workaround and
 // LEC-equivalent to the Verilog element select `g[idx]` (the golden).
-comb bsel(g:u16, idx:u4) -> (z:u1) {
+pub comb bsel(g:u16, idx:u4) -> (z:u1) {
   z = g#[idx]
 }

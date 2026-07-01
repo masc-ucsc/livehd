@@ -9,7 +9,7 @@
 // reads `fb` BEFORE `fb`'s single driver appears textually (legal: a `wire` is
 // position-independent). The register `acc` breaks the loop, so `fb` is just a
 // net == acc (no flop for fb). out = acc, acc <= a + acc.
-mod ring(a:u8) -> (out:u8@[0]) {
+pub mod ring(a:u8) -> (out:u8@[0]) {
   wire fb = nil
   reg  acc:u8 = 0
   const sum = a + fb     // reads fb BEFORE it is driven (legal: wire)

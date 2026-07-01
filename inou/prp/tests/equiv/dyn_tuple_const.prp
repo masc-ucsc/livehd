@@ -13,7 +13,7 @@
 // `const`/`mut` tuple value is now muxed; a comp_type_array (`const t:[4]u8`)
 // still lowers to a Memory ROM (see mem_rom), so a large const table stays a
 // ROM instead of a giant mux tree.
-comb csel(sel:u2) -> (z:u8) {
+pub comb csel(sel:u2) -> (z:u8) {
   const choices = (10, 20, 30, 40)
   z = choices[sel]
 }

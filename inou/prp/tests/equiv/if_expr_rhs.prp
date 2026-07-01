@@ -15,7 +15,7 @@
 //        comptime arm store to the result tmp was dropped + the tmp kept the
 //        else const. Fixed in constprop (keep arm stores under uncertainty) +
 //        symbol_table (invalidate the result tmp on arm exit).
-comb ifsel(c:bool, d:bool, a:u8, b:u8) -> (o:u8, p:u8, q:u8) {
+pub comb ifsel(c:bool, d:bool, a:u8, b:u8) -> (o:u8, p:u8, q:u8) {
   o = if c { a } else { b }
   p = if c { b } else { a }
   q = if c { a } elif d { b } else { 0 }

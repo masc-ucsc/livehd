@@ -330,6 +330,11 @@ private:
   std::unordered_set<std::string>                                      foldable_;     // temp names to inline at their use
   std::unordered_set<int64_t>                                          folded_node_;  // def-node keys (get_class_index) to skip
   std::unordered_set<std::string>                                      dead_signals_; // stripped names written but never read (dropped)
+  // Every READ name plus its dotted ancestor prefixes (`a.b.c` read -> {a, a.b,
+  // a.b.c}). Lets the bundle reconstruction skip re-grouping a NEVER-read tuple
+  // base into `wire base:(...) = nil` — detuple only re-splits a tuple that is
+  // read, so a write-only bundle would leave field stores tolg cannot lower.
+  std::unordered_set<std::string>                                      read_field_prefixes_;
   // Mark/collect signals that are assigned but never read (and are not ports,
   // regs, the clock/reset cone, or instance temps) so their def statements are
   // dropped. firtool SSA+poison-init emits a dead base per versioned signal.

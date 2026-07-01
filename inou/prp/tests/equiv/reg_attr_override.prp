@@ -9,7 +9,7 @@
 // (default sync): `sync=false` selects an asynchronous reset and
 // `reset_pin=ref rst_n` binds the declared active-low input (the `_n`
 // suffix flips negreset), so no implicit reset input is minted.
-mod blink(rst_n:bool, en:bool) -> (q:u8@[0]) {
+pub mod blink(rst_n:bool, en:bool) -> (q:u8@[0]) {
   reg r:u8:[sync=false, reset_pin=ref rst_n] = 5
   if en and r < 200 {
     r = r + 1

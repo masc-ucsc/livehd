@@ -5,6 +5,6 @@
 :pyrope_top: pipe1_pass.passthru
 */
 
-pipe[1] passthru(a:u8) -> (o:u8) {
+pub pipe[1] passthru(a:u8) -> (o:u8) {
   o = a
 }

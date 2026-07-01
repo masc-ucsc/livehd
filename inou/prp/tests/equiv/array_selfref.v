@@ -7,25 +7,27 @@
 // BusyTable's `io_read`.
 //
 // Substituting vec[0]=a_0 into vec[1]'s expression makes this trivially
-// ACYCLIC (z = a_0 ^ a_1), but no existing LiveHD mechanism splits a plain
+// ACYCLIC (z = a_0 ^ a_1). Pre-fix, no LiveHD mechanism split a plain
 // packed-array `'{...}` pattern into independent per-element leaves the way
 // is_scalar_struct_var does for packed structs (Type A/B above) -- so a read
-// of `vec[0]` while computing `vec[1]` in the same pattern wires `vec[0]`
-// onto the whole not-yet-fully-defined `vec` node at the graph level.
+// of `vec[0]` while computing `vec[1]` in the same pattern wired the stale
+// whole-`vec` bus (poison) onto vec[1], miscompiling z.
 //
-// On the FULL XiangShan modules (CloseShiftLeftWithMux etc.) this surfaces as
-// an `lhd lec` ENCODE failure ("operand of 'X' has no encodable driver
-// (combinational cycle?)"). At this minimal scale it instead surfaces as a
-// silent MISCOMPILE: `lhd lec` cleanly REFUTES with a concrete counterexample
-// (z wrong), and yosys lgcheck (prp-equiv, an independent tool) agrees the
-// two circuits differ. Same root cause, two different downstream symptoms
-// depending on design size/shape (see io_bundle_nested.v for the same
-// pattern on the struct side).
+// On the FULL XiangShan modules (CloseShiftLeftWithMux etc.) the pre-fix bug
+// surfaced as an `lhd lec` ENCODE failure ("operand of 'X' has no encodable
+// driver (combinational cycle?)"). At this minimal scale it instead surfaced as
+// a silent MISCOMPILE: `lhd lec` cleanly REFUTED with a concrete counterexample
+// (z wrong), and yosys lgcheck (prp-equiv, an independent tool) agreed the two
+// circuits differ. Same root cause, two symptoms by design size/shape (see
+// io_bundle_nested.v for the same pattern on the struct side).
 //
-// KNOWN BROKEN (fixme) -- see small_todo_working.md "Type C: self-referencing
-// packed-array locals" for the fix plan (a new array-element leaf-splitting
-// mechanism, analogous to the struct one, is needed -- there is no existing
-// scaffolding for this case).
+// FIXED (2026-06-30) in slang_structure.cpp: Array_selfref_collector flags a
+// packed-array local whose `'{...}` pattern reads one of its own elements, and
+// declare_array_leaves splits it into per-element WIRE leaf nets (`vec.e0`,
+// `vec.e1`) -- the array analogue of the per-field struct bundle. A sibling read
+// `vec[0]` routes to its own leaf net (via the ElementSelect intercept in
+// slang_expr.cpp / slang_lvalue.cpp), breaking the false cycle. This test guards
+// the fix (both prp-equiv-array_selfref and prp-v2prp-array_selfref PASS).
 module \array_selfref.top (
   input  [1:0] a_0,
   input  [1:0] a_1,

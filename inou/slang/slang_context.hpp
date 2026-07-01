@@ -248,6 +248,22 @@ private:
   // to those vars (not every nested/array struct) to keep struct-heavy designs fast.
   absl::flat_hash_set<const slang::ast::ValueSymbol*> struct_deep_accessed_;
   absl::flat_hash_set<const slang::ast::ValueSymbol*> struct_whole_copied_;
+  // Packed-struct vars deep-WRITTEN (`io.sub.x = v`): a read-modify-write on a
+  // nested field roots at the whole-struct net (resolve_packed_lvalue), which a
+  // per-field bundle lacks, so a deep-written struct with a nested field stays a
+  // flat bus. Deep READS of a nested-struct field route through the leaf and are
+  // safe to bundle (small_todo_working.md Type B).
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> struct_deep_written_;
+  // Plain packed-array LOCALS driven by a single whole per-element assignment (a
+  // `'{...}` pattern or a per-element `{...}` concat) and read by element select,
+  // with no element writes (the Type C shift-network shape — an element reading a
+  // sibling of the same array reads the stale whole-array bus / a false comb
+  // cycle). Split into per-element leaf nets (declare_array_leaves) — the array
+  // analogue of the struct bundle — so each element read routes to its own net.
+  // Reset per module.
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> struct_array_bundle_;
+  bool is_packed_array_bundle_var(const slang::ast::ValueSymbol& sym) const;
+  void declare_array_leaves(const slang::ast::ValueSymbol& sym);
   // True for a scalar packed-struct VARIABLE we lower per-field (excludes ports,
   // clocked regs, and arrays — those keep their existing lowering).
   bool is_scalar_struct_var(const slang::ast::ValueSymbol& sym) const;

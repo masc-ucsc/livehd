@@ -11,6 +11,6 @@
 // landing cycle. `stage[2] x = a` delivers `a` two cycles later (a depth-2
 // shift register).
 mut runtime_delay = 2
-mod f(a:u8) -> (x:u8@[runtime_delay]) {
+pub mod f(a:u8) -> (x:u8@[runtime_delay]) {
   stage[2] x = a
 }

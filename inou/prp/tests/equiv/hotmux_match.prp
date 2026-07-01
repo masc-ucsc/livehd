@@ -8,7 +8,7 @@
 // 1a-ops: a `match` is a unique-if chain by definition, so the expression
 // form lowers to a Hotmux: selector bit per arm compare plus the none-of bit
 // driving the (mandatory) else value.
-comb msel(x:u2, a:u8, b:u8, c:u8) -> (res:u8) {
+pub comb msel(x:u2, a:u8, b:u8, c:u8) -> (res:u8) {
   res = match x {
     == 0 { a }
     == 1 { b }

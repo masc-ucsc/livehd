@@ -14,7 +14,7 @@
 //   out_gap : a low run then a lone HIGH bit, bits 5..11 left a zero gap
 //   out_over: a later range overwrites part of an earlier one (last write wins)
 //   out_rev : ranges written HIGH-to-LOW (assembly order must not matter)
-comb foo(i:u32) -> (out_gap:u16, out_over:u16, out_rev:u13) {
+pub comb foo(i:u32) -> (out_gap:u16, out_over:u16, out_rev:u13) {
   mut g:u16 = 0
   g#[0..=4] = i#[0..=4]
   g#[12]    = i#[31]

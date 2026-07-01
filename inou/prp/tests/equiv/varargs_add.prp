@@ -12,6 +12,6 @@ comb add1(...x) -> (r) {
   r = x[0] + x[1] + x[2]
 }
 
-comb top(a:u8, b:u8, c:u8) -> (z:u9) {
+pub comb top(a:u8, b:u8, c:u8) -> (z:u9) {
   z = add1(a, b, c)
 }

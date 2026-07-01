@@ -11,7 +11,7 @@
 // else/false input (tolg lower_if takes the pre-if binding); the post-if
 // read of `m` must demand the wire instead of folding to the nil that
 // Symbol_table::leave_scope pins on uncertainty-modified vars.
-comb seedmod(s:bool, t:u3) -> (b:u5) {
+pub comb seedmod(s:bool, t:u3) -> (b:u5) {
   mut m:u6 = 0
   if s {
     m = t

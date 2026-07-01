@@ -9,7 +9,7 @@
 // 2-input Xor cells over the selected bits. Widths exercise both power-of-2
 // (2, 4, 16) and non-power-of-2 (3, 5, 7) leaf counts so the odd-leaf
 // carry-up branch is covered, plus unsigned/signed and the open `#[..]` form.
-comb foo(a:u16, b:s16) -> (
+pub comb foo(a:u16, b:s16) -> (
   x2:u1, x4:u1, x3:u1, x5:u1, x7:u1, xf:u1, xs:u1, x1:u1
 ) {
   x2 = a#^[0..=1]    // 2 bits  (power of 2)

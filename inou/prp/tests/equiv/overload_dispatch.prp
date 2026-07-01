@@ -12,7 +12,7 @@
 comb add2(a:u8, b:u8)        -> (r:u9)  { r = a + b }
 comb add3(a:u8, b:u8, c:u8)  -> (r:u10) { r = a + b + c }
 
-comb ovdispatch(x:u8, y:u8, z:u8) -> (s2:u9, s3:u10) {
+pub comb ovdispatch(x:u8, y:u8, z:u8) -> (s2:u9, s3:u10) {
   const add = [add2, add3]
   s2 = add(a=x, b=y)        // 2 args → add2
   s3 = add(a=x, b=y, c=z)   // 3 args → add3

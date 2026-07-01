@@ -12,7 +12,7 @@
 // No `else` arm: the none-of slot falls through to the pre-if value (d).
 // `compile` additionally runs the O2 graph recipe (pass.cprop +
 // pass.bitwidth) over the Hotmux cell.
-comb dec(x:u2, a:u8, b:u8, c:u8, d:u8) -> (res:u8) {
+pub comb dec(x:u2, a:u8, b:u8, c:u8, d:u8) -> (res:u8) {
   mut res = d
   unique if x == 0 {
     res = a

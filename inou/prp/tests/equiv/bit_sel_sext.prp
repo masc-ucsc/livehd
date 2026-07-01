@@ -15,7 +15,7 @@
 // zero-extended select). `sout` exposes the 2-bit `#sext` on a SIGNED port so
 // the negative path (-2..1) is checked without contaminating zout's unsigned
 // arithmetic (Verilog turns a mixed signed/unsigned expression unsigned).
-comb bsel(a:u8) -> (zout:u32, sout:s8) {
+pub comb bsel(a:u8) -> (zout:u32, sout:s8) {
   mut e1 = a#[3]            // 1-bit zext -> 0 or 1   (NEVER -1)
   mut e2 = a#[0..=1]        // 2-bit zext -> 0..3
   zout = (e1 * 1000) + (e2 * 10)

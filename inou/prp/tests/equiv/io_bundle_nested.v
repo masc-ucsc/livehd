@@ -5,25 +5,25 @@
 // CSRPermitModule's `io.toS1.vd` / `io.xRet.mret` and ByteMaskTailGen /
 // DstMgu / CVT32ModuleS1 / DecodeUnit / EnqEntry_26.
 //
-// is_scalar_struct_var's field_type_is_struct_free() gate (slang_structure.cpp,
-// landed 2026-06-30 for Type A / plain-array fields) rejects ANY struct field
-// -- nested or not -- and falls back to ONE flat bus for the whole `io`, so
-// `c`'s read of `io.sub.x` becomes a false self-reference again.
-//
-// On the FULL XiangShan modules (CSRPermitModule etc.) this surfaces as an
-// `lhd lec` ENCODE failure ("operand of 'X' has no encodable driver
+// On the FULL XiangShan modules (CSRPermitModule etc.) the pre-fix bug surfaced
+// as an `lhd lec` ENCODE failure ("operand of 'X' has no encodable driver
 // (combinational cycle?)" -- a literal graph cycle in the bigger design). At
-// this minimal scale it instead surfaces as a silent MISCOMPILE: `lhd lec`
-// cleanly REFUTES with a concrete counterexample (io_c wrong), and yosys
-// lgcheck (prp-equiv, an independent tool) agrees the two circuits differ --
-// so the flat-bus fallback wires `c` to the wrong value rather than forming a
+// this minimal scale it instead surfaced as a silent MISCOMPILE: `lhd lec`
+// cleanly REFUTED with a concrete counterexample (io_c wrong), and yosys
+// lgcheck (prp-equiv, an independent tool) agreed the two circuits differ --
+// the flat-bus fallback wired `c` to the wrong value rather than forming a
 // literal cycle here. Same root cause, two different downstream symptoms
 // depending on design size/shape.
 //
-// KNOWN BROKEN (fixme) -- see small_todo_working.md "Type B: nested-struct io
-// bundles" for the fix plan (assign_struct_whole needs to recurse into nested
-// struct fields -- give `sub` its own per-field leaves too -- instead of
-// falling back to a flat bus the moment ANY field is a struct).
+// FIXED (2026-06-30) in slang_structure.cpp: a plain (non-array) NESTED STRUCT
+// field no longer forces the whole `io` onto a flat bus when the struct is only
+// deep-READ (not whole-copied / deep-written). `is_scalar_struct_var` now uses
+// field_forces_flat_bus() (nested struct is bundle-safe; only an array-of-struct
+// field forces flat), and the Struct_whole_copy_collector no longer treats a
+// struct's own `'{...}` pattern-assign LHS as a whole-copy. `io` splits into
+// per-field leaf nets (`io.sub` its own net), so `c`'s read of `io.sub.x` routes
+// to the independent leaf and the false self-reference is gone. This test guards
+// the fix (both prp-equiv-io_bundle_nested and prp-v2prp-io_bundle_nested PASS).
 module \io_bundle_nested.top (
   input        io_x,
   input  [1:0] io_a,

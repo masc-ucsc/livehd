@@ -7,6 +7,6 @@
 
 // Ranged depth: the body must support every latency in [2,5]; the Verilog
 // realization default is the declared MINIMUM (2 stages) — the golden below.
-pipe[2..=5] flex(a:u8) -> (d:u9) {
+pub pipe[2..=5] flex(a:u8) -> (d:u9) {
   d = a + 1
 }

@@ -17,6 +17,6 @@ mod add_op(op:u8, ...args) -> (r:u11@[0]) {
   r = acc
 }
 
-mod top(op:u8, a:u8, b:u8, c:u8) -> (z:u11@[0]) {
+pub mod top(op:u8, a:u8, b:u8, c:u8) -> (z:u11@[0]) {
   z = add_op(op, a, b, c)
 }

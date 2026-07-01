@@ -7,6 +7,6 @@
 
 // Bare `pipe`: unconstrained latency, stages(1,0) — the effective minimum is
 // 1 stage, which is also the Verilog realization the golden encodes.
-pipe bare(a:u8) -> (c:u8) {
+pub pipe bare(a:u8) -> (c:u8) {
   c = a
 }

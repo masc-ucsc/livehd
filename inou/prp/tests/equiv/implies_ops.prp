@@ -10,7 +10,7 @@
 // cell, so prp2lnast lowers `a implies b` to the equivalent `!a or b`. The
 // Verilog golden hand-expands every `implies` to the explicit `(!a) | b`, so
 // the formal LEC fails the moment that lowering drifts from the identity.
-comb top(a:bool, b:bool, c:bool, x:u4, y:u4) -> (out1:bool, out2:bool, out3:bool, out4:bool) {
+pub comb top(a:bool, b:bool, c:bool, x:u4, y:u4) -> (out1:bool, out2:bool, out3:bool, out4:bool) {
   // bare implication on scalar booleans
   out1 = a implies b
 

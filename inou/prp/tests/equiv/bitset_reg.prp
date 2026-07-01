@@ -23,7 +23,7 @@
 //   o_hold : partial; bits 4..=7 are never written, so they HOLD the flop q
 //   o_cond : a straight-line write then a CONDITIONAL one that must compose with
 //            it: [0..=7]=a then `if en { [8..=11]=b }` -> en ? {b[3:0],a} : {q[11:8],a}
-mod foo(a:u8, b:u8, en:bool) -> (o_cont:u12@[0], o_over:u12@[0], o_rev:u12@[0], o_hold:u12@[0], o_cond:u12@[0]) {
+pub mod foo(a:u8, b:u8, en:bool) -> (o_cont:u12@[0], o_over:u12@[0], o_rev:u12@[0], o_hold:u12@[0], o_cond:u12@[0]) {
   reg x_cont:u12 = 0
   x_cont#[0..=7]  = a
   x_cont#[8..=11] = b

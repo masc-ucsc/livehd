@@ -17,7 +17,7 @@
 //
 // Both outputs are logically the same function written two ways, so the LEC must
 // hold only when continuation parsing keeps every term.
-comb top(sel:u4, x:u8, y:u8) -> (out1:bool, out2:bool) {
+pub comb top(sel:u4, x:u8, y:u8) -> (out1:bool, out2:bool) {
   // out1 — the chained form, operators starting each continuation line. This is
   // the exact shape that used to silently collapse to `(sel == 0 and x == y)`.
   out1 =

@@ -11,7 +11,7 @@
 // `o` was 1-bit (LEC-refuted). The Hotmux now sizes to the widest arm, like the
 // Mux path. (match/unique-if always lower to Hotmux so the one-hot selector
 // check is preserved — never a plain Mux.)
-comb t(s:u2, a:u8, b:u8) -> (o:u8) {
+pub comb t(s:u2, a:u8, b:u8) -> (o:u8) {
   o = match s {
     == 0 { a }
     == 1 { b }

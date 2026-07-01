@@ -13,7 +13,7 @@
 // to 0sb? poison — the whole `e` wire vanished from the output cone. The
 // uncertain-nil MARK now propagates through eq/ne and log_* folds, keeping
 // every producer alive so tolg lowers the real wires.
-comb condread(s:bool, b:bool) -> (g:bool) {
+pub comb condread(s:bool, b:bool) -> (g:bool) {
   mut e = false
   if s {
     e = true

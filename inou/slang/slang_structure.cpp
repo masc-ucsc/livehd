@@ -43,6 +43,33 @@ bool field_type_is_struct_free(const slang::ast::Type& type) {
   return true;
 }
 
+// True iff a field of this type CANNOT be represented as an independent bundle
+// leaf without breaking the deep-access routing. A plain (non-array) nested
+// packed struct is fine: a deep read `io.sub.x` lowers as a MemberAccess whose
+// base `io.sub` routes through the leaf net (read_leaf), and a whole-copy /
+// whole-read reassembles the leaf as flat bits — so `sub` gets its own leaf and
+// the false self-loop is broken (small_todo_working.md Type B). But ANY ARRAY
+// dimension over a non-struct-free element forces the flat bus: a deep access
+// `io.arr[i]` lowers as an ElementSelect on the leaf, which does not route back
+// to the leaf net (it needs the whole-struct bus + element bit-offset), so the
+// struct must stay flat. Recurses so a nested struct that itself holds an
+// array-of-struct field also forces the flat bus.
+bool field_forces_flat_bus(const slang::ast::Type& type) {
+  const auto& ct = type.getCanonicalType();
+  if (ct.isPackedArray() || ct.isUnpackedArray()) {
+    return !field_type_is_struct_free(type);  // array-of-struct (or struct-through-array)
+  }
+  if (ct.isStruct()) {
+    for (const auto& f : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
+      if (field_forces_flat_bus(f.getType())) {
+        return true;
+      }
+    }
+    return false;  // nested struct whose sub-fields are all bundle-safe
+  }
+  return false;  // plain bits
+}
+
 // Walk an assignment LHS spine down to the written base symbol.
 const slang::ast::ValueSymbol* lhs_base_symbol(const slang::ast::Expression& lhs) {
   const auto* e = &lhs;
@@ -198,6 +225,45 @@ struct Deep_struct_access_collector
   }
 };
 
+// Flags a packed-struct VAR deep-WRITTEN (`io.sub.x = v`, `io.field[i] = v`):
+// the per-field bundle path has no whole-struct net for resolve_packed_lvalue to
+// root the read-modify-write on, so a deep-written struct with a nested field
+// must stay a flat bus. (A deep READ of a nested-struct field is safe — it
+// routes through the leaf net; see field_forces_flat_bus / is_scalar_struct_var.)
+struct Deep_struct_write_collector
+    : public slang::ast::ASTVisitor<Deep_struct_write_collector, slang::ast::VisitFlags::AllGood> {
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>* out = nullptr;
+  // `base` is the value() the OUTERMOST lvalue select/member sits on; the write
+  // is "deep" when that base is itself a member/element/range select.
+  void note_deep(const slang::ast::Expression& base) {
+    if (base.kind == slang::ast::ExpressionKind::MemberAccess
+        || base.kind == slang::ast::ExpressionKind::ElementSelect
+        || base.kind == slang::ast::ExpressionKind::RangeSelect) {
+      if (const auto* sym = lhs_base_symbol(base)) {
+        out->insert(sym);
+      }
+    }
+  }
+  void note_lhs(const slang::ast::Expression& lhs) {
+    switch (lhs.kind) {
+      case slang::ast::ExpressionKind::MemberAccess: note_deep(lhs.as<slang::ast::MemberAccessExpression>().value()); return;
+      case slang::ast::ExpressionKind::ElementSelect: note_deep(lhs.as<slang::ast::ElementSelectExpression>().value()); return;
+      case slang::ast::ExpressionKind::RangeSelect: note_deep(lhs.as<slang::ast::RangeSelectExpression>().value()); return;
+      case slang::ast::ExpressionKind::Conversion: note_lhs(lhs.as<slang::ast::ConversionExpression>().operand()); return;
+      case slang::ast::ExpressionKind::Concatenation:
+        for (const auto* op : lhs.as<slang::ast::ConcatenationExpression>().operands()) {
+          note_lhs(*op);
+        }
+        return;
+      default: return;
+    }
+  }
+  void handle(const slang::ast::AssignmentExpression& a) {
+    note_lhs(a.left());
+    visitDefault(a);
+  }
+};
+
 // Flags a packed-struct VAR that is WHOLE-COPIED (`a = b` as bare names): the
 // per-field bundle path detuples the copy per-top-level-field, silently DROPPING
 // a field that is a nested struct / array. Flattening keeps the copy intact. Only
@@ -215,9 +281,164 @@ struct Struct_whole_copy_collector
     }
   }
   void handle(const slang::ast::AssignmentExpression& a) {
-    note(a.left());
+    // A struct read as a whole (bare RHS name) keeps a flat bus so read_struct_whole
+    // reassembles it. Its DESTINATION is a genuine whole-copy only when the RHS is
+    // ALSO a bare struct name (`dst = src`) — a pattern assign `io = '{...}` is
+    // per-field driven, so its bare-name LHS must NOT be flagged (that false
+    // positive kept Type B nested-struct io bundles flat; small_todo_working.md
+    // "Type B" — `io` looked whole-copied purely because of its own `'{...}` LHS).
     note(a.right());
+    const slang::ast::Expression* r = &a.right();
+    while (r->kind == slang::ast::ExpressionKind::Conversion) {
+      r = &r->as<slang::ast::ConversionExpression>().operand();
+    }
+    if (r->kind == slang::ast::ExpressionKind::NamedValue
+        && r->as<slang::ast::NamedValueExpression>().symbol.getType().getCanonicalType().isStruct()) {
+      note(a.left());  // genuine `dst = src` copy destination
+    }
     visitDefault(a);
+  }
+};
+
+// Flags a plain packed-array LOCAL that is driven by a SINGLE whole PER-ELEMENT
+// assignment (a `'{...}` assignment pattern OR a `{...}` bit-concatenation whose
+// operands are exactly the array elements) AND read by element select somewhere,
+// with NO element/partial writes. This is the CIRCT/firtool shift-network shape
+// (small_todo_working.md Type C), e.g. CloseShiftLeftWithMux's
+//   assign io_result_res_vec = {{_T_6}, ..., {_T_1}, {io.src}};
+// where each `_T_k` reads `io_result_res_vec[k-1]` — a sibling element of the
+// same array (often indirectly through a named wire). Lowered to one flat bus the
+// sibling read binds to the STALE whole-array bus (poison / a false comb cycle),
+// miscompiling / failing to encode. Splitting the array into independent
+// per-element leaf nets (declare_array_leaves) routes each sibling read to its own
+// net — the array analogue of the per-field struct bundle. Requiring a single
+// whole per-element driver and no element writes keeps the split a pure
+// representation change (semantically identical) and dodges the dynamic-index-
+// write case the leaf path does not handle; ordinary packed arrays are untouched.
+struct Array_bundle_collector : public slang::ast::ASTVisitor<Array_bundle_collector, slang::ast::VisitFlags::AllGood> {
+  struct Info {
+    int  whole_drivers  = 0;
+    bool per_elem_driver = false;
+    bool elem_written    = false;
+    bool elem_read       = false;
+    bool nonconst_access = false;  // a dynamic-index / range select — keep flat
+  };
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, Info>* info = nullptr;
+
+  // A select index is CONSTANT only if it folds to a literal (CIRCT emits `3'h0`
+  // etc.). A dynamic index (`arr[sig]`) touches the whole array — there is no
+  // per-element independence to exploit, and the flat-bus + dynamic-shift lowering
+  // is the correct (and only proven) path — so such an array must stay flat.
+  static bool is_dynamic_selector(const slang::ast::Expression& sel) {
+    const slang::ast::Expression* s = &sel;
+    while (s->kind == slang::ast::ExpressionKind::Conversion) {
+      s = &s->as<slang::ast::ConversionExpression>().operand();
+    }
+    return s->kind != slang::ast::ExpressionKind::IntegerLiteral;
+  }
+
+  static bool is_pattern(slang::ast::ExpressionKind k) {
+    return k == slang::ast::ExpressionKind::SimpleAssignmentPattern
+           || k == slang::ast::ExpressionKind::StructuredAssignmentPattern
+           || k == slang::ast::ExpressionKind::ReplicatedAssignmentPattern;
+  }
+  static bool is_candidate(const slang::ast::ValueSymbol& sym) {
+    const auto& ct = sym.getType().getCanonicalType();
+    if (!(ct.isPackedArray() && ct.isIntegral() && ct.getArrayElementType() != nullptr)) {
+      return false;
+    }
+    if (!field_type_is_struct_free(*ct.getArrayElementType())) {
+      return false;
+    }
+    // Require a genuine MULTI-BIT element (a real 2-D array like `[6:0][53:0]`),
+    // not a plain bus: `logic [1:0]` is a packed array of 1-bit elements too, but
+    // splitting a bus into per-bit leaves is wrong (and a self-referencing bus
+    // shift already lowers correctly via bit concat, no false cycle).
+    return ct.getArrayElementType()->getBitWidth() > 1;
+  }
+  static int elem_bits_of(const slang::ast::Type& ct) {
+    return static_cast<int>(ct.getArrayElementType()->getBitWidth());
+  }
+  static int elem_count_of(const slang::ast::Type& ct) {
+    int eb = elem_bits_of(ct);
+    return eb > 0 ? static_cast<int>(ct.getBitWidth()) / eb : 0;
+  }
+
+  // Is the RHS a per-element driver of a `count`-element / `elem_bits`-wide array?
+  static bool per_element_rhs(const slang::ast::Expression& r, int count, int elem_bits) {
+    if (is_pattern(r.kind)) {
+      switch (r.kind) {
+        case slang::ast::ExpressionKind::SimpleAssignmentPattern:
+          return static_cast<int>(r.as<slang::ast::SimpleAssignmentPatternExpression>().elements().size()) == count;
+        case slang::ast::ExpressionKind::StructuredAssignmentPattern:
+          return static_cast<int>(r.as<slang::ast::StructuredAssignmentPatternExpression>().elements().size()) == count;
+        case slang::ast::ExpressionKind::ReplicatedAssignmentPattern:
+          return static_cast<int>(r.as<slang::ast::ReplicatedAssignmentPatternExpression>().elements().size()) == count;
+        default: return false;
+      }
+    }
+    if (r.kind == slang::ast::ExpressionKind::Concatenation) {
+      const auto ops = r.as<slang::ast::ConcatenationExpression>().operands();
+      if (static_cast<int>(ops.size()) != count) {
+        return false;
+      }
+      for (const auto* op : ops) {
+        if (op->type == nullptr || static_cast<int>(op->type->getBitWidth()) != elem_bits) {
+          return false;  // an operand spans more/less than one element
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  void handle(const slang::ast::AssignmentExpression& a) {
+    const slang::ast::Expression* l = &a.left();
+    while (l->kind == slang::ast::ExpressionKind::Conversion) {
+      l = &l->as<slang::ast::ConversionExpression>().operand();
+    }
+    if (l->kind == slang::ast::ExpressionKind::NamedValue) {
+      const auto& sym = l->as<slang::ast::NamedValueExpression>().symbol;
+      if (is_candidate(sym)) {
+        const auto& ct = sym.getType().getCanonicalType();
+        auto&       in = (*info)[&sym];
+        in.whole_drivers++;
+        const slang::ast::Expression* r = &a.right();
+        while (r->kind == slang::ast::ExpressionKind::Conversion) {
+          r = &r->as<slang::ast::ConversionExpression>().operand();
+        }
+        in.per_elem_driver |= per_element_rhs(*r, elem_count_of(ct), elem_bits_of(ct));
+      }
+    } else if (const auto* base = lhs_base_symbol(*l)) {
+      if (is_candidate(*base)) {
+        (*info)[base].elem_written = true;  // an element / partial write: keep flat
+      }
+    }
+    visitDefault(a);
+  }
+  void handle(const slang::ast::ElementSelectExpression& e) {
+    if (e.value().kind == slang::ast::ExpressionKind::NamedValue) {
+      const auto& sym = e.value().as<slang::ast::NamedValueExpression>().symbol;
+      if (is_candidate(sym)) {
+        auto& in     = (*info)[&sym];
+        in.elem_read = true;
+        if (is_dynamic_selector(e.selector())) {
+          in.nonconst_access = true;
+        }
+      }
+    }
+    visitDefault(e);
+  }
+  void handle(const slang::ast::RangeSelectExpression& e) {
+    // A multi-element range select of the whole array (`arr[hi:lo]`) has no
+    // single-element leaf to route to — keep the array flat.
+    if (e.value().kind == slang::ast::ExpressionKind::NamedValue) {
+      const auto& sym = e.value().as<slang::ast::NamedValueExpression>().symbol;
+      if (is_candidate(sym)) {
+        (*info)[&sym].nonconst_access = true;
+      }
+    }
+    visitDefault(e);
   }
 };
 
@@ -250,6 +471,39 @@ const slang::ast::Expression* whole_net_driver(const slang::ast::ValueSymbol& sy
     return &ax.right();
   }
   return nullptr;
+}
+
+// True iff `expr` reads `target` — directly, or transitively through the whole-net
+// driver of any wire it references (bounded depth). Used to decide whether a
+// per-element packed-array `'{...}`/`{...}` assignment is SELF-REFERENCING: an
+// element driver that reads a sibling element of the same array (the false comb
+// cycle), possibly through named intermediate wires (`{_T6, ...}` where
+// `_T6 = f(arr[5])`, CIRCT's shift-network shape). ONLY such an array benefits
+// from the per-element leaf split; a non-self-ref per-element array (independent
+// elements) keeps its flat-bus lowering (bundling it into a wire tuple whose reads
+// later inline away leaves a write-only tuple the prp_writer round-trip cannot
+// recompile — the DivUnit `mNeg` / DataPath `fpRfWdata` regression).
+bool driver_reads_target(const slang::ast::Expression& expr, const slang::ast::ValueSymbol& target,
+                         absl::flat_hash_set<const slang::ast::ValueSymbol*>& visiting, int depth) {
+  if (depth > 16) {
+    return false;
+  }
+  Named_value_collector nvc;
+  expr.visit(nvc);
+  for (const auto* s : nvc.syms) {
+    if (s == &target) {
+      return true;
+    }
+    if (!visiting.insert(s).second) {
+      continue;
+    }
+    if (const auto* d = whole_net_driver(*s)) {
+      if (driver_reads_target(*d, target, visiting, depth + 1)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 // Seed a net/var's constant value into `ctx` (as an EvalContext local) by
@@ -622,6 +876,42 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
     Struct_whole_copy_collector swc;
     swc.out = &struct_whole_copied_;
     body->visit(swc);
+  }
+  struct_deep_written_.clear();
+  {
+    Deep_struct_write_collector dwc;
+    dwc.out = &struct_deep_written_;
+    body->visit(dwc);
+  }
+  struct_array_bundle_.clear();
+  {
+    absl::flat_hash_map<const slang::ast::ValueSymbol*, Array_bundle_collector::Info> info;
+    Array_bundle_collector                                                            abc;
+    abc.info = &info;
+    body->visit(abc);
+    for (const auto& [sym, in] : info) {
+      // Exactly one whole per-element driver, read ONLY by constant single-element
+      // select, and no element/partial writes: a candidate for the per-element leaf
+      // split. A dynamic-index or range read keeps it flat (no per-element leaf to
+      // route such an access to).
+      if (!(in.whole_drivers == 1 && in.per_elem_driver && in.elem_read && !in.elem_written
+            && !in.nonconst_access)) {
+        continue;
+      }
+      // Only SELF-REFERENCING arrays (an element driver reads a sibling element,
+      // directly or transitively) actually need the split — that is the false comb
+      // cycle. A non-self-ref per-element array (independent elements) must keep its
+      // flat bus: bundling it into a wire tuple whose reads later inline away leaves
+      // a write-only tuple the prp_writer round-trip cannot recompile.
+      const auto* drv = whole_net_driver(*sym);
+      if (drv == nullptr) {
+        continue;
+      }
+      absl::flat_hash_set<const slang::ast::ValueSymbol*> visiting;
+      if (driver_reads_target(*drv, *sym, visiting, 0)) {
+        struct_array_bundle_.insert(sym);
+      }
+    }
   }
   // Harvest `initial begin mem[k]=v; end` power-on contents before the declares
   // emit (declare_unpacked folds them into the reg array's initializer).
@@ -1159,6 +1449,13 @@ void Slang_context::declare_value_symbol(const slang::ast::ValueSymbol& sym, boo
     declare_struct_leaves(sym);
     return;
   }
+  // A self-referencing packed-array local lowers to per-element leaf nets (the
+  // array analogue of the struct bundle) so a sibling read `vec[0]` binds to its
+  // own net, not the stale whole-`vec` bus (Type C false comb cycle).
+  if (is_packed_array_bundle_var(sym)) {
+    declare_array_leaves(sym);
+    return;
+  }
   if (!type.isIntegral()) {
     emit_unsupported(sym.location, "unsupported-var-type",
                      std::string("variable '") + std::string(sym.name) + "' has a non-integral type");
@@ -1203,6 +1500,72 @@ void Slang_context::declare_value_symbol(const slang::ast::ValueSymbol& sym, boo
   clear_pending_loc();
 }
 
+bool Slang_context::is_packed_array_bundle_var(const slang::ast::ValueSymbol& sym) const {
+  // Only a per-element-driven packed-array LOCAL (see Array_bundle_collector). Ports,
+  // clocked regs, and memory-ized arrays keep their existing lowering.
+  if (!struct_array_bundle_.contains(&sym)) {
+    return false;
+  }
+  if (input_syms_.contains(&sym) || output_syms_.contains(&sym) || reg_syms_.contains(&sym)
+      || mem_info_.contains(&sym)) {
+    return false;
+  }
+  // The per-element leaf is `<base>.e<idx>`; a base name that needs backtick
+  // escaping (a `$`/`:`/`\`-laden yosys-netlist name, e.g. `\0$memwr$...`) cannot
+  // form a valid dotted leaf ref, so keep such an array a flat bus.
+  for (char c : sym.name) {
+    if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_')) {
+      return false;
+    }
+  }
+  const auto& ct = sym.getType().getCanonicalType();
+  return ct.isPackedArray() && ct.isIntegral();
+}
+
+// Declare the per-ELEMENT leaf nets of a self-referencing packed array. Reuses the
+// Struct_info machinery (assign_struct_whole / read_struct_whole / find_struct_field)
+// with each element modeled as a field named `e<idx>` at bit offset idx*elem_bits.
+// Fields are ordered HIGHEST-index-first so field[i] lines up with `'{...}` element
+// [i] (a SystemVerilog array assignment pattern lists the first-declared/high index
+// first, exactly like the struct field order the pattern path already assumes).
+void Slang_context::declare_array_leaves(const slang::ast::ValueSymbol& sym) {
+  const auto& ct        = sym.getType().getCanonicalType();
+  const auto* elem_ty   = ct.getArrayElementType();
+  auto        elem_ti   = tinfo(*elem_ty);
+  int         elem_bits = elem_ti.bits;
+  int         count     = elem_bits > 0 ? static_cast<int>(ct.getBitWidth()) / elem_bits : 0;
+  Struct_info si;
+  // WIRE leaves (position-independent reads): the `'{...}` pattern is emitted in
+  // field order (highest index first), so an element that reads a LOWER-index
+  // sibling (`vec.e1 = vec.e0 ^ a_1`) is emitted BEFORE that sibling's driver
+  // (`vec.e0 = a_0`). A mut leaf would read the sibling's poison init; a wire
+  // leaf binds the read to the driver regardless of textual order. The
+  // element-level dependency is acyclic (that is the whole point of splitting),
+  // so no real combinational cycle results.
+  si.is_wire  = true;
+  si.is_tuple = false;  // per-element flat leaves (never a real LNAST tuple)
+  auto base   = lname_of(sym);
+  set_pending_loc(sym.location);
+  for (int idx = count - 1; idx >= 0; --idx) {
+    si.fields.push_back({absl::StrCat("e", idx), static_cast<int64_t>(idx) * elem_bits, elem_bits, elem_ti.is_signed});
+    auto leaf = absl::StrCat(base, ".e", idx);
+    if (si.is_wire) {
+      builder_.create_declare_stmts(leaf, "wire", int_max_str(elem_bits, elem_ti.is_signed),
+                                    int_min_str(elem_bits, elem_ti.is_signed));
+    } else {
+      builder_.create_declare_stmts(leaf, "mut", "", "");
+      if (elem_ti.is_signed) {
+        builder_.create_assign_stmts(leaf, "0sb?");
+      } else {
+        std::string qmarks(static_cast<size_t>(elem_bits), '?');
+        builder_.create_assign_stmts(leaf, absl::StrCat("0ub", qmarks));
+      }
+    }
+  }
+  clear_pending_loc();
+  struct_var_info_.emplace(&sym, std::move(si));
+}
+
 bool Slang_context::struct_is_all_scalar(const slang::ast::ValueSymbol& sym) const {
   const auto& ct = sym.getType().getCanonicalType();
   if (!ct.isStruct()) {
@@ -1229,22 +1592,36 @@ bool Slang_context::is_scalar_struct_var(const slang::ast::ValueSymbol& sym) con
   }
   // A struct whose whole-copy is dropped in the per-field bundle path (a field that
   // is a nested struct / array-of-struct) must stay a consistent FLAT bus — but only
-  // when it is actually WHOLE-COPIED or accessed BELOW the top level (the cases that
-  // break; Dispatcher's `io_out_0_bits_ctrl_0 = io_in_bits_ctrl_0` became all-zero).
-  // Scoping to those vars avoids flattening every such struct in a struct-heavy
-  // design. (The proper fix is to make assign_struct_whole recurse into nested
-  // struct fields so no flattening is needed — todo.) A plain (struct-free) packed
-  // ARRAY field — e.g. CIRCT's io-bundle `logic [1:0][5:0] enq` — is fine as a leaf:
-  // its whole value is just its flat bit width, same as a scalar field, so it does
-  // NOT force the flat-bus fallback (field_type_is_struct_free allows it). Forcing
-  // such fields onto the flat bus is what causes a false self-loop when one field of
-  // the bundle (e.g. `out`) is computed from another (e.g. `canIssue`) within the
-  // same `'{...}` pattern assignment — the per-field bundle gives each field its own
-  // independent leaf net, breaking the false cycle.
-  if (struct_whole_copied_.contains(&sym) || struct_deep_accessed_.contains(&sym)) {
+  // when it is actually WHOLE-COPIED, deep-WRITTEN, or deep-accessed through an ARRAY
+  // dimension (the cases the bundle path cannot route; Dispatcher's
+  // `io_out_0_bits_ctrl_0 = io_in_bits_ctrl_0` became all-zero). Scoping to those
+  // vars avoids flattening every such struct in a struct-heavy design.
+  //
+  // A plain (struct-free) packed ARRAY field — e.g. CIRCT's io-bundle
+  // `logic [1:0][5:0] enq` — is fine as a leaf: its whole value is just its flat
+  // bit width, same as a scalar field (field_type_is_struct_free allows it). And a
+  // plain (non-array) NESTED STRUCT field is ALSO fine when the struct is only
+  // deep-READ (not whole-copied / deep-written): a read `io.sub.x` routes through
+  // the leaf net `io.sub` via the generic MemberAccess path, so `sub` gets its own
+  // independent leaf and the false self-loop is broken (small_todo_working.md Type
+  // B — a field `c` computed from a sibling `io.sub.x` in the same `'{...}` pattern
+  // no longer reads the stale whole-`io` bus). Only an ARRAY-shaped non-struct-free
+  // field (array-of-struct, ElementSelect on the leaf) still forces the flat bus.
+  //
+  // Whole-copy and deep-write keep the STRICT rule (any nested/array field ->
+  // flat): a whole-copy of a nested-struct leaf and a nested-field read-modify-write
+  // both need the flat whole-struct net.
+  if (struct_whole_copied_.contains(&sym) || struct_deep_written_.contains(&sym)) {
     for (const auto& f : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
       if (!field_type_is_struct_free(f.getType())) {
         return false;  // nested struct / array-of-struct field
+      }
+    }
+  }
+  if (struct_deep_accessed_.contains(&sym)) {
+    for (const auto& f : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
+      if (field_forces_flat_bus(f.getType())) {
+        return false;  // array-of-struct field (a nested struct field is bundle-safe)
       }
     }
   }

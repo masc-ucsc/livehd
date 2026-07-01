@@ -9,6 +9,6 @@
 // The Pyrope tolg path lowers this correctly, so prp-equiv LEC-passes against
 // the golden.  The companion prp-v2prp-bitsel_dyn (--reader slang reading the
 // .v) is the one that fails -- slang mis-lowers the dynamic bit-select.
-comb bsel(g:u16, idx:u4) -> (z:u1) {
+pub comb bsel(g:u16, idx:u4) -> (z:u1) {
   z = (g >> idx) & 1   // dynamic bit-select via logical shift + mask
 }

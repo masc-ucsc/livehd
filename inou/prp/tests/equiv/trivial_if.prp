@@ -5,7 +5,7 @@
 :pyrope_top: trivial_if.fun3
 */
 
-comb fun3(a:u3, b:u7, cond:boolean) -> (res:u4) {
+pub comb fun3(a:u3, b:u7, cond:boolean) -> (res:u4) {
   if cond {
     res = a + 1
   }else{

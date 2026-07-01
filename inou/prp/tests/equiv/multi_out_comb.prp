@@ -17,7 +17,7 @@ comb dpair(x:u8) -> (s:u9, d:u9) {
   d = x + 2
 }
 
-mod top(x:u8) -> (os:u9@[0], od:u9@[0]) {
+pub mod top(x:u8) -> (os:u9@[0], od:u9@[0]) {
   const (s, d) = dpair(x)
   os = s
   od = d

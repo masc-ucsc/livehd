@@ -63,7 +63,9 @@ void Slang_context::lower_assign(const slang::ast::AssignmentExpression& expr) {
     while (l->kind == ExpressionKind::Conversion) {
       l = &l->as<slang::ast::ConversionExpression>().operand();
     }
-    if (l->kind == ExpressionKind::NamedValue && is_scalar_struct_var(l->as<slang::ast::NamedValueExpression>().symbol)) {
+    if (l->kind == ExpressionKind::NamedValue
+        && (is_scalar_struct_var(l->as<slang::ast::NamedValueExpression>().symbol)
+            || is_packed_array_bundle_var(l->as<slang::ast::NamedValueExpression>().symbol))) {
       current_assign_nonblocking_ = expr.isNonBlocking();
       if (assign_struct_whole(l->as<slang::ast::NamedValueExpression>().symbol, expr.right())) {
         return;
@@ -174,6 +176,32 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
       // read-modify-write the addressed word.
       if (lower_mem_element_dynamic_write(lhs, rhs)) {
         return;
+      }
+
+      // A whole-element write `vec[const] = v` into a per-element bundle array
+      // routes to the element's own leaf net (a per-element bundle has no flat
+      // whole-array net for resolve_packed_lvalue to root the RMW on).
+      if (lhs.kind == ExpressionKind::ElementSelect && base.kind == ExpressionKind::NamedValue) {
+        const auto& bsym = base.as<slang::ast::NamedValueExpression>().symbol;
+        if (is_packed_array_bundle_var(bsym)) {
+          const auto& es = lhs.as<slang::ast::ElementSelectExpression>();
+          if (auto ci = try_eval_int(es.selector())) {
+            const auto& bt  = bsym.getType().getCanonicalType();
+            auto        rng = bt.getFixedRange();
+            int64_t     idx = rng.isDescending() ? (*ci - rng.lower()) : (rng.upper() - *ci);
+            if (!declared_.contains(&bsym)) {
+              declare_value_symbol(bsym, /*force_reg=*/false);
+            }
+            if (auto it = struct_var_info_.find(&bsym); it != struct_var_info_.end()) {
+              if (const auto* f = find_struct_field(it->second, absl::StrCat("e", idx))) {
+                note_write(bsym, current_assign_nonblocking_, lhs.sourceRange.start());
+                emit_leaf_store(absl::StrCat(lname_of(bsym), ".", f->name),
+                                fit_wrap(to_int_value(rhs), f->bits, f->is_signed));
+                return;
+              }
+            }
+          }
+        }
       }
 
       // Any chain of packed `.field` / `[idx]` / `[hi:lo]` collapses to one
@@ -344,6 +372,33 @@ bool Slang_context::assign_struct_whole(const slang::ast::ValueSymbol& sym, cons
       put(f.name, v);
     }
     return true;
+  }
+
+  // `arr = {e_hi, ..., e_lo}` per-element bit-concatenation driving an ARRAY
+  // bundle: operand[i] is element field[i] (both MSB-first — a concat's first
+  // operand is the high bits = highest element index = fields[0]). Only when every
+  // operand is exactly one element wide and the count matches (the CIRCT
+  // shift-network shape); otherwise fall through to the whole-value slice below.
+  if (r->kind == ExpressionKind::Concatenation && is_packed_array_bundle_var(sym)) {
+    const auto ops = r->as<slang::ast::ConcatenationExpression>().operands();
+    if (ops.size() == fields.size()) {
+      bool per_elem = true;
+      for (size_t i = 0; i < fields.size(); ++i) {
+        if (ops[i]->type == nullptr || static_cast<int>(ops[i]->type->getBitWidth()) != fields[i].bits) {
+          per_elem = false;
+          break;
+        }
+      }
+      if (per_elem) {
+        note_write(sym, current_assign_nonblocking_, rhs.sourceRange.start());
+        for (size_t i = 0; i < fields.size(); ++i) {
+          const auto& f = fields[i];
+          auto        v = fit_wrap(to_int_value(lower_rvalue(*ops[i])), f.bits, f.is_signed);
+          put(f.name, v);
+        }
+        return true;
+      }
+    }
   }
 
   // `io = io2` whole copy from a sibling bundle struct: copy matching leaves.

@@ -12,7 +12,7 @@
 // reaching the dynamic-index lowering cannot be hiding a dropped write.) A
 // runtime-indexed `mut` *array* (`mut t:[4]u8`) still becomes a Memory cell —
 // see mem_mut_array.
-comb msel(sel:u2) -> (z:u8) {
+pub comb msel(sel:u2) -> (z:u8) {
   mut choices = (5, 6, 7, 8)
   z = choices[sel]
 }

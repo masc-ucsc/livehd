@@ -9,7 +9,7 @@
 // name the next-state value as a `wire` (`nx`) and feed BOTH the register and
 // the consumer. `o` sees the in-cycle value (a+1) combinationally, while `r`
 // holds the registered (one-cycle-late) copy.
-mod wreg(a:u8) -> (o:u9@[0]) {
+pub mod wreg(a:u8) -> (o:u9@[0]) {
   wire nx = nil
   reg  r:u9 = 0
   nx = a + 1

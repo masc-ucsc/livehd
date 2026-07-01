@@ -13,7 +13,7 @@
 // per-entry write OVERRIDES the bulk update. This is the XiangShan
 // `validArray <= '{0,..}` (reset/flush) + per-set write idiom: a const/tuple-lit
 // whole-array store to a reg memory (lower_mem_init_store -> lower_mem_update_store).
-mod condconst(clr:bool, fill:bool, we:bool, waddr:u3, wdata:u10, idx:u3) -> (r:u10@[0]) {
+pub mod condconst(clr:bool, fill:bool, we:bool, waddr:u3, wdata:u10, idx:u3) -> (r:u10@[0]) {
   reg arr:[8]u10 = nil
   if clr {
     arr = 0

@@ -16,7 +16,7 @@
 // lower_if currently sizes the merged mux from the var's LAST recorded
 // write (upass_tolg mw_lookup), a separate pre-existing width bug. With the
 // wider constant in the else arm the mux is sized correctly either way.
-comb condout(s:bool) -> (o:u2) {
+pub comb condout(s:bool) -> (o:u2) {
   if s {
     o = 1
   } else {

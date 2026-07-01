@@ -671,6 +671,16 @@ void Lnast_prp_writer::write_module() {
         if (base_bad.count(base) || bf[base].empty() || declared_.count(base)) {
           continue;
         }
+        // A never-READ bundle base is a write-only / dead tuple (e.g. a Type-C
+        // array bundle whose element reads were dead-code-eliminated by cprop).
+        // Re-grouping it into `wire base:(...) = nil` emits per-field stores that
+        // detuple — which only re-splits a tuple that is READ — leaves as
+        // multi-element stores tolg rejects on recompile ("tuple/field store has
+        // no hardware lowering"). Leave such a base as flat leaf nets (they
+        // recompile as ordinary dead wires and drop out).
+        if (!read_field_prefixes_.count(base)) {
+          continue;
+        }
         print_indent();
         os << base_mode[base] << " " << quote_kw_path(base) << ":(";
         bool first = true;
@@ -2426,7 +2436,8 @@ void Lnast_prp_writer::compute_dead_signals(Lnast_nid io_nid, Lnast_nid stmts_ni
   // instead of an O(fold_info_) inner rescan FOR EVERY zero-use candidate
   // (was O(N^2): on a design with many thousands of signals — e.g. the
   // XiangShan Backend top — this single function dominated the whole compile).
-  std::unordered_set<std::string> read_field_prefixes;
+  read_field_prefixes_.clear();
+  auto& read_field_prefixes = read_field_prefixes_;  // populated as a member for bundle reconstruction
   for (const auto& [fname, ffi] : fold_info_) {
     if (ffi.use_count == 0) {
       continue;
@@ -2435,6 +2446,7 @@ void Lnast_prp_writer::compute_dead_signals(Lnast_nid io_nid, Lnast_nid stmts_ni
     if (!fs.empty() && fs.front() == '`') {  // bundle-field leaves render as `base.field`
       fs = fs.substr(1, fs.size() >= 2 ? fs.size() - 2 : std::string::npos);
     }
+    read_field_prefixes.insert(fs);  // the whole name (a base read as a whole counts too)
     for (size_t dot = fs.find('.'); dot != std::string::npos; dot = fs.find('.', dot + 1)) {
       read_field_prefixes.insert(fs.substr(0, dot));
     }
