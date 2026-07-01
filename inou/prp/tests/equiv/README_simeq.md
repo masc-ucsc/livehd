@@ -32,6 +32,20 @@ sequential DUT (a pure-feedforward pipe) instead skips a 32-cycle fill window so
 the power-on state (`X` in Verilog, the init in the driver) flushes out before
 hashing begins. Combinational DUTs hash every cycle. 1000 cycles total.
 
+The golden Verilog TB samples **after the full clock period settles** (both
+the rising and the falling half), never right after the rising edge alone: one
+`step`/peek in the `lhd sim` model observes the flop's *settled* value for the
+whole cycle regardless of its `posclk` (posedge/negedge) attribute, since
+`posclk` only picks which sub-tick a VCD dump lands in — it is otherwise a
+no-op in the cycle-based sim scheduler (see `inou/cgen/cgen_sim.cpp`'s `Flop`
+comment). A negedge-clocked flop only updates on the falling half, so sampling
+right after the rising edge alone would read its *stale*, previous-cycle
+value against the golden while `lhd sim` reports the current cycle's value —
+a spurious mismatch, not a real `lhd sim` bug. Posedge-only DUTs are
+unaffected by where exactly post-edge sampling happens (no other input
+changes between the two edges within one generated cycle), so this is a safe
+default for every pair, not just the negedge ones.
+
 ## Two phases
 
 * **SETUP** (only when a pair is *added* or its logic/interface changes; needs

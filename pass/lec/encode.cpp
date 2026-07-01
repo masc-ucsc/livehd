@@ -266,7 +266,7 @@ std::string mem_state_key(const Mem_sig& sig, int occ) {
 }
 
 Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, std::string_view prefix,
-                        const Io_name_map<cvc5::Term>* shared_mems) {
+                        const Io_name_map<cvc5::Term>* shared_mems, const Io_name_map<cvc5::Term>* shared_reads) {
   Encoded out;
   auto    gio = g->get_io();
 
@@ -538,8 +538,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     int                 mtype   = -1;
     bool                is_rom  = false;
     cvc5::Term          a_cur;
-    std::vector<Term>   rd_fresh;  // fresh dout symbol per read port (port order)
+    std::vector<Term>   rd_fresh;  // dout symbol per read port (port order): a
+                                   // fresh within-cycle var (async/comb, tied via
+                                   // equalities) OR a seeded current-state symbol
+                                   // (type==1 sync, threaded via next_read).
     std::vector<hhds::Pin_class> rd_addr;
+    std::vector<std::string>     rd_key;  // "<key>:rd<N>" per read port (sync threading)
     // Whole-array support (the `update` bus is driven): one update/read_all bus
     // instead of N per-entry ports. `is_comb` (type==2, no clock) => no persistent
     // state (no next_mem); reads/read_all reflect the post-update array.
@@ -642,14 +646,29 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (!p.rd) {
         continue;
       }
-      auto dout_dpin = node.get_driver_pin(static_cast<hhds::Port_id>(mc.sig.n_wr + n_rd_pos));
-      bool sgn       = dout_dpin.is_invalid() ? false : !gu::is_unsign(dout_dpin);
-      Term fresh     = tm_.mkConst(bv(mc.sig.bits), std::string(prefix) + mc.key + ":rd" + std::to_string(n_rd_pos));
+      auto        dout_dpin = node.get_driver_pin(static_cast<hhds::Port_id>(mc.sig.n_wr + n_rd_pos));
+      bool        sgn       = dout_dpin.is_invalid() ? false : !gu::is_unsign(dout_dpin);
+      std::string rk        = mc.key + ":rd" + std::to_string(n_rd_pos);
+      // type==1 (sync, latency-1): the dout THIS cycle is a REGISTERED value — a
+      // current-state symbol seeded from shared_reads (threaded from last cycle),
+      // NOT a within-cycle read. Its next-state (select(read-source, addr)) is
+      // emitted in phase 2 into out.next_read[rk]. type==0/2 keep a within-cycle
+      // fresh var tied to select(...) in phase 2 (latency-0).
+      Term fresh;
+      if (mtype == 1 && shared_reads != nullptr) {
+        if (auto it = shared_reads->find(rk); it != shared_reads->end()) {
+          fresh = it->second;
+        }
+      }
+      if (fresh.isNull()) {
+        fresh = tm_.mkConst(bv(mc.sig.bits), std::string(prefix) + rk);
+      }
       if (!dout_dpin.is_invalid()) {
         pin2val[pinkey(dout_dpin)] = Val{fresh, mc.sig.bits, sgn};
       }
       mc.rd_fresh.push_back(fresh);
       mc.rd_addr.push_back(p.addr);
+      mc.rd_key.push_back(rk);
       ++n_rd_pos;
     }
     // Async read_all: registered reflects the CURRENT committed array (computable
@@ -1687,7 +1706,16 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       Term addr = fit_unsigned(av, mc.sig.addr_w);
       Term real = tm_.mkTerm(Kind::SELECT, {rd_src, addr});
-      out.equalities.emplace_back(mc.rd_fresh[k], real);
+      if (mc.mtype == 1 && shared_reads != nullptr) {
+        // Sync read (latency-1): rd_fresh is the CURRENT registered dout (seeded
+        // from shared_reads in phase 1); THIS cycle's read is its NEXT state,
+        // threaded forward by the caller like next_mem. The dout thus lands one
+        // cycle after the address. (Gated on shared_reads so callers that do not
+        // thread it keep the latency-0 tie below — a sound conservative default.)
+        out.next_read[mc.rd_key[k]] = real;
+      } else {
+        out.equalities.emplace_back(mc.rd_fresh[k], real);
+      }
     }
     // Combinational read_all: tie its deferred symbol to CONCAT(SELECT(rd_src,i)).
     if (mc.is_comb && !mc.ra_fresh.isNull()) {

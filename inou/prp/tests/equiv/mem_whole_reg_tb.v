@@ -17,11 +17,11 @@ module mem_whole_reg_tb;
       s=s*A+C; inp = s & ~64'd0;
       s=s*A+C; idx = s & 64'd7;
       #1 clock=1; #1;
+      #1 clock=0; #1;
       if (k>=32) begin
         sig = sig*P + (r & 64'd1023);
         sig = sig*P + (allout & ~64'd0);
       end
-      #1 clock=0; #1;
     end
     $display("SIG %0d", sig & MASK);
     $finish;

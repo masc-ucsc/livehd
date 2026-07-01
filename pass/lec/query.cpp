@@ -1148,6 +1148,12 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     // collapse to the same initial contents); threaded forward like flop state.
     Io_name_map<cvc5::Term> ref_mem = build_shared_mems("m0_");
     Io_name_map<cvc5::Term> impl_mem = ref_mem;
+    // Sync-read (type==1) registered douts: a per-side latency-1 state, threaded
+    // forward like memory state. Empty at cycle 0 (encode mints a fresh power-on
+    // dout via the cycle prefix, flushed within the reset-hold window); each side
+    // carries its OWN keys (a sync memory on one side may correspond to a comb
+    // array + external flop on the other, whose latency comes from that flop).
+    Io_name_map<cvc5::Term> ref_reads, impl_reads;
 
     cvc5::Term bad;
     std::vector<std::pair<std::string, cvc5::Term>> decomp_diffs;  // per-(output,cycle) diffs for decomposed proof
@@ -1257,13 +1263,13 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         sh_impl[k] = v;
       }
 
-      Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(cyc) + "_", &ref_mem);
+      Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(cyc) + "_", &ref_mem, &ref_reads);
       if (!re.ok) {
         res.verdict  = Verdict::Unknown;
         res.detail  += "; ref encode failed: " + re.error;
         return res;
       }
-      Encoded ie = enc.encode(impl, &sh_impl, "i" + std::to_string(cyc) + "_", &impl_mem);
+      Encoded ie = enc.encode(impl, &sh_impl, "i" + std::to_string(cyc) + "_", &impl_mem, &impl_reads);
       if (!ie.ok) {
         res.verdict  = Verdict::Unknown;
         res.detail  += "; impl encode failed: " + ie.error;
@@ -1360,6 +1366,8 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       impl_state = std::move(in);
       ref_mem    = std::move(re.next_mem);
       impl_mem   = std::move(ie.next_mem);
+      ref_reads  = std::move(re.next_read);
+      impl_reads = std::move(ie.next_read);
     }
 
     res.detail = "solver=cvc5 (bmc, phase=" + opts.phase + ", " + std::to_string(N) + " checked steps"

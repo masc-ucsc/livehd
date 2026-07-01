@@ -45,6 +45,16 @@ struct Encoded {
   // next-state array. Read douts are ordinary BV terms in `outputs`/pin2val.
   Io_name_map<cvc5::Term> next_mem;  // key -> next-state array
 
+  // M4 SYNC-read latency. A type==1 (registered / latency-1) read port's dout is
+  // a 1-cycle REGISTERED value: the dout this cycle is a CURRENT-STATE symbol
+  // (seeded from `shared_reads`), and its next-state = select(read-source, addr).
+  // Keyed "<mem_state_key>:rd<N>" (per read port). Threaded across cycles by the
+  // caller EXACTLY like next_mem, so the read lands one cycle after the address —
+  // matching a front-end that models the same sync read as a comb array feeding an
+  // external flop. type==0 (async) and type==2 (comb) reads stay latency-0 and do
+  // NOT appear here (they tie their dout within the cycle via `equalities`).
+  Io_name_map<cvc5::Term> next_read;  // "<key>:rd<N>" -> next-state read value
+
   // Side constraints the caller must assert (EQUAL lhs rhs). Used to tie an
   // async read dout (a fresh symbol seeded before the combinational loop so
   // downstream logic can consume it) to its select(array, addr) once the read
@@ -195,8 +205,13 @@ public:
   // array term for the memory's CURRENT contents. Memories whose key is present
   // reuse that array (this is how corresponding memories collapse across two
   // designs); memories not present get a fresh array `mkConst`.
+  // `shared_reads` (optional): a map from "<mem_state_key>:rd<N>" to an already-
+  // built BV term for a type==1 (sync) read port's CURRENT registered dout. Read
+  // ports whose key is present reuse that term (the sync-read latency-1 state cut,
+  // threaded across cycles like shared_mems); absent keys get a fresh symbol.
   Encoded encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs = nullptr,
-                 std::string_view prefix = "", const Io_name_map<cvc5::Term>* shared_mems = nullptr);
+                 std::string_view prefix = "", const Io_name_map<cvc5::Term>* shared_mems = nullptr,
+                 const Io_name_map<cvc5::Term>* shared_reads = nullptr);
 
 private:
   // Fit `v` to exactly `width` bits: sign/zero-extend (per v.is_signed) when

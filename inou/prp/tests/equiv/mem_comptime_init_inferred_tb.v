@@ -18,10 +18,10 @@ module mem_comptime_init_inferred_tb;
       s=s*A+C; j = s & 64'd1;
       reset = (k<4) ? 1'b1 : 1'b0;
       #1 clock=1; #1;
+      #1 clock=0; #1;
       if (k>=4) begin
         sig = sig*P + (z & 64'd15);
       end
-      #1 clock=0; #1;
     end
     $display("SIG %0d", sig & MASK);
     $finish;

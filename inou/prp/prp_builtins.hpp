@@ -32,8 +32,8 @@ inline bool is_builtin_function(std::string_view name) {
     return true;
   }
   static constexpr std::string_view names[] = {
-      // verification
-      "assert", "cassert", "assume", "assert_always",
+      // verification (requires/ensures = lambda pre/postconditions -> assume/assert)
+      "assert", "cassert", "assume", "assert_always", "requires", "ensures",
       // debug / string output
       "cputs", "puts", "print", "format",
       // compilation / directives

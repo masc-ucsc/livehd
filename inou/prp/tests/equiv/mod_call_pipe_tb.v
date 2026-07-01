@@ -16,10 +16,10 @@ module mod_call_pipe_tb;
       s=s*A+C; in1 = s & 64'd65535;
       s=s*A+C; in2 = s & 64'd65535;
       #1 clock=1; #1;
+      #1 clock=0; #1;
       if (k>=32) begin
         sig = sig*P + (out & 64'd4294967295);
       end
-      #1 clock=0; #1;
     end
     $display("SIG %0d", sig & MASK);
     $finish;

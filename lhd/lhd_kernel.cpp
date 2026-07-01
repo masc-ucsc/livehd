@@ -3636,8 +3636,32 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
       run_step("inou.yosys.tolg", var, labels, opts, res);
     } else {
       if (kind == "pyrope") {
-        check_inputs_exist({path});
-        run_step("inou.prp", var, {{"files", path}}, opts, res);
+        // A pyrope: input can be a single .prp OR an emit DIRECTORY holding one
+        // .prp per module (the slang->pyrope multi-module emission). inou.prp
+        // splits `files` on comma and loads each as its own LNAST; the runner
+        // then resolves the top's import() of its sibling modules. Enumerate the
+        // dir's *.prp so a multi-file library recompiles (a lone top file would
+        // fail import-no-progress with its callees absent).
+        std::string files = path;
+        if (fs::is_directory(path)) {
+          std::vector<std::string> prps;
+          for (const auto& de : fs::directory_iterator(path)) {
+            if (de.is_regular_file() && de.path().extension() == ".prp") {
+              prps.push_back(de.path().string());
+            }
+          }
+          if (prps.empty()) {
+            throw Lhd_error{"missing_file", std::format("pyrope: directory has no .prp files: {}", path), ""};
+          }
+          std::sort(prps.begin(), prps.end());
+          files.clear();
+          for (const auto& p : prps) {
+            files += (files.empty() ? "" : ",") + p;
+          }
+        } else {
+          check_inputs_exist({path});
+        }
+        run_step("inou.prp", var, {{"files", files}}, opts, res);
       } else if (kind == "verilog") {  // slang: the direct SV -> LNAST front-end
         check_inputs_exist({path});
         run_step("inou.slang", var, {{"files", path}}, opts, res);

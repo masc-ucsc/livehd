@@ -10,7 +10,7 @@
 // write sites in one branch mint two write ports sharing the path-condition
 // enable. An async memory read lands @[0] (committed state, like a reg).
 pub mod cidx(a:u8, b:u8, we:bool) -> (z:u8@[0]) {
-  reg t:[2]u8 = nil
+  reg t:[2]u8:[fwd=true] = nil
   if we {
     t[0] = a
     t[1] = b

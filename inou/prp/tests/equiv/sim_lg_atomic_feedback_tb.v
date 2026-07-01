@@ -6,23 +6,23 @@ module sim_lg_atomic_feedback_tb;
   localparam integer NCYC=1000;
   reg  [7:0] a;
   reg  [7:0] b;
-  reg  [7:0] c;
   reg  [7:0] d;
-  wire [8:0] x;
-  wire [8:0] y;
-  sim_lg_atomic_feedback_subadd dut(.a(a), .b(b), .c(c), .d(d), .x(x), .y(y));
+  reg  [7:0] topx;
+  wire [8:0] x_out;
+  wire [8:0] y_out;
+  sim_lg_atomic_feedback_top dut(.a(a), .b(b), .d(d), .topx(topx), .x_out(x_out), .y_out(y_out));
   reg [63:0] s, sig; integer k;
   initial begin
     s=SEED; sig=0;
     for (k=0;k<NCYC;k=k+1) begin
       s=s*A+C; a = s & 64'd255;
       s=s*A+C; b = s & 64'd255;
-      s=s*A+C; c = s & 64'd255;
       s=s*A+C; d = s & 64'd255;
+      s=s*A+C; topx = s & 64'd255;
       #1;
       if (k>=0) begin
-        sig = sig*P + (x & 64'd511);
-        sig = sig*P + (y & 64'd511);
+        sig = sig*P + (x_out & 64'd511);
+        sig = sig*P + (y_out & 64'd511);
       end
     end
     $display("SIG %0d", sig & MASK);

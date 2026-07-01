@@ -16,10 +16,10 @@ module mem_init_tb;
       s=s*A+C; raddr = s & 64'd3;
       reset = (k<4) ? 1'b1 : 1'b0;
       #1 clock=1; #1;
+      #1 clock=0; #1;
       if (k>=4) begin
         sig = sig*P + (q & 64'd255);
       end
-      #1 clock=0; #1;
     end
     $display("SIG %0d", sig & MASK);
     $finish;

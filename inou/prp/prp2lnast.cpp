@@ -1871,6 +1871,14 @@ void Prp2lnast::process_statement(TSNode n) {
     TSNode func = child_by_field(n, "function");
     if (!ts_node_is_null(func)) {
       auto fname = trim(get_text(func));
+      // Lambda pre/postconditions (05-assert.md): `requires`/`ensures` are
+      // accepted and lowered as a no-op today (the same silent-no-op family as
+      // `lec()`/`lec_valid()`/`covercase()`). A `requires` precondition is an
+      // input constraint that a free top would refute in isolation, so it is not
+      // yet lowered to a checked assert/assume; full pre/post verification is TBD.
+      if (fname == "requires" || fname == "ensures") {
+        return;
+      }
       if (fname == "cassert" || fname == "assert" || fname == "assume" || fname == "assert_always") {
         TSNode arg_tuple = child_by_field(n, "argument");
         if (!ts_node_is_null(arg_tuple)) {
@@ -3451,10 +3459,12 @@ std::vector<Prp2lnast::Call_arg> Prp2lnast::collect_call_args(TSNode arg_tuple) 
       if (lvt == "typed_identifier") {
         TSNode id = child_by_field(lv, "identifier");
         if (!ts_node_is_null(id)) {
-          arg.assign_key = trim(get_text(id));
+          // Canonicalize so a keyword-escaped call-site key (`` `in` = x ``)
+          // matches the parameter DECLARATION, which is stored unescaped (`in`).
+          arg.assign_key = std::string(canonical_escaped_ident(trim(get_text(id))));
         }
       } else {
-        arg.assign_key = trim(get_text(lv));
+        arg.assign_key = std::string(canonical_escaped_ident(trim(get_text(lv))));
       }
 
       if (arg.assign_key.empty()) {

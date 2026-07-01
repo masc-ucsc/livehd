@@ -17,11 +17,11 @@ module pipe2_two_out_tb;
       s=s*A+C; a = s & 64'd15;
       s=s*A+C; b = s & 64'd15;
       #1 clock=1; #1;
+      #1 clock=0; #1;
       if (k>=32) begin
         sig = sig*P + (x & 64'd255);
         sig = sig*P + (y & 64'd255);
       end
-      #1 clock=0; #1;
     end
     $display("SIG %0d", sig & MASK);
     $finish;

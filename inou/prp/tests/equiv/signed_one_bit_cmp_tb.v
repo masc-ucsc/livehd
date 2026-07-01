@@ -6,7 +6,7 @@ module signed_one_bit_cmp_tb;
   localparam integer NCYC=1000;
   reg  [7:0] x;
   wire [0:0] b;
-  p dut(.x(x), .b(b));
+  \signed_one_bit_cmp.p  dut(.x(x), .b(b));
   reg [63:0] s, sig; integer k;
   initial begin
     s=SEED; sig=0;

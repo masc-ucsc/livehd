@@ -78,11 +78,28 @@ def _width_of(decl):
     return w
 
 
-def parse_verilog_ports(vpath):
+def _prp_header(ppath, key):
+    pat = re.compile(r"^\s*:%s:\s*(.+)" % re.escape(key))
+    try:
+        for line in open(ppath):
+            m = pat.match(line)
+            if m:
+                return m.group(1).strip()
+    except OSError:
+        pass
+    return None
+
+
+def parse_verilog_ports(vpath, want=None):
     src = _strip_comments(open(vpath).read())
-    m = re.search(r'\bmodule\b\s+(\\\S+|\w+)\s*(#\s*\([^)]*\)\s*)?\(', src)
+    if want:
+        # Pick the NAMED module (a multi-module golden lists sub-modules first, so
+        # the top is not module #1); the .v id may be `\`-escaped.
+        m = re.search(r'\bmodule\b\s+(\\?%s)\s*(#\s*\([^)]*\)\s*)?\(' % re.escape(want.lstrip('\\')), src)
+    else:
+        m = re.search(r'\bmodule\b\s+(\\\S+|\w+)\s*(#\s*\([^)]*\)\s*)?\(', src)
     if not m:
-        raise GenError("no module declaration found")
+        raise GenError("no module declaration found" + ((" for " + want) if want else ""))
     modname = m.group(1)
     # capture the ANSI port list: from the '(' after the module name to its match
     i = m.end() - 1
@@ -147,6 +164,20 @@ def lambda_of(modname):
     return nm.rsplit('.', 1)[-1] if '.' in nm else nm
 
 
+def pyrope_lambda_of(ppath, modname, default_lam):
+    # `lg="<modname>"` renames the generated lgraph/Verilog module, but the
+    # IMPORTABLE pub entry keeps its SOURCE name (e.g. `pub comb my_top::[lg=
+    # "chip_top"]`). The _tb must import that source lambda, not the renamed
+    # module. Recover it from the .prp; fall back to the Verilog-derived name.
+    try:
+        txt = open(ppath).read()
+    except OSError:
+        return default_lam
+    m = re.search(r'pub\s+(?:comb|mod|pipe)\s+([A-Za-z_]\w*)\s*::\s*\[[^\]]*lg\s*=\s*"%s"'
+                  % re.escape(modname.lstrip('\\')), txt)
+    return m.group(1) if m else default_lam
+
+
 # ---- emit the two testbenches -----------------------------------------------
 def mask_lit_v(w):
     return "64'd" + str((1 << w) - 1) if w < 63 else "~64'd0"
@@ -201,7 +232,16 @@ def emit_verilog(base, modname, clk, rst, data_in, outs):
     if rst:
         a("      reset = (%s<%d) ? 1'b1 : 1'b0;" % (K, NRST))
     if seq:
+        # Full period (posedge then negedge) before sampling: a negedge-clocked
+        # flop (posclk=false) only updates on the falling half, so sampling right
+        # after the rising edge would read its STALE (previous-cycle) value. The
+        # `lhd sim` `step`/peek model observes the settled end-of-cycle value (one
+        # step == one full period), so the golden must match that same point.
+        # Posedge-clocked outputs are unaffected: nothing else changes between the
+        # two edges (inputs are held for the whole cycle), so they already read
+        # their final value by the time the negedge half completes.
         a("      #1 clock=1; #1;")
+        a("      #1 clock=0; #1;")
     else:
         a("      #1;")
     a("      if (%s>=%d) begin" % (K, hs))
@@ -210,8 +250,6 @@ def emit_verilog(base, modname, clk, rst, data_in, outs):
         # sides (the driver peeks a signed value; the Verilog wire is unsigned).
         a("        %s = %s*P + (%s & %s);" % (SIG, SIG, n, mask_lit_v(w)))
     a("      end")
-    if seq:
-        a("      #1 clock=0; #1;")
     a("    end")
     a('    $display("SIG %%0d", %s & MASK);' % SIG)
     a("    $finish;")
@@ -298,8 +336,13 @@ def process(base, equiv_dir, workdir, do_setup):
     ppath = os.path.join(equiv_dir, base + ".prp")
     if not os.path.exists(vpath) or not os.path.exists(ppath):
         raise GenError("missing .v or .prp")
-    modname, ports = parse_verilog_ports(vpath)
-    lam = lambda_of(modname)
+    # Prefer the authoritative :verilog_top: / :pyrope_top: headers (they name the
+    # real top, which for a multi-module golden is NOT the first module). Fall back
+    # to the first .v module + its lambda for header-less legacy pairs.
+    vtop = _prp_header(ppath, "verilog_top")
+    ptop = _prp_header(ppath, "pyrope_top")
+    modname, ports = parse_verilog_ports(vpath, want=vtop)
+    lam = (ptop.rsplit(".", 1)[-1] if ptop else None) or pyrope_lambda_of(ppath, modname, lambda_of(modname))
     clk, rst, data_in, outs = classify(ports)
     if not outs:
         raise GenError("no output ports to hash")

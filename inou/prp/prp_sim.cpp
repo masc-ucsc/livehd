@@ -386,6 +386,41 @@ public:
       : src_(src), duts_(duts), vcd_dir_(vcd_dir), file_(file) {
     auto slash  = file_.find_last_of("/\\");
     file_short_ = (slash == std::string::npos) ? file_ : file_.substr(slash + 1);
+    // Pre-scan file-scope import bindings (`const my_top = import("unit.lam")`):
+    // the bound NAME references a DUT even when it is not a dut-map key (an lg=
+    // rename makes the module/hpp name differ from the source lambda). Only such
+    // a name may bind `mut acc = <name>` to the sole DUT -- scalars/params/literals
+    // (e.g. `mut acc = base`, `mut v_final = nil`) must NOT.
+    for (size_t p = 0; (p = src_.find("import", p)) != std::string::npos; p += 6) {
+      if (p > 0 && (std::isalnum(static_cast<unsigned char>(src_[p - 1])) || src_[p - 1] == '_')) {
+        continue;  // not a whole-word `import`
+      }
+      size_t q = p + 6;
+      while (q < src_.size() && (src_[q] == ' ' || src_[q] == '\t')) {
+        ++q;
+      }
+      if (q >= src_.size() || src_[q] != '(') {
+        continue;  // not an import(...) call
+      }
+      long b = static_cast<long>(p) - 1;
+      while (b >= 0 && (src_[b] == ' ' || src_[b] == '\t')) {
+        --b;
+      }
+      if (b < 0 || src_[b] != '=') {
+        continue;  // not `<name> = import(...)`
+      }
+      --b;
+      while (b >= 0 && (src_[b] == ' ' || src_[b] == '\t')) {
+        --b;
+      }
+      long e = b;
+      while (b >= 0 && (std::isalnum(static_cast<unsigned char>(src_[b])) || src_[b] == '_')) {
+        --b;
+      }
+      if (e > b) {
+        import_bound_.insert(src_.substr(b + 1, e - b));
+      }
+    }
   }
 
   // Emit one test's run-function into the shared driver:
@@ -572,6 +607,7 @@ private:
   std::set<std::string>                           param_names_; // test parameter names
   std::map<std::string, std::string>              inst_of_var;  // instance var -> module name (`mut acc = M`)
   std::map<std::string, std::vector<std::string>> arrays_;      // array name -> element exprs
+  std::set<std::string>                           import_bound_;  // names bound by `= import(...)` (module refs)
 
   // `mut acc = Module` -- the rvalue is a bare module name. Unwrap single-child
   // expression wrappers and return the module name iff it is a known DUT.
@@ -580,7 +616,17 @@ private:
       auto t = ntype(rv);
       if (t == "identifier") {
         std::string nm = text_of(src_, rv);
-        return duts_.count(nm) != 0 ? nm : std::string{};
+        if (duts_.count(nm) != 0) {
+          return nm;
+        }
+        // lg= rename: the imported pub lambda name (e.g. `my_top`) differs from
+        // the sole generated module/hpp (`chip_top`), so `mut acc = my_top` names
+        // no dut key. Bind an IMPORT-BOUND name to the sole DUT; a scalar/param/
+        // literal (`mut acc = base`, `mut v_final = nil`) is never import-bound.
+        if (duts_.size() == 1 && import_bound_.count(nm)) {
+          return duts_.begin()->first;
+        }
+        return {};
       }
       if ((t == "expression_item" || t == "paren_group") && ts_node_named_child_count(rv) == 1) {
         rv = ts_node_named_child(rv, 0);
@@ -1004,7 +1050,7 @@ private:
     std::string base, fld;
     if (inst_dot(lv, base, fld)) {
       std::string tgt = field_access(base, fld, /*write=*/true);
-      o << ind << tgt << " = decltype(" << tgt << ")::create_integer(" << expr(rv) << ");\n";
+      o << ind << "__prp_poke(" << tgt << ", " << expr(rv) << ");\n";
       return;
     }
 
@@ -1588,6 +1634,13 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   // (it is transitively included by every DUT header otherwise).
   o << "#include \"slop.hpp\"\n";
   o << "#include \"checkpoint.hpp\"  // periodic DUT-state checkpoint cadence/fork/prune\n";
+  // Width-deducing input poke: a testbench value is a 64-bit two's-complement
+  // long; drive it into a Slop<N> port as the RAW low bits, ZERO-extended above
+  // bit 63 (matching Verilog `port = val & mask`). create_integer() alone would
+  // SIGN-fill a wide (N>64) port from a negative value; zext_to<N> keeps the low
+  // min(64,N) bits and zeroes the rest (identical to create_integer for N<=64).
+  o << "template<int N> static inline void __prp_poke(Slop<N>& d, long long v){ "
+       "d = Slop<64>::create_integer(v).template zext_to<N>(); }\n";
   const bool vcd_on = !vcd_dir.empty();
   if (vcd_on) {
     // For vcd::global_timestamp — reset between tests (see main()).

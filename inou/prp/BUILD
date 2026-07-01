@@ -153,7 +153,9 @@ cc_test(
             "//inou/prp:tests/fixme/%s.prp" % base,
             "//lhd",
         ],
-        tags = ["fixme"],
+        # verif_requires now lowers cleanly (requires/ensures accepted as a
+        # silent no-op, the lec()/covercase() family); the rest are still TBD.
+        tags = [] if base == "verif_requires" else ["fixme"],
     )
     for base in [
         "temporal_past",
@@ -274,13 +276,6 @@ cc_direct_headers(
             # test can never pass; run it via the fixme target below. The reverse
             # direction is already fixme-tagged through _V2PRP_FIXME.
             "tests/equiv/gen_type_cast.prp",
-            # io_bundle_nested / array_selfref: known-broken "false comb cycle"
-            # repros (see small_todo_working.md Type B / Type C). Both REFUTE
-            # (a real miscompile, not a timeout) against yosys lgcheck too, so
-            # they cannot live in the auto-passing glob; run via the fixme
-            # targets below.
-            "tests/equiv/io_bundle_nested.prp",
-            "tests/equiv/array_selfref.prp",
             # Known-failing semantic trackers. Run via the fixme targets below.
             "tests/equiv/async_reset_enable.prp",
             "tests/equiv/latch_enable_hold.prp",
@@ -304,7 +299,6 @@ sh_test(
         "//lhd",
     ],
     deps = ["//inou/yosys:scripts"],
-    tags = ["fixme"],
 )
 
 # Known-failing equiv tracker (fixme): gen_type_cast.prp is a DELIBERATELY-broken
@@ -322,43 +316,6 @@ sh_test(
         "//inou/prp:tests/pyrope_test.py",
         "//inou/prp:tests/equiv/gen_type_cast.prp",
         "//inou/prp:tests/equiv/gen_type_cast.v",
-        "//lhd",
-    ],
-    deps = ["//inou/yosys:scripts"],
-    tags = ["fixme"],
-)
-
-# Known-failing equiv trackers (fixme): io_bundle_nested / array_selfref are
-# minimal repros of the "false comb cycle" family (small_todo_working.md Type
-# B / Type C) — a struct/array field self-reference within one `'{...}`
-# pattern assignment miscompiles through --reader slang. Both REFUTE against
-# yosys lgcheck too (a real miscompile, not a tool-specific quirk). Excluded
-# from the glob above; tagged `fixme` so `bazel test //... (-fixme)` stays
-# green. Run e.g.: bazel test //inou/prp:prp-equiv-io_bundle_nested --test_tag_filters=
-sh_test(
-    name = "prp-equiv-io_bundle_nested",
-    srcs = ["tests/pyrope_test.py"],
-    args = ["-i", "$(location //inou/prp:tests/equiv/io_bundle_nested.prp)"],
-    data = [
-        "//inou/prp:tests/prplib.py",
-        "//inou/prp:tests/pyrope_test.py",
-        "//inou/prp:tests/equiv/io_bundle_nested.prp",
-        "//inou/prp:tests/equiv/io_bundle_nested.v",
-        "//lhd",
-    ],
-    deps = ["//inou/yosys:scripts"],
-    tags = ["fixme"],
-)
-
-sh_test(
-    name = "prp-equiv-array_selfref",
-    srcs = ["tests/pyrope_test.py"],
-    args = ["-i", "$(location //inou/prp:tests/equiv/array_selfref.prp)"],
-    data = [
-        "//inou/prp:tests/prplib.py",
-        "//inou/prp:tests/pyrope_test.py",
-        "//inou/prp:tests/equiv/array_selfref.prp",
-        "//inou/prp:tests/equiv/array_selfref.v",
         "//lhd",
     ],
     deps = ["//inou/yosys:scripts"],
@@ -405,47 +362,23 @@ sh_test(
 # green is the fix:
 #   bazel test //inou/prp:prp-v2prp-mem_rom --test_tag_filters=
 _V2PRP_FIXME = [
-    # cvc5 mem-cut encoder: a memory read's latency / init contents / write
-    # semantics differ from the slang-emitted reconstruction (lgyosys proves all
-    # four equivalent, so the emitted Pyrope is correct — the gap is the SMT
-    # memory model). Tracked on the lec roadmap (todo/livehd/lec.html, M4 arrays).
+    # cvc5 mem-cut encoder: the ref Memory and the slang reconstruction of a
+    # 2-entry `reg [7:0] data[1:0]` (ONE packed 16-bit flop) have INDEPENDENT free
+    # uninitialized states, so a we=0 read of committed state diverges. Needs a
+    # Memory(size x bits) <-> single-flop(size*bits) initial-state bridge (the
+    # sync-read latency sibling mem_pending_sync_init is now fixed via next_read).
+    # Tracked on the lec roadmap (todo/livehd/lec.html, M4 arrays).
     "mem_const_idx",
-    "mem_mut_array",
-    "mem_pending_sync_init",
-    "mem_rom",
-    # multi-module hierarchical recompile: the writer emits one .prp per module
-    # (apat_top + apat_enc + apat_split); reading them back as a library
-    # (`pyrope:DIR/`) hits a create_io assertion on the `'{...}` unpacked-array
-    # output-port wiring. The FORWARD prp-equiv-assign_pattern passes.
-    "assign_pattern",
     # the original .prp is a DELIBERATELY-broken generics repro (the `T(a)`
     # constructor does not lower — see the file header); the emitted Pyrope is
     # correct, but the reference itself will not compile, so it cannot be the LEC
     # ref. Tracked by 3g (generics).
     "gen_type_cast",
-    # known 1-bit signed ordered-compare fixme tracker (the same gap the forward
-    # prp-equiv side carries).
-    "signed_one_bit_cmp",
     # Reverse v2prp proves against the concrete Pyrope source and does not mask
     # the Verilog X payload under valid=false. The forward lgyosys equiv test
     # passes and pins the intended don't-care semantics.
     "sim_dontcare_ctrl",
     "sim_dontcare_state",
-    # Pyrope cgen.sim false word-level cycle: packed self-reference where the
-    # read slice and written slice are independent, but SIM schedules the whole
-    # packed value as one object. Forward LEC passes.
-    "sim_prp_packed_selfref",
-    # Golden Verilog intentionally preserves hierarchy with feedback through a
-    # sub-instance; reverse reconstruction is not the point of this cgen.sim
-    # tracker.
-    "sim_lg_atomic_feedback",
-    # "false comb cycle" family (small_todo_working.md Type B / Type C): a
-    # struct/array field self-reference within one `'{...}` pattern assignment
-    # miscompiles through --reader slang. REFUTES with a concrete
-    # counterexample here (see the .v file headers for why the full-scale
-    # XiangShan modules instead see an `lhd lec` encode failure).
-    "io_bundle_nested",
-    "array_selfref",
     # Known-failing semantic trackers: latch inference and explicit data-path
     # async resets do not have a supported Pyrope source equivalent yet.
     "async_reset_enable",
@@ -547,14 +480,9 @@ sh_test(
 # CANNOT catch the XiangShan MISCOMPILE class whose root cause is LiveHD's
 # yosys-verilog front end (slang reads it correctly — verified sl=OK yv=BAD by
 # xs/attribute2.sh), so this drives each minimal golden through
-# `--reader yosys-verilog` and LECs the result vs the source:
-#   * MISCOMPILE — clz_nest: the terminal constant of a deep nested-ternary chain
-#                  is corrupted (CLZ_28/lzc/CMOUnit/... cluster, 68 LEC refutes).
-# This reproduces a KNOWN, currently-unfixed yosys-verilog reader bug, so it FAILS
-# by design. Tagged `fixme` (the repo's known-broken convention; .bazelrc filters
-# `-fixme` so `bazel test //...` stays green). Run it to see the bug — clear the
-# tag filter so the fixme target is selected — and a fix flips it green:
-#   bazel test //inou/prp:prp-yvr-clz_nest --test_tag_filters=
+# `--reader yosys-verilog` and LECs the result vs the source. clz_nest (a deep
+# nested-ternary terminal constant, the CLZ_28/lzc/CMOUnit cluster) is the seed
+# regression and now PROVES; add more yosys-verilog reader repros here.
 [
     sh_test(
         name = "prp-yvr-%s" % base,
@@ -568,11 +496,10 @@ sh_test(
             "//inou/prp:tests/equiv/%s.v" % base,
             "//lhd",
         ],
-        tags = ["fixme"],
         deps = ["//inou/yosys:scripts"],
     )
     for base in [
-        "clz_nest",  # MISCOMPILE: deep nested-ternary terminal constant
+        "clz_nest",  # deep nested-ternary terminal constant (now proven)
     ]
 ]
 
@@ -633,8 +560,8 @@ _SIMEQ = [
     "bitset_reg", "clz_nest", "codeblock_expr", "comb_single_out_op", "cond_modified_read",
     "condout_const_arms", "condout_mixed_arms", "condout_seed_uncertain", "dyn_tuple_const",
     "dyn_tuple_idxexpr", "dyn_tuple_mixed", "dyn_tuple_mut_ro", "dyn_tuple_pair",
-    "dyn_tuple_sel", "generic_mod", "hier_value", "hotmux_match", "hotmux_match_partial",
-    "hotmux_unique", "if_expr_rhs", "implies_cond", "implies_ops", "lead_or_chain", "loop_accum",
+    "dyn_tuple_sel", "flop_reset_matrix", "generic_mod", "hier_value", "hotmux_match", "hotmux_match_partial",
+    "hotmux_unique", "if_expr_rhs", "implies_cond", "implies_ops", "lead_or_chain", "lg_rename", "loop_accum",
     "match_const_else", "match_no_else", "mem_const_idx", "mem_init", "mem_init_scalar",
     "mem_init_tuple", "mem_pending_sync_init", "mem_rom", "mem_whole_cond_const",
     "mem_write_only", "mod_acc_state", "mod_call_mod", "mod_call_pipe", "mod_call_pipe2",
@@ -643,11 +570,16 @@ _SIMEQ = [
     "mod_twopaths", "mod_varargs_add", "mod_varargs_csa", "multi_out_comb", "overload_dispatch",
     "overload_return_dispatch", "packed_assign", "pipe1_pass", "pipe2_two_out", "pipe3_mul",
     "pipe_bare", "pipe_range", "pipe_stage_reg", "pipe_state_acc", "pipe_varargs_add",
+    "const_bit_select",
+    "mem_comptime_init", "mem_comptime_init_inferred", "mem_multidim_init", "mem_multidim_rw",
+    "mem_mut_array", "mem_pending_reset_restore", "mem_whole_coexist", "mem_whole_comb",
+    "mem_whole_reg",
     "reduce_and", "reduce_or", "reduce_popcount", "reduce_xor", "reg_async_flag",
     "reg_attr_override", "reg_delay_init", "reg_hold_empty_elif", "reg_hold_match",
     "reg_hold_no_else", "reg_out_feedforward", "reg_tuple_reset", "rt_bool_cast",
     "rt_int_output", "rt_sat_s", "rt_sat_u", "rt_typecast", "rt_wrap_noop", "rt_wrap_reassign",
     "rt_wrap_s", "rt_wrap_sub", "rt_wrap_sum", "rt_wrap_u", "shift_combo_i8", "shift_combo_i8b",
+    "sim_lg_atomic_feedback",
     "shift_nested_sra", "shift_sra_unsigned", "signed_one_bit_cmp", "splice_merge", "trivial_if",
     "varargs_add", "wire_comb", "wire_reg", "wire_reset", "wire_ring", "wire_typed",
 ]
@@ -655,26 +587,19 @@ _SIMEQ = [
 # Known-failing differential-sim trackers (tagged `fixme` so `bazel test //...`
 # (-fixme) stays green). Each is a real inou.cgen.sim gap the harness SURFACES --
 # fixing the codegen (not the test) flips it green:
-#   * mem_comptime_init* / mem_multidim_* / mem_pending_reset_restore /
-#       sim_lg_atomic_feedback : the single-pass sim schedule cannot order a
-#       combinational cycle (a real loop, or a false loop through an atomic Sub /
-#       memory read-before-write). Tracked in cgen_sim_false_comb_loop.
-#   * mem_mut_array / mem_whole_coexist / mem_whole_reg : combinational per-port
-#       array write-persistence / whole-array re-init semantics (re-applying the
-#       comptime init default each cycle also broke input-driven comb arrays, so
-#       it is deferred rather than force-fit).
-#   * const_bit_select : a don't-care const (`0sb1????????`) has no single concrete
-#       sim value that matches the LEC don't-care semantics.
-#   * async_reset_enable / gen_type_cast / lg_rename : pre-existing fixme DUTs
-#       (async data-path reset; broken-generics repro; lg= rename makes the
-#       Verilog module name differ from the importable Pyrope lambda).
-#   * sim_prp_packed_selfref : packed self-reference the sim cannot yet order.
-# Run one: bazel test //inou/prp:prp-simeq-mem_mut_array --test_tag_filters=
+#   * sim_lg_atomic_feedback : a false combinational loop through an ATOMIC comb
+#       Sub instance (its output feeds back into one of its own inputs via parent
+#       logic). Needs Stage-1 selective flatten of the offending instance before
+#       cgen.sim. Tracked in cgen_sim_false_comb_loop.
+#   * sim_prp_packed_selfref : a false WORD-level cycle -- a packed value whose
+#       read slice and written slice are independent, but the sim schedules the
+#       whole packed word as one object. Needs bit-slice leaf splitting.
+#   * async_reset_enable / gen_type_cast : pre-existing fixme DUTs (async
+#       data-path reset; the deliberately-broken generics `T(a)` repro).
+# Run one: bazel test //inou/prp:prp-simeq-sim_lg_atomic_feedback --test_tag_filters=
 _SIMEQ_FIXME = [
-    "async_reset_enable", "const_bit_select", "gen_type_cast", "lg_rename", "mem_comptime_init",
-    "mem_comptime_init_inferred", "mem_multidim_init", "mem_multidim_rw", "mem_mut_array",
-    "mem_pending_reset_restore", "mem_whole_coexist", "mem_whole_comb", "mem_whole_reg",
-    "sim_lg_atomic_feedback", "sim_prp_packed_selfref",
+    "async_reset_enable", "gen_type_cast",
+    "sim_prp_packed_selfref",
 ]
 
 [

@@ -18,10 +18,10 @@ module mem_init_tuple_tb;
       s=s*A+C; i = s & 64'd3;
       s=s*A+C; we = s & 64'd1;
       #1 clock=1; #1;
+      #1 clock=0; #1;
       if (k>=32) begin
         sig = sig*P + (z & 64'd255);
       end
-      #1 clock=0; #1;
     end
     $display("SIG %0d", sig & MASK);
     $finish;

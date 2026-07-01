@@ -24,6 +24,7 @@ module bitset_reg_tb;
       s=s*A+C; en = s & 64'd1;
       reset = (k<4) ? 1'b1 : 1'b0;
       #1 clock=1; #1;
+      #1 clock=0; #1;
       if (k>=4) begin
         sig = sig*P + (o_cont & 64'd4095);
         sig = sig*P + (o_over & 64'd4095);
@@ -31,7 +32,6 @@ module bitset_reg_tb;
         sig = sig*P + (o_hold & 64'd4095);
         sig = sig*P + (o_cond & 64'd4095);
       end
-      #1 clock=0; #1;
     end
     $display("SIG %0d", sig & MASK);
     $finish;

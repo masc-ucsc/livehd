@@ -14,10 +14,10 @@ module pipe_range_tb;
     for (k=0;k<NCYC;k=k+1) begin
       s=s*A+C; a = s & 64'd255;
       #1 clock=1; #1;
+      #1 clock=0; #1;
       if (k>=32) begin
         sig = sig*P + (d & 64'd511);
       end
-      #1 clock=0; #1;
     end
     $display("SIG %0d", sig & MASK);
     $finish;

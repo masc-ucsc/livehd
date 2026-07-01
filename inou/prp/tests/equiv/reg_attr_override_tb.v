@@ -16,10 +16,10 @@ module reg_attr_override_tb;
       s=s*A+C; rst_n = s & 64'd1;
       s=s*A+C; en = s & 64'd1;
       #1 clock=1; #1;
+      #1 clock=0; #1;
       if (k>=32) begin
         sig = sig*P + (q & 64'd255);
       end
-      #1 clock=0; #1;
     end
     $display("SIG %0d", sig & MASK);
     $finish;

@@ -17,11 +17,11 @@ module mod_twopaths_tb;
       s=s*A+C; a = s & 64'd4294967295;
       s=s*A+C; opt = s & 64'd1;
       #1 clock=1; #1;
+      #1 clock=0; #1;
       if (k>=32) begin
         sig = sig*P + (o & 64'd4294967295);
         sig = sig*P + (o2 & 64'd4294967295);
       end
-      #1 clock=0; #1;
     end
     $display("SIG %0d", sig & MASK);
     $finish;
