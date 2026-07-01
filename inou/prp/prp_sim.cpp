@@ -670,6 +670,42 @@ private:
     return {};
   }
 
+  // Resolve a peek()/poke() hierarchical string path `"<unit>/<field>"` to a
+  // field_access on the matching DUT instance (09-verification.md). `<unit>`
+  // matches an instance-variable name (`mut dut = cnt` -> "dut") or a module name
+  // ("cnt"); one "unit/field" level is supported -- the common testbench probe.
+  std::string path_target(TSNode call, bool write) {
+    TSNode args = field(call, "argument");
+    if (ts_node_is_null(args) || ts_node_named_child_count(args) < 1) {
+      fail("peek/poke needs a \"unit/field\" path");
+    }
+    std::string path = text_of(src_, ts_node_named_child(args, 0));
+    if (path.size() >= 2 && path.front() == '"') {
+      path = path.substr(1, path.size() - 2);
+    }
+    auto slash = path.find('/');
+    if (slash == std::string::npos) {
+      fail("peek/poke path '" + path + "' must be \"unit/field\"");
+    }
+    std::string unit = path.substr(0, slash);
+    std::string fld  = path.substr(slash + 1);
+    std::string var;
+    if (inst_of_var.count(unit)) {
+      var = unit;  // path used the instance-variable name directly
+    } else {
+      for (const auto& [v, m] : inst_of_var) {
+        if (m == unit) {
+          var = v;  // path used the module name -> its (sole) instance
+          break;
+        }
+      }
+    }
+    if (var.empty()) {
+      fail("peek/poke: no DUT instance for path '" + path + "'");
+    }
+    return field_access(var, fld, write);
+  }
+
   // C++ (long) expression for a `{name}` puts/print interpolation: a dotted
   // `acc.field` resolves to the instance-field peek; anything else is a plain
   // in-scope value (a local or the `clock` loop var).
@@ -777,6 +813,12 @@ private:
         }
       }
       return "(" + op + opnd + ")";
+    }
+    if (t == "function_call_expression") {
+      TSNode fn = field(n, "function");
+      if (!ts_node_is_null(fn) && text_of(src_, fn) == "peek") {  // peek("unit/field")
+        return "(" + path_target(n, /*write=*/false) + ".to_just_i64())";
+      }
     }
     if (t == "dot_expression") {
       std::string base, fld;
@@ -1034,6 +1076,15 @@ private:
       }
       if (fnnm == "puts" || fnnm == "print") {
         gen_puts(o, n, depth, /*newline=*/fnnm == "puts");
+        return;
+      }
+      if (fnnm == "poke") {  // poke("unit/field", value) -> force an internal reg/input
+        TSNode args = field(n, "argument");
+        if (ts_node_is_null(args) || ts_node_named_child_count(args) < 2) {
+          fail("poke needs a \"unit/field\" path and a value");
+        }
+        o << ind << "__prp_poke(" << path_target(n, /*write=*/true) << ", " << expr(ts_node_named_child(args, 1))
+          << ");\n";
         return;
       }
     }

@@ -1,0 +1,58 @@
+/*
+:name: flop_reset_matrix
+:type: equiv
+:verilog_top: flop_reset_matrix.matrix
+:pyrope_top: flop_reset_matrix.matrix
+*/
+
+// Full (posedge/negedge clock) x (posedge/negedge/sync reset) flop matrix,
+// one counter per combination, each with its own distinct non-zero reset
+// value. `lhd lec` (cvc5) treats an async reset as if it were sampled
+// synchronously at the clock edge (the `async`/`posclk` Flop pins are never
+// read by the LEC encoder — see pass/lec/encode.cpp's per-flop next-state
+// formula, which only consults din/enable/reset_pin/negreset/initial), so
+// this pair PROVEs across all six styles by construction. The clock-edge
+// polarity (posclk) only matters to the Verilog/sim codegen, so the
+// differential-sim pair (prp-simeq-flop_reset_matrix) is what actually
+// exercises negedge-clock correctness end to end.
+//
+// The active-low (negedge-reset) flops use their own explicit `reset_n`
+// input rather than the implicit `reset` with a bare `negreset=true`
+// override: `pass/lec/query.cpp`'s reset-hold phase (used by the
+// BMC-from-reset `prp-v2prp-*` check) keys a primary reset input's asserted
+// level by PORT NAME, so two flops sharing one name with opposite polarity
+// make that phase ambiguous (whichever flop is visited last wins, which can
+// differ between the two sides of a LEC and cause a spurious refute). One
+// input per polarity — the `reg_attr_override` convention (`rst_n`) — keeps
+// every reset primary input unambiguous.
+//
+// Both `reset` and `reset_n` are declared EXPLICIT module parameters, and
+// every reg (including the plain sync/async-posedge ones) carries an
+// explicit `reset_pin=ref …`: once any reset-shaped name (`reset_n`) exists
+// in the design, `upass.tolg`'s implicit-reset bind-before-mint picks the
+// FIRST such candidate name for every reg that has no override — it does not
+// know a second, differently-polarized explicit input is meant to stay
+// separate — so leaving any reg on the implicit path here would silently
+// rebind it onto `reset_n` too and drop the `reset` port entirely.
+pub mod matrix(reset:bool, reset_n:bool, en:bool) -> (q_pp:u8@[0], q_pn:u8@[0], q_ps:u8@[0], q_np:u8@[0], q_nn:u8@[0], q_ns:u8@[0]) {
+  reg r_pp:u8:[async=true, reset_pin=ref reset]                 = 1  // posedge clk, async posedge reset
+  reg r_pn:u8:[async=true, reset_pin=ref reset_n]               = 2  // posedge clk, async negedge reset_n
+  reg r_ps:u8:[reset_pin=ref reset]                             = 3  // posedge clk, sync reset
+  reg r_np:u8:[posclk=false, async=true, reset_pin=ref reset]   = 4  // negedge clk, async posedge reset
+  reg r_nn:u8:[posclk=false, async=true, reset_pin=ref reset_n] = 5  // negedge clk, async negedge reset_n
+  reg r_ns:u8:[posclk=false, reset_pin=ref reset]               = 6  // negedge clk, sync reset
+
+  if en and r_pp < 200 { r_pp = r_pp + 1 }
+  if en and r_pn < 200 { r_pn = r_pn + 1 }
+  if en and r_ps < 200 { r_ps = r_ps + 1 }
+  if en and r_np < 200 { r_np = r_np + 1 }
+  if en and r_nn < 200 { r_nn = r_nn + 1 }
+  if en and r_ns < 200 { r_ns = r_ns + 1 }
+
+  q_pp = r_pp
+  q_pn = r_pn
+  q_ps = r_ps
+  q_np = r_np
+  q_nn = r_nn
+  q_ns = r_ns
+}

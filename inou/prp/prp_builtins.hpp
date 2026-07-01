@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <string_view>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -42,6 +43,8 @@ inline bool is_builtin_function(std::string_view name) {
       "wrap", "sat", "saturate",
       // concurrency / timing
       "spawn", "defer",
+      // testbench string-path probes (sim-only; handled by prp_sim, not tolg)
+      "peek", "poke",
   };
   for (const auto n : names) {
     if (n == name) {
@@ -69,7 +72,36 @@ inline bool is_type_cast_callee(std::string_view t) {
          && std::all_of(t.begin() + 1, t.end(), [](unsigned char ch) { return std::isdigit(ch); });
 }
 
-// True iff `name` is any compiler-provided callee (function or type cast).
-inline bool is_builtin_callee(std::string_view name) { return is_builtin_function(name) || is_type_cast_callee(name); }
+// Temporal-library builtin `past[N](x)` — `x` delayed by N clock cycles (an
+// N-deep flop shift register). The grammar parses `past[2](a)` as a call whose
+// callee text is the whole `past[2]` member-selection, so the `[N]` rides along
+// in the callee name. Returns the delay N when `name` matches `past[<N>]` with N
+// a positive decimal literal, else 0 ("not a past builtin"). prp2lnast rewrites
+// such a call into an equivalent `stage[N]` shift register; recognizing it here
+// also keeps the undefined-call check from flagging the synthetic callee.
+inline uint64_t past_builtin_delay(std::string_view name) {
+  constexpr std::string_view prefix = "past[";
+  if (name.size() < prefix.size() + 2 || name.substr(0, prefix.size()) != prefix || name.back() != ']') {
+    return 0;
+  }
+  const std::string_view digits = name.substr(prefix.size(), name.size() - prefix.size() - 1);
+  if (digits.empty() || !std::all_of(digits.begin(), digits.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
+    return 0;
+  }
+  uint64_t n = 0;
+  for (const char c : digits) {
+    n = n * 10 + static_cast<uint64_t>(c - '0');
+    if (n > 4096) {  // absurd depth guard — a shift register this deep is a mistake
+      return 0;
+    }
+  }
+  return n;  // N==0 (`past[0]`) is not a delay: reported as an undefined call
+}
+
+// True iff `name` is any compiler-provided callee (function, type cast, or the
+// `past[N]` temporal builtin).
+inline bool is_builtin_callee(std::string_view name) {
+  return is_builtin_function(name) || is_type_cast_callee(name) || past_builtin_delay(name) != 0;
+}
 
 }  // namespace prp_builtins

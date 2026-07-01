@@ -149,13 +149,16 @@ cc_test(
         ],
         data = [
             "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/prpsim.py",  # testbench_step is :type: simulation
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:tests/fixme/%s.prp" % base,
+            "//inou/prp:sim_runtime_hdrs",
             "//lhd",
         ],
-        # verif_requires now lowers cleanly (requires/ensures accepted as a
-        # silent no-op, the lec()/covercase() family); the rest are still TBD.
-        tags = [] if base == "verif_requires" else ["fixme"],
+        # verif_requires + testbench_step + temporal_past now lower/run; the rest
+        # are still TBD. (temporal_past: `past[N](x)` lowers to a depth-N `stage`
+        # shift register — see prp2lnast function_call_expr_to_node.)
+        tags = [] if base in ("verif_requires", "testbench_step", "temporal_past") else ["fixme"],
     )
     for base in [
         "temporal_past",
@@ -441,7 +444,9 @@ _V2PRP_FIXME = [
             "//lhd",
         ],
         deps = ["//inou/yosys:scripts"],
-        tags = ["fixme"],
+        # sim_lg_atomic_feedback now compiles: cgen_sim flattens the false-loop
+        # pure-comb sub-instance (flatten_false_loop_subs). The rest are still gaps.
+        tags = [] if name == "sim_lg_atomic_feedback" else ["fixme"],
     )
     for name, mode in {
         "sim_dontcare_ctrl": "exact-diff",

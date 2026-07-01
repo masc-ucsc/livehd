@@ -460,19 +460,17 @@ int flatten_false_loop_subs(hhds::Graph* g) {
 
     // A callee driver pin -> the equivalent driver pin in g.
     auto map_driver = [&](const hhds::Pin_class& cdrv) -> hhds::Pin_class {
-      auto mn  = cdrv.get_master_node();
-      auto mop = gu::type_op_of(mn);
-      if (mop == Ntype_op::Nconst || gu::is_const_pin(cdrv)) {
-        return gu::create_const(*g, gu::hydrate_const(cdrv));  // recreate the const in g
-      }
-      if (mop == Ntype_op::IO) {
-        auto it = sub_in_drv.find(static_cast<uint32_t>(cdrv.get_port_id()));  // callee input port -> Sub input driver
+      if (gu::is_graph_input_pin(cdrv)) {
+        // a callee INPUT port -> the Sub's driver for that port (same port id)
+        auto it = sub_in_drv.find(static_cast<uint32_t>(cdrv.get_port_id()));
         return it == sub_in_drv.end() ? hhds::Pin_class{} : it->second;
       }
-      auto mit = nmap.find(mn);
+      if (gu::is_const_pin(cdrv)) {
+        return gu::create_const(*g, gu::hydrate_const(cdrv));  // recreate the const in g
+      }
+      auto mit = nmap.find(cdrv.get_master_node());
       if (mit == nmap.end()) {
-        std::fprintf(stderr, "cgen_sim flatten: uncopied callee driver op=%s\n", Ntype::get_name(mop).data());
-        return {};
+        return {};  // an uncopied node (should not happen for a pure-comb callee)
       }
       auto neo = mit->second;
       auto np  = neo.create_driver_pin(cdrv.get_port_id());
@@ -534,6 +532,287 @@ int flatten_false_loop_subs(hhds::Graph* g) {
   }
   return static_cast<int>(targets.size());
 }
+
+// Break a FALSE word-level combinational loop through a PACKED wire. A single net
+// `W` driven by an `Or` (a bit-field pack) whose operands occupy DISJOINT constant
+// bit ranges is really a concat: a constant Get_mask slice of `W` reads only ONE
+// operand. inou.cgen.sim schedules `W` as one atomic object, so a slice-read of
+// `W` that (through parent logic) drives a DIFFERENT slice of that same `W` looks
+// like a cycle even though the bit-level DAG is acyclic -- e.g.
+//   hi = io#[2..=3];  low = hi & 3;  io = low | (a << 2);  z = io#[0..=1]
+// (io[3:2] comes only from `a<<2`, io[1:0] only from `low`). The fix REDIRECTS
+// each constant Get_mask slice-read of such a packed net to read DIRECTLY from the
+// Or operand that drives the covered range. This is exactly value-preserving (OR
+// of disjoint ranges == concat, so the sliced bits come only from that one
+// operand) and drops the false word-level edge so forward_class can order the
+// now-acyclic DAG. Strictly a NO-OP unless a genuine word-level comb cycle exists;
+// a GENUINE bit-level loop (driver is not an Or of disjoint operands, e.g.
+// `w=w+1`) is never split and still fails loudly at emission. Runs on the live sim
+// graph, before emission. Returns #rewired reads.
+int split_packed_selfref_wires(hhds::Graph* g) {
+  namespace gu = livehd::graph_util;
+
+  auto is_comb = [](const hhds::Node_class& n) {
+    auto op = gu::type_op_of(n);
+    return !(op == Ntype_op::IO || op == Ntype_op::Nconst || op == Ntype_op::Sub || op == Ntype_op::Memory
+             || gu::is_type_register(n));
+  };
+
+  // --- gate: which comb nodes sit on a word-level cycle (Kahn peel of sources) ---
+  std::vector<hhds::Node_class>                                       comb_nodes;
+  absl::flat_hash_map<hhds::Node_class, int>                          indeg;
+  absl::flat_hash_map<hhds::Node_class, std::vector<hhds::Node_class>> succ;
+  for (auto n : g->fast_class()) {
+    if (is_comb(n)) {
+      comb_nodes.push_back(n);
+      indeg.try_emplace(n, 0);
+    }
+  }
+  for (auto& n : comb_nodes) {
+    for (auto e : n.inp_edges()) {
+      auto d = e.driver;
+      if (d.is_invalid() || gu::is_const_pin(d)) {
+        continue;
+      }
+      auto m = d.get_master_node();
+      if (!is_comb(m)) {
+        continue;  // state element / Sub / IO / const -> not a comb edge
+      }
+      ++indeg[n];
+      succ[m].push_back(n);
+    }
+  }
+  std::vector<hhds::Node_class> q;
+  for (auto& [n, d] : indeg) {
+    if (d == 0) {
+      q.push_back(n);
+    }
+  }
+  absl::flat_hash_set<hhds::Node_class> removed;
+  while (!q.empty()) {
+    auto n = q.back();
+    q.pop_back();
+    removed.insert(n);
+    auto it = succ.find(n);
+    if (it == succ.end()) {
+      continue;
+    }
+    for (auto& s : it->second) {
+      if (--indeg[s] == 0) {
+        q.push_back(s);
+      }
+    }
+  }
+  absl::flat_hash_set<hhds::Node_class> in_cycle;
+  for (auto& n : comb_nodes) {
+    if (!removed.contains(n)) {
+      in_cycle.insert(n);
+    }
+  }
+  if (in_cycle.empty()) {
+    return 0;  // an acyclic word-level schedule already exists -> strict no-op
+  }
+
+  auto drv_at = [](const hhds::Node_class& n, uint32_t pid) -> hhds::Pin_class {
+    for (auto e : n.inp_edges()) {
+      if (static_cast<uint32_t>(e.sink.get_port_id()) == pid) {
+        return e.driver;
+      }
+    }
+    return {};
+  };
+
+  // footprint(p) = an OVER-approximation [lo,hi) of the bit positions where `p`
+  // can be nonzero; {-1,-1} means "cannot bound -> do not split". A sound UPPER
+  // bound is required for the disjointness proof below.
+  auto footprint = [&](auto&& self, const hhds::Pin_class& p, int depth) -> std::pair<int, int> {
+    const std::pair<int, int> kBail{-1, -1};
+    if (depth > 8 || p.is_invalid()) {
+      return kBail;
+    }
+    if (gu::is_const_pin(p)) {
+      auto c = gu::hydrate_const(p);
+      if (c.has_unknowns() || c.is_negative()) {
+        return kBail;
+      }
+      int lo = c.get_first_bit_set();
+      int hi = c.get_last_bit_set();
+      if (lo < 0 || hi < 0) {
+        return {0, 0};  // known zero -> contributes no bits
+      }
+      return {lo, hi + 1};
+    }
+    auto m  = p.get_master_node();
+    auto op = gu::type_op_of(m);
+    if (op == Ntype_op::SHL) {
+      auto kd = drv_at(m, 1);
+      if (kd.is_invalid() || !gu::is_const_pin(kd)) {
+        return kBail;
+      }
+      auto kc = gu::hydrate_const(kd);
+      if (kc.has_unknowns() || kc.is_negative() || !kc.is_just_i64()) {
+        return kBail;
+      }
+      int  k  = static_cast<int>(kc.to_just_i64());
+      auto fx = self(self, drv_at(m, 0), depth + 1);
+      if (fx.first < 0) {
+        return kBail;
+      }
+      if (fx.second <= fx.first) {
+        return {0, 0};
+      }
+      return {fx.first + k, fx.second + k};
+    }
+    if (op == Ntype_op::Get_mask) {
+      auto md = drv_at(m, 2);
+      if (!md.is_invalid()) {
+        if (!gu::is_const_pin(md)) {
+          return kBail;
+        }
+        auto mc = gu::hydrate_const(md);
+        if (mc.has_unknowns()) {
+          return kBail;
+        }
+        // mask == -1 is the "to-unsigned" idiom: the RESULT is the non-negative
+        // low sig bits of the output pin (fall through to the unsigned bound).
+        if (!(mc.is_just_i64() && mc.to_just_i64() == -1)) {
+          auto [a, b] = mc.get_mask_range();
+          if (a < 0 || b < 0 || b > (1 << 28)) {
+            return kBail;  // noncontiguous / open / negative mask
+          }
+          int w = b - a;
+          if (w <= 1) {
+            return kBail;  // a single-bit Get_mask returns the SIGNED -1/0 -> unbounded
+          }
+          return {0, w};  // extracted bits are packed down to [0, w)
+        }
+      }
+      // unary width-adjust (zext) OR to-unsigned: result is the non-negative low
+      // sig bits of THIS node's (unsigned) output pin.
+      int b = gu::bits_of(p);
+      return (gu::is_unsign(p) && b > 1) ? std::pair<int, int>{0, b - 1} : kBail;
+    }
+    // generic value: an over-approximation is sound only when UNSIGNED (its top
+    // sign bit is always 0, so the significant width is bits-1).
+    int b = gu::bits_of(p);
+    return (gu::is_unsign(p) && b > 1) ? std::pair<int, int>{0, b - 1} : kBail;
+  };
+
+  // Follow a value driver back through range-transparent Get_mask nodes (which
+  // preserve bit POSITIONS across [0,hi)) to the underlying Or. {} if none.
+  auto trace_to_or = [&](auto&& self, const hhds::Pin_class& v, int hi, int depth) -> hhds::Node_class {
+    if (depth > 8 || v.is_invalid() || gu::is_const_pin(v)) {
+      return {};
+    }
+    auto m  = v.get_master_node();
+    auto op = gu::type_op_of(m);
+    if (op == Ntype_op::Or) {
+      return m;
+    }
+    if (op != Ntype_op::Get_mask) {
+      return {};
+    }
+    auto md = drv_at(m, 2);
+    if (md.is_invalid()) {  // unary zext preserves [0, sig)
+      int b = gu::bits_of(v);
+      if (!gu::is_unsign(v) || b <= 1 || hi > b - 1) {
+        return {};
+      }
+      return self(self, drv_at(m, 0), hi, depth + 1);
+    }
+    if (!gu::is_const_pin(md)) {
+      return {};
+    }
+    auto mc = gu::hydrate_const(md);
+    if (mc.has_unknowns()) {
+      return {};
+    }
+    if (mc.is_just_i64() && mc.to_just_i64() == -1) {  // to-unsigned preserves positions
+      return self(self, drv_at(m, 0), hi, depth + 1);
+    }
+    auto [a, b] = mc.get_mask_range();
+    if (a != 0 || b < hi) {
+      return {};  // must start at bit 0 (no down-shift) and still cover the slice
+    }
+    return self(self, drv_at(m, 0), hi, depth + 1);
+  };
+
+  // Collect (reader, operand-driver) rewires first (graph mutation is deferred so
+  // the analysis above sees a stable graph).
+  std::vector<std::pair<hhds::Node_class, hhds::Pin_class>> rewires;
+  for (auto& R : comb_nodes) {
+    if (!in_cycle.contains(R) || gu::type_op_of(R) != Ntype_op::Get_mask) {
+      continue;
+    }
+    auto md = drv_at(R, 2);
+    if (md.is_invalid() || !gu::is_const_pin(md)) {
+      continue;  // needs a constant slice mask
+    }
+    auto mc = gu::hydrate_const(md);
+    if (mc.has_unknowns() || (mc.is_just_i64() && mc.to_just_i64() == -1)) {
+      continue;  // a full read, not a bit-field slice
+    }
+    auto [rlo, rhi] = mc.get_mask_range();
+    if (rlo < 0 || rhi <= rlo || rhi > (1 << 28)) {
+      continue;  // noncontiguous / open slice
+    }
+    auto vd = drv_at(R, 0);
+    auto O  = trace_to_or(trace_to_or, vd, rhi, 0);
+    if (O.is_invalid()) {
+      continue;
+    }
+    // Every operand of O must have a bounded footprint; the slice must be covered
+    // by EXACTLY ONE operand and be disjoint from all the others.
+    hhds::Pin_class cover;
+    int             covers = 0;
+    bool            ok     = true;
+    for (auto e : O.inp_edges()) {
+      auto fp = footprint(footprint, e.driver, 0);
+      if (fp.first < 0) {
+        ok = false;
+        break;
+      }
+      if (fp.second <= fp.first) {
+        continue;  // empty operand
+      }
+      bool covers_slice = rlo >= fp.first && rhi <= fp.second;
+      bool overlaps     = !(rhi <= fp.first || rlo >= fp.second);
+      if (covers_slice) {
+        cover = e.driver;
+        ++covers;
+      } else if (overlaps) {
+        ok = false;  // slice straddles two operands -> not a clean bit-field read
+        break;
+      }
+    }
+    if (!ok || covers != 1 || cover.is_invalid() || cover == vd) {
+      continue;
+    }
+    rewires.emplace_back(R, cover);
+  }
+
+  for (auto& [R, cover] : rewires) {
+    auto edges = R.inp_edges();  // snapshot before mutating
+    for (auto e : edges) {
+      if (static_cast<uint32_t>(e.sink.get_port_id()) == 0) {
+        e.del_edge();
+      }
+    }
+    cover.connect_sink(R.create_sink_pin(static_cast<hhds::Port_id>(0)));
+  }
+  if (!rewires.empty()) {
+    // The edge rewires above only INCREMENTALLY patch forward_class's in-edge
+    // counts; its cached Pass-2 deferral order was built while the graph still had
+    // the (now-removed) cycle and would otherwise replay that stale, invalid
+    // schedule. Re-stamping a touched node's UNCHANGED type forces a full rebuild
+    // of the forward-traversal caches on the now-acyclic graph (same effect the
+    // node/pin creation in flatten_false_loop_subs has for free), so the scheduler
+    // re-derives a correct topological order.
+    auto& R = rewires.front().first;
+    R.set_type(R.get_type());
+  }
+  return static_cast<int>(rewires.size());
+}
 }  // namespace
 
 void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
@@ -563,6 +842,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // inlining the offending instance into this graph before scheduling. A no-op
   // unless a stateless Sub's output feeds back into one of its own inputs.
   flatten_false_loop_subs(g);
+  // Break a false WORD-level combinational loop through a packed wire: redirect
+  // each constant Get_mask slice-read of an `Or`-of-disjoint-ranges net to the one
+  // operand that drives the read range. A no-op unless a genuine word-level cycle
+  // exists; a real bit-level loop is never split (still fails loudly below).
+  split_packed_selfref_wires(g);
   // `is_top` = the testbench-driven module (vs an instantiated sub-module). The
   // clock/reset waveform CONFIG + the functional reset window live on the top so
   // the reset behaves identically whether or not a VCD is dumped; `vcd_on` adds

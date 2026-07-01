@@ -8182,6 +8182,54 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
     return ref;
   }
 
+  // Temporal builtin `past[N](x)` — `x` delayed by N clock cycles. Rewrite it,
+  // at the source level, into the LNAST equivalent of
+  //     stage[N] %past = x        // one depth-N pipeline register (N real flops)
+  //     <result> = %past          // reads the stage q, which lands N cycles later
+  // so it flows through the NORMAL stage/reg lowering — tolg finalize_regs wires
+  // the clock/reset and realizes the shift register, and the interface `@[N]`
+  // landing-cycle check is satisfied by the stage's feedforward σ. Only a literal
+  // positive N is intercepted; every other callee falls through to the usual call
+  // path. (A plain state `reg` chain would NOT work here: in a `mod`, plain regs
+  // are cycle-0 state, so a q-read never advances the landing cycle — only a
+  // feedforward `stage` shifts σ, which is what `@[N]` on the output requires.)
+  if (!has_receiver && func_ref.is_ref()) {
+    if (const uint64_t past_n = prp_builtins::past_builtin_delay(func_ref.get_name()); past_n != 0) {
+      auto call_args = collect_call_args(arg);
+      if (call_args.size() != 1 || call_args[0].is_assign || call_args[0].is_spread || call_args[0].is_ufcs) {
+        report_error(n,
+                     "past-arity",
+                     "name",
+                     "`past[N](x)` takes exactly one positional argument (the value to delay)",
+                     "write `past[N](value)` — the result is `value` delayed by N clock cycles");
+      }
+      const std::string delay_txt(func_ref.get_name().substr(std::string_view("past[").size(),
+                                                              func_ref.get_name().size() - std::string_view("past[").size()
+                                                                  - 1));
+      // Cluster head: attr_set(%past, "type", "stage") + trailing stages(N,N).
+      // Identical shape to a source-level `stage[N] %past = x` (see the
+      // declaration_statement handler), so the decl-merge folds it into a
+      // `declare(%past, none, "reg", stages(N,N))` and tolg lowers one depth-N
+      // pipeline Flop.
+      auto past_ref = builder.mint_tmp_ref();
+      auto as_idx   = builder.add_child(Lnast_ntype::create_attr_set());
+      lnast->add_child(as_idx, past_ref);
+      lnast->add_child(as_idx, Lnast_node::create_const("type"));
+      lnast->add_child(as_idx, Lnast_node::create_const("stage"));
+      auto st = lnast->add_child(as_idx, Lnast_ntype::create_stages());
+      lnast->add_child(st, Lnast_node::create_const(delay_txt));
+      lnast->add_child(st, Lnast_node::create_const(delay_txt));
+      attach_loc(as_idx, n);
+      // The stage din: `%past = x`. Reads of %past (below and at the call site)
+      // see its q.
+      auto store_idx = builder.add_child(Lnast_ntype::create_store());
+      lnast->add_child(store_idx, past_ref);
+      lnast->add_child(store_idx, call_args[0].value);
+      attach_loc(store_idx, n);
+      return past_ref;
+    }
+  }
+
   auto call_args    = collect_call_args(arg);
   auto generic_args = collect_generic_args(n);
   if (!callsite_inst_name.empty()) {

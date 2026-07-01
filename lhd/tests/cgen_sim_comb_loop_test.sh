@@ -8,11 +8,21 @@
 # calls a Sub atomically, so the fed-back input has no valid emission order and
 # operand() used to silently emit create_integer(0) -> WRONG sim, exit 0.
 #
-# Stage 0 turns that silent miscompile into a LOUD, located build failure
+# Stage 0 turned that silent miscompile into a LOUD, located build failure
 # (diag code comb-loop-through-instance / combinational-loop, category
 # unsupported, non-deferred so run_step's has_halting_errors() gate blocks the
-# sim build). This test guards both directions: the bug designs MUST fail with the
-# diagnostic, and legitimate hierarchical/comb designs MUST still compile clean.
+# sim build).
+#
+# Stage 1 (flatten_false_loop_subs in cgen_sim.cpp) RESOLVES the common case: a
+# single PURE-COMB sub-instance whose output feeds back into its OWN input is
+# inlined into the parent before scheduling, so forward_class orders the now-flat
+# DAG and the sim is correct (verified end-to-end by prp-simfail/simeq-
+# sim_lg_atomic_feedback, the same design). Still an ERROR: a GENUINE comb loop
+# (flattens to a real bit-level cycle) and a cross-coupled MUTUAL false loop
+# through TWO subs (the detector stops at the sibling instance). This test guards
+# all three: the single-instance false loop compiles clean, the genuine loop and
+# the mutual loop still fail with a comb-loop diagnostic, and a legitimate
+# hierarchical/comb design still compiles clean.
 
 set -u
 
@@ -63,7 +73,9 @@ module top(input [7:0] a, input [7:0] b, input [7:0] d, input [7:0] topx,
   assign x_out = x;
 endmodule
 EOF
-expect_loop_error "$W/base.v" top "base false loop"
+# Stage 1: a single-instance self-feedback false loop is now FLATTENED and
+# computes correctly (golden a=10,b=20,d=5,topx=3 -> x_out=30, y_out=38).
+expect_clean "$W/base.v" top "base false loop (flattened)"
 
 # --- bug: two pure-comb subs cross-coupled (u1.x->u2.c, u2.x->u1.c) ---
 cat > "$W/cross.v" <<'EOF'
