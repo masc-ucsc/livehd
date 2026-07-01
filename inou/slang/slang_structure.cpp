@@ -25,6 +25,24 @@ using slang::ast::SymbolKind;
 
 namespace {
 
+// True iff `type` bottoms out in plain bits with no STRUCT anywhere in its
+// shape (recurses through any number of packed/unpacked array dimensions).
+// Used to gate the per-field leaf-wire bundle split: a field that is a plain
+// multi-dimensional array (e.g. CIRCT's `logic [1:0][5:0] enq`) is fine — its
+// whole value is just `getBitWidth()` flat bits, same as a scalar field — but
+// a (possibly array-of-) nested struct field needs its own recursive split,
+// which the bundle path does not do (see is_scalar_struct_var).
+bool field_type_is_struct_free(const slang::ast::Type& type) {
+  const auto& ct = type.getCanonicalType();
+  if (ct.isStruct()) {
+    return false;
+  }
+  if (ct.isPackedArray() || ct.isUnpackedArray()) {
+    return field_type_is_struct_free(*ct.getArrayElementType());
+  }
+  return true;
+}
+
 // Walk an assignment LHS spine down to the written base symbol.
 const slang::ast::ValueSymbol* lhs_base_symbol(const slang::ast::Expression& lhs) {
   const auto* e = &lhs;
@@ -1210,16 +1228,23 @@ bool Slang_context::is_scalar_struct_var(const slang::ast::ValueSymbol& sym) con
     return false;
   }
   // A struct whose whole-copy is dropped in the per-field bundle path (a field that
-  // is a nested struct / multi-dim array / array-of-struct) must stay a consistent
-  // FLAT bus — but only when it is actually WHOLE-COPIED or accessed BELOW the top
-  // level (the cases that break; Dispatcher's `io_out_0_bits_ctrl_0 = io_in_bits_ctrl_0`
-  // became all-zero). Scoping to those vars avoids flattening every such struct in a
-  // struct-heavy design. (The proper fix is to make assign_struct_whole recurse into
-  // nested/array fields so no flattening is needed — todo.)
+  // is a nested struct / array-of-struct) must stay a consistent FLAT bus — but only
+  // when it is actually WHOLE-COPIED or accessed BELOW the top level (the cases that
+  // break; Dispatcher's `io_out_0_bits_ctrl_0 = io_in_bits_ctrl_0` became all-zero).
+  // Scoping to those vars avoids flattening every such struct in a struct-heavy
+  // design. (The proper fix is to make assign_struct_whole recurse into nested
+  // struct fields so no flattening is needed — todo.) A plain (struct-free) packed
+  // ARRAY field — e.g. CIRCT's io-bundle `logic [1:0][5:0] enq` — is fine as a leaf:
+  // its whole value is just its flat bit width, same as a scalar field, so it does
+  // NOT force the flat-bus fallback (field_type_is_struct_free allows it). Forcing
+  // such fields onto the flat bus is what causes a false self-loop when one field of
+  // the bundle (e.g. `out`) is computed from another (e.g. `canIssue`) within the
+  // same `'{...}` pattern assignment — the per-field bundle gives each field its own
+  // independent leaf net, breaking the false cycle.
   if (struct_whole_copied_.contains(&sym) || struct_deep_accessed_.contains(&sym)) {
     for (const auto& f : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
-      if (!f.getType().getCanonicalType().isSimpleBitVector()) {
-        return false;  // nested struct / multi-dim array / array-of-struct field
+      if (!field_type_is_struct_free(f.getType())) {
+        return false;  // nested struct / array-of-struct field
       }
     }
   }

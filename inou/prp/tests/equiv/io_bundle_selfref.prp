@@ -1,0 +1,16 @@
+/*
+:name: io_bundle_selfref
+:type: equiv_slang
+:verilog_top: io_bundle_selfref.top
+:pyrope_top: io_bundle_selfref.top
+*/
+
+// Pyrope reference for io_bundle_selfref.v: `io_c = io_b & io_a` (the struct
+// bundle is purely a Verilog naming artifact -- see the .v header). Confirms
+// the field_type_is_struct_free fix in slang_structure.cpp: `--reader slang`
+// must split `io` into independent per-field leaf nets so reading `io.b`
+// while computing `io.c` in the same `'{...}` pattern is not treated as a
+// false self-reference (a combinational cycle).
+comb top(io_a:u2, io_b:u2) -> (io_c:u2) {
+  io_c = io_b & io_a
+}

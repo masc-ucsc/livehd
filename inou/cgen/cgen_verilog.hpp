@@ -86,6 +86,17 @@ private:
   void process_hotmux(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
   void process_simple_node(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
 
+  // Pre-reserve every Sub/Memory instance name into declared_name_counts
+  // BEFORE create_locals runs. Instance names (default_instance_name) are
+  // textually emitted later by create_memories/create_subs and never flow
+  // through get_unique_decl_name themselves, so without this reservation an
+  // anonymous wire's synthesized fallback name (instance_name + "_" + port_id,
+  // see node_util.hpp wire_name()) can collide with an unrelated instance that
+  // happens to carry that exact name (e.g. a Chisel-style anonymous net
+  // `_foo_io_out` falling back to "foo_2", colliding with a sibling instance
+  // literally named "foo_2") — an invalid Verilog redefinition.
+  void reserve_instance_names(hhds::Graph* graph);
+
   void create_module_io(std::shared_ptr<File_output> fout, hhds::Graph* graph);
   void create_memories(std::shared_ptr<File_output> fout, hhds::Graph* graph);
   void create_subs(std::shared_ptr<File_output> fout, hhds::Graph* graph);

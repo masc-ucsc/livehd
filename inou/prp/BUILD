@@ -271,6 +271,13 @@ cc_direct_headers(
             # test can never pass; run it via the fixme target below. The reverse
             # direction is already fixme-tagged through _V2PRP_FIXME.
             "tests/equiv/gen_type_cast.prp",
+            # io_bundle_nested / array_selfref: known-broken "false comb cycle"
+            # repros (see small_todo_working.md Type B / Type C). Both REFUTE
+            # (a real miscompile, not a timeout) against yosys lgcheck too, so
+            # they cannot live in the auto-passing glob; run via the fixme
+            # targets below.
+            "tests/equiv/io_bundle_nested.prp",
+            "tests/equiv/array_selfref.prp",
         ],
     )
 ]
@@ -309,6 +316,43 @@ sh_test(
         "//inou/prp:tests/pyrope_test.py",
         "//inou/prp:tests/equiv/gen_type_cast.prp",
         "//inou/prp:tests/equiv/gen_type_cast.v",
+        "//lhd",
+    ],
+    deps = ["//inou/yosys:scripts"],
+    tags = ["fixme"],
+)
+
+# Known-failing equiv trackers (fixme): io_bundle_nested / array_selfref are
+# minimal repros of the "false comb cycle" family (small_todo_working.md Type
+# B / Type C) — a struct/array field self-reference within one `'{...}`
+# pattern assignment miscompiles through --reader slang. Both REFUTE against
+# yosys lgcheck too (a real miscompile, not a tool-specific quirk). Excluded
+# from the glob above; tagged `fixme` so `bazel test //... (-fixme)` stays
+# green. Run e.g.: bazel test //inou/prp:prp-equiv-io_bundle_nested --test_tag_filters=
+sh_test(
+    name = "prp-equiv-io_bundle_nested",
+    srcs = ["tests/pyrope_test.py"],
+    args = ["-i", "$(location //inou/prp:tests/equiv/io_bundle_nested.prp)"],
+    data = [
+        "//inou/prp:tests/prplib.py",
+        "//inou/prp:tests/pyrope_test.py",
+        "//inou/prp:tests/equiv/io_bundle_nested.prp",
+        "//inou/prp:tests/equiv/io_bundle_nested.v",
+        "//lhd",
+    ],
+    deps = ["//inou/yosys:scripts"],
+    tags = ["fixme"],
+)
+
+sh_test(
+    name = "prp-equiv-array_selfref",
+    srcs = ["tests/pyrope_test.py"],
+    args = ["-i", "$(location //inou/prp:tests/equiv/array_selfref.prp)"],
+    data = [
+        "//inou/prp:tests/prplib.py",
+        "//inou/prp:tests/pyrope_test.py",
+        "//inou/prp:tests/equiv/array_selfref.prp",
+        "//inou/prp:tests/equiv/array_selfref.v",
         "//lhd",
     ],
     deps = ["//inou/yosys:scripts"],
@@ -355,6 +399,13 @@ _V2PRP_FIXME = [
     # known 1-bit signed ordered-compare fixme tracker (the same gap the forward
     # prp-equiv side carries).
     "signed_one_bit_cmp",
+    # "false comb cycle" family (small_todo_working.md Type B / Type C): a
+    # struct/array field self-reference within one `'{...}` pattern assignment
+    # miscompiles through --reader slang. REFUTES with a concrete
+    # counterexample here (see the .v file headers for why the full-scale
+    # XiangShan modules instead see an `lhd lec` encode failure).
+    "io_bundle_nested",
+    "array_selfref",
 ]
 
 [

@@ -6348,26 +6348,41 @@ void uPass_runner::dead_code_eliminate_staging() {
 
     // Pass 1: count uses (refs in non-LHS positions) for each name. Refs
     // that live inside an already-dead statement don't count.
+    //
+    // "inside a dead statement" used to be an upward walk to the root per ref
+    // node (O(depth) each) — quadratic-ish on a deeply nested generated body
+    // (a long if/elif decode chain) with many refs, and this whole Pass 1 can
+    // re-run once per outer fixed-point iteration. depth_preorder visits a
+    // parent strictly before its descendants, so memoize "is dead, or nested
+    // inside a dead ancestor" bottom-up-built-top-down as we walk: by the time
+    // a node is visited, its parent's entry is already in the map, making the
+    // lookup O(1) amortized instead of O(depth). Same fixed point, just
+    // computed without redundant re-walks.
     absl::flat_hash_map<std::string, int> use_count;
+    absl::flat_hash_map<int64_t, bool>    dead_or_nested;  // node id -> self-or-ancestor in dead_stmts
     for (auto node : staging->depth_preorder(staging->get_root())) {
       if (node.is_invalid()) {
         continue;
       }
+      auto parent = staging->get_parent(node);
+      bool parent_dead_or_nested = false;
+      if (parent.is_valid()) {
+        const auto pid = parent.get_class_index().value;
+        if (dead_stmts.contains(pid)) {
+          parent_dead_or_nested = true;
+        } else if (auto it = dead_or_nested.find(pid); it != dead_or_nested.end()) {
+          parent_dead_or_nested = it->second;
+        }
+      }
+      dead_or_nested[node.get_class_index().value] = parent_dead_or_nested;
+
       if (staging->get_type(node) != N::Lnast_ntype_ref) {
         continue;
       }
-      auto parent = staging->get_parent(node);
       if (!parent.is_valid()) {
         continue;
       }
-      bool inside_dead = false;
-      for (auto a = parent; a.is_valid(); a = staging->get_parent(a)) {
-        if (dead_stmts.contains(a.get_class_index().value)) {
-          inside_dead = true;
-          break;
-        }
-      }
-      if (inside_dead) {
+      if (parent_dead_or_nested) {
         continue;
       }
       const bool is_lhs = dce_is_def_producing(staging->get_type(parent)) && node.is_first_child();

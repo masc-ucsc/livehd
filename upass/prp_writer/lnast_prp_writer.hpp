@@ -316,6 +316,17 @@ private:
   };
   std::unordered_map<std::string, Fold_info>                           fold_info_;    // by raw name
   std::unordered_map<std::string, std::vector<int>>                    write_idx_;    // name -> sorted write pre-order indices
+  // name -> EXCLUSIVE end pre-order index of the func_call subtree that defines it
+  // (one past the last index used by that statement, i.e. by the result var, the
+  // callee, and EVERY argument expression). A read whose index falls inside
+  // [def_index, end_index) is a self-reference from within the instantiation's
+  // OWN argument list (e.g. a handshake port wired to the instance's own output,
+  // `inst(... , ready_i = inst.valid_o)`) — analyze_instance_inline's try_inline
+  // uses this to treat it as genuine feedback (never inlined), not merely a def
+  // BEFORE the call's first node (which `inst_def_index` alone cannot detect,
+  // since every argument is itself a descendant of the call and so sorts AFTER
+  // the call's own start index).
+  std::unordered_map<std::string, int>                                 func_call_end_idx_;
   std::unordered_set<std::string>                                      foldable_;     // temp names to inline at their use
   std::unordered_set<int64_t>                                          folded_node_;  // def-node keys (get_class_index) to skip
   std::unordered_set<std::string>                                      dead_signals_; // stripped names written but never read (dropped)

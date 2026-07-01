@@ -147,6 +147,16 @@ void Inou_slang::work(Eprp_var& var) {
   if (!user_has("--ignore-unknown-modules")) {
     argv.push_back(strdup("--ignore-unknown-modules"));
   }
+  // slang's default parser recursion cap (1024) rejects some cgen-emitted
+  // Verilog: a wide mux/case chain (e.g. a large priority encoder) lowers to
+  // deeply nested if/else or concatenation expressions that legitimately need
+  // more parser stack depth than typical hand-written RTL ("language
+  // constructs are too deeply nested" / ParseTreeTooDeep). Raise it well above
+  // anything reasonable rather than rejecting valid-but-deep generated code.
+  if (!user_has("--max-parse-depth")) {
+    argv.push_back(strdup("--max-parse-depth"));
+    argv.push_back(strdup("8192"));
+  }
 
   // Forward lhd's `--top` so slang elaborates ONLY that module's hierarchy.
   // Without it slang auto-tops EVERY uninstantiated module (e.g. a SimTop with

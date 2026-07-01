@@ -256,12 +256,24 @@ Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc,
   r.verdict    = Verdict::Unknown;
   r.engine     = "auto(ind|bmc)";
   r.elapsed_ms = total_ms;
-  std::string d = "auto INCONCLUSIVE: ind=" + std::string(vname(ind.verdict)) + "(" + std::to_string(ind.elapsed_ms) + "ms)";
+  // A sub-millisecond-to-low-ms Unknown is almost never the solver genuinely
+  // giving up — it's usually a structural encode failure (unsupported op, an
+  // unresolved combinational-cycle-looking operand) or a now-caught engine
+  // exception (see safe_prove_equal). Surface that reason instead of just the
+  // timing, or a fast inconclusive looks identical to (and is easily mistaken
+  // for) a hard query the solver actually spent its budget on.
+  auto reason = [](const Query_result& e) -> std::string {
+    if (e.detail.find("encode failed") != std::string::npos || e.detail.find("ENGINE CRASH") != std::string::npos) {
+      return " [" + e.detail + "]";
+    }
+    return "";
+  };
+  std::string d = "auto INCONCLUSIVE: ind=" + std::string(vname(ind.verdict)) + "(" + std::to_string(ind.elapsed_ms) + "ms)" + reason(ind);
   if (ind.verdict == Verdict::Refuted) {
     d += " [single-step CEX — may be an UNREACHABLE step-case, treated as a HINT not a failure: "
          + (ind.witness.empty() ? std::string("(no witness)") : ind.witness) + "]";
   }
-  d += ", bmc=" + std::string(vname(bmc.verdict)) + "(" + std::to_string(bmc.elapsed_ms) + "ms)";
+  d += ", bmc=" + std::string(vname(bmc.verdict)) + "(" + std::to_string(bmc.elapsed_ms) + "ms)" + reason(bmc);
   if (bmc.verdict == Verdict::Proven) {
     d += " [no CEX up to bound " + std::to_string(opts.bound) + " — bounded, NOT a full proof]";
   }
@@ -291,6 +303,29 @@ bool try_bounded_proven(const Query_result& bmc, Query_result& out) {
   return true;
 }
 
+// Run one engine, converting any escaping C++ exception (e.g. a cvc5 API
+// exception from a malformed term — see the seed_state width-fit fix above)
+// into a clearly-tagged Unknown result instead of letting it propagate and
+// kill the (forked-child or sequential-fallback) process. The tag lets a human
+// or the verification harness distinguish "engine genuinely couldn't decide"
+// from "the encoder crashed" even though both currently surface as Unknown.
+Query_result safe_prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
+                              const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  try {
+    return prove_equal(ref, impl, opts, sub_lib);
+  } catch (const std::exception& e) {
+    Query_result r;
+    r.verdict = Verdict::Unknown;
+    r.detail  = "ENGINE CRASH (" + opts.engine + "): " + e.what();
+    return r;
+  } catch (...) {
+    Query_result r;
+    r.verdict = Verdict::Unknown;
+    r.detail  = "ENGINE CRASH (" + opts.engine + "): unknown C++ exception";
+    return r;
+  }
+}
+
 // Sequential fallback when fork/pipe is unavailable: run ind, then bmc, applying
 // the same trust asymmetry. Used only on a (rare) fork failure.
 Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
@@ -299,7 +334,7 @@ Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_
   Lec_options  oi = opts;
   oi.engine       = "ind";
   auto         ti = std::chrono::steady_clock::now();
-  Query_result ri = prove_equal(ref, impl, oi, sub_lib);
+  Query_result ri = safe_prove_equal(ref, impl, oi, sub_lib);
   ri.engine       = "ind";
   ri.elapsed_ms   = now_ms(ti);
   if (ri.verdict == Verdict::Proven) {
@@ -309,7 +344,7 @@ Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_
   Lec_options ob = opts;
   ob.engine      = "bmc";
   auto         tb = std::chrono::steady_clock::now();
-  Query_result rb = prove_equal(ref, impl, ob, sub_lib);
+  Query_result rb = safe_prove_equal(ref, impl, ob, sub_lib);
   rb.engine       = "bmc";
   rb.elapsed_ms   = now_ms(tb);
   if (rb.verdict == Verdict::Refuted) {
@@ -370,7 +405,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       Lec_options  o = opts;
       o.engine       = engines[i];
       auto         ci = std::chrono::steady_clock::now();
-      Query_result r  = prove_equal(ref, impl, o, sub_lib);
+      Query_result r  = safe_prove_equal(ref, impl, o, sub_lib);
       r.engine        = engines[i];
       r.elapsed_ms    = now_ms(ci);
       std::string blob = serialize_result(r);

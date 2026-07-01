@@ -227,6 +227,10 @@ struct Sim_set_option {
 inline constexpr Sim_set_option kSimSetOptions[] = {
     {"vcd", "false", Sim_set_option::Kind::boolean,
      "dump one VCD per test to <workdir>/<test.name>.vcd (links the VCD writer)"},
+    {"cgen_color", "true", Sim_set_option::Kind::boolean,
+     "run pass.color (cgen per-output cones) before inou.cgen.sim so sim codegen can schedule a Sub by output "
+     "cone (breaks a false combinational loop through an instance); coloring is metadata only, NO_COLOR is just "
+     "another partition, so inou.cgen.verilog and an un-split sim are unaffected (default on)"},
     {"checkpoint", "true", Sim_set_option::Kind::boolean,
      "periodic editable state checkpoints of the DUT + testbench (default on; --restart-at needs them)"},
     {"checkpoint_min_secs", "10", Sim_set_option::Kind::non_neg_num,

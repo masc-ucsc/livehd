@@ -459,7 +459,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (auto it = shared_inputs->find(key); it != shared_inputs->end()) {
         v           = it->second;
         v.is_signed = sgn;
-        if (v.width < w) {
+        // query.cpp pre-builds this shared symbol at the MAX width seen across
+        // ref+impl, but THIS design's own real_width (w) can be narrower than
+        // that cross-design max (the other side declares the same flop wider).
+        // Always fit to the LOCAL w (extend OR truncate) so every term feeding
+        // this design's next-state ITE (din/self/source) agrees on width — a
+        // stale "only ever extends" check left v wider than w on that side,
+        // producing a width-mismatched ITE that crashes the cvc5 encode (the
+        // worker then dies and the auto-portfolio swallows it as INCONCLUSIVE).
+        if (v.width != w) {
           v.term  = fit(v, w);
           v.width = w;
         }

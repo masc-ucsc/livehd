@@ -1077,8 +1077,37 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
 // Run inou.cgen.sim (TODO 3d): a <module>.hpp interface + <module>.cpp body per
 // graph into `odir`. Mirrors cgen_into — seed odir, run the step, then assert
 // each pair exists.
+// sim.cgen_color (default true): run the per-output-cone coloring before
+// inou.cgen.sim. Honors `sim.cgen_color` (lhd sim) and `compile.sim.cgen_color`
+// (the compile --emit-dir sim: path); absent => on.
+static bool sim_cgen_color_enabled(const Options& opts) {
+  for (const auto& [k, v] : opts.sets) {
+    if (k == "sim.cgen_color" || k == "compile.sim.cgen_color") {
+      return v != "false" && v != "0" && !v.empty();
+    }
+  }
+  return true;
+}
+
 std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, const std::string& odir) {
   ensure_dir(odir);
+
+  // Color each module by its per-output cones (pass.color cgen) BEFORE emitting,
+  // so inou.cgen.sim can schedule a Sub at output-cone granularity and break a
+  // false combinational loop through an instance. The coloring is metadata on the
+  // live graphs only: inou.cgen.verilog ignores it and an un-split sim is
+  // identical, and NO_COLOR is treated as just another partition, so generation
+  // is always safe whether or not a node was colored.
+  if (sim_cgen_color_enabled(opts)) {
+    Eprp_var::Eprp_dict clabels{
+        {"alg", "cgen"}
+    };
+    if (!opts.top.empty() && opts.top != "-auto-top") {
+      clabels["top"] = opts.top;
+    }
+    run_step("pass.color", var, clabels, opts, res);
+  }
+
   Eprp_var::Eprp_dict labels{
       {"odir", odir}
   };

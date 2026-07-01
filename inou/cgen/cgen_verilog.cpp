@@ -516,7 +516,12 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) {
   // registered. HHDS's get_pin_name resolves both to the declared name; fall
   // back to that so the emitted Verilog references the right wire.
   if (is_const_pin(dpin)) {
-    return const_to_verilog(hydrate_const(dpin));
+    // Parenthesize like the needs_parenthesis sub-expressions above: callers
+    // (e.g. Get_mask/Sext) may append a bit-select suffix directly to this
+    // string (`a[hi:lo]`), and a bare sized literal can't take one — Verilog
+    // rejects `193'sb0????...?[191:64]` ("expected ';'"). `(193'sb0...)[191:64]`
+    // is valid and identical in every other context this return value is used.
+    return absl::StrCat("(", const_to_verilog(hydrate_const(dpin)), ")");
   }
 
   // Single-use unnamed nodes are intentionally not declared in create_locals:
@@ -1697,6 +1702,17 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
   }
 }
 
+void Cgen_verilog::reserve_instance_names(hhds::Graph* graph) {
+  for (auto node : graph->fast_class()) {
+    auto op = type_op_of(node);
+    if (op != Ntype_op::Sub && op != Ntype_op::Memory) {
+      continue;
+    }
+    auto iname = get_scaped_name(default_instance_name(node));
+    declared_name_counts.insert({iname, 1});
+  }
+}
+
 void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, hhds::Graph* graph) {
   auto gio = graph->get_io();
   I(gio);
@@ -2469,6 +2485,7 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   hhds::Graph* g = graph.get();
   create_module_io(fout, g);
 
+  reserve_instance_names(g);
   create_locals(fout, g);
   create_memories(fout, g);
   create_subs(fout, g);

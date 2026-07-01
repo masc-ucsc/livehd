@@ -1,0 +1,19 @@
+/*
+:name: io_bundle_nested
+:type: equiv_slang
+:verilog_top: io_bundle_nested.top
+:pyrope_top: io_bundle_nested.top
+*/
+
+// Pyrope reference for io_bundle_nested.v: `io_c = io_x ? io_a : 0` (the
+// nested-struct bundle is purely a Verilog naming artifact -- see the .v
+// header). KNOWN BROKEN: prp-v2prp-io_bundle_nested currently REFUTES (a
+// concrete counterexample, not a timeout/inconclusive) -- see
+// small_todo_working.md "Type B".
+comb top(io_x:u1, io_a:u2) -> (io_c:u2) {
+  if io_x != 0 {
+    io_c = io_a
+  } else {
+    io_c = 0
+  }
+}

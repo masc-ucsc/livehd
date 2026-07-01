@@ -2350,6 +2350,14 @@ void Lnast_prp_writer::scan_node(Lnast_nid nid, int& index) {
     if (!callee.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(callee))) {
       func_call_callees_.insert(std::string(strip_prefix(lnast->get_name(callee))));
     }
+    // Record the EXCLUSIVE end of this statement's subtree (the `index` counter
+    // right after every child — result, callee, and every argument expression —
+    // has been visited), keyed by the result var's raw name.  See the
+    // func_call_end_idx_ declaration for why try_inline needs this instead of
+    // just `my_index` (the call's own START index).
+    if (!fc0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(fc0))) {
+      func_call_end_idx_[std::string(lnast->get_name(fc0))] = index;
+    }
   }
 }
 
@@ -2412,6 +2420,26 @@ void Lnast_prp_writer::compute_dead_signals(Lnast_nid io_nid, Lnast_nid stmts_ni
     keep.insert(nm);
   }
 
+  // Precompute every "ancestor prefix" of a name that is actually read
+  // (use_count != 0) once — e.g. a read "a.b.c" inserts "a" and "a.b" — so the
+  // "does base `s` have any field read" check below is an O(1) set lookup
+  // instead of an O(fold_info_) inner rescan FOR EVERY zero-use candidate
+  // (was O(N^2): on a design with many thousands of signals — e.g. the
+  // XiangShan Backend top — this single function dominated the whole compile).
+  std::unordered_set<std::string> read_field_prefixes;
+  for (const auto& [fname, ffi] : fold_info_) {
+    if (ffi.use_count == 0) {
+      continue;
+    }
+    std::string fs(strip_prefix(fname));
+    if (!fs.empty() && fs.front() == '`') {  // bundle-field leaves render as `base.field`
+      fs = fs.substr(1, fs.size() >= 2 ? fs.size() - 2 : std::string::npos);
+    }
+    for (size_t dot = fs.find('.'); dot != std::string::npos; dot = fs.find('.', dot + 1)) {
+      read_field_prefixes.insert(fs.substr(0, dot));
+    }
+  }
+
   for (const auto& [name, fi] : fold_info_) {
     if (fi.use_count != 0 || fi.def_count < 1) {
       continue;  // read somewhere, or never defined
@@ -2429,21 +2457,7 @@ void Lnast_prp_writer::compute_dead_signals(Lnast_nid io_nid, Lnast_nid stmts_ni
     // would lose the bundle copy and leave every field at its `=0` default — a
     // real miscompile (e.g. Dispatcher's `io_out_0_bits_ctrl_0 = io_in_bits_ctrl_0`
     // becoming all-zero), which LEC then refutes against the (correct) cgen output.
-    bool field_read = false;
-    for (const auto& [fname, ffi] : fold_info_) {
-      if (ffi.use_count == 0) {
-        continue;
-      }
-      std::string fs(strip_prefix(fname));
-      if (!fs.empty() && fs.front() == '`') {  // bundle-field leaves render as `base.field`
-        fs = fs.substr(1, fs.size() >= 2 ? fs.size() - 2 : std::string::npos);
-      }
-      if (fs.size() > s.size() + 1 && fs.compare(0, s.size(), s) == 0 && fs[s.size()] == '.') {
-        field_read = true;
-        break;
-      }
-    }
-    if (field_read) {
+    if (read_field_prefixes.count(s)) {
       continue;
     }
     dead_signals_.insert(s);
@@ -2688,6 +2702,7 @@ void Lnast_prp_writer::analyze_folding() {
   fold_info_.clear();
   func_call_callees_.clear();
   write_idx_.clear();
+  func_call_end_idx_.clear();
   foldable_.clear();
   folded_node_.clear();
   range_lohi_.clear();
@@ -2856,7 +2871,16 @@ void Lnast_prp_writer::analyze_instance_inline() {
     if (bwit == write_idx_.end() || bwit->second.size() != 1) {
       return;  // instance reassigned (or odd) — leave alone
     }
-    int inst_def_index = bwit->second.front();
+    // The EXCLUSIVE end of the instantiation statement's own subtree (covers the
+    // result, callee, AND every argument expression) — NOT just the call's start
+    // index. A read embedded in the instance's OWN argument list (e.g. a port
+    // wired straight to the instance's own output, same statement) sorts AFTER
+    // the call's start index in pre-order (it is one of the call's descendants)
+    // but is still strictly inside [start, end): comparing against the start
+    // alone would misclassify it as "after the declaration" and inline an
+    // `inst.port` read of an instance that does not exist yet on that line.
+    auto eit = func_call_end_idx_.find(std::string(lnast->get_name(inst)));
+    int  inst_def_end = (eit != func_call_end_idx_.end()) ? eit->second : bwit->second.front() + 1;
 
     std::string raw_name(lnast->get_name(c0));
     std::string tname(strip_prefix(raw_name));
@@ -2873,8 +2897,9 @@ void Lnast_prp_writer::analyze_instance_inline() {
     if (pin_cone_.count(tname) != 0u || pin_cone_.count(base_name) != 0u) {
       return;  // a clock/reset-cone net keeps its name (`clock_pin=ref <net>`)
     }
-    if (fit->second.min_use_index <= inst_def_index) {
-      return;  // a use precedes the instance decl -> genuine feedback, keep wire
+    if (fit->second.min_use_index < inst_def_end) {
+      return;  // a use precedes (or is INSIDE) the instance decl -> genuine
+                // feedback (incl. self-reference within its own arg list), keep wire
     }
     // render_value inlines `fold_info_[name].def_node`; point it at this def (a
     // trailing `wire` declare may otherwise be the recorded def).
