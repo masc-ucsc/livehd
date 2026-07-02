@@ -291,6 +291,9 @@ private:
   // child0), following single-use folded temps into their definitions so a
   // `gclk = clk_b & inv` whose `& ` is an inlined temp still reports `inv`.
   void collect_driver_reads(Lnast_nid def_node, std::unordered_set<std::string>& out) const;
+  // Same fold-following read collection applied to `node` ITSELF (a condition
+  // ref, an if arm, …) rather than a defining statement's operand tail.
+  void collect_node_reads(Lnast_nid node, std::unordered_set<std::string>& out) const;
 
   // Walk the top-level body statements and populate folded_attrs_ (mapping the
   // slang attr vocabulary to the Pyrope source one: initial->init,

@@ -542,33 +542,117 @@ void Lnast_prp_writer::write_module() {
     // binds to a real driver, not a hoisted 0.  Closure over the combinational
     // drivers' read sets catches a multi-level derived clock
     // (`inv = ~gate; gclk = clk_b & inv`).
+    //
+    // A cone net may be written by MORE than its seed store: a reset mux
+    // (`real_reset = mode ? lgc_rst : reset`) lowers to a seed store plus an
+    // in-`if` override, and the ref reads the value AFTER the override. So the
+    // cone tracks every top-level writer of a net — a plain defining statement
+    // or an `if` whose arms store it — and the closure chases the reads of ALL
+    // of them (relocating only the seed used to drop the override below the reg
+    // declares, silently rewiring the reset to the seed arm, AND left the net's
+    // original `declare` to re-declare it in the declare pass — the ResetGen
+    // duplicate-`mut _mux_1` miscompile).
+    // Stored names of an `if`/`unique_if`'s arms, nested ifs included.
+    auto collect_if_stores = [&](auto&& self, Lnast_nid n, std::unordered_set<std::string>& stored) -> void {
+      for (auto b = lnast->get_child(n); !b.is_invalid(); b = lnast->get_sibling_next(b)) {
+        if (!Lnast_ntype::is_stmts(lnast->get_type(b))) {
+          continue;  // a condition operand, not an arm
+        }
+        for (auto s = lnast->get_child(b); !s.is_invalid(); s = lnast->get_sibling_next(s)) {
+          const auto st = lnast->get_type(s);
+          if (st == Lnast_ntype::Lnast_ntype_if || st == Lnast_ntype::Lnast_ntype_unique_if) {
+            self(self, s, stored);
+            continue;
+          }
+          auto s0 = lnast->get_child(s);
+          if (!s0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(s0)) && defines_child0(st)) {
+            stored.insert(std::string(strip_prefix(lnast->get_name(s0))));
+          }
+        }
+      }
+    };
+    // Reads of an `if`/`unique_if`: condition operands plus every arm
+    // statement's operands (written lhs excluded), fold-following throughout.
+    auto collect_if_reads = [&](auto&& self, Lnast_nid n, std::unordered_set<std::string>& out) -> void {
+      for (auto b = lnast->get_child(n); !b.is_invalid(); b = lnast->get_sibling_next(b)) {
+        if (!Lnast_ntype::is_stmts(lnast->get_type(b))) {
+          collect_node_reads(b, out);  // condition
+          continue;
+        }
+        for (auto s = lnast->get_child(b); !s.is_invalid(); s = lnast->get_sibling_next(s)) {
+          const auto st = lnast->get_type(s);
+          auto       s0 = lnast->get_child(s);
+          if (st == Lnast_ntype::Lnast_ntype_if || st == Lnast_ntype::Lnast_ntype_unique_if) {
+            self(self, s, out);
+          } else if (!s0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(s0)) && defines_child0(st)) {
+            collect_driver_reads(s, out);
+          } else {
+            collect_node_reads(s, out);
+          }
+        }
+      }
+    };
     pin_cone_ = pin_dep_nets_;
     if (!pin_dep_nets_.empty()) {
-      std::unordered_map<std::string, Lnast_nid> body_driver;  // stripped lhs -> its (first) combinational driver
+      std::unordered_map<std::string, std::vector<Lnast_nid>> body_writers;  // stripped lhs -> its top-level writers
+      std::unordered_set<std::string>                         state_decl;    // reg/latch names — a flop-Q read is order-free
       for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-        auto c0 = lnast->get_child(c);
-        if (c0.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(c0)) || !defines_child0(lnast->get_type(c))) {
+        const auto ct = lnast->get_type(c);
+        auto       c0 = lnast->get_child(c);
+        if (c0.is_invalid()) {
           continue;
         }
         // A reg/latch declare is resolved in the declare pass, not relocatable;
         // a clock that reads a flop Q keeps the declared reg ref.
-        if (lnast->get_type(c) == Lnast_ntype::Lnast_ntype_declare || is_folded_node(c) || emits_nothing_stmt(c)) {
+        if (ct == Lnast_ntype::Lnast_ntype_declare) {
+          if (Lnast_ntype::is_ref(lnast->get_type(c0))) {
+            auto c1 = lnast->get_sibling_next(c0);
+            auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
+            if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))
+                && (lnast->get_name(c2) == "reg" || lnast->get_name(c2) == "latch")) {
+              state_decl.insert(std::string(strip_prefix(lnast->get_name(c0))));
+            }
+          }
           continue;
         }
-        body_driver.emplace(std::string(strip_prefix(lnast->get_name(c0))), c);
+        if (is_folded_node(c) || emits_nothing_stmt(c)) {
+          continue;
+        }
+        if (ct == Lnast_ntype::Lnast_ntype_if || ct == Lnast_ntype::Lnast_ntype_unique_if) {
+          std::unordered_set<std::string> stored;
+          collect_if_stores(collect_if_stores, c, stored);
+          for (const auto& nm : stored) {
+            body_writers[nm].push_back(c);
+          }
+          continue;
+        }
+        if (!Lnast_ntype::is_ref(lnast->get_type(c0)) || !defines_child0(ct)) {
+          continue;
+        }
+        body_writers[std::string(strip_prefix(lnast->get_name(c0)))].push_back(c);
       }
       std::vector<std::string> work(pin_dep_nets_.begin(), pin_dep_nets_.end());
       while (!work.empty()) {
         auto nm = work.back();
         work.pop_back();
-        auto it = body_driver.find(nm);
-        if (it == body_driver.end()) {
+        auto it = body_writers.find(nm);
+        if (it == body_writers.end()) {
           continue;  // an interface port / reg / has no combinational body driver
         }
         std::unordered_set<std::string> reads;
-        collect_driver_reads(it->second, reads);
+        for (const auto& w : it->second) {
+          const auto wt = lnast->get_type(w);
+          if (wt == Lnast_ntype::Lnast_ntype_if || wt == Lnast_ntype::Lnast_ntype_unique_if) {
+            collect_if_reads(collect_if_reads, w, reads);
+          } else {
+            collect_driver_reads(w, reads);
+          }
+        }
         for (const auto& r : reads) {
-          if (body_driver.count(r) && pin_cone_.insert(r).second) {
+          if (state_decl.count(r)) {
+            continue;  // flop Q — position-independent, the reg declare stays put
+          }
+          if (body_writers.count(r) && pin_cone_.insert(r).second) {
             work.push_back(r);
           }
         }
@@ -803,27 +887,51 @@ void Lnast_prp_writer::write_module() {
     }
     // Clock/reset-pin dependency CONE (e.g. a derived clock `gclk = clk_b &
     // gate`, or a multi-level `inv = ~gate; gclk = clk_b & inv`) must be DEFINED
-    // before the reg declares that bind it via `clock_pin=ref <net>`.  Emit each
-    // cone net's defining body statement now (in body order, so a dependency
-    // lands before its consumer) as its first write -> `mut <net> = <driver>`,
-    // and remember it so the body passes below skip it.
+    // before the reg declares that bind it via `clock_pin=ref <net>`.  Emit, in
+    // body order (so a dependency lands before its consumer), EVERY top-level
+    // statement that defines a cone net: the net's own `declare` (keeps its
+    // declared type, and the declare pass below then skips it instead of
+    // re-declaring a name the first-write already minted), every plain write,
+    // and any `if` whose arms store only cone nets (a reset-mux override must
+    // ride ahead of the reg with its seed, or the ref reads the seed arm only).
+    // Remember each so the body passes below skip them.
     std::unordered_set<int64_t> pin_net_emitted;
     if (!pin_cone_.empty()) {
       for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-        auto c0 = lnast->get_child(c);
-        if (c0.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(c0)) || !defines_child0(lnast->get_type(c))) {
+        const auto ct = lnast->get_type(c);
+        auto       c0 = lnast->get_child(c);
+        if (c0.is_invalid() || is_folded_node(c) || emits_nothing_stmt(c)) {
           continue;
         }
-        if (lnast->get_type(c) == Lnast_ntype::Lnast_ntype_declare || is_folded_node(c) || emits_nothing_stmt(c)) {
-          continue;
+        bool relocate = false;
+        if (ct == Lnast_ntype::Lnast_ntype_declare) {
+          // Reg/latch declares are resolved by the declare pass, never here.
+          if (Lnast_ntype::is_ref(lnast->get_type(c0))) {
+            auto c1 = lnast->get_sibling_next(c0);
+            auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
+            const bool is_state = !c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))
+                                  && (lnast->get_name(c2) == "reg" || lnast->get_name(c2) == "latch");
+            relocate = !is_state && pin_cone_.count(std::string(strip_prefix(lnast->get_name(c0)))) != 0u;
+          }
+        } else if (ct == Lnast_ntype::Lnast_ntype_if || ct == Lnast_ntype::Lnast_ntype_unique_if) {
+          std::unordered_set<std::string> stored;
+          collect_if_stores(collect_if_stores, c, stored);
+          relocate = !stored.empty();
+          for (const auto& nm : stored) {
+            if (pin_cone_.count(nm) == 0u) {
+              relocate = false;  // stores a non-cone net too — leave the whole if in place
+              break;
+            }
+          }
+        } else if (Lnast_ntype::is_ref(lnast->get_type(c0)) && defines_child0(ct)) {
+          relocate = pin_cone_.count(std::string(strip_prefix(lnast->get_name(c0)))) != 0u;
         }
-        std::string lhs = std::string(strip_prefix(lnast->get_name(c0)));
-        if (!pin_cone_.count(lhs) || declared_.count(lhs)) {
+        if (!relocate) {
           continue;
         }
         print_indent();
         cur = c;
-        write_node();  // decl_prefix sees the first write -> emits `mut <net> = <driver>`
+        write_node();  // a first write with no relocated declare -> decl_prefix mints `mut <net> = <driver>`
         os << "\n";
         pin_net_emitted.insert(c.get_class_index().value);
       }
@@ -1063,36 +1171,37 @@ void Lnast_prp_writer::collect_folded_attrs(Lnast_nid stmts_nid) {
   }
 }
 
+void Lnast_prp_writer::collect_node_reads(Lnast_nid node, std::unordered_set<std::string>& out) const {
+  // A ref that is an inlined single-use temp is replaced by the operands of
+  // ITS definition (so `gclk = clk_b & inv` whose `&` rides a folded temp still
+  // reports the real read `inv`).  Folds are acyclic (def precedes use), so this
+  // terminates.
+  if (Lnast_ntype::is_ref(lnast->get_type(node))) {
+    std::string raw(lnast->get_name(node));
+    auto        fit = fold_info_.find(raw);
+    if (foldable_.count(raw) && fit != fold_info_.end()) {
+      auto d0 = lnast->get_child(fit->second.def_node);
+      for (auto c = d0.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(d0); !c.is_invalid();
+           c      = lnast->get_sibling_next(c)) {
+        collect_node_reads(c, out);
+      }
+    } else {
+      out.insert(std::string(strip_prefix(raw)));
+    }
+    return;
+  }
+  for (auto c = lnast->get_child(node); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    collect_node_reads(c, out);
+  }
+}
+
 void Lnast_prp_writer::collect_driver_reads(Lnast_nid def_node, std::unordered_set<std::string>& out) const {
   auto c0 = lnast->get_child(def_node);
   if (c0.is_invalid()) {
     return;
   }
-  // Recurse operands; an inlined single-use temp is replaced by the operands of
-  // ITS definition (so `gclk = clk_b & inv` whose `&` rides a folded temp still
-  // reports the real read `inv`).  Folds are acyclic (def precedes use), so this
-  // terminates.
-  auto rec = [&](auto&& self, Lnast_nid node) -> void {
-    if (Lnast_ntype::is_ref(lnast->get_type(node))) {
-      std::string raw(lnast->get_name(node));
-      auto        fit = fold_info_.find(raw);
-      if (foldable_.count(raw) && fit != fold_info_.end()) {
-        auto d0 = lnast->get_child(fit->second.def_node);
-        for (auto c = d0.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(d0); !c.is_invalid();
-             c      = lnast->get_sibling_next(c)) {
-          self(self, c);
-        }
-      } else {
-        out.insert(std::string(strip_prefix(raw)));
-      }
-      return;
-    }
-    for (auto c = lnast->get_child(node); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-      self(self, c);
-    }
-  };
   for (auto c = lnast->get_sibling_next(c0); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-    rec(rec, c);
+    collect_node_reads(c, out);
   }
 }
 

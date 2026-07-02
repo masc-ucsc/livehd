@@ -29,6 +29,15 @@ struct Val {
   cvc5::Term term;
   int        width     = 0;
   bool       is_signed = false;
+  // Optional X/don't-care bit-plane (same width as `term`; bit i = 1 means the
+  // value's bit i is unknown/don't-care). A NULL term means fully known — the
+  // common case pays nothing. Only populated when the encoder runs with
+  // x_dontcare (the REFERENCE side under lec.gold_x=ignore): sourced at
+  // constants with '?' bits, propagated exactly through Mux arms and
+  // conservatively (whole-value smear) through every other op, and consumed by
+  // the query-side miters, which exclude ref-unknown bits from the compare —
+  // the cvc5 analogue of yosys `miter -ignore_gold_x`.
+  cvc5::Term x_mask{};  // ('undef' avoided: C-preprocessor collision risk)
 };
 
 struct Encoded {
@@ -139,7 +148,7 @@ std::string canon_flop_name(std::string_view hier_name);
 // Concrete reset value of a flop (its constant `initial` pin), as a width-bit
 // BV; nullopt for a reset-less flop. Used by the BMC engine to seed the
 // reachable-from-reset initial state. See M2/BMC in lec.md.
-std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Node_class& node, int width);
+std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Node_class& node, int width, bool x_as_undefined = false);
 
 // Extend (sign/zero per v.is_signed) or truncate `v` to exactly `width` bits.
 cvc5::Term fit_to(cvc5::TermManager& tm, const Val& v, int width);
@@ -213,6 +222,11 @@ public:
                  std::string_view prefix = "", const Io_name_map<cvc5::Term>* shared_mems = nullptr,
                  const Io_name_map<cvc5::Term>* shared_reads = nullptr);
 
+  // lec.gold_x=ignore: while true, constants with unknown ('?') bits source an
+  // undef bit-plane on every Val (see Val::undef) instead of being silently
+  // masked to 0. Toggled ON only while encoding the REFERENCE design.
+  void set_x_dontcare(bool on) { x_dontcare_ = on; }
+
 private:
   // Fit `v` to exactly `width` bits: sign/zero-extend (per v.is_signed) when
   // widening, low-bit Extract when narrowing.
@@ -232,6 +246,13 @@ private:
   const Io_name_map<bool>*                            collapse_defs_ = nullptr;
   const absl::flat_hash_map<std::string, State_box>*  state_boxes_   = nullptr;
   int                                                 sub_depth_   = 0;  // Sub flattening recursion guard
+  bool                                                x_dontcare_  = false;  // ref-side X = don't-care (lec.gold_x=ignore)
 };
+
+// Fit an undef bit-plane to `width` alongside its value: NULL stays NULL;
+// narrowing extracts; widening follows the VALUE's extension rule — a
+// sign-extension duplicates the (possibly unknown) top bit, a zero-extension
+// appends known-0 bits.
+cvc5::Term fit_x_mask_to(cvc5::TermManager& tm, const Val& v, int width);
 
 }  // namespace livehd::lec

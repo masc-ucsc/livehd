@@ -155,6 +155,21 @@ Sort Encoder::bv(int width) { return tm_.mkBitVectorSort(width < 1 ? 1 : width);
 
 Term Encoder::fit(const Val& v, int width) { return fit_to(tm_, v, width); }
 
+Term fit_x_mask_to(cvc5::TermManager& tm, const Val& v, int width) {
+  if (v.x_mask.isNull() || v.width == width) {
+    return v.x_mask;
+  }
+  if (width < v.width) {
+    return bv_extract(tm, v.x_mask, width - 1, 0);
+  }
+  uint32_t d = static_cast<uint32_t>(width - v.width);
+  // sign-extension replicates the top VALUE bit, so the copies are unknown iff
+  // that bit is unknown (replicate the undef msb); zero-extension appends
+  // known-0 bits (zero-extend the plane).
+  auto op = tm.mkOp(v.is_signed ? Kind::BITVECTOR_SIGN_EXTEND : Kind::BITVECTOR_ZERO_EXTEND, {d});
+  return tm.mkTerm(op, {v.x_mask});
+}
+
 std::string Encoder::flop_key(std::string_view hier) const {
   std::string c = canon_flop_name(hier);
   if (name_alias_ != nullptr) {
@@ -168,13 +183,23 @@ std::string Encoder::flop_key(std::string_view hier) const {
 // Concrete reset/initial value of a flop's `initial` pin (the reset value), as a
 // `width`-bit BV. Returns nullopt for a reset-less flop (no constant initial) —
 // its power-on value is arbitrary, so the BMC caller seeds a fresh shared symbol
-// instead. Unknown bits in the initial are masked to 0 (a defined reset).
-std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Node_class& node, int width) {
+// instead. Unknown bits in the initial are masked to 0 (a defined reset), UNLESS
+// `x_as_undefined` (lec.gold_x=ignore): a partially-unknown initial is a
+// DON'T-CARE power-on, so it behaves like no initial at all — both designs then
+// seed the same fresh shared symbol, i.e. the reference's X-init is bound to
+// whatever the implementation starts with (any impl choice is a legal
+// resolution). Concretizing it instead (the old behavior) split the two sides
+// at cycle 0 when only ONE side carries the ?-constant (BypassNetwork:
+// ref init `0sb1<64x?>` -> 2^64 vs the recompiled impl's 0-init).
+std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Node_class& node, int width, bool x_as_undefined) {
   auto init_d = gu::get_driver_of_sink_name(node, "initial");
   if (init_d.is_invalid() || !gu::is_const_pin(init_d)) {
     return std::nullopt;
   }
   Dlop c = gu::hydrate_const(init_d);
+  if (x_as_undefined && c.has_unknowns()) {
+    return std::nullopt;
+  }
   if (c.is_just_i64()) {
     return Val{bv_const(tm, width, static_cast<uint64_t>(c.to_just_i64())), width, c.is_negative()};
   }
@@ -317,18 +342,33 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // Wide / partially-unknown constant: build from the MSB-first binary string
       // (get_bits() chars, no prefix). Unknown (X / don't-care) bits are masked
       // to 0 — consistent across two designs reading the same source constant.
-      // (Refine to a shared free symbol if X-sensitive equivalence is needed.)
+      // Under x_dontcare (lec.gold_x=ignore, REF side) the '?' positions ALSO
+      // source the undef bit-plane, so the miter can exclude ref-unknown bits
+      // from the compare instead of comparing an arbitrary concretization.
       auto bin = c.to_binary();
+      std::string ubin;
+      ubin.reserve(bin.size());
+      bool any_unknown = false;
       for (auto& ch : bin) {
         if (ch != '0' && ch != '1') {
-          ch = '0';
+          ch          = '0';
+          any_unknown = true;
+          ubin += '1';
+        } else {
+          ubin += '0';
         }
       }
       if (bin.empty()) {
-        bin = "0";
+        bin  = "0";
+        ubin = "0";
       }
       width = static_cast<int>(bin.size());
       t     = tm_.mkBitVector(static_cast<uint32_t>(width), bin, 2);
+      if (x_dontcare_ && any_unknown) {
+        Val v{t, width, sgn};
+        v.x_mask = tm_.mkBitVector(static_cast<uint32_t>(width), ubin, 2);
+        return v;
+      }
     }
     return Val{t, width, sgn};
   };
@@ -473,6 +513,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // producing a width-mismatched ITE that crashes the cvc5 encode (the
         // worker then dies and the auto-portfolio swallows it as INCONCLUSIVE).
         if (v.width != w) {
+          v.x_mask = fit_x_mask_to(tm_, v, w);  // BEFORE the value: needs v's old width
           v.term  = fit(v, w);
           v.width = w;
         }
@@ -1422,7 +1463,65 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (result.isNull()) {
         return fail("op '" + std::string(Ntype::get_name(op)) + "' produced no term");
       }
-      pin2val[pinkey(dpin)] = Val{result, W, out_signed};
+      Val out_val{result, W, out_signed};
+      if (x_dontcare_) {
+        // Undef bit-plane propagation (lec.gold_x=ignore, REF side). Exact for
+        // Mux/Hotmux (an ITE over the arms' planes — the invalid-payload idiom
+        // `valid ? data : X` stays checkable on the valid path); conservative
+        // whole-value smear for every other op with an unknown operand.
+        bool any_undef = false;
+        for (const auto& v : all) {
+          if (!v.x_mask.isNull()) {
+            any_undef = true;
+            break;
+          }
+        }
+        if (any_undef) {
+          auto zero_w = tm_.mkBitVector(static_cast<uint32_t>(W), 0);
+          auto ones_w = tm_.mkTerm(Kind::BITVECTOR_NOT, {zero_w});
+          if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
+            const Val&       sel = pid(0)[0];
+            std::vector<Val> arms;
+            for (hhds::Port_id p = 1;; ++p) {
+              auto it = by_pid.find(p);
+              if (it == by_pid.end()) {
+                break;
+              }
+              arms.push_back(it->second.front());
+            }
+            if (!sel.x_mask.isNull() || arms.empty()) {
+              out_val.x_mask = ones_w;  // unknown selector: everything may be X
+            } else {
+              auto arm_xm = [&](const Val& a) -> Term {
+                Val aw = a;
+                aw.width = a.width;
+                Term u = fit_x_mask_to(tm_, aw, W);
+                return u.isNull() ? zero_w : u;
+              };
+              Term u = arm_xm(arms.back());
+              for (int k = static_cast<int>(arms.size()) - 2; k >= 0; --k) {
+                int64_t key  = (op == Ntype_op::Mux) ? k : (int64_t{1} << k);
+                Term    cond = tm_.mkTerm(Kind::EQUAL, {sel.term, bv_const(tm_, sel.width, static_cast<uint64_t>(key))});
+                u            = tm_.mkTerm(Kind::ITE, {cond, arm_xm(arms[k]), u});
+              }
+              out_val.x_mask = u;
+            }
+          } else {
+            // any operand dynamically unknown anywhere -> whole result unknown
+            Term any;
+            for (const auto& v : all) {
+              if (v.x_mask.isNull()) {
+                continue;
+              }
+              auto zero_v = tm_.mkBitVector(static_cast<uint32_t>(v.width < 1 ? 1 : v.width), 0);
+              Term nz     = tm_.mkTerm(Kind::DISTINCT, {v.x_mask, zero_v});
+              any         = any.isNull() ? nz : tm_.mkTerm(Kind::OR, {any, nz});
+            }
+            out_val.x_mask = tm_.mkTerm(Kind::ITE, {any, ones_w, zero_w});
+          }
+        }
+      }
+      pin2val[pinkey(dpin)] = out_val;
       {
         static const std::set<uint64_t> dbg_nodes = [] {
           std::set<uint64_t> s;
@@ -1502,13 +1601,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // din: the value the FIRST stage latches each cycle (no enable/reset yet).
     bool has_din = false;
     Term din;
+    Term din_xm;  // undef plane of din, fitted to w (null = fully known)
     if (auto din_d = hier_sink_driver(node, "din"); !din_d.is_invalid()) {
       Val dv = driver_val(din_d, ok);
       if (!ok) {
         return fail("flop '" + gu::debug_name(node) + "' din not encodable");
       }
-      din     = fit(dv, w);
-      has_din = true;
+      din       = fit(dv, w);
+      din_xm = fit_x_mask_to(tm_, dv, w);
+      has_din   = true;
     }
 
     // enable: a low write-enable holds the whole shift register (no din=q
@@ -1577,7 +1678,31 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         nval = tm_.mkTerm(Kind::ITE, {rst_hot, initv, nval});
       }
       std::string key = (k + 1 < depth) ? (nm + "\x02p" + std::to_string(k)) : nm;
-      out.outputs[std::string("\x01nxt:") + key] = Val{nval, w, sgn};
+      Val         nv{nval, w, sgn};
+      if (x_dontcare_) {
+        // Mirror the next-state mux over the undef planes so a ?-fed flop's
+        // next-state compare can be masked (the write path may carry X; the
+        // hold path inherits the Q's plane; a reset override is known).
+        Term self_u = (k + 1 < depth) ? fit_x_mask_to(tm_, internals[static_cast<size_t>(k)], w) : fit_x_mask_to(tm_, qv, w);
+        Term src_u  = (k == 0) ? (has_din ? din_xm : self_u)
+                               : fit_x_mask_to(tm_, internals[static_cast<size_t>(k - 1)], w);
+        if (!self_u.isNull() || !src_u.isNull()) {
+          auto zw = tm_.mkBitVector(static_cast<uint32_t>(w), 0);
+          Term su = self_u.isNull() ? zw : self_u;
+          Term du = src_u.isNull() ? zw : src_u;
+          Term nu = du;
+          if (enable_const_false) {
+            nu = su;
+          } else if (has_enable) {
+            nu = tm_.mkTerm(Kind::ITE, {en_hot, du, su});
+          }
+          if (has_reset) {
+            nu = tm_.mkTerm(Kind::ITE, {rst_hot, zw, nu});
+          }
+          nv.x_mask = nu;
+        }
+      }
+      out.outputs[std::string("\x01nxt:") + key] = nv;
       if (const char* dump_enc = std::getenv("LEC_DUMP_ENC");
           dump_enc != nullptr && dump_enc[0] != '\0' && nm.find(dump_enc) != std::string::npos) {
         std::string ts = nval.toString();
@@ -1775,7 +1900,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // other reader's correctly-1-bit output. fit() truncates the driver to it.
       ow = 1;
     }
-    out.outputs[d.name] = Val{fit(v, ow), ow, !gio->is_unsign(d.name)};
+    Val ov{fit(v, ow), ow, !gio->is_unsign(d.name)};
+    ov.x_mask            = fit_x_mask_to(tm_, v, ow);
+    out.outputs[d.name] = ov;
   }
 
   return out;

@@ -1049,7 +1049,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
             fsgn[key] = !graph_util::is_unsign(q);
           }
           if (!init.count(key)) {
-            if (auto iv = flop_initial(tm, node, w)) {
+            if (auto iv = flop_initial(tm, node, w, opts.gold_x != "zero")) {
               init[key] = *iv;
             }
           }
@@ -1330,7 +1330,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           for (const auto& [key, pv] : prev_next) {
             cvc5::Term s = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(pv.width)), "st" + std::to_string(uid++));
             solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {s, pv.term}));
-            cur[key] = Val{s, pv.width, pv.is_signed};
+            Val nv{s, pv.width, pv.is_signed};
+            nv.x_mask = pv.x_mask;  // ref X-plane threads across the cycle boundary (impl's is null)
+            cur[key] = nv;
           }
         };
         pin_state(ref_state, ns_ref);
@@ -1385,7 +1387,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         sh_impl[k] = v;
       }
 
+      enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (lec.gold_x)
       Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(cyc) + "_", &ref_mem, &ref_reads);
+      enc.set_x_dontcare(false);
       if (!re.ok) {
         res.verdict  = Verdict::Unknown;
         res.detail  += "; ref encode failed: " + re.error;
@@ -1416,6 +1420,12 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           int        w    = std::max(rv.width, it->second.width);
           cvc5::Term rfit = fit_to(tm, rv, w);
           cvc5::Term ifit = fit_to(tm, it->second, w);
+          if (cvc5::Term u = fit_x_mask_to(tm, rv, w); !u.isNull()) {
+            // ref X = don't-care: exclude ref-unknown bits from the compare
+            cvc5::Term keep = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {u});
+            rfit            = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {rfit, keep});
+            ifit            = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {ifit, keep});
+          }
           cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {rfit, ifit});
           bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
           decomp_diffs.push_back({name + "@" + std::to_string(cyc), diff});
@@ -1959,7 +1969,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   enc.set_collapse_defs(collapse_ptr);
   enc.set_state_boxes(state_boxes_ptr);
   enc.set_shared_bbox(&shared_bbox);
+  enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (lec.gold_x)
   Encoded re = enc.encode(ref, &shared, "", &shared_mems);
+  enc.set_x_dontcare(false);
   if (!re.ok) {
     res.verdict  = Verdict::Unknown;
     res.detail  += "; ref encode failed: " + re.error;
@@ -2036,7 +2048,17 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       continue;
     }
     int        w    = std::max(rv.width, it->second.width);
-    cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, rv, w), fit_to(tm, it->second, w)});
+    cvc5::Term rfit = fit_to(tm, rv, w);
+    cvc5::Term ifit = fit_to(tm, it->second, w);
+    if (cvc5::Term u = fit_x_mask_to(tm, rv, w); !u.isNull()) {
+      // ref X = don't-care (lec.gold_x=ignore): exclude ref-unknown bits. The
+      // shared current-state hypothesis already binds ref X-state to the
+      // impl's value, so this masks exactly the ref-side don't-care choices.
+      cvc5::Term keep = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {u});
+      rfit            = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {rfit, keep});
+      ifit            = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {ifit, keep});
+    }
+    cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {rfit, ifit});
     bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
     ind_diffs.push_back({display_name(name), diff});
   }

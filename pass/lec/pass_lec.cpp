@@ -38,6 +38,12 @@ void Pass_lec::setup() {
                        "read_verilog -sv) | slang (load the yosys-slang plugin and read_slang; needed for "
                        "SystemVerilog packed-struct sources like CIRCT/firtool output)",
                        "verilog");
+  m.add_label_optional("gold_x",
+                       "reference-side X semantics (cvc5 engines; the analogue of yosys miter "
+                       "-ignore_gold_x): ignore (default; a ref constant's ?/X bits are don't-care — "
+                       "excluded from the compare, any impl value accepted) | zero (legacy: ?/X bits "
+                       "silently concretized to 0 on both sides)",
+                       "ignore");
   m.add_label_optional("bound", "BMC / induction depth bound k", "6");
   m.add_label_optional("timeout", "per-query cvc5 wall-clock seconds (0 = unbounded; default bounds the CLI so a hard miter degrades to UNKNOWN instead of freezing)", "120");
   m.add_label_optional("witness", "print the counterexample/witness on Refuted", "true");
@@ -93,6 +99,7 @@ void Pass_lec::lec(Eprp_var& var) {
   lec::Lec_options o;
   o.engine  = std::string{var.get("engine", "auto")};
   o.solver  = std::string{var.get("solver", "cvc5")};
+  o.gold_x  = std::string{var.get("gold_x", "ignore")};
   o.bound   = str_tools::to_i(var.get("bound", "6"));
   o.timeout = str_tools::to_i(var.get("timeout", "120"));
   o.witness = parse_bool(var.get("witness", "true"));

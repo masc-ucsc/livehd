@@ -50,6 +50,14 @@ struct Query_result {
 
 // Discharge / engine knobs (filled from the lec.* set-options).
 struct Lec_options {
+  // Reference-side X semantics — the cvc5 analogue of yosys `miter
+  // -ignore_gold_x`. "ignore" (default): a ref constant's '?' bits source an
+  // undef bit-plane; the miters exclude ref-unknown output/next-state bits from
+  // the compare, and the shared state hypothesis binds ref X-state to the
+  // impl's value (any impl choice is a legal resolution of a ref don't-care).
+  // "zero": legacy behavior — '?' bits silently concretized to 0 on BOTH sides.
+  std::string gold_x = "ignore";
+
   std::string engine  = "bmc";   // bmc | ind (k-induction) | ic3 | auto (portfolio). This is
                                  // the programmatic-API fallback (a single, fork-free engine for
                                  // in-pass design-queries); the `lhd lec` CLI defaults to `auto`.

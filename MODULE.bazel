@@ -56,14 +56,13 @@ git_override(
 
 # hlop (Dlop value type + slop/dlop execution layer)
 bazel_dep(name = "hlop", version = "0.2.0")
-# Pointing at top of tree (../hlop) for ongoing co-development. Restore the
-# git_override below once ../hlop is at a pushed commit and the pin is bumped.
-local_path_override(module_name = "hlop", path = "../hlop")
-# git_override(
-#     module_name = "hlop",
-#     remote = "https://github.com/masc-ucsc/hlop.git",
-#     commit = "d29d20ec2a469a4a30802f071807e76631e088c2",  # from_chars fast path in from_pyrope (int64-fitting literals)
-# )
+git_override(
+    module_name = "hlop",
+    remote = "https://github.com/masc-ucsc/hlop.git",
+    commit = "d229eb14c026bd1128cc6094928abfe4f3f1a35a",  # top of tree
+)
+# For local co-development swap the git_override above for:
+# local_path_override(module_name = "hlop", path = "../hlop")
 
 # slang (fmt required by slang CMake)
 http_archive(
@@ -136,15 +135,13 @@ http_archive(
 
 # HHDS
 bazel_dep(name = "hhds", version = "0.2.0")
-# PIN-RESTORE PENDING: local override carries the case-sensitive name-map revert
-# (str_ci.hpp -> str_hash.hpp, Name_hash/Name_eq). Restore the git_override below
-# once ../hhds is committed + pushed and the pin bumped.
-local_path_override(module_name = "hhds", path = "../hhds")
-# git_override(
-#     module_name = "hhds",
-#     remote = "https://github.com/masc-ucsc/hhds.git",
-#     commit = "abdd0c55372276c782bc8a28867cda4c710cee3f",  # attr slot-vector + try_get/get_or; GraphLibrary writer-preferring registry lock (fixes high-core create/find livelock)
-# )
+git_override(
+    module_name = "hhds",
+    remote = "https://github.com/masc-ucsc/hhds.git",
+    commit = "9f34c8578f6fa58962d2044a0122a91e74068493",  # top of tree
+)
+# For local co-development swap the git_override above for:
+# local_path_override(module_name = "hhds", path = "../hhds")
 
 # prpparse — hand-written recursive-descent Pyrope parser; the inou/prp front-end
 # (it replaced the tree-sitter-pyrope grammar, so neither @tree-sitter nor
@@ -153,24 +150,16 @@ local_path_override(module_name = "hhds", path = "../hhds")
 # LiveHD's core diag.hpp / parser.hpp); see //packages:prpparse.BUILD.
 # To bump the pin, recompute integrity via:
 #   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip | openssl dgst -sha256 -binary | base64
-# Pinned to 00f1df0 (sim test-syntax: dotted `test name(params)`, `tick`, `step`).
+# Pinned to 3776315 (top of tree).
 # For local co-development swap this for:
 #   new_local_repository(name = "prpparse", build_file = "//packages:prpparse.BUILD", path = "../tree-sitter-pyrope/prpparse")
-# LOCAL CO-DEVELOPMENT OVERRIDE (sim VCD clock/reset work, 2026-06-28) — RESTORE
-# the http_archive pin below once the prpparse `tick clocks=/resets=` change is
-# committed upstream and the integrity recomputed.
-new_local_repository(
+http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    path = "../tree-sitter-pyrope/prpparse",
+    integrity = "sha256-twiRA2jTW9WH71KC55h/rsDoYWneNf2Dkmevtxb72DY=",  # 3776315 (same archive as @tree_sitter_pyrope below)
+    strip_prefix = "tree-sitter-pyrope-3776315064eacd11cd174c1d83ac837014693066/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/3776315064eacd11cd174c1d83ac837014693066.zip"],
 )
-# http_archive(
-#     name = "prpparse",
-#     build_file = "//packages:prpparse.BUILD",
-#     integrity = "sha256-AxeMfrMJxojFGmNsMsy2FjHPkcct+MInjxq+HrOZUYo=",  # 00f1df0 (same archive as @tree_sitter_pyrope below)
-#     strip_prefix = "tree-sitter-pyrope-00f1df07ad5542f6bc67d7531ee1995c031e2019/prpparse",
-#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/00f1df07ad5542f6bc67d7531ee1995c031e2019.zip"],
-# )
 
 # tree-sitter runtime — the incremental-parsing C library (libtree-sitter).
 # Only the Pyrope *formatter* (`lhd pyrope fmt`, @tree_sitter_pyrope//:prpfmt)
@@ -202,9 +191,9 @@ http_archive(
 http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-AxeMfrMJxojFGmNsMsy2FjHPkcct+MInjxq+HrOZUYo=",  # 00f1df0 (same archive as @prpparse above)
-    strip_prefix = "tree-sitter-pyrope-00f1df07ad5542f6bc67d7531ee1995c031e2019",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/00f1df07ad5542f6bc67d7531ee1995c031e2019.zip"],
+    integrity = "sha256-twiRA2jTW9WH71KC55h/rsDoYWneNf2Dkmevtxb72DY=",  # 3776315 (same archive as @prpparse above)
+    strip_prefix = "tree-sitter-pyrope-3776315064eacd11cd174c1d83ac837014693066",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/3776315064eacd11cd174c1d83ac837014693066.zip"],
 )
 # LOCAL OVERRIDE for prpfmt co-development — swap the http_archive above for:
 # new_local_repository(
