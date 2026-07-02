@@ -2557,8 +2557,16 @@ private:
           error_here("upass.tolg: a multi-output instance result is read by a single output-port name");
           return;
         }
-        const auto&           pname = lnast_->get_name(idx);
-        const Lnast_io_entry* oe    = nullptr;
+        // The index is a string CONST: a bracket read `inst["port"]` reaches
+        // here with the surrounding quotes still on the name (`'rdata'`),
+        // while the dot form (`inst.port`) is bare — unquote before matching
+        // the output-port list (same trap as the quoted mod-import callee).
+        std::string_view pname = lnast_->get_name(idx);
+        if (pname.size() >= 2
+            && ((pname.front() == '\'' && pname.back() == '\'') || (pname.front() == '"' && pname.back() == '"'))) {
+          pname = pname.substr(1, pname.size() - 2);
+        }
+        const Lnast_io_entry* oe = nullptr;
         for (const auto& e : srt->second.outputs) {
           if ((e.name == pname)) {
             oe = &e;
@@ -3854,13 +3862,29 @@ private:
     const std::string dst_name{lnast_->get_name(dst)};
     const bool is_reg  = reg_map_.contains(dst_name) && reg_info_.contains(dst_name);
     const bool is_wire = !is_reg && wire_names_.contains(dst_name);
-    Val        vv;
-    if ((is_reg || is_wire) && Lnast_ntype::is_ref(lnast_->get_type(val)) && lnast_->get_name(val) == dst_name) {
-      // RMW base = current din accumulator if a prior partial write set it,
-      // else the committed value (q / buffer output) via the name.
-      auto dit = pin_map_.find(din_key(dst_name));
-      vv       = dit != pin_map_.end() ? Val{dit->second, mw_lookup(din_key(dst_name))} : set_mask_base(val);
-    } else {
+    // RMW base = current din accumulator if a prior partial write set it, else
+    // the committed value (q / buffer output) via the name. This must key off
+    // the BASE OPERAND's name, not just dst: prp2lnast lowers `r#[lo..=hi] = x`
+    // to a copy-temp shape (`set_mask %t, r, mask, x` + `r = %t`), so dst is a
+    // TEMP while the read of `r` still needs the accumulated value — resolving
+    // it to q made the SECOND conditional partial write rebuild its whole-word
+    // image from stale q and silently drop the first write when both enables
+    // fired (the DataModule__64entry per-entry register file: entry 63's write
+    // vanished under a same-cycle entry-62 write).
+    Val  vv;
+    bool base_from_accum = false;
+    if (Lnast_ntype::is_ref(lnast_->get_type(val))) {
+      const std::string val_name{lnast_->get_name(val)};
+      const bool vreg  = reg_map_.contains(val_name) && reg_info_.contains(val_name);
+      const bool vwire = !vreg && wire_names_.contains(val_name);
+      if (vreg || vwire) {
+        if (auto dit = pin_map_.find(din_key(val_name)); dit != pin_map_.end()) {
+          vv              = Val{dit->second, mw_lookup(din_key(val_name))};
+          base_from_accum = true;
+        }
+      }
+    }
+    if (!base_from_accum) {
       vv = set_mask_base(val);
     }
 

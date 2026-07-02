@@ -402,22 +402,31 @@ bool Slang_context::assign_struct_whole(const slang::ast::ValueSymbol& sym, cons
   }
 
   // `io = io2` whole copy from a sibling bundle struct: copy matching leaves.
+  // Gate on the source ACTUALLY having leaves (struct_var_info_), not just on
+  // the is_scalar_struct_var predicate: a whole-copied/deep-accessed source is
+  // DECLARED flat (no leaves) even when the predicate holds at this later call
+  // (CtrlBlock's `delayedWriteBack_1_bits_redirect =
+  // delayedNotFlushedWriteBack_1_bits_redirect` emitted reads of `.bits`/
+  // `.valid` leaves that were never declared -> "read of undefined variable").
+  // A flat source falls through to the whole-value slice below, which reads it
+  // per its real (flat) representation.
   if (r->kind == ExpressionKind::NamedValue) {
     const auto& osym = r->as<slang::ast::NamedValueExpression>().symbol;
     if (is_scalar_struct_var(osym)) {
       if (!declared_.contains(&osym)) {
         declare_value_symbol(osym, /*force_reg=*/false);
       }
-      auto       oit        = struct_var_info_.find(&osym);
-      const bool o_is_tuple = oit != struct_var_info_.end() && oit->second.is_tuple;
-      note_write(sym, current_assign_nonblocking_, rhs.sourceRange.start());
-      for (const auto& f : fields) {
-        // Read the source field per the SOURCE struct's representation.
-        auto src = o_is_tuple ? read_struct_field_get(lname_of(osym), f.name)
-                              : read_leaf(absl::StrCat(lname_of(osym), ".", f.name));
-        put(f.name, src);
+      if (auto oit = struct_var_info_.find(&osym); oit != struct_var_info_.end()) {
+        const bool o_is_tuple = oit->second.is_tuple;
+        note_write(sym, current_assign_nonblocking_, rhs.sourceRange.start());
+        for (const auto& f : fields) {
+          // Read the source field per the SOURCE struct's representation.
+          auto src = o_is_tuple ? read_struct_field_get(lname_of(osym), f.name)
+                                : read_leaf(absl::StrCat(lname_of(osym), ".", f.name));
+          put(f.name, src);
+        }
+        return true;
       }
-      return true;
     }
   }
 

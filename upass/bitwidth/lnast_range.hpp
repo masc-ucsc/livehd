@@ -306,8 +306,11 @@ struct Lnast_range {
     return bounded(lo, hi);
   }
 
-  // Logical shift left: result = [min << b_lo, max << b_hi].
-  // Conservative: returns unbounded when b is not bounded-positive.
+  // Logical shift left. The result envelope must cover EVERY shift in
+  // [amt.min, amt.max]: a negative endpoint shifted by MORE gets more
+  // negative, a positive one larger — evaluate both value endpoints at both
+  // extreme shifts. Conservative: returns unbounded when b is not
+  // bounded-positive or any candidate overflows int64.
   Lnast_range shl(const Lnast_range& amt) const noexcept {
     if (unbounded || amt.unbounded || amt.min < 0) {
       return make_unbounded();
@@ -316,28 +319,40 @@ struct Lnast_range {
       return make_unbounded();
     }
     using i128          = __int128;
-    i128           lo   = (i128)min << amt.min;
-    i128           hi   = (i128)max << amt.max;
+    const i128     c[4] = {(i128)min << amt.min, (i128)min << amt.max, (i128)max << amt.min, (i128)max << amt.max};
+    i128           lo   = c[0];
+    i128           hi   = c[0];
+    for (int i = 1; i < 4; ++i) {
+      lo = c[i] < lo ? c[i] : lo;
+      hi = c[i] > hi ? c[i] : hi;
+    }
     constexpr i128 kMin = (i128)std::numeric_limits<int64_t>::min();
     constexpr i128 kMax = (i128)std::numeric_limits<int64_t>::max();
     if (lo < kMin || hi > kMax) {
       return make_unbounded();
     }
-    return bounded((int64_t)std::min(lo, hi), (int64_t)std::max(lo, hi));
+    return bounded((int64_t)lo, (int64_t)hi);
   }
 
-  // Arithmetic shift right: conservative when b is unknown.
+  // Arithmetic shift right. Same both-endpoints-at-both-extreme-shifts rule
+  // as shl: the old form shifted BOTH endpoints by amt.min only, so
+  // `2047 >>> [0..10]` stamped [2047,2047] while the folded value was 1 — a
+  // false "does not fit its declared range" error (the VIAluFixPoint /
+  // ExeUnitImp_13 regen-.v re-read cluster). Conservative when b is unknown.
   Lnast_range sra(const Lnast_range& amt) const noexcept {
     if (unbounded || amt.unbounded || amt.min < 0) {
       return make_unbounded();
     }
-    int64_t shift = amt.min;  // shift by minimum narrows range the least
-    if (shift > 63) {
-      shift = 63;
+    const int64_t s_lo = amt.min > 63 ? 63 : amt.min;
+    const int64_t s_hi = amt.max > 63 ? 63 : amt.max;
+    const int64_t c[4] = {min >> s_lo, min >> s_hi, max >> s_lo, max >> s_hi};
+    int64_t       lo   = c[0];
+    int64_t       hi   = c[0];
+    for (int i = 1; i < 4; ++i) {
+      lo = std::min(lo, c[i]);
+      hi = std::max(hi, c[i]);
     }
-    int64_t lo = min >> shift;
-    int64_t hi = max >> shift;
-    return bounded(std::min(lo, hi), std::max(lo, hi));
+    return bounded(lo, hi);
   }
 
 private:

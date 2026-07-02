@@ -282,6 +282,12 @@ cc_direct_headers(
             # Known-failing semantic trackers. Run via the fixme targets below.
             "tests/equiv/async_reset_enable.prp",
             "tests/equiv/latch_enable_hold.prp",
+            # struct_init_whole_read: the golden's nested-struct '{...} net
+            # initializers exceed yosys read_verilog, so the forward lgcheck
+            # miter never completes (INCONCLUSIVE, not a refute). The reverse
+            # prp-v2prp-struct_init_whole_read (cvc5, slang-read) is the real
+            # guard for the slang net-initializer store-drop fix and passes.
+            "tests/equiv/struct_init_whole_read.prp",
         ],
     )
 ]
@@ -343,6 +349,9 @@ sh_test(
     for base in [
         "async_reset_enable",
         "latch_enable_hold",
+        # yosys-reader gap, not a semantic tracker: see the equiv-glob exclude
+        # note; the cvc5 prp-v2prp direction is the live guard.
+        "struct_init_whole_read",
     ]
 ]
 
@@ -365,13 +374,6 @@ sh_test(
 # green is the fix:
 #   bazel test //inou/prp:prp-v2prp-mem_rom --test_tag_filters=
 _V2PRP_FIXME = [
-    # cvc5 mem-cut encoder: the ref Memory and the slang reconstruction of a
-    # 2-entry `reg [7:0] data[1:0]` (ONE packed 16-bit flop) have INDEPENDENT free
-    # uninitialized states, so a we=0 read of committed state diverges. Needs a
-    # Memory(size x bits) <-> single-flop(size*bits) initial-state bridge (the
-    # sync-read latency sibling mem_pending_sync_init is now fixed via next_read).
-    # Tracked on the lec roadmap (todo/livehd/lec.html, M4 arrays).
-    "mem_const_idx",
     # the original .prp is a DELIBERATELY-broken generics repro (the `T(a)`
     # constructor does not lower — see the file header); the emitted Pyrope is
     # correct, but the reference itself will not compile, so it cannot be the LEC
@@ -445,8 +447,10 @@ _V2PRP_FIXME = [
         ],
         deps = ["//inou/yosys:scripts"],
         # sim_lg_atomic_feedback now compiles: cgen_sim flattens the false-loop
-        # pure-comb sub-instance (flatten_false_loop_subs). The rest are still gaps.
-        tags = [] if name == "sim_lg_atomic_feedback" else ["fixme"],
+        # pure-comb sub-instance (flatten_false_loop_subs). sim_prp_packed_selfref
+        # now compiles too: cgen_sim splits the false WORD-level packed-wire cycle
+        # (split_packed_selfref_wires). The rest are still gaps.
+        tags = [] if name in ("sim_lg_atomic_feedback", "sim_prp_packed_selfref") else ["fixme"],
     )
     for name, mode in {
         "sim_dontcare_ctrl": "exact-diff",
@@ -584,7 +588,7 @@ _SIMEQ = [
     "reg_hold_no_else", "reg_out_feedforward", "reg_tuple_reset", "rt_bool_cast",
     "rt_int_output", "rt_sat_s", "rt_sat_u", "rt_typecast", "rt_wrap_noop", "rt_wrap_reassign",
     "rt_wrap_s", "rt_wrap_sub", "rt_wrap_sum", "rt_wrap_u", "shift_combo_i8", "shift_combo_i8b",
-    "sim_lg_atomic_feedback",
+    "sim_lg_atomic_feedback", "sim_prp_packed_selfref",
     "shift_nested_sra", "shift_sra_unsigned", "signed_one_bit_cmp", "splice_merge", "trivial_if",
     "varargs_add", "wire_comb", "wire_reg", "wire_reset", "wire_ring", "wire_typed",
 ]
@@ -596,15 +600,16 @@ _SIMEQ = [
 #       Sub instance (its output feeds back into one of its own inputs via parent
 #       logic). Needs Stage-1 selective flatten of the offending instance before
 #       cgen.sim. Tracked in cgen_sim_false_comb_loop.
-#   * sim_prp_packed_selfref : a false WORD-level cycle -- a packed value whose
-#       read slice and written slice are independent, but the sim schedules the
-#       whole packed word as one object. Needs bit-slice leaf splitting.
+#   * sim_prp_packed_selfref (NOW FIXED, promoted to _SIMEQ): a false WORD-level
+#       cycle -- a packed value whose read slice and written slice are independent,
+#       but the sim scheduled the whole packed word as one object. cgen_sim now
+#       redirects each disjoint Get_mask slice-read of an Or-of-disjoint-ranges net
+#       to the single operand driving it (split_packed_selfref_wires).
 #   * async_reset_enable / gen_type_cast : pre-existing fixme DUTs (async
 #       data-path reset; the deliberately-broken generics `T(a)` repro).
 # Run one: bazel test //inou/prp:prp-simeq-sim_lg_atomic_feedback --test_tag_filters=
 _SIMEQ_FIXME = [
     "async_reset_enable", "gen_type_cast",
-    "sim_prp_packed_selfref",
 ]
 
 [

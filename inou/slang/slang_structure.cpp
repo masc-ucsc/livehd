@@ -2226,6 +2226,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     }
   }
 
+
   // ── pass 4: emit ──────────────────────────────────────────────────────────
   // Cyclic drivers emit last (after the topologically-ordered ones); their nets
   // are declared `wire` (2c-wire), so a forward read binds to the resolved net.
@@ -2246,13 +2247,27 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         // never wrote them -> reads resolve to nil (collect_struct_pattern_assigns
         // only scans ContinuousAssign, missing the initializer form). Split the
         // initializer into per-field writes like the continuous-`assign x = '{...}`
-        // path. Safe when the struct is ALL-SCALAR (leaf<->whole round-trips cleanly,
-        // e.g. RvcExpander `_GEN` read whole). For a NESTED struct, split only when
-        // it is read BY-FIELD (StdExeUnit) — a nested whole-read-only struct
-        // (NewPipelineConnectPipe `_GEN` in `io = '{in: _GEN}`) keeps the whole-net
-        // assign, since splitting then re-reading it whole does not reassemble the
-        // nested field cleanly.
-        if (is_scalar_struct_var(ns) && (struct_is_all_scalar(ns) || struct_field_read_.contains(&ns))) {
+        // path — ALWAYS when the var is bundle-declared: an old narrower gate
+        // (all-scalar or read-by-field) left a NESTED struct that is read only
+        // WHOLE on the flat-store path, but a whole read of a scalar-struct-var
+        // ALSO resolves through the leaves, so that flat store was a dual
+        // identity the reads never saw (CtrlBlock's
+        // `_GEN_3923 = '{...cfVec[7].bits...}` consumed by a whole-concat:
+        // decl-only `= nil` in the emitted Pyrope -> "incompletely driven").
+        // Nested fields are flattened scalar leaves since the Type-B bundle
+        // work, so leaf<->whole round-trips cleanly for them too.
+        if (const char* dbg = std::getenv("SLANG_DUMP_NETINIT");
+            dbg != nullptr && ns.name.find(dbg) != std::string_view::npos) {
+          std::fprintf(stderr,
+                       "[SLANG_NETINIT] '%s' scalar_struct=%d all_scalar=%d field_read=%d deep_access=%d "
+                       "whole_copied=%d deep_written=%d\n",
+                       std::string(ns.name).c_str(), is_scalar_struct_var(ns) ? 1 : 0, struct_is_all_scalar(ns) ? 1 : 0,
+                       struct_field_read_.contains(&ns) ? 1 : 0, struct_deep_accessed_.contains(&ns) ? 1 : 0,
+                       struct_whole_copied_.contains(&ns) ? 1 : 0, struct_deep_written_.contains(&ns) ? 1 : 0);
+        }
+        if (is_scalar_struct_var(ns)
+            && (std::getenv("SLANG_NETINIT_OLDGATE") == nullptr || struct_is_all_scalar(ns)
+                || struct_field_read_.contains(&ns))) {
           current_assign_nonblocking_ = false;
           if (assign_struct_whole(ns, *ns.getInitializer())) {
             clear_pending_loc();
@@ -2819,6 +2834,15 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     }
     auto pi = flat_or_tinfo(oc.port->getType());
     auto ei = flat_or_tinfo(*oc.expr->type);
+    // KNOWN OPEN (ExeUnitImp_4/VSetRiWvf): an output port bound to a
+    // scalar-struct-var stores the FLAT name here while reads resolve through
+    // the leaves; the in-memory LNAST lowers correctly (tolg slices the flat
+    // store), but the .prp TEXT round-trip loses that relation (the leaf muts
+    // recompile as independent 0-init vars), so the regen Pyrope diverges.
+    // Splitting the store per-field here fixes the Pyrope side but the
+    // wire-leaf feedback shape then mis-lowers on the tolg/cgen .v path
+    // (VsetModule vtype feedback cone) — that .v-side lowering must be fixed
+    // FIRST, then this store can move onto the leaves.
     assign_to(*oc.expr, materialize_conversion(v, pi.bits, pi.is_signed, ei.bits, ei.is_signed));
   }
   clear_pending_loc();

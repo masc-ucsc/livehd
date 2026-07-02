@@ -249,6 +249,22 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Regression for the cvc5 LEC "phantom headroom bit" false REFUTE: a flop
+# declared wider on one side (cgen's signed spare-bit `reg [1:0]` for a u1
+# value) must share its power-on state at the MIN corresponding width, extended
+# on the wide side — a free headroom bit spuriously refutes an equivalent pair
+# (the DelayNWithValid shape). Also guards soundness: a genuinely-2-bit counter
+# vs a u1 twin must still REFUTE. Uses the equiv pair as data; cvc5-only.
+sh_test(
+    name = "lec_flop_init_headroom_test",
+    size = "large",
+    srcs = ["lec_flop_init_headroom_test.sh"],
+    data = [
+        "//inou/prp:equiv_tests",
+        "//lhd",
+    ],
+)
+
 # Regression for the slang reader lowering a scalar packed-struct variable as a
 # per-field BUNDLE (independent nets) instead of one flat packed bus: a struct
 # whose '{...} write computes a field from reads of its OTHER fields (the

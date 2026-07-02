@@ -457,20 +457,26 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     Val v;
     if (shared_inputs != nullptr) {
       if (auto it = shared_inputs->find(key); it != shared_inputs->end()) {
-        v           = it->second;
-        v.is_signed = sgn;
-        // query.cpp pre-builds this shared symbol at the MAX width seen across
-        // ref+impl, but THIS design's own real_width (w) can be narrower than
-        // that cross-design max (the other side declares the same flop wider).
-        // Always fit to the LOCAL w (extend OR truncate) so every term feeding
-        // this design's next-state ITE (din/self/source) agrees on width — a
-        // stale "only ever extends" check left v wider than w on that side,
+        v = it->second;
+        // query.cpp pre-builds this shared symbol at the MIN width seen across
+        // ref+impl (the value's width): a wider local flop (cgen's spare-sign-
+        // bit reg) EXTENDS it here, so the headroom bits are pinned to the
+        // value's extension instead of ranging free — a free headroom bit has
+        // no counterpart on the narrow side and spuriously refutes any design
+        // whose control reads the flop unmasked (`vld != 0`) before the first
+        // real write (see tests/equiv/flop_init_headroom). Fit BEFORE adopting
+        // the local sign: the extension must follow the SHARED symbol's own
+        // (narrow, value-semantics) signedness, not this side's container
+        // signedness. Always fit to the LOCAL w so every term feeding this
+        // design's next-state ITE (din/self/source) agrees on width — a stale
+        // "only ever extends" check left v wider than w on that side,
         // producing a width-mismatched ITE that crashes the cvc5 encode (the
         // worker then dies and the auto-portfolio swallows it as INCONCLUSIVE).
         if (v.width != w) {
           v.term  = fit(v, w);
           v.width = w;
         }
+        v.is_signed = sgn;
       }
     }
     if (v.term.isNull()) {
@@ -496,10 +502,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     Val         v   = seed_state(nm, w, sgn);
     bool        was_shared
         = shared_inputs != nullptr && shared_inputs->find(nm) != shared_inputs->end();
-    if (std::getenv("LEC_DUMP_ENC") != nullptr && nm.find("registers_regs_0") != std::string::npos
-        && nm.find("registers_regs_0_") == std::string::npos) {
-      std::fprintf(stderr, "[LEC_ENC pfx=%s] flop hier='%s' key='%s' shared=%d term=%s\n", std::string(prefix).c_str(),
-                   node.get_hier_name().c_str(), nm.c_str(), was_shared ? 1 : 0, v.term.toString().c_str());
+    if (const char* dump_enc = std::getenv("LEC_DUMP_ENC");
+        dump_enc != nullptr && (dump_enc[0] == '\0' || nm.find(dump_enc) != std::string::npos)) {
+      std::fprintf(stderr, "[LEC_ENC pfx=%s] flop hier='%s' key='%s' w=%d sgn=%d shared=%d term=%s\n",
+                   std::string(prefix).c_str(), node.get_hier_name().c_str(), nm.c_str(), w, sgn ? 1 : 0,
+                   was_shared ? 1 : 0, v.term.toString().c_str());
     }
     pin2val[pinkey(qpin)] = v;
     out.inputs[nm]        = v;
@@ -1571,6 +1578,16 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       std::string key = (k + 1 < depth) ? (nm + "\x02p" + std::to_string(k)) : nm;
       out.outputs[std::string("\x01nxt:") + key] = Val{nval, w, sgn};
+      if (const char* dump_enc = std::getenv("LEC_DUMP_ENC");
+          dump_enc != nullptr && dump_enc[0] != '\0' && nm.find(dump_enc) != std::string::npos) {
+        std::string ts = nval.toString();
+        if (ts.size() > 4000) {
+          ts.resize(4000);
+          ts += "...<truncated>";
+        }
+        std::fprintf(stderr, "[LEC_ENC pfx=%s] nxt '%s' stage=%d/%d w=%d nval=%s\n", std::string(prefix).c_str(),
+                     key.c_str(), k, depth, w, ts.c_str());
+      }
     }
   }
 

@@ -1451,6 +1451,15 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     auto a_dpin = get_driver(find_sink_pin(node, "a"));
     auto a_bits = bits_of(a_dpin);
     auto a      = get_expression(a_dpin);
+    // add_to_pin2var declares ONE-BIT-NARROWER (`reg [bits-2:0]`) only an
+    // UNSIGNED net whose driver is itself a Get_mask (the `_u` locals) — its
+    // top (sign) slot is dropped at declare and reads as 0. Every other
+    // unsigned net keeps its full raw width (ABC cell outputs, muxes), so the
+    // top-bit clamps below must key on THIS predicate, not on unsignedness
+    // alone (clamping a raw-width net replaced its REAL msb with 1'b0 — the
+    // abc_mem lgyosys refute).
+    const bool a_decl_dropped_bit = !a_dpin.is_invalid() && !is_const_pin(a_dpin) && is_unsign(a_dpin)
+                                    && type_op_of(a_dpin.get_master_node()) == Ntype_op::Get_mask;
     if (is_const_pin(a_dpin)) {
       // A bit-select of a CONSTANT operand: get_expression returns a parenthesized
       // literal `(N'sb1?...)`, and appending `[hi:lo]` produces invalid Verilog — a
@@ -1498,10 +1507,20 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
           if (mask_v.and_op(*Dlop::create_integer(int64_t{1} << i))->is_known_false()) {
             continue;
           }
-          if (sel.empty()) {
-            sel = absl::StrCat(a, "[", i, "]");
+          // Past-the-net bits: an unsigned driver is declared one bit narrower
+          // (its sign is always 0); a signed driver extends its top bit.
+          std::string bit;
+          if (a_bits > 0 && a_decl_dropped_bit && i >= a_bits - 1) {
+            bit = "1'b0";
+          } else if (a_bits > 0 && i >= a_bits) {
+            bit = absl::StrCat(a, "[", a_bits - 1, "]");
           } else {
-            sel = absl::StrCat(sel, ",", a, "[", i, "]");
+            bit = absl::StrCat(a, "[", i, "]");
+          }
+          if (sel.empty()) {
+            sel = bit;
+          } else {
+            sel = absl::StrCat(sel, ",", bit);
           }
         }
         final_expr = absl::StrCat("{", sel, "}");
@@ -1509,7 +1528,14 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
         // sign-replicate / extend forms below would fabricate a[-1]. Fall
         // through to the width-agnostic part-select forms instead.
       } else if (a_bits > 0 && range_begin >= static_cast<int>(a_bits)) {
-        final_expr = absl::StrCat("{", range_end - range_begin, "{", a, "[", a_bits - 1, "]}}");
+        // Entirely above the driver: replicate its sign. An UNSIGNED driver's
+        // sign bit is dropped at declare (reg [bits-2:0]) and is always 0 —
+        // replicate a literal 0 instead of indexing past the net.
+        if (a_decl_dropped_bit) {
+          final_expr = absl::StrCat("{", range_end - range_begin, "{1'b0}}");
+        } else {
+          final_expr = absl::StrCat("{", range_end - range_begin, "{", a, "[", a_bits - 1, "]}}");
+        }
       } else if (a_bits > 0 && range_end > static_cast<int>(a_bits) && range_begin == 0) {
         // Pure widening: let the assignment context extend the bare net per its
         // declared signedness (sign-extend a signed net, zero-extend unsigned).
@@ -1518,12 +1544,45 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
         // (reg [bits-2:0]), so a[bits-1] reads as undef (X) in yosys.
         final_expr = a;
       } else if (a_bits > 0 && range_end > static_cast<int>(a_bits)) {
-        auto top   = absl::StrCat("{{", range_end - a_bits, "{", a, "[", a_bits - 1, "]}}");
-        final_expr = absl::StrCat(top, ",", a, "[", a_bits - 1, ":", range_begin, "]}");
+        // Straddling slice: high part = sign replication, low part = a
+        // part-select. Same unsigned-decl trap as above: an unsigned driver is
+        // DECLARED one bit narrower, so a[a_bits-1] reads past the net (slang
+        // hard-errors "cannot refer to element N of reg[N-1:0]" when the regen
+        // .v is read back — the SRT16Divint/ExeUnitImp_14 category). For an
+        // unsigned driver the sign is a constant 0: emit zero-fill and clamp
+        // the part-select top to the declared msb.
+        if (a_decl_dropped_bit) {
+          auto decl_msb = a_bits - 2;
+          if (decl_msb >= range_begin) {
+            final_expr
+                = absl::StrCat("{{", range_end - (a_bits - 1), "{1'b0}},", a, "[", decl_msb, ":", range_begin, "]}");
+          } else {
+            final_expr = absl::StrCat("{", range_end - range_begin, "{1'b0}}");
+          }
+        } else {
+          auto top   = absl::StrCat("{{", range_end - a_bits, "{", a, "[", a_bits - 1, "]}}");
+          final_expr = absl::StrCat(top, ",", a, "[", a_bits - 1, ":", range_begin, "]}");
+        }
       } else if (range_begin == 0 && range_end >= out_bits) {
         final_expr = a;
       } else if (a_bits_to_use == 1) {
-        final_expr = absl::StrCat(a, "[", range_begin, "]");
+        // An unsigned driver's top (sign) bit is dropped at declare and is 0.
+        if (a_bits > 0 && a_decl_dropped_bit && range_begin >= a_bits - 1) {
+          final_expr = "1'b0";
+        } else {
+          final_expr = absl::StrCat(a, "[", range_begin, "]");
+        }
+      } else if (a_bits >= 2 && a_decl_dropped_bit && range_end - 1 >= a_bits - 1) {
+        // range_end == a_bits on an UNSIGNED driver: the top of the select is
+        // the dropped always-0 sign bit (`x[5:2]` of a reg [4:0] — slang
+        // hard-errors "cannot select range" on the regen .v re-read). Emit a
+        // zero-fill for it and clamp the part-select to the declared msb.
+        const auto decl_msb = a_bits - 2;
+        if (decl_msb >= range_begin) {
+          final_expr = absl::StrCat("{{", range_end - 1 - decl_msb, "{1'b0}},", a, "[", decl_msb, ":", range_begin, "]}");
+        } else {
+          final_expr = absl::StrCat(range_end - range_begin, "'b0");
+        }
       } else {
         final_expr = absl::StrCat(a, "[", range_end - 1, ":", range_begin, "]");
       }

@@ -46,7 +46,9 @@ else
 fi
 
 # The ROOT must be the internal reg `s`, named ahead of the inherited output.
-if echo "$OUT" | grep -q "STATE cut (root): s("; then
+# (The root clause lists ALL cuts diverging at the earliest cycle, sorted —
+# `s(` must appear within it.)
+if echo "$OUT" | grep -q "STATE cut(s) (root): .*s("; then
   echo "ok: first diverging internal cut = s (root)"
 else
   echo "FAIL: witness did not name the internal root cut 's'"; fail=1

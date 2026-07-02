@@ -1018,8 +1018,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     Io_name_map<Val> ref_state, impl_state;
     absl::flat_hash_set<std::string> bank_hold_keys;  // reset-less bank flops: hold across the reset prologue
     {
-      Io_name_map<int> fw;
-      Io_name_map<Val> init;
+      Io_name_map<int>  fw;
+      Io_name_map<bool> fsgn;  // sign of the NARROWEST decl (the value semantics of the shared init)
+      Io_name_map<Val>  init;
       auto                                  collect_flops = [&](hhds::Graph* g) {
         for (auto node : g->forward_hier()) {  // descend hierarchy: cut flops at every level
           if (graph_util::type_op_of(node) != Ntype_op::Flop) {
@@ -1034,8 +1035,18 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           if (w == 0) {
             w = 1;
           }
-          if (auto it = fw.find(key); it == fw.end() || w > it->second) {
-            fw[key] = w;  // max-width across both designs (bit-width trap)
+          // MIN width across both designs: the shared power-on symbol is the
+          // VALUE the two flops both hold; a wider decl (cgen's spare-sign-bit
+          // reg) EXTENDS it in seed_state per this sign, so its headroom bits
+          // start value-consistent instead of ranging free (a free headroom
+          // bit has no narrow-side counterpart and spuriously refutes designs
+          // whose control reads the flop unmasked before the first real write
+          // — see tests/equiv/flop_init_headroom). Widths written by the
+          // transition still use each side's full local width, so a REAL
+          // wide-vs-narrow divergence is still caught from the first write on.
+          if (auto it = fw.find(key); it == fw.end() || w < it->second) {
+            fw[key]   = w;
+            fsgn[key] = !graph_util::is_unsign(q);
           }
           if (!init.count(key)) {
             if (auto iv = flop_initial(tm, node, w)) {
@@ -1077,7 +1088,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         if (!phase_run && init.count(key)) {
           v = init.at(key);
         } else {
-          v = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), "s0_" + key), w, false};
+          v = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), "s0_" + key), w, fsgn.at(key)};
         }
         ref_state[key]  = v;
         impl_state[key] = v;
@@ -1148,6 +1159,117 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     // collapse to the same initial contents); threaded forward like flop state.
     Io_name_map<cvc5::Term> ref_mem = build_shared_mems("m0_");
     Io_name_map<cvc5::Term> impl_mem = ref_mem;
+
+    // ── Memory <-> single-wide-flop init bridge ───────────────────────────────
+    // A behavioral memory (one SMT array) on one design can appear on the OTHER
+    // design as ONE packed scalar flop of width size*bits: the slang reader lowers
+    // a const-indexed unpacked-array reg `reg [W] d[N]` to a single N*W-bit flop
+    // with bit-slice element accesses, while the Pyrope reference keeps it a
+    // Memory. (The inductive mem<->flop-bank bridge below matches a memory against
+    // N SEPARATE flops; this matches it against ONE wide flop.) Both are
+    // uninitialized here, so their initial states are INDEPENDENT free symbols
+    // (m0_<key> vs s0_<flop>) and a committed read before any write diverges even
+    // though the designs are equivalent. Tie the memory's initial array to
+    // array_from_bus(flop_init_bus) — entry i = bus[(i+1)*bits-1 : i*bits], entry
+    // 0 in the low bits, matching the encoder's array_from_bus and the slang
+    // flat-bus element packing. SOUND: the array becomes a deterministic FUNCTION
+    // of the flop's free init symbol (never a constant), so equal designs prove
+    // and a divergent written value still refutes on the write path.
+    {
+      // Per-design memory cut keys (shape-only occ, matching build_shared_mems).
+      auto collect_mem_keys = [&](hhds::Graph* g) {
+        Io_name_map<Mem_sig> out;
+        Io_name_map<int>     occ;
+        for (auto node : g->forward_class()) {
+          if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
+            continue;
+          }
+          Mem_sig sig = read_mem_sig(node);
+          if (sig.bits <= 0 || sig.size <= 0) {
+            continue;
+          }
+          std::string sg  = std::to_string(sig.size) + "x" + std::to_string(sig.bits);
+          std::string key = mem_state_key(sig, occ[sg]++);
+          out.emplace(key, sig);  // first occurrence wins (matches build_shared_mems)
+        }
+        return out;
+      };
+      // Per-design flop cut key -> width (hier-canon key, matching ref_state above).
+      auto collect_flop_w = [&](hhds::Graph* g) {
+        Io_name_map<int>        out;
+        hhds::Hier_opaque_scope sc(collapse_gids_ptr);
+        for (auto node : g->forward_hier()) {
+          if (graph_util::type_op_of(node) != Ntype_op::Flop) {
+            continue;
+          }
+          auto q = node.get_driver_pin(0);
+          if (q.is_invalid()) {
+            continue;
+          }
+          int w = real_width(q);
+          if (w == 0) {
+            w = 1;
+          }
+          auto key = eff(node.get_hier_name());
+          if (auto it = out.find(key); it == out.end() || w > it->second) {
+            out[key] = w;
+          }
+        }
+        return out;
+      };
+      auto ref_mem_keys  = collect_mem_keys(ref);
+      auto impl_mem_keys = collect_mem_keys(impl);
+      auto ref_flop_w    = collect_flop_w(ref);
+      auto impl_flop_w   = collect_flop_w(impl);
+
+      // Pair a memory owned by ONE design with a UNIQUE same-width wide flop on the
+      // other (require uniqueness so an arbitrary width collision does not mis-pair
+      // — sound either way, but a mis-pair would leave the block REFUTED, no worse
+      // than today's independent-init behavior).
+      auto try_bridge = [&](const Io_name_map<Mem_sig>& mem_side, const Io_name_map<Mem_sig>& other_mem_side,
+                            const Io_name_map<int>& mem_side_flops, const Io_name_map<int>& other_side_flops) {
+        for (const auto& [mkey, sig] : mem_side) {
+          if (other_mem_side.count(mkey)) {
+            continue;  // memory corresponds to a memory -> already shared, no bridge
+          }
+          auto sit = ref_mem.find(mkey);
+          if (sit == ref_mem.end()) {
+            continue;  // no shared array was built for this key
+          }
+          const int64_t total = static_cast<int64_t>(sig.size) * sig.bits;
+          std::string   cand;
+          int           n_cand = 0;
+          for (const auto& [fk, fw] : other_side_flops) {
+            if (fw != total || mem_side_flops.count(fk)) {
+              continue;  // width mismatch, or a flop shared with the memory side
+            }
+            cand = fk;
+            ++n_cand;
+          }
+          if (n_cand != 1) {
+            continue;  // no unique wide-flop counterpart
+          }
+          auto fvit = ref_state.find(cand);
+          if (fvit == ref_state.end() || fvit->second.width != total) {
+            continue;
+          }
+          cvc5::Term bus = fvit->second.term;  // the flop's free init symbol (s0_<flop>)
+          cvc5::Term arr = sit->second;        // base = shared free array; entries overwritten below
+          for (int i = 0; i < sig.size; ++i) {
+            auto op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT,
+                              {static_cast<uint32_t>((i + 1) * sig.bits - 1), static_cast<uint32_t>(i * sig.bits)});
+            cvc5::Term slice = tm.mkTerm(op, {bus});
+            arr = tm.mkTerm(cvc5::Kind::STORE,
+                            {arr, tm.mkBitVector(static_cast<uint32_t>(sig.addr_w), static_cast<uint64_t>(i)), slice});
+          }
+          ref_mem[mkey]  = arr;
+          impl_mem[mkey] = arr;
+        }
+      };
+      try_bridge(ref_mem_keys, impl_mem_keys, ref_flop_w, impl_flop_w);   // ref memory <-> impl wide flop
+      try_bridge(impl_mem_keys, ref_mem_keys, impl_flop_w, ref_flop_w);   // impl memory <-> ref wide flop
+    }
+
     // Sync-read (type==1) registered douts: a per-side latency-1 state, threaded
     // forward like memory state. Empty at cycle 0 (encode mints a fresh power-on
     // dout via the cycle prefix, flushed within the reset-hold window); each side
@@ -1538,9 +1660,30 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         }
         std::string root;
         if (state_bad >= 0 && state_bad + 1 <= first_bad) {
+          // wit_state iterates a hash map, so state_tok is an ARBITRARY member of
+          // the earliest diverging cycle's cut set — collect ALL cuts diverging at
+          // that same cycle (sorted) so the witness names the true root set, not a
+          // hash-order pick (a single wide-fanin bug diverges many flops at once).
+          std::vector<std::string> rtoks;
+          for (const auto& s : wit_state) {
+            if (s.cyc != state_bad) {
+              continue;
+            }
+            cvc5::Term rval = solver.getValue(s.rv);
+            cvc5::Term ival = solver.getValue(s.iv);
+            if (rval.isNull() || ival.isNull()) {
+              continue;
+            }
+            auto rs = rval.getBitVectorValue(10);
+            auto is = ival.getBitVectorValue(10);
+            if (rs != is) {
+              rtoks.push_back(display_name(s.key) + "(ref=" + rs + " impl=" + is + ")");
+            }
+          }
+          std::sort(rtoks.begin(), rtoks.end());
           std::string slbl = state_bad < reset_hold ? ("rst" + std::to_string(state_bad))
                                                     : ("s" + std::to_string(state_bad - reset_hold + 1));
-          root = "first diverging STATE cut (root): " + state_tok + " — state after step " + slbl
+          root = "earliest diverging STATE cut(s) (root): " + join_ordered(rtoks, 16) + " — state after step " + slbl
                + " (the diverging output inherits it); ";
         }
         res.witness = root + "first divergence at checked step " + std::to_string(first_bad - reset_hold + 1) + "/"
@@ -1605,8 +1748,18 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       if (w == 0) {
         w = 1;
       }
-      if (auto it = shared.find(key); it != shared.end() && it->second.width >= w) {
-        continue;  // keep the wider shared state symbol (see input note above)
+      // Keep the NARROWER decl (min width across designs — the opposite of the
+      // input rule above): the shared current-state symbol is the VALUE both
+      // flops hold, and the wider side (cgen's spare-sign-bit reg) EXTENDS it
+      // in seed_state per this sign. Sharing at the max instead leaves the
+      // wide side's headroom bit FREE with no narrow-side counterpart — an
+      // assumed current state the narrow design can never mirror, so the step
+      // spuriously diverges wherever control reads the flop unmasked (see
+      // tests/equiv/flop_init_headroom). The step's next-state comparison
+      // fits both sides to the max width, so the proven invariant is exactly
+      // wide' == extend(narrow') — a REAL width divergence still refutes.
+      if (auto it = shared.find(key); it != shared.end() && it->second.width <= w) {
+        continue;
       }
       bool       sgn = !graph_util::is_unsign(q);
       cvc5::Term t   = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), key);
