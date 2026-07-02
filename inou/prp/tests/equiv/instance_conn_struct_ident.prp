@@ -1,0 +1,19 @@
+/*
+:name: instance_conn_struct_ident
+:type: equiv
+:verilog_top: instance_conn_struct_ident.top
+:pyrope_top: instance_conn_struct_ident.top
+*/
+
+// Regression for the slang per-module collector-state clobber (the XiangShan
+// Alu_3 "io_out_valid stuck at 0" SIM-fail category). Lowering a submodule
+// instance recursively lowers the callee module, which rebuilds the
+// struct-classification collector sets; without saving/restoring the parent's
+// sets, every read lowered after the instance classified the '{...}'-assigned
+// struct net differently from its store (flat store vs bundle-leaf reads) and
+// folded to the leaves' 0-init. Semantically the golden forwards in_valid and
+// ctrl.rfWen (= in_bits bit 10) through a pass-through submodule.
+pub comb top(in_valid:u1, in_bits:u20) -> (out_valid:u1, out_r:u8) {
+  out_valid = in_valid
+  out_r = (in_bits >> 10) & 1
+}

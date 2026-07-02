@@ -1,0 +1,26 @@
+/*
+:name: struct_selfref_pattern
+:type: equiv
+:verilog_top: struct_selfref_pattern.top
+:pyrope_top: struct_selfref_pattern.top
+*/
+
+// Regression for the Type-C whole-net false combinational loop (the dominant
+// XiangShan Backend SIM-error / LEC-inconclusive family, DretEventModule et
+// al.). The golden's struct net is whole-'{...}'-assigned with later elements
+// reading earlier FIELDS of the same net and is whole-copied to the output —
+// acyclic per field, cyclic at whole-net granularity. The slang reader keeps
+// it a per-field bundle (leaves) so the sim schedule and the cvc5 encoder see
+// no cycle. Semantically: out = {V, PRVM[1:0], SDT, MPRV} where
+// SDT = ~V & in_sdt and MPRV = (PRVM==3) & in_mprv.
+pub comb top(in_v:u1, in_prv:u2, in_sdt:u1, in_mprv:u1) -> (out:u5) {
+  mut privState:u3 = 0
+  mut sdt:u1 = 0
+  mut mprv:u1 = 0
+  privState = (in_v << 2) | in_prv
+  sdt = ~in_v & in_sdt & 1
+  if in_prv == 3 {
+    mprv = in_mprv
+  }
+  out = (privState << 2) | (sdt << 1) | mprv
+}

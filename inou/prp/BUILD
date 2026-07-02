@@ -288,6 +288,20 @@ cc_direct_headers(
             # prp-v2prp-struct_init_whole_read (cvc5, slang-read) is the real
             # guard for the slang net-initializer store-drop fix and passes.
             "tests/equiv/struct_init_whole_read.prp",
+            # instance_conn_struct_ident: same yosys-reader gap (struct-typed
+            # internal wire in the golden). The reverse prp-v2prp direction
+            # (cvc5, slang-read) is the live guard for the slang per-module
+            # collector-state clobber fix (Alu_3 io_out_valid stuck at 0).
+            "tests/equiv/instance_conn_struct_ident.prp",
+            # struct_selfref_pattern: same yosys-reader gap. The reverse
+            # prp-v2prp direction (cvc5, slang-read) is the live guard for the
+            # Type-C whole-net false-loop bundle relaxation (DretEventModule).
+            "tests/equiv/struct_selfref_pattern.prp",
+            # instance_out_struct_ident: same yosys-reader gap AND a
+            # known-failing v2prp tracker (instance-output struct dual
+            # identity — the ExeUnitImp_4 / XiangShan fp-convert family root
+            # cause). Run via the fixme target below.
+            "tests/equiv/instance_out_struct_ident.prp",
         ],
     )
 ]
@@ -352,6 +366,12 @@ sh_test(
         # yosys-reader gap, not a semantic tracker: see the equiv-glob exclude
         # note; the cvc5 prp-v2prp direction is the live guard.
         "struct_init_whole_read",
+        "instance_conn_struct_ident",
+        "struct_selfref_pattern",
+        # instance-output struct dual identity: BOTH directions blocked until
+        # lower_instance's per-field output split lands (fix order in the
+        # KNOWN OPEN comment there). The .v is also a yosys-reader gap.
+        "instance_out_struct_ident",
     ]
 ]
 
@@ -388,6 +408,10 @@ _V2PRP_FIXME = [
     # async resets do not have a supported Pyrope source equivalent yet.
     "async_reset_enable",
     "latch_enable_hold",
+    # instance-output struct dual identity (ExeUnitImp_4 / fp-convert family
+    # root cause): v2prp REFUTES until lower_instance's per-field output split
+    # lands (fix order in slang_structure.cpp lower_instance's KNOWN OPEN).
+    "instance_out_struct_ident",
 ]
 
 [

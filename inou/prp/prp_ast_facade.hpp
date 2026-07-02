@@ -103,6 +103,48 @@ inline TSNode ts_node_named_child(TSNode n, uint32_t i) {
   return TSNode{};
 }
 
+// Linear sweep over a node's named children. An indexed loop
+// (`for (i < named_child_count) ts_node_named_child(n, i)`) rescans `kids`
+// from the front on every call — O(kids^2) — and generated Pyrope (v2prp)
+// puts 10^5+ statements in one scope, so any walker written that way stalls
+// for hours on files like XiangShan's Rob.prp. Iterate this range instead.
+struct TSNamedChildren {
+  const prpparse::Ast*           a;
+  const prpparse::Source_buffer* buf;
+  struct iterator {
+    const prpparse::Ast* const*    it;
+    const prpparse::Ast* const*    end;
+    const prpparse::Source_buffer* buf;
+    void      skip_unnamed() {
+      while (it != end && !(*it)->named) {
+        ++it;
+      }
+    }
+    TSNode    operator*() const { return TSNode{*it, buf}; }
+    iterator& operator++() {
+      ++it;
+      skip_unnamed();
+      return *this;
+    }
+    bool operator!=(const iterator& o) const { return it != o.it; }
+  };
+  iterator begin() const {
+    if (a == nullptr) {
+      return iterator{nullptr, nullptr, nullptr};
+    }
+    iterator b{a->kids.data(), a->kids.data() + a->kids.size(), buf};
+    b.skip_unnamed();
+    return b;
+  }
+  iterator end() const {
+    if (a == nullptr) {
+      return iterator{nullptr, nullptr, nullptr};
+    }
+    return iterator{a->kids.data() + a->kids.size(), a->kids.data() + a->kids.size(), buf};
+  }
+};
+inline TSNamedChildren ts_node_named_children(TSNode n) { return TSNamedChildren{n.a, n.buf}; }
+
 // Field role of child `i` (NUL-terminated; nullptr when the child has no field,
 // matching tree-sitter's ts_node_field_name_for_child).
 inline const char* ts_node_field_name_for_child(TSNode n, uint32_t i) {

@@ -267,6 +267,12 @@ private:
   // True for a scalar packed-struct VARIABLE we lower per-field (excludes ports,
   // clocked regs, and arrays — those keep their existing lowering).
   bool is_scalar_struct_var(const slang::ast::ValueSymbol& sym) const;
+  // Whole-copied struct whose single whole-net driver is a SELF-REFERENCING
+  // '{...}' pattern with one element per top field (CIRCT's `_out_output`
+  // idiom): the flat bus would be a false combinational loop, so it stays a
+  // bundle (per-field leaves) instead. Pure over the AST — cached by symbol.
+  bool whole_copied_selfref_pattern(const slang::ast::ValueSymbol& sym) const;
+  mutable absl::flat_hash_map<const slang::ast::ValueSymbol*, bool> selfref_pattern_cache_;
   const Struct_info::Field* find_struct_field(const Struct_info& si, std::string_view name) const;
   // Declare the per-field leaf nets (called from declare_value_symbol).
   void declare_struct_leaves(const slang::ast::ValueSymbol& sym);

@@ -1,0 +1,32 @@
+/*
+:name: instance_out_struct_ident
+:type: equiv
+:verilog_top: instance_out_struct_ident.top
+:pyrope_top: instance_out_struct_ident.top
+*/
+
+// KNOWN-FAILING tracker (fixme) — instance-OUTPUT struct dual identity, the
+// ExeUnitImp_4/VSetRiWvf category and the root cause of the XiangShan
+// fp-convert family fails (INT2FP/CVT64: Lzc instance struct output stored
+// FLAT, read via never-written 0-init leaves in the recompiled Pyrope).
+// The prp-v2prp direction REFUTES until lower_instance splits the output
+// binding per field (blocked on the tolg/cgen wire-leaf feedback lowering —
+// see the KNOWN OPEN comment in slang_structure.cpp lower_instance).
+// Semantically: r = {a==0, ~lzc3(a)} where lzc3 is the 4-case priority above.
+pub comb top(a:u8) -> (r:u4) {
+  mut d:u3 = 0
+  mut z:u1 = 0
+  if a & 0x80 {
+    d = 0
+  } elif a & 0x40 {
+    d = 1
+  } elif a & 0x20 {
+    d = 2
+  } else {
+    d = 7
+    if a == 0 {
+      z = 1
+    }
+  }
+  r = ((~d) & 7) | (z << 3)
+}

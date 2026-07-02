@@ -1,0 +1,25 @@
+/*
+:name: struct_init_whole_read
+:type: equiv
+:verilog_top: struct_init_whole_read.top
+:pyrope_top: struct_init_whole_read.top
+*/
+
+// Regression for the slang net-initializer store drop (the CtrlBlock
+// `_GEN_3923` "incompletely driven" category from the XiangShan Backend
+// sweep). The golden .v declares a NESTED-struct wire whose initializer is a
+// '{...} pattern reading fields of a const-indexed array-of-struct element,
+// and the wire is then consumed only WHOLE (inside a concat) — never by
+// field. The old emission gate split the initializer into per-field leaf
+// stores only for all-scalar or read-by-field structs, so this shape stored
+// to the FLAT name while every read resolved through the (never-written)
+// bundle leaves: the emitted Pyrope declared the wire `= nil` with no store
+// and failed "incompletely driven". A scalar-struct-var's reads always route
+// through its leaves, so the initializer must split whenever the var is
+// bundle-declared. Semantically the module forwards element 1's fields:
+// out = {foldpc, ev, instr} of cfVec[1].
+pub mod top(clock:u1, reset:u1,
+            io_cfVec_0_valid:u1, io_cfVec_0_bits:u14,
+            io_cfVec_1_valid:u1, io_cfVec_1_bits:u14) -> (io_out:u14@[]) {
+  io_out = io_cfVec_1_bits
+}

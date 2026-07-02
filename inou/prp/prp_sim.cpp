@@ -146,8 +146,8 @@ void dump_node(const std::string& src, TSNode n, int depth) {
     txt = txt.substr(0, 36);
   }
   std::fprintf(stderr, "%s[%s] '%s'\n", ind.c_str(), ts_node_type(n), txt.c_str());
-  for (uint32_t i = 0; i < ts_node_named_child_count(n); ++i) {
-    dump_node(src, ts_node_named_child(n, i), depth + 1);
+  for (TSNode c : ts_node_named_children(n)) {
+    dump_node(src, c, depth + 1);
   }
 }
 
@@ -184,8 +184,7 @@ std::string lvalue_name(const std::string& src, TSNode n) {
     return text_of(src, n);
   }
   if (t == "typed_identifier") {
-    for (uint32_t i = 0; i < ts_node_named_child_count(n); ++i) {
-      TSNode c = ts_node_named_child(n, i);
+    for (TSNode c : ts_node_named_children(n)) {
       if (ntype(c) == "identifier") {
         return text_of(src, c);
       }
@@ -251,8 +250,7 @@ std::vector<Param_raw> read_params_raw(const std::string& src, TSNode test) {
     out.push_back(cur);
     have = false;
   };
-  for (uint32_t i = 0; i < ts_node_named_child_count(inp); ++i) {
-    TSNode ci = ts_node_named_child(inp, i);
+  for (TSNode ci : ts_node_named_children(inp)) {
     if (ntype(ci) == "typed_identifier") {
       flush();
       cur       = Param_raw{};
@@ -441,8 +439,8 @@ public:
     }
     // collect body statements
     std::vector<TSNode> stmts;
-    for (uint32_t i = 0; i < ts_node_named_child_count(code); ++i) {
-      stmts.push_back(ts_node_named_child(code, i));
+    for (TSNode c : ts_node_named_children(code)) {
+      stmts.push_back(c);
     }
     // pass 1: discover scalar locals (every assigned lvalue identifier) and the
     // DUT instances used (a `mut acc = Module` declaration).
@@ -747,8 +745,8 @@ private:
         std::string m = ts_node_is_null(rv) ? std::string{} : rvalue_module(rv);
         if (!ts_node_is_null(rv) && ntype(rv) == "tuple_sq") {
           std::vector<std::string> elems;
-          for (uint32_t i = 0; i < ts_node_named_child_count(rv); ++i) {
-            elems.push_back(expr(ts_node_named_child(rv, i)));
+          for (TSNode c : ts_node_named_children(rv)) {
+            elems.push_back(expr(c));
           }
           arrays_[ln] = elems;
         } else if (!m.empty()) {
@@ -758,8 +756,8 @@ private:
         }
       }
     }
-    for (uint32_t i = 0; i < ts_node_named_child_count(n); ++i) {
-      discover_node(ts_node_named_child(n, i));
+    for (TSNode c : ts_node_named_children(n)) {
+      discover_node(c);
     }
   }
 
@@ -775,9 +773,8 @@ private:
     }
     if (t == "constant") {
       // wraps integer_literal / bool_literal / string
-      for (uint32_t i = 0; i < ts_node_named_child_count(n); ++i) {
-        TSNode c  = ts_node_named_child(n, i);
-        auto   ct = ntype(c);
+      for (TSNode c : ts_node_named_children(n)) {
+        auto ct = ntype(c);
         if (ct == "integer_literal") {
           return strip_sep(text_of(src_, c));
         }
@@ -799,9 +796,8 @@ private:
     if (t == "unary_expression") {
       std::string op;
       std::string opnd;
-      for (uint32_t i = 0; i < ts_node_named_child_count(n); ++i) {
-        TSNode c  = ts_node_named_child(n, i);
-        auto   ct = ntype(c);
+      for (TSNode c : ts_node_named_children(n)) {
+        auto ct = ntype(c);
         // prpparse unary operator node kinds (see prp2lnast.cpp): `!`/`not` ->
         // op_log_not, `~` -> op_bit_not, unary `-` -> op_unary_minus. Matching the
         // wrong names silently DROPS the operator -> a corrupted guard (e.g.
@@ -831,11 +827,12 @@ private:
       // base[index]: base identifier + `select` ([idx])
       TSNode base = ts_node_named_child(n, 0);
       std::string idx;
-      for (uint32_t i = 1; i < ts_node_named_child_count(n); ++i) {
+      uint32_t    nc = ts_node_named_child_count(n);
+      for (uint32_t i = 1; i < nc; ++i) {
         TSNode c = ts_node_named_child(n, i);
         if (ntype(c) == "select") {
-          for (uint32_t j = 0; j < ts_node_named_child_count(c); ++j) {
-            idx = expr(ts_node_named_child(c, j));
+          for (TSNode sc : ts_node_named_children(c)) {
+            idx = expr(sc);
           }
         }
       }
@@ -853,9 +850,8 @@ private:
       return expr(ts_node_named_child(n, 0));
     }
     std::string out = "(";
-    for (uint32_t i = 0; i < nc; ++i) {
-      TSNode c = ts_node_named_child(n, i);
-      auto   t = ntype(c);
+    for (TSNode c : ts_node_named_children(n)) {
+      auto t = ntype(c);
       if (t == "binary_compare_op" || t == "binary_other_op" || t == "binary_times_op" || t == "binary_logical_op"
           || t == "binary_step_op") {
         out += " " + map_op(text_of(src_, c)) + " ";
@@ -956,12 +952,16 @@ private:
   // operand-range half of expr_seq, so `acc.total` / `cycles - 2` each render on
   // their own side of a top-level comparison.
   std::string expr_range(TSNode parent, uint32_t b, uint32_t e) {
+    std::vector<TSNode> kids;  // collected once: per-index ts_node_named_child rescans would be O(kids^2)
+    for (TSNode k : ts_node_named_children(parent)) {
+      kids.push_back(k);
+    }
     if (e - b == 1) {
-      return expr(ts_node_named_child(parent, b));
+      return expr(kids[b]);
     }
     std::string out = "(";
     for (uint32_t i = b; i < e; ++i) {
-      TSNode c = ts_node_named_child(parent, i);
+      TSNode c = kids[i];
       auto   t = ntype(c);
       if (t == "binary_compare_op" || t == "binary_other_op" || t == "binary_times_op" || t == "binary_logical_op"
           || t == "binary_step_op") {
@@ -997,12 +997,14 @@ private:
     if (nc < 3) {
       return false;
     }
-    int k = -1, cnt = 0;
-    for (uint32_t i = 0; i < nc; ++i) {
-      if (ntype(ts_node_named_child(u, i)) == "binary_compare_op") {
+    int      k = -1, cnt = 0;
+    uint32_t i = 0;  // ordinal of the current named child (k records the compare-op position)
+    for (TSNode c : ts_node_named_children(u)) {
+      if (ntype(c) == "binary_compare_op") {
         k = static_cast<int>(i);
         ++cnt;
       }
+      ++i;
     }
     if (cnt != 1 || k <= 0 || k >= static_cast<int>(nc) - 1) {
       return false;
@@ -1054,8 +1056,8 @@ private:
       return;
     }
     if (t == "control_statement") {
-      for (uint32_t i = 0; i < ts_node_named_child_count(n); ++i) {
-        auto ct = ntype(ts_node_named_child(n, i));
+      for (TSNode c : ts_node_named_children(n)) {
+        auto ct = ntype(c);
         if (ct == "break_statement") {
           o << ind << "break;\n";
           return;
@@ -1125,8 +1127,7 @@ private:
     std::string ind(depth * 2, ' ');
     TSNode      cond;
     std::vector<TSNode> scopes;
-    for (uint32_t i = 0; i < ts_node_named_child_count(n); ++i) {
-      TSNode c = ts_node_named_child(n, i);
+    for (TSNode c : ts_node_named_children(n)) {
       if (ntype(c) == "scope_statement") {
         scopes.push_back(c);
       } else if (ts_node_is_null(cond)) {
@@ -1137,14 +1138,14 @@ private:
       fail("unsupported if form in test");
     }
     o << ind << "if (" << expr(cond) << ") {\n";
-    for (uint32_t i = 0; i < ts_node_named_child_count(scopes[0]); ++i) {
-      gen_stmt(o, ts_node_named_child(scopes[0], i), depth + 1);
+    for (TSNode c : ts_node_named_children(scopes[0])) {
+      gen_stmt(o, c, depth + 1);
     }
     o << ind << "}";
     if (scopes.size() >= 2) {
       o << " else {\n";
-      for (uint32_t i = 0; i < ts_node_named_child_count(scopes[1]); ++i) {
-        gen_stmt(o, ts_node_named_child(scopes[1], i), depth + 1);
+      for (TSNode c : ts_node_named_children(scopes[1])) {
+        gen_stmt(o, c, depth + 1);
       }
       o << ind << "}";
     }
@@ -1160,8 +1161,8 @@ private:
     if (ntype(n) == "step_statement") {
       return true;
     }
-    for (uint32_t i = 0; i < ts_node_named_child_count(n); ++i) {
-      if (subtree_has_step(ts_node_named_child(n, i))) {
+    for (TSNode c : ts_node_named_children(n)) {
+      if (subtree_has_step(c)) {
         return true;
       }
     }
@@ -1177,8 +1178,7 @@ private:
     }
     TSNode   entry = {};
     unsigned seen  = 0;
-    for (uint32_t i = 0; i < ts_node_named_child_count(tup); ++i) {
-      TSNode a = ts_node_named_child(tup, i);
+    for (TSNode a : ts_node_named_children(tup)) {
       if (ntype(a) != "assignment") {
         continue;  // skip the operator wrapper / stray nodes
       }
@@ -1403,8 +1403,8 @@ private:
     emit_vcd_window_block(o, ind + "  ", clk_name);  // --vcd-from/--vcd-to: enable/disable trace
     emit_checkpoint_block(o, ind + "  ", clk_name);  // periodic DUT+tb checkpoint
     std::vector<TSNode> body;
-    for (uint32_t i = 0; i < ts_node_named_child_count(code); ++i) {
-      body.push_back(ts_node_named_child(code, i));
+    for (TSNode c : ts_node_named_children(code)) {
+      body.push_back(c);
     }
     for (auto s : body) {
       gen_stmt(o, s, depth + 1);
@@ -1497,8 +1497,11 @@ private:
     }
     // positional args after the format string
     std::vector<std::string> pos;
-    for (uint32_t i = 1; i < ts_node_named_child_count(args); ++i) {
-      pos.push_back(expr(ts_node_named_child(args, i)));
+    uint32_t                 ai = 0;  // skips the format string (the first named child)
+    for (TSNode a : ts_node_named_children(args)) {
+      if (ai++ != 0) {
+        pos.push_back(expr(a));
+      }
     }
     std::string              fmt;
     std::vector<std::string> argv;
@@ -1562,8 +1565,7 @@ int for_each_test(const std::string& file, const std::string& test_sel, std::str
   }
   TSNode root_node{root, &buf};
   int    matched = 0;
-  for (uint32_t i = 0; i < ts_node_named_child_count(root_node); ++i) {
-    TSNode c = ts_node_named_child(root_node, i);
+  for (TSNode c : ts_node_named_children(root_node)) {
     if (ntype(c) != "test_statement") {
       continue;
     }

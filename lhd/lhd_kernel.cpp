@@ -1765,8 +1765,11 @@ void discover_imports(Options& opts, Eprp_var& var, size_t n_imports) {
   // Scans the directory and returns the on-disk path only when a filename
   // matches `<stem>.prp` exactly — FS-independent (a case-insensitive host FS
   // does not let `import("stem")` resolve a file named `Stem.prp`). Empty when
-  // absent.
-  auto find_prp = [](const std::string& dir, const std::string& stem) -> std::string {
+  // absent. Listings are cached per directory: a fresh directory_iterator per
+  // import is O(import-edges × dirents) stat calls (an xs_core_prp-scale sweep
+  // is 1631 sibling files, each importing several others).
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, std::string>> dir_listing;  // dir -> (fname -> path)
+  auto find_prp = [&dir_listing](const std::string& dir, const std::string& stem) -> std::string {
     // A stem may be path-qualified (`subdir/mod`): the directory portion rides
     // verbatim onto `dir` and only the final component is matched against the
     // on-disk filenames.
@@ -1776,18 +1779,21 @@ void discover_imports(Options& opts, Eprp_var& var, size_t n_imports) {
       scan_dir = dir + "/" + stem.substr(0, s);
       leaf     = stem.substr(s + 1);
     }
-    std::error_code it_ec;
-    for (fs::directory_iterator it(scan_dir, it_ec), end; !it_ec && it != end; it.increment(it_ec)) {
-      if (!it->is_regular_file()) {
-        continue;
-      }
-      const auto fn = it->path().filename().string();
-      if (fn.size() == leaf.size() + 4 && str_tools::ends_with(fn, ".prp")
-          && (std::string_view(fn).substr(0, leaf.size()) == leaf)) {
-        return it->path().string();
+    auto [lit, first_visit] = dir_listing.try_emplace(scan_dir);
+    if (first_visit) {
+      std::error_code it_ec;
+      for (fs::directory_iterator it(scan_dir, it_ec), end; !it_ec && it != end; it.increment(it_ec)) {
+        if (!it->is_regular_file()) {
+          continue;
+        }
+        auto fn = it->path().filename().string();
+        if (str_tools::ends_with(fn, ".prp")) {
+          lit->second.emplace(std::move(fn), it->path().string());
+        }
       }
     }
-    return {};
+    const auto fit = lit->second.find(leaf + ".prp");
+    return fit == lit->second.end() ? std::string{} : fit->second;
   };
 
   absl::flat_hash_map<std::string, std::string>          unit_dir;      // unit -> source dir (case-sensitive)
@@ -1797,15 +1803,24 @@ void discover_imports(Options& opts, Eprp_var& var, size_t n_imports) {
     parsed_paths.insert(abspath_of(f));
   }
 
+  // Each unit's imports are examined exactly ONCE, in the round after the unit
+  // was parsed (`next_scan` worklist). Re-scanning every loaded unit per round
+  // is O(units × rounds) full-LNAST walks — and resolution is deterministic on
+  // a static tree, so a re-scan can never produce a different outcome: an
+  // import that resolved was parsed on the spot, one that didn't never will
+  // (same dir, same stem), and one satisfied by a later round's load needs no
+  // action anyway.
+  absl::flat_hash_set<std::string> loaded;
+  for (const auto& ln : var.lnasts) {
+    loaded.insert(std::string(ln->get_top_module_name()));
+  }
+  size_t next_scan = n_imports;
   while (true) {
-    absl::flat_hash_set<std::string> loaded;
-    for (const auto& ln : var.lnasts) {
-      loaded.insert(std::string(ln->get_top_module_name()));
-    }
     std::map<std::string, std::string>           found;       // logical name -> file to parse
     std::map<std::string, std::set<std::string>> seen_paths;  // logical name -> resolved files
 
-    for (size_t i = n_imports; i < var.lnasts.size(); ++i) {
+    const size_t scan_end = var.lnasts.size();
+    for (size_t i = next_scan; i < scan_end; ++i) {
       const auto& ln  = var.lnasts[i];
       auto        dit = unit_dir.find(std::string(ln->get_top_module_name()));
       if (dit == unit_dir.end()) {
@@ -1878,9 +1893,11 @@ void discover_imports(Options& opts, Eprp_var& var, size_t n_imports) {
       }
       Prp2lnast converter(path, name);
       var.add(converter.get_lnast());
+      loaded.insert(name);
       unit_dir[name] = dir_of(path);
       progress       = true;
     }
+    next_scan = scan_end;
     if (!progress) {
       break;
     }
@@ -3542,6 +3559,21 @@ std::string materialize_verilog(Options& opts, Result& res, const std::string& k
   return out;
 }
 
+// The yosys-slang plugin (slang.so) for lgcheck's `--gold_reader slang`: lets
+// yosys read SystemVerilog packed-struct sources (CIRCT output) that
+// read_verilog cannot parse. Same candidates inou_yosys_api probes.
+std::string locate_yosys_slang_plugin() {
+  auto exe_path = file_utils::get_exe_path();
+  for (const auto& cand : {absl::StrCat(exe_path, "/../external/+_repo_rules+yosys_slang/slang.so"),
+                           absl::StrCat(exe_path, "/../external/+http_archive+yosys_slang/slang.so"),
+                           absl::StrCat(exe_path, "/lhd.runfiles/+http_archive+yosys_slang/slang.so")}) {
+    if (::access(cand.c_str(), R_OK) == 0) {
+      return cand;
+    }
+  }
+  return "";
+}
+
 // The lgyosys backend (`--set lec.solver=lgyosys`): materialize both sides to
 // Verilog and discharge with inou/yosys/lgcheck (the former `lhd check`).
 // Verilog sides pass straight through; pyrope:/ln:/lg: are compiled first.
@@ -3550,6 +3582,26 @@ void lec_lgyosys(Options& opts, Result& res) {
   auto ref_v   = fs::absolute(materialize_verilog(opts, res, opts.ref_kind, opts.ref_path, "ref")).string();
   auto lgcheck = locate_lgcheck();
   auto yosys   = locate_lgcheck_yosys();
+
+  // --set lec.gold_reader=slang: read the REFERENCE side through yosys-slang
+  // (SystemVerilog packed structs / '{...} patterns exceed read_verilog).
+  std::string gold_reader = "verilog";
+  for (const auto& [k, v] : opts.sets) {
+    if (k == "lec.gold_reader" && !v.empty()) {
+      gold_reader = v;
+    }
+  }
+  if (gold_reader != "verilog" && gold_reader != "slang") {
+    throw Lhd_error{"usage", std::format("--set lec.gold_reader expects verilog|slang, got '{}'", gold_reader), ""};
+  }
+  std::string slang_plugin;
+  if (gold_reader == "slang") {
+    slang_plugin = locate_yosys_slang_plugin();
+    if (slang_plugin.empty()) {
+      throw Lhd_error{"dependency", "lec.gold_reader=slang: yosys-slang plugin (slang.so) not found",
+                      "build //inou/yosys (the @yosys_slang external) or use the default gold_reader"};
+    }
+  }
 
   // Run lgcheck FROM the scratch workdir so its cwd droppings (trace*.v,
   // lgcheck*.log) never land in the caller's directory (hermetic kernel).
@@ -3561,6 +3613,9 @@ void lec_lgyosys(Options& opts, Result& res) {
                             shell_quote(ref_v));
   if (!yosys.empty()) {
     cmd += std::format(" --yosys {}", shell_quote(yosys));
+  }
+  if (gold_reader == "slang") {
+    cmd += std::format(" --gold_reader slang --slang_plugin {}", shell_quote(slang_plugin));
   }
   if (!opts.impl_top.empty()) {
     cmd += std::format(" --implementation_top {}", shell_quote(opts.impl_top));

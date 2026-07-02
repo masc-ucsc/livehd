@@ -1,0 +1,29 @@
+/*
+:name: flop_init_headroom
+:type: equiv
+:verilog_top: flop_init_headroom.top
+:pyrope_top: flop_init_headroom.top
+*/
+
+// Regression for the LEC "phantom headroom bit" false REFUTE (the
+// DelayNWithValid shape from the XiangShan Backend sweep). The golden .v
+// declares the async-reset CONTROL flop with cgen's signed spare-bit
+// convention (`reg [1:0]` holding a u1 value: every write stores {0,1}), while
+// this side declares the same flop `u1`. The two designs are equivalent from
+// any value-consistent power-on state, but a LEC that builds the SHARED
+// pre-reset state symbol at the MAX width across the sides leaves the wide
+// reg's headroom bit free with no counterpart on the narrow side: the free
+// value 2 fires the no-reset `dat` capture during the reset-hold window on
+// the wide side only (`vld != 0` reads the reg unmasked), the narrow side
+// holds, and `io_q` spuriously diverges right after reset. The shared flop
+// init must instead be built at the MIN corresponding width, each side
+// extending it per the value's signedness.
+pub mod top(clock:u1, reset:u1, io_en:u1, io_d:u1) -> (io_q:u1@[0]) {
+  reg vld:u1:[init=0, reset_pin=ref reset, async=true]
+  reg dat:u1
+  if vld != 0 {
+    dat = io_d
+  }
+  vld = io_en
+  io_q = dat
+}

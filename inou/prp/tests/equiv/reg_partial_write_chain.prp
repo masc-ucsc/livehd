@@ -1,0 +1,28 @@
+/*
+:name: reg_partial_write_chain
+:type: equiv
+:verilog_top: reg_partial_write_chain.top
+:pyrope_top: reg_partial_write_chain.top
+*/
+
+// Regression for the tolg partial-write CHAIN miscompile (the
+// DataModule__64entry per-entry register file from the XiangShan Backend
+// sweep). Two independently-enabled single-bit writes to the same reg must
+// BOTH land when both enables fire. prp2lnast lowers `r#[k..=k] = v` to a
+// copy-temp shape (`%t = r; %t#[k..=k] = v; r = %t`), and tolg resolved the
+// `%t = r` read to the flop q instead of the din accumulator — the second
+// write rebuilt its whole-word image from stale q and silently DROPPED the
+// first write whenever both enables were true in the same cycle (entry 63's
+// write vanished under a same-cycle entry-62 write). Fixed in
+// upass/tolg lower_set_mask: the RMW base keys off the base OPERAND's din
+// accumulator, not only the direct dst==base shape.
+pub mod top(clock:u1, reset:u1, en7:u1, en6:u1, d:u2) -> (q:u2@[0]) {
+  reg data:u8
+  if en7 != 0 {
+    data#[7..=7] = d & 1
+  }
+  if en6 != 0 {
+    data#[6..=6] = (d >> 1) & 1
+  }
+  q = data#[6..=7]
+}

@@ -265,6 +265,21 @@ sh_test(
     ],
 )
 
+# Type-C whole-net false comb loop on the SIM-emission path: a struct net
+# whole-'{...}'-assigned with later elements reading earlier FIELDS of the same
+# net (acyclic per field, cyclic per whole net) must sim-emit — the slang
+# reader keeps it a per-field bundle (whole_copied_selfref_pattern). Guards the
+# dominant XiangShan `lhd sim` error family (DretEventModule et al.).
+sh_test(
+    name = "sim_selfref_struct_test",
+    size = "large",
+    srcs = ["sim_selfref_struct_test.sh"],
+    data = [
+        "//inou/prp:equiv_tests",
+        "//lhd",
+    ],
+)
+
 # Regression for the slang reader lowering a scalar packed-struct variable as a
 # per-field BUNDLE (independent nets) instead of one flat packed bus: a struct
 # whose '{...} write computes a field from reads of its OTHER fields (the

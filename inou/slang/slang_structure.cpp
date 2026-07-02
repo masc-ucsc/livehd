@@ -818,6 +818,19 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   auto saved_tuple_names   = std::move(tuple_type_names_);
   auto saved_emitted_types = std::move(emitted_tuple_types_);
   auto saved_local_cnt     = local_cnt_;
+  // The struct-classification collector sets are rebuilt per module below —
+  // save them too, or the parent module resumes with the CHILD's sets after a
+  // mid-emission recursive instance lowering, flipping is_scalar_struct_var
+  // between a var's store and its later reads (Alu_3's `io_in = '{...}` stored
+  // flat, but every read after the aluModule instance resolved through
+  // never-written leaves -> io_out_valid stuck 0).
+  auto saved_pattern_assigned = std::move(struct_pattern_assigned_);
+  auto saved_field_read       = std::move(struct_field_read_);
+  auto saved_deep_accessed    = std::move(struct_deep_accessed_);
+  auto saved_whole_copied     = std::move(struct_whole_copied_);
+  auto saved_deep_written     = std::move(struct_deep_written_);
+  auto saved_array_bundle     = std::move(struct_array_bundle_);
+  auto saved_packed_mem_regs  = std::move(packed_mem_regs_);
 
   builder_ = Lnast_builder();
   sym_lname_.clear();
@@ -1044,6 +1057,13 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   tuple_type_names_      = std::move(saved_tuple_names);
   emitted_tuple_types_   = std::move(saved_emitted_types);
   local_cnt_             = saved_local_cnt;
+  struct_pattern_assigned_ = std::move(saved_pattern_assigned);
+  struct_field_read_       = std::move(saved_field_read);
+  struct_deep_accessed_    = std::move(saved_deep_accessed);
+  struct_whole_copied_     = std::move(saved_whole_copied);
+  struct_deep_written_     = std::move(saved_deep_written);
+  struct_array_bundle_     = std::move(saved_array_bundle);
+  packed_mem_regs_         = std::move(saved_packed_mem_regs);
 
   return ok;
 }
@@ -1579,6 +1599,44 @@ bool Slang_context::struct_is_all_scalar(const slang::ast::ValueSymbol& sym) con
   return true;
 }
 
+bool Slang_context::whole_copied_selfref_pattern(const slang::ast::ValueSymbol& sym) const {
+  if (auto it = selfref_pattern_cache_.find(&sym); it != selfref_pattern_cache_.end()) {
+    return it->second;
+  }
+  bool ok = false;
+  if (const auto* drv = whole_net_driver(sym)) {
+    const auto* r = drv;
+    while (r->kind == slang::ast::ExpressionKind::Conversion) {
+      r = &r->as<slang::ast::ConversionExpression>().operand();
+    }
+    size_t n_elems = 0;
+    switch (r->kind) {
+      case slang::ast::ExpressionKind::SimpleAssignmentPattern:
+        n_elems = r->as<slang::ast::SimpleAssignmentPatternExpression>().elements().size();
+        break;
+      case slang::ast::ExpressionKind::StructuredAssignmentPattern:
+        n_elems = r->as<slang::ast::StructuredAssignmentPatternExpression>().elements().size();
+        break;
+      default: break;
+    }
+    if (n_elems > 0) {
+      const auto& ct       = sym.getType().getCanonicalType();
+      size_t      n_fields = 0;
+      if (ct.isStruct()) {
+        for ([[maybe_unused]] const auto& f : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
+          ++n_fields;
+        }
+      }
+      if (n_elems == n_fields) {  // assign_struct_whole's pattern branch will split per leaf
+        absl::flat_hash_set<const slang::ast::ValueSymbol*> visiting;
+        ok = driver_reads_target(*drv, sym, visiting, 0);
+      }
+    }
+  }
+  selfref_pattern_cache_.emplace(&sym, ok);
+  return ok;
+}
+
 bool Slang_context::is_scalar_struct_var(const slang::ast::ValueSymbol& sym) const {
   // Ports are already flat (CIRCT/firtool flattens struct ports to scalars), and
   // a clocked struct keeps the existing flat-reg-bus path; only a comb/wire/mut
@@ -1610,17 +1668,36 @@ bool Slang_context::is_scalar_struct_var(const slang::ast::ValueSymbol& sym) con
   //
   // Whole-copy and deep-write keep the STRICT rule (any nested/array field ->
   // flat): a whole-copy of a nested-struct leaf and a nested-field read-modify-write
-  // both need the flat whole-struct net.
+  // both need the flat whole-struct net. EXCEPTION: a whole-copied (not
+  // deep-written) struct whose whole-net driver is a SELF-REFERENCING '{...}'
+  // pattern (CIRCT's `_out_output` idiom — privState built from inputs,
+  // mstatus/vsstatus from _out_output.privState.*) would make the flat bus a
+  // FALSE combinational loop (Type C): the fields are pairwise acyclic, only
+  // the whole-net granularity is cyclic. Keep it a bundle — the pattern splits
+  // one element per leaf (assign_struct_whole), deep reads route through the
+  // covering leaf (Type B), and the whole copy reassembles from the leaves.
   if (struct_whole_copied_.contains(&sym) || struct_deep_written_.contains(&sym)) {
     for (const auto& f : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
       if (!field_type_is_struct_free(f.getType())) {
-        return false;  // nested struct / array-of-struct field
+        if (struct_deep_written_.contains(&sym) || !whole_copied_selfref_pattern(sym)) {
+          return false;  // nested struct / array-of-struct field
+        }
+        break;  // self-ref pattern: bundle-safe, flat would be a false loop
       }
     }
   }
   if (struct_deep_accessed_.contains(&sym)) {
     for (const auto& f : ct.as<slang::ast::PackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
       if (field_forces_flat_bus(f.getType())) {
+        // KNOWN OPEN (the DataModule__16entry / Entries* SIM comb-loop
+        // cluster): extending the whole-copy branch's self-ref-pattern
+        // exception here (CIRCT's register-file io idiom — `io = '{raddr,
+        // rdata: <cone reading io.wdata/io.wen>, ...}` with an array-of-struct
+        // wdata) fixes the standalone module but at Backend scale leaves a
+        // bundle whose field store upass.tolg cannot lower ("tuple/field
+        // store to 'io_enq' has no hardware lowering"). Fix order: tolg's
+        // multi-element bundle store lowering first, then re-apply
+        //   if (!whole_copied_selfref_pattern(sym)) return false; break;
         return false;  // array-of-struct field (a nested struct field is bundle-safe)
       }
     }

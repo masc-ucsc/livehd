@@ -1,0 +1,22 @@
+/*
+:name: sra_const_range
+:type: equiv
+:verilog_top: sra_const_range.top
+:pyrope_top: sra_const_range.top
+*/
+
+// Regression for the Lnast_range::sra/shl endpoint bug (the
+// ExeUnitImp_13/VIAluFixPoint "does not fit its declared range" cluster from
+// the XiangShan Backend sweep). The golden .v holds an exact-const 11-bit
+// register (`k = 12'sh7ff` = 2047, range [2047,2047]) and derives a control
+// bit via `(k >>> 10) & 1` — cgen's standard bit-test emission. The bitwidth
+// pass shifted BOTH range endpoints by only amt.min, so a shift-amount range
+// like [0..10] stamped the result [2047,2047] while constprop correctly
+// folded the value to 1 — upass.runner's bw-soundness check then errored the
+// whole compile ("`%N` (value 1) does not fit its declared range
+// [2047, 2047]"). The result envelope must evaluate both value endpoints at
+// both extreme shifts. The whole const chain folds to 1, so the module is
+// equivalent to a plain passthrough of io_en.
+pub mod top(clock:u1, reset:u1, io_en:u1) -> (io_q:u1@[]) {
+  io_q = io_en
+}

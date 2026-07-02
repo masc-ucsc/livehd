@@ -33,6 +33,11 @@ void Pass_lec::setup() {
                        "equivalence backend: cvc5 (default, in-process SMT) | bitwuzla (in-process SMT) | "
                        "lgyosys (kernel-routed yosys/lgcheck; reads Verilog directly)",
                        "cvc5");
+  m.add_label_optional("gold_reader",
+                       "lgyosys backend only: reader for the REFERENCE side — verilog (default; yosys "
+                       "read_verilog -sv) | slang (load the yosys-slang plugin and read_slang; needed for "
+                       "SystemVerilog packed-struct sources like CIRCT/firtool output)",
+                       "verilog");
   m.add_label_optional("bound", "BMC / induction depth bound k", "6");
   m.add_label_optional("timeout", "per-query cvc5 wall-clock seconds (0 = unbounded; default bounds the CLI so a hard miter degrades to UNKNOWN instead of freezing)", "120");
   m.add_label_optional("witness", "print the counterexample/witness on Refuted", "true");

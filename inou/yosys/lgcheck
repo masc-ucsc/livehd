@@ -88,6 +88,29 @@ while true; do
       ;;
     esac
     ;;
+  --gold_reader | --reference_reader)
+    # reader for the GOLD side: verilog (default; read_verilog -sv) | slang
+    # (load the yosys-slang plugin and read_slang — needed for SystemVerilog
+    # packed-struct sources, e.g. CIRCT/firtool output, that read_verilog
+    # cannot parse). Needs --slang_plugin.
+    case "$2" in
+    "") shift 2 ;;
+    *)
+      GOLD_READER=$2
+      shift 2
+      ;;
+    esac
+    ;;
+  --slang_plugin)
+    # path to the yosys-slang plugin (slang.so) for --gold_reader slang
+    case "$2" in
+    "") shift 2 ;;
+    *)
+      SLANG_PLUGIN=$2
+      shift 2
+      ;;
+    esac
+    ;;
   "") break ;;
   *)
     argument=$1
@@ -199,6 +222,25 @@ if [ "${GATE_TOP}" != "" ]; then
   GATE_TOP_STR="-top $GATE_TOP"
 fi
 
+# GOLD-side read command, shared by every strategy below. --gold_reader slang
+# reads through the yosys-slang plugin (SystemVerilog packed structs / '{...}
+# patterns that read_verilog cannot parse); --no-proc leaves the RTLIL
+# processes for the strategies' own `proc`.
+gold_read_cmds() {
+  # $1 = extra read_verilog flags position is unused; kept single-form
+  if [ "${GOLD_READER}" == "slang" ]; then
+    if [ ! -f "${SLANG_PLUGIN}" ]; then
+      echo "lgcheck: --gold_reader slang needs --slang_plugin <slang.so> (got '${SLANG_PLUGIN}')"
+      exit 5
+    fi
+    GOLD_SLANG_TOP=""
+    if [ "${GOLD_TOP}" != "" ]; then GOLD_SLANG_TOP="--top ${GOLD_TOP}"; fi
+    echo "plugin -i ${SLANG_PLUGIN}; read_slang ${GOLD_SLANG_TOP} --no-proc ${GOLD}; hierarchy ${GOLD_TOP_STR}"
+  else
+    echo "read_verilog -sv -icells ${VLG_INC} ${GOLD}; hierarchy ${GOLD_TOP_STR}"
+  fi
+}
+
 echo "checking GATE:$GATE (top:${GATE_TOP}) vs GOLD:$GOLD (top:${GOLD_TOP}) directory:$PWD"
 
 # cgen output `include`s memory models (cgen_memory_*.v) that live in
@@ -239,7 +281,7 @@ fi
 
 #exit 2
 
-yosys_read="read_verilog -sv -icells ${VLG_INC} ${GOLD}; hierarchy ${GOLD_TOP_STR}; proc; bmuxmap; flatten; rename -top gold; design -stash gold;
+yosys_read="$(gold_read_cmds); proc; bmuxmap; flatten; rename -top gold; design -stash gold;
             read_verilog -sv -icells ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}; proc; bmuxmap; flatten; rename -top gate; design -stash gate;
             design -copy-from gold -as gold gold; design -copy-from gate -as gate gate; ${lib};"
 
@@ -271,7 +313,12 @@ fi
 #  exit 0
 #fi
 
-if grep -q reset ${GOLD}; then
+# Word-match `reset` OUTSIDE comments: the miter's shared reset input is
+# `in_reset` only when a side has a port literally named `reset` — a design
+# whose reset is named differently (rst_ni, active-low) must NOT arm the
+# constraint (`sat -set-at ... in_reset` on a miter without that signal is a
+# hard yosys error → a false FAIL; the async_localdecl regression).
+if sed 's|//.*||' ${GOLD} | grep -qw reset; then
   # Assert the miter's reset (the `in_`-prefixed gold/gate shared input) for
   # the first two cycles, then release it from cycle 2 — a deterministic LEC
   # start that brings both sides through their reset path to a known state.
@@ -288,7 +335,7 @@ else
   RESET_STMT=""
 fi
 
-${YOSYS} -p " read_verilog -sv -icells ${VLG_INC} ${GOLD}; hierarchy ${GOLD_TOP_STR}; proc; bmuxmap; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
+${YOSYS} -p " $(gold_read_cmds); proc; bmuxmap; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
               read_verilog -sv -icells ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}; proc; bmuxmap; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
               design -copy-from gold -as gold gold
               design -copy-from gate -as gate gate
@@ -335,14 +382,27 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   #   equivalent     -> "SAT proof finished - no model found: SUCCESS!"
   # One query per depth 1..N so transient (init-dependent) mismatches at
   # shallow depths are not masked by the deepest step.
+  # Reset-bearing gold: hold the miter's shared reset for the first cycles and
+  # only check AFTER the release (mirrors the tempinduct stage's RESET_STMT and
+  # cvc5's after_reset phase). Without it the miter compares un-reset zero-init
+  # states — unreachable in real hardware — and a state-encoding difference
+  # between two EQUIVALENT designs falsely refutes (XiangShan DcsrModule/Fence:
+  # cvc5 proves, the un-reset BMC "found a mismatch"). sat timesteps are
+  # 1-based: reset high at 1-2, released at 3, trigger checked from 4.
+  bmc_start=1
+  BMC_RESET_STMT=""
+  if [ "${RESET_STMT}" != "" ]; then
+    BMC_RESET_STMT="-set-at 1 in_reset 1 -set-at 2 in_reset 1 -set-at 3 in_reset 0"
+    bmc_start=4
+  fi
   bmc_sat_cmds=""
-  for ((t = 1; t <= LGCHECK_BMC_STEPS; t++)); do
-    bmc_sat_cmds+="sat -ignore_unknown_cells -seq ${t} -set-at ${t} trigger 1 -prove trigger 0 -set-init-zero -set-def-inputs -show-ports miter; "
+  for ((t = bmc_start; t < bmc_start + LGCHECK_BMC_STEPS; t++)); do
+    bmc_sat_cmds+="sat -ignore_unknown_cells -seq ${t} ${BMC_RESET_STMT} -set-at ${t} trigger 1 -prove trigger 0 -set-init-zero -set-def-inputs -show-ports miter; "
   done
 
   # No -q: yosys -q suppresses the SAT report itself, so the log would always
   # be empty and the greps below would vacuously "pass" any pair of designs.
-  ${YOSYS} -p "read_verilog -sv -icells ${VLG_INC} ${GOLD}; hierarchy ${GOLD_TOP_STR}; proc; bmuxmap; memory; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
+  ${YOSYS} -p "$(gold_read_cmds); proc; bmuxmap; memory; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
                read_verilog -sv -icells ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}; proc; bmuxmap; memory; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
                design -copy-from gold -as gold gold
                design -copy-from gate -as gate gate
