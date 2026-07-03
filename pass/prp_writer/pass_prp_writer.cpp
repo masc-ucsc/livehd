@@ -52,19 +52,6 @@ void Pass_prp_writer::work(Eprp_var& var) {
     return;
   }
 
-  // Cross-unit signature scan: a multi-output `comb` callee is INLINED on
-  // re-compile, so `r = C(...)` is the rejected `multi-output-one-var` whole-bind
-  // — the writer must destructure it.  Pre-scan every unit so each per-unit
-  // writer knows which callees need that treatment (and their output names).
-  std::unordered_map<std::string, std::vector<std::string>> multi_out_combs;
-  for (const auto& ln : var.lnasts) {
-    std::string              nm;
-    std::vector<std::string> outs;
-    if (Lnast_prp_writer::scan_multi_out_comb(ln, nm, outs)) {
-      multi_out_combs.emplace(std::move(nm), std::move(outs));
-    }
-  }
-
   // Every module emitted in this run, by name.  A unit's file-top `import`s are
   // generated for its instantiated submodules that are themselves emitted here,
   // so the per-file output names its cross-module dependencies.
@@ -99,7 +86,6 @@ void Pass_prp_writer::work(Eprp_var& var) {
 
     Lnast_prp_writer writer(out, ln);
     writer.set_debug(debug_on);
-    writer.set_multi_out_combs(&multi_out_combs);
     writer.set_known_modules(&emitted_modules);
     writer.set_instantiated_modules(&instantiated_modules);
     writer.write_all();

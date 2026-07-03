@@ -391,6 +391,22 @@ class PrpRunner:
         mods = PrpRunner._verilog_modules(vpath)
         return mods[0] if mods else None
 
+    @staticmethod
+    def _yosys_slang_plugin(tmp_dir):
+        # The yosys-slang plugin (slang.so) for lgcheck's `--gold_reader slang`
+        # (goldens with SystemVerilog packed structs / '{...} patterns that
+        # read_verilog cannot parse). Probes the bazel runfiles layout (cwd is
+        # <runfiles>/_main, the external repo sits beside it) and the repo-root
+        # bazel-bin layout (manual runs). Returns an absolute path or None.
+        for cand in ('../+http_archive+yosys_slang/slang.so',
+                     '../+_repo_rules+yosys_slang/slang.so',
+                     'bazel-bin/external/+http_archive+yosys_slang/slang.so',
+                     'bazel-bin/external/+_repo_rules+yosys_slang/slang.so'):
+            path = os.path.normpath(os.path.join(tmp_dir, cand))
+            if os.path.exists(path):
+                return path
+        return None
+
     def run_equiv(self, tmp_dir, test: PrpTest):
         # Lower each .prp function to Verilog (inou.prp -> pass.upass tolg:1 ->
         # inou.cgen.verilog) and prove it equivalent to its sibling golden .v
@@ -462,9 +478,22 @@ class PrpRunner:
                 print('{} - equiv - FAILED: {} generated modules {}; set :pyrope_top:'.format(name, len(gen_mods), gen_mods))
                 return 1
 
+        lgcheck_cmd = ['./inou/yosys/lgcheck', '--reference', gold, '--implementation', impl,
+                       '--reference_top', verilog_top, '--implementation_top', pyrope_top]
+        # Optional `:gold_reader: slang` header: read the golden through the
+        # yosys-slang plugin instead of read_verilog (goldens using
+        # SystemVerilog packed structs / '{...} patterns). The golden's top
+        # module must be a PLAIN identifier (no escaped `\a.b ` names — those
+        # break yosys-slang's --top/RTLIL naming), hence the `<name>_top`
+        # convention on such goldens.
+        if (test.params.get('gold_reader') or '').strip() == 'slang':
+            plugin = self._yosys_slang_plugin(tmp_dir)
+            if not plugin:
+                print('{} - equiv - FAILED: :gold_reader: slang but yosys-slang plugin (slang.so) not found'.format(name))
+                return 1
+            lgcheck_cmd += ['--gold_reader', 'slang', '--slang_plugin', plugin]
         check = subprocess.Popen(
-            ['./inou/yosys/lgcheck', '--reference', gold, '--implementation', impl,
-             '--reference_top', verilog_top, '--implementation_top', pyrope_top],
+            lgcheck_cmd,
             cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
             clog, _ = check.communicate()

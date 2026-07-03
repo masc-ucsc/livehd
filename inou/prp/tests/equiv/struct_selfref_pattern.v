@@ -10,7 +10,11 @@
 // through the covering leaf, and the whole copy reassembles from the leaves.
 // Functionally: privState = {V:in_v, PRVM:in_prv}; status.SDT = ~V & in_sdt;
 // status.MPRV = (&PRVM) & in_mprv; out = {privState, status}.
-module \struct_selfref_pattern.top (
+// NOTE: the top is deliberately UNDOTTED (not \struct_selfref_pattern.top) so lgcheck's
+// slang gold reader can name it via --top (dotted escaped names break
+// yosys-slang's --top/RTLIL naming) — same convention as
+// instance_out_struct_ident_top.
+module struct_selfref_pattern_top (
   input        in_v,
   input  [1:0] in_prv,
   input        in_sdt,

@@ -5,7 +5,11 @@
 // resolve through — the old gate stored the flat name instead, leaving every
 // leaf undriven ("incompletely driven"). Functionally io_out forwards
 // cfVec[1].bits = io_cfVec_1_bits.
-module \struct_init_whole_read.top (
+// NOTE: the top is deliberately UNDOTTED (not \struct_init_whole_read.top) so lgcheck's
+// slang gold reader can name it via --top (dotted escaped names break
+// yosys-slang's --top/RTLIL naming) — same convention as
+// instance_out_struct_ident_top.
+module struct_init_whole_read_top (
   input               clock,
   input               reset,
   input               io_cfVec_0_valid,

@@ -1,8 +1,9 @@
 /*
 :name: struct_selfref_pattern
 :type: equiv
-:verilog_top: struct_selfref_pattern.top
+:verilog_top: struct_selfref_pattern_top
 :pyrope_top: struct_selfref_pattern.top
+:gold_reader: slang
 */
 
 // Regression for the Type-C whole-net false combinational loop (the dominant

@@ -6,14 +6,14 @@
 // CVT64 refuted by BOTH cvc5 and lgcheck, expReg 77 vs 15; FPCVT/FCVT/
 // FP_INCVT/CVT32ModuleS0/ByteMaskTailGen SIM-diverge the same way).
 //
-// slang's lower_instance binds `.out(_lzc_out)` as a flat store; every read
-// of a scalar-struct-var resolves through its per-field leaves. The in-memory
-// LNAST lowers right (tolg slices the flat store; the regen .v proves vs the
-// original), but the emitted .prp TEXT carries disconnected `mut x.f = 0`
-// leaves + the flat store, so the RECOMPILED Pyrope reads 0-init leaves.
-// Fix order (comment in lower_instance's output loop): first make tolg/cgen
-// lower the instance-output wire-leaf FEEDBACK shape correctly, then re-apply
-// the per-field output-binding split. Functionally: r = {in==0, ~lzc(in)}.
+// FIXED 2026-07-03: assign_to now splits a whole value bound to a
+// bundle-declared struct var onto its per-field leaves
+// (assign_struct_whole_value), so `.out(_lzc_out)` emits
+// `` `_lzc_out.data` = u_lzc#[1..=3] `` etc. and the .prp text round-trips.
+// This test is the guard: prp-v2prp-* (LEC vs the original .prp) and
+// prp-simfail-* mode v2prp-sim (emitted-text sim == slang in-memory sim) are
+// both green; prp-equiv-* stays fixme only for the yosys '{...} reader gap.
+// Functionally: r = {in==0, ~lzc(in)}.
 module icsi_lzc8(
   input  [7:0] in,
   output struct packed {logic [2:0] data; logic isZero; } out

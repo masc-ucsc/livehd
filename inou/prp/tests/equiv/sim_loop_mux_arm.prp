@@ -1,0 +1,24 @@
+/*
+:name: sim_loop_mux_arm
+:type: equiv
+:verilog_top: sim_loop_mux_arm
+:pyrope_top: sim_loop_mux_arm
+*/
+
+// Repro for the BlockCipherModule/round-chaining lhd-sim residual (Bku,
+// CryptoModule, ExeUnitImp_6, ExuBlock): a packed word driven by a MUX whose
+// arms pack a field computed FROM a slice of the same word. Bit-level acyclic
+// (w[3:0] = mux(sel, a, a^9) reads only inputs; w[7:4] reads w[3:0]), but
+// cgen.sim's split_packed_selfref_wires has no Mux rule in resolve(): the
+// slice-read of `w` reaches the Mux node and fails, so the word-level false
+// loop survives to emission. FIX: distribute the slice THROUGH the Mux arms
+// (Get_mask(mux(s,x,y),m) == mux(s, Get_mask(x,m), Get_mask(y,m)); the
+// selector itself resolves as a full-width slice).
+pub comb sim_loop_mux_arm::[lg="sim_loop_mux_arm", hdl](sel:u1, a:u4, b:u4) -> (z:u8) {
+  wire w:u8
+  wire hi:u4
+
+  hi = (w#[0..=3] ^ b) & 15         // reads the word's LOW nibble
+  w  = if sel != 0 { a | (hi << 4) } else { (a ^ 9) | (hi << 4) }
+  z  = w
+}

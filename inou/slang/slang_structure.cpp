@@ -2394,6 +2394,28 @@ void Slang_context::lower_continuous_assign(const slang::ast::ContinuousAssignSy
   clear_pending_loc();
 }
 
+// Canonical reset-name test, token-aware to avoid matching "first"/"burst"
+// (mirrors pass/lec/query.cpp reset_name_polarity; polarity is irrelevant here
+// because a demoted reset is READ by the body, not wired to a reset pin).
+static bool is_reset_like_name(std::string_view nm) {
+  std::string lc(nm);
+  for (auto& c : lc) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  size_t start = 0;
+  for (size_t i = 0; i <= lc.size(); ++i) {
+    if (i == lc.size() || lc[i] == '_') {
+      std::string_view tok = std::string_view(lc).substr(start, i - start);
+      if (tok == "rst" || tok == "reset" || tok == "rstn" || tok == "resetn" || tok == "arst" || tok == "areset"
+          || tok == "nrst" || tok == "nreset" || tok == "por") {
+        return true;
+      }
+      start = i + 1;
+    }
+  }
+  return false;
+}
+
 void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) {
   using slang::ast::ProceduralBlockKind;
   using slang::ast::TimingControlKind;
@@ -2509,6 +2531,34 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
   std::vector<const slang::ast::Statement*> prologue;
   const slang::ast::Statement*              body = &timed.stmt;
 
+  // Fallback when a rung cannot be extracted (compound guard `if (rst || soft)`,
+  // missing else arm, non-const async load, ...): LEC and lhd sim observe state
+  // only AFTER a clock update, so an edge-triggered reset is indistinguishable
+  // from a synchronous one — drop the reset's edge trigger and lower the body as
+  // ordinary clocked logic that READS the signal (yosys async2sync semantics).
+  // Only reset-named triggers demote (an unrecognized second edge stays a hard
+  // error), and exactly one trigger — the clock — must remain.
+  auto demote_reset_edges = [&]() -> bool {
+    std::vector<size_t> demote;
+    for (size_t i = 0; i < edges.size(); ++i) {
+      if (edges[i]->expr.kind == ExpressionKind::NamedValue
+          && is_reset_like_name(edges[i]->expr.as<slang::ast::NamedValueExpression>().symbol.name)) {
+        demote.push_back(i);
+      }
+    }
+    if (demote.empty() || edges.size() - demote.size() != 1) {
+      return false;
+    }
+    for (auto it = demote.rbegin(); it != demote.rend(); ++it) {
+      const auto& sym = edges[*it]->expr.as<slang::ast::NamedValueExpression>().symbol;
+      emit_warning(edges[*it]->sourceRange, "async-reset-as-sync", "time",
+                   std::string("edge-triggered reset '") + std::string(sym.name)
+                       + "' has no extractable async-reset rung; modeled as a synchronous reset (state is only observed after clock updates)");
+      edges.erase(edges.begin() + static_cast<std::ptrdiff_t>(*it));
+    }
+    return true;
+  };
+
   while (edges.size() > 1) {
     if (body->kind == StatementKind::Block) {
       body = &body->as<slang::ast::BlockStatement>().body;
@@ -2544,6 +2594,9 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       }
     }
     if (body->kind != StatementKind::Conditional) {
+      if (demote_reset_edges()) {
+        break;
+      }
       emit_unsupported(body->sourceRange, "unsupported-async-pattern",
                        "expected `if (rst) ... else ...` rungs for the extra edge triggers",
                        "use a synchronous reset, or --reader yosys-slang");
@@ -2551,6 +2604,9 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     }
     const auto& cond_stmt = body->as<slang::ast::ConditionalStatement>();
     if (cond_stmt.conditions.size() != 1 || cond_stmt.conditions[0].pattern != nullptr || cond_stmt.ifFalse == nullptr) {
+      if (demote_reset_edges()) {
+        break;
+      }
       emit_unsupported(body->sourceRange, "unsupported-async-pattern",
                        "the async-reset if must have one plain condition and an else arm");
       return;
@@ -2588,6 +2644,9 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       break;
     }
     if (cond->kind != ExpressionKind::NamedValue) {
+      if (demote_reset_edges()) {
+        break;
+      }
       emit_unsupported(cond->sourceRange, "unsupported-async-pattern", "the async-reset condition must be a plain signal");
       return;
     }
@@ -2603,6 +2662,9 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       }
     }
     if (match == edges.size()) {
+      if (demote_reset_edges()) {
+        break;
+      }
       emit_unsupported(cond->sourceRange, "unsupported-async-pattern",
                        "the async-reset condition does not name one of the edge triggers");
       return;
@@ -2623,6 +2685,9 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
                                 && (&rsc->asSymbol() == body_
                                     || rsc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
       if (!module_level) {
+        if (demote_reset_edges()) {
+          break;
+        }
         emit_unsupported(cond->sourceRange, "unsupported-async-pattern",
                          "the async reset must be a module input or a module-level signal");
         return;
@@ -2633,7 +2698,10 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     }
 
     // The then-arm must be const nonblocking stores to regs: those become
-    // the reset values.
+    // the reset values. Validate-and-collect first, emit after — a partial
+    // emit would leave stray reset attrs behind when a later statement fails
+    // the walk and the demote fallback lowers the arm synchronously instead.
+    std::vector<std::pair<const slang::ast::ValueSymbol*, std::string>> reset_stores;
     std::function<bool(const slang::ast::Statement&)> harvest = [&](const slang::ast::Statement& s) -> bool {
       switch (s.kind) {
         case StatementKind::Empty: return true;
@@ -2677,35 +2745,41 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
           if (!cv || !cv->isInteger()) {
             return false;
           }
-          declare_reg(*sym);  // ensure declared (hoisting normally did)
-          auto  name = lname_of(*sym);
-          auto& ln   = *builder_.lnast;
-          auto  emit_attr = [&](std::string_view key, const std::string& val, bool val_is_ref) {
-            auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
-            ln.add_child(idx, Lnast_node::create_ref(name));
-            ln.add_child(idx, Lnast_node::create_const(key));
-            if (val_is_ref) {
-              ln.add_child(idx, Lnast_node::create_ref(val));
-            } else {
-              ln.add_child(idx, Lnast_node::create_const(val));
-            }
-          };
-          emit_attr("initial", const_text(cv->integer()), false);
-          emit_attr("reset_pin", lname_of(*rst_sym), true);
-          emit_attr("sync", "false", false);
-          if (!edge_pos) {
-            emit_attr("negreset", "true", false);
-          }
+          reset_stores.emplace_back(sym, const_text(cv->integer()));
           return true;
         }
         default: return false;
       }
     };
     if (!harvest(cond_stmt.ifTrue)) {
+      if (demote_reset_edges()) {
+        break;
+      }
       emit_unsupported(cond_stmt.ifTrue.sourceRange, "unsupported-async-load",
                        "the async-reset arm must contain only constant non-blocking writes to state regs",
                        "non-constant async loads have no flop lowering; use --reader yosys-slang");
       return;
+    }
+    for (const auto& [sym, init_text] : reset_stores) {
+      declare_reg(*sym);  // ensure declared (hoisting normally did)
+      auto  name = lname_of(*sym);
+      auto& ln   = *builder_.lnast;
+      auto  emit_attr = [&](std::string_view key, const std::string& val, bool val_is_ref) {
+        auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
+        ln.add_child(idx, Lnast_node::create_ref(name));
+        ln.add_child(idx, Lnast_node::create_const(key));
+        if (val_is_ref) {
+          ln.add_child(idx, Lnast_node::create_ref(val));
+        } else {
+          ln.add_child(idx, Lnast_node::create_const(val));
+        }
+      };
+      emit_attr("initial", init_text, false);
+      emit_attr("reset_pin", lname_of(*rst_sym), true);
+      emit_attr("sync", "false", false);
+      if (!edge_pos) {
+        emit_attr("negreset", "true", false);
+      }
     }
 
     edges.erase(edges.begin() + static_cast<std::ptrdiff_t>(match));
@@ -2911,15 +2985,12 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     }
     auto pi = flat_or_tinfo(oc.port->getType());
     auto ei = flat_or_tinfo(*oc.expr->type);
-    // KNOWN OPEN (ExeUnitImp_4/VSetRiWvf): an output port bound to a
-    // scalar-struct-var stores the FLAT name here while reads resolve through
-    // the leaves; the in-memory LNAST lowers correctly (tolg slices the flat
-    // store), but the .prp TEXT round-trip loses that relation (the leaf muts
-    // recompile as independent 0-init vars), so the regen Pyrope diverges.
-    // Splitting the store per-field here fixes the Pyrope side but the
-    // wire-leaf feedback shape then mis-lowers on the tolg/cgen .v path
-    // (VsetModule vtype feedback cone) — that .v-side lowering must be fixed
-    // FIRST, then this store can move onto the leaves.
+    // An output port bound to a bundle-declared struct var (ExeUnitImp_4/
+    // VSetRiWvf `_vsetModule_io_out`) is split onto the per-field leaves
+    // inside assign_to (assign_struct_whole_value) — a flat store would be
+    // dead (reads resolve through the leaves; the .prp text round-trip used
+    // to lose the flat↔leaf relation, and a nested-struct var dropped the
+    // binding entirely). Guard: prp-v2prp/prp-simfail-instance_out_struct_ident.
     assign_to(*oc.expr, materialize_conversion(v, pi.bits, pi.is_signed, ei.bits, ei.is_signed));
   }
   clear_pending_loc();

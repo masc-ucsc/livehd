@@ -1,14 +1,19 @@
 /*
 :name: async_reset_enable
-:type: equiv
+:type: equiv_slang
 :verilog_top: async_reset_enable.pipe
 :pyrope_top: async_reset_enable.pipe
 */
 
-// KNOWN-FAILING (fixme tracker): explicit data-path async resets from Verilog
-// do not have a matching Pyrope surface construct. This models `arst` as a
-// synchronous conditional write, so it should not be equivalent to the golden's
-// always @(posedge clock or posedge arst) behavior.
+// Correct Pyrope reference for async_reset_enable.v — the golden keeps the
+// module reset in the sensitivity list (`posedge clock or posedge reset`) but
+// guards it with the compound `if (reset || arst)`, so no async rung is
+// extractable and the slang reader DEMOTES the edge-triggered reset to a
+// synchronous one (warning `async-reset-as-sync`; sound because LEC/sim only
+// observe state after clock updates). `arst` is a plain synchronous clear.
+// equiv_slang (not equiv): yosys read_verilog's proc_arst cannot peel the
+// compound guard either, and there it is a HARD proc_dff error ("Multiple
+// edge sensitive events"), so lgcheck can never read the golden directly.
 pub mod pipe(en:bool, arst:bool, d:u8) -> (q:u8@[0]) {
   reg r:u8 = 0
   if arst {

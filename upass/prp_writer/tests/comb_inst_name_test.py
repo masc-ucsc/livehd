@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """Regression: a stateless multi-output COMB instance keeps its hierarchical name.
 
-A multi-output `comb` is emitted by the writer as a destructure
-`(t = C.p, …) = C(args)`.  This test checks two coupled fixes:
-
-  1. The writer annotates that destructure with the call-site instance name —
-     `… = fwdunit::[name=fwd](…)` — so the Sub keeps the source instance name
-     (not a synthesised `u_fwdunit_<tmp>`) when re-compiled with
-     `upass.inline=false`.
-  2. inou.prp accepts that named destructure form (the `Callee::[name=…]`
-     annotation must not trip the `destructure-prefix` consistency check, which
-     compares the field-extraction prefix against the BARE callee).
+A multi-output `comb` is emitted by the writer as a whole-bind
+`mut fwd = fwdunit::[name=fwd](args)` with `fwd.port` output reads (the old
+destructure form `(t = C.p, …) = C(args)` silently dropped every output
+binding once `hdl` units stopped being runner-inlined — the INT2FP
+fracRounded miscompile). This test checks that the call-site instance name
+survives: the `::[name=…]` annotation is emitted so the Sub keeps the source
+instance name (not a synthesised `u_fwdunit_<tmp>`) when re-compiled with
+`upass.inline=false`.
 
 The loop is closed by re-compiling the emitted Pyrope with inline=false and
 confirming the hierarchy tree shows `fwd : fwdunit`.
@@ -65,9 +63,9 @@ def main():
             print("FAILED: " + msg)
 
     # The stateless multi-output comb must carry the call-site instance name on
-    # the destructure RHS callee.
+    # the whole-bind callee (`mut fwd = fwdunit::[name=fwd](…)`).
     need("= fwdunit::[name=fwd](" in text,
-         "destructure call `= fwdunit::[name=fwd](` missing — comb instance lost its name")
+         "call `= fwdunit::[name=fwd](` missing — comb instance lost its name")
 
     # 2. re-compile the emitted pyrope (inline=false keeps combs as Sub instances)
     prp_files = sorted(
@@ -78,7 +76,7 @@ def main():
          "--emit-dir", "lg:" + lg_dir] + prp_files + ["--workdir", os.path.join(work, "w2")],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if rec.returncode != 0:
-        print("FAILED: pyrope re-compile rc={} (parser must accept the named destructure)".format(rec.returncode))
+        print("FAILED: pyrope re-compile rc={} (parser must accept the named whole-bind)".format(rec.returncode))
         print(rec.stdout.decode("utf-8", "ignore"))
         print("--- emitted top.prp ---")
         print(text)

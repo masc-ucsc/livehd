@@ -20,7 +20,11 @@ module icsi_sub(
   assign r = a;
 endmodule
 
-module \instance_conn_struct_ident.top (
+// NOTE: the top is deliberately UNDOTTED (not \instance_conn_struct_ident.top) so lgcheck's
+// slang gold reader can name it via --top (dotted escaped names break
+// yosys-slang's --top/RTLIL naming) — same convention as
+// instance_out_struct_ident_top.
+module instance_conn_struct_ident_top (
   input         in_valid,
   input  [19:0] in_bits,
   output        out_valid,

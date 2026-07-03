@@ -279,29 +279,17 @@ cc_direct_headers(
             # test can never pass; run it via the fixme target below. The reverse
             # direction is already fixme-tagged through _V2PRP_FIXME.
             "tests/equiv/gen_type_cast.prp",
-            # Known-failing semantic trackers. Run via the fixme targets below.
-            "tests/equiv/async_reset_enable.prp",
+            # Known-failing semantic tracker. Run via the fixme target below.
             "tests/equiv/latch_enable_hold.prp",
-            # struct_init_whole_read: the golden's nested-struct '{...} net
-            # initializers exceed yosys read_verilog, so the forward lgcheck
-            # miter never completes (INCONCLUSIVE, not a refute). The reverse
-            # prp-v2prp-struct_init_whole_read (cvc5, slang-read) is the real
-            # guard for the slang net-initializer store-drop fix and passes.
-            "tests/equiv/struct_init_whole_read.prp",
-            # instance_conn_struct_ident: same yosys-reader gap (struct-typed
-            # internal wire in the golden). The reverse prp-v2prp direction
-            # (cvc5, slang-read) is the live guard for the slang per-module
-            # collector-state clobber fix (Alu_3 io_out_valid stuck at 0).
-            "tests/equiv/instance_conn_struct_ident.prp",
-            # struct_selfref_pattern: same yosys-reader gap. The reverse
-            # prp-v2prp direction (cvc5, slang-read) is the live guard for the
-            # Type-C whole-net false-loop bundle relaxation (DretEventModule).
-            "tests/equiv/struct_selfref_pattern.prp",
-            # instance_out_struct_ident: same yosys-reader gap AND a
-            # known-failing v2prp tracker (instance-output struct dual
-            # identity — the ExeUnitImp_4 / XiangShan fp-convert family root
-            # cause). Run via the fixme target below.
-            "tests/equiv/instance_out_struct_ident.prp",
+            # NOTE: struct_init_whole_read / instance_conn_struct_ident /
+            # struct_selfref_pattern / instance_out_struct_ident used to be
+            # excluded here (their SystemVerilog '{...} / struct-typed-wire
+            # goldens exceed yosys read_verilog, so the forward miter was
+            # INCONCLUSIVE). They now run in the glob (2026-07-03): the header
+            # `:gold_reader: slang` has lgcheck read the golden through the
+            # yosys-slang plugin, and each golden's top is an UNDOTTED plain
+            # identifier (dotted escaped `\a.b ` names break yosys-slang's
+            # --top/RTLIL naming).
         ],
     )
 ]
@@ -361,17 +349,18 @@ sh_test(
         tags = ["fixme"],
     )
     for base in [
-        "async_reset_enable",
+        # async_reset_enable was PROMOTED out of this list (2026-07-03): the
+        # slang reader demotes an edge-triggered reset with no extractable
+        # async rung to a synchronous one (async-reset-as-sync; sound because
+        # LEC/sim observe state only after clock updates), and the pair runs
+        # as :type: equiv_slang since yosys read_verilog hard-errors on the
+        # compound `if (reset || arst)` guard (proc_dff multi-edge).
         "latch_enable_hold",
-        # yosys-reader gap, not a semantic tracker: see the equiv-glob exclude
-        # note; the cvc5 prp-v2prp direction is the live guard.
-        "struct_init_whole_read",
-        "instance_conn_struct_ident",
-        "struct_selfref_pattern",
-        # instance-output struct dual identity: BOTH directions blocked until
-        # lower_instance's per-field output split lands (fix order in the
-        # KNOWN OPEN comment there). The .v is also a yosys-reader gap.
-        "instance_out_struct_ident",
+        # struct_init_whole_read / instance_conn_struct_ident /
+        # struct_selfref_pattern / instance_out_struct_ident were PROMOTED out
+        # of this list (2026-07-03): `:gold_reader: slang` reads their goldens
+        # through the yosys-slang plugin (see the equiv-glob note above), so
+        # the forward direction proves; they run as ordinary prp-equiv-* now.
     ]
 ]
 
@@ -399,19 +388,16 @@ _V2PRP_FIXME = [
     # correct, but the reference itself will not compile, so it cannot be the LEC
     # ref. Tracked by 3g (generics).
     "gen_type_cast",
-    # Reverse v2prp proves against the concrete Pyrope source and does not mask
-    # the Verilog X payload under valid=false. The forward lgyosys equiv test
-    # passes and pins the intended don't-care semantics.
-    "sim_dontcare_ctrl",
-    "sim_dontcare_state",
-    # Known-failing semantic trackers: latch inference and explicit data-path
-    # async resets do not have a supported Pyrope source equivalent yet.
-    "async_reset_enable",
+    # Known-failing semantic tracker: latch inference does not have a supported
+    # Pyrope source equivalent yet.
+    # async_reset_enable was PROMOTED out of this list (2026-07-03): the slang
+    # reader now demotes an edge-triggered reset with no extractable async rung
+    # to a synchronous one (async-reset-as-sync warning), so the .v round-trips.
     "latch_enable_hold",
-    # instance-output struct dual identity (ExeUnitImp_4 / fp-convert family
-    # root cause): v2prp REFUTES until lower_instance's per-field output split
-    # lands (fix order in slang_structure.cpp lower_instance's KNOWN OPEN).
-    "instance_out_struct_ident",
+    # instance_out_struct_ident (instance-output struct dual identity,
+    # ExeUnitImp_4 / fp-convert family) was PROMOTED out of this list:
+    # assign_to splits a whole value onto the bundle leaves, so the emitted
+    # .prp text round-trips (2026-07-03).
     # instance_collapse_order (hierarchical-LEC box-instance pairing) was
     # PROMOTED out of this list: stateless collapsed leaves are now pairing-free
     # (per-def UF congruence), stateful ones pair name-first, and a collapsed-box
@@ -438,8 +424,6 @@ _V2PRP_FIXME = [
         tags = ["fixme"] if base in _V2PRP_FIXME else [],
         deps = ["//inou/yosys:scripts"],
     )
-    # Every golden ships a matching .prp except mclk_sram_2wclk (its own fixme
-    # target below — multi-clock memory has no Pyrope reference yet).
     for base in [
         f.split("/")[-1][:-2]
         for f in glob(
@@ -447,7 +431,6 @@ _V2PRP_FIXME = [
             # `*_tb.v` are the generated differential-sim golden drivers
             # (prp-simeq-*), not equiv goldens — keep them out of the v2prp glob.
             exclude = [
-                "tests/equiv/mclk_sram_2wclk.v",
                 "tests/equiv/*_tb.v",
             ],
         )
@@ -500,19 +483,28 @@ _V2PRP_FIXME = [
             # gets peek()-pre-bound outputs + a deferred cycle(in) call.
             "sim_sub_stateful_feedback",
             "sim_sub_nested_comb_feedback",
+            # 2026-07-03: instance-output dual identity fixed — assign_to
+            # splits the bound value onto the struct's bundle leaves, so the
+            # emitted .prp recompiles to the same sim (v2prp-sim mode green).
+            "instance_out_struct_ident",
+            # 2026-07-03: resolve() distributes a slice through Mux arms
+            # (GM(mux(s,x,y),m) == mux(s, GM(x,m), GM(y,m)); an on-cycle
+            # selector resolves as its own full-width slice).
+            "sim_loop_mux_arm",
+            # 2026-07-03: per-OUTPUT-cone deferral (Stage-2) — a stateful
+            # MEALY callee whose FED-BACK outputs are all pure state reads
+            # gets those outputs peek()-pre-bound; the atomic cycle(in) call
+            # orders normally with its input cone emitted on demand.
+            "sim_sub_mealy_feedback",
         ) else ["fixme"],
     )
     for name, mode in {
-        "sim_dontcare_ctrl": "exact-diff",
-        "sim_dontcare_state": "exact-diff",
         "sim_prp_packed_selfref": "prp-emit",
         "sim_lg_atomic_feedback": "lg-emit",
         # SIM-side pin of the fp-convert fail family (FCVT/FPCVT/FP_INCVT/
-        # CVT32ModuleS0/ByteMaskTailGen — instance-output struct dual identity):
-        # the .v sims right via slang in-memory, but the EMITTED Pyrope text
-        # recompiles to a sim that reads 0-init leaves. Companion of the
-        # prp-v2prp-instance_out_struct_ident LEC fixme; both flip green with
-        # lower_instance's per-field output split.
+        # CVT32ModuleS0/ByteMaskTailGen — instance-output struct dual
+        # identity). FIXED 2026-07-03 (assign_to splits the bound value onto
+        # the bundle leaves); green together with its prp-v2prp companion.
         "instance_out_struct_ident": "v2prp-sim",
         # ---- 2026-07-03 lhd-sim failure-class synthetics (verification.html
         # sim column, ~63 comb-loop errors + 3 sub-feedback + 2 segv). Each
@@ -562,33 +554,22 @@ _V2PRP_FIXME = [
         # a comb Sub and callee_is_pure_comb() rejects Ntype_op::Sub; the
         # flatten is single-level non-recursive (ExeUnitImp_4/Alu).
         "sim_sub_nested_comb_feedback": "prp-emit",
+        # ---- 2026-07-03b: the last two NON-latch sim-engine gaps, BOTH FIXED
+        # the same day (untagged above; each also in _SIMEQ):
+        # Mux-arm slice distribution: a packed word driven by a MUX whose arms
+        # pack a field computed from a slice of the same word (the
+        # BlockCipherModule/round-chaining residual: Bku/CryptoModule/
+        # ExeUnitImp_6/ExuBlock). resolve() distributes
+        # GM(mux(s,x,y),m) == mux(s, GM(x,m), GM(y,m)).
+        "sim_loop_mux_arm": "prp-emit",
+        # per-OUTPUT-cone deferral (Stage-2): a stateful MEALY callee (one
+        # reg-read output on the feedback, one comb in->out output) defeats
+        # the whole-callee Moore check (CSR/NewCSR::MipModule, DivUnit/SRT16).
+        # Pre-binding ONLY the input-independent outputs un-cycles the
+        # schedule; the atomic call orders normally.
+        "sim_sub_mealy_feedback": "prp-emit",
     }.items()
 ]
-
-# 2w-prp_writer bucket C2 (DEFERRED to 2m-multiport_mem): a multi-clock SRAM
-# whose two write ports use different clocks. This aborts in the FRONT END
-# (upass.attributes: `clock_pin_refname` of the memory is add-only), never
-# reaching the writer — it needs a per-port memory-clock representation +
-# cgen's existing ware/rtl/cgen_memory_multiclock_*.v wrapper wiring. It is also
-# the ONE golden with no <name>.prp reference, so the v2prp harness has nothing
-# to LEC against either. Tagged `fixme` (repo known-broken convention; .bazelrc
-# filters `-fixme` so `bazel test //...` stays green):
-#   bazel test //inou/prp:prp-v2prp-mclk_sram_2wclk --test_tag_filters=
-sh_test(
-    name = "prp-v2prp-mclk_sram_2wclk",
-    srcs = ["tests/v2prp_test.py"],
-    args = [
-        "-i",
-        "$(location //inou/prp:tests/equiv/mclk_sram_2wclk.v)",
-    ],
-    data = [
-        "//inou/prp:tests/v2prp_test.py",
-        "//inou/prp:tests/equiv/mclk_sram_2wclk.v",
-        "//lhd",
-    ],
-    tags = ["fixme"],
-    deps = ["//inou/yosys:scripts"],
-)
 
 # prp-yvr: the `--reader yosys-verilog` direction. The slang/pyrope tests above
 # CANNOT catch the XiangShan MISCOMPILE class whose root cause is LiveHD's
@@ -669,7 +650,7 @@ sh_test(
 # `sim_runtime_hdrs` headers; NO nested bazel). The `_tb.prp` imports its sibling
 # `<name>.prp`, so BOTH are runfiles.
 _SIMEQ = [
-    "arr2d_dyn_sel", "array_selfref", "bit_sel_sext", "bitrange_dyn", "bitrange_open",
+    "arr2d_dyn_sel", "array_selfref", "async_reset_enable", "bit_sel_sext", "bitrange_dyn", "bitrange_open",
     "bitsel_dyn", "bitsel_idx", "bitset_gap", "bitset_imm", "bitset_mut", "bitset_nil",
     "bitset_reg", "clz_nest", "codeblock_expr", "comb_single_out_op", "cond_modified_read",
     "condout_const_arms", "condout_mixed_arms", "condout_seed_uncertain", "dyn_tuple_const",
@@ -697,6 +678,7 @@ _SIMEQ = [
     "sim_packed_selfref_1bit", "sim_loop_sticky_ripple", "sim_loop_pack_shiftand",
     "sim_loop_packed_bus_group", "sim_loop_mux1h_selfslice", "sim_loop_sbox_bit_selfref",
     "sim_loop_mem_prefetch", "sim_sub_stateful_feedback", "sim_sub_nested_comb_feedback",
+    "sim_loop_mux_arm", "sim_sub_mealy_feedback",
     "shift_nested_sra", "shift_sra_unsigned", "signed_one_bit_cmp", "splice_merge", "trivial_if",
     "varargs_add", "wire_comb", "wire_reg", "wire_reset", "wire_ring", "wire_typed",
 ]
@@ -713,11 +695,16 @@ _SIMEQ = [
 #       but the sim scheduled the whole packed word as one object. cgen_sim now
 #       redirects each disjoint Get_mask slice-read of an Or-of-disjoint-ranges net
 #       to the single operand driving it (split_packed_selfref_wires).
-#   * async_reset_enable / gen_type_cast : pre-existing fixme DUTs (async
-#       data-path reset; the deliberately-broken generics `T(a)` repro).
+#   * async_reset_enable (NOW FIXED, promoted to _SIMEQ): the golden's reset
+#       is edge-triggered under a compound guard; the slang reader demotes it
+#       to a synchronous reset (async-reset-as-sync), and the _tb.prp import
+#       binding no longer collides with the `pipe` keyword (gen_equiv_tb.py
+#       PRP_KEYWORDS guard -> `pipe_`).
+#   * gen_type_cast : pre-existing fixme DUT (the deliberately-broken generics
+#       `T(a)` repro).
 # Run one: bazel test //inou/prp:prp-simeq-sim_lg_atomic_feedback --test_tag_filters=
 _SIMEQ_FIXME = [
-    "async_reset_enable", "gen_type_cast",
+    "gen_type_cast",
 ]
 
 [

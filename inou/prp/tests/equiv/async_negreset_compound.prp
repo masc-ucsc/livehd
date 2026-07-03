@@ -1,0 +1,24 @@
+/*
+:name: async_negreset_compound
+:type: equiv_slang
+:verilog_top: async_negreset_compound.pipe
+:pyrope_top: async_negreset_compound.pipe
+*/
+
+// Correct Pyrope reference for async_negreset_compound.v — the golden's
+// active-low `rst_n` is edge-triggered (negedge) but guarded by the compound
+// `if (!rst_n || clr)`, so the slang reader demotes it to a synchronous read
+// (warning `async-reset-as-sync`; sound because LEC/sim only observe state
+// after clock updates). `clr` is a plain synchronous clear. equiv_slang for
+// the same reason as async_reset_enable: yosys read_verilog's proc_arst
+// cannot peel a compound async guard (hard proc_dff "Multiple edge sensitive
+// events" error), so lgcheck can never read the golden directly.
+pub mod pipe(rst_n:bool, clr:bool, en:bool, d:u8) -> (q:u8@[0]) {
+  reg r:u8 = 0
+  if !rst_n or clr {
+    r = 0
+  } elif en {
+    r = d
+  }
+  q = r
+}

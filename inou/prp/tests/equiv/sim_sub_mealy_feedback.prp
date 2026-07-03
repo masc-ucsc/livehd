@@ -1,0 +1,37 @@
+/*
+:name: sim_sub_mealy_feedback
+:type: equiv
+:verilog_top: sim_sub_mealy_feedback_top
+:pyrope_top: sim_sub_mealy_feedback_top
+*/
+
+// FALSE combinational loop through a stateful sub-instance that is NOT a
+// Moore machine (the CSR/NewCSR::MipModule `lcofiReq` and DivUnit/SRT16
+// residual class). The fed-back cone only touches `ready` — a pure register
+// read — but the callee ALSO has `echo`, a combinational in->out path, so
+// callee_is_moore() declines the whole-callee peek()/defer treatment and
+// flatten declines the stateful callee: cgen.sim errs
+// `comb-loop-through-instance` (input `kill`). FIX: per-OUTPUT-cone deferral
+// (Stage-2) — pre-bind only the outputs with no comb dependence on any input
+// (here `ready`), which already un-cycles the schedule; the atomic call then
+// orders normally.
+pub mod cell::[lg="ssmf_cell", hdl](start:u1, kill:u1, din:u4) -> (ready:u1@[], echo:u4@[]) {
+  reg busy:u1 = 0
+  ready = busy ^ 1
+  echo  = din ^ 3            // comb in->out path: the callee is Mealy
+  if kill != 0 {
+    busy = 0
+  } elif start != 0 {
+    busy = 1
+  }
+}
+
+pub mod top::[lg="sim_sub_mealy_feedback_top", hdl](go:u1, flush:u1, d:u4) -> (ready_o:u1@[0], echo_o:u4@[0]) {
+  wire u_ready:u1
+  wire kill:u1
+  kill = (u_ready ^ 1) & flush     // depends on the instance's own reg-read output
+  mut ures = cell::[name=u](start = go, kill = kill, din = d)
+  u_ready = ures.ready
+  ready_o = u_ready
+  echo_o  = ures.echo
+}

@@ -1,8 +1,9 @@
 /*
 :name: struct_init_whole_read
 :type: equiv
-:verilog_top: struct_init_whole_read.top
+:verilog_top: struct_init_whole_read_top
 :pyrope_top: struct_init_whole_read.top
+:gold_reader: slang
 */
 
 // Regression for the slang net-initializer store drop (the CtrlBlock

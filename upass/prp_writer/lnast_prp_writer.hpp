@@ -45,13 +45,6 @@ public:
   bool                            has_unimplemented() const { return !unimplemented_.empty(); }
   const std::vector<std::string>& unimplemented() const { return unimplemented_; }
 
-  // Cross-unit map (callee unit name -> its ordered output port names) for the
-  // multi-output COMB units in the same emit batch.  A `comb` with >1 output is
-  // INLINED by the runner, so `r = C(...)` (whole-bind of multiple returns) is
-  // the rejected `multi-output-one-var` form; the writer instead destructures it
-  // (`(t = C.o, …) = C(...)`).  Mods stay `r = M(...)` (Sub instances).  Owned by
-  // the pass; must outlive write_all().
-  void set_multi_out_combs(const std::unordered_map<std::string, std::vector<std::string>>* m) { multi_out_combs_ = m; }
   // The names of every module emitted in this run.  A func_call callee that is
   // one of them becomes a file-top `const X = import("X.X")` so the cross-module
   // call resolves on re-compile.  Owned by the pass; must outlive write_all().
@@ -65,13 +58,6 @@ public:
   // instances, and the annotation is inert when a comb is inlined.  Owned by the
   // pass; must outlive write_all().
   void set_instantiated_modules(const std::unordered_set<std::string>* m) { instantiated_modules_ = m; }
-  // Scan a unit's LNAST top; if it is a slang-origin multi-output `comb`, set
-  // `name`/`outputs` (ordered output port names) and return true (else false).
-  static bool scan_multi_out_comb(const std::shared_ptr<Lnast>& ln, std::string& name, std::vector<std::string>& outputs);
-  // True if `nid`'s subtree contains module state (a `reg`/`latch` declare or a
-  // submodule `func_call`).  The mod-vs-comb predicate used by scan_multi_out_comb
-  // (destructure decision).
-  static bool subtree_has_state(const std::shared_ptr<Lnast>& ln, Lnast_nid nid);
 
 private:
   std::ostream&          os;
@@ -230,12 +216,6 @@ private:
   // True if `name` is a known bundle field `base.field` (rendered unescaped).
   bool is_bundle_field(std::string_view name) const;
 
-  // Multi-output-comb destructuring (see set_multi_out_combs).  When a call to a
-  // multi-output comb binds to a var `r`, the func_call is emitted as a
-  // destructure into per-output temps; `mocomb_dst_` records `r` and
-  // `mocomb_field_` maps `r\x01<output>` -> the temp that received it, so the
-  // later `r["<output>"]` tuple_get reads rewrite to that temp.
-  const std::unordered_map<std::string, std::vector<std::string>>* multi_out_combs_{nullptr};
   // Set of all module names emitted in this run (see set_known_modules); a
   // func_call callee in this set is emitted as a file-top import.
   const std::unordered_set<std::string>* known_modules_{nullptr};
@@ -253,8 +233,6 @@ private:
   // `SubModule`.  Maps module name -> emitted alias (== module name when no
   // collision).  Cleared per module.
   std::unordered_map<std::string, std::string>                     import_alias_;
-  std::unordered_set<std::string>                                  mocomb_dst_;
-  std::unordered_map<std::string, std::string>                     mocomb_field_;
 
   // Storage-class prefix to print before an assignment LHS: a pending
   // attr_set-type keyword if one is queued, else "mut " on the first write to

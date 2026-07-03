@@ -494,15 +494,7 @@ void Lnast_prp_writer::write_module() {
     import_alias_.clear();
     for (const auto& nm : imports) {
       std::string alias = nm;
-      // Multi-output combs are consumed via a destructure `mut (r__o = Callee.o, …) =
-      // Callee(args)` whose field-ref prefix MUST match the call callee (the runner
-      // pairs them by name) and which RELIES on the (benign) type==instance-name
-      // collision to read the instance ports.  Aliasing those would both break the
-      // prefix match and re-introduce the import-const read.  Only the SINGLE-output
-      // bare-instance-read form (`mut inst = Callee(...); x = inst`) hits the bug, so
-      // alias only non-multi-out callees.
-      const bool multi_out = multi_out_combs_ != nullptr && multi_out_combs_->count(nm) != 0u;
-      if (!multi_out && inst_names.count(nm) != 0u) {   // would collide with an instance var
+      if (inst_names.count(nm) != 0u) {                  // would collide with an instance var
         do {
           alias += "_t";                                 // disambiguating suffix
         } while (inst_names.count(alias) != 0u || (known_modules_ != nullptr && known_modules_->count(alias) != 0u));
@@ -1757,84 +1749,6 @@ void Lnast_prp_writer::write_cassert() {
 
 // ── func_call ─────────────────────────────────────────────────────────────────
 
-// The mod-vs-comb predicate: a subtree carries module state if it holds a
-// `reg`/`latch` declare or a submodule `func_call` (a nested instantiation makes
-// the enclosing unit a `mod`).  Used by scan_multi_out_comb (destructure
-// decision).
-bool Lnast_prp_writer::subtree_has_state(const std::shared_ptr<Lnast>& ln, Lnast_nid nid) {
-  using N = Lnast_ntype;
-  if (nid.is_invalid()) {
-    return false;
-  }
-  if (ln->get_type(nid) == N::Lnast_ntype_func_call) {
-    return true;
-  }
-  if (ln->get_type(nid) == N::Lnast_ntype_declare) {
-    auto c0 = ln->get_child(nid);
-    auto c1 = c0.is_invalid() ? c0 : ln->get_sibling_next(c0);
-    auto c2 = c1.is_invalid() ? c1 : ln->get_sibling_next(c1);
-    if (!c2.is_invalid() && ln->get_type(c2) == N::Lnast_ntype_const) {
-      auto q = ln->get_name(c2);
-      if (q == "reg" || q == "latch") {
-        return true;
-      }
-    }
-  }
-  for (auto c = ln->get_child(nid); !c.is_invalid(); c = ln->get_sibling_next(c)) {
-    if (subtree_has_state(ln, c)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// Scan a unit's top to detect a slang-origin multi-output `comb` (see the header
-// note).  Mirrors write_module's `is_mod = body_has_state(body)` decision and
-// emit_port_group's output-port walk, but as a pure read over an arbitrary unit.
-bool Lnast_prp_writer::scan_multi_out_comb(const std::shared_ptr<Lnast>& ln, std::string& name,
-                                           std::vector<std::string>& outputs) {
-  using N   = Lnast_ntype;
-  auto root = ln->get_root();
-  if (root.is_invalid()) {
-    return false;
-  }
-  auto io = ln->get_child(root);
-  if (io.is_invalid() || ln->get_type(io) != N::Lnast_ntype_io) {
-    return false;  // pyrope-origin bare file (func_defs), not a slang io module
-  }
-  auto body = ln->get_sibling_next(io);
-  // `is_mod`: a body with state (reg/latch) OR a submodule func_call must be a
-  // `mod`; only a stateless, instantiation-free body is an inlined `comb`.
-  if (subtree_has_state(ln, body)) {
-    return false;  // a mod: stays a Sub instance, no destructure needed
-  }
-  // Output port names: the io node's SECOND tuple_add child; each port is
-  // `store(ref(name), …)`.
-  auto in_tup  = ln->get_child(io);
-  auto out_tup = in_tup.is_invalid() ? Lnast_nid{} : ln->get_sibling_next(in_tup);
-  if (out_tup.is_invalid()) {
-    return false;
-  }
-  for (auto port = ln->get_child(out_tup); !port.is_invalid(); port = ln->get_sibling_next(port)) {
-    auto name_nid = ln->get_child(port);
-    if (name_nid.is_invalid()) {
-      continue;
-    }
-    auto pn = ln->get_name(name_nid);
-    if (!pn.empty() && pn[0] == '\\') {
-      pn = pn.substr(1);  // strip the SSA/escape prefix the same way strip_prefix does for refs
-    }
-    outputs.emplace_back(pn);
-  }
-  if (outputs.size() <= 1) {
-    return false;  // single-output comb binds to one var fine — no destructure
-  }
-  std::string_view full = ln->get_top_module_name();
-  auto             dot  = full.rfind('.');
-  name                  = std::string(dot == std::string_view::npos ? full : full.substr(dot + 1));
-  return true;
-}
-
 void Lnast_prp_writer::write_func_call() {
   if (!move_to_child()) {
     return;
@@ -1858,17 +1772,6 @@ void Lnast_prp_writer::write_func_call() {
     }
   }
 
-  // A multi-output COMB bound to a real var is rejected by the runner as
-  // `multi-output-one-var` (combs are inlined, so the whole-bind keeps all
-  // returns).  Emit a destructure instead — `mut (r__o0 = C.o0, …) = C(args)` —
-  // and record r__o<i> so the body's `r["o<i>"]` tuple_gets rewrite to it.
-  const std::vector<std::string>* outs = nullptr;
-  if (multi_out_combs_ && !is_tmp(lhs)) {
-    if (auto it = multi_out_combs_->find(call_tail); it != multi_out_combs_->end()) {
-      outs = &it->second;
-    }
-  }
-
   // Preserve the hierarchical instance name.  A call to an emitted module becomes
   // a Sub instance on re-compile (every module with `upass.inline=false`; a
   // stateful `mod` always); without an explicit name tolg synthesises
@@ -1882,31 +1785,16 @@ void Lnast_prp_writer::write_func_call() {
   const bool name_instance = !is_tmp(lhs) && instantiated_modules_ != nullptr
                              && instantiated_modules_->count(call_tail) != 0u;
 
-  if (outs != nullptr) {
-    mocomb_dst_.insert(lhs);
-    print("mut (");
-    bool firstd = true;
-    for (const auto& o : *outs) {
-      if (!firstd) {
-        print(", ");
-      }
-      std::string tgt = lhs + "__" + o;
-      mocomb_field_[lhs + std::string(1, '\x01') + o] = tgt;
-      print(tgt);
-      print(" = ");
-      print(callee_ref);
-      print(".");
-      print(o);
-      firstd = false;
-    }
-    print(") = ");
-    print(callee_ref);
-  } else {
-    print(decl_prefix(lhs));
-    print(lhs);
-    print(" = ");
-    print(callee_ref);
-  }
+  // A multi-output callee (comb or mod) whole-binds like any other instance —
+  // `mut r = C(args)` — and its outputs are read as `r.port`.  (The old
+  // destructure form `mut (r__o = C.o, …) = C(args)` targeted the runner-inline
+  // era; today slang-origin units carry `hdl` and stay Sub instances, where the
+  // destructure silently dropped every output binding — the INT2FP fracRounded
+  // miscompile.)
+  print(decl_prefix(lhs));
+  print(lhs);
+  print(" = ");
+  print(callee_ref);
   if (name_instance) {
     print("::[name=");
     print(lhs);
@@ -3246,26 +3134,6 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
     }
     case N::Lnast_ntype_tuple_get: {
       auto base = lnast->get_sibling_next(c0);
-      // Multi-output-comb rewrite: `r["o"]` where `r` is a destructured comb
-      // result becomes the per-output temp `r__o` (see write_func_call).  Only a
-      // single constant field index (a named output) rewrites; any other index
-      // (bit-slice / multi-level) falls through to the normal postfix form.
-      if (!base.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(base))) {
-        std::string bn(strip_prefix(lnast->get_name(base)));
-        if (mocomb_dst_.count(bn) != 0u) {
-          auto idx = lnast->get_sibling_next(base);
-          if (!idx.is_invalid() && lnast->get_sibling_next(idx).is_invalid()
-              && lnast->get_type(idx) == N::Lnast_ntype_const) {
-            std::string field(lnast->get_name(idx));
-            if (field.size() >= 2 && (field.front() == '\'' || field.front() == '"') && field.back() == field.front()) {
-              field = field.substr(1, field.size() - 2);
-            }
-            if (auto it = mocomb_field_.find(bn + std::string(1, '\x01') + field); it != mocomb_field_.end()) {
-              return it->second;
-            }
-          }
-        }
-      }
       // A submodule output read `inst["port"]` prints as `inst.port` (dot field
       // access) when `inst` is a module-instance result and `port` is a bare
       // identifier.  This covers both the inlined uses and any remaining `wire`
@@ -3273,7 +3141,7 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
       if (!base.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(base))) {
         std::string bn(strip_prefix(lnast->get_name(base)));
         auto        idx0 = lnast->get_sibling_next(base);
-        if (instance_results_.count(bn) != 0u && mocomb_dst_.count(bn) == 0u && !idx0.is_invalid()
+        if (instance_results_.count(bn) != 0u && !idx0.is_invalid()
             && lnast->get_sibling_next(idx0).is_invalid() && lnast->get_type(idx0) == N::Lnast_ntype_const) {
           std::string field(lnast->get_name(idx0));
           if (field.size() >= 2 && (field.front() == '\'' || field.front() == '"') && field.back() == field.front()) {

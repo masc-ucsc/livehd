@@ -559,9 +559,13 @@ int flatten_false_loop_subs(hhds::Graph* g) {
 
 // A Sub S sits on a FALSE combinational loop when a backward COMB walk from one
 // of its input drivers reaches S itself (stopping at other state/Sub/IO
-// boundaries). Shared by flatten_false_loop_subs and the Moore-sub deferral.
-bool sub_on_false_loop(const hhds::Node_class& s) {
+// boundaries). Returns the S output PORT-IDS the loop threads through (the
+// fed-back outputs); empty means S is not on a false loop. The Moore-sub
+// deferral only needs non-emptiness; the per-output-cone (Stage-2) deferral
+// checks each fed-back port is a pure state read.
+absl::flat_hash_set<uint32_t> sub_false_loop_output_pids(const hhds::Node_class& s) {
   namespace gu = livehd::graph_util;
+  absl::flat_hash_set<uint32_t>         pids;
   absl::flat_hash_set<hhds::Node_class> seen;
   std::vector<hhds::Pin_class>          stk;
   for (auto e : s.inp_edges()) {
@@ -575,7 +579,8 @@ bool sub_on_false_loop(const hhds::Node_class& s) {
     }
     auto m = d.get_master_node();
     if (m == s) {
-      return true;
+      pids.insert(static_cast<uint32_t>(d.get_port_id()));
+      continue;  // stop AT s; keep walking the rest for every fed-back port
     }
     auto op = gu::type_op_of(m);
     if (op == Ntype_op::Sub || op == Ntype_op::Memory || gu::is_type_register(m) || op == Ntype_op::IO) {
@@ -588,7 +593,7 @@ bool sub_on_false_loop(const hhds::Node_class& s) {
       stk.push_back(e.driver);
     }
   }
-  return false;
+  return pids;
 }
 
 // TRUE when NO output of the callee depends COMBINATIONALLY on any of its
@@ -646,6 +651,73 @@ bool callee_is_moore(const std::shared_ptr<hhds::Graph>& cg, const SIO& sio) {
     }
   }
   return true;
+}
+
+// The PER-OUTPUT slice of the Moore check: port-ids of the callee outputs whose
+// cone has NO combinational dependence on any callee input (pure functions of
+// state/consts). A MEALY callee (rejected whole by callee_is_moore) still has
+// state-only outputs -- the CSR/NewCSR::MipModule / DivUnit-SRT16 shape, where
+// the fed-back `ready` is a register read but a sibling `echo` output is a comb
+// in->out path. Conservative per output: anything unbounded (a nested Sub on
+// the cone, a reached IO) disqualifies that output only; an undriven output is
+// never included.
+template <typename SIO>
+absl::flat_hash_set<uint32_t> callee_state_only_outputs(const std::shared_ptr<hhds::Graph>& cg, const SIO& sio) {
+  namespace gu = livehd::graph_util;
+  absl::flat_hash_set<uint32_t> res;
+  if (!cg || !sio) {
+    return res;
+  }
+  auto driver_of = [](const hhds::Pin_class& sink) -> hhds::Pin_class {
+    if (sink.is_invalid()) {
+      return {};
+    }
+    for (auto e : sink.get_master_node().inp_edges()) {
+      if (e.sink.get_port_id() == sink.get_port_id()) {
+        return e.driver;
+      }
+    }
+    return {};
+  };
+  for (const auto& od : sio->get_output_pin_decls()) {
+    auto drv = driver_of(cg->get_output_pin(od.name));
+    if (drv.is_invalid()) {
+      continue;
+    }
+    bool                                  state_only = true;
+    absl::flat_hash_set<hhds::Node_class> seen;
+    std::vector<hhds::Pin_class>          stk{drv};
+    while (!stk.empty() && state_only) {
+      auto d = stk.back();
+      stk.pop_back();
+      if (d.is_invalid() || gu::is_const_pin(d)) {
+        continue;
+      }
+      if (gu::is_graph_input_pin(d)) {
+        state_only = false;  // a combinational in->out path
+        break;
+      }
+      auto m  = d.get_master_node();
+      auto op = gu::type_op_of(m);
+      if (op == Ntype_op::Memory || gu::is_type_register(m)) {
+        continue;  // state boundary: reads of current state are input-independent
+      }
+      if (op == Ntype_op::Sub || op == Ntype_op::IO) {
+        state_only = false;  // conservative: a nested sub may be comb-through
+        break;
+      }
+      if (!seen.insert(m).second) {
+        continue;
+      }
+      for (auto e : m.inp_edges()) {
+        stk.push_back(e.driver);
+      }
+    }
+    if (state_only) {
+      res.insert(static_cast<uint32_t>(od.port_id));
+    }
+  }
+  return res;
 }
 
 // Break a FALSE word-level combinational loop through a PACKED wire. A single net
@@ -1106,6 +1178,51 @@ int split_packed_selfref_wires(hhds::Graph* g) {
         }
       } else if (split_dbg) {
         std::print("split[dbg]:   sra amount NON-CONST (dynamic shift)\n");
+      }
+    } else if (op == Ntype_op::Mux) {
+      // Distribute the slice through the arms: Get_mask(mux(s, xs...), m) ==
+      // mux(s, Get_mask(x, m)...) -- the mux picks one arm's bit pattern, so
+      // bits [lo,hi) of the result are bits [lo,hi) of the picked arm (the
+      // BlockCipherModule/round-chaining shape: a packed word driven by a Mux
+      // whose arms pack a field computed from a slice of the same word). The
+      // selector is NOT sliced (it picks the same arm either way); an on-cycle
+      // selector resolves as its own full-width slice (sound for an unsigned
+      // pin: Get_mask[0, sig) of an unsigned value is the value).
+      auto            sel = drv_at(m, 0);
+      hhds::Pin_class rsel;
+      if (!sel.is_invalid()) {
+        if (gu::is_const_pin(sel) || !in_cycle.contains(sel.get_master_node())) {
+          rsel = sel;
+        } else if (gu::is_unsign(sel)) {
+          int sb = gu::bits_of(sel);
+          rsel   = self(self, sel, 0, std::max(1, sb - 1), depth + 1);
+        }
+      }
+      if (!rsel.is_invalid()) {
+        std::vector<std::pair<hhds::Port_id, hhds::Pin_class>> arms;
+        bool                                                   ok = true;
+        for (auto e : m.inp_edges()) {
+          if (static_cast<uint32_t>(e.sink.get_port_id()) == 0) {
+            continue;  // selector
+          }
+          auto r = self(self, e.driver, lo, hi, depth + 1);
+          if (r.is_invalid()) {
+            ok = false;
+            break;
+          }
+          arms.emplace_back(e.sink.get_port_id(), r);
+        }
+        if (ok && !arms.empty()) {
+          auto n = gu::create_typed_node(*g, Ntype_op::Mux);
+          ++created;
+          rsel.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
+          for (auto& [pid, ap] : arms) {
+            ap.connect_sink(n.create_sink_pin(pid));
+          }
+          auto dp = n.create_driver_pin(0);
+          gu::set_bits(dp, w + 1);
+          res = dp;
+        }
       }
     } else if (op == Ntype_op::Not) {
       // bits of ~x at [lo,hi) = complement of x's bits there, re-masked to w
@@ -1832,18 +1949,60 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // are untouched). ----
   absl::flat_hash_set<hhds::Class_index> moore_deferred;
   std::vector<const Sub*>                deferred_moore;
+  // Per-OUTPUT-cone deferral (Stage-2): a MEALY callee (some comb in->out path,
+  // so callee_is_moore declines the whole-callee treatment) whose FED-BACK
+  // outputs are all pure state reads. Pre-binding just those outputs via peek()
+  // un-cycles the schedule; the atomic cycle(in) call then orders normally (its
+  // input cone reads only pre-bound values, emitted on demand below). The
+  // CSR/NewCSR::MipModule and DivUnit/SRT16 residual class.
+  absl::flat_hash_set<hhds::Class_index> mealy_prebound;
   for (const auto& s : subs) {
-    if (!sub_on_false_loop(s.node) || !callee_is_moore(s.node.get_subnode_graph(), s.node.get_subnode_io())) {
+    auto fed_back = sub_false_loop_output_pids(s.node);
+    if (fed_back.empty()) {
       continue;
     }
-    moore_deferred.insert(s.node.get_class_index());
+    const bool                    moore = callee_is_moore(s.node.get_subnode_graph(), s.node.get_subnode_io());
+    absl::flat_hash_set<uint32_t> state_only;
+    if (moore) {
+      moore_deferred.insert(s.node.get_class_index());
+    } else {
+      state_only = callee_state_only_outputs(s.node.get_subnode_graph(), s.node.get_subnode_io());
+      bool all_state_only = true;
+      for (auto pid : fed_back) {
+        if (!state_only.contains(pid)) {
+          all_state_only = false;
+          break;
+        }
+      }
+      if (!all_state_only) {
+        continue;  // genuine comb feedback -> the loud Stage-0 diagnostic below
+      }
+      mealy_prebound.insert(s.node.get_class_index());
+    }
     fout->append(absl::StrCat("    auto ", s.inst, "__pre = ", s.inst,
-                              ".peek({});  // Moore sub: outputs from current state (call deferred)\n"));
-    auto sio = s.node.get_subnode_io();
+                              moore ? ".peek({});  // Moore sub: outputs from current state (call deferred)\n"
+                                    : ".peek({});  // Mealy sub: state-only outputs pre-bound (call ordered normally)\n"));
+    // Bind only pins that EXIST (enumerated via the instance's out-edges): a
+    // declared-but-unread output has no created pin, and hhds' name lookup
+    // asserts on it (find_pin "requested pin was not created" -- the DataPath
+    // family crash). The lazy out_edges view is iterated read-only.
+    auto                                    sio = s.node.get_subnode_io();
+    absl::flat_hash_map<uint32_t, std::string> pid2name;
     for (const auto& d : sio->get_output_pin_decls()) {
-      auto opin = s.node.get_driver_pin(d.name);
-      if (!opin.is_invalid()) {
-        pin2var[opin.get_class_index()] = absl::StrCat(s.inst, "__pre.", cpp_id(d.name));
+      pid2name[static_cast<uint32_t>(d.port_id)] = d.name;
+    }
+    for (const auto& e : s.node.out_edges()) {
+      auto opin = e.driver;
+      if (opin.is_invalid() || pin2var.contains(opin.get_class_index())) {
+        continue;
+      }
+      auto pid = static_cast<uint32_t>(opin.get_port_id());
+      if (!moore && !state_only.contains(pid)) {
+        continue;  // a comb in->out output binds at the (normally ordered) call
+      }
+      auto it = pid2name.find(pid);
+      if (it != pid2name.end()) {
+        pin2var[opin.get_class_index()] = absl::StrCat(s.inst, "__pre.", cpp_id(it->second));
       }
     }
   }
@@ -2008,6 +2167,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         for (const auto& d : sio->get_input_pin_decls()) {
           auto drv = get_driver(node.get_sink_pin(d.name));
           int  wb  = d.bits > 0 ? static_cast<int>(d.bits) : 1;
+          // Stage-2 per-output-cone deferral: this instance's fed-back outputs
+          // were pre-bound from peek(), so its input cone no longer depends on
+          // the call -- but the scheduler built its order while the word-level
+          // cycle still existed, so the cone may be SCHEDULED after this node.
+          // Emit it on demand (a genuine still-cyclic cone stays unbound and
+          // falls through to the loud Stage-0 diagnostic).
+          if (mealy_prebound.contains(node.get_class_index())) {
+            ensure_ready(drv);
+          }
           // Stage 0: a valid, non-const driver feeding this instance input that is
           // not yet bound is a combinational cycle threading THROUGH this atomic Sub
           // call (the false-loop-through-instance case). Report it precisely.
@@ -2056,17 +2224,29 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   // Deferred Moore-sub calls: every comb value is bound now; the child call
   // only advances the child's state (its outputs were pre-bound via peek()).
+  // Inputs are bound from the instance's EXISTING sink edges (an unconnected
+  // declared input has no created pin -- hhds asserts on a name lookup -- and
+  // the In{} zero-init already models it as 0).
   for (const auto* sp : deferred_moore) {
     const auto& s    = *sp;
     auto        dsio = s.node.get_subnode_io();
     if (!dsio) {
       continue;
     }
-    fout->append(absl::StrCat("    ", s.callee_struct, "::In ", s.inst, "__i;\n"));
+    absl::flat_hash_map<uint32_t, const void*> bound_pids;  // pid -> decl (dedupe)
+    absl::flat_hash_map<uint32_t, std::pair<std::string, int>> pid2in;
     for (const auto& d : dsio->get_input_pin_decls()) {
-      auto drv = get_driver(s.node.get_sink_pin(d.name));
-      int  wb  = d.bits > 0 ? static_cast<int>(d.bits) : 1;
-      fout->append(absl::StrCat("    ", s.inst, "__i.", cpp_id(d.name), " = ", operand(drv, wb), ";\n"));
+      pid2in[static_cast<uint32_t>(d.port_id)] = {d.name, d.bits > 0 ? static_cast<int>(d.bits) : 1};
+    }
+    fout->append(absl::StrCat("    ", s.callee_struct, "::In ", s.inst, "__i;\n"));
+    for (auto e : s.node.inp_edges()) {
+      auto pid = static_cast<uint32_t>(e.sink.get_port_id());
+      auto it  = pid2in.find(pid);
+      if (it == pid2in.end() || !bound_pids.emplace(pid, nullptr).second) {
+        continue;
+      }
+      fout->append(absl::StrCat("    ", s.inst, "__i.", cpp_id(it->second.first), " = ",
+                                operand(e.driver, it->second.second), ";\n"));
     }
     fout->append(absl::StrCat("    ", s.inst, ".cycle(", s.inst, "__i);  // deferred Moore-sub state advance\n"));
   }
