@@ -39,6 +39,7 @@ struct Dut {
   std::vector<std::string> inputs;   // In field names
   std::vector<std::string> outputs;  // Out field names
   std::vector<std::string> regs;     // struct-scope `Slop<N> name{}` members (flops/pipe stages/regs)
+  bool                     is_child = false;  // this unit's hpp is #included by another unit (a sub-instance)
 
   bool has_input(const std::string& f) const {
     return std::find(inputs.begin(), inputs.end(), f) != inputs.end();
@@ -416,7 +417,21 @@ public:
         --b;
       }
       if (e > b) {
-        import_bound_.insert(src_.substr(b + 1, e - b));
+        const std::string bound = src_.substr(b + 1, e - b);
+        import_bound_.insert(bound);
+        // capture the quoted "unit.entry" path too: an lg=-renamed entry in a
+        // MULTI-module closure resolves through it (dut key `<unit>_<entry>`)
+        size_t qb = src_.find('"', q);
+        if (qb != std::string::npos) {
+          size_t qe = src_.find('"', qb + 1);
+          if (qe != std::string::npos) {
+            std::string path = src_.substr(qb + 1, qe - qb - 1);
+            auto        dot  = path.find_last_of('.');
+            if (dot != std::string::npos) {
+              import_path_[bound] = {path.substr(0, dot), path.substr(dot + 1)};
+            }
+          }
+        }
       }
     }
   }
@@ -606,6 +621,7 @@ private:
   std::map<std::string, std::string>              inst_of_var;  // instance var -> module name (`mut acc = M`)
   std::map<std::string, std::vector<std::string>> arrays_;      // array name -> element exprs
   std::set<std::string>                           import_bound_;  // names bound by `= import(...)` (module refs)
+  std::map<std::string, std::pair<std::string, std::string>> import_path_;  // bound name -> {unit, entry}
 
   // `mut acc = Module` -- the rvalue is a bare module name. Unwrap single-child
   // expression wrappers and return the module name iff it is a known DUT.
@@ -621,8 +637,34 @@ private:
         // the sole generated module/hpp (`chip_top`), so `mut acc = my_top` names
         // no dut key. Bind an IMPORT-BOUND name to the sole DUT; a scalar/param/
         // literal (`mut acc = base`, `mut v_final = nil`) is never import-bound.
-        if (duts_.size() == 1 && import_bound_.count(nm)) {
-          return duts_.begin()->first;
+        if (import_bound_.count(nm)) {
+          // an lg=-renamed entry emits its module as `<unit>_<entry>` (or the
+          // lg value directly matching the entry) -- try the import path first
+          if (auto it = import_path_.find(nm); it != import_path_.end()) {
+            const auto& [unit, entry] = it->second;
+            if (duts_.count(entry) != 0) {
+              return entry;
+            }
+            if (const std::string joined = unit + "_" + entry; duts_.count(joined) != 0) {
+              return joined;
+            }
+          }
+          if (duts_.size() == 1) {
+            return duts_.begin()->first;
+          }
+          // multi-module closure: the tb imports the TOP entry -> map the
+          // bound name to the unique ROOT unit (not #included by any other)
+          std::string root;
+          int         nroots = 0;
+          for (const auto& [k, d] : duts_) {
+            if (!d.is_child) {
+              root = k;
+              ++nroots;
+            }
+          }
+          if (nroots == 1) {
+            return root;
+          }
         }
         return {};
       }
@@ -1616,6 +1658,21 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   if (duts.empty()) {
     err = "no DUT modules found in " + simdir + " (the design produced no Slop units)";
     return 1;
+  }
+  // Mark CHILD units (their hpp is #included by another unit's hpp, i.e. they
+  // are sub-instances). rvalue_module's import-bound fallback then resolves an
+  // lg=-renamed top entry (`const top = import("u.top")` where the emitted
+  // module is `u_top`) to the unique ROOT of a multi-module closure.
+  for (auto& [k, d] : duts) {
+    std::ifstream     f(simdir + "/" + d.hpp);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    const std::string txt = ss.str();
+    for (auto& [k2, d2] : duts) {
+      if (k2 != k && txt.find("\"" + d2.hpp + "\"") != std::string::npos) {
+        d2.is_child = true;
+      }
+    }
   }
 
   // 2. parse the source and emit one run-function per `test`, accumulating the

@@ -1,0 +1,27 @@
+/*
+:name: sim_loop_pack_shiftand
+:type: equiv
+:verilog_top: sim_loop_pack_shiftand
+:pyrope_top: sim_loop_pack_shiftand
+*/
+
+// Repro for the CSRPermitModule lhd-sim emission family. 1-bit flags are
+// packed into ONE scalar bus with shifts+ORs, and other flags read the packed
+// bus back via `(bus >> k) & 1`. The bit-level DAG is acyclic (pk[1] comes
+// only from `a`, pk[0] reads pk[1], pk[2] reads pk[1:0]), but cgen.sim
+// schedules the packed word as one atomic object -> false combinational loop.
+// split_packed_selfref_wires does NOT rescue it: the readbacks are SRA+And
+// chains (not const-mask Get_mask slices), and the Or operands are 1-bit
+// values whose footprint cannot be bounded (a 1-bit value may be signed -1).
+pub comb sim_loop_pack_shiftand::[lg="sim_loop_pack_shiftand", hdl](a:u2) -> (z:u3) {
+  wire pk:u3
+  wire ii:u1
+  wire vi:u1
+  wire wen:u1
+
+  ii  = a & 1
+  vi  = ((pk >> 1) & 1) & ((a >> 1) & 1)
+  wen = (~(((pk >> 1) & 1) | (pk & 1))) & 1
+  pk  = (wen << 2) | (ii << 1) | vi
+  z   = pk
+}

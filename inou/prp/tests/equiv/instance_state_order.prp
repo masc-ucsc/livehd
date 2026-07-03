@@ -1,0 +1,30 @@
+/*
+:name: instance_state_order
+:type: equiv
+:verilog_top: instance_state_order.top
+:pyrope_top: instance_state_order.top
+*/
+
+// Hierarchical-LEC STATEFUL box-instance pairing guard (the sequential
+// counterpart of instance_collapse_order). A stateless collapsed leaf is
+// pairing-free (per-def UF congruence), but a STATEFUL collapsed leaf needs a
+// real instance correspondence: its abstract state cut is one shared symbol
+// per corresponding instance pair. The four `icso_lane_acc` instances below
+// are NAMED u0..u3 on both sides but DELIBERATELY declared in the opposite
+// order from the golden .v — occurrence-order pairing would associate lane i
+// with lane j and spuriously refute the collapsed parent (rescued only by the
+// flat-confirmation fallback); the box-correspondence builder pairs by
+// canonicalized instance NAME first, so the collapsed run proves directly.
+pub mod lane_acc::[lg="icso_lane_acc"](a:u8) -> (s:u8@[0]) {
+  reg acc:u8 = 0
+  s = acc
+  wrap acc = acc + a
+}
+
+pub mod top::[lg="instance_state_order.top"](d:u32) -> (q:u32@[0]) {
+  mut s3 = lane_acc::[name=u3](a = (d >> 24) & 0xff)
+  mut s2 = lane_acc::[name=u2](a = (d >> 16) & 0xff)
+  mut s1 = lane_acc::[name=u1](a = (d >> 8) & 0xff)
+  mut s0 = lane_acc::[name=u0](a = d & 0xff)
+  q = (s3 << 24) | (s2 << 16) | (s1 << 8) | s0
+}

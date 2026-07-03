@@ -293,6 +293,10 @@ private:
   // concatenated whole — that would reintroduce the field↔field self-loop).
   // Returns false for an unhandled RHS shape (caller falls back to the bus path).
   bool assign_struct_whole(const slang::ast::ValueSymbol& sym, const slang::ast::Expression& rhs);
+  // Same split for an ALREADY-LOWERED whole value (an instance-output binding,
+  // a concat part, …): slice `value` onto the leaves. Returns false when `sym`
+  // has no leaves (not a bundle var) — caller stores flat.
+  bool assign_struct_whole_value(const slang::ast::ValueSymbol& sym, const std::string& value, slang::SourceLocation loc);
   // Reconstruct the packed value of a whole-struct read from its leaves.
   std::string read_struct_whole(const slang::ast::ValueSymbol& sym);
 

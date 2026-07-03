@@ -1,0 +1,30 @@
+/*
+:name: sim_loop_mem_prefetch
+:type: equiv
+:verilog_top: sim_loop_mem_prefetch
+:pyrope_top: sim_loop_mem_prefetch
+*/
+
+// Repro for the BusyTable_1/Dispatch `lhd sim` SIGSEGV category (class C).
+// A FALSE word-level cycle through a packed wire (`io` packs `low` and `a<<2`
+// with a Sum, so the disjoint-Or splitter declines; bits 3:2 still come only
+// from `a`, so the bit-level DAG is acyclic) feeds the READ ADDRESS of a
+// combinational mut array. cgen_sim's mem-operand prefetch walker
+// (`ensure_ready_impl`) recurses the address cone with no on-stack guard, so
+// the word-level cycle makes it recurse forever -> stack overflow instead of
+// the loud combinational-loop diagnostic.
+pub mod sim_loop_mem_prefetch::[lg="sim_loop_mem_prefetch", hdl](a:u2, en:bool, d:u8) -> (z:u8@[0]) {
+  wire io:u4
+  wire hi:u2
+  wire low:u2
+
+  hi  = io#[2..=3]        // reads only io[3:2] == a
+  low = hi & 3            // == a
+  io  = low + (a << 2)    // Sum pack, no carries: io == {a, low}
+
+  mut t:[4]u8 = (10,20,30,40)
+  if en {
+    t[a] = d
+  }
+  z = t[low]              // read address cone contains the word-level cycle
+}

@@ -342,7 +342,23 @@ def process(base, equiv_dir, workdir, do_setup):
     vtop = _prp_header(ppath, "verilog_top")
     ptop = _prp_header(ppath, "pyrope_top")
     modname, ports = parse_verilog_ports(vpath, want=vtop)
-    lam = (ptop.rsplit(".", 1)[-1] if ptop else None) or pyrope_lambda_of(ppath, modname, lambda_of(modname))
+    # :pyrope_top: may name the lg="..." RENAMED module (what the lec harnesses
+    # need); the IMPORTABLE pub entry keeps its source name. Accept the header
+    # tail only when it really is a pub entry; otherwise recover the source
+    # lambda from the lg= attribute (e.g. pyrope_top sim_sub_stateful_feedback_top
+    # -> pub mod `top`).
+    lam = None
+    if ptop:
+        cand = ptop.rsplit(".", 1)[-1]
+        try:
+            _ptxt = open(ppath).read()
+        except OSError:
+            _ptxt = ""
+        if re.search(r'pub\s+(?:comb|mod|pipe)\s+%s\b' % re.escape(cand), _ptxt):
+            lam = cand
+        else:
+            lam = pyrope_lambda_of(ppath, cand, None)
+    lam = lam or pyrope_lambda_of(ppath, modname, lambda_of(modname))
     clk, rst, data_in, outs = classify(ports)
     if not outs:
         raise GenError("no output ports to hash")

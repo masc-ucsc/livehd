@@ -100,6 +100,13 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
       if (rhs == name) {
         return;  // full-width self-assign (`q <= q;` hold idiom): an unwritten reg already holds
       }
+      // A bundle-declared struct var has NO flat net — every read resolves
+      // through its leaves, so a flat store would be dead (undriven leaves,
+      // dropped instance-output bindings: the _vsetModule_io_out/ExeUnitImp_4
+      // family). Split the already-lowered value onto the leaves instead.
+      if (assign_struct_whole_value(sym, rhs, lhs.sourceRange.start())) {
+        return;
+      }
       note_write(sym, current_assign_nonblocking_, lhs.sourceRange.start());
       builder_.create_assign_stmts(name, to_int_value(rhs));
       return;
@@ -433,15 +440,33 @@ bool Slang_context::assign_struct_whole(const slang::ast::ValueSymbol& sym, cons
   // Any other packed RHS (a function result, a ?: of structs, …): lower the whole
   // value once and slice each field out of it. The RHS does not read `io`'s own
   // fields, so this slice introduces no self-dependency.
-  auto bi = tinfo(sym.getType());
-  auto p  = to_pattern(to_int_value(lower_rvalue(rhs)), bi.bits, false);
-  note_write(sym, current_assign_nonblocking_, rhs.sourceRange.start());
+  return assign_struct_whole_value(sym, to_int_value(lower_rvalue(rhs)), rhs.sourceRange.start());
+}
+
+bool Slang_context::assign_struct_whole_value(const slang::ast::ValueSymbol& sym, const std::string& value,
+                                              slang::SourceLocation loc) {
+  auto it = struct_var_info_.find(&sym);
+  if (it == struct_var_info_.end()) {
+    return false;
+  }
+  // Copy up front: builder calls below can insert into struct_var_info_ and
+  // rehash it (same invalidation class as the assign_struct_whole snapshot).
+  const bool is_tuple = it->second.is_tuple;
+  const auto fields   = it->second.fields;
+  auto       base     = lname_of(sym);
+  auto       bi       = tinfo(sym.getType());
+  auto       p        = to_pattern(to_int_value(value), bi.bits, false);
+  note_write(sym, current_assign_nonblocking_, loc);
   for (const auto& f : fields) {
     auto fv = extract_field(p, f.off, f.bits);
     if (f.is_signed) {
       fv = builder_.create_sext_stmts(fv, std::to_string(f.bits - 1));
     }
-    put(f.name, fv);
+    if (is_tuple) {
+      emit_struct_field_set(base, f.name, fv);
+    } else {
+      emit_leaf_store(absl::StrCat(base, ".", f.name), fv);
+    }
   }
   return true;
 }

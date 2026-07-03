@@ -1,0 +1,30 @@
+/*
+:name: instance_state_anon
+:type: equiv
+:verilog_top: instance_state_anon.top
+:pyrope_top: instance_state_anon.top
+*/
+
+// Hierarchical-LEC flat-confirmation backstop guard. Same stateful lanes as
+// instance_state_order, but the instance names CANNOT pair across the sides
+// (the golden .v names them ua0..ua3; here the Sub instances inherit the s0..s3
+// destination variables), and the declaration order is reversed — so the
+// name-first correspondence falls back to occurrence order and MISPAIRS lane i
+// with lane j. The collapsed parent then spuriously REFUTES (the shared
+// per-pair state cuts diverge), and the driver's flat-confirmation fallback
+// must rescue it: re-solve the parent flat (children descended) and report the
+// PASS. A fail is only ever reported from a box-free counterexample, so this
+// pair must never exit REFUTED no matter how the instances are paired.
+pub mod lane_acc::[lg="icsa_lane_acc"](a:u8) -> (s:u8@[0]) {
+  reg acc:u8 = 0
+  s = acc
+  wrap acc = acc + a
+}
+
+pub mod top::[lg="instance_state_anon.top"](d:u32) -> (q:u32@[0]) {
+  mut s3 = lane_acc(a = (d >> 24) & 0xff)
+  mut s2 = lane_acc(a = (d >> 16) & 0xff)
+  mut s1 = lane_acc(a = (d >> 8) & 0xff)
+  mut s0 = lane_acc(a = d & 0xff)
+  q = (s3 << 24) | (s2 << 16) | (s1 << 8) | s0
+}

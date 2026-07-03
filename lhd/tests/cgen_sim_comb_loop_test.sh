@@ -125,8 +125,12 @@ expect_clean "$W/ok.v" top "no-feedback hierarchy"
 # --- crash regression: comb cycle feeding a comb-array READ ADDRESS ----------
 # The mem-operand prefetch walker (ensure_ready_impl, cgen_sim.cpp) used to
 # self-recurse with no visited guard: a word-level false cycle in the address
-# cone stack-overflowed (SIGSEGV rc=139, NO diagnostic) instead of the loud
-# combinational-loop error (BusyTable_1/Dispatch; equiv/sim_loop_mem_prefetch).
+# cone stack-overflowed (SIGSEGV rc=139, NO diagnostic) instead of any orderly
+# outcome (BusyTable_1/Dispatch; equiv/sim_loop_mem_prefetch). Since the
+# generalized split_packed_selfref_wires the FALSE word-level cycle is also
+# RESOLVED, so the correct outcome today is a clean compile; the crash guard
+# is the rc<128 check (a regression may legitimately re-error with the loud
+# comb-loop diagnostic, but must never die by signal).
 cat > "$W/memp.prp" <<'EOF'
 pub mod memp::[lg="memp", hdl](a:u2, en:bool, d:u8) -> (z:u8@[0]) {
   wire io:u4
@@ -145,10 +149,8 @@ EOF
 "$LHD" compile "$W/memp.prp" --top memp \
       --emit-dir "sim:$W/sim_memp/" --workdir "$W/wd_memp" >"$W/out" 2>&1
 rc=$?
-[ "$rc" -ne 0 ] || fail "mem-prefetch cycle: expected non-zero exit"
 [ "$rc" -lt 128 ] || fail "mem-prefetch cycle: died by signal (rc=$rc) instead of a diagnostic"
-grep -qE '"code":"(comb-loop-through-instance|combinational-loop)"' "$W/out" \
-  || fail "mem-prefetch cycle: expected a comb-loop diagnostic; got: $(cat "$W/out")"
-echo "ok: mem-prefetch address-cone cycle blocked with a diagnostic (no crash)"
+[ "$rc" -eq 0 ] || fail "mem-prefetch cycle: expected clean compile (false loop resolved) but rc=$rc: $(cat "$W/out")"
+echo "ok: mem-prefetch address-cone cycle resolves cleanly (no crash, no false loop)"
 
 echo "PASS: cgen_sim comb-loop Stage 0 safety net"

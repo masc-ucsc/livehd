@@ -1,0 +1,34 @@
+/*
+:name: sim_sub_nested_comb_feedback
+:type: equiv
+:verilog_top: sim_sub_nested_comb_feedback_top
+:pyrope_top: sim_sub_nested_comb_feedback_top
+*/
+
+// FALSE combinational loop through a PURE-COMB sub-instance that itself
+// CONTAINS a nested comb Sub (the XiangShan ExeUnitImp_4 / Alu / AluDataModule
+// idiom). The mid module's two output cones are independent (x = leaf(a,b),
+// y = c+d) and the parent feeds x back into c only — no bit-level cycle. The
+// single-level pure-comb case is fixed (flatten_false_loop_subs), but
+// callee_is_pure_comb() rejects a callee containing Ntype_op::Sub and the
+// flatten is single-level non-recursive, so this nested variant still errs
+// `comb-loop-through-instance` (input `c` fed by the instance's own output).
+pub mod leaf_add::[lg="ssncf_leaf_add", hdl](a:u8, b:u8) -> (s:u9@[]) {
+  s = a + b
+}
+
+pub mod mid::[lg="ssncf_mid", hdl](a:u8, b:u8, c:u8, d:u8) -> (x:u9@[], y:u9@[]) {
+  mut l = leaf_add::[name=u_leaf](a = a, b = b)
+  x = l.s
+  y = c + d
+}
+
+pub mod top::[lg="sim_sub_nested_comb_feedback_top", hdl](a:u8, b:u8, d:u8, topx:u8) -> (x_out:u9@[0], y_out:u9@[0]) {
+  wire x:u9
+  wire c:u8
+  mut m = mid::[name=u](a = a, b = b, c = c, d = d)
+  x = m.x
+  c = (x#[0..=7] + topx)#[0..=7]
+  x_out = x
+  y_out = m.y
+}

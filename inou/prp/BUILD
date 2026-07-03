@@ -479,7 +479,28 @@ _V2PRP_FIXME = [
         # pure-comb sub-instance (flatten_false_loop_subs). sim_prp_packed_selfref
         # now compiles too: cgen_sim splits the false WORD-level packed-wire cycle
         # (split_packed_selfref_wires). The rest are still gaps.
-        tags = [] if name in ("sim_lg_atomic_feedback", "sim_prp_packed_selfref") else ["fixme"],
+        tags = [] if name in (
+            "sim_lg_atomic_feedback",
+            "sim_prp_packed_selfref",
+            # 2026-07-03: the generalized slice-resolution engine in
+            # split_packed_selfref_wires (footprint 1-bit/And-const/Mux rules +
+            # recursive resolve: bitwise distribute, SHL/SRA re-basing, offset
+            # Get_mask descent, Sum-as-disjoint-Or, And(SRA(w,k),m) readers)
+            # fixed the whole packed-word false-loop family. Each pair is also
+            # in _SIMEQ (iverilog-vs-lhd-sim value check).
+            "sim_packed_selfref_1bit",
+            "sim_loop_sticky_ripple",
+            "sim_loop_pack_shiftand",
+            "sim_loop_packed_bus_group",
+            "sim_loop_mux1h_selfslice",
+            "sim_loop_sbox_bit_selfref",
+            "sim_loop_mem_prefetch",
+            # class-B sub-feedback: nested pure-comb closures now FLATTEN
+            # recursively, and a stateful MOORE callee (no comb in->out path)
+            # gets peek()-pre-bound outputs + a deferred cycle(in) call.
+            "sim_sub_stateful_feedback",
+            "sim_sub_nested_comb_feedback",
+        ) else ["fixme"],
     )
     for name, mode in {
         "sim_dontcare_ctrl": "exact-diff",
@@ -673,6 +694,9 @@ _SIMEQ = [
     "rt_int_output", "rt_sat_s", "rt_sat_u", "rt_typecast", "rt_wrap_noop", "rt_wrap_reassign",
     "rt_wrap_s", "rt_wrap_sub", "rt_wrap_sum", "rt_wrap_u", "shift_combo_i8", "shift_combo_i8b",
     "sim_lg_atomic_feedback", "sim_prp_packed_selfref",
+    "sim_packed_selfref_1bit", "sim_loop_sticky_ripple", "sim_loop_pack_shiftand",
+    "sim_loop_packed_bus_group", "sim_loop_mux1h_selfslice", "sim_loop_sbox_bit_selfref",
+    "sim_loop_mem_prefetch", "sim_sub_stateful_feedback", "sim_sub_nested_comb_feedback",
     "shift_nested_sra", "shift_sra_unsigned", "signed_one_bit_cmp", "splice_merge", "trivial_if",
     "varargs_add", "wire_comb", "wire_reg", "wire_reset", "wire_ring", "wire_typed",
 ]

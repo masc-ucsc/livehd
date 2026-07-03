@@ -1,0 +1,19 @@
+/*
+:name: sim_packed_selfref_1bit
+:type: equiv
+:verilog_top: sim_packed_selfref_1bit
+:pyrope_top: sim_packed_selfref_1bit
+*/
+
+// False word-level cycle through a packed wire with a ONE-BIT packed field
+// (XiangShan BusyTable family). pack[14:7] is driven only by input `a`; the
+// 1-bit flag at pack[6] is computed FROM pack[14:7]. The bit-level DAG is
+// acyclic (iverilog/LEC fine), but cgen.sim schedules `pack` as one word and
+// split_packed_selfref_wires cannot bound the footprint of a 1-bit Or operand
+// (signed -1/0 hazard), so it declines to split and emission errors.
+pub comb sim_packed_selfref_1bit::[lg="sim_packed_selfref_1bit", hdl](a:u8, k:u8) -> (z:u1) {
+  wire pack:u15
+  mut flag = if k == pack#[7..=14] { 1 } else { 0 }
+  pack = (a << 7) | ((flag & 1) << 6)
+  z = (pack >> 6) & 1
+}

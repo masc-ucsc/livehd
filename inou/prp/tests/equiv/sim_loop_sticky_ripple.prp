@@ -1,0 +1,21 @@
+/*
+:name: sim_loop_sticky_ripple
+:type: equiv
+:verilog_top: sim_loop_sticky_ripple
+:pyrope_top: sim_loop_sticky_ripple
+*/
+
+// Repro for the FloatFMA (XiangShan FMA sticky-bit ripple) lhd-sim emission
+// category. A packed word `s` is OR-packed from SINGLE-BIT operands at distinct
+// positions, and one of those bits is computed FROM another bit of the same
+// word: s[1]=a[0]; t=s[1]; s[2]=t. The bit-level DAG is acyclic (a real
+// concat), but cgen.sim schedules `s` as one object and the packed-selfref
+// splitter cannot bound the footprint of 1-bit OR operands, so it reports a
+// combinational loop when emitting the sim.
+pub comb sim_loop_sticky_ripple::[lg="sim_loop_sticky_ripple", hdl](a:u2) -> (z:u4) {
+  wire t:u1
+  wire s:u4
+  t = (s >> 1) & 1
+  s = ((a & 1) << 1) | (t << 2)
+  z = s#[0..=3]
+}

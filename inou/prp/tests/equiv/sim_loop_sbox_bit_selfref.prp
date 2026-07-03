@@ -1,0 +1,21 @@
+/*
+:name: sim_loop_sbox_bit_selfref
+:type: equiv
+:verilog_top: sim_loop_sbox_bit_selfref
+:pyrope_top: sim_loop_sbox_bit_selfref
+*/
+
+// Repro for the BlockCipherModule (riscv-crypto sbox linear-layer) lhd-sim
+// emission category. A `wire` vector is whole-word assigned ONCE while the RHS
+// reads single BITS of itself ((w>>k)&1 -> Get_mask after cprop). Bit-level the
+// dependencies are triangular (w[0] <- a only, w[1] <- w[0], w[2] <- w[1]), so
+// there is no real loop, but cgen.sim schedules `w` as one word-level object
+// and reports a combinational loop with the self-read Get_mask as back-edge.
+// The packed-selfref splitter cannot break it: the pack is an Or of SINGLE-BIT
+// `(x) << k` pieces whose footprints are unbounded (signed 1-bit), and in the
+// real corpus the root is an Xor of two packs, not an Or of disjoint fields.
+pub comb sim_loop_sbox_bit_selfref::[lg="sim_loop_sbox_bit_selfref", hdl](a:u3) -> (z:u3) {
+  wire w:u3
+  w = (a & 1) | ((((w & 1) ^ ((a >> 1) & 1)) & 1) << 1) | (((((w >> 1) & 1) ^ ((a >> 2) & 1)) & 1) << 2)
+  z = w
+}

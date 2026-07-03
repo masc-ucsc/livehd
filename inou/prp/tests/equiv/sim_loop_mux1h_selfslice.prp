@@ -1,0 +1,26 @@
+/*
+:name: sim_loop_mux1h_selfslice
+:type: equiv
+:verilog_top: sim_loop_mux1h_selfslice
+:pyrope_top: sim_loop_mux1h_selfslice
+*/
+
+// Repro for the FDivSqrt/fpsqrt_r16_block lhd-sim emission category. A one-hot
+// AND-OR mux (Chisel Mux1H) packs a word `w` whose HIGH nibble is computed from
+// a slice of the SAME word's LOW nibble (w[3:0] never depends on w): bit-level
+// acyclic, word-level cyclic. cgen.sim's split_packed_selfref_wires only
+// redirects a slice-read when the packed word is an Or of DISJOINT bit-fields;
+// here every `mask & term` operand of the Or spans the full width and overlaps
+// the slice (covers != 1), so the false loop survives and the single-pass sim
+// schedule reports a combinational loop.
+pub comb sim_loop_mux1h_selfslice::[lg="sim_loop_mux1h_selfslice", hdl](sel:u2, a:u4, b:u4) -> (z:u8) {
+  wire w:u8
+  wire e0:u4
+  wire e1:u4
+  const m0 = (sel & 1) | ((sel & 1) << 1) | ((sel & 1) << 2) | ((sel & 1) << 3) | ((sel & 1) << 4) | ((sel & 1) << 5) | ((sel & 1) << 6) | ((sel & 1) << 7)
+  const m1 = ((sel >> 1) & 1) | (((sel >> 1) & 1) << 1) | (((sel >> 1) & 1) << 2) | (((sel >> 1) & 1) << 3) | (((sel >> 1) & 1) << 4) | (((sel >> 1) & 1) << 5) | (((sel >> 1) & 1) << 6) | (((sel >> 1) & 1) << 7)
+  e0 = (w#[0..=3] | a)#[0..=3]
+  e1 = (w#[0..=3] | b)#[0..=3]
+  w = (m0 & (a | (e0 << 4))) | (m1 & (b | (e1 << 4)))
+  z = w#[0..=7]
+}
