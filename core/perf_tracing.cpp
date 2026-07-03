@@ -4,11 +4,25 @@
 
 #include <fcntl.h>
 
+#include <csignal>
+#include <exception>
+
 PERFETTO_TRACK_EVENT_STATIC_STORAGE();
 
 static const char*                               trace_path = "livehd.trace";
 static std::unique_ptr<perfetto::TracingSession> tracing_session;
 static int                                       tracing_fd;
+
+// A break (^C / kill) must still yield a readable trace: finalize the session,
+// then re-raise with the default action so the exit status stays
+// signal-accurate. Perfetto's Stop is not strictly async-signal-safe, but the
+// alternative is losing the whole trace; the periodic write_into_file flush
+// below bounds the loss to the last flush period even on SIGKILL.
+static void tracing_signal_handler(int sig) {
+  stop_tracing();
+  std::signal(sig, SIG_DFL);
+  std::raise(sig);
+}
 
 void start_tracing() {
   perfetto::TracingInitArgs args;
@@ -20,6 +34,14 @@ void start_tracing() {
   perfetto::TrackEvent::Register();
 
   cfg.add_buffers()->set_size_kb(32768);
+  // Drain the in-memory buffer into the trace file every 2s so a mid-run
+  // break/stop keeps everything gathered so far (a >1h compile killed at the
+  // 59-minute mark used to write NOTHING — Stop only ran at process exit).
+  cfg.set_write_into_file(true);
+  cfg.set_file_write_period_ms(2000);
+  // Matching flush period: without it the UI/trace_processor must load the
+  // whole file into memory (config_write_into_file_no_flush health warning).
+  cfg.set_flush_period_ms(2000);
 #if 0
   // FIXME: Does not seem to make a difference.
   // How to capture frequency??
@@ -60,6 +82,9 @@ void start_tracing() {
 
   tracing_session->Setup(cfg, tracing_fd);
   tracing_session->StartBlocking();
+
+  std::signal(SIGINT, tracing_signal_handler);
+  std::signal(SIGTERM, tracing_signal_handler);
 }
 
 void stop_tracing() {
@@ -67,6 +92,7 @@ void stop_tracing() {
     perfetto::TrackEvent::Flush();
     tracing_session->StopBlocking();
     close(tracing_fd);
+    tracing_session.reset();  // idempotent: the signal path and Trace_guard may both call
   }
 }
 

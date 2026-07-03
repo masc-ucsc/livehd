@@ -280,6 +280,16 @@ sh_test(
     ],
 )
 
+# lec.gold_x=ignore (reference-side X = don't-care, the yosys -ignore_gold_x
+# analogue): an impl that concretizes a ref X arm to ANY value must prove; a
+# real bug on non-X bits must still refute; gold_x=zero keeps legacy behavior.
+sh_test(
+    name = "lec_gold_x_test",
+    size = "large",
+    srcs = ["lec_gold_x_test.sh"],
+    data = ["//lhd"],
+)
+
 # Regression for the slang reader lowering a scalar packed-struct variable as a
 # per-field BUNDLE (independent nets) instead of one flat packed bus: a struct
 # whose '{...} write computes a field from reads of its OTHER fields (the
@@ -302,6 +312,19 @@ sh_test(
     name = "reg_cond_hold_test",
     size = "large",
     srcs = ["reg_cond_hold_test.sh"],
+    data = ["//lhd"],
+)
+
+# Hierarchical-LEC box-instance correspondence + verdict safety: stateless
+# collapsed leaves prove reversed interchangeable instances PAIRING-FREE
+# (per-def UF congruence), stateful ones pair name-first (sorted cross-design
+# UF input layout), an occurrence-mispaired anonymous pair is rescued by the
+# driver's flat confirmation, and a REAL bug in the same shapes still exits
+# REFUTED (the fallback never launders a genuine fail).
+sh_test(
+    name = "lec_box_pairing_test",
+    size = "large",
+    srcs = ["lec_box_pairing_test.sh"],
     data = ["//lhd"],
 )
 

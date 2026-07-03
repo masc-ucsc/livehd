@@ -263,6 +263,10 @@ private:
   // reload re-derives lambda_kind, and slang output is comb, so the reload path
   // is naturally timecheck-free without serializing this flag.
   bool                                             skip_timecheck_ = false;
+  // DCE mark-only mode: dead statement class-indices for the CURRENT body
+  // (see is_dce_dead above). In-memory only — lg-only flows drop the LNAST
+  // after tolg, and any body swap invalidates the ids.
+  absl::flat_hash_set<int64_t>                     dce_dead_stmts_;
   // Generic type parameters (`<T, U>`) recorded by func_extract from
   // the func_def generics child (a seam: the per-`T` body substitution lands
   // in a follow-up goal; this only preserves the names so a template carrying
@@ -500,6 +504,17 @@ public:
   // ── timecheck suppression (todo/ 1s subtask E; stamped by inou.slang) ─────
   bool get_skip_timecheck() const noexcept { return skip_timecheck_; }
   void set_skip_timecheck(bool t) noexcept { skip_timecheck_ = t; }
+
+  // ── DCE mark-only mode (upass runner, lg-only flows) ──────────────────────
+  // Statement nids the post-walk DCE proved dead when the rewritten LNAST is
+  // consumed ONLY by lnast.tolg and then dropped: tolg skips them instead of
+  // the runner paying a full staging-tree rebuild. Keyed by Node_class
+  // class_index into the CURRENT body; any body swap invalidates the ids
+  // (replace_body clears / transfers from staging accordingly).
+  void set_dce_dead_stmts(absl::flat_hash_set<int64_t>&& s) noexcept { dce_dead_stmts_ = std::move(s); }
+  bool is_dce_dead(const Lnast_nid& nid) const {
+    return !dce_dead_stmts_.empty() && dce_dead_stmts_.contains(nid.get_class_index().value);
+  }
   // Generic type-parameter names (`<T, U>`), bound per call site (comb
   // splice re-types `a:T` params; mod/pipe specialization injects them).
   void set_generics(std::vector<std::string> g) { generics_ = std::move(g); }

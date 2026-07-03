@@ -93,18 +93,72 @@ struct Encoded {
 // outputs BEFORE resolving the inputs, so that feedback cannot deadlock its fixpoint.)
 //
 // The state SYMBOL is not stored here: it threads through the ordinary flop-cut
-// machinery under the key "\x01leafstate:<defname>#<occ>" (a shared current-state
+// machinery under the key "\x01leafstate:<defname>#<tag>" (a shared current-state
 // in query.cpp's `shared`, next-state emitted with the "\x01nxt:" prefix), so the
 // inductive miter corresponds it and the BMC unroll threads it. Only the shared
 // UF symbols + domain widths live here; built once in query.cpp, applied by both
-// encodes. Keyed "<defname>#<occ>" (the blackbox occurrence key).
+// encodes. Keyed "<defname>#<tag>" — the box correspondence key from query.cpp's
+// builder (name-first instance pairing, occurrence fallback; see set_box_keys).
 struct State_box {
-  int                                                          in_w    = 0;  // concatenated input width (UF domain)
-  int                                                          state_w = 0;  // state width (UF domain + next codomain)
-  cvc5::Term                                                   next_fn;      // UF (inputs, state) -> state
-  absl::flat_hash_map<std::string, cvc5::Term>                 out_fn;       // output port -> UF (state) -> out  [Moore]
-  absl::flat_hash_map<std::string, int>                        out_w;        // output port -> width
+  int                                      in_w    = 0;  // concatenated input width (UF domain)
+  int                                      state_w = 0;  // state width (UF domain + next codomain)
+  // NAME-SORTED (port, width) input concat layout, unioned across the two
+  // designs (max declared width per port). The encoder MUST build the UF_next
+  // input concat from this layout — NOT from its own side's decl order: two
+  // front-ends can declare the same ports in different orders (slang keeps the
+  // .v port list, Pyrope appends implicit clock/reset), and a permuted concat
+  // feeds the shared UF structurally different values for EQUAL inputs, so the
+  // threaded states spuriously diverge. A port a side does not connect (or
+  // does not even declare) contributes 0.
+  std::vector<std::pair<std::string, int>> in_ports;
+  cvc5::Term                                   next_fn;  // UF (inputs, state) -> state
+  absl::flat_hash_map<std::string, cvc5::Term> out_fn;   // output port -> UF (state) -> out  [Moore]
+  absl::flat_hash_map<std::string, int>        out_w;    // output port -> width
 };
+
+// PAIRING-FREE collapse of a STATELESS proven leaf. The legacy stateless box
+// (one free output symbol SHARED between the two designs' corresponding
+// instances, plus the bbin input compare obligations) needs a bijective
+// instance pairing — and with several interchangeable instances of the same
+// def, occurrence-order pairing can associate physically different instances
+// and falsely refute an equivalent pair (tests/equiv/instance_collapse_order).
+// Instead, each output of a stateless collapsed leaf becomes
+//   out = UF_<def>_<port>(concatenated inputs)
+// with ONE uninterpreted function per (def, output port) shared across BOTH
+// designs and ALL instances. The solver's congruence closure then pairs
+// instances dynamically: any two applications over equal inputs yield equal
+// outputs, regardless of declaration order, instance count, or names — so no
+// correspondence key exists to get wrong, and no bbin obligations are emitted.
+// Sound: a Proven verdict holds for ALL interpretations of the UF, in
+// particular the real (already-proven-equivalent) leaf function.
+//
+// The encoder still emits each instance's outputs as per-instance FRESH
+// symbols on the FIRST visit (before the inputs resolve) and ties them with
+// `out_sym == UF(inputs)` equalities once the inputs land (Encoded::equalities)
+// — the same two-phase trick the Moore box uses, so a collapsed leaf whose
+// output feeds glue back to its own input cannot deadlock the fixpoint.
+// NOTE the fresh symbols are NOT shared across the designs (sharing without
+// the bbin obligations would be an unjustified equality assumption).
+//
+// The input layout is NAME-SORTED (not decl-order) so both front-ends build
+// the identical concat; a port unconnected on an instance contributes 0.
+// in_w == 0 (a no-input leaf = a constant): cvc5 UFs need a non-empty domain,
+// so the outputs are instead ONE shared free symbol per (def, port) in
+// `out_const` — same def + no inputs => same outputs, trivially congruent.
+struct Comb_box {
+  int                                            in_w = 0;   // concatenated input width (UF domain)
+  std::vector<std::pair<std::string, int>>       in_ports;   // NAME-SORTED (port, width) concat layout
+  absl::flat_hash_map<std::string, cvc5::Term>   out_fn;     // port -> UF (inputs) -> out (in_w > 0)
+  absl::flat_hash_map<std::string, Val>          out_const;  // port -> shared symbol (in_w == 0)
+  absl::flat_hash_map<std::string, int>          out_w;      // port -> width (max across designs)
+  absl::flat_hash_map<std::string, bool>         out_sgn;    // port -> signedness (of the widest side)
+};
+
+// Structural identity of a node inside one design's hierarchical walk
+// (graph id : hierarchy position : debug nid). Stable across repeated walks of
+// the same in-memory design, so query.cpp's box-correspondence builder and the
+// encoder agree on which instance is which without sharing traversal order.
+std::string box_node_key(const hhds::Node_class& n);
 
 // Reader-invariant signature of a Memory cell (the same RTL array read through
 // two front-ends yields the same signature). Drives both the shared-array sort
@@ -171,10 +225,11 @@ public:
   // Shared output symbols for BLACKBOX Sub instances (missing/unresolved defs —
   // e.g. the XiangShan SRAM macros `array_*_ext`, or any module read with its
   // children left empty). A blackbox is "collapsed": each of its outputs becomes
-  // a fresh symbol SHARED across the two designs (keyed "<defname>#<occ>:<port>"
+  // a fresh symbol SHARED across the two designs (keyed "<defname>#<tag>:<port>"
   // here), and each of its inputs is emitted as a miter comparison output
-  // ("\x02bbin:<defname>#<occ>:<port>"). Sound when BOTH designs instantiate the
-  // corresponding blackbox (matched by module name + occurrence order) — the
+  // ("\x02bbin:<defname>#<tag>:<port>"). Sound when BOTH designs instantiate the
+  // corresponding blackbox — matched by module name + the box correspondence key
+  // (name-first instance pairing, occurrence fallback; see set_box_keys) — the
   // surrounding logic must drive identical inputs, and identical inputs yield the
   // identical (shared) outputs. Built once in query.cpp and reused by both encodes.
   void set_shared_bbox(const Io_name_map<Val>* bb) { shared_bbox_ = bb; }
@@ -194,11 +249,29 @@ public:
   // box's output symbols are pre-built and shared across the two designs.
   void set_collapse_defs(const Io_name_map<bool>* c) { collapse_defs_ = c; }
 
-  // Shared state-aware boxes for STATEFUL collapsed leaves (keyed defname#occ).
-  // When a collapsed leaf has an entry here, its outputs/next-state are encoded
-  // as UF(inputs, state) instead of the stateless shared-symbol box — see
-  // State_box. Built once in query.cpp so both designs share the UF symbols.
+  // Shared state-aware boxes for STATEFUL collapsed leaves (keyed by the box
+  // correspondence key from set_box_keys). When a collapsed leaf has an entry
+  // here, its outputs/next-state are encoded as UF(inputs, state) instead of
+  // the stateless shared-symbol box — see State_box. Built once in query.cpp
+  // so both designs share the UF symbols.
   void set_state_boxes(const absl::flat_hash_map<std::string, State_box>* s) { state_boxes_ = s; }
+
+  // Pairing-free boxes for STATELESS collapsed leaves, keyed by module DEF
+  // name (no instance key needed — see Comb_box). Built once in query.cpp so
+  // both designs and all instances share the per-(def,port) UF symbols.
+  void set_comb_boxes(const absl::flat_hash_map<std::string, Comb_box>* c) { comb_boxes_ = c; }
+
+  // Box-instance correspondence: box_node_key(node) -> the cross-design
+  // correspondence key ("<defname>#<tag>") computed ONCE by query.cpp's
+  // builder for THIS design (name-first pairing, occurrence fallback — set
+  // separately before encoding each side). Replaces the encoder-local
+  // traversal-order occurrence counters, whose order could disagree both with
+  // the other design's encode and with query.cpp's own builders (the latter
+  // silently degraded a stateful box to a stateless one — a false-PASS
+  // hazard). A node absent from the map gets a per-encode "?" key: its
+  // outputs stay UNSHARED and its obligations one-sided, which the miters
+  // gate to an incomplete correspondence (never a false verdict).
+  void set_box_keys(const Io_name_map<std::string>* k) { box_keys_ = k; }
 
   // Encode the combinational logic of `g`.
   //
@@ -245,6 +318,8 @@ private:
   const Io_name_map<std::string>*                     name_alias_    = nullptr;
   const Io_name_map<bool>*                            collapse_defs_ = nullptr;
   const absl::flat_hash_map<std::string, State_box>*  state_boxes_   = nullptr;
+  const absl::flat_hash_map<std::string, Comb_box>*   comb_boxes_    = nullptr;
+  const Io_name_map<std::string>*                     box_keys_      = nullptr;
   int                                                 sub_depth_   = 0;  // Sub flattening recursion guard
   bool                                                x_dontcare_  = false;  // ref-side X = don't-care (lec.gold_x=ignore)
 };

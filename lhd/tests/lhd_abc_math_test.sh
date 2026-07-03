@@ -74,9 +74,14 @@ for r in $REGIONS; do
 done
 
 # Negative control: the cell models are load-bearing. Without --lib the netlist's
-# blackbox cell Subs are unresolved, so lec must NOT prove equivalence.
+# blackbox cell Subs are unresolved, so lec must NOT prove equivalence — a sound
+# Unknown or a fail, never a vacuous pass. The impl-only box obligations gate the
+# miter to INCONCLUSIVE (an incomplete correspondence can neither prove nor
+# refute), which exits 0 unless strict — so run the control strict, where any
+# non-Proven outcome is a hard failure exit.
 one_region=$(echo "$REGIONS" | head -1)
 if "$LHD" lec --impl lg:"$W/net" --ref lg:"$W/re" --top "$one_region" \
+    --set lec.strict=true \
     --workdir "$W/wlec_nolib" -q --result-json "$W/rn.json" 2>/dev/null; then
   fail "lec proved equivalence with no --lib (unresolved cells must not vacuously pass)"
 fi

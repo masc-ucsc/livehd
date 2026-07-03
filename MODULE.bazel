@@ -139,6 +139,10 @@ git_override(
     module_name = "hhds",
     remote = "https://github.com/masc-ucsc/hhds.git",
     commit = "9f34c8578f6fa58962d2044a0122a91e74068493",  # top of tree
+    # Decouple hhds's vestigial perfetto select from LiveHD's `profiling`
+    # define (see the patch header); drop once upstream hhds carries it.
+    patches = ["//packages:hhds-profiling-define.patch"],
+    patch_strip = 1,
 )
 # For local co-development swap the git_override above for:
 # local_path_override(module_name = "hhds", path = "../hhds")

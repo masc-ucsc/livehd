@@ -81,9 +81,13 @@ map_and_lec cla 3 --set pass.abc.adder=cla --set pass.abc.block_size=3
 
 # Control: the PROVEN results are load-bearing on the cell models. Without
 # --lib, the netlist's blackbox cell `Sub`s are unresolved, so lec must NOT
-# prove equivalence (sound Unknown / fail), never a vacuous pass.
+# prove equivalence (sound Unknown / fail), never a vacuous pass. The impl-only
+# box obligations gate the miter to INCONCLUSIVE (an incomplete correspondence
+# can neither prove nor refute), which exits 0 unless strict — so run the
+# control strict, where any non-Proven outcome is a hard failure exit.
 one_region=$(echo "$REGIONS" | head -1)
 if "$LHD" lec --impl lg:"$W/net_rca_default" --ref lg:"$W/re" --top "$one_region" \
+    --set lec.strict=true \
     --workdir "$W/wlec_nolib" -q --result-json "$W/rn.json" 2>/dev/null; then
   fail "lec proved equivalence with no --lib (unresolved cells must not vacuously pass)"
 fi

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "lnast_prp_writer.hpp"
+#include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 
 static Pass_plugin sample("pass_prp_writer", Pass_prp_writer::setup);
 
@@ -87,6 +88,7 @@ void Pass_prp_writer::work(Eprp_var& var) {
 
   for (const auto& ln : var.lnasts) {
     auto module_name = ln->get_top_module_name();
+    TRACE_EVENT("pass", "prp_writer.module", "unit", std::string(module_name));
     auto fname       = std::format("{}/{}.prp", out_dir, module_name);
 
     std::ofstream out(fname);

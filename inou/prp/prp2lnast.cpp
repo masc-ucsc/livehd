@@ -20,6 +20,7 @@
 #include "absl/strings/str_cat.h"
 #include "diag.hpp"
 #include "pass.hpp"
+#include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "prpparse/lexer.hpp"
 #include "prpparse/parser.hpp"
 #include "prpparse/prp_diag.hpp"
@@ -144,6 +145,9 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name)
 
 // Buffer-backed entry (LSP / unsaved buffers): analyze `source` verbatim.
 Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, std::string_view source) {
+  // One slice per parsed file (profiling builds) — parse cost is per-file, so
+  // this is the "which file is slow" view of the trace.
+  TRACE_EVENT("pyrope", "prp2lnast", "file", std::string(filename));
   lnast = std::make_shared<Lnast>(module_name);
 
   lnast->set_root(Lnast_ntype::create_top());

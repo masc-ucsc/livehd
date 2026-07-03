@@ -129,6 +129,13 @@ def main():
         return 0
 
     if chk.returncode == 0:
+        # `lhd lec` exits 0 for INCONCLUSIVE too (could-not-prove is a warning,
+        # not a fail — same gate semantics as the timeout above). Report it
+        # honestly instead of conflating it with a real proof.
+        out = chk.stdout.decode("utf-8", "ignore")
+        if "INCONCLUSIVE" in out or "UNKNOWN" in out:
+            print("{} - v2prp - inconclusive (solver gave up; NOT a proof; impl-top:{} ref-top:{})".format(name, vtop, ptop))
+            return 0
         print("{} - v2prp - success (impl-top:{} ref-top:{})".format(name, vtop, ptop))
         return 0
     print("{} - v2prp - FAILED: not equivalent (impl-top:{} ref-top:{})".format(name, vtop, ptop))

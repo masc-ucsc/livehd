@@ -23,6 +23,7 @@
 #include "lnast_ntype.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
+#include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 
 namespace {
 
@@ -478,6 +479,10 @@ private:
 
   void lower_stmts(const Lnast_nid& stmts) {
     for (auto c = lnast_->get_first_child(stmts); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
+      if (lnast_->is_dce_dead(c)) {
+        continue;  // dce:mark (lg-only flows): a dead statement is skipped here
+                   // instead of the runner rebuilding the whole staging tree
+      }
       lower_node(c);
     }
   }
@@ -1705,6 +1710,10 @@ private:
   [[nodiscard]] int count_mem_write_sites(std::string_view name) const {
     int                                   n    = 0;
     std::function<void(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) {
+      if (lnast_->is_dce_dead(nid)) {
+        return;  // dce:mark — the lowering skips dead stores; counting them
+                 // here would desync the pre-scan exactly like the decl-store
+      }
       if (Lnast_ntype::is_store(lnast_->get_type(nid))) {
         auto c0 = lnast_->get_first_child(nid);
         if (!c0.is_invalid() && lnast_->get_name(c0) == name) {
@@ -5805,6 +5814,10 @@ private:
 
 void collect_callee_names_impl(const std::shared_ptr<Lnast>& lnast, std::vector<std::string>& out) {
   std::function<void(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) {
+    if (lnast->is_dce_dead(nid)) {
+      return;  // dce:mark — a dead instance call must not pull clock/reset
+               // onto the parent (the rebuilt-tree path would have dropped it)
+    }
     if (Lnast_ntype::is_func_call(lnast->get_type(nid))) {
       auto c0 = lnast->get_first_child(nid);
       if (!c0.is_invalid()) {
@@ -6272,6 +6285,10 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
   if (!lnast || lnast->io_meta().empty()) {
     return nullptr;  // not a lowerable module (e.g. the empty file-root tree)
   }
+  // One perfetto slice per lowered unit (profiling builds only) — tolg is
+  // invoked directly by the kernel (not via run_step), so without this the
+  // whole LNAST->LGraph phase was a blank stretch in the trace.
+  TRACE_EVENT("pass", "lnast.tolg", "unit", std::string(lnast->get_top_module_name()));
   if (is_sim_only_unit(lnast)) {
     return nullptr;  // testbench / spawn comb — checked by `lhd sim`, not lowered to hardware
   }

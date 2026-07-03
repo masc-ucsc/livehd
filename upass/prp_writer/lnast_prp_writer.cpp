@@ -2645,6 +2645,17 @@ Lnast_nid Lnast_prp_writer::arm_value_def(Lnast_nid stmts_node, std::string expe
   if (x0.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(x0))) {
     return Lnast_nid{};
   }
+  // A 3-child `store(mem, idx, val)` is a PER-ENTRY memory write, not a scalar
+  // value-def: folding it into a mux arm would render just the value and drop
+  // the index (mem_whole_coexist). A type-tailed decl-store keeps its old
+  // acceptance (the tail is a type node, not an index).
+  if (t == Lnast_ntype::Lnast_ntype_store) {
+    if (auto v1 = lnast->get_sibling_next(x0); !v1.is_invalid()) {
+      if (auto v2 = lnast->get_sibling_next(v1); !v2.is_invalid() && !Lnast_ntype::is_type(lnast->get_type(v2))) {
+        return Lnast_nid{};
+      }
+    }
+  }
   std::string nm(strip_prefix(lnast->get_name(x0)));
   if (nm.find('.') != std::string::npos) {
     return Lnast_nid{};  // scalar only (a bundle leaf keeps its own form)
@@ -2714,37 +2725,82 @@ void Lnast_prp_writer::analyze_muxes(Lnast_nid stmts_nid) {
               ok = false;
             }
           } else if (i > 0) {
-            // the immediately-preceding sibling must be the unconditional default
+            // A preceding sibling must be the unconditional default
             // `store lhs = D`; it becomes the else value and is dropped.
-            std::string pl;
-            auto        pdef = (lnast->get_type(kids[i - 1]) == Lnast_ntype::Lnast_ntype_stmts)
-                                   ? Lnast_nid{}
-                                   : (defines_child0(lnast->get_type(kids[i - 1])) ? kids[i - 1] : Lnast_nid{});
-            // reuse arm_value_def shape check via a one-statement wrapper is awkward;
-            // validate kids[i-1] directly as a scalar value-def to lhs
-            if (!pdef.is_invalid()) {
-              auto x0 = lnast->get_child(pdef);
-              const auto t = lnast->get_type(pdef);
-              if (!x0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(x0))
-                  && std::string(strip_prefix(lnast->get_name(x0))) == mi.lhs && t != Lnast_ntype::Lnast_ntype_func_call
-                  && t != Lnast_ntype::Lnast_ntype_attr_set && t != Lnast_ntype::Lnast_ntype_set_mask
-                  && t != Lnast_ntype::Lnast_ntype_range && t != Lnast_ntype::Lnast_ntype_declare
-                  && !Lnast_ntype::is_if_like(t)) {
-                mi.else_def = pdef;
-              } else {
-                ok = false;
+            // slang's driver-topological emission can interleave UNRELATED
+            // statements (poison stores of other nets) between the seed and
+            // the if — the firtool ternary `x = D; if c { x = V }` then missed
+            // the collapse and kept the `mut x:T = 0` declare + statement-if
+            // (the ResetGen `_mux_1` shape). Scan a bounded window backward;
+            // skipping an intervening statement is sound only when it neither
+            // READS lhs (it would observe the seed value the fold removes from
+            // that position) nor WRITES anything the seed's rhs reads (the
+            // else value is evaluated at the if once folded).
+            constexpr size_t                kSeedScanWindow = 32;
+            std::unordered_set<std::string> iv_writes;
+            for (size_t back = 1; back <= i && back <= kSeedScanWindow; ++back) {
+              const auto s = kids[i - back];
+              const auto t = lnast->get_type(s);
+              if (t == Lnast_ntype::Lnast_ntype_stmts || Lnast_ntype::is_if_like(t) || !defines_child0(t)) {
+                break;  // control flow / non-def statement — a fold barrier
               }
-            } else {
+              auto x0 = lnast->get_child(s);
+              if (x0.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(x0))) {
+                break;
+              }
+              const std::string sname(strip_prefix(lnast->get_name(x0)));
+              if (sname == mi.lhs) {
+                // Nearest def of lhs decides either way: validate the same
+                // scalar value-def shape the adjacent case required. A 3-child
+                // `store(mem, idx, val)` is a PER-ENTRY memory write — a
+                // partial write can never be the unconditional default
+                // (folding one clobbered the whole array in mem_whole_coexist).
+                bool indexed_store = false;
+                if (t == Lnast_ntype::Lnast_ntype_store) {
+                  if (auto v1 = lnast->get_sibling_next(x0); !v1.is_invalid()) {
+                    if (auto v2 = lnast->get_sibling_next(v1);
+                        !v2.is_invalid() && !Lnast_ntype::is_type(lnast->get_type(v2))) {
+                      indexed_store = true;
+                    }
+                  }
+                }
+                if (!indexed_store && t != Lnast_ntype::Lnast_ntype_func_call && t != Lnast_ntype::Lnast_ntype_attr_set
+                    && t != Lnast_ntype::Lnast_ntype_set_mask && t != Lnast_ntype::Lnast_ntype_range
+                    && t != Lnast_ntype::Lnast_ntype_declare) {
+                  std::unordered_set<std::string> seed_reads;
+                  collect_driver_reads(s, seed_reads);
+                  bool clash = false;
+                  for (const auto& w : iv_writes) {
+                    if (seed_reads.count(w)) {
+                      clash = true;
+                      break;
+                    }
+                  }
+                  if (!clash) {
+                    mi.else_def = s;
+                  }
+                }
+                break;
+              }
+              iv_writes.insert(sname);
+              std::unordered_set<std::string> sreads;
+              collect_driver_reads(s, sreads);
+              if (sreads.count(mi.lhs)) {
+                break;  // an in-between reader of the seed value — cannot fold past it
+              }
+            }
+            if (mi.else_def.is_invalid()) {
               ok = false;
             }
           } else {
             ok = false;  // no else, no preceding default
           }
         }
+        const bool seed_is_sibling = ok && !has_else && !mi.else_def.is_invalid();
         if (ok && !mi.else_def.is_invalid()) {
           // success: record + suppress the preceding default store if it is the else.
-          if (i > 0 && mi.else_def == kids[i - 1]) {
-            folded_node_.insert(kids[i - 1].get_class_index().value);
+          if (seed_is_sibling) {
+            folded_node_.insert(mi.else_def.get_class_index().value);
           } else if (i > 0) {
             // has explicit else: an immediately-preceding redundant store to lhs is dead.
             auto       prev = kids[i - 1];

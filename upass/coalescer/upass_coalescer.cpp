@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
+#include <print>
 #include <string>
 #include <utility>
 
@@ -20,9 +22,34 @@ void uPass_coalescer::set_options(const upass::Options_map& opts) {
     return;
   }
   // Match the same lower/0/false/no/off truthiness convention pass.upass uses.
+  // "auto" (the pass.upass label DEFAULT — every runner gets the label, so a
+  // key-present check cannot tell "user said 1" from "nobody said anything")
+  // keeps the begin_iteration verilog-origin self-disable armed; an explicit
+  // 0/1 pins the behavior.
   std::string v = it->second;
   std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  enabled = !(v.empty() || v == "0" || v == "false" || v == "no" || v == "off");
+  if (v == "auto") {
+    return;
+  }
+  enabled        = !(v.empty() || v == "0" || v == "false" || v == "no" || v == "off");
+  enabled_forced = true;
+}
+
+void uPass_coalescer::begin_iteration() {
+  // A Verilog-origin unit (native slang reader, or a re-parsed v2prp file via
+  // its `::[hdl]` marker) is firtool/SSA-shaped: names are written once, so
+  // the park/flush machinery never gets to supersede anything. Measured on
+  // XiangShan's Rob.Rob: 3,147,133 parks yielded 8 DSE drops while costing
+  // 70s of an 80s walk (87%). Park nothing for such units — hand-written
+  // Pyrope (the `mut a=1; a+=1; a+=1` accumulator idiom this pass exists
+  // for) keeps the full coalescer. An explicit `coalescer:0/1` option owns
+  // the final say; this only flips the default.
+  if (enabled_forced) {
+    return;
+  }
+  if (const auto& ln = lm->get_lnast(); ln && ln->is_verilog_origin()) {
+    enabled = false;
+  }
 }
 
 void uPass_coalescer::process_declare() {
@@ -150,6 +177,20 @@ void uPass_coalescer::park_current(const std::string& lhs) {
   parked_current_stmt = true;
 }
 
+void uPass_coalescer::end_run() {
+  if (std::getenv("LIVEHD_UPASS_STATS") == nullptr) {
+    return;
+  }
+  const auto& ln = lm->get_lnast();
+  std::print(stderr,
+             "uPass stats [coalescer]: parked={} dse_dropped={} flushed={} flush_all_calls={} flush_all_keys={} (avg "
+             "pending {:.1f}) unit={} vorigin={} enabled={}\n",
+             stat_parked, stat_dse_dropped, stat_flushed, stat_flush_all_calls, stat_flush_all_keys,
+             stat_flush_all_calls > 0 ? static_cast<double>(stat_flush_all_keys) / static_cast<double>(stat_flush_all_calls)
+                                      : 0.0,
+             ln ? ln->get_top_module_name() : "<null>", ln && ln->is_verilog_origin(), enabled);
+}
+
 bool uPass_coalescer::flush_one(const std::string& name) {
   auto it = pending.find(name);
   if (it == pending.end()) {
@@ -181,9 +222,11 @@ bool uPass_coalescer::flush_one(const std::string& name) {
 }
 
 void uPass_coalescer::flush_all() {
+  ++stat_flush_all_calls;
   if (pending.empty()) {
     return;
   }
+  stat_flush_all_keys += pending.size();
   // Snapshot keys first — flush_one mutates `pending`. flat_hash_map gives
   // unspecified iteration order, so sort the keys to keep the emitted order
   // deterministic across runs (matches the std::map behavior this replaced).

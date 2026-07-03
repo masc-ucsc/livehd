@@ -53,6 +53,8 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
+#include <cstdlib>
 #include <format>
 #include <functional>
 #include <map>
@@ -384,6 +386,14 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
       std::print(" {}", name);
     }
     std::print("\n");
+  }
+
+  dispatch_stats_ = std::getenv("LIVEHD_UPASS_STATS") != nullptr;
+
+  // dce:mark — lg-only flows skip the post-DCE staging rebuild (see
+  // dead_code_eliminate_staging); tolg skips the marked statements instead.
+  if (auto it = options.find("dce"); it != options.end()) {
+    dce_mark_only_ = it->second == "mark";
   }
 
   // compile.upass.inline=false: keep fully-defined combs as Sub instances
@@ -1015,6 +1025,18 @@ void uPass_runner::dispatch_to_passes(Pass_method fn) {
     // otherwise unbalanced, restoring here keeps the runner-level emit
     // logic operating on the op-node the switch case selected.
     const auto saved = lm->save_cursor();
+    if (dispatch_stats_) {
+      const auto t0 = std::chrono::steady_clock::now();
+      try {
+        (entry.pass.get()->*fn)();
+      } catch (const std::runtime_error& ex) {
+        std::print(stderr, "uPass [{}] error: {}\n", entry.name, ex.what());
+      }
+      entry.stat_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
+      ++entry.stat_calls;
+      lm->restore_cursor(saved);
+      continue;
+    }
     try {
       (entry.pass.get()->*fn)();
     } catch (const std::runtime_error& ex) {
@@ -1153,12 +1175,17 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
   bool any_drop = false;
   for (auto& entry : upasses) {
     const auto here = lm->save_cursor();
+    const auto t0   = dispatch_stats_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     try {
       if ((entry.pass.get()->*fn)(rn.dst_name, *rn.dst, upass::Src_span{rn.src}) == upass::Vote::drop) {
         any_drop = true;
       }
     } catch (const std::runtime_error& e) {
       std::print(stderr, "upass pass error: {}\n", e.what());
+    }
+    if (dispatch_stats_) {
+      entry.stat_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
+      ++entry.stat_calls;
     }
     lm->restore_cursor(here);
   }
@@ -6123,11 +6150,36 @@ void uPass_runner::run() {
   for (auto& entry : upasses) {
     entry.pass->begin_iteration();
   }
+  const auto walk_t0 = std::chrono::steady_clock::now();
   process_lnast();
   // Print the completion marker the dependency / shared-pass tests
   // (upass_noop_first_iter_test.sh, upass_lnast_shared_scan_test.sh,
   // upass_lnast_shared_decide_test.sh) grep for.
   std::print("uPass - walk complete\n");
+  if (dispatch_stats_) {
+    // LIVEHD_UPASS_STATS breakdown. stderr, not stdout: run_step redirects
+    // stdout into the per-step log; stats should land on the terminal.
+    const auto walk_s
+        = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - walk_t0).count() / 1e3;
+    double dispatched_s = 0;
+    for (const auto& entry : upasses) {
+      dispatched_s += static_cast<double>(entry.stat_ns) / 1e9;
+    }
+    std::print(stderr, "uPass stats [{}]: walk {:.1f}s, dispatched {:.1f}s ({:.0f}%), runner-core {:.1f}s\n",
+               lm->get_top_module_name(), walk_s, dispatched_s, walk_s > 0 ? 100.0 * dispatched_s / walk_s : 0.0,
+               walk_s - dispatched_s);
+    std::vector<const Pass_entry*> sorted;
+    sorted.reserve(upasses.size());
+    for (const auto& entry : upasses) {
+      sorted.push_back(&entry);
+    }
+    std::sort(sorted.begin(), sorted.end(), [](const Pass_entry* a, const Pass_entry* b) { return a->stat_ns > b->stat_ns; });
+    for (const auto* entry : sorted) {
+      std::print(stderr, "uPass stats [{}]:   {:<12} {:9.1f}s  ({:4.1f}% of walk, {} dispatches)\n",
+                 lm->get_top_module_name(), entry->name, static_cast<double>(entry->stat_ns) / 1e9,
+                 walk_s > 0 ? 100.0 * (static_cast<double>(entry->stat_ns) / 1e9) / walk_s : 0.0, entry->stat_calls);
+    }
+  }
 
   // Post-walk DCE on staging — removes definition statements (assign,
   // tuple_add, attr_set, etc.) whose dst has no surviving downstream
@@ -6138,7 +6190,12 @@ void uPass_runner::run() {
   // cleans those up. Skipped (with the whole staging build) when nothing
   // consumes the rewritten LNAST — see set_materialize().
   if (materialize_) {
+    const auto dce_t0 = std::chrono::steady_clock::now();
     dead_code_eliminate_staging();
+    if (dispatch_stats_) {
+      std::print(stderr, "uPass stats [{}]:   staging-DCE {:9.1f}s\n", lm->get_top_module_name(),
+                 std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - dce_t0).count() / 1e3);
+    }
   }
 
   // Step J — dest-walk finisher dispatch. Passes that want to inspect
@@ -6301,182 +6358,220 @@ void uPass_runner::dead_code_eliminate_staging() {
   const bool  io_known         = !io.inputs.empty() || !io.outputs.empty();
   const bool  allow_named_drop = is_function_body_ && io_known;
 
-  absl::flat_hash_set<std::string> protected_names;
-  {
-    for (const auto& e : io.inputs) {
-      protected_names.insert(e.name);
-    }
-    for (const auto& e : io.outputs) {
-      protected_names.insert(e.name);
-    }
-    for (auto node : staging->depth_preorder(staging->get_root())) {
-      if (node.is_invalid() || staging->get_type(node) != N::Lnast_ntype_declare) {
-        continue;
-      }
-      auto nm = staging->get_first_child(node);  // child0: declared var
-      if (!nm.is_valid() || staging->get_type(nm) != N::Lnast_ntype_ref) {
-        continue;
-      }
-      auto ty = staging->get_sibling_next(nm);  // child1: type subtree
-      if (!ty.is_valid()) {
-        continue;
-      }
-      auto mode = staging->get_sibling_next(ty);  // child2: storage-class const
-      if (!mode.is_valid() || staging->get_type(mode) != N::Lnast_ntype_const) {
-        continue;
-      }
-      const auto m = staging->get_name(mode);
-      if (m == "mut" || m == "reg") {
-        protected_names.insert(std::string(staging->get_name(nm)));
-      }
-    }
+  // string_view keys throughout: ref names resolve into the staging name pool
+  // and io_meta entry strings, both stable for the whole DCE — no per-ref
+  // std::string allocation. The mut/reg declare roots are collected during the
+  // main scan below (declares are statement-level nodes the scan visits
+  // anyway); droppability is therefore checked at SEED/KILL time, not at scan
+  // time, which folds the old declare pre-walk into the single scan.
+  absl::flat_hash_set<std::string_view> protected_names;
+  for (const auto& e : io.inputs) {
+    protected_names.insert(e.name);
+  }
+  for (const auto& e : io.outputs) {
+    protected_names.insert(e.name);
   }
 
-  // Compute the live-statement set via iterative liveness on the
+  // Compute the live-statement set via worklist liveness on the
   // staging tree, then rebuild a fresh tree containing only the live
   // statements. Avoiding in-place delete_subtree dodges HHDS's
   // pre-order iterator transiently yielding default-constructed
   // Node_class instances for deleted slots — downstream lnastfmt walks
   // would crash on the unchecked `get_type` that follows.
+  //
+  // Worklist, not fixed point: the previous version re-walked the WHOLE tree
+  // (use recount + candidate rescan) once per dead "layer", so a K-deep dead
+  // def-use chain cost K full-tree walks — Rob.Rob (240k ifs, ~5M staging
+  // nodes) spent ~6 minutes here, dominating the whole compile. One scan
+  // builds the use counts, the droppable-def index, and each droppable
+  // statement's read list; killing a statement then decrements only ITS OWN
+  // reads and enqueues the defs of names that hit zero — O(tree) total, same
+  // fixed point (kill order does not change the final zero-use set).
 
   // Set of statement nids in the staging tree that should be dropped.
   absl::flat_hash_set<int64_t> dead_stmts;
+  const auto                   dce_t_scan = std::chrono::steady_clock::now();
+  {
+    absl::flat_hash_map<std::string_view, int>                  use_count;   // refs in non-LHS positions, per name
+    absl::flat_hash_map<std::string_view, std::vector<int64_t>> defs_of;     // name -> candidate stmt-level def nids
+    absl::flat_hash_map<int64_t, std::vector<std::string_view>> stmt_reads;  // candidate def nid -> subtree read names
 
-  bool changed = true;
-  while (changed) {
-    changed = false;
-
-    // Pass 1: count uses (refs in non-LHS positions) for each name. Refs
-    // that live inside an already-dead statement don't count.
+    // One recursive scan. A statement-level def is a def-producing node whose
+    // direct parent is a `stmts` block — nested `assign` nodes living inside a
+    // tuple_add (field-label payload, not a real statement) are payload, and
+    // attr_set with `type`=mut|reg is a keepalive marker (storage class
+    // declarations survive even when the name has no surviving readers).
+    // Temporary defs (`___N`) are always droppable when unread. A user-named
+    // def is droppable only when it is NOT a root: not function IO (io_meta)
+    // and not a mut/reg state element. This is the io-root rule —
+    // `protected_names` holds exactly those roots (mut/reg declares collected
+    // right here in the scan; the droppable test runs at seed/kill time, when
+    // the set is complete). Outputs are the motivating case for the io_meta
+    // half (written, never read in-tree, so they'd be mis-swept without the
+    // root); the var-arg reconstruction `args = (args__0, …)` is the
+    // motivating case for the drop (non-IO, non-state, zero readers once the
+    // for-loop unrolled into port reads).
     //
-    // "inside a dead statement" used to be an upward walk to the root per ref
-    // node (O(depth) each) — quadratic-ish on a deeply nested generated body
-    // (a long if/elif decode chain) with many refs, and this whole Pass 1 can
-    // re-run once per outer fixed-point iteration. depth_preorder visits a
-    // parent strictly before its descendants, so memoize "is dead, or nested
-    // inside a dead ancestor" bottom-up-built-top-down as we walk: by the time
-    // a node is visited, its parent's entry is already in the map, making the
-    // lookup O(1) amortized instead of O(depth). Same fixed point, just
-    // computed without redundant re-walks.
-    absl::flat_hash_map<std::string, int> use_count;
-    absl::flat_hash_map<int64_t, bool>    dead_or_nested;  // node id -> self-or-ancestor in dead_stmts
-    for (auto node : staging->depth_preorder(staging->get_root())) {
-      if (node.is_invalid()) {
-        continue;
-      }
-      auto parent = staging->get_parent(node);
-      bool parent_dead_or_nested = false;
-      if (parent.is_valid()) {
-        const auto pid = parent.get_class_index().value;
-        if (dead_stmts.contains(pid)) {
-          parent_dead_or_nested = true;
-        } else if (auto it = dead_or_nested.find(pid); it != dead_or_nested.end()) {
-          parent_dead_or_nested = it->second;
+    // `active` = the enclosing candidate def stmt's nid (0 outside one): every
+    // non-LHS ref in its subtree lands in its read list, so its death can
+    // un-count exactly the reads it contributed. A ref that is the first child
+    // of a def-producing node is that node's dst, at ANY depth (a nested
+    // assign-in-tuple_add's child0 too) — never a read.
+    //
+    // `on_spine` mirrors the rebuild's is_structural descent (top/stmts/if/
+    // while/for — NOT unique_if): the rebuild only dead-checks statements on
+    // that spine and copies everything under a unique_if as payload, so a def
+    // under a unique_if arm must NOT be a kill candidate. Killing it anyway
+    // (as the old fixed point did) decremented its reads while the copy kept
+    // the statement — a spine def whose only reader was that kept payload
+    // could then be dropped out from under it.
+    std::function<void(const Lnast_nid&, int64_t, bool)> scan = [&](const Lnast_nid& n, int64_t active, bool on_spine) {
+      const auto nt       = staging->get_type(n);
+      const bool is_stmts = nt == N::Lnast_ntype_stmts;
+      for (auto c = n.first_child(); c.is_valid(); c = c.next_sibling()) {
+        const auto ct = staging->get_type(c);
+        if (ct == N::Lnast_ntype_ref) {
+          const bool is_lhs = dce_is_def_producing(nt) && c.is_first_child();
+          if (!is_lhs) {
+            const auto nm = staging->get_name(c);
+            ++use_count[nm];
+            if (active != 0) {
+              stmt_reads[active].push_back(nm);
+            }
+          }
+          continue;
         }
-      }
-      dead_or_nested[node.get_class_index().value] = parent_dead_or_nested;
-
-      if (staging->get_type(node) != N::Lnast_ntype_ref) {
-        continue;
-      }
-      if (!parent.is_valid()) {
-        continue;
-      }
-      if (parent_dead_or_nested) {
-        continue;
-      }
-      const bool is_lhs = dce_is_def_producing(staging->get_type(parent)) && node.is_first_child();
-      if (!is_lhs) {
-        ++use_count[std::string(staging->get_name(node))];
-      }
-    }
-
-    // Pass 2: extend the dead set with statement-level defs whose dst
-    // is unused. A node is statement-level only when its direct parent
-    // is a `stmts` block — nested `assign` nodes living inside a
-    // tuple_add (field-label payload, not a real statement) must be
-    // skipped. attr_set with `type`=mut|reg is a keepalive marker
-    // (storage class declarations survive even when the name has no
-    // surviving readers). Empty stmts subtrees are also dropped
-    // (constprop's dead-branch elimination collapses if/else with
-    // known conds to an empty stmts node so block scope survives;
-    // once nothing in there had effects, the wrapper itself is noise).
-    for (auto node : staging->depth_preorder(staging->get_root())) {
-      if (node.is_invalid()) {
-        continue;
-      }
-      const auto key = node.get_class_index().value;
-      if (dead_stmts.contains(key)) {
-        continue;
-      }
-      auto parent = staging->get_parent(node);
-      if (!parent.is_valid()) {
-        continue;
-      }
-      const bool parent_is_stmts = staging->get_type(parent) == N::Lnast_ntype_stmts;
-      auto       t               = staging->get_type(node);
-
-      // Empty stmts subtree. Droppable ONLY when it is a block-scope wrapper
-      // sitting directly inside another `stmts` block — that is the noise
-      // constprop's dead-branch elimination leaves behind. An empty stmts that
-      // is a POSITIONAL child of an `if`/`for`/`while` (an arm body / loop
-      // body) must be preserved: an if node's children are (cond, stmts) pairs
-      // plus an optional trailing else-stmts, so deleting an empty arm body
-      // SHIFTS every following sibling — e.g. `if a {…} elif b {} else {…}`
-      // would lose the empty `elif b` body and slide the `else` into the `elif`
-      // slot. For a conditional reg write that turns the intended hold into a
-      // garbage write (the `else` value lands on the elif path), which is
-      // exactly the no-auto-hold trap. Gating on parent==stmts keeps the
-      // dead-branch cleanup (those wrappers are emitted as stmts-under-stmts).
-      if (t == N::Lnast_ntype_stmts) {
-        bool has_live_child = false;
-        for (auto c = node.first_child(); c.is_valid(); c = c.next_sibling()) {
-          if (!dead_stmts.contains(c.get_class_index().value)) {
-            has_live_child = true;
-            break;
+        int64_t next_active = active;
+        if (active == 0 && is_stmts) {
+          if (ct == N::Lnast_ntype_declare) {
+            // mut/reg storage-class declares are the named-var roots
+            // (collected everywhere, spine or not — roots are name-level).
+            auto nm = staging->get_first_child(c);
+            if (nm.is_valid() && staging->get_type(nm) == N::Lnast_ntype_ref) {
+              if (auto ty = staging->get_sibling_next(nm); ty.is_valid()) {
+                if (auto mode = staging->get_sibling_next(ty);
+                    mode.is_valid() && staging->get_type(mode) == N::Lnast_ntype_const) {
+                  const auto m = staging->get_name(mode);
+                  if (m == "mut" || m == "reg") {
+                    protected_names.insert(staging->get_name(nm));
+                  }
+                }
+              }
+            }
+          } else if (on_spine && dce_is_def_producing(ct) && !dce_is_keepalive_attr_set(*staging, c)) {
+            if (auto fc = staging->get_first_child(c); fc.is_valid() && staging->get_type(fc) == N::Lnast_ntype_ref) {
+              const auto id = c.get_class_index().value;
+              defs_of[staging->get_name(fc)].push_back(id);
+              next_active = id;
+            }
           }
         }
-        if (!has_live_child && parent_is_stmts) {
-          dead_stmts.insert(key);
-          changed = true;
-        }
-        continue;
+        const bool child_structural = ct == N::Lnast_ntype_top || ct == N::Lnast_ntype_stmts || ct == N::Lnast_ntype_if
+                                      || ct == N::Lnast_ntype_while || ct == N::Lnast_ntype_for;
+        scan(c, next_active, on_spine && child_structural);
       }
+    };
+    scan(staging->get_root(), 0, true);
 
-      if (!parent_is_stmts) {
-        continue;  // payload node inside an op (e.g. nested assign in tuple_add)
-      }
-      if (!dce_is_def_producing(t)) {
+    const auto droppable = [&](std::string_view name) {
+      return Lnast::is_tmp(name) || (allow_named_drop && !protected_names.contains(name));
+    };
+    std::vector<int64_t> work;
+    for (const auto& [name, ids] : defs_of) {
+      if (!droppable(name)) {
         continue;
       }
-      if (dce_is_keepalive_attr_set(*staging, node)) {
-        continue;
-      }
-      auto fc = staging->get_first_child(node);
-      if (!fc.is_valid() || staging->get_type(fc) != N::Lnast_ntype_ref) {
-        continue;
-      }
-      // Temporary defs (`___N`) are always droppable when unread. A
-      // user-named def is droppable only when it is NOT a root: not function
-      // IO (io_meta) and not a mut/reg state element. This is the io-root
-      // rule — `protected_names` holds exactly those roots. Outputs are the
-      // motivating case for the io_meta half (written, never read in-tree, so
-      // they'd be mis-swept without the root); the var-arg reconstruction
-      // `args = (args__0, …)` is the motivating case for the drop (non-IO,
-      // non-state, zero readers once the for-loop unrolled into port reads).
-      const auto fc_name = staging->get_name(fc);
-      if (!Lnast::is_tmp(fc_name) && (!allow_named_drop || protected_names.contains(std::string(fc_name)))) {
-        continue;
-      }
-      auto it = use_count.find(std::string(fc_name));
+      const auto it = use_count.find(name);
       if (it == use_count.end() || it->second == 0) {
-        dead_stmts.insert(key);
-        changed = true;
+        work.insert(work.end(), ids.begin(), ids.end());
+      }
+    }
+    while (!work.empty()) {
+      const auto id = work.back();
+      work.pop_back();
+      if (!dead_stmts.insert(id).second) {
+        continue;
+      }
+      const auto rit = stmt_reads.find(id);
+      if (rit == stmt_reads.end()) {
+        continue;
+      }
+      for (const auto nm : rit->second) {
+        if (auto uit = use_count.find(nm); uit != use_count.end() && --uit->second == 0 && droppable(nm)) {
+          if (auto dit = defs_of.find(nm); dit != defs_of.end()) {
+            work.insert(work.end(), dit->second.begin(), dit->second.end());
+          }
+        }
       }
     }
   }
 
+  // Empty stmts wrappers. Droppable ONLY when the wrapper is a block-scope
+  // stmts sitting directly inside another `stmts` block — that is the noise
+  // constprop's dead-branch elimination leaves behind. An empty stmts that
+  // is a POSITIONAL child of an `if`/`for`/`while` (an arm body / loop
+  // body) must be preserved: an if node's children are (cond, stmts) pairs
+  // plus an optional trailing else-stmts, so deleting an empty arm body
+  // SHIFTS every following sibling — e.g. `if a {…} elif b {} else {…}`
+  // would lose the empty `elif b` body and slide the `else` into the `elif`
+  // slot. For a conditional reg write that turns the intended hold into a
+  // garbage write (the `else` value lands on the elif path), which is
+  // exactly the no-auto-hold trap. Post-order, so a wrapper whose children
+  // were themselves just-emptied wrappers resolves inner-first (a wrapper's
+  // death frees no reads — everything under it is already dead — so this
+  // cannot re-enable the def worklist above).
+  {
+    // stmts wrappers only live on the structural spine (top/stmts/if/while/
+    // for arms — payload ops never nest a stmts), so the sweep skips payload
+    // subtrees entirely instead of re-walking the whole tree. Same spine as
+    // the rebuild's is_structural (unique_if is payload there, and nothing
+    // under it is a kill candidate anyway).
+    const auto structural = [](Lnast_ntype::Lnast_ntype_int t) {
+      return t == N::Lnast_ntype_top || t == N::Lnast_ntype_stmts || t == N::Lnast_ntype_if || t == N::Lnast_ntype_while
+             || t == N::Lnast_ntype_for;
+    };
+    std::function<void(const Lnast_nid&)> sweep_wrappers = [&](const Lnast_nid& n) {
+      const bool n_is_stmts = staging->get_type(n) == N::Lnast_ntype_stmts;
+      for (auto c = n.first_child(); c.is_valid(); c = c.next_sibling()) {
+        const auto ct = staging->get_type(c);
+        if (!structural(ct)) {
+          continue;
+        }
+        sweep_wrappers(c);
+        if (!n_is_stmts || ct != N::Lnast_ntype_stmts) {
+          continue;
+        }
+        bool has_live_child = false;
+        for (auto gc = c.first_child(); gc.is_valid(); gc = gc.next_sibling()) {
+          if (!dead_stmts.contains(gc.get_class_index().value)) {
+            has_live_child = true;
+            break;
+          }
+        }
+        if (!has_live_child) {
+          dead_stmts.insert(c.get_class_index().value);
+        }
+      }
+    };
+    sweep_wrappers(staging->get_root());
+  }
+  const auto dce_t_marked = std::chrono::steady_clock::now();
+
   if (dead_stmts.empty()) {
+    return;
+  }
+
+  // lg-only flows (dce:mark — nothing downstream keeps the LNAST): record the
+  // dead set on the staging Lnast for lnast.tolg's lower_stmts to skip, and
+  // pay NO tree rebuild at all. LNAST-emitting flows fall through to the
+  // rebuild so prp_writer / ln: / dumps see a clean tree.
+  if (dce_mark_only_) {
+    if (dispatch_stats_) {
+      std::print(stderr, "uPass stats [{}]:   DCE mark {} dead stmts in {:.2f}s (no rebuild)\n", lm->get_top_module_name(),
+                 dead_stmts.size(),
+                 std::chrono::duration_cast<std::chrono::milliseconds>(dce_t_marked - dce_t_scan).count() / 1e3);
+    }
+    staging->set_dce_dead_stmts(std::move(dead_stmts));
     return;
   }
 
@@ -6527,6 +6622,13 @@ void uPass_runner::dead_code_eliminate_staging() {
   };
   copy_subtree(src_root, dst_root, false);
 
+  if (dispatch_stats_) {
+    std::print(stderr, "uPass stats [{}]:   DCE mark {} dead stmts in {:.2f}s, rebuild {:.2f}s\n", lm->get_top_module_name(),
+               dead_stmts.size(),
+               std::chrono::duration_cast<std::chrono::milliseconds>(dce_t_marked - dce_t_scan).count() / 1e3,
+               std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - dce_t_marked).count()
+                   / 1e3);
+  }
   staging = new_staging;
 }
 

@@ -272,6 +272,11 @@ public:
   // 1i: flush parked writes before an inline source-swap so their src nids
   // are still relative to the active read tree (see uPass::flush_deferred).
   void flush_deferred() override { flush_all(); }
+  // LIVEHD_UPASS_STATS: park/flush counters (see upass_runner's per-pass
+  // dispatch timing — this fills in WHY the coalescer's share is what it is).
+  void end_run() override;
+  // Auto-disable parking on Verilog-origin (SSA-shaped) units — see the cpp.
+  void begin_iteration() override;
 
   // Cassert reads its operand and is treated as a barrier — flush so the
   // operand reflects whatever value the parked producer would have emitted.
@@ -339,12 +344,17 @@ private:
   bool parked_current_stmt{false};
 
   // coalescer:0 disables parking — pass becomes inert (still flushes empty
-  // dict on boundaries; cheap).
+  // dict on boundaries; cheap). begin_iteration also auto-disables parking on
+  // Verilog-origin units (SSA-shaped, DSE never fires); an explicit option
+  // wins (enabled_forced).
   bool enabled{true};
+  bool enabled_forced{false};
 
   std::size_t stat_parked{0};
   std::size_t stat_dse_dropped{0};
   std::size_t stat_flushed{0};
+  std::size_t stat_flush_all_calls{0};
+  std::size_t stat_flush_all_keys{0};  // sum of pending.size() over non-empty flush_all calls
 
   // Top-level handler: scan the current op's children, flush any pending
   // names read by RHS, then decide whether to park (DSE-replace or fresh

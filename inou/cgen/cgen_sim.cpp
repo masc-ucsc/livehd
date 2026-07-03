@@ -1331,11 +1331,20 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // atomic Subs / multi-out cells / consts (bound elsewhere, or a genuine cycle
   // the detector below still catches). Direct-input / const addresses (the
   // common case) are already bound, so this is a no-op for them.
+  absl::flat_hash_set<pin_key_t> prefetch_seen;
   auto ensure_ready_impl = [&](auto&& self, const hhds::Pin_class& drv) -> void {
     if (drv.is_invalid() || is_const_pin(drv)) {
       return;
     }
     if (pin2var.contains(drv.get_class_index())) {
+      return;
+    }
+    if (!prefetch_seen.insert(drv.get_class_index()).second) {
+      // Already walked this pin (or a combinational-cycle back-edge re-entered
+      // it): stop instead of recursing forever -- an unbound cycle member is
+      // left for operand() to report as the loud combinational-loop diagnostic
+      // (unbounded self-recursion here stack-overflowed on BusyTable_1/Dispatch,
+      // any comb cycle reaching a Memory operand; repro sim_loop_mem_prefetch).
       return;
     }
     auto n   = drv.get_master_node();

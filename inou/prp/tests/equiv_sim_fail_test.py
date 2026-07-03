@@ -173,16 +173,26 @@ def compare_dirs(a, b):
 
 
 def compile_sim(src, top, out, reader=None):
-    cmd = [str(LHD), "compile", str(src)]
+    srcs = [str(s) for s in src] if isinstance(src, (list, tuple)) else [str(src)]
+    cmd = [str(LHD), "compile", *srcs]
     if reader:
         cmd += ["--reader", reader]
     cmd += ["--top", top, "--emit-dir", f"sim:{out}", "--workdir", str(out.parent / ("w_" + out.name))]
     return run(cmd)
 
 
+def drive(simdir, top, rundir):
+    """gen_driver + compile + run one side; returns (rc, output)."""
+    gen_driver(simdir, top)
+    _, (rc, out) = compile_driver(simdir)
+    if rc:
+        return rc, out
+    return run([str(simdir / "drv_compare"), "8", str(rundir)])
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["lg-emit", "prp-emit", "exact-diff"], required=True)
+    ap.add_argument("--mode", choices=["lg-emit", "prp-emit", "exact-diff", "v2prp-sim"], required=True)
     ap.add_argument("--prp", required=True)
     ap.add_argument("--reader", default="yosys-verilog")
     args = ap.parse_args()
@@ -205,6 +215,47 @@ def main():
             rc, out = compile_sim(prp, pyrope_top, work / "prp_sim")
             print(out)
             return rc
+        if args.mode == "v2prp-sim":
+            # The XiangShan fp-convert-family SIM fail class (instance-output
+            # struct dual identity, the ExeUnitImp_4 category): the .v lowers
+            # CORRECTLY in memory (side A: slang -> sim), but the EMITTED
+            # Pyrope TEXT carries a flat instance-output store + 0-init
+            # per-field leaves, so the RECOMPILED Pyrope (side B) computes
+            # from never-written leaves and its sim diverges. Both sides get
+            # the same deterministic stimulus; they must match once the
+            # emitter fix (lower_instance per-field output split) lands.
+            lg_sim = work / "lg_sim"
+            rc, out = compile_sim(verilog, verilog_top, lg_sim, "slang")
+            if rc:
+                print(out)
+                return rc
+            prp_dir = work / "prp_emit"
+            rc, out = run([str(LHD), "compile", "--reader", "slang", str(verilog),
+                           "--emit-dir", f"pyrope:{prp_dir}/",
+                           "--workdir", str(work / "w_emit")])
+            if rc:
+                print(out)
+                return rc
+            emitted = sorted(prp_dir.glob("*.prp"))
+            if not emitted:
+                print("no .prp emitted from", verilog)
+                return 1
+            v2_sim = work / "v2_sim"
+            rc, out = compile_sim(emitted, verilog_top, v2_sim)
+            if rc:
+                print(out)
+                return rc
+            for simdir, rundir in ((lg_sim, work / "lg_run"), (v2_sim, work / "v2_run")):
+                rc, out = drive(simdir, verilog_top, rundir)
+                if rc:
+                    print(out)
+                    return rc
+            diffs = compare_dirs(work / "lg_run", work / "v2_run")
+            if diffs:
+                print("SIM v2prp diff:", ",".join(diffs))
+                return 1
+            print("SIM v2prp match")
+            return 0
 
         lg_sim = work / "lg_sim"
         prp_sim = work / "prp_sim"

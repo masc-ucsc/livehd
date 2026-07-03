@@ -38,6 +38,7 @@
 #include "log.hpp"  // livehd::log — `--set <channel>.log=<level>` developer logging
 #include "node_util.hpp"
 #include "pass.hpp"
+#include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "prp2lnast.hpp"
 #include "prp_sim.hpp"  // `lhd sim`: generate C++ test drivers from `test` blocks
 #include "query.hpp"  // pass/lec L1 (lec::prove_equal) for the cross-check path
@@ -356,6 +357,9 @@ void setup_diag(const Options& opts, std::string_view step) {
 
 // Run one registered EPRP method synchronously, stdout captured to a log.
 void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict& labels, Options& opts, Result& res) {
+  // One perfetto slice per pipeline step (`--define profiling=1` builds; a
+  // plain build compiles this away), so the trace timeline reads as the recipe.
+  TRACE_EVENT("pass", perfetto::DynamicString{std::string(method)});
   auto log = next_log_path(opts, method);
   {
     Stdout_to_log redirect(log);
@@ -1744,6 +1748,7 @@ Ir_inputs gather_ir_inputs(const Options& opts, std::string_view cmd) {
 std::vector<std::string> collect_imports(const std::shared_ptr<Lnast>& ln);  // defined below
 
 void discover_imports(Options& opts, Eprp_var& var, size_t n_imports) {
+  TRACE_EVENT("pyrope", "discover_imports");
   auto dir_of = [](std::string_view p) -> std::string {
     auto s = p.rfind('/');
     return s == std::string_view::npos ? std::string(".") : std::string(p.substr(0, s));
@@ -2534,6 +2539,14 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   if (!need_graphs && !emits_need_lnast(opts)) {
     up["toln"] = "0";
   }
+  // lg-only flows: the rewritten LNAST is consumed ONLY by lnast.tolg and then
+  // dropped, so the post-walk DCE marks dead statements for tolg to skip
+  // instead of rebuilding a cleaned staging tree (dce:mark — the rebuild is
+  // the dominant DCE cost on generated-code-scale units). Any LNAST-keeping
+  // flow (pyrope:/ln:/lnast dumps/tool) keeps the rebuild.
+  if (need_graphs && !emits_need_lnast(opts)) {
+    up["dce"] = "mark";
+  }
   merge_sets(opts, "compile.upass", up);
 
   // A user `--set upass.toln=0` keeps each tree's original (post-lnastfmt,
@@ -2737,6 +2750,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     }
     // By construction lib_path == the lg output dir whenever one was
     // declared (tolg/copy targeted it), so saving the library is the emit.
+    TRACE_EVENT("pass", "lg.save");
     livehd::Hhds_graph_library::save(lib_path);
     res.outputs.push_back(lg_out->path);
   }
@@ -3786,6 +3800,7 @@ static void emit_lec_block_progress(std::string_view block, const livehd::lec::Q
 // resolves, so an agent stream-parses the long run. Returns the TOP def's result.
 static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var, Eprp_var& impl_var,
                                                   const std::string&        top_name,
+                                                  hhds::Graph* ref_top_g, hhds::Graph* impl_top_g,
                                                   const livehd::lec::Lec_options& base,
                                                   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
   using livehd::lec::Verdict;
@@ -3803,6 +3818,15 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       impl_by_name[std::string(g->get_name())] = g.get();
     }
   }
+
+  // Per-side tops may DIFFER (--ref-top vs --impl-top; e.g. v2prp LECs the
+  // emitted .v module name against the original Pyrope lambda). The by-name
+  // pairing alone would then never LEC the top pair at all, and an UNKNOWN
+  // top exits 0 under the inconclusive-is-a-warning policy — a silent
+  // vacuous pass. Force-pair the two explicitly-picked TOP graphs under the
+  // ref-top name so the driver always proves/refutes the top itself.
+  ref_by_name[top_name]  = ref_top_g;
+  impl_by_name[top_name] = impl_top_g;
 
   // The LEC-able defs are those present on BOTH sides; children[def] = the child
   // def-NAMES it instantiates (taken from the ref-side Subs, name-matched).
@@ -3913,8 +3937,28 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         // a non-proven child is left OUT of the collapse set -> flattened (descended)
       }
     }
-    auto            t0 = std::chrono::steady_clock::now();
-    auto            r  = livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], o, sub_lib);
+    auto t0 = std::chrono::steady_clock::now();
+    auto r  = livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], o, sub_lib);
+    if (r.verdict == Verdict::Refuted && !coll.empty()) {
+      // A REFUTE under proven-child collapse is an ABSTRACTION verdict: the box
+      // over-approximates the child (free/UF values the real leaf can never
+      // emit, and — for unnamed interchangeable instances — an occurrence-paired
+      // correspondence that may associate different physical instances), so the
+      // counterexample can be spurious. Confirm FLAT (collapse cleared, children
+      // descended) before reporting a fail: flat-Proven is adopted, flat-Unknown
+      // stays inconclusive. A FAIL is then only ever reported from a
+      // counterexample free of proven-child collapse boxes (true blackboxes for
+      // UNRESOLVED defs may remain in the flat run — those correspond
+      // explicitly and gate to inconclusive when one-sided).
+      std::print("lec[hier]: '{}' REFUTED under collapse ({} box def(s)) -> flat confirmation\n", name, coll.size());
+      livehd::lec::Lec_options oflat = o;
+      oflat.collapse.clear();
+      auto rf   = livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], oflat, sub_lib);
+      rf.detail = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
+      rf.elapsed_ms = -1;  // the progress record carries the combined wall-clock below
+      r = std::move(rf);
+    }
     const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
     emit_lec_block_progress(name, r, o, ms);
     if (r.verdict == Verdict::Proven) {
@@ -4103,11 +4147,25 @@ void lec_command(Options& opts, Result& res) {
     // Bottom-up: LEC every def leaves-first under `auto`, collapsing proven
     // children. The driver emits a per-def progress line itself; the TOP def's
     // verdict drives the exit policy below (like the single-design path).
-    r = lec_hierarchical(res, ref_var, impl_var, std::string(ref_g->get_name()), o, sub_lib_ptr);
+    r = lec_hierarchical(res, ref_var, impl_var, std::string(ref_g->get_name()), ref_g.get(), impl_g.get(), o, sub_lib_ptr);
   } else {
     res.recipe_steps.emplace_back(std::format("pass.lec engine:{} solver:{} phase:{}", o.engine, o.solver, o.phase));
-    auto            t0 = std::chrono::steady_clock::now();
-    r                  = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), o, sub_lib_ptr);
+    auto t0 = std::chrono::steady_clock::now();
+    r       = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), o, sub_lib_ptr);
+    if (r.verdict == livehd::lec::Verdict::Refuted && !o.collapse.empty()) {
+      // Same abstraction rule as the hierarchical driver: a REFUTE under a
+      // manual --collapse can be an artifact of the box over-approximation, so
+      // confirm FLAT before letting the exit policy report a fail.
+      std::print("lec: '{}' REFUTED under collapse ({} box def(s)) -> flat confirmation\n", impl_g->get_name(),
+                 o.collapse.size());
+      livehd::lec::Lec_options oflat = o;
+      oflat.collapse.clear();
+      auto rf   = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), oflat, sub_lib_ptr);
+      rf.detail = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
+      rf.elapsed_ms = -1;  // the progress record carries the combined wall-clock below
+      r = std::move(rf);
+    }
     const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
     // Per-block progress (info severity): stream the verdict the moment it resolves.
     emit_lec_block_progress(impl_g->get_name(), r, o, ms);

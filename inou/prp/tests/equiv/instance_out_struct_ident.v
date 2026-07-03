@@ -24,7 +24,11 @@ module icsi_lzc8(
              : '{data: 3'h7, isZero: (in == 8'h0)};
 endmodule
 
-module \instance_out_struct_ident.top (
+// NOTE: the top is deliberately UNDOTTED (not \instance_out_struct_ident.top)
+// so the sim-emission harness can pass it to `--top` under the slang reader
+// (dotted escaped names break --top there) — same convention as
+// sim_lg_atomic_feedback_top.
+module instance_out_struct_ident_top (
   input  [7:0] a,
   output [3:0] r
 );

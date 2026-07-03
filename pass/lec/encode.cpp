@@ -290,6 +290,19 @@ std::string mem_state_key(const Mem_sig& sig, int occ) {
   return std::format("\x01m:{}x{}#{}", sig.size, sig.bits, occ);
 }
 
+// Structural node identity within one design (see encode.hpp). Must stay in
+// lock-step with the encoder's pinkey convention (INVALID -> ROOT), so the
+// query-side box-correspondence builder and the encoder name the same instance
+// identically no matter which walk found it.
+std::string box_node_key(const hhds::Node_class& n) {
+  auto hp = n.get_hier_pos();
+  if (hp == hhds::INVALID) {
+    hp = hhds::ROOT;
+  }
+  return std::to_string(static_cast<uint64_t>(n.get_current_gid())) + ":"
+         + std::to_string(static_cast<int64_t>(hp)) + ":" + std::to_string(static_cast<uint64_t>(n.get_debug_nid()));
+}
+
 Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, std::string_view prefix,
                         const Io_name_map<cvc5::Term>* shared_mems, const Io_name_map<cvc5::Term>* shared_reads) {
   Encoded out;
@@ -314,11 +327,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
            + std::to_string(static_cast<int64_t>(hp)) + ":"
            + std::to_string(static_cast<uint64_t>(p.get_debug_pid()));
   };
-  Io_name_map<int>       bbox_occ;  // blackbox Sub occurrence per def-name (forward_hier order)
+  Io_name_map<int> bbox_occ;  // LEGACY blackbox occurrence per def-name — only when no box_keys_ map is set
   // Two-phase blackbox bookkeeping (keyed by structural nodekey): the assigned
-  // occurrence key once its OUTPUTS are emitted, and the seeded state symbol for a
-  // state-aware box. Outputs emit on the first visit (they need only the state /
-  // nothing); the input-dependent bbin + next-state are emitted in a later pass.
+  // correspondence key once its OUTPUTS are emitted, and the seeded state symbol
+  // for a state-aware box. Outputs emit on the first visit (they need only the
+  // state / nothing); the input-dependent bbin / UF-tie + next-state are emitted
+  // in a later pass.
   absl::flat_hash_map<std::string, std::string> bb_outkey;
   absl::flat_hash_map<std::string, Val>          bb_state_sym;
 
@@ -463,11 +477,14 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // is in the proven-module collapse set. forward_hier(&opaque) then yields them
   // as leaf Subs (not descended), so the blackbox path collapses them instead of
   // flattening — and their internal state is NOT cut here (the box models it).
-  // Found via a flat top-level scan; gids are name-hash stable, so one instance
-  // pins the gid for every (incl. nested) instance of the same def.
+  // Found via a HIERARCHICAL scan (a collapse def instantiated only NESTED
+  // below a flattened parent would be missed by a top-level scan, and the walk
+  // would then descend it while the Sub handler still boxes it — cutting its
+  // internal flops on one side only); gids are name-hash stable, so one
+  // instance pins the gid for every instance of the same def.
   ankerl::unordered_dense::set<hhds::Gid> opaque_subs;
   if (collapse_defs_ != nullptr) {
-    for (auto sn : g->forward_class()) {
+    for (auto sn : g->forward_hier()) {
       if (gu::type_op_of(sn) != Ntype_op::Sub) {
         continue;
       }
@@ -545,9 +562,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         = shared_inputs != nullptr && shared_inputs->find(nm) != shared_inputs->end();
     if (const char* dump_enc = std::getenv("LEC_DUMP_ENC");
         dump_enc != nullptr && (dump_enc[0] == '\0' || nm.find(dump_enc) != std::string::npos)) {
-      std::fprintf(stderr, "[LEC_ENC pfx=%s] flop hier='%s' key='%s' w=%d sgn=%d shared=%d term=%s\n",
+      std::fprintf(stderr, "[LEC_ENC pfx=%s] flop hier='%s' key='%s' w=%d sgn=%d shared=%d xmask=%d term=%s\n",
                    std::string(prefix).c_str(), node.get_hier_name().c_str(), nm.c_str(), w, sgn ? 1 : 0,
-                   was_shared ? 1 : 0, v.term.toString().c_str());
+                   was_shared ? 1 : 0, v.x_mask.isNull() ? 0 : 1, v.term.toString().c_str());
     }
     pin2val[pinkey(qpin)] = v;
     out.inputs[nm]        = v;
@@ -751,14 +768,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // deferred to a later pass; an acyclic graph converges, and a node still stuck
   // after no-progress is a genuine error (a real comb cycle / missing driver).
   absl::flat_hash_set<std::string> done;
-  auto nodekey = [&](const hhds::Node_class& n) -> std::string {
-    auto hp = n.get_hier_pos();
-    if (hp == hhds::INVALID) {
-      hp = hhds::ROOT;
-    }
-    return std::to_string(static_cast<uint64_t>(n.get_current_gid())) + ":"
-           + std::to_string(static_cast<int64_t>(hp)) + ":" + std::to_string(static_cast<uint64_t>(n.get_debug_nid()));
-  };
+  auto nodekey = [](const hhds::Node_class& n) -> std::string { return box_node_key(n); };
   bool progress = true;
   while (progress) {
     progress = false;
@@ -890,28 +900,96 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         continue;
       }
 
-      // ---- BLACKBOX COLLAPSE (two-phase). Key by module name + occurrence
-      // (forward_hier first-visit order), reader-invariant so corresponding
-      // instances align across designs. The OUTPUTS need only the state cut (a
-      // state-aware Moore box) or nothing (a stateless box) — NEVER the current
-      // inputs — so emit them on the FIRST visit, before the inputs resolve. This
-      // breaks a false combinational cycle where a collapsed stage register's
-      // output must be available to resolve its own (stall-fed) input. The
-      // input-dependent bbin compare points + next-state are deferred to a later
-      // pass (synthetic outputs, read by no combinational node, so they block none).
+      // ---- BLACKBOX COLLAPSE (two-phase). The cross-design correspondence key
+      // comes from query.cpp's box-correspondence builder (set_box_keys):
+      // name-first instance pairing with an occurrence fallback, computed ONCE
+      // over both designs so neither traversal order nor declaration order can
+      // mispair interchangeable instances. (Without a map — a bare Encoder
+      // user — fall back to the legacy per-def occurrence counter.) A stateless
+      // collapsed PROVEN leaf takes the pairing-free Comb_box path instead: no
+      // correspondence at all, congruence over shared per-def UFs (see
+      // encode.hpp). The OUTPUTS need only the state cut (a state-aware Moore
+      // box) or nothing (a stateless box) — NEVER the current inputs — so emit
+      // them on the FIRST visit, before the inputs resolve. This breaks a false
+      // combinational cycle where a collapsed stage register's output must be
+      // available to resolve its own (stall-fed) input. The input-dependent
+      // bbin compare points / UF-tie equalities + next-state are deferred to a
+      // later pass (synthetic, read by no combinational node, so they block none).
       std::string      nk = nodekey(node);
       std::string      defname(sub_io->get_name());
       std::string      bk;
       const State_box* sbox = nullptr;
+      const Comb_box*  cbox = nullptr;
+      if (comb_boxes_ != nullptr) {
+        if (auto it = comb_boxes_->find(defname); it != comb_boxes_->end()) {
+          cbox = &it->second;
+        }
+      }
       if (auto okit = bb_outkey.find(nk); okit == bb_outkey.end()) {
-        bk            = defname + "#" + std::to_string(bbox_occ[defname]++);
+        if (box_keys_ != nullptr) {
+          auto kit = box_keys_->find(nk);
+          if (kit == box_keys_->end()) {
+            // The builder walks the same hierarchy with the same blackbox
+            // predicate, so a miss means the walks drifted apart. Degrading
+            // silently (an unshared / mis-keyed box) risks a WRONG verdict in
+            // either direction — fail loudly instead; the engine reports the
+            // encode error as INCONCLUSIVE.
+            return fail("blackbox Sub '" + gu::debug_name(node) + "' (def '" + defname
+                        + "') missing from the box-correspondence map (builder/encoder walk drift)");
+          }
+          bk = kit->second;
+        } else {
+          bk = defname + "#" + std::to_string(bbox_occ[defname]++);  // legacy: encoder-local occurrence order
+        }
         bb_outkey[nk] = bk;
         if (state_boxes_ != nullptr) {
           if (auto it = state_boxes_->find(bk); it != state_boxes_->end()) {
             sbox = &it->second;
           }
         }
-        if (sbox != nullptr) {  // state-aware: outputs are MOORE — UF_out(state).
+        if (cbox != nullptr) {  // pairing-free stateless box: fresh per-instance outputs, tied to UF(inputs) in phase 2
+          for (const auto& e : node.out_edges()) {
+            auto        dp   = e.driver;
+            auto        nit  = out_name.find(dp.get_port_id());
+            std::string port = nit != out_name.end() ? nit->second : std::to_string(dp.get_port_id());
+            // LOCAL width + LOCAL signedness: the Val models the pin this side's
+            // parent actually reads, and downstream fit_to extends by is_signed —
+            // adopting the other side's (union) signedness would model BOTH sides
+            // extending identically and false-PROVE a real sign-vs-zero-extension
+            // divergence downstream of the leaf. The UF codomain stays the union
+            // width; phase 2 fits the application down to this local width.
+            int ow = real_width(dp);
+            if (ow == 0) {
+              ow = 1;
+            }
+            bool osgn = !gu::is_unsign(dp);
+            Val  ov;
+            if (cbox->in_w == 0) {
+              // A no-input leaf is a constant: same def => same value, so the
+              // outputs share ONE per-(def,port) symbol (see Comb_box) — refit
+              // to the local pin width/sign for the same reason as above.
+              if (auto cit = cbox->out_const.find(port); cit != cbox->out_const.end()) {
+                ov        = Val{fit(cit->second, ow), ow, osgn};
+              } else {
+                ov = Val{tm_.mkConst(bv(ow), std::string(prefix) + "cb:" + bk + ":" + port), ow, osgn};  // unshared (sound)
+              }
+            } else {
+              // NOT shared across the designs: sharing without the bbin input
+              // obligations would be an unjustified equality. The phase-2 UF tie
+              // provides the (pairing-free) congruence instead.
+              // NO x_mask is minted here even under lec.gold_x=ignore: a box is
+              // X-opaque, and smearing the outputs whenever ANY input might be X
+              // makes every downstream compare vacuous — a false PROVEN that no
+              // fallback ever re-examines (the flat confirmation fires only on
+              // REFUTED). Leaving the mask empty is the PASS-sound choice: an X
+              // reaching the box at worst makes the UF applications differ, and
+              // that spurious refute IS flat-confirmed (the flat encode carries
+              // the precise per-cone X planes).
+              ov = Val{tm_.mkConst(bv(ow), std::string(prefix) + "cb:" + bk + ":" + port), ow, osgn};
+            }
+            pin2val[pinkey(dp)] = ov;
+          }
+        } else if (sbox != nullptr) {  // state-aware: outputs are MOORE — UF_out(state).
           Val S = seed_state(std::string("\x01") + "leafstate:" + bk, sbox->state_w, false);
           bb_state_sym[nk] = S;
           for (const auto& e : node.out_edges()) {
@@ -923,7 +1001,13 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               return fail("state box for '" + defname + "' has no output UF for port '" + port + "'");
             }
             int ow = sbox->out_w.count(port) ? sbox->out_w.at(port) : std::max(1, real_width(dp));
-            pin2val[pinkey(dp)] = Val{tm_.mkTerm(Kind::APPLY_UF, {ofn->second, S.term}), ow, !gu::is_unsign(dp)};
+            Val bov{tm_.mkTerm(Kind::APPLY_UF, {ofn->second, S.term}), ow, !gu::is_unsign(dp)};
+            // Deliberately NO x_mask (see the Comb_box note above): smearing a
+            // Moore output whenever the abstract state might hold an X made every
+            // downstream compare vacuous — a false PROVEN with no fallback. An X
+            // divergence at worst refutes spuriously, which the driver's flat
+            // confirmation re-solves with the precise per-cone X planes.
+            pin2val[pinkey(dp)] = bov;
           }
         } else {  // stateless: outputs are shared free symbols.
           for (const auto& e : node.out_edges()) {
@@ -974,24 +1058,114 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // Compare only the bits the blackbox port actually receives (a wider driver
         // is truncated by the connection — see the SRAM addr note).
         if (auto pit = in_pw.find(pid); pit != in_pw.end() && pit->second > 0 && pit->second < v.width) {
-          v = Val{fit(v, pit->second), pit->second, v.is_signed};
+          Val tv{fit(v, pit->second), pit->second, v.is_signed};
+          tv.x_mask = fit_x_mask_to(tm_, v, pit->second);  // keep the X plane through the truncation
+          v         = tv;
         }
         bb_in_by_port[port] = v;
       }
       if (!all_in) {
         continue;  // inputs not ready; outputs already emitted, so nothing is blocked
       }
-      for (const auto& [port, v] : bb_in_by_port) {  // inputs = miter compare points
-        out.outputs[std::string("\x02") + "bbin:" + bk + ":" + port] = v;
+      if (cbox != nullptr) {
+        // Pairing-free stateless box, phase 2: tie the phase-1 fresh output
+        // symbols to UF_def_port(NAME-SORTED input concat). Congruence over the
+        // shared per-def UF replaces the bbin obligations entirely — equal
+        // inputs anywhere yield equal outputs, no instance pairing to get
+        // wrong. (in_w == 0: the outputs are already the shared per-def
+        // constants; nothing to tie.)
+        if (cbox->in_w > 0) {
+          // A connected input the layout does not cover would silently narrow
+          // the UF domain — the leaf would be modeled as INDEPENDENT of that
+          // input (an obligation dropped with no bbin backstop). The builder
+          // unions declared ports with every connected pid-fallback port, so a
+          // miss here is walk drift: fail loudly (sound Unknown).
+          for (const auto& [port, v] : bb_in_by_port) {
+            bool covered = false;
+            for (const auto& [pname, pw] : cbox->in_ports) {
+              if (pname == port) {
+                covered = true;
+                break;
+              }
+            }
+            if (!covered) {
+              return fail("comb box for '" + defname + "' has a connected input '" + port
+                          + "' outside its UF input layout (builder/encoder drift)");
+            }
+          }
+          Term in_concat;
+          for (const auto& [port, piece_w] : cbox->in_ports) {
+            Val pv;
+            if (auto it2 = bb_in_by_port.find(port); it2 != bb_in_by_port.end()) {
+              pv = it2->second;
+            } else {
+              pv = Val{bv_const(tm_, piece_w, 0), piece_w, false};  // unconnected port -> 0
+            }
+            Term piece = fit(pv, piece_w);
+            in_concat  = in_concat.isNull() ? piece : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {in_concat, piece});
+          }
+          for (const auto& e : node.out_edges()) {
+            auto        dp   = e.driver;
+            auto        nit  = out_name.find(dp.get_port_id());
+            std::string port = nit != out_name.end() ? nit->second : std::to_string(dp.get_port_id());
+            auto        vit  = pin2val.find(pinkey(dp));
+            if (vit == pin2val.end()) {
+              continue;  // no phase-1 value (unreachable: phase 1 seeds every out edge)
+            }
+            auto ofn = cbox->out_fn.find(port);
+            if (ofn == cbox->out_fn.end()) {
+              return fail("comb box for '" + defname + "' has no output UF for port '" + port + "'");
+            }
+            // The UF codomain is the cross-design union width; the phase-1
+            // symbol is this side's LOCAL pin width. Fit the application down
+            // to the local width (connection-truncation semantics).
+            int  uf_w   = cbox->out_w.count(port) ? cbox->out_w.at(port) : vit->second.width;
+            bool uf_sgn = cbox->out_sgn.count(port) ? cbox->out_sgn.at(port) : vit->second.is_signed;
+            Val  app{tm_.mkTerm(Kind::APPLY_UF, {ofn->second, in_concat}), uf_w, uf_sgn};
+            out.equalities.emplace_back(vit->second.term, fit(app, vit->second.width));
+          }
+        }
+        done.insert(nk);
+        progress = true;
+        continue;
       }
+      for (const auto& [port, v] : bb_in_by_port) {  // inputs = miter compare points
+        if (const char* de = std::getenv("LEC_DUMP_ENC"); de != nullptr && std::string_view(de) == "bbin") {
+          std::string ts = v.term.toString();
+          if (ts.size() > 700) {
+            ts = ts.substr(0, 200) + " ...LEAVES... " + ts.substr(ts.size() - 500);
+          }
+          std::fprintf(stderr, "[LEC_ENC pfx=%s] bbin %s:%s w=%d xmask=%d term=%s\n", std::string(prefix).c_str(),
+                       bk.c_str(), port.c_str(), v.width, v.x_mask.isNull() ? 0 : 1, ts.c_str());
+        }
+        // The bbin points are OBLIGATIONS (they justify the shared output
+        // symbols), not golden outputs: excluding ref-X bits from them (the
+        // generic gold_x=ignore compare rule) would let the inputs differ on
+        // those bits while the box outputs stay forced equal — a false-PASS
+        // channel. Strip the X plane so the obligation compares full values;
+        // an X-driven divergence at worst refutes, which is flat-confirmed.
+        Val ov2 = v;
+        ov2.x_mask = cvc5::Term{};
+        out.outputs[std::string("\x02") + "bbin:" + bk + ":" + port] = ov2;
+      }
+      // Presence marker: a PAIRED box (state-aware or true blackbox) with no
+      // connected inputs emits no bbin obligations, so an instance-count
+      // mismatch would otherwise be invisible to the unmatched-correspondence
+      // gate — its free/shared outputs could then refute (or vacuously prove)
+      // with the correspondence looking complete. The marker is a constant on
+      // both sides: two-sided it compares trivially equal (the miters skip it
+      // as a diff), one-sided it lands in unmatched_* and gates the verdict.
+      out.outputs[std::string("\x02") + "bbox:" + bk] = Val{bv_const(tm_, 1, 0), 1, false};
       if (sbox != nullptr) {
         // next-state = UF_next(inputs, state): the state TRANSITION depends on the
         // inputs, but it feeds the state cut a cycle later (no combinational loop).
+        // The concat follows the box's NAME-SORTED cross-design layout — NOT this
+        // side's decl order, which can be permuted between front-ends (see
+        // State_box::in_ports); a port this instance does not drive contributes 0.
         Term in_concat;
-        for (const auto& d : sub_io->get_input_pin_decls()) {
-          int piece_w = std::max(1, static_cast<int>(d.bits));
+        for (const auto& [pname, piece_w] : sbox->in_ports) {
           Val pv;
-          if (auto it = bb_in_by_port.find(d.name); it != bb_in_by_port.end()) {
+          if (auto it = bb_in_by_port.find(pname); it != bb_in_by_port.end()) {
             pv = it->second;
           } else {
             pv = Val{bv_const(tm_, piece_w, 0), piece_w, false};  // unconnected port -> 0
@@ -1004,7 +1178,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           next_args.push_back(in_concat);
         }
         next_args.push_back(bb_state_sym[nk].term);
-        out.outputs[std::string("\x01") + "nxt:\x01leafstate:" + bk] = Val{tm_.mkTerm(Kind::APPLY_UF, next_args), sbox->state_w, false};
+        // Deliberately NO x_mask on the next-state (see the Comb_box phase-1
+        // note): the old "any X input/state smears the whole next-state
+        // unknown" rule became sticky through the BMC state threading and made
+        // every later compare of the box's cone vacuous — a false PROVEN with
+        // no fallback. An X reaching an opaque box now at worst diverges the
+        // UF applications, and that spurious refute is flat-confirmed by the
+        // driver with the precise per-cone X planes.
+        Val nsv{tm_.mkTerm(Kind::APPLY_UF, next_args), sbox->state_w, false};
+        out.outputs[std::string("\x01") + "nxt:\x01leafstate:" + bk] = nsv;
       }
       done.insert(nk);
       progress = true;
@@ -1710,8 +1892,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           ts.resize(4000);
           ts += "...<truncated>";
         }
-        std::fprintf(stderr, "[LEC_ENC pfx=%s] nxt '%s' stage=%d/%d w=%d nval=%s\n", std::string(prefix).c_str(),
-                     key.c_str(), k, depth, w, ts.c_str());
+        std::fprintf(stderr, "[LEC_ENC pfx=%s] nxt '%s' stage=%d/%d w=%d xmask=%d nval=%s\n", std::string(prefix).c_str(),
+                     key.c_str(), k, depth, w, nv.x_mask.isNull() ? 0 : 1, ts.c_str());
       }
     }
   }

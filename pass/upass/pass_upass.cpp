@@ -18,6 +18,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
 #include "log.hpp"                // LHD_LOG developer tracing on the "upass" channel
+#include "perf_tracing.hpp"       // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
 #include "upass_constprop.hpp"
@@ -86,7 +87,10 @@ void Pass_upass::setup() {
   Eprp_method m1("pass.upass", "lnast micropass (upass) controller", &Pass_upass::work);
   m1.add_label_optional("verifier", "enable lnast verifier upass", "true");
   m1.add_label_optional("constprop", "enable constant propagation upass", "true");
-  m1.add_label_optional("coalescer", "enable deferred-emit / DSE coalescer upass", "true");
+  m1.add_label_optional("coalescer",
+                        "enable deferred-emit / DSE coalescer upass (auto = on, but parking self-disables on "
+                        "verilog-origin units where DSE never fires)",
+                        "auto");
   m1.add_label_optional("attributes", "enable Pyrope attribute upass (sticky propagation, comptime checks)", "true");
   m1.add_label_optional("bitwidth",
                         "enable LNAST bitwidth range inference (publishes max/min for lnast_to_lgraph; see upass/upass.md §2)",
@@ -113,6 +117,11 @@ void Pass_upass::setup() {
                         "Pair toln:0 with `--emit-dir pyrope:` to re-emit Pyrope from the original pre-upass "
                         "inou.slang/inou.prp LNAST. Default on.",
                         "true");
+  m1.add_label_optional("dce",
+                        "post-walk DCE mode: `rebuild` (default) materializes a cleaned staging tree; `mark` records "
+                        "the dead statements on the Lnast for lnast.tolg to skip — no rebuild copy. The kernel sets "
+                        "mark for lg-only flows (nothing downstream keeps the LNAST).",
+                        "rebuild");
   m1.add_label_optional("reset_style",
                         "elaboration flag: sync|async reset wiring for implicit-reset flops (default sync — "
                         "target-dependent, FPGA-typical). A per-reg `:[sync=…]` attr beats the flag.",
@@ -185,6 +194,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   capture_opt("coalescer");
   capture_opt("import_defer");
   capture_opt("inline");  // compile.upass.inline=false -> runner emits comb instances instead of inlining
+  capture_opt("dce");     // dce:mark -> runner skips the post-DCE staging rebuild (lg-only flows)
 
   if (!upass_order.empty()) {
     return;
@@ -401,6 +411,7 @@ void Pass_upass::work(Eprp_var& var) {
     if (ln->is_pre_elaborated()) {
       continue;  // a loaded import is already detupled + lambda-split
     }
+    TRACE_EVENT("pass", "upass.detuple_split", "unit", std::string(ln->get_top_module_name()));
     // Excerpt provider for any diagnostic emitted while this unit is split.
     livehd::diag::Locator_scope diag_scope(&ln->source_locator());
     // Lower tuple-typed memory/var declarations into per-field scalar leaves
@@ -428,6 +439,7 @@ void Pass_upass::work(Eprp_var& var) {
       if (ln->is_pre_elaborated()) {
         continue;  // io_meta restored from the ln: manifest; body already SSA'd
       }
+      TRACE_EVENT("pass", "upass.ssa", "unit", std::string(ln->get_top_module_name()));
       uPass_ssa::run(ln);
     }
   }
@@ -469,6 +481,7 @@ void Pass_upass::work(Eprp_var& var) {
       continue;
     }
 
+    TRACE_EVENT("pass", "upass.runner", "unit", std::string(ln->get_top_module_name()));
     // Excerpt provider: diagnostics emitted while this unit is walked render
     // their caret excerpt through the unit's locator (hash-validated bytes).
     livehd::diag::Locator_scope diag_scope(&ln->source_locator());

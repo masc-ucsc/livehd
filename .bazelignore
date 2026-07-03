@@ -3,4 +3,5 @@ cov
 samples
 sim_alu
 sim_cpu
-tmp
+tmp*
+verif_*

@@ -570,7 +570,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 
   // Proven-module collapse set (lec.collapse): def-NAMES forced to the blackbox
   // path (case-sensitive). Applied identically by the encoder (skip flatten)
-  // and build_shared_bbox below (pre-build the box's shared output symbols).
+  // and the box-correspondence builder below (pre-build the boxes' shared symbols).
   Io_name_map<bool> collapse_defs;
   for (const auto& d : opts.collapse) {
     if (!d.empty()) {
@@ -582,13 +582,15 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   cvc5::TermManager tm;
   cvc5::Solver      solver(tm);
 
-  // Subnode Gids of collapsed leaves (top-level), so the inductive/BMC flop
-  // collection below can skip descending into them (their state is the box's, not
-  // a set of internal flop cuts). gids are name-hash stable across designs.
+  // Subnode Gids of collapsed leaves, so the inductive/BMC flop collection
+  // below can skip descending into them (their state is the box's, not a set of
+  // internal flop cuts). Scanned HIERARCHICALLY (a nested-only collapse
+  // instance would be missed by a top-level scan — the encoder's own opaque
+  // scan matches). gids are name-hash stable across designs.
   ankerl::unordered_dense::set<hhds::Gid> collapse_gids;
   if (collapse_ptr != nullptr) {
     for (auto* g : {ref, impl}) {
-      for (auto node : g->forward_class()) {
+      for (auto node : g->forward_hier()) {
         if (graph_util::type_op_of(node) != Ntype_op::Sub) {
           continue;
         }
@@ -601,48 +603,236 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   }
   const ankerl::unordered_dense::set<hhds::Gid>* collapse_gids_ptr = collapse_gids.empty() ? nullptr : &collapse_gids;
 
-  // Shared state-aware boxes for STATEFUL collapsed leaves (sequential collapse).
-  // For each collapsed leaf instance whose def has state, build the shared UF
-  // symbols (out per port + next) over (concatenated-inputs, state). Both designs
-  // share these, so equal inputs + equal corresponding state => equal outputs +
-  // next-state. Keyed defname#occ to align with the encoder's blackbox occurrence.
-  absl::flat_hash_map<std::string, State_box> state_boxes;
-  if (collapse_ptr != nullptr) {
-    auto add_boxes = [&](hhds::Graph* g) {
-      Io_name_map<int> occ;
-      for (auto node : g->forward_class()) {
-        if (graph_util::type_op_of(node) != Ntype_op::Sub) {
-          continue;
-        }
-        auto        sio = node.get_subnode_io();
-        std::string defname(sio->get_name());
-        if (collapse_ptr->count(defname) == 0) {
-          continue;
-        }
-        std::string bk = defname + "#" + std::to_string(occ[defname]++);
-        if (state_boxes.count(bk)) {
-          continue;
-        }
-        auto def      = node.get_subnode_graph();
-        bool stateful = false;
-        if (def != nullptr) {
-          for (auto dn : def->forward_class()) {
+  // ── Box correspondence (collapsed / blackbox Sub instances) ────────────────
+  // ONE hierarchical walk per design enumerates every Sub the encoder will treat
+  // as a box — the encoder's own scope (collapsed leaves opaque) and its exact
+  // blackbox predicate — and records it under its structural node key. Products:
+  //   * ref_box_keys / impl_box_keys: box_node_key -> cross-design correspondence
+  //     key "<defname>#<tag>". tag is "n:<canon instance hier-name>" when that
+  //     name occurs exactly ONCE on EACH side (name-first pairing: a Verilog
+  //     instance name and a Pyrope ::[name=] attr both survive their front-ends
+  //     onto the Sub node), else "o<idx>" over the unnamed/unmatched remainder
+  //     in walk order (the legacy occurrence fallback, now only for the
+  //     instances a name cannot pair). A key present on ONE side only (count
+  //     mismatch) yields one-sided obligations, which the miters gate to an
+  //     incomplete correspondence — never a Proven/Refuted.
+  //   * comb_boxes: pairing-free per-def UFs for STATELESS collapsed leaves
+  //     (see Comb_box in encode.hpp — no correspondence to get wrong).
+  //   * state_boxes: shared UF symbols per STATEFUL collapsed leaf instance,
+  //     keyed by the correspondence key.
+  //   * shared_bbox: shared output symbols for TRUE blackboxes (unresolved defs).
+  // Building all of these from one enumeration retires the old three-counter
+  // scheme (encoder forward_hier vs two forward_class builders), whose drift on
+  // nested boxes silently degraded a stateful box to a stateless constant one —
+  // a false-PASS hazard. The encoder now hard-errors on a key it cannot find.
+  struct Box_inst {
+    std::string      nk;     // box_node_key (per-design structural identity)
+    std::string      cname;  // canonicalized instance hier-name
+    hhds::Node_class node;
+    bool             in_ref;
+  };
+  absl::flat_hash_map<std::string, std::vector<Box_inst>> boxes_by_def;
+  std::vector<std::string>                                box_defnames;  // insertion order (walk-deterministic)
+  absl::flat_hash_map<std::string, bool>                  def_stateful;  // collapse defs: ANY resolvable body has state?
+  absl::flat_hash_map<std::string, bool>                  def_has_body;  // collapse defs: ANY instance resolves a body?
+  absl::flat_hash_set<const void*>                        scanned_bodies;  // def graphs already state-scanned
+  // hhds Hier_index uniqueness is only guaranteed within ONE level of subnode
+  // instantiation: two instances of the same grand-subgraph below a
+  // multiply-instantiated middle def collide on gid:hier_pos:nid. A collision
+  // among BOX instances would silently alias their keys/symbols and drop one
+  // instance's obligations, so detect it and bail to a sound INCONCLUSIVE.
+  absl::flat_hash_set<std::string> seen_ref_nk, seen_impl_nk;
+  bool                             nk_collision = false;
+  auto scan_boxes = [&](hhds::Graph* g, bool in_ref) {
+    hhds::Hier_opaque_scope sc(collapse_gids_ptr);  // mirror the encoder's ambient opacity
+    for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+      if (graph_util::type_op_of(node) != Ntype_op::Sub || !node.has_out_edges()) {
+        continue;  // the encoder skips consumer-less nodes before its box path
+      }
+      auto sio = node.get_subnode_io();
+      if (sio == nullptr) {
+        continue;
+      }
+      std::string defname(sio->get_name());
+      const bool  force_collapse = collapse_ptr != nullptr && collapse_ptr->count(defname) > 0;
+      // Mirror encode.cpp exactly: a sub with a body is DESCENDED (not a box)
+      // unless force-collapsed; a sub_lib-resolvable combinational def is
+      // flattened inline (not a box); everything else is a box.
+      if (node.get_subnode_graph() != nullptr && !force_collapse) {
+        continue;
+      }
+      if (!force_collapse && sub_lib != nullptr) {
+        if (auto git = sub_lib->find(node.get_subnode_gid()); git != sub_lib->end() && git->second != nullptr) {
+          bool lib_stateful = false;
+          for (auto dn : git->second->forward_class()) {
             auto dop = graph_util::type_op_of(dn);
             if (dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Latch || dop == Ntype_op::Memory) {
-              stateful = true;
+              lib_stateful = true;
               break;
             }
           }
+          if (!lib_stateful) {
+            continue;  // flattened inline by the encoder
+          }
         }
-        if (!stateful) {
-          continue;  // combinational leaf -> the stateless shared-symbol box suffices
+      }
+      // Classification accumulates as an OR over ALL instances on BOTH sides:
+      // pinning it to the first-scanned instance (whose body may be null while
+      // the other side resolves a STATEFUL body) would route a stateful def to
+      // the time-frozen shared-symbol blackbox — the stateful-degraded-to-
+      // constant false-PASS this builder exists to retire.
+      if (force_collapse) {
+        if (auto def = node.get_subnode_graph(); def != nullptr) {
+          def_has_body[defname] = true;
+          if (scanned_bodies.insert(def.get()).second) {
+            for (auto dn : def->forward_class()) {
+              auto dop = graph_util::type_op_of(dn);
+              if (dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Latch || dop == Ntype_op::Memory) {
+                def_stateful[defname] = true;
+                break;
+              }
+            }
+          }
         }
-        State_box box;
+      }
+      if (boxes_by_def.find(defname) == boxes_by_def.end()) {
+        box_defnames.push_back(defname);
+      }
+      std::string nk = box_node_key(node);
+      if (!(in_ref ? seen_ref_nk : seen_impl_nk).insert(nk).second) {
+        nk_collision = true;
+      }
+      boxes_by_def[defname].push_back(Box_inst{std::move(nk), canon_flop_name(node.get_hier_name()), node, in_ref});
+    }
+  };
+  scan_boxes(ref, true);
+  scan_boxes(impl, false);
+  if (nk_collision) {
+    Query_result r0;
+    r0.verdict = Verdict::Unknown;
+    r0.engine  = opts.engine;
+    r0.detail  = "box-correspondence: duplicate structural node key among box instances (hhds Hier_index collides for a "
+                 "grand-subgraph below a multiply-instantiated middle def) — instance identity is ambiguous, so neither a "
+                 "proof nor a refutation would be trustworthy; prove/collapse the middle def first";
+    return r0;
+  }
+
+  // Name-first pairing per def: a canon instance name unique on BOTH sides is
+  // the tag; the remainder pairs by walk-order occurrence.
+  Io_name_map<std::string> ref_box_keys, impl_box_keys;
+  for (const auto& defname : box_defnames) {
+    const auto&      insts = boxes_by_def[defname];
+    Io_name_map<int> ref_cnt, impl_cnt;
+    for (const auto& bi : insts) {
+      (bi.in_ref ? ref_cnt : impl_cnt)[bi.cname]++;
+    }
+    int ref_res = 0, impl_res = 0;
+    for (const auto& bi : insts) {
+      const bool  named = ref_cnt[bi.cname] == 1 && impl_cnt[bi.cname] == 1;
+      std::string tag   = named ? ("n:" + bi.cname) : ("o" + std::to_string(bi.in_ref ? ref_res++ : impl_res++));
+      (bi.in_ref ? ref_box_keys : impl_box_keys)[bi.nk] = defname + "#" + tag;
+    }
+  }
+
+  absl::flat_hash_map<std::string, State_box> state_boxes;
+  absl::flat_hash_map<std::string, Comb_box>  comb_boxes;
+  Io_name_map<Val>                            shared_bbox;
+  {
+    Io_name_map<int>  bw;   // true-blackbox "key:port" -> max real width across designs
+    Io_name_map<bool> bsg;  // "key:port" -> signedness of the widest side
+    auto out_port_name = [](const std::shared_ptr<hhds::GraphIO>& sio, const hhds::Pin_class& dp) -> std::string {
+      for (const auto& d : sio->get_output_pin_decls()) {
+        if (sio->get_output_port_id(d.name) == dp.get_port_id()) {
+          return d.name;
+        }
+      }
+      return std::to_string(dp.get_port_id());
+    };
+    // NAME-SORTED UF input layout for a box def, unioned across all instances
+    // on BOTH designs. Per port the width is max(declared bits, DRIVEN real
+    // width): a 0-bit (unknown-width) decl must not narrow the slot — the
+    // encoder feeds the untruncated driver value, and a 1-bit slot would
+    // truncate it to its LSB, letting two genuinely different inputs collide in
+    // the UF domain (a false PROVEN with no bbin backstop on the comb path).
+    // CONNECTED ports with no IO decl (the encoder's pid-fallback names) are
+    // included too — dropping them would model the leaf as independent of a
+    // real input.
+    auto build_in_ports = [&](const std::vector<Box_inst>& insts_) {
+      Io_name_map<int> in_pw;
+      for (const auto& bi : insts_) {
+        auto                                             sio = bi.node.get_subnode_io();
+        absl::flat_hash_map<hhds::Port_id, std::string>  in_name;
         for (const auto& d : sio->get_input_pin_decls()) {
-          box.in_w += std::max(1, static_cast<int>(d.bits));
+          in_name[sio->get_input_port_id(d.name)] = d.name;
+          int w = static_cast<int>(d.bits);
+          if (auto it = in_pw.find(d.name); it == in_pw.end() || w > it->second) {
+            in_pw[d.name] = w;
+          }
         }
-        box.state_w = 64;  // abstract state width (the same for both designs -> sound)
-        cvc5::Sort bv_state = tm.mkBitVectorSort(static_cast<uint32_t>(box.state_w));
+        for (const auto& e : bi.node.inp_edges()) {
+          auto        pid  = e.sink.get_port_id();
+          auto        nit  = in_name.find(pid);
+          std::string port = nit != in_name.end() ? nit->second : std::to_string(pid);
+          int         w    = real_width(e.driver);
+          if (auto it = in_pw.find(port); it == in_pw.end() || w > it->second) {
+            in_pw[port] = w;
+          }
+        }
+      }
+      std::vector<std::string> pnames;
+      pnames.reserve(in_pw.size());
+      for (const auto& [n, w] : in_pw) {
+        pnames.push_back(n);
+      }
+      std::sort(pnames.begin(), pnames.end());  // identical layout on both sides
+      std::pair<std::vector<std::pair<std::string, int>>, int> out{{}, 0};
+      for (const auto& n : pnames) {
+        int w = std::max(1, in_pw[n]);
+        out.first.emplace_back(n, w);
+        out.second += w;
+      }
+      return out;
+    };
+    for (const auto& defname : box_defnames) {
+      const auto& insts          = boxes_by_def[defname];
+      const bool  collapsed      = collapse_ptr != nullptr && collapse_ptr->count(defname) > 0;
+      const bool  body_resolved  = def_has_body.count(defname) > 0;
+      if (collapsed && body_resolved && !def_stateful[defname]) {
+        // STATELESS collapsed leaf -> pairing-free per-def UF box (Comb_box).
+        Comb_box box;
+        for (const auto& bi : insts) {
+          auto sio = bi.node.get_subnode_io();
+          for (const auto& e : bi.node.out_edges()) {
+            auto        dp   = e.driver;
+            std::string port = out_port_name(sio, dp);
+            int         w    = real_width(dp);
+            if (w == 0) {
+              w = 1;
+            }
+            if (auto it = box.out_w.find(port); it == box.out_w.end() || w > it->second) {
+              box.out_w[port]   = w;
+              box.out_sgn[port] = !graph_util::is_unsign(dp);
+            }
+          }
+        }
+        std::tie(box.in_ports, box.in_w) = build_in_ports(insts);
+        if (box.in_w > 0) {
+          cvc5::Sort dom = tm.mkBitVectorSort(static_cast<uint32_t>(box.in_w));
+          for (const auto& [port, ow] : box.out_w) {
+            box.out_fn[port] = tm.mkConst(tm.mkFunctionSort({dom}, tm.mkBitVectorSort(static_cast<uint32_t>(ow))),
+                                          "uf_cb:" + defname + ":" + port);
+          }
+        } else {  // no-input leaf = a constant: one shared symbol per (def, port)
+          for (const auto& [port, ow] : box.out_w) {
+            box.out_const[port]
+                = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(ow)), "cb0:" + defname + ":" + port), ow, box.out_sgn[port]};
+          }
+        }
+        comb_boxes[defname] = std::move(box);
+        continue;
+      }
+      if (collapsed && body_resolved && def_stateful[defname]) {
+        // STATEFUL collapsed leaf -> shared state-aware box per instance pair.
         // Outputs are MOORE — UF_out(state) ONLY, not (inputs, state). A Mealy box
         // (output depends on the current input) adds a combinational input->output
         // path through the leaf; in a pipeline a stage register's q feeds glue that
@@ -652,30 +842,88 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         // UF_out + state; divergent leaf inputs are still caught by the bbin compare
         // points). The next-state transition keeps its (inputs, state) dependence —
         // it feeds the state cut a cycle later, never a combinational loop.
-        for (const auto& d : sio->get_output_pin_decls()) {
-          int ow             = std::max(1, static_cast<int>(d.bits));
-          box.out_w[d.name]  = ow;
-          box.out_fn[d.name] = tm.mkConst(tm.mkFunctionSort({bv_state}, tm.mkBitVectorSort(static_cast<uint32_t>(ow))),
-                                          "uf_out:" + bk + ":" + d.name);
+        // Per-DEF io layout, unioned across BOTH designs (max width per port,
+        // NAME-SORTED inputs — see build_in_ports) so every instance pair
+        // applies the shared UFs to an identically-laid-out concat
+        // (State_box::in_ports). Outputs union the decls with the actually
+        // driven pins (an undeclared output would otherwise miss its UF and
+        // gratuitously fail the encode).
+        Io_name_map<int> out_pw;
+        for (const auto& bi : insts) {
+          auto sio = bi.node.get_subnode_io();
+          for (const auto& d : sio->get_output_pin_decls()) {
+            int w = std::max(1, static_cast<int>(d.bits));
+            if (auto it = out_pw.find(d.name); it == out_pw.end() || w > it->second) {
+              out_pw[d.name] = w;
+            }
+          }
+          for (const auto& e : bi.node.out_edges()) {
+            auto        dp   = e.driver;
+            std::string port = out_port_name(sio, dp);
+            int         w    = std::max(1, real_width(dp));
+            if (auto it = out_pw.find(port); it == out_pw.end() || w > it->second) {
+              out_pw[port] = w;
+            }
+          }
         }
-        std::vector<cvc5::Sort> next_dom;  // next_state = UF_next(inputs, state)
-        if (box.in_w > 0) {
-          next_dom.push_back(tm.mkBitVectorSort(static_cast<uint32_t>(box.in_w)));
+        auto [in_ports, in_w] = build_in_ports(insts);
+        for (const auto& bi : insts) {
+          const std::string& bk = (bi.in_ref ? ref_box_keys : impl_box_keys).at(bi.nk);
+          if (state_boxes.count(bk)) {
+            continue;  // the other design's corresponding instance built it (shared UFs)
+          }
+          State_box box;
+          box.in_ports        = in_ports;
+          box.in_w            = in_w;
+          box.state_w         = 64;  // abstract state width (the same for both designs -> sound)
+          cvc5::Sort bv_state = tm.mkBitVectorSort(static_cast<uint32_t>(box.state_w));
+          for (const auto& [pname, ow] : out_pw) {
+            box.out_w[pname]  = ow;
+            box.out_fn[pname] = tm.mkConst(tm.mkFunctionSort({bv_state}, tm.mkBitVectorSort(static_cast<uint32_t>(ow))),
+                                           "uf_out:" + bk + ":" + pname);
+          }
+          std::vector<cvc5::Sort> next_dom;  // next_state = UF_next(inputs, state)
+          if (box.in_w > 0) {
+            next_dom.push_back(tm.mkBitVectorSort(static_cast<uint32_t>(box.in_w)));
+          }
+          next_dom.push_back(bv_state);
+          box.next_fn     = tm.mkConst(tm.mkFunctionSort(next_dom, bv_state), "uf_next:" + bk);
+          state_boxes[bk] = std::move(box);
         }
-        next_dom.push_back(bv_state);
-        box.next_fn = tm.mkConst(tm.mkFunctionSort(next_dom, bv_state), "uf_next:" + bk);
-        state_boxes[bk] = std::move(box);
+        continue;
       }
-    };
-    add_boxes(ref);
-    add_boxes(impl);
+      // TRUE blackbox (unresolved def, or a collapse def with no body): shared
+      // output symbols per correspondence key, at the max width across designs.
+      for (const auto& bi : insts) {
+        const std::string& bk  = (bi.in_ref ? ref_box_keys : impl_box_keys).at(bi.nk);
+        auto               sio = bi.node.get_subnode_io();
+        for (const auto& e : bi.node.out_edges()) {
+          auto        dp   = e.driver;
+          std::string port = out_port_name(sio, dp);
+          std::string key  = bk + ":" + port;
+          int         w    = real_width(dp);
+          if (w == 0) {
+            w = 1;
+          }
+          if (auto it = bw.find(key); it == bw.end() || w > it->second) {
+            bw[key]  = w;
+            bsg[key] = !graph_util::is_unsign(dp);
+          }
+        }
+      }
+    }
+    for (const auto& [key, w] : bw) {
+      shared_bbox[key] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), "bb:" + key), w, bsg[key]};
+    }
   }
   const auto* state_boxes_ptr = state_boxes.empty() ? nullptr : &state_boxes;
+  const auto* comb_boxes_ptr  = comb_boxes.empty() ? nullptr : &comb_boxes;
 
-  // A stateful collapse adds uninterpreted functions; widen the logic to include
-  // UF (and keep arrays for the memory cut). The eager internal bit-blaster has
-  // no UF/array theory, so a UF query keeps the default solver (below).
-  solver.setLogic(state_boxes_ptr != nullptr ? "QF_AUFBV" : "QF_ABV");  // BV + arrays (+UF)
+  // A stateful or stateless collapse adds uninterpreted functions; widen the
+  // logic to include UF (and keep arrays for the memory cut). The eager internal
+  // bit-blaster has no UF/array theory, so a UF query keeps the default solver
+  // (below).
+  solver.setLogic(state_boxes_ptr != nullptr || comb_boxes_ptr != nullptr ? "QF_AUFBV" : "QF_ABV");  // BV + arrays (+UF)
 
   // Per-checkSat wall-clock bound (lec.timeout seconds; 0 = unbounded). Hard
   // nonlinear miters (a chain of two multiplies — associativity, distributivity,
@@ -708,7 +956,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       break;
     }
   }
-  if (!has_mem && state_boxes_ptr == nullptr) {
+  if (!has_mem && state_boxes_ptr == nullptr && comb_boxes_ptr == nullptr) {
     solver.setOption("bv-solver", "bitblast-internal");  // UF/array queries keep the default solver
   }
   if (opts.witness) {
@@ -745,74 +993,6 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     return sm;
   };
 
-  // Shared output symbols for BLACKBOX Sub instances (missing/empty defs). Each
-  // blackbox output becomes one free symbol SHARED across both designs, keyed
-  // "<defname>#<occ>:<port>" (matches the encoder). Built at the max output width
-  // seen across the two designs (bit-width trap). A Sub is a blackbox unless the
-  // resolution library has a purely-combinational def for it (mirrors encode.cpp).
-  auto build_shared_bbox = [&]() {
-    Io_name_map<Val>  bb;
-    Io_name_map<int>  bw;   // key -> max real width
-    Io_name_map<bool> bsg;  // key -> signed
-    auto                                   add = [&](hhds::Graph* g) {
-      Io_name_map<int> occ;
-      for (auto node : g->forward_class()) {
-        if (graph_util::type_op_of(node) != Ntype_op::Sub) {
-          continue;
-        }
-        auto        sub_io  = node.get_subnode_io();
-        std::string defname(sub_io->get_name());
-        // Mirror encode.cpp's blackbox predicate EXACTLY so the box's shared
-        // symbols are pre-built for every sub the encoder will blackbox: a forced
-        // collapse (proven module), else a sub with no flattenable combinational
-        // def in the resolution library.
-        bool blackbox = true;
-        if (collapse_ptr != nullptr && collapse_ptr->count(defname) > 0) {
-          blackbox = true;  // proven-module collapse: always a blackbox
-        } else if (sub_lib != nullptr) {
-          if (auto git = sub_lib->find(node.get_subnode_gid()); git != sub_lib->end() && git->second != nullptr) {
-            blackbox = false;
-            for (auto dn : git->second->forward_class()) {
-              auto dop = graph_util::type_op_of(dn);
-              if (dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Latch || dop == Ntype_op::Memory) {
-                blackbox = true;
-                break;
-              }
-            }
-          }
-        }
-        if (!blackbox) {
-          continue;
-        }
-        std::string bk = defname + "#" + std::to_string(occ[defname]++);
-        absl::flat_hash_map<hhds::Port_id, std::string> out_name;
-        for (const auto& d : sub_io->get_output_pin_decls()) {
-          out_name[sub_io->get_output_port_id(d.name)] = d.name;
-        }
-        for (const auto& e : node.out_edges()) {
-          auto        dp   = e.driver;
-          auto        nit  = out_name.find(dp.get_port_id());
-          std::string port = nit != out_name.end() ? nit->second : std::to_string(dp.get_port_id());
-          std::string key  = bk + ":" + port;
-          int         w    = real_width(dp);
-          if (w == 0) {
-            w = 1;
-          }
-          if (auto it = bw.find(key); it == bw.end() || w > it->second) {
-            bw[key]  = w;
-            bsg[key] = !graph_util::is_unsign(dp);
-          }
-        }
-      }
-    };
-    add(ref);
-    add(impl);
-    for (const auto& [key, w] : bw) {
-      bb[key] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), "bb:" + key), w, bsg[key]};
-    }
-    return bb;
-  };
-
   // ── BMC engine: unroll N cycles from the reset state ──────────────────────
   // The single-step inductive miter (below) assumes an arbitrary equal current
   // state, so it false-REFUTEs on UNREACHABLE states where the two front-ends
@@ -828,7 +1008,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     enc.set_name_alias(&name_alias);
     enc.set_collapse_defs(collapse_ptr);
     enc.set_state_boxes(state_boxes_ptr);
-    Io_name_map<Val> shared_bbox = build_shared_bbox();
+    enc.set_comb_boxes(comb_boxes_ptr);
     enc.set_shared_bbox(&shared_bbox);
 
     struct In {
@@ -1311,6 +1491,15 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       cvc5::Term  iv;
     };
     std::vector<Wit_state> wit_state;
+    // Correspondence completeness: a compare point (primary output or a
+    // collapsed-box bbin obligation) present on ONE side only means the two
+    // designs did not expose the same compare set — e.g. mismatched box
+    // instance counts, or a box the correspondence builder could not pair.
+    // Silently skipping it (the old behavior) let an UNSAT return Proven with
+    // part of the obligation set never checked, and let a SAT refute through
+    // an unjustified shared-box assumption — so the verdict is gated to
+    // Unknown below whenever these are non-empty (the inductive engine's rule).
+    std::set<std::string> bmc_unmatched_ref, bmc_unmatched_impl;  // ordered: deterministic detail text
 
     for (int cyc = 0; cyc < total_cyc; ++cyc) {
       // `run` phase: the first `reset_hold` cycles hold reset asserted and are
@@ -1388,6 +1577,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       }
 
       enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (lec.gold_x)
+      enc.set_box_keys(&ref_box_keys);            // per-design box correspondence
       Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(cyc) + "_", &ref_mem, &ref_reads);
       enc.set_x_dontcare(false);
       if (!re.ok) {
@@ -1395,6 +1585,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         res.detail  += "; ref encode failed: " + re.error;
         return res;
       }
+      enc.set_box_keys(&impl_box_keys);
       Encoded ie = enc.encode(impl, &sh_impl, "i" + std::to_string(cyc) + "_", &impl_mem, &impl_reads);
       if (!ie.ok) {
         res.verdict  = Verdict::Unknown;
@@ -1410,12 +1601,16 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 
       if (checking) {
         for (const auto& [name, rv] : re.outputs) {
-          if (!name.empty() && name[0] == '\x01') {
-            continue;  // next-state, not a primary output
+          if (!name.empty() && (name[0] == '\x01' || name[0] == '\x03')) {
+            continue;  // next-state / env-gated debug tap, not a primary output
           }
           auto it = ie.outputs.find(name);
           if (it == ie.outputs.end()) {
+            bmc_unmatched_ref.insert(display_name(name));
             continue;
+          }
+          if (name.rfind("\x02" "bbox:", 0) == 0) {
+            continue;  // two-sided box presence marker: constant on both sides, never a diff
           }
           int        w    = std::max(rv.width, it->second.width);
           cvc5::Term rfit = fit_to(tm, rv, w);
@@ -1431,6 +1626,14 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           decomp_diffs.push_back({name + "@" + std::to_string(cyc), diff});
           if (opts.witness) {
             wit_outs.push_back({cyc, name, rfit, ifit});
+          }
+        }
+        for (const auto& [name, iv] : ie.outputs) {
+          if (!name.empty() && (name[0] == '\x01' || name[0] == '\x03')) {
+            continue;
+          }
+          if (re.outputs.find(name) == re.outputs.end()) {
+            bmc_unmatched_impl.insert(display_name(name));
           }
         }
       }
@@ -1509,8 +1712,25 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     // the count of (output,cycle) comparisons actually run (0 => vacuous, no PASS).
     res.checked_steps = N;
     res.output_checks = static_cast<int>(decomp_diffs.size());
+    // Incomplete correspondence gates BOTH verdict directions (see the set's
+    // declaration): no Proven with unchecked obligations, no Refuted through an
+    // unjustified shared-box assumption — only Unknown, with the sets surfaced.
+    res.unmatched_ref.assign(bmc_unmatched_ref.begin(), bmc_unmatched_ref.end());
+    res.unmatched_impl.assign(bmc_unmatched_impl.begin(), bmc_unmatched_impl.end());
+    const bool incomplete = !res.unmatched_ref.empty() || !res.unmatched_impl.empty();
+    if (!res.unmatched_ref.empty()) {
+      res.detail += "; " + std::to_string(res.unmatched_ref.size()) + " ref-only cut point(s) {" + join_capped(res.unmatched_ref) + "}";
+    }
+    if (!res.unmatched_impl.empty()) {
+      res.detail += "; " + std::to_string(res.unmatched_impl.size()) + " impl-only cut point(s) {" + join_capped(res.unmatched_impl) + "}";
+    }
     if (bad.isNull()) {
-      res.verdict = Verdict::Proven;
+      if (incomplete) {
+        res.verdict  = Verdict::Unknown;
+        res.detail  += "; no COMMON outputs to compare (correspondence incomplete)";
+      } else {
+        res.verdict = Verdict::Proven;
+      }
       return res;
     }
     // Decomposed proof: a monolithic `bad` = OR of every (output,cycle) diff is a
@@ -1533,7 +1753,12 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         }
       }
       if (all_unsat) {
-        res.verdict = Verdict::Proven;
+        if (incomplete) {
+          res.verdict  = Verdict::Unknown;
+          res.detail  += "; matched portion EQUIVALENT (only the unmatched cut points above remain)";
+        } else {
+          res.verdict = Verdict::Proven;
+        }
         return res;
       }
       if (!lec_decompose_fallback(opts.decompose)) {
@@ -1548,9 +1773,23 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     solver.assertFormula(bad);
     cvc5::Result r = solver.checkSat();
     if (r.isUnsat()) {
-      res.verdict = Verdict::Proven;
+      if (incomplete) {
+        res.verdict  = Verdict::Unknown;
+        res.detail  += "; matched portion EQUIVALENT (only the unmatched cut points above remain)";
+      } else {
+        res.verdict = Verdict::Proven;
+      }
     } else if (r.isSat()) {
-      res.verdict = Verdict::Refuted;
+      // A concrete reachable divergence is a genuine refutation only when the
+      // correspondence is complete; with unmatched cut points the divergence can
+      // be an artifact of a one-sided shared-box symbol, so report Unknown (the
+      // witness below still surfaces the divergence for iteration).
+      if (incomplete) {
+        res.verdict  = Verdict::Unknown;
+        res.detail  += "; matched portion DIFFERS (witness below; may be an artifact of the unmatched cut points)";
+      } else {
+        res.verdict = Verdict::Refuted;
+      }
       if (std::getenv("LEC_DUMP_WIT") != nullptr) {
         for (const auto& [nm, t] : dbg_init) {
           cvc5::Term vv = solver.getValue(t);
@@ -1794,7 +2033,6 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   // Shared current-state memory arrays (M4 cut): corresponding memories collapse
   // to one array symbol, so the step proves equal next-state contents + douts.
   Io_name_map<cvc5::Term> shared_mems = build_shared_mems("s_");
-  Io_name_map<Val>        shared_bbox = build_shared_bbox();
 
   // ── Memory <-> flop-bank correspondence bridge ────────────────────────────
   // A behavioral memory (one Memory cell / SMT array) on one side often appears
@@ -1968,8 +2206,10 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   enc.set_name_alias(&name_alias);
   enc.set_collapse_defs(collapse_ptr);
   enc.set_state_boxes(state_boxes_ptr);
+  enc.set_comb_boxes(comb_boxes_ptr);
   enc.set_shared_bbox(&shared_bbox);
   enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (lec.gold_x)
+  enc.set_box_keys(&ref_box_keys);            // per-design box correspondence
   Encoded re = enc.encode(ref, &shared, "", &shared_mems);
   enc.set_x_dontcare(false);
   if (!re.ok) {
@@ -1977,6 +2217,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     res.detail  += "; ref encode failed: " + re.error;
     return res;
   }
+  enc.set_box_keys(&impl_box_keys);
   Encoded ie = enc.encode(impl, &shared, "", &shared_mems);
   if (!ie.ok) {
     res.verdict  = Verdict::Unknown;
@@ -2039,6 +2280,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     ind_diffs.push_back({"bridge", t});
   }
   for (const auto& [name, rv] : re.outputs) {
+    if (!name.empty() && name[0] == '\x03') {
+      continue;  // env-gated debug tap, never a compare point
+    }
     if (bridged_ref_out.count(name)) {
       continue;  // bank-flop next state -> compared via the memory bridge above
     }
@@ -2046,6 +2290,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     if (it == ie.outputs.end()) {
       res.unmatched_ref.push_back(display_name(name));
       continue;
+    }
+    if (name.rfind("\x02" "bbox:", 0) == 0) {
+      continue;  // two-sided box presence marker: constant on both sides, never a diff
     }
     int        w    = std::max(rv.width, it->second.width);
     cvc5::Term rfit = fit_to(tm, rv, w);
@@ -2063,6 +2310,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     ind_diffs.push_back({display_name(name), diff});
   }
   for (const auto& [name, iv] : ie.outputs) {
+    if (!name.empty() && name[0] == '\x03') {
+      continue;  // env-gated debug tap, never a compare point
+    }
     if (bridged_impl_out.count(name)) {
       continue;
     }

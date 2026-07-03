@@ -412,6 +412,11 @@ _V2PRP_FIXME = [
     # root cause): v2prp REFUTES until lower_instance's per-field output split
     # lands (fix order in slang_structure.cpp lower_instance's KNOWN OPEN).
     "instance_out_struct_ident",
+    # instance_collapse_order (hierarchical-LEC box-instance pairing) was
+    # PROMOTED out of this list: stateless collapsed leaves are now pairing-free
+    # (per-def UF congruence), stateful ones pair name-first, and a collapsed-box
+    # REFUTE is flat-confirmed before it can fail — see pass/lec/encode.hpp
+    # (Comb_box / set_box_keys) and lec_hierarchical's flat confirmation.
 ]
 
 [
@@ -481,6 +486,61 @@ _V2PRP_FIXME = [
         "sim_dontcare_state": "exact-diff",
         "sim_prp_packed_selfref": "prp-emit",
         "sim_lg_atomic_feedback": "lg-emit",
+        # SIM-side pin of the fp-convert fail family (FCVT/FPCVT/FP_INCVT/
+        # CVT32ModuleS0/ByteMaskTailGen — instance-output struct dual identity):
+        # the .v sims right via slang in-memory, but the EMITTED Pyrope text
+        # recompiles to a sim that reads 0-init leaves. Companion of the
+        # prp-v2prp-instance_out_struct_ident LEC fixme; both flip green with
+        # lower_instance's per-field output split.
+        "instance_out_struct_ident": "v2prp-sim",
+        # ---- 2026-07-03 lhd-sim failure-class synthetics (verification.html
+        # sim column, ~63 comb-loop errors + 3 sub-feedback + 2 segv). Each
+        # pins ONE distinct gap; all pairs are bit-level acyclic and LEC-proven
+        # (lgyosys) — the loop exists only at cgen.sim's word/instance
+        # granularity. Promote into _SIMEQ (differential sim) when fixed.
+        #
+        # split_packed_selfref_wires gaps (inou/cgen/cgen_sim.cpp):
+        # 1-bit fed-back packed field: footprint() bails on any single-bit Or
+        # operand (signed -1/0 "unbounded", ~685; generic bound needs bits>1,
+        # ~698) — one bail vetoes ALL rewires. BusyTable/BranchUnit/EnqEntry/
+        # EnqPolicy/OthersEntry valid-bit families (~40 modules).
+        "sim_packed_selfref_1bit": "prp-emit",
+        # same footprint-1bit bail exercised as a bit k -> k+1 RIPPLE chain
+        # (FloatFMA sticky vecs): every bit of the pack reads the previous
+        # bit's slice, so the fix must redirect a CHAIN of slice-reads.
+        "sim_loop_sticky_ripple": "prp-emit",
+        # reader-form gap: readers spelled `(w>>k)&m` are SRA+And nodes, and
+        # the rewire scan only matches const-mask Get_mask readers
+        # (CSRPermitModule/Debug/DecodeUnit family).
+        "sim_loop_pack_shiftand": "prp-emit",
+        # hierarchically GROUPED pack: the covering operand `(group)<<k` is
+        # itself a still-cyclic sub-pack, and the one-shot redirect cannot
+        # recurse — this is the family whose back-edge label is `shl_*`
+        # (RegCacheDataModule_1/OldestArbiter/DataPath).
+        "sim_loop_packed_bus_group": "prp-emit",
+        # And-masked Mux1H arms: trace_to_or fails when the packed word's
+        # driver is an And / Or-of-Ands with bit-replicated one-hot masks
+        # (fpsqrt_r16_block nxt_rt speculation words, FDivSqrt/ExeUnitImp_10).
+        "sim_loop_mux1h_selfslice": "prp-emit",
+        # `wire` whole-vector direct self-read across TWO nets (riscv-crypto
+        # sbox linear layer, BlockCipherModule o_36/t_36): mutual word-level
+        # false loop, no Or-of-disjoint pack to trace at all.
+        "sim_loop_sbox_bit_selfref": "prp-emit",
+        # packed-wire false cycle feeding a comb-array READ ADDRESS: pins the
+        # BusyTable_1/Dispatch class-C SIGSEGV (ensure_ready_impl unbounded
+        # recursion — crash itself fixed by the prefetch_seen guard; the
+        # residual loud comb-loop error keeps this fixme until the splitter
+        # handles the Sum-packed word).
+        "sim_loop_mem_prefetch": "prp-emit",
+        # flatten_false_loop_subs gaps (comb-loop-through-instance survivors):
+        # STATEFUL callee — the fed-back output is a pure register read, but
+        # callee_is_pure_comb() rejects any callee holding a Flop
+        # (DivUnit/SRT16DividerDataModule, ExeUnitImp_2).
+        "sim_sub_stateful_feedback": "prp-emit",
+        # NESTED pure-comb callee — zero flops anywhere, but the callee holds
+        # a comb Sub and callee_is_pure_comb() rejects Ntype_op::Sub; the
+        # flatten is single-level non-recursive (ExeUnitImp_4/Alu).
+        "sim_sub_nested_comb_feedback": "prp-emit",
     }.items()
 ]
 

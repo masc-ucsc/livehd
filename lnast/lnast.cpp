@@ -79,6 +79,10 @@ void Lnast::replace_body(std::shared_ptr<hhds::Tree> new_body) {
   tree_.reset();
   treeio_->replace(std::move(new_body));
   tree_ = treeio_->get_tree();
+  // Node class-indices are body-relative: a swapped-in body invalidates any
+  // recorded dead-statement marks (the Lnast overload below re-transfers the
+  // staging's own marks after this).
+  dce_dead_stmts_.clear();
 }
 
 void Lnast::replace_body(const std::shared_ptr<Lnast>& staging) {
@@ -89,6 +93,9 @@ void Lnast::replace_body(const std::shared_ptr<Lnast>& staging) {
   // Lnast's stale pool.
   name_pool_ = staging->name_pool_;
   replace_body(staging->tree_ptr());
+  // DCE mark-only mode: the dead-statement marks were computed against the
+  // staging body just installed — they ride along for tolg to skip.
+  dce_dead_stmts_ = std::move(staging->dce_dead_stmts_);
 }
 
 void Lnast::export_into(hhds::Forest& forest) const {

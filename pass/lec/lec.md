@@ -104,24 +104,50 @@ everything the encoder needs.
   instance's input Vals, outputs wired onto its output pins) — the prime use is
   an ABC standard-cell netlist whose blackbox cells resolve to `pass.liberty
   gensim` models. Unresolved / stateful / too-deep `Sub`s become a sound
-  **blackbox** (inputs = compare points, outputs = free symbols, keyed by
-  def-name + occurrence so both sides line up).
+  **blackbox** (inputs = compare points, outputs = free symbols shared across the
+  designs by the box-correspondence key below).
+- **Box correspondence** (query.cpp builder, `Encoder::set_box_keys`): every Sub
+  the encoder will treat as a box is enumerated ONCE per design (the encoder's
+  own hierarchical walk + blackbox predicate) and keyed `defname#tag`. `tag` is
+  the **canonicalized instance hier-NAME** when that name occurs exactly once on
+  BOTH sides (a Verilog instance name and a Pyrope `::[name=]` attr both land on
+  the Sub node), else an occurrence index over the unnamed/unmatched remainder.
+  The encoder looks keys up (a miss is a loud encode error, never a silent
+  re-count) — this retired the old per-walk occurrence counters, whose drift
+  between the encoder and the query-side builders could silently degrade a
+  stateful box to a stateless constant one (a false-PASS hazard) and whose
+  traversal-order pairing falsely refuted reversed interchangeable instances
+  (tests/equiv/instance_collapse_order). A key present on ONE side only yields
+  one-sided obligations, which BOTH engines gate to an incomplete
+  correspondence: no Proven with unchecked obligations, no Refuted through an
+  unjustified shared-box assumption — only INCONCLUSIVE.
 - **Proven-module collapse** (`lhd lec --collapse <def>` / `lec.collapse`): a def
   the driver has already proven equivalent is **forced** to the blackbox path
   even when it could be flattened (so the parent stops re-solving its internals).
-  A *combinational* leaf becomes shared `UF(inputs)` outputs (inputs as compare
-  points) — directly sound. A **stateful** leaf becomes a **state-aware** box:
-  `outputs = UF(state)` (Moore), `next_state = UF2(inputs, state)` over one shared
-  state cut corresponding on both designs (matched-reset shared init, threaded by
+  A *stateless* leaf is **pairing-free** (`Comb_box`): each output is
+  `UF_def_port(inputs)` with ONE uninterpreted function per (def, port) shared
+  across both designs and ALL instances, so congruence pairs interchangeable
+  instances dynamically — no correspondence key exists to get wrong, no bbin
+  obligations are emitted, and instance-count mismatches cost nothing. The
+  outputs are still emitted as per-instance fresh symbols on the first visit and
+  tied to the UF once the inputs resolve (`Encoded::equalities`), so an
+  output-feeds-own-input false cycle cannot deadlock the fixpoint. A **stateful**
+  leaf becomes a **state-aware** box: `outputs = UF(state)` (Moore),
+  `next_state = UF2(inputs, state)` over one shared state cut per corresponding
+  instance pair (name-first pairing above; matched-reset shared init, threaded by
   the BMC unroll), so the leaf output varies per cycle — a constant combinational
-  box would false-prove a timing difference through a stateful leaf. The output is
-  Moore (state only, not the current inputs) and is emitted *before* the inputs are
-  resolved, so a collapsed stage register whose output feeds glue back to its own
-  stall/enable input does not close a false combinational cycle; divergent leaf
-  inputs are still caught by the compare points. Collapsing a
-  same-library submodule (one `forward_hier` would descend into + the edge
-  resolver would thread through) uses the hhds `Hier_opaque_scope` so the leaf is
-  opaque to BOTH the walk and the cross-boundary edge resolution.
+  box would false-prove a timing difference through a stateful leaf. Both box
+  kinds build their UF input concat from a **NAME-SORTED, cross-design-unioned
+  port layout** (`in_ports`) — never a side's own decl order, which front-ends
+  permute (slang keeps the .v port list, Pyrope appends implicit clock/reset) and
+  a permuted concat feeds the shared UF different values for equal inputs. The
+  Moore output is emitted *before* the inputs are resolved, so a collapsed stage
+  register whose output feeds glue back to its own stall/enable input does not
+  close a false combinational cycle; divergent leaf inputs are still caught by
+  the compare points. Collapsing a same-library submodule (one `forward_hier`
+  would descend into + the edge resolver would thread through) uses the hhds
+  `Hier_opaque_scope` so the leaf is opaque to BOTH the walk and the
+  cross-boundary edge resolution.
 - **Bottom-up hierarchical** (`lec.hierarchical=true`): build the module-def
   dependency DAG over the defs present BY NAME in both libraries, topo-order it
   **leaves-first**, and LEC each def under the `auto` portfolio. Record the proven
@@ -130,9 +156,19 @@ everything the encoder needs.
   isolation with free inputs (context-dependent equivalence) is **not** collapsed
   — it stays flattened into the parent and is proven in context (the M5 CEGAR /
   un-black-box fallback). Correspondence is name-based, so no semdiff is needed
-  when the call structures match. Each def emits a per-block progress line the
-  instant it resolves; the TOP def's verdict is the result. (v1 walks the DAG
-  sequentially; proving independent leaves in parallel is a later speedup.)
+  when the call structures match. A parent **REFUTED under a non-empty collapse
+  set is never final**: the collapse over-approximates the children (free/UF box
+  values the real leaf may never emit; occurrence-paired unnamed instances may
+  mispair), so the driver re-solves the def FLAT before reporting — flat-Proven
+  is adopted, flat-Unknown stays inconclusive, and a FAIL is only ever reported
+  from a counterexample free of collapse boxes (true blackboxes for unresolved
+  defs may remain; they correspond explicitly and gate to inconclusive when
+  one-sided). The same confirmation guards a manual `--collapse` on the
+  non-hierarchical path. (tests/equiv/instance_state_anon +
+  lhd/tests/lec_box_pairing_test pin this.) Each def emits a per-block progress
+  line the instant it resolves; the TOP def's verdict is the result. (v1 walks
+  the DAG sequentially; proving independent leaves in parallel is a later
+  speedup.)
 - **Structural def-diff skip** (`lec.semdiff=structural`, M3): in the bottom-up
   flow, run `pass/semdiff::structural_match` per module BEFORE the solver. A def
   whose ref/impl are **structurally identical** (no unmatched node on either side,

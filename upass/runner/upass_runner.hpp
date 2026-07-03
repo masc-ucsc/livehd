@@ -100,9 +100,24 @@ protected:
   struct Pass_entry {
     std::string                   name;
     std::shared_ptr<upass::uPass> pass;
+    // Per-pass dispatch wall-clock + call count, accumulated only when the
+    // LIVEHD_UPASS_STATS env var is set (dispatch_to_passes / dispatch_push);
+    // run() prints the per-unit breakdown to stderr at walk end.
+    uint64_t stat_ns{0};
+    uint64_t stat_calls{0};
   };
 
   std::vector<Pass_entry> upasses;
+
+  // LIVEHD_UPASS_STATS: per-pass dispatch timing (see Pass_entry). Checked
+  // once in the constructor; the disabled path adds one branch per dispatch.
+  bool dispatch_stats_{false};
+
+  // dce:mark (pass.upass option, set by the kernel for lg-only flows): the
+  // post-walk DCE records dead statement nids on the staging Lnast for tolg
+  // to skip instead of rebuilding the tree — the LNAST is dropped after
+  // lowering, so a clean copy is wasted work there.
+  bool dce_mark_only_{false};
 
   // THE symbol table: one runner-owned, scope-aware table holding one
   // shared_ptr<Bundle> per live name, shared by every pass (wired via
