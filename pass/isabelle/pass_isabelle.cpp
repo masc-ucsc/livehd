@@ -1192,8 +1192,11 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         if (!have_a || !have_b) {
           fatal(ctx, "Sext node n_" + std::to_string(node_id(node)) + " missing a/b.");
         }
-        op_expr = "Op_Sext";
-        deps    = {cert_dep_id(ctx, build, a, pin_width(ctx, a, node)), cert_dep_id(ctx, build, b, pin_width(ctx, b, node))};
+        const uint32_t amount_w = pin_is_const(b)
+                                      ? std::max(pin_width(ctx, b, node), minimal_unsigned_const_width(pin_const_value(b)))
+                                      : pin_width(ctx, b, node);
+        op_expr                 = "Op_Sext";
+        deps                    = {cert_dep_id(ctx, build, a, pin_width(ctx, a, node)), cert_dep_id(ctx, build, b, amount_w)};
         break;
       }
 
@@ -1221,8 +1224,13 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         if (!have_a || !have_m) {
           fatal(ctx, "Get_mask node n_" + std::to_string(node_id(node)) + " missing operands.");
         }
-        op_expr = "Op_GetMask";
-        deps    = {cert_dep_id(ctx, build, a, pin_width(ctx, a, node)), cert_dep_id(ctx, build, mask, pin_width(ctx, mask, node))};
+        // Mirror the fast-model widening: mask at max(pin_w, src_w) so the -1
+        // sentinel (pin width 1) is widened to cover every source bit.
+        // Concrete masks with pin_width >= src_w are unchanged.
+        const uint32_t gm_src_w  = pin_width(ctx, a, node);
+        const uint32_t gm_mask_w = std::max(pin_width(ctx, mask, node), gm_src_w);
+        op_expr                  = "Op_GetMask";
+        deps                     = {cert_dep_id(ctx, build, a, gm_src_w), cert_dep_id(ctx, build, mask, gm_mask_w)};
         break;
       }
 
@@ -2170,8 +2178,8 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       }
       uint32_t src_w    = pin_width(ctx, a, node);
       uint32_t amount_w = pin_width(ctx, b, node);
-      return "((word_of_int (signed_take_bit (unat (" + driver_expr_at(ctx, b, amount_w) + ")) (uint " + ucast_pin_at(ctx, a, src_w)
-             + "))) " + ty_word(w) + ")";
+      return "((word_of_int (signed_take_bit (unat (" + shift_amount_expr_at(ctx, b, amount_w) + ")) (uint "
+             + ucast_pin_at(ctx, a, src_w) + "))) " + ty_word(w) + ")";
     }
 
     case Ntype_op::Get_mask: {
@@ -2209,7 +2217,15 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
         return undefined_at(w, reason);
       }
       uint32_t src_w  = pin_width(ctx, a, node);
-      uint32_t mask_w = pin_width(ctx, mask, node);
+      // The mask selects WHICH source bits to gather; it must be at least as
+      // wide as the source operand. LiveHD's canonical zext idiom
+      // Get_mask(a, -1) == a (cprop.cpp:852) uses the all-ones sentinel
+      // whose pin width the front-end collapses to 1; at that width
+      // sem_get_mask selects only bit 0. Widen to cover the source width.
+      // Concrete non-(-1) masks already arrive at their intended width
+      // (>= src_w), so the max is a no-op for them. The output width does
+      // not belong here: the trailing ":: w word" already zero-pads/truncates.
+      uint32_t mask_w = std::max(pin_width(ctx, mask, node), src_w);
       return "((sem_get_mask " + ucast_pin_at(ctx, a, src_w) + " " + ucast_pin_at(ctx, mask, mask_w) + ") " + ty_word(w) + ")";
     }
 
