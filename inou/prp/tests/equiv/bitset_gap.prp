@@ -2,7 +2,7 @@
 :name: bitset_gap
 :type: equiv
 :verilog_top: bitset_gap.foo
-:pyrope_top: bitset_gap.foo
+:pyrope_top: foo
 */
 
 // NON-contiguous / overlapping / reordered per-range bit-assembly. These three

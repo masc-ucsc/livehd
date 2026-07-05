@@ -2,7 +2,7 @@
 :name: sim_sub_stateful_feedback
 :type: equiv
 :verilog_top: sim_sub_stateful_feedback_top
-:pyrope_top: sim_sub_stateful_feedback_top
+:pyrope_top: top
 */
 
 // FALSE combinational loop through a STATEFUL sub-instance (XiangShan
@@ -12,7 +12,7 @@
 // atomically (all inputs -> all outputs via one child.cycle()), and
 // flatten_false_loop_subs declines because callee_is_pure_comb() rejects any
 // callee containing a Flop, so the survivor errs `comb-loop-through-instance`.
-pub mod busy_cell::[lg="sssf_busy_cell", hdl](start:u1, kill:u1) -> (ready:u1@[]) {
+pub mod busy_cell::[timecheck=false](start:u1, kill:u1) -> (ready:u1@[]) {
   reg busy:u1 = 0
   ready = busy ^ 1
   if kill != 0 {
@@ -22,7 +22,7 @@ pub mod busy_cell::[lg="sssf_busy_cell", hdl](start:u1, kill:u1) -> (ready:u1@[]
   }
 }
 
-pub mod top::[lg="sim_sub_stateful_feedback_top", hdl](go:u1, flush:u1) -> (ready_o:u1@[0]) {
+pub mod top::[timecheck=false](go:u1, flush:u1) -> (ready_o:u1@[0]) {
   wire u_ready:u1
   wire kill:u1
   kill = (u_ready ^ 1) & flush     // depends on the instance's own output

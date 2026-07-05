@@ -2,7 +2,7 @@
 :name: mod_varargs_csa
 :type: equiv
 :verilog_top: mod_varargs_csa.top
-:pyrope_top: mod_varargs_csa.top
+:pyrope_top: top
 */
 
 // Task 1p-F / 2u-for stress test — a var-arg `mod` whose `for` calls ANOTHER,

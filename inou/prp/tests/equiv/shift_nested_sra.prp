@@ -2,7 +2,7 @@
 :name: shift_nested_sra
 :type: equiv
 :verilog_top: top
-:pyrope_top: shift_nested_sra.top
+:pyrope_top: top
 */
 
 // Regression for 2i-issues E (now FIXED): a NESTED arithmetic right shift

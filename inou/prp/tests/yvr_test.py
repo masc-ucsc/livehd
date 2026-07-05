@@ -74,11 +74,15 @@ def main():
 
     impl = gen[0]
     # 2. LEC the reader's netlist against the source (yosys read_verilog parses
-    #    the plain golden fine for the miscompile class).
+    #    the plain golden fine for the miscompile class). The reference is the
+    #    golden read by yosys (keeps its `file.entity` module name); the
+    #    implementation is cgen-emitted Verilog, whose module name is FLAT (the
+    #    hierarchical internal name flattens to its entity for Verilog).
+    impl_top = top.rsplit(".", 1)[-1] if "." in top else top
     try:
         chk = subprocess.run(
             ["./inou/yosys/lgcheck", "--reference", v, "--implementation", impl,
-             "--reference_top", top, "--implementation_top", top],
+             "--reference_top", top, "--implementation_top", impl_top],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=CHECK_TIMEOUT)
     except subprocess.TimeoutExpired:
         print("{} - yvr - inconclusive (lgcheck timeout >{}s, NOT a fail)".format(name, CHECK_TIMEOUT))

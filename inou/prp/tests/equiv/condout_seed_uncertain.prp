@@ -2,7 +2,7 @@
 :name: condout_seed_uncertain
 :type: equiv
 :verilog_top: condout_seed_uncertain.seedmod
-:pyrope_top: condout_seed_uncertain.seedmod
+:pyrope_top: seedmod
 */
 
 // Regression (constprop miscompile, repro C — the `cond ? t : 0` shape the

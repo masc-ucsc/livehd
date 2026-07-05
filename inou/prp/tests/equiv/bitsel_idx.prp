@@ -2,7 +2,7 @@
 :name: bitsel_idx
 :type: equiv
 :verilog_top: bitsel_idx.bsel
-:pyrope_top: bitsel_idx.bsel
+:pyrope_top: bsel
 */
 
 // Runtime (non-comptime) single-bit select via the NATIVE `g#[idx]` syntax

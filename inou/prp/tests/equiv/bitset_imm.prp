@@ -2,7 +2,7 @@
 :name: bitset_imm
 :type: equiv
 :verilog_top: bitset_imm.foo
-:pyrope_top: bitset_imm.foo
+:pyrope_top: foo
 */
 
 // Per-range LHS bit-assembly (`b#[lo..=hi] = src`) into a `mut` accumulator,

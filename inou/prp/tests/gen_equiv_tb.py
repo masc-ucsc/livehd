@@ -214,6 +214,10 @@ def emit_verilog(base, modname, clk, rst, data_in, outs):
     hs = hash_start_of(clk, rst)
     taken = {n for n, _ in data_in} | {n for n, _ in outs} | {"clock", "reset"}
     S, SIG, K = uniq("s", taken), uniq("sig", taken), uniq("k", taken)
+    # The instance name must not collide with a golden PORT name (a golden with a
+    # port literally named `dut` would otherwise emit `dut dut(...)`). uniq() is a
+    # no-op when there is no collision, so existing goldens regenerate identically.
+    DUT = uniq("dut", taken)
     L = []
     a = L.append
     a("`timescale 1ns/1ps")
@@ -236,7 +240,7 @@ def emit_verilog(base, modname, clk, rst, data_in, outs):
     if rst:
         conns.append(".reset(reset)")
     conns += ["." + n + "(" + n + ")" for n, _ in outs]
-    a("  %s dut(%s);" % (esc(modname), ", ".join(conns)))
+    a("  %s %s(%s);" % (esc(modname), DUT, ", ".join(conns)))
     a("  reg [63:0] %s, %s; integer %s;" % (S, SIG, K))
     a("  initial begin")
     a("    %s=SEED; %s=0;%s" % (S, SIG, "" if not seq else " clock=0;"))

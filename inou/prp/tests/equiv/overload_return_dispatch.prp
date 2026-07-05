@@ -2,7 +2,7 @@
 :name: overload_return_dispatch
 :type: equiv
 :verilog_top: overload_return_dispatch.ovret
-:pyrope_top: overload_return_dispatch.ovret
+:pyrope_top: ovret
 */
 
 // 2f-overload — dispatch resolves the WHOLE `c = f(args)`, return side included.

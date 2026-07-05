@@ -2,7 +2,7 @@
 :name: clz_nest
 :type: equiv
 :verilog_top: clz_nest.clz
-:pyrope_top: clz_nest.clz
+:pyrope_top: clz
 */
 
 // Correct Pyrope reference for clz_nest.v (count-leading-zeros of a 10-bit

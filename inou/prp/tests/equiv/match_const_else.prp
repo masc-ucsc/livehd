@@ -2,7 +2,7 @@
 :name: match_const_else
 :type: equiv
 :verilog_top: match_const_else.t
-:pyrope_top: match_const_else.t
+:pyrope_top: t
 */
 
 // match expression with a comptime-CONST else arm. Regression guard for the

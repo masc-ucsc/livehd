@@ -2,7 +2,7 @@
 :name: mem_pending_reset_restore
 :type: equiv
 :verilog_top: mem_pending_reset_restore.restore
-:pyrope_top: mem_pending_reset_restore.restore
+:pyrope_top: restore
 */
 
 // The async memory read lands @[0]: committed state, like a scalar reg read.

@@ -2,7 +2,7 @@
 :name: wire_reg
 :type: equiv
 :verilog_top: wire_reg.wreg
-:pyrope_top: wire_reg.wreg
+:pyrope_top: wreg
 */
 
 // 2c-wire — the next-state-read pattern that replaces a register's `.[defer]`:

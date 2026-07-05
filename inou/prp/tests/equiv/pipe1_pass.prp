@@ -2,7 +2,7 @@
 :name: pipe1_pass
 :type: equiv
 :verilog_top: pipe1_pass.passthru
-:pyrope_top: pipe1_pass.passthru
+:pyrope_top: passthru
 */
 
 pub pipe[1] passthru(a:u8) -> (o:u8) {

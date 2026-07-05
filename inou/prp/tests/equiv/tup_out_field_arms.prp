@@ -2,7 +2,7 @@
 :name: tup_out_field_arms
 :type: equiv
 :verilog_top: tup_out_field_arms.top
-:pyrope_top: tup_out_field_arms.top
+:pyrope_top: top
 */
 
 // 2i-issues D (corner) — a tuple OUTPUT port whose leaves are written by per-field

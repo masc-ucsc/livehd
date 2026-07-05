@@ -2,7 +2,7 @@
 :name: flop_reset_matrix
 :type: equiv
 :verilog_top: flop_reset_matrix.matrix
-:pyrope_top: flop_reset_matrix.matrix
+:pyrope_top: matrix
 */
 
 // Full (posedge/negedge clock) x (posedge/negedge/sync reset) flop matrix,

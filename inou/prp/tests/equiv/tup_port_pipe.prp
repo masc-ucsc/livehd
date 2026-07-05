@@ -2,7 +2,7 @@
 :name: tup_port_pipe
 :type: equiv
 :verilog_top: tup_port_pipe.f
-:pyrope_top: tup_port_pipe.f
+:pyrope_top: f
 */
 
 // Tuple-typed PIPE ports: same leaf flattening as comb, plus the pipe[1]

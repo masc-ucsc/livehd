@@ -2,7 +2,7 @@
 :name: rt_wrap_noop
 :type: equiv
 :verilog_top: rt_wrap_noop.rt_wrap_noop
-:pyrope_top: rt_wrap_noop.rt_wrap_noop
+:pyrope_top: rt_wrap_noop
 */
 
 // A `wrap` whose value provably fits the target type is a no-op: the lowering

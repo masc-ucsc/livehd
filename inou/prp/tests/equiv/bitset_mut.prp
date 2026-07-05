@@ -2,7 +2,7 @@
 :name: bitset_mut
 :type: equiv
 :verilog_top: bitset_mut.foo
-:pyrope_top: bitset_mut.foo
+:pyrope_top: foo
 */
 
 // The `mut` twin of bitset_reg, and the exact shape from the original bug report

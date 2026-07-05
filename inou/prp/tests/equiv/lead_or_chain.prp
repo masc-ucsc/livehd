@@ -2,7 +2,7 @@
 :name: lead_or_chain
 :type: equiv
 :verilog_top: lead_or_chain.top
-:pyrope_top: lead_or_chain.top
+:pyrope_top: top
 */
 
 // Regression for the line-leading word-operator continuation bug: a long boolean

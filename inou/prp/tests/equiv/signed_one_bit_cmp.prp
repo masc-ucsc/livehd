@@ -2,7 +2,7 @@
 :name: signed_one_bit_cmp
 :type: equiv
 :verilog_top: signed_one_bit_cmp.p
-:pyrope_top: signed_one_bit_cmp.p
+:pyrope_top: p
 */
 
 // Ordered comparison of a 1-bit SIGNED value. `signed(x#[3])` reinterprets the

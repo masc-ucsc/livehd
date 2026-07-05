@@ -2,7 +2,7 @@
 :name: mod_three
 :type: equiv
 :verilog_top: mod_three.foo
-:pyrope_top: mod_three.foo
+:pyrope_top: foo
 */
 
 // `a % 3` lowered to a base-4 digit-sum reduction (tolg lower_mod3): since

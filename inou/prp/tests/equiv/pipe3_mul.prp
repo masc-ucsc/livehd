@@ -2,7 +2,7 @@
 :name: pipe3_mul
 :type: equiv
 :verilog_top: pipe3_mul.mul
-:pyrope_top: pipe3_mul.mul
+:pyrope_top: mul
 */
 
 // The 06c-pipelining.md canonical fixed-latency pipe: every result arrives

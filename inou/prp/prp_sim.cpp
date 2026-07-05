@@ -1491,7 +1491,7 @@ private:
     if (cmp) {
       bool        lhs_lit = is_literal_operand(lhs_src);
       bool        rhs_lit = is_literal_operand(rhs_src);
-      std::string fmt     = "  ASSERT FAILED (" + c_str_lit(loc) + ") clock=%ld: " + c_str_lit(lhs_src)
+      std::string fmt     = c_str_lit(loc) + ":assert fail: clock=%ld: " + c_str_lit(lhs_src)
                         + (lhs_lit ? "" : "=%ld") + " " + c_str_lit(op) + " " + c_str_lit(rhs_src)
                         + (rhs_lit ? "" : "=%ld");
       if (!msg.empty()) {
@@ -1506,7 +1506,7 @@ private:
       }
       o << ");\n";
     } else {
-      std::string fmt = "  ASSERT FAILED (" + c_str_lit(loc) + ") clock=%ld: condition `" + c_str_lit(cond_src)
+      std::string fmt = c_str_lit(loc) + ":assert fail: clock=%ld: condition `" + c_str_lit(cond_src)
                         + "` is false";
       if (!msg.empty()) {
         fmt += "  [" + c_str_lit(msg) + "]";
@@ -1527,9 +1527,11 @@ private:
   // newline; `print` does not.
   void gen_puts(std::ostringstream& o, TSNode n, int depth, bool newline) {
     std::string ind(depth * 2, ' ');
-    TSNode      args = field(n, "argument");
+    // `file:line:cmd:` origin prefix on every printed message (cmd = puts/print).
+    std::string prefix = c_str_lit(file_short_ + ":" + std::to_string(line_of(n)) + ":" + (newline ? "puts" : "print") + ":");
+    TSNode      args   = field(n, "argument");
     if (ts_node_is_null(args) || ts_node_named_child_count(args) < 1) {
-      o << ind << "std::printf(\"" << (newline ? "\\n" : "") << "\");\n";
+      o << ind << "std::printf(\"" << prefix << (newline ? "\\n" : "") << "\");\n";
       return;
     }
     // format string = first arg (a constant wrapping a [interpolated_]string_literal)
@@ -1576,7 +1578,7 @@ private:
         fmt += c;
       }
     }
-    o << ind << "std::printf(\"" << fmt << (newline ? "\\n" : "") << "\"";
+    o << ind << "std::printf(\"" << prefix << fmt << (newline ? "\\n" : "") << "\"";
     for (const auto& a : argv) {
       o << ", " << a;
     }

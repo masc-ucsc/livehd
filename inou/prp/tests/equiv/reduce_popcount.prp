@@ -2,7 +2,7 @@
 :name: reduce_popcount
 :type: equiv
 :verilog_top: reduce_popcount.foo
-:pyrope_top: reduce_popcount.foo
+:pyrope_top: foo
 */
 
 // Popcount `foo#+[range]` lowers to a balanced binary adder tree over the

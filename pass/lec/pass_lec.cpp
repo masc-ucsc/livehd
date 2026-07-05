@@ -46,7 +46,18 @@ void Pass_lec::setup() {
                        "ignore");
   m.add_label_optional("bound", "BMC / induction depth bound k", "6");
   m.add_label_optional("timeout", "per-query cvc5 wall-clock seconds (0 = unbounded; default bounds the CLI so a hard miter degrades to UNKNOWN instead of freezing)", "120");
-  m.add_label_optional("witness", "print the counterexample/witness on Refuted", "true");
+  m.add_label_optional("witness", "print the counterexample/witness on Refuted (and gate lec.prpfail/prpfailrun)", "true");
+  m.add_label_optional("prpfail",
+                       "`lhd lec` + --workdir only: on a REFUTED verdict, write a self-contained Pyrope testbench "
+                       "that instantiates BOTH designs, drives the counterexample input sequence, and (with "
+                       "prpfailrun) dumps a VCD. Value: a filename created under --workdir — default 'lecfail.prp' "
+                       "when --workdir is set (else empty=off); 'true'='lecfail.prp'; ''/'false'=off. Gated by lec.witness",
+                       "");
+  m.add_label_optional("prpfailrun",
+                       "run the generated lec.prpfail testbench through `lhd sim --set sim.vcd=true` to produce the "
+                       "counterexample waveform (same basename, .vcd, in --workdir). Default true when --workdir is "
+                       "set (else false); gated by lec.prpfail actually being written",
+                       "");
   m.add_label_optional("phase",
                        "bmc reset phase: after_reset (default; hold reset N cycles, deassert, check "
                        "free-running) | just_reset (hold reset asserted, check during reset) | "

@@ -2,7 +2,7 @@
 :name: array_selfref
 :type: equiv_slang
 :verilog_top: array_selfref.top
-:pyrope_top: array_selfref.top
+:pyrope_top: top
 */
 
 // Pyrope reference for array_selfref.v: `z = a_0 ^ a_1` (substituting

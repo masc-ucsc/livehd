@@ -16,10 +16,40 @@ namespace livehd::lec {
 // is_sat are the duals/relatives (added as the clients land).
 enum class Verdict { Proven, Refuted, Unknown };
 
+// Machine-readable counterexample trace: the reproducible input sequence a
+// REFUTED BMC run found, uncapped and grouped by cycle (the display `witness`
+// string caps its input tokens for readability). `lhd lec` turns this into a
+// self-contained Pyrope testbench (lecfail.prp) that drives BOTH designs with
+// the sequence and dumps a VCD, so the divergence is visualized / re-run.
+// Only the BMC engine fills it — its CEX is reachable from reset; the inductive
+// engine's single-step CEX may be an unreachable step-case, so `ind` leaves it
+// empty (and the `auto` portfolio only trusts a BMC-Refuted, so a REFUTED verdict
+// always carries a BMC trace).
+struct Witness_in {
+  std::string name;       // primary-input name (implicit `clock`/`reset` included)
+  std::string value;      // satisfying value, decimal (unsigned magnitude)
+  int         width = 1;  // symbol bit-width
+};
+struct Witness_cycle {
+  bool                    reset_asserted = false;  // a reset-hold prologue cycle
+  std::vector<Witness_in> inputs;                  // every primary input this cycle
+};
+struct Witness_trace {
+  int                        reset_cycles  = 0;   // leading reset-hold cycles
+  int                        diverge_cycle = -1;  // index into `cycles` of the first output divergence
+  std::vector<std::string>   diverge_outputs;     // "name(ref=X impl=Y)" tokens at diverge_cycle
+  std::vector<Witness_cycle> cycles;              // driven sequence (reset prologue first)
+  bool                       empty() const { return cycles.empty(); }
+};
+
 struct Query_result {
   Verdict     verdict = Verdict::Unknown;
   std::string witness;  // satisfying input assignment when Refuted
   std::string detail;   // engine / bound / encode error, for diagnostics
+
+  // Structured, uncapped counterexample trace for witness reproduction (empty
+  // unless a BMC REFUTE built one). See Witness_trace.
+  Witness_trace trace;
 
   // Which engine produced this verdict + how long it took (for the per-block
   // progress/info record). Normally just the requested engine; under the `auto`

@@ -12,7 +12,7 @@
 // concat), but cgen.sim schedules `s` as one object and the packed-selfref
 // splitter cannot bound the footprint of 1-bit OR operands, so it reports a
 // combinational loop when emitting the sim.
-pub comb sim_loop_sticky_ripple::[lg="sim_loop_sticky_ripple", hdl](a:u2) -> (z:u4) {
+pub comb sim_loop_sticky_ripple::[timecheck=false](a:u2) -> (z:u4) {
   wire t:u1
   wire s:u4
   t = (s >> 1) & 1

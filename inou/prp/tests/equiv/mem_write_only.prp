@@ -2,7 +2,7 @@
 :name: mem_write_only
 :type: equiv
 :verilog_top: mem_write_only.wro
-:pyrope_top: mem_write_only.wro
+:pyrope_top: wro
 */
 
 // 1a-mem — a read-less memory is LEGAL (warning only, never an error): its

@@ -2,7 +2,7 @@
 :name: tup_out_nested_whole
 :type: equiv
 :verilog_top: top
-:pyrope_top: tup_out_nested_whole.top
+:pyrope_top: top
 */
 
 // FAILING regression for 2i-issues D (residual): a NESTED tuple-typed OUTPUT port

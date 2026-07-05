@@ -66,7 +66,7 @@ DRV="$W/s/sim/drv.cpp"
 grep -q 'struct _Fail'                  "$DRV" || fail "no _Fail (first-failing-assert) record"
 grep -q '\[\[maybe_unused\]\] long _clk' "$DRV" || fail "no _clk cycle tracker"
 grep -q '_clk = clock;'                 "$DRV" || fail "tick loop does not update _clk"
-grep -q 'ASSERT FAILED ('               "$DRV" || fail "no located ASSERT FAILED message"
+grep -q ':assert fail:'                  "$DRV" || fail "no located ':assert fail:' message"
 grep -q 'clock=%ld'                     "$DRV" || fail "located message does not print the cycle"
 grep -q '_ff.has = true'                "$DRV" || fail "first-failing-assert is not captured"
 grep -q '_ff.assertion ='               "$DRV" || fail "failing_assert source is not captured"
@@ -76,7 +76,7 @@ grep -q 'std::string _rj = "\[";'       "$DRV" || fail "result array is not a ba
 grep -q '"--result-json"'               "$DRV" || fail "driver does not accept --result-json"
 grep -q 'failing_assert'                "$DRV" || fail "driver does not emit failing_assert"
 # a literal RHS prints only its source (one %ld for the LHS): `v=%ld == 30`
-grep -q 'v=%ld == 30'                   "$DRV" || fail "literal operand should not print '=value' ($(grep 'ASSERT FAILED .la.prp:.*== 30' "$DRV"))"
+grep -q 'v=%ld == 30'                   "$DRV" || fail "literal operand should not print '=value' ($(grep 'la.prp:.*:assert fail:.*== 30' "$DRV"))"
 # two named operands each print their value: `v=%ld == expect=%ld`
 grep -q 'v=%ld == expect=%ld'           "$DRV" || fail "both named operands should print their value"
 
@@ -114,7 +114,7 @@ RC=$?
 [ "$RC" = "1" ] || fail "expected exit 1 (asserts fired), got $RC: $(cat "$W/run.out")"
 
 # located stdout: prp:line, cycle (post-loop clock = 11), both operands, the message
-grep -Eq 'ASSERT FAILED \(la\.prp:[0-9]+\) clock=11: v=10 == 30  \[must reach 30\]' "$W/run.out" \
+grep -Eq 'la\.prp:[0-9]+:assert fail: clock=11: v=10 == 30  \[must reach 30\]' "$W/run.out" \
   || fail "literal-operand located message wrong: $(grep 'ASSERT FAILED' "$W/run.out")"
 grep -Eq 'ASSERT FAILED \(la\.prp:[0-9]+\) clock=11: v=10 == expect=99' "$W/run.out" \
   || fail "two-operand located message wrong: $(grep 'ASSERT FAILED' "$W/run.out")"

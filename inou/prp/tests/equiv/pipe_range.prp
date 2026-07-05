@@ -2,7 +2,7 @@
 :name: pipe_range
 :type: equiv
 :verilog_top: pipe_range.flex
-:pyrope_top: pipe_range.flex
+:pyrope_top: flex
 */
 
 // Ranged depth: the body must support every latency in [2,5]; the Verilog

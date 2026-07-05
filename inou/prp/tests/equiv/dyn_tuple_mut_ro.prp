@@ -2,7 +2,7 @@
 :name: dyn_tuple_mut_ro
 :type: equiv
 :verilog_top: dyn_tuple_mut_ro.msel
-:pyrope_top: dyn_tuple_mut_ro.msel
+:pyrope_top: msel
 */
 
 // A read-only `mut` (non-array-typed) tuple of constants is also a muxable

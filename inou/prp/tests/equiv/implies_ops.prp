@@ -2,7 +2,7 @@
 :name: implies_ops
 :type: equiv
 :verilog_top: implies_ops.top
-:pyrope_top: implies_ops.top
+:pyrope_top: top
 */
 
 // `a implies b` is boolean implication: it is false only when `a` is true and

@@ -2,7 +2,7 @@
 :name: async_negreset_compound
 :type: equiv_slang
 :verilog_top: async_negreset_compound.pipe
-:pyrope_top: async_negreset_compound.pipe
+:pyrope_top: pipe
 */
 
 // Correct Pyrope reference for async_negreset_compound.v — the golden's

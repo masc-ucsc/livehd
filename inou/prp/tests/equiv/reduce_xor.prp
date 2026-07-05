@@ -2,7 +2,7 @@
 :name: reduce_xor
 :type: equiv
 :verilog_top: reduce_xor.foo
-:pyrope_top: reduce_xor.foo
+:pyrope_top: foo
 */
 
 // XOR-reduction (parity) `foo#^[range]` lowers to a balanced binary tree of

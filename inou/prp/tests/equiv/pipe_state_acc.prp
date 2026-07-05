@@ -2,7 +2,7 @@
 :name: pipe_state_acc
 :type: equiv
 :verilog_top: pipe_state_acc.acc_mix
-:pyrope_top: pipe_state_acc.acc_mix
+:pyrope_top: acc_mix
 */
 
 // 2d-reg — the 06c `acc_mix` analog (wrap-free by bounding instead of

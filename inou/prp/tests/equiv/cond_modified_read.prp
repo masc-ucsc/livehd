@@ -2,7 +2,7 @@
 :name: cond_modified_read
 :type: equiv
 :verilog_top: cond_modified_read.condread
-:pyrope_top: cond_modified_read.condread
+:pyrope_top: condread
 */
 
 // Regression (constprop miscompile, the slang `g = e && b` shape): a var

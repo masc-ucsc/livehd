@@ -2,7 +2,7 @@
 :name: const_bit_select
 :type: equiv_slang
 :verilog_top: const_bit_select.top
-:pyrope_top: const_bit_select.top
+:pyrope_top: top
 */
 
 // Minimal repro of the verification.html "lhd lec ERROR" category

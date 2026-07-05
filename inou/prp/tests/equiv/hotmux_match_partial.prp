@@ -2,7 +2,7 @@
 :name: hotmux_match_partial
 :type: equiv
 :verilog_top: hotmux_match_partial.msel2
-:pyrope_top: hotmux_match_partial.msel2
+:pyrope_top: msel2
 */
 
 // 1a-ops: statement-form `match` writing TWO variables, with partial writes

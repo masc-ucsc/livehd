@@ -2,7 +2,7 @@
 :name: instance_out_struct_ident
 :type: equiv
 :verilog_top: instance_out_struct_ident_top
-:pyrope_top: instance_out_struct_ident.top
+:pyrope_top: top
 :gold_reader: slang
 */
 

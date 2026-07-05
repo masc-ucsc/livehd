@@ -2,7 +2,7 @@
 :name: comb_single_out_op
 :type: equiv
 :verilog_top: comb_single_out_op.csout
-:pyrope_top: comb_single_out_op.csout
+:pyrope_top: csout
 */
 
 // 1i comb-inliner: a SINGLE-output `comb`'s call result must be usable in ANY

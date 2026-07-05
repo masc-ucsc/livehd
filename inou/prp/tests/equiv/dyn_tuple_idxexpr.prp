@@ -2,7 +2,7 @@
 :name: dyn_tuple_idxexpr
 :type: equiv
 :verilog_top: dyn_tuple_idxexpr.selx
-:pyrope_top: dyn_tuple_idxexpr.selx
+:pyrope_top: selx
 */
 
 // The index may be a runtime EXPRESSION, not just a bare signal: `choices[sel+1]`

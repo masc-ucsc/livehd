@@ -2,7 +2,7 @@
 :name: mclk_derived
 :type: equiv
 :verilog_top: mclk_derived.derived
-:pyrope_top: mclk_derived.derived
+:pyrope_top: derived
 */
 
 // Multi-clock registers with a DERIVED clock. `qa` is clocked by the default

@@ -2,7 +2,7 @@
 :name: mod_comp
 :type: equiv
 :verilog_top: mod_comp.foo
-:pyrope_top: mod_comp.foo
+:pyrope_top: foo
 */
 
 // `a % b` where the dividend is a COMPUTED value (not an input port), so its

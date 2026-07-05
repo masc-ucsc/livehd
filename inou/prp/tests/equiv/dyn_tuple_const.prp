@@ -2,7 +2,7 @@
 :name: dyn_tuple_const
 :type: equiv
 :verilog_top: dyn_tuple_const.csel
-:pyrope_top: dyn_tuple_const.csel
+:pyrope_top: csel
 */
 
 // A runtime index into a COMPTIME all-constant tuple (`const choices =

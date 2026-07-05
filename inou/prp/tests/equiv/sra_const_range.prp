@@ -2,7 +2,7 @@
 :name: sra_const_range
 :type: equiv
 :verilog_top: sra_const_range.top
-:pyrope_top: sra_const_range.top
+:pyrope_top: top
 */
 
 // Regression for the Lnast_range::sra/shl endpoint bug (the

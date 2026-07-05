@@ -2,7 +2,7 @@
 :name: reg_hold_match
 :type: equiv
 :verilog_top: reg_hold_match.selreg
-:pyrope_top: reg_hold_match.selreg
+:pyrope_top: selreg
 */
 
 // Regression for the auto-hold trap on the `unique if` / `match` lowering path

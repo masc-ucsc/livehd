@@ -63,9 +63,11 @@ grep -q "graph_io ${foo_gid} foo.foo" "$W/L1/library.txt" || fail "foo gid not p
 "$LHD" compile lg:"$W/L3/" --emit verilog:"$W/out.v" --workdir "$W/w4" -q --result-json "$W/r4.json" \
   || fail "compile of merged library failed: $(cat "$W/r4.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r4.json" || fail "compile result not pass"
-grep -q 'module \\foo.foo' "$W/out.v" || fail "merged Verilog misses module foo.foo: $(cat "$W/out.v")"
-grep -q 'module \\bar.bar' "$W/out.v" || fail "merged Verilog misses module bar.bar"
-grep -q '\\foo.foo .*\\u_foo' "$W/out.v" || fail "bar does not instantiate foo: $(cat "$W/out.v")"
+# Verilog module names are FLAT (`foo`, not the internal `\foo.foo`); the
+# instance TYPE is the flat name, its instance NAME still embeds `\u_foo.foo…`.
+grep -qE '^module foo\(' "$W/out.v" || fail "merged Verilog misses module foo: $(cat "$W/out.v")"
+grep -qE '^module bar\(' "$W/out.v" || fail "merged Verilog misses module bar"
+grep -qE '^foo .*u_foo' "$W/out.v" || fail "bar does not instantiate foo: $(cat "$W/out.v")"
 grep -q '.a(x)' "$W/out.v" || fail "foo instance input not wired"
 grep -Eq '\.r\(' "$W/out.v" || fail "foo instance output not wired"
 

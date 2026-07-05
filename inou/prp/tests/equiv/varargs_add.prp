@@ -2,7 +2,7 @@
 :name: varargs_add
 :type: equiv
 :verilog_top: varargs_add.top
-:pyrope_top: varargs_add.top
+:pyrope_top: top
 */
 
 // Task 1p — a var-args `comb` is INLINED at the call site: the leftover

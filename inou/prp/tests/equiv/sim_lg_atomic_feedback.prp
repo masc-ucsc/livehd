@@ -2,7 +2,7 @@
 :name: sim_lg_atomic_feedback
 :type: equiv
 :verilog_top: sim_lg_atomic_feedback_top
-:pyrope_top: sim_lg_atomic_feedback.top
+:pyrope_top: top
 */
 
 // LEC-equivalent flattened form of sim_lg_atomic_feedback.v. The golden keeps

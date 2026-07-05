@@ -2,7 +2,7 @@
 :name: mod_acc_state
 :type: equiv
 :verilog_top: mod_acc_state.acc
-:pyrope_top: mod_acc_state.acc
+:pyrope_top: acc
 */
 
 // 2d-reg — a state register SCC (acc_r feeds its own din combinationally

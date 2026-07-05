@@ -508,19 +508,17 @@ void Lnast_prp_writer::write_module() {
   }
 
   const bool is_mod = body_has_state(lnast->get_sibling_next(io_nid));
-  // `pub … ::[lg="<name>"]` pins the generated module name to the source module
-  // name verbatim, so the re-compile leg and LEC see the SAME identifier as the
-  // golden .v.  Without it the lambda name `fun3` would be re-qualified by the
-  // .prp filename (`trivial_if.fun3` → `trivial_if.fun3.fun3`, and a non-dotted
-  // `chip_top` → `chip_top.chip_top`).  lg requires a `pub` lambda.
   print("pub ");
   print(is_mod ? "mod " : "comb ");
   print(lambda_name());
-  // `lg` pins the module name; `hdl` marks this as a Verilog-imported unit so
-  // the re-compile treats its plain regs as always_ff state (σ=0), not Pyrope
-  // feedforward pipeline stages (the cross-cycle timing check would otherwise
-  // fire when a reg q meets a combinational value).
-  print(std::format("::[lg=\"{}\", hdl]", lnast->get_top_module_name()));
+  // `timecheck=false` opts the re-compile out of the Pyrope timing / comb-cycle
+  // checks (plain regs = always_ff cycle-0 state, undriven wire = X, same-cycle
+  // wire ring not flagged as a comb loop) — the semantics a Verilog-imported unit
+  // needs. The former `lg="<name>"` module-name pin is GONE: the internal graph
+  // name is always the unique `file.entity` (Verilog flattens to the entity at
+  // emission), so re-emitting an inert `lg=` would only mislead. A re-compiled
+  // `fun3` is named `<file>.fun3` exactly as the original was.
+  print("::[timecheck=false]");
   emit_module_header(io_nid, is_mod);
   print(" {\n");
   ++depth;

@@ -2,7 +2,7 @@
 :name: mem_whole_coexist
 :type: equiv
 :verilog_top: mem_whole_coexist.coexist
-:pyrope_top: mem_whole_coexist.coexist
+:pyrope_top: coexist
 */
 
 // A whole-array `update` (`arr = inp`) COEXISTING with a per-entry write

@@ -2,7 +2,7 @@
 :name: mem_comptime_init_inferred
 :type: equiv
 :verilog_top: mem_comptime_init_inferred.mcii
-:pyrope_top: mem_comptime_init_inferred.mcii
+:pyrope_top: mcii
 */
 
 // 2f-mem_comptime_init — the INFERRED form: a reg with no array type whose

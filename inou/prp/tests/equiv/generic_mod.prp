@@ -2,7 +2,7 @@
 :name: generic_mod
 :type: equiv
 :verilog_top: generic_mod.top
-:pyrope_top: generic_mod.top
+:pyrope_top: top
 */
 
 // 2f-generics — a generic `mod` is a deferred template: each call site's

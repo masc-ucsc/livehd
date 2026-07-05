@@ -80,8 +80,9 @@ void sort_by_sink_pid(livehd::graph_util::Edge_vec& edges) {
 
 }  // namespace
 
-Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir, bool _srcmap)
-    : verbose(_verbose), odir(_odir), srcmap(_srcmap), nrunning(0) {
+Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir, bool _srcmap,
+                           const absl::flat_hash_map<std::string, std::string>* _flat_names)
+    : verbose(_verbose), odir(_odir), srcmap(_srcmap), nrunning(0), flat_names_(_flat_names) {
   static std::once_flag init_once;
   std::call_once(init_once, [] {
     // Full Verilog-2005 (IEEE 1364) + SystemVerilog (IEEE 1800-2017, Annex B)
@@ -443,6 +444,22 @@ std::string Cgen_verilog::get_scaped_name(std::string_view name) {
   }
 
   return res_name;
+}
+
+std::string Cgen_verilog::flat_module_name(std::string_view full) const {
+  // Verilog module names are flat: turn the internal hierarchical `file.entity`
+  // into a legal, collision-free bare name. The driver's map has the authoritative
+  // decision for every co-emitted graph (bare entity when unique, sanitized
+  // `file_entity` when two graphs share the entity). A name not in the map (a
+  // single-graph emit, or a reference to an external/black-box graph) falls back
+  // to the bare entity — the last '.'/'/'-separated component.
+  if (flat_names_ != nullptr) {
+    if (auto it = flat_names_->find(std::string(full)); it != flat_names_->end()) {
+      return it->second;
+    }
+  }
+  auto pos = full.find_last_of("./");
+  return std::string(pos == std::string_view::npos ? full : full.substr(pos + 1));
 }
 
 bool Cgen_verilog::sra_operand_signed(const hhds::Pin_class& dpin) {
@@ -1950,7 +1967,7 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
     auto iname = get_scaped_name(default_instance_name(node));
 
     note_src(fout, node);
-    fout->append(get_scaped_name(sub_io->get_name()), " ", iname, "(\n");
+    fout->append(get_scaped_name(flat_module_name(sub_io->get_name())), " ", iname, "(\n");
 
     bool first_entry = true;
 
@@ -2548,7 +2565,7 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   note_module(fout);
   fout->append("/* verilator lint_off WIDTH */\n");
   note_module(fout);
-  fout->append("module ", get_scaped_name(graph->get_name()), "(\n");
+  fout->append("module ", get_scaped_name(flat_module_name(graph->get_name())), "(\n");
 
   hhds::Graph* g = graph.get();
   create_module_io(fout, g);

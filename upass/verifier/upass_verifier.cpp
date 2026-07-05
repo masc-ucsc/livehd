@@ -327,7 +327,17 @@ upass::Emit_decision uPass_verifier::classify_func_call() {
 
   processed_cputs_keys.insert(dedup_key);
   ++cputs_count;
-  std::print(stderr, "prp:{}\n", strip_pyrope_quotes(val->to_pyrope()));
+  // Prefix every printed message with `file:line:cputs:` so the origin of a
+  // comptime print is always visible (mirrors the runtime puts/assert prefix).
+  const auto  span = span_from_nid(lm, fcall_nid);
+  std::string floc = span.file;
+  if (const auto slash = floc.find_last_of('/'); slash != std::string::npos) {
+    floc = floc.substr(slash + 1);  // basename only
+  }
+  if (floc.empty()) {
+    floc = "prp";
+  }
+  std::print(stderr, "{}:{}:cputs:{}\n", floc, span.start_line.value_or(0), strip_pyrope_quotes(val->to_pyrope()));
   return upass::Emit_decision::drop();
 }
 

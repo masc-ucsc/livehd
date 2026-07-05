@@ -153,6 +153,26 @@ std::string serialize_result(const Query_result& r) {
   }
   put_u32(b, static_cast<uint32_t>(r.checked_steps));
   put_u32(b, static_cast<uint32_t>(r.output_checks));
+  // Structured witness trace (the lecfail.prp reproduction sequence). Layout:
+  // reset_cycles, diverge_cycle (as u32; -1 -> 0xffffffff), diverge_outputs list,
+  // then the cycles: count, and per cycle {reset_asserted byte, inputs {count,
+  // per input name+value+width}}.
+  put_u32(b, static_cast<uint32_t>(r.trace.reset_cycles));
+  put_u32(b, static_cast<uint32_t>(r.trace.diverge_cycle));
+  put_u32(b, static_cast<uint32_t>(r.trace.diverge_outputs.size()));
+  for (const auto& s : r.trace.diverge_outputs) {
+    put_str(b, s);
+  }
+  put_u32(b, static_cast<uint32_t>(r.trace.cycles.size()));
+  for (const auto& c : r.trace.cycles) {
+    b.push_back(static_cast<char>(c.reset_asserted ? 1 : 0));
+    put_u32(b, static_cast<uint32_t>(c.inputs.size()));
+    for (const auto& in : c.inputs) {
+      put_str(b, in.name);
+      put_str(b, in.value);
+      put_u32(b, static_cast<uint32_t>(in.width));
+    }
+  }
   return b;
 }
 
@@ -222,6 +242,49 @@ bool deserialize_result(std::string_view b, Query_result& r) {
   }
   if (get_u32(b, oc)) {
     r.output_checks = static_cast<int>(oc);
+  }
+  // Structured witness trace (mirror serialize_result). Best-effort: an older /
+  // truncated blob simply leaves the trace empty (the fields are optional).
+  uint32_t rc = 0, dc = 0, dn = 0;
+  if (!get_u32(b, rc) || !get_u32(b, dc) || !get_u32(b, dn)) {
+    return true;
+  }
+  r.trace.reset_cycles  = static_cast<int>(rc);
+  r.trace.diverge_cycle = static_cast<int>(dc);  // 0xffffffff -> -1 round-trips
+  r.trace.diverge_outputs.clear();
+  for (uint32_t i = 0; i < dn; ++i) {
+    std::string s;
+    if (!get_str(b, s)) {
+      return true;
+    }
+    r.trace.diverge_outputs.push_back(std::move(s));
+  }
+  uint32_t nc = 0;
+  if (!get_u32(b, nc)) {
+    return true;
+  }
+  r.trace.cycles.clear();
+  for (uint32_t i = 0; i < nc; ++i) {
+    if (b.empty()) {
+      return true;
+    }
+    Witness_cycle cyc;
+    cyc.reset_asserted = b.front() != 0;
+    b.remove_prefix(1);
+    uint32_t ni = 0;
+    if (!get_u32(b, ni)) {
+      return true;
+    }
+    for (uint32_t j = 0; j < ni; ++j) {
+      Witness_in in;
+      uint32_t   w = 0;
+      if (!get_str(b, in.name) || !get_str(b, in.value) || !get_u32(b, w)) {
+        return true;
+      }
+      in.width = static_cast<int>(w);
+      cyc.inputs.push_back(std::move(in));
+    }
+    r.trace.cycles.push_back(std::move(cyc));
   }
   return true;
 }
@@ -1939,6 +2002,32 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
                     + std::to_string(N) + ": " + join_ordered(dtoks, 32);
         if (!itoks.empty()) {
           res.witness += " @ inputs " + join_ordered(itoks, 64);
+        }
+        // Structured, UNCAPPED reproduction trace (the display witness above caps
+        // its input tokens): every primary input's value for each cycle up to the
+        // first divergence, grouped by cycle, so `lhd lec` can regenerate the exact
+        // driving sequence into a Pyrope testbench (lecfail.prp). Same getValue
+        // reads as the display witness — read-only on already-solved terms.
+        res.trace.reset_cycles   = reset_hold;
+        res.trace.diverge_cycle  = first_bad;
+        res.trace.diverge_outputs = dtoks;
+        res.trace.cycles.assign(static_cast<size_t>(first_bad) + 1, Witness_cycle{});
+        for (int c = 0; c <= first_bad; ++c) {
+          res.trace.cycles[static_cast<size_t>(c)].reset_asserted = c < reset_hold;
+        }
+        for (const auto& in : wit_ins) {
+          if (in.cyc < 0 || in.cyc > first_bad) {
+            continue;
+          }
+          cvc5::Term v = solver.getValue(in.t);
+          if (v.isNull()) {
+            continue;
+          }
+          Witness_in wi;
+          wi.name  = in.name;
+          wi.value = v.getBitVectorValue(10);
+          wi.width = static_cast<int>(in.t.getSort().getBitVectorSize());
+          res.trace.cycles[static_cast<size_t>(in.cyc)].inputs.push_back(std::move(wi));
         }
       }
     } else {

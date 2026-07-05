@@ -14,7 +14,7 @@
 // The packed-selfref splitter cannot break it: the pack is an Or of SINGLE-BIT
 // `(x) << k` pieces whose footprints are unbounded (signed 1-bit), and in the
 // real corpus the root is an Xor of two packs, not an Or of disjoint fields.
-pub comb sim_loop_sbox_bit_selfref::[lg="sim_loop_sbox_bit_selfref", hdl](a:u3) -> (z:u3) {
+pub comb sim_loop_sbox_bit_selfref::[timecheck=false](a:u3) -> (z:u3) {
   wire w:u3
   w = (a & 1) | ((((w & 1) ^ ((a >> 1) & 1)) & 1) << 1) | (((((w >> 1) & 1) ^ ((a >> 2) & 1)) & 1) << 2)
   z = w

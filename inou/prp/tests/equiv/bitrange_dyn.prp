@@ -2,7 +2,7 @@
 :name: bitrange_dyn
 :type: equiv
 :verilog_top: bitrange_dyn.rsel
-:pyrope_top: bitrange_dyn.rsel
+:pyrope_top: rsel
 */
 
 // Runtime (non-comptime) contiguous bit-range select via the NATIVE

@@ -2,7 +2,7 @@
 :name: condout_const_arms
 :type: equiv
 :verilog_top: condout_const_arms.condout
-:pyrope_top: condout_const_arms.condout
+:pyrope_top: condout
 */
 
 // Regression (constprop miscompile, repro A): BOTH if-arm writes to an io

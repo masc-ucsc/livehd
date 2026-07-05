@@ -476,10 +476,15 @@ public:
   // ── explicit lgraph/module name override (`::[lg="name"]`; see 2f-lg) ──────
   std::string_view get_lg_name() const noexcept { return lg_name_; }
   void             set_lg_name(std::string_view name) { lg_name_ = name; }
-  // Effective artifact name: the `lg` override when set, else the mangled
-  // top_module_name. This is the GraphIO/library key and the emitted module
-  // name; it is NOT the `import("file.entity")` key (that stays top_module_name).
-  std::string_view get_graph_name() const noexcept { return lg_name_.empty() ? std::string_view(top_module_name) : std::string_view(lg_name_); }
+  // Effective artifact name = the mangled, always-unique top_module_name
+  // (`file.entity`). This is the GraphIO/library key AND the `import("file.entity")`
+  // key, so two files may define the same simple module name without colliding
+  // (Pyrope keeps the hierarchical `file.mod`; Verilog is where names must flatten).
+  // The `lg="…"` override no longer drives the internal name — a flat, legal
+  // Verilog module name is derived at emission time (see Cgen_verilog flat_module_name):
+  // the entity alone when unique, else the sanitized `file_entity`. `lg_name_` is
+  // still parsed/stored for backward compatibility but is inert for naming.
+  std::string_view get_graph_name() const noexcept { return std::string_view(top_module_name); }
 
   // ── tolg phase memo ───────────────────────────────────────────────────────
   // Lazily-filled cache of the pure tree-scan analyses upass.tolg runs while

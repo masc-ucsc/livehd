@@ -2,7 +2,7 @@
 :name: arr2d_dyn_sel
 :type: equiv
 :verilog_top: arr2d_dyn_sel.sel2d
-:pyrope_top: arr2d_dyn_sel.sel2d
+:pyrope_top: sel2d
 */
 
 // Pyrope reference for arr2d_dyn_sel.v: a runtime-indexed read of a 4-entry

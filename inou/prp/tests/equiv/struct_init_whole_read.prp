@@ -2,7 +2,7 @@
 :name: struct_init_whole_read
 :type: equiv
 :verilog_top: struct_init_whole_read_top
-:pyrope_top: struct_init_whole_read.top
+:pyrope_top: top
 :gold_reader: slang
 */
 

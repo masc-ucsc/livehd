@@ -2,7 +2,7 @@
 :name: flop_init_headroom
 :type: equiv
 :verilog_top: flop_init_headroom.top
-:pyrope_top: flop_init_headroom.top
+:pyrope_top: top
 */
 
 // Regression for the LEC "phantom headroom bit" false REFUTE (the

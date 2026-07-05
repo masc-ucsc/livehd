@@ -29,9 +29,11 @@ mkdir -p "$W"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # instance line in a module body is `\dut.<m>  u_...(`; the module DEFINITION
-# `module \dut.addone (` lives in that module's own .v file, so grepping the
-# PARENT's .v for the callee name finds only instances.
-has_inst() { grep -Eq '\\'"$2"'[[:space:]]+[A-Za-z_]' "$1"; }
+# `module addone (` lives in that module's own .v file, so grepping the PARENT's
+# .v for the callee name finds only instances. The instance TYPE is the FLAT
+# Verilog module name (`addone`, at line start); its instance NAME may be an
+# escaped `\u_dut.addone…`, so allow an optional `\` before the instance id.
+has_inst() { grep -Eq '^'"$2"'[[:space:]]+\\?[A-Za-z_]' "$1"; }
 
 # ── Design: a leaf comb, a comb that calls a comb, and a top that calls both,
 #    all with RUNTIME arguments (the module inputs) — the hardware path. ────────
@@ -51,23 +53,23 @@ EOF
 "$LHD" compile "$W/dut.prp" --top top \
   --emit-dir "lg:$W/off/" --emit-dir "verilog:$W/voff/" --workdir "$W/woff" -q >/dev/null 2>&1 \
   || fail "default compile failed"
-has_inst "$W/voff/dut.top.v" 'dut\.addone' || fail "default: top.v does not instantiate addone"
-has_inst "$W/voff/dut.top.v" 'dut\.twice'  || fail "default: top.v does not instantiate twice"
+has_inst "$W/voff/dut.top.v" 'addone' || fail "default: top.v does not instantiate addone"
+has_inst "$W/voff/dut.top.v" 'twice'  || fail "default: top.v does not instantiate twice"
 # the comb-calling-comb body instantiates the inner addone TWICE.
-n=$(grep -Ec '\\dut\.addone[[:space:]]+[A-Za-z_]' "$W/voff/dut.twice.v")
+n=$(grep -Ec '^addone[[:space:]]+\\?[A-Za-z_]' "$W/voff/dut.twice.v")
 [ "$n" -eq 2 ] || fail "default: twice.v should instantiate addone twice, found $n"
 echo "PASS(1): default instantiates the comb (incl. comb-in-comb)"
 
 # ── (2) O2 and explicit inline=true both flatten ──────────────────────────────
 "$LHD" compile "$W/dut.prp" --top top --recipe O2 \
   --emit-dir "verilog:$W/vo2/" --workdir "$W/wo2" -q >/dev/null 2>&1 || fail "O2 compile failed"
-if has_inst "$W/vo2/dut.top.v" 'dut\.(addone|twice)'; then
+if has_inst "$W/vo2/dut.top.v" '(addone|twice)'; then
   fail "O2: top.v instantiates the comb (expected flattened)"
 fi
 "$LHD" compile "$W/dut.prp" --top top --set compile.upass.inline=true \
   --emit-dir "lg:$W/on/" --emit-dir "verilog:$W/von/" --workdir "$W/won" -q >/dev/null 2>&1 \
   || fail "inline=true compile failed"
-if has_inst "$W/von/dut.top.v" 'dut\.(addone|twice)'; then
+if has_inst "$W/von/dut.top.v" '(addone|twice)'; then
   fail "inline=true: top.v instantiates the comb (expected flattened)"
 fi
 echo "PASS(2): --recipe O2 and inline=true flatten the comb into top"
@@ -117,7 +119,7 @@ pub comb mix(x:u8) -> (o:u8) {
 EOF
 "$LHD" compile "$W/mix.prp" --top mix \
   --emit-dir "verilog:$W/mixv/" --workdir "$W/mixw" -q >/dev/null 2>&1 || fail "mix compile failed"
-m=$(grep -Ec '\\mix\.addone[[:space:]]+[A-Za-z_]' "$W/mixv/mix.mix.v")
+m=$(grep -Ec '^addone[[:space:]]+\\?[A-Za-z_]' "$W/mixv/mix.mix.v")
 [ "$m" -eq 1 ] || fail "default: expected 1 addone instance (runtime call only), found $m — const-arg call did not fold"
 grep -Eq "4'sh4|8'sh04|'h4\b|\+ 4\b" "$W/mixv/mix.mix.v" || fail "default: const-arg addone(3) did not fold to the literal 4"
 echo "PASS(4): const-argument comb call still folds at the default (1 instance, +4 literal)"
@@ -136,7 +138,7 @@ EOF
   --emit-dir "verilog:$W/ovv/" --workdir "$W/ovw" -q >/dev/null 2>&1 \
   || fail "default: overload-dispatch design failed to compile"
 # `add` is an overload set, not a module — it must NOT appear as an instance.
-if has_inst "$W/ovv/ov.ov.v" 'ov\.add'; then
+if has_inst "$W/ovv/ov.ov.v" 'add'; then
   fail "default: overload `add` lowered to an instance (it has no Sub form)"
 fi
 echo "PASS(5): overload dispatch still inlines"

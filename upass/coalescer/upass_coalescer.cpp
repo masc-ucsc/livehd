@@ -8,6 +8,7 @@
 #include <print>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
@@ -36,19 +37,48 @@ void uPass_coalescer::set_options(const upass::Options_map& opts) {
 }
 
 void uPass_coalescer::begin_iteration() {
-  // A Verilog-origin unit (native slang reader, or a re-parsed v2prp file via
-  // its `::[hdl]` marker) is firtool/SSA-shaped: names are written once, so
-  // the park/flush machinery never gets to supersede anything. Measured on
-  // XiangShan's Rob.Rob: 3,147,133 parks yielded 8 DSE drops while costing
-  // 70s of an 80s walk (87%). Park nothing for such units — hand-written
-  // Pyrope (the `mut a=1; a+=1; a+=1` accumulator idiom this pass exists
-  // for) keeps the full coalescer. An explicit `coalescer:0/1` option owns
-  // the final say; this only flips the default.
-  if (enabled_forced) {
+  // Only a name written MORE THAN ONCE can be dead-store-eliminated, so parking
+  // a write-once name is pure overhead (measured 3,147,133 parks -> 8 DSE drops
+  // on XiangShan's Rob.Rob, 70s of an 80s walk = 87%). Pre-scan the unit and
+  // park only repeat-writes. Origin-AGNOSTIC: an SSA/firtool-shaped Verilog
+  // import AND an SSA-shaped hand-written Pyrope both skip the cost, while the
+  // `mut a=1; a+=1; a+=1` accumulator (a written N times) still coalesces. This
+  // replaces the former `is_verilog_origin` default-off, which was a proxy for
+  // "SSA-shaped" that mis-charged SSA-shaped Pyrope and needed the `::[hdl]`
+  // origin bit. An explicit `coalescer:0/1` (enabled_forced) still wins.
+  if (!enabled_forced) {
+    prescan_repeat_writes();
+  }
+}
+
+void uPass_coalescer::prescan_repeat_writes() {
+  repeat_names_.clear();
+  const auto& ln = lm->get_lnast();
+  if (!ln) {
     return;
   }
-  if (const auto& ln = lm->get_lnast(); ln && ln->is_verilog_origin()) {
-    enabled = false;
+  // A name is a write target when it is a node's FIRST child ref (op/assign/
+  // store LHS). We also count a few reads (e.g. an `if` cond ref) — a harmless
+  // OVER-count (adds at most some extra parking); we never UNDER-count, so a
+  // genuine repeat-write is never missed (missing one would silently drop a
+  // real DSE). Iterative walk to avoid deep recursion on large units.
+  absl::flat_hash_map<std::string_view, int> cnt;
+  std::vector<Lnast_nid>                      stack{ln->get_root()};
+  while (!stack.empty()) {
+    const Lnast_nid nid = stack.back();
+    stack.pop_back();
+    const Lnast_nid c0 = ln->get_first_child(nid);
+    if (!c0.is_invalid() && Lnast_ntype::is_ref(ln->get_type(c0))) {
+      ++cnt[ln->get_name(c0)];
+    }
+    for (const auto& c : ln->children(nid)) {
+      stack.push_back(c);
+    }
+  }
+  for (const auto& [n, c] : cnt) {
+    if (c >= 2) {
+      repeat_names_.insert(std::string(n));
+    }
   }
 }
 
@@ -156,6 +186,13 @@ void uPass_coalescer::handle_op() {
   // coalescer's own DSE supersedes the dead ones; the surviving last write is
   // emitted at flush (flush_one never comptime-drops a mut store).
   if (!mut_decl_names.contains(lhs_strip) && is_comptime(lhs_strip)) {
+    return;
+  }
+
+  // Park ONLY names written more than once (prescan_repeat_writes) — a write-once
+  // name has nothing to DSE, so parking it just costs a park + end-of-scope
+  // flush. A forced `coalescer:1` parks everything (skips the pre-scan filter).
+  if (!enabled_forced && !repeat_names_.contains(lhs_strip)) {
     return;
   }
 

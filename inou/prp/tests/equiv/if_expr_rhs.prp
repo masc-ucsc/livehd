@@ -2,7 +2,7 @@
 :name: if_expr_rhs
 :type: equiv
 :verilog_top: if_expr_rhs.ifsel
-:pyrope_top: if_expr_rhs.ifsel
+:pyrope_top: ifsel
 */
 
 // if/elif/else used as an RHS *expression value* (not statement form). Each

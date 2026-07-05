@@ -2,7 +2,7 @@
 :name: overload_dispatch
 :type: equiv
 :verilog_top: overload_dispatch.ovdispatch
-:pyrope_top: overload_dispatch.ovdispatch
+:pyrope_top: ovdispatch
 */
 
 // 2f-overload — overload dispatch is resolved at compile time, so the gathered

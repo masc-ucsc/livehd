@@ -9,6 +9,7 @@
 #include <unordered_set>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "upass_core.hpp"
@@ -275,7 +276,8 @@ public:
   // LIVEHD_UPASS_STATS: park/flush counters (see upass_runner's per-pass
   // dispatch timing — this fills in WHY the coalescer's share is what it is).
   void end_run() override;
-  // Auto-disable parking on Verilog-origin (SSA-shaped) units — see the cpp.
+  // Per-unit pre-scan: only names WRITTEN more than once can be DSE'd, so park
+  // only those (origin-agnostic; replaces the old is_verilog_origin default-off).
   void begin_iteration() override;
 
   // Cassert reads its operand and is treated as a barrier — flush so the
@@ -349,6 +351,14 @@ private:
   // wins (enabled_forced).
   bool enabled{true};
   bool enabled_forced{false};
+
+  // Names written (as an op/assign/store LHS) MORE THAN ONCE in this unit —
+  // the ONLY names a park can dead-store-eliminate. Rebuilt per begin_iteration
+  // by prescan_repeat_writes(); handle_op parks only these, so a write-once
+  // (SSA/firtool-shaped) name never pays the park/flush cost. Empty => enabled
+  // but nothing parks (the SSA-shaped-unit fast path, no origin check needed).
+  absl::flat_hash_set<std::string> repeat_names_;
+  void                             prescan_repeat_writes();
 
   std::size_t stat_parked{0};
   std::size_t stat_dse_dropped{0};

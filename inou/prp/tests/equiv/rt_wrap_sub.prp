@@ -2,7 +2,7 @@
 :name: rt_wrap_sub
 :type: equiv
 :verilog_top: rt_wrap_sub.rt_wrap_sub
-:pyrope_top: rt_wrap_sub.rt_wrap_sub
+:pyrope_top: rt_wrap_sub
 */
 
 // Runtime `wrap` of a SUBTRACTION narrowed into u32. The bit-selects give each

@@ -2,7 +2,7 @@
 :name: gen_type_cast
 :type: equiv
 :verilog_top: gen_type_cast.top
-:pyrope_top: gen_type_cast.top
+:pyrope_top: top
 */
 
 // FAILING regression repro (generics lowering gap): a generic type parameter

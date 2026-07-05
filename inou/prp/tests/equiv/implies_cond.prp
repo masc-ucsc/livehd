@@ -2,7 +2,7 @@
 :name: implies_cond
 :type: equiv
 :verilog_top: implies_cond.top
-:pyrope_top: implies_cond.top
+:pyrope_top: top
 */
 
 // Exercises `implies` (lowered to `!a or b`) in two contexts the scalar

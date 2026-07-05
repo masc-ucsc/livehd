@@ -2,7 +2,7 @@
 :name: match_no_else
 :type: equiv
 :verilog_top: match_no_else.msel
-:pyrope_top: match_no_else.msel
+:pyrope_top: msel
 */
 
 // B1-ergonomics: a `match` whose arms cover the full key space needs NO `else`.

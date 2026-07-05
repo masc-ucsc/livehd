@@ -2,7 +2,7 @@
 :name: mod_passthru
 :type: equiv
 :verilog_top: mod_passthru.passthru
-:pyrope_top: mod_passthru.passthru
+:pyrope_top: passthru
 */
 
 // Task 1r — a mod with a cycle-0 output: a combinational feedthrough is

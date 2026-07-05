@@ -2,7 +2,7 @@
 :name: reserved_word_signal
 :type: equiv
 :verilog_top: top
-:pyrope_top: reserved_word_signal.top
+:pyrope_top: top
 */
 
 // Regression for 2i-issues F (now FIXED): cgen must escape SystemVerilog-2012

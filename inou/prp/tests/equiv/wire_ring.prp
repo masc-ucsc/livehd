@@ -2,7 +2,7 @@
 :name: wire_ring
 :type: equiv
 :verilog_top: wire_ring.ring
-:pyrope_top: wire_ring.ring
+:pyrope_top: ring
 */
 
 // 2c-wire — a module-interconnect ring closed without ordering gymnastics: `sum`

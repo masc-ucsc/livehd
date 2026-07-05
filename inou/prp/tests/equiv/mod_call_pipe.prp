@@ -2,7 +2,7 @@
 :name: mod_call_pipe
 :type: equiv
 :verilog_top: mod_call_pipe.top
-:pyrope_top: mod_call_pipe.top
+:pyrope_top: top
 */
 
 // WORKS: pipe[1..=10] mul(a:u16, b:u16) -> (c:u32) { c = a * b }

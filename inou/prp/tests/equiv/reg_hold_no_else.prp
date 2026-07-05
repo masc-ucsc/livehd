@@ -2,7 +2,7 @@
 :name: reg_hold_no_else
 :type: equiv
 :verilog_top: reg_hold_no_else.regfile
-:pyrope_top: reg_hold_no_else.regfile
+:pyrope_top: regfile
 */
 
 // Regression for the "conditional reg write with no covering else does NOT

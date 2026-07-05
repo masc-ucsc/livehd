@@ -2,7 +2,7 @@
 :name: reg_partial_write_chain
 :type: equiv
 :verilog_top: reg_partial_write_chain.top
-:pyrope_top: reg_partial_write_chain.top
+:pyrope_top: top
 */
 
 // Regression for the tolg partial-write CHAIN miscompile (the

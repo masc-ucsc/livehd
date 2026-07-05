@@ -2,7 +2,7 @@
 :name: io_bundle_selfref
 :type: equiv_slang
 :verilog_top: io_bundle_selfref.top
-:pyrope_top: io_bundle_selfref.top
+:pyrope_top: top
 */
 
 // Pyrope reference for io_bundle_selfref.v: `io_c = io_b & io_a` (the struct

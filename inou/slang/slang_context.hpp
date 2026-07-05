@@ -80,6 +80,7 @@ private:
   absl::flat_hash_set<std::string>                            used_names_;
   absl::flat_hash_set<const slang::ast::Symbol*>              input_syms_;
   absl::flat_hash_set<const slang::ast::Symbol*>              output_syms_;
+  absl::flat_hash_map<const slang::ast::Symbol*, std::pair<int, bool>> output_info_;  // {flat bits, is_signed} per output, for the body-top X-default poison-init of non-reg outputs
   absl::flat_hash_set<const slang::ast::Symbol*>              reg_syms_;   // clocked state vars
   absl::flat_hash_set<const slang::ast::Symbol*>              wire_syms_;  // 2c-wire — comb-cycle nets: declared `wire` so reads are position-independent
   absl::flat_hash_set<const slang::ast::Symbol*>              latch_syms_; // level-sensitive latch state vars (subset of reg_syms_)

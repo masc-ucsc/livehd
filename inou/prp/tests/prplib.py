@@ -577,6 +577,14 @@ class PrpRunner:
         if not pyrope_top:
             gen_mods = self._verilog_modules(ref)
             pyrope_top = gen_mods[0] if len(gen_mods) == 1 else verilog_top
+        # BOTH sides here are cgen-emitted Verilog (ref = .prp->cgen, impl =
+        # golden.v->slang->cgen), whose module names are FLAT — internal graph
+        # names are the hierarchical `file.entity`, but Verilog flattens to the
+        # entity. A dotted golden/header top (`const_bit_select.top`) must be
+        # reduced to that flat entity (`top`) to resolve in the emitted netlists.
+        flat = lambda t: t.rsplit('.', 1)[-1] if t and '.' in t else t
+        verilog_top = flat(verilog_top)
+        pyrope_top  = flat(pyrope_top)
 
         check = subprocess.Popen(
             ['./inou/yosys/lgcheck', '--reference', ref, '--implementation', impl,

@@ -156,6 +156,30 @@ fi
 if [ "${GOLD_TOP}" == "" ]; then GOLD_TOP=$OPT_TOP; fi
 if [ "${GATE_TOP}" == "" ]; then GATE_TOP=$OPT_TOP; fi
 
+# cgen now emits FLAT Verilog module names (`fun3`) while goldens/callers may
+# still pass the hierarchical internal name (`file.fun3`) — Pyrope keeps the
+# `file.entity` graph name, Verilog flattens to the entity. Resolve each side's
+# requested top against the modules ACTUALLY present in that file: keep an exact
+# (bare or `\`-escaped) match, else fall back to the entity (after the last '.'),
+# else leave it unchanged (yosys then reports a clear not-found). This makes
+# flat<->dotted transparent on each side without every caller knowing the form.
+resolve_top() {
+  local f="$1" want="$2"
+  [ -z "${want}" ] && { echo ""; return; }
+  [ -f "${f}" ] || { echo "${want}"; return; }
+  local re="${want//./\\.}"
+  if grep -qE "^module[[:space:]]+\\\\?${re}[[:space:](]" "${f}" 2>/dev/null; then
+    echo "${want}"; return
+  fi
+  local ent="${want##*.}"
+  if [ "${ent}" != "${want}" ] && grep -qE "^module[[:space:]]+\\\\?${ent}[[:space:](]" "${f}" 2>/dev/null; then
+    echo "${ent}"; return
+  fi
+  echo "${want}"
+}
+GOLD_TOP=$(resolve_top "${GOLD}" "${GOLD_TOP}")
+GATE_TOP=$(resolve_top "${GATE}" "${GATE_TOP}")
+
 fm_top=$OPT_TOP
 if [ "${fm_top}" == "" ]; then
   fm_top=$GATE_TOP

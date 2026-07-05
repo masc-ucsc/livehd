@@ -2,7 +2,7 @@
 :name: reg_attr_override
 :type: equiv
 :verilog_top: reg_attr_override.blink
-:pyrope_top: reg_attr_override.blink
+:pyrope_top: blink
 */
 
 // 2d-reg — per-reg flop-attr overrides beat the upass.reset_style flag

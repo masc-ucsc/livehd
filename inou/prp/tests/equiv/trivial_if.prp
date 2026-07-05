@@ -2,7 +2,7 @@
 :name: trivial_if
 :type: equiv
 :verilog_top: trivial_if.fun3
-:pyrope_top: trivial_if.fun3
+:pyrope_top: fun3
 */
 
 pub comb fun3(a:u3, b:u7, cond:boolean) -> (res:u4) {

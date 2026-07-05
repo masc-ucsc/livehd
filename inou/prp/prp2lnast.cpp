@@ -3659,13 +3659,27 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
         } else if (it == "identifier" || it == "ref_identifier") {
           key = trim(get_text(item));
         }
+        if (key == "timecheck") {
+          // `timecheck=false` opts a lambda OUT of the Pyrope timing / comb-cycle
+          // checks: a plain reg is an always_ff cycle-0 STATE element (not a
+          // feedforward pipeline stage), an undriven wire / unresolved comb-cycle
+          // net reads as X (not a hard error), and a same-cycle ring through a
+          // wire is not flagged as a combinational loop. inou.slang sets it for
+          // every Verilog-imported unit (which routinely carries these
+          // firtool/handshake shapes) and prp_writer re-emits it. `timecheck=true`
+          // (the default) keeps all checks.
+          const std::string_view val = ts_node_is_null(rv) ? std::string_view{} : trim(get_text(rv));
+          if (val == "false" || val == "0") {
+            has_hdl = true;
+          } else if (!val.empty() && val != "true" && val != "1") {
+            report_error(item, "timecheck-bad-value", "type",
+                         "the `timecheck` attribute must be `false` (opt out of the timing/comb-loop checks) or `true`",
+                         "write `timecheck=false`");
+          }
+          continue;
+        }
         if (key == "hdl") {
-          // Marker emitted by upass/prp_writer on a Verilog-imported (v2prp)
-          // unit: its plain regs are always_ff STATE elements (σ=0), not Pyrope
-          // feedforward pipeline stages.  Sets the same provenance the slang
-          // reader sets directly, so the tolg reg-timing analysis treats the
-          // re-compiled regs as state and does not trip the cross-cycle check.
-          has_hdl = true;
+          has_hdl = true;  // DEPRECATED spelling of `timecheck=false` (same effect)
           continue;
         }
         if (key != "lg") {

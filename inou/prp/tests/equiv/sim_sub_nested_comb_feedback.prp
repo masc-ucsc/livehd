@@ -2,7 +2,7 @@
 :name: sim_sub_nested_comb_feedback
 :type: equiv
 :verilog_top: sim_sub_nested_comb_feedback_top
-:pyrope_top: sim_sub_nested_comb_feedback_top
+:pyrope_top: top
 */
 
 // FALSE combinational loop through a PURE-COMB sub-instance that itself
@@ -13,17 +13,17 @@
 // callee_is_pure_comb() rejects a callee containing Ntype_op::Sub and the
 // flatten is single-level non-recursive, so this nested variant still errs
 // `comb-loop-through-instance` (input `c` fed by the instance's own output).
-pub mod leaf_add::[lg="ssncf_leaf_add", hdl](a:u8, b:u8) -> (s:u9@[]) {
+pub mod leaf_add::[timecheck=false](a:u8, b:u8) -> (s:u9@[]) {
   s = a + b
 }
 
-pub mod mid::[lg="ssncf_mid", hdl](a:u8, b:u8, c:u8, d:u8) -> (x:u9@[], y:u9@[]) {
+pub mod mid::[timecheck=false](a:u8, b:u8, c:u8, d:u8) -> (x:u9@[], y:u9@[]) {
   mut l = leaf_add::[name=u_leaf](a = a, b = b)
   x = l.s
   y = c + d
 }
 
-pub mod top::[lg="sim_sub_nested_comb_feedback_top", hdl](a:u8, b:u8, d:u8, topx:u8) -> (x_out:u9@[0], y_out:u9@[0]) {
+pub mod top::[timecheck=false](a:u8, b:u8, d:u8, topx:u8) -> (x_out:u9@[0], y_out:u9@[0]) {
   wire x:u9
   wire c:u8
   mut m = mid::[name=u](a = a, b = b, c = c, d = d)

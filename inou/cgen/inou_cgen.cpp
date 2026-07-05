@@ -48,11 +48,48 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
   // but that was an unused performance optimization; build-level parallelism
   // comes from independent lhd invocations. If sim/cgen ever needs
   // intra-process parallelism it will be reintroduced via taskflow.)
+  // Internal graph names are the hierarchical, always-unique `file.entity`
+  // (two files may define the same simple module name). Verilog module names are
+  // flat, so pre-compute one flat name per co-emitted graph, shared by every
+  // module header and sub-instance reference: a bare `entity` when it is unique
+  // across this set, else the sanitized `file_entity` (keeps the netlist
+  // collision-free without reintroducing the `lg="…"` override).
+  absl::flat_hash_map<std::string, std::string> flat_names;
+  {
+    absl::flat_hash_map<std::string, std::vector<std::string>> by_entity;
+    for (const auto& g : var.graphs) {
+      if (!g) {
+        continue;
+      }
+      std::string full(g->get_name());
+      auto        pos = full.find_last_of("./");
+      by_entity[pos == std::string::npos ? full : full.substr(pos + 1)].push_back(std::move(full));
+    }
+    auto sanitize = [](std::string s) {
+      for (auto& c : s) {
+        const bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+        if (!ok) {
+          c = '_';
+        }
+      }
+      return s;
+    };
+    for (auto& [entity, fulls] : by_entity) {
+      if (fulls.size() == 1) {
+        flat_names.emplace(fulls.front(), entity);  // unique entity -> clean flat name
+      } else {
+        for (auto& f : fulls) {
+          flat_names.emplace(f, sanitize(f));  // shared entity -> sanitized file_entity
+        }
+      }
+    }
+  }
+
   for (const auto& g : var.graphs) {
     if (!g) {
       continue;
     }
-    Cgen_verilog p(verbose, dir, srcmap);
+    Cgen_verilog p(verbose, dir, srcmap, &flat_names);
     p.do_from_graph(g);
   }
 }

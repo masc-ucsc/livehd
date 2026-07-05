@@ -1133,6 +1133,15 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
     if (!entity.empty() && entity.front() == '%') {
       continue;
     }
+    // Mirror inou.cgen.sim's file-name sanitization: a '/' from a path-qualified
+    // import (`../pp.Foo`) is a directory separator that cgen collapses to '_'
+    // for the emitted .hpp/.cpp — the existence check and the BUILD srcs list
+    // must reference the SAME sanitized basename.
+    for (char& c : gn) {
+      if (c == '/' || c == '\\') {
+        c = '_';
+      }
+    }
     names.emplace_back(std::move(gn));
   }
   std::sort(names.begin(), names.end());
@@ -1145,6 +1154,66 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
     }
   }
   return names;
+}
+
+// Locate a header staged in the bazel RUNFILES of the running binary (e.g. the
+// `cc_direct_headers` sim-runtime deps): walk up from the executable dir to a
+// `*.runfiles` ancestor and bounded-search it for `header`, returning its
+// directory (cached per header). Empty when there is no runfiles layout (a
+// plain dev checkout) — the caller then falls back to the sibling ../hlop. This
+// makes `lhd sim`'s host-compile self-sufficient in any runfiles context (a
+// child sim spawned by `lhd lec`, a test that data-deps //lhd, ...), not only
+// from a repo-root cwd where ../hlop resolves.
+std::string find_header_in_runfiles(std::string_view header) {
+  static absl::flat_hash_map<std::string, std::string> cache;
+  std::string                                          key{header};
+  if (auto it = cache.find(key); it != cache.end()) {
+    return it->second;
+  }
+  // Candidate runfiles roots. `get_exe_path()` is symlink-RESOLVED (proc_pidpath
+  // / readlink) so it usually points OUTSIDE the runfiles tree — the reliable
+  // source is bazel's RUNFILES_DIR / TEST_SRCDIR env (set for a `bazel test`/`run`
+  // and inherited by a child `lhd sim` spawned by `lhd lec`); the exe-ancestor
+  // walk is a backstop for a genuinely in-runfiles executable.
+  std::vector<fs::path> roots;
+  for (const char* env : {"RUNFILES_DIR", "TEST_SRCDIR"}) {
+    if (const char* v = std::getenv(env); v != nullptr && *v != 0) {
+      roots.emplace_back(v);
+    }
+  }
+  for (fs::path p = file_utils::get_exe_path(); !p.empty() && p != p.root_path(); p = p.parent_path()) {
+    if (p.filename().string().find(".runfiles") != std::string::npos) {
+      roots.push_back(p);
+      break;
+    }
+  }
+  // Runfiles stage each external repo as a direct child; the sim headers live at
+  // <repo>/hlop/<h> (hlop), <repo>/src/<h> (iassert), or flat. Probe those bounded
+  // candidates per child — access() follows any repo symlink, so no recursive walk
+  // (the runfiles tree has symlink cycles a naive follow-symlinks recursion hangs on).
+  std::string     result;
+  std::error_code ec;
+  for (const auto& root : roots) {
+    for (fs::directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end;
+         it != end && result.empty(); it.increment(ec)) {
+      if (ec) {
+        ec.clear();
+        continue;
+      }
+      for (const char* sub : {"", "hlop", "src"}) {
+        fs::path cand = (*sub != 0) ? it->path() / sub / header : it->path() / header;
+        if (::access(cand.c_str(), R_OK) == 0) {
+          result = cand.parent_path().string();
+          break;
+        }
+      }
+    }
+    if (!result.empty()) {
+      break;
+    }
+  }
+  cache.emplace(std::move(key), result);
+  return result;
 }
 
 // hlop checkout for the generated MODULE.bazel: --set compile.cgen.sim_hlop=PATH
@@ -1171,7 +1240,7 @@ std::string sim_hlop_include_dir(const Options& opts) {
       return cand;
     }
   }
-  return "";
+  return find_header_in_runfiles("slop.hpp");  // bazel runfiles fallback
 }
 
 // The `-I` directory that resolves `#include "iassert.hpp"` (slop.hpp pulls it
@@ -1195,7 +1264,7 @@ std::string sim_iassert_include_dir(const Options& opts) {
       return cand;
     }
   }
-  return "";
+  return find_header_in_runfiles("iassert.hpp");  // bazel runfiles fallback
 }
 
 // Host C++ compiler for the fast (header-only + optional VCD) sim build. The Slop
@@ -2984,8 +3053,24 @@ void sim_command(Options& opts, Result& res) {
   if (opts.files.empty()) {
     throw Lhd_error{"usage", "sim requires a .prp file", "e.g. `lhd sim foo.prp` or `lhd sim foo.prp test.name`"};
   }
-  const std::string file       = opts.files[0];
-  const std::string test_sel   = opts.files.size() > 1 ? opts.files[1] : "";
+  // Positional args: every `.prp` is a SOURCE — `lhd sim a.prp b.prp top.prp`
+  // loads all three so the top's `import("a")`/`import("b")` resolve to the
+  // co-loaded units (no relative path or `-I` needed). A lone non-`.prp` token is
+  // the test selector. The LAST source is the primary, test-containing file;
+  // any earlier sources are the units it imports.
+  std::vector<std::string> sources;
+  std::string              test_sel;
+  for (const auto& f : opts.files) {
+    if (str_tools::ends_with(f, ".prp")) {
+      sources.push_back(f);
+    } else {
+      test_sel = f;
+    }
+  }
+  if (sources.empty()) {
+    throw Lhd_error{"usage", "sim requires a .prp file", "e.g. `lhd sim foo.prp` or `lhd sim foo.prp test.name`"};
+  }
+  const std::string file       = sources.back();
   const bool        setup_only = opts.sim_setup_only;
   const bool        run_only   = opts.sim_run_only;
   const bool        list_only  = opts.sim_list_tests;
@@ -3107,7 +3192,7 @@ void sim_command(Options& opts, Result& res) {
   if (!run_only) {
     ensure_dir(simdir);
     opts.language = "pyrope";
-    opts.files    = {file};  // keep only the source from the positional list
+    opts.files    = sources;  // compile ALL positional sources (imports resolve across them)
     if (vcd_on) {
       opts.sets.emplace_back("compile.sim.vcd", "1");  // make cgen_sim emit the VCD machinery
     }
@@ -4002,7 +4087,588 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   return top_result;
 }
 
+// ===== lecfail witness reproduction (`lhd lec` + --workdir) ==================
+// On a REFUTED verdict with a reproducible BMC trace, write a self-contained
+// Pyrope testbench (lec.prpfail, default lecfail.prp) that instantiates BOTH
+// designs inside one wrapper module, drives the counterexample input sequence,
+// and (with lec.prpfailrun) runs `lhd sim` to dump ONE VCD (lecfail.vcd) so the
+// impl-vs-ref divergence is visualized / re-runnable. Every step is best-effort:
+// a side that cannot re-emit as Pyrope (lg:/yosys netlists have no LNAST), a
+// name clash, or a sim build error is a WARNING, never a hard failure — the LEC
+// verdict already stands on its own.
+
+// One re-emitted Pyrope module: name + parsed header IO + full source text (the
+// emitted `::[lg="..", hdl]` attribute is kept verbatim; a fresh sim compile
+// ignores the stale `lg=` reference — validated).
+struct Lecfail_mod {
+  std::string                                      name;
+  std::string                                      text;     // full module source
+  std::vector<std::pair<std::string, std::string>> inputs;   // {name, ":type" suffix or ""}
+  std::vector<std::pair<std::string, std::string>> outputs;  // {name, ":type@[..]" suffix or ""}
+};
+
+// Simple (unqualified) module name: the tail after the last '.' (a graph named
+// "impl.dut" re-emits as `mod dut`).
+std::string lecfail_simple_name(std::string_view n) {
+  auto dot = n.rfind('.');
+  return std::string(dot == std::string_view::npos ? n : n.substr(dot + 1));
+}
+
+// Split a comma-separated IO list ("en, din:u8") into {name, ":type" suffix}.
+void lecfail_parse_io(std::string_view list, std::vector<std::pair<std::string, std::string>>& out) {
+  size_t i = 0;
+  while (i <= list.size()) {
+    size_t           c    = list.find(',', i);
+    std::string_view item = list.substr(i, (c == std::string_view::npos ? list.size() : c) - i);
+    size_t           b    = item.find_first_not_of(" \t\r\n");
+    size_t           e    = item.find_last_not_of(" \t\r\n");
+    if (b != std::string_view::npos) {
+      item             = item.substr(b, e - b + 1);
+      size_t colon     = item.find(':');
+      if (colon == std::string_view::npos) {
+        out.emplace_back(std::string(item), std::string{});
+      } else {
+        out.emplace_back(std::string(item.substr(0, colon)), std::string(item.substr(colon)));
+      }
+    }
+    if (c == std::string_view::npos) {
+      break;
+    }
+    i = c + 1;
+  }
+}
+
+// Parse `... mod NAME[::[..]](in..) -> (out..) {` from a module's source. The
+// attribute block and types carry no parens, so the first '(' after the name is
+// the input list. Returns false if no `mod` header is present (e.g. an empty
+// file-level unit).
+bool lecfail_parse_header(std::string_view text, Lecfail_mod& m) {
+  size_t mp = text.find("mod ");
+  if (mp == std::string_view::npos) {
+    return false;
+  }
+  size_t p  = mp + 4;
+  size_t ns = p;
+  while (p < text.size() && text[p] != ':' && text[p] != '(' && text[p] != ' ' && text[p] != '\t' && text[p] != '\n') {
+    ++p;
+  }
+  m.name.assign(text.substr(ns, p - ns));
+  if (m.name.empty()) {
+    return false;
+  }
+  size_t io = text.find('(', p);
+  if (io == std::string_view::npos) {
+    return false;
+  }
+  size_t ic = text.find(')', io);
+  if (ic == std::string_view::npos) {
+    return false;
+  }
+  size_t body  = text.find('{', ic);
+  size_t arrow = text.find("->", ic);
+  if (arrow != std::string_view::npos && (body == std::string_view::npos || arrow < body)) {
+    size_t oo = text.find('(', arrow);
+    size_t oc = oo == std::string_view::npos ? std::string_view::npos : text.find(')', oo);
+    if (oo != std::string_view::npos && oc != std::string_view::npos && (body == std::string_view::npos || oc < body)) {
+      lecfail_parse_io(text.substr(oo + 1, oc - oo - 1), m.outputs);
+    }
+  }
+  lecfail_parse_io(text.substr(io + 1, ic - io - 1), m.inputs);
+  return true;
+}
+
+// Read every *.prp in `dir` (one module per file) and parse its header.
+std::vector<Lecfail_mod> lecfail_parse_dir(const std::string& dir) {
+  std::vector<Lecfail_mod> mods;
+  std::error_code          ec;
+  for (auto& de : fs::directory_iterator(dir, ec)) {
+    if (!de.is_regular_file() || de.path().extension() != ".prp") {
+      continue;
+    }
+    std::ifstream     ifs(de.path());
+    std::stringstream ss;
+    ss << ifs.rdbuf();
+    Lecfail_mod m;
+    if (!lecfail_parse_header(ss.str(), m)) {
+      continue;  // empty file-level unit: no `mod`
+    }
+    m.text = ss.str();
+    mods.push_back(std::move(m));
+  }
+  std::sort(mods.begin(), mods.end(), [](const Lecfail_mod& a, const Lecfail_mod& b) { return a.name < b.name; });
+  return mods;
+}
+
+// Rename module `from` -> `to` ONLY at a definition (`mod from`) or an
+// instantiation (`from(`) site — never inside a string/type/signal (so a stale
+// `lg="side.from"` reference and any signal named like a module are untouched).
+std::string lecfail_rename(const std::string& s, const std::string& from, const std::string& to) {
+  auto is_ident = [](char c) { return (std::isalnum(static_cast<unsigned char>(c)) != 0) || c == '_'; };
+  std::string out;
+  out.reserve(s.size());
+  size_t i = 0;
+  while (i < s.size()) {
+    if (s.compare(i, from.size(), from) == 0) {
+      bool   lb = i == 0 || !is_ident(s[i - 1]);
+      size_t j  = i + from.size();
+      bool   rb = j >= s.size() || !is_ident(s[j]);
+      if (lb && rb) {
+        bool def  = i >= 4 && s.compare(i - 4, 4, "mod ") == 0;
+        bool inst = j < s.size() && s[j] == '(';
+        if (def || inst) {
+          out += to;
+          i = j;
+          continue;
+        }
+      }
+    }
+    out += s[i];
+    ++i;
+  }
+  return out;
+}
+
+// Give each UNTYPED module parameter an explicit `:u<width>` when its name is a
+// known primary input (from the witness trace). prp_writer re-emits inputs
+// untyped (`mod adder(en)`), but Pyrope needs an explicit width at an internal
+// `mod` INSTANTIATION boundary — so a hierarchical DUT (a top whose sub-module
+// takes a threaded top input) otherwise fails to re-compile. The top's own
+// inputs are typed by the wrapper regardless; this fixes the internal boundaries.
+std::string lecfail_type_params(const std::string& text, const absl::flat_hash_map<std::string, int>& width_of) {
+  size_t mp = text.find("mod ");
+  if (mp == std::string::npos) {
+    return text;
+  }
+  size_t io = text.find('(', mp);
+  size_t ic = io == std::string::npos ? std::string::npos : text.find(')', io);
+  if (io == std::string::npos || ic == std::string::npos || ic <= io + 1) {
+    return text;  // no header params
+  }
+  const std::string params = text.substr(io + 1, ic - io - 1);
+  std::string       rebuilt;
+  bool              changed = false;
+  size_t            i       = 0;
+  while (i <= params.size()) {
+    size_t      c   = params.find(',', i);
+    std::string raw = params.substr(i, (c == std::string::npos ? params.size() : c) - i);
+    size_t      b = raw.find_first_not_of(" \t");
+    size_t      e = raw.find_last_not_of(" \t");
+    if (b != std::string::npos) {
+      std::string name = raw.substr(b, e - b + 1);
+      if (name.find(':') == std::string::npos) {  // untyped
+        if (auto it = width_of.find(name); it != width_of.end()) {
+          raw     = name + std::format(":u{}", it->second);
+          changed = true;
+        }
+      }
+    }
+    rebuilt += (rebuilt.empty() ? "" : ", ") + raw;
+    if (c == std::string::npos) {
+      break;
+    }
+    i = c + 1;
+  }
+  if (!changed) {
+    return text;
+  }
+  return text.substr(0, io + 1) + rebuilt + text.substr(ic);
+}
+
+// Re-emit one --impl/--ref side as Pyrope (LNAST -> .prp) by shelling to a fresh
+// `lhd compile ... --emit-dir pyrope:` (clean process isolation; reuses the
+// tested front-end + prp_writer flow). Returns false when the side has no LNAST
+// path (lg:/yosys-verilog) or the compile fails.
+bool lecfail_emit_side(const std::string& lhd_bin, const Options& opts, const std::string& kind, const std::string& path,
+                       const std::string& outdir, const std::string& scratch, const std::string& log) {
+  ensure_dir(outdir);
+  ensure_dir(scratch);
+  std::string sidearg = kind == "lg" ? "lg:" + path : (kind == "ln" ? "ln:" + path : path);
+  std::string cmd     = shell_quote(lhd_bin) + " compile " + shell_quote(sidearg) + " --emit-dir "
+                    + shell_quote("pyrope:" + outdir) + " --workdir " + shell_quote(scratch);
+  if (kind == "verilog") {
+    cmd += " --reader " + shell_quote(opts.reader);
+  }
+  cmd += " >> " + shell_quote(log) + " 2>&1";
+  int st = std::system(cmd.c_str());
+  return WIFEXITED(st) && WEXITSTATUS(st) == 0;
+}
+
+// True when the .prp at `path` declares `top` as a `pub` lambda — the precondition
+// for `import("<stem>.<top>")` to resolve it. (A lec top compiled from a bare
+// `mod dut` is not importable; the generator then falls back to inlining.)
+// Text scan: a `pub <kind> <top>` where <top> ends the token (`(`, `:`, or space).
+bool lecfail_prp_top_is_pub(const std::string& path, const std::string& top) {
+  std::ifstream ifs(path);
+  if (!ifs.is_open()) {
+    return false;
+  }
+  std::stringstream ss;
+  ss << ifs.rdbuf();
+  const std::string text = ss.str();
+  for (const char* kw : {"mod", "comb", "pipe", "fluid"}) {
+    const std::string needle = std::string("pub ") + kw + " " + top;
+    for (size_t p = text.find(needle); p != std::string::npos; p = text.find(needle, p + 1)) {
+      const size_t e     = p + needle.size();
+      const char   after = e < text.size() ? text[e] : ' ';
+      if (after == '(' || after == ':' || after == ' ' || after == '\t' || after == '\n' || after == '\r') {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// The generator proper. `impl_top`/`ref_top` are the two designs' TOP graph names
+// (unqualified names are matched against the re-emitted modules).
+void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_result& r, const std::string& impl_top_full,
+                          const std::string& ref_top_full, const std::string& prpfail, bool run_sim) {
+  auto skip = [&](std::string_view why) {
+    livehd::diag::info("pass.lec", "lecfail-skip", "io")
+        .msg("lec.prpfail witness testbench not generated: {}", why)
+        .emit();
+  };
+  if (r.trace.empty()) {
+    skip("the verdict carries no reproducible input trace (inductive single-step CEX, or witnesses disabled)");
+    return;
+  }
+
+  const std::string prpfail_path = prpfail.find('/') != std::string::npos ? prpfail : opts.workdir + "/" + prpfail;
+  // Test name = the .prp basename stem, sanitized to a Pyrope identifier; it is
+  // also the sole sim instance's VCD stem (`<workdir>/<stem>.vcd`).
+  std::string stem = fs::path(prpfail_path).stem().string();
+  std::string test_name;
+  for (char c : stem) {
+    test_name += (std::isalnum(static_cast<unsigned char>(c)) != 0) ? c : '_';
+  }
+  if (test_name.empty() || (std::isdigit(static_cast<unsigned char>(test_name[0])) != 0)) {
+    test_name = "lecfail_" + test_name;
+  }
+
+  // Phase 2/3 of the lec-on-failure flow: re-emitting both sides as Pyrope shells
+  // out to `lhd` twice, so announce the target up front (the write itself is quick;
+  // the side re-emit is the slow part).
+  livehd::diag::info("pass.lec", "lecfail-creating-prp", "progress")
+      .msg("lec: creating counterexample testbench {}", prpfail_path)
+      .emit();
+
+  const std::string lhd_bin  = file_utils::get_exe_path() + "/lhd";
+  const std::string impl_dir = opts.workdir + "/lecfail_impl_prp";
+  const std::string ref_dir  = opts.workdir + "/lecfail_ref_prp";
+  const std::string log      = next_log_path(opts, "lec.prpfail");
+  if (!lecfail_emit_side(lhd_bin, opts, opts.impl_kind, opts.impl_path, impl_dir, opts.workdir + "/lecfail_impl_w", log)
+      || !lecfail_emit_side(lhd_bin, opts, opts.ref_kind, opts.ref_path, ref_dir, opts.workdir + "/lecfail_ref_w", log)) {
+    skip(std::format("a side could not be re-emitted as Pyrope (lg:/yosys-verilog sides have no LNAST); see {}", log));
+    return;
+  }
+
+  std::vector<Lecfail_mod> impl_mods = lecfail_parse_dir(impl_dir);
+  std::vector<Lecfail_mod> ref_mods  = lecfail_parse_dir(ref_dir);
+  if (impl_mods.empty() || ref_mods.empty()) {
+    skip("no Pyrope modules were re-emitted for a side");
+    return;
+  }
+
+  std::string      impl_top = lecfail_simple_name(impl_top_full);
+  std::string      ref_top  = lecfail_simple_name(ref_top_full);
+  const std::string wrapper = "__lecfail_dut_pair";
+
+  // Prefer IMPORTING the original sources: the testbench then references the two
+  // designs by `import("<file>.<top>")` instead of inlining renamed copies, so
+  // fixing a bug in the original .prp and re-running the SAME lecfail.prp picks
+  // up the fix. Requires both sides to be Pyrope files (an lg:/verilog side has
+  // no editable .prp to iterate on) with DISTINCT file stems — the stem is the
+  // import unit name, and two same-named units would collide. Otherwise fall
+  // back to the self-contained inline form (renamed copies) built below.
+  const std::string impl_stem = fs::path(opts.impl_path).stem().string();
+  const std::string ref_stem  = fs::path(opts.ref_path).stem().string();
+  const bool        prp_pair  = opts.impl_kind == "pyrope" && opts.ref_kind == "pyrope" && !impl_stem.empty()
+                        && !ref_stem.empty() && impl_stem != ref_stem;
+  const bool impl_pub  = prp_pair && lecfail_prp_top_is_pub(opts.impl_path, impl_top);
+  const bool ref_pub   = prp_pair && lecfail_prp_top_is_pub(opts.ref_path, ref_top);
+  const bool can_import = prp_pair && impl_pub && ref_pub;
+
+  // A Pyrope pair that qualifies EXCEPT for a non-`pub` top gets the inline copy
+  // (which cannot iterate on the original). Nudge the user to opt into the import
+  // form — `import("<file>.<top>")` needs the top to be `pub`.
+  if (prp_pair && !can_import) {
+    std::string which;
+    if (!impl_pub) {
+      which = std::format("the impl top `{}` in {}", impl_top, opts.impl_path);
+    }
+    if (!ref_pub) {
+      which += (which.empty() ? "" : " and ") + std::format("the ref top `{}` in {}", ref_top, opts.ref_path);
+    }
+    livehd::diag::warn("pass.lec", "lecfail-top-not-pub", "io")
+        .msg("lecfail.prp inlines a COPY of each design because a LEC top is not `pub` ({}) — mark the LEC top `pub` "
+             "and the testbench will `import` the original instead, so a fix to the .prp flows into a re-run",
+             which)
+        .hint(std::format("e.g. `pub mod {}(...)` / `pub comb {}(...)`", impl_top, ref_top))
+        .emit();
+  }
+
+  // Rename any ref-side module whose name clashes with an impl-side module (or
+  // the wrapper) so both hierarchies coexist in one Pyrope namespace. Only the
+  // inline (non-import) form shares a namespace; an import keeps each side's
+  // modules under its own unit, so the two `<file>.<top>` graphs never collide.
+  absl::flat_hash_map<std::string, std::string> ref_rename;
+  if (!can_import) {
+    absl::flat_hash_set<std::string> impl_names;
+    for (const auto& m : impl_mods) {
+      impl_names.insert(m.name);
+    }
+    for (const auto& m : ref_mods) {
+      if (impl_names.count(m.name) != 0 || m.name == wrapper) {
+        ref_rename[m.name] = "lecref_" + m.name;
+      }
+    }
+    for (auto& m : ref_mods) {
+      for (const auto& [from, to] : ref_rename) {
+        m.text = lecfail_rename(m.text, from, to);
+      }
+    }
+    for (auto& m : ref_mods) {
+      if (auto it = ref_rename.find(m.name); it != ref_rename.end()) {
+        m.name = it->second;
+      }
+    }
+    if (auto it = ref_rename.find(ref_top); it != ref_rename.end()) {
+      ref_top = it->second;
+    }
+  }
+
+  auto find_mod = [](const std::vector<Lecfail_mod>& mods, const std::string& name) -> const Lecfail_mod* {
+    for (const auto& m : mods) {
+      if (m.name == name) {
+        return &m;
+      }
+    }
+    return nullptr;
+  };
+  const Lecfail_mod* impl_m = find_mod(impl_mods, impl_top);
+  const Lecfail_mod* ref_m  = find_mod(ref_mods, ref_top);
+  if (impl_m == nullptr || ref_m == nullptr || impl_m->outputs.empty() || ref_m->outputs.empty()) {
+    skip("could not locate both TOP modules (or a side exposes no outputs) in the re-emitted Pyrope");
+    return;
+  }
+
+  // Per-input bit width (any cycle carrying the input), for unsigned wrapper-input
+  // typing — driving the unsigned magnitude then reproduces the exact bit pattern.
+  absl::flat_hash_map<std::string, int> width_of;
+  for (const auto& cyc : r.trace.cycles) {
+    for (const auto& in : cyc.inputs) {
+      width_of[in.name] = in.width < 1 ? 1 : in.width;
+    }
+  }
+  auto wtype = [&](const std::string& n) {
+    auto it = width_of.find(n);
+    return std::format(":u{}", it == width_of.end() ? 1 : it->second);
+  };
+
+  // Union of the two tops' declared inputs (order: impl first, then ref extras).
+  std::vector<std::string>         win;
+  absl::flat_hash_set<std::string> seen;
+  for (const auto& [n, t] : impl_m->inputs) {
+    if (seen.insert(n).second) {
+      win.push_back(n);
+    }
+  }
+  for (const auto& [n, t] : ref_m->inputs) {
+    if (seen.insert(n).second) {
+      win.push_back(n);
+    }
+  }
+
+  // ---- build the wrapper module -------------------------------------------
+  std::string sig_in;
+  for (const auto& n : win) {
+    sig_in += (sig_in.empty() ? "" : ", ") + n + wtype(n);
+  }
+  std::string sig_out;
+  for (const auto& [n, suf] : impl_m->outputs) {
+    sig_out += (sig_out.empty() ? "" : ", ") + std::format("impl_{}{}", n, suf);
+  }
+  for (const auto& [n, suf] : ref_m->outputs) {
+    sig_out += (sig_out.empty() ? "" : ", ") + std::format("ref_{}{}", n, suf);
+  }
+  auto call_args = [](const Lecfail_mod* m) {
+    std::string a;
+    for (const auto& [n, t] : m->inputs) {
+      a += (a.empty() ? "" : ", ") + std::format("{} = {}", n, n);
+    }
+    return a;
+  };
+  auto side_body = [&](const std::string& top, const Lecfail_mod* m, const std::string& prefix, const std::string& tmp) {
+    std::string b;
+    if (m->outputs.size() == 1) {
+      b += std::format("  {}{} = {}({})\n", prefix, m->outputs[0].first, top, call_args(m));
+    } else {
+      // A stateful multi-output instance is bound to a fresh local (needs `const`,
+      // like prp_writer's own emission), then each output read as `inst.port`.
+      b += std::format("  const {} = {}({})\n", tmp, top, call_args(m));
+      for (const auto& [n, suf] : m->outputs) {
+        b += std::format("  {}{} = {}.{}\n", prefix, n, tmp, n);
+      }
+    }
+    return b;
+  };
+  // The wrapper calls each side by the imported const name (`implmod`/`refmod`)
+  // when importing, else by the (possibly renamed) inlined module name.
+  const std::string impl_callee = can_import ? std::string{"implmod"} : impl_top;
+  const std::string ref_callee  = can_import ? std::string{"refmod"} : ref_top;
+  std::string wrap_text = std::format("mod {}({}) -> ({}) {{\n", wrapper, sig_in, sig_out);
+  wrap_text += side_body(impl_callee, impl_m, "impl_", "_lec_impl");
+  wrap_text += side_body(ref_callee, ref_m, "ref_", "_lec_ref");
+  wrap_text += "}\n";
+
+  // ---- build the test: per-cycle stimulus arrays indexed by `clock` -------
+  const int   ncyc = static_cast<int>(r.trace.cycles.size());
+  auto        val_at = [&](const std::string& name, int c) -> std::string {
+    for (const auto& in : r.trace.cycles[static_cast<size_t>(c)].inputs) {
+      if (in.name == name) {
+        return in.value;
+      }
+    }
+    return "0";
+  };
+  // The implicit reset: a trace input named `reset` that is NOT a declared port
+  // (Pyrope-origin designs drive their registers off it). An explicit reset PORT
+  // is instead driven by name like any other input.
+  const bool reset_is_port = std::find(win.begin(), win.end(), "reset") != win.end();
+  const bool implicit_reset = width_of.count("reset") != 0 && !reset_is_port;
+
+  std::string test_text = std::format("test {} {{\n  mut _lec_dut = {}\n", test_name, wrapper);
+  for (const auto& n : win) {
+    std::string arr;
+    for (int c = 0; c < ncyc; ++c) {
+      arr += (arr.empty() ? "" : ", ") + val_at(n, c);
+    }
+    test_text += std::format("  const _drv_{} = [{}]\n", n, arr);
+  }
+  if (implicit_reset) {
+    std::string arr;
+    for (int c = 0; c < ncyc; ++c) {
+      arr += (arr.empty() ? "" : ", ") + val_at("reset", c);
+    }
+    test_text += std::format("  const _drv_reset = [{}]\n", arr);
+  }
+  test_text += std::format("  tick {} {{\n", ncyc);
+  // Reset drive: an explicit `reset` PORT is driven by the input loop below (and
+  // the sim unifies it with the implicit reset). Otherwise drive the implicit
+  // reset — from the trace's `reset` values, or the reset-hold prologue length.
+  if (!reset_is_port) {
+    if (implicit_reset) {
+      test_text += "    _lec_dut.reset = _drv_reset[clock]\n";
+    } else if (r.trace.reset_cycles > 0) {
+      test_text += std::format("    _lec_dut.reset = clock < {}\n", r.trace.reset_cycles);
+    } else {
+      test_text += "    _lec_dut.reset = false\n";
+    }
+  }
+  for (const auto& n : win) {
+    test_text += std::format("    _lec_dut.{} = _drv_{}[clock]\n", n, n);
+  }
+  test_text += "    step\n  }\n}\n";
+
+  // ---- assemble lecfail.prp -----------------------------------------------
+  std::string divtxt;
+  for (const auto& d : r.trace.diverge_outputs) {
+    divtxt += (divtxt.empty() ? "" : ", ") + d;
+  }
+  // The reproduce/iterate command. The import form passes BOTH original sources
+  // positionally so their `import("<stem>.<top>")` resolve to the co-loaded units
+  // (edit either .prp, re-run, the fix flows through); the inline form is a single
+  // self-contained file.
+  const std::string rerun =
+      can_import ? std::format("lhd sim {} {} {} --set sim.vcd=true --workdir <dir>", opts.impl_path, opts.ref_path,
+                               prpfail_path)
+                 : std::format("lhd sim {} --set sim.vcd=true --workdir <dir>", prpfail_path);
+  std::string out = std::format(
+      "/*\n:name: {}\n:type: simulation\n*/\n"
+      "// AUTO-GENERATED by `lhd lec` from a REFUTED counterexample.\n"
+      "// impl='{}'  ref='{}'\n"
+      "// Drives BOTH designs with the failing input sequence ({} cycle(s), {} reset-hold).\n"
+      "// Divergence at cycle {}: {}\n"
+      "// Re-run:  {}   (dumps {}.vcd)\n\n",
+      test_name, opts.impl_path, opts.ref_path, ncyc, r.trace.reset_cycles, r.trace.diverge_cycle,
+      divtxt.empty() ? "(see verdict)" : divtxt, rerun, test_name);
+  if (can_import) {
+    // Reference the ORIGINAL sources by their `<file-stem>.<top>` import key.
+    out += std::format("const implmod = import(\"{}.{}\")\n", impl_stem, impl_top);
+    out += std::format("const refmod  = import(\"{}.{}\")\n\n", ref_stem, ref_top);
+  } else {
+    // Inline both re-emitted hierarchies (ref-side clashes already renamed).
+    for (const auto& m : impl_mods) {
+      out += lecfail_type_params(m.text, width_of);
+      if (!out.empty() && out.back() != '\n') {
+        out += '\n';
+      }
+      out += '\n';
+    }
+    for (const auto& m : ref_mods) {
+      out += lecfail_type_params(m.text, width_of);
+      if (!out.empty() && out.back() != '\n') {
+        out += '\n';
+      }
+      out += '\n';
+    }
+  }
+  out += wrap_text + "\n" + test_text;
+
+  std::ofstream ofs(prpfail_path);
+  if (!ofs.is_open()) {
+    skip(std::format("could not write {}", prpfail_path));
+    return;
+  }
+  ofs << out;
+  ofs.close();
+  res.outputs.push_back(prpfail_path);
+  res.recipe_steps.push_back(std::format("lec.prpfail witness testbench -> {}", prpfail_path));
+  std::print("lec: wrote counterexample testbench {}\n", prpfail_path);
+
+  if (!run_sim) {
+    return;
+  }
+  // Phase 3/3 of the lec-on-failure flow: `lhd sim` on the testbench dumps the
+  // waveform; announce the target up front (the sim run is the slow part).
+  livehd::diag::info("pass.lec", "lecfail-creating-vcd", "progress")
+      .msg("lec: creating counterexample waveform {}/{}.vcd", opts.workdir, test_name)
+      .emit();
+  // Run it: one instance -> one VCD at <workdir>/<test_name>.vcd.
+  const std::string sim_log = next_log_path(opts, "lec.prpfailrun");
+  std::string       cmd     = shell_quote(lhd_bin) + " sim ";
+  // Import form: pass both original sources positionally so the testbench's
+  // `import("<stem>.<top>")` resolve to the co-loaded units.
+  if (can_import) {
+    cmd += shell_quote(opts.impl_path) + " " + shell_quote(opts.ref_path) + " ";
+  }
+  cmd += shell_quote(prpfail_path) + " --set sim.vcd=true --workdir " + shell_quote(opts.workdir);
+  // Forward any explicit sim-runtime header locations (compile.cgen.sim_hlop /
+  // sim_iassert) to the child sim host-compile — needed when `../hlop` isn't
+  // beside the cwd (e.g. under `bazel test`, where the caller passes them).
+  for (const auto& [k, v] : opts.sets) {
+    if ((k == "compile.cgen.sim_hlop" || k == "compile.cgen.sim_iassert") && !v.empty()) {
+      cmd += " --set " + shell_quote(k + "=" + v);
+    }
+  }
+  cmd += " >> " + shell_quote(sim_log) + " 2>&1";
+  int         st  = std::system(cmd.c_str());
+  std::string vcd = std::format("{}/{}.vcd", opts.workdir, test_name);
+  if (WIFEXITED(st) && WEXITSTATUS(st) == 0 && fs::exists(vcd)) {
+    res.outputs.push_back(vcd);
+    res.recipe_steps.push_back(std::format("lec.prpfailrun VCD -> {}", vcd));
+    std::print("lec: wrote counterexample waveform {}\n", vcd);
+  } else {
+    livehd::diag::warn("pass.lec", "lecfail-sim", "io")
+        .msg("lec.prpfailrun: `lhd sim {}` did not produce {} (see {})", prpfail_path, vcd, sim_log)
+        .emit();
+  }
+}
+
 void lec_command(Options& opts, Result& res) {
+  // Whether the USER passed --workdir (captured before load_side_graphs' first
+  // workdir() call fabricates a scratch temp dir): the lecfail witness testbench
+  // + VCD are on-by-default only for a persistent, user-named --workdir.
+  const bool workdir_set = !opts.workdir.empty();
   setup_diag(opts, "lec");
 #ifndef NDEBUG
   // NDEBUG is only defined under `-c opt`; a dbg/fastbuild binary runs the SMT
@@ -4052,6 +4718,27 @@ void lec_command(Options& opts, Result& res) {
         if (g && g->get_name() == t) {
           return g;
         }
+      }
+      // Fall back to the SIMPLE (post-'.') module name. Internal graph names are
+      // the hierarchical `file.entity`, but Verilog/flat-name tooling (and the
+      // v2prp harness `:pyrope_top:`) names the module by its flat entity
+      // (`counter`, not `mod_counter.counter`). Accept `t` as either the full name
+      // or the entity, matching on the entity of both — only when unambiguous.
+      auto entity = [](std::string_view n) {
+        auto d = n.rfind('.');
+        return d == std::string_view::npos ? n : n.substr(d + 1);
+      };
+      const std::string_view           want_entity = entity(t);
+      std::shared_ptr<hhds::Graph>      simple_hit;
+      int                              n_simple = 0;
+      for (auto& g : v.graphs) {
+        if (g && entity(g->get_name()) == want_entity) {
+          simple_hit = g;
+          ++n_simple;
+        }
+      }
+      if (n_simple == 1) {
+        return simple_hit;
       }
       throw Lhd_error{"config", std::format("lec: {} top '{}' not found", side, t), ""};
     }
@@ -4142,6 +4829,15 @@ void lec_command(Options& opts, Result& res) {
   }
   const auto* sub_lib_ptr = sub_lib.empty() ? nullptr : &sub_lib;
 
+  // Phase 1/3 of the lec-on-failure flow (detect -> testbench -> waveform):
+  // announce the (possibly long, quiet) SMT detection up front so a slow solve is
+  // legible instead of looking like a hang.
+  livehd::diag::info("pass.lec", "lec-detecting", "progress")
+      .msg("lec: detecting equivalence of '{}' vs '{}' (engine={}, solver={}, {})", impl_g->get_name(),
+           ref_g->get_name(), o.engine, o.solver,
+           o.timeout > 0 ? std::format("timeout={}s", o.timeout) : std::string{"no timeout"})
+      .emit();
+
   livehd::lec::Query_result r;
   if (label("hierarchical", "true") != "false" && label("hierarchical", "true") != "0") {
     // Bottom-up: LEC every def leaves-first under `auto`, collapsing proven
@@ -4180,6 +4876,44 @@ void lec_command(Options& opts, Result& res) {
   // still the actionable iteration signal), not only on a clean Refuted.
   if (!r.witness.empty()) {
     std::print("  counterexample: {}\n", r.witness);
+  }
+
+  // lecfail witness testbench + VCD (`lhd lec` + --workdir). On a REFUTED verdict,
+  // write a self-contained Pyrope reproduction (lec.prpfail) and optionally run it
+  // to dump a VCD (lec.prpfailrun). Resolved with workdir-aware defaults: without
+  // a user --workdir both are off; with one they default on. Gated by lec.witness.
+  if (r.verdict == livehd::lec::Verdict::Refuted) {
+    auto get_set = [&](std::string_view k, std::string& v) {
+      auto it = labels.find(std::string{k});
+      if (it == labels.end()) {
+        return false;
+      }
+      v = it->second;
+      return true;
+    };
+    std::string prpfail;  // "" = off; else the .prp basename under --workdir
+    std::string pv;
+    if (o.witness && workdir_set) {
+      if (get_set("prpfail", pv)) {
+        prpfail = (pv.empty() || pv == "false" || pv == "0") ? std::string{}
+                  : (pv == "true" || pv == "1")              ? std::string{"lecfail.prp"}
+                                                             : pv;
+      } else {
+        prpfail = "lecfail.prp";  // default when --workdir is set
+      }
+    } else if (get_set("prpfail", pv) && !workdir_set && !pv.empty() && pv != "false" && pv != "0") {
+      livehd::diag::info("pass.lec", "lecfail-needs-workdir", "io")
+          .msg("lec.prpfail needs --workdir (a persistent output dir); skipping the witness testbench")
+          .emit();
+    }
+    bool prpfailrun = workdir_set;  // default: run iff --workdir
+    if (std::string rv; get_set("prpfailrun", rv)) {
+      prpfailrun = !(rv == "false" || rv == "0" || rv.empty());
+    }
+    if (!prpfail.empty()) {
+      emit_lecfail_witness(opts, res, r, std::string(impl_g->get_name()), std::string(ref_g->get_name()), prpfail,
+                           prpfailrun);
+    }
   }
 
   if (!cross) {

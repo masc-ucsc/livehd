@@ -2,7 +2,7 @@
 :name: mod_mut_delay
 :type: equiv
 :verilog_top: mod_mut_delay.f
-:pyrope_top: mod_mut_delay.f
+:pyrope_top: f
 */
 
 // Task 1r/1q — a `mut` integer is captured at the lambda declaration point and

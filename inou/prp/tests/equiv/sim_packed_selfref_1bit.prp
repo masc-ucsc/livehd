@@ -11,7 +11,7 @@
 // acyclic (iverilog/LEC fine), but cgen.sim schedules `pack` as one word and
 // split_packed_selfref_wires cannot bound the footprint of a 1-bit Or operand
 // (signed -1/0 hazard), so it declines to split and emission errors.
-pub comb sim_packed_selfref_1bit::[lg="sim_packed_selfref_1bit", hdl](a:u8, k:u8) -> (z:u1) {
+pub comb sim_packed_selfref_1bit::[timecheck=false](a:u8, k:u8) -> (z:u1) {
   wire pack:u15
   mut flag = if k == pack#[7..=14] { 1 } else { 0 }
   pack = (a << 7) | ((flag & 1) << 6)

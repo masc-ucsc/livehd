@@ -2,7 +2,7 @@
 :name: reduce_or
 :type: equiv
 :verilog_top: reduce_or.foo
-:pyrope_top: reduce_or.foo
+:pyrope_top: foo
 */
 
 // OR-reduction `foo#|[range]` lowers to the graph Ror cell over the get_mask

@@ -2,7 +2,7 @@
 :name: instance_collapse_order
 :type: equiv
 :verilog_top: instance_collapse_order.top
-:pyrope_top: instance_collapse_order.top
+:pyrope_top: top
 */
 
 // Hierarchical-LEC STATELESS box-instance pairing guard (see the .v header
@@ -22,11 +22,11 @@
 //           --impl pyrope:instance_collapse_order.prp \
 //           --ref-top 'instance_collapse_order.top' \
 //           --impl-top 'instance_collapse_order.top'
-pub comb lane_parity::[lg="icso_lane_parity"](a:u8) -> (p:u1) {
+pub comb lane_parity(a:u8) -> (p:u1) {
   p = a#[0] ^ a#[1] ^ a#[2] ^ a#[3] ^ a#[4] ^ a#[5] ^ a#[6] ^ a#[7]
 }
 
-pub comb top::[lg="instance_collapse_order.top"](d:u32) -> (q:u4) {
+pub comb top(d:u32) -> (q:u4) {
   mut p3 = lane_parity::[name=u3](a = (d >> 24) & 0xff)
   mut p2 = lane_parity::[name=u2](a = (d >> 16) & 0xff)
   mut p1 = lane_parity::[name=u1](a = (d >> 8) & 0xff)

@@ -2,7 +2,7 @@
 :name: rt_bool_cast
 :type: equiv
 :verilog_top: rt_bool_cast.rt_bool_cast
-:pyrope_top: rt_bool_cast.rt_bool_cast
+:pyrope_top: rt_bool_cast
 */
 
 // Runtime `bool(int)` lowers to `x != 0`. The second output also chains it

@@ -2,7 +2,7 @@
 :name: mod_mux_aligned
 :type: equiv
 :verilog_top: mod_mux_aligned.pick
-:pyrope_top: mod_mux_aligned.pick
+:pyrope_top: pick
 */
 
 // 2d-reg — a mux whose data legs all land at the SAME cycle (the select

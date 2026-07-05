@@ -2,7 +2,7 @@
 :name: dyn_tuple_mixed
 :type: equiv
 :verilog_top: dyn_tuple_mixed.selm
-:pyrope_top: dyn_tuple_mixed.selm
+:pyrope_top: selm
 */
 
 // A dynamic tuple select whose elements MIX runtime wires and a comptime

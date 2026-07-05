@@ -2,7 +2,7 @@
 :name: rt_wrap_sum
 :type: equiv
 :verilog_top: rt_wrap_sum.rt_wrap_sum
-:pyrope_top: rt_wrap_sum.rt_wrap_sum
+:pyrope_top: rt_wrap_sum
 */
 
 // Runtime `wrap` of a COMPUTED value (a tmp, not an input): the u5 sum a+b

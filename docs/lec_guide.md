@@ -56,7 +56,9 @@ Output: `PROVEN equivalent`, `REFUTED (not equivalent)` + a counterexample, or
 | `lec.engine` | `ind` | `ind` = single-step inductive miter; `bmc` = unroll from reset; `ic3` (reserved) |
 | `lec.bound`  | `20`  | BMC unroll depth (number of cycles from reset) |
 | `lec.solver` | `cvc5`| backend: `cvc5` (in-process, the only SMT backend built) \| `bitwuzla` (in-process, not yet built) \| `lgyosys` (yosys/lgcheck) |
-| `lec.witness`| `true`| print the counterexample on REFUTED |
+| `lec.witness`| `true`| print the counterexample on REFUTED (and gate the lecfail testbench below) |
+| `lec.prpfail`| `lecfail.prp` (iff `--workdir`) | on REFUTED with `--workdir`, write a self-contained Pyrope testbench that instantiates BOTH designs and drives the counterexample sequence. Filename under `--workdir`; `true`=`lecfail.prp`; `""`/`false`=off |
+| `lec.prpfailrun`| `true` (iff `--workdir`) | run the `lec.prpfail` testbench (`lhd sim --set sim.vcd=true`) to dump the divergence waveform (`lecfail.vcd`) |
 | `lec.phase`  | `free`| BMC reset-phase: `free` \| `reset` \| `run` (see below) |
 | `lec.reset_cycles` | `2` | `run` phase: cycles to hold reset before checking |
 | `lec.reset`  | *(auto)* | explicit reset inputs `name[:lo\|:hi]`, comma-separated; overrides auto-detect |

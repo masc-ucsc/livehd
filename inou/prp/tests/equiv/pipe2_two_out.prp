@@ -2,7 +2,7 @@
 :name: pipe2_two_out
 :type: equiv
 :verilog_top: pipe2_two_out.two
-:pyrope_top: pipe2_two_out.two
+:pyrope_top: two
 */
 
 // Two outputs: BOTH land at exactly N=2 (each gets its own output flop).

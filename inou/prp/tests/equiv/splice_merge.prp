@@ -2,7 +2,7 @@
 :name: splice_merge
 :type: equiv
 :verilog_top: splice_merge.spl
-:pyrope_top: splice_merge.spl
+:pyrope_top: spl
 */
 
 // 2f-splice RTL coverage: splice-merge a tuple whose fields are comb INPUTS

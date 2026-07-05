@@ -2,7 +2,7 @@
 :name: instance_state_anon
 :type: equiv
 :verilog_top: instance_state_anon.top
-:pyrope_top: instance_state_anon.top
+:pyrope_top: top
 */
 
 // Hierarchical-LEC flat-confirmation backstop guard. Same stateful lanes as
@@ -15,13 +15,13 @@
 // must rescue it: re-solve the parent flat (children descended) and report the
 // PASS. A fail is only ever reported from a box-free counterexample, so this
 // pair must never exit REFUTED no matter how the instances are paired.
-pub mod lane_acc::[lg="icsa_lane_acc"](a:u8) -> (s:u8@[0]) {
+pub mod lane_acc(a:u8) -> (s:u8@[0]) {
   reg acc:u8 = 0
   s = acc
   wrap acc = acc + a
 }
 
-pub mod top::[lg="instance_state_anon.top"](d:u32) -> (q:u32@[0]) {
+pub mod top(d:u32) -> (q:u32@[0]) {
   mut s3 = lane_acc(a = (d >> 24) & 0xff)
   mut s2 = lane_acc(a = (d >> 16) & 0xff)
   mut s1 = lane_acc(a = (d >> 8) & 0xff)

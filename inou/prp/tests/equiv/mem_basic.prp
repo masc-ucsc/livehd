@@ -2,7 +2,7 @@
 :name: mem_basic
 :type: equiv
 :verilog_top: mem_basic.memdut
-:pyrope_top: mem_basic.memdut
+:pyrope_top: memdut
 */
 
 // 1a-mem — a reg array is an async Memory cell (type 0, fwd on): a write

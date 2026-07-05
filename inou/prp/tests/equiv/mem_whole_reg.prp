@@ -2,7 +2,7 @@
 :name: mem_whole_reg
 :type: equiv
 :verilog_top: mem_whole_reg.regarr
-:pyrope_top: mem_whole_reg.regarr
+:pyrope_top: regarr
 */
 
 // REGISTERED whole-array: the whole `arr` is registered from one bus each cycle

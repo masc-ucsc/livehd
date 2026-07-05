@@ -2,7 +2,7 @@
 :name: tup_in_port
 :type: equiv
 :verilog_top: tup_in_port.top
-:pyrope_top: tup_in_port.top
+:pyrope_top: top
 */
 
 // 2i-issues C — a tuple/struct-typed INPUT port whose fields are read inside an

@@ -13,7 +13,7 @@
 // split_packed_selfref_wires does NOT rescue it: the readbacks are SRA+And
 // chains (not const-mask Get_mask slices), and the Or operands are 1-bit
 // values whose footprint cannot be bounded (a 1-bit value may be signed -1).
-pub comb sim_loop_pack_shiftand::[lg="sim_loop_pack_shiftand", hdl](a:u2) -> (z:u3) {
+pub comb sim_loop_pack_shiftand::[timecheck=false](a:u2) -> (z:u3) {
   wire pk:u3
   wire ii:u1
   wire vi:u1

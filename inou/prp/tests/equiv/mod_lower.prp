@@ -2,7 +2,7 @@
 :name: mod_lower
 :type: equiv
 :verilog_top: mod_lower.foo
-:pyrope_top: mod_lower.foo
+:pyrope_top: foo
 */
 
 // `a % b` lowered to shift/mask for the easy, unambiguous cases (tolg

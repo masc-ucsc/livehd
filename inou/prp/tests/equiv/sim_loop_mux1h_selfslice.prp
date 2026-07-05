@@ -13,7 +13,7 @@
 // here every `mask & term` operand of the Or spans the full width and overlaps
 // the slice (covers != 1), so the false loop survives and the single-pass sim
 // schedule reports a combinational loop.
-pub comb sim_loop_mux1h_selfslice::[lg="sim_loop_mux1h_selfslice", hdl](sel:u2, a:u4, b:u4) -> (z:u8) {
+pub comb sim_loop_mux1h_selfslice::[timecheck=false](sel:u2, a:u4, b:u4) -> (z:u8) {
   wire w:u8
   wire e0:u4
   wire e1:u4

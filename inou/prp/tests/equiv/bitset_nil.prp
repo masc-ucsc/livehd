@@ -2,7 +2,7 @@
 :name: bitset_nil
 :type: equiv
 :verilog_top: bitset_nil.foo
-:pyrope_top: bitset_nil.foo
+:pyrope_top: foo
 */
 
 // A `nil`-initialised accumulator (`mut b:uN = nil`) has no reset/init store,

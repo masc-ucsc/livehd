@@ -181,8 +181,21 @@ def compile_sim(src, top, out, reader=None):
     return run(cmd)
 
 
+def _resolve_top(simdir, top):
+    # cgen_sim names each module's .hpp by its HIERARCHICAL graph name
+    # (`file.entity`), while the caller's `top` is the flat entity (Verilog-style)
+    # or a golden module name. Map it to the actually-emitted top .hpp stem.
+    skip = {"slop.hpp", "iassert.hpp", "vcd_writer.hpp"}
+    cands = [p.stem for p in simdir.glob("*.hpp") if p.name not in skip]
+    if top in cands:
+        return top
+    dotted = [c for c in cands if c.rsplit(".", 1)[-1] == top]
+    return dotted[0] if len(dotted) == 1 else top
+
+
 def drive(simdir, top, rundir):
     """gen_driver + compile + run one side; returns (rc, output)."""
+    top = _resolve_top(simdir, top)
     gen_driver(simdir, top)
     _, (rc, out) = compile_driver(simdir)
     if rc:

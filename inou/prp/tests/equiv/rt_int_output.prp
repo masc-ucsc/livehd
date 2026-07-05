@@ -2,7 +2,7 @@
 :name: rt_int_output
 :type: equiv
 :verilog_top: rt_int_output.rt_int_output
-:pyrope_top: rt_int_output.rt_int_output
+:pyrope_top: rt_int_output
 */
 
 // An UNBOUNDED `int`/`unsigned` output is sized to its computed value range

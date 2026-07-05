@@ -2,7 +2,7 @@
 :name: rt_wrap_reassign
 :type: equiv
 :verilog_top: rt_wrap_reassign.rt_wrap_reassign
-:pyrope_top: rt_wrap_reassign.rt_wrap_reassign
+:pyrope_top: rt_wrap_reassign
 */
 
 // Runtime `wrap` of a subtraction into a u32 LOCAL that was ALREADY ASSIGNED

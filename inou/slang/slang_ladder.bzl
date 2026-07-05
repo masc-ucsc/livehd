@@ -70,6 +70,13 @@ SLANG_LADDER = {
     "mux": "lec",
     "nshift": "lec",  # Verilog shift count is unsigned; negative-constant count masks to unsigned (no nil/error)
     "mux2": "lec",
+    # async-reset-as-sync demotion soundness gates (each is a confirmed silent
+    # miscompile the reader must instead hard-error; see slang_structure.cpp
+    # demote_reset_edges). The clean async_reset_enable / async_negreset_compound
+    # demotions are the positive coverage (inou/prp equiv_slang pairs).
+    "nocheck_async_reset_clock_demote": "error",  # gate 3: reset-named CLOCK not read in body → refuse
+    "nocheck_async_reset_peel": "error",  # gate 1: no demote after a rung already peeled
+    "nocheck_async_reset_unreadable": "error",  # gate 2: demoted reset must be readable
     "nocheck_blackboxing2": "error",  # fail-unknown-module
     "nocheck_chunk_FetchTargetQueue": "error",  # fail-unsupported-system-task
     "nocheck_cpp_api": "error",  # fail-unknown-module

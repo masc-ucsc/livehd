@@ -2,7 +2,7 @@
 :name: hotmux_unique
 :type: compile equiv
 :verilog_top: hotmux_unique.dec
-:pyrope_top: hotmux_unique.dec
+:pyrope_top: dec
 */
 
 // 1a-ops: `unique if` lowers to ONE Hotmux per merged variable (not a Mux

@@ -2,7 +2,7 @@
 :name: rt_typecast
 :type: equiv
 :verilog_top: rt_typecast.rt_typecast
-:pyrope_top: rt_typecast.rt_typecast
+:pyrope_top: rt_typecast
 */
 
 // Runtime (non-comptime) scalar typecasts lowered to hardware. Each cast feeds

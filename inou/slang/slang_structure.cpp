@@ -674,6 +674,7 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
         declared_.insert(internal);  // io entries ARE the declaration
         if (is_out) {
           output_syms_.insert(internal);
+          output_info_.emplace(internal, std::pair<int, bool>{io_bits, io_signed});
         } else {
           input_syms_.insert(internal);
         }
@@ -802,6 +803,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   auto saved_used          = std::move(used_names_);
   auto saved_inputs        = std::move(input_syms_);
   auto saved_outputs       = std::move(output_syms_);
+  auto saved_output_info   = std::move(output_info_);
   auto saved_regs          = std::move(reg_syms_);
   auto saved_wires         = std::move(wire_syms_);
   auto saved_latches       = std::move(latch_syms_);
@@ -837,6 +839,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   used_names_.clear();
   input_syms_.clear();
   output_syms_.clear();
+  output_info_.clear();
   reg_syms_.clear();
   wire_syms_.clear();
   latch_syms_.clear();
@@ -1025,6 +1028,52 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       declare_value_symbol(vsym, /*force_reg=*/false);
     }
   }
+
+  // X-default poison-init for every COMBINATIONAL (non-reg) output: emit
+  // `out = 0sb?` / `0ub?…?` at body top, BEFORE lower_members drives anything.
+  // A legal Verilog output the body never drives defaults to X — this makes that
+  // explicit (Pyrope would otherwise reject an undriven output). A real driver
+  // supersedes it (the coalescer DSE-drops it, or a conditional drive folds it to
+  // the mux ELSE arm = correct X-when-not-selected). This is what lets tolg drop
+  // its is_verilog_origin undriven-output leniency and keep the hard error for a
+  // genuinely-undriven PYROPE output. Output regs already have a q-pin driver, so
+  // they are excluded (a poison-init would double-drive). Deterministic order.
+  {
+    std::vector<const slang::ast::Symbol*> couts;
+    for (const auto* sym : output_syms_) {
+      if (reg_syms_.contains(sym) || !output_info_.contains(sym) || !sym_lname_.contains(sym)) {
+        continue;
+      }
+      // Skip an ESCAPED (`\`-quoted, i.e. dotted) output name — that is a
+      // struct/tuple LEAF (`p.q`), driven through a shadow-mut that already
+      // X-fills its undriven leaves. A whole-output poison here fights that
+      // machinery and re-emits as a malformed nested-backtick name. Only plain
+      // SCALAR outputs (which the body drives — or not — as a whole) get poison.
+      const auto& ln = sym_lname_.at(sym);
+      if (!ln.empty() && ln.front() == '`') {
+        continue;
+      }
+      couts.push_back(sym);
+    }
+    std::sort(couts.begin(), couts.end(), [](const slang::ast::Symbol* a, const slang::ast::Symbol* b) {
+      if (a->location != b->location) {
+        return a->location < b->location;
+      }
+      return a->name < b->name;
+    });
+    for (const auto* sym : couts) {
+      const auto [bits, is_signed] = output_info_.at(sym);
+      set_pending_loc(sym->location);
+      if (is_signed) {
+        builder_.create_assign_stmts(sym_lname_.at(sym), "0sb?");
+      } else {
+        std::string qmarks(static_cast<size_t>(bits > 0 ? bits : 1), '?');
+        builder_.create_assign_stmts(sym_lname_.at(sym), absl::StrCat("0ub", qmarks));
+      }
+      clear_pending_loc();
+    }
+  }
+
   lower_members(*body);
 
   bool ok = !module_failed_;
@@ -1041,6 +1090,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   used_names_            = std::move(saved_used);
   input_syms_            = std::move(saved_inputs);
   output_syms_           = std::move(saved_outputs);
+  output_info_           = std::move(saved_output_info);
   reg_syms_              = std::move(saved_regs);
   wire_syms_            = std::move(saved_wires);
   latch_syms_           = std::move(saved_latches);
@@ -2529,16 +2579,34 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
   // edge trigger must guard the next if/else rung; its then-arm holds the
   // CONST reset values, which become per-reg initial/reset_pin/sync attrs.
   std::vector<const slang::ast::Statement*> prologue;
-  const slang::ast::Statement*              body = &timed.stmt;
+  const slang::ast::Statement*              body      = &timed.stmt;
+  bool                                      peeled_any = false;  // a rung already extracted?
 
   // Fallback when a rung cannot be extracted (compound guard `if (rst || soft)`,
   // missing else arm, non-const async load, ...): LEC and lhd sim observe state
   // only AFTER a clock update, so an edge-triggered reset is indistinguishable
   // from a synchronous one — drop the reset's edge trigger and lower the body as
   // ordinary clocked logic that READS the signal (yosys async2sync semantics).
+  //
+  // This is sound ONLY under three gates (each guards a confirmed miscompile):
+  //  (1) NO rung has peeled yet. A peeled reset is no longer present in the
+  //      residual body, so lowering that body synchronously would drop it — a reg
+  //      reset by the peeled rung but written in the residual body would update
+  //      while the async reset is held high at a clock edge.
+  //  (2) every demoted signal is READABLE here (module input or module-level /
+  //      generate net). A non-readable reset lowers to a driverless poison-init
+  //      whose guard folds to a constant, silently killing the reset arm.
+  //  (3) every demoted signal is actually REFERENCED in the residual body, so the
+  //      synchronous lowering re-derives the reset AND the surviving edge is
+  //      genuinely the clock. This refuses a reset-token-named CLOCK (`clk_por`):
+  //      the clock is not read as data in the body, so demoting it (which would
+  //      move the flop onto the guard signal's domain) is rejected.
   // Only reset-named triggers demote (an unrecognized second edge stays a hard
   // error), and exactly one trigger — the clock — must remain.
   auto demote_reset_edges = [&]() -> bool {
+    if (peeled_any) {
+      return false;  // gate (1)
+    }
     std::vector<size_t> demote;
     for (size_t i = 0; i < edges.size(); ++i) {
       if (edges[i]->expr.kind == ExpressionKind::NamedValue
@@ -2547,7 +2615,34 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       }
     }
     if (demote.empty() || edges.size() - demote.size() != 1) {
-      return false;
+      return false;  // need exactly one surviving edge (the clock)
+    }
+
+    Named_value_collector body_reads;
+    body->visit(body_reads);
+    absl::flat_hash_set<const slang::ast::ValueSymbol*> read_set(body_reads.syms.begin(), body_reads.syms.end());
+
+    auto is_readable = [&](const slang::ast::ValueSymbol* sym) {
+      if (input_syms_.contains(sym)) {
+        return true;
+      }
+      const auto* rsc = sym->getParentScope();
+      return rsc != nullptr
+             && (&rsc->asSymbol() == body_ || rsc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
+    };
+    for (size_t idx : demote) {
+      const auto* sym = &edges[idx]->expr.as<slang::ast::NamedValueExpression>().symbol;
+      if (!is_readable(sym) || !read_set.contains(sym)) {
+        return false;  // gates (2) + (3)
+      }
+    }
+    // A demoted module-level net (not an input) must be declared so the
+    // synchronous body can read its driver.
+    for (size_t idx : demote) {
+      const auto* sym = &edges[idx]->expr.as<slang::ast::NamedValueExpression>().symbol;
+      if (!input_syms_.contains(sym) && !declared_.contains(sym)) {
+        declare_value_symbol(*sym, /*force_reg=*/false);
+      }
     }
     for (auto it = demote.rbegin(); it != demote.rend(); ++it) {
       const auto& sym = edges[*it]->expr.as<slang::ast::NamedValueExpression>().symbol;
@@ -2783,7 +2878,8 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     }
 
     edges.erase(edges.begin() + static_cast<std::ptrdiff_t>(match));
-    body = cond_stmt.ifFalse;
+    body       = cond_stmt.ifFalse;
+    peeled_any = true;  // a demote after this point would drop this reset — gate (1)
   }
 
   lower_ff_process(*edges[0], *body, prologue);

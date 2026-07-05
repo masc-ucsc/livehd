@@ -2,7 +2,7 @@
 :name: reg_hold_empty_elif
 :type: equiv
 :verilog_top: reg_hold_empty_elif.pcunit
-:pyrope_top: reg_hold_empty_elif.pcunit
+:pyrope_top: pcunit
 */
 
 // Regression for the "conditional reg write with no covering else does NOT

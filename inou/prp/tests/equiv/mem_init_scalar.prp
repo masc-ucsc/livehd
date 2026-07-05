@@ -2,7 +2,7 @@
 :name: mem_init_scalar
 :type: equiv
 :verilog_top: mem_init_scalar.regi
-:pyrope_top: mem_init_scalar.regi
+:pyrope_top: regi
 */
 
 // 1a-mem — a concrete reg-array initializer is treated exactly like a mut

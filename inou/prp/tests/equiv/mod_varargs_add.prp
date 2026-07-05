@@ -2,7 +2,7 @@
 :name: mod_varargs_add
 :type: equiv
 :verilog_top: mod_varargs_add.top
-:pyrope_top: mod_varargs_add.top
+:pyrope_top: top
 */
 
 // Task 1p/2u follow-on — the `mod` analog of varargs_add: a var-arg `mod`

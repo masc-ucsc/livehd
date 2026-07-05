@@ -2,7 +2,7 @@
 :name: tup_out_port
 :type: equiv
 :verilog_top: tup_out_port.top
-:pyrope_top: tup_out_port.top
+:pyrope_top: top
 */
 
 // 2i-issues D — a tuple/struct-typed OUTPUT port driven by a single WHOLE-tuple

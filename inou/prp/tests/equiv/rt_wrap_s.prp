@@ -2,7 +2,7 @@
 :name: rt_wrap_s
 :type: equiv
 :verilog_top: rt_wrap_s.rt_wrap_s
-:pyrope_top: rt_wrap_s.rt_wrap_s
+:pyrope_top: rt_wrap_s
 */
 
 // Runtime (non-comptime) signed `wrap`: low 4 bits of an 8-bit input,

@@ -138,6 +138,17 @@ sh_test(
     tags = ["no-sandbox"],  # runs the in-process cvc5 solver
 )
 
+# lecfail witness reproduction (`lhd lec` + --workdir): a REFUTED verdict writes a
+# self-contained Pyrope testbench (lec.prpfail) driving BOTH designs and runs
+# `lhd sim` to dump one VCD (lec.prpfailrun). Covers the default-on behavior, the
+# three knobs, and the no-workdir / PROVEN gating.
+sh_test(
+    name = "lec_witness_prpfail_test",
+    srcs = ["tests/lec_witness_prpfail_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # in-process cvc5 BMC + shells `lhd compile` / `lhd sim --setup-only`
+)
+
 # Agentic per-block progress: every resolved block emits one machine-parseable
 # `info`-severity diagnostic (lec-block-proven / -refuted / -inconclusive) with a
 # verdict, the winning engine, and duration_ms, without touching the exit code.

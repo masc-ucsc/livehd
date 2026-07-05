@@ -2,7 +2,7 @@
 :name: mem_const_idx
 :type: equiv
 :verilog_top: mem_const_idx.cidx
-:pyrope_top: mem_const_idx.cidx
+:pyrope_top: cidx
 */
 
 // 1a-mem — comptime indices still become Memory ports (an array-typed reg is

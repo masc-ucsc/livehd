@@ -2,7 +2,7 @@
 :name: bitrange_open
 :type: equiv
 :verilog_top: bitrange_open.osel
-:pyrope_top: bitrange_open.osel
+:pyrope_top: osel
 */
 
 // Open-ended bit slice `a#[k..]` with a COMPTIME offset (todo "Open-ended bit

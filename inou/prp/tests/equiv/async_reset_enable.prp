@@ -2,7 +2,7 @@
 :name: async_reset_enable
 :type: equiv_slang
 :verilog_top: async_reset_enable.pipe
-:pyrope_top: async_reset_enable.pipe
+:pyrope_top: pipe
 */
 
 // Correct Pyrope reference for async_reset_enable.v — the golden keeps the

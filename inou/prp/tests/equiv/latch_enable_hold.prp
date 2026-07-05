@@ -2,7 +2,7 @@
 :name: latch_enable_hold
 :type: equiv
 :verilog_top: latch_enable_hold.latch8
-:pyrope_top: latch_enable_hold.latch8
+:pyrope_top: latch8
 */
 
 // KNOWN-FAILING (fixme tracker): Pyrope has no intentional level-sensitive

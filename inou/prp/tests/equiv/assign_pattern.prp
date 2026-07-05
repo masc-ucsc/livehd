@@ -2,7 +2,7 @@
 :name: assign_pattern
 :type: equiv_slang
 :verilog_top: apat_top
-:pyrope_top: assign_pattern.apat_top
+:pyrope_top: apat_top
 */
 
 // Pyrope reference for assign_pattern.v (SimpleAssignmentPattern lvalue).

@@ -2,7 +2,7 @@
 :name: mem_whole_cond_const
 :type: equiv
 :verilog_top: mem_whole_cond_const.condconst
-:pyrope_top: mem_whole_cond_const.condconst
+:pyrope_top: condconst
 */
 
 // CONDITIONAL whole-array CONST stores to a REGISTERED array: a clear-all arm

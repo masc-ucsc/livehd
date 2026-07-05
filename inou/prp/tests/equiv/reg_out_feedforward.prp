@@ -2,7 +2,7 @@
 :name: reg_out_feedforward
 :type: equiv
 :verilog_top: reg_out_feedforward.addreg
-:pyrope_top: reg_out_feedforward.addreg
+:pyrope_top: addreg
 */
 
 // 2d-reg — a feedforward register OUTPUT on a mod (`-> (reg q:u9@[1])`):

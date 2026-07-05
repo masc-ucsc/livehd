@@ -2,7 +2,7 @@
 :name: condout_mixed_arms
 :type: equiv
 :verilog_top: condout_mixed_arms.mixedarm
-:pyrope_top: condout_mixed_arms.mixedarm
+:pyrope_top: mixedarm
 */
 
 // Regression (constprop miscompile, repro B): one if-arm writes a comptime

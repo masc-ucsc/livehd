@@ -2,7 +2,7 @@
 :name: struct_selfref_pattern
 :type: equiv
 :verilog_top: struct_selfref_pattern_top
-:pyrope_top: struct_selfref_pattern.top
+:pyrope_top: top
 :gold_reader: slang
 */
 

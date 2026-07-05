@@ -2,7 +2,7 @@
 :name: multi_out_comb
 :type: equiv
 :verilog_top: multi_out_comb.top
-:pyrope_top: multi_out_comb.top
+:pyrope_top: top
 */
 
 // Regression (multi-output `comb` call destructure): `const (s,d) = dpair(x)`

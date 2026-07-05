@@ -2,7 +2,7 @@
 :name: hier_value
 :type: equiv
 :verilog_top: hval_popcnt
-:pyrope_top: hier_value.hval_popcnt
+:pyrope_top: hval_popcnt
 */
 
 // Pyrope reference for hier_value.v (HierarchicalValue). The .v builds a

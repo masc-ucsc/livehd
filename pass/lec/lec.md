@@ -270,7 +270,9 @@ a silent no-op).
 | `lec.solver` | backend: `cvc5` (in-process) \| `bitwuzla` (opt-in, may be unbuilt) \| `lgyosys` (yosys/lgcheck) | `cvc5` |
 | `lec.bound` | BMC / induction depth bound `k` | `6` |
 | `lec.timeout` | per-query wall-clock seconds (`0` = none) | `0` |
-| `lec.witness` | print the counterexample on `Refuted` | `true` |
+| `lec.witness` | print the counterexample on `Refuted` (and gate the lecfail testbench below) | `true` |
+| `lec.prpfail` | `lhd lec` + `--workdir` only: on `Refuted`, write a self-contained Pyrope testbench driving BOTH designs with the counterexample sequence. A filename under `--workdir`; `true`=`lecfail.prp`; `""`/`false`=off. Default `lecfail.prp` iff `--workdir` set | `lecfail.prp` (else `""`) |
+| `lec.prpfailrun` | run the generated `lec.prpfail` testbench through `lhd sim --set sim.vcd=true` to dump the waveform (same basename, `.vcd`) | `true` iff `--workdir` set |
 | `lec.phase` | BMC reset phase: `after_reset` \| `just_reset` \| `free_toreset` \| `full` | `after_reset` |
 | `lec.reset_cycles` | `after_reset` phase: reset-hold prologue length | `2` |
 | `lec.reset` | explicit reset inputs `name[:lo\|:hi]`, comma-sep (else auto-detect) | `""` |
@@ -285,6 +287,29 @@ former `lhd check`) — the only backend that reads Verilog without a front-end
 reader, kept as a **bring-up cross-check oracle** and the path for gate-level
 netlists; the goal is to *replace* it (it does not scale past combinational
 logic). It is **never** on the production trust path.
+
+## The lecfail witness testbench (`lhd lec --workdir DIR`)
+
+When `--workdir` is set, a **REFUTED** verdict does more than print a
+counterexample string: it drops a runnable, self-contained Pyrope reproduction
+into the workdir. `lec.prpfail` (default `lecfail.prp`) is a single file holding
+
+- **both designs** re-emitted as Pyrope (`lhd compile --emit-dir pyrope:`; the
+  ref side's modules are prefixed `lecref_` on a name clash),
+- a wrapper `mod __lecfail_dut_pair` that instantiates BOTH and exposes their
+  outputs as `impl_<o>` / `ref_<o>`, and
+- a `test` that drives the BMC counterexample's exact per-cycle input sequence
+  (reset-hold prologue included) via `const _drv_<in> = [...]` arrays.
+
+`lec.prpfailrun` (default on with `--workdir`) then runs `lhd sim
+--set sim.vcd=true` on it, producing **one** VCD (`lecfail.vcd`) whose
+`impl_*` vs `ref_*` traces show exactly where and how the two designs diverge —
+open it in a waveform viewer, or edit the `.prp` and re-run. The trace is the
+uncapped structured witness the BMC engine records (`Query_result::trace`); the
+inductive engine's single-step CEX is not a reachable-from-reset sequence, so it
+produces no testbench (a plain `auto`/`bmc` REFUTE always does). Turn the whole
+thing off with `lec.witness=false` (or `lec.prpfail=""`); keep only the `.prp`
+with `lec.prpfailrun=false`. Regression: `pass/lec/tests/lec_witness_prpfail_test.sh`.
 
 ## Build facts (cvc5)
 

@@ -2,7 +2,7 @@
 :name: mem_init_tuple
 :type: equiv
 :verilog_top: mem_init_tuple.regi2
-:pyrope_top: mem_init_tuple.regi2
+:pyrope_top: regi2
 */
 
 // 1a-mem — a tuple-literal reg-array initializer packs per entry onto the

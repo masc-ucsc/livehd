@@ -2,7 +2,7 @@
 :name: mod_twopaths
 :type: equiv
 :verilog_top: mod_twopaths.twopaths
-:pyrope_top: mod_twopaths.twopaths
+:pyrope_top: twopaths
 */
 
 // 1a-mem follow-up — multi-path landing cycles. `o` reaches the interface

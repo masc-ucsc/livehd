@@ -2,7 +2,7 @@
 :name: reduce_and
 :type: equiv
 :verilog_top: reduce_and.foo
-:pyrope_top: reduce_and.foo
+:pyrope_top: foo
 */
 
 // AND-reduction `foo#&[range]`: the get_mask slice is sign-extended from its

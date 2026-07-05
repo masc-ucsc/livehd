@@ -2,7 +2,7 @@
 :name: mem_mut_array
 :type: equiv
 :verilog_top: mem_mut_array.mutarr
-:pyrope_top: mem_mut_array.mutarr
+:pyrope_top: mutarr
 */
 
 // 1a-mem — a runtime-indexed mut array is NOT a memory (no cross-cycle

@@ -2,7 +2,7 @@
 :name: mem_tuple_rw
 :type: equiv
 :verilog_top: mem_tuple_rw.mtr
-:pyrope_top: mem_tuple_rw.mtr
+:pyrope_top: mtr
 */
 
 // tuple-typed memory: `reg mem:[8]q_type` (q_type = (a,b)) is lowered by

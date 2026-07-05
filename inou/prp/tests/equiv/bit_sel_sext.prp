@@ -2,7 +2,7 @@
 :name: bit_sel_sext
 :type: equiv
 :verilog_top: bit_sel_sext.bsel
-:pyrope_top: bit_sel_sext.bsel
+:pyrope_top: bsel
 */
 
 // 2f-bit_sel_sext RTL coverage: a no-operator `#[N]` is a default zext (a bit

@@ -2,7 +2,7 @@
 :name: tup_in_match
 :type: equiv
 :verilog_top: tup_in_match.top
-:pyrope_top: tup_in_match.top
+:pyrope_top: top
 */
 
 // 2i-issues C (corner) — tuple INPUT port fields read inside MATCH arms (each

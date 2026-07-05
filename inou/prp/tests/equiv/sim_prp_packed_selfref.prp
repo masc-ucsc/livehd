@@ -9,7 +9,7 @@
 // false word-level cycle: `hi` reads only io[3:2], and those bits are driven
 // only by input `a`, but cgen.sim schedules the packed `io` value as one object
 // and reports a combinational loop when emitting the Pyrope sim.
-pub comb sim_prp_packed_selfref::[lg="sim_prp_packed_selfref", hdl](a:u2) -> (z:u2) {
+pub comb sim_prp_packed_selfref::[timecheck=false](a:u2) -> (z:u2) {
   wire io:u4
   wire hi:u2
   wire low:u2

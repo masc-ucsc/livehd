@@ -2,7 +2,7 @@
 :name: tup_port_nested
 :type: equiv
 :verilog_top: tup_port_nested.f
-:pyrope_top: tup_port_nested.f
+:pyrope_top: f
 */
 
 // NESTED tuple ports flatten recursively: `ar.inner.a`, `p.s.n` are 2-level

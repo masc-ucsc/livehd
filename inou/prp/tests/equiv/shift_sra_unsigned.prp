@@ -2,7 +2,7 @@
 :name: shift_sra_unsigned
 :type: equiv
 :verilog_top: shift_sra_unsigned.top
-:pyrope_top: shift_sra_unsigned.top
+:pyrope_top: top
 */
 
 // 2i-issues E (corner) — the SAME idiom on an UNSIGNED u8. The fix must NOT

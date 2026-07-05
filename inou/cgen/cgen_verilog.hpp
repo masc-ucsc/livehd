@@ -48,12 +48,24 @@ private:
   inline static std::mutex                       lgs_mutex;  // setup of static reserved_keyword
   inline static absl::flat_hash_set<std::string> reserved_keyword;
 
+  // Internal graph identity is the hierarchical, always-unique `file.entity`
+  // (top_module_name); Verilog needs a FLAT, legal module name. This map (built
+  // once by the driver over the co-emitted graph set) resolves a `file.entity`
+  // to its flat name: the bare `entity` when unique across the set, else the
+  // sanitized `file_entity`. Shared (non-owning) so a module header and every
+  // sub-instance reference agree. nullptr => flat_module_name falls back to the
+  // bare entity (single-module / external-reference case).
+  const absl::flat_hash_map<std::string, std::string>* flat_names_ = nullptr;
+
   // Helper: name for a wire, preferring user-assigned name; falls back to a
   // synthesised name from node + port_id. Graph-IO pins resolve to their
   // declared name from GraphIO.
   static std::string         pin_wire_name(const hhds::Pin_class& pin);
   std::string                get_wire_or_const(const hhds::Pin_class& dpin) const;
   static std::string         get_scaped_name(std::string_view name);
+  // Flat Verilog module name for an internal `file.entity` graph name (see
+  // flat_names_). Not yet scaped — the caller still runs get_scaped_name.
+  std::string                flat_module_name(std::string_view full) const;
   static std::string         get_append_to_name(std::string_view name, std::string_view ext);
   std::string                get_unique_decl_name(std::string_view name);
   std::string                get_expression(const hhds::Pin_class& dpin);
@@ -126,5 +138,6 @@ private:
 public:
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
 
-  Cgen_verilog(bool _verbose, std::string_view _odir, bool _srcmap = false);
+  Cgen_verilog(bool _verbose, std::string_view _odir, bool _srcmap = false,
+               const absl::flat_hash_map<std::string, std::string>* _flat_names = nullptr);
 };

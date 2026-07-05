@@ -2,7 +2,7 @@
 :name: tup_port_comb
 :type: equiv
 :verilog_top: tup_port_comb.f
-:pyrope_top: tup_port_comb.f
+:pyrope_top: f
 */
 
 // Tuple/struct-typed comb PORTS flatten to dotted scalar leaves: a

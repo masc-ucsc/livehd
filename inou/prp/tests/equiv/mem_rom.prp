@@ -2,7 +2,7 @@
 :name: mem_rom
 :type: equiv
 :verilog_top: mem_rom.romtest
-:pyrope_top: mem_rom.romtest
+:pyrope_top: romtest
 */
 
 // 1a-mem — a const array read at a runtime index is a ROM: the same type=2

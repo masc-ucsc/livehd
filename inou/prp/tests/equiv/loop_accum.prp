@@ -2,7 +2,7 @@
 :name: loop_accum
 :type: equiv
 :verilog_top: loop_accum.top
-:pyrope_top: loop_accum.top
+:pyrope_top: top
 */
 
 // Task 2u — a RUNTIME `mut` accumulated across a comptime-eliminated block: an

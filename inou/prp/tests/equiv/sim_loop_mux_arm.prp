@@ -14,7 +14,7 @@
 // loop survives to emission. FIX: distribute the slice THROUGH the Mux arms
 // (Get_mask(mux(s,x,y),m) == mux(s, Get_mask(x,m), Get_mask(y,m)); the
 // selector itself resolves as a full-width slice).
-pub comb sim_loop_mux_arm::[lg="sim_loop_mux_arm", hdl](sel:u1, a:u4, b:u4) -> (z:u8) {
+pub comb sim_loop_mux_arm::[timecheck=false](sel:u1, a:u4, b:u4) -> (z:u8) {
   wire w:u8
   wire hi:u4
 

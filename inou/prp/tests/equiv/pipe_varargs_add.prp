@@ -2,7 +2,7 @@
 :name: pipe_varargs_add
 :type: equiv
 :verilog_top: pipe_varargs_add.top
-:pyrope_top: pipe_varargs_add.top
+:pyrope_top: top
 */
 
 // Task 1p/2u follow-on — the `pipe` analog of varargs_add: a var-arg `pipe`

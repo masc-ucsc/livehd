@@ -87,9 +87,15 @@ def main():
 
     # 2. Recompile the emitted Pyrope and LEC it against the golden .v.
     try:
+        # Per-side tops: the golden .v carries the historical dotted module name
+        # (`pipe1_pass.passthru`), but the Pyrope side now emits the FLAT Verilog
+        # module name (`passthru`) — internal graph names stay hierarchical while
+        # Verilog flattens. Pass each side its own module name.
+        ref_top  = top
+        impl_top = top.rsplit(".", 1)[-1]
         chk = subprocess.run(
             [lhd, "lec", "--set", "lec.solver=lgyosys", "--impl", "pyrope:" + emitted, "--ref", "verilog:" + v,
-             "--top", top, "--workdir", os.path.join(work, "w_check")],
+             "--impl-top", impl_top, "--ref-top", ref_top, "--workdir", os.path.join(work, "w_check")],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=CHECK_TIMEOUT)
     except subprocess.TimeoutExpired:
         print("{} - p2p - inconclusive (lhd lec timeout >{}s, NOT a fail)".format(name, CHECK_TIMEOUT))

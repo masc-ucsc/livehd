@@ -2,7 +2,7 @@
 :name: reg_delay_init
 :type: equiv
 :verilog_top: reg_delay_init.delay
-:pyrope_top: reg_delay_init.delay
+:pyrope_top: delay
 */
 
 // 2d-reg — an explicit stage register with a non-nil initializer: the init

@@ -2,7 +2,7 @@
 :name: mod_template
 :type: equiv
 :verilog_top: mod_template.top
-:pyrope_top: mod_template.top
+:pyrope_top: top
 */
 
 // Task 1p — `mod inner(a)` has an UNTYPED input, so it is a deferred template

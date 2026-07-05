@@ -2,7 +2,7 @@
 :name: tup_out_cond_whole
 :type: equiv
 :verilog_top: top
-:pyrope_top: tup_out_cond_whole.top
+:pyrope_top: top
 */
 
 // FAILING regression for 2i-issues D (residual): a tuple-typed OUTPUT port driven

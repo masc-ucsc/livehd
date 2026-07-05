@@ -2,7 +2,7 @@
 :name: mod_call_mod
 :type: equiv
 :verilog_top: mod_call_mod.top
-:pyrope_top: mod_call_mod.top
+:pyrope_top: top
 */
 
 // mod instantiating a mod: the callee's declared per-output cycle is the

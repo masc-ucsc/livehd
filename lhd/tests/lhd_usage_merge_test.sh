@@ -47,9 +47,11 @@ done
   || fail "compile of merged library failed: $(cat "$W/r5.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r5.json" || fail "compile not pass"
 grep -q 'module inv' "$W/top.v" || fail "verilog misses module inv: $(cat "$W/top.v")"
-grep -q 'module \\adder.adder' "$W/top.v" || fail "verilog misses module adder.adder"
-grep -q 'module \\top.top' "$W/top.v" || fail "verilog misses module top.top"
-grep -q 'inv u_inv' "$W/top.v" || fail "top does not instantiate the inv black box"
-grep -q '\\adder.adder .*\\u_adder' "$W/top.v" || fail "top does not instantiate adder.adder"
+# Verilog module names are FLAT (`adder`/`top`, not the internal `\adder.adder`);
+# instance TYPE is flat, instance NAME still embeds the hierarchical `\u_adder…`.
+grep -qE '^module adder\(' "$W/top.v" || fail "verilog misses module adder"
+grep -qE '^module top\(' "$W/top.v" || fail "verilog misses module top"
+grep -qE '^inv .*u_inv' "$W/top.v" || fail "top does not instantiate the inv black box"
+grep -qE '^adder .*u_adder' "$W/top.v" || fail "top does not instantiate adder"
 
 echo "lhd_usage_merge_test passed"

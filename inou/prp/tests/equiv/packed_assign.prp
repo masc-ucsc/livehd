@@ -2,7 +2,7 @@
 :name: packed_assign
 :type: equiv_slang
 :verilog_top: packed_assign.pa
-:pyrope_top: packed_assign.pa
+:pyrope_top: pa
 */
 
 // Correct Pyrope reference for packed_assign.v -- a packed 2-D array built with

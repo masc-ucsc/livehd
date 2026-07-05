@@ -153,7 +153,9 @@ EOF
   --emit verilog:"$W/modc.v" --workdir "$W/w9" -q --result-json "$W/r9.json" \
   || fail "mod-via-import lowering failed: $(cat "$W/r9.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r9.json" || fail "mod-via-import result not pass: $(cat "$W/r9.json")"
-grep -q 'modlib.scale  *u_scale' "$W/modc.v" || fail "expected a \\modlib.scale Sub instance: $(cat "$W/modc.v")"
+# The instance TYPE is the FLAT Verilog module name `scale`; its instance NAME
+# still embeds the hierarchical graph name (`\u_modlib.scale_…`).
+grep -qE '^scale .*u_' "$W/modc.v" || fail "expected a scale Sub instance: $(cat "$W/modc.v")"
 
 # ── 5. liveness: a dead-branch import never resolves (and never errors) ──────
 cat > "$W/dead.prp" <<'EOF'

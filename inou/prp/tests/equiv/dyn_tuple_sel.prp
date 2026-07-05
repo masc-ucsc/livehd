@@ -2,7 +2,7 @@
 :name: dyn_tuple_sel
 :type: equiv
 :verilog_top: dyn_tuple_sel.sel4
-:pyrope_top: dyn_tuple_sel.sel4
+:pyrope_top: sel4
 */
 
 // A runtime index into a COMPTIME fixed-size tuple-of-wires lowers to a

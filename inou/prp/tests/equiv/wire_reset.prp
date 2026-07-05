@@ -2,7 +2,7 @@
 :name: wire_reset
 :type: equiv
 :verilog_top: wire_reset.wreset
-:pyrope_top: wire_reset.wreset
+:pyrope_top: wreset
 */
 
 // 2c-wire — a computed clear wired into a register's `reset_pin` via a forward

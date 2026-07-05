@@ -2,7 +2,7 @@
 :name: mem_whole_comb
 :type: equiv
 :verilog_top: mem_whole_comb.combarr
-:pyrope_top: mem_whole_comb.combarr
+:pyrope_top: combarr
 */
 
 // Pure COMBINATIONAL whole-array: the whole `arr` is written from one bus

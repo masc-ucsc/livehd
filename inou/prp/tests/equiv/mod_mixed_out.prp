@@ -2,7 +2,7 @@
 :name: mod_mixed_out
 :type: equiv
 :verilog_top: mod_mixed_out.mix
-:pyrope_top: mod_mixed_out.mix
+:pyrope_top: mix
 */
 
 const capture_val = 1

@@ -3,7 +3,7 @@
 :type: equiv
 :reset_style: async
 :verilog_top: reg_async_flag.counter
-:pyrope_top: reg_async_flag.counter
+:pyrope_top: counter
 */
 
 // 2d-reg — the `upass.reset_style=async` elaboration flag (via the

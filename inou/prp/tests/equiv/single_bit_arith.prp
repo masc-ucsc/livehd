@@ -2,7 +2,7 @@
 :name: single_bit_arith
 :type: equiv
 :verilog_top: single_bit_arith.sb
-:pyrope_top: single_bit_arith.sb
+:pyrope_top: sb
 */
 
 // Single-bit extract -> sign replication.  `(io_instruction >> 31) & 1` selects

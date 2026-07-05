@@ -2,7 +2,7 @@
 :name: tuple_in_port
 :type: equiv
 :verilog_top: top
-:pyrope_top: tuple_in_port.top
+:pyrope_top: top
 */
 
 // FAILING regression for 2i-issues C: a tuple/struct-typed INPUT port is valid,

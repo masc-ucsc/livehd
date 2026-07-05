@@ -2,7 +2,7 @@
 :name: wire_typed
 :type: equiv
 :verilog_top: wire_typed.wt
-:pyrope_top: wire_typed.wt
+:pyrope_top: wt
 */
 
 // 2c-wire — a TYPED wire narrows its driver to the declared width (Verilog net

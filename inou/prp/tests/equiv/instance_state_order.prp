@@ -2,7 +2,7 @@
 :name: instance_state_order
 :type: equiv
 :verilog_top: instance_state_order.top
-:pyrope_top: instance_state_order.top
+:pyrope_top: top
 */
 
 // Hierarchical-LEC STATEFUL box-instance pairing guard (the sequential
@@ -15,13 +15,13 @@
 // with lane j and spuriously refute the collapsed parent (rescued only by the
 // flat-confirmation fallback); the box-correspondence builder pairs by
 // canonicalized instance NAME first, so the collapsed run proves directly.
-pub mod lane_acc::[lg="icso_lane_acc"](a:u8) -> (s:u8@[0]) {
+pub mod lane_acc(a:u8) -> (s:u8@[0]) {
   reg acc:u8 = 0
   s = acc
   wrap acc = acc + a
 }
 
-pub mod top::[lg="instance_state_order.top"](d:u32) -> (q:u32@[0]) {
+pub mod top(d:u32) -> (q:u32@[0]) {
   mut s3 = lane_acc::[name=u3](a = (d >> 24) & 0xff)
   mut s2 = lane_acc::[name=u2](a = (d >> 16) & 0xff)
   mut s1 = lane_acc::[name=u1](a = (d >> 8) & 0xff)

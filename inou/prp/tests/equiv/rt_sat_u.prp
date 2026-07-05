@@ -2,7 +2,7 @@
 :name: rt_sat_u
 :type: equiv
 :verilog_top: rt_sat_u.rt_sat_u
-:pyrope_top: rt_sat_u.rt_sat_u
+:pyrope_top: rt_sat_u
 */
 
 // Runtime (non-comptime) unsigned `sat`: clamp an 8-bit input to [0, 15]. The

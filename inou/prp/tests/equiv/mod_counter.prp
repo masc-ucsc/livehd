@@ -2,7 +2,7 @@
 :name: mod_counter
 :type: equiv
 :verilog_top: mod_counter.counter
-:pyrope_top: mod_counter.counter
+:pyrope_top: counter
 */
 
 // 2d-reg — the counter idiom in a mod: a state register (conditional write

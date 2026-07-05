@@ -27,7 +27,7 @@ mod lg_use_top(a:u8, b:u8) -> (o:u9@[0]) {
 }
 EOF
 cat > "$W/gold.v" <<'EOF'
-module \lg_use.lg_use_top (input [7:0] a, input [7:0] b, output [8:0] o);
+module lg_use_top (input [7:0] a, input [7:0] b, output [8:0] o);
   assign o = a + b;
 endmodule
 EOF
@@ -43,7 +43,7 @@ cat > "$W/plib.prp" <<'EOF'
 pub mod prp_add::[lg="prp_add"](a:u8, b:u8) -> (s:u9@[0]) { s = a + b }
 EOF
 cat > "$W/prp_use.prp" <<'EOF'
-const prp_add = import("lg:prp_add")
+const prp_add = import("lg:plib.prp_add")
 mod prp_use_top(a:u8, b:u8) -> (o:u9@[0]) { o = prp_add(a=a, b=b).s }
 EOF
 
@@ -58,8 +58,10 @@ grep -q "addsub u_" "$W/out/lg_use.lg_use_top.v" || fail "top does not instantia
 
 # ---- 3. LEC: top (instantiating addsub) + the addsub body == flat a+b -------
 cat "$W/out/lg_use.lg_use_top.v" "$W/addsub.v" > "$W/impl.v"
+# The Pyrope side emits the FLAT Verilog module name (`lg_use_top`); internal
+# graph names stay hierarchical (`lg_use.lg_use_top`) but Verilog flattens.
 $LHD lec --set lec.solver=lgyosys --impl "verilog:$W/impl.v" --ref "verilog:$W/gold.v" \
-  --impl-top lg_use.lg_use_top --ref-top lg_use.lg_use_top --workdir "$W/wlec" -q \
+  --impl-top lg_use_top --ref-top lg_use_top --workdir "$W/wlec" -q \
   || fail "LEC: imported lg netlist is not equivalent to a+b"
 
 # ---- 4. not-found diagnostic -----------------------------------------------
@@ -77,12 +79,14 @@ fi
 grep -qi "Assertion" "$W/bp.err" && fail "port mismatch aborted instead of a clean diagnostic"
 grep -qi "does not have\|no input named" "$W/bp.err" || fail "port-mismatch error lacks a clear message"
 
-# ---- 6. lg: unit from a Pyrope producer (::[lg=...] pinned name) ------------
-$LHD compile "$W/plib.prp" --top prp_add --emit-dir "lg:$W/plgdb/" \
+# ---- 6. lg: unit from a Pyrope producer (hierarchical file.entity name) ------
+$LHD compile "$W/plib.prp" --top plib.prp_add --emit-dir "lg:$W/plgdb/" \
   --workdir "$W/w6a" -q || fail "pyrope producer (plib) did not compile to lg"
 $LHD compile "$W/prp_use.prp" "lg:$W/plgdb/" --emit-dir "verilog:$W/pout/" \
   --workdir "$W/w6b" -q || fail "import of a pyrope-produced lg unit did not compile"
-grep -q "prp_add u_" "$W/pout/prp_use.prp_use_top.v" || fail "top does not instantiate the pyrope-produced prp_add"
+# The instance TYPE is the flat module name `prp_add`; its instance NAME now
+# embeds the hierarchical graph name (`\u_plib.prp_add_…`), so match the type.
+grep -qE "^prp_add " "$W/pout/prp_use.prp_use_top.v" || fail "top does not instantiate the pyrope-produced prp_add"
 
 echo "lg_import_test - PASS (slang+pyrope two-step LEC, not-found, port-mismatch)"
 exit 0

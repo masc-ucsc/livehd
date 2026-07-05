@@ -2,7 +2,7 @@
 :name: bitset_reg
 :type: equiv
 :verilog_top: bitset_reg.foo
-:pyrope_top: bitset_reg.foo
+:pyrope_top: foo
 */
 
 // Per-range LHS bit-assembly into a `reg` (NOT a `mut`). Each registered output

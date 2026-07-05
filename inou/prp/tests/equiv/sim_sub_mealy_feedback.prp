@@ -2,7 +2,7 @@
 :name: sim_sub_mealy_feedback
 :type: equiv
 :verilog_top: sim_sub_mealy_feedback_top
-:pyrope_top: sim_sub_mealy_feedback_top
+:pyrope_top: top
 */
 
 // FALSE combinational loop through a stateful sub-instance that is NOT a
@@ -15,7 +15,7 @@
 // (Stage-2) — pre-bind only the outputs with no comb dependence on any input
 // (here `ready`), which already un-cycles the schedule; the atomic call then
 // orders normally.
-pub mod cell::[lg="ssmf_cell", hdl](start:u1, kill:u1, din:u4) -> (ready:u1@[], echo:u4@[]) {
+pub mod cell::[timecheck=false](start:u1, kill:u1, din:u4) -> (ready:u1@[], echo:u4@[]) {
   reg busy:u1 = 0
   ready = busy ^ 1
   echo  = din ^ 3            // comb in->out path: the callee is Mealy
@@ -26,7 +26,7 @@ pub mod cell::[lg="ssmf_cell", hdl](start:u1, kill:u1, din:u4) -> (ready:u1@[], 
   }
 }
 
-pub mod top::[lg="sim_sub_mealy_feedback_top", hdl](go:u1, flush:u1, d:u4) -> (ready_o:u1@[0], echo_o:u4@[0]) {
+pub mod top::[timecheck=false](go:u1, flush:u1, d:u4) -> (ready_o:u1@[0], echo_o:u4@[0]) {
   wire u_ready:u1
   wire kill:u1
   kill = (u_ready ^ 1) & flush     // depends on the instance's own reg-read output

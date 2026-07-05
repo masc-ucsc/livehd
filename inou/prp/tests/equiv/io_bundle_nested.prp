@@ -2,7 +2,7 @@
 :name: io_bundle_nested
 :type: equiv_slang
 :verilog_top: io_bundle_nested.top
-:pyrope_top: io_bundle_nested.top
+:pyrope_top: top
 */
 
 // Pyrope reference for io_bundle_nested.v: `io_c = io_x ? io_a : 0` (the

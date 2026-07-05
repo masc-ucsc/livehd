@@ -2,7 +2,7 @@
 :name: mod_mul_add
 :type: equiv
 :verilog_top: mod_mul_add.multiply_add
-:pyrope_top: mod_mul_add.multiply_add
+:pyrope_top: multiply_add
 */
 
 // The 06c-pipelining.md canonical: two pipes at different latencies,

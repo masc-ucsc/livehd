@@ -2,7 +2,7 @@
 :name: dyn_tuple_pair
 :type: equiv
 :verilog_top: dyn_tuple_pair.sel2
-:pyrope_top: dyn_tuple_pair.sel2
+:pyrope_top: sel2
 */
 
 // Smallest dynamic tuple select: a 2-entry tuple-of-wires with a 1-bit index

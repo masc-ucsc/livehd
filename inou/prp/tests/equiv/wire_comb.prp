@@ -2,7 +2,7 @@
 :name: wire_comb
 :type: equiv
 :verilog_top: wire_comb.wcomb
-:pyrope_top: wire_comb.wcomb
+:pyrope_top: wcomb
 */
 
 // 2c-wire — a `wire` is a single-driver combinational net read

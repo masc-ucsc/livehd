@@ -2,7 +2,7 @@
 :name: tup_port_mod
 :type: equiv
 :verilog_top: tup_port_mod.f
-:pyrope_top: tup_port_mod.f
+:pyrope_top: f
 */
 
 // Tuple-typed MOD ports: the `@[0]` landing-cycle annotation rides the WHOLE

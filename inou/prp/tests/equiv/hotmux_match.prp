@@ -2,7 +2,7 @@
 :name: hotmux_match
 :type: equiv
 :verilog_top: hotmux_match.msel
-:pyrope_top: hotmux_match.msel
+:pyrope_top: msel
 */
 
 // 1a-ops: a `match` is a unique-if chain by definition, so the expression
