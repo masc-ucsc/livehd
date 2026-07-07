@@ -1,0 +1,18 @@
+/*
+:name: generic_const_value
+:type: compile
+*/
+// TBD feature (docs/pyrope/06-functions.md, 15-tbd.md; todo/livehd/3g.html
+// subtask A): a CONSTANT-valued generic read as a value in the body. The
+// call-site `addn<3>(…)` already parses and passes arity; the body read of
+// `N` fails:
+//   undefined-read: read of undefined variable 'N'
+// A single generic name makes the unnamed binding unambiguous per the
+// argument-naming rules. The concrete substitution (`r = a + 3`) compiles
+// green, so this file flips green exactly when constant generics land.
+comb addn<N>(a:u4) -> (r:u8) {
+  r = a + N
+}
+pub comb generic_const_value(x:u4) -> (r:u8) {
+  r = addn<3>(a=x)
+}

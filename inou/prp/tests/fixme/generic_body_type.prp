@@ -1,0 +1,20 @@
+/*
+:name: generic_body_type
+:type: compile
+*/
+// TBD feature (docs/pyrope/06-functions.md, 15-tbd.md; todo/livehd/3g.html
+// subtask A): a generic name used as a BODY type annotation. Only signature
+// `:T` slots bind today; any body reference of a generic dies at name
+// resolution — this one with:
+//   unknown-type: `T` is not a type (no such `type`/`enum` is declared)
+// (This form worked in the prp2lnast era — gen_type_cast.prp's header used to
+// cite it as the working case — and regressed with the prpparse swap.)
+// The concrete substitution (`mut tmp:u8 = a`) compiles green, so this file
+// flips green exactly when body binding lands.
+comb widen<T>(a:T) -> (r:u32) {
+  mut tmp:T = a
+  r = u32(tmp) + 1
+}
+pub comb generic_body_type(x:u8) -> (r:u32) {
+  r = widen<u8>(a=x)
+}

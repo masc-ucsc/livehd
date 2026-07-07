@@ -1,0 +1,17 @@
+/*
+:name: generic_named_bind
+:type: compile
+*/
+// TBD feature (docs/pyrope/06-functions.md, 15-tbd.md; todo/livehd/3g.html
+// subtask C): NAMED call-site generic bindings `f<T=u8>(…)`, following the
+// same naming rules as arguments (replacing the landed positional
+// all-or-nothing rule). Does not parse today:
+//   missing-terminator: expected newline or ';' to end the statement
+// The positional form `add<u8>(a=x, b=y)` compiles green, so this file flips
+// green exactly when named bindings land.
+comb add<T>(a:T, b:T) -> (r:T) {
+  r = a + b
+}
+pub comb generic_named_bind(x:u8, y:u8) -> (r:u8) {
+  r = add<T=u8>(a=x, b=y)
+}

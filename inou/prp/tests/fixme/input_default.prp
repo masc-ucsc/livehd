@@ -1,0 +1,27 @@
+/*
+:name: input_default
+:type: compile
+*/
+// TBD feature (docs/pyrope/06-functions.md and the 04-variables.md
+// tuple-scope example, 15-tbd.md; todo/livehd/3g.html subtask E): INPUT
+// default values — no generics involved. Both declarations parse, but every
+// call omitting a defaulted input fails:
+//   fcall-missing-arg
+// The default evaluates in the parameter tuple's scope: a constant (`in2=3`)
+// or an expression over EARLIER parameters (`b:signed=a+5`, the documented
+// 04-variables example). The explicit-argument forms compile green, so this
+// file flips green exactly when input defaults land.
+// (Bodies deliberately avoid `u8(expr)` casts: uN() of an arithmetic
+// expression is independently broken at HEAD — "call to undefined function
+// 'u8'" even for `pub comb top(x:u4,y:u4)->(r:u8){ r = u8(x+y) }` — and this
+// tracker must flip green on input defaults alone.)
+comb f(in1:u4, in2=3) -> (out:u8) {
+  out = in1 + in2
+}
+comb example(a:u4, b:u8=a+5) -> (result:u8) {
+  result = a + b
+}
+pub comb input_default(x:u4) -> (r:u8, s:u8) {
+  r = f(in1=x)
+  s = example(a=x)
+}

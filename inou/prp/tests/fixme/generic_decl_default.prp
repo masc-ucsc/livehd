@@ -1,0 +1,19 @@
+/*
+:name: generic_decl_default
+:type: compile
+*/
+// TBD feature (docs/pyrope/06-functions.md, 15-tbd.md; todo/livehd/3g.html
+// subtask B): a generic DEFAULT in the declaration (`<T, N=1>`), replacing
+// the deleted `[...]` comptime-parameter slot. The declaration does not
+// parse today:
+//   expected-gt: expected '>' to close generics (found '=')
+// The body deliberately does not read `N`, isolating the defaults grammar +
+// omission machinery from body binding (subtask A). The unnamed `<u8>`
+// binding is unambiguous (N's default pins it as constant-kinded; u8 is a
+// type → binds T). The default-free substitution compiles green.
+comb addn<T, N=1>(a:T) -> (r:T) {
+  r = a
+}
+pub comb generic_decl_default(x:u8) -> (r:u8) {
+  r = addn<u8>(a=x)
+}

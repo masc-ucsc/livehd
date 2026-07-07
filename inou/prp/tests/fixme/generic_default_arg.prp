@@ -1,0 +1,19 @@
+/*
+:name: generic_default_arg
+:type: compile
+*/
+// TBD feature (docs/pyrope/06-functions.md, 15-tbd.md; todo/livehd/3g.html):
+// a GENERIC used as an input default (`in2=N`) — the `comb fun1<T1,T2,T4>
+// (in1:T1, in2=T4)` form from the 3g spec discussion. Combines subtask A
+// (generic visible in the default expression; today's failure:
+//   undefined-read: read of undefined variable 'N'
+// ) with subtask E (input defaults at all — see input_default.prp). The
+// unnamed `<u4, 3>` binding is unambiguous by kind (type → T, constant → N).
+// Flips green only when BOTH land; the fully-substituted form
+// (`in2` passed explicitly as 3) compiles green.
+comb f<T, N>(in1:T, in2=N) -> (out:u8) {
+  out = in1 + in2
+}
+pub comb generic_default_arg(x:u4) -> (r:u8) {
+  r = f<u4, 3>(in1=x)
+}
