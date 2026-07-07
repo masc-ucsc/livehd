@@ -3139,10 +3139,13 @@ void sim_command(Options& opts, Result& res) {
   // --set sim.vcd=true: dump one VCD per test, `<workdir>/<test.name>.vcd`. The
   // path is absolute (the driver binary is run from the caller's cwd), and when
   // on, the fast build also links hlop's VCD writer (vcd_writer.cpp).
-  bool vcd_on = false;
+  bool vcd_on        = false;
+  bool vcd_fakedelay = true;  // sim.vcdfakedelay: X + settle delay after each edge (default); false = edge-aligned
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.vcd") {
       vcd_on = (v == "true" || v == "1" || v == "on");
+    } else if (k == "sim.vcdfakedelay") {
+      vcd_fakedelay = (v == "true" || v == "1" || v == "on");
     }
   }
   // A `--vcd-from` window or `--vcd-on-fail` implies VCD: the driver needs the
@@ -3195,6 +3198,9 @@ void sim_command(Options& opts, Result& res) {
     opts.files    = sources;  // compile ALL positional sources (imports resolve across them)
     if (vcd_on) {
       opts.sets.emplace_back("compile.sim.vcd", "1");  // make cgen_sim emit the VCD machinery
+      if (!vcd_fakedelay) {
+        opts.sets.emplace_back("compile.sim.vcdfakedelay", "false");  // edge-aligned trace (cgen default is true)
+      }
     }
     // `sim` is DYNAMIC verification: each `test` block's asserts are checked by
     // running the generated driver, not formally. Skip pass.formal — a `test`
@@ -4677,9 +4683,11 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   cmd += shell_quote(prpfail_path) + " --set sim.vcd=true --workdir " + shell_quote(opts.workdir);
   // Forward any explicit sim-runtime header locations (compile.cgen.sim_hlop /
   // sim_iassert) to the child sim host-compile — needed when `../hlop` isn't
-  // beside the cwd (e.g. under `bazel test`, where the caller passes them).
+  // beside the cwd (e.g. under `bazel test`, where the caller passes them) —
+  // and the VCD style knob, so `lhd lec --set sim.vcdfakedelay=false` shapes
+  // the counterexample waveform too.
   for (const auto& [k, v] : opts.sets) {
-    if ((k == "compile.cgen.sim_hlop" || k == "compile.cgen.sim_iassert") && !v.empty()) {
+    if ((k == "compile.cgen.sim_hlop" || k == "compile.cgen.sim_iassert" || k == "sim.vcdfakedelay") && !v.empty()) {
       cmd += " --set " + shell_quote(k + "=" + v);
     }
   }

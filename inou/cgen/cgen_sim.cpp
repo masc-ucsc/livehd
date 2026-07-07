@@ -1450,6 +1450,129 @@ int split_packed_selfref_wires(hhds::Graph* g) {
 }
 }  // namespace
 
+// Name (raw port name) of the INPUT port that clocks module `g`: the port
+// feeding a flop's clock_pin, else -- recursively -- the port wired straight
+// through to a sub-instance's own clock port (a flopless wrapper still has a
+// clock). Empty when no input-driven clock exists (purely combinational, or
+// an internally derived clock). Memoized per Cgen_sim (one graph emission);
+// the in-progress "" entry terminates a recursive instantiation.
+std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
+  const auto key = std::string{g->get_name()};
+  if (auto it = clk_memo_.find(key); it != clk_memo_.end()) {
+    return it->second;
+  }
+  clk_memo_.emplace(key, "");
+  auto gio = g->get_io();
+  if (!gio) {
+    return "";
+  }
+  absl::flat_hash_map<pin_key_t, std::string> in_pin_name;
+  for (const auto& d : gio->get_input_pin_decls()) {
+    auto p = g->get_input_pin(d.name);
+    if (!p.is_invalid()) {
+      in_pin_name[p.get_class_index()] = std::string{d.name};
+    }
+  }
+  // See through the identity wrappers tolg puts on a typed port read -- a unary
+  // Get_mask (width adjust) or Get_mask(v, -1) (to-positive) -- so `clock:u1`
+  // wired straight into a sub's clock port still resolves to the input pin.
+  auto resolve_passthrough = [](hhds::Pin_class p) {
+    for (int hops = 0; hops < 8 && !p.is_invalid(); ++hops) {
+      auto n = p.get_master_node();
+      if (type_op_of(n) != Ntype_op::Get_mask) {
+        break;
+      }
+      auto e = sorted_inp(n);  // e[0]=value, e[1]=optional mask (node_expr's convention)
+      if (e.empty()) {
+        break;
+      }
+      if (e.size() >= 2) {  // binary form: identity only for the mask==-1 idiom
+        if (!is_const_pin(e[1].driver)) {
+          break;
+        }
+        auto mv = hydrate_const(e[1].driver);
+        if (!mv.is_just_i64() || mv.to_just_i64() != -1) {
+          break;
+        }
+      }
+      p = e[0].driver;
+    }
+    return p;
+  };
+  std::string found;
+  bool        has_flops = false;
+  for (auto node : g->fast_class()) {
+    if (!livehd::graph_util::is_type_flop(node)) {
+      continue;
+    }
+    has_flops = true;
+    auto d    = resolve_passthrough(get_driver(find_sink_pin(node, "clock_pin")));
+    if (d.is_invalid()) {
+      continue;
+    }
+    if (auto it = in_pin_name.find(d.get_class_index()); it != in_pin_name.end()) {
+      found = it->second;
+      break;
+    }
+  }
+  // name fallback, mirroring the top-level one: flops whose clock_pin is left
+  // implicit still make an input literally named `clock` THE clock port (so a
+  // parent wiring its own clock into it resolves through this module too).
+  if (found.empty() && has_flops) {
+    for (const auto& d : gio->get_input_pin_decls()) {
+      if (d.name == "clock") {
+        found = "clock";
+        break;
+      }
+    }
+  }
+  if (found.empty()) {
+    for (auto node : g->fast_class()) {
+      if (!livehd::graph_util::is_type_sub(node)) {
+        continue;
+      }
+      auto sio = node.get_subnode_io();
+      auto sg  = node.get_subnode_graph();
+      if (!sio || !sg) {
+        continue;
+      }
+      const auto callee_clk = clock_input_of(sg.get());
+      if (callee_clk.empty()) {
+        continue;
+      }
+      uint32_t clk_pid  = 0;
+      bool     have_pid = false;
+      for (const auto& d : sio->get_input_pin_decls()) {
+        if (d.name == callee_clk) {
+          clk_pid  = static_cast<uint32_t>(d.port_id);
+          have_pid = true;
+          break;
+        }
+      }
+      if (!have_pid) {
+        continue;
+      }
+      for (auto e : node.inp_edges()) {
+        if (static_cast<uint32_t>(e.sink.get_port_id()) != clk_pid) {
+          continue;
+        }
+        auto d = resolve_passthrough(e.driver);
+        if (!d.is_invalid()) {
+          if (auto it = in_pin_name.find(d.get_class_index()); it != in_pin_name.end()) {
+            found = it->second;
+          }
+        }
+        break;
+      }
+      if (!found.empty()) {
+        break;
+      }
+    }
+  }
+  clk_memo_[key] = found;
+  return found;
+}
+
 void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   pin2var.clear();
   tmp_cnt           = 0;
@@ -1482,12 +1605,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // operand that drives the read range. A no-op unless a genuine word-level cycle
   // exists; a real bit-level loop is never split (still fails loudly below).
   split_packed_selfref_wires(g);
-  // `is_top` = the testbench-driven module (vs an instantiated sub-module). The
-  // clock/reset waveform CONFIG + the functional reset window live on the top so
-  // the reset behaves identically whether or not a VCD is dumped; `vcd_on` adds
-  // the actual VCD writer/vars (a strict subset: VCD only when also top).
+  // `is_top` = the testbench-driven module (vs an instantiated sub-module); it
+  // only gates which module BAKES the VCD file path (avoids two modules opening
+  // the same baked file). The VCD machinery itself (vars, snapshots, the phased
+  // hierarchical dump methods) is emitted for EVERY module when tracing is on:
+  // the root instance's writer is shared down the hierarchy by __vcd_hier(), so
+  // one VCD carries the whole design tree, not just the top's io.
   const bool is_top  = top.empty() || entity == top;
-  const bool vcd_on  = !vcd_file.empty() && is_top;
+  const bool vcd_on  = !vcd_file.empty();
 
   const std::string fstem = sim_file_stem(gname);
   const std::string base  = odir.empty() ? fstem : absl::StrCat(odir, "/", fstem);
@@ -1582,22 +1707,16 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // is traced like any other input.
   std::string clk_field;
   {
-    absl::flat_hash_map<pin_key_t, std::string> in_pin_field;
-    for (const auto& io : ios) {
-      if (!io.is_input) {
-        continue;
-      }
-      auto p = g->get_input_pin(io.raw);
-      if (!p.is_invalid()) {
-        in_pin_field[p.get_class_index()] = io.field;
-      }
-    }
-    for (const auto& f : flops) {
-      auto d = get_driver(find_sink_pin(f.node, "clock_pin"));
-      if (!d.is_invalid()) {
-        auto it = in_pin_field.find(d.get_class_index());
-        if (it != in_pin_field.end()) {
-          clk_field = it->second;
+    // clock_input_of covers both this module's own flops AND the pass-through
+    // case (a flopless wrapper whose `clock` input is wired straight into its
+    // sub-instances' clock ports -- e.g. the lecfail dut pair): without the
+    // recursive walk that input traced as a flat ordinary signal and the
+    // synthetic waveform label collided into `clock_vcd0`.
+    const auto raw_clk = clock_input_of(g);
+    if (!raw_clk.empty()) {
+      for (const auto& io : ios) {
+        if (io.is_input && io.raw == raw_clk) {
+          clk_field = io.field;
           break;
         }
       }
@@ -1790,28 +1909,36 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   hout->append("  In __in{};\n");
 
   // ---- VCD trace state (compile.sim.vcd): traces In, Out, and flop state of
-  // this (top) module. Lazily opens the file on the first cycle(). The clock is
-  // the one signal NOT traced as an ordinary io port -- it gets the synthetic
-  // `__vv_clk` waveform driven by `step`; reset and every other input trace
-  // normally (reset is just a poked input now). ----
+  // EVERY module -- the root instance (the one the driver hands a __vcd_path)
+  // lazily opens the writer on its first cycle() and __vcd_hier() shares it down
+  // the sub-instance tree, so one VCD carries the whole hierarchy under nested
+  // scopes. The clock is the one signal NOT traced as an ordinary io port -- it
+  // gets the `__vv_clk` waveform driven by `step`; reset and every other input
+  // trace normally (reset is just a poked input now).
+  //
+  // Each traced instance SNAPSHOTS its values (__vs*) inside its own cycle(),
+  // pre-commit -- a sub's cycle() runs (and commits its flops) mid-way through
+  // the parent's comb walk, so by the parent's dump point the sub's live members
+  // are already one edge ahead; the snapshot preserves this-period semantics.
+  // The root then walks the hierarchy in timestamp-ordered phases (the writer
+  // hard-rejects a past timestamp): clock edge -> [X window] -> settled data. ----
   struct VcdSig {
-    std::string var, vname, accessor;
+    std::string var, vname, accessor, snap, prev;
     int         bits;
-    bool        posedge;  // dumped at the +3 (posedge) or +half+3 (negedge) sub-tick
+    bool        posedge;   // dumped at the posedge or negedge slot of the period
+    bool        is_input;  // root: poked at the edge; sub: an ordinary comb net
   };
   std::vector<VcdSig> vsig;
-  bool                any_negedge = false;
   if (vcd_on) {
     int  k   = 0;
-    auto add = [&](const std::string& nm, int b, const std::string& acc, bool pe = true) {
-      vsig.push_back({absl::StrCat("__vv", k++), (b > 1 ? absl::StrCat(nm, "[", b - 1, ":0]") : nm), acc, b, pe});
-      if (!pe) {
-        any_negedge = true;
-      }
+    auto add = [&](const std::string& nm, int b, const std::string& acc, bool pe = true, bool is_in = false) {
+      vsig.push_back({absl::StrCat("__vv", k), (b > 1 ? absl::StrCat(nm, "[", b - 1, ":0]") : nm), acc,
+                      absl::StrCat("__vs", k), absl::StrCat("__vp", k), b, pe, is_in});
+      ++k;
     };
     for (const auto& io : ios) {
       if (io.is_input && io.field != clk_field) {
-        add(io.field, io.bits, absl::StrCat("in.", io.field));  // clock gets the dedicated waveform
+        add(io.field, io.bits, absl::StrCat("in.", io.field), true, true);  // clock gets the dedicated waveform
       }
     }
     for (const auto& io : ios) {
@@ -1828,13 +1955,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // shared_ptr (not unique_ptr) so a DUT struct stays COPYABLE: a hierarchical
     // parent's peek() snapshots each sub-instance by value (`auto _pk = sub;`),
     // which a non-copyable member would break. Sub-instances never get a VCD path
-    // (only the test's top instance does), so their __vcd stays null and the shared
-    // copy is harmless; the top instance's own peek move-saves __vcd + clears the
+    // (only the root instance does), so their __vcd stays null and the shared
+    // copy is harmless; the root instance's own peek move-saves __vcd + clears the
     // path so no spurious trace is written during the state-preserving recompute.
     hout->append("  std::shared_ptr<vcd::VCDWriter> __vcd;\n");
+    hout->append("  bool __vcd_trace = false;  // registered in a trace (as root or by a parent's __vcd_hier)\n");
     hout->append("  vcd::VarPtr __vv_clk;\n");
     for (const auto& v : vsig) {
       hout->append(absl::StrCat("  vcd::VarPtr ", v.var, ";\n"));
+      hout->append(absl::StrCat("  Slop<", v.bits, "> ", v.snap, "{};  // this-period sample (pre-commit)\n"));
+      if (vcd_fakedelay) {
+        hout->append(absl::StrCat("  Slop<", v.bits, "> ", v.prev, "{};  // last dumped (X-window change detection)\n"));
+      }
     }
   }
 
@@ -1866,7 +1998,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // Clock waveform config + the VCD path / period counter. Plain scalars on every
   // module; the driver sets the path + clock ratio/name on each instance.
   {
-    std::string vcd_baked = (vcd_file == "1" || vcd_file == "true") ? std::string{} : vcd_file;
+    // A baked FILE path lands only on the --top module: with the machinery now on
+    // every module, baking it everywhere would have each sub-instance lazily open
+    // the same file as its own root writer.
+    std::string vcd_baked = (vcd_file == "1" || vcd_file == "true" || !is_top) ? std::string{} : vcd_file;
     hout->append(absl::StrCat("  std::string __vcd_path = \"", vcd_baked, "\";\n"));
     hout->append("  unsigned __vcd_tick = 0;       // clock periods elapsed (10 VCD time-units each)\n");
     hout->append(absl::StrCat("  std::string __clk_name = \"", clk_name_baked, "\";\n"));
@@ -1876,6 +2011,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // ---- method declarations, then close the struct (bodies follow in the .cpp) ----
   if (vcd_on) {
     hout->append("  void __vcd_init();\n");
+    hout->append("  void __vcd_hier(vcd::VCDWriter* __w, const std::string& __s);\n");
+    hout->append("  void __vcd_clk(vcd::VCDWriter* __w, bool __rise);\n");
+    hout->append("  void __vcd_dump_in(vcd::VCDWriter* __w);\n");
+    if (vcd_fakedelay) {
+      hout->append("  void __vcd_dump_x(vcd::VCDWriter* __w, bool __pos, bool __root);\n");
+    }
+    hout->append("  void __vcd_dump_data(vcd::VCDWriter* __w, bool __pos, bool __root);\n");
   }
   hout->append("  void reset_cycle();\n");
   hout->append("  Out cycle(In in);\n");
@@ -1898,14 +2040,133 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   hout->append("  void probe_signals(const std::string& _p, std::map<std::string, long>& _m) const;\n");
   hout->append("};\n");
 
-  // ---- __vcd_init definition (source) ----
+  // ---- VCD method definitions (source): __vcd_init (root-only entry) plus the
+  // recursive registration/dump walkers every module carries. The root's writer
+  // is passed down as a plain pointer -- only the root instance OWNS it (shared
+  // __vcd stays null on subs, keeping window-off teardown a root-local reset). ----
   if (vcd_on) {
+    // `has_clock`: this module has clocked state (or a pass-through clock port),
+    // so its scope shows the clock waveform. A clockless module still gets one
+    // when it is the ROOT (the testbench tick is its clock) -- registered in
+    // __vcd_init, not __vcd_hier, so a clockless SUB scope stays data-only.
+    const bool has_clock = !clk_field.empty() || !flops.empty();
     fout->append("void ", mod, "::__vcd_init() {\n");
     fout->append("  __vcd = std::make_shared<vcd::VCDWriter>(__vcd_path, vcd::makeVCDHeader());\n");
-    fout->append(absl::StrCat("  __vv_clk = __vcd->register_var(\"", mod, "\", __clk_name, vcd::VariableType::wire, 1);\n"));
+    if (!has_clock) {
+      fout->append(absl::StrCat("  __vv_clk = __vcd->register_var(\"", mod, "\", __clk_name, vcd::VariableType::wire, 1);\n"));
+    }
+    fout->append(absl::StrCat("  __vcd_hier(__vcd.get(), \"", mod, "\");\n"));
+    fout->append("}\n");
+
+    // Register this instance's vars under scope `__s`, then the sub-instances
+    // under `__s.<inst>` (nested $scope blocks -- the writer splits on '.').
+    fout->append("void ", mod, "::__vcd_hier(vcd::VCDWriter* __w, const std::string& __s) {\n");
+    fout->append("  (void)__w; (void)__s;\n");
+    fout->append("  __vcd_trace = true;\n");
+    if (has_clock) {
+      fout->append("  __vv_clk = __w->register_var(__s, __clk_name, vcd::VariableType::wire, 1);\n");
+    }
     for (const auto& v : vsig) {
       fout->append(
-          absl::StrCat("  ", v.var, " = __vcd->register_var(\"", mod, "\", \"", v.vname, "\", vcd::VariableType::wire, ", v.bits, ");\n"));
+          absl::StrCat("  ", v.var, " = __w->register_var(__s, \"", v.vname, "\", vcd::VariableType::wire, ", v.bits, ");\n"));
+    }
+    for (const auto& s : subs) {
+      fout->append(absl::StrCat("  ", s.inst, ".__vcd_hier(__w, __s + \".", s.inst, "\");\n"));
+    }
+    fout->append("}\n");
+
+    // The clock edge, written into every clocked scope of the subtree.
+    fout->append("void ", mod, "::__vcd_clk(vcd::VCDWriter* __w, bool __rise) {\n");
+    fout->append("  (void)__w; (void)__rise;\n");
+    fout->append("  if (__vv_clk) {\n");
+    fout->append("    if (__rise) { __w->change(__vv_clk, \"1\"); } else { __w->change(__vv_clk, \"0\"); }\n");
+    fout->append("  }\n");
+    for (const auto& s : subs) {
+      fout->append(absl::StrCat("  ", s.inst, ".__vcd_clk(__w, __rise);\n"));
+    }
+    fout->append("}\n");
+
+    // Root-only, at the edge timestamp: the testbench pokes inputs BEFORE the
+    // edge, so they change exactly at it (no settle window, no X). Not recursive:
+    // a sub's inputs are ordinary comb nets, dumped with the data phase below.
+    fout->append("void ", mod, "::__vcd_dump_in(vcd::VCDWriter* __w) {\n");
+    fout->append("  (void)__w;\n");
+    fout->append("  if (__vcd_trace) {\n");
+    for (const auto& v : vsig) {
+      if (v.is_input) {
+        fout->append(absl::StrCat("    __w->change(", v.var, ", vcd::to_vcd_bits(", v.snap, ", ", v.bits, "));\n"));
+      }
+    }
+    fout->append("  }\n}\n");
+
+    if (vcd_fakedelay) {
+      // At the edge timestamp: any signal whose settled value will differ goes X
+      // for the settle window ("computing"); an unchanged signal stays clean.
+      fout->append("void ", mod, "::__vcd_dump_x(vcd::VCDWriter* __w, bool __pos, bool __root) {\n");
+      fout->append("  (void)__w; (void)__pos; (void)__root;\n");
+      fout->append("  if (__vcd_trace) {\n");
+      fout->append("    if (__pos) {\n");
+      for (const auto& v : vsig) {
+        if (!v.posedge) {
+          continue;
+        }
+        const char* x = v.bits > 1 ? "bx" : "x";
+        if (v.is_input) {
+          fout->append(absl::StrCat("      if (!__root && !", v.snap, ".same_repr(", v.prev, ")) __w->change(", v.var,
+                                    ", \"", x, "\");\n"));
+        } else {
+          fout->append(
+              absl::StrCat("      if (!", v.snap, ".same_repr(", v.prev, ")) __w->change(", v.var, ", \"", x, "\");\n"));
+        }
+      }
+      fout->append("    } else {\n");
+      for (const auto& v : vsig) {
+        if (v.posedge) {
+          continue;
+        }
+        const char* x = v.bits > 1 ? "bx" : "x";
+        fout->append(
+            absl::StrCat("      if (!", v.snap, ".same_repr(", v.prev, ")) __w->change(", v.var, ", \"", x, "\");\n"));
+      }
+      fout->append("    }\n  }\n");
+      for (const auto& s : subs) {
+        fout->append(absl::StrCat("  ", s.inst, ".__vcd_dump_x(__w, __pos, false);\n"));
+      }
+      fout->append("}\n");
+    }
+
+    // The settled data of this period's sample (posedge slot, then the negedge
+    // slot at the period midpoint). Root inputs were already written at the edge
+    // by __vcd_dump_in; as a SUB they are comb nets and dump here instead.
+    fout->append("void ", mod, "::__vcd_dump_data(vcd::VCDWriter* __w, bool __pos, bool __root) {\n");
+    fout->append("  (void)__w; (void)__pos; (void)__root;\n");
+    fout->append("  if (__vcd_trace) {\n");
+    fout->append("    if (__pos) {\n");
+    for (const auto& v : vsig) {
+      if (!v.posedge) {
+        continue;
+      }
+      std::string upd = vcd_fakedelay ? absl::StrCat(" ", v.prev, " = ", v.snap, ";") : std::string{};
+      if (v.is_input) {
+        fout->append(absl::StrCat("      if (!__root) { __w->change(", v.var, ", vcd::to_vcd_bits(", v.snap, ", ",
+                                  v.bits, "));", upd, " }\n"));
+      } else {
+        fout->append(
+            absl::StrCat("      __w->change(", v.var, ", vcd::to_vcd_bits(", v.snap, ", ", v.bits, "));", upd, "\n"));
+      }
+    }
+    fout->append("    } else {\n");
+    for (const auto& v : vsig) {
+      if (v.posedge) {
+        continue;
+      }
+      std::string upd = vcd_fakedelay ? absl::StrCat(" ", v.prev, " = ", v.snap, ";") : std::string{};
+      fout->append(
+          absl::StrCat("      __w->change(", v.var, ", vcd::to_vcd_bits(", v.snap, ", ", v.bits, "));", upd, "\n"));
+    }
+    fout->append("    }\n  }\n");
+    for (const auto& s : subs) {
+      fout->append(absl::StrCat("  ", s.inst, ".__vcd_dump_data(__w, __pos, false);\n"));
     }
     fout->append("}\n");
   }
@@ -2352,45 +2613,55 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
 
-  // VCD dump (pre-commit, current-state values at this cycle's timestamp).
-  // Guarded by `if (__vcd)` so a path-less instance (e.g. peek(), which clears
-  // the path to suppress dumping) never derefs a null writer.
+  // VCD sample + dump (pre-commit, current-state values at this cycle's
+  // timestamp). EVERY traced instance snapshots its values here -- a sub's
+  // cycle() runs mid-way through its parent's comb walk, so by the parent's
+  // dump point the sub's live flops are already one edge ahead; the snapshot
+  // preserves this-period semantics. Only the ROOT (the instance holding the
+  // writer; peek() clears path+writer to suppress dumping) then walks the
+  // hierarchy in timestamp-ORDERED phases (the writer hard-rejects any past
+  // timestamp, so per-instance inline dumping cannot interleave correctly).
   //
   // One cycle() call advances one clock period of `__clk_ratio` ticks (10 VCD
-  // time-units each). Within the period, edges and data are spread out so a
-  // waveform viewer shows clock-edge -> data causality:
-  //   base          : clock rises 0->1, reset takes this period's level
+  // time-units each). With the settle window (compile.sim.vcdfakedelay, the
+  // default), edges and data are spread out so a waveform viewer shows
+  // clock-edge -> data causality:
+  //   base          : clock rises 0->1; root inputs take this period's pokes;
+  //                   any about-to-change data goes X ("computing")
   //   base + 3      : posedge-sourced data settles (just after the rising edge)
   //   base + half   : clock falls 1->0   (half = ratio*5, the period midpoint)
   //   base + half+3 : negedge-sourced data settles (just after the falling edge)
-  // change() only writes when a value differs from the previous timestamp.
+  // Without it (vcdfakedelay=false) data lands exactly ON its clock edge: no X,
+  // no +3 offset (the traditional, smaller trace). change() only writes when a
+  // value differs from the previous timestamp.
   if (vcd_on) {
+    fout->append("    if (__vcd_trace) {\n");
+    for (const auto& v : vsig) {
+      fout->append(absl::StrCat("      ", v.snap, " = ", v.accessor, ";\n"));
+    }
+    fout->append("    }\n");
     fout->append("    if (!__vcd && !__vcd_path.empty()) __vcd_init();\n");
     fout->append("    if (__vcd) {\n");
     fout->append("      const unsigned __b    = __vcd_tick * 10;\n");
     fout->append("      const unsigned __half = (__clk_ratio > 0 ? __clk_ratio : 1) * 5;\n");
-    // rising clock edge (reset and other inputs are ordinary traced signals)
+    // rising clock edge, in every clocked scope; root inputs change AT the edge
     fout->append("      vcd::global_timestamp = __b;\n");
-    fout->append("      __vcd->change(__vv_clk, \"1\");\n");
-    // posedge-sourced data, just after the rising edge
-    fout->append("      vcd::global_timestamp = __b + 3;\n");
-    for (const auto& v : vsig) {
-      if (v.posedge) {
-        fout->append(absl::StrCat("      __vcd->change(", v.var, ", vcd::to_vcd_bits(", v.accessor, ", ", v.bits, "));\n"));
-      }
+    fout->append("      __vcd_clk(__vcd.get(), true);\n");
+    fout->append("      __vcd_dump_in(__vcd.get());\n");
+    if (vcd_fakedelay) {
+      fout->append("      __vcd_dump_x(__vcd.get(), true, true);\n");
+      fout->append("      vcd::global_timestamp = __b + 3;\n");
     }
-    // falling clock edge at the period midpoint
+    fout->append("      __vcd_dump_data(__vcd.get(), true, true);\n");
+    // falling clock edge at the period midpoint, then the negedge-sourced data
+    // (the calls recurse the whole subtree; scopes with none write nothing)
     fout->append("      vcd::global_timestamp = __b + __half;\n");
-    fout->append("      __vcd->change(__vv_clk, \"0\");\n");
-    // negedge-sourced data, just after the falling edge (only when present)
-    if (any_negedge) {
+    fout->append("      __vcd_clk(__vcd.get(), false);\n");
+    if (vcd_fakedelay) {
+      fout->append("      __vcd_dump_x(__vcd.get(), false, true);\n");
       fout->append("      vcd::global_timestamp = __b + __half + 3;\n");
-      for (const auto& v : vsig) {
-        if (!v.posedge) {
-          fout->append(absl::StrCat("      __vcd->change(", v.var, ", vcd::to_vcd_bits(", v.accessor, ", ", v.bits, "));\n"));
-        }
-      }
     }
+    fout->append("      __vcd_dump_data(__vcd.get(), false, true);\n");
     fout->append("    }\n");
   }
   // Advance the period counter every cycle -- independent of VCD and of is_top,

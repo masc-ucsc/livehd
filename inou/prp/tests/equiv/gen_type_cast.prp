@@ -5,19 +5,20 @@
 :pyrope_top: top
 */
 
-// FAILING regression repro (generics lowering gap): a generic type parameter
-// used as a CONSTRUCTOR / cast inside the lambda body — `T(a)` — does not lower.
-// The generic-binding pass inlines the body but leaves `T(...)` as a call to a
-// value named `T` (renamed `inl1_T`), so `lnast.tolg` aborts with:
+// FAILING tracker (generics body-binding gap, todo 3g subtask A): a generic
+// type parameter used as a CONSTRUCTOR / cast inside the lambda body — `T(a)`
+// — is not bound. Since the prpparse front-end swap this fails EARLY at name
+// resolution (it used to reach tolg and abort on an `inl1_T` call):
 //
-//   upass.tolg: call to 'inl1_T' has no hardware lowering yet —
-//   only pipe/mod calls become instances
+//   undefined-call: call to undefined function 'T' (no such
+//   `comb`/`mod`/`pipe`, variable, or built-in)
 //
-// Using `T` purely as a *type annotation* (`mut tmp:T = a`) DOES lower today;
-// only the `T(x)` constructor form is broken. Once the binding pass substitutes
-// the concrete type into constructor calls too, `widen<u8>(a)` is
-// `u32(u8(a)) + 1` == `a + 1` (32-bit) — proven equivalent to the golden below
-// (validated by LEC against the `mut tmp:u8 = a; r = u32(tmp) + 1` form).
+// Body references of a generic name are broken across the board — the type
+// annotation form `mut tmp:T = a` fails too (unknown-type; tracked separately
+// by //inou/prp:prp-tbd-generic_body_type). Once body binding substitutes the
+// concrete entity, `widen<u8>(a)` is `u32(u8(a)) + 1` == `a + 1` (32-bit) —
+// proven equivalent to the golden below (validated by LEC against the
+// `mut tmp:u8 = a; r = u32(tmp) + 1` form).
 
 comb widen<T>(a:T) -> (r:u32) {
   r = u32(T(a)) + 1

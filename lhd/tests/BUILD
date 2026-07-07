@@ -185,6 +185,18 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Hierarchical VCD (one writer shared down the sub-instance tree, nested $scope
+# per instance, sub io+flops traced) + the `sim.vcdfakedelay` style knob (default:
+# X settle window after each edge; false: plain edge-aligned updates) + the real
+# `clock` label through a flopless pass-through wrapper (the lecfail dut-pair
+# shape). Structural checks run hermetically; the run checks need the sibling
+# ../hlop/../iassert headers.
+sh_test(
+    name = "lhd_sim_vcd_hier_test",
+    srcs = ["lhd_sim_vcd_hier_test.sh"],
+    data = ["//lhd"],
+)
+
 # `lhd sim` OBSERVABILITY (sim_checkpoint_debug_plan): query signal values without
 # re-instrumenting. cgen emits describe_signals/probe_signals per module; the
 # result envelope's "debug" member carries --list-signals (the observable signal

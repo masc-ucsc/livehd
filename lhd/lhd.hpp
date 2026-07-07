@@ -227,6 +227,9 @@ struct Sim_set_option {
 inline constexpr Sim_set_option kSimSetOptions[] = {
     {"vcd", "false", Sim_set_option::Kind::boolean,
      "dump one VCD per test to <workdir>/<test.name>.vcd (links the VCD writer)"},
+    {"vcdfakedelay", "true", Sim_set_option::Kind::boolean,
+     "VCD data settles a few ticks after each clock edge, with X during the settle window (edge->data causality); "
+     "false = plain edge-aligned updates (no X, no delay; smaller/faster trace)"},
     {"cgen_color", "true", Sim_set_option::Kind::boolean,
      "run pass.color (cgen per-output cones) before inou.cgen.sim so sim codegen can schedule a Sub by output "
      "cone (breaks a false combinational loop through an instance); coloring is metadata only, NO_COLOR is just "

@@ -3,66 +3,139 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TODO 3g — Generics &lt;T&gt;</title>
+<title>TODO 3g — Finish generics &lt;T&gt;</title>
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">3g</strong> Generics <code>&lt;T&gt;</code></h1>
+<h1><strong class="item-id">3g</strong> Finish generics <code>&lt;T&gt;</code></h1>
 
-<p>Type-parameterized lambdas (<code>comb add&lt;T&gt;(a:T, b:T) -&gt; (r:T)</code>).
-  <strong>Needs a specification first</strong> — this task is a placeholder so the
-  deferred work has a home; not urgent. Successor to the generics slice that task
-  1p (deferred lambda templates, fully landed 2026-06-08) explicitly carved out.</p>
-
-<h2>Depends on</h2>
-<p>Nothing hard. The template + call-site-specialization machinery it builds on is
-  on master (1p): a not-fully-typed lambda is a <em>template</em> with no LGraph;
-  <code>comb</code> inlines, <code>pipe</code>/<code>mod</code> specialize
-  per-signature into a dedup'd <code>Sub</code> with a readable mangled suffix.
-  Spec-wise it interacts with the typesystem (<code>does</code>, declared-type
-  propagation), so write the spec against the current
+<p>The generics <em>binding machinery</em> landed 2026-06-12 as task 2f-generics
+  (its page is deleted; this page was stale until 2026-07-07 and used to call
+  generics an unimplemented placeholder — it is not). What remains is finishing
+  the contract now written in
   <a href="https://masc-ucsc.github.io/docs/pyrope/06-functions/">06-functions</a>
-  contract.</p>
+  (spec settled 2026-07-07, see "Spec decisions" below): a generic name binds any
+  <strong>compile-time entity</strong> — a type, a comptime constant, or a
+  lambda — and unlike an input it can constrain the types of other inputs and of
+  outputs.</p>
+
+<h2>Spec decisions (2026-07-07, settled with Jose — do not re-litigate)</h2>
+<ul class="subtasks">
+<li><strong>Generics subsume the <code>[...]</code> comptime-parameter slot.</strong>
+  The old <code>COMPTIME</code> field (<code>comb addn[n:u8=1](a:u8)</code> /
+  <code>addn[3](…)</code>) is deleted from 06-functions (it never parsed —
+  declaration or call). A caller-picked comptime constant is a constant-valued
+  generic; to replace the slot's defaults, generics gain declaration defaults
+  (<code>&lt;T, N=4&gt;</code>).</li>
+<li><strong>Call-site binding follows the argument-naming rules.</strong> Named
+  (<code>f&lt;T=u8, N=8&gt;(…)</code>) unless unambiguous (single generic /
+  kind-unique / identifier matches the generic's name). This REPLACES the
+  landed positional all-or-nothing rule, so <code>fcall-generic-arity</code>
+  semantics change (partial lists become legal when named/defaulted/inferable).</li>
+<li><strong>Pure comptime-macro expansion.</strong> Whatever is legal for the
+  substituted entity is legal for the generic, nothing more. Corollaries:
+  <code>T.[bits]</code> is NOT a generics feature (it is exactly as (il)legal as
+  <code>u8.[bits]</code>, which errors today — type-name attribute queries are a
+  separate, unspecified feature; verified 2026-07-07 that even value-side
+  <code>a.[bits]</code> in a comb body hits <code>unhandled-node</code> for
+  concrete types too, so nothing generic-specific to do). Constant- and
+  lambda-valued generics are never inferred (no <code>:T</code> slot) — explicit
+  or defaulted only.</li>
+<li><strong>Constraints are out of scope.</strong> No <code>where</code>, no
+  <code>&lt;T does …&gt;</code> clause — the documented idiom is
+  <code>cassert(T does Addable)</code> in the body, which needs nothing beyond
+  body binding of <code>T</code> (subtask A) plus existing comptime asserts.</li>
+<li><strong>Input defaults join the general contract</strong>
+  (<code>comb f(in1:u4, in2=3)</code>): the default evaluates in the parameter
+  tuple's scope — 04-variables already documents the tuple-scope form
+  <code>b:signed=a+5</code> (default reads an EARLIER parameter at runtime) —
+  and a generic name (<code>in2=N</code>) is just one legal default expression.
+  Today omitting errors <code>fcall-missing-arg</code>.</li>
+</ul>
+
+<h2>Landed (verified against HEAD lhd, 2026-07-07)</h2>
+<ul class="subtasks">
+<li>Signature <code>:T</code> binding on params and outputs: explicit
+  <code>f&lt;u8&gt;(…)</code>, inference by unification over the actuals'
+  declared types (literals contribute kind only), named user types
+  (<code>f&lt;Byte&gt;</code>), comb inline re-typing, <code>mod</code>/<code>pipe</code>
+  per-binding specialization with readable mangling
+  (<code>madd__u8_u8</code>), diags <code>fcall-generic-arity</code> /
+  <code>fcall-generic-mismatch</code>.</li>
+<li>Grammar already accepts constants and lambda names in <code>&lt;…&gt;</code>
+  (<code>f&lt;3&gt;</code>, <code>f&lt;inc&gt;</code> parse and pass arity) —
+  but see the D validation hole below.</li>
+<li>Seams: <code>upass/runner/upass_runner.cpp</code> —
+  <code>resolve_generic_binds</code> (~:4323), the
+  <code>__generic_arg</code> call-site marker (~:269), specializer clone clears
+  generics (~:4236); <code>lnast/lnast.hpp</code> <code>generics_</code>.
+  Front-end is <strong>prpparse</strong> (this page used to cite prp2lnast —
+  gone).</li>
+</ul>
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
-<li><strong>A — write the spec.</strong> Syntax and semantics: where <code>&lt;T&gt;</code>
-  binds (params, outputs, body locals, <code>T.[bits]</code>-style queries),
-  inference vs explicit instantiation at the call site, constraints
-  (<code>T does …</code>?), multiple parameters <code>&lt;T, U&gt;</code>, and how a
-  generic differs from today's untyped-template behavior (an untyped param already
-  specializes on the actual's declared type — the spec must say what <code>&lt;T&gt;</code>
-  adds: same-type unification across params/outputs, named type reuse in the body,
-  …). Lands in the Pyrope docs, then split implementation subtasks here.</li>
-<li><strong>B — implementation.</strong> Per-<code>T</code> body substitution in the
-  specializer + the reserved mangling (<code>add6__T_u22</code>). Scope after A.</li>
+<li><strong>A — body binding of the generic name.</strong> The single systemic
+  gap: a generic resolves only in signature type slots; ANY body reference dies
+  at name resolution. Forms + today's error + tracker (all
+  <code>fixme</code>-tagged, run with <code>--test_tag_filters=</code>):
+  <ul>
+  <li><code>T(a)</code> constructor cast → <code>undefined-call</code> —
+    <code>//inou/prp:prp-equiv-gen_type_cast</code> +
+    <code>prp-v2prp-gen_type_cast</code> (equiv pair with LEC-validated golden).
+    NOTE its header used to describe a tolg <code>inl1_T</code> abort — the
+    failure moved earlier (prpparse-era semacheck).</li>
+  <li>body annotation <code>mut tmp:T = a</code> → <code>unknown-type</code> —
+    <code>prp-tbd-generic_body_type</code>. (gen_type_cast's header used to
+    claim this form works; it regressed with the front-end swap.)</li>
+  <li>constant read <code>r = a + N</code> → <code>undefined-read</code> —
+    <code>prp-tbd-generic_const_value</code>.</li>
+  <li>lambda call <code>F(v=a)</code> → <code>undefined-call</code> —
+    <code>prp-tbd-generic_lambda_param</code>.</li>
+  </ul></li>
+<li><strong>B — declaration defaults <code>&lt;T, N=4&gt;</code>.</strong>
+  Does not parse (<code>expected-gt</code>) —
+  <code>prp-tbd-generic_decl_default</code>.</li>
+<li><strong>C — named call-site bindings <code>f&lt;T=u8&gt;(…)</code></strong>
+  + the argument-naming rules replacing positional all-or-nothing. Does not
+  parse (<code>missing-terminator</code>) —
+  <code>prp-tbd-generic_named_bind</code>.</li>
+<li><strong>D — kind validation of bindings.</strong> A constant bound into a
+  type slot (<code>comb f&lt;N&gt;(a:N)</code> called <code>f&lt;3&gt;</code>)
+  silently compiles to hardware today with the <code>:3</code> annotation
+  apparently ignored (verified: emitted netlist is a plain u8 passthrough).
+  Needs a ruling: either follow the <code>b:a</code> value-as-type semantics
+  (envelope of the constant) or hard-error <code>fcall-generic-kind</code>.
+  Silent-ignore is the one wrong answer.</li>
+<li><strong>E — input defaults (non-generic)</strong>
+  <code>comb f(in1:u4, in2=3)</code> + omission → today
+  <code>fcall-missing-arg</code> — <code>prp-tbd-input_default</code>. Then the
+  generic-valued default <code>in2=T4</code> (today <code>undefined-read</code>)
+  — <code>prp-tbd-generic_default_arg</code> — falls out of A+E.</li>
+<li><strong>F — mangling for non-type binds.</strong> Specialization suffix
+  today keys on port types (<code>madd__u8_u8</code>); constant/lambda binds
+  need stable tokens (e.g. <code>__N_3</code>, <code>__F_inc</code>) so distinct
+  bindings dedup correctly and LEC names stay readable.</li>
 </ul>
 
-<h2>Subtasks — landed</h2>
-<p>None here. The seams 1p left in place (all on master):</p>
+<h2>Implementation traps (from the 2f-generics session — memory
+  <code>generics_resolution_traps</code>)</h2>
 <ul class="subtasks">
-<li><code>prp2lnast</code> parses the <code>&lt;T, U&gt;</code> list into the func_def
-  generics tuple (<code>prp2lnast.cpp:2785</code>), with no read-site refs minted
-  for the type names.</li>
-<li><code>Lnast::generics_</code> + <code>get/set/has_generics()</code>
-  (<code>lnast/lnast.hpp:170</code>); <code>func_extract</code> copies the names onto
-  the extracted Lnast and any generic signature is stamped <code>template_</code>
-  (no LGraph) (<code>upass_func_extract.cpp:66,491</code>).</li>
-<li>The specializer clone clears generics (<code>upass_runner.cpp:2121</code>) —
-  i.e. today a generic call rides the untyped-template path with <strong>no</strong>
-  per-<code>T</code> substitution or unification; the <code>__T_</code> mangling is
-  reserved, unimplemented.</li>
+<li>Post-SSA, io stores carry NO <code>ref T</code> child;
+  <code>io_meta.type_name</code> is the only "this port is T-typed" carrier.
+  Body <code>:T</code> declare refs DO survive — substitute during
+  <code>copy_subtree_into</code>.</li>
+<li>SSA re-emits mod outputs as <code>store(r, nil, stages)</code>; a type
+  appended after a stages child — <code>flatten_assign</code> looks past it;
+  keep that.</li>
+<li>fcall markers: compare KEYS with <code>current_raw_text()</code>, read
+  VALUES with <code>current_text()</code>.</li>
+<li><code>maybe_specialize_template_call</code>'s <code>already_typed</code>
+  must exclude generic ports or it mangles the literal "T" and dedups all
+  instantiations onto one module.</li>
 </ul>
-
-<h2>Design notes</h2>
-<p>None yet — intentionally unspecified. When picking this up, start from the 1p
-  decisions that already constrain it: specialization keys on the actual's
-  <em>declared</em> type (an untyped actual is a compile error,
-  <code>fcall-untyped-actual</code>); specialized modules dedup by mangled name;
-  readable suffix mangling. The open design question is what <code>&lt;T&gt;</code>
-  buys over the implicit untyped-param specialization that already works.</p>
 </main>
 <footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
 </body>

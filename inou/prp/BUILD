@@ -133,7 +133,13 @@ cc_test(
 # //...` green; run one with the tag filter cleared to see the failure:
 #   bazel test //inou/prp:prp-tbd-temporal_past --test_tag_filters=
 # Covered: temporal library (past[n]), standard library (import("prp")),
-# verification extras (requires/ensures), and testbench extras (step/peek/poke).
+# verification extras (requires/ensures), testbench extras (step/peek/poke),
+# and the finish-generics gaps from todo/livehd/3g.html (generic_* = body
+# references of a generic name / declaration defaults <T, N=4> / named <T=…>
+# bindings / generic-valued input default, input_default = input defaults with
+# no generics involved; each header records today's exact diagnostic; the
+# `T(a)` constructor form is tracked by the prp-equiv-gen_type_cast pair
+# below instead, which also LEC-checks the lowering once it lands).
 # (The `lg` attribute used to be on this list but is now implemented — its TBD
 # markers were removed from the docs.) The `macro=` memory-compiler binding is
 # also still TBD but is silently accepted-and-ignored — it compiles clean today
@@ -165,6 +171,13 @@ cc_test(
         "stdlib_import",
         "verif_requires",
         "testbench_step",
+        "generic_body_type",
+        "generic_const_value",
+        "generic_lambda_param",
+        "generic_decl_default",
+        "generic_named_bind",
+        "generic_default_arg",
+        "input_default",
     ]
 ]
 
@@ -273,11 +286,12 @@ cc_direct_headers(
             # signed_one_bit_cmp: known-failing miscompile tracker (1-bit signed
             # ordered compare reads unsigned). Run via the fixme target below.
             "tests/equiv/signed_one_bit_cmp.prp",
-            # gen_type_cast: DELIBERATELY-broken generics repro — the `T(a)`
-            # constructor on a generic param does not lower yet (see the file
-            # header, tracked by 3g). It cannot compile, so the forward equiv
-            # test can never pass; run it via the fixme target below. The reverse
-            # direction is already fixme-tagged through _V2PRP_FIXME.
+            # gen_type_cast: DELIBERATELY-broken generics repro — `T(a)` on a
+            # generic param is an unbound body reference (undefined-call; see
+            # the file header, tracked by 3g with the prp-tbd-generic_* family).
+            # It cannot compile, so the forward equiv test can never pass; run
+            # it via the fixme target below. The reverse direction is already
+            # fixme-tagged through _V2PRP_FIXME.
             "tests/equiv/gen_type_cast.prp",
             # Known-failing semantic tracker. Run via the fixme target below.
             "tests/equiv/latch_enable_hold.prp",
@@ -313,11 +327,13 @@ sh_test(
 )
 
 # Known-failing equiv tracker (fixme): gen_type_cast.prp is a DELIBERATELY-broken
-# generics repro — the `T(a)` constructor on a generic parameter does not lower
-# yet (the binding pass leaves it as a call to `inl1_T`; see the file header,
-# tracked by 3g). The .prp cannot compile, so the forward equiv pair can never
-# pass. Excluded from the glob above; tagged `fixme` so `bazel test //... (-fixme)`
-# stays green. Run it: bazel test //inou/prp:prp-equiv-gen_type_cast --test_tag_filters=
+# generics repro — the `T(a)` constructor on a generic parameter is an unbound
+# body reference and fails name resolution (undefined-call; see the file header,
+# tracked by 3g alongside the prp-tbd-generic_* compile trackers — this pair
+# additionally LEC-checks the lowering against a golden once it lands). The .prp
+# cannot compile, so the forward equiv pair can never pass. Excluded from the
+# glob above; tagged `fixme` so `bazel test //... (-fixme)` stays green. Run it:
+#   bazel test //inou/prp:prp-equiv-gen_type_cast --test_tag_filters=
 sh_test(
     name = "prp-equiv-gen_type_cast",
     srcs = ["tests/pyrope_test.py"],

@@ -45,6 +45,11 @@ private:
   static hhds::Pin_class get_driver(const hhds::Pin_class& sink);
   static hhds::Pin_class find_sink_pin(const hhds::Node_class& node, std::string_view name);
 
+  // Raw name of the input port clocking `g` (flop clock_pin, else recursively a
+  // sub-instance's clock port); "" = none. Memoized in clk_memo_.
+  std::string                                   clock_input_of(hhds::Graph* g);
+  absl::flat_hash_map<std::string, std::string> clk_memo_;
+
   // Resolve a driver pin to a Slop<target_bits> C++ EXPRESSION: a constant ->
   // Slop<W>::from_pyrope("..."); otherwise the named value width-converted to W.
   // sign_mode: 0 = per is_unsign(pin), +1 = force signed (Slop<W>{...}, sext),
@@ -53,11 +58,14 @@ private:
   // The RHS Slop<wbits> expression for one combinational node.
   std::string node_expr(const hhds::Node_class& node, int wbits);
 
-  std::string vcd_file;  // --set compile.sim.vcd=FILE ("" = no VCD)
-  std::string top;       // --top: only this module emits VCD (avoids file collisions)
+  std::string vcd_file;       // --set compile.sim.vcd=FILE ("" = no VCD)
+  std::string top;            // --top: only this module bakes the VCD path (avoids file collisions)
+  bool        vcd_fakedelay;  // --set compile.sim.vcdfakedelay: data settles at edge+3 with an X window (default);
+                              // false = plain edge-aligned updates (no X, no delay)
 
 public:
   void do_from_graph(const std::shared_ptr<hhds::Graph>& graph);
-  Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top)
-      : odir(_odir), vcd_file(_vcd), top(_top) {}
+  Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay)
+      : odir(_odir), vcd_file(_vcd), top(_top),
+        vcd_fakedelay(!(_fakedelay == "false" || _fakedelay == "0" || _fakedelay == "off")) {}
 };

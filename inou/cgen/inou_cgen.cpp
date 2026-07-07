@@ -29,6 +29,10 @@ void Inou_cgen::setup() {
   Eprp_method m2("inou.cgen.sim", "export executable slop C++ from an Lgraph", &Inou_cgen::to_cgen_sim);
   m2.add_label_optional("vcd", "VCD trace file baked into the sim (compile.sim.vcd); empty = no VCD", "");
   m2.add_label_optional("top", "top module name; only it emits VCD (avoids file collisions)", "");
+  m2.add_label_optional("vcdfakedelay",
+                        "VCD data settles a few ticks after each clock edge, with X during the settle window "
+                        "(compile.sim.vcdfakedelay); false = plain edge-aligned updates (no X, no delay)",
+                        "true");
   register_inou("cgen", m2);
 }
 
@@ -98,9 +102,10 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   TRACE_EVENT("inou", "sim_gen");
 
   Inou_cgen pp(var);
-  auto      dir     = pp.get_odir(var);
-  auto      vcd_out = var.get("vcd");
-  auto      top     = var.get("top");
+  auto      dir       = pp.get_odir(var);
+  auto      vcd_out   = var.get("vcd");
+  auto      top       = var.get("top");
+  auto      fakedelay = var.get("vcdfakedelay");
 
   // Synchronous (one .hpp per module): the designs are small and the kernel's
   // sim_into() checks each <module>.hpp exists right after this returns.
@@ -108,7 +113,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     if (!g) {
       continue;
     }
-    Cgen_sim p(dir, vcd_out, top);
+    Cgen_sim p(dir, vcd_out, top, fakedelay);
     p.do_from_graph(g);
   }
 }

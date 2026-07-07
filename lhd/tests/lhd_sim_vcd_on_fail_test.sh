@@ -67,8 +67,9 @@ RC=$?
 # the verdict is unchanged + located once; the on-fail re-run reports the VCD
 grep -q 'failed at clock 7 -> wrote failure VCD (cycles 4..7)' "$W/run.out" \
   || fail "missing the failure-VCD report: $(grep -i 'failure VCD' "$W/run.out")"
-[ "$(grep -c 'ASSERT FAILED' "$W/run.out")" = "1" ] \
-  || fail "the located assert should print ONCE (re-run must be silent): $(grep -c 'ASSERT FAILED' "$W/run.out")"
+# (asserts print with the file:line:cmd origin prefix, e.g. "bug.prp:13:assert fail: ...")
+[ "$(grep -c 'assert fail:' "$W/run.out")" = "1" ] \
+  || fail "the located assert should print ONCE (re-run must be silent): $(grep -c 'assert fail:' "$W/run.out")"
 
 # the failure-window VCD exists and is windowed (not a whole 30-cycle trace)
 VCD="$W/run/cnt.bug.vcd"
