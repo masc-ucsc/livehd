@@ -1,0 +1,77 @@
+pass.isabelle TODO
+==================
+
+[BUG] Get_mask(a, -1) all-ones mask is emitted at the mask pin's 1-bit width
+---------------------------------------------------------------------------
+
+Status:   RESOLVED
+  - pass.isabelle: fixed upstream by "pass.isabelle: preserve Get_mask and Sext
+    widths" (origin/fix/isabelle-get-mask-sext-width, cherry-picked as
+    cb636f4ca). The mask is now materialized at the source width, so the -1
+    sentinel becomes all-ones over every source bit (Get_mask(a,-1) == zext a).
+  - pass.lean: fixed in pass/lean/pass_lean.cpp Get_mask emit + certificate
+    mask-dep, widened to max(src_w, out_w) (behaviorally identical to the
+    src_w widening; the source has no bits above src_w).
+  Both validated by the add2 oracle:
+    forall a b : BitVec 4, add2_comb {a,b}.out_y = a + b   (and = add2_comb_cert).
+
+Found:    2026 (Lean port add2 oracle check)
+Severity: HIGH — produced semantically wrong models for the canonical zext idiom
+Present since: 590f019d5 "Add Isabelle graph export pass" (2026-06-05).
+              This was NOT a regression; the all-ones mask sentinel was never
+              handled until the fix above.
+
+Symptom
+-------
+LiveHD's canonical zero-extend idiom lowers to `Get_mask(x, mask=-1)`, which per
+pass/cprop/cprop.cpp:852 means `get_mask(a,-1) == a` (take ALL bits of x, zero
+extended). The `-1` is an all-ones sentinel of conceptually infinite width.
+
+Both the fast model and the certificate materialize the mask at the mask PIN's
+declared width, which the front-end sets to 1 for a `-1` constant:
+
+    uint32_t mask_w = pin_width(ctx, mask, node);          // == 1
+    ... sem_get_mask (ucast a :: src word) (ucast mask :: 1 word) ...
+
+`word_of_int (-1) :: 1 word` = `1`, so `mask_indices` of a 1-bit `1` is `[0]`,
+and `sem_get_mask a 1` collapses to *bit 0 of a* instead of the full value.
+
+Concrete failure (add2.sv = `y = a + b`, 4-bit):
+    a=5, b=3  -> emitted model yields y=2  (bit0(5)+bit0(3) = 1+1 = 2)
+                 correct RTL value is y=8.
+
+Why it still typechecks / proves
+--------------------------------
+The fast model AND the certificate evaluator share the identical 1-bit mask, so
+`<top>_comb = <top>_comb_cert` and `<top>_evalGraph_correct` both hold. The
+translation contract "model = certificate" is satisfied; only "model = RTL" is
+violated — which the LEC frontend gate is responsible for catching.
+
+Fix (apply to BOTH the fast-model emit and the cert mask-dep, in lockstep so the
+bridge theorem keeps holding)
+-----------------------------------------------------------------------------
+The disambiguation must happen at emission time, while the mask is still a Dlop
+and known to be `-1` / all-ones (`v.same_repr(Dlop::create_integer(-1))` or
+`get_mask_range()` covering all source bits). Materialize the mask at
+`max(src_w, out_w)` instead of the mask pin's 1-bit width:
+
+  - `-1`  -> all-ones over the source width  -> selects every source bit = zext.
+  - a concrete non-negative pattern -> high bits pad with 0 (no behavior change).
+
+This matches cgen_sim.cpp:201 `a.get_mask_op(mask).zext_to<tw>`.
+
+Reference fix already applied in pass/lean/pass_lean.cpp (Ntype_op::Get_mask):
+
+    const uint32_t mask_src_w = pin_width(ctx, drivers[0], node);
+    const uint32_t mask_w     = std::max(mask_src_w, w);
+    ... sem_get_mask <a> (mask materialized at mask_w) ...
+
+The same widening must be applied to the certificate's mask dependency so the
+cert const node carries the widened all-ones value (mask consts are dedicated
+per Get_mask in practice, so widening the const width is safe).
+
+Validation
+----------
+Add an oracle check (not just a typecheck/lake/isabelle-build smoke test) for a
+design whose Get_mask(-1) feeds arithmetic, e.g. add2: assert
+`add2_comb {a:=5, b:=3} = {y:=8}` and a wrap case `{a:=10,b:=10} = {y:=4}`.

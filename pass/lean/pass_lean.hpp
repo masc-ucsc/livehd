@@ -29,6 +29,7 @@ public:
   // Configuration knobs (parsed from Eprp_var):
   bool        strict;           // strict:true (default) — abort on unsupported ops
   bool        normalize;        // normalize:true (default) — fix pre-export IR width artifacts
+  bool        emit_cert;        // emit_cert:true (default) — emit graph certificates and cert model
   std::string top;              // top module name override (informational)
   LeanCertWFMode cert_wf;       // cert_wf:skip|eval|sorry|chunked (default skip)
   LeanCertWFFallback cert_wf_fallback;

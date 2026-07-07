@@ -58,6 +58,9 @@ def bv_width (x : BV) : Nat := x.width
 def bv_uint (x : BV) : Int :=
   x.value % (2 ^ x.width)
 
+def bv_to_bitvec (w : Nat) (x : BV) : BitVec w :=
+  BitVec.ofInt w (bv_uint x)
+
 def mk_bv (w : Nat) (v : Int) : BV :=
   { width := w, value := v % (2 ^ w) }
 

@@ -9,6 +9,18 @@ Lean 4.31.0, BitVec native.
 
 def intAbs (a : Int) : Int := if a < 0 then -a else a
 
+def bv_zext {a b : Nat} (x : BitVec a) : BitVec b :=
+  BitVec.ofNat b x.toNat
+
+def bv_sext {a b : Nat} (x : BitVec a) : BitVec b :=
+  BitVec.ofInt b x.toInt
+
+def bitvec_nonzero {w : Nat} (x : BitVec w) : Bool :=
+  x ≠ 0#w
+
+def bool_to_bv1 (b : Bool) : BitVec 1 :=
+  if b then 1#1 else 0#1
+
 --------------------------------------------------------------------------------
 -- sem_udiv
 --------------------------------------------------------------------------------
