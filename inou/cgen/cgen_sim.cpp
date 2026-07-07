@@ -1527,6 +1527,13 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
     }
   }
   if (found.empty()) {
+    // Collect EVERY parent input wired into some sub-instance's clock port, and
+    // accept only an unambiguous result: a candidate literally named "clock"
+    // wins, else a single distinct candidate. A gated-clock idiom (two nets
+    // clocking different subs) stays undetected -- picking whichever instance
+    // the traversal visits first would mislabel a poked DATA input as the
+    // free-running clock waveform and silently drop its real trace.
+    absl::flat_hash_set<std::string> candidates;
     for (auto node : g->fast_class()) {
       if (!livehd::graph_util::is_type_sub(node)) {
         continue;
@@ -1559,14 +1566,16 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
         auto d = resolve_passthrough(e.driver);
         if (!d.is_invalid()) {
           if (auto it = in_pin_name.find(d.get_class_index()); it != in_pin_name.end()) {
-            found = it->second;
+            candidates.insert(it->second);
           }
         }
         break;
       }
-      if (!found.empty()) {
-        break;
-      }
+    }
+    if (candidates.contains("clock")) {
+      found = "clock";
+    } else if (candidates.size() == 1) {
+      found = *candidates.begin();
     }
   }
   clk_memo_[key] = found;
@@ -2050,10 +2059,28 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // when it is the ROOT (the testbench tick is its clock) -- registered in
     // __vcd_init, not __vcd_hier, so a clockless SUB scope stays data-only.
     const bool has_clock = !clk_field.empty() || !flops.empty();
+    // The BAKED clock label was uniquified against the traced names at codegen,
+    // but a `tick clocks=(name=…)` clause overrides __clk_name at RUN time -- a
+    // label matching a traced 1-bit signal would make registration throw. Guard
+    // the runtime value against this module's (baked) 1-bit signal names.
+    std::string clk_guard;  // C++ bool expr over __cn, "" = no 1-bit names to collide with
+    for (const auto& v : vsig) {
+      if (v.bits == 1) {
+        absl::StrAppend(&clk_guard, clk_guard.empty() ? "" : " || ", "__cn == \"", v.vname, "\"");
+      }
+    }
+    auto emit_clk_reg = [&](const char* writer_expr, const std::string& scope_expr) {
+      fout->append(absl::StrCat("  std::string __cn = __clk_name;\n"));
+      if (!clk_guard.empty()) {
+        fout->append(absl::StrCat("  if (", clk_guard, ") { __cn += \"_vcd0\"; }  // runtime tick-clock label collided\n"));
+      }
+      fout->append(
+          absl::StrCat("  __vv_clk = ", writer_expr, "->register_var(", scope_expr, ", __cn, vcd::VariableType::wire, 1);\n"));
+    };
     fout->append("void ", mod, "::__vcd_init() {\n");
     fout->append("  __vcd = std::make_shared<vcd::VCDWriter>(__vcd_path, vcd::makeVCDHeader());\n");
     if (!has_clock) {
-      fout->append(absl::StrCat("  __vv_clk = __vcd->register_var(\"", mod, "\", __clk_name, vcd::VariableType::wire, 1);\n"));
+      emit_clk_reg("__vcd", absl::StrCat("\"", mod, "\""));
     }
     fout->append(absl::StrCat("  __vcd_hier(__vcd.get(), \"", mod, "\");\n"));
     fout->append("}\n");
@@ -2064,13 +2091,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     fout->append("  (void)__w; (void)__s;\n");
     fout->append("  __vcd_trace = true;\n");
     if (has_clock) {
-      fout->append("  __vv_clk = __w->register_var(__s, __clk_name, vcd::VariableType::wire, 1);\n");
+      emit_clk_reg("__w", "__s");
     }
     for (const auto& v : vsig) {
       fout->append(
           absl::StrCat("  ", v.var, " = __w->register_var(__s, \"", v.vname, "\", vcd::VariableType::wire, ", v.bits, ");\n"));
     }
     for (const auto& s : subs) {
+      // A registered sub is never its own trace root: drop any writer it
+      // self-rooted (a baked FILE path without --top) and clear the path so
+      // its lazy __vcd_init can't fire again.
+      fout->append(absl::StrCat("  ", s.inst, ".__vcd.reset();\n"));
+      fout->append(absl::StrCat("  ", s.inst, ".__vcd_path.clear();\n"));
       fout->append(absl::StrCat("  ", s.inst, ".__vcd_hier(__w, __s + \".", s.inst, "\");\n"));
     }
     fout->append("}\n");
@@ -2635,11 +2667,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // no +3 offset (the traditional, smaller trace). change() only writes when a
   // value differs from the previous timestamp.
   if (vcd_on) {
-    fout->append("    if (__vcd_trace) {\n");
+    // UNCONDITIONAL (not gated on __vcd_trace): on the very first traced cycle
+    // the root's lazy __vcd_init below has not run yet -- and every sub already
+    // cycled earlier in this comb walk -- so a gated snapshot would dump
+    // default-zero values for the whole first period (the reset cycle of a lec
+    // witness, or the opening cycle of a --vcd-from window).
     for (const auto& v : vsig) {
-      fout->append(absl::StrCat("      ", v.snap, " = ", v.accessor, ";\n"));
+      fout->append(absl::StrCat("    ", v.snap, " = ", v.accessor, ";\n"));
     }
-    fout->append("    }\n");
     fout->append("    if (!__vcd && !__vcd_path.empty()) __vcd_init();\n");
     fout->append("    if (__vcd) {\n");
     fout->append("      const unsigned __b    = __vcd_tick * 10;\n");

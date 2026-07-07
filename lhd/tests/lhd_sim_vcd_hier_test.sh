@@ -119,15 +119,22 @@ fi
 VCD="$W/run/h.vcd"
 [ -s "$VCD" ] || fail "no VCD produced"
 
-# nested $scope blocks: pair > mid > leaf (three levels), each with traced vars
+# nested $scope blocks: pair > mid > leaf (three levels), each with traced vars,
+# and a BALANCED $scope/$upscope stack at $enddefinitions
 [ "$(grep -c '^\$scope module' "$VCD")" -ge 3 ] || fail "VCD lacks the nested hierarchy scopes"
 grep -q 'count\[' "$VCD" || fail "sub-module flop state not traced"
-awk '/^\$scope/{d++; if(d>m)m=d} /^\$upscope/{d--} END{exit m>=3?0:1}' "$VCD" \
-  || fail "scopes are not NESTED (flat scope list)"
+awk '/^\$scope/{d++; if(d>m)m=d} /^\$upscope/{d--} /^\$enddefinitions/{exit (m>=3 && d==0)?0:1}' "$VCD" \
+  || fail "scopes are not NESTED 3 deep with a balanced header"
 # a scope with both vars and children stays OPEN around its children (no
 # close+reopen duplicate -- needs the sibling hlop write_header subtree fix)
 [ "$(grep -c '^\$scope module u_mid_a_value_0' "$VCD")" = 1 ] \
   || fail "intermediate scope declared twice (closed and reopened around its child)"
+# the FIRST dumped period must show the real poked inputs (reset=1 on cycle 0),
+# not default-zero snapshots (regression: snapshot gated on a flag set too late)
+RID=$(awk '/^\$var wire 1 .* reset \$end/{print $4; exit}' "$VCD")
+[ -n "$RID" ] || fail "no top-scope reset var"
+awk -v id="$RID" '/^#10$/{exit 1} $0=="1"id{f=1; exit} END{exit f?0:1}' "$VCD" \
+  || fail "first period lost the poked reset=1 (default-zero first-cycle snapshots)"
 # the clock is the real label and it toggles
 grep -q '^\$var wire 1 . clock \$end' "$VCD" || fail "no 1-bit clock var under the top scope"
 grep -q 'clock_vcd' "$VCD" && fail "VCD clock label was uniquified"
@@ -141,5 +148,35 @@ VCD2="$W/run2/h.vcd"
 grep -qE '^(x.|bx )' "$VCD2" && fail "vcdfakedelay=false VCD must not contain X"
 # edge-aligned: every timestamp is a clock edge (multiple of 5); +3 offsets are absent
 grep -E '^#[0-9]+' "$VCD2" | grep -qvE '^#[0-9]*[05]$' && fail "traditional VCD has off-edge timestamps"
+# ...and POSITIVE evidence it still traces: the counters actually count
+grep -q '^b000000001 ' "$VCD2" || fail "traditional VCD carries no data changes (vacuous trace)"
+awk '/^\$scope module/{s++} /^\$var/{v++} END{exit (s>=3 && v>=10)?0:1}' "$VCD2" \
+  || fail "traditional VCD lost the hierarchy vars"
+
+# ---- runtime: two DUT instances in one test = two VCDs, no writer abort --------
+cat > "$W/two.prp" <<'EOF'
+/*
+:name: two
+:type: simulation
+*/
+mod cnt(en:bool) -> (value:u8@[0]) {
+  reg count:u8 = 0
+  value = count
+  if en { wrap count += 1 }
+}
+test two {
+  mut x = cnt
+  mut y = cnt
+  tick 4 {
+    x.en = true
+    y.en = true
+    step
+  }
+}
+EOF
+"$LHD" sim "$W/two.prp" --set sim.vcd=true --workdir "$W/run3" -q >/dev/null 2>&1 \
+  || fail "two-instance VCD run failed (second writer registration aborts?)"
+[ -s "$W/run3/two.x.vcd" ] && [ -s "$W/run3/two.y.vcd" ] \
+  || fail "expected one VCD per instance (two.x.vcd + two.y.vcd)"
 
 echo "PASS: lhd sim hierarchical VCD + sim.vcdfakedelay (structural + run)"

@@ -3139,13 +3139,15 @@ void sim_command(Options& opts, Result& res) {
   // --set sim.vcd=true: dump one VCD per test, `<workdir>/<test.name>.vcd`. The
   // path is absolute (the driver binary is run from the caller's cwd), and when
   // on, the fast build also links hlop's VCD writer (vcd_writer.cpp).
-  bool vcd_on        = false;
-  bool vcd_fakedelay = true;  // sim.vcdfakedelay: X + settle delay after each edge (default); false = edge-aligned
+  bool vcd_on            = false;
+  bool vcd_fakedelay     = true;  // sim.vcdfakedelay: X + settle delay after each edge (default); false = edge-aligned
+  bool vcd_fakedelay_set = false;
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.vcd") {
       vcd_on = (v == "true" || v == "1" || v == "on");
     } else if (k == "sim.vcdfakedelay") {
-      vcd_fakedelay = (v == "true" || v == "1" || v == "on");
+      vcd_fakedelay     = (v == "true" || v == "1" || v == "on");
+      vcd_fakedelay_set = true;
     }
   }
   // A `--vcd-from` window or `--vcd-on-fail` implies VCD: the driver needs the
@@ -3288,6 +3290,34 @@ void sim_command(Options& opts, Result& res) {
       res.error_class   = "usage";
       res.error_message = "this --run-only sim was generated without VCD; re-run without --run-only (or "
                           "--setup-only --set sim.vcd=true) so the driver gets the trace machinery";
+      res.exit_code     = 1;
+      return;
+    }
+  }
+  // Same staleness trap for the VCD style: sim.vcdfakedelay is BAKED at setup
+  // (the X/settle phases are codegen), so an explicit request that disagrees
+  // with the prior --setup-only would be silently ignored — reject instead.
+  // The `__vcd_dump_x` method is emitted iff fake-delay codegen was on.
+  if (run_only && vcd_on && vcd_fakedelay_set) {
+    bool baked_fakedelay = false;
+    for (const auto& de : fs::directory_iterator(simdir)) {
+      if (de.path().extension() != ".hpp") {
+        continue;
+      }
+      std::ifstream     hfs(de.path());
+      std::stringstream hss;
+      hss << hfs.rdbuf();
+      if (hss.str().find("__vcd_dump_x") != std::string::npos) {
+        baked_fakedelay = true;
+        break;
+      }
+    }
+    if (baked_fakedelay != vcd_fakedelay) {
+      res.status        = "fail";
+      res.error_class   = "usage";
+      res.error_message = std::format("this --run-only sim was generated with sim.vcdfakedelay={}; the style is baked "
+                                      "at codegen — re-run --setup-only with the desired --set sim.vcdfakedelay",
+                                      baked_fakedelay ? "true" : "false");
       res.exit_code     = 1;
       return;
     }

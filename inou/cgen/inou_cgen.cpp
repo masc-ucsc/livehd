@@ -4,6 +4,7 @@
 
 #include "cgen_sim.hpp"
 #include "cgen_verilog.hpp"
+#include "diag.hpp"  // livehd::diag::err — flag-value validation
 #include "file_utils.hpp"
 #include "perf_tracing.hpp"
 
@@ -106,6 +107,16 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   auto      vcd_out   = var.get("vcd");
   auto      top       = var.get("top");
   auto      fakedelay = var.get("vcdfakedelay");
+  // Boolean grammar, validated loudly: anything outside the canonical set would
+  // otherwise silently mean "true" (the sim.* namespace validates its own copy,
+  // but compile.sim.vcdfakedelay reaches this label directly).
+  if (!fakedelay.empty() && fakedelay != "true" && fakedelay != "1" && fakedelay != "on" && fakedelay != "false"
+      && fakedelay != "0" && fakedelay != "off") {
+    livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
+        .msg("compile.sim.vcdfakedelay expects true|false, got '{}'", fakedelay)
+        .emit();
+    return;
+  }
 
   // Synchronous (one .hpp per module): the designs are small and the kernel's
   // sim_into() checks each <module>.hpp exists right after this returns.
