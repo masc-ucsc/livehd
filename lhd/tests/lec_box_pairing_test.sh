@@ -45,14 +45,14 @@ module top(input [31:0] d, output [3:0] q);
 endmodule
 EOF
 cat > "$W/comb.prp" <<'EOF'
-pub comb lane_parity::[lg="bp_lane_parity"](a:u8) -> (p:u1) {
+pub comb bp_lane_parity(a:u8) -> (p:u1) {
   p = a#[0] ^ a#[1] ^ a#[2] ^ a#[3] ^ a#[4] ^ a#[5] ^ a#[6] ^ a#[7]
 }
-pub comb top::[lg="top"](d:u32) -> (q:u4) {
-  mut p3 = lane_parity::[name=u3](a = (d >> 24) & 0xff)
-  mut p2 = lane_parity::[name=u2](a = (d >> 16) & 0xff)
-  mut p1 = lane_parity::[name=u1](a = (d >> 8) & 0xff)
-  mut p0 = lane_parity::[name=u0](a = d & 0xff)
+pub comb top(d:u32) -> (q:u4) {
+  mut p3 = bp_lane_parity::[name=u3](a = (d >> 24) & 0xff)
+  mut p2 = bp_lane_parity::[name=u2](a = (d >> 16) & 0xff)
+  mut p1 = bp_lane_parity::[name=u1](a = (d >> 8) & 0xff)
+  mut p0 = bp_lane_parity::[name=u0](a = d & 0xff)
   q = (p3 << 3) | (p2 << 2) | (p1 << 1) | p0
 }
 EOF
@@ -79,16 +79,16 @@ module top(input clock, input reset, input [31:0] d, output [31:0] q);
 endmodule
 EOF
 cat > "$W/state.prp" <<'EOF'
-pub mod lane_acc::[lg="bp_lane_acc"](a:u8) -> (s:u8@[0]) {
+pub mod bp_lane_acc(a:u8) -> (s:u8@[0]) {
   reg acc:u8 = 0
   s = acc
   wrap acc = acc + a
 }
-pub mod top::[lg="top"](d:u32) -> (q:u32@[0]) {
-  mut s3 = lane_acc::[name=u3](a = (d >> 24) & 0xff)
-  mut s2 = lane_acc::[name=u2](a = (d >> 16) & 0xff)
-  mut s1 = lane_acc::[name=u1](a = (d >> 8) & 0xff)
-  mut s0 = lane_acc::[name=u0](a = d & 0xff)
+pub mod top(d:u32) -> (q:u32@[0]) {
+  mut s3 = bp_lane_acc::[name=u3](a = (d >> 24) & 0xff)
+  mut s2 = bp_lane_acc::[name=u2](a = (d >> 16) & 0xff)
+  mut s1 = bp_lane_acc::[name=u1](a = (d >> 8) & 0xff)
+  mut s0 = bp_lane_acc::[name=u0](a = d & 0xff)
   q = (s3 << 24) | (s2 << 16) | (s1 << 8) | s0
 }
 EOF
@@ -101,10 +101,13 @@ sed -e 's/ u\([0-3]\)(/ ua\1(/' "$W/state.v" > "$W/state_anon.v"
 sed 's/(a = d & 0xff)/(a = (d \& 0xff) ^ 1)/' "$W/state_anon.prp" > "$W/state_anon_bug.prp"
 
 # run <log> <ref.v> <impl.prp> : hierarchical lec, captures output, returns rc.
-# The .prp tops carry ::[lg="top"] so both sides name the top "top" — without
-# it the Pyrope lambda is namespaced by its file basename, the driver finds no
-# top common to both libraries, and a NON-STRICT run exits 0 on the resulting
-# UNKNOWN (a vacuous "pass"). proven_top() below guards against exactly that.
+# Graph names differ across front-ends (Pyrope namespaces by file: "state.top";
+# slang emits the flat entity: "top"), so the driver pairs defs by ENTITY when
+# it is unique per side — the .prp module names must match the .v entities
+# (bp_lane_*) or the child defs never pair, no collapse happens, and every
+# section "passes" vacuously on a flat top solve. Were the TOPS not to pair
+# either, a NON-STRICT run exits 0 on the resulting UNKNOWN (a vacuous
+# "pass"). proven_top() below guards against exactly that.
 run() {
   local log="$1" refv="$2" impl="$3"
   "$LHD" lec --ref "verilog:$refv" --impl "pyrope:$impl" \

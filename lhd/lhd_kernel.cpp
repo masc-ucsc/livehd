@@ -3875,8 +3875,8 @@ static void emit_lec_block_progress(std::string_view block, const livehd::lec::Q
 }
 
 // Bottom-up hierarchical LEC driver (lec.hierarchical=true). Build the module-def
-// dependency DAG over the defs present BY NAME in both libraries, topo-order it
-// leaves-first, and LEC each def under the `auto` portfolio. Record the proven
+// dependency DAG over the defs present in both libraries (paired by ENTITY — see
+// below), topo-order it leaves-first, and LEC each def under the `auto` portfolio. Record the proven
 // set; for each parent, force-black-box its PROVEN child instances (--collapse) so
 // the parent proof stops re-solving them, while a child NOT provable in isolation
 // stays FLATTENED into the parent (descended) — the M5 CEGAR / un-black-box
@@ -3891,16 +3891,48 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   using livehd::lec::Verdict;
   namespace gu = livehd::graph_util;
 
-  // name -> def graph (case-sensitive, LiveHD/Pyrope name policy).
-  absl::flat_hash_map<std::string, hhds::Graph*> ref_by_name, impl_by_name;
+  // key -> def graph (case-sensitive, LiveHD/Pyrope name policy). A def's FULL
+  // graph name embeds its front-end namespace (Pyrope "file.entity" vs slang's
+  // flat "entity"), so the same module never shares a full name across a
+  // cross-front-end pair. Defs therefore pair by ENTITY (the post-'.' tail)
+  // when that entity names exactly ONE graph on its side; an ambiguous entity
+  // keeps the full name (such defs simply stay flattened into their parents).
+  // pass/lec's box-correspondence builder canonicalizes the same way, so the
+  // entity keys pushed into o.collapse resolve on both sides.
+  auto entity_of = [](std::string_view n) -> std::string {
+    auto d = n.rfind('.');
+    return std::string(d == std::string_view::npos ? n : n.substr(d + 1));
+  };
+  absl::flat_hash_map<std::string, int> ref_ent_cnt, impl_ent_cnt;
   for (auto& g : ref_var.graphs) {
     if (g) {
-      ref_by_name[std::string(g->get_name())] = g.get();
+      ref_ent_cnt[entity_of(g->get_name())]++;
     }
   }
   for (auto& g : impl_var.graphs) {
     if (g) {
-      impl_by_name[std::string(g->get_name())] = g.get();
+      impl_ent_cnt[entity_of(g->get_name())]++;
+    }
+  }
+  auto canon_ref = [&](std::string_view full) -> std::string {
+    auto e  = entity_of(full);
+    auto it = ref_ent_cnt.find(e);
+    return it != ref_ent_cnt.end() && it->second == 1 ? e : std::string(full);
+  };
+  auto canon_impl = [&](std::string_view full) -> std::string {
+    auto e  = entity_of(full);
+    auto it = impl_ent_cnt.find(e);
+    return it != impl_ent_cnt.end() && it->second == 1 ? e : std::string(full);
+  };
+  absl::flat_hash_map<std::string, hhds::Graph*> ref_by_name, impl_by_name;
+  for (auto& g : ref_var.graphs) {
+    if (g) {
+      ref_by_name[canon_ref(g->get_name())] = g.get();
+    }
+  }
+  for (auto& g : impl_var.graphs) {
+    if (g) {
+      impl_by_name[canon_impl(g->get_name())] = g.get();
     }
   }
 
@@ -3909,12 +3941,13 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // pairing alone would then never LEC the top pair at all, and an UNKNOWN
   // top exits 0 under the inconclusive-is-a-warning policy — a silent
   // vacuous pass. Force-pair the two explicitly-picked TOP graphs under the
-  // ref-top name so the driver always proves/refutes the top itself.
-  ref_by_name[top_name]  = ref_top_g;
-  impl_by_name[top_name] = impl_top_g;
+  // ref-top key so the driver always proves/refutes the top itself.
+  const std::string top_key = canon_ref(top_name);
+  ref_by_name[top_key]      = ref_top_g;
+  impl_by_name[top_key]     = impl_top_g;
 
   // The LEC-able defs are those present on BOTH sides; children[def] = the child
-  // def-NAMES it instantiates (taken from the ref-side Subs, name-matched).
+  // def keys it instantiates (taken from the ref-side Subs, canonicalized).
   absl::flat_hash_map<std::string, std::vector<std::string>> children;
   std::vector<std::string>             defs;
   for (auto& [name, g] : ref_by_name) {
@@ -3928,7 +3961,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         continue;
       }
       auto        sio = node.get_subnode_io();
-      std::string cn(sio->get_name());
+      std::string cn  = canon_ref(sio->get_name());
       if (ref_by_name.find(cn) != ref_by_name.end() && impl_by_name.find(cn) != impl_by_name.end() && !seen.count(cn)) {
         children[name].push_back(cn);
         seen.insert(cn);
@@ -4002,7 +4035,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           proven_list.push_back(name);
           ++semdiff_count;
           std::print("lec[hier]: '{}' MATCHED (semdiff {}, no solver)\n", name, so.alg);
-          if ((name == top_name)) {
+          if ((name == top_key)) {
             top_result = sr;
             have_top   = true;
           }
@@ -4064,7 +4097,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                r.verdict == Verdict::Proven ? "PROVEN" : (r.verdict == Verdict::Refuted ? "REFUTED" : "UNKNOWN"),
                coll.size(),
                coll.size() == 1 ? "" : "s");
-    if ((name == top_name)) {
+    if ((name == top_key)) {
       top_result = r;
       have_top   = true;
     }

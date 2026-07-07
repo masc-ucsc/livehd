@@ -631,13 +631,78 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     return c;
   };
 
+  // Def-name canonicalization across front-ends. A def's FULL callee name
+  // embeds its front-end namespace (Pyrope "file.entity" vs slang's flat
+  // "entity"), so the SAME module never carries the same full name on a
+  // cross-front-end pair. Every cross-design def match below (the collapse
+  // set, the box-correspondence def key) therefore works on the ENTITY (the
+  // post-'.' tail) — but only when that entity names exactly ONE def within
+  // its design: two same-entity defs from different files would alias, and a
+  // mispaired box is a false-PROVEN hazard. An ambiguous entity keeps the
+  // full name; its pairing degrades to one-sided obligations, which the
+  // miters already gate to inconclusive (never a Proven/Refuted).
+  auto entity_of = [](std::string_view n) -> std::string {
+    auto d = n.rfind('.');
+    return std::string(d == std::string_view::npos ? n : n.substr(d + 1));
+  };
+  // Per design: entity -> the unique full callee name, or "" when ambiguous.
+  absl::flat_hash_map<std::string, std::string> ref_ent_uniq, impl_ent_uniq;
+  for (auto* g : {ref, impl}) {
+    absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> ents;
+    for (auto node : g->forward_hier()) {
+      if (graph_util::type_op_of(node) != Ntype_op::Sub) {
+        continue;
+      }
+      auto sio = node.get_subnode_io();
+      if (sio == nullptr) {
+        continue;
+      }
+      std::string full(sio->get_name());
+      ents[entity_of(full)].insert(std::move(full));
+    }
+    auto& uniq = g == ref ? ref_ent_uniq : impl_ent_uniq;
+    for (auto& [e, fulls] : ents) {
+      uniq[e] = fulls.size() == 1 ? *fulls.begin() : std::string{};
+    }
+  }
+  auto canon_def = [&](bool in_ref, std::string_view full) -> std::string {
+    const auto& uniq = in_ref ? ref_ent_uniq : impl_ent_uniq;
+    std::string e    = entity_of(full);
+    if (auto it = uniq.find(e); it != uniq.end() && it->second == full) {
+      return e;  // unique within this design -> the entity is the cross-design key
+    }
+    return std::string(full);
+  };
+
   // Proven-module collapse set (lec.collapse): def-NAMES forced to the blackbox
   // path (case-sensitive). Applied identically by the encoder (skip flatten)
   // and the box-correspondence builder below (pre-build the boxes' shared symbols).
+  // A requested def resolves by ANY of its spellings (canonical entity or a
+  // side's full name); all spellings are inserted so the encoder's exact
+  // per-side name match keeps working on both designs.
   Io_name_map<bool> collapse_defs;
   for (const auto& d : opts.collapse) {
     if (!d.empty()) {
       collapse_defs[d] = true;
+    }
+  }
+  for (const auto& d : opts.collapse) {
+    if (d.empty()) {
+      continue;
+    }
+    const std::string e   = entity_of(d);
+    const auto        rit = ref_ent_uniq.find(e);
+    const auto        iit = impl_ent_uniq.find(e);
+    const std::string rf  = rit != ref_ent_uniq.end() ? rit->second : std::string{};
+    const std::string im  = iit != impl_ent_uniq.end() ? iit->second : std::string{};
+    if (d == e || d == rf || d == im) {  // d names the (side-)unique entity e
+      collapse_defs[e] = true;
+      if (!rf.empty()) {
+        collapse_defs[rf] = true;
+      }
+      if (!im.empty()) {
+        collapse_defs[im] = true;
+      }
     }
   }
   const Io_name_map<bool>* collapse_ptr = collapse_defs.empty() ? nullptr : &collapse_defs;
@@ -717,7 +782,11 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         continue;
       }
       std::string defname(sio->get_name());
-      const bool  force_collapse = collapse_ptr != nullptr && collapse_ptr->count(defname) > 0;
+      // The cross-design def key: entity when side-unique (a Pyrope
+      // "file.entity" and a slang flat "entity" must land on ONE key for
+      // their boxes to correspond), else the full per-side name.
+      const std::string defkey         = canon_def(in_ref, defname);
+      const bool        force_collapse = collapse_ptr != nullptr && collapse_ptr->count(defname) > 0;
       // Mirror encode.cpp exactly: a sub with a body is DESCENDED (not a box)
       // unless force-collapsed; a sub_lib-resolvable combinational def is
       // flattened inline (not a box); everything else is a box.
@@ -746,26 +815,26 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       // constant false-PASS this builder exists to retire.
       if (force_collapse) {
         if (auto def = node.get_subnode_graph(); def != nullptr) {
-          def_has_body[defname] = true;
+          def_has_body[defkey] = true;
           if (scanned_bodies.insert(def.get()).second) {
             for (auto dn : def->forward_class()) {
               auto dop = graph_util::type_op_of(dn);
               if (dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Latch || dop == Ntype_op::Memory) {
-                def_stateful[defname] = true;
+                def_stateful[defkey] = true;
                 break;
               }
             }
           }
         }
       }
-      if (boxes_by_def.find(defname) == boxes_by_def.end()) {
-        box_defnames.push_back(defname);
+      if (boxes_by_def.find(defkey) == boxes_by_def.end()) {
+        box_defnames.push_back(defkey);
       }
       std::string nk = box_node_key(node);
       if (!(in_ref ? seen_ref_nk : seen_impl_nk).insert(nk).second) {
         nk_collision = true;
       }
-      boxes_by_def[defname].push_back(Box_inst{std::move(nk), canon_flop_name(node.get_hier_name()), node, in_ref});
+      boxes_by_def[defkey].push_back(Box_inst{std::move(nk), canon_flop_name(node.get_hier_name()), node, in_ref});
     }
   };
   scan_boxes(ref, true);
@@ -778,6 +847,23 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
                  "grand-subgraph below a multiply-instantiated middle def) — instance identity is ambiguous, so neither a "
                  "proof nor a refutation would be trustworthy; prove/collapse the middle def first";
     return r0;
+  }
+  // A box inst's per-side FULL spelling that coincides with a DIFFERENT def's
+  // canonical key would alias two defs in the by-name lookups (the collapse
+  // set, the Comb_box map); def identity is then ambiguous, so bail to a
+  // sound INCONCLUSIVE (same policy as the nk collision above).
+  for (const auto& [defkey, insts] : boxes_by_def) {
+    for (const auto& bi : insts) {
+      std::string full(bi.node.get_subnode_io()->get_name());
+      if (full != defkey && boxes_by_def.find(full) != boxes_by_def.end()) {
+        Query_result r0;
+        r0.verdict = Verdict::Unknown;
+        r0.engine  = opts.engine;
+        r0.detail  = "box-correspondence: box def '" + full + "' collides with another def's canonical (entity) key — def "
+                     "identity is ambiguous, so neither a proof nor a refutation would be trustworthy; rename one module";
+        return r0;
+      }
+    }
   }
 
   // Name-first pairing per def: a canon instance name unique on BOTH sides is
@@ -889,6 +975,16 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           for (const auto& [port, ow] : box.out_w) {
             box.out_const[port]
                 = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(ow)), "cb0:" + defname + ":" + port), ow, box.out_sgn[port]};
+          }
+        }
+        // The encoder looks a Comb_box up by the PER-SIDE callee name; alias
+        // every spelling (e.g. slang's flat "entity", Pyrope's "file.entity")
+        // onto the same box — the copies share the cvc5 UF terms, so
+        // congruence still spans the designs.
+        for (const auto& bi : insts) {
+          std::string full(bi.node.get_subnode_io()->get_name());
+          if (full != defname) {
+            comb_boxes[full] = box;
           }
         }
         comb_boxes[defname] = std::move(box);
