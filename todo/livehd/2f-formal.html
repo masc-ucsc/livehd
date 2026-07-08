@@ -3,510 +3,98 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TODO 2f-formal — formal property engine: assert/assume proving + reusable property library</title>
+<title>TODO 2f-formal — compile-time formal tier: pending items (re-based on 2f-verify)</title>
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">2f-formal</strong> Formal property engine — <code>assert</code>/<code>assume</code> proving + a reusable property library (on <code>pass/lec</code>)</h1>
+<h1><strong class="item-id">2f-formal</strong> Compile-time formal tier — pending items (re-based on <a class="xref" href="2f-verify.html">2f-verify</a>)</h1>
 
-<p>A <strong>single-graph</strong> formal-property tier built on the landed
-  <a class="xref" href="lec.html">lec</a> Encoder. Where <code>lec</code> is
-  <em>relational</em> (graph-vs-graph miter), <code>2f-formal</code> answers
-  <em>single-graph, sub-cone</em> questions about one design:
-  <em>"is this <code>cond</code> always true/false?"</em>,
-  <em>"are pins X and Y always equal — and which bits?"</em>,
-  <em>"is X constant?"</em>. It has two faces:</p>
-<ol>
-<li><strong>A reusable C++ property library</strong> any pass calls. First consumers:
-  the <code>assert</code>/<code>assume</code> driver in this task, and (future)
-  <code>pass/memory</code> port-sharing / banking and <code>pass.abc</code>
-  optimizations that need bit-level guarantees.</li>
-<li><strong>An always-on verification tier</strong> that proves both user
-  <code>assert</code>/<code>assume</code> <em>and</em> built-in structural obligations
-  (the first being <strong>Hotmux selector one-hotness</strong>) at compile time:
-  <strong>proven ⇒ removed</strong> (marked, runtime check elided), <strong>disproven
-  over free inputs ⇒ compile error</strong>, <strong>everything else ⇒ kept for a
-  (future) runtime check, with a deferral warning</strong>.</li>
-</ol>
+<p>The original 2f-formal engine <strong>landed 2026-06-20</strong>: the
+  <code>pass/formal</code> Prover (demand-driven cone encoder, deterministic
+  cone-scaled <code>rlimit</code>), the always-on <code>pass.formal</code> pipeline pass,
+  the Hotmux one-hot hard check, <code>assert</code>/<code>assert_always</code>/
+  <code>assume</code> end-to-end (<code>fproperty</code> materialization, proven ⇒ cgen
+  elision, else <code>translate_off</code> runtime check + deferral warning), and the
+  <code>pass.abc</code> proven-assume flags. Reference: <code>pass/formal/prove.{hpp,cpp}</code>,
+  <code>pass_formal.cpp</code>, and the memory of the landed design decisions in git
+  history of this page.</p>
 
-<p><strong>The cascade.</strong> This slots between the two existing assertion tiers:
-  <code>comptime (upass.verifier constprop) → formal SMT (this) → runtime (future)</code>.
-  The verifier already drops comptime-true asserts and errors comptime-false ones;
-  only the <em>unknown survivors</em> are materialized as lgraph sub-nodes and handed
-  here, which naturally bounds how much work the always-on tier does.</p>
+<p><strong>What this page is now:</strong> only the pending remainder — and its shape
+  changed, because <a class="xref" href="2f-verify.html">2f-verify</a> supersedes the
+  engine underneath it.</p>
 
 <h2>Depends on</h2>
-<p><a class="xref" href="lec.html">lec</a> — the <strong>landed</strong> Encoder only
-  (<code>pass/lec/encode.cpp</code> M1/M2/M4: LGraph→cvc5 bit-vector translation,
-  <code>Val{term,width,is_signed}</code>, <code>real_width</code> sign/width handling,
-  the inductive flop-cut state model, memory-as-array). It does <em>not</em> depend on
-  the pending <code>lec</code> roadmap (M3 def-diff, M5 assume-guarantee, M6 cache).
-  Reuses the same <code>@cvc5</code> dep and the <code>QF_ABV</code> setup.
-  <a class="xref" href="../pyrope/3f-temporal.html">3f-temporal</a> (Pyrope, Group 3)
-  depends on <em>this</em> for the substrate used to prove temporal assertions
-  (<code>assert(rose(req) implies eventually[1..=10](rose(ack)))</code>); that page
-  owns the temporal-operator lowering, this page owns the proof substrate. The initial
-  single-frame engine here does not by itself prove bounded temporal behavior; that is
-  gated on the deferred reachable-state BMC/k-induction extension.</p>
+<p><a class="xref" href="2f-verify.html">2f-verify</a> — <strong>do 2f-verify
+  first</strong>. Its V7 milestone re-bases <code>pass.formal</code> onto the shared
+  incremental engine as the <em>don't-try-hard profile</em>: same code path as
+  <code>lhd formal verify</code>, restricted options, small deterministic
+  <code>rlimit</code> budget, <strong>timeout is not an error</strong> (just "not proven,
+  keep the runtime check"), proven results feed synthesis as today. The items below are
+  specified against that engine, not the current self-contained single-frame Prover —
+  in particular the planned encoder de-dup (Prover's private cone encoder vs
+  <code>pass/lec</code>'s) is <em>subsumed</em> by the V7 rebase rather than done as a
+  separate refactor.</p>
 
-<h2>Key realization — demand-encode once, collapse, query sub-cones</h2>
-<p>These checks are <strong>not</strong> "graph X vs graph Y". They are
-  "<em>sub-cone X of graph Y</em> vs <em>sub-cone X′ of the same graph Y</em>", and in
-  the common case both cones share the <em>same</em> flops / memory / inputs. So the
-  engine starts at the property pins and traverses only the required backward/forward
-  cones. Encoding is <strong>demand-driven and memoized</strong>, with full structural
-  sharing: every visited lgraph pin maps to exactly one cvc5 term, reused by all later
-  queries. Unrelated logic is never walked, so an unsupported node outside every
-  property cone cannot poison the module's results. A property is then a query over
-  the lazily built terms:</p>
+<h2>Pending</h2>
 <ul class="subtasks">
-<li><code>assert(cond)</code> → demand the term for the <code>cond</code> driver pin,
-  add the normal-assert cone-reset guard, assert <code>¬cond</code>,
-  <code>checkSat</code>.</li>
-<li><code>rdaddr_i == rdaddr_j</code> → both address pins are terms over the
-  <em>same</em> upstream state, so asserting <code>addr_i != addr_j</code> collapses all
-  shared flops/memory/inputs to one term each automatically. <code>UNSAT ⇒</code> always
-  equal ⇒ the two reads can share a port.</li>
-<li>"which bits of X equal Y" → <code>BITVECTOR_EXTRACT</code> bit <em>k</em> from the
-  pre-built <code>X</code>/<code>Y</code> terms, assert <code>X[k] != Y[k]</code>,
-  incremental <code>checkSat</code> per bit → a per-bit mask.</li>
-</ul>
-<p>The collapse is therefore <strong>intrinsic, not an optimization</strong>: it falls out
-  of one memo table shared across every query. A cone traversal also brings in the
-  semantic side constraints required by its state cuts and memory reads, but does not
-  expand into unrelated graph regions. Each query is
-  <code>push → assert ¬property (+ assumes) → checkSat → pop</code> on a single
-  long-lived solver, so overlapping cones amortize their encoding.</p>
-
-<h2>C++ API — single-graph property prover (mirrors <code>lec::prove_equal</code> shape)</h2>
-<p>New <code>pass/formal/prove.{hpp,cpp}</code> (target <code>//pass/formal:formal</code>),
-  depending on <code>//pass/lec:lec_query</code> for the cvc5 <code>Encoder</code> and its
-  width / sign / flop / memory machinery. The shared <code>Encoder</code> stays in
-  <code>pass/lec</code> for now; <code>pass/formal</code> adds the single-design
-  <code>Prover</code>. Refactor the current eager, encode-local <code>pin2val</code> table
-  into a reusable lazy encoding context. <code>val_of()</code> demand-encodes an arbitrary
-  internal driver pin and the required portion of its cone; it is not merely a getter over
-  a prior whole-graph encode.</p>
-<pre><code>namespace livehd::lec {
-// --- demand-driven extension/refactor of the existing Encoder (encode.hpp); stays in pass/lec ---
-// Encodes driver_pin and the required cone on first use; later calls reuse the Val.
-std::optional&lt;Val&gt; Encoder::val_of(hhds::Pin_class driver_pin);
-}  // namespace livehd::lec
-
-namespace livehd::formal {   // the new single-design pass (pass/formal)
-
-// --- the new single-graph property prover ---
-struct Prove_options {
-  std::string engine     = "ind";   // reuse lec: flop-cut single frame (free state)
-  int         budget_k   = 256;     // rlimit-per = budget_k * cone_node_count  (deterministic)
-  int         cone_max   = 50000;   // pre-solve gate: cones bigger than this skip -> Unknown
-};
-
-enum class Reset_policy {
-  Include,             // core-library default; property must hold during reset too
-  ExcludeConeActive,   // normal assert: constrain every cone flop's reset inactive
-};
-
-using Verdict = lec::Verdict;   // { Proven, Refuted, Unknown } from query.hpp
-
-class Prover {
-public:
-  Prover(hhds::Graph* g, const Prove_options&amp; = {}, const sub_lib* = nullptr); // initializes lazy encoder
-
-  // scalar properties (1-bit cond, or whole-signal pins)
-  Verdict               is_true (hhds::Pin_class cond, Reset_policy = Reset_policy::Include);
-                                                    // UNSAT(¬cond)?Proven : SAT?Refuted : Unknown
-  Verdict               is_false(hhds::Pin_class cond);
-  Verdict               equal   (hhds::Pin_class a, hhds::Pin_class b);
-  std::optional&lt;Lconst&gt; is_constant(hhds::Pin_class x);   // proven-constant value, else nullopt
-
-  // structural predicates (built-in obligations, e.g. Hotmux selectors)
-  Verdict               is_onehot0(hhds::Pin_class sel);  // at most one bit set (one-hot OR zero = default arm)
-  Verdict               is_onehot (hhds::Pin_class sel);  // exactly one bit set
-
-  // bit-granularity (the ports / banking requirement)
-  Bitmask bits_equal   (hhds::Pin_class a, hhds::Pin_class b); // per-bit: positions provably equal
-  Bitmask bits_constant(hhds::Pin_class x);                    // per-bit: provably-constant positions (+values)
-
-  // checked contracts + later hypotheses (assume)
-  Verdict check_assume(hhds::Pin_class cond); // no reset exclusion; never assumes itself
-  void assume(hhds::Pin_class cond);     // adds solver.assertFormula(cond) to every later query
-  bool assumptions_consistent();         // one checkSat of the conjunction of assumes
-
-private:
-  // owns: cvc5::TermManager + Solver (QF_ABV), one lazy per-pin memo map, cone-size cache.
-  // each query: push / assert ¬property + assumes / set rlimit-per / checkSat / pop.
-};
-
-}  // namespace livehd::formal
-</code></pre>
-<p>Whether the property cone touches state (a stateful query may have an
-  <em>unreachable</em> witness) is reported alongside <code>Refuted</code> so callers
-  apply their own soundness policy (below). The library never decides removal/errors —
-  it returns verdicts; the driver decides.</p>
-
-<h2>Built-in property checks (structural obligations)</h2>
-<p>The always-on tier proves more than user assertions: many IR constructs carry an
-  <em>implicit</em> obligation the formal engine should discharge with the exact same
-  yes / no / defer-to-runtime cascade as <code>assert</code>. The first — and one of the
-  most valuable — is <strong>Hotmux selector one-hotness</strong>.</p>
-<ul class="subtasks">
-<li><strong>Hotmux / index-selection one-hot.</strong> <code>match</code> and
-  <code>unique if</code> lower to <code>Hotmux</code>, which <em>assumes</em> its selector
-  is one-hot (an arm is chosen by <code>sel == 2^k</code>; if two bits are set no arm
-  matches and it silently falls to the default/last arm — a real mutual-exclusivity
-  bug). This check is the <strong>dual</strong> of that implicit <code>assume</code>: for
-  every <code>Hotmux</code> driver, prove <code>is_onehot0(sel)</code> (at most one bit,
-  since an all-zero selector legitimately takes the default arm).
-  <strong>Proven ⇒</strong> drop the obligation (the Hotmux is guaranteed safe — a
-  downstream pass may exploit it). <strong>SAT over a stateless cone ⇒</strong> two arms
-  can fire at once ⇒ <strong>compile error</strong> (overlapping
-  <code>match</code>/<code>unique if</code> conditions). <strong>Otherwise ⇒</strong>
-  keep a runtime one-hot check + emit the deferral warning. The dynamic tuple-index
-  Hotmux (decoded <code>idx==k</code> match-chain) is one-hot by construction and should
-  prove instantly; user <code>unique if</code> is where this earns its keep.</li>
-<li><strong>No frontend work — ships first.</strong> Hotmux nodes already exist in the
-  lgraph, so this is the <em>lowest-friction</em> first always-on application: it needs
-  only the driver skeleton, the <code>proven</code>/<code>runtime_check</code> attrs and
-  the deferral warning — none of the <code>assert</code> grammar / <code>tolg</code>
-  materialization. It lands before the user-assert driver (see milestones).</li>
-<li><strong>Same framework for future obligations.</strong> The descending bit-range
-  precondition (<code>hi ≥ lo</code>, today <code>lower_range_assert</code>/
-  <code>lgassert</code>) becomes a discharged obligation; likewise div-by-zero,
-  cast-overflow, array-index-in-bounds — each is just another built-in predicate run
-  through the same prove / error / defer cascade.</li>
+<li><strong>Stateful asserts via the verdict ladder (old M6).</strong> Today a stateful
+  refutation is kept as a runtime check because the single-frame witness may be
+  unreachable. On the 2f-verify engine this becomes: 1-induction proven ⇒ elide;
+  BMC-from-reset refuted ⇒ a <em>reachable</em> counterexample even in the compile
+  profile's small budget ⇒ eligible for hard error (policy below); otherwise keep +
+  defer. Tests: an invariant over registered logic proven &amp; removed; a stateful
+  assert whose only violation is unreachable stays (no false error); a genuinely
+  reachable stateful violation within the compile budget errors with the witness
+  cycle.</li>
+<li><strong>Reset-exclusion for user asserts (<code>Reset_policy::ExcludeConeActive</code>)
+  — prerequisite for hard-erroring them.</strong> A normal <code>assert</code> may
+  legitimately fail while reset is asserted, so today only the Hotmux structural check
+  hard-errors; refuted user asserts merely defer. On the 2f-verify engine the
+  <code>after_reset</code> phase machinery (reset detection + driven prologue,
+  <code>query.cpp:1201-1291</code>) provides this for free in BMC mode; the single-frame
+  induction rung still needs the cone-reset guard (collect each cone Flop's
+  <code>reset_pin</code>/<code>negreset</code>, constrain inactive).
+  <code>assert_always</code> keeps <code>Reset_policy::Include</code>. Once in place,
+  enable the landed asymmetric policy's error row for user asserts: hard-error only on a
+  definitive refutation that is reset-clean and (for the induction rung) stateless or
+  reachability-confirmed.</li>
+<li><strong>ABC EXDC don't-care network.</strong> The flags
+  (<code>pass.abc.use_proven_assume</code>, default true;
+  <code>use_all_assume</code>, default false) and per-region constraint gathering landed
+  (<code>abc_map.cpp:196-227</code>); building the EXDC network that actually hands the
+  constraints to ABC's mfs/fraig is the remaining step. With 2f-verify, the constraint
+  pool grows: sidecar invariants proven unbounded are don't-care sources too.</li>
 </ul>
 
-<h2>Design decisions (locked)</h2>
+<h2>Policy carried forward (unchanged)</h2>
 <ul class="subtasks">
-<li><strong>Demand-encode once + collapse.</strong> Start from each point of interest,
-  traverse only the required cone, and memoize each visited pin/state term once.
-  Overlapping queries share terms via <code>val_of()</code> and one incremental
-  <code>push/pop</code> solver. Do not eagerly call whole-module
-  <code>Encoder::encode(g)</code>: that leaves encoding cost unbounded by
-  <code>cone_max</code> and lets unrelated unsupported nodes poison every query.</li>
-<li><strong>State = flop-cut, single frame.</strong> Reuse <code>lec</code>'s
-  <code>engine=ind</code>: flops/memory are free symbolic state, collapsed to one shared
-  term each. A <code>UNSAT</code> over free state is sound for <em>all</em> states,
-  including reachable.</li>
-<li><strong>Asymmetric soundness policy (assert).</strong>
-  <table>
-  <thead><tr><th>Verdict</th><th>Cone has flop/memory?</th><th>Driver action</th></tr></thead>
-  <tbody>
-  <tr><td><strong>UNSAT</strong> (Proven)</td><td>either</td><td>mark <code>proven</code>; cgen elides the runtime check</td></tr>
-  <tr><td><strong>SAT</strong> (Refuted)</td><td><strong>no</strong> (free inputs ⇒ reachable witness)</td><td><strong>hard compile error</strong> + counterexample + the assert message</td></tr>
-  <tr><td><strong>SAT</strong> (Refuted)</td><td><strong>yes</strong> (witness may be unreachable)</td><td>keep + mark <code>runtime_check</code> (no error)</td></tr>
-  <tr><td><strong>Unknown</strong> / budget-exceeded</td><td>either</td><td>keep + mark <code>runtime_check</code></td></tr>
-  </tbody>
-  </table>
-  The invariant that makes <em>always-on</em> safe: <strong>hard-error only on a
-  definitive SAT over a stateless cone (after applying assumes and, for a normal
-  assert, its cone-reset guard)</strong>. Budget /
-  Unknown / stateful-SAT never error — so a budget mistune can never turn a good build
-  into a false error; worst case it under-proves and leaves a runtime check.</li>
-<li><strong>Normal <code>assert</code> excludes active reset, and only
-  <code>assert</code> does so.</strong> While collecting a normal assertion's cone, gather
-  each encountered <code>Flop</code>'s <code>reset_pin</code> and
-  <code>negreset</code>, build its reset-active expression, and constrain it inactive
-  for that query. Modules containing registers must expose explicit reset pins.
-  <code>Memory</code> has initialization, not an intrinsic reset, so it contributes no
-  reset guard; logic may still use a module reset to initialize an SRAM through normal
-  writes. General library queries, built-in obligations, and checked
-  <code>assume</code>s include reset-active valuations. <code>assert_always</code> also
-  uses <code>Reset_policy::Include</code> — it must hold every cycle, reset included
-  (that is the only difference from a normal <code>assert</code>).</li>
-<li><strong>Deterministic budget = cvc5 <code>rlimit-per</code>, cone-scaled.</strong>
-  Per query, <code>rlimit-per = budget_k × (#nodes in the effective query cone)</code>,
-  including assumption and reset-guard cones used by that query.
-  cvc5's <code>rlimit</code> is a deterministic internal resource counter
-  (rewrites/decisions/conflicts), machine- and wall-clock-independent — the realization
-  of "<em>#statements passed to formal × constant = max clauses to eval</em>". A cheap
-  pre-solve gate skips cones above <code>cone_max</code> straight to <code>Unknown</code>.
-  Same config ⇒ identical verdicts everywhere.</li>
-<li><strong><code>assume</code> = checked contract + optimization hypothesis.</strong>
-  Every in-scope <code>assume(cond)</code> is <code>assertFormula</code>'d before assert
-  and LEC queries and is also fed to ABC as an optimization constraint. It is itself a
-  formal obligation: check it without assuming itself or relying circularly on
-  unproven peer assumptions. Proven ⇒ elide its runtime check; definitive stateless
-  refutation ⇒ compile error; stateful refutation or Unknown ⇒ keep a runtime contract
-  check and emit <code>formal-assume-deferred</code>. Optimization may still exploit
-  the declared contract: behavior outside it is undefined, and the runtime check
-  detects a contract violation but cannot restore logic optimized away under the
-  assumption. The engine also runs one <code>assumptions_consistent()</code> check per
-  scope — a jointly-contradictory assume set is a <strong>warning</strong> (it would make
-  every proof vacuous) and suppresses removals.</li>
-<li><strong>The library returns verdicts; drivers own policy.</strong> The
-  <code>assert</code> driver applies the table above. A future <code>pass/memory</code>
-  asks <code>equal(addr_i,addr_j)</code> and applies its <em>own</em> conservative
-  fallback (can't prove ⇒ use a separate port; error only when the un-mergeable count
-  exceeds the declared <code>rdports</code> limit). No reachability concern there — the
-  fallback is "more ports", never a wrong answer.</li>
-<li><strong>Deferred-to-runtime ⇒ warning (silenceable).</strong> Whenever <em>any</em>
-  obligation — user <code>assert</code>/<code>assume</code> or a built-in like Hotmux
-  one-hotness — is deferred to runtime (Unknown / budget-exceeded / kept stateful-SAT),
-  emit a diagnostic <strong>warning</strong>: it now costs a runtime check formal could
-  not discharge. Per-category codes (<code>formal-assert-deferred</code>,
-  <code>formal-onehot-deferred</code>, …) so each is independently silenceable — a global
-  <code>--set pass.formal.warn_deferred=false</code> and per-category
-  <code>--set pass.formal.warn_&lt;cat&gt;=false</code> turn them off. Proven obligations
-  are silent; errors stay errors. Reuses the existing diag <code>warnings/</code>
-  harness (<code>:type: warning</code>).</li>
+<li><strong>Asymmetric soundness:</strong> hard-error only on a definitive refutation
+  that cannot be an artifact (stateless cone, or reachable-by-BMC witness, after assumes
+  and the reset guard). Budget / Unknown / possibly-unreachable never error — a budget
+  mistune can never turn a good build into a false error.</li>
+<li><strong>Only proven assumes are hypotheses</strong> (no circular self-proof); the
+  consistency check runs before any removal; contradictory assume set ⇒ warning +
+  removals suppressed.</li>
+<li><strong>Deferred-to-runtime ⇒ silenceable per-category warning</strong>
+  (<code>formal-assert-deferred</code>, <code>formal-onehot-deferred</code>, …).</li>
 </ul>
 
-<h2>Pipeline placement</h2>
+<h2>Future / deferred (other pages)</h2>
 <ul class="subtasks">
-<li><strong><code>pass.formal</code> is its own pass</strong> — single-design reasoning,
-  distinct from <code>pass.lec</code> (two-design equivalence). It owns the
-  <code>Prover</code> library + the always-on drivers and orchestrates other passes
-  (feeds proven contracts to <code>pass.abc</code>, will call a future
-  <code>pass/memory</code>). It <em>reuses</em> <code>pass/lec</code>'s cvc5
-  <code>Encoder</code> via <code>//pass/lec:lec_query</code>; that shared encoder may
-  later relocate to a neutral target consumed by both.</li>
-<li><strong>Pipeline slot.</strong> Runs after bitwidths are final and before codegen:
-  <code>lnast → lgraph (tolg) → cprop → bitwidth → <strong>pass.formal</strong> → cgen</code>.
-  The cvc5 encoding needs resolved widths/signs, so <code>pass.formal</code> must follow
-  <code>bitwidth</code>; its proven contracts must be available to a later
-  <code>pass.abc</code>, and its removals/marks must land before <code>cgen</code>.</li>
-<li><strong>Always-on, opt-out.</strong> <code>pass.formal</code> is in the default
-  <code>compile</code> recipe, opt-out via <code>--set compile.formal.enabled=false</code>
-  (consistent with the bare-compile-max-diagnostics philosophy). The deterministic
-  cone-scaled budget keeps build time bounded, and Unknown/budget never errors, so
-  always-on is safe.</li>
-<li><strong>Library:</strong> caller-agnostic <code>Prover</code> in
-  <code>pass/formal</code>. Always available to any pass.</li>
-<li><strong>Future callers</strong> (<code>pass/memory</code> ports/banking,
-  <code>pass.abc</code>) invoke the <em>library</em> directly to decide ports / memory /
-  banking once they need bit-level property guarantees — their own pages.</li>
-</ul>
-
-<h2>ABC integration — proven assumes as don't-cares</h2>
-<p>A formally established <code>assume</code> is an input/state constraint: states that
-  violate it never occur, so they are <strong>don't-cares</strong> <code>pass.abc</code>
-  can exploit to synthesize smaller logic. For each discharged <code>assume</code>,
-  <code>pass.formal</code> records whether it was <em>proven</em> (UNSAT of its negation)
-  or merely <em>declared</em> (kept as a runtime contract), and hands the constraint set
-  to <code>pass.abc</code>.</p>
-<ul class="subtasks">
-<li><strong><code>--set pass.abc.use_proven_assume=true</code> (default true).</strong>
-  Feed only <em>formally proven</em> assumes to ABC as care-set constraints. Sound by
-  construction: the assumption provably holds on the design, so optimizing under it
-  changes nothing observable.</li>
-<li><strong><code>--set pass.abc.use_all_assume=false</code> (default false).</strong>
-  When enabled, also feed <em>declared-but-unproven</em> assumes (those deferred to
-  runtime). Aggressive mode: behavior outside the contract becomes undefined and the
-  runtime check can detect a violation but cannot recover logic optimized away. Off by
-  default — it trades soundness-without-the-contract for area.</li>
-<li><strong>Mechanism.</strong> Each fed assume constrains its bit-blasted cone true in
-  ABC's network, so violating minterms become don't-cares for the AIG / tech-map flow.
-  <code>pass.formal</code> emits the constraint list; <code>pass.abc</code> consumes it
-  under the flags above (both off ⇒ today's exact behavior).</li>
-</ul>
-
-<h2>Frontend + lowering changes</h2>
-<ul class="subtasks">
-<li><strong><code>assume</code> keyword (new).</strong> Add <code>assume(cond)</code> to
-  the sibling <code>tree-sitter-pyrope</code> grammar + <code>prp2lnast</code> (mirror the
-  existing <code>assert</code>/<code>cassert</code> path); either a new LNAST node or
-  <code>cassert</code> with an <code>is_assume</code> flag.</li>
-<li><strong><code>tolg</code> materialization.</strong> Today <code>tolg</code>
-  <em>silently drops</em> <code>cassert</code>. Change it to lower the <em>surviving</em>
-  (verifier-unknown) asserts/assumes into
-  <code>assert</code>/<code>assert_always</code>/<code>assume</code>
-  <strong>Sub-nodes</strong> (the <code>assert_always</code> variant carries a flag so the
-  driver picks <code>Reset_policy::Include</code>), mirroring the existing
-  <code>lower_range_assert</code> /
-  <code>lgassert</code> precedent (1-bit <code>cond</code> sink pin + source-loc; carry
-  the <strong>message</strong> too — extend the current loc-only name attr, e.g.
-  <code>loc\x1fmsg</code>, or a second attribute).</li>
-<li><strong>Attributes (new in <code>graph/attrs.hpp</code>).</strong> <code>proven</code>
-  and <code>runtime_check</code> (mirror <code>color_t</code>; sparse). <code>proven</code>
-  ⇒ provenance kept, runtime emission elided; <code>runtime_check</code> ⇒ future
-  runtime/sim must check it.</li>
-<li><strong>cgen.</strong> Generalize the existing <code>lgassert</code> handling to emit
-  user <code>assert</code>/<code>assume</code> (with message) inside
-  <code>// synthesis translate_off</code>, skipping <code>proven</code> nodes.</li>
-</ul>
-
-<h2>Subtasks — pending (milestones, each LEC/test-backed)</h2>
-<ul class="subtasks">
-<li><strong>M1 — library core.</strong> <code>Encoder::val_of</code> +
-  <code>Prover</code> + <code>is_true</code>/<code>is_false</code>/<code>equal</code> +
-  the cone-scaled <code>rlimit-per</code> budget + the pre-solve cone gate. gtests on
-  tiny hand-built lgraphs (mirror <code>comb_equiv_test</code>): tautology ⇒ Proven,
-  contradiction ⇒ Refuted, unconstrained input ⇒ Refuted (it has a concrete
-  falsifying valuation); budget or unsupported logic in the queried cone forces Unknown
-  deterministically; unrelated unsupported logic is not traversed and does not affect
-  the verdict.</li>
-<li><strong>M2 — bit-granularity.</strong> <code>bits_equal</code> /
-  <code>bits_constant</code> / <code>is_constant</code>. gtests: low bits of
-  <code>x</code> vs <code>x&amp;0xF</code> equal, high bits not; constant-folded cone
-  ⇒ all bits constant with values.</li>
-<li><strong>M3 — Hotmux one-hot check + always-on driver skeleton (no frontend).</strong>
-  <code>is_onehot0</code>/<code>is_onehot</code> in the Prover; the always-on
-  post-<code>tolg</code> pass walks <code>Hotmux</code> drivers and classifies
-  prove→drop / stateless-SAT→error / else→keep+warn. Establishes the shared driver
-  skeleton, the <code>proven</code>/<code>runtime_check</code> attrs, and the deferral
-  warning + its <code>--set</code> silencers — all without any grammar/lowering work.
-  Tests: overlapping <code>unique if</code> arms ⇒ compile error; provably-disjoint arms
-  ⇒ proven (obligation dropped); unprovable selector ⇒ kept +
-  <code>formal-onehot-deferred</code> warning (and a <code>warnings/</code> test that
-  <code>--set pass.formal.warn_onehot=false</code> silences it).</li>
-<li><strong>M4 — user <code>assert</code> driver + materialization + cgen.</strong>
-  <code>tolg</code> emits <code>assert</code> sub-nodes for verifier-unknown survivors
-  (cond + message + loc); cgen elides proven, emits the rest in
-  <code>translate_off</code>. Combinational asserts go prove→remove / disprove→error /
-  unknown→keep+warn end-to-end on the M3 skeleton. A normal assert is guarded by the
-  inactive polarity of every flop reset found in its cone. New <code>errors/</code> (stateless
-  false ⇒ compile error with message + CEX) and <code>equiv/</code> (proven assert
-  removed, design still LECs) tests.</li>
-<li><strong>M5 — <code>assume</code>.</strong> grammar + lowering + formal obligation,
-  runtime fallback, LEC/ABC hypothesis feed, and
-  <code>assumptions_consistent</code>. Tests: an assume that <em>enables</em> an
-  otherwise-unprovable assert (assert removed); proven/refuted/deferred assumes; a
-  contradictory assume set ⇒ warning + no spurious removals; and no self- or
-  mutually-circular assume proof.</li>
-<li><strong>M6 — stateful asserts.</strong> flop-cut over real flops/memory: UNSAT
-  proves &amp; removes; SAT keeps (unreachable-safe). Tests: an invariant over registered
-  logic proven&amp;removed; a stateful assert with only an unreachable violation stays
-  (no false error).</li>
-</ul>
-
-<h2>Tests</h2>
-<ul class="subtasks">
-<li><code>//pass/lec:prove_test</code> — gtest for M1/M2 on synthetic lgraphs.</li>
-<li><code>inou/prp/tests/equiv/</code> — proven asserts removed, design still LEC-equiv to
-  golden (proves removal is sound).</li>
-<li><code>inou/prp/tests/errors/</code> — stateless false assert ⇒ compile error carrying
-  the user message + counterexample.</li>
-<li><code>inou/prp/tests/errors/</code> — overlapping <code>unique if</code>/<code>match</code>
-  arms ⇒ Hotmux one-hot compile error.</li>
-<li><code>inou/prp/tests/comptime/</code> — assume-enables-proof; contradictory-assume
-  warning; budget-exceeded ⇒ kept (deterministic).</li>
-<li><code>inou/prp/tests/warnings/</code> — a deferred obligation emits its
-  <code>formal-*-deferred</code> warning; the matching
-  <code>--set pass.formal.warn_&lt;cat&gt;=false</code> silences exactly it
-  (<code>:type: warning</code> harness).</li>
-</ul>
-
-<h2>Traps</h2>
-<ul class="subtasks">
-<li><strong>Width = magnitude+1.</strong> Reuse <code>real_width</code> /
-  <code>fit_to</code> from <code>encode.cpp</code> for every cond/pin — do not re-derive
-  widths (the bit-width trap that silently breaks every cvc5 comparison).</li>
-<li><strong>Apply assumes before erroring.</strong> A stateless cone can still be
-  input-constrained by an <code>assume</code>; a SAT may vanish once assumes are added.
-  Never hard-error before the in-scope assumes are <code>assertFormula</code>'d.</li>
-<li><strong>Do not prove an assume with itself.</strong> An assume is both an obligation
-  and a later hypothesis. Its obligation query must not contain that same assumption
-  or depend circularly on unproven assumptions; otherwise every assume proves
-  vacuously.</li>
-<li><strong>Reset masking belongs to normal asserts only.</strong> Collect reset polarity
-  from cone <code>Flop</code> nodes and constrain those resets inactive. Do not infer a
-  reset from a <code>Memory</code>'s <code>init</code>, and do not silently add reset guards
-  to Hotmux, memory/ABC, LEC, or assume queries.</li>
-<li><strong>Consistency before vacuity.</strong> Contradictory assumes make every assert
-  vacuously Proven — run <code>assumptions_consistent()</code> first and suppress
-  removals (warn) if UNSAT.</li>
-<li><strong>SAT ≠ bug when state is in the cone.</strong> Only stateless-cone SAT is a
-  reachable counterexample; stateful SAT must keep, never error.</li>
-<li><strong>Budget never errors.</strong> Unknown/budget-exceeded ⇒ keep+runtime, so the
-  set of <em>compile errors</em> stays deterministic regardless of <code>budget_k</code>.</li>
-<li><strong>One-hot = <code>onehot0</code> (≤1), not <code>==1</code>.</strong> An all-zero
-  Hotmux selector legitimately takes the default arm, so the obligation is "at most one
-  bit set" — build it as <code>(sel &amp; (sel-1)) == 0</code> (covers zero and exact
-  one-hot in one term). Requiring exactly-one would false-error every design that relies
-  on the default arm.</li>
-<li><strong>Only survivors reach here.</strong> The verifier already discharged
-  comptime-constant asserts; don't re-prove them — <code>tolg</code> only materializes
-  the unknowns.</li>
-</ul>
-
-<h2>Subtasks — landed (2026-06-20)</h2>
-<p>M1–M5 shipped and build green; full <code>//pass/... //inou/prp/... //graph/...
-  //upass/...</code> 713/713 (1 parallel-teardown flake passes in isolation), 0
-  regressions; <code>//pass/formal:prove_test</code> green.</p>
-<ul class="subtasks">
-<li><strong>Attributes.</strong> <code>proven</code> / <code>runtime_check</code>
-  (uint32 sparse, like <code>match</code>) in <code>graph/attrs.hpp</code>, registered in
-  <code>graph/cell.cpp</code>, accessors + the <code>fproperty_module_name</code> primitive
-  + <code>kFormal{Onehot,Assert,Assume,AssertAlways}</code> kind codes in
-  <code>graph/node_util.hpp</code>.</li>
-<li><strong>Prover (<code>pass/formal/prove.{hpp,cpp}</code>, target
-  <code>//pass/formal:formal</code>).</strong> A <em>self-contained</em> demand-driven
-  cone encoder reusing the exported <code>lec</code> helpers (<code>Val</code>,
-  <code>fit_to</code>, <code>real_width</code>, <code>flop_state_key</code>) — so
-  <code>pass/lec</code> is untouched (zero risk to its tests). Inputs pre-seeded from IO
-  decls; flops cut as free state; Memory/Sub/Fflop/Latch ⇒ Unknown. Primitives
-  <code>is_true</code>/<code>is_false</code>/<code>equal</code>/<code>is_onehot0</code>/
-  <code>is_onehot</code>/<code>assume</code>; deterministic per-query cvc5 <code>rlimit</code>
-  = <code>budget_k × cone-nodes</code> on a fresh QF_BV solver, + the <code>cone_max</code>
-  pre-gate. <strong>Verdict widths come from the cvc5 term sort, not the declared pin
-  width</strong> (a comparison op is 1-bit even on a wider pin). <strong>And/Or/Xor use the
-  Verilog effective-sign rule</strong> (any unsigned operand ⇒ zero-extend) — without it a
-  lone signed 1-bit selector bit sign-extends to all-ones and a one-hot check false-fires.</li>
-<li><strong>pass.formal plugin + pipeline.</strong> <code>pass_formal.{hpp,cpp}</code>
-  (clone of <code>pass_lec</code>); <code>compile.formal → pass.formal</code> in
-  <code>kSetPasses</code> + the O2 recipe (after <code>bitwidth</code>, before
-  <code>cgen</code>); <code>lhd pass formal</code> subcommand; opt out with
-  <code>--set compile.formal.enabled=false</code>.</li>
-<li><strong>Hotmux one-hot check (the hard-error path).</strong> Walks every
-  <code>Hotmux</code>, proves <code>is_onehot0(sel)</code>: proven ⇒ mark; stateless SAT ⇒
-  compile error with a counterexample (overlapping <code>unique if</code>/<code>match</code>
-  arms); else ⇒ keep + <code>formal-onehot-deferred</code> warning. Verified: a
-  mutually-exclusive chain compiles clean, an overlapping one errors with witness
-  <code>a=1,b=1</code>.</li>
-<li><strong>assert / assert_always / assume.</strong> <code>prp2lnast</code> recognizes the
-  three call names (no grammar change — they parse as calls); <code>tolg</code>
-  materializes the verifier-unknown survivors into <code>fproperty</code> Subs;
-  <code>pass.formal</code> proves them (proven ⇒ <code>cgen</code> elides; else ⇒ runtime
-  check + deferral warning); <code>cgen</code> emits an immediate <code>assert/assume</code>
-  in <code>translate_off</code>. Verified end-to-end (provable assert elided; unprovable
-  kept with file:line; assume emits <code>assume(...)</code>).</li>
-<li><strong>ABC flags.</strong> <code>--set pass.abc.use_proven_assume=true</code> (default)
-  + <code>pass.abc.use_all_assume=false</code> registered, plumbed to
-  <code>Map_options</code>; <code>map_region</code> gathers the proven (and, under
-  use_all_assume, declared) assume cond drivers per region.</li>
-</ul>
-<h3>Deviations from the plan above (intentional, documented)</h3>
-<ul class="subtasks">
-<li><strong>Kind carrier = sentinel const child, not the node name.</strong> The cassert
-  NODE name does not survive upass re-emission (its CHILDREN do), so the kind rides a
-  <code>'__fkind__assume'</code> / <code>'__fkind__assert_always'</code> const child ahead
-  of the user message.</li>
-<li><strong>User asserts defer on refutation (no hard error yet).</strong> Only the Hotmux
-  structural check hard-errors. A normal assert may legitimately fail during reset, so the
-  <code>Reset_policy::ExcludeConeActive</code> reset-exclusion is a prerequisite for
-  erroring user asserts — deferred. Refuted/Unknown user asserts keep a runtime check.</li>
-<li><strong>Only PROVEN assumes are assert hypotheses.</strong> Each assume is proved
-  independently (empty hypothesis set ⇒ no circular self-proof); only proven ones feed the
-  assert queries (sound), avoiding unsound assert removal under an unproven contract.</li>
-<li><strong>Encoder kept self-contained, not refactored.</strong> The demand encoder lives
-  in <code>pass/formal</code> reusing <code>lec</code>'s exported free functions; the
-  planned in-place refactor of <code>encode.cpp</code> into a shared lazy context is a
-  future de-dup.</li>
-<li><strong>ABC don't-care exploitation is the follow-on.</strong> The flags + gathering
-  ship; building the EXDC don't-care network that hands the constraints to ABC's
-  mfs/fraig is the remaining ABC-integration step.</li>
-</ul>
-
-<h2>Future / deferred (reuse this same library)</h2>
-<ul class="subtasks">
-<li><strong>Reachable-state refutation</strong> — k-induction / BMC-from-reset (the
-  <code>lec</code> <code>bmc</code> engine already exists) so a stateful violation within
-  N reachable cycles can become a hard error too, and temporal assertions
-  (<a class="xref" href="../pyrope/3f-temporal.html">3f-temporal</a>) get real proofs.</li>
+<li><strong>Temporal assertion proofs</strong> —
+  <a class="xref" href="../pyrope/3f-temporal.html">3f-temporal</a> lowering on the
+  2f-verify engine.</li>
 <li><strong><code>pass/memory</code> port-sharing &amp; banking</strong> — its own page;
-  calls <code>equal</code>/<code>bits_equal</code>/<code>is_constant</code> to merge read
-  ports, choose banking, and error when un-mergeable accesses exceed declared
-  <code>rdports</code>.</li>
-<li><strong>Runtime fallback execution</strong> — actually running the
-  <code>runtime_check</code>-marked asserts in sim/slop (ties to Group 4
-  <code>4b</code> assert/assume slop emission).</li>
-<li><strong>Proven-certificate cache</strong> — share <code>lec</code> M6's persistent
-  cache keyed by cone hash + assumptions, so always-on re-runs skip re-proving unchanged
-  cones.</li>
+  calls the Prover primitives (<code>equal</code>/<code>bits_equal</code>/
+  <code>is_constant</code>) with its own conservative fallback.</li>
+<li><strong>Runtime fallback execution</strong> — running
+  <code>runtime_check</code>-marked asserts in sim/slop
+  (<a class="xref" href="../pyrope/4b.html">4b</a>).</li>
+<li><strong>Proven-certificate cache</strong> — subsumed by 2f-verify's per-obligation
+  cone-hash verdict cache (its L2 layer); compile-profile runs get cache hits from prior
+  <code>lhd formal verify</code> runs for free.</li>
 </ul>
 </main>
 <footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
