@@ -1,0 +1,30 @@
+/*
+:name: generic_mod_const
+:type: compile
+*/
+
+// 3g-generics subtask F — mangling for non-type binds. A `mod`/`pipe` generic
+// bound to a CONSTANT (`addk<3>`) or a LAMBDA (`applymod<inc>`) is realized as a
+// specialized module; its mangled name must carry a stable per-bind token
+// (`addk__u8_N_3`, `applymod__u8_G_inc`) so two DISTINCT binds produce distinct
+// modules (else the name-keyed dedup silently merges them and mis-wires the
+// second instance). Two constant binds and two lambda binds of the same
+// template exercise the collision path; the body substitutes the concrete
+// constant / lambda (todo 3g A/F).
+
+comb inc(v:u8) -> (o:u9) { o = v + 1 }
+comb dec(v:u8) -> (o:u9) { o = v - 1 }
+
+mod addk<N>(a:u8) -> (r:u9@[0]) {
+  r = a + N
+}
+mod applymod<G>(a:u8) -> (r:u9@[0]) {
+  r = G(v=a)
+}
+
+pub mod top(x:u8) -> (p:u9@[0], q:u9@[0], s:u9@[0], t:u9@[0]) {
+  p = addk<3>(a=x)
+  q = addk<5>(a=x)
+  s = applymod<inc>(a=x)
+  t = applymod<dec>(a=x)
+}

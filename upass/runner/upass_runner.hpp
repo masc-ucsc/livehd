@@ -499,15 +499,30 @@ protected:
     std::optional<Dlop> min  = {};
     std::string         type_name = {};  // named type (kind == none)
     std::string         from      = {};  // binding source, for the mismatch diagnostic
+    // A CONSTANT-valued generic (`f<3>`): the literal substituted for body reads
+    // of the generic name (`r = a + N` → `a + 3`). Non-empty ⇒ constant bind;
+    // `kind`/`max`/`min` still carry its envelope (so a constant bound into a
+    // type slot has a width — todo 3g D). Never inferred (explicit/default only).
+    std::string const_text = {};
+    // A LAMBDA-valued generic (`f<inc>`): the bound callee name, registered in
+    // func_param_bindings_ so a body call `F(v)` dispatches to it (todo 3g A).
+    std::string func_name = {};
   };
-  // Explicit `<…>` bindings (declaration order) win; otherwise each generic
-  // is inferred from the DECLARED types of the actuals at its `:T` positions
-  // (literals contribute their kind only). Conflicts and `<…>` arity
-  // mismatches are fatal call-site errors. A generic that nothing types
-  // stays absent from the map (the `triadd(a=1,b=2,c=3)` → T = int case).
+  // One explicit `<…>` argument at a call site. `value` is the bound entity's
+  // text (a type ref / tmp, a constant, or a lambda name); `name` is set for a
+  // NAMED bind (`f<T=u8>`, todo 3g C) and empty for a positional one.
+  struct Generic_actual {
+    std::string value = {};
+    std::string name  = {};
+  };
+  // Explicit `<…>` bindings (positional and/or named) win; otherwise each
+  // generic is inferred from the DECLARED types of the actuals at its `:T`
+  // positions (literals contribute their kind only), then falls to its
+  // declaration default. Conflicts and arity mismatches are fatal call-site
+  // errors. A generic that nothing types stays absent (`triadd(a=1,b=2,c=3)`).
   absl::flat_hash_map<std::string, Generic_bind> resolve_generic_binds(
       const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io, const std::vector<Lnast_node>& param_val,
-      const std::vector<bool>& param_set, std::size_t nbind, const std::vector<std::string>& explicit_generics,
+      const std::vector<bool>& param_set, std::size_t nbind, const std::vector<Generic_actual>& explicit_generics,
       const std::string& callee_name, const livehd::diag::Span& call_span);
 
   bool maybe_specialize_template_call(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,
@@ -593,7 +608,7 @@ protected:
   // explicit `<…>` generic refs, honoring the UFCS-receiver drop. Saves and
   // restores the cursor. Returns false on a malformed call shape (the caller
   // then declines the inline).
-  bool gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& actuals, std::vector<std::string>& explicit_generics);
+  bool gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& actuals, std::vector<Generic_actual>& explicit_generics);
   // A gathered lambda set `const add = [f1, f2]` folds (constprop) to a bundle
   // of qualified function-name strings under numeric keys "0","1",… — the same
   // shape `init` overloads use. Returns those names in tuple order (only the
@@ -802,6 +817,12 @@ protected:
   // around each body walk so nested frames don't clobber each other. Consulted
   // by try_inline_func_call when a callee name isn't itself a registry entry.
   absl::flat_hash_map<std::string, std::string> func_param_bindings_;
+  // Type-valued generic used as a constructor/cast in the body (`T(a)` with T
+  // bound to `u8`): maps the generic's RAW name (as read in the body) to the
+  // concrete cast token (`u8`/`s4`/`bool`) so try_lower_typecast reclassifies
+  // `T(a)` as that scalar cast (todo 3g A). Saved/restored around each body
+  // walk, like func_param_bindings_.
+  absl::flat_hash_map<std::string, std::string> generic_cast_binds_;
   // Phase D recursion fuel. Per-callee depth is capped at kInlineMaxDepth
   // (active frames of the same callee); inline_budget_ is a per-run total
   // splice cap so a non-terminating / exponential unroll bails instead of

@@ -457,6 +457,7 @@ struct Lambda_extractor {
     }
 
     std::vector<std::string> generics;
+    std::vector<std::string> generic_defaults;  // aligned; "" = no default (3g B)
     if (move_to_sibling()) {  // kind -> generics
       if (lm->has_child()) {
         const auto saved_g = lm->save_cursor();
@@ -464,12 +465,25 @@ struct Lambda_extractor {
         do {
           if (Lnast_ntype::is_ref(lm->current_type())) {
             generics.emplace_back(lm->current_text());
+            // The generic's DECLARATION default rides as a `const` child of the
+            // ref (prp2lnast); lift it, aligned with the name.
+            std::string def;
+            if (lm->has_child()) {
+              const auto saved_d = lm->save_cursor();
+              move_to_child();
+              if (Lnast_ntype::is_const(lm->current_type())) {
+                def = std::string(lm->current_text());
+              }
+              lm->restore_cursor(saved_d);
+            }
+            generic_defaults.emplace_back(std::move(def));
           }
         } while (move_to_sibling());
         lm->restore_cursor(saved_g);
       }
     }
     new_lnast->set_generics(std::move(generics));
+    new_lnast->set_generic_defaults(std::move(generic_defaults));
 
     if (!move_to_sibling()) {  // generics -> inputs
       new_lnast->add_child(root_nid, Lnast_ntype::create_stmts());

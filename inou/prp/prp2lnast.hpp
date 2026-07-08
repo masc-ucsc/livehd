@@ -562,10 +562,15 @@ protected:
   void                  add_call_args_to_fcall(const Lnast_nid& fcall_idx, const std::vector<Call_arg>& call_args);
   // Explicit call-site generic bindings (`f<int,string>(…)` — grammar field
   // `generic`): type-arg refs collected BEFORE the fcall node exists, then
-  // attached as `store(__generic_arg, type_ref)` children ahead of the
-  // actuals.
-  std::vector<Lnast_node> collect_generic_args(TSNode call_node);
-  void                    add_generic_args_to_fcall(const Lnast_nid& fcall_idx, const std::vector<Lnast_node>& generic_args);
+  // attached as `store(__generic_arg, type_ref [, const name])` children ahead
+  // of the actuals. `name` is set for a NAMED bind (`f<T=u8>`, todo 3g C) and
+  // empty for a positional one.
+  struct Generic_call_arg {
+    Lnast_node  value;         // the bound type/constant/lambda (a ref or const)
+    std::string name;          // generic parameter name, or empty (positional)
+  };
+  std::vector<Generic_call_arg> collect_generic_args(TSNode call_node);
+  void                          add_generic_args_to_fcall(const Lnast_nid& fcall_idx, const std::vector<Generic_call_arg>& generic_args);
 
   // Lvalue helpers. `rhs_is_fcall` tells the lvalue_list path to bind by
   // name (return-field name) rather than position; otherwise positional

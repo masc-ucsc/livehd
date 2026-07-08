@@ -1703,7 +1703,11 @@ void uPass_function_registry::ensure(const std::vector<std::shared_ptr<Lnast>>& 
       const bool is_comb = lk.empty() || lk == "comb";
       bool       special = has_placeholder;
       for (const auto& e : io.inputs) {
-        if (e.is_ref || e.is_varargs) {
+        // A defaulted input (todo 3g E) has no standalone-module form — its
+        // body-prologue default binding is only correct on the inline path (the
+        // provided-arg skip runs there), and an expression default like
+        // `b=a+5` cannot be a static port default at all. Force inline.
+        if (e.is_ref || e.is_varargs || e.has_default) {
           special = true;
           break;
         }
@@ -2399,9 +2403,16 @@ bool uPass_runner::try_lower_typecast() {
   // RAW name: an inlined body tag-prefixes the callee (`int` → `inlN_int`); the
   // cast classifier keys on the un-renamed builtin name (mirrors constprop).
   const std::string callee(lm->current_raw_text());
-  const auto        tc = upass::classify_typecast(callee);
+  auto              tc = upass::classify_typecast(callee);
   if (!tc) {
-    return bail();  // not a built-in scalar cast (bool/boolean, user fn, cell-op…)
+    // A type-valued generic used as a constructor/cast (`T(a)` with T bound to
+    // `u8`): reclassify against the bound concrete token (todo 3g A).
+    if (auto gb = generic_cast_binds_.find(callee); gb != generic_cast_binds_.end()) {
+      tc = upass::classify_typecast(gb->second);
+    }
+    if (!tc) {
+      return bail();  // not a built-in scalar cast (bool/boolean, user fn, cell-op…)
+    }
   }
 
   // Exactly one positional operand (a ref or const). A `store(...)` named actual
@@ -2942,7 +2953,7 @@ bool uPass_runner::try_inline_func_call() {
     auto cands = overload_candidates_of(callee_name);
     if (!cands.empty()) {
       std::vector<Actual>      ov_actuals;
-      std::vector<std::string> ov_generics;
+      std::vector<Generic_actual> ov_generics;
       if (gather_actuals(/*drop_ufcs_receiver=*/false, ov_actuals, ov_generics)) {
         std::string chosen;
         if (cands.size() == 1) {
@@ -3118,7 +3129,7 @@ bool uPass_runner::try_inline_func_call() {
   --inline_budget_;
 
   std::vector<Actual>      actuals;
-  std::vector<std::string> explicit_generics;  // `f<int,string>(…)` type-arg refs, in order
+  std::vector<Generic_actual> explicit_generics;  // `f<int,string>(…)` binds, in order (named or positional)
   if (!gather_actuals(drop_ufcs_receiver, actuals, explicit_generics)) {
     return false;
   }
@@ -3508,12 +3519,13 @@ bool uPass_runner::try_inline_func_call() {
     }
   }
 
-  // Every non-self FIXED parameter must be bound — io_meta carries no defaults,
-  // so an unset input means the caller omitted a required argument. The var-arg
-  // slot (index nbind, when present) is always satisfied — it gathers zero or
-  // more leftovers — so it is excluded from this check.
+  // Every non-self FIXED parameter must be bound — an unset input means the
+  // caller omitted a required argument. EXCEPT a param with a declared default
+  // (`comb f(in1:u4, in2=3)`, todo 3g E): an omitted default takes the
+  // body-prologue value (bound below). The var-arg slot (index nbind, when
+  // present) is always satisfied — it gathers zero or more leftovers.
   for (std::size_t i = (has_self ? 1 : 0); i < nbind; ++i) {
-    if (!param_set[i]) {
+    if (!param_set[i] && !io.inputs[i].has_default) {
       fcall_arg_fail(call_span,
                      "fcall-missing-arg",
                      std::format("missing required argument `{}` in call to `{}`", io.inputs[i].name, callee_name),
@@ -3629,6 +3641,9 @@ bool uPass_runner::try_inline_func_call() {
   // Function-valued params: record the body-local name → bound function so the
   // body's `f(x)` resolves; restored after the body walk. No value is emitted.
   std::vector<std::pair<std::string, std::optional<std::string>>> saved_func_bindings;
+  // Type-generic constructor-cast tokens (`T(a)` → generic_cast_binds_), same
+  // save/restore discipline as saved_func_bindings.
+  std::vector<std::pair<std::string, std::optional<std::string>>> saved_cast_binds;
   for (std::size_t i = 0; i < nparams; ++i) {
     const auto& e = io.inputs[i];
     // Register the var-arg leftovers for try_resolve_vararg_get.
@@ -3698,14 +3713,58 @@ bool uPass_runner::try_inline_func_call() {
       }
     }
   }
-  // Bind each generic NAME inside the inline frame so body `:T` slots
-  // (declare type refs, renamed to `inlN_T`) resolve through the normal
-  // named-type machinery.
+  // Bind each generic NAME inside the inline frame so body references resolve
+  // (todo 3g A). A generic binds one of three comptime entities:
+  //   * a CONSTANT (`f<3>`): the body reads it as a value (`a + N`) — emit the
+  //     literal binding for the tagged name (`inlN_N = 3`).
+  //   * a LAMBDA  (`f<inc>`): the body calls it (`F(v)`) — register the raw
+  //     name in func_param_bindings_ so the call dispatches (same seam as a
+  //     function-valued param).
+  //   * a TYPE    (`f<u8>`): the body uses it as a `:T` type slot (declare refs
+  //     renamed to `inlN_T`, bound via the named-type machinery) AND/OR as a
+  //     constructor cast (`T(a)` → generic_cast_binds_ so try_lower_typecast
+  //     reclassifies it against the concrete token).
   for (const auto& [g, gb] : gbinds) {
+    if (!gb.func_name.empty()) {
+      saved_func_bindings.emplace_back(
+          g, func_param_bindings_.count(g) != 0u ? std::optional<std::string>(func_param_bindings_[g]) : std::nullopt);
+      func_param_bindings_[g] = gb.func_name;
+      continue;
+    }
+    if (!gb.const_text.empty()) {
+      emit_inline_binding(upass::Lnast_manager::make_inlined_name(tag, g), Lnast_node::create_const(gb.const_text));
+      continue;
+    }
     if (gb.type_name.empty() && gb.kind == Io_kind::boolean) {
       emit_inline_typespec_bool(upass::Lnast_manager::make_inlined_name(tag, g));
     } else if (gb.type_name.empty() && (gb.max || gb.min)) {
       emit_inline_typespec_range(upass::Lnast_manager::make_inlined_name(tag, g), gb.max, gb.min);
+    }
+    // Constructor-cast token for a body `T(a)`. A named type is spelled
+    // verbatim; an integer/bool envelope maps back to its scalar token.
+    std::string cast_token;
+    if (!gb.type_name.empty()) {
+      cast_token = gb.type_name;
+    } else if (gb.kind == Io_kind::boolean) {
+      cast_token = "bool";
+    } else if (gb.max || gb.min) {
+      const bool is_signed = !(gb.min && !gb.min->is_negative());
+      int        bits      = 0;
+      if (gb.max && gb.max->is_integer()) {
+        if (!is_signed) {
+          bits = gb.max->is_known_zero() ? 0 : static_cast<int>(gb.max->get_bits() - 1);
+        } else {
+          const int mb = static_cast<int>(gb.max->get_bits());
+          const int nb = (gb.min && gb.min->is_integer()) ? static_cast<int>(gb.min->get_bits()) : mb;
+          bits         = std::max(mb, nb);
+        }
+      }
+      cast_token = (is_signed ? "s" : "u") + std::to_string(bits);
+    }
+    if (!cast_token.empty()) {
+      saved_cast_binds.emplace_back(
+          g, generic_cast_binds_.count(g) != 0u ? std::optional<std::string>(generic_cast_binds_[g]) : std::nullopt);
+      generic_cast_binds_[g] = cast_token;
     }
   }
   // An output may share the Pyrope name of an input (`comb f(x) -> (x)`):
@@ -3794,6 +3853,17 @@ bool uPass_runner::try_inline_func_call() {
     }
     inline_call_sites_.push_back(call_site_id);
   }
+  // A PROVIDED arg that also has a default: the body opens with a prologue
+  // `store(name, default)` (todo 3g E) — skip that one store so the actual bound
+  // in the param loop wins. Only the FIRST prologue store per name is dropped
+  // (a later body write to the same name is real). An OMITTED default is NOT in
+  // this set, so its prologue store runs and binds the default value.
+  absl::flat_hash_set<std::string> skip_default_stores;
+  for (std::size_t i = 0; i < nbind && i < io.inputs.size(); ++i) {
+    if (param_set[i] && io.inputs[i].has_default) {
+      skip_default_stores.insert(io.inputs[i].name);
+    }
+  }
   lm->push_source(callee, tag, salt);
   if (lm->move_to_child()) {
     if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_io) {
@@ -3801,6 +3871,20 @@ bool uPass_runner::try_inline_func_call() {
     }
     if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_stmts && lm->move_to_child()) {
       do {
+        if (!skip_default_stores.empty() && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_store) {
+          const auto  sc      = lm->save_cursor();
+          bool        skipped = false;
+          if (lm->move_to_child() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+            if (auto it = skip_default_stores.find(std::string(lm->current_raw_text())); it != skip_default_stores.end()) {
+              skip_default_stores.erase(it);
+              skipped = true;
+            }
+          }
+          lm->restore_cursor(sc);
+          if (skipped) {
+            continue;  // provided arg wins over its default prologue store
+          }
+        }
         process_lnast();
       } while (lm->move_to_sibling());
     }
@@ -3821,6 +3905,14 @@ bool uPass_runner::try_inline_func_call() {
       func_param_bindings_[key] = *old;
     } else {
       func_param_bindings_.erase(key);
+    }
+  }
+  // Restore the type-generic cast tokens shadowed by this frame.
+  for (const auto& [key, old] : saved_cast_binds) {
+    if (old) {
+      generic_cast_binds_[key] = *old;
+    } else {
+      generic_cast_binds_.erase(key);
     }
   }
 
@@ -4113,6 +4205,19 @@ void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Ln
     if (type_subst != nullptr) {
       if (auto it = type_subst->find(std::string(src->get_name(src_nid))); it != type_subst->end()) {
         const auto& gb = it->second;
+        // A CONSTANT-valued generic (`m<3>`): a body reference is a VALUE
+        // (`r = a + N`) — substitute the literal. D already rejected a constant
+        // in a type slot, so a body `ref N` is always a value here (todo 3g F).
+        if (!gb.const_text.empty()) {
+          dst->add_child(dst_parent, Lnast_node::create_const(gb.const_text));
+          return;
+        }
+        // A LAMBDA-valued generic (`m<inc>`): a body reference is a CALLEE
+        // (`F(v)`) — rename it to the bound function so the clone dispatches.
+        if (!gb.func_name.empty()) {
+          dst->add_child(dst_parent, Lnast_node::create_ref(gb.func_name));
+          return;
+        }
         if (!gb.type_name.empty()) {
           dst->add_child(dst_parent, Lnast_node::create_ref(gb.type_name));
           return;
@@ -4322,7 +4427,7 @@ void uPass_runner::emit_specialized_call(const std::string& dst, const std::stri
 
 absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resolve_generic_binds(
     const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io, const std::vector<Lnast_node>& param_val,
-    const std::vector<bool>& param_set, std::size_t nbind, const std::vector<std::string>& explicit_generics,
+    const std::vector<bool>& param_set, std::size_t nbind, const std::vector<Generic_actual>& explicit_generics,
     const std::string& callee_name, const livehd::diag::Span& call_span) {
   absl::flat_hash_map<std::string, Generic_bind> binds;
   const auto&                                    gens = callee->get_generics();
@@ -4381,18 +4486,153 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
     return gb;
   };
 
-  // 1) Explicit `<…>` bindings: declaration order, all-or-nothing.
+  // Resolve ONE explicit `<…>` argument. Unlike inference (types only), an
+  // explicit bind may be a type, a compile-time CONSTANT (`f<3>`), or a LAMBDA
+  // name (`f<inc>`) — todo 3g A. A leading digit / quote or a bool keyword can
+  // never be a type or lambda identifier, so classify on the first character;
+  // otherwise a registry function name is a lambda bind, and anything else is a
+  // type (named user type or a `'type'` tmp carrying an envelope).
+  const auto bind_of_explicit_arg = [&](const std::string& s, std::string from) -> Generic_bind {
+    const char c0 = s.empty() ? '\0' : s.front();
+    if (c0 == '\'' || c0 == '"') {
+      Generic_bind gb;
+      gb.from       = std::move(from);
+      gb.kind       = Io_kind::string;
+      gb.const_text = s;
+      return gb;
+    }
+    if (s == "true" || s == "false") {
+      Generic_bind gb;
+      gb.from       = std::move(from);
+      gb.kind       = Io_kind::boolean;
+      gb.max        = *Dlop::from_pyrope("1");
+      gb.min        = *Dlop::from_pyrope("0");
+      gb.const_text = s;
+      return gb;
+    }
+    if (std::isdigit(static_cast<unsigned char>(c0)) != 0) {
+      Generic_bind gb;
+      gb.from = std::move(from);
+      gb.kind = Io_kind::integer;
+      if (auto d = Dlop::from_pyrope(s)) {
+        gb.max = *d;  // a constant pins its own value as the type envelope (D)
+        gb.min = *d;
+      }
+      gb.const_text = s;
+      return gb;
+    }
+    if (lookup_callee(s) != nullptr) {
+      Generic_bind gb;
+      gb.from      = std::move(from);
+      gb.func_name = s;
+      return gb;
+    }
+    return bind_of_type_name(s, std::move(from));
+  };
+
+  // A generic left unbound by the call takes its DECLARATION default (`<T,
+  // N=1>`, todo 3g B): the default text is re-classified exactly like an
+  // explicit `<…>` argument (type / constant / lambda).
+  const auto& gdefaults    = callee->get_generic_defaults();
+  const auto  apply_defaults = [&]() {
+    for (std::size_t i = 0; i < gens.size(); ++i) {
+      if (binds.count(gens[i]) != 0u) {
+        continue;
+      }
+      const std::string def = (i < gdefaults.size()) ? gdefaults[i] : std::string{};
+      if (!def.empty()) {
+        binds[gens[i]] = bind_of_explicit_arg(def, std::format("the default for generic `{}`", gens[i]));
+      }
+    }
+  };
+
+  // D — kind validation: a generic bound to a CONSTANT (`f<3>`) or a LAMBDA
+  // (`f<inc>`) may NOT stand where a type is required — a param/output `:G`
+  // slot. A constant/lambda is not a type; silently ignoring the annotation
+  // (compiling `f<3>(a:N)` to a plain passthrough) is the one wrong answer (todo
+  // 3g D). Value/lambda/default uses (`a + N`, `F(v)`, `in2=N`) stay legal.
+  const auto validate_kinds = [&]() {
+    for (const auto& [g, gb] : binds) {
+      if (gb.const_text.empty() && gb.func_name.empty()) {
+        continue;  // a type bind is fine in a type slot
+      }
+      const auto in_type_slot = [&](const std::vector<Lnast_io_entry>& es) {
+        return std::any_of(es.begin(), es.end(), [&](const Lnast_io_entry& e) { return e.type_name == g; });
+      };
+      if (in_type_slot(io.inputs) || in_type_slot(io.outputs)) {
+        const std::string what = gb.func_name.empty() ? "constant" : "lambda";
+        fcall_arg_fail(
+            call_span,
+            "fcall-generic-kind",
+            std::format("generic `{}` of `{}` is bound to a {} but is used as a type (a `:{}` param/output) — a {} is not a type",
+                        g, callee_name, what, g, what),
+            "bind a type there (e.g. `f<u8>`), or use the generic only as a value/lambda in the body");
+      }
+    }
+  };
+
+  // 1) Explicit `<…>` bindings — named and/or positional, following the same
+  // argument-naming rules as call arguments (todo 3g C). NAMED binds (`f<T=u8>`)
+  // bind by name; POSITIONAL binds fill the remaining generics in declaration
+  // order. A PARTIAL list is legal when the still-unbound generics carry
+  // declaration defaults (todo 3g B). Binding MORE than declared is an error.
   if (!explicit_generics.empty()) {
-    if (explicit_generics.size() != gens.size()) {
+    if (explicit_generics.size() > gens.size()) {
       fcall_arg_fail(
           call_span,
           "fcall-generic-arity",
           std::format("`{}` declares {} generic parameter(s) but the call binds {}", callee_name, gens.size(), explicit_generics.size()),
-          "bind one type per generic name, in declaration order");
+          "bind at most one type per generic name");
     }
-    for (std::size_t i = 0; i < gens.size(); ++i) {
-      binds[gens[i]] = bind_of_type_name(explicit_generics[i], std::format("the explicit `<…>` argument {}", i + 1));
+    // Named binds first: validate the name is a generic and not already bound.
+    for (const auto& ga : explicit_generics) {
+      if (ga.name.empty()) {
+        continue;
+      }
+      if (std::find(gens.begin(), gens.end(), ga.name) == gens.end()) {
+        fcall_arg_fail(call_span,
+                       "fcall-generic-name",
+                       std::format("`{}` has no generic parameter `{}`", callee_name, ga.name),
+                       "name one of the declared generics, or bind positionally");
+      }
+      if (binds.count(ga.name) != 0u) {
+        fcall_arg_fail(call_span,
+                       "fcall-generic-name",
+                       std::format("generic `{}` of `{}` is bound more than once", ga.name, callee_name),
+                       "bind each generic at most once");
+      }
+      binds[ga.name] = bind_of_explicit_arg(ga.value, std::format("the named bind `{}=…`", ga.name));
     }
+    // Positional binds fill the generics not taken by a name, in decl order.
+    std::size_t pos = 0;
+    for (const auto& ga : explicit_generics) {
+      if (!ga.name.empty()) {
+        continue;
+      }
+      while (pos < gens.size() && binds.count(gens[pos]) != 0u) {
+        ++pos;
+      }
+      if (pos >= gens.size()) {
+        fcall_arg_fail(call_span,
+                       "fcall-generic-arity",
+                       std::format("`{}` has no free generic slot for a positional bind", callee_name),
+                       "bind the remaining generics by name");
+      }
+      binds[gens[pos]] = bind_of_explicit_arg(ga.value, std::format("the explicit `<…>` argument {}", pos + 1));
+      ++pos;
+    }
+    apply_defaults();
+    // With an explicit list present, an unbound generic with no default is a
+    // hard miss (we do not fall back to actual-type inference here).
+    for (const auto& g : gens) {
+      if (binds.count(g) == 0u) {
+        fcall_arg_fail(call_span,
+                       "fcall-generic-arity",
+                       std::format("generic `{}` of `{}` is unbound and has no default", g, callee_name),
+                       std::format("bind it in the `<…>` list or declare a default `<{}=…>`", g));
+      }
+    }
+    validate_kinds();
     return binds;
   }
 
@@ -4510,6 +4750,10 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
     }
     unify(e.type_name, std::move(cand));
   }
+  // A generic that inference did not reach falls to its declaration default
+  // (`comb addn<T, N=1>(a:T)` called `addn(a=x)` — T inferred, N defaulted).
+  apply_defaults();
+  validate_kinds();
   return binds;
 }
 
@@ -4700,6 +4944,29 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
     }
   }
 
+  // Non-type binds — a CONSTANT (`m<3>`) or LAMBDA (`m<inc>`) generic used as a
+  // value/callee in the body (todo 3g F) rides no typed port, so it never
+  // reached `suffix` above. Append a stable `G_<token>` per such bind, in
+  // declaration order, so two distinct binds (`m<3>` vs `m<5>`, `m<inc>` vs
+  // `m<dec>`) produce distinct module names — otherwise the name-keyed dedup
+  // silently merges them onto one clone and mis-wires the second call site.
+  for (const auto& g : gens) {
+    auto it = gbinds.find(g);
+    if (it == gbinds.end()) {
+      continue;
+    }
+    const std::string tok = !it->second.const_text.empty() ? it->second.const_text : it->second.func_name;
+    if (tok.empty()) {
+      continue;  // a type bind already contributed its width/name token
+    }
+    std::string clean;
+    clean.reserve(tok.size());
+    for (char ch : tok) {
+      clean.push_back((std::isalnum(static_cast<unsigned char>(ch)) != 0) ? ch : '_');
+    }
+    suffix.push_back(std::format("{}_{}", g, clean));
+  }
+
   // Mangled module name: readable + deterministic, so identical signatures map
   // to one module (natural dedup keyed by name). The owning-unit prefix is kept
   // so tolg exact-matches and cross-unit names never collide.
@@ -4778,7 +5045,7 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
 // ── overload-gathering call dispatch (2f-overload) ────────────────────────────
 
 bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& actuals,
-                                  std::vector<std::string>& explicit_generics) {
+                                  std::vector<Generic_actual>& explicit_generics) {
   // Cursor MUST be on the callee ref (the func_call's 2nd child); the actuals
   // are its following siblings. The cursor is saved/restored here so this can
   // be called twice (overload probe + real bind) without disturbing the caller.
@@ -4842,14 +5109,21 @@ bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& 
         continue;
       }
       // Explicit generic binding — consumed here, never an actual. The value
-      // ref is frame-renamed text, so current_text(), not raw.
+      // ref is frame-renamed text, so current_text(), not raw. A NAMED bind
+      // (`f<T=u8>`, todo 3g C) carries the target generic name in a trailing
+      // const child; read it RAW (a source name, never frame-renamed).
       if (a.key == call_generic_arg_marker) {
         if (!lm->move_to_sibling()) {
           shape_ok = false;
           lm->restore_cursor(here);
           break;
         }
-        explicit_generics.emplace_back(lm->current_text());
+        Generic_actual ga;
+        ga.value = std::string(lm->current_text());
+        if (lm->move_to_sibling()) {
+          ga.name = std::string(lm->current_raw_text());
+        }
+        explicit_generics.push_back(std::move(ga));
         lm->restore_cursor(here);
         continue;
       }

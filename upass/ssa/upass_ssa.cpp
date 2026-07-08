@@ -394,6 +394,16 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast) {
         lnast->get_name(rhs_nid) == "...") {
       is_vararg = true;
     }
+    // Input DEFAULT (`comb f(in1:u4, in2=3)`, todo 3g E): the slot carries the
+    // `__default` sentinel; the value itself is a body-prologue store. Records
+    // io_meta.has_default so the comb inliner tolerates an omitted arg (and
+    // skips the prologue when the arg is provided).
+    bool has_default = false;
+    if (collect_is_ref && !rhs_nid.is_invalid() &&
+        Lnast_ntype::is_const(lnast->get_type(rhs_nid)) &&
+        lnast->get_name(rhs_nid) == "__default") {
+      has_default = true;
+    }
     // A NAMED type annotation (`self:t1`, `x:Point`) arrives as a
     // `ref` type child (prp2lnast emit_type_expr). Record the typename so the
     // inliner's typed-self does-check can resolve the declared fields.
@@ -408,6 +418,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast) {
     out.back().has_range = ti.has_range;
     out.back().range_min = ti.range_min;
     out.back().range_max = ti.range_max;
+    out.back().has_default = has_default;
   };
 
   if (!in_tup_nid.is_invalid()) {

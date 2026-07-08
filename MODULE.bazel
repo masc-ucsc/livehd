@@ -150,15 +150,16 @@ git_override(
 # LiveHD's core diag.hpp / parser.hpp); see //packages:prpparse.BUILD.
 # To bump the pin, recompute integrity via:
 #   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip | openssl dgst -sha256 -binary | base64
-# Pinned to 3776315 (top of tree).
+# Pinned to d903e4f (top of tree; carries the todo 3g B/C generics grammar —
+# declaration-defaults `<T, N=1>` + named binds `f<T=u8>`).
 # For local co-development swap this for:
 #   new_local_repository(name = "prpparse", build_file = "//packages:prpparse.BUILD", path = "../tree-sitter-pyrope/prpparse")
 http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-twiRA2jTW9WH71KC55h/rsDoYWneNf2Dkmevtxb72DY=",  # 3776315 (same archive as @tree_sitter_pyrope below)
-    strip_prefix = "tree-sitter-pyrope-3776315064eacd11cd174c1d83ac837014693066/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/3776315064eacd11cd174c1d83ac837014693066.zip"],
+    integrity = "sha256-26MZlKBM7/mRIMREu/qNdcdBgBk2c0NWB+7dMWjhyd8=",  # d903e4f (same archive as @tree_sitter_pyrope below)
+    strip_prefix = "tree-sitter-pyrope-d903e4fef7a35992c92af616803e260b82ebbfaf/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/d903e4fef7a35992c92af616803e260b82ebbfaf.zip"],
 )
 
 # tree-sitter runtime — the incremental-parsing C library (libtree-sitter).
@@ -191,9 +192,9 @@ http_archive(
 http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-twiRA2jTW9WH71KC55h/rsDoYWneNf2Dkmevtxb72DY=",  # 3776315 (same archive as @prpparse above)
-    strip_prefix = "tree-sitter-pyrope-3776315064eacd11cd174c1d83ac837014693066",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/3776315064eacd11cd174c1d83ac837014693066.zip"],
+    integrity = "sha256-26MZlKBM7/mRIMREu/qNdcdBgBk2c0NWB+7dMWjhyd8=",  # d903e4f (same archive as @prpparse above)
+    strip_prefix = "tree-sitter-pyrope-d903e4fef7a35992c92af616803e260b82ebbfaf",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/d903e4fef7a35992c92af616803e260b82ebbfaf.zip"],
 )
 # LOCAL OVERRIDE for prpfmt co-development — swap the http_archive above for:
 # new_local_repository(

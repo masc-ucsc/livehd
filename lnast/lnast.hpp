@@ -181,6 +181,13 @@ struct Lnast_io_entry {
   bool        has_range  = false;
   int64_t     range_min  = 0;
   int64_t     range_max  = 0;
+  // Input declared with a DEFAULT value (`comb f(in1:u4, in2=3)`, todo 3g E).
+  // The default expression is lowered as a body-prologue `store(name, expr)`
+  // (self-contained, so it survives func_extract and evaluates in param-tuple
+  // scope); this flag (from the io store's `__default` sentinel slot) lets the
+  // comb inliner (a) not error when the arg is omitted and (b) skip the
+  // prologue store when the arg IS provided so the actual wins. Comb-only.
+  bool        has_default = false;
 };
 struct Lnast_tree_io {
   std::vector<Lnast_io_entry> inputs;
@@ -272,6 +279,12 @@ private:
   // in a follow-up goal; this only preserves the names so a template carrying
   // generics is detected and its mangling reserved).
   std::vector<std::string>                         generics_;
+  // Declaration DEFAULT for each generic (`<T, N=1>`, todo 3g B), aligned with
+  // generics_ (empty string = no default). The stored text is the default's
+  // source form (a type `u8`, a constant `1`, or a lambda name `inc`) — the
+  // runner re-classifies it exactly like an explicit `<…>` argument when the
+  // generic is left unbound at a call site.
+  std::vector<std::string>                         generic_defaults_;
   // The file's `pub` export list, recorded by prp2lnast on the
   // file-level (top) Lnast. kind is "value" for `pub const`/`pub comptime`
   // declarations or the lambda kind ("comb"/"mod"/"pipe"/"fluid") for
@@ -525,6 +538,8 @@ public:
   void set_generics(std::vector<std::string> g) { generics_ = std::move(g); }
   bool has_generics() const noexcept { return !generics_.empty(); }
   const std::vector<std::string>& get_generics() const noexcept { return generics_; }
+  void set_generic_defaults(std::vector<std::string> g) { generic_defaults_ = std::move(g); }
+  const std::vector<std::string>& get_generic_defaults() const noexcept { return generic_defaults_; }
 
   // ── pub export list (recorded by prp2lnast on file-level trees) ─
   const std::vector<Lnast_pub_entry>& get_pub_list() const noexcept { return pub_list_; }

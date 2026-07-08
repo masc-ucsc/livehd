@@ -563,6 +563,33 @@ void prp_collect_sig_targets(const Lnast* ln, const Lnast_nid& node, absl::flat_
     prp_collect_sig_targets(ln, c, out);
   }
 }
+
+// The generic parameter names of a func_def (`comb f<T, N>(…)`): the direct
+// `ref` children of its generics tuple (func_def child index 2 — see
+// process_lambda: name, kind, generics, inputs, outputs, body). A generic
+// binds a comptime entity (type / constant / lambda) that is visible
+// throughout the body — exactly like a param for name-resolution purposes
+// (todo 3g subtask A), even though it carries no runtime value. Empty when the
+// lambda has no `<…>` clause.
+void prp_collect_generic_names(const Lnast* ln, const Lnast_nid& func_def, absl::flat_hash_set<std::string>& out) {
+  auto c = ln->get_first_child(func_def);  // name
+  if (c.is_invalid()) {
+    return;
+  }
+  c = ln->get_sibling_next(c);  // kind const
+  if (c.is_invalid()) {
+    return;
+  }
+  c = ln->get_sibling_next(c);  // generics tuple_add
+  if (c.is_invalid() || !Lnast_ntype::is_tuple_add(ln->get_type(c))) {
+    return;
+  }
+  for (auto g = ln->get_first_child(c); !g.is_invalid(); g = ln->get_sibling_next(g)) {
+    if (Lnast_ntype::is_ref(ln->get_type(g))) {
+      out.insert(std::string(ln->get_name(g)));
+    }
+  }
+}
 }  // namespace
 
 void Prp2lnast::check_undeclared_writes() const {
@@ -852,6 +879,10 @@ bool Prp2lnast::read_is_visible(const Read_site& rs) const {
       if (Lnast_ntype::is_func_def(pt)) {
         absl::flat_hash_set<std::string> sig;
         prp_collect_sig_targets(lnast.get(), p, sig);
+        // Generic names (`comb f<T>(…)`) are visible in the body too — as a
+        // type (`mut tmp:T`), a value (`a + N`), or a callee (`T(a)`, `F(v)`);
+        // the runner substitutes the bound entity per call site (todo 3g A).
+        prp_collect_generic_names(lnast.get(), p, sig);
         if (sig.contains(rs.name)) {
           return true;
         }
@@ -3496,39 +3527,64 @@ std::vector<Prp2lnast::Call_arg> Prp2lnast::collect_call_args(TSNode arg_tuple) 
   return call_args;
 }
 
-std::vector<Lnast_node> Prp2lnast::collect_generic_args(TSNode call_node) {
+std::vector<Prp2lnast::Generic_call_arg> Prp2lnast::collect_generic_args(TSNode call_node) {
   // Explicit call-site generic bindings (`f<int,string>(…)`, grammar field
   // `generic` → generic_type_list). Lower each type argument BEFORE the
   // fcall node is created: a primitive/constrained type becomes a
   // `declare(tmp, prim_type_*, 'type')` statement (the int-type-call shape —
   // see does_operand_to_node) whose ref rides the marker; a named type
-  // passes its ref through directly.
-  std::vector<Lnast_node> out;
-  TSNode                  gen = child_by_field(call_node, "generic");
+  // passes its ref through directly. A NAMED bind (`f<T=u8>`, todo 3g C)
+  // arrives as an `arg_assignment` (lvalue=name, rvalue=type): the name rides
+  // alongside the lowered value.
+  std::vector<Generic_call_arg> out;
+  TSNode                        gen = child_by_field(call_node, "generic");
   if (ts_node_is_null(gen)) {
     return out;
   }
-  for (TSNode ty : ts_node_named_children(gen)) {
+  // Lower one type-argument node (`u8`, `3`, `Byte`, `inc`) into a ref/const.
+  auto lower_one = [&](TSNode ty) -> Lnast_node {
     std::string_view tt(ts_node_type(ty));
     if (tt == "expression_type" || tt == "dot_expression_type") {
-      out.emplace_back(Lnast_node::create_ref(trim(get_text(ty))));
-      continue;
+      auto txt = trim(get_text(ty));
+      // A CONSTANT-valued generic (`f<3>`, `f<true>`, `f<'s'>`) rides as a
+      // const, not a ref — a ref named `3` is malformed (lnastfmt) and the
+      // runner substitutes the literal for body reads of the generic (todo 3g
+      // A/D). A named type / lambda stays a ref (resolved at bind time).
+      const char c0 = txt.empty() ? '\0' : txt.front();
+      const bool is_const_arg
+          = std::isdigit(static_cast<unsigned char>(c0)) || c0 == '\'' || c0 == '"' || txt == "true" || txt == "false";
+      return is_const_arg ? Lnast_node::create_const(std::string(txt)) : Lnast_node::create_ref(std::string(txt));
     }
     auto didx = builder.add_child(Lnast_ntype::create_declare());
     auto tref = builder.mint_tmp_ref();
     lnast->add_child(didx, tref);
     emit_type_expr(didx, ty);
     lnast->add_child(didx, Lnast_node::create_const("type"));
-    out.emplace_back(tref);
+    return tref;
+  };
+  for (TSNode item : ts_node_named_children(gen)) {
+    if (std::string_view(ts_node_type(item)) == "arg_assignment") {
+      TSNode      lv = child_by_field(item, "lvalue");   // generic NAME
+      TSNode      rv = child_by_field(item, "rvalue");   // bound type/const/lambda
+      std::string nm = ts_node_is_null(lv) ? std::string{} : std::string(trim(get_text(lv)));
+      out.push_back({lower_one(rv), std::move(nm)});
+    } else {
+      out.push_back({lower_one(item), {}});
+    }
   }
   return out;
 }
 
-void Prp2lnast::add_generic_args_to_fcall(const Lnast_nid& fcall_idx, const std::vector<Lnast_node>& generic_args) {
+void Prp2lnast::add_generic_args_to_fcall(const Lnast_nid& fcall_idx, const std::vector<Generic_call_arg>& generic_args) {
   for (const auto& g : generic_args) {
     auto aidx = lnast->add_child(fcall_idx, Lnast_ntype::create_store());
     lnast->add_child(aidx, Lnast_node::create_ref(call_generic_arg_marker));
-    lnast->add_child(aidx, g);
+    lnast->add_child(aidx, g.value);
+    // A named bind carries the target generic name as a trailing const child;
+    // gather_actuals reads it to bind by name (todo 3g C).
+    if (!g.name.empty()) {
+      lnast->add_child(aidx, Lnast_node::create_const(g.name));
+    }
   }
 }
 
@@ -3828,7 +3884,15 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
       auto             add_one = [&](TSNode ti) {
         TSNode id = child_by_field(ti, "identifier");
         if (!ts_node_is_null(id)) {
-          lnast->add_child(gen_idx, Lnast_node::create_ref(get_text(id)));
+          auto gref = lnast->add_child(gen_idx, Lnast_node::create_ref(get_text(id)));
+          // A DECLARATION default (`<T, N=1>`, todo 3g B) rides as the default's
+          // source text in a `const` child of the generic ref: func_extract
+          // lifts it into Lnast::generic_defaults_, and the runner re-classifies
+          // it (type / constant / lambda) exactly like an explicit `<…>` arg.
+          TSNode def = child_by_field(ti, "definition");
+          if (!ts_node_is_null(def)) {
+            lnast->add_child(gref, Lnast_node::create_const(std::string(trim(get_text(def)))));
+          }
         }
       };
       if (ct == "typed_identifier_list") {
@@ -3857,6 +3921,11 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // output (the counter idiom). Collected here; a matching `reg` declare is
   // synthesized at body entry below so tolg lowers the output as a Flop.
   std::vector<std::pair<TSNode, TSNode>> output_regs;  // (typed_identifier, definition)
+  // Comb INPUT defaults (`comb f(in1:u4, in2=3)`, todo 3g E): (param name,
+  // default expr node), in declaration order. Lowered as a body-prologue
+  // `store(name, expr)` after the body stmts open (so the default evaluates in
+  // param-tuple scope — an EARLIER param is readable — and is self-contained).
+  std::vector<std::pair<std::string, TSNode>> input_defaults;
   auto                                   collect_args = [&](TSNode                    container,
                                                             const Lnast_nid&          parent_tup,
                                                             std::vector<std::string>* names_out,
@@ -3881,6 +3950,11 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
           inflight_name_scopes_.back().emplace_back(get_text(id));
           if (names_out) {
             names_out->emplace_back(get_text(id));
+          }
+          // A comb INPUT default rides to the body prologue (todo 3g E); the io
+          // slot only carries the `__default` sentinel (see emit_arg_assign).
+          if (!is_io_output && kind == "comb" && !ts_node_is_null(pending_def)) {
+            input_defaults.emplace_back(std::string(trim(get_text(id))), pending_def);
           }
         }
         // A `reg` modifier on an OUTPUT marks an output register
@@ -4015,6 +4089,22 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   auto saved_inflight_scopes = std::exchange(inflight_name_scopes_, {});
   auto body_idx              = lnast->add_child(fd_idx, Lnast_ntype::create_stmts());
   builder.push_stmts(body_idx);
+  // Comb INPUT defaults (todo 3g E): the FIRST body statements, in declaration
+  // order, so the default evaluates in param-tuple scope (an earlier param is
+  // already visible) and is self-contained (survives func_extract). At a call
+  // that OMITS the arg the inliner lets this `store(name, expr)` bind the param;
+  // when the arg is PROVIDED the inliner skips this store (the actual wins). A
+  // literal default like `store(in2, 3)` folds; an expression `b = a + 5` emits
+  // its tmp here too (not in the enclosing frame). Emitted before the reg/attr
+  // prologues below and the user body.
+  for (const auto& [pname, pdef] : input_defaults) {
+    // Lower the default FIRST (it may append a `%t = a + 5` tmp to the body),
+    // then the store that consumes it — so the tmp precedes its use.
+    auto val  = expr_to_node(pdef);
+    auto stix = lnast->add_child(body_idx, Lnast_ntype::create_store());
+    lnast->add_child(stix, Lnast_node::create_ref(canonical_escaped_ident(pname)));
+    lnast->add_child(stix, val);
+  }
   // Synthesize the body `reg` declare for each `-> (reg q:T)` output
   // register, the same cluster process_lvalue_for_assign emits for a body
   // `reg q:T = init` (the decl-merge folds it into declare(q, T, reg,
@@ -6199,7 +6289,16 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
   // collide. A var-arg never carries a default — the `...` marker WINS over any
   // (meaningless) `= expr` so downstream var-arg detection (which keys on the
   // sentinel) is never silently lost if the grammar admits `...args = e`.
+  // A comb INPUT default is lowered later as a body-prologue `store(name, expr)`
+  // (evaluated in param-tuple scope, self-contained → survives extraction, todo
+  // 3g E): the io slot only records that a default EXISTS via the `__default`
+  // sentinel (SSA turns it into io_meta.has_default). Emitting it here via
+  // expr_to_node would (for an expression default) pollute the ENCLOSING frame
+  // with a dangling tmp — so the sentinel replaces it. Outputs / mod / pipe keep
+  // the direct encoding.
+  const bool defer_default = !is_io_output && lambda_kind == "comb" && !is_vararg_mod && !ts_node_is_null(definition_or_null);
   Lnast_node arg_val = is_vararg_mod                          ? Lnast_node::create_const("...")
+                       : defer_default                        ? Lnast_node::create_const("__default")
                        : !ts_node_is_null(definition_or_null) ? expr_to_node(definition_or_null)
                        : is_ref_mod                           ? Lnast_node::create_const("ref")
                                                               : Lnast_node::create_const("nil");
@@ -6210,8 +6309,19 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
     TSNode ty = child_by_field(type_cast, "type");
     if (!ts_node_is_null(ty)) {
       // A literal default must match the declared scalar kind, exactly as a
-      // variable declaration `mut b:bool = 3` would (shared check).
-      check_decl_init_kind(trim(get_text(id)), arg_val, ty, type_cast);
+      // variable declaration `mut b:bool = 3` would (shared check). When the
+      // default was deferred to the body prologue (arg_val is the sentinel, not
+      // the literal), rebuild a lightweight const from the default's source text
+      // for the same check: a LITERAL (`3`, `true`) keeps its kind so
+      // `b:bool = 3` still errors; an EXPRESSION default (`a+5`) yields a const
+      // of unknown kind → the check no-ops (it is kind-checked when the prologue
+      // store lowers).
+      if (defer_default) {
+        auto lit = Lnast_node::create_const(std::string(trim(get_text(definition_or_null))));
+        check_decl_init_kind(trim(get_text(id)), lit, ty, type_cast);
+      } else {
+        check_decl_init_kind(trim(get_text(id)), arg_val, ty, type_cast);
+      }
       emit_arg_type(aidx, ty);
     }
     // Parameter-side attribute carrier (`a::[comptime]`, `a:T::[debug=2]`).

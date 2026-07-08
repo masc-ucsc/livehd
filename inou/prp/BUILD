@@ -161,10 +161,25 @@ cc_test(
             "//inou/prp:sim_runtime_hdrs",
             "//lhd",
         ],
-        # verif_requires + testbench_step + temporal_past now lower/run; the rest
-        # are still TBD. (temporal_past: `past[N](x)` lowers to a depth-N `stage`
-        # shift register — see prp2lnast function_call_expr_to_node.)
-        tags = [] if base in ("verif_requires", "testbench_step", "temporal_past") else ["fixme"],
+        # verif_requires + testbench_step + temporal_past now lower/run, as do the
+        # 3g subtask-A body-binding trackers (generic_{body_type,const_value,
+        # lambda_param} — a generic name is now visible+substituted in the body);
+        # the rest are still TBD. (temporal_past: `past[N](x)` lowers to a depth-N
+        # `stage` shift register — see prp2lnast function_call_expr_to_node.)
+        tags = [] if base in (
+            "verif_requires",
+            "testbench_step",
+            "temporal_past",
+            "generic_body_type",
+            "generic_const_value",
+            "generic_lambda_param",
+            "generic_default_arg",
+            "input_default",
+            # B/C land via the prpparse grammar (generic decl-defaults + named
+            # binds); they need the @prpparse local override / re-pinned commit.
+            "generic_decl_default",
+            "generic_named_bind",
+        ) else ["fixme"],
     )
     for base in [
         "temporal_past",
@@ -286,13 +301,6 @@ cc_direct_headers(
             # signed_one_bit_cmp: known-failing miscompile tracker (1-bit signed
             # ordered compare reads unsigned). Run via the fixme target below.
             "tests/equiv/signed_one_bit_cmp.prp",
-            # gen_type_cast: DELIBERATELY-broken generics repro — `T(a)` on a
-            # generic param is an unbound body reference (undefined-call; see
-            # the file header, tracked by 3g with the prp-tbd-generic_* family).
-            # It cannot compile, so the forward equiv test can never pass; run
-            # it via the fixme target below. The reverse direction is already
-            # fixme-tagged through _V2PRP_FIXME.
-            "tests/equiv/gen_type_cast.prp",
             # Known-failing semantic tracker. Run via the fixme target below.
             "tests/equiv/latch_enable_hold.prp",
             # NOTE: struct_init_whole_read / instance_conn_struct_ident /
@@ -324,29 +332,6 @@ sh_test(
         "//lhd",
     ],
     deps = ["//inou/yosys:scripts"],
-)
-
-# Known-failing equiv tracker (fixme): gen_type_cast.prp is a DELIBERATELY-broken
-# generics repro — the `T(a)` constructor on a generic parameter is an unbound
-# body reference and fails name resolution (undefined-call; see the file header,
-# tracked by 3g alongside the prp-tbd-generic_* compile trackers — this pair
-# additionally LEC-checks the lowering against a golden once it lands). The .prp
-# cannot compile, so the forward equiv pair can never pass. Excluded from the
-# glob above; tagged `fixme` so `bazel test //... (-fixme)` stays green. Run it:
-#   bazel test //inou/prp:prp-equiv-gen_type_cast --test_tag_filters=
-sh_test(
-    name = "prp-equiv-gen_type_cast",
-    srcs = ["tests/pyrope_test.py"],
-    args = ["-i", "$(location //inou/prp:tests/equiv/gen_type_cast.prp)"],
-    data = [
-        "//inou/prp:tests/prplib.py",
-        "//inou/prp:tests/pyrope_test.py",
-        "//inou/prp:tests/equiv/gen_type_cast.prp",
-        "//inou/prp:tests/equiv/gen_type_cast.v",
-        "//lhd",
-    ],
-    deps = ["//inou/yosys:scripts"],
-    tags = ["fixme"],
 )
 
 [
@@ -399,11 +384,6 @@ sh_test(
 # green is the fix:
 #   bazel test //inou/prp:prp-v2prp-mem_rom --test_tag_filters=
 _V2PRP_FIXME = [
-    # the original .prp is a DELIBERATELY-broken generics repro (the `T(a)`
-    # constructor does not lower — see the file header); the emitted Pyrope is
-    # correct, but the reference itself will not compile, so it cannot be the LEC
-    # ref. Tracked by 3g (generics).
-    "gen_type_cast",
     # Known-failing semantic tracker: latch inference does not have a supported
     # Pyrope source equivalent yet.
     # async_reset_enable was PROMOTED out of this list (2026-07-03): the slang
@@ -671,7 +651,7 @@ _SIMEQ = [
     "bitset_reg", "clz_nest", "codeblock_expr", "comb_single_out_op", "cond_modified_read",
     "condout_const_arms", "condout_mixed_arms", "condout_seed_uncertain", "dyn_tuple_const",
     "dyn_tuple_idxexpr", "dyn_tuple_mixed", "dyn_tuple_mut_ro", "dyn_tuple_pair",
-    "dyn_tuple_sel", "flop_reset_matrix", "generic_mod", "hier_value", "hotmux_match", "hotmux_match_partial",
+    "dyn_tuple_sel", "flop_reset_matrix", "gen_type_cast", "generic_mod", "hier_value", "hotmux_match", "hotmux_match_partial",
     "hotmux_unique", "if_expr_rhs", "implies_cond", "implies_ops", "lead_or_chain", "lg_rename", "loop_accum",
     "match_const_else", "match_no_else", "mem_const_idx", "mem_init", "mem_init_scalar",
     "mem_init_tuple", "mem_pending_sync_init", "mem_rom", "mem_whole_cond_const",
@@ -716,12 +696,10 @@ _SIMEQ = [
 #       to a synchronous reset (async-reset-as-sync), and the _tb.prp import
 #       binding no longer collides with the `pipe` keyword (gen_equiv_tb.py
 #       PRP_KEYWORDS guard -> `pipe_`).
-#   * gen_type_cast : pre-existing fixme DUT (the deliberately-broken generics
-#       `T(a)` repro).
+#   * gen_type_cast (NOW FIXED, promoted to _SIMEQ): the generic `T(a)`
+#       constructor cast now binds+lowers (todo 3g subtask A).
 # Run one: bazel test //inou/prp:prp-simeq-sim_lg_atomic_feedback --test_tag_filters=
-_SIMEQ_FIXME = [
-    "gen_type_cast",
-]
+_SIMEQ_FIXME = []
 
 [
     sh_test(

@@ -1,12 +1,14 @@
 /*
 :name: generic_arity
 :type: error
-:error: declares 2 generic parameter\(s\) but the call binds 1
-:help: one type per generic name
+:error: generic .T2. of .two. is unbound and has no default
+:help: declare a default
 */
 
-// 2f-generics — an explicit `<…>` binding list is all-or-nothing: one type
-// per generic name, in declaration order.
+// 3g-generics — an explicit `<…>` binding list may be PARTIAL (named and/or
+// positional, todo 3g B/C), but every generic must end up bound: by an explicit
+// bind, or by a declaration default (`<T2=…>`). Here `two<signed>` binds T1
+// positionally and leaves T2 with no bind and no default — a hard miss.
 
 comb two<T1,T2>(a:T1, b:T2) -> (c:T1) { c = a }
 cassert(two<signed>(a=7, b="x") == 7)

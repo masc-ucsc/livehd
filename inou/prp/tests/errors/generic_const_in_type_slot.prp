@@ -1,0 +1,20 @@
+/*
+:name: generic_const_in_type_slot
+:type: error
+:error: bound to a constant but is used as a type
+:help: bind a type there
+*/
+
+// 3g-generics subtask D — kind validation. A generic may bind a type, a
+// compile-time constant, or a lambda, but a CONSTANT (`f<3>`) may not stand
+// where a TYPE is required — a param/output `:G` type slot. Silently compiling
+// `f<3>(a:N)` to a plain passthrough (ignoring the `:N` annotation) is the one
+// wrong answer; the binding is rejected as a kind mismatch instead. (A constant
+// generic used as a VALUE — `r = a + N` — stays legal; see generic_const_value.)
+
+comb f<N>(a:N) -> (r:N) {
+  r = a
+}
+pub comb top(x:u8) -> (r:u8) {
+  r = f<3>(a=x)
+}
