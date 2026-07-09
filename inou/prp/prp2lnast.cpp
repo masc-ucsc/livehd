@@ -255,8 +255,7 @@ std::string_view Prp2lnast::text_between(uint32_t start, uint32_t end) const {
   return std::string_view(prp_file).substr(start, end - start);
 }
 
-void Prp2lnast::report_error(const TSNode& node, std::string_view code, std::string_view category, std::string message,
-                             std::string_view hint) const {
+livehd::diag::Span Prp2lnast::span_of_node(const TSNode& node) const {
   livehd::diag::Span span;
   span.file       = src_filename;
   span.start_byte = ts_node_start_byte(node);
@@ -267,7 +266,11 @@ void Prp2lnast::report_error(const TSNode& node, std::string_view code, std::str
   span.start_col  = sp.column + 1;
   span.end_line   = ep.row + 1;
   span.end_col    = ep.column + 1;
+  return span;
+}
 
+void Prp2lnast::stage_error(livehd::diag::Span span, std::string_view code, std::string_view category, std::string message,
+                            std::string_view hint) const {
   auto msg_copy = message;
   // Stage the rich record; the throw path (parser_error_int -> sink.flush) emits
   // it exactly once and prints the `livehd: error:` line.
@@ -281,6 +284,11 @@ void Prp2lnast::report_error(const TSNode& node, std::string_view code, std::str
   throw Eprp::parser_error(Pass::eprp, msg_copy);
 }
 
+void Prp2lnast::report_error(const TSNode& node, std::string_view code, std::string_view category, std::string message,
+                             std::string_view hint) const {
+  stage_error(span_of_node(node), code, category, std::move(message), hint);
+}
+
 void Prp2lnast::report_error_at(uint32_t start_byte, uint32_t end_byte, uint32_t start_line, uint32_t start_col,
                                 uint32_t end_line, uint32_t end_col, std::string_view code, std::string_view category,
                                 std::string message, std::string_view hint) const {
@@ -292,31 +300,11 @@ void Prp2lnast::report_error_at(uint32_t start_byte, uint32_t end_byte, uint32_t
   span.start_col  = start_col;
   span.end_line   = end_line;
   span.end_col    = end_col;
-
-  auto msg_copy = message;
-  livehd::diag::sink().stage(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
-                                                      .code     = std::string(code),
-                                                      .category = std::string(category),
-                                                      .pass     = "inou.prp",
-                                                      .message  = std::move(message),
-                                                      .span     = std::move(span),
-                                                      .hint     = std::string(hint)});
-  throw Eprp::parser_error(Pass::eprp, msg_copy);
+  stage_error(std::move(span), code, category, std::move(message), hint);
 }
 
 void Prp2lnast::report_warning(const TSNode& node, std::string_view code, std::string_view category, std::string message,
                                std::string_view hint) const {
-  livehd::diag::Span span;
-  span.file       = src_filename;
-  span.start_byte = ts_node_start_byte(node);
-  span.end_byte   = ts_node_end_byte(node);
-  auto sp         = ts_node_start_point(node);
-  auto ep         = ts_node_end_point(node);
-  span.start_line = sp.row + 1;
-  span.start_col  = sp.column + 1;
-  span.end_line   = ep.row + 1;
-  span.end_col    = ep.column + 1;
-
   // A warning never aborts the parse — emit it straight to the sink (which
   // writes the configured JSONL/human channels) and continue lowering.
   livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::warning,
@@ -324,7 +312,7 @@ void Prp2lnast::report_warning(const TSNode& node, std::string_view code, std::s
                                                      .category = std::string(category),
                                                      .pass     = "inou.prp",
                                                      .message  = std::move(message),
-                                                     .span     = std::move(span),
+                                                     .span     = span_of_node(node),
                                                      .hint     = std::string(hint)});
 }
 
@@ -465,14 +453,7 @@ void Prp2lnast::check_decl_init_kind(std::string_view name, const Lnast_node& va
 
 
 void Prp2lnast::report_error(std::string_view code, std::string_view category, std::string message, std::string_view hint) const {
-  auto msg_copy = message;
-  livehd::diag::sink().stage(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
-                                                      .code     = std::string(code),
-                                                      .category = std::string(category),
-                                                      .pass     = "inou.prp",
-                                                      .message  = std::move(message),
-                                                      .hint     = std::string(hint)});
-  throw Eprp::parser_error(Pass::eprp, msg_copy);
+  stage_error(livehd::diag::Span{}, code, category, std::move(message), hint);  // location-less (span = null)
 }
 
 void Prp2lnast::report_prpparse_error(const prpparse::Diag& d) const {
@@ -491,14 +472,8 @@ void Prp2lnast::report_prpparse_error(const prpparse::Diag& d) const {
   if (hint.empty() && !d.notes.empty()) {
     hint = d.notes.front().message;
   }
-  livehd::diag::sink().stage(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
-                                                      .code     = d.code,
-                                                      .category = d.category.empty() ? std::string("syntax") : d.category,
-                                                      .pass     = "inou.prp",
-                                                      .message  = d.message,
-                                                      .span     = std::move(span),
-                                                      .hint     = std::move(hint)});
-  throw Eprp::parser_error(Pass::eprp, d.message);
+  stage_error(std::move(span), d.code, d.category.empty() ? std::string_view("syntax") : std::string_view(d.category), d.message,
+              hint);
 }
 
 void Prp2lnast::report_error(const Lnast_nid& nid, std::string_view code, std::string_view category, std::string message,
@@ -507,16 +482,7 @@ void Prp2lnast::report_error(const Lnast_nid& nid, std::string_view code, std::s
   if (span.is_null()) {
     report_error(code, category, std::move(message), hint);  // no attached span — fall back to location-less
   }
-
-  auto msg_copy = message;
-  livehd::diag::sink().stage(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
-                                                      .code     = std::string(code),
-                                                      .category = std::string(category),
-                                                      .pass     = "inou.prp",
-                                                      .message  = std::move(message),
-                                                      .span     = std::move(span),
-                                                      .hint     = std::string(hint)});
-  throw Eprp::parser_error(Pass::eprp, msg_copy);
+  stage_error(std::move(span), code, category, std::move(message), hint);
 }
 
 namespace {

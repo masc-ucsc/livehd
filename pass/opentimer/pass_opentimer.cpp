@@ -87,6 +87,51 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
 
   std::string line;
 
+  // Shared parse+dispatch for the port-constraint directives (set_input_delay,
+  // set_input_transition, set_output_delay): pull the [get_ports XX] name, then
+  // apply `value` across the min/max × rise/fall corners selected by the
+  // -min/-max/-rise/-fall flags. A bare -min/-max covers both edges; no flag
+  // covers all four corners. `set(pname, split, tran, value)` is the ot::Timer
+  // setter (set_at / set_slew / set_rat). Keeping this in one place avoids the
+  // copy-paste corner mistakes the three inlined ladders had accumulated.
+  auto apply_port_corners = [&](const std::vector<std::string>& line_vec, std::string_view directive, float value,
+                                const auto& set) {
+    std::string pname;
+    for (std::size_t i = 2; i < line_vec.size(); i++) {
+      if (line_vec[i] == "[get_ports") {
+        pname = line_vec[++i];
+        pname.pop_back();
+      }
+    }
+    if (pname.empty()) {
+      livehd::diag::err("pass.opentimer", "sdc-unsupported", "unsupported")
+          .msg("SDC file {} {} only supports [get_ports XX] syntax not {}", sdc_file, directive, line)
+          .fatal();
+    }
+    const std::string& lo = line_vec[2];
+    const std::string  hi = line_vec.size() > 3 ? line_vec[3] : std::string();
+    if (lo == "-min" && hi == "-rise") {
+      set(pname, ot::MIN, ot::RISE, value);
+    } else if (lo == "-min" && hi == "-fall") {
+      set(pname, ot::MIN, ot::FALL, value);
+    } else if (lo == "-max" && hi == "-rise") {
+      set(pname, ot::MAX, ot::RISE, value);
+    } else if (lo == "-max" && hi == "-fall") {
+      set(pname, ot::MAX, ot::FALL, value);
+    } else if (lo == "-max") {
+      set(pname, ot::MAX, ot::FALL, value);
+      set(pname, ot::MAX, ot::RISE, value);
+    } else if (lo == "-min") {
+      set(pname, ot::MIN, ot::FALL, value);
+      set(pname, ot::MIN, ot::RISE, value);
+    } else {
+      set(pname, ot::MIN, ot::FALL, value);
+      set(pname, ot::MIN, ot::RISE, value);
+      set(pname, ot::MAX, ot::FALL, value);
+      set(pname, ot::MAX, ot::RISE, value);
+    }
+  };
+
   while (std::getline(file, line)) {
     std::vector<std::string> line_vec = absl::StrSplit(line, ' ', absl::SkipWhitespace());
 
@@ -103,108 +148,14 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       timer.create_clock(pname, period);
 
     } else if (line_vec[0] == "set_input_delay") {
-      std::string pname;
-      float       delay = std::stof(line_vec[1], nullptr);
-      for (std::size_t i = 2; i < line_vec.size(); i++) {
-        if (line_vec[i] == "[get_ports") {
-          pname = line_vec[++i];
-          pname.pop_back();
-        }
-      }
-      if (pname.empty()) {
-        livehd::diag::err("pass.opentimer", "sdc-unsupported", "unsupported")
-            .msg("SDC file {} set_input_delay only supports [get_ports XX] syntax not {}", sdc_file, line)
-            .fatal();
-      }
-      if (line_vec[2] == "-min" && line_vec[3] == "-rise") {
-        timer.set_at(pname, ot::MIN, ot::RISE, delay);
-      } else if (line_vec[2] == "-min" && line_vec[3] == "-fall") {
-        timer.set_at(pname, ot::MIN, ot::FALL, delay);
-      } else if (line_vec[2] == "-max" && line_vec[3] == "-rise") {
-        timer.set_at(pname, ot::MAX, ot::RISE, delay);
-      } else if (line_vec[2] == "-max" && line_vec[3] == "-fall") {
-        timer.set_at(pname, ot::MIN, ot::FALL, delay);
-      } else if (line_vec[2] == "-max") {
-        timer.set_at(pname, ot::MAX, ot::FALL, delay);
-        timer.set_at(pname, ot::MAX, ot::RISE, delay);
-      } else if (line_vec[2] == "-min") {
-        timer.set_at(pname, ot::MIN, ot::FALL, delay);
-        timer.set_at(pname, ot::MIN, ot::RISE, delay);
-      } else {
-        timer.set_at(pname, ot::MIN, ot::FALL, delay);
-        timer.set_at(pname, ot::MIN, ot::RISE, delay);
-        timer.set_at(pname, ot::MAX, ot::FALL, delay);
-        timer.set_at(pname, ot::MAX, ot::RISE, delay);
-      }
+      apply_port_corners(line_vec, "set_input_delay", std::stof(line_vec[1], nullptr),
+                         [&](const std::string& p, auto split, auto tran, float v) { timer.set_at(p, split, tran, v); });
     } else if (line_vec[0] == "set_input_transition") {
-      std::string pname;
-      float       delay = std::stof(line_vec[1], nullptr);
-      for (std::size_t i = 2; i < line_vec.size(); i++) {
-        if (line_vec[i] == "[get_ports") {
-          pname = line_vec[++i];
-          pname.pop_back();
-        }
-      }
-      if (pname.empty()) {
-        livehd::diag::err("pass.opentimer", "sdc-unsupported", "unsupported")
-            .msg("SDC file {} set_input_transition only supports [get_ports XX] syntax not {}", sdc_file, line)
-            .fatal();
-      }
-      if (line_vec[2] == "-min" && line_vec[3] == "-rise") {
-        timer.set_slew(pname, ot::MIN, ot::RISE, delay);
-      } else if (line_vec[2] == "-min" && line_vec[3] == "-fall") {
-        timer.set_slew(pname, ot::MIN, ot::FALL, delay);
-      } else if (line_vec[2] == "-max" && line_vec[3] == "-rise") {
-        timer.set_slew(pname, ot::MAX, ot::RISE, delay);
-      } else if (line_vec[2] == "-max" && line_vec[3] == "-fall") {
-        timer.set_slew(pname, ot::MIN, ot::FALL, delay);
-      } else if (line_vec[2] == "-max") {
-        timer.set_slew(pname, ot::MAX, ot::FALL, delay);
-        timer.set_slew(pname, ot::MAX, ot::RISE, delay);
-      } else if (line_vec[2] == "-max") {
-        timer.set_slew(pname, ot::MIN, ot::FALL, delay);
-        timer.set_slew(pname, ot::MIN, ot::RISE, delay);
-      } else {
-        timer.set_slew(pname, ot::MAX, ot::FALL, delay);
-        timer.set_slew(pname, ot::MAX, ot::RISE, delay);
-        timer.set_slew(pname, ot::MIN, ot::FALL, delay);
-        timer.set_slew(pname, ot::MIN, ot::RISE, delay);
-      }
-
+      apply_port_corners(line_vec, "set_input_transition", std::stof(line_vec[1], nullptr),
+                         [&](const std::string& p, auto split, auto tran, float v) { timer.set_slew(p, split, tran, v); });
     } else if (line_vec[0] == "set_output_delay") {
-      std::string pname;
-      float       delay = std::stof(line_vec[1], nullptr);
-      for (std::size_t i = 2; i < line_vec.size(); i++) {
-        if (line_vec[i] == "[get_ports") {
-          pname = line_vec[++i];
-          pname.pop_back();
-        }
-      }
-      if (pname.empty()) {
-        livehd::diag::err("pass.opentimer", "sdc-unsupported", "unsupported")
-            .msg("SDC file {} set_output_delay only supports [get_ports XX] syntax not {}", sdc_file, line)
-            .fatal();
-      }
-      if (line_vec[2] == "-min" && line_vec[3] == "-rise") {
-        timer.set_rat(pname, ot::MIN, ot::RISE, delay);
-      } else if (line_vec[2] == "-min" && line_vec[3] == "-fall") {
-        timer.set_rat(pname, ot::MIN, ot::FALL, delay);
-      } else if (line_vec[2] == "-max" && line_vec[3] == "-rise") {
-        timer.set_rat(pname, ot::MAX, ot::RISE, delay);
-      } else if (line_vec[2] == "-max" && line_vec[3] == "-fall") {
-        timer.set_rat(pname, ot::MIN, ot::FALL, delay);
-      } else if (line_vec[2] == "-max") {
-        timer.set_rat(pname, ot::MAX, ot::FALL, delay);
-        timer.set_rat(pname, ot::MAX, ot::RISE, delay);
-      } else if (line_vec[2] == "-min") {
-        timer.set_rat(pname, ot::MIN, ot::FALL, delay);
-        timer.set_rat(pname, ot::MIN, ot::RISE, delay);
-      } else {
-        timer.set_rat(pname, ot::MAX, ot::FALL, delay);
-        timer.set_rat(pname, ot::MAX, ot::RISE, delay);
-        timer.set_rat(pname, ot::MIN, ot::FALL, delay);
-        timer.set_rat(pname, ot::MIN, ot::RISE, delay);
-      }
+      apply_port_corners(line_vec, "set_output_delay", std::stof(line_vec[1], nullptr),
+                         [&](const std::string& p, auto split, auto tran, float v) { timer.set_rat(p, split, tran, v); });
     }
   }
   file.close();

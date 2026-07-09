@@ -15,6 +15,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "diag.hpp"
 #include "lnast.hpp"
 #include "lnast_builder.hpp"
 #include "lnast_ntype.hpp"
@@ -92,6 +93,14 @@ protected:
   // lint-style findings such as a statement whose computed value is unused.
   void report_warning(const TSNode& node, std::string_view code, std::string_view category, std::string message,
                       std::string_view hint = {}) const;
+
+  // Build a diag Span from a Tree-sitter node (byte range + 1-based line/col).
+  [[nodiscard]] livehd::diag::Span span_of_node(const TSNode& node) const;
+  // Stage an error diagnostic (pass = "inou.prp") into the sink and abort the
+  // parse. Every report_error/report_prpparse_error overload funnels through
+  // here so the stage+throw shape lives in exactly one place.
+  [[noreturn]] void stage_error(livehd::diag::Span span, std::string_view code, std::string_view category, std::string message,
+                                std::string_view hint) const;
 
   // True when `n` (the CST subtree of a statement-position expression) can have
   // an observable side effect — a function call, an assignment, an attribute

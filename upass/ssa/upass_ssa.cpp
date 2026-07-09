@@ -1141,6 +1141,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast) {
                     rit != rename_map.end()) {
                   src_name = rit->second;
                 }
+                auto src_port = resolve_port_path(lnast->get_name(kids[1]));
                 bool any = false;
                 for (const auto &f : flat_outputs) {
                   if (f.name.size() <= dot_port.size() ||
@@ -1150,22 +1151,29 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast) {
                   any = true;
                   const std::string sub =
                       f.name.substr(dot_port.size()); // "first" | "lo.hi"
-                  std::string tmp = absl::StrCat("%aws_", arm_split_tmp++);
-                  auto tg = staging->add_child(dst_parent,
-                                               Lnast_ntype::create_tuple_get());
-                  if (Lnast::srcid_carries(Lnast_ntype::create_tuple_get())) {
-                    staging->set_srcid(tg, lnast->get_srcid(src_nid));
-                  }
-                  staging->add_child(tg, Lnast_node::create_ref(tmp));
-                  staging->add_child(tg, Lnast_node::create_ref(src_name));
-                  for (size_t pos = 0; pos != std::string::npos;) {
-                    size_t dot = sub.find('.', pos);
-                    std::string field = (dot == std::string::npos)
-                                            ? sub.substr(pos)
-                                            : sub.substr(pos, dot - pos);
-                    staging->add_child(tg, Lnast_node::create_const(field));
-                    pos = (dot == std::string::npos) ? std::string::npos
-                                                     : dot + 1;
+                  std::string value_ref;              // the per-leaf RHS ref name
+                  if (src_port) {
+                    value_ref =
+                        *src_port + "." + sub; // leaf-to-leaf from a tuple input port
+                  } else {
+                    std::string tmp = absl::StrCat("%aws_", arm_split_tmp++);
+                    auto tg = staging->add_child(dst_parent,
+                                                 Lnast_ntype::create_tuple_get());
+                    if (Lnast::srcid_carries(Lnast_ntype::create_tuple_get())) {
+                      staging->set_srcid(tg, lnast->get_srcid(src_nid));
+                    }
+                    staging->add_child(tg, Lnast_node::create_ref(tmp));
+                    staging->add_child(tg, Lnast_node::create_ref(src_name));
+                    for (size_t pos = 0; pos != std::string::npos;) {
+                      size_t dot = sub.find('.', pos);
+                      std::string field = (dot == std::string::npos)
+                                              ? sub.substr(pos)
+                                              : sub.substr(pos, dot - pos);
+                      staging->add_child(tg, Lnast_node::create_const(field));
+                      pos = (dot == std::string::npos) ? std::string::npos
+                                                       : dot + 1;
+                    }
+                    value_ref = std::move(tmp);
                   }
                   auto st = staging->add_child(dst_parent,
                                                Lnast_ntype::create_store());
@@ -1175,7 +1183,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast) {
                   staging->add_child(
                       st, Lnast_node::create_ref(
                               f.name)); // BASE leaf name (branch write)
-                  staging->add_child(st, Lnast_node::create_ref(tmp));
+                  staging->add_child(st, Lnast_node::create_ref(value_ref));
                 }
                 if (any) {
                   port_split_armed.insert(port);

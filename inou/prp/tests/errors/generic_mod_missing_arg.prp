@@ -1,0 +1,19 @@
+/*
+:name: generic_mod_missing_arg
+:type: error
+:error: missing required argument .b. in call to .madd.
+:help: provide the argument by name
+*/
+
+// A generic `mod` is a deferred template specialized per call site. The
+// specialization path used to return before the general missing-argument check,
+// so an omitted required arg was silently pushed as an invalid actual instead of
+// erroring. It must now report fcall-missing-arg, exactly like a comb call.
+
+mod madd<T>(a:T, b:T) -> (r:T@[0]) {
+  r = a ^ b
+}
+
+pub mod top(x:u8, y:u8) -> (s:u8@[0]) {
+  s = madd<u8>(a=x)   // locate_error_here  (required `b` omitted)
+}

@@ -14,34 +14,6 @@ namespace {
 using livehd::graph_util::del_color;
 using livehd::graph_util::set_color;
 
-// Union-find over node identities for the continuous (per-region) split.
-class Union_find {
-public:
-  hhds::Node_class find(const hhds::Node_class &n) {
-    auto it = parent_.find(n);
-    if (it == parent_.end()) {
-      parent_[n] = n;
-      return n;
-    }
-    if (it->second == n) {
-      return n;
-    }
-    auto root = find(it->second);
-    parent_[n] = root; // path compression
-    return root;
-  }
-  void merge(const hhds::Node_class &a, const hhds::Node_class &b) {
-    auto ra = find(a);
-    auto rb = find(b);
-    if (ra != rb) {
-      parent_[ra] = rb;
-    }
-  }
-
-private:
-  absl::flat_hash_map<hhds::Node_class, hhds::Node_class> parent_;
-};
-
 // Re-number node2id so that each maximal connected region of equal-id nodes
 // gets a distinct fresh id. Two same-id nodes are connected when an edge runs
 // directly between them.

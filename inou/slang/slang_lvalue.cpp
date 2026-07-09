@@ -883,8 +883,18 @@ std::string Slang_context::flat_port_read(const slang::ast::ElementSelectExpress
   }
   std::string shamt = mi.elem_bits != 1 ? builder_.create_mult_stmts(idx, std::to_string(mi.elem_bits)) : idx;
   const int   bias  = mi.elem_bits;
-  shamt             = builder_.create_plus_stmts(shamt, std::to_string(bias));
-  auto shifted      = builder_.create_sra_stmts(builder_.create_shl_stmts(p, std::to_string(bias)), shamt);
+  // Widen the shift amount so `+ bias` cannot drop its carry when cgen inlines it
+  // into the Verilog shift operand (self-determined width = max(operand widths)).
+  // Mirrors lower_select in slang_expr.cpp: a clog2(size)-bit idx makes `idx + 1`
+  // wrap to 0 at the top index, silently returning the wrong element. Hold
+  // flat_bits + bias, plus one headroom bit for the carry.
+  int amt_bits = 0;
+  for (int t = flat_bits + bias; t > 0; t >>= 1) {
+    ++amt_bits;
+  }
+  ++amt_bits;
+  shamt        = builder_.create_plus_stmts(trunc_to(shamt, amt_bits), std::to_string(bias));
+  auto shifted = builder_.create_sra_stmts(builder_.create_shl_stmts(p, std::to_string(bias)), shamt);
   auto r            = trunc_to(shifted, mi.elem_bits);
   return mi.elem_signed ? builder_.create_sext_stmts(r, std::to_string(mi.elem_bits - 1)) : r;
 }

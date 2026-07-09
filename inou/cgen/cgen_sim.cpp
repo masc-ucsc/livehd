@@ -214,6 +214,22 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
     case Ntype_op::Or: return fold("or_op");
     case Ntype_op::Xor: return fold("xor_op");
     case Ntype_op::Mult: return fold("mult_op");
+    case Ntype_op::Div: {
+      // Binary, order-sensitive, and sign-aware (slop div_op dispatches on the
+      // operand sign). Without this case Div fell through to the default and
+      // simulated as the bare dividend. Read each operand at its own width with
+      // one headroom bit when either side is signed, so a signed operand actually
+      // sign-extends before the divide (same reasoning as the LT/GT/SRA cases);
+      // the quotient then fits to the node width on assignment.
+      if (e.size() < 2) {
+        return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)") : operand(e[0].driver, wbits);
+      }
+      int cw = std::max({wbits_of(e[0].driver), wbits_of(e[1].driver), wbits, 1});
+      if (!is_unsign(e[0].driver) || !is_unsign(e[1].driver)) {
+        cw += 1;
+      }
+      return absl::StrCat(operand(e[0].driver, cw), ".div_op(", operand(e[1].driver, cw), ")");
+    }
     case Ntype_op::Ror: {
       // OR-reduction: 1 iff ANY bit of ANY operand is set. Each operand must be
       // read at its OWN full width (not the 1-bit node width), then reduced --

@@ -438,16 +438,9 @@ void uPass_attributes::process_attr_set() {
         // Existing entries only — minting a fact-only entry would read as a
         // value claim downstream.
         if (runner_st != nullptr) {
-          upass::Mode m = upass::Mode::unknown;
-          switch (kind) {
-            case Decl_kind::mut_kind  : m = upass::Mode::mut_kind; break;
-            case Decl_kind::const_kind: m = upass::Mode::const_kind; break;
-            case Decl_kind::reg_kind  : m = upass::Mode::reg_kind; break;
-            case Decl_kind::wire_kind : m = upass::Mode::wire_kind; break;
-            case Decl_kind::await_kind: m = upass::Mode::await_kind; break;
-            case Decl_kind::type_kind : m = upass::Mode::type_kind; break;
-            default                   : break;
-          }
+          // Decl_kind IS upass::Mode (same enum); the outer guard already
+          // excluded unknown.
+          upass::Mode m = kind;
           const auto root  = Bundle::get_first_level(target);
           const auto fpath = Bundle::get_all_but_first_level(target);
           if (auto wb = runner_st->get_bundle_for_write(root); wb && m != upass::Mode::unknown) {

@@ -1,0 +1,14 @@
+/*
+:name: generic_unnamed
+:type: error
+:error: a positional type generic argument to .two. is ambiguous and must be named
+:help: name it
+*/
+
+// 3g-generics — positional generic binds follow the SAME naming exceptions as
+// call arguments: a single generic, a matching name, or a unique role (type vs
+// value). `two<T1,T2>` has TWO free type-role generics, so a positional type
+// bind is ambiguous and must be named (`<T1=signed, T2=string>`).
+
+comb two<T1,T2>(a:T1, b:T2) -> (c:T1) { c = a }
+cassert(two<signed,string>(a=7, b="x") == 7)   // locate_error_here

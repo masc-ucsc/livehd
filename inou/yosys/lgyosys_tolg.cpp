@@ -843,7 +843,13 @@ static hhds::Node_class resolve_memory(hhds::Graph* g, RTLIL::Cell* cell) {
           // process_cell_drivers_intialization's parallel else branch.
           if (wire2pin.find(wire) == wire2pin.end()) {
             auto pa_node   = create_typed_node(*g, Ntype_op::Or, wire->width);
-            wire2pin[wire] = pa_node.create_driver_pin(0);
+            set_loc(pa_node, wire->get_src_attribute());
+            auto pa_dpin   = pa_node.create_driver_pin(0);
+            wire2pin[wire] = pa_dpin;
+            // Stamp the wire's sign; without it finalize_module leaves the
+            // memory-read placeholder unsigned-by-default and can mis-sign the
+            // read wire (mirrors get_edge_pin and the parallel else branch).
+            mark_pin_sign_from_wire(pa_dpin, wire);
           }
         }
         set_bits(dpin, ss.size());
@@ -1102,16 +1108,21 @@ static void process_cell_drivers_intialization(RTLIL::Module* mod, hhds::Graph* 
             partially_assigned[wire].resize(wire->width);
             partially_assigned_bits[wire].resize(wire->width);
 
-            auto n2 = create_typed_node(*g, Ntype_op::Or, wire->width);
-            set_loc(n2, wire->get_src_attribute());
+            // Reuse a pre-existing placeholder Or as the partial accumulator
+            // rather than minting a second one and orphaning the pass-1 readers
+            // that already point at it (mirrors resolve_memory / process_assigns).
+            if (wire2pin.find(wire) == wire2pin.end()) {
+              auto n2 = create_typed_node(*g, Ntype_op::Or, wire->width);
+              set_loc(n2, wire->get_src_attribute());
 
-            auto n2_dpin = n2.create_driver_pin(0);
-            if (wire->name.c_str()[0] != '$') {
-              std::string wname(&wire->name.c_str()[1]);
-              set_pin_name(n2_dpin, wname);
+              auto n2_dpin = n2.create_driver_pin(0);
+              if (wire->name.c_str()[0] != '$') {
+                std::string wname(&wire->name.c_str()[1]);
+                set_pin_name(n2_dpin, wname);
+              }
+              wire2pin[wire] = n2_dpin;
+              mark_pin_sign_from_wire(n2_dpin, wire);
             }
-            wire2pin[wire] = n2_dpin;
-            mark_pin_sign_from_wire(n2_dpin, wire);
           }
 
           auto src_pin  = create_pick_operator(driver_pin, offset, chunk.width, wire->is_signed);
@@ -1447,7 +1458,7 @@ static uint32_t get_input_size(const RTLIL::Cell* cell) {
     }
 
     const RTLIL::SigSpec ss = conn.second;
-    if (static_cast<uint32_t>(ss.chunks().size()) > max_input) {
+    if (static_cast<uint32_t>(ss.size()) > max_input) {  // max input BIT WIDTH (was chunk count)
       max_input = ss.size();
     }
   }

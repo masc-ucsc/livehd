@@ -40,6 +40,7 @@ using livehd::graph_util::is_type_const;
 using livehd::graph_util::is_type_flop;
 using livehd::graph_util::set_bits;
 using livehd::graph_util::set_sign;
+using livehd::graph_util::setup_sink_by_name;
 using livehd::graph_util::set_type_const_serialized;
 using livehd::graph_util::set_type_op;
 using livehd::graph_util::set_unsign;
@@ -75,20 +76,6 @@ void clear_all_sinks(const hhds::Node_class& node) {
   for (auto e : node.inp_edges()) {
     e.del_edge();
   }
-}
-
-// Find-or-create sink pin by LiveHD sink name (used when we need to connect
-// a driver to a specific named sink that may or may not exist yet).
-[[nodiscard]] hhds::Pin_class setup_sink_by_name(const hhds::Node_class& node, std::string_view name) {
-  auto op = type_op_of(node);
-  if (op == Ntype_op::Sub) {
-    return node.create_sink_pin(name);
-  }
-  auto pid = Ntype::get_sink_pid(op, name);
-  if (pid == livehd::Port_invalid) {
-    return {};
-  }
-  return node.create_sink_pin(pid);
 }
 
 }  // namespace

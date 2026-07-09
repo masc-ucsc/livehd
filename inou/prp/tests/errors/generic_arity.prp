@@ -6,9 +6,11 @@
 */
 
 // 3g-generics — an explicit `<…>` binding list may be PARTIAL (named and/or
-// positional, todo 3g B/C), but every generic must end up bound: by an explicit
-// bind, or by a declaration default (`<T2=…>`). Here `two<signed>` binds T1
-// positionally and leaves T2 with no bind and no default — a hard miss.
+// positional), but every generic must end up bound: by an explicit bind, or by a
+// declaration default (`<T2=…>`). Here `two<T1=signed>` binds T1 and leaves T2
+// with no bind and no default — a hard miss. (T1 is named because two same-role
+// type generics cannot be bound positionally — that is a separate ambiguity
+// error, exercised in errors/generic_unnamed.prp.)
 
 comb two<T1,T2>(a:T1, b:T2) -> (c:T1) { c = a }
-cassert(two<signed>(a=7, b="x") == 7)
+cassert(two<T1=signed>(a=7, b="x") == 7)

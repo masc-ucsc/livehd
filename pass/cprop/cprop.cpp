@@ -47,18 +47,7 @@ livehd::graph_util::Edge_vec ordered_inp_edges(const hhds::Node_class& node) {
 }
 
 using livehd::graph_util::hydrate_const;
-
-[[nodiscard]] hhds::Pin_class setup_sink_by_name(const hhds::Node_class& node, std::string_view name) {
-  auto op = type_op_of(node);
-  if (op == Ntype_op::Sub) {
-    return node.create_sink_pin(name);
-  }
-  auto pid = Ntype::get_sink_pid(op, name);
-  if (pid == livehd::Port_invalid) {
-    return {};
-  }
-  return node.create_sink_pin(pid);
-}
+using livehd::graph_util::setup_sink_by_name;
 
 // "Is there an edge from `driver` to `sink`?"
 [[nodiscard]] bool is_driver_connected_to_sink(const hhds::Pin_class& driver, const hhds::Pin_class& sink) {

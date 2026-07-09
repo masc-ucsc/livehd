@@ -1221,8 +1221,12 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         if (!have_a || !have_m) {
           fatal(ctx, "Get_mask node n_" + std::to_string(node_id(node)) + " missing operands.");
         }
-        op_expr = "Op_GetMask";
-        deps    = {cert_dep_id(ctx, build, a, pin_width(ctx, a, node)), cert_dep_id(ctx, build, mask, pin_width(ctx, mask, node))};
+        // Mirror the fast model above: widen the mask to at least the source
+        // width so the -1 zext idiom is not truncated to bit 0 in the cert.
+        const uint32_t gm_src_w  = pin_width(ctx, a, node);
+        const uint32_t gm_mask_w = std::max(pin_width(ctx, mask, node), gm_src_w);
+        op_expr                  = "Op_GetMask";
+        deps                     = {cert_dep_id(ctx, build, a, gm_src_w), cert_dep_id(ctx, build, mask, gm_mask_w)};
         break;
       }
 
@@ -2208,8 +2212,11 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
         }
         return undefined_at(w, reason);
       }
-      uint32_t src_w  = pin_width(ctx, a, node);
-      uint32_t mask_w = pin_width(ctx, mask, node);
+      uint32_t src_w = pin_width(ctx, a, node);
+      // The canonical zext idiom Get_mask(a, -1) declares the -1 mask at 1 bit;
+      // emitting sem_get_mask at that width would select only bit 0. Widen the
+      // mask to at least the source width (matches pass.lean and cgen_sim).
+      uint32_t mask_w = std::max(pin_width(ctx, mask, node), src_w);
       return "((sem_get_mask " + ucast_pin_at(ctx, a, src_w) + " " + ucast_pin_at(ctx, mask, mask_w) + ") " + ty_word(w) + ")";
     }
 

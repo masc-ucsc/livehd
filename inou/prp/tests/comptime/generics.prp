@@ -20,7 +20,9 @@ comb f<X>(a:X, b:X) -> (r) { r = a + b }
 cassert(f(a=u22(33), b=u22(100)) == 133)
 
 comb two<T1,T2>(a:T1, b:T2) -> (c:T1) { c = a }  // generics need not agree
-cassert(two<signed,string>(a=7, b="x") == 7)
+// Two same-role (both type) generics are ambiguous positionally — name them,
+// exactly as call arguments must be named when a positional bind is ambiguous.
+cassert(two<T1=signed,T2=string>(a=7, b="x") == 7)
 
 // The bound type is the param's DECLARED type inside the body.
 comb bw<T>(a:T) -> (r) { r = a.[bits] }

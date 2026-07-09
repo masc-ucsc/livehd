@@ -498,28 +498,12 @@ protected:
   // Ordering comparisons (`<`, `<=`, …). A nil operand is rejected by
   // report_nil_operand (ordering a nil walks payload-less bits in three_way_cmp
   // and yields a garbage Less/Greater/Equal — and per 07-typesystem.md nil may
-  // not feed a non-`==`/`!=` op anyway).
+  // not feed a non-`==`/`!=` op anyway). Behaviourally identical to
+  // push_binary_passthrough's defaults (report_nil=false, nil_operand_error=true);
+  // this named wrapper keeps the comparison call sites self-documenting.
   template <typename F>
   upass::Vote push_binary_compare(std::string_view dst, upass::Src_span src, F op) {
-    if (dst.empty() || src.size() < 2) {
-      return upass::Vote::keep;
-    }
-    if (report_nil_operand(src)) {
-      return classify_vote();
-    }
-    if (has_runtime_seed_operand(src)) {
-      return keep_runtime_seed(dst);  // runtime comb result → keep structural, do not fold to nil
-    }
-    Dlop n1 = operand_value(src[0]);
-    Dlop n2 = operand_value(src[1]);
-    if (!is_numeric(n1) || !is_numeric(n2)) {
-      return upass::Vote::keep;
-    }
-    Dlop r = op(n1, n2);
-    if (!r.is_invalid()) {
-      store_trivial(dst, r);
-    }
-    return classify_vote();
+    return push_binary_passthrough(dst, src, std::move(op));
   }
   // nil_operand_error=false for logical `not`: a nil operand propagates (keeps)
   // for the cassert/attribute-discharge path, same as push_binary_passthrough.

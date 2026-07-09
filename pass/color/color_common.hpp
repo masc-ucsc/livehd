@@ -27,6 +27,36 @@ using Node = hhds::Node_class;
 using NodeSet = absl::flat_hash_set<hhds::Node_class>;
 using Node2Id = absl::flat_hash_map<hhds::Node_class, int>;
 
+// Union-find over node identities (a region = connected component of same-color
+// nodes). Shared by the continuous per-region split (apply_coloring) and the
+// partition pass; keep the single definition here so the two never drift.
+class Union_find {
+public:
+  hhds::Node_class find(const hhds::Node_class &n) {
+    auto it = parent_.find(n);
+    if (it == parent_.end()) {
+      parent_[n] = n;
+      return n;
+    }
+    if (it->second == n) {
+      return n;
+    }
+    auto root  = find(it->second);
+    parent_[n] = root;  // path compression
+    return root;
+  }
+  void merge(const hhds::Node_class &a, const hhds::Node_class &b) {
+    auto ra = find(a);
+    auto rb = find(b);
+    if (ra != rb) {
+      parent_[ra] = rb;
+    }
+  }
+
+private:
+  absl::flat_hash_map<hhds::Node_class, hhds::Node_class> parent_;
+};
+
 // Per-pass options shared by every algorithm. `hier` selects whether the pass
 // driver colors the whole instance hierarchy (every unique def) or only the
 // given graph. `compact` writes the flat per-def color (the default — these

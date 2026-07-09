@@ -609,6 +609,20 @@ protected:
   // restores the cursor. Returns false on a malformed call shape (the caller
   // then declines the inline).
   bool gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& actuals, std::vector<Generic_actual>& explicit_generics);
+  // Shared actual→param binding ladder (06-functions.md §"Argument naming"),
+  // used by BOTH the real inline bind (try_inline_func_call, commit=true) and the
+  // overload probe (signature_matches, commit=false) so the two can never drift.
+  // Fills param_val/param_set/param_func (all sized to io.inputs) and the var-arg
+  // leftovers. commit=true fails fatally via fcall_arg_fail and lets a whole tuple
+  // actual fall through to the single-param exception (whole-tuple→scalar);
+  // commit=false returns false on the first rejection and forbids a tuple actual
+  // from binding a lone scalar param (the overload-discrimination rule). Returns
+  // true on a full successful bind.
+  bool bind_call_actuals(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool is_ctor_call, bool commit,
+                         std::string_view callee_name, const livehd::diag::Span& call_span,
+                         std::vector<Lnast_node>& param_val, std::vector<bool>& param_set,
+                         std::vector<std::string>& param_func, std::vector<Lnast_node>& vararg_pos,
+                         std::vector<std::pair<std::string, Lnast_node>>& vararg_named);
   // A gathered lambda set `const add = [f1, f2]` folds (constprop) to a bundle
   // of qualified function-name strings under numeric keys "0","1",… — the same
   // shape `init` overloads use. Returns those names in tuple order (only the

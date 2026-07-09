@@ -14,7 +14,9 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
+#include "decl_facts.hpp"
 #include "hlop/dlop.hpp"
+#include "kind.hpp"
 #include "str_tools.hpp"
 #include "upass_attributes_handler.hpp"
 #include "upass_core.hpp"
@@ -198,13 +200,15 @@ private:
   //     constprop's runner_fold_fn fallback).
 public:
   // Storage classification recorded by the `type` decl-attr that prp2lnast
-  // emits (`mut`/`const`/`reg`/`wire`/`await`).
-  enum class Decl_kind : uint8_t { unknown, mut_kind, const_kind, reg_kind, await_kind, type_kind, wire_kind };
+  // emits (`mut`/`const`/`reg`/`wire`/`await`). Aliased to the shared binding
+  // lattice (upass::Mode) so the two vocabularies can never drift.
+  using Decl_kind = upass::Mode;
 
   // Numeric type carried by a type_spec node. Width 0 means the declaration
   // omitted the bit count (e.g. `int` / `uint`); concrete widths populate
-  // bits via the trailing const child of prim_type_uint/sint.
-  enum class Numeric_kind : uint8_t { none, unsigned_int, signed_int, boolean, string };
+  // bits via the trailing const child of prim_type_uint/sint. Aliased to the
+  // shared decl_facts::Num so the derivation and the reader agree by construction.
+  using Numeric_kind = upass::decl_facts::Num;
   struct Type_info {
     Decl_kind            decl{Decl_kind::unknown};
     Numeric_kind         kind{Numeric_kind::none};

@@ -46,33 +46,7 @@ namespace {
 
 namespace gu = livehd::graph_util;
 
-// Union-find over node identities (region = connected component of same color).
-class Union_find {
-public:
-  hhds::Node_class find(const hhds::Node_class& n) {
-    auto it = parent_.find(n);
-    if (it == parent_.end()) {
-      parent_[n] = n;
-      return n;
-    }
-    if (it->second == n) {
-      return n;
-    }
-    auto root  = find(it->second);
-    parent_[n] = root;
-    return root;
-  }
-  void merge(const hhds::Node_class& a, const hhds::Node_class& b) {
-    auto ra = find(a);
-    auto rb = find(b);
-    if (ra != rb) {
-      parent_[ra] = rb;
-    }
-  }
-
-private:
-  absl::flat_hash_map<hhds::Node_class, hhds::Node_class> parent_;
-};
+using livehd::color::Union_find;  // region = connected component of same color
 
 std::string sanitize(std::string_view s) {
   std::string out;

@@ -6377,10 +6377,14 @@ collect_callee_names(const std::shared_ptr<Lnast> &lnast) {
   return *cache_slot;
 }
 
-[[nodiscard]] bool needs_clock_rec(const std::shared_ptr<Lnast> &lnast,
-                                   const uPass_tolg::Registry &registry,
-                                   absl::flat_hash_map<std::string, bool> &memo,
-                                   absl::flat_hash_set<std::string> &visiting) {
+// Memoized, cycle-guarded transitive "does this module (or any pipe/mod callee)
+// satisfy `declares`" walk. `declares` is the per-tree leaf predicate — a plain
+// reg declare (needs a clock) or a reset-carrying reg declare (needs a reset).
+[[nodiscard]] bool needs_transitive(const std::shared_ptr<Lnast> &lnast,
+                                    const uPass_tolg::Registry &registry,
+                                    absl::flat_hash_map<std::string, bool> &memo,
+                                    absl::flat_hash_set<std::string> &visiting,
+                                    bool (*declares)(const std::shared_ptr<Lnast> &)) {
   const std::string key(lnast->get_top_module_name());
   if (auto it = memo.find(key); it != memo.end()) {
     return it->second;
@@ -6388,7 +6392,7 @@ collect_callee_names(const std::shared_ptr<Lnast> &lnast) {
   if (!visiting.insert(key).second) {
     return false; // cycle guard
   }
-  bool needs = tree_declares_reg(lnast);
+  bool needs = declares(lnast);
   if (!needs) {
     for (const auto &cn : collect_callee_names(lnast)) {
       auto callee = resolve_callee_lnast(cn, registry);
@@ -6399,7 +6403,7 @@ collect_callee_names(const std::shared_ptr<Lnast> &lnast) {
       if (kind != "pipe" && kind != "mod") {
         continue;
       }
-      if (needs_clock_rec(callee, registry, memo, visiting)) {
+      if (needs_transitive(callee, registry, memo, visiting, declares)) {
         needs = true;
         break;
       }
@@ -6408,6 +6412,13 @@ collect_callee_names(const std::shared_ptr<Lnast> &lnast) {
   visiting.erase(key);
   memo[key] = needs;
   return needs;
+}
+
+[[nodiscard]] bool needs_clock_rec(const std::shared_ptr<Lnast> &lnast,
+                                   const uPass_tolg::Registry &registry,
+                                   absl::flat_hash_map<std::string, bool> &memo,
+                                   absl::flat_hash_set<std::string> &visiting) {
+  return needs_transitive(lnast, registry, memo, visiting, &tree_declares_reg);
 }
 
 // True when any plain-reg declare carries a non-nil initializer (the
@@ -6555,33 +6566,7 @@ tree_declares_init_reg_array(const std::shared_ptr<Lnast> &lnast) {
                                    const uPass_tolg::Registry &registry,
                                    absl::flat_hash_map<std::string, bool> &memo,
                                    absl::flat_hash_set<std::string> &visiting) {
-  const std::string key(lnast->get_top_module_name());
-  if (auto it = memo.find(key); it != memo.end()) {
-    return it->second;
-  }
-  if (!visiting.insert(key).second) {
-    return false; // cycle guard
-  }
-  bool needs = tree_declares_reset_reg(lnast);
-  if (!needs) {
-    for (const auto &cn : collect_callee_names(lnast)) {
-      auto callee = resolve_callee_lnast(cn, registry);
-      if (!callee) {
-        continue;
-      }
-      auto kind = callee->get_lambda_kind();
-      if (kind != "pipe" && kind != "mod") {
-        continue;
-      }
-      if (needs_reset_rec(callee, registry, memo, visiting)) {
-        needs = true;
-        break;
-      }
-    }
-  }
-  visiting.erase(key);
-  memo[key] = needs;
-  return needs;
+  return needs_transitive(lnast, registry, memo, visiting, &tree_declares_reset_reg);
 }
 
 // Shared phase-1 io+clock+reset GraphIO registration. Idempotent (the GraphIO

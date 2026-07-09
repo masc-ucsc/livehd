@@ -89,22 +89,10 @@ const uPass_attributes::Type_info* uPass_attributes::lookup_type_info_bundle(std
     return nullptr;
   }
   Type_info ti;
-  switch (f->kind) {
-    case upass::decl_facts::Num::unsigned_int: ti.kind = Numeric_kind::unsigned_int; break;
-    case upass::decl_facts::Num::signed_int  : ti.kind = Numeric_kind::signed_int; break;
-    case upass::decl_facts::Num::boolean     : ti.kind = Numeric_kind::boolean; break;
-    case upass::decl_facts::Num::string      : ti.kind = Numeric_kind::string; break;
-    case upass::decl_facts::Num::none        : ti.kind = Numeric_kind::none; break;
-  }
-  switch (f->mode) {
-    case upass::Mode::mut_kind  : ti.decl = Decl_kind::mut_kind; break;
-    case upass::Mode::const_kind: ti.decl = Decl_kind::const_kind; break;
-    case upass::Mode::reg_kind  : ti.decl = Decl_kind::reg_kind; break;
-    case upass::Mode::wire_kind : ti.decl = Decl_kind::wire_kind; break;
-    case upass::Mode::await_kind: ti.decl = Decl_kind::await_kind; break;
-    case upass::Mode::type_kind : ti.decl = Decl_kind::type_kind; break;
-    default                     : ti.decl = Decl_kind::unknown; break;
-  }
+  // Numeric_kind IS decl_facts::Num and Decl_kind IS upass::Mode (aliases), so
+  // these copy straight across with no per-enumerator mapping.
+  ti.kind          = f->kind;
+  ti.decl          = f->mode;
   ti.bits          = f->bits;
   ti.is_comptime   = f->is_comptime;
   ti.has_type_spec = f->has_type_spec;

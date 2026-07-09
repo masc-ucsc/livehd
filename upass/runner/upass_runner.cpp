@@ -2810,6 +2810,307 @@ void uPass_runner::emit_inline_op(Lnast_ntype::Lnast_ntype_int op, const std::st
   lm->pop_source();
 }
 
+bool uPass_runner::bind_call_actuals(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool is_ctor_call,
+                                     bool commit, std::string_view callee_name, const livehd::diag::Span& call_span,
+                                     std::vector<Lnast_node>& param_val, std::vector<bool>& param_set,
+                                     std::vector<std::string>& param_func, std::vector<Lnast_node>& vararg_pos,
+                                     std::vector<std::pair<std::string, Lnast_node>>& vararg_named) {
+  const std::size_t nparams    = io.inputs.size();
+  // A trailing `...args` var-arg param (always the LAST input) gathers every
+  // actual not consumed by a fixed leading param into one synthesized tuple:
+  // positional leftovers become positional entries (`args[i]`), named leftovers
+  // become named fields (`args.NAME`).
+  const bool        has_vararg = nparams > 0 && io.inputs[nparams - 1].is_varargs;
+  const std::size_t nbind      = has_vararg ? nparams - 1 : nparams;  // bindable fixed params (vararg excluded)
+
+  param_val.assign(nparams, Lnast_node::create_invalid());
+  param_set.assign(nparams, false);
+  param_func.assign(nparams, std::string{});
+  vararg_pos.clear();
+  vararg_named.clear();
+
+  auto param_index = [&](std::string_view k) -> std::size_t {
+    for (std::size_t i = 0; i < nbind; ++i) {  // never match the var-arg slot by name
+      if (io.inputs[i].name == k) {
+        return i;
+      }
+    }
+    return nbind;
+  };
+  // Expand a (possibly RUNTIME) tuple ACTUAL `tup` into the flattened leaf params
+  // `<prefix>.<field>` — a comptime field as a const, a runtime field as a ref to
+  // its tuple_slot_ref wire. All-or-nothing: binds nothing and returns false
+  // unless EVERY field maps onto an unset leaf param. Flat (one-level) tuples only.
+  auto expand_tuple_actual = [&](std::string_view tup, std::string_view prefix) -> bool {
+    const auto shape_opt = try_tuple_shape(tup);
+    if (!shape_opt || shape_opt->empty()) {
+      return false;
+    }
+    const auto& shape = *shape_opt;
+    // A genuine tuple has >1 field or a NAMED (non-positional) field; a 1-entry
+    // positional bundle is a scalar carrier, not a tuple worth expanding.
+    bool genuine = shape.size() > 1;
+    for (const auto& [fld, is_pos] : shape) {
+      if (!is_pos) {
+        genuine = true;
+        break;
+      }
+    }
+    if (!genuine) {
+      return false;
+    }
+    const auto comptime = try_bundle_fields(tup);
+    // Pre-resolve every field before committing (no partial bind on mismatch).
+    std::vector<std::tuple<std::size_t, bool, std::string>> binds;  // (leaf idx, is_const, payload)
+    binds.reserve(shape.size());
+    for (const auto& [fld, is_pos] : shape) {
+      const auto lidx = param_index(std::string(prefix) + "." + fld);
+      if (lidx >= nbind || param_set[lidx]) {
+        return false;
+      }
+      bool resolved = false;
+      if (comptime) {
+        for (const auto& [k, v] : *comptime) {
+          if (k == fld && !v.is_invalid()) {
+            binds.emplace_back(lidx, true, v.to_pyrope());
+            resolved = true;
+            break;
+          }
+        }
+      }
+      if (!resolved) {
+        if (auto rn = try_tuple_slot_ref(tup, fld)) {
+          binds.emplace_back(lidx, false, *rn);
+          resolved = true;
+        }
+      }
+      if (!resolved) {
+        return false;
+      }
+    }
+    for (const auto& [lidx, is_const, payload] : binds) {
+      param_val[lidx] = is_const ? Lnast_node::create_const(payload) : Lnast_node::create_ref(payload);
+      param_set[lidx] = true;
+    }
+    return true;
+  };
+  const bool        has_self       = nbind > 0 && io.inputs[0].name == "self";
+  const std::size_t n_named_params = nbind - (has_self ? 1 : 0);  // fixed, non-self (var-arg excluded)
+  auto              actual_kind    = [&](const Lnast_node& node) { return actual_node_kind(node); };
+  for (const auto& a : actuals) {
+    if (a.is_named) {
+      if (a.key == "self") {
+        if (!commit) {
+          return false;  // self is never named
+        }
+        fcall_arg_fail(call_span,
+                       "fcall-self-named",
+                       std::format("`self` cannot be passed as a named argument to `{}`", callee_name),
+                       "self is bound positionally by the UFCS receiver (`value.method(...)`)");
+      }
+      const auto idx = param_index(a.key);
+      if (idx >= nbind) {
+        // A named actual that matches no fixed param is a named leftover gathered
+        // into the var-arg tuple (`args.NAME`); otherwise a bundle-typed actual
+        // `ar=(x=2,y=11)` (or a runtime tuple `ar=a`) expands field-by-field.
+        if (has_vararg) {
+          vararg_named.emplace_back(a.key, a.node);
+          continue;
+        }
+        bool expanded = false;
+        if (a.node.is_ref()) {
+          expanded = expand_tuple_actual(a.node.get_name(), a.key);
+        }
+        if (!expanded) {
+          if (!commit) {
+            return false;  // unknown argument
+          }
+          fcall_arg_fail(call_span,
+                         "fcall-unknown-arg",
+                         std::format("unknown argument `{}` in call to `{}`", a.key, callee_name),
+                         "remove it or rename it to a declared parameter");
+        }
+        continue;
+      }
+      if (param_set[idx]) {
+        if (!commit) {
+          return false;  // duplicate
+        }
+        fcall_arg_fail(call_span,
+                       "fcall-duplicate-arg",
+                       std::format("duplicate argument `{}` in call to `{}`", a.key, callee_name),
+                       "each parameter may be bound only once");
+      }
+      param_val[idx]  = a.node;
+      param_set[idx]  = true;
+      param_func[idx] = a.func_name;
+    } else {
+      // Positional actual. Bind it, honoring the naming exceptions.
+      auto bind = [&](std::size_t i) {
+        param_val[i]  = a.node;
+        param_set[i]  = true;
+        param_func[i] = a.func_name;
+      };
+      const auto next_unset = [&](std::size_t from) -> std::size_t {
+        for (std::size_t i = from; i < nbind; ++i) {
+          if (!param_set[i]) {
+            return i;
+          }
+        }
+        return nbind;
+      };
+      // Pass-by-ref (`f(ref x)`) binds positionally by design — exempt from the
+      // naming rules — and so does the UFCS receiver bound to `self`.
+      if (a.is_ref_pass) {
+        const auto slot = next_unset(0);
+        if (slot >= nbind) {
+          if (has_vararg) {
+            vararg_pos.push_back(a.node);
+            continue;
+          }
+          if (!commit) {
+            return false;  // too many positional
+          }
+          fcall_arg_fail(call_span,
+                         "fcall-too-many-args",
+                         std::format("too many positional arguments in call to `{}`", callee_name),
+                         "remove the extra argument(s) or pass them by name");
+        }
+        bind(slot);
+        continue;
+      }
+      if (has_self && !param_set[0]) {
+        bind(0);  // self ← UFCS receiver
+        continue;
+      }
+      // With a var-arg param, fixed leading params bind positionally in
+      // declaration order; every actual past them is a positional leftover
+      // gathered into the var-arg tuple. The naming exceptions below are skipped.
+      if (has_vararg) {
+        const auto slot = next_unset(has_self ? 1 : 0);
+        if (slot < nbind) {
+          bind(slot);
+        } else {
+          vararg_pos.push_back(a.node);
+        }
+        continue;
+      }
+      // Constructor call (synthesized): construction args bind in tuple order.
+      if (is_ctor_call) {
+        const auto slot = next_unset(has_self ? 1 : 0);
+        if (slot >= nparams) {
+          if (!commit) {
+            return false;
+          }
+          fcall_arg_fail(call_span,
+                         "fcall-too-many-args",
+                         std::format("too many constructor arguments for `{}`", callee_name),
+                         "the construction value has more entries than the init overload's parameters");
+        }
+        bind(slot);
+        continue;
+      }
+      // Positional TUPLE actual → a flattened tuple-param GROUP. A tuple-typed
+      // param `p:(x,y)` is flattened to leaves `p.x`,`p.y`; a positional tuple
+      // actual binds by EXPANDING its fields into those leaves.
+      if (a.node.is_ref()) {
+        const auto shape_opt       = try_tuple_shape(a.node.get_name());
+        bool       is_tuple_actual = false;
+        if (shape_opt) {
+          is_tuple_actual = shape_opt->size() > 1;
+          for (const auto& [fld, is_pos] : *shape_opt) {
+            if (!is_pos) {
+              is_tuple_actual = true;
+              break;
+            }
+          }
+        }
+        if (is_tuple_actual) {
+          // Find the unset flattened tuple-param GROUP whose leaf count matches
+          // the actual's field count, then expand the fields into it.
+          absl::flat_hash_map<std::string, std::size_t> group_count;
+          for (std::size_t i = (has_self ? 1u : 0u); i < nbind; ++i) {
+            if (param_set[i]) {
+              continue;
+            }
+            const auto& pn = io.inputs[i].name;
+            if (auto dp = pn.rfind('.'); dp != std::string::npos) {
+              ++group_count[pn.substr(0, dp)];
+            }
+          }
+          bool matched = false;
+          for (const auto& [prefix, cnt] : group_count) {
+            if (cnt == shape_opt->size() && expand_tuple_actual(a.node.get_name(), prefix)) {
+              matched = true;
+              break;
+            }
+          }
+          if (matched) {
+            continue;
+          }
+          // A tuple actual that matched no group must NOT bind a lone scalar
+          // param in the overload probe (that is the tuple-vs-scalar
+          // discrimination); the real bind falls through to exception 1.
+          if (!commit) {
+            return false;
+          }
+        }
+      }
+      // Exception 2: a bare variable whose name matches an unset, non-self
+      // parameter binds to THAT parameter (so `f(b, a)` binds by name).
+      if (a.node.is_ref()) {
+        const auto nidx = param_index(a.node.get_name());
+        if (nidx < nparams && nidx >= (has_self ? 1u : 0u) && !param_set[nidx]) {
+          bind(nidx);
+          continue;
+        }
+      }
+      // Exception 1: exactly one non-self parameter — a single positional value
+      // maps unambiguously (also the whole-tuple→scalar path under commit).
+      if (n_named_params == 1) {
+        const auto slot = next_unset(has_self ? 1 : 0);
+        if (slot < nparams) {
+          bind(slot);
+          continue;
+        }
+      }
+      // Exception 3: the actual's kind uniquely identifies one unset, typed,
+      // non-self parameter. Untyped params (kind=none) never match.
+      if (const auto k = actual_kind(a.node); k != Io_kind::none) {
+        std::size_t match = nparams;
+        std::size_t count = 0;
+        for (std::size_t i = (has_self ? 1u : 0u); i < nparams; ++i) {
+          if (!param_set[i] && io.inputs[i].kind == k) {
+            match = i;
+            ++count;
+          }
+        }
+        if (count == 1) {
+          bind(match);
+          continue;
+        }
+      }
+      if (!commit) {
+        return false;  // ambiguous / unbindable positional — must be named
+      }
+      // Otherwise the positional argument is ambiguous and must be named.
+      const auto  slot  = next_unset(has_self ? 1 : 0);
+      std::string pname = slot < nparams ? io.inputs[slot].name : std::string{"argument"};
+      if (slot >= nparams) {
+        fcall_arg_fail(call_span,
+                       "fcall-too-many-args",
+                       std::format("too many positional arguments in call to `{}`", callee_name),
+                       "remove the extra argument(s) or pass them by name");
+      }
+      fcall_arg_fail(call_span,
+                     "fcall-unnamed-arg",
+                     std::format("argument `{}` must be named (`{}=...`) in call to `{}`", pname, pname, callee_name),
+                     "name the argument, or pass a variable whose name matches the parameter");
+    }
+  }
+  return true;
+}
+
 bool uPass_runner::try_inline_func_call() {
   // One-shot ctor marker (see splice_init_call): true only for the
   // synthesized constructor call itself, never for calls nested inside the
@@ -3149,307 +3450,20 @@ bool uPass_runner::try_inline_func_call() {
   // erroring for the identical `comb`. The callee + io are already resolved.
 
   // ── Match actuals → params (positional + named) ──────────────────────────
-  const std::size_t       nparams    = io.inputs.size();
-  // A trailing `...args` var-arg param (always the LAST input)
-  // gathers every actual not consumed by a fixed leading param into one
-  // synthesized tuple: positional leftovers become positional entries
-  // (`args[i]`), named leftovers become named fields (`args.NAME`). Fixed
-  // params bind by the normal rules below; only the leftovers go to the tuple.
-  const bool              has_vararg = nparams > 0 && io.inputs[nparams - 1].is_varargs;
-  const std::size_t       nbind      = has_vararg ? nparams - 1 : nparams;  // bindable fixed params (vararg excluded)
-  std::vector<Lnast_node> vararg_pos;                                       // positional leftovers, in call order
-  std::vector<std::pair<std::string, Lnast_node>> vararg_named;             // named leftovers
-  std::vector<Lnast_node>                         param_val(nparams, Lnast_node::create_invalid());
-  std::vector<bool>                               param_set(nparams, false);
-  std::vector<std::string>                        param_func(nparams);  // non-empty: function-valued param
-  auto                                            param_index = [&](std::string_view k) -> std::size_t {
-    for (std::size_t i = 0; i < nbind; ++i) {  // never match the var-arg slot by name
-      if ((io.inputs[i].name == k)) {
-        return i;
-      }
-    }
-    return nbind;
-  };
-  // Expand a (possibly RUNTIME) tuple ACTUAL `tup` into the flattened leaf
-  // params `<prefix>.<field>`. A tuple-typed param `ar:(x,y)` is flattened in
-  // io_meta to `ar.x`,`ar.y`; a tuple actual binds field-by-field — a comptime
-  // field as a const, a runtime field as a ref to its tuple_slot_ref wire. This
-  // is what makes `comb f(ar:(x,y))` callable with a runtime tuple `f(ar=a)`
-  // exactly like its hand-flattened `f(ar_x, ar_y)` twin. All-or-nothing: binds
-  // nothing and returns false unless EVERY field maps onto an unset leaf param.
-  // Flat (one-level) tuples only.
-  auto expand_tuple_actual = [&](std::string_view tup, std::string_view prefix) -> bool {
-    const auto shape_opt = try_tuple_shape(tup);
-    if (!shape_opt || shape_opt->empty()) {
-      return false;
-    }
-    const auto& shape = *shape_opt;
-    // A genuine tuple has >1 field or a NAMED (non-positional) field; a 1-entry
-    // positional bundle is a scalar carrier, not a tuple worth expanding.
-    bool genuine = shape.size() > 1;
-    for (const auto& [fld, is_pos] : shape) {
-      if (!is_pos) {
-        genuine = true;
-        break;
-      }
-    }
-    if (!genuine) {
-      return false;
-    }
-    const auto comptime = try_bundle_fields(tup);
-    // Pre-resolve every field before committing (no partial bind on mismatch).
-    std::vector<std::tuple<std::size_t, bool, std::string>> binds;  // (leaf idx, is_const, payload)
-    binds.reserve(shape.size());
-    for (const auto& [fld, is_pos] : shape) {
-      const auto lidx = param_index(std::string(prefix) + "." + fld);
-      if (lidx >= nbind || param_set[lidx]) {
-        return false;
-      }
-      bool resolved = false;
-      if (comptime) {
-        for (const auto& [k, v] : *comptime) {
-          if (k == fld && !v.is_invalid()) {
-            binds.emplace_back(lidx, true, v.to_pyrope());
-            resolved = true;
-            break;
-          }
-        }
-      }
-      if (!resolved) {
-        if (auto rn = try_tuple_slot_ref(tup, fld)) {
-          binds.emplace_back(lidx, false, *rn);
-          resolved = true;
-        }
-      }
-      if (!resolved) {
-        return false;
-      }
-    }
-    for (const auto& [lidx, is_const, payload] : binds) {
-      param_val[lidx] = is_const ? Lnast_node::create_const(payload) : Lnast_node::create_ref(payload);
-      param_set[lidx] = true;
-    }
-    return true;
-  };
-  // 06-functions.md §"Argument naming": every input must be named at the call
-  // site. Unnamed (positional) actuals are allowed only under narrow exceptions:
-  //   (1) exactly one non-self parameter (nothing to disambiguate),
-  //   (2) the actual is a bare variable whose name matches the parameter name,
-  //   (3) the actual's type uniquely identifies one parameter by kind (e.g.
-  //       `f(true, 7)` for `f(flag:bool, n:int)`). An untyped (kind=none) param
-  //       does NOT participate — it must be named unless it is the only arg.
-  // `self` (io.inputs[0] for a method) is always bound positionally by the UFCS
-  // receiver and is never named; pass-by-ref actuals (`f(ref x)`) are positional
-  // by design.
-  const bool        has_self       = nbind > 0 && io.inputs[0].name == "self";
-  const std::size_t n_named_params = nbind - (has_self ? 1 : 0);  // fixed, non-self (var-arg excluded)
-  // Classify a positional actual's scalar kind for exception (3). Dlop literals
-  // carry their kind verbatim; a `ref` reports its inferred/declared scalar kind
-  // (bool/string/integer), falling back to integer for a range-carrying typed
-  // var. The shared actual_node_kind() is also used by signature_matches's
-  // overload probe, so the two agree on kind by construction.
-  auto              actual_kind    = [&](const Lnast_node& node) { return actual_node_kind(node); };
-  for (auto& a : actuals) {
-    if (a.is_named) {
-      if (a.key == "self") {
-        fcall_arg_fail(call_span,
-                       "fcall-self-named",
-                       std::format("`self` cannot be passed as a named argument to `{}`", callee_name),
-                       "self is bound positionally by the UFCS receiver (`value.method(...)`)");
-      }
-      const auto idx = param_index(a.key);
-      if (idx >= nbind) {
-        // A named actual that matches no fixed param is a named
-        // leftover gathered into the var-arg tuple (`args.NAME`).
-        if (has_vararg) {
-          vararg_named.emplace_back(a.key, a.node);
-          continue;
-        }
-        // A bundle-typed param is flattened in io_meta to dotted leaves
-        // (`ar` → `ar.x`, `ar.y`). A bundle-literal actual `ar=(x=2,y=11)` (or a
-        // runtime tuple `ar=a`) arrives under the un-flattened key `ar`; expand
-        // it field-by-field into the leaf params (comptime const / runtime wire).
-        bool expanded = false;
-        if (a.node.is_ref()) {
-          expanded = expand_tuple_actual(a.node.get_name(), a.key);
-        }
-        if (!expanded) {
-          fcall_arg_fail(call_span,
-                         "fcall-unknown-arg",
-                         std::format("unknown argument `{}` in call to `{}`", a.key, callee_name),
-                         "remove it or rename it to a declared parameter");
-        }
-        continue;
-      }
-      if (param_set[idx]) {
-        fcall_arg_fail(call_span,
-                       "fcall-duplicate-arg",
-                       std::format("duplicate argument `{}` in call to `{}`", a.key, callee_name),
-                       "each parameter may be bound only once");
-      }
-      param_val[idx]  = a.node;
-      param_set[idx]  = true;
-      param_func[idx] = a.func_name;
-    } else {
-      // Positional actual. Bind it, honoring the naming exceptions.
-      auto bind = [&](std::size_t i) {
-        param_val[i]  = a.node;
-        param_set[i]  = true;
-        param_func[i] = a.func_name;
-      };
-      const auto next_unset = [&](std::size_t from) -> std::size_t {
-        for (std::size_t i = from; i < nbind; ++i) {
-          if (!param_set[i]) {
-            return i;
-          }
-        }
-        return nbind;
-      };
-      // Pass-by-ref (`f(ref x)`) binds positionally by design — exempt from the
-      // naming rules — and so does the UFCS receiver bound to `self` (the first
-      // positional actual when the callee declares self).
-      if (a.is_ref_pass) {
-        const auto slot = next_unset(0);
-        if (slot >= nbind) {
-          if (has_vararg) {
-            vararg_pos.push_back(a.node);
-            continue;
-          }
-          fcall_arg_fail(call_span,
-                         "fcall-too-many-args",
-                         std::format("too many positional arguments in call to `{}`", callee_name),
-                         "remove the extra argument(s) or pass them by name");
-        }
-        bind(slot);
-        continue;
-      }
-      if (has_self && !param_set[0]) {
-        bind(0);  // self ← UFCS receiver
-        continue;
-      }
-      // With a var-arg param, fixed leading params bind positionally
-      // in declaration order; every actual past them is a positional leftover
-      // gathered into the var-arg tuple (`args[i]`). The naming-disambiguation
-      // exceptions below are for fully-fixed signatures and are skipped here.
-      if (has_vararg) {
-        const auto slot = next_unset(has_self ? 1 : 0);
-        if (slot < nbind) {
-          bind(slot);
-        } else {
-          vararg_pos.push_back(a.node);
-        }
-        continue;
-      }
-      // Constructor call (synthesized — no user-written call site to hold to
-      // the naming rules): construction args bind in tuple order, mirroring
-      // `init(ref y, "hello", 44)` in 07-typesystem.md.
-      if (is_ctor_call) {
-        const auto slot = next_unset(has_self ? 1 : 0);
-        if (slot >= nparams) {
-          fcall_arg_fail(call_span,
-                         "fcall-too-many-args",
-                         std::format("too many constructor arguments for `{}`", callee_name),
-                         "the construction value has more entries than the init overload's parameters");
-        }
-        bind(slot);
-        continue;
-      }
-      // Positional TUPLE actual → a flattened tuple-param GROUP. A tuple-typed
-      // param `p:(x,y)` is flattened to leaves `p.x`,`p.y`; a positional tuple
-      // actual binds by EXPANDING its fields into those leaves (the positional
-      // mirror of the named-arg expansion above). signature_matches has already
-      // rejected candidates whose only params are scalars, so this only fires for
-      // the genuine tuple-param candidate. (2f-arg_naming_tuple.)
-      if (a.node.is_ref()) {
-        const auto shape_opt       = try_tuple_shape(a.node.get_name());
-        bool       is_tuple_actual = false;
-        if (shape_opt) {
-          is_tuple_actual = shape_opt->size() > 1;
-          for (const auto& [fld, is_pos] : *shape_opt) {
-            if (!is_pos) {
-              is_tuple_actual = true;
-              break;
-            }
-          }
-        }
-        if (is_tuple_actual) {
-          // Find the unset flattened tuple-param GROUP whose leaf count matches
-          // the actual's field count, then expand the fields into it (comptime
-          // const / runtime wire — the positional mirror of the named path).
-          absl::flat_hash_map<std::string, std::size_t> group_count;
-          for (std::size_t i = (has_self ? 1u : 0u); i < nbind; ++i) {
-            if (param_set[i]) {
-              continue;
-            }
-            const auto& pn = io.inputs[i].name;
-            if (auto dp = pn.rfind('.'); dp != std::string::npos) {
-              ++group_count[pn.substr(0, dp)];
-            }
-          }
-          bool matched = false;
-          for (const auto& [prefix, cnt] : group_count) {
-            if (cnt == shape_opt->size() && expand_tuple_actual(a.node.get_name(), prefix)) {
-              matched = true;
-              break;
-            }
-          }
-          if (matched) {
-            continue;
-          }
-        }
-      }
-      // Exception 2: a bare variable whose name matches an unset, non-self
-      // parameter binds to THAT parameter — so reordered calls like `f(b, a)`
-      // bind by name, not position.
-      if (a.node.is_ref()) {
-        const auto nidx = param_index(a.node.get_name());
-        if (nidx < nparams && nidx >= (has_self ? 1u : 0u) && !param_set[nidx]) {
-          bind(nidx);
-          continue;
-        }
-      }
-      // Exception 1: exactly one non-self parameter — a single positional value
-      // (literal, expression, or non-matching variable) maps unambiguously.
-      if (n_named_params == 1) {
-        const auto slot = next_unset(has_self ? 1 : 0);
-        if (slot < nparams) {
-          bind(slot);
-          continue;
-        }
-      }
-      // Exception 3: the actual's kind uniquely identifies one unset, typed,
-      // non-self parameter (`f(true, 7)` → bool→flag, int→n). Untyped params
-      // (kind=none) never match, so an unnamed value beside an untyped param is
-      // still ambiguous and must be named.
-      if (const auto k = actual_kind(a.node); k != Io_kind::none) {
-        std::size_t match = nparams;
-        std::size_t count = 0;
-        for (std::size_t i = (has_self ? 1u : 0u); i < nparams; ++i) {
-          if (!param_set[i] && io.inputs[i].kind == k) {
-            match = i;
-            ++count;
-          }
-        }
-        if (count == 1) {
-          bind(match);
-          continue;
-        }
-      }
-      // Otherwise the positional argument is ambiguous and must be named.
-      const auto  slot  = next_unset(has_self ? 1 : 0);
-      std::string pname = slot < nparams ? io.inputs[slot].name : std::string{"argument"};
-      if (slot >= nparams) {
-        fcall_arg_fail(call_span,
-                       "fcall-too-many-args",
-                       std::format("too many positional arguments in call to `{}`", callee_name),
-                       "remove the extra argument(s) or pass them by name");
-      }
-      fcall_arg_fail(call_span,
-                     "fcall-unnamed-arg",
-                     std::format("argument `{}` must be named (`{}=...`) in call to `{}`", pname, pname, callee_name),
-                     "name the argument, or pass a variable whose name matches the parameter");
-    }
-  }
+  // The full binding ladder (06-functions.md §"Argument naming") lives in the
+  // shared bind_call_actuals so the overload probe (signature_matches) cannot
+  // drift from the real bind. commit=true → fatal diagnostics + whole-tuple→scalar.
+  std::vector<Lnast_node>                         vararg_pos;
+  std::vector<std::pair<std::string, Lnast_node>> vararg_named;
+  std::vector<Lnast_node>                         param_val;
+  std::vector<bool>                               param_set;
+  std::vector<std::string>                        param_func;
+  bind_call_actuals(io, actuals, is_ctor_call, /*commit=*/true, callee_name, call_span, param_val, param_set, param_func,
+                    vararg_pos, vararg_named);
+  const std::size_t nparams    = io.inputs.size();
+  const bool        has_vararg = nparams > 0 && io.inputs[nparams - 1].is_varargs;
+  const std::size_t nbind      = has_vararg ? nparams - 1 : nparams;
+  const bool        has_self   = nbind > 0 && io.inputs[0].name == "self";
 
   // ── pipe/mod declines ─────────────────────────────────────────────────────
   // These run AFTER the argument-naming validation above (06-functions.md
@@ -3474,6 +3488,19 @@ bool uPass_runner::try_inline_func_call() {
     const auto k         = callee->get_lambda_kind();
     const bool is_method = !io.inputs.empty() && io.inputs[0].name == "self";
     if ((k == "mod" || k == "pipe" || k == "fluid") && !is_method) {
+      // Template mod/pipe/fluid specialization returns true unconditionally, so
+      // the general missing-arg check below (3527) is unreachable for these
+      // callees. Run the same check here so an omitted required arg errors
+      // instead of being silently pushed as an invalid actual (is_method==false
+      // here, so there is no self slot to skip).
+      for (std::size_t i = 0; i < nbind; ++i) {
+        if (!param_set[i] && !io.inputs[i].has_default) {
+          fcall_arg_fail(call_span,
+                         "fcall-missing-arg",
+                         std::format("missing required argument `{}` in call to `{}`", io.inputs[i].name, callee_name),
+                         "provide the argument by name");
+        }
+      }
       if (maybe_specialize_template_call(callee,
                                          io,
                                          param_val,
@@ -4603,23 +4630,68 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
       }
       binds[ga.name] = bind_of_explicit_arg(ga.value, std::format("the named bind `{}=…`", ga.name));
     }
-    // Positional binds fill the generics not taken by a name, in decl order.
-    std::size_t pos = 0;
+    // Positional binds follow the SAME naming exceptions as call arguments
+    // (06-functions.md §"Argument naming"), NOT declaration-order fill: a bare
+    // name that matches a generic (exc 2), a single free generic (exc 1), or a
+    // role (type vs value) that uniquely picks one free generic (exc 3). An
+    // ambiguous positional bind (e.g. two free type generics `two<signed,string>`)
+    // must be named `<Name=…>`. Role-matching also fixes the case where the
+    // declaration order does not match the actuals' roles (`<N,T>` bound `<u4,3>`).
+    const auto is_type_generic = [&](const std::string& g) {
+      const auto in_slot = [&](const std::vector<Lnast_io_entry>& es) {
+        return std::any_of(es.begin(), es.end(), [&](const Lnast_io_entry& e) { return e.type_name == g; });
+      };
+      return in_slot(io.inputs) || in_slot(io.outputs);
+    };
     for (const auto& ga : explicit_generics) {
       if (!ga.name.empty()) {
-        continue;
+        continue;  // named binds already applied above
       }
-      while (pos < gens.size() && binds.count(gens[pos]) != 0u) {
-        ++pos;
+      const Generic_bind cand         = bind_of_explicit_arg(ga.value, std::format("the explicit `<…>` argument `{}`", ga.value));
+      const bool         cand_is_type = cand.const_text.empty() && cand.func_name.empty();  // type bind vs value/lambda
+      std::size_t        target       = gens.size();
+      // Exception 2: a bare identifier whose text matches an unbound generic name.
+      if (const auto it = std::find(gens.begin(), gens.end(), ga.value); it != gens.end()) {
+        const auto gi = static_cast<std::size_t>(it - gens.begin());
+        if (binds.count(gens[gi]) == 0u) {
+          target = gi;
+        }
       }
-      if (pos >= gens.size()) {
+      if (target >= gens.size()) {
+        std::vector<std::size_t> free;
+        for (std::size_t i = 0; i < gens.size(); ++i) {
+          if (binds.count(gens[i]) == 0u) {
+            free.push_back(i);
+          }
+        }
+        if (free.size() == 1) {
+          target = free[0];  // Exception 1: the only free generic.
+        } else {
+          // Exception 3: the actual's role (type vs value) selects exactly one.
+          std::size_t match = gens.size();
+          std::size_t count = 0;
+          for (const auto i : free) {
+            if (is_type_generic(gens[i]) == cand_is_type) {
+              match = i;
+              ++count;
+            }
+          }
+          if (count == 1) {
+            target = match;
+          }
+        }
+      }
+      if (target >= gens.size()) {
+        // ga.value is a lowered temp/const by now, not the source text, so name
+        // the ambiguity by role rather than by the (unhelpful) internal ref.
         fcall_arg_fail(call_span,
-                       "fcall-generic-arity",
-                       std::format("`{}` has no free generic slot for a positional bind", callee_name),
-                       "bind the remaining generics by name");
+                       "fcall-generic-unnamed",
+                       std::format("a positional {} generic argument to `{}` is ambiguous and must be named",
+                                   cand_is_type ? "type" : "value", callee_name),
+                       "name it (`<GenericName=…>`) — a positional generic bind resolves only when a single generic, a "
+                       "matching name, or a unique role (type vs value) selects the target");
       }
-      binds[gens[pos]] = bind_of_explicit_arg(ga.value, std::format("the explicit `<…>` argument {}", pos + 1));
-      ++pos;
+      binds[gens[target]] = cand;
     }
     apply_defaults();
     // With an explicit list present, an unbound generic with no default is a
@@ -5272,226 +5344,32 @@ bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<
   const std::size_t nparams    = io.inputs.size();
   const bool        has_vararg = nparams > 0 && io.inputs[nparams - 1].is_varargs;
   const std::size_t nbind      = has_vararg ? nparams - 1 : nparams;
+  const bool        has_self   = nbind > 0 && io.inputs[0].name == "self";
 
-  std::vector<Lnast_node> param_val(nparams, Lnast_node::create_invalid());
-  std::vector<bool>       param_set(nparams, false);
-
-  auto param_index = [&](std::string_view k) -> std::size_t {
-    for (std::size_t i = 0; i < nbind; ++i) {
-      if ((io.inputs[i].name == k)) {
-        return i;
-      }
-    }
-    return nbind;
-  };
-  const bool        has_self       = nbind > 0 && io.inputs[0].name == "self";
-  const std::size_t n_named_params = nbind - (has_self ? 1 : 0);
-
-  // Comptime scalar kind of an actual — the same actual_node_kind() the real
-  // bind (try_inline_func_call) uses, so probe and commit agree on kind.
-  auto classify = [&](const Lnast_node& node) { return actual_node_kind(node); };
-
-  for (const auto& a : actuals) {
-    if (a.is_named) {
-      if (a.key == "self") {
-        return false;  // self is never named
-      }
-      const auto idx = param_index(a.key);
-      if (idx >= nbind) {
-        if (has_vararg) {
-          continue;  // named leftover → var-arg tuple
-        }
-        // Mirror try_inline_func_call's named bundle-leaf expansion: a
-        // bundle-literal actual `ar=(x=2,y=11)` expands into the flattened
-        // leaf params `ar.x`, `ar.y`. The probe MUST accept whatever the real
-        // bind accepts, or a callable overload is rejected here and never
-        // chosen (spurious fcall-no-overload with ≥2 candidates).
-        bool expanded = false;
-        if (a.node.is_ref()) {
-          if (auto bf = try_bundle_fields(a.node.get_name()); bf && !bf->empty()) {
-            expanded = true;
-            for (const auto& [fld, val] : *bf) {
-              const auto leaf = a.key + "." + fld;
-              const auto lidx = param_index(leaf);
-              if (lidx >= nbind || val.is_invalid()) {
-                expanded = false;
-                break;
-              }
-              param_val[lidx] = Lnast_node::create_const(val.to_pyrope());
-              param_set[lidx] = true;
-            }
-          }
-        }
-        if (!expanded) {
-          return false;  // unknown argument
-        }
-        continue;
-      }
-      if (param_set[idx]) {
-        return false;  // duplicate
-      }
-      param_val[idx] = a.node;
-      param_set[idx] = true;
-    } else {
-      const auto next_unset = [&](std::size_t from) -> std::size_t {
-        for (std::size_t i = from; i < nbind; ++i) {
-          if (!param_set[i]) {
-            return i;
-          }
-        }
-        return nbind;
-      };
-      auto bind = [&](std::size_t i) {
-        param_val[i] = a.node;
-        param_set[i] = true;
-      };
-      if (a.is_ref_pass) {
-        const auto slot = next_unset(0);
-        if (slot >= nbind) {
-          if (has_vararg) {
-            continue;
-          }
-          return false;  // too many positional
-        }
-        bind(slot);
-        continue;
-      }
-      if (has_self && !param_set[0]) {
-        bind(0);  // self ← UFCS receiver
-        continue;
-      }
-      if (has_vararg) {
-        const auto slot = next_unset(has_self ? 1 : 0);
-        if (slot < nbind) {
-          bind(slot);
-        }
-        continue;  // fixed params filled; leftover → var-arg tuple
-      }
-      // Overloaded and non-overloaded calls share the SAME callability rules
-      // (06-functions.md §"Argument naming"); a gathered overload only differs
-      // in trying candidates first-to-last. So the positional-binding
-      // disambiguation below mirrors the real bind path exactly: ctor-style
-      // order binding is reserved for is_ctor_call (never reached here — the
-      // probe is invoked with is_ctor_call=false), and otherwise a positional
-      // actual binds only under exceptions 2/1/3.
-      if (is_ctor_call) {
-        const auto slot = next_unset(has_self ? 1 : 0);
-        if (slot >= nparams) {
-          return false;
-        }
-        bind(slot);
-        continue;
-      }
-      // Tuple-shape discrimination (a `does`-style field check): a positional
-      // TUPLE actual binds ONLY to a tuple-shaped param — a group of flattened
-      // leaves sharing a dotted prefix (`p:(x,y)` → io entries `p.x`,`p.y`) whose
-      // field names it structurally covers. It must NEVER fall through to
-      // exception 1 and bind to a lone scalar param (`a:int`). So when the actual
-      // is a readable bundle, match-or-reject here.
-      if (a.node.is_ref()) {
-        auto af              = try_bundle_fields(a.node.get_name());
-        bool is_tuple_actual = false;
-        if (af && !af->empty()) {  // a genuine tuple (named field or >1 entry), NOT a 1-entry scalar
-          is_tuple_actual = af->size() > 1;
-          for (const auto& [fld, fv] : *af) {
-            (void)fv;
-            if (fld.find_first_not_of("0123456789") != std::string::npos) {
-              is_tuple_actual = true;
-              break;
-            }
-          }
-        }
-        if (is_tuple_actual) {
-          // group unset non-self params by their top-level (pre-dot) prefix
-          absl::flat_hash_map<std::string, std::vector<std::size_t>> groups;
-          for (std::size_t i = (has_self ? 1u : 0u); i < nbind; ++i) {
-            if (param_set[i]) {
-              continue;
-            }
-            const auto& pn = io.inputs[i].name;
-            if (auto dp = pn.rfind('.'); dp != std::string::npos) {
-              groups[pn.substr(0, dp)].push_back(i);
-            }
-          }
-          bool matched = false;
-          for (auto& [prefix, idxs] : groups) {
-            if (idxs.size() != af->size()) {
-              continue;
-            }
-            // every actual field name must be a leaf of this param group
-            bool cover = true;
-            for (const auto& [fld, _] : *af) {
-              bool found = false;
-              for (std::size_t idx : idxs) {
-                if (io.inputs[idx].name.substr(prefix.size() + 1) == fld) {
-                  found = true;
-                  break;
-                }
-              }
-              if (!found) {
-                cover = false;
-                break;
-              }
-            }
-            if (cover) {
-              // Bind each leaf to its FIELD's const value (mirroring the real
-              // bind in try_inline_func_call), not the whole tuple ref — else
-              // the per-arg range check below sees a non-const ref and silently
-              // skips range-fit for every tuple-param leaf (cat 2).
-              for (const auto& [fld, val] : *af) {
-                for (std::size_t idx : idxs) {
-                  if (io.inputs[idx].name.substr(prefix.size() + 1) == fld) {
-                    param_val[idx] = val.is_invalid() ? a.node : Lnast_node::create_const(val.to_pyrope());
-                    param_set[idx] = true;
-                    break;
-                  }
-                }
-              }
-              matched = true;
-              break;
-            }
-          }
-          if (!matched) {
-            return false;  // a tuple actual can't bind a scalar param / no matching group
-          }
-          continue;
-        }
-      }
-      if (a.node.is_ref()) {  // exception 2: bare var name matches a param
-        const auto nidx = param_index(a.node.get_name());
-        if (nidx < nparams && nidx >= (has_self ? 1u : 0u) && !param_set[nidx]) {
-          bind(nidx);
-          continue;
-        }
-      }
-      if (n_named_params == 1) {  // exception 1: single non-self param
-        const auto slot = next_unset(has_self ? 1 : 0);
-        if (slot < nparams) {
-          bind(slot);
-          continue;
-        }
-      }
-      if (const auto k = classify(a.node); k != Io_kind::none) {  // exception 3: unique kind
-        std::size_t match = nparams;
-        std::size_t count = 0;
-        for (std::size_t i = (has_self ? 1u : 0u); i < nparams; ++i) {
-          if (!param_set[i] && io.inputs[i].kind == k) {
-            match = i;
-            ++count;
-          }
-        }
-        if (count == 1) {
-          bind(match);
-          continue;
-        }
-      }
-      return false;  // ambiguous / unbindable positional — must be named (same rule)
-    }
+  // Run the SHARED binding ladder in probe mode: commit=false returns false on
+  // any rejection (no fatal diag) and forbids a tuple actual from binding a lone
+  // scalar param. Same code as the real bind, so the two cannot drift;
+  // callee_name/call_span are unused on the non-fatal path.
+  std::vector<Lnast_node>                         param_val;
+  std::vector<bool>                               param_set;
+  std::vector<std::string>                        param_func;
+  std::vector<Lnast_node>                         vararg_pos;
+  std::vector<std::pair<std::string, Lnast_node>> vararg_named;
+  if (!bind_call_actuals(io, actuals, is_ctor_call, /*commit=*/false, /*callee_name=*/{}, livehd::diag::Span{}, param_val,
+                         param_set, param_func, vararg_pos, vararg_named)) {
+    return false;
   }
 
-  // Every non-self FIXED parameter must be bound (io_meta carries no defaults).
+  // Comptime scalar kind of an actual — the same actual_node_kind() the real
+  // bind uses, so probe and commit agree on kind.
+  auto classify = [&](const Lnast_node& node) { return actual_node_kind(node); };
+
+  // Every non-self FIXED parameter must be bound, EXCEPT a param with a declared
+  // default (io_meta.has_default): an omitted default takes the body-prologue
+  // value, mirroring the real bind (try_inline_func_call, ~L3527). io_meta DOES
+  // carry defaults, so a defaulted-param candidate must not be rejected here.
   for (std::size_t i = (has_self ? 1 : 0); i < nbind; ++i) {
-    if (!param_set[i]) {
+    if (!param_set[i] && !io.inputs[i].has_default) {
       return false;  // missing required argument
     }
   }

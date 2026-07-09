@@ -267,9 +267,17 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
         enc_unsupported_ = true;
         return std::nullopt;
       }
-      Term a = lec::fit_to(tm_, pid(0)[0], W);
-      Term b = lec::fit_to(tm_, pid(1)[0], W);
-      result = tm_.mkTerm(out_signed ? Kind::BITVECTOR_SDIV : Kind::BITVECTOR_UDIV, {a, b});
+      // Division is NOT modular like add/mult: fitting the operands to the
+      // (often tiny) output width W corrupts it. Bitwidth analysis stamps the
+      // QUOTIENT width on the Div pin — e.g. `c/100` with c:u3 always yields 0,
+      // so W is ~1 bit and `fit(100, 1)` truncates the divisor to 0 =>
+      // UDIV-by-zero => all-ones garbage. Compute at a width holding both
+      // operands, then narrow to W (matches pass/lec/encode.cpp).
+      int  dw = std::max({pid(0)[0].width, pid(1)[0].width, W});
+      Term a  = lec::fit_to(tm_, pid(0)[0], dw);
+      Term b  = lec::fit_to(tm_, pid(1)[0], dw);
+      Term q  = tm_.mkTerm(out_signed ? Kind::BITVECTOR_SDIV : Kind::BITVECTOR_UDIV, {a, b});
+      result  = lec::fit_to(tm_, Val{q, dw, out_signed}, W);
       break;
     }
     case Ntype_op::Not: {
@@ -325,12 +333,21 @@ std::optional<Val> Prover::encode_comb(const hhds::Node_class& node, const hhds:
       Term acc;
       for (const auto& a : as) {
         for (const auto& b : bs) {
-          bool both_signed = a.is_signed && b.is_signed;
-          int  cw          = std::max(a.width, b.width);
-          Term la          = lec::fit_to(tm_, Val{a.term, a.width, both_signed}, cw);
-          Term lb          = lec::fit_to(tm_, Val{b.term, b.width, both_signed}, cw);
-          Kind cmp         = (op == Ntype_op::LT) ? (both_signed ? Kind::BITVECTOR_SLT : Kind::BITVECTOR_ULT)
-                                                  : (both_signed ? Kind::BITVECTOR_SGT : Kind::BITVECTOR_UGT);
+          // Pyrope compares by VALUE, so the compare is signed whenever EITHER
+          // operand is signed (not only when BOTH are): a signed value vs a
+          // non-negative (front-end-unsigned) constant must still order by
+          // signed value. Extend each operand per ITS OWN sign; for a MIXED
+          // pair add one headroom bit so the unsigned operand's top bit is not
+          // misread as a sign bit (matches pass/lec/encode.cpp).
+          bool use_signed = a.is_signed || b.is_signed;
+          int  cw         = std::max(a.width, b.width);
+          if (a.is_signed != b.is_signed) {
+            cw += 1;  // mixed sign: keep the unsigned operand non-negative
+          }
+          Term la  = lec::fit_to(tm_, Val{a.term, a.width, a.is_signed}, cw);
+          Term lb  = lec::fit_to(tm_, Val{b.term, b.width, b.is_signed}, cw);
+          Kind cmp = (op == Ntype_op::LT) ? (use_signed ? Kind::BITVECTOR_SLT : Kind::BITVECTOR_ULT)
+                                          : (use_signed ? Kind::BITVECTOR_SGT : Kind::BITVECTOR_UGT);
           Term one         = tm_.mkTerm(cmp, {la, lb});
           acc              = acc.isNull() ? one : tm_.mkTerm(Kind::AND, {acc, one});
         }
