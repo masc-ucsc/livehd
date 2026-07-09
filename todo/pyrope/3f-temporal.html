@@ -13,23 +13,23 @@
 <p><code>past[n](x)</code> (compiler inserts <code>n</code> flops),
   <code>next[n](x)</code>, <code>rose</code>/<code>fell</code>/<code>stable</code>/<code>changed</code>/<code>eventually[w]</code>/<code>always[w]</code>,
   and the attribute sugar <code>sig.[rising]</code>/<code>.[falling]</code>/<code>.[changed]</code>.
-  Everything except <code>past</code> is debug-only. No semantic handling
-  exists anywhere today (zero hits in prp2lnast/upass).</p>
+  Everything except <code>past</code> is debug-only. A partial <code>past</code>
+  lowering exists (<code>prp_builtins.hpp</code> <code>past_builtin_delay</code>) but it
+  currently fails the LEC acceptance below; the remaining operators have no
+  semantic handling anywhere.</p>
 <p>This page owns the <strong>temporal-operator lowering</strong> (the flops behind
   <code>past</code>/<code>next</code>, and the debug-block evaluation of
   <code>rose</code>/<code>fell</code>/<code>eventually</code>/…). <strong>Formally
   proving</strong> the assertions those operators feed
   (<code>assert(rose(req) implies eventually[1..=10](rose(ack)))</code>) is the job of
-  <a class="xref" href="../livehd/2f-formal.html">2f-formal</a>, not this task. Its
-  initial flop-cut single-frame engine is only the substrate; bounded temporal proofs
-  require that task's deferred reachable-state BMC/k-induction extension.</p>
+  the <a class="xref" href="../livehd/2f-verify.html">2f-verify</a> engine (incremental
+  BMC + 1-induction Houdini verdict ladder), not this task.</p>
 <h2>Depends on</h2>
-<p><a class="xref" href="../livehd/2f-formal.html">2f-formal</a> (LiveHD, Group 2) — the
+<p><a class="xref" href="../livehd/2f-verify.html">2f-verify</a> (LiveHD, Group 2) — the
   <code>assert</code>/<code>assume</code> formal-proof substrate. Temporal operators here
-  produce the <code>cond</code> signals. The initial single-frame tier can classify only
-  properties supported by that model; formally proving temporal
-  <code>eventually</code>/<code>always</code> windows over reachable states is gated on
-  <code>2f-formal</code>'s deferred BMC/k-induction track.</p>
+  produce the <code>cond</code> signals; proving temporal
+  <code>eventually</code>/<code>always</code> windows over reachable states uses that
+  task's incremental BMC + 1-induction Houdini verdict ladder.</p>
 <h2>Failing example (pyrope/verilog pair)</h2>
 <pre><code>// delay2.prp
 mod delay2(a:u8) -&gt; (out:u8@[2]) {

@@ -43,11 +43,12 @@ cc_library(
     alwayslink = True,  # static Pass_plugin registration
 )
 
-# cvc5 link smoke test: the prebuilt static cvc5 links and a QF_ABV query runs
-# through cvc5's own C++ API (the API pass/lec is built directly on).
+# cvc5 link smoke check: the prebuilt static cvc5 links and a QF_ABV query runs
+# through cvc5's own C++ API (the API pass/lec is built directly on). Standalone
+# (no corresponding cvc5_link.cpp), so no _test suffix.
 cc_test(
-    name = "cvc5_link_test",
-    srcs = ["tests/cvc5_link_test.cpp"],
+    name = "cvc5_link_smoke",
+    srcs = ["tests/cvc5_link_smoke.cpp"],
     copts = COPTS,
     deps = [
         "@cvc5",
@@ -55,10 +56,11 @@ cc_test(
     ],
 )
 
-# M1 acceptance: encode + prove_equal on tiny combinational graphs.
+# M1 acceptance: encode + prove_equal (the query.cpp API) on tiny combinational
+# graphs.
 cc_test(
-    name = "comb_equiv_test",
-    srcs = ["tests/comb_equiv_test.cpp"],
+    name = "query_test",
+    srcs = ["tests/query_test.cpp"],
     copts = COPTS,
     deps = [
         ":lec_query",

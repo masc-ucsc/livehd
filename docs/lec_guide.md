@@ -166,4 +166,4 @@ CaDiCaL crash below). Regression: `pass/lec/tests/lec_mem_test.sh`.
 
 - Engine: `pass/lec/{encode,query}.{hpp,cpp}`, design doc `pass/lec/lec.md`.
 - CLI: `lhd/lhd_kernel.cpp` (`lec_command`, `load_side_graphs`).
-- Tests: `pass/lec/` (`comb_equiv_test`, `lec_cross_test`).
+- Tests: `pass/lec/` (`query_test`, `lec_cross_test`).

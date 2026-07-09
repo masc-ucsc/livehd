@@ -1,7 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
 // pass.formal Prover acceptance: single-design property verdicts on tiny
-// hand-built graphs (no reader). Mirrors pass/lec comb_equiv_test's builders.
+// hand-built graphs (no reader). Mirrors pass/lec query_test's builders.
 
 #include <memory>
 #include <string>

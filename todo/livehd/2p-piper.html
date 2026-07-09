@@ -3,250 +3,114 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TODO 2p-piper — pass.piper: lgraph pipeline timing (verify + stage insertion)</title>
+<title>TODO 2p-piper — pass.piper: extract pipeline timing out of upass_tolg</title>
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">2p-piper</strong> pass.piper — lgraph pipeline timing: verify <code>@[N]</code> + insert <code>stage</code></h1>
+<h1><strong class="item-id">2p-piper</strong> pass.piper — move pipeline-timing resolution out of <code>upass_tolg</code> into an lgraph pass</h1>
 
-<p>Pyrope's pipeline timing has two primitives
-(<a href="https://masc-ucsc.github.io/docs/livehd/pyrope/06c-pipelining/">06c-pipelining</a>):
-<code>@[N]</code> — a <strong>pure, exact cycle-count type check</strong> (asserts a value lands at
-absolute cycle <code>N</code> counted from the enclosing <code>mod</code>/<code>pipe</code>
-inputs; <em>never</em> inserts flops; mismatch = compile error), and <code>stage[N]</code> — the
-<strong>action</strong> that <em>inserts</em> <code>N</code> pipeline stages (the RHS delivered
-<code>N</code> cycles later; <code>mod</code>-only). Today this logic is smeared across three
-places and the insertion side is wrong/incomplete, so a verifier run against the lowered graph is
-checking a graph that does not yet reflect real <code>stage</code> semantics. <strong>2p-piper</strong>
-adds a single lgraph pass <code>pass.piper</code> that owns <em>both</em> the verification and the
-flop insertion, decided where the global timing information actually lives.</p>
+<p><strong>Goal (unchanged): consolidation.</strong> The pipeline-timing resolution — &sigma;
+interval propagation, <code>@[N]</code> discharge, depth narrowing — lives today as an
+<em>inline</em> class at the tolg seam. Extract it into a standalone, re-runnable lgraph pass
+<code>pass.piper</code> (no <code>pass/piper/</code> exists yet), leaving tolg to lowering +
+attr stamping only. <strong>The original design premise is dead:</strong> there is no
+<code>Ntype_op::Stage</code> cell and none is needed — the landed mechanism carries pipeline
+depth as comptime pins on plain <code>Flop</code> cells, and the resolution/narrowing/discharge
+already landed inside tolg. This page re-specs the extraction against that reality.</p>
 
-<p><strong>Why one pass.</strong> tolg lowers statement-by-statement and has no global timing picture,
-so it cannot soundly decide how many flops a <code>stage[…]</code> needs (especially ranged /
-tool-picked counts — it currently hard-errors <code>not supported yet</code> at
-<a href="../../upass/tolg/upass_tolg.cpp"><code>upass_tolg.cpp:2539,2584</code></a>). piper holds the
-&sigma; (stage) solution and the <code>@[N]</code> constraints, so the decision belongs there. You
-cannot meaningfully verify until insertion is correct, hence <strong>verify + insert together</strong>.</p>
+<h2>Landed mechanism — the starting point</h2>
+<p>Pipeline depth is a <em>cell parameter</em>, never replicated cells: every <code>Flop</code>
+has comptime const <code>pipe_min</code>/<code>pipe_max</code> sink pins (pids 8/9,
+<a href="../../graph/cell.cpp"><code>graph/cell.cpp:248-257</code></a>; unset = depth 1;
+<code>min==max</code> = fixed; <code>min&lt;max</code> = tool's choice — cgen realizes
+<code>pipe_min</code> stages,
+<a href="../../inou/cgen/cgen_verilog.cpp"><code>cgen_verilog.cpp:2167-2180</code></a>).
+<a href="../../upass/timecheck/upass_timecheck.cpp"><code>upass.timecheck</code></a> gives LNAST-level
+best-effort early diagnostics (discharges trivially-fixed <code>@[N]</code> by stamping
+<code>const("checked")</code>, defers hard cases);
+<a href="../../upass/pipe/upass_pipe.cpp"><code>upass.pipe</code></a> appends the
+<code>%pipe_*</code> output flops for <code>pipe</code> lambdas. The real work is the inline
+<code>Time_checker</code>
+(<a href="../../upass/tolg/upass_tolg.cpp"><code>upass_tolg.cpp:5499-6258</code></a>, run at the
+tolg seam ~<code>6885</code> for <code>pipe</code>/<code>mod</code>/<code>comb</code>): (1) Tarjan
+SCC classifies flops STATE vs feedforward stage (comb-loop + register-feedback errors); (2) two-pass
+forward (min,max) &sigma; interval propagation (inputs (0,0), consts unify with anything, comb =
+equal-meet, stage <code>Flop</code> adds its depth, <code>Sub</code> adds its pinned
+<code>attrs::time_range</code>, state pins &sigma;(q)=&sigma;(din)); (3) narrows LN-inserted pipe
+output flops to the body deficit by rewriting their <code>pipe_min</code>/<code>pipe_max</code>
+const pins — (0,0) realizes as a wire, &sigma;&gt;min is the latency-exceeded error; (4) discharges
+every <code>pending_time</code> record
+(<a href="../../graph/attrs.hpp"><code>attrs.hpp:208-215</code></a>) — verified records get
+<code>.del()</code>, mismatches error. The <code>stage[N]</code>/<code>@[N]</code> LEC equiv suite
+(<code>prp-equiv-*</code>, <a href="../../inou/prp/tests/equiv/"><code>inou/prp/tests/equiv/</code></a>)
+and most error cases (<a href="../../inou/prp/tests/errors/"><code>inou/prp/tests/errors/</code></a>)
+already exist — they are the parity bed for the migration, not pending work.</p>
 
-<h2>The model — one cell, three roles</h2>
-<table>
-<thead><tr><th>Component</th><th>Role after 2p-piper</th></tr></thead>
-<tbody>
-<tr><td><code>upass.timecheck</code> (LNAST)<br><a href="../../upass/timecheck/upass_timecheck.cpp"><code>upass_timecheck.cpp</code></a></td>
-<td><strong>Unchanged.</strong> Fast best-effort early diagnostics: discharges trivially-fixed
-<code>@[N]</code> (stamps <code>const("checked")</code>), defers every hard case (branch-written
-values, plain-reg state/stage classification, ranged <code>@[A..=B]</code>) to the graph level. Keeps
-early errors + LSP diagnostics before lowering.</td></tr>
-<tr><td><code>upass.tolg</code><br><a href="../../upass/tolg/upass_tolg.cpp"><code>upass_tolg.cpp</code></a></td>
-<td><strong>Shrinks to lowering only.</strong> Stamps the timing attrs it already stamps
-(<code>pending_time</code>, <code>time_range</code>, flop <code>pipe_min</code>/<code>pipe_max</code>)
-<em>and emits a <code>Stage</code> cell</em> at every deferred flop-insertion point. Decides
-<em>no</em> counts. The inline <code>Time_checker</code> (lines ~4125&ndash;4815) is <strong>deleted</strong>
-(migrated to piper).</td></tr>
-<tr><td><code>pass.piper</code> (NEW)</td>
-<td><strong>Owns timing.</strong> (1) verify — &sigma;/SCC propagation + <code>@[N]</code> discharge
-(ported <code>Time_checker</code>); (2) resolve every <code>Stage</code> cell as one
-difference-constraint system; (3) rewrite each <code>Stage</code> &rarr; flop chain / wire; (4)
-LEC-verify the result.</td></tr>
-</tbody>
-</table>
-
-<h2>New cell: <code>Ntype_op::Stage</code></h2>
-<p>A first-class <strong>undecided pipeline stage</strong>: the value exists but its flop count is not
-yet chosen. Codegen is illegal while one survives — the gate that enforces "we cannot generate code
-until the stage is decided".</p>
-<ul>
-<li><strong>Shape.</strong> <code>Stage(din, pipe_min, pipe_max[, clock_pin, reset_pin])</code>; driver
-pin 0 = the staged value. <code>pipe_min</code>/<code>pipe_max</code> = <strong>allowed flop-insertion
-count</strong> (pipeline depth, relative, <code>&ge;0</code>) carried as const-driven sink pins — the
-<em>same</em> sink names the <code>Flop</code> already uses for its pipe depth
-(<a href="../../upass/tolg/upass_tolg.cpp"><code>upass_tolg.cpp:2603-2604</code></a>). <strong>Named
-<code>pipe_*</code> deliberately</strong> — not <code>min</code>/<code>max</code>, which would collide
-with <code>bw_min</code>/<code>bw_max</code> (the integer <em>bitwidth</em> range, a different concept).
-<code>0</code> flops &rArr; resolves to a wire (bypass); <code>k</code> &rArr; a <code>k</code>-deep flop
-chain.</li>
-<li><strong>Width comes from <code>din</code>.</strong> The staged output inherits <code>din</code>'s
-bits/sign ("whatever din had") — no <code>bw_*</code> stamping on the cell, only the
-<code>pipe_*</code> depth. Resolves the 1-bit-truncation trap that bites hand-stamped cells.</li>
-<li><strong>Clock required, reset optional.</strong> <code>clock_pin</code> is needed to materialize the
-flops; <code>reset_pin</code> defaults to <em>none</em> — a pipeline-stage flop is pure feedforward
-transport (reset value don't-care / retiming-free), so reset is carried only when the source semantics
-demand a reset value.</li>
-<li><strong>Always feedforward.</strong> State lives in <code>reg</code>, never in a stage — so in
-piper's SCC a <code>Stage</code> is a cut edge, never part of a state loop (a <code>Stage</code> with a
-possible <code>0</code> count only ever appears where it cannot close a comb loop: output padding feeds
-nothing internal).</li>
-<li><strong>Plumbing.</strong> add the enum + attr registration in
-<a href="../../graph/cell.hpp"><code>graph/cell.hpp</code></a> /
-<a href="../../graph/cell.cpp"><code>graph/cell.cpp</code></a> (registration site
-<code>cell.cpp:34-35</code>); add <code>is_type_stage()</code> next to
-<code>is_type_flop</code>/<code>is_type_register</code> in
-<a href="../../graph/node_util.hpp"><code>graph/node_util.hpp:113-121</code></a>.</li>
-</ul>
-
-<h2>tolg — emit <code>Stage</code> cells (unify every insertion point)</h2>
-<p>The <code>Stage</code> cell subsumes <strong>all</strong> deferred flop insertion, one mechanism:</p>
-<ul>
-<li><code>create_stage_flop</code> (<a href="../../upass/tolg/upass_tolg.cpp"><code>upass_tolg.cpp:2508</code></a>)
-&rarr; <code>create_stage_cell</code>: emit a <code>Stage</code> with the <em>legal</em>
-<code>pipe_min</code>/<code>pipe_max</code> range instead of materializing <code>Flop</code>s. fixed
-<code>stage[N]</code> on a value &rArr; <code>pipe_min=pipe_max=N</code>; on a pipe/mod call (picked
-latency <code>M</code>, callee min <code>cmin</code>) &rArr; the caller-side deficit
-<code>pipe_min=pipe_max=M&minus;cmin</code>; <code>stage[]</code> / <code>stage[A..=B]</code> /
-bare-or-ranged <code>pipe</code> &rArr; the full legal range <code>pipe_min=a, pipe_max=b</code> (these
-are exactly the cases tolg errors on today).</li>
-<li>pipe-output padding (today's LN-inserted <code>___pipe_*</code> flops) &rArr; a <code>Stage</code> at
-the output with <code>pipe_min=0, pipe_max=deficit</code> (&sigma; &le; N, pad N&minus;&sigma;).</li>
-<li>Keep the attr-stamping piper reads: <code>pending_time</code> on driver pins / GraphIO sinks
-(<a href="../../graph/attrs.hpp"><code>attrs.hpp:194-201</code></a>), Sub-instance
-<code>time_range</code> (<code>attrs.hpp:180-187</code>), io_meta
-<code>stages_min</code>/<code>stages_max</code>
-(<a href="../../lnast/lnast.hpp"><code>lnast.hpp:123-124</code></a>).</li>
-<li>The two currently in-memory bits passed to <code>Time_checker</code> (the
-<code>plain_regs_</code> state-eligibility set and <code>wire_cuts_</code> Verilog comb-cycle markers)
-become small marker attrs so they survive the pass boundary. Everything else (SCC membership,
-enable-driven detection, <code>___pipe_</code> name tag) is re-derivable structurally.</li>
-</ul>
-
-<h2>pass.piper — resolver + verifier</h2>
-<p>Port the algorithm from the inline <code>Time_checker</code>
-(<a href="../../upass/tolg/upass_tolg.cpp"><code>upass_tolg.cpp:4125-4815</code></a>, <code>run()</code>
-at <code>4221-4623</code>) into <code>pass/piper/piper_timecheck.{hpp,cpp}</code>, then extend it to
-resolve <code>Stage</code> cells:</p>
+<h2>Pending</h2>
 <ol>
-<li><strong>Build node digraph</strong> (exclude consts / graph-input pins; honor the comb-cycle
-wire-cut markers), <strong>Tarjan SCC</strong> &rarr; classify each flop STATE
-(Verilog-origin OR enable-driven OR in a feedback SCC) vs FEEDFORWARD; a non-state flop inside a
-feedback SCC = "register feedback through stage registers" error; a flopless SCC = combinational
-loop.</li>
-<li><strong>Forward &sigma; interval propagation</strong> (topo order): input pins
-<code>&sigma;=0</code>; consts unify with any cycle; comb op = equal-meet / interval intersection of
-operands (empty = cross-stage mix error); <code>Stage(x, pipe_min=a, pipe_max=b)</code> contributes
-<code>&sigma;(out) &isin; [&sigma;(x)+a, &sigma;(x)+b]</code>; state flop <code>&sigma;(q)=&sigma;(din)</code>
-(pinned, re-fixpointed); <code>past[n](x)</code> <code>&sigma;=&sigma;(x)+n</code>; Sub adds its pinned
-<code>time_range</code>.</li>
-<li><strong>Pin by constraints.</strong> Each <code>@[N]</code> (driver pin / mod-output sink) and the
-output contract intersects the interval at that point. Where a <code>Stage</code>'s effective count is
-forced to a point, use it; where a range stays free, pick the <strong>minimum legal depth</strong>
-(fewest flops). An empty intersection is a compile error naming the offending <code>@[N]</code> /
-output and both stages.</li>
-<li><strong>Rewrite each <code>Stage</code>.</strong> chosen <code>k=0</code> &rArr; bypass <code>din</code>
-to the consumers, delete the cell; <code>k&ge;1</code> &rArr; a <code>k</code>-deep <code>Flop</code>
-chain (clock/reset from the <code>Stage</code>, bits/sign from <code>din</code>,
-<code>retime=true</code> so downstream <code>pass.abc</code>/synth may move them), reconnect consumers
-to the last <code>q</code>.</li>
-<li><strong>Discharge.</strong> Verify computed &sigma; against every <code>pending_time</code> (exact
-<code>==</code> for <code>@[N]</code> and <code>mod</code> outputs; <code>&le;</code> + pad for
-<code>pipe</code> outputs), <code>.del()</code> the attr on success; any leftover
-<code>pending_time</code> = compile error (matches the existing leftover-is-error contract,
-<code>attrs.hpp:189-201</code>, <code>upass_tolg.cpp:4549-4623</code>).</li>
-<li><strong>LEC.</strong> Each resolved result is checked logically equivalent to the canonical
-reference (comb body + <code>N</code> appended output flops), the contract the docs guarantee
-(06c-pipelining "retiming-equivalent to the canonical spelling").</li>
+<li><strong>Extract <code>Time_checker</code> &rarr; <code>pass/piper/</code>.</strong> The blocker
+is that the checker consumes six <em>in-memory</em> maps handed over from the lowering builder
+(<code>take_pending_checks / flop_depths / sub_times / plain_reg_flops / inserted_flops /
+wire_cuts</code>, <a href="../../upass/tolg/upass_tolg.cpp"><code>upass_tolg.cpp:5450-5469</code></a>)
+— that coupling is what keeps it inside tolg. Three are already durable on the graph
+(<code>pending_time</code> attr, <code>pipe_min</code>/<code>pipe_max</code> pins, Sub
+<code>attrs::time_range</code>); the other three (<code>plain_regs_</code> state-eligibility,
+<code>inserted_</code> LN-pipe-flop marker, <code>wire_cuts_</code> comb-cycle markers) need small
+marker attrs or structural re-derivation. Standard plumbing:
+<code>pass/piper/{BUILD, pass_piper.{hpp,cpp}, piper_test.cpp}</code>, <code>Pass_plugin</code>
+registration (template <a href="../../pass/sample/pass_sample.cpp"><code>pass/sample</code></a>),
+pass order <code>tolg &rarr; piper &rarr; cprop</code>. Keep the <code>comb</code>-top
+acyclicity-only phase (2c-wire) working across the seam — either piper handles <code>comb</code>
+tops too, or tolg retains a minimal comb-loop check.</li>
+<li><strong>Real range narrowing.</strong> Today narrowing only fires on LN-inserted output flops
+with a <em>fixed</em> body &sigma; ("ranged body sigma — declared depth stands",
+<a href="../../upass/tolg/upass_tolg.cpp"><code>upass_tolg.cpp:5956</code></a>), and discharge
+demands <em>exact interval equality</em> (<code>upass_tolg.cpp:6038</code>) even though the attr
+contract documents "computed &sube; asserted" (<code>attrs.hpp:208-212</code>). piper should do the
+constraint intersection the original spec wanted — intersect ranged flop depths against
+<code>@[N]</code>/interface constraints, pick the minimum legal depth where a range stays free,
+error on empty intersection — and settle subset-vs-equality for discharge.</li>
+<li><strong>2 missing error tests</strong> (3 of the 5 originally listed exist:
+<code>cycle_check_mismatch</code>/<code>cycle_lhs_mismatch</code>, <code>pipe_bad_mix</code>/<code>call_operand_misaligned</code>,
+<code>reg_home_mismatch</code>). Re-specified: (a) <em>unsatisfiable depth range</em> — a ranged
+<code>stage[A..=B]</code> whose interval cannot meet a fixed <code>@[N]</code>/output cycle
+(the ranged-vs-fixed conflict path is untested; <code>mod_cycle_range</code> only covers
+fixed-vs-declared-range); (b) <em>leftover-obligation guard</em> — the residual-Stage-at-cgen guard
+is obsolete (ranged <code>pipe_min&lt;pipe_max</code> flops are <em>legal</em> at cgen), but its
+landed analogue is real: "records still present after the checker are a compile error"
+(<code>attrs.hpp:212</code>) has no enforcement point outside the checker's own run — piper should
+own a leftover-<code>pending_time</code> check, exercised by a gtest on a hand-built graph.</li>
+<li><strong>Decide where the global &sigma; timing lives.</strong> Today &sigma; is computed
+per-lambda at the tolg seam and thrown away; cross-module latency flows only through the pinned
+per-instance <code>time_range</code> on <code>Sub</code> nodes. Decide: v1 piper stays per-graph
+with Sub contributions (matching today), or persists &sigma;/per-module latency (an attr or library
+side table) so a later hierarchical run and LSP queries can read it without re-solving.</li>
 </ol>
 
-<h2>Guards — no codegen with an undecided <code>Stage</code></h2>
-<p>A residual <code>Stage</code> cell is a hard error in <code>cgen</code> and every structural consumer
-(<code>pass.abc</code>, <code>pass.lec</code>, <code>pass.partition</code>, <code>pass.semdiff</code>, the
-prp/verilog writers): <code>"undecided pipeline stage — run pass.piper first"</code>. Centralize via one
-helper (e.g. <code>graph_util::assert_no_stage(g)</code> or a check in the cgen cell dispatch).</p>
-
-<h2>Consolidation / removals</h2>
+<h2>Dropped from the old spec</h2>
 <ul>
-<li><strong><code>upass.pipe</code> insertion folded into piper.</strong> Remove the LNAST-level
-pipe-output flop insertion (<a href="../../upass/pipe/upass_pipe.cpp"><code>upass_pipe.cpp:81-109</code></a>);
-the pipe-output registration becomes a <code>Stage(out,0,deficit)</code> emitted by tolg and resolved by
-piper. One insertion site.</li>
-<li><strong>tolg <code>Time_checker</code> deleted</strong> (~<code>upass_tolg.cpp:4125-4815</code>) and
-its in-memory maps; the attr-stamping stays.</li>
-</ul>
-
-<h2>v1 boundary (deferred to a v2 follow-on)</h2>
-<ul>
-<li><code>.[valid]</code> bubble clock-gating on inserted flops (clock-gate on invalid cycles as
-bubbles travel — 06c-pipelining).</li>
-<li>piper-side retiming / rebalancing (distribute flops through logic, Leiserson&ndash;Saxe). v1 inserts
-the literal flops the annotations demand and marks them <code>retime=true</code> so a later
-<code>pass.abc</code>/synth step owns physical placement.</li>
-<li>Hierarchical descent — v1 is per-graph (Sub <code>time_range</code> already carries the callee's
-latency contribution); a <code>--set pass.piper.hier=true</code> descent comes later.</li>
-</ul>
-
-<h2>Decisions locked (clarification 2026-06-20)</h2>
-<ul>
-<li><strong>Extract + extend.</strong> piper is the single standalone, re-runnable lgraph timing pass;
-the inline tolg checker is moved into it, not duplicated.</li>
-<li><strong>Verify + insert together</strong> in v1 — because the current (insertion-less / wrong)
-graph cannot be soundly verified.</li>
-<li><strong>Literal placement + LEC</strong>: minimum legal depth where free, <code>retime=true</code>,
-no piper-side retiming, <code>.[valid]</code> deferred.</li>
-<li><strong><code>Stage</code> cell unifies every insertion point</strong>; tolg emits the legal range,
-piper decides the count.</li>
-<li><strong>Cell shape <code>Stage(din, pipe_min, pipe_max[, clock_pin, reset_pin])</code></strong>:
-depth named <code>pipe_*</code> (not <code>min</code>/<code>max</code> — avoids the <code>bw_*</code>
-bitwidth collision); bits/sign inherited from <code>din</code>; clock required; reset optional
-(default none, pure-transport flop).</li>
-<li><strong><code>@[N]</code> is exact</strong> (not "at least N"): the "pad up to / at least N"
-behavior belongs to plain/pipe-output padding (&sigma; &le; N) and to <code>stage[N]</code>, never to
-the <code>@[N]</code> check itself.</li>
-</ul>
-
-<h2>Files / build / pass order</h2>
-<ul>
-<li><code>pass/piper/{BUILD, pass_piper.{hpp,cpp}, piper_timecheck.{hpp,cpp}, piper_test.cpp}</code>.
-<code>cc_library</code> with <code>alwayslink=True</code>, <code>deps</code> on
-<code>//pass/common:pass</code>, <code>//graph</code>, <code>//pass/lec</code> (the LEC check); add
-<code>//pass/piper:pass_piper</code> to <a href="../../lhd/BUILD"><code>lhd/BUILD</code></a>. Register
-<code>lhd pass piper</code> via the <code>static Pass_plugin</code> + <code>setup()</code> +
-<code>register_pass(Eprp_method)</code> pattern (template
-<a href="../../pass/partition/pass_partition.cpp"><code>pass/partition</code></a>,
-<a href="../../pass/sample/pass_sample.cpp"><code>pass_sample.cpp:30</code></a>).</li>
-<li><strong>Pass order:</strong> <code>tolg &rarr; piper &rarr; cprop &rarr; bitwidth &rarr; abc &rarr;
-cgen</code>. piper runs <em>pre-<code>cprop</code></em> so it sees the as-lowered structure and resolves
-every <code>Stage</code> before optimization (single run; no post-opt re-verify in v1).</li>
+<li><code>Ntype_op::Stage</code> cell, <code>is_type_stage()</code>, tolg
+<code>create_stage_cell</code> emission — superseded: depth pins on plain <code>Flop</code>s landed
+instead.</li>
+<li>Residual-<code>Stage</code> guards in cgen/abc/lec/writers — nothing undecided survives; a
+ranged depth is a legal parameter (cgen realizes <code>pipe_min</code>).</li>
+<li>Stage-rewrite step + per-rewrite LEC — flop chains are realized directly by cgen from the depth
+parameter; equivalence is covered by the existing <code>prp-equiv-*</code> suite.</li>
+<li>Folding <code>upass.pipe</code> into piper — insertion is already unified on ranged
+<code>Flop</code> pins; <code>upass.pipe</code> stays as the one LNAST insertion site, piper owns
+only the narrowing.</li>
+<li>Still out of scope (as before): piper-side retiming/rebalancing and <code>.[valid]</code>
+bubble clock-gating — synth owns physical placement.</li>
 </ul>
 
 <h2>Tests</h2>
 <ul>
-<li><strong>LEC equiv</strong> (<code>inou/prp/tests/equiv/</code>): each <code>stage[N]</code> /
-<code>@[N]</code> source, resolved by piper, LEC-equal to its canonical comb+output-flops reference and
-to alternate legal spellings (the multiply-add / <code>res2a</code> examples in 06c-pipelining are
-ready-made cases).</li>
-<li><strong>Error tests</strong>: <code>@[N]</code> mismatch, cross-stage operand mix, registered-output
-home-stage, an unsatisfiable <code>Stage</code> range, and a residual-<code>Stage</code>-at-cgen guard
-trip.</li>
-<li><strong>Parity</strong>: every case the current tolg <code>Time_checker</code> passes/rejects must
-behave identically after migration (run the existing timecheck regressions against piper).</li>
-<li><strong>Unit</strong>: gtest over hand-built graphs (input&rarr;Stage chains&rarr;output) asserting
-&sigma; / chosen depth / rewrite shape (template
-<a href="../../pass/sample/sample_test2.cpp"><code>sample_test2.cpp</code></a>).</li>
-</ul>
-
-<h2>Implementation order</h2>
-<ol>
-<li><strong>(a) <code>Stage</code> cell + tolg emission first.</strong> Add <code>Ntype_op::Stage</code> +
-<code>is_type_stage</code>; convert <code>create_stage_flop</code> &rarr; <code>create_stage_cell</code>;
-add the cgen/structural residual-<code>Stage</code> guard. At this checkpoint the graph carries
-undecided stages and codegen errors cleanly — reviewable in isolation.</li>
-<li><strong>(b) Migrate timecheck/tolg/pipe into piper.</strong> Move the tolg <code>Time_checker</code>
-into <code>pass/piper</code>, fold in <code>upass.pipe</code>'s output insertion, add the
-<code>Stage</code> resolver + rewrite + LEC, wire the pass order, delete the dead inline checker.</li>
-</ol>
-
-<h2>Risks / open</h2>
-<ul>
-<li>Interval &sigma; over <code>Stage</code> ranges + comb meets is a difference-constraint solve
-(weighted union-find, per 06c-pipelining); v1 keeps it simple (propagate intervals, intersect at meets,
-pin at <code>@[N]</code>, min-legal where free) — confirm this covers the real corpus before reaching
-for a general solver.</li>
-<li>Coverage parity between <code>upass.timecheck</code> (LNAST best-effort) and piper is currently
-unverified; the migration must not silently drop a check the inline <code>Time_checker</code> caught.</li>
-<li>Keep <code>pipe_min</code>/<code>pipe_max</code> (pipeline depth) strictly separate from
-<code>bw_min</code>/<code>bw_max</code> (integer bitwidth) — same shape, different meaning. The staged
-output's bits/sign is inherited from <code>din</code>, which sidesteps the 1-bit-truncation stamping
-trap, but the resolver's materialized flop chain must still propagate that width down the chain.</li>
+<li><strong>Parity first</strong>: the existing <code>inou/prp</code> error + equiv suites must
+behave identically after the move (same diagnostics, same LEC verdicts).</li>
+<li>The 2 new error tests from Pending&nbsp;3, plus a small gtest over hand-built graphs
+(input&rarr;ranged-Flop&rarr;output) asserting &sigma;, chosen depth, and the leftover guard.</li>
 </ul>
 </main>
 <footer>LiveHD TODO · <a href="../index.html">index</a></footer>

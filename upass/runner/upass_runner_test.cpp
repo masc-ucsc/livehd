@@ -39,7 +39,7 @@ public:
 };
 
 std::shared_ptr<upass::Lnast_manager> make_lm() {
-  auto ln = std::make_shared<Lnast>("upass_runner_cycle_test");
+  auto ln = std::make_shared<Lnast>("upass_runner_test");
   return std::make_shared<upass::Lnast_manager>(ln);
 }
 

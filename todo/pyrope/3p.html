@@ -29,14 +29,6 @@ cassert(prp.len((1, 2, 23)) == 3)
 
 comb inc(a) -&gt; (r) { r = a + 1 }
 cassert((1, 2, 3).map(inc) == (2, 3, 4))</code></pre>
-<h2>Depends on</h2>
-<ul>
-<li>2p (stable SSA/tmp ids) — <strong>landed</strong>: tmp ids are now scoped
-  (<code>___&lt;dest&gt;_&lt;n&gt;</code>) or hash-derived
-  (<code>___&lt;site-hash&gt;_&lt;n&gt;</code> / <code>_i&lt;n&gt;</code> for
-  inline/unroll copies), so generated library expansion, dumps, and
-  diagnostics stay edit-stable.</li>
-</ul>
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
 <li><strong>A — decide the package location and resolver contract.</strong>

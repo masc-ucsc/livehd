@@ -593,3 +593,13 @@ sh_test(
     srcs = ["lhd_debug_obs_test.sh"],
     data = _FLOW_DATA + ["bw_mix.v"],
 )
+
+# `compile --unused-inputs FILE` (Bazel unused_inputs_list): declared source
+# positionals absent from the compiled closure, one cwd-relative path per
+# line. Positive case = a .sv outside the --top hierarchy; pyrope roots are
+# always compiled (empty list); the file is created even when empty.
+sh_test(
+    name = "lhd_unused_inputs_test",
+    srcs = ["lhd_unused_inputs_test.sh"],
+    data = ["//lhd"],
+)

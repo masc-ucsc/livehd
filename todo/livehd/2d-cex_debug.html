@@ -9,432 +9,160 @@
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">2d-cex_debug</strong> Actionable LEC counterexamples: rich trace, source-mapped first-divergence, and source-level replay</h1>
+<h1><strong class="item-id">2d-cex_debug</strong> Actionable LEC counterexamples — remaining gaps over the landed <code>lecfail.prp</code>&nbsp;+&nbsp;VCD flow</h1>
 
 <p>When <code>lhd lec</code> <strong>REFUTES</strong> it has found a concrete
 input/state under which the two designs differ — a real bug in exactly one of
-(a) the impl lowering (prp2lnast/tolg/cgen), (b) the ref lowering (slang or the
-other design), or (c) the LEC encoder itself. Today the verdict prints only the
-diverging <em>primary output</em> and its ref/impl values; everything needed to
-localise the bug — the input trace that drove it, the <em>first internal cut</em>
-that actually diverged (outputs merely inherit it), the source line behind that
-cut, and a way to replay the trace on both designs — has to be rebuilt by hand
-every time. This task makes the counterexample self-sufficient. Scope is strictly
-the <strong>REFUTE</strong> case; the <em>UNKNOWN</em> case (a cone cvc5 cannot
+(a) the impl lowering, (b) the ref lowering, or (c) the LEC encoder itself.
+Scope is strictly the <strong>REFUTE</strong> case; UNKNOWN (a cone cvc5 cannot
 discharge) is a solver-capability concern owned by
-<a class="xref" href="lec.html">lec</a> / <a class="xref" href="2f-formal.html">2f-formal</a>,
-not this page.</p>
+<a class="xref" href="lec.html">lec</a> / <a class="xref" href="2f-formal.html">2f-formal</a>.</p>
 
-<h2>Plan revision (22/06/2026 brainstorm)</h2>
-<p>This page was re-planned after a design review. Three pivots, each verified
-against the code:</p>
+<h2>Landed baseline (30/06 + 03/07/2026) — what this page used to spec</h2>
+<p>The core of the original design is in and automatic on every refute:</p>
 <ul class="subtasks">
-<li><strong>The driving case is pyrope&nbsp;↔&nbsp;pyrope, not verilog&nbsp;↔&nbsp;pyrope.</strong>
-The everyday use is verifying a <em>Pyrope transformation</em> (retiming for
-frequency, restructuring for readability/optimization). Both sides then share the
-<em>entire</em> toolchain, so the debug surface must be <strong>Pyrope source</strong>
-— variables and lines the user actually wrote — not cgen-generated, sign-magnitude
-Verilog nets.</li>
-<li><strong>Replay is via <a class="xref" href="../hlop">slop</a> over LNAST, not a
-Verilog testbench.</strong> Both <code>--reader prp</code> and <code>--reader slang</code>
-produce LNAST, so a slop generator (an upcoming task, landing regardless of this
-one) replays <em>both</em> sides at source granularity, in-process, with full
-visibility into every intermediate variable. slop bypasses tolg <em>and</em> the
-cvc5 encoder, so it already catches false-refutes. The Verilog-testbench/VCD path
-is demoted to an occasional forensic tool (see the blame table). The earlier idea
-of a bespoke constprop-LNAST replay emulator is <strong>dropped</strong>: slop is
-the correct, two-sided realization of it.</li>
-<li><strong>The model already holds inputs + flops + memories + outputs; it is
-recorded-and-discarded, not missing.</strong> The first deliverable is mostly
-<em>deleting a filter</em>, not new machinery (see "What the SAT model already
-holds").</li>
+<li><strong>First-diverging internal cut (the ROOT).</strong> On a BMC REFUTE the
+engine captures every flop's paired per-cycle next-state — both sides, by
+canonical key, no filter (<code>wit_state</code>,
+<code>pass/lec/query.cpp:~1850</code>) — and the witness names the EARLIEST
+diverging STATE cut(s) ahead of the primary output that merely inherits them
+(<code>query.cpp:~2049-2100</code>; ALL cuts at the earliest cycle, sorted, so a
+wide-fanin bug is not reported as a hash-order pick). Pure <code>getValue</code>
+on the already-solved SAT model — no new SMT terms, no UNKNOWN risk. Regression:
+<code>pass/lec/tests/cex_debug_test.sh</code> (the conditional-reg mis-write
+class: internal <code>s</code> named as root, inherited <code>out</code> carried).</li>
+<li><strong><code>lecfail.prp</code> + single-VCD replay.</strong> On Refuted,
+with <code>lec.witness</code> and a user <code>--workdir</code>,
+<code>emit_lecfail_witness</code> (<code>lhd/lhd_kernel.cpp:4404</code>) re-emits
+BOTH sides as Pyrope, writes a self-contained testbench
+(<code>lecfail.prp</code>: one <code>__lecfail_dut_pair</code> wrapper
+instantiating ref and impl, driving the <em>uncapped</em> structured
+<code>Witness_trace</code> input sequence incl. the reset prologue), then runs
+<code>lhd sim --set sim.vcd=true</code> to dump ONE <code>lecfail.vcd</code> with
+both designs side-by-side. Knobs <code>lec.prpfail</code> /
+<code>lec.prpfailrun</code>, default on under <code>--workdir</code>; BMC-only
+(the inductive single-step CEX may be unreachable, so it carries no trace).
+Test: <code>pass/lec/tests/lec_witness_prpfail_test.sh</code>.</li>
+</ul>
+<p>This <strong>supersedes</strong> the page's original manual design: the daily
+"real bug or false refute?" loop (re-simulate the CEX on both sides, watch where
+they diverge) is now one automatic artifact pair. The <code>cex.json</code>
+contract, the <code>lhd lec --replay</code> mode, the slop/LNAST replay back-end,
+and the Verilog-testbench/two-VCD-diff forensic path are therefore
+<strong>dropped</strong>. What remains below are the gaps the landed flow does not
+cover, re-specified as extensions of it.</p>
+
+<h2>Remaining gaps</h2>
+
+<h3>1 — Source-map the first diverging cut to <code>file:line</code> (M; the keystone)</h3>
+<ul class="subtasks">
+<li><strong>Gap:</strong> the root clause names the diverging cut by canonical
+flop key with ref/impl values — but no source location.
+<code>flop_state_key()</code> (<code>pass/lec/encode.cpp:79</code>) has an
+<code>attrs::srcid</code>&nbsp;→ <code>resolve_span</code> fallback but is
+<em>dead on every engine path</em> (declared <code>encode.hpp:190</code>, never
+called); the live keys come from <code>canon_flop_name()</code>
+(<code>encode.cpp:52</code>) and carry no span, and <code>query.cpp</code> reads
+no <code>srcid</code> at all.</li>
+<li><strong>Work:</strong> during the existing flop-collection loop build a
+<code>key → node → attrs::srcid → span</code> side map; render
+<code>s (cpu.prp:554)</code> in the root clause and stamp the same location as a
+comment next to the corresponding signal in <code>lecfail.prp</code>. Tolerate the
+multi-stage <code>\x02p&lt;k&gt;</code> key suffix. For a Verilog-origin side, map
+back through the cgen ECMA-426 sourcemap
+(<code>inou/cgen/cgen_verilog.cpp</code>
+<code>note_src()</code>/<code>write_srcmap()</code>). This is real
+<code>srcid</code> plumbing, not a polish step.</li>
 </ul>
 
-<h2>Update (30/06/2026) — <code>lhd sim</code> exists; do a do-first slice before the LEC/SIM verification flow</h2>
-<p>This page (22/06/2026) assumed the only source-level sim was the <em>upcoming</em>
-slop generator, so Stage 2's <code>--replay</code> waited on it. That gap is now
-partly filled: <strong><code>lhd sim</code></strong> (<code>inou.cgen.sim</code>)
-compiles an LGraph to executable C++ and already supports <strong>per-cycle stepping,
-a process-wide seeded RNG, checkpoint save/load/<code>--restart-at</code>, located
-asserts, and <code>--result-json</code></strong>. That is enough to realize the
-<em>replay-and-classify</em> half of this task <strong>without waiting for slop</strong>.
-In blame-table terms <code>lhd sim</code> is the <code>iverilog(Verilog)</code> column
-(LGraph→C++, bypasses only the encoder), so by itself it already separates an
-<strong>encoder false-refute</strong> (sim agrees, LEC refutes) from a
-<strong>genuine bug</strong> (sim disagrees). The slop/LNAST column (which additionally
-splits tolg/cgen bugs from the encoder) stays a later refinement.</p>
-<p><strong>Why now:</strong> the <a class="xref" href="#">small_todo</a> Backend
-LEC/SIM verification flow (regenerated Verilog↔Pyrope per module, LEC + SIM table)
-will produce many LEC refutes/inconclusives, each needing the "real bug or
-false-refute?" classification this task provides. Concrete case already in hand:
-<code>mem_pending_sync_init</code> LEC-refutes under cvc5 because the encoder models a
-<code>type==1</code> sync read at latency&nbsp;0 — a sim replay of the CEX on both sides
-would show them <em>agreeing</em>, immediately flagging an encoder false-refute rather
-than a generation bug. (The 3 landed init fixes already turned the type==2 / ROM init
-cases green; the sync-read latency is the residual encoder gap.)</p>
-<p><strong>Do-first slice (land before / alongside small_todo):</strong></p>
+<h3>2 — Machine-readable witness artifact (S/M)</h3>
 <ul class="subtasks">
-<li><strong>Stage 0 in full</strong> — first-diverging <em>internal</em> cut + per-cycle
-state capture from the already-solved SAT model (pure read-only, ~40–60 lines, no slop,
-no UNKNOWN risk). Answers "which register/wire diverged first, and when."</li>
-<li><strong>A minimal <code>cex.json</code></strong> = per-cycle primary-input trace
-(<code>wit_ins</code>) + <code>rstN</code>/<code>sN</code> labels + the first-divergence
-record. Defer the full source-map/<code>name_map</code> keystone (cut <em>name</em> +
-values are enough to start classifying).</li>
-<li><strong><code>lhd lec --replay cex.json</code> backed by <code>lhd sim</code></strong>:
-drive <code>lhd sim</code> on BOTH sides with the cex inputs (seed initial state where
-present), run ≤bound cycles, compare per-cycle outputs <em>and</em> checkpoint reg/mem
-state — the <strong>same checkpoint-compare the small_todo SIM column needs</strong>, so
-build the two together. Emit the blame-table verdict (sim-agree ⇒ encoder false-refute;
-sim-disagree ⇒ genuine bug).</li>
-</ul>
-<p><strong>Defer:</strong> the full source-mapping + <code>name_map</code> (Stage 1
-keystone), the slop/LNAST replay (Stage 2 as originally written — now a refinement that
-adds the tolg/cgen-vs-encoder split), and the Verilog-VCD forensic path. The
-<code>cex.json</code> contract below is unchanged; the do-first slice fills a subset of
-it and uses <code>lhd sim</code> as the replay engine instead of slop.</p>
-
-<h2>Depends on</h2>
-<p>The <a class="xref" href="lec.html">lec</a> engine (the witness already exists in
-skeleton form) and the upcoming <a class="xref" href="../hlop">slop</a> generator
-(LNAST&nbsp;→ slop; the <code>cex.json</code> below is co-designed as its
-seed&nbsp;+&nbsp;input&nbsp;+&nbsp;I/O-oracle format). Reuses, rather than rebuilds:
-the cgen ECMA-426 sourcemap
-(<code>inou/cgen/cgen_verilog.cpp</code> <code>note_src()</code>/<code>write_srcmap()</code>,
-<code>cgen_verilog.hpp:104</code>), the flop correspondence keys
-(<code>pass/lec/encode.cpp:52</code> <code>canon_flop_name()</code> → the live
-<code>\x01n:&lt;hier&gt;</code> keys), the <code>lec.match</code> parser, the new
-per-cut decompose (<code>query.cpp:822-838</code>, <code>--set lec.decompose</code>),
-the VCD reader (<code>core/vcd_reader.{hpp,cpp}</code>, for the optional forensic
-path), and <a class="xref" href="2f-semdiff.html">2f-semdiff</a>'s
-<code>structural_match()</code> (<code>pass/semdiff/semdiff.cpp:299</code>) for
-auto flop-correspondence between renamed pipelines.</p>
-<p><strong>Correction (was wrong in the original draft):</strong> the source span
-is <em>not</em> free. <code>flop_state_key()</code> (<code>encode.cpp:79</code>) is
-<em>defined but never called by any engine path</em> — the live next-state keys come
-from <code>canon_flop_name()</code> (<code>\x01n:&lt;name&gt;</code>, no byte range),
-and even <code>flop_state_key</code> only emits a span for <em>unnamed</em> flops.
-Source-mapping a cut is real work (key&nbsp;→ re-find node&nbsp;→ read
-<code>attrs::srcid</code>&nbsp;→ resolve span), and it is the keystone of this task,
-not a polish step.</p>
-
-<h2>The debug loop today (what this replaces)</h2>
-<p>Per REFUTE the manual loop is: bisect by <code>--set lec.bound</code> to find the
-breaking cycle; add the env-gated dumps (<code>LEC_DUMP_FLOPS</code>,
-<code>LEC_DUMP_WIT</code>) to <code>pass/lec/query.cpp</code> and walk
-<em>backward</em> from the diverging output to the first diverging flop; hand-build a
-testbench with the solver's exact register init + instruction trace to ground-truth
-which side is right; and map a canonical cut name (<code>a_exmem_exresult</code>)
-back to <code>prp2/cpu.prp</code> by eye. Every step exists only as scratch. The
-three things that would have saved the most time: a <em>rich</em> counterexample, a
-one-command <em>source-level replay</em>, and <em>source-mapped</em> names.</p>
-
-<h2>Sample use cases (the design targets)</h2>
-<p><strong>Case 1 — pyrope&nbsp;↔&nbsp;pyrope transform (the common case).</strong>
-You retime or restructure a module for frequency; LEC refutes. You need to see, in
-<em>Pyrope</em>, the first cycle/variable where the optimized version diverges from
-the original — without reading generated Verilog. Note: under <em>retiming</em>,
-registers are deliberately moved, so flop-by-flop correspondence may not exist;
-localization must fall back to I/O&nbsp;+ combinational cones with full source-level
-value visibility.</p>
-<p><strong>Case 2 — a conditional <code>reg</code> write whose un-covered path is left
-a don't-care by the lowering instead of holding</strong> — the shape hit in
-<code>simplechisel/build_dualissue_d/prp2/cpu.prp:554</code> (the ID/EX flush block),
-which surfaced as an <code>io_dmem_address</code> divergence. Minimal illustration:</p>
-<ul class="subtasks">
-<li><strong>impl</strong> <code>reg s:u8 = 0 ; if inc { s = s + val } ; out = s</code>
-&nbsp;— on <code>!inc</code> a mis-lowering leaves <code>s</code> don't-care instead of holding.</li>
-<li><strong>ref</strong> holds <code>s</code> on <code>!inc</code> (the correct semantics).</li>
-</ul>
-<p><strong>Today</strong> the whole verdict is one inherited-output line:</p>
-<p><code>lec: REFUTED  first divergence at checked step 3/6:
-io_dmem_address(ref=18446744073709551614 impl=9223372036854775805)</code></p>
-<p>— which output, and the two values. Not: which cycle's inputs caused it, which
-<em>internal</em> flop diverged first, or where in the source.</p>
-<p><strong>This task</strong> should instead emit (all values come from the SAME SAT
-model already solved — no re-solve):</p>
-<pre class="cex"><code>lec: REFUTED at checked step 3 (cycle 23)
-  first diverging cut:  a_exmem_exresult     ref=-2   impl=9223372036854775805 (don't-care)
-      source:  prp2/cpu.prp:554   `if idex_flush { b_idex_rd1 = 0 } else { ... }`
-      ref flop:  pipeB_ex_mem.reg_ex_result        (matched via lec.match / semdiff)
-      propagates to output io_dmem_address @ step 3
-  primary-input trace (cycles 20..23, replayable):
-      cyc20  io_imem_instruction=0x00..  io_imem_good=1  io_dmem_good=0 ...
-      cyc21  io_imem_instruction=0x13..  ...
-      cyc22  io_imem_instruction=0x..    ...   (branch enters EX)
-      cyc23  ...
-  replay:  lhd lec --replay cex.json     # re-sims BOTH sides with slop, reports the
-                                         # first Pyrope variable/cycle that diverges
-</code></pre>
-<p>The win is the <em>root</em> cut + its source line + the replayable input trace,
-turning a 2-hour manual hunt into reading one verdict.</p>
-
-<h2>What the SAT model already holds (verified against query.cpp)</h2>
-<p>On REFUTE, <strong>all four</strong> of inputs / registers / memories / outputs are
-in the solved model; <code>solver.getValue()</code> works on any retained term once
-<code>produce-models</code> is set (<code>query.cpp:199</code>, when
-<code>opts.witness</code>). Status:</p>
-<ul class="subtasks">
-<li><strong>Inputs — present, reportable.</strong> <code>wit_ins{cyc,name,term}</code>
-(<code>query.cpp:701-704</code>) holds the full per-cycle primary-input trace incl.
-the reset prologue. Already <code>getValue</code>'d (<code>:931</code>); the printed
-trace just truncates to <code>≤&nbsp;first_bad</code>. Gap = serialization.</li>
-<li><strong>Outputs — present, reportable.</strong> <code>wit_outs{cyc,name,rv,iv}</code>
-(<code>:746-748</code>); this is the entire current witness.</li>
-<li><strong>Registers (per cycle, both sides) — present, read-only, recorded-and-discarded.</strong>
-The throwaway <code>st&lt;uid&gt;</code> current-state symbols (<code>:655</code>) are
-useless, but the next-state maps <code>rn</code>/<code>in</code> (<code>:754-764</code>)
-are keyed by <em>canonical hier name, identically on both sides</em>, and
-<code>current@cyc == next@cyc-1</code> by the equality pinning. So
-<code>getValue(rn[key])</code>/<code>getValue(in[key])</code> per cycle yields full
-per-cycle flop state of both designs, paired — <strong>with no new SMT terms</strong>
-(so the probe-output→UNKNOWN trap does not apply). Already proven by the
-<code>LEC_DUMP_WIT</code>/<code>dbg_ns</code> path (<code>:779-801, :845-876</code>),
-which is gated behind an env var <em>and a hardcoded <code>keep()</code> filter</em>
-(<code>:780-784</code>). Deleting that filter is most of the first deliverable.</li>
-<li><strong>Memories — present but on the getValue-unsafe path.</strong> Arrays are
-threaded per cycle and never queried. The trap: <code>has_mem</code>
-(<code>query.cpp:185-195</code>) <em>disables</em> the witness-safe eager
-<code>bitblast-internal</code> blaster and falls back to cvc5's lazy BV solver, whose
-own comment warns it can return spurious SAT and make a subsequent
-<code>getValue</code> <em>abort inside CaDiCaL</em>. Read <em>values</em> are cheaper
-than expected (read douts <code>rd_fresh[k]</code> are plain BV symbols tied by
-equality to <code>SELECT(arr,addr)</code>, so <code>getValue(rd_fresh[k])</code> is a
-plain BV read, not an array query) — but they still ride the lazy solver. Treat
-memory readback as a <strong>gated spike</strong>, not a casual extension.</li>
+<li><strong>Gap:</strong> the structured <code>Witness_trace</code>
+(<code>pass/lec/query.hpp:28-42</code>: <code>reset_cycles</code>,
+<code>diverge_cycle</code>, <code>diverge_outputs</code>, per-cycle
+<code>{reset_asserted, inputs{name,value,width}}</code>) is exact and uncapped,
+but only crosses the worker pipe in a private binary form
+(<code>serialize_result</code>, <code>query.cpp:138</code>) and is consumed solely
+by <code>emit_lecfail_witness</code>. Tooling that wants the trace must re-parse
+the generated <code>lecfail.prp</code> or the <em>capped</em> display witness
+string. The per-cycle paired flop values (<code>wit_state</code>) are read for the
+root scan and then discarded — never surfaced at all.</li>
+<li><strong>Work:</strong> serialize, next to <code>lecfail.prp</code> (e.g.
+<code>&lt;workdir&gt;/lecfail.json</code>, mirroring <code>lhd sim</code>'s
+<code>--result-json</code>), the trace + the root-cut record (key, cycle, ref/impl
+values, and the gap-1 source span) + optionally the per-cycle
+<code>wit_state</code> values. Same <code>getValue</code> reads the display path
+already does; an extension of the lecfail flow, not a new replay contract.</li>
 </ul>
 
-<h2>Blame decomposition (why slop, and when the Verilog path still helps)</h2>
-<p>cvc5 compares <em>LGraphs</em> (post-tolg, via the encoder). slop replays from
-<em>LNAST</em> (bypassing tolg + encoder); an independent Verilog simulator replays
-<code>cgen(LGraph)</code> (bypassing only the encoder). Given a REFUTE, the two
-independent sims triangulate the (a)/(b)/(c) blame:</p>
-<pre class="cex"><code>slop(LNAST)   iverilog(Verilog)   ⇒ blame
- disagree      disagree            genuine bug — the transform changed behavior  (the EXPECTED case)
- agree         agree               encoder bug — false refute
- agree         disagree            tolg/cgen bug exposed by the transform
- disagree      agree               rare/contradictory — investigate
-</code></pre>
-<p>Key point: slop <em>by itself</em> already separates "encoder/tolg bug" from
-"genuine/frontend bug" and catches false-refutes (it never touches the encoder). The
-Verilog path only adds value in the <code>slop-agree</code> rows (separating tolg/cgen
-from encoder) — a rare forensic question, not the daily loop. Hence slop is the
-primary back-end and the Verilog-testbench/VCD path is optional.</p>
-
-<h2>Design decisions (locked)</h2>
+<h3>3 — Auto flop-correspondence from <a class="xref" href="2f-semdiff.html">2f-semdiff</a> (M)</h3>
 <ul class="subtasks">
-<li><strong>REFUTE only.</strong> A timed-out cone (UNKNOWN) is a capability gap, not a
-counterexample; do not conflate. UNKNOWN localisation is already served by
-<code>--set lec.decompose</code>'s "N/M cuts PROVEN, K unresolved {…}" line.</li>
-<li><strong>Root, not leaf.</strong> Report the EARLIEST diverging cut (an internal
-flop/wire/output), since downstream outputs only inherit it. Extend the
-<code>first_bad</code> scan (<code>query.cpp:897</code>) over <em>internal</em> cuts,
-not just <code>wit_outs</code> primary outputs.</li>
-<li><strong>Flop correspondence is best-effort.</strong> For code-restructuring it
-holds (names/boundaries correspond → first-diverging-flop works). For
-<em>retiming</em> it is deliberately broken (no corresponding flop); degrade
-gracefully to I/O + combinational-cone localization, leaning on slop's source-level
-visibility. Pair renamed-but-corresponding flops via semdiff / <code>lec.match</code>.</li>
-<li><strong>Extract from the existing model, never add probe outputs.</strong> Pull
-internal cut values with <code>solver.getValue()</code> on the SAT assignment.
-Adding synthetic outputs perturbs the instance enough to flip cvc5 to UNKNOWN
-(observed with <code>LEC_DBG_NIDS</code>). Reading <code>rn</code>/<code>in</code> for
-localization is pure; pushing state-cut <code>DISTINCT</code> terms into <code>bad</code>
-(making a masked internal divergence refutable) can flip verdicts, so flag-gate it.</li>
-<li><strong>Replay at the source level via slop, not via Verilog.</strong> The default
-<code>--replay</code> back-end is slop (two-sided, in-process, Pyrope-granular). The
-Verilog-testbench/VCD path is optional, for tolg-vs-encoder forensics only.</li>
-<li><strong>Machine-readable + human.</strong> Emit a <code>cex.json</code> (step,
-root cut, source span, name-map, correspondence, full per-cycle trace) alongside the
-human verdict; it is the shared contract consumed by <code>--replay</code>, the slop
-generator, scripts, and (optionally) the Verilog path — without re-solving.</li>
+<li><strong>Gap:</strong> correspondence today is <code>lec.match</code> only —
+explicit user pairs, inline or <code>@FILE</code>
+(<code>lhd/lhd_kernel.cpp:4856</code>, alias map <code>query.cpp:614-632</code>).
+Hier-LEC calls <code>semdiff::structural_match</code> only as the module-level
+"structurally identical ⇒ PROVEN, no solver" reduction
+(<code>lhd_kernel.cpp:4073-4086</code>), never as a flop-pairing source. So
+renamed-but-corresponding flops keep separate cut keys: the miter treats them as
+unmatched cut points, and the <code>wit_state</code> capture pairs by identical
+canonical key (<code>in.find(k)</code>, <code>query.cpp:~1853</code>) so
+one-side-only flops are silently invisible to the root scan.</li>
+<li><strong>Work:</strong> on a refuting pair, run
+<code>structural_match(matching_names)</code> and feed the stamped flop pairs into
+the <code>name_alias</code> map exactly as if <code>lec.match</code> had supplied
+them — differently-named pipelines then need no hand-built <code>match.txt</code>.
+Best-effort: <em>retiming</em> deliberately breaks flop correspondence; degrade to
+I/O-level divergence and report unpaired flops as "unpaired", never drop them
+silently.</li>
 </ul>
 
-<h2>The cex.json contract</h2>
-<p>One artifact, co-designed with the slop generator: it is simultaneously the
-<em>seed</em> (initial state + per-cycle inputs), the <em>oracle</em> (the per-cycle
-flop/output values cvc5 solved, to confirm a replay reproduces the divergence), and
-the <em>localization</em> (first cut + source). Sketch:</p>
-<pre class="cex"><code>{
-  "engine": "bmc", "bound": 6, "reset_hold": 20,
-  "first_divergence": {
-    "kind": "flop" | "output", "cut": "&lt;canonical key&gt;",
-    "cycle": 23, "checked_step": 3, "ref": "-2", "impl": "9223372036854775805",
-    "src": { "file": "prp2/cpu.prp", "line": 554, "snippet": "if idex_flush { ... }" }
-  },
-  "name_map":      [ { "key": "n:...", "lnast": "...", "src": "file:line" } ],
-  "correspondence":[ { "ref": "...", "impl": "...", "via": "semdiff|lec.match|name" } ],
-  "io_oracle": false,   // true under retiming: validate replay at I/O only (no flop corr.)
-  "cycles": [
-    { "cycle": 0, "label": "rst0",
-      "inputs":     { "io_imem_instruction": "...", ... },
-      "state_ref":  { "&lt;key&gt;": "..." }, "state_impl": { "&lt;key&gt;": "..." },
-      "mem_reads":  [ { "mem": "&lt;key&gt;", "addr": "...", "data": "..." } ],
-      "outputs":    { "io_dmem_address": { "ref": "...", "impl": "..." } } },
-    ...
-  ]
-}
-</code></pre>
-<p>The <code>name_map</code> (LGraph flop key&nbsp;↔ LNAST/source name) is the
-contract between this task and the slop generator; it is exactly the Stage-1
-source-mapping work. <code>io_oracle</code> + <code>correspondence</code> let the
-replay run when no flop correspondence exists (retiming).</p>
-
-<h2>Pipeline placement</h2>
+<h3>4 — Memory-cut readback (deferred; spike first)</h3>
 <ul class="subtasks">
-<li><strong>pass/lec, on <code>Verdict::Refuted</code>.</strong> Both engines build a
-witness already — BMC at <code>query.cpp:878-945</code>, inductive at
-<code>:1370-1412</code>. The new fields hang off those sites. <strong>BMC only</strong>
-for the trace/replay: the inductive engine's SAT witness is a single, possibly
-unreachable step — give it a flat assignment dump, never a multi-cycle
-<code>cex.json</code>.</li>
-<li><strong><code>lhd lec --replay cex.json</code></strong> is a new <code>lhd lec</code>
-mode in <code>lhd/lhd_kernel.cpp</code> that drives the slop generator on both sides.</li>
-</ul>
-
-<h2>Staged plan</h2>
-
-<h3>Stage 0 — first-diverging cut + capture (S; do this first, alone)</h3>
-<p>Pure read-only on the solved model; ~40–60 lines; zero new SMT, zero UNKNOWN risk.
-This is the 80/20 — it directly answers "which register went wrong first, and when."</p>
-<ul class="subtasks">
-<li>Add a <code>wit_state{cyc,key,rv,iv}</code> vector populated next to
-<code>rn</code>/<code>in</code> (<code>query.cpp:~764</code>), mirroring
-<code>wit_outs</code>; <strong>drop the hardcoded <code>keep()</code> filter</strong>
-(<code>:780-784</code>) so all flops are captured.</li>
-<li>Extend the <code>first_bad</code> scan (<code>:897-907</code>) to also scan
-<code>wit_state</code> for the EARLIEST <code>(cyc,key)</code> where
-<code>getValue(rv) != getValue(iv)</code>, comparing at <strong>declared width</strong>
-via <code>fit_to</code> (or phantom diffs appear on the sign-mag spare bit). Report the
-state cut ahead of the inherited output. Prefer a state cut over an output cut at the
-same cycle (more localized).</li>
-<li>(Optional, flag-gated) push per-<code>(state-key,cyc)</code> <code>DISTINCT</code>
-terms into the existing <code>decomp_diffs</code> (<code>:617,:745</code>) so
-<code>--set lec.decompose</code> proves each internal cut independently and the first
-non-UNSAT cut <em>is</em> the first-bad cut. (Was M1/M8.)</li>
-</ul>
-
-<h3>Stage 1 — source mapping + cex.json (M; the keystone)</h3>
-<ul class="subtasks">
-<li>Build the <code>key → node → attrs::srcid → span</code> map during the existing
-flop-collection loop (this is the real work behind every "source line" claim —
-<code>flop_state_key</code> will not give it to you). Render
-<code>flop foo (file.prp:42)</code> in the verdict; tolerate the multi-stage
-<code>\x02p&lt;k&gt;</code> suffix in keys. (Was M2.)</li>
-<li>Serialize the full per-cycle <code>cex.json</code> above (union of
-<code>wit_ins</code>/<code>wit_outs</code>/<code>wit_state</code> + the
-<code>name_map</code>). Honor the existing <code>rstN</code>/<code>sN</code> cycle
-labels (<code>:935</code>); delta-encode large flop banks. (Was M3.)</li>
-<li>Ingest <a class="xref" href="2f-semdiff.html">semdiff</a>'s <code>match</code>
-stamps (<code>semdiff.cpp:299</code>) as <code>correspondence</code> so renamed
-pipelines pair without a hand-built <code>match.txt</code>. (Was M7.)</li>
-</ul>
-
-<h3>Stage 2 — source-level replay (L; the primary debug experience)</h3>
-<p class="note"><strong>See the 30/06/2026 update above:</strong> the do-first replay
-back-end is now <code>lhd sim</code> (LGraph→C++, exists today, gives the
-encoder-false-refute vs genuine-bug split and reuses the small_todo checkpoint-compare).
-The slop/LNAST replay below is the later refinement that additionally splits tolg/cgen
-bugs from the encoder.</p>
-<ul class="subtasks">
-<li><code>lhd lec --replay cex.json</code> seeds the slop model of both sides from
-<code>cex.json</code> (name-keyed state load, not binary memcpy — robust across
-layout/version), injects the per-cycle input vectors, runs, and reports the first
-<em>Pyrope variable / cycle</em> that diverges, validated against the
-<code>cex.json</code> oracle. Under <code>io_oracle</code> (retiming), validate at I/O
-and trace back on the failing side via slop's source-level visibility.</li>
-<li>Two asks for the slop generator (coordinate with the slop task): a
-<strong>name-keyed state-load</strong> entry and a <strong>per-cycle input-injection</strong>
-interface, both consuming <code>cex.json</code> directly.</li>
-</ul>
-
-<h3>Optional / deferred</h3>
-<ul class="subtasks">
-<li><strong>Verilog testbench + two-file VCD diff (forensic only).</strong> cgen both
-sides, run iverilog/verilator, dump <code>ref.vcd</code>/<code>impl.vcd</code>, diff
-via <code>core/vcd_reader</code> (GAP: no two-file diff). Use only to split tolg/cgen
-from encoder when both independent sims agree. Drive from RTL reset + prologue-replay
-(not hierarchical from-state force, which rides the dead <code>flop_state_key</code>);
-compare at declared port width; treat iverilog X as inconclusive; cross-check at port
-level (internal-net match across renamed designs needs semdiff). (Was M4/M5.)</li>
-<li><strong>Memory-cut readback</strong> — only after a spike resolves the
-lazy-solver <code>getValue</code>-abort risk (surface the read addr + array key in
-<code>Encoded</code>, dump only touched entries).</li>
-<li><strong>Backward fan-in cone root-cause</strong> — from the diverging cut, the
-minimal flop/memory reads on its fan-in cone, filtering don't-care/false paths, to
-point at the cell to fix. (Was M6.)</li>
+<li><strong>Gap:</strong> <code>has_mem</code> (<code>query.cpp:1106-1119</code>;
+same rule on the formal path at <code>:~2800</code>) keeps any memory design on
+cvc5's lazy BV solver — the witness-safe eager <code>bitblast-internal</code>
+blaster has no array theory — and the lazy solver's spurious-SAT history can make
+a witness <code>getValue</code> abort inside CaDiCaL. So memory read values never
+appear in the witness, and the root scan is flop-only.</li>
+<li><strong>Work:</strong> a gated spike first — establish when
+<code>getValue</code> on the plain-BV <code>rd_fresh</code> read symbols is safe
+under the lazy solver (or find an eager-with-arrays configuration); only then
+extend <code>wit_state</code> / <code>lecfail.prp</code> / the gap-2 artifact with
+per-cycle mem-read records (<code>{mem, addr, data}</code>). This extends the
+lecfail/witness flow; it is not a separate artifact.</li>
 </ul>
 
 <h2>Tests</h2>
 <ul class="subtasks">
-<li><code>pass/lec/tests/cex_debug_*</code> — a tiny prp pair that REFUTES on the
-don't-care reg-hold class (Case 2); assert the verdict (and <code>cex.json</code>)
-names the first diverging <em>internal</em> cut, carries a <code>file:line</code>, and
-that <code>--replay</code> re-simulates (slop) to the same first-divergence cycle.</li>
-<li>A pyrope&nbsp;↔&nbsp;pyrope transform pair (Case 1) where the optimized version
-has a real bug; assert slop replay reports the diverging Pyrope variable/cycle.</li>
-<li>A pair with differently-named pipeline flops to exercise semdiff auto-match
-(<code>correspondence</code>) without a supplied <code>match.txt</code>.</li>
+<li>Extend <code>pass/lec/tests/cex_debug_test.sh</code>: the root clause carries
+a <code>file:line</code> pointing into the impl <code>.prp</code> (gap 1).</li>
+<li>Extend <code>lec_witness_prpfail_test.sh</code>: <code>lecfail.json</code>
+exists, parses, and its input sequence matches the one driven by
+<code>lecfail.prp</code> (gap 2).</li>
+<li>A pair with differently-named pipeline flops: REFUTE names the semdiff-paired
+root cut with no supplied <code>match.txt</code> (gap 3).</li>
 </ul>
 
-<h2>Traps</h2>
+<h2>Traps (carried forward, still true)</h2>
 <ul class="subtasks">
-<li><strong>Source span is NOT free.</strong> <code>flop_state_key</code>
-(<code>encode.cpp:79</code>) is dead on the live path; the live keys
-(<code>canon_flop_name</code> → <code>\x01n:&lt;name&gt;</code>) carry no byte range,
-and even <code>flop_state_key</code> only spans <em>unnamed</em> flops. Budget Stage 1
-as real <code>srcid</code> work.</li>
-<li><strong>Memory rides the getValue-unsafe solver.</strong> <code>has_mem</code>
-disables the eager blaster (<code>query.cpp:185-195</code>); the lazy fallback can make
-<code>getValue</code> abort. The flop-state win is array-free and bulletproof; memory
-is a gated spike.</li>
-<li><strong>Don't add outputs to probe internals.</strong> <code>LEC_DBG_NIDS</code>
-showed synthetic outputs perturb the SAT instance into UNKNOWN; read internals from
-the existing model via <code>getValue()</code>.</li>
-<li><strong>Adding state-cuts to the refutation condition changes verdicts.</strong>
-Reading <code>wit_state</code> for localization is pure and safe; pushing state-cut
-<code>DISTINCT</code> into <code>bad</code> can flip "proven-in-window" designs to
-REFUTED. Localization-only by default; flag-gate any change to <code>bad</code>.</li>
-<li><strong>Retiming breaks flop correspondence.</strong> "First diverging flop" can
-be meaningless when registers are moved; fall back to I/O + cones and slop source
-visibility. Don't silently drop unpaired flops — report "unpaired."</li>
-<li><strong>BMC-only.</strong> Every trace/replay concept assumes the multi-cycle BMC
-engine (now default). The inductive witness is a single, possibly-unreachable step.</li>
-<li><strong>Sign-magnitude widths.</strong> cgen emits 65/66-bit sign-mag nets; every
-diff (state, output, replay, VCD) must compare at the real (declared) width via
-<code>fit_to</code>, or it reports phantom diffs on the spare sign bit.</li>
-<li><strong><code>lhd tool cat</code> hides inline/const sink edges</strong> — a 2-arm
-mux with a constant arm prints as 1-arm and reads as "dropped arm" (cost a long false
-lead). Any netlist dump used for root-cause must show inline constants.</li>
-<li><strong>Reset prologue cost is in the SMT re-encoding, not the sim.</strong> A
-1-cycle repro still re-pays the ~20-cycle reset/flush prologue. slop replay sidesteps
-this for the <em>sim</em>; a <code>--set lec.from-state=@file</code> would let the
-miter skip the prologue too. (Note: slop checkpoint cannot help here — the cost is the
-SMT encoding, which checkpoint does not touch.)</li>
+<li><strong>The source span is NOT free.</strong> <code>flop_state_key</code> is
+dead code, and even it only spans <em>unnamed</em> flops; budget gap 1 as real
+<code>srcid</code> work.</li>
+<li><strong>Never add probe outputs.</strong> Synthetic outputs perturb the SAT
+instance into UNKNOWN (observed with <code>LEC_DBG_NIDS</code>); read internals
+from the solved model via <code>getValue()</code> only.</li>
+<li><strong>Localization-only.</strong> Reading <code>wit_state</code> is pure;
+pushing state-cut <code>DISTINCT</code> terms into <code>bad</code> can flip
+proven-in-window designs to REFUTED — flag-gate any change to <code>bad</code>.</li>
+<li><strong>Memory rides the getValue-unsafe solver</strong> (gap 4); the
+flop-state machinery is array-free and bulletproof.</li>
+<li><strong>BMC-only.</strong> The inductive witness is a single, possibly
+unreachable step; it never fills <code>Witness_trace</code>, so every artifact
+here is BMC-gated (as the lecfail flow already is).</li>
+<li><strong>Sign-magnitude widths.</strong> cgen emits 65/66-bit sign-mag nets;
+any new value compare (JSON diffs, mem reads) must compare at declared width or
+it reports phantom diffs on the spare sign bit.</li>
 </ul>
-
-<h2>Subtasks — landed</h2>
-<ul class="subtasks">
-<li><strong>Stage 0 — first-diverging internal cut (30/06/2026, uncommitted).</strong>
-On a BMC <code>REFUTE</code>, the witness now names the EARLIEST diverging internal
-<em>state</em> cut (the root) ahead of the inherited output:
-<code>first diverging STATE cut (root): s(ref=.. impl=..) — state after step sN; …</code>.
-A <code>wit_state{cyc,key,rv,iv}</code> captures every flop's paired next-state from
-<code>rn</code>/<code>in</code> (no <code>keep()</code> filter, gated on
-<code>opts.witness</code>); the <code>first_bad</code> scan finds the earliest diverging
-<code>(cyc,key)</code> by pure <code>getValue</code> (no new SMT, no UNKNOWN risk). Test
-<code>//pass/lec:cex_debug_test</code> (a don't-care reg-hold pair → root = the reg).</li>
-<li><strong>Bounded-BMC → PROVEN verdict policy (30/06/2026, uncommitted).</strong> A
-non-vacuous BMC proof up to the bound (<code>output_checks&gt;0</code>) now reports
-<strong>PROVEN</strong> under <code>auto</code> (was INCONCLUSIVE) — so the LEC/SIM flow
-doesn't drown in spurious inconclusives. <code>Query_result.checked_steps</code>/
-<code>output_checks</code> + <code>try_bounded_proven()</code> (<code>query.cpp</code>);
-real refutes preserved.</li>
-</ul>
-<p>The only other adjacent piece already in tree is <code>--set lec.decompose</code>
-(per-cut residual naming for the inductive miter), which Stage 0's optional step
-generalises. <strong>Remaining:</strong> the minimal <code>cex.json</code> (Stage 1
-subset) and <code>lhd lec --replay</code> via <code>lhd sim</code> (Stage 2 do-first).</p>
 
 </main>
 <footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>

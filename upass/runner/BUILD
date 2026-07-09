@@ -21,8 +21,8 @@ cc_library(
 )
 
 cc_test(
-    name = "upass_runner_cycle_test",
-    srcs = ["upass_runner_cycle_test.cpp"],
+    name = "upass_runner_test",
+    srcs = ["upass_runner_test.cpp"],
     copts = COPTS,
     deps = [
         ":upass_runner",

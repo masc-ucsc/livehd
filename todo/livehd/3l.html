@@ -16,14 +16,6 @@
   free. The demand-first half already exists (<code>uPass_coalescer</code>); the pragmatic
   hybrid has landed, with the full sea-of-nodes rewrite deferred.</p>
 
-<h2>Depends on</h2>
-<p><strong>The 2b push-dispatch flag-day landed 2026-06-10</strong> — this task is
-  unblocked. The seams it rebuilds are now in their final shape: the coalescer's
-  demand-driven emit (<code>pending</code> + <code>runner_emit_at_fn</code>, both kept by
-  2b) and the runner's votes-based emit model. The per-name <code>Bundle</code> in the
-  runner-owned symbol table is the natural home for the "consumed" bit the
-  demand-driven scheme needs, instead of another side map.</p>
-
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
 <li><strong>D — full sea-of-nodes rewrite (deferred).</strong> Fully <em>retiring</em> the
@@ -38,21 +30,14 @@
   <li>Extend demand-driven emit to all pure defs — then the post-walk rebuild
     disappears.</li>
   </ul></li>
-<li><strong>E — arrays (future-gated).</strong> Total reorder of pure defs is sound today
-  (no memory aliasing — every read-after-write is visible through SSA names). An
-  array index reintroduces may-alias ordering (<code>a[i]=</code> vs <code>=a[j]</code>);
-  treat aliasing array ops as pinned/ordered when arrays land.</li>
-</ul>
-
-<h2>Subtasks — landed</h2>
-<ul class="subtasks">
-<li><strong>A — D1: range → dce_is_def_producing sweep.</strong> <span class="status landed">landed</span></li>
-<li><strong>B — hybrid A: complete-the-sweep.</strong> <span class="status landed">landed</span>
-  The post-walk sweep completed as the post-emit liveness backstop — it now runs
-  on mod/pipe/fluid clones and drops non-root user-named defs via the io-root rule
-  (root = io_meta IO &cup; mut/reg declares), which cleared the
-  <code>mod_varargs_*</code> tolg warnings.</li>
-<li><strong>C — hybrid B: park <code>is</code> in the coalescer.</strong> <span class="status landed">landed</span></li>
+<li><strong>E — arrays (design constraint).</strong> Arrays/memories are in the upass
+  pipeline, and today the coalescer sidesteps aliasing entirely by treating every
+  tuple/attr/array op as a <code>flush_all()</code> barrier
+  (<code>upass/coalescer/upass_coalescer.hpp:294-315</code>). The constraint applies to
+  the future demand-driven emit this page plans: total reorder of pure defs is sound
+  only while every read-after-write is visible through SSA names; an array index
+  reintroduces may-alias ordering (<code>a[i]=</code> vs <code>=a[j]</code>), so aliasing
+  array ops must stay pinned/ordered when they graduate from the barrier treatment.</li>
 </ul>
 
 <h2>Design notes</h2>

@@ -1,6 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
-// Ported from pass/label/synth_test (2c-color) onto the current hhds::Graph API.
+// Ported from the old pass/label synth test (2c-color) onto the current hhds::Graph API.
 
 #include "color_common.hpp"
 #include "color_synth.hpp"

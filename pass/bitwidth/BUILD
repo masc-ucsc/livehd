@@ -21,8 +21,8 @@ cc_library(
 )
 
 cc_test(
-    name = "bitwidth_unbounded_test",
-    srcs = ["bitwidth_unbounded_test.cpp"],
+    name = "bitwidth_test",
+    srcs = ["bitwidth_test.cpp"],
     copts = COPTS,
     deps = [
         ":pass_bitwidth",

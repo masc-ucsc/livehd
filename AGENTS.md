@@ -17,6 +17,7 @@
   **removed** (2026-06-04)
 - C++ formatted with `clang-format`
 - **Contract tests/benchmarks**: Any test or benchmark file whose name contains the word `contract` is immutable to the coding agent. Do NOT modify these files — they define the expected behavior contract. If a contract test fails, fix the implementation, not the test.
+- **Test file naming**: use the `_test.cpp` suffix only when a matching `foo.cpp` exists in the same or parent directory (`foo_test.cpp` tests `foo.cpp`); it is a suffix, never a prefix. Standalone checks with no single source counterpart must not carry `_test` (use e.g. `*_smoke.cpp`).
 
 ## Sibling Repositories (DO NOT search the filesystem for these)
 

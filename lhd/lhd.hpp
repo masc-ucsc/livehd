@@ -66,6 +66,12 @@ struct Options {
   // (SV/Verilog -> LGraphs).
   std::string reader = "slang";
   std::string depfile;
+  // --unused-inputs PATH (compile): write the declared source-file positionals
+  // whose contents did NOT reach the compiled closure (absent from every final
+  // unit's Source_locator table, e.g. a .sv outside the --top hierarchy) — one
+  // cwd(exec-root)-relative path per line, empty when everything was read; the
+  // format Bazel's unused_inputs_list consumes for input pruning.
+  std::string unused_inputs;
   std::string recipe;       // resolved per-command default in the kernel
   std::string recipe_file;  // deferred (unsupported)
   std::string config;       // --config lhd.toml: pass-flag defaults (CLI --set/--recipe win)

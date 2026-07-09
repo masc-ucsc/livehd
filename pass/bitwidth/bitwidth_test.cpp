@@ -24,7 +24,7 @@ namespace {
 // derive a range, so the Sum driver pin stays unbounded (bits == 0) and
 // report_unbounded() must surface a `bitwidth-unbounded` warning.
 TEST(BitwidthUnbounded, WarnsOnUnboundedDriverPin) {
-  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_unbounded_test");
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
   auto  gio = lib.create_io("bw_unbounded");
   gio->add_input("a", 1);  // no set_bits -> declared width stays 0
   gio->add_input("b", 2);
@@ -50,7 +50,7 @@ TEST(BitwidthUnbounded, WarnsOnUnboundedDriverPin) {
 
 // A fully-typed design must NOT produce a bitwidth-unbounded warning.
 TEST(BitwidthUnbounded, NoWarnWhenAllBounded) {
-  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_unbounded_test");
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
   auto  gio = lib.create_io("bw_bounded");
   gio->add_input("a", 1);
   gio->set_bits("a", 8);
@@ -87,7 +87,7 @@ TEST(BitwidthUnbounded, NoWarnWhenAllBounded) {
 // bitwidth infers on the op's driver pin.
 
 [[nodiscard]] static std::shared_ptr<hhds::Graph> bounded_inputs(const char* name, int abits, int bbits) {
-  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_unbounded_test");
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
   auto  gio = lib.create_io(name);
   gio->add_input("a", 1);
   gio->set_bits("a", abits);
@@ -161,7 +161,7 @@ TEST(BitwidthInfer, ComparatorIsOneBit) {
 // Mux: sink 0 is the selector, sinks 1..N the data arms; the output unions
 // the data arms' ranges. Two u8 data arms -> at least 8 bits.
 TEST(BitwidthInfer, MuxUnionsDataArms) {
-  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_unbounded_test");
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
   auto  gio = lib.create_io("bw_mux");
   gio->add_input("sel", 1);
   gio->set_bits("sel", 1);

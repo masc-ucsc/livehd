@@ -11,7 +11,7 @@
 <main>
 <h1><strong class="item-id">5d</strong> Test reorg</h1>
 <p>Test reorg per the "Test Organization" design notes below: a <code>tests/</code>
-  layout, a <code>contracts/</code> split, and <code>*_test.cpp</code> naming rules.</p>
+  layout and contract-test coverage.</p>
 
 <h2>Depends on</h2>
 <p>None.</p>
@@ -19,11 +19,16 @@
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
 <li><strong>A — tests/ layout.</strong> All C++ tests under a <code>tests/</code> subdir per
-  component.</li>
-<li><strong>B — _test.cpp suffix rules.</strong> Use the <code>_test.cpp</code> suffix only
-  with a sibling <code>foo.cpp</code>; it is a suffix, never a prefix.</li>
-<li><strong>C — contracts/ split.</strong> Integration/API tests live in
-  <code>contracts/</code>; agents don't edit them.</li>
+  component. Current offenders (verified 2026-07-08): <code>upass/*</code> (7 tests:
+  assert, bitwidth, coalescer, constprop, prp_writer, runner, verifier),
+  <code>pass/abc</code>, <code>pass/bitwidth</code>, <code>pass/color</code> (5 tests),
+  <code>pass/sample</code>, <code>pass/semdiff</code>, <code>inou/prp</code>.</li>
+<li><strong>C — contract-test coverage.</strong> The mechanism landed as a filename
+  convention instead of a directory split: any test/benchmark file whose name
+  contains <code>contract</code> is immutable to coding agents (AGENTS.md, enforced by
+  <code>scripts/constracts/check_contract_untouched.sh</code>). Remaining work is
+  coverage: audit the existing integration/API tests, identify which ought to be
+  contract-protected, and rename/add contract-named tests accordingly.</li>
 <li><strong>D — move compile-driver scripts.</strong> Move <code>*_compile.sh</code> driver
   scripts under <code>contracts/</code>.</li>
 </ul>
@@ -35,27 +40,22 @@
 <h3 id="test-organization">Test Organization</h3>
 <p>Tests are scattered across the codebase. Some subsystems place tests in
 dedicated <code>tests/</code> directories (core, lgraph, lnast, inou/pyrope) while others
-have test files alongside source code (upass, pass/label, pass/mockturtle,
-main, inou/lefdef, inou/liveparse).</p>
+have test files alongside source code (as of 2026-07-08: upass — 7 tests —
+pass/abc, pass/bitwidth, pass/color, pass/sample, pass/semdiff, inou/prp).</p>
 <p>Rules to enforce:</p>
 <ul>
 <li>
 <p>All main C++ tests must live in a <code>tests/</code> subdirectory under each component.</p>
 </li>
 <li>
-<p>A file should only use the <code>_test.cpp</code> suffix (e.g., <code>foo_test.cpp</code>) when
-  there is a corresponding <code>foo.cpp</code> in the parent directory. Otherwise it is
-  just a standalone test and should not carry the <code>_test</code> suffix.</p>
-</li>
-<li>
-<p>When the <code>_test</code> convention is used, it must be a suffix, never a prefix
-  (<code>foo_test.cpp</code>, not <code>test_foo.cpp</code>).</p>
-</li>
-<li>
-<p>Create a separate <code>contracts/</code> directory (per component or top-level) for
-  higher-level integration and API tests. Contracts test only public/high-level
-  APIs and overall integration. Agents should not edit contract tests directly;
-  they are maintained by hand to guarantee stable interface behavior.</p>
+<p>Contract tests are marked by filename, not by directory: any test/benchmark
+  file whose name contains <code>contract</code> is immutable to coding agents
+  (AGENTS.md; enforced by <code>scripts/constracts/check_contract_untouched.sh</code>).
+  Contracts test only public/high-level APIs and overall integration; they are
+  maintained by hand to guarantee stable interface behavior. The old
+  <code>contracts/</code>-directory migration design is dropped — the open work is
+  coverage: audit existing integration/API tests and rename/add
+  contract-named tests where protection is warranted.</p>
 </li>
 <li>
 <p>Treat compile-driver scripts as contracts, not ordinary tests. Move

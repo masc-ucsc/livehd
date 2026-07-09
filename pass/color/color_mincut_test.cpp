@@ -1,6 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
-// Ported from pass/label/mincut_test (2c-color) onto the current hhds::Graph
+// Ported from the old pass/label mincut test (2c-color) onto the current hhds::Graph
 // API. VieCut runs file-based (METIS in, partition out), so this only asserts
 // the coloring invariants, not a specific cut.
 

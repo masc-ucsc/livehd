@@ -1,6 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
-// Ported from pass/label/acyclic_test (2c-color). Asserts the acyclic coloring
+// Ported from the old pass/label acyclic test (2c-color). Asserts the acyclic coloring
 // invariants on the current hhds::Graph API rather than exact legacy ids.
 
 #include "color_acyclic.hpp"

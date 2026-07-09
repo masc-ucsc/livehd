@@ -50,7 +50,12 @@ cc_library(
     name = "inou_prp",
     srcs = glob(
         ["*.cpp"],
-        exclude = ["*test*.cpp"],
+        exclude = [
+            "*test*.cpp",
+            # Standalone gtest smoke check (no _test suffix: it exercises only
+            # the external prpparse API, not a sibling .cpp here).
+            "prpparse_stream_smoke.cpp",
+        ],
     ),
     hdrs = glob(["*.hpp"]),
     copts = COPTS,
@@ -66,9 +71,11 @@ cc_library(
 )
 
 # 2f-stream: the streaming seam keeps the CST arena bounded to one construct.
+# Standalone smoke check of the external prpparse streaming API (no sibling
+# prpparse_stream.cpp here, so no _test suffix).
 cc_test(
-    name = "prpparse_stream_test",
-    srcs = ["prpparse_stream_test.cpp"],
+    name = "prpparse_stream_smoke",
+    srcs = ["prpparse_stream_smoke.cpp"],
     copts = COPTS,
     deps = [
         "@googletest//:gtest_main",

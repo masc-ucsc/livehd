@@ -11,13 +11,7 @@
 <main>
 <h1><strong class="item-id">2i-issues</strong> Pyrope lowering &amp; cgen emission defects (non-LEC)</h1>
 
-<p><span class="status landed">only A, B open — re-verified 2026-06-20</span> — of the
-original six compiler bugs surfaced by the differential corpus, four have landed and
-been removed (<strong>C</strong> tuple input port, <strong>D</strong> tuple output port
-incl. the conditional/nested whole-tuple writes, <strong>E</strong> signed-shift idiom,
-<strong>F</strong> reserved-word signal names — each proven by three independent
-oracles: <code>lgyosys</code>, <code>cvc5</code>, exhaustive <code>iverilog</code>).
-<strong>A</strong> (registered-output interface) and <strong>B</strong> (hierarchical
+<p><strong>A</strong> (registered-output interface) and <strong>B</strong> (hierarchical
 enums) are the only remaining work — both still <strong>hard-error in lowering</strong>
 (the latest patch round <code>cada30102</code>, import + ABC sra/mul ops, did not touch
 their code paths). Each is valid, documented Pyrope; they have no ordering between them,
@@ -52,18 +46,8 @@ reading the source on <strong>2026-06-20</strong> against a fresh
 </tbody>
 </table>
 
-<p><span class="status landed">resolved 2026-06-20</span> For context, the recent
-patches already fixed these neighbours (verified by both LEC engines + an
-independent <code>iverilog</code> oracle): <code>implies</code>, runtime bit index
-<code>a#[i]</code>, runtime index into a const-array literal <code>arr[i]</code>,
-<code>u8#[..]</code>/<code>i8#[..]</code> full-width slice, open-ended slice
-<code>a#[k..]</code>, or/and/xor/plus reductions <code>a#|[..]</code>, and the
-two-writes-to-one-register slice merge (the netlist now computes <code>{b,a}</code>
-correctly — but it exposed subtask&nbsp;F). Do not re-file these.</p>
-
 <h2>Depends on</h2>
-<p>None. A and B are each self-contained and the only remaining work. C, D, E, F are
-fully landed and removed.</p>
+<p>None. A and B are each self-contained and the only remaining work.</p>
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
@@ -127,10 +111,10 @@ re-test harness from the 2026-06-20 round lives in the session scratchpad
 (<code>retest.sh</code> = compile + both LEC engines; <code>comb_oracle.py</code> =
 exhaustive combinational <code>iverilog</code>; <code>seq_oracle.py</code> = clocked
 random <code>iverilog</code>). For one case:</p>
-<pre><code># A–D: must stop hard-erroring
+<pre><code># A, B: must stop hard-erroring
 lhd compile &lt;dir&gt;/impl.prp --emit verilog:gen.v
 
-# E, F (and A–D once they compile): prove equivalent to ref.v with BOTH engines
+# once they compile: prove equivalent to ref.v with BOTH engines
 lhd lec --impl &lt;dir&gt;/impl.prp --ref &lt;dir&gt;/ref.v \
         --impl-top impl.top --ref-top top --set lec.solver=cvc5
 lhd lec --impl &lt;dir&gt;/impl.prp --ref &lt;dir&gt;/ref.v \

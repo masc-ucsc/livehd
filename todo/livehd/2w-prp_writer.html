@@ -17,83 +17,12 @@
   (re-emit a Pyrope source through the upass) is still maturing: this task
   finishes it.</p>
 
-<h2>Landed</h2>
-<ul>
-<li><strong>Safety net (default-on).</strong> The writer no longer silently
-  emits a <code>/* TODO */</code> stub and lets the compile pass.  An
-  unimplemented construct is recorded and <code>pass.prp_writer</code> raises a
-  fatal <code>unsupported</code> diagnostic, so <code>lhd compile … --emit-dir
-  pyrope:</code> exits non-zero.  Pass <code>--set prp_writer.debug=true</code>
-  to keep the partial (TODO-laden) output and let the compile pass — for
-  inspecting what is missing.  <code>prp_writer</code> is registered in the
-  <code>--set</code> registry (<code>kSetPasses</code>) with a <code>debug</code>
-  label.</li>
-<li><strong>Pipeline.</strong> <code>stage[N] x = v</code> (a <code>reg</code>
-  declare carrying a trailing <code>stages</code> node) re-emits as
-  <code>stage[N] x = v</code> instead of the broken <code>reg x = N</code>; the
-  output-port cycle annotation <code>@[N]</code> / <code>@[A..=B]</code> is
-  recovered from the io-store <code>stages</code> node (the slang
-  <code>stages(nil,nil)</code> still opts out with <code>@[]</code>).  Driving
-  case <code>mod_call_pipe</code> now round-trips and LEC-passes.</li>
-<li><strong><code>type_spec</code>.</strong> A bare type assertion is folded
-  into the variable's first declaration (<code>mut x:T = v</code>).</li>
-<li><strong><code>tuple_concat</code>.</strong> <code>dst = (...a, ...b)</code>
-  spread concatenation.</li>
-<li><strong>Regression tests.</strong> The <code>prp-p2p-*</code> family
-  (<code>inou/prp/tests/p2p_test.py</code>) round-trips a Pyrope source through
-  the writer and LECs it against the golden <code>.v</code>; the pipeline cases
-  are wired in (<code>mod_call_pipe</code>, <code>pipe1_pass</code>,
-  <code>pipe2_two_out</code>, <code>pipe3_mul</code>, <code>pipe_range</code>,
-  <code>pipe_state_acc</code>, <code>mod_delay3</code>,
-  <code>reg_out_feedforward</code>).  Add a name to that allow-list once it
-  round-trips.</li>
-</ul>
-
-<h2>Landed — 2026-06-18 (subtasks A + C1)</h2>
-<ul>
-<li><strong>A — unimplemented statement nodes (all emit cleanly now; safety net
-  no longer fires for any equiv case).</strong>
-  <ul>
-  <li><code>timecheck</code> (the inert <code>x@[N]</code> assertion) is
-    <strong>dropped</strong> (the <code>@[]</code> opt-out): the timing it
-    carries is already re-emitted by the writer as the <code>stage[N]</code>
-    declaration and the <code>out:T@[N]</code> interface annotation, so the
-    statement is redundant; and its SSA-renamed ref frequently names a stage var
-    not yet assigned at that point (<code>tmp@[3]</code> precedes
-    <code>stage[3] tmp = …</code>), which would forward-reference an undeclared
-    name on re-parse.  (A literal statement <code>@[N]</code> is left for the
-    future LGraph timecheck.)</li>
-  <li><code>for</code> re-emits as
-    <code>for v[, idx[, key]] in [ref ]iter { body }</code>
-    (<code>write_for</code>); it survives to the writer only inside a generic /
-    un-monomorphized template lambda (every concrete instantiation is unrolled
-    by the runner).</li>
-  <li><code>func_def</code> now emits the nested lambda
-    (<code>kind name&lt;generics&gt;(in:T,…) -&gt; (out:T,…) { body }</code>,
-    via the extracted <code>emit_port_group</code>) instead of a stub.  No equiv
-    LEC case exercises it; covered by the writer unit test.</li>
-  <li>Writer bug: the pre-declare scan wrongly collected <em>named call
-    arguments</em> (<code>mul(a=in1, b=in2)</code>, <code>wrap(v=…, type=…)</code>)
-    as statement stores, hoisting bogus <code>mut a/b/v/type = 0</code> lines.
-    Fixed by requiring a <code>store</code>'s parent to be a <code>stmts</code>
-    node to be a hoist candidate.</li>
-  </ul></li>
-<li><strong>C1 — v→prp derived clock (<code>mclk_derived</code>) LEC-passes.</strong>
-  A <code>clock_pin</code>/<code>reset_pin</code> bound to a net now emits
-  <code>clock_pin=ref &lt;net&gt;</code> (a bare name resolved to the net's
-  declare-time <em>value</em> <code>0</code> → the <code>names clock_pin '0'</code>
-  tolg error), and the net's combinational driver
-  (<code>mut gclk = clk_b &amp; gate</code>) is emitted <em>before</em> the reg
-  declares that bind it (the declare-first hoist otherwise put the reg ahead of
-  its clock driver).  <code>prp-v2prp-mclk_derived</code> green; full suite
-  615/616, 0 regressions.</li>
-</ul>
-
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
 <li><strong>A-LEC — promote the A cases to a gated LEC.</strong> All six
   unimplemented-node cases now emit clean Pyrope (safety net no longer fires),
-  but none can join the <code>prp-p2p-*</code> allow-list yet:
+  but none can join the <code>prp-p2p-*</code> allow-list
+  (<code>inou/prp/tests/p2p_test.py</code>) yet:
   <ul>
   <li><code>accum</code> ships no golden <code>.v</code> (it was aspirational) —
     add one (or drop it) to gate it.</li>
@@ -122,32 +51,11 @@
   <code>lhd lec --set lec.solver=lgyosys --impl pyrope:DIR/X.&lt;top&gt;.prp
   --ref verilog:X.v --top &lt;top&gt;</code>; promote into the
   <code>prp-p2p-*</code> allow-list as each is fixed.</li>
-<li><strong>C2 — multi-clock memory (DEFERRED to
-  <a href="2m-multiport_mem.html">2m-multiport_mem</a>).</strong>
-  <code>mclk_sram_2wclk</code> (two write ports on different clocks) aborts in
-  the <strong>front end</strong> (<code>inou.slang → upass.attributes</code>:
-  <code>clock_pin_refname</code> is add-only), never reaching the writer — the
-  Memory cell carries a single per-memory clock pin.  cgen already has
-  <code>ware/rtl/cgen_memory_multiclock_*.v</code>, but no front-end path builds
-  a per-port-clock Memory.  This is a Memory-model feature, not writer
-  completeness; the <code>prp-v2prp-mclk_sram_2wclk</code> target is tagged
-  <code>fixme</code> (so <code>bazel test //...</code> stays green).  C1
-  (<code>mclk_derived</code>, derived/internal-wire clock) LANDED above.</li>
 <li><strong>Minor writer-faithfulness remainders.</strong> (a) A monomorphized
   cross-module call still emits the fully-qualified <code>file.name(...)</code>
   rather than the bare callee name (only reached on the unresolved multi-module
-  path above).  (b) A dead SSA-v0 clock poison (<code>mut gclk = 0; gclk =
-  0ub?</code>) is still emitted next to a derived clock — harmless dead code
-  (LEC passes), cosmetic.</li>
+  path above).</li>
 </ul>
-
-<h2>Why the LEC "passed" before</h2>
-<p>It did not — there was no LEC on the prp→prp output at all.
-  <code>lhd compile … --emit-dir pyrope:</code> reported <code>status:pass</code>
-  (exit 0) regardless of what the writer produced, because the writer only wrote
-  a <code>/* TODO */</code> comment and never raised a diagnostic.  The safety
-  net (above) closes that hole; the <code>prp-p2p-*</code> family adds the
-  missing LEC gate.</p>
 </main>
 <footer>LiveHD TODO · <a href="../index.html">index</a></footer>
 </body>

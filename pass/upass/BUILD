@@ -79,7 +79,7 @@ sh_test(
 test_suite(
     name = "upass_smoke_suite",
     tests = [
-        "//upass/runner:upass_runner_cycle_test",
+        "//upass/runner:upass_runner_test",
         ":upass_dependency_test.sh",
         ":upass_noop_first_iter_test.sh",
         ":upass_cycle_cmd_test.sh",

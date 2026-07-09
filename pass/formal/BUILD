@@ -42,7 +42,7 @@ cc_library(
 )
 
 # Prover acceptance: tautology / contradiction / onehot0 / cone-gate verdicts on
-# tiny hand-built graphs (no reader needed), mirroring pass/lec comb_equiv_test.
+# tiny hand-built graphs (no reader needed), mirroring pass/lec query_test.
 cc_test(
     name = "prove_test",
     srcs = ["tests/prove_test.cpp"],

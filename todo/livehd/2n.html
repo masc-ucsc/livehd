@@ -16,107 +16,51 @@
   <strong>Primary consumer Claude Code's <code>LSP</code> tool</strong> (implement its op
   subset first), <strong>secondary neovim</strong>. Ephemeral, per-buffer, no
   <code>lgdb</code>; scope = the semantic server only (the tree-sitter grammar/neovim
-  queries and the <code>prpfmt</code> formatter are a separate project). Phase A has
-  landed; B–E remain.</p>
-
-<h2>Resolved design decisions — 2026-06-19</h2>
-<p>The B–D foundation is now pinned (verified against the code on 2026-06-19):</p>
-<ul>
-<li><strong>Index seam = an injected <code>lsp</code> pass in the upass runner.</strong> Gated on an
-  LSP-enabled flag (the normal CLI pays nothing), it runs inside the <strong>single upass
-  traversal</strong> and writes a <strong>persistent external map</strong> — the immutable semantic
-  index. Because it executes while the runner's <code>symbol_table_</code>, the live
-  <code>bw_meta</code>, and the SSA rename state are all in scope, it captures the
-  <strong>source-name ↔ post-SSA-name ↔ kind ↔ range ↔ span join at the moment everything is
-  alive</strong>, rather than reconstructing it from a raw post-SSA name at request time. This is
-  why the LSP need not retain <code>Prp2lnast</code> or pass-internal tables: the map outlives them.</li>
-<li><strong>Partial index by construction.</strong> The one traversal populates the map
-  incrementally per statement; the first error stops the traversal (it flushes a <code>diag</code>
-  record the LSP reads as a diagnostic). The map therefore holds correct kind/type/range for every
-  statement <strong>before</strong> the first error and is <strong>empty after</strong> it. Hover/nav
-  answer from the partial map for earlier statements — this satisfies §5's partial-results promise
-  with <strong>no</strong> front-end "collect-and-continue" change.</li>
-<li><strong>References + hover share recorded read sites.</strong> The <code>lsp</code> pass records
-  each read during the walk (with live lexical identity + the resolved SSA version) — it does
-  <strong>not</strong> reuse <code>Prp2lnast::read_sites_</code> (the converter is destroyed before the
-  runner runs). Hover-on-a-use and findReferences both resolve to these recorded sites, and the pass
-  can deliberately include or exclude the <code>func_call</code> callee.</li>
-<li><strong>Hover shows the range live at the cursor's use</strong> (per-instance, from that read
-  site's SSA version), rendered as <code>u8(0,15)</code>: a <code>u</code>/<code>i</code> +
-  <strong>declared</strong> bit-width prefix with the bitwidth-inferred <code>(min,max)</code> at that
-  instance inside. When the variable has no declared type the prefix bits are derived from the
-  inferred range; an unbounded value renders as bare <code>int</code>.</li>
-<li><strong>Workspace index (§12) trimmed.</strong> Phase D builds an <strong>in-memory session
-  index</strong> (lazy on the first <code>workspaceSymbol</code>, kept for the session); the persistent
-  XDG cache, background indexer process, manifest, and <code>.gitignore</code>/symlink walk move to
-  Phase E behind a measured-need gate.</li>
-</ul>
+  queries and the <code>prpfmt</code> formatter are a separate project). Remaining:
+  <code>documentSymbol</code> (Phase B leftover) and phases C–E.</p>
 
 <h2>Feature coverage — the Claude Code <code>LSP</code> tool list</h2>
-<p>The six operations the agent's <code>LSP</code> tool drives, mapped to the wire method,
+<p>The pending operations the agent's <code>LSP</code> tool drives (diagnostics and
+  <code>hover</code> already exist), mapped to the wire method,
   the <code>ServerCapabilities</code> flag that gates each, the phase that lands it, and
-  today's status (diagnostics audited 2026-06-18; <code>hover</code> landed 2026-06-19, against
-  <code>lsp/livehd_lsp.cpp</code>). Diagnostics + <code>hover</code> exist; the other four are
+  today's status (audited against <code>lsp/livehd_lsp.cpp</code>). All four are
   <strong>entirely absent</strong> — not stubbed.</p>
 <table>
 <tr><th>Feature</th><th>LSP method</th><th>provider flag</th><th>phase</th><th>status</th></tr>
-<tr><td><code>getDiagnostics</code></td><td><code>textDocument/diagnostic</code> + push <code>publishDiagnostics</code></td><td><code>diagnosticProvider</code></td><td>A</td><td><span class="status landed">landed</span></td></tr>
-<tr><td><code>hover</code></td><td><code>textDocument/hover</code></td><td><code>hoverProvider</code></td><td>B</td><td><span class="status landed">landed</span></td></tr>
 <tr><td><code>documentSymbol</code></td><td><code>textDocument/documentSymbol</code></td><td><code>documentSymbolProvider</code></td><td>B</td><td><span class="status">missing</span></td></tr>
 <tr><td><code>goToDefinition</code></td><td><code>textDocument/definition</code></td><td><code>definitionProvider</code></td><td>C</td><td><span class="status">missing</span></td></tr>
 <tr><td><code>findReferences</code></td><td><code>textDocument/references</code></td><td><code>referencesProvider</code></td><td>C</td><td><span class="status">missing</span></td></tr>
 <tr><td><code>workspaceSymbol</code></td><td><code>workspace/symbol</code></td><td><code>workspaceSymbolProvider</code></td><td>D</td><td><span class="status">missing</span></td></tr>
 </table>
-<p>Today <code>handle_initialize</code> advertises only <code>textDocumentSync</code> +
-  <code>diagnosticProvider</code>, and the <code>run_stdio</code> dispatch handles only lifecycle
+<p>Today <code>handle_initialize</code> advertises <code>textDocumentSync</code> +
+  <code>diagnosticProvider</code> + <code>hoverProvider</code>, and the <code>run_stdio</code> dispatch handles lifecycle
   (incl. a <code>$/cancelRequest</code> + <code>$/setTrace</code> no-op) +
-  <code>did{Open,Change,Save,Close}</code> + <code>textDocument/diagnostic</code>; <strong>any other
+  <code>did{Open,Change,Save,Close}</code> + <code>textDocument/diagnostic</code> +
+  <code>textDocument/hover</code>; <strong>any other
   request carrying an <code>id</code> falls through to <code>-32601 MethodNotFound</code></strong>
   (<code>respond_method_not_found</code>). Each missing feature therefore needs two coupled
   edits: (a) flip its provider flag in <code>handle_initialize</code>, and (b) add its handler
   to the dispatch. <strong>Flag and handler land together</strong> — advertising a provider with
   no handler is a protocol bug (the client surfaces a dead action, then errors on
-  use). All five also share one foundation the diagnostics path never needed: a
-  <strong>position→symbol resolver</strong> (cursor → the lexical symbol at that span), since
-  analysis today keeps only <code>uri→text</code> (<code>g_docs</code>) and discards the parse/LNAST
-  after collecting diagnostics. Phase B builds an immutable external semantic index from
-  the analyzed LNAST + traversal symbol table; B–D query that index without keeping
-  pass-internal state alive.</p>
-
-<h2>Depends on</h2>
-<ul>
-<li><strong>1f</strong> (landed 2026-06-10) — diagnostic spans sharpen once
-  <code>source_id</code> threads through.</li>
-<li><strong>3f</strong> (landed 2026-06-11) — structured diagnostic codes/categories.</li>
-</ul>
+  use). All four also share one foundation the diagnostics path never needed: a
+  <strong>position→symbol resolver</strong> (cursor → the lexical symbol at that span) — the
+  immutable external semantic index Phase B built from the analyzed LNAST + traversal symbol
+  table; B–D query that index without keeping pass-internal state alive.</p>
 
 <h2>Subtasks — pending</h2>
-<p>Phases match §10 and the coverage table above. The shared prerequisite for B–D
-  is an immutable <strong>position→symbol semantic index</strong> built <strong>during</strong> the
-  single upass traversal by an injected, flag-gated <code>lsp</code> pass (see "Resolved design
-  decisions"). Each entry carries lexical symbol identity, scope, definition/read spans, kind/type,
+<p>Phases match §10 and the coverage table above. The shared foundation for B–D
+  is the immutable <strong>position→symbol semantic index</strong> built <strong>during</strong> the
+  single upass traversal by an injected, flag-gated <code>lsp</code> pass
+  (<code>core/lsp_index.{hpp,cpp}</code>, landed with B). Each entry carries lexical symbol
+  identity, scope, definition spans (read sites land with C), kind/type,
   and <code>bw_min</code>/<code>bw_max</code>, all stamped while the runner's symbol table + live
-  <code>bw_meta</code> are in scope. Land that map with B; do not retain <code>Prp2lnast</code> or
+  <code>bw_meta</code> are in scope; do not retain <code>Prp2lnast</code> or
   pass-internal symbol tables after the run — the map outlives them.</p>
 <ul class="subtasks">
-<li><strong>B — semantic-index <code>lsp</code> recording + hover</strong>
-  <span class="status landed">landed 2026-06-19</span> (<code>hoverProvider</code> flipped).
-  The index is a process-global store in <code>core/lsp_index.{hpp,cpp}</code> (mirrors
-  <code>diag::sink()</code>; no dep cycle — both <code>upass/</code> and <code>lsp/</code> already dep
-  <code>//core</code>). <code>uPass_runner::record_lsp_def</code> records one entry per
-  value-producing op's destination during the single traversal, gated on
-  <code>lsp_index::index().enabled()</code> (set only by <code>analyze()</code>, so the CLI pays one
-  bool check and records nothing — <strong>no <code>--set</code> flag, no <code>pass_upass</code>
-  change</strong>). <code>hover</code> re-analyzes the buffer and returns the entry whose span covers
-  the cursor: declared bits/sign from <code>io_meta</code> (IO) or the bundle's declared envelope, with
-  the inferred <code>bw_meta</code> range when bounded else the declared envelope — e.g.
-  <code>z : u8(0,255)</code>, <code>i8(-128,127)</code>, constant <code>u8(5,5)</code>;
-  <code>null</code> off a name or for a closed buffer. Span is token-precise on the dst (the store
-  carries the srcid). <em>Tests:</em> <code>lhd_lsp_test</code> asserts <code>hoverProvider</code> +
-  a hover shape; <code>lsp_cli.py f.prp hover L C</code> for manual probes. <strong>STILL
-  PENDING in B:</strong> <code>documentSymbol</code> — walk <code>func_def</code> + IO
+<li><strong>B — documentSymbol</strong> (leftover; the semantic-index <code>lsp</code> recording +
+  hover shipped 2026-06-19): walk <code>func_def</code> + IO
   <code>tuple_add</code> + body <code>declare</code> nodes (reg via qualifier) into a symbol tree and
-  flip <code>documentSymbolProvider</code>. <strong>v1 limitations:</strong> only dst-def sites are
+  flip <code>documentSymbolProvider</code>. <strong>Index v1 limitations:</strong> only dst-def sites are
   indexed (hovering a pure read/use returns the covering statement's dst; token-level read spans need
   per-ref srcids — a prp2lnast change); tuple-field ranges (<code>b.x</code>) absent
   (<code>write_bw</code> is scalar-only); a <em>syntax</em> error yields an empty index (parse
@@ -131,18 +75,31 @@
   capture). Search an <strong>in-memory session</strong> index of workspace <code>.prp</code> files
   (built lazily on first query, then kept) plus open-buffer overrides; persistent cache deferred to
   E (§12). <em>Test:</em> <code>lsp_cli.py f.prp workspaceSymbol QUERY</code>.</li>
-<li><strong>E — packaging / workspace polish.</strong> The <code>.lsp.json</code> plugin + install
-  recipe, neovim pointer, persistent workspace indexer/cache, and fold into
-  <code>livehd lsp</code> when the agent CLI lands.</li>
+<li><strong>E — workspace indexer + crash isolation</strong> (packaging is done — see below).
+  Two remaining pieces:
+  (1) the <strong>persistent XDG-cache workspace indexer</strong> — the <em>(Phase E)</em> bullets
+  of §12 — explicitly <strong>gated on measured need</strong>: ship only if Phase D's in-memory
+  session index is demonstrably too slow to build on a real workspace.
+  (2) the <strong>crash-hardening remainder</strong> folded in from Phase A: front-end crash
+  <em>isolation</em> for the server loop. Exceptions are already contained —
+  <code>analyze()</code> (<code>lsp/livehd_lsp.cpp</code>) wraps the <code>Prp2lnast</code> ctor and
+  <code>Pass_upass::work</code> in try/catch, as does the sibling-import parse loop, and
+  <code>run_stdio</code> repoints fd 1 so stray front-end prints can't corrupt the JSON-RPC
+  stream. The residual gap is <strong>non-exception</strong> failures: an <code>I()</code> assert
+  abort, a segfault, or a front-end hang kills or wedges the whole in-process server (analysis is
+  synchronous). Remedy = the same two-process split §12 already prescribes for the indexer — an
+  out-of-process analysis worker with a timeout, respawn on death, and a "front-end crashed"
+  diagnostic instead of silence. Gate on the first such crash actually observed through an
+  editor.
+  <em>Shipped 2026-07, no longer E work:</em> the Claude Code plugin recipe (skills-dir plugin,
+  <strong>inline <code>lspServers</code> in <code>plugin.json</code></strong>), the checked-in
+  <code>scripts/prplsp</code> checkout-aware wrapper, and the Neovim spec
+  (<code>scripts/pyrope.lua</code> + minimal <code>vim.lsp.start</code> wiring) — all documented
+  in <code>README.md</code> ("Claude Code" / "Neovim (0.11+)" sections); the server already runs
+  as the <code>lhd pyrope lsp</code> subcommand, so there is no separate "fold into the agent
+  CLI" step pending.</li>
 </ul>
 
-<h2>Subtasks — landed</h2>
-<ul class="subtasks">
-<li><strong>A — Phase A: lhd pyrope lsp over stdio.</strong> <span class="status landed">landed</span>
-  Lifecycle, <code>textDocumentSync</code> Full,
-  <code>didOpen</code>/<code>didChange</code>/<code>didSave</code>/<code>didClose</code>,
-  <code>publishDiagnostics</code> push + pull, <code>positionEncoding</code>.</li>
-</ul>
 
 <h2>Command-line testing</h2>
 <p>The server is plain JSON-RPC over stdio (Content-Length framing), so every
@@ -180,11 +137,11 @@ honor <code>$LHD</code>, and factor the byte-identical JSON-RPC framing into a s
 cannot be exercised by the one-buffer <code>lsp_cli.py</code> — Phase D needs a multi-file driver.</p>
 <pre><code>bazel build //lhd:lhd          # build the server once
 
-# diagnostics (works today) — a clean file reports empty items
+# diagnostics + hover (work today) — a clean file reports empty items
 python3 lhd/tests/lsp_cli.py foo.prp diagnostic
-
-# the five pending features (each returns MethodNotFound until its phase lands):
 python3 lhd/tests/lsp_cli.py foo.prp hover           3 8    # textDocument/hover
+
+# the four pending features (each returns MethodNotFound until its phase lands):
 python3 lhd/tests/lsp_cli.py foo.prp documentSymbol         # textDocument/documentSymbol
 python3 lhd/tests/lsp_cli.py foo.prp definition      5 2    # textDocument/definition
 python3 lhd/tests/lsp_cli.py foo.prp references       5 2   # textDocument/references
@@ -203,11 +160,6 @@ bazel test //lhd/tests:lhd_lsp_test
 <p><strong>Acceptance per feature</strong> — what the driver (and the extended bazel test)
   should show once the phase lands:</p>
 <ul>
-<li><code>hover</code> → <code>{contents, range}</code> at a name position carrying the variable's
-  type + the bitwidth range live <strong>at that use</strong>, rendered as <code>a : u8(0,15)</code> —
-  a <code>u</code>/<code>i</code> + declared-bit-width prefix with the inferred <code>(min,max)</code>
-  inside (prefix bits derived from the range when undeclared; bare <code>int</code> when unbounded).
-  <code>null</code> off a name.</li>
 <li><code>documentSymbol</code> → a tree of <code>{name, kind, range, selectionRange}</code> over the
   file's <code>func_def</code> nodes, their <code>tuple_add</code> IO entries, and body
   <code>declare</code> nodes (registers detected by the <code>"reg"</code>/<code>"stage"</code>
@@ -311,17 +263,6 @@ is the gate for all later phases.</p>
 <tr><td>call hierarchy</td><td><code>func_def</code> ↔ <code>func_call</code> graph in LNAST</td><td>new traversal</td></tr>
 </table>
 
-<p><strong>Lifecycle/visibility gap — RESOLVED (the seam):</strong> today <code>analyze()</code>
-returns only <code>sink.records()</code>; the <code>Lnast</code>, the <code>Eprp_var</code>, and the
-<code>Prp2lnast</code> converter are stack-locals dropped on return, and the runner's
-<code>Symbol_table</code> (the only source of scope/shadowing identity) is destroyed inside
-<code>Pass_upass::work</code>'s per-tree loop <em>before</em> <code>work()</code> returns
-(<code>pass_upass.cpp:453-535</code>) — so a post-hoc "traverse the analyzed symbol table" is
-impossible. The fix is an <strong>injected <code>lsp</code> pass in the runner order</strong>
-(flag-gated; CLI unaffected) that writes an immutable per-file map <strong>during the single
-traversal</strong>, while <code>symbol_table_</code> + <code>bw_meta</code> are live. The map, not the
-converter or pass-local tables, is the long-lived LSP state (see "Resolved design decisions"
-above).</p>
 
 <p>Definition, references, and hover must use <strong>lexical symbol identity</strong>, including
 shadowing and same-named variables in different functions; raw-name matching is not
@@ -354,12 +295,12 @@ than re-deriving it from a raw name at request time.</p>
   is <strong>required for request parsing</strong> — <code>core/diag</code> is <strong>write-only</strong> (hand-rolled
   <code>to_jsonl</code>, no parse path), so it can only optionally serve response
   serialization, never parse.</li>
-<li><strong>Unsaved-buffer entry (near-trivial):</strong> <code>Prp2lnast(filename, module_name)</code>
-  already slurps the file into a <code>std::string</code> and calls
-  <code>ts_parser_parse_string(...)</code>. Add a constructor that takes the buffer directly
-  + a virtual filename for diagnostics — a small refactor of the existing slurp.
-  (The old <code>parse_only</code> ctor flag — stop after <code>check_parse_errors()</code> — was
-  removed 2026-06-04; a syntax-only tier (§5) would reintroduce that seam.)</li>
+<li><strong>Unsaved-buffer entry:</strong> <code>Prp2lnast(filename, module_name)</code>
+  slurps the file into a <code>std::string</code>; a second constructor takes the buffer directly
+  + a virtual filename for diagnostics. Both feed a <code>prpparse::Source_buffer</code> +
+  <code>Parser</code> and lower construct-by-construct via <code>parse_next()</code>.
+  (A syntax-only tier (§5) no longer needs a ctor seam — the prpparse streaming API is
+  directly constructible over the buffer, outside <code>Prp2lnast</code>.)</li>
 </ul>
 
 <h3>5. The fast pipeline (latency is the constraint)</h3>
@@ -367,7 +308,7 @@ than re-deriving it from a raw name at request time.</p>
 <strong>Pyrope-only</strong>, stopping well before LGraph lowering. To surface every
 diagnostic the CLI would (the user's requirement), <code>analyze()</code> runs the
 <code>inou.prp |> pass.upass</code> chain in-process:</p>
-<pre><code>tree-sitter parse → prp2lnast (buffer-backed ctor) → converter.get_lnast()
+<pre><code>prpparse (streaming parse_next) → prp2lnast (buffer-backed ctor) → converter.get_lnast()
   → Eprp_var var; var.add(lnast); var.add("tolg","false"); var.add("toln","false")
   → Pass_upass::work(var)        (default order MINUS the coalescer — under toln:0 it is
                                   dropped, nothing consumes the rewritten LNAST: verifier,
@@ -389,11 +330,28 @@ order; the full <code>pass.upass</code> is the landed behavior so the LSP and th
 CLI report identically.)</p>
 <p>Two tiers:</p>
 <ul>
-<li><strong>Syntax tier</strong> — stop after <code>check_parse_errors()</code>. Near-instant; on
-  <code>didChange</code>. Not implemented (the <code>parse_only</code> flag that provided it was
-  removed 2026-06-04 — reintroduce the seam if this tier ships).</li>
-<li><strong>Semantic tier</strong> — the full front-end above. Run directly for every
-  <code>didOpen</code>/<code>didChange</code>/<code>didSave</code>; no debounce. Workspace indexing is a
+<li><strong>Syntax tier</strong> (pending; re-specced 2026-07-08 against the prpparse front-end)
+  — a <strong>bare prpparse parse loop</strong>: construct <code>prpparse::Source_buffer</code> +
+  <code>prpparse::Parser</code> over the buffer and drain <code>parse_next()</code> to end of
+  input — <strong>lex/parse only, no LNAST lowering, no upass pipeline</strong> — catching
+  <code>prpparse::Parse_error</code> and mapping its <code>Diag</code> (shape-compatible with
+  <code>core/diag</code>) straight to the LSP diagnostic. prpparse is streaming and
+  <strong>fail-fast with no ERROR-node phase</strong> (<code>inou/prp/prp2lnast.cpp:221</code> —
+  <code>check_parse_errors()</code> is moot; a returning parse is well-formed), so the tier
+  yields at most the <em>first</em> syntax error, near-instantly and with bounded memory (the
+  CST arena recycles per construct). Run it on <code>didChange</code>; the full compile
+  (semantic tier) runs on idle/<code>didSave</code>. Two costs to carry over:
+  <code>Prp2lnast</code>'s pre-parse nesting-depth guard must be duplicated (or accepted as
+  absent), and the semantic index is only rebuilt by the semantic tier — hover/nav stay empty
+  (never stale: the index is version-tagged and dropped on <code>didChange</code>) until the
+  next semantic run. The old design — reintroduce the tree-sitter-era <code>parse_only</code>
+  ctor flag that stopped after <code>check_parse_errors()</code> (removed 2026-06-04) — is
+  <strong>dead</strong>: no ctor seam is needed, the facade's streaming API is directly
+  callable.</li>
+<li><strong>Semantic tier</strong> — the full front-end above. Landed behavior today: run
+  directly for every <code>didOpen</code>/<code>didChange</code>/<code>didSave</code>, no debounce.
+  When the syntax tier ships, <code>didChange</code> demotes to syntax-only and this tier moves
+  to idle/<code>didSave</code>. Workspace indexing is a
   separate background process, so it does not share the foreground front-end's
   process-global pass/diagnostic state.</li>
 </ul>
@@ -442,9 +400,7 @@ request.</p>
 <code>upass/bitwidth</code> emits <strong>fully null</strong> spans; <code>upass/typecheck</code> is null <strong>except</strong>
 cassert/func_call diagnostics, which already carry <code>file</code> + <code>start_line</code> (line
 only, no <code>start_byte</code>) via the loc-carry chain; <code>inou/prp</code> syntax diagnostics
-carry precise byte spans. So a null/line-only span is the LSP's problem to map —
-the <strong>"clamp to document start" fallback is planned LSP behavior, not something
-<code>core/diag</code> does today</strong>. The record schema is unchanged, so semantic-span
+carry precise byte spans. The record schema is unchanged, so semantic-span
 precision sharpens automatically as the <strong>1f</strong> (landed 2026-06-10)/<strong>3f</strong>
 (landed 2026-06-11) spans propagate — no LSP-side change.</p>
 <p><strong>Push and pull — pick one <em>per client</em>.</strong> Claude Code "auto-reports after each
@@ -454,8 +410,7 @@ implement <strong>both</strong> and advertise <code>diagnosticProvider</code>, b
 both at once</strong> — a client that supports pull <em>and</em> receives pushes shows every
 diagnostic <strong>twice</strong> (observed with neovim 0.11). So at <code>initialize</code>, if the
 client announced pull support (<code>capabilities.textDocument.diagnostic</code>), serve
-<strong>pull only</strong> and suppress <code>publishDiagnostics</code>; otherwise push. (Landed: the
-<code>g_client_pull</code> gate in <code>publish_diagnostics</code>.)</p>
+<strong>pull only</strong> and suppress <code>publishDiagnostics</code>; otherwise push.</p>
 
 <h3>7. Position encoding &amp; indexing — the classic footguns</h3>
 <ul>
@@ -520,6 +475,12 @@ here so they aren't lost — not 2n work):</p>
 </ul>
 
 <h3>9. Packaging / install &amp; the two Claude-Code diagnostics channels</h3>
+<p><strong>Landed 2026-07 — partially superseded.</strong> The shipped recipe
+(<code>README.md</code>, "Claude Code" / "Neovim (0.11+)" sections) uses a skills-directory
+plugin with <strong>inline <code>lspServers</code> in <code>plugin.json</code></strong> plus the
+checkout-aware <code>scripts/prplsp</code> wrapper on <code>$PATH</code> — <em>not</em> the
+plugin-bundled binary sketched below. The notes below stay for the bundled-binary variant and
+the two-channel analysis, which remain accurate.</p>
 <ul>
 <li><strong>Binary:</strong> one <code>livehd-lsp</code> (the semantic server; no <code>prpfmt</code> — that ships
   with the separate project).</li>
@@ -561,46 +522,35 @@ here so they aren't lost — not 2n work):</p>
 <p><strong>Present today (can start now):</strong> <code>prp2lnast</code>, <code>upass/typecheck</code>,
 <code>upass/bitwidth</code>, <code>core/diag</code> (1z landed), <code>rapidjson</code>, and the
 <code>tree-sitter-pyrope</code> grammar (via <code>prp2lnast</code>).</p>
-<p><strong>NOT ready / needs work:</strong> the injected <code>lsp</code> pass + its immutable
-lexical-symbol map, incl. the source↔post-SSA join and per-use ranges (Phase B); read-site
-recording in that pass + definition spans (Phase C); the in-memory session workspace index (Phase
-D); and the persistent XDG cache + background indexer (Phase E). The "partial index on a semantic
-error" is <strong>not</strong> separate work — it falls out of the single-traversal incremental
-population (empty after the first error; see §5).</p>
+<p><strong>NOT ready / needs work:</strong> <code>documentSymbol</code> over the semantic-index map
+(Phase B leftover); read-site
+recording in the <code>lsp</code> pass + definition spans (Phase C); the in-memory session workspace index (Phase
+D); and the persistent XDG cache + background indexer plus front-end
+crash isolation (Phase E — both gated on measured need).</p>
 <p><strong>Soft deps (do not block):</strong> the agent CLI (the LSP runs its own in-process pipeline,
 folds under <code>livehd lsp</code> later; see <a class="xref" href="3y-agent.html">3y-agent</a>); <strong>1f</strong> (landed 2026-06-10)/<strong>3f</strong> (landed 2026-06-11) (semantic-span precision; degrades
 gracefully).</p>
 <p><strong>Phases:</strong></p>
 <ul>
-<li><strong>A — skeleton + diagnostics (primary value). ✅ LANDED 2026-06-02.</strong> JSON-RPC
-  stdio in <code>lsp/livehd_lsp.cpp</code> (<code>run_stdio</code>), wired to <code>lhd pyrope lsp</code>
-  (<code>lhd/lhd_main.cpp</code>, 2026-06-04; originally <code>lgshell --lsp</code>, removed with
-  the REPL); fd 1 repointed to fd 2 so stray stdout can't corrupt the stream.
-  <code>initialize</code> returns <code>ServerCapabilities</code> (<code>textDocumentSync</code> Full, negotiated
-  <code>positionEncoding</code>, <code>diagnosticProvider</code>); <code>initialized</code>/<code>shutdown</code>/<code>exit</code>/
-  <code>$/cancelRequest</code>; <code>didOpen</code>/<code>didChange</code>/<code>didSave</code>/<code>didClose</code>;
-  <code>publishDiagnostics</code> push <strong>and</strong> <code>textDocument/diagnostic</code> pull. The
-  <code>Prp2lnast</code> buffer-backed ctor landed (also fixes a latent TSTree/parser leak).
-  Runs the full front-end so name/type diagnostics surface. <strong>Not</strong> "one diagnostic per
-  run": non-fatal diagnostics (casserts, <code>cputs</code>, bitwidth over/underflow, warnings) already
-  <strong>accumulate</strong> and are all returned; what truncates is a <strong>fatal</strong> error —
-  the first syntax error aborts the front-end (the parser is fail-fast) and the first fatal semantic
-  error unwinds the rest of that unit's traversal. <strong>Remaining for A:</strong> ship the
-  <code>.lsp.json</code> plugin; harden against front-end crashes on malformed buffers.</li>
-<li><strong>B — semantic-index <code>lsp</code> pass + hover + documentSymbol</strong> (flip
-  <code>hoverProvider</code>+<code>documentSymbolProvider</code>). Land the injected, flag-gated
-  <code>lsp</code> pass that writes the immutable per-file map during the single traversal (kind,
-  declared type, per-use <code>bw_min</code>/<code>bw_max</code> joined to source identity); hover and
-  documentSymbol read it.</li>
+<li><strong>A — skeleton + diagnostics.</strong> Done, including the packaging leftover: the
+  Claude Code plugin recipe (inline <code>lspServers</code> in <code>plugin.json</code>) +
+  <code>scripts/prplsp</code> wrapper + Neovim spec shipped and are documented in
+  <code>README.md</code>. The crash-hardening leftover (front-end crash <em>isolation</em>, not
+  try/catch — that exists) is folded into E.</li>
+<li><strong>B — documentSymbol</strong> (flip
+  <code>documentSymbolProvider</code>; the injected, flag-gated <code>lsp</code> pass + hover
+  shipped). documentSymbol reads the same immutable per-file map.</li>
 <li><strong>C — definition + references</strong> (flip <code>definitionProvider</code>+<code>referencesProvider</code>).
   Both read the def/read sites the <code>lsp</code> pass records during the walk (identity stamped at
   capture), never a raw name and never <code>read_sites_</code>.</li>
 <li><strong>D — workspaceSymbol + call hierarchy</strong> (flip the providers). Consume an in-memory
   session index (lazy on first query) plus open-buffer overrides; call hierarchy needs its own
   callee-identity capture (the <code>func_call</code> gap, §3).</li>
-<li><strong>E — packaging polish.</strong> Persistent XDG workspace cache + one-shot background
-  indexer; <code>.lsp.json</code> plugin + <code>livehd-lsp</code> install recipe; neovim
-  <code>vim.lsp</code> pointer; fold into <code>livehd lsp</code> when the agent CLI lands. (Formatting,
+<li><strong>E — workspace indexer + crash isolation.</strong> Persistent XDG workspace cache +
+  one-shot background indexer process (§12; measured-need gate) and the Phase-A crash-hardening
+  remainder (out-of-process analysis isolation — details in the subtask list). Packaging is
+  done: plugin recipe + <code>prplsp</code> + Neovim spec live in <code>README.md</code>, and the
+  server already ships as <code>lhd pyrope lsp</code>. (Formatting,
   neovim tree-sitter queries, and the <code>prpfmt</code> <code>PostToolUse</code> hook belong to the
   separate grammar/formatter project.)</li>
 </ul>

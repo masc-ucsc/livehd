@@ -32,9 +32,9 @@ cc_library(
         "@googletest//:gtest_main",
     ],
 ) for test_name in [
-    "acyclic_test",
-    "cgen_test",
-    "synth_test",
-    "path_test",
-    "mincut_test",
+    "color_acyclic_test",
+    "color_cgen_test",
+    "color_synth_test",
+    "color_path_test",
+    "color_mincut_test",
 ]]

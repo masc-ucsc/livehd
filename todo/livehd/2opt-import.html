@@ -54,11 +54,9 @@
 
 <h2>Depends on / relates to</h2>
 <ul>
-<li><a class="xref" href="2i-import.html">2i-import</a> — its landed subtask <strong>S1</strong>
-  already built the lazy transitive <code>.prp</code> discovery this task reuses
-  (<code>discover_imports</code>, <a href="../../lhd/lhd_kernel.cpp"><code>lhd_kernel.cpp:1640-1759</code></a>):
-  a fixpoint that parses a seed, collects its imports, resolves each to a sibling
-  <code>&lt;name&gt;.prp</code>, parses the new file, repeats. 2opt-import changes only
+<li><a class="xref" href="2i-import.html">2i-import</a> — this task reuses its
+  <code>discover_imports</code> lazy transitive <code>.prp</code> discovery
+  (<a href="../../lhd/lhd_kernel.cpp"><code>lhd_kernel.cpp:1640-1759</code></a>); 2opt-import changes only
   <em>what seeds it</em> and teaches it to cross <code>ln:</code> boundaries. The two tasks
   are orthogonal: 2i-import is about <em>link-time identity / dedup / rename</em>; 2opt-import
   is about <em>not opening inputs you don't need to reach the top</em>.</li>
@@ -171,14 +169,6 @@
   <code>write_manifest</code> (a small additive change) so the <em>entire</em> closure is computable
   from manifests, and bodies load only for the final reachable set. B makes the design fully lazy,
   which is the whole point when there are many <code>ln:</code> inputs.</li>
-<li><strong>D2 — does <code>--top XXX</code> match the entity name or the <code>lg=</code> artifact
-  name?</strong> <code>filter_top</code> matches <code>get_top_module_name()</code> (the entity),
-  <em>not</em> <code>get_graph_name()</code> (the <code>lg=</code> override,
-  <a href="../../lnast/lnast.hpp"><code>lnast.hpp:468-470</code></a>). So an <code>lg</code>-renamed
-  top is not selectable by its <code>lg</code> name today. <code>scan_pubs</code> should index
-  <em>both</em>; decide whether <code>--top</code> may match the <code>lg</code> name and keep the
-  index and <code>filter_top</code> consistent. (Likely yes — the artifact name is what a user
-  thinks of as the module.)</li>
 <li><strong>D3 — selective <code>ln:</code> body load (later).</strong> If <code>ln:</code> dirs hold
   many units and you need one, a load-one-unit-by-name path (<code>load_body</code> is already
   per-tree, just not exposed by name) avoids loading siblings. Treat as an optional optimization
@@ -283,9 +273,6 @@
 <li><strong>Ambiguity:</strong> <code>XXX</code> (or a followed import) provided by two inputs →
   <code>import-ambiguous</code> at index time, candidates listed (parity with
   <code>lhd_kernel.cpp:1724-1747</code>).</li>
-<li><strong><code>lg</code>-rename selection (D2):</strong> a top declared
-  <code>pub comb f::[lg="chip_top"]</code> selected by whichever name D2 settles on, resolved without
-  parsing unrelated files.</li>
 <li><strong>Over-approximation safety:</strong> an <code>import</code> under <code>if false</code> is
   still followed (no under-open); a re-export bundle's pieces are reached through the file's imports.</li>
 </ul>

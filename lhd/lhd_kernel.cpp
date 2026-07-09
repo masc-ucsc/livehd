@@ -1517,18 +1517,25 @@ void emit_pyrope_single_file(Options& opts, Result& res, Eprp_var& var) {
 // Depfile closure: a compiled unit's Source_locator file table is the
 // list of source files its provenance actually references (its own file plus
 // anything imports pulled in) — fold them into the depfile prerequisites.
-void harvest_source_files(Result& res, const std::vector<std::shared_ptr<Lnast>>& units) {
+// Returns the harvested closure by itself (res.inputs also holds the declared
+// inputs) so write_unused_inputs can subtract it from the declared files.
+std::vector<std::string> harvest_source_files(Result& res, const std::vector<std::shared_ptr<Lnast>>& units) {
+  std::vector<std::string> closure;
   for (const auto& ln : units) {
     if (!ln) {
       continue;
     }
     const auto& sl = ln->source_locator();
     for (uint32_t fid = 0; fid < sl.file_count(); ++fid) {
-      res.inputs.emplace_back(sl.file_path(fid));
+      closure.emplace_back(sl.file_path(fid));
     }
   }
+  std::sort(closure.begin(), closure.end());
+  closure.erase(std::unique(closure.begin(), closure.end()), closure.end());
+  res.inputs.insert(res.inputs.end(), closure.begin(), closure.end());
   std::sort(res.inputs.begin(), res.inputs.end());
   res.inputs.erase(std::unique(res.inputs.begin(), res.inputs.end()), res.inputs.end());
+  return closure;
 }
 
 void write_depfile(const Options& opts, Result& res) {
@@ -1539,10 +1546,11 @@ void write_depfile(const Options& opts, Result& res) {
   if (!ofs.is_open()) {
     throw Lhd_error{"config", std::format("could not write depfile {}", opts.depfile), ""};
   }
-  // Make syntax: every primary output depends on every declared input.
-  // (`include discovery through the frontend is deferred to the source-map
-  // work [1f]; today the prerequisites are the declared inputs.) Paths are
-  // emitted cwd(exec-root)-relative per the contract — never absolute.
+  // Make syntax: every primary output depends on every declared input plus
+  // the frontend-harvested source closure (harvest_source_files folded each
+  // compiled unit's Source_locator file table — imports included — into
+  // res.inputs). Paths are emitted cwd(exec-root)-relative per the contract —
+  // never absolute.
   auto relativize = [](const std::string& p) {
     std::error_code ec;
     auto            r = fs::proximate(p, ec);
@@ -1574,6 +1582,57 @@ void write_depfile(const Options& opts, Result& res) {
   }
   ofs << '\n';
   res.outputs.push_back(opts.depfile);
+}
+
+// --unused-inputs (Bazel `unused_inputs_list`): the declared source-file
+// positionals whose contents did NOT reach the compiled closure — absent from
+// every final unit's Source_locator table, e.g. a .sv whose modules fall
+// outside the --top hierarchy (inou.slang elaborates only the requested top).
+// One cwd(exec-root)-relative path per line, in the declared spelling; empty
+// when everything was read. The file is ALWAYS created when the flag is given.
+// Conservative by construction: every pyrope positional is compiled as a root
+// (its module reaches the emits), so it is never listed; a flow that harvests
+// no LNAST units (yosys-* readers, IR-only compiles) lists nothing. A listed
+// file is still *parsed* today — pruning it trades away re-runs on its future
+// parse errors, the standard unused_inputs_list contract — but its contents
+// provably do not affect the produced artifacts.
+void write_unused_inputs(const Options& opts, Result& res, const std::vector<std::string>& closure) {
+  if (opts.unused_inputs.empty()) {
+    return;
+  }
+  std::ofstream ofs(opts.unused_inputs);  // creation is unconditional (empty = all inputs used)
+  if (!ofs.is_open()) {
+    throw Lhd_error{"config", std::format("could not write unused-inputs list {}", opts.unused_inputs), ""};
+  }
+  auto canon = [](const std::string& p) {
+    std::error_code ec;
+    auto            c = fs::weakly_canonical(p, ec);
+    return (ec || c.empty()) ? p : c.string();
+  };
+  // Canonicalize both sides before subtracting: harvest paths are the
+  // Source_locator's workspace-relative form (srcloc::workspace_relative —
+  // which strips the leading '/' from outside-workspace absolutes), declared
+  // inputs are as-typed. Register each closure entry under both readings.
+  absl::flat_hash_set<std::string> read;
+  for (const auto& p : closure) {
+    read.insert(canon(p));
+    if (!p.empty() && p.front() != '/') {
+      read.insert(canon("/" + p));  // outside-workspace ingress form
+    }
+  }
+  if (!read.empty()) {  // no harvested closure -> nothing is provably unused
+    absl::flat_hash_set<std::string> emitted;
+    for (const auto& f : opts.files) {
+      auto key = canon(f);
+      if (read.contains(key) || !emitted.insert(key).second) {
+        continue;
+      }
+      std::error_code ec;
+      auto            r = fs::proximate(f, ec);  // same relativization as write_depfile
+      ofs << ((ec || r.empty()) ? f : r.string()) << '\n';
+    }
+  }
+  res.outputs.push_back(opts.unused_inputs);
 }
 
 // ---- emit-kind validation ---------------------------------------------------
@@ -3022,8 +3081,9 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
       graph_pipeline_and_emits(opts, res, var, lib_path);
     }
   }
-  harvest_source_files(res, var.lnasts);
+  const auto closure = harvest_source_files(res, var.lnasts);
   write_depfile(opts, res);
+  write_unused_inputs(opts, res, closure);
 }
 
 void compile_command(Options& opts, Result& res) {
@@ -3047,9 +3107,12 @@ void compile_command(Options& opts, Result& res) {
   }
   if (!ir.ln_dirs.empty() && !ir.lg_dirs.empty()) {
     compile_link_ir(opts, res, ir);  // ln: + lg: linker
-    return;
+  } else {
+    compile_ir(opts, res, ir);  // ln:-only or lg:-only
   }
-  compile_ir(opts, res, ir);  // ln:-only or lg:-only
+  // IR-only compiles declare no source-file positionals; the list is still
+  // created (empty) so a Bazel action can rely on its existence.
+  write_unused_inputs(opts, res, {});
 }
 
 // ---- sim --------------------------------------------------------------------

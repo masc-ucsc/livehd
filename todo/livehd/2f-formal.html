@@ -11,16 +11,6 @@
 <main>
 <h1><strong class="item-id">2f-formal</strong> Compile-time formal tier — pending items (re-based on <a class="xref" href="2f-verify.html">2f-verify</a>)</h1>
 
-<p>The original 2f-formal engine <strong>landed 2026-06-20</strong>: the
-  <code>pass/formal</code> Prover (demand-driven cone encoder, deterministic
-  cone-scaled <code>rlimit</code>), the always-on <code>pass.formal</code> pipeline pass,
-  the Hotmux one-hot hard check, <code>assert</code>/<code>assert_always</code>/
-  <code>assume</code> end-to-end (<code>fproperty</code> materialization, proven ⇒ cgen
-  elision, else <code>translate_off</code> runtime check + deferral warning), and the
-  <code>pass.abc</code> proven-assume flags. Reference: <code>pass/formal/prove.{hpp,cpp}</code>,
-  <code>pass_formal.cpp</code>, and the memory of the landed design decisions in git
-  history of this page.</p>
-
 <p><strong>What this page is now:</strong> only the pending remainder — and its shape
   changed, because <a class="xref" href="2f-verify.html">2f-verify</a> supersedes the
   engine underneath it.</p>
@@ -32,10 +22,7 @@
   <code>lhd formal verify</code>, restricted options, small deterministic
   <code>rlimit</code> budget, <strong>timeout is not an error</strong> (just "not proven,
   keep the runtime check"), proven results feed synthesis as today. The items below are
-  specified against that engine, not the current self-contained single-frame Prover —
-  in particular the planned encoder de-dup (Prover's private cone encoder vs
-  <code>pass/lec</code>'s) is <em>subsumed</em> by the V7 rebase rather than done as a
-  separate refactor.</p>
+  specified against that engine, not the current self-contained single-frame Prover.</p>
 
 <h2>Pending</h2>
 <ul class="subtasks">
@@ -49,36 +36,42 @@
   reachable stateful violation within the compile budget errors with the witness
   cycle.</li>
 <li><strong>Reset-exclusion for user asserts (<code>Reset_policy::ExcludeConeActive</code>)
-  — prerequisite for hard-erroring them.</strong> A normal <code>assert</code> may
-  legitimately fail while reset is asserted, so today only the Hotmux structural check
-  hard-errors; refuted user asserts merely defer. On the 2f-verify engine the
-  <code>after_reset</code> phase machinery (reset detection + driven prologue,
-  <code>query.cpp:1201-1291</code>) provides this for free in BMC mode; the single-frame
-  induction rung still needs the cone-reset guard (collect each cone Flop's
+  — quality improvement, no longer a prerequisite.</strong> The gate is already live:
+  a definitive root-module refutation hard-errors with <em>no</em> reset guard
+  (<code>pass_formal.cpp</code> <code>report_refuted</code>, landed 2026-07-08 by
+  explicit ruling), and the reset-aware escape hatch is moving the property into a
+  <code>formal</code> block, where the 2f-verify BMC engine already carries the full
+  <code>after_reset</code> machinery (structural <code>reset_pin</code>/<code>negreset</code>
+  detection + name-polarity inference + driven reset-hold prologue,
+  <code>query.cpp:1197-1291</code> and <code>:2871-2951</code>). The compile-tier
+  single-frame Prover has none of it, so an assert whose only counterexample lies in the
+  reset prologue produces a FALSE refutation ⇒ a spurious hard error. Adding
+  reset-exclusion there cuts those — fewer spurious errors, and fewer properties pushed
+  into <code>formal</code> blocks just to get reset awareness. Implementation: reuse (do
+  not duplicate) the <code>query.cpp</code> reset detection, which the V7 re-base makes
+  natural — on the shared engine the BMC rung gets it for free; only the single-frame
+  induction rung needs the cone-reset guard (collect each cone Flop's
   <code>reset_pin</code>/<code>negreset</code>, constrain inactive).
-  <code>assert_always</code> keeps <code>Reset_policy::Include</code>. Once in place,
-  enable the landed asymmetric policy's error row for user asserts: hard-error only on a
-  definitive refutation that is reset-clean and (for the induction rung) stateless or
-  reachability-confirmed.</li>
-<li><strong>ABC EXDC don't-care network.</strong> The flags
-  (<code>pass.abc.use_proven_assume</code>, default true;
-  <code>use_all_assume</code>, default false) and per-region constraint gathering landed
-  (<code>abc_map.cpp:196-227</code>); building the EXDC network that actually hands the
-  constraints to ABC's mfs/fraig is the remaining step. With 2f-verify, the constraint
-  pool grows: sidecar invariants proven unbounded are don't-care sources too.</li>
+  <code>assert_always</code> keeps <code>Reset_policy::Include</code>.</li>
+<li><strong>ABC EXDC don't-care network.</strong> Building the EXDC network that
+  actually hands the constraints (already gathered per region in
+  <code>abc_map.cpp:196-227</code>) to ABC's mfs/fraig is the remaining step. With
+  2f-verify, the constraint pool grows: sidecar invariants proven unbounded are
+  don't-care sources too.</li>
 </ul>
 
 <h2>Policy carried forward (unchanged)</h2>
 <ul class="subtasks">
 <li><strong>Asymmetric soundness:</strong> hard-error only on a definitive refutation
-  that cannot be an artifact (stateless cone, or reachable-by-BMC witness, after assumes
-  and the reset guard). Budget / Unknown / possibly-unreachable never error — a budget
-  mistune can never turn a good build into a false error.</li>
+  that cannot be an artifact (stateless cone, or reachable-by-BMC witness, after assumes;
+  per the 2026-07-08 ruling the compile-tier gate runs with <em>no</em> reset guard —
+  reset-exclusion above is the quality follow-up, and the reset-aware path is a
+  <code>formal</code> block on the 2f-verify engine). Budget / Unknown /
+  possibly-unreachable never error — a budget mistune can never turn a good build into
+  a false error.</li>
 <li><strong>Only proven assumes are hypotheses</strong> (no circular self-proof); the
   consistency check runs before any removal; contradictory assume set ⇒ warning +
   removals suppressed.</li>
-<li><strong>Deferred-to-runtime ⇒ silenceable per-category warning</strong>
-  (<code>formal-assert-deferred</code>, <code>formal-onehot-deferred</code>, …).</li>
 </ul>
 
 <h2>Future / deferred (other pages)</h2>
@@ -92,9 +85,6 @@
 <li><strong>Runtime fallback execution</strong> — running
   <code>runtime_check</code>-marked asserts in sim/slop
   (<a class="xref" href="../pyrope/4b.html">4b</a>).</li>
-<li><strong>Proven-certificate cache</strong> — subsumed by 2f-verify's per-obligation
-  cone-hash verdict cache (its L2 layer); compile-profile runs get cache hits from prior
-  <code>lhd formal verify</code> runs for free.</li>
 </ul>
 </main>
 <footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>

@@ -436,6 +436,8 @@ Options parse_args(int argc, char** argv) {
       opts.config = need_value(a, i, argc, argv);
     } else if (a == "--depfile") {
       opts.depfile = need_value(a, i, argc, argv);
+    } else if (a == "--unused-inputs") {  // Bazel unused_inputs_list (compile)
+      opts.unused_inputs = need_value(a, i, argc, argv);
     } else if (a == "--recipe") {
       opts.recipe = need_value(a, i, argc, argv);
     } else if (a == "--recipe-file") {

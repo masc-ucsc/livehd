@@ -33,8 +33,8 @@ cc_test(
 )
 
 cc_test(
-    name = "lnast_stable_tmp_test",
-    srcs = ["tests/lnast_stable_tmp_test.cpp"],
+    name = "lnast_test",
+    srcs = ["tests/lnast_test.cpp"],
     copts = COPTS,
     deps = [":lnast"],
 )

@@ -17,10 +17,11 @@
   <code>file.entity</code> dotting). <strong>(2) A module's identity is its
   <em>structure</em></strong> — a forward-canonical digest computed by
   <a class="xref" href="2f-semdiff.html">2f-semdiff</a>, not its name or its file path.
-  <strong>(3) Name collisions are a <em>merge-time</em> concept</strong>: at link, two
-  structurally-identical modules <em>dedup</em>; two different modules that want the same
-  emitted name are <em>renamed — both, symmetrically</em> (<code>alu__riscv</code> /
-  <code>alu__gpu</code>) and never silently. The same <code>.prp</code> compiles unchanged
+  <strong>(3) Same-name modules coexist</strong>: internal names are unique
+  <code>file.entity</code> (the 2026-07-04 lg-drop), so at link two structurally-identical
+  modules <em>dedup</em> by digest while two different modules sharing a name simply keep
+  their distinct qualified names; only Verilog emission resolves the name — bare entity
+  when unique, qualified on collision (landed). The same <code>.prp</code> compiles unchanged
   in the <strong>interactive single-file flow</strong> (imports resolve to sibling source)
   and a <strong>hermetic parallel-<code>bazel</code> flow</strong> (imports resolve to
   precompiled artifacts, discovered by <code>lhd scan</code>).</p>
@@ -63,8 +64,9 @@
 <h2>Mental model (one line)</h2>
 <p>A <strong>library is a directory</strong>; <code>pub</code> modules in it have flat short
   names; a module's true identity is its <strong>forward-canonical structure digest</strong>,
-  so names are just labels — disambiguated <em>only</em> when two different structures
-  collide on one name at link.</p>
+  so names are just labels — internal names are unique <code>file.entity</code>, same-name
+  modules coexist, and only Verilog emission disambiguates (bare entity when unique,
+  qualified on collision).</p>
 
 <h2>The user experience — interactive flow (the daily loop)</h2>
 <p>Imports are <strong>logical names</strong>, resolved <strong>relative to the importing
@@ -105,7 +107,8 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
 #   -> `lhd compile --in lg:cpu/ --in lg:gpu/ --top cpu --emit verilog:soc.v`
 #      (no `lhd link` verb: `lhd compile` links when given lg: inputs, gcc-style)
 #      load all -> bottom-up digest -> bucket -> structural_match confirm
-#      -> dedup identical / rename-both on conflict -> emit
+#      -> dedup identical; distinct same-name modules coexist (unique file.entity)
+#      -> emit (bare entity name when unique, qualified on collision)
 </code></pre>
 <p>Hermetic: resolution sees only the sandbox-declared dep artifacts, no filesystem crawl.
   Incremental: touching <code>alu.prp</code> changes <code>alu</code>'s digest and relinks
@@ -125,19 +128,17 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
   — the property the parallel build needs.</li>
 <li><strong>The two failure modes are not symmetric, so dedup is <em>sound</em>, never
   merely heuristic.</strong> A <em>false merge</em> (collapsing two different modules) is
-  silently-wrong hardware — forbidden. A <em>false split</em> (renaming both when they were
-  the same) is still-correct hardware, just a duplicated module — tolerable. So the rule:
+  silently-wrong hardware — forbidden. A <em>false split</em> (keeping two copies of the
+  same module) is still-correct hardware, just a duplicated module — tolerable. So the rule:
   dedup <strong>only</strong> when sameness is proven (digest bucket → <code>structural_match</code>
-  confirm), otherwise rename-both.</li>
-<li><strong>Conflict ⇒ rename BOTH, symmetrically — and a rename is just a re-export.</strong>
-  When two distinct digests want the same short emitted name, both become
-  <code>name__&lt;library&gt;</code> (<code>alu__riscv</code> / <code>alu__gpu</code>); neither
-  silently wins, and each library's internal instance wiring re-points to its own copy. There
-  is <strong>no special rename machinery at any level</strong>: a rename is stamping a new
-  <code>lg</code> name — the exact operation the user can already write by hand as
-  <code>pub alu_rv = import("lg:alu")</code> or <code>::[lg="alu_rv"]</code> — so the renamed
-  module stays a first-class importable <code>lg:alu__riscv</code>. The same mechanism covers
-  binding-level aliasing (below).</li>
+  confirm), otherwise the modules simply coexist.</li>
+<li><strong>Distinct same-name modules COEXIST — no merge-time rename (final, post lg-drop
+  2026-07-04).</strong> Internal names are unique <code>file.entity</code>, so two distinct
+  digests sharing a short name never clash inside the design: nothing is renamed at link and
+  no instance wiring is re-pointed. The name is resolved only at Verilog emission — each
+  module flattens to its bare entity name when that is unique across the design and keeps
+  the qualified name on collision (landed: <code>inou/cgen/inou_cgen.cpp:56-91</code>
+  <code>flat_names</code>).</li>
 <li><strong>The digest is bottom-up (Merkle).</strong> A parent's identity must include its
   children's identities — else two parents with identical bodies but different child
   <code>alu</code>s would false-merge. Inject each resolved child digest at its instance
@@ -180,13 +181,13 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
   <code>structural_match</code> to confirm, then collapse the bucket to one module and
   rewire all instances of any member to it. (Distinct names, same digest ⇒ still one module
   under a single canonical name — origin/name is ignored per the identity rule.)</li>
-<li><strong>Name conflict resolution.</strong> If two <em>surviving</em> (distinct-digest)
-  modules want the same short emitted name, rename both to <code>name__&lt;library&gt;</code>
-  (stamp the <code>lg</code> name — the same path as a hand-written re-export; the renamed
-  module stays importable as <code>lg:name__&lt;library&gt;</code>) and re-point each
-  library's internal instances. Report every rename and every dedup.</li>
-<li>Emit. Module names are bare unless step&nbsp;4 renamed them; instance references match
-  the resolved module name.</li>
+<li><strong>Name coexistence — no rename.</strong> <em>Surviving</em> (distinct-digest)
+  modules that share a short name simply coexist under their unique <code>file.entity</code>
+  internal names; nothing is renamed and no instance is re-pointed. Report every dedup.</li>
+<li>Emit. Verilog emission flattens each module to its bare entity name when that is unique
+  across the design and keeps the qualified name on collision (landed:
+  <code>inou/cgen/inou_cgen.cpp:56-91</code> <code>flat_names</code>); instance references
+  match the emitted name.</li>
 </ol>
 
 <h2>Artifact format (forward-canonical hash-ref)</h2>
@@ -196,8 +197,8 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
 <li>Per module: its <strong>forward-canonical digest</strong> and its <strong>port
   signature</strong> (names, widths, signedness, order).</li>
 <li>Per <code>Sub</code> instance: a <strong>by-digest reference</strong> to the instantiated
-  module (the child's digest) instead of a hard name binding — so a rename or dedup at link
-  is a pure relabel, and a cross-library instance binds to whichever artifact carries the
+  module (the child's digest) instead of a hard name binding — so a dedup at link is a pure
+  relabel, and a cross-library instance binds to whichever artifact carries the
   matching digest.</li>
 <li>A per-library compile consumes its own <code>.prp</code> files plus the
   <code>lg:</code> artifacts of the libraries it imports (to read dep interfaces and embed
@@ -209,8 +210,9 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
 <li><strong>A7 / 6a</strong> — no on-disk import search → importer-dir-relative resolution
   makes <code>lhd compile foo/bar.prp</code> (and the LSP) resolve siblings automatically;
   no more "list every file".</li>
-<li><strong>6c</strong> — <code>\file.entity</code> escaped names → bare module names by
-  default; dotting/mangling only on a real collision.</li>
+<li><strong>6c</strong> — <code>\file.entity</code> escaped names → Verilog emission
+  flattens to bare module names by default, qualified only on a real collision (landed via
+  <code>flat_names</code>).</li>
 <li><strong>2f / A1</strong> — cross-file instantiation "no hardware lowering yet" and the
   filename==modname shadow → identity is structural and library-scoped, so name==filename
   is irrelevant; cross-file instances are first-class link hash-refs.</li>
@@ -218,45 +220,13 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
   bundled callee-not-found, name collision, and missing file → cross-file instantiation is
   a defined link step, and unresolved/ambiguous imports get their own named diagnostics.</li>
 <li><strong>The cross-project collision the user led with</strong> — two designs both
-  defining <code>alu</code> → symmetric rename-both at merge, or dedup if structurally
-  identical; never a silent clash.</li>
-</ul>
-
-<h2>Subtasks — landed</h2>
-<ul class="subtasks">
-<li><strong>S1 — interactive resolver (DONE 2026-06-20).</strong> Importer-directory-relative
-  transitive on-disk discovery: <code>lhd compile foo/bar.prp</code> now pulls in its imported
-  siblings with no dependency list (closes A7/6a), and the Pyrope LSP resolves the same way so
-  the permanent false <code>import-unresolved</code> squiggle is gone.
-  <strong>Compile:</strong> <code>discover_imports()</code> in <code>lhd/lhd_kernel.cpp</code>
-  (called inside <code>pyrope_parse</code> after <code>inou.prp</code>) — for each source
-  unit's unresolved bare import, search the importing file's <em>own directory</em> for
-  <code>&lt;name&gt;.prp</code> (a trailing <code>.entry</code> after the last <code>/</code>
-  selects a pub member → the file is the stem), parse it named by its logical import path, to
-  a fixpoint; <code>lg:</code>/<code>ln:</code> skipped; a name resolving to two files is
-  <code>import-ambiguous</code> (never a silent first-hit); files deduped by absolute path.
-  <strong>LSP:</strong> <code>discover_sibling_imports()</code> in <code>lsp/livehd_lsp.cpp</code>
-  reads siblings from disk, orders exporters-before-importer (reverse of the BFS discovery
-  order) for single-pass resolution, and enables <code>import_defer</code> so a residual (an
-  import cycle, or an import it can't resolve without build context) defers silently rather
-  than false-flagging. <strong>Tests:</strong> <code>inou/prp/tests/imports/import_discover.prp</code>
-  (single file; the sibling <code>lib_add</code> is NOT in <code>:files:</code>) plus manual
-  transitive / not-found / genuine-error LSP checks; 701/705 prp+lsp green (the 4 reds are the
-  pre-existing <a class="xref" href="../pyrope/2i-issues.html">2i-issues</a> tuple-port defects,
-  import-unrelated). <strong>Not yet:</strong> an explicit <code>-I</code> root (same-directory
-  resolution only — the daily-win case; <code>lhd scan</code> + declared deps cover the build
-  side).</li>
+  defining <code>alu</code> → dedup at merge if structurally identical; otherwise both
+  coexist under their unique <code>file.entity</code> names and Verilog emission keeps the
+  qualified name for the colliding one — never a silent clash.</li>
 </ul>
 
 <h2>Subtasks — pending (suggested slices)</h2>
 <ul class="subtasks">
-<li><strong>S2 — bare-name emit + collision rename.</strong> Drop the
-  <code>file_stem + "." + func_name</code> default
-  (<code>upass/func_extract/upass_func_extract.cpp</code>); emit bare names; turn
-  <code>detect_lg_collisions()</code> (<code>upass/tolg/upass_tolg.cpp</code>, today a fatal
-  reject) into the symmetric rename-both resolution — a rename is just stamping the existing
-  <code>lg</code> name (the <code>::[lg=…]</code> / <code>import("lg:…")</code> re-export
-  path), so no new naming mechanism. Closes 6c.</li>
 <li><strong>S3 — <code>canonical_hash</code> export.</strong>
   <span class="status">partial — re-verified 2026-06-27</span> Add
   <code>semdiff::canonical_hash(graph)</code> to <a class="xref" href="2f-semdiff.html">2f-semdiff</a>
@@ -271,15 +241,16 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
   <span class="status">partial — re-verified 2026-06-27</span> Lift
   the one-<code>lg:</code> cap (no separate <code>lhd link</code> verb); when given several
   <code>lg:</code> inputs <code>lhd compile</code> runs the merge = load → digest → bucket →
-  <code>structural_match</code> confirm → dedup/rename → emit, with a report.
+  <code>structural_match</code> confirm → dedup → emit, with a report (distinct same-name
+  modules coexist under their unique <code>file.entity</code> names — no rename step).
   <em>Today:</em> the <code>ln:</code>+<code>lg:</code> linker (<code>compile_link_ir</code>) and
   the source+<code>lg:</code> path already <code>load_merge</code> several <code>lg:</code> inputs,
   but that merge is hhds <strong>name-hash</strong> dedup only (no per-module digest, no
-  <code>structural_match</code> confirm, no rename, no report), and the pure
+  <code>structural_match</code> confirm, no report), and the pure
   <code>lg:</code>-only path is still capped (<code>lhd/lhd_kernel.cpp:2632</code>
   <code>compile_ir</code>: <em>"multiple lg: inputs are not supported yet"</em>).
   <em>Remaining:</em> lift the pure-<code>lg:</code> cap and replace the name-hash dedup with the
-  digest → bucket → <code>structural_match</code> confirm → dedup/rename pipeline.</li>
+  digest → bucket → <code>structural_match</code> confirm → dedup pipeline.</li>
 <li><strong>S5 — artifact format.</strong>
   <span class="status">partial — re-verified 2026-06-27</span> Digest + port signature per module,
   by-digest instance refs in the <code>lg:</code> manifest.
@@ -295,31 +266,15 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
 </ul>
 
 <h2>Remaining items</h2>
-<p><strong>Cross-module multi-output binding &amp; rename (A8 / 5b) — DONE 2026-06-20.</strong>
-  A rename rides the existing re-export mechanism: a module is aliased to a new <code>lg</code>
-  name (<code>pub fast = import("lg:alu")</code>), the very stamp the merge uses — so there is
-  no special rename machinery at any level. For the output-name clash (two imported modules both
-  exporting <code>io_result</code>), a single call on the RHS is unambiguous, so the bare output
-  name is now a valid rename source: <code>const (r = io_result) = alu(…)</code> needs no
-  full-call-path prefix (was a hard <code>destructure-prefix</code> error). Implemented in
-  <code>inou/prp/prp2lnast.cpp</code> — in the single-fcall-RHS rename path, a lone identifier
-  whose name isn't the callee is reinterpreted as a field pick on the return (a dotted source
-  naming a <em>different</em> callee, <code>g.b</code>, still errors — genuine cross-function
-  reuse). Binding a multi-output call to one bare var stays a deliberate compile error (5a).
-  Test: <code>inou/prp/tests/comptime/destructure_bare_field.prp</code>; existing
-  <code>callee.field</code> rename tests unchanged.</p>
 <ul>
 <li><strong>Still genuinely open:</strong> emitted ports are all <code>signed</code> even when
   the source type is unsigned (6d — <code>cgen_verilog.cpp</code> hardcodes
   <code>input signed</code> / <code>output reg signed</code> while the GraphIO carries the real
   sign). Small and independent of this redesign.</li>
-<li><strong>Dissolved:</strong> the <code>lgdb/</code> workdir litter (6b) — there is no default
-  <code>lgdb/</code>; <code>lg:</code> resolves at the graph-library location and Pyrope source
-  resolves only at the importer's directory or an explicit <code>-I</code>.</li>
-<li><strong>Small details to settle while implementing:</strong> how the graph-library location
-  is configured (default + flag); which name survives when two differently-named modules share
-  a digest (a deterministic canonical pick); and whether the LSP parses the full transitive
-  closure or resolves dependency interfaces only (responsiveness).</li>
+<li><strong>Small details to settle while implementing:</strong> which name survives when two
+  differently-named modules share a digest (a deterministic canonical pick); and whether the
+  LSP parses the full transitive closure or resolves dependency interfaces only
+  (responsiveness).</li>
 </ul>
 
 <h2>Traps</h2>
@@ -333,17 +288,10 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
 <li><strong>Never bucket-and-dedup on the digest alone.</strong> A digest collision must be
   confirmed by <code>structural_match</code> before merging, or a hash clash becomes wrong
   hardware. Hash narrows candidates; the traversal decides truth.</li>
-<li><strong>Rename must rewire intra-library instances.</strong> After
-  <code>alu → alu__riscv</code>, every instance in the riscv library that referenced
-  <code>alu</code> must point at <code>alu__riscv</code> (and the gpu side at
-  <code>alu__gpu</code>) — the by-digest instance ref makes this a pure relabel.</li>
 <li><strong>Two libraries with same-named modules keep independent attr stores.</strong>
   Same caution as <a class="xref" href="2f-semdiff.html">2f-semdiff</a>: hold the
   <code>Graph*</code> per library; don't let one <code>Hhds_graph_library</code> alias gids
   across the two.</li>
-<li><strong>Suffix tiebreak.</strong> If two distinct-digest modules share both a short name
-  <em>and</em> a library-suffix source, the rename suffix needs a deterministic secondary
-  disambiguator (e.g. a short digest prefix) — still reported, never silent.</li>
 </ul>
 </main>
 </body>

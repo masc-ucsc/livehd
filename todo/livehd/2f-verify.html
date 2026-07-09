@@ -11,39 +11,17 @@
 <main>
 <h1><strong class="item-id">2f-verify</strong> <code>lhd formal verify</code> — incremental assert/assume BMC engine + assume mining (on the <code>lec</code> unroller)</h1>
 
-<p><strong>Status.</strong> The engine core is LANDED (2026-07-08, V1&ndash;V3 —
-  see git history of this page for the landing notes and user rulings):
-  <code>lhd formal verify</code> proves a design's fproperty obligations by
-  per-obligation incremental BMC on the pass/lec engine (frontier assumes,
-  per-assert/per-cycle verdict table, witness traces, per-obligation timeout
-  isolation); <code>formal name.dotted { }</code> sidecar blocks bind through
-  import aliases to the top or to every instance of a submodule and compile
-  through the real Pyrope pipeline into per-cycle-bound monitors
-  (<code>--formal</code> glob filters); the verdict ladder upgrades
-  bounded-proven asserts to PROVEN-unbounded via simultaneous 1-induction
-  (reset pinned deasserted in the step, disclosed). Knobs live under ONE
-  namespace, <code>formal.*</code>, with the legacy <code>lec.*</code>
-  spellings as aliases (user ruling: no per-subcommand replicas);
-  <code>lhd formal lec</code> = the lec command. User docs:
-  <code>docs/livehd/02-usage.md</code> (flow) and
-  <code>docs/pyrope/05-assert.md</code> (block syntax). Tests:
-  <code>//lhd/tests:lhd_formal_verify_test</code>.</p>
-
-<p><strong>This page is now the PENDING remainder</strong> — the mining loop
-  that turns solver-learned facts into sidecar assumes, the cross-run reuse
-  layers, the budget scheduler, LEC consumption of formal blocks, and the
-  memory-template attack. NOTE: the prpparse <code>formal</code>-block grammar
-  ships via the temporary MODULE.bazel LOCAL OVERRIDE — the user pushes
-  tree-sitter-pyrope, then the http_archive pin is restored (recipe in
-  MODULE.bazel).</p>
+<p><strong>Status.</strong> This page is the PENDING remainder of
+  <code>lhd formal verify</code> (the engine core — per-obligation incremental
+  BMC with frontier assumes, verdict ladder, and <code>formal name.dotted { }</code>
+  sidecar blocks — already exists): the mining loop that turns solver-learned
+  facts into sidecar assumes, the cross-run reuse layers, the budget scheduler,
+  LEC consumption of formal blocks, and the memory-template attack.</p>
 
 <h2>Depends on / affects</h2>
 <ul class="subtasks">
 <li><a class="xref" href="lec.html">lec</a> — the landed Encoder + BMC unroller
-  (<code>pass/lec/encode.cpp</code>, <code>query.cpp</code>) are the substrate; this page
-  owns the engine restructure. The lec-roadmap M5 (assume-guarantee) and M6 (persistent
-  cache) items are <strong>subsumed</strong> by this page's frontier-assume and
-  verdict-cache layers.</li>
+  (<code>pass/lec/encode.cpp</code>, <code>query.cpp</code>) are the substrate.</li>
 <li><a class="xref" href="2f-formal.html">2f-formal</a> — <strong>depends on this
   page</strong> (do 2f-verify first): compile-time <code>pass.formal</code> becomes the
   <em>don't-try-hard profile</em> of this engine (same code, restricted options), replacing
@@ -104,7 +82,7 @@
   the speculative report only.</li>
 </ul>
 
-<h2>Memory strategy — invariants first, lazy concretization later (decided)</h2>
+<h2>Memory strategy — invariants first, lazy concretization later</h2>
 <ul class="subtasks">
 <li><strong>Why memories explode:</strong> each cycle appends stores; read-over-write
   chains grow with the bound; the solver case-splits on address aliasing across the whole
@@ -233,7 +211,7 @@
   introspection.</li>
 </ul>
 
-<h2>Milestones — pending (each test-backed; V1&ndash;V3 landed 2026-07-08)</h2>
+<h2>Milestones — pending (each test-backed)</h2>
 <ul class="subtasks">
 <li><strong>V4 — mining v1 + budgets.</strong> Learned-literal recurrence → Houdini →
   usefulness ranking → sidecar emit (<code>formal &lt;top&gt;.mined</code>);

@@ -331,8 +331,8 @@ with `lec.prpfailrun=false`. Regression: `pass/lec/tests/lec_witness_prpfail_tes
 
 ## Tests
 
-`bazel test //pass/lec/...`: `cvc5_link_test` (link + a `QF_ABV` checkSat),
-`comb_equiv_test` (encode + prove_equal on tiny comb graphs), `lec_cross_test`
+`bazel test //pass/lec/...`: `cvc5_link_smoke` (link + a `QF_ABV` checkSat),
+`query_test` (encode + prove_equal on tiny comb graphs), `lec_cross_test`
 (verdicts agree with `lgcheck`), `lec_phase_test` (BMC reset phases),
 `lec_mem_test` / `lec_arrfield_test` / `lec_combarray_test` (the array engine on
 compiled RTL). The strongest encoder check: emit *both* the SMT model and the
