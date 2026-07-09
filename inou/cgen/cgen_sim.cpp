@@ -1862,8 +1862,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       continue;
     }
     std::string cname{sio->get_name()};
-    if (cname.empty() || cname == livehd::graph_util::lgassert_module_name) {
-      continue;  // a recognized primitive, not a real sub-graph
+    if (cname.empty() || cname == livehd::graph_util::lgassert_module_name
+        || cname == livehd::graph_util::fproperty_module_name) {
+      // Recognized primitives, not real sub-graphs: instantiating one emitted
+      // an #include for a module with no body and broke the sim host-compile
+      // (any design with an undischarged assert). Skipped like cgen_verilog's
+      // special-case; EXECUTING the runtime check in sim is the pending
+      // runtime-fallback item (2f-formal / 4b slop emission).
+      continue;
     }
     subs.push_back({node, cpp_id(default_instance_name(node)), cpp_id(cname)});
     auto hdr = absl::StrCat(sim_file_stem(cname), ".hpp");

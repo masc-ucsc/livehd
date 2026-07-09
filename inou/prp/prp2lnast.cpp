@@ -1872,6 +1872,14 @@ void Prp2lnast::process_statement(TSNode n) {
   if (t == "comment") {
     return;
   }
+  if (t == "formal_statement") {
+    // 2f-verify `formal name.dotted { ... }` block: a declarative verification
+    // overlay consumed ONLY by `lhd formal` (which re-parses the file and
+    // evaluates the body against the design's encoded signals). It never
+    // lowers to hardware — the design compile skips it entirely, like a
+    // comment (same file can carry both design code and formal blocks).
+    return;
+  }
   if (t == "scope_statement") {
     auto inner_stmts = builder.add_child(Lnast_ntype::create_stmts());
     builder.push_stmts(inner_stmts);

@@ -1748,6 +1748,49 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     }
   }
 
+  // ---- 2f-verify property obligations (gated: set_emit_props). Each `fproperty`
+  // Sub carries a 1-bit `cond` sink plus "<kind>\x1f<loc>\x1f<msg>" in its name
+  // attr (see graph_util::fproperty_module_name). Its cond CONE was encoded by
+  // the fixpoint above (the cone nodes have out-edges; the fproperty itself has
+  // none and was skipped), so the cond driver resolves here. Emit it as a
+  // synthetic output "\x04prop:<occ>\x1f<kind>\x1f<loc>\x1f<msg>" — occ is a
+  // walk-order counter, deterministic across repeated encodes of the same graph,
+  // so the engine's per-cycle encodes agree on which property is which.
+  if (emit_props_) {
+    int prop_occ = 0;
+    for (auto node : g->forward_hier(true, false, opaque)) {
+      if (gu::type_op_of(node) != Ntype_op::Sub) {
+        continue;
+      }
+      auto sio = node.get_subnode_io();
+      if (sio == nullptr || sio->get_name() != gu::fproperty_module_name) {
+        continue;
+      }
+      // Resolve the cond driver across instance boundaries via the HIER
+      // inp_edges (get_driver_of_sink_name stops at a sub's GraphIO pin).
+      const auto      cond_pid = sio->get_input_port_id("cond");
+      hhds::Pin_class cond_drv;
+      for (const auto& e : node.inp_edges()) {
+        if (e.sink.get_port_id() == cond_pid) {
+          cond_drv = e.driver;
+          break;
+        }
+      }
+      const int occ = prop_occ++;  // count even a skipped prop: keys stay walk-stable
+      if (cond_drv.is_invalid()) {
+        continue;  // unconnected cond: nothing to prove (tolg never emits this)
+      }
+      bool ok = true;
+      Val  cv = driver_val(cond_drv, ok);
+      if (!ok) {
+        return fail("fproperty '" + gu::debug_name(node) + "' cond has no encodable driver");
+      }
+      auto        nm  = gu::node_name_of(node);
+      std::string raw = nm.empty() ? std::string{"assert"} : std::string{nm};
+      out.outputs[std::string("\x04") + "prop:" + std::to_string(occ) + "\x1f" + raw] = cv;
+    }
+  }
+
   // ---- M2 next-state functions. For each cut flop emit the value it latches
   // next cycle as a synthetic output keyed "<nxt><statekey>", so the miter
   // compares the two designs' next-state for every corresponding register (the

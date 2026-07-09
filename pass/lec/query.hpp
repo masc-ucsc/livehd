@@ -246,4 +246,86 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 // or whitespace; blank lines and "#" comments are skipped.
 std::vector<std::pair<std::string, std::string>> parse_match_pairs(std::string_view text);
 
+// ── 2f-verify: single-design property BMC (`lhd formal verify`) ─────────────
+//
+// Per-property verdict from prove_properties. A property is one fproperty Sub
+// (a user assert / assert_always / assume materialized by tolg). Cycle indices
+// are ABSOLUTE unroll indices (the after_reset reset-hold prologue occupies
+// 0..reset_hold-1; plain `assert` is checked only in the run window,
+// `assert_always` at every cycle, and in just_reset every cycle is checked).
+struct Prop_result {
+  std::string kind;   // assert | assert_always | assume
+  std::string loc;    // source location ("" when tolg carried none)
+  std::string msg;    // user message ("")
+  std::string block;  // formal-block dotted name ("" = an fproperty in the design itself)
+  // kind==assume: an ENVIRONMENT CONSTRAINT, asserted at every checked cycle
+  // (never an obligation here — the checked-then-used tier is the sidecar's,
+  // V3+). Its verdict stays Unknown and the cycle fields stay -1; n_assumes on
+  // Verify_result discloses that the run's verdicts are conditional on it.
+  Verdict verdict = Verdict::Unknown;
+  // V3 verdict ladder: a bounded-proven assert that also survives the
+  // simultaneous-induction step is PROVEN UNBOUNDED — true at every cycle of
+  // every bound (the conjunction of survivors is inductive; the BMC run is its
+  // base case), eligible as an unconditional helper everywhere.
+  bool unbounded = false;
+  int proven_to  = -1;  // deepest checked cycle proven (every checked cycle <= it is UNSAT)
+  int refuted_at = -1;  // first cycle with a reachable violation (SAT)
+  int unknown_at = -1;  // first cycle where the solver gave up (timeout/unknown);
+                        // later cycles were not attempted for this property
+  std::string witness;  // per-cycle input assignment reaching the violation (Refuted)
+  // Structured, uncapped input trace for witness reproduction (Refuted only):
+  // the same shape the lec engine fills, so `lhd formal verify --workdir` can
+  // emit a formalfail.prp testbench + VCD exactly like lec's lecfail.prp.
+  Witness_trace trace;
+};
+
+// Aggregate result of a prove_properties run: Refuted if any assert has a
+// reachable counterexample; else Unknown if anything is unresolved (a
+// per-property timeout, a contradictory assume set, an encode failure); else
+// Proven — a BOUNDED verdict (no violation within `checked_steps` cycles).
+struct Verify_result {
+  Verdict     verdict = Verdict::Unknown;
+  std::string detail;
+  int         checked_steps = 0;   // bound actually run
+  int         reset_hold    = 0;   // after_reset prologue length (incl. pipeline flush)
+  int         n_assumes     = 0;   // user assumes in force (verdicts are conditional on them)
+  bool        vacuous       = false;  // assume set contradictory: every "proof" was vacuous
+  std::vector<Prop_result> props;  // one entry per fproperty, walk order
+  long long                elapsed_ms = -1;
+};
+
+// 2f-verify V2: a formal-block MONITOR — the block's property statements
+// compiled (through the real Pyrope pipeline, so expression semantics never
+// diverge) into a tiny comb module whose inputs are the design signals the
+// block references. The engine encodes it per cycle with each input bound to
+// the design's encoded value for that cycle, and its fproperty obligations
+// join the verdict table under the block's dotted name.
+struct Monitor {
+  hhds::Graph* graph = nullptr;  // the compiled monitor comb (caller owns lifetime)
+  std::string  block;            // dotted block name (filter/report handle)
+  // One input binding: the monitor's input port name <- a design signal.
+  struct Bind {
+    enum class Src { input, output, state };
+    std::string ident;  // monitor input port
+    Src         src = Src::state;
+    std::string key;    // input/output port name, or the canon flop-state key
+  };
+  std::vector<Bind> binds;
+  // Generated-source line -> original "file:line" (fproperty locs point into
+  // the generated monitor file; the report shows the user's formal block).
+  absl::flat_hash_map<int, std::string> line2loc;
+};
+
+// Prove the fproperty obligations of ONE design (plus any formal-block
+// monitors) by BMC from reset: unroll cycle by cycle (same reset phases /
+// prologue rules as prove_equal's bmc engine), check each obligation per cycle
+// as a retractable checkSatAssuming, and re-assert every proven obligation as
+// a fact ("frontier assume") so later cycles solve in the pruned space. Honors
+// Lec_options bound / timeout / phase / reset_cycles / reset / witness; engine
+// must be "bmc" (the only property engine). `sub_lib` resolves Sub instances
+// exactly as in prove_equal.
+Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts = {},
+                               const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib = nullptr,
+                               const std::vector<Monitor>* monitors = nullptr);
+
 }  // namespace livehd::lec

@@ -479,6 +479,8 @@ Options parse_args(int argc, char** argv) {
       auto tp       = parse_check_side(a, need_value(a, i, argc, argv));
       opts.ref_kind = tp.kind;
       opts.ref_path = tp.path;
+    } else if (a == "--formal") {  // `formal verify`: fnmatch glob over formal-block dotted names
+      opts.formal_filter = need_value(a, i, argc, argv);
     } else if (a == "--impl-top") {
       opts.impl_top = need_value(a, i, argc, argv);
     } else if (a == "--ref-top") {
@@ -614,7 +616,8 @@ Options parse_args(int argc, char** argv) {
                         "run `lhd pyrope lsp` (or point your editor's launcher at it)"};
       }
       if (a == "compile" || a == "lec" || a == "scan" || a == "pyrope" || a == "list" || a == "describe"
-          || a == "version" || a == "help" || a == "tool" || a == "tools" || a == "pass" || a == "sim") {
+          || a == "version" || a == "help" || a == "tool" || a == "tools" || a == "pass" || a == "sim"
+          || a == "formal") {
         // tool keeps its positionals raw and ORDERED in opts.files: the verb
         // (cat/grep/diff/tree), the filter terms (name:/color:/from:…), and the
         // ln:/lg: inputs all keep their place — tool_command classifies them.
@@ -642,6 +645,22 @@ Options parse_args(int argc, char** argv) {
         }
         opts.files.emplace_back(a);
       }
+    } else if (opts.command == "formal") {
+      // `formal <sub>`: the first positional picks the engine face (2f-verify).
+      // `formal lec` IS the lec command (behavior-preserving rename — rewrite the
+      // command word so everything downstream, --impl/--ref included, is
+      // untouched); `formal verify` keeps command=formal with the subcommand in
+      // files[0] (the `pass` convention). Later positionals are the design /
+      // formal-block sources (lg:DIR routed to opts.ins by route_positional).
+      if (opts.files.empty() && a == "lec") {
+        opts.command = "lec";
+        cmd_path     = "lec";
+      } else if (opts.files.empty() && a == "verify") {
+        cmd_path = "formal.verify";
+        opts.files.emplace_back(a);
+      } else if (!route_positional(opts, a)) {
+        opts.files.emplace_back(a);
+      }
     } else {
       opts.files.emplace_back(a);
     }
@@ -655,7 +674,7 @@ Options parse_args(int argc, char** argv) {
   // and reports its own real error.
   if (!want_help && n_user_tokens == 1
       && (opts.command == "compile" || opts.command == "lec" || opts.command == "scan" || opts.command == "tool"
-          || opts.command == "pass" || opts.command == "sim")) {
+          || opts.command == "pass" || opts.command == "sim" || opts.command == "formal")) {
     want_help = true;
   }
 

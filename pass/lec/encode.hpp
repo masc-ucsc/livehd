@@ -300,6 +300,16 @@ public:
   // masked to 0. Toggled ON only while encoding the REFERENCE design.
   void set_x_dontcare(bool on) { x_dontcare_ = on; }
 
+  // 2f-verify: while true, each `fproperty` Sub (a user assert/assume/
+  // assert_always materialized by tolg — see graph_util::fproperty_module_name)
+  // emits its resolved cond as a synthetic output keyed
+  //   "\x04prop:<occ>\x1f<kind>\x1f<loc>\x1f<msg>"
+  // (occ = deterministic walk-order counter, so the SAME property carries the
+  // SAME key on every per-cycle encode of one design). Default OFF: the
+  // equivalence miters never see property outputs (an fproperty has no data
+  // output, and a one-sided \x04 output would gate lec to Unknown).
+  void set_emit_props(bool on) { emit_props_ = on; }
+
 private:
   // Fit `v` to exactly `width` bits: sign/zero-extend (per v.is_signed) when
   // widening, low-bit Extract when narrowing.
@@ -322,6 +332,7 @@ private:
   const Io_name_map<std::string>*                     box_keys_      = nullptr;
   int                                                 sub_depth_   = 0;  // Sub flattening recursion guard
   bool                                                x_dontcare_  = false;  // ref-side X = don't-care (lec.gold_x=ignore)
+  bool                                                emit_props_  = false;  // emit fproperty conds as \x04prop: outputs (2f-verify)
 };
 
 // Fit an undef bit-plane to `width` alongside its value: NULL stays NULL;

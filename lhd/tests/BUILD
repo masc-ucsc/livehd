@@ -240,6 +240,17 @@ sh_test(
     data = ["//lhd"],
 )
 
+# 2f-verify V1: `lhd formal verify` — single-design assert/assume BMC on the
+# pass/lec engine: per-assert bounded-proven / refuted-at-cycle-with-trace
+# verdict table, assume-as-disclosed-constraint, per-obligation timeout
+# isolation (+ formal.strict), formal.*/lec.* knob aliases, `formal lec` alias.
+sh_test(
+    name = "lhd_formal_verify_test",
+    size = "large",
+    srcs = ["lhd_formal_verify_test.sh"],
+    data = ["//lhd"],
+)
+
 # Regression: a kind-change ("a variable's type cannot change") diagnostic must
 # report its source span (file + line), not "span":null. Guards both the
 # constprop array/field store path (cursor left invalid by the sibling walk) and

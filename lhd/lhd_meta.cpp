@@ -16,7 +16,7 @@ namespace lhd {
 namespace {
 
 constexpr std::string_view kSteps =
-    R"json(["compile verilog","compile pyrope","lec","scan","tool","pass","pyrope fmt","pyrope lsp"])json";
+    R"json(["compile verilog","compile pyrope","lec","formal verify","formal lec","scan","tool","pass","pyrope fmt","pyrope lsp"])json";
 constexpr std::string_view kRecipes = R"json(["O0","O1","O2"])json";
 constexpr std::string_view kEmitKinds =
     R"json(["ln","lg","verilog","pyrope","lnast-dump","isabelle","lean","sim","graphviz","metadata","results","diagnostics"])json";
@@ -280,6 +280,11 @@ int describe_command(const Options& opts) {
   if (name == "lec") {
     print_json_line(
         R"json({"schema_version":1,"name":"lec","description":"Logic equivalence check (LEC): prove_equal(ref, impl). Sides are verilog:/pyrope:/ln:/lg: (or a bare .v/.sv/.prp; kind inferred), loaded/elaborated to LGraphs (verilog via --reader, default slang). The --set lec.solver knob picks the backend: cvc5 (default, in-process SMT), bitwuzla (in-process SMT), or lgyosys (inou/yosys/lgcheck, the former `lhd check`). Other engine knobs are --set lec.* (`lhd lec --help`)","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"set","type":"lec.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.v","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind","lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo"]})json");
+    return 0;
+  }
+  if (name == "formal" || name == "formal verify" || name == "formal lec") {
+    print_json_line(
+        R"json({"schema_version":1,"name":"formal","description":"Formal command family (2f-verify). `formal verify` proves ONE design's assert/assert_always/assume obligations by BMC from reset on the pass/lec engine: per-obligation solve with frontier assumes, a per-assert/per-cycle verdict table (PROVEN-to-cycle-k is BOUNDED), per-obligation timeout isolation; only a reachable violation fails the run. `formal lec` is the equivalence check (alias of `lhd lec`). Knobs: --set formal.* (bound/timeout/phase/reset/...); legacy lec.* spellings stay accepted","args":{"required":[{"name":"subcommand","type":"verify|lec","positional":true},{"name":"design","type":"path or verilog:PATH|pyrope:PATH|lg:DIR (verify; lec takes --impl/--ref)","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","lg"],"outputs":[],"examples":["lhd formal verify foo.prp --top foo --set formal.bound=12","lhd formal verify design.v --set formal.timeout=60 --set formal.strict=true","lhd formal lec --impl impl.prp --ref ref.v"]})json");
     return 0;
   }
   if (name == "semdiff" || name == "pass semdiff") {
@@ -730,6 +735,36 @@ int help_command(const Options& opts) {
         "  lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind\n"
         "  lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo\n");
     return print_options_section({"lec."});
+  }
+  if (topic == "formal" || topic == "formal verify") {
+    std::print(
+        "lhd formal — formal verification family (2f-verify)\n"
+        "\n"
+        "usage: lhd formal verify <design> [--top T] [flags]\n"
+        "       lhd formal lec    --impl KIND:PATH --ref KIND:PATH [flags]   (= lhd lec)\n"
+        "\n"
+        "verify proves ONE design's assert / assert_always / assume obligations by BMC\n"
+        "from reset (the pass/lec engine): each obligation is checked per cycle as its\n"
+        "own solver query, every proven fact immediately prunes the search for the rest\n"
+        "(frontier assumes), and a timeout costs one obligation at one cycle — the run\n"
+        "reports a per-assert verdict table, not a single verdict:\n"
+        "  PROVEN to cycle k   BOUNDED (no violation within the unrolled window)\n"
+        "  REFUTED at cycle k  a REACHABLE violation + the per-cycle input trace (fails)\n"
+        "  UNKNOWN             solver gave up / blackbox artifact / contradictory assumes\n"
+        "                      (a loud warning; --set formal.strict=true makes it fail)\n"
+        "`assume` is an environment constraint, in force at every checked cycle and\n"
+        "disclosed in the table (verdicts are conditional on it).\n"
+        "\n"
+        "the design: a bare .prp/.v/.sv path, --impl KIND:PATH, or lg:DIR.\n"
+        "\n"
+        "knobs (--set): formal.* (bound, timeout, phase, reset, reset_cycles,\n"
+        "  witness, strict, solver, ...); the legacy lec.* spellings stay accepted.\n"
+        "\n"
+        "examples:\n"
+        "  lhd formal verify foo.prp --top foo --set formal.bound=12\n"
+        "  lhd formal verify net.v --set formal.timeout=60 --set formal.strict=true\n"
+        "  lhd formal verify design.prp --set formal.phase=full   # reset window too\n");
+    return print_options_section({"formal."});
   }
   if (topic == "semdiff") {
     // `semdiff` moved under `pass`; keep `lhd help semdiff` as a convenience

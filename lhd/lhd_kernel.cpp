@@ -39,6 +39,10 @@
 #include "node_util.hpp"
 #include "pass.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
+#include <fnmatch.h>
+
+#include "encode.hpp"         // pass/lec width/canon helpers (formal-block monitor binding)
+#include "formal_blocks.hpp"  // 2f-verify V2: `formal name.dotted { ... }` extraction
 #include "prp2lnast.hpp"
 #include "prp_sim.hpp"  // `lhd sim`: generate C++ test drivers from `test` blocks
 #include "query.hpp"  // pass/lec L1 (lec::prove_equal) for the cross-check path
@@ -410,6 +414,14 @@ constexpr std::pair<std::string_view, std::string_view> kSetPasses[] = {
     {             "pass.abc",          "pass.abc"},
     {         "pass.liberty",      "pass.liberty"},
     {                  "lec",          "pass.lec"},
+    // 2f-verify knob namespace: ONE shared `formal.*` (formal.bound /
+    // formal.timeout / ...) resolving against pass.lec's label registry — no
+    // per-subcommand formal.lec.*/formal.verify.* replicas (user ruling,
+    // 2026-07-08: a run is either lec or verify, never both, and triplicated
+    // `lhd list options` rows just confuse). The legacy `lec.*` spellings
+    // above stay accepted as aliases indefinitely (no flag-day for the equiv
+    // goldens / scripts).
+    {               "formal",          "pass.lec"},
     {         "pass.semdiff",      "pass.semdiff"},
 };
 
@@ -4760,6 +4772,7 @@ void lec_command(Options& opts, Result& res) {
   // front-end reader and the path for gate-level / yosys-origin netlists.
   Eprp_var::Eprp_dict labels;
   merge_sets(opts, "lec", labels);
+  merge_sets(opts, "formal", labels);  // formal.* aliases (2f-verify namespace; wins over lec.*)
   auto label = [&](std::string_view k, std::string_view def) -> std::string {
     auto it = labels.find(std::string{k});
     return it == labels.end() ? std::string{def} : it->second;
@@ -5065,6 +5078,695 @@ void lec_command(Options& opts, Result& res) {
   if (!lg_equiv) {
     throw Lhd_error{"equiv_fail", std::format("equivalence check failed ({} vs {})", opts.impl_path, opts.ref_path), ""};
   }
+}
+
+// formalfail.prp: the `lhd formal verify` analogue of lec's lecfail.prp — on a
+// REFUTED obligation with --workdir, write a self-contained Pyrope testbench
+// that instantiates the DESIGN, drives the violating per-cycle input trace,
+// and (prpfailrun) replays it under `lhd sim --set sim.vcd=true`. A design
+// assert then FIRES during the replay (sim exiting non-zero is the expected
+// reproduction, not a failure); a formal-block obligation has no runtime
+// check, but the VCD still shows every signal the block reads.
+void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop_result& prop,
+                             const std::string& design_kind, const std::string& design_path,
+                             const std::string& top_full, const std::string& prpfail, bool run_sim,
+                             const std::string& embed_assert) {
+  auto skip = [&](std::string_view why) {
+    livehd::diag::info("pass.formal", "formalfail-skip", "io")
+        .msg("formal.prpfail witness testbench not generated: {}", why)
+        .emit();
+  };
+  if (prop.trace.empty()) {
+    skip("the refuted obligation carries no reproducible input trace (witnesses disabled?)");
+    return;
+  }
+  const auto& tr = prop.trace;
+
+  const std::string prpfail_path = prpfail.find('/') != std::string::npos ? prpfail : opts.workdir + "/" + prpfail;
+  std::string       stem         = fs::path(prpfail_path).stem().string();
+  std::string       test_name;
+  for (char c : stem) {
+    test_name += (std::isalnum(static_cast<unsigned char>(c)) != 0) ? c : '_';
+  }
+  if (test_name.empty() || (std::isdigit(static_cast<unsigned char>(test_name[0])) != 0)) {
+    test_name = "formalfail_" + test_name;
+  }
+
+  livehd::diag::info("pass.formal", "formalfail-creating-prp", "progress")
+      .msg("formal verify: creating counterexample testbench {}", prpfail_path)
+      .emit();
+
+  const std::string lhd_bin    = file_utils::get_exe_path() + "/lhd";
+  const std::string design_dir = opts.workdir + "/formalfail_prp";
+  const std::string log        = next_log_path(opts, "formal.prpfail");
+  if (!lecfail_emit_side(lhd_bin, opts, design_kind, design_path, design_dir, opts.workdir + "/formalfail_w", log)) {
+    skip(std::format("the design could not be re-emitted as Pyrope (lg:/yosys-verilog has no LNAST); see {}", log));
+    return;
+  }
+  std::vector<Lecfail_mod> mods = lecfail_parse_dir(design_dir);
+  if (mods.empty()) {
+    skip("no Pyrope modules were re-emitted for the design");
+    return;
+  }
+  std::string        top = lecfail_simple_name(top_full);
+  const Lecfail_mod* m   = nullptr;
+  for (const auto& mm : mods) {
+    if (mm.name == top) {
+      m = &mm;
+    }
+  }
+  if (m == nullptr) {
+    skip("could not locate the TOP module in the re-emitted Pyrope");
+    return;
+  }
+
+  // Import the ORIGINAL source when it is a Pyrope file with a `pub` top (a fix
+  // to the .prp then flows into a re-run of the SAME formalfail.prp); else
+  // inline the re-emitted copy (self-contained).
+  const std::string design_stem = fs::path(design_path).stem().string();
+  const bool        can_import  = design_kind == "pyrope" && !design_stem.empty()
+                          && lecfail_prp_top_is_pub(design_path, top);
+
+  absl::flat_hash_map<std::string, int> width_of;
+  for (const auto& cyc : tr.cycles) {
+    for (const auto& in : cyc.inputs) {
+      width_of[in.name] = in.width < 1 ? 1 : in.width;
+    }
+  }
+  std::vector<std::string> win;  // the DESIGN's declared inputs, decl order
+  for (const auto& [n, t] : m->inputs) {
+    win.push_back(n);
+  }
+  const int ncyc   = static_cast<int>(tr.cycles.size());
+  auto      val_at = [&](const std::string& name, int c) -> std::string {
+    for (const auto& in : tr.cycles[static_cast<size_t>(c)].inputs) {
+      if (in.name == name) {
+        return in.value;
+      }
+    }
+    return "0";
+  };
+  const bool reset_is_port  = std::find(win.begin(), win.end(), "reset") != win.end();
+  const bool implicit_reset = width_of.count("reset") != 0 && !reset_is_port;
+
+  const std::string callee = can_import ? std::string{"dutmod"} : top;
+  std::string test_text = std::format("test {} {{\n  mut _dut = {}\n", test_name, callee);
+  for (const auto& n : win) {
+    std::string arr;
+    for (int c = 0; c < ncyc; ++c) {
+      arr += (arr.empty() ? "" : ", ") + val_at(n, c);
+    }
+    test_text += std::format("  const _drv_{} = [{}]\n", n, arr);
+  }
+  if (implicit_reset) {
+    std::string arr;
+    for (int c = 0; c < ncyc; ++c) {
+      arr += (arr.empty() ? "" : ", ") + val_at("reset", c);
+    }
+    test_text += std::format("  const _drv_reset = [{}]\n", arr);
+  }
+  test_text += std::format("  tick {} {{\n", ncyc);
+  if (!reset_is_port) {
+    if (implicit_reset) {
+      test_text += "    _dut.reset = _drv_reset[clock]\n";
+    } else if (tr.reset_cycles > 0) {
+      test_text += std::format("    _dut.reset = clock < {}\n", tr.reset_cycles);
+    } else {
+      test_text += "    _dut.reset = false\n";
+    }
+  }
+  for (const auto& n : win) {
+    test_text += std::format("    _dut.{} = _drv_{}[clock]\n", n, n);
+  }
+  if (!embed_assert.empty()) {
+    // The violated formal-block assertion, re-targeted at the instance
+    // (`__p_*` idents -> `_dut.<path>` reads): the replay TRIGGERS it through
+    // the test-assert machinery at exactly the violating cycle, so the run
+    // fails with a located `assert fail: clock=N` line plus the VCD.
+    test_text += std::format("    if clock == {} {{\n      {}\n    }}\n", tr.diverge_cycle, embed_assert);
+  }
+  test_text += "    step\n  }\n}\n";
+
+  std::string what = prop.kind + (prop.loc.empty() ? "" : " at " + prop.loc)
+                   + (prop.block.empty() ? "" : " [" + prop.block + "]")
+                   + (prop.msg.empty() ? "" : " \"" + prop.msg + "\"");
+  const std::string rerun = can_import
+                                ? std::format("lhd sim {} {} --set sim.vcd=true --workdir <dir>", design_path, prpfail_path)
+                                : std::format("lhd sim {} --set sim.vcd=true --workdir <dir>", prpfail_path);
+  std::string out = std::format(
+      "/*\n:name: {}\n:type: simulation\n*/\n"
+      "// AUTO-GENERATED by `lhd formal verify` from a REFUTED obligation.\n"
+      "// design='{}'  violated: {}\n"
+      "// Drives the design with the violating input sequence ({} cycle(s), {} reset-hold);\n"
+      "// the violation lands at cycle {}. A formal-block obligation is re-checked in\n"
+      "// the test body below (the replay FAILS on it); a design-body assert is not yet\n"
+      "// executed by sim — read those off the VCD.\n"
+      "// Re-run:  {}   (dumps {}.vcd)\n\n",
+      test_name, design_path, what, ncyc, tr.reset_cycles, tr.diverge_cycle, rerun, test_name);
+  if (can_import) {
+    out += std::format("const dutmod = import(\"{}.{}\")\n\n", design_stem, top);
+  } else {
+    for (const auto& mm : mods) {
+      out += lecfail_type_params(mm.text, width_of);
+      if (!out.empty() && out.back() != '\n') {
+        out += '\n';
+      }
+      out += '\n';
+    }
+  }
+  out += test_text;
+
+  std::ofstream ofs(prpfail_path);
+  if (!ofs.is_open()) {
+    skip(std::format("could not write {}", prpfail_path));
+    return;
+  }
+  ofs << out;
+  ofs.close();
+  res.outputs.push_back(prpfail_path);
+  res.recipe_steps.push_back(std::format("formal.prpfail witness testbench -> {}", prpfail_path));
+  std::print("formal verify: wrote counterexample testbench {}\n", prpfail_path);
+
+  if (!run_sim) {
+    return;
+  }
+  livehd::diag::info("pass.formal", "formalfail-creating-vcd", "progress")
+      .msg("formal verify: creating counterexample waveform {}/{}.vcd", opts.workdir, test_name)
+      .emit();
+  const std::string sim_log = next_log_path(opts, "formal.prpfailrun");
+  std::string       cmd     = shell_quote(lhd_bin) + " sim ";
+  if (can_import) {
+    cmd += shell_quote(design_path) + " ";
+  }
+  cmd += shell_quote(prpfail_path) + " --set sim.vcd=true --workdir " + shell_quote(opts.workdir);
+  for (const auto& [k, v] : opts.sets) {
+    if ((k == "compile.cgen.sim_hlop" || k == "compile.cgen.sim_iassert" || k == "sim.vcdfakedelay") && !v.empty()) {
+      cmd += " --set " + shell_quote(k + "=" + v);
+    }
+  }
+  cmd += " >> " + shell_quote(sim_log) + " 2>&1";
+  int         st  = std::system(cmd.c_str());
+  std::string vcd = std::format("{}/{}.vcd", opts.workdir, test_name);
+  // A design assert firing makes the replay exit non-zero — that IS the
+  // reproduction; the artifact that matters is the waveform.
+  if (fs::exists(vcd)) {
+    res.outputs.push_back(vcd);
+    res.recipe_steps.push_back(std::format("formal.prpfailrun VCD -> {}", vcd));
+    const bool fired = !(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    std::print("formal verify: wrote counterexample waveform {}{}\n", vcd,
+               fired ? " (the replay reproduced the violation: the runtime assert fired)" : "");
+  } else {
+    livehd::diag::warn("pass.formal", "formalfail-sim", "io")
+        .msg("formal.prpfailrun: `lhd sim {}` did not produce {} (see {})", prpfail_path, vcd, sim_log)
+        .emit();
+  }
+}
+
+// ---- formal verify (2f-verify V1: single-design assert/assume BMC) ----------
+
+// `lhd formal verify <design> [--top m] [--set formal.bound=N ...]`: prove the
+// design's fproperty obligations (user assert / assert_always / assume) by BMC
+// from reset on the pass/lec engine (lec::prove_properties): per-obligation
+// checkSatAssuming with frontier assumes, a per-assert/per-cycle verdict table,
+// and per-obligation timeout isolation. Exit policy mirrors lec: only a
+// REACHABLE violation hard-fails; bounded-proven passes; unknown is a loud
+// warning unless formal.strict. Knobs: formal.* (shared engine), formal.lec.*
+// (lec-only), formal.verify.* (verify-only), with lec.* accepted as aliases.
+void formal_verify_command(Options& opts, Result& res) {
+  // Captured before any workdir() call fabricates a scratch dir: the formalfail
+  // testbench + VCD default ON only for a persistent, user-named --workdir.
+  const bool workdir_set = !opts.workdir.empty();
+  setup_diag(opts, "formal");
+#ifndef NDEBUG
+  livehd::diag::info("pass.formal", "formal-debug-build-slow", "progress")
+      .msg("formal verify is slow and you compile without optimizations. Maybe `bazel build -c opt //...`")
+      .emit();
+#endif
+
+  // The design: --impl KIND:PATH wins; else the first positional after the
+  // `verify` subcommand word (kind by extension — verilog:/pyrope: prefixed
+  // positionals were stripped to plain paths by route_positional); else a
+  // routed lg:DIR. V1 takes ONE design source (sidecar formal-block files: V2).
+  std::string              kind = opts.impl_kind;
+  std::string              path = opts.impl_path;
+  std::vector<std::string> extras(opts.files.begin() + (opts.files.empty() ? 0 : 1), opts.files.end());
+  if (path.empty() && !extras.empty()) {
+    const std::string& f    = extras.front();
+    auto               ends = [&](std::string_view s) { return f.size() > s.size() && f.compare(f.size() - s.size(), s.size(), s) == 0; };
+    if (ends(".prp")) {
+      kind = "pyrope";
+    } else if (ends(".v") || ends(".sv")) {
+      kind = "verilog";
+    } else {
+      throw Lhd_error{"usage", std::format("formal verify: cannot infer the design kind of '{}'", f),
+                      "pass --impl KIND:PATH (verilog:/pyrope:/lg:) or a .prp/.v/.sv path"};
+    }
+    path = f;
+    extras.erase(extras.begin());
+  }
+  if (path.empty() && !opts.ins.empty()) {
+    kind = "lg";
+    path = opts.ins.front().path;
+  }
+  if (path.empty()) {
+    throw Lhd_error{"usage", "formal verify needs a design (a .prp/.v/.sv path, --impl KIND:PATH, or lg:DIR)",
+                    "e.g. `lhd formal verify foo.prp --top foo.top`"};
+  }
+  // Extra .prp positionals are formal-block sources (the sidecar files): they
+  // are parsed for `formal name.dotted { ... }` blocks, never compiled as
+  // design. The design file itself (when Pyrope) is also a block source, so a
+  // design and its blocks can share one file.
+  std::vector<std::string> block_files;
+  if (kind == "pyrope") {
+    block_files.push_back(path);
+  }
+  for (const auto& f : extras) {
+    if (f.size() > 4 && f.compare(f.size() - 4, 4, ".prp") == 0) {
+      block_files.push_back(f);
+    } else {
+      throw Lhd_error{"usage", std::format("formal verify: unexpected extra input '{}'", f),
+                      "extra inputs must be .prp formal-block (sidecar) files"};
+    }
+  }
+
+  // The in-compile pass.formal gate keeps its normal FAIL policy on the USER'S
+  // design (user ruling, 2026-07-08): a root-module refutation — including an
+  // input `assume`, which the gate treats as a refutable obligation — fails the
+  // load. The escape hatches are explicit: move the assume into a formal block
+  // (blocks bypass the gate; the BMC engine adjudicates them), or pass
+  // --set compile.formal.on_refute=warn deliberately.
+
+  Eprp_var var;
+  load_side_graphs(opts, res, kind, path, "impl", var);
+
+  // Top pick: --impl-top / --top, else the sole module; entity fallback like lec.
+  auto pick = [&]() -> std::shared_ptr<hhds::Graph> {
+    const std::string& t = !opts.impl_top.empty() ? opts.impl_top : opts.top;
+    if (!t.empty()) {
+      for (auto& g : var.graphs) {
+        if (g && g->get_name() == t) {
+          return g;
+        }
+      }
+      auto entity = [](std::string_view n) {
+        auto d = n.rfind('.');
+        return d == std::string_view::npos ? n : n.substr(d + 1);
+      };
+      const std::string_view       want_entity = entity(t);
+      std::shared_ptr<hhds::Graph> simple_hit;
+      int                          n_simple = 0;
+      for (auto& g : var.graphs) {
+        if (g && entity(g->get_name()) == want_entity) {
+          simple_hit = g;
+          ++n_simple;
+        }
+      }
+      if (n_simple == 1) {
+        return simple_hit;
+      }
+      throw Lhd_error{"config", std::format("formal verify: top '{}' not found", t), ""};
+    }
+    if (var.graphs.size() == 1) {
+      return var.graphs.front();
+    }
+    throw Lhd_error{"usage", std::format("formal verify: design has {} modules; pass --top", var.graphs.size()), ""};
+  };
+  auto g = pick();
+
+  // Knobs: lec.* (legacy aliases) < formal.* (the one shared namespace).
+  Eprp_var::Eprp_dict labels;
+  merge_sets(opts, "lec", labels);
+  merge_sets(opts, "formal", labels);
+  auto label = [&](std::string_view k, std::string_view def) -> std::string {
+    auto it = labels.find(std::string{k});
+    return it == labels.end() ? std::string{def} : it->second;
+  };
+
+  livehd::lec::Lec_options o;
+  o.engine = label("engine", "bmc");
+  if (o.engine == "auto") {
+    o.engine = "bmc";  // the ind/bmc portfolio is a lec concept; verify is bmc-only (V1)
+  }
+  o.solver       = label("solver", "cvc5");
+  o.bound        = std::atoi(label("bound", "6").c_str());
+  o.timeout      = std::atoi(label("timeout", "120").c_str());
+  o.witness      = label("witness", "true") != "false" && label("witness", "true") != "0";
+  o.phase        = label("phase", "after_reset");
+  o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
+  o.reset        = label("reset", "");
+  o.strict       = label("strict", "false") != "false" && label("strict", "false") != "0";
+  if (auto e = livehd::lec::lec_options_range_error(o); !e.empty()) {
+    throw Lhd_error{"usage", e, "the BMC engine unrolls one SMT copy of the design per cycle"};
+  }
+
+  // --lib lg:DIR cell-model libraries, exactly as in lec.
+  absl::flat_hash_map<hhds::Gid, hhds::Graph*> sub_lib;
+  std::vector<std::shared_ptr<hhds::Graph>>    sub_lib_keep;
+  for (const auto& lp : opts.libs) {
+    if (lp.kind != "lg") {
+      throw Lhd_error{"usage", std::format("formal verify --lib expects lg:DIR, got '{}:'", lp.kind), ""};
+    }
+    if (!fs::is_directory(lp.path)) {
+      throw Lhd_error{"missing_file", std::format("formal verify --lib not found: {}", lp.path), ""};
+    }
+    auto& lib = livehd::Hhds_graph_library::instance(lp.path);
+    for (const hhds::Gid id : lib.all_gids()) {
+      auto lg = lib.get_graph(id);
+      if (!lg) {
+        continue;
+      }
+      sub_lib_keep.push_back(lg);
+      sub_lib[id] = lg.get();
+    }
+  }
+  const auto* sub_lib_ptr = sub_lib.empty() ? nullptr : &sub_lib;
+
+  // ── Formal-block monitors (2f-verify V2) ──────────────────────────────────
+  // Extract every `formal name.dotted { ... }` block from the block sources,
+  // filter by --formal <glob>, resolve each referenced dotted path against the
+  // design (top input/output ports; registers by canonical hierarchical name),
+  // and compile the block's statements into a tiny comb MONITOR module through
+  // the normal Pyrope pipeline — exact expression semantics, no re-implemented
+  // evaluator. The engine binds the monitor inputs per cycle.
+  std::vector<livehd::lec::Monitor> mons;
+  std::vector<Eprp_var>             mon_keep;  // owns the monitor graphs' lifetime
+  // "block\x1floc" -> the block statement re-targeted at `_dut.<path>` reads,
+  // so a refuted obligation can be re-checked inside the formalfail testbench.
+  absl::flat_hash_map<std::string, std::string> fb_embed;
+  {
+    // Design signal tables (setup-time mirror of the engine's own collection).
+    struct Sig {
+      int  w;
+      bool sgn;
+    };
+    absl::flat_hash_map<std::string, Sig> in_tbl, out_tbl, flop_tbl;
+    {
+      auto gio = g->get_io();
+      for (const auto& d : gio->get_input_pin_decls()) {
+        auto pin = g->get_input_pin(d.name);
+        int  w   = livehd::lec::real_width_io(pin, *gio, d.name);
+        in_tbl[d.name] = Sig{w == 0 ? 1 : w, pin.is_invalid() ? !gio->is_unsign(d.name) : !livehd::graph_util::is_unsign(pin)};
+      }
+      for (const auto& d : gio->get_output_pin_decls()) {
+        auto pin = g->get_output_pin(d.name);
+        int  w   = livehd::lec::real_width_io(pin, *gio, d.name);
+        out_tbl[d.name] = Sig{w == 0 ? 1 : w, !gio->is_unsign(d.name)};
+      }
+      for (auto node : g->forward_hier()) {
+        if (livehd::graph_util::type_op_of(node) != Ntype_op::Flop) {
+          continue;
+        }
+        auto q = node.get_driver_pin(0);
+        if (q.is_invalid()) {
+          continue;
+        }
+        int w = livehd::lec::real_width(q);
+        flop_tbl[livehd::lec::canon_flop_name(node.get_hier_name())] = Sig{w == 0 ? 1 : w, !livehd::graph_util::is_unsign(q)};
+      }
+    }
+    auto entity = [](std::string_view n) {
+      auto d = n.rfind('.');
+      return d == std::string_view::npos ? n : n.substr(d + 1);
+    };
+    int gen_ix = 0;
+    for (const auto& bf : block_files) {
+      for (auto& blk : livehd::formal_blocks::extract(bf)) {
+        if (!blk.error.empty()) {
+          throw Lhd_error{"usage", std::format("formal block error: {}", blk.error),
+                          "V2 formal blocks: alias bindings + assert/assume/assert_always over dotted signal paths"};
+        }
+        if (!opts.formal_filter.empty() && fnmatch(opts.formal_filter.c_str(), blk.name.c_str(), 0) != 0) {
+          continue;
+        }
+        if (blk.stmts.empty()) {
+          continue;  // nothing to prove (aliases only)
+        }
+        // Where the block binds (user ruling, 2026-07-08): the verified top
+        // itself when the target IS the top (or unnamed), else EVERY instance
+        // of the target module inside the top — the property must hold for
+        // each one (reported as block@instance).
+        std::vector<std::string> inst_prefixes;  // "" = the top itself
+        if (blk.target.empty() || entity(blk.target) == entity(g->get_name())) {
+          inst_prefixes.emplace_back("");
+        } else {
+          for (auto node : g->forward_hier()) {
+            if (livehd::graph_util::type_op_of(node) != Ntype_op::Sub) {
+              continue;
+            }
+            auto sio = node.get_subnode_io();
+            if (sio != nullptr && entity(sio->get_name()) == entity(blk.target)) {
+              inst_prefixes.emplace_back(node.get_hier_name());
+            }
+          }
+          if (inst_prefixes.empty()) {
+            throw Lhd_error{"usage",
+                            std::format("formal block '{}' targets module '{}', which '{}' does not instantiate",
+                                        blk.name, blk.target, g->get_name()),
+                            "bind the block to the verified top or to a module instantiated inside it"};
+          }
+        }
+        // Resolve one signal path for one instance context ("" = the top).
+        auto resolve = [&](const std::string& path, const std::string& prefix,
+                           livehd::lec::Monitor::Bind& b) -> const Sig* {
+          if (prefix.empty()) {  // top ports are only visible at the top itself
+            if (auto it = in_tbl.find(path); it != in_tbl.end()) {
+              b.src = livehd::lec::Monitor::Bind::Src::input;
+              b.key = path;
+              return &it->second;
+            }
+            if (auto ot = out_tbl.find(path); ot != out_tbl.end()) {
+              b.src = livehd::lec::Monitor::Bind::Src::output;
+              b.key = path;
+              return &ot->second;
+            }
+          }
+          std::string full = prefix.empty() ? path : prefix + "." + path;
+          if (auto ft = flop_tbl.find(livehd::lec::canon_flop_name(full)); ft != flop_tbl.end()) {
+            b.src = livehd::lec::Monitor::Bind::Src::state;
+            b.key = livehd::lec::canon_flop_name(full);
+            return &ft->second;
+          }
+          return nullptr;
+        };
+        // Port list + widths from the FIRST context (same module def => same
+        // widths in every instance); binds built per instance below.
+        livehd::lec::Monitor mon;
+        mon.block = blk.name;
+        std::string ports;
+        for (const auto& in : blk.inputs) {
+          livehd::lec::Monitor::Bind b;
+          b.ident      = in.ident;
+          const Sig* s = resolve(in.path, inst_prefixes.front(), b);
+          if (s == nullptr) {
+            throw Lhd_error{"usage",
+                            std::format("formal block '{}': signal path '{}' does not resolve in '{}'{}", blk.name,
+                                        in.path, g->get_name(),
+                                        inst_prefixes.front().empty() ? std::string{}
+                                                                      : " instance '" + inst_prefixes.front() + "'"),
+                            "V2 reaches top input/output ports and registers (dotted through instances); "
+                            "internal wires and memory elements come later"};
+          }
+          mon.binds.push_back(std::move(b));
+          ports += std::format("{}{}:{}{}", ports.empty() ? "" : ", ", in.ident, s->sgn ? "s" : "u", s->w);
+        }
+        // Generated monitor: one statement per line; line 1 is the header, so
+        // statement i sits on generated line 2+i (the loc-remap key).
+        std::string src = std::format("comb __fbmon({}) -> (__fb_ok:bool) {{\n", ports);
+        for (size_t i = 0; i < blk.stmts.size(); ++i) {
+          std::string one = blk.stmts[i].text;
+          std::replace(one.begin(), one.end(), '\n', ' ');  // keep 1 stmt : 1 line for the remap
+          src += one + "\n";
+          mon.line2loc[static_cast<int>(2 + i)] = std::format("{}:{}", bf, blk.stmts[i].line);
+        }
+        src += "__fb_ok = true\n}\n";
+        const auto genp = fs::path(workdir(opts)) / std::format("__fbmon_{}.prp", gen_ix++);
+        {
+          std::ofstream gf(genp);
+          gf << src;
+        }
+        // The monitor is an INTERNAL artifact: its assume/assert conds over
+        // free comb inputs would trip the compile gate's root-module FAIL
+        // policy, but the deep engine below adjudicates every one of its
+        // obligations — skip the gate for the monitor compile only (the user's
+        // design load above kept the gate's normal policy).
+        const size_t saved_sets = opts.sets.size();
+        opts.sets.emplace_back("compile.formal.mode", "none");
+        Eprp_var mvar;
+        load_side_graphs(opts, res, "pyrope", genp.string(), "impl", mvar);
+        opts.sets.resize(saved_sets);
+        if (mvar.graphs.size() != 1) {
+          throw Lhd_error{"internal", std::format("formal block '{}': monitor compile yielded {} modules", blk.name,
+                                                  mvar.graphs.size()), genp.string()};
+        }
+        mon.graph = mvar.graphs.front().get();
+        mon_keep.push_back(std::move(mvar));
+        // One Monitor per instance context: the compiled graph is shared, the
+        // binds differ, and non-top contexts carry the @instance label.
+        for (const auto& prefix : inst_prefixes) {
+          livehd::lec::Monitor im = mon;  // graph + line2loc shared; binds rebuilt
+          {
+            // Embeddable form of each assert/assert_always statement for THIS
+            // instance context (assumes hold on the trace by construction).
+            for (const auto& st : blk.stmts) {
+              if (st.text.rfind("assume", 0) == 0) {
+                continue;
+              }
+              std::string t = st.text;
+              for (const auto& bin : blk.inputs) {
+                const std::string dut = "_dut." + (prefix.empty() ? bin.path : prefix + "." + bin.path);
+                for (size_t pos = 0; (pos = t.find(bin.ident, pos)) != std::string::npos; pos += dut.size()) {
+                  t.replace(pos, bin.ident.size(), dut);
+                }
+              }
+              const std::string blabel = prefix.empty() ? blk.name : blk.name + "@" + prefix;
+              fb_embed[blabel + "\x1f" + std::format("{}:{}", bf, st.line)] = t;
+            }
+          }
+          if (!prefix.empty()) {
+            im.block = blk.name + "@" + prefix;
+            im.binds.clear();
+            for (const auto& in : blk.inputs) {
+              livehd::lec::Monitor::Bind b;
+              b.ident      = in.ident;
+              const Sig* s = resolve(in.path, prefix, b);
+              if (s == nullptr) {
+                throw Lhd_error{"usage",
+                                std::format("formal block '{}': signal path '{}' does not resolve in instance '{}'",
+                                            blk.name, in.path, prefix),
+                                "submodule-bound blocks reach the instance's registers (ports are internal nets — later)"};
+              }
+              im.binds.push_back(std::move(b));
+            }
+          }
+          mons.push_back(std::move(im));
+        }
+      }
+    }
+  }
+
+  livehd::diag::info("pass.formal", "formal-proving", "progress")
+      .msg("formal verify: proving obligations of '{}' (bound={}, phase={}, {} formal block(s), {})", g->get_name(),
+           o.bound, o.phase, mons.size(),
+           o.timeout > 0 ? std::format("timeout={}s per query", o.timeout) : std::string{"no timeout"})
+      .emit();
+  res.recipe_steps.emplace_back(std::format("pass.lec prove_properties bound:{} phase:{}", o.bound, o.phase));
+
+  auto r = livehd::lec::prove_properties(g.get(), o, sub_lib_ptr, mons.empty() ? nullptr : &mons);
+
+  const char* verdict = r.verdict == livehd::lec::Verdict::Proven    ? "PROVEN (bounded)"
+                        : r.verdict == livehd::lec::Verdict::Refuted ? "REFUTED"
+                                                                     : "UNKNOWN";
+  std::print("formal verify: '{}' {} ({}; {} ms)\n", g->get_name(), verdict, r.detail, r.elapsed_ms);
+  std::string first_fail;  // the exit policy's headline: the first refuted obligation
+  for (const auto& p : r.props) {
+    std::string where = p.loc.empty() ? std::string{} : " at " + p.loc;
+    std::string msg   = p.msg.empty() ? std::string{} : " \"" + p.msg + "\"";
+    if (!p.block.empty()) {
+      msg += " [" + p.block + "]";  // block (+@instance) attribution
+    }
+    if (p.kind == "assume") {
+      std::print("  assume{}{}: in force (environment constraint; verdicts are conditional on it)\n", where, msg);
+      continue;
+    }
+    switch (p.verdict) {
+      case livehd::lec::Verdict::Proven:
+        if (p.unbounded) {
+          std::print("  {}{}{}: PROVEN (inductive — every cycle of every bound)\n", p.kind, where, msg);
+        } else {
+          std::print("  {}{}{}: PROVEN to cycle {} (bounded)\n", p.kind, where, msg, p.proven_to);
+        }
+        break;
+      case livehd::lec::Verdict::Refuted:
+        std::print("  {}{}{}: REFUTED at cycle {}\n", p.kind, where, msg, p.refuted_at);
+        if (!p.witness.empty()) {
+          std::print("    counterexample inputs: {}\n", p.witness);
+        }
+        if (first_fail.empty()) {
+          first_fail = p.kind + where + msg;
+        }
+        break;
+      default: {
+        std::string why = p.refuted_at >= 0 ? std::format("violation at cycle {} may be a blackbox artifact", p.refuted_at)
+                          : p.unknown_at >= 0
+                              ? std::format("solver gave up at cycle {} (raise --set formal.timeout)", p.unknown_at)
+                          : r.vacuous ? std::string{"assume set contradictory"}
+                                      : std::string{"not checked"};
+        std::print("  {}{}{}: UNKNOWN ({})\n", p.kind, where, msg, why);
+        if (!p.witness.empty()) {
+          std::print("    candidate violation inputs: {}\n", p.witness);
+        }
+        break;
+      }
+    }
+  }
+
+  // formalfail witness testbench + VCD (`--workdir`, mirroring lec's lecfail):
+  // emitted for the FIRST refuted obligation that carries a trace. Same knobs,
+  // shared with lec: formal.prpfail (default 'formalfail.prp' when --workdir is
+  // set) and formal.prpfailrun (default: run iff --workdir); gated by witness.
+  if (r.verdict == livehd::lec::Verdict::Refuted) {
+    const livehd::lec::Prop_result* fp = nullptr;
+    for (const auto& p : r.props) {
+      if (p.refuted_at >= 0 && !p.trace.empty()) {
+        fp = &p;
+        break;
+      }
+    }
+    std::string prpfail;
+    std::string pv;
+    if (auto it = labels.find("prpfail"); it != labels.end()) {
+      pv = it->second;
+    }
+    if (o.witness && workdir_set) {
+      prpfail = pv.empty()          ? std::string{"formalfail.prp"}
+                : (pv == "false" || pv == "0") ? std::string{}
+                : (pv == "true" || pv == "1")  ? std::string{"formalfail.prp"}
+                                               : pv;
+    } else if (!pv.empty() && pv != "false" && pv != "0" && !workdir_set) {
+      livehd::diag::info("pass.formal", "formalfail-needs-workdir", "io")
+          .msg("formal.prpfail needs --workdir (a persistent output dir); skipping the witness testbench")
+          .emit();
+    }
+    bool prpfailrun = workdir_set;
+    if (auto it = labels.find("prpfailrun"); it != labels.end() && !it->second.empty()) {
+      prpfailrun = !(it->second == "false" || it->second == "0");
+    }
+    if (fp != nullptr && !prpfail.empty()) {
+      std::string embed;
+      if (auto it = fb_embed.find(fp->block + "\x1f" + fp->loc); it != fb_embed.end()) {
+        embed = it->second;
+      }
+      emit_formalfail_witness(opts, res, *fp, kind, path, std::string(g->get_name()), prpfail, prpfailrun, embed);
+    }
+  }
+
+  if (r.verdict == livehd::lec::Verdict::Refuted) {
+    throw Lhd_error{"equiv_fail", std::format("'{}' has a reachable property violation ({})", g->get_name(), first_fail),
+                    "the per-cycle input trace above reproduces it from reset"};
+  }
+  if (r.verdict == livehd::lec::Verdict::Unknown) {
+    if (o.strict) {
+      throw Lhd_error{"unsupported", std::format("formal verify could not decide '{}'", g->get_name()), r.detail};
+    }
+    livehd::diag::warn("pass.formal", "formal-inconclusive", "io")
+        .msg("formal verify INCONCLUSIVE: '{}' — {}. This proves nothing and disproves nothing; pass --set "
+             "formal.strict=true to treat it as a failure.",
+             g->get_name(),
+             r.detail)
+        .emit();
+  }
+}
+
+// `lhd formal <sub>`: verify (above) | lec (rewritten to the lec command at
+// parse time, so it never reaches here).
+void formal_command(Options& opts, Result& res) {
+  if (opts.files.empty() || opts.files.front() != "verify") {
+    throw Lhd_error{"usage",
+                    opts.files.empty() ? std::string{"formal needs a subcommand: verify | lec"}
+                                       : std::format("unknown formal subcommand '{}'", opts.files.front()),
+                    "`lhd formal verify <design>` proves assert/assume by BMC; `lhd formal lec` is the equivalence check"};
+  }
+  formal_verify_command(opts, res);
 }
 
 // ---- semdiff (structural diff/match: stamp the `match` attribute) -----------
@@ -6564,6 +7266,8 @@ void run_engine_command(Options& opts, Result& res) {
     compile_command(opts, res);
   } else if (opts.command == "lec") {
     lec_command(opts, res);
+  } else if (opts.command == "formal") {
+    formal_command(opts, res);
   } else if (opts.command == "scan") {
     scan_command(opts, res);
   } else if (opts.command == "tool") {
