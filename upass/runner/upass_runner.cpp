@@ -3518,6 +3518,34 @@ bool uPass_runner::try_inline_func_call() {
     }
   }
 
+  // A pipe or a non-method mod lowers to a Sub INSTANCE, whose ports tolg wires
+  // by declaration order for any unnamed actual. That mis-binds a
+  // type-distinguished unnamed actual — the runner resolved it by KIND (e.g.
+  // `pick(x, true)` binds x→the u8 param and true→the bool param regardless of
+  // order), which position cannot reproduce. So if the source used any unnamed
+  // actual, re-emit the call with the already-resolved binding as NAMED
+  // `port=value` actuals and let tolg wire by name. The re-emitted call is
+  // all-named, so on its re-walk this block is skipped and it declines straight
+  // through — no re-canonicalization, no recursion.
+  {
+    const bool is_pipe = std::any_of(io.outputs.begin(), io.outputs.end(), [](const Lnast_io_entry& oe) {
+      return oe.stages_min > 0;
+    });
+    const bool becomes_sub = is_pipe || (callee->get_lambda_kind() == "mod" && !has_self);
+    const bool any_unnamed  = std::any_of(actuals.begin(), actuals.end(), [](const Actual& a) { return !a.is_named; });
+    if (becomes_sub && any_unnamed) {
+      std::vector<std::pair<std::string, Lnast_node>> named;
+      named.reserve(nbind);
+      for (std::size_t i = 0; i < nbind; ++i) {  // becomes_sub ⇒ no self slot
+        if (param_set[i]) {
+          named.emplace_back(io.inputs[i].name, param_val[i]);
+        }
+      }
+      emit_named_instance_call(dst_name, callee_name, call_inst_name, named);
+      return true;
+    }
+  }
+
   // A `pipe` callee (any output carries a stages annotation) is
   // never comb-inlined: its outputs are flopped, and a call site must consume
   // it via `stage[N]` (later phase). Decline so the call surfaces unresolved
@@ -4431,8 +4459,9 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
   return clone;
 }
 
-void uPass_runner::emit_specialized_call(const std::string& dst, const std::string& mangled,
-                                         const std::vector<std::pair<std::string, Lnast_node>>& actuals) {
+void uPass_runner::emit_named_instance_call(const std::string& dst, const std::string& callee_ref,
+                                            const std::string& inst_name,
+                                            const std::vector<std::pair<std::string, Lnast_node>>& actuals) {
   if (!scratch_forest_) {
     scratch_forest_ = hhds::Forest::create();
   }
@@ -4441,8 +4470,16 @@ void uPass_runner::emit_specialized_call(const std::string& dst, const std::stri
   auto root = s->set_root(Lnast_ntype::create_func_call());
   stamp_scratch_srcid(s, root);
   s->add_child(root, Lnast_node::create_ref(dst));
-  s->add_child(root, Lnast_node::create_ref(mangled));  // mangled callee → tolg makes the Sub
-  // Named actuals: `store(port, value)` per binding, so tolg wires by name.
+  s->add_child(root, Lnast_node::create_ref(callee_ref));  // callee → tolg makes the Sub
+  // Re-emit the explicit instance name (`name=`) so the Sub keeps its hierarchy.
+  if (!inst_name.empty()) {
+    auto in = s->add_child(root, Lnast_ntype::create_store());
+    s->add_child(in, Lnast_node::create_ref("__inst_name"));
+    s->add_child(in, Lnast_node::create_const(inst_name));
+  }
+  // Named actuals: `store(port, value)` per binding, so tolg wires by name (never
+  // by declaration order — a type-distinguished unnamed actual is resolved by
+  // KIND, which position cannot reproduce).
   for (const auto& [port, val] : actuals) {
     auto st = s->add_child(root, Lnast_ntype::create_store());
     s->add_child(st, Lnast_node::create_ref(port));
@@ -4450,7 +4487,7 @@ void uPass_runner::emit_specialized_call(const std::string& dst, const std::stri
   }
   flush_deferred_emits();
   lm->push_source(s, "", 0);
-  process_lnast();  // mangled callee isn't in the registry yet → emitted verbatim for tolg
+  process_lnast();  // re-walked: an all-named call declines straight through to tolg (no re-canonicalize)
   flush_deferred_emits();
   lm->pop_source();
 }
@@ -5118,7 +5155,7 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
   for (const auto& [key, a] : vararg_named) {
     actuals.emplace_back(std::format("{}__{}", vname, key), a);
   }
-  emit_specialized_call(dst_name, mangled, actuals);
+  emit_named_instance_call(dst_name, mangled, /*inst_name=*/"", actuals);
   return true;
 }
 

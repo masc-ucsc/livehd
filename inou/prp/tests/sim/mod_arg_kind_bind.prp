@@ -1,0 +1,28 @@
+/*
+:name: mod_arg_kind_bind
+:type: simulation
+*/
+// Regression: a mod-instance call with UNNAMED, type-distinguished arguments
+// whose source order does NOT match the declaration order. `pick(x, true)` must
+// bind `x` (u8) -> `n` and `true` (bool) -> `flag` BY KIND, not by position.
+// tolg used to wire the Sub ports positionally (x->flag, true->n), so `r` came
+// out as `1` (true) instead of the selected `n`. The runner now canonicalizes
+// the call to named actuals before tolg, so the Sub wires by name.
+
+mod pick(flag:bool, n:u8) -> (r:u8@[0]) {
+  r = if flag { n } else { 0 }
+}
+
+mod dut(x:u8) -> (o:u8@[0]) {
+  o = pick(x, true)   // unnamed, kind-distinguished, swapped vs decl order
+}
+
+test kindbind.check {
+  mut d   = dut
+  mut got = nil
+  d.x = 42
+  step
+  got = d.o
+  // flag=true selects n=42. The old positional mis-bind produced 1.
+  assert(got == 42, "type-distinguished unnamed mod arg was mis-bound by position")
+}

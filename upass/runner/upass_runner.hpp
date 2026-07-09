@@ -550,8 +550,12 @@ protected:
   void copy_subtree_into(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
                          const Lnast_nid& dst_parent,
                          const absl::flat_hash_map<std::string, Generic_bind>* type_subst = nullptr);
-  void emit_specialized_call(const std::string& dst, const std::string& mangled,
-                             const std::vector<std::pair<std::string, Lnast_node>>& actuals);
+  // Emit a `func_call(dst, callee, [name=], port=val…)` with NAMED actuals into a
+  // scratch tree and re-walk it, so tolg wires the Sub instance by port name.
+  // Used by template specialization and by the concrete pipe/mod decline to
+  // canonicalize any unnamed (type/exception-resolved) actual to named form.
+  void emit_named_instance_call(const std::string& dst, const std::string& callee_ref, const std::string& inst_name,
+                                const std::vector<std::pair<std::string, Lnast_node>>& actuals);
   // Specialized-module names this runner already minted this run (avoid
   // re-cloning the same signature within one tree; cross-tree dedup is by name
   // in pass_upass's queue drain).
