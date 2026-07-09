@@ -3548,9 +3548,13 @@ private:
       }
     }
 
-    // Actuals → callee input sink pins.
+    // Actuals → callee input sink pins. Named actuals (`port=value`, a `store`)
+    // bind by port name; a bare positional actual binds the next declared input
+    // in order. Track bound ports per-port so a duplicate bind or an omitted
+    // input is caught individually — a bare count of provided-vs-declared could
+    // net out equal when one port was bound twice and another left undriven.
     std::size_t pos = 0;
-    std::size_t provided = 0;
+    absl::flat_hash_set<std::string> bound_ports;
     for (auto a = lnast_->get_sibling_next(callee_n); !a.is_invalid();
          a = lnast_->get_sibling_next(a)) {
       std::string pname;
@@ -3601,6 +3605,11 @@ private:
                    callee_full, pname);
         return;
       }
+      if (!bound_ports.insert(pname).second) {
+        error_here("upass.tolg: call to '{}' binds input '{}' more than once",
+                   callee_full, pname);
+        return;
+      }
       auto spin = sub.create_sink_pin(pname);
       if (spin.is_invalid()) {
         error_here("upass.tolg: callee '{}' has no input named '{}'",
@@ -3608,13 +3617,16 @@ private:
         return;
       }
       spin.connect_driver(v.pin);
-      ++provided;
     }
-    if (provided != cio.inputs.size()) {
-      error_here(
-          "upass.tolg: call to '{}' provides {} of its {} declared inputs",
-          callee_full, provided, cio.inputs.size());
-      return;
+    // Every declared input must be driven — checked per-port so an omitted input
+    // is caught even when another was bound twice (a bare provided==declared
+    // count would miss that).
+    for (const auto &ie : cio.inputs) {
+      if (bound_ports.count(ie.name) == 0) {
+        error_here("upass.tolg: call to '{}' does not bind declared input '{}'",
+                   callee_full, ie.name);
+        return;
+      }
     }
 
     // Minted-clock wiring: the callee's implicit "clock" input exists on its
