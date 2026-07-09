@@ -4432,7 +4432,7 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
 }
 
 void uPass_runner::emit_specialized_call(const std::string& dst, const std::string& mangled,
-                                         const std::vector<Lnast_node>& actuals) {
+                                         const std::vector<std::pair<std::string, Lnast_node>>& actuals) {
   if (!scratch_forest_) {
     scratch_forest_ = hhds::Forest::create();
   }
@@ -4442,8 +4442,11 @@ void uPass_runner::emit_specialized_call(const std::string& dst, const std::stri
   stamp_scratch_srcid(s, root);
   s->add_child(root, Lnast_node::create_ref(dst));
   s->add_child(root, Lnast_node::create_ref(mangled));  // mangled callee → tolg makes the Sub
-  for (const auto& a : actuals) {
-    s->add_child(root, a);
+  // Named actuals: `store(port, value)` per binding, so tolg wires by name.
+  for (const auto& [port, val] : actuals) {
+    auto st = s->add_child(root, Lnast_ntype::create_store());
+    s->add_child(st, Lnast_node::create_ref(port));
+    s->add_child(st, val);
   }
   flush_deferred_emits();
   lm->push_source(s, "", 0);
@@ -5097,18 +5100,23 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
     new_lnasts.push_back(clone_template_specialized(callee, mangled, inject, vports, vname, out_inject, gbinds));
   }
 
-  // Actuals wired to the clone's ports, in io order: fixed params, then the
-  // var-arg leftovers (positional then named) → the synthesized vname__* ports.
-  std::vector<Lnast_node> actuals;
+  // Actuals wired to the clone's ports BY NAME, in io order: fixed params, then
+  // the var-arg leftovers (positional then named) → the synthesized vname__*
+  // ports. Emitting named `store(port, value)` (rather than positional) keeps
+  // the specialized call consistent with the source's own naming — tolg binds
+  // every instance actual by name, and its positional path is left only for a
+  // genuine user single-arg call.
+  std::vector<std::pair<std::string, Lnast_node>> actuals;
   actuals.reserve(nbind + vports.size());
   for (std::size_t i = 0; i < nbind; ++i) {
-    actuals.push_back(param_val[i]);
+    actuals.emplace_back(io.inputs[i].name, param_val[i]);
   }
+  std::size_t vk = 0;
   for (const auto& a : vararg_pos) {
-    actuals.push_back(a);
+    actuals.emplace_back(std::format("{}__{}", vname, vk++), a);
   }
   for (const auto& [key, a] : vararg_named) {
-    actuals.push_back(a);
+    actuals.emplace_back(std::format("{}__{}", vname, key), a);
   }
   emit_specialized_call(dst_name, mangled, actuals);
   return true;

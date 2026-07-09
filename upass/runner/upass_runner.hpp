@@ -550,7 +550,8 @@ protected:
   void copy_subtree_into(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
                          const Lnast_nid& dst_parent,
                          const absl::flat_hash_map<std::string, Generic_bind>* type_subst = nullptr);
-  void emit_specialized_call(const std::string& dst, const std::string& mangled, const std::vector<Lnast_node>& actuals);
+  void emit_specialized_call(const std::string& dst, const std::string& mangled,
+                             const std::vector<std::pair<std::string, Lnast_node>>& actuals);
   // Specialized-module names this runner already minted this run (avoid
   // re-cloning the same signature within one tree; cross-tree dedup is by name
   // in pass_upass's queue drain).
