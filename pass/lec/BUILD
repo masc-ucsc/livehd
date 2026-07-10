@@ -223,3 +223,15 @@ sh_test(
     data = ["//lhd"],
     tags = ["no-sandbox"],  # runs pass.semdiff + the in-process cvc5 solver
 )
+
+# Every formal-engine source, hashed at build time into the verdict-cache salt
+# (lhd//:formal_salt genrule): a change to the prover auto-invalidates cached
+# verdicts with no human in the loop (2f-fcore ruling 2026-07-10).
+filegroup(
+    name = "formal_srcs",
+    srcs = glob([
+        "*.cpp",
+        "*.hpp",
+    ]),
+    visibility = ["//visibility:public"],
+)

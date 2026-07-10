@@ -6,6 +6,11 @@ build --features=external_include_paths
 build --repo_env=BAZEL_CONLYOPTS="-std=gnu17"
 build --cxxopt="-std=c++23" --cxxopt="-fexceptions" --force_pic --build_tag_filters="-fixme"
 build --action_env=BAZEL_CXXOPTS="-std=c++23"
+# cvc5's bignum backend (@gmp, built from source by bazel) must ALWAYS compile
+# optimized: the prebuilt libcvc5.a is already -O2, but its GMP symbols resolve
+# to our hermetic @gmp build, and a -c dbg (-O0) GMP makes every wide-bit-vector
+# solve inside cvc5 crawl. -g0 too: nobody debugs GMP internals.
+build --per_file_copt=external/gmp[+~].*@-O2,-g0
 # build --action_env=PATH
 
 # Set minimum macOS version to support C++23 features (requires 13.3+)

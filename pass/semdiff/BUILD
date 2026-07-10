@@ -45,3 +45,15 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+# Hashed into the formal verdict-cache salt (see //pass/lec:formal_srcs): the
+# canonical digest is computed here, so digest-affecting changes must
+# invalidate cached verdicts too.
+filegroup(
+    name = "formal_srcs",
+    srcs = glob([
+        "*.cpp",
+        "*.hpp",
+    ]),
+    visibility = ["//visibility:public"],
+)

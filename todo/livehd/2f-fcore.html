@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2f-fcore — shared formal core: proof-DAG runner, portfolio, unified cache, assumes &amp; hints</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2f-fcore</strong> Shared formal core — proof-DAG runner, portfolio, unified cache, assumes &amp; hints</h1>
+
+<p>Formal has <strong>two main components</strong> — LEC
+  (<a class="xref" href="2f-lec.html">2f-lec</a>) and Verify
+  (<a class="xref" href="2f-verify.html">2f-verify</a>) — and they must share as much
+  code, functionality, and options as possible. They already share the encoder/unroller
+  (<code>pass/lec/encode.cpp</code>, <code>query.cpp</code>), ONE <code>formal.*</code>
+  knob namespace (<code>lec.*</code> accepted as aliases), and the
+  witness→<code>lecfail.prp</code>/<code>formalfail.prp</code> (the
+  <code>formal.prpfail</code> knob)→<code>lhd sim</code>→single-VCD reproduction flow.
+  This page owns the <strong>next shared layer</strong>: parallel proof orchestration,
+  the verdict cache, generalized case-split/assume machinery, and hint plumbing.
+  <a class="xref" href="2f-formal.html">2f-formal</a> (the compile tier) is the third
+  consumer, as the engine's don't-try-hard profile.</p>
+
+<h2>Goals (the yardstick for every item below)</h2>
+<ul class="subtasks">
+<li><strong>Fast formal</strong> — lec and verify both.</li>
+<li><strong>Incremental reuse</strong> — small edits re-prove only what changed; an
+  untouched submodule is <em>instantaneous</em> (<code>--workdir</code> keeps the
+  cache).</li>
+<li><strong>Parallel exploration</strong> — on the order of 4–8 concurrent proof tasks,
+  not hundreds; methods/assumes/hints race and collapse to consensus early.</li>
+<li><strong>Never a wrong outcome</strong> — PASS means definitively
+  equivalent/proven; FAIL means definitively different/violated; anything else is
+  timeout/inconclusive (not great, but OK).</li>
+</ul>
+
+<h2>1 — Proof-task DAG runner (taskflow + fork workers)</h2>
+<ul class="subtasks">
+<li><strong>Vendor <a href="https://github.com/taskflow/taskflow">taskflow</a></strong>
+  (header-only, MIT) via <code>MODULE.bazel</code>. It owns the dependency DAG and a
+  worker pool (default 4–8, <code>formal.jobs</code>).</li>
+<li><strong>ONE global pool for every solver fork (ruling 2026-07-10):</strong>
+  def-tasks, portfolio racers, and case-split cubes are all tasks in the same
+  <code>formal.jobs</code>-slot pool — total concurrent cvc5 processes is bounded at
+  <code>formal.jobs</code>, period. <code>formal.partitions</code> becomes "how many
+  cubes to split into" (task count), no longer "how many extra processes".</li>
+<li><strong>Each solver task body FORKS a cvc5 worker process</strong> — cvc5
+  cross-instance thread-safety is unverified (<code>query.cpp:125</code>), and a child
+  process keeps the free timeout/hard-kill we rely on for early cancellation. The
+  taskflow thread just <code>fork</code>+<code>waitpid</code>s, reusing the existing
+  fork/pipe/serialize machinery. Sequential in-process fallback on fork failure
+  (existing pattern).</li>
+<li><strong>DAG sources:</strong> the lec bottom-up def hierarchy (all ready leaves in
+  flight; a parent unlocks when its children settle; a proven child becomes a collapse
+  point) and verify's obligation set (independent except frontier-assume ordering and
+  scheduler rounds).</li>
+<li><strong>Early consensus:</strong> the first <em>definitive</em> (Proven/Refuted)
+  verdict for a subtask kills that subtask's still-running sibling branches (portfolio
+  methods; a SAT cube in a case-split). Consensus is per-method-semantics: a
+  case-split is Proven only when ALL cubes are UNSAT, Refuted on any SAT cube.</li>
+</ul>
+
+<h2>2 — Portfolio: parallel methods per subtask, first definitive wins</h2>
+<ul class="subtasks">
+<li>A <strong>subtask</strong> is one def-pair (lec) or one obligation (verify). The
+  method ladder — cache hit → semdiff structural match (no solver) → inductive miter →
+  BMC → case-split — races where racing pays; a definitive pass/fail from any method
+  stops the rest.</li>
+<li>Today this exists <strong>lec-only</strong> (<code>run_auto_portfolio</code>:
+  ind+bmc fork race, combinational skip). Lift it into fcore so verify obligations get
+  the same treatment; the trust asymmetries (e.g. ind-Refuted trusted only for
+  combinational designs; REFUTE-under-collapse needs flat confirmation) stay with the
+  consumer pages that own them.</li>
+</ul>
+
+<h2>3 — Unified canonical digest + verdict cache (<code>--workdir</code>)</h2>
+<p>Subsumes old lec-M3 (canonical-hash def-diff) and old 2f-verify V5 (per-obligation
+  verdict cache) — <strong>one digest, one store, two key kinds</strong> (ruling
+  2026-07-10).</p>
+<ul class="subtasks">
+<li><strong>Deliverable A — canonical structural def digest:</strong> op + params +
+  sorted connectivity + interface, stable across two independent builds of an unchanged
+  def. This is also the module-identity digest
+  <a class="xref" href="2i-import.html">2i-import</a> needs — one implementation, two
+  consumers.</li>
+<li><strong>Deliverable B — verdict cache store</strong> under <code>--workdir</code>.
+  Key kinds: <em>(a)</em> lec def-pair: <code>digest(ref)+digest(impl)</code> + the
+  engine-identity salt — a <strong>formal-source content hash</strong> baked at build
+  time (hash of <code>pass/lec/</code>, <code>pass/semdiff/</code>, the fcore lib,
+  cvc5 version; ruling 2026-07-10: prover-code changes auto-invalidate with no human
+  in the loop, unrelated <code>lhd</code> rebuilds keep the cache warm) + options,
+  phase, bound —
+  a hit needs <strong>no encode</strong>, so an unchanged submodule is instantaneous;
+  <em>(b)</em> verify obligation: hash of the <strong>serialized SMT encoding</strong>
+  of the obligation's cone + obligation term + solver identity + engine params —
+  hashing downstream of the encoder means an encoder semantics fix auto-invalidates
+  (soundness rule F, moved here from 2f-verify).</li>
+<li><strong>Rules (non-negotiable):</strong> cache only definitive verdicts; SAT only
+  together with its witness, revalidated by evaluation on hit; <strong>never cache
+  Unknown</strong>; solver identity genuinely belongs in the key (this repo already
+  lived a solver-config soundness bug — the lazy-bitblaster spurious SAT,
+  <code>query.cpp:1098-1120</code>).</li>
+<li><strong>Payoff:</strong> edit one module ⇒ only cone/def-touched proofs re-run
+  (the external <code>verification_cache.json</code> harness precedent, made native +
+  sound + fine-grained).</li>
+<li><strong>Third record kind — strategy hints (user note 2026-07-10):</strong> the
+  cache also remembers which <code>auto</code> choices WON per def/obligation —
+  winning engine, case-split selector, bound, solve time — keyed by canonical
+  <em>entity name</em>, not digest, so the hint <strong>survives an edit</strong>
+  that misses the verdict cache. On the next run the portfolio tries the known-good
+  strategy first. Purely a heuristic ordering channel: hints can speed a proof but
+  can never change a verdict, so they need none of the verdict-cache soundness
+  rules.</li>
+</ul>
+
+<h2>4 — Case-split / assume-spill generalization</h2>
+<ul class="subtasks">
+<li><code>lec.partitions=N</code> + <code>lec.split=auto</code> landed 2026-07-10
+  (auto-pick a control selector, fork disjoint cube workers, fold verdicts; ALU
+  18.5s→0.7s). Generalize to <code>formal.partitions</code>/<code>formal.split</code>
+  in fcore so <strong>verify obligations</strong> can case-split on control selectors
+  in their cones too — the "introduce assumes on an input and spill parallel
+  sub-proofs" principle, applied to both components.</li>
+<li>Soundness folding is per-method: all cubes UNSAT ⇒ Proven; any cube SAT ⇒ Refuted
+  with that witness; any cube Unknown ⇒ inconclusive.</li>
+<li>Gotchas already learned: input pins have empty <code>pin_name_of</code> — match by
+  identity; use the forward cone, not backward BFS; static cone SIZE ≠ hardness.</li>
+</ul>
+
+<h2>5 — Hints: proven facts become reusable assumes</h2>
+<ul class="subtasks">
+<li><strong>Producers:</strong> verify's mining loop
+  (<a class="xref" href="2f-verify.html">2f-verify</a>), lec's winning case-split
+  selectors and proven-def certificates, proven sidecar invariants.</li>
+<li><strong>Consumers:</strong> <em>(a)</em> the cache — automatic reuse next run;
+  <em>(b)</em> ready-to-paste sidecar <code>formal</code> blocks with provenance
+  comments, so the user can add them to the design Pyrope and make future runs faster
+  on any machine (no workdir needed).</li>
+<li><strong>LEC hints specifically:</strong> persist the winning engine
+  and split selector ("split on <code>state</code>") as §3 strategy hints (keyed by
+  entity name, so they survive design edits); assert proven impl-side
+  invariants in the miter (entailed facts — pure speedup, can never change the
+  verdict).</li>
+</ul>
+
+<h2>6 — Scheduler: global budget, escalating rounds, diagnose-last (moved from 2f-verify V6)</h2>
+<ul class="subtasks">
+<li><strong>Global <code>formal.timeout</code></strong> owns proving time (fixes the
+  (N+1)×<code>tlimit-per</code> hazard). Ruling 2026-07-10: <code>formal.timeout</code>
+  is the TOTAL wall-clock budget for the whole command — a deliberate semantics
+  change from today's per-proof-call meaning; the scheduler derives per-task slices
+  and stragglers inherit what's left (one knob, default 120). Rounds: <strong>R0 free</strong> (comptime,
+  cache hits, sidecar rechecks) → <strong>R1 small slices</strong> (~1-2s per pending
+  obligation — most properties are easy) → <strong>R2+ escalation</strong>
+  (4s → 16s → 64s…), survivors ranked by <code>getDifficulty</code> mass + cone size +
+  last-round progress; stragglers sink and inherit remaining budget. Rounds map onto
+  staged taskflow subflows.</li>
+<li><strong><code>formal.minetimeout</code></strong> — an independent budget
+  (<code>0</code> = off) for the diagnosis/mining phase:
+  <code>getTimeoutCoreAssuming</code> names the toxic kernel so a timed-out run's
+  <em>output</em> is the assumes/hints that make the next run succeed.</li>
+<li><strong>Determinism:</strong> the compile profile budgets by cvc5
+  <code>rlimit</code> (machine-independent); <code>formal verify</code> defaults to
+  wall-clock with <code>formal.budget_mode=rlimit</code> for CI.</li>
+</ul>
+
+<h2>7 — Assume forms: the contract (ruling 2026-07-10)</h2>
+<p>Three forms; grammar lands in prpparse, semantics enforced here. Both
+  <code>_nocheck</code> forms get a diag warning at <strong>every encounter</strong>
+  (with the standard <code>file:line:cmd:</code> origin prefix).</p>
+<table>
+<thead><tr><th>form</th><th>formal (verify/lec)</th><th>synthesis (compile tier)</th><th>diag</th></tr></thead>
+<tbody>
+<tr><td><code>assume</code></td><td>over <em>internal</em> signals: a proof
+  obligation; once proven, used as a constraint per the soundness discipline
+  (2f-verify rules A–E). Over <em>primary inputs only</em>: an environment
+  constraint by nature (inputs are free — there is nothing to prove it against);
+  honored directly, and every verdict discloses it ("under N input assume(s)" —
+  conditional equivalence/proof)</td><td>used only when
+  proven (input-only assumes: never — synthesis can't restrict its environment)</td><td>—</td></tr>
+<tr><td><code>assume_nocheck_formal</code></td><td>free constraint, no proof; every
+  verdict discloses "under N unchecked assume(s)"</td><td><strong>ignored</strong></td>
+  <td>warning per encounter</td></tr>
+<tr><td><code>assume_nocheck_synth</code></td><td><strong>ignored entirely</strong></td>
+  <td>used unchecked (user's explicit risk)</td><td>warning per encounter</td></tr>
+</tbody>
+</table>
+<ul class="subtasks">
+<li><strong>Composition note:</strong> a LEC across a synth boundary that used
+  <code>assume_nocheck_synth</code> will (correctly) refute in the excluded input
+  space — the netlists really differ there. A user who wants the conditional LEC
+  states the condition explicitly in a formal block — as a plain
+  <code>assume</code> (checked where checkable; an input-support assume is an
+  environment constraint by nature) or, deliberately, as
+  <code>assume_nocheck_formal</code> (never checked, louder disclosure). The two are
+  <em>not</em> interchangeable; the point is that formal never silently imports
+  synth pragmas — the user restates the condition consciously.</li>
+<li><code>assume_nocheck_synth</code> facts never become proof hypotheses anywhere;
+  their only consumer is the compile tier
+  (<a class="xref" href="2f-formal.html">2f-formal</a>'s EXDC item).</li>
+</ul>
+
+<h2>8 — Shared witness layer: remaining gaps (absorbs 2d-cex_debug)</h2>
+<p>The repro flow itself is landed and shared (<code>lecfail.prp</code> /
+  <code>formalfail.prp</code> + single VCD). Two gaps, both benefiting lec and verify
+  witnesses alike:</p>
+<ul class="subtasks">
+<li><strong>Source-map the first diverging cut to <code>file:line</code>.</strong>
+  During the existing flop-collection loop build a
+  <code>key → node → attrs::srcid → span</code> side map; render
+  <code>s (cpu.prp:554)</code> in the root clause and stamp the same location as a
+  comment in the generated testbench. Tolerate the multi-stage
+  <code>\x02p&lt;k&gt;</code> key suffix; for a Verilog-origin side map back through
+  the cgen ECMA-426 sourcemap (<code>note_src()</code>/<code>write_srcmap()</code>).
+  <code>flop_state_key()</code>'s srcid fallback is dead code on every live path —
+  budget this as real plumbing.</li>
+<li><strong>Machine-readable witness artifact</strong> —
+  <code>&lt;workdir&gt;/lecfail.json</code> / <code>formalfail.json</code> (mirroring
+  <code>lhd sim --result-json</code>): the structured <code>Witness_trace</code> +
+  the root-cut record (key, cycle, ref/impl values, source span) + optionally the
+  per-cycle <code>wit_state</code> values. Same <code>getValue</code> reads the
+  display path already does.</li>
+<li><strong>Traps carried from 2d-cex:</strong> never add probe outputs (perturbs the
+  SAT instance into UNKNOWN); localization-only (pushing state-cut
+  <code>DISTINCT</code> terms into <code>bad</code> can flip verdicts — flag-gate);
+  BMC-only (the inductive CEX may be unreachable, so it carries no trace);
+  sign-magnitude widths — compare at declared width or phantom diffs appear on the
+  spare sign bit. (Memory-cut readback was <strong>dropped</strong> by ruling
+  2026-07-10 — it rides the lazy-solver <code>getValue</code> hazard; revisit only if
+  it hurts in practice.)</li>
+</ul>
+
+<h2>Milestones (each test-backed)</h2>
+<ul class="subtasks">
+<li><strong>F1 — taskflow vendored + DAG runner;</strong> lec hier defs prove with
+  leaves in parallel. Test: a hier fixture proves with identical verdicts to the
+  sequential driver and lower wall-clock; verdicts deterministic across runs.</li>
+<li><strong>F2 — digest + verdict cache.</strong> Tests: identical re-run all-hit
+  (near-instant); a single-def edit re-proves only that def + its ancestors; an
+  option/solver change invalidates; Unknown never cached.</li>
+<li><strong>F3 — portfolio generalized + early-cancel.</strong> Test: planted
+  easy/hard method pair — winner cancels loser, verdict unchanged.</li>
+<li><strong>F4 — case-split shared with verify.</strong> Test: a verify obligation
+  with a control selector completes faster under split, same verdict.</li>
+<li><strong>F5 — scheduler.</strong> Tests: an N-obligation run respects the global
+  budget; straggler diagnosis names the planted toxic kernel.</li>
+<li><strong>F6 — assume forms.</strong> Tests: <code>assume_nocheck_formal</code>
+  warns + verdict discloses; <code>assume_nocheck_synth</code> invisible to
+  verify/lec, consumed by the compile tier; plain <code>assume</code> proven before
+  use.</li>
+<li><strong>F7 — witness file:line + JSON</strong> (extend
+  <code>pass/lec/tests/cex_debug_test.sh</code> and
+  <code>lec_witness_prpfail_test.sh</code>): the root clause carries a
+  <code>file:line</code> into the impl source, and <code>lecfail.json</code> exists,
+  parses, and its input sequence <em>matches the one driven by</em>
+  <code>lecfail.prp</code> (the cross-check that catches serializer/testbench
+  skew).</li>
+</ul>
+
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>

@@ -48,6 +48,8 @@
 #include "query.hpp"  // pass/lec L1 (lec::prove_equal) for the cross-check path
 #include "rapidjson/document.h"
 #include "semdiff.hpp"  // pass/semdiff (structural_match) for the `lhd pass semdiff` command
+#include "formal_cache.hpp"  // 2f-fcore verdict cache: --workdir formal_cache.json (verdicts + strategy hints)
+#include "formal_salt.hpp"   // generated (//lhd:formal_salt): formal-source engine-identity salt
 #include "upass_tolg.hpp"
 #include "woothash.hpp"
 
@@ -3985,9 +3987,52 @@ static void emit_lec_block_progress(std::string_view block, const livehd::lec::Q
   b.emit();
 }
 
+// Cache key for one def-pair proof: the two hierarchical (Merkle) digests +
+// every verdict-relevant option. Deliberately EXCLUDED: timeout / partitions /
+// split / semdiff (effort and strategy — they change how fast, never what is
+// claimed) and witness (reporting). The engine-identity salt is applied
+// cache-wide by Verdict_cache, not per key.
+static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& dref,
+                                      const livehd::semdiff::Canonical_digest& dimpl,
+                                      const livehd::lec::Lec_options&          o) {
+  auto sorted_join = [](std::vector<std::string> v) {
+    std::sort(v.begin(), v.end());
+    std::string s;
+    for (auto& e : v) {
+      s += e;
+      s += ',';
+    }
+    return s;
+  };
+  std::vector<std::string> match_pairs;
+  match_pairs.reserve(o.match.size());
+  for (const auto& [mk, mv] : o.match) {
+    match_pairs.push_back(mk + "=" + mv);
+  }
+  return std::format("{:016x}{:016x}:{:016x}{:016x}|e={};gx={};b={};dc={};st={};ph={};rc={};r={};m=[{}];c=[{}];sv={}",
+                     dref.h0,
+                     dref.h1,
+                     dimpl.h0,
+                     dimpl.h1,
+                     o.engine,
+                     o.gold_x,
+                     o.bound,
+                     o.decompose,
+                     o.strict ? 1 : 0,
+                     o.phase,
+                     o.reset_cycles,
+                     o.reset,
+                     sorted_join(match_pairs),
+                     sorted_join(o.collapse),
+                     o.solver);
+}
+
 // Bottom-up hierarchical LEC driver (lec.hierarchical=true). Build the module-def
 // dependency DAG over the defs present in both libraries (paired by ENTITY — see
-// below), topo-order it leaves-first, and LEC each def under the `auto` portfolio. Record the proven
+// below), scope it to the picked TOP pair and its transitive descendants (a
+// whole-design library may hold many defs unrelated to --ref-top; those are NOT
+// proven as extra roots — ruling 2026-07-10), topo-order the subtree
+// leaves-first, and LEC each def under the `auto` portfolio. Record the proven
 // set; for each parent, force-black-box its PROVEN child instances (--collapse) so
 // the parent proof stops re-solving them, while a child NOT provable in isolation
 // stays FLATTENED into the parent (descended) — the M5 CEGAR / un-black-box
@@ -3998,7 +4043,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                                                   const std::string&        top_name,
                                                   hhds::Graph* ref_top_g, hhds::Graph* impl_top_g,
                                                   const livehd::lec::Lec_options& base,
-                                                  const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+                                                  const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
+                                                  livehd::formal::Verdict_cache* vcache) {
   using livehd::lec::Verdict;
   namespace gu = livehd::graph_util;
 
@@ -4060,12 +4106,10 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   // The LEC-able defs are those present on BOTH sides; children[def] = the child
   // def keys it instantiates (taken from the ref-side Subs, canonicalized).
   absl::flat_hash_map<std::string, std::vector<std::string>> children;
-  std::vector<std::string>             defs;
   for (auto& [name, g] : ref_by_name) {
     if (impl_by_name.find(name) == impl_by_name.end()) {
       continue;
     }
-    defs.push_back(name);
     absl::flat_hash_set<std::string> seen;
     for (auto node : g->forward_class()) {
       if (gu::type_op_of(node) != Ntype_op::Sub) {
@@ -4080,7 +4124,11 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     }
   }
 
-  // Topo-order leaves-first (DFS post-order; the in-progress mark guards cycles).
+  // Topo-order leaves-first (DFS post-order; the in-progress mark guards cycles),
+  // rooted at the TOP pair only: `order` is exactly the top and its transitive
+  // shared descendants. Defs that merely coexist in the two libraries (a
+  // whole-design --emit-dir holds every module, not just the --ref-top subtree)
+  // are outside the requested proof and must not become extra roots.
   std::vector<std::string> order;
   absl::flat_hash_map<std::string, int>          mark;  // 0 unvisited, 1 in-progress, 2 done
   std::function<void(const std::string&)> dfs = [&](const std::string& n) {
@@ -4097,15 +4145,46 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     m = 2;
     order.push_back(n);
   };
-  for (const auto& name : defs) {
-    dfs(name);
+  dfs(top_key);
+
+  // Per-side digest resolvers for the hierarchical (Merkle) canonical digest: a
+  // Sub's body resolves within its OWN side first (gids are name-hash stable,
+  // and the two sides may hold different bodies under one name), then the
+  // shared --lib models.
+  absl::flat_hash_map<hhds::Gid, hhds::Graph*> ref_gid2g, impl_gid2g;
+  if (vcache != nullptr) {
+    for (auto& g : ref_var.graphs) {
+      if (g) {
+        ref_gid2g[g->get_gid()] = g.get();
+      }
+    }
+    for (auto& g : impl_var.graphs) {
+      if (g) {
+        impl_gid2g[g->get_gid()] = g.get();
+      }
+    }
+    if (sub_lib != nullptr) {
+      for (const auto& [gid, gp] : *sub_lib) {
+        ref_gid2g.try_emplace(gid, gp);
+        impl_gid2g.try_emplace(gid, gp);
+      }
+    }
   }
+  livehd::semdiff::Digest_resolver ref_dres = [&ref_gid2g](hhds::Gid gid) -> hhds::Graph* {
+    auto it = ref_gid2g.find(gid);
+    return it == ref_gid2g.end() ? nullptr : it->second;
+  };
+  livehd::semdiff::Digest_resolver impl_dres = [&impl_gid2g](hhds::Gid gid) -> hhds::Graph* {
+    auto it = impl_gid2g.find(gid);
+    return it == impl_gid2g.end() ? nullptr : it->second;
+  };
 
   // LEC each def leaves-first; collapse its already-proven children.
   absl::flat_hash_set<std::string>                proven;
   livehd::lec::Query_result top_result;
   bool                      have_top      = false;
   int                       semdiff_count = 0;  // defs dropped structurally (no solver)
+  int                       cache_count   = 0;  // defs settled by the verdict cache (no analysis at all)
   std::vector<std::string>  proven_list, collapsed_note;
   for (const auto& name : order) {
     livehd::lec::Lec_options o = base;
@@ -4113,59 +4192,98 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // the ind+bmc portfolio). Honor an explicit engine so `--set lec.engine=bmc`
     // (e.g. a reset-phase proof) is not silently overridden by the hierarchical driver.
 
-    // M3 structural def-diff reduction: a def whose ref/impl are structurally
-    // IDENTICAL (no unmatched node on either side) and whose children are ALL
-    // proven is equivalent with NO solver call. A parent's own-structure match
-    // does NOT cover a child's internals (the child Sub matches by name regardless),
-    // so require the children proven first — leaves-first guarantees they are settled.
-    if (o.semdiff != "none") {
-      bool kids_proven = true;
-      if (auto it = children.find(name); it != children.end()) {
-        for (const auto& c : it->second) {
-          if (!proven.count(c)) {
-            kids_proven = false;
-            break;
-          }
-        }
-      }
-      if (kids_proven) {
-        auto                            t0 = std::chrono::steady_clock::now();
-        livehd::semdiff::Semdiff_options so;
-        so.alg            = o.semdiff;
-        so.matching_names = true;  // anchor flops/mems by hier name (lec's correspondence basis)
-        auto m            = livehd::semdiff::structural_match(ref_by_name[name], impl_by_name[name], so);
-        const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
-        if (m.a_unmatched == 0 && m.b_unmatched == 0) {
-          livehd::lec::Query_result sr;
-          sr.verdict    = Verdict::Proven;
-          sr.engine     = "semdiff";
-          sr.elapsed_ms = ms;
-          sr.detail     = std::format("structurally identical ({}: {} matched node(s), no solver call)", so.alg, m.a_matched);
-          emit_lec_block_progress(name, sr, o, ms);
-          proven.insert(name);
-          proven_list.push_back(name);
-          ++semdiff_count;
-          std::print("lec[hier]: '{}' MATCHED (semdiff {}, no solver)\n", name, so.alg);
-          if ((name == top_key)) {
-            top_result = sr;
-            have_top   = true;
-          }
-          continue;  // skip the solver for this def
-        }
-      }
-    }
-
+    // Effective collapse set FIRST — it is part of the cache key: a proven
+    // child black-boxes; a non-proven child is left OUT of the collapse set ->
+    // flattened (descended).
     o.collapse.clear();
     std::vector<std::string> coll;
+    bool                     kids_proven = true;
     if (auto it = children.find(name); it != children.end()) {
       for (const auto& c : it->second) {
         if (proven.count(c)) {
           o.collapse.push_back(c);  // proven child -> sound black-box collapse
           coll.push_back(c);
+        } else {
+          kids_proven = false;
         }
-        // a non-proven child is left OUT of the collapse set -> flattened (descended)
       }
     }
+
+    // 2f-fcore verdict cache: digest-equal def-pair (hierarchical Merkle
+    // digest) + identical verdict-relevant options => the stored PROVEN
+    // verdict transfers. A hit needs no encode and no solver — an unchanged
+    // submodule is instantaneous. Undigestable graphs (anonymous state cell)
+    // simply skip the cache.
+    std::string ckey;
+    if (vcache != nullptr) {
+      auto dr = livehd::semdiff::canonical_digest(ref_by_name[name], ref_dres);
+      auto di = livehd::semdiff::canonical_digest(impl_by_name[name], impl_dres);
+      if (dr.valid && di.valid) {
+        ckey = lec_pair_cache_key(dr, di, o);
+        if (auto hit = vcache->lookup(ckey); hit.has_value()) {
+          livehd::lec::Query_result cr;
+          cr.verdict    = Verdict::Proven;
+          cr.engine     = "cache";
+          cr.elapsed_ms = 0;
+          cr.detail = std::format("verdict cache hit (was {} in {}ms: {})", hit->engine, hit->elapsed_ms, hit->detail);
+          emit_lec_block_progress(name, cr, o, 0);
+          proven.insert(name);
+          proven_list.push_back(name);
+          ++cache_count;
+          std::print("lec[hier]: '{}' PROVEN (cache)\n", name);
+          if ((name == top_key)) {
+            top_result = cr;
+            have_top   = true;
+          }
+          continue;  // no analysis at all for this def
+        }
+      }
+    }
+
+    // M3 structural def-diff reduction: a def whose ref/impl are structurally
+    // IDENTICAL (no unmatched node on either side) and whose children are ALL
+    // proven is equivalent with NO solver call. A parent's own-structure match
+    // does NOT cover a child's internals (the child Sub matches by name regardless),
+    // so require the children proven first — leaves-first guarantees they are settled.
+    if (o.semdiff != "none" && kids_proven) {
+      auto                             t0 = std::chrono::steady_clock::now();
+      livehd::semdiff::Semdiff_options so;
+      so.alg            = o.semdiff;
+      so.matching_names = true;  // anchor flops/mems by hier name (lec's correspondence basis)
+      auto m            = livehd::semdiff::structural_match(ref_by_name[name], impl_by_name[name], so);
+      const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+      if (m.a_unmatched == 0 && m.b_unmatched == 0) {
+        livehd::lec::Query_result sr;
+        sr.verdict    = Verdict::Proven;
+        sr.engine     = "semdiff";
+        sr.elapsed_ms = ms;
+        sr.detail     = std::format("structurally identical ({}: {} matched node(s), no solver call)", so.alg, m.a_matched);
+        emit_lec_block_progress(name, sr, o, ms);
+        proven.insert(name);
+        proven_list.push_back(name);
+        ++semdiff_count;
+        std::print("lec[hier]: '{}' MATCHED (semdiff {}, no solver)\n", name, so.alg);
+        if (vcache != nullptr && !ckey.empty()) {
+          vcache->insert(ckey, {sr.engine, sr.detail, ms});  // a structural match is a definitive Proven
+        }
+        if ((name == top_key)) {
+          top_result = sr;
+          have_top   = true;
+        }
+        continue;  // skip the solver for this def
+      }
+    }
+
+    // Strategy hint (cache record kind 3): replay the case-split selector that
+    // WON for this entity last run — heuristic-only ordering (pick_split falls
+    // back to auto scoring when the hinted input no longer qualifies), so it
+    // can speed the proof but never change a verdict.
+    if (vcache != nullptr && o.split == "auto") {
+      if (auto h = vcache->hint(name); h.has_value() && !h->split.empty()) {
+        o.split = h->split;
+      }
+    }
+
     auto t0 = std::chrono::steady_clock::now();
     auto r  = livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], o, sub_lib);
     if (r.verdict == Verdict::Refuted && !coll.empty()) {

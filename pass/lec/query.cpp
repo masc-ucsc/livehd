@@ -173,6 +173,7 @@ std::string serialize_result(const Query_result& r) {
       put_u32(b, static_cast<uint32_t>(in.width));
     }
   }
+  put_str(b, r.split_used);  // strategy-hint selector (same binary both ends)
   return b;
 }
 
@@ -286,6 +287,7 @@ bool deserialize_result(std::string_view b, Query_result& r) {
     }
     r.trace.cycles.push_back(std::move(cyc));
   }
+  (void)get_str(b, r.split_used);  // best-effort tail field (mirror serialize)
   return true;
 }
 
@@ -649,6 +651,7 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
     }
     Query_result r = safe_prove_equal(ref, impl, o, sub_lib);
     r.engine       = "casesplit";
+    r.split_used   = pick.name;
     r.elapsed_ms   = now_ms(t0);
     r.detail       = "auto: case-split " + pick.name + "[" + std::to_string(pick.width) + "b] " + std::to_string(nvals)
              + " cubes (sequential fallback); " + r.detail;
@@ -782,6 +785,7 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
   if (refuter >= 0) {
     Query_result out = got[refuter];
     out.engine       = "casesplit";
+    out.split_used   = pick.name;
     out.elapsed_ms   = now_ms(t0);
     out.detail       = "auto: case-split " + tag + " REFUTED; " + out.detail;
     return out;
@@ -796,6 +800,7 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
   }
   Query_result out;
   out.engine     = "casesplit";
+  out.split_used = pick.name;
   out.elapsed_ms = now_ms(t0);
   if (unknown == 0) {
     out.verdict = Verdict::Proven;

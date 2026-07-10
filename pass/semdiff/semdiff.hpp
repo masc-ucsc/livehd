@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 
 #include "hhds/graph.hpp"
@@ -40,5 +41,42 @@ struct Match_result {
 // for corresponding nodes, 0 for nodes with no counterpart. Mirrors
 // lec::prove_equal's signature so lec can pre-match before building its miter.
 Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts = {});
+
+// A process-independent 128-bit structural digest of a module def: op kinds,
+// pin widths, connectivity (commutative-normalized within each sink port,
+// operand hashes sorted — the pass/submatch canonical form), constant values,
+// IO names/widths/signs/port-bindings, and state-cell hierarchical names — the
+// same name-based correspondence basis lec proofs rest on, so a digest-equal
+// pair soundly transfers a verdict.
+//
+// HIERARCHICAL (Merkle): a Sub whose body `resolve` can produce folds the
+// CHILD'S digest, recursively (bottom-up over the instance DAG) — an edited
+// child that the encoder flattens into a parent proof must change the parent's
+// digest, or a cached verdict would go stale. A Sub with no body (a true
+// blackbox, abstracted as UF in proofs) folds only its def-name identity.
+//
+// This one-sided canonical form exists for comparing against a STORED digest
+// (the 2f-fcore verdict cache, 2i-import module dedup). When both graphs are in
+// hand, structural_match's joint traversal compares them directly — no
+// canonicalization pass needed.
+//
+// valid=false — not digestable, callers must skip the cache: the def (or a
+// resolved child) holds an ANONYMOUS state cell (its only key would be the
+// per-run debug nid, and any constant fallback would fold two genuinely
+// different graphs — swap the fan-outs of two anonymous flops — to one digest),
+// or the instance graph is cyclic.
+struct Canonical_digest {
+  uint64_t h0    = 0;
+  uint64_t h1    = 0;  // two independent chains: a 64-bit collision is a wrong verdict
+  bool     valid = false;
+  bool     operator==(const Canonical_digest&) const = default;
+};
+
+// Resolve a Sub's def gid to its body graph on THIS side's library (nullptr /
+// empty function = blackbox). Digests are memoized per call across the
+// instance DAG, so shared children are computed once.
+using Digest_resolver = std::function<hhds::Graph*(hhds::Gid)>;
+
+Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve = {});
 
 }  // namespace livehd::semdiff

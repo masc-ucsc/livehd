@@ -100,6 +100,151 @@ TEST(Semdiff, ExtraGateUnmatched) {
   EXPECT_EQ(2U, r.b_matched);
 }
 
+// canonical_digest: two independently-built identical designs (separate
+// libraries — independent gids, allocation order) produce the SAME digest.
+TEST(Semdiff, DigestStableAcrossLibraries) {
+  auto a = build_and_or("lgdb_semdiff_dg_a", "m");
+  auto b = build_and_or("lgdb_semdiff_dg_b", "m");
+
+  auto da = livehd::semdiff::canonical_digest(a.get());
+  auto db = livehd::semdiff::canonical_digest(b.get());
+
+  EXPECT_TRUE(da.valid);
+  EXPECT_TRUE(db.valid);
+  EXPECT_EQ(da, db);
+}
+
+// canonical_digest: construction ORDER must not leak in — build the same
+// netlist creating the Or node before the And node.
+TEST(Semdiff, DigestConstructionOrderIndependent) {
+  auto a = build_and_or("lgdb_semdiff_do_a", "m");
+
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_semdiff_do_b");
+  auto  gio = lib.create_io("m");
+  gio->add_input("a", 1);
+  gio->add_input("b", 1);
+  gio->add_input("c", 1);
+  gio->add_output("y", 1);
+  auto b = gio->create_graph();
+
+  auto an_or = create_typed_node(*b, Ntype_op::Or);  // Or allocated FIRST
+  auto a_and = create_typed_node(*b, Ntype_op::And);
+  b->get_input_pin("a").connect_sink(a_and.create_sink_pin(0));
+  b->get_input_pin("b").connect_sink(a_and.create_sink_pin(0));
+  a_and.create_driver_pin(0).connect_sink(an_or.create_sink_pin(0));
+  b->get_input_pin("c").connect_sink(an_or.create_sink_pin(0));
+  an_or.create_driver_pin(0).connect_sink(b->get_output_pin("y"));
+
+  auto da = livehd::semdiff::canonical_digest(a.get());
+  auto db = livehd::semdiff::canonical_digest(b.get());
+  EXPECT_TRUE(da.valid && db.valid);
+  EXPECT_EQ(da, db);
+}
+
+// canonical_digest: a width or IO-name change must change the digest (the
+// unsigned bits = magnitude+1 trap; lec pairs IO by name). NOTE add_input's
+// second arg is the PORT ID, not bits — width is the pin `bits` attribute.
+TEST(Semdiff, DigestSensitiveToWidthAndIoName) {
+  auto base = build_and_or("lgdb_semdiff_dw_base", "m");
+
+  auto wg = build_and_or("lgdb_semdiff_dw_w", "m");
+  livehd::graph_util::set_bits(wg->get_input_pin("a"), 2);  // widened input
+
+  auto& ln  = livehd::Hhds_graph_library::instance("lgdb_semdiff_dw_n");
+  auto  gn  = ln.create_io("m");
+  gn->add_input("a", 1);
+  gn->add_input("b", 2);
+  gn->add_input("c", 3);
+  gn->add_output("z", 4);  // renamed output (y -> z)
+  auto ng    = gn->create_graph();
+  auto n_and = create_typed_node(*ng, Ntype_op::And);
+  ng->get_input_pin("a").connect_sink(n_and.create_sink_pin(0));
+  ng->get_input_pin("b").connect_sink(n_and.create_sink_pin(0));
+  auto n_or = create_typed_node(*ng, Ntype_op::Or);
+  n_and.create_driver_pin(0).connect_sink(n_or.create_sink_pin(0));
+  ng->get_input_pin("c").connect_sink(n_or.create_sink_pin(0));
+  n_or.create_driver_pin(0).connect_sink(ng->get_output_pin("z"));
+
+  auto d0 = livehd::semdiff::canonical_digest(base.get());
+  auto dw = livehd::semdiff::canonical_digest(wg.get());
+  auto dn = livehd::semdiff::canonical_digest(ng.get());
+  EXPECT_TRUE(d0.valid && dw.valid && dn.valid);
+  EXPECT_NE(d0, dw);
+  EXPECT_NE(d0, dn);
+}
+
+// canonical_digest: a named flop digests fine; an ANONYMOUS flop poisons the
+// digest (valid=false) — its only key would be the per-run debug nid, and a
+// constant fallback could fold two different graphs to one digest.
+TEST(Semdiff, DigestAnonymousStateCellInvalid) {
+  auto named = [&](const std::string& dir, bool name_it) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  gio = lib.create_io("m");
+    gio->add_input("d", 1);
+    gio->add_output("q", 1);
+    auto g    = gio->create_graph();
+    auto flop = create_typed_node(*g, Ntype_op::Flop);
+    g->get_input_pin("d").connect_sink(flop.create_sink_pin(0));
+    auto qpin = flop.create_driver_pin(0);
+    if (name_it) {
+      livehd::graph_util::set_pin_name(qpin, "r_state");
+    }
+    qpin.connect_sink(g->get_output_pin("q"));
+    return g;
+  };
+
+  auto dg_named = livehd::semdiff::canonical_digest(named("lgdb_semdiff_df_n", true).get());
+  auto dg_anon  = livehd::semdiff::canonical_digest(named("lgdb_semdiff_df_a", false).get());
+  EXPECT_TRUE(dg_named.valid);
+  EXPECT_FALSE(dg_anon.valid);
+}
+
+// canonical_digest is HIERARCHICAL (Merkle): with a resolver, a parent's digest
+// folds its child's digest — an edited child body changes the parent digest.
+// Without a resolver the Sub is a blackbox (name identity only) and the parent
+// digest is insensitive to the child's internals.
+TEST(Semdiff, DigestHierarchicalMerkle) {
+  auto build = [&](const std::string& dir, bool child_uses_or) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+
+    auto cio = lib.create_io("child");
+    cio->add_input("x", 1);
+    cio->add_input("y", 1);
+    cio->add_output("o", 1);
+    auto cg  = cio->create_graph();
+    auto op  = create_typed_node(*cg, child_uses_or ? Ntype_op::Or : Ntype_op::And);
+    cg->get_input_pin("x").connect_sink(op.create_sink_pin(0));
+    cg->get_input_pin("y").connect_sink(op.create_sink_pin(0));
+    op.create_driver_pin(0).connect_sink(cg->get_output_pin("o"));
+
+    auto pio = lib.create_io("parent");
+    pio->add_input("a", 1);
+    pio->add_input("b", 1);
+    pio->add_output("z", 1);
+    auto pg  = pio->create_graph();
+    auto sub = create_typed_node(*pg, Ntype_op::Sub);
+    sub.set_subnode(cio);
+    pg->get_input_pin("a").connect_sink(sub.create_sink_pin(0));
+    pg->get_input_pin("b").connect_sink(sub.create_sink_pin(1));
+    sub.create_driver_pin(0).connect_sink(pg->get_output_pin("z"));
+
+    livehd::semdiff::Digest_resolver resolve = [&lib](hhds::Gid gid) -> hhds::Graph* {
+      auto g = lib.get_graph(gid);
+      return g ? g.get() : nullptr;
+    };
+    return std::pair{livehd::semdiff::canonical_digest(pg.get(), resolve),
+                     livehd::semdiff::canonical_digest(pg.get())};  // no resolver: blackbox
+  };
+
+  auto [and_deep, and_bb] = build("lgdb_semdiff_hm_and", false);
+  auto [or_deep, or_bb]   = build("lgdb_semdiff_hm_or", true);
+
+  EXPECT_TRUE(and_deep.valid && or_deep.valid && and_bb.valid && or_bb.valid);
+  EXPECT_NE(and_deep, or_deep);  // Merkle: child edit changes the parent digest
+  EXPECT_EQ(and_bb, or_bb);      // blackbox: child internals invisible by design
+  EXPECT_NE(and_deep, and_bb);   // resolved vs blackbox digests are distinct forms
+}
+
 // A diverging op (And vs Or at the same spot) is the gap: neither side's node
 // matches, surrounding primary IO is the anchored boundary.
 TEST(Semdiff, DivergentOpIsGap) {

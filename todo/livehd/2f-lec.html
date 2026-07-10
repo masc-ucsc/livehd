@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2f-lec — LEC remainder on the shared core (parallel hier, formal-block consumption, hints, correspondence)</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2f-lec</strong> LEC remainder — parallel hier driver, formal-block consumption, hints out, correspondence quality</h1>
+
+<p>How and why <code>pass/lec</code> works today is the reference doc
+  <code>pass/lec/lec.md</code>. Landed: cvc5-direct combinational miter, inductive
+  flop-cut + BMC-from-reset sequential phases, memory arrays, combinational
+  <code>Sub</code> flattening, the <code>auto</code> ind+bmc fork portfolio with
+  combinational skip, bottom-up hierarchical decomposition with proven-child
+  black-box collapse (<code>lec.hierarchical</code>) + REFUTE-under-collapse flat
+  confirmation, the per-module semdiff structural skip, the parallel input
+  case-split (<code>lec.partitions</code>/<code>lec.split=auto</code>, 2026-07-10),
+  and the witness→<code>lecfail.prp</code>→<code>lhd sim</code>→VCD flow. The
+  hier driver is also now <strong>scoped to the picked top pair and its transitive
+  descendants</strong> (fixed 2026-07-10 — it previously proved every def the two
+  libraries happened to share). This page tracks what remains, mostly as a consumer
+  of <a class="xref" href="2f-fcore.html">2f-fcore</a>.</p>
+
+<h2>Verdict discipline (unchanged, the page-level contract)</h2>
+<p>PASS ⇒ definitively equivalent; FAIL ⇒ definitively different; anything else
+  times out to inconclusive. Every reduction below (collapse, cache, split,
+  helpers) must preserve this — abstraction may only cause extra work (flat
+  confirmation), never a wrong verdict.</p>
+
+<h2>Pending</h2>
+<ul class="subtasks">
+<li><strong>Parallel hier driver on the fcore DAG (consumes F1).</strong> Replace the
+  sequential leaves-first loop in <code>lec_hierarchical</code>
+  (<code>lhd/lhd_kernel.cpp</code>) with the taskflow proof-DAG: all ready leaves in
+  flight (4–8 workers), a parent unlocks when its children settle, a proven child
+  becomes an <code>o.collapse</code> black-box exactly as today, and the
+  REFUTE-under-collapse ⇒ flat-confirmation rule is preserved. The semdiff
+  structural skip and the verdict cache become the first rungs of the per-def
+  portfolio ladder. Per-def progress lines stay (agents stream-parse long runs).</li>
+<li><strong>Consume formal blocks (old 2f-verify V7, lec half).</strong>
+  <em>(a)</em> Proven invariants (sidecar or mined, impl-side) asserted in the miter
+  are entailed facts — pure solver pruning, can never change the verdict.
+  <em>(b)</em> User <code>assume</code>s follow the fcore contract: over internal
+  signals they are proof obligations (checked on the impl side before use); over
+  primary inputs only, they are environment constraints by nature (inputs are free —
+  nothing to prove) and restrict the shared inputs ⇒ <em>conditional</em>
+  equivalence. Legitimate and often wanted, but the verdict must disclose it
+  ("PROVEN under 3 input assume(s)") so a constrained pass is never mistaken for
+  unconditional equivalence. <em>(c)</em> <code>assume_nocheck_formal</code> is
+  honored unchecked with the per-encounter warning and a <em>distinct</em>
+  disclosure — "PROVEN under N <strong>unchecked</strong> assume(s)" — so an
+  unchecked-conditioned pass is never confusable with a proven/input-conditioned
+  one; <code>assume_nocheck_synth</code> is ignored (fcore contract, ruling
+  2026-07-10).</li>
+<li><strong>LEC hints output (fcore producer).</strong> Persist the
+  winning engine and case-split selector into the <code>--workdir</code> cache as
+  strategy hints — keyed by canonical <em>entity name</em> so they survive design
+  edits, and consulted to order the next run's portfolio (user note 2026-07-10) —
+  and optionally emit sidecar <code>formal</code>-block suggestions (assumes that
+  made this LEC fast) with provenance comments — the verify mining concept, extended
+  to LEC.</li>
+<li><strong>Auto flop-correspondence from semdiff on REFUTE</strong> (absorbed from
+  2d-cex_debug). Correspondence today is <code>lec.match</code> only (explicit user
+  pairs); renamed-but-corresponding flops become unmatched cut points and one-side
+  flops are invisible to the root scan. On a refuting pair, run
+  <code>semdiff::structural_match(matching_names)</code> and feed the stamped flop
+  pairs into the <code>name_alias</code> map exactly as if <code>lec.match</code>
+  had supplied them — differently-named pipelines then need no hand-built
+  <code>match.txt</code>. Best-effort: retiming deliberately breaks flop
+  correspondence; degrade to I/O-level divergence and report unpaired flops as
+  "unpaired", never drop them silently.</li>
+<li><strong>Collapse quality — the diverged-use memory.</strong> Register and memory
+  collapse is landed (flop-cut, memories correspond by address). Rarely, the same
+  memory <em>cannot</em> be collapsed because its use diverges between the sides;
+  the engine must detect the correspondence/usage mismatch and conservatively keep
+  it uncollapsed (descended) rather than force a pairing. Add a regression that
+  plants a diverged-use memory and asserts the verdict is still correct (no false
+  PROVEN via a bogus collapse, no false REFUTE — flat fallback).</li>
+</ul>
+
+<h2>Tests</h2>
+<ul class="subtasks">
+<li>Hier fixture on the parallel driver: identical verdicts to the sequential
+  baseline, lower wall-clock, deterministic across runs (F1 acceptance lives in
+  fcore; the lec-specific assertion is collapse/flat-confirm behavior parity).</li>
+<li>Formal-block consumption: a miter that times out bare but proves with a sidecar
+  invariant asserted; a user-assume run whose verdict line carries the
+  "under N assume(s)" disclosure; an <code>assume_nocheck_synth</code> in the design
+  changes nothing in the lec verdict or encoding.</li>
+<li>Scope regression: two whole-design libraries sharing many defs +
+  <code>--ref-top</code> a leaf — exactly that leaf's subtree is proven (no
+  unrelated <code>lec[hier]</code> lines).</li>
+<li>Differently-named pipeline flops: REFUTE names the semdiff-paired root cut with
+  no supplied <code>match.txt</code>.</li>
+</ul>
+
+<h2>Later / elsewhere</h2>
+<ul class="subtasks">
+<li>Functional (n:m) gap matching that lets lec skip solver work on
+  matched regions — <a class="xref" href="3f-semdiff.html">3f-semdiff</a>.</li>
+<li>Transaction-level equivalence for elastic interfaces —
+  <a class="xref" href="4f-fluid-lec.html">4f-fluid-lec</a>.</li>
+<li>Alternative solver backend — <a class="xref" href="4f-bitwuzla.html">4f-bitwuzla</a>.</li>
+</ul>
+
+</main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
+</body>
+</html>

@@ -59,6 +59,12 @@ struct Query_result {
   std::string engine;
   long long   elapsed_ms = -1;
 
+  // The case-split selector that produced this verdict ("" = no split). The
+  // structured twin of the "case-split <name>[Nb]" detail text: the verdict
+  // cache persists it as a strategy hint (keyed by def entity name) and replays
+  // it next run via lec.split=<name>, so a known-good split is tried first.
+  std::string split_used;
+
   // BMC bound bookkeeping for the `auto` portfolio's bounded-Proven policy: the
   // checked-window size and the number of (output,cycle) comparisons actually run.
   // A BMC `Proven` with output_checks>0 is a BOUNDED proof (no CEX <= bound), which

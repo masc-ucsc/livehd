@@ -1,7 +1,8 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Stage-0 cex-debug (todo/livehd/2d-cex_debug): on a REFUTE, the verdict must name
+# Stage-0 cex-debug (todo/livehd/2f-fcore.html section 8, shared witness layer;
+# formerly 2d-cex_debug): on a REFUTE, the verdict must name
 # the EARLIEST diverging INTERNAL state cut (the ROOT) ahead of the inherited
 # primary output. A `reg` that mis-holds on its un-covered path diverges internally
 # first; the output merely inherits it. The first-diverging-cut scan reads the

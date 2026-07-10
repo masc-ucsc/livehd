@@ -1,7 +1,9 @@
 # LiveHD Relational Equivalence Engine (`pass/lec`)
 
 > **Reference — how and why `pass/lec` works today.** Current work and the
-> longer roadmap live in [`todo/livehd/lec.html`](../../todo/livehd/lec.html). The
+> longer roadmap live in [`todo/livehd/2f-lec.html`](../../todo/livehd/2f-lec.html)
+> (LEC remainder) and [`todo/livehd/2f-fcore.html`](../../todo/livehd/2f-fcore.html)
+> (the shared formal core: proof-DAG runner, verdict cache, case-split, hints). The
 > original Pono+smt-switch implementation plan and the fluid-pipeline research
 > appendix were retired (superseded by the cvc5-direct architecture below); their
 > full text is in git history if needed.

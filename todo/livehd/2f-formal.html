@@ -3,85 +3,79 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TODO 2f-formal — compile-time formal tier: pending items (re-based on 2f-verify)</title>
+<title>TODO 2f-formal — compile-time formal tier: engine rebase, stateful asserts, reset-exclusion, ABC EXDC</title>
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">2f-formal</strong> Compile-time formal tier — pending items (re-based on <a class="xref" href="2f-verify.html">2f-verify</a>)</h1>
+<h1><strong class="item-id">2f-formal</strong> Compile-time formal tier — engine rebase, stateful asserts, reset-exclusion, ABC EXDC</h1>
 
-<p><strong>What this page is now:</strong> only the pending remainder — and its shape
-  changed, because <a class="xref" href="2f-verify.html">2f-verify</a> supersedes the
-  engine underneath it.</p>
-
-<h2>Depends on</h2>
-<p><a class="xref" href="2f-verify.html">2f-verify</a> — <strong>do 2f-verify
-  first</strong>. Its V7 milestone re-bases <code>pass.formal</code> onto the shared
-  incremental engine as the <em>don't-try-hard profile</em>: same code path as
-  <code>lhd formal verify</code>, restricted options, small deterministic
-  <code>rlimit</code> budget, <strong>timeout is not an error</strong> (just "not proven,
-  keep the runtime check"), proven results feed synthesis as today. The items below are
-  specified against that engine, not the current self-contained single-frame Prover.</p>
+<p><code>pass.formal</code>'s own single-frame engine landed 2026-06-20; this page is
+  the remainder, re-based on the shared engine
+  (<a class="xref" href="2f-fcore.html">2f-fcore</a> +
+  <a class="xref" href="2f-verify.html">2f-verify</a>). Everything below stays 2f:
+  the 2026-07-10 ruling kept stateful asserts, reset-exclusion, and ABC EXDC at 2f
+  (its fourth item, memory templates, lives on 2f-verify); the engine rebase moved
+  here from old 2f-verify V7.</p>
 
 <h2>Pending</h2>
 <ul class="subtasks">
-<li><strong>Stateful asserts via the verdict ladder (old M6).</strong> Today a stateful
-  refutation is kept as a runtime check because the single-frame witness may be
-  unreachable. On the 2f-verify engine this becomes: 1-induction proven ⇒ elide;
-  BMC-from-reset refuted ⇒ a <em>reachable</em> counterexample even in the compile
-  profile's small budget ⇒ eligible for hard error (policy below); otherwise keep +
-  defer. Tests: an invariant over registered logic proven &amp; removed; a stateful
-  assert whose only violation is unreachable stays (no false error); a genuinely
-  reachable stateful violation within the compile budget errors with the witness
-  cycle.</li>
-<li><strong>Reset-exclusion for user asserts (<code>Reset_policy::ExcludeConeActive</code>)
-  — quality improvement, no longer a prerequisite.</strong> The gate is already live:
-  a definitive root-module refutation hard-errors with <em>no</em> reset guard
-  (<code>pass_formal.cpp</code> <code>report_refuted</code>, landed 2026-07-08 by
-  explicit ruling), and the reset-aware escape hatch is moving the property into a
-  <code>formal</code> block, where the 2f-verify BMC engine already carries the full
-  <code>after_reset</code> machinery (structural <code>reset_pin</code>/<code>negreset</code>
-  detection + name-polarity inference + driven reset-hold prologue,
-  <code>query.cpp:1197-1291</code> and <code>:2871-2951</code>). The compile-tier
-  single-frame Prover has none of it, so an assert whose only counterexample lies in the
-  reset prologue produces a FALSE refutation ⇒ a spurious hard error. Adding
-  reset-exclusion there cuts those — fewer spurious errors, and fewer properties pushed
-  into <code>formal</code> blocks just to get reset awareness. Implementation: reuse (do
-  not duplicate) the <code>query.cpp</code> reset detection, which the V7 re-base makes
-  natural — on the shared engine the BMC rung gets it for free; only the single-frame
-  induction rung needs the cone-reset guard (collect each cone Flop's
-  <code>reset_pin</code>/<code>negreset</code>, constrain inactive).
-  <code>assert_always</code> keeps <code>Reset_policy::Include</code>.</li>
-<li><strong>ABC EXDC don't-care network.</strong> Building the EXDC network that
-  actually hands the constraints (already gathered per region in
-  <code>abc_map.cpp:196-227</code>) to ABC's mfs/fraig is the remaining step. With
-  2f-verify, the constraint pool grows: sidecar invariants proven unbounded are
-  don't-care sources too.</li>
+<li><strong>Rebase <code>pass.formal</code> onto the shared engine as the
+  don't-try-hard profile</strong> (was 2f-verify's V7, formal half): same code path as
+  <code>lhd formal verify</code>, restricted options, small deterministic
+  <code>rlimit</code> budget (machine-independent), <strong>timeout is not an
+  error</strong> (just "not proven, keep the runtime check"), proven results feed
+  synthesis as today. This replaces the self-contained single-frame Prover for
+  property proving and is the step the two items below assume.</li>
+<li><strong>Stateful asserts via the verdict ladder (old M6).</strong> Today a
+  stateful refutation is kept as a runtime check because the single-frame witness may
+  be unreachable. On the shared engine: 1-induction proven ⇒ elide; BMC-from-reset
+  refuted ⇒ a <em>reachable</em> counterexample even in the compile profile's small
+  budget ⇒ eligible for hard error; otherwise keep + defer. Tests: an invariant over
+  registered logic proven &amp; removed; a stateful assert whose only violation is
+  unreachable stays (no false error); a genuinely reachable stateful violation within
+  the compile budget errors with the witness cycle.</li>
+<li><strong>Reset-exclusion for user asserts
+  (<code>Reset_policy::ExcludeConeActive</code>) — quality.</strong> The hard-error
+  gate is live with <em>no</em> reset guard (2026-07-08 ruling), so an assert whose
+  only counterexample lies in the reset prologue produces a FALSE refutation ⇒ a
+  spurious hard error. Reuse (do not duplicate) the <code>query.cpp</code> reset
+  detection — the rebase gives the BMC rung the full <code>after_reset</code>
+  machinery for free; only the single-frame induction rung needs the cone-reset
+  guard (collect each cone Flop's <code>reset_pin</code>/<code>negreset</code>,
+  constrain inactive). <code>assert_always</code> keeps
+  <code>Reset_policy::Include</code>.</li>
+<li><strong>ABC EXDC don't-care network.</strong> Hand the constraints already
+  gathered per region (<code>abc_map.cpp:196-227</code>) to ABC's mfs/fraig as an
+  EXDC network. Constraint sources now: <em>(a)</em> proven asserts/assumes,
+  <em>(b)</em> sidecar invariants proven unbounded by the verify engine,
+  <em>(c)</em> <code>assume_nocheck_synth</code> facts — the compile tier is the
+  <strong>only</strong> consumer of that form (fcore contract; per-encounter diag
+  warning; the user explicitly owns the risk).</li>
 </ul>
 
 <h2>Policy carried forward (unchanged)</h2>
 <ul class="subtasks">
 <li><strong>Asymmetric soundness:</strong> hard-error only on a definitive refutation
-  that cannot be an artifact (stateless cone, or reachable-by-BMC witness, after assumes;
-  per the 2026-07-08 ruling the compile-tier gate runs with <em>no</em> reset guard —
-  reset-exclusion above is the quality follow-up, and the reset-aware path is a
-  <code>formal</code> block on the 2f-verify engine). Budget / Unknown /
-  possibly-unreachable never error — a budget mistune can never turn a good build into
-  a false error.</li>
+  that cannot be an artifact (stateless cone, or reachable-by-BMC witness, after
+  assumes). Budget / Unknown / possibly-unreachable never error — a budget mistune
+  can never turn a good build into a false error.</li>
 <li><strong>Only proven assumes are hypotheses</strong> (no circular self-proof); the
   consistency check runs before any removal; contradictory assume set ⇒ warning +
-  removals suppressed.</li>
+  removals suppressed. <code>assume_nocheck_synth</code> facts are never proof
+  hypotheses — they are synthesis-only don't-cares by explicit user fiat;
+  <code>assume_nocheck_formal</code> is ignored by this tier entirely.</li>
 </ul>
 
 <h2>Future / deferred (other pages)</h2>
 <ul class="subtasks">
 <li><strong>Temporal assertion proofs</strong> —
   <a class="xref" href="../pyrope/3f-temporal.html">3f-temporal</a> lowering on the
-  2f-verify engine.</li>
-<li><strong><code>pass/memory</code> port-sharing &amp; banking</strong> — its own page;
-  calls the Prover primitives (<code>equal</code>/<code>bits_equal</code>/
-  <code>is_constant</code>) with its own conservative fallback.</li>
+  shared engine.</li>
+<li><strong><code>pass/memory</code> port-sharing &amp; banking</strong> — not yet
+  paged (gets its own page when scheduled); calls the Prover primitives with its own
+  conservative fallback.</li>
 <li><strong>Runtime fallback execution</strong> — running
   <code>runtime_check</code>-marked asserts in sim/slop
   (<a class="xref" href="../pyrope/4b.html">4b</a>).</li>

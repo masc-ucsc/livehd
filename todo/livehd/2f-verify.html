@@ -3,171 +3,113 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TODO 2f-verify — lhd formal verify: incremental assert/assume BMC + assume mining</title>
+<title>TODO 2f-verify — lhd formal verify remainder: assume mining + memory templates</title>
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">2f-verify</strong> <code>lhd formal verify</code> — incremental assert/assume BMC engine + assume mining (on the <code>lec</code> unroller)</h1>
+<h1><strong class="item-id">2f-verify</strong> <code>lhd formal verify</code> remainder — assume mining + memory-invariant templates</h1>
 
-<p><strong>Status.</strong> This page is the PENDING remainder of
-  <code>lhd formal verify</code> (the engine core — per-obligation incremental
-  BMC with frontier assumes, verdict ladder, and <code>formal name.dotted { }</code>
-  sidecar blocks — already exists): the mining loop that turns solver-learned
-  facts into sidecar assumes, the cross-run reuse layers, the budget scheduler,
-  LEC consumption of formal blocks, and the memory-template attack.</p>
+<p><strong>Status.</strong> The engine core is LANDED (V1–V3): per-obligation
+  incremental BMC with frontier assumes and a per-assert verdict table;
+  <code>formal name.dotted { }</code> sidecar blocks compiled to per-cycle-bound
+  monitors with submodule-instance binding; the verdict ladder to PROVEN-unbounded
+  via simultaneous 1-induction Houdini; ONE <code>formal.*</code> knob namespace with
+  <code>lec.*</code> aliases. The shared infrastructure this page used to spec moved
+  to <a class="xref" href="2f-fcore.html">2f-fcore</a> (2026-07-10 reorg): the
+  verdict cache (old V5), the budget scheduler (old V6), case-split, and hint
+  plumbing. LEC consumption of formal blocks (old V7, lec half) moved to
+  <a class="xref" href="2f-lec.html">2f-lec</a>; the compile-profile rebase (old V7,
+  formal half) to <a class="xref" href="2f-formal.html">2f-formal</a>.
+  <strong>Dropped by ruling 2026-07-10:</strong> CEGAR lazy memory reads (old Attack
+  B) and cross-run learned-literal replay (old L3).</p>
 
-<h2>Depends on / affects</h2>
-<ul class="subtasks">
-<li><a class="xref" href="lec.html">lec</a> — the landed Encoder + BMC unroller
-  (<code>pass/lec/encode.cpp</code>, <code>query.cpp</code>) are the substrate.</li>
-<li><a class="xref" href="2f-formal.html">2f-formal</a> — <strong>depends on this
-  page</strong> (do 2f-verify first): compile-time <code>pass.formal</code> becomes the
-  <em>don't-try-hard profile</em> of this engine (same code, restricted options), replacing
-  its self-contained single-frame Prover for property proving; its pending items
-  (stateful asserts, reset-exclusion hard-error escalation) re-base on the verdict ladder
-  here.</li>
-<li><a class="xref" href="../pyrope/3f-temporal.html">3f-temporal</a> — temporal
-  assertion proofs will target this engine (bounded windows map onto the unroller
-  directly).</li>
-</ul>
-
-<h2>Scheduler — global budget, escalating rounds, diagnose-last</h2>
-<ul class="subtasks">
-<li><strong>Global <code>formal.timeout</code></strong> owns proving time (fixes today's
-  hazard: per-checkSat <code>tlimit-per</code> composes to (N+1)×timeout unbounded).
-  Rounds: <strong>R0 free</strong> (comptime, cache hits, sidecar invariant rechecks) →
-  <strong>R1 small slices</strong> (~1-2s per pending obligation at the frontier; the
-  multi-property literature's cheap-first: most properties are easy) →
-  <strong>R2+ escalation</strong> (4s → 16s → 64s…), survivors ranked by
-  <code>getDifficulty</code> mass from their own failed attempts + cone size +
-  last-round progress; stragglers sink to the end and inherit remaining budget.
-  Frontier assumes interleave, so later rounds run in a smaller space.</li>
-<li><strong><code>formal.minetimeout</code></strong> — an <em>independent</em>
-  budget (e.g. 60 when <code>formal.timeout=120</code>; <code>0</code> = no mining) for
-  the diagnosis/mining phase: <code>getTimeoutCoreAssuming</code> names the toxic kernel
-  ("these 2 asserts + this store chain") and the miner targets their cones — so a
-  timed-out run's <em>output</em> is the assumes that make the next run succeed.</li>
-<li><strong>Determinism.</strong> Compile profile budgets by cvc5 <code>rlimit</code>
-  (deterministic, machine-independent — the landed pass.formal convention);
-  <code>formal verify</code> defaults to wall-clock with
-  <code>formal.budget_mode=rlimit</code> available for CI.</li>
-</ul>
-
-<h2>Mining — learned facts → Houdini → ranked → Pyrope</h2>
+<h2>Pending — mining (learned facts → Houdini → ranked → Pyrope)</h2>
 <ul class="subtasks">
 <li><strong>Source 1: learned-literal recurrence</strong> (cheap — the solver already
   computed it). Harvest <code>getLearnedLiterals(INPUT)</code>; strip cycle prefixes;
   a literal recurring at many cycles ("<code>r5_st ≤ 3</code> at cycles 2..9") is an
-  invariant candidate "<code>st ≤ 3</code>". Keep only literals over <em>named</em> user
-  signals (internal <code>st&lt;uid&gt;</code> temps can't become source code).
-  Word-level facts map back through encoder naming to LGraph signals to Pyrope names —
-  this is why CNF-level solvers can't do this job (see cvc5 inventory).</li>
-<li><strong>Source 2: templates targeted at the pain</strong> (v2). Where difficulty /
-  timeout cores point, instantiate hardware-invariant templates over the registers and
-  memories in the hard asserts' cones: range bounds (seeded from BMC model values),
-  one-hot state encodings, mutual exclusion of valid bits, register-pair equality,
-  count == popcount(valids), valid ⇒ field-in-range per memory entry.</li>
+  invariant candidate "<code>st ≤ 3</code>". Keep only literals over <em>named</em>
+  user signals (internal temps can't become source code); word-level facts map back
+  through encoder naming → LGraph signals → Pyrope names.</li>
+<li><strong>Source 2: templates targeted at the pain.</strong> Where difficulty mass /
+  timeout cores point, instantiate hardware-invariant templates over the registers
+  and memories in the hard asserts' cones: range bounds (seeded from BMC model
+  values), one-hot state encodings, mutual exclusion of valid bits, register-pair
+  equality, count == popcount(valids), valid ⇒ field-in-range per memory entry.</li>
 <li><strong>Filter: Houdini fixpoint</strong> on the persistent solver — assume all
-  candidates at cycle c, prove each at c+1, drop failures, iterate to fixpoint.
-  Survivors are genuine inductive invariants (true at every cycle of any bound;
-  re-provable next run in one query).</li>
-<li><strong>Rank before emitting</strong> — a candidate must earn its keep: it appears in
-  the <code>getUnsatCore</code> of a newly-provable obligation, or asserting it drops a
-  straggler's solve time / difficulty mass. Everything else is noise (and every carried
-  assume also bloats the formula).</li>
+  candidates at cycle c, prove each at c+1, drop failures, iterate. Survivors are
+  genuine inductive invariants (re-provable next run in one query).</li>
+<li><strong>Rank before emitting</strong> — a candidate must earn its keep: it appears
+  in the <code>getUnsatCore</code> of a newly-provable obligation, or asserting it
+  drops a straggler's solve time / difficulty mass. Everything else is noise (every
+  carried assume also bloats the formula).</li>
 <li><strong>Emit</strong> ready-to-paste <code>formal</code> blocks with provenance
-  comments; inductive survivors → the auto-managed sidecar; bounded/unranked candidates →
-  the speculative report only.</li>
+  comments (the fcore hints channel): inductive survivors → the auto-managed sidecar;
+  bounded/unranked candidates → the speculative report only. Gated by
+  <code>formal.minetimeout</code> (<code>0</code> = off);
+  <code>--mine=speculative</code> tier.</li>
+<li>Tests: a mined invariant round-trips (emitted, re-parsed, re-proven, measurably
+  speeds the straggler); pruning on design edit.</li>
 </ul>
 
-<h2>Memory strategy — invariants first, lazy concretization later</h2>
+<h2>Pending — memory-invariant templates (old V8 Attack A; stays 2f by ruling 2026-07-10)</h2>
 <ul class="subtasks">
 <li><strong>Why memories explode:</strong> each cycle appends stores; read-over-write
-  chains grow with the bound; the solver case-splits on address aliasing across the whole
-  history.</li>
-<li><strong>Attack A (ship first): per-entry invariants</strong> via comptime-unrolled
-  <code>for</code> loops in formal blocks + the template pool above. Most memory-heavy
-  asserts need a per-entry property, not the contents.</li>
-<li><strong>Attack B (later, evidence-gated): CEGAR lazy reads</strong> — start each
-  memory read as a free symbol (sound for Proven: strictly more behaviors); on a
-  refutation, validate the CEX against the real store history; concretize only the
-  conflicting reads/alias facts and re-check (with the persistent solver, refinement is
-  just new assertions — no rebuild). Pono ceg-array / Burch–Dill lineage; the existing
-  State_box UF collapse is the same philosophy at module granularity. Build only where
-  timeout cores show store chains remain the kernel after Attack A. The synergy: an
-  assumed invariant constrains the free reads directly, so the abstraction is often
-  precise enough to never build the chain.</li>
+  chains grow with the bound; the solver case-splits on address aliasing across the
+  whole history.</li>
+<li><strong>Attack: per-entry invariants</strong> via comptime-unrolled
+  <code>for</code> loops in formal blocks + the template pool above, targeted where
+  timeout cores show store chains are the kernel. Most memory-heavy asserts need a
+  per-entry property, not the contents. (The CEGAR lazy-read alternative was dropped;
+  an assumed invariant constrains the reads directly, which is the same synergy
+  without the machinery.)</li>
 </ul>
 
-<h2>Cross-run reuse — three layers, cheapest-to-verify first</h2>
+<h2>Pending — assume forms (verify view of the fcore contract)</h2>
 <ul class="subtasks">
-<li><strong>L1 — the sidecar</strong> (above): survives code edits; one induction query
-  per invariant per run.</li>
-<li><strong>L2 — per-obligation verdict cache</strong> (subsumes lec-M6). Key =
-  hash of the <strong>serialized SMT encoding of the obligation's cone</strong> +
-  obligation term + solver identity (logic, <code>bv-solver</code>, all options, cvc5
-  version) + engine params (phase, reset_hold, bound). Hit ⇒ skip the solve. Rules
-  (soundness F): hash <em>downstream</em> of the encoder (an encoder semantics fix
-  auto-invalidates); cache only definitive verdicts (UNSAT; SAT together with its witness
-  model, revalidated by evaluation on hit); <strong>never cache Unknown</strong>. Payoff:
-  edit one module ⇒ only cone-touched obligations re-run
-  (<code>verification_cache.json</code> precedent, made native + sound + fine-grained).</li>
-<li><strong>L3 — learned-literal replay</strong> (<code>formal.verify.replay=on</code>,
-  opt-in). On timeout, persist <code>getLearnedLiterals(INPUT)</code> (+ Plugin clause
-  stream) as SMT-LIB text keyed by frame hash. Exact frame match ⇒ entailed, re-assert
-  directly (restart partway up the mountain). Frame changed ⇒ per-literal short-timeout
-  <code>checkSatAssuming(¬L)</code> revalidation, failures dropped. Guardrails
-  (soundness D): harvest only level-0-provenance literals (collected with no obligation
-  pushed) over named symbols; deterministic symbol naming is a completeness requirement
-  (a rename ⇒ cache miss, never a wrong bind).</li>
-</ul>
-
-<h2>LEC integration (<code>lhd formal lec</code> consuming formal blocks)</h2>
-<ul class="subtasks">
-<li><strong>Proven invariants as helpers</strong> — entailed facts of the impl side;
-  asserting them in the miter prunes solver work and can never change the verdict. Pure
-  speedup; no ref-side name mapping needed.</li>
-<li><strong>Unproven/user assumes as environment constraints</strong> — restrict the
-  shared inputs ⇒ <em>conditional</em> equivalence. Legitimate and often wanted, but the
-  verdict must disclose it ("PROVEN under 3 assumes") so a constrained pass is never
-  mistaken for unconditional equivalence.</li>
+<li><code>assume</code> — a proof obligation like any assert; once proven it
+  constrains the remaining obligations per rules A–E below (the landed frontier
+  machinery; the cache makes re-proving on unchanged cones instant).</li>
+<li><code>assume_nocheck_formal</code> — consumed as a free constraint with
+  <em>no</em> proof obligation; diag warning at every encounter; every verdict
+  discloses "under N unchecked assume(s)". Debug/exploration aid — quite risky by
+  design.</li>
+<li><code>assume_nocheck_synth</code> — invisible to verify (fcore ruling).</li>
+<li>Verify also feeds the fcore scheduler its ranking signals:
+  <code>getDifficulty</code> mass from failed attempts, cone size, last-round
+  progress.</li>
 </ul>
 
 <h2>Soundness rules (adversarially reviewed; the non-negotiables)</h2>
+<p>(Rule F — the verdict-cache key discipline — moved to
+  <a class="xref" href="2f-fcore.html">2f-fcore</a> with the cache itself.)</p>
 <ul class="subtasks">
 <li><strong>A. Assume-at-proven-horizon.</strong> A fact proven for cycles ≤ k may be
   assumed at cycles ≤ k while checking anything at bound ≤ k — but "proven" means
   per-cycle UNSAT verdicts (a tlimit'd sweep can be "proven at 2..5, Unknown at 6";
-  assuming the Unknown cycle is a real masking channel), and the assumption must be the
-  <em>exact term proven</em> (X-mask and width-fit included).</li>
+  assuming the Unknown cycle is a real masking channel), and the assumption must be
+  the <em>exact term proven</em> (X-mask and width-fit included).</li>
 <li><strong>B. Raising the bound k→k′ &gt; k:</strong> clip assumptions to cycles ≤ k
-  (free, always sound) or re-prove at k′ first. Assuming beyond the proven horizon can
-  <em>retroactively</em> prune traces whose violation is at cycle 2 (suffix constraints
-  remove whole traces) — strictly worse than not assuming at all. A base-SAT vacuity
-  check does <em>not</em> detect partial pruning.</li>
-<li><strong>C. Circularity:</strong> same-cycle mutual assumption is unsound (two-line
-  counterexample: simultaneous flags). Sound discipline = assume siblings only at cycles
-  <em>strictly earlier</em> than the cycle being checked (McMillan's circular rule /
-  Rushby's PVS proof; Goldberg et al.'s JA-verification). With unproven mutual
-  assumptions the guarantee is for the <em>conjunction</em>/first-failure only — an
-  individual local pass is a global proof only if the whole set passes.</li>
-<li><strong>D. Learned-literal replay:</strong> a literal is entailed by the assertion
-  stack <em>at the moment of learning</em>; cvc5 does not tag scope provenance, so
-  literals learned while an obligation was pushed may depend on it. Only frame-only
-  provenance or per-literal revalidation. Monotonicity means timed-out-run provenance per
-  se is fine.</li>
+  (free, always sound) or re-prove at k′ first. Assuming beyond the proven horizon
+  can <em>retroactively</em> prune traces whose violation is at cycle 2 — strictly
+  worse than not assuming at all. A base-SAT vacuity check does <em>not</em> detect
+  partial pruning.</li>
+<li><strong>C. Circularity:</strong> same-cycle mutual assumption is unsound. Sound
+  discipline = assume siblings only at cycles <em>strictly earlier</em> than the
+  cycle being checked (McMillan's circular rule; Goldberg et al.'s
+  JA-verification). With unproven mutual assumptions the guarantee is for the
+  <em>conjunction</em>/first-failure only.</li>
+<li><strong>D. Learned-literal provenance:</strong> cvc5 does not tag scope
+  provenance, so literals learned while an obligation was pushed may depend on it.
+  Mining harvests only literals collected with no obligation pushed (level-0
+  provenance) over named symbols.</li>
 <li><strong>E. k-induction strengthening:</strong> the step case starts in arbitrary
   unreachable states — BMC-to-k facts may <em>never</em> be step-frame assumptions.
-  Sound forms only: BMC discharges <em>base cases</em>; helpers assumed in the step must
-  be true invariants (sidecar) or folded into the conjunctive obligation (assume
-  helper∧P at frames 1..k, prove helper∧P at k+1). Base depth ≥ induction depth used.</li>
-<li><strong>F. Verdict cache key</strong> must determine the exact SMT script + query +
-  solver configuration + solver binary (this repo already lived a solver-config
-  soundness bug — the lazy-bitblaster spurious SAT behind
-  <code>bv-solver=bitblast-internal</code>, <code>query.cpp:1098-1120</code> — so solver
-  identity genuinely belongs in the key). Definitive verdicts only.</li>
+  Sound forms only: BMC discharges <em>base cases</em>; helpers assumed in the step
+  must be true invariants (sidecar) or folded into the conjunctive obligation.
+  Base depth ≥ induction depth used.</li>
 </ul>
 
 <h2>cvc5 1.3.4 API inventory (verified against the vendored headers)</h2>
@@ -176,117 +118,65 @@
   substrate; incremental is default-on in 1.3.x.</li>
 <li><code>getLearnedLiterals(modes::LearnedLitType)</code> (cvc5.h:6156; gate
   <code>produce-learned-literals</code>) — unit facts entailed by the current
-  assertions; <code>INPUT</code> mode = input-vocabulary, the replayable/minable class.
-  cvc5's own deep-restart replays these internally (but deep-restart is incompatible
-  with incremental — external replay is the workaround).</li>
-<li><code>getDifficulty()</code> (cvc5.h:6029; gate <code>produce-difficulty</code>) —
-  per-input-assertion lemma/conflict participation count; callable right after
+  assertions; <code>INPUT</code> mode = input-vocabulary, the minable class. This is
+  why CNF-level solvers can't do the mining job — clauses over integer variables
+  cannot be lifted back to word-level assumes.</li>
+<li><code>getDifficulty()</code> (cvc5.h:6029; gate <code>produce-difficulty</code>)
+  — per-input-assertion lemma/conflict participation; callable right after
   <em>any</em> checkSat, including timeout. The scheduler's ranking signal.</li>
 <li><code>getTimeoutCore()</code> / <code>getTimeoutCoreAssuming()</code>
-  (cvc5.h:6063/6101; knob <code>timeout-core-timeout</code>, default 10s) — a subset of
-  assertions/assumptions that alone reproduces the timeout; the
-  <code>Assuming</code> form needs no prior checkSat. The diagnosis phase's tool.</li>
-<li><code>getUnsatCore()</code> (gate <code>produce-unsat-cores</code>) — which assumed
-  facts a proof actually used ⇒ prune useless assumes, build the empirical
-  helper-dependency DAG, rank mined candidates.</li>
-<li><code>Plugin</code> (cvc5.h:3620: <code>notifySatClause</code> /
-  <code>notifyTheoryLemma</code> / <code>check()</code>-injects-lemmas) — live tap to
-  stream learned clauses out before a timeout kill, and inject on restart.</li>
-<li><code>getInterpolant/getAbduct</code> — present but SyGuS-enumerative underneath;
-  <strong>not credible on BMC-sized bit-vector formulas</strong>; do not plan invariant
-  mining on them.</li>
-<li><strong>No solver-state serialization exists</strong> (Solver non-copyable; nothing
-  checkpoints). Cross-process = SMT-LIB text round-trip
-  (<code>getAssertions</code>/<code>Term::toString</code> + bundled
-  <code>InputParser</code>, or the vendored <code>bin/cvc5</code>).</li>
-<li><strong>All of the above are marked experimental</strong> — wrap in option probes +
-  try/catch; a cvc5 upgrade may change them (another reason solver version is in the
-  cache key).</li>
-<li><strong>Why not raw CaDiCaL:</strong> it offers clause-level export/import, sound
-  incremental inprocessing, LRAT — but you'd own bit-blasting, arrays (memories!), and
-  UF (boxes), and CNF clauses over integer variables cannot be lifted back to
-  word-level assumes (the whole point of mining). cvc5 already exposes CaDiCaL as its
-  CDCL(T) backend (<code>--sat-solver=cadical</code>) and term-level clause taps via
-  Plugin. Bitwuzla (~2.9× faster raw QF_BV) ships CaDiCaL inside but has none of the
-  introspection.</li>
-</ul>
-
-<h2>Milestones — pending (each test-backed)</h2>
-<ul class="subtasks">
-<li><strong>V4 — mining v1 + budgets.</strong> Learned-literal recurrence → Houdini →
-  usefulness ranking → sidecar emit (<code>formal &lt;top&gt;.mined</code>);
-  <code>formal.minetimeout</code> (0=off); <code>--mine=speculative</code> tier.
-  Tests: mined invariant round-trips (emitted, re-parsed, re-proven, measurably speeds
-  the straggler); pruning on design edit.</li>
-<li><strong>V5 — verdict cache (L2).</strong> Cone-hash keying with the F-rules;
-  storage next to lgdb/workdir. Tests: identical re-run all-hit; single-module edit
-  invalidates only cone-touched obligations; option/solver change invalidates.</li>
-<li><strong>V6 — scheduler.</strong> Rounds + escalation + difficulty ranking + global
-  budget + diagnosis phase (timeout cores) under minetimeout;
-  <code>formal.budget_mode=rlimit</code>. Tests: N-obligation run respects the global
-  budget; straggler diagnosis names the planted toxic kernel.</li>
-<li><strong>V7 — LEC consumption + compile-profile rebase.</strong> Formal blocks feed
-  the miter (helpers + conditional-equivalence disclosure); <code>lhd formal lec</code>
-  command with <code>lhd lec</code> alias; <code>pass.formal</code> switches to the
-  shared engine's don't-try-hard profile (this is the step that re-bases
-  <a class="xref" href="2f-formal.html">2f-formal</a>'s pending items).</li>
-<li><strong>V8 — memory templates (Attack A).</strong> Per-entry template pool +
-  targeting via timeout cores. <strong>Deferred, evidence-gated:</strong> CEGAR lazy
-  reads (Attack B); learned-literal replay (L3).</li>
+  (cvc5.h:6063/6101; knob <code>timeout-core-timeout</code>) — a subset of
+  assertions that alone reproduces the timeout; the diagnosis phase's tool.</li>
+<li><code>getUnsatCore()</code> (gate <code>produce-unsat-cores</code>) — which
+  assumed facts a proof actually used ⇒ prune useless assumes, rank mined
+  candidates.</li>
+<li><code>getInterpolant/getAbduct</code> — SyGuS-enumerative underneath;
+  <strong>not credible on BMC-sized bit-vector formulas</strong>; do not plan
+  invariant mining on them.</li>
+<li><strong>No solver-state serialization exists</strong> (Solver non-copyable).
+  Cross-process = SMT-LIB text round-trip.</li>
+<li><strong>All of the above are experimental</strong> — probe options at startup
+  (<code>getOptionNames</code>), degrade gracefully (mining off) rather than crash;
+  a cvc5 upgrade may change them (solver version is in the fcore cache key).</li>
 </ul>
 
 <h2>Traps</h2>
 <ul class="subtasks">
-<li><strong>tlimit-per is per-checkSat</strong> — with per-obligation checks the count of
-  checkSats grows; only the scheduler's global budget prevents (N+1)×timeout runs.</li>
-<li><strong>Deepening after assuming</strong> — on <code>--deepen</code>, frontier facts
-  are already horizon-clipped by construction; sidecar facts are inductive so exempt;
-  anything bounded from L2/L3 must be re-proven at the new bound before reuse (rule
-  B).</li>
-<li><strong>Never cache Unknown</strong>; SAT only with its revalidatable witness; hash
-  after the encoder; solver identity in the key (rule F).</li>
-<li><strong>Experimental cvc5 APIs</strong> — probe options at startup
-  (<code>getOptionNames</code>), degrade gracefully (mining off) rather than crash.</li>
-<li><strong>Symbol-name determinism</strong> — <code>st&lt;uid&gt;</code>/<code>s0_*</code>
-  naming must be encode-order-stable or L2/L3 keys churn (completeness, not soundness:
-  a rename is a miss, never a wrong bind).</li>
+<li><strong>tlimit-per is per-checkSat</strong> — only the fcore scheduler's global
+  budget prevents (N+1)×timeout runs.</li>
+<li><strong>Deepening after assuming</strong> — on <code>--deepen</code>, frontier
+  facts are already horizon-clipped by construction; sidecar facts are inductive so
+  exempt; anything bounded from the cache must be re-proven at the new bound before
+  reuse (rule B).</li>
+<li><strong>Symbol-name determinism</strong> — encode-order-stable naming or the
+  fcore cache keys churn (completeness, not soundness: a rename is a miss, never a
+  wrong bind).</li>
 </ul>
 
 <h2>References</h2>
 <ul class="subtasks">
-<li>Eén, Sörensson — <em>Temporal Induction by Incremental SAT Solving</em>, ENTCS 89(4),
-  2003 (assumption literals; learned clauses never depend on them).</li>
+<li>Eén, Sörensson — <em>Temporal Induction by Incremental SAT Solving</em>, ENTCS
+  89(4), 2003 (assumption literals; learned clauses never depend on them).</li>
 <li>Goldberg, Güdemann, Kroening, Mukherjee — <em>Efficient Verification of
   Multi-Property Designs (The Benefit of Wrong Assumptions)</em>, DATE 2018,
-  <a href="https://arxiv.org/abs/1711.05698">arXiv:1711.05698</a> (JA-verification;
-  earliest-failure induction; conjunction semantics).</li>
+  <a href="https://arxiv.org/abs/1711.05698">arXiv:1711.05698</a>.</li>
 <li>Sheeran, Singh, Stålmarck — <em>Checking Safety Properties Using Induction and a
   SAT-Solver</em>, FMCAD 2000 (k-induction; helpers must be true invariants).</li>
 <li>McMillan — <em>Circular Compositional Reasoning about Liveness</em>, CHARME 1999;
   Rushby — <em>Formal Verification of McMillan's Compositional Assume-Guarantee
-  Rule</em>, SRI CSL 2001,
-  <a href="https://www.csl.sri.com/~rushby/papers/mcmillan.pdf">PVS proof</a>
-  (strictly-earlier-cycle discipline).</li>
+  Rule</em>, SRI CSL 2001 (strictly-earlier-cycle discipline).</li>
 <li>Cabodi et al. — <em>Speeding up model checking by exploiting explicit and hidden
   verification constraints</em>, DATE 2009; <em>To split or to group</em>, STTT 19(6)
-  2017 (proven-property constraints; COI-affinity grouping; cheap-first).</li>
+  2017 (proven-property constraints; cheap-first).</li>
 <li>McMillan — <em>Interpolation and SAT-Based Model Checking</em>, CAV 2003
   (invariant-strengthening loop archetype).</li>
-<li>Chockler, Ivrii, Matsliah, Moran, Nevo — <em>Incremental Formal Verification of
-  Hardware</em>, FMCAD 2011 (revalidate-then-inject lemma reuse across runs); Dureja,
-  Rozier — <em>FuseIC3</em>, FMCAD 2017 (frame reuse across model families);
-  <em>Incremental PDR</em>, <a href="https://arxiv.org/abs/2308.12162">arXiv:2308.12162</a>.</li>
-<li>Fazekas, Biere, Scholl — <em>Incremental Inprocessing in SAT Solving</em>, SAT 2019
-  (why CaDiCaL-under-cvc5 is the safe incremental backend).</li>
-<li>Tools: yosys-smtbmc (<code>backends/smt2/smtbmc.py</code>: assume-after-prove,
-  model-eval peel on <code>--keep-going</code>, <code>--track-assumes</code>); Pono CAV'21
-  (<code>--show-invar</code>/<code>--check-invar</code>, <code>assume_prop</code>); AVR
-  (<code>inv.smt2</code> certificates); certifaiger (certificates as the durable proof
-  artifact); JasperGold Proof Structure (helper-assertion DAG, circularity tracking);
-  VC Formal RMA (cache orchestration state, not clauses).</li>
-<li>cvc5: <em>Interfaces for Understanding cvc5</em> (blog, 2024-04-15) — learned
-  literals / timeout cores / difficulty; Barbosa et al., TACAS 2022 system paper;
-  vendored headers <code>+cvc5_repo+cvc5/include/cvc5/cvc5.h</code> (1.3.4).</li>
+<li>Tools: yosys-smtbmc (assume-after-prove, <code>--track-assumes</code>); Pono
+  CAV'21 (<code>--show-invar</code>/<code>assume_prop</code>); JasperGold Proof
+  Structure (helper-assertion DAG, circularity tracking); VC Formal RMA (cache
+  orchestration state, not clauses).</li>
+<li>cvc5: <em>Interfaces for Understanding cvc5</em> (blog, 2024-04-15); Barbosa et
+  al., TACAS 2022; vendored headers
+  <code>+cvc5_repo+cvc5/include/cvc5/cvc5.h</code> (1.3.4).</li>
 </ul>
 </main>
 <footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>

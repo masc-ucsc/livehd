@@ -417,4 +417,115 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
   return res;
 }
 
+namespace {
+
+// One def's digest, recursing into resolvable Sub bodies (Merkle). `memo` and
+// `visiting` are shared across the whole canonical_digest() call so shared
+// children in the instance DAG are digested once and a cycle is caught.
+Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve,
+                            absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo,
+                            absl::flat_hash_set<hhds::Gid>&                   visiting) {
+  Canonical_digest d;
+  if (g == nullptr) {
+    return d;
+  }
+
+  // Refuse anonymous state cells up front (see semdiff.hpp): their state_key
+  // falls back to the per-run debug nid, which is neither stable across
+  // processes nor safely replaceable by a constant.
+  for (auto node : g->forward_class()) {
+    if (is_state(gu::type_op_of(node)) && state_key(g, node).starts_with("f:")) {
+      return d;  // valid=false — not digestable, callers skip the cache
+    }
+  }
+
+  Semdiff_options opts;
+  opts.matching_names = true;  // state cells keyed by hierarchical name — lec's
+                               // correspondence basis, so digest-equal transfers
+  Side s = analyze(g, opts);
+
+  // Order-independent fold: one token per node (fsig = input-cone identity,
+  // bsig = output-cone identity, kind = local shape), sorted so allocation /
+  // iteration order can never leak into the digest. The canonical form follows
+  // pass/submatch's convention: sort the constituent hashes, then mix.
+  std::vector<uint64_t> toks;
+  toks.reserve(s.order.size() + 16);
+  for (const auto& node : s.order) {
+    auto     ci = node.get_class_index();
+    uint64_t f  = 0;
+    uint64_t b  = 0;
+    if (auto it = s.fsig.find(ci); it != s.fsig.end()) {
+      f = it->second;
+    }
+    if (auto it = s.bsig.find(ci); it != s.bsig.end()) {
+      b = it->second;
+    }
+    uint64_t tok = hcombine(hcombine(f, b), node_kind_key(node));
+    if (auto gid = node.get_subnode_gid(); gid != hhds::Gid_invalid) {
+      // Hierarchical (Merkle) fold: a Sub with a resolvable body takes the
+      // CHILD'S digest as its identity — an edited child that the encoder
+      // flattens into this def's proof must change this digest, or a cached
+      // verdict would go stale. No body => true blackbox (UF in proofs): the
+      // def-name identity already folded by node_kind_key stands.
+      if (hhds::Graph* child = resolve ? resolve(gid) : nullptr) {
+        Canonical_digest cd;
+        if (auto it = memo.find(gid); it != memo.end()) {
+          cd = it->second;
+        } else {
+          if (!visiting.insert(gid).second) {
+            return {};  // instantiation cycle: not digestable
+          }
+          cd = digest_one(child, resolve, memo, visiting);
+          visiting.erase(gid);
+          memo.emplace(gid, cd);
+        }
+        if (!cd.valid) {
+          return {};  // an undigestable child poisons every ancestor
+        }
+        tok = hcombine(hcombine(tok, cd.h0), cd.h1);
+      }
+    }
+    toks.push_back(tok);
+  }
+  // The module interface, explicitly: lec pairs IO by name, a dangling port
+  // never shows up in any node signature above, and the name<->port_id binding
+  // is part of the identity (a parent's edges carry port ids; permuting the
+  // binding changes what those edges mean without touching this graph's nodes).
+  // Width is read the way the lec encoder reads it (pin bits attr with decl
+  // fallback — encode.cpp real_width_io), so digest-equal implies encode-equal.
+  auto gio = g->get_io();
+  for (const auto& dio : gio->get_input_pin_decls()) {
+    uint64_t t = hcombine(hstr("\x01idecl"), hstr(dio.name));
+    t          = hcombine(t, static_cast<uint64_t>(static_cast<uint32_t>(gu::bits_of(g->get_input_pin(dio.name), *gio, dio.name))));
+    t          = hcombine(t, static_cast<uint64_t>(dio.port_id) | (static_cast<uint64_t>(dio.unsign) << 32U));
+    toks.push_back(t);
+  }
+  for (const auto& dio : gio->get_output_pin_decls()) {
+    uint64_t t = hcombine(hstr("\x01odecl"), hstr(dio.name));
+    t          = hcombine(t, static_cast<uint64_t>(static_cast<uint32_t>(gu::bits_of(g->get_output_pin(dio.name), *gio, dio.name))));
+    t          = hcombine(t, static_cast<uint64_t>(dio.port_id) | (static_cast<uint64_t>(dio.unsign) << 32U));
+    toks.push_back(t);
+  }
+  std::sort(toks.begin(), toks.end());
+
+  uint64_t h0 = 0x1ec0ffee2f0c0deULL;
+  uint64_t h1 = 0x5a17ed15c0ffee5ULL;
+  for (uint64_t t : toks) {
+    h0 = hcombine(h0, t);
+    h1 = hcombine(h1, mix64(t ^ 0x9e3779b97f4a7c15ULL));
+  }
+  d.h0    = h0;
+  d.h1    = h1;
+  d.valid = true;
+  return d;
+}
+
+}  // namespace
+
+Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve) {
+  absl::flat_hash_map<hhds::Gid, Canonical_digest> memo;
+  absl::flat_hash_set<hhds::Gid>                   visiting;
+  return digest_one(g, resolve, memo, visiting);
+}
+
 }  // namespace livehd::semdiff

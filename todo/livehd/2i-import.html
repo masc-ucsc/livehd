@@ -15,8 +15,9 @@
   design back-and-forth with the user. <strong>(1) A library is a directory</strong>; the
   <code>pub</code> modules inside it have <strong>flat, short names</strong> (no
   <code>file.entity</code> dotting). <strong>(2) A module's identity is its
-  <em>structure</em></strong> — a forward-canonical digest computed by
-  <a class="xref" href="2f-semdiff.html">2f-semdiff</a>, not its name or its file path.
+  <em>structure</em></strong> — the forward-canonical digest owned by
+  <a class="xref" href="2f-fcore.html">2f-fcore</a> (built on <code>pass/semdiff</code>'s
+  forward signature), not its name or its file path.
   <strong>(3) Same-name modules coexist</strong>: internal names are unique
   <code>file.entity</code> (the 2026-07-04 lg-drop), so at link two structurally-identical
   modules <em>dedup</em> by digest while two different modules sharing a name simply keep
@@ -34,7 +35,8 @@
 
 <h2>Depends on / relates to</h2>
 <ul>
-<li><a class="xref" href="2f-semdiff.html">2f-semdiff</a> — <strong>export two entry points</strong>:
+<li><a class="xref" href="2f-fcore.html">2f-fcore</a> (canonical digest; the v1
+  <code>pass/semdiff</code> engine is landed) — <strong>export two entry points</strong>:
   <code>semdiff::canonical_hash(graph)</code> (the forward signature folded to a digest —
   the IO-by-name, commutative-within-port, <code>bits</code>-folded key it already builds)
   as the dedup bucket key, and the existing <code>semdiff::structural_match</code> as the
@@ -122,8 +124,9 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
   names in the common case.</li>
 <li><strong>Identity = forward-canonical structure digest, origin-ignored.</strong> Two
   modules are "the same" iff their lowered graphs share the canonical digest — regardless
-  of file path or even module name. The digest comes from
-  <a class="xref" href="2f-semdiff.html">2f-semdiff</a>'s forward signature (deterministic,
+  of file path or even module name. The digest is
+  <a class="xref" href="2f-fcore.html">2f-fcore</a>'s canonical digest over the
+  <code>pass/semdiff</code> forward signature (deterministic,
   order-independent), so it is <strong>stable across independent compile processes</strong>
   — the property the parallel build needs.</li>
 <li><strong>The two failure modes are not symmetric, so dedup is <em>sound</em>, never
@@ -229,7 +232,8 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
 <ul class="subtasks">
 <li><strong>S3 — <code>canonical_hash</code> export.</strong>
   <span class="status">partial — re-verified 2026-06-27</span> Add
-  <code>semdiff::canonical_hash(graph)</code> to <a class="xref" href="2f-semdiff.html">2f-semdiff</a>
+  <code>semdiff::canonical_hash(graph)</code> to <code>pass/semdiff</code> (the
+  <a class="xref" href="2f-fcore.html">2f-fcore</a> digest deliverable)
   and the bottom-up Merkle driver over the instance DAG.
   <em>Today:</em> only the confirm step <code>structural_match</code> is exported
   (<code>pass/semdiff/semdiff.hpp:42</code>); there is no exported single-graph digest, and the
@@ -282,14 +286,14 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
 <li><strong>The digest MUST be process-independent.</strong> It cannot depend on node gids,
   allocation order, or any per-run state — two libraries compiled in separate
   <code>lhd</code> invocations must produce comparable digests. The
-  <a class="xref" href="2f-semdiff.html">2f-semdiff</a> forward signature is already
+  <code>pass/semdiff</code> forward signature is already
   canonical (commutative-within-port, IO-by-name, <code>bits</code>-folded); a digest must
   preserve exactly that and add nothing run-dependent.</li>
 <li><strong>Never bucket-and-dedup on the digest alone.</strong> A digest collision must be
   confirmed by <code>structural_match</code> before merging, or a hash clash becomes wrong
   hardware. Hash narrows candidates; the traversal decides truth.</li>
 <li><strong>Two libraries with same-named modules keep independent attr stores.</strong>
-  Same caution as <a class="xref" href="2f-semdiff.html">2f-semdiff</a>: hold the
+  Same caution as <a class="xref" href="3f-semdiff.html">3f-semdiff</a>: hold the
   <code>Graph*</code> per library; don't let one <code>Hhds_graph_library</code> alias gids
   across the two.</li>
 </ul>
