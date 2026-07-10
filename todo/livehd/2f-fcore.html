@@ -80,6 +80,23 @@
 <p>Subsumes old lec-M3 (canonical-hash def-diff) and old 2f-verify V5 (per-obligation
   verdict cache) — <strong>one digest, one store, two key kinds</strong> (ruling
   2026-07-10).</p>
+<p><strong>Status: the lec def-pair slice LANDED 2026-07-10</strong> —
+  <code>semdiff::canonical_digest</code> (hierarchical Merkle via a per-side
+  <code>Digest_resolver</code>; anonymous-state-cell ⇒ <code>valid=false</code>,
+  uncacheable), the <code>//lhd:formal_salt</code> genrule,
+  <code>lhd/formal_cache.{hpp,cpp}</code> (<code>formal_cache.json</code>: verdicts
+  salt-gated, hints survive salt), wired into the hier driver as
+  <code>lec.cache</code> (default on under a user <code>--workdir</code>), v1 stores
+  PROVEN only; regression <code>pass/lec/tests/lec_cache_test.sh</code>.
+  <em>v1 conservatism:</em> the Merkle digest re-proves every ancestor of an edited
+  def even when the child is collapse-isolated from the parent proof (ancestors
+  usually resolve via the semdiff skip). <em>Refinement (open):</em> digest
+  collapsed children by INTERFACE only (decl tokens — name/width/sign/port-binding),
+  so ancestors hit the cache across a child-body edit; sound because a collapsed
+  child is a black box whose identity in the parent proof IS its interface + the
+  collapse list already in the key. <em>Remaining:</em> the verify obligation key
+  kind (serialized-SMT-encoding hash, rule F) and the flat (non-hierarchical) lec
+  path.</p>
 <ul class="subtasks">
 <li><strong>Deliverable A — canonical structural def digest:</strong> op + params +
   sorted connectivity + interface, stable across two independent builds of an unchanged
@@ -100,9 +117,18 @@
   (soundness rule F, moved here from 2f-verify).</li>
 <li><strong>Rules (non-negotiable):</strong> cache only definitive verdicts; SAT only
   together with its witness, revalidated by evaluation on hit; <strong>never cache
-  Unknown</strong>; solver identity genuinely belongs in the key (this repo already
-  lived a solver-config soundness bug — the lazy-bitblaster spurious SAT,
-  <code>query.cpp:1098-1120</code>).</li>
+  Unknown as a verdict</strong>; solver identity genuinely belongs in the key (this
+  repo already lived a solver-config soundness bug — the lazy-bitblaster spurious
+  SAT, <code>query.cpp:1098-1120</code>).</li>
+<li><strong>Unknown-attempt LEDGER (ruling 2026-07-10; landed):</strong> distinct
+  from caching a verdict — record "this digest+options already came back Unknown at
+  budget X" and <strong>skip the re-attempt</strong> on an unchanged re-run (the def
+  still reports inconclusive, exactly as re-grinding would). Only
+  <em>witness-free</em> Unknowns ledger: a partial-miter diff is actionable (the
+  exit policy escalates it) and must re-surface every run. Re-attempt on: digest or
+  option change, larger <code>lec.timeout</code>, prover change (salt), or
+  <code>--set lec.retry=all</code>. Motivation: XSCore self-LEC has 443 unprovable
+  defs that re-burned ~23min per warm run.</li>
 <li><strong>Payoff:</strong> edit one module ⇒ only cone/def-touched proofs re-run
   (the external <code>verification_cache.json</code> harness precedent, made native +
   sound + fine-grained).</li>

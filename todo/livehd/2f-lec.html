@@ -33,6 +33,47 @@
 
 <h2>Pending</h2>
 <ul class="subtasks">
+<li><strong>Encoder gap: <code>get_mask</code> operand "no encodable driver
+  (combinational cycle?)" — gates 27% of XSCore.</strong> Finding 2026-07-10, from
+  the XSCore self-LEC scale run: of 1630 defs, 443 are inconclusive, and
+  <em>442 of them</em> fail with this ONE encoder error
+  (<code>pass/lec/encode.cpp</code>) — on a SELF-lec, so it is not a real design
+  cycle on one side. <strong>Root-caused 2026-07-10</strong> (encoder now prints the
+  stall root): a <strong>WORD-level cycle that is BIT-level false</strong> — tolg's
+  concat-accumulator lowering (<code>or(shl(...),...)</code> chains) with
+  <code>get_mask</code> slices of the same wide word feeding members of that word
+  (the Chisel arbiter grant-chain shape, <code>grant[i] = f(valid[j&lt;i])</code>).
+  Cycle e.g. <code>get_mask_13184 → or_13104 → shl_13096 → … → get_mask_11900 →
+  get_mask_13184</code> in <code>Arbiter3_ExuOutput</code> (3ms repro). Preferred
+  fix: a <strong>cprop slice-distribute rule</strong> — <code>get_mask(or(shl(A,k),B),
+  const-mask)</code> reads the member that actually drives the masked bits
+  (distribute over <code>or</code>/<code>shl</code>; iterate) — dissolving the false
+  loop in the graph so lec, cgen, AND sim benefit (same family as the known
+  cgen_sim false comb-loop, <code>inou/cgen/tests/comb_loop/</code>). Traps: mask is
+  a MASK not a position; unsigned bits = magnitude+1; sign-bit reads outside a
+  member's range must resolve to the accumulator's effective sign.
+  <strong>FIXED 2026-07-10:</strong> the transform already existed as cgen_sim's
+  <code>split_packed_selfref_wires</code> (sim-only) — lifted to
+  <code>graph/split_selfref.{hpp,cpp}</code> and called at the head of
+  <code>pass/cprop</code>'s <code>do_trans</code>, so every backend (lec encode,
+  cgen, sim) sees the acyclic bit-level DAG; cgen_sim keeps its call for O0
+  graphs. Full suite green (1129 tests); the encoder's cycle-printing diagnostic
+  stays as the loud backstop for genuine loops. <strong>Validated:</strong>
+  recompiled XSCore self-LEC went 1187/1630 → <strong>1474/1630 proven</strong>
+  (+287). Known limit inherited from the splitter: 1-bit signed members have
+  unbounded footprint (the <code>sim_loop_pack_shiftand</code> boundary) — those
+  still refuse to split, correctly.</li>
+<li><strong>Remaining XSCore tail (156 defs UNKNOWN) — the harder cycle class.</strong>
+  The residual word-level cycles thread through <code>mult</code>/<code>sum</code>/
+  <code>eq</code>/<code>mux</code> — arithmetic the splitter's footprint algebra
+  correctly refuses to cross (a multiplier's output bits depend on ALL input
+  bits). Suspects: dynamic (non-const-mask) range selects lowered to
+  <code>SRA</code>+<code>And</code> (the splitter only cracks const
+  <code>Get_mask</code>), plus genuine solver timeouts on memory-heavy defs
+  (RegFileParts). Needs classification + its own attack (bit-level SCC analysis,
+  or tolg-side lowering changes for the dynamic-select read-backs); the top-level
+  flat encode of XSCore also runs ~7min uncapped — encode time should respect the
+  budget.</li>
 <li><strong>Parallel hier driver on the fcore DAG (consumes F1).</strong> Replace the
   sequential leaves-first loop in <code>lec_hierarchical</code>
   (<code>lhd/lhd_kernel.cpp</code>) with the taskflow proof-DAG: all ready leaves in

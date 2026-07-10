@@ -138,7 +138,7 @@ bazel_dep(name = "hhds", version = "0.2.0")
 git_override(
     module_name = "hhds",
     remote = "https://github.com/masc-ucsc/hhds.git",
-    commit = "730dcd6b4203d92d20ad3be98bb67ea62418632a",  # top of tree (carries the hhds_profiling define decoupling)
+    commit = "6d5720346bddca79bddee7c410e903e223ceab13",
 )
 # For local co-development swap the git_override above for:
 # local_path_override(module_name = "hhds", path = "../hhds")

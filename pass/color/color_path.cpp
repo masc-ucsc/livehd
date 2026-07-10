@@ -15,7 +15,6 @@ using livehd::graph_util::has_name;
 using livehd::graph_util::node_name_of;
 using livehd::graph_util::pin_name_of;
 using livehd::graph_util::type_op_of;
-using livehd::graph_util::wire_name;
 
 // clk/clock/rst/reset are global signals shared across many flops; treating
 // them as boundaries creates false aliases, so skip them.

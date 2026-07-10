@@ -20,6 +20,7 @@ cc_library(
         "cell.cpp",
         "const_pin.cpp",
         "graph_library_singleton.cpp",
+        "split_selfref.cpp",
     ],
     hdrs = [
         "ann_place.hpp",
@@ -27,6 +28,7 @@ cc_library(
         "cell.hpp",
         "graph_library_singleton.hpp",
         "node_util.hpp",
+        "split_selfref.hpp",
     ],
     copts = COPTS,
     includes = ["."],

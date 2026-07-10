@@ -31,7 +31,6 @@ using livehd::graph_util::is_graph_input_pin;
 using livehd::graph_util::is_graph_output_pin;
 using livehd::graph_util::pin_name_of;
 using livehd::graph_util::type_op_of;
-using livehd::graph_util::wire_name;
 
 Graphviz::Graphviz(bool _bits, bool _verbose, std::string_view _odir) : verbose(_verbose), odir(_odir) { (void)_bits; }
 

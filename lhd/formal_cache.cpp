@@ -82,6 +82,21 @@ Verdict_cache::Verdict_cache(std::string workdir, uint64_t salt) : workdir_(std:
   if (!doc.HasMember("salt") || !doc["salt"].IsString() || want_salt != doc["salt"].GetString()) {
     return;  // prover changed: every cached verdict is stale
   }
+  if (doc.HasMember("unknowns") && doc["unknowns"].IsObject()) {
+    for (auto it = doc["unknowns"].MemberBegin(); it != doc["unknowns"].MemberEnd(); ++it) {
+      if (!it->value.IsObject()) {
+        continue;
+      }
+      Unknown_attempt a;
+      if (it->value.HasMember("timeout") && it->value["timeout"].IsInt()) {
+        a.timeout = it->value["timeout"].GetInt();
+      }
+      if (it->value.HasMember("ms") && it->value["ms"].IsInt64()) {
+        a.elapsed_ms = it->value["ms"].GetInt64();
+      }
+      unknowns_.emplace(it->name.GetString(), a);
+    }
+  }
   if (doc.HasMember("verdicts") && doc["verdicts"].IsObject()) {
     for (auto it = doc["verdicts"].MemberBegin(); it != doc["verdicts"].MemberEnd(); ++it) {
       if (!it->value.IsObject()) {
@@ -130,6 +145,35 @@ void Verdict_cache::set_hint(const std::string& entity, Strategy_hint h) {
   dirty_         = true;
 }
 
+bool Verdict_cache::skip_unknown(const std::string& key, int timeout_s) const {
+  auto it = unknowns_.find(key);
+  if (it == unknowns_.end()) {
+    return false;
+  }
+  // A re-attempt only makes sense with MORE budget than the recorded attempt
+  // had: 0 = unbounded dominates everything; otherwise skip when the current
+  // budget is no larger.
+  const bool skip = it->second.timeout == 0 || (timeout_s != 0 && timeout_s <= it->second.timeout);
+  if (skip) {
+    ++skips_;
+  }
+  return skip;
+}
+
+void Verdict_cache::note_unknown(const std::string& key, Unknown_attempt a) {
+  auto [it, inserted] = unknowns_.try_emplace(key, a);
+  if (!inserted) {
+    // Keep the LARGEST budget that came back Unknown (0 = unbounded wins).
+    // NOTE: operator[] would default-construct timeout=0 == "unbounded" and
+    // wrongly suppress future bigger-budget retries — hence try_emplace.
+    auto& rec = it->second;
+    if (rec.timeout != 0 && (a.timeout == 0 || a.timeout >= rec.timeout)) {
+      rec = a;
+    }
+  }
+  dirty_ = true;
+}
+
 void Verdict_cache::save() const {
   if (!dirty_) {
     return;
@@ -158,6 +202,21 @@ void Verdict_cache::save() const {
     out += std::format("    \"{}\": {{\"engine\": \"{}\", \"detail\": \"{}\", \"ms\": {}}}{}\n",
                        esc(vkeys[i]), esc(v.engine), esc(v.detail), v.elapsed_ms,
                        i + 1 < vkeys.size() ? "," : "");
+  }
+  out += "  },\n";
+  out += "  \"unknowns\": {\n";
+  {
+    std::vector<std::string> ukeys;
+    ukeys.reserve(unknowns_.size());
+    for (const auto& [k, _] : unknowns_) {
+      ukeys.push_back(k);
+    }
+    std::sort(ukeys.begin(), ukeys.end());
+    for (size_t i = 0; i < ukeys.size(); ++i) {
+      const auto& a = unknowns_.at(ukeys[i]);
+      out += std::format("    \"{}\": {{\"timeout\": {}, \"ms\": {}}}{}\n",
+                         esc(ukeys[i]), a.timeout, a.elapsed_ms, i + 1 < ukeys.size() ? "," : "");
+    }
   }
   out += "  },\n";
   out += "  \"hints\": {\n";

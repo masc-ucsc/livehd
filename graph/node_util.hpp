@@ -171,14 +171,42 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
   return a.has() ? a.get() : 0;
 }
 
+// Pin / node classification by master node id (no attr lookup).
+[[nodiscard]] inline bool is_graph_input_pin(const hhds::Pin_class& pin) {
+  if (pin.is_invalid()) {
+    return false;
+  }
+  auto master = pin.get_master_node();
+  return master.get_debug_nid() == hhds::Graph::INPUT_NODE;
+}
+
+[[nodiscard]] inline bool is_graph_output_pin(const hhds::Pin_class& pin) {
+  if (pin.is_invalid()) {
+    return false;
+  }
+  auto master = pin.get_master_node();
+  return master.get_debug_nid() == hhds::Graph::OUTPUT_NODE;
+}
+
 // Per-pin / per-node user-assigned name. Returns empty string when no name
-// attribute is present.
+// attribute is present — EXCEPT for graph-IO pins, whose port name lives on
+// the graph's IO maps (GraphIO decls), not in the pin_name attr: those resolve
+// through hhds Graph::pin_name and never come back empty (asserted). An
+// explicit pin_name attr still wins, as a caller-stamped override.
 [[nodiscard]] inline std::string_view pin_name_of(const hhds::Pin_class& pin) {
   if (pin.is_invalid()) {
     return {};
   }
   auto a = pin.attr(livehd::attrs::pin_name);
-  return a.has() ? std::string_view{a.get()} : std::string_view{};
+  if (a.has()) {
+    return std::string_view{a.get()};
+  }
+  if (is_graph_input_pin(pin) || is_graph_output_pin(pin)) {
+    auto n = pin.get_pin_name();
+    I(!n.empty(), "graph-IO pin has no declared port name (GraphIO decls out of sync with graph body)");
+    return n;
+  }
+  return {};
 }
 
 [[nodiscard]] inline std::string_view node_name_of(const hhds::Node_class& node) {
@@ -195,23 +223,6 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
 [[nodiscard]] inline std::string_view const_value_of(const hhds::Node_class& node) {
   auto a = node.attr(livehd::attrs::const_value);
   return a.has() ? std::string_view{a.get()} : std::string_view{};
-}
-
-// Pin / node classification by master node id (no attr lookup).
-[[nodiscard]] inline bool is_graph_input_pin(const hhds::Pin_class& pin) {
-  if (pin.is_invalid()) {
-    return false;
-  }
-  auto master = pin.get_master_node();
-  return master.get_debug_nid() == hhds::Graph::INPUT_NODE;
-}
-
-[[nodiscard]] inline bool is_graph_output_pin(const hhds::Pin_class& pin) {
-  if (pin.is_invalid()) {
-    return false;
-  }
-  auto master = pin.get_master_node();
-  return master.get_debug_nid() == hhds::Graph::OUTPUT_NODE;
 }
 
 // True iff `node` is one of HHDS's singleton built-ins (INPUT_NODE,
@@ -272,9 +283,9 @@ inline constexpr hhds::Port_id Const_small_pid_count = 32;
     return {};
   }
   auto master  = pin.get_master_node();
-  // Graph-IO pins carry their declared name on GraphIO; cgen handles those via
-  // its IO-walk path before falling through here. For internal pins we generate
-  // a synthetic name from the master node + port_id.
+  // Graph-IO pins never reach this fallback: pin_name_of resolves their declared
+  // port name above. For internal pins we generate a synthetic name from the
+  // master node + port_id.
   auto base    = default_instance_name(master);
   auto port_id = pin.get_port_id();
   if (port_id == 0) {

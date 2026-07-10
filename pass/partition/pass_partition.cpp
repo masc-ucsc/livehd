@@ -113,7 +113,6 @@ private:
 
   Union_find uf_;
 
-  absl::flat_hash_map<hhds::Pin_class, std::string> pin_in_name_;   // primary input pin -> io name
   absl::flat_hash_map<hhds::Node_class, std::vector<hhds::Node_class>> region_nodes_;
 
   absl::flat_hash_map<hhds::Node_class, std::vector<InputPort>>                        module_inputs_;
@@ -205,16 +204,7 @@ void Partitioner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pi
 }
 
 bool Partitioner::collect() {
-  // Primary-input pin -> io name.
   auto gio = g_->get_io();
-  if (gio) {
-    for (const auto& decl : gio->get_input_pin_decls()) {
-      auto pin = g_->get_input_pin(decl.name);
-      if (!pin.is_invalid()) {
-        pin_in_name_[pin] = decl.name;
-      }
-    }
-  }
 
   // Regions = connected components of same-color partitionable nodes. Color 0
   // (NO_COLOR) means the node was never colored — either no `pass.color` ran, or
@@ -270,8 +260,8 @@ bool Partitioner::collect() {
       if (gu::is_const_pin(e.driver)) {
         const_edges_[r].push_back(ConstEdge{e.driver, n, spid});
       } else if (gu::is_graph_input_pin(e.driver)) {
-        std::string ioname = pin_in_name_.contains(e.driver) ? pin_in_name_[e.driver] : std::string{};
-        ensure_input_port(r, e.driver, SinkRef{n, spid}, /*from_primary=*/true, ioname);
+        // pin_name_of resolves the graph input's declared port name directly.
+        ensure_input_port(r, e.driver, SinkRef{n, spid}, /*from_primary=*/true, std::string{gu::pin_name_of(e.driver)});
       } else if (is_partitionable(dn)) {
         auto rd = region_of(dn);
         if (rd == r) {
@@ -298,8 +288,7 @@ bool Partitioner::collect() {
         if (gu::is_const_pin(d)) {
           top_outputs_.push_back(OutWire{decl.name, OutWire::Const, {}, {}, d});
         } else if (gu::is_graph_input_pin(d)) {
-          std::string ioname = pin_in_name_.contains(d) ? pin_in_name_[d] : std::string{};
-          top_outputs_.push_back(OutWire{decl.name, OutWire::Primary, {}, ioname, {}});
+          top_outputs_.push_back(OutWire{decl.name, OutWire::Primary, {}, std::string{gu::pin_name_of(d)}, {}});
         } else if (is_partitionable(dn)) {
           ensure_output_port(d);
           top_outputs_.push_back(OutWire{decl.name, OutWire::Region, d, {}, {}});

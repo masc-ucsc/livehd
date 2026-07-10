@@ -229,6 +229,14 @@ static bool set_driver_name_if_free(hhds::Pin_class& pin, std::string_view name)
   if (name.empty()) {
     return false;
   }
+  // A graph-IO pin already carries its declared port name (pin_name_of resolves
+  // it from the graph's IO maps); stamping a cosmetic alias attr here would
+  // SHADOW the port name for every downstream consumer. Reachable e.g. when a
+  // port's declared name itself starts with '_' (the rename sites treat a
+  // leading '_' as "free to rename").
+  if (is_graph_input_pin(pin) || is_graph_output_pin(pin)) {
+    return false;
+  }
 
   auto existing = find_driver_by_name(pin.get_graph(), name);
   if (!existing.is_invalid() && existing != pin) {

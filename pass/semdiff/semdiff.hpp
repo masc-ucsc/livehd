@@ -5,6 +5,7 @@
 #include <functional>
 #include <string>
 
+#include "absl/container/flat_hash_map.h"
 #include "hhds/graph.hpp"
 
 // pass/semdiff — structural diff/match between two LGraphs (task 2f-semdiff): a
@@ -78,5 +79,13 @@ struct Canonical_digest {
 using Digest_resolver = std::function<hhds::Graph*(hhds::Gid)>;
 
 Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve = {});
+
+// Batch form: `memo` (keyed by def gid) persists ACROSS calls, so a driver
+// digesting every def of one library (the hier-LEC loop) computes each subtree
+// once — the per-call form above re-walks shared children per root, which is
+// O(defs x subtree) on a deep hierarchy. One memo per side (a gid must resolve
+// to one body).
+Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve,
+                                  absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo);
 
 }  // namespace livehd::semdiff

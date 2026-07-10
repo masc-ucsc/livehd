@@ -344,17 +344,8 @@ Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir, bool _srcmap,
 }
 
 std::string Cgen_verilog::pin_wire_name(const hhds::Pin_class& pin) {
-  if (pin.is_invalid()) {
-    return {};
-  }
-  // Graph-IO pins resolve via HHDS's get_pin_name (it walks the GraphIO
-  // declaration tables on INPUT_NODE / OUTPUT_NODE pins).
-  if (is_graph_input_pin(pin) || is_graph_output_pin(pin)) {
-    auto n = pin.get_pin_name();
-    if (!n.empty()) {
-      return std::string{n};
-    }
-  }
+  // wire_name resolves graph-IO pins to their declared port name (via
+  // pin_name_of) and internal pins to their attr / synthetic name.
   return wire_name(pin);
 }
 

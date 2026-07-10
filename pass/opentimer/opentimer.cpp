@@ -31,24 +31,11 @@ using livehd::graph_util::hydrate_const;
 using livehd::graph_util::is_const_pin;
 using livehd::graph_util::is_graph_input_pin;
 using livehd::graph_util::is_graph_output_pin;
-using livehd::graph_util::pin_name_of;
 using livehd::graph_util::set_color;
 using livehd::graph_util::type_op_of;
 using livehd::graph_util::wire_name;
 
 namespace {
-
-// Wire name for a pin as opentimer should see it: GraphIO pins use their
-// declared name; internal pins fall back to graph_util::wire_name().
-[[nodiscard]] std::string pin_net_name(const hhds::Pin_class& pin) {
-  if (is_graph_input_pin(pin) || is_graph_output_pin(pin)) {
-    auto n = pin.get_pin_name();
-    if (!n.empty()) {
-      return std::string{n};
-    }
-  }
-  return wire_name(pin);
-}
 
 // Sink-pin name for a node + sink port. For Sub nodes the name is the
 // sub-graph's IO declared name; for other nodes it's Ntype's sink_name.
@@ -146,7 +133,7 @@ std::string Pass_opentimer::get_driver_net_name(const hhds::Pin_class& dpin) con
   if (it != overwrite_dpin2net.end()) {
     return it->second;
   }
-  return pin_net_name(dpin);
+  return wire_name(dpin);
 }
 
 void Pass_opentimer::read_vcd() {
@@ -266,7 +253,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     bool root_track = Ntype::is_pin_trackable(op);
     if (root_track) {
       auto dpin0 = node.create_driver_pin(0);
-      auto wname = pin_net_name(dpin0);
+      auto wname = wire_name(dpin0);
       if (op == Ntype_op::Set_mask) {
         auto a_dpin     = get_driver_of_sink_name(node, "a");
         auto mask_dpin  = get_driver_of_sink_name(node, "mask");
@@ -284,7 +271,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           return;
         }
         auto mask_const = hydrate_const(mask_dpin);
-        pin_tracker.add_set_mask(wname, pin_net_name(a_dpin), bits_of(a_dpin), mask_const, pin_net_name(value_dpin));
+        pin_tracker.add_set_mask(wname, wire_name(a_dpin), bits_of(a_dpin), mask_const, wire_name(value_dpin));
       } else if (op == Ntype_op::Get_mask) {
         auto a_dpin    = get_driver_of_sink_name(node, "a");
         auto mask_dpin = get_driver_of_sink_name(node, "mask");
@@ -301,7 +288,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           return;
         }
         auto mask_const = hydrate_const(mask_dpin);
-        pin_tracker.add_get_mask(wname, pin_net_name(a_dpin), bits_of(a_dpin), mask_const);
+        pin_tracker.add_get_mask(wname, wire_name(a_dpin), bits_of(a_dpin), mask_const);
       } else if (op == Ntype_op::SRA) {
         auto a_dpin = get_driver_of_sink_name(node, "a");
         auto b_dpin = get_driver_of_sink_name(node, "b");
@@ -318,7 +305,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           return;
         }
         auto b_const = hydrate_const(b_dpin);
-        pin_tracker.add_sra(wname, pin_net_name(a_dpin), bits_of(a_dpin), b_const);
+        pin_tracker.add_sra(wname, wire_name(a_dpin), bits_of(a_dpin), b_const);
       } else if (op == Ntype_op::Sext) {
         auto a_dpin = get_driver_of_sink_name(node, "a");
         auto b_dpin = get_driver_of_sink_name(node, "b");
@@ -335,7 +322,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           return;
         }
         auto b_const = hydrate_const(b_dpin);
-        pin_tracker.add_sext(wname, pin_net_name(a_dpin), bits_of(a_dpin), b_const);
+        pin_tracker.add_sext(wname, wire_name(a_dpin), bits_of(a_dpin), b_const);
       } else if (op == Ntype_op::SHL) {
         auto a_dpin = get_driver_of_sink_name(node, "a");
         if (a_dpin.is_invalid()) {
@@ -353,10 +340,10 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           return;
         }
         auto b_const = hydrate_const(b_dpin);
-        pin_tracker.add_shl(wname, pin_net_name(a_dpin), bits_of(a_dpin), b_const);
+        pin_tracker.add_shl(wname, wire_name(a_dpin), bits_of(a_dpin), b_const);
       } else if (op == Ntype_op::Or) {
         for (auto e : node.inp_edges()) {
-          pin_tracker.add_or(wname, pin_net_name(e.driver));
+          pin_tracker.add_or(wname, wire_name(e.driver));
         }
       } else if (op == Ntype_op::And) {
         Dlop            a_mask = *Dlop::create_integer(-1);
@@ -375,7 +362,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           }
         }
         if (!a_dpin.is_invalid()) {
-          pin_tracker.add_and(wname, pin_net_name(a_dpin), a_mask);
+          pin_tracker.add_and(wname, wire_name(a_dpin), a_mask);
         }
       } else {
         livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
@@ -394,7 +381,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         I(!root_track);
         continue;
       }
-      auto wname = pin_net_name(dpin);
+      auto wname = wire_name(dpin);
 
       if (root_track) {
         const auto& pv = pin_tracker.get_pin_vector(wname);

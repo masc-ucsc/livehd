@@ -96,6 +96,16 @@ void Pass_lec::setup() {
                        "case-split control input: auto (default; pick the small-width input feeding the widest "
                        "variable shift-amount / mux-selector pins) | <input-name> (force) | none (disable)",
                        "auto");
+  m.add_label_optional("cache",
+                       "2f-fcore verdict cache under --workdir (formal_cache.json): a def-pair whose canonical "
+                       "digests + verdict-relevant options match a stored PROVEN record is settled with no solver "
+                       "call; false disables. Only active with a user --workdir",
+                       "true");
+  m.add_label_optional("retry",
+                       "verdict-cache Unknown policy: changed (default; an unchanged def that already came back "
+                       "Unknown at this budget skips the re-attempt, still reported inconclusive) | all (re-attempt "
+                       "every Unknown)",
+                       "changed");
   m.add_label_optional("cross", "also run lgcheck and assert agreement (bring-up only)", "false");
   m.add_label_optional("decompose",
                        "split the cut/output miter into per-cut focused queries: auto (default; sweep, then "

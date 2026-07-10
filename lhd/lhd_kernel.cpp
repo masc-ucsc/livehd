@@ -4044,7 +4044,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                                                   hhds::Graph* ref_top_g, hhds::Graph* impl_top_g,
                                                   const livehd::lec::Lec_options& base,
                                                   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
-                                                  livehd::formal::Verdict_cache* vcache) {
+                                                  livehd::formal::Verdict_cache* vcache, bool retry_all) {
   using livehd::lec::Verdict;
   namespace gu = livehd::graph_util;
 
@@ -4178,6 +4178,10 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     auto it = impl_gid2g.find(gid);
     return it == impl_gid2g.end() ? nullptr : it->second;
   };
+  // One digest memo per side, shared across the whole leaves-first loop: each
+  // def's subtree is digested ONCE (the per-call form would re-walk shared
+  // children per root — O(defs x subtree) on an XSCore-deep hierarchy).
+  absl::flat_hash_map<hhds::Gid, livehd::semdiff::Canonical_digest> ref_dmemo, impl_dmemo;
 
   // LEC each def leaves-first; collapse its already-proven children.
   absl::flat_hash_set<std::string>                proven;
@@ -4216,8 +4220,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // simply skip the cache.
     std::string ckey;
     if (vcache != nullptr) {
-      auto dr = livehd::semdiff::canonical_digest(ref_by_name[name], ref_dres);
-      auto di = livehd::semdiff::canonical_digest(impl_by_name[name], impl_dres);
+      auto dr = livehd::semdiff::canonical_digest(ref_by_name[name], ref_dres, ref_dmemo);
+      auto di = livehd::semdiff::canonical_digest(impl_by_name[name], impl_dres, impl_dmemo);
       if (dr.valid && di.valid) {
         ckey = lec_pair_cache_key(dr, di, o);
         if (auto hit = vcache->lookup(ckey); hit.has_value()) {
@@ -4236,6 +4240,28 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
             have_top   = true;
           }
           continue;  // no analysis at all for this def
+        }
+        // Unknown-attempt ledger (ruling 2026-07-10): an unchanged def that
+        // already came back Unknown at this (or a larger) budget skips the
+        // re-grind — it still REPORTS inconclusive, exactly as a re-run would;
+        // no verdict is transferred. A digest/option change, a larger
+        // lec.timeout, a prover change (salt), or --set lec.retry=all
+        // re-attempts.
+        if (!retry_all && vcache->skip_unknown(ckey, o.timeout)) {
+          livehd::lec::Query_result ur;
+          ur.verdict    = Verdict::Unknown;
+          ur.engine     = "cache-skip";
+          ur.elapsed_ms = 0;
+          ur.detail     = std::format(
+              "known inconclusive at timeout<={}s with unchanged digest/options; --set lec.retry=all re-attempts",
+              o.timeout);
+          emit_lec_block_progress(name, ur, o, 0);
+          std::print("lec[hier]: '{}' UNKNOWN (skipped: known inconclusive; lec.retry=all re-attempts)\n", name);
+          if ((name == top_key)) {
+            top_result = ur;
+            have_top   = true;
+          }
+          continue;
         }
       }
     }
@@ -4311,6 +4337,21 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     if (r.verdict == Verdict::Proven) {
       proven.insert(name);
       proven_list.push_back(name);
+      if (vcache != nullptr) {
+        if (!ckey.empty()) {
+          vcache->insert(ckey, {r.engine, r.detail, ms});  // definitive Proven only (rule F; v1 skips Refuted)
+        }
+        // Strategy hint keyed by entity NAME so it survives the design edit
+        // that misses the digest-keyed verdict cache.
+        vcache->set_hint(name, {r.engine, r.split_used, ms});
+      }
+    } else if (r.verdict == Verdict::Unknown && r.witness.empty() && vcache != nullptr && !ckey.empty()) {
+      // Ledger the attempt (NOT a verdict): an unchanged re-run at no more
+      // budget skips this def instead of re-burning the full solver timeout.
+      // Witness-CARRYING Unknowns are excluded: a partial-miter diff is a
+      // potential discrepancy the exit policy escalates (hard fail) — it must
+      // re-surface on every run, never be skipped.
+      vcache->note_unknown(ckey, {o.timeout, ms});
     }
     if (!coll.empty()) {
       collapsed_note.push_back(name + "<-{" + [&] {
@@ -4332,14 +4373,16 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     }
   }
 
-  std::print("lec[hier]: {}/{} def(s) proven leaves-first ({} via semdiff, {} via solver)\n",
+  std::print("lec[hier]: {}/{} def(s) proven leaves-first ({} via cache, {} via semdiff, {} via solver)\n",
              proven_list.size(),
              order.size(),
+             cache_count,
              semdiff_count,
-             static_cast<int>(proven_list.size()) - semdiff_count);
-  res.recipe_steps.emplace_back(std::format("pass.lec hierarchical defs:{} proven:{} semdiff:{}",
+             static_cast<int>(proven_list.size()) - semdiff_count - cache_count);
+  res.recipe_steps.emplace_back(std::format("pass.lec hierarchical defs:{} proven:{} cache:{} semdiff:{}",
                                             order.size(),
                                             proven_list.size(),
+                                            cache_count,
                                             semdiff_count));
 
   if (!have_top) {
@@ -5105,12 +5148,31 @@ void lec_command(Options& opts, Result& res) {
            o.timeout > 0 ? std::format("timeout={}s", o.timeout) : std::string{"no timeout"})
       .emit();
 
+  // 2f-fcore verdict cache: persistent only under a user-named --workdir
+  // (formal_cache.json; opt out with --set lec.cache=false). Keyed cache-wide
+  // by kFormalSrcSalt — the build-time content hash of the prover sources — so
+  // a prover change invalidates every stored verdict automatically. v1 wires
+  // it into the hierarchical driver (the default path).
+  std::unique_ptr<livehd::formal::Verdict_cache> vcache;
+  if (workdir_set && label("cache", "true") != "false" && label("cache", "true") != "0") {
+    vcache = std::make_unique<livehd::formal::Verdict_cache>(opts.workdir, livehd::kFormalSrcSalt);
+  }
+
   livehd::lec::Query_result r;
   if (label("hierarchical", "true") != "false" && label("hierarchical", "true") != "0") {
     // Bottom-up: LEC every def leaves-first under `auto`, collapsing proven
     // children. The driver emits a per-def progress line itself; the TOP def's
     // verdict drives the exit policy below (like the single-design path).
-    r = lec_hierarchical(res, ref_var, impl_var, std::string(ref_g->get_name()), ref_g.get(), impl_g.get(), o, sub_lib_ptr);
+    const bool retry_all = label("retry", "changed") == "all";
+    r = lec_hierarchical(res, ref_var, impl_var, std::string(ref_g->get_name()), ref_g.get(), impl_g.get(), o, sub_lib_ptr,
+                         vcache.get(), retry_all);
+    if (vcache) {
+      vcache->save();
+      if (vcache->hits() > 0 || vcache->stores() > 0 || vcache->skips() > 0) {
+        std::print("lec[cache]: {} hit(s), {} stored, {} skipped-unknown ({}/formal_cache.json)\n", vcache->hits(),
+                   vcache->stores(), vcache->skips(), opts.workdir);
+      }
+    }
   } else {
     res.recipe_steps.emplace_back(std::format("pass.lec engine:{} solver:{} phase:{}", o.engine, o.solver, o.phase));
     auto t0 = std::chrono::steady_clock::now();
@@ -6599,14 +6661,26 @@ std::vector<std::shared_ptr<hhds::Graph>> tool_select_graphs(const std::string& 
   if (!fs::is_directory(dir)) {
     throw Lhd_error{"missing_file", std::format("lg: input not found: {}", dir), "an lg: input is a GraphLibrary directory"};
   }
+  // With --top, resolve just that one graph by name and materialize only it: the
+  // GraphLibrary loads bodies lazily, so its sub-instances load on demand as the
+  // caller descends (e.g. tool_tree_children -> get_subnode_graph). Iterating the
+  // whole library via load_lg_into_var would instead materialize every graph — on
+  // a large design (XiangShan: 1630 graphs, top needs ~79) that is the difference
+  // between reading a handful of bodies and reading all of them.
+  auto& lib = livehd::Hhds_graph_library::instance(dir);
+  std::vector<std::shared_ptr<hhds::Graph>> sel;
+  if (!opts.top.empty()) {
+    if (auto gio = lib.find_io(opts.top)) {
+      if (auto g = gio->get_graph()) {
+        sel.push_back(g);
+      }
+    }
+    return sel;
+  }
   Eprp_var var;
   load_lg_into_var(dir, var);
-  std::vector<std::shared_ptr<hhds::Graph>> sel;
   for (auto& g : var.graphs) {
     if (!g) {
-      continue;
-    }
-    if (!opts.top.empty() && g->get_name() != opts.top) {
       continue;
     }
     sel.push_back(g);
@@ -6910,8 +6984,13 @@ void tool_diff_lg(Options& opts, const std::vector<std::string>& lg_dirs, const 
 }
 
 size_t tool_node_count(hhds::Graph* g) {
+  // fast_class (raw node_table walk), NOT forward_class: a count is
+  // order-independent, and forward_class would build a topological order that
+  // reads every edge — which for a persisted graph forces its overflow
+  // (edge-adjacency) sets to be loaded. fast_class touches only node_table, so a
+  // pure node/instance tree never pays to read edges it will not print.
   size_t n = 0;
-  for ([[maybe_unused]] auto node : g->forward_class()) {
+  for ([[maybe_unused]] auto node : g->fast_class()) {
     ++n;
   }
   return n;

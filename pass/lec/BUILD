@@ -235,3 +235,14 @@ filegroup(
     ]),
     visibility = ["//visibility:public"],
 )
+
+# 2f-fcore verdict cache (lec.cache, --workdir formal_cache.json): identical
+# re-run all-hit; a def edit re-proves that def and (Merkle) its ancestors while
+# defs below the edit still hit; option change = key change; a REFUTE is never
+# cached; lec.cache=false opts out; strategy hints persisted.
+sh_test(
+    name = "lec_cache_test",
+    srcs = ["tests/lec_cache_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # forks the in-process cvc5 solver per def
+)

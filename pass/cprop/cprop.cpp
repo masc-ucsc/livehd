@@ -15,6 +15,7 @@
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
+#include "split_selfref.hpp"
 #include "pass_cprop.hpp"
 #include "perf_tracing.hpp"
 
@@ -965,6 +966,15 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
 #endif
 
   current_graph = g.get();
+  // Dissolve word-level-false comb cycles FIRST (packed-wire concat
+  // accumulators read back via const Get_mask slices -- the Chisel arbiter
+  // grant-chain shape): each slice-read is redirected to the operand that
+  // drives it, so the sweep below AND every downstream consumer (lec encode,
+  // cgen, sim scheduling) sees the acyclic bit-level DAG. No-op on acyclic
+  // graphs. Lifted from cgen_sim 2026-07-10 (which still calls it for O0
+  // graphs that skip cprop); was sim-only, leaving lec unable to encode 442
+  // XSCore defs.
+  livehd::graph_util::split_packed_selfref_wires(current_graph);
   scalar_pass(current_graph);
   current_graph = nullptr;
 

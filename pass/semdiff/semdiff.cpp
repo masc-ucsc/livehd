@@ -524,8 +524,22 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve,
 
 Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve) {
   absl::flat_hash_map<hhds::Gid, Canonical_digest> memo;
-  absl::flat_hash_set<hhds::Gid>                   visiting;
-  return digest_one(g, resolve, memo, visiting);
+  return canonical_digest(g, resolve, memo);
+}
+
+Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve,
+                                  absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo) {
+  if (g == nullptr) {
+    return {};
+  }
+  if (auto it = memo.find(g->get_gid()); it != memo.end()) {
+    return it->second;  // this def was already digested as some other root's child
+  }
+  absl::flat_hash_set<hhds::Gid> visiting;
+  visiting.insert(g->get_gid());  // catch self-instantiation
+  auto d = digest_one(g, resolve, memo, visiting);
+  memo.emplace(g->get_gid(), d);
+  return d;
 }
 
 }  // namespace livehd::semdiff

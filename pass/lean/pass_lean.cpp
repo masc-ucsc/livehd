@@ -113,10 +113,6 @@ bool pin_is_input(const Node_pin& pin) { return livehd::graph_util::is_graph_inp
 
 bool pin_is_const(const Node_pin& pin) { return livehd::graph_util::is_const_pin(pin); }
 
-bool same_pin(const Node_pin& a, const Node_pin& b) {
-  return !a.is_invalid() && !b.is_invalid() && a.get_class_index() == b.get_class_index();
-}
-
 livehd::graph_util::Edge_vec inp_edges_ordered(const Node& node) {
   auto edges = node.inp_edges();
   std::sort(edges.begin(), edges.end(), [](const Edge& a, const Edge& b) {
@@ -272,15 +268,8 @@ std::string int_of_const(const LeanCtx& ctx, const Node& node, const Dlop& v) {
 }
 
 std::string input_name_for_pin(const LeanCtx& ctx, const Node_pin& pin) {
-  if (ctx.g == nullptr) {
-    return {};
-  }
-  for (const auto& kv : ctx.input_field) {
-    auto ipin = ctx.g->get_input_pin(kv.first);
-    if (same_pin(ipin, pin)) {
-      return kv.first;
-    }
-  }
+  // pin_name_of resolves a graph-input pin's declared port name directly (via
+  // the graph's IO maps); no need to identity-match against get_input_pin.
   auto pname = std::string(livehd::graph_util::pin_name_of(pin));
   if (!pname.empty() && ctx.input_field.contains(pname)) {
     return pname;

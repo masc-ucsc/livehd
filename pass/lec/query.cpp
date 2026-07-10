@@ -494,10 +494,12 @@ Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int e
   // auto: score each candidate by the weighted control fan-in it backs. Input
   // support is computed by a FORWARD pass over forward_class (topological order):
   // each node's cone-mask = OR of its input drivers' cones, seeding enumerable
-  // graph-input drivers with their own candidate bit. inp_edges() is walked ONLY
-  // on forward_class nodes (the flat context that resolves drivers — a driver's
-  // source node is looked up by nid in `cone`, never re-walked, since walking a
-  // get_master_node()-derived node's inp_edges() yields nothing outside this loop).
+  // graph-input drivers with their own candidate bit. This single topological
+  // sweep is O(N): each node's cone is memoized in `cone` by nid and a driver's
+  // source node is looked up there, never re-walked. (Historically this shape was
+  // also FORCED because inp_edges() on a get_master_node()-derived node returned
+  // an empty range; hhds fixed that — see graph_test test_get_master_node_edges —
+  // so a backward walk would now be correct, just less efficient than this pass.)
   const bool                                  dbg = std::getenv("LEC_SPLIT_LOG") != nullptr;
   absl::flat_hash_map<std::string, long long> score;
   std::vector<std::string>                    cand;      // candidate index (bitmask, cap 64)
@@ -508,25 +510,15 @@ Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int e
       cand.push_back(nm);
     }
   }
-  // A graph-input DRIVER pin carries no usable pin_name_of() in this flat context
-  // (the port name is on the GraphIO), so match a driver against each input's pin
-  // by pin identity to recover its name. Classify: >=0 enumerable-candidate bit;
-  // -1 wide/other input (a leaf, no cone); -2 internal node output (recurse).
-  std::vector<std::pair<hhds::Pin, std::string>> input_pins;
-  for (const auto& d : gio->get_input_pin_decls()) {
-    input_pins.emplace_back(g->get_input_pin(d.name), std::string(d.name));
-  }
+  // Classify a driver: >=0 enumerable-candidate bit; -1 wide/other input (a
+  // leaf, no cone); -2 internal node output (recurse). pin_name_of resolves a
+  // graph-input driver's port name directly (via the graph's IO maps).
   auto classify = [&](const hhds::Pin& dp) -> int {
     if (!graph_util::is_graph_input_pin(dp)) {
       return -2;
     }
-    for (const auto& [ipin, nm] : input_pins) {
-      if (dp == ipin) {
-        auto it = cand_idx.find(nm);
-        return it == cand_idx.end() ? -1 : it->second;
-      }
-    }
-    return -1;  // an input we could not name -> treat as a non-enumerable leaf
+    auto it = cand_idx.find(graph_util::pin_name_of(dp));
+    return it == cand_idx.end() ? -1 : it->second;
   };
   auto cone_of = [&](const absl::flat_hash_map<uint64_t, uint64_t>& cone, const hhds::Pin& dp) -> uint64_t {
     int b = classify(dp);
@@ -1610,10 +1602,15 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     collect_ins(ref);
     collect_ins(impl);
 
-    // Reset-phase setup. A PRIMARY reset input is an input name that drives some
-    // flop's reset_pin directly; its asserted level is 0 when that flop is
-    // active-low (negreset), else 1. (Derived resets — driven by a mux, not a
-    // primary input — are not directly controllable and are simply left free.)
+    // Reset-phase setup. A PRIMARY reset input is a TOP-level input name that
+    // drives some flop's reset_pin directly; its asserted level is 0 when that
+    // flop is active-low (negreset), else 1. (Derived resets — driven by a mux,
+    // not a primary input — are not directly controllable and are simply left
+    // free.) The top-graph check matters: a subgraph flop's reset driver is the
+    // SUBGRAPH's own input pin, and matching its port name against the top-level
+    // `ins` map by name alone could pin an unrelated same-named top input
+    // (under-exploration -> unsound PROVEN). Subgraph-local resets are left
+    // free; the canonical-name fallback below still covers pass-through resets.
     Io_name_map<bool> reset_negset;  // name -> negreset
     auto                                   collect_resets = [&](hhds::Graph* g) {
       for (auto node : g->forward_hier()) {  // descend hierarchy: flops at every level
@@ -1621,7 +1618,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           continue;
         }
         auto rst_d = graph_util::get_driver_of_sink_name(node, "reset_pin");
-        if (rst_d.is_invalid() || !graph_util::is_graph_input_pin(rst_d)) {
+        if (rst_d.is_invalid() || !graph_util::is_graph_input_pin(rst_d) || rst_d.get_graph() != g) {
           continue;
         }
         auto nm = std::string(graph_util::pin_name_of(rst_d));
@@ -3385,12 +3382,16 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         }
       }
     } else {
-      for (auto node : design->forward_hier()) {  // structural async resets
+      // Structural async resets. Top-graph-only, like prove_equal's collect_resets:
+      // a subgraph flop's reset driver is the SUBGRAPH's own input pin, and name-
+      // matching its port against the top-level `ins` map could pin an unrelated
+      // same-named top input (under-exploration -> unsound PROVEN).
+      for (auto node : design->forward_hier()) {
         if (graph_util::type_op_of(node) != Ntype_op::Flop) {
           continue;
         }
         auto rst_d = graph_util::get_driver_of_sink_name(node, "reset_pin");
-        if (rst_d.is_invalid() || !graph_util::is_graph_input_pin(rst_d)) {
+        if (rst_d.is_invalid() || !graph_util::is_graph_input_pin(rst_d) || rst_d.get_graph() != design) {
           continue;
         }
         auto nm = std::string(graph_util::pin_name_of(rst_d));

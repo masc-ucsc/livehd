@@ -1744,7 +1744,57 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       continue;  // descended
     }
     if (!done.contains(nodekey(node))) {
-      return fail("operand of '" + gu::debug_name(node) + "' has no encodable driver (combinational cycle?)");
+      // Diagnose the ROOT of the stall, not the first undone node in walk
+      // order: follow undone operands until either (a) a node repeats — a real
+      // word-level cycle, print its members — or (b) a node whose blocking
+      // operand is not another undone node (an unmapped input-pin name, an
+      // opaque driver, ...), print that operand.
+      std::vector<std::string>       chain;
+      absl::flat_hash_set<uint64_t>  seen;
+      auto cur      = node;
+      bool diagnosed = false;
+      std::string diag;
+      while (!diagnosed) {
+        if (!seen.insert(static_cast<uint64_t>(cur.get_debug_nid())).second) {
+          diag = "WORD-LEVEL CYCLE through: ";
+          for (const auto& c : chain) {
+            diag += c + " -> ";
+          }
+          diag += gu::debug_name(cur);
+          diagnosed = true;
+          break;
+        }
+        chain.push_back(gu::debug_name(cur));
+        bool hopped = false;
+        for (const auto& e : cur.inp_edges()) {
+          const auto& drv = e.driver;
+          if (gu::is_const_pin(drv)) {
+            continue;
+          }
+          if (gu::is_graph_input_pin(drv)) {
+            std::string in_name{drv.get_pin_name()};
+            if (!out.inputs.contains(in_name)) {
+              diag      = "input pin '" + in_name + "' of '" + gu::debug_name(cur) + "' is not among the declared inputs";
+              diagnosed = true;
+            }
+            continue;
+          }
+          auto mn = drv.get_master_node();
+          if (!done.contains(nodekey(mn))) {
+            cur    = mn;
+            hopped = true;
+            break;  // follow the first undone operand
+          }
+        }
+        if (diagnosed) {
+          break;
+        }
+        if (!hopped) {
+          diag      = "'" + gu::debug_name(cur) + "' has all operands resolved yet never encoded (deferred op?)";
+          diagnosed = true;
+        }
+      }
+      return fail("operand of '" + gu::debug_name(node) + "' has no encodable driver (combinational cycle?); root: " + diag);
     }
   }
 
