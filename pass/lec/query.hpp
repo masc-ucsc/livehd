@@ -175,6 +175,26 @@ struct Lec_options {
   // the changed defs reach cvc5. The driver (lhd lec --set lec.hierarchical=true)
   // consumes this; prove_equal itself ignores it.
   std::string semdiff = "none";
+
+  // Input-space case-split (lec.partitions / lec.split): prove the combinational
+  // miter one CONTROL-cofactor at a time, in parallel. `partitions` caps the
+  // number of forked workers (default 4; <2 disables). `split` names the control
+  // input to case-split on ("auto" = pick the input feeding the widest control
+  // operand — a variable barrel shift / mux selector — via graph_is_combinational's
+  // caller; "" / "none" disables). Each worker sweeps a disjoint slice of the
+  // selector's values; every value is pinned to a CONSTANT so cvc5 folds the
+  // control-dependent wide operators (a 1088-bit variable ashr becomes a static
+  // slice), turning one intractable monolithic miter into many trivial cubes.
+  // Only applied to purely combinational pairs (no unreachable-state concern, so
+  // any SAT cube is a genuine counterexample). v1: combinational only.
+  int         partitions = 4;
+  std::string split      = "auto";
+
+  // Internal (set by run_case_split, not a user knob): when `_split_values` is
+  // non-empty, prove_equal's ind path runs the cube sweep over exactly these
+  // selector values of input `_split_name` instead of the monolithic solve.
+  std::string           _split_name;
+  std::vector<uint64_t> _split_values;
 };
 
 // lec.decompose mode predicates (auto | true | false; on/1==true, off/0==false).

@@ -122,6 +122,16 @@ sh_test(
     tags = ["no-sandbox"],  # compiles RTL via both readers + lgcheck
 )
 
+# lec.partitions / lec.split: parallel input-space case-split. Auto-picks the
+# control selector, forks cube-workers, folds the datapath per cube; PROVEN/REFUTED
+# via case-split, disabled by partitions=1, graceful fallback with no selector.
+sh_test(
+    name = "lec_partitions_test",
+    srcs = ["tests/lec_partitions_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # forks in-process cvc5 cube-workers
+)
+
 # lec.timeout regression: nonlinear-multiplier miters that freeze cvc5 forever
 # must come back promptly as UNKNOWN once a per-query solver time limit is set.
 sh_test(

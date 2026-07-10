@@ -422,8 +422,420 @@ Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_
   return make_inconclusive(ri, rb, opts, now_ms(t0));
 }
 
+// A LEC pair is "combinational" when neither design — nor any descended sub-body
+// or sub_lib-resolved def — holds a state cell (Flop/Fflop/Latch/Memory). For
+// such a pair BMC has nothing to unroll (its N-cycle unroll would just re-bit-
+// blast the same combinational miter N times) and the inductive miter degenerates
+// to plain combinational equivalence, which is COMPLETE (no unreachable-state
+// spurious CEX, since there is no state). So the `auto` portfolio can skip the
+// bmc racer — and the fork — entirely. Conservative: a Sub we cannot resolve to a
+// body (a true blackbox that could hide state) forces the full portfolio.
+bool graph_is_combinational(hhds::Graph* g, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
+                            absl::flat_hash_set<hhds::Graph*>& seen) {
+  if (g == nullptr || !seen.insert(g).second) {
+    return true;  // null / already-verified body (a real hw hierarchy is a finite DAG)
+  }
+  for (auto node : g->forward_class()) {  // single level; Sub bodies are descended explicitly below
+    auto op = graph_util::type_op_of(node);
+    if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Memory) {
+      return false;
+    }
+    if (op != Ntype_op::Sub) {
+      continue;
+    }
+    auto         sg   = node.get_subnode_graph();      // shared_ptr; keep alive across the recursion
+    hhds::Graph* body = sg ? sg.get() : nullptr;       // inlined body, if any
+    if (body == nullptr && sub_lib != nullptr) {       // else the sub_lib-resolved def
+      if (auto it = sub_lib->find(node.get_subnode_gid()); it != sub_lib->end()) {
+        body = it->second;
+      }
+    }
+    if (body == nullptr || !graph_is_combinational(body, sub_lib, seen)) {
+      return false;  // blackbox we cannot prove combinational -> keep the full portfolio
+    }
+  }
+  return true;
+}
+
+// ── lec.split=auto: pick a control input to case-split on ────────────────────
+// The hardness of a combinational miter is dominated by WIDE operators whose
+// control operand is input-VARIABLE (a variable barrel shift's amount, a mux
+// selector). Fixing that control input to a constant collapses the operator
+// (cvc5 folds a constant-amount shift to a static slice). So the best split
+// signal is the small-width primary input that (transitively) feeds the widest
+// such control pins — a structural backdoor. Returns {name,width}; name empty if
+// no enumerable candidate (caller falls back to a single monolithic ind query).
+struct Split_pick {
+  std::string name;
+  int         width = 0;
+};
+
+Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int enum_cap_bits) {
+  auto                                  gio = g->get_io();
+  absl::flat_hash_map<std::string, int> in_w;  // enumerable primary inputs -> width
+  for (const auto& d : gio->get_input_pin_decls()) {
+    int w = real_width_io(g->get_input_pin(d.name), *gio, d.name);
+    if (w >= 1 && w <= enum_cap_bits) {
+      in_w[std::string(d.name)] = w;
+    }
+  }
+  if (in_w.empty()) {
+    return {};
+  }
+  // Explicit request: honor a named input if it is an enumerable primary input.
+  if (!requested.empty() && requested != "auto" && requested != "none") {
+    if (auto it = in_w.find(requested); it != in_w.end()) {
+      return {it->first, it->second};
+    }
+    return {};
+  }
+  // auto: score each candidate by the weighted control fan-in it backs. Input
+  // support is computed by a FORWARD pass over forward_class (topological order):
+  // each node's cone-mask = OR of its input drivers' cones, seeding enumerable
+  // graph-input drivers with their own candidate bit. inp_edges() is walked ONLY
+  // on forward_class nodes (the flat context that resolves drivers — a driver's
+  // source node is looked up by nid in `cone`, never re-walked, since walking a
+  // get_master_node()-derived node's inp_edges() yields nothing outside this loop).
+  const bool                                  dbg = std::getenv("LEC_SPLIT_LOG") != nullptr;
+  absl::flat_hash_map<std::string, long long> score;
+  std::vector<std::string>                    cand;      // candidate index (bitmask, cap 64)
+  absl::flat_hash_map<std::string, int>       cand_idx;
+  for (const auto& [nm, w] : in_w) {
+    if (cand.size() < 64) {
+      cand_idx[nm] = static_cast<int>(cand.size());
+      cand.push_back(nm);
+    }
+  }
+  // A graph-input DRIVER pin carries no usable pin_name_of() in this flat context
+  // (the port name is on the GraphIO), so match a driver against each input's pin
+  // by pin identity to recover its name. Classify: >=0 enumerable-candidate bit;
+  // -1 wide/other input (a leaf, no cone); -2 internal node output (recurse).
+  std::vector<std::pair<hhds::Pin, std::string>> input_pins;
+  for (const auto& d : gio->get_input_pin_decls()) {
+    input_pins.emplace_back(g->get_input_pin(d.name), std::string(d.name));
+  }
+  auto classify = [&](const hhds::Pin& dp) -> int {
+    if (!graph_util::is_graph_input_pin(dp)) {
+      return -2;
+    }
+    for (const auto& [ipin, nm] : input_pins) {
+      if (dp == ipin) {
+        auto it = cand_idx.find(nm);
+        return it == cand_idx.end() ? -1 : it->second;
+      }
+    }
+    return -1;  // an input we could not name -> treat as a non-enumerable leaf
+  };
+  auto cone_of = [&](const absl::flat_hash_map<uint64_t, uint64_t>& cone, const hhds::Pin& dp) -> uint64_t {
+    int b = classify(dp);
+    if (b >= 0) {
+      return uint64_t{1} << b;
+    }
+    if (b == -2) {
+      if (auto it = cone.find(static_cast<uint64_t>(dp.get_master_node().get_debug_nid())); it != cone.end()) {
+        return it->second;
+      }
+    }
+    return 0;
+  };
+  absl::flat_hash_map<uint64_t, uint64_t> cone;  // node nid -> candidate bitmask of its input cone
+  long long                               dbg_nodes = 0, dbg_sra = 0, dbg_shl = 0, dbg_mux = 0, dbg_varctrl = 0;
+  auto                                    score_ctrl = [&](const hhds::Pin& ctrl, long long weight) {
+    if (ctrl.is_invalid() || graph_util::is_const_pin(ctrl)) {
+      return;
+    }
+    ++dbg_varctrl;
+    uint64_t cm = cone_of(cone, ctrl);
+    for (int i = 0; i < static_cast<int>(cand.size()); ++i) {
+      if (cm & (uint64_t{1} << i)) {
+        score[cand[i]] += weight;
+      }
+    }
+  };
+  for (auto node : g->forward_class()) {
+    ++dbg_nodes;
+    uint64_t m = 0;
+    for (auto e : node.inp_edges()) {
+      m |= cone_of(cone, e.driver);
+    }
+    cone[static_cast<uint64_t>(node.get_debug_nid())] = m;
+    // The control driver's source node precedes `node` in topo order, so its cone
+    // is already in the map — score it now.
+    auto op = graph_util::type_op_of(node);
+    if (op == Ntype_op::SRA || op == Ntype_op::SHL) {
+      (op == Ntype_op::SRA) ? ++dbg_sra : ++dbg_shl;
+      score_ctrl(graph_util::get_driver_of_sink_name(node, "b"), std::max(1, real_width(node.get_driver_pin(0))));
+    } else if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
+      ++dbg_mux;
+      score_ctrl(graph_util::get_driver_of_sink_name(node, "s"), std::max(1, real_width(node.get_driver_pin(0))) / 2 + 1);
+    }
+  }
+  if (dbg) {
+    std::fprintf(stderr, "[SPLIT] census nodes=%lld sra=%lld shl=%lld mux/hotmux=%lld var-ctrl=%lld ; scores:", dbg_nodes,
+                 dbg_sra, dbg_shl, dbg_mux, dbg_varctrl);
+    for (const auto& [n, s] : score) {
+      std::fprintf(stderr, " %s=%lld", n.c_str(), static_cast<long long>(s));
+    }
+    std::fprintf(stderr, "\n");
+  }
+  // Deterministic argmax: highest score, tie -> smaller width -> name.
+  std::vector<std::string> cands;
+  cands.reserve(score.size());
+  for (const auto& [nm, sc] : score) {
+    (void)sc;
+    cands.push_back(nm);
+  }
+  std::sort(cands.begin(), cands.end());
+  std::string best;
+  long long   best_sc = 0;
+  int         best_w  = 0;
+  for (const auto& nm : cands) {
+    long long sc = score[nm];
+    int       w  = in_w[nm];
+    if (sc > best_sc || (sc == best_sc && !best.empty() && w < best_w)) {
+      best    = nm;
+      best_sc = sc;
+      best_w  = w;
+    }
+  }
+  if (best.empty()) {
+    return {};
+  }
+  return {best, best_w};
+}
+
+// ── lec.partitions: parallel input-space case-split ──────────────────────────
+// Fork up to `opts.partitions` workers; each proves the miter UNSAT over a
+// disjoint slice of the split signal's values (every value fully cofactored, so
+// each cube is trivial). First worker to REFUTE wins (kill the rest); all workers
+// Proven => Proven. Returns a sentinel (engine=="") when there is no good split,
+// so the caller falls back to the single monolithic ind query. Combinational only
+// (the caller gates on graph_is_combinational): a SAT cube is a genuine CEX.
+Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
+                            const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  constexpr int kEnumCapBits = 8;  // enumerate at most 2^8 = 256 selector values
+  Query_result  none;
+  none.engine  = "";  // sentinel: caller falls back
+  none.verdict = Verdict::Unknown;
+
+  Split_pick pick = pick_split_signal(ref, opts.split, kEnumCapBits);
+  if (pick.name.empty() || pick.width < 1 || pick.width > kEnumCapBits) {
+    return none;
+  }
+  const uint64_t nvals    = uint64_t{1} << pick.width;
+  const int      nworkers = static_cast<int>(std::min<uint64_t>(static_cast<uint64_t>(std::max(2, opts.partitions)), nvals));
+  auto           t0       = std::chrono::steady_clock::now();
+
+  // Round-robin the selector values across workers (load balance).
+  std::vector<std::vector<uint64_t>> slices(nworkers);
+  for (uint64_t v = 0; v < nvals; ++v) {
+    slices[v % nworkers].push_back(v);
+  }
+
+  // Per-cube solve cap: a cube whose selector value folds the datapath is trivial
+  // (ms), so a short cap costs nothing on a GOOD pick but makes a mis-pick (a
+  // selector that does not fold the hard operator) fail fast -> worker Unknown ->
+  // monolithic fallback, instead of grinding the full lec.timeout per cube.
+  const int kCubeTimeout = (opts.timeout > 0 && opts.timeout < 30) ? opts.timeout : 30;
+
+  auto run_seq = [&]() -> Query_result {  // fork-failure fallback: one in-process sweep
+    Lec_options o   = opts;
+    o.engine        = "ind";
+    o.timeout       = kCubeTimeout;
+    o._split_name   = pick.name;
+    o._split_values.clear();
+    for (uint64_t v = 0; v < nvals; ++v) {
+      o._split_values.push_back(v);
+    }
+    Query_result r = safe_prove_equal(ref, impl, o, sub_lib);
+    r.engine       = "casesplit";
+    r.elapsed_ms   = now_ms(t0);
+    r.detail       = "auto: case-split " + pick.name + "[" + std::to_string(pick.width) + "b] " + std::to_string(nvals)
+             + " cubes (sequential fallback); " + r.detail;
+    return r;
+  };
+
+  std::vector<int>   rfd(nworkers, -1), wfd(nworkers, -1);
+  std::vector<pid_t> pid(nworkers, -1);
+  bool               fork_ok = true;
+  for (int i = 0; i < nworkers; ++i) {
+    int p[2];
+    if (::pipe(p) != 0) {
+      fork_ok = false;
+      break;
+    }
+    rfd[i]  = p[0];
+    wfd[i]  = p[1];
+    pid_t c = ::fork();
+    if (c < 0) {
+      fork_ok = false;
+      break;
+    }
+    if (c == 0) {
+      // child i: keep only its own write fd, run its slice, serialize, _exit.
+      for (int j = 0; j < nworkers; ++j) {
+        if (rfd[j] >= 0) {
+          ::close(rfd[j]);
+        }
+        if (j != i && wfd[j] >= 0) {
+          ::close(wfd[j]);
+        }
+      }
+      Lec_options o    = opts;
+      o.engine         = "ind";
+      o.timeout        = kCubeTimeout;
+      o._split_name    = pick.name;
+      o._split_values  = slices[i];
+      Query_result r   = safe_prove_equal(ref, impl, o, sub_lib);
+      std::string  blob = serialize_result(r);
+      write_all(wfd[i], blob.data(), blob.size());
+      ::close(wfd[i]);
+      ::_exit(0);
+    }
+    pid[i] = c;
+    ::close(wfd[i]);  // parent never writes
+    wfd[i] = -1;
+  }
+
+  if (!fork_ok) {
+    for (int j = 0; j < nworkers; ++j) {
+      if (rfd[j] >= 0) {
+        ::close(rfd[j]);
+      }
+      if (wfd[j] >= 0) {
+        ::close(wfd[j]);
+      }
+      if (pid[j] > 0) {
+        ::kill(pid[j], SIGKILL);
+        int st = 0;
+        ::waitpid(pid[j], &st, 0);
+      }
+    }
+    return run_seq();
+  }
+
+  // Parent: poll all children; the first REFUTED wins (kill the rest).
+  std::vector<std::string>  buf(nworkers);
+  std::vector<bool>         done(nworkers, false);
+  std::vector<Query_result> got(nworkers);
+  int                       remaining = nworkers;
+  int                       refuter   = -1;
+  while (remaining > 0 && refuter < 0) {
+    std::vector<struct pollfd> pfds;
+    std::vector<int>           map;
+    for (int i = 0; i < nworkers; ++i) {
+      if (!done[i]) {
+        struct pollfd pf;
+        pf.fd      = rfd[i];
+        pf.events  = POLLIN;
+        pf.revents = 0;
+        pfds.push_back(pf);
+        map.push_back(i);
+      }
+    }
+    int pr = ::poll(pfds.data(), static_cast<nfds_t>(pfds.size()), -1);
+    if (pr < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      break;
+    }
+    for (size_t k = 0; k < pfds.size() && refuter < 0; ++k) {
+      if (pfds[k].revents == 0) {
+        continue;
+      }
+      int     i = map[k];
+      char    tmp[8192];
+      ssize_t n = ::read(rfd[i], tmp, sizeof tmp);
+      if (n > 0) {
+        buf[i].append(tmp, static_cast<size_t>(n));
+        continue;
+      }
+      done[i] = true;
+      --remaining;
+      if (!deserialize_result(buf[i], got[i])) {
+        got[i]         = Query_result{};
+        got[i].verdict = Verdict::Unknown;
+      }
+      if (got[i].verdict == Verdict::Refuted) {
+        refuter = i;
+      }
+    }
+  }
+  for (int i = 0; i < nworkers; ++i) {
+    if (!done[i] && pid[i] > 0) {
+      ::kill(pid[i], SIGKILL);
+    }
+    if (rfd[i] >= 0) {
+      ::close(rfd[i]);
+    }
+  }
+  for (int i = 0; i < nworkers; ++i) {
+    if (pid[i] > 0) {
+      int st = 0;
+      ::waitpid(pid[i], &st, 0);
+    }
+  }
+
+  std::string tag = pick.name + "[" + std::to_string(pick.width) + "b] " + std::to_string(nworkers) + " workers x "
+                  + std::to_string(nvals) + " cubes";
+  if (refuter >= 0) {
+    Query_result out = got[refuter];
+    out.engine       = "casesplit";
+    out.elapsed_ms   = now_ms(t0);
+    out.detail       = "auto: case-split " + tag + " REFUTED; " + out.detail;
+    return out;
+  }
+  int proven = 0, unknown = 0;
+  for (int i = 0; i < nworkers; ++i) {
+    if (done[i] && got[i].verdict == Verdict::Proven) {
+      ++proven;
+    } else {
+      ++unknown;
+    }
+  }
+  Query_result out;
+  out.engine     = "casesplit";
+  out.elapsed_ms = now_ms(t0);
+  if (unknown == 0) {
+    out.verdict = Verdict::Proven;
+    out.detail  = "auto: case-split " + tag + " PROVEN (every cube UNSAT)";
+  } else {
+    out.verdict = Verdict::Unknown;  // inconclusive: caller falls back to monolithic ind
+    out.detail  = "auto: case-split " + tag + " inconclusive (" + std::to_string(proven) + " workers proven, "
+               + std::to_string(unknown) + " not)";
+  }
+  return out;
+}
+
 Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
                                 const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  // Purely combinational pair: skip the bmc racer (and the fork). Run one ind
+  // query and return its verdict directly — for a stateless design the inductive
+  // miter is the combinational miter, so even a Refuted here is a genuine CEX.
+  {
+    absl::flat_hash_set<hhds::Graph*> seen;
+    if (graph_is_combinational(ref, sub_lib, seen) && graph_is_combinational(impl, sub_lib, seen)) {
+      // Parallel input-space case-split accelerator (lec.partitions): split the
+      // hard combinational miter into per-selector cubes solved across workers.
+      // Only trust a DECISIVE case-split verdict; on no-split/inconclusive fall
+      // back to the single monolithic ind query below (never a regression).
+      if (opts.partitions >= 2 && opts.split != "none" && !opts.split.empty()) {
+        Query_result cs = run_case_split(ref, impl, opts, sub_lib);
+        if (cs.engine == "casesplit" && (cs.verdict == Verdict::Proven || cs.verdict == Verdict::Refuted)) {
+          return cs;
+        }
+      }
+      Lec_options  o  = opts;
+      o.engine        = "ind";
+      auto         tc = std::chrono::steady_clock::now();
+      Query_result r  = safe_prove_equal(ref, impl, o, sub_lib);
+      r.engine        = "ind";
+      r.elapsed_ms    = now_ms(tc);
+      r.detail        = "auto: combinational (no flop/latch/mem) -> single ind query, bmc skipped; " + r.detail;
+      return r;
+    }
+  }
   const char* const engines[2] = {"ind", "bmc"};  // index 0 = inductive, 1 = bmc
   int               p0[2]       = {-1, -1};
   int               p1[2]       = {-1, -1};
@@ -2551,6 +2963,99 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     return res;
   }
 
+  // Witness = diverging COMMON outputs + the satisfying assignment. Built on every
+  // SAT (useful for iteration even when the verdict is gated to Unknown by an
+  // incomplete correspondence). Collect-then-sort: `re.outputs`/`shared` are
+  // flat_hash_maps with run-varying order, which would make the text irreproducible.
+  auto build_witness = [&]() -> std::string {
+    if (!opts.witness) {
+      return {};
+    }
+    std::vector<std::string> diff_toks;
+    for (const auto& [name, rv] : re.outputs) {
+      auto it = ie.outputs.find(name);
+      if (it == ie.outputs.end()) {
+        continue;
+      }
+      int        w    = std::max(rv.width, it->second.width);
+      cvc5::Term rval = solver.getValue(fit_to(tm, rv, w));
+      cvc5::Term ival = solver.getValue(fit_to(tm, it->second, w));
+      if (!rval.isNull() && !ival.isNull() && rval.getBitVectorValue(10) != ival.getBitVectorValue(10)) {
+        diff_toks.push_back(display_name(name) + "(ref=" + rval.getBitVectorValue(10) + " impl=" + ival.getBitVectorValue(10) + ")");
+      }
+    }
+    std::sort(diff_toks.begin(), diff_toks.end());
+    std::string diffs;
+    for (const auto& t : diff_toks) {
+      if (!diffs.empty()) {
+        diffs += ", ";
+      }
+      diffs += t;
+    }
+    std::vector<std::string> toks;
+    for (const auto& [name, v] : shared) {
+      cvc5::Term val = solver.getValue(v.term);
+      if (val.isNull()) {
+        continue;
+      }
+      toks.push_back(display_name(name) + "=" + val.getBitVectorValue(10));
+    }
+    std::sort(toks.begin(), toks.end());
+    std::string w;
+    for (const auto& t : toks) {
+      if (!w.empty()) {
+        w += ", ";
+      }
+      w += t;
+    }
+    return (diffs.empty() ? "" : "diff " + diffs + " @ ") + w;
+  };
+
+  // ── Input-space case-split cube sweep (lec.partitions / lec.split) ─────────
+  // run_case_split forks N workers and hands each a disjoint slice of the control
+  // input's values via opts._split_values. Here (inside one worker) we prove `bad`
+  // UNSAT under sel==v for every assigned v: substituting the constant folds every
+  // control-dependent wide operator (a variable barrel shift becomes a static
+  // slice), so each cube is a trivial query. Combinational only (run_case_split
+  // gates on it), so no unreachable-state concern — a SAT cube is a genuine CEX.
+  if (!opts._split_values.empty()) {
+    if (auto sit = shared.find(opts._split_name); sit != shared.end()) {
+      cvc5::Term sel    = sit->second.term;
+      uint32_t   sel_w  = static_cast<uint32_t>(sit->second.width);
+      int        proven = 0, unknown = 0;
+      for (uint64_t v : opts._split_values) {
+        cvc5::Term vc = tm.mkBitVector(sel_w, v);  // mkBitVector takes v mod 2^sel_w
+        solver.push();
+        solver.assertFormula(bad.substitute(sel, vc));                  // folded miter
+        solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {sel, vc}));  // pin sel so the witness reads it
+        cvc5::Result cr = solver.checkSat();
+        if (cr.isSat()) {
+          res.witness  = build_witness();
+          solver.pop();
+          res.detail  += "; case-split " + opts._split_name + "=" + std::to_string(v) + " DIFFERS";
+          res.verdict  = incomplete ? Verdict::Unknown : Verdict::Refuted;
+          return res;
+        }
+        if (cr.isUnsat()) {
+          ++proven;
+        } else {
+          ++unknown;
+        }
+        solver.pop();
+      }
+      res.detail += "; case-split " + opts._split_name + "[" + std::to_string(sel_w) + "b] " + std::to_string(proven) + "/"
+                  + std::to_string(opts._split_values.size()) + " cubes UNSAT"
+                  + (unknown ? (", " + std::to_string(unknown) + " unknown") : std::string{});
+      if (unknown > 0) {
+        res.verdict = Verdict::Unknown;
+        return res;
+      }
+      res.verdict = incomplete ? Verdict::Unknown : Verdict::Proven;
+      return res;
+    }
+    // sel symbol absent (should not happen): fall through to the monolithic solve.
+  }
+
   // Combinational / inductive miter: UNSAT iff the designs agree on every COMMON
   // output for all inputs (and assumed-equal current state). The monolithic OR of
   // ~100 next-state + output diffs is a single huge query that cvc5's eager
@@ -2608,54 +3113,6 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   }
   solver.assertFormula(bad);
   cvc5::Result r = solver.checkSat();
-
-  // Witness = diverging COMMON outputs + the satisfying assignment. Built on every
-  // SAT (useful for iteration even when the verdict is gated to Unknown by an
-  // incomplete correspondence). Collect-then-sort: `re.outputs`/`shared` are
-  // flat_hash_maps with run-varying order, which would make the text irreproducible.
-  auto build_witness = [&]() -> std::string {
-    if (!opts.witness) {
-      return {};
-    }
-    std::vector<std::string> diff_toks;
-    for (const auto& [name, rv] : re.outputs) {
-      auto it = ie.outputs.find(name);
-      if (it == ie.outputs.end()) {
-        continue;
-      }
-      int        w    = std::max(rv.width, it->second.width);
-      cvc5::Term rval = solver.getValue(fit_to(tm, rv, w));
-      cvc5::Term ival = solver.getValue(fit_to(tm, it->second, w));
-      if (!rval.isNull() && !ival.isNull() && rval.getBitVectorValue(10) != ival.getBitVectorValue(10)) {
-        diff_toks.push_back(display_name(name) + "(ref=" + rval.getBitVectorValue(10) + " impl=" + ival.getBitVectorValue(10) + ")");
-      }
-    }
-    std::sort(diff_toks.begin(), diff_toks.end());
-    std::string diffs;
-    for (const auto& t : diff_toks) {
-      if (!diffs.empty()) {
-        diffs += ", ";
-      }
-      diffs += t;
-    }
-    std::vector<std::string> toks;
-    for (const auto& [name, v] : shared) {
-      cvc5::Term val = solver.getValue(v.term);
-      if (val.isNull()) {
-        continue;
-      }
-      toks.push_back(display_name(name) + "=" + val.getBitVectorValue(10));
-    }
-    std::sort(toks.begin(), toks.end());
-    std::string w;
-    for (const auto& t : toks) {
-      if (!w.empty()) {
-        w += ", ";
-      }
-      w += t;
-    }
-    return (diffs.empty() ? "" : "diff " + diffs + " @ ") + w;
-  };
 
   if (r.isUnsat()) {
     // COMMON outputs agree. Proven only if the correspondence is also complete.

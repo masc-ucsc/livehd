@@ -4912,6 +4912,8 @@ void lec_command(Options& opts, Result& res) {
   o.decompose    = label("decompose", "auto");
   o.strict       = label("strict", "false") != "false" && label("strict", "false") != "0";
   o.semdiff      = livehd::lec::lec_canon_semdiff(label("semdiff", "structural"));
+  o.partitions   = std::atoi(label("partitions", "4").c_str());
+  o.split        = label("split", "auto");
   o.phase        = label("phase", "after_reset");
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
   o.reset        = label("reset", "");

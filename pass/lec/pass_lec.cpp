@@ -85,6 +85,17 @@ void Pass_lec::setup() {
                        "cross-front-end pairs (slang vs pyrope) never match structurally, so it only helps "
                        "same-source rebuilds",
                        "structural");
+  m.add_label_optional("partitions",
+                       "input-space case-split: max parallel cube-workers for a purely COMBINATIONAL miter "
+                       "(default 4; <2 disables). Each worker sweeps a disjoint slice of the auto-picked control "
+                       "input's values, every value pinned to a constant so control-dependent wide operators (a "
+                       "variable barrel shift / mux selector) fold — turning one intractable miter into many trivial "
+                       "cubes. A decisive case-split verdict is used; otherwise it falls back to the monolithic solve",
+                       "4");
+  m.add_label_optional("split",
+                       "case-split control input: auto (default; pick the small-width input feeding the widest "
+                       "variable shift-amount / mux-selector pins) | <input-name> (force) | none (disable)",
+                       "auto");
   m.add_label_optional("cross", "also run lgcheck and assert agreement (bring-up only)", "false");
   m.add_label_optional("decompose",
                        "split the cut/output miter into per-cut focused queries: auto (default; sweep, then "
@@ -121,6 +132,8 @@ void Pass_lec::lec(Eprp_var& var) {
   o.decompose    = std::string{var.get("decompose", "auto")};
   o.strict       = parse_bool(var.get("strict", "false"));
   o.semdiff      = lec::lec_canon_semdiff(var.get("semdiff", "structural"));
+  o.partitions   = str_tools::to_i(var.get("partitions", "4"));
+  o.split        = std::string{var.get("split", "auto")};
   // lec.collapse: comma-separated proven-module def names to force-blackbox.
   if (std::string cs{var.get("collapse", "")}; !cs.empty()) {
     size_t pos = 0;
