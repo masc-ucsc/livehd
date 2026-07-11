@@ -5771,21 +5771,21 @@ void formal_verify_command(Options& opts, Result& res) {
           }
         }
         // Resolve one signal path for one instance context ("" = the top).
-        auto resolve = [&](const std::string& path, const std::string& prefix,
+        auto resolve = [&](const std::string& sig_path, const std::string& prefix,
                            livehd::lec::Monitor::Bind& b) -> const Sig* {
           if (prefix.empty()) {  // top ports are only visible at the top itself
-            if (auto it = in_tbl.find(path); it != in_tbl.end()) {
+            if (auto it = in_tbl.find(sig_path); it != in_tbl.end()) {
               b.src = livehd::lec::Monitor::Bind::Src::input;
-              b.key = path;
+              b.key = sig_path;
               return &it->second;
             }
-            if (auto ot = out_tbl.find(path); ot != out_tbl.end()) {
+            if (auto ot = out_tbl.find(sig_path); ot != out_tbl.end()) {
               b.src = livehd::lec::Monitor::Bind::Src::output;
-              b.key = path;
+              b.key = sig_path;
               return &ot->second;
             }
           }
-          std::string full = prefix.empty() ? path : prefix + "." + path;
+          std::string full = prefix.empty() ? sig_path : prefix + "." + sig_path;
           if (auto ft = flop_tbl.find(livehd::lec::canon_flop_name(full)); ft != flop_tbl.end()) {
             b.src = livehd::lec::Monitor::Bind::Src::state;
             b.key = livehd::lec::canon_flop_name(full);
