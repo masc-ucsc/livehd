@@ -472,6 +472,8 @@ void print_general_help() {
       "               backend — cvc5 (default, in-process) | bitwuzla | lgyosys (yosys/lgcheck)\n"
       "               lhd lec --impl impl.prp --ref ref.v\n"
       "               lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo\n"
+      "  formal     formal verification family: verify (assert/assume BMC from reset) | lec (= lhd lec)\n"
+      "               lhd formal verify foo.prp --top foo --set formal.bound=12\n"
       "  scan       report each .prp file's import strings (the result's \"scan\" member)\n"
       "               lhd scan x.prp y.prp\n"
       "  tool       inspect ln:/lg: artifacts: cat | grep | diff | tree (stdout; --diag-fmt jsonl)\n"
@@ -494,6 +496,7 @@ void print_general_help() {
       "\n"
       "per-command help:  lhd <command> --help   (== `lhd help <command>`; lists that command's\n"
       "  --set options too) — e.g. `lhd lec --help`, `lhd pass --help`, `lhd pass partition --help`\n"
+      "  (`--diag-fmt jsonl` renders any help page as a machine record; pretty is the tty default)\n"
       "\n"
       "typed I/O (KIND:PATH):  ln: = Forest dir (LNAST units)   lg: = GraphLibrary dir (LGraphs)\n"
       "  ln:/lg:/lnast-dump:/isabelle:/lean:/sim: are directory containers (--emit-dir only;\n"
@@ -669,9 +672,157 @@ int help_pass(const std::string& sub) {
   return 0;
 }
 
+// ---- `--diag-fmt jsonl` help: the machine record for a help page ------------
+// `lhd help X` / `lhd X --help` honor --diag-fmt just like `list`/`describe`:
+// pretty prints the human page (the functions above), jsonl prints a JSON
+// record. For a topic that `lhd describe` already covers (compile/lec/formal/
+// scan/tool/pass/pass semdiff/pyrope fmt|lsp, and the recipes/pass.flags/
+// emit-kinds describe knows) the record IS the describe record — one source of
+// truth, no drift. The topics describe has no entry for get their own records
+// here: the general overview, the pyrope/pass sub-command pages, the `sim`
+// COMMAND (distinct from the `sim` emit-kind describe returns), and list/
+// describe/version. An emit-kind describe lacks a record for (e.g. graphviz)
+// falls through to the same "unknown name" error in either format — a pre-
+// existing describe gap, consistent across pretty/jsonl, not a help defect.
+
+std::string json_general() {
+  return std::format(
+      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set lec.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: color | partition | abc | liberty | semdiff"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|recipes|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
+      kVersion);
+}
+
+std::string json_version() {
+  return std::format(
+      R"json({{"schema_version":1,"name":"version","version":"{}","description":"Print the tool version (also lhd --version)","examples":["lhd version"]}})json",
+      kVersion);
+}
+
+constexpr std::string_view kJsonPyropeOverview =
+    R"json({"schema_version":1,"name":"pyrope","description":"Pyrope developer tools (language-adjacent, not the compile/synth flow)","subcommands":[{"name":"fmt","summary":"format Pyrope source (clang-format-like): -i in place, else stdout"},{"name":"lsp","summary":"the Pyrope LSP server over stdio (JSON-RPC; .prp only)"}],"examples":["lhd pyrope fmt -i foo.prp","lhd pyrope lsp"]})json";
+
+constexpr std::string_view kJsonPassColor =
+    R"json({"schema_version":1,"name":"pass color","description":"Node coloring over an lg: library, in place: acyclic|synth|path|mincut (alg defaults to acyclic). The coloring is written back into the input lg:","args":{"required":[{"name":"alg","type":"enum","values":["acyclic","synth","path","mincut"],"default":"acyclic","positional":true},{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"set","type":"pass.color.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir"]})json";
+
+constexpr std::string_view kJsonPassPartition =
+    R"json({"schema_version":1,"name":"pass partition","description":"Split a design into region -> module Subs (LEC-equivalent). --emit-dir lg: (must differ from the input) receives the partitioned library","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.partition.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass partition --top m lg:dir --emit-dir lg:parts"]})json";
+
+constexpr std::string_view kJsonPassAbc =
+    R"json({"schema_version":1,"name":"pass abc","description":"Combinational ABC tech-map: bit-blast -> AIG -> sky130 blackboxes. --emit-dir lg: (must differ from the input) receives the mapped netlist","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.abc.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass abc --top m lg:dir --emit-dir lg:net"]})json";
+
+constexpr std::string_view kJsonPassLiberty =
+    R"json({"schema_version":1,"name":"pass liberty","description":"Liberty cells -> LGraph simulation models (gensim). Takes a Liberty FILE (not an lg: input); --emit-dir lg: receives the model library","args":{"required":[{"name":"subcommand","type":"enum","values":["gensim"],"positional":true},{"name":"file","type":"path (.lib)","positional":true}],"optional":[{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.liberty.flag=value","repeatable":true}]},"inputs":[],"outputs":["lg"],"examples":["lhd pass liberty gensim sky130.lib --emit-dir lg:models"]})json";
+
+constexpr std::string_view kJsonSimCommand =
+    R"json({"schema_version":1,"name":"sim","description":"Build and run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify): the DUT lowers to a Slop<N> struct (inou.cgen.sim, over ../hlop) and ONE C++ driver holding every test block is host-compiled and run — each test's asserts are checked by running, not formally. An optional second positional selects a single test; each `test name(params)` parameter becomes a --<name> flag on the generated binary","args":{"required":[{"name":"file","type":"path (.prp)","positional":true}],"optional":[{"name":"test","type":"string","positional":true},{"name":"arg","type":"key=value","repeatable":true},{"name":"seed","type":"int"},{"name":"list-tests","type":"flag"},{"name":"setup-only","type":"flag"},{"name":"run-only","type":"flag"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"},{"name":"restart-at","type":"int"},{"name":"vcd-from","type":"int"},{"name":"vcd-to","type":"int"},{"name":"vcd-on-fail","type":"flag"},{"name":"vcd-fail-window","type":"int"},{"name":"list-signals","type":"flag"},{"name":"probe","type":"SIG,..."},{"name":"probe-from","type":"int"},{"name":"probe-to","type":"int"},{"name":"break-when","type":"SIG OP VALUE"},{"name":"set","type":"sim.flag=value","repeatable":true}]},"inputs":["pyrope"],"outputs":["sim"],"examples":["lhd sim foo.prp","lhd sim foo.prp --list-tests","lhd sim foo.prp my_test --arg n=4","lhd sim foo.prp --set sim.vcd=true"]})json";
+
+constexpr std::string_view kJsonList =
+    R"json({"schema_version":1,"name":"list","description":"Enumerate the CLI vocabulary as one JSON line (options also honors --diag-fmt pretty). Patterns: steps | recipes | emit-kinds | error-classes | options [REGEX] | log-channels","args":{"required":[{"name":"pattern","type":"enum","values":["steps","recipes","emit-kinds","error-classes","options","log-channels"],"positional":true}],"optional":[{"name":"regex","type":"string (options name filter)","positional":true}]},"examples":["lhd list options 'cgen\\..*'","lhd list recipes","lhd list log-channels"]})json";
+
+constexpr std::string_view kJsonDescribe =
+    R"json({"schema_version":1,"name":"describe","description":"One item's full record as JSON (the machine face of help; pretty prose for a pass.flag option). Accepts a command, recipe:NAME, emit-kind, pass.flag, dump, or config","args":{"required":[{"name":"name","type":"command | recipe:NAME | emit-kind | pass.flag | dump | config","positional":true}]},"examples":["lhd describe compile.cgen.srcmap","lhd describe lec"]})json";
+
+// Route a `--diag-fmt jsonl` help page to its JSON record. `topic`/`sub` are the
+// normalized help words (formal lec already folded to lec by the caller).
+int help_json_dispatch(const std::string& topic, const std::string& sub, const Options& opts) {
+  // Reuse the describe record for a topic describe already knows (no drift):
+  // render it by asking describe_command for that exact name.
+  auto describe_as = [&](std::string name) {
+    Options t = opts;
+    t.files   = {std::move(name)};
+    return describe_command(t);
+  };
+
+  if (topic.empty() || topic == "help") {
+    print_json_line(json_general());
+    return 0;
+  }
+  if (topic == "version") {
+    print_json_line(json_version());
+    return 0;
+  }
+  if (topic == "sim") {  // the `sim` COMMAND, not the `sim` emit-kind describe returns
+    print_json_line(kJsonSimCommand);
+    return 0;
+  }
+  if (topic == "list") {
+    print_json_line(kJsonList);
+    return 0;
+  }
+  if (topic == "describe") {
+    print_json_line(kJsonDescribe);
+    return 0;
+  }
+  if (topic == "lsp") {  // convenience alias for `pyrope lsp`
+    return describe_as("pyrope lsp");
+  }
+  if (topic == "semdiff") {  // convenience alias for `pass semdiff`
+    return describe_as("pass semdiff");
+  }
+  if (topic == "pyrope") {
+    if (sub.empty()) {
+      print_json_line(kJsonPyropeOverview);
+      return 0;
+    }
+    if (sub == "fmt" || sub == "lsp") {
+      return describe_as("pyrope " + sub);
+    }
+    std::print(stderr, "lhd help: unknown pyrope subcommand '{}' (fmt | lsp)\n", sub);
+    return 1;
+  }
+  if (topic == "pass") {
+    if (sub.empty()) {
+      return describe_as("pass");
+    }
+    if (sub == "semdiff") {
+      return describe_as("pass semdiff");
+    }
+    if (sub == "color") {
+      print_json_line(kJsonPassColor);
+      return 0;
+    }
+    if (sub == "partition") {
+      print_json_line(kJsonPassPartition);
+      return 0;
+    }
+    if (sub == "abc") {
+      print_json_line(kJsonPassAbc);
+      return 0;
+    }
+    if (sub == "liberty") {
+      print_json_line(kJsonPassLiberty);
+      return 0;
+    }
+    std::print(stderr, "lhd help: unknown pass subcommand '{}' (color | partition | abc | liberty | semdiff)\n", sub);
+    return 1;
+  }
+  // compile / lec / formal / scan / tool, plus every non-command describe topic
+  // (recipe:NAME, emit-kind, pass.flag, dump, config): describe renders the JSON.
+  return describe_as(topic);
+}
+
 int help_command(const Options& opts) {
-  const std::string topic = opts.files.empty() ? "" : opts.files.front();
-  const std::string sub   = opts.files.size() > 1 ? opts.files[1] : "";
+  std::string topic = opts.files.empty() ? "" : opts.files.front();
+  std::string sub   = opts.files.size() > 1 ? opts.files[1] : "";
+
+  // `formal lec` is a behavior-preserving alias of `lec` (parse_args already
+  // rewrites `lhd formal lec --help` to the `lec` topic); fold the
+  // `lhd help formal lec` spelling to match so the two render identically.
+  if (topic == "formal" && sub == "lec") {
+    topic = "lec";
+    sub.clear();
+  }
+  // `tools` is the accepted alias for the `tool` command (parse_args maps the
+  // command word); apply it on the help topic too so `lhd help tools` matches
+  // `lhd tools --help`.
+  if (topic == "tools") {
+    topic = "tool";
+  }
+
+  // --diag-fmt jsonl -> the machine record (mirrors `list`/`describe`); pretty
+  // falls through to the human pages below.
+  if (opts.diag_fmt == Diag_fmt::jsonl) {
+    return help_json_dispatch(topic, sub, opts);
+  }
 
   if (topic.empty() || topic == "help") {
     print_general_help();

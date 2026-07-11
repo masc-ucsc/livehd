@@ -118,6 +118,7 @@ Verdict_cache::Verdict_cache(std::string workdir, uint64_t salt) : workdir_(std:
 }
 
 std::optional<Cached_verdict> Verdict_cache::lookup(const std::string& key) {
+  std::lock_guard lock(mutex_);
   auto it = verdicts_.find(key);
   if (it == verdicts_.end()) {
     return std::nullopt;
@@ -127,12 +128,14 @@ std::optional<Cached_verdict> Verdict_cache::lookup(const std::string& key) {
 }
 
 void Verdict_cache::insert(const std::string& key, Cached_verdict v) {
+  std::lock_guard lock(mutex_);
   verdicts_[key] = std::move(v);
   dirty_         = true;
   ++stores_;
 }
 
 std::optional<Strategy_hint> Verdict_cache::hint(const std::string& entity) const {
+  std::lock_guard lock(mutex_);
   auto it = hints_.find(entity);
   if (it == hints_.end()) {
     return std::nullopt;
@@ -141,11 +144,13 @@ std::optional<Strategy_hint> Verdict_cache::hint(const std::string& entity) cons
 }
 
 void Verdict_cache::set_hint(const std::string& entity, Strategy_hint h) {
+  std::lock_guard lock(mutex_);
   hints_[entity] = std::move(h);
   dirty_         = true;
 }
 
 bool Verdict_cache::skip_unknown(const std::string& key, int timeout_s) const {
+  std::lock_guard lock(mutex_);
   auto it = unknowns_.find(key);
   if (it == unknowns_.end()) {
     return false;
@@ -161,6 +166,7 @@ bool Verdict_cache::skip_unknown(const std::string& key, int timeout_s) const {
 }
 
 void Verdict_cache::note_unknown(const std::string& key, Unknown_attempt a) {
+  std::lock_guard lock(mutex_);
   auto [it, inserted] = unknowns_.try_emplace(key, a);
   if (!inserted) {
     // Keep the LARGEST budget that came back Unknown (0 = unbounded wins).
@@ -175,6 +181,7 @@ void Verdict_cache::note_unknown(const std::string& key, Unknown_attempt a) {
 }
 
 void Verdict_cache::save() const {
+  std::lock_guard lock(mutex_);
   if (!dirty_) {
     return;
   }
@@ -200,7 +207,10 @@ void Verdict_cache::save() const {
   for (size_t i = 0; i < vkeys.size(); ++i) {
     const auto& v = verdicts_.at(vkeys[i]);
     out += std::format("    \"{}\": {{\"engine\": \"{}\", \"detail\": \"{}\", \"ms\": {}}}{}\n",
-                       esc(vkeys[i]), esc(v.engine), esc(v.detail), v.elapsed_ms,
+                                 esc(vkeys[i]),
+                                 esc(v.engine),
+                                 esc(v.detail),
+                                 v.elapsed_ms,
                        i + 1 < vkeys.size() ? "," : "");
   }
   out += "  },\n";
@@ -215,7 +225,10 @@ void Verdict_cache::save() const {
     for (size_t i = 0; i < ukeys.size(); ++i) {
       const auto& a = unknowns_.at(ukeys[i]);
       out += std::format("    \"{}\": {{\"timeout\": {}, \"ms\": {}}}{}\n",
-                         esc(ukeys[i]), a.timeout, a.elapsed_ms, i + 1 < ukeys.size() ? "," : "");
+                                   esc(ukeys[i]),
+                                   a.timeout,
+                                   a.elapsed_ms,
+                                   i + 1 < ukeys.size() ? "," : "");
     }
   }
   out += "  },\n";
@@ -223,7 +236,10 @@ void Verdict_cache::save() const {
   for (size_t i = 0; i < hkeys.size(); ++i) {
     const auto& h = hints_.at(hkeys[i]);
     out += std::format("    \"{}\": {{\"engine\": \"{}\", \"split\": \"{}\", \"ms\": {}}}{}\n",
-                       esc(hkeys[i]), esc(h.engine), esc(h.split), h.elapsed_ms,
+                                 esc(hkeys[i]),
+                                 esc(h.engine),
+                                 esc(h.split),
+                                 h.elapsed_ms,
                        i + 1 < hkeys.size() ? "," : "");
   }
   out += "  }\n}\n";

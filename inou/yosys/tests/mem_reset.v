@@ -3,7 +3,7 @@ module mem_reset
 ( input                  clk,
   input                  reset,
 
-  input [6-1:0]    addr,
+  input [2-1:0]    addr,
 
   input [7:0]      a,
   input [7:0]      b,
@@ -21,8 +21,8 @@ module mem_reset
     end
   end
 
-  logic [6-1:0] wr_addr;
-  logic [6-1:0] wr_addr_next;
+  logic [2-1:0] wr_addr;
+  logic [2-1:0] wr_addr_next;
 
   always_comb begin
     if (a < b)
@@ -39,9 +39,9 @@ module mem_reset
     end
   end
 
-  logic [6-1:0] reset_cntr;
+  logic [2-1:0] reset_cntr;
 
-  logic [7:0] mem[0:31];
+  logic [7:0] mem[0:3];
 
   always @(posedge clk) begin
     if (reset) begin

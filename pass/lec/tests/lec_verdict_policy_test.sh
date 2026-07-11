@@ -39,7 +39,7 @@ module foo(input a, input b, output o); assign o = ~((~a)|(~b)); endmodule
 EOF
 
 run() {  # $1=label $2..=lhd args ; sets RC/OUT
-  OUT=$("$LHD" lec "${@:2}" --top foo --set lec.hierarchical=false --set lec.timeout=5 --workdir "$WORK/w_$1" 2>&1); RC=$?
+  OUT=$("$LHD" lec "${@:2}" --top foo --set lec.hierarchical=false --set lec.timeout=2 --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
 # 1) UNKNOWN, default policy -> clean exit 0 + a warning, verdict UNKNOWN

@@ -19,7 +19,11 @@
   <code>lec.*</code> aliases. The shared infrastructure this page used to spec moved
   to <a class="xref" href="2f-fcore.html">2f-fcore</a> (2026-07-10 reorg): the
   verdict cache (old V5), the budget scheduler (old V6), case-split, and hint
-  plumbing. LEC consumption of formal blocks (old V7, lec half) moved to
+  plumbing. <strong>LANDED 2026-07-10:</strong> serialized-SMT verify-obligation
+  cache keys (F2 tail) and verify case splitting through
+  <code>formal.partitions</code>/<code>formal.split</code> (F4). The scheduler and
+  hint plumbing remain pending in fcore. LEC consumption of formal blocks (old V7,
+  lec half) moved to
   <a class="xref" href="2f-lec.html">2f-lec</a>; the compile-profile rebase (old V7,
   formal half) to <a class="xref" href="2f-formal.html">2f-formal</a>.
   <strong>Dropped by ruling 2026-07-10:</strong> CEGAR lazy memory reads (old Attack

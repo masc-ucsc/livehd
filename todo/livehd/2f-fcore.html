@@ -38,6 +38,11 @@
 </ul>
 
 <h2>1 — Proof-task DAG runner (taskflow + fork workers)</h2>
+<p><strong>Status: F1 LANDED 2026-07-10.</strong> Taskflow 4.1.0 is a pinned
+  <code>MODULE.bazel</code> external dependency; hierarchical LEC now runs the
+  scoped child→parent proof DAG under <code>formal.jobs</code> (default 4). Each
+  definition task owns one fork-isolated solver child and runs its auto ladder
+  sequentially there, so nested forks cannot exceed the global worker bound.</p>
 <ul class="subtasks">
 <li><strong>Vendor <a href="https://github.com/taskflow/taskflow">taskflow</a></strong>
   (header-only, MIT) via <code>MODULE.bazel</code>. It owns the dependency DAG and a
@@ -76,11 +81,12 @@
   consumer pages that own them.</li>
 </ul>
 
-<h2>3 — Unified canonical digest + verdict cache (<code>--workdir</code>)</h2>
+<h2>3 — Unified canonical digest + verdict cache (<code>--workdir</code>) — F2 verify tail LANDED</h2>
 <p>Subsumes old lec-M3 (canonical-hash def-diff) and old 2f-verify V5 (per-obligation
   verdict cache) — <strong>one digest, one store, two key kinds</strong> (ruling
   2026-07-10).</p>
-<p><strong>Status: the lec def-pair slice LANDED 2026-07-10</strong> —
+<p><strong>Status: F2 LANDED for hierarchical LEC and verify obligations
+  2026-07-10.</strong> The lec def-pair slice uses
   <code>semdiff::canonical_digest</code> (hierarchical Merkle via a per-side
   <code>Digest_resolver</code>; anonymous-state-cell ⇒ <code>valid=false</code>,
   uncacheable), the <code>//lhd:formal_salt</code> genrule,
@@ -94,9 +100,11 @@
   collapsed children by INTERFACE only (decl tokens — name/width/sign/port-binding),
   so ancestors hit the cache across a child-body edit; sound because a collapsed
   child is a black box whose identity in the parent proof IS its interface + the
-  collapse list already in the key. <em>Remaining:</em> the verify obligation key
-  kind (serialized-SMT-encoding hash, rule F) and the flat (non-hierarchical) lec
-  path.</p>
+  collapse list already in the key. The verify obligation key hashes the exact
+  accumulated serialized SMT
+  assertions plus the obligation term and solver/reset identity downstream of
+  encoding, then uses the same salt-gated store. <em>Remaining:</em> the flat
+  (non-hierarchical) lec path.</p>
 <ul class="subtasks">
 <li><strong>Deliverable A — canonical structural def digest:</strong> op + params +
   sorted connectivity + interface, stable across two independent builds of an unchanged
@@ -143,13 +151,18 @@
 </ul>
 
 <h2>4 — Case-split / assume-spill generalization</h2>
+<p><strong>Status: F4 LANDED 2026-07-10.</strong> Verify consumes
+  <code>formal.partitions</code>/<code>formal.split</code>, reuses the LEC selector
+  scorer, and cofactors the current-cycle selector per obligation. All cubes
+  UNSAT proves; a SAT cube refutes; an unknown cube falls back to the monolithic
+  check, so splitting cannot weaken a verdict.</p>
 <ul class="subtasks">
 <li><code>lec.partitions=N</code> + <code>lec.split=auto</code> landed 2026-07-10
   (auto-pick a control selector, fork disjoint cube workers, fold verdicts; ALU
-  18.5s→0.7s). Generalize to <code>formal.partitions</code>/<code>formal.split</code>
-  in fcore so <strong>verify obligations</strong> can case-split on control selectors
-  in their cones too — the "introduce assumes on an input and spill parallel
-  sub-proofs" principle, applied to both components.</li>
+  18.5s→0.7s). The shared <code>formal.partitions</code>/<code>formal.split</code>
+  path is now also landed, so <strong>verify obligations</strong> case-split on control
+  selectors in their cones too — the "introduce assumes on an input and spill
+  parallel sub-proofs" principle, applied to both components.</li>
 <li>Soundness folding is per-method: all cubes UNSAT ⇒ Proven; any cube SAT ⇒ Refuted
   with that witness; any cube Unknown ⇒ inconclusive.</li>
 <li>Gotchas already learned: input pins have empty <code>pin_name_of</code> — match by
@@ -261,15 +274,15 @@
 
 <h2>Milestones (each test-backed)</h2>
 <ul class="subtasks">
-<li><strong>F1 — taskflow vendored + DAG runner;</strong> lec hier defs prove with
+<li><strong>F1 — LANDED: taskflow vendored + DAG runner;</strong> lec hier defs prove with
   leaves in parallel. Test: a hier fixture proves with identical verdicts to the
   sequential driver and lower wall-clock; verdicts deterministic across runs.</li>
-<li><strong>F2 — digest + verdict cache.</strong> Tests: identical re-run all-hit
+<li><strong>F2 — LANDED for hier LEC + verify: digest + verdict cache.</strong> Tests: identical re-run all-hit
   (near-instant); a single-def edit re-proves only that def + its ancestors; an
   option/solver change invalidates; Unknown never cached.</li>
 <li><strong>F3 — portfolio generalized + early-cancel.</strong> Test: planted
   easy/hard method pair — winner cancels loser, verdict unchanged.</li>
-<li><strong>F4 — case-split shared with verify.</strong> Test: a verify obligation
+<li><strong>F4 — LANDED: case-split shared with verify.</strong> Test: a verify obligation
   with a control selector completes faster under split, same verdict.</li>
 <li><strong>F5 — scheduler.</strong> Tests: an N-obligation run respects the global
   budget; straggler diagnosis names the planted toxic kernel.</li>

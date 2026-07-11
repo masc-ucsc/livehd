@@ -251,6 +251,22 @@ sh_test(
     data = ["//lhd"],
 )
 
+sh_test(
+    name = "lhd_formal_cache_split_test",
+    srcs = ["lhd_formal_cache_split_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+# run_id slice scoping: a lec lg: side hashes only its --top slice, so edits
+# to modules outside the proven subtree keep the run_id; edits to a Sub child
+# move it; an unresolvable top falls back to whole-directory hashing.
+sh_test(
+    name = "lhd_runid_slice_test",
+    srcs = ["lhd_runid_slice_test.sh"],
+    data = ["//lhd"],
+)
+
 # Regression: a kind-change ("a variable's type cannot change") diagnostic must
 # report its source span (file + line), not "span":null. Guards both the
 # constprop array/field store path (cursor left invalid by the sibling walk) and
@@ -535,6 +551,14 @@ sh_test(
     name = "lhd_list_options_test",
     srcs = ["lhd_list_options_test.sh"],
     data = _FLOW_DATA,
+)
+
+# `lhd help X` == `lhd X --help` parity, sub-command-specific pages, and the
+# --diag-fmt pretty|jsonl rendering of every help page.
+sh_test(
+    name = "lhd_help_test",
+    srcs = ["lhd_help_test.sh"],
+    data = ["//lhd"],
 )
 
 # --recipe O2 (pass.cprop + pass.bitwidth): cell-type mix LEC'd against the

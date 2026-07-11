@@ -72,6 +72,7 @@ cc_library(
         "//upass/tolg:upass_tolg",
         "@hhds//hhds:tree_edit_distance",
         "@rapidjson",
+        "@taskflow//:taskflow",
     ],
 )
 

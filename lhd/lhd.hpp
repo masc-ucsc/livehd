@@ -281,7 +281,10 @@ Lhd_error classify_engine_failure(std::string_view fallback_msg);
 void init_engine();
 
 // Deterministic content-hash run_id over (tool version + command + resolved
-// config + input bytes).
+// config + input bytes). A lec --impl/--ref hhds graph-library directory
+// hashes only its per-side --top slice (the top graph plus transitive Sub
+// dependencies): the proof reads nothing else, so nothing else may move the
+// run_id. Every other directory input hashes whole.
 std::string compute_run_id(const Options& opts);
 
 // Serialize the result envelope (single JSON line) to --result-json or stdout.

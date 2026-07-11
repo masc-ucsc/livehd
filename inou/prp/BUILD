@@ -525,8 +525,8 @@ _V2PRP_FIXME = [
         # (FloatFMA sticky vecs): every bit of the pack reads the previous
         # bit's slice, so the fix must redirect a CHAIN of slice-reads.
         "sim_loop_sticky_ripple": "prp-emit",
-        # reader-form gap: readers spelled `(w>>k)&m` are SRA+And nodes, and
-        # the rewire scan only matches const-mask Get_mask readers
+        # reader-form regression: readers spelled `(w>>k)&m` are SRA+And nodes;
+        # the splitter now recognizes them alongside const-mask Get_mask reads
         # (CSRPermitModule/Debug/DecodeUnit family).
         "sim_loop_pack_shiftand": "prp-emit",
         # hierarchically GROUPED pack: the covering operand `(group)<<k` is

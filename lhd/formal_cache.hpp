@@ -19,6 +19,7 @@
 // salt changes too.
 
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -81,6 +82,7 @@ private:
   int         hits_   = 0;
   int         stores_ = 0;
   mutable int skips_  = 0;
+  mutable std::mutex                                mutex_;
   absl::flat_hash_map<std::string, Cached_verdict>  verdicts_;
   absl::flat_hash_map<std::string, Strategy_hint>   hints_;
   absl::flat_hash_map<std::string, Unknown_attempt> unknowns_;

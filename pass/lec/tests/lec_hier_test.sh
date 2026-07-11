@@ -56,5 +56,34 @@ elif ! echo "$OUT" | grep -q "lec\[hier\]: 'mid' REFUTED (0 child collapse"; the
 elif ! echo "$OUT" | grep -q "REFUTED"; then echo "FAIL: top not REFUTED"; fail=1
 else echo "ok: an unprovable child is flattened into its parent (CEGAR fallback)"; fi
 
+# 3) Independent ready leaves exercise the Taskflow DAG. Parallel completion
+# order may differ, but the definition/verdict set must match jobs=1 exactly.
+cat > "$WORK/fan.v" <<'EOF'
+module la(input [7:0] a, output [7:0] y); assign y = a ^ 8'h11; endmodule
+module lb(input [7:0] a, output [7:0] y); assign y = a + 8'h22; endmodule
+module lc(input [7:0] a, output [7:0] y); assign y = a & 8'h33; endmodule
+module ld(input [7:0] a, output [7:0] y); assign y = a | 8'h44; endmodule
+module fan(input [7:0] a, output [7:0] y);
+  wire [7:0] ya, yb, yc, yd;
+  la a0(.a(a),.y(ya)); lb b0(.a(a),.y(yb)); lc c0(.a(a),.y(yc)); ld d0(.a(a),.y(yd));
+  assign y = ya ^ yb ^ yc ^ yd;
+endmodule
+EOF
+"$LHD" compile "$WORK/fan.v" --top fan --emit-dir "lg:$WORK/fanlib" --workdir "$WORK/cfan" >/dev/null 2>&1
+for jobs in 1 4; do
+  "$LHD" lec --impl "lg:$WORK/fanlib" --ref "lg:$WORK/fanlib" --top fan \
+    --set lec.hierarchical=true --set lec.semdiff=none --set formal.jobs="$jobs" \
+    --set lec.cache=false --workdir "$WORK/w_fan_$jobs" >"$WORK/fan_$jobs.out" 2>&1
+  if [ $? -ne 0 ]; then echo "FAIL: fan hierarchy jobs=$jobs failed"; fail=1; fi
+  grep "lec\[hier\]: '.*' .*child collapse" "$WORK/fan_$jobs.out" | sort >"$WORK/fan_$jobs.set"
+done
+if ! cmp -s "$WORK/fan_1.set" "$WORK/fan_4.set"; then
+  echo "FAIL: parallel hierarchy verdict set differs from sequential"
+  diff -u "$WORK/fan_1.set" "$WORK/fan_4.set" || true
+  fail=1
+else
+  echo "ok: formal.jobs=4 matches jobs=1 across independent ready leaves"
+fi
+
 if [ $fail -ne 0 ]; then echo "lec_hier_test: FAILED"; exit 1; fi
 echo "lec_hier_test: PASSED"; exit 0

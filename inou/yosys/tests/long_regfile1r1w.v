@@ -1,18 +1,18 @@
 
 module regfile1r1w
     (input                    clk
-     ,input [4-1:0]           waddr0
+     ,input [2-1:0]           waddr0
      ,input                   we0
-     ,input [13-1:0]          din0
-     ,input [4-1:0]           raddr0
+     ,input [4-1:0]          din0
+     ,input [2-1:0]           raddr0
 
-     ,output reg [13-1:0]     q0
+     ,output reg [4-1:0]     q0
 
      );
 
-   reg [13-1:0]                      rf[16-1:0]; // synthesis syn_ramstyle = "block_ram"
+   reg [4-1:0]                      rf[4-1:0]; // synthesis syn_ramstyle = "block_ram"
 
-   reg [13-1:0] q0_next;
+   reg [4-1:0] q0_next;
    always @(*) begin
      if (we0)
        q0_next = din0;

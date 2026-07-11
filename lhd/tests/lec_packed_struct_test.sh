@@ -116,4 +116,25 @@ EOF
 grep -q '"status":"pass"' "$W/lecs.json" || fail "signed lec not pass: $(cat "$W/lecs.json")"
 echo "PASS: signed packed-struct fields land in their declared signed range (cvc5-PROVEN)"
 
+# (4) A packed word may have overlapping OR contributors in one output field
+# while a disjoint input-region read controls another field. Global pairwise
+# disjointness is false, but the local input slice still has one clean driver.
+# The splitter must prune operands whose proven footprints miss that slice;
+# otherwise it recurses into the output Mux and recreates a false word loop.
+cat >"$W/pack_local.prp" <<'EOF'
+pub comb pack_local(a:u2) -> (z:u2) {
+  mut io:u4 = 0ub????
+  wire hi:u1
+  hi = if ((io >> 2) & 1) != 0 { 1 } else { 0 }
+  io = 1 | 1 | (hi << 1) | (a << 2)
+  z = io#[0..=1]
+}
+EOF
+"$LHD" lec --set lec.strict=true --set lec.semdiff=none --set lec.engine=ind \
+  --top pack_local --ref "$W/pack_local.prp" --impl "$W/pack_local.prp" \
+  --workdir "$W/lec_local" -q --result-json "$W/lec_local.json" \
+  || fail "local-footprint packed-word split did not solver-prove: $(cat "$W/lec_local.json" 2>/dev/null)"
+grep -q '"status":"pass"' "$W/lec_local.json" || fail "local-footprint lec not pass: $(cat "$W/lec_local.json")"
+echo "PASS: overlapping OR fields do not block an unrelated packed input-slice split"
+
 echo "PASS: scalar packed struct → bundle (no false self-loop)"

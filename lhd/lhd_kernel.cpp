@@ -1,9 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <fcntl.h>
+#include <fnmatch.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cstdio>
@@ -15,19 +17,23 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <regex>
 #include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#include "absl/container/flat_hash_set.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "color_common.hpp"  // livehd::color::is_partitionable / NO_COLOR (lhd tool)
 #include "diag.hpp"
-#include "str_tools.hpp"
+#include "encode.hpp"  // pass/lec width/canon helpers (formal-block monitor binding)
 #include "eprp.hpp"
 #include "file_utils.hpp"
+#include "formal_blocks.hpp"  // 2f-verify V2: `formal name.dotted { ... }` extraction
+#include "formal_cache.hpp"   // 2f-fcore verdict cache: --workdir formal_cache.json (verdicts + strategy hints)
+#include "formal_salt.hpp"    // generated (//lhd:formal_salt): formal-source engine-identity salt
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
 #include "hhds/tree.hpp"
@@ -39,17 +45,13 @@
 #include "node_util.hpp"
 #include "pass.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
-#include <fnmatch.h>
-
-#include "encode.hpp"         // pass/lec width/canon helpers (formal-block monitor binding)
-#include "formal_blocks.hpp"  // 2f-verify V2: `formal name.dotted { ... }` extraction
 #include "prp2lnast.hpp"
 #include "prp_sim.hpp"  // `lhd sim`: generate C++ test drivers from `test` blocks
 #include "query.hpp"  // pass/lec L1 (lec::prove_equal) for the cross-check path
 #include "rapidjson/document.h"
 #include "semdiff.hpp"  // pass/semdiff (structural_match) for the `lhd pass semdiff` command
-#include "formal_cache.hpp"  // 2f-fcore verdict cache: --workdir formal_cache.json (verdicts + strategy hints)
-#include "formal_salt.hpp"   // generated (//lhd:formal_salt): formal-source engine-identity salt
+#include "str_tools.hpp"
+#include "taskflow/taskflow.hpp"
 #include "upass_tolg.hpp"
 #include "woothash.hpp"
 
@@ -510,9 +512,7 @@ void check_known_set_passes(const Options& opts) {
       // overrides it. Folded into the run decision by lnastfmt_enabled(), and
       // merge_sets never copies it into a pass (its `pass` matches none).
       if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
-        throw Lhd_error{"usage",
-                        std::format("--set/--config compile.lnast_fmt expects true|false, got '{}'", value),
-                        ""};
+        throw Lhd_error{"usage", std::format("--set/--config compile.lnast_fmt expects true|false, got '{}'", value), ""};
       }
       continue;
     }
@@ -533,11 +533,12 @@ void check_known_set_passes(const Options& opts) {
           known += known.empty() ? "" : ", ";
           known += s.name;
         }
-        throw Lhd_error{"usage", std::format("--set/--config references unknown sim flag 'sim.{}'", flag),
+        throw Lhd_error{"usage",
+                        std::format("--set/--config references unknown sim flag 'sim.{}'", flag),
                         std::format("the sim.* namespace takes: {}", known)};
       }
-      if (opt->kind == Sim_set_option::Kind::boolean && value != "true" && value != "false" && value != "1"
-          && value != "0" && value != "on" && value != "off") {
+      if (opt->kind == Sim_set_option::Kind::boolean && value != "true" && value != "false" && value != "1" && value != "0"
+          && value != "on" && value != "off") {
         throw Lhd_error{"usage", std::format("--set/--config sim.{} expects true|false, got '{}'", flag, value), ""};
       }
       // The numeric checkpoint knobs must be non-negative numbers, else a typo would
@@ -547,8 +548,7 @@ void check_known_set_passes(const Options& opts) {
         char*  endp   = nullptr;
         double parsed = std::strtod(value.c_str(), &endp);
         if (value.empty() || endp == value.c_str() || *endp != '\0' || parsed < 0.0 || errno == ERANGE) {
-          throw Lhd_error{"usage", std::format("--set/--config sim.{} expects a non-negative number, got '{}'", flag, value),
-                          ""};
+          throw Lhd_error{"usage", std::format("--set/--config sim.{} expects a non-negative number, got '{}'", flag, value), ""};
         }
       }
       continue;
@@ -1208,8 +1208,8 @@ std::string find_header_in_runfiles(std::string_view header) {
   std::string     result;
   std::error_code ec;
   for (const auto& root : roots) {
-    for (fs::directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end;
-         it != end && result.empty(); it.increment(ec)) {
+    for (fs::directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end; it != end && result.empty();
+         it.increment(ec)) {
       if (ec) {
         ec.clear();
         continue;
@@ -1394,12 +1394,12 @@ void emit_isabelle_outputs(Options& opts, Result& res, Eprp_var& var) {
       continue;
     }
     if (var.graphs.empty()) {
-      throw Lhd_error{"config",
-                      "no LGraphs to emit as Isabelle",
-                      "the input produced no synthesizable modules"};
+      throw Lhd_error{"config", "no LGraphs to emit as Isabelle", "the input produced no synthesizable modules"};
     }
     ensure_dir(e.path);
-    Eprp_var::Eprp_dict labels{{"path", e.path}};
+    Eprp_var::Eprp_dict labels{
+        {"path", e.path}
+    };
     if (!opts.top.empty()) {
       labels["top"] = opts.top;
     }
@@ -1415,12 +1415,12 @@ void emit_lean_outputs(Options& opts, Result& res, Eprp_var& var) {
       continue;
     }
     if (var.graphs.empty()) {
-      throw Lhd_error{"config",
-                      "no LGraphs to emit as Lean",
-                      "the input produced no synthesizable modules"};
+      throw Lhd_error{"config", "no LGraphs to emit as Lean", "the input produced no synthesizable modules"};
     }
     ensure_dir(e.path);
-    Eprp_var::Eprp_dict labels{{"path", e.path}};
+    Eprp_var::Eprp_dict labels{
+        {"path", e.path}
+    };
     if (!opts.top.empty()) {
       labels["top"] = opts.top;
     }
@@ -1713,11 +1713,10 @@ void validate_emits(const Options& opts) {
   }
   if (opts.command == "tool") {
     for (const char* k : {"lg", "verilog", "ln", "pyrope", "lnast-dump", "isabelle", "lean"}) {
-      reject_emit_kind(opts,
+      reject_emit_kind(
+          opts,
                        k,
-                       {"usage",
-                        "tool prints to stdout (redirect with `>`); it has no --emit outputs",
-                        "use compile for declared artifacts"});
+          {"usage", "tool prints to stdout (redirect with `>`); it has no --emit outputs", "use compile for declared artifacts"});
     }
   }
 }
@@ -2021,8 +2020,8 @@ void discover_imports(Options& opts, Eprp_var& var, size_t n_imports) {
         }
         list += p;
       }
-      livehd::diag::sink().emit(livehd::diag::Diagnostic{
-          .severity = livehd::diag::Severity::error,
+      livehd::diag::sink().emit(
+          livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
           .code     = "import-ambiguous",
           .category = "name",
           .pass     = "lhd.compile",
@@ -2326,7 +2325,9 @@ void scan_command(Options& opts, Result& res) {
     // but has an empty stem; create_io asserts on an empty unit name. Reject any
     // non-regular-file / empty-stem input with a clean usage error.
     if (!fs::is_regular_file(f)) {
-      throw Lhd_error{"usage", std::format("scan expects .prp source files, got '{}'", f), "scan derives a module name from each file's stem"};
+      throw Lhd_error{"usage",
+                      std::format("scan expects .prp source files, got '{}'", f),
+                      "scan derives a module name from each file's stem"};
     }
     auto base = fs::path(f).stem().string();
     if (base.empty()) {
@@ -2706,7 +2707,8 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   if (user_toln_off && find_slot(opts.emits, "pyrope") == nullptr && find_slot(opts.emit_dirs, "pyrope") == nullptr) {
     livehd::diag::warn("lhd.elaborate", "toln-debug-flow", "io")
         .msg("--set upass.toln=0 keeps the original pre-upass LNAST, but no pyrope emit (pass.prp_writer) consumes it")
-        .hint("toln:0 is meant for `--emit-dir pyrope:DIR/` (re-emit source from the inou.slang/inou.prp LNAST); "
+        .hint(
+            "toln:0 is meant for `--emit-dir pyrope:DIR/` (re-emit source from the inou.slang/inou.prp LNAST); "
               "without a pyrope emit this is a debugging or unexpected flow")
         .emit();
   }
@@ -3178,7 +3180,9 @@ void sim_command(Options& opts, Result& res) {
         std::print("  {}", t.name);
         for (size_t i = 0; i < t.params.size(); ++i) {
           const auto& p = t.params[i];
-          std::print("{}{}{}", i == 0 ? "(" : ", ", p.name,
+          std::print("{}{}{}",
+                     i == 0 ? "(" : ", ",
+                     p.name,
                      p.required ? std::string(": required") : std::format(" = {}", p.default_text));
         }
         if (!t.params.empty()) {
@@ -3264,7 +3268,8 @@ void sim_command(Options& opts, Result& res) {
     throw Lhd_error{"usage", std::format("--vcd-from {} is after --vcd-to {}", opts.sim_vcd_from, opts.sim_vcd_to), ""};
   }
   if (ckpt_dir.empty() && opts.sim_restart_at >= 0) {
-    throw Lhd_error{"usage", "--restart-at needs checkpoints — do not combine it with --set sim.checkpoint=false",
+    throw Lhd_error{"usage",
+                    "--restart-at needs checkpoints — do not combine it with --set sim.checkpoint=false",
                     "run once with checkpointing on to create them, then --restart-at"};
   }
 
@@ -3365,7 +3370,8 @@ void sim_command(Options& opts, Result& res) {
     if (dss.str().find("vcd::global_timestamp") == std::string::npos) {
       res.status        = "fail";
       res.error_class   = "usage";
-      res.error_message = "this --run-only sim was generated without VCD; re-run without --run-only (or "
+      res.error_message
+          = "this --run-only sim was generated without VCD; re-run without --run-only (or "
                           "--setup-only --set sim.vcd=true) so the driver gets the trace machinery";
       res.exit_code     = 1;
       return;
@@ -3392,7 +3398,8 @@ void sim_command(Options& opts, Result& res) {
     if (baked_fakedelay != vcd_fakedelay) {
       res.status        = "fail";
       res.error_class   = "usage";
-      res.error_message = std::format("this --run-only sim was generated with sim.vcdfakedelay={}; the style is baked "
+      res.error_message = std::format(
+          "this --run-only sim was generated with sim.vcdfakedelay={}; the style is baked "
                                       "at codegen — re-run --setup-only with the desired --set sim.vcdfakedelay",
                                       baked_fakedelay ? "true" : "false");
       res.exit_code     = 1;
@@ -3405,7 +3412,8 @@ void sim_command(Options& opts, Result& res) {
     res.status        = "fail";
     res.error_class   = "dependency";
     res.error_message = std::format("could not locate the sim runtime headers (slop.hpp: {}, iassert.hpp: {})",
-                                    hlop_inc.empty() ? "<not found>" : hlop_inc, iassert_inc.empty() ? "<not found>" : iassert_inc);
+                                    hlop_inc.empty() ? "<not found>" : hlop_inc,
+                                    iassert_inc.empty() ? "<not found>" : iassert_inc);
     res.exit_code     = 1;
     if (pretty) {
       std::print("  hint: --set compile.cgen.sim_hlop=/path/to/hlop  --set compile.cgen.sim_iassert=/path/to/iassert/src\n");
@@ -3437,8 +3445,11 @@ void sim_command(Options& opts, Result& res) {
   }
 
   const std::string exe = std::format("{}/{}.bin", simdir, prp_sim::kDriverBasename);
-  std::string       cc  = std::format("{} -std=c++23 -DNDEBUG -O1 -I{} -I{} -I{}", shell_quote(cxx), shell_quote(simdir),
-                                       shell_quote(hlop_inc), shell_quote(iassert_inc));
+  std::string       cc  = std::format("{} -std=c++23 -DNDEBUG -O1 -I{} -I{} -I{}",
+                                      shell_quote(cxx),
+                                      shell_quote(simdir),
+                                      shell_quote(hlop_inc),
+                                      shell_quote(iassert_inc));
   for (const auto& b : bodies) {
     cc += " " + shell_quote(b);
   }
@@ -3810,7 +3821,8 @@ void lec_lgyosys(Options& opts, Result& res) {
   if (gold_reader == "slang") {
     slang_plugin = locate_yosys_slang_plugin();
     if (slang_plugin.empty()) {
-      throw Lhd_error{"dependency", "lec.gold_reader=slang: yosys-slang plugin (slang.so) not found",
+      throw Lhd_error{"dependency",
+                      "lec.gold_reader=slang: yosys-slang plugin (slang.so) not found",
                       "build //inou/yosys (the @yosys_slang external) or use the default gold_reader"};
     }
   }
@@ -3928,10 +3940,22 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
         } else {
           check_inputs_exist({path});
         }
-        run_step("inou.prp", var, {{"files", files}}, opts, res);
+        run_step("inou.prp",
+                 var,
+                 {
+                     {"files", files}
+        },
+                 opts,
+                 res);
       } else if (kind == "verilog") {  // slang: the direct SV -> LNAST front-end
         check_inputs_exist({path});
-        run_step("inou.slang", var, {{"files", path}}, opts, res);
+        run_step("inou.slang",
+                 var,
+                 {
+                     {"files", path}
+        },
+                 opts,
+                 res);
       } else {  // ln:
         if (!fs::is_directory(path)) {
           throw Lhd_error{"missing_file", std::format("ln: input not found: {}", path), "an ln: input is a Forest save directory"};
@@ -3959,14 +3983,23 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
 // the end. Reuses the diag jsonl/pretty rendering; the record carries the block
 // name, the verdict, the engine that reached it (the portfolio winner r.engine
 // when the auto engine set one, else the requested engine), and the elapsed ms.
-static void emit_lec_block_progress(std::string_view block, const livehd::lec::Query_result& r,
-                                    const livehd::lec::Lec_options& o, long long elapsed_ms) {
+static void emit_lec_block_progress(std::string_view block, const livehd::lec::Query_result& r, const livehd::lec::Lec_options& o,
+                                    long long elapsed_ms) {
   const char* code;
   const char* verdict;
   switch (r.verdict) {
-    case livehd::lec::Verdict::Proven : code = "lec-block-proven";       verdict = "pass";         break;
-    case livehd::lec::Verdict::Refuted: code = "lec-block-refuted";      verdict = "fail";         break;
-    default                           : code = "lec-block-inconclusive"; verdict = "inconclusive"; break;
+    case livehd::lec::Verdict::Proven:
+      code    = "lec-block-proven";
+      verdict = "pass";
+      break;
+    case livehd::lec::Verdict::Refuted:
+      code    = "lec-block-refuted";
+      verdict = "fail";
+      break;
+    default:
+      code    = "lec-block-inconclusive";
+      verdict = "inconclusive";
+      break;
   }
   const std::string eng = r.engine.empty() ? o.engine : r.engine;
   const long long   ms  = r.elapsed_ms >= 0 ? r.elapsed_ms : elapsed_ms;
@@ -3992,8 +4025,7 @@ static void emit_lec_block_progress(std::string_view block, const livehd::lec::Q
 // split / semdiff (effort and strategy — they change how fast, never what is
 // claimed) and witness (reporting). The engine-identity salt is applied
 // cache-wide by Verdict_cache, not per key.
-static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& dref,
-                                      const livehd::semdiff::Canonical_digest& dimpl,
+static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& dref, const livehd::semdiff::Canonical_digest& dimpl,
                                       const livehd::lec::Lec_options&          o) {
   auto sorted_join = [](std::vector<std::string> v) {
     std::sort(v.begin(), v.end());
@@ -4039,8 +4071,7 @@ static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& d
 // fallback, now in v1. Correspondence is name-based (no semdiff needed when the
 // call structures match). Each def emits a per-block progress line the instant it
 // resolves, so an agent stream-parses the long run. Returns the TOP def's result.
-static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var, Eprp_var& impl_var,
-                                                  const std::string&        top_name,
+static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var, Eprp_var& impl_var, const std::string& top_name,
                                                   hhds::Graph* ref_top_g, hhds::Graph* impl_top_g,
                                                   const livehd::lec::Lec_options& base,
                                                   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
@@ -4178,19 +4209,31 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     auto it = impl_gid2g.find(gid);
     return it == impl_gid2g.end() ? nullptr : it->second;
   };
-  // One digest memo per side, shared across the whole leaves-first loop: each
-  // def's subtree is digested ONCE (the per-call form would re-walk shared
-  // children per root — O(defs x subtree) on an XSCore-deep hierarchy).
+  // Precompute digests before the parallel proof DAG. The memoized walk is fast,
+  // and keeping it single-threaded avoids racing its shared Merkle memo maps.
   absl::flat_hash_map<hhds::Gid, livehd::semdiff::Canonical_digest> ref_dmemo, impl_dmemo;
+  std::vector<livehd::semdiff::Canonical_digest>                    ref_digest(order.size()), impl_digest(order.size());
+  if (vcache != nullptr) {
+    for (size_t i = 0; i < order.size(); ++i) {
+      ref_digest[i]  = livehd::semdiff::canonical_digest(ref_by_name[order[i]], ref_dres, ref_dmemo);
+      impl_digest[i] = livehd::semdiff::canonical_digest(impl_by_name[order[i]], impl_dres, impl_dmemo);
+    }
+  }
 
-  // LEC each def leaves-first; collapse its already-proven children.
-  absl::flat_hash_set<std::string>                proven;
+  // One task per def. Child->parent edges preserve the exact leaves-first
+  // collapse semantics while independent leaves run concurrently.
+  absl::flat_hash_map<std::string, size_t> order_ix;
+  for (size_t i = 0; i < order.size(); ++i) {
+    order_ix.emplace(order[i], i);
+  }
+  std::vector<uint8_t>      proven(order.size(), 0);  // each slot written by its owning task
   livehd::lec::Query_result top_result;
   bool                      have_top      = false;
-  int                       semdiff_count = 0;  // defs dropped structurally (no solver)
-  int                       cache_count   = 0;  // defs settled by the verdict cache (no analysis at all)
-  std::vector<std::string>  proven_list, collapsed_note;
-  for (const auto& name : order) {
+  std::atomic<int>          semdiff_count{0};  // defs dropped structurally (no solver)
+  std::atomic<int>          cache_count{0};    // defs settled by the verdict cache (no analysis at all)
+  std::mutex                report_mutex;
+  auto                      run_def = [&](size_t def_ix) {
+    const auto&              name = order[def_ix];
     livehd::lec::Lec_options o = base;
     // Each def is LEC'd under the requested engine (lec.engine, default `auto` =
     // the ind+bmc portfolio). Honor an explicit engine so `--set lec.engine=bmc`
@@ -4204,7 +4247,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     bool                     kids_proven = true;
     if (auto it = children.find(name); it != children.end()) {
       for (const auto& c : it->second) {
-        if (proven.count(c)) {
+        if (auto ci = order_ix.find(c); ci != order_ix.end() && proven[ci->second] != 0) {
           o.collapse.push_back(c);  // proven child -> sound black-box collapse
           coll.push_back(c);
         } else {
@@ -4220,8 +4263,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // simply skip the cache.
     std::string ckey;
     if (vcache != nullptr) {
-      auto dr = livehd::semdiff::canonical_digest(ref_by_name[name], ref_dres, ref_dmemo);
-      auto di = livehd::semdiff::canonical_digest(impl_by_name[name], impl_dres, impl_dmemo);
+      const auto& dr = ref_digest[def_ix];
+      const auto& di = impl_digest[def_ix];
       if (dr.valid && di.valid) {
         ckey = lec_pair_cache_key(dr, di, o);
         if (auto hit = vcache->lookup(ckey); hit.has_value()) {
@@ -4230,16 +4273,16 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           cr.engine     = "cache";
           cr.elapsed_ms = 0;
           cr.detail = std::format("verdict cache hit (was {} in {}ms: {})", hit->engine, hit->elapsed_ms, hit->detail);
-          emit_lec_block_progress(name, cr, o, 0);
-          proven.insert(name);
-          proven_list.push_back(name);
+          proven[def_ix] = 1;
           ++cache_count;
+          std::lock_guard report_lock(report_mutex);
+          emit_lec_block_progress(name, cr, o, 0);
           std::print("lec[hier]: '{}' PROVEN (cache)\n", name);
           if ((name == top_key)) {
             top_result = cr;
             have_top   = true;
           }
-          continue;  // no analysis at all for this def
+          return;  // no analysis at all for this def
         }
         // Unknown-attempt ledger (ruling 2026-07-10): an unchanged def that
         // already came back Unknown at this (or a larger) budget skips the
@@ -4252,16 +4295,17 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           ur.verdict    = Verdict::Unknown;
           ur.engine     = "cache-skip";
           ur.elapsed_ms = 0;
-          ur.detail     = std::format(
-              "known inconclusive at timeout<={}s with unchanged digest/options; --set lec.retry=all re-attempts",
+          ur.detail
+              = std::format("known inconclusive at timeout<={}s with unchanged digest/options; --set lec.retry=all re-attempts",
               o.timeout);
+          std::lock_guard report_lock(report_mutex);
           emit_lec_block_progress(name, ur, o, 0);
           std::print("lec[hier]: '{}' UNKNOWN (skipped: known inconclusive; lec.retry=all re-attempts)\n", name);
           if ((name == top_key)) {
             top_result = ur;
             have_top   = true;
           }
-          continue;
+          return;
         }
       }
     }
@@ -4284,11 +4328,13 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         sr.engine     = "semdiff";
         sr.elapsed_ms = ms;
         sr.detail     = std::format("structurally identical ({}: {} matched node(s), no solver call)", so.alg, m.a_matched);
-        emit_lec_block_progress(name, sr, o, ms);
-        proven.insert(name);
-        proven_list.push_back(name);
+        proven[def_ix] = 1;
         ++semdiff_count;
+        {
+          std::lock_guard report_lock(report_mutex);
+          emit_lec_block_progress(name, sr, o, ms);
         std::print("lec[hier]: '{}' MATCHED (semdiff {}, no solver)\n", name, so.alg);
+        }
         if (vcache != nullptr && !ckey.empty()) {
           vcache->insert(ckey, {sr.engine, sr.detail, ms});  // a structural match is a definitive Proven
         }
@@ -4296,7 +4342,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           top_result = sr;
           have_top   = true;
         }
-        continue;  // skip the solver for this def
+        return;  // skip the solver for this def
       }
     }
 
@@ -4311,7 +4357,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     }
 
     auto t0 = std::chrono::steady_clock::now();
-    auto r  = livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], o, sub_lib);
+    auto r  = order.size() == 1 ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], o, sub_lib)
+                                : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], o, sub_lib);
     if (r.verdict == Verdict::Refuted && !coll.empty()) {
       // A REFUTE under proven-child collapse is an ABSTRACTION verdict: the box
       // over-approximates the child (free/UF values the real leaf can never
@@ -4323,20 +4370,22 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // counterexample free of proven-child collapse boxes (true blackboxes for
       // UNRESOLVED defs may remain in the flat run — those correspond
       // explicitly and gate to inconclusive when one-sided).
+      {
+        std::lock_guard report_lock(report_mutex);
       std::print("lec[hier]: '{}' REFUTED under collapse ({} box def(s)) -> flat confirmation\n", name, coll.size());
+      }
       livehd::lec::Lec_options oflat = o;
       oflat.collapse.clear();
-      auto rf   = livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], oflat, sub_lib);
+      auto rf       = order.size() == 1 ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], oflat, sub_lib)
+                                        : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], oflat, sub_lib);
       rf.detail = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
                 + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
       rf.elapsed_ms = -1;  // the progress record carries the combined wall-clock below
       r = std::move(rf);
     }
     const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
-    emit_lec_block_progress(name, r, o, ms);
     if (r.verdict == Verdict::Proven) {
-      proven.insert(name);
-      proven_list.push_back(name);
+      proven[def_ix] = 1;
       if (vcache != nullptr) {
         if (!ckey.empty()) {
           vcache->insert(ckey, {r.engine, r.detail, ms});  // definitive Proven only (rule F; v1 skips Refuted)
@@ -4353,37 +4402,56 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // re-surface on every run, never be skipped.
       vcache->note_unknown(ckey, {o.timeout, ms});
     }
-    if (!coll.empty()) {
-      collapsed_note.push_back(name + "<-{" + [&] {
-        std::string s;
-        for (const auto& c : coll) {
-          s += (s.empty() ? "" : ",") + c;
-        }
-        return s;
-      }() + "}");
-    }
+    {
+      std::lock_guard report_lock(report_mutex);
+      emit_lec_block_progress(name, r, o, ms);
     std::print("lec[hier]: '{}' {} ({} child collapse{})\n",
                name,
                r.verdict == Verdict::Proven ? "PROVEN" : (r.verdict == Verdict::Refuted ? "REFUTED" : "UNKNOWN"),
                coll.size(),
                coll.size() == 1 ? "" : "s");
+    }
     if ((name == top_key)) {
       top_result = r;
       have_top   = true;
     }
+  };
+
+  if (order.size() == 1) {
+    run_def(0);  // preserve the normal portfolio; no hierarchy parallelism needed
+  } else {
+    tf::Taskflow          proof_dag;
+    std::vector<tf::Task> tasks;
+    tasks.reserve(order.size());
+    for (size_t i = 0; i < order.size(); ++i) {
+      tasks.push_back(proof_dag.emplace([&, i] { run_def(i); }).name(order[i]));
+    }
+    for (size_t i = 0; i < order.size(); ++i) {
+      if (auto it = children.find(order[i]); it != children.end()) {
+        for (const auto& child : it->second) {
+          if (auto ci = order_ix.find(child); ci != order_ix.end()) {
+            tasks[ci->second].precede(tasks[i]);
+          }
+        }
+      }
+    }
+    tf::Executor executor(static_cast<size_t>(std::max(1, base.jobs)));
+    executor.run(proof_dag).wait();
   }
 
+  const int proven_count = static_cast<int>(std::count(proven.begin(), proven.end(), uint8_t{1}));
+
   std::print("lec[hier]: {}/{} def(s) proven leaves-first ({} via cache, {} via semdiff, {} via solver)\n",
-             proven_list.size(),
+             proven_count,
              order.size(),
-             cache_count,
-             semdiff_count,
-             static_cast<int>(proven_list.size()) - semdiff_count - cache_count);
+             cache_count.load(),
+             semdiff_count.load(),
+             proven_count - semdiff_count.load() - cache_count.load());
   res.recipe_steps.emplace_back(std::format("pass.lec hierarchical defs:{} proven:{} cache:{} semdiff:{}",
                                             order.size(),
-                                            proven_list.size(),
-                                            cache_count,
-                                            semdiff_count));
+                                            proven_count,
+                                            cache_count.load(),
+                                            semdiff_count.load()));
 
   if (!have_top) {
     top_result.verdict = Verdict::Unknown;
@@ -4588,8 +4656,8 @@ bool lecfail_emit_side(const std::string& lhd_bin, const Options& opts, const st
   ensure_dir(outdir);
   ensure_dir(scratch);
   std::string sidearg = kind == "lg" ? "lg:" + path : (kind == "ln" ? "ln:" + path : path);
-  std::string cmd     = shell_quote(lhd_bin) + " compile " + shell_quote(sidearg) + " --emit-dir "
-                    + shell_quote("pyrope:" + outdir) + " --workdir " + shell_quote(scratch);
+  std::string cmd     = shell_quote(lhd_bin) + " compile " + shell_quote(sidearg) + " --emit-dir " + shell_quote("pyrope:" + outdir)
+                        + " --workdir " + shell_quote(scratch);
   if (kind == "verilog") {
     cmd += " --reader " + shell_quote(opts.reader);
   }
@@ -4628,9 +4696,7 @@ bool lecfail_prp_top_is_pub(const std::string& path, const std::string& top) {
 void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_result& r, const std::string& impl_top_full,
                           const std::string& ref_top_full, const std::string& prpfail, bool run_sim) {
   auto skip = [&](std::string_view why) {
-    livehd::diag::info("pass.lec", "lecfail-skip", "io")
-        .msg("lec.prpfail witness testbench not generated: {}", why)
-        .emit();
+    livehd::diag::info("pass.lec", "lecfail-skip", "io").msg("lec.prpfail witness testbench not generated: {}", why).emit();
   };
   if (r.trace.empty()) {
     skip("the verdict carries no reproducible input trace (inductive single-step CEX, or witnesses disabled)");
@@ -4686,8 +4752,8 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   // back to the self-contained inline form (renamed copies) built below.
   const std::string impl_stem = fs::path(opts.impl_path).stem().string();
   const std::string ref_stem  = fs::path(opts.ref_path).stem().string();
-  const bool        prp_pair  = opts.impl_kind == "pyrope" && opts.ref_kind == "pyrope" && !impl_stem.empty()
-                        && !ref_stem.empty() && impl_stem != ref_stem;
+  const bool        prp_pair
+      = opts.impl_kind == "pyrope" && opts.ref_kind == "pyrope" && !impl_stem.empty() && !ref_stem.empty() && impl_stem != ref_stem;
   const bool impl_pub  = prp_pair && lecfail_prp_top_is_pub(opts.impl_path, impl_top);
   const bool ref_pub   = prp_pair && lecfail_prp_top_is_pub(opts.ref_path, ref_top);
   const bool can_import = prp_pair && impl_pub && ref_pub;
@@ -4704,7 +4770,8 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
       which += (which.empty() ? "" : " and ") + std::format("the ref top `{}` in {}", ref_top, opts.ref_path);
     }
     livehd::diag::warn("pass.lec", "lecfail-top-not-pub", "io")
-        .msg("lecfail.prp inlines a COPY of each design because a LEC top is not `pub` ({}) — mark the LEC top `pub` "
+        .msg(
+            "lecfail.prp inlines a COPY of each design because a LEC top is not `pub` ({}) — mark the LEC top `pub` "
              "and the testbench will `import` the original instead, so a fix to the .prp flows into a re-run",
              which)
         .hint(std::format("e.g. `pub mod {}(...)` / `pub comb {}(...)`", impl_top, ref_top))
@@ -4883,9 +4950,8 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   // positionally so their `import("<stem>.<top>")` resolve to the co-loaded units
   // (edit either .prp, re-run, the fix flows through); the inline form is a single
   // self-contained file.
-  const std::string rerun =
-      can_import ? std::format("lhd sim {} {} {} --set sim.vcd=true --workdir <dir>", opts.impl_path, opts.ref_path,
-                               prpfail_path)
+  const std::string rerun
+      = can_import ? std::format("lhd sim {} {} {} --set sim.vcd=true --workdir <dir>", opts.impl_path, opts.ref_path, prpfail_path)
                  : std::format("lhd sim {} --set sim.vcd=true --workdir <dir>", prpfail_path);
   std::string out = std::format(
       "/*\n:name: {}\n:type: simulation\n*/\n"
@@ -4894,8 +4960,15 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
       "// Drives BOTH designs with the failing input sequence ({} cycle(s), {} reset-hold).\n"
       "// Divergence at cycle {}: {}\n"
       "// Re-run:  {}   (dumps {}.vcd)\n\n",
-      test_name, opts.impl_path, opts.ref_path, ncyc, r.trace.reset_cycles, r.trace.diverge_cycle,
-      divtxt.empty() ? "(see verdict)" : divtxt, rerun, test_name);
+      test_name,
+      opts.impl_path,
+      opts.ref_path,
+      ncyc,
+      r.trace.reset_cycles,
+      r.trace.diverge_cycle,
+      divtxt.empty() ? "(see verdict)" : divtxt,
+      rerun,
+      test_name);
   if (can_import) {
     // Reference the ORIGINAL sources by their `<file-stem>.<top>` import key.
     out += std::format("const implmod = import(\"{}.{}\")\n", impl_stem, impl_top);
@@ -5068,12 +5141,14 @@ void lec_command(Options& opts, Result& res) {
   o.solver  = solver;  // cvc5 | bitwuzla
   o.gold_x  = label("gold_x", "ignore");
   o.bound   = std::atoi(label("bound", "6").c_str());
-  o.timeout = std::atoi(label("timeout", "120").c_str());  // bound the CLI: hard miters degrade to UNKNOWN, never freeze (0 = unbounded)
+  o.timeout
+      = std::atoi(label("timeout", "120").c_str());  // bound the CLI: hard miters degrade to UNKNOWN, never freeze (0 = unbounded)
   o.witness = label("witness", "true") != "false" && label("witness", "true") != "0";
   o.decompose    = label("decompose", "auto");
   o.strict       = label("strict", "false") != "false" && label("strict", "false") != "0";
   o.semdiff      = livehd::lec::lec_canon_semdiff(label("semdiff", "structural"));
   o.partitions   = std::atoi(label("partitions", "4").c_str());
+  o.jobs         = std::max(1, std::atoi(label("jobs", "4").c_str()));
   o.split        = label("split", "auto");
   o.phase        = label("phase", "after_reset");
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
@@ -5122,7 +5197,9 @@ void lec_command(Options& opts, Result& res) {
   std::vector<std::shared_ptr<hhds::Graph>>    sub_lib_keep;
   for (const auto& lp : opts.libs) {
     if (lp.kind != "lg") {
-      throw Lhd_error{"usage", std::format("lec --lib expects lg:DIR, got '{}:'", lp.kind), "the cell-model library, e.g. --lib lg:models"};
+      throw Lhd_error{"usage",
+                      std::format("lec --lib expects lg:DIR, got '{}:'", lp.kind),
+                      "the cell-model library, e.g. --lib lg:models"};
     }
     if (!fs::is_directory(lp.path)) {
       throw Lhd_error{"missing_file", std::format("lec --lib not found: {}", lp.path), ""};
@@ -5143,8 +5220,11 @@ void lec_command(Options& opts, Result& res) {
   // announce the (possibly long, quiet) SMT detection up front so a slow solve is
   // legible instead of looking like a hang.
   livehd::diag::info("pass.lec", "lec-detecting", "progress")
-      .msg("lec: detecting equivalence of '{}' vs '{}' (engine={}, solver={}, {})", impl_g->get_name(),
-           ref_g->get_name(), o.engine, o.solver,
+      .msg("lec: detecting equivalence of '{}' vs '{}' (engine={}, solver={}, {})",
+           impl_g->get_name(),
+           ref_g->get_name(),
+           o.engine,
+           o.solver,
            o.timeout > 0 ? std::format("timeout={}s", o.timeout) : std::string{"no timeout"})
       .emit();
 
@@ -5164,13 +5244,24 @@ void lec_command(Options& opts, Result& res) {
     // children. The driver emits a per-def progress line itself; the TOP def's
     // verdict drives the exit policy below (like the single-design path).
     const bool retry_all = label("retry", "changed") == "all";
-    r = lec_hierarchical(res, ref_var, impl_var, std::string(ref_g->get_name()), ref_g.get(), impl_g.get(), o, sub_lib_ptr,
-                         vcache.get(), retry_all);
+    r                    = lec_hierarchical(res,
+                                            ref_var,
+                                            impl_var,
+                                            std::string(ref_g->get_name()),
+                                            ref_g.get(),
+                                            impl_g.get(),
+                                            o,
+                                            sub_lib_ptr,
+                                            vcache.get(),
+                                            retry_all);
     if (vcache) {
       vcache->save();
       if (vcache->hits() > 0 || vcache->stores() > 0 || vcache->skips() > 0) {
-        std::print("lec[cache]: {} hit(s), {} stored, {} skipped-unknown ({}/formal_cache.json)\n", vcache->hits(),
-                   vcache->stores(), vcache->skips(), opts.workdir);
+        std::print("lec[cache]: {} hit(s), {} stored, {} skipped-unknown ({}/formal_cache.json)\n",
+                   vcache->hits(),
+                   vcache->stores(),
+                   vcache->skips(),
+                   opts.workdir);
       }
     }
   } else {
@@ -5181,8 +5272,7 @@ void lec_command(Options& opts, Result& res) {
       // Same abstraction rule as the hierarchical driver: a REFUTE under a
       // manual --collapse can be an artifact of the box over-approximation, so
       // confirm FLAT before letting the exit policy report a fail.
-      std::print("lec: '{}' REFUTED under collapse ({} box def(s)) -> flat confirmation\n", impl_g->get_name(),
-                 o.collapse.size());
+      std::print("lec: '{}' REFUTED under collapse ({} box def(s)) -> flat confirmation\n", impl_g->get_name(), o.collapse.size());
       livehd::lec::Lec_options oflat = o;
       oflat.collapse.clear();
       auto rf   = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), oflat, sub_lib_ptr);
@@ -5240,8 +5330,7 @@ void lec_command(Options& opts, Result& res) {
       prpfailrun = !(rv == "false" || rv == "0" || rv.empty());
     }
     if (!prpfail.empty()) {
-      emit_lecfail_witness(opts, res, r, std::string(impl_g->get_name()), std::string(ref_g->get_name()), prpfail,
-                           prpfailrun);
+      emit_lecfail_witness(opts, res, r, std::string(impl_g->get_name()), std::string(ref_g->get_name()), prpfail, prpfailrun);
     }
   }
 
@@ -5261,11 +5350,13 @@ void lec_command(Options& opts, Result& res) {
       // loud inconclusive warning and exit cleanly: an UNKNOWN proves nothing, but it
       // also disproves nothing, so it must not be conflated with REFUTED.
       if (o.strict || !r.witness.empty()) {
-        throw Lhd_error{"unsupported", std::format("lec could not decide equivalence of '{}'", impl_g->get_name()),
+        throw Lhd_error{"unsupported",
+                        std::format("lec could not decide equivalence of '{}'", impl_g->get_name()),
                         r.witness.empty() ? r.detail : std::format("{}; witness: {}", r.detail, r.witness)};
       }
       livehd::diag::warn("pass.lec", "inconclusive", "io")
-          .msg("lec INCONCLUSIVE: '{}' — the solver could not complete the proof and found NO counterexample ({}). "
+          .msg(
+              "lec INCONCLUSIVE: '{}' — the solver could not complete the proof and found NO counterexample ({}). "
                "This is NOT a proof of equivalence; pass --set lec.strict=true to treat it as a failure.",
                impl_g->get_name(),
                r.detail)
@@ -5332,9 +5423,8 @@ void lec_command(Options& opts, Result& res) {
 // assert then FIRES during the replay (sim exiting non-zero is the expected
 // reproduction, not a failure); a formal-block obligation has no runtime
 // check, but the VCD still shows every signal the block reads.
-void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop_result& prop,
-                             const std::string& design_kind, const std::string& design_path,
-                             const std::string& top_full, const std::string& prpfail, bool run_sim,
+void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop_result& prop, const std::string& design_kind,
+                             const std::string& design_path, const std::string& top_full, const std::string& prpfail, bool run_sim,
                              const std::string& embed_assert) {
   auto skip = [&](std::string_view why) {
     livehd::diag::info("pass.formal", "formalfail-skip", "io")
@@ -5389,8 +5479,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   // to the .prp then flows into a re-run of the SAME formalfail.prp); else
   // inline the re-emitted copy (self-contained).
   const std::string design_stem = fs::path(design_path).stem().string();
-  const bool        can_import  = design_kind == "pyrope" && !design_stem.empty()
-                          && lecfail_prp_top_is_pub(design_path, top);
+  const bool        can_import  = design_kind == "pyrope" && !design_stem.empty() && lecfail_prp_top_is_pub(design_path, top);
 
   absl::flat_hash_map<std::string, int> width_of;
   for (const auto& cyc : tr.cycles) {
@@ -5452,11 +5541,9 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   }
   test_text += "    step\n  }\n}\n";
 
-  std::string what = prop.kind + (prop.loc.empty() ? "" : " at " + prop.loc)
-                   + (prop.block.empty() ? "" : " [" + prop.block + "]")
+  std::string what = prop.kind + (prop.loc.empty() ? "" : " at " + prop.loc) + (prop.block.empty() ? "" : " [" + prop.block + "]")
                    + (prop.msg.empty() ? "" : " \"" + prop.msg + "\"");
-  const std::string rerun = can_import
-                                ? std::format("lhd sim {} {} --set sim.vcd=true --workdir <dir>", design_path, prpfail_path)
+  const std::string rerun = can_import ? std::format("lhd sim {} {} --set sim.vcd=true --workdir <dir>", design_path, prpfail_path)
                                 : std::format("lhd sim {} --set sim.vcd=true --workdir <dir>", prpfail_path);
   std::string out = std::format(
       "/*\n:name: {}\n:type: simulation\n*/\n"
@@ -5467,7 +5554,14 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
       "// the test body below (the replay FAILS on it); a design-body assert is not yet\n"
       "// executed by sim — read those off the VCD.\n"
       "// Re-run:  {}   (dumps {}.vcd)\n\n",
-      test_name, design_path, what, ncyc, tr.reset_cycles, tr.diverge_cycle, rerun, test_name);
+      test_name,
+      design_path,
+      what,
+      ncyc,
+      tr.reset_cycles,
+      tr.diverge_cycle,
+      rerun,
+      test_name);
   if (can_import) {
     out += std::format("const dutmod = import(\"{}.{}\")\n\n", design_stem, top);
   } else {
@@ -5518,7 +5612,8 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
     res.outputs.push_back(vcd);
     res.recipe_steps.push_back(std::format("formal.prpfailrun VCD -> {}", vcd));
     const bool fired = !(WIFEXITED(st) && WEXITSTATUS(st) == 0);
-    std::print("formal verify: wrote counterexample waveform {}{}\n", vcd,
+    std::print("formal verify: wrote counterexample waveform {}{}\n",
+               vcd,
                fired ? " (the replay reproduced the violation: the runtime assert fired)" : "");
   } else {
     livehd::diag::warn("pass.formal", "formalfail-sim", "io")
@@ -5563,7 +5658,8 @@ void formal_verify_command(Options& opts, Result& res) {
     } else if (ends(".v") || ends(".sv")) {
       kind = "verilog";
     } else {
-      throw Lhd_error{"usage", std::format("formal verify: cannot infer the design kind of '{}'", f),
+      throw Lhd_error{"usage",
+                      std::format("formal verify: cannot infer the design kind of '{}'", f),
                       "pass --impl KIND:PATH (verilog:/pyrope:/lg:) or a .prp/.v/.sv path"};
     }
     path = f;
@@ -5574,7 +5670,8 @@ void formal_verify_command(Options& opts, Result& res) {
     path = opts.ins.front().path;
   }
   if (path.empty()) {
-    throw Lhd_error{"usage", "formal verify needs a design (a .prp/.v/.sv path, --impl KIND:PATH, or lg:DIR)",
+    throw Lhd_error{"usage",
+                    "formal verify needs a design (a .prp/.v/.sv path, --impl KIND:PATH, or lg:DIR)",
                     "e.g. `lhd formal verify foo.prp --top foo.top`"};
   }
   // Extra .prp positionals are formal-block sources (the sidecar files): they
@@ -5589,7 +5686,8 @@ void formal_verify_command(Options& opts, Result& res) {
     if (f.size() > 4 && f.compare(f.size() - 4, 4, ".prp") == 0) {
       block_files.push_back(f);
     } else {
-      throw Lhd_error{"usage", std::format("formal verify: unexpected extra input '{}'", f),
+      throw Lhd_error{"usage",
+                      std::format("formal verify: unexpected extra input '{}'", f),
                       "extra inputs must be .prp formal-block (sidecar) files"};
     }
   }
@@ -5660,6 +5758,16 @@ void formal_verify_command(Options& opts, Result& res) {
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
   o.reset        = label("reset", "");
   o.strict       = label("strict", "false") != "false" && label("strict", "false") != "0";
+  o.partitions   = std::atoi(label("partitions", "4").c_str());
+  o.jobs         = std::max(1, std::atoi(label("jobs", "4").c_str()));
+  o.split        = label("split", "auto");
+
+  std::unique_ptr<livehd::formal::Verdict_cache> vcache;
+  if (workdir_set && label("cache", "true") != "false" && label("cache", "true") != "0") {
+    vcache                = std::make_unique<livehd::formal::Verdict_cache>(opts.workdir, livehd::kFormalSrcSalt);
+    o.verify_cache_lookup = [&vcache](std::string_view key) { return vcache->lookup(std::string{key}).has_value(); };
+    o.verify_cache_store  = [&vcache](std::string key) { vcache->insert(key, {"bmc", "serialized verify obligation UNSAT", 0}); };
+  }
   if (auto e = livehd::lec::lec_options_range_error(o); !e.empty()) {
     throw Lhd_error{"usage", e, "the BMC engine unrolls one SMT copy of the design per cycle"};
   }
@@ -5737,7 +5845,8 @@ void formal_verify_command(Options& opts, Result& res) {
     for (const auto& bf : block_files) {
       for (auto& blk : livehd::formal_blocks::extract(bf)) {
         if (!blk.error.empty()) {
-          throw Lhd_error{"usage", std::format("formal block error: {}", blk.error),
+          throw Lhd_error{"usage",
+                          std::format("formal block error: {}", blk.error),
                           "V2 formal blocks: alias bindings + assert/assume/assert_always over dotted signal paths"};
         }
         if (!opts.formal_filter.empty() && fnmatch(opts.formal_filter.c_str(), blk.name.c_str(), 0) != 0) {
@@ -5766,7 +5875,9 @@ void formal_verify_command(Options& opts, Result& res) {
           if (inst_prefixes.empty()) {
             throw Lhd_error{"usage",
                             std::format("formal block '{}' targets module '{}', which '{}' does not instantiate",
-                                        blk.name, blk.target, g->get_name()),
+                                        blk.name,
+                                        blk.target,
+                                        g->get_name()),
                             "bind the block to the verified top or to a module instantiated inside it"};
           }
         }
@@ -5803,11 +5914,13 @@ void formal_verify_command(Options& opts, Result& res) {
           b.ident      = in.ident;
           const Sig* s = resolve(in.path, inst_prefixes.front(), b);
           if (s == nullptr) {
-            throw Lhd_error{"usage",
-                            std::format("formal block '{}': signal path '{}' does not resolve in '{}'{}", blk.name,
-                                        in.path, g->get_name(),
-                                        inst_prefixes.front().empty() ? std::string{}
-                                                                      : " instance '" + inst_prefixes.front() + "'"),
+            throw Lhd_error{
+                "usage",
+                std::format("formal block '{}': signal path '{}' does not resolve in '{}'{}",
+                            blk.name,
+                            in.path,
+                            g->get_name(),
+                            inst_prefixes.front().empty() ? std::string{} : " instance '" + inst_prefixes.front() + "'"),
                             "V2 reaches top input/output ports and registers (dotted through instances); "
                             "internal wires and memory elements come later"};
           }
@@ -5840,8 +5953,9 @@ void formal_verify_command(Options& opts, Result& res) {
         load_side_graphs(opts, res, "pyrope", genp.string(), "impl", mvar);
         opts.sets.resize(saved_sets);
         if (mvar.graphs.size() != 1) {
-          throw Lhd_error{"internal", std::format("formal block '{}': monitor compile yielded {} modules", blk.name,
-                                                  mvar.graphs.size()), genp.string()};
+          throw Lhd_error{"internal",
+                          std::format("formal block '{}': monitor compile yielded {} modules", blk.name, mvar.graphs.size()),
+                          genp.string()};
         }
         mon.graph = mvar.graphs.front().get();
         mon_keep.push_back(std::move(mvar));
@@ -5875,9 +5989,9 @@ void formal_verify_command(Options& opts, Result& res) {
               b.ident      = in.ident;
               const Sig* s = resolve(in.path, prefix, b);
               if (s == nullptr) {
-                throw Lhd_error{"usage",
-                                std::format("formal block '{}': signal path '{}' does not resolve in instance '{}'",
-                                            blk.name, in.path, prefix),
+                throw Lhd_error{
+                    "usage",
+                    std::format("formal block '{}': signal path '{}' does not resolve in instance '{}'", blk.name, in.path, prefix),
                                 "submodule-bound blocks reach the instance's registers (ports are internal nets — later)"};
               }
               im.binds.push_back(std::move(b));
@@ -5890,13 +6004,25 @@ void formal_verify_command(Options& opts, Result& res) {
   }
 
   livehd::diag::info("pass.formal", "formal-proving", "progress")
-      .msg("formal verify: proving obligations of '{}' (bound={}, phase={}, {} formal block(s), {})", g->get_name(),
-           o.bound, o.phase, mons.size(),
+      .msg("formal verify: proving obligations of '{}' (bound={}, phase={}, {} formal block(s), {})",
+           g->get_name(),
+           o.bound,
+           o.phase,
+           mons.size(),
            o.timeout > 0 ? std::format("timeout={}s per query", o.timeout) : std::string{"no timeout"})
       .emit();
   res.recipe_steps.emplace_back(std::format("pass.lec prove_properties bound:{} phase:{}", o.bound, o.phase));
 
   auto r = livehd::lec::prove_properties(g.get(), o, sub_lib_ptr, mons.empty() ? nullptr : &mons);
+  if (vcache) {
+    vcache->save();
+    if (vcache->hits() > 0 || vcache->stores() > 0) {
+      std::print("formal[cache]: {} obligation hit(s), {} stored ({}/formal_cache.json)\n",
+                 vcache->hits(),
+                 vcache->stores(),
+                 opts.workdir);
+    }
+  }
 
   const char* verdict = r.verdict == livehd::lec::Verdict::Proven    ? "PROVEN (bounded)"
                         : r.verdict == livehd::lec::Verdict::Refuted ? "REFUTED"
@@ -5932,8 +6058,7 @@ void formal_verify_command(Options& opts, Result& res) {
         break;
       default: {
         std::string why = p.refuted_at >= 0 ? std::format("violation at cycle {} may be a blackbox artifact", p.refuted_at)
-                          : p.unknown_at >= 0
-                              ? std::format("solver gave up at cycle {} (raise --set formal.timeout)", p.unknown_at)
+                          : p.unknown_at >= 0 ? std::format("solver gave up at cycle {} (raise --set formal.timeout)", p.unknown_at)
                           : r.vacuous ? std::string{"assume set contradictory"}
                                       : std::string{"not checked"};
         std::print("  {}{}{}: UNKNOWN ({})\n", p.kind, where, msg, why);
@@ -5986,7 +6111,8 @@ void formal_verify_command(Options& opts, Result& res) {
   }
 
   if (r.verdict == livehd::lec::Verdict::Refuted) {
-    throw Lhd_error{"equiv_fail", std::format("'{}' has a reachable property violation ({})", g->get_name(), first_fail),
+    throw Lhd_error{"equiv_fail",
+                    std::format("'{}' has a reachable property violation ({})", g->get_name(), first_fail),
                     "the per-cycle input trace above reproduces it from reset"};
   }
   if (r.verdict == livehd::lec::Verdict::Unknown) {
@@ -5994,7 +6120,8 @@ void formal_verify_command(Options& opts, Result& res) {
       throw Lhd_error{"unsupported", std::format("formal verify could not decide '{}'", g->get_name()), r.detail};
     }
     livehd::diag::warn("pass.formal", "formal-inconclusive", "io")
-        .msg("formal verify INCONCLUSIVE: '{}' — {}. This proves nothing and disproves nothing; pass --set "
+        .msg(
+            "formal verify INCONCLUSIVE: '{}' — {}. This proves nothing and disproves nothing; pass --set "
              "formal.strict=true to treat it as a failure.",
              g->get_name(),
              r.detail)
@@ -6028,7 +6155,9 @@ void formal_command(Options& opts, Result& res) {
 void semdiff_command(Options& opts, Result& res) {
   setup_diag(opts, "semdiff");
   if (opts.impl_path.empty() || opts.ref_path.empty()) {
-    throw Lhd_error{"usage", "pass semdiff requires --ref lg:DIR and --impl lg:DIR", "e.g. `lhd pass semdiff --ref lg:gold --impl lg:opt --top adder`"};
+    throw Lhd_error{"usage",
+                    "pass semdiff requires --ref lg:DIR and --impl lg:DIR",
+                    "e.g. `lhd pass semdiff --ref lg:gold --impl lg:opt --top adder`"};
   }
   if (opts.ref_kind != "lg" || opts.impl_kind != "lg") {
     throw Lhd_error{"usage",
@@ -6062,7 +6191,9 @@ void semdiff_command(Options& opts, Result& res) {
     if (v.graphs.size() == 1) {
       return v.graphs.front();
     }
-    throw Lhd_error{"usage", std::format("pass semdiff: {} has {} modules; pass --{}-top or --top", side, v.graphs.size(), side), ""};
+    throw Lhd_error{"usage",
+                    std::format("pass semdiff: {} has {} modules; pass --{}-top or --top", side, v.graphs.size(), side),
+                    ""};
   };
   auto ref_g  = pick(ref_var, opts.ref_top, "ref");
   auto impl_g = pick(impl_var, opts.impl_top, "impl");
@@ -6082,7 +6213,8 @@ void semdiff_command(Options& opts, Result& res) {
     throw Lhd_error{"usage", std::format("--set pass.semdiff.id_granularity expects pair|region, got '{}'", o.id_granularity), ""};
   }
 
-  res.recipe_steps.emplace_back(std::format("pass.semdiff alg:{} matching_names:{} id_granularity:{}", o.alg, o.matching_names, o.id_granularity));
+  res.recipe_steps.emplace_back(
+      std::format("pass.semdiff alg:{} matching_names:{} id_granularity:{}", o.alg, o.matching_names, o.id_granularity));
   auto r = livehd::semdiff::structural_match(ref_g.get(), impl_g.get(), o);
 
   if (!opts.quiet) {
@@ -6269,7 +6401,8 @@ void pass_command(Options& opts, Result& res) {
     merge_sets(opts, "pass.formal", labels);
     run_step("pass.formal", var, labels, opts, res);  // marks proven/runtime_check in place; errors on a real violation
   } else {
-    throw Lhd_error{"usage", std::format("unknown pass subcommand '{}'", sub),
+    throw Lhd_error{"usage",
+                    std::format("unknown pass subcommand '{}'", sub),
                     "use: color <alg> | partition | abc | formal | liberty gensim | semdiff"};
   }
 }
@@ -6319,9 +6452,8 @@ bool tool_is_numeric_field(std::string_view f) {
 // value that merely contains ':'/'=' (e.g. a src path `x.prp:5`) is not
 // mis-split into a bogus field.
 bool tool_is_known_field(std::string_view f) {
-  return f == "nid" || f == "id" || f == "kind" || f == "name" || f == "color" || f == "src"
-         || f == "partitionable" || f == "bits" || f == "signed" || f == "from" || f == "to" || f == "delay"
-         || f == "hier_color" || f == "match";
+  return f == "nid" || f == "id" || f == "kind" || f == "name" || f == "color" || f == "src" || f == "partitionable" || f == "bits"
+         || f == "signed" || f == "from" || f == "to" || f == "delay" || f == "hier_color" || f == "match";
 }
 
 long tool_parse_long(std::string_view v, std::string_view ctx) {
@@ -6900,8 +7032,8 @@ void tool_diff_match_lg(Options& opts, const std::vector<std::string>& lg_dirs) 
     }
   }
   if (!saw_match) {
-    std::string hint =
-        "-- no `match` attribute found; run `lhd pass semdiff --ref lg:… --impl lg:…` first to mark correspondences, "
+    std::string hint
+        = "-- no `match` attribute found; run `lhd pass semdiff --ref lg:… --impl lg:…` first to mark correspondences, "
         "then `lhd tool diff … --match`\n";
     std::fwrite(hint.data(), 1, hint.size(), stdout);
     std::fflush(stdout);
@@ -7033,8 +7165,8 @@ int32_t tool_tree_node_bits(const hhds::Node_class& node) {
 // List the nodes of `g` whose kind matches `kinds`, indented to sit beside the
 // module's sub-instances (a register/memory is content of the module, not a
 // child in the call tree). No-op when `kinds` is empty (the default tree).
-void tool_tree_kind_nodes(hhds::Graph* g, const std::vector<std::string>& kinds, int indent, std::string& out,
-                          size_t& budget, bool& truncated) {
+void tool_tree_kind_nodes(hhds::Graph* g, const std::vector<std::string>& kinds, int indent, std::string& out, size_t& budget,
+                          bool& truncated) {
   namespace gu = livehd::graph_util;
   if (kinds.empty()) {
     return;
@@ -7145,8 +7277,8 @@ struct Ln_tree_row {
 
 bool tool_tree_ln_skeleton(Lnast_ntype::Lnast_ntype_int t) {
   using L = Lnast_ntype;
-  return L::is_top(t) || L::is_stmts(t) || L::is_if(t) || L::is_unique_if(t) || L::is_for(t) || L::is_while(t)
-         || L::is_func_def(t) || L::is_func_call(t) || L::is_io(t);
+  return L::is_top(t) || L::is_stmts(t) || L::is_if(t) || L::is_unique_if(t) || L::is_for(t) || L::is_while(t) || L::is_func_def(t)
+         || L::is_func_call(t) || L::is_io(t);
 }
 
 // `--target kind:<X>` for the ln tree: X names an Lnast verbal (store, declare,
@@ -7193,8 +7325,8 @@ std::string tool_tree_ln_label(const Lnast& ln, const Lnast_nid& nid, Lnast_ntyp
 // attaches to its nearest shown ancestor). Returns the total LNAST node count of
 // the subtree — ALL nodes, shown or collapsed — so a scope's count reflects
 // everything it holds. `sink == nullptr` ⇒ count only (over depth / suppressed).
-size_t tool_tree_ln_collect(const Lnast& ln, const Lnast_nid& nid, int depth, int maxdepth,
-                            const std::vector<std::string>& kinds, std::vector<Ln_tree_row>* sink) {
+size_t tool_tree_ln_collect(const Lnast& ln, const Lnast_nid& nid, int depth, int maxdepth, const std::vector<std::string>& kinds,
+                            std::vector<Ln_tree_row>* sink) {
   auto type  = ln.get_type(nid);
   bool shown = tool_tree_ln_skeleton(type) || tool_tree_ln_kind_match(type, kinds);
 
@@ -7316,7 +7448,9 @@ std::string tool_input_kind(const std::string& t) {
 void tool_command(Options& opts, Result& res) {
   setup_diag(opts, "tool");
   if (opts.files.empty()) {
-    throw Lhd_error{"usage", "tool requires a verb: cat | grep | diff | tree", "e.g. `lhd tool cat lg:dir` or `lhd tool grep color:nil lg:dir`"};
+    throw Lhd_error{"usage",
+                    "tool requires a verb: cat | grep | diff | tree",
+                    "e.g. `lhd tool cat lg:dir` or `lhd tool grep color:nil lg:dir`"};
   }
   const std::string verb = opts.files[0];
   if (verb != "cat" && verb != "grep" && verb != "diff" && verb != "tree") {
@@ -7498,9 +7632,14 @@ std::vector<Set_option> list_set_options() {
   // The `lhd.*` kernel namespace: shared, cross-pass settings the kernel folds
   // into Options (apply_lhd_settings), not labels of any single EPRP method.
   // Keep in sync with check_known_set_passes / apply_lhd_settings.
-  out.push_back(Set_option{"lhd.seed", "lhd", "0",
+  out.push_back(Set_option{"lhd.seed",
+                           "lhd",
+                           "0",
                            "shared RNG seed for every pass that wants determinism (e.g. pass.color mincut); one seed per run"});
-  out.push_back(Set_option{"lhd.top", "lhd", "",
+  out.push_back(
+      Set_option{"lhd.top",
+                 "lhd",
+                 "",
                            "top module shared across passes; the canonical form of the --top flag (the flag wins if both are given)"});
   // The `sim.*` command namespace (consumed by sim_command, not an EPRP method):
   // keep `lhd list options` / `lhd describe` complete. Single source of truth =

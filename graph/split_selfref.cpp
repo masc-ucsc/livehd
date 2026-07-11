@@ -286,7 +286,7 @@ int split_packed_selfref_wires(hhds::Graph* g) {
       // unary width-adjust (zext) OR to-unsigned: result is the non-negative low
       // sig bits of THIS node's (unsigned) output pin.
       int b = gu::bits_of(p);
-      return (gu::is_unsign(p) && b > 1) ? std::pair<int, int>{0, b - 1} : kBail;
+      return b > 1 ? std::pair<int, int>{0, b - 1} : (b == 1 ? std::pair<int, int>{0, 1} : kBail);
     }
     // generic value: an over-approximation is sound only when UNSIGNED (its top
     // sign bit is always 0, so the significant width is bits-1; a 1-bit
@@ -313,6 +313,8 @@ int split_packed_selfref_wires(hhds::Graph* g) {
   //  * Get_mask const [a,b) extraction -> descend at positions [a+lo, a+hi)
   //  * to-unsigned / unary-zext Get_mask -> position-preserving descent
   //  * Sum with no subtrahend and pairwise-DISJOINT operand footprints == Or
+  //  * Or operands with footprints outside the requested slice -> exact zero
+  //  * EQ control bit -> rebuild only from complete bounded operands
   auto mask_const = [&](int lo, int hi) -> hhds::Pin_class {
     return livehd::graph_util::create_const(*g, *Dlop::get_mask_value(hi - 1, lo));
   };
@@ -442,6 +444,18 @@ int split_packed_selfref_wires(hhds::Graph* g) {
         std::vector<hhds::Pin_class> parts;
         bool                         ok = true;
         for (auto& d : operands) {
+          if (op == Ntype_op::Or) {
+            // Global pack disjointness is unnecessary for a local OR slice:
+            // an operand whose proven nonzero footprint does not overlap
+            // [lo,hi) contributes exactly zero here. This is crucial when an
+            // unrelated output field has overlapping OR contributors but the
+            // requested input field has one clean driver (XSCore LruStateGen's
+            // packed io word).
+            auto f = footprint(footprint, d, 0);
+            if (f.first >= 0 && (hi <= f.first || lo >= f.second)) {
+              continue;
+            }
+          }
           auto r = self(self, d, lo, hi, depth + 1);
           if (r.is_invalid()) {
             ok = false;
@@ -449,7 +463,9 @@ int split_packed_selfref_wires(hhds::Graph* g) {
           }
           parts.push_back(r);
         }
-        if (ok) {
+        if (ok && parts.empty()) {
+          res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
+        } else if (ok) {
           auto n = gu::create_typed_node(*g, op == Ntype_op::Sum ? Ntype_op::Or : op);
           ++created;
           for (auto& pp : parts) {
@@ -547,6 +563,66 @@ int split_packed_selfref_wires(hhds::Graph* g) {
           res = dp;
         }
       }
+    } else if (op == Ntype_op::EQ) {
+      // Equality is a one-bit control result, but unlike bit-parallel ops its
+      // bit depends on every operand bit. Rebuild it only when each on-cycle
+      // operand can be resolved as its COMPLETE unsigned value. This covers
+      // packed-slice predicates used as Mux selectors (the XSCore Btb/PreDecode
+      // tail) without pretending that a partial comparator cone is local.
+      if (lo >= 1) {
+        res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
+      } else {
+        std::vector<hhds::Pin_class> operands;
+        bool                         ok = true;
+        for (auto e : m.inp_edges()) {
+          if (static_cast<uint32_t>(e.sink.get_port_id()) != 0) {
+            ok = false;
+            break;
+          }
+          auto d = e.driver;
+          if (!gu::is_const_pin(d) && in_cycle.contains(d.get_master_node())) {
+            const int db = gu::bits_of(d);
+            int       whole_w = 0;
+            if (gu::is_unsign(d) && db > 0) {
+              whole_w = std::max(1, db - 1);
+            } else {
+              // A signed-typed masked value is still exactly reconstructible
+              // when footprint proves it nonnegative and zero above hi.
+              auto f = footprint(footprint, d, 0);
+              if (f.first >= 0) {
+                whole_w = std::max(1, f.second);
+              }
+            }
+            if (whole_w == 0) {
+              if (split_dbg) {
+                std::print("split[dbg]:   EQ operand {} bits={} unsigned={} has no complete bound\n",
+                           op_name(gu::type_op_of(d.get_master_node())), db, gu::is_unsign(d));
+              }
+              ok = false;
+              break;
+            }
+            d = self(self, d, 0, whole_w, depth + 1);
+            if (split_dbg) {
+              std::print("split[dbg]:   EQ operand complete width={} -> {}\n", whole_w, d.is_invalid() ? "FAIL" : "ok");
+            }
+          }
+          if (d.is_invalid()) {
+            ok = false;
+            break;
+          }
+          operands.push_back(d);
+        }
+        if (ok && !operands.empty()) {
+          auto n = gu::create_typed_node(*g, Ntype_op::EQ);
+          ++created;
+          for (auto& d : operands) {
+            d.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
+          }
+          auto dp = n.create_driver_pin(0);
+          gu::set_bits(dp, 2);  // unsigned boolean: one magnitude bit + spare sign
+          res = dp;
+        }
+      }
     } else if (op == Ntype_op::Not) {
       // bits of ~x at [lo,hi) = complement of x's bits there, re-masked to w
       auto r = self(self, drv_at(m, 0), lo, hi, depth + 1);
@@ -573,12 +649,13 @@ int split_packed_selfref_wires(hhds::Graph* g) {
       auto md = drv_at(m, 2);
       if (md.is_invalid()) {
         // unary zext: positions [0, sig) preserved; above sig -> zeros
-        int b = gu::bits_of(v);
-        if (gu::is_unsign(v) && b > 1) {
-          if (lo >= b - 1) {
+        int b   = gu::bits_of(v);
+        int sig = b > 1 ? b - 1 : b;
+        if (sig > 0) {
+          if (lo >= sig) {
             res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
           } else {
-            res = self(self, drv_at(m, 0), lo, std::min(hi, b - 1), depth + 1);
+            res = self(self, drv_at(m, 0), lo, std::min(hi, sig), depth + 1);
           }
         }
       } else if (gu::is_const_pin(md)) {
@@ -586,11 +663,12 @@ int split_packed_selfref_wires(hhds::Graph* g) {
         if (!mc.has_unknowns()) {
           if (mc.is_just_i64() && mc.to_just_i64() == -1) {
             // to-unsigned keeps positions; above the sig width -> zeros
-            int b = gu::bits_of(v);
-            if (gu::is_unsign(v) && b > 1 && lo >= b - 1) {
+            int b   = gu::bits_of(v);
+            int sig = b > 1 ? b - 1 : b;
+            if (sig > 0 && lo >= sig) {
               res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
-            } else if (gu::is_unsign(v) && b > 1) {
-              res = self(self, drv_at(m, 0), lo, std::min(hi, b - 1), depth + 1);
+            } else if (sig > 0) {
+              res = self(self, drv_at(m, 0), lo, std::min(hi, sig), depth + 1);
             } else {
               res = self(self, drv_at(m, 0), lo, hi, depth + 1);
             }

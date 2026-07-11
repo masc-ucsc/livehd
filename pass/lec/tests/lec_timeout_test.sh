@@ -86,10 +86,10 @@ run_lec() {  # $1=name $2=lec.timeout secs $3=outer kill secs
   if [ "$RC" -ge 128 ] && [ "$ELAPSED" -ge "$outer" ]; then HUNG=1; fi
 }
 
-# Each hard case: lec.timeout=5s, outer watchdog 25s. Must (a) NOT trip the
+# Each hard case: lec.timeout=2s, outer watchdog 25s. Must (a) NOT trip the
 # watchdog -- proving the bound actually fires -- and (b) report UNKNOWN.
 for c in reassoc distrib poly; do
-  run_lec "$c" 5 25
+  run_lec "$c" 2 25
   v=$(echo "$OUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN" | head -1)
   if [ "$HUNG" -eq 1 ]; then
     echo "FAIL: $c HUNG past the outer 25s watchdog -> lec.timeout was NOT honored"; fail=1
@@ -101,7 +101,7 @@ for c in reassoc distrib poly; do
 done
 
 # Positive control: the bound must not turn an easy proof into UNKNOWN.
-run_lec easy 5 25
+run_lec easy 2 25
 v=$(echo "$OUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN" | head -1)
 if [ "$v" != "PROVEN equivalent" ]; then
   echo "FAIL: easy control -> verdict '$v' (want PROVEN equivalent); rc=$RC"; fail=1

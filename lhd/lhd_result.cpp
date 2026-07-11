@@ -14,7 +14,11 @@
 #include <string>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
+#include "graph_library_singleton.hpp"
+#include "hhds/graph.hpp"
 #include "lhd.hpp"
+#include "node_util.hpp"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include "woothash.hpp"
@@ -42,7 +46,7 @@ void append_dir_content(std::string& buf, const std::string& dir) {
   std::error_code          ec;
   for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator(); ++it) {
     if (it->is_regular_file()) {
-      rels.emplace_back(fs::relative(it->path(), dir, ec).string());
+      rels.emplace_back(it->path().lexically_relative(dir).string());
     }
   }
   std::sort(rels.begin(), rels.end());
@@ -50,6 +54,86 @@ void append_dir_content(std::string& buf, const std::string& dir) {
     buf += r;
     buf += '\0';
     append_file_content(buf, (fs::path(dir) / r).string());
+  }
+}
+
+// Hash only the `top` slice of an hhds graph-library directory: the resolved
+// top graph(s) plus every graph reachable through Sub instances. A whole-design
+// library holds every module of the design; a proof scoped to one subtree must
+// not change run_id when an unrelated module changes. Returns false when the
+// slice cannot be resolved (no top, not a graph library, top absent, or any
+// library error) — the caller then falls back to whole-directory hashing.
+bool append_lg_slice_content(std::string& buf, const std::string& dir, const std::string& top) {
+  std::error_code ec;
+  if (top.empty() || !fs::exists(fs::path(dir) / "library.txt", ec) || ec) {
+    return false;
+  }
+  try {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+
+    // Resolve `top` like lec's pick(): exact full name, else the entity
+    // (post-'.') name. Ambiguous entity matches hash the UNION of their
+    // slices — whether ambiguity is an error stays a lec-side decision.
+    std::vector<hhds::Gid> roots;
+    if (auto gio = lib.find_io(top); gio) {
+      roots.push_back(gio->get_gid());
+    } else {
+      auto entity = [](std::string_view n) {
+        auto d = n.rfind('.');
+        return d == std::string_view::npos ? n : n.substr(d + 1);
+      };
+      for (const hhds::Gid id : lib.all_io_gids()) {
+        if (auto g = lib.find_io(id); g && entity(g->get_name()) == entity(top)) {
+          roots.push_back(id);
+        }
+      }
+    }
+    if (roots.empty()) {
+      return false;
+    }
+
+    // DFS over Sub targets. Materializes bodies for the slice only; fast_class
+    // + subnode is a pure structure walk, so edge overflow stays deferred.
+    absl::flat_hash_set<hhds::Gid> seen(roots.begin(), roots.end());
+    std::vector<hhds::Gid>         stack = roots;
+    std::vector<hhds::Gid>         cone;
+    while (!stack.empty()) {
+      const hhds::Gid id = stack.back();
+      stack.pop_back();
+      cone.push_back(id);
+      auto g = lib.get_graph(id);
+      if (!g) {
+        continue;
+      }
+      namespace gu = livehd::graph_util;
+      for (auto node : g->fast_class()) {
+        if (gu::type_op_of(node) != Ntype_op::Sub) {
+          continue;
+        }
+        auto sio = node.get_subnode_io();
+        if (!sio) {
+          continue;  // external/black-box target: no bytes of it in this library
+        }
+        const hhds::Gid child = sio->get_gid();
+        if (lib.has_graph(child) && seen.insert(child).second) {
+          stack.push_back(child);
+        }
+      }
+    }
+
+    // Build the slice apart from `buf`: a throw mid-way must not leave partial
+    // slice bytes in front of the whole-directory fallback.
+    std::sort(cone.begin(), cone.end());
+    std::string slice;
+    for (const hhds::Gid id : cone) {
+      slice += std::format("g{}", id);  // gid is the name hash: renames change the slice
+      slice += '\0';
+      append_dir_content(slice, (fs::path(dir) / std::format("graph_{}", id)).string());
+    }
+    buf += slice;
+    return true;
+  } catch (...) {
+    return false;  // any library/load hiccup: the whole-dir hash still works
   }
 }
 
@@ -158,31 +242,54 @@ std::string compute_run_id(const Options& opts) {
     buf += std::format("|raw:{}", a);
   }
 
-  std::vector<std::string> inputs = opts.files;
+  // Each input carries the top that scopes it: a lec --impl/--ref side is read
+  // only from its (per-side) top down, so its hash covers just that slice; all
+  // other inputs are read whole and hash whole (empty top = no slice).
+  struct Run_input {
+    std::string path;
+    std::string top;
+  };
+  std::vector<Run_input> inputs;
+  for (const auto& f : opts.files) {
+    inputs.push_back({f, ""});
+  }
   for (const auto& in : opts.ins) {
-    inputs.push_back(in.path);
+    inputs.push_back({in.path, ""});
   }
   for (const auto& in : opts.in_dirs) {
-    inputs.push_back(in.path);
+    inputs.push_back({in.path, ""});
   }
   if (!opts.impl_path.empty()) {
-    inputs.push_back(opts.impl_path);
+    inputs.push_back({opts.impl_path, opts.impl_top.empty() ? opts.top : opts.impl_top});
   }
   if (!opts.ref_path.empty()) {
-    inputs.push_back(opts.ref_path);
+    inputs.push_back({opts.ref_path, opts.ref_top.empty() ? opts.top : opts.ref_top});
   }
-  std::sort(inputs.begin(), inputs.end());
+  std::sort(inputs.begin(), inputs.end(),
+            [](const Run_input& a, const Run_input& b) { return std::tie(a.path, a.top) < std::tie(b.path, b.top); });
 
   // Hash input BYTES only (ordinal-separated), never the path strings: the
   // same sources under a different sandbox/exec-root path must produce the
   // same run_id (future_cli.md: no absolute path leaks into an artifact).
   for (size_t idx = 0; idx < inputs.size(); ++idx) {
-    const auto& f = inputs[idx];
+    const auto& [f, eff_top] = inputs[idx];
     buf += '|';
     buf += std::format("{}", idx);
     buf += '\0';
     if (fs::is_directory(f)) {
-      append_dir_content(buf, f);
+      // Mode headers keep the slice and whole-dir byte streams from aliasing;
+      // the slice header also folds the per-side top (not otherwise hashed)
+      // into the run_id.
+      std::string slice;
+      if (append_lg_slice_content(slice, f, eff_top)) {
+        buf += std::format("lgslice={}", eff_top);
+        buf += '\0';
+        buf += slice;
+      } else {
+        buf += "dir";
+        buf += '\0';
+        append_dir_content(buf, f);
+      }
     } else {
       append_file_content(buf, f);
     }

@@ -45,7 +45,10 @@ void Pass_lec::setup() {
                        "silently concretized to 0 on both sides)",
                        "ignore");
   m.add_label_optional("bound", "BMC / induction depth bound k", "6");
-  m.add_label_optional("timeout", "per-query cvc5 wall-clock seconds (0 = unbounded; default bounds the CLI so a hard miter degrades to UNKNOWN instead of freezing)", "120");
+  m.add_label_optional("timeout",
+                       "per-query cvc5 wall-clock seconds (0 = unbounded; default bounds the CLI so a hard miter degrades to "
+                       "UNKNOWN instead of freezing)",
+                       "120");
   m.add_label_optional("witness", "print the counterexample/witness on Refuted (and gate lec.prpfail/prpfailrun)", "true");
   m.add_label_optional("prpfail",
                        "`lhd lec` + --workdir only: on a REFUTED verdict, write a self-contained Pyrope testbench "
@@ -92,6 +95,7 @@ void Pass_lec::setup() {
                        "variable barrel shift / mux selector) fold — turning one intractable miter into many trivial "
                        "cubes. A decisive case-split verdict is used; otherwise it falls back to the monolithic solve",
                        "4");
+  m.add_label_optional("jobs", "shared formal proof worker-pool size (default 4); bounds concurrent hierarchical def tasks", "4");
   m.add_label_optional("split",
                        "case-split control input: auto (default; pick the small-width input feeding the widest "
                        "variable shift-amount / mux-selector pins) | <input-name> (force) | none (disable)",

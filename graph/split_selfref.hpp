@@ -6,11 +6,11 @@
 namespace livehd::graph_util {
 
 // Dissolve a WORD-level-false combinational cycle through a packed wire: a net
-// built as an Or-of-disjoint-ranges concat accumulator (or(shl(a,k), b) chains)
-// that is read back via constant Get_mask slices looks cyclic at word level
+// built as an Or/shift concat accumulator that is read back via constant
+// Get_mask slices or And(SRA(w,k),mask) readers looks cyclic at word level
 // while the bit-level DAG is acyclic (the Chisel arbiter grant-chain shape).
-// Each such slice-read is REDIRECTED to the one operand that drives the covered
-// range -- exactly value-preserving (OR of disjoint ranges == concat). Strictly
+// Each such slice-read is rebuilt from only the operands whose proven bit
+// footprints overlap it (including bounded EQ/Mux controls). Strictly
 // a NO-OP unless a genuine word-level comb cycle exists; a genuine bit-level
 // loop (e.g. w = w+1) is never split and still fails loudly downstream.
 //

@@ -114,13 +114,15 @@ id_b=$(sed 's/.*"run_id":"\([^"]*\)".*/\1/' "$W/r9b.json")
 # 10. per-command --help options block: namespaced header + the actual flags
 # (not the old silently-empty list), capped with a "more" pointer, and pointing
 # at `lhd list options <namespace>`. Guards the wrong-prefix bug that printed an
-# empty options section under `lhd pass <sub> --help`.
-help=$("$LHD" pass abc --help 2>&1)
+# empty options section under `lhd pass <sub> --help`. `--diag-fmt pretty` is
+# forced: this is a piped run (auto == jsonl), and the options block is a
+# feature of the PRETTY page (jsonl help emits the machine record instead).
+help=$("$LHD" pass abc --help --diag-fmt pretty 2>&1)
 echo "$help" | grep -qF 'options (--set pass.abc.flag=value; `lhd describe pass.abc.flag` for each listed flag option in `lhd list options pass.abc`):' \
   || fail "pass abc --help: namespaced options header missing -> $help"
 echo "$help" | grep -q 'pass.abc.flow=' || fail "pass abc --help: the flow flag must be listed (empty options block?) -> $help"
 echo "$help" | grep -q 'more; `lhd list options pass.abc`' || fail "pass abc --help: >5 flags must show a '... more' pointer -> $help"
-"$LHD" lec --help 2>&1 | grep -q 'options (--set lec.flag=value;' || fail "lec --help: namespaced options header missing"
+"$LHD" lec --help --diag-fmt pretty 2>&1 | grep -q 'options (--set lec.flag=value;' || fail "lec --help: namespaced options header missing"
 
 # 11. The `sim.*` command namespace (sim_command, not an EPRP pass) lives in the
 # SAME registry as the pass flags, so `lhd list options` / `lhd describe` /
@@ -146,8 +148,9 @@ echo "$simlist" | grep -q '^compile\.sim\.vcd=' || fail "list options sim droppe
 "$LHD" describe compile.sim.vcd | grep -q '"name":"compile.sim.vcd","kind":"option","method":"inou.cgen.sim"' \
   || fail "describe compile.sim.vcd must still reach the distinct cgen label"
 # `lhd sim --help` ends with the standardized options block (like lec/compile),
-# enumerating the sim.* flags instead of a hand-maintained list.
-simhelp=$("$LHD" sim --help 2>&1)
+# enumerating the sim.* flags instead of a hand-maintained list (pretty page;
+# jsonl help would emit the machine record instead — forced here since piped).
+simhelp=$("$LHD" sim --help --diag-fmt pretty 2>&1)
 echo "$simhelp" | grep -qF 'options (--set sim.flag=value; `lhd describe sim.flag` for each listed flag option in `lhd list options sim`):' \
   || fail "sim --help: standardized options header missing -> $simhelp"
 echo "$simhelp" | grep -q '^  sim.checkpoint_min_secs=10 ' || fail "sim --help: sim.checkpoint_min_secs not listed -> $simhelp"

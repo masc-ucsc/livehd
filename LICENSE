@@ -63,9 +63,9 @@ external/rapidjson: BSD style license
 external/httplib: MIT style license
 external/replxx: BSD style license
 external/googletest: BSD 3-Clause
+external/taskflow: MIT license
 
 External repos used for benchmarking, not inside LiveHD:
 
 external/verilator: LGPL license
 third_party/anubis: BSD 2-Clause license
-

@@ -467,6 +467,7 @@ upass::Vote uPass_constprop::process_store(std::string_view dst_name, Bundle& ds
   if (!dst_name.empty()) {
     st().uninitialized.erase(std::string(dst_name));
   }
+  note_var_span(dst_name);  // store target, at its write line (covers the tuple_set path)
   // A store to a reg-declared name (scalar reg OR a `reg` memory/array) is a
   // next-state write consumed by tolg; constprop must not symbolically bind it
   // (reads see the flop's q, not the value written this cycle). process_assign
@@ -767,6 +768,19 @@ void uPass_constprop::process_assign() {
   move_to_parent();
 }
 
+void uPass_constprop::note_var_span(std::string_view var) {
+  // Compiler temporaries (`___tN`) and the `%`/`$` internal namespaces carry no
+  // user-visible declaration to point at.
+  if (var.empty() || var[0] == '%' || var[0] == '$' || Lnast::is_tmp(var)) {
+    return;
+  }
+  auto sp = lm->current_span();
+  if (!sp.start_line) {
+    return;  // no resolvable location here — a later touch may have one
+  }
+  var_spans_.try_emplace(std::string(var), std::move(sp));  // first resolvable touch wins
+}
+
 void uPass_constprop::process_declare() {
   // declare(ref(var), TYPE, const(mode), [value]). Record the declared
   // UNSIGNED width (uN, or int(max,min≥0)) so the var's first scalar write can
@@ -775,6 +789,7 @@ void uPass_constprop::process_declare() {
   if (!move_to_child()) {
     return;
   }
+  note_var_span(current_text());  // the declared var, at its declaration line
   // The runner's declare bake already wrote mode/type_name/decl
   // ranges onto the binding (declare_bare created it); the mode/type/umax
   // readers above consult the binding directly. Nothing to record here.
@@ -1700,12 +1715,24 @@ void uPass_constprop::process_stmts_post() {
           if (field_reads_.contains(path)) {
             continue;
           }
+          // Point at the field's declaration/first-touch line: current_span()
+          // here has walked off the end of the block and would name the closing
+          // brace. The per-field seed store (`io.in = nil`) records the exact
+          // field path; fall back to the enclosing var's span if only that was
+          // seen.
+          livehd::diag::Span field_span;
+          if (const auto sit = var_spans_.find(path); sit != var_spans_.end()) {
+            field_span = sit->second;
+          } else if (const auto vit = var_spans_.find(var); vit != var_spans_.end()) {
+            field_span = vit->second;
+          }
           livehd::diag::sink().emit(livehd::diag::Diagnostic{
               .severity = livehd::diag::Severity::warning,
               .code     = "unset-unused-field",
               .category = "type",
               .pass     = "upass.constprop",
               .message  = std::format("field `{}` is declared but never set and never used", path),
+              .span     = std::move(field_span),
               .hint     = "drop the field, or give it a value",
           });
         }
@@ -3795,6 +3822,7 @@ void uPass_constprop::process_tuple_get() {
   move_to_sibling();
   auto src     = std::string(current_text());          // source tuple variable
   auto src_raw = std::string(lm->current_raw_text());  // un-renamed source (inline-frame free vars)
+  note_var_span(src);  // read source var, at this access line
 
   if (!move_to_sibling()) {
     move_to_parent();

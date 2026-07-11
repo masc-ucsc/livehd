@@ -9,9 +9,11 @@
 #include <unordered_map>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "call_resolver.hpp"
 #include "decl_facts.hpp"
+#include "diag.hpp"
 #include "range_bits.hpp"
 #include "hlop/dlop.hpp"
 #include "lnast_ntype.hpp"
@@ -286,6 +288,18 @@ protected:
 
   // Field paths read via tuple_get this walk (unused-unset warning).
   absl::flat_hash_set<std::string> field_reads_;
+
+  // First-touch source span per assignable name. The unset-unused-field warning
+  // fires at block-pop time (process_stmts_post), where current_span() has run
+  // off the end of the walk and would point at the closing brace, not the
+  // declaration. Recording the earliest resolvable span each name is seen at
+  // (declare / store target / tuple read) lets that warning point at the real
+  // source line. Keyed by the touched name as written: a top-level var (`io`) or
+  // the exact dotted field path of a per-field seed store (`io.in = nil`), so the
+  // warning can look up the field path first and fall back to its enclosing var.
+  absl::flat_hash_map<std::string, livehd::diag::Span> var_spans_;
+  // Remember `var`'s span the first time it is seen with a resolvable location.
+  void note_var_span(std::string_view var);
 
   // Local replacement for the deleted runner_type_query_fn seam:
   // inferred scalar KIND off the binding + declared integer ENVELOPE from

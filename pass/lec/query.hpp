@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <functional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -194,6 +195,7 @@ struct Lec_options {
   // Only applied to purely combinational pairs (no unreachable-state concern, so
   // any SAT cube is a genuine counterexample). v1: combinational only.
   int         partitions = 4;
+  int         jobs       = 4;  // shared formal worker-pool bound (hier proof DAG)
   std::string split      = "auto";
 
   // Internal (set by run_case_split, not a user knob): when `_split_values` is
@@ -201,6 +203,13 @@ struct Lec_options {
   // selector values of input `_split_name` instead of the monolithic solve.
   std::string           _split_name;
   std::vector<uint64_t> _split_values;
+  bool                  _isolated_worker = false;  // one global-pool child: no nested forks
+
+  // Verify-obligation cache hooks. The engine computes a rule-F key downstream
+  // of encoding; the CLI supplies the persistent store without coupling this
+  // reusable library to lhd/formal_cache.
+  std::function<bool(std::string_view)> verify_cache_lookup;
+  std::function<void(std::string)>      verify_cache_store;
 };
 
 // lec.decompose mode predicates (auto | true | false; on/1==true, off/0==false).
@@ -208,9 +217,7 @@ struct Lec_options {
 // that does not discharge, fall back to the monolithic solve for a definitive
 // verdict + witness (only `auto`). `true` runs the sweep but never the monolithic
 // solve (the diagnostic mode). See Lec_options::decompose.
-inline bool lec_decompose_try(std::string_view m) {
-  return m == "auto" || m == "true" || m == "on" || m == "1";
-}
+inline bool lec_decompose_try(std::string_view m) { return m == "auto" || m == "true" || m == "on" || m == "1"; }
 inline bool lec_decompose_fallback(std::string_view m) { return m == "auto"; }
 
 // Normalize a lec.semdiff value to the canonical {none, structural}. `true`/`on`/
@@ -248,8 +255,8 @@ inline std::string lec_options_range_error(const Lec_options& o) {
   if (o.semdiff != "none" && o.semdiff != "structural") {
     return "lec.semdiff unknown '" + o.semdiff + "' (none | structural)";
   }
-  if (o.decompose != "auto" && o.decompose != "true" && o.decompose != "false" && o.decompose != "on"
-      && o.decompose != "off" && o.decompose != "1" && o.decompose != "0") {
+  if (o.decompose != "auto" && o.decompose != "true" && o.decompose != "false" && o.decompose != "on" && o.decompose != "off"
+      && o.decompose != "1" && o.decompose != "0") {
     return "lec.decompose unknown '" + o.decompose + "' (auto | true | false)";
   }
   return {};
@@ -265,6 +272,12 @@ inline std::string lec_options_range_error(const Lec_options& o) {
 // to gensim models); nullptr keeps the sound Sub -> Unknown.
 Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts = {},
                          const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib = nullptr);
+
+// Run one proof in a fork-isolated worker. Used by the Taskflow hierarchy DAG:
+// one task owns one child process, so the solver-process count is bounded by
+// formal.jobs and cvc5 instances never execute concurrently in threads.
+Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts = {},
+                                  const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib = nullptr);
 
 // Parse a lec.match correspondence spec into {ref_name, impl_name} pairs. Pure (no
 // file IO — a caller resolves any leading "@FILE" to its text first). Pairs are

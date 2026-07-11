@@ -31,9 +31,9 @@
   helpers) must preserve this — abstraction may only cause extra work (flat
   confirmation), never a wrong verdict.</p>
 
-<h2>Pending</h2>
+<h2>Landed 2026-07-10</h2>
 <ul class="subtasks">
-<li><strong>Encoder gap: <code>get_mask</code> operand "no encodable driver
+<li><strong>LANDED — encoder gap: <code>get_mask</code> operand "no encodable driver
   (combinational cycle?)" — gates 27% of XSCore.</strong> Finding 2026-07-10, from
   the XSCore self-LEC scale run: of 1630 defs, 443 are inconclusive, and
   <em>442 of them</em> fail with this ONE encoder error
@@ -63,25 +63,35 @@
   (+287). Known limit inherited from the splitter: 1-bit signed members have
   unbounded footprint (the <code>sim_loop_pack_shiftand</code> boundary) — those
   still refuse to split, correctly.</li>
-<li><strong>Remaining XSCore tail (156 defs UNKNOWN) — the harder cycle class.</strong>
-  The residual word-level cycles thread through <code>mult</code>/<code>sum</code>/
-  <code>eq</code>/<code>mux</code> — arithmetic the splitter's footprint algebra
-  correctly refuses to cross (a multiplier's output bits depend on ALL input
-  bits). Suspects: dynamic (non-const-mask) range selects lowered to
-  <code>SRA</code>+<code>And</code> (the splitter only cracks const
-  <code>Get_mask</code>), plus genuine solver timeouts on memory-heavy defs
-  (RegFileParts). Needs classification + its own attack (bit-level SCC analysis,
-  or tolg-side lowering changes for the dynamic-select read-backs); the top-level
-  flat encode of XSCore also runs ~7min uncapped — encode time should respect the
-  budget.</li>
-<li><strong>Parallel hier driver on the fcore DAG (consumes F1).</strong> Replace the
-  sequential leaves-first loop in <code>lec_hierarchical</code>
-  (<code>lhd/lhd_kernel.cpp</code>) with the taskflow proof-DAG: all ready leaves in
+<li><strong>Remaining XSCore tail — second splitter attack LANDED 2026-07-10.</strong>
+  The <code>And(SRA(w,k),mask)</code>
+  reader matcher was already present in the generalized splitter and its focused
+  differential-sim regression is green. The fresh sweep exposed a broader local
+  footprint issue: one packed word may contain overlapping OR contributors in an
+  unrelated output field, which disabled the global disjoint-pack shortcut and
+  made a clean input-region read recurse through every output operand. OR slice
+  resolution now drops any operand whose proven footprint misses the requested
+  slice (Sum retains the strict no-carry proof), and one-bit EQ/Mux controls may be
+  rebuilt only from complete bounded operands. <code>LruStateGen</code>, previously
+  an immediate encoder-cycle UNKNOWN, now solver-proves in 53ms with semdiff off.
+  A pre-fix classification reached 1626/1630 definitions before being stopped
+  (the final tally was obsolete once this rule landed); it separated the same
+  encoder-cycle class from genuine arithmetic/memory-heavy residues, which remain
+  F5 work. That run also reconfirmed that encode time does not respect
+  <code>lec.timeout</code> (late parents can spend minutes before cvc5), so
+  budget-aware encode remains open.</li>
+<li><strong>Parallel hier driver on the fcore DAG (F1, LANDED 2026-07-10).</strong>
+  <code>lec_hierarchical</code> now uses the Taskflow proof-DAG: all ready leaves in
   flight (4–8 workers), a parent unlocks when its children settle, a proven child
   becomes an <code>o.collapse</code> black-box exactly as today, and the
   REFUTE-under-collapse ⇒ flat-confirmation rule is preserved. The semdiff
   structural skip and the verdict cache become the first rungs of the per-def
-  portfolio ladder. Per-def progress lines stay (agents stream-parse long runs).</li>
+  portfolio ladder. Per-def progress lines stay (agents stream-parse long runs),
+  and <code>formal.jobs</code> bounds the fork-isolated solver children.</li>
+</ul>
+
+<h2>Pending</h2>
+<ul class="subtasks">
 <li><strong>Consume formal blocks (old 2f-verify V7, lec half).</strong>
   <em>(a)</em> Proven invariants (sidecar or mined, impl-side) asserted in the miter
   are entailed facts — pure solver pruning, can never change the verdict.
