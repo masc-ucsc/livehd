@@ -27,7 +27,56 @@
   <code>rlimit</code> budget (machine-independent), <strong>timeout is not an
   error</strong> (just "not proven, keep the runtime check"), proven results feed
   synthesis as today. This replaces the self-contained single-frame Prover for
-  property proving and is the step the two items below assume.</li>
+  property proving and is the step the two items below assume.
+  <br><em>Hints (surveyed 2026-07-11):</em>
+  <ul class="subtasks">
+  <li><em>What exists today:</em> the single-frame Prover is
+    <code>pass/formal/prove.{hpp,cpp}</code> (demand-encodes each property's cone,
+    one fresh QF_BV solver per query, <code>Prove_options::budget_k</code> (256) ×
+    cone-pins as the cvc5 <strong>rlimit</strong> — machine-independent by design —
+    plus the <code>cone_max</code> (50000) pre-solve gate);
+    <code>pass/formal/pass_formal.cpp</code> owns the <code>mode none|fast|normal</code>
+    knob and the structural checks (Hotmux one-hot, bitwidth), which are NOT property
+    proofs and stay put after the rebase.</li>
+  <li><em>The target:</em> <code>lec::prove_properties</code>
+    (<code>pass/lec/query.cpp</code> ~3640, decl <code>query.hpp</code>). The
+    <code>fproperty</code> Subs tolg materialized are already in the compiled graph
+    (<code>monitors=nullptr</code>; sidecar blocks are the verify CLI's concern, not
+    compile's). <code>Prop_result</code> already carries everything the stateful
+    verdict ladder (next item) needs: <code>unbounded</code> (V3 1-induction
+    survivor ⇒ elide), <code>refuted_at ≥ 0</code> (reachable-from-reset CEX ⇒
+    hard-error eligible), else keep + defer.</li>
+  <li><em>Engine prerequisite — deterministic budget:</em> the shared engine only has
+    wall-clock <code>tlimit-per</code> today (query.cpp ~1792 and ~3692). A verdict
+    that ELIDES a runtime check must be machine-independent or builds go
+    nondeterministic — add an <code>Lec_options::rlimit</code> surface (cvc5
+    <code>setOption("rlimit-per", …)</code>, semantics mirroring
+    <code>budget_k</code>; 0 = off) and have the compile profile set rlimit with
+    timeout 0. The verify CLI keeps wall-clock; only compile needs determinism.</li>
+  <li><em>Profile shape:</em> <code>engine=bmc</code>, tiny bound (the current
+    single-frame ≈ bound 1 + the V3 induction step), rlimit-per, <strong>no
+    forks</strong> in compile (call <code>prove_properties</code> in-process — it
+    never forks; do NOT route through the F1/F3 portfolio machinery here),
+    no <code>--workdir</code> cache coupling in v1 (compile runs everywhere;
+    <code>verify_cache_lookup/store</code> hooks stay unset). Exit semantics
+    unchanged: Unknown/budget ⇒ keep the runtime check, clean exit; only
+    <code>assume</code>s that were themselves proven are hypotheses (policy section
+    below).</li>
+  <li><em>Migration order:</em> (1) add the rlimit knob to the engine + a
+    determinism test (same verdict with the same rlimit across <code>-c dbg</code>
+    and <code>-c opt</code> binaries); (2) route <code>mode=normal</code> property
+    proving through <code>prove_properties</code> behind a comparison flag and diff
+    verdicts against the single-frame Prover over
+    <code>pass/formal/tests</code> (the rebase may only ADD proofs, never lose one —
+    any regression is a cone the demand-encoder handled but the full encoder
+    rejects: fix or gate); (3) delete <code>prove.cpp</code>'s property path, keep
+    its cone-size pre-gate as the compile profile's skip heuristic; (4) then the
+    stateful-assert ladder and reset-exclusion items below land on top.</li>
+  <li><em>Trap:</em> <code>pass.formal</code> runs inside every <code>lhd
+    compile</code> (recipe step <code>pass.formal mode:fast</code>) — wall-clock
+    creep and stdout noise are regressions here; the per-def progress lines the lec
+    driver prints must stay OFF in the compile profile.</li>
+  </ul></li>
 <li><strong>Stateful asserts via the verdict ladder (old M6).</strong> Today a
   stateful refutation is kept as a runtime check because the single-frame witness may
   be unreachable. On the shared engine: 1-induction proven ⇒ elide; BMC-from-reset

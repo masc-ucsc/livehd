@@ -28,6 +28,26 @@ MULTI = ('const kk = 33\n'
          '}\n'
          'const pair = (const px = 1, const py = 2)\n')
 
+# A runtime if/else mux: `sel` takes 1 on one path and 0 on the other, so its
+# inferred range must be the UNION [0, 1] — not the textually-last arm's [0, 0]
+# (each arm's store REPLACES the range; the bitwidth pass range-unions across
+# the arms so a non-constant never reads as bw_min==bw_max, a fold hazard).
+MUX = ('comb m(a:u8, b:u8) -> (z:u8) {\n'
+       '  mut sel = if a == b { 1 } else { 0 }\n'
+       '  z = sel\n'
+       '}\n')
+
+# A struct wire: its fields carry declared widths (pc:u64, src:u128) that the
+# root `io` never binds as a tuple bundle. Hover on a field access must report
+# the field's declared width (u64/u128) — not a bare `int`. Exercises both the
+# lsp-decl-hints recovery and the >62-bit width render.
+FIELD = ('comb w(a:u64, b:u128) -> (z:u64) {\n'
+         '  wire io:(pc:u64, src:u128) = nil\n'
+         '  io.pc = a\n'
+         '  io.src = b\n'
+         '  z = io.pc\n'
+         '}\n')
+
 
 def send(proc, obj):
     body = json.dumps(obj).encode('utf-8')
@@ -125,9 +145,12 @@ def main():
         fail('hover missing contents/range on a name: %r' % hov)
     value = hov.get('contents', {}).get('value', '')
     if 'z' not in value or 'u8' not in value:
-        fail('hover did not report z : u8(...): %r' % hov)
-    if 'bw_min=' not in value or 'bw_max=' not in value:  # 2n Phase C render
-        fail('hover did not report the bw_min/bw_max range: %r' % hov)
+        fail('hover did not report z : u8: %r' % hov)
+    # z spans its full u8 range, so the render is the plain width with NO
+    # bw_min/bw_max (those appear only when the value is narrower than its type;
+    # the kk and mux hovers below exercise the narrowed case).
+    if 'bw_min=' in value:
+        fail('a full-range u8 should render as plain u8, not with bw_min/bw_max: %r' % hov)
     # Hover off any name (column 2, inside the `comb` keyword) -> null.
     send(proc, {'jsonrpc': '2.0', 'id': 7, 'method': 'textDocument/hover',
                 'params': {'textDocument': {'uri': uri},
@@ -177,6 +200,35 @@ def main():
     value = (hov or {}).get('contents', {}).get('value', '')
     if 'tuple(' not in value or 'px: ' not in value or 'py: ' not in value:
         fail('tuple hover should list per-field types: %r' % hov)
+
+    # ── if/else mux range-union (regression) ────────────────────────────────
+    # `mut sel = if a==b { 1 } else { 0 }`: hover on `sel` (line 1, char 6)
+    # must report the union range [0, 1], not one arm's value ([0,0] / [1,1]).
+    send(proc, {'jsonrpc': '2.0', 'method': 'textDocument/didChange',
+                'params': {'textDocument': {'uri': uri, 'version': 4},
+                           'contentChanges': [{'text': MUX}]}})
+    send(proc, {'jsonrpc': '2.0', 'id': 16, 'method': 'textDocument/hover',
+                'params': {'textDocument': {'uri': uri},
+                           'position': {'line': 1, 'character': 6}}})
+    hov = read_response(proc, 16).get('result')
+    value = (hov or {}).get('contents', {}).get('value', '')
+    if 'bw_min=0, bw_max=1' not in value:
+        fail('if/else mux hover should report the union bw_min=0, bw_max=1 '
+             '(not a single arm value): %r' % hov)
+
+    # ── struct-wire field width (regression) ────────────────────────────────
+    # `z = io.pc` on line 4: hover on `pc` (char 9) must report u64 (the field's
+    # declared width), never `int`; the wide u128 field renders too.
+    send(proc, {'jsonrpc': '2.0', 'method': 'textDocument/didChange',
+                'params': {'textDocument': {'uri': uri, 'version': 5},
+                           'contentChanges': [{'text': FIELD}]}})
+    send(proc, {'jsonrpc': '2.0', 'id': 17, 'method': 'textDocument/hover',
+                'params': {'textDocument': {'uri': uri},
+                           'position': {'line': 4, 'character': 9}}})
+    hov = read_response(proc, 17).get('result')
+    value = (hov or {}).get('contents', {}).get('value', '')
+    if 'u64' not in value or 'int' in value:
+        fail('struct-wire field hover should report the declared width u64, not int: %r' % hov)
 
     # ── cross-file definition through import() (2n Phase C) ─────────────────
     # A real sibling .prp on disk; the importing buffer is unsaved (didOpen

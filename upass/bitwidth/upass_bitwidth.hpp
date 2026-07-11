@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/flat_hash_map.h"
@@ -86,6 +87,20 @@ public:
   // may be unbound here (no constprop), so this pass ensures the binding.
   void process_type_spec() override;
 
+  // ── If-arm value-range merge ──────────────────────────────────────────────
+  // A var assigned inside an uncertain if-arm has its range REPLACED by each
+  // arm (process_store/stamp use replace=true), and Symbol_table::leave_scope
+  // invalidates only the comptime trivial, not the range. So a mux like
+  // `mut b = if c { 1 } else { 0 }` would keep just the last arm's range
+  // ([0,0]) — a value that is NOT constant reads as bw_min==bw_max, which is a
+  // miscompile hazard (downstream treats it as a foldable constant). These
+  // hooks range-union what each arm assigns and write the union back after the
+  // if, so the range CONTAINS every reachable value.
+  void notify_if_merge_begin() override;
+  void notify_if_merge_end(bool all_paths_covered) override;
+  void notify_uncertain_arm_begin() override;
+  void notify_uncertain_arm_end() override;
+
 private:
   // Variables whose next write carries a wrap/sat policy. A wrap/sat call is
   // emitted immediately before the store to its `type` argument; consume the
@@ -93,6 +108,31 @@ private:
   // (Deliberately transient walk state, like the coalescer's pending set: a
   // one-shot per-write policy handshake, not a per-name fact.)
   absl::flat_hash_set<std::string> wrap_sat_exempt_;
+
+  // ── If-arm merge state (see the notify_if_* hooks) ────────────────────────
+  // One frame per active if node (nesting → a stack). arm_union[v] is the
+  // range-union of what v was assigned across the arms seen so far;
+  // arm_writes[v] counts how many uncertain arms wrote v; uncertain_arms is
+  // the arm count. A var written in ALL arms of a fully-covered if drops its
+  // pre-if value (the union is exactly the arms); otherwise the merge widens
+  // to the declared/unbounded envelope (never a stale narrow range).
+  struct If_merge_frame {
+    absl::flat_hash_map<std::string, Lnast_range> arm_union;
+    absl::flat_hash_map<std::string, int>         arm_writes;
+    int                                           uncertain_arms = 0;
+  };
+  std::vector<If_merge_frame> if_merge_stack_;
+  // The current uncertain arm's writes (latest range per var wins). A stack so
+  // a nested if's arms don't disturb the enclosing arm's write set.
+  std::vector<absl::flat_hash_map<std::string, Lnast_range>> arm_write_stack_;
+
+  // Record `r` as the latest value `name` takes in the current uncertain arm
+  // (no-op outside one). Called from write_bw on every committed range.
+  void record_arm_write(std::string_view name, const Lnast_range& r);
+  // Write the merged range back to `name`'s scalar entry (bundle Entry.bw_* +
+  // bw_meta), bypassing write_bw's has-trivial guard so the arm-invalidated
+  // entry is refreshed, and propagate it into any enclosing uncertain arm.
+  void commit_merged(std::string_view name, const Lnast_range& r);
 
   // ── Lnast_range ↔ bundle-Entry conversion ─────────────────────────────────
   static std::optional<int64_t> const_to_i64(const Dlop& v);

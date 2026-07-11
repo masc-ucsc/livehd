@@ -222,6 +222,30 @@ void put_str(std::string& b, std::string_view s) {
   b.append(s.data(), s.size());
 }
 
+// Structured witness-trace codec, factored out so the lec (Query_result) and
+// verify (Verify_result) result codecs both round-trip a Witness_trace with the
+// same bytes. Layout: reset_cycles, diverge_cycle (u32; -1 -> 0xffffffff),
+// diverge_outputs list, then the cycles: count, and per cycle {reset_asserted
+// byte, inputs {count, per input name+value+width}}.
+void put_trace(std::string& b, const Witness_trace& tr) {
+  put_u32(b, static_cast<uint32_t>(tr.reset_cycles));
+  put_u32(b, static_cast<uint32_t>(tr.diverge_cycle));
+  put_u32(b, static_cast<uint32_t>(tr.diverge_outputs.size()));
+  for (const auto& s : tr.diverge_outputs) {
+    put_str(b, s);
+  }
+  put_u32(b, static_cast<uint32_t>(tr.cycles.size()));
+  for (const auto& c : tr.cycles) {
+    b.push_back(static_cast<char>(c.reset_asserted ? 1 : 0));
+    put_u32(b, static_cast<uint32_t>(c.inputs.size()));
+    for (const auto& in : c.inputs) {
+      put_str(b, in.name);
+      put_str(b, in.value);
+      put_u32(b, static_cast<uint32_t>(in.width));
+    }
+  }
+}
+
 // Serialize a Query_result over the worker pipe (same binary on both ends, so
 // native-endian POD is fine). Layout: verdict byte, witness, detail, engine,
 // elapsed_ms (i64), then the two unmatched-cut-point lists.
@@ -243,26 +267,7 @@ std::string serialize_result(const Query_result& r) {
   }
   put_u32(b, static_cast<uint32_t>(r.checked_steps));
   put_u32(b, static_cast<uint32_t>(r.output_checks));
-  // Structured witness trace (the lecfail.prp reproduction sequence). Layout:
-  // reset_cycles, diverge_cycle (as u32; -1 -> 0xffffffff), diverge_outputs list,
-  // then the cycles: count, and per cycle {reset_asserted byte, inputs {count,
-  // per input name+value+width}}.
-  put_u32(b, static_cast<uint32_t>(r.trace.reset_cycles));
-  put_u32(b, static_cast<uint32_t>(r.trace.diverge_cycle));
-  put_u32(b, static_cast<uint32_t>(r.trace.diverge_outputs.size()));
-  for (const auto& s : r.trace.diverge_outputs) {
-    put_str(b, s);
-  }
-  put_u32(b, static_cast<uint32_t>(r.trace.cycles.size()));
-  for (const auto& c : r.trace.cycles) {
-    b.push_back(static_cast<char>(c.reset_asserted ? 1 : 0));
-    put_u32(b, static_cast<uint32_t>(c.inputs.size()));
-    for (const auto& in : c.inputs) {
-      put_str(b, in.name);
-      put_str(b, in.value);
-      put_u32(b, static_cast<uint32_t>(in.width));
-    }
-  }
+  put_trace(b, r.trace);     // structured witness (the lecfail.prp reproduction sequence)
   put_str(b, r.split_used);  // strategy-hint selector (same binary both ends)
   put_u32(b, static_cast<uint32_t>(r.uncertain_pairs_used.size()));
   for (const auto& [rn, in] : r.uncertain_pairs_used) {
@@ -287,6 +292,55 @@ bool get_str(std::string_view& b, std::string& s) {
   }
   s.assign(b.data(), n);
   b.remove_prefix(n);
+  return true;
+}
+
+// Inverse of put_trace. Returns false on a truncated blob (may leave `tr`
+// partially filled and `b` mid-record). The lec codec treats a truncation as
+// "optional tail absent" (its caller returns true); the verify codec treats the
+// trace as a required per-Prop_result field.
+bool get_trace(std::string_view& b, Witness_trace& tr) {
+  uint32_t rc = 0, dc = 0, dn = 0;
+  if (!get_u32(b, rc) || !get_u32(b, dc) || !get_u32(b, dn)) {
+    return false;
+  }
+  tr.reset_cycles  = static_cast<int>(rc);
+  tr.diverge_cycle = static_cast<int>(dc);  // 0xffffffff -> -1 round-trips
+  tr.diverge_outputs.clear();
+  for (uint32_t i = 0; i < dn; ++i) {
+    std::string s;
+    if (!get_str(b, s)) {
+      return false;
+    }
+    tr.diverge_outputs.push_back(std::move(s));
+  }
+  uint32_t nc = 0;
+  if (!get_u32(b, nc)) {
+    return false;
+  }
+  tr.cycles.clear();
+  for (uint32_t i = 0; i < nc; ++i) {
+    if (b.empty()) {
+      return false;
+    }
+    Witness_cycle cyc;
+    cyc.reset_asserted = b.front() != 0;
+    b.remove_prefix(1);
+    uint32_t ni = 0;
+    if (!get_u32(b, ni)) {
+      return false;
+    }
+    for (uint32_t j = 0; j < ni; ++j) {
+      Witness_in in;
+      uint32_t   w = 0;
+      if (!get_str(b, in.name) || !get_str(b, in.value) || !get_u32(b, w)) {
+        return false;
+      }
+      in.width = static_cast<int>(w);
+      cyc.inputs.push_back(std::move(in));
+    }
+    tr.cycles.push_back(std::move(cyc));
+  }
   return true;
 }
 bool deserialize_result(std::string_view b, Query_result& r) {
@@ -340,47 +394,10 @@ bool deserialize_result(std::string_view b, Query_result& r) {
     r.output_checks = static_cast<int>(oc);
   }
   // Structured witness trace (mirror serialize_result). Best-effort: an older /
-  // truncated blob simply leaves the trace empty (the fields are optional).
-  uint32_t rc = 0, dc = 0, dn = 0;
-  if (!get_u32(b, rc) || !get_u32(b, dc) || !get_u32(b, dn)) {
+  // truncated blob simply leaves the trace empty (the fields are optional), so a
+  // truncated get_trace ends the parse right here.
+  if (!get_trace(b, r.trace)) {
     return true;
-  }
-  r.trace.reset_cycles  = static_cast<int>(rc);
-  r.trace.diverge_cycle = static_cast<int>(dc);  // 0xffffffff -> -1 round-trips
-  r.trace.diverge_outputs.clear();
-  for (uint32_t i = 0; i < dn; ++i) {
-    std::string s;
-    if (!get_str(b, s)) {
-      return true;
-    }
-    r.trace.diverge_outputs.push_back(std::move(s));
-  }
-  uint32_t nc = 0;
-  if (!get_u32(b, nc)) {
-    return true;
-  }
-  r.trace.cycles.clear();
-  for (uint32_t i = 0; i < nc; ++i) {
-    if (b.empty()) {
-      return true;
-    }
-    Witness_cycle cyc;
-    cyc.reset_asserted = b.front() != 0;
-    b.remove_prefix(1);
-    uint32_t ni = 0;
-    if (!get_u32(b, ni)) {
-      return true;
-    }
-    for (uint32_t j = 0; j < ni; ++j) {
-      Witness_in in;
-      uint32_t   w = 0;
-      if (!get_str(b, in.name) || !get_str(b, in.value) || !get_u32(b, w)) {
-        return true;
-      }
-      in.width = static_cast<int>(w);
-      cyc.inputs.push_back(std::move(in));
-    }
-    r.trace.cycles.push_back(std::move(cyc));
   }
   (void)get_str(b, r.split_used);  // best-effort tail field (mirror serialize)
   uint32_t np = 0;
@@ -394,6 +411,114 @@ bool deserialize_result(std::string_view b, Query_result& r) {
       return true;
     }
     r.uncertain_pairs_used.emplace_back(std::move(rn), std::move(im));
+  }
+  return true;
+}
+
+// Verify_result wire codec (F3 verify strategy race). Mirrors serialize_result's
+// native-endian POD layout: the aggregate verdict/detail/counters, then one
+// record per Prop_result (kind/loc/msg/block, verdict byte, unbounded byte, the
+// three cycle indices as u32 with -1 -> 0xffffffff, witness, structured trace).
+std::string serialize_verify(const Verify_result& v) {
+  std::string b;
+  b.push_back(static_cast<char>(static_cast<uint8_t>(v.verdict)));
+  put_str(b, v.detail);
+  put_u32(b, static_cast<uint32_t>(v.checked_steps));
+  put_u32(b, static_cast<uint32_t>(v.reset_hold));
+  put_u32(b, static_cast<uint32_t>(v.n_assumes));
+  b.push_back(static_cast<char>(v.vacuous ? 1 : 0));
+  b.push_back(static_cast<char>(v.reset_detected ? 1 : 0));
+  int64_t ms = v.elapsed_ms;
+  b.append(reinterpret_cast<const char*>(&ms), sizeof ms);
+  put_u32(b, static_cast<uint32_t>(v.props.size()));
+  for (const auto& p : v.props) {
+    put_str(b, p.kind);
+    put_str(b, p.loc);
+    put_str(b, p.msg);
+    put_str(b, p.block);
+    b.push_back(static_cast<char>(static_cast<uint8_t>(p.verdict)));
+    b.push_back(static_cast<char>(p.unbounded ? 1 : 0));
+    put_u32(b, static_cast<uint32_t>(p.proven_to));
+    put_u32(b, static_cast<uint32_t>(p.refuted_at));
+    put_u32(b, static_cast<uint32_t>(p.unknown_at));
+    put_str(b, p.witness);
+    put_trace(b, p.trace);
+  }
+  return b;
+}
+
+bool deserialize_verify(std::string_view b, Verify_result& v) {
+  if (b.empty()) {
+    return false;
+  }
+  auto vv = static_cast<uint8_t>(b.front());
+  b.remove_prefix(1);
+  if (vv > static_cast<uint8_t>(Verdict::Unknown)) {
+    return false;
+  }
+  v.verdict = static_cast<Verdict>(vv);
+  if (!get_str(b, v.detail)) {
+    return false;
+  }
+  uint32_t cs = 0, rh = 0, na = 0;
+  if (!get_u32(b, cs) || !get_u32(b, rh) || !get_u32(b, na)) {
+    return false;
+  }
+  v.checked_steps = static_cast<int>(cs);
+  v.reset_hold    = static_cast<int>(rh);
+  v.n_assumes     = static_cast<int>(na);
+  if (b.empty()) {
+    return false;
+  }
+  v.vacuous = b.front() != 0;
+  b.remove_prefix(1);
+  if (b.empty()) {
+    return false;
+  }
+  v.reset_detected = b.front() != 0;
+  b.remove_prefix(1);
+  int64_t ms = 0;
+  if (b.size() < sizeof ms) {
+    return false;
+  }
+  std::memcpy(&ms, b.data(), sizeof ms);
+  b.remove_prefix(sizeof ms);
+  v.elapsed_ms = ms;
+  uint32_t np = 0;
+  if (!get_u32(b, np)) {
+    return false;
+  }
+  v.props.clear();
+  for (uint32_t i = 0; i < np; ++i) {
+    Prop_result p;
+    if (!get_str(b, p.kind) || !get_str(b, p.loc) || !get_str(b, p.msg) || !get_str(b, p.block)) {
+      return false;
+    }
+    if (b.empty()) {
+      return false;
+    }
+    auto pv = static_cast<uint8_t>(b.front());
+    b.remove_prefix(1);
+    if (pv > static_cast<uint8_t>(Verdict::Unknown)) {
+      return false;
+    }
+    p.verdict = static_cast<Verdict>(pv);
+    if (b.empty()) {
+      return false;
+    }
+    p.unbounded = b.front() != 0;
+    b.remove_prefix(1);
+    uint32_t pt = 0, ra = 0, ua = 0;
+    if (!get_u32(b, pt) || !get_u32(b, ra) || !get_u32(b, ua)) {
+      return false;
+    }
+    p.proven_to  = static_cast<int>(pt);  // 0xffffffff -> -1 round-trips
+    p.refuted_at = static_cast<int>(ra);
+    p.unknown_at = static_cast<int>(ua);
+    if (!get_str(b, p.witness) || !get_trace(b, p.trace)) {
+      return false;
+    }
+    v.props.push_back(std::move(p));
   }
   return true;
 }
@@ -417,6 +542,164 @@ long long now_ms(std::chrono::steady_clock::time_point t0) {
 }
 
 const char* vname(Verdict v) { return v == Verdict::Proven ? "Proven" : (v == Verdict::Refuted ? "Refuted" : "Unknown"); }
+
+// ── Generic fork-per-method race harness (F3, 2f-fcore) ─────────────────────
+// The shared parallel-proof primitive extracted from run_auto_portfolio's
+// ind|bmc fork race so BOTH lec (Query_result method ladder) and verify
+// (Verify_result strategy race) run over the same battle-tested fork/pipe/poll/
+// reap loop. Forks one child process per method; each runs its method closure,
+// serializes its result over a pipe, and _exit()s (no atexit/dtors). The parent
+// polls; the FIRST result that satisfies `trust` cancels (SIGKILL) the remaining
+// children. If no result is trustworthy, every child runs to completion and all
+// results are collected for the caller to merge / post-process.
+//
+// cvc5 cross-instance thread-safety is unverified, so methods race as PROCESSES
+// (never threads) — the free timeout/hard-kill we rely on for early cancellation
+// and the per-query lec.timeout bounds each child's checkSat, so children
+// self-limit and the parent needs no watchdog. Children fork from a clean state
+// (no cvc5 TermManager in the parent yet), so each builds its own solver — the
+// CALLER MUST invoke this before constructing any cvc5 object in the parent
+// (the reason prove_equal / prove_properties dispatch to the portfolio first).
+//
+// R must be default-constructible. `run_method(i)` runs method i and returns R
+// (called ONLY in the forked child). `ser`/`deser` are the wire codec (a
+// truncated / short blob deserializes best-effort, like serialize_result).
+// `trust(i, r)` decides whether result i is a definitive winner. Returns
+// forked=false when fork/pipe is unavailable so the caller runs its own
+// in-process sequential fallback. A child that dies without a valid result
+// leaves results[i] == R{} with done[i] == true (the caller tags it).
+template <class R>
+struct Race_result {
+  bool              forked = true;  // false => run the sequential fallback
+  int               winner = -1;    // first trustworthy method index, or -1
+  std::vector<R>    results;        // per-method result (default R{} if a child died)
+  std::vector<bool> done;           // whether method i produced any result
+};
+
+template <class R>
+Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method,
+                         const std::function<std::string(const R&)>& ser, const std::function<bool(std::string_view, R&)>& deser,
+                         const std::function<bool(int, const R&)>& trust) {
+  Race_result<R> out;
+  out.results.assign(static_cast<size_t>(nmethods), R{});
+  out.done.assign(static_cast<size_t>(nmethods), false);
+
+  std::vector<int>   rfd(nmethods, -1), wfd(nmethods, -1);
+  std::vector<pid_t> pid(nmethods, -1);
+  bool               fork_ok = true;
+  for (int i = 0; i < nmethods; ++i) {
+    int p[2];
+    if (::pipe(p) != 0) {
+      fork_ok = false;
+      break;
+    }
+    rfd[i]  = p[0];
+    wfd[i]  = p[1];
+    pid_t c = ::fork();
+    if (c < 0) {
+      fork_ok = false;
+      break;
+    }
+    if (c == 0) {
+      // child i: keep only its own write fd (the parent already closed every
+      // earlier child's write end), run its method, serialize, _exit.
+      for (int j = 0; j <= i; ++j) {
+        if (rfd[j] >= 0) {
+          ::close(rfd[j]);
+        }
+        if (j != i && wfd[j] >= 0) {
+          ::close(wfd[j]);
+        }
+      }
+      R           r    = run_method(i);
+      std::string blob = ser(r);
+      write_all(wfd[i], blob.data(), blob.size());
+      ::close(wfd[i]);
+      ::_exit(0);
+    }
+    pid[i] = c;
+    ::close(wfd[i]);  // parent never writes
+    wfd[i] = -1;
+  }
+
+  if (!fork_ok) {
+    for (int j = 0; j < nmethods; ++j) {
+      if (rfd[j] >= 0) {
+        ::close(rfd[j]);
+      }
+      if (wfd[j] >= 0) {
+        ::close(wfd[j]);
+      }
+      if (pid[j] > 0) {
+        ::kill(pid[j], SIGKILL);
+        int st = 0;
+        ::waitpid(pid[j], &st, 0);
+      }
+    }
+    out.forked = false;
+    return out;
+  }
+
+  std::vector<std::string> bufs(nmethods);
+  int                      remaining = nmethods;
+  while (remaining > 0 && out.winner < 0) {
+    std::vector<struct pollfd> pfds;
+    std::vector<int>           map;
+    for (int i = 0; i < nmethods; ++i) {
+      if (!out.done[i]) {
+        struct pollfd pf;
+        pf.fd      = rfd[i];
+        pf.events  = POLLIN;
+        pf.revents = 0;
+        pfds.push_back(pf);
+        map.push_back(i);
+      }
+    }
+    int pr = ::poll(pfds.data(), static_cast<nfds_t>(pfds.size()), -1);
+    if (pr < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      break;
+    }
+    for (size_t k = 0; k < pfds.size() && out.winner < 0; ++k) {
+      if (pfds[k].revents == 0) {
+        continue;
+      }
+      int     i = map[k];
+      char    tmp[8192];
+      ssize_t n = ::read(rfd[i], tmp, sizeof tmp);
+      if (n > 0) {
+        bufs[i].append(tmp, static_cast<size_t>(n));
+        continue;  // worker may still be writing; EOF (n==0) marks done
+      }
+      out.done[i] = true;
+      --remaining;
+      if (!deser(bufs[i], out.results[i])) {
+        out.results[i] = R{};
+      }
+      if (trust(i, out.results[i])) {
+        out.winner = i;
+      }
+    }
+  }
+  // Reap: kill any worker still running (the losers), wait on all (no zombies).
+  for (int i = 0; i < nmethods; ++i) {
+    if (!out.done[i] && pid[i] > 0) {
+      ::kill(pid[i], SIGKILL);
+    }
+    if (rfd[i] >= 0) {
+      ::close(rfd[i]);
+    }
+  }
+  for (int i = 0; i < nmethods; ++i) {
+    if (pid[i] > 0) {
+      int st = 0;
+      ::waitpid(pid[i], &st, 0);
+    }
+  }
+  return out;
+}
 
 // Build the inconclusive verdict from two completed engine results. Neither was
 // trustworthy here (no BMC-Refuted, no inductive-Proven). The inductive CEX (if
@@ -1002,143 +1285,51 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       return r;
     }
   }
-  const char* const engines[2] = {"ind", "bmc"};  // index 0 = inductive, 1 = bmc
-  int               p0[2]      = {-1, -1};
-  int               p1[2]      = {-1, -1};
-  if (::pipe(p0) != 0 || ::pipe(p1) != 0) {
-    if (p0[0] >= 0) {
-      ::close(p0[0]);
-      ::close(p0[1]);
-    }
+  // Race the inductive and BMC engines as two forked children over the shared
+  // fork_race harness (F3). index 0 = inductive, 1 = bmc; the trust asymmetry
+  // (inductive-Proven / bmc-Refuted) is the lec verdict policy — the shared
+  // harness only runs the fork/poll/reap loop and cancels the loser on the
+  // first trustworthy verdict.
+  static const char* const engines[2] = {"ind", "bmc"};
+  auto                     t0          = std::chrono::steady_clock::now();
+  auto run_engine = [&](int i) -> Query_result {
+    Lec_options o    = opts;
+    o.engine         = engines[i];
+    auto         ci  = std::chrono::steady_clock::now();
+    Query_result r   = safe_prove_equal(ref, impl, o, sub_lib);
+    r.engine         = engines[i];
+    r.elapsed_ms     = now_ms(ci);
+    return r;
+  };
+  auto trust = [](int i, const Query_result& r) -> bool {
+    return (i == 0 && r.verdict == Verdict::Proven) || (i == 1 && r.verdict == Verdict::Refuted);
+  };
+  auto race = fork_race<Query_result>(2, run_engine, serialize_result, deserialize_result, trust);
+  if (!race.forked) {
     return run_auto_sequential(ref, impl, opts, sub_lib);
   }
-  int   rfd[2] = {p0[0], p1[0]};
-  int   wfd[2] = {p0[1], p1[1]};
-  pid_t pid[2] = {-1, -1};
-
-  auto t0 = std::chrono::steady_clock::now();
+  // A child that died without a serialized result surfaces as the default
+  // Query_result (empty engine): tag it, exactly as the old inline poll loop did.
   for (int i = 0; i < 2; ++i) {
-    pid_t c = ::fork();
-    if (c < 0) {
-      // fork failed: clean up everything spawned so far and fall back.
-      for (int j = 0; j < 2; ++j) {
-        if (rfd[j] >= 0) {
-          ::close(rfd[j]);
-        }
-        if (wfd[j] >= 0) {
-          ::close(wfd[j]);
-        }
-      }
-      for (int j = 0; j < i; ++j) {
-        if (pid[j] > 0) {
-          ::kill(pid[j], SIGKILL);
-          int st = 0;
-          ::waitpid(pid[j], &st, 0);
-        }
-      }
-      return run_auto_sequential(ref, impl, opts, sub_lib);
-    }
-    if (c == 0) {
-      // ── child i: run exactly one engine, serialize, _exit (no atexit/dtors).
-      ::close(rfd[0]);
-      ::close(rfd[1]);
-      ::close(wfd[1 - i]);
-      Lec_options o    = opts;
-      o.engine         = engines[i];
-      auto         ci  = std::chrono::steady_clock::now();
-      Query_result r   = safe_prove_equal(ref, impl, o, sub_lib);
-      r.engine         = engines[i];
-      r.elapsed_ms     = now_ms(ci);
-      std::string blob = serialize_result(r);
-      write_all(wfd[i], blob.data(), blob.size());
-      ::close(wfd[i]);
-      ::_exit(0);
-    }
-    pid[i] = c;
-  }
-  // ── parent: poll both pipes; first TRUSTWORTHY verdict wins, kill the loser.
-  ::close(wfd[0]);
-  ::close(wfd[1]);
-  std::string  buf[2];
-  bool         done[2] = {false, false};
-  Query_result got[2];
-  int          remaining = 2;
-  int          winner    = -1;
-  while (remaining > 0) {
-    struct pollfd pfds[2];
-    int           map[2];
-    int           nf = 0;
-    for (int i = 0; i < 2; ++i) {
-      if (!done[i]) {
-        pfds[nf].fd     = rfd[i];
-        pfds[nf].events = POLLIN;
-        map[nf]         = i;
-        ++nf;
-      }
-    }
-    int pr = ::poll(pfds, static_cast<nfds_t>(nf), -1);
-    if (pr < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      break;
-    }
-    for (int k = 0; k < nf && winner < 0; ++k) {
-      if (pfds[k].revents == 0) {
-        continue;
-      }
-      int     i = map[k];
-      char    tmp[8192];
-      ssize_t n = ::read(rfd[i], tmp, sizeof tmp);
-      if (n > 0) {
-        buf[i].append(tmp, static_cast<size_t>(n));
-        continue;  // worker may still be writing; EOF (n==0) marks done
-      }
-      done[i] = true;
-      --remaining;
-      if (!deserialize_result(buf[i], got[i])) {
-        got[i]         = Query_result{};
-        got[i].verdict = Verdict::Unknown;
-        got[i].engine  = engines[i];
-        got[i].detail  = std::string(engines[i]) + " worker terminated without a result";
-      }
-      const bool is_ind      = i == 0;
-      const bool trustworthy = (is_ind && got[i].verdict == Verdict::Proven) || (!is_ind && got[i].verdict == Verdict::Refuted);
-      if (trustworthy) {
-        winner    = i;
-        remaining = 0;
-      }
+    if (race.done[i] && race.results[i].engine.empty()) {
+      race.results[i].verdict = Verdict::Unknown;
+      race.results[i].engine  = engines[i];
+      race.results[i].detail  = std::string(engines[i]) + " worker terminated without a result";
     }
   }
-  // Reap: kill any worker still running (the loser), wait on both (no zombies).
-  for (int i = 0; i < 2; ++i) {
-    if (!done[i] && pid[i] > 0) {
-      ::kill(pid[i], SIGKILL);
-    }
-    if (rfd[i] >= 0) {
-      ::close(rfd[i]);
-    }
-  }
-  for (int i = 0; i < 2; ++i) {
-    if (pid[i] > 0) {
-      int st = 0;
-      ::waitpid(pid[i], &st, 0);
-    }
-  }
-
-  if (winner >= 0) {
-    Query_result r = got[winner];
-    r.engine       = engines[winner];
-    r.detail       = "auto: " + std::string(engines[winner]) + " reached " + vname(r.verdict) + " first in "
+  if (race.winner >= 0) {
+    Query_result r = race.results[race.winner];
+    r.engine       = engines[race.winner];
+    r.detail       = "auto: " + std::string(engines[race.winner]) + " reached " + vname(r.verdict) + " first in "
                      + std::to_string(r.elapsed_ms) + "ms (raced ind|bmc); " + r.detail;
     return r;
   }
   Query_result bp;
-  if (try_bounded_proven(got[1], bp)) {
+  if (try_bounded_proven(race.results[1], bp)) {
     bp.elapsed_ms = now_ms(t0);
     return bp;
   }
-  return make_inconclusive(got[0], got[1], opts, now_ms(t0));
+  return make_inconclusive(race.results[0], race.results[1], opts, now_ms(t0));
 }
 
 bool assert_monitor_assumptions(cvc5::TermManager& tm, cvc5::Solver& solver, Encoder& enc, const std::vector<Monitor>* monitors,
@@ -1790,6 +1981,13 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   // it bounds each decisive checkSat in the comb / inductive / BMC frames.
   if (opts.timeout > 0) {
     solver.setOption("tlimit-per", std::to_string(static_cast<long long>(opts.timeout) * 1000));
+  }
+  // Deterministic per-query budget (2f-formal): a machine-independent resource
+  // counter, so a verdict is reproducible across build modes / machines. Resets
+  // per checkSat, like tlimit-per, and a resource-out returns `unknown` (the same
+  // SOUND degrade). The compile tier sets this with timeout=0; both may be set.
+  if (opts.rlimit > 0) {
+    solver.setOption("rlimit-per", std::to_string(opts.rlimit));
   }
 
   // Bit-blasting BV sub-solver. cvc5's default LAZY bitblast solver can return a
@@ -3646,6 +3844,192 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     res.detail += "; solver backend '" + opts.solver + "' not built for verify (cvc5 only)";
     return res;
   }
+
+  // ── verify portfolio (engine=auto, F3) ─────────────────────────────────────
+  // Race two whole-run STRATEGIES as forked children over the shared fork_race
+  // harness, then merge per-obligation firsts:
+  //   bmc-first  = today's ladder at the full bound (deep BMC + the V3 induction
+  //                rung on the bounded-proven survivors). Catches shallow/mid
+  //                reachable bugs and gives the deepest bounded proofs.
+  //   ind-first  = the same code at a SHALLOW bound: a deep-state obligation's
+  //                per-cycle cone stays small, so it reaches proven_to at the
+  //                base cycle and the induction rung promotes it to UNBOUNDED
+  //                without the deep unroll that times bmc-first out.
+  // Per obligation take the strongest verdict (Refuted > unbounded-Proven >
+  // bounded-Proven > Unknown); the trust asymmetry (a reachable BMC refute, an
+  // unbounded k-induction proof) is sound from either strategy. Must fork BEFORE
+  // any cvc5 TermManager exists, so this is the first dispatch. Compile tier and
+  // the recursive strategy calls use engine=bmc, so they never re-enter here.
+  if (opts.engine == "auto") {
+    constexpr int kIndFirstBound = 1;  // minimal k=1 base case
+    auto          run_strategy   = [&](int i) -> Verify_result {
+      Lec_options o = opts;
+      o.engine      = "bmc";
+      if (i == 1 && o.bound > kIndFirstBound) {
+        o.bound = kIndFirstBound;  // ind-first: shallow base case
+      }
+      return prove_properties(design, o, sub_lib, monitors);
+    };
+    // Cancel the sibling only when a strategy has settled EVERY assert obligation
+    // definitively-forever (a reachable refute or an unbounded induction proof) —
+    // both are sound to trust standalone; a merely bounded-Proven is not.
+    auto trust = [](int, const Verify_result& r) -> bool {
+      if (r.props.empty()) {
+        return false;
+      }
+      int n_asserts = 0;
+      for (const auto& p : r.props) {
+        if (p.kind == "assume") {
+          continue;
+        }
+        ++n_asserts;
+        const bool settled = p.verdict == Verdict::Refuted || (p.verdict == Verdict::Proven && p.unbounded);
+        if (!settled) {
+          return false;
+        }
+      }
+      return n_asserts > 0;
+    };
+    // The fork race gives parallelism + early cancel, but each child accumulates
+    // its verdict-cache entries in copy-on-write process memory that is lost on
+    // exit. So when a verdict cache is active, run the two strategies SEQUENTIALLY
+    // IN-PROCESS (bmc-first, then ind-first only if bmc-first left something open)
+    // — the cache stores land in the caller's store; otherwise race them as forked
+    // children (cvc5 instances never run concurrently in threads).
+    const bool    cache_active = static_cast<bool>(opts.verify_cache_store) || static_cast<bool>(opts.verify_cache_lookup);
+    Verify_result A, B;  // A = bmc-first, B = ind-first
+    int           winner = -1;
+    if (!cache_active) {
+      auto race = fork_race<Verify_result>(2, run_strategy, serialize_verify, deserialize_verify, trust);
+      if (!race.forked) {
+        // fork unavailable: run bmc-first only (== today's single-strategy ladder).
+        Lec_options o   = opts;
+        o.engine        = "bmc";
+        Verify_result r = prove_properties(design, o, sub_lib, monitors);
+        r.detail        = "auto verify (sequential, fork unavailable): " + r.detail;
+        return r;
+      }
+      winner = race.winner;
+      A      = std::move(race.results[0]);
+      B      = std::move(race.results[1]);
+    } else {
+      A = run_strategy(0);  // bmc-first, in-process
+      if (trust(0, A)) {
+        winner = 0;
+      } else {
+        B = run_strategy(1);  // ind-first, in-process
+        if (trust(1, B)) {
+          winner = 1;
+        }
+      }
+    }
+    if (winner >= 0) {
+      Verify_result r = (winner == 0) ? std::move(A) : std::move(B);
+      r.detail        = "auto verify: " + std::string(winner == 0 ? "bmc-first" : "ind-first")
+                 + " settled every obligation definitively" + (cache_active ? "" : " (cancelled the other strategy)") + "; "
+                 + r.detail;
+      r.elapsed_ms = now_ms(t0);
+      return r;
+    }
+    // A crashed child surfaces as the DEFAULT Verify_result (empty detail AND no
+    // props); a child that ran but found no obligations carries a non-empty
+    // detail ("...no assert/assert_always obligations found"). Distinguish them
+    // so an obligation-free design is not misreported as a crash.
+    const bool a_ran = !A.detail.empty() || !A.props.empty();
+    const bool b_ran = !B.detail.empty() || !B.props.empty();
+    if (!a_ran && !b_ran) {
+      res.verdict    = Verdict::Unknown;
+      res.detail     = "auto verify: both strategies crashed without a result (fork children died)";
+      res.elapsed_ms = now_ms(t0);
+      return res;
+    }
+    if (!a_ran || !b_ran || A.props.size() != B.props.size()) {
+      // One strategy crashed, or the two disagree on the obligation count (an
+      // encode/monitor error hit one at a different point): fall back to the
+      // more complete single run rather than misalign obligations by index.
+      const bool    a_wins = !b_ran || (a_ran && A.props.size() >= B.props.size());
+      Verify_result r      = a_wins ? A : B;
+      r.detail             = "auto verify: using " + std::string(a_wins ? "bmc-first" : "ind-first")
+               + " (the other strategy crashed or produced a differing obligation count); " + r.detail;
+      r.elapsed_ms = now_ms(t0);
+      return r;
+    }
+    Verify_result m = A;  // carries checked_steps / reset_hold base; props recomputed below
+    m.props.clear();
+    int n_ind_unbounded = 0;
+    for (size_t i = 0; i < A.props.size(); ++i) {
+      const auto& a = A.props[i];
+      const auto& b = B.props[i];
+      Prop_result chosen;
+      if (a.verdict == Verdict::Refuted) {
+        chosen = a;  // bmc-first's deep reachable CEX (with the earliest-cycle trace)
+      } else if (b.verdict == Verdict::Refuted) {
+        chosen = b;
+      } else if (a.unbounded) {
+        chosen = a;  // proven every cycle of every bound (settles it)
+      } else if (b.unbounded) {
+        chosen = b;
+        ++n_ind_unbounded;
+      } else {
+        // Neither refuted nor unbounded: take the strategy that explored DEEPER
+        // (reach = the deepest cycle it resolved/attempted), so ind-first's
+        // shallow bounded-Proven never masks bmc-first's deeper Unknown (a
+        // strategy that gave up at a deep cycle carries more information than one
+        // that bounded-proved only a couple of cycles). On a tie, prefer the one
+        // that actually PROVED its reach over the one that gave up there.
+        auto reach = [](const Prop_result& p) { return std::max(p.proven_to, std::max(p.refuted_at, p.unknown_at)); };
+        const int ra = reach(a), rb = reach(b);
+        if (ra > rb) {
+          chosen = a;
+        } else if (rb > ra) {
+          chosen = b;
+        } else {
+          chosen = (a.verdict == Verdict::Proven) ? a : b;
+        }
+      }
+      m.props.push_back(std::move(chosen));
+    }
+    m.checked_steps  = std::max(A.checked_steps, B.checked_steps);
+    m.reset_hold     = std::max(A.reset_hold, B.reset_hold);
+    m.reset_detected = A.reset_detected || B.reset_detected;
+    m.vacuous        = A.vacuous || B.vacuous;
+    // Aggregate verdict recomputed from the merged props (same rule as the tail
+    // of the single-strategy run): Refuted dominates; anything unresolved ->
+    // Unknown; a design with no assert obligation at all is Unknown, not a PASS.
+    m.n_assumes     = 0;
+    bool any_refuted = false, any_unknown = false, all_proven = true;
+    int  n_asserts   = 0;
+    for (const auto& pr : m.props) {
+      if (pr.kind == "assume") {
+        ++m.n_assumes;
+        continue;
+      }
+      ++n_asserts;
+      if (pr.verdict == Verdict::Refuted) {
+        any_refuted = true;
+      } else if (pr.verdict != Verdict::Proven) {
+        any_unknown = true;
+      }
+      if (pr.verdict != Verdict::Proven) {
+        all_proven = false;
+      }
+    }
+    if (n_asserts == 0) {
+      m.verdict = Verdict::Unknown;
+    } else if (any_refuted) {
+      m.verdict = Verdict::Refuted;
+    } else if (any_unknown || m.vacuous || !all_proven) {
+      m.verdict = Verdict::Unknown;
+    } else {
+      m.verdict = Verdict::Proven;
+    }
+    m.detail = "auto verify: raced bmc-first(bound=" + std::to_string(A.checked_steps) + ") | ind-first(bound="
+             + std::to_string(B.checked_steps) + "), " + std::to_string(n_ind_unbounded)
+             + " obligation(s) proven unbounded by induction-first; bmc-first: " + A.detail + " || ind-first: " + B.detail;
+    m.elapsed_ms = now_ms(t0);
+    return m;
+  }
+
   if (opts.engine != "bmc") {
     res.detail += "; engine '" + opts.engine + "' not supported for verify (bmc only)";
     return res;
@@ -3690,6 +4074,12 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   solver.setLogic("QF_ABV");
   if (opts.timeout > 0) {
     solver.setOption("tlimit-per", std::to_string(static_cast<long long>(opts.timeout) * 1000));
+  }
+  // Deterministic per-obligation budget (2f-formal compile tier): machine- and
+  // build-mode-independent, so an elided runtime check is reproducible. rlimit-per
+  // resets per checkSatAssuming, so each obligation gets the same budget.
+  if (opts.rlimit > 0) {
+    solver.setOption("rlimit-per", std::to_string(opts.rlimit));
   }
   // Same solver-config rules as prove_equal: the eager internal bit-blaster is
   // the trustworthy config (the lazy default has a spurious-SAT history) but has
@@ -3909,6 +4299,11 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   const int total_cyc = N + reset_hold;
   res.checked_steps   = N;
   res.reset_hold      = reset_hold;
+  // A reset prologue actually pinned state[0] iff a primary reset input was
+  // found (structural reset_pin, canonical reset name, or an explicit lec.reset).
+  // When empty, the after_reset flops start FREE, so a BMC refute may rest on an
+  // unreachable initial state — the compile tier gates its hard error on this.
+  res.reset_detected = !reset_negset.empty();
 
   // state[0]: reset init (just_reset / free_toreset) or fresh symbols with a
   // driven reset prologue (after_reset); reset-less register-file banks HOLD
@@ -4160,6 +4555,14 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         cvc5::Term holds = tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, ob.cond, w), zero});
 
         if (pr.kind == "assume") {
+          // Compile tier (ignore_assumes): a design assume is a no-op here — the
+          // pass.formal driver proves assumes separately and only PROVEN ones
+          // become hypotheses, so an unproven / input assume must not prune any
+          // assert's proof. The prop still occupies its occ slot (it stays
+          // Unknown) so downstream occ correlation is unperturbed.
+          if (opts.ignore_assumes) {
+            continue;
+          }
           // Environment constraint: in force at EVERY cycle, reset prologue
           // included (SVA semantics — otherwise an assert_always checked during
           // the prologue would run unconstrained and false-refute). A
@@ -4441,8 +4844,10 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
       };
       if (ind_ok) {
         // Env assumes constrain BOTH frames (they hold on every real cycle).
+        // Skipped entirely under ignore_assumes (the compile tier does not use
+        // design assumes as hypotheses — see the process_props note above).
         for (const auto& [occ_key, ix] : prop_ix) {
-          if (res.props[ix].kind != "assume") {
+          if (opts.ignore_assumes || res.props[ix].kind != "assume") {
             continue;
           }
           for (int f = 0; f < 2; ++f) {
@@ -4525,7 +4930,9 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
 
   // Vacuity: contradictory assumes make every proof vacuous. One plain checkSat
   // over the frame + assumes (+ entailed frontier facts, which cannot flip it).
-  if (res.n_assumes > 0) {
+  // Skipped under ignore_assumes — no design assume was asserted, so there is no
+  // assume set to be contradictory (the compile tier owns assume consistency).
+  if (res.n_assumes > 0 && !opts.ignore_assumes) {
     cvc5::Result r = solver.checkSat();
     if (r.isUnsat()) {
       res.vacuous = true;

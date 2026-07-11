@@ -213,6 +213,18 @@ public:
   virtual void notify_uncertain_arm_begin() {}
   virtual void notify_uncertain_arm_end() {}
 
+  // Called by the runner around the full-emit (runtime / elif-chain) if walk,
+  // bracketing the sequence of uncertain-arm begin/end notifications for ONE
+  // if node. The bitwidth pass uses this to merge (range-union) the value a
+  // variable takes across the arms: each arm's store REPLACES the range, so
+  // without a cross-arm merge a var written in every arm keeps only the
+  // textually-last arm's (too-narrow) range. `all_paths_covered` is true iff
+  // every runtime path through the if is one of the uncertain arms (a real
+  // trailing `else` and no comptime-decided/dead arm) — only then can a var
+  // written in ALL arms drop its pre-if value from the union. Default: no-op.
+  virtual void notify_if_merge_begin() {}
+  virtual void notify_if_merge_end(bool /*all_paths_covered*/) {}
+
   // Init-construction window. The runner synthesizes the `init(ref x, …)`
   // constructor call (plus the type-defaults bind) for `mut x:T = v` /
   // `x = T(v)` / `mut x:T = some_mod_init`. While the window is open the

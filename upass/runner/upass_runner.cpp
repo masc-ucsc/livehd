@@ -1419,6 +1419,22 @@ std::string lsp_render_leaf_type(const Bundle::Entry& fe) {
     return std::max(sb(lo), sb(hi));
   };
 
+  // Declared WIDTH from the (max, min) type Consts. get_bits() is the signed
+  // width; an unsigned envelope (min >= 0) drops the sign bit. Unlike to_i64
+  // this handles >62-bit types (u64/u128) whose bounds don't fit int64, so the
+  // width still renders instead of collapsing to `int`.
+  bool       dsgn  = false;
+  const auto dbits = [&]() -> std::optional<int> {
+    const auto& dmax = fe.decl_max;
+    const auto& dmin = fe.decl_min;
+    if ((dmax.is_invalid() || !dmax.is_integer()) && (dmin.is_invalid() || !dmin.is_integer())) {
+      return std::nullopt;
+    }
+    dsgn          = !dmin.is_invalid() && dmin.is_integer() && dmin.is_negative();
+    const auto bw = [](const Dlop& v) -> int { return (v.is_invalid() || !v.is_integer()) ? 0 : v.get_bits(); };
+    const int  b  = dsgn ? std::max(bw(dmax), bw(dmin)) : (dmax.is_known_zero() ? 0 : bw(dmax) - 1);
+    return b > 0 ? std::optional<int>(b) : std::nullopt;
+  }();
   const auto dlo = to_i64(fe.decl_min);
   const auto dhi = to_i64(fe.decl_max);
   auto       lo  = to_i64(fe.bw_min);
@@ -1429,23 +1445,35 @@ std::string lsp_render_leaf_type(const Bundle::Entry& fe) {
       hi = v;
     }
   }
-  const bool have_decl = dlo && dhi;
-  if (!lo || !hi) {
-    lo = dlo;
-    hi = dhi;
+  const bool have_decl_i64 = dlo && dhi;
+  if (!dbits && (!lo || !hi) && !have_decl_i64) {
+    return "int";  // no declared width and no derived/point range
   }
-  if (!lo || !hi) {
-    return "int";
+  bool sgn;
+  int  bits;
+  if (dbits) {
+    sgn  = dsgn;
+    bits = *dbits;
+  } else if (have_decl_i64) {
+    sgn  = *dlo < 0;
+    bits = sgn ? sbits(*dlo, *dhi) : ubits(*dhi);
+  } else {
+    sgn  = *lo < 0;
+    bits = sgn ? sbits(*lo, *hi) : ubits(*hi);
   }
-  const bool  sgn  = have_decl ? (*dlo < 0) : (*lo < 0);
-  const int   bits = have_decl ? (sgn ? sbits(*dlo, *dhi) : ubits(*dhi)) : (sgn ? sbits(*lo, *hi) : ubits(*hi));
   std::string r(1, sgn ? 's' : 'u');
   r += std::to_string(bits);
-  r += "(bw_min=";
-  r += std::to_string(*lo);
-  r += ", bw_max=";
-  r += std::to_string(*hi);
-  r += ')';
+  // Show bw_min/bw_max ONLY when the value is strictly NARROWER than the
+  // declared full range — a full-range value adds no info, and wide-type
+  // bounds don't fit int64 anyway. With no declared envelope the derived
+  // range IS the only bound, so show it.
+  if (lo && hi && (!have_decl_i64 || *lo > *dlo || *hi < *dhi)) {
+    r += "(bw_min=";
+    r += std::to_string(*lo);
+    r += ", bw_max=";
+    r += std::to_string(*hi);
+    r += ')';
+  }
   return r;
 }
 
@@ -1572,6 +1600,22 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
   std::optional<int64_t> dlo;              // declared value envelope
   std::optional<int64_t> dhi;
   Io_kind                io_kind = Io_kind::none;  // declared bool/string on an IO leaf
+  // Derive the declared width + i64 envelope from a type's (max, min) Consts.
+  // get_bits() handles >62-bit types (u64/u128) whose bounds don't fit int64,
+  // so dbits is set even when to_i64 (dlo/dhi) cannot represent the bound.
+  const auto apply_decl = [&](const Dlop& dmax, const Dlop& dmin) {
+    if ((dmax.is_invalid() || !dmax.is_integer()) && (dmin.is_invalid() || !dmin.is_integer())) {
+      return;
+    }
+    dsigned       = !dmin.is_invalid() && dmin.is_integer() && dmin.is_negative();
+    const auto bw = [](const Dlop& v) -> int { return (v.is_invalid() || !v.is_integer()) ? 0 : v.get_bits(); };
+    const int  b  = dsigned ? std::max(bw(dmax), bw(dmin)) : (dmax.is_known_zero() ? 0 : bw(dmax) - 1);
+    if (b > 0) {
+      dbits = b;
+    }
+    dlo = to_i64(dmin);
+    dhi = to_i64(dmax);
+  };
   {
     const auto&                  io    = lm->get_lnast()->io_meta();
     const Lnast_io_entry*        found = nullptr;
@@ -1609,10 +1653,31 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
       }
     } else if (bun) {
       const auto& e = bun->get_entry(bundle_path::of_string("0"));
-      dlo           = to_i64(e.decl_min);
-      dhi           = to_i64(e.decl_max);
-      if (dlo && dhi) {
-        dsigned = *dlo < 0;
+      apply_decl(e.decl_max, e.decl_min);
+    }
+  }
+
+  // A DOTTED field whose root container is NOT a live tuple binding (a wire/reg
+  // struct field: the field TYPE was stashed in lsp_decl_hints / pending, but
+  // no `io` bundle ever bound). Without this the field falls through to a bare
+  // `int` — recover its declared width from the stash. Integer width via
+  // apply_decl; a bool/string field carries its kind through io_kind below.
+  if (!dbits && !dlo && !dhi && !Bundle::get_all_but_first_level(base).empty()) {
+    const auto pull = [&](const Symbol_table::Pending_decl& pf) {
+      apply_decl(pf.decl_max, pf.decl_min);
+      if (io_kind == Io_kind::none && pf.kind == upass::Kind::boolean) {
+        io_kind = Io_kind::boolean;
+      } else if (io_kind == Io_kind::none && pf.kind == upass::Kind::string) {
+        io_kind = Io_kind::string;
+      }
+    };
+    const std::string base_s(base);
+    if (const auto it = symbol_table_.pending_decl_facts.find(base_s); it != symbol_table_.pending_decl_facts.end()) {
+      pull(it->second);
+    }
+    if (!dbits && !dlo && !dhi) {
+      if (const auto it = lsp_decl_hints().find(base_s); it != lsp_decl_hints().end()) {
+        pull(it->second);
       }
     }
   }
@@ -1786,31 +1851,35 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
       render += "string";
     }
   } else {
-    const bool have_decl = dlo && dhi;
-    const bool have_inf  = ilo && ihi;
-    if (!have_decl && !have_inf) {
-      render += "int";  // unbounded and undeclared: no width to show
+    const bool have_decl = dlo && dhi;  // declared envelope fits int64
+    const bool have_inf  = ilo && ihi;  // inferred range known
+    if (!have_decl && !have_inf && !dbits) {
+      render += "int";  // no declared width and no derived range
     } else {
-      // bw_min/bw_max shown = the inferred (possibly narrowed) range when
-      // known, else the declared envelope. Prefix bits/sign = the DECLARED
-      // width when declared (so `z:u8` narrowed to 0..15 renders
-      // u8(bw_min=0, bw_max=15)), else derived from the range.
-      const int64_t lo  = have_inf ? *ilo : *dlo;
-      const int64_t hi  = have_inf ? *ihi : *dhi;
-      const bool    sgn = have_decl ? dsigned : (lo < 0);
-      int           bits;
-      if (have_decl) {
-        bits = dbits ? *dbits : (dsigned ? sbits(*dlo, *dhi) : ubits(*dhi));
+      // Width prefix = the DECLARED width when known (dbits — handles u64/u128
+      // whose bounds don't fit int64), else derived from the i64 envelope/range.
+      const bool sgn = dbits ? dsigned : (have_decl ? dsigned : (*ilo < 0));
+      int        bits;
+      if (dbits) {
+        bits = *dbits;
+      } else if (have_decl) {
+        bits = dsigned ? sbits(*dlo, *dhi) : ubits(*dhi);
       } else {
-        bits = sgn ? sbits(lo, hi) : ubits(hi);
+        bits = (*ilo < 0) ? sbits(*ilo, *ihi) : ubits(*ihi);
       }
       render += sgn ? 's' : 'u';
       render += std::to_string(bits);
-      render += "(bw_min=";
-      render += std::to_string(lo);
-      render += ", bw_max=";
-      render += std::to_string(hi);
-      render += ')';
+      // Show bw_min/bw_max ONLY when the inferred range is strictly NARROWER
+      // than the declared full range (`z:u8` narrowed to 0..15 →
+      // u8(bw_min=0, bw_max=15); a full-range `z:u8` → just u8). With no
+      // declared envelope the inferred range IS the only bound, so show it.
+      if (have_inf && (!have_decl || *ilo > *dlo || *ihi < *dhi)) {
+        render += "(bw_min=";
+        render += std::to_string(*ilo);
+        render += ", bw_max=";
+        render += std::to_string(*ihi);
+        render += ')';
+      }
     }
   }
 
@@ -8008,6 +8077,17 @@ void uPass_runner::process_if() {
 
   // Unknown condition (or elif chain): emit the full if node unchanged.
   emit_push(lm->current_type());
+  // Bracket the arm walk so a pass (bitwidth) can range-union a variable's
+  // value across the arms — each arm's store REPLACES the range, so without
+  // this a var written in every arm would keep only the textually-last arm's
+  // (too-narrow) range. saw_else && all_arms_uncertain == "the uncertain arms
+  // partition every runtime path", which lets a var written in ALL arms drop
+  // its pre-if value from the union (see notify_if_merge_end).
+  for (auto& e : upasses) {
+    e.pass->notify_if_merge_begin();
+  }
+  bool saw_else           = false;
+  bool all_arms_uncertain = true;
   if (lm->has_child()) {
     lm->move_to_child();
     // Branch elimination for known conditions. The if's children alternate
@@ -8067,10 +8147,20 @@ void uPass_runner::process_if() {
         // uncertain when some prior arm's cond didn't fold either way; if
         // every prior cond folded to known-false the else *is* guaranteed.
         const bool uncertain    = last_was_cond ? !just_matched : any_prior_uncertain;
+        // A trailing else (a body-stmts with no cond of its own this round)
+        // is the only stmts reached with last_was_cond == false.
+        const bool is_trailing_else = !last_was_cond;
         last_was_cond           = false;
         if (dead) {
+          all_arms_uncertain = false;  // a comptime-decided/dead path exists — not a clean mux
           emit_subtree_verbatim();
           continue;
+        }
+        if (is_trailing_else) {
+          saw_else = true;
+        }
+        if (!uncertain) {
+          all_arms_uncertain = false;  // a just_matched (comptime-true) arm — not a clean mux
         }
         if (uncertain) {
           next_block_uncertain_ = true;  // The arm's stmts scope gets mark_current_uncertain
@@ -8105,6 +8195,9 @@ void uPass_runner::process_if() {
       process_lnast();
     } while (lm->move_to_sibling());
     lm->move_to_parent();
+  }
+  for (auto& e : upasses) {
+    e.pass->notify_if_merge_end(saw_else && all_arms_uncertain);
   }
   emit_pop();
 }

@@ -251,6 +251,27 @@ sh_test(
     data = ["//lhd"],
 )
 
+# F3 (2f-fcore): `lhd formal verify` under the engine=auto portfolio — the
+# induction-first strategy promotes a deep-state invariant to UNBOUNDED, the
+# per-obligation merge takes bmc-first's deep reachable refute, and auto never
+# regresses a bmc verdict.
+sh_test(
+    name = "lhd_formal_portfolio_test",
+    size = "large",
+    srcs = ["lhd_formal_portfolio_test.sh"],
+    data = ["//lhd"],
+)
+
+# 2f-formal: pass.formal mode=normal rebased onto the shared BMC-from-reset +
+# 1-induction engine — the stateful verdict ladder (inductive->elide, reachable
+# refute->hard error, out-of-budget->deferred) and the deterministic rlimit budget.
+sh_test(
+    name = "lhd_formal_rebase_test",
+    size = "large",
+    srcs = ["lhd_formal_rebase_test.sh"],
+    data = ["//lhd"],
+)
+
 sh_test(
     name = "lhd_formal_cache_split_test",
     srcs = ["lhd_formal_cache_split_test.sh"],

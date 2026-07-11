@@ -79,6 +79,58 @@
   the same treatment; the trust asymmetries (e.g. ind-Refuted trusted only for
   combinational designs; REFUTE-under-collapse needs flat confirmation) stay with the
   consumer pages that own them.</li>
+<li><strong>Implementation hints (surveyed 2026-07-11, all in
+  <code>pass/lec/query.cpp</code>).</strong> What to extract: the fork/pipe/poll race
+  harness inside <code>run_auto_portfolio</code> (~line 921) — two forked children,
+  each runs one engine, serializes its result over a pipe, parent polls and SIGKILLs
+  the loser on the first trustworthy verdict — plus its satellites:
+  <code>safe_prove_equal</code> (exception→tagged-Unknown), <code>run_auto_sequential</code>
+  (fork-failure fallback), <code>try_bounded_proven</code>,
+  <code>make_inconclusive</code>, <code>serialize_result</code>/<code>deserialize_result</code>,
+  and <code>graph_is_combinational</code>. Generalize to
+  <code>race(methods, trust_predicate, serialize)</code>: the consumer supplies the
+  method closures, the trust asymmetry (lec: ind-Proven / bmc-Refuted; verify:
+  induction-UNSAT ⇒ unbounded, BMC-SAT ⇒ reachable refute, induction-SAT ⇒ hint),
+  and the result codec. The shared core stays in <code>pass/lec</code> (fcore is a
+  concept, not a directory — verify already lives there).</li>
+<li><strong>Verify racing shape — the key design decision.</strong> lec subtasks are
+  independent processes by construction; verify obligations today share ONE
+  incremental solver inside <code>prove_properties</code> (query.cpp ~3640:
+  cycle-by-cycle retractable <code>checkSatAssuming</code> per obligation, proven
+  obligations re-asserted as frontier assumes, then the V3 simultaneous 1-induction
+  pass promotes survivors to unbounded). Per-obligation racing therefore does NOT
+  decompose like def-pairs. Two viable shapes: <em>(a)</em> race two whole-run
+  STRATEGIES as forked children — induction-first (try the V3 Houdini pass up front;
+  everything it proves unbounded is settled without unrolling) vs BMC-first (today's
+  ladder) — and merge per-obligation firsts; <em>(b)</em> keep one BMC run and fork
+  only the induction pass alongside it. (a) reuses the race harness unchanged and is
+  the suggested v1. The per-obligation verify cache lookup
+  (<code>verify_obligation_key</code>, rule-F hooks) stays the first rung either
+  way.</li>
+<li><strong>Layering constraint (learned from tier-2, 2026-07-11):</strong> consumer
+  verdict-discipline wrappers — the uncertain-pair drop-and-retry + bounded-Proven
+  suppression at the top of <code>prove_equal</code>, the driver's
+  REFUTE-under-collapse flat confirmation — sit ABOVE the racing harness and must
+  stay there after the lift: the harness returns raw method verdicts; policy that
+  re-solves or demotes them is the consumer's.</li>
+<li><strong>Traps (all present in the current code, keep them):</strong> children must
+  fork BEFORE any cvc5 <code>TermManager</code> exists in the process (the reason
+  <code>prove_equal</code> dispatches to the portfolio first);
+  cvc5 cross-instance thread-safety is unverified ⇒ processes, never threads;
+  <code>_isolated_worker</code> switches to the fork-free sequential ladder so
+  Taskflow tasks never nest forks past <code>formal.jobs</code>;
+  new <code>Query_result</code> fields must be appended to BOTH
+  <code>serialize_result</code> and <code>deserialize_result</code> as best-effort
+  TAIL fields (the tier-2 <code>uncertain_pairs_used</code> shows the pattern);
+  reap every child (<code>SIGKILL</code> + <code>waitpid</code>, no zombies); the
+  per-query <code>lec.timeout</code> (cvc5 <code>tlimit-per</code>) makes each child
+  self-limiting, so the parent needs no watchdog.</li>
+<li><strong>Acceptance:</strong> a deep-state verify assert that times out under the
+  plain BMC ladder but proves via the induction-first racer ends PROVEN-unbounded;
+  identical verdicts to today across the existing verify + lec suites (the harness
+  refactor must be a no-op for lec); total live solver processes never exceed
+  <code>formal.jobs</code> under the hier driver; a racer crash (ENGINE CRASH tag)
+  degrades that method to Unknown without killing the run.</li>
 </ul>
 
 <h2>3 — Unified canonical digest + verdict cache (<code>--workdir</code>) — F2 verify tail LANDED</h2>

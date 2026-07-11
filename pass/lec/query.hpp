@@ -110,6 +110,13 @@ struct Lec_options {
   std::string solver  = "cvc5";  // cvc5 | bitwuzla (not yet built)
   int         bound   = 6;       // BMC / induction depth
   int         timeout = 0;       // per-query seconds (0 = none)
+  // Deterministic per-query budget (cvc5 `rlimit-per`): a machine-/wall-clock-
+  // independent internal resource counter, so the SAME config yields the SAME
+  // verdict on every machine and build mode. The compile tier (2f-formal) sets
+  // this (with timeout=0) so a verdict that ELIDES a runtime check is
+  // reproducible across `-c dbg`/`-c opt` binaries; the verify/lec CLIs default
+  // to wall-clock `timeout`. 0 = off. Both may be set (each bounds a checkSat).
+  int         rlimit  = 0;
   bool        witness = true;    // print counterexample on Refuted
   std::string decompose = "auto"; // prove each cut/output diff as a separate UNSAT query
                                  // instead of one monolithic OR-miter. Same proof (an OR
@@ -254,6 +261,17 @@ struct Lec_options {
   int                         input_assumes     = 0;
   int                         unchecked_assumes = 0;
 
+  // Compile tier (2f-formal): treat design `assume` fproperties as NO-OPs — never
+  // asserted as constraints, never induction hypotheses (they still occupy an occ
+  // slot / a Prop_result, but are neither checked nor used). Sound for the compile
+  // tier because a PROVEN invariant assume is auto-satisfied by BMC-from-reset
+  // (reachable states already satisfy it) and an UNPROVEN / input assume must
+  // never prune an assert's proof (only proven assumes are hypotheses — that
+  // discipline lives in the pass.formal driver, which proves assumes separately
+  // and recovers assume-dependent elisions with the single-frame Prover). The
+  // verify CLI leaves this false: there, an assume is a disclosed env constraint.
+  bool ignore_assumes = false;
+
   // Verify-obligation cache hooks. The engine computes a rule-F key downstream
   // of encoding; the CLI supplies the persistent store without coupling this
   // reusable library to lhd/formal_cache.
@@ -390,6 +408,10 @@ struct Verify_result {
   std::string detail;
   int         checked_steps = 0;   // bound actually run
   int         reset_hold    = 0;   // after_reset prologue length (incl. pipeline flush)
+  bool        reset_detected = false;  // a reset prologue actually pinned state[0] (a primary reset input
+                                       // was found/applied). When false, the BMC starts from FREE flop
+                                       // state, so a refute may rest on an unreachable initial state — the
+                                       // compile tier must NOT treat it as reachable-from-reset (no hard error).
   int         n_assumes     = 0;   // user assumes in force (verdicts are conditional on them)
   bool        vacuous       = false;  // assume set contradictory: every "proof" was vacuous
   std::vector<Prop_result> props;  // one entry per fproperty, walk order

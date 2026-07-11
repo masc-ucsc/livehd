@@ -160,6 +160,10 @@ void uPass_bitwidth::write_bw(std::string_view name, Bundle& dst, Lnast_range r,
     dst.set(bundle_path::of_string("0"), std::move(e));
   }
 
+  // Feed the if-arm merge: this is what `name` is assigned on this arm's path
+  // (the last committed write wins). Consumed by notify_if_merge_end.
+  record_arm_write(name, r);
+
   // Write-through to lnast->bw_meta() — the tolg/LSP interface, and the
   // cross-invocation persistence store (replaces the old end_run flush).
   auto&         meta = lm->get_lnast()->bw_meta();
@@ -184,6 +188,85 @@ void uPass_bitwidth::clear_range(std::string_view name) {
     }
   }
   lm->get_lnast()->bw_meta().ranges.erase(std::string(name));
+}
+
+// ── If-arm value-range merge ─────────────────────────────────────────────────
+
+void uPass_bitwidth::record_arm_write(std::string_view name, const Lnast_range& r) {
+  if (arm_write_stack_.empty()) {
+    return;  // not inside an uncertain if-arm
+  }
+  arm_write_stack_.back()[std::string(name)] = r;  // latest write in this arm wins
+}
+
+void uPass_bitwidth::commit_merged(std::string_view name, const Lnast_range& r) {
+  // Refresh the scalar "0" entry DIRECTLY: the arm's leave_scope invalidated
+  // the trivial, so write_bw's `is_empty() || has_trivial` guard would skip
+  // the bundle write and leave the stale narrow bw fields that range_of_operand
+  // reads first (bw_meta is only the fallback).
+  if (auto b = (runner_st != nullptr) ? runner_st->get_bundle_for_write(name) : nullptr; b) {
+    Bundle::Entry e = b->get_entry(bundle_path::of_string("0"));
+    e.immutable     = false;
+    if (r.is_unbounded()) {
+      e.bw_max = Bundle::invalid_lconst;
+      e.bw_min = Bundle::invalid_lconst;
+    } else {
+      e.bw_max = *Dlop::create_integer(r.max);
+      e.bw_min = *Dlop::create_integer(r.min);
+    }
+    b->set(bundle_path::of_string("0"), std::move(e));
+  }
+  // Write-through to bw_meta (LSP hover + tolg + cross-invocation persistence).
+  auto&         meta = lm->get_lnast()->bw_meta();
+  BitwidthEntry me;
+  me.min                         = r.min;
+  me.max                         = r.max;
+  me.unbounded                   = r.is_unbounded();
+  meta.ranges[std::string(name)] = me;
+  // If this if is nested inside another uncertain arm, the merged value is
+  // `name`'s contribution to that outer arm's path.
+  record_arm_write(name, r);
+}
+
+void uPass_bitwidth::notify_if_merge_begin() { if_merge_stack_.emplace_back(); }
+
+void uPass_bitwidth::notify_uncertain_arm_begin() {
+  if (if_merge_stack_.empty()) {
+    return;  // an uncertain arm with no bracketing merge frame (shouldn't happen)
+  }
+  arm_write_stack_.emplace_back();
+  ++if_merge_stack_.back().uncertain_arms;
+}
+
+void uPass_bitwidth::notify_uncertain_arm_end() {
+  if (if_merge_stack_.empty() || arm_write_stack_.empty()) {
+    return;
+  }
+  const auto arm = std::move(arm_write_stack_.back());
+  arm_write_stack_.pop_back();
+  auto& f = if_merge_stack_.back();
+  for (const auto& [var, r] : arm) {
+    const auto it    = f.arm_union.find(var);
+    f.arm_union[var] = (it == f.arm_union.end()) ? r : it->second.join(r);  // join = [min,max] over paths
+    ++f.arm_writes[var];
+  }
+}
+
+void uPass_bitwidth::notify_if_merge_end(bool all_paths_covered) {
+  if (if_merge_stack_.empty()) {
+    return;
+  }
+  const auto f = std::move(if_merge_stack_.back());
+  if_merge_stack_.pop_back();
+  for (const auto& [var, arm_union] : f.arm_union) {
+    // The precise union is sound ONLY when every runtime path assigns `var`:
+    // a fully-covered if (real else, no comptime-decided arm) where `var` was
+    // written in ALL arms. Otherwise `var` may keep its pre-if value on some
+    // path, so widen to unbounded — which renders as the declared type
+    // envelope (or `int`), never a stale narrow / spurious-constant range.
+    const bool covered = all_paths_covered && f.arm_writes.at(var) == f.uncertain_arms;
+    commit_merged(var, covered ? arm_union : Lnast_range::make_unbounded());
+  }
 }
 
 // ── Declared envelope + fit check (at the offending node) ───────────────────

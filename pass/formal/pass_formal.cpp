@@ -2,6 +2,7 @@
 
 #include "pass_formal.hpp"
 
+#include <algorithm>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -97,6 +98,30 @@ void report_refuted(std::string_view code, const std::string& what, std::string_
       .emit();
 }
 
+// A REACHABLE-from-reset refutation found by the shared BMC engine (mode=normal,
+// 2f-formal rebase). Unlike the single-frame free-state refute, the witness is
+// reachable from reset within the compile budget, so it is a genuine violation
+// (no "may be unreachable" caveat). Recorded as a deferred (non-fatal) error so
+// the pipeline finishes with the failing check kept at runtime.
+void report_refuted_reachable(std::string_view code, const std::string& what, std::string_view module, const std::string& loc,
+                              const std::string& msg, const std::string& witness, int cycle) {
+  std::string detail;
+  if (!loc.empty()) {
+    detail += " at " + loc;
+  }
+  if (!msg.empty()) {
+    detail += ": " + msg;
+  }
+  std::string cex
+      = witness.empty() ? std::string{} : (" (counterexample from reset @ cycle " + std::to_string(cycle) + ": " + witness + ")");
+  livehd::diag::err("pass.formal", code, "comptime")
+      .msg("{} in '{}'{}{}", what, module, detail, cex)
+      .hint("reachable from reset within the compile budget (BMC), so this is a genuine violation — fix the design, narrow "
+            "it with a proven assume, or intend it as a runtime check; a deeper/unreachable case would not error")
+      .deferred()
+      .emit();
+}
+
 // A property that was NOT confirmed-real (or was downgraded) is kept as a runtime
 // check and reported as a LOUD `DEFERRED` warning (never silently masked) — the
 // build still passes. Reasons, in priority order: the user downgraded refutations
@@ -150,6 +175,14 @@ void Pass_formal::setup() {
                        "error");
   m.add_label_optional("enabled", "true|false run the pass (opt out with false, same as mode=none)", "true");
   m.add_label_optional("budget_k", "deterministic per-query cvc5 rlimit = budget_k * cone-node-count (0 = default 256)", "0");
+  m.add_label_optional("bmc_bound",
+                       "mode=normal BMC-from-reset unroll depth (default 4, tiny): caps how deep a REACHABLE refute is "
+                       "confirmed; the 1-induction rung proves unbounded invariants regardless. Raise to catch deeper bugs",
+                       "4");
+  m.add_label_optional("reset",
+                       "mode=normal authoritative reset input spec (name[:lo|:hi], comma-separated; else auto-detect). "
+                       "When no reset is detected the BMC starts from free state, so a refute is NOT treated as reachable",
+                       "");
   m.add_label_optional("cone_max", "skip (defer to runtime) cones larger than this many nodes (0 = default 50000)", "0");
   m.add_label_optional("warn_deferred", "true|false warn whenever any obligation is deferred to runtime", "true");
   m.add_label_optional("warn_onehot", "true|false warn on a deferred Hotmux one-hot check", "true");
@@ -205,6 +238,14 @@ void Pass_formal::work(Eprp_var& var) {
   const int cone_max = to_int(var.get("cone_max", "0"), 0);
   opts.budget_k = budget_k > 0 ? budget_k : 256;
   opts.cone_max = cone_max > 0 ? cone_max : 50000;
+
+  // mode=normal BMC-from-reset unroll depth (2f-formal): a TINY bound — the
+  // single-frame base case plus enough free cycles that shallow reachable
+  // violations surface within a compile-safe budget. The 1-induction rung proves
+  // UNBOUNDED invariants regardless of it; the bound only caps how deep a
+  // REACHABLE refute is confirmed (deeper bugs stay runtime checks, never a false
+  // error). Raise it to confirm deeper violations at the cost of compile time.
+  const int bmc_bound = std::max(1, to_int(var.get("bmc_bound", "4"), 4));
 
   const bool warn_def    = truthy(var.get("warn_deferred", "true"));
   const bool warn_onehot = warn_def && truthy(var.get("warn_onehot", "true"));
@@ -338,36 +379,142 @@ void Pass_formal::work(Eprp_var& var) {
       prover.assume(c);  // sound hypotheses for the assert queries
     }
 
-    // Pass 2: prove asserts / assert_always under the proven-assume hypotheses.
-    // Verdict policy (2f-formal): PROVEN -> elide; REFUTED -> record a non-fatal
-    // error and keep the runtime check (never elide it, never use it as a
-    // hypothesis); UNKNOWN -> keep the runtime check + a deferral warning. A
-    // FAIL is reported but the design still compiles (continue); the hint notes
-    // that a different top-level may change the result (inputs are free here).
-    for (auto& node : props) {
-      auto parts = fprop_parts(node);
-      if (parts.kind == "assume") {
-        continue;
-      }
+    // Pass 2: prove asserts / assert_always.
+    //
+    // The pre-rebase single-frame Prover engine, as a per-obligation proof:
+    // PROVEN -> elide; (only when allow_refute_error) a trusted top-level refute
+    // -> a non-fatal error + kept runtime check; else keep the runtime check + a
+    // DEFERRED warning. mode=fast uses it directly (a stateful refute may be an
+    // unreachable state, so trust_stateful_refute is false there); mode=normal
+    // uses it ONLY to recover a free-state proof under the proven assumes that the
+    // BMC engine left undecided (never hard-erroring — the BMC engine is
+    // authoritative on reachability and did not confirm a reachable violation).
+    auto prove_assert_prover = [&](const hhds::Node_class& node, const Fprop& parts, bool allow_refute_error) {
       auto cond = gu::get_driver_of_sink_name(node, "cond");
       if (cond.is_invalid()) {
-        continue;
+        return;
       }
       uint32_t code = (parts.kind == "assert_always") ? gu::kFormalAssertAlways : gu::kFormalAssert;
       auto     out  = prover.is_true(cond);
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, code);  // cgen elides the runtime check
-      } else if (out.verdict == formal::Verdict::Refuted && is_top && (trust_stateful_refute || !out.stateful)
-                 && !downgrade_refute) {
+      } else if (allow_refute_error && out.verdict == formal::Verdict::Refuted && is_top
+                 && (trust_stateful_refute || !out.stateful) && !downgrade_refute) {
         report_refuted("assert-refuted", parts.kind + " is refuted (a concrete input makes it false)", g->get_name(),
                        parts.loc, parts.msg, out);
         gu::set_runtime_check(node, code);  // keep: never elide a failing assert
       } else {
-        // Unknown, a non-top module ("not enough top"), or (fast) a stateful
-        // refutation whose witness may be an unreachable state -> keep the runtime
-        // check + a loud DEFERRED warning; only a root + BMC (normal) trusts it.
         gu::set_runtime_check(node, code);
         warn_deferred(warn_assert, "assert-deferred", parts.kind, g->get_name(), out, is_top, downgrade_refute);
+      }
+    };
+
+    if (mode != "normal") {
+      // mode=fast: single-frame induction over free (cut) state (unchanged).
+      for (auto& node : props) {
+        auto parts = fprop_parts(node);
+        if (parts.kind != "assume") {
+          prove_assert_prover(node, parts, /*allow_refute_error=*/true);
+        }
+      }
+    } else {
+      // mode=normal (2f-formal rebase): the shared BMC-from-reset + 1-induction
+      // engine (lec::prove_properties) is THE assert engine. Prove every
+      // obligation of g at once under a deterministic rlimit (no forks, no
+      // wall-clock — reproducible across build modes), then map each verdict back
+      // to its fproperty node via the encoder's occ walk and apply the stateful
+      // verdict ladder:
+      //   1-induction PROVEN (unbounded)          -> elide (every cycle of every bound);
+      //   BMC-from-reset REFUTED in the post-reset window at a ROOT -> a genuine
+      //       reachable violation -> hard (deferred) error + kept runtime check;
+      //   else (bounded-only / Unknown / prologue-only / blackbox-gated / non-top)
+      //       -> recover a free-state proof under the proven assumes with the
+      //       single-frame Prover (never lose a pre-rebase elision), else keep + defer.
+      livehd::lec::Lec_options po;
+      po.engine        = "bmc";  // single strategy, in-process (never fork in compile)
+      po.solver        = "cvc5";
+      po.bound         = bmc_bound;  // tiny BMC depth + the 1-induction step
+      po.reset_cycles  = 1;
+      po.phase         = "after_reset";
+      po.timeout       = 0;  // deterministic budget only
+      po.rlimit        = static_cast<int>(std::min<long long>(
+          static_cast<long long>(std::max(1, opts.budget_k)) * 4096, 1'000'000'000));
+      po.witness       = true;
+      po.partitions    = 1;      // no case-split forks
+      po.split         = "none";
+      po.state_pairing = false;
+      po.ignore_assumes = true;  // proven assumes recovered by the Prover fallback below
+      po.reset          = std::string{var.get("reset", "")};  // authoritative reset spec (else auto-detect)
+
+      auto pres = livehd::lec::prove_properties(g, po);
+
+      // Replay the encoder's fproperty walk to align pres.props (occ order) with
+      // g's fproperty nodes. Without a sub_lib the encoder treats sub-instances as
+      // opaque free boxes (not descended), so only g's own top-level fproperties
+      // are emitted -> 1:1 by index. A size mismatch (unexpected hierarchy) leaves
+      // the map unused and falls back to the pre-rebase Prover engine.
+      std::vector<hhds::Node_class> occ_nodes;
+      for (auto pn : g->forward_hier(true, false, nullptr)) {
+        if (gu::type_op_of(pn) != Ntype_op::Sub) {
+          continue;
+        }
+        auto sio = pn.get_subnode_io();
+        if (sio == nullptr || sio->get_name() != gu::fproperty_module_name) {
+          continue;
+        }
+        auto cond_pid  = sio->get_input_port_id("cond");
+        bool connected = false;
+        for (const auto& e : pn.inp_edges()) {
+          if (e.sink.get_port_id() == cond_pid) {
+            connected = true;
+            break;
+          }
+        }
+        if (connected) {
+          occ_nodes.push_back(pn);
+        }
+      }
+
+      if (occ_nodes.size() != pres.props.size()) {
+        // Correlation failed (unexpected hierarchy / encode divergence): degrade
+        // to the pre-rebase Prover engine rather than risk mis-marking a node.
+        for (auto& node : props) {
+          auto parts = fprop_parts(node);
+          if (parts.kind != "assume") {
+            prove_assert_prover(node, parts, /*allow_refute_error=*/true);
+          }
+        }
+      } else {
+        for (size_t k = 0; k < occ_nodes.size(); ++k) {
+          auto& node = occ_nodes[k];
+          if (node.get_graph() != g) {
+            continue;  // a descended sub-instance fproperty: its own module's visit owns it
+          }
+          const auto& pr = pres.props[k];
+          if (pr.kind == "assume") {
+            continue;  // assumes are proven independently in Pass 1 (Prover)
+          }
+          Fprop parts;
+          parts.kind    = pr.kind;
+          parts.loc     = pr.loc;
+          parts.msg     = pr.msg;
+          uint32_t code = (pr.kind == "assert_always") ? gu::kFormalAssertAlways : gu::kFormalAssert;
+          if (pr.verdict == livehd::lec::Verdict::Proven && pr.unbounded) {
+            gu::set_proven(node, code);  // inductive -> holds forever -> elide
+          } else if (pr.verdict == livehd::lec::Verdict::Refuted && pr.refuted_at >= pres.reset_hold && pres.reset_detected
+                     && is_top && !downgrade_refute) {
+            // A reset prologue actually pinned the initial state, so the BMC CEX
+            // is genuinely reachable from reset -> a real violation. Without a
+            // detected reset (pres.reset_detected == false) the flops start FREE,
+            // so the witness may be an unreachable initial state: fall through to
+            // the deferred path rather than fail a possibly-correct build.
+            report_refuted_reachable("assert-refuted", pr.kind + " is refuted (a reachable state makes it false)",
+                                     g->get_name(), pr.loc, pr.msg, pr.witness, pr.refuted_at);
+            gu::set_runtime_check(node, code);
+          } else {
+            prove_assert_prover(node, parts, /*allow_refute_error=*/false);
+          }
+        }
       }
     }
   }

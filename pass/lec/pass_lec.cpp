@@ -104,6 +104,11 @@ void Pass_lec::setup() {
                        "cubes. A decisive case-split verdict is used; otherwise it falls back to the monolithic solve",
                        "4");
   m.add_label_optional("jobs", "shared formal proof worker-pool size (default 4); bounds concurrent hierarchical def tasks", "4");
+  m.add_label_optional("rlimit",
+                       "deterministic per-query budget: cvc5 rlimit-per, a machine-/build-mode-independent resource "
+                       "counter (0 = off). The compile tier sets it (with timeout=0) so a verdict that elides a "
+                       "runtime check is reproducible across binaries; verify/lec default to wall-clock timeout",
+                       "0");
   m.add_label_optional("split",
                        "case-split control input: auto (default; pick the small-width input feeding the widest "
                        "variable shift-amount / mux-selector pins) | <input-name> (force) | none (disable)",

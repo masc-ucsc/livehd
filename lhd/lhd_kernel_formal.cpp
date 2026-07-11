@@ -1716,6 +1716,7 @@ void lec_command(Options& opts, Result& res) {
   o.partitions   = std::atoi(label("partitions", "4").c_str());
   o.jobs         = std::max(1, std::atoi(label("jobs", "4").c_str()));
   o.split        = label("split", "auto");
+  o.rlimit       = std::atoi(label("rlimit", "0").c_str());  // deterministic per-query budget (0=off; CI/repro)
   o.phase        = label("phase", "after_reset");
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
   o.reset        = label("reset", "");
@@ -2430,10 +2431,11 @@ void formal_verify_command(Options& opts, Result& res) {
   };
 
   livehd::lec::Lec_options o;
-  o.engine = label("engine", "bmc");
-  if (o.engine == "auto") {
-    o.engine = "bmc";  // the ind/bmc portfolio is a lec concept; verify is bmc-only (V1)
-  }
+  // F3: verify gets the shared portfolio — engine=auto races two whole-run
+  // strategies (bmc-first at the full bound | ind-first at a shallow base case
+  // whose induction rung promotes deep-state invariants to unbounded) and merges
+  // per-obligation firsts. bmc / ind still select a single strategy directly.
+  o.engine = label("engine", "auto");
   o.solver       = label("solver", "cvc5");
   o.bound        = std::atoi(label("bound", "6").c_str());
   o.timeout      = std::atoi(label("timeout", "120").c_str());
@@ -2445,6 +2447,7 @@ void formal_verify_command(Options& opts, Result& res) {
   o.partitions   = std::atoi(label("partitions", "4").c_str());
   o.jobs         = std::max(1, std::atoi(label("jobs", "4").c_str()));
   o.split        = label("split", "auto");
+  o.rlimit       = std::atoi(label("rlimit", "0").c_str());  // deterministic per-query budget (0=off; CI/repro)
 
   std::unique_ptr<livehd::formal::Verdict_cache> vcache;
   if (workdir_set && label("cache", "true") != "false" && label("cache", "true") != "0") {
