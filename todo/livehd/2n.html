@@ -23,20 +23,23 @@
 <p>The pending operations the agent's <code>LSP</code> tool drives (diagnostics and
   <code>hover</code> already exist), mapped to the wire method,
   the <code>ServerCapabilities</code> flag that gates each, the phase that lands it, and
-  today's status (audited against <code>lsp/livehd_lsp.cpp</code>). All four are
-  <strong>entirely absent</strong> — not stubbed.</p>
+  today's status (audited against <code>lsp/livehd_lsp.cpp</code>). The three still-missing
+  ones are <strong>entirely absent</strong> — not stubbed.</p>
 <table>
 <tr><th>Feature</th><th>LSP method</th><th>provider flag</th><th>phase</th><th>status</th></tr>
 <tr><td><code>documentSymbol</code></td><td><code>textDocument/documentSymbol</code></td><td><code>documentSymbolProvider</code></td><td>B</td><td><span class="status">missing</span></td></tr>
-<tr><td><code>goToDefinition</code></td><td><code>textDocument/definition</code></td><td><code>definitionProvider</code></td><td>C</td><td><span class="status">missing</span></td></tr>
+<tr><td><code>goToDefinition</code></td><td><code>textDocument/definition</code> (+ <code>declaration</code>)</td><td><code>definitionProvider</code> + <code>declarationProvider</code></td><td>C</td><td><span class="status">landed 2026-07-10</span></td></tr>
 <tr><td><code>findReferences</code></td><td><code>textDocument/references</code></td><td><code>referencesProvider</code></td><td>C</td><td><span class="status">missing</span></td></tr>
 <tr><td><code>workspaceSymbol</code></td><td><code>workspace/symbol</code></td><td><code>workspaceSymbolProvider</code></td><td>D</td><td><span class="status">missing</span></td></tr>
 </table>
 <p>Today <code>handle_initialize</code> advertises <code>textDocumentSync</code> +
-  <code>diagnosticProvider</code> + <code>hoverProvider</code>, and the <code>run_stdio</code> dispatch handles lifecycle
+  <code>diagnosticProvider</code> + <code>hoverProvider</code> +
+  <code>definitionProvider</code>/<code>declarationProvider</code>, and the <code>run_stdio</code> dispatch handles lifecycle
   (incl. a <code>$/cancelRequest</code> + <code>$/setTrace</code> no-op) +
   <code>did{Open,Change,Save,Close}</code> + <code>textDocument/diagnostic</code> +
-  <code>textDocument/hover</code>; <strong>any other
+  <code>textDocument/hover</code> + <code>textDocument/definition</code>/<code>declaration</code>
+  (hover renders kind-aware: <code>bool</code>/<code>string</code>/<code>enum T</code>/<code>tuple</code>/<code>import("u")</code>/<code>comb u.f</code>/<code>reg&nbsp;</code>-prefix,
+  integers as <code>u12(bw_min=30, bw_max=1000)</code> with the Pyrope <code>s</code> spelling for signed); <strong>any other
   request carrying an <code>id</code> falls through to <code>-32601 MethodNotFound</code></strong>
   (<code>respond_method_not_found</code>). Each missing feature therefore needs two coupled
   edits: (a) flip its provider flag in <code>handle_initialize</code>, and (b) add its handler
@@ -65,11 +68,25 @@
   per-ref srcids — a prp2lnast change); tuple-field ranges (<code>b.x</code>) absent
   (<code>write_bw</code> is scalar-only); a <em>syntax</em> error yields an empty index (parse
   fail-fast), while a post-parse <em>semantic</em> error still indexes the statements before it.</li>
-<li><strong>C — goToDefinition + findReferences</strong> (flip <code>definitionProvider</code> +
-  <code>referencesProvider</code>). Both read the def/read sites the <code>lsp</code> pass already
-  records (lexical identity stamped at capture, §3/§10) — <strong>not</strong> <code>read_sites_</code>.
-  Mostly index-query + LSP plumbing once B's map carries read sites. <em>Test:</em>
-  <code>lsp_cli.py f.prp definition L C</code> / <code>references L C</code>.</li>
+<li><strong>C — goToDefinition</strong>: LANDED 2026-07-10 (<code>textDocument/definition</code> +
+  <code>textDocument/declaration</code>, one resolver). Shipped differently than planned: the
+  cursor→symbol step is <em>lexical</em> (token + dotted-qualifier chain extracted from the buffer
+  text — refs carry no srcid, so no read-site recording was needed), then resolution runs, in
+  order: import-string → imported file; <code>root.member</code> through the buffer's
+  <code>import()</code> bindings → the exporter's <code>pub_list_</code> entry (its srcid anchors
+  the pub NAME identifier, resolved through the exporter's own locator — precise cross-file jump);
+  local decl = the earliest <code>lsp_index</code> entry for the name (entries now carry
+  <code>Span.file</code>; an import-bound name lists the original definition first, then the local
+  binding); pub/lambda names in the buffer; IO params → the covering lambda's signature.
+  <code>record_lsp_def</code> also fires on <code>declare</code> nodes now (reg/wire stores are
+  never symbolically bound, so regs had no def entry). Known v1 limits: shadowing resolves by
+  name (not lexical scope); members of a dotted-entity binding (<code>f = import("u.e"); f.x</code>)
+  don't resolve. <em>Test:</em> <code>lsp_cli.py f.prp definition L C</code> +
+  <code>lhd_lsp_test.py</code> (same-buffer + cross-file assertions).</li>
+<li><strong>C-resid — findReferences</strong> (flip <code>referencesProvider</code>): still needs
+  read-site recording with lexical identity in the <code>lsp</code> pass (the piece Phase C's
+  lexical definition resolver deliberately avoided). <em>Test:</em>
+  <code>lsp_cli.py f.prp references L C</code>.</li>
 <li><strong>D — workspaceSymbol</strong> (flip <code>workspaceSymbolProvider</code>; call hierarchy
   follows — note its callee identity is the <code>func_call</code> gap §3, so it needs its own
   capture). Search an <strong>in-memory session</strong> index of workspace <code>.prp</code> files

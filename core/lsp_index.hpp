@@ -28,8 +28,11 @@ struct Entry {
   uint32_t    start_col{0};
   uint32_t    end_line{0};
   uint32_t    end_col{0};
+  std::string file;    // workspace-relative source path (Span.file); the run
+                       // walks the buffer AND its imported siblings, so every
+                       // entry must say which file its span lives in
   std::string name;    // source-level lexical name (SSA suffix stripped)
-  std::string render;  // hover text, e.g. "a : u8(0,15)"
+  std::string render;  // hover text, e.g. "a : u8(bw_min=0, bw_max=15)"
 };
 
 class Index {

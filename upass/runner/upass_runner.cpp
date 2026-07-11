@@ -1415,6 +1415,11 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
     return std::max(sb(lo), sb(hi));
   };
 
+  // The live bundle drives BOTH the kind shown (bool/string/enum/tuple/
+  // import/function) and the declared envelope of a non-IO integer. May be
+  // null (e.g. an IO store with no symbol-table binding yet).
+  const auto bun = symbol_table_.get_bundle(Bundle::get_first_level(dst_name));
+
   // Declared type/envelope. IO leaves carry it on the Lnast's io_meta
   // side-channel (harvested by the SSA upass): the authoritative declared bits +
   // sign + value range. For an internal (non-IO) declared var, fall back to the
@@ -1423,6 +1428,7 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
   bool                   dsigned = false;  // declared sign
   std::optional<int64_t> dlo;              // declared value envelope
   std::optional<int64_t> dhi;
+  Io_kind                io_kind = Io_kind::none;  // declared bool/string on an IO leaf
   {
     const auto&                  io    = lm->get_lnast()->io_meta();
     const Lnast_io_entry*        found = nullptr;
@@ -1442,6 +1448,7 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
     }
     if (found != nullptr) {
       dsigned = found->is_signed;
+      io_kind = found->kind;
       if (found->bits > 0) {
         dbits = found->bits;
       }
@@ -1457,8 +1464,8 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
           dlo = 0;
         }
       }
-    } else if (const auto b = symbol_table_.get_bundle(Bundle::get_first_level(dst_name)); b) {
-      const auto& e = b->get_entry(bundle_path::of_string("0"));
+    } else if (bun) {
+      const auto& e = bun->get_entry(bundle_path::of_string("0"));
       dlo           = to_i64(e.decl_min);
       dhi           = to_i64(e.decl_max);
       if (dlo && dhi) {
@@ -1478,32 +1485,137 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
     ihi = it->second.max;
   }
 
-  const bool  have_decl = dlo && dhi;
-  const bool  have_inf  = ilo && ihi;
+  // Scalar kind: typecheck's stamps (bundle value_kind, then the "0" Entry
+  // kind), then the comptime Dlop, then the declared IO kind. Kind is carried
+  // explicitly — a runtime bool (`a<b`) has no comptime Dlop and `true` reads
+  // as 1, so the Dlop alone cannot classify (see upass/core/kind.hpp).
+  upass::Kind kind = upass::Kind::unknown;
+  if (bun) {
+    kind = bun->get_value_kind();
+    if (kind == upass::Kind::unknown) {
+      kind = bun->get_entry(bundle_path::of_string("0")).kind;
+    }
+    if (kind == upass::Kind::unknown) {
+      if (const auto sc = bun->scalar(); sc && !sc->is_invalid()) {
+        if (sc->is_string()) {
+          kind = upass::Kind::string;
+        } else if (sc->is_bool()) {
+          kind = upass::Kind::boolean;
+        }
+      }
+    }
+  }
+  if (kind == upass::Kind::unknown && io_kind == Io_kind::boolean) {
+    kind = upass::Kind::boolean;
+  }
+  if (kind == upass::Kind::unknown && io_kind == Io_kind::string) {
+    kind = upass::Kind::string;
+  }
+
+  // Tuple shape: named top / >1 positional / a single element that is itself a
+  // sub-bundle (mirrors classify_in_bundle / uPass_typecheck::kind_of_bundle).
+  bool is_tuple = false;
+  if (bun && (bun->has_named_top() || bun->unnamed_top_count() > 1)) {
+    is_tuple = true;
+  } else if (bun) {
+    for (const auto& tl : bun->top_levels()) {
+      if (tl.has_leafs) {
+        is_tuple = true;
+        break;
+      }
+    }
+  }
+
+  // An enum TYPE bundle (`const Color = enum(...)`) carries per-member
+  // `<Member>.enumentry` tags — a NAMED prefix, so it is not the bundle's own
+  // identity and bundle_enum_type below skips it (that helper answers only for
+  // enum VALUES).
+  bool is_enum_type = false;
+  if (bun) {
+    for (const auto& [k, ep] : bun->get_attrs()) {
+      if (Bundle::get_last_level(k) == battr::enumentry) {
+        is_enum_type = true;
+        break;
+      }
+    }
+  }
+
+  const auto unquote = [](std::string s) {
+    if (s.size() >= 2 && (s.front() == '\'' || s.front() == '"') && s.back() == s.front()) {
+      s = s.substr(1, s.size() - 2);
+    }
+    return s;
+  };
+
   std::string render(base);
   render += " : ";
-  if (!have_decl && !have_inf) {
-    render += "int";  // unbounded and undeclared: no width to show
-  } else {
-    // (min,max) shown = the inferred (possibly narrowed) range when known, else
-    // the declared envelope. Prefix bits/sign = the DECLARED width when declared
-    // (so `z:u8` narrowed to 0..15 renders u8(0,15)), else derived from the range.
-    const int64_t lo  = have_inf ? *ilo : *dlo;
-    const int64_t hi  = have_inf ? *ihi : *dhi;
-    const bool    sgn = have_decl ? dsigned : (lo < 0);
-    int           bits;
-    if (have_decl) {
-      bits = dbits ? *dbits : (dsigned ? sbits(*dlo, *dhi) : ubits(*dhi));
-    } else {
-      bits = sgn ? sbits(lo, hi) : ubits(hi);
+  if (bun && bun->get_mode() == upass::Mode::reg_kind) {
+    render += "reg ";
+  }
+  if (bun && bun->has_attr("pub_unit")) {
+    // `X = import("unit")` whole-namespace binding (call_resolver marker attr).
+    render += "import(\"";
+    render += unquote(std::string(bun->get_attr("pub_unit").to_pyrope()));
+    render += "\")";
+  } else if (const auto et = bundle_enum_type(bun); et) {
+    render += "enum ";
+    render += *et;
+  } else if (is_enum_type) {
+    render += "enum";
+  } else if (is_tuple) {
+    render += "tuple";
+  } else if (kind == upass::Kind::boolean) {
+    render += "bool";
+  } else if (kind == upass::Kind::string) {
+    // A callee-name string ('unit.entity', how constprop folds an imported or
+    // aliased lambda) is a function value, not text — show it as one. Gate the
+    // registry lookup on the qualified-identifier shape: lookup_callee's miss
+    // path is a linear registry scan, and paying it for every text-string def
+    // would make this (LSP-only) walk super-linear in the import closure.
+    std::string txt;
+    if (const auto sc = bun ? bun->scalar() : std::optional<Dlop>{}; sc && !sc->is_invalid() && sc->is_string()) {
+      txt = unquote(std::string(sc->to_pyrope()));
     }
-    render += sgn ? 'i' : 'u';
-    render += std::to_string(bits);
-    render += '(';
-    render += std::to_string(lo);
-    render += ',';
-    render += std::to_string(hi);
-    render += ')';
+    bool callee_shape = txt.find('.') != std::string::npos;
+    for (const char c : txt) {
+      callee_shape = callee_shape
+                     && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.');
+    }
+    if (const auto fn = callee_shape ? lookup_callee(txt) : nullptr; fn) {
+      const auto lk  = fn->get_lambda_kind();
+      render        += lk.empty() ? std::string_view("fun") : lk;
+      render        += ' ';
+      render        += txt;
+    } else {
+      render += "string";
+    }
+  } else {
+    const bool have_decl = dlo && dhi;
+    const bool have_inf  = ilo && ihi;
+    if (!have_decl && !have_inf) {
+      render += "int";  // unbounded and undeclared: no width to show
+    } else {
+      // bw_min/bw_max shown = the inferred (possibly narrowed) range when
+      // known, else the declared envelope. Prefix bits/sign = the DECLARED
+      // width when declared (so `z:u8` narrowed to 0..15 renders
+      // u8(bw_min=0, bw_max=15)), else derived from the range.
+      const int64_t lo  = have_inf ? *ilo : *dlo;
+      const int64_t hi  = have_inf ? *ihi : *dhi;
+      const bool    sgn = have_decl ? dsigned : (lo < 0);
+      int           bits;
+      if (have_decl) {
+        bits = dbits ? *dbits : (dsigned ? sbits(*dlo, *dhi) : ubits(*dhi));
+      } else {
+        bits = sgn ? sbits(lo, hi) : ubits(hi);
+      }
+      render += sgn ? 's' : 'u';
+      render += std::to_string(bits);
+      render += "(bw_min=";
+      render += std::to_string(lo);
+      render += ", bw_max=";
+      render += std::to_string(hi);
+      render += ')';
+    }
   }
 
   livehd::lsp_index::Entry e;
@@ -1511,6 +1623,7 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
   e.start_col  = sp.start_col ? *sp.start_col : 0;
   e.end_line   = sp.end_line ? *sp.end_line : e.start_line;
   e.end_col    = sp.end_col ? *sp.end_col : e.start_col;
+  e.file       = sp.file;
   e.name       = std::string(base);
   e.render     = std::move(render);
   livehd::lsp_index::index().record(std::move(e));
@@ -6968,6 +7081,22 @@ void uPass_runner::process_lnast() {
         lm->restore_cursor(here);
       }
       bake_decl_pre_step(/*is_declare=*/true);  // Bake type/mode into the bundle first
+      // task 2n: a reg/wire declare's stores are never symbolically bound, so
+      // the push path records no def entry for them — record the declaration
+      // site itself (now that the type/mode facts are baked). Non-state
+      // declares record here too; the init store re-records with bw facts.
+      if (livehd::lsp_index::index().enabled() && lm->has_child()) {
+        const auto  here = lm->save_cursor();
+        std::string nm;
+        lm->move_to_child();
+        if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+          nm = std::string(lm->current_text());
+        }
+        lm->restore_cursor(here);
+        if (!nm.empty()) {
+          record_lsp_def(nm);
+        }
+      }
       // Inside an inlined comb body, stamp the hierarchical instance-path prefix
       // on each reg/latch/memory declare so tolg names the flop/mem
       // hierarchically (`pipeB_ex_mem.reg_x`) — matching what a non-inlined Sub

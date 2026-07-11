@@ -12,11 +12,19 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 
 LHD = os.environ.get('LHD', 'lhd/lhd')
 
 GOOD = 'comb f(a:u8) -> (z:u8) { z = a }\n'
 BAD = 'comb f(a:u8 -> (z:u8) { z = a\n'  # missing ')' and '}'
+
+# 2n Phase C: a file-scope const used inside a comb -> definition on the use
+# must answer the declaration statement.
+MULTI = ('const kk = 33\n'
+         'comb g(a:u8) -> (z:u8) {\n'
+         '  z = a + kk\n'
+         '}\n')
 
 
 def send(proc, obj):
@@ -72,6 +80,10 @@ def main():
         fail('server did not advertise pull diagnostics: %r' % caps)
     if not caps.get('hoverProvider'):  # task 2n Phase B
         fail('server did not advertise hoverProvider: %r' % caps)
+    if not caps.get('definitionProvider'):  # 2n Phase C
+        fail('server did not advertise definitionProvider: %r' % caps)
+    if not caps.get('declarationProvider'):  # 2n Phase C
+        fail('server did not advertise declarationProvider: %r' % caps)
     send(proc, {'jsonrpc': '2.0', 'method': 'initialized', 'params': {}})
 
     # Broken file -> at least one error diagnostic with a span.
@@ -112,6 +124,8 @@ def main():
     value = hov.get('contents', {}).get('value', '')
     if 'z' not in value or 'u8' not in value:
         fail('hover did not report z : u8(...): %r' % hov)
+    if 'bw_min=' not in value or 'bw_max=' not in value:  # 2n Phase C render
+        fail('hover did not report the bw_min/bw_max range: %r' % hov)
     # Hover off any name (column 2, inside the `comb` keyword) -> null.
     send(proc, {'jsonrpc': '2.0', 'id': 7, 'method': 'textDocument/hover',
                 'params': {'textDocument': {'uri': uri},
@@ -119,6 +133,81 @@ def main():
     off = read_response(proc, 7).get('result', 'missing')
     if off is not None:
         fail('hover off a name should be null, got: %r' % off)
+
+    # ── definition / declaration (2n Phase C), same buffer ───────────────────
+    # MULTI: `kk` used at line 2 char 10 declares at line 0.
+    send(proc, {'jsonrpc': '2.0', 'method': 'textDocument/didChange',
+                'params': {'textDocument': {'uri': uri, 'version': 3},
+                           'contentChanges': [{'text': MULTI}]}})
+    send(proc, {'jsonrpc': '2.0', 'id': 8, 'method': 'textDocument/definition',
+                'params': {'textDocument': {'uri': uri},
+                           'position': {'line': 2, 'character': 10}}})
+    defs = read_response(proc, 8).get('result')
+    if not defs or not isinstance(defs, list):
+        fail('definition on a use returned no locations: %r' % defs)
+    if defs[0].get('uri') != uri or defs[0]['range']['start']['line'] != 0:
+        fail('definition of kk should be line 0 of the same buffer: %r' % defs)
+    # gD path: textDocument/declaration answers through the same resolver.
+    send(proc, {'jsonrpc': '2.0', 'id': 9, 'method': 'textDocument/declaration',
+                'params': {'textDocument': {'uri': uri},
+                           'position': {'line': 2, 'character': 10}}})
+    decl = read_response(proc, 9).get('result')
+    if not decl or decl[0]['range']['start']['line'] != 0:
+        fail('declaration of kk should be line 0: %r' % decl)
+    # Hover the same use: the reaching definition's comptime range.
+    send(proc, {'jsonrpc': '2.0', 'id': 10, 'method': 'textDocument/hover',
+                'params': {'textDocument': {'uri': uri},
+                           'position': {'line': 2, 'character': 10}}})
+    hov = read_response(proc, 10).get('result')
+    if not hov or 'bw_min=33' not in hov.get('contents', {}).get('value', ''):
+        fail('hover on kk should report bw_min=33: %r' % hov)
+    # Definition off any name -> null.
+    send(proc, {'jsonrpc': '2.0', 'id': 11, 'method': 'textDocument/definition',
+                'params': {'textDocument': {'uri': uri},
+                           'position': {'line': 0, 'character': 2}}})
+    if read_response(proc, 11).get('result', 'missing') is not None:
+        fail('definition off a name should be null')
+
+    # ── cross-file definition through import() (2n Phase C) ─────────────────
+    # A real sibling .prp on disk; the importing buffer is unsaved (didOpen
+    # text only) — sibling discovery reads the buffer URI's directory.
+    libdir = tempfile.mkdtemp()
+    with open(os.path.join(libdir, 'libx.prp'), 'w') as f:
+        f.write('pub comb addx(a, b) -> (r) { r = a + b }\n')
+    uri2 = 'file://' + os.path.join(libdir, 'main.prp')
+    send(proc, {'jsonrpc': '2.0', 'method': 'textDocument/didOpen',
+                'params': {'textDocument': {
+                    'uri': uri2, 'languageId': 'pyrope', 'version': 1,
+                    'text': 'const lib = import("libx")\n'
+                            'const y = lib.addx(a=1, b=2)\n'}}})
+    # definition on the `addx` member -> the pub name identifier in libx.prp.
+    send(proc, {'jsonrpc': '2.0', 'id': 12, 'method': 'textDocument/definition',
+                'params': {'textDocument': {'uri': uri2},
+                           'position': {'line': 1, 'character': 15}}})
+    defs = read_response(proc, 12).get('result')
+    if not defs or not defs[0].get('uri', '').endswith('/libx.prp'):
+        fail('definition of an imported member should land in libx.prp: %r' % defs)
+    start = defs[0]['range']['start']
+    if start['line'] != 0 or start['character'] != 9:
+        fail('definition of addx should anchor its name token (0,9): %r' % defs)
+    # definition on the import binding -> the imported file first, then the
+    # local `const lib = import(...)` statement.
+    send(proc, {'jsonrpc': '2.0', 'id': 13, 'method': 'textDocument/definition',
+                'params': {'textDocument': {'uri': uri2},
+                           'position': {'line': 0, 'character': 7}}})
+    defs = read_response(proc, 13).get('result')
+    if not defs or len(defs) < 2 or not defs[0].get('uri', '').endswith('/libx.prp') \
+            or defs[1].get('uri') != uri2:
+        fail('definition of an import binding should list [imported file, local decl]: %r' % defs)
+    # hover on the member reports the imported lambda's kind.
+    send(proc, {'jsonrpc': '2.0', 'id': 14, 'method': 'textDocument/hover',
+                'params': {'textDocument': {'uri': uri2},
+                           'position': {'line': 1, 'character': 15}}})
+    hov = read_response(proc, 14).get('result')
+    if not hov or 'comb' not in hov.get('contents', {}).get('value', ''):
+        fail('hover on an imported member should report its comb kind: %r' % hov)
+    send(proc, {'jsonrpc': '2.0', 'method': 'textDocument/didClose',
+                'params': {'textDocument': {'uri': uri2}}})
 
     # didSave keeps the good text; didClose drops the buffer.
     send(proc, {'jsonrpc': '2.0', 'method': 'textDocument/didSave',

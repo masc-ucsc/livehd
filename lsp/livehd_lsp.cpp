@@ -4,11 +4,11 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <algorithm>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -24,12 +24,13 @@
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "lsp_index.hpp"
-#include "str_tools.hpp"
 #include "pass_upass.hpp"
 #include "prp2lnast.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
+#include "source_path.hpp"
+#include "str_tools.hpp"
 
 namespace livehd::lsp {
 
@@ -248,6 +249,136 @@ std::string module_name_of(std::string_view path) {
   return base.empty() ? std::string("top") : std::string(base);
 }
 
+// Percent-encode an absolute filesystem path into a file:// URI.
+std::string path_to_uri(std::string_view abs_path) {
+  static constexpr char hex[] = "0123456789ABCDEF";
+  std::string           out   = "file://";
+  for (const char c : abs_path) {
+    const bool keep = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_'
+                      || c == '~' || c == '/';
+    if (keep) {
+      out.push_back(c);
+    } else {
+      out.push_back('%');
+      out.push_back(hex[(static_cast<unsigned char>(c) >> 4) & 0xF]);
+      out.push_back(hex[static_cast<unsigned char>(c) & 0xF]);
+    }
+  }
+  return out;
+}
+
+//============================ semantic state (2n Phase C) ============================
+
+// Cross-file navigation state rebuilt by every analyze() run, alongside the
+// livehd::lsp_index def entries the upass runner records. Everything here is
+// copied OUT of the front-end objects before analyze() returns — no Lnast,
+// Prp2lnast, or pass-internal symbol table is retained.
+struct Pub_def {            // one `pub` export (name-identifier-anchored span)
+  std::string        unit;  // exporting file unit ("lib_add")
+  std::string        name;  // exported member ("my_add")
+  std::string        kind;  // "value" | "comb" | "mod" | "pipe" | "fluid"
+  livehd::diag::Span span;
+};
+struct Unit_info {                          // one walked Lnast unit (file-level or extracted lambda)
+  std::string                 unit;         // top module name ("lib_add", "lib_add.my_add")
+  std::string                 lambda_kind;  // "" for a file-level tree
+  std::string                 file;         // workspace-relative source path
+  livehd::diag::Span          span;         // whole-definition span (null for file-level trees)
+  std::vector<Lnast_io_entry> inputs;       // io_meta copy (params hover/definition)
+  std::vector<Lnast_io_entry> outputs;
+};
+struct Import_bind {   // `X = import("unit")` / `import("unit.entity")` in the buffer
+  std::string local;   // bound name ("lib", "RegFile")
+  std::string target;  // import string, quotes stripped ("lib_add", "lib_add.my_add")
+};
+struct Semantic_state {
+  std::vector<Pub_def>                          pubs;
+  std::vector<Unit_info>                        units;
+  std::vector<Import_bind>                      imports;
+  absl::flat_hash_map<std::string, std::string> rel2abs;     // Span.file -> absolute path
+  std::string                                   buffer_rel;  // workspace-relative path of the analyzed buffer
+};
+Semantic_state g_sem;
+
+// The buffer's import bindings, walked on the freshly-parsed tree (before the
+// upass pipeline). prp2lnast lowers `const X = import("unit")` as an import
+// fcall into a `%tmp` followed by `store(X, %tmp)`, so the tmp is chased one
+// store; a direct user-name fcall target is accepted too.
+void collect_import_bindings(const std::shared_ptr<Lnast>& ln, std::vector<Import_bind>& out) {
+  absl::flat_hash_map<std::string, std::string> tmp_target;  // %tmp -> import string
+  const auto                                    unquote = [](std::string s) {
+    if (s.size() >= 2 && (s.front() == '\'' || s.front() == '"') && s.back() == s.front()) {
+      s = s.substr(1, s.size() - 2);
+    }
+    return s;
+  };
+  for (const auto& nid : ln->tree().pre_order()) {
+    const auto t = ln->get_type(nid);
+    if (Lnast_ntype::is_func_call(t)) {
+      const auto target = ln->get_first_child(nid);
+      const auto fname  = target.is_invalid() ? target : ln->get_sibling_next(target);
+      if (fname.is_invalid() || ln->get_name(fname) != "import") {
+        continue;
+      }
+      const auto arg = ln->get_sibling_next(fname);
+      if (arg.is_invalid()) {
+        continue;
+      }
+      const std::string unit = unquote(std::string(ln->get_name(arg)));
+      if (unit.empty() || unit.starts_with("lg:") || unit.starts_with("ln:")) {
+        continue;  // artifact imports have no on-disk .prp to jump to
+      }
+      const std::string tname(ln->get_name(target));
+      if (Lnast::is_tmp(tname)) {
+        tmp_target[tname] = unit;
+      } else if (!tname.empty()) {
+        out.push_back({tname, unit});
+      }
+    } else if (Lnast_ntype::is_store(t) || Lnast_ntype::is_dp_assign(t)) {
+      // Plain 2-child `store(dst, src)` only — a leveled store writes a tuple
+      // path, never an import binding.
+      const auto dst = ln->get_first_child(nid);
+      if (dst.is_invalid()) {
+        continue;
+      }
+      const auto src = ln->get_sibling_next(dst);
+      if (src.is_invalid() || !ln->get_sibling_next(src).is_invalid()) {
+        continue;
+      }
+      const auto it = tmp_target.find(std::string(ln->get_name(src)));
+      if (it == tmp_target.end()) {
+        continue;
+      }
+      const std::string dname(ln->get_name(dst));
+      if (!dname.empty() && !Lnast::is_tmp(dname)) {
+        out.push_back({dname, it->second});
+      }
+    }
+  }
+}
+
+// Pub exports + per-unit io/span facts of every walked unit (buffer +
+// discovered siblings + the lambda trees func_extract spawned during upass).
+void collect_semantic_state(const std::vector<std::shared_ptr<Lnast>>& lnasts, Semantic_state& sem) {
+  for (const auto& ln : lnasts) {
+    Unit_info ui;
+    ui.unit        = std::string(ln->get_top_module_name());
+    ui.lambda_kind = std::string(ln->get_lambda_kind());
+    ui.span        = ln->span_of(ln->get_root());
+    if (!ui.span.file.empty()) {
+      ui.file = ui.span.file;
+    } else if (ln->source_locator().file_count() > 0) {
+      ui.file = std::string(ln->source_locator().file_path(0));  // file-level tree: root has no srcid
+    }
+    ui.inputs  = ln->io_meta().inputs;
+    ui.outputs = ln->io_meta().outputs;
+    for (const auto& p : ln->get_pub_list()) {
+      sem.pubs.push_back({ui.unit, p.name, p.kind, ln->source_locator().resolve_span(p.srcid)});
+    }
+    sem.units.push_back(std::move(ui));
+  }
+}
+
 //============================ analysis ============================
 
 // 2i-import S1 — raw `import("…")` strings of a parsed unit (quotes stripped).
@@ -283,7 +414,8 @@ std::vector<std::string> import_strings(const std::shared_ptr<Lnast>& ln) {
 // files from disk so imports resolve. Transitive to a fixpoint; reads siblings
 // from disk (the open buffer is only this file). Best-effort: a sibling that
 // fails to parse is skipped (the import simply stays unresolved for this file).
-void discover_sibling_imports(Eprp_var& var, std::string_view importer_path) {
+void discover_sibling_imports(Eprp_var& var, std::string_view importer_path,
+                              absl::flat_hash_map<std::string, std::string>& rel2abs) {
   auto dir_of = [](std::string_view p) -> std::string {
     auto s = p.rfind('/');
     return s == std::string_view::npos ? std::string(".") : std::string(p.substr(0, s));
@@ -381,6 +513,10 @@ void discover_sibling_imports(Eprp_var& var, std::string_view importer_path) {
         Prp2lnast converter(path, name);
         var.add(converter.get_lnast());
         unit_dir[name] = dir_of(path);
+        // Span.file of everything minted from this sibling is
+        // workspace_relative(path) — remember how to get back to the disk file
+        // so definition Locations can carry a real file:// URI.
+        rel2abs[livehd::srcloc::workspace_relative(path)] = abspath_of(path);
       } catch (...) {
         // sibling did not parse — skip it (import stays unresolved for this file)
       }
@@ -401,6 +537,16 @@ std::vector<livehd::diag::Diagnostic> analyze(std::string_view virtual_path, std
   // enabled(), which only the LSP ever sets); hover reads it afterwards.
   livehd::lsp_index::index().set_enabled(true);
   livehd::lsp_index::index().clear();
+
+  // 2n Phase C: navigation state rebuilt per run (pubs, units, import
+  // bindings, path mapping) — hover/definition read it after the front-end.
+  g_sem            = {};
+  g_sem.buffer_rel = livehd::srcloc::workspace_relative(virtual_path);
+  {
+    std::error_code ec;
+    const auto      abs             = std::filesystem::absolute(std::filesystem::path(virtual_path), ec);
+    g_sem.rel2abs[g_sem.buffer_rel] = ec ? std::string(virtual_path) : abs.lexically_normal().string();
+  }
 
   // Run `inou.prp |> pass.upass` — no lnastfmt stage (its user-facing
   // checks moved into upass/semacheck, so lnastfmt is a compiler-internal
@@ -433,7 +579,8 @@ std::vector<livehd::diag::Diagnostic> analyze(std::string_view virtual_path, std
     // reverse approximates leaf-first) → imports resolve in upass's single pass;
     // import_defer makes any residual (an import cycle) defer silently instead
     // of emitting a false `import-unresolved`.
-    discover_sibling_imports(var, virtual_path);
+    discover_sibling_imports(var, virtual_path, g_sem.rel2abs);
+    collect_import_bindings(lnast, g_sem.imports);
     std::reverse(var.lnasts.begin(), var.lnasts.end());
     // Diagnostics-only run: tolg:0 (no LNAST→LGraph lowering — also the label
     // default, set explicitly for clarity) and toln:0 (don't materialize the
@@ -448,6 +595,10 @@ std::vector<livehd::diag::Diagnostic> analyze(std::string_view virtual_path, std
       // upass aborted (a diag fatal/parser_error throw or config error); its diagnostic is
       // already in the sink — the `|>` pipeline would stop here too.
     }
+    // Pubs + unit io/span facts, including the lambda trees upass spawned
+    // (var.lnasts grew during the walk). Copied out — nothing front-end-owned
+    // survives past this return.
+    collect_semantic_state(var.lnasts, g_sem);
   }
 
   return sink.records();  // copy out before the next analysis clears the sink
@@ -610,6 +761,10 @@ void handle_initialize(const rapidjson::Document& req) {
   w.EndObject();
   w.Key("hoverProvider");  // task 2n Phase B (flag + handler land together)
   w.Bool(true);
+  w.Key("definitionProvider");  // 2n Phase C (flag + handler land together)
+  w.Bool(true);
+  w.Key("declarationProvider");  // same resolver — gd/gD both answer
+  w.Bool(true);
   w.EndObject();  // capabilities
   w.Key("serverInfo");
   w.StartObject();
@@ -752,14 +907,8 @@ void handle_pull_diagnostic(const rapidjson::Document& req) {
   send_message(sb.GetString());
 }
 
-// textDocument/hover (task 2n Phase B). Re-analyze the buffer (the upass runner
-// fills livehd::lsp_index during the run), then return the type+range of the
-// variable whose definition span covers the cursor. Per the 2n design the span
-// is statement-granularity, so selectionRange == range. result:null off a name.
-void handle_hover(const rapidjson::Document& req) {
-  std::string uri   = uri_of(req);
-  uint32_t    line0 = 0;
-  uint32_t    char0 = 0;
+// params.position -> 0-based line/character (both 0 when absent).
+void position_of(const rapidjson::Document& req, uint32_t& line0, uint32_t& char0) {
   if (const auto* params = member(req, "params")) {
     if (const auto* pos = member(*params, "position")) {
       if (const auto* l = member(*pos, "line"); l && l->IsUint()) {
@@ -770,29 +919,544 @@ void handle_hover(const rapidjson::Document& req) {
       }
     }
   }
+}
+
+//============================ cursor -> symbol (2n Phase C) ============================
+
+// The identifier (plus its dotted qualifier chain and any enclosing quoted
+// string) under a 0-based cursor position. Refs carry no srcid in LNAST
+// (srcid_carries excludes them — statement-granularity provenance), so the
+// name under the cursor is recovered lexically from the buffer text.
+struct Cursor_tok {
+  std::string name;       // identifier under the cursor ("" when not on one)
+  std::string root;       // first segment of a dotted chain ("" when unqualified)
+  std::string chain;      // full chain up to and including the token (== name when unqualified)
+  uint32_t    line0 = 0;  // token coordinates: 0-based, ecol0 exclusive
+  uint32_t    scol0 = 0;
+  uint32_t    ecol0 = 0;
+  std::string str;  // enclosing quoted-string content ("" when none)
+};
+
+bool is_ident_char(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'; }
+
+Cursor_tok token_at(std::string_view text, uint32_t line0, uint32_t char0) {
+  Cursor_tok tok;
+  tok.line0 = line0;
+  size_t ls = 0;
+  for (uint32_t l = 0; l < line0; ++l) {
+    const auto nl = text.find('\n', ls);
+    if (nl == std::string_view::npos) {
+      return tok;
+    }
+    ls = nl + 1;
+  }
+  const auto             le   = text.find('\n', ls);
+  const std::string_view line = text.substr(ls, (le == std::string_view::npos ? text.size() : le) - ls);
+  size_t                 pos  = std::min<size_t>(char0, line.size());
+
+  // Enclosing quoted string (single line, no escape handling — Pyrope import
+  // strings carry neither newlines nor escapes).
+  {
+    char   q  = 0;
+    size_t qs = 0;
+    for (size_t i = 0; i < line.size(); ++i) {
+      const char c = line[i];
+      if (q == 0 && (c == '"' || c == '\'')) {
+        q  = c;
+        qs = i;
+      } else if (q != 0 && c == q) {
+        if (pos > qs && pos <= i) {
+          tok.str = std::string(line.substr(qs + 1, i - qs - 1));
+          break;
+        }
+        q = 0;
+      }
+    }
+  }
+
+  // Identifier under (or immediately left of) the cursor.
+  size_t p = pos;
+  if ((p >= line.size() || !is_ident_char(line[p])) && p > 0 && is_ident_char(line[p - 1])) {
+    --p;
+  }
+  if (p >= line.size() || !is_ident_char(line[p])) {
+    return tok;
+  }
+  size_t s = p;
+  size_t e = p + 1;
+  while (s > 0 && is_ident_char(line[s - 1])) {
+    --s;
+  }
+  while (e < line.size() && is_ident_char(line[e])) {
+    ++e;
+  }
+  if (line[s] >= '0' && line[s] <= '9') {
+    return tok;  // a number literal, not a name
+  }
+  tok.name  = std::string(line.substr(s, e - s));
+  tok.scol0 = static_cast<uint32_t>(s);
+  tok.ecol0 = static_cast<uint32_t>(e);
+
+  // Dotted qualifier chain to the left (`lib.my_add` with the cursor on
+  // `my_add` -> root "lib", chain "lib.my_add").
+  std::vector<std::string_view> segs;
+  size_t                        q2 = s;
+  while (q2 > 0 && line[q2 - 1] == '.') {
+    size_t e2 = q2 - 1;
+    size_t s2 = e2;
+    while (s2 > 0 && is_ident_char(line[s2 - 1])) {
+      --s2;
+    }
+    if (s2 == e2) {
+      break;
+    }
+    segs.push_back(line.substr(s2, e2 - s2));
+    q2 = s2;
+  }
+  if (!segs.empty()) {
+    tok.root = std::string(segs.back());
+    std::string chain;
+    for (auto it = segs.rbegin(); it != segs.rend(); ++it) {
+      chain += *it;
+      chain += '.';
+    }
+    chain     += tok.name;
+    tok.chain  = std::move(chain);
+  } else {
+    tok.chain = tok.name;
+  }
+  return tok;
+}
+
+//============================ definition resolution ============================
+
+struct Def_loc {
+  std::string        file;  // workspace-relative Span.file
+  livehd::diag::Span span;
+};
+
+const Pub_def* find_pub(std::string_view unit, std::string_view name) {
+  for (const auto& p : g_sem.pubs) {
+    if (p.unit == unit && p.name == name) {
+      return &p;
+    }
+  }
+  return nullptr;
+}
+
+const Unit_info* find_unit(std::string_view unit) {
+  for (const auto& u : g_sem.units) {
+    if (u.unit == unit) {
+      return &u;
+    }
+  }
+  return nullptr;
+}
+
+std::string binding_target(std::string_view local) {
+  for (const auto& ib : g_sem.imports) {
+    if (ib.local == local) {
+      return ib.target;
+    }
+  }
+  return {};
+}
+
+livehd::diag::Span point_span(std::string file, uint32_t line1, uint32_t col1) {
+  livehd::diag::Span sp;
+  sp.file       = std::move(file);
+  sp.start_line = line1;
+  sp.start_col  = col1;
+  sp.end_line   = line1;
+  sp.end_col    = col1;
+  return sp;
+}
+
+// Resolve an import string ("unit" / "unit.entity" / "dir/unit") to a jump
+// target: the pub entity's name identifier when the dotted form names one,
+// else the start of the imported file.
+void push_import_target(const std::string& target, std::vector<Def_loc>& out) {
+  const auto slash  = target.rfind('/');
+  const auto dot    = target.rfind('.');
+  const bool dotted = dot != std::string::npos && (slash == std::string::npos || dot > slash);
+  const auto unit   = dotted ? target.substr(0, dot) : target;
+  if (dotted) {
+    if (const auto* p = find_pub(unit, target.substr(dot + 1)); p != nullptr && p->span.start_line) {
+      out.push_back({p->span.file, p->span});
+      return;
+    }
+  }
+  for (const auto& cand : {unit, target}) {
+    if (const auto* u = find_unit(cand); u != nullptr && !u->file.empty()) {
+      out.push_back({u->file, point_span(u->file, 1, 1)});
+      return;
+    }
+  }
+}
+
+// The earliest recorded definition of `name` in the current buffer — the
+// declaration statement (later entries are SSA re-definitions).
+bool push_entry_decl(std::string_view name, std::vector<Def_loc>& out) {
+  const livehd::lsp_index::Entry* best = nullptr;
+  for (const auto& e : livehd::lsp_index::index().entries()) {
+    if (e.name != name || e.file != g_sem.buffer_rel || e.start_line == 0) {
+      continue;
+    }
+    if (best == nullptr || e.start_line < best->start_line || (e.start_line == best->start_line && e.start_col < best->start_col)) {
+      best = &e;
+    }
+  }
+  if (best == nullptr) {
+    return false;
+  }
+  livehd::diag::Span sp;
+  sp.file       = best->file;
+  sp.start_line = best->start_line;
+  sp.start_col  = best->start_col;
+  sp.end_line   = best->end_line;
+  sp.end_col    = best->end_col;
+  out.push_back({best->file, sp});
+  return true;
+}
+
+std::vector<Def_loc> resolve_definition(const Cursor_tok& tok) {
+  std::vector<Def_loc> out;
+
+  // (1) inside an import string: jump into the imported file
+  if (!tok.str.empty()) {
+    push_import_target(tok.str, out);
+    if (!out.empty()) {
+      return out;
+    }
+  }
+  if (tok.name.empty()) {
+    return out;
+  }
+
+  // (2) qualified member `root.…name` through an import namespace binding
+  if (!tok.root.empty()) {
+    const auto target = binding_target(tok.root);
+    if (!target.empty() && target.find('.') == std::string::npos) {
+      if (const auto* p = find_pub(target, tok.name); p != nullptr && p->span.start_line) {
+        out.push_back({p->span.file, p->span});
+      }
+    }
+    if (out.empty()) {
+      push_entry_decl(tok.chain, out);  // a tuple-field definition in this buffer
+    }
+    return out;
+  }
+
+  // (3) unqualified: the import's original definition first (the point of
+  // go-to-declaration on an imported binding), then the local declaration
+  const auto target = binding_target(tok.name);
+  if (!target.empty()) {
+    push_import_target(target, out);
+  }
+  push_entry_decl(tok.name, out);
+  if (!out.empty()) {
+    return out;
+  }
+
+  // (4) a pub / lambda defined in this buffer (function names have no
+  // symbol-table def entry — they live in the function registry)
+  for (const auto& p : g_sem.pubs) {
+    if (p.name == tok.name && p.span.file == g_sem.buffer_rel && p.span.start_line) {
+      out.push_back({p.span.file, p.span});
+      return out;
+    }
+  }
+  for (const auto& u : g_sem.units) {
+    if (u.lambda_kind.empty() || u.file != g_sem.buffer_rel || !u.span.start_line) {
+      continue;
+    }
+    const auto dot = u.unit.rfind('.');
+    if (dot != std::string::npos && std::string_view(u.unit).substr(dot + 1) == tok.name) {
+      out.push_back({u.file, point_span(u.file, *u.span.start_line, u.span.start_col ? *u.span.start_col : 1)});
+      return out;
+    }
+  }
+
+  // (5) an IO param of the innermost lambda whose definition covers the cursor
+  const Unit_info* best = nullptr;
+  for (const auto& u : g_sem.units) {
+    if (u.file != g_sem.buffer_rel || !u.span.start_line) {
+      continue;
+    }
+    const uint32_t cl = tok.line0 + 1;  // spans are 1-based
+    if (cl < *u.span.start_line || (u.span.end_line && cl > *u.span.end_line)) {
+      continue;
+    }
+    bool has = false;
+    for (const auto* v : {&u.inputs, &u.outputs}) {
+      for (const auto& e : *v) {
+        has = has || e.name == tok.name;
+      }
+    }
+    if (has && (best == nullptr || *u.span.start_line > *best->span.start_line)) {
+      best = &u;
+    }
+  }
+  if (best != nullptr) {
+    out.push_back({best->file, point_span(best->file, *best->span.start_line, best->span.start_col ? *best->span.start_col : 1)});
+  }
+  return out;
+}
+
+// Workspace-relative Span.file -> the URI the client can open. The current
+// buffer answers with the request's own URI (exact match, no re-encoding).
+std::string uri_for_rel(const std::string& rel, const std::string& buffer_uri) {
+  if (rel.empty() || rel == g_sem.buffer_rel) {
+    return buffer_uri;
+  }
+  const auto it = g_sem.rel2abs.find(rel);
+  if (it == g_sem.rel2abs.end()) {
+    return {};
+  }
+  return path_to_uri(it->second);
+}
+
+// textDocument/definition + textDocument/declaration (2n Phase C). Both answer
+// the declaration site(s) of the symbol under the cursor; an imported binding
+// answers the original (cross-file) definition first, then the local binding.
+void handle_definition(const rapidjson::Document& req) {
+  std::string uri   = uri_of(req);
+  uint32_t    line0 = 0;
+  uint32_t    char0 = 0;
+  position_of(req, line0, char0);
+
+  // A non-.prp doc never runs analyze(), so lsp_index/g_sem would still
+  // describe the previously analyzed buffer — answer null, don't cross wires.
+  auto doc_it = g_docs.find(uri);
+  if (doc_it == g_docs.end() || !ends_with(uri_to_path(uri), ".prp")) {
+    respond_null(req);
+    return;
+  }
+  (void)diagnostics_for(uri, doc_it->second);  // rebuilds lsp_index + g_sem
+
+  const auto locs = resolve_definition(token_at(doc_it->second, line0, char0));
+
+  rapidjson::StringBuffer sb;
+  Writer                  w(sb);
+  w.StartObject();
+  w.Key("jsonrpc");
+  w.String("2.0");
+  write_id(w, req);
+  w.Key("result");
+  if (locs.empty()) {
+    w.Null();
+  } else {
+    w.StartArray();
+    for (const auto& d : locs) {
+      const std::string u = uri_for_rel(d.file, uri);
+      if (u.empty()) {
+        continue;  // span in a file the analysis didn't read from disk
+      }
+      w.StartObject();
+      w.Key("uri");
+      w.String(u.data(), static_cast<rapidjson::SizeType>(u.size()));
+      write_range(w, d.span);
+      w.EndObject();
+    }
+    w.EndArray();
+  }
+  w.EndObject();
+  send_message(sb.GetString());
+}
+
+// textDocument/hover (task 2n Phase B; identifier-based lookup + cross-file
+// kinds added with Phase C). Re-analyze the buffer (the upass runner fills
+// livehd::lsp_index during the run), then answer, in order: the reaching
+// definition of the identifier under the cursor; the def entry whose statement
+// span covers the cursor; a pub/lambda (function) name; an IO param.
+void handle_hover(const rapidjson::Document& req) {
+  std::string uri   = uri_of(req);
+  uint32_t    line0 = 0;
+  uint32_t    char0 = 0;
+  position_of(req, line0, char0);
 
   // Drive the front-end on the current buffer; populates lsp_index as a side
   // effect (diagnostics discarded here — the pull/push path owns those). If the
-  // doc is not open, answer null rather than from a stale index of another buffer.
+  // doc is not open — or is not .prp, which analyze() never runs on — answer
+  // null rather than from a stale index/g_sem of another buffer.
   auto doc_it = g_docs.find(uri);
-  if (doc_it == g_docs.end()) {
+  if (doc_it == g_docs.end() || !ends_with(uri_to_path(uri), ".prp")) {
     respond_null(req);
     return;
   }
   (void)diagnostics_for(uri, doc_it->second);
 
-  // First index entry whose 0-based [start,end] span covers the cursor.
-  const livehd::lsp_index::Entry* hit = nullptr;
-  for (const auto& e : livehd::lsp_index::index().entries()) {
-    const uint32_t sl = e.start_line ? e.start_line - 1 : 0;
-    const uint32_t sc = e.start_col ? e.start_col - 1 : 0;
-    const uint32_t el = e.end_line ? e.end_line - 1 : sl;
-    const uint32_t ec = e.end_col ? e.end_col - 1 : sc;
-    const bool     after_start = (line0 > sl) || (line0 == sl && char0 >= sc);
-    const bool     before_end  = (line0 < el) || (line0 == el && char0 <= ec);
-    if (after_start && before_end) {
-      hit = &e;
-      break;
+  const auto tok = token_at(doc_it->second, line0, char0);
+
+  std::string render;
+  uint32_t    rsl = 0;  // reported range, 0-based, rec exclusive
+  uint32_t    rsc = 0;
+  uint32_t    rel = 0;
+  uint32_t    rec = 0;
+
+  const auto& entries = livehd::lsp_index::index().entries();
+
+  // (a) identifier-based: the reaching definition (max recorded position at or
+  // before the cursor), else the first one (a use above a hoisted def).
+  if (!tok.name.empty()) {
+    const livehd::lsp_index::Entry* reach = nullptr;
+    const livehd::lsp_index::Entry* first = nullptr;
+    for (const auto& e : entries) {
+      if (e.file != g_sem.buffer_rel || e.start_line == 0) {
+        continue;
+      }
+      // A qualified access (`lib.my_add`) can never be a bare local: match the
+      // full chain only, or a same-named local would shadow the member.
+      if (tok.root.empty() ? (e.name != tok.name) : (e.name != tok.chain)) {
+        continue;
+      }
+      if (first == nullptr) {
+        first = &e;
+      }
+      const uint32_t sl = e.start_line - 1;
+      const uint32_t sc = e.start_col ? e.start_col - 1 : 0;
+      if (sl > line0 || (sl == line0 && sc > char0)) {
+        continue;  // starts past the cursor
+      }
+      if (reach == nullptr || e.start_line > reach->start_line
+          || (e.start_line == reach->start_line && e.start_col >= reach->start_col)) {
+        reach = &e;  // >= : same statement recorded twice (declare+store) — later facts win
+      }
+    }
+    if (const auto* hit = (reach != nullptr) ? reach : first; hit != nullptr) {
+      render = hit->render;
+      rsl    = tok.line0;
+      rsc    = tok.scol0;
+      rel    = tok.line0;
+      rec    = tok.ecol0;
+    }
+  }
+
+  // (b) a function / pub name (no symbol-table def entry): `my_add : comb`.
+  // Cross-file member (`lib.my_add`) prefers the exporter's own def entry so
+  // the full type renders; a lambda kind is the fallback.
+  if (render.empty() && !tok.name.empty()) {
+    const Pub_def* p = nullptr;
+    if (!tok.root.empty()) {
+      const auto target = binding_target(tok.root);
+      if (!target.empty() && target.find('.') == std::string::npos) {
+        p = find_pub(target, tok.name);
+      }
+    } else {
+      const auto target = binding_target(tok.name);  // `const f = import("unit.entity")`
+      if (!target.empty()) {
+        const auto dot = target.rfind('.');
+        if (dot != std::string::npos) {
+          p = find_pub(target.substr(0, dot), target.substr(dot + 1));
+        }
+      }
+      if (p == nullptr) {
+        for (const auto& q : g_sem.pubs) {
+          if (q.name == tok.name && q.span.file == g_sem.buffer_rel) {
+            p = &q;
+            break;
+          }
+        }
+      }
+    }
+    if (p != nullptr) {
+      const livehd::lsp_index::Entry* src = nullptr;
+      for (const auto& e : entries) {  // exporter-side def entry (pub values)
+        if (e.name == p->name && e.file == p->span.file) {
+          src = &e;
+        }
+      }
+      if (src != nullptr && p->kind == "value") {
+        render = src->render;
+      } else {
+        render = tok.name + " : " + p->kind + " " + p->unit + "." + p->name;
+      }
+    } else if (tok.root.empty()) {
+      for (const auto& u : g_sem.units) {  // non-pub lambda in this buffer
+        if (u.lambda_kind.empty() || u.file != g_sem.buffer_rel) {
+          continue;
+        }
+        const auto dot = u.unit.rfind('.');
+        if (dot != std::string::npos && std::string_view(u.unit).substr(dot + 1) == tok.name) {
+          render = tok.name + " : " + u.lambda_kind;
+          break;
+        }
+      }
+    }
+    if (!render.empty()) {
+      rsl = tok.line0;
+      rsc = tok.scol0;
+      rel = tok.line0;
+      rec = tok.ecol0;
+    }
+  }
+
+  // (c) an IO param of the innermost lambda covering the cursor: `a : u8`.
+  if (render.empty() && !tok.name.empty() && tok.root.empty()) {
+    const Lnast_io_entry* io_hit = nullptr;
+    uint32_t              io_ln  = 0;
+    for (const auto& u : g_sem.units) {
+      if (u.file != g_sem.buffer_rel || !u.span.start_line) {
+        continue;
+      }
+      const uint32_t cl = line0 + 1;
+      if (cl < *u.span.start_line || (u.span.end_line && cl > *u.span.end_line)) {
+        continue;
+      }
+      for (const auto* v : {&u.inputs, &u.outputs}) {
+        for (const auto& e : *v) {
+          if (e.name == tok.name && (io_hit == nullptr || *u.span.start_line > io_ln)) {
+            io_hit = &e;
+            io_ln  = *u.span.start_line;
+          }
+        }
+      }
+    }
+    if (io_hit != nullptr) {
+      render = tok.name + " : ";
+      if (io_hit->kind == Io_kind::boolean) {
+        render += "bool";
+      } else if (io_hit->kind == Io_kind::string) {
+        render += "string";
+      } else if (io_hit->bits > 0) {
+        render += io_hit->is_signed ? 's' : 'u';
+        render += std::to_string(io_hit->bits);
+        if (io_hit->has_range) {
+          render += "(bw_min=" + std::to_string(io_hit->range_min) + ", bw_max=" + std::to_string(io_hit->range_max) + ")";
+        }
+      } else {
+        render += "int";
+      }
+      rsl = tok.line0;
+      rsc = tok.scol0;
+      rel = tok.line0;
+      rec = tok.ecol0;
+    }
+  }
+
+  // (d) statement-span coverage (the Phase B behavior, now file-filtered) —
+  // only off an identifier (operators/assignment glyphs of a statement show
+  // its dst). An unresolved identifier stays null rather than answering with
+  // the covering statement's dst (or an inliner temp's) unrelated type.
+  if (render.empty() && tok.name.empty()) {
+    for (const auto& e : entries) {
+      if (e.file != g_sem.buffer_rel) {
+        continue;
+      }
+      const uint32_t sl          = e.start_line ? e.start_line - 1 : 0;
+      const uint32_t sc          = e.start_col ? e.start_col - 1 : 0;
+      const uint32_t el          = e.end_line ? e.end_line - 1 : sl;
+      const uint32_t ec          = e.end_col ? e.end_col - 1 : sc;
+      const bool     after_start = (line0 > sl) || (line0 == sl && char0 >= sc);
+      const bool     before_end  = (line0 < el) || (line0 == el && char0 <= ec);
+      if (after_start && before_end) {
+        render = e.render;
+        rsl    = sl;
+        rsc    = sc;
+        rel    = el;
+        rec    = ec;
+        break;
+      }
     }
   }
 
@@ -803,7 +1467,7 @@ void handle_hover(const rapidjson::Document& req) {
   w.String("2.0");
   write_id(w, req);
   w.Key("result");
-  if (hit == nullptr) {
+  if (render.empty()) {
     w.Null();
   } else {
     w.StartObject();
@@ -812,18 +1476,14 @@ void handle_hover(const rapidjson::Document& req) {
     w.Key("kind");
     w.String("plaintext");
     w.Key("value");
-    w.String(hit->render.data(), static_cast<rapidjson::SizeType>(hit->render.size()));
+    w.String(render.data(), static_cast<rapidjson::SizeType>(render.size()));
     w.EndObject();
-    const uint32_t sl = hit->start_line ? hit->start_line - 1 : 0;
-    const uint32_t sc = hit->start_col ? hit->start_col - 1 : 0;
-    const uint32_t el = hit->end_line ? hit->end_line - 1 : sl;
-    const uint32_t ec = hit->end_col ? hit->end_col - 1 : sc;
     w.Key("range");
     w.StartObject();
     w.Key("start");
-    write_position(w, sl, sc);
+    write_position(w, rsl, rsc);
     w.Key("end");
-    write_position(w, el, ec);
+    write_position(w, rel, rec);
     w.EndObject();
     w.EndObject();
   }
@@ -880,6 +1540,8 @@ int run_stdio() {
       handle_pull_diagnostic(doc);
     } else if (method == "textDocument/hover") {
       handle_hover(doc);  // task 2n Phase B
+    } else if (method == "textDocument/definition" || method == "textDocument/declaration") {
+      handle_definition(doc);  // 2n Phase C
     } else if (method == "$/cancelRequest" || method == "$/setTrace") {
       // no-op (analysis is synchronous)
     } else if (has_id) {
