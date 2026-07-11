@@ -117,9 +117,16 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
   if (ref == nullptr || impl == nullptr || pairs.empty()) {
     return out;
   }
-  // Top-level flops per side, keyed the way the engine keys them (canonical
-  // hier name). Same scope the tier-2 producer pairs in — flattened-child
-  // flops are out of tier-2's per-def problem by design.
+  // EVERY flop the engine will key (canonical hier name), collected over the
+  // full hierarchy — the miter cuts flops at every descended level
+  // (forward_hier), so the collision guards below must see them all: an alias
+  // whose name coincides with a DESCENDANT flop's canon name would silently
+  // fuse two same-side flops onto one cut key (shared current-state symbol,
+  // one next-state transition dropped by map overwrite) — a false-PROVEN
+  // hazard, not a lost proof. Collecting without the collapse opacity the
+  // engine may apply is a strict superset: at worst a valid pair is dropped
+  // (conservative). The tier-2 producer itself only ever names top-level
+  // flops; hierarchy matters here purely for collision detection.
   struct Vflop {
     int         count    = 0;
     bool        has_init = false;
@@ -127,7 +134,7 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
   };
   auto collect = [](hhds::Graph* g) {
     absl::flat_hash_map<std::string, Vflop> m;
-    for (auto node : g->forward_class()) {
+    for (auto node : g->forward_hier()) {
       auto op = graph_util::type_op_of(node);
       if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Latch) {
         continue;

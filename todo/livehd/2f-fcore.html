@@ -148,17 +148,22 @@
   strategy first. Purely a heuristic ordering channel: hints can speed a proof but
   can never change a verdict, so they need none of the verdict-cache soundness
   rules.</li>
-<li><strong>Fourth record kind — state-pair hints (pending; consumer
+<li><strong>Fourth record kind — state-pair hints (LANDED 2026-07-11; consumer
   <a class="xref" href="2f-lec.html">2f-lec</a>):</strong> tier-2 (uncertain)
-  flop/memory pairs that participated in a PASS persist keyed by canonical entity
-  name — like strategy hints they survive edits and salt. UNLIKE strategy hints
-  they alter the obligation set: they enter the verdict-cache key as
-  <code>m=[…]</code> pairs and keep the uncertain-pair discipline on replay —
-  re-validated at injection (both flops must still exist and the init-equality
-  precondition must still hold, since an edit can change a reset value under the
-  same entity name), drop-and-retry on REFUTE, never bounded-Proven. A speed
-  channel that can move a verdict only between Unknown and PROVEN — never to a
-  wrong FAIL or PASS.</li>
+  flop pairs that participated in a PASS persist keyed by canonical entity
+  name (<code>pair_hints</code> in <code>formal_cache.json</code>) — like
+  strategy hints they survive edits and salt (loaded before the salt check).
+  UNLIKE strategy hints they alter the obligation set: they enter the
+  verdict-cache key as a distinct <code>um=[…]</code> segment (never aliasing a
+  certain <code>lec.match</code> run, whose bounded-Proven policy differs) and
+  keep the uncertain-pair discipline on replay — re-validated at injection via
+  <code>lec::validate_uncertain_pairs</code> (both flops must still exist and
+  the init-equality precondition must still hold, since an edit can change a
+  reset value under the same entity name; debug-nid fallback names never
+  persist), drop-and-retry on REFUTE, never bounded-Proven. A speed channel
+  that can move a verdict only between Unknown and PROVEN — never to a wrong
+  FAIL or PASS. Memory pairs are excluded (mem correspondence is
+  shape+occurrence-keyed; the permutation-retry item in 2f-lec owns that gap).</li>
 </ul>
 
 <h2>4 — Case-split / assume-spill generalization</h2>

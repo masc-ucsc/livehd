@@ -91,6 +91,29 @@ everything the encoder needs.
   verdict-cache key; neither trustworthy ⇒ **inconclusive**. The per-query `lec.timeout`
   bounds each worker, so a hard miter self-limits and the portfolio degrades to
   inconclusive rather than hanging.
+- **Tier-2 uncertain state correspondence** (`lec.state_pairing`, default on):
+  correspondence is name-first (tier-1: `canon_flop_name` + explicit
+  `lec.match`); a renamed flop is an unmatched cut point that gates `ind` — the
+  only unbounded-PROVEN engine — to Unknown. When unmatched state survives
+  tier-1, the driver runs `pass/semdiff`'s full-match (SRP/ERP signature) pass
+  per def-pair and injects the surviving pairs as **uncertain**
+  (`Lec_options::uncertain_match`; explicit `lec.match` pairs seed the
+  signatures as anchors; pairs must satisfy the reset/init-equality
+  precondition, re-validated by `validate_uncertain_pairs`). `prove_equal`
+  enforces the discipline itself: an unbounded inductive PROVEN is accepted —
+  self-certifying (any inductive, output-implying, initially-true relation
+  certifies, given init-equality) — and disclosed as "PROVEN with N uncertain
+  tier-2 pair(s)"; **REFUTED under pairs is never final** (drop ALL, re-solve
+  once: a pair-free re-refute is the real FAIL, else the ceiling is Unknown);
+  a **bounded bmc PASS is never claimed** while pairs apply (shared-s0
+  over-constraint could mask a bounded CEX); timeout/Unknown never retries.
+  A PASS persists the pairs as entity-keyed **pair hints** in
+  `formal_cache.json`; warm runs re-validate and re-inject them (same
+  `um=[…]` cache-key segment ⇒ verdict-cache hit) without the signature pass.
+  Unpaired state is reported with the reason (ambiguous bucket / kind-init
+  mismatch / no full match). Memory pairs are name-free (shape+occurrence),
+  so tier-2 never aliases them. Regression:
+  `lhd/tests/lec_state_pairing_test.sh`.
 - **Memory**: `Memory` cells → SMT **theory of arrays**. Corresponding memories
   (matched by signature + `forward_class()` occurrence via `mem_state_key()`)
   collapse to **one shared array symbol**; `dout = select(array, addr)`,
@@ -283,6 +306,7 @@ a silent no-op).
 | `lec.collapse` | proven-module collapse: comma-sep def names forced to the sound blackbox | `""` |
 | `lec.hierarchical` | bottom-up: LEC every def leaves-first under `lec.engine`, collapsing proven children (`false` = flat single LEC) | `true` |
 | `lec.semdiff` | structural def-diff skip: `structural` (drop a structurally-identical def with no solver; `true`/`on` alias) \| `none`. NB cross-front-end pairs never match | `structural` |
+| `lec.state_pairing` | tier-2 uncertain state correspondence: pair name-unmatched flops via semdiff's full-match signature pass, injected as uncertain (drop-and-retry on REFUTE, no bounded-Proven, ind PASS self-certifies + persists pair hints) | `true` |
 | `lec.decompose` | split the miter into per-cut queries: `auto` (sweep, fall back to the monolithic solve on a non-discharging cut) \| `true` (sweep only, report the hard residue, no monolithic solve) \| `false` (monolithic only) | `auto` |
 | `lec.cross` | also run `lgcheck` and assert agreement (bring-up only) | `false` |
 

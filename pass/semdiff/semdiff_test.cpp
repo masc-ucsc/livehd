@@ -256,6 +256,7 @@ std::shared_ptr<hhds::Graph> build_pipe2(const std::string& dir, const std::stri
   auto g = gio->create_graph();
 
   auto f0 = create_typed_node(*g, Ntype_op::Flop);
+  f0.set_name(n0);  // node name too (tolg stamps both) — the exported State_pair basis
   g->get_input_pin("d").connect_sink(f0.create_sink_pin(3));  // din
   auto q0 = f0.create_driver_pin(0);
   livehd::graph_util::set_pin_name(q0, n0);
@@ -264,6 +265,7 @@ std::shared_ptr<hhds::Graph> build_pipe2(const std::string& dir, const std::stri
   q0.connect_sink(inv.create_sink_pin(0));
 
   auto f1 = create_typed_node(*g, Ntype_op::Flop);
+  f1.set_name(n1);
   inv.create_driver_pin(0).connect_sink(f1.create_sink_pin(3));  // din
   auto q1 = f1.create_driver_pin(0);
   livehd::graph_util::set_pin_name(q1, n1);
@@ -288,6 +290,20 @@ TEST(Semdiff, StatePairingRenamedPipeline) {
   EXPECT_EQ(2U, r.state.full_pairs);
   EXPECT_EQ(0U, r.state.a_unpaired);
   EXPECT_EQ(0U, r.state.b_unpaired);
+
+  // The exported pair list (the lec uncertain-pair feed): concrete raw names,
+  // the true correspondence, flops not mems.
+  ASSERT_EQ(2U, r.state_pairs.size());
+  std::vector<std::pair<std::string, std::string>> got;
+  for (const auto& p : r.state_pairs) {
+    EXPECT_FALSE(p.is_mem);
+    got.emplace_back(p.a_name, p.b_name);
+  }
+  std::sort(got.begin(), got.end());
+  EXPECT_EQ(got[0], (std::pair<std::string, std::string>{"ra", "xa"}));
+  EXPECT_EQ(got[1], (std::pair<std::string, std::string>{"rb", "xb"}));
+  EXPECT_TRUE(r.a_state_unpaired.empty());
+  EXPECT_TRUE(r.b_state_unpaired.empty());
 
   // The paired seeds let the WHOLE structure match: nothing left unmatched.
   EXPECT_EQ(0U, r.a_unmatched);
@@ -362,6 +378,12 @@ TEST(Semdiff, StatePairingAmbiguousTwinsStayUnpaired) {
   EXPECT_EQ(2U, r.state.b_unpaired);
   EXPECT_EQ(2U, r.state.a_ambiguous);
   EXPECT_EQ(2U, r.state.b_ambiguous);
+
+  // The unpaired report carries the reason.
+  ASSERT_EQ(2U, r.a_state_unpaired.size());
+  for (const auto& s : r.a_state_unpaired) {
+    EXPECT_NE(s.find("(ambiguous)"), std::string::npos) << s;
+  }
 }
 
 // Differing const reset values refuse to full-match (the 2f-lec pair
@@ -394,6 +416,33 @@ TEST(Semdiff, StatePairingInitMismatchRefuses) {
   EXPECT_EQ(0U, r.state.full_pairs);
   EXPECT_EQ(1U, r.state.a_unpaired);
   EXPECT_EQ(1U, r.state.b_unpaired);
+  EXPECT_TRUE(r.state_pairs.empty());
+
+  // The refusal names its reason: same structure, different kind/init fold.
+  ASSERT_EQ(1U, r.a_state_unpaired.size());
+  EXPECT_NE(r.a_state_unpaired[0].find("(kind/init mismatch)"), std::string::npos) << r.a_state_unpaired[0];
+}
+
+// Caller-supplied seed pairs (lec.match) are tier-1 anchors: the seeded pair
+// resolves without a signature, and the remaining renamed flop full-matches
+// against sharper (seed-anchored) signatures.
+TEST(Semdiff, StatePairingSeedPairsAnchor) {
+  auto a = build_pipe2("lgdb_semdiff_seed_a", "ra", "rb");
+  auto b = build_pipe2("lgdb_semdiff_seed_b", "xa", "xb");
+
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+  o.state_pairing  = true;
+  o.seed_pairs.emplace_back("ra", "xa");
+  auto r = livehd::semdiff::structural_match(a.get(), b.get(), o);
+
+  EXPECT_EQ(1U, r.state.seed_pairs);
+  EXPECT_EQ(1U, r.state.full_pairs);  // only rb<->xb is left for tier-2
+  EXPECT_EQ(0U, r.state.a_unpaired);
+  EXPECT_EQ(0U, r.state.b_unpaired);
+  ASSERT_EQ(1U, r.state_pairs.size());
+  EXPECT_EQ(r.state_pairs[0].a_name, "rb");
+  EXPECT_EQ(r.state_pairs[0].b_name, "xb");
 }
 
 // name_noise=1.0 destroys every impl key: tier-1 pairs nothing, tier-2 recovers

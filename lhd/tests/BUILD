@@ -265,6 +265,16 @@ sh_test(
     data = ["//lhd:lhd"],
 )
 
+# 2f-lec tier-2 uncertain state correspondence: semdiff full-match pairs
+# injected as uncertain (self-certifying ind PASS, drop-all+retry-once on
+# REFUTE, bounded bmc PASS suppressed), entity-keyed pair hints replayed warm.
+sh_test(
+    name = "lec_state_pairing_test",
+    size = "medium",
+    srcs = ["lec_state_pairing_test.sh"],
+    data = ["//lhd:lhd"],
+)
+
 # run_id slice scoping: a lec lg: side hashes only its --top slice, so edits
 # to modules outside the proven subtree keep the run_id; edits to a Sub child
 # move it; an unresolvable top falls back to whole-directory hashing.

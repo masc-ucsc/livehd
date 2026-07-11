@@ -183,6 +183,13 @@ void Verdict_cache::set_pair_hint(const std::string& entity, Pair_hint h) {
   dirty_              = true;
 }
 
+void Verdict_cache::clear_pair_hint(const std::string& entity) {
+  std::lock_guard lock(mutex_);
+  if (pair_hints_.erase(entity) > 0) {
+    dirty_ = true;
+  }
+}
+
 bool Verdict_cache::skip_unknown(const std::string& key, int timeout_s) const {
   std::lock_guard lock(mutex_);
   auto it = unknowns_.find(key);
@@ -286,10 +293,13 @@ void Verdict_cache::save() const {
     }
     std::sort(pkeys.begin(), pkeys.end());
     for (size_t i = 0; i < pkeys.size(); ++i) {
-      const auto& h = pair_hints_.at(pkeys[i]);
+      // The producer's pair order follows hash-map iteration — sort here so
+      // re-runs emit byte-identical files (the section's stated contract).
+      auto pairs = pair_hints_.at(pkeys[i]).pairs;
+      std::sort(pairs.begin(), pairs.end());
       std::string ps;
-      for (size_t j = 0; j < h.pairs.size(); ++j) {
-        ps += std::format("[\"{}\", \"{}\"]{}", esc(h.pairs[j].first), esc(h.pairs[j].second), j + 1 < h.pairs.size() ? ", " : "");
+      for (size_t j = 0; j < pairs.size(); ++j) {
+        ps += std::format("[\"{}\", \"{}\"]{}", esc(pairs[j].first), esc(pairs[j].second), j + 1 < pairs.size() ? ", " : "");
       }
       out += std::format("    \"{}\": {{\"pairs\": [{}]}}{}\n", esc(pkeys[i]), ps, i + 1 < pkeys.size() ? "," : "");
     }

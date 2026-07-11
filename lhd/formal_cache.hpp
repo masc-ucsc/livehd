@@ -80,6 +80,10 @@ public:
 
   std::optional<Pair_hint> pair_hint(const std::string& entity) const;
   void                     set_pair_hint(const std::string& entity, Pair_hint h);
+  // Self-heal: a replayed hint whose solve did NOT end Proven is stale (e.g.
+  // the design changed under the same entity name) — drop it so the next run
+  // re-derives the pairing fresh instead of re-suppressing the signature pass.
+  void                     clear_pair_hint(const std::string& entity);
 
   // Unknown-attempt ledger: skip_unknown() is true when a re-attempt at
   // `timeout_s` cannot outspend the recorded attempt (records with timeout 0 =

@@ -115,60 +115,48 @@
   pending verify mining/hints producer rather than this replay path.</li>
 </ul>
 
+<h2>Landed 2026-07-11 — two-tier state correspondence (tier-2 uncertain pairing)</h2>
+<ul class="subtasks">
+<li><strong>Speculative full-match pairing with drop-and-retry (settled
+  2026-07-10, landed 2026-07-11; supersedes "auto flop-correspondence from
+  semdiff on REFUTE").</strong> Tier-1 stays name-first
+  (<code>canon_flop_name</code> + explicit <code>lec.match</code>); for renamed
+  state, pairing is the <em>only</em> route to <em>unbounded</em> PROVEN (a
+  renamed-but-reset pair still bounded-Proves via BMC — the regression pins
+  exactly that delta). <strong>Tier-2 (uncertain) pairs</strong> come from
+  semdiff's full-match signature pass (<a class="xref"
+  href="3f-semdiff.html">3f-semdiff</a>, <code>Match_result::state_pairs</code>;
+  explicit <code>lec.match</code> pairs seed the signatures as anchors) whenever
+  unmatched state survives tier-1 — zero tier-2 work on the all-names-match
+  path — and are injected as <code>Lec_options::uncertain_match</code>
+  (validated by <code>lec::validate_uncertain_pairs</code>: existence,
+  collision, init-equality). The discipline lives INSIDE
+  <code>prove_equal</code> (uniform across hier/flat/pass callers):
+  ind-PROVEN accepted and disclosed ("PROVEN with N uncertain tier-2 pair(s)
+  applied — self-certifying"); <strong>REFUTED under pairs is never final</strong>
+  (drop ALL, re-solve once — pair-free re-refute = real FAIL, else Unknown);
+  <strong>bounded bmc-Proven never claimed with pairs applied</strong>
+  (suppressed to Unknown, no retry — a pair-free bmc is gated Unknown anyway);
+  timeout/Unknown ⇒ no retry. Unpaired state is reported with the reason
+  (ambiguous / kind-init mismatch / no full match). Memory pairs are exported
+  but filtered (<code>is_mem</code>): mem correspondence is shape+occurrence,
+  never name-aliased.
+  <em>Promotion:</em> a PASS persists the pairs as entity-keyed
+  <strong>pair hints</strong> (<code>formal_cache.json</code>
+  <code>pair_hints</code>, salt-surviving like strategy hints); replay
+  re-validates at injection and keeps the uncertain discipline. Uncertain pairs
+  enter the verdict-cache key as a DISTINCT <code>um=[…]</code> segment (same
+  pair set ⇒ same key, so hint-replay runs hit the stored verdict and the
+  Unknown ledger composes; never aliasing a certain <code>lec.match</code> run,
+  whose bounded-Proven policy differs). Knob: <code>lec.state_pairing</code>
+  (default on). Regression: <code>lhd/tests/lec_state_pairing_test.sh</code>
+  (renamed-pipeline PROVEN + warm hint replay, real-diff FAIL through the
+  pair-free confirm, crossed-hint bounded-PASS suppression, init-mismatch
+  refusal, all-names-match zero-work, pairing-off baseline).</li>
+</ul>
+
 <h2>Pending</h2>
 <ul class="subtasks">
-<li><strong>Two-tier state correspondence — speculative full-match pairing with
-  drop-and-retry (settled 2026-07-10; supersedes "auto flop-correspondence from
-  semdiff on REFUTE").</strong> Correspondence today is tier-1 only: preserved
-  names (<code>canon_flop_name</code>) plus explicit <code>lec.match</code> pairs;
-  a renamed flop becomes an unmatched cut point, and incomplete correspondence
-  gates <code>ind</code> — the only unbounded-PROVEN engine — to Unknown. So for
-  renamed state, pairing is not a speedup: it is the <em>only</em> route to
-  <em>unbounded</em> PROVEN (a bounded-Proven PASS needs no flop correspondence —
-  BMC's completeness gate covers only output compare points). Add
-  <strong>tier-2 (uncertain) pairs</strong> from semdiff's full-match
-  signature pass (<a class="xref" href="3f-semdiff.html">3f-semdiff</a>) whenever
-  unmatched state survives tier-1 (near-free on the common all-names-match path):
-  fed into <code>name_alias</code> exactly as if <code>lec.match</code> had
-  supplied them, but tracked as uncertain.
-  <em>Pair precondition:</em> reset/init values must be equal; a both-reset-less
-  pair qualifies (power-on correspondence by assumption — the exact semantics
-  tier-1 name pairing already gives reset-less flops); never pair init with
-  init-less. This closes the pre-existing ind corner — a power-on-only init (no
-  reset pin) never enters the ind formula at all (a reset-pin init does, but a
-  mismatch there surfaces only as a distrusted ind-SAT) — and it is what makes a
-  speculative ind-PROVEN self-certifying: <em>any</em> inductive,
-  output-implying, initially-true relation certifies equivalence, so the pairing
-  being "the intended one" is not load-bearing for soundness.
-  <em>Verdict discipline (mirrors REFUTE-under-collapse flat confirmation):</em>
-  <strong>REFUTED under a non-empty uncertain-pair set is never final</strong> —
-  drop ALL uncertain pairs and re-solve once; a re-refute (now pair-free) is a
-  real FAIL, else the honest ceiling is Unknown, since dropping any pair already
-  makes the correspondence incomplete (hence drop-all + one retry, no CEGAR loop).
-  Timeout ⇒ <strong>no retry</strong>: the retry's ceiling is the Unknown the
-  timeout already reports, and the Unknown ledger keeps it skipped.
-  <em>Trust notes:</em> under <code>auto</code> a wrong uncertain pair mostly
-  costs a lost proof, not a false FAIL — ind-SAT is already distrusted (hint
-  only), and BMC pairing is dominantly s0 equality constraints (model-removing:
-  a BMC CEX under extra pairs is usually still a legal diverging trace). Not
-  airtight, though: the alias set also feeds the reset-prologue bank-hold
-  heuristic (<code>query.cpp:1998-2024, 2379-2388</code>) and the mem↔flop-bank
-  bridge uniqueness test (<code>query.cpp:2126-2134</code>), which can change
-  transition semantics — the false-FAIL guard is the drop-and-retry rule itself,
-  not monotonicity. The dangerous direction is
-  PROVEN: <strong>bounded-Proven must never be claimed with uncertain pairs
-  applied</strong> — s0 over-constraint can mask a real bounded CEX (false PASS);
-  strip uncertains on that fallback path. Unpaired flops are still reported
-  "unpaired" <em>with the reason</em> (no full match / ambiguous bucket / init
-  mismatch), never dropped silently; retiming still deliberately breaks flop
-  correspondence — degrade to I/O-level divergence.
-  <em>Promotion:</em> a PASS obtained with uncertain pairs validates them —
-  persist as entity-keyed pair hints (<a class="xref"
-  href="2f-fcore.html">2f-fcore</a> §3 record kind) so warm runs inject them for
-  free; replayed hints keep the uncertain discipline and are re-validated at
-  injection (both flops must still exist and the init-equality precondition must
-  still hold — entity-keyed hints survive edits that can change either), since
-  they alter the obligation set and are not pure-ordering strategy hints.</li>
 <li><strong>Memory pairing tier-2 — same-shape permutation retry.</strong> Memories
   already pair by attributes, not names (<code>mem_state_key</code> = size×bits +
   <code>forward_class</code> occurrence), so attribute matching is landed; the
@@ -204,25 +192,21 @@
 <li>Scope regression: two whole-design libraries sharing many defs +
   <code>--ref-top</code> a leaf — exactly that leaf's subtree is proven (no
   unrelated <code>lec[hier]</code> lines).</li>
-<li>Differently-named pipeline flops (renamed clone): tier-2 full-match pairs them
-  and the pair reaches <strong>PROVEN</strong> with no supplied
-  <code>match.txt</code>; the pairs persist as pair hints and a warm re-run skips
-  the signature pass.</li>
-<li>Planted bogus uncertain pair: the REFUTE-under-uncertain-pairs retry drops it
-  and the run ends Unknown naming the unpaired flops — never FAIL from a
-  speculative pair. A genuinely-different renamed design still ends FAIL: the
-  pair-free confirming re-solve refutes on its own.</li>
-<li>Bounded-proven guard: a reset-less divergence maskable by a wrong s0 pairing
-  never reports bounded-Proven while uncertain pairs are applied.</li>
-<li>Init precondition: a tier-2 candidate whose reset values differ is not paired
-  (and the report says why it stayed unpaired).</li>
+<li><strong>Covered by <code>lhd/tests/lec_state_pairing_test.sh</code>
+  (2026-07-11):</strong> renamed pipeline → PROVEN with no <code>match.txt</code>
+  + pair-hint persistence + warm-run signature-pass skip; genuinely-different
+  renamed design → FAIL through the pair-free confirming re-solve; planted
+  crossed pair hint → bounded-PASS suppressed, honest Unknown (never a wrong
+  verdict); init-mismatch candidate refused with the reason; all-names-match →
+  zero tier-2 work; <code>lec.state_pairing=false</code> → the pre-tier-2
+  baseline (bounded auto-PASS, ind gated Unknown naming the cut points).</li>
 <li>Same-shape memory permutation: two same-shape memories swapped in RTL order
   prove via the permutation retry; the diverged-use memory regression (above)
   still degrades soundly.</li>
 <li>Timeout with uncertain pairs applied: no retry fires, the Unknown ledgers,
-  and the warm re-run skips it (same pair set ⇒ same <code>m=[…]</code> key).</li>
-<li>All-names-match design: the signature pass never runs (tier-1 complete ⇒ zero
-  tier-2 work on the common path).</li>
+  and the warm re-run skips it (same pair set ⇒ same <code>um=[…]</code> key —
+  the retry-only-on-Refuted rule makes this structural, but a live timeout
+  fixture is still worth planting).</li>
 <li>Retimed clone (correspondence deliberately broken): degrades to I/O-level
   divergence with the unpaired flops listed; verdict stays sound.</li>
 </ul>
