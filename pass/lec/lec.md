@@ -110,6 +110,11 @@ everything the encoder needs.
   A PASS persists the pairs as entity-keyed **pair hints** in
   `formal_cache.json`; warm runs re-validate and re-inject them (same
   `um=[…]` cache-key segment ⇒ verdict-cache hit) without the signature pass.
+  Hint storage is all-or-nothing (a debug-nid-named pair blocks the whole
+  hint — a partial hint would wedge warm runs at Unknown) and self-healing
+  (a replayed hint whose solve does not end Proven is cleared, so the next
+  run pairs fresh); `validate_uncertain_pairs`'s collision guards walk the
+  full hierarchy, since the miter cuts flops at every descended level.
   Unpaired state is reported with the reason (ambiguous bucket / kind-init
   mismatch / no full match). Memory pairs are name-free (shape+occurrence),
   so tier-2 never aliases them. Regression:

@@ -130,7 +130,11 @@
   unmatched state survives tier-1 — zero tier-2 work on the all-names-match
   path — and are injected as <code>Lec_options::uncertain_match</code>
   (validated by <code>lec::validate_uncertain_pairs</code>: existence,
-  collision, init-equality). The discipline lives INSIDE
+  collision, init-equality — the collision maps walk the FULL hierarchy
+  (<code>forward_hier</code>), because the miter cuts flops at every descended
+  level and an alias colliding with a descendant's canon name would fuse two
+  same-side flops onto one cut key, a false-PROVEN hazard the adversarial
+  review caught). The discipline lives INSIDE
   <code>prove_equal</code> (uniform across hier/flat/pass callers):
   ind-PROVEN accepted and disclosed ("PROVEN with N uncertain tier-2 pair(s)
   applied — self-certifying"); <strong>REFUTED under pairs is never final</strong>
@@ -144,15 +148,22 @@
   <em>Promotion:</em> a PASS persists the pairs as entity-keyed
   <strong>pair hints</strong> (<code>formal_cache.json</code>
   <code>pair_hints</code>, salt-surviving like strategy hints); replay
-  re-validates at injection and keeps the uncertain discipline. Uncertain pairs
+  re-validates at injection and keeps the uncertain discipline. Hint storage
+  is <strong>all-or-nothing</strong> (a pair with a debug-nid name blocks the
+  whole hint — a PARTIAL hint's replay would suppress the fresh signature pass
+  while leaving the unnamed flops unmatched, wedging a cold PASS into a
+  permanent warm Unknown) and <strong>self-healing</strong> (a replayed hint
+  whose solve does not end Proven is stale — <code>clear_pair_hint</code>
+  drops it so the next run pairs fresh; a planted crossed hint goes
+  UNKNOWN → cleared → PROVEN on the re-run). Uncertain pairs
   enter the verdict-cache key as a DISTINCT <code>um=[…]</code> segment (same
   pair set ⇒ same key, so hint-replay runs hit the stored verdict and the
   Unknown ledger composes; never aliasing a certain <code>lec.match</code> run,
   whose bounded-Proven policy differs). Knob: <code>lec.state_pairing</code>
   (default on). Regression: <code>lhd/tests/lec_state_pairing_test.sh</code>
   (renamed-pipeline PROVEN + warm hint replay, real-diff FAIL through the
-  pair-free confirm, crossed-hint bounded-PASS suppression, init-mismatch
-  refusal, all-names-match zero-work, pairing-off baseline).</li>
+  pair-free confirm, crossed-hint bounded-PASS suppression + self-heal,
+  init-mismatch refusal, all-names-match zero-work, pairing-off baseline).</li>
 </ul>
 
 <h2>Pending</h2>

@@ -159,10 +159,17 @@
   keep the uncertain-pair discipline on replay — re-validated at injection via
   <code>lec::validate_uncertain_pairs</code> (both flops must still exist and
   the init-equality precondition must still hold, since an edit can change a
-  reset value under the same entity name; debug-nid fallback names never
-  persist), drop-and-retry on REFUTE, never bounded-Proven. A speed channel
-  that can move a verdict only between Unknown and PROVEN — never to a wrong
-  FAIL or PASS. Memory pairs are excluded (mem correspondence is
+  reset value under the same entity name; the collision guards walk the FULL
+  hierarchy, since the miter cuts flops at every descended level),
+  drop-and-retry on REFUTE, never bounded-Proven. Storage is
+  <strong>all-or-nothing</strong> (a debug-nid-named pair blocks the whole
+  hint — a partial hint's replay would suppress the fresh signature pass and
+  wedge a cold PASS into a permanent warm Unknown) and
+  <strong>self-healing</strong> (<code>clear_pair_hint</code> drops a replayed
+  hint whose solve did not end Proven, so the next run pairs fresh); the
+  <code>pairs</code> arrays emit sorted for deterministic files. A speed
+  channel that can move a verdict only between Unknown and PROVEN — never to a
+  wrong FAIL or PASS. Memory pairs are excluded (mem correspondence is
   shape+occurrence-keyed; the permutation-retry item in 2f-lec owns that gap).</li>
 </ul>
 
