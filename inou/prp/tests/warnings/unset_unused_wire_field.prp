@@ -1,0 +1,20 @@
+/*
+:name: unset_unused_wire_field
+:type: warning
+:warning: field `io\.dead` is declared but never set and never used
+:help: drop the field
+*/
+// A detupled wire bundle (`wire io:(…)` splits into per-leaf dotted nets):
+// fields a/o are driven and consumed through plain dotted refs (no tuple_get
+// survives uPass_detuple), and their u64 width exceeds the bitwidth pass's
+// 62-bit derived-range cap — neither may warn (they are read and written; the
+// runner/constprop field-touched record is what proves it). The never-touched
+// `dead` leaf is the true positive: declared, never set, never used.
+pub comb wide_io::[timecheck=false](io_a:u64) -> (io_o:u64) {
+  wire io:(a:u64, o:u64, dead:u16) = nil   // locate_warning_here
+  mut w1 = 0
+  io.o = io.a#[0..=63]
+  w1 = io.o
+  io.a = io_a#[0..=63]
+  io_o = w1
+}

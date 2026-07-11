@@ -245,6 +245,176 @@ TEST(Semdiff, DigestHierarchicalMerkle) {
   EXPECT_NE(and_deep, and_bb);   // resolved vs blackbox digests are distinct forms
 }
 
+// ---- tier-2 full-match state pairing (state_pairing) ------------------------
+
+// in d -> [flop r0] -> Not -> [flop r1] -> out q, with per-side flop names.
+std::shared_ptr<hhds::Graph> build_pipe2(const std::string& dir, const std::string& n0, const std::string& n1) {
+  auto& lib = livehd::Hhds_graph_library::instance(dir);
+  auto  gio = lib.create_io("m");
+  gio->add_input("d", 1);
+  gio->add_output("q", 1);
+  auto g = gio->create_graph();
+
+  auto f0 = create_typed_node(*g, Ntype_op::Flop);
+  g->get_input_pin("d").connect_sink(f0.create_sink_pin(3));  // din
+  auto q0 = f0.create_driver_pin(0);
+  livehd::graph_util::set_pin_name(q0, n0);
+
+  auto inv = create_typed_node(*g, Ntype_op::Not);
+  q0.connect_sink(inv.create_sink_pin(0));
+
+  auto f1 = create_typed_node(*g, Ntype_op::Flop);
+  inv.create_driver_pin(0).connect_sink(f1.create_sink_pin(3));  // din
+  auto q1 = f1.create_driver_pin(0);
+  livehd::graph_util::set_pin_name(q1, n1);
+  q1.connect_sink(g->get_output_pin("q"));
+  return g;
+}
+
+// Renamed pipeline flops: tier-1 (name) pairs nothing, the full-match signature
+// pass pairs both — the chain stages are told apart by anchor DISTANCE.
+TEST(Semdiff, StatePairingRenamedPipeline) {
+  auto a = build_pipe2("lgdb_semdiff_sp_a", "ra", "rb");
+  auto b = build_pipe2("lgdb_semdiff_sp_b", "xa", "xb");
+
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+  o.state_pairing  = true;
+  auto r           = livehd::semdiff::structural_match(a.get(), b.get(), o);
+
+  EXPECT_EQ(2U, r.state.a_total);
+  EXPECT_EQ(2U, r.state.b_total);
+  EXPECT_EQ(0U, r.state.name_pairs);
+  EXPECT_EQ(2U, r.state.full_pairs);
+  EXPECT_EQ(0U, r.state.a_unpaired);
+  EXPECT_EQ(0U, r.state.b_unpaired);
+
+  // The paired seeds let the WHOLE structure match: nothing left unmatched.
+  EXPECT_EQ(0U, r.a_unmatched);
+  EXPECT_EQ(0U, r.b_unmatched);
+}
+
+// Without state_pairing the renamed flops stay unmatched frontiers (the
+// pre-tier-2 behavior — this is the gap the pass exists to close).
+TEST(Semdiff, RenamedFlopsUnpairedWithoutStatePairing) {
+  auto a = build_pipe2("lgdb_semdiff_sn_a", "ra", "rb");
+  auto b = build_pipe2("lgdb_semdiff_sn_b", "xa", "xb");
+
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+  auto r           = livehd::semdiff::structural_match(a.get(), b.get(), o);
+
+  EXPECT_EQ(0U, r.state.name_pairs);
+  EXPECT_EQ(0U, r.state.full_pairs);
+  EXPECT_EQ(2U, r.state.a_unpaired);
+  EXPECT_EQ(2U, r.state.b_unpaired);
+}
+
+// Mixed: one flop keeps its name across the sides (tier-1), the other is
+// renamed and full-matches (tier-2).
+TEST(Semdiff, StatePairingMixedTiers) {
+  auto a = build_pipe2("lgdb_semdiff_sm_a", "keep", "rb");
+  auto b = build_pipe2("lgdb_semdiff_sm_b", "keep", "xb");
+
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+  o.state_pairing  = true;
+  auto r           = livehd::semdiff::structural_match(a.get(), b.get(), o);
+
+  EXPECT_EQ(1U, r.state.name_pairs);
+  EXPECT_EQ(1U, r.state.full_pairs);
+  EXPECT_EQ(0U, r.state.a_unpaired);
+  EXPECT_EQ(0U, r.state.b_unpaired);
+}
+
+// Two TRULY symmetric flops (independent, same input, both dead-ended into one
+// output through symmetric ops) share the signature: the ambiguous bucket stays
+// unpaired — never force-picked.
+TEST(Semdiff, StatePairingAmbiguousTwinsStayUnpaired) {
+  auto twins = [](const std::string& dir, const std::string& n0, const std::string& n1) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  gio = lib.create_io("m");
+    gio->add_input("d", 1);
+    gio->add_output("q", 1);
+    auto g = gio->create_graph();
+
+    auto an_or = create_typed_node(*g, Ntype_op::Or);
+    for (const auto& nm : {n0, n1}) {
+      auto f = create_typed_node(*g, Ntype_op::Flop);
+      g->get_input_pin("d").connect_sink(f.create_sink_pin(3));
+      auto q = f.create_driver_pin(0);
+      livehd::graph_util::set_pin_name(q, nm);
+      q.connect_sink(an_or.create_sink_pin(0));
+    }
+    an_or.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+    return g;
+  };
+  auto a = twins("lgdb_semdiff_st_a", "ta", "tb");
+  auto b = twins("lgdb_semdiff_st_b", "ua", "ub");
+
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+  o.state_pairing  = true;
+  auto r           = livehd::semdiff::structural_match(a.get(), b.get(), o);
+
+  EXPECT_EQ(0U, r.state.full_pairs);
+  EXPECT_EQ(2U, r.state.a_unpaired);
+  EXPECT_EQ(2U, r.state.b_unpaired);
+  EXPECT_EQ(2U, r.state.a_ambiguous);
+  EXPECT_EQ(2U, r.state.b_ambiguous);
+}
+
+// Differing const reset values refuse to full-match (the 2f-lec pair
+// precondition folds into the signature).
+TEST(Semdiff, StatePairingInitMismatchRefuses) {
+  auto with_init = [](const std::string& dir, const std::string& nm, int64_t init) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  gio = lib.create_io("m");
+    gio->add_input("d", 1);
+    gio->add_output("q", 1);
+    auto g = gio->create_graph();
+    auto f = create_typed_node(*g, Ntype_op::Flop);
+    g->get_input_pin("d").connect_sink(f.create_sink_pin(3));
+    auto cval = Dlop::create_integer(init);
+    auto c    = livehd::graph_util::create_const(*g, *cval);
+    c.connect_sink(f.create_sink_pin(1));  // initial
+    auto q = f.create_driver_pin(0);
+    livehd::graph_util::set_pin_name(q, nm);
+    q.connect_sink(g->get_output_pin("q"));
+    return g;
+  };
+  auto a = with_init("lgdb_semdiff_si_a", "ra", 0);
+  auto b = with_init("lgdb_semdiff_si_b", "xa", 1);  // renamed AND different reset
+
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+  o.state_pairing  = true;
+  auto r           = livehd::semdiff::structural_match(a.get(), b.get(), o);
+
+  EXPECT_EQ(0U, r.state.full_pairs);
+  EXPECT_EQ(1U, r.state.a_unpaired);
+  EXPECT_EQ(1U, r.state.b_unpaired);
+}
+
+// name_noise=1.0 destroys every impl key: tier-1 pairs nothing, tier-2 recovers
+// both flops, and the ground-truth check scores them CORRECT.
+TEST(Semdiff, StatePairingNoiseRecoveryScored) {
+  auto a = build_pipe2("lgdb_semdiff_nz_a", "r0", "r1");
+  auto b = build_pipe2("lgdb_semdiff_nz_b", "r0", "r1");  // same names — noise breaks them
+
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+  o.state_pairing  = true;
+  o.name_noise     = 1.0;
+  auto r           = livehd::semdiff::structural_match(a.get(), b.get(), o);
+
+  EXPECT_EQ(2U, r.state.noised);
+  EXPECT_EQ(0U, r.state.name_pairs);
+  EXPECT_EQ(2U, r.state.full_pairs);
+  EXPECT_EQ(2U, r.state.noised_recovered);
+  EXPECT_EQ(2U, r.state.noised_correct);
+}
+
 // A diverging op (And vs Or at the same spot) is the gap: neither side's node
 // matches, surrounding primary IO is the anchored boundary.
 TEST(Semdiff, DivergentOpIsGap) {

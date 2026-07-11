@@ -107,7 +107,7 @@ struct Options {
 
   std::string impl_kind, impl_path, impl_top;  // lec --impl
   std::string ref_kind, ref_path, ref_top;     // lec --ref
-  std::string formal_filter;                   // `formal verify --formal <glob>`: block-name filter
+  std::string formal_filter;                   // formal verify / lec: formal-block name glob
   // lec --collapse <def> (repeatable): module-def names the driver has already
   // proven equivalent, forced to the sound black-box path even when --lib could
   // flatten them (proven-module collapse — the parent stops re-solving them).
@@ -281,10 +281,12 @@ Lhd_error classify_engine_failure(std::string_view fallback_msg);
 void init_engine();
 
 // Deterministic content-hash run_id over (tool version + command + resolved
-// config + input bytes). A lec --impl/--ref hhds graph-library directory
-// hashes only its per-side --top slice (the top graph plus transitive Sub
-// dependencies): the proof reads nothing else, so nothing else may move the
-// run_id. Every other directory input hashes whole.
+// config + input bytes). A lec --impl/--ref side of kind lg: hashes only its
+// per-side --top slice — the top graph(s) plus transitive Sub dependencies,
+// bodies AND library.txt IO declarations — because the proof reads nothing
+// else, so nothing else may move the run_id. Per-side tops hash into every
+// impl/ref row (file or directory); --lib model libraries and every other
+// directory input hash whole.
 std::string compute_run_id(const Options& opts);
 
 // Serialize the result envelope (single JSON line) to --result-json or stdout.

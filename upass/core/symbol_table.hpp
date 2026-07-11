@@ -162,6 +162,39 @@ public:
   // copy from the ref. Erased wholesale when the dst tuple is rebuilt.
   absl::flat_hash_map<std::string, std::map<std::string, std::string>> tuple_slot_ref;
 
+  // Field paths explicitly READ or WRITTEN this run, keyed per unit
+  // ("<unit>\t<var>.<field>"). Detupled wire/reg leaves ride plain dotted refs
+  // (never tuple_get), and a runtime store leaves no comptime value behind —
+  // so constprop's unset-unused-field warning cannot infer set/used from the
+  // bundle entries alone. The runner records every dotted ref OPERAND here
+  // (resolve_node_operands); constprop records every non-nil dotted STORE
+  // (record_field_write) and tuple_get read. Suppression-only: a stale or
+  // spurious key can only hide a warning, never invent one. Transient;
+  // cleared with the other per-run state.
+  absl::flat_hash_set<std::string> field_touched;
+
+  // Key builder for field_touched: unit-scoped (io.* paths recur across
+  // units) with any ___ssa_N suffix stripped from the base segment so
+  // insert (may see an SSA-renamed base) and lookup (varmap base name) agree.
+  static std::string field_touch_key(std::string_view unit, std::string_view path) {
+    std::string_view base = path;
+    std::string_view rest;
+    if (const auto dot = path.find('.'); dot != std::string_view::npos) {
+      base = path.substr(0, dot);
+      rest = path.substr(dot);
+    }
+    if (const auto pos = base.find("___ssa_"); pos != std::string_view::npos) {
+      base = base.substr(0, pos);
+    }
+    std::string key;
+    key.reserve(unit.size() + 1 + base.size() + rest.size());
+    key += unit;
+    key += '\t';
+    key += base;
+    key += rest;
+    return key;
+  }
+
   bool set(std::string_view key, std::shared_ptr<Bundle> bundle);
   bool set(std::string_view key, const Dlop& trivial);
   bool set(std::string_view key, const spool_ptr<Dlop>& trivial) { return set(key, *trivial); }

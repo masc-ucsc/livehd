@@ -83,7 +83,16 @@ struct Query_result {
   // still carry the matched-portion result + the per-output divergences found.
   std::vector<std::string> unmatched_ref;   // in ref, no corresponding impl signal
   std::vector<std::string> unmatched_impl;  // in impl, no corresponding ref signal
+
+  // Uncertain (tier-2) pairs that were APPLIED for this verdict — copied from
+  // Lec_options::uncertain_match by the discipline wrapper; empty when the
+  // verdict came from the pair-free confirming retry. On an ind-PROVEN the
+  // proof itself validates them: the driver promotes exactly this list to
+  // entity-keyed pair hints in the persistent cache.
+  std::vector<std::pair<std::string, std::string>> uncertain_pairs_used;
 };
+
+struct Monitor;
 
 // Discharge / engine knobs (filled from the lec.* set-options).
 struct Lec_options {
@@ -164,6 +173,22 @@ struct Lec_options {
   // needed there either.
   std::vector<std::pair<std::string, std::string>> match;
 
+  // Tier-2 UNCERTAIN state correspondence (2f-lec; produced by pass/semdiff's
+  // full-match signature pass or replayed pair hints): {ref,impl} pairs applied
+  // to the flop name-alias exactly like `match`, but SPECULATIVE. prove_equal
+  // enforces the uncertain discipline itself: REFUTED with pairs applied is
+  // never final — drop ALL of them and re-solve once (a pair-free re-refute is
+  // the real FAIL; anything else ceilings at Unknown, since dropping any pair
+  // already makes the correspondence incomplete). A timeout/Unknown never
+  // retries (the retry's ceiling is the Unknown the timeout already reports).
+  // A BOUNDED bmc-Proven is never claimed while pairs are applied (the shared
+  // s0 constraints can mask a real bounded CEX — a false PASS); only an
+  // unbounded inductive Proven is accepted with pairs in force — it is
+  // self-certifying (any inductive, output-implying, initially-true relation
+  // certifies) PROVIDED the paired reset/init values are equal, which the
+  // producer guarantees and validate_uncertain_pairs re-checks on hint replay.
+  std::vector<std::pair<std::string, std::string>> uncertain_match;
+
   // Proven-module black-box collapse (`lhd lec --collapse <def>` / lec.collapse):
   // module-def names the driver has ALREADY proven equivalent in isolation, which
   // are FORCED to the sound black-box path even when they could be flattened (a
@@ -182,6 +207,14 @@ struct Lec_options {
   // the changed defs reach cvc5. The driver (lhd lec --set lec.hierarchical=true)
   // consumes this; prove_equal itself ignores it.
   std::string semdiff = "none";
+
+  // Tier-2 speculative state pairing (lec.state_pairing, CLI default on): when
+  // unmatched state survives tier-1 name correspondence, the DRIVER runs
+  // pass/semdiff's full-match signature pass per def-pair (or replays a
+  // persisted pair hint) and injects the surviving pairs as `uncertain_match`.
+  // prove_equal itself ignores this flag — it only enforces the uncertain
+  // discipline on whatever pairs it is handed.
+  bool state_pairing = true;
 
   // Input-space case-split (lec.partitions / lec.split): prove the combinational
   // miter one CONTROL-cofactor at a time, in parallel. `partitions` caps the
@@ -204,6 +237,22 @@ struct Lec_options {
   std::string           _split_name;
   std::vector<uint64_t> _split_values;
   bool                  _isolated_worker = false;  // one global-pool child: no nested forks
+
+  // Heuristic-only strategy replay from the persistent cache. `auto` tries a
+  // previously winning ind/bmc engine first, then falls back to its complete
+  // normal portfolio if the hint no longer settles the edited design.
+  std::string _preferred_engine;
+
+  // Impl-side formal helpers accepted by the lhd driver. Every monitor here
+  // contains only `assume` properties: internal facts were independently
+  // proven unbounded before insertion, input-only facts are disclosed
+  // environment constraints, and unchecked facts carry a distinct warning and
+  // verdict disclosure. `assumption_key` participates in the verdict-cache key.
+  const std::vector<Monitor>* assumptions = nullptr;
+  std::string                 assumption_key;
+  int                         proven_helpers    = 0;
+  int                         input_assumes     = 0;
+  int                         unchecked_assumes = 0;
 
   // Verify-obligation cache hooks. The engine computes a rule-F key downstream
   // of encoding; the CLI supplies the persistent store without coupling this
@@ -284,6 +333,20 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
 // separated by commas / semicolons / newlines; the two names within a pair by "="
 // or whitespace; blank lines and "#" comments are skipped.
 std::vector<std::pair<std::string, std::string>> parse_match_pairs(std::string_view text);
+
+// Validate tier-2 uncertain {ref,impl} pairs against the two designs before
+// injection (pair-hint replay re-validation; fresh same-process semdiff pairs
+// are valid by construction but pass through the same gate). A pair survives
+// iff BOTH canonical names resolve to exactly one top-level flop on their own
+// side, neither name collides with the other side's flop space or with an
+// explicit `base.match` entry (the alias is applied to both designs' walks, so
+// a collision would silently remap an unrelated flop), the pair target is not
+// already taken by an earlier pair, and the reset/init values are equal (a
+// both-init-less pair qualifies; init is never paired with init-less). Each
+// dropped pair contributes one "ref<->impl: reason" line to `reasons`.
+std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
+    hhds::Graph* ref, hhds::Graph* impl, const Lec_options& base,
+    const std::vector<std::pair<std::string, std::string>>& pairs, std::vector<std::string>* reasons = nullptr);
 
 // ── 2f-verify: single-design property BMC (`lhd formal verify`) ─────────────
 //

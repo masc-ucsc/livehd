@@ -183,7 +183,7 @@ bool parse_alias_binding(std::string_view stmt_text, absl::flat_hash_map<std::st
 }
 
 Block build_block(std::string_view src, const std::string& path, const Ast* fnode,
-                  const absl::flat_hash_map<std::string, std::string>& file_aliases) {
+                  const absl::flat_hash_map<std::string, std::string>& file_aliases, bool allow_nocheck) {
   Block b;
   b.line = line_of(src, fnode->start_byte);
   if (const Ast* name = find_field(fnode, Field::f_name)) {
@@ -228,8 +228,9 @@ Block build_block(std::string_view src, const std::string& path, const Ast* fnod
         break;
       }
     }
-    if (callee != "assert" && callee != "assume" && callee != "assert_always") {
-      err("unsupported statement in formal block (V2: alias bindings and assert/assume/assert_always only; got '"
+    const bool nocheck = callee == "assume_nocheck_formal" || callee == "assume_nocheck_synth";
+    if (callee != "assert" && callee != "assume" && callee != "assert_always" && !(allow_nocheck && nocheck)) {
+      err("unsupported statement in formal block (alias bindings and assert/assume/assert_always/assume_nocheck_* only; got '"
           + callee + "')");
       return b;
     }
@@ -250,10 +251,12 @@ Block build_block(std::string_view src, const std::string& path, const Ast* fnod
     for (size_t i : order) {
       out += src.substr(pos, rw.spans[i].first - pos);
       out += rw.idents[i];
-      pos = rw.spans[i].second;
+      pos  = rw.spans[i].second;
     }
     out += src.substr(pos, stmt->end_byte - pos);
-    b.stmts.push_back(Stmt{std::move(out), sline});
+    std::sort(rw.idents.begin(), rw.idents.end());
+    rw.idents.erase(std::unique(rw.idents.begin(), rw.idents.end()), rw.idents.end());
+    b.stmts.push_back(Stmt{std::move(out), std::move(rw.idents), sline});
   }
   // The block's target module = the (unique) target of the aliases it USED.
   for (const auto& root : used_roots) {
@@ -262,8 +265,8 @@ Block build_block(std::string_view src, const std::string& path, const Ast* fnod
       continue;
     }
     if (!b.target.empty() && b.target != t) {
-      b.error = path + ":" + std::to_string(b.line) + ": block references two different target modules ('" + b.target
-              + "' and '" + t + "')";
+      b.error = path + ":" + std::to_string(b.line) + ": block references two different target modules ('" + b.target + "' and '"
+                + t + "')";
       return b;
     }
     b.target = t;
@@ -277,7 +280,7 @@ Block build_block(std::string_view src, const std::string& path, const Ast* fnod
 
 }  // namespace
 
-std::vector<Block> extract(const std::string& path) {
+std::vector<Block> extract(const std::string& path, bool allow_nocheck) {
   std::vector<Block> out;
   std::ifstream      f(path);
   if (!f) {
@@ -307,7 +310,7 @@ std::vector<Block> extract(const std::string& path) {
         continue;
       }
       // parse_next() recycles the arena on the NEXT call, so build now.
-      out.push_back(build_block(src, path, top, file_aliases));
+      out.push_back(build_block(src, path, top, file_aliases, allow_nocheck));
     }
   } catch (const prpparse::Parse_error& pe) {
     Block b;

@@ -22,6 +22,8 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "absl/container/flat_hash_map.h"
 
@@ -50,6 +52,20 @@ struct Unknown_attempt {
   long long elapsed_ms = 0;
 };
 
+// Fifth record kind (2f-lec tier-2): state-pair hints — the uncertain flop
+// pairs that participated in a PASS, keyed by canonical entity NAME like
+// strategy hints (and surviving salt like them), so a warm run injects the
+// known-good pairing without re-running semdiff's signature pass. UNLIKE
+// strategy hints they alter the obligation set: replayed pairs re-enter the
+// verdict-cache key (um=[...]), keep the full uncertain discipline
+// (drop-and-retry, no bounded-Proven), and are re-validated at injection
+// (lec::validate_uncertain_pairs — flops must still exist and the init-equality
+// precondition must still hold, since entity-keyed hints survive edits that
+// can change either).
+struct Pair_hint {
+  std::vector<std::pair<std::string, std::string>> pairs;  // {ref, impl} raw names
+};
+
 class Verdict_cache {
 public:
   // Loads <workdir>/formal_cache.json when present. A salt mismatch drops the
@@ -61,6 +77,9 @@ public:
 
   std::optional<Strategy_hint> hint(const std::string& entity) const;
   void                         set_hint(const std::string& entity, Strategy_hint h);
+
+  std::optional<Pair_hint> pair_hint(const std::string& entity) const;
+  void                     set_pair_hint(const std::string& entity, Pair_hint h);
 
   // Unknown-attempt ledger: skip_unknown() is true when a re-attempt at
   // `timeout_s` cannot outspend the recorded attempt (records with timeout 0 =
@@ -85,6 +104,7 @@ private:
   mutable std::mutex                                mutex_;
   absl::flat_hash_map<std::string, Cached_verdict>  verdicts_;
   absl::flat_hash_map<std::string, Strategy_hint>   hints_;
+  absl::flat_hash_map<std::string, Pair_hint>       pair_hints_;
   absl::flat_hash_map<std::string, Unknown_attempt> unknowns_;
 };
 

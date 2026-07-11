@@ -140,14 +140,25 @@
 <li><strong>Payoff:</strong> edit one module ⇒ only cone/def-touched proofs re-run
   (the external <code>verification_cache.json</code> harness precedent, made native +
   sound + fine-grained).</li>
-<li><strong>Third record kind — strategy hints (user note 2026-07-10):</strong> the
-  cache also remembers which <code>auto</code> choices WON per def/obligation —
+<li><strong>Third record kind — strategy hints (LEC slice LANDED 2026-07-10):</strong> the
+  cache remembers which <code>auto</code> choices WON per def —
   winning engine, case-split selector, bound, solve time — keyed by canonical
   <em>entity name</em>, not digest, so the hint <strong>survives an edit</strong>
   that misses the verdict cache. On the next run the portfolio tries the known-good
   strategy first. Purely a heuristic ordering channel: hints can speed a proof but
   can never change a verdict, so they need none of the verdict-cache soundness
   rules.</li>
+<li><strong>Fourth record kind — state-pair hints (pending; consumer
+  <a class="xref" href="2f-lec.html">2f-lec</a>):</strong> tier-2 (uncertain)
+  flop/memory pairs that participated in a PASS persist keyed by canonical entity
+  name — like strategy hints they survive edits and salt. UNLIKE strategy hints
+  they alter the obligation set: they enter the verdict-cache key as
+  <code>m=[…]</code> pairs and keep the uncertain-pair discipline on replay —
+  re-validated at injection (both flops must still exist and the init-equality
+  precondition must still hold, since an edit can change a reset value under the
+  same entity name), drop-and-retry on REFUTE, never bounded-Proven. A speed
+  channel that can move a verdict only between Unknown and PROVEN — never to a
+  wrong FAIL or PASS.</li>
 </ul>
 
 <h2>4 — Case-split / assume-spill generalization</h2>
@@ -178,11 +189,12 @@
   <em>(b)</em> ready-to-paste sidecar <code>formal</code> blocks with provenance
   comments, so the user can add them to the design Pyrope and make future runs faster
   on any machine (no workdir needed).</li>
-<li><strong>LEC hints specifically:</strong> persist the winning engine
+<li><strong>LEC hints specifically — LANDED 2026-07-10:</strong> persist the winning engine
   and split selector ("split on <code>state</code>") as §3 strategy hints (keyed by
   entity name, so they survive design edits); assert proven impl-side
   invariants in the miter (entailed facts — pure speedup, can never change the
-  verdict).</li>
+  verdict). Verify-side hint production and emitted sidecar suggestions remain
+  coupled to the pending mining loop.</li>
 </ul>
 
 <h2>6 — Scheduler: global budget, escalating rounds, diagnose-last (moved from 2f-verify V6)</h2>

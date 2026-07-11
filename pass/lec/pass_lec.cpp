@@ -88,6 +88,14 @@ void Pass_lec::setup() {
                        "cross-front-end pairs (slang vs pyrope) never match structurally, so it only helps "
                        "same-source rebuilds",
                        "structural");
+  m.add_label_optional("state_pairing",
+                       "tier-2 speculative state correspondence (default true): when unmatched flops survive "
+                       "tier-1 name pairing, run pass.semdiff's full-match (SRP/ERP) signature pass per def-pair "
+                       "and inject the resulting pairs as UNCERTAIN — REFUTED under them drops all pairs and "
+                       "re-solves once, a bounded bmc PASS is never claimed while they apply, and only an "
+                       "unbounded inductive proof (self-certifying) accepts them; a PASS persists the pairs as "
+                       "entity-keyed pair hints under --workdir. false disables (renamed state stays unmatched)",
+                       "true");
   m.add_label_optional("partitions",
                        "input-space case-split: max parallel cube-workers for a purely COMBINATIONAL miter "
                        "(default 4; <2 disables). Each worker sweeps a disjoint slice of the auto-picked control "

@@ -286,8 +286,19 @@ protected:
   // No-op when either side's kind is not comptime-known.
   void check_field_store_kind(std::string_view field_key, const Dlop& value);
 
-  // Field paths read via tuple_get this walk (unused-unset warning).
-  absl::flat_hash_set<std::string> field_reads_;
+  // Dotted `wire` field declares seen this file walk (`declare(io.a,…,wire)`,
+  // the uPass_detuple split of `wire io:(a:…, o:…)`). The runner's declare
+  // bake DROPS their facts when the root was never declared (detuple removed
+  // it), and constprop never binds their runtime stores — so these fields have
+  // no bundle entry to inspect at the file-scope pop. This set is the
+  // declared-field enumeration for the unset-unused-field warning: a member
+  // never in st().field_touched is declared but never set and never used.
+  // Cleared at each file-scope pop (per-unit state).
+  absl::flat_hash_set<std::string> declared_wire_fields_;
+
+  // Record an explicit non-nil field store into st().field_touched (the
+  // unset-unused-field warning's "was set" evidence). See the .cpp.
+  void record_field_write(std::string_view dst_name, upass::Src_span src);
 
   // First-touch source span per assignable name. The unset-unused-field warning
   // fires at block-pop time (process_stmts_post), where current_span() has run

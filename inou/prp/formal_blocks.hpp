@@ -21,7 +21,9 @@
 //   mut   X = <alias-or-module>    // secondary alias (test-block style)
 //   assert(expr[, "msg"]) / assume(...) / assert_always(...)
 // where `expr` uses dotted paths rooted at an alias, literals, and operators —
-// but no nested function calls (V2).
+// but no nested function calls (V2). LEC opts into the two additional fcore
+// forms `assume_nocheck_formal` and `assume_nocheck_synth`; verify keeps the V2
+// subset until its assume-form milestone lands.
 
 #include <string>
 #include <vector>
@@ -34,22 +36,23 @@ struct Input {
 };
 
 struct Stmt {
-  std::string text;  // property statement with signal paths rewritten to idents
-  int         line = 0;  // 1-based line in the ORIGINAL file (loc remap)
+  std::string              text;      // property statement with signal paths rewritten to idents
+  std::vector<std::string> idents;    // monitor inputs referenced by THIS statement
+  int                      line = 0;  // 1-based line in the ORIGINAL file (loc remap)
 };
 
 struct Block {
-  std::string        name;    // dotted block name (the --formal filter handle)
-  std::string        target;  // module the alias chain resolves to ("" = the verified top)
-  std::vector<Input> inputs;  // referenced signals, deduped by ident
-  std::vector<Stmt>  stmts;   // property statements, source order
-  std::string        error;   // non-empty: first unsupported construct ("file:line: why")
+  std::string        name;      // dotted block name (the --formal filter handle)
+  std::string        target;    // module the alias chain resolves to ("" = the verified top)
+  std::vector<Input> inputs;    // referenced signals, deduped by ident
+  std::vector<Stmt>  stmts;     // property statements, source order
+  std::string        error;     // non-empty: first unsupported construct ("file:line: why")
   int                line = 0;  // block's own 1-based line (diagnostics)
 };
 
 // Parse `path` and return every formal block in it (empty vector when none).
 // A file-level parse error is reported as ONE Block whose `error` is set (so
 // the caller has a uniform reporting path).
-std::vector<Block> extract(const std::string& path);
+std::vector<Block> extract(const std::string& path, bool allow_nocheck = false);
 
 }  // namespace livehd::formal_blocks

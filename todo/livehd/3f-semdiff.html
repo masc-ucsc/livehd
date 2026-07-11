@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TODO 3f-semdiff — functional (n:m) gap matching feeding the LEC skip</title>
+<title>TODO 3f-semdiff — functional (n:m) gap matching + full-match state pairing feeding LEC</title>
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">3f-semdiff</strong> <code>alg=functional</code> — n:m gap matching between two LGraphs, feeding the LEC skip</h1>
+<h1><strong class="item-id">3f-semdiff</strong> v2 — n:m functional gap matching + full-match state pairing, feeding LEC</h1>
 
 <p><strong>Status.</strong> The v1 structural engine is LANDED
   (<code>pass/semdiff</code>: <code>semdiff::structural_match</code>, anchored
@@ -20,7 +20,50 @@
   <em>digest</em> (old lec-M3 remainder) moved to
   <a class="xref" href="2f-fcore.html">2f-fcore</a>'s unified cache, which also
   serves <a class="xref" href="2i-import.html">2i-import</a>'s module identity.
-  This page is the remaining v2.</p>
+  The full-match state pairing (lec's tier-2 producer) LANDED 2026-07-11 — see
+  below. This page's remaining pending item is the n:m functional gap matcher.</p>
+
+<h2>Landed 2026-07-11 — full-match state pairing (lec tier-2 producer)</h2>
+<p>The simplified/fast SynAlign scheme (<code>papers/iccad26/SynAlign</code>),
+  implemented inside <code>structural_match</code>
+  (<code>state_pairing</code>/<code>dump_state</code> options,
+  <code>Match_result.state</code> stats): <strong>full match only</strong> — no
+  half/partial/surrounding relaxation cascade. Per unmatched flop, SRP/ERP
+  resolved-point signature sets over the sequential graph (anchors = def IOs +
+  tier-1 pairs; clocks/resets/comptime excluded; data pins only), commutative
+  set-hash inverted maps, ambiguous buckets stay unmatched, fixed point ≤64
+  rounds. Two deliberate deviations from the paper: tokens are
+  (anchor, min-hop-distance) annotated — plain sets leave linear chains
+  permanently ambiguous — and ambiguous buckets are never force-picked. The
+  reset/init-value equality precondition folds init/size into the signature
+  kind. Consumer and verdict discipline live in
+  <a class="xref" href="2f-lec.html">2f-lec</a> (uncertain pairs, drop-and-retry,
+  bounded-proven guard).</p>
+<ul class="subtasks">
+<li><strong>Measured</strong> (XSCore, 1630 defs, 18,231 state cells/side): names
+  on = 100% tier-1 1:1 (round-tripped names); names destroyed (100%-noise mode) =
+  tier-2 recovers 27.6% full-match pairs, residue dominated by ambiguity
+  (symmetric queue/regfile rows). At 10% name noise: ~55% recovery with
+  <strong>0 wrong pairs</strong> — the paper's 100%-precision claim reproduces.
+  Tier-2 is near-free next to the lec solve (~1m35 either way on XSCore).</li>
+<li><code>lhd pass semdiff</code> grew <code>--set pass.semdiff.state_pairing /
+  dump_state / hier / save / name_noise / noise_seed / explain_noise /
+  synalign_maxiter</code>; <code>hier</code> pairs defs by entity (same canon as
+  hier-lec) and aggregates <code>State_stats</code>. 5 unit tests in
+  <code>semdiff_test.cpp</code>.</li>
+<li>Iteration headroom, in order: sub-instance anchors (def identity + port
+  binding as resolved points), a bounded-set-diff "near-match" tier (recovers the
+  observed genuine cross-side asymmetries; lec re-verifies anyway),
+  symmetric-bucket tie-breaks, parent-context anchors for tiny defs.</li>
+<li><strong>Scope boundary (ruling 2026-07-11):</strong> matching is one problem
+  per def pair — an impl-side inlined/flattened module leaves its flops
+  no-counterpart in the parent pair (the <code>hier=1</code> stats show the
+  ref/impl state asymmetry and REF-ONLY defs, so the case is diagnosed, not
+  silent). Flattening-aware matching (virtual-flatten descent + the
+  name-preservation contract through synthesis) lives in
+  <a class="xref" href="3a-synth.html">3a-synth</a>, to be tried small once
+  synthesis runs.</li>
+</ul>
 
 <h2>Pending — <code>alg=functional</code> (the LEC win)</h2>
 <ul class="subtasks">

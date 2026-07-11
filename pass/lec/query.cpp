@@ -110,6 +110,88 @@ std::vector<std::pair<std::string, std::string>> parse_match_pairs(std::string_v
   return out;
 }
 
+std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
+    hhds::Graph* ref, hhds::Graph* impl, const Lec_options& base,
+    const std::vector<std::pair<std::string, std::string>>& pairs, std::vector<std::string>* reasons) {
+  std::vector<std::pair<std::string, std::string>> out;
+  if (ref == nullptr || impl == nullptr || pairs.empty()) {
+    return out;
+  }
+  // Top-level flops per side, keyed the way the engine keys them (canonical
+  // hier name). Same scope the tier-2 producer pairs in — flattened-child
+  // flops are out of tier-2's per-def problem by design.
+  struct Vflop {
+    int         count    = 0;
+    bool        has_init = false;
+    std::string init;  // serialized reset/init const ("" when none)
+  };
+  auto collect = [](hhds::Graph* g) {
+    absl::flat_hash_map<std::string, Vflop> m;
+    for (auto node : g->forward_class()) {
+      auto op = graph_util::type_op_of(node);
+      if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Latch) {
+        continue;
+      }
+      auto& f = m[canon_flop_name(node.get_hier_name())];
+      ++f.count;
+      if (auto d = graph_util::get_driver_of_sink_name(node, "initial"); !d.is_invalid() && graph_util::is_const_pin(d)) {
+        f.has_init = true;
+        f.init     = graph_util::hydrate_const(d).serialize();
+      }
+    }
+    return m;
+  };
+  auto rmap = collect(ref);
+  auto imap = collect(impl);
+  // Names already spoken for by the explicit (certain) lec.match set.
+  absl::flat_hash_set<std::string> taken;
+  for (const auto& [mr, mi] : base.match) {
+    taken.insert(canon_flop_name(mr));
+    taken.insert(canon_flop_name(mi));
+  }
+  auto drop = [&](const std::string& rn, const std::string& in, std::string_view why) {
+    if (reasons != nullptr) {
+      reasons->push_back(rn + "<->" + in + ": " + std::string(why));
+    }
+  };
+  for (const auto& [rn, in] : pairs) {
+    std::string rc = canon_flop_name(rn);
+    std::string ic = canon_flop_name(in);
+    if (rc.empty() || ic.empty() || rc == ic) {
+      continue;  // empty or already-agreeing names alias to nothing — a no-op, not an error
+    }
+    auto ri = rmap.find(rc);
+    auto ii = imap.find(ic);
+    if (ri == rmap.end() || ii == imap.end()) {
+      drop(rn, in, "flop no longer exists");
+      continue;
+    }
+    if (ri->second.count != 1 || ii->second.count != 1) {
+      drop(rn, in, "canonical name is ambiguous on its side");
+      continue;
+    }
+    // The alias (canon(impl) -> canon(ref)) is applied to BOTH designs' walks:
+    // an impl name that exists as a ref flop (or vice versa) would silently
+    // remap tier-1 state, so such pairs never inject.
+    if (rmap.contains(ic) || imap.contains(rc)) {
+      drop(rn, in, "name collides with the other side's tier-1 flop space");
+      continue;
+    }
+    if (taken.contains(rc) || taken.contains(ic)) {
+      drop(rn, in, "conflicts with an explicit lec.match entry or an earlier pair");
+      continue;
+    }
+    if (ri->second.has_init != ii->second.has_init || ri->second.init != ii->second.init) {
+      drop(rn, in, "reset/init values differ (tier-2 pair precondition)");
+      continue;
+    }
+    taken.insert(rc);
+    taken.insert(ic);
+    out.emplace_back(rn, in);
+  }
+  return out;
+}
+
 namespace {
 
 // ── auto portfolio (lec.engine=auto) ────────────────────────────────────────
@@ -175,6 +257,11 @@ std::string serialize_result(const Query_result& r) {
     }
   }
   put_str(b, r.split_used);  // strategy-hint selector (same binary both ends)
+  put_u32(b, static_cast<uint32_t>(r.uncertain_pairs_used.size()));
+  for (const auto& [rn, in] : r.uncertain_pairs_used) {
+    put_str(b, rn);
+    put_str(b, in);
+  }
   return b;
 }
 
@@ -289,6 +376,18 @@ bool deserialize_result(std::string_view b, Query_result& r) {
     r.trace.cycles.push_back(std::move(cyc));
   }
   (void)get_str(b, r.split_used);  // best-effort tail field (mirror serialize)
+  uint32_t np = 0;
+  if (!get_u32(b, np)) {
+    return true;
+  }
+  r.uncertain_pairs_used.clear();
+  for (uint32_t i = 0; i < np; ++i) {
+    std::string rn, im;
+    if (!get_str(b, rn) || !get_str(b, im)) {
+      return true;
+    }
+    r.uncertain_pairs_used.emplace_back(std::move(rn), std::move(im));
+  }
   return true;
 }
 
@@ -807,13 +906,40 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
   } else {
     out.verdict = Verdict::Unknown;  // inconclusive: caller falls back to monolithic ind
     out.detail  = "auto: case-split " + tag + " inconclusive (" + std::to_string(proven) + " workers proven, "
-               + std::to_string(unknown) + " not)";
+                  + std::to_string(unknown) + " not)";
   }
   return out;
 }
 
 Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
                                 const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  // Cache hints are ordering only. Try the previous winner once; if an edit
+  // made it inconclusive, continue through the unchanged auto portfolio below.
+  if (opts._preferred_engine == "ind" || opts._preferred_engine == "bmc") {
+    Lec_options hinted = opts;
+    hinted.engine      = opts._preferred_engine;
+    hinted._preferred_engine.clear();
+    hinted.partitions = 1;
+    auto t_hint       = std::chrono::steady_clock::now();
+    auto hr           = safe_prove_equal(ref, impl, hinted, sub_lib);
+    hr.engine         = opts._preferred_engine;
+    hr.elapsed_ms     = now_ms(t_hint);
+    bool trusted      = hr.engine == "ind" && hr.verdict == Verdict::Proven;
+    if (hr.engine == "bmc" && hr.verdict == Verdict::Refuted) {
+      trusted = true;
+    }
+    if (hr.engine == "bmc" && !trusted) {
+      Query_result bounded;
+      if (try_bounded_proven(hr, bounded)) {
+        hr      = std::move(bounded);
+        trusted = true;
+      }
+    }
+    if (trusted) {
+      hr.detail = "auto: strategy hint tried " + hr.engine + " first and settled; " + hr.detail;
+      return hr;
+    }
+  }
   if (opts._isolated_worker) {
     // The hierarchy Taskflow already supplies parallelism and process
     // isolation. Run the method ladder in this one child to prevent nested
@@ -859,7 +985,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
           return cs;
         }
       }
-      Lec_options  o  = opts;
+      Lec_options o   = opts;
       o.engine        = "ind";
       auto         tc = std::chrono::steady_clock::now();
       Query_result r  = safe_prove_equal(ref, impl, o, sub_lib);
@@ -870,8 +996,8 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     }
   }
   const char* const engines[2] = {"ind", "bmc"};  // index 0 = inductive, 1 = bmc
-  int               p0[2]       = {-1, -1};
-  int               p1[2]       = {-1, -1};
+  int               p0[2]      = {-1, -1};
+  int               p1[2]      = {-1, -1};
   if (::pipe(p0) != 0 || ::pipe(p1) != 0) {
     if (p0[0] >= 0) {
       ::close(p0[0]);
@@ -910,12 +1036,12 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       ::close(rfd[0]);
       ::close(rfd[1]);
       ::close(wfd[1 - i]);
-      Lec_options  o = opts;
-      o.engine       = engines[i];
-      auto         ci = std::chrono::steady_clock::now();
-      Query_result r  = safe_prove_equal(ref, impl, o, sub_lib);
-      r.engine        = engines[i];
-      r.elapsed_ms    = now_ms(ci);
+      Lec_options o    = opts;
+      o.engine         = engines[i];
+      auto         ci  = std::chrono::steady_clock::now();
+      Query_result r   = safe_prove_equal(ref, impl, o, sub_lib);
+      r.engine         = engines[i];
+      r.elapsed_ms     = now_ms(ci);
       std::string blob = serialize_result(r);
       write_all(wfd[i], blob.data(), blob.size());
       ::close(wfd[i]);
@@ -954,8 +1080,8 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       if (pfds[k].revents == 0) {
         continue;
       }
-      int  i = map[k];
-      char tmp[8192];
+      int     i = map[k];
+      char    tmp[8192];
       ssize_t n = ::read(rfd[i], tmp, sizeof tmp);
       if (n > 0) {
         buf[i].append(tmp, static_cast<size_t>(n));
@@ -997,7 +1123,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     Query_result r = got[winner];
     r.engine       = engines[winner];
     r.detail       = "auto: " + std::string(engines[winner]) + " reached " + vname(r.verdict) + " first in "
-             + std::to_string(r.elapsed_ms) + "ms (raced ind|bmc); " + r.detail;
+                     + std::to_string(r.elapsed_ms) + "ms (raced ind|bmc); " + r.detail;
     return r;
   }
   Query_result bp;
@@ -1006,6 +1132,72 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     return bp;
   }
   return make_inconclusive(got[0], got[1], opts, now_ms(t0));
+}
+
+bool assert_monitor_assumptions(cvc5::TermManager& tm, cvc5::Solver& solver, Encoder& enc, const std::vector<Monitor>* monitors,
+                                const Io_name_map<Val>& inputs, const Io_name_map<Val>& state, const Encoded& impl,
+                                std::string_view prefix, std::string& error) {
+  for (size_t mi = 0; monitors != nullptr && mi < monitors->size(); ++mi) {
+    const Monitor& mon = (*monitors)[mi];
+    if (mon.graph == nullptr) {
+      continue;
+    }
+    Io_name_map<Val> msh;
+    for (const auto& b : mon.binds) {
+      const Val* v = nullptr;
+      if (b.src == Monitor::Bind::Src::input) {
+        if (auto it = inputs.find(b.key); it != inputs.end()) {
+          v = &it->second;
+        }
+      } else if (b.src == Monitor::Bind::Src::output) {
+        if (auto it = impl.outputs.find(b.key); it != impl.outputs.end()) {
+          v = &it->second;
+        }
+      } else if (auto it = state.find(b.key); it != state.end()) {
+        v = &it->second;
+      }
+      if (v == nullptr) {
+        error = "formal helper '" + mon.block + "' binding '" + b.ident + "' <- '" + b.key + "' did not resolve";
+        return false;
+      }
+      msh[b.ident] = *v;
+    }
+    enc.set_emit_props(true);
+    Encoded me = enc.encode(mon.graph, &msh, std::string(prefix) + "h" + std::to_string(mi) + "_", nullptr, nullptr);
+    if (!me.ok) {
+      error = "formal helper '" + mon.block + "' encode failed: " + me.error;
+      return false;
+    }
+    for (const auto& [l, r] : me.equalities) {
+      solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+    }
+    int nprops = 0;
+    for (const auto& [name, cond] : me.outputs) {
+      constexpr std::string_view pfx{"\x04prop:", 6};
+      if (name.substr(0, pfx.size()) != pfx) {
+        continue;
+      }
+      std::string_view rest{name.data() + pfx.size(), name.size() - pfx.size()};
+      auto             first  = rest.find('\x1f');
+      auto             second = first == std::string_view::npos ? std::string_view::npos : rest.find('\x1f', first + 1);
+      std::string_view kind
+          = first == std::string_view::npos
+                ? std::string_view{}
+                : rest.substr(first + 1, second == std::string_view::npos ? std::string_view::npos : second - first - 1);
+      if (kind != "assume") {
+        error = "formal helper '" + mon.block + "' was not normalized to an assume";
+        return false;
+      }
+      const int w = cond.width > 0 ? cond.width : 1;
+      solver.assertFormula(tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, cond, w), tm.mkBitVector(static_cast<uint32_t>(w), 0)}));
+      ++nprops;
+    }
+    if (nprops == 0) {
+      error = "formal helper '" + mon.block + "' contains no encodable assumption";
+      return false;
+    }
+  }
+  return true;
 }
 
 }  // namespace
@@ -1020,6 +1212,58 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     res.verdict  = Verdict::Unknown;
     res.detail  += "; solver backend '" + opts.solver + "' not built (cvc5 only)";
     return res;
+  }
+
+  // ── Tier-2 uncertain-pair discipline (2f-lec) ──────────────────────────────
+  // Speculative pairs are merged into `match` for one full solve (any engine /
+  // the whole portfolio), then the verdict is post-processed per the settled
+  // rules — see Lec_options::uncertain_match. The recursion is bounded: the
+  // inner calls carry an empty uncertain set.
+  if (!opts.uncertain_match.empty()) {
+    const std::string tag = std::to_string(opts.uncertain_match.size()) + " uncertain tier-2 pair(s)";
+    Lec_options       applied = opts;
+    applied.uncertain_match.clear();
+    applied.match.insert(applied.match.end(), opts.uncertain_match.begin(), opts.uncertain_match.end());
+    Query_result r = prove_equal(ref, impl, applied, sub_lib);
+    if (r.verdict == Verdict::Refuted) {
+      // REFUTED under speculative pairs is never final: the alias set also
+      // shapes transition semantics (shared s0 symbols, the reset-prologue
+      // bank hold, the mem<->flop-bank bridge), so the CEX may be an artifact
+      // of a wrong pair. Drop ALL pairs, re-solve ONCE: a pair-free re-refute
+      // is a real FAIL; anything else ceilings at Unknown (dropping any pair
+      // already made the correspondence incomplete — no CEGAR).
+      Lec_options bare = opts;
+      bare.uncertain_match.clear();
+      Query_result rf = prove_equal(ref, impl, bare, sub_lib);
+      if (rf.verdict != Verdict::Unknown) {
+        rf.detail = "tier-2 confirm (REFUTED under " + tag + "; dropped all, re-solved pair-free): " + rf.detail;
+        return rf;
+      }
+      rf.detail = "REFUTED under " + tag + " but NOT confirmed pair-free -> Unknown (a speculative pair may be wrong; "
+                  "supply lec.match to pin the correspondence): "
+                + rf.detail;
+      return rf;
+    }
+    r.uncertain_pairs_used = opts.uncertain_match;
+    if (r.verdict == Verdict::Proven && r.output_checks > 0) {
+      // A bmc Proven is BOUNDED; with speculative pairs applied the shared-s0
+      // constraints can mask a real bounded CEX (a false PASS). Never claim
+      // it — and skip the pair-free retry: incomplete correspondence gates a
+      // pair-free bmc to Unknown anyway, so demotion loses nothing.
+      r.verdict = Verdict::Unknown;
+      r.detail  = "bounded bmc PASS suppressed under " + tag + " (shared-s0 over-constraint could mask a bounded CEX; "
+                  "only an unbounded inductive proof is accepted with speculative pairs): "
+                + r.detail;
+      return r;
+    }
+    if (r.verdict == Verdict::Proven) {
+      r.detail = "PROVEN with " + tag + " applied (self-certifying: an inductive, output-implying, initially-true "
+                 "relation certifies equivalence): "
+               + r.detail;
+    } else {
+      r.detail += "; (" + tag + " applied; Unknown -> no retry)";
+    }
+    return r;
   }
 
   // `auto` = parallel portfolio: race the inductive miter and BMC as two forked
@@ -2184,6 +2428,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         sh_impl[k] = v;
       }
 
+      enc.set_emit_props(false);                   // helper encoding below enables it temporarily
       enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (lec.gold_x)
       enc.set_box_keys(&ref_box_keys);            // per-design box correspondence
       Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(cyc) + "_", &ref_mem, &ref_reads);
@@ -2197,7 +2442,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       Encoded ie = enc.encode(impl, &sh_impl, "i" + std::to_string(cyc) + "_", &impl_mem, &impl_reads);
       if (!ie.ok) {
         res.verdict  = Verdict::Unknown;
-        res.detail  += "; impl encode failed: " + ie.error;
+        res.detail   += "; impl encode failed: " + ie.error;
         return res;
       }
       for (const auto& [l, r] : re.equalities) {
@@ -2205,6 +2450,22 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       }
       for (const auto& [l, r] : ie.equalities) {
         solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+      }
+      if (opts.assumptions != nullptr) {
+        std::string helper_error;
+        if (!assert_monitor_assumptions(tm,
+                                        solver,
+                                        enc,
+                                        opts.assumptions,
+                                        sh_impl,
+                                        impl_state,
+                                        ie,
+                                        "c" + std::to_string(cyc) + "_",
+                                        helper_error)) {
+          res.verdict  = Verdict::Unknown;
+          res.detail  += "; " + helper_error;
+          return res;
+        }
       }
 
       if (checking) {
@@ -2346,6 +2607,15 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     if (!res.unmatched_impl.empty()) {
       res.detail
           += "; " + std::to_string(res.unmatched_impl.size()) + " impl-only cut point(s) {" + join_capped(res.unmatched_impl) + "}";
+    }
+    if (opts.assumptions != nullptr) {
+      cvc5::Result ar = solver.checkSat();
+      if (!ar.isSat()) {
+        res.verdict = Verdict::Unknown;
+        res.detail += ar.isUnsat() ? "; formal helper set is CONTRADICTORY (vacuous proof rejected)"
+                                   : "; formal helper consistency check returned unknown";
+        return res;
+      }
     }
     if (bad.isNull()) {
       if (incomplete) {
@@ -2889,6 +3159,14 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   for (const auto& [l, r] : ie.equalities) {
     solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
   }
+  if (opts.assumptions != nullptr) {
+    std::string helper_error;
+    if (!assert_monitor_assumptions(tm, solver, enc, opts.assumptions, shared, shared, ie, "ind_", helper_error)) {
+      res.verdict  = Verdict::Unknown;
+      res.detail  += "; " + helper_error;
+      return res;
+    }
+  }
 
   // ── Bridge miter: bank-flop next state vs select(memory_next, i) ──────────
   // Consume the memory<->flop-bank bridges resolved above. The bank-flop next
@@ -3014,6 +3292,16 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   if (!res.unmatched_impl.empty()) {
     res.detail
         += "; " + std::to_string(res.unmatched_impl.size()) + " impl-only cut point(s) {" + join_capped(res.unmatched_impl) + "}";
+  }
+
+  if (opts.assumptions != nullptr) {
+    cvc5::Result ar = solver.checkSat();
+    if (!ar.isSat()) {
+      res.verdict  = Verdict::Unknown;
+      res.detail  += ar.isUnsat() ? "; formal helper set is CONTRADICTORY (vacuous proof rejected)"
+                                  : "; formal helper consistency check returned unknown";
+      return res;
+    }
   }
 
   if (bad.isNull()) {

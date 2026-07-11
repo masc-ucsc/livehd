@@ -152,6 +152,8 @@ cc_test(
 # also still TBD but is silently accepted-and-ignored — it compiles clean today
 # (no diagnostic), so it needs an emitted-Verilog grep harness, not a compile
 # test, and is tracked in todo/pyrope/3f-macro.html instead.
+# One entry (wire_field_const_store) is a known-BUG tracker rather than a TBD
+# feature: valid code that miscompile-errors today (see its fixture header).
 [
     sh_test(
         name = "prp-tbd-%s" % base,
@@ -200,6 +202,11 @@ cc_test(
         "generic_named_bind",
         "generic_default_arg",
         "input_default",
+        # Known BUG tracker (not TBD): const store to a wire-BUNDLE field is
+        # folded+dropped (detupled dotted declare loses its wire mode), then
+        # tolg errors "wire 'io.a' is never driven" on valid code. See the
+        # fixture header for the root-cause chain and fix direction.
+        "wire_field_const_store",
     ]
 ]
 

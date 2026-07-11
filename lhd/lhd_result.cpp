@@ -58,11 +58,17 @@ void append_dir_content(std::string& buf, const std::string& dir) {
 }
 
 // Hash only the `top` slice of an hhds graph-library directory: the resolved
-// top graph(s) plus every graph reachable through Sub instances. A whole-design
-// library holds every module of the design; a proof scoped to one subtree must
-// not change run_id when an unrelated module changes. Returns false when the
-// slice cannot be resolved (no top, not a graph library, top absent, or any
-// library error) — the caller then falls back to whole-directory hashing.
+// top graph(s) plus every graph reachable through Sub instances — bodies AND
+// IO declarations (port name/id/bits/sign live ONLY in library.txt, and lec
+// pairs pins by name, so they are proof inputs; bodyless black-box stubs
+// contribute their decls). A whole-design library holds every module of the
+// design; a proof scoped to one subtree must not change run_id when an
+// unrelated module changes. Known approximation: the hierarchical driver
+// today also entity-pairs defs that are not Sub-reachable from the top (stale
+// whole-design leftovers) — those are outside the slice until load_side_graphs
+// itself narrows to the top cone. Returns false when the slice cannot be
+// resolved (no top, not a graph library, top absent or bodyless everywhere,
+// or any library error) — the caller falls back to whole-directory hashing.
 bool append_lg_slice_content(std::string& buf, const std::string& dir, const std::string& top) {
   std::error_code ec;
   if (top.empty() || !fs::exists(fs::path(dir) / "library.txt", ec) || ec) {
@@ -88,12 +94,17 @@ bool append_lg_slice_content(std::string& buf, const std::string& dir, const std
         }
       }
     }
-    if (roots.empty()) {
+    // A top that only resolves to bodyless stubs is not this library's design
+    // top (lec's pick() would reject it): whole-dir fallback, and never
+    // get_graph() a bodyless gid (it asserts on dbg builds).
+    const bool any_body = std::any_of(roots.begin(), roots.end(), [&lib](hhds::Gid id) { return lib.has_graph(id); });
+    if (roots.empty() || !any_body) {
       return false;
     }
 
     // DFS over Sub targets. Materializes bodies for the slice only; fast_class
     // + subnode is a pure structure walk, so edge overflow stays deferred.
+    // Bodyless decl-only gids stay in the cone (their interface hashes below).
     absl::flat_hash_set<hhds::Gid> seen(roots.begin(), roots.end());
     std::vector<hhds::Gid>         stack = roots;
     std::vector<hhds::Gid>         cone;
@@ -101,6 +112,9 @@ bool append_lg_slice_content(std::string& buf, const std::string& dir, const std
       const hhds::Gid id = stack.back();
       stack.pop_back();
       cone.push_back(id);
+      if (!lib.has_graph(id)) {
+        continue;  // declared interface without a body: nothing to walk
+      }
       auto g = lib.get_graph(id);
       if (!g) {
         continue;
@@ -112,10 +126,10 @@ bool append_lg_slice_content(std::string& buf, const std::string& dir, const std
         }
         auto sio = node.get_subnode_io();
         if (!sio) {
-          continue;  // external/black-box target: no bytes of it in this library
+          continue;  // target has no decl in this library (resolved elsewhere)
         }
         const hhds::Gid child = sio->get_gid();
-        if (lib.has_graph(child) && seen.insert(child).second) {
+        if (seen.insert(child).second) {
           stack.push_back(child);
         }
       }
@@ -128,6 +142,16 @@ bool append_lg_slice_content(std::string& buf, const std::string& dir, const std
     for (const hhds::Gid id : cone) {
       slice += std::format("g{}", id);  // gid is the name hash: renames change the slice
       slice += '\0';
+      if (auto gio = lib.find_io(id); gio) {
+        auto decls = [&slice](std::string_view tag, const auto& pins) {
+          for (const auto& d : pins) {
+            slice += std::format("{} {} {} {} {} {}", tag, d.name, d.port_id, d.bits, d.unsign ? 1 : 0, d.loop_break ? 1 : 0);
+            slice += '\0';
+          }
+        };
+        decls("i", gio->get_input_pin_decls());
+        decls("o", gio->get_output_pin_decls());
+      }
       append_dir_content(slice, (fs::path(dir) / std::format("graph_{}", id)).string());
     }
     buf += slice;
@@ -242,47 +266,58 @@ std::string compute_run_id(const Options& opts) {
     buf += std::format("|raw:{}", a);
   }
 
-  // Each input carries the top that scopes it: a lec --impl/--ref side is read
-  // only from its (per-side) top down, so its hash covers just that slice; all
-  // other inputs are read whole and hash whole (empty top = no slice).
+  // Each input carries the kind and top that scope it: a lec --impl/--ref
+  // lg: side is read only from its (per-side) top down, so its hash covers
+  // just that slice; every other input — including --lib model libraries,
+  // which the proof flattens through — is read whole and hashes whole. The
+  // per-side top is part of every impl/ref row (a file-typed side proves a
+  // different obligation under a different --impl-top).
   struct Run_input {
     std::string path;
+    std::string kind;  // impl/ref side kind: "lg" enables slice hashing
     std::string top;
   };
   std::vector<Run_input> inputs;
   for (const auto& f : opts.files) {
-    inputs.push_back({f, ""});
+    inputs.push_back({f, "", ""});
   }
   for (const auto& in : opts.ins) {
-    inputs.push_back({in.path, ""});
+    inputs.push_back({in.path, "", ""});
   }
   for (const auto& in : opts.in_dirs) {
-    inputs.push_back({in.path, ""});
+    inputs.push_back({in.path, "", ""});
+  }
+  for (const auto& l : opts.libs) {
+    inputs.push_back({l.path, "", ""});
   }
   if (!opts.impl_path.empty()) {
-    inputs.push_back({opts.impl_path, opts.impl_top.empty() ? opts.top : opts.impl_top});
+    inputs.push_back({opts.impl_path, opts.impl_kind, opts.impl_top.empty() ? opts.top : opts.impl_top});
   }
   if (!opts.ref_path.empty()) {
-    inputs.push_back({opts.ref_path, opts.ref_top.empty() ? opts.top : opts.ref_top});
+    inputs.push_back({opts.ref_path, opts.ref_kind, opts.ref_top.empty() ? opts.top : opts.ref_top});
   }
-  std::sort(inputs.begin(), inputs.end(),
-            [](const Run_input& a, const Run_input& b) { return std::tie(a.path, a.top) < std::tie(b.path, b.top); });
+  std::sort(inputs.begin(), inputs.end(), [](const Run_input& a, const Run_input& b) {
+    return std::tie(a.path, a.kind, a.top) < std::tie(b.path, b.kind, b.top);
+  });
 
   // Hash input BYTES only (ordinal-separated), never the path strings: the
   // same sources under a different sandbox/exec-root path must produce the
   // same run_id (future_cli.md: no absolute path leaks into an artifact).
+  // Each row is ordinal + per-side top + a mode tag (lgslice/dir/file), so
+  // slice, whole-dir and file byte streams can never alias each other.
   for (size_t idx = 0; idx < inputs.size(); ++idx) {
-    const auto& [f, eff_top] = inputs[idx];
+    const auto& [f, kind, eff_top] = inputs[idx];
     buf += '|';
     buf += std::format("{}", idx);
     buf += '\0';
+    buf += std::format("top={}", eff_top);
+    buf += '\0';
     if (fs::is_directory(f)) {
-      // Mode headers keep the slice and whole-dir byte streams from aliasing;
-      // the slice header also folds the per-side top (not otherwise hashed)
-      // into the run_id.
+      // Slice only a true lg: side: an ln:/pyrope: DIRECTORY side may share
+      // its db dir with a (stale) graph library, but lec reads the sources.
       std::string slice;
-      if (append_lg_slice_content(slice, f, eff_top)) {
-        buf += std::format("lgslice={}", eff_top);
+      if (kind == "lg" && append_lg_slice_content(slice, f, eff_top)) {
+        buf += "lgslice";
         buf += '\0';
         buf += slice;
       } else {
@@ -291,6 +326,8 @@ std::string compute_run_id(const Options& opts) {
         append_dir_content(buf, f);
       }
     } else {
+      buf += "file";
+      buf += '\0';
       append_file_content(buf, f);
     }
   }

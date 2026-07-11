@@ -481,7 +481,7 @@ Options parse_args(int argc, char** argv) {
       auto tp       = parse_check_side(a, need_value(a, i, argc, argv));
       opts.ref_kind = tp.kind;
       opts.ref_path = tp.path;
-    } else if (a == "--formal") {  // `formal verify`: fnmatch glob over formal-block dotted names
+    } else if (a == "--formal") {  // formal verify / lec: fnmatch glob over formal-block dotted names
       opts.formal_filter = need_value(a, i, argc, argv);
     } else if (a == "--impl-top") {
       opts.impl_top = need_value(a, i, argc, argv);

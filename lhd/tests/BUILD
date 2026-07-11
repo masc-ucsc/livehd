@@ -258,12 +258,30 @@ sh_test(
     tags = ["no-sandbox"],
 )
 
+sh_test(
+    name = "lec_formal_helpers_test",
+    size = "medium",
+    srcs = ["lec_formal_helpers_test.sh"],
+    data = ["//lhd:lhd"],
+)
+
 # run_id slice scoping: a lec lg: side hashes only its --top slice, so edits
 # to modules outside the proven subtree keep the run_id; edits to a Sub child
 # move it; an unresolvable top falls back to whole-directory hashing.
 sh_test(
     name = "lhd_runid_slice_test",
     srcs = ["lhd_runid_slice_test.sh"],
+    data = ["//lhd"],
+)
+
+# unset-unused-field on detupled wire-bundle leaves: a driven+consumed u64
+# field must not false-positive (its reads/writes ride plain dotted refs and
+# its width defeats the 62-bit bw-range proxy), and a never-touched leaf must
+# still be reported (it materializes no bundle entry — the declare-side
+# enumeration catches it).
+sh_test(
+    name = "unset_unused_field_warning_test",
+    srcs = ["unset_unused_field_warning_test.sh"],
     data = ["//lhd"],
 )
 

@@ -1155,8 +1155,15 @@ bool uPass_runner::resolve_node_operands(Resolved_node& out) {
       const auto& pc = cit->second;
       out.src.push_back(upass::Operand{std::string_view{}, Bundle::make_const(pc.value, pc.kind), pc.pattern});
     } else if (Lnast_ntype::is_ref(t)) {
-      const auto              name = lm->current_text();
-      std::shared_ptr<Bundle> b    = symbol_table_.get_bundle(name);
+      const auto name = lm->current_text();
+      if (name.find('.') != std::string_view::npos) {
+        // A dotted ref operand is an explicit field READ. Detupled wire/reg
+        // leaves are read through plain refs (never tuple_get), so this is
+        // the only place those reads are visible — constprop's
+        // unset-unused-field warning consults the set.
+        symbol_table_.field_touched.insert(Symbol_table::field_touch_key(lm->get_top_module_name(), name));
+      }
+      std::shared_ptr<Bundle> b = symbol_table_.get_bundle(name);
       if (!b) {
         b = std::make_shared<Bundle>(name);  // unbound (runtime IO etc.): empty view
       }
@@ -6421,6 +6428,7 @@ void uPass_runner::run() {
   symbol_table_.tget_origin.clear();
   symbol_table_.nil_seeded.clear();
   symbol_table_.uninitialized.clear();
+  symbol_table_.field_touched.clear();
 
   // Step H — allocate the dest (staging) body in a runner-owned Forest
   // (conceptually the "lgdb/optimized" forest the plan describes; today

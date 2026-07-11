@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <format>
 #include <functional>
+#include <iterator>
 #include <optional>
 #include <print>
 #include <string>
@@ -134,6 +135,606 @@ uint64_t fold_operands(uint64_t base, absl::flat_hash_map<int, std::vector<uint6
   return h;
 }
 
+// ---- tier-2 state pairing (full-match, the simplified SynAlign scheme) ------
+// Pair the state cells tier-1 name matching left unmatched, by structural
+// signature: a cell pairs when the RESOLVED POINTS in its transitive fan-in
+// (SRP) and fan-out (ERP) — graph IOs + already-paired state cells, walked over
+// the sequential (state-to-state through comb) graph — are EXACTLY equal on
+// both sides and the signature is unambiguous (one candidate per side). Newly
+// paired cells become resolved points themselves; iterate to a fixed point.
+// Full-match only, ambiguity-conservative: no half/partial relaxation — the
+// paper's full matches were the 100%-precise tier, and lec re-verifies anyway.
+// Clock/reset/comptime pins are excluded (globally shared, no discriminating
+// information); init values fold into the signature (the 2f-lec pair
+// precondition: never pair state whose reset values differ).
+
+// The sink ports of a state cell that carry DATA (traced by the sequential
+// walk). Everything else — clock, reset, polarity, pipe bounds — is excluded.
+bool data_sink_port(Ntype_op op, int pid) {
+  switch (op) {
+    case Ntype_op::Flop:
+    case Ntype_op::Latch: return pid == 3 || pid == 4;                // din, enable
+    case Ntype_op::Fflop: return pid == 0 || pid == 3 || pid == 5;    // valid, din, stop
+    case Ntype_op::Memory:
+      return pid == 0 || pid == 3 || pid == 4 || pid == 12 || pid == 13;  // addr, din, enable, update, update_enable
+    default: return true;  // comb node: every input is data
+  }
+}
+
+struct State_cell {
+  hhds::Node_class      node;
+  std::string           key;    // state_key (tier-1 identity; mangled under name_noise)
+  std::string           truth;  // name_noise only: the original key (empty = key is original)
+  bool                  is_mem = false;
+  uint64_t              kind   = 0;  // op + bits + init fold (local identity)
+  std::vector<uint32_t> preds;       // state cells feeding a data pin through comb
+  std::vector<uint32_t> succs;       // state cells fed from a driver pin through comb
+  std::vector<uint64_t> in_anchors;   // graph-input tokens feeding a data pin
+  std::vector<uint64_t> out_anchors;  // graph-output tokens reached from a driver pin
+  // Transitive closure over the state graph, with the min HOP DISTANCE (BFS
+  // level). Distance-annotated resolved points are a deliberate refinement over
+  // the paper's plain sets: a linear chain (in -> A -> B -> out) is permanently
+  // ambiguous under {in}/{out} set equality, while (in,1)/(in,2) tells A from B.
+  // Annotation only refines buckets, and lec re-verifies every pair anyway.
+  std::vector<std::pair<uint32_t, uint32_t>> reach_b;  // (index, dist>=1)
+  std::vector<std::pair<uint32_t, uint32_t>> reach_f;
+  uint64_t              token = 0;    // nonzero = resolved (tier-1 seed or tier-2 pair)
+  bool                  t1_pair = false, t1_group = false, t2_pair = false, ambiguous = false;
+  bool                  kind_clash = false;  // unpaired: cross-side SRP/ERP match refused by the
+                                             // kind fold (op/bits/init — the pair precondition)
+};
+
+struct State_side {
+  std::vector<State_cell>                          cells;
+  absl::flat_hash_map<hhds::Class_index, uint32_t> index;  // node -> cells[] slot
+  absl::flat_hash_map<uint64_t, std::string>       label;  // explain only: RP token -> name
+};
+
+State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
+  const bool want_labels = opts.explain_noise > 0;
+  State_side ss;
+  for (auto node : g->forward_class()) {
+    auto op = gu::type_op_of(node);
+    if (!is_state(op)) {
+      continue;
+    }
+    State_cell c;
+    c.node   = node;
+    c.key    = state_key(g, node);
+    c.is_mem = op == Ntype_op::Memory;
+    c.kind   = hcombine(hstr("\x01skind"), static_cast<uint64_t>(op));
+    c.kind   = hcombine(c.kind, static_cast<uint64_t>(static_cast<uint32_t>(node_out_bits(node))));
+    if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
+      // Reset/init value folds into the identity — the 2f-lec precondition:
+      // state with differing reset values must never pair.
+      if (auto init_d = gu::get_driver_of_sink_name(node, "initial"); !init_d.is_invalid() && gu::is_const_pin(init_d)) {
+        c.kind = hcombine(c.kind, hstr(gu::hydrate_const(init_d).serialize()));
+      }
+    } else if (op == Ntype_op::Memory) {
+      if (auto size_d = gu::get_driver_of_sink_name(node, "size"); !size_d.is_invalid() && gu::is_const_pin(size_d)) {
+        c.kind = hcombine(c.kind, hstr(gu::hydrate_const(size_d).serialize()));
+      }
+    }
+    ss.index.emplace(node.get_class_index(), static_cast<uint32_t>(ss.cells.size()));
+    ss.cells.push_back(std::move(c));
+  }
+
+  // Immediate sequential neighbors: BFS through comb nodes only, so each cell
+  // records the state cells / graph IOs one comb hop away in the state graph.
+  for (auto& c : ss.cells) {
+    auto op = gu::type_op_of(c.node);
+
+    // Backward: data-pin fan-in.
+    absl::flat_hash_set<hhds::Class_index> seen;
+    std::vector<hhds::Pin_class>           work;
+    for (const auto& e : c.node.inp_edges()) {
+      if (data_sink_port(op, e.sink.get_port_id())) {
+        work.push_back(e.driver);
+      }
+    }
+    while (!work.empty()) {
+      auto drv = work.back();
+      work.pop_back();
+      if (gu::is_graph_input_pin(drv)) {
+        uint64_t t = hcombine(hstr("\x01in"), hstr(drv.get_pin_name()));
+        if (want_labels) {
+          ss.label.try_emplace(t, "in:" + std::string{drv.get_pin_name()});
+        }
+        c.in_anchors.push_back(t);
+        continue;
+      }
+      if (gu::is_const_pin(drv)) {
+        continue;
+      }
+      auto m = drv.get_master_node();
+      if (auto it = ss.index.find(m.get_class_index()); it != ss.index.end()) {
+        c.preds.push_back(it->second);
+        continue;
+      }
+      if (seen.insert(m.get_class_index()).second) {
+        for (const auto& e : m.inp_edges()) {
+          work.push_back(e.driver);
+        }
+      }
+    }
+
+    // Forward: fan-out until the next state cell's DATA pin or a graph output.
+    // An edge landing on a clock/reset pin of downstream state is ignored.
+    seen.clear();
+    std::vector<hhds::Pin_class> fwork;
+    for (const auto& e : c.node.out_edges()) {
+      fwork.push_back(e.sink);
+    }
+    while (!fwork.empty()) {
+      auto snk = fwork.back();
+      fwork.pop_back();
+      if (gu::is_graph_output_pin(snk)) {
+        uint64_t t = hcombine(hstr("\x01out"), hstr(snk.get_pin_name()));
+        if (want_labels) {
+          ss.label.try_emplace(t, "out:" + std::string{snk.get_pin_name()});
+        }
+        c.out_anchors.push_back(t);
+        continue;
+      }
+      auto m = snk.get_master_node();
+      if (auto it = ss.index.find(m.get_class_index()); it != ss.index.end()) {
+        if (data_sink_port(gu::type_op_of(m), snk.get_port_id())) {
+          c.succs.push_back(it->second);
+        }
+        continue;
+      }
+      if (seen.insert(m.get_class_index()).second) {
+        for (const auto& e : m.out_edges()) {
+          fwork.push_back(e.sink);
+        }
+      }
+    }
+
+    auto dedupe = [](auto& v) {
+      std::sort(v.begin(), v.end());
+      v.erase(std::unique(v.begin(), v.end()), v.end());
+    };
+    dedupe(c.preds);
+    dedupe(c.succs);
+    dedupe(c.in_anchors);
+    dedupe(c.out_anchors);
+  }
+
+  // Transitive closure over the state graph (SRP/ERP accumulate ALL resolved
+  // points in the transitive cone, not just the frontier — traversal passes
+  // through resolved and unresolved cells alike, so the closure is static and
+  // computed once; per round only the member tokens change). BFS => the stored
+  // distance is the MIN hop count.
+  auto close = [&](std::vector<uint32_t> State_cell::* step, std::vector<std::pair<uint32_t, uint32_t>> State_cell::* out) {
+    std::vector<uint8_t> mark(ss.cells.size());
+    for (auto& c : ss.cells) {
+      std::fill(mark.begin(), mark.end(), 0);
+      auto& res = c.*out;
+      for (uint32_t i : c.*step) {
+        if (mark[i] == 0) {
+          mark[i] = 1;
+          res.emplace_back(i, 1);
+        }
+      }
+      for (size_t head = 0; head < res.size(); ++head) {
+        auto [i, d] = res[head];  // BFS: res doubles as the queue
+        for (uint32_t j : ss.cells[i].*step) {
+          if (mark[j] == 0) {
+            mark[j] = 1;
+            res.emplace_back(j, d + 1);
+          }
+        }
+      }
+      std::sort(res.begin(), res.end());
+    }
+  };
+  close(&State_cell::preds, &State_cell::reach_b);
+  close(&State_cell::succs, &State_cell::reach_f);
+  return ss;
+}
+
+// One direction's resolved points as (base token, min hop dist) items, sorted
+// and deduped: the cell's own IO anchors (dist 1), the closure members'
+// resolved tokens (their hop dist), and the members' IO anchors (dist+1).
+// Commutative by construction — this annotated set is the identity the
+// full-match compares, and what the explain dump renders/diffs.
+std::vector<std::pair<uint64_t, uint32_t>> rp_items(const State_side& ss, const State_cell& c, bool backward) {
+  const auto& reach = backward ? c.reach_b : c.reach_f;
+  const auto& own   = backward ? c.in_anchors : c.out_anchors;
+  std::vector<std::pair<uint64_t, uint32_t>> items;
+  items.reserve(own.size() + reach.size() * 2);
+  for (uint64_t t : own) {
+    items.emplace_back(t, 1);
+  }
+  for (auto [i, d] : reach) {
+    const auto& m = ss.cells[i];
+    if (m.token != 0) {
+      items.emplace_back(m.token, d);
+    }
+    for (uint64_t t : backward ? m.in_anchors : m.out_anchors) {
+      items.emplace_back(t, d + 1);
+    }
+  }
+  std::sort(items.begin(), items.end());
+  items.erase(std::unique(items.begin(), items.end()), items.end());
+  return items;
+}
+
+uint64_t rp_signature(const State_side& ss, const State_cell& c, bool backward) {
+  uint64_t h = hstr("\x01rp");
+  for (auto [t, d] : rp_items(ss, c, backward)) {
+    h = hcombine(h, hcombine(t, d));
+  }
+  return h;
+}
+
+// Tier-1 (name) + tier-2 (full-match) state pairing. Fills stats + the exported
+// pair/unpaired lists, assigns resolved tokens, and reports per-cell outcomes
+// under dump_state.
+void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb, const Semdiff_options& opts,
+                Match_result& res) {
+  State_stats& st = res.state;
+  st.a_total = static_cast<uint32_t>(sa.cells.size());
+  st.b_total = static_cast<uint32_t>(sb.cells.size());
+  for (const auto& c : sa.cells) {
+    st.a_mems += c.is_mem ? 1 : 0;
+  }
+  for (const auto& c : sb.cells) {
+    st.b_mems += c.is_mem ? 1 : 0;
+  }
+
+  // name_noise experiment (NL2NL-style): destroy a deterministic pseudo-random
+  // fraction of IMPL-side keys — selected by key hash, so a colliding key group
+  // noises as a unit and the selection is reproducible per seed. The original
+  // key is kept as ground truth, so tier-2 recovery is scored for CORRECTNESS,
+  // not just coverage.
+  if (opts.name_noise > 0.0) {
+    const auto threshold = static_cast<uint64_t>(opts.name_noise * 1e6);
+    for (auto& c : sb.cells) {
+      if (mix64(hstr(c.key) ^ mix64(opts.noise_seed)) % 1000000 < threshold) {
+        c.truth = c.key;
+        c.key += "\x01!noise";
+        ++st.noised;
+      }
+    }
+  }
+
+  // Tier-1: state_key across the sides. 1:1 => a certain pair; a colliding key
+  // present on both sides => one symmetric group (seeded alike, exactly the
+  // matching_names contract); a one-sided key stays unresolved.
+  absl::flat_hash_map<std::string, std::vector<uint32_t>> akeys, bkeys;
+  for (uint32_t i = 0; i < sa.cells.size(); ++i) {
+    akeys[sa.cells[i].key].push_back(i);
+  }
+  for (uint32_t i = 0; i < sb.cells.size(); ++i) {
+    bkeys[sb.cells[i].key].push_back(i);
+  }
+  if (opts.matching_names) {
+    for (auto& [key, av] : akeys) {
+      auto it = bkeys.find(key);
+      if (it == bkeys.end()) {
+        continue;
+      }
+      uint64_t tok = hcombine(hstr("\x01state"), hstr(key));
+      if (opts.explain_noise > 0) {
+        sa.label.try_emplace(tok, "st:" + key);
+        sb.label.try_emplace(tok, "st:" + key);
+      }
+      bool     one = av.size() == 1 && it->second.size() == 1;
+      for (uint32_t i : av) {
+        sa.cells[i].token   = tok;
+        sa.cells[i].t1_pair = one;
+        sa.cells[i].t1_group = !one;
+        st.a_name_grouped += one ? 0 : 1;
+      }
+      for (uint32_t i : it->second) {
+        sb.cells[i].token   = tok;
+        sb.cells[i].t1_pair = one;
+        sb.cells[i].t1_group = !one;
+        st.b_name_grouped += one ? 0 : 1;
+      }
+      st.name_pairs += one ? 1 : 0;
+    }
+  }
+
+  // Caller-supplied certain pairs (lec.match): resolve each side by hier name
+  // (the lec keying basis) or by the tier-1 state_key spelling, and give the
+  // pair a shared resolved token — an anchor exactly like a name match. Names
+  // that don't resolve 1:1 or land on an already-resolved cell are skipped
+  // (the consumer owns the validity of its explicit pairs, and lec re-verifies
+  // every downstream tier-2 pair anyway).
+  if (!opts.seed_pairs.empty()) {
+    constexpr uint32_t kDup         = UINT32_MAX;
+    auto               build_lookup = [](State_side& ss) {
+      absl::flat_hash_map<std::string, uint32_t> m;
+      auto                                       add = [&](std::string n, uint32_t i) {
+        if (n.empty()) {
+          return;
+        }
+        auto [it, ins] = m.try_emplace(std::move(n), i);
+        if (!ins && it->second != i) {
+          it->second = kDup;
+        }
+      };
+      for (uint32_t i = 0; i < ss.cells.size(); ++i) {
+        add(normalize_reg_name(ss.cells[i].node.get_hier_name()), i);
+        if (const auto& k = ss.cells[i].key; k.starts_with("n:")) {
+          add(k.substr(2), i);
+        }
+      }
+      return m;
+    };
+    auto la = build_lookup(sa);
+    auto lb = build_lookup(sb);
+    for (const auto& [an, bn] : opts.seed_pairs) {
+      auto ia = la.find(normalize_reg_name(an));
+      auto ib = lb.find(normalize_reg_name(bn));
+      if (ia == la.end() || ib == lb.end() || ia->second == kDup || ib->second == kDup) {
+        continue;
+      }
+      auto& ca = sa.cells[ia->second];
+      auto& cb = sb.cells[ib->second];
+      if (ca.token != 0 || cb.token != 0) {
+        continue;  // already resolved by tier-1
+      }
+      uint64_t tok = hcombine(hstr("\x01seed"), hstr(normalize_reg_name(an)));
+      ca.token     = tok;
+      ca.t1_pair   = true;
+      cb.token     = tok;
+      cb.t1_pair   = true;
+      ++st.seed_pairs;
+    }
+  }
+
+  // Tier-2 fixed point: bucket the still-unresolved cells by (kind, SRP, ERP);
+  // a 1:1 bucket across the sides pairs, the pair becomes a resolved point, and
+  // the sharpened signatures go around again — until a round adds nothing or
+  // synalign_maxiter caps it. Tier-1-complete common path: no unresolved cell
+  // on a side means nothing can pair — the signature pass never runs
+  // (2f-lec acceptance: all-names-match designs do zero tier-2 work).
+  auto has_unresolved = [](const State_side& ss) {
+    for (const auto& c : ss.cells) {
+      if (c.token == 0) {
+        return true;
+      }
+    }
+    return false;
+  };
+  if (opts.state_pairing && has_unresolved(sa) && has_unresolved(sb)) {
+    const uint32_t maxiter = std::max<uint32_t>(1, opts.synalign_maxiter);
+    for (uint32_t round = 1; round <= maxiter; ++round) {
+      absl::flat_hash_map<uint64_t, std::vector<uint32_t>> asig, bsig;
+      auto sig_of = [&](const State_side& ss, const State_cell& c) {
+        uint64_t h = hcombine(c.kind, rp_signature(ss, c, /*backward=*/true));
+        return hcombine(h, rp_signature(ss, c, /*backward=*/false));
+      };
+      for (uint32_t i = 0; i < sa.cells.size(); ++i) {
+        if (sa.cells[i].token == 0) {
+          asig[sig_of(sa, sa.cells[i])].push_back(i);
+        }
+      }
+      for (uint32_t i = 0; i < sb.cells.size(); ++i) {
+        if (sb.cells[i].token == 0) {
+          bsig[sig_of(sb, sb.cells[i])].push_back(i);
+        }
+      }
+      bool progress = false;
+      for (auto& [sig, av] : asig) {
+        auto it = bsig.find(sig);
+        if (it == bsig.end()) {
+          continue;
+        }
+        if (av.size() == 1 && it->second.size() == 1) {
+          uint64_t tok                    = hcombine(hstr("\x02pair"), sig);
+          if (opts.explain_noise > 0) {
+            sa.label.try_emplace(tok, "pair:" + sa.cells[av.front()].key);
+            sb.label.try_emplace(tok, "pair:" + sa.cells[av.front()].key);
+          }
+          sa.cells[av.front()].token      = tok;
+          sa.cells[av.front()].t2_pair    = true;
+          sb.cells[it->second.front()].token   = tok;
+          sb.cells[it->second.front()].t2_pair = true;
+          ++st.full_pairs;
+          // Export the concrete pair for the LEC consumer: raw hier names (the
+          // node name attr lec keys flops by — NOT the driver-pin-based
+          // state_key, which a reader may stamp differently).
+          res.state_pairs.push_back(State_pair{sa.cells[av.front()].node.get_hier_name(),
+                                               sb.cells[it->second.front()].node.get_hier_name(),
+                                               sa.cells[av.front()].is_mem,
+                                               round});
+          progress = true;
+          if (const auto& bt = sb.cells[it->second.front()].truth; !bt.empty()) {
+            ++st.noised_recovered;
+            st.noised_correct += bt == sa.cells[av.front()].key ? 1 : 0;
+          }
+          if (opts.dump_state) {
+            std::print("semdiff[state]: full-match '{}' ({}) <-> '{}' ({}) round {}\n",
+                       sa.cells[av.front()].key,
+                       ga->get_name(),
+                       sb.cells[it->second.front()].key,
+                       gb->get_name(),
+                       round);
+          }
+        }
+      }
+      if (progress) {
+        st.rounds = round;
+      }
+      if (!progress || round == maxiter) {
+        // Terminal round (converged, or capped by synalign_maxiter): cells
+        // stuck in a both-sided but non-1:1 bucket are the AMBIGUOUS residue
+        // (matcher headroom), distinct from no-counterpart. Cells that paired
+        // THIS round carry a token and are excluded downstream.
+        for (auto& [sig, av] : asig) {
+          auto it = bsig.find(sig);
+          if (it == bsig.end()) {
+            continue;
+          }
+          if (av.size() != 1 || it->second.size() != 1) {
+            for (uint32_t i : av) {
+              sa.cells[i].ambiguous = true;
+            }
+            for (uint32_t i : it->second) {
+              sb.cells[i].ambiguous = true;
+            }
+          }
+        }
+
+        // Kind-clash diagnostic: an unresolved cell whose SRP/ERP exist on the
+        // other side only under a DIFFERENT kind (op/bits/init fold) was
+        // refused by the pair precondition, not by structure — reported as
+        // "kind/init mismatch" instead of "no full match" (a renamed flop
+        // whose reset value was also edited is this class, and the report is
+        // the user's cue to check the reset).
+        auto nokind_sig = [&](const State_side& ss, const State_cell& c) {
+          return hcombine(rp_signature(ss, c, /*backward=*/true), rp_signature(ss, c, /*backward=*/false));
+        };
+        absl::flat_hash_set<uint64_t> a_nk, b_nk;
+        for (const auto& c : sa.cells) {
+          if (c.token == 0) {
+            a_nk.insert(nokind_sig(sa, c));
+          }
+        }
+        for (const auto& c : sb.cells) {
+          if (c.token == 0) {
+            b_nk.insert(nokind_sig(sb, c));
+          }
+        }
+        for (auto& c : sa.cells) {
+          c.kind_clash = c.token == 0 && !c.ambiguous && b_nk.contains(nokind_sig(sa, c));
+        }
+        for (auto& c : sb.cells) {
+          c.kind_clash = c.token == 0 && !c.ambiguous && a_nk.contains(nokind_sig(sb, c));
+        }
+
+        // explain_noise: deep-dump noised-but-unrecovered impl cells against
+        // their ground-truth ref twin — the mechanical "why no full match":
+        // equal signatures => ambiguity (list the bucket), differing => show
+        // exactly which (anchor, dist) items diverge, kind mismatch called out.
+        if (opts.explain_noise > st.explained) {
+          auto lbl = [](const State_side& ss, uint64_t base) {
+            auto it2 = ss.label.find(base);
+            return it2 == ss.label.end() ? std::format("tok:{:x}", base) : it2->second;
+          };
+          auto items_str = [&](const State_side& ss, const std::vector<std::pair<uint64_t, uint32_t>>& items) {
+            std::string s;
+            size_t      shown = 0;
+            for (auto [t, d] : items) {
+              if (shown++ == 24) {
+                s += std::format(" …(+{} more)", items.size() - 24);
+                break;
+              }
+              s += std::format(" ({},{})", lbl(ss, t), d);
+            }
+            return s;
+          };
+          auto print_diff = [&](std::string_view what, const State_cell& cr, const State_cell& ci, bool backward) {
+            auto ri = rp_items(sa, cr, backward);
+            auto ii = rp_items(sb, ci, backward);
+            std::vector<std::pair<uint64_t, uint32_t>> only_r, only_i;
+            std::set_difference(ri.begin(), ri.end(), ii.begin(), ii.end(), std::back_inserter(only_r));
+            std::set_difference(ii.begin(), ii.end(), ri.begin(), ri.end(), std::back_inserter(only_i));
+            if (only_r.empty() && only_i.empty()) {
+              std::print("    {} sets EQUAL ({} items)\n", what, ri.size());
+              return;
+            }
+            std::print("    {} diff: only-ref{} | only-impl{}\n", what, items_str(sa, only_r), items_str(sb, only_i));
+          };
+          for (uint32_t j = 0; j < sb.cells.size() && opts.explain_noise > st.explained; ++j) {
+            auto& ci = sb.cells[j];
+            if (ci.truth.empty() || ci.token != 0) {
+              continue;
+            }
+            ++st.explained;
+            uint64_t isig = sig_of(sb, ci);
+            size_t   ibkt = bsig.contains(isig) ? bsig[isig].size() : 0;
+            size_t   abkt = asig.contains(isig) ? asig[isig].size() : 0;
+            std::print("semdiff[explain] def '{}': impl '{}' ({} bits {}) noised, UNRECOVERED — same-sig candidates ref/impl {}/{}\n",
+                       gb->get_name(),
+                       ci.truth,
+                       Ntype::get_name(gu::type_op_of(ci.node)),
+                       node_out_bits(ci.node),
+                       abkt,
+                       ibkt);
+            std::print("    impl SRP:{}\n", items_str(sb, rp_items(sb, ci, true)));
+            std::print("    impl ERP:{}\n", items_str(sb, rp_items(sb, ci, false)));
+            auto tw = akeys.find(ci.truth);
+            if (tw == akeys.end() || tw->second.size() != 1) {
+              std::print("    ref ground-truth twin '{}': not present 1:1 on ref side ({} candidates) — defs differ\n",
+                         ci.truth,
+                         tw == akeys.end() ? 0 : tw->second.size());
+              continue;
+            }
+            const auto& cr = sa.cells[tw->second.front()];
+            if (cr.token != 0) {
+              std::print("    ref twin resolved elsewhere as {} — impl cell lost it (twin paired before this cell disambiguated)\n",
+                         lbl(sa, cr.token));
+              continue;
+            }
+            if (cr.kind != ci.kind) {
+              std::print("    KIND differs (op/bits/init fold) — pair precondition refuses regardless of structure\n");
+            }
+            if (sig_of(sa, cr) == isig) {
+              std::string mem_r, mem_i;
+              size_t      shown = 0;
+              for (uint32_t i2 : asig[isig]) {
+                if (shown++ == 8) {
+                  mem_r += " …";
+                  break;
+                }
+                mem_r += " '" + sa.cells[i2].key + "'";
+              }
+              shown = 0;
+              for (uint32_t j2 : bsig[isig]) {
+                if (shown++ == 8) {
+                  mem_i += " …";
+                  break;
+                }
+                mem_i += " '" + (sb.cells[j2].truth.empty() ? sb.cells[j2].key : sb.cells[j2].truth) + "'";
+              }
+              std::print("    AMBIGUOUS: twin signature EQUAL — ref bucket:{} | impl bucket:{}\n", mem_r, mem_i);
+            } else {
+              std::print("    ref  SRP:{}\n", items_str(sa, rp_items(sa, cr, true)));
+              std::print("    ref  ERP:{}\n", items_str(sa, rp_items(sa, cr, false)));
+              print_diff("SRP", cr, ci, true);
+              print_diff("ERP", cr, ci, false);
+            }
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  auto finish = [&](hhds::Graph* g, State_side& ss, uint32_t& unpaired, uint32_t& ambiguous, std::vector<std::string>& names,
+                    std::string_view side) {
+    for (auto& c : ss.cells) {
+      if (c.token == 0) {
+        ++unpaired;
+        ambiguous += c.ambiguous ? 1 : 0;
+        if (opts.state_pairing) {
+          names.push_back(c.node.get_hier_name()
+                          + (c.ambiguous ? " (ambiguous)" : c.kind_clash ? " (kind/init mismatch)" : " (no full match)"));
+        }
+      }
+      if (opts.dump_state) {
+        std::print("semdiff[state]: {} '{}' {}{} {}\n",
+                   side,
+                   g->get_name(),
+                   c.truth.empty() ? c.key : c.truth,
+                   c.truth.empty() ? "" : " (noised)",
+                   c.t1_pair    ? "name"
+                   : c.t1_group ? "name-group"
+                   : c.t2_pair  ? "full"
+                   : c.ambiguous ? "UNPAIRED(ambiguous)"
+                                 : "UNPAIRED(no-counterpart)");
+      }
+    }
+  };
+  finish(ga, sa, st.a_unpaired, st.a_ambiguous, res.a_state_unpaired, "ref");
+  finish(gb, sb, st.b_unpaired, st.b_ambiguous, res.b_state_unpaired, "impl");
+}
+
 // Per-side analysis: forward/backward signatures + node order.
 struct Side {
   hhds::Graph*                                      g = nullptr;
@@ -144,14 +745,22 @@ struct Side {
   absl::flat_hash_set<uint64_t>                     bvals;   // bsig value set
 };
 
-Side analyze(hhds::Graph* g, const Semdiff_options& opts) {
+Side analyze(hhds::Graph* g, const Semdiff_options& opts,
+             const absl::flat_hash_map<hhds::Class_index, uint64_t>* state_seeds = nullptr) {
   Side s;
   s.g = g;
 
   // Seed state cells (cut points). With matching_names they get a cross-side
   // identity by hierarchical name so structure flows through them in BOTH
   // directions; without it they stay frontiers (a renamed flop => a gap).
-  if (opts.matching_names) {
+  // structural_match may pass explicit seeds instead (state_pairing: tier-2
+  // full-match pairs override/extend the name seeds).
+  if (state_seeds != nullptr) {
+    for (const auto& [ci, seed] : *state_seeds) {
+      s.fsig[ci] = seed;
+      s.bsig[ci] = seed;
+    }
+  } else if (opts.matching_names) {
     for (auto node : g->forward_class()) {
       if (is_state(gu::type_op_of(node))) {
         uint64_t seed             = hcombine(hstr("\x01state"), hstr(state_key(g, node)));
@@ -302,8 +911,35 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
     return res;
   }
 
-  Side sa = analyze(a, opts);
-  Side sb = analyze(b, opts);
+  Side sa, sb;
+  if (opts.matching_names || opts.state_pairing) {
+    // Tier-1 (name) + tier-2 (full-match) state pairing first; the resolved
+    // tokens seed the structural analysis so structure flows through paired
+    // state in both directions. One-sided-key cells keep the plain name seed
+    // under matching_names (bit-for-bit the pre-state_pairing behavior).
+    State_side ssa = collect_state(a, opts);
+    State_side ssb = collect_state(b, opts);
+    pair_state(a, b, ssa, ssb, opts, res);
+    absl::flat_hash_map<hhds::Class_index, uint64_t> seeds_a, seeds_b;
+    auto build_seeds = [&](State_side& ss, absl::flat_hash_map<hhds::Class_index, uint64_t>& seeds) {
+      for (auto& c : ss.cells) {
+        uint64_t s = c.token;
+        if (s == 0 && opts.matching_names) {
+          s = hcombine(hstr("\x01state"), hstr(c.key));
+        }
+        if (s != 0) {
+          seeds.emplace(c.node.get_class_index(), s);
+        }
+      }
+    };
+    build_seeds(ssa, seeds_a);
+    build_seeds(ssb, seeds_b);
+    sa = analyze(a, opts, &seeds_a);
+    sb = analyze(b, opts, &seeds_b);
+  } else {
+    sa = analyze(a, opts);
+    sb = analyze(b, opts);
+  }
 
   // Signatures present on BOTH sides are matchable.
   absl::flat_hash_set<uint64_t> fcommon;

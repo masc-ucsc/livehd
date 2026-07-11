@@ -1,0 +1,29 @@
+/*
+:name: wire_field_const_store
+:type: compile
+*/
+// KNOWN BUG (not a TBD feature): a comptime-const store to a field of a wire
+// BUNDLE is folded and dropped, then tolg rejects the valid design with
+//   upass.tolg: wire 'io.a' is never driven — a `wire` must have exactly one driver
+// The same store to a SCALAR wire (`wire x:u8; x = 3`) compiles clean.
+//
+// Root cause: uPass_detuple splits `wire io:(…)` into per-field dotted
+// declares (`declare(io.a,…,wire)`) and deletes the root declare; the runner's
+// declare bake then DROPS the dotted facts because the root binding does not
+// exist (upass_runner.cpp bake_decl_pre_step, dotted branch, root==null early
+// return), and constprop's decl_mode_of("io.a") reads a fresh sub-bundle clone
+// whose mode_ is never lifted from the field Entry — so the wire-store skips
+// in process_store/process_assign (upass_constprop.cpp) never fire: constprop
+// symbolically binds the const, folds `io.a + 1`, and the runner drops the
+// now-"known" store that tolg needed as the net's single driver.
+// Fix direction: bake must keep dotted-declare facts (declare_bare the root +
+// stash pending), and decl_mode_of must answer from per-field declared facts
+// for dotted paths. Runtime stores dodge the fold, which is why generated
+// corpora (xs_core_prp) compile — only comptime-const wire-field drivers trip.
+// Tagged `fixme`: fails by design until the mode plumbing is fixed.
+comb wire_field_const_store(i:u4) -> (out:u8) {
+  wire io:(a:u8, o:u8) = nil
+  io.a = 3
+  io.o = io.a + 1
+  out = io.o + i
+}

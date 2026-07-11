@@ -455,6 +455,44 @@ void uPass_constprop::set_function_registry(const std::vector<std::shared_ptr<Ln
   }
 }
 
+// An explicit non-nil store marks the field as SET for the unset-unused-field
+// warning — the bundle entries cannot answer that question themselves: a
+// runtime store leaves no comptime value behind, the derived bw range bails
+// out past 62 bits (uPass_bitwidth::const_to_i64), and wire/reg stores are
+// never bound at all. Two store shapes carry a field path: a dotted dst
+// ("io.o = v", the detupled-wire form) and a tuple-keyed dst with comptime
+// selectors (store(t,'f',v)). The `= nil` seed is the declaration itself, not
+// a write — an explicit `t.f = nil` re-store keeps warning (nil never counts
+// as set, matching the entry-side "trivial nil is unset" rule).
+void uPass_constprop::record_field_write(std::string_view dst_name, upass::Src_span src) {
+  if (src.empty() || dst_name.empty()) {
+    return;
+  }
+  const auto& val = src.back();  // the stored value is the last operand
+  if (val.name.empty()) {
+    if (const auto s = val.bundle->scalar(); s && s->is_nil()) {
+      return;  // nil store: declaration seed, not a set
+    }
+  }
+  std::string path(dst_name);
+  for (size_t i = 0; i + 1 < src.size(); ++i) {  // leading operands are selectors
+    const auto& sel = src[i];
+    if (!sel.name.empty()) {
+      return;  // runtime selector: the written path is not comptime-knowable
+    }
+    const auto sv = sel.bundle->scalar();
+    if (!sv || sv->is_invalid() || sv->is_nil()) {
+      return;
+    }
+    path += '.';
+    path += sv->to_field();
+  }
+  if (path.find('.') == std::string::npos) {
+    return;  // scalar store — not a field write
+  }
+  st().field_touched.insert(Symbol_table::field_touch_key(lm->get_top_module_name(), path));
+}
+
 upass::Vote uPass_constprop::process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   // Route by src arity; the bodies walk the node
   // under the cursor (store payloads include subtree initializers that the
@@ -468,6 +506,7 @@ upass::Vote uPass_constprop::process_store(std::string_view dst_name, Bundle& ds
     st().uninitialized.erase(std::string(dst_name));
   }
   note_var_span(dst_name);  // store target, at its write line (covers the tuple_set path)
+  record_field_write(dst_name, src);  // BEFORE the wire/reg skip: those stores are the ones constprop never binds
   // A store to a reg-declared name (scalar reg OR a `reg` memory/array) is a
   // next-state write consumed by tolg; constprop must not symbolically bind it
   // (reads see the flop's q, not the value written this cycle). process_assign
@@ -791,8 +830,18 @@ void uPass_constprop::process_declare() {
   }
   note_var_span(current_text());  // the declared var, at its declaration line
   // The runner's declare bake already wrote mode/type_name/decl
-  // ranges onto the binding (declare_bare created it); the mode/type/umax
-  // readers above consult the binding directly. Nothing to record here.
+  // ranges onto the binding (declare_bare created it) — EXCEPT for a dotted
+  // wire leaf (`declare(io.a,…,wire)`, the uPass_detuple split of a bundle
+  // wire): its root was never declared, so the bake drops the facts and no
+  // binding ever answers for the field. Record those here — they are the
+  // declared-field enumeration for the unset-unused-field warning (a leaf
+  // never read or written has no other trace in the symbol table).
+  if (const auto var = current_text(); var.find('.') != std::string_view::npos && var[0] != '%') {
+    std::string path(var);
+    if (move_to_sibling() && move_to_sibling() && is_type(Lnast_ntype::Lnast_ntype_const) && current_text() == "wire") {
+      declared_wire_fields_.insert(std::move(path));
+    }
+  }
   move_to_parent();
 }
 
@@ -1682,10 +1731,37 @@ void uPass_constprop::process_stmts_post() {
   // an unresolved import (it defers wholesale; erroring on a pub value that
   // depends on the missing import would mask the defer).
   if (st().stack.size() == 2) {
-    // "an unset field that is never used is a warning": at the
-    // file-scope pop, any DECLARED named field that was never set (invalid
-    // trivial), never runtime-driven (no bw range — runtime producers
-    // always carry one), and never read (field_reads_) is dead weight.
+    // "an unset field that is never used is a warning": at the file-scope
+    // pop, any DECLARED named field that was never set and never used is dead
+    // weight. "Set" and "used" are answered by st().field_touched — the
+    // explicit read/write record (runner operand resolution + constprop
+    // store/tuple_get hooks) — because the bundle entries cannot answer alone:
+    // a runtime store leaves an invalid trivial behind, and the derived bw
+    // range (kept below as an extra suppressor) bails out past 62 bits.
+    const auto unit    = std::string(lm->get_top_module_name());
+    const auto touched = [&](const std::string& path) { return st().field_touched.contains(Symbol_table::field_touch_key(unit, path)); };
+    const auto emit_unset_unused = [&](const std::string& path, const std::string& var) {
+      // Point at the field's declaration/first-touch line: current_span()
+      // here has walked off the end of the block and would name the closing
+      // brace. The per-field declare/seed store records the exact field
+      // path; fall back to the enclosing var's span if only that was seen.
+      livehd::diag::Span field_span;
+      if (const auto sit = var_spans_.find(path); sit != var_spans_.end()) {
+        field_span = sit->second;
+      } else if (const auto vit = var_spans_.find(var); vit != var_spans_.end()) {
+        field_span = vit->second;
+      }
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::warning,
+          .code     = "unset-unused-field",
+          .category = "type",
+          .pass     = "upass.constprop",
+          .message  = std::format("field `{}` is declared but never set and never used", path),
+          .span     = std::move(field_span),
+          .hint     = "drop the field, or give it a value",
+      });
+    };
+    absl::flat_hash_set<std::string> warned;  // one report per path across both sources
     for (const auto* scope : st().stack) {
       for (const auto& [var, bundle] : scope->varmap) {
         if ((!var.empty() && var[0] == '%') || !bundle || bundle->get_mode() == upass::Mode::reg_kind
@@ -1712,32 +1788,37 @@ void uPass_constprop::process_stmts_post() {
             continue;
           }
           const std::string path = var + "." + k;
-          if (field_reads_.contains(path)) {
+          if (touched(path) || !warned.insert(path).second) {
             continue;
           }
-          // Point at the field's declaration/first-touch line: current_span()
-          // here has walked off the end of the block and would name the closing
-          // brace. The per-field seed store (`io.in = nil`) records the exact
-          // field path; fall back to the enclosing var's span if only that was
-          // seen.
-          livehd::diag::Span field_span;
-          if (const auto sit = var_spans_.find(path); sit != var_spans_.end()) {
-            field_span = sit->second;
-          } else if (const auto vit = var_spans_.find(var); vit != var_spans_.end()) {
-            field_span = vit->second;
-          }
-          livehd::diag::sink().emit(livehd::diag::Diagnostic{
-              .severity = livehd::diag::Severity::warning,
-              .code     = "unset-unused-field",
-              .category = "type",
-              .pass     = "upass.constprop",
-              .message  = std::format("field `{}` is declared but never set and never used", path),
-              .span     = std::move(field_span),
-              .hint     = "drop the field, or give it a value",
-          });
+          emit_unset_unused(path, var);
         }
       }
     }
+    // Detupled wire leaves (`declare(io.a,…,wire)`) never materialize a
+    // bundle entry — constprop does not bind wire stores — so the loop above
+    // cannot see them at all. Their declares are the enumeration instead: a
+    // declared leaf never read and never written is exactly the warning.
+    // Skipped when THIS unit hit an unresolved import (it defers wholesale;
+    // the interrupted walk has not recorded all its touches yet).
+    bool unit_deferred = false;
+    for (const auto& p : pending_imports_) {
+      if (p.unit == unit) {
+        unit_deferred = true;
+        break;
+      }
+    }
+    if (!unit_deferred) {
+      std::vector<std::string> unused(declared_wire_fields_.begin(), declared_wire_fields_.end());
+      std::sort(unused.begin(), unused.end());  // deterministic report order
+      for (const auto& path : unused) {
+        if (touched(path) || !warned.insert(path).second) {
+          continue;
+        }
+        emit_unset_unused(path, std::string(Bundle::get_first_level(path)));
+      }
+    }
+    declared_wire_fields_.clear();  // per-unit state: the next file walk starts fresh
   }
   if (st().stack.size() == 2 && !lm->get_lnast()->get_pub_list().empty()) {
     const auto unit = std::string(lm->get_top_module_name());
@@ -3923,7 +4004,8 @@ void uPass_constprop::process_tuple_get() {
     if (key.size() > src.size() + 1) {
       check_nested_tuple_access(src, key.substr(src.size() + 1));  // the field path, sans "src."
     }
-    field_reads_.insert(key);  // Feeds the unused-unset warning
+    // Feeds the unset-unused-field warning ("was read" evidence).
+    st().field_touched.insert(Symbol_table::field_touch_key(lm->get_top_module_name(), key));
   }
 
   // For a NAMED access, capture src's bundle so we can tell "absent named field

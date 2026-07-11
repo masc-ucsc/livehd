@@ -77,6 +77,25 @@ Verdict_cache::Verdict_cache(std::string workdir, uint64_t salt) : workdir_(std:
       hints_.emplace(it->name.GetString(), std::move(h));
     }
   }
+  // Pair hints travel with the strategy hints: they survive a salt mismatch
+  // (they are re-validated at injection and keep the uncertain discipline, so
+  // a prover change never makes them unsound — just possibly stale).
+  if (doc.HasMember("pair_hints") && doc["pair_hints"].IsObject()) {
+    for (auto it = doc["pair_hints"].MemberBegin(); it != doc["pair_hints"].MemberEnd(); ++it) {
+      if (!it->value.IsObject() || !it->value.HasMember("pairs") || !it->value["pairs"].IsArray()) {
+        continue;
+      }
+      Pair_hint h;
+      for (const auto& p : it->value["pairs"].GetArray()) {
+        if (p.IsArray() && p.Size() == 2 && p[0].IsString() && p[1].IsString()) {
+          h.pairs.emplace_back(p[0].GetString(), p[1].GetString());
+        }
+      }
+      if (!h.pairs.empty()) {
+        pair_hints_.emplace(it->name.GetString(), std::move(h));
+      }
+    }
+  }
   // Verdicts only under the exact engine-identity salt (rule F).
   const std::string want_salt = std::format("{:016x}", salt_);
   if (!doc.HasMember("salt") || !doc["salt"].IsString() || want_salt != doc["salt"].GetString()) {
@@ -147,6 +166,21 @@ void Verdict_cache::set_hint(const std::string& entity, Strategy_hint h) {
   std::lock_guard lock(mutex_);
   hints_[entity] = std::move(h);
   dirty_         = true;
+}
+
+std::optional<Pair_hint> Verdict_cache::pair_hint(const std::string& entity) const {
+  std::lock_guard lock(mutex_);
+  auto it = pair_hints_.find(entity);
+  if (it == pair_hints_.end()) {
+    return std::nullopt;
+  }
+  return it->second;
+}
+
+void Verdict_cache::set_pair_hint(const std::string& entity, Pair_hint h) {
+  std::lock_guard lock(mutex_);
+  pair_hints_[entity] = std::move(h);
+  dirty_              = true;
 }
 
 bool Verdict_cache::skip_unknown(const std::string& key, int timeout_s) const {
@@ -241,6 +275,24 @@ void Verdict_cache::save() const {
                                  esc(h.split),
                                  h.elapsed_ms,
                        i + 1 < hkeys.size() ? "," : "");
+  }
+  out += "  },\n";
+  out += "  \"pair_hints\": {\n";
+  {
+    std::vector<std::string> pkeys;
+    pkeys.reserve(pair_hints_.size());
+    for (const auto& [k, _] : pair_hints_) {
+      pkeys.push_back(k);
+    }
+    std::sort(pkeys.begin(), pkeys.end());
+    for (size_t i = 0; i < pkeys.size(); ++i) {
+      const auto& h = pair_hints_.at(pkeys[i]);
+      std::string ps;
+      for (size_t j = 0; j < h.pairs.size(); ++j) {
+        ps += std::format("[\"{}\", \"{}\"]{}", esc(h.pairs[j].first), esc(h.pairs[j].second), j + 1 < h.pairs.size() ? ", " : "");
+      }
+      out += std::format("    \"{}\": {{\"pairs\": [{}]}}{}\n", esc(pkeys[i]), ps, i + 1 < pkeys.size() ? "," : "");
+    }
   }
   out += "  }\n}\n";
 

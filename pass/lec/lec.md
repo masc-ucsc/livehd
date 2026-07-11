@@ -85,8 +85,10 @@ everything the encoder needs.
   correspondence) ⇒ PASS, kill BMC; BMC **Refuted** (reachable CEX from reset) ⇒
   FAIL + witness, kill inductive; inductive **Refuted** ⇒ a *hint only* (single-step
   assumes an arbitrary equal state, so the CEX may be an unreachable step-case — it
-  must never hard-fail the build); BMC bounded-**Proven** (no CEX ≤ bound) ⇒ *not*
-  a full PASS; neither trustworthy ⇒ **inconclusive**. The per-query `lec.timeout`
+  must never hard-fail the build); BMC bounded-**Proven** (no CEX ≤ bound) ⇒
+  accepted as PASS by the bounded-proof policy (`try_bounded_proven`), disclosed
+  as bounded — cycles beyond the bound stay unproven, and the bound is part of the
+  verdict-cache key; neither trustworthy ⇒ **inconclusive**. The per-query `lec.timeout`
   bounds each worker, so a hard miter self-limits and the portfolio degrades to
   inconclusive rather than hanging.
 - **Memory**: `Memory` cells → SMT **theory of arrays**. Corresponding memories
