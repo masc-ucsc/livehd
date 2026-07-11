@@ -38,8 +38,11 @@
   (incl. a <code>$/cancelRequest</code> + <code>$/setTrace</code> no-op) +
   <code>did{Open,Change,Save,Close}</code> + <code>textDocument/diagnostic</code> +
   <code>textDocument/hover</code> + <code>textDocument/definition</code>/<code>declaration</code>
-  (hover renders kind-aware: <code>bool</code>/<code>string</code>/<code>enum T</code>/<code>tuple</code>/<code>import("u")</code>/<code>comb u.f</code>/<code>reg&nbsp;</code>-prefix,
-  integers as <code>u12(bw_min=30, bw_max=1000)</code> with the Pyrope <code>s</code> spelling for signed); <strong>any other
+  (hover renders kind-aware: <code>bool</code>/<code>string</code>/<code>enum T</code>/<code>import("u")</code>/<code>comb u.f</code>/<code>reg&nbsp;</code>-prefix,
+  integers as <code>u12(bw_min=30, bw_max=1000)</code> with the Pyrope <code>s</code> spelling for signed, and tuples
+  with per-field types — <code>tuple(x: u4(bw_min=3, bw_max=3), y: string, …+N)</code>, capped at 8 leaves;
+  reg-struct field widths render <code>int</code>: their per-field envelope rides detuple-tmp type_specs the
+  render can't chase); <strong>any other
   request carrying an <code>id</code> falls through to <code>-32601 MethodNotFound</code></strong>
   (<code>respond_method_not_found</code>). Each missing feature therefore needs two coupled
   edits: (a) flip its provider flag in <code>handle_initialize</code>, and (b) add its handler

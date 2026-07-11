@@ -1382,6 +1382,142 @@ void uPass_runner::process_drop_candidate_push(upass::Push_method fn, bool fold_
   }
 }
 
+namespace {
+
+// task 2n — the scalar type of ONE bundle leaf for the LSP hover, from the
+// Entry's own facts alone: kind (bool/string/enum), else integer with bits
+// recomputed from the declared envelope and the bw_min/bw_max (or comptime
+// value) range labeled the same way a plain variable renders. Used for tuple
+// FIELDS, where the io_meta/bw_meta side-channels don't apply (write_bw skips
+// dotted names — the per-field range lives on the bundle Entry itself).
+std::string lsp_render_leaf_type(const Bundle::Entry& fe) {
+  switch (fe.kind) {
+    case upass::Kind::boolean: return "bool";
+    case upass::Kind::string : return "string";
+    case upass::Kind::enumv  : return "enum";
+    case upass::Kind::tuple  : return "tuple";
+    default                  : break;
+  }
+  if (!fe.trivial.is_invalid() && fe.trivial.is_string()) {
+    return "string";
+  }
+  if (!fe.trivial.is_invalid() && fe.trivial.is_bool()) {
+    return "bool";
+  }
+  const auto to_i64 = [](const Dlop& v) -> std::optional<int64_t> {
+    if (v.is_invalid() || !v.is_integer() || v.has_unknowns() || v.get_bits() > 62) {
+      return std::nullopt;
+    }
+    return v.to_just_i64();
+  };
+  const auto ubits = [](int64_t hi) -> int { return hi <= 0 ? 0 : static_cast<int>(std::bit_width(static_cast<uint64_t>(hi))); };
+  const auto sbits = [](int64_t lo, int64_t hi) -> int {
+    const auto sb = [](int64_t v) {
+      return v >= 0 ? static_cast<int>(std::bit_width(static_cast<uint64_t>(v))) + 1
+                    : static_cast<int>(std::bit_width(static_cast<uint64_t>(-v - 1))) + 1;
+    };
+    return std::max(sb(lo), sb(hi));
+  };
+
+  const auto dlo = to_i64(fe.decl_min);
+  const auto dhi = to_i64(fe.decl_max);
+  auto       lo  = to_i64(fe.bw_min);
+  auto       hi  = to_i64(fe.bw_max);
+  if (!lo || !hi) {  // no derived range: a comptime value is its own point range
+    if (const auto v = to_i64(fe.trivial); v) {
+      lo = v;
+      hi = v;
+    }
+  }
+  const bool have_decl = dlo && dhi;
+  if (!lo || !hi) {
+    lo = dlo;
+    hi = dhi;
+  }
+  if (!lo || !hi) {
+    return "int";
+  }
+  const bool  sgn  = have_decl ? (*dlo < 0) : (*lo < 0);
+  const int   bits = have_decl ? (sgn ? sbits(*dlo, *dhi) : ubits(*dhi)) : (sgn ? sbits(*lo, *hi) : ubits(*hi));
+  std::string r(1, sgn ? 's' : 'u');
+  r += std::to_string(bits);
+  r += "(bw_min=";
+  r += std::to_string(*lo);
+  r += ", bw_max=";
+  r += std::to_string(*hi);
+  r += ')';
+  return r;
+}
+
+// LSP-side stash of declared type/mode read straight off `declare` nodes
+// during the walk (filled only when the lsp index is enabled). A reg field's
+// declare (`bank.x` from a struct reg) reaches bake_decl_pre_step before its
+// root binding exists, so the compiler path DROPS the facts (regs are runtime;
+// tolg re-reads the type subtree itself) — this keeps a render-only copy so
+// hover still shows u32/s8 + the reg mode. Keyed by dotted dst name, cleared
+// per runner run; never fed back into the symbol table (no semantic effect).
+absl::flat_hash_map<std::string, Symbol_table::Pending_decl>& lsp_decl_hints() {
+  static absl::flat_hash_map<std::string, Symbol_table::Pending_decl> m;
+  return m;
+}
+
+// Overlay for declared facts that never landed on the bundle entry: first the
+// compiler's own pending stash (a field declared before its first write), then
+// the LSP-side declare hints above. Applied at render time only.
+Bundle::Entry lsp_overlay_pending(Bundle::Entry fe, const Symbol_table& st, const std::string& key) {
+  const auto apply = [&fe](const Symbol_table::Pending_decl& pf) {
+    if (fe.kind == upass::Kind::unknown) {
+      fe.kind = pf.kind;
+    }
+    if (fe.decl_max.is_invalid()) {
+      fe.decl_max = pf.decl_max;
+    }
+    if (fe.decl_min.is_invalid()) {
+      fe.decl_min = pf.decl_min;
+    }
+  };
+  if (const auto it = st.pending_decl_facts.find(key); it != st.pending_decl_facts.end()) {
+    apply(it->second);
+  }
+  if (const auto it = lsp_decl_hints().find(key); it != lsp_decl_hints().end()) {
+    apply(it->second);
+  }
+  return fe;
+}
+
+// task 2n — a whole tuple for the LSP hover: each leaf with its scalar render,
+// `tuple(x: u4(bw_min=1, bw_max=1), y: string, …)`. non_attr_entries flattens
+// nested sub-bundles into dotted keys in canonical order; long tuples truncate
+// so the hover stays one-glance readable. `root` prefixes each leaf key for
+// the pending-facts overlay lookup.
+std::string lsp_render_tuple(const Bundle& b, const Symbol_table& st, std::string_view root) {
+  constexpr size_t kMaxFields = 8;
+  const auto       leaves     = b.non_attr_entries();
+  std::string      r          = "tuple(";
+  size_t           shown      = 0;
+  for (const auto& [key, fe] : leaves) {
+    if (shown == kMaxFields) {
+      r += ", …+";
+      r += std::to_string(leaves.size() - kMaxFields);
+      break;
+    }
+    if (shown != 0) {
+      r += ", ";
+    }
+    std::string pkey(root);
+    pkey += '.';
+    pkey += key;
+    r    += key;
+    r    += ": ";
+    r    += lsp_render_leaf_type(lsp_overlay_pending(fe, st, pkey));
+    ++shown;
+  }
+  r += ')';
+  return r;
+}
+
+}  // namespace
+
 // task 2n Phase B — see the header. Statement-granularity span (operand refs
 // carry no SourceId; the enclosing op does), so selectionRange == range.
 void uPass_runner::record_lsp_def(std::string_view dst_name) {
@@ -1554,11 +1690,64 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
     return s;
   };
 
+  const auto emit = [&](std::string_view nm, std::string rend) {
+    livehd::lsp_index::Entry e;
+    e.start_line = sp.start_line ? *sp.start_line : 0;
+    e.start_col  = sp.start_col ? *sp.start_col : 0;
+    e.end_line   = sp.end_line ? *sp.end_line : e.start_line;
+    e.end_col    = sp.end_col ? *sp.end_col : e.start_col;
+    e.file       = sp.file;
+    e.name       = std::string(nm);
+    e.render     = std::move(rend);
+    livehd::lsp_index::index().record(std::move(e));
+  };
+
+  std::string reg_pfx;
+  if (bun && bun->get_mode() == upass::Mode::reg_kind) {
+    reg_pfx = "reg ";
+  }
+
+  // A DOTTED dst (`bank.x = …`, or the per-field declares detuple splits a
+  // struct reg into) defines one FIELD of a container bundle: render that
+  // field's own type, and refresh the container's whole-tuple entry so the
+  // container name stays hoverable (nothing ever defines bare `bank`).
+  if (const auto sub = Bundle::get_all_but_first_level(base); bun && !sub.empty()) {
+    const std::string base_s(base);
+    if (reg_pfx.empty()) {  // a reg field's mode only exists in the declare hints
+      if (const auto it = lsp_decl_hints().find(base_s); it != lsp_decl_hints().end() && it->second.mode == upass::Mode::reg_kind) {
+        reg_pfx = "reg ";
+      }
+    }
+    std::string render(base);
+    render        += " : ";
+    render        += reg_pfx;
+    bool rendered  = false;
+    if (const auto sb = bun->get_bundle(bundle_path::of_string(sub)); sb) {
+      const auto leaves = sb->non_attr_entries();
+      if (leaves.size() == 1 && leaves.begin()->first == "0") {
+        // a lone positional leaf is the field's scalar, not a nested tuple
+        render += lsp_render_leaf_type(lsp_overlay_pending(leaves.begin()->second, symbol_table_, base_s));
+      } else {
+        render += lsp_render_tuple(*sb, symbol_table_, base_s);
+      }
+      rendered = true;
+    }
+    if (!rendered) {
+      render += lsp_render_leaf_type(lsp_overlay_pending(bun->get_entry(bundle_path::of_string(sub)), symbol_table_, base_s));
+    }
+    emit(base, std::move(render));
+    const auto  first = Bundle::get_first_level(base);
+    std::string crend(first);
+    crend += " : ";
+    crend += reg_pfx;
+    crend += lsp_render_tuple(*bun, symbol_table_, first);
+    emit(first, std::move(crend));
+    return;
+  }
+
   std::string render(base);
   render += " : ";
-  if (bun && bun->get_mode() == upass::Mode::reg_kind) {
-    render += "reg ";
-  }
+  render += reg_pfx;
   if (bun && bun->has_attr("pub_unit")) {
     // `X = import("unit")` whole-namespace binding (call_resolver marker attr).
     render += "import(\"";
@@ -1570,7 +1759,7 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
   } else if (is_enum_type) {
     render += "enum";
   } else if (is_tuple) {
-    render += "tuple";
+    render += lsp_render_tuple(*bun, symbol_table_, base);
   } else if (kind == upass::Kind::boolean) {
     render += "bool";
   } else if (kind == upass::Kind::string) {
@@ -1625,15 +1814,7 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
     }
   }
 
-  livehd::lsp_index::Entry e;
-  e.start_line = sp.start_line ? *sp.start_line : 0;
-  e.start_col  = sp.start_col ? *sp.start_col : 0;
-  e.end_line   = sp.end_line ? *sp.end_line : e.start_line;
-  e.end_col    = sp.end_col ? *sp.end_col : e.start_col;
-  e.file       = sp.file;
-  e.name       = std::string(base);
-  e.render     = std::move(render);
-  livehd::lsp_index::index().record(std::move(e));
+  emit(base, std::move(render));
 }
 
 void uPass_runner::process_drop_candidate_verbatim(Pass_method fn) {
@@ -6424,6 +6605,9 @@ void uPass_runner::run() {
   }
   symbol_table_.pending_decl_facts.clear();  // dotted-bake stash is per-run state
   symbol_table_.pending_keys_by_root.clear();
+  if (livehd::lsp_index::index().enabled()) {
+    lsp_decl_hints().clear();  // LSP-side declare hints are per-run state too
+  }
   const_parse_cache_.clear();
   symbol_table_.tget_origin.clear();
   symbol_table_.nil_seeded.clear();
@@ -7093,12 +7277,48 @@ void uPass_runner::process_lnast() {
       // the push path records no def entry for them — record the declaration
       // site itself (now that the type/mode facts are baked). Non-state
       // declares record here too; the init store re-records with bw facts.
+      // The declared type/mode is also read straight off the node into
+      // lsp_decl_hints: a reg FIELD's facts never reach the symbol table (its
+      // root binding doesn't exist when bake runs, so bake drops them).
       if (livehd::lsp_index::index().enabled() && lm->has_child()) {
         const auto  here = lm->save_cursor();
         std::string nm;
         lm->move_to_child();
         if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
           nm = std::string(lm->current_text());
+          Symbol_table::Pending_decl hint;
+          if (lm->move_to_sibling()) {  // TYPE slot (mirrors bake_decl_pre_step)
+            const auto t = lm->get_raw_ntype();
+            if (Lnast_ntype::is_prim_type_int(t)) {
+              hint.kind = upass::Kind::integer;
+              if (lm->move_to_child()) {
+                if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
+                  if (auto v = Dlop::from_pyrope(lm->current_text()); v->is_integer()) {
+                    hint.decl_max = *v;
+                  }
+                }
+                if (lm->move_to_sibling() && Lnast_ntype::is_const(lm->get_raw_ntype())) {
+                  if (auto v = Dlop::from_pyrope(lm->current_text()); v->is_integer()) {
+                    hint.decl_min = *v;
+                  }
+                }
+                lm->move_to_parent();
+              }
+            } else if (Lnast_ntype::is_prim_type_bool(t)) {
+              hint.kind = upass::Kind::boolean;
+            } else if (Lnast_ntype::is_prim_type_string(t)) {
+              hint.kind = upass::Kind::string;
+            }
+            if (lm->move_to_sibling() && Lnast_ntype::is_const(lm->get_raw_ntype())) {  // MODE slot
+              const auto txt = lm->current_text();
+              if (txt == "reg" || txt.substr(0, 4) == "reg ") {
+                hint.mode = upass::Mode::reg_kind;
+              }
+            }
+          }
+          if (hint.kind != upass::Kind::unknown || hint.mode != upass::Mode::unknown || !hint.decl_max.is_invalid()) {
+            lsp_decl_hints()[nm] = std::move(hint);
+          }
         }
         lm->restore_cursor(here);
         if (!nm.empty()) {

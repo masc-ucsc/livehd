@@ -20,11 +20,13 @@ GOOD = 'comb f(a:u8) -> (z:u8) { z = a }\n'
 BAD = 'comb f(a:u8 -> (z:u8) { z = a\n'  # missing ')' and '}'
 
 # 2n Phase C: a file-scope const used inside a comb -> definition on the use
-# must answer the declaration statement.
+# must answer the declaration statement. The trailing tuple exercises the
+# per-field hover render (`pair : tuple(px: u1(...), py: u2(...))`).
 MULTI = ('const kk = 33\n'
          'comb g(a:u8) -> (z:u8) {\n'
          '  z = a + kk\n'
-         '}\n')
+         '}\n'
+         'const pair = (const px = 1, const py = 2)\n')
 
 
 def send(proc, obj):
@@ -167,6 +169,14 @@ def main():
                            'position': {'line': 0, 'character': 2}}})
     if read_response(proc, 11).get('result', 'missing') is not None:
         fail('definition off a name should be null')
+    # Tuple hover lists its fields with per-field types.
+    send(proc, {'jsonrpc': '2.0', 'id': 15, 'method': 'textDocument/hover',
+                'params': {'textDocument': {'uri': uri},
+                           'position': {'line': 4, 'character': 7}}})
+    hov = read_response(proc, 15).get('result')
+    value = (hov or {}).get('contents', {}).get('value', '')
+    if 'tuple(' not in value or 'px: ' not in value or 'py: ' not in value:
+        fail('tuple hover should list per-field types: %r' % hov)
 
     # ── cross-file definition through import() (2n Phase C) ─────────────────
     # A real sibling .prp on disk; the importing buffer is unsaved (didOpen
