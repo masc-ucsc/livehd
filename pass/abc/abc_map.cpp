@@ -497,9 +497,6 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // A region-internal node not yet materialized (should not happen in topo
     // order) or an unexpected boundary: emit a constant 0 so the netlist stays
     // structurally valid; correctness is guarded by the unsupported-cell diag.
-    std::print(stderr, "[dbg abc_bit FALLBACK->const0] drv nid={} op={} bits={} unsign={} eff={}\n",
-               drv.get_master_node().get_debug_nid(), Ntype::get_name(gu::type_op_of(drv.get_master_node())), w,
-               gu::is_unsign(drv), eff);
     auto* net  = abc_const_bit(false);
     slots[eff] = net;
     return net;
@@ -539,11 +536,27 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     if (region_input_drivers.contains(d)) {
       return std::max(1, gu::bits_of(d));
     }
+    if (gu::is_const_pin(d)) {
+      // A constant driver usually carries NO bits attribute (bits_of == 0), so
+      // real_width would clamp it to 1 bit and a width-sensitive consumer
+      // (mult/sra) would read e.g. 342 as its bit 0 only — collapsing the whole
+      // cone to a constant (the const-mult miscompile). Size a constant from
+      // its VALUE: get_bits() is the minimal two's-complement width, which is
+      // exactly how the LEC reads the literal.
+      return std::max(1, static_cast<int>(gu::hydrate_const(d).get_bits()));
+    }
     return real_width(d);
   };
   // Bit i of an operand as the LEC sees it: the real bit below its effective
   // width, then sign/zero extension above it (NOT the raw stored spare slot).
   auto abc_eff_bit = [&](const hhds::Pin_class& d, int i) -> Abc_Obj_t* {
+    if (gu::is_const_pin(d)) {
+      // Constants are exact in abc_bit: with no bits attr (w == 0) it reads the
+      // literal's two's-complement bit at ANY position (negatives sign-extend
+      // via bit_test), and with a stamped attr it clamps like every other
+      // consumer. Bypassing the eff-width clamp avoids truncating the value.
+      return abc_bit(d, i);
+    }
     int ew = eff_width(d);
     if (i < ew) {
       return abc_bit(d, i);
@@ -739,13 +752,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   bool unsupported = false;
   for (auto n : rb.src->forward_class()) {
     if (!region.contains(n)) {
-      std::print(stderr, "[dbg topo SKIP not-in-region] nid={} op={}\n", n.get_debug_nid(),
-                 Ntype::get_name(gu::type_op_of(n)));
       continue;
     }
     auto op = gu::type_op_of(n);
-    std::print(stderr, "[dbg topo] nid={} op={} out_bits={}\n", n.get_debug_nid(), Ntype::get_name(op),
-               gu::bits_of(n.create_driver_pin(0)));
     if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Div) {
       continue;  // blackbox boundary (Sub instance / memory / divider) -- handled separately
     }
@@ -1263,7 +1272,6 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   Abc_NtkDelete(manNtk);
   Abc_FrameClearVerifStatus(frame);
   Abc_FrameSetCurrentNetwork(frame, pLogic);
-  Cmd_CommandExecute(frame, "write_blif /tmp/dbg_premap.blif");  // dbg
   auto flow = opts_.seq ? seq_flow() : comb_flow();
   if (Cmd_CommandExecute(frame, flow.c_str()) != 0) {
     livehd::diag::err("pass.abc", "abc-flow", "internal").msg("ABC flow failed for region '{}': {}", rb.module_name, flow).fatal();
