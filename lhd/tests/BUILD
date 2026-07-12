@@ -272,6 +272,17 @@ sh_test(
     data = ["//lhd"],
 )
 
+# post-V1 verify knobs: the TOTAL solver-time budget (budget_mode=wall), the
+# minetimeout timeout-core diagnosis (names the toxic obligation subset), and the
+# per-flop induction reset guard (unbounded proof for a true twin invariant, still
+# REFUTED for an unequal-reset twin — the guard never manufactures a proof).
+sh_test(
+    name = "lhd_formal_budget_mine_test",
+    size = "large",
+    srcs = ["lhd_formal_budget_mine_test.sh"],
+    data = ["//lhd"],
+)
+
 sh_test(
     name = "lhd_formal_cache_split_test",
     srcs = ["lhd_formal_cache_split_test.sh"],

@@ -109,6 +109,15 @@ void Pass_lec::setup() {
                        "counter (0 = off). The compile tier sets it (with timeout=0) so a verdict that elides a "
                        "runtime check is reproducible across binaries; verify/lec default to wall-clock timeout",
                        "0");
+  m.add_label_optional("budget_mode",
+                       "how the hierarchical driver spends `timeout`: wall (timeout is a TOTAL wall-clock budget spent "
+                       "over escalating rounds, so one formal.timeout=T is an actual total, not T per def) | rlimit "
+                       "(no wall-clock rounds; deterministic rlimit-per bounds each query — the compile/CI-repro path)",
+                       "wall");
+  m.add_label_optional("minetimeout",
+                       "extra budget (seconds, 0 = off) for a diagnosis phase after the final round: names the "
+                       "still-unproven defs so a timed-out run's output is actionable",
+                       "0");
   m.add_label_optional("split",
                        "case-split control input: auto (default; pick the small-width input feeding the widest "
                        "variable shift-amount / mux-selector pins) | <input-name> (force) | none (disable)",

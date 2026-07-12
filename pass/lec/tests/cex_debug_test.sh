@@ -46,13 +46,14 @@ else
   echo "FAIL: expected REFUTED"; echo "$OUT" | tail -2; fail=1
 fi
 
-# The ROOT must be the internal reg `s`, named ahead of the inherited output.
-# (The root clause lists ALL cuts diverging at the earliest cycle, sorted —
-# `s(` must appear within it.)
-if echo "$OUT" | grep -q "STATE cut(s) (root): .*s("; then
-  echo "ok: first diverging internal cut = s (root)"
+# The ROOT must be the internal reg `s`, named ahead of the inherited output, and
+# (F7) SOURCE-MAPPED to its declaration `file:line` — `s (…/m.prp:2)` — resolved
+# from the flop node's attrs::srcid via the graph Source_locator.
+if echo "$OUT" | grep -Eq "STATE cut\(s\) \(root\): .*s \([^)]*m\.prp:[0-9]+\)"; then
+  echo "ok: first diverging internal cut = s (root), source-mapped to file:line"
 else
-  echo "FAIL: witness did not name the internal root cut 's'"; fail=1
+  echo "FAIL: witness did not name the source-mapped internal root cut 's (…m.prp:N)'"
+  echo "$OUT" | grep -o "STATE cut.*" | head -1; fail=1
 fi
 
 # The inherited primary output must still be carried.

@@ -707,11 +707,17 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
   }
 
   auto finish = [&](hhds::Graph* g, State_side& ss, uint32_t& unpaired, uint32_t& ambiguous, std::vector<std::string>& names,
-                    std::string_view side) {
+                    std::vector<std::string>& mem_diverged, std::string_view side) {
     for (auto& c : ss.cells) {
       if (c.token == 0) {
         ++unpaired;
         ambiguous += c.ambiguous ? 1 : 0;
+        // A memory with a GENUINE mismatch (kind/init clash or no counterpart —
+        // not mere symmetric ambiguity, which is occurrence-safe) must not be
+        // force-collapsed by lec: its correspondence diverges. See 2f-lec guard.
+        if (c.is_mem && !c.ambiguous) {
+          mem_diverged.push_back(std::string(c.node.get_hier_name()));
+        }
         if (opts.state_pairing) {
           names.push_back(c.node.get_hier_name()
                           + (c.ambiguous ? " (ambiguous)" : c.kind_clash ? " (kind/init mismatch)" : " (no full match)"));
@@ -731,8 +737,8 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
       }
     }
   };
-  finish(ga, sa, st.a_unpaired, st.a_ambiguous, res.a_state_unpaired, "ref");
-  finish(gb, sb, st.b_unpaired, st.b_ambiguous, res.b_state_unpaired, "impl");
+  finish(ga, sa, st.a_unpaired, st.a_ambiguous, res.a_state_unpaired, res.a_mem_diverged, "ref");
+  finish(gb, sb, st.b_unpaired, st.b_ambiguous, res.b_state_unpaired, res.b_mem_diverged, "impl");
 }
 
 // Per-side analysis: forward/backward signatures + node order.

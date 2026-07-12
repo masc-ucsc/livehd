@@ -55,6 +55,32 @@ ck "testbench exposes ref out"  'grep -q "ref_value" "$W1/lecfail.prp"'
 ck "testbench drives the seq"   'grep -q "const _drv_en = \[" "$W1/lecfail.prp"'
 ck "testbench drives reset"     'grep -q "_lec_dut.reset" "$W1/lecfail.prp"'
 
+# ---- F7: source-mapped root cut + machine-readable lecfail.json -----------------
+# The first diverging STATE cut (the flop the diverging output inherits) is named
+# with its impl-side declaration file:line, both in the .prp header and in a sibling
+# lecfail.json whose input sequence matches the .prp _drv_* arrays by construction.
+ck "prp header has source-mapped root cut" 'grep -Eq "// Root cut:.*impl\.prp:[0-9]+" "$W1/lecfail.prp"'
+ck "wrote lecfail.json"                    '[ -f "$W1/lecfail.json" ]'
+ck "lecfail.json parses"                   'python3 -m json.tool "$W1/lecfail.json" >/dev/null'
+cat > "$WORK/chk.py" <<'PY'
+import json, re, sys
+prp = open(sys.argv[1]).read()
+d   = json.load(open(sys.argv[2]))
+rc  = d.get("root_cut")
+assert rc and rc["file"].endswith("impl.prp") and rc["line"] > 0, f"bad root_cut {rc}"
+cyc = d["trace"]["cycles"]
+drv = {m.group(1): [x.strip() for x in m.group(2).split(",")]
+       for m in re.finditer(r"const _drv_(\w+) = \[([^\]]*)\]", prp)}
+assert drv, "no _drv arrays in the .prp"
+for name, arr in drv.items():
+    assert len(arr) == len(cyc), f"len _drv_{name}={len(arr)} != json cycles={len(cyc)}"
+    for i, v in enumerate(arr):
+        got = {x["name"]: x["value"] for x in cyc[i]["inputs"]}.get(name)
+        assert got is None or got == v, f"_drv_{name}[{i}] prp={v} json={got}"
+print("ok")
+PY
+ck "json root_cut + input sequence match the .prp" 'python3 "$WORK/chk.py" "$W1/lecfail.prp" "$W1/lecfail.json" | grep -q ok'
+
 # ---- the generated testbench must be SIM-VALID: `lhd sim --setup-only` runs the
 # whole front-end (inou.prp -> upass -> tolg -> cgen_sim) without host-compiling,
 # so it catches any codegen regression in the generated wrapper/test hermetically.

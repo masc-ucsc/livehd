@@ -244,6 +244,12 @@ void put_trace(std::string& b, const Witness_trace& tr) {
       put_u32(b, static_cast<uint32_t>(in.width));
     }
   }
+  // F7 root cut (best-effort TAIL — a reader that stops before it keeps defaults).
+  put_str(b, tr.root_key);
+  put_u32(b, static_cast<uint32_t>(tr.root_cycle));  // -1 round-trips via 0xffffffff
+  put_str(b, tr.root_ref);
+  put_str(b, tr.root_impl);
+  put_str(b, tr.root_src);
 }
 
 // Serialize a Query_result over the worker pipe (same binary on both ends, so
@@ -340,6 +346,12 @@ bool get_trace(std::string_view& b, Witness_trace& tr) {
       cyc.inputs.push_back(std::move(in));
     }
     tr.cycles.push_back(std::move(cyc));
+  }
+  // F7 root cut — optional tail; a truncated blob leaves the root_* defaults.
+  uint32_t rcyc = 0;
+  if (get_str(b, tr.root_key) && get_u32(b, rcyc) && get_str(b, tr.root_ref) && get_str(b, tr.root_impl)
+      && get_str(b, tr.root_src)) {
+    tr.root_cycle = static_cast<int>(rcyc);
   }
   return true;
 }
@@ -2017,6 +2029,102 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     solver.setOption("produce-models", "true");
   }
 
+  // ── diverged-use memory collapse guard (2f-lec) ───────────────────────────
+  // Memories collapse by SHAPE (size×bits) × RTL occurrence order, NOT by name
+  // (memory hier-names are positional node-ids like `n10`, so they cannot by
+  // themselves tell a correct occurrence order from a crossed one). Occurrence
+  // pairing is a soundness hazard ONLY when a shape bucket holds MORE THAN ONE
+  // memory per side and the two front-ends correspond them in a different order
+  // than declaration: the wrong two memories then share one current-state array,
+  // which can mask a real difference (false PROVEN) or invent one (false REFUTE).
+  // We only ACT on that hazard when semdiff has a confident structural opinion
+  // about the bucket's memories (opts.mem_match, its full-match mem pairs): if
+  // semdiff paired any memory of an ambiguous bucket, its occurrence pairing must
+  // agree with semdiff at every position, else the bucket is left UNCOLLAPSED
+  // (skip minting the shared symbol ⇒ the encoder falls back to fresh per-design
+  // arrays — sound, worst case Unknown). When semdiff has NO opinion (the common
+  // case, incl. every self-LEC and single-memory-per-shape design) the collapse
+  // is UNCHANGED from before this guard — so it can never regress an existing
+  // verdict, only remove a semdiff-contradicted (diverged) collapse.
+  auto mem_names_by_shape = [&](hhds::Graph* g) {
+    absl::flat_hash_map<std::string, std::vector<std::string>> by;
+    for (auto node : g->forward_class()) {
+      if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
+        continue;
+      }
+      Mem_sig sig = read_mem_sig(node);
+      if (sig.bits <= 0 || sig.size <= 0) {
+        continue;
+      }
+      by[std::to_string(sig.size) + "x" + std::to_string(sig.bits)].push_back(std::string(node.get_hier_name()));
+    }
+    return by;
+  };
+  const auto                       ref_mem_shapes  = mem_names_by_shape(ref);
+  const auto                       impl_mem_shapes = mem_names_by_shape(impl);
+  absl::flat_hash_set<std::string> mem_confirmed;  // canon(ref)\x01canon(impl) confident semdiff mem pairs
+  absl::flat_hash_set<std::string> mem_opined;     // canon name of any memory semdiff paired (either side)
+  for (const auto& [rn, in] : opts.mem_match) {
+    mem_confirmed.insert(canon_flop_name(rn) + "\x01" + canon_flop_name(in));
+    mem_opined.insert(canon_flop_name(rn));
+    mem_opined.insert(canon_flop_name(in));
+  }
+  absl::flat_hash_set<std::string> mem_diverged;  // canon names semdiff flagged as genuinely diverged
+  for (const auto& n : opts.mem_diverged) {
+    mem_diverged.insert(canon_flop_name(n));
+  }
+  auto bucket_has_diverged = [&](const std::vector<std::string>& names) {
+    for (const auto& n : names) {
+      if (mem_diverged.count(canon_flop_name(n))) {
+        return true;
+      }
+    }
+    return false;
+  };
+  // true ⇒ this shape's occurrence pairing is trustworthy, so collapse it.
+  auto shape_collapse_ok = [&](const std::string& sg) -> bool {
+    auto   ri = ref_mem_shapes.find(sg);
+    auto   ii = impl_mem_shapes.find(sg);
+    size_t rn = ri == ref_mem_shapes.end() ? 0 : ri->second.size();
+    size_t in = ii == impl_mem_shapes.end() ? 0 : ii->second.size();
+    // A GENUINELY diverged memory (semdiff kind/init mismatch or no counterpart)
+    // in this shape must never be force-collapsed — the sides use/init it
+    // differently, so one shared current-state array would be unsound. Uncollapse
+    // the whole shape (the diverged-use case this guard exists for; "Rarely" per
+    // the todo, so the completeness cost of dropping the bucket is negligible).
+    if ((ri != ref_mem_shapes.end() && bucket_has_diverged(ri->second))
+        || (ii != impl_mem_shapes.end() && bucket_has_diverged(ii->second))) {
+      return false;
+    }
+    if (rn <= 1 && in <= 1) {
+      return true;  // unambiguous: at most one memory of this shape per side
+    }
+    // Only second-guess an ambiguous bucket when semdiff actually paired one of
+    // its memories; otherwise preserve the pre-guard occurrence collapse (so this
+    // guard never regresses a design semdiff said nothing about — e.g. self-LEC).
+    bool opined = false;
+    for (size_t i = 0; i < rn && !opined; ++i) {
+      opined = mem_opined.count(canon_flop_name(ri->second[i])) != 0;
+    }
+    for (size_t i = 0; i < in && !opined; ++i) {
+      opined = mem_opined.count(canon_flop_name(ii->second[i])) != 0;
+    }
+    if (!opined) {
+      return true;  // no semdiff signal for this bucket: unchanged occurrence collapse
+    }
+    if (rn != in) {
+      return false;  // semdiff opined + a count mismatch ⇒ correspondence diverges
+    }
+    for (size_t i = 0; i < rn; ++i) {
+      std::string k = canon_flop_name(ri->second[i]) + "\x01" + canon_flop_name(ii->second[i]);
+      if (mem_confirmed.count(k)) {
+        continue;  // semdiff confirms this position's occurrence pairing
+      }
+      return false;  // semdiff contradicts (diverged): keep the whole bucket uncollapsed
+    }
+    return true;
+  };
+
   // Shared current-state ARRAY symbol per memory cut key, across both designs
   // (the "collapse corresponding memories" assumption). Built once; the encoder
   // reuses the symbol for the matching memory in each design.
@@ -2033,6 +2141,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           continue;
         }
         std::string sg  = std::to_string(sig.size) + "x" + std::to_string(sig.bits);  // shape only; occ matches by RTL order
+        if (!shape_collapse_ok(sg)) {
+          continue;  // ambiguous bucket semdiff flagged as diverged: leave every memory of this shape uncollapsed
+        }
         std::string key = mem_state_key(sig, occ[sg]++);
         if (sm.count(key)) {
           continue;
@@ -2058,6 +2169,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   if (opts.engine == "bmc") {
     const int N = opts.bound > 0 ? opts.bound : 6;
     Encoder   enc(tm);
+    enc.set_encode_budget(opts.timeout);  // 2f-lec: bound encode wall-clock like each checkSat
     enc.set_sub_lib(sub_lib);
     enc.set_name_alias(&name_alias);
     enc.set_collapse_defs(collapse_ptr);
@@ -2551,6 +2663,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       cvc5::Term  iv;
     };
     std::vector<Wit_state> wit_state;
+    Io_name_map<std::string> wit_src;  // F7: flop key -> "file:line" (impl side), merged from ie.src_of_key
     // Correspondence completeness: a compare point (primary output or a
     // collapsed-box bbin obligation) present on ONE side only means the two
     // designs did not expose the same compare set — e.g. mismatched box
@@ -2649,6 +2762,13 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         res.verdict  = Verdict::Unknown;
         res.detail   += "; impl encode failed: " + ie.error;
         return res;
+      }
+      // F7: the impl-side flop decl locations (same key set every cycle) — the impl
+      // is the design the user edits, so its `file:line` is what the witness names.
+      if (opts.witness) {
+        for (const auto& [k, loc] : ie.src_of_key) {
+          wit_src.try_emplace(k, loc);
+        }
       }
       for (const auto& [l, r] : re.equalities) {
         solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
@@ -3016,6 +3136,16 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
           // the earliest diverging cycle's cut set — collect ALL cuts diverging at
           // that same cycle (sorted) so the witness names the true root set, not a
           // hash-order pick (a single wide-fanin bug diverges many flops at once).
+          // F7: strip the multi-stage \x02p<k> suffix to the base flop key, then
+          // look up the impl-side "file:line" for the source-mapped root clause.
+          auto src_for = [&](const std::string& key) -> std::string {
+            std::string base = key;
+            if (auto p = base.find("\x02p"); p != std::string::npos) {
+              base = base.substr(0, p);
+            }
+            auto it = wit_src.find(base);
+            return it == wit_src.end() ? std::string{} : it->second;
+          };
           std::vector<std::string> rtoks;
           for (const auto& s : wit_state) {
             if (s.cyc != state_bad) {
@@ -3029,7 +3159,17 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
             auto rs = rval.getBitVectorValue(10);
             auto is = ival.getBitVectorValue(10);
             if (rs != is) {
-              rtoks.push_back(display_name(s.key) + "(ref=" + rs + " impl=" + is + ")");
+              std::string loc = src_for(s.key);
+              rtoks.push_back(display_name(s.key) + (loc.empty() ? "" : " (" + loc + ")") + "(ref=" + rs + " impl=" + is + ")");
+              // Record the FIRST diverging state cut as the machine-readable root cut
+              // (lecfail.json) — the state the diverging output inherits.
+              if (res.trace.root_cycle < 0) {
+                res.trace.root_key   = display_name(s.key);
+                res.trace.root_cycle = state_bad;
+                res.trace.root_ref   = rs;
+                res.trace.root_impl  = is;
+                res.trace.root_src   = loc;
+              }
             }
           }
           std::sort(rtoks.begin(), rtoks.end());
@@ -3221,8 +3361,10 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         if (sig.bits <= 0 || sig.size <= 0) {
           continue;
         }
-        std::string sg  = std::to_string(sig.size) + "x" + std::to_string(sig.bits) + ":r" + std::to_string(sig.n_rd) + "w"
-                       + std::to_string(sig.n_wr);
+        std::string sg  = std::to_string(sig.size) + "x" + std::to_string(sig.bits);  // shape only; occ matches by RTL
+                                                                                       // order (see mem_state_key + the
+                                                                                       // build_shared_mems / collect_mem_keys
+                                                                                       // sites — port counts must NOT key occ)
         std::string key = mem_state_key(sig, occ[sg]++);
         out[key]        = MemRec{sig};
       }
@@ -3335,6 +3477,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   }
 
   Encoder enc(tm);
+  enc.set_encode_budget(opts.timeout);  // 2f-lec: bound encode wall-clock like each checkSat
   enc.set_sub_lib(sub_lib);
   enc.set_name_alias(&name_alias);
   enc.set_collapse_defs(collapse_ptr);
@@ -4097,6 +4240,54 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   if (opts.witness) {
     solver.setOption("produce-models", "true");
   }
+  // 2f-verify timeout-core diagnosis (formal.minetimeout): unsat-core production
+  // AND the timeout-core budget must be armed at setup — both are rejected once
+  // the solver is "fully initialized" (after the first checkSat). Opt-in only
+  // (default 0), so a normal run pays nothing.
+  if (opts.minetimeout > 0) {
+    solver.setOption("produce-unsat-cores", "true");
+    solver.setOption("timeout-core-timeout", std::to_string(static_cast<long long>(opts.minetimeout) * 1000));
+  }
+
+  // ── Total solver-time budget (2f-verify, budget_mode=wall) ────────────────
+  // Mirror the hierarchical lec scheduler at OBLIGATION granularity: bound the
+  // whole prove_properties run to ~opts.timeout of cvc5 time across every
+  // obligation-check and cycle, instead of opts.timeout PER checkSatAssuming (the
+  // D×T hazard — O obligations × C cycles each getting the full budget). SOUND:
+  // it only ever yields Unknown or a shallower bounded proof, never a false
+  // Proven/Refuted. OFF for the deterministic rlimit / compile tier (rlimit>0 or
+  // timeout==0) so those stay machine-reproducible. engine=auto races two whole-
+  // run strategies, each its own prove_properties call, so each self-bounds to
+  // `timeout` (fork children can't share this in-process accumulator — that is
+  // fine: two strategies budgeted to T apiece is the intended parallelism).
+  const bool      solve_budget_on = opts.budget_mode == "wall" && opts.timeout > 0 && opts.rlimit == 0;
+  const long long solve_budget_ms = static_cast<long long>(opts.timeout) * 1000;
+  long long       solve_spent_ms  = 0;
+  bool            budget_capped   = false;  // an obligation was frozen for lack of budget
+  auto            budget_spent    = [&]() { return solve_budget_on && solve_spent_ms >= solve_budget_ms; };
+  // Budget-aware checkSatAssuming: while budget remains it shrinks tlimit-per to
+  // the remaining budget; once spent it FLOORS each attempt at 1s so a straggler
+  // still earns a real verdict (matching the hier-lec scheduler) instead of a
+  // silent skip. The FREEZE of already-bounded obligations (below) is what bounds
+  // the total — this only ensures no single obligation-check runs unbounded.
+  // No-op accounting when the budget is off.
+  auto budget_check = [&](const cvc5::Term& bad) -> cvc5::Result {
+    if (solve_budget_on) {
+      const long long remaining = solve_budget_ms - solve_spent_ms;
+      solver.setOption("tlimit-per", std::to_string(std::max<long long>(1000, remaining)));
+    }
+    const auto   tq = std::chrono::steady_clock::now();
+    cvc5::Result r  = solver.checkSatAssuming(bad);
+    if (solve_budget_on) {
+      solve_spent_ms += now_ms(tq);
+    }
+    return r;
+  };
+  // Timeout-core diagnosis (formal.minetimeout): each obligation left Unknown
+  // remembers the `bad` term of its stuck cycle, so a post-run getTimeoutCore
+  // can name the toxic subset. prop index -> its last violated-condition term.
+  absl::flat_hash_map<size_t, cvc5::Term> unknown_bad;
+
   std::vector<cvc5::Term> asserted;
   auto                    assert_formula = [&](const cvc5::Term& t) {
     solver.assertFormula(t);
@@ -4138,6 +4329,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   }
 
   Encoder enc(tm);
+  enc.set_encode_budget(opts.timeout);  // 2f-lec: bound per-cycle encode wall-clock like each checkSat
   enc.set_sub_lib(sub_lib);
   enc.set_emit_props(true);
 
@@ -4575,6 +4767,15 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         if (!check_now || pr.refuted_at >= 0 || pr.unknown_at >= 0) {
           continue;  // outside this property's window, or already resolved/stuck
         }
+        // Total-budget FREEZE: once the budget is spent, stop DEEPENING an
+        // obligation that already has a bounded proof — keep it at the depth it
+        // reached instead of re-burning the floor at every remaining cycle. A
+        // never-resolved obligation (proven_to < 0) still gets one floored attempt
+        // below, so it earns a real Unknown/CEX rather than a silent "not checked".
+        if (budget_spent() && pr.proven_to >= 0) {
+          budget_capped = true;
+          continue;
+        }
         cvc5::Term   bad = tm.mkTerm(cvc5::Kind::EQUAL, {fit_to(tm, ob.cond, w), zero});
         std::string ckey   = verify_obligation_key(asserted, bad, opts);
         bool        cached = opts.verify_cache_lookup && opts.verify_cache_lookup(ckey);
@@ -4591,7 +4792,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
               cvc5::Term cube_bad
                   = tm.mkTerm(cvc5::Kind::AND,
                               {bad.substitute(sit->second.term, vc), tm.mkTerm(cvc5::Kind::EQUAL, {sit->second.term, vc})});
-              cvc5::Result cr = solver.checkSatAssuming(cube_bad);
+              cvc5::Result cr = budget_check(cube_bad);
               if (cr.isSat()) {
                 sat   = true;
                 unsat = false;
@@ -4607,7 +4808,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         if (!cached && !unsat && !sat) {
           // A poor selector is only an accelerator miss: fall back to the
           // monolithic obligation so splitting can never weaken the verdict.
-        cvc5::Result r   = solver.checkSatAssuming(bad);
+          cvc5::Result r = budget_check(bad);
           unsat          = r.isUnsat();
           sat            = r.isSat();
         }
@@ -4625,8 +4826,11 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
           pr.witness    = witness_string(pr.trace);
           any_refuted   = true;
         } else {
-          pr.unknown_at = cyc;
-          any_unknown   = true;
+          pr.unknown_at   = cyc;
+          any_unknown     = true;
+          if (opts.minetimeout > 0) {
+            unknown_bad[ix] = bad;  // remember the toxic term for the post-run timeout-core
+          }
         }
       }
     };
@@ -4718,7 +4922,8 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   // sound conjunctive form — rule E; a dropped candidate keeps its bounded
   // verdict). Everything lives under one push/pop so the BMC frame and the
   // final vacuity check are untouched.
-  if (!res.props.empty()) {
+  const bool ind_budget_left = !(solve_budget_on && solve_spent_ms >= solve_budget_ms);
+  if (!res.props.empty() && ind_budget_left) {
     std::vector<size_t> cand;
     for (size_t i = 0; i < res.props.size(); ++i) {
       const auto& pr = res.props[i];
@@ -4733,7 +4938,10 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
       // to their DEASSERTED level in the after_reset phase (user ruling,
       // 2026-07-08): the step then quantifies over post-reset free-running
       // states only, upgrading invariants a mid-trace reset would break. The
-      // narrowing is disclosed in the run detail below.
+      // narrowing is disclosed in the run detail below. NOTE: only PRIMARY reset
+      // INPUTS are pinned (an environment assumption) — a DERIVED/internal reset
+      // (soft reset, functional clear) is left FREE, since pinning a design-
+      // controlled reset would drop reachable states and false-prove (unsound).
       auto frame_inputs = [&](int f) {
         Io_name_map<Val> s;
         for (const auto& [name, info] : ins) {
@@ -4892,10 +5100,14 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
               const int  w   = cond_f[1].at(occ_of(ix)).width > 0 ? cond_f[1].at(occ_of(ix)).width : 1;
               cvc5::Term bad = tm.mkTerm(cvc5::Kind::EQUAL,
                                          {fit_to(tm, cond_f[1].at(occ_of(ix)), w), tm.mkBitVector(static_cast<uint32_t>(w), 0)});
-              if (solver.checkSatAssuming(bad).isUnsat()) {
+              // Under the total budget each rung check is floored, so a candidate
+              // the solver cannot confirm within the remaining budget is simply
+              // dropped (kept only on a definitive UNSAT) — a budget-out only ever
+              // loses an unbounded upgrade, never manufactures one.
+              if (budget_check(bad).isUnsat()) {
                 keep.push_back(ix);
               } else {
-                changed = true;  // dropped: not inductive relative to the set
+                changed = true;  // dropped: not inductive relative to the set (or out of budget)
               }
             }
             solver.pop();
@@ -4933,6 +5145,13 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   // Skipped under ignore_assumes — no design assume was asserted, so there is no
   // assume set to be contradictory (the compile tier owns assume consistency).
   if (res.n_assumes > 0 && !opts.ignore_assumes) {
+    // Restore the full per-query limit first: a budget-exhausted run left
+    // tlimit-per floored at the 1s straggler value, and an inconclusive vacuity
+    // check would spuriously VOID genuine bounded-Proven obligations. This check
+    // is not billed against solve_spent_ms, so the full timeout is consistent.
+    if (solve_budget_on) {
+      solver.setOption("tlimit-per", std::to_string(solve_budget_ms));
+    }
     cvc5::Result r = solver.checkSat();
     if (r.isUnsat()) {
       res.vacuous = true;
@@ -4958,6 +5177,57 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
               + (reset_negset.empty() && opts.phase != "free_toreset" ? "; WARNING no primary reset input found" : "");
   if (split_checks > 0) {
     res.detail += "; case-split " + verify_split.name + " on " + std::to_string(split_checks) + " obligation check(s)";
+  }
+  if (budget_capped) {
+    res.detail += "; total solver budget (" + std::to_string(opts.timeout)
+                + "s) reached: unproven obligation(s) left at their budget-limited depth";
+  }
+
+  // ── Timeout-core diagnosis (formal.minetimeout) ───────────────────────────
+  // A time-limited run leaves obligations Unknown. Under an INDEPENDENT
+  // minetimeout budget (never drawn from formal.timeout), ask cvc5 which SUBSET
+  // of the still-open obligations is the toxic core — the ones whose combined
+  // constraints actually make the solver time out — so the OUTPUT names the real
+  // culprit instead of a flat "N unknown". Diagnostic ONLY: it never changes a
+  // verdict. The cvc5 timeout-core API is experimental, so it is best-effort.
+  if (opts.minetimeout > 0 && !unknown_bad.empty()) {
+    std::vector<cvc5::Term> bads;
+    std::vector<size_t>     bad_ix;
+    for (const auto& [ix, t] : unknown_bad) {
+      if (ix < res.props.size() && res.props[ix].verdict == Verdict::Unknown) {
+        bads.push_back(t);
+        bad_ix.push_back(ix);
+      }
+    }
+    if (!bads.empty()) {
+      try {
+        auto tc = solver.getTimeoutCoreAssuming(bads);
+        std::vector<bool> consumed(bads.size(), false);
+        std::string       names;
+        for (const auto& ct : tc.second) {
+          for (size_t j = 0; j < bads.size(); ++j) {
+            if (!consumed[j] && bads[j] == ct) {
+              consumed[j]    = true;
+              const auto& pr = res.props[bad_ix[j]];
+              names += (names.empty() ? "" : ", ") + (pr.loc.empty() ? pr.kind : pr.kind + "@" + pr.loc)
+                     + (pr.msg.empty() ? "" : " \"" + pr.msg + "\"");
+              break;
+            }
+          }
+        }
+        // tc.first says WHY the subset is the core: unknown/timeout -> it exhausts
+        // the solver (the intended diagnosis); unsat -> the obligations CANNOT be
+        // jointly violated (a real unsat core, not a hardness signal); sat is an
+        // empty core (names stays empty and is skipped).
+        if (!names.empty()) {
+          const char* why = tc.first.isUnsat() ? "jointly UNSATISFIABLE (cannot all be violated)" : "jointly exhaust the solver";
+          res.detail += "; minetimeout core (" + std::to_string(tc.second.size()) + "/" + std::to_string(bads.size())
+                      + " obligation(s) " + why + "): " + names;
+        }
+      } catch (const std::exception& e) {
+        res.detail += "; minetimeout diagnosis unavailable (" + std::string(e.what()) + ")";
+      }
+    }
   }
 
   // Aggregate: Refuted dominates; anything unresolved -> Unknown; else bounded Proven.

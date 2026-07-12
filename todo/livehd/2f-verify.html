@@ -16,18 +16,48 @@
   <code>formal name.dotted { }</code> sidecar blocks compiled to per-cycle-bound
   monitors with submodule-instance binding; the verdict ladder to PROVEN-unbounded
   via simultaneous 1-induction Houdini; ONE <code>formal.*</code> knob namespace with
-  <code>lec.*</code> aliases. The shared infrastructure this page used to spec moved
-  to <a class="xref" href="2f-fcore.html">2f-fcore</a> (2026-07-10 reorg): the
-  verdict cache (old V5), the budget scheduler (old V6), case-split, and hint
-  plumbing. <strong>LANDED 2026-07-10:</strong> serialized-SMT verify-obligation
-  cache keys (F2 tail) and verify case splitting through
-  <code>formal.partitions</code>/<code>formal.split</code> (F4). The scheduler and
-  hint plumbing remain pending in fcore. LEC consumption of formal blocks (old V7,
-  lec half) moved to
-  <a class="xref" href="2f-lec.html">2f-lec</a>; the compile-profile rebase (old V7,
-  formal half) to <a class="xref" href="2f-formal.html">2f-formal</a>.
+  <code>lec.*</code> aliases. The shared formal core (once tracked on the separate
+  2f-fcore page, now retired) is LANDED and lives in <code>pass/lec</code>: the
+  Taskflow proof-DAG runner, the raced portfolio (verify <code>engine=auto</code>:
+  bmc-first vs ind-first), the salt-gated verdict cache, case-split, the assume-form
+  contract, and the shared witness (<code>file:line</code> + <code>lecfail.json</code>).
+  <strong>LANDED 2026-07-10:</strong> serialized-SMT verify-obligation cache keys and
+  verify case splitting through <code>formal.partitions</code>/<code>formal.split</code>.
+  The two shared items that were NOT fully landed when 2f-fcore retired now live on
+  this page (below): the verify-side mining/hint <em>production</em>, and the last
+  bits of the solver-time budget (extend the landed equivalence budget to the verify
+  front; a timeout-core diagnosis under its own <code>formal.minetimeout</code>). LEC
+  consumption of formal blocks (old V7, lec half)
+  is in <a class="xref" href="2f-lec.html">2f-lec</a>; the compile-profile rebase (old
+  V7, formal half) in <a class="xref" href="2f-formal.html">2f-formal</a>.
   <strong>Dropped by ruling 2026-07-10:</strong> CEGAR lazy memory reads (old Attack
   B) and cross-run learned-literal replay (old L3).</p>
+
+<h2>Pending — total-budget scheduler: two small remainders (from 2f-fcore §6)</h2>
+<p><strong>LANDED for equivalence.</strong> <code>formal.timeout</code> is a soft
+  TOTAL budget for cvc5/BMC <em>solver</em> time across the hierarchical
+  <code>lhd lec</code> command — each def's per-query cap is the budget remaining,
+  and ONLY <code>prove_equal</code> time draws it down, so semdiff / encode / load are
+  excluded (the budget is for the part that can run forever, not wall-clock). It is a
+  hint: a bit over/under is fine. <code>formal.budget_mode=wall|rlimit</code> (rlimit
+  = the deterministic no-budget CI path), <code>formal.minetimeout</code> emits the
+  straggler list today. Deliberately simple — one accumulator, no escalating-round /
+  <code>getDifficulty</code>-ranking machinery (that was over-engineered for a soft
+  target that the per-query <code>tlimit-per</code> already backstops per call). Two
+  small remainders:</p>
+<ul class="subtasks">
+<li><strong>Verify-side coverage.</strong> The solver-time budget wraps
+  <code>lec_hierarchical</code> (equivalence); <code>run_formal_verify</code> still
+  hands its whole obligation set one budget. Apply the same accumulator so the
+  property front shares the semantics.</li>
+<li><strong>Timeout-core diagnosis under its OWN budget.</strong>
+  <code>formal.minetimeout</code> is a SEPARATE budget (never drawn from
+  <code>formal.timeout</code>) precisely because
+  <code>getTimeoutCoreAssuming</code>/the mining loop iterate the solver and can run
+  long. Today it prints the straggler def list; the goal is to name the toxic kernel
+  so a timed-out run's OUTPUT is the assumes/hints that make the next run succeed —
+  the natural feed into the mining loop below.</li>
+</ul>
 
 <h2>Pending — mining (learned facts → Houdini → ranked → Pyrope)</h2>
 <ul class="subtasks">
@@ -50,7 +80,7 @@
   drops a straggler's solve time / difficulty mass. Everything else is noise (every
   carried assume also bloats the formula).</li>
 <li><strong>Emit</strong> ready-to-paste <code>formal</code> blocks with provenance
-  comments (the fcore hints channel): inductive survivors → the auto-managed sidecar;
+  comments (the persistent hints channel): inductive survivors → the auto-managed sidecar;
   bounded/unranked candidates → the speculative report only. Gated by
   <code>formal.minetimeout</code> (<code>0</code> = off);
   <code>--mine=speculative</code> tier.</li>
@@ -87,8 +117,8 @@
 </ul>
 
 <h2>Soundness rules (adversarially reviewed; the non-negotiables)</h2>
-<p>(Rule F — the verdict-cache key discipline — moved to
-  <a class="xref" href="2f-fcore.html">2f-fcore</a> with the cache itself.)</p>
+<p>(Rule F — the verdict-cache key discipline — moved to the shared verdict cache
+  (<code>lhd/formal_cache</code> + <code>lec_pair_cache_key</code>) with the cache itself.)</p>
 <ul class="subtasks">
 <li><strong>A. Assume-at-proven-horizon.</strong> A fact proven for cycles ≤ k may be
   assumed at cycles ≤ k while checking anything at bound ≤ k — but "proven" means

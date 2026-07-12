@@ -451,14 +451,36 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     order_ix.emplace(order[i], i);
   }
   std::vector<uint8_t>      proven(order.size(), 0);  // each slot written by its owning task
+  // Budget scheduler: `settled` marks a def whose verdict is DEFINITIVE (Proven or
+  // Refuted), for the straggler diagnosis. When `budget_on` (budget_mode=wall,
+  // timeout>0, >1 def), `base.timeout` is a soft TOTAL budget for cvc5/BMC SOLVER
+  // time — the part that can run forever — NOT wall-clock: only the time spent
+  // inside prove_equal accumulates into `solve_spent_ms`, so semdiff, encode, cache,
+  // and graph load are all excluded. Each def's per-query cap is the budget
+  // remaining (a 1s floor once spent, so a straggler still gets a quick attempt).
+  // It is a HINT/target — a bit over or under is fine. Off ⇒ each def keeps the
+  // full base.timeout per-query cap (pre-scheduler behavior).
+  std::vector<uint8_t>      settled(order.size(), 0);
+  bool                      budget_on = false;
+  std::atomic<long long>    solve_spent_ms{0};
   livehd::lec::Query_result top_result;
   bool                      have_top      = false;
   std::atomic<int>          semdiff_count{0};  // defs dropped structurally (no solver)
   std::atomic<int>          cache_count{0};    // defs settled by the verdict cache (no analysis at all)
   std::mutex                report_mutex;
   auto                      run_def = [&](size_t def_ix) {
+    if (settled[def_ix]) {
+      return;  // definitively decided in an earlier round — do not re-solve
+    }
     const auto&              name = order[def_ix];
     livehd::lec::Lec_options o = base;
+    if (budget_on) {
+      // This def's per-query cap = the SOLVER budget remaining (1s floor once spent;
+      // 0 would read as UNBOUNDED to the engine). Only prior prove_equal time counts,
+      // so a run dominated by semdiff/encode still gets its full solver budget.
+      const long long spent_s = solve_spent_ms.load() / 1000;
+      o.timeout               = static_cast<int>(std::max<long long>(1, static_cast<long long>(base.timeout) - spent_s));
+    }
     if (name != top_key) {
       // Sidecar paths are resolved against the selected impl top. Descendant
       // defs prove their unconditional contracts; only the top miter consumes
@@ -588,6 +610,11 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       so.seed_pairs     = o.match;  // explicit lec.match pairs are tier-1 anchors for the signatures
       auto m            = livehd::semdiff::structural_match(ref_by_name[name], impl_by_name[name], so);
       const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+      // 2f-lec diverged-use guard: memories semdiff flagged as genuinely diverged
+      // (kind/init mismatch or no counterpart) must not be force-collapsed.
+      o.mem_diverged.clear();
+      o.mem_diverged.insert(o.mem_diverged.end(), m.a_mem_diverged.begin(), m.a_mem_diverged.end());
+      o.mem_diverged.insert(o.mem_diverged.end(), m.b_mem_diverged.begin(), m.b_mem_diverged.end());
       // The no-solver skip stays anchored to CERTAIN correspondence only: a
       // "structurally identical" verdict that leans on a speculative tier-2
       // pair or an explicit seed is not taken (the spec self-certifies only
@@ -619,7 +646,12 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         std::vector<std::pair<std::string, std::string>> fresh;
         fresh.reserve(m.state_pairs.size());
         for (auto& p : m.state_pairs) {
-          if (!p.is_mem) {  // memory correspondence is shape/occurrence-keyed, never name-aliased
+          if (p.is_mem) {
+            // Memories are never name-aliased, but a confident mem pair lets the
+            // diverged-use collapse guard (build_shared_mems) trust an ambiguous
+            // shape bucket's occurrence pairing instead of leaving it uncollapsed.
+            o.mem_match.emplace_back(std::move(p.a_name), std::move(p.b_name));
+          } else {
             fresh.emplace_back(std::move(p.a_name), std::move(p.b_name));
           }
         }
@@ -703,6 +735,9 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     }
     disclose_lec_helpers(r, o);
     const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+    if (budget_on) {
+      solve_spent_ms += ms;  // only solver (prove_equal) time draws down the budget
+    }
     if (r.verdict == Verdict::Proven) {
       proven[def_ix] = 1;
       if (vcache != nullptr) {
@@ -734,6 +769,13 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         vcache->clear_pair_hint(name);
       }
     }
+    // Scheduler bookkeeping: a Proven or Refuted verdict is DEFINITIVE, so later
+    // rounds skip this def; an Unknown stays unsettled and is re-tried with a
+    // bigger slice next round (the verdict-cache Unknown ledger, keyed by budget,
+    // makes that a genuine re-attempt rather than a cache skip).
+    if (r.verdict == Verdict::Proven || r.verdict == Verdict::Refuted) {
+      settled[def_ix] = 1;
+    }
     {
       std::lock_guard report_lock(report_mutex);
       emit_lec_block_progress(name, r, o, ms);
@@ -749,9 +791,15 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     }
   };
 
-  if (order.size() == 1) {
-    run_def(0);  // preserve the normal portfolio; no hierarchy parallelism needed
-  } else {
+  // Dispatch the child→parent proof DAG once: all ready leaves in flight (up to
+  // `jobs` workers), a parent unlocked once its children settle, proven children
+  // black-boxed. run_def skips already-`settled` defs, so RE-dispatching is exactly
+  // how an escalating round re-tries only the survivors with a larger slice.
+  auto dispatch_dag = [&]() {
+    if (order.size() == 1) {
+      run_def(0);  // preserve the normal portfolio; no hierarchy parallelism needed
+      return;
+    }
     tf::Taskflow          proof_dag;
     std::vector<tf::Task> tasks;
     tasks.reserve(order.size());
@@ -769,6 +817,39 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     }
     tf::Executor executor(static_cast<size_t>(std::max(1, base.jobs)));
     executor.run(proof_dag).wait();
+  };
+
+  // ── Budget scheduler ──────────────────────────────────────────────────────
+  // Under budget_mode "wall" with a finite timeout on a multi-def hierarchy,
+  // `base.timeout` is a soft TOTAL budget for cvc5/BMC SOLVER time: each def's
+  // per-query cap becomes the budget remaining (run_def, above), and only
+  // prove_equal time draws it down — so N hard defs share ~one budget of solver
+  // effort instead of one budget EACH (the D×T hazard), while semdiff/encode/load
+  // never eat into it. Fast defs (the common case) finish well under budget and
+  // still see the full cap, so a design that fits is never regressed; only a run
+  // that would out-solve `timeout` is reined in. Off — the full per-query cap,
+  // byte-identical to before — for the compile/rlimit tier (budget_mode!=wall), an
+  // unbounded budget (timeout==0), or a lone def. A single DAG pass: the verdict
+  // cache / Unknown-ledger and per-def progress stay exactly as before.
+  budget_on = base.budget_mode == "wall" && base.timeout > 0 && order.size() > 1;
+  dispatch_dag();
+
+  // Diagnosis phase (formal.minetimeout): name the still-unproven defs so a
+  // budget-limited run's OUTPUT is actionable. The toxic-core / mining iteration —
+  // itself potentially many cvc5 rounds — gets its OWN budget (formal.minetimeout),
+  // never drawing from formal.timeout; the straggler list is today's signal.
+  if (base.minetimeout > 0) {
+    std::string stragglers;
+    int         n = 0;
+    for (size_t i = 0; i < order.size(); ++i) {
+      if (!settled[i]) {
+        stragglers += (stragglers.empty() ? "" : ", ") + order[i];
+        ++n;
+      }
+    }
+    if (n > 0) {
+      std::print("lec[hier]: {} def(s) unproven within the {}s budget: {}\n", n, base.timeout, stragglers);
+    }
   }
 
   const int proven_count = static_cast<int>(std::count(proven.begin(), proven.end(), uint8_t{1}));
@@ -1021,6 +1102,71 @@ bool lecfail_prp_top_is_pub(const std::string& path, const std::string& top) {
     }
   }
   return false;
+}
+
+// F7 machine-readable witness artifact (mirrors `lhd sim --result-json`): the full
+// driven trace + the source-mapped root cut, written next to the .prp testbench, so
+// CI / auto-triage tools consume a LEC/verify failure without scraping the human
+// witness string. The input sequence here is dumped from the SAME `Witness_trace`
+// that drives the .prp `_drv_*` arrays, so the two match by construction.
+static void emit_witness_json(const std::string& path, std::string_view kind, std::string_view impl, std::string_view ref,
+                              const livehd::lec::Witness_trace& t) {
+  auto esc = [](std::string_view s) {
+    std::string o;
+    for (char c : s) {
+      switch (c) {
+        case '"': o += "\\\""; break;
+        case '\\': o += "\\\\"; break;
+        case '\n': o += "\\n"; break;
+        case '\t': o += "\\t"; break;
+        case '\r': o += "\\r"; break;
+        default:
+          if (static_cast<unsigned char>(c) < 0x20) {
+            o += std::format("\\u{:04x}", static_cast<int>(static_cast<unsigned char>(c)));
+          } else {
+            o += c;
+          }
+      }
+    }
+    return o;
+  };
+  // Split the root cut's "file:line" (start_line is 1-based; 0 = unmapped).
+  std::string root_file = t.root_src, root_line = "0";
+  if (auto p = t.root_src.rfind(':'); p != std::string::npos) {
+    root_file = t.root_src.substr(0, p);
+    root_line = t.root_src.substr(p + 1);
+  }
+  std::string j = "{\n";
+  j += std::format("  \"schema_version\": 1,\n  \"kind\": \"{}\",\n", esc(kind));
+  j += std::format("  \"impl\": \"{}\",\n  \"ref\": \"{}\",\n", esc(impl), esc(ref));
+  j += std::format("  \"reset_cycles\": {},\n  \"diverge_cycle\": {},\n", t.reset_cycles, t.diverge_cycle);
+  j += "  \"diverge_outputs\": [";
+  for (size_t i = 0; i < t.diverge_outputs.size(); ++i) {
+    j += std::format("{}\"{}\"", i ? ", " : "", esc(t.diverge_outputs[i]));
+  }
+  j += "],\n";
+  if (t.root_cycle >= 0) {
+    j += std::format(
+        "  \"root_cut\": {{\"key\": \"{}\", \"cycle\": {}, \"ref\": \"{}\", \"impl\": \"{}\", \"file\": \"{}\", \"line\": {}}},\n",
+        esc(t.root_key), t.root_cycle, esc(t.root_ref), esc(t.root_impl), esc(root_file), root_line.empty() ? "0" : root_line);
+  } else {
+    j += "  \"root_cut\": null,\n";
+  }
+  j += "  \"trace\": {\n    \"cycles\": [\n";
+  for (size_t c = 0; c < t.cycles.size(); ++c) {
+    const auto& cy = t.cycles[c];
+    j += std::format("      {{\"reset_asserted\": {}, \"inputs\": [", cy.reset_asserted ? "true" : "false");
+    for (size_t i = 0; i < cy.inputs.size(); ++i) {
+      const auto& in = cy.inputs[i];
+      j += std::format("{}{{\"name\": \"{}\", \"value\": \"{}\", \"width\": {}}}", i ? ", " : "", esc(in.name), esc(in.value), in.width);
+    }
+    j += std::format("]}}{}\n", c + 1 < t.cycles.size() ? "," : "");
+  }
+  j += "    ]\n  }\n}\n";
+  std::ofstream ofs(path);
+  if (ofs.is_open()) {
+    ofs << j;
+  }
 }
 
 // The generator proper. `impl_top`/`ref_top` are the two designs' TOP graph names
@@ -1285,12 +1431,23 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   const std::string rerun
       = can_import ? std::format("lhd sim {} {} {} --set sim.vcd=true --workdir <dir>", opts.impl_path, opts.ref_path, prpfail_path)
                  : std::format("lhd sim {} --set sim.vcd=true --workdir <dir>", prpfail_path);
+  // F7: the source-mapped root cut — the first diverging STATE cut the output
+  // inherits, stamped with the impl-side `file:line` of the flop's declaration.
+  std::string rootcut;
+  if (r.trace.root_cycle >= 0) {
+    rootcut = std::format("// Root cut: {} (ref={} impl={}){}\n",
+                          r.trace.root_key,
+                          r.trace.root_ref,
+                          r.trace.root_impl,
+                          r.trace.root_src.empty() ? std::string{} : std::format(" at {}", r.trace.root_src));
+  }
   std::string out = std::format(
       "/*\n:name: {}\n:type: simulation\n*/\n"
       "// AUTO-GENERATED by `lhd lec` from a REFUTED counterexample.\n"
       "// impl='{}'  ref='{}'\n"
       "// Drives BOTH designs with the failing input sequence ({} cycle(s), {} reset-hold).\n"
       "// Divergence at cycle {}: {}\n"
+      "{}"
       "// Re-run:  {}   (dumps {}.vcd)\n\n",
       test_name,
       opts.impl_path,
@@ -1299,6 +1456,7 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
       r.trace.reset_cycles,
       r.trace.diverge_cycle,
       divtxt.empty() ? "(see verdict)" : divtxt,
+      rootcut,
       rerun,
       test_name);
   if (can_import) {
@@ -1334,6 +1492,13 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   res.outputs.push_back(prpfail_path);
   res.recipe_steps.push_back(std::format("lec.prpfail witness testbench -> {}", prpfail_path));
   std::print("lec: wrote counterexample testbench {}\n", prpfail_path);
+
+  // F7: machine-readable sibling artifact, keyed off the same trace (so its input
+  // sequence matches the .prp `_drv_*` arrays by construction).
+  std::string json_path = prpfail_path.ends_with(".prp") ? prpfail_path.substr(0, prpfail_path.size() - 4) + ".json"
+                                                         : prpfail_path + ".json";
+  emit_witness_json(json_path, "lecfail", opts.impl_path, opts.ref_path, r.trace);
+  res.outputs.push_back(json_path);
 
   if (!run_sim) {
     return;
@@ -1717,6 +1882,8 @@ void lec_command(Options& opts, Result& res) {
   o.jobs         = std::max(1, std::atoi(label("jobs", "4").c_str()));
   o.split        = label("split", "auto");
   o.rlimit       = std::atoi(label("rlimit", "0").c_str());  // deterministic per-query budget (0=off; CI/repro)
+  o.budget_mode  = label("budget_mode", "wall");             // wall = total-budget escalating rounds; rlimit = no-op
+  o.minetimeout  = std::atoi(label("minetimeout", "0").c_str());
   o.phase        = label("phase", "after_reset");
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
   o.reset        = label("reset", "");
@@ -1790,6 +1957,12 @@ void lec_command(Options& opts, Result& res) {
   if (!formal_helpers.checks.empty()) {
     livehd::lec::Lec_options check_opts = o;
     check_opts.engine                   = "bmc";
+    // Helper facts feed the relational miter, so their proof must be
+    // REPRODUCIBLE (build success depends on an unbounded helper verdict). Never
+    // run this under the wall-clock total budget — a budget-out could skip the
+    // induction rung and lose a genuinely-inductive helper on a slow machine.
+    check_opts.budget_mode = "rlimit";
+    check_opts.minetimeout = 0;
     check_opts.assumptions              = nullptr;
     check_opts.assumption_key.clear();
     check_opts.proven_helpers = check_opts.input_assumes = check_opts.unchecked_assumes = 0;
@@ -1906,11 +2079,19 @@ void lec_command(Options& opts, Result& res) {
         so.state_pairing  = true;
         so.seed_pairs     = o.match;
         auto m            = livehd::semdiff::structural_match(ref_g.get(), impl_g.get(), so);
+        // 2f-lec diverged-use guard: keep genuinely-diverged memories uncollapsed.
+        o.mem_diverged.clear();
+        o.mem_diverged.insert(o.mem_diverged.end(), m.a_mem_diverged.begin(), m.a_mem_diverged.end());
+        o.mem_diverged.insert(o.mem_diverged.end(), m.b_mem_diverged.begin(), m.b_mem_diverged.end());
         if (!m.state_pairs.empty()) {
           std::vector<std::pair<std::string, std::string>> fresh;
           fresh.reserve(m.state_pairs.size());
           for (auto& p : m.state_pairs) {
-            if (!p.is_mem) {  // memory correspondence is shape/occurrence-keyed, never name-aliased
+            if (p.is_mem) {
+              // Memories are never name-aliased, but a confident mem pair lets the
+              // diverged-use collapse guard trust an ambiguous shape bucket's pairing.
+              o.mem_match.emplace_back(std::move(p.a_name), std::move(p.b_name));
+            } else {
               fresh.emplace_back(std::move(p.a_name), std::move(p.b_name));
             }
           }
@@ -1940,32 +2121,113 @@ void lec_command(Options& opts, Result& res) {
         }
       }
     }
+    // 2f-fcore verdict cache on the FLAT path (F2 tail): the same store the
+    // hierarchical driver uses, applied to the single top-pair miter. Keyed by the
+    // canonical digest of each side + the verdict-relevant options (via
+    // lec_pair_cache_key, incl. the um=[…] uncertain-pair segment settled above and
+    // the manual c=[…] collapse list), salt-gated cache-wide. A PROVEN hit skips
+    // encode+solve entirely; an Unknown-ledger hit skips a re-grind that cannot
+    // outspend the prior budget. Anonymous-state (undigestable) defs stay
+    // uncacheable, exactly as in the hier path.
+    const bool                        flat_retry_all = label("retry", "changed") == "all";
+    livehd::semdiff::Canonical_digest dref_flat, dimpl_flat;
+    std::string                       flat_ckey;
+    bool                              flat_cacheable = false;
+    bool                              settled_by_cache = false;
+    if (vcache != nullptr) {
+      absl::flat_hash_map<hhds::Gid, hhds::Graph*> ref_gid2g, impl_gid2g;
+      for (auto& g : ref_var.graphs) {
+        if (g) {
+          ref_gid2g[g->get_gid()] = g.get();
+        }
+      }
+      for (auto& g : impl_var.graphs) {
+        if (g) {
+          impl_gid2g[g->get_gid()] = g.get();
+        }
+      }
+      if (sub_lib_ptr != nullptr) {
+        for (const auto& [gid, gp] : *sub_lib_ptr) {
+          ref_gid2g.try_emplace(gid, gp);
+          impl_gid2g.try_emplace(gid, gp);
+        }
+      }
+      livehd::semdiff::Digest_resolver rdres = [&ref_gid2g](hhds::Gid gid) -> hhds::Graph* {
+        auto it = ref_gid2g.find(gid);
+        return it == ref_gid2g.end() ? nullptr : it->second;
+      };
+      livehd::semdiff::Digest_resolver idres = [&impl_gid2g](hhds::Gid gid) -> hhds::Graph* {
+        auto it = impl_gid2g.find(gid);
+        return it == impl_gid2g.end() ? nullptr : it->second;
+      };
+      dref_flat  = livehd::semdiff::canonical_digest(ref_g.get(), rdres);
+      dimpl_flat = livehd::semdiff::canonical_digest(impl_g.get(), idres);
+      if (dref_flat.valid && dimpl_flat.valid) {
+        flat_cacheable = true;
+        flat_ckey      = lec_pair_cache_key(dref_flat, dimpl_flat, o);
+        if (auto hit = vcache->lookup(flat_ckey); hit.has_value()) {
+          r.verdict    = livehd::lec::Verdict::Proven;
+          r.engine     = "cache";
+          r.detail     = hit->detail.empty() ? "verdict cache hit" : hit->detail;
+          r.elapsed_ms = 0;
+          std::print("lec: '{}' PROVEN (cache)\n", impl_g->get_name());
+          settled_by_cache = true;
+        } else if (!flat_retry_all && vcache->skip_unknown(flat_ckey, o.timeout)) {
+          r.verdict    = livehd::lec::Verdict::Unknown;
+          r.engine     = "cache-skip";
+          r.detail     = "skipped: known inconclusive at >= this budget (--set lec.retry=all to re-attempt)";
+          r.elapsed_ms = 0;
+          std::print("lec: '{}' UNKNOWN (skipped: known inconclusive)\n", impl_g->get_name());
+          settled_by_cache = true;
+        }
+      }
+    }
     auto t0 = std::chrono::steady_clock::now();
-    r       = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), o, sub_lib_ptr);
-    if (r.verdict == livehd::lec::Verdict::Refuted && !o.collapse.empty()) {
-      // Same abstraction rule as the hierarchical driver: a REFUTE under a
-      // manual --collapse can be an artifact of the box over-approximation, so
-      // confirm FLAT before letting the exit policy report a fail.
-      std::print("lec: '{}' REFUTED under collapse ({} box def(s)) -> flat confirmation\n", impl_g->get_name(), o.collapse.size());
-      livehd::lec::Lec_options oflat = o;
-      oflat.collapse.clear();
-      auto rf       = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), oflat, sub_lib_ptr);
-      rf.detail     = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
-                      + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
-      rf.elapsed_ms = -1;  // the progress record carries the combined wall-clock below
-      r             = std::move(rf);
+    if (!settled_by_cache) {
+      r = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), o, sub_lib_ptr);
+      if (r.verdict == livehd::lec::Verdict::Refuted && !o.collapse.empty()) {
+        // Same abstraction rule as the hierarchical driver: a REFUTE under a
+        // manual --collapse can be an artifact of the box over-approximation, so
+        // confirm FLAT before letting the exit policy report a fail.
+        std::print("lec: '{}' REFUTED under collapse ({} box def(s)) -> flat confirmation\n", impl_g->get_name(), o.collapse.size());
+        livehd::lec::Lec_options oflat = o;
+        oflat.collapse.clear();
+        auto rf       = livehd::lec::prove_equal(ref_g.get(), impl_g.get(), oflat, sub_lib_ptr);
+        rf.detail     = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                        + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
+        rf.elapsed_ms = -1;  // the progress record carries the combined wall-clock below
+        r             = std::move(rf);
+      }
     }
     disclose_lec_helpers(r, o);
     const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
-    if (vcache != nullptr && r.verdict == livehd::lec::Verdict::Proven) {
-      vcache->set_hint(std::string{impl_g->get_name()}, {r.engine, r.split_used, ms});
-      lec_store_pair_hint(vcache.get(), lec_entity_of(impl_g->get_name()), r.uncertain_pairs_used);
+    // Store — only for a freshly-solved verdict (a cache/skip hit is already recorded).
+    if (!settled_by_cache && vcache != nullptr) {
+      if (r.verdict == livehd::lec::Verdict::Proven) {
+        if (flat_cacheable && !flat_ckey.empty()) {
+          vcache->insert(flat_ckey, {r.engine, r.detail, ms});  // definitive Proven only (rule F)
+        }
+        vcache->set_hint(std::string{impl_g->get_name()}, {r.engine, r.split_used, ms});
+        lec_store_pair_hint(vcache.get(), lec_entity_of(impl_g->get_name()), r.uncertain_pairs_used);
+      } else if (r.verdict == livehd::lec::Verdict::Unknown && r.witness.empty() && flat_cacheable && !flat_ckey.empty()) {
+        // Witness-free Unknown: ledger the attempt (a witness-carrying partial-miter
+        // diff is actionable and must re-surface every run, so it is NOT ledgered).
+        vcache->note_unknown(flat_ckey, {o.timeout, ms});
+      } else if (pairs_from_hint) {
+        // Self-heal (mirror of the hier driver): a replayed pair hint that did
+        // not end Proven is stale — drop it so the next run pairs fresh.
+        vcache->clear_pair_hint(lec_entity_of(impl_g->get_name()));
+      }
+    }
+    if (vcache != nullptr) {
       vcache->save();
-    } else if (vcache != nullptr && pairs_from_hint) {
-      // Self-heal (mirror of the hier driver): a replayed pair hint that did
-      // not end Proven is stale — drop it so the next run pairs fresh.
-      vcache->clear_pair_hint(lec_entity_of(impl_g->get_name()));
-      vcache->save();
+      if (vcache->hits() > 0 || vcache->stores() > 0 || vcache->skips() > 0) {
+        std::print("lec[cache]: {} hit(s), {} stored, {} skipped-unknown ({}/formal_cache.json)\n",
+                   vcache->hits(),
+                   vcache->stores(),
+                   vcache->skips(),
+                   opts.workdir);
+      }
     }
     // Per-block progress (info severity): stream the verdict the moment it resolves.
     emit_lec_block_progress(impl_g->get_name(), r, o, ms);
@@ -2271,6 +2533,20 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   res.recipe_steps.push_back(std::format("formal.prpfail witness testbench -> {}", prpfail_path));
   std::print("formal verify: wrote counterexample testbench {}\n", prpfail_path);
 
+  // F7: machine-readable sibling artifact. For a verify obligation the "root" is the
+  // failing assert itself, so stamp its kind/loc/violation-cycle into the trace copy
+  // — formalfail.json then carries the same signal shape as lecfail.json.
+  livehd::lec::Witness_trace jtr = prop.trace;
+  if (jtr.root_cycle < 0) {
+    jtr.root_key   = prop.kind;
+    jtr.root_cycle = prop.refuted_at;
+    jtr.root_src   = prop.loc;
+  }
+  std::string json_path = prpfail_path.ends_with(".prp") ? prpfail_path.substr(0, prpfail_path.size() - 4) + ".json"
+                                                         : prpfail_path + ".json";
+  emit_witness_json(json_path, "formalfail", design_path, design_path, jtr);
+  res.outputs.push_back(json_path);
+
   if (!run_sim) {
     return;
   }
@@ -2448,6 +2724,13 @@ void formal_verify_command(Options& opts, Result& res) {
   o.jobs         = std::max(1, std::atoi(label("jobs", "4").c_str()));
   o.split        = label("split", "auto");
   o.rlimit       = std::atoi(label("rlimit", "0").c_str());  // deterministic per-query budget (0=off; CI/repro)
+  // budget_mode=wall (default): `timeout` is a TOTAL cvc5-time budget spent
+  // across every obligation-check, not `timeout` per check (the O×C hazard) —
+  // the verify analogue of the hier-lec scheduler. rlimit>0 (deterministic tier)
+  // disables it inside prove_properties. minetimeout (0=off): an INDEPENDENT
+  // diagnosis budget that names the toxic obligation core of a timed-out run.
+  o.budget_mode  = label("budget_mode", "wall");
+  o.minetimeout  = std::atoi(label("minetimeout", "0").c_str());
 
   std::unique_ptr<livehd::formal::Verdict_cache> vcache;
   if (workdir_set && label("cache", "true") != "false" && label("cache", "true") != "0") {

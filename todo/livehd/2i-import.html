@@ -15,9 +15,10 @@
   design back-and-forth with the user. <strong>(1) A library is a directory</strong>; the
   <code>pub</code> modules inside it have <strong>flat, short names</strong> (no
   <code>file.entity</code> dotting). <strong>(2) A module's identity is its
-  <em>structure</em></strong> — the forward-canonical digest owned by
-  <a class="xref" href="2f-fcore.html">2f-fcore</a> (built on <code>pass/semdiff</code>'s
-  forward signature), not its name or its file path.
+  <em>structure</em></strong> — the forward-canonical digest
+  (<code>semdiff::canonical_digest</code>, owned by
+  <a class="xref" href="3f-semdiff.html">3f-semdiff</a>, built on
+  <code>pass/semdiff</code>'s forward signature), not its name or its file path.
   <strong>(3) Same-name modules coexist</strong>: internal names are unique
   <code>file.entity</code> (the 2026-07-04 lg-drop), so at link two structurally-identical
   modules <em>dedup</em> by digest while two different modules sharing a name simply keep
@@ -35,7 +36,7 @@
 
 <h2>Depends on / relates to</h2>
 <ul>
-<li><a class="xref" href="2f-fcore.html">2f-fcore</a> (canonical digest; the v1
+<li><a class="xref" href="3f-semdiff.html">3f-semdiff</a> (canonical digest; the v1
   <code>pass/semdiff</code> engine is landed) — <strong>export two entry points</strong>:
   <code>semdiff::canonical_hash(graph)</code> (the forward signature folded to a digest —
   the IO-by-name, commutative-within-port, <code>bits</code>-folded key it already builds)
@@ -125,8 +126,8 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
 <li><strong>Identity = forward-canonical structure digest, origin-ignored.</strong> Two
   modules are "the same" iff their lowered graphs share the canonical digest — regardless
   of file path or even module name. The digest is
-  <a class="xref" href="2f-fcore.html">2f-fcore</a>'s canonical digest over the
-  <code>pass/semdiff</code> forward signature (deterministic,
+  <a class="xref" href="3f-semdiff.html">3f-semdiff</a>'s <code>canonical_digest</code>
+  over the <code>pass/semdiff</code> forward signature (deterministic,
   order-independent), so it is <strong>stable across independent compile processes</strong>
   — the property the parallel build needs.</li>
 <li><strong>The two failure modes are not symmetric, so dedup is <em>sound</em>, never
@@ -233,7 +234,7 @@ prp_link(name = "soc", deps = [":cpu", ":gpu"])
 <li><strong>S3 — <code>canonical_hash</code> export.</strong>
   <span class="status">partial — re-verified 2026-06-27</span> Add
   <code>semdiff::canonical_hash(graph)</code> to <code>pass/semdiff</code> (the
-  <a class="xref" href="2f-fcore.html">2f-fcore</a> digest deliverable)
+  <a class="xref" href="3f-semdiff.html">3f-semdiff</a> digest deliverable)
   and the bottom-up Merkle driver over the instance DAG.
   <em>Today:</em> only the confirm step <code>structural_match</code> is exported
   (<code>pass/semdiff/semdiff.hpp:42</code>); there is no exported single-graph digest, and the

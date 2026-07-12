@@ -17,9 +17,10 @@
   attribute, <code>matching_names</code> flop/mem anchoring, <code>lhd semdiff</code>
   mirroring the <code>lec</code> CLI). Hier-LEC already consumes it as the
   "structurally identical ⇒ PROVEN, no solver" per-def skip. The canonical per-def
-  <em>digest</em> (old lec-M3 remainder) moved to
-  <a class="xref" href="2f-fcore.html">2f-fcore</a>'s unified cache, which also
-  serves <a class="xref" href="2i-import.html">2i-import</a>'s module identity.
+  <em>digest</em> (old lec-M3 remainder) is <code>semdiff::canonical_digest</code> in
+  this engine (a hierarchical Merkle digest via a per-side <code>Digest_resolver</code>),
+  consumed by the formal verdict cache (LANDED — see the Formal chapter's caching
+  section) and by <a class="xref" href="2i-import.html">2i-import</a>'s module identity.
   The full-match state pairing (lec's tier-2 producer) LANDED 2026-07-11 — see
   below. This page's remaining pending item is the n:m functional gap matcher.</p>
 

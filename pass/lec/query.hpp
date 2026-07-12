@@ -40,6 +40,14 @@ struct Witness_trace {
   int                        diverge_cycle = -1;  // index into `cycles` of the first output divergence
   std::vector<std::string>   diverge_outputs;     // "name(ref=X impl=Y)" tokens at diverge_cycle
   std::vector<Witness_cycle> cycles;              // driven sequence (reset prologue first)
+  // F7 root cut — the FIRST diverging STATE cut (the state the diverging output
+  // inherits), for the machine-readable lecfail.json and the source-mapped root
+  // clause. `root_src` is "file:line" of the flop's declaration (empty if the
+  // node carried no source id). All empty when the trace has no state cut.
+  std::string                root_key;            // canonical flop key (display-stripped in the clause)
+  int                        root_cycle = -1;     // checked step of the diverging cut
+  std::string                root_ref, root_impl; // paired current values (unsigned-magnitude decimal)
+  std::string                root_src;            // "file:line" of the flop decl, or ""
   bool                       empty() const { return cycles.empty(); }
 };
 
@@ -109,7 +117,24 @@ struct Lec_options {
                                  // in-pass design-queries); the `lhd lec` CLI defaults to `auto`.
   std::string solver  = "cvc5";  // cvc5 | bitwuzla (not yet built)
   int         bound   = 6;       // BMC / induction depth
-  int         timeout = 0;       // per-query seconds (0 = none)
+  int         timeout = 0;       // per-query seconds (0 = none). NOTE: for the hierarchical
+                                 // driver this is the TOTAL wall-clock budget for the whole
+                                 // command (2f-fcore §6 scheduler), sliced across escalating
+                                 // rounds; for a single def / the flat path it is the per-query cap.
+  // Budget scheduler (2f-fcore §6): how the hier driver spends `timeout`.
+  //   "wall"   — `timeout` is a TOTAL wall-clock budget; the driver runs escalating
+  //              rounds (small slices first, survivors re-tried with bigger slices)
+  //              until every def settles or the deadline passes. This makes one
+  //              `formal.timeout=T` an actual total, not `T` per def (the D×T hazard).
+  //   "rlimit" — no wall-clock rounds; each query is bounded by the deterministic
+  //              `rlimit` counter instead (the compile tier / CI-repro path). A no-op
+  //              scheduler, so builds stay reproducible across machines/build modes.
+  std::string budget_mode = "wall";
+  // Independent budget (seconds, 0 = off) for a diagnosis/straggler phase after the
+  // final round: name the still-unproven defs so a timed-out run's OUTPUT is
+  // actionable. Reserved for the mining/timeout-core work; currently emits the
+  // straggler list. (2f-fcore §6 `formal.minetimeout`.)
+  int         minetimeout = 0;
   // Deterministic per-query budget (cvc5 `rlimit-per`): a machine-/wall-clock-
   // independent internal resource counter, so the SAME config yields the SAME
   // verdict on every machine and build mode. The compile tier (2f-formal) sets
@@ -195,6 +220,28 @@ struct Lec_options {
   // certifies) PROVIDED the paired reset/init values are equal, which the
   // producer guarantees and validate_uncertain_pairs re-checks on hint replay.
   std::vector<std::pair<std::string, std::string>> uncertain_match;
+
+  // Confident MEMORY correspondence (2f-lec diverged-use collapse guard; produced
+  // by pass/semdiff's full-match signature pass, the mem entries of state_pairs).
+  // {ref_mem_hier_name, impl_mem_hier_name}. Unlike flops, memories are NOT
+  // name-aliased — they collapse by shape (size×bits) × RTL occurrence order. That
+  // occurrence pairing is a false-PROVEN hazard when a shape bucket holds MORE THAN
+  // ONE memory per side and the two front-ends emit them in a different order (the
+  // wrong two memories then share one initial-contents array). build_shared_mems
+  // uses this list (plus canon-name agreement) to CONFIRM an ambiguous bucket's
+  // occurrence pairing before collapsing it; an unconfirmed ambiguous bucket is
+  // kept UNCOLLAPSED (fresh per-design array symbols) — a sound degrade (worst
+  // case Unknown/flat-refute, never a false PROVEN). Empty ⇒ rely on canon names
+  // alone (still sound: renamed-and-reordered ambiguous mems stay uncollapsed).
+  std::vector<std::pair<std::string, std::string>> mem_match;
+
+  // Memories (raw hier names, either side) that semdiff flagged as GENUINELY
+  // diverged — unpaired with a kind/init mismatch or no counterpart (NOT mere
+  // symmetric ambiguity). Such a memory must NOT be force-collapsed by shape ×
+  // occurrence: the two sides use/initialize it differently, so sharing one
+  // current-state array would be unsound. build_shared_mems leaves any shape
+  // bucket containing a diverged memory uncollapsed (fresh per-design arrays).
+  std::vector<std::string> mem_diverged;
 
   // Proven-module black-box collapse (`lhd lec --collapse <def>` / lec.collapse):
   // module-def names the driver has ALREADY proven equivalent in isolation, which

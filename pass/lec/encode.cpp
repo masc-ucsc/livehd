@@ -344,6 +344,22 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     return out;
   };
 
+  // Budget-aware encode (2f-lec): a fresh top-level encode() call (sub_depth_==0)
+  // arms a `budget_seconds_`-long deadline; a recursive Sub-flatten re-entry
+  // (sub_depth_>0) inherits the parent's deadline so a slow subtree counts against
+  // its parent, not a new clock. `over_budget()` is true once that deadline passes;
+  // it's checked at the head of the combinational fixpoint and (throttled) inside
+  // its node walk, plus once here so every recursive re-entry is covered. A
+  // budget-out degrades to ok=false, which the query layer maps to a sound
+  // Verdict::Unknown (never a wrong verdict).
+  if (budget_seconds_ > 0 && sub_depth_ == 0) {
+    deadline_ = std::chrono::steady_clock::now() + std::chrono::seconds(budget_seconds_);
+  }
+  auto over_budget = [&]() -> bool { return deadline_ && std::chrono::steady_clock::now() > *deadline_; };
+  if (over_budget()) {
+    return fail("encode budget exceeded (lec.timeout); raise --set lec.timeout to allow more encode time");
+  }
+
   // bit-vector literal of `width` bits from a constant pin's Dlop.
   auto const_val = [&](const hhds::Pin_class& dpin) -> Val {
     Dlop c     = gu::hydrate_const(dpin);
@@ -769,10 +785,21 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // after no-progress is a genuine error (a real comb cycle / missing driver).
   absl::flat_hash_set<std::string> done;
   auto nodekey = [](const hhds::Node_class& n) -> std::string { return box_node_key(n); };
-  bool progress = true;
+  bool         progress    = true;
+  unsigned int budget_tick = 0;  // throttles the per-node deadline check (avoids a now() per node)
   while (progress) {
+    // Budget-aware encode: bail before another full fixpoint pass over the
+    // virtually-flattened design — this loop, not cvc5, is the deep-parent time sink.
+    if (over_budget()) {
+      return fail("encode budget exceeded during combinational fixpoint (lec.timeout); raise --set lec.timeout");
+    }
     progress = false;
     for (auto node : g->forward_hier(true, false, opaque)) {
+      // A single forward_hier pass over a huge flattened design can itself blow
+      // the budget before the while-head re-checks; sample the clock every 1024 nodes.
+      if ((++budget_tick & 0x3ff) == 0 && over_budget()) {
+        return fail("encode budget exceeded during combinational fixpoint (lec.timeout); raise --set lec.timeout");
+      }
       auto op = gu::type_op_of(node);
 
       // Skip nodes with no consumers (cgen does the same). A memory with no read
@@ -1940,6 +1967,18 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       return (k + 1 < depth) ? internals[static_cast<size_t>(k)].term : qv.term;
     };
     const std::string nm = flop_key(node.get_hier_name());
+    // F7 source-map: resolve this flop's declaration to "file:line" once (the key
+    // feeds every stage's \x01nxt: output and the downstream wit_state cuts). The
+    // srcid rides tolg for a Pyrope node and the cgen ECMA-426 sourcemap for a
+    // Verilog one; absent ⇒ no entry (the witness just renders the bare name).
+    if (out.src_of_key.find(nm) == out.src_of_key.end()) {
+      if (auto ref = node.attr(hhds::attrs::srcid); ref.has()) {
+        auto span = g->source_locator().resolve_span(ref.get());
+        if (!span.file.empty() && span.start_line.has_value()) {
+          out.src_of_key[nm] = span.file + ":" + std::to_string(*span.start_line);
+        }
+      }
+    }
     for (int k = 0; k < depth; ++k) {
       const Term& self   = stage_cur(k);
       Term        source = (k == 0) ? (has_din ? din : self) : stage_cur(k - 1);

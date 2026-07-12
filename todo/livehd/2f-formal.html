@@ -13,16 +13,32 @@
 
 <p><code>pass.formal</code>'s own single-frame engine landed 2026-06-20; this page is
   the remainder, re-based on the shared engine
-  (<a class="xref" href="2f-fcore.html">2f-fcore</a> +
+  (<code>pass/lec</code>, shared with <a class="xref" href="2f-lec.html">2f-lec</a> /
   <a class="xref" href="2f-verify.html">2f-verify</a>). Everything below stays 2f:
   the 2026-07-10 ruling kept stateful asserts, reset-exclusion, and ABC EXDC at 2f
   (its fourth item, memory templates, lives on 2f-verify); the engine rebase moved
   here from old 2f-verify V7.</p>
 
 <h2>Pending</h2>
+<p><strong>Status (2026-07-12): the rebase + the stateful verdict ladder LANDED
+  2026-07-11</strong> (<code>f3</code>-portfolio session). <code>pass.formal
+  mode=normal</code> routes ASSERT proving through <code>lec::prove_properties</code>
+  (compile profile: <code>engine=bmc</code> no-fork, tiny <code>bmc_bound</code>,
+  <code>rlimit=budget_k×4096</code>, <code>timeout=0</code>,
+  <code>ignore_assumes=true</code>), with an occ↔node correlation replaying the
+  encoder walk to align <code>pres.props</code> 1:1 and a size-mismatch guard falling
+  back to the single-frame Prover; <code>mode=fast</code> is UNCHANGED (no compile-recipe
+  perf hit) and <code>prove.cpp</code>'s property path is RETAINED (used by
+  fast/Hotmux/assumes/the normal-mode fallback — the "delete prove.cpp" cleanup is
+  resolved as <em>keep</em>). Tests <code>lhd/tests/lhd_formal_rebase_test.sh</code>.
+  <strong>Still pending here:</strong> the FULL reset-exclusion
+  (<code>Reset_policy::ExcludeConeActive</code> — only the coarse BMC-window guard
+  <code>pass_formal.cpp:504</code> exists; the per-cone induction-rung guard and
+  reset-less power-on-<code>initial</code> handling are absent) and the ABC EXDC
+  don't-care network.</p>
 <ul class="subtasks">
-<li><strong>Rebase <code>pass.formal</code> onto the shared engine as the
-  don't-try-hard profile</strong> (was 2f-verify's V7, formal half): same code path as
+<li><strong>LANDED 2026-07-11 — Rebase <code>pass.formal</code> onto the shared engine
+  as the don't-try-hard profile</strong> (was 2f-verify's V7, formal half): same code path as
   <code>lhd formal verify</code>, restricted options, small deterministic
   <code>rlimit</code> budget (machine-independent), <strong>timeout is not an
   error</strong> (just "not proven, keep the runtime check"), proven results feed
@@ -77,31 +93,35 @@
     creep and stdout noise are regressions here; the per-def progress lines the lec
     driver prints must stay OFF in the compile profile.</li>
   </ul></li>
-<li><strong>Stateful asserts via the verdict ladder (old M6).</strong> Today a
-  stateful refutation is kept as a runtime check because the single-frame witness may
-  be unreachable. On the shared engine: 1-induction proven ⇒ elide; BMC-from-reset
-  refuted ⇒ a <em>reachable</em> counterexample even in the compile profile's small
-  budget ⇒ eligible for hard error; otherwise keep + defer. Tests: an invariant over
-  registered logic proven &amp; removed; a stateful assert whose only violation is
-  unreachable stays (no false error); a genuinely reachable stateful violation within
-  the compile budget errors with the witness cycle.</li>
+<li><strong>LANDED 2026-07-11 — Stateful asserts via the verdict ladder (old M6).</strong>
+  On the shared engine: 1-induction proven ⇒ <code>set_proven</code> (elide);
+  BMC-from-reset refuted with <code>refuted_at ≥ reset_hold</code> at a root ⇒ a
+  <em>reachable</em> counterexample ⇒ deferred hard error; otherwise the single-frame
+  Prover fallback (elide on Proven, never hard-error) + deferred warning. Fixes the old
+  <code>mode=normal</code> over-trust where a possibly-unreachable free-state refute
+  could false-error; a <code>Verdict_result::reset_detected</code> gate means a design
+  with no recognized reset defers instead of erroring. Tests in
+  <code>lhd_formal_rebase_test.sh</code> (fsm elide / reachable-bug error / deep
+  out-of-budget deferred / determinism).</li>
 <li><strong>Reset-exclusion for user asserts
-  (<code>Reset_policy::ExcludeConeActive</code>) — quality.</strong> The hard-error
-  gate is live with <em>no</em> reset guard (2026-07-08 ruling), so an assert whose
-  only counterexample lies in the reset prologue produces a FALSE refutation ⇒ a
-  spurious hard error. Reuse (do not duplicate) the <code>query.cpp</code> reset
-  detection — the rebase gives the BMC rung the full <code>after_reset</code>
-  machinery for free; only the single-frame induction rung needs the cone-reset
-  guard (collect each cone Flop's <code>reset_pin</code>/<code>negreset</code>,
-  constrain inactive). <code>assert_always</code> keeps
-  <code>Reset_policy::Include</code>.</li>
+  (<code>Reset_policy::ExcludeConeActive</code>) — quality. PARTIAL.</strong> The
+  landed rebase already excludes the crudest case at the BMC-window level
+  (<code>pass_formal.cpp:504</code>: a refute is a hard error only when
+  <code>refuted_at ≥ reset_hold</code> and a reset was detected). STILL OPEN: the
+  per-cone induction-rung guard and reset-less flops that carry a power-on
+  <code>initial</code> in a mixed design. Reuse (do not duplicate) the
+  <code>query.cpp</code> reset detection — the rebase gives the BMC rung the full
+  <code>after_reset</code> machinery for free; only the single-frame induction rung
+  needs the cone-reset guard (collect each cone Flop's
+  <code>reset_pin</code>/<code>negreset</code>, constrain inactive).
+  <code>assert_always</code> keeps <code>Reset_policy::Include</code>.</li>
 <li><strong>ABC EXDC don't-care network.</strong> Hand the constraints already
   gathered per region (<code>abc_map.cpp:196-227</code>) to ABC's mfs/fraig as an
   EXDC network. Constraint sources now: <em>(a)</em> proven asserts/assumes,
   <em>(b)</em> sidecar invariants proven unbounded by the verify engine,
   <em>(c)</em> <code>assume_nocheck_synth</code> facts — the compile tier is the
-  <strong>only</strong> consumer of that form (fcore contract; per-encounter diag
-  warning; the user explicitly owns the risk).</li>
+  <strong>only</strong> consumer of that form (the assume-form contract; per-encounter
+  diag warning; the user explicitly owns the risk).</li>
 </ul>
 
 <h2>Policy carried forward (unchanged)</h2>

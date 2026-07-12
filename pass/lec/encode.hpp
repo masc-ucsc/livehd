@@ -3,6 +3,7 @@
 
 #include <cvc5/cvc5.h>
 
+#include <chrono>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -70,6 +71,15 @@ struct Encoded {
   // address has been computed — the same fresh-var deferral the BMC loop uses
   // for flop state, applied inside one encode() for memory reads.
   std::vector<std::pair<cvc5::Term, cvc5::Term>> equalities;
+
+  // F7 witness source-map: flop correspondence key (the same key used for the
+  // `\x01nxt:` next-state outputs and the wit_state cuts) -> "file:line" of the
+  // flop's declaration, resolved from the node's attrs::srcid via the graph's
+  // Source_locator. Populated only when the node carries a source id (a Verilog
+  // node resolves back through the cgen ECMA-426 sourcemap). Lets the BMC witness
+  // render the first diverging state cut as `s (cpu.prp:554)` and stamp the same
+  // location into the generated lecfail.prp testbench. Empty entry = unknown.
+  Io_name_map<std::string> src_of_key;
 };
 
 // State-aware black-box for a SEQUENTIAL collapse (lec.html "sequential
@@ -310,6 +320,19 @@ public:
   // output, and a one-sided \x04 output would gate lec to Unknown).
   void set_emit_props(bool on) { emit_props_ = on; }
 
+  // Budget-aware encode (2f-lec): a wall-clock budget, in SECONDS, bounding each
+  // top-level encode() call. encode() is where deep/late hierarchical parents can
+  // spend minutes flattening the instance tree BEFORE cvc5 is ever called (the
+  // `while(progress)` fixpoint), so the per-checkSat `tlimit-per` never bounds it.
+  // Each top-level encode() call (sub_depth_==0) gets a fresh `seconds`-long
+  // budget; the recursive Sub-flatten re-entry inherits the parent's deadline
+  // (so a slow subtree still counts against its parent, not a fresh clock). On
+  // overrun the encode bails via the same ok=false/error path a structural
+  // failure uses, which the query layer maps to a sound Verdict::Unknown (a
+  // budget-out is never a wrong verdict). 0 (the default) = no encode budget.
+  // Mirrors Lec_options::timeout, so encode and each checkSat share one knob.
+  void set_encode_budget(int seconds) { budget_seconds_ = seconds; }
+
 private:
   // Fit `v` to exactly `width` bits: sign/zero-extend (per v.is_signed) when
   // widening, low-bit Extract when narrowing.
@@ -333,6 +356,8 @@ private:
   int                                                 sub_depth_   = 0;  // Sub flattening recursion guard
   bool                                                x_dontcare_  = false;  // ref-side X = don't-care (lec.gold_x=ignore)
   bool                                                emit_props_  = false;  // emit fproperty conds as \x04prop: outputs (2f-verify)
+  int                                                 budget_seconds_ = 0;  // per-encode wall-clock budget in s (2f-lec); 0 = none
+  std::optional<std::chrono::steady_clock::time_point> deadline_{};  // set at each top-level encode() entry from budget_seconds_
 };
 
 // Fit an undef bit-plane to `width` alongside its value: NULL stays NULL;

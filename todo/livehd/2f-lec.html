@@ -23,7 +23,8 @@
   hier driver is also now <strong>scoped to the picked top pair and its transitive
   descendants</strong> (fixed 2026-07-10 — it previously proved every def the two
   libraries happened to share). This page tracks what remains, mostly as a consumer
-  of <a class="xref" href="2f-fcore.html">2f-fcore</a>.</p>
+  of the shared formal core (proof-DAG runner, portfolio, verdict cache, case-split —
+  landed in <code>pass/lec</code>).</p>
 
 <h2>Verdict discipline (unchanged, the page-level contract)</h2>
 <p>PASS ⇒ definitively equivalent; FAIL ⇒ definitively different; anything else
@@ -78,8 +79,21 @@
   (the final tally was obsolete once this rule landed); it separated the same
   encoder-cycle class from genuine arithmetic/memory-heavy residues, which remain
   F5 work. That run also reconfirmed that encode time does not respect
-  <code>lec.timeout</code> (late parents can spend minutes before cvc5), so
-  budget-aware encode remains open.</li>
+  <code>lec.timeout</code> (late parents can spend minutes before cvc5) —
+  <strong>budget-aware encode LANDED 2026-07-12</strong> (see below).</li>
+<li><strong>Budget-aware encode LANDED 2026-07-12.</strong> The encoder now honors
+  <code>lec.timeout</code>: <code>Encoder::set_encode_budget(seconds)</code>
+  (<code>pass/lec/encode.hpp</code>) arms a wall-clock deadline at each TOP-LEVEL
+  <code>encode()</code> call (a recursive Sub-flatten re-entry inherits the parent's
+  deadline via the <code>sub_depth_==0</code> guard), checked at the function entry,
+  the <code>while(progress)</code> combinational fixpoint head, and throttled inside
+  its <code>forward_hier</code> node walk. Over-budget bails through the existing
+  <code>ok=false → Verdict::Unknown</code> path (a sound degrade, never a wrong
+  verdict), so a deep/late parent that would grind for minutes in encode now stops at
+  the budget instead of blocking every checkSat behind it. Wired at all three
+  <code>Encoder</code> sites in <code>query.cpp</code> (bmc / ind / verify) as
+  <code>enc.set_encode_budget(opts.timeout)</code>; shares the one
+  <code>lec.timeout</code> knob (seconds).</li>
 <li><strong>Parallel hier driver on the fcore DAG (F1, LANDED 2026-07-10).</strong>
   <code>lec_hierarchical</code> now uses the Taskflow proof-DAG: all ready leaves in
   flight (4–8 workers), a parent unlocks when its children settle, a proven child
@@ -182,13 +196,91 @@
   bridge collector groups occurrence by size×bits <em>plus port counts</em>
   (<code>query.cpp:2868-2870</code>) while every other site groups by size×bits
   only.</li>
-<li><strong>Collapse quality — the diverged-use memory.</strong> Register and memory
-  collapse is landed (flop-cut, memories correspond by address). Rarely, the same
-  memory <em>cannot</em> be collapsed because its use diverges between the sides;
-  the engine must detect the correspondence/usage mismatch and conservatively keep
-  it uncollapsed (descended) rather than force a pairing. Add a regression that
-  plants a diverged-use memory and asserts the verdict is still correct (no false
-  PROVEN via a bogus collapse, no false REFUTE — flat fallback).</li>
+</ul>
+
+<h2>Landed 2026-07-12 — flat-path verdict cache + witness file:line/JSON (from 2f-fcore)</h2>
+<ul class="subtasks">
+<li><strong>Flat (non-hierarchical) lec verdict cache (2f-fcore F2 tail).</strong> The
+  <code>--set lec.hierarchical=false</code> single-miter path now consumes the same
+  <code>formal_cache.json</code> store the hier driver uses: <code>lec_pair_cache_key</code>
+  over the two sides' <code>semdiff::canonical_digest</code> + verdict-relevant options
+  (incl. the <code>um=[…]</code>/<code>c=[…]</code> segments), salt- and
+  digestability-gated. A PROVEN hit skips encode+solve; the Unknown-ledger skips a
+  re-grind that can't outspend the prior budget; a fresh Proven inserts, a witness-free
+  Unknown ledgers. Regression <code>pass/lec/tests/lec_cache_flat_test.sh</code>.</li>
+<li><strong>Witness <code>file:line</code> source-map + <code>lecfail.json</code>
+  (2f-fcore F7).</strong> The BMC witness now names the first diverging STATE cut with
+  its impl-side declaration <code>file:line</code> (<code>s (cpu.prp:554)</code>) —
+  resolved from the flop node's <code>attrs::srcid</code> via the graph
+  <code>Source_locator</code> into a new <code>Encoded::src_of_key</code> side map,
+  threaded through the BMC loop and (crucially) appended to the fork trace codec
+  (<code>put_trace</code>/<code>get_trace</code>) as a best-effort tail so it survives
+  the portfolio's pipe round-trip. The same location is stamped into the generated
+  <code>lecfail.prp</code>/<code>formalfail.prp</code> header, and a machine-readable
+  <code>&lt;workdir&gt;/lecfail.json</code>/<code>formalfail.json</code> carries the full
+  <code>Witness_trace</code> + the <code>{key,cycle,ref,impl,file,line}</code> root cut
+  (input sequence dumped from the same trace that drives the <code>.prp</code>, so they
+  match by construction). Regressions <code>cex_debug_test.sh</code> +
+  <code>lec_witness_prpfail_test.sh</code>.</li>
+</ul>
+
+<h2>Pending — interface-only digest for collapsed children (moved from 2f-fcore §3)</h2>
+<ul class="subtasks">
+<li><strong>Digest a collapsed (proven-child) instance by INTERFACE only</strong> (decl
+  tokens — name/width/sign/port-binding) instead of its full Merkle body, so an edit
+  confined to a collapse-isolated child's body leaves the parent's cache digest
+  unchanged and the ancestor still hits. Sound because a collapsed child is a black box
+  whose identity in the parent proof IS its interface, and the collapse list is already
+  in the <code>c=[…]</code> key segment. <em>Why it's not trivial:</em> the collapse set
+  is per-parent and known only at proof time, so the collapse-blind digest precompute
+  can't supply it — a parent digest must be re-walked in <code>run_def</code> with a
+  thread-local memo (the shared body memo is collapse-blind), and the change flips the
+  cache test's Merkle-invalidation assertion from "any child edit invalidates the
+  ancestor" to "a collapse-isolated child-body edit keeps the ancestor's hit" (needs a
+  distinct fixture). A pure hit-rate optimization on the working cache, not a
+  correctness gap.</li>
+</ul>
+
+<h2>Landed 2026-07-12 — diverged-use memory collapse guard</h2>
+<ul class="subtasks">
+<li><strong>Keep a diverged memory uncollapsed instead of forcing a shape×occurrence
+  pairing.</strong> Memories collapse to one shared current-state array by SHAPE
+  (size×bits) × RTL occurrence order — <strong>the key discovery: a memory's
+  <code>get_hier_name()</code> is a POSITIONAL node-id (<code>n10</code>,
+  <code>n11</code>), not an RTL name</strong>, so both sides carry <code>n10</code> at
+  occurrence-0 regardless of identity and a name check cannot tell a crossed pairing
+  from a correct one; semdiff likewise reports symmetric same-shape mems as
+  <code>(ambiguous)</code>. The only trustworthy divergence signal is semdiff's
+  <em>genuine</em>-mismatch reason. So <code>pass/semdiff</code> now exports
+  <code>Match_result::{a,b}_mem_diverged</code> (mem cells unpaired with a
+  <code>kind/init mismatch</code> or <code>no full match</code> — <strong>NOT</strong>
+  the occurrence-safe <code>ambiguous</code>), the driver routes them plus the
+  confident mem <code>state_pairs</code> into <code>Lec_options::{mem_diverged,
+  mem_match}</code>, and <code>build_shared_mems</code> (<code>query.cpp</code>) leaves
+  a shape bucket UNCOLLAPSED when it holds a diverged memory or when semdiff opines and
+  contradicts the occurrence pairing. Non-regression rule: the guard only tightens when
+  semdiff has a POSITIVE opinion about the bucket — otherwise the pre-guard occurrence
+  collapse is preserved (a self-LEC of a 2-same-shape-memory design still PROVEs).
+  Because the guard only ever SKIPS a collapse, it can remove a false PROVEN but never
+  introduce a wrong verdict. Regression <code>pass/lec/tests/lec_mem_diverge_test.sh</code>
+  (crossed same-shape mems → never false PROVEN across ind/bmc/decompose; self-LEC still
+  PROVEN). <em>Note:</em> a Verilog <code>initial</code> block DECOMPOSES a small array
+  into flops (no <code>$mem</code>) — the collapse path only sees write-only
+  <code>$mem_v2</code> cells.</li>
+</ul>
+
+<h2>Pending (cont.)</h2>
+<ul class="subtasks">
+<li><strong>Structurally-symmetric same-shape reorder (the permutation-retry gap
+  above).</strong> The diverged-use guard closes the case where semdiff CAN tell the
+  memories apart (kind/init/usage mismatch). It does NOT close the case where two
+  same-shape memories are structurally identical but RTL-reordered — semdiff can only
+  call those <code>ambiguous</code>, so the guard stays passive and occurrence pairing
+  still governs. That is exactly the <strong>permutation-retry</strong> item above:
+  retry alternative permutations as uncertain pairs under the drop-and-retry discipline.
+  (On the current ind decompose path a reordered genuinely-different pair still degrades
+  soundly to REFUTED/INCONCLUSIVE, never a false PROVEN — but a genuinely-equivalent
+  reorder is lost to Unknown until this lands.)</li>
 </ul>
 
 <h2>Tests</h2>

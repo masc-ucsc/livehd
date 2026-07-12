@@ -102,6 +102,28 @@ sh_test(
 )
 
 sh_test(
+    name = "lec_mem_diverge_test",
+    srcs = ["tests/lec_mem_diverge_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # 2f-lec diverged-use memory collapse guard (no false PROVEN on crossed mems)
+)
+
+sh_test(
+    name = "lec_budget_test",
+    srcs = ["tests/lec_budget_test.sh"],
+    size = "medium",  # runs a few short freezing miters under a wall-clock budget
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # 2f-fcore §6 global budget scheduler: formal.timeout is a TOTAL, not per-def
+)
+
+sh_test(
+    name = "lec_cache_flat_test",
+    srcs = ["tests/lec_cache_flat_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # 2f-fcore F2 tail: verdict cache on the flat (non-hierarchical) lec path
+)
+
+sh_test(
     name = "cex_debug_test",
     srcs = ["tests/cex_debug_test.sh"],
     data = ["//lhd"],

@@ -120,6 +120,11 @@ struct Match_result {
   // precondition refuses), or `no full match` (no cross-side counterpart).
   std::vector<State_pair>  state_pairs;
   std::vector<std::string> a_state_unpaired, b_state_unpaired;
+  // Memories whose correspondence GENUINELY diverges — unpaired with a kind/init
+  // mismatch or no counterpart, NOT mere symmetric `ambiguous` (which is
+  // occurrence-safe). Raw hier names, for lec's diverged-use collapse guard
+  // (2f-lec): a memory here must NOT be force-collapsed by shape×occurrence.
+  std::vector<std::string> a_mem_diverged, b_mem_diverged;
 };
 
 // Stamp the `match` attribute on nodes + driver pins of BOTH graphs: a shared id
