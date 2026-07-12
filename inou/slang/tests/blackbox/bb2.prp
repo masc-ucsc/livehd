@@ -1,0 +1,6 @@
+// Hand-written pyrope equivalent of bbdefs.v's bb2 (multi-output blackbox;
+// the verilog port `in` is a pyrope keyword, exercising the escaped-id path).
+pub mod bb2::[timecheck=false](`in`:u8) -> (out1:u8@[], out2:u8@[]) {
+  out1 = (`in` + 3) & 0xff
+  out2 = 255 ^ `in`
+}

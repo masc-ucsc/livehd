@@ -1,0 +1,9 @@
+// Hand-written pyrope equivalent of bbdefs.v's array_0_ext — the definition a
+// user supplies at recompile time for a blackboxed unit.
+pub mod array_0_ext::[timecheck=false](RW0_addr:u8, RW0_en:u1, RW0_clk:u1, RW0_wmode:u1, RW0_wdata:u32) -> (RW0_rdata:u32@[]) {
+  mut sel:u32 = 0
+  if RW0_en == 1 {
+    sel = RW0_wdata
+  }
+  RW0_rdata = sel ^ u32(RW0_addr) ^ u32(RW0_wmode)
+}
