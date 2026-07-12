@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <deque>
 #include <format>
@@ -274,6 +275,12 @@ private:
   // (see is_dce_dead above). In-memory only — lg-only flows drop the LNAST
   // after tolg, and any body swap invalidates the ids.
   absl::flat_hash_set<int64_t>                     dce_dead_stmts_;
+  // Blackbox (unknown-definition) modules this unit instantiates — stamped by
+  // inou.slang when slang elaborates with --ignore-unknown-modules. The pyrope
+  // re-emission imports these exactly like emitted submodules (the definition
+  // is supplied externally at recompile time). In-memory only (sibling to
+  // lambda_kind_).
+  std::vector<std::string>                         external_modules_;
   // Generic type parameters (`<T, U>`) recorded by func_extract from
   // the func_def generics child (a seam: the per-`T` body substitution lands
   // in a follow-up goal; this only preserves the names so a template carrying
@@ -522,6 +529,20 @@ public:
   // ── timecheck suppression (todo/ 1s subtask E; stamped by inou.slang) ─────
   bool get_skip_timecheck() const noexcept { return skip_timecheck_; }
   void set_skip_timecheck(bool t) noexcept { skip_timecheck_ = t; }
+
+  // ── external (blackbox) modules instantiated by this unit ─────────────────
+  // Stamped by inou.slang for slang UninstantiatedDef instances
+  // (--ignore-unknown-modules): callee names with no definition in this
+  // compile. The pyrope re-emission imports them like emitted submodules.
+  void add_external_module(std::string_view name) {
+    if (!has_external_module(name)) {
+      external_modules_.emplace_back(name);
+    }
+  }
+  bool has_external_module(std::string_view name) const {
+    return std::find(external_modules_.begin(), external_modules_.end(), name) != external_modules_.end();
+  }
+  const std::vector<std::string>& get_external_modules() const noexcept { return external_modules_; }
 
   // ── DCE mark-only mode (upass runner, lg-only flows) ──────────────────────
   // Statement nids the post-walk DCE proved dead when the rewritten LNAST is

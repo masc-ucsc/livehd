@@ -15,6 +15,7 @@
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Statement.h"
 #include "slang/ast/TimingControl.h"
+#include "slang/ast/expressions/AssertionExpr.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/ast/types/AllTypes.h"
 #include "slang_context.hpp"
@@ -85,6 +86,29 @@ const slang::ast::ValueSymbol* lhs_base_symbol(const slang::ast::Expression& lhs
       default: return nullptr;
     }
   }
+}
+
+// The real expression of an unknown-module (UninstantiatedDef) port
+// connection. slang binds these against the ERROR type (there is no port to
+// type them), wrapping the bound expression in an InvalidExpression — unwrap
+// to the self-determined child. Returns nullptr for an unconnected `.p()`
+// (EmptyArgument) or a non-simple (assertion-shaped) connection.
+const slang::ast::Expression* unknown_conn_expr(const slang::ast::AssertionExpr* conn) {
+  if (conn == nullptr) {
+    return nullptr;
+  }
+  const auto* sae = conn->as_if<slang::ast::SimpleAssertionExpr>();
+  if (sae == nullptr) {
+    return nullptr;
+  }
+  const auto* e = &sae->expr;
+  while (e != nullptr && e->kind == ExpressionKind::Invalid) {
+    e = e->as<slang::ast::InvalidExpression>().child;
+  }
+  if (e == nullptr || e->kind == ExpressionKind::EmptyArgument) {
+    return nullptr;
+  }
+  return e;
 }
 
 // Collect the symbols written by a statement subtree, split by style.
@@ -2116,8 +2140,12 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     std::string                                         prefix;  // genblk name prefix at collection point
     absl::flat_hash_set<const slang::ast::ValueSymbol*> reads;
     absl::flat_hash_set<const slang::ast::ValueSymbol*> writes;
+    // UninstantiatedDef (blackbox) only: inferred per-connection direction,
+    // aligned with getPortConnections() (see the inference pass below).
+    std::vector<bool>                                   bb_outs;
   };
   std::vector<Driver> drivers;
+  std::vector<size_t> unknown_idx;  // drivers[] entries that are blackbox instances
   // External nets driven by purely-registered instance outputs; reads of them are
   // order-free (see collect_registered_outputs) so pass 2 skips their back-edges.
   absl::flat_hash_set<const slang::ast::Symbol*> seq_out_nets;
@@ -2146,7 +2174,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         case SymbolKind::Net: {
           const auto& ns = member.as<slang::ast::NetSymbol>();
           if (const auto* expr = ns.getInitializer()) {
-            Driver d{&member, genblk_prefix_, {}, {}};
+            Driver d{&member, genblk_prefix_, {}, {}, {}};
             Dep_collector dc;
             expr->visit(dc);
             d.reads = std::move(dc.reads);
@@ -2166,7 +2194,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         }
 
         case SymbolKind::ContinuousAssign: {
-          Driver        d{&member, genblk_prefix_, {}, {}};
+          Driver        d{&member, genblk_prefix_, {}, {}, {}};
           Dep_collector dc;
           member.as<slang::ast::ContinuousAssignSymbol>().getAssignment().visit(dc);
           d.reads  = std::move(dc.reads);
@@ -2176,7 +2204,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         }
 
         case SymbolKind::ProceduralBlock: {
-          Driver        d{&member, genblk_prefix_, {}, {}};
+          Driver        d{&member, genblk_prefix_, {}, {}, {}};
           Dep_collector dc;
           member.as<slang::ast::ProceduralBlockSymbol>().getBody().visit(dc);
           d.reads  = std::move(dc.reads);
@@ -2187,7 +2215,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
 
         case SymbolKind::Instance: {
           collect_registered_outputs(member.as<slang::ast::InstanceSymbol>(), seq_out_nets);
-          Driver d{&member, genblk_prefix_, {}, {}};
+          Driver d{&member, genblk_prefix_, {}, {}, {}};
           for (const auto* conn : member.as<slang::ast::InstanceSymbol>().getPortConnections()) {
             const auto* expr = conn->getExpression();
             if (expr == nullptr || conn->port.kind != SymbolKind::Port) {
@@ -2237,12 +2265,24 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
           break;
         }
 
-        case SymbolKind::UninstantiatedDef:
-          emit_unsupported(member.location, "unknown-module",
-                           std::string("instance '") + std::string(member.name)
-                               + "' refers to an unknown module (blackboxes are not supported by --reader slang)",
-                           "provide the module source, or use --reader yosys-slang with a blackbox library");
+        case SymbolKind::UninstantiatedDef: {
+          // Unknown-module instance. Under a USER --ignore-unknown-modules it
+          // is kept as an opaque blackbox sub-instance (slang has no port
+          // directions for it, so reads/writes are filled by the inference
+          // pass below); otherwise a typo'd module name stays a clean error.
+          const auto& ud = member.as<slang::ast::UninstantiatedDefSymbol>();
+          if (!options_.blackbox_unknown || ud.isChecker()) {
+            emit_unsupported(member.location, "unknown-module",
+                             std::string("instance '") + std::string(member.name)
+                                 + "' refers to an unknown module (no definition in this compile)",
+                             "provide the module source, or pass --ignore-unknown-modules to keep it as a blackbox "
+                             "instance (pyrope emission imports it)");
+            break;
+          }
+          drivers.push_back(Driver{&member, genblk_prefix_, {}, {}, {}});
+          unknown_idx.push_back(drivers.size() - 1);
           break;
+        }
 
         default:
           emit_unsupported(member.location, "unsupported-member",
@@ -2252,6 +2292,125 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
     }
   };
   collect(scope);
+
+  // ── pass 1b: blackbox port-direction inference ─────────────────────────────
+  // An unknown module gives slang no port directions, so infer them from how
+  // the module uses the connected net:
+  //   input  (confident) — a computed rvalue, a module input, or a net WRITTEN
+  //                        by known logic (assign/process/net-init/known
+  //                        instance output);
+  //   output (confident) — an undriven lvalue net that known logic READS or
+  //                        that goes to a module output;
+  //   ambiguous          — neither written nor read by anything known, incl. a
+  //                        net between two blackboxes: the direction cannot be
+  //                        guessed, so warn and assume (first blackbox in
+  //                        source order drives it, later ones read it).
+  if (!unknown_idx.empty()) {
+    absl::flat_hash_set<const slang::ast::ValueSymbol*> driven;         // written by known logic
+    absl::flat_hash_set<const slang::ast::ValueSymbol*> read_by_known;  // read by known logic
+    for (const auto& d : drivers) {  // blackbox drivers are still empty here
+      driven.insert(d.writes.begin(), d.writes.end());
+      read_by_known.insert(d.reads.begin(), d.reads.end());
+    }
+    // Nets an earlier blackbox claimed as its output (the ambiguous-guess
+    // trail), mapped to that blackbox for the warning text.
+    absl::flat_hash_map<const slang::ast::ValueSymbol*, const slang::ast::UninstantiatedDefSymbol*> bb_claimed;
+
+    // All lvalue root symbols of a connection expr, or false for a shape that
+    // cannot be written (a computed rvalue — definitely an input).
+    std::function<bool(const slang::ast::Expression&, std::vector<const slang::ast::ValueSymbol*>&)> lvalue_roots
+        = [&](const slang::ast::Expression& e, std::vector<const slang::ast::ValueSymbol*>& roots) -> bool {
+      if (e.kind == ExpressionKind::Concatenation) {
+        for (const auto* op : e.as<slang::ast::ConcatenationExpression>().operands()) {
+          if (!lvalue_roots(*op, roots)) {
+            return false;
+          }
+        }
+        return true;
+      }
+      const auto* sym = lhs_base_symbol(e);
+      if (sym == nullptr) {
+        return false;
+      }
+      roots.push_back(sym);
+      return true;
+    };
+
+    for (size_t k : unknown_idx) {
+      auto&       d     = drivers[k];
+      const auto& ud    = d.member->as<slang::ast::UninstantiatedDefSymbol>();
+      auto        conns = ud.getPortConnections();
+      auto        names = ud.getPortNames();
+      d.bb_outs.assign(conns.size(), false);
+      for (size_t i = 0; i < conns.size(); ++i) {
+        const auto* pe = unknown_conn_expr(conns[i]);
+        if (pe == nullptr) {
+          continue;
+        }
+        const auto&                                 expr  = *pe;
+        std::vector<const slang::ast::ValueSymbol*> roots;
+        const bool is_lvalue = lvalue_roots(expr, roots) && !roots.empty();
+
+        const std::string pname = i < names.size() && !names[i].empty() ? std::string(names[i]) : std::to_string(i);
+        auto conn_desc = [&]() {
+          return std::string("port '") + pname + "' of blackbox instance '" + std::string(ud.name) + "' ('"
+                 + std::string(ud.definitionName) + "')";
+        };
+
+        bool in_conf = !is_lvalue;  // a computed rvalue can only be an input
+        bool out_conf = false;
+        const slang::ast::UninstantiatedDefSymbol* bb_peer = nullptr;
+        for (const auto* r : roots) {
+          if (input_syms_.contains(r) || driven.contains(r)) {
+            in_conf = true;
+          } else if (auto it = bb_claimed.find(r); it != bb_claimed.end()) {
+            bb_peer = it->second;
+          } else if (read_by_known.contains(r) || output_syms_.contains(r)) {
+            out_conf = true;
+          }
+        }
+
+        bool is_out;
+        if (in_conf) {  // a written net cannot be a blackbox output
+          is_out = false;
+          if (out_conf) {
+            emit_warning(expr.sourceRange, "unknown-module-dir-guess", "io",
+                         "mixed direction evidence for " + conn_desc()
+                             + " (parts of the connection are written, parts only read) — assuming an input");
+          }
+        } else if (bb_peer != nullptr) {
+          is_out = false;
+          emit_warning(expr.sourceRange, "unknown-module-dir-guess", "io",
+                       "direction of " + conn_desc() + " cannot be inferred: the net only connects blackboxes — assuming '"
+                           + std::string(bb_peer->definitionName) + "' (instance '" + std::string(bb_peer->name)
+                           + "') drives it and this is an input");
+        } else if (out_conf) {
+          is_out = true;
+        } else {
+          is_out = true;  // undriven and unread: nothing known to contradict either way
+          emit_warning(expr.sourceRange, "unknown-module-dir-guess", "io",
+                       "direction of " + conn_desc()
+                           + " cannot be inferred (the net is neither driven nor read in this module) — assuming an "
+                             "output");
+        }
+
+        if (is_out) {
+          d.bb_outs[i] = true;
+          Dep_collector dc;
+          dc.note_lhs(expr);  // writes the roots; select indices become reads
+          d.reads.insert(dc.reads.begin(), dc.reads.end());
+          d.writes.insert(dc.writes.begin(), dc.writes.end());
+          for (const auto* r : roots) {
+            bb_claimed.emplace(r, &ud);
+          }
+        } else {
+          Dep_collector dc;
+          expr.visit(dc);
+          d.reads.insert(dc.reads.begin(), dc.reads.end());
+        }
+      }
+    }
+  }
 
   // ── pass 2: dependency edges. A read of a wire depends on every driver
   // writing it; reads of regs (q pins), inputs, and locals are order-free.
@@ -2412,6 +2571,9 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       case SymbolKind::ContinuousAssign: lower_continuous_assign(d.member->as<slang::ast::ContinuousAssignSymbol>()); break;
       case SymbolKind::ProceduralBlock: lower_process(d.member->as<slang::ast::ProceduralBlockSymbol>()); break;
       case SymbolKind::Instance: lower_instance(d.member->as<slang::ast::InstanceSymbol>()); break;
+      case SymbolKind::UninstantiatedDef:
+        lower_unknown_instance(d.member->as<slang::ast::UninstantiatedDefSymbol>(), d.bb_outs);
+        break;
       default: break;
     }
     genblk_prefix_ = saved_prefix;
@@ -3090,4 +3252,99 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     assign_to(*oc.expr, materialize_conversion(v, pi.bits, pi.is_signed, ei.bits, ei.is_signed));
   }
   clear_pending_loc();
+}
+
+void Slang_context::lower_unknown_instance(const slang::ast::UninstantiatedDefSymbol& inst,
+                                           const std::vector<bool>&                   conn_is_out) {
+  std::string callee{inst.definitionName};
+  if (callee.empty()) {
+    emit_unsupported(inst.location, "unknown-module",
+                     std::string("instance '") + std::string(inst.name) + "' has no definition name");
+    return;
+  }
+  auto conns = inst.getPortConnections();
+  auto names = inst.getPortNames();
+
+  if (unknown_warned_.insert(callee).second) {
+    emit_warning(slang::SourceRange(inst.location, inst.location), "unknown-module-blackbox", "unsupported",
+                 std::string("module '") + callee
+                     + "' has no definition; kept as a blackbox instance (port directions inferred, an `import` is "
+                       "emitted on the pyrope output)",
+                 "provide the module source, or supply a matching pyrope module at recompile time");
+  }
+  if (!inst.paramExpressions.empty()) {
+    emit_warning(slang::SourceRange(inst.location, inst.location), "unknown-module-params", "unsupported",
+                 std::string("parameter bindings of blackbox instance '") + std::string(inst.name) + "' ('" + callee
+                     + "') are dropped (no definition to bind against)");
+  }
+
+  proc_kind_ = Proc_kind::none;
+
+  // Mirror lower_instance, minus everything that needs the definition: no
+  // port types (values pass self-determined, no materialize_conversion) and
+  // the connection count stands in for the callee's output arity.
+  struct Out_conn {
+    std::string                   name;
+    const slang::ast::Expression* expr;
+  };
+  std::vector<std::pair<std::string, std::string>> in_args;  // (port, value)
+  std::vector<Out_conn>                            outs;
+
+  for (size_t i = 0; i < conns.size(); ++i) {
+    const auto* pe = unknown_conn_expr(conns[i]);
+    if (pe == nullptr) {  // unconnected `.p()`
+      continue;
+    }
+    std::string_view pname = i < names.size() ? names[i] : std::string_view{};
+    if (pname.empty()) {
+      emit_unsupported(inst.location, "unknown-module-ordered-conn",
+                       std::string("instance '") + std::string(inst.name) + "' of unknown module '" + callee
+                           + "' uses ordered port connections (name/direction inference needs named ports)",
+                       "use named `.port(expr)` connections");
+      return;
+    }
+    const auto& expr = *pe;
+    if (i < conn_is_out.size() && conn_is_out[i]) {
+      outs.push_back({std::string(pname), &expr});
+    } else {
+      set_pending_loc(expr.sourceRange);
+      auto v = to_int_value(lower_rvalue(expr));
+      clear_pending_loc();
+      in_args.emplace_back(std::string(pname), v);
+    }
+  }
+
+  auto& ln = *builder_.lnast;
+  set_pending_loc(inst.location);
+  auto fcall_idx = builder_.add_child(Lnast_ntype::create_func_call());
+  auto result    = inst.name.empty() ? builder_.create_lnast_tmp() : std::string(inst.name);
+  ln.add_child(fcall_idx, Lnast_node::create_ref(result));
+  ln.add_child(fcall_idx, Lnast_node::create_ref(callee));
+  for (const auto& [pname, v] : in_args) {
+    auto arg = ln.add_child(fcall_idx, Lnast_ntype::create_store());
+    ln.add_child(arg, Lnast_node::create_ref(pname));
+    builder_.add_value_child_pub(arg, v);
+  }
+
+  // Output arity is a guess: every CONNECTED inferred output is assumed to be
+  // a real callee output (SRAM-macro style blackboxes connect them all), so
+  // exactly one binds the call result directly and several read tuple fields.
+  const bool single_out = outs.size() == 1;
+  for (const auto& oc : outs) {
+    std::string v;
+    if (single_out) {
+      v = result;
+    } else {
+      auto tg = builder_.add_child(Lnast_ntype::create_tuple_get());
+      auto t  = builder_.create_lnast_tmp();
+      ln.add_child(tg, Lnast_node::create_ref(t));
+      ln.add_child(tg, Lnast_node::create_ref(result));
+      ln.add_child(tg, Lnast_node::create_const(oc.name));
+      v = t;
+    }
+    assign_to(*oc.expr, v);
+  }
+  clear_pending_loc();
+
+  builder_.lnast->add_external_module(callee);
 }

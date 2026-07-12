@@ -469,13 +469,16 @@ void Lnast_prp_writer::write_module() {
   Lnast_nid io_nid = cur;
 
   // File top-scope imports: one per instantiated submodule (a func_call callee
-  // that is itself an emitted module).  `const X = import("X.X")` binds the
-  // single pub entry so the cross-module call `X(...)` resolves on re-compile.
-  if (known_modules_ != nullptr) {
+  // that is itself an emitted module, or an EXTERNAL blackbox the slang reader
+  // stamped on this unit — its .prp is supplied by the user at recompile time).
+  // `const X = import("X.X")` binds the single pub entry so the cross-module
+  // call `X(...)` resolves on re-compile.
+  if (known_modules_ != nullptr || !lnast->get_external_modules().empty()) {
     std::string              self(lnast->get_top_module_name());
     std::vector<std::string> imports;
     for (const auto& c : func_call_callees_) {
-      if (c != self && known_modules_->count(c) != 0u) {
+      if (c != self
+          && ((known_modules_ != nullptr && known_modules_->count(c) != 0u) || lnast->has_external_module(c))) {
         imports.push_back(c);
       }
     }
@@ -1780,8 +1783,9 @@ void Lnast_prp_writer::write_func_call() {
   // included: when such a comb is actually inlined the runner consumes the name
   // as the inline hierarchy level (identical to the dst-name fallback), so it is
   // never harmful.
-  const bool name_instance = !is_tmp(lhs) && instantiated_modules_ != nullptr
-                             && instantiated_modules_->count(call_tail) != 0u;
+  const bool name_instance = !is_tmp(lhs)
+                             && ((instantiated_modules_ != nullptr && instantiated_modules_->count(call_tail) != 0u)
+                                 || lnast->has_external_module(call_tail));
 
   // A multi-output callee (comb or mod) whole-binds like any other instance —
   // `mut r = C(args)` — and its outputs are read as `r.port`.  (The old

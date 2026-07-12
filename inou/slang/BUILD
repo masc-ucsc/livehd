@@ -62,6 +62,17 @@ sh_test(
     ],
 )
 
+# Unknown-module (blackbox) policy: without a user --ignore-unknown-modules
+# the compile fails cleanly; with it, unknown instances become blackbox
+# sub-instances the pyrope emission imports, and supplying their .prp
+# definitions LEC-proves against the golden.
+sh_test(
+    name = "slang_blackbox",
+    size = "large",
+    srcs = ["tests/slang_blackbox.sh"],
+    data = glob(["tests/blackbox/*"]) + ["//lhd"],
+)
+
 # The --reader slang coverage ladder (todo/ 2s subtask E): one slang_compile-*
 # target per inou/yosys/tests/*.v source, pinned to its strongest passing tier
 # in slang_ladder.bzl (lec > verilog > lnast > error — see

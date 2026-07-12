@@ -50,6 +50,10 @@ public:
   struct Options {
     int  unroll_limit   = 4000;  // slang-side loop unroll cap (yosys-slang default)
     bool keep_timecheck = false;
+    // The USER passed --ignore-unknown-modules (inou_slang always injects it
+    // at the slang level so the reader owns the policy): lower unknown-module
+    // instances as blackbox sub-instances instead of a clean error.
+    bool blackbox_unknown = false;
   };
 
   Slang_context() = default;
@@ -117,6 +121,15 @@ private:
   void        lower_ff_process(const slang::ast::SignalEventControl& clock, const slang::ast::Statement& body,
                                std::vector<const slang::ast::Statement*>& prologue);
   void        lower_instance(const slang::ast::InstanceSymbol& inst);
+  // Blackbox instance (slang UninstantiatedDef, i.e. --ignore-unknown-modules):
+  // no definition, so port directions come from the collect-pass inference
+  // (`conn_is_out`, aligned with getPortConnections()). Lowered as a func_call
+  // to the definition name; the callee is recorded as an external module on
+  // the unit's Lnast so the pyrope emission writes its `import` + call.
+  void        lower_unknown_instance(const slang::ast::UninstantiatedDefSymbol& inst, const std::vector<bool>& conn_is_out);
+  // Unknown-module definition names already diagnosed (one warning per name,
+  // not per instance — XS-scale designs instantiate one SRAM macro x100s).
+  absl::flat_hash_set<std::string> unknown_warned_;
   void        lower_continuous_assign(const slang::ast::ContinuousAssignSymbol& ca);
   void        declare_value_symbol(const slang::ast::ValueSymbol& sym, bool force_reg);
   void        declare_reg(const slang::ast::ValueSymbol& sym);

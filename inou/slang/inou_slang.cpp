@@ -248,6 +248,10 @@ void Inou_slang::work(Eprp_var& var) {
 
   Slang_context::Options opts;
   opts.keep_timecheck = keep_timecheck;
+  // Only a USER-supplied --ignore-unknown-modules turns unknown modules into
+  // blackbox sub-instances; the copy injected above (so slang itself never
+  // hard-errors and the reader owns the diagnostic) does not.
+  opts.blackbox_unknown = user_has("--ignore-unknown-modules");
   if (var.has_label("unroll_limit")) {
     if (int v = atoi(std::string(var.get("unroll_limit")).c_str()); v > 0) {
       opts.unroll_limit = v;
