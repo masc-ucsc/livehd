@@ -6863,6 +6863,13 @@ bool dce_is_keepalive_attr_set(const Lnast& staging, const Lnast_nid& node) {
   if (!key.is_valid() || staging.get_type(key) != Lnast_ntype::Lnast_ntype_const) {
     return false;
   }
+  // Synthesis-region marker (2opt-freq B): `attr_set %__region_N '__region' …`
+  // opens a block-scoped partition region for tolg. Its %-target never has
+  // readers by construction, so without this exemption DCE would silently
+  // delete the user's block annotation.
+  if (staging.get_name(key) == "__region") {
+    return true;
+  }
   if (staging.get_name(key) != "type") {
     return false;
   }

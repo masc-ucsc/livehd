@@ -55,11 +55,19 @@ namespace {
 // Built-in combinational flow (task default). {D}/{L} substituted from opts.
 constexpr std::string_view kCombFlow = "strash; &get -n; &fraig -x; &put; &get -n; &dch -f; &nf {D}; &put";
 
-// Built-in sequential flow (seq=true). Same comb opt/map as kCombFlow but with a
-// retiming step (`dretime`) so ABC is allowed to move the region's registers
-// across the combinational logic. Latch count/order may change; the read-back is
-// robust to that (per-latch reconstruction + single-root remap).
-constexpr std::string_view kSeqFlow = "strash; &get -n; &fraig -x; &put; dretime; &get -n; &dch -f; &nf {D}; &put";
+// Built-in sequential flow (seq=true). Same comb opt/map as kCombFlow; the
+// latches only carry the registers across ABC so it can optimize the logic
+// BETWEEN them. Retiming (`dretime`) is deliberately NOT in the default
+// (2opt-freq E ruling): moving registers reshapes the latch count/order,
+// which (a) drops the register-preserving flop read-back to anonymous
+// per-latch flops (breaking the tier-1 name correspondence post-synthesis
+// LEC relies on, 3a-synth), (b) loses the din-cone source attribution
+// (latch->source-flop mapping needs a stable count), and (c) is a
+// latency-visible transform the 2opt-freq loop's cycle-accurate gate
+// forbids. Opt in explicitly per run or per region when that is understood:
+// `--set pass.abc.flow="strash; &get -n; &fraig -x; &put; dretime; &get -n;
+// &dch -f; &nf {D}; &put"` (the read-back stays robust to reshaped latches).
+constexpr std::string_view kSeqFlow = "strash; &get -n; &fraig -x; &put; &get -n; &dch -f; &nf {D}; &put";
 
 // Standard ABC synthesis scripts from berkeley-abc's abc.rc, installed as
 // aliases so a `--set pass.abc.flow="resyn2"` (or any other abc.rc script name)
@@ -129,17 +137,26 @@ struct Abc_bit_ops {
 
 }  // namespace
 
+// {D}/{L} expand to the full FLAG (`-D <val>` / `-L <val>`) when the option is
+// set and to nothing otherwise — `&nf {D}` needs `&nf -D 4`, and a bare value
+// (`&nf 4`) is silently ignored by ABC, which made the delay target a no-op.
+namespace {
+std::string flag_subst(std::string f, std::string_view tok, char flag, const std::string& val) {
+  return subst(std::move(f), tok, val.empty() ? std::string{} : std::format("-{} {}", flag, val));
+}
+}  // namespace
+
 std::string Mapper::comb_flow() const {
   std::string f = opts_.flow.empty() ? std::string{kCombFlow} : opts_.flow;
-  f             = subst(std::move(f), "{D}", opts_.delay);
-  f             = subst(std::move(f), "{L}", opts_.load);
+  f             = flag_subst(std::move(f), "{D}", 'D', opts_.delay);
+  f             = flag_subst(std::move(f), "{L}", 'L', opts_.load);
   return f;
 }
 
 std::string Mapper::seq_flow() const {
   std::string f = opts_.flow.empty() ? std::string{kSeqFlow} : opts_.flow;
-  f             = subst(std::move(f), "{D}", opts_.delay);
-  f             = subst(std::move(f), "{L}", opts_.load);
+  f             = flag_subst(std::move(f), "{D}", 'D', opts_.delay);
+  f             = flag_subst(std::move(f), "{L}", 'L', opts_.load);
   return f;
 }
 
@@ -157,7 +174,10 @@ bool Mapper::start() {
   for (auto a : kAbcAliases) {
     Cmd_CommandExecute(frame, std::string{a}.c_str());
   }
-  auto cmd = std::string{"read_lib "} + opts_.library;
+  // -s skips multi-output cells (sky130 fa/ha/...): the gate read-back speaks
+  // single-output Mio gates only — a multi-output supergate would previously
+  // read back as a null-pData node and silently collapse its cone to const0.
+  auto cmd = std::string{"read_lib -s "} + opts_.library;
   if (Cmd_CommandExecute(frame, cmd.c_str()) != 0) {
     livehd::diag::err("pass.abc", "read-lib", "unsupported")
         .msg("ABC could not read the Liberty library '{}'", opts_.library)
@@ -477,6 +497,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // A region-internal node not yet materialized (should not happen in topo
     // order) or an unexpected boundary: emit a constant 0 so the netlist stays
     // structurally valid; correctness is guarded by the unsupported-cell diag.
+    std::print(stderr, "[dbg abc_bit FALLBACK->const0] drv nid={} op={} bits={} unsign={} eff={}\n",
+               drv.get_master_node().get_debug_nid(), Ntype::get_name(gu::type_op_of(drv.get_master_node())), w,
+               gu::is_unsign(drv), eff);
     auto* net  = abc_const_bit(false);
     slots[eff] = net;
     return net;
@@ -716,9 +739,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   bool unsupported = false;
   for (auto n : rb.src->forward_class()) {
     if (!region.contains(n)) {
+      std::print(stderr, "[dbg topo SKIP not-in-region] nid={} op={}\n", n.get_debug_nid(),
+                 Ntype::get_name(gu::type_op_of(n)));
       continue;
     }
     auto op = gu::type_op_of(n);
+    std::print(stderr, "[dbg topo] nid={} op={} out_bits={}\n", n.get_debug_nid(), Ntype::get_name(op),
+               gu::bits_of(n.create_driver_pin(0)));
     if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Div) {
       continue;  // blackbox boundary (Sub instance / memory / divider) -- handled separately
     }
@@ -1236,6 +1263,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   Abc_NtkDelete(manNtk);
   Abc_FrameClearVerifStatus(frame);
   Abc_FrameSetCurrentNetwork(frame, pLogic);
+  Cmd_CommandExecute(frame, "write_blif /tmp/dbg_premap.blif");  // dbg
   auto flow = opts_.seq ? seq_flow() : comb_flow();
   if (Cmd_CommandExecute(frame, flow.c_str()) != 0) {
     livehd::diag::err("pass.abc", "abc-flow", "internal").msg("ABC flow failed for region '{}': {}", rb.module_name, flow).fatal();
@@ -1442,7 +1470,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   Abc_NtkForEachNode(mapped, pObj, i) {
     auto* g = static_cast<Mio_Gate_t*>(pObj->pData);
     if (g == nullptr) {
-      continue;
+      // A mapped node without Mio data cannot be read back — skipping it
+      // would silently collapse its fanout cone to const0 (seen with
+      // multi-output supergates before read_lib -s). Never miscompile.
+      livehd::diag::err("pass.abc", "abc-readback", "internal")
+          .msg("region '{}': mapped node {} carries no Mio gate — unreadable mapping (multi-output cell?)", rb.module_name,
+               Abc_ObjId(pObj))
+          .fatal();
+      Abc_NtkDelete(mapped);
+      return;
     }
     auto io  = blackbox_io(g);
     auto sub = gu::create_typed_node(*body, Ntype_op::Sub);
@@ -1739,6 +1775,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
     // roots = the mapped gate driving each PO bit, grouped by output port
     std::vector<std::vector<Abc_Obj_t*>> port_roots(rb.outputs.size());
+    std::vector<hhds::SourceId>          cone_srcid(po_srcid);
     Abc_NtkForEachPo(mapped, pObj, i) {
       if (i >= static_cast<int>(po_order.size())) {
         continue;
@@ -1748,10 +1785,47 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         port_roots[po_order[i].first].push_back(drv);
       }
     }
+    // Latch-input pseudo-outputs (seq): a gate feeding a register din gets the
+    // ORIGINAL register's srcid, so a post-map critical path ending at a flop
+    // still points at source. Latch k maps to its source flop by creation
+    // order — valid only when the latch count survived the flow unchanged
+    // (the same assumption the 1:1 flop read-back makes); a retime-reshaped
+    // region keeps PO-cone attribution only.
+    if (opts_.seq && !flops.empty()) {
+      int total_bits = 0;
+      for (const auto& f : flops) {
+        total_bits += f.bits;
+      }
+      std::vector<Abc_Obj_t*> lat_objs;
+      Abc_NtkForEachLatch(mapped, pObj, i) { lat_objs.push_back(pObj); }
+      if (static_cast<int>(lat_objs.size()) == total_bits) {
+        std::vector<const Seq_flop*> owner;
+        owner.reserve(static_cast<size_t>(total_bits));
+        for (const auto& f : flops) {
+          for (int b = 0; b < f.bits; ++b) {
+            owner.push_back(&f);
+          }
+        }
+        for (size_t k = 0; k < lat_objs.size(); ++k) {
+          auto sid_attr = owner[k]->node.attr(hhds::attrs::srcid);
+          if (!sid_attr.has() || sid_attr.get() == 0) {
+            continue;
+          }
+          auto* bi_obj = Abc_ObjFanin0(lat_objs[k]);                          // latch -> BI
+          auto* dnet   = bi_obj != nullptr ? Abc_ObjFanin0(bi_obj) : nullptr;  // BI -> net
+          auto* drv    = dnet != nullptr ? Abc_ObjFanin0(dnet) : nullptr;      // net -> driving node
+          if (drv == nullptr || !Abc_ObjIsNode(drv)) {
+            continue;
+          }
+          port_roots.push_back({drv});
+          cone_srcid.push_back(body->source_locator().import_from(rb.src->source_locator(), sid_attr.get()));
+        }
+      }
+    }
     // per output, DFS its fanin cone and record the port on each reached gate
     absl::flat_hash_map<Abc_Obj_t*, std::vector<int>> cone_ports;
-    for (size_t po = 0; po < rb.outputs.size(); ++po) {
-      if (po_srcid[po] == hhds::SourceId_invalid) {
+    for (size_t po = 0; po < port_roots.size(); ++po) {
+      if (cone_srcid[po] == hhds::SourceId_invalid) {
         continue;  // no provenance to attribute this cone with
       }
       absl::flat_hash_set<Abc_Obj_t*> visited;
@@ -1778,7 +1852,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     for (auto& [g, ports] : cone_ports) {
       std::vector<hhds::SourceId> ids;
       for (int po : ports) {
-        auto id = po_srcid[po];
+        auto id = cone_srcid[static_cast<size_t>(po)];
         if (std::find(ids.begin(), ids.end(), id) == ids.end()) {
           ids.push_back(id);  // distinct outputs may share a srcid; keep it unique
         }

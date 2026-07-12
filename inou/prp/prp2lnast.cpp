@@ -2032,25 +2032,35 @@ bool Prp2lnast::parse_scope_attributes(TSNode attr_list_node, int& region_id, TS
       report_error(item, "scope-attr-shape", "syntax", "scope attribute needs an explicit value", "abc=\"…\" or color=…");
       return false;
     }
+    // Attribute values arrive as `constant` nodes; classify by text. A quoted
+    // value is a string. abc= flows contain `{D}` (ABC's delay substitution),
+    // which a double-quoted Pyrope string would interpolate — require single
+    // quotes when a `{` is present so the flow stays verbatim.
+    auto value_txt = [&](TSNode v) { return trim(get_text(v)); };
+    auto is_quoted = [](std::string_view t) {
+      return t.size() >= 2 && ((t.front() == '\'' && t.back() == '\'') || (t.front() == '"' && t.back() == '"'));
+    };
     auto key = trim(get_text(lv));
     if (key == "abc") {
-      if (std::string_view(ts_node_type(rv)) != "string_literal") {
+      auto txt = value_txt(rv);
+      if (!is_quoted(txt) || (txt.front() == '"' && txt.find('{') != std::string_view::npos)) {
         report_error(rv,
                      "scope-attr-value",
                      "syntax",
-                     "abc= takes a string literal (the per-region ABC flow/options)",
-                     "e.g. abc=\"strash; resyn2; &get -n; &nf {D}; &put\"");
+                     "abc= takes a plain string literal (the per-region ABC flow/options)",
+                     "single-quote it so `{D}` stays verbatim: abc='strash; resyn2; &get -n; &nf {D}; &put'");
         return false;
       }
       abc_rv = rv;
     } else if (key == "color") {
       have_color = true;
-      std::string_view rvt(ts_node_type(rv));
-      auto             txt = trim(get_text(rv));
-      if (rvt == "string_literal") {
+      auto txt = value_txt(rv);
+      if (is_quoted(txt)) {
         // strip the quotes; same label anywhere in this file => same region
-        if (txt.size() >= 2) {
-          txt = txt.substr(1, txt.size() - 2);
+        txt = txt.substr(1, txt.size() - 2);
+        if (txt.empty()) {
+          report_error(rv, "scope-attr-value", "syntax", "color= label must not be empty", "e.g. color=\"crit\"");
+          return false;
         }
         auto [itr, inserted] = region_label_ids_.try_emplace(std::string{txt}, 0);
         if (inserted) {

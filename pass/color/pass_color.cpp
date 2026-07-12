@@ -156,6 +156,11 @@ void Pass_color::color(Eprp_var& var) {
   }
 
   if (top_g != nullptr) {
-    set_coloring_info(top_g, build_coloring_info_json(top_g, top.empty() ? top_g->get_name() : top, alg, params_json(alg, opts, var)));
+    // preserve_seeded_info keeps the block-attribute members ("seeded",
+    // "region_opts") alive across this rebuild (2opt-freq B).
+    set_coloring_info(
+        top_g,
+        preserve_seeded_info(top_g,
+                             build_coloring_info_json(top_g, top.empty() ? top_g->get_name() : top, alg, params_json(alg, opts, var))));
   }
 }

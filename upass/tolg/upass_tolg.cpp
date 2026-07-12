@@ -5,8 +5,10 @@
 
 #include <algorithm>
 #include <bit>
+#include <charconv>
 #include <cstdint>
 #include <cstdlib>
+#include <map>
 #include <functional>
 #include <limits>
 #include <optional>
@@ -166,7 +168,8 @@ private:
   struct Pending_stage {
     std::string min_txt;
     std::string max_txt;
-    Lnast_nid decl_nid; // for located diagnostics
+    Lnast_nid decl_nid;      // for located diagnostics
+    int32_t decl_color = 0;  // block region at the declare (2opt-freq B)
   };
 
   // Per call-result name: the callee output's declared stages
@@ -255,10 +258,12 @@ public:
     // unlocated rather than mislocated at whatever statement came last
     // (finalize_regs / create_stage_flop re-anchor per entity).
     cur_srcid_ = hhds::SourceId_invalid;
+    cur_color_ = 0;
 
     // Wire every declared reg's din/enable/reset/initial now that
     // all stores and per-reg attr overrides have been seen.
     finalize_regs();
+    cur_color_ = 0; // the last reg's region must not leak into mem/output glue
     // Sanity-check the per-memory port allocation.
     finalize_mems();
     // Bind any deferred field reads (forward references to a call result
@@ -271,6 +276,7 @@ public:
     // pin, and after resolve_pending_tgets so a driver that reads a forward
     // call result is bound first.
     finalize_wires();
+    cur_color_ = 0; // the last wire's region must not leak into output glue
 
     // Outputs: connect each output's bound driver to its graph output sink. The
     // GraphIO carries the port widths cgen emits; fetch it so an unbounded
@@ -344,6 +350,11 @@ public:
                "stored — its delay would be silently lost",
                pending_stage_.begin()->first, lnast_->get_top_module_name());
     }
+
+    // Persist the block-attribute regions (2opt-freq B): the coloring_info
+    // JSON's "region_opts" member is what pass.abc reads for per-region ABC
+    // options; the node colors themselves were stamped by make_node.
+    write_region_info();
   }
 
 private:
@@ -496,6 +507,10 @@ private:
   // ───────────────────────────────────────────────
 
   void lower_stmts(const Lnast_nid &stmts) {
+    // A `__region` marker inside this stmts sets cur_color_ for the REST of
+    // the block; restoring here bounds the region to its block (nested blocks
+    // override and restore, if/match arms inherit the enclosing color).
+    const auto saved_color = cur_color_;
     for (auto c = lnast_->get_first_child(stmts); !c.is_invalid();
          c = lnast_->get_sibling_next(c)) {
       if (lnast_->is_dce_dead(c)) {
@@ -504,12 +519,24 @@ private:
       }
       lower_node(c);
     }
+    cur_color_ = saved_color;
   }
 
   // The current statement's SourceId, re-minted into the graph's
   // locator. Every cell make_node creates while lowering this statement is
   // stamped with it, so LGraph nodes resolve back to Pyrope source.
   hhds::SourceId cur_srcid_{0};
+
+  // Block-scoped synthesis region (2opt-freq B): the active `{ ::[abc=…,
+  // color=…] }` region id, set by the block's `__region` marker and restored
+  // at the enclosing stmts' exit; every node make_node mints while it is
+  // non-zero gets livehd::attrs::color, which pass.partition/pass.abc turn
+  // into a per-region mapping unit. region_abc_ collects the per-color ABC
+  // flow payloads for the coloring_info "region_opts" member.
+  int32_t                          cur_color_ = 0;
+  std::map<int32_t, std::string>   region_abc_;
+  absl::flat_hash_set<int32_t>     region_colors_marked_;
+  absl::flat_hash_set<int32_t>     region_colors_stamped_;
 
   // Anchor priority shared by error_at/warn_at: the given nid's SourceId,
   // falling back to the current statement's (re-minted into the graph).
@@ -579,6 +606,10 @@ private:
         livehd::graph_util::create_typed_node(*g_, std::forward<Args>(args)...);
     if (cur_srcid_ != hhds::SourceId_invalid) {
       n.attr(hhds::attrs::srcid).set(cur_srcid_);
+    }
+    if (cur_color_ != 0) {
+      livehd::graph_util::set_color(n, cur_color_);
+      region_colors_stamped_.insert(cur_color_);
     }
     return n;
   }
@@ -785,6 +816,7 @@ private:
         cur_srcid_ =
             g_->source_locator().import_from(lnast_->source_locator(), id);
       }
+      cur_color_ = info.decl_color; // finalize glue lands in the wire's region
 
       // Wire the buffer input to the accumulated single driver, restamping the
       // buffer output width from the driver when the wire was untyped.
@@ -867,6 +899,42 @@ private:
     if (key_n.is_invalid()) {
       return;
     }
+    if (lnast_->get_name(key_n) == "__region") {
+      // Synthesis-region marker (2opt-freq B): attr_set(%__region_<id>,
+      // "__region", <abc-string | true>) — first statement of an annotated
+      // `{ ::[…] … }` block. The region id rides the target name; a quoted
+      // value is the per-region ABC flow payload. lower_stmts restores
+      // cur_color_ at the block's exit.
+      constexpr std::string_view kPrefix = "%__region_";
+      auto                       tname   = lnast_->get_name(tgt);
+      int32_t                    id      = 0;
+      if (tname.size() > kPrefix.size() && tname.substr(0, kPrefix.size()) == kPrefix) {
+        auto ds = tname.substr(kPrefix.size());
+        std::from_chars(ds.data(), ds.data() + ds.size(), id);
+      }
+      if (id <= 0) {
+        warn_at(tgt, {"region-marker-malformed", "internal"},
+                "malformed __region marker target '{}' (compiler bug?)", tname);
+        return;
+      }
+      cur_color_ = id;
+      region_colors_marked_.insert(id);
+      if (auto val_n = lnast_->get_sibling_next(key_n); !val_n.is_invalid()) {
+        std::string_view val = lnast_->get_name(val_n);
+        if (val.size() >= 2 && ((val.front() == '\'' && val.back() == '\'') ||
+                                (val.front() == '"' && val.back() == '"'))) {
+          val = val.substr(1, val.size() - 2);
+          auto [ait, inserted] = region_abc_.try_emplace(id, std::string(val));
+          if (!inserted && ait->second != val) {
+            warn_at(tgt, {"region-abc-conflict", "unsupported"},
+                    "region color {} carries conflicting abc= options; keeping "
+                    "the first",
+                    id);
+          }
+        }
+      }
+      return;
+    }
     auto it = reg_info_.find(std::string(lnast_->get_name(tgt)));
     if (it == reg_info_.end()) {
       // Not a flop reg (yet): stash for a later array/memory declare (the
@@ -930,6 +998,106 @@ private:
     }
   }
 
+  // Persist the block-attribute regions (2opt-freq B) as the graph-level
+  // coloring_info JSON: algorithm "block-attr" marks the colors as
+  // SOURCE-SEEDED (pass.color preserves seeded colors and allocates its own
+  // ids above them), and "region_opts" carries each region's abc= flow string
+  // for pass.abc. Emitted only when at least one annotated block exists, so
+  // ordinary compiles keep no coloring_info.
+  void write_region_info() {
+    if (region_colors_marked_.empty()) {
+      return;
+    }
+    // Absorb uncolored fan-in glue into its consumers' region. Helper-minted
+    // conditioning nodes (e.g. node_util's to-positive Get_mask wrappers)
+    // bypass the make_node funnel and would otherwise shatter into tiny
+    // color-0 boundary regions between the block and its inputs — each a
+    // separate mapping unit whose region cut costs delay. A color-0 node
+    // whose every sink lives in ONE region belongs to that region; iterate to
+    // a fixpoint so glue chains absorb too.
+    bool changed = true;
+    while (changed) {
+      changed = false;
+      for (auto n : g_->forward_class()) {
+        if (n.is_invalid() || livehd::graph_util::is_builtin_node(n)) {
+          continue;
+        }
+        auto op = livehd::graph_util::type_op_of(n);
+        if (op == Ntype_op::Nconst || op == Ntype_op::IO) {
+          continue;
+        }
+        if (livehd::graph_util::node_color_of(n) != 0) {
+          continue;
+        }
+        int32_t c = 0;
+        bool ok = false;
+        for (const auto &e : n.out_edges()) {
+          auto sn = e.sink.get_master_node();
+          if (sn.is_invalid() || livehd::graph_util::is_builtin_node(sn)) {
+            ok = false; // drives an output/builtin: boundary glue, keep it out
+            break;
+          }
+          auto sc = livehd::graph_util::node_color_of(sn);
+          if (sc == 0 || (c != 0 && sc != c)) {
+            ok = false; // uncolored or multi-region fanout: stays background
+            break;
+          }
+          c = sc;
+          ok = true;
+        }
+        if (ok && c != 0) {
+          livehd::graph_util::set_color(n, c);
+          changed = true;
+        }
+      }
+    }
+    for (auto c : region_colors_marked_) {
+      if (!region_colors_stamped_.contains(c)) {
+        warn_at(Lnast_nid{}, {"block-attr-region-empty", "unsupported"},
+                "block region color {} in '{}' produced no hardware (its "
+                "statements folded away?) — the annotation has no effect",
+                c, lnast_->get_top_module_name());
+      }
+    }
+    auto jesc = [](std::string_view sv) {
+      std::string out;
+      out.reserve(sv.size());
+      for (char ch : sv) {
+        switch (ch) {
+        case '"':
+          out += "\\\"";
+          break;
+        case '\\':
+          out += "\\\\";
+          break;
+        case '\n':
+          out += "\\n";
+          break;
+        case '\t':
+          out += "\\t";
+          break;
+        default:
+          out.push_back(ch);
+        }
+      }
+      return out;
+    };
+    std::string j = "{\"schema_version\":1,";
+    j += std::format("\"top\":\"{}\",", jesc(lnast_->get_graph_name()));
+    j += "\"algorithm\":\"block-attr\",\"params\":{},\"colors\":{},"
+         "\"region_opts\":{";
+    bool first = true;
+    for (const auto &[color, abc] : region_abc_) {
+      if (!first) {
+        j += ",";
+      }
+      first = false;
+      j += std::format("\"{}\":{{\"flow\":\"{}\"}}", color, jesc(abc));
+    }
+    j += "}}";
+    g_->get_input_node().attr(livehd::attrs::coloring_info).set(j);
+  }
+
   // Wire each declared reg's din / enable / reset_pin / initial /
   // async / negreset after the whole body has been lowered (stores and attr
   // overrides arrive in any order relative to the declare).
@@ -984,6 +1152,7 @@ private:
         cur_srcid_ =
             g_->source_locator().import_from(lnast_->source_locator(), id);
       }
+      cur_color_ = info.decl_color; // finalize glue lands in the reg's region
 
       // din: the final shadow value (last-write-wins; branch writes arrive
       // pre-muxed). A never-written reg holds its value forever: din <- q.
@@ -1345,6 +1514,7 @@ private:
     }
     wire_names_.insert(std::string(name));
     wire_order_.emplace_back(name);
+    info.decl_color = cur_color_;
     wire_info_.emplace(std::string(name), std::move(info));
     // A Verilog-origin comb-cycle net may legally close a same-cycle ring (e.g.
     // a ready/valid handshake whose dataflow loops through a submodule instance
@@ -1429,6 +1599,7 @@ private:
       p.max_txt =
           mx.is_invalid() ? p.min_txt : std::string(lnast_->get_name(mx));
       p.decl_nid = nid;
+      p.decl_color                                             = cur_color_;
       pending_stage_[std::string(lnast_->get_name(name_nid))] = std::move(p);
       return;
     }
@@ -1503,6 +1674,7 @@ private:
     }
     reg_map_.emplace(std::string(name), flop);
     reg_order_.emplace_back(name);
+    info.decl_color = cur_color_;
     reg_info_.emplace(std::string(name), std::move(info));
     plain_reg_flops_[flop.get_debug_nid()] = std::string(name);
     // Seed the enable shadow false: a store rebinds it true, the branch-mux
@@ -1515,6 +1687,7 @@ private:
   struct Reg_info {
     hhds::Node_class flop;
     Lnast_nid decl_nid;
+    int32_t decl_color = 0; // block region at the declare (finalize glue inherits it)
     std::string
         init_txt; // declare [value] child; "" = none, "nil" = explicit no-reset
     int32_t decl_mw = 0; // declared type width; 0 = untyped
@@ -3233,6 +3406,7 @@ private:
       cur_srcid_ =
           g_->source_locator().import_from(lnast_->source_locator(), id);
     }
+    cur_color_ = p.decl_color; // stage flop lands in its declare's region
     const bool min_nil = p.min_txt == "nil";
     const bool max_nil = p.max_txt == "nil";
     int64_t smin = 0;
@@ -5306,8 +5480,9 @@ private:
   struct Wire_info {
     hhds::Node_class buf; // the passthrough Or (cgen `out = a`)
     Pin out;              // the buffer output (what reads bind to)
-    Lnast_nid decl_nid;   // diag anchor (the `wire x` site)
-    int32_t decl_mw = 0;  // declared width; 0 = untyped (restamp from driver)
+    Lnast_nid decl_nid;      // diag anchor (the `wire x` site)
+    int32_t decl_color = 0;  // block region at the declare (2opt-freq B)
+    int32_t decl_mw = 0;     // declared width; 0 = untyped (restamp from driver)
     bool is_signed = false;
   };
   absl::flat_hash_set<std::string> wire_names_; // gates lower_store

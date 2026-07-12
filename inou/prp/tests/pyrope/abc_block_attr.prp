@@ -1,0 +1,19 @@
+/*
+:name: abc_block_attr
+:type: lgraph compile
+*/
+
+// 2opt-freq B fixture: the second cone lives in its own synthesis partition
+// region via a block attribute, with a per-region ABC flow override. The
+// annotation must never change semantics (LEC-invariant vs the plain block —
+// the companion test strips the `::[…]` line and proves equivalence).
+mod abc_block_attr(a:u8, b:u8, c:u8, s:u1) -> (x:u8@[0], y:u8@[0]) {
+  x = (a & b) | (c ^ a)
+  {::[abc='strash; &get -n; &dch -f; &nf {D}; &put', color=2]
+    mut t = b & c
+    if s {
+      t = a | b
+    }
+    y = t ^ c
+  }
+}

@@ -482,6 +482,17 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
+# 2opt-freq B: `{ ::[abc='…', color=N] … }` block-scoped synthesis attributes —
+# LEC-invariant annotation, own region + per-region flow override (with and
+# without a pass.color run: seeded precedence), netlist LEC vs the partition
+# twin, and the unknown-attr / interpolation-trap negative controls.
+sh_test(
+    name = "lhd_block_attr_test",
+    size = "large",
+    srcs = ["lhd_block_attr_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
 # 2i-abc_arith: every selectable adder architecture (rca/cska/cla + block_size)
 # tech-maps the arithmetic fixture and is LEC-equivalent to the original logic.
 sh_test(

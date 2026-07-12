@@ -49,9 +49,17 @@ Per region (`Region_body` from the partition seam):
    Magnitude-width note: `mult`/`sra` size their result at the LEC's `real_width`
    (LiveHD reserves the top bit of an *unsigned* net as an always-0 sign slot), so
    the spare bit is held at 0 rather than carrying a stray product/sign bit.
-2. **flow** — `Abc_NtkToLogic` → run `pass.abc.flow` (comb default
-   `strash; &get -n; &fraig -x; &put; &get -n; &dch -f; &nf {D}; &put`; seq
-   default adds `dretime`) against the `read_lib` Liberty → `Abc_NtkToNetlist`.
+2. **flow** — `Abc_NtkToLogic` → run `pass.abc.flow` (comb and seq default
+   `strash; &get -n; &fraig -x; &put; &get -n; &dch -f; &nf {D}; &put`)
+   against the `read_lib -s` Liberty (`-s` skips multi-output cells — fa/ha
+   supergates cannot be read back and previously collapsed their cone to
+   const0 silently; the read-back now also hard-errors on any unreadable
+   mapped node) → `Abc_NtkToNetlist`. Retiming (`dretime`) is deliberately
+   NOT in the default seq flow (2opt-freq ruling): it reshapes the latch
+   count/order, which drops register name preservation (post-synthesis LEC
+   tier-1 correspondence, 3a-synth) and the din-cone source attribution, and
+   it is a latency-visible transform the cycle-accurate loop gate forbids.
+   Opt in explicitly via `flow` when that is understood.
 3. **from ABC** — each mapped gate becomes a 1-bit blackbox `Sub` named after the
    Liberty cell (`Mio_GateReadName`), with pins from the Mio gate. Multi-bit
    outputs are reassembled with a `Set_mask` concat; inputs are bit-selected with
@@ -61,7 +69,7 @@ Per region (`Region_body` from the partition seam):
 ### Sequential (`seq=true`)
 
 Registers cross into ABC as 1-bit **latches** (`Abc_NtkCreateLatch` + `Bi`/`Bo`)
-so ABC can retime/optimize across them, but stay **native `Flop`s** on read-back
+so ABC can optimize the logic between them, but stay **native `Flop`s** on read-back
 (never mapped to library DFFs — the Liberty stays purely combinational). Each
 flop's Q-net seeds `bitnet` as a source; its latch D is wired (after the comb
 loop) to the folded next-state `reset? rval : (enable? din : Q)`, so the
@@ -93,11 +101,11 @@ The option namespace matches the command path (`lhd pass abc`); after the
 |------|---------|---------|
 | `library` | Liberty `.lib` for `read_lib` | `$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib` |
 | `flow` | ABC command string (`{D}`/`{L}` substituted), run verbatim — see below | built-in comb/seq default |
-| `seq` | sequential mapping (flops→latches, memories/Subs blackboxed) — a superset that also maps purely combinational regions (no flops ⇒ `dretime` is a no-op), so it is the default | `true` |
+| `seq` | sequential mapping (flops→latches, memories/Subs blackboxed) — a superset that also maps purely combinational regions, so it is the default | `true` |
 | `adder` | comb adder architecture for `sum`/cmp (also the `mult` partial-product adds): `rca`/`cska`/`cla` | `rca` |
 | `block_size` | CSKA/CLA block width (`0` = auto) | `0` |
 | `multiplier` | comb multiplier architecture for `mult`: `array` (the only option today; the enum is the extension point for Booth/Wallace) | `array` |
-| `delay` / `load` | `{D}` / `{L}` substitution | empty |
+| `delay` / `load` | `{D}` / `{L}` substitution: expands to the full flag (`-D <val>` / `-L <val>`) when set, to nothing when empty — `&nf {D}` needs `-D`, a bare value is silently ignored by ABC | empty |
 | `verbose` | extra per-region prints (assume constraints, …) | `false` |
 | `qor` | write the QoR JSON (below) to this file | empty (`lhd pass abc` defaults it to `<workdir>/qor.json` under `--workdir`) |
 | `region_opts` | per-region (color-keyed) overrides, JSON — see below | empty |

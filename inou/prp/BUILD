@@ -37,6 +37,7 @@ filegroup(
     srcs = [
         "tests/abc/test.lib",
         "tests/pyrope/abc_arith.prp",
+        "tests/pyrope/abc_block_attr.prp",
         "tests/pyrope/abc_comb.prp",
         "tests/pyrope/abc_mathops.prp",
         "tests/pyrope/abc_mem.prp",

@@ -3,6 +3,10 @@
 
 #include "color_common.hpp"
 
+#include "rapidjson/document.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
+
 #include <algorithm>
 #include <format>
 #include <vector>
@@ -11,7 +15,9 @@ namespace livehd::color {
 
 namespace {
 
+using livehd::graph_util::color_of;
 using livehd::graph_util::del_color;
+using livehd::graph_util::has_color;
 using livehd::graph_util::set_color;
 
 // Re-number node2id so that each maximal connected region of equal-id nodes
@@ -52,21 +58,55 @@ Node2Id split_continuous(hhds::Graph *g, const Node2Id &node2id) {
 
 } // namespace
 
+bool has_seeded_coloring(hhds::Graph *g) {
+  auto a = g->get_input_node().attr(livehd::attrs::coloring_info);
+  if (!a.has()) {
+    return false;
+  }
+  const std::string info{a.get()};
+  return info.find("\"algorithm\":\"block-attr\"") != std::string::npos ||
+         info.find("\"seeded\":true") != std::string::npos;
+}
+
 int apply_coloring(hhds::Graph *g, const Node2Id &node2id_in,
                    const Color_opts &opts) {
   const Node2Id local =
       opts.continuous ? split_continuous(g, node2id_in) : node2id_in;
   const Node2Id &node2id = opts.continuous ? local : node2id_in;
 
+  // Source-seeded colors (2opt-freq B block attributes, coloring_info
+  // algorithm=="block-attr" or a carried "seeded":true): user block regions
+  // beat any algorithm run by default — keep them, and shift the
+  // algorithm-minted ids (every algorithm starts at 1) above the max seeded
+  // id so region ids never collide. `keep_colored` keeps its explicit
+  // meaning for the 2p iterative flow (preserve ANY pre-existing color on
+  // nodes the algorithm leaves uncolored).
+  const bool seeded = has_seeded_coloring(g);
+  int base = 0;
+  if (seeded) {
+    for (auto n : g->forward_class()) {
+      if (!is_partitionable(n)) {
+        continue;
+      }
+      if (has_color(n)) {
+        base = std::max(base, color_of(n));
+      }
+    }
+  }
+
   absl::flat_hash_set<int> seen_ids;
   for (auto n : g->forward_class()) {
     if (!is_partitionable(n)) {
       continue;
     }
+    if (seeded && has_color(n) && color_of(n) != 0) {
+      seen_ids.insert(color_of(n)); // seeded region membership wins
+      continue;
+    }
     auto it = node2id.find(n);
     if (it != node2id.end()) {
-      set_color(n, it->second);
-      seen_ids.insert(it->second);
+      set_color(n, it->second + base);
+      seen_ids.insert(it->second + base);
     } else if (!opts.keep_colored) {
       del_color(n);
     }
@@ -83,6 +123,37 @@ void clear_coloring(hhds::Graph *g) {
   // directly.
   g->attr_clear(livehd::attrs::hier_color);
   del_coloring_info(g);
+}
+
+std::string preserve_seeded_info(hhds::Graph *g, std::string fresh_json) {
+  auto a = g->get_input_node().attr(livehd::attrs::coloring_info);
+  if (!a.has()) {
+    return fresh_json;
+  }
+  const std::string old{a.get()};
+  if (old.find("\"algorithm\":\"block-attr\"") == std::string::npos &&
+      old.find("\"seeded\":true") == std::string::npos) {
+    return fresh_json;
+  }
+  rapidjson::Document od;
+  od.Parse(old.data(), old.size());
+  rapidjson::Document nd;
+  nd.Parse(fresh_json.data(), fresh_json.size());
+  if (od.HasParseError() || nd.HasParseError() || !od.IsObject() ||
+      !nd.IsObject()) {
+    return fresh_json;
+  }
+  // Mark the rebuild as still carrying source-seeded regions, and carry the
+  // block-attribute ABC options through (pass.abc reads "region_opts").
+  nd.AddMember("seeded", true, nd.GetAllocator());
+  if (auto ro = od.FindMember("region_opts"); ro != od.MemberEnd()) {
+    rapidjson::Value copy(ro->value, nd.GetAllocator());
+    nd.AddMember("region_opts", copy, nd.GetAllocator());
+  }
+  rapidjson::StringBuffer sb;
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  nd.Accept(w);
+  return std::string{sb.GetString(), sb.GetSize()};
 }
 
 void set_coloring_info(hhds::Graph *g, const std::string &json) {

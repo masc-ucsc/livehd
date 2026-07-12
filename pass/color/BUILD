@@ -17,6 +17,7 @@ cc_library(
         "//graph",
         "//pass/common:pass",
         "//third_party/viecut",
+        "@rapidjson",
     ],
     alwayslink = True,  # static Pass_plugin registration
 )

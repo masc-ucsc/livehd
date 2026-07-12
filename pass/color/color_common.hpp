@@ -90,8 +90,15 @@ struct Color_opts {
 // requested, then writes flat (compact) or per-instance hier color. Nodes
 // absent from node2id are cleared (unless keep_colored leaves an existing
 // color in place). Returns the number of distinct color ids written.
+// Source-SEEDED colors (2opt-freq B block attributes: coloring_info
+// algorithm=="block-attr", or "seeded":true carried by a later rebuild) win
+// over the algorithm: seeded nodes keep their color and algorithm ids shift
+// above the max seeded id.
 int apply_coloring(hhds::Graph *g, const Node2Id &node2id,
                    const Color_opts &opts);
+
+// True when g's active coloring carries source-seeded block regions.
+[[nodiscard]] bool has_seeded_coloring(hhds::Graph *g);
 
 // Drop the active coloring on `g` (flat + hier color attrs on every node).
 void clear_coloring(hhds::Graph *g);
@@ -101,6 +108,13 @@ void clear_coloring(hhds::Graph *g);
 // body). One record per top graph.
 void set_coloring_info(hhds::Graph *g, const std::string &json);
 void del_coloring_info(hhds::Graph *g);
+
+// Splice the source-seeded members ("seeded" + the block-attribute
+// "region_opts" pass.abc consumes) from g's CURRENT coloring_info into a
+// freshly built one, so a pass.color rebuild never drops the user's block
+// annotations. Identity when g carries no seeded coloring.
+[[nodiscard]] std::string preserve_seeded_info(hhds::Graph *g,
+                                               std::string fresh_json);
 
 // Build the serialized ColoringInfo for `g` from its active (flat) coloring:
 // schema_version, top, algorithm, params (verbatim JSON object string), and a
