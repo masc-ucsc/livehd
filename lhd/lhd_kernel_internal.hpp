@@ -38,6 +38,7 @@ inline constexpr std::pair<std::string_view, std::string_view> kSetPasses[] = {
     {    "pass.partition",    "pass.partition"},
     {          "pass.abc",          "pass.abc"},
     {      "pass.liberty",      "pass.liberty"},
+    {    "pass.opentimer",    "pass.opentimer"},
     {               "lec",          "pass.lec"},
     {            "formal",          "pass.lec"},
     {      "pass.semdiff",      "pass.semdiff"},

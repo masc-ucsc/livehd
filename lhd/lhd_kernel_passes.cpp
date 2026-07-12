@@ -6,7 +6,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <functional>
+#include <iterator>
 
 #include "color_common.hpp"
 #include "graph_library_singleton.hpp"
@@ -362,11 +364,29 @@ void load_lg_into_var(const std::string& lib_path, Eprp_var& var) {
   }
 }
 
+// Slurp a pass's "qor" sidecar label into the envelope's "qor" member so an
+// agent loop reads its score straight from --result-json (2opt-freq A/D).
+static void embed_qor_sidecar(const Eprp_var::Eprp_dict& labels, Result& res) {
+  auto qit = labels.find("qor");
+  if (qit == labels.end() || qit->second.empty() || !fs::exists(qit->second)) {
+    return;
+  }
+  std::ifstream ifs(qit->second, std::ios::binary);
+  std::string   j((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+  while (!j.empty() && (j.back() == '\n' || j.back() == '\r' || j.back() == ' ')) {
+    j.pop_back();  // RawValue must embed exactly one JSON value
+  }
+  if (!j.empty()) {
+    res.qor_json = std::move(j);
+    res.outputs.push_back(qit->second);
+  }
+}
+
 void pass_command(Options& opts, Result& res) {
   setup_diag(opts, "pass");
   if (opts.files.empty()) {
     throw Lhd_error{"usage",
-                    "pass requires a subcommand: color <alg> | partition | abc | liberty gensim | semdiff",
+                    "pass requires a subcommand: color <alg> | partition | abc | opentimer | liberty gensim | semdiff",
                     "e.g. `lhd pass color acyclic --top m lg:dir` or `lhd pass abc --top m lg:dir --emit-dir lg:net`"};
   }
   const std::string sub = opts.files[0];
@@ -490,12 +510,56 @@ void pass_command(Options& opts, Result& res) {
       ensure_dir(lg_out->path);
       labels["out"] = lg_out->path;
     }
+    // QoR sidecar (2opt-freq A): default under --workdir; merge_sets below runs
+    // after, so an explicit `--set pass.abc.qor=FILE` overrides the default.
+    if (!opts.workdir.empty()) {
+      labels["qor"] = (fs::path(opts.workdir) / "qor.json").string();
+    }
     merge_sets(opts, "pass.abc", labels);
     run_step("pass.abc", var, labels, opts, res);
     if (lg_out != nullptr) {
       livehd::Hhds_graph_library::save(lg_out->path);
       res.outputs.push_back(lg_out->path);
     }
+    embed_qor_sidecar(labels, res);
+  } else if (sub == "opentimer") {
+    // `lhd pass opentimer --top <module> lg:net cells.lib [file.sdc file.spef]`
+    // (2opt-freq D): STA on ONE tech-mapped module. Timing files are the bare
+    // positional args after the subcommand (like `pass liberty gensim`);
+    // `files` is a kernel-managed label, so the kernel builds it here.
+    std::vector<std::string> tfiles(opts.files.begin() + 1, opts.files.end());
+    if (tfiles.empty()) {
+      throw Lhd_error{"usage",
+                      "pass opentimer needs a Liberty .lib file argument (+ optional .sdc/.spef)",
+                      "e.g. `lhd pass opentimer --top 'mod__c0' lg:net cells.lib`"};
+    }
+    check_inputs_exist(tfiles);
+    Eprp_var var;
+    load_lg_into_var(lg_in, var);
+    if (var.graphs.empty()) {
+      throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};
+    }
+    std::string joined;
+    for (const auto& f : tfiles) {
+      if (!joined.empty()) {
+        joined += ",";
+      }
+      joined += f;
+      res.inputs.push_back(f);
+    }
+    Eprp_var::Eprp_dict labels{
+        {"files", joined}
+    };
+    if (!opts.top.empty()) {
+      labels["top"] = opts.top;
+    }
+    // Timing sidecar: default under --workdir; --set pass.opentimer.qor overrides.
+    if (!opts.workdir.empty()) {
+      labels["qor"] = (fs::path(opts.workdir) / "timing.json").string();
+    }
+    merge_sets(opts, "pass.opentimer", labels);
+    run_step("pass.opentimer", var, labels, opts, res);
+    embed_qor_sidecar(labels, res);
   } else if (sub == "formal") {
     Eprp_var var;
     load_lg_into_var(lg_in, var);
@@ -511,7 +575,7 @@ void pass_command(Options& opts, Result& res) {
   } else {
     throw Lhd_error{"usage",
                     std::format("unknown pass subcommand '{}'", sub),
-                    "use: color <alg> | partition | abc | formal | liberty gensim | semdiff"};
+                    "use: color <alg> | partition | abc | opentimer | formal | liberty gensim | semdiff"};
   }
 }
 

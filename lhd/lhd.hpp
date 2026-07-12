@@ -182,6 +182,11 @@ struct Result {
   // driver's debug sidecar, embedded verbatim as the result's "debug" member.
   std::string sim_debug_json;
 
+  // `lhd pass abc` QoR payload (2opt-freq A): the qor.json sidecar content
+  // (per-region + total mapped gates/area/critical delay, source-attributed),
+  // embedded verbatim as the result's "qor" member.
+  std::string qor_json;
+
   std::string error_class;  // empty when status == pass (future_cli.md taxonomy)
   std::string error_message;
   std::string error_hint;

@@ -15,6 +15,11 @@ void Pass_opentimer::setup() {
   Eprp_method m1("pass.opentimer", "timing analysis on lgraph", &Pass_opentimer::time_work);
   m1.add_label_required("files", "Liberty, spef, sdc file[s] for timing");
   m1.add_label_optional("margin", "% arrival time marging (0-100)", "0");
+  m1.add_label_optional("top", "analyze only this module (required when the library holds several defs)", "");
+  m1.add_label_optional("qor",
+                        "write the timing JSON (max delay, critical pin, endpoint arrivals, source-attributed) to this file "
+                        "(`lhd pass opentimer` defaults it to <workdir>/timing.json when --workdir is set)",
+                        "");
 
   register_pass(m1);
 
@@ -76,6 +81,14 @@ Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var
     freq = std::stof(txt, nullptr);
   }
   margin_delay = 0;
+
+  qor_path   = var.get("qor", "");
+  top_filter = var.get("top", "");
+
+  // Flush the (lineage-queued) read_celllib so build_circuit can validate cell
+  // names against the loaded library at queue time. The design is still empty,
+  // so this is a no-op timing update.
+  timer.update_timing();
 }
 
 void Pass_opentimer::read_sdc(std::string_view sdc_file) {

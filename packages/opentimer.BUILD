@@ -15,3 +15,18 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+# OpenTimer bundles its own (forked 4.0) taskflow under ot/taskflow, compiled
+# into every OT object. Anything living in the same binary as OpenTimer MUST
+# use THIS taskflow copy: linking a second taskflow version alongside is an
+# ODR violation — two different tf::Executor/tf::Worker layouts behind one set
+# of weak inline symbols — that corrupts the executor at runtime (EXC_BAD_ACCESS
+# inside tf::Worker lookups the first time both run in one process). The
+# `includes = ["ot"]` entry maps the canonical #include "taskflow/taskflow.hpp"
+# onto the bundled ot/taskflow headers, so consumers need no source changes.
+cc_library(
+    name = "taskflow",
+    hdrs = glob(["ot/taskflow/**/*.hpp"]),
+    includes = ["ot"],
+    visibility = ["//visibility:public"],
+)
+

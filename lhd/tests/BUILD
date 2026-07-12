@@ -472,6 +472,16 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
+# 2opt-freq D: `lhd pass opentimer` STA on pass.abc-mapped modules — comb
+# region + flat sequential (flop-boundary), timing.json + envelope qor member,
+# and the non-Liberty-Sub / bogus-top negative controls.
+sh_test(
+    name = "lhd_opentimer_test",
+    size = "large",
+    srcs = ["lhd_opentimer_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
 # 2i-abc_arith: every selectable adder architecture (rca/cska/cla + block_size)
 # tech-maps the arithmetic fixture and is LEC-equivalent to the original logic.
 sh_test(

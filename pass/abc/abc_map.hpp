@@ -1,7 +1,9 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -33,6 +35,41 @@ struct Map_options {
   bool              use_all_assume    = false;  // also feed declared (unproven) assumes (aggressive)
 };
 
+// Per-region (color-keyed) overrides of the mapping options that vary per
+// region (2opt-freq C). Unset fields inherit the global Map_options. Two
+// sources, later wins: a "region_opts" member inside the source graph's
+// coloring_info JSON (the block-attribute channel, 2opt-freq B), then the
+// --set pass.abc.region_opts CLI JSON.
+struct Region_opts {
+  std::optional<std::string>       flow;
+  std::optional<std::string>       delay;
+  std::optional<std::string>       load;
+  std::optional<arith::Adder_kind> adder;
+  std::optional<int>               block_size;
+  std::optional<arith::Mult_kind>  multiplier;
+};
+using Region_opts_map = std::map<int, Region_opts>;
+
+// Parse {"<color>":{"flow":…,"delay":…,"load":…,"adder":…,"block_size":…,
+// "multiplier":…},…}. Unknown keys and malformed values are hard errors (a
+// mistyped hint must never silently no-op). Returns nullopt after a diag.
+std::optional<Region_opts_map> parse_region_opts(std::string_view json, std::string_view where);
+
+// Per-region quality-of-results read back from ABC after mapping (2opt-freq A).
+// `delay` is ABC's mapped-delay estimate from the Liberty pin-to-pin data
+// (Abc_NtkDelayTrace) — the phase-1 frequency oracle. Per-region only: paths
+// crossing region/blackbox boundaries are invisible here (pass.opentimer is
+// the whole-design scorer).
+struct Region_qor {
+  std::string module;         // region module name (<top>__c<color>)
+  int         color = 0;
+  int         gates = 0;      // mapped standard cells
+  double      area  = 0.0;    // sum of Liberty cell areas
+  float       delay = -1.0f;  // critical arrival in library time units; <0 => unavailable
+  std::string crit_output;    // region output port with the worst arrival
+  std::string crit_src;       // "file:line" of that output's original driver (may be empty)
+};
+
 // Stats-only mode (no --emit-dir): summarize what would be mapped.
 void report_stats(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view top, const Map_options& opts);
 
@@ -50,14 +87,29 @@ public:
 
   void set_outlib(hhds::GraphLibrary* l) { outlib_ = l; }
 
+  // CLI-level per-region overrides (--set pass.abc.region_opts). Graph-embedded
+  // overrides (coloring_info "region_opts") are read per region in map_region.
+  void set_region_opts(Region_opts_map m) { region_opts_cli_ = std::move(m); }
+
+  // QoR rows accumulated by map_region, one per successfully mapped region.
+  [[nodiscard]] const std::vector<Region_qor>& qor() const { return qor_; }
+
 private:
-  Map_options         opts_;
-  void*               pabc_       = nullptr;  // Abc_Frame_t*
-  bool                lib_loaded_ = false;
-  hhds::GraphLibrary* outlib_     = nullptr;  // where blackbox cell defs are declared
+  Map_options             opts_;
+  void*                   pabc_       = nullptr;  // Abc_Frame_t*
+  bool                    lib_loaded_ = false;
+  hhds::GraphLibrary*     outlib_     = nullptr;  // where blackbox cell defs are declared
+  std::vector<Region_qor> qor_;
+  Region_opts_map         region_opts_cli_;
+  // coloring_info "region_opts" parse cache, one entry per source graph.
+  std::map<const hhds::Graph*, Region_opts_map> graph_region_opts_;
 
   [[nodiscard]] std::string comb_flow() const;
   [[nodiscard]] std::string seq_flow() const;
+
+  // Overlay any per-region overrides for rb.color onto opts_ (caller saves and
+  // restores opts_ around the region).
+  void apply_region_overrides(const livehd::partition::Region_body& rb);
 };
 
 }  // namespace livehd::abc

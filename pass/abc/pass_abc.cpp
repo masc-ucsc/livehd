@@ -4,6 +4,9 @@
 
 #include <charconv>
 #include <cstdlib>
+#include <format>
+#include <fstream>
+#include <print>
 #include <string>
 #include <system_error>
 
@@ -58,6 +61,18 @@ void Pass_abc::setup() {
   m.add_label_optional("use_all_assume",
                        "true|false also feed DECLARED (unproven) assume conditions (aggressive: undefined outside contract)",
                        "false");
+  m.add_label_optional("qor",
+                       "write per-region + total QoR JSON (mapped gates/area/critical delay, source-attributed) to this file "
+                       "(`lhd pass abc` defaults it to <workdir>/qor.json when --workdir is set)",
+                       "");
+  m.add_label_optional(
+      "region_opts",
+      "per-region option overrides as JSON keyed by color id, e.g. "
+      "'{\"1\":{\"flow\":\"strash; resyn2; &get -n; &nf {D}; &put\",\"delay\":\"2\"},\"4\":{\"adder\":\"cla\"}}'. "
+      "Overridable per region: flow|delay|load|adder|block_size|multiplier. "
+      "Wins over a \"region_opts\" member embedded in the graph's coloring_info (the block-attribute channel); "
+      "unknown keys or malformed values are hard errors",
+      "");
   register_pass(m);
 }
 
@@ -78,6 +93,107 @@ std::string default_library() {
 
 bool truthy(std::string_view v) { return v != "false" && v != "0" && v != ""; }
 
+// Minimal JSON string escape (module names / file paths can carry quotes or
+// backslashes; anything below 0x20 is escaped numerically).
+std::string jesc(std::string_view s) {
+  std::string out;
+  out.reserve(s.size());
+  for (char c : s) {
+    switch (c) {
+      case '"': out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\n': out += "\\n"; break;
+      case '\t': out += "\\t"; break;
+      case '\r': out += "\\r"; break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          out += std::format("\\u{:04x}", static_cast<unsigned char>(c));
+        } else {
+          out.push_back(c);
+        }
+    }
+  }
+  return out;
+}
+
+// Aggregate the per-region QoR rows, print the one-line summary (the step log
+// under lhd), and optionally write the qor.json sidecar (2opt-freq A). The
+// design max delay is the worst REGION delay — an ABC estimate blind to
+// cross-region paths; pass.opentimer is the whole-design scorer.
+void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view top, const livehd::abc::Map_options& opts,
+              const std::string& qor_path) {
+  int    tgates = 0;
+  double tarea  = 0.0;
+  int    worst  = -1;  // index of the region with the worst delay
+  for (size_t r = 0; r < qor.size(); ++r) {
+    tgates += qor[r].gates;
+    tarea += qor[r].area;
+    if (qor[r].delay >= 0 && (worst < 0 || qor[r].delay > qor[static_cast<size_t>(worst)].delay)) {
+      worst = static_cast<int>(r);
+    }
+  }
+  std::string crit;
+  if (worst >= 0) {
+    const auto& w = qor[static_cast<size_t>(worst)];
+    crit          = std::format(", max delay {:.2f} (region '{}'", w.delay, w.module);
+    if (!w.crit_output.empty()) {
+      crit += std::format(" output '{}'", w.crit_output);
+    }
+    if (!w.crit_src.empty()) {
+      crit += std::format(" @ {}", w.crit_src);
+    }
+    crit += ")";
+  }
+  std::print("pass.abc qor: {} region(s), {} gates, area {:.2f}{}\n", qor.size(), tgates, tarea, crit);
+
+  if (qor_path.empty()) {
+    return;
+  }
+  std::string j = "{";
+  j += "\"schema_version\":1,\"kind\":\"abc-map\",";
+  j += std::format("\"top\":\"{}\",", jesc(top));
+  j += std::format("\"library\":\"{}\",", jesc(opts.library));
+  j += std::format("\"seq\":{},", opts.seq ? "true" : "false");
+  j += std::format("\"delay_target\":\"{}\",", jesc(opts.delay));
+  j += std::format("\"total\":{{\"regions\":{},\"gates\":{},\"area\":{:.4f}", qor.size(), tgates, tarea);
+  if (worst >= 0) {
+    const auto& w = qor[static_cast<size_t>(worst)];
+    j += std::format(",\"max_delay\":{:.4f},\"critical_region\":\"{}\"", w.delay, jesc(w.module));
+    if (!w.crit_output.empty()) {
+      j += std::format(",\"critical_output\":\"{}\"", jesc(w.crit_output));
+    }
+    if (!w.crit_src.empty()) {
+      j += std::format(",\"critical_src\":\"{}\"", jesc(w.crit_src));
+    }
+  }
+  j += "},\"regions\":[";
+  for (size_t r = 0; r < qor.size(); ++r) {
+    const auto& q = qor[r];
+    if (r != 0) {
+      j += ",";
+    }
+    j += std::format("{{\"module\":\"{}\",\"color\":{},\"gates\":{},\"area\":{:.4f}", jesc(q.module), q.color, q.gates, q.area);
+    if (q.delay >= 0) {
+      j += std::format(",\"delay\":{:.4f}", q.delay);
+    }
+    if (!q.crit_output.empty()) {
+      j += std::format(",\"critical_output\":\"{}\"", jesc(q.crit_output));
+    }
+    if (!q.crit_src.empty()) {
+      j += std::format(",\"critical_src\":\"{}\"", jesc(q.crit_src));
+    }
+    j += "}";
+  }
+  j += "]}";
+
+  std::ofstream ofs(qor_path, std::ios::binary | std::ios::trunc);
+  if (!ofs) {
+    livehd::diag::err("pass.abc", "qor-write", "io").msg("pass.abc: cannot write qor file '{}'", qor_path).fatal();
+    return;
+  }
+  ofs << j << "\n";
+}
+
 }  // namespace
 
 void Pass_abc::work(Eprp_var& var) {
@@ -94,6 +210,17 @@ void Pass_abc::work(Eprp_var& var) {
   auto mult_s  = std::string{var.get("multiplier", "array")};
   bool use_proven_assume = truthy(var.get("use_proven_assume", "true"));
   bool use_all_assume    = truthy(var.get("use_all_assume", "false"));
+  auto qor_path          = std::string{var.get("qor", "")};
+  auto region_opts_s     = std::string{var.get("region_opts", "")};
+
+  livehd::abc::Region_opts_map region_opts;
+  if (!region_opts_s.empty()) {
+    auto parsed = livehd::abc::parse_region_opts(region_opts_s, "--set pass.abc.region_opts");
+    if (!parsed.has_value()) {
+      return;  // diag already emitted
+    }
+    region_opts = std::move(parsed.value());
+  }
 
   auto adder = livehd::abc::arith::parse_adder_kind(adder_s);
   if (!adder.has_value()) {
@@ -152,6 +279,7 @@ void Pass_abc::work(Eprp_var& var) {
 
   livehd::abc::Mapper mapper(opts);
   mapper.set_outlib(&outlib);
+  mapper.set_region_opts(std::move(region_opts));
   if (!mapper.start()) {
     return;  // diag already emitted
   }
@@ -162,4 +290,6 @@ void Pass_abc::work(Eprp_var& var) {
   });
 
   mapper.stop();
+
+  emit_qor(mapper.qor(), top, opts, qor_path);
 }

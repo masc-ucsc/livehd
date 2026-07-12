@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <algorithm>
 #include <format>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -9,6 +11,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_cat.h"
 #include "cell.hpp"
+#include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
@@ -37,6 +40,24 @@ using livehd::graph_util::wire_name;
 
 namespace {
 
+// A Sub-instance pin's declared name looked up in the sub-graph's GraphIO by
+// port id. Instance pins loaded from an lg: library may carry no pin_name of
+// their own (only the def declares names), so resolving through the decl is
+// what keeps OT pin names equal to the Liberty pin names.
+[[nodiscard]] std::string sub_pin_name_from_decl(const hhds::Node_class& node, hhds::Port_id pid, bool is_driver) {
+  auto io = node.get_subnode_io();
+  if (!io) {
+    return {};
+  }
+  const auto& decls = is_driver ? io->get_output_pin_decls() : io->get_input_pin_decls();
+  for (const auto& d : decls) {
+    if (d.port_id == pid) {
+      return d.name;
+    }
+  }
+  return {};
+}
+
 // Sink-pin name for a node + sink port. For Sub nodes the name is the
 // sub-graph's IO declared name; for other nodes it's Ntype's sink_name.
 [[nodiscard]] std::string sink_pin_name_of(const hhds::Node_class& node, const hhds::Pin_class& sink) {
@@ -45,6 +66,9 @@ namespace {
     auto n = sink.get_pin_name();
     if (!n.empty()) {
       return std::string{n};
+    }
+    if (auto dn = sub_pin_name_from_decl(node, pid, /*is_driver=*/false); !dn.empty()) {
+      return dn;
     }
     return std::to_string(static_cast<uint32_t>(pid));
   }
@@ -57,6 +81,9 @@ namespace {
     auto n = dpin.get_pin_name();
     if (!n.empty()) {
       return std::string{n};
+    }
+    if (auto dn = sub_pin_name_from_decl(node, dpin.get_port_id(), /*is_driver=*/true); !dn.empty()) {
+      return dn;
     }
     return std::to_string(static_cast<uint32_t>(dpin.get_port_id()));
   }
@@ -94,6 +121,43 @@ inline void  del_delay(const hhds::Pin_class& pin) {
   pin.attr(livehd::attrs::pin_delay).del();
 }
 
+// Minimal JSON string escape for the timing report (pin names / file paths).
+std::string jesc(std::string_view s) {
+  std::string out;
+  out.reserve(s.size());
+  for (char c : s) {
+    switch (c) {
+      case '"': out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\n': out += "\\n"; break;
+      case '\t': out += "\\t"; break;
+      case '\r': out += "\\r"; break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          out += std::format("\\u{:04x}", static_cast<unsigned char>(c));
+        } else {
+          out.push_back(c);
+        }
+    }
+  }
+  return out;
+}
+
+// "file:line" of a node's srcid (empty when absent/unresolvable). Mapped gates
+// carry the srcid of the output cone they feed (pass.abc carry-through), so a
+// critical pin points back at the pre-synthesis RTL.
+std::string src_of_node(const std::shared_ptr<hhds::Graph>& g, const hhds::Node_class& n) {
+  auto a = n.attr(hhds::attrs::srcid);
+  if (!a.has() || a.get() == 0) {
+    return {};
+  }
+  auto span = g->source_locator().resolve_span(a.get());
+  if (span.file.empty() || !span.start_line.has_value()) {
+    return {};
+  }
+  return span.file + ":" + std::to_string(*span.start_line);
+}
+
 }  // namespace
 
 void Pass_opentimer::time_work(Eprp_var& var) {
@@ -101,15 +165,40 @@ void Pass_opentimer::time_work(Eprp_var& var) {
 
   TRACE_EVENT("pass", "OPENTIMER_work");
 
+  // One ot::Timer holds ONE design: building several graphs into the same
+  // timer silently merges them, so exactly one def is analyzed per run
+  // (top_filter picks it out of a multi-def library).
+  std::vector<std::shared_ptr<hhds::Graph>> selected;
   for (const auto& g : var.graphs) {
     if (!g) {
       continue;
     }
-    pass.build_circuit(g);
-    pass.read_sdc_spef();
-    pass.compute_timing(g);
-    pass.populate_table(g);
+    if (!pass.top_filter.empty() && g->get_name() != pass.top_filter) {
+      continue;
+    }
+    selected.push_back(g);
   }
+  if (selected.empty()) {
+    livehd::diag::err("pass.opentimer", "no-top", "unsupported")
+        .msg("pass.opentimer: no module{} found in the input library",
+             pass.top_filter.empty() ? std::string{} : std::format(" named '{}'", pass.top_filter))
+        .fatal();
+    return;
+  }
+  if (selected.size() > 1) {
+    livehd::diag::err("pass.opentimer", "bad-option", "usage")
+        .msg("pass.opentimer times one module per run ({} defs in the library): pass --top <module> to pick one",
+             selected.size())
+        .fatal();
+    return;
+  }
+
+  const auto& g = selected.front();
+  pass.build_circuit(g);
+  pass.read_sdc_spef();
+  pass.compute_timing(g);
+  pass.populate_table(g);
+  pass.write_qor();
 }
 
 void Pass_opentimer::power_work(Eprp_var& var) {
@@ -187,6 +276,40 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
 
   auto gio = g->get_io();
 
+  // Pin-level `bits` on a graph-IO pin is usually unset (widths live on the
+  // GraphIO decl) — the pin tracker needs the real width, so fall back to the
+  // decl when the driver is a module input.
+  auto io_bits_of = [&](const hhds::Pin_class& dpin) -> int32_t {
+    auto b = bits_of(dpin);
+    if (b != 0 || !gio || !is_graph_input_pin(dpin)) {
+      return b;
+    }
+    auto n = dpin.get_pin_name();
+    if (n.empty()) {
+      return b;
+    }
+    return bits_of(dpin, *gio, n);
+  };
+
+  // Tracker id for a driver pin. pass.partition names region boundary ports
+  // after the SOURCE-side wire (a port can literally be called "get_mask_20"),
+  // so an internal trackable node's synthetic wire_name can collide with a
+  // port name and silently redefine the port's bus inside the string-keyed
+  // tracker. Trackable outputs are pure rewiring — never real OT nets — so
+  // decorate exactly those with a prefix no port/net name ever carries;
+  // tracker LEAVES (ports, gate output nets) stay undecorated, which keeps
+  // every pv root a name that exists as an OT net.
+  auto trk_id = [&](const hhds::Pin_class& pin) -> std::string {
+    if (is_graph_input_pin(pin) || is_graph_output_pin(pin)) {
+      return wire_name(pin);
+    }
+    auto master = pin.get_master_node();
+    if (!master.is_invalid() && Ntype::is_pin_trackable(type_op_of(master))) {
+      return absl::StrCat("n$", wire_name(pin));
+    }
+    return wire_name(pin);
+  };
+
   // 1st: primary inputs.
   if (gio) {
     for (const auto& d : gio->get_input_pin_decls()) {
@@ -253,7 +376,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     bool root_track = Ntype::is_pin_trackable(op);
     if (root_track) {
       auto dpin0 = node.create_driver_pin(0);
-      auto wname = wire_name(dpin0);
+      auto wname = trk_id(dpin0);
       if (op == Ntype_op::Set_mask) {
         auto a_dpin     = get_driver_of_sink_name(node, "a");
         auto mask_dpin  = get_driver_of_sink_name(node, "mask");
@@ -271,7 +394,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           return;
         }
         auto mask_const = hydrate_const(mask_dpin);
-        pin_tracker.add_set_mask(wname, wire_name(a_dpin), bits_of(a_dpin), mask_const, wire_name(value_dpin));
+        pin_tracker.add_set_mask(wname, trk_id(a_dpin), io_bits_of(a_dpin), mask_const, trk_id(value_dpin));
       } else if (op == Ntype_op::Get_mask) {
         auto a_dpin    = get_driver_of_sink_name(node, "a");
         auto mask_dpin = get_driver_of_sink_name(node, "mask");
@@ -288,7 +411,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           return;
         }
         auto mask_const = hydrate_const(mask_dpin);
-        pin_tracker.add_get_mask(wname, wire_name(a_dpin), bits_of(a_dpin), mask_const);
+        pin_tracker.add_get_mask(wname, trk_id(a_dpin), io_bits_of(a_dpin), mask_const);
       } else if (op == Ntype_op::SRA) {
         auto a_dpin = get_driver_of_sink_name(node, "a");
         auto b_dpin = get_driver_of_sink_name(node, "b");
@@ -305,7 +428,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           return;
         }
         auto b_const = hydrate_const(b_dpin);
-        pin_tracker.add_sra(wname, wire_name(a_dpin), bits_of(a_dpin), b_const);
+        pin_tracker.add_sra(wname, trk_id(a_dpin), io_bits_of(a_dpin), b_const);
       } else if (op == Ntype_op::Sext) {
         auto a_dpin = get_driver_of_sink_name(node, "a");
         auto b_dpin = get_driver_of_sink_name(node, "b");
@@ -322,7 +445,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           return;
         }
         auto b_const = hydrate_const(b_dpin);
-        pin_tracker.add_sext(wname, wire_name(a_dpin), bits_of(a_dpin), b_const);
+        pin_tracker.add_sext(wname, trk_id(a_dpin), io_bits_of(a_dpin), b_const);
       } else if (op == Ntype_op::SHL) {
         auto a_dpin = get_driver_of_sink_name(node, "a");
         if (a_dpin.is_invalid()) {
@@ -340,10 +463,10 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           return;
         }
         auto b_const = hydrate_const(b_dpin);
-        pin_tracker.add_shl(wname, wire_name(a_dpin), bits_of(a_dpin), b_const);
+        pin_tracker.add_shl(wname, trk_id(a_dpin), io_bits_of(a_dpin), b_const);
       } else if (op == Ntype_op::Or) {
         for (auto e : node.inp_edges()) {
-          pin_tracker.add_or(wname, wire_name(e.driver));
+          pin_tracker.add_or(wname, trk_id(e.driver));
         }
       } else if (op == Ntype_op::And) {
         Dlop            a_mask = *Dlop::create_integer(-1);
@@ -362,7 +485,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           }
         }
         if (!a_dpin.is_invalid()) {
-          pin_tracker.add_and(wname, wire_name(a_dpin), a_mask);
+          pin_tracker.add_and(wname, trk_id(a_dpin), a_mask);
         }
       } else {
         livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
@@ -372,8 +495,21 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       }
     }
 
-    // setup driver pins and nets
+    // setup driver pins and nets. Plain cells (trackable ops, flops) drive
+    // through an implicit port-0 pin that materializes no PinEntry, so
+    // out_pins() misses it — fall back to the port-0 driver handle explicitly
+    // (Sub node ports are always materialized, no fallback there).
+    std::vector<hhds::Pin_class> dpins;
     for (auto& dpin : node.out_pins()) {
+      dpins.push_back(dpin);
+    }
+    if (dpins.empty() && op != Ntype_op::Sub) {
+      auto dpin0 = node.create_driver_pin(0);
+      if (!dpin0.is_invalid()) {
+        dpins.push_back(dpin0);
+      }
+    }
+    for (auto& dpin : dpins) {
       if (dpin.is_invalid() || dpin.out_edges().empty()) {
         continue;
       }
@@ -381,7 +517,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         I(!root_track);
         continue;
       }
-      auto wname = wire_name(dpin);
+      auto wname = root_track ? trk_id(dpin) : wire_name(dpin);
 
       if (root_track) {
         const auto& pv = pin_tracker.get_pin_vector(wname);
@@ -413,6 +549,43 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     if (Ntype::is_pin_trackable(op)) {
       continue;
     }
+    if (op == Ntype_op::Flop || op == Ntype_op::Memory) {
+      // Path boundary, not a cell (2opt-freq D): pass.abc keeps flops/memories
+      // native — the Liberty stays combinational. Each consumed output (Q,
+      // memory read data) becomes a virtual primary input arriving at 0, so
+      // flop-to-flop segments are scored; the din/en/addr cones end at their
+      // driving gate pins, which compute_timing already reads. Clock/reset
+      // nets are not timed (no clock tree in this estimate). Flop Q is an
+      // implicit port-0 pin (no PinEntry) — same fallback as the net walk.
+      std::vector<hhds::Pin_class> bpins;
+      for (auto& dpin : node.out_pins()) {
+        bpins.push_back(dpin);
+      }
+      if (bpins.empty()) {
+        auto dpin0 = node.create_driver_pin(0);
+        if (!dpin0.is_invalid()) {
+          bpins.push_back(dpin0);
+        }
+      }
+      for (auto& dpin : bpins) {
+        if (dpin.is_invalid() || dpin.out_edges().empty()) {
+          continue;
+        }
+        if (overwrite_dpin2net.contains(dpin.get_class_index())) {
+          continue;  // drives a primary output directly: already a PO net
+        }
+        auto        wname = wire_name(dpin);
+        const auto  bits  = bits_of(dpin);
+        timer.insert_primary_input(wname);  // idempotent net insert underneath
+        set_input_delays(wname);
+        for (auto i = 1; i < bits; ++i) {
+          auto bus_bit_name = absl::StrCat(wname, ".", str_tools::to_s(i));
+          timer.insert_primary_input(bus_bit_name);
+          set_input_delays(bus_bit_name);
+        }
+      }
+      continue;
+    }
     if (op != Ntype_op::Sub) {
       livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
           .msg("opentimer pass needs the lgraph to be tmap, found cell {} with type {}", debug_name(node), Ntype::get_name(op))
@@ -422,6 +595,28 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
 
     auto instance_name = default_instance_name(node);
     auto type_name     = sub_type_name(node);
+
+    // ABC's builtin tie cells (emitted when the Liberty has no constant
+    // cells): a constant never transitions, so it contributes no arrival —
+    // leave its output net driverless and skip the gate.
+    if (type_name == "_const0_" || type_name == "_const1_") {
+      continue;
+    }
+
+    // A Sub that is not a Liberty cell (a child-module instance) cannot be
+    // timed: ot::Timer::insert_gate would just log-and-skip, yielding silent
+    // garbage. The celllib is loaded (ctor flushes the lineage).
+    const auto& lib = timer.celllib(ot::MAX);
+    if (!lib || lib->cell(type_name) == nullptr) {
+      livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+          .msg("module instantiates '{}' (instance {}), which is not a cell in the Liberty library — pass.opentimer times one "
+               "tech-mapped module at a time: run pass.abc first and pass --top of a mapped module (a region <mod>__c<N>, or "
+               "an uncolored/flat map for whole-design timing)",
+               type_name,
+               instance_name)
+          .fatal();
+      return;
+    }
 
     timer.insert_gate(instance_name, type_name);
 
@@ -495,6 +690,15 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
 
   const auto& pins = timer.pins();
 
+  // Every annotated gate output, kept for the timing report (2opt-freq D).
+  struct Arrival {
+    float            delay;
+    std::string      pin;
+    hhds::Node_class node;
+  };
+  std::vector<Arrival> arrivals;
+  hhds::Node_class     max_node;
+
   for (auto node : g->fast_class()) {
     auto op = type_op_of(node);
     if (op != Ntype_op::Sub) {
@@ -526,10 +730,12 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       }
       if (delay > 0) {
         set_delay(dpin, delay);
+        arrivals.push_back({delay, pin_name, node});
 
         if (delay > max_delay) {
           max_delay = delay;
           max_pin   = pin_name;
+          max_node  = node;
         }
       } else {
         del_delay(dpin);
@@ -545,6 +751,56 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       std::print("slowest delay:{} pin:{} NO MARGIN selected\n", max_delay, max_pin);
     }
   }
+
+  if (qor_path.empty()) {
+    return;
+  }
+
+  // One JSON block per analyzed design: max delay + the worst endpoints,
+  // source-attributed through the gates' srcid (agent edit targets).
+  std::sort(arrivals.begin(), arrivals.end(), [](const Arrival& a, const Arrival& b) { return a.delay > b.delay; });
+  constexpr size_t kMaxEndpoints = 10;
+
+  std::string j = std::format("{{\"module\":\"{}\"", jesc(g->get_name()));
+  if (!max_pin.empty()) {
+    j += std::format(",\"max_delay\":{:.6g},\"critical_pin\":\"{}\"", max_delay, jesc(max_pin));
+    if (auto src = src_of_node(g, max_node); !src.empty()) {
+      j += std::format(",\"critical_src\":\"{}\"", jesc(src));
+    }
+  }
+  j += ",\"endpoints\":[";
+  for (size_t i = 0; i < arrivals.size() && i < kMaxEndpoints; ++i) {
+    if (i != 0) {
+      j += ",";
+    }
+    j += std::format("{{\"pin\":\"{}\",\"delay\":{:.6g}", jesc(arrivals[i].pin), arrivals[i].delay);
+    if (auto src = src_of_node(g, arrivals[i].node); !src.empty()) {
+      j += std::format(",\"src\":\"{}\"", jesc(src));
+    }
+    j += "}";
+  }
+  j += "]}";
+  qor_blocks_.push_back(std::move(j));
+}
+
+void Pass_opentimer::write_qor() const {
+  if (qor_path.empty()) {
+    return;
+  }
+  std::string j = "{\"schema_version\":1,\"kind\":\"sta\",\"designs\":[";
+  for (size_t i = 0; i < qor_blocks_.size(); ++i) {
+    if (i != 0) {
+      j += ",";
+    }
+    j += qor_blocks_[i];
+  }
+  j += "]}";
+  std::ofstream ofs(qor_path, std::ios::binary | std::ios::trunc);
+  if (!ofs) {
+    livehd::diag::err("pass.opentimer", "qor-write", "io").msg("pass.opentimer: cannot write timing file '{}'", qor_path).fatal();
+    return;
+  }
+  ofs << j << "\n";
 }
 
 void Pass_opentimer::compute_power(const std::shared_ptr<hhds::Graph>& g) {

@@ -98,7 +98,30 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `block_size` | CSKA/CLA block width (`0` = auto) | `0` |
 | `multiplier` | comb multiplier architecture for `mult`: `array` (the only option today; the enum is the extension point for Booth/Wallace) | `array` |
 | `delay` / `load` | `{D}` / `{L}` substitution | empty |
-| `verbose` | per-region gate count | `false` |
+| `verbose` | extra per-region prints (assume constraints, …) | `false` |
+| `qor` | write the QoR JSON (below) to this file | empty (`lhd pass abc` defaults it to `<workdir>/qor.json` under `--workdir`) |
+| `region_opts` | per-region (color-keyed) overrides, JSON — see below | empty |
+
+### Per-region overrides (`region_opts`, 2opt-freq C)
+
+`flow`/`delay`/`load`/`adder`/`block_size`/`multiplier` can be overridden **per
+color region**, so an agent can spend synthesis effort on the critical region
+only:
+
+```
+--set pass.abc.region_opts='{"1":{"flow":"strash; resyn2; &get -n; &dch -f; &nf {D}; &put","delay":"2"},
+                             "4":{"adder":"cla","block_size":4}}'
+```
+
+Keys are color ids (the region `<mod>__c<N>` suffix). Unset fields inherit the
+global options. Two sources, later wins: a `"region_opts"` member embedded in
+the source graph's `coloring_info` JSON (the Pyrope block-attribute channel,
+2opt-freq B), then the CLI JSON above. Unknown option names, non-integer color
+keys, or malformed values are **hard errors** — a mistyped hint never silently
+no-ops. Each application is logged
+(`region '…': color N options override applied (…)`); a region whose
+overridden flow fails to produce a mapped netlist fails with the region's name
+in the diagnostic while other regions still map.
 
 > Known limitation: `adder=cla` with the auto block width on a wide `mult`
 > produces an AIG that ABC's default `&dch` step aborts on (an ABC-internal
@@ -130,6 +153,32 @@ technology-mapping step (`&nf {D}`) for the read-back to find cells, e.g.
 `lhd describe pass.abc.flow` for the in-tool cheat-sheet + the upstream `abc.rc`
 link. Keep `kAbcAliases` and that help text in sync.
 
+## QoR read-back (2opt-freq A)
+
+After each region's flow, while ABC still holds the mapped *logic* network, the
+pass reads back the region's **gates / Liberty area / critical delay**
+(`Abc_NtkDelayTrace` over the Liberty pin-to-pin data — the same estimate ABC's
+`print_stats` shows after mapping) plus the **worst-arrival region output**,
+source-attributed to `file:line` through the output driver's `srcid`. One line
+per region goes to the step log, a `pass.abc qor:` summary follows the region
+loop, and with `qor=FILE` the whole thing is written as JSON:
+
+```json
+{"schema_version":1, "top":…, "library":…, "seq":…, "delay_target":…,
+ "total":{"regions":N,"gates":G,"area":A,"max_delay":D,
+          "critical_region":…, "critical_output":…, "critical_src":"file:line"},
+ "regions":[{"module":…,"color":C,"gates":g,"area":a,"delay":d,
+             "critical_output":…, "critical_src":…}, …]}
+```
+
+`lhd pass abc --workdir W` defaults `qor` to `W/qor.json` and embeds the file
+as the result envelope's `"qor"` member, so an agent loop reads its score
+straight from `--result-json`. **Per-region numbers only**: the delay is ABC's
+mapped estimate inside one region — paths crossing region or blackbox
+boundaries are invisible here (`pass.opentimer` is the whole-design scorer).
+A region whose flow fails contributes no row; a `delay` below 0 (or absent in
+the JSON) means the mapped network exposed no delay data.
+
 ## Source-map carry-through
 
 ABC's `strash`/`dch` destroy per-node provenance, so after mapping each gate is
@@ -150,7 +199,9 @@ selectable `sum`/comparator bit-blast (`//lhd/tests:lhd_abc_arith_test`).
 Sequential mapping (`seq=true`) — flops↔latches with name preservation +
 single-root remap, and memory/`Sub` blackbox boundaries — is complete and
 LEC-verified (`//lhd/tests:lhd_abc_seq_test`: flops, memory, and a 3-level
-hierarchy) and is the default (`seq=true`). The `shl` bit-blast (constant +
-runtime barrel shifter) is LEC-verified by the arith fixture's `shc`/`shv`
-outputs. Not yet implemented: `mult/div/mod` + `sra` (right-shift) bit-blast,
-and per-region `flow` overrides. See `todo/livehd/2a-abc.html`.
+hierarchy) and is the default (`seq=true`). The `mult`/`shl`/`sra` bit-blasts
+(array multiplier, constant + runtime barrel shifters) are LEC-verified by the
+arith fixture. `div` (and `mod`, which lowers through `div`) stays blackboxed.
+QoR read-back (gates/area/delay + `qor.json`, above) is in. Not yet
+implemented: per-region `flow` overrides (2opt-freq C). See
+`todo/livehd/2opt-freq.html`.

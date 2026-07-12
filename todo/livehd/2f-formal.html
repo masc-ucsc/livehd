@@ -3,139 +3,60 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TODO 2f-formal — compile-time formal tier: engine rebase, stateful asserts, reset-exclusion, ABC EXDC</title>
+<title>TODO 2f-formal — generic formal / compile-time tier: ABC EXDC remainder</title>
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">2f-formal</strong> Compile-time formal tier — engine rebase, stateful asserts, reset-exclusion, ABC EXDC</h1>
+<h1><strong class="item-id">2f-formal</strong> Generic formal / compile-time tier — ABC EXDC remainder</h1>
 
-<p><code>pass.formal</code>'s own single-frame engine landed 2026-06-20; this page is
-  the remainder, re-based on the shared engine
-  (<code>pass/lec</code>, shared with <a class="xref" href="2f-lec.html">2f-lec</a> /
-  <a class="xref" href="2f-verify.html">2f-verify</a>). Everything below stays 2f:
-  the 2026-07-10 ruling kept stateful asserts, reset-exclusion, and ABC EXDC at 2f
-  (its fourth item, memory templates, lives on 2f-verify); the engine rebase moved
-  here from old 2f-verify V7.</p>
-
-<h2>Pending</h2>
-<p><strong>Status (2026-07-12): the rebase + the stateful verdict ladder LANDED
-  2026-07-11</strong> (<code>f3</code>-portfolio session). <code>pass.formal
-  mode=normal</code> routes ASSERT proving through <code>lec::prove_properties</code>
-  (compile profile: <code>engine=bmc</code> no-fork, tiny <code>bmc_bound</code>,
+<p>The generic-formal page (the shared engine lives in <code>pass/lec</code>; the
+  verify CLI's agent-loop objective is <a class="xref"
+  href="2f-verify.html">2f-verify</a>, LEC-specific work is
+  <a class="xref" href="2f-lec.html">2f-lec</a>). The compile-time tier is DONE
+  except ABC EXDC: <code>pass.formal mode=normal</code> was re-based onto
+  <code>lec::prove_properties</code> 2026-07-11 (compile profile:
+  <code>engine=bmc</code> in-process, tiny bound, deterministic
   <code>rlimit=budget_k×4096</code>, <code>timeout=0</code>,
-  <code>ignore_assumes=true</code>), with an occ↔node correlation replaying the
-  encoder walk to align <code>pres.props</code> 1:1 and a size-mismatch guard falling
-  back to the single-frame Prover; <code>mode=fast</code> is UNCHANGED (no compile-recipe
-  perf hit) and <code>prove.cpp</code>'s property path is RETAINED (used by
-  fast/Hotmux/assumes/the normal-mode fallback — the "delete prove.cpp" cleanup is
-  resolved as <em>keep</em>). Tests <code>lhd/tests/lhd_formal_rebase_test.sh</code>.
-  <strong>Still pending here:</strong> the ABC EXDC don't-care network.
-  <strong>Reset-exclusion is resolved 2026-07-12:</strong> the sound part (coarse
-  BMC-window guard at <code>pass_formal.cpp:504</code> + primary reset INPUT pinning in
-  the induction rung) already ships; the further per-cone / reset-less
-  <code>initial</code> guard was attempted and REJECTED as unsound (see the
-  reset-exclusion subtask below — a derived <code>reset_pin</code> pinned inactive
-  false-proves and silently elides a real assert).</p>
+  <code>ignore_assumes=true</code>; <code>mode=fast</code> unchanged;
+  <code>prove.cpp</code> RETAINED for fast/Hotmux/assumes/fallback), with the
+  stateful verdict ladder: 1-induction proven ⇒ elide; BMC-from-reset refuted with
+  <code>refuted_at ≥ reset_hold</code> ⇒ reachable CEX ⇒ deferred hard error;
+  otherwise keep the runtime check + deferred warning. Tests
+  <code>lhd/tests/lhd_formal_rebase_test.sh</code>.</p>
+
+<p><strong>Reset-exclusion is RESOLVED 2026-07-12 — record the trap.</strong> The
+  sound part ships: the coarse BMC-window guard
+  (<code>pass_formal.cpp:504</code>) + primary reset INPUT pinning in the induction
+  rung (<code>reset_negset</code> gated on <code>is_graph_input_pin</code>).
+  <strong>DO NOT resurrect the per-flop guard</strong> that pins a flop's own
+  <code>reset_pin</code>/<code>negreset</code> inactive in the step — attempted and
+  REVERTED as UNSOUND: <code>reset_pin</code> can carry a DESIGN-CONTROLLED derived
+  signal (Pyrope <code>reset_pin=ref &lt;wire&gt;</code>, slang soft-reset nets,
+  Yosys <code>ARST/SRST/ALOAD/CLR</code>), so pinning it drops REACHABLE mid-trace
+  soft-reset states → false unbounded-Proven → <code>set_proven</code> silently
+  ELIDES the runtime assert → miscompile; the step-vacuity <code>base.isSat()</code>
+  guard does not catch it. Only a PRIMARY reset INPUT inherits the "no mid-trace
+  reset" environment assumption. Same for reset-less power-on-<code>initial</code>
+  flops. <code>assert_always</code> keeps <code>Reset_policy::Include</code>.</p>
+
+<h2>Pending — ABC EXDC don't-care network</h2>
 <ul class="subtasks">
-<li><strong>LANDED 2026-07-11 — Rebase <code>pass.formal</code> onto the shared engine
-  as the don't-try-hard profile</strong> (was 2f-verify's V7, formal half): same code path as
-  <code>lhd formal verify</code>, restricted options, small deterministic
-  <code>rlimit</code> budget (machine-independent), <strong>timeout is not an
-  error</strong> (just "not proven, keep the runtime check"), proven results feed
-  synthesis as today. This replaces the self-contained single-frame Prover for
-  property proving and is the step the two items below assume.
-  <br><em>Hints (surveyed 2026-07-11):</em>
-  <ul class="subtasks">
-  <li><em>What exists today:</em> the single-frame Prover is
-    <code>pass/formal/prove.{hpp,cpp}</code> (demand-encodes each property's cone,
-    one fresh QF_BV solver per query, <code>Prove_options::budget_k</code> (256) ×
-    cone-pins as the cvc5 <strong>rlimit</strong> — machine-independent by design —
-    plus the <code>cone_max</code> (50000) pre-solve gate);
-    <code>pass/formal/pass_formal.cpp</code> owns the <code>mode none|fast|normal</code>
-    knob and the structural checks (Hotmux one-hot, bitwidth), which are NOT property
-    proofs and stay put after the rebase.</li>
-  <li><em>The target:</em> <code>lec::prove_properties</code>
-    (<code>pass/lec/query.cpp</code> ~3640, decl <code>query.hpp</code>). The
-    <code>fproperty</code> Subs tolg materialized are already in the compiled graph
-    (<code>monitors=nullptr</code>; sidecar blocks are the verify CLI's concern, not
-    compile's). <code>Prop_result</code> already carries everything the stateful
-    verdict ladder (next item) needs: <code>unbounded</code> (V3 1-induction
-    survivor ⇒ elide), <code>refuted_at ≥ 0</code> (reachable-from-reset CEX ⇒
-    hard-error eligible), else keep + defer.</li>
-  <li><em>Engine prerequisite — deterministic budget:</em> the shared engine only has
-    wall-clock <code>tlimit-per</code> today (query.cpp ~1792 and ~3692). A verdict
-    that ELIDES a runtime check must be machine-independent or builds go
-    nondeterministic — add an <code>Lec_options::rlimit</code> surface (cvc5
-    <code>setOption("rlimit-per", …)</code>, semantics mirroring
-    <code>budget_k</code>; 0 = off) and have the compile profile set rlimit with
-    timeout 0. The verify CLI keeps wall-clock; only compile needs determinism.</li>
-  <li><em>Profile shape:</em> <code>engine=bmc</code>, tiny bound (the current
-    single-frame ≈ bound 1 + the V3 induction step), rlimit-per, <strong>no
-    forks</strong> in compile (call <code>prove_properties</code> in-process — it
-    never forks; do NOT route through the F1/F3 portfolio machinery here),
-    no <code>--workdir</code> cache coupling in v1 (compile runs everywhere;
-    <code>verify_cache_lookup/store</code> hooks stay unset). Exit semantics
-    unchanged: Unknown/budget ⇒ keep the runtime check, clean exit; only
-    <code>assume</code>s that were themselves proven are hypotheses (policy section
-    below).</li>
-  <li><em>Migration order:</em> (1) add the rlimit knob to the engine + a
-    determinism test (same verdict with the same rlimit across <code>-c dbg</code>
-    and <code>-c opt</code> binaries); (2) route <code>mode=normal</code> property
-    proving through <code>prove_properties</code> behind a comparison flag and diff
-    verdicts against the single-frame Prover over
-    <code>pass/formal/tests</code> (the rebase may only ADD proofs, never lose one —
-    any regression is a cone the demand-encoder handled but the full encoder
-    rejects: fix or gate); (3) delete <code>prove.cpp</code>'s property path, keep
-    its cone-size pre-gate as the compile profile's skip heuristic; (4) then the
-    stateful-assert ladder and reset-exclusion items below land on top.</li>
-  <li><em>Trap:</em> <code>pass.formal</code> runs inside every <code>lhd
-    compile</code> (recipe step <code>pass.formal mode:fast</code>) — wall-clock
-    creep and stdout noise are regressions here; the per-def progress lines the lec
-    driver prints must stay OFF in the compile profile.</li>
-  </ul></li>
-<li><strong>LANDED 2026-07-11 — Stateful asserts via the verdict ladder (old M6).</strong>
-  On the shared engine: 1-induction proven ⇒ <code>set_proven</code> (elide);
-  BMC-from-reset refuted with <code>refuted_at ≥ reset_hold</code> at a root ⇒ a
-  <em>reachable</em> counterexample ⇒ deferred hard error; otherwise the single-frame
-  Prover fallback (elide on Proven, never hard-error) + deferred warning. Fixes the old
-  <code>mode=normal</code> over-trust where a possibly-unreachable free-state refute
-  could false-error; a <code>Verdict_result::reset_detected</code> gate means a design
-  with no recognized reset defers instead of erroring. Tests in
-  <code>lhd_formal_rebase_test.sh</code> (fsm elide / reachable-bug error / deep
-  out-of-budget deferred / determinism).</li>
-<li><strong>Reset-exclusion for user asserts
-  (<code>Reset_policy::ExcludeConeActive</code>) — quality. PARTIAL; per-cone guard
-  investigated 2026-07-12 and REJECTED as UNSOUND.</strong> The landed rebase already
-  excludes the crudest case at the BMC-window level (<code>pass_formal.cpp:504</code>:
-  a refute is a hard error only when <code>refuted_at ≥ reset_hold</code> and a reset
-  was detected), AND the single-frame induction rung already pins every PRIMARY reset
-  INPUT deasserted (<code>frame_inputs</code>, <code>query.cpp</code>; only names in
-  <code>reset_negset</code>, gated on <code>is_graph_input_pin</code>). <strong>DO NOT
-  add a per-flop guard that pins a flop's own <code>reset_pin</code>/<code>negreset</code>
-  inactive.</strong> Attempted 2026-07-12 (encoder emitted each flop's reset-active
-  cond, the rung pinned them 0) and reverted after adversarial review: <code>reset_pin</code>
-  can carry a DESIGN-CONTROLLED derived signal — Pyrope <code>reset_pin=ref &lt;wire&gt;</code>
-  accepts any wire, slang routes module-level soft-reset/synchronizer nets to it, Yosys
-  maps <code>ARST/SRST/ALOAD/CLR</code> — so pinning it inactive drops REACHABLE states
-  (a soft reset / functional clear that fires mid-trace) → false unbounded-Proven →
-  <code>pass_formal.cpp:502</code> <code>set_proven</code> silently ELIDES the runtime
-  assert → miscompile. The step-vacuity <code>base.isSat()</code> guard does not catch it
-  (reset-inactive stays SAT). Only a PRIMARY reset INPUT inherits the "no mid-trace reset"
-  environment assumption; a derived reset must stay FREE (the sound subset is redundant
-  with the existing input pinning). Same for reset-less power-on-<code>initial</code>
-  flops — forcing them to <code>initial</code> in the step is unsound unless provably
-  never written. Net: this item is effectively DONE (the sound part already exists);
-  the remaining "per-cone" wish is not soundly implementable for the elision path.
-  <code>assert_always</code> keeps <code>Reset_policy::Include</code>.</li>
-<li><strong>ABC EXDC don't-care network.</strong> Hand the constraints already
-  gathered per region (<code>abc_map.cpp:196-227</code>) to ABC's mfs/fraig as an
-  EXDC network. Constraint sources now: <em>(a)</em> proven asserts/assumes,
-  <em>(b)</em> sidecar invariants proven unbounded by the verify engine,
-  <em>(c)</em> <code>assume_nocheck_synth</code> facts — the compile tier is the
-  <strong>only</strong> consumer of that form (the assume-form contract; per-encounter
-  diag warning; the user explicitly owns the risk).</li>
+<li>Hand the constraints already gathered per region
+  (<code>pass/abc/abc_map.cpp:386-417</code> — the
+  <code>assume_constraints</code> gathering loop, currently a
+  <code>(void)</code> no-op awaiting this item) to ABC's mfs/fraig as an EXDC
+  network.
+  Constraint sources: <em>(a)</em> proven asserts/assumes, <em>(b)</em> sidecar
+  invariants proven unbounded by the verify engine, <em>(c)</em>
+  <code>assume_nocheck_synth</code> facts — the compile tier is the
+  <strong>only</strong> consumer of that form (assume-form contract; per-encounter
+  diag warning; the user explicitly owns the risk). <em>Status of the form today
+  (survey 2026-07-12):</em> <code>assume_nocheck_synth</code> parses in LEC formal
+  blocks and is then skipped by every formal engine
+  (<code>lhd/lhd_kernel_formal.cpp:1673-1675</code>) — until this item lands, the
+  form is consumed by NOTHING, so writing one is a silent no-op.</li>
 </ul>
 
 <h2>Policy carried forward (unchanged)</h2>
@@ -153,6 +74,11 @@
 
 <h2>Future / deferred (other pages)</h2>
 <ul class="subtasks">
+<li><strong>The agent-driven verify loop</strong> (assume discipline,
+  <code>formal_report.json</code>, mining) — <a class="xref"
+  href="2f-verify.html">2f-verify</a>, the current priority.</li>
+<li><strong>Memory-invariant templates, <code>requires</code>/<code>ensures</code>
+  contracts</strong> — <a class="xref" href="3f-verify.html">3f-verify</a>.</li>
 <li><strong>Temporal assertion proofs</strong> —
   <a class="xref" href="../pyrope/3f-temporal.html">3f-temporal</a> lowering on the
   shared engine.</li>

@@ -31,6 +31,11 @@ protected:
   std::vector<std::string> vcd_file_list;
   std::vector<Vcd_power>   vcd_list;
 
+  std::string qor_path;    // timing JSON sidecar (2opt-freq D); empty => none
+  std::string top_filter;  // analyze only the def with this name; empty => the single def
+
+  std::vector<std::string> qor_blocks_;  // one JSON object per analyzed design
+
   static void liberty_open(Eprp_var& var);
   static void time_work(Eprp_var& var);
   static void power_work(Eprp_var& var);
@@ -50,6 +55,7 @@ protected:
 
   std::string get_driver_net_name(const hhds::Pin_class& dpin) const;
   void        backpath_set_color(hhds::Node_class node, int color);
+  void        write_qor() const;  // write the accumulated qor_blocks_ to qor_path
 
 public:
   Pass_opentimer(const Eprp_var& var);

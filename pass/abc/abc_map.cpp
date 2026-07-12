@@ -11,6 +11,7 @@
 #include "abc_map.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <functional>
 #include <print>
 #include <span>
@@ -29,6 +30,7 @@
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
 #include "node_util.hpp"
+#include "rapidjson/document.h"
 
 // clang-format off
 // ABC headers must stay in dependency order: abc.h defines Abc_Frame_t (used by
@@ -173,7 +175,195 @@ void Mapper::stop() {
   }
 }
 
+namespace {
+
+// One override entry {"flow":…,"delay":…,"load":…,"adder":…,"block_size":…,
+// "multiplier":…} -> Region_opts. Unknown keys / bad values are hard errors:
+// a mistyped agent hint must never silently no-op (2opt-freq contract).
+bool parse_region_opts_entry(const rapidjson::Value& v, Region_opts& ro, std::string_view where, std::string_view color_key) {
+  auto bad = [&](std::string_view what) {
+    livehd::diag::err("pass.abc", "region-opts", "io").msg("{}: region_opts[\"{}\"]: {}", where, color_key, what).fatal();
+    return false;
+  };
+  if (!v.IsObject()) {
+    return bad("entry must be an object of per-region options");
+  }
+  for (const auto& mem : v.GetObject()) {
+    const std::string_view key{mem.name.GetString(), mem.name.GetStringLength()};
+    const auto&            val = mem.value;
+    if (key == "flow" || key == "delay" || key == "load") {
+      if (!val.IsString()) {
+        return bad(std::format("'{}' must be a string", key));
+      }
+      std::string s{val.GetString(), val.GetStringLength()};
+      if (key == "flow") {
+        ro.flow = std::move(s);
+      } else if (key == "delay") {
+        ro.delay = std::move(s);
+      } else {
+        ro.load = std::move(s);
+      }
+    } else if (key == "adder") {
+      if (!val.IsString()) {
+        return bad("'adder' must be a string (rca|cska|cla)");
+      }
+      auto a = arith::parse_adder_kind({val.GetString(), val.GetStringLength()});
+      if (!a.has_value()) {
+        return bad(std::format("unknown adder '{}' (use rca|cska|cla)", val.GetString()));
+      }
+      ro.adder = a.value();
+    } else if (key == "multiplier") {
+      if (!val.IsString()) {
+        return bad("'multiplier' must be a string (array)");
+      }
+      auto m = arith::parse_mult_kind({val.GetString(), val.GetStringLength()});
+      if (!m.has_value()) {
+        return bad(std::format("unknown multiplier '{}' (use array)", val.GetString()));
+      }
+      ro.multiplier = m.value();
+    } else if (key == "block_size") {
+      if (!val.IsInt() || val.GetInt() < 0) {
+        return bad("'block_size' must be a non-negative integer");
+      }
+      ro.block_size = val.GetInt();
+    } else {
+      return bad(std::format("unknown option '{}' (use flow|delay|load|adder|block_size|multiplier)", key));
+    }
+  }
+  return true;
+}
+
+bool parse_region_opts_object(const rapidjson::Value& obj, Region_opts_map& out, std::string_view where) {
+  if (!obj.IsObject()) {
+    livehd::diag::err("pass.abc", "region-opts", "io")
+        .msg("{}: region_opts must be a JSON object keyed by color id", where)
+        .fatal();
+    return false;
+  }
+  for (const auto& mem : obj.GetObject()) {
+    const std::string_view key{mem.name.GetString(), mem.name.GetStringLength()};
+    int                    color   = 0;
+    const auto*            b       = key.data();
+    const auto*            e       = key.data() + key.size();
+    auto [p, ec]                   = std::from_chars(b, e, color);
+    if (ec != std::errc{} || p != e || color < 0) {
+      livehd::diag::err("pass.abc", "region-opts", "io")
+          .msg("{}: region_opts key '{}' is not a color id (non-negative integer)", where, key)
+          .fatal();
+      return false;
+    }
+    Region_opts ro;
+    if (!parse_region_opts_entry(mem.value, ro, where, key)) {
+      return false;
+    }
+    out[color] = std::move(ro);
+  }
+  return true;
+}
+
+}  // namespace
+
+std::optional<Region_opts_map> parse_region_opts(std::string_view json, std::string_view where) {
+  rapidjson::Document d;
+  d.Parse(json.data(), json.size());
+  if (d.HasParseError()) {
+    livehd::diag::err("pass.abc", "region-opts", "io")
+        .msg("{}: region_opts is not valid JSON (offset {})", where, d.GetErrorOffset())
+        .fatal();
+    return std::nullopt;
+  }
+  Region_opts_map m;
+  if (!parse_region_opts_object(d, m, where)) {
+    return std::nullopt;
+  }
+  return m;
+}
+
+void Mapper::apply_region_overrides(const livehd::partition::Region_body& rb) {
+  auto apply = [&](const Region_opts& ro, std::string_view src) {
+    if (ro.flow.has_value()) {
+      opts_.flow = *ro.flow;
+    }
+    if (ro.delay.has_value()) {
+      opts_.delay = *ro.delay;
+    }
+    if (ro.load.has_value()) {
+      opts_.load = *ro.load;
+    }
+    if (ro.adder.has_value()) {
+      opts_.adder = *ro.adder;
+    }
+    if (ro.block_size.has_value()) {
+      opts_.block_size = *ro.block_size;
+    }
+    if (ro.multiplier.has_value()) {
+      opts_.multiplier = *ro.multiplier;
+    }
+    std::print("[pass.abc] region '{}': color {} options override applied ({})\n", rb.module_name, rb.color, src);
+  };
+
+  // Graph-embedded overrides first (the block-attribute channel writes a
+  // "region_opts" member into coloring_info), CLI second so --set wins.
+  auto git = graph_region_opts_.find(rb.src);
+  if (git == graph_region_opts_.end()) {
+    Region_opts_map m;
+    if (auto a = rb.src->get_input_node().attr(livehd::attrs::coloring_info); a.has()) {
+      const std::string   info{a.get()};
+      rapidjson::Document d;
+      d.Parse(info.data(), info.size());
+      if (!d.HasParseError() && d.IsObject()) {
+        if (auto ro = d.FindMember("region_opts"); ro != d.MemberEnd()) {
+          parse_region_opts_object(ro->value, m, "coloring_info");  // diag on malformed, best-effort continue
+        }
+      }
+    }
+    git = graph_region_opts_.emplace(rb.src, std::move(m)).first;
+  }
+  if (auto it = git->second.find(rb.color); it != git->second.end()) {
+    apply(it->second, "coloring_info");
+  }
+  if (auto it = region_opts_cli_.find(rb.color); it != region_opts_cli_.end()) {
+    apply(it->second, "--set region_opts");
+  }
+}
+
+namespace {
+// Resolve the original source "file:line" of region output `po` into q.crit_*
+// (2opt-freq A). Best-effort: a missing srcid or an unresolvable span just
+// leaves crit_src empty — the QoR row is still useful without provenance.
+void qor_src_of_output(const livehd::partition::Region_body& rb, size_t po, Region_qor& q) {
+  q.crit_output = rb.outputs[po].name;
+  auto drv = rb.outputs[po].src_driver;
+  if (drv.is_invalid()) {
+    return;
+  }
+  auto onode = drv.get_master_node();
+  if (onode.is_invalid()) {
+    return;
+  }
+  auto a = onode.attr(hhds::attrs::srcid);
+  if (!a.has() || a.get() == 0) {
+    return;
+  }
+  auto span = rb.src->source_locator().resolve_span(a.get());
+  if (!span.file.empty() && span.start_line.has_value()) {
+    q.crit_src = span.file + ":" + std::to_string(*span.start_line);
+  }
+}
+}  // namespace
+
 void Mapper::map_region(const livehd::partition::Region_body& rb) {
+  // Per-region option overrides (2opt-freq C): overlay onto opts_ for the
+  // duration of this region (every helper below reads opts_), restored on
+  // every exit path.
+  const Map_options saved_opts = opts_;
+  struct Opts_restore {
+    Map_options*       dst;
+    const Map_options* src;
+    ~Opts_restore() { *dst = *src; }
+  } opts_restore{&opts_, &saved_opts};
+  apply_region_overrides(rb);
+
   auto* manNtk  = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
   manNtk->pName = Extra_UtilStrsav(const_cast<char*>(rb.module_name.c_str()));
   auto* manFunc = static_cast<Hop_Man_t*>(manNtk->pManFunc);
@@ -1051,6 +1241,43 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     livehd::diag::err("pass.abc", "abc-flow", "internal").msg("ABC flow failed for region '{}': {}", rb.module_name, flow).fatal();
     return;
   }
+
+  // --- QoR read-back (2opt-freq A): critical delay/area/gates from the Liberty
+  // pin-to-pin data while the flow's result is still a mapped LOGIC network
+  // (Abc_NtkDelayTrace requires one; the netlist conversion below is only for
+  // the gate read-back). Per-region numbers: paths crossing the region or
+  // blackbox boundary are pass.opentimer's job, not scored here.
+  {
+    Region_qor q;
+    q.module = rb.module_name;
+    q.color  = rb.color;
+    if (auto* pMappedLogic = Abc_FrameReadNtk(frame); pMappedLogic != nullptr && Abc_NtkIsMappedLogic(pMappedLogic)) {
+      q.delay = Abc_NtkDelayTrace(pMappedLogic, nullptr, nullptr, 0);
+      q.area  = Abc_NtkGetMappedArea(pMappedLogic);
+      q.gates = Abc_NtkNodeNum(pMappedLogic);
+      // Worst-arrival REGION output (the delay trace leaves per-node arrivals
+      // behind; POs beyond po_order are blackbox-input cuts, not outputs).
+      float      worst = -1.0f;
+      int        wpo   = -1;
+      Abc_Obj_t* pPo   = nullptr;
+      int        poi   = 0;
+      Abc_NtkForEachPo(pMappedLogic, pPo, poi) {
+        if (poi >= static_cast<int>(po_order.size())) {
+          break;
+        }
+        float arr = Abc_NodeReadArrivalWorst(Abc_ObjFanin0(pPo));
+        if (arr > worst) {
+          worst = arr;
+          wpo   = static_cast<int>(po_order[static_cast<size_t>(poi)].first);
+        }
+      }
+      if (wpo >= 0) {
+        qor_src_of_output(rb, static_cast<size_t>(wpo), q);
+      }
+    }
+    qor_.push_back(std::move(q));
+  }
+
   auto* mapped = Abc_NtkToNetlist(Abc_FrameReadNtk(frame));
   if (mapped == nullptr || !Abc_NtkHasMapping(mapped)) {
     livehd::diag::err("pass.abc", "abc-unmapped", "internal")
@@ -1565,8 +1792,18 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     }
   }
 
-  if (opts_.verbose) {
-    std::print("[pass.abc] region '{}' mapped: {} gates\n", rb.module_name, gates.size());
+  {
+    // One QoR line per region (stdout is the step log under lhd). qor_.back()
+    // is this region's row: pushed above, and every later exit path is fatal.
+    const auto& q = qor_.back();
+    std::string crit;
+    if (!q.crit_output.empty()) {
+      crit = std::format("  critical output '{}'", q.crit_output);
+      if (!q.crit_src.empty()) {
+        crit += std::format(" @ {}", q.crit_src);
+      }
+    }
+    std::print("[pass.abc] region '{}': {} gates, area {:.2f}, delay {:.2f}{}\n", rb.module_name, q.gates, q.area, q.delay, crit);
   }
   Abc_NtkDelete(mapped);
 }

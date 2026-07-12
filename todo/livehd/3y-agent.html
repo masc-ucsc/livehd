@@ -38,17 +38,10 @@
   textual <code>lgraph-dump:</code> debug emit (twin of <code>lnast-dump:</code> — the
   REPL's <code>lgraph.dump</code> died with lgshell), <code>--recipe-file</code> TOML,
   repeated-pass <code>--set pass.idx.flag</code> index addressing.</li>
-<li><strong>G — pass.opentimer driver.</strong> Liberty ingestion is no longer the
-  gap: <code>lhd pass liberty gensim file.lib --emit-dir lg:models</code> (ABC
-  <code>read_lib</code>) landed as the lhd-native path. What remains is
-  <code>pass.opentimer</code> / <code>pass.opentimer.power</code> (timing and power
-  reports; <code>files=</code> liberty+spef+sdc labels) — driverless since the
-  lgshell REPL was deleted, and not even linked into <code>lhd</code> (absent from
-  lhd/BUILD deps; only pass/opentimer/tests reach it). Gap: link the pass and add
-  an <code>lhd pass opentimer</code> subcommand (lg: input,
-  <code>--set pass.opentimer.*</code> for files/margin/freq) that emits the
-  timing/power report as a declared output. The old <code>inou.liberty</code>
-  blackbox reader is likewise driverless and superseded by pass/liberty.</li>
+<li><strong>G — pass.opentimer driver.</strong> MOVED to
+  <a class="xref" href="2opt-freq.html">2opt-freq</a> subtask D (2026-07-12): it
+  is now the phase-2 timing oracle on the frequency-loop critical path, along
+  with retiring the superseded <code>inou.liberty</code> blackbox reader.</li>
 </ul>
 
 <h2>Design notes — the @tag layer (item B)</h2>

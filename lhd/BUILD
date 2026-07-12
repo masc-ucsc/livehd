@@ -64,6 +64,7 @@ cc_library(
         "//pass/color:pass_color",
         "//pass/common:pass",
         "//pass/liberty:pass_liberty",
+        "//pass/opentimer:pass_opentimer",
         "//pass/cprop:pass_cprop",
         "//pass/isabelle:pass_isabelle",
         "//pass/lean:pass_lean",
@@ -78,8 +79,8 @@ cc_library(
         "//pass/upass:pass_upass",
         "//upass/tolg:upass_tolg",
         "@hhds//hhds:tree_edit_distance",
+        "@opentimer//:taskflow",  # the OT-bundled copy — see packages/opentimer.BUILD for the ODR rule
         "@rapidjson",
-        "@taskflow//:taskflow",
     ],
 )
 
