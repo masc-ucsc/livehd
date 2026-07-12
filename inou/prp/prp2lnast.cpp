@@ -1704,6 +1704,15 @@ void Prp2lnast::lower_children_range(TSNode parent, uint32_t from) {
       continue;
     }
 
+    // Scope attributes (`{ ::[abc=…, color=…] … }`, 2opt-freq B) are consumed
+    // by process_scope_statement — never a statement. Skip by TYPE so every
+    // walk over this child list (including the guarded-return re-entries at
+    // lower_children_range(parent, i+1)) stays clean.
+    if (t == "attribute_sq"sv) {
+      prev_end = ts_node_end_byte(c);
+      continue;
+    }
+
     // Early-return rewrite (see header comment). Only fires when a `return` is
     // actually present, so return-free scopes lower exactly as before.
     if (ts_is_bare_return(c)) {
@@ -1958,7 +1967,133 @@ void Prp2lnast::process_scope_statement(TSNode n, Lnast_nid /*target_stmts*/) {
   // conditional_depth_ so a write inside cannot capture/update a file-scope
   // comptime int binding (see const_int_bindings_).
   Conditional_scope guard(&conditional_depth_);
+
+  TSNode attrs = child_by_field(n, "attributes");
+  if (ts_node_is_null(attrs)) {
+    walk_statement_block(n);
+    return;
+  }
+
+  // 2opt-freq B: `{ ::[abc="…", color=…] stmts }` — the annotated block is its
+  // own synthesis partition region. Lower to a NESTED stmts (tolg recurses
+  // plain stmts transparently) whose first statement is one compiler-minted
+  // marker
+  //     attr_set(%__region_<id>, "__region", <abc-string | true>)
+  // tolg stamps every LGraph node generated inside the stmts with node color
+  // <id> and records the abc string as coloring_info "region_opts"[<id>]
+  // (consumed by pass.abc, which maps each color region separately). The
+  // runner DCE keeps "__region" markers alive (dce_is_keepalive_attr_set);
+  // the `%` target namespace skips scope/shadowing checks by construction.
+  int    region_id = 0;
+  TSNode abc_rv{};
+  if (!parse_scope_attributes(attrs, region_id, abc_rv)) {
+    return;  // diag already emitted
+  }
+  auto sidx = builder.add_child(Lnast_ntype::create_stmts());
+  attach_loc(sidx, n);
+  builder.push_stmts(sidx);
+  {
+    Pending_src pending_guard(*lnast, mint_src(attrs));
+    auto        idx = builder.add_child(Lnast_ntype::create_attr_set());
+    attach_loc(idx, attrs);
+    lnast->add_child(idx, Lnast_node::create_ref(std::format("%__region_{}", region_id)));
+    lnast->add_child(idx, Lnast_node::create_const("__region"));
+    if (!ts_node_is_null(abc_rv)) {
+      lnast->add_child(idx, expr_to_node(abc_rv));
+    } else {
+      lnast->add_child(idx, Lnast_node::create_const("true"));
+    }
+  }
   walk_statement_block(n);
+  builder.pop_stmts();
+}
+
+// Parse `::[abc="…", color=<int|"label">]` on a scope block (strict, unlike
+// the open declaration-attribute vocabulary: a mistyped synthesis hint must
+// never silently no-op). `color` picks the region id — an integer literal is
+// used as-is (two blocks with the same id become the same region group), a
+// string label is interned per file (same label => same region), and with no
+// `color` a fresh id is auto-allocated. Returns false after a diag.
+bool Prp2lnast::parse_scope_attributes(TSNode attr_list_node, int& region_id, TSNode& abc_rv) {
+  bool have_color = false;
+  for (TSNode item : ts_node_named_children(attr_list_node)) {
+    std::string_view it(ts_node_type(item));
+    if (it != "attribute_assignment") {
+      report_error(item,
+                   "scope-attr-shape",
+                   "syntax",
+                   "scope attributes must be key=value pairs",
+                   "use { ::[abc=\"<abc flow>\", color=<int or \"label\">] ... }");
+      return false;
+    }
+    TSNode lv = child_by_field(item, "lvalue");
+    TSNode rv = child_by_field(item, "rvalue");
+    if (ts_node_is_null(lv) || ts_node_is_null(rv)) {
+      report_error(item, "scope-attr-shape", "syntax", "scope attribute needs an explicit value", "abc=\"…\" or color=…");
+      return false;
+    }
+    auto key = trim(get_text(lv));
+    if (key == "abc") {
+      if (std::string_view(ts_node_type(rv)) != "string_literal") {
+        report_error(rv,
+                     "scope-attr-value",
+                     "syntax",
+                     "abc= takes a string literal (the per-region ABC flow/options)",
+                     "e.g. abc=\"strash; resyn2; &get -n; &nf {D}; &put\"");
+        return false;
+      }
+      abc_rv = rv;
+    } else if (key == "color") {
+      have_color = true;
+      std::string_view rvt(ts_node_type(rv));
+      auto             txt = trim(get_text(rv));
+      if (rvt == "string_literal") {
+        // strip the quotes; same label anywhere in this file => same region
+        if (txt.size() >= 2) {
+          txt = txt.substr(1, txt.size() - 2);
+        }
+        auto [itr, inserted] = region_label_ids_.try_emplace(std::string{txt}, 0);
+        if (inserted) {
+          itr->second = alloc_region_id();
+        }
+        region_id = itr->second;
+      } else {
+        int         v      = 0;
+        const auto* b      = txt.data();
+        const auto* e      = txt.data() + txt.size();
+        auto [p, ec]       = std::from_chars(b, e, v);
+        if (ec != std::errc{} || p != e || v <= 0) {
+          report_error(rv,
+                       "scope-attr-value",
+                       "syntax",
+                       "color= takes a positive integer region id or a string label",
+                       "e.g. color=2 or color=\"crit\"");
+          return false;
+        }
+        region_id = v;
+        region_ids_used_.insert(v);
+      }
+    } else {
+      report_error(lv,
+                   "scope-attr-unknown",
+                   "syntax",
+                   std::format("unknown scope attribute '{}'", key),
+                   "scope blocks accept only abc=\"…\" and color=…");
+      return false;
+    }
+  }
+  if (!have_color) {
+    region_id = alloc_region_id();
+  }
+  return true;
+}
+
+int Prp2lnast::alloc_region_id() {
+  while (region_ids_used_.contains(next_region_id_)) {
+    ++next_region_id_;
+  }
+  region_ids_used_.insert(next_region_id_);
+  return next_region_id_;
 }
 
 // Resolved modifiers of a `var_or_let_or_reg` decl node.

@@ -312,6 +312,15 @@ protected:
   // Statements
   void process_statement(TSNode n);
   void process_scope_statement(TSNode n, Lnast_nid target_stmts);
+  // Scope attributes `{ ::[abc="…", color=…] … }` (2opt-freq B): strict parse
+  // of the block's attribute_sq into a region id (+ optional abc string
+  // literal node). Region-id bookkeeping: string labels intern per file, auto
+  // ids skip explicitly used ones.
+  bool                                  parse_scope_attributes(TSNode attr_list_node, int& region_id, TSNode& abc_rv);
+  int                                   alloc_region_id();
+  absl::flat_hash_map<std::string, int> region_label_ids_;
+  absl::flat_hash_set<int>              region_ids_used_;
+  int                                   next_region_id_ = 1;
   // Shared body for process_description / process_scope_statement: walks ALL
   // children of `parent` (named + anonymous) so the grammar's hidden `wrap`/
   // `sat` overflow tokens are visible.
