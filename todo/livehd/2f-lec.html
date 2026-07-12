@@ -120,13 +120,6 @@
   2026-07-10). Each helper set fingerprints the verdict-cache key, preventing a
   constrained proof from aliasing an unconditional or differently-constrained
   proof.</li>
-<li><strong>LEC strategy hints (fcore producer) — LANDED 2026-07-10.</strong> The
-  winning engine and case-split selector persist in the <code>--workdir</code> cache as
-  strategy hints — keyed by canonical <em>entity name</em> so they survive design
-  edits. On a verdict-cache miss, auto first tries the prior winning engine and
-  selector; a stale hint falls through to the complete normal portfolio and can
-  never change the verdict. Sidecar suggestion emission remains coupled to the
-  pending verify mining/hints producer rather than this replay path.</li>
 </ul>
 
 <h2>Landed 2026-07-11 — two-tier state correspondence (tier-2 uncertain pairing)</h2>
@@ -192,22 +185,18 @@
   produce a trusted false REFUTE today. When an ind-SAT touches memory keys with
   same-shape ambiguity, retry alternative permutations as uncertain pairs under
   the same drop-and-retry discipline (N is tiny in practice; past a small bound,
-  keep today's behavior). Key-derivation quirk to fix while here: the ind-side
-  bridge collector groups occurrence by size×bits <em>plus port counts</em>
-  (<code>query.cpp:2868-2870</code>) while every other site groups by size×bits
-  only.</li>
+  keep today's behavior). <strong>Key-derivation quirk — FIXED 2026-07-12:</strong>
+  the ind-side bridge collector (<code>collect_mems</code>) grouped occurrence by
+  size×bits <em>plus port counts</em> (<code>:r{n_rd}w{n_wr}</code>) while every
+  other site (<code>build_shared_mems</code>, <code>collect_mem_keys</code>, the
+  BMC <code>mem</code> builder, and <code>mem_state_key</code> itself) groups by
+  size×bits only — so two same-shape / different-port memories both got
+  occurrence-0 and collided on one key. Now shape-only, aligned with the rest.
+  (The main tier-2 same-shape permutation retry is still pending.)</li>
 </ul>
 
-<h2>Landed 2026-07-12 — flat-path verdict cache + witness file:line/JSON (from 2f-fcore)</h2>
+<h2>Landed 2026-07-12 — witness file:line/JSON (from 2f-fcore)</h2>
 <ul class="subtasks">
-<li><strong>Flat (non-hierarchical) lec verdict cache (2f-fcore F2 tail).</strong> The
-  <code>--set lec.hierarchical=false</code> single-miter path now consumes the same
-  <code>formal_cache.json</code> store the hier driver uses: <code>lec_pair_cache_key</code>
-  over the two sides' <code>semdiff::canonical_digest</code> + verdict-relevant options
-  (incl. the <code>um=[…]</code>/<code>c=[…]</code> segments), salt- and
-  digestability-gated. A PROVEN hit skips encode+solve; the Unknown-ledger skips a
-  re-grind that can't outspend the prior budget; a fresh Proven inserts, a witness-free
-  Unknown ledgers. Regression <code>pass/lec/tests/lec_cache_flat_test.sh</code>.</li>
 <li><strong>Witness <code>file:line</code> source-map + <code>lecfail.json</code>
   (2f-fcore F7).</strong> The BMC witness now names the first diverging STATE cut with
   its impl-side declaration <code>file:line</code> (<code>s (cpu.prp:554)</code>) —
@@ -222,23 +211,6 @@
   (input sequence dumped from the same trace that drives the <code>.prp</code>, so they
   match by construction). Regressions <code>cex_debug_test.sh</code> +
   <code>lec_witness_prpfail_test.sh</code>.</li>
-</ul>
-
-<h2>Pending — interface-only digest for collapsed children (moved from 2f-fcore §3)</h2>
-<ul class="subtasks">
-<li><strong>Digest a collapsed (proven-child) instance by INTERFACE only</strong> (decl
-  tokens — name/width/sign/port-binding) instead of its full Merkle body, so an edit
-  confined to a collapse-isolated child's body leaves the parent's cache digest
-  unchanged and the ancestor still hits. Sound because a collapsed child is a black box
-  whose identity in the parent proof IS its interface, and the collapse list is already
-  in the <code>c=[…]</code> key segment. <em>Why it's not trivial:</em> the collapse set
-  is per-parent and known only at proof time, so the collapse-blind digest precompute
-  can't supply it — a parent digest must be re-walked in <code>run_def</code> with a
-  thread-local memo (the shared body memo is collapse-blind), and the change flips the
-  cache test's Merkle-invalidation assertion from "any child edit invalidates the
-  ancestor" to "a collapse-isolated child-body edit keeps the ancestor's hit" (needs a
-  distinct fixture). A pure hit-rate optimization on the working cache, not a
-  correctness gap.</li>
 </ul>
 
 <h2>Landed 2026-07-12 — diverged-use memory collapse guard</h2>

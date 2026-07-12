@@ -19,44 +19,57 @@
   <code>lec.*</code> aliases. The shared formal core (once tracked on the separate
   2f-fcore page, now retired) is LANDED and lives in <code>pass/lec</code>: the
   Taskflow proof-DAG runner, the raced portfolio (verify <code>engine=auto</code>:
-  bmc-first vs ind-first), the salt-gated verdict cache, case-split, the assume-form
+  bmc-first vs ind-first), case-split, the assume-form
   contract, and the shared witness (<code>file:line</code> + <code>lecfail.json</code>).
-  <strong>LANDED 2026-07-10:</strong> serialized-SMT verify-obligation cache keys and
+  <strong>LANDED 2026-07-10:</strong>
   verify case splitting through <code>formal.partitions</code>/<code>formal.split</code>.
   The two shared items that were NOT fully landed when 2f-fcore retired now live on
-  this page (below): the verify-side mining/hint <em>production</em>, and the last
-  bits of the solver-time budget (extend the landed equivalence budget to the verify
-  front; a timeout-core diagnosis under its own <code>formal.minetimeout</code>). LEC
+  this page (below): the verify-side mining/hint <em>production</em> (still pending),
+  and the last bits of the solver-time budget — <strong>LANDED 2026-07-12:</strong> the
+  verify-side total solver-time budget inside <code>prove_properties</code> and the
+  <code>formal.minetimeout</code> timeout-core diagnosis. LEC
   consumption of formal blocks (old V7, lec half)
   is in <a class="xref" href="2f-lec.html">2f-lec</a>; the compile-profile rebase (old
   V7, formal half) in <a class="xref" href="2f-formal.html">2f-formal</a>.
   <strong>Dropped by ruling 2026-07-10:</strong> CEGAR lazy memory reads (old Attack
   B) and cross-run learned-literal replay (old L3).</p>
 
-<h2>Pending — total-budget scheduler: two small remainders (from 2f-fcore §6)</h2>
+<h2>LANDED 2026-07-12 — total-budget scheduler: both remainders (from 2f-fcore §6)</h2>
 <p><strong>LANDED for equivalence.</strong> <code>formal.timeout</code> is a soft
   TOTAL budget for cvc5/BMC <em>solver</em> time across the hierarchical
   <code>lhd lec</code> command — each def's per-query cap is the budget remaining,
   and ONLY <code>prove_equal</code> time draws it down, so semdiff / encode / load are
   excluded (the budget is for the part that can run forever, not wall-clock). It is a
   hint: a bit over/under is fine. <code>formal.budget_mode=wall|rlimit</code> (rlimit
-  = the deterministic no-budget CI path), <code>formal.minetimeout</code> emits the
-  straggler list today. Deliberately simple — one accumulator, no escalating-round /
-  <code>getDifficulty</code>-ranking machinery (that was over-engineered for a soft
-  target that the per-query <code>tlimit-per</code> already backstops per call). Two
-  small remainders:</p>
+  = the deterministic no-budget CI path). Deliberately simple — one accumulator, no
+  escalating-round / <code>getDifficulty</code>-ranking machinery (that was
+  over-engineered for a soft target that the per-query <code>tlimit-per</code> already
+  backstops per call). Both remainders now landed:</p>
 <ul class="subtasks">
-<li><strong>Verify-side coverage.</strong> The solver-time budget wraps
-  <code>lec_hierarchical</code> (equivalence); <code>run_formal_verify</code> still
-  hands its whole obligation set one budget. Apply the same accumulator so the
-  property front shares the semantics.</li>
-<li><strong>Timeout-core diagnosis under its OWN budget.</strong>
+<li><strong>Verify-side coverage — LANDED.</strong> The solver-time budget now runs
+  <em>inside</em> <code>prove_properties</code> at OBLIGATION granularity, not just the
+  hierarchical equivalence driver: one <code>solve_spent_ms</code> accumulator + a
+  <code>budget_check</code> wrapper shrink <code>tlimit-per</code> to the budget
+  remaining before each <code>checkSatAssuming</code> and FREEZE deepening of an
+  already-bounded-proven obligation once the budget is spent (a never-resolved
+  obligation still gets one floored attempt, so it earns a real Unknown — never a
+  silent "not checked"). SOUND: only ever yields Unknown / a shallower bounded proof.
+  Gated <code>budget_mode=="wall" &amp;&amp; timeout&gt;0 &amp;&amp; rlimit==0</code>, so the
+  deterministic compile tier (<code>rlimit&gt;0</code>, <code>timeout=0</code>) and the
+  LEC helper-proving call (<code>check_opts.budget_mode="rlimit"</code>) are excluded —
+  those must stay reproducible. Default-ON for <code>lhd formal verify</code>; escape
+  hatch <code>--set formal.budget_mode=rlimit</code>. Disclosed in the run detail.</li>
+<li><strong>Timeout-core diagnosis under its OWN budget — LANDED.</strong>
   <code>formal.minetimeout</code> is a SEPARATE budget (never drawn from
-  <code>formal.timeout</code>) precisely because
-  <code>getTimeoutCoreAssuming</code>/the mining loop iterate the solver and can run
-  long. Today it prints the straggler def list; the goal is to name the toxic kernel
-  so a timed-out run's OUTPUT is the assumes/hints that make the next run succeed —
-  the natural feed into the mining loop below.</li>
+  <code>formal.timeout</code>). After the run, each still-Unknown obligation's stuck
+  <code>bad</code> term feeds <code>getTimeoutCoreAssuming</code> under
+  <code>timeout-core-timeout=minetimeout*1000</code>; the returned subset maps back to
+  obligation names in <code>res.detail</code>
+  ("<code>minetimeout core (k/n obligation(s) jointly exhaust the solver): …</code>").
+  <code>produce-unsat-cores</code>/<code>timeout-core-timeout</code> are armed at solver
+  SETUP (both reject a post-first-checkSat <code>setOption</code>). Diagnostic only —
+  never changes a verdict; best-effort/guarded (the cvc5 API is experimental). This is
+  the toxic-kernel signal the mining loop below will consume.</li>
 </ul>
 
 <h2>Pending — mining (learned facts → Houdini → ranked → Pyrope)</h2>
@@ -117,8 +130,6 @@
 </ul>
 
 <h2>Soundness rules (adversarially reviewed; the non-negotiables)</h2>
-<p>(Rule F — the verdict-cache key discipline — moved to the shared verdict cache
-  (<code>lhd/formal_cache</code> + <code>lec_pair_cache_key</code>) with the cache itself.)</p>
 <ul class="subtasks">
 <li><strong>A. Assume-at-proven-horizon.</strong> A fact proven for cycles ≤ k may be
   assumed at cycles ≤ k while checking anything at bound ≤ k — but "proven" means

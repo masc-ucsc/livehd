@@ -31,11 +31,13 @@
   perf hit) and <code>prove.cpp</code>'s property path is RETAINED (used by
   fast/Hotmux/assumes/the normal-mode fallback — the "delete prove.cpp" cleanup is
   resolved as <em>keep</em>). Tests <code>lhd/tests/lhd_formal_rebase_test.sh</code>.
-  <strong>Still pending here:</strong> the FULL reset-exclusion
-  (<code>Reset_policy::ExcludeConeActive</code> — only the coarse BMC-window guard
-  <code>pass_formal.cpp:504</code> exists; the per-cone induction-rung guard and
-  reset-less power-on-<code>initial</code> handling are absent) and the ABC EXDC
-  don't-care network.</p>
+  <strong>Still pending here:</strong> the ABC EXDC don't-care network.
+  <strong>Reset-exclusion is resolved 2026-07-12:</strong> the sound part (coarse
+  BMC-window guard at <code>pass_formal.cpp:504</code> + primary reset INPUT pinning in
+  the induction rung) already ships; the further per-cone / reset-less
+  <code>initial</code> guard was attempted and REJECTED as unsound (see the
+  reset-exclusion subtask below — a derived <code>reset_pin</code> pinned inactive
+  false-proves and silently elides a real assert).</p>
 <ul class="subtasks">
 <li><strong>LANDED 2026-07-11 — Rebase <code>pass.formal</code> onto the shared engine
   as the don't-try-hard profile</strong> (was 2f-verify's V7, formal half): same code path as
@@ -104,16 +106,28 @@
   <code>lhd_formal_rebase_test.sh</code> (fsm elide / reachable-bug error / deep
   out-of-budget deferred / determinism).</li>
 <li><strong>Reset-exclusion for user asserts
-  (<code>Reset_policy::ExcludeConeActive</code>) — quality. PARTIAL.</strong> The
-  landed rebase already excludes the crudest case at the BMC-window level
-  (<code>pass_formal.cpp:504</code>: a refute is a hard error only when
-  <code>refuted_at ≥ reset_hold</code> and a reset was detected). STILL OPEN: the
-  per-cone induction-rung guard and reset-less flops that carry a power-on
-  <code>initial</code> in a mixed design. Reuse (do not duplicate) the
-  <code>query.cpp</code> reset detection — the rebase gives the BMC rung the full
-  <code>after_reset</code> machinery for free; only the single-frame induction rung
-  needs the cone-reset guard (collect each cone Flop's
-  <code>reset_pin</code>/<code>negreset</code>, constrain inactive).
+  (<code>Reset_policy::ExcludeConeActive</code>) — quality. PARTIAL; per-cone guard
+  investigated 2026-07-12 and REJECTED as UNSOUND.</strong> The landed rebase already
+  excludes the crudest case at the BMC-window level (<code>pass_formal.cpp:504</code>:
+  a refute is a hard error only when <code>refuted_at ≥ reset_hold</code> and a reset
+  was detected), AND the single-frame induction rung already pins every PRIMARY reset
+  INPUT deasserted (<code>frame_inputs</code>, <code>query.cpp</code>; only names in
+  <code>reset_negset</code>, gated on <code>is_graph_input_pin</code>). <strong>DO NOT
+  add a per-flop guard that pins a flop's own <code>reset_pin</code>/<code>negreset</code>
+  inactive.</strong> Attempted 2026-07-12 (encoder emitted each flop's reset-active
+  cond, the rung pinned them 0) and reverted after adversarial review: <code>reset_pin</code>
+  can carry a DESIGN-CONTROLLED derived signal — Pyrope <code>reset_pin=ref &lt;wire&gt;</code>
+  accepts any wire, slang routes module-level soft-reset/synchronizer nets to it, Yosys
+  maps <code>ARST/SRST/ALOAD/CLR</code> — so pinning it inactive drops REACHABLE states
+  (a soft reset / functional clear that fires mid-trace) → false unbounded-Proven →
+  <code>pass_formal.cpp:502</code> <code>set_proven</code> silently ELIDES the runtime
+  assert → miscompile. The step-vacuity <code>base.isSat()</code> guard does not catch it
+  (reset-inactive stays SAT). Only a PRIMARY reset INPUT inherits the "no mid-trace reset"
+  environment assumption; a derived reset must stay FREE (the sound subset is redundant
+  with the existing input pinning). Same for reset-less power-on-<code>initial</code>
+  flops — forcing them to <code>initial</code> in the step is unsound unless provably
+  never written. Net: this item is effectively DONE (the sound part already exists);
+  the remaining "per-cone" wish is not soundly implementable for the elision path.
   <code>assert_always</code> keeps <code>Reset_policy::Include</code>.</li>
 <li><strong>ABC EXDC don't-care network.</strong> Hand the constraints already
   gathered per region (<code>abc_map.cpp:196-227</code>) to ABC's mfs/fraig as an
