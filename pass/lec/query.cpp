@@ -2087,17 +2087,30 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     auto   ii = impl_mem_shapes.find(sg);
     size_t rn = ri == ref_mem_shapes.end() ? 0 : ri->second.size();
     size_t in = ii == impl_mem_shapes.end() ? 0 : ii->second.size();
+    // At most one memory of this shape per side: the occurrence pairing is
+    // UNAMBIGUOUS (only one candidate each side, or one side + a wide-flop bridge),
+    // so it is always safe to collapse — the crossed-occurrence hazard the guard
+    // exists for needs >1 memory per side. This MUST precede the diverged check
+    // below: semdiff cannot structurally pair positional-named memories that are
+    // equivalent but differently shaped internally (fwd on/off, a wide-flop
+    // counterpart, differently-ordered reads), so it flags them "no full match"
+    // ⇒ mem_diverged. Treating that as a real divergence here would refuse the
+    // shared INITIAL-CONTENTS symbol and false-REFUTE every uninitialized read
+    // (mem_const_idx / mem_rtl_rf / mem_whole_cond_const) even though the pairing
+    // is forced. A genuine init/kind difference still refutes on the compared
+    // outputs (the encoder builds each side's next-state per design).
+    if (rn <= 1 && in <= 1) {
+      return true;
+    }
     // A GENUINELY diverged memory (semdiff kind/init mismatch or no counterpart)
-    // in this shape must never be force-collapsed — the sides use/init it
-    // differently, so one shared current-state array would be unsound. Uncollapse
-    // the whole shape (the diverged-use case this guard exists for; "Rarely" per
-    // the todo, so the completeness cost of dropping the bucket is negligible).
+    // in an AMBIGUOUS (>1 per side) shape must never be force-collapsed — the
+    // sides use/init it differently, so one shared current-state array would be
+    // unsound. Uncollapse the whole shape (the diverged-use case this guard exists
+    // for; "Rarely" per the todo, so the completeness cost of dropping the bucket
+    // is negligible).
     if ((ri != ref_mem_shapes.end() && bucket_has_diverged(ri->second))
         || (ii != impl_mem_shapes.end() && bucket_has_diverged(ii->second))) {
       return false;
-    }
-    if (rn <= 1 && in <= 1) {
-      return true;  // unambiguous: at most one memory of this shape per side
     }
     // Only second-guess an ambiguous bucket when semdiff actually paired one of
     // its memories; otherwise preserve the pre-guard occurrence collapse (so this
