@@ -320,7 +320,8 @@ protected:
   int                                   alloc_region_id();
   absl::flat_hash_map<std::string, int> region_label_ids_;
   absl::flat_hash_set<int>              region_ids_used_;
-  int                                   next_region_id_ = 1;
+  int                                   next_region_id_   = 1;
+  int                                   region_marker_seq_ = 0;  // unique marker target per block
   // Shared body for process_description / process_scope_statement: walks ALL
   // children of `parent` (named + anonymous) so the grammar's hidden `wrap`/
   // `sat` overflow tokens are visible.

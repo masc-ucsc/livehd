@@ -7,8 +7,12 @@
 #     the bound, per-assert, with a per-cycle depth in the table;
 #   * a reachable violation is REFUTED at its cycle with the per-cycle input
 #     trace, carries the user message, and fails the run (exit != 0);
-#   * a user `assume` is an ENVIRONMENT CONSTRAINT: it flips the same assert to
-#     bounded-proven and is disclosed in the table;
+#   * P1 assume discipline: an assume over PRIMARY INPUTS only is an environment
+#     constraint (free, disclosed); an assume touching design STATE is a proof
+#     obligation (prove-then-use) — a true invariant PROVES and constrains, a
+#     false one REFUTES the run (it can no longer fake a PROVEN);
+#     assume_nocheck_formal is accepted as a free UNCHECKED constraint (warned +
+#     disclosed); assume_nocheck_synth is invisible to verify;
 #   * per-obligation timeout isolation: a hard obligation goes UNKNOWN on its
 #     own budget while its easy sibling still proves; UNKNOWN is a warning
 #     (exit 0) unless formal.strict=true;
@@ -72,8 +76,10 @@ verify cnt cnt_alias --top cnt --set lec.bound=10
 grep -q 'REFUTED at cycle 7' "$OUT" || fail "lec.bound=10 must reach the cycle-7 refutation: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
-# 2. `assume` = environment constraint: pruning count<5 makes count!=5 bounded-
-#    proven; the table DISCLOSES the assume (verdicts are conditional on it).
+# 2. P1 assume discipline, internal (state) assumes are PROVE-THEN-USE:
+#    a FALSE state assume (count<5 while count reaches 5) is REFUTED and fails
+#    the run — it can no longer fake a PROVEN for its companion assert (which
+#    now also refutes honestly).
 # ---------------------------------------------------------------------------
 cat >"$W/cnt_assume.prp" <<'EOF'
 mod cnt(enable:bool) -> (value:u8@[0]) {
@@ -87,10 +93,32 @@ mod cnt(enable:bool) -> (value:u8@[0]) {
 }
 EOF
 verify cnt_assume assume --top cnt --set formal.bound=10
-[ "$RC" -eq 0 ] || fail "under the assume the assert must be bounded-proven (got rc=$RC): $(cat "$OUT")"
-grep -q 'PROVEN (bounded)' "$OUT" || fail "aggregate must be PROVEN (bounded): $(cat "$OUT")"
-grep -q 'assume.*in force' "$OUT" || fail "the assume must be disclosed in the table: $(cat "$OUT")"
-grep -q 'cnt_assume.prp:5.*PROVEN' "$OUT" || fail "count!=5 must be proven under the assume: $(cat "$OUT")"
+[ "$RC" -ne 0 ] || fail "a FALSE internal assume must REFUTE the run, never fake a PROVEN (got rc=0): $(cat "$OUT")"
+grep -q 'assume at.*cnt_assume.prp:4.*REFUTED at cycle' "$OUT" || fail "the false state assume must be REFUTED at its cycle: $(cat "$OUT")"
+grep -q 'internal assume(s):.*REFUTED' "$OUT" || fail "the headline must disclose the refuted internal assume: $(cat "$OUT")"
+grep -q 'cnt_assume.prp:5.*REFUTED' "$OUT" || fail "the companion assert must refute honestly (no masking): $(cat "$OUT")"
+
+# 2a. A TRUE state invariant assume PROVES (here: inductively) and is disclosed
+#     as used; the run stays green.
+cat >"$W/wrap_assume.prp" <<'EOF'
+mod wrapcnt(enable:bool) -> (value:u8@[0]) {
+  reg count:u8 = 0
+  value = count
+  assume(count <= 5)
+  assert(count != 7, "never 7")
+  if enable {
+    if count == 5 {
+      count = 0
+    } else {
+      count += 1
+    }
+  }
+}
+EOF
+verify wrap_assume wrap_assume --top wrapcnt --set formal.bound=8
+[ "$RC" -eq 0 ] || fail "a TRUE internal assume must prove and keep the run green (got rc=$RC): $(cat "$OUT")"
+grep -q 'assume at.*wrap_assume.prp:4.*PROVEN' "$OUT" || fail "the true state assume must get a PROVEN row: $(cat "$OUT")"
+grep -q 'internal assume(s): 1 proven (used)' "$OUT" || fail "the headline must disclose the proven internal assume: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
 # 2b. Assumes are in force at EVERY cycle, reset prologue included (SVA
@@ -119,6 +147,8 @@ grep -q 'assume-refuted' "$OUT" || fail "the load failure must be the gate's ass
 verify always_env always_env --top always_env --set formal.bound=4 --set compile.formal.on_refute=warn
 [ "$RC" -eq 0 ] || fail "assert_always under a prologue-relevant assume must prove (got rc=$RC): $(cat "$OUT")"
 grep -q 'assert_always.*PROVEN' "$OUT" || fail "assert_always must be proven incl. the prologue: $(cat "$OUT")"
+grep -q 'input environment constraint' "$OUT" || fail "an input-only assume must be classified as an input env constraint: $(cat "$OUT")"
+grep -q 'under 1 input assume(s)' "$OUT" || fail "the headline must disclose the input assume count: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
 # 3. Per-obligation timeout isolation: a 32-bit multiply identity blows the 2s
@@ -203,8 +233,9 @@ RC=$?
 [ "$RC" -ne 0 ] || fail "an unresolvable block signal path must be an error (got rc=0)"
 grep -q "signal path 'nonexistent_signal' does not resolve" "$OUT" || fail "unresolvable path must name the signal: $(cat "$OUT")"
 
-# A block assume prunes like a design assume: freezing enable proves count!=5
-# (same design whose unconstrained run refutes it at cycle 7 in case 1).
+# A block assume over an INPUT prunes like a design input assume: freezing
+# enable proves count!=5 (same design whose unconstrained run refutes it at
+# cycle 7 in case 1).
 cat >"$W/frozen.verify.prp" <<'EOF'
 const top = import("cnt.cnt")
 formal cnt.frozen {
@@ -215,8 +246,44 @@ formal cnt.frozen {
 EOF
 OUT="$W/blocks_frozen.out"
 "$LHD" formal verify "$W/cnt.prp" "$W/frozen.verify.prp" --formal 'cnt.frozen' --top cnt --set formal.bound=10 >"$OUT" 2>&1
-grep -q '\[cnt.frozen\].*in force' "$OUT" || fail "block assume must be disclosed: $(cat "$OUT")"
-grep -q "'frozen counter'.*PROVEN" "$OUT" || fail "block assume must prune the violation: $(cat "$OUT")"
+grep -q '\[cnt.frozen\].*in force (input environment constraint' "$OUT" || fail "block input assume must be disclosed: $(cat "$OUT")"
+grep -q "'frozen counter'.*PROVEN" "$OUT" || fail "block input assume must prune the violation: $(cat "$OUT")"
+
+# 6c. P1 assume forms in blocks. A plain block assume over STATE is a proof
+#     obligation: a false one REFUTES the run. assume_nocheck_formal is the
+#     explicit escape: accepted as a free constraint, warned per encounter,
+#     disclosed as UNCHECKED (and it masks the violation — the user owns the
+#     risk). assume_nocheck_synth is invisible to verify.
+cat >"$W/stateassume.verify.prp" <<'EOF'
+const top = import("cnt.cnt")
+formal cnt.stateassume {
+  mut acc = top
+  assume(acc.count < 5)
+  assert(acc.count != 5, "shadow")
+}
+EOF
+OUT="$W/blocks_stateassume.out"
+"$LHD" formal verify "$W/cnt.prp" "$W/stateassume.verify.prp" --formal 'cnt.stateassume' --top cnt --set formal.bound=10 >"$OUT" 2>&1
+[ $? -ne 0 ] || fail "a false block STATE assume must refute the run (got rc=0): $(cat "$OUT")"
+grep -q '\[cnt.stateassume\].*REFUTED at cycle' "$OUT" || fail "the false block state assume must be REFUTED: $(cat "$OUT")"
+
+cat >"$W/nocheck.verify.prp" <<'EOF'
+const top = import("cnt.cnt")
+formal cnt.nocheck {
+  mut acc = top
+  assume_nocheck_formal(acc.count < 5)
+  assume_nocheck_synth(acc.count < 3)
+  assert(acc.count != 5, "shadow")
+}
+EOF
+OUT="$W/blocks_nocheck.out"
+"$LHD" formal verify "$W/cnt.prp" "$W/nocheck.verify.prp" --formal 'cnt.nocheck' --top cnt --set formal.bound=10 >"$OUT" 2>&1
+[ $? -eq 0 ] || fail "assume_nocheck_formal must be accepted on the verify path (got rc!=0): $(cat "$OUT")"
+grep -q 'formal-unchecked-assume' "$OUT" || fail "assume_nocheck_formal must warn per encounter: $(cat "$OUT")"
+grep -q 'in force (UNCHECKED assume_nocheck_formal' "$OUT" || fail "the unchecked assume row must be distinct: $(cat "$OUT")"
+grep -q 'under 1 UNCHECKED assume(s)' "$OUT" || fail "the headline must disclose the unchecked count: $(cat "$OUT")"
+grep -q "'shadow'.*PROVEN" "$OUT" || fail "the unchecked constraint must prune (user owns the risk): $(cat "$OUT")"
+grep -q 'count < 3' "$OUT" && fail "assume_nocheck_synth must be INVISIBLE to verify: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
 # 6b. A block may target a SUBMODULE (user ruling): it binds to EVERY instance
@@ -282,6 +349,67 @@ grep -q 'counter hit 5' "$WD/formalfail.prp" || fail "testbench must name the vi
 grep -q '_drv_enable = \[0, 0, 1, 1, 1, 1, 1, 0\]' "$WD/formalfail.prp" || fail "testbench must drive the violating enable trace: $(cat "$WD/formalfail.prp")"
 grep -q 'tick 8 {' "$WD/formalfail.prp" || fail "testbench must step all 8 trace cycles"
 
+# ---------------------------------------------------------------------------
+# 8b. formal_report.json (P2 agent feedback): written on EVERY run — the
+#     REFUTED run above included (before the exit throw) — with per-obligation
+#     verdicts/ids/solve_ms, assume counts, and existing artifact paths; and
+#     formalfail.json (the F7 witness JSON) parses with a mapped root cut.
+# ---------------------------------------------------------------------------
+[ -s "$WD/formal_report.json" ] || fail "the REFUTED run must still write formal_report.json"
+grep -q 'wrote report' "$OUT" || fail "the report path must be announced on stdout: $(cat "$OUT")"
+python3 - "$WD" <<'PYEOF' || fail "formal_report.json / formalfail.json contract check failed"
+import json, sys
+wd = sys.argv[1]
+d = json.load(open(wd + "/formal_report.json"))
+assert d["schema_version"] == 1 and d["kind"] == "formal_report"
+assert d["run"]["verdict"] == "refuted", d["run"]["verdict"]
+obs = d["obligations"]
+assert len(obs) == 2, obs  # parity assert + count!=5 assert
+ref = [o for o in obs if o["verdict"] == "refuted"]
+assert len(ref) == 1 and ref[0]["refuted_at"] == 7 and ref[0]["witness"], ref
+assert ref[0]["id"].startswith("assert@") and ref[0]["file"].endswith("cnt.prp") and ref[0]["line"] > 0, ref
+assert all(o["solve_ms"] >= 0 for o in obs)
+assert "prpfail" in d["artifacts"] and "prpfail_json" in d["artifacts"], d["artifacts"]
+ac = d["run"]["assume_counts"]
+assert set(ac) == {"input", "unchecked", "internal_proven", "internal_unproven", "internal_refuted"}
+# formalfail.json (F7): previously untested on the verify path.
+w = json.load(open(d["artifacts"]["prpfail_json"]))
+assert w["kind"] == "formalfail" and w["root_cut"]["line"] > 0 and w["root_cut"]["file"].endswith("cnt.prp"), w["root_cut"]
+assert len(w["trace"]["cycles"]) == w["diverge_cycle"] + 1
+PYEOF
+
+# PROVEN run report: verdict + the internal-assume ledger from case 2a.
+WDP="$W/wd_report_proven"
+mkdir -p "$WDP"
+"$LHD" formal verify "$W/wrap_assume.prp" --top wrapcnt --set formal.bound=8 --workdir "$WDP" >"$W/report_proven.out" 2>&1
+[ $? -eq 0 ] || fail "proven report run must pass: $(cat "$W/report_proven.out")"
+python3 - "$WDP" <<'PYEOF' || fail "PROVEN formal_report.json contract check failed"
+import json, sys
+d = json.load(open(sys.argv[1] + "/formal_report.json"))
+assert d["run"]["verdict"] == "proven"
+assert d["run"]["assume_counts"]["internal_proven"] == 1
+a = [o for o in d["obligations"] if o["kind"] == "assume"]
+assert len(a) == 1 and a[0]["aclass"] == "internal" and a[0]["verdict"] == "proven", a
+PYEOF
+
+# UNKNOWN run report: the structured timeout_core names the straggler by id and
+# in_timeout_core marks it; the easy sibling stays out of the core.
+WDU="$W/wd_report_unknown"
+mkdir -p "$WDU"
+"$LHD" formal verify "$W/hard.prp" --top hard --set formal.bound=2 --set formal.timeout=2 \
+  --set formal.minetimeout=3 --workdir "$WDU" >"$W/report_unknown.out" 2>&1
+python3 - "$WDU" <<'PYEOF' || fail "UNKNOWN formal_report.json contract check failed"
+import json, sys
+d = json.load(open(sys.argv[1] + "/formal_report.json"))
+assert d["run"]["verdict"] == "unknown"
+unk = [o for o in d["obligations"] if o["verdict"] == "unknown"]
+assert len(unk) == 1 and unk[0]["unknown_why"] and unk[0]["msg"] == "'distrib'", unk
+if d["timeout_core"]:  # best-effort cvc5 API: when present it must be consistent
+    assert unk[0]["in_timeout_core"] and unk[0]["id"] in d["timeout_core"], (unk, d["timeout_core"])
+    easy = [o for o in d["obligations"] if o["verdict"] == "proven"]
+    assert all(not o["in_timeout_core"] for o in easy)
+PYEOF
+
 # A refuted FORMAL-BLOCK obligation is embedded into the testbench as a
 # test-body assert at the violating cycle (re-targeted at _dut.<path> reads),
 # so the replay TRIGGERS the proven-to-fail assertion.
@@ -332,4 +460,4 @@ verify ladder ladder --top cnt2 --set formal.bound=6
 grep -q "'parity'\": PROVEN (inductive" "$OUT" || fail "the inductive invariant must upgrade to unbounded: $(cat "$OUT")"
 grep -q "'bounded only'\": PROVEN to cycle 7 (bounded)" "$OUT" || fail "a non-inductive fact must STAY bounded: $(cat "$OUT")"
 
-echo "PASS: 2f-verify V1-V3 (bounded/inductive ladder; refuted-at-cycle + trace; assume discloses+prunes; formal blocks + filter; timeout isolation; strict; aliases; no vacuous pass)"
+echo "PASS: 2f-verify V1-V3 + P1 assume discipline (bounded/inductive ladder; refuted-at-cycle + trace; input/internal/unchecked assume forms; formal blocks + filter; timeout isolation; strict; aliases; no vacuous pass)"

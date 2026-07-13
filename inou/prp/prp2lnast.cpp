@@ -1887,11 +1887,18 @@ void Prp2lnast::process_statement(TSNode n) {
     if (!ts_node_is_null(func)) {
       auto fname = trim(get_text(func));
       // Lambda pre/postconditions (05-assert.md): `requires`/`ensures` are
-      // accepted and lowered as a no-op today (the same silent-no-op family as
-      // `lec()`/`lec_valid()`/`covercase()`). A `requires` precondition is an
+      // accepted and lowered as a no-op today. A `requires` precondition is an
       // input constraint that a free top would refute in isolation, so it is not
-      // yet lowered to a checked assert/assume; full pre/post verification is TBD.
+      // yet lowered to a checked assert/assume; full pre/post verification is
+      // 3f-verify. LOUD no-op (P1): an agent writing contracts must learn from
+      // the run that they generate ZERO obligations, not find out from silence.
       if (fname == "requires" || fname == "ensures") {
+        report_warning(n,
+                       "contract-not-lowered",
+                       "comptime",
+                       std::format("'{}' is accepted but generates NO obligation yet (silent no-op)", fname),
+                       "lambda pre/postconditions are not lowered; use assert/assume (or a formal block) for checked "
+                       "properties");
         return;
       }
       if (fname == "cassert" || fname == "assert" || fname == "assume" || fname == "assert_always") {
@@ -1996,7 +2003,11 @@ void Prp2lnast::process_scope_statement(TSNode n, Lnast_nid /*target_stmts*/) {
     Pending_src pending_guard(*lnast, mint_src(attrs));
     auto        idx = builder.add_child(Lnast_ntype::create_attr_set());
     attach_loc(idx, attrs);
-    lnast->add_child(idx, Lnast_node::create_ref(std::format("%__region_{}", region_id)));
+    // The region id is the LEADING integer of the target suffix; the trailing
+    // per-block counter keeps each marker's target unique (two same-label
+    // blocks carry different payloads, and the attribute store is add-only
+    // per name — one write per target name, ever).
+    lnast->add_child(idx, Lnast_node::create_ref(std::format("%__region_{}_{}", region_id, region_marker_seq_++)));
     lnast->add_child(idx, Lnast_node::create_const("__region"));
     if (!ts_node_is_null(abc_rv)) {
       lnast->add_child(idx, expr_to_node(abc_rv));

@@ -11,20 +11,19 @@
 <main>
 <h1><strong class="item-id">2f-verify</strong> <code>lhd formal verify</code> — the agent-driven assert/assume loop</h1>
 
-<p><strong>THE OBJECTIVE (priority ruling 2026-07-12 — do this page before the other
-  Group-2 items).</strong> A coding agent drives the loop: run
-  <code>lhd formal verify design.prp --workdir W</code>; parse a machine-readable run
-  report; see which obligations are PROVEN / REFUTED / UNKNOWN and <em>why</em>
-  (witness, timeout core, budget); then write better <code>assume</code>s / helper
-  <code>assert</code>s (and curate mined invariant candidates) and re-run. Everything
-  here serves that loop, in priority order: <strong>P1</strong> assume-form
-  discipline (make assert/assume behave per the settled contract),
-  <strong>P2</strong> the agent feedback report, <strong>P3</strong> the mining loop
-  (the FULL loop stays on this page — ruling 2026-07-12: the tool
-  proves/filters/ranks/emits, the agent curates). Verify work that is NOT on this
-  critical path moved to <a class="xref" href="3f-verify.html">3f-verify</a>
-  (memory-invariant templates, <code>requires</code>/<code>ensures</code> contracts;
-  also the dropped-by-ruling record).</p>
+<p><strong>THE OBJECTIVE (priority ruling 2026-07-12) — P1 + P2 + P3 ALL LANDED
+  2026-07-12.</strong> A coding agent drives the loop: run
+  <code>lhd formal verify design.prp --workdir W</code>; parse
+  <code>formal_report.json</code>; see which obligations are PROVEN / REFUTED /
+  UNKNOWN and <em>why</em> (witness, timeout core, solve_ms, budget); write better
+  <code>assume</code>s / helper <code>assert</code>s (and curate the mined
+  invariants in <code>formal_mined.prp</code>); re-run. The loop is documented for
+  agents in <code>../docs</code> 07-formal.md ("Driving lhd formal verify from an
+  agent"). What remains on this page is the small refinements section below.
+  Verify work NOT on this critical path lives in
+  <a class="xref" href="3f-verify.html">3f-verify</a> (memory-invariant templates,
+  <code>requires</code>/<code>ensures</code> contracts; the dropped-by-ruling
+  record).</p>
 
 <p><strong>Landed base (compressed; details in git + memory).</strong> Engine core
   V1–V3: per-obligation incremental BMC with frontier facts, the verdict ladder to
@@ -48,172 +47,105 @@
   <code>lhd_formal_portfolio_test.sh</code>, <code>lhd_formal_budget_mine_test.sh</code>,
   <code>lhd_formal_cache_split_test.sh</code>.</p>
 
-<h2>P1 — assume-form discipline on the verify path (the "working with assert/assume" half)</h2>
-<p><strong>Current reality (code survey 2026-07-12; the contract below is settled,
-  the implementation is NOT there yet):</strong> the verify engine treats ANY
-  <code>kind=assume</code> as a free environment constraint asserted at EVERY cycle
-  including the reset prologue, never a proof obligation
-  (<code>pass/lec/query.cpp:4762-4777</code>;
-  <code>inou/prp/formal_blocks.hpp:25-26</code> documents the V2-subset deferral).
-  A formal-block <code>assume</code> over an INTERNAL register is silently accepted
-  "in force" and can power a fake inductive PROVEN of its companion assert
-  (reproduced 2026-07-12) — the only breadcrumb is the generic per-assume
-  "verdicts are conditional on it" line. <code>assume_nocheck_formal</code> /
-  <code>assume_nocheck_synth</code> are REJECTED in verify blocks (the extractor is
-  called with <code>allow_nocheck=false</code>,
-  <code>lhd/lhd_kernel_formal.cpp:2816</code>; only LEC opts in at
-  <code>:1618</code>), and the "under N assume(s)" disclosures are LEC-only
-  (<code>disclose_lec_helpers</code>, <code>lhd_kernel_formal.cpp:271-284</code>).
-  The end-of-run vacuity <code>checkSat</code> (contradictory set ⇒ all Proven
-  demoted to Unknown, <code>query.cpp:5156-5183</code>) is the sole backstop and
-  stays.</p>
+<h2>P1 — assume-form discipline — LANDED 2026-07-12</h2>
+<p><strong>Every item below shipped</strong> (tests
+  <code>lhd/tests/lhd_formal_verify_test.sh</code>; the pre-P1 hazard — a formal-block
+  <code>assume</code> over an internal register silently accepted "in force" and
+  powering a fake inductive PROVEN — is pinned by the rewritten case 2, which now
+  demands the REFUTE). A classification PROBE (one encode against fresh state/mem
+  symbols; transitive term support through the probe's defining equalities) runs
+  once per <code>prove_properties</code> when assumes exist; an unclassifiable
+  assume defaults to "internal" (the sound side). The vacuity backstop stays,
+  gated on env-class assumes.</p>
 <ul class="subtasks">
-<li><strong>Input-vs-internal classification (port LEC's discipline).</strong> LEC
-  already computes <code>input_only</code> from the monitor binds and enforces
-  prove-first for anything touching state/outputs
-  (<code>lhd_kernel_formal.cpp:1683-1745</code>); verify's block resolve
-  distinguishes input/output/state only for WIDTH lookup, not policy
-  (<code>:2855-2876</code>). New policy, uniform for design-embedded and block
-  assumes: an assume over primary inputs only = environment constraint (free by
-  nature — inputs are unconstrained otherwise; disclosed; verdicts conditional).
-  An assume touching internal state/outputs = a PROOF OBLIGATION, prove-then-use:
-  once proven to cycle k it constrains sibling obligations at cycles ≤ k (the
-  landed frontier machinery; rules A–C below), and only an unbounded/inductive
-  survivor may constrain the induction step (rule E). A REFUTED internal assume is
-  an error verdict for that assume and never constrains anything; an Unknown
-  internal assume is NOT used and is disclosed as unproven-unused.</li>
-<li><strong>Accept <code>assume_nocheck_formal</code> on the verify path.</strong>
-  Flip the verify extract to <code>allow_nocheck=true</code>
-  (<code>lhd_kernel_formal.cpp:2816</code>) and consume it as a free constraint with
-  a per-encounter diag warning and a DISTINCT disclosure ("under N
-  <strong>unchecked</strong> assume(s)") in both the aggregate line and the report —
-  never confusable with input-conditioned or proven-internal assumes.
-  <code>assume_nocheck_synth</code> stays invisible to verify (skip, as LEC does at
-  <code>:1673-1675</code>). Also fix the self-contradictory rejection text
-  (<code>inou/prp/formal_blocks.cpp:233</code> advertises
-  <code>assume_nocheck_*</code> while rejecting it).</li>
-<li><strong>Disclosure parity in the aggregate.</strong>
-  <code>Verify_result.n_assumes</code> is computed (<code>query.cpp:5144</code>) but
-  never printed; the headline detail (and P2 report) must carry the counts by class:
-  "under K input / M proven-internal / U unchecked assume(s)".</li>
-<li><strong>Verdict-cache honesty under the new semantics.</strong> The
-  <code>verify:…</code> obligation cache keys must fingerprint the assume set AND
-  its classification (LEC already fingerprints helper sets into pair keys) so an
-  edited or reclassified assume can never replay a stale verdict.</li>
-<li><strong>Inline input-assume load-trap ergonomics.</strong> A design-source
-  <code>assume(a &lt; 4)</code> at a root module hard-fails the verify LOAD through
-  the compile gate's assume-refuted policy
-  (<code>lhd/tests/lhd_formal_verify_test.sh:113-121</code>); the error hint
-  (<code>pass/formal/pass_formal.cpp:75-99</code>) suggests neither real escape.
-  Point it at both: move the constraint to a <code>formal</code> block, or
-  <code>--set compile.formal.on_refute=warn</code>.</li>
-<li><strong><code>requires</code>/<code>ensures</code> presence diag.</strong> They
-  parse and silently vanish (<code>inou/prp/prp2lnast.cpp:1880-1887</code>) — an
-  agent using lambda pre/postconditions gets zero obligations and zero disclosure.
-  Near-term: a loud "not an obligation yet" warning whenever a verified design
-  contains them. The actual contract lowering is
-  <a class="xref" href="3f-verify.html">3f-verify</a>.</li>
-<li><strong>Tests:</strong> a false internal assume can no longer fake a PROVEN
-  (prove-then-use); input assume disclosed by class; nocheck accepted + warned +
-  disclosed distinctly; contradictory set still voids to Unknown (vacuity backstop);
-  cache key changes when an assume is edited or its classification changes;
-  <code>requires</code> warning fires.</li>
+<li><strong>Input-vs-internal classification</strong>: input-only assume = free env
+  constraint (disclosed "input environment constraint"; headline "under K input
+  assume(s)"); state/output-touching assume = PROOF OBLIGATION, prove-then-use
+  (frontier at just-proven cycles, rule A; induction-step use only as a Houdini
+  survivor, rule E). REFUTED internal assume = hard error (aggregate Refuted, even
+  with zero asserts); Unknown = NOT used, disclosed. <code>Prop_result::aclass</code>
+  carries the class through the fork codec.</li>
+<li><strong><code>assume_nocheck_formal</code> accepted on verify</strong>
+  (extract <code>allow_nocheck=true</code>; rewritten to <code>assume</code> in the
+  generated monitor with <code>Monitor::nocheck_lines</code> marking; per-encounter
+  <code>formal-unchecked-assume</code> warning; distinct "under N UNCHECKED
+  assume(s)" disclosure). <code>assume_nocheck_synth</code> invisible.
+  <code>formal_blocks.cpp</code> rejection text no longer self-contradictory.</li>
+<li><strong>Cache honesty</strong>: obligation keys hash the full asserted set (so
+  the assume set + classes are in the key by construction) + explicit
+  <code>verify-obligation-v2</code> bump.</li>
+<li><strong>Ergonomics</strong>: the compile-gate assume-refuted hint now names both
+  escapes (formal block / <code>on_refute=warn</code>);
+  <code>requires</code>/<code>ensures</code> emit the loud
+  <code>contract-not-lowered</code> warning (lowering itself:
+  <a class="xref" href="3f-verify.html">3f-verify</a>); <code>lhd help formal</code>
+  documents the contract.</li>
 </ul>
 
-<h2>P2 — agent feedback: <code>formal_report.json</code> (workdir report; ruling 2026-07-12)</h2>
-<p><strong>Gap (survey 2026-07-12):</strong> there is NO machine-readable
-  per-obligation output. The verdict table is stdout prose
-  (<code>lhd_kernel_formal.cpp:3002-3041</code>); the global
-  <code>--result-json</code> envelope has no obligations array (unlike
-  <code>lhd sim</code>'s <code>tests</code>; <code>lhd/lhd.hpp:170-183</code>) and
-  stays as-is by ruling; <code>formalfail.json</code> covers only the FIRST refuted
-  obligation; UNKNOWN — the verdict the agent most needs to act on — leaves no
-  artifact at all; per-obligation solve times exist nowhere (only whole-run
-  <code>elapsed_ms</code>, <code>pass/lec/query.hpp:465</code>).</p>
-<ul class="subtasks">
-<li><strong>Write <code>&lt;workdir&gt;/formal_report.json</code> at the end of EVERY
-  run</strong> (all verdicts — PROVEN, REFUTED, and UNKNOWN; not refute-gated),
-  next to <code>formal_cache.json</code>. Knob <code>formal.report</code> (default
-  <code>formal_report.json</code>, empty = off); stdout announces the path. Agent
-  contract: pass <code>--workdir</code> (without it the run lands in an anonymous
-  <code>mkdtemp</code> dir, <code>lhd/lhd_kernel_common.cpp:259-272</code> — the
-  report is still written + announced on stdout there, so one-shot parsing works,
-  but nothing is findable across runs).</li>
-<li><strong>Schema</strong> (<code>schema_version</code>'d, like
-  <code>formalfail.json</code>): <code>run</code> {verdict, detail, engine/strategy,
-  elapsed_ms, checked_steps, reset_hold, reset_detected, budget {timeout,
-  budget_mode, exhausted}, assume_counts {input, internal_proven,
-  internal_unproven, unchecked}}; <code>obligations[]</code> {id (stable:
-  <code>kind@file:line[block@instance]</code>), kind, file, line, msg, block,
-  instance, verdict, unbounded, proven_to, refuted_at, unknown_at, unknown_why (the
-  four reasons at <code>lhd_kernel_formal.cpp:3029-3037</code>), solve_ms,
-  in_timeout_core, candidate_inputs (Unknown-with-model), artifacts {prpfail, json,
-  vcd}}; <code>timeout_core[]</code> as obligation ids — structured, replacing the
-  prose-only <code>res.detail</code> line (<code>query.cpp:5235-5238</code>);
-  <code>mined[]</code> reserved for P3.</li>
-<li><strong>Per-obligation <code>solve_ms</code> plumbing.</strong> Add to
-  <code>Prop_result</code> — <em>TRAP:</em> new <code>Prop_result</code> fields MUST
-  extend the <code>Verify_result</code> wire codec
-  <code>serialize_verify</code>/<code>deserialize_verify</code>
-  (<code>pass/lec/query.cpp:434-536</code>, per-prop record loop) or the
-  portfolio/fork path silently drops them (the F7 witness hit the same class of bug
-  on the <code>Witness_trace</code> codec <code>put_trace</code>/<code>get_trace</code>).</li>
-<li><strong><code>formalfail.json</code> parity + regression.</strong> Today no test
-  asserts <code>formalfail.json</code> (only <code>lecfail.json</code> is checked);
-  its <code>root_cut.ref/impl</code> are empty strings and
-  <code>diverge_outputs</code> is <code>[]</code> on the verify path — fill what is
-  fillable (the violated expression's value at the failing cycle) and add the
-  test.</li>
-<li><strong>Agent workflow doc.</strong> <code>../docs</code> 07-formal.md gains
-  "driving <code>lhd formal verify</code> from an agent": the loop (run → parse
-  <code>formal_report.json</code> → strengthen assumes / add helper asserts →
-  re-run), exit-code semantics (REFUTED ⇒ exit 1; UNKNOWN ⇒ exit 0 + warning diag
-  unless <code>formal.strict</code>), the artifact map
-  (<code>formal_report.json</code> / <code>formalfail.{prp,json}</code> / VCD /
-  <code>formal_cache.json</code>), the <code>minetimeout</code> recipe, and the P1
-  assume-form table.</li>
-<li><strong>Tests:</strong> report present and parseable on PROVEN / UNKNOWN /
-  REFUTED runs; ids stable across cache-hit replays; <code>timeout_core</code> ids
-  match the prose diagnosis; <code>solve_ms</code> populated through the fork
-  path.</li>
-</ul>
+<h2>P2 — agent feedback: <code>formal_report.json</code> — LANDED 2026-07-12</h2>
+<p><strong>Shipped as ruled</strong> (workdir report file; the
+  <code>--result-json</code> envelope stays as-is): written on EVERY run — PROVEN /
+  REFUTED (before the exit throw) / UNKNOWN — and announced on stdout; knob
+  <code>formal.report</code> (default <code>formal_report.json</code>). Schema:
+  <code>run</code> {verdict, detail, budget, assume_counts, checked_steps,
+  reset…}; <code>obligations[]</code> {stable id <code>kind@file:line[block]</code>,
+  verdict, unbounded, cycles, <code>unknown_why</code>, <code>aclass</code>,
+  <code>solve_ms</code>, <code>in_timeout_core</code>, witness};
+  structured <code>timeout_core[]</code> (ids); <code>artifacts</code>
+  {prpfail/prpfail_json/vcd/cache/mined_block}; <code>mined[]</code> (P3).
+  Per-obligation <code>solve_ms</code> plumbed through <code>Prop_result</code> +
+  the <code>serialize_verify/deserialize_verify</code> wire codec (BMC checks +
+  rung candidate checks; cache hits ≈ 0). <code>formalfail.json</code> got its
+  first regression. Agent-workflow doc landed in <code>../docs</code> 07-formal.md.
+  Tests: report sections of <code>lhd_formal_verify_test.sh</code> (all three
+  verdicts, ids, core consistency, fork-path field survival).</p>
 
-<h2>P3 — mining (learned facts → Houdini → ranked → Pyrope; FULL loop stays here, ruling 2026-07-12)</h2>
+
+<h2>P3 — mining (learned facts → Houdini → Pyrope) — CORE LOOP LANDED 2026-07-12</h2>
+<p><strong>The full loop ships</strong> (gated by <code>formal.minetimeout</code>;
+  mining bills that budget exclusively — the induction rung opens on the mining
+  budget even when the stuck run exhausted the main one, which is the normal
+  mining scenario). Sources: <em>(1)</em> <code>getLearnedLiterals(INPUT)</code>
+  over ONE cycle's state symbols, mapped back to flop keys via the engine's
+  sym→key ledger (mixed-cycle or input-referencing literals are rejected);
+  <em>(2)</em> register templates over the still-Unknown obligations' cones —
+  range bounds seeded by a SAT-guided max-probe of the last cycle (an arbitrary
+  single model seeds useless all-zero bounds; the ascent finds the tight wrap
+  bound, e.g. <code>count &le; 5</code>), frozen-register, and same-sample
+  register-pair equality. Every candidate must pass the BASE proof (UNSAT of
+  "violated at any checked cycle", in the live frame under the env assumes) and
+  then survive the JOINT Houdini fixpoint with the prop candidates in the V3
+  rung (rule E). Survivors are emitted as a paste-ready auto-managed block
+  (<code>&lt;workdir&gt;/formal_mined.prp</code>, provenance comments,
+  <code>assume(acc.&lt;key&gt; …)</code> — re-proven on use by the P1 discipline,
+  so a stale fact after a design edit REFUTES loudly) and land in
+  <code>formal_report.json</code>'s <code>mined[]</code> with status/keys/targets
+  (targets = stuck obligations whose cone overlaps).
+  <code>formal.mine=speculative</code> additionally reports base-proven
+  candidates the step dropped. Renderable shapes (unsigned compares, equality,
+  and/or) become Pyrope; the rest ship as SMT text. Test
+  <code>lhd/tests/lhd_formal_mine_test.sh</code>: tight bound mined + emitted,
+  round-trip re-proves-and-uses, stale fact refutes, speculative tier.</p>
+
+<h2>Remaining refinements (the page's only open work)</h2>
 <ul class="subtasks">
-<li><strong>Source 1: learned-literal recurrence</strong> (cheap — the solver already
-  computed it). Harvest <code>getLearnedLiterals(INPUT)</code>; strip cycle prefixes;
-  a literal recurring at many cycles ("<code>r5_st ≤ 3</code> at cycles 2..9") is an
-  invariant candidate "<code>st ≤ 3</code>". Keep only literals over <em>named</em>
-  user signals (internal temps can't become source code); word-level facts map back
-  through encoder naming → LGraph signals → Pyrope names.</li>
-<li><strong>Source 2: register/state templates targeted at the pain.</strong> Where
-  difficulty mass / timeout cores point, instantiate hardware-invariant templates
-  over the registers in the hard asserts' cones: range bounds (seeded from BMC model
-  values), one-hot state encodings, mutual exclusion of valid bits, register-pair
-  equality, count == popcount(valids). The per-memory-ENTRY template family moved to
-  <a class="xref" href="3f-verify.html">3f-verify</a> (ruling 2026-07-12) — memory
-  pain is served near-term by the agent hand-writing per-entry invariants where the
-  timeout core shows store chains are the kernel.</li>
-<li><strong>Filter: Houdini fixpoint</strong> on the persistent solver — assume all
-  candidates at cycle c, prove each at c+1, drop failures, iterate. Survivors are
-  genuine inductive invariants (re-provable next run in one query).</li>
-<li><strong>Rank before emitting</strong> — a candidate must earn its keep: it appears
-  in the <code>getUnsatCore</code> of a newly-provable obligation, or asserting it
-  drops a straggler's solve time / difficulty mass. Everything else is noise (every
-  carried assume also bloats the formula). <em>Prerequisite (survey 2026-07-12):</em>
-  <code>getDifficulty</code> is unused repo-wide today — wire
-  <code>produce-difficulty</code> into the failed-attempt path first; it is the
-  ranking signal.</li>
-<li><strong>Emit</strong> ready-to-paste <code>formal</code> blocks with provenance
-  comments (the persistent hints channel): inductive survivors → the auto-managed
-  sidecar; bounded/unranked candidates → the speculative report only. Both ALSO land
-  in <code>formal_report.json</code>'s <code>mined[]</code> (status:
-  inductive-survivor | speculative, provenance, target obligation ids) so the agent
-  curates without scraping the sidecar. Gated by <code>formal.minetimeout</code>
-  (<code>0</code> = off); <code>--mine=speculative</code> tier.</li>
-<li>Tests: a mined invariant round-trips (emitted, re-parsed, re-proven, measurably
-  speeds the straggler); pruning on design edit; <code>mined[]</code> entries match
-  the sidecar.</li>
+<li><strong>Ranking signals.</strong> v1 ranks by stuck-cone overlap + the
+  inductive/speculative tier. Still pending: <code>getDifficulty</code>
+  (<code>produce-difficulty</code> is still unused repo-wide) as the
+  hardness-mass signal, and <code>getUnsatCore</code> earns-its-keep pruning (a
+  survivor should demonstrably help a stuck obligation or drop a straggler's
+  solve time before it is emitted — today every inductive survivor is
+  emitted).</li>
+<li><strong>More template families</strong>: one-hot state encodings, mutual
+  exclusion of valid bits, count == popcount(valids). (Per-memory-ENTRY
+  templates stay <a class="xref" href="3f-verify.html">3f-verify</a>.)</li>
+<li><strong>Literal recurrence filter.</strong> Source 1 currently takes any
+  single-cycle state literal; the original spec keeps literals recurring at MANY
+  cycles (a stronger prior). Cheap once there is a design where learned literals
+  actually fire (bitblast-internal returns few INPUT-mode literals).</li>
+<li><strong>Signed-compare rendering</strong>: mined facts over signed registers
+  ship as SMT text only; render them once a signedness-faithful Pyrope mapping
+  is pinned by a test.</li>
 </ul>
 
 <h2>Soundness rules (adversarially reviewed; the non-negotiables)</h2>

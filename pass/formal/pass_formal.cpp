@@ -89,6 +89,13 @@ void report_refuted(std::string_view code, const std::string& what, std::string_
               "report a compiler bug if it should already hold"
             : "checked over free module inputs in isolation; a different top-level instantiation may constrain them so "
               "it holds — re-check at the intended top, or report a compiler bug if it should already hold";
+  if (code == "assume-refuted") {
+    // An input `assume` at a root module is BY NATURE refutable here (inputs are
+    // free) — the gate is telling the user the constraint is not self-evident,
+    // not that the design is broken. Name both real escapes explicitly.
+    hint += "; for an intentional environment constraint, move the assume into a `formal name { }` block "
+            "(adjudicated by `lhd formal verify`, not this gate) or pass --set compile.formal.on_refute=warn";
+  }
   // Deferred: record + fail the build, but let the pipeline finish so cgen still
   // emits the design with the failing property kept as a runtime check.
   livehd::diag::err("pass.formal", code, "comptime")

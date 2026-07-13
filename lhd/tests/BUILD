@@ -283,6 +283,17 @@ sh_test(
     data = ["//lhd"],
 )
 
+# P3 invariant mining: a stuck run mines the tight inductive range bound of the
+# counter in the hard obligation's cone, emits it as a paste-ready formal block
+# (formal_mined.prp) + report mined[] records, the round-trip re-proves it
+# (P1 prove-then-use), and a design edit that falsifies it REFUTES loudly.
+sh_test(
+    name = "lhd_formal_mine_test",
+    size = "large",
+    srcs = ["lhd_formal_mine_test.sh"],
+    data = ["//lhd"],
+)
+
 sh_test(
     name = "lhd_formal_cache_split_test",
     srcs = ["lhd_formal_cache_split_test.sh"],

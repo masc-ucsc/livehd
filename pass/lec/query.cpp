@@ -448,13 +448,35 @@ std::string serialize_verify(const Verify_result& v) {
     put_str(b, p.loc);
     put_str(b, p.msg);
     put_str(b, p.block);
+    put_str(b, p.aclass);
     b.push_back(static_cast<char>(static_cast<uint8_t>(p.verdict)));
     b.push_back(static_cast<char>(p.unbounded ? 1 : 0));
     put_u32(b, static_cast<uint32_t>(p.proven_to));
     put_u32(b, static_cast<uint32_t>(p.refuted_at));
     put_u32(b, static_cast<uint32_t>(p.unknown_at));
+    int64_t sms = p.solve_ms;
+    b.append(reinterpret_cast<const char*>(&sms), sizeof sms);
     put_str(b, p.witness);
     put_trace(b, p.trace);
+  }
+  put_u32(b, static_cast<uint32_t>(v.timeout_core.size()));
+  for (int ix : v.timeout_core) {
+    put_u32(b, static_cast<uint32_t>(ix));
+  }
+  put_u32(b, static_cast<uint32_t>(v.mined.size()));
+  for (const auto& m : v.mined) {
+    put_str(b, m.pyrope);
+    put_str(b, m.smt2);
+    put_str(b, m.provenance);
+    put_u32(b, static_cast<uint32_t>(m.keys.size()));
+    for (const auto& k : m.keys) {
+      put_str(b, k);
+    }
+    put_u32(b, static_cast<uint32_t>(m.targets.size()));
+    for (int t : m.targets) {
+      put_u32(b, static_cast<uint32_t>(t));
+    }
+    b.push_back(static_cast<char>(m.inductive ? 1 : 0));
   }
   return b;
 }
@@ -503,7 +525,7 @@ bool deserialize_verify(std::string_view b, Verify_result& v) {
   v.props.clear();
   for (uint32_t i = 0; i < np; ++i) {
     Prop_result p;
-    if (!get_str(b, p.kind) || !get_str(b, p.loc) || !get_str(b, p.msg) || !get_str(b, p.block)) {
+    if (!get_str(b, p.kind) || !get_str(b, p.loc) || !get_str(b, p.msg) || !get_str(b, p.block) || !get_str(b, p.aclass)) {
       return false;
     }
     if (b.empty()) {
@@ -527,10 +549,68 @@ bool deserialize_verify(std::string_view b, Verify_result& v) {
     p.proven_to  = static_cast<int>(pt);  // 0xffffffff -> -1 round-trips
     p.refuted_at = static_cast<int>(ra);
     p.unknown_at = static_cast<int>(ua);
+    int64_t sms = 0;
+    if (b.size() < sizeof sms) {
+      return false;
+    }
+    std::memcpy(&sms, b.data(), sizeof sms);
+    b.remove_prefix(sizeof sms);
+    p.solve_ms = sms;
     if (!get_str(b, p.witness) || !get_trace(b, p.trace)) {
       return false;
     }
     v.props.push_back(std::move(p));
+  }
+  uint32_t ntc = 0;
+  if (!get_u32(b, ntc)) {
+    return false;
+  }
+  v.timeout_core.clear();
+  for (uint32_t i = 0; i < ntc; ++i) {
+    uint32_t ix = 0;
+    if (!get_u32(b, ix)) {
+      return false;
+    }
+    v.timeout_core.push_back(static_cast<int>(ix));
+  }
+  uint32_t nmi = 0;
+  if (!get_u32(b, nmi)) {
+    return false;
+  }
+  v.mined.clear();
+  for (uint32_t i = 0; i < nmi; ++i) {
+    Verify_result::Mined_invariant m;
+    if (!get_str(b, m.pyrope) || !get_str(b, m.smt2) || !get_str(b, m.provenance)) {
+      return false;
+    }
+    uint32_t nk = 0;
+    if (!get_u32(b, nk)) {
+      return false;
+    }
+    for (uint32_t k = 0; k < nk; ++k) {
+      std::string s;
+      if (!get_str(b, s)) {
+        return false;
+      }
+      m.keys.push_back(std::move(s));
+    }
+    uint32_t nt = 0;
+    if (!get_u32(b, nt)) {
+      return false;
+    }
+    for (uint32_t t = 0; t < nt; ++t) {
+      uint32_t ix = 0;
+      if (!get_u32(b, ix)) {
+        return false;
+      }
+      m.targets.push_back(static_cast<int>(ix));
+    }
+    if (b.empty()) {
+      return false;
+    }
+    m.inductive = b.front() != 0;
+    b.remove_prefix(1);
+    v.mined.push_back(std::move(m));
   }
   return true;
 }
@@ -3977,7 +4057,9 @@ std::string verify_obligation_key(const std::vector<cvc5::Term>& assertions, con
     }
     h0 = (h0 ^ 0xffU) * 1099511628211ULL;  // term boundary
   };
-  mix("verify-obligation-v1");
+  // v2: P1 assume discipline — internal assumes became obligations (the
+  // asserted-set changes anyway, but the explicit bump keeps old stores inert).
+  mix("verify-obligation-v2");
   mix(opts.solver);
   mix(opts.phase);
   mix(opts.reset);
@@ -4149,6 +4231,14 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     m.reset_hold     = std::max(A.reset_hold, B.reset_hold);
     m.reset_detected = A.reset_detected || B.reset_detected;
     m.vacuous        = A.vacuous || B.vacuous;
+    // Structured timeout core: prop indices are walk-stable across the two
+    // strategies; keep the richer core but drop entries the merge resolved.
+    m.timeout_core = A.timeout_core.empty() ? B.timeout_core : A.timeout_core;
+    std::erase_if(m.timeout_core,
+                  [&](int ix) { return ix < 0 || ix >= static_cast<int>(m.props.size()) || m.props[ix].verdict != Verdict::Unknown; });
+    // Mined invariants: both strategies mine independently; prefer the deeper
+    // bmc-first harvest (its base proof covers more cycles), else ind-first's.
+    m.mined = !A.mined.empty() ? A.mined : B.mined;
     // Aggregate verdict recomputed from the merged props (same rule as the tail
     // of the single-strategy run): Refuted dominates; anything unresolved ->
     // Unknown; a design with no assert obligation at all is Unknown, not a PASS.
@@ -4158,6 +4248,9 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     for (const auto& pr : m.props) {
       if (pr.kind == "assume") {
         ++m.n_assumes;
+        if (pr.aclass == "internal" && pr.verdict == Verdict::Refuted) {
+          any_refuted = true;  // a refuted internal assume is a hard error (P1)
+        }
         continue;
       }
       ++n_asserts;
@@ -4170,10 +4263,10 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         all_proven = false;
       }
     }
-    if (n_asserts == 0) {
+    if (any_refuted) {
+      m.verdict = Verdict::Refuted;  // incl. a refuted internal assume with zero asserts
+    } else if (n_asserts == 0) {
       m.verdict = Verdict::Unknown;
-    } else if (any_refuted) {
-      m.verdict = Verdict::Refuted;
     } else if (any_unknown || m.vacuous || !all_proven) {
       m.verdict = Verdict::Unknown;
     } else {
@@ -4209,7 +4302,8 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         const auto& b = r1.props[i];
         if (b.verdict == Verdict::Refuted && a.verdict != Verdict::Refuted) {
           a = b;  // a during-reset violation dominates
-        } else if (b.verdict == Verdict::Unknown && a.verdict == Verdict::Proven && a.kind != "assume") {
+        } else if (b.verdict == Verdict::Unknown && a.verdict == Verdict::Proven
+                   && (a.kind != "assume" || a.aclass == "internal")) {
           a.verdict    = Verdict::Unknown;
           a.unknown_at = b.unknown_at;
         }
@@ -4256,10 +4350,16 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   // 2f-verify timeout-core diagnosis (formal.minetimeout): unsat-core production
   // AND the timeout-core budget must be armed at setup — both are rejected once
   // the solver is "fully initialized" (after the first checkSat). Opt-in only
-  // (default 0), so a normal run pays nothing.
+  // (default 0), so a normal run pays nothing. The same gate arms the P3 mining
+  // inputs: learned-literal production (candidate source 1) and models (the
+  // template seed sample) — all experimental cvc5 surface, guarded at use.
   if (opts.minetimeout > 0) {
     solver.setOption("produce-unsat-cores", "true");
     solver.setOption("timeout-core-timeout", std::to_string(static_cast<long long>(opts.minetimeout) * 1000));
+    if (!opts.ignore_assumes) {
+      solver.setOption("produce-learned-literals", "true");
+      solver.setOption("produce-models", "true");
+    }
   }
 
   // ── Total solver-time budget (2f-verify, budget_mode=wall) ────────────────
@@ -4510,6 +4610,15 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   // unreachable initial state — the compile tier gates its hard error on this.
   res.reset_detected = !reset_negset.empty();
 
+  // P3 mining bookkeeping (minetimeout>0 only): every per-cycle STATE symbol is
+  // remembered with its flop key + cycle so learned literals map back to named
+  // signals, and the state map of every cycle is retained so a candidate can be
+  // base-proven at each checked cycle by substitution. Zero cost when off.
+  const bool                                 mining_on = opts.minetimeout > 0 && !opts.ignore_assumes;
+  absl::flat_hash_map<uint64_t, std::string> sym2key;
+  absl::flat_hash_map<uint64_t, int>         sym2cyc;
+  std::vector<Io_name_map<Val>>              cyc_state;
+
   // state[0]: reset init (just_reset / free_toreset) or fresh symbols with a
   // driven reset prologue (after_reset); reset-less register-file banks HOLD
   // across the prologue (same rule + rationale as prove_equal).
@@ -4547,6 +4656,10 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         state[key] = init.at(key);
       } else {
         state[key] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), "s0_" + key), w, fsgn.at(key)};
+      }
+      if (mining_on && state.at(key).term.getKind() == cvc5::Kind::CONSTANT) {
+        sym2key[state.at(key).term.getId()] = key;
+        sym2cyc[state.at(key).term.getId()] = 0;
       }
     }
     for (const auto& [key, w] : fw) {
@@ -4597,6 +4710,158 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
       cvc5::Sort asort = tm.mkArraySort(tm.mkBitVectorSort(static_cast<uint32_t>(sig.addr_w)),
                                         tm.mkBitVectorSort(static_cast<uint32_t>(sig.bits)));
       mem[key]         = tm.mkConst(asort, "m0_" + key);
+    }
+  }
+
+  // ── P1 assume classification: input | internal | unchecked ────────────────
+  // One PROBE encode against FRESH state/memory symbols classifies every
+  // assume-kind obligation STRUCTURALLY before any cycle is asserted: a cond
+  // whose transitive support (expanded through the probe's defining equalities)
+  // reaches a state or memory symbol is INTERNAL — a proof obligation under the
+  // prove-then-use discipline, because asserting an unproven claim about design
+  // state prunes reachable behaviors and can fake a PROVEN. A cond over primary
+  // inputs only (free blackbox outputs count as inputs — nothing to prove
+  // either way) stays a free, disclosed environment constraint. A monitor
+  // statement listed in Monitor::nocheck_lines is UNCHECKED by user fiat.
+  // Nothing from the probe is asserted into the solver; the extra encode is
+  // skipped when no assume exists and for the compile tier (ignore_assumes).
+  absl::flat_hash_map<int, std::string> occ_aclass;  // occ_key -> input|internal|unchecked
+  {
+    auto graph_has_assume = [](hhds::Graph* gg) {
+      for (auto node : gg->forward_hier()) {
+        if (graph_util::type_op_of(node) != Ntype_op::Sub) {
+          continue;
+        }
+        auto sio = node.get_subnode_io();
+        if (sio == nullptr || sio->get_name() != graph_util::fproperty_module_name) {
+          continue;
+        }
+        if (std::string_view nm = graph_util::node_name_of(node); nm.rfind("assume\x1f", 0) == 0) {
+          return true;
+        }
+      }
+      return false;
+    };
+    bool want_probe = !opts.ignore_assumes && graph_has_assume(design);
+    for (size_t mi = 0; !want_probe && monitors != nullptr && mi < monitors->size(); ++mi) {
+      want_probe = (*monitors)[mi].graph != nullptr && graph_has_assume((*monitors)[mi].graph);
+    }
+    if (want_probe) {
+      Io_name_map<Val> psh;
+      for (const auto& [name, info] : ins) {
+        psh[name] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(info.w)), "pin_" + name), info.w, info.sgn};
+      }
+      Io_name_map<Val> pstate;
+      for (const auto& [key, v] : state) {
+        pstate[key] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(v.width)), "pst_" + key), v.width, v.is_signed};
+      }
+      Io_name_map<cvc5::Term> pmem;
+      for (const auto& [key, a] : mem) {
+        pmem[key] = tm.mkConst(a.getSort(), "pm_" + key);
+      }
+      absl::flat_hash_set<uint64_t> targets;  // the state/memory symbol ids
+      for (const auto& [key, v] : pstate) {
+        targets.insert(v.term.getId());
+        psh[key] = v;
+      }
+      for (const auto& [key, a] : pmem) {
+        targets.insert(a.getId());
+      }
+      Io_name_map<cvc5::Term> preads;
+      Encoded                 pe = enc.encode(design, &psh, "p_", &pmem, &preads);
+      // Defining equalities (lhs symbol -> rhs term): the encoder introduces
+      // intermediate symbols whose cones live on the rhs, so the support walk
+      // must expand through them or a state dependency hides behind a temp.
+      absl::flat_hash_map<uint64_t, cvc5::Term> defs;
+      auto add_defs = [&defs](const Encoded& eo) {
+        for (const auto& [l, r] : eo.equalities) {
+          defs.emplace(l.getId(), r);
+        }
+      };
+      auto cond_internal = [&](const cvc5::Term& root) {
+        absl::flat_hash_set<uint64_t> seen;
+        std::vector<cvc5::Term>       stk{root};
+        while (!stk.empty()) {
+          cvc5::Term t = stk.back();
+          stk.pop_back();
+          if (!seen.insert(t.getId()).second) {
+            continue;
+          }
+          if (targets.contains(t.getId())) {
+            return true;
+          }
+          if (auto it = defs.find(t.getId()); it != defs.end()) {
+            stk.push_back(it->second);
+          }
+          for (const auto& c : t) {
+            stk.push_back(c);
+          }
+        }
+        return false;
+      };
+      auto classify = [&](const Encoded& eo, int occ_base, const Monitor* mon) {
+        for (const auto& [name, v] : eo.outputs) {
+          auto k = parse_prop_key(name);
+          if (!k || k->kind != "assume") {
+            continue;
+          }
+          std::string cls;
+          if (mon != nullptr && !mon->nocheck_lines.empty()) {
+            if (auto colon = k->loc.rfind(':'); colon != std::string::npos
+                                                && mon->nocheck_lines.contains(std::atoi(k->loc.c_str() + colon + 1))) {
+              cls = "unchecked";
+            }
+          }
+          if (cls.empty()) {
+            cls = cond_internal(v.term) ? "internal" : "input";
+          }
+          occ_aclass[occ_base + k->occ] = cls;
+        }
+      };
+      if (pe.ok) {  // probe-encode failure: occ_aclass stays empty -> assumes
+                    // default to "internal" (sound), and the main loop's own
+                    // encode will fail the run the same way anyway.
+        add_defs(pe);
+        classify(pe, 0, nullptr);
+        for (size_t mi = 0; monitors != nullptr && mi < monitors->size(); ++mi) {
+          const Monitor& mon = (*monitors)[mi];
+          if (mon.graph == nullptr || !graph_has_assume(mon.graph)) {
+            continue;
+          }
+          Io_name_map<Val> msh;
+          bool             ok = true;
+          for (const auto& b : mon.binds) {
+            const Val* v = nullptr;
+            if (b.src == Monitor::Bind::Src::input) {
+              if (auto it = psh.find(b.key); it != psh.end()) {
+                v = &it->second;
+              }
+            } else if (b.src == Monitor::Bind::Src::state) {
+              if (auto it = pstate.find(b.key); it != pstate.end()) {
+                v = &it->second;
+              }
+            } else {
+              if (auto it = pe.outputs.find(b.key); it != pe.outputs.end()) {
+                v = &it->second;
+              }
+            }
+            if (v == nullptr) {
+              ok = false;  // unclassified -> "internal" default at discovery (sound)
+              break;
+            }
+            msh[b.ident] = *v;
+          }
+          if (!ok) {
+            continue;
+          }
+          Encoded me = enc.encode(mon.graph, &msh, "pm" + std::to_string(mi) + "_", nullptr, nullptr);
+          if (!me.ok) {
+            continue;
+          }
+          add_defs(me);
+          classify(me, static_cast<int>((mi + 1) * 100000), &mon);
+        }
+      }
     }
   }
   Io_name_map<cvc5::Term> reads;
@@ -4669,6 +4934,10 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         cvc5::Term s = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(pv.width)), "st" + std::to_string(uid++));
         assert_formula(tm.mkTerm(cvc5::Kind::EQUAL, {s, pv.term}));
         ns[key] = Val{s, pv.width, pv.is_signed};
+        if (mining_on) {
+          sym2key[s.getId()] = key;
+          sym2cyc[s.getId()] = cyc;
+        }
       }
       state = std::move(ns);
       Io_name_map<cvc5::Term> nm;
@@ -4678,6 +4947,9 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         nm[key] = s;
       }
       mem = std::move(nm);
+    }
+    if (mining_on) {
+      cyc_state.push_back(state);  // the state view AT this cycle (base-proof frames)
     }
 
     Io_name_map<Val> sh;
@@ -4741,6 +5013,13 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
           pr.kind = ob.k.kind;
           pr.loc  = ob.k.loc;
           pr.msg  = ob.k.msg;
+          if (pr.kind == "assume" && !opts.ignore_assumes) {
+            // P1 classification from the probe; an unclassified assume (probe or
+            // monitor-probe encode failed) defaults to the SOUND side: a proof
+            // obligation, never a silent free constraint.
+            auto ac   = occ_aclass.find(occ_key);
+            pr.aclass = ac != occ_aclass.end() ? ac->second : std::string{"internal"};
+          }
           if (mon != nullptr) {
             pr.block = mon->block;
             // The fproperty loc points into the GENERATED monitor source; map
@@ -4768,13 +5047,20 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
           if (opts.ignore_assumes) {
             continue;
           }
-          // Environment constraint: in force at EVERY cycle, reset prologue
-          // included (SVA semantics — otherwise an assert_always checked during
-          // the prologue would run unconstrained and false-refute). A
-          // contradiction with the driven reset behavior is caught by the
-          // vacuity check below. Disclosed via n_assumes.
-          assert_formula(holds);
-          continue;
+          if (pr.aclass != "internal") {
+            // input / unchecked: environment constraint in force at EVERY cycle,
+            // reset prologue included (SVA semantics — otherwise an assert_always
+            // checked during the prologue would run unconstrained and
+            // false-refute). A contradiction with the driven reset behavior is
+            // caught by the vacuity check below. Disclosed by class.
+            assert_formula(holds);
+            continue;
+          }
+          // internal (P1 prove-then-use): fall through to the obligation path —
+          // checked per cycle like a plain assert, and the UNSAT branch's
+          // frontier fact IS the "use": the assume only ever constrains cycles
+          // where it was just PROVEN (rule A). A refute is a hard error; an
+          // unknown assume stops being checked and never constrains anything.
         }
         const bool check_now = pr.kind == "assert_always" ? true : checking;
         if (!check_now || pr.refuted_at >= 0 || pr.unknown_at >= 0) {
@@ -4794,6 +5080,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         bool        cached = opts.verify_cache_lookup && opts.verify_cache_lookup(ckey);
         bool        unsat  = cached;
         bool        sat    = false;
+        const auto  tob    = std::chrono::steady_clock::now();  // per-obligation solve_ms (P2)
         if (!cached && !verify_split.name.empty()) {
           auto sit = sh.find(verify_split.name);
           if (sit != sh.end()) {
@@ -4825,6 +5112,9 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
           unsat          = r.isUnsat();
           sat            = r.isSat();
         }
+        if (!cached) {
+          pr.solve_ms += now_ms(tob);
+        }
         if (unsat) {
           pr.proven_to = cyc;
           if (!cached && opts.verify_cache_store) {
@@ -4839,8 +5129,10 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
           pr.witness    = witness_string(pr.trace);
           any_refuted   = true;
         } else {
-          pr.unknown_at   = cyc;
-          any_unknown     = true;
+          pr.unknown_at = cyc;
+          if (pr.kind != "assume") {
+            any_unknown = true;  // an unproven internal assume is unused, not a run-degrader
+          }
           if (opts.minetimeout > 0) {
             unknown_bad[ix] = bad;  // remember the toxic term for the post-run timeout-core
           }
@@ -4925,6 +5217,310 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     reads = std::move(e.next_read);
   }
 
+  // ── P3 mining: harvest candidates → base-prove them; the V3 rung below then
+  // Houdini-filters the base survivors into genuine inductive invariants.
+  // Sources: (1) solver learned literals over ONE cycle's state symbols mapped
+  // back to flop keys; (2) range/equality templates over the registers in the
+  // still-Unknown obligations' cones, seeded from one reachable model sample.
+  // Every candidate must FIRST pass the base proof — UNSAT of "violated at any
+  // checked cycle" inside the live BMC frame (env assumes in force) — before it
+  // may even be a step candidate, so a sampled-wrong or garbage candidate can
+  // never survive. Mining bills its OWN budget (opts.minetimeout), never the
+  // run's `timeout`. Term shapes that render to Pyrope become paste-ready; the
+  // rest are reported as SMT text only.
+  std::vector<cvc5::Term>                      mined_rep;   // candidate over rep syms
+  std::vector<Verify_result::Mined_invariant>  mined_meta;  // parallel metadata
+  Io_name_map<Val>                             rep;         // representative frame
+  long long                                    mine_spent_ms = 0;
+  const long long                              mine_budget_ms = static_cast<long long>(opts.minetimeout) * 1000;
+  auto mine_check = [&](const cvc5::Term& t) -> cvc5::Result {
+    solver.setOption("tlimit-per", std::to_string(std::max<long long>(1000, mine_budget_ms - mine_spent_ms)));
+    const auto   tq = std::chrono::steady_clock::now();
+    cvc5::Result r  = solver.checkSatAssuming(t);
+    mine_spent_ms += now_ms(tq);
+    return r;
+  };
+  // Rebase a rep-form candidate onto any frame (a per-cycle state map, or the
+  // induction rung's free frames). A key the frame lacks makes the candidate
+  // unusable there (ok=false) — dropped, never guessed.
+  auto subst_to = [&rep](const cvc5::Term& t, const std::vector<std::string>& keys, const Io_name_map<Val>& frame,
+                         bool& ok) -> cvc5::Term {
+    std::vector<cvc5::Term> olds, news;
+    for (const auto& k : keys) {
+      auto it = frame.find(k);
+      if (it == frame.end() || it->second.width != rep.at(k).width) {
+        ok = false;
+        return t;
+      }
+      olds.push_back(rep.at(k).term);
+      news.push_back(it->second.term);
+    }
+    ok = true;
+    return olds.empty() ? t : t.substitute(olds, news);
+  };
+  size_t mined_tried = 0;
+  bool   any_stuck   = false;
+  for (const auto& pr : res.props) {
+    any_stuck = any_stuck || pr.unknown_at >= 0;
+  }
+  if (mining_on && !cyc_state.empty() && (any_stuck || opts.mine == "speculative")) {
+    for (const auto& [key, v] : cyc_state.back()) {
+      rep[key] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(v.width)), "mrep_" + key), v.width, v.is_signed};
+    }
+    // Defining equalities from the asserted set (lhs symbol -> rhs) so support
+    // walks can expand through encoder temporaries.
+    absl::flat_hash_map<uint64_t, cvc5::Term> mdefs;
+    for (const auto& a : asserted) {
+      if (a.getKind() == cvc5::Kind::EQUAL && a.getNumChildren() == 2 && a[0].getKind() == cvc5::Kind::CONSTANT) {
+        mdefs.emplace(a[0].getId(), a[1]);
+      }
+    }
+    auto state_support = [&](const cvc5::Term& root) {
+      absl::flat_hash_set<std::string>  keys;
+      absl::flat_hash_set<uint64_t>     seen;
+      std::vector<cvc5::Term>           stk{root};
+      while (!stk.empty()) {
+        cvc5::Term t = stk.back();
+        stk.pop_back();
+        if (!seen.insert(t.getId()).second) {
+          continue;
+        }
+        if (auto it = sym2key.find(t.getId()); it != sym2key.end()) {
+          keys.insert(it->second);
+        } else if (auto dt = mdefs.find(t.getId()); dt != mdefs.end()) {
+          stk.push_back(dt->second);
+        }
+        for (const auto& c : t) {
+          stk.push_back(c);
+        }
+      }
+      return keys;
+    };
+    // The pain map: per still-Unknown obligation, the state keys in its cone.
+    absl::flat_hash_map<size_t, absl::flat_hash_set<std::string>> stuck_keys;
+    for (const auto& [ix, badt] : unknown_bad) {
+      stuck_keys[ix] = state_support(badt);
+    }
+    constexpr size_t kMaxCandidates = 48;
+    absl::flat_hash_set<uint64_t> cand_dedup;
+    auto add_candidate = [&](const cvc5::Term& over_rep, std::vector<std::string> keys, std::string provenance) {
+      if (mined_rep.size() >= kMaxCandidates || !cand_dedup.insert(over_rep.getId()).second) {
+        return;
+      }
+      Verify_result::Mined_invariant m;
+      m.smt2       = over_rep.toString();
+      m.provenance = std::move(provenance);
+      std::sort(keys.begin(), keys.end());
+      keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+      for (const auto& [ix, sk] : stuck_keys) {
+        for (const auto& k : keys) {
+          if (sk.contains(k)) {
+            m.targets.push_back(static_cast<int>(ix));
+            break;
+          }
+        }
+      }
+      std::sort(m.targets.begin(), m.targets.end());
+      m.keys = std::move(keys);
+      mined_rep.push_back(over_rep);
+      mined_meta.push_back(std::move(m));
+    };
+
+    // Source 1: learned literals (INPUT vocabulary) whose leaves are the state
+    // symbols of ONE cycle (a mixed-cycle literal is a transition fact, not a
+    // one-frame invariant; input-referencing literals are not invariants).
+    try {
+      auto lls = solver.getLearnedLiterals(cvc5::modes::LearnedLitType::INPUT);
+      size_t scanned = 0;
+      for (const auto& lit : lls) {
+        if (++scanned > 512 || mined_rep.size() >= kMaxCandidates) {
+          break;
+        }
+        std::vector<cvc5::Term>          olds, news;
+        std::vector<std::string>         keys;
+        int                              cyc0 = -2;
+        bool                             ok   = true;
+        absl::flat_hash_set<uint64_t>    seen;
+        std::vector<cvc5::Term>          stk{lit};
+        while (!stk.empty() && ok) {
+          cvc5::Term t = stk.back();
+          stk.pop_back();
+          if (!seen.insert(t.getId()).second) {
+            continue;
+          }
+          if (t.getKind() == cvc5::Kind::CONSTANT) {
+            auto it = sym2key.find(t.getId());
+            if (it == sym2key.end()) {
+              ok = false;  // an input / temp symbol: not a state invariant
+              break;
+            }
+            const int c = sym2cyc.at(t.getId());
+            if (cyc0 == -2) {
+              cyc0 = c;
+            } else if (c != cyc0) {
+              ok = false;  // mixed cycles: a transition fact
+              break;
+            }
+            if (auto rit = rep.find(it->second); rit != rep.end()) {
+              olds.push_back(t);
+              news.push_back(rit->second.term);
+              keys.push_back(it->second);
+            } else {
+              ok = false;
+            }
+          }
+          for (const auto& c : t) {
+            stk.push_back(c);
+          }
+        }
+        if (!ok || keys.empty()) {
+          continue;
+        }
+        add_candidate(lit.substitute(olds, news), std::move(keys), std::format("learned-literal@cyc{}", cyc0));
+      }
+    } catch (const std::exception&) {
+      // experimental API: mining degrades, never crashes the run
+    }
+
+    // Source 2: templates over the stuck obligations' registers, seeded from
+    // one reachable model of the live frame (produce-models is armed).
+    if (!stuck_keys.empty() && mine_spent_ms < mine_budget_ms) {
+      solver.setOption("tlimit-per", std::to_string(std::max<long long>(1000, mine_budget_ms - mine_spent_ms)));
+      const auto   ts  = std::chrono::steady_clock::now();
+      cvc5::Result smp = solver.checkSat();
+      mine_spent_ms += now_ms(ts);
+      if (smp.isSat()) {
+        // Per key, ascend to the MAXIMUM reachable last-cycle value by SAT
+        // probing ("can it exceed v?" — resample from the witness model until
+        // UNSAT or the round cap). An arbitrary single model would seed useless
+        // bounds (the solver loves all-zero inputs); the max seed makes range
+        // candidates tight (`count <= 5` for a wrap-at-5 counter), and a
+        // window-truncated max just yields a candidate the base/step filters
+        // reject — never a wrong emit.
+        absl::flat_hash_map<std::string, unsigned long long> sample;
+        bool model_live = true;  // a model is queryable right after a SAT check
+        auto sample_of  = [&](const std::string& key) -> unsigned long long* {
+          if (auto it = sample.find(key); it != sample.end()) {
+            return &it->second;
+          }
+          auto st = cyc_state.back().find(key);
+          if (st == cyc_state.back().end() || st->second.width > 63) {
+            return nullptr;
+          }
+          unsigned long long v = 0;
+          try {
+            if (!model_live) {  // the previous key's last probe ended UNSAT
+              if (!mine_check(tm.mkBoolean(true)).isSat()) {
+                return nullptr;
+              }
+              model_live = true;
+            }
+            v = std::strtoull(solver.getValue(st->second.term).getBitVectorValue(10).c_str(), nullptr, 10);
+            for (int round = 0; round < 6 && mine_spent_ms < mine_budget_ms; ++round) {
+              cvc5::Term gt = tm.mkTerm(cvc5::Kind::BITVECTOR_UGT,
+                                        {st->second.term, tm.mkBitVector(static_cast<uint32_t>(st->second.width), v)});
+              if (!mine_check(gt).isSat()) {
+                model_live = false;
+                break;
+              }
+              v = std::strtoull(solver.getValue(st->second.term).getBitVectorValue(10).c_str(), nullptr, 10);
+            }
+          } catch (const std::exception&) {
+            return nullptr;
+          }
+          sample[key] = v;
+          return &sample.at(key);
+        };
+        absl::flat_hash_set<std::string> pain;  // union of stuck cones, capped
+        for (const auto& [ix, sk] : stuck_keys) {
+          for (const auto& k : sk) {
+            if (pain.size() < 16) {
+              pain.insert(k);
+            }
+          }
+        }
+        for (const auto& k : pain) {
+          const unsigned long long* pv = sample_of(k);
+          if (pv == nullptr) {
+            continue;
+          }
+          const auto&              rv  = rep.at(k);
+          const unsigned long long top = rv.width >= 64 ? ~0ULL : ((1ULL << rv.width) - 1);
+          auto ule = [&](unsigned long long bound) {
+            return tm.mkTerm(cvc5::Kind::BITVECTOR_ULE, {rv.term, tm.mkBitVector(static_cast<uint32_t>(rv.width), bound)});
+          };
+          if (*pv == 0) {
+            add_candidate(tm.mkTerm(cvc5::Kind::EQUAL, {rv.term, tm.mkBitVector(static_cast<uint32_t>(rv.width), 0)}),
+                          {k}, std::format("template:frozen({})", k));
+          }
+          if (*pv < top) {
+            add_candidate(ule(*pv), {k}, std::format("template:range({} <= {})", k, *pv));
+            unsigned long long cap = 1;
+            while (cap <= *pv && cap != 0) {
+              cap <<= 1;
+            }
+            if (cap != 0 && cap - 1 > *pv && cap - 1 < top) {
+              add_candidate(ule(cap - 1), {k}, std::format("template:range({} <= {})", k, cap - 1));
+            }
+          }
+        }
+        // Register-pair equality inside one stuck cone (same width + same sample).
+        size_t pairs = 0;
+        for (const auto& [ix, sk] : stuck_keys) {
+          std::vector<std::string> ks(sk.begin(), sk.end());
+          std::sort(ks.begin(), ks.end());
+          for (size_t i = 0; i < ks.size() && pairs < 8; ++i) {
+            for (size_t j = i + 1; j < ks.size() && pairs < 8; ++j) {
+              const auto *va = sample_of(ks[i]), *vb = sample_of(ks[j]);
+              if (va == nullptr || vb == nullptr || *va != *vb || rep.at(ks[i]).width != rep.at(ks[j]).width) {
+                continue;
+              }
+              add_candidate(tm.mkTerm(cvc5::Kind::EQUAL, {rep.at(ks[i]).term, rep.at(ks[j]).term}), {ks[i], ks[j]},
+                            std::format("template:equal({}, {})", ks[i], ks[j]));
+              ++pairs;
+            }
+          }
+        }
+      }
+    }
+
+    // BASE proof: a candidate must hold at EVERY checked cycle of the run —
+    // one query per candidate ("violated at some checked cycle" is UNSAT),
+    // discharged in the live frame so the env assumes are in force. A failed
+    // or budget-out candidate is dropped outright.
+    {
+      mined_tried = mined_rep.size();
+      std::vector<cvc5::Term>                     keep_rep;
+      std::vector<Verify_result::Mined_invariant> keep_meta;
+      for (size_t i = 0; i < mined_rep.size(); ++i) {
+        if (mine_spent_ms >= mine_budget_ms) {
+          break;
+        }
+        std::vector<cvc5::Term> viol;
+        bool                    ok = true;
+        for (int c = 0; c < static_cast<int>(cyc_state.size()) && ok; ++c) {
+          if (phase_run && c < reset_hold) {
+            continue;  // invariants are claims about the post-reset run window
+          }
+          cvc5::Term at = subst_to(mined_rep[i], mined_meta[i].keys, cyc_state[static_cast<size_t>(c)], ok);
+          if (ok) {
+            viol.push_back(tm.mkTerm(cvc5::Kind::NOT, {at}));
+          }
+        }
+        if (!ok || viol.empty()) {
+          continue;
+        }
+        cvc5::Term bad = viol.size() == 1 ? viol.front() : tm.mkTerm(cvc5::Kind::OR, viol);
+        if (mine_check(bad).isUnsat()) {
+          keep_rep.push_back(mined_rep[i]);
+          keep_meta.push_back(std::move(mined_meta[i]));
+        }
+      }
+      mined_rep  = std::move(keep_rep);
+      mined_meta = std::move(keep_meta);
+    }
+  }
+
   // ── V3 induction rung: upgrade bounded-proven asserts to UNBOUNDED ────────
   // Simultaneous (conjunctive) 1-induction over the still-clean asserts: a
   // free-state step frame (fresh state/memory/input symbols, reset free —
@@ -4936,15 +5532,23 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   // verdict). Everything lives under one push/pop so the BMC frame and the
   // final vacuity check are untouched.
   const bool ind_budget_left = !(solve_budget_on && solve_spent_ms >= solve_budget_ms);
-  if (!res.props.empty() && ind_budget_left) {
+  // Mined candidates open the rung on their OWN budget: the mining scenario is
+  // exactly a run whose main budget the stuck obligation already exhausted, so
+  // gating their step proof on ind_budget_left would make mining structurally
+  // dead. Prop upgrades still respect the main budget (cand stays empty).
+  const bool mine_budget_left = !mined_rep.empty() && mine_spent_ms < mine_budget_ms;
+  if ((!res.props.empty() && ind_budget_left) || mine_budget_left) {
     std::vector<size_t> cand;
-    for (size_t i = 0; i < res.props.size(); ++i) {
+    for (size_t i = 0; ind_budget_left && i < res.props.size(); ++i) {
       const auto& pr = res.props[i];
-      if (pr.kind != "assume" && pr.refuted_at < 0 && pr.unknown_at < 0 && pr.proven_to >= 0) {
+      // Clean bounded-proven asserts AND clean internal assumes are candidates:
+      // an internal assume earns step-frame use only by surviving the same
+      // Houdini fixpoint (rule E) — never by fiat.
+      if ((pr.kind != "assume" || pr.aclass == "internal") && pr.refuted_at < 0 && pr.unknown_at < 0 && pr.proven_to >= 0) {
         cand.push_back(i);
       }
     }
-    if (!cand.empty()) {
+    if (!cand.empty() || mine_budget_left) {
       solver.push();
       // Frame-0 free state; frame-1 state pinned to frame-0's next-state.
       // Step-frame inputs are free EXCEPT the primary resets, which are pinned
@@ -4972,7 +5576,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         }
         return s;
       };
-      Io_name_map<Val> fstate;
+      Io_name_map<Val> fstate, fstate0;
       for (const auto& [key, v] : state) {
         fstate[key] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(v.width)), "ks0_" + key), v.width, v.is_signed};
       }
@@ -5046,6 +5650,9 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
           collect(me, static_cast<int>((mi + 1) * 100000));
         }
         if (f == 0) {  // pin frame-1 state to frame-0's next-state
+          if (!mined_rep.empty()) {
+            fstate0 = fstate;  // keep frame-0's state map: mined hypotheses bind to it
+          }
           Io_name_map<Val> ns;
           for (const auto& [name, v] : fe.outputs) {
             if (name.rfind("\x01nxt:", 0) == 0) {
@@ -5064,11 +5671,13 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         return tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, v, w), tm.mkBitVector(static_cast<uint32_t>(w), 0)});
       };
       if (ind_ok) {
-        // Env assumes constrain BOTH frames (they hold on every real cycle).
-        // Skipped entirely under ignore_assumes (the compile tier does not use
-        // design assumes as hypotheses — see the process_props note above).
+        // Env assumes (input / unchecked) constrain BOTH frames (they hold on
+        // every real cycle). INTERNAL assumes are excluded here — they are
+        // Houdini candidates above, never free step hypotheses. Skipped entirely
+        // under ignore_assumes (the compile tier does not use design assumes as
+        // hypotheses — see the process_props note above).
         for (const auto& [occ_key, ix] : prop_ix) {
-          if (opts.ignore_assumes || res.props[ix].kind != "assume") {
+          if (opts.ignore_assumes || res.props[ix].kind != "assume" || res.props[ix].aclass == "internal") {
             continue;
           }
           for (int f = 0; f < 2; ++f) {
@@ -5101,12 +5710,30 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
             }
             return -1;
           };
+          // Mined base-survivors join the SAME fixpoint (rule E: the joint
+          // survivors' conjunction is inductive; the BMC run + their base
+          // proofs are its base case). Their checks bill the mining budget.
+          std::vector<cvc5::Term> mc_f0(mined_rep.size()), mc_f1(mined_rep.size());
+          std::vector<size_t>     malive;
+          for (size_t i = 0; i < mined_rep.size(); ++i) {
+            bool o0 = false, o1 = false;
+            cvc5::Term a = subst_to(mined_rep[i], mined_meta[i].keys, fstate0, o0);
+            cvc5::Term b = subst_to(mined_rep[i], mined_meta[i].keys, fstate, o1);
+            if (o0 && o1) {
+              mc_f0[i] = a;
+              mc_f1[i] = b;
+              malive.push_back(i);
+            }
+          }
           bool changed = true;
-          while (changed && !alive.empty()) {
+          while (changed && (!alive.empty() || !malive.empty())) {
             changed = false;
             solver.push();
             for (size_t ix : alive) {
               solver.assertFormula(truth(cond_f[0].at(occ_of(ix))));  // hypothesis at frame 0
+            }
+            for (size_t i : malive) {
+              solver.assertFormula(mc_f0[i]);  // mined hypothesis at frame 0
             }
             std::vector<size_t> keep;
             for (size_t ix : alive) {
@@ -5117,19 +5744,35 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
               // the solver cannot confirm within the remaining budget is simply
               // dropped (kept only on a definitive UNSAT) — a budget-out only ever
               // loses an unbounded upgrade, never manufactures one.
-              if (budget_check(bad).isUnsat()) {
+              const auto trk = std::chrono::steady_clock::now();
+              const bool ok  = budget_check(bad).isUnsat();
+              res.props[ix].solve_ms += now_ms(trk);
+              if (ok) {
                 keep.push_back(ix);
               } else {
                 changed = true;  // dropped: not inductive relative to the set (or out of budget)
               }
             }
+            std::vector<size_t> mkeep;
+            for (size_t i : malive) {
+              if (mine_spent_ms < mine_budget_ms
+                  && mine_check(tm.mkTerm(cvc5::Kind::NOT, {mc_f1[i]})).isUnsat()) {
+                mkeep.push_back(i);
+              } else {
+                changed = true;  // dropped: not inductive relative to the set (or out of mining budget)
+              }
+            }
             solver.pop();
-            alive = std::move(keep);
+            alive  = std::move(keep);
+            malive = std::move(mkeep);
           }
           for (size_t ix : alive) {
             res.props[ix].unbounded = true;
           }
-          if (!alive.empty() && phase_run && !reset_negset.empty()) {
+          for (size_t i : malive) {
+            mined_meta[i].inductive = true;
+          }
+          if ((!alive.empty() || !malive.empty()) && phase_run && !reset_negset.empty()) {
             res.detail += "; induction step holds reset deasserted (unbounded verdicts assume no mid-trace reset)";
           }
         }
@@ -5138,11 +5781,14 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     }
   }
 
-  // Finalize per-property verdicts.
+  // Finalize per-property verdicts. Env-class assumes (input/unchecked) have no
+  // verdict of their own; INTERNAL assumes ride the same ladder as asserts.
   for (auto& pr : res.props) {
     if (pr.kind == "assume") {
       ++res.n_assumes;
-      continue;
+      if (pr.aclass != "internal") {
+        continue;
+      }
     }
     if (pr.refuted_at >= 0) {
       pr.verdict = has_bbox ? Verdict::Unknown : Verdict::Refuted;  // free-box artifact gate
@@ -5153,11 +5799,19 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     }
   }
 
-  // Vacuity: contradictory assumes make every proof vacuous. One plain checkSat
-  // over the frame + assumes (+ entailed frontier facts, which cannot flip it).
-  // Skipped under ignore_assumes — no design assume was asserted, so there is no
-  // assume set to be contradictory (the compile tier owns assume consistency).
-  if (res.n_assumes > 0 && !opts.ignore_assumes) {
+  // Vacuity: contradictory FREE assumes (input/unchecked) make every proof
+  // vacuous. One plain checkSat over the frame + assumes (+ entailed frontier
+  // facts — internal-assume facts included — which cannot flip it: they were
+  // each proven UNSAT-of-negation under the assertions in force). Skipped under
+  // ignore_assumes — no design assume was asserted, so there is no assume set
+  // to be contradictory (the compile tier owns assume consistency).
+  int n_env_assumes = 0;
+  for (const auto& pr : res.props) {
+    if (pr.kind == "assume" && pr.aclass != "internal" && !opts.ignore_assumes) {
+      ++n_env_assumes;
+    }
+  }
+  if (n_env_assumes > 0 && !opts.ignore_assumes) {
     // Restore the full per-query limit first: a budget-exhausted run left
     // tlimit-per floored at the 1s straggler value, and an inconclusive vacuity
     // check would spuriously VOID genuine bounded-Proven obligations. This check
@@ -5175,7 +5829,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     }
     if (res.vacuous) {
       for (auto& pr : res.props) {
-        if (pr.kind != "assume" && pr.verdict == Verdict::Proven) {
+        if ((pr.kind != "assume" || pr.aclass == "internal") && pr.verdict == Verdict::Proven) {
           pr.verdict = Verdict::Unknown;
         }
       }
@@ -5190,6 +5844,147 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
               + (reset_negset.empty() && opts.phase != "free_toreset" ? "; WARNING no primary reset input found" : "");
   if (split_checks > 0) {
     res.detail += "; case-split " + verify_split.name + " on " + std::to_string(split_checks) + " obligation check(s)";
+  }
+  // P1 assume disclosure: verdicts are conditional on env-class assumes; the
+  // internal-assume ledger says which claims were actually usable.
+  if (!opts.ignore_assumes) {
+    int n_in = 0, n_unch = 0, n_ip = 0, n_iu = 0, n_ir = 0;
+    for (const auto& pr : res.props) {
+      if (pr.kind != "assume") {
+        continue;
+      }
+      if (pr.aclass == "unchecked") {
+        ++n_unch;
+      } else if (pr.aclass == "internal") {
+        if (pr.verdict == Verdict::Proven) {
+          ++n_ip;
+        } else if (pr.verdict == Verdict::Refuted) {
+          ++n_ir;
+        } else {
+          ++n_iu;
+        }
+      } else {
+        ++n_in;
+      }
+    }
+    if (n_in > 0) {
+      res.detail += "; under " + std::to_string(n_in) + " input assume(s)";
+    }
+    if (n_unch > 0) {
+      res.detail += "; under " + std::to_string(n_unch) + " UNCHECKED assume(s)";
+    }
+    if (n_ip + n_iu + n_ir > 0) {
+      res.detail += "; internal assume(s): " + std::to_string(n_ip) + " proven (used)";
+      if (n_iu > 0) {
+        res.detail += ", " + std::to_string(n_iu) + " unproven (NOT used)";
+      }
+      if (n_ir > 0) {
+        res.detail += ", " + std::to_string(n_ir) + " REFUTED";
+      }
+    }
+  }
+
+  // ── P3 mining finalize: render + report ────────────────────────────────────
+  // Shapes made of unsigned compares / equality / and-or over state symbols and
+  // constants render to paste-ready Pyrope (`acc.<key>` paths — the formal-block
+  // alias convention); anything else ships as SMT text only. Only inductive
+  // survivors are reported by default; mine=speculative adds the base-proven
+  // candidates the step dropped.
+  if (mined_tried > 0) {
+    absl::flat_hash_map<uint64_t, std::pair<std::string, bool>> rep2key;  // sym id -> (key, is_signed)
+    for (const auto& [k, v] : rep) {
+      rep2key[v.term.getId()] = {k, v.is_signed};
+    }
+    auto key_ok = [](const std::string& k) {
+      if (k.empty() || (std::isalpha(static_cast<unsigned char>(k[0])) == 0 && k[0] != '_')) {
+        return false;
+      }
+      for (char c : k) {
+        if (std::isalnum(static_cast<unsigned char>(c)) == 0 && c != '_' && c != '.') {
+          return false;
+        }
+      }
+      return true;
+    };
+    auto ratom = [&](const cvc5::Term& t, std::string& out) {
+      if (t.getKind() == cvc5::Kind::CONST_BITVECTOR) {
+        out = t.getBitVectorValue(10);
+        return true;
+      }
+      if (auto it = rep2key.find(t.getId()); it != rep2key.end() && !it->second.second && key_ok(it->second.first)) {
+        out = "acc." + it->second.first;  // unsigned keys only: BV compares match Pyrope uN compares
+        return true;
+      }
+      return false;
+    };
+    std::function<bool(const cvc5::Term&, bool, std::string&)> rcmp = [&](const cvc5::Term& t, bool neg, std::string& out) {
+      const auto  k  = t.getKind();
+      const char* op = nullptr;
+      if (k == cvc5::Kind::NOT) {
+        return rcmp(t[0], !neg, out);
+      }
+      if ((k == cvc5::Kind::AND && !neg) || (k == cvc5::Kind::OR && neg)) {
+        std::string parts;
+        for (const auto& c : t) {
+          std::string p;
+          if (!rcmp(c, neg, p)) {
+            return false;
+          }
+          parts += (parts.empty() ? "(" : " and (") + p + ")";
+        }
+        out = parts;
+        return !parts.empty();
+      }
+      if ((k == cvc5::Kind::OR && !neg) || (k == cvc5::Kind::AND && neg)) {
+        std::string parts;
+        for (const auto& c : t) {
+          std::string p;
+          if (!rcmp(c, neg, p)) {
+            return false;
+          }
+          parts += (parts.empty() ? "(" : " or (") + p + ")";
+        }
+        out = parts;
+        return !parts.empty();
+      }
+      if (k == cvc5::Kind::EQUAL) {
+        op = neg ? "!=" : "==";
+      } else if (k == cvc5::Kind::DISTINCT) {
+        op = neg ? "==" : "!=";
+      } else if (k == cvc5::Kind::BITVECTOR_ULE) {
+        op = neg ? ">" : "<=";
+      } else if (k == cvc5::Kind::BITVECTOR_ULT) {
+        op = neg ? ">=" : "<";
+      } else if (k == cvc5::Kind::BITVECTOR_UGE) {
+        op = neg ? "<" : ">=";
+      } else if (k == cvc5::Kind::BITVECTOR_UGT) {
+        op = neg ? "<=" : ">";
+      } else {
+        return false;
+      }
+      if (t.getNumChildren() != 2) {
+        return false;
+      }
+      std::string a, b;
+      if (!ratom(t[0], a) || !ratom(t[1], b)) {
+        return false;
+      }
+      out = a + " " + op + " " + b;
+      return true;
+    };
+    int n_inductive = 0;
+    for (size_t i = 0; i < mined_meta.size(); ++i) {
+      std::string py;
+      if (rcmp(mined_rep[i], false, py)) {
+        mined_meta[i].pyrope = py;
+      }
+      n_inductive += mined_meta[i].inductive ? 1 : 0;
+      if (mined_meta[i].inductive || opts.mine == "speculative") {
+        res.mined.push_back(mined_meta[i]);
+      }
+    }
+    res.detail += "; mined " + std::to_string(n_inductive) + " inductive invariant(s) of " + std::to_string(mined_tried)
+                + " base candidate(s)";
   }
   if (budget_capped) {
     res.detail += "; total solver budget (" + std::to_string(opts.timeout)
@@ -5224,6 +6019,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
               const auto& pr = res.props[bad_ix[j]];
               names += (names.empty() ? "" : ", ") + (pr.loc.empty() ? pr.kind : pr.kind + "@" + pr.loc)
                      + (pr.msg.empty() ? "" : " \"" + pr.msg + "\"");
+              res.timeout_core.push_back(static_cast<int>(bad_ix[j]));  // structured core (P2 report)
               break;
             }
           }
@@ -5256,11 +6052,14 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
       all_proven = false;
     }
   }
-  if (n_asserts == 0) {
+  if (any_refuted && !has_bbox) {
+    res.verdict = Verdict::Refuted;  // incl. a refuted internal assume with zero asserts
+    if (n_asserts == 0) {
+      res.detail += "; no assert/assert_always obligations found";
+    }
+  } else if (n_asserts == 0) {
     res.detail += "; no assert/assert_always obligations found";
     res.verdict = Verdict::Unknown;
-  } else if (any_refuted && !has_bbox) {
-    res.verdict = Verdict::Refuted;
   } else if (any_unknown || res.vacuous || (any_refuted && has_bbox) || !all_proven) {
     res.verdict = Verdict::Unknown;
   } else {

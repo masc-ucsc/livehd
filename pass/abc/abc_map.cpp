@@ -1287,6 +1287,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     Region_qor q;
     q.module = rb.module_name;
     q.color  = rb.color;
+    for (const auto& bb : bboxes) {
+      if (bb.op == Ntype_op::Div) {
+        ++q.div_blackbox;  // unmapped cone: the region score is partial
+      }
+    }
     if (auto* pMappedLogic = Abc_FrameReadNtk(frame); pMappedLogic != nullptr && Abc_NtkIsMappedLogic(pMappedLogic)) {
       q.delay = Abc_NtkDelayTrace(pMappedLogic, nullptr, nullptr, 0);
       q.area  = Abc_NtkGetMappedArea(pMappedLogic);

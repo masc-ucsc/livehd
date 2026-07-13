@@ -2583,6 +2583,207 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   }
 }
 
+// ---- formal_report.json (P2 agent feedback) ---------------------------------
+
+static std::string json_esc(std::string_view s) {
+  std::string o;
+  for (char c : s) {
+    switch (c) {
+      case '"': o += "\\\""; break;
+      case '\\': o += "\\\\"; break;
+      case '\n': o += "\\n"; break;
+      case '\t': o += "\\t"; break;
+      case '\r': o += "\\r"; break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          o += std::format("\\u{:04x}", static_cast<int>(static_cast<unsigned char>(c)));
+        } else {
+          o += c;
+        }
+    }
+  }
+  return o;
+}
+
+// The machine-readable run report an agent parses each loop iteration: written
+// on EVERY run (PROVEN / REFUTED / UNKNOWN alike — UNKNOWN is exactly the case
+// the agent must act on), covering every obligation with its verdict, cycles,
+// classification, cumulative solve time, timeout-core membership, and the
+// witness artifact paths. The stdout table stays the human view; this file is
+// the contract (ids are stable: kind@file:line[block]).
+static void emit_formal_report(const std::string& path, const std::string& design_path, std::string_view top,
+                               const livehd::lec::Verify_result& r, const livehd::lec::Lec_options& o,
+                               const absl::flat_hash_map<std::string, std::string>& artifacts) {
+  auto prop_id = [](const livehd::lec::Prop_result& p) {
+    std::string id = p.kind + "@" + (p.loc.empty() ? std::string{"?"} : p.loc);
+    if (!p.block.empty()) {
+      id += "[" + p.block + "]";
+    }
+    return id;
+  };
+  absl::flat_hash_set<size_t> in_core;
+  for (int ix : r.timeout_core) {
+    if (ix >= 0 && static_cast<size_t>(ix) < r.props.size()) {
+      in_core.insert(static_cast<size_t>(ix));
+    }
+  }
+  int n_in = 0, n_unch = 0, n_ip = 0, n_iu = 0, n_ir = 0;
+  for (const auto& p : r.props) {
+    if (p.kind != "assume") {
+      continue;
+    }
+    if (p.aclass == "unchecked") {
+      ++n_unch;
+    } else if (p.aclass == "internal") {
+      if (p.verdict == livehd::lec::Verdict::Proven) {
+        ++n_ip;
+      } else if (p.verdict == livehd::lec::Verdict::Refuted) {
+        ++n_ir;
+      } else {
+        ++n_iu;
+      }
+    } else {
+      ++n_in;
+    }
+  }
+  const char* agg = r.verdict == livehd::lec::Verdict::Proven    ? "proven"
+                    : r.verdict == livehd::lec::Verdict::Refuted ? "refuted"
+                                                                 : "unknown";
+  std::string j = "{\n";
+  j += "  \"schema_version\": 1,\n  \"kind\": \"formal_report\",\n";
+  j += std::format("  \"design\": \"{}\",\n  \"top\": \"{}\",\n", json_esc(design_path), json_esc(top));
+  j += "  \"run\": {\n";
+  j += std::format("    \"verdict\": \"{}\",\n    \"detail\": \"{}\",\n", agg, json_esc(r.detail));
+  j += std::format("    \"elapsed_ms\": {},\n    \"checked_steps\": {},\n    \"reset_hold\": {},\n", r.elapsed_ms,
+                   r.checked_steps, r.reset_hold);
+  j += std::format("    \"reset_detected\": {},\n    \"vacuous\": {},\n", r.reset_detected ? "true" : "false",
+                   r.vacuous ? "true" : "false");
+  j += std::format("    \"engine\": \"{}\",\n    \"bound\": {},\n", json_esc(o.engine), o.bound);
+  j += std::format("    \"budget\": {{\"timeout_s\": {}, \"budget_mode\": \"{}\", \"rlimit\": {}, \"minetimeout_s\": {}}},\n",
+                   o.timeout, json_esc(o.budget_mode), o.rlimit, o.minetimeout);
+  j += std::format(
+      "    \"assume_counts\": {{\"input\": {}, \"unchecked\": {}, \"internal_proven\": {}, \"internal_unproven\": {}, "
+      "\"internal_refuted\": {}}}\n",
+      n_in, n_unch, n_ip, n_iu, n_ir);
+  j += "  },\n  \"obligations\": [\n";
+  for (size_t i = 0; i < r.props.size(); ++i) {
+    const auto& p        = r.props[i];
+    std::string file     = p.loc;
+    std::string line     = "0";
+    if (auto colon = p.loc.rfind(':'); colon != std::string::npos) {
+      file = p.loc.substr(0, colon);
+      line = p.loc.substr(colon + 1);
+    }
+    const bool  env_assume = p.kind == "assume" && p.aclass != "internal";
+    const char* verdict    = env_assume                                       ? "in_force"
+                             : p.verdict == livehd::lec::Verdict::Proven      ? "proven"
+                             : p.verdict == livehd::lec::Verdict::Refuted     ? "refuted"
+                                                                              : "unknown";
+    std::string why;
+    if (!env_assume && p.verdict != livehd::lec::Verdict::Proven && p.verdict != livehd::lec::Verdict::Refuted) {
+      why = p.refuted_at >= 0    ? std::format("violation at cycle {} may be a blackbox artifact", p.refuted_at)
+            : p.unknown_at >= 0  ? std::format("solver gave up at cycle {}", p.unknown_at)
+            : r.vacuous          ? std::string{"assume set contradictory"}
+                                 : std::string{"not checked"};
+      if (p.kind == "assume") {
+        why += "; unproven internal assume — NOT used";
+      }
+    }
+    j += std::format("    {{\"id\": \"{}\", \"kind\": \"{}\", \"file\": \"{}\", \"line\": {}, \"msg\": \"{}\", "
+                     "\"block\": \"{}\", \"aclass\": \"{}\", \"verdict\": \"{}\", \"unbounded\": {}, \"proven_to\": {}, "
+                     "\"refuted_at\": {}, \"unknown_at\": {}, \"unknown_why\": {}, \"solve_ms\": {}, "
+                     "\"in_timeout_core\": {}, \"witness\": {}}}{}\n",
+                     json_esc(prop_id(p)), json_esc(p.kind), json_esc(file), line.empty() ? "0" : line, json_esc(p.msg),
+                     json_esc(p.block), json_esc(p.aclass), verdict, p.unbounded ? "true" : "false", p.proven_to,
+                     p.refuted_at, p.unknown_at, why.empty() ? std::string{"null"} : "\"" + json_esc(why) + "\"",
+                     p.solve_ms, in_core.contains(i) ? "true" : "false",
+                     p.witness.empty() ? std::string{"null"} : "\"" + json_esc(p.witness) + "\"",
+                     i + 1 < r.props.size() ? "," : "");
+  }
+  j += "  ],\n  \"timeout_core\": [";
+  {
+    bool first = true;
+    for (int ix : r.timeout_core) {
+      if (ix >= 0 && static_cast<size_t>(ix) < r.props.size()) {
+        j += std::format("{}\"{}\"", first ? "" : ", ", json_esc(prop_id(r.props[static_cast<size_t>(ix)])));
+        first = false;
+      }
+    }
+  }
+  j += "],\n  \"artifacts\": {";
+  {
+    bool first = true;
+    for (const auto& [k, v] : artifacts) {
+      j += std::format("{}\"{}\": \"{}\"", first ? "" : ", ", json_esc(k), json_esc(v));
+      first = false;
+    }
+  }
+  j += "},\n  \"mined\": [\n";
+  for (size_t i = 0; i < r.mined.size(); ++i) {
+    const auto& m = r.mined[i];
+    std::string tgts;
+    for (int t : m.targets) {
+      if (t >= 0 && static_cast<size_t>(t) < r.props.size()) {
+        tgts += std::format("{}\"{}\"", tgts.empty() ? "" : ", ", json_esc(prop_id(r.props[static_cast<size_t>(t)])));
+      }
+    }
+    std::string keys;
+    for (const auto& k : m.keys) {
+      keys += std::format("{}\"{}\"", keys.empty() ? "" : ", ", json_esc(k));
+    }
+    j += std::format("    {{\"pyrope\": {}, \"smt2\": \"{}\", \"provenance\": \"{}\", \"status\": \"{}\", "
+                     "\"keys\": [{}], \"targets\": [{}]}}{}\n",
+                     m.pyrope.empty() ? std::string{"null"} : "\"" + json_esc(m.pyrope) + "\"", json_esc(m.smt2),
+                     json_esc(m.provenance), m.inductive ? "inductive" : "speculative", keys, tgts,
+                     i + 1 < r.mined.size() ? "," : "");
+  }
+  j += "  ]\n}\n";
+  std::ofstream ofs(path);
+  if (ofs.is_open()) {
+    ofs << j;
+  }
+}
+
+// P3 sidecar emission: the INDUCTIVE mined invariants as a paste-ready formal
+// block. Written fresh each mining run (auto-managed — never hand-edited); an
+// agent curates it: pass it as an extra positional on the next run, or copy
+// statements into its own sidecar. Every statement is an `assume` over design
+// state, so the P1 discipline re-proves it on use — a stale invariant after a
+// design edit REFUTES instead of corrupting the run.
+static void emit_mined_block(const std::string& path, const std::string& design_path, std::string_view top_full,
+                             const livehd::lec::Verify_result& r) {
+  std::vector<const livehd::lec::Verify_result::Mined_invariant*> emit;
+  for (const auto& m : r.mined) {
+    if (m.inductive && !m.pyrope.empty()) {
+      emit.push_back(&m);
+    }
+  }
+  if (emit.empty()) {
+    return;
+  }
+  auto entity = [](std::string_view n) {
+    auto d = n.rfind('.');
+    return d == std::string_view::npos ? n : n.substr(d + 1);
+  };
+  const std::string ent  = std::string(entity(top_full));
+  const std::string stem = fs::path(design_path).stem().string();
+  std::string       s;
+  s += "// AUTO-GENERATED by `lhd formal verify` (mined invariants) — regenerated each mining run.\n";
+  s += "// Each fact was proven at every checked cycle AND survived the induction step of the run\n";
+  s += "// that mined it. As formal-block assumes they are RE-PROVEN on use (P1 prove-then-use),\n";
+  s += "// so a stale invariant after a design edit refutes loudly instead of corrupting a proof.\n";
+  s += std::format("const top = import(\"{}.{}\")\n\n", stem, ent);
+  s += std::format("formal {}.mined {{\n  mut acc = top\n", ent);
+  for (const auto* m : emit) {
+    s += std::format("  // {}\n  assume({})\n", m->provenance, m->pyrope);
+  }
+  s += "}\n";
+  std::ofstream ofs(path);
+  if (ofs.is_open()) {
+    ofs << s;
+  }
+}
+
 // ---- formal verify (2f-verify V1: single-design assert/assume BMC) ----------
 
 // `lhd formal verify <design> [--top m] [--set formal.bound=N ...]`: prove the
@@ -2731,6 +2932,7 @@ void formal_verify_command(Options& opts, Result& res) {
   // diagnosis budget that names the toxic obligation core of a timed-out run.
   o.budget_mode  = label("budget_mode", "wall");
   o.minetimeout  = std::atoi(label("minetimeout", "0").c_str());
+  o.mine         = label("mine", "");  // P3 mining tier ("" = inductive only | speculative)
 
   std::unique_ptr<livehd::formal::Verdict_cache> vcache;
   if (workdir_set && label("cache", "true") != "false" && label("cache", "true") != "0") {
@@ -2813,11 +3015,11 @@ void formal_verify_command(Options& opts, Result& res) {
     };
     int gen_ix = 0;
     for (const auto& bf : block_files) {
-      for (auto& blk : livehd::formal_blocks::extract(bf)) {
+      for (auto& blk : livehd::formal_blocks::extract(bf, /*allow_nocheck=*/true)) {
         if (!blk.error.empty()) {
           throw Lhd_error{"usage",
                           std::format("formal block error: {}", blk.error),
-                          "V2 formal blocks: alias bindings + assert/assume/assert_always over dotted signal paths"};
+                          "formal blocks: alias bindings + assert/assume/assert_always/assume_nocheck_* over dotted signal paths"};
         }
         if (!opts.formal_filter.empty() && fnmatch(opts.formal_filter.c_str(), blk.name.c_str(), 0) != 0) {
           continue;
@@ -2898,13 +3100,41 @@ void formal_verify_command(Options& opts, Result& res) {
           ports += std::format("{}{}:{}{}", ports.empty() ? "" : ", ", in.ident, s->sgn ? "s" : "u", s->w);
         }
         // Generated monitor: one statement per line; line 1 is the header, so
-        // statement i sits on generated line 2+i (the loc-remap key).
-        std::string src = std::format("comb __fbmon({}) -> (__fb_ok:bool) {{\n", ports);
-        for (size_t i = 0; i < blk.stmts.size(); ++i) {
-          std::string one = blk.stmts[i].text;
+        // emitted statement j sits on generated line 2+j (the loc-remap key).
+        // P1 assume forms: `assume_nocheck_synth` is INVISIBLE to verify (a
+        // synthesis-only don't-care by fcore contract); `assume_nocheck_formal`
+        // compiles as a plain `assume` (the nocheck spelling is not a builtin)
+        // with its generated line recorded so the engine classifies it
+        // "unchecked" — a free constraint by user fiat, warned per encounter.
+        std::string src      = std::format("comb __fbmon({}) -> (__fb_ok:bool) {{\n", ports);
+        int         gen_line = 2;
+        for (const auto& st : blk.stmts) {
+          std::string one = st.text;
           std::replace(one.begin(), one.end(), '\n', ' ');  // keep 1 stmt : 1 line for the remap
+          std::string callee;
+          for (char ch : one) {
+            if (std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_') {
+              callee += ch;
+            } else {
+              break;
+            }
+          }
+          if (callee == "assume_nocheck_synth") {
+            continue;
+          }
+          if (callee == "assume_nocheck_formal") {
+            one.replace(0, callee.size(), "assume");
+            mon.nocheck_lines.insert(gen_line);
+            livehd::diag::warn("pass.formal", "formal-unchecked-assume", "comptime")
+                .msg("formal block '{}' uses assume_nocheck_formal ({}:{}); verify verdicts are conditional and UNCHECKED",
+                     blk.name,
+                     bf,
+                     st.line)
+                .emit();
+          }
           src += one + "\n";
-          mon.line2loc[static_cast<int>(2 + i)] = std::format("{}:{}", bf, blk.stmts[i].line);
+          mon.line2loc[gen_line] = std::format("{}:{}", bf, st.line);
+          ++gen_line;
         }
         src += "__fb_ok = true\n}\n";
         const auto genp = fs::path(workdir(opts)) / std::format("__fbmon_{}.prp", gen_ix++);
@@ -3005,10 +3235,17 @@ void formal_verify_command(Options& opts, Result& res) {
     if (!p.block.empty()) {
       msg += " [" + p.block + "]";  // block (+@instance) attribution
     }
-    if (p.kind == "assume") {
-      std::print("  assume{}{}: in force (environment constraint; verdicts are conditional on it)\n", where, msg);
+    if (p.kind == "assume" && p.aclass != "internal") {
+      if (p.aclass == "unchecked") {
+        std::print("  assume{}{}: in force (UNCHECKED assume_nocheck_formal; verdicts are conditional and unchecked)\n",
+                   where,
+                   msg);
+      } else {
+        std::print("  assume{}{}: in force (input environment constraint; verdicts are conditional on it)\n", where, msg);
+      }
       continue;
     }
+    // Asserts AND internal assumes (P1 prove-then-use): the same verdict rows.
     switch (p.verdict) {
       case livehd::lec::Verdict::Proven:
         if (p.unbounded) {
@@ -3031,6 +3268,9 @@ void formal_verify_command(Options& opts, Result& res) {
                           : p.unknown_at >= 0 ? std::format("solver gave up at cycle {} (raise --set formal.timeout)", p.unknown_at)
                           : r.vacuous ? std::string{"assume set contradictory"}
                                       : std::string{"not checked"};
+        if (p.kind == "assume") {
+          why += "; unproven internal assume — NOT used (prove it, restrict it to inputs, or spell assume_nocheck_formal)";
+        }
         std::print("  {}{}{}: UNKNOWN ({})\n", p.kind, where, msg, why);
         if (!p.witness.empty()) {
           std::print("    candidate violation inputs: {}\n", p.witness);
@@ -3077,6 +3317,65 @@ void formal_verify_command(Options& opts, Result& res) {
         embed = it->second;
       }
       emit_formalfail_witness(opts, res, *fp, kind, path, std::string(g->get_name()), prpfail, prpfailrun, embed);
+    }
+  }
+
+  // ── formal_report.json (P2): the agent-loop feedback channel ─────────────
+  // Written on EVERY run — UNKNOWN included (that is the verdict the agent must
+  // act on) — BEFORE the exit-policy throws below, so a REFUTED run still leaves
+  // the report. Pass --workdir to keep it across runs; without one, the file
+  // lands in the announced scratch dir (one-shot parsing still works).
+  {
+    std::string rv = label("report", "formal_report.json");
+    if (rv == "true" || rv == "1") {
+      rv = "formal_report.json";
+    }
+    if (!rv.empty() && rv != "false" && rv != "0") {
+      const std::string rpath = rv.find('/') != std::string::npos ? rv : workdir(opts) + "/" + rv;
+      absl::flat_hash_map<std::string, std::string> artifacts;
+      // Reference only artifacts that actually exist (the witness emit may skip).
+      auto add_artifact = [&](std::string_view key, const std::string& p) {
+        if (!p.empty() && fs::exists(p)) {
+          artifacts[std::string{key}] = p;
+        }
+      };
+      std::string pv;
+      if (auto it = labels.find("prpfail"); it != labels.end()) {
+        pv = it->second;
+      }
+      std::string pf = (pv.empty() || pv == "true" || pv == "1") ? std::string{"formalfail.prp"}
+                       : (pv == "false" || pv == "0")            ? std::string{}
+                                                                 : pv;
+      if (!pf.empty()) {
+        const std::string pf_path = pf.find('/') != std::string::npos ? pf : opts.workdir + "/" + pf;
+        add_artifact("prpfail", pf_path);
+        add_artifact("prpfail_json",
+                     pf_path.ends_with(".prp") ? pf_path.substr(0, pf_path.size() - 4) + ".json" : pf_path + ".json");
+        std::string stem = fs::path(pf_path).stem().string(), test_name;
+        for (char c : stem) {
+          test_name += (std::isalnum(static_cast<unsigned char>(c)) != 0) ? c : '_';
+        }
+        if (test_name.empty() || (std::isdigit(static_cast<unsigned char>(test_name[0])) != 0)) {
+          test_name = "formalfail_" + test_name;
+        }
+        add_artifact("vcd", opts.workdir + "/" + test_name + ".vcd");
+      }
+      add_artifact("cache", opts.workdir + "/formal_cache.json");
+      // Mined inductive invariants also land as a paste-ready sidecar block.
+      if (!r.mined.empty()) {
+        const std::string mpath = workdir(opts) + "/formal_mined.prp";
+        emit_mined_block(mpath, path, g->get_name(), r);
+        if (fs::exists(mpath)) {
+          add_artifact("mined_block", mpath);
+          res.outputs.push_back(mpath);
+          std::print("formal verify: wrote mined invariants {}\n", mpath);
+        }
+      }
+      emit_formal_report(rpath, path, g->get_name(), r, o, artifacts);
+      if (fs::exists(rpath)) {
+        res.outputs.push_back(rpath);
+        std::print("formal verify: wrote report {}\n", rpath);
+      }
     }
   }
 

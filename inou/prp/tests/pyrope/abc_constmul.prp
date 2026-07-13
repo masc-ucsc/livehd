@@ -1,0 +1,18 @@
+/*
+:name: abc_constmul
+:type: lgraph compile
+*/
+
+// Constant-operand multiply regression for the pass.abc bit-blast (const-mult
+// miscompile): a Mult fed by a bare CONSTANT driver (342 below). Constant
+// drivers usually carry no `bits` attribute, so the width-sensitive mult/sra
+// operand path (eff_width/abc_eff_bit in abc_map.cpp) used to clamp the
+// constant to 1 effective bit — 342 was read as its bit 0 (= 0), the whole
+// product cone collapsed to constant 0, and ABC mapped every output bit to a
+// _const0_ tie cell with no diagnostic. The chain + right shift keeps the
+// high product bits (the ones that were silently zeroed) observable at `y`.
+// Exercised by lhd/tests/lhd_abc_arith_test.sh with a mapped-netlist LEC
+// against the partition twin as the oracle.
+mod abc_constmul(a:u8, b:u8) -> (y:u8@[0]) {
+  y = ((a + b) * 342) >> 10
+}

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
 
 namespace livehd::lec {
@@ -324,6 +325,12 @@ struct Lec_options {
   // reusable library to lhd/formal_cache.
   std::function<bool(std::string_view)> verify_cache_lookup;
   std::function<void(std::string)>      verify_cache_store;
+
+  // P3 mining tier. Mining itself is gated by minetimeout>0 (it spends that
+  // budget, never `timeout`). "" = report only the inductive survivors;
+  // "speculative" = also report base-proven candidates the induction step
+  // dropped (bounded facts an agent may still find suggestive).
+  std::string mine;
 };
 
 // lec.decompose mode predicates (auto | true | false; on/1==true, off/0==false).
@@ -425,10 +432,22 @@ struct Prop_result {
   std::string loc;    // source location ("" when tolg carried none)
   std::string msg;    // user message ("")
   std::string block;  // formal-block dotted name ("" = an fproperty in the design itself)
-  // kind==assume: an ENVIRONMENT CONSTRAINT, asserted at every checked cycle
-  // (never an obligation here — the checked-then-used tier is the sidecar's,
-  // V3+). Its verdict stays Unknown and the cycle fields stay -1; n_assumes on
-  // Verify_result discloses that the run's verdicts are conditional on it.
+  // kind==assume classification (P1 assume discipline; "" for asserts and under
+  // ignore_assumes):
+  //   "input"     — the cond's cone reaches primary inputs (or free blackbox
+  //                 outputs) only: an environment constraint by nature (inputs
+  //                 are free, nothing to prove). Asserted at EVERY cycle,
+  //                 prologue included; verdict stays Unknown / cycles -1;
+  //                 disclosed ("under N input assume(s)").
+  //   "internal"  — the cond depends on design state / memory: a PROOF
+  //                 OBLIGATION, prove-then-use. Checked per cycle like a plain
+  //                 assert; only a just-PROVEN cycle's fact constrains later
+  //                 obligations (rule A), and only an inductive survivor
+  //                 constrains the step frame (rule E). REFUTED = a hard error;
+  //                 Unknown = NOT used, disclosed as unproven.
+  //   "unchecked" — assume_nocheck_formal: a free constraint by explicit user
+  //                 fiat; warned per encounter, disclosed distinctly.
+  std::string aclass;
   Verdict verdict = Verdict::Unknown;
   // V3 verdict ladder: a bounded-proven assert that also survives the
   // simultaneous-induction step is PROVEN UNBOUNDED — true at every cycle of
@@ -439,6 +458,10 @@ struct Prop_result {
   int refuted_at = -1;  // first cycle with a reachable violation (SAT)
   int unknown_at = -1;  // first cycle where the solver gave up (timeout/unknown);
                         // later cycles were not attempted for this property
+  // Cumulative cvc5 time spent on THIS obligation's checks (BMC per-cycle checks
+  // + its induction-rung candidate checks; cache hits cost ~0). P2 agent-report
+  // signal — the report ranks stragglers by it. Serialized by the wire codec.
+  long long solve_ms = 0;
   std::string witness;  // per-cycle input assignment reaching the violation (Refuted)
   // Structured, uncapped input trace for witness reproduction (Refuted only):
   // the same shape the lec engine fills, so `lhd formal verify --workdir` can
@@ -462,7 +485,28 @@ struct Verify_result {
   int         n_assumes     = 0;   // user assumes in force (verdicts are conditional on them)
   bool        vacuous       = false;  // assume set contradictory: every "proof" was vacuous
   std::vector<Prop_result> props;  // one entry per fproperty, walk order
-  long long                elapsed_ms = -1;
+  // STRUCTURED timeout core (formal.minetimeout): indices into `props` of the
+  // obligations cvc5 named as the toxic subset (the same set res.detail spells
+  // in prose). Empty when the diagnosis is off / unavailable / found nothing.
+  std::vector<int> timeout_core;
+  // P3 mining output. Every entry passed the BASE proof (holds at every checked
+  // BMC cycle, under the env assumes); `inductive` entries also survived the
+  // joint Houdini induction step, so they are GENUINE invariants — safe to
+  // paste as formal-block assumes (they re-prove on use; a wrong edit later
+  // refutes them instead of corrupting a run). Non-inductive entries appear
+  // only under mine=speculative. Candidate sources: solver learned literals
+  // over state symbols, and range/equality templates over the registers in the
+  // still-Unknown obligations' cones, seeded from a reachable model sample.
+  struct Mined_invariant {
+    std::string      pyrope;      // ready-to-paste block expression ("" = shape not expressible)
+    std::string      smt2;        // solver-term rendering (debug / non-expressible shapes)
+    std::string      provenance;  // "learned-literal@cyc N" | "template:range(key)" | ...
+    std::vector<std::string> keys;     // state keys mentioned
+    std::vector<int>         targets;  // indices of still-Unknown props whose cone overlaps
+    bool                     inductive = false;
+  };
+  std::vector<Mined_invariant> mined;
+  long long                    elapsed_ms = -1;
 };
 
 // 2f-verify V2: a formal-block MONITOR — the block's property statements
@@ -485,6 +529,11 @@ struct Monitor {
   // Generated-source line -> original "file:line" (fproperty locs point into
   // the generated monitor file; the report shows the user's formal block).
   absl::flat_hash_map<int, std::string> line2loc;
+  // Generated-source lines holding an `assume_nocheck_formal` statement (the
+  // CLI rewrote the callee to `assume` so the monitor compiles): the engine
+  // classifies these props "unchecked" — a free constraint by user fiat, never
+  // a proof obligation, disclosed distinctly.
+  absl::flat_hash_set<int> nocheck_lines;
 };
 
 // Prove the fproperty obligations of ONE design (plus any formal-block

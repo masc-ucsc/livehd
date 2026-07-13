@@ -68,6 +68,10 @@ struct Region_qor {
   float       delay = -1.0f;  // critical arrival in library time units; <0 => unavailable
   std::string crit_output;    // region output port with the worst arrival
   std::string crit_src;       // "file:line" of that output's original driver (may be empty)
+  // Blackboxed div/mod nodes in this region: their cones are NOT mapped, so
+  // gates/area/delay under-report — the score is partial until the div is
+  // strength-reduced away. Surfaced so an agent never trusts a blind score.
+  int div_blackbox = 0;
 };
 
 // Stats-only mode (no --emit-dir): summarize what would be mapped.

@@ -93,3 +93,29 @@ if "$LHD" lec --impl lg:"$W/net_rca_default" --ref lg:"$W/re" --top "$one_region
 fi
 
 echo "PASS: pass.abc adders (rca/cska/cla) all lhd-lec-equivalent to original arithmetic"
+
+# ---------------------------------------------------------------------------
+# Constant-operand multiply (const-mult miscompile regression): a Mult fed by a
+# bare constant driver (342) used to be read at effective width 1 by the
+# bit-blast (constant pins carry no bits attr, so eff_width clamped them),
+# collapsing the whole product cone to constant 0 — every mapped output bit a
+# _const0_ tie cell, no diagnostic. Oracle: the mapped netlist must LEC-prove
+# against the original-logic partition twin (an all-const0 netlist REFUTES).
+# No pass color: the whole design folds into the color-0 region, keeping the
+# mult inside the bit-blasted cone (synth coloring excludes mult region seeds).
+# ---------------------------------------------------------------------------
+CPRP=inou/prp/tests/pyrope/abc_constmul.prp
+CTOP=abc_constmul.abc_constmul
+C="$W/constmul"
+mkdir -p "$C"
+[ -f "$CPRP" ] || fail "missing fixture $CPRP"
+run compile "$CPRP" --top "$CTOP" --recipe O1 --emit-dir lg:"$C/lg" --workdir "$C/w1"
+# uncolored pass abc warns once (color-0 region) — tolerated by run()'s exit check
+run pass abc --top "$CTOP" lg:"$C/lg" --emit-dir lg:"$C/net" --set pass.abc.library="$LIB" --workdir "$C/w2"
+run pass partition --top "$CTOP" lg:"$C/lg" --emit-dir lg:"$C/re" --workdir "$C/w3"
+CREGIONS=$(grep -oE '[A-Za-z0-9_.]+__c[0-9]+' "$C/re/library.txt" | sort -u)
+[ -n "$CREGIONS" ] || fail "no __cN region modules in the constmul partition twin: $(cat "$C/re/library.txt")"
+for r in $CREGIONS; do
+  run lec --impl lg:"$C/net" --ref lg:"$C/re" --lib lg:"$W/models" --top "$r" --workdir "$C/wlec"
+done
+echo "PASS: pass.abc constant-operand multiply lhd-lec-equivalent (no const0 collapse)"

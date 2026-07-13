@@ -118,6 +118,18 @@ void Pass_lec::setup() {
                        "extra budget (seconds, 0 = off) for a diagnosis phase after the final round: names the "
                        "still-unproven defs so a timed-out run's output is actionable",
                        "0");
+  m.add_label_optional("report",
+                       "`lhd formal verify` machine-readable run report: a JSON file written into the workdir on "
+                       "EVERY run (all verdicts, UNKNOWN included) with per-obligation verdicts/cycles/solve times, "
+                       "assume classes, the structured timeout core, and witness artifact paths — the agent-loop "
+                       "feedback channel. Value: a filename (default formal_report.json); ''/'false'=off",
+                       "formal_report.json");
+  m.add_label_optional("mine",
+                       "`lhd formal verify` invariant-mining tier (runs under the minetimeout budget; minetimeout=0 "
+                       "disables mining entirely): '' (default) reports only INDUCTIVE survivors — genuine "
+                       "invariants, also emitted as a paste-ready formal block (formal_mined.prp) | speculative "
+                       "(additionally report base-proven candidates the induction step dropped)",
+                       "");
   m.add_label_optional("split",
                        "case-split control input: auto (default; pick the small-width input feeding the widest "
                        "variable shift-amount / mux-selector pins) | <input-name> (force) | none (disable)",

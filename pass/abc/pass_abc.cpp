@@ -124,10 +124,12 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
               const std::string& qor_path) {
   int    tgates = 0;
   double tarea  = 0.0;
+  int    tdivbb = 0;  // blackboxed div/mod cones (the score under-reports)
   int    worst  = -1;  // index of the region with the worst delay
   for (size_t r = 0; r < qor.size(); ++r) {
     tgates += qor[r].gates;
     tarea += qor[r].area;
+    tdivbb += qor[r].div_blackbox;
     if (qor[r].delay >= 0 && (worst < 0 || qor[r].delay > qor[static_cast<size_t>(worst)].delay)) {
       worst = static_cast<int>(r);
     }
@@ -144,7 +146,8 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     }
     crit += ")";
   }
-  std::print("pass.abc qor: {} region(s), {} gates, area {:.2f}{}\n", qor.size(), tgates, tarea, crit);
+  std::print("pass.abc qor: {} region(s), {} gates, area {:.2f}{}{}\n", qor.size(), tgates, tarea, crit,
+             tdivbb == 0 ? std::string{} : std::format(" [PARTIAL: {} blackboxed div/mod cone(s) unscored]", tdivbb));
 
   if (qor_path.empty()) {
     return;
@@ -156,6 +159,9 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   j += std::format("\"seq\":{},", opts.seq ? "true" : "false");
   j += std::format("\"delay_target\":\"{}\",", jesc(opts.delay));
   j += std::format("\"total\":{{\"regions\":{},\"gates\":{},\"area\":{:.4f}", qor.size(), tgates, tarea);
+  if (tdivbb > 0) {
+    j += std::format(",\"div_blackbox\":{}", tdivbb);
+  }
   if (worst >= 0) {
     const auto& w = qor[static_cast<size_t>(worst)];
     j += std::format(",\"max_delay\":{:.4f},\"critical_region\":\"{}\"", w.delay, jesc(w.module));
@@ -173,6 +179,9 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
       j += ",";
     }
     j += std::format("{{\"module\":\"{}\",\"color\":{},\"gates\":{},\"area\":{:.4f}", jesc(q.module), q.color, q.gates, q.area);
+    if (q.div_blackbox > 0) {
+      j += std::format(",\"div_blackbox\":{}", q.div_blackbox);
+    }
     if (q.delay >= 0) {
       j += std::format(",\"delay\":{:.4f}", q.delay);
     }
