@@ -1,0 +1,28 @@
+/*
+:name: wide_cex
+:type: verify
+:top_module: wide_cex
+:verify_bound: 4
+:verify_proven: 1
+:verify_refuted: 1
+:verify_replay: fired
+*/
+// Fuzz regression (2026-07-12, distilled from the xs_core_prp CSR-write
+// modules): a REFUTED witness that must drive a >64-bit value (u65 bus; the
+// input assume forces bit 64) has to survive the WHOLE failure loop —
+// formalfail.prp generation, the sim driver COMPILE (its `long` value plane
+// used to emit `long _drv_w[] = {18446744073709551712, ...}` and fail to
+// build), and the replay must RE-FIRE the assert (wide drives ride the
+// string/from_pyrope plane, exact at any width).
+pub mod wide_cex(clock:u1, reset:u1, w:u65) -> (o:u8@[0]) {
+  reg r:u65 = 0
+  o = r#[0..=7]
+  r = w
+}
+
+formal wide.props {
+  mut acc = wide_cex
+  assume(acc.w >= 0x10000000000000000)              // every witness needs bit 64 set
+  assert(acc.r <= 0x1ffffffffffffffff, "in range")  // tautology: PROVEN
+  assert(acc.o != 96, "low byte probe")             // REFUTED: w = 2^64 + 96 reaches it
+}

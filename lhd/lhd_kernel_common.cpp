@@ -1122,7 +1122,21 @@ std::string find_header_in_runfiles(std::string_view header) {
   // source is bazel's RUNFILES_DIR / TEST_SRCDIR env (set for a `bazel test`/`run`
   // and inherited by a child `lhd sim` spawned by `lhd lec`); the exe-ancestor
   // walk is a backstop for a genuinely in-runfiles executable.
+  // The CWD anchor comes FIRST: a bazel test runs with cwd inside the LIVE
+  // sandbox's runfiles (…/<target>.runfiles/_main), while RUNFILES_DIR /
+  // TEST_SRCDIR can point at a torn-down/reused sandbox instance (observed: a
+  // child `lhd sim` spawned by `lhd formal verify` got -I dirs into a dead
+  // darwin-sandbox tree and the driver compile failed with "no such file").
   std::vector<fs::path> roots;
+  {
+    std::error_code cec;
+    for (fs::path p = fs::current_path(cec); !cec && !p.empty() && p != p.root_path(); p = p.parent_path()) {
+      if (p.filename().string().find(".runfiles") != std::string::npos) {
+        roots.push_back(p);
+        break;
+      }
+    }
+  }
   for (const char* env : {"RUNFILES_DIR", "TEST_SRCDIR"}) {
     if (const char* v = std::getenv(env); v != nullptr && *v != 0) {
       roots.emplace_back(v);

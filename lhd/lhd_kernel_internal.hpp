@@ -122,6 +122,14 @@ void print_line_diff(std::string& out, const std::vector<std::string>& a, const 
 void tool_cat_ln(Options& opts, Result& res, const std::vector<std::string>& tokens);
 void tool_diff_ln(Options& opts, Result& res, const std::vector<std::string>& tokens);
 void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool need_graphs);
+// 2i-import S1 — transitively pull in imported sibling .prp sources from each
+// importing file's own directory (fixpoint; importer-dir-relative only), so a
+// single-file load needs no dependency list. `seed_files` are the already-parsed
+// on-disk sources (they seed unit->dir); `n_imports` is the index of the first
+// source unit in var.lnasts (earlier entries are pre-loaded ln: imports).
+// Shared by compile AND the lec/verify side loaders (a Pyrope side never needs
+// a pre-compile to lg: just to resolve its imports).
+void discover_imports(Eprp_var& var, size_t n_imports, const std::vector<std::string>& seed_files);
 void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path);
 void compile_sources(Options& opts, Result& res, const Ir_inputs& inputs);
 void compile_command(Options& opts, Result& res);

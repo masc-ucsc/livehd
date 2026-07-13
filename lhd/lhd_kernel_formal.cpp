@@ -106,6 +106,24 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
         },
                  opts,
                  res);
+        // A Pyrope side resolves its own import() dependencies (sibling .prp in
+        // the importing file's directory, to a fixpoint) — no pre-compile to lg:
+        // is ever needed just to satisfy imports (Verilog still needs its own
+        // elaboration; this is the same discovery `lhd compile` runs).
+        {
+          std::vector<std::string> seeds;
+          for (size_t b = 0; b <= files.size();) {
+            auto e = files.find(',', b);
+            if (e == std::string::npos) {
+              e = files.size();
+            }
+            if (e > b) {
+              seeds.emplace_back(files.substr(b, e - b));
+            }
+            b = e + 1;
+          }
+          discover_imports(var, /*n_imports=*/0, seeds);
+        }
       } else if (kind == "verilog") {  // slang: the direct SV -> LNAST front-end
         check_inputs_exist({path});
         run_step("inou.slang",
@@ -1403,16 +1421,12 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   }
   test_text += std::format("  tick {} {{\n", ncyc);
   // Reset drive: an explicit `reset` PORT is driven by the input loop below (and
-  // the sim unifies it with the implicit reset). Otherwise drive the implicit
-  // reset — from the trace's `reset` values, or the reset-hold prologue length.
-  if (!reset_is_port) {
-    if (implicit_reset) {
-      test_text += "    _lec_dut.reset = _drv_reset[clock]\n";
-    } else if (r.trace.reset_cycles > 0) {
-      test_text += std::format("    _lec_dut.reset = clock < {}\n", r.trace.reset_cycles);
-    } else {
-      test_text += "    _lec_dut.reset = false\n";
-    }
+  // the sim unifies it with the implicit reset). An IMPLICIT reset (the trace
+  // carries `reset` values but the decl list does not) is driven from the trace.
+  // A design with NO reset at all (e.g. slang-imported, reset-less flops) gets
+  // no drive — `_dut.reset` would be an unknown field and fail the replay.
+  if (implicit_reset) {
+    test_text += "    _lec_dut.reset = _drv_reset[clock]\n";
   }
   for (const auto& n : win) {
     test_text += std::format("    _lec_dut.{} = _drv_{}[clock]\n", n, n);
@@ -1567,7 +1581,13 @@ static Lec_formal_helpers compile_lec_formal_helpers(Options& opts, Result& res,
   for (const auto& d : gio->get_input_pin_decls()) {
     auto pin       = impl->get_input_pin(d.name);
     int  w         = livehd::lec::real_width_io(pin, *gio, d.name);
-    in_tbl[d.name] = Sig{w == 0 ? 1 : w, pin.is_invalid() ? !gio->is_unsign(d.name) : !livehd::graph_util::is_unsign(pin)};
+    // Sign from the IO DECLARATION, never the pin: LiveHD represents uN as a
+        // signed N+1 internally, so the pin reads "signed" for an unsigned port —
+        // typing the monitor input sN would flip ordered compares in user
+        // properties (assume(x <= 15) held vacuously for large x). The decl is
+        // what the user wrote; the engine truncates/extends the bound value to
+        // the monitor's declared type.
+        in_tbl[d.name] = Sig{w == 0 ? 1 : w, !gio->is_unsign(d.name)};
   }
   for (const auto& d : gio->get_output_pin_decls()) {
     auto pin        = impl->get_output_pin(d.name);
@@ -2467,14 +2487,11 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
     test_text += std::format("  const _drv_reset = [{}]\n", arr);
   }
   test_text += std::format("  tick {} {{\n", ncyc);
-  if (!reset_is_port) {
-    if (implicit_reset) {
-      test_text += "    _dut.reset = _drv_reset[clock]\n";
-    } else if (tr.reset_cycles > 0) {
-      test_text += std::format("    _dut.reset = clock < {}\n", tr.reset_cycles);
-    } else {
-      test_text += "    _dut.reset = false\n";
-    }
+  // Same reset rule as the lecfail generator: drive only a reset that exists
+  // (explicit port via the input loop; implicit via the trace; NONE for a
+  // reset-less design — `_dut.reset` would be an unknown field).
+  if (implicit_reset) {
+    test_text += "    _dut.reset = _drv_reset[clock]\n";
   }
   for (const auto& n : win) {
     test_text += std::format("    _dut.{} = _drv_{}[clock]\n", n, n);
@@ -2576,6 +2593,18 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
     std::print("formal verify: wrote counterexample waveform {}{}\n",
                vcd,
                fired ? " (the replay reproduced the violation: the runtime assert fired)" : "");
+    if (!fired) {
+      // Silence here would read as "reproduced". The usual cause: the witness
+      // depends on FREE INITIAL STATE (an init-less register / memory, or a
+      // reset-less design) which the BMC may choose but a sim replay cannot
+      // set (sim powers up at the declared init / zero).
+      livehd::diag::warn("pass.formal", "formalfail-replay-no-refire", "io")
+          .msg("the formalfail replay ran but did NOT re-fire the assert ({}): the witness likely depends on free "
+               "initial state (init-less registers/memories or no reset input) that the sim cannot reproduce; "
+               "inspect the VCD against formalfail.json",
+               vcd)
+          .emit();
+    }
   } else {
     livehd::diag::warn("pass.formal", "formalfail-sim", "io")
         .msg("formal.prpfailrun: `lhd sim {}` did not produce {} (see {})", prpfail_path, vcd, sim_log)
@@ -2812,6 +2841,12 @@ void formal_verify_command(Options& opts, Result& res) {
   std::string              kind = opts.impl_kind;
   std::string              path = opts.impl_path;
   std::vector<std::string> extras(opts.files.begin() + (opts.files.empty() ? 0 : 1), opts.files.end());
+  if (path.empty() && !opts.ins.empty()) {
+    // An explicitly routed lg:DIR is the design; every .prp positional stays a
+    // formal-block sidecar (the pre-compiled flow for import-heavy designs).
+    kind = "lg";
+    path = opts.ins.front().path;
+  }
   if (path.empty() && !extras.empty()) {
     const std::string& f    = extras.front();
     auto               ends = [&](std::string_view s) { return f.size() > s.size() && f.compare(f.size() - s.size(), s.size(), s) == 0; };
@@ -2990,7 +3025,13 @@ void formal_verify_command(Options& opts, Result& res) {
       for (const auto& d : gio->get_input_pin_decls()) {
         auto pin = g->get_input_pin(d.name);
         int  w   = livehd::lec::real_width_io(pin, *gio, d.name);
-        in_tbl[d.name] = Sig{w == 0 ? 1 : w, pin.is_invalid() ? !gio->is_unsign(d.name) : !livehd::graph_util::is_unsign(pin)};
+        // Sign from the IO DECLARATION, never the pin: LiveHD represents uN as a
+        // signed N+1 internally, so the pin reads "signed" for an unsigned port —
+        // typing the monitor input sN would flip ordered compares in user
+        // properties (assume(x <= 15) held vacuously for large x). The decl is
+        // what the user wrote; the engine truncates/extends the bound value to
+        // the monitor's declared type.
+        in_tbl[d.name] = Sig{w == 0 ? 1 : w, !gio->is_unsign(d.name)};
       }
       for (const auto& d : gio->get_output_pin_decls()) {
         auto pin = g->get_output_pin(d.name);
@@ -3053,6 +3094,26 @@ void formal_verify_command(Options& opts, Result& res) {
                             "bind the block to the verified top or to a module instantiated inside it"};
           }
         }
+        // Submodule PORT table (decl width + decl sign, matching the encoder's
+        // "\x05tap:" emission): a submodule-bound block reaches the instance's
+        // ports as well as its registers. Same def => same decls per instance.
+        absl::flat_hash_map<std::string, Sig> sub_port_tbl;
+        if (!inst_prefixes.front().empty()) {
+          for (auto node : g->forward_hier()) {
+            if (livehd::graph_util::type_op_of(node) != Ntype_op::Sub || node.get_hier_name() != inst_prefixes.front()) {
+              continue;
+            }
+            if (auto sio = node.get_subnode_io(); sio != nullptr) {
+              for (const auto& d : sio->get_input_pin_decls()) {
+                sub_port_tbl[d.name] = Sig{d.bits > 0 ? static_cast<int>(d.bits) : 1, !sio->is_unsign(d.name)};
+              }
+              for (const auto& d : sio->get_output_pin_decls()) {
+                sub_port_tbl[d.name] = Sig{d.bits > 0 ? static_cast<int>(d.bits) : 1, !sio->is_unsign(d.name)};
+              }
+            }
+            break;
+          }
+        }
         // Resolve one signal path for one instance context ("" = the top).
         auto resolve = [&](const std::string& sig_path, const std::string& prefix,
                            livehd::lec::Monitor::Bind& b) -> const Sig* {
@@ -3074,6 +3135,15 @@ void formal_verify_command(Options& opts, Result& res) {
             b.key = livehd::lec::canon_flop_name(full);
             return &ft->second;
           }
+          if (!prefix.empty()) {
+            // Submodule ports bind through an encoder tap ("\x05tap:<inst>.<port>"),
+            // read exactly like a top output (Src::output on the tap key).
+            if (auto pt = sub_port_tbl.find(sig_path); pt != sub_port_tbl.end()) {
+              b.src = livehd::lec::Monitor::Bind::Src::output;
+              b.key = std::string("\x05tap:", 5) + prefix + "." + sig_path;
+              return &pt->second;
+            }
+          }
           return nullptr;
         };
         // Port list + widths from the FIRST context (same module def => same
@@ -3093,8 +3163,9 @@ void formal_verify_command(Options& opts, Result& res) {
                             in.path,
                             g->get_name(),
                             inst_prefixes.front().empty() ? std::string{} : " instance '" + inst_prefixes.front() + "'"),
-                            "V2 reaches top input/output ports and registers (dotted through instances); "
-                            "internal wires and memory elements come later"};
+                            "blocks reach top input/output ports, registers (dotted through instances), and — for a "
+                            "submodule-bound block — the target instance's ports; internal wires and memory "
+                            "elements come later"};
           }
           mon.binds.push_back(std::move(b));
           ports += std::format("{}{}:{}{}", ports.empty() ? "" : ", ", in.ident, s->sgn ? "s" : "u", s->w);
@@ -3192,7 +3263,7 @@ void formal_verify_command(Options& opts, Result& res) {
                 throw Lhd_error{
                     "usage",
                     std::format("formal block '{}': signal path '{}' does not resolve in instance '{}'", blk.name, in.path, prefix),
-                                "submodule-bound blocks reach the instance's registers (ports are internal nets — later)"};
+                                "submodule-bound blocks reach the instance's registers and its input/output ports"};
               }
               im.binds.push_back(std::move(b));
             }

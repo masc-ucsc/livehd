@@ -1868,6 +1868,98 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     }
   }
 
+  // ---- 2f-verify submodule port taps (gated: set_port_taps). For every Sub
+  // instance whose hier name was requested, emit each resolvable input/output
+  // port value as a synthetic output "\x05tap:<inst>.<port>", fitted to the
+  // port DECLARATION's width — the same width the verify CLI types the monitor
+  // input with, so a formal block binds a submodule port exactly like a top
+  // output. Best-effort per port: an unconnected / unresolved port simply has
+  // no tap (the CLI validated the referenced names upfront; the engine's bind
+  // step fails loudly if a referenced tap is missing).
+  if (port_taps_ != nullptr && !port_taps_->empty()) {
+    for (auto node : g->forward_hier(true, false, opaque)) {
+      if (gu::type_op_of(node) != Ntype_op::Sub) {
+        continue;
+      }
+      const std::string hname{node.get_hier_name()};
+      if (!port_taps_->contains(hname)) {
+        continue;
+      }
+      auto sio = node.get_subnode_io();
+      if (sio == nullptr) {
+        continue;
+      }
+      auto emit_tap = [&](const std::string& port, const Val& v, int decl_w, bool decl_sgn) {
+        const int w = decl_w > 0 ? decl_w : (v.width > 0 ? v.width : 1);
+        out.outputs["\x05tap:" + hname + "." + port] = Val{fit(v, w), w, decl_sgn};
+      };
+      // INPUT ports: the parent-side driver, resolved across the instance
+      // boundary via the HIER inp_edges (the fproperty cond pattern).
+      for (const auto& d : sio->get_input_pin_decls()) {
+        const auto      pid = sio->get_input_port_id(d.name);
+        hhds::Pin_class drv;
+        for (const auto& e : node.inp_edges()) {
+          if (e.sink.get_port_id() == pid) {
+            drv = e.driver;
+            break;
+          }
+        }
+        if (drv.is_invalid()) {
+          continue;
+        }
+        bool ok = true;
+        Val  v  = driver_val(drv, ok);
+        if (ok) {
+          emit_tap(d.name, v, static_cast<int>(d.bits), !sio->is_unsign(d.name));
+        }
+      }
+      // OUTPUT ports: in a HIER walk the instance pin itself carries no value —
+      // edges hop THROUGH boundaries to real leaves. Recover the internal
+      // driver from any consumer: the consumer's inp_edge whose sink is this
+      // same pin resolves its driver DOWN into the callee, to the real
+      // (memoized) leaf. An output nobody reads has no tap.
+      auto same_pin = [](const hhds::Pin_class& a, const hhds::Pin_class& b) {
+        auto ah = a.get_hier_pos();
+        auto bh = b.get_hier_pos();
+        if (ah == hhds::INVALID) {
+          ah = hhds::ROOT;
+        }
+        if (bh == hhds::INVALID) {
+          bh = hhds::ROOT;
+        }
+        return a.get_current_gid() == b.get_current_gid() && ah == bh && a.get_debug_pid() == b.get_debug_pid();
+      };
+      for (const auto& d : sio->get_output_pin_decls()) {
+        const auto pid = sio->get_output_port_id(d.name);
+        bool       ok  = false;
+        Val        v;
+        if (auto dp = node.get_driver_pin(pid); !dp.is_invalid()) {
+          v = driver_val(dp, ok);  // flat/collapsed case: the pin value exists
+        }
+        if (!ok) {
+          for (const auto& e : node.out_edges()) {
+            if (e.driver.get_port_id() != pid || e.sink.is_invalid()) {
+              continue;
+            }
+            auto consumer = e.sink.get_master_node();
+            for (const auto& ce : consumer.inp_edges()) {
+              if (same_pin(ce.sink, e.sink)) {
+                v = driver_val(ce.driver, ok);
+                break;
+              }
+            }
+            if (ok) {
+              break;
+            }
+          }
+        }
+        if (ok) {
+          emit_tap(d.name, v, static_cast<int>(d.bits), !sio->is_unsign(d.name));
+        }
+      }
+    }
+  }
+
   // ---- M2 next-state functions. For each cut flop emit the value it latches
   // next cycle as a synthetic output keyed "<nxt><statekey>", so the miter
   // compares the two designs' next-state for every corresponding register (the

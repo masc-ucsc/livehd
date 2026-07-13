@@ -1,0 +1,23 @@
+/*
+:name: freeinit_cex
+:type: verify
+:top_module: freeinit_cex
+:verify_bound: 4
+:verify_refuted: 1
+:verify_replay: no-refire
+*/
+// Fuzz regression (2026-07-12, distilled from FallThroughPredictor /
+// array_128x48): a witness that rests on FREE INITIAL STATE (an init-less
+// register in a reset-less design — the BMC may pick any power-on value, and
+// real silicon does too) cannot be reproduced by input driving alone. The
+// replay must WARN loudly (formalfail-replay-no-refire) instead of silently
+// writing a VCD in which the assert never fires.
+pub mod freeinit_cex(clock:u1, en:u1) -> (o:u8@[0]) {
+  reg r:u8  // never written: r holds its (free) power-on value forever
+  o = r & (u8(en) | 0xfe)
+}
+
+formal fi.props {
+  mut acc = freeinit_cex
+  assert(acc.r != 3, "freeinit probe")  // refutable ONLY by the initial state
+}

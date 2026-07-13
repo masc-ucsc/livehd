@@ -269,7 +269,7 @@ Ir_inputs gather_ir_inputs(const Options& opts, std::string_view cmd) {
 // to two distinct files is an error, never a silent first-hit.
 std::vector<std::string> collect_imports(const std::shared_ptr<Lnast>& ln);  // defined below
 
-void discover_imports(Options& opts, Eprp_var& var, size_t n_imports) {
+void discover_imports(Eprp_var& var, size_t n_imports, const std::vector<std::string>& seed_files) {
   TRACE_EVENT("pyrope", "discover_imports");
   auto dir_of = [](std::string_view p) -> std::string {
     auto s = p.rfind('/');
@@ -325,7 +325,7 @@ void discover_imports(Options& opts, Eprp_var& var, size_t n_imports) {
 
   absl::flat_hash_map<std::string, std::string>          unit_dir;      // unit -> source dir (case-sensitive)
   absl::flat_hash_set<std::string> parsed_paths;  // abs paths already parsed
-  for (const auto& f : opts.files) {
+  for (const auto& f : seed_files) {
     unit_dir[unit_name_of(f)] = dir_of(f);
     parsed_paths.insert(abspath_of(f));
   }
@@ -472,7 +472,7 @@ size_t pyrope_parse(Options& opts, Result& res, Eprp_var& var, const std::vector
   // 2i-import S1 — transitively pull in imported sibling sources from each
   // importing file's own directory, so a single-file compile needs no
   // dependency list (and the LSP resolves the same way).
-  discover_imports(opts, var, n_imports);
+  discover_imports(var, n_imports, opts.files);
   if (lnastfmt_enabled(opts)) {
     run_step("pass.lnastfmt", var, {}, opts, res);
   }

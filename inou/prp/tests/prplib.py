@@ -647,6 +647,98 @@ class PrpRunner:
             return rc
         return rc
 
+    def run_verify(self, tmp_dir, test: PrpTest):
+        # `:type: verify` — drive `lhd formal verify` on the fixture (design and
+        # `formal` blocks live in ONE .prp file) with a persistent --workdir and
+        # check the header expectations against the run's machine artifacts:
+        #   :top_module: <name>        --top (defaults to 'top')
+        #   :verify_bound: N           formal.bound (default 6)
+        #   :verify_proven: N          exact PROVEN count in formal_report.json
+        #   :verify_refuted: N         exact REFUTED count; N>0 also demands a
+        #                              non-zero exit and workdir/formalfail.prp
+        #                              (the counterexample testbench)
+        #   :verify_replay: fired      the formalfail replay re-fired the assert
+        #   :verify_replay: no-refire  the replay ran but warned it could not
+        #                              reproduce (free initial state)
+        wd = self._scratch(test, 'verify')
+        os.makedirs(os.path.join(tmp_dir, wd), exist_ok=True)
+        cmd = [self.lhd, 'formal', 'verify']
+        cmd += test.params['files']
+        cmd += ['--top', test.params['top_module'], '--workdir', wd]
+        cmd += ['--set', 'formal.bound={}'.format(test.params.get('verify_bound', '6'))]
+        # The replay is run by the HARNESS below, VCD-less: the built-in
+        # prpfailrun compiles the VCD writer source, which bazel runfiles do
+        # not stage (cc_library data deps carry headers/libs, not .cpp).
+        cmd += ['--set', 'formal.prpfailrun=false']
+
+        proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        try:
+            log_b, _ = proc.communicate()
+            rc = proc.returncode
+        except:
+            proc.kill()
+            log_b, rc = b'', 1
+        log = log_b.decode('utf-8', 'ignore')
+
+        problems = []
+        want_refuted = int(test.params.get('verify_refuted', -1))
+        want_proven  = int(test.params.get('verify_proven', -1))
+        if want_refuted > 0 and rc == 0:
+            problems.append('expected a REFUTED run (exit != 0), got rc=0')
+        if want_refuted == 0 and rc != 0:
+            problems.append('expected a clean run, got rc={}'.format(rc))
+
+        report = os.path.join(tmp_dir, wd, 'formal_report.json')
+        if not os.path.exists(report):
+            problems.append('missing {} (the agent-loop report must exist on EVERY run)'.format(report))
+        else:
+            with open(report) as f:
+                rep = json.load(f)
+            got_proven  = sum(1 for o in rep['obligations'] if o['verdict'] == 'proven')
+            got_refuted = sum(1 for o in rep['obligations'] if o['verdict'] == 'refuted')
+            if want_proven >= 0 and got_proven != want_proven:
+                problems.append('proven count: want {}, got {}'.format(want_proven, got_proven))
+            if want_refuted >= 0 and got_refuted != want_refuted:
+                problems.append('refuted count: want {}, got {}'.format(want_refuted, got_refuted))
+
+        if want_refuted > 0:
+            tb = os.path.join(tmp_dir, wd, 'formalfail.prp')
+            if not os.path.exists(tb):
+                problems.append('missing {} (counterexample testbench)'.format(tb))
+
+        # Replay oracle: re-simulate the generated counterexample testbench
+        # (VCD-less — the embedded assert alone decides). `fired` = the driven
+        # trace re-fires the assert (sim exits non-zero); `no-refire` = the
+        # replay completes clean, i.e. the witness is NOT reproducible by input
+        # driving alone (free initial state — interactively, `lhd formal
+        # verify` warns formalfail-replay-no-refire on its own VCD replay).
+        replay = test.params.get('verify_replay', '')
+        if replay:
+            tb = os.path.join(wd, 'formalfail.prp')
+            rcmd = [self.lhd, 'sim', test.params['files'][0], tb, '--workdir', wd + '_sim']
+            rproc = subprocess.Popen(rcmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            try:
+                rlog_b, _ = rproc.communicate()
+                rrc = rproc.returncode
+            except:
+                rproc.kill()
+                rlog_b, rrc = b'', -1
+            if replay == 'fired' and rrc == 0:
+                problems.append('the counterexample replay did not re-fire the assert')
+                log += '\n---- replay ----\n' + rlog_b.decode('utf-8', 'ignore')
+            if replay == 'no-refire' and rrc != 0:
+                problems.append('the free-initial-state witness unexpectedly reproduced (rc={})'.format(rrc))
+                log += '\n---- replay ----\n' + rlog_b.decode('utf-8', 'ignore')
+
+        if problems:
+            print('{} - verify - failed'.format(test.params['name']))
+            for p in problems:
+                print('  ' + p)
+            print(log)
+            return 1
+        print('{} - verify - success'.format(test.params['name']))
+        return 0
+
     def run(self, tmp_dir, test: PrpTest):
 
         rc = 0
@@ -668,6 +760,9 @@ class PrpRunner:
                 # import lazily so only the `prp-sim-*` targets need it staged.
                 from prpsim import run_simulation
                 rc = run_simulation(self, tmp_dir, test)
+                continue
+            if mode == 'verify':
+                rc = self.run_verify(tmp_dir, test)
                 continue
 
             cmd = self.gen_lhd_cmd(test, mode)

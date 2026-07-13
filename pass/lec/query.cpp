@@ -4445,6 +4445,24 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   enc.set_encode_budget(opts.timeout);  // 2f-lec: bound per-cycle encode wall-clock like each checkSat
   enc.set_sub_lib(sub_lib);
   enc.set_emit_props(true);
+  // Submodule port taps: a monitor may bind a SUBMODULE port (Src::output with
+  // a "\x05tap:<inst>.<port>" key); tell the encoder which instances to tap.
+  // The set outlives every encode (probe / per-cycle loop / induction frames).
+  absl::flat_hash_set<std::string> tap_insts;
+  for (size_t mi = 0; monitors != nullptr && mi < monitors->size(); ++mi) {
+    for (const auto& b : (*monitors)[mi].binds) {
+      constexpr std::string_view pfx{"\x05tap:", 5};
+      if (b.src == Monitor::Bind::Src::output && std::string_view(b.key).substr(0, pfx.size()) == pfx) {
+        auto rest = std::string_view(b.key).substr(pfx.size());
+        if (auto dot = rest.rfind('.'); dot != std::string_view::npos) {
+          tap_insts.insert(std::string(rest.substr(0, dot)));
+        }
+      }
+    }
+  }
+  if (!tap_insts.empty()) {
+    enc.set_port_taps(&tap_insts);
+  }
 
   // Primary inputs (one design).
   struct In {

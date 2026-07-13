@@ -330,6 +330,40 @@ OUT="$W/orphan.out"
 grep -q 'does not instantiate' "$OUT" || fail "orphan-target error must say so: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
+# 6b2. Submodule PORT binding (encoder "\x05tap:" outputs): a submodule-bound
+#      block reaches the instance's input/output PORTS as well as its
+#      registers; an input-port assume classifies as an input env constraint
+#      and freezes each instance independently; a false port claim REFUTES
+#      with the @instance attribution (taps are never vacuous).
+# ---------------------------------------------------------------------------
+cat >"$W/leafports.verify.prp" <<'HEOF'
+const sub = import("hier.leafcnt")
+formal leaf.ports {
+  mut acc = sub
+  assume(acc.en == 0)
+  assert(acc.c == 0 and acc.v == 0, "frozen leaf pins register and port at 0")
+}
+HEOF
+OUT="$W/leafports.out"
+"$LHD" formal verify "$W/hier.prp" "$W/leafports.verify.prp" --top duo --set formal.bound=6 >"$OUT" 2>&1
+[ $? -eq 0 ] || fail "submodule port binding must prove (got rc!=0): $(cat "$OUT")"
+n_rows=$(grep -c 'frozen leaf pins.*PROVEN' "$OUT")
+[ "$n_rows" -eq 2 ] || fail "the port block must bind BOTH leafcnt instances (got $n_rows rows): $(cat "$OUT")"
+grep -q 'in force (input environment constraint' "$OUT" || fail "an instance input-port assume must classify as input: $(cat "$OUT")"
+
+cat >"$W/leafbad.verify.prp" <<'HEOF'
+const sub = import("hier.leafcnt")
+formal leaf.badport {
+  mut acc = sub
+  assert(acc.v == 5, "always five")
+}
+HEOF
+OUT="$W/leafbad.out"
+"$LHD" formal verify "$W/hier.prp" "$W/leafbad.verify.prp" --top duo --set formal.bound=6 >"$OUT" 2>&1
+[ $? -ne 0 ] || fail "a false submodule port assert must refute (got rc=0): $(cat "$OUT")"
+grep -q '\[leaf.badport@.*REFUTED at cycle' "$OUT" || fail "the port refute must carry @instance: $(cat "$OUT")"
+
+# ---------------------------------------------------------------------------
 # 8. --workdir on a REFUTED run writes formalfail.prp (the lec-lecfail
 #    analogue): a self-contained `lhd sim` testbench driving the violating
 #    input trace. Generation only (prpfailrun=false keeps the test hermetic —

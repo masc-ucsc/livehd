@@ -283,6 +283,33 @@ cc_direct_headers(
     for prp_file in glob(["tests/sim/*.prp"])
 ]
 
+# `:type: verify` fixtures (tests/verify/): the harness drives `lhd formal
+# verify` on a single self-contained .prp (design + `formal` blocks) with a
+# --workdir, then checks the header expectations against the machine artifacts:
+# formal_report.json verdict counts, the formalfail.prp counterexample
+# testbench on an expected REFUTE, and the replay outcome (:verify_replay:
+# fired = the driven trace re-fires the assert; no-refire = the loud
+# free-initial-state warning). The replay compiles a sim driver, hence the
+# sim_runtime_hdrs data dep. Distinct `prp-verify-` prefix.
+[
+    sh_test(
+        name = "prp-verify-%s" % prp_file.split("/")[-1].split(".")[0],
+        srcs = ["tests/pyrope_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:%s)" % prp_file,
+        ],
+        data = [
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//inou/prp:%s" % prp_file,
+            "//inou/prp:sim_runtime_hdrs",
+            "//lhd",
+        ],
+    )
+    for prp_file in glob(["tests/verify/*.prp"])
+]
+
 # Equivalence pairs (tests/equiv/<name>.prp + golden <name>.v): the harness
 # lowers the .prp to Verilog (tolg path) and formally LECs it against the
 # golden via inou/yosys/lgcheck, so these need the yosys scripts/binary on

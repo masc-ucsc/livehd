@@ -362,9 +362,32 @@ void sim_command(Options& opts, Result& res) {
   int  build_rc  = 0;
   auto build_out = capture(cc, build_rc);
   if (build_rc != 0) {
+    // Persist the full compiler output (in JSONL mode it was previously
+    // swallowed entirely — "see the compiler output" pointed nowhere) and
+    // surface the first error line in the machine-readable message.
+    const std::string build_log = simdir + "/build.log";
+    {
+      std::ofstream bl(build_log);
+      if (bl.is_open()) {
+        bl << cc << "\n\n" << build_out;
+      }
+    }
+    std::string first_err;
+    {
+      std::istringstream iss(build_out);
+      std::string        ln;
+      while (std::getline(iss, ln)) {
+        if (ln.find("error") != std::string::npos) {
+          first_err = ln;
+          break;
+        }
+      }
+    }
     res.status        = "fail";
     res.error_class   = "compile";
-    res.error_message = "the sim driver failed to compile (see the compiler output)";
+    res.error_message = std::format("the sim driver failed to compile ({}): {}",
+                                    build_log,
+                                    first_err.empty() ? std::string{"see the log"} : first_err);
     res.exit_code     = 1;
     if (pretty) {
       std::istringstream iss(build_out);

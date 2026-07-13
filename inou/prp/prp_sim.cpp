@@ -4,8 +4,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <fstream>
 #include <functional>
 #include <map>
@@ -541,9 +544,42 @@ public:
       o << "  long " << v << " = 0;\n";
     }
     for (const auto& [aname, elems] : arrays_) {
+      // Classify: any element wider than 64 bits flips the WHOLE array onto the
+      // string plane (`const char*[]`), consumed exactly by the wide
+      // __prp_poke overload; otherwise stay on the long plane, with
+      // above-int64 elements rendered bit-preserving ((long)0x…ULL — the poke
+      // zero-extends raw low bits, so any width <= 64 drives exact).
+      bool wide = false;
+      for (const auto& e : elems) {
+        unsigned long long v = 0;
+        if (int_literal_class(e, v) == 2) {
+          wide = true;
+          break;
+        }
+      }
+      if (wide) {
+        o << "  static const char* " << aname << "[] = {";
+        for (size_t i = 0; i < elems.size(); ++i) {
+          unsigned long long v = 0;
+          if (int_literal_class(elems[i], v) < 0) {
+            fail("array '" + aname + "' mixes a >64-bit constant with a non-literal element: " + elems[i]);
+          }
+          o << (i != 0 ? ", " : "") << '"' << elems[i] << '"';
+        }
+        o << "};\n";
+        continue;
+      }
       o << "  long " << aname << "[] = {";
       for (size_t i = 0; i < elems.size(); ++i) {
-        o << (i != 0 ? ", " : "") << elems[i];
+        unsigned long long v  = 0;
+        const int          cl = int_literal_class(elems[i], v);
+        std::string        e  = elems[i];
+        if (cl == 1) {
+          char buf[32];
+          std::snprintf(buf, sizeof buf, "(long)0x%llxULL", v);
+          e = buf;
+        }
+        o << (i != 0 ? ", " : "") << e;
       }
       o << "};\n";
     }
@@ -788,7 +824,7 @@ private:
         if (!ts_node_is_null(rv) && ntype(rv) == "tuple_sq") {
           std::vector<std::string> elems;
           for (TSNode c : ts_node_named_children(rv)) {
-            elems.push_back(expr(c));
+            elems.push_back(array_elem(c));
           }
           arrays_[ln] = elems;
         } else if (!m.empty()) {
@@ -804,6 +840,77 @@ private:
   }
 
   // ---- expression -> C++ (int64-valued) -------------------------------------
+  // Lower a Pyrope integer literal onto the driver's `long` value plane.
+  // Pyrope integers are arbitrary precision, C++ `long` is not: a decimal/hex
+  // constant above LLONG_MAX (e.g. an auto-generated formalfail testbench
+  // driving a witness value like 18446744073709551712 on a u64 bus) is not a
+  // valid C++ `long` literal and used to break the driver COMPILE. Values that
+  // fit in uint64 are emitted as a bit-preserving `(long)0x…ULL` — exact for
+  // any poke target of width <= 64 (Slop masks to the port width). Anything
+  // wider than 64 bits cannot ride the long plane at all: fail LOUDLY at
+  // generation instead of emitting uncompilable or silently-wrong C++.
+  std::string cpp_int_literal(std::string lit) {
+    unsigned long long v  = 0;
+    const int          cl = int_literal_class(lit, v);
+    if (cl <= 0) {
+      return lit;  // fits int64 verbatim, or a spelling we leave untouched
+    }
+    if (cl == 2) {
+      fail("testbench integer constant does not fit 64 bits in an expression (drive it via a poke, whose string "
+           "plane is exact at any width): "
+           + lit);
+    }
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "(long)0x%llxULL", v);
+    return buf;
+  }
+
+  // An ARRAY element keeps a plain integer literal VERBATIM (no long-plane
+  // rendering): the array emitter classifies the whole array afterwards — a
+  // 64-bit-representable array stays `long[]`, one with any wider element is
+  // emitted as decimal strings and consumed by the wide __prp_poke overload.
+  std::string array_elem(TSNode n) {
+    TSNode lit = n;
+    if (ntype(lit) == "constant") {
+      for (TSNode c : ts_node_named_children(lit)) {
+        if (ntype(c) == "integer_literal") {
+          lit = c;
+          break;
+        }
+      }
+    }
+    if (ntype(lit) == "integer_literal") {
+      return strip_sep(text_of(src_, lit));
+    }
+    return expr(n);
+  }
+
+  // Raw decimal/hex literal -> value class: 0 = fits int64 (verbatim is valid
+  // C++), 1 = fits uint64 (needs the bit-preserving ULL rendering), 2 = wider
+  // than 64 bits (only the string/from_pyrope plane can carry it), -1 = not a
+  // plain parseable literal.
+  static int int_literal_class(const std::string& lit, unsigned long long& v) {
+    if (lit.empty()) {
+      return -1;
+    }
+    errno     = 0;
+    char* end = nullptr;
+    if (lit.size() > 2 && lit[0] == '0' && (lit[1] == 'x' || lit[1] == 'X')) {
+      v = std::strtoull(lit.c_str() + 2, &end, 16);
+    } else if (std::isdigit(static_cast<unsigned char>(lit[0])) != 0) {
+      v = std::strtoull(lit.c_str(), &end, 10);
+    } else {
+      return -1;
+    }
+    if (end == nullptr || *end != '\0') {
+      return -1;
+    }
+    if (errno == ERANGE) {
+      return 2;
+    }
+    return v <= static_cast<unsigned long long>(std::numeric_limits<long long>::max()) ? 0 : 1;
+  }
+
   std::string expr(TSNode n) {
     auto t = ntype(n);
     if (t == "identifier") {
@@ -818,7 +925,7 @@ private:
       for (TSNode c : ts_node_named_children(n)) {
         auto ct = ntype(c);
         if (ct == "integer_literal") {
-          return strip_sep(text_of(src_, c));
+          return cpp_int_literal(strip_sep(text_of(src_, c)));
         }
         if (ct == "bool_literal") {
           return text_of(src_, c) == "true" ? "1" : "0";
@@ -827,7 +934,7 @@ private:
       return text_of(src_, n);
     }
     if (t == "integer_literal") {
-      return strip_sep(text_of(src_, n));
+      return cpp_int_literal(strip_sep(text_of(src_, n)));
     }
     if (t == "bool_literal") {
       return text_of(src_, n) == "true" ? "1" : "0";
@@ -1145,7 +1252,14 @@ private:
     std::string base, fld;
     if (inst_dot(lv, base, fld)) {
       std::string tgt = field_access(base, fld, /*write=*/true);
-      o << ind << "__prp_poke(" << tgt << ", " << expr(rv) << ");\n";
+      // A >64-bit constant poke rides the string plane (exact at any width).
+      std::string        raw = array_elem(rv);
+      unsigned long long v   = 0;
+      if (int_literal_class(raw, v) == 2) {
+        o << ind << "__prp_poke(" << tgt << ", \"" << raw << "\");\n";
+      } else {
+        o << ind << "__prp_poke(" << tgt << ", " << expr(rv) << ");\n";
+      }
       return;
     }
 
@@ -1753,13 +1867,18 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   // min(64,N) bits and zeroes the rest (identical to create_integer for N<=64).
   o << "template<int N> static inline void __prp_poke(Slop<N>& d, long long v){ "
        "d = Slop<64>::create_integer(v).template zext_to<N>(); }\n";
+  // Wide poke: a testbench constant that does not fit 64 bits (e.g. a formalfail
+  // witness driving a u65 CSR bus) rides as a decimal STRING and converts at the
+  // port's own width via the constexpr pyrope codec — exact at any width.
+  o << "template<int N> static inline void __prp_poke(Slop<N>& d, std::string_view v){ "
+       "d = Slop<N>::from_pyrope(v); }\n";  // string_view: a literal 0 must not be ambiguous with a null pointer
   const bool vcd_on = !vcd_dir.empty();
   if (vcd_on) {
     // For vcd::global_timestamp — reset between tests (see main()).
     o << "#include \"vcd_writer.hpp\"\n";
   }
   o << "#include <cstdio>\n#include <cstdint>\n#include <cstdlib>\n#include <cerrno>\n#include <cctype>\n"
-       "#include <string>\n#include <map>\n#include <set>\n#include <vector>\n#include <fstream>\n#include <chrono>\n\n";
+       "#include <string>\n#include <string_view>\n#include <map>\n#include <set>\n#include <vector>\n#include <fstream>\n#include <chrono>\n\n";
 
   // Checkpoint configuration (sim.checkpoint*): periodic fork-checkpoints of the
   // DUT state + testbench frame, written under <dir>/<test>/ckp<cycle>/, pruned to

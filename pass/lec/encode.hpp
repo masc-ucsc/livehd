@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
 
 namespace livehd::lec {
@@ -320,6 +321,15 @@ public:
   // output, and a one-sided \x04 output would gate lec to Unknown).
   void set_emit_props(bool on) { emit_props_ = on; }
 
+  // 2f-verify submodule port taps: for every Sub instance whose HIER name is in
+  // `insts`, emit each resolvable input/output port value as a synthetic output
+  //   "\x05tap:<inst_hier>.<port>"
+  // so a formal-block monitor can bind a SUBMODULE port exactly like a top-level
+  // output (Monitor::Bind::Src::output with the tap key). Values are fitted to
+  // the port DECLARATION's width (the same width the CLI types the monitor input
+  // with). Default nullptr: no taps, zero cost. The set must outlive the encoder.
+  void set_port_taps(const absl::flat_hash_set<std::string>* insts) { port_taps_ = insts; }
+
   // Budget-aware encode (2f-lec): a wall-clock budget, in SECONDS, bounding each
   // top-level encode() call. encode() is where deep/late hierarchical parents can
   // spend minutes flattening the instance tree BEFORE cvc5 is ever called (the
@@ -356,6 +366,7 @@ private:
   int                                                 sub_depth_   = 0;  // Sub flattening recursion guard
   bool                                                x_dontcare_  = false;  // ref-side X = don't-care (lec.gold_x=ignore)
   bool                                                emit_props_  = false;  // emit fproperty conds as \x04prop: outputs (2f-verify)
+  const absl::flat_hash_set<std::string>*             port_taps_   = nullptr;  // sub instances whose ports get \x05tap: outputs
   int                                                 budget_seconds_ = 0;  // per-encode wall-clock budget in s (2f-lec); 0 = none
   std::optional<std::chrono::steady_clock::time_point> deadline_{};  // set at each top-level encode() entry from budget_seconds_
 };
