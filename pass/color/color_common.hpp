@@ -4,10 +4,11 @@
 
 // Shared helpers for the pass/color algorithms (the revived pass/label, 2c).
 //
-// The four algorithms (acyclic, synth, path, mincut) each compute a per-node
-// color id over a single graph def and then hand the result to apply_coloring,
-// which performs the optional continuous (per-region) split and writes either
-// the flat per-def color (default, "compact") or the per-instance hier color.
+// The algorithms (acyclic, cgen, synth, path, mincut, flat) each compute a
+// per-node color id over a single graph def and then hand the result to
+// apply_coloring, which performs the optional continuous (per-region) split and
+// writes either the flat per-def color (default, "compact") or the per-instance
+// hier color.
 
 #include <cstdint>
 #include <string>

@@ -145,12 +145,21 @@ std::vector<std::shared_ptr<Lnast>> filter_top(const std::vector<std::shared_ptr
   if (top.empty()) {
     return units;
   }
-  std::vector<std::shared_ptr<Lnast>> out;
-  std::vector<std::string>            names;
+  std::vector<std::string> names;
+  names.reserve(units.size());
   for (const auto& ln : units) {
     names.emplace_back(ln->get_top_module_name());
-    if (ln->get_top_module_name() == top) {
-      out.push_back(ln);
+  }
+  // Unit names are the internal `file.entity`; accept a bare `--top XXX` when
+  // it resolves to the unique XXX entity (resolve_top_name warns on fallback).
+  std::string want = top;
+  if (const std::string resolved = resolve_top_name(names, top, "lhd.compile"); !resolved.empty()) {
+    want = resolved;
+  }
+  std::vector<std::shared_ptr<Lnast>> out;
+  for (size_t i = 0; i < units.size(); ++i) {
+    if (names[i] == want) {
+      out.push_back(units[i]);
     }
   }
   if (out.empty()) {
@@ -492,6 +501,10 @@ std::string verilog_frontend(Options& opts, Result& res, Eprp_var& var) {
   const auto* d_out    = find_slot(opts.emit_dirs, "lg");
   std::string lib_path = d_out ? d_out->path : workdir(opts) + "/lgdb";
 
+  // --top rides RAW to yosys: source-level module names may legitimately
+  // contain '.' (LiveHD's own cgen emits `file.entity` as an escaped Verilog
+  // identifier), so no entity-stripping here — an unknown top fails loudly in
+  // yosys itself.
   Eprp_var::Eprp_dict labels{
       {    "path",                                                                       lib_path},
       {     "top",                         opts.top.empty() ? std::string{"-auto-top"} : opts.top},
@@ -540,6 +553,8 @@ void slang_parse(Options& opts, Result& res, Eprp_var& var) {
   }
   // Forward --top so inou.slang elaborates only that module's hierarchy (it
   // otherwise auto-tops every uninstantiated module, e.g. a sim/difftest top).
+  // Raw: source module names may contain '.' via escaped identifiers (cgen
+  // emits `file.entity` that way), so no entity-stripping here.
   if (!opts.top.empty() && opts.top != "-auto-top") {
     labels["top"] = opts.top;
   }

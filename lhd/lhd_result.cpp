@@ -19,6 +19,7 @@
 #include "hhds/graph.hpp"
 #include "lhd.hpp"
 #include "node_util.hpp"
+#include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include "woothash.hpp"
@@ -185,6 +186,158 @@ std::string source_date_epoch_iso() {
   return buf;
 }
 
+// ---- pretty qor rendering ---------------------------------------------------
+// A pass's structured qor payload (embed_qor_sidecar) rendered as a short
+// human report per `kind` instead of the raw JSON blob. jsonl mode embeds the
+// payload untouched; an unknown/unparseable kind keeps the raw dump.
+
+std::string json_str(const rapidjson::Value& v, const char* key) {
+  auto it = v.FindMember(key);
+  if (it == v.MemberEnd() || !it->value.IsString()) {
+    return {};
+  }
+  return {it->value.GetString(), it->value.GetStringLength()};
+}
+
+bool json_num(const rapidjson::Value& v, const char* key, double& out) {
+  auto it = v.FindMember(key);
+  if (it == v.MemberEnd() || !it->value.IsNumber()) {
+    return false;
+  }
+  out = it->value.GetDouble();
+  return true;
+}
+
+// kind:"sta" (pass.opentimer timing.json): an OpenSTA-style report per design
+// — max-delay summary, the critical-path Delay/Time/Description table, and
+// the worst-endpoint arrivals, each source-attributed when a src is present.
+bool write_pretty_sta(const rapidjson::Value& d) {
+  auto dit = d.FindMember("designs");
+  if (dit == d.MemberEnd() || !dit->value.IsArray()) {
+    return false;
+  }
+  const std::string unit = json_str(d, "time_unit");
+  for (const auto& des : dit->value.GetArray()) {
+    if (!des.IsObject()) {
+      continue;
+    }
+    std::string head = std::format("  sta: {}", json_str(des, "module"));
+    if (double md = 0; json_num(des, "max_delay", md)) {
+      head += std::format("  max delay {:.3f}{}{}", md, unit.empty() ? "" : " ", unit);
+    }
+    std::print("{}\n", head);
+    if (auto cp = json_str(des, "critical_pin"); !cp.empty()) {
+      auto src = json_str(des, "critical_src");
+      std::print("    critical pin: {}{}\n", cp, src.empty() ? std::string{} : std::format("  ({})", src));
+    }
+    if (auto pit = des.FindMember("path"); pit != des.MemberEnd() && pit->value.IsArray() && !pit->value.Empty()) {
+      const auto path = pit->value.GetArray();
+      std::print("\n       Delay      Time   Description\n");
+      std::print("    ------------------------------------------------------------\n");
+      double last_at = 0;
+      for (rapidjson::SizeType i = 0; i < path.Size(); ++i) {
+        const auto& p = path[i];
+        if (!p.IsObject()) {
+          continue;
+        }
+        double at    = 0;
+        double delay = 0;
+        json_num(p, "at", at);
+        json_num(p, "delay", delay);
+        last_at   = at;
+        auto dir  = json_str(p, "dir");
+        char mark = dir == "rise" ? '^' : (dir == "fall" ? 'v' : ' ');
+        auto cell = json_str(p, "cell");
+        auto src  = json_str(p, "src");
+
+        std::string desc = json_str(p, "pin");
+        if (!cell.empty()) {
+          desc += std::format(" ({})", cell);
+        } else if (i == 0) {
+          desc += " (in)";  // module input or a flop/memory-boundary arrival
+        } else if (i + 1 == path.Size()) {
+          desc += " (out)";
+        }
+        if (!src.empty()) {
+          desc += std::format("  {}", src);
+        }
+        std::print("    {:>8.3f}  {:>8.3f} {} {}\n", delay, at, mark, desc);
+      }
+      std::print("              {:>8.3f}   data arrival time\n", last_at);
+    }
+    if (auto eit = des.FindMember("endpoints"); eit != des.MemberEnd() && eit->value.IsArray() && !eit->value.Empty()) {
+      std::print("\n    worst endpoints:\n");
+      for (const auto& e : eit->value.GetArray()) {
+        if (!e.IsObject()) {
+          continue;
+        }
+        double delay = 0;
+        json_num(e, "delay", delay);
+        auto src = json_str(e, "src");
+        std::print("    {:>8.3f}  {}{}\n", delay, json_str(e, "pin"), src.empty() ? std::string{} : std::format("  ({})", src));
+      }
+    }
+  }
+  return true;
+}
+
+// kind:"abc-map" (pass.abc qor.json): the compact one-line summary (the same
+// shape as the pass's own step-log line, which fd redirection keeps off the
+// terminal).
+bool write_pretty_abc_map(const rapidjson::Value& d) {
+  auto tit = d.FindMember("total");
+  if (tit == d.MemberEnd() || !tit->value.IsObject()) {
+    return false;
+  }
+  const auto& t       = tit->value;
+  double      regions = 0;
+  double      gates   = 0;
+  double      area    = 0;
+  json_num(t, "regions", regions);
+  json_num(t, "gates", gates);
+  json_num(t, "area", area);
+  std::string line
+      = std::format("  qor: abc-map '{}': {:.0f} region(s), {:.0f} gates, area {:.2f}", json_str(d, "top"), regions, gates, area);
+  if (double md = 0; json_num(t, "max_delay", md)) {
+    line += std::format(", max delay {:.2f}", md);
+    std::string crit;
+    if (auto r = json_str(t, "critical_region"); !r.empty()) {
+      crit += std::format("region '{}'", r);
+    }
+    if (auto o = json_str(t, "critical_output"); !o.empty()) {
+      crit += std::format("{}output '{}'", crit.empty() ? "" : " ", o);
+    }
+    if (auto s = json_str(t, "critical_src"); !s.empty()) {
+      crit += std::format(" @ {}", s);
+    }
+    if (!crit.empty()) {
+      line += std::format(" ({})", crit);
+    }
+  }
+  if (double bb = 0; json_num(t, "div_blackbox", bb) && bb > 0) {
+    line += std::format("  [PARTIAL: {:.0f} blackboxed div/mod cone(s) unscored]", bb);
+  }
+  std::print("{}\n", line);
+  return true;
+}
+
+void write_pretty_qor(const std::string& qor_json) {
+  rapidjson::Document d;
+  d.Parse(qor_json.data(), qor_json.size());
+  bool rendered = false;
+  if (!d.HasParseError() && d.IsObject()) {
+    const auto kind = json_str(d, "kind");
+    if (kind == "sta") {
+      rendered = write_pretty_sta(d);
+    } else if (kind == "abc-map") {
+      rendered = write_pretty_abc_map(d);
+    }
+  }
+  if (!rendered) {
+    std::print("  qor: {}\n", qor_json);
+  }
+}
+
 // --diag-fmt pretty: a short human status block on stdout instead of the JSON
 // envelope. --result-json files always carry JSON; stderr already renders the
 // per-diagnostic clang-style text, so this only summarizes the step result.
@@ -228,7 +381,7 @@ void write_pretty(const Options& opts, const Result& res) {
     std::print("  debug: {}\n", res.sim_debug_json);
   }
   if (!res.qor_json.empty()) {
-    std::print("  qor: {}\n", res.qor_json);
+    write_pretty_qor(res.qor_json);
   }
   if (res.status != "pass") {
     std::print("  {}error[{}]{}: {}\n", bad, res.error_class, off, res.error_message);

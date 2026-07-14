@@ -123,7 +123,20 @@ hhds::Pin_class Cgen_sim::find_sink_pin(const hhds::Node_class& node, std::strin
   }
   auto op = type_op_of(node);
   if (op == Ntype_op::Sub) {
-    return node.get_sink_pin(name);
+    // Same invalid-on-miss contract for sub instances: resolve the name via the
+    // sub-graph's GraphIO decls and walk inp_edges — a declared input that was
+    // never connected has no materialized pin, and hhds get_sink_pin asserts.
+    auto sub_io = node.get_subnode_io();
+    if (!sub_io || !sub_io->has_input(name)) {
+      return {};
+    }
+    auto pid = sub_io->get_input_port_id(name);
+    for (const auto& e : node.inp_edges()) {
+      if (e.sink.get_port_id() == pid) {
+        return e.sink;
+      }
+    }
+    return {};
   }
   auto pid = Ntype::get_sink_pid(op, name);
   if (pid == livehd::Port_invalid) {
@@ -132,6 +145,27 @@ hhds::Pin_class Cgen_sim::find_sink_pin(const hhds::Node_class& node, std::strin
   for (const auto& e : node.inp_edges()) {
     if (e.sink.get_port_id() == pid) {
       return e.sink;
+    }
+  }
+  return {};
+}
+
+hhds::Pin_class Cgen_sim::find_driver_pin(const hhds::Node_class& node, std::string_view name) {
+  // Invalid-on-miss probe for a Sub instance's declared output: a declared
+  // output with no consumer has no materialized pin (hhds get_driver_pin
+  // asserts on it), and an edge-less pin is unnamed to the emitted code
+  // anyway — walk out_edges and match the resolved port_id.
+  if (node.is_invalid()) {
+    return {};
+  }
+  auto sub_io = node.get_subnode_io();
+  if (!sub_io || !sub_io->has_output(name)) {
+    return {};
+  }
+  auto pid = sub_io->get_output_port_id(name);
+  for (const auto& e : node.out_edges()) {
+    if (e.driver.get_port_id() == pid) {
+      return e.driver;
     }
   }
   return {};
@@ -561,22 +595,27 @@ int flatten_false_loop_subs(hhds::Graph* g) {
 
     // (c) resolve each callee OUTPUT port to its g-driver and the Sub-output's
     // consumer sinks (computed BEFORE deleting the Sub, which still owns them).
+    // Walk out_edges instead of probing get_driver_pin per decl: a declared
+    // output with no consumer has no materialized pin and hhds asserts.
+    absl::flat_hash_map<uint32_t, std::vector<hhds::Pin_class>> out_sinks;
+    for (const auto& oe : sub.out_edges()) {
+      out_sinks[static_cast<uint32_t>(oe.driver.get_port_id())].push_back(oe.sink);
+    }
     std::vector<std::pair<hhds::Pin_class, std::vector<hhds::Pin_class>>> reconnect;
     for (const auto& od : sio->get_output_pin_decls()) {
+      auto sit = out_sinks.find(static_cast<uint32_t>(od.port_id));
+      if (sit == out_sinks.end()) {
+        continue;
+      }
       auto internal = driver_of(cg->get_output_pin(od.name));  // driver inside the callee
       if (internal.is_invalid()) {
         continue;
       }
-      auto gdrv   = map_driver(internal);
-      auto subout = sub.get_driver_pin(od.name);
-      if (gdrv.is_invalid() || subout.is_invalid()) {
+      auto gdrv = map_driver(internal);
+      if (gdrv.is_invalid()) {
         continue;
       }
-      std::vector<hhds::Pin_class> sinks;
-      for (auto oe : subout.out_edges()) {
-        sinks.push_back(oe.sink);
-      }
-      reconnect.emplace_back(gdrv, std::move(sinks));
+      reconnect.emplace_back(gdrv, std::move(sit->second));
     }
 
     sub.del_node();  // drops the Sub + all its boundary edges
@@ -918,7 +957,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // hierarchical dump methods) is emitted for EVERY module when tracing is on:
   // the root instance's writer is shared down the hierarchy by __vcd_hier(), so
   // one VCD carries the whole design tree, not just the top's io.
-  const bool is_top  = top.empty() || entity == top;
+  // `top` may be the bare entity or the full internal `file.entity` name — the
+  // full form is the only spelling that disambiguates two same-entity modules.
+  const bool is_top  = top.empty() || entity == top || gname == top;
   const bool vcd_on  = !vcd_file.empty();
 
   const std::string fstem = sim_file_stem(gname);
@@ -1786,7 +1827,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         fout->append(absl::StrCat("    ", s.callee_struct, "::In ", s.inst, "__i;\n"));
         for (const auto& d : sio->get_input_pin_decls()) {
-          auto drv = get_driver(node.get_sink_pin(d.name));
+          auto drv = get_driver(find_sink_pin(node, d.name));
           int  wb  = d.bits > 0 ? static_cast<int>(d.bits) : 1;
           // Stage-2 per-output-cone deferral: this instance's fed-back outputs
           // were pre-bound from peek(), so its input cone no longer depends on
@@ -1818,7 +1859,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         fout->append(absl::StrCat("    auto ", s.inst, "__o = ", s.inst, ".cycle(", s.inst, "__i);\n"));
         for (const auto& d : sio->get_output_pin_decls()) {
-          auto opin = node.get_driver_pin(d.name);
+          auto opin = find_driver_pin(node, d.name);
           if (!opin.is_invalid()) {
             pin2var[opin.get_class_index()] = absl::StrCat(s.inst, "__o.", cpp_id(d.name));
           }

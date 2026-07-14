@@ -8,6 +8,8 @@
 
 #include "pass_liberty.hpp"
 
+#include "liberty_dff.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <format>
@@ -277,6 +279,18 @@ void Pass_liberty::gensim(Eprp_var& var) {
     }
   }
   Abc_Stop();
+
+  // ABC's read_lib drops sequential cells, so the Mio loop above never sees the
+  // flop. Scan the Liberty text directly for a plain posedge D-flop and emit a
+  // `q = Flop(clk, d)` model so pass.abc's mapped-DFF Subs resolve for LEC/sim.
+  if (auto dff = livehd::liberty::find_dff_cell(files)) {
+    livehd::liberty::emit_dff_model(outlib, *dff);
+    ++modeled;
+    if (verbose) {
+      std::print("[pass.liberty] gensim: DFF model '{}' (d={}, clk={}, q={})\n", dff->name, dff->d_pin, dff->clk_pin,
+                 dff->q_pin);
+    }
+  }
   if (verbose) {
     std::print("[pass.liberty] gensim: {} cells modeled, {} skipped from '{}'\n", modeled, skipped, files);
   }

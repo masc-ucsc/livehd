@@ -16,6 +16,7 @@ cc_library(
     deps = [
         "//graph",
         "//pass/common:pass",
+        "//pass/liberty:liberty_dff",
         "//pass/partition:pass_partition",
         "@abc",
         "@abseil-cpp//absl/container:node_hash_map",

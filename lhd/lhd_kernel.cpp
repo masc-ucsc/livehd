@@ -111,7 +111,8 @@ std::vector<Set_option> list_set_options() {
       Set_option{"lhd.top",
                  "lhd",
                  "",
-                 "top module shared across passes; the canonical form of the --top flag (the flag wins if both are given)"});
+                 "top module shared across passes; the canonical form of the --top flag (the flag wins if both are given). "
+                 "Full internal `file.entity` name, or the bare entity when unique (resolves with a top-entity-fallback warning)"});
   // The `sim.*` command namespace (consumed by sim_command, not an EPRP method):
   // keep `lhd list options` / `lhd describe` complete. Single source of truth =
   // kSimSetOptions, which also drives check_known_set_passes / the sim --help block.

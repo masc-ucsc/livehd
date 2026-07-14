@@ -92,6 +92,24 @@ region read-back stays index-aligned.
 ABC's frame is global: one `Abc_Start`/`Abc_Stop` per run, `read_lib` once before
 the region loop.
 
+### Whole-design flatten (`flatten`)
+
+The decomposition is per-def by default: every module reachable from `--top`
+gets its own wrapper + `__c<color>` region modules, and child instances stay
+blackbox boundaries. With `flatten` the instance hierarchy is structurally
+inlined first (`pass/partition/flatten.cpp`: child bodies cloned per instance,
+node/wire names prefixed with the dotted instance path, srcids/colors carried)
+and ONE decomposition runs on the flat def. A single resulting region — the
+`pass.color flat` case — is emitted directly under the top's own name and port
+list: **one netlist module**, a drop-in replacement for the original def. All
+cross-module `get_mask`/`set_mask` bus-packing glue disappears with the module
+boundaries (only true blackboxes — memories with `memory=false`, div cones,
+external IP — keep their PI/PO cuts), so `lhd pass opentimer` can time the
+whole design in its default single-module mode. `auto` flattens exactly when
+the active coloring came from `pass.color flat`; a multi-color coloring under
+`flatten=true` still produces the wrapper, with regions spanning the former
+hierarchy.
+
 ## Options (`--set pass.abc.<flag>=value`)
 
 The option namespace matches the command path (`lhd pass abc`); after the
@@ -107,6 +125,7 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `multiplier` | comb multiplier architecture for `mult`: `array` (the only option today; the enum is the extension point for Booth/Wallace) | `array` |
 | `delay` / `load` | `{D}` / `{L}` substitution: expands to the full flag (`-D <val>` / `-L <val>`) when set, to nothing when empty — `&nf {D}` needs `-D`, a bare value is silently ignored by ABC | empty |
 | `verbose` | extra per-region prints (assume constraints, …) | `false` |
+| `flatten` | whole-design flatten: `auto`/`true`/`false` — see below | `auto` |
 | `qor` | write the QoR JSON (below) to this file | empty (`lhd pass abc` defaults it to `<workdir>/qor.json` under `--workdir`) |
 | `region_opts` | per-region (color-keyed) overrides, JSON — see below | empty |
 

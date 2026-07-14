@@ -185,6 +185,20 @@ bool Mapper::start() {
     return false;
   }
   lib_loaded_ = true;
+
+  // Register mapping target: scan the Liberty for a plain posedge D-flop (ABC's
+  // read_lib already dropped it, so this is a separate text scan). A missing DFF
+  // cell is not fatal — the read-back keeps flops native (the same shape as
+  // register=false) so the netlist stays correct, just not fully cell-mapped.
+  if (opts_.map_register) {
+    dff_ = liberty::find_dff_cell(opts_.library, opts_.dff_cell);
+    if (!dff_.has_value()) {
+      livehd::diag::warn("pass.abc", "no-dff-cell", "unsupported")
+          .msg("pass.abc register=true: no {} in '{}' — keeping flops native (no DFF-cell mapping)",
+               opts_.dff_cell.empty() ? "plain posedge D-flop cell" : std::format("cell '{}'", opts_.dff_cell), opts_.library)
+          .emit();
+    }
+  }
   return true;
 }
 
@@ -470,6 +484,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     return abc_bin(abc_bin(sel, t, '&'), abc_bin(abc_not(sel), f, '&'), '|');
   };
 
+  // Set when a region node cannot be mapped (unsupported cell / mask); the
+  // region is abandoned after the blast loop. Declared here so abc_bit can
+  // suppress its per-bit unmaterialized-driver diagnostics once the ONE real
+  // unsupported-cell error has fired (the producer wrote no slots, so every
+  // downstream read would otherwise flood the log).
+  bool unsupported = false;
+
   // --- bit i of an original driver pin, with sign/zero extension past width ---
   std::function<Abc_Obj_t*(const hhds::Pin_class&, int)> abc_bit = [&](const hhds::Pin_class& drv, int i) -> Abc_Obj_t* {
     if (drv.is_invalid()) {
@@ -494,9 +515,21 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       slots[eff] = net;
       return net;
     }
-    // A region-internal node not yet materialized (should not happen in topo
-    // order) or an unexpected boundary: emit a constant 0 so the netlist stays
-    // structurally valid; correctness is guarded by the unsupported-cell diag.
+    // A region-internal node not yet materialized (a genuine node-level cycle
+    // the fixpoint scheduler could not resolve) or an unexpected boundary:
+    // emit a constant 0 so the netlist stays structurally valid, and say so —
+    // a silent const0 here miscompiles the whole downstream cone. Suppressed
+    // once the region is already known-unsupported (the producer legitimately
+    // wrote no slots after its own error).
+    if (!unsupported) {
+      livehd::diag::warn("pass.abc", "unmaterialized-driver", "internal")
+          .msg("pass.abc: region '{}': bit {} of driver '{}' (node op {}) read before it was materialized — emitted const0",
+               rb.module_name,
+               eff,
+               gu::debug_name(drv.get_master_node()),
+               Ntype::get_name(gu::type_op_of(drv.get_master_node())))
+          .emit();
+    }
     auto* net  = abc_const_bit(false);
     slots[eff] = net;
     return net;
@@ -603,8 +636,17 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     bool                    neg_reset = false;
     std::vector<Abc_Obj_t*> bi;  // per-bit latch BI (data-in terminal)
   };
-  std::vector<Seq_flop> flops;
-  if (opts_.seq) {
+  // Region-input driver -> port name. Used twice: to reconnect a flop
+  // boundary's control pins natively (see the boundary scan below), and to
+  // decide whether a register's clock even HAS a native source on read-back.
+  absl::flat_hash_map<hhds::Pin_class, std::string> region_in_name;
+  for (const auto& port : rb.inputs) {
+    region_in_name.emplace(port.src_driver, port.name);
+  }
+
+  std::vector<Seq_flop>                  flops;
+  absl::flat_hash_set<hhds::Node_class>  clk_demoted;  // registers demoted to boundary: clock from region-internal logic
+  if (opts_.map_register) {
     for (auto n : rb.src->forward_class()) {
       if (!region.contains(n)) {
         continue;
@@ -628,6 +670,36 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       f.rst_drv  = gu::get_driver_of_sink_name(n, "reset_pin");
       f.rval_drv = gu::get_driver_of_sink_name(n, "initial");
       f.clk_drv  = gu::get_driver_of_sink_name(n, "clock_pin");
+      // tolg wraps a call-site clock in 1-bit Get_mask coercions (`x:u1` casts
+      // survive cprop when the source is signed, and their output carries the
+      // usual unsigned +1 headroom bit). On a 1-bit OPERAND they are wire
+      // identities regardless of the declared output width — trace to the root
+      // so the register's clock is recognized as region-input-driven and the
+      // DFF clock pin connects DIRECTLY to it (never through mapped logic).
+      for (int guard = 0; guard < 8 && !f.clk_drv.is_invalid(); ++guard) {
+        auto m = f.clk_drv.get_master_node();
+        if (gu::type_op_of(m) != Ntype_op::Get_mask) {
+          break;
+        }
+        auto a    = gu::get_driver_of_sink_name(m, "a");
+        auto mask = gu::get_driver_of_sink_name(m, "mask");
+        if (a.is_invalid() || gu::bits_of(a) != 1 || mask.is_invalid() || !gu::is_const_pin(mask)
+            || !gu::hydrate_const(mask).bit_test(0)) {
+          break;
+        }
+        f.clk_drv = a;  // get_mask(bit0) of a 1-bit wire == the wire
+      }
+      // A clock driven by region-INTERNAL logic (a genuinely gated/derived
+      // clock — a shape whole-design flatten makes reachable, since everything
+      // is one region) cannot cross as a latch: the read-back has no native
+      // source for the DFF/flop clock pin and used to silently drop the
+      // connection. Demote the register to a boundary box (the register=false
+      // machinery): it stays a native flop and its clock cone is
+      // technology-mapped and reconnected like any comb-driven boundary input.
+      if (!f.clk_drv.is_invalid() && !gu::is_const_pin(f.clk_drv) && !region_in_name.contains(f.clk_drv)) {
+        clk_demoted.insert(n);
+        continue;
+      }
       if (auto nr = gu::get_driver_of_sink_name(n, "negreset"); !nr.is_invalid() && gu::is_const_pin(nr)) {
         f.neg_reset = gu::hydrate_const(nr).bit_test(0);
       }
@@ -653,6 +725,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         f.bi.push_back(bi);
       }
       flops.push_back(std::move(f));
+    }
+    if (!clk_demoted.empty()) {
+      livehd::diag::warn("pass.abc", "derived-clock-native", "unsupported")
+          .msg("pass.abc region '{}': {} register(s) clocked by region-internal logic (a gated/derived clock) kept as "
+               "native flops — a DFF cell cannot take its clock from mapped logic; the clock cone is still mapped and "
+               "reconnected",
+               rb.module_name,
+               clk_demoted.size())
+          .emit();
     }
   }
 
@@ -680,8 +761,17 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     Ntype_op                                     op;
     std::vector<Bbox_out>                        outs;
     std::vector<Bbox_in>                         ins;
-    std::vector<std::pair<int, hhds::Pin_class>> const_ins;  // (port_id, const driver)
+    std::vector<std::pair<int, hhds::Pin_class>> const_ins;   // (port_id, const driver)
+    std::vector<std::pair<int, hhds::Pin_class>> native_ins;  // flop boundary: (port_id, region-input driver) reconnected directly
   };
+  // region_in_name (built above the register scan) reconnects a flop
+  // boundary's control pins (clock/reset/enable that come straight from a
+  // region input) NATIVELY on read-back. Routing such a clock through the
+  // combinational AIG would map it to a logic buffer and make the rebuilt flop
+  // clock on `posedge <data-wire>` -- logically correct but unusable as a real
+  // netlist (breaks clock-tree synthesis and timing). Only the flop's din cone
+  // (genuine comb logic) crosses into ABC. A clk_demoted register's GATED
+  // clock cone, by contrast, IS genuine logic and does cross as a PO.
   std::vector<Bbox>                      bboxes;
   std::vector<std::tuple<int, int, int>> bbox_pi;  // appended PI -> (bbox, out, bit)
   for (auto n : rb.src->forward_class()) {
@@ -689,7 +779,15 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       continue;
     }
     auto op = gu::type_op_of(n);
-    if (op != Ntype_op::Sub && op != Ntype_op::Memory && op != Ntype_op::Div) {
+    // A flop in a !seq (combinational-only) map is kept as a native boundary,
+    // exactly like a Sub/Memory: its Q feeds the mapped logic as a fresh PI, its
+    // din/enable/clock/reset are cut as POs (or recreated when const), and the
+    // Flop node is rebuilt unchanged on read-back (never bit-blasted). In seq
+    // mode flops instead cross into ABC as 1-bit latches (handled above), so they
+    // are excluded from the boundary set there — EXCEPT registers demoted for a
+    // region-internal (gated/derived) clock, which take this boundary path.
+    bool flop_boundary = gu::is_type_flop(n) && (!opts_.map_register || clk_demoted.contains(n));
+    if (op != Ntype_op::Sub && op != Ntype_op::Memory && op != Ntype_op::Div && !flop_boundary) {
       continue;
     }
     if (op == Ntype_op::Div) {
@@ -732,11 +830,16 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         bbox_pi.emplace_back(bb_idx, oi, b);
       }
     }
-    // inputs: const-driven recreated directly; comb-driven cut as POs
+    // inputs: const-driven recreated directly; comb-driven cut as POs. For a flop
+    // boundary a control pin (clock/reset/enable) that is driven straight by a
+    // region input is reconnected natively instead -- never through the AIG (see
+    // region_in_name above). The din cone still crosses as POs like any comb input.
     for (const auto& e : n.inp_edges()) {
       int pid = static_cast<int>(e.sink.get_port_id());
       if (gu::is_const_pin(e.driver)) {
         bb.const_ins.emplace_back(pid, e.driver);
+      } else if (flop_boundary && region_in_name.contains(e.driver)) {
+        bb.native_ins.emplace_back(pid, e.driver);
       } else {
         int w = gu::bits_of(e.driver);
         if (w == 0) {
@@ -748,19 +851,71 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     bboxes.push_back(std::move(bb));
   }
 
-  // --- bit-blast each region node in topological order ---
-  bool unsupported = false;
-  for (auto n : rb.src->forward_class()) {
-    if (!region.contains(n)) {
-      continue;
+  // --- bit-blast each region node in dependency order. forward_class() is
+  // *mostly* topological, but it can emit a reader before its producer (the
+  // same phenomenon the LEC encoder fixpoints around for forward_hier — seen
+  // on the DINO top, where a wide packed-bus Get_mask was read by an Sra a
+  // thousand nodes before the Get_mask was visited). A single pass would then
+  // read the unmaterialized operand as const0 and silently miscompile the
+  // whole cone. Schedule to a FIXPOINT first: a node is ready when every comb
+  // operand is a constant or already materialized (seeded boundary or an
+  // earlier-blasted node); an acyclic region always converges, and a stuck
+  // remainder (a genuine node-level cycle) is appended in traversal order so
+  // abc_bit's unmaterialized-driver diagnostic pinpoints the const0 reads.
+  std::vector<hhds::Node_class> blast_order;
+  {
+    std::vector<hhds::Node_class> pending;
+    for (auto n : rb.src->forward_class()) {
+      if (!region.contains(n)) {
+        continue;
+      }
+      auto op = gu::type_op_of(n);
+      if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Div) {
+        continue;  // blackbox boundary (Sub instance / memory / divider) -- handled separately
+      }
+      if (gu::is_type_flop(n)) {
+        continue;  // flop: a 1-bit latch in seq mode, a native boundary in !seq mode -- never bit-blasted
+      }
+      pending.push_back(n);
     }
+    absl::flat_hash_set<hhds::Pin_class> ready;  // driver pins with materialized (or scheduled) bit slots
+    ready.reserve(bitnet.size() + pending.size());
+    for (const auto& kv : bitnet) {
+      ready.insert(kv.first);
+    }
+    auto operands_ready = [&](const hhds::Node_class& n) -> bool {
+      for (const auto& e : n.inp_edges()) {
+        const auto& d = e.driver;
+        if (d.is_invalid() || gu::is_const_pin(d) || ready.contains(d)) {
+          continue;
+        }
+        return false;
+      }
+      return true;
+    };
+    blast_order.reserve(pending.size());
+    while (!pending.empty()) {
+      std::vector<hhds::Node_class> next;
+      next.reserve(pending.size());
+      for (const auto& n : pending) {
+        if (operands_ready(n)) {
+          blast_order.push_back(n);
+          ready.insert(n.create_driver_pin(0));
+        } else {
+          next.push_back(n);
+        }
+      }
+      if (next.size() == pending.size()) {
+        for (const auto& n : next) {
+          blast_order.push_back(n);
+        }
+        break;
+      }
+      pending = std::move(next);
+    }
+  }
+  for (const auto& n : blast_order) {
     auto op = gu::type_op_of(n);
-    if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Div) {
-      continue;  // blackbox boundary (Sub instance / memory / divider) -- handled separately
-    }
-    if (opts_.seq && gu::is_type_flop(n)) {
-      continue;  // sequential register -- crosses into ABC as a latch (handled above)
-    }
     auto out_pin  = n.create_driver_pin(0);
     int  out_bits = gu::bits_of(out_pin);
     if (out_bits == 0) {
@@ -1272,7 +1427,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   Abc_NtkDelete(manNtk);
   Abc_FrameClearVerifStatus(frame);
   Abc_FrameSetCurrentNetwork(frame, pLogic);
-  auto flow = opts_.seq ? seq_flow() : comb_flow();
+  auto flow = (opts_.map_register || opts_.map_memory) ? seq_flow() : comb_flow();
   if (Cmd_CommandExecute(frame, flow.c_str()) != 0) {
     livehd::diag::err("pass.abc", "abc-flow", "internal").msg("ABC flow failed for region '{}': {}", rb.module_name, flow).fatal();
     return;
@@ -1415,7 +1570,10 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     auto  nn = gu::create_typed_node(*body, bb.op);
     if (bb.op == Ntype_op::Sub) {
       if (auto child = bb.node.get_subnode_io()) {
-        if (auto out_child = outlib_->find_io(child->get_name())) {
+        // A def with a body was partitioned children-first; a body-less black
+        // box (e.g. a liberty cell when re-mapping an already-mapped netlist)
+        // is cloned as an IO-only decl so the instance stays opaque.
+        if (auto out_child = livehd::partition::resolve_or_clone_subdef(outlib_, bb.node)) {
           nn.set_subnode(out_child);
         } else {
           livehd::diag::err("pass.abc", "missing-subdef", "unsupported")
@@ -1436,8 +1594,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       const auto& o  = bb.outs[oi];
       auto        dp = nn.create_driver_pin(o.port_id);
       gu::set_bits(dp, o.bits);
-      if (!o.sign) {
-        gu::set_unsign(dp);
+      if (o.sign) {
+        gu::set_sign(dp);
       }
       br.out_bit[oi].resize(o.bits);
       if (o.bits == 1) {
@@ -1454,8 +1612,38 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         }
       }
     }
+    // Declared outputs with no consumer in the source region still get a driver
+    // pin (edge-less), mirroring tolg: readers probe every declared output
+    // (cgen create_subs, LEC pairing) and hhds find_pin asserts on a pin that
+    // was never created. Width/sign come from the child decl (the source pin
+    // is edge-less too, so hhds cannot enumerate it).
+    if (bb.op == Ntype_op::Sub) {
+      if (auto sio = nn.get_subnode_io()) {
+        absl::flat_hash_set<int> made;
+        for (const auto& o : bb.outs) {
+          made.insert(o.port_id);
+        }
+        for (const auto& d : sio->get_output_pin_decls()) {
+          if (!made.insert(static_cast<int>(d.port_id)).second) {
+            continue;
+          }
+          auto dp = nn.create_driver_pin(d.port_id);
+          gu::set_bits(dp, d.bits != 0 ? static_cast<int>(d.bits) : 1);
+          // No sign stamp: decl.unsign==false also means "unspecified" (e.g.
+          // blackbox cell decls), and an edge-less pin has no reader — leave
+          // the attr absent (the unsigned default) rather than plant `signed`.
+        }
+      }
+    }
     for (const auto& [pid, cdrv] : bb.const_ins) {
       gu::create_const(*body, gu::hydrate_const(cdrv)).connect_sink(nn.create_sink_pin(pid));
+    }
+    // flop boundary: control pins straight from a region input reconnect to the
+    // body input pin directly (the clock/reset never enters the AIG).
+    for (const auto& [pid, src_drv] : bb.native_ins) {
+      if (auto it = region_in_name.find(src_drv); it != region_in_name.end()) {
+        body->get_input_pin(it->second).connect_sink(nn.create_sink_pin(pid));
+      }
     }
     br.in_bit.resize(bb.ins.size());
     for (size_t ii = 0; ii < bb.ins.size(); ++ii) {
@@ -1520,7 +1708,16 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     std::vector<Abc_Obj_t*> dnet;  // per-bit latch data-in net (wired in pass 2b)
   };
   std::vector<Recon_flop> recon;
-  if (opts_.seq && !flops.empty()) {
+  // register=true DFF-cell mapping: one library DFF Sub per surviving latch (its
+  // din is wired in pass 2b, like a native flop's). `dff_` is set only when the
+  // Liberty had a plain posedge D-flop; otherwise the native path below runs.
+  struct Recon_dff {
+    hhds::Node_class sub;
+    Abc_Obj_t*       dnet;
+  };
+  std::vector<Recon_dff> dff_recon;
+  bool                   init_dropped = false;  // a concrete power-on init lost to a plain DFF cell
+  if (opts_.map_register && !flops.empty()) {
     // src external driver -> body driver pin (region input port, or recreated const)
     absl::flat_hash_map<hhds::Pin_class, std::string> src_in_to_name;
     for (const auto& port : rb.inputs) {
@@ -1544,6 +1741,84 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     std::vector<Abc_Obj_t*> lat;
     Abc_NtkForEachLatch(mapped, pObj, i) { lat.push_back(pObj); }
     int m = static_cast<int>(lat.size());
+
+    // Per-latch source flop, so clock and reset are decided PER FLOP (not region-
+    // wide): the crossing creates latches in flops order, one per bit, so when the
+    // latch count is preserved (the default flow does not retime) latch k maps to
+    // its origin flop. A retime-reshaped count falls back to the first flop.
+    int total_bits = 0;
+    for (const auto& f : flops) {
+      total_bits += f.bits;
+    }
+    std::vector<const Seq_flop*> latch_owner;
+    if (m == total_bits) {
+      for (const auto& f : flops) {
+        for (int b = 0; b < f.bits; ++b) {
+          latch_owner.push_back(&f);
+        }
+      }
+    }
+    auto owner_clk = [&](int k) -> hhds::Pin_class {
+      return k < static_cast<int>(latch_owner.size()) ? body_pin_for_src(latch_owner[k]->clk_drv) : region_clk;
+    };
+    // A latch init is a TRUE power-on value only when its source flop has NO
+    // reset. With a reset, the init is the reset value — already folded into the D
+    // cone — so the flop resets to it and LEC pins reset; a plain DFF cell (power-
+    // on X, exactly like the reset flop's own cgen) is then equivalent and the bit
+    // can map to a cell. Only a resetless init must keep its native flop.
+    auto owner_has_reset = [&](int k) -> bool {
+      return k < static_cast<int>(latch_owner.size()) ? !latch_owner[k]->rst_drv.is_invalid()
+                                                       : !flops.front().rst_drv.is_invalid();
+    };
+
+    if (dff_.has_value()) {
+      // --- register=true: map each surviving latch to a library DFF-cell Sub ---
+      // (D/CLK/Q). Q feeds the comb read-back via net2drv; D is wired in pass 2b
+      // from the latch's data-in net; CLK comes straight from the region clock
+      // (never through the AIG). A plain posedge D-flop cell has NO init pin, so a
+      // latch carrying a concrete power-on init CANNOT be represented by the cell
+      // without changing power-on behavior — such a bit stays a native flop (the
+      // netlist stays equivalent), only init-less bits become DFF cells.
+      auto io = liberty::create_dff_io(*outlib_, *dff_);
+      for (int k = 0; k < m; ++k) {
+        auto* L    = lat[k];
+        auto* qnet = Abc_ObjFanout0(Abc_ObjFanout0(L));  // latch -> BO -> Q net
+        auto* dnet = Abc_ObjFanin0(Abc_ObjFanin0(L));    // latch <- BI <- D net
+        auto  lclk = owner_clk(k);
+        if (int v = Abc_LatchInit(L); (v == 1 || v == 2) && !owner_has_reset(k)) {
+          // resetless power-on init: keep this bit native so the value survives
+          init_dropped = true;
+          auto F       = gu::create_typed_node(*body, Ntype_op::Flop);
+          F.attr(hhds::attrs::name).set(std::format("{}__rinit{}", rb.module_name, Abc_ObjId(L)));
+          auto Fq = F.create_driver_pin(0);
+          gu::set_bits(Fq, 1);
+          gu::set_unsign(Fq);
+          if (!lclk.is_invalid()) {
+            lclk.connect_sink(gu::setup_sink_by_name(F, "clock_pin"));
+          }
+          gu::create_const(*body, *Dlop::from_binary(v == 2 ? "1" : "0", /*unsigned_result=*/true))
+              .connect_sink(gu::setup_sink_by_name(F, "initial"));
+          net2drv[qnet] = Fq;
+          Recon_flop rf;
+          rf.node = F;
+          rf.bits = 1;
+          rf.dnet.push_back(dnet);
+          recon.push_back(std::move(rf));
+          continue;
+        }
+        auto sub = gu::create_typed_node(*body, Ntype_op::Sub);
+        sub.set_subnode(io);
+        sub.attr(hhds::attrs::name).set(std::format("g{}_{}", Abc_ObjId(L), dff_->name));
+        auto q = sub.create_driver_pin(dff_->q_pin);
+        gu::set_bits(q, 1);
+        gu::set_unsign(q);
+        net2drv[qnet] = q;
+        if (!lclk.is_invalid()) {
+          lclk.connect_sink(sub.create_sink_pin(dff_->clk_pin));
+        }
+        dff_recon.push_back({sub, dnet});
+      }
+    } else {
 
     absl::flat_hash_set<std::string> roots;
     for (const auto& f : flops) {
@@ -1571,7 +1846,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       groups.push_back(std::move(g));
     } else {
       for (int k = 0; k < m; ++k) {
-        groups.push_back(Group{std::format("{}__r{}", rb.module_name, k), {k}, region_clk});
+        // per-latch flop clocked from its OWN source flop (multi-clock regions)
+        groups.push_back(Group{std::format("{}__r{}", rb.module_name, k), {k}, owner_clk(k)});
       }
     }
 
@@ -1626,6 +1902,14 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
       recon.push_back(std::move(rf));
     }
+    }  // else (native-flop read-back)
+  }
+  if (init_dropped) {
+    livehd::diag::warn("pass.abc", "dff-init-kept-native", "unsupported")
+        .msg("pass.abc region '{}': a register bit carries a power-on init value that the plain DFF cell '{}' has no pin for; "
+             "that bit was kept as a native flop (still correct) while the rest mapped to DFF cells",
+             rb.module_name, dff_->name)
+        .emit();
   }
 
   // pass 2: wire each Sub's fanins (fanin k <-> Liberty pin k)
@@ -1683,6 +1967,14 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     acc.connect_sink(din_sink);
   }
 
+  // pass 2b (register=true): wire each mapped DFF Sub's D pin from its latch's
+  // data-in net (each DFF cell is 1-bit, so no Set_mask reassembly is needed).
+  for (auto& rd : dff_recon) {
+    auto it = net2drv.find(rd.dnet);
+    auto d  = it != net2drv.end() ? it->second : const0_pin();
+    d.connect_sink(rd.sub.create_sink_pin(dff_->d_pin));
+  }
+
   // pass 3: POs -> reassemble multi-bit outputs (Set_mask concat). Match by
   // creation order (po_order), consistent with the PI readback.
   std::vector<std::vector<hhds::Pin_class>> out_bits(rb.outputs.size());
@@ -1690,10 +1982,28 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     int w = rb.outputs[po].bits == 0 ? 1 : rb.outputs[po].bits;
     out_bits[po].resize(w);
   }
+  if (Abc_NtkPoNum(mapped) != static_cast<int>(po_order.size() + bbox_po.size())) {
+    livehd::diag::warn("pass.abc", "abc-readback", "internal")
+        .msg("pass.abc: region '{}': mapped PO count {} != created {} (region {} + bbox {}) — read-back misaligned",
+             rb.module_name,
+             Abc_NtkPoNum(mapped),
+             po_order.size() + bbox_po.size(),
+             po_order.size(),
+             bbox_po.size())
+        .emit();
+  }
   Abc_NtkForEachPo(mapped, pObj, i) {
     auto* net = Abc_ObjFanin0(pObj);
     auto  dit = net2drv.find(net);
-    auto  drv = dit != net2drv.end() ? dit->second : const0_pin();
+    if (dit == net2drv.end()) {
+      livehd::diag::warn("pass.abc", "abc-readback", "internal")
+          .msg("pass.abc: region '{}': PO {} ('{}') fanin net has no read-back driver — emitted const0",
+               rb.module_name,
+               i,
+               Abc_ObjName(pObj))
+          .emit();
+    }
+    auto drv = dit != net2drv.end() ? dit->second : const0_pin();
     if (i < static_cast<int>(po_order.size())) {
       out_bits[po_order[i].first][po_order[i].second] = drv;
     } else if (int j = i - static_cast<int>(po_order.size()); j < static_cast<int>(bbox_po.size())) {
@@ -1804,7 +2114,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     // order — valid only when the latch count survived the flow unchanged
     // (the same assumption the 1:1 flop read-back makes); a retime-reshaped
     // region keeps PO-cone attribution only.
-    if (opts_.seq && !flops.empty()) {
+    if (opts_.map_register && !flops.empty()) {
       int total_bits = 0;
       for (const auto& f : flops) {
         total_bits += f.bits;
@@ -1897,7 +2207,8 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
 
 void report_stats(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view top, const Map_options& opts) {
   (void)graphs;
-  std::print("pass.abc stats: top='{}' library='{}' seq={}\n", top, opts.library, opts.seq);
+  std::print("pass.abc stats: top='{}' library='{}' register={} memory={}\n", top, opts.library, opts.map_register,
+             opts.map_memory);
   std::print("  (run with --emit-dir lg:DIR to produce the mapped netlist library)\n");
 }
 

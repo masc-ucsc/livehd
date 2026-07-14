@@ -18,6 +18,7 @@
 #include "cell.hpp"
 #include "color_common.hpp"
 #include "diag.hpp"
+#include "flatten.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
@@ -39,6 +40,11 @@ void Pass_partition::setup() {
   // `top` label), not a per-pass --set option.
   m.add_label_optional("out", "output graph_library directory (the --emit-dir lg: slot)", "");
   m.add_label_optional("debug_color", "diagnose same-color region interface mismatches", "false");
+  m.add_label_optional("flatten",
+                       "auto|true|false whole-design flatten: inline the instance hierarchy and partition the flat "
+                       "design as one def (auto = flatten exactly when the active coloring is `pass.color flat`); a "
+                       "single resulting region is emitted directly under the top name — one output module",
+                       "auto");
   register_pass(m);
 }
 
@@ -97,8 +103,8 @@ struct OutWire {
 class Partitioner {
 public:
   Partitioner(hhds::Graph* g, hhds::GraphLibrary* outlib, std::string top, bool debug_color,
-              livehd::partition::Body_builder hook = {})
-      : g_(g), outlib_(outlib), top_(std::move(top)), debug_color_(debug_color), hook_(std::move(hook)) {}
+              livehd::partition::Body_builder hook = {}, bool flatten = false)
+      : g_(g), outlib_(outlib), top_(std::move(top)), debug_color_(debug_color), hook_(std::move(hook)), flatten_(flatten) {}
 
   bool run();
   void report_stats();
@@ -110,6 +116,10 @@ private:
   bool                            debug_color_;
   bool                            saw_uncolored_ = false;  // any color-0 node seen in collect()
   livehd::partition::Body_builder hook_;
+  // Whole-design flatten mode: same-color regions merge even when structurally
+  // disconnected (one region per color), and a single-region result is emitted
+  // directly under `top_` (no wrapper) — see build_module_as_top.
+  bool flatten_ = false;
 
   Union_find uf_;
 
@@ -162,6 +172,7 @@ private:
   void name_ports();
   void diagnose_colors();
   void build_module(const hhds::Node_class& r);
+  void build_module_as_top(const hhds::Node_class& r);
   void build_top();
   // Regions in a reproducible order: by color, then by the smallest member node
   // id (invariant to which member the union-find picks as representative).
@@ -213,6 +224,12 @@ bool Partitioner::collect() {
   // colored set, so the decomposition (and `pass.abc`) runs on an uncolored
   // design without a prior color pass. We only warn once (below) so the implicit
   // coloring is visible without being fatal.
+  // Whole-design flatten: one region per color, even for structurally
+  // disconnected same-color cones (two cones linked only through a primary
+  // input or a constant never union-merge below). The flat def must come out
+  // as ONE module, and a same-color multi-module split would defeat it.
+  absl::flat_hash_map<int, hhds::Node_class> color_anchor;
+
   for (auto n : g_->forward_class()) {
     if (!is_partitionable(n)) {
       continue;
@@ -222,6 +239,12 @@ bool Partitioner::collect() {
       saw_uncolored_ = true;
     }
     uf_.find(n);
+    if (flatten_) {
+      auto [it, inserted] = color_anchor.try_emplace(c, n);
+      if (!inserted) {
+        uf_.merge(n, it->second);
+      }
+    }
     for (const auto& e : n.out_edges()) {
       auto sn = e.sink.get_master_node();
       if (is_partitionable(sn) && node_color_of(sn) == c) {
@@ -457,7 +480,13 @@ void Partitioner::build_module(const hhds::Node_class& r) {
     // which reads its sign) — stamp it. The output port is a SINK; its sign is on
     // the GraphIO (set_unsign above) for the declaration, never read off the sink,
     // so we do NOT stamp it (signed is a driver-pin property; node_util asserts it).
+    // Width too: tolg stamps `bits` on every materialized input pin and readers
+    // (e.g. pass.abc's bit-blast re-consuming this module) size the port from the
+    // PIN attr, not the decl — without it an 8-bit input reads as 1 bit.
     auto ip = body->get_input_pin(p.name);
+    if (auto b = gu::bits_of(p.driver); b != 0) {
+      gu::set_bits(ip, b);
+    }
     gu::is_unsign(p.driver) ? gu::set_unsign(ip) : gu::set_sign(ip);
   }
 
@@ -490,10 +519,12 @@ void Partitioner::build_module(const hhds::Node_class& r) {
     if (op == Ntype_op::Sub) {
       // Hierarchical input: re-link the instance to the partitioned child def
       // in the output library. Children are partitioned before their parents,
-      // so the same-named def already exists in outlib_. Without this the Sub
-      // is left dangling (its body wires float) and the child def is lost.
-      if (auto child = n.get_subnode_io()) {
-        auto out_child = outlib_->find_io(child->get_name());
+      // so a def WITH a body already exists in outlib_; a body-less black box
+      // (a liberty cell in an already-mapped netlist) is cloned as an IO-only
+      // decl. Without this the Sub is left dangling (its body wires float) and
+      // the child def is lost.
+      if (n.get_subnode_io()) {
+        auto out_child = livehd::partition::resolve_or_clone_subdef(outlib_, n);
         if (out_child) {
           neo.set_subnode(out_child);
         } else {
@@ -501,7 +532,7 @@ void Partitioner::build_module(const hhds::Node_class& r) {
               .msg("sub-instance '{}' in '{}' references child def '{}' missing from the output library",
                    gu::debug_name(n),
                    top_,
-                   std::string{child->get_name()})
+                   std::string{n.get_subnode_io()->get_name()})
               .fatal();
         }
       }
@@ -510,9 +541,17 @@ void Partitioner::build_module(const hhds::Node_class& r) {
     carry_node_attrs(body.get(), n, neo);
   }
 
+  // Track which Sub output ports get a real (edge-carrying) pin, so the
+  // declared-outputs completion below does not clobber their carried attrs.
+  absl::flat_hash_map<hhds::Node_class, absl::flat_hash_set<uint32_t>> sub_outs_made;
+
   auto driver_pin = [&](const hhds::Pin_class& orig) {
-    auto neo = node_map[orig.get_master_node()].create_driver_pin(orig.get_port_id());
+    auto master = orig.get_master_node();
+    auto neo    = node_map[master].create_driver_pin(orig.get_port_id());
     carry_driver_attrs(orig, neo);
+    if (gu::type_op_of(master) == Ntype_op::Sub) {
+      sub_outs_made[master].insert(static_cast<uint32_t>(orig.get_port_id()));
+    }
     return neo;
   };
 
@@ -542,6 +581,189 @@ void Partitioner::build_module(const hhds::Node_class& r) {
     dp.connect_sink(body->get_output_pin(p.name));
   }
 
+  // Sub instances: materialize the declared outputs that carried no edge
+  // (edge-less driver pin), mirroring tolg. Readers probe every declared
+  // output (cgen create_subs, LEC pairing) and hhds find_pin asserts on a
+  // pin that was never created. Width/sign come from the child decl (the
+  // source pin is edge-less too, so hhds cannot enumerate it); ports wired
+  // above keep their carried attrs.
+  for (const auto& n : region_nodes_[r]) {
+    if (gu::type_op_of(n) != Ntype_op::Sub) {
+      continue;
+    }
+    auto neo = node_map[n];
+    auto sio = neo.get_subnode_io();
+    if (!sio) {
+      continue;
+    }
+    auto& made = sub_outs_made[n];
+    for (const auto& d : sio->get_output_pin_decls()) {
+      if (made.contains(static_cast<uint32_t>(d.port_id))) {
+        continue;
+      }
+      auto np = neo.create_driver_pin(d.port_id);
+      if (d.bits != 0) {
+        gu::set_bits(np, static_cast<int>(d.bits));
+      }
+      // No sign stamp: decl.unsign==false also means "unspecified", and an
+      // edge-less pin has no reader — leave the attr absent (unsigned default).
+    }
+  }
+
+  body->commit();
+}
+
+// Whole-design flatten, single region: the region IS the design. Emit it
+// directly under the top's own name with the top's own port list (no wrapper,
+// no __c suffix) — `pass.color flat` + `pass.abc` then yields exactly one
+// output module. Ports keep the primary IO names (decls cloned verbatim), so
+// the result is a drop-in replacement for the original def; name_ports()'s
+// collision renaming is bypassed on purpose (internal child nodes are
+// instance-path-prefixed by the flattener and cannot collide with port names).
+void Partitioner::build_module_as_top(const hhds::Node_class& r) {
+  auto src_gio = g_->get_io();
+  auto gio     = outlib_->create_io(top_);
+  module_gio_[r] = gio;
+  for (const auto& decl : src_gio->get_input_pin_decls()) {
+    gio->add_input(decl.name, decl.port_id, decl.loop_break);
+    if (decl.bits != 0) {
+      gio->set_bits(decl.name, decl.bits);
+    }
+    gio->set_unsign(decl.name, decl.unsign);
+  }
+  for (const auto& decl : src_gio->get_output_pin_decls()) {
+    gio->add_output(decl.name, decl.port_id, decl.loop_break);
+    if (decl.bits != 0) {
+      gio->set_bits(decl.name, decl.bits);
+    }
+    gio->set_unsign(decl.name, decl.unsign);
+  }
+  auto body = gio->create_graph();
+
+  // Stamp bits/sign on the materialized input pins (same invariant as
+  // build_module/build_top: the decl is not auto-propagated to pin attrs and
+  // every reader sizes from the pin).
+  for (const auto& decl : src_gio->get_input_pin_decls()) {
+    auto ip = body->get_input_pin(decl.name);
+    if (decl.bits != 0) {
+      gu::set_bits(ip, static_cast<int>(decl.bits));
+    }
+    decl.unsign ? gu::set_unsign(ip) : gu::set_sign(ip);
+  }
+
+  // With one region there is no other region to drive a boundary port, so
+  // every input port must come from a primary input.
+  for (const auto& p : module_inputs_[r]) {
+    if (!p.from_primary) {
+      livehd::diag::err("pass.partition", "flatten-input", "internal")
+          .msg("flatten: single-region input port unexpectedly driven by a non-primary pin in '{}'", top_)
+          .fatal();
+      return;
+    }
+  }
+
+  if (hook_) {
+    livehd::partition::Region_body rb;
+    rb.body        = body.get();
+    rb.src         = g_;
+    rb.color       = region_color_[r];
+    rb.module_name = top_;
+    for (const auto& p : module_inputs_[r]) {
+      rb.inputs.push_back({p.primary_name, p.driver, gu::bits_of(p.driver), !gu::is_unsign(p.driver)});
+    }
+    for (const auto& ow : top_outputs_) {
+      if (ow.kind == OutWire::Region) {
+        rb.outputs.push_back({ow.oname, ow.driver, gu::bits_of(ow.driver), !gu::is_unsign(ow.driver)});
+      }
+    }
+    rb.nodes = region_nodes_[r];
+    hook_(rb);
+  } else {
+    // Recreate the region logic (the LEC-equivalent twin), boundary-wired to
+    // the primary ports instead of region ports.
+    absl::flat_hash_map<hhds::Node_class, hhds::Node_class> node_map;
+    for (const auto& n : region_nodes_[r]) {
+      auto op  = gu::type_op_of(n);
+      auto neo = gu::create_typed_node(*body, op);
+      if (op == Ntype_op::Sub && n.get_subnode_io()) {
+        auto out_child = livehd::partition::resolve_or_clone_subdef(outlib_, n);
+        if (out_child) {
+          neo.set_subnode(out_child);
+        } else {
+          livehd::diag::err("pass.partition", "missing-subdef", "unsupported")
+              .msg("sub-instance '{}' in '{}' references child def '{}' missing from the output library",
+                   gu::debug_name(n),
+                   top_,
+                   std::string{n.get_subnode_io()->get_name()})
+              .fatal();
+        }
+      }
+      node_map[n] = neo;
+      carry_node_attrs(body.get(), n, neo);
+    }
+
+    auto driver_pin = [&](const hhds::Pin_class& orig) {
+      auto neo = node_map[orig.get_master_node()].create_driver_pin(orig.get_port_id());
+      carry_driver_attrs(orig, neo);
+      return neo;
+    };
+
+    for (const auto& e : internal_edges_[r]) {
+      driver_pin(e.driver).connect_sink(node_map[e.snode].create_sink_pin(e.spid));
+    }
+    for (const auto& e : const_edges_[r]) {
+      gu::create_const(*body, gu::hydrate_const(e.cdriver)).connect_sink(node_map[e.snode].create_sink_pin(e.spid));
+    }
+    for (const auto& p : module_inputs_[r]) {
+      auto ipin = body->get_input_pin(p.primary_name);
+      for (const auto& s : p.sinks) {
+        ipin.connect_sink(node_map[s.node].create_sink_pin(s.pid));
+      }
+    }
+    for (const auto& ow : top_outputs_) {
+      if (ow.kind == OutWire::Region) {
+        driver_pin(ow.driver).connect_sink(body->get_output_pin(ow.oname));
+      }
+    }
+
+    // Materialize declared-but-unwired Sub outputs (same reader invariant as
+    // build_module; "has an edge" is exact here because every created driver
+    // pin above is immediately connected).
+    for (const auto& n : region_nodes_[r]) {
+      if (gu::type_op_of(n) != Ntype_op::Sub) {
+        continue;
+      }
+      auto neo = node_map[n];
+      auto sio = neo.get_subnode_io();
+      if (!sio) {
+        continue;
+      }
+      absl::flat_hash_set<uint32_t> made;
+      for (const auto& e : neo.out_edges()) {
+        made.insert(static_cast<uint32_t>(e.driver.get_port_id()));
+      }
+      for (const auto& d : sio->get_output_pin_decls()) {
+        if (made.contains(static_cast<uint32_t>(d.port_id))) {
+          continue;
+        }
+        auto np = neo.create_driver_pin(d.port_id);
+        if (d.bits != 0) {
+          gu::set_bits(np, static_cast<int>(d.bits));
+        }
+      }
+    }
+  }
+
+  // Primary-driven and constant-driven outputs bypass the region in both the
+  // hook and twin shapes (the wrapper used to wire these; there is no wrapper).
+  for (const auto& ow : top_outputs_) {
+    if (ow.kind == OutWire::Const) {
+      gu::create_const(*body, gu::hydrate_const(ow.cdriver)).connect_sink(body->get_output_pin(ow.oname));
+    } else if (ow.kind == OutWire::Primary) {
+      body->get_input_pin(ow.primary_name).connect_sink(body->get_output_pin(ow.oname));
+    }
+  }
+
   body->commit();
 }
 
@@ -563,6 +785,18 @@ void Partitioner::build_top() {
     tgio->set_unsign(decl.name, decl.unsign);
   }
   auto t = tgio->create_graph();
+
+  // Stamp bits/sign on the materialized top input pins, mirroring tolg: the
+  // GraphIO decl is not auto-propagated to the pin attrs, and readers that
+  // re-consume this wrapper (pass.abc re-mapping a netlist, cgen) size a port
+  // from the PIN attr — without it an 8-bit input reads as 1 bit.
+  for (const auto& decl : src_gio->get_input_pin_decls()) {
+    auto ip = t->get_input_pin(decl.name);
+    if (decl.bits != 0) {
+      gu::set_bits(ip, static_cast<int>(decl.bits));
+    }
+    decl.unsign ? gu::set_unsign(ip) : gu::set_sign(ip);
+  }
 
   // One Sub instance per region.
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class>                     sub_of;
@@ -697,7 +931,16 @@ bool Partitioner::run() {
   if (debug_color_) {
     diagnose_colors();
   }
-  for (const auto& r : ordered_regions()) {
+  auto regs = ordered_regions();
+  // Whole-design flatten with a single region (the `pass.color flat` case):
+  // the region IS the design — emit it directly under the top's own name and
+  // port list, no wrapper. Multi-color flatten keeps the wrapper+regions shape
+  // (regions just span the former hierarchy).
+  if (flatten_ && regs.size() == 1) {
+    build_module_as_top(regs.front());
+    return true;
+  }
+  for (const auto& r : regs) {
     build_module(r);
   }
   build_top();
@@ -764,11 +1007,63 @@ hhds::Graph* resolve_order(const std::vector<std::shared_ptr<hhds::Graph>>& grap
   return g;
 }
 
+// Resolve Flatten_mode::automatic against g's active coloring: a
+// `pass.color flat` coloring means whole-design synthesis. Same substring
+// probe as color_common's has_seeded_coloring — the blob is machine-written
+// by build_coloring_info_json.
+bool flatten_resolved(hhds::Graph* g, livehd::partition::Flatten_mode mode) {
+  if (mode == livehd::partition::Flatten_mode::on) {
+    return true;
+  }
+  if (mode == livehd::partition::Flatten_mode::off) {
+    return false;
+  }
+  if (auto a = g->get_input_node().attr(livehd::attrs::coloring_info); a.has()) {
+    return std::string_view{a.get()}.find("\"algorithm\":\"flat\"") != std::string_view::npos;
+  }
+  return false;
+}
+
 }  // namespace
+
+namespace livehd::partition {
+
+std::shared_ptr<hhds::GraphIO> resolve_or_clone_subdef(hhds::GraphLibrary* outlib, const hhds::Node_class& inst) {
+  auto child = inst.get_subnode_io();
+  if (!child) {
+    return nullptr;
+  }
+  if (auto out_child = outlib->find_io(child->get_name())) {
+    return out_child;
+  }
+  if (inst.get_subnode_graph() != nullptr) {
+    return nullptr;  // has a body: children-first ordering should have partitioned it already
+  }
+  // Body-less black-box def: clone the IO decl so the instance stays opaque.
+  auto io = outlib->create_io(std::string{child->get_name()});
+  for (const auto& d : child->get_input_pin_decls()) {
+    io->add_input(d.name, d.port_id, d.loop_break);
+    if (d.bits != 0) {
+      io->set_bits(d.name, d.bits);
+    }
+    io->set_unsign(d.name, d.unsign);
+  }
+  for (const auto& d : child->get_output_pin_decls()) {
+    io->add_output(d.name, d.port_id, d.loop_break);
+    if (d.bits != 0) {
+      io->set_bits(d.name, d.bits);
+    }
+    io->set_unsign(d.name, d.unsign);
+  }
+  return io;
+}
+
+}  // namespace livehd::partition
 
 bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, hhds::GraphLibrary* outlib,
                                          std::string_view top_in, bool debug_color,
-                                         const livehd::partition::Body_builder& hook) {
+                                         const livehd::partition::Body_builder& hook,
+                                         livehd::partition::Flatten_mode        flatten) {
   std::string               top{top_in};
   std::vector<hhds::Graph*> order;
   auto*                     g = resolve_order(graphs, top, order);
@@ -778,6 +1073,31 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
         .fatal();
     return false;
   }
+
+  if (flatten_resolved(g, flatten)) {
+    // Inline the hierarchy into a scratch def in the output library, run ONE
+    // Partitioner on it (top's own name), then drop the scratch def — it must
+    // never persist or be emitted. A hierarchy-less top skips the clone.
+    hhds::Graph*                 flat_src = g;
+    std::shared_ptr<hhds::Graph> flat_holder;
+    std::string                  flat_name;
+    if (order.size() > 1) {
+      flat_name   = top + "__flatten_tmp";
+      flat_holder = livehd::partition::flatten_hierarchy(g, outlib, flat_name);
+      if (!flat_holder) {
+        return false;  // diag already emitted
+      }
+      flat_src = flat_holder.get();
+    }
+    Partitioner p(flat_src, outlib, top, debug_color, hook, /*flatten=*/true);
+    bool        ok = p.run();
+    if (flat_holder) {
+      outlib->delete_graph(flat_holder);
+      outlib->delete_graphio(flat_name);
+    }
+    return ok;
+  }
+
   for (auto* def : order) {
     Partitioner p(def, outlib, std::string{def->get_name()}, debug_color, hook);
     if (!p.run()) {
@@ -787,14 +1107,30 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
   return true;
 }
 
+livehd::partition::Flatten_mode livehd::partition::parse_flatten_mode(std::string_view v, std::string_view pass) {
+  if (v == "auto" || v.empty()) {
+    return Flatten_mode::automatic;
+  }
+  if (v == "true" || v == "1") {
+    return Flatten_mode::on;
+  }
+  if (v == "false" || v == "0") {
+    return Flatten_mode::off;
+  }
+  livehd::diag::err(pass, "bad-flatten", "io").msg("{}: flatten must be auto|true|false, got '{}'", pass, v).fatal();
+  return Flatten_mode::off;
+}
+
 void Pass_partition::partition(Eprp_var& var) {
   auto top = std::string{var.get("top", "")};
   auto out = std::string{var.get("out", "")};
   bool dbg = var.get("debug_color", "false") != "false" && var.get("debug_color", "false") != "0";
+  auto flatten = livehd::partition::parse_flatten_mode(var.get("flatten", "auto"), "pass.partition");
 
   if (out.empty()) {
     // Stats-only mode: count colors/regions/ports per reachable def without
-    // building an output library.
+    // building an output library. Flatten applies here too — the reported
+    // decomposition must match what an emit run would build.
     std::string               t = top;
     std::vector<hhds::Graph*> order;
     auto*                     g = resolve_order(var.graphs, t, order);
@@ -802,6 +1138,30 @@ void Pass_partition::partition(Eprp_var& var) {
       livehd::diag::err("pass.partition", "no-top", "unsupported")
           .msg("partition: top module '{}' not found in the input library", t)
           .fatal();
+      return;
+    }
+    if (flatten_resolved(g, flatten)) {
+      auto* lib = g->get_io() ? g->get_io()->get_library() : nullptr;
+      hhds::Graph*                 flat_src = g;
+      std::shared_ptr<hhds::Graph> flat_holder;
+      std::string                  flat_name;
+      if (order.size() > 1 && lib != nullptr) {
+        // Scratch def in the graph's OWN library: stats mode never saves it,
+        // and it is deleted right after (same lifecycle as the emit path).
+        flat_name   = t + "__flatten_tmp";
+        flat_holder = livehd::partition::flatten_hierarchy(g, lib, flat_name);
+        if (!flat_holder) {
+          return;  // diag already emitted
+        }
+        flat_src = flat_holder.get();
+      }
+      Partitioner p(flat_src, nullptr, t, dbg, {}, /*flatten=*/true);
+      p.report_stats();
+      if (flat_holder) {
+        lib->delete_graph(flat_holder);
+        flat_holder = nullptr;
+        lib->delete_graphio(flat_name);
+      }
       return;
     }
     for (auto* def : order) {
@@ -812,5 +1172,5 @@ void Pass_partition::partition(Eprp_var& var) {
   }
 
   auto& outlib = livehd::Hhds_graph_library::instance(out);
-  build_decomposition(var.graphs, &outlib, top, dbg);
+  build_decomposition(var.graphs, &outlib, top, dbg, {}, flatten);
 }

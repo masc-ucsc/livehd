@@ -45,4 +45,16 @@ library(test_lib) {
       timing() { related_pin : "A B"; cell_rise(scalar){values("0.3");} cell_fall(scalar){values("0.3");}
                  rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
   }
+  cell(DFFx1) {
+    area : 6;
+    ff(IQ, IQN) { next_state : "D"; clocked_on : "CLK"; }
+    pin(CLK) { direction : input; capacitance : 1; clock : true; }
+    pin(D)   { direction : input; capacitance : 1;
+      timing() { related_pin : "CLK"; timing_type : hold_rising;
+                 cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");} } }
+    pin(Q)   { direction : output; function : "IQ";
+      timing() { related_pin : "CLK"; timing_type : rising_edge;
+                 cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
 }

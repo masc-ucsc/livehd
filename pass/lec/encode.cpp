@@ -2283,17 +2283,33 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   }
 
   // ---- Outputs: value driving each output sink, fit to the declared width.
+  // Read through the HIER resolver, not the class edges: an output driven
+  // DIRECTLY by a descended sub-instance's output pin (the pass.partition /
+  // pass.abc wrapper shape: `out <- u_top__c0.f_o` with no comb node between)
+  // has no pin2val entry for the boundary pin itself — the encoded producer
+  // lives inside the child body and is keyed by ITS hier frame. A hier-context
+  // handle's inp_edges() resolves each edge to the real leaf driver (and stops
+  // at an opaque collapsed boundary, whose box outputs ARE keyed on the
+  // boundary pin — the ambient Hier_opaque_scope covers this walk too).
+  absl::flat_hash_map<hhds::Port_id, hhds::Pin_class> out_driver;
+  {
+    hhds::Node_class out_hier(g, static_cast<hhds::Gid>(hhds::Gid_invalid), static_cast<hhds::Tree_pos>(hhds::ROOT),
+                              hhds::Graph::OUTPUT_NODE);
+    for (const auto& e : out_hier.inp_edges()) {
+      out_driver.emplace(e.sink.get_port_id(), e.driver);
+    }
+  }
   for (const auto& d : gio->get_output_pin_decls()) {
     auto spin = g->get_output_pin(d.name);
     if (spin.is_invalid()) {
       continue;
     }
-    auto edges = spin.inp_edges();
-    if (edges.empty()) {
+    auto dit = out_driver.find(gio->get_output_port_id(d.name));
+    if (dit == out_driver.end()) {
       return fail("output '" + d.name + "' is undriven");
     }
     bool ok = true;
-    Val  v  = driver_val(edges.front().driver, ok);
+    Val  v  = driver_val(dit->second, ok);
     if (!ok) {
       return fail("output '" + d.name + "' driver not encodable");
     }

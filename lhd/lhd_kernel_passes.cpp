@@ -54,25 +54,6 @@ void semdiff_command(Options& opts, Result& res) {
   load_side_graphs(opts, res, opts.ref_kind, opts.ref_path, "ref", ref_var);
   load_side_graphs(opts, res, opts.impl_kind, opts.impl_path, "impl", impl_var);
 
-  // Pick the top module on each side (same rule as lec): explicit
-  // --{ref,impl}-top, else --top, else the sole module.
-  auto pick = [&](Eprp_var& v, const std::string& want, std::string_view side) -> std::shared_ptr<hhds::Graph> {
-    const std::string& t = !want.empty() ? want : opts.top;
-    if (!t.empty()) {
-      for (auto& g : v.graphs) {
-        if (g && g->get_name() == t) {
-          return g;
-        }
-      }
-      throw Lhd_error{"config", std::format("pass semdiff: {} top '{}' not found", side, t), ""};
-    }
-    if (v.graphs.size() == 1) {
-      return v.graphs.front();
-    }
-    throw Lhd_error{"usage",
-                    std::format("pass semdiff: {} has {} modules; pass --{}-top or --top", side, v.graphs.size(), side),
-                    ""};
-  };
   Eprp_var::Eprp_dict labels;
   merge_sets(opts, "pass.semdiff", labels);
   auto label = [&](std::string_view k, std::string_view def) -> std::string {
@@ -221,15 +202,20 @@ void semdiff_command(Options& opts, Result& res) {
     }
     const std::string want_top = !opts.ref_top.empty() ? opts.ref_top : opts.top;
     if (!want_top.empty()) {
-      // Accept the top as full name or unambiguous entity (lec's rule).
-      std::string top_key;
-      if (ref_by_name.contains(canon_ref(want_top))) {
-        top_key = canon_ref(want_top);
-      } else if (ref_ent_cnt.contains(want_top) && ref_ent_cnt[want_top] == 1) {
-        top_key = want_top;  // entity-unique => the canon key IS the entity
-      } else {
+      // Accept the top as full name or unambiguous entity (lec's rule, via
+      // the shared resolver — it warns when the fallback substitutes).
+      std::vector<std::string> ref_names;
+      ref_names.reserve(ref_var.graphs.size());
+      for (const auto& g : ref_var.graphs) {
+        if (g) {
+          ref_names.emplace_back(g->get_name());
+        }
+      }
+      const std::string resolved = resolve_top_name(ref_names, want_top, "pass.semdiff");
+      if (resolved.empty()) {
         throw Lhd_error{"config", std::format("pass semdiff: ref top '{}' not found", want_top), ""};
       }
+      const std::string top_key = canon_ref(resolved);
       absl::flat_hash_map<std::string, int>   mark;
       std::function<void(const std::string&)> dfs = [&](const std::string& n) {
         int& m = mark[n];
@@ -317,8 +303,11 @@ void semdiff_command(Options& opts, Result& res) {
     return;
   }
 
-  auto ref_g  = pick(ref_var, opts.ref_top, "ref");
-  auto impl_g = pick(impl_var, opts.impl_top, "impl");
+  // Pick the top module on each side (same rule as lec): explicit
+  // --{ref,impl}-top, else --top, else the sole module (pick_top_graph: exact
+  // name or unambiguous entity fallback with a diag warning).
+  auto ref_g  = pick_top_graph(ref_var, opts.ref_top, opts.top, "ref", "pass semdiff", "pass.semdiff");
+  auto impl_g = pick_top_graph(impl_var, opts.impl_top, opts.top, "impl", "pass semdiff", "pass.semdiff");
   auto r      = livehd::semdiff::structural_match(ref_g.get(), impl_g.get(), o);
 
   if (!opts.quiet) {
@@ -362,6 +351,26 @@ void load_lg_into_var(const std::string& lib_path, Eprp_var& var) {
       var.add(g);
     }
   }
+}
+
+// Stamp labels["top"] with --top resolved once against the loaded library, so
+// every pass consumer gets the full internal name (they match g->get_name()
+// exactly); an unresolvable name passes through unchanged (each pass keeps its
+// own not-found policy).
+static void set_top_label(const Options& opts, const Eprp_var& var, Eprp_var::Eprp_dict& labels,
+                          std::string_view diag_pass) {
+  if (opts.top.empty()) {
+    return;
+  }
+  std::vector<std::string> names;
+  names.reserve(var.graphs.size());
+  for (const auto& g : var.graphs) {
+    if (g) {
+      names.emplace_back(g->get_name());
+    }
+  }
+  const std::string resolved = resolve_top_name(names, opts.top, diag_pass);
+  labels["top"]              = resolved.empty() ? opts.top : resolved;
 }
 
 // Slurp a pass's "qor" sidecar label into the envelope's "qor" member so an
@@ -457,9 +466,7 @@ void pass_command(Options& opts, Result& res) {
     Eprp_var::Eprp_dict labels;
     labels["alg"]  = alg;
     labels["seed"] = opts.seed;  // the shared `lhd.seed` (mincut RNG); no per-pass seed option
-    if (!opts.top.empty()) {
-      labels["top"] = opts.top;
-    }
+    set_top_label(opts, var, labels, "pass.color");
     merge_sets(opts, "pass.color", labels);
     run_step("pass.color", var, labels, opts, res);
     livehd::Hhds_graph_library::save(lg_in);  // in-place coloring
@@ -472,9 +479,7 @@ void pass_command(Options& opts, Result& res) {
     }
     const auto*         lg_out = find_slot(opts.emit_dirs, "lg");
     Eprp_var::Eprp_dict labels;
-    if (!opts.top.empty()) {
-      labels["top"] = opts.top;
-    }
+    set_top_label(opts, var, labels, "pass.partition");
     if (lg_out != nullptr) {
       if (fs::weakly_canonical(lg_out->path) == fs::weakly_canonical(lg_in)) {
         throw Lhd_error{"usage", "partition --emit-dir lg: must differ from the input lg:", ""};
@@ -498,9 +503,7 @@ void pass_command(Options& opts, Result& res) {
     }
     const auto*         lg_out = find_slot(opts.emit_dirs, "lg");
     Eprp_var::Eprp_dict labels;
-    if (!opts.top.empty()) {
-      labels["top"] = opts.top;
-    }
+    set_top_label(opts, var, labels, "pass.abc");
     if (lg_out != nullptr) {
       if (fs::weakly_canonical(lg_out->path) == fs::weakly_canonical(lg_in)) {
         throw Lhd_error{"usage", "abc --emit-dir lg: must differ from the input lg:", ""};
@@ -550,16 +553,22 @@ void pass_command(Options& opts, Result& res) {
     Eprp_var::Eprp_dict labels{
         {"files", joined}
     };
-    if (!opts.top.empty()) {
-      labels["top"] = opts.top;
-    }
-    // Timing sidecar: default under --workdir; --set pass.opentimer.qor overrides.
-    if (!opts.workdir.empty()) {
-      labels["qor"] = (fs::path(opts.workdir) / "timing.json").string();
-    }
+    set_top_label(opts, var, labels, "pass.opentimer");
+    // Timing sidecar: always defaulted — workdir() mints the same ephemeral
+    // scratch dir run_step's logs land in when --workdir is absent — so the
+    // pretty/jsonl report always has timing data to render. merge_sets runs
+    // after, so an explicit `--set pass.opentimer.qor=FILE` still overrides.
+    const std::string ephemeral_qor = opts.workdir.empty() ? (fs::path(workdir(opts)) / "timing.json").string() : std::string{};
+    labels["qor"] = ephemeral_qor.empty() ? (fs::path(opts.workdir) / "timing.json").string() : ephemeral_qor;
     merge_sets(opts, "pass.opentimer", labels);
     run_step("pass.opentimer", var, labels, opts, res);
     embed_qor_sidecar(labels, res);
+    if (!ephemeral_qor.empty() && labels["qor"] == ephemeral_qor) {
+      // The scratch-dir sidecar only exists to feed the report renderer: keep
+      // the embedded qor JSON but do not advertise the ephemeral path as an
+      // output (`outputs` lists only user-visible artifacts).
+      std::erase(res.outputs, ephemeral_qor);
+    }
   } else if (sub == "formal") {
     Eprp_var var;
     load_lg_into_var(lg_in, var);
@@ -567,9 +576,7 @@ void pass_command(Options& opts, Result& res) {
       throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};
     }
     Eprp_var::Eprp_dict labels;
-    if (!opts.top.empty()) {
-      labels["top"] = opts.top;
-    }
+    set_top_label(opts, var, labels, "pass.formal");
     merge_sets(opts, "pass.formal", labels);
     run_step("pass.formal", var, labels, opts, res);  // marks proven/runtime_check in place; errors on a real violation
   } else {

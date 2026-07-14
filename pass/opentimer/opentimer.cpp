@@ -4,13 +4,16 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_cat.h"
 #include "cell.hpp"
+#include "flatten.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
@@ -99,6 +102,53 @@ namespace {
   return std::string{io->get_name()};
 }
 
+// Net name of a driver pin. In flat mode it is the plain wire_name. In the
+// whole-design (flattened) walk an internal pin's net is its MASTER NODE's
+// dotted hier path plus the numeric port id — mirroring wire_name's structure
+// but with a per-instance prefix. Keying on the master node + port id (not the
+// pin's own get_hier_name) is essential: node.out_pins() yields a driver pin
+// with no pin_name while inp_edges().driver yields the SAME pin carrying its
+// port name, so the pin's own get_hier_name differs between the two (one omits
+// the port suffix, one appends it) and the driver/consumer nets would not meet.
+// The master node's get_hier_name is the stable, representation-independent id
+// (the same primitive LEC keys flops on). Module-IO pins keep their decl name.
+[[nodiscard]] std::string net_of(const hhds::Pin_class& dpin, bool hier) {
+  if (!hier) {
+    return wire_name(dpin);
+  }
+  if (is_graph_input_pin(dpin) || is_graph_output_pin(dpin)) {
+    return wire_name(dpin);  // module IO: the declared port name (root level)
+  }
+  auto master = dpin.get_master_node();
+  auto base   = master.get_hier_name();
+  auto pid    = dpin.get_port_id();
+  return pid == 0 ? base : absl::StrCat(base, "_", static_cast<uint32_t>(pid));
+}
+
+// Same net name, but for a DRIVER pin obtained from the traversal node's
+// out_pins()/create_driver_pin(): those pins do NOT carry the hier instance
+// chain (dpin.get_master_node().get_hier_name() drops the prefix), whereas the
+// traversal `owner` node does. A pin resolved through a hier edge (e.driver)
+// keeps its chain, so consumers use net_of(); this owner-based form is the
+// matching driver-side spelling. Both yield the same string for the same gate.
+[[nodiscard]] std::string net_of_node(const hhds::Node_class& owner, const hhds::Pin_class& dpin, bool hier) {
+  if (!hier) {
+    return wire_name(dpin);
+  }
+  if (is_graph_input_pin(dpin) || is_graph_output_pin(dpin)) {
+    return wire_name(dpin);
+  }
+  auto base = owner.get_hier_name();
+  auto pid  = dpin.get_port_id();
+  return pid == 0 ? base : absl::StrCat(base, "_", static_cast<uint32_t>(pid));
+}
+
+// Gate/instance name of a node: hier-unique get_hier_name when flattening, else
+// the flat instance name.
+[[nodiscard]] std::string inst_of(const hhds::Node_class& node, bool hier) {
+  return hier ? std::string{node.get_hier_name()} : default_instance_name(node);
+}
+
 // Per-pin delay annotation helpers (replaces Lgraph's Node_pin::set_delay /
 // has_delay / get_delay / del_delay).
 inline void set_delay(const hhds::Pin_class& pin, float d) {
@@ -151,7 +201,10 @@ std::string src_of_node(const std::shared_ptr<hhds::Graph>& g, const hhds::Node_
   if (!a.has() || a.get() == 0) {
     return {};
   }
-  auto span = g->source_locator().resolve_span(a.get());
+  // A flattened leaf lives in a child graph, so its srcid indexes that child's
+  // source map, not the top's — resolve against the node's own graph.
+  auto* ng   = n.get_graph();
+  auto  span = (ng != nullptr ? ng : g.get())->source_locator().resolve_span(a.get());
   if (span.file.empty() || !span.start_line.has_value()) {
     return {};
   }
@@ -193,12 +246,93 @@ void Pass_opentimer::time_work(Eprp_var& var) {
     return;
   }
 
-  const auto& g = selected.front();
+  auto g = selected.front();
+
+  // Whole-design timing (`hier=true`): structurally inline the instance
+  // hierarchy into a scratch def (pass/partition's flatten_hierarchy) and time
+  // THAT through the classic single-module path below. The legacy forward_hier
+  // walk kept module boundaries and stitched nets across them by name — the
+  // multi-bit pass.abc get_mask/set_mask bus packing was never stitched, so
+  // real netlists drowned in "can't connect pin" errors. Erasing the
+  // boundaries instead makes the boundary glue plain class-context rewiring,
+  // exactly what the pin tracker already handles in every mapped region. The
+  // walk stays reachable as `hier=stitch` for debugging/comparison. The
+  // scratch def exists only in memory (pass opentimer never saves the input
+  // library) and is deleted after the run; node names carry the dotted
+  // instance path, so reports still read hierarchically.
+  std::shared_ptr<hhds::Graph> scratch;
+  hhds::GraphLibrary*          scratch_lib = nullptr;
+  std::string                  scratch_name;
+  if (pass.hier_setting_ == "true") {
+    bool has_hier = false;
+    for (auto n : g->forward_class()) {
+      if (livehd::graph_util::is_type_sub(n) && n.get_subnode_graph() != nullptr) {
+        has_hier = true;
+        break;
+      }
+    }
+    if (has_hier) {
+      pass.report_module_ = std::string{g->get_name()};  // reports keep the real top name
+      scratch_lib         = g->get_io()->get_library();
+      scratch_name        = pass.report_module_ + "__ot_flat_tmp";
+      scratch             = livehd::partition::flatten_hierarchy(g.get(), scratch_lib, scratch_name);
+      if (!scratch) {
+        return;  // diag already emitted
+      }
+      g = scratch;
+    }
+  }
+
+  pass.setup_hier(g);
+  // The hier edge walk (inp_edges/out_edges -> resolve_hier_driver) consults the
+  // AMBIENT opaque scope, not the set passed to forward_hier — so the Liberty
+  // cells must be opaque here too, or edge resolution descends into their empty
+  // blackbox bodies and every gate-to-gate net silently disconnects. Set it once
+  // around the whole build+analyze (nullptr in flat mode == descend-all default).
+  const auto*             opq = pass.opaque_gids_.empty() ? nullptr : &pass.opaque_gids_;
+  hhds::Hier_opaque_scope opaque_scope(opq);
+
   pass.build_circuit(g);
   pass.read_sdc_spef();
   pass.compute_timing(g);
   pass.populate_table(g);
   pass.write_qor();
+
+  if (scratch) {
+    scratch_lib->delete_graph(scratch);
+    scratch = nullptr;
+    scratch_lib->delete_graphio(scratch_name);
+  }
+}
+
+// Legacy hier-walk mode selection. `hier=true` no longer lands here as a walk:
+// time_work structurally flattens the design first (pass/partition
+// flatten_hierarchy) and the flat single-module path times the scratch def —
+// no cross-boundary stitching at all. This walk (forward_hier + name-keyed
+// overwrite_hnet_ stitching) remains reachable as `hier=stitch` for
+// debugging/comparison only: it chains combinational gate-to-gate paths across
+// module boundaries but multi-bit buses crossing them (the pass.abc
+// get_mask/set_mask packing glue) are not stitched — resolve_hier_driver
+// returns those child module input ports as leaves, so a hierarchical top
+// reports unconnected boundary nets.
+void Pass_opentimer::setup_hier(const std::shared_ptr<hhds::Graph>& g) {
+  const auto& lib     = timer.celllib(ot::MAX);
+  auto        is_cell = [&](std::string_view name) { return lib && lib->cell(std::string{name}) != nullptr; };
+
+  hier_mode_ = (hier_setting_ == "stitch");
+  if (!hier_mode_) {
+    return;
+  }
+
+  // Every instantiated Liberty cell in the hierarchy is a non-descend leaf; the
+  // hier walk then yields those as gates and recurses only through design
+  // modules. hier_range visits one instance per subnode at every depth.
+  for (auto inst : g->hier_range()) {
+    auto tg = inst.get_target_graph();
+    if (tg && is_cell(tg->get_name())) {
+      opaque_gids_.insert(inst.get_target_gid());
+    }
+  }
 }
 
 void Pass_opentimer::power_work(Eprp_var& var) {
@@ -218,11 +352,44 @@ void Pass_opentimer::power_work(Eprp_var& var) {
 }
 
 std::string Pass_opentimer::get_driver_net_name(const hhds::Pin_class& dpin) const {
+  if (hier_mode_) {
+    auto hn = net_of(dpin, true);
+    auto it = overwrite_hnet_.find(hn);
+    return it != overwrite_hnet_.end() ? it->second : hn;
+  }
   auto it = overwrite_dpin2net.find(dpin.get_class_index());
   if (it != overwrite_dpin2net.end()) {
     return it->second;
   }
   return wire_name(dpin);
+}
+
+std::string Pass_opentimer::driver_net_of(const hhds::Node_class& owner, const hhds::Pin_class& dpin) const {
+  if (hier_mode_) {
+    auto key = net_of_node(owner, dpin, true);
+    auto it  = overwrite_hnet_.find(key);
+    return it != overwrite_hnet_.end() ? it->second : key;
+  }
+  auto it = overwrite_dpin2net.find(dpin.get_class_index());
+  if (it != overwrite_dpin2net.end()) {
+    return it->second;
+  }
+  return wire_name(dpin);
+}
+
+std::vector<hhds::Node_class> Pass_opentimer::leaf_nodes(const std::shared_ptr<hhds::Graph>& g) const {
+  std::vector<hhds::Node_class> v;
+  if (hier_mode_) {
+    const auto* opq = opaque_gids_.empty() ? nullptr : &opaque_gids_;
+    for (auto n : g->forward_hier(true, false, opq)) {
+      v.push_back(n);
+    }
+  } else {
+    for (auto n : g->fast_class()) {
+      v.push_back(n);
+    }
+  }
+  return v;
 }
 
 void Pass_opentimer::read_vcd() {
@@ -281,14 +448,25 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // decl when the driver is a module input.
   auto io_bits_of = [&](const hhds::Pin_class& dpin) -> int32_t {
     auto b = bits_of(dpin);
-    if (b != 0 || !gio || !is_graph_input_pin(dpin)) {
+    if (b != 0 || !is_graph_input_pin(dpin)) {
       return b;
     }
     auto n = dpin.get_pin_name();
     if (n.empty()) {
       return b;
     }
-    return bits_of(dpin, *gio, n);
+    // Resolve the declared width against the pin's OWN graph IO: a flattened
+    // leaf input can be a child-module port, not a top port, so the top gio
+    // would not declare it (get_bits asserts on an unknown name).
+    auto pio = gio;
+    if (hier_mode_) {
+      auto* pg = dpin.get_master_node().get_graph();
+      pio      = (pg != nullptr) ? pg->get_io() : nullptr;
+    }
+    if (!pio) {
+      return b;
+    }
+    return bits_of(dpin, *pio, n);
   };
 
   // Tracker id for a driver pin. pass.partition names region boundary ports
@@ -301,13 +479,68 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // every pv root a name that exists as an OT net.
   auto trk_id = [&](const hhds::Pin_class& pin) -> std::string {
     if (is_graph_input_pin(pin) || is_graph_output_pin(pin)) {
-      return wire_name(pin);
+      return net_of(pin, hier_mode_);
     }
     auto master = pin.get_master_node();
     if (!master.is_invalid() && Ntype::is_pin_trackable(type_op_of(master))) {
-      return absl::StrCat("n$", wire_name(pin));
+      return absl::StrCat("n$", net_of(pin, hier_mode_));
     }
-    return wire_name(pin);
+    return net_of(pin, hier_mode_);
+  };
+
+  // Record a driver pin -> net-name override. Keyed by the hier-unique net name
+  // when flattening (Class_index collides across instances), by Class_index in
+  // flat mode (byte-for-byte the original behaviour).
+  // key_net is the driver's net name computed with the correct hier context by
+  // the caller (net_of_node for a traversal-node driver, net_of for a resolved
+  // edge driver); the flat map keys on the pin's Class_index as before.
+  auto set_overwrite = [&](const std::string& key_net, const hhds::Pin_class& dpin, const std::string& netname) {
+    if (hier_mode_) {
+      overwrite_hnet_.insert_or_assign(key_net, netname);
+    } else {
+      overwrite_dpin2net.insert_or_assign(dpin.get_class_index(), netname);
+    }
+  };
+  auto is_overwritten = [&](const std::string& key_net, const hhds::Pin_class& dpin) -> bool {
+    return hier_mode_ ? overwrite_hnet_.contains(key_net) : overwrite_dpin2net.contains(dpin.get_class_index());
+  };
+
+  // Driver feeding a named sink, HIER-resolved. get_driver_of_sink_name reads the
+  // pin-level inp_edges (Graph::inp_edges(Pin_class)), which is LOCAL-only — it
+  // never crosses a module boundary — so the tracker would build on a child
+  // module's own input port (a bare "io_x") instead of the parent's driver.
+  // node.inp_edges() (the Node overload) is the hier-resolving one, so route the
+  // tracker's operand lookups through it when flattening.
+  auto hier_driver_of = [&](const hhds::Node_class& n, std::string_view sname) -> hhds::Pin_class {
+    if (!hier_mode_) {
+      return get_driver_of_sink_name(n, sname);
+    }
+    for (auto& e : n.inp_edges()) {
+      if (sink_pin_name_of(n, e.sink) == sname) {
+        return e.driver;
+      }
+    }
+    return {};
+  };
+
+  // The node set for the forward (net-population) walk. Flat mode iterates the
+  // def's own forward_class; the whole-design walk iterates forward_hier
+  // (descending design modules, yielding Liberty-cell leaves via opaque_gids_)
+  // and is snapshot into a vector first: processing materializes port-0 driver
+  // pins on shared child bodies, which must not mutate a live hier iterator.
+  auto forward_nodes = [&]() {
+    std::vector<hhds::Node_class> v;
+    if (hier_mode_) {
+      const auto* opq = opaque_gids_.empty() ? nullptr : &opaque_gids_;
+      for (auto n : g->forward_hier(true, false, opq)) {
+        v.push_back(n);
+      }
+    } else {
+      for (auto n : g->forward_class()) {
+        v.push_back(n);
+      }
+    }
+    return v;
   };
 
   // 1st: primary inputs.
@@ -361,13 +594,21 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         timer.insert_net(bus_bit_name);
       }
       // Multiple outputs sharing the same driver dpin is legal — last one wins
-      // (mirrors the original code's behaviour).
-      overwrite_dpin2net.insert_or_assign(driver_dpin.get_class_index(), driver_name);
+      // (mirrors the original code's behaviour). driver_dpin is a resolved edge
+      // driver (its master carries the hier chain), so net_of is the right key.
+      // A feed-through (output driven straight by a graph INPUT — the flatten
+      // as-top shape) must NOT overwrite: it would rename the input's net onto
+      // the PO net, silently un-timing every gate cone fed by that input (the
+      // PI arrival lands on the original net). The feed-through PO itself has
+      // no combinational content to time. Consts likewise never carry a net.
+      if (!is_graph_input_pin(driver_dpin) && !is_const_pin(driver_dpin)) {
+        set_overwrite(net_of(driver_dpin, hier_mode_), driver_dpin, driver_name);
+      }
     }
   }
 
   // 3rd: populate all the net names (forward walk, pin-tracker for trackable ops).
-  for (auto node : g->forward_class()) {
+  for (auto& node : forward_nodes()) {
     auto op = type_op_of(node);
     if (op == Ntype_op::Nconst || op == Ntype_op::AttrSet) {
       continue;
@@ -376,11 +617,14 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     bool root_track = Ntype::is_pin_trackable(op);
     if (root_track) {
       auto dpin0 = node.create_driver_pin(0);
-      auto wname = trk_id(dpin0);
+      // This trackable node's OWN output: name it from the traversal node (its
+      // hier chain is intact; a create_driver_pin/out_pins handle drops it). The
+      // "n$" prefix keeps the pure-rewiring output out of the real-net space.
+      auto wname = hier_mode_ ? absl::StrCat("n$", net_of_node(node, dpin0, true)) : trk_id(dpin0);
       if (op == Ntype_op::Set_mask) {
-        auto a_dpin     = get_driver_of_sink_name(node, "a");
-        auto mask_dpin  = get_driver_of_sink_name(node, "mask");
-        auto value_dpin = get_driver_of_sink_name(node, "value");
+        auto a_dpin     = hier_driver_of(node, "a");
+        auto mask_dpin  = hier_driver_of(node, "mask");
+        auto value_dpin = hier_driver_of(node, "value");
         if (a_dpin.is_invalid() || mask_dpin.is_invalid() || value_dpin.is_invalid()) {
           livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
               .msg("Invalid corrupt set_mask node {} (cprop should have deleted it)", debug_name(node))
@@ -396,8 +640,8 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         auto mask_const = hydrate_const(mask_dpin);
         pin_tracker.add_set_mask(wname, trk_id(a_dpin), io_bits_of(a_dpin), mask_const, trk_id(value_dpin));
       } else if (op == Ntype_op::Get_mask) {
-        auto a_dpin    = get_driver_of_sink_name(node, "a");
-        auto mask_dpin = get_driver_of_sink_name(node, "mask");
+        auto a_dpin    = hier_driver_of(node, "a");
+        auto mask_dpin = hier_driver_of(node, "mask");
         if (a_dpin.is_invalid() || mask_dpin.is_invalid()) {
           livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
               .msg("Invalid corrupt get_mask node {} (cprop should have deleted it)", debug_name(node))
@@ -413,8 +657,8 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         auto mask_const = hydrate_const(mask_dpin);
         pin_tracker.add_get_mask(wname, trk_id(a_dpin), io_bits_of(a_dpin), mask_const);
       } else if (op == Ntype_op::SRA) {
-        auto a_dpin = get_driver_of_sink_name(node, "a");
-        auto b_dpin = get_driver_of_sink_name(node, "b");
+        auto a_dpin = hier_driver_of(node, "a");
+        auto b_dpin = hier_driver_of(node, "b");
         if (a_dpin.is_invalid() || b_dpin.is_invalid()) {
           livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
               .msg("Invalid corrupt SRA node {} (cprop should have deleted it)", debug_name(node))
@@ -430,8 +674,8 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         auto b_const = hydrate_const(b_dpin);
         pin_tracker.add_sra(wname, trk_id(a_dpin), io_bits_of(a_dpin), b_const);
       } else if (op == Ntype_op::Sext) {
-        auto a_dpin = get_driver_of_sink_name(node, "a");
-        auto b_dpin = get_driver_of_sink_name(node, "b");
+        auto a_dpin = hier_driver_of(node, "a");
+        auto b_dpin = hier_driver_of(node, "b");
         if (a_dpin.is_invalid() || b_dpin.is_invalid()) {
           livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
               .msg("Invalid corrupt Sext node {} (cprop should have deleted it)", debug_name(node))
@@ -447,7 +691,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         auto b_const = hydrate_const(b_dpin);
         pin_tracker.add_sext(wname, trk_id(a_dpin), io_bits_of(a_dpin), b_const);
       } else if (op == Ntype_op::SHL) {
-        auto a_dpin = get_driver_of_sink_name(node, "a");
+        auto a_dpin = hier_driver_of(node, "a");
         if (a_dpin.is_invalid()) {
           livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
               .msg("Invalid corrupt SHL node {} (cprop should have deleted it)", debug_name(node))
@@ -455,7 +699,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           return;
         }
         // SHL b is single-driver (the one-hot multi-shift form was removed).
-        auto b_dpin = get_driver_of_sink_name(node, "b");
+        auto b_dpin = hier_driver_of(node, "b");
         if (!is_const_pin(b_dpin)) {
           livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
               .msg("opentimer can not handle non-constant SHL on node {} (cprop/tmap first)", debug_name(node))
@@ -517,21 +761,34 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         I(!root_track);
         continue;
       }
-      auto wname = root_track ? trk_id(dpin) : wire_name(dpin);
+      // Driver-side net name comes from the traversal node (hier chain intact).
+      auto dnet  = net_of_node(node, dpin, hier_mode_);
+      auto wname = root_track ? (hier_mode_ ? absl::StrCat("n$", dnet) : trk_id(dpin)) : dnet;
 
       if (root_track) {
         const auto& pv = pin_tracker.get_pin_vector(wname);
 
         if (pv.size() == 1) {  // single bit tracking result
-          auto dpin_cd = dpin.get_class_index();
           if (pv[0].pos < 0) {
             continue;  // no connection
           }
           if (pv[0].pos) {
             auto bus_bit_name = absl::StrCat(pv[0].id, ".", str_tools::to_s(pv[0].pos));
-            overwrite_dpin2net.insert_or_assign(dpin_cd, bus_bit_name);
+            set_overwrite(dnet, dpin, bus_bit_name);
           } else {
-            overwrite_dpin2net.insert_or_assign(dpin_cd, pv[0].id);
+            set_overwrite(dnet, dpin, pv[0].id);
+          }
+        } else if (pv.size() > 1 && pv[0].pos >= 0 && !is_overwritten(dnet, dpin)) {
+          // MULTI-bit tracker result: a module-boundary packed bus (pass.abc
+          // glue). bit 0 is the real signal, higher bits are const padding for a
+          // wide port, so a 1-bit cell reading this driver reads bit 0 — map it
+          // to pv[0]. A consumer that reads a specific higher bit goes through a
+          // Get_mask, which resolves inside the tracker (not via this overwrite);
+          // the is_overwritten guard keeps a phase-2 primary-output net intact.
+          if (pv[0].pos) {
+            set_overwrite(dnet, dpin, absl::StrCat(pv[0].id, ".", str_tools::to_s(pv[0].pos)));
+          } else {
+            set_overwrite(dnet, dpin, pv[0].id);
           }
         }
       } else {
@@ -540,8 +797,11 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     }
   }
 
-  // 4th: populate the cells (Sub instances).
-  for (auto node : g->fast_class()) {
+  // 4th: populate the cells (Sub instances). Whole-design mode iterates the
+  // flattened leaf set (forward_hier descends design modules; Liberty-cell
+  // leaves are yielded via opaque_gids_), so gates from every instance land in
+  // the single ot::Timer under their hier-unique names.
+  for (auto& node : leaf_nodes(g)) {
     auto op = type_op_of(node);
     if (op == Ntype_op::Nconst || op == Ntype_op::AttrSet) {
       continue;
@@ -551,17 +811,24 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     }
     if (op == Ntype_op::Flop || op == Ntype_op::Memory) {
       // Path boundary, not a cell (2opt-freq D): pass.abc keeps flops/memories
-      // native — the Liberty stays combinational. Each consumed output (Q,
-      // memory read data) becomes a virtual primary input arriving at 0, so
+      // native — the Liberty stays combinational. Each consumed output (a flop Q,
+      // a memory read-data port) becomes a virtual primary input arriving at 0, so
       // flop-to-flop segments are scored; the din/en/addr cones end at their
-      // driving gate pins, which compute_timing already reads. Clock/reset
-      // nets are not timed (no clock tree in this estimate). Flop Q is an
-      // implicit port-0 pin (no PinEntry) — same fallback as the net walk.
-      std::vector<hhds::Pin_class> bpins;
-      for (auto& dpin : node.out_pins()) {
-        bpins.push_back(dpin);
+      // driving gate pins, which compute_timing already reads. Clock/reset nets
+      // are not timed (no clock tree in this estimate).
+      //
+      // out_pins() does NOT materialize these outputs — a flop Q is an implicit
+      // port-0 pin, and a MEMORY exposes each read-data port only on its
+      // consuming edges (out_pins() is empty). Collect the actually-driven output
+      // pins from out_edges (deduped by pin) so every read port becomes a net.
+      std::vector<hhds::Pin_class>           bpins;
+      absl::flat_hash_set<hhds::Class_index> seen;
+      for (const auto e : node.out_edges()) {
+        if (!e.driver.is_invalid() && seen.insert(e.driver.get_class_index()).second) {
+          bpins.push_back(e.driver);
+        }
       }
-      if (bpins.empty()) {
+      if (bpins.empty()) {  // no consuming edge (a dead flop): fall back to port 0
         auto dpin0 = node.create_driver_pin(0);
         if (!dpin0.is_invalid()) {
           bpins.push_back(dpin0);
@@ -571,10 +838,11 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         if (dpin.is_invalid() || dpin.out_edges().empty()) {
           continue;
         }
-        if (overwrite_dpin2net.contains(dpin.get_class_index())) {
+        auto dnet = net_of_node(node, dpin, hier_mode_);  // flop/mem output (driver side)
+        if (is_overwritten(dnet, dpin)) {
           continue;  // drives a primary output directly: already a PO net
         }
-        auto        wname = wire_name(dpin);
+        auto        wname = dnet;
         const auto  bits  = bits_of(dpin);
         timer.insert_primary_input(wname);  // idempotent net insert underneath
         set_input_delays(wname);
@@ -593,7 +861,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       return;
     }
 
-    auto instance_name = default_instance_name(node);
+    auto instance_name = inst_of(node, hier_mode_);
     auto type_name     = sub_type_name(node);
 
     // ABC's builtin tie cells (emitted when the Liberty has no constant
@@ -603,15 +871,28 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       continue;
     }
 
-    // A Sub that is not a Liberty cell (a child-module instance) cannot be
-    // timed: ot::Timer::insert_gate would just log-and-skip, yielding silent
-    // garbage. The celllib is loaded (ctor flushes the lineage).
+    // A Sub that is not a Liberty cell. In whole-design mode a design module is
+    // descended into by the hier walk (never yielded here); reaching this with
+    // a body means a black-box the flatten cannot enter — skip it defensively
+    // (its boundary nets simply stay unscored). ot::Timer::insert_gate would
+    // otherwise log-and-skip, yielding silent garbage. The celllib is loaded.
     const auto& lib = timer.celllib(ot::MAX);
     if (!lib || lib->cell(type_name) == nullptr) {
+      if (hier_mode_) {
+        if (node.get_subnode_graph() != nullptr) {
+          continue;  // design-module body already flattened in via the hier walk
+        }
+        livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+            .msg("whole-design timing hit black-box '{}' (instance {}): no Liberty cell and no descendable body to flatten",
+                 type_name,
+                 instance_name)
+            .fatal();
+        return;
+      }
       livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
           .msg("module instantiates '{}' (instance {}), which is not a cell in the Liberty library — pass.opentimer times one "
-               "tech-mapped module at a time: run pass.abc first and pass --top of a mapped module (a region <mod>__c<N>, or "
-               "an uncolored/flat map for whole-design timing)",
+               "tech-mapped module per run. Pass --top of a mapped region (<mod>__c<N>), or enable whole-design flattening "
+               "across the instance hierarchy with --set pass.opentimer.hier=true",
                type_name,
                instance_name)
           .fatal();
@@ -626,7 +907,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         continue;
       }
       auto pin_name = absl::StrCat(instance_name, ":", driver_pin_name_of(node, dpin));
-      auto wire     = get_driver_net_name(dpin);
+      auto wire     = driver_net_of(node, dpin);
       timer.connect_pin(pin_name, wire);
     }
 
@@ -636,7 +917,6 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
 
       auto wire     = get_driver_net_name(e.driver);
       auto pin_name = absl::StrCat(instance_name, ":", sink_pin_name_of(node, e.sink));
-
       timer.connect_pin(pin_name, wire);
     }
   }
@@ -699,13 +979,17 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
   std::vector<Arrival> arrivals;
   hhds::Node_class     max_node;
 
-  for (auto node : g->fast_class()) {
+  // OT gate/instance name -> node, to source-attribute the path points below.
+  absl::flat_hash_map<std::string, hhds::Node_class> inst2node;
+
+  for (auto& node : leaf_nodes(g)) {
     auto op = type_op_of(node);
     if (op != Ntype_op::Sub) {
       continue;
     }
 
-    auto instance_name = default_instance_name(node);
+    auto instance_name = inst_of(node, hier_mode_);
+    inst2node.emplace(instance_name, node);
 
     for (auto& dpin : node.out_pins()) {
       if (dpin.is_invalid() || dpin.out_edges().empty()) {
@@ -756,19 +1040,124 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     return;
   }
 
-  // One JSON block per analyzed design: max delay + the worst endpoints,
-  // source-attributed through the gates' srcid (agent edit targets).
+  // Critical-path trace for the report: one point per pin, source -> critical
+  // pin/endpoint. report_timing ranks slack over ENDPOINTS, which exist only
+  // at RAT'd primary outputs (flops stay native, so no Liberty timing tests)
+  // — its path is used only when it actually reaches the critical arrival;
+  // otherwise (a flop-din cone) reconstruct by walking max-arrival fanin
+  // backward from the critical pin. Best-effort: an empty path still leaves a
+  // renderable summary + endpoints table.
+  struct Path_point {
+    std::string     pin;
+    float           at;
+    bool            rise;
+    const ot::Gate* gate;  // nullptr for ports / flop-boundary virtual PIs
+  };
+  std::vector<Path_point> path_pts;
+  if (!max_pin.empty()) {
+    auto paths = timer.report_timing(1, ot::MAX);
+    if (!paths.empty() && !paths.front().empty() && paths.front().back().at >= max_delay - 1e-4F * std::max(1.0F, max_delay)) {
+      for (const auto& p : paths.front()) {
+        path_pts.push_back({p.pin.name(), p.at, p.transition == ot::RISE, p.pin.gate()});
+      }
+    }
+  }
+  if (path_pts.empty() && !max_pin.empty()) {
+    constexpr float kNinf      = -std::numeric_limits<float>::infinity();
+    // Worst MAX-corner arrival of a pin over both edges: {at, is_rise}.
+    auto            arrival_of = [](const ot::Pin& p) -> std::pair<float, bool> {
+      auto  af = p.at(ot::MAX, ot::FALL);
+      auto  ar = p.at(ot::MAX, ot::RISE);
+      float f  = af ? *af : kNinf;
+      float r  = ar ? *ar : kNinf;
+      return r >= f ? std::pair{r, true} : std::pair{f, false};
+    };
+    // net -> its driver (rct-root) pin, for the backward net hop of the walk.
+    absl::flat_hash_map<const ot::Net*, const ot::Pin*> net_driver;
+    for (const auto& [pname, p] : pins) {
+      if (p.net() != nullptr && p.is_rct_root()) {
+        net_driver.emplace(p.net(), &p);
+      }
+    }
+
+    std::vector<Path_point>             rev;
+    absl::flat_hash_set<const ot::Pin*> seen;  // a comb loop must not cycle the walk
+    auto                                pit = pins.find(max_pin);
+    const ot::Pin*                      cur = pit != pins.end() ? &pit->second : nullptr;
+    while (cur != nullptr && seen.insert(cur).second) {
+      auto [at, rise] = arrival_of(*cur);
+      rev.push_back({cur->name(), at == kNinf ? 0.0F : at, rise, cur->gate()});
+      if (cur->primary_input() != nullptr) {
+        break;  // module input or flop/memory virtual PI: the path source
+      }
+      const ot::Pin* next = nullptr;
+      if (cur->is_input()) {  // gate input: hop the net to its driver
+        auto nd = net_driver.find(cur->net());
+        if (nd != net_driver.end() && nd->second != cur) {
+          next = nd->second;
+        }
+      } else if (const auto* gate = cur->gate(); gate != nullptr) {
+        // gate output: greedy max-arrival input pin of the same gate. A
+        // backward walk must be time-monotonic: an input arriving LATER than
+        // this output has no timing arc to it (a sequential cell's D vs Q —
+        // greedily picking D would splice the previous cycle's path in front
+        // of this one, with the Time column running backward). Bound the pick
+        // by the current arrival (+ float noise); at a DFF this follows the
+        // clock pin (the launch path) or ends the walk.
+        const float bound = at + 1e-4F * std::max(1.0F, std::abs(at));
+        float       best  = kNinf;
+        for (const ot::Pin* ip : gate->pins()) {
+          if (ip == nullptr || !ip->is_input()) {
+            continue;
+          }
+          if (auto [ia, ir] = arrival_of(*ip); ia > best && ia <= bound) {
+            best = ia;
+            next = ip;
+          }
+        }
+      }
+      cur = next;  // nullptr (untimed fanin: a tie cell / clock) ends the walk
+    }
+    path_pts.assign(rev.rbegin(), rev.rend());
+  }
+
+  // One JSON block per analyzed design: max delay + the critical-path points
+  // + the worst endpoints, source-attributed through the gates' srcid (agent
+  // edit targets).
   std::sort(arrivals.begin(), arrivals.end(), [](const Arrival& a, const Arrival& b) { return a.delay > b.delay; });
   constexpr size_t kMaxEndpoints = 10;
 
-  std::string j = std::format("{{\"module\":\"{}\"", jesc(g->get_name()));
+  std::string j = std::format("{{\"module\":\"{}\"", jesc(report_module_.empty() ? std::string{g->get_name()} : report_module_));
   if (!max_pin.empty()) {
     j += std::format(",\"max_delay\":{:.6g},\"critical_pin\":\"{}\"", max_delay, jesc(max_pin));
     if (auto src = src_of_node(g, max_node); !src.empty()) {
       j += std::format(",\"critical_src\":\"{}\"", jesc(src));
     }
   }
-  j += ",\"endpoints\":[";
+  j             += ",\"path\":[";
+  float prev_at  = 0.0F;
+  for (size_t i = 0; i < path_pts.size(); ++i) {
+    const auto& p = path_pts[i];
+    if (i != 0) {
+      j += ",";
+    }
+    j += std::format("{{\"pin\":\"{}\",\"at\":{:.6g},\"delay\":{:.6g},\"dir\":\"{}\"",
+                     jesc(p.pin),
+                     p.at,
+                     p.at - prev_at,
+                     p.rise ? "rise" : "fall");
+    if (p.gate != nullptr) {
+      j += std::format(",\"cell\":\"{}\"", jesc(p.gate->cell_name()));
+      if (auto it = inst2node.find(p.gate->name()); it != inst2node.end()) {
+        if (auto src = src_of_node(g, it->second); !src.empty()) {
+          j += std::format(",\"src\":\"{}\"", jesc(src));
+        }
+      }
+    }
+    j       += "}";
+    prev_at  = p.at;
+  }
+  j += "],\"endpoints\":[";
   for (size_t i = 0; i < arrivals.size() && i < kMaxEndpoints; ++i) {
     if (i != 0) {
       j += ",";
@@ -787,7 +1176,26 @@ void Pass_opentimer::write_qor() const {
   if (qor_path.empty()) {
     return;
   }
-  std::string j = "{\"schema_version\":1,\"kind\":\"sta\",\"designs\":[";
+  // The Liberty time unit as a label (arrivals are plain numbers in this
+  // unit), so the pretty renderer can print real units. Omitted when the
+  // library declares none / an uncommon one.
+  std::string tu;
+  if (auto u = timer.time_unit(); u) {
+    auto         near = [](double a, double b) { return a > b * 0.999 && a < b * 1.001; };
+    const double v    = u->value();
+    if (near(v, 1e-6)) {
+      tu = "us";
+    } else if (near(v, 1e-9)) {
+      tu = "ns";
+    } else if (near(v, 1e-12)) {
+      tu = "ps";
+    }
+  }
+  std::string j = "{\"schema_version\":1,\"kind\":\"sta\",";
+  if (!tu.empty()) {
+    j += std::format("\"time_unit\":\"{}\",", tu);
+  }
+  j += "\"designs\":[";
   for (size_t i = 0; i < qor_blocks_.size(); ++i) {
     if (i != 0) {
       j += ",";

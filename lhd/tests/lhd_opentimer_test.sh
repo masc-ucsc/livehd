@@ -63,6 +63,17 @@ if grep -qE '^[WE] ' "$W/ot_seq.err"; then
   fail "OpenTimer warnings/errors on the seq netlist: $(grep -E '^[WE] ' "$W/ot_seq.err" | head -3)"
 fi
 
+# 3b. whole-design timing (hier=true): the hierarchical netlist top (wrapper +
+#     region instances) is structurally flattened into one scratch module and
+#     timed end-to-end — zero OT connect errors, module name = the real top.
+"$LHD" pass opentimer --set pass.opentimer.hier=true --top "$TOP" lg:"$W/net" "$LIB" --workdir "$W/wth" \
+    -q --result-json "$W/rh.json" 2> "$W/ot_hier.err" || fail "hier=true opentimer -> $(cat "$W/rh.json")"
+grep -q "\"module\":\"$TOP\"" "$W/wth/timing.json" || fail "hier timing.json must report the real top name"
+grep -q '"max_delay":' "$W/wth/timing.json" || fail "hier timing.json missing max_delay"
+if grep -qE '^[WE] ' "$W/ot_hier.err"; then
+  fail "OpenTimer warnings/errors on the hier=true run: $(grep -E '^[WE] ' "$W/ot_hier.err" | head -3)"
+fi
+
 # 4. negative control: the rebuilt netlist top instantiates region modules,
 #    which are not Liberty cells -> must fail (never silent garbage)
 if "$LHD" pass opentimer --top "$TOP" lg:"$W/net" "$LIB" --workdir "$W/wn" -q --result-json "$W/rn.json" 2>/dev/null; then

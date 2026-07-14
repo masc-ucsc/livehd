@@ -13,6 +13,7 @@
 #include "abc_map.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
+#include "mem_lower.hpp"
 #include "pass_partition.hpp"
 
 static Pass_plugin sample("pass_abc", Pass_abc::setup);
@@ -48,7 +49,17 @@ void Pass_abc::setup() {
       "command/alias reference: https://github.com/berkeley-abc/abc/blob/master/abc.rc "
       "(and `<cmd> -h` inside an ABC shell for each command's switches)",
       "");
-  m.add_label_optional("seq", "true|false sequential vs combinational", "true");
+  m.add_label_optional("register",
+                       "true|false map flops to Liberty DFF cells (true, falls back to native flops when the library has no "
+                       "DFF cell) vs keep them native as `always @(posedge)` (false)",
+                       "true");
+  m.add_label_optional("memory",
+                       "true|false bit-blast a Memory into a DFF-cell array + read/write mux logic (true) vs keep it as a "
+                       "native memory instance (false)",
+                       "false");
+  m.add_label_optional("seq", "DEPRECATED alias for `register` (maps seq=<v> to register=<v>); use register/memory instead", "");
+  m.add_label_optional("dff_cell",
+                       "explicit Liberty DFF cell name for register=true (empty => auto-detect a plain posedge D-flop)", "");
   m.add_label_optional("delay", "{D} substitution in flow", "");
   m.add_label_optional("load", "{L} substitution in flow", "");
   m.add_label_optional("verbose", "per-module ABC stats", "false");
@@ -65,6 +76,11 @@ void Pass_abc::setup() {
                        "write per-region + total QoR JSON (mapped gates/area/critical delay, source-attributed) to this file "
                        "(`lhd pass abc` defaults it to <workdir>/qor.json when --workdir is set)",
                        "");
+  m.add_label_optional("flatten",
+                       "auto|true|false whole-design flatten: inline the instance hierarchy and map the flat design as "
+                       "one region (auto = flatten exactly when the active coloring is `pass.color flat`); the result "
+                       "is a single netlist module named after the top",
+                       "auto");
   m.add_label_optional(
       "region_opts",
       "per-region option overrides as JSON keyed by color id, e.g. "
@@ -156,7 +172,7 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   j += "\"schema_version\":1,\"kind\":\"abc-map\",";
   j += std::format("\"top\":\"{}\",", jesc(top));
   j += std::format("\"library\":\"{}\",", jesc(opts.library));
-  j += std::format("\"seq\":{},", opts.seq ? "true" : "false");
+  j += std::format("\"register\":{},\"memory\":{},", opts.map_register ? "true" : "false", opts.map_memory ? "true" : "false");
   j += std::format("\"delay_target\":\"{}\",", jesc(opts.delay));
   j += std::format("\"total\":{{\"regions\":{},\"gates\":{},\"area\":{:.4f}", qor.size(), tgates, tarea);
   if (tdivbb > 0) {
@@ -210,7 +226,18 @@ void Pass_abc::work(Eprp_var& var) {
   auto out     = std::string{var.get("out", "")};
   auto library = std::string{var.get("library", "")};
   auto flow    = std::string{var.get("flow", "")};
-  bool seq     = truthy(var.get("seq", "true"));
+  bool map_register = truthy(var.get("register", "true"));
+  bool map_memory   = truthy(var.get("memory", "false"));
+  // `seq` is the deprecated single knob. It only ever controlled flops, so it
+  // maps to `register` (memory was always kept native). Explicit register/memory
+  // still win if both are given.
+  if (auto seq_s = std::string{var.get("seq", "")}; !seq_s.empty()) {
+    map_register = truthy(seq_s);
+    livehd::diag::warn("pass.abc", "seq-deprecated", "io")
+        .msg("pass.abc: 'seq' is deprecated; use 'register' and 'memory'. Treating seq={} as register={}.", seq_s,
+             map_register ? "true" : "false")
+        .emit();
+  }
   auto delay   = std::string{var.get("delay", "")};
   auto load    = std::string{var.get("load", "")};
   bool verbose = truthy(var.get("verbose", "false"));
@@ -221,6 +248,7 @@ void Pass_abc::work(Eprp_var& var) {
   bool use_all_assume    = truthy(var.get("use_all_assume", "false"));
   auto qor_path          = std::string{var.get("qor", "")};
   auto region_opts_s     = std::string{var.get("region_opts", "")};
+  auto flatten           = livehd::partition::parse_flatten_mode(var.get("flatten", "auto"), "pass.abc");
 
   livehd::abc::Region_opts_map region_opts;
   if (!region_opts_s.empty()) {
@@ -256,7 +284,9 @@ void Pass_abc::work(Eprp_var& var) {
 
   livehd::abc::Map_options opts;
   opts.flow       = flow;
-  opts.seq        = seq;
+  opts.map_register = map_register;
+  opts.map_memory   = map_memory;
+  opts.dff_cell     = std::string{var.get("dff_cell", "")};
   opts.delay      = delay;
   opts.load       = load;
   opts.verbose    = verbose;
@@ -284,6 +314,14 @@ void Pass_abc::work(Eprp_var& var) {
   }
   opts.library = library;
 
+  // memory=true: bit-blast every Memory into native flops + comb BEFORE
+  // partitioning, so the normal flow tech-maps the resulting muxes/flops. Deleted
+  // Memory nodes never reach the boundary code; any memory left native (an
+  // unsupported shape) still cuts as a boundary (the memory=false behavior).
+  if (map_memory) {
+    livehd::abc::lower_memories(var.graphs);
+  }
+
   auto& outlib = livehd::Hhds_graph_library::instance(out);
 
   livehd::abc::Mapper mapper(opts);
@@ -294,9 +332,13 @@ void Pass_abc::work(Eprp_var& var) {
   }
 
   bool dbg = false;
-  Pass_partition::build_decomposition(var.graphs, &outlib, top, dbg, [&mapper](const livehd::partition::Region_body& rb) {
-    mapper.map_region(rb);
-  });
+  Pass_partition::build_decomposition(
+      var.graphs,
+      &outlib,
+      top,
+      dbg,
+      [&mapper](const livehd::partition::Region_body& rb) { mapper.map_region(rb); },
+      flatten);
 
   mapper.stop();
 

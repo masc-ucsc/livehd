@@ -153,7 +153,7 @@ bazel_dep(name = "hhds", version = "0.2.0")
 git_override(
     module_name = "hhds",
     remote = "https://github.com/masc-ucsc/hhds.git",
-    commit = "37721a29fc7e00ed5864456cdb7f902ff1f277df",  # top of tree (name persistence); insulates from in-flight ../hhds traversal work
+    commit = "b1b099c276348a7688fac19a1db778bd22a57994",
 )
 # For local co-development swap the git_override above for:
 # local_path_override(module_name = "hhds", path = "../hhds")

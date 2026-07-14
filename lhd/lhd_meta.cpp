@@ -343,7 +343,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "pass") {
     print_json_line(
-        R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut node coloring), partition (region->module Sub split), abc (combinational ABC tech-map), liberty gensim <file.lib> (Liberty -> sim models), semdiff (structural diff/match of two lg: libraries via --ref/--impl; `lhd describe \"pass semdiff\"`)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","abc","liberty","semdiff"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"ref","type":"lg:DIR (semdiff)"},{"name":"impl","type":"lg:DIR (semdiff)"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder"]})json");
+        R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut|flat node coloring), partition (region->module Sub split), abc (combinational ABC tech-map), opentimer (OpenTimer STA on a tech-mapped module -> timing.json), liberty gensim <file.lib> (Liberty -> sim models), semdiff (structural diff/match of two lg: libraries via --ref/--impl; `lhd describe \"pass semdiff\"`)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","abc","opentimer","liberty","semdiff"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"ref","type":"lg:DIR (semdiff)"},{"name":"impl","type":"lg:DIR (semdiff)"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder"]})json");
     return 0;
   }
   if (name == "lnast-dump") {
@@ -485,7 +485,7 @@ void print_general_help() {
       "               lhd pyrope fmt -i foo.prp         # reformat in place\n"
       "               lhd pyrope fmt foo.prp            # print formatted source to stdout\n"
       "               lhd pyrope lsp                    # Pyrope LSP server over stdio (JSON-RPC; .prp only)\n"
-      "  pass       run one graph pass over lg: inputs: color <alg> | partition | abc | liberty gensim | semdiff\n"
+      "  pass       run one graph pass over lg: inputs: color <alg> | partition | abc | opentimer | liberty gensim | semdiff\n"
       "               lhd pass abc --top m lg:dir --emit-dir lg:net\n"
       "               lhd pass semdiff --ref lg:gold --impl lg:opt --top adder   # structural diff/match\n"
       "  list       steps | recipes | emit-kinds | error-classes | options [REGEX]\n"
@@ -579,11 +579,35 @@ int help_pass(const std::string& sub) {
     std::print(
         "lhd pass color <alg> — node coloring over an lg: library (in place)\n"
         "\n"
-        "usage: lhd pass color [acyclic|synth|path|mincut] --top M lg:DIR\n"
-        "  alg defaults to acyclic. The coloring is written back into the input lg:.\n"
+        "usage: lhd pass color [acyclic|cgen|synth|path|mincut|flat|clear] --top M lg:DIR\n"
+        "  alg defaults to acyclic. The coloring is written back into the input lg:. With\n"
+        "  --top the whole instance hierarchy is colored (each unique def once); set\n"
+        "  pass.color.hier=false to limit it to the top def.\n"
         "\n"
-        "example:\n"
-        "  lhd pass color acyclic --top m lg:dir\n");
+        "algorithms:\n"
+        "  acyclic  DAG cone partitions: every primary-output driver, fan-out>1, and dead\n"
+        "           node seeds a region grown backward over its input cone (--set cutoff,\n"
+        "           merge tune small-region merging)\n"
+        "  cgen     one color per cone-sink signature — each primary output, plus one\n"
+        "           shared flop/mem next-state bucket; logic feeding several sinks gets its\n"
+        "           own id (the granularity inou.cgen.sim uses to break false comb loops)\n"
+        "  synth    connectivity clusters grown forward (combinationally) from the primary\n"
+        "           inputs, stopping at flops; synth mode also cuts the fan-out of mult/div\n"
+        "           and >8-bit adders so their downstream logic starts new clusters\n"
+        "           (--set synth_alg=pipe|synth)\n"
+        "  path     register-to-register regions: seed every flop/reg/mem and color its\n"
+        "           backward+forward cone up to real (non-clk/rst) wire names; --set\n"
+        "           instance=a,b instead seeds named nodes forward-only, bounded by the\n"
+        "           instance-name prefix\n"
+        "  mincut   two-way split of the def along a VieCut global minimum edge cut\n"
+        "           (--set iters, mincut_alg, and the kernel --seed)\n"
+        "  flat     one single color for the entire selected hierarchy — the coloring\n"
+        "           equivalent of flattening the design (ignores pass.color.continuous)\n"
+        "  clear    remove any existing coloring\n"
+        "\n"
+        "examples:\n"
+        "  lhd pass color acyclic --top m lg:dir\n"
+        "  lhd pass color flat --top m lg:dir      # whole hierarchy -> one color\n");
     return print_options_section({"pass.color."});
   }
   if (sub == "partition") {
@@ -607,6 +631,38 @@ int help_pass(const std::string& sub) {
         "example:\n"
         "  lhd pass abc --top m lg:dir --emit-dir lg:net\n");
     return print_options_section({"pass.abc."});
+  }
+  if (sub == "opentimer") {
+    std::print(
+        "lhd pass opentimer — OpenTimer STA on a pass.abc tech-mapped module\n"
+        "\n"
+        "usage: lhd pass opentimer --top M lg:DIR <cells.lib> [file.sdc file.spef]\n"
+        "  Reports the critical path of ONE tech-mapped module machine-readably (the\n"
+        "  accurate frequency oracle of the 2opt-freq loop). Timing files are POSITIONAL\n"
+        "  (like `pass liberty gensim`): 1-2 Liberty files (.lib; a 2nd = min corner) plus\n"
+        "  optional .sdc / .spef — not a --set option.\n"
+        "\n"
+        "  One module per run (one OpenTimer design): --top picks the def out of the\n"
+        "  netlist library. Time a region module (<mod>__c<N>) or a flat map. Flops and\n"
+        "  memories are path boundaries (kept native by pass.abc, zeroed as virtual inputs),\n"
+        "  not Liberty cells. By default a --top whose body instantiates a sub-MODULE (a Sub\n"
+        "  that is not a Liberty cell) is rejected — opentimer times one flat module.\n"
+        "\n"
+        "flags:\n"
+        "  --set pass.opentimer.hier=true        whole-design flattening across the instance hierarchy\n"
+        "                                        (combinational paths chain across module boundaries;\n"
+        "                                        flops/memories stay zero-arrival path boundaries)\n"
+        "  --set pass.opentimer.margin=<0-100>   criticality-coloring threshold (report is independent)\n"
+        "  --set pass.opentimer.qor=FILE         timing JSON path (defaults to <workdir>/timing.json)\n"
+        "\n"
+        "the report (timing.json / result envelope \"qor\" member):\n"
+        "  max_delay (worst MAX-corner gate arrival, library time units), the critical pin,\n"
+        "  the 10 worst endpoints, each `src`-attributed back to the pre-synth RTL line.\n"
+        "\n"
+        "example:\n"
+        "  lhd pass abc --top m lg:g --emit-dir lg:net\n"
+        "  lhd pass opentimer --top m__c0 lg:net cells.lib --workdir W\n");
+    return print_options_section({"pass.opentimer."});
   }
   if (sub == "liberty") {
     std::print(
@@ -633,7 +689,8 @@ int help_pass(const std::string& sub) {
         "\n"
         "flags:\n"
         "  --ref lg:DIR   --impl lg:DIR\n"
-        "  --top T        --ref-top T   --impl-top T\n"
+        "  --top T        --ref-top T   --impl-top T   (T = full `file.entity` name, or the\n"
+        "                 bare entity when unique — resolves with a top-entity-fallback warning)\n"
         "  --set pass.semdiff.matching_names=true   anchor internal flops/mems by hierarchical name\n"
         "  --set pass.semdiff.state_pairing=true    tier-2: full-match (SRP/ERP signature) pairing of renamed state\n"
         "  --set pass.semdiff.hier=1                sweep every def pair (--top scopes to its subtree), aggregate state stats\n"
@@ -652,7 +709,7 @@ int help_pass(const std::string& sub) {
     return print_options_section({"pass.semdiff."});
   }
   if (!sub.empty()) {
-    std::print(stderr, "lhd help: unknown pass subcommand '{}' (color | partition | abc | liberty | semdiff)\n", sub);
+    std::print(stderr, "lhd help: unknown pass subcommand '{}' (color | partition | abc | opentimer | liberty | semdiff)\n", sub);
     return 1;
   }
   std::print(
@@ -661,9 +718,10 @@ int help_pass(const std::string& sub) {
       "usage: lhd pass <subcommand> [args] [--top M] lg:DIR [--emit-dir lg:OUT/]\n"
       "\n"
       "subcommands (run `lhd pass <subcommand> --help` for each one's --set options):\n"
-      "  color <alg>          acyclic|synth|path|mincut node coloring (in place)\n"
+      "  color <alg>          acyclic|synth|path|mincut|flat node coloring (in place)\n"
       "  partition            region -> module Sub split (-> new lg:)\n"
       "  abc                  combinational ABC tech-map (-> new lg:)\n"
+      "  opentimer            OpenTimer STA on a tech-mapped module (-> timing.json)\n"
       "  liberty gensim FILE  Liberty -> simulation models (-> new lg:)\n"
       "  semdiff              structural diff/match of two lg: (--ref/--impl; marked in place)\n"
       "\n"
@@ -671,6 +729,7 @@ int help_pass(const std::string& sub) {
       "  lhd pass color acyclic --top m lg:dir\n"
       "  lhd pass partition --top m lg:dir --emit-dir lg:parts\n"
       "  lhd pass abc --top m lg:dir --emit-dir lg:net\n"
+      "  lhd pass opentimer --top m__c0 lg:net sky130.lib --workdir W\n"
       "  lhd pass liberty gensim sky130.lib --emit-dir lg:models\n"
       "  lhd pass semdiff --ref lg:gold --impl lg:opt --top adder\n");
   return 0;
@@ -691,7 +750,7 @@ int help_pass(const std::string& sub) {
 
 std::string json_general() {
   return std::format(
-      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set lec.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: color | partition | abc | liberty | semdiff"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|recipes|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
+      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set lec.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: color | partition | abc | opentimer | liberty | semdiff"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|recipes|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
       kVersion);
 }
 
@@ -705,13 +764,16 @@ constexpr std::string_view kJsonPyropeOverview =
     R"json({"schema_version":1,"name":"pyrope","description":"Pyrope developer tools (language-adjacent, not the compile/synth flow)","subcommands":[{"name":"fmt","summary":"format Pyrope source (clang-format-like): -i in place, else stdout"},{"name":"lsp","summary":"the Pyrope LSP server over stdio (JSON-RPC; .prp only)"}],"examples":["lhd pyrope fmt -i foo.prp","lhd pyrope lsp"]})json";
 
 constexpr std::string_view kJsonPassColor =
-    R"json({"schema_version":1,"name":"pass color","description":"Node coloring over an lg: library, in place: acyclic|synth|path|mincut (alg defaults to acyclic). The coloring is written back into the input lg:","args":{"required":[{"name":"alg","type":"enum","values":["acyclic","synth","path","mincut"],"default":"acyclic","positional":true},{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"set","type":"pass.color.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir"]})json";
+    R"json({"schema_version":1,"name":"pass color","description":"Node coloring over an lg: library, in place: acyclic|cgen|synth|path|mincut|flat|clear (alg defaults to acyclic). flat gives the whole --top hierarchy one color (the flatten equivalent). The coloring is written back into the input lg:","args":{"required":[{"name":"alg","type":"enum","values":["acyclic","cgen","synth","path","mincut","flat","clear"],"default":"acyclic","positional":true},{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"set","type":"pass.color.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass color flat --top m lg:dir"]})json";
 
 constexpr std::string_view kJsonPassPartition =
     R"json({"schema_version":1,"name":"pass partition","description":"Split a design into region -> module Subs (LEC-equivalent). --emit-dir lg: (must differ from the input) receives the partitioned library","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.partition.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass partition --top m lg:dir --emit-dir lg:parts"]})json";
 
 constexpr std::string_view kJsonPassAbc =
     R"json({"schema_version":1,"name":"pass abc","description":"Combinational ABC tech-map: bit-blast -> AIG -> sky130 blackboxes. --emit-dir lg: (must differ from the input) receives the mapped netlist","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.abc.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass abc --top m lg:dir --emit-dir lg:net"]})json";
+
+constexpr std::string_view kJsonPassOpentimer =
+    R"json({"schema_version":1,"name":"pass opentimer","description":"OpenTimer static timing analysis on ONE pass.abc tech-mapped module: reports the critical path (max_delay, critical pin, worst endpoints, source-attributed) as timing.json and the result envelope 'qor' member. Timing files are POSITIONAL (1-2 Liberty .lib, a 2nd = min corner, plus optional .sdc/.spef). --top picks the def (time a <mod>__c<N> region or a flat map); flops/memories are zeroed path boundaries. A --top that instantiates a sub-module (a Sub that is not a Liberty cell) is rejected — one flat module per run","args":{"required":[{"name":"files","type":"path (.lib[,.sdc,.spef])","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"set","type":"pass.opentimer.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["json"],"examples":["lhd pass abc --top m lg:g --emit-dir lg:net","lhd pass opentimer --top m__c0 lg:net cells.lib --workdir W"]})json";
 
 constexpr std::string_view kJsonPassLiberty =
     R"json({"schema_version":1,"name":"pass liberty","description":"Liberty cells -> LGraph simulation models (gensim). Takes a Liberty FILE (not an lg: input); --emit-dir lg: receives the model library","args":{"required":[{"name":"subcommand","type":"enum","values":["gensim"],"positional":true},{"name":"file","type":"path (.lib)","positional":true}],"optional":[{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.liberty.flag=value","repeatable":true}]},"inputs":[],"outputs":["lg"],"examples":["lhd pass liberty gensim sky130.lib --emit-dir lg:models"]})json";
@@ -792,11 +854,15 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
       print_json_line(kJsonPassAbc);
       return 0;
     }
+    if (sub == "opentimer") {
+      print_json_line(kJsonPassOpentimer);
+      return 0;
+    }
     if (sub == "liberty") {
       print_json_line(kJsonPassLiberty);
       return 0;
     }
-    std::print(stderr, "lhd help: unknown pass subcommand '{}' (color | partition | abc | liberty | semdiff)\n", sub);
+    std::print(stderr, "lhd help: unknown pass subcommand '{}' (color | partition | abc | opentimer | liberty | semdiff)\n", sub);
     return 1;
   }
   // compile / lec / formal / scan / tool, plus every non-command describe topic
@@ -886,7 +952,8 @@ int help_command(const Options& opts) {
         "\n"
         "flags:\n"
         "  --impl KIND:PATH   --ref KIND:PATH\n"
-        "  --top T            --impl-top T   --ref-top T\n"
+        "  --top T            --impl-top T   --ref-top T   (T = full `file.entity` name, or\n"
+        "                     the bare entity when unique — a top-entity-fallback warning notes it)\n"
         "  --reader R         --set lec.flag=value   --formal GLOB\n"
         "  Extra .prp files supply impl-side formal helpers. Internal/output facts are\n"
         "  proven unbounded before use; input-only assumes are environment constraints;\n"

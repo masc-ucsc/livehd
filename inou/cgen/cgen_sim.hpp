@@ -44,6 +44,7 @@ private:
   static std::string     cpp_id(std::string_view name);  // sanitize to a valid C++ identifier
   static hhds::Pin_class get_driver(const hhds::Pin_class& sink);
   static hhds::Pin_class find_sink_pin(const hhds::Node_class& node, std::string_view name);
+  static hhds::Pin_class find_driver_pin(const hhds::Node_class& node, std::string_view name);
 
   // Raw name of the input port clocking `g` (flop clock_pin, else recursively a
   // sub-instance's clock port); "" = none. Memoized in clk_memo_.

@@ -47,6 +47,73 @@ std::string join_csv(const std::vector<std::string>& v) {
   return out;
 }
 
+std::string_view top_entity_of(std::string_view name) {
+  auto d = name.rfind('.');
+  return d == std::string_view::npos ? name : name.substr(d + 1);
+}
+
+std::string resolve_top_name(const std::vector<std::string>& names, std::string_view want, std::string_view diag_pass) {
+  for (const auto& n : names) {
+    if (n == want) {
+      return std::string{want};
+    }
+  }
+  // Entity fallback (lec's long-standing rule): internal names are the
+  // hierarchical `file.entity`, but Verilog/flat-name tooling names the module
+  // by its flat entity (`counter`, not `mod_counter.counter`), and a v2prp-style
+  // LEC pairs `x.counter` against a regenerated `plain.counter`. Match on the
+  // entity of BOTH sides — accepted only when exactly one name matches, and
+  // always announced by the warning below.
+  const std::string_view want_entity = top_entity_of(want);
+  std::string            hit;
+  int                    n_hits = 0;
+  for (const auto& n : names) {
+    if (top_entity_of(n) == want_entity) {
+      hit = n;
+      ++n_hits;
+    }
+  }
+  if (n_hits != 1) {
+    return {};
+  }
+  livehd::diag::warn(diag_pass, "top-entity-fallback", "name")
+      .msg("top '{}' not found; using '{}' (the unique entity-name match)", want, hit)
+      .emit();
+  return hit;
+}
+
+std::shared_ptr<hhds::Graph> pick_top_graph(const Eprp_var& v, const std::string& side_top, const std::string& shared_top,
+                                            std::string_view side, std::string_view cmd, std::string_view diag_pass) {
+  const std::string& t = !side_top.empty() ? side_top : shared_top;
+  if (!t.empty()) {
+    std::vector<std::string> names;
+    names.reserve(v.graphs.size());
+    for (const auto& g : v.graphs) {
+      if (g) {
+        names.emplace_back(g->get_name());
+      }
+    }
+    if (const std::string resolved = resolve_top_name(names, t, diag_pass); !resolved.empty()) {
+      for (const auto& g : v.graphs) {
+        if (g && g->get_name() == resolved) {
+          return g;
+        }
+      }
+    }
+    if (side.empty()) {
+      throw Lhd_error{"config", std::format("{}: top '{}' not found", cmd, t), ""};
+    }
+    throw Lhd_error{"config", std::format("{}: {} top '{}' not found", cmd, side, t), ""};
+  }
+  if (v.graphs.size() == 1) {
+    return v.graphs.front();
+  }
+  if (side.empty()) {
+    throw Lhd_error{"usage", std::format("{}: design has {} modules; pass --top", cmd, v.graphs.size()), ""};
+  }
+  throw Lhd_error{"usage", std::format("{}: {} has {} modules; pass --{}-top or --top", cmd, side, v.graphs.size(), side), ""};
+}
+
 void ensure_dir(const std::string& path) {
   std::error_code ec;
   fs::create_directories(path, ec);
@@ -1043,6 +1110,28 @@ static bool sim_cgen_color_enabled(const Options& opts) {
 std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, const std::string& odir) {
   ensure_dir(odir);
 
+  // Resolve --top once against the loaded graphs: both pass.color and
+  // inou.cgen.sim accept the FULL internal name (file.entity) — the only
+  // spelling that disambiguates two same-entity modules. An unresolvable name
+  // passes through unchanged (with a warning: the VCD would not self-root).
+  std::string top_full;
+  if (!opts.top.empty() && opts.top != "-auto-top") {
+    std::vector<std::string> names;
+    names.reserve(var.graphs.size());
+    for (const auto& g : var.graphs) {
+      if (g) {
+        names.emplace_back(g->get_name());
+      }
+    }
+    top_full = resolve_top_name(names, opts.top, "lhd.sim");
+    if (top_full.empty()) {
+      livehd::diag::warn("lhd.sim", "top-not-found", "name")
+          .msg("top '{}' matches no module (or is ambiguous); the VCD will not be rooted at it", opts.top)
+          .emit();
+      top_full = opts.top;
+    }
+  }
+
   // Color each module by its per-output cones (pass.color cgen) BEFORE emitting,
   // so inou.cgen.sim can schedule a Sub at output-cone granularity and break a
   // false combinational loop through an instance. The coloring is metadata on the
@@ -1053,8 +1142,8 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
     Eprp_var::Eprp_dict clabels{
         {"alg", "cgen"}
     };
-    if (!opts.top.empty() && opts.top != "-auto-top") {
-      clabels["top"] = opts.top;
+    if (!top_full.empty()) {
+      clabels["top"] = top_full;
     }
     run_step("pass.color", var, clabels, opts, res);
   }
@@ -1064,8 +1153,8 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
   };
   merge_sets(opts, "compile.cgen", labels);
   merge_sets(opts, "compile.sim", labels);  // compile.sim.vcd=FILE -> labels["vcd"]
-  if (!opts.top.empty() && opts.top != "-auto-top") {
-    labels["top"] = opts.top;  // only the top module emits the VCD
+  if (!top_full.empty()) {
+    labels["top"] = top_full;  // only the top module emits the VCD
   }
   run_step("inou.cgen.sim", var, labels, opts, res);
 

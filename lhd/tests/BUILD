@@ -535,13 +535,33 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
-# 2c-color: every coloring algorithm (acyclic|synth|path|mincut) + continuous +
-# clear run through the lhd CLI on a real design.
+# Whole-design flatten: `pass.color flat` + pass.abc/pass.partition inline the
+# hierarchy into ONE output module (flatten=auto), LEC-proven vs the original;
+# flatten=false keeps the classic per-def decomposition.
+sh_test(
+    name = "lhd_abc_flat_test",
+    size = "large",
+    srcs = ["lhd_abc_flat_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+# 2c-color: every coloring algorithm (acyclic|cgen|synth|path|mincut|flat) +
+# continuous + clear run through the lhd CLI on a real design.
 sh_test(
     name = "lhd_color_test",
     size = "large",
     srcs = ["lhd_color_test.sh"],
     data = _FLOW_DATA + ["part_hier.v"],
+)
+
+# The --top XXX -> XXX.XXX (file.entity) fallback: commands resolving a top
+# against internal graph/unit names accept the bare entity with a
+# top-entity-fallback warning; an unresolvable --top still errors (tool diff
+# must not read as "identical").
+sh_test(
+    name = "lhd_top_fallback_test",
+    srcs = ["lhd_top_fallback_test.sh"],
+    data = _FLOW_DATA + glob(["merge_demo/*"]),
 )
 
 # The `lhd tool` lg-side inspector (cat/grep/diff/tree, the filter grammar,

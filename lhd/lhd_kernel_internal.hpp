@@ -113,6 +113,29 @@ void                     write_unused_inputs(const Options& opts, Result& res, c
 void                                validate_emits(const Options& opts);
 void                                validate_dumps(const Options& opts);
 std::vector<std::shared_ptr<Lnast>> filter_top(const std::vector<std::shared_ptr<Lnast>>& units, const std::string& top);
+
+// Entity tail of a full internal module name ("file.entity" -> "entity").
+std::string_view top_entity_of(std::string_view name);
+
+// Resolve a user --top/--ref-top/--impl-top against the full internal names
+// (`file.entity`) in `names`. An exact match wins (returned as-is, silently).
+// Otherwise the entity fallback (lec's long-standing rule), with a diag
+// warning naming the substitution: match on the entity tail of BOTH sides, so
+// a bare `--top XXX` resolves to the unique `file.XXX` (commonly Pyrope's
+// self-named `XXX.XXX`) and a dotted `--top a.XXX` can pair with a
+// regenerated `plain.XXX` (the v2prp LEC case). Accepted only when exactly
+// one name matches. Returns "" when nothing (or more than one name) matches;
+// the caller keeps its own not-found handling. `diag_pass` is the warning's
+// origin identity (e.g. "pass.lec").
+std::string resolve_top_name(const std::vector<std::string>& names, std::string_view want, std::string_view diag_pass);
+
+// The shared "pick the top module on a side" ladder (lec / formal verify /
+// pass semdiff): explicit per-side top, else --top (resolved via
+// resolve_top_name), else the sole module. `side` is "ref"/"impl", or "" for
+// a single-sided command (changes the error phrasing); `cmd` prefixes the
+// error messages ("lec", "formal verify", "pass semdiff").
+std::shared_ptr<hhds::Graph> pick_top_graph(const Eprp_var& v, const std::string& side_top, const std::string& shared_top,
+                                            std::string_view side, std::string_view cmd, std::string_view diag_pass);
 Ir_inputs                           gather_ir_inputs(const Options& opts, std::string_view command);
 std::string                         json_escape_min(std::string_view value);
 Ln_inputs                           classify_ln_inputs(const std::vector<std::string>& tokens, std::string_view command);

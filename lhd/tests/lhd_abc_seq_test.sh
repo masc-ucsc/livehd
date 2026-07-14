@@ -1,18 +1,23 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# End-to-end test for `lhd pass abc --set pass.abc.seq=true` (task 2a-abc
-# subtask 5): technology-map a colored SEQUENTIAL design to a standard-cell
-# netlist and prove it LEC-equivalent to the original logic, including flops and
-# blackbox boundaries (memories + hierarchical Sub instances).
+# End-to-end test for the sequential `lhd pass abc` knobs (task 2a-abc subtask 5):
+# technology-map a colored SEQUENTIAL design to a standard-cell netlist and prove
+# it LEC-equivalent to the original logic, exercising both register-mapping modes
+# and both memory-mapping modes.
 #
-# Registers cross into ABC as 1-bit latches (so ABC can retime), but stay NATIVE
-# LGraph flops on read-back -- they are never mapped to library DFFs (the
-# vendored Liberty is purely combinational). Memories and Sub instances are
-# treated as blackbox boundaries: their I/O is cut at the ABC border and they
-# are rebuilt natively and reconnected. Each region's mapped netlist must be
-# sequentially LEC-equivalent (yosys miter + BMC/induction, via `lhd lec --set lec.solver=lgyosys`) to
-# its original-logic `partition` twin.
+#   pass.abc.register=true   flops -> library DFF cells (DFFx1 in the test lib)
+#   pass.abc.register=false  flops kept native (`always @(posedge)`)
+#   pass.abc.memory=true     memory bit-blasted into a DFF array + mux gates
+#   pass.abc.memory=false    memory kept as a native boundary instance
+#
+# Registers cross into ABC as 1-bit latches (so ABC can optimize the surrounding
+# logic); on read-back register=true maps each latch to a plain DFF cell (a bit
+# carrying a power-on init stays native so the value survives), register=false
+# rebuilds a native flop. Sub instances are blackbox boundaries; a memory is
+# either a boundary (memory=false) or lowered to flops+mux gates (memory=true).
+# Each mode's mapped netlist must be sequentially LEC-equivalent (yosys miter +
+# BMC/induction, via `lhd lec --set lec.solver=lgyosys`) to its `partition` twin.
 #
 #   prp -> lg (O1)
 #   pass color synth                       (the abc driver coloring)
@@ -50,11 +55,14 @@ fail() {
 
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 
-# seq_lec <fixture-basename> <top>: map seq, build the twin + models, LEC each.
-seq_lec() {
-  local fix="$1" top="$2"
+# run_abc_lec <fix> <top> <register> <memory>: tech-map with the given knobs,
+# build the original-logic twin + gensim models, and prove the netlist equivalent.
+# Leaves the netlist verilog dir in the global NETV for the caller's structural asserts.
+NETV=""
+run_abc_lec() {
+  local fix="$1" top="$2" reg="$3" mem="$4"
   local prp="inou/prp/tests/pyrope/${fix}.prp"
-  local d="$W/$fix"
+  local d="$W/${fix}_r${reg}_m${mem}"
   mkdir -p "$d"
   local r="$d/r.json"
   run() { "$LHD" "$@" -q --result-json "$r" || fail "$* -> $(cat "$r" 2>/dev/null)"; }
@@ -62,8 +70,8 @@ seq_lec() {
   [ -f "$prp" ] || fail "missing fixture $prp"
   run compile "$prp" --top "$top" --recipe O1 --emit-dir lg:"$d/lg" --workdir "$d/w1"
   run pass color synth --top "$top" lg:"$d/lg" --workdir "$d/w2"
-  # sequential tech-map: flops -> latches -> native flops; memories/Subs blackboxed
-  run pass abc --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --set abc.library="$LIB" --set pass.abc.seq=true --workdir "$d/w3"
+  run pass abc --top "$top" lg:"$d/lg" --emit-dir lg:"$d/net" --set abc.library="$LIB" \
+      --set pass.abc.register="$reg" --set pass.abc.memory="$mem" --workdir "$d/w3"
   # the original-logic twin (same module structure)
   run pass partition --top "$top" lg:"$d/lg" --emit-dir lg:"$d/re" --workdir "$d/w4"
   run pass liberty gensim "$LIB" --emit-dir lg:"$d/models" --workdir "$d/w5"
@@ -73,24 +81,44 @@ seq_lec() {
   run compile lg:"$d/re" --top "$top" --recipe O0 --emit-dir verilog:"$d/rev" --workdir "$d/w8"
 
   # the netlist really is a standard-cell netlist (Sub instances of Liberty cells)
-  grep -hq "NAND2x1\|NOR2x1\|INVx1\|XOR2x1\|BUFx1" "$d/netv/"*.v || fail "$fix: no standard cells in the ABC netlist"
-  # flops stayed native (an always/posedge register survives, not a mapped DFF)
-  grep -hq "always" "$d/netv/"*.v || fail "$fix: no sequential logic survived (flops lost?)"
-  # the memory fixture must keep its memory as a blackbox (not bit-blasted away)
-  if [ "$fix" = "abc_mem" ]; then
-    grep -hq "cgen_memory" "$d/netv/"*.v || fail "$fix: memory was not preserved as a blackbox in the ABC netlist"
-  fi
+  grep -hq "NAND2x1\|NOR2x1\|INVx1\|XOR2x1\|BUFx1" "$d/netv/"*.v \
+    || fail "$fix[reg=$reg,mem=$mem]: no standard cells in the ABC netlist"
 
   cat "$d/netv/"*.v "$d/modelsv/"*.v > "$d/impl.v"
   cat "$d/rev/"*.v > "$d/ref.v"
 
-  # sequential LEC: the tech-mapped netlist must equal the original logic
+  # LEC: the tech-mapped netlist must equal the original logic in every mode
   run lec --set lec.solver=lgyosys --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$top" --workdir "$d/wc"
-  echo "PASS: pass.abc seq tech-map LEC-equivalent for '$top'"
+  NETV="$d/netv"
 }
 
-seq_lec abc_seq abc_seq.abc_seq
-seq_lec abc_mem abc_mem.abc_mem
-seq_lec hier_seq hier_seq.top
+has() { grep -hq "$2" "$1/"*.v; }
 
-echo "PASS: pass.abc seq tech-map LEC-equivalent (flops + memory + Sub blackbox)"
+# register=true: flops map to library DFF cells (abc_seq/hier_seq are init-less,
+# so every flop becomes a DFFx1 cell -- no behavioral `always @(posedge)` left).
+run_abc_lec abc_seq abc_seq.abc_seq true false
+has "$NETV" "DFFx1 " || fail "abc_seq register=true: flops were not mapped to DFF cells"
+! has "$NETV" "posedge" || fail "abc_seq register=true: a behavioral flop survived (expected all DFF cells)"
+echo "PASS: register=true maps flops to DFF cells (abc_seq)"
+
+run_abc_lec hier_seq hier_seq.top true false
+has "$NETV" "DFFx1 " || fail "hier_seq register=true: flops were not mapped to DFF cells"
+echo "PASS: register=true maps flops to DFF cells across hierarchy (hier_seq)"
+
+# register=false: flops kept native (`always @(posedge)`), never a DFF cell.
+run_abc_lec abc_seq abc_seq.abc_seq false false
+has "$NETV" "posedge" || fail "abc_seq register=false: no native flop survived (flops lost?)"
+! has "$NETV" "DFFx1 " || fail "abc_seq register=false: unexpected DFF cell (flop should stay native)"
+echo "PASS: register=false keeps flops native (abc_seq)"
+
+# memory=false: the memory stays a native boundary instance (not bit-blasted).
+run_abc_lec abc_mem abc_mem.abc_mem true false
+has "$NETV" "cgen_memory" || fail "abc_mem memory=false: memory not preserved as a native instance"
+echo "PASS: memory=false keeps the memory as a native instance (abc_mem)"
+
+# memory=true: the memory is bit-blasted into gates -- no memory instance remains.
+run_abc_lec abc_mem abc_mem.abc_mem true true
+! has "$NETV" "cgen_memory" || fail "abc_mem memory=true: memory was not bit-blasted"
+echo "PASS: memory=true bit-blasts the memory to gates (abc_mem)"
+
+echo "PASS: pass.abc register/memory tech-map LEC-equivalent (DFF cells, native flops, memory bit-blast + boundary)"

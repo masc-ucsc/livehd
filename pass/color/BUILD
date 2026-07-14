@@ -38,4 +38,5 @@ cc_library(
     "color_synth_test",
     "color_path_test",
     "color_mincut_test",
+    "color_flat_test",
 ]]

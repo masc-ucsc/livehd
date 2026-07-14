@@ -418,7 +418,21 @@ std::vector<std::shared_ptr<hhds::Graph>> tool_select_graphs(const std::string& 
   auto& lib = livehd::Hhds_graph_library::instance(dir);
   std::vector<std::shared_ptr<hhds::Graph>> sel;
   if (!opts.top.empty()) {
-    if (auto gio = lib.find_io(opts.top)) {
+    auto gio = lib.find_io(opts.top);
+    if (!gio) {
+      // Exact name missed: try the shared entity fallback (--top XXX for the
+      // Pyrope-named XXX.XXX). IO decls are cheap — no body is materialized.
+      std::vector<std::string> names;
+      for (const hhds::Gid id : lib.all_io_gids()) {
+        if (auto io = lib.find_io(id)) {
+          names.emplace_back(io->get_name());
+        }
+      }
+      if (const std::string resolved = resolve_top_name(names, opts.top, "lhd.tool"); !resolved.empty()) {
+        gio = lib.find_io(resolved);
+      }
+    }
+    if (gio) {
       if (auto g = gio->get_graph()) {
         sel.push_back(g);
       }
@@ -640,6 +654,14 @@ void tool_diff_match_lg(Options& opts, const std::vector<std::string>& lg_dirs) 
   auto   ga    = tool_select_graphs(lg_dirs[0], opts);
   auto   gb    = tool_select_graphs(lg_dirs[1], opts);
   size_t pairs = std::min(ga.size(), gb.size());
+  if (pairs == 0 && !opts.top.empty()) {
+    // A match-diff needs the module on BOTH sides. Without this, an
+    // unresolvable --top falls through to the misleading "no `match`
+    // attribute found; run semdiff" hint. Name the side(s) that missed.
+    const std::string which = ga.empty() && gb.empty() ? std::format("lg:{} and lg:{}", lg_dirs[0], lg_dirs[1])
+                                                       : std::format("lg:{}", ga.empty() ? lg_dirs[0] : lg_dirs[1]);
+    throw Lhd_error{"config", std::format("{} holds no graph matching --top {}", which, opts.top), "check --top"};
+  }
 
   bool saw_match = false;
   for (size_t i = 0; i < pairs; ++i) {
@@ -719,8 +741,15 @@ void tool_diff_lg(Options& opts, const std::vector<std::string>& lg_dirs, const 
   }
   Tool_target tgt   = parse_tool_target(opts.tool_target);
   auto        dcols = tool_display_cols(opts, tgt);
-  auto        a     = tool_diff_lines(lg_dirs[0], opts, tgt, filters, dcols);
-  auto        b     = tool_diff_lines(lg_dirs[1], opts, tgt, filters, dcols);
+  // A --top that selects nothing on EITHER side must not fall through to the
+  // line diff: both sides empty would print "identical" (a typo'd top reading
+  // as a no-differences verdict). The graphs are cached, so the reload by
+  // tool_diff_lines below is free.
+  if (!opts.top.empty() && tool_select_graphs(lg_dirs[0], opts).empty() && tool_select_graphs(lg_dirs[1], opts).empty()) {
+    throw Lhd_error{"config", std::format("lg: inputs hold no graphs matching --top {}", opts.top), "check --top"};
+  }
+  auto a = tool_diff_lines(lg_dirs[0], opts, tgt, filters, dcols);
+  auto b = tool_diff_lines(lg_dirs[1], opts, tgt, filters, dcols);
   std::string out;
   if (a == b) {
     out += "identical\n";

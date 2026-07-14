@@ -17,6 +17,7 @@ cc_library(
         "//core",
         "//graph",
         "//pass/common:pass",
+        "//pass/partition:pass_partition",
         "@hhds//hhds:graph",
         "@hlop//hlop:hlop",
         "@opentimer",

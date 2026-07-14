@@ -9,6 +9,7 @@
 #include "color_acyclic.hpp"
 #include "color_cgen.hpp"
 #include "color_common.hpp"
+#include "color_flat.hpp"
 #include "color_mincut.hpp"
 #include "color_path.hpp"
 #include "color_synth.hpp"
@@ -22,8 +23,8 @@ static Pass_plugin sample("pass_color", Pass_color::setup);
 Pass_color::Pass_color(const Eprp_var& var) : Pass("pass.color", var) {}
 
 void Pass_color::setup() {
-  Eprp_method m("pass.color", "Hierarchical node coloring (acyclic|cgen|synth|path|mincut|clear)", &Pass_color::color);
-  m.add_label_optional("alg", "algorithm: acyclic|cgen|synth|path|mincut|clear", "acyclic");
+  Eprp_method m("pass.color", "Hierarchical node coloring (acyclic|cgen|synth|path|mincut|flat|clear)", &Pass_color::color);
+  m.add_label_optional("alg", "algorithm: acyclic|cgen|synth|path|mincut|flat|clear", "acyclic");
   // The top module is the shared kernel `--top` flag (lhd plumbs it into the
   // `top` label), not a per-pass --set option.
   m.add_label_optional("hier", "color every unique def in the hierarchy (else only the top)", "true");
@@ -85,6 +86,9 @@ void run_one(std::string_view alg, hhds::Graph* g, const Color_opts& opts, const
   } else if (alg == "mincut") {
     Color_mincut c(opts, str_tools::to_i(var.get("iters", "1")), str_tools::to_i(var.get("seed", "0")), var.get("mincut_alg", "vc"));
     c.label(g);
+  } else if (alg == "flat") {
+    Color_flat c(opts);
+    c.label(g);
   }
 }
 
@@ -103,9 +107,9 @@ void Pass_color::color(Eprp_var& var) {
     return;
   }
 
-  if (alg != "acyclic" && alg != "cgen" && alg != "synth" && alg != "path" && alg != "mincut") {
+  if (alg != "acyclic" && alg != "cgen" && alg != "synth" && alg != "path" && alg != "mincut" && alg != "flat") {
     livehd::diag::err("pass.color", "bad-alg", "unsupported")
-        .msg("unknown algorithm '{}' (expected acyclic|cgen|synth|path|mincut|clear)", alg)
+        .msg("unknown algorithm '{}' (expected acyclic|cgen|synth|path|mincut|flat|clear)", alg)
         .fatal();
   }
 
@@ -115,6 +119,13 @@ void Pass_color::color(Eprp_var& var) {
   opts.compact      = parse_bool(var.get("compact", "true"));
   opts.continuous   = parse_bool(var.get("continuous", "false"));
   opts.keep_colored = parse_bool(var.get("keep_colored", "false"));
+
+  // `flat` is "one color for everything"; the per-region continuous split would
+  // undo that. Force it off up front so both the run and the recorded params
+  // (params_json below) reflect the actual single-color behavior.
+  if (alg == "flat") {
+    opts.continuous = false;
+  }
 
   // gid -> graph, so the hierarchy walk can resolve sub-def bodies.
   absl::flat_hash_map<hhds::Gid, hhds::Graph*> gid2graph;

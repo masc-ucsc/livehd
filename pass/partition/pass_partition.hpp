@@ -36,6 +36,27 @@ struct Region_body {
 // Called once per region. If unset, partition recreates the original logic.
 using Body_builder = std::function<void(const Region_body&)>;
 
+// Whole-design flatten policy for build_decomposition. `automatic` flattens
+// exactly when the top's active coloring was produced by `pass.color flat`
+// (coloring_info algorithm=="flat") — a flat one-color-for-everything coloring
+// is the user asking for whole-design synthesis, so the hierarchy is inlined
+// and a single module comes out; any other (or no) coloring keeps the classic
+// per-def decomposition.
+enum class Flatten_mode { off, on, automatic };
+
+// Parse the shared `flatten` label value ("auto"|"true"|"false", plus 0/1);
+// anything else is a fatal diag under `pass` and returns off.
+[[nodiscard]] Flatten_mode parse_flatten_mode(std::string_view v, std::string_view pass);
+
+// Resolve a sub-instance's child def inside `outlib`: an already-partitioned
+// def resolves by name; a BODY-LESS def (a black box — a liberty cell or tie
+// cell in an already-mapped netlist, an external IP decl) is cloned as an
+// IO-only decl so the instance stays an opaque box and a mapped netlist can be
+// re-partitioned / re-synthesized like any other lg. Returns nullptr when the
+// def has a body but is missing from `outlib` (a children-first ordering bug —
+// the caller reports it).
+std::shared_ptr<hhds::GraphIO> resolve_or_clone_subdef(hhds::GraphLibrary* outlib, const hhds::Node_class& inst);
+
 }  // namespace livehd::partition
 
 // pass.partition — build a new graph_library from the colors produced by
@@ -54,7 +75,12 @@ public:
   // Reusable decomposition seam (task 2a-abc): partition the whole hierarchy
   // reachable from `top` (children-first) into `outlib`. With a `hook`, each
   // region body is filled by the caller (e.g. an ABC-mapped netlist) instead of
-  // the original logic. Returns false on a fatal collect error.
+  // the original logic. When flattening (see Flatten_mode), the hierarchy is
+  // structurally inlined first and ONE Partitioner runs on the flat def; a
+  // single resulting region is emitted directly under the top's own name (no
+  // wrapper), so a flat coloring yields exactly one output module. Returns
+  // false on a fatal collect/flatten error.
   static bool build_decomposition(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, hhds::GraphLibrary* outlib,
-                                  std::string_view top, bool debug_color, const livehd::partition::Body_builder& hook = {});
+                                  std::string_view top, bool debug_color, const livehd::partition::Body_builder& hook = {},
+                                  livehd::partition::Flatten_mode flatten = livehd::partition::Flatten_mode::off);
 };

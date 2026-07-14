@@ -10,6 +10,7 @@
 
 #include "abc_arith.hpp"  // arith::Adder_kind
 #include "hhds/graph.hpp"
+#include "liberty_dff.hpp"     // livehd::liberty::Dff_cell
 #include "pass_partition.hpp"  // livehd::partition::Region_body
 
 namespace livehd::abc {
@@ -17,7 +18,17 @@ namespace livehd::abc {
 struct Map_options {
   std::string       library;  // Liberty .lib for read_lib
   std::string       flow;     // ABC command string (empty => built-in default)
-  bool              seq = false;
+  // Sequential technology-mapping knobs (independent because their cost differs:
+  // a register is one DFF cell per bit, a memory bit-blasts into a whole DFF
+  // array + address decode). register=true maps flops to Liberty DFF cells (falls
+  // back to native flops when the library has none); false keeps them native
+  // (cgen emits `always @(posedge clk)`). memory=true bit-blasts a Memory into a
+  // register array + read/write mux logic; false keeps it as a native instance.
+  bool              map_register = true;
+  bool              map_memory   = false;
+  // Optional explicit DFF cell name for register mapping (empty => auto-detect a
+  // plain posedge D-flop from the Liberty).
+  std::string       dff_cell;
   std::string       delay;  // {D} substitution
   std::string       load;   // {L} substitution
   bool              verbose    = false;
@@ -102,6 +113,10 @@ private:
   Map_options             opts_;
   void*                   pabc_       = nullptr;  // Abc_Frame_t*
   bool                    lib_loaded_ = false;
+  // Plain posedge D-flop found in the Liberty (register mapping target). Empty
+  // when map_register is off or the library has no DFF cell — the read-back then
+  // keeps flops native. Detected once in start().
+  std::optional<liberty::Dff_cell> dff_;
   hhds::GraphLibrary*     outlib_     = nullptr;  // where blackbox cell defs are declared
   std::vector<Region_qor> qor_;
   Region_opts_map         region_opts_cli_;

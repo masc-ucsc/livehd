@@ -382,8 +382,20 @@ hhds::Pin_class Cgen_verilog::find_sink_pin(const hhds::Node_class& node, std::s
   // by port_id — slower than a direct fetch but safe.
   auto op = type_op_of(node);
   if (op == Ntype_op::Sub) {
-    auto pin = node.get_sink_pin(name);  // sub-graph path: HHDS knows the port_id
-    return pin;
+    // Same invalid-on-miss contract for sub instances: resolve the name via the
+    // sub-graph's GraphIO decls and walk inp_edges — a declared input that was
+    // never connected has no materialized pin, and hhds get_sink_pin asserts.
+    auto sub_io = node.get_subnode_io();
+    if (!sub_io || !sub_io->has_input(name)) {
+      return {};
+    }
+    auto pid = sub_io->get_input_port_id(name);
+    for (const auto& e : node.inp_edges()) {
+      if (e.sink.get_port_id() == pid) {
+        return e.sink;
+      }
+    }
+    return {};
   }
   auto pid = Ntype::get_sink_pid(op, name);
   if (pid == livehd::Port_invalid) {
@@ -1437,7 +1449,13 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
           }
         }
         std::string replace;
-        if (value_bits_to_use == 1) {
+        if (range_begin == 0 && range_end >= static_cast<int>(bits_of(dpin))) {
+          // Full overwrite of the declared width: no part-select. Load-bearing
+          // for a 1-bit destination, which is DECLARED as a scalar reg — a
+          // `var[0] = …` select on a scalar is invalid Verilog (abc's per-bit
+          // Set_mask reassembly chain starts with exactly this shape).
+          replace = " = ";
+        } else if (value_bits_to_use == 1) {
           replace = absl::StrCat("[", range_begin, "] = ");
         } else {
           replace = absl::StrCat("[", range_end - 1, ":", range_begin, "] = ");
@@ -1880,7 +1898,7 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
     // reader skip the simulation-only `assert … else $error` action block
     // (yosys cannot parse the `else`), while RTL simulators keep it live.
     if (sub_io->get_name() == livehd::graph_util::lgassert_module_name) {
-      auto cond = get_driver(node.get_sink_pin("cond"));
+      auto cond = get_driver(find_sink_pin(node, "cond"));
       if (cond.is_invalid()) {
         continue;
       }
@@ -1909,7 +1927,7 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
       if (livehd::graph_util::proven_of(node) != 0) {
         continue;  // pass.formal discharged it -> elide the runtime check
       }
-      auto cond = get_driver(node.get_sink_pin("cond"));
+      auto cond = get_driver(find_sink_pin(node, "cond"));
       if (cond.is_invalid()) {
         continue;
       }
@@ -1979,18 +1997,23 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
       return a.decl->port_id < b.decl->port_id;
     });
 
+    // Connections come from the instance's existing edges: a declared port with
+    // no materialized pin (unused output, unconnected input) has no edge, and
+    // probing it via get_driver_pin/get_sink_pin asserts inside hhds find_pin.
+    absl::flat_hash_map<hhds::Port_id, hhds::Pin_class> in_conn;   // sink port_id -> its driver
+    absl::flat_hash_map<hhds::Port_id, hhds::Pin_class> out_conn;  // driver port_id -> consumed driver pin
+    for (const auto& e : node.inp_edges()) {
+      in_conn.emplace(e.sink.get_port_id(), e.driver);
+    }
+    for (const auto& e : node.out_edges()) {
+      out_conn.emplace(e.driver.get_port_id(), e.driver);
+    }
+
     for (const auto& io : ordered) {
       hhds::Pin_class dpin;
-      if (io.is_input) {
-        // node's sink pin named io.decl->name → driver via inp_edges
-        auto spin = node.get_sink_pin(io.decl->name);
-        dpin      = get_driver(spin);
-      } else {
-        // node's driver pin named io.decl->name → emit only if has consumers
-        auto candidate = node.get_driver_pin(io.decl->name);
-        if (!candidate.is_invalid() && !candidate.out_edges().empty()) {
-          dpin = candidate;
-        }
+      const auto&     conn = io.is_input ? in_conn : out_conn;
+      if (auto it = conn.find(io.decl->port_id); it != conn.end()) {
+        dpin = it->second;
       }
       if (!dpin.is_invalid()) {
         note_src(fout, node);

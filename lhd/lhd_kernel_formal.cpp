@@ -65,6 +65,8 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
     auto       lib_path     = std::format("{}/lec_{}_lgdb", workdir(opts), side);
     if (yosys_reader) {
       check_inputs_exist({path});
+      // --top rides RAW to yosys: source module names may contain '.' via
+      // escaped identifiers (cgen emits `file.entity` that way).
       Eprp_var::Eprp_dict labels{
           {    "path",                                                                      lib_path},
           {   "files",                                                                          path},
@@ -1841,45 +1843,10 @@ void lec_command(Options& opts, Result& res) {
   load_side_graphs(opts, res, opts.impl_kind, opts.impl_path, "impl", impl_var);
 
   // Pick the top module on each side: explicit --{ref,impl}-top, else --top,
-  // else the sole module.
-  auto pick = [&](Eprp_var& v, const std::string& want, std::string_view side) -> std::shared_ptr<hhds::Graph> {
-    const std::string& t = !want.empty() ? want : opts.top;
-    if (!t.empty()) {
-      for (auto& g : v.graphs) {
-        if (g && g->get_name() == t) {
-          return g;
-        }
-      }
-      // Fall back to the SIMPLE (post-'.') module name. Internal graph names are
-      // the hierarchical `file.entity`, but Verilog/flat-name tooling (and the
-      // v2prp harness `:pyrope_top:`) names the module by its flat entity
-      // (`counter`, not `mod_counter.counter`). Accept `t` as either the full name
-      // or the entity, matching on the entity of both — only when unambiguous.
-      auto entity = [](std::string_view n) {
-        auto d = n.rfind('.');
-        return d == std::string_view::npos ? n : n.substr(d + 1);
-      };
-      const std::string_view       want_entity = entity(t);
-      std::shared_ptr<hhds::Graph> simple_hit;
-      int                          n_simple = 0;
-      for (auto& g : v.graphs) {
-        if (g && entity(g->get_name()) == want_entity) {
-          simple_hit = g;
-          ++n_simple;
-        }
-      }
-      if (n_simple == 1) {
-        return simple_hit;
-      }
-      throw Lhd_error{"config", std::format("lec: {} top '{}' not found", side, t), ""};
-    }
-    if (v.graphs.size() == 1) {
-      return v.graphs.front();
-    }
-    throw Lhd_error{"usage", std::format("lec: {} has {} modules; pass --{}-top or --top", side, v.graphs.size(), side), ""};
-  };
-  auto ref_g  = pick(ref_var, opts.ref_top, "ref");
-  auto impl_g = pick(impl_var, opts.impl_top, "impl");
+  // else the sole module (pick_top_graph: exact name or unambiguous entity
+  // fallback with a diag warning).
+  auto ref_g  = pick_top_graph(ref_var, opts.ref_top, opts.top, "ref", "lec", "pass.lec");
+  auto impl_g = pick_top_graph(impl_var, opts.impl_top, opts.top, "impl", "lec", "pass.lec");
 
   bool cross = label("cross", "false") != "false" && label("cross", "false") != "0";
 
@@ -2899,39 +2866,9 @@ void formal_verify_command(Options& opts, Result& res) {
   Eprp_var var;
   load_side_graphs(opts, res, kind, path, "impl", var);
 
-  // Top pick: --impl-top / --top, else the sole module; entity fallback like lec.
-  auto pick = [&]() -> std::shared_ptr<hhds::Graph> {
-    const std::string& t = !opts.impl_top.empty() ? opts.impl_top : opts.top;
-    if (!t.empty()) {
-      for (auto& g : var.graphs) {
-        if (g && g->get_name() == t) {
-          return g;
-        }
-      }
-      auto entity = [](std::string_view n) {
-        auto d = n.rfind('.');
-        return d == std::string_view::npos ? n : n.substr(d + 1);
-      };
-      const std::string_view       want_entity = entity(t);
-      std::shared_ptr<hhds::Graph> simple_hit;
-      int                          n_simple = 0;
-      for (auto& g : var.graphs) {
-        if (g && entity(g->get_name()) == want_entity) {
-          simple_hit = g;
-          ++n_simple;
-        }
-      }
-      if (n_simple == 1) {
-        return simple_hit;
-      }
-      throw Lhd_error{"config", std::format("formal verify: top '{}' not found", t), ""};
-    }
-    if (var.graphs.size() == 1) {
-      return var.graphs.front();
-    }
-    throw Lhd_error{"usage", std::format("formal verify: design has {} modules; pass --top", var.graphs.size()), ""};
-  };
-  auto g = pick();
+  // Top pick: --impl-top / --top, else the sole module; entity fallback like
+  // lec (pick_top_graph warns when the fallback substitutes the full name).
+  auto g = pick_top_graph(var, opts.impl_top, opts.top, "", "formal verify", "pass.formal");
 
   // Knobs: lec.* (legacy aliases) < formal.* (the one shared namespace).
   Eprp_var::Eprp_dict labels;
