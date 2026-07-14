@@ -1,0 +1,25 @@
+/*
+:name: abc_flat_names
+:type: lgraph compile
+*/
+
+// Whole-design-flatten flop-name preservation fixture for `pass abc`.
+//
+// Every register is declared WITHOUT an initializer, so it carries the
+// implicit power-on init 0 and NO reset. Under register=true a plain DFF
+// cell has no init pin, so these registers must stay native flops — and the
+// read-back must rebuild each one as a single multi-bit flop under its
+// ORIGINAL hierarchical name (e.g. `s1.r`), not anonymous per-bit
+// __rinit/__r flops. The LEC leans on that name correspondence.
+
+mod holder(din:u8) -> (q:u8@[1]) {
+  reg r:u8
+  q = r
+  r = din
+}
+
+mod top(din:u8, k1:u8, k2:u8) -> (o:u9@[1]) {
+  stage[1] a = holder(din=din & k1)
+  stage[1] b = holder(din=din | k2)
+  o = a + b
+}

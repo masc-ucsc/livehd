@@ -62,6 +62,22 @@ std::string join_capped(std::vector<std::string> toks, size_t cap = 24) {
   }
   return out;
 }
+
+// When blackbox-input cut points (bbin:) dominate the impl-only set, the impl
+// instantiates library cells the encoder has no definition for — a
+// technology-mapped netlist checked without its cell models. Surface the
+// gensim/--lib recipe instead of leaving only a wall of cell pins.
+std::string bbin_models_hint(const std::vector<std::string>& unmatched_impl) {
+  size_t n = 0;
+  for (const auto& s : unmatched_impl) {
+    n += s.rfind("bbin:", 0) == 0 ? 1 : 0;
+  }
+  if (n == 0 || n * 2 < unmatched_impl.size()) {
+    return {};
+  }
+  return "; hint: the impl instantiates library cells with no definition (a tech-mapped netlist without its cell models) — "
+         "generate models with `lhd pass liberty gensim <file.lib> --emit-dir lg:models` and re-run with `--lib lg:models`";
+}
 }  // namespace
 
 std::vector<std::pair<std::string, std::string>> parse_match_pairs(std::string_view text) {
@@ -3025,6 +3041,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     if (!res.unmatched_impl.empty()) {
       res.detail
           += "; " + std::to_string(res.unmatched_impl.size()) + " impl-only cut point(s) {" + join_capped(res.unmatched_impl) + "}";
+      res.detail += bbin_models_hint(res.unmatched_impl);
     }
     if (opts.assumptions != nullptr) {
       cvc5::Result ar = solver.checkSat();
@@ -3733,6 +3750,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   if (!res.unmatched_impl.empty()) {
     res.detail
         += "; " + std::to_string(res.unmatched_impl.size()) + " impl-only cut point(s) {" + join_capped(res.unmatched_impl) + "}";
+    res.detail += bbin_models_hint(res.unmatched_impl);
   }
 
   if (opts.assumptions != nullptr) {

@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <charconv>
 #include <functional>
+#include <numeric>
 #include <print>
 #include <span>
 #include <string>
@@ -1697,11 +1698,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   // register across ABC so it could optimize/retime the surrounding logic. The
   // latch output net (Q) is mapped into net2drv so the comb fanins/outputs read
   // the flop's Q; the latch input net (D) is recorded and wired in pass 2b (its
-  // driving gate is created in pass 2). Reassembly: a single-root region (one
-  // distinct register name) collapses every surviving latch into one named
-  // flop; a multi-register region with a 1:1 latch count rebuilds one flop per
-  // original register; otherwise (retiming reshaped the count) each surviving
-  // latch becomes its own deterministically-named 1-bit flop.
+  // driving gate is created in pass 2). Reassembly: when the latch count is
+  // preserved (the default flow does not retime) each source register is
+  // rebuilt as ONE multi-bit flop with its ORIGINAL name — including any bit
+  // the DFF-cell path must keep native for a resetless power-on init. A
+  // retime-reshaped count falls back to a single-root collapse (one register
+  // name in the region) or per-latch deterministically-named 1-bit flops.
   struct Recon_flop {
     hhds::Node_class        node;
     int                     bits = 0;
@@ -1771,95 +1773,46 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
                                                        : !flops.front().rst_drv.is_invalid();
     };
 
-    if (dff_.has_value()) {
-      // --- register=true: map each surviving latch to a library DFF-cell Sub ---
-      // (D/CLK/Q). Q feeds the comb read-back via net2drv; D is wired in pass 2b
-      // from the latch's data-in net; CLK comes straight from the region clock
-      // (never through the AIG). A plain posedge D-flop cell has NO init pin, so a
-      // latch carrying a concrete power-on init CANNOT be represented by the cell
-      // without changing power-on behavior — such a bit stays a native flop (the
-      // netlist stays equivalent), only init-less bits become DFF cells.
-      auto io = liberty::create_dff_io(*outlib_, *dff_);
-      for (int k = 0; k < m; ++k) {
-        auto* L    = lat[k];
-        auto* qnet = Abc_ObjFanout0(Abc_ObjFanout0(L));  // latch -> BO -> Q net
-        auto* dnet = Abc_ObjFanin0(Abc_ObjFanin0(L));    // latch <- BI <- D net
-        auto  lclk = owner_clk(k);
-        if (int v = Abc_LatchInit(L); (v == 1 || v == 2) && !owner_has_reset(k)) {
-          // resetless power-on init: keep this bit native so the value survives
-          init_dropped = true;
-          auto F       = gu::create_typed_node(*body, Ntype_op::Flop);
-          F.attr(hhds::attrs::name).set(std::format("{}__rinit{}", rb.module_name, Abc_ObjId(L)));
-          auto Fq = F.create_driver_pin(0);
-          gu::set_bits(Fq, 1);
-          gu::set_unsign(Fq);
-          if (!lclk.is_invalid()) {
-            lclk.connect_sink(gu::setup_sink_by_name(F, "clock_pin"));
-          }
-          gu::create_const(*body, *Dlop::from_binary(v == 2 ? "1" : "0", /*unsigned_result=*/true))
-              .connect_sink(gu::setup_sink_by_name(F, "initial"));
-          net2drv[qnet] = Fq;
-          Recon_flop rf;
-          rf.node = F;
-          rf.bits = 1;
-          rf.dnet.push_back(dnet);
-          recon.push_back(std::move(rf));
-          continue;
-        }
-        auto sub = gu::create_typed_node(*body, Ntype_op::Sub);
-        sub.set_subnode(io);
-        sub.attr(hhds::attrs::name).set(std::format("g{}_{}", Abc_ObjId(L), dff_->name));
-        auto q = sub.create_driver_pin(dff_->q_pin);
-        gu::set_bits(q, 1);
-        gu::set_unsign(q);
-        net2drv[qnet] = q;
-        if (!lclk.is_invalid()) {
-          lclk.connect_sink(sub.create_sink_pin(dff_->clk_pin));
-        }
-        dff_recon.push_back({sub, dnet});
-      }
-    } else {
-
-    absl::flat_hash_set<std::string> roots;
-    for (const auto& f : flops) {
-      roots.insert(f.root);
-    }
-
-    struct Group {
-      std::string      name;
-      std::vector<int> idx;  // indices into `lat`
-      hhds::Pin_class  clk;
+    // Original-name reconstruction: with the latch count preserved, latches
+    // [start, start+bits) are flops[i]'s bits in crossing order, so a native
+    // read-back can rebuild each source register as ONE multi-bit flop under
+    // its ORIGINAL (hierarchical) name. That keeps the flop-name
+    // correspondence across synthesis — the LEC collapses same-name state
+    // pairs instead of solving thousands of anonymous 1-bit registers, which
+    // is load-bearing for the whole-design flatten (one region holds EVERY
+    // register of the design).
+    struct Span {
+      const Seq_flop* f;
+      int             start;
     };
-    // Single-root region (one register name, possibly multi-bit): collapse every
-    // surviving latch into one named flop. `pass color synth` splits each def at
-    // its registers, so regions are single-root in practice and this is the path
-    // the seq tests exercise. Any multi-register region falls back to per-latch
-    // 1-bit flops -- always LEC-correct regardless of how retiming reshaped or
-    // reordered the latches (each latch is faithfully its own 1-bit register; no
-    // cross-register order assumption).
-    std::vector<Group> groups;
-    if (roots.size() == 1) {
-      Group g{flops.front().root, {}, region_clk};
-      for (int k = 0; k < m; ++k) {
-        g.idx.push_back(k);
-      }
-      groups.push_back(std::move(g));
-    } else {
-      for (int k = 0; k < m; ++k) {
-        // per-latch flop clocked from its OWN source flop (multi-clock regions)
-        groups.push_back(Group{std::format("{}__r{}", rb.module_name, k), {k}, owner_clk(k)});
+    std::vector<Span> spans;
+    if (m == total_bits) {
+      int s = 0;
+      for (const auto& f : flops) {
+        spans.push_back({&f, s});
+        s += f.bits;
       }
     }
-
-    for (auto& g : groups) {
-      int  k = static_cast<int>(g.idx.size());
+    // Nothing enforces wire-name uniqueness across a region's registers; two
+    // same-named rebuilt flops would cgen as two `reg` declarations of one name.
+    absl::flat_hash_map<std::string, int> name_used;
+    auto unique_flop_name = [&](const std::string& base) {
+      int& n = name_used[base];
+      ++n;
+      return n == 1 ? base : std::format("{}__dup{}", base, n - 1);
+    };
+    // Rebuild one native flop covering the latches `idx` (bit 0 first): Q bits
+    // feed the mapped logic via net2drv, din is Set_mask-reassembled in pass
+    // 2b, and the power-on init is recovered from the latch init values.
+    auto build_native_flop = [&](const std::string& name, const hhds::Pin_class& clk, const std::vector<int>& idx) {
+      int  k = static_cast<int>(idx.size());
       auto F = gu::create_typed_node(*body, Ntype_op::Flop);
-      F.attr(hhds::attrs::name).set(g.name);
+      F.attr(hhds::attrs::name).set(name);
       auto Fq = F.create_driver_pin(0);
       gu::set_bits(Fq, k);
       gu::set_unsign(Fq);
-      if (!g.clk.is_invalid()) {
-        g.clk.connect_sink(gu::setup_sink_by_name(F, "clock_pin"));
+      if (!clk.is_invalid()) {
+        clk.connect_sink(gu::setup_sink_by_name(F, "clock_pin"));
       }
       // power-on / reset init from the (possibly retimed) latch init values.
       // Build the value MSB->LSB as a binary string so widths past 64 bits stay
@@ -1867,7 +1820,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       bool        any_init = false;
       std::string init_bits(k, '0');  // index 0 = MSB (bit k-1)
       for (int b = 0; b < k; ++b) {
-        int v = Abc_LatchInit(lat[g.idx[b]]);  // 1=zero, 2=one, else dc/none
+        int v = Abc_LatchInit(lat[idx[b]]);  // 1=zero, 2=one, else dc/none
         if (v == 1 || v == 2) {
           any_init = true;
           if (v == 2) {
@@ -1883,7 +1836,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       rf.node = F;
       rf.bits = k;
       for (int b = 0; b < k; ++b) {
-        auto*           L    = lat[g.idx[b]];
+        auto*           L    = lat[idx[b]];
         auto*           qnet = Abc_ObjFanout0(Abc_ObjFanout0(L));  // latch -> BO -> Q net
         auto*           dnet = Abc_ObjFanin0(Abc_ObjFanin0(L));    // latch <- BI <- D net
         hhds::Pin_class qd;
@@ -1901,13 +1854,112 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         rf.dnet.push_back(dnet);
       }
       recon.push_back(std::move(rf));
+    };
+
+    if (dff_.has_value()) {
+      // --- register=true: map each surviving latch to a library DFF-cell Sub ---
+      // (D/CLK/Q). Q feeds the comb read-back via net2drv; D is wired in pass 2b
+      // from the latch's data-in net; CLK comes straight from the region clock
+      // (never through the AIG). A plain posedge D-flop cell has NO init pin, so a
+      // latch carrying a concrete power-on init CANNOT be represented by the cell
+      // without changing power-on behavior — such a bit stays a native flop (the
+      // netlist stays equivalent), only init-less bits become DFF cells.
+      auto io = liberty::create_dff_io(*outlib_, *dff_);
+      // resetless power-on init: such a bit must keep a native flop so the
+      // value survives
+      auto needs_native = [&](int k) -> bool {
+        int v = Abc_LatchInit(lat[k]);
+        return (v == 1 || v == 2) && !owner_has_reset(k);
+      };
+      auto map_dff_cell = [&](int k) {
+        auto* L    = lat[k];
+        auto* qnet = Abc_ObjFanout0(Abc_ObjFanout0(L));  // latch -> BO -> Q net
+        auto* dnet = Abc_ObjFanin0(Abc_ObjFanin0(L));    // latch <- BI <- D net
+        auto  sub  = gu::create_typed_node(*body, Ntype_op::Sub);
+        sub.set_subnode(io);
+        sub.attr(hhds::attrs::name).set(std::format("g{}_{}", Abc_ObjId(L), dff_->name));
+        auto q = sub.create_driver_pin(dff_->q_pin);
+        gu::set_bits(q, 1);
+        gu::set_unsign(q);
+        net2drv[qnet] = q;
+        if (auto lclk = owner_clk(k); !lclk.is_invalid()) {
+          lclk.connect_sink(sub.create_sink_pin(dff_->clk_pin));
+        }
+        dff_recon.push_back({sub, dnet});
+      };
+      auto native_single = [&](int k) {
+        init_dropped = true;
+        build_native_flop(unique_flop_name(std::format("{}__rinit{}", rb.module_name, Abc_ObjId(lat[k]))),
+                          owner_clk(k),
+                          {k});
+      };
+      if (!spans.empty()) {
+        for (const auto& sp : spans) {
+          bool native = false;
+          bool cell   = false;
+          for (int b = 0; b < sp.f->bits; ++b) {
+            (needs_native(sp.start + b) ? native : cell) = true;
+          }
+          if (native && !cell) {
+            // the whole register keeps its power-on init: rebuild it as one
+            // native flop under its original name
+            init_dropped = true;
+            std::vector<int> idx(sp.f->bits);
+            std::iota(idx.begin(), idx.end(), sp.start);
+            build_native_flop(unique_flop_name(sp.f->root), body_pin_for_src(sp.f->clk_drv), idx);
+          } else {
+            // init-less register -> per-bit DFF cells; a mixed register
+            // (should not occur: init is stamped per register) degrades to
+            // per-bit handling, never to a dropped init
+            for (int b = 0; b < sp.f->bits; ++b) {
+              int k = sp.start + b;
+              needs_native(k) ? native_single(k) : map_dff_cell(k);
+            }
+          }
+        }
+      } else {
+        // retime-reshaped latch count: no per-register correspondence survives
+        for (int k = 0; k < m; ++k) {
+          needs_native(k) ? native_single(k) : map_dff_cell(k);
+        }
+      }
+    } else {
+
+    if (!spans.empty()) {
+      // one flop per source register under its ORIGINAL name — multi-root
+      // regions (the whole-design flatten) keep the name correspondence
+      for (const auto& sp : spans) {
+        std::vector<int> idx(sp.f->bits);
+        std::iota(idx.begin(), idx.end(), sp.start);
+        build_native_flop(unique_flop_name(sp.f->root), body_pin_for_src(sp.f->clk_drv), idx);
+      }
+    } else {
+      absl::flat_hash_set<std::string> roots;
+      for (const auto& f : flops) {
+        roots.insert(f.root);
+      }
+      if (roots.size() == 1) {
+        // retime-reshaped single-root region (one register name): collapse
+        // every surviving latch into one named flop
+        std::vector<int> idx(m);
+        std::iota(idx.begin(), idx.end(), 0);
+        build_native_flop(unique_flop_name(flops.front().root), region_clk, idx);
+      } else {
+        // retime-reshaped multi-register region: per-latch 1-bit flops --
+        // always LEC-correct regardless of how retiming reshaped or reordered
+        // the latches (each latch is faithfully its own 1-bit register; no
+        // cross-register order assumption), clocked from its OWN source flop
+        for (int k = 0; k < m; ++k) {
+          build_native_flop(unique_flop_name(std::format("{}__r{}", rb.module_name, k)), owner_clk(k), {k});
+        }
+      }
     }
     }  // else (native-flop read-back)
   }
   if (init_dropped) {
     livehd::diag::warn("pass.abc", "dff-init-kept-native", "unsupported")
-        .msg("pass.abc region '{}': a register bit carries a power-on init value that the plain DFF cell '{}' has no pin for; "
-             "that bit was kept as a native flop (still correct) while the rest mapped to DFF cells",
+        .msg("pass.abc region '{}': register(s) carry a power-on init value that the plain DFF cell '{}' has no pin for; "
+             "they were kept as native flops (still correct) while init-less registers mapped to DFF cells",
              rb.module_name, dff_->name)
         .emit();
   }

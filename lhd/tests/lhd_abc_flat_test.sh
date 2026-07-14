@@ -79,6 +79,30 @@ cat "$D/rev/"*.v > "$D/ref.v"
 run lec --set lec.solver=lgyosys --impl verilog:"$D/impl.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/wc"
 echo "PASS: flat netlist LEC-equivalent to the flat original-logic twin"
 
+# Flop-name preservation on the native read-back: abc_flat_names' registers
+# carry an implicit power-on init and NO reset, so register=true (default)
+# cannot map them to plain DFF cells — each must be rebuilt as ONE multi-bit
+# native flop under its ORIGINAL hierarchical name (never anonymous per-bit
+# __rinit/__r flops; the LEC's tier-1 state pairing leans on those names).
+FIX2=inou/prp/tests/pyrope/abc_flat_names.prp
+TOP2=abc_flat_names.top
+[ -f "$FIX2" ] || fail "missing fixture $FIX2"
+D2="$W/flatnames"
+mkdir -p "$D2"
+run compile "$FIX2" --top "$TOP2" --recipe O1 --emit-dir lg:"$D2/lg" --workdir "$D2/w1"
+run pass color flat --top "$TOP2" lg:"$D2/lg" --workdir "$D2/w2"
+run pass abc --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/net" --set abc.library="$LIB" --workdir "$D2/w3"
+run pass partition --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/re" --workdir "$D2/w4"
+run compile lg:"$D2/net" --top "$TOP2" --recipe O0 --emit-dir verilog:"$D2/netv" --workdir "$D2/w5"
+run compile lg:"$D2/re" --top "$TOP2" --recipe O0 --emit-dir verilog:"$D2/rev" --workdir "$D2/w6"
+grep -hq "holder.*\.r " "$D2/netv/"*.v || fail "hierarchical flop name lost in the flat netlist (expected a '<inst>.r' register)"
+! grep -hq "__rinit\|__r[0-9]" "$D2/netv/"*.v || fail "anonymous __rinit/__r flop leaked (original register names must survive)"
+! grep -hq "DFFx1 " "$D2/netv/"*.v || fail "an init-carrying register was mapped to a DFF cell (power-on init would be lost)"
+cat "$D2/netv/"*.v "$D/modelsv/"*.v > "$D2/impl.v"
+cat "$D2/rev/"*.v > "$D2/ref.v"
+run lec --set lec.solver=lgyosys --impl verilog:"$D2/impl.v" --ref verilog:"$D2/ref.v" --top "$TOP2" --workdir "$D2/wc"
+echo "PASS: init-carrying registers keep their hierarchical names as native flops (LEC-proven)"
+
 # Escape hatch: flatten=false restores the classic per-def wrapper+region shape.
 run pass abc --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net_hier" --set abc.library="$LIB" \
     --set pass.abc.flatten=false --workdir "$D/w9"
