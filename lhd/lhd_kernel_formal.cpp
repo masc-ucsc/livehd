@@ -1862,6 +1862,8 @@ void lec_command(Options& opts, Result& res) {
       = std::atoi(label("timeout", "120").c_str());  // bound the CLI: hard miters degrade to UNKNOWN, never freeze (0 = unbounded)
   o.witness      = label("witness", "true") != "false" && label("witness", "true") != "0";
   o.decompose    = label("decompose", "auto");
+  o.cones        = label("cones", "auto");
+  o.conelimit    = std::atoi(label("conelimit", "10000").c_str());
   o.strict       = label("strict", "false") != "false" && label("strict", "false") != "0";
   o.semdiff      = livehd::lec::lec_canon_semdiff(label("semdiff", "structural"));
   o.state_pairing = label("state_pairing", "true") != "false" && label("state_pairing", "true") != "0";

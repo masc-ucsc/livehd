@@ -10,10 +10,12 @@ load("//tools:copt_default.bzl", "COPTS")
 cc_library(
     name = "lec_query",
     srcs = [
+        "cone_abc.cpp",
         "encode.cpp",
         "query.cpp",
     ],
     hdrs = [
+        "cone_abc.hpp",
         "encode.hpp",
         "query.hpp",
     ],
@@ -22,6 +24,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//graph",
+        "@abc",  # vendored berkeley-abc -- the AIG/CEC engine behind lec.cones
         "@cvc5",  # prebuilt cvc5 (combined+localized) -- the SMT backend
         "@hhds//hhds:graph",
     ],
@@ -62,11 +65,27 @@ cc_test(
     name = "query_test",
     srcs = ["tests/query_test.cpp"],
     copts = COPTS,
+    linkopts = ["-lz"],  # via :lec_query -> @abc (zlib-backed aiger/liberty readers)
     deps = [
         ":lec_query",
         "//graph",
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
+    ],
+)
+
+# Cone bit-blaster vs cvc5, differentially: the blaster's own semantics are the
+# soundness boundary of lec.cones (a Proven cut is SUBTRACTED from the cvc5
+# obligation), so every case is cross-checked against the SMT solver itself.
+cc_test(
+    name = "cone_abc_test",
+    srcs = ["tests/cone_abc_test.cpp"],
+    copts = COPTS,
+    linkopts = ["-lz"],  # @abc's aiger/liberty readers pull in zlib (as //lhd does)
+    deps = [
+        ":lec_query",
+        "@cvc5",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -267,4 +286,18 @@ sh_test(
     srcs = ["tests/lec_cache_test.sh"],
     data = ["//lhd"],
     tags = ["no-sandbox"],  # forks the in-process cvc5 solver per def
+)
+
+# lec.cones register-cone (compare-point) decomposition: ABC discharges each
+# name-matched register's next-state cone and lec subtracts it from the cvc5
+# obligation. Pins the two properties that matter -- it must not invent a PROVEN,
+# and it must not mask a REFUTED -- on the RTL-vs-tech-mapped shape it targets.
+sh_test(
+    name = "lec_cones_test",
+    srcs = ["tests/lec_cones_test.sh"],
+    data = [
+        "//inou/prp:abc_tests",
+        "//lhd",
+    ],
+    tags = ["no-sandbox"],  # runs pass.abc/gensim + the in-process cvc5+abc engines
 )

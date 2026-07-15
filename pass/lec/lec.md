@@ -91,6 +91,38 @@ everything the encoder needs.
   verdict-cache key; neither trustworthy ⇒ **inconclusive**. The per-query `lec.timeout`
   bounds each worker, so a hard miter self-limits and the portfolio degrades to
   inconclusive rather than hanging.
+- **Register-cone decomposition** (`lec.cones`, default on): the classical
+  compare-point method (van Eijk's register correspondence; "compare points" in
+  Formality/Conformal). Cutting at name-matched registers already makes each
+  next-state cut an *independent combinational miter* — so before cvc5 sees the
+  step obligation, each cut is handed to **abc**: bit-blasted into an AIG and
+  proved const-0. Every cone abc proves is **subtracted** from the obligation (an
+  OR is UNSAT iff every disjunct is), so cvc5 only ever solves the residue. This
+  is what makes a word-level solver viable against a **tech-mapped** netlist,
+  where nothing but the state anchors matches structurally: dino
+  (`PipelinedDualIssueCPU` vs its sky130 netlist) goes from *inconclusive after 8
+  minutes* to **PROVEN in 40s**, with 23 of 26 cuts discharged by abc in 3.5s.
+  Two properties define the design:
+  - **The obligation is taken as a cvc5 TERM, not re-sliced from the LGraph**
+    (`cone_abc.cpp`). The per-cut diff term already *is* the cone — its
+    free-variable support is exactly the cone boundary — so the blast inherits
+    encode.cpp's flop reset/enable folding, magnitude+1 widths, `--lib` Sub
+    inlining and X-masking verbatim. A second, hand-derived lowering of those
+    rules is precisely how a bit-level pre-pass would "prove" a cut cvc5 refutes.
+    Terms outside the pure bit-vector fragment (arrays, UF, division) are
+    declined, and the cut stays with cvc5.
+  - **abc only ever SUBTRACTS.** Refuted/unknown/unsupported all mean "keep the
+    cut"; cvc5 still owns every verdict and witness. An abc *Refuted* is not a
+    refutation at all: free boundary symbols make the abc obligation strictly
+    *stronger* than cvc5's (a memory dout is free here, but tied to
+    `SELECT(array, addr)` there), so it is reported only as a localization hint —
+    `cone diffs {nxt:q}` names the one register whose cone differs.
+  abc has no wall-clock bound of its own (its `Prove_Params` limits cap SAT
+  conflicts, while the rewriting/fraiging that dominates a datapath cone runs
+  unbounded — an 8-bit multiplier-reassociation miter of ~1k AIG nodes takes ~40s
+  at *any* conflict limit), so the pass runs in a **forked child under a deadline**
+  carved out of `lec.timeout`, streaming each verdict back as it lands; a cone the
+  deadline cuts off simply stays with cvc5.
 - **Tier-2 uncertain state correspondence** (`lec.state_pairing`, default on):
   correspondence is name-first (tier-1: `canon_flop_name` + explicit
   `lec.match`); a renamed flop is an unmatched cut point that gates `ind` — the
@@ -313,6 +345,8 @@ a silent no-op).
 | `lec.semdiff` | structural def-diff skip: `structural` (drop a structurally-identical def with no solver; `true`/`on` alias) \| `none`. NB cross-front-end pairs never match | `structural` |
 | `lec.state_pairing` | tier-2 uncertain state correspondence: pair name-unmatched flops via semdiff's full-match signature pass, injected as uncertain (drop-and-retry on REFUTE, no bounded-Proven, ind PASS self-certifies + persists pair hints) | `true` |
 | `lec.decompose` | split the miter into per-cut queries: `auto` (sweep, fall back to the monolithic solve on a non-discharging cut) \| `true` (sweep only, report the hard residue, no monolithic solve) \| `false` (monolithic only) | `auto` |
+| `lec.cones` | register-cone (compare-point) decomposition: bit-blast each per-cut obligation into an AIG and discharge it with abc, subtracting every cone abc proves from the cvc5 obligation. `auto` \| `true` (also report each cone's outcome) \| `false` | `auto` |
+| `lec.conelimit` | per-cone abc SAT conflict budget (`0` = abc's own default) | `10000` |
 | `lec.cross` | also run `lgcheck` and assert agreement (bring-up only) | `false` |
 
 The `lgyosys` solver shells out to `inou/yosys/lgcheck` (yosys `equiv`, the
@@ -371,6 +405,17 @@ with `lec.prpfailrun=false`. Regression: `pass/lec/tests/lec_witness_prpfail_tes
 compiled RTL). The strongest encoder check: emit *both* the SMT model and the
 cgen Verilog from the **same** graph and LEC them via `lgcheck` — any
 disagreement is an encoder bug caught before it can mask a real design diff.
+
+`cone_abc_test` applies the same idea to the cone bit-blaster, which is the
+soundness boundary of `lec.cones` (a proven cone is *subtracted* from the cvc5
+obligation): every case — hand-picked identities, the shift/compare/extend
+boundaries, and a randomized fuzz over the whole supported op set — asks cvc5 and
+abc the same question and fails on any disagreement. Using the SMT solver as the
+oracle is the only check that covers the op set without re-deriving the semantics
+a second time and getting them wrong the same way twice. `lec_cones_test` pins
+the end-to-end contract on an RTL-vs-tech-mapped netlist: cones discharge the
+cuts, `cones=false` reaches the same verdict, and a mutated netlist is still
+REFUTED with the residue naming the one differing register.
 
 ## References
 

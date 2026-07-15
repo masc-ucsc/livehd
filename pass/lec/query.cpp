@@ -21,6 +21,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "cone_abc.hpp"
 #include "encode.hpp"
 #include "node_util.hpp"
 
@@ -3742,6 +3743,86 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     }
   }
 
+  // ── Register-cone decomposition (lec.cones): subtract what ABC can prove ───
+  // Cutting at name-matched registers turns the step obligation into one
+  // independent combinational miter per compare point (the classic
+  // register-correspondence decomposition). Each cut's diff TERM already IS its
+  // cone -- the term's free-variable support is exactly the cone boundary
+  // (shared state, shared inputs, memory douts) -- so it can go straight to a
+  // bit-level engine without re-slicing the LGraph.
+  //
+  // ABC is used ONLY to SUBTRACT: a proven cut is dropped from `bad` and from
+  // the per-cut sweep below, because an OR is UNSAT iff every disjunct is. A
+  // cut ABC refutes or gives up on stays in the obligation untouched, so cvc5
+  // still owns every verdict and every witness. That asymmetry is what makes
+  // the pass unable to change a verdict it should not: the worst an ABC bug can
+  // do is leave work for cvc5 -- except a false Proven, which is exactly what
+  // cone_abc_test pins against cvc5 itself.
+  int         cones_proven = 0;
+  std::string cones_note;
+  if (lec_cones_try(opts.cones) && !ind_diffs.empty() && opts._split_values.empty()) {
+    const auto t0 = std::chrono::steady_clock::now();
+    // ABC has no wall-clock bound of its own (its Prove_Params limits cap SAT
+    // conflicts, but the rewriting/fraiging that dominates a datapath cone is
+    // unbounded), so the pass runs in a forked child under a deadline carved out
+    // of lec.timeout. A cone the deadline cuts off simply stays with cvc5.
+    const int64_t cone_deadline_ms = opts.timeout > 0 ? std::max<int64_t>(1000, static_cast<int64_t>(opts.timeout) * 250)
+                                                      : 60000;
+    std::vector<cvc5::Term> terms;
+    terms.reserve(ind_diffs.size());
+    for (const auto& cut : ind_diffs) {
+      terms.push_back(cut.second);
+    }
+    const std::vector<Cone_verdict> verdicts = abc_prove_unsat_batch(terms, opts.conelimit, cone_deadline_ms);
+
+    std::vector<std::pair<std::string, cvc5::Term>> keep;
+    std::vector<std::string>                       refuted;
+    int                                            unsupported = 0;
+    int                                            gave_up     = 0;
+    keep.reserve(ind_diffs.size());
+    for (size_t i = 0; i < ind_diffs.size(); ++i) {
+      const Cone_verdict v = verdicts[i];
+      if (v == Cone_verdict::Proven) {
+        ++cones_proven;
+        continue;
+      }
+      if (v == Cone_verdict::Refuted) {
+        refuted.push_back(ind_diffs[i].first);
+      } else if (v == Cone_verdict::Unsupported) {
+        ++unsupported;
+      } else {
+        ++gave_up;
+      }
+      keep.push_back(std::move(ind_diffs[i]));
+    }
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+    if (cones_proven > 0 || !keep.empty()) {
+      cones_note = "; cones: " + std::to_string(cones_proven) + "/" + std::to_string(ind_diffs.size()) + " PROVEN by abc in "
+                   + std::to_string(ms) + "ms";
+      if (!keep.empty()) {
+        cones_note += " (residue " + std::to_string(keep.size()) + ": " + std::to_string(refuted.size()) + " diff, "
+                      + std::to_string(gave_up) + " unknown, " + std::to_string(unsupported) + " unsupported)";
+      }
+      // A refuted cone localizes a mismatch to ONE register. Report it as a
+      // lead, never as a verdict: the induction step assigns current state
+      // freely, so the failing assignment may not be reachable -- cvc5 (with
+      // the witness path) still decides.
+      if (lec_cones_report(opts.cones) && !refuted.empty()) {
+        cones_note += "; cone diffs {" + join_capped(refuted) + "}";
+      }
+    }
+    if (cones_proven > 0) {
+      ind_diffs = std::move(keep);
+      bad       = cvc5::Term();
+      for (const auto& [dn, dt] : ind_diffs) {
+        bad = bad.isNull() ? dt : tm.mkTerm(cvc5::Kind::OR, {bad, dt});
+      }
+    }
+  }
+  if (!cones_note.empty()) {
+    res.detail += cones_note;
+  }
+
   const bool incomplete = !res.unmatched_ref.empty() || !res.unmatched_impl.empty();
   if (!res.unmatched_ref.empty()) {
     res.detail
@@ -3764,14 +3845,16 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   }
 
   if (bad.isNull()) {
-    // Nothing common to compare. Vacuously equal only if the sets also fully
-    // matched (both empty); otherwise the comparison is empty AND incomplete.
+    // Nothing left to compare: either there was no common cut point at all, or
+    // the cone pass just discharged every one of them. Vacuously equal only if
+    // the sets also fully matched (both empty); otherwise the comparison is
+    // empty AND incomplete.
     if (incomplete) {
       res.verdict  = Verdict::Unknown;
       res.detail  += "; no COMMON outputs to compare (correspondence incomplete)";
     } else {
       res.verdict  = Verdict::Proven;
-      res.detail  += "; no comparable outputs";
+      res.detail  += cones_proven > 0 ? "; every cut discharged by the cone pass" : "; no comparable outputs";
     }
     return res;
   }

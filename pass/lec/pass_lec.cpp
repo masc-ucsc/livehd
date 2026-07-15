@@ -151,6 +151,13 @@ void Pass_lec::setup() {
                        "proves, definitive otherwise) | true (sweep ONLY, report the hard residue, no "
                        "monolithic solve — the diagnostic mode) | false (monolithic only)",
                        "auto");
+  m.add_label_optional("cones",
+                       "register-cone decomposition: bit-blast each per-cut obligation into an AIG and "
+                       "discharge it with abc, subtracting every cone abc proves from the cvc5 obligation "
+                       "(abc only subtracts; cvc5 still owns every verdict and witness): auto (default) | "
+                       "true (also report each cone's outcome) | false (off)",
+                       "auto");
+  m.add_label_optional("conelimit", "per-cone abc SAT backtrack budget; 0 = abc's own default", "10000");
   m.add_label_optional("strict",
                        "treat an inconclusive UNKNOWN (no counterexample, solver incomplete) as a hard "
                        "failure; default false (REFUTED fails, witness-free UNKNOWN is a deferred warning)",
@@ -178,6 +185,8 @@ void Pass_lec::lec(Eprp_var& var) {
   o.reset        = std::string{var.get("reset", "")};
   o.match        = lec::parse_match_pairs(var.get("match", ""));  // inline pairs (@FILE only via `lhd lec`)
   o.decompose    = std::string{var.get("decompose", "auto")};
+  o.cones        = std::string{var.get("cones", "auto")};
+  o.conelimit    = str_tools::to_i(var.get("conelimit", "10000"));
   o.strict       = parse_bool(var.get("strict", "false"));
   o.semdiff      = lec::lec_canon_semdiff(var.get("semdiff", "structural"));
   o.partitions   = str_tools::to_i(var.get("partitions", "4"));

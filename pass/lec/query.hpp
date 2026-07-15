@@ -165,6 +165,24 @@ struct Lec_options {
                                  //          cut's PROVEN/DIFF/unknown verdict.
                                  //   false : monolithic OR-miter only (one big checkSat).
                                  // on/1 == true, off/0 == false.
+  std::string cones = "auto";    // register-cone decomposition: before cvc5 sees the induction
+                                 // step, try to discharge each per-cut obligation by bit-blasting
+                                 // it into an AIG and proving it with ABC (see cone_abc.hpp). Every
+                                 // cut ABC proves is SUBTRACTED from the cvc5 obligation, so only
+                                 // the cones ABC could not settle are ever handed to the SMT
+                                 // solver. This is the classic compare-point decomposition: cutting
+                                 // at name-matched registers makes each next-state cone an
+                                 // independent combinational miter, which is what a bit-level
+                                 // engine is good at (cvc5 chokes on the monolithic OR of a
+                                 // tech-mapped pipeline). ABC NEVER decides a verdict on its own:
+                                 // only Proven subtracts; a refuted/unknown/unsupported cone stays
+                                 // with cvc5, which owns every verdict and witness exactly as
+                                 // before.
+                                 //   auto (default): subtract what ABC proves, cvc5 does the rest.
+                                 //   true : same, and report each cone's outcome (diagnostic).
+                                 //   false: skip the ABC pass entirely.
+  int         conelimit = 10000;   // per-cone ABC SAT conflict budget (0 = ABC's own default).
+                                   // Bounds a hard cone so it falls back to cvc5 instead of hanging.
   bool        strict = false;    // treat an inconclusive UNKNOWN (no counterexample, the
                                  // solver merely could not complete the proof) as a hard
                                  // failure. Default false: REFUTED (a real counterexample)
@@ -341,6 +359,12 @@ struct Lec_options {
 inline bool lec_decompose_try(std::string_view m) { return m == "auto" || m == "true" || m == "on" || m == "1"; }
 inline bool lec_decompose_fallback(std::string_view m) { return m == "auto"; }
 
+// lec.cones mode predicates (auto | true | false). `lec_cones_try` = run the ABC
+// cone pass; `lec_cones_report` = also disclose each cone's outcome. See
+// Lec_options::cones.
+inline bool lec_cones_try(std::string_view m) { return m == "auto" || m == "true" || m == "on" || m == "1"; }
+inline bool lec_cones_report(std::string_view m) { return m == "true" || m == "on" || m == "1"; }
+
 // Normalize a lec.semdiff value to the canonical {none, structural}. `true`/`on`/
 // `1` are accepted as ergonomic aliases for `structural` (the only algorithm),
 // everything else (false/off/0/none/empty) maps to `none`. Applied at the CLI
@@ -379,6 +403,13 @@ inline std::string lec_options_range_error(const Lec_options& o) {
   if (o.decompose != "auto" && o.decompose != "true" && o.decompose != "false" && o.decompose != "on" && o.decompose != "off"
       && o.decompose != "1" && o.decompose != "0") {
     return "lec.decompose unknown '" + o.decompose + "' (auto | true | false)";
+  }
+  if (o.cones != "auto" && o.cones != "true" && o.cones != "false" && o.cones != "on" && o.cones != "off" && o.cones != "1"
+      && o.cones != "0") {
+    return "lec.cones unknown '" + o.cones + "' (auto | true | false)";
+  }
+  if (o.conelimit < 0) {
+    return "lec.conelimit must be >= 0 (0 = ABC default), got " + std::to_string(o.conelimit);
   }
   return {};
 }
