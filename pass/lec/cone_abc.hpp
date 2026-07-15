@@ -26,6 +26,8 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <vector>
 
 #include <cvc5/cvc5.h>
 
@@ -66,8 +68,40 @@ Cone_verdict abc_prove_unsat(const cvc5::Term& diff, int64_t backtrack_limit, Co
 //
 // Falls back to reporting everything Unknown if the fork fails: losing the
 // optimization is always preferable to losing the bound.
+// `st`, when given, is resized to diffs.size() and filled with each cone's size
+// (cones the deadline cut off keep their zero-initialized entry).
+//
+// `merge` (optional) maps a free symbol onto a representative symbol, so both
+// blast to the SAME primary inputs. This is speculative reduction: assuming two
+// symbols equal makes the obligation WEAKER, so -- unlike everything else here --
+// it is NOT free. Every entry must already have been discharged by its own proof
+// (see mergeable_dout_pairs); an undischarged merge would be a false PROVEN.
+using Cone_merge_map = std::unordered_map<cvc5::Term, cvc5::Term>;
 std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& diffs, int64_t backtrack_limit,
-                                                int64_t deadline_ms);
+                                                int64_t deadline_ms, std::vector<Cone_stats>* st = nullptr,
+                                                const Cone_merge_map* merge = nullptr);
+
+// Canonical structural digest of a cone obligation (32 hex chars / 128 bits).
+//
+// This is a COMPLETE cache key, which is what makes a cone cache simpler than
+// the def-pair one: the obligation is self-contained -- "is this term UNSAT,
+// with every free symbol unconstrained" -- so nothing about the run needs to
+// enter the key. Everything that could change the answer is already IN the
+// term: the widths, the flop reset/enable folding, the X-mask, the inlined cell
+// bodies, and the names of the boundary symbols. Two cones with the same digest
+// are the same formula, so a PROVEN transfers.
+//
+// Hashes the DAG directly (memoized, one visit per node) rather than the
+// printed form: toString() is safe on a shared DAG (cvc5 let-binds, so it does
+// not blow up) but it would couple a PERSISTED key to cvc5's printer and its
+// _let_N numbering, and the walk is cheaper than materializing the string.
+//
+// Stable across runs and processes: only kinds, sorts, operator indices,
+// constant values and symbol NAMES feed the hash -- never term ids or pointers.
+// Returns "" for a term that has no such stable identity (an unnamed symbol
+// prints as var_<allocation-id>); an empty digest means DO NOT CACHE, never
+// "cache under the empty key".
+std::string cone_digest(const cvc5::Term& t);
 
 std::string_view cone_verdict_name(Cone_verdict v);
 

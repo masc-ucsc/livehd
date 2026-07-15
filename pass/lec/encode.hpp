@@ -66,6 +66,32 @@ struct Encoded {
   // NOT appear here (they tie their dout within the cycle via `equalities`).
   Io_name_map<cvc5::Term> next_read;  // "<key>:rd<N>" -> next-state read value
 
+  // Per-port memory obligations (lec.cones). The next-state array is a chain
+  //   a[k+1] = store(a[k], addr[k], (~wmask[k] & select(a[k],addr[k])) | (wmask[k] & din[k]))
+  // starting from the SHARED current-contents symbol. So if every write port's
+  // (addr, wmask, din) agrees across the designs, the two chains are the same
+  // function of the same array by induction -- WITHOUT comparing arrays. That
+  // turns one array-theory query (the single most expensive obligation in a
+  // register-file design) into a handful of bit-vector cones a bit-level engine
+  // settles instantly. Exported in PORT ORDER; the consumer pairs the ports
+  // (positionally, or by matching cone digests when a front-end reordered them).
+  struct Mem_wr_port {
+    cvc5::Term addr;   // fitted to addr_w
+    cvc5::Term wmask;  // per-bit write mask (enable already folded in)
+    cvc5::Term din;    // fitted to bits
+  };
+  struct Mem_rd_port {
+    cvc5::Term dout;  // the fresh symbol downstream logic consumes
+    cvc5::Term addr;  // fitted to addr_w
+    // The dout reads the SHARED committed contents (fwd==0, not comb/ROM), so
+    // two read ports with equal addresses MUST hold equal values -- the
+    // precondition for merging the two sides' dout symbols. A forwarding or
+    // combinational read sources a per-design array instead: not mergeable.
+    bool from_shared_cur = false;
+  };
+  Io_name_map<std::vector<Mem_wr_port>> mem_wr;  // mem key -> write ports, in port order
+  Io_name_map<std::vector<Mem_rd_port>> mem_rd;  // mem key -> read ports, in port order
+
   // Side constraints the caller must assert (EQUAL lhs rhs). Used to tie an
   // async read dout (a fresh symbol seeded before the combinational loop so
   // downstream logic can consume it) to its select(array, addr) once the read

@@ -116,6 +116,16 @@ Verdict_cache::Verdict_cache(std::string workdir, uint64_t salt) : workdir_(std:
       unknowns_.emplace(it->name.GetString(), a);
     }
   }
+  // Cone verdicts: a bare digest list (the digest IS the whole claim), inside
+  // the salt gate like the def-pair verdicts.
+  if (doc.HasMember("cones") && doc["cones"].IsArray()) {
+    for (const auto& d : doc["cones"].GetArray()) {
+      if (d.IsString()) {
+        cones_.insert(d.GetString());
+      }
+    }
+    cone_hits_ = static_cast<int>(cones_.size());
+  }
   if (doc.HasMember("verdicts") && doc["verdicts"].IsObject()) {
     for (auto it = doc["verdicts"].MemberBegin(); it != doc["verdicts"].MemberEnd(); ++it) {
       if (!it->value.IsObject()) {
@@ -221,6 +231,16 @@ void Verdict_cache::note_unknown(const std::string& key, Unknown_attempt a) {
   dirty_ = true;
 }
 
+void Verdict_cache::note_cone_proven(const std::string& digest) {
+  std::lock_guard lock(mutex_);
+  if (digest.empty()) {
+    return;
+  }
+  if (cones_.insert(digest).second) {
+    dirty_ = true;
+  }
+}
+
 void Verdict_cache::save() const {
   std::lock_guard lock(mutex_);
   if (!dirty_) {
@@ -304,7 +324,16 @@ void Verdict_cache::save() const {
       out += std::format("    \"{}\": {{\"pairs\": [{}]}}{}\n", esc(pkeys[i]), ps, i + 1 < pkeys.size() ? "," : "");
     }
   }
-  out += "  }\n}\n";
+  out += "  },\n";
+  out += "  \"cones\": [\n";
+  {
+    std::vector<std::string> ckeys(cones_.begin(), cones_.end());
+    std::sort(ckeys.begin(), ckeys.end());
+    for (size_t i = 0; i < ckeys.size(); ++i) {
+      out += std::format("    \"{}\"{}\n", esc(ckeys[i]), i + 1 < ckeys.size() ? "," : "");
+    }
+  }
+  out += "  ]\n}\n";
 
   const std::string path = workdir_ + "/formal_cache.json";
   const std::string tmp  = path + ".tmp";

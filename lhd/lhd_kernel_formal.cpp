@@ -273,6 +273,21 @@ static bool lec_dbg_nid_name(std::string_view s) {
 // while leaving the unnamed flops unmatched, permanently degrading a cold-run
 // PASS to Unknown. Store no hint; the fresh pass re-derives the full set
 // every run (near-free) and keeps passing.
+// Persist the cone obligations this solve proved. Deliberately NOT gated on the
+// def's verdict: a cone proof is per-OBLIGATION, so a def that ends Unknown
+// because ONE cone is hard still proved the others, and those stay valid
+// forever (the digest is the whole claim). The next run then re-attacks only
+// the residue -- the cache accumulates partial progress across runs, which the
+// def-pair verdict cache cannot do.
+static void lec_store_cones(livehd::formal::Verdict_cache* vcache, const livehd::lec::Query_result& r) {
+  if (vcache == nullptr) {
+    return;
+  }
+  for (const auto& d : r.cone_proven) {
+    vcache->note_cone_proven(d);
+  }
+}
+
 static void lec_store_pair_hint(livehd::formal::Verdict_cache* vcache, const std::string& entity,
                                 const std::vector<std::pair<std::string, std::string>>& pairs) {
   if (vcache == nullptr || pairs.empty()) {
@@ -758,6 +773,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     if (budget_on) {
       solve_spent_ms += ms;  // only solver (prove_equal) time draws down the budget
     }
+    lec_store_cones(vcache, r);
     if (r.verdict == Verdict::Proven) {
       proven[def_ix] = 1;
       if (vcache != nullptr) {
@@ -2005,6 +2021,11 @@ void lec_command(Options& opts, Result& res) {
   std::unique_ptr<livehd::formal::Verdict_cache> vcache;
   if (workdir_set && label("cache", "true") != "false" && label("cache", "true") != "0") {
     vcache = std::make_unique<livehd::formal::Verdict_cache>(opts.workdir, livehd::kFormalSrcSalt);
+    // Read side of the cone cache: hand the engine the whole PROVEN digest set
+    // ONCE, by value. It rides the Lec_options copy into every forked worker,
+    // so no worker ever opens this file -- it just checks membership and skips
+    // abc for a cone whose obligation is already settled.
+    o._cone_cache = vcache->cone_digests();
   }
 
   livehd::lec::Query_result r;
@@ -2208,6 +2229,7 @@ void lec_command(Options& opts, Result& res) {
         vcache->clear_pair_hint(lec_entity_of(impl_g->get_name()));
       }
     }
+    lec_store_cones(vcache.get(), r);
     if (vcache != nullptr) {
       vcache->save();
       if (vcache->hits() > 0 || vcache->stores() > 0 || vcache->skips() > 0) {

@@ -63,8 +63,8 @@ std::string kind_name(cvc5::Kind k) {
 // same way it does in the cvc5 term graph.
 class Blaster {
 public:
-  explicit Blaster(Abc_Ntk_t* ntk)
-      : ntk_(ntk), man_(static_cast<Abc_Aig_t*>(ntk->pManFunc)), one_(Abc_AigConst1(ntk)) {}
+  Blaster(Abc_Ntk_t* ntk, const Cone_merge_map* merge)
+      : ntk_(ntk), man_(static_cast<Abc_Aig_t*>(ntk->pManFunc)), one_(Abc_AigConst1(ntk)), merge_(merge) {}
 
   // Returns the AIG bit for `root` (Boolean), or nullptr if the term left the
   // blastable fragment (then why() names the offending kind).
@@ -101,6 +101,15 @@ private:
     Abc_ObjAssignName(pi, const_cast<char*>(name.c_str()), nullptr);
     ++npi_;
     return pi;
+  }
+
+  // Resolve a symbol to its merge representative (identity when unmerged).
+  cvc5::Term canon(const cvc5::Term& t) const {
+    if (merge_ == nullptr) {
+      return t;
+    }
+    auto it = merge_->find(t);
+    return it == merge_->end() ? t : it->second;
   }
 
   void fail(std::string_view what) {
@@ -334,11 +343,17 @@ private:
       case cvc5::Kind::VARIABLE: {
         // A free symbol: shared state, a primary input, or a memory dout. This
         // is the cone's boundary -- unconstrained here, which is what makes the
-        // ABC obligation at least as strong as cvc5's.
+        // ABC obligation at least as strong as cvc5's. A merged symbol reuses its
+        // representative's inputs (a DISCHARGED assumption -- see the header).
+        const cvc5::Term rep = canon(t);
+        if (auto it = sym_pi_.find(rep); it != sym_pi_.end()) {
+          return it->second;
+        }
         std::vector<Bit> r(w);
         for (uint32_t i = 0; i < w; ++i) {
-          r[i] = new_pi(t.getId(), i);
+          r[i] = new_pi(rep.getId(), i);
         }
+        sym_pi_.emplace(rep, r);
         return r;
       }
       case cvc5::Kind::BITVECTOR_NOT: return bv_not(bits_of(t[0]));
@@ -451,7 +466,14 @@ private:
     switch (t.getKind()) {
       case cvc5::Kind::CONST_BOOLEAN: return t.getBooleanValue() ? one() : zero();
       case cvc5::Kind::CONSTANT:
-      case cvc5::Kind::VARIABLE: return new_pi(t.getId(), 0);
+      case cvc5::Kind::VARIABLE: {
+        const cvc5::Term rep = canon(t);
+        auto             it  = sym_bit_.find(rep);
+        if (it == sym_bit_.end()) {
+          it = sym_bit_.emplace(rep, new_pi(rep.getId(), 0)).first;
+        }
+        return it->second;
+      }
       case cvc5::Kind::NOT: return inv(bool_of(t[0]));
       case cvc5::Kind::AND: {
         Bit acc = one();
@@ -518,11 +540,143 @@ private:
   int         npi_ = 0;
   std::string why_;
 
+  const Cone_merge_map*                           merge_ = nullptr;
   std::unordered_map<cvc5::Term, std::vector<Bit>> bv_;
   std::unordered_map<cvc5::Term, Bit>              bl_;
+  std::unordered_map<cvc5::Term, std::vector<Bit>> sym_pi_;   // representative -> its PIs
+  std::unordered_map<cvc5::Term, Bit>              sym_bit_;  // representative -> its PI (bool)
 };
 
 }  // namespace
+
+// ---- canonical cone digest --------------------------------------------------
+namespace {
+
+uint64_t mix64(uint64_t x) {
+  x += 0x9e3779b97f4a7c15ULL;
+  x  = (x ^ (x >> 30U)) * 0xbf58476d1ce4e5b9ULL;
+  x  = (x ^ (x >> 27U)) * 0x94d049bb133111ebULL;
+  return x ^ (x >> 31U);
+}
+
+uint64_t hcomb(uint64_t h, uint64_t v) { return mix64(h ^ (v + 0x9e3779b97f4a7c15ULL + (h << 6U) + (h >> 2U))); }
+
+uint64_t hstr(uint64_t h, std::string_view s) {
+  for (const char c : s) {
+    h = (h ^ static_cast<unsigned char>(c)) * 0x100000001b3ULL;  // FNV-1a
+  }
+  return mix64(h);
+}
+
+// The bits of a term that DEFINE it, as text. Kind + sort pin the shape; the
+// leaf payloads pin the identity (a symbol is its name -- two cones over the
+// same boundary symbol are the same obligation, which is the whole point).
+//
+// Returns false when the term has NO stable identity, which makes the whole
+// cone undigestable (and so uncacheable). See the anonymous-symbol case.
+//
+// `name_seq`/`sym_ix` disambiguate symbols that SHARE a name -- see the
+// same-name case below; they must persist across one cone_digest walk.
+bool node_payload(const cvc5::Term& t, std::string& p, std::unordered_map<std::string, uint32_t>& name_seq,
+                  std::unordered_map<cvc5::Term, uint32_t>& sym_ix) {
+  p = std::to_string(static_cast<int>(t.getKind())) + "|" + t.getSort().toString();
+  switch (t.getKind()) {
+    case cvc5::Kind::CONSTANT:
+    case cvc5::Kind::VARIABLE: {
+      // An UNNAMED symbol has no identity we may persist: cvc5 prints it as
+      // "var_<id>", an allocation-order number that differs between processes.
+      // Baking that into a stored key would let two DIFFERENT cones collide on
+      // one digest and silently transfer a PROVEN -- the single failure mode
+      // this pass must never have. Refuse to digest instead; the cone is simply
+      // re-proven every run. (Same ruling as semdiff's anonymous state cells,
+      // semdiff.cpp: a per-run debug nid is not a cross-process identity.)
+      if (!t.hasSymbol()) {
+        return false;
+      }
+      // A name is NOT an identity: mkConst does not hash-cons on it, and the ind
+      // engine encodes BOTH designs with an empty prefix (query.cpp), so each
+      // side's memory read dout and comb-box output are DISTINCT symbols with
+      // the SAME name (":rd0", "cb:..."). Keying on the name alone would give
+      // DISTINCT(f(a), f(b)) -- SAT, two free vars -- the same digest as
+      // DISTINCT(f(a), f(a)) -- UNSAT -- and replay a PROVEN onto a cone nobody
+      // proved. Number the symbols within each name group, in first-encounter
+      // order of this deterministic walk: equal digests then mean the terms are
+      // equal up to a BIJECTIVE renaming inside each group, which preserves
+      // satisfiability, so a PROVEN still transfers.
+      const std::string sym = t.getSymbol();
+      auto [it, fresh]      = sym_ix.try_emplace(t, 0U);
+      if (fresh) {
+        it->second = name_seq[sym]++;
+      }
+      p += "|v:" + sym + "#" + std::to_string(it->second);
+      break;
+    }
+    case cvc5::Kind::CONST_BITVECTOR: p += "|k:" + t.getBitVectorValue(2); break;
+    case cvc5::Kind::CONST_BOOLEAN: p += t.getBooleanValue() ? "|b:1" : "|b:0"; break;
+    default: break;
+  }
+  if (t.hasOp()) {  // EXTRACT/ZERO_EXTEND/... indices are part of the operator
+    const cvc5::Op op = t.getOp();
+    for (size_t i = 0; i < op.getNumIndices(); ++i) {
+      p += "|i:" + cvc5::Op(op)[i].toString();
+    }
+  }
+  return true;
+}
+
+}  // namespace
+
+std::string cone_digest(const cvc5::Term& t) {
+  if (t.isNull()) {
+    return {};
+  }
+  // Two independent lanes -> 128 bits. A collision would silently transfer a
+  // PROVEN between two DIFFERENT obligations, so 64 bits (birthday-bound ~2^32
+  // cones) is not enough margin to rely on.
+  std::unordered_map<cvc5::Term, std::pair<uint64_t, uint64_t>> memo;
+  std::unordered_map<std::string, uint32_t>                     name_seq;  // name -> next free index
+  std::unordered_map<cvc5::Term, uint32_t>                      sym_ix;    // symbol -> its index in its name group
+  std::vector<std::pair<cvc5::Term, bool>>                      st;
+  st.emplace_back(t, false);
+  while (!st.empty()) {
+    auto entry = st.back();
+    if (memo.count(entry.first) != 0) {
+      st.pop_back();
+      continue;
+    }
+    if (!entry.second) {
+      st.back().second = true;
+      for (size_t i = 0; i < entry.first.getNumChildren(); ++i) {
+        st.emplace_back(entry.first[i], false);
+      }
+      continue;
+    }
+    st.pop_back();
+    std::string pay;
+    if (!node_payload(entry.first, pay, name_seq, sym_ix)) {
+      return {};  // no stable identity anywhere in the DAG => never cache this cone
+    }
+    uint64_t a = hstr(0xcbf29ce484222325ULL, pay);
+    uint64_t b = hstr(0x9ae16a3b2f90404fULL, pay);
+    for (size_t i = 0; i < entry.first.getNumChildren(); ++i) {
+      const auto it = memo.find(entry.first[i]);
+      if (it == memo.end()) {
+        return {};  // cannot happen (post-order), but never hash a partial DAG
+      }
+      a = hcomb(a, it->second.first);
+      b = hcomb(b, it->second.second ^ 0x5851f42d4c957f2dULL);
+    }
+    memo.emplace(entry.first, std::make_pair(a, b));
+  }
+  const auto it = memo.find(t);
+  if (it == memo.end()) {
+    return {};
+  }
+  char buf[33];
+  std::snprintf(buf, sizeof buf, "%016llx%016llx", static_cast<unsigned long long>(it->second.first),
+                static_cast<unsigned long long>(it->second.second));
+  return std::string{buf, 32};
+}
 
 std::string_view cone_verdict_name(Cone_verdict v) {
   switch (v) {
@@ -533,7 +687,8 @@ std::string_view cone_verdict_name(Cone_verdict v) {
   }
 }
 
-Cone_verdict abc_prove_unsat(const cvc5::Term& diff, int64_t backtrack_limit, Cone_stats* st) {
+namespace {
+Cone_verdict prove_one(const cvc5::Term& diff, int64_t backtrack_limit, Cone_stats* st, const Cone_merge_map* merge) {
   if (diff.isNull() || !diff.getSort().isBoolean()) {
     return Cone_verdict::Unsupported;
   }
@@ -542,7 +697,7 @@ Cone_verdict abc_prove_unsat(const cvc5::Term& diff, int64_t backtrack_limit, Co
   Abc_Ntk_t* ntk = Abc_NtkAlloc(ABC_NTK_STRASH, ABC_FUNC_AIG, 1);
   ntk->pName     = Extra_UtilStrsav(const_cast<char*>("lec_cone"));
 
-  Blaster b(ntk);
+  Blaster b(ntk, merge);
   Bit     po_bit = b.run(diff);
   if (b.bad() || po_bit == nullptr) {
     if (st != nullptr) {
@@ -602,6 +757,11 @@ Cone_verdict abc_prove_unsat(const cvc5::Term& diff, int64_t backtrack_limit, Co
   }
   return rv == 0 ? Cone_verdict::Refuted : Cone_verdict::Unknown;
 }
+}  // namespace
+
+Cone_verdict abc_prove_unsat(const cvc5::Term& diff, int64_t backtrack_limit, Cone_stats* st) {
+  return prove_one(diff, backtrack_limit, st, nullptr);
+}
 
 // One streamed result: which cone, what verdict, and its size (diagnostics).
 namespace {
@@ -621,10 +781,14 @@ uint32_t get_u32(const unsigned char* p) {
 }  // namespace
 
 std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& diffs, int64_t backtrack_limit,
-                                                int64_t deadline_ms) {
+                                                int64_t deadline_ms, std::vector<Cone_stats>* st,
+                                                const Cone_merge_map* merge) {
   // Unknown = "not proven" = the cut stays in the cvc5 obligation, so every
   // early return below degrades soundly.
   std::vector<Cone_verdict> out(diffs.size(), Cone_verdict::Unknown);
+  if (st != nullptr) {
+    st->assign(diffs.size(), Cone_stats{});
+  }
   if (diffs.empty()) {
     return out;
   }
@@ -650,13 +814,13 @@ std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& d
       close(devnull);
     }
     for (size_t i = 0; i < diffs.size(); ++i) {
-      Cone_stats         st;
-      const Cone_verdict v = abc_prove_unsat(diffs[i], backtrack_limit, &st);
+      Cone_stats         one;
+      const Cone_verdict v = prove_one(diffs[i], backtrack_limit, &one, merge);
       unsigned char      rec[kRecord];
       put_u32(rec, static_cast<uint32_t>(i));
       rec[4] = static_cast<unsigned char>(v);
-      put_u32(rec + 5, static_cast<uint32_t>(st.pis));
-      put_u32(rec + 9, static_cast<uint32_t>(st.ands));
+      put_u32(rec + 5, static_cast<uint32_t>(one.pis));
+      put_u32(rec + 9, static_cast<uint32_t>(one.ands));
       if (write(fds[1], rec, kRecord) != static_cast<ssize_t>(kRecord)) {
         break;  // parent stopped listening (deadline): nothing left to report
       }
@@ -707,9 +871,9 @@ std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& d
     if (idx < out.size() && rec[4] <= static_cast<unsigned char>(Cone_verdict::Unknown)) {
       out[idx] = v;
     }
-    if (std::getenv("LEC_CONE_LOG") != nullptr) {
-      std::fprintf(stderr, "[LEC_CONE] #%-4u %-12s pis=%u ands=%u\n", idx, std::string{cone_verdict_name(v)}.c_str(),
-                   get_u32(rec + 5), get_u32(rec + 9));
+    if (st != nullptr && idx < st->size()) {
+      (*st)[idx].pis  = static_cast<int>(get_u32(rec + 5));
+      (*st)[idx].ands = static_cast<int>(get_u32(rec + 9));
     }
   }
   close(fds[0]);

@@ -123,6 +123,27 @@ everything the encoder needs.
   at *any* conflict limit), so the pass runs in a **forked child under a deadline**
   carved out of `lec.timeout`, streaming each verdict back as it lands; a cone the
   deadline cuts off simply stays with cvc5.
+- **The cone cache** (`--workdir`, with the verdict cache): each cone is keyed by
+  `cone_digest` — a 128-bit structural hash of its obligation term — and every
+  PROVEN digest is persisted in `formal_cache.json` (`"cones": [...]`, salt-gated
+  with the verdicts). Because the obligation is self-contained, the digest is a
+  **complete** key: nothing about the run qualifies it, so the same cone hits in a
+  *different* design. That buys two things the def-pair verdict cache cannot:
+  - **incremental LEC** — edit one pipeline stage and only the cones whose
+    obligation actually changed are re-proven (note that against a *tech-mapped*
+    impl an RTL edit can perturb mapping non-locally, so a neighbouring cone may
+    legitimately get a new digest);
+  - **resumable progress** — a def that ends UNKNOWN caches *nothing* in the
+    def-pair cache, but its proven cones still persist, so a re-run at a bigger
+    budget only re-attacks the residue. Measured on dino: a starved run proved
+    8/26 cones and reported UNKNOWN; the next run at full budget replayed those 8
+    from cache and reached PROVEN.
+  The engine may run in a forked worker, so it never touches the cache file: the
+  driver hands it the PROVEN set by value (`Lec_options::_cone_cache`) and
+  collects what it newly proved (`Query_result::cone_proven`).
+  A term with no cross-process identity (an unnamed symbol prints as
+  `var_<allocation-id>`) is deliberately **undigestable** — it is re-proven every
+  run rather than risk one digest standing for two different obligations.
 - **Tier-2 uncertain state correspondence** (`lec.state_pairing`, default on):
   correspondence is name-first (tier-1: `canon_flop_name` + explicit
   `lec.match`); a renamed flop is an unmatched cut point that gates `ind` — the

@@ -99,6 +99,12 @@ struct Query_result {
   // proof itself validates them: the driver promotes exactly this list to
   // entity-keyed pair hints in the persistent cache.
   std::vector<std::pair<std::string, std::string>> uncertain_pairs_used;
+
+  // Cone digests (cone_digest) this run PROVED for the first time. The engine
+  // may live in a forked worker, so it cannot touch the driver's verdict cache
+  // itself: it reports what it proved and the driver persists it. See
+  // Lec_options::_cone_cache for the read direction.
+  std::vector<std::string> cone_proven;
 };
 
 struct Monitor;
@@ -309,6 +315,12 @@ struct Lec_options {
   // selector values of input `_split_name` instead of the monolithic solve.
   std::string           _split_name;
   std::vector<uint64_t> _split_values;
+
+  // Cone digests already known PROVEN (from the driver's verdict cache). Read
+  // side of the cone cache: the set is loaded ONCE by the driver and rides the
+  // by-value Lec_options copy into every fork, so a worker never touches the
+  // cache file -- it just checks membership. A hit skips abc for that cone.
+  absl::flat_hash_set<std::string> _cone_cache;
   bool                  _isolated_worker = false;  // one global-pool child: no nested forks
 
   // Heuristic-only strategy replay from the persistent cache. `auto` tries a

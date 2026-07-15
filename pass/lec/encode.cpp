@@ -2221,6 +2221,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       Term set      = tm_.mkTerm(Kind::BITVECTOR_AND, {wmask, din});
       Term new_word = tm_.mkTerm(Kind::BITVECTOR_OR, {keep, set});
       a_next        = tm_.mkTerm(Kind::STORE, {a_next, addr, new_word});
+      // The bit-vector inputs this port contributes to the chain: equal inputs on
+      // both sides => equal chains, provable without the array theory.
+      out.mem_wr[mc.key].push_back(Encoded::Mem_wr_port{addr, wmask, din});
     }
 
     // Reset (highest priority) overrides per-port + update for a registered
@@ -2254,6 +2257,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       Term addr = fit_unsigned(av, mc.sig.addr_w);
       Term real = tm_.mkTerm(Kind::SELECT, {rd_src, addr});
+      // A dout that reads the SHARED committed contents is a candidate for
+      // merging with the other design's matching port: equal address + the same
+      // array term => provably equal values. A forwarding / combinational read
+      // sources this design's OWN a_next, so nothing can be assumed about it.
+      const bool shared_cur = !mc.is_comb && mc.fwd == 0 && !mc.is_rom && rd_src == mc.a_cur;
+      out.mem_rd[mc.key].push_back(Encoded::Mem_rd_port{mc.rd_fresh[k], addr, shared_cur});
       if (mc.mtype == 1 && shared_reads != nullptr) {
         // Sync read (latency-1): rd_fresh is the CURRENT registered dout (seeded
         // from shared_reads in phase 1); THIS cycle's read is its NEXT state,

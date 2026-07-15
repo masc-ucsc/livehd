@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 
 namespace livehd::formal {
 
@@ -66,6 +67,16 @@ struct Pair_hint {
   std::vector<std::pair<std::string, std::string>> pairs;  // {ref, impl} raw names
 };
 
+// Sixth record kind (lec.cones): PROVEN cone obligations, keyed by the cone's
+// canonical structural digest (lec::cone_digest). Unlike every other record
+// here the key needs NOTHING else — a cone obligation is self-contained ("is
+// this term UNSAT with every free symbol unconstrained"), so the digest IS the
+// claim; there are no options, no entity name and no def-pair to qualify it.
+// That is what makes it incremental at a much finer grain than the def-pair
+// verdicts: editing one pipeline stage only changes the digests of the cones
+// whose logic actually moved, and every other cone still hits. Salt-gated with
+// the verdicts (rule F) — a prover change drops them all.
+
 class Verdict_cache {
 public:
   // Loads <workdir>/formal_cache.json when present. A salt mismatch drops the
@@ -91,6 +102,14 @@ public:
   bool skip_unknown(const std::string& key, int timeout_s) const;
   void note_unknown(const std::string& key, Unknown_attempt a);
 
+  // Cone verdicts (lec.cones): the whole PROVEN digest set is handed to the
+  // engine by value (Lec_options::_cone_cache) because the engine may run in a
+  // forked worker that must not touch this file; it reports back what it newly
+  // proved (Query_result::cone_proven) and the driver notes it here.
+  const absl::flat_hash_set<std::string>& cone_digests() const { return cones_; }
+  void                                    note_cone_proven(const std::string& digest);
+
+  int  cone_hits() const { return cone_hits_; }
   int  hits() const { return hits_; }
   int  stores() const { return stores_; }
   int  skips() const { return skips_; }
@@ -110,6 +129,8 @@ private:
   absl::flat_hash_map<std::string, Strategy_hint>   hints_;
   absl::flat_hash_map<std::string, Pair_hint>       pair_hints_;
   absl::flat_hash_map<std::string, Unknown_attempt> unknowns_;
+  absl::flat_hash_set<std::string>                 cones_;
+  int                                              cone_hits_ = 0;  // digests loaded from disk
 };
 
 }  // namespace livehd::formal
