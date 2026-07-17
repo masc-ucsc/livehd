@@ -814,7 +814,13 @@ void Partitioner::build_top() {
     auto gio = module_gio_[r];
     auto sub = gu::create_typed_node(*t, Ntype_op::Sub);
     sub.set_subnode(gio);
-    sub.attr(hhds::attrs::name).set(std::format("u_{}", std::string{gio->get_name()}));
+    // Region wrappers are left ANONYMOUS (no `name` attr) on purpose: a named
+    // wrapper would insert a `u_<module>` level into every internal node's hier
+    // name (top.u_top__c3.foo instead of top.foo), breaking name-based lec
+    // pairing / opentimer / VCD between the source and the re-partitioned design.
+    // build_hier_name treats an unnamed instance as transparent, so the leaf hier
+    // names are preserved; cgen synthesizes the stable Verilog name `u_<module>`
+    // at emit (Cgen_verilog::sub_instance_name).
     sub_of[r] = sub;
   }
 

@@ -1796,14 +1796,37 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, const 
   }
 }
 
+std::string Cgen_verilog::sub_instance_name(const hhds::Node_class& node) {
+  if (auto it = sub_instance_names_.find(node.get_class_index()); it != sub_instance_names_.end()) {
+    return it->second;
+  }
+  std::string base;
+  if (livehd::graph_util::has_name(node)) {
+    base = default_instance_name(node);  // explicit RTL instance name
+  } else if (auto io = node.get_subnode_io()) {
+    // Anonymous instance (partition leaves region wrappers unnamed so the leaf
+    // hier names stay transparent): derive a stable, readable name from the
+    // module -- not `sub_<nid>`, which churns every recompile.
+    base = "u_" + std::string{io->get_name()};
+  } else {
+    base = default_instance_name(node);
+  }
+  // De-collide against wires and other instances (two anonymous instances of one
+  // module -- e.g. a deduplicated region mapped once and instantiated twice --
+  // would otherwise both be `u_<module>`).
+  auto name = get_unique_decl_name(get_scaped_name(base));
+  sub_instance_names_.emplace(node.get_class_index(), name);
+  return name;
+}
+
 void Cgen_verilog::reserve_instance_names(hhds::Graph* graph) {
   for (auto node : graph->fast_class()) {
     auto op = type_op_of(node);
-    if (op != Ntype_op::Sub && op != Ntype_op::Memory) {
-      continue;
+    if (op == Ntype_op::Sub) {
+      sub_instance_name(node);  // choose + reserve the (possibly anonymous) name
+    } else if (op == Ntype_op::Memory) {
+      declared_name_counts.insert({get_scaped_name(default_instance_name(node)), 1});
     }
-    auto iname = get_scaped_name(default_instance_name(node));
-    declared_name_counts.insert({iname, 1});
   }
 }
 
@@ -1973,7 +1996,7 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
       continue;
     }
 
-    auto iname = get_scaped_name(default_instance_name(node));
+    auto iname = sub_instance_name(node);
 
     note_src(fout, node);
     fout->append(get_scaped_name(flat_module_name(sub_io->get_name())), " ", iname, "(\n");
@@ -2545,6 +2568,7 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   pin2expr.clear();
   mux2vector.clear();
   declared_name_counts.clear();
+  sub_instance_names_.clear();
   first_array_block = true;
   map_segments_.clear();
   mem_wrappers_emitted_.clear();

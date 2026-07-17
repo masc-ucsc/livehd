@@ -36,6 +36,11 @@ private:
   absl::flat_hash_map<pin_key_t, std::string>  pin2var;
   absl::flat_hash_map<node_key_t, std::string> mux2vector;
   absl::flat_hash_map<std::string, int>         declared_name_counts;
+  // Chosen instance name per Sub node, computed once (in reserve_instance_names)
+  // and de-collided, so every emit site renders the same name. An ANONYMOUS Sub
+  // (no `name` attr -- e.g. a re-partition wrapper left transparent so hier names
+  // are preserved) is named `u_<module>`; a named Sub keeps its name.
+  absl::flat_hash_map<node_key_t, std::string> sub_instance_names_;
 
   bool first_array_block;
 
@@ -108,6 +113,11 @@ private:
   // `_foo_io_out` falling back to "foo_2", colliding with a sibling instance
   // literally named "foo_2") — an invalid Verilog redefinition.
   void reserve_instance_names(hhds::Graph* graph);
+  // The emit-time instance name for a Sub node (cached in sub_instance_names_,
+  // computed on first call, so it can be called for its reserving side effect).
+  // Named Sub keeps its name; an anonymous Sub becomes `u_<module>`, de-collided
+  // against every already-chosen name.
+  std::string sub_instance_name(const hhds::Node_class& node);
 
   void create_module_io(std::shared_ptr<File_output> fout, hhds::Graph* graph);
   void create_memories(std::shared_ptr<File_output> fout, hhds::Graph* graph);

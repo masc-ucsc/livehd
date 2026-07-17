@@ -150,13 +150,16 @@ http_archive(
 
 # HHDS
 bazel_dep(name = "hhds", version = "0.2.0")
-git_override(
-    module_name = "hhds",
-    remote = "https://github.com/masc-ucsc/hhds.git",
-    commit = "638cb0240a865a0869023318b5a9aa50b17db3f8",
-)
-# For local co-development swap the git_override above for:
-# local_path_override(module_name = "hhds", path = "../hhds")
+# Local co-development: the transparent-hier-name change (build_hier_name skips
+# unnamed path instances) that the color/partition re-partition flow depends on
+# lives in ../hhds and is not yet pushed. Bump the git_override commit below once
+# ../hhds HEAD (9f0d3a6 "build_hier_name: transparent path levels") is pushed.
+local_path_override(module_name = "hhds", path = "../hhds")
+# git_override(
+#     module_name = "hhds",
+#     remote = "https://github.com/masc-ucsc/hhds.git",
+#     commit = "638cb0240a865a0869023318b5a9aa50b17db3f8",
+# )
 
 # prpparse — hand-written recursive-descent Pyrope parser; the inou/prp front-end
 # (it replaced the tree-sitter-pyrope grammar, so neither @tree-sitter nor
