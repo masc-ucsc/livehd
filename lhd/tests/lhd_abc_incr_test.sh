@@ -58,7 +58,7 @@ compile_and_color() {  # $1 = lg dir tag
 
 abc_incr() {  # $1 = input lg tag, $2 = out tag
   # ONE shared --workdir across every abc run: the cache lives under it
-  # (<workdir>/abc_cache, the lec.cache convention), on by default.
+  # (<workdir>/abc_cache, the formal.cache convention), on by default.
   run pass abc --top "$TOP" lg:"$W/$1" --emit-dir lg:"$W/$2" --set abc.library="$LIB" \
       --workdir "$W/wabc"
 }
@@ -73,7 +73,7 @@ lec_gate() {  # $1 = net tag, $2 = lg tag, $3 = label
   run compile lg:"$W/re$1" --top "$TOP" --recipe O0 --emit-dir verilog:"$W/re${1}v" --workdir "$W/w_rv$1"
   cat "$W/${1}v/"*.v "$W/modelsv/"*.v > "$W/impl$1.v"
   cat "$W/re${1}v/"*.v > "$W/ref$1.v"
-  run lec --set lec.solver=lgyosys --impl verilog:"$W/impl$1.v" --ref verilog:"$W/ref$1.v" --top "$TOP" --workdir "$W/w_l$1"
+  run lec --set formal.solver=lgyosys --impl verilog:"$W/impl$1.v" --ref verilog:"$W/ref$1.v" --top "$TOP" --workdir "$W/w_l$1"
   echo "PASS: $3 is LEC-equivalent"
 }
 
@@ -110,7 +110,7 @@ run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net4" --set abc.library=
     --set abc.cache=false --workdir "$W/wabc"
 [ -z "$(incr_field hits)" ] || fail "cache=false still ran the cache"
 # No user --workdir: nowhere durable to cache, so the cache stays off even at
-# its default of true (the lec.cache convention).
+# its default of true (the formal.cache convention).
 run pass abc --top "$TOP" lg:"$W/lg1" --emit-dir lg:"$W/net5" --set abc.library="$LIB"
 [ -z "$(incr_field hits)" ] || fail "no --workdir must mean no cache"
 echo "PASS: cache=false and no-workdir both disable cleanly"

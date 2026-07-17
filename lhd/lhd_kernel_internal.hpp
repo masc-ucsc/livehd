@@ -48,6 +48,29 @@ inline constexpr std::string_view kFormalCommonFlags[] = {
     "partitions", "phase", "report", "reset", "reset_cycles", "retry", "rlimit", "solver", "split", "strict", "timeout", "witness",
 };
 
+// REMOVED namespaces/flags (no back-compat, user ruling 2026-07-17): using one
+// errors with a directed "use X instead" hint. `formal_split` = the lec split
+// (common flags -> formal.<f>, pairing machinery -> formal.lec.<f>).
+struct Renamed_ns {
+  std::string_view old_ns;
+  std::string_view new_ns;
+  bool             formal_split = false;
+};
+inline constexpr Renamed_ns kRenamedSetPasses[] = {
+    {             "lec",          "formal", true},
+    {     "compile.sim",             "sim", false},
+    {"compile.isabelle", "formal.isabelle", false},
+    {    "compile.lean",     "formal.lean", false},
+};
+inline constexpr std::pair<std::string_view, std::string_view> kRenamedFlags[] = {
+    { "minetimeout",    "mine_timeout"},
+    {  "prpfailrun",     "prpfail_run"},
+    {"vcdfakedelay",  "vcd_fake_delay"},
+    {         "min",          "min_ge"},
+    {         "max",          "max_ge"},
+    {         "seq",        "register"},
+};
+
 inline constexpr Set_pass kSetPasses[] = {
     {     "compile.upass",        "pass.upass",     Set_pass::List::all},
     {     "compile.cprop",        "pass.cprop",     Set_pass::List::all},
@@ -56,9 +79,7 @@ inline constexpr Set_pass kSetPasses[] = {
     {       "pass.formal",       "pass.formal",     Set_pass::List::none},  // alias of compile.formal
     {      "compile.cgen", "inou.cgen.verilog",     Set_pass::List::all},
     {     "compile.yosys",   "inou.yosys.tolg",     Set_pass::List::all},
-    {  "compile.isabelle",     "pass.isabelle",     Set_pass::List::none},  // legacy: canonical is formal.isabelle.*
     {   "formal.isabelle",     "pass.isabelle",     Set_pass::List::all},
-    {      "compile.lean",         "pass.lean",     Set_pass::List::none},  // legacy: canonical is formal.lean.*
     {       "formal.lean",         "pass.lean",     Set_pass::List::all},
     {"compile.prp_writer",   "pass.prp_writer",     Set_pass::List::all},
     {        "pass.color",        "pass.color",     Set_pass::List::all},
@@ -66,7 +87,6 @@ inline constexpr Set_pass kSetPasses[] = {
     {          "pass.abc",          "pass.abc",     Set_pass::List::all},
     {      "pass.liberty",      "pass.liberty",     Set_pass::List::all},
     {    "pass.opentimer",    "pass.opentimer",     Set_pass::List::all},
-    {               "lec",          "pass.lec",     Set_pass::List::none},  // legacy: canonical is formal[.lec].*
     {            "formal",          "pass.lec",     Set_pass::List::common},
     {        "formal.lec",          "pass.lec",     Set_pass::List::specific},
     {      "pass.semdiff",      "pass.semdiff",     Set_pass::List::all},

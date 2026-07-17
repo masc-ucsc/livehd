@@ -37,7 +37,7 @@ echo "$out" | grep -q '"name":"compile.bitwidth.max_iterations"' || fail "compil
 # hier options all spell it `hier` and default true.
 echo "$out" | grep -q '"name":"compile.cprop.hier"' && fail "compile.cprop.hier must be gone (vestigial): $out"
 echo "$out" | grep -q '"name":"compile.bitwidth.hier"' && fail "compile.bitwidth.hier must be gone (vestigial): $out"
-echo "$out" | grep -q '"name":"lec.hierarchical"' && fail "lec.hierarchical must be gone (renamed lec.hier): $out"
+echo "$out" | grep -q '"name":"lec.hierarchical"' && fail "lec.hierarchical must be gone (renamed formal.lec.hier): $out"
 # formal-root restructure (2026-07-17): lec.* is an accepted-but-unlisted alias;
 # the canonical names are formal.<common> and formal.lec.<lec-specific>.
 echo "$out" | grep -q '"name":"lec\.' && fail "lec.* must not be listed (alias of formal[.lec].*): $out"
@@ -53,7 +53,7 @@ echo "$out" | grep -q '"name":"formal.solver"' || fail "formal.solver (shared fo
 echo "$out" | grep -q '"name":"formal.strict","method":"pass.lec","default":"false"' || fail "formal.strict missing: $out"
 echo "$out" | grep -q '"name":"formal.isabelle.strict"' || fail "formal.isabelle.strict missing: $out"
 echo "$out" | grep -q '"name":"formal.lean.strict"' || fail "formal.lean.strict missing: $out"
-echo "$out" | grep -q '"name":"compile.isabelle.strict"' && fail "compile.isabelle.* must be unlisted (alias of formal.isabelle.*): $out"
+echo "$out" | grep -q '"name":"compile.isabelle.' && fail "compile.isabelle.* must not exist (canonical is formal.isabelle.*): $out"
 # The shared lhd.* kernel namespace (seed); the old per-pass top/seed are gone.
 echo "$out" | grep -q '"name":"lhd.seed"' || fail "shared lhd.seed missing: $out"
 echo "$out" | grep -q '"name":"pass.color.seed"' && fail "per-pass pass.color.seed must be gone (use lhd.seed): $out"
@@ -155,7 +155,9 @@ echo "$out" | grep -q '"name":"sim.checkpoint_min_secs","method":"sim","default"
 # in the code or as an alias, and the codegen reads the same sim.vcd knob.
 echo "$out" | grep -q '"name":"compile.sim.vcd"' && fail "compile.sim.* must not exist: $out"
 echo "$out" | grep -q '"name":"sim.vcd_fake_delay","method":"sim","default":"true"' || fail "sim.vcd_fake_delay missing: $out"
-echo "$out" | grep -q '"name":"sim.vcdfakedelay"' && fail "deprecated sim.vcdfakedelay must be unlisted: $out"
+# the old vcdfakedelay spelling is DELETED: setting it errors with the rename hint
+"$LHD" sim "$PRP" --set sim.vcdfakedelay=false --workdir "$W/w11c" -q >"$W/r11c.json" 2>/dev/null && fail "--set sim.vcdfakedelay must fail (renamed)"
+grep -q "use --set sim.vcd_fake_delay=false instead" "$W/r11c.json" || fail "vcdfakedelay rename hint missing: $(cat "$W/r11c.json")"
 # `lhd list options sim` (regex) shows the one sim namespace.
 simlist=$("$LHD" list options sim --diag-fmt pretty)
 echo "$simlist" | grep -q '^sim\.checkpoint_min_secs=10' || fail "list options sim dropped sim.checkpoint_min_secs: $simlist"
@@ -166,9 +168,17 @@ echo "$simlist" | grep -q '^sim\.checkpoint_min_secs=10' || fail "list options s
 "$LHD" describe sim.vcd | grep -q '"name":"sim.vcd","kind":"option","method":"sim"' \
   || fail "describe sim.vcd must be the sim namespace, not compile.sim.vcd"
 "$LHD" describe compile.sim.vcd >/dev/null 2>&1 && fail "describe compile.sim.vcd must fail (the namespace does not exist)"
-# a --set of the dead spelling errors WITH the inline sim.vcd suggestion
+# a --set of the dead spelling errors with the DIRECTED replacement hint
 "$LHD" compile "$PRP" --set compile.sim.vcd=1 --workdir "$W/w11b" -q >"$W/r11b.json" 2>/dev/null && fail "--set compile.sim.vcd must fail"
-grep -q "sim.vcd=false" "$W/r11b.json" || fail "dead compile.sim.vcd must suggest sim.vcd inline: $(cat "$W/r11b.json")"
+grep -q "use --set sim.vcd=1 instead" "$W/r11b.json" || fail "dead compile.sim.vcd must name the replacement: $(cat "$W/r11b.json")"
+# same for the removed lec.* namespace: common flags point at formal.*, pairing
+# flags at formal.lec.*, and renamed flags compose (lec.minetimeout -> formal.mine_timeout)
+"$LHD" compile "$PRP" --set lec.solver=lgyosys --workdir "$W/w11d" -q >"$W/r11d.json" 2>/dev/null && fail "--set lec.solver must fail (namespace removed)"
+grep -q "use --set formal.solver=lgyosys instead" "$W/r11d.json" || fail "lec.solver must point at formal.solver: $(cat "$W/r11d.json")"
+"$LHD" compile "$PRP" --set lec.hier=false --workdir "$W/w11e" -q >"$W/r11e.json" 2>/dev/null && fail "--set lec.hier must fail (namespace removed)"
+grep -q "use --set formal.lec.hier=false instead" "$W/r11e.json" || fail "lec.hier must point at formal.lec.hier: $(cat "$W/r11e.json")"
+"$LHD" compile "$PRP" --set lec.minetimeout=9 --workdir "$W/w11f" -q >"$W/r11f.json" 2>/dev/null && fail "--set lec.minetimeout must fail"
+grep -q "use --set formal.mine_timeout=9 instead" "$W/r11f.json" || fail "lec.minetimeout must compose both renames: $(cat "$W/r11f.json")"
 # `lhd sim --help` ends with the standardized options block (like lec/compile),
 # enumerating the sim.* flags instead of a hand-maintained list (pretty page;
 # jsonl help would emit the machine record instead — forced here since piped).

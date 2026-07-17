@@ -23,7 +23,7 @@ EOF
 run() {
   "$LHD" formal verify "$W/split.prp" --top split --workdir "$W/wd" \
     --set formal.bound=5 --set formal.partitions=4 --set formal.split=sel \
-    --set formal.prpfailrun=false >"$1" 2>&1
+    --set formal.prpfail_run=false >"$1" 2>&1
 }
 
 run "$W/first.out" || fail "first verify run failed: $(cat "$W/first.out")"

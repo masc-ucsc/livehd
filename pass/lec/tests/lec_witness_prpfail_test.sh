@@ -2,9 +2,9 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # lecfail witness reproduction (`lhd lec` + --workdir): on a REFUTED verdict the
-# CLI writes a self-contained Pyrope testbench (lec.prpfail, default lecfail.prp)
+# CLI writes a self-contained Pyrope testbench (formal.lec.prpfail, default lecfail.prp)
 # that instantiates BOTH designs inside one wrapper, drives the counterexample
-# input sequence, and (lec.prpfailrun) runs `lhd sim` to dump ONE VCD showing the
+# input sequence, and (formal.lec.prpfail_run) runs `lhd sim` to dump ONE VCD showing the
 # impl-vs-ref divergence. This test verifies the deterministic pieces hermetically:
 # the .prp generation, the three knobs, the no-workdir/PROVEN gating, that the
 # generated testbench is sim-VALID (`lhd sim --setup-only`), and that its
@@ -91,27 +91,27 @@ ck "generated testbench sim-valid" '[ -f "$S1/sim/drv.cpp" ]'
 # stays copyable under VCD: __vcd is a shared_ptr, not unique_ptr (the cgen_sim fix).
 ck "VCD __vcd is copyable (shared_ptr)" '! grep -rq "unique_ptr<vcd::VCDWriter>" "$S1/sim"/ && grep -rq "shared_ptr<vcd::VCDWriter>" "$S1/sim"/'
 
-# ---- lec.witness=false disables the whole feature ------------------------------
+# ---- formal.witness=false disables the whole feature ------------------------------
 W2="$WORK/w2"
-$LHD lec --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W2" --set lec.witness=false >/dev/null 2>&1
+$LHD lec --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W2" --set formal.witness=false >/dev/null 2>&1
 ck "witness=false => no prp"    '[ ! -f "$W2/lecfail.prp" ]'
 
-# ---- lec.prpfail=false disables generation -------------------------------------
+# ---- formal.lec.prpfail=false disables generation -------------------------------------
 W3="$WORK/w3"
-$LHD lec --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W3" --set lec.prpfail=false >/dev/null 2>&1
+$LHD lec --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W3" --set formal.lec.prpfail=false >/dev/null 2>&1
 ck "prpfail=false => no prp"    '[ ! -f "$W3/lecfail.prp" ]'
 
-# ---- lec.prpfail=NAME builds NAME.prp (custom basename under --workdir) --------
+# ---- formal.lec.prpfail=NAME builds NAME.prp (custom basename under --workdir) --------
 W4="$WORK/w4"
-$LHD lec --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W4" --set lec.prpfail=mycex.prp --set lec.prpfailrun=false >/dev/null 2>&1
+$LHD lec --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W4" --set formal.lec.prpfail=mycex.prp --set formal.lec.prpfail_run=false >/dev/null 2>&1
 ck "custom prpfail name"        '[ -f "$W4/mycex.prp" ]'
 ck "no default lecfail.prp"     '[ ! -f "$W4/lecfail.prp" ]'
 
-# ---- lec.prpfailrun=false writes the .prp but never attempts the VCD sim -------
+# ---- formal.lec.prpfail_run=false writes the .prp but never attempts the VCD sim -------
 W5="$WORK/w5"
-$LHD lec --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W5" --set lec.prpfailrun=false >/dev/null 2>&1
-ck "prpfailrun=false => prp"    '[ -f "$W5/lecfail.prp" ]'
-ck "prpfailrun=false => no vcd" '[ ! -f "$W5/lecfail.vcd" ]'
+$LHD lec --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W5" --set formal.lec.prpfail_run=false >/dev/null 2>&1
+ck "prpfail_run=false => prp"    '[ -f "$W5/lecfail.prp" ]'
+ck "prpfail_run=false => no vcd" '[ ! -f "$W5/lecfail.vcd" ]'
 
 # ---- no --workdir => the feature is off (nothing written / announced) ----------
 OUT=$($LHD lec --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" 2>&1)
@@ -147,7 +147,7 @@ mod topm(en:bool) -> (o:u8@[0]) {
 }
 EOF
 WH="$WORK/wh"
-$LHD lec --impl "$WORK/h_impl.prp" --ref "$WORK/h_ref.prp" --impl-top h_impl.topm --ref-top h_ref.topm --workdir "$WH" --set lec.prpfailrun=false >/dev/null 2>&1
+$LHD lec --impl "$WORK/h_impl.prp" --ref "$WORK/h_ref.prp" --impl-top h_impl.topm --ref-top h_ref.topm --workdir "$WH" --set formal.lec.prpfail_run=false >/dev/null 2>&1
 ck "hier: prp generated"        '[ -f "$WH/lecfail.prp" ]'
 ck "hier: sub-module input typed" 'grep -Eq "mod adder[^(]*\(en:u" "$WH/lecfail.prp"'
 SH="$WORK/sh"
@@ -174,7 +174,7 @@ pub mod dut(en:bool) -> (value:u8@[0]) {
 }
 EOF
 WP="$WORK/wp"
-$LHD lec --impl "$WORK/pimpl.prp" --ref "$WORK/pref.prp" --workdir "$WP" --set lec.prpfailrun=false >/dev/null 2>&1
+$LHD lec --impl "$WORK/pimpl.prp" --ref "$WORK/pref.prp" --workdir "$WP" --set formal.lec.prpfail_run=false >/dev/null 2>&1
 ck "import: prp generated"       '[ -f "$WP/lecfail.prp" ]'
 ck "import: imports impl origin" 'grep -q "import(\"pimpl.dut\")" "$WP/lecfail.prp"'
 ck "import: imports ref origin"  'grep -q "import(\"pref.dut\")" "$WP/lecfail.prp"'

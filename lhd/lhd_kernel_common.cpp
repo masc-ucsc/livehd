@@ -575,6 +575,11 @@ void check_known_set_passes(const Options& opts) {
           known += known.empty() ? "" : ", ";
           known += s.name;
         }
+        if (flag == "vcdfakedelay") {
+          throw Lhd_error{"usage",
+                          "--set/--config 'sim.vcdfakedelay' was renamed",
+                          std::format("use --set sim.vcd_fake_delay={} instead", value)};
+        }
         auto near = leaf_match_hint(flag);
         throw Lhd_error{"usage",
                         std::format("--set/--config references unknown sim flag 'sim.{}'", flag),
@@ -597,8 +602,40 @@ void check_known_set_passes(const Options& opts) {
       }
       continue;
     }
+    auto renamed_flag = [](std::string_view f) -> std::string_view {
+      for (const auto& [oldf, newf] : kRenamedFlags) {
+        if (oldf == f) {
+          return newf;
+        }
+      }
+      return f;
+    };
     auto method = set_pass_method(pass);
     if (method.empty()) {
+      // A REMOVED namespace gets a directed answer, not a guessing game: name
+      // the exact canonical spelling for THIS flag.
+      for (const auto& rn : kRenamedSetPasses) {
+        if (rn.old_ns != pass) {
+          continue;
+        }
+        std::string_view f2  = renamed_flag(flag);
+        std::string      ns2 = std::string{rn.new_ns};
+        if (rn.formal_split) {
+          bool common = false;
+          for (const auto& cf : kFormalCommonFlags) {
+            if (cf == f2) {
+              common = true;
+              break;
+            }
+          }
+          if (!common) {
+            ns2 = "formal.lec";
+          }
+        }
+        throw Lhd_error{"usage",
+                        std::format("--set/--config '{}.{}' was removed (the {}.* spelling no longer exists)", pass, flag, pass),
+                        std::format("use --set {}.{}={} instead", ns2, f2, value)};
+      }
       std::string known;
       for (const auto& sp : kSetPasses) {
         if (sp.list == Set_pass::List::none) {
@@ -620,6 +657,11 @@ void check_known_set_passes(const Options& opts) {
     }
     const auto* m = Pass::eprp.get_method(method);
     if (m == nullptr || !m->has_label(flag)) {
+      if (auto f2 = renamed_flag(flag); m != nullptr && f2 != flag && m->has_label(f2)) {
+        throw Lhd_error{"usage",
+                        std::format("--set/--config '{}.{}' was renamed", pass, flag),
+                        std::format("use --set {}.{}={} instead", pass, f2, value)};
+      }
       auto near = leaf_match_hint(flag);
       throw Lhd_error{"usage",
                       std::format("--set/--config references unknown flag '{}' of pass '{}'", flag, pass),
@@ -1511,7 +1553,6 @@ void emit_isabelle_outputs(Options& opts, Result& res, Eprp_var& var) {
     if (!opts.top.empty()) {
       labels["top"] = opts.top;
     }
-    merge_sets(opts, "compile.isabelle", labels);  // legacy spelling
     // The formal tools share the `formal.` root (user ruling 2026-07-17):
     // formal.strict / formal.normalize apply to every emitter, and the
     // tool-specific formal.isabelle.* overrides them.
@@ -1543,7 +1584,6 @@ void emit_lean_outputs(Options& opts, Result& res, Eprp_var& var) {
     if (!opts.top.empty()) {
       labels["top"] = opts.top;
     }
-    merge_sets(opts, "compile.lean", labels);  // legacy spelling
     for (const auto& [k, v] : opts.sets) {
       if (k == "formal.strict") {
         labels["strict"] = v;

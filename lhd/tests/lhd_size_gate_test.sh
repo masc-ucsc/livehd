@@ -14,8 +14,8 @@
 #   2. pass.abc (whole-design flatten) REFUSES: nonzero exit + large-design code
 #   3. pass.abc.allow_oversize=true overrides the refusal
 #   4. pass.abc per-def (flatten=false) does NOT fire (aggregate is not one unit)
-#   5. lec REFUSES with nonzero exit, naming lec.allow_oversize
-#   6. lec.allow_oversize=true overrides the refusal (back to PROVEN)
+#   5. lec REFUSES with nonzero exit, naming formal.allow_oversize
+#   6. formal.allow_oversize=true overrides the refusal (back to PROVEN)
 #   7. the DEFAULT threshold does not false-positive on the same tiny design
 #
 # Hermetic: the small vendored Liberty + a tiny Pyrope fixture, no PDK.
@@ -81,12 +81,12 @@ LIVEHD_LARGE_DESIGN_NODES=1 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"
 [ -n "$(ls -A "$W/abc_perdef" 2>/dev/null)" ] || fail "per-def abc was wrongly refused by the size gate"
 
 # ---------------------------------------------------------------------------
-# 5+6. lec: a hard REFUSAL naming lec.allow_oversize, then the override.
+# 5+6. lec: a hard REFUSAL naming formal.allow_oversize, then the override.
 #      semdiff=none forces the solver path (prove_equal) where the gate lives;
 #      otherwise identical designs are dropped structurally before any encode.
 # ---------------------------------------------------------------------------
 if LIVEHD_LARGE_DESIGN_NODES=1 "$LHD" lec --impl "$PRP" --ref "$PRP" \
-    --impl-top "$TOP" --ref-top "$TOP" --set lec.solver=cvc5 --set lec.semdiff=none \
+    --impl-top "$TOP" --ref-top "$TOP" --set formal.solver=cvc5 --set formal.lec.semdiff=none \
     --workdir "$W/w6" -q --result-json "$W/lec.json" 2>/dev/null; then
   fail "lec accepted an over-threshold design"
 fi
@@ -94,8 +94,8 @@ grep -q 'allow_oversize' "$W/lec.json" \
   || fail "lec refusal does not name the override flag: $(cat "$W/lec.json" 2>/dev/null)"
 
 LIVEHD_LARGE_DESIGN_NODES=1 run lec --impl "$PRP" --ref "$PRP" \
-  --impl-top "$TOP" --ref-top "$TOP" --set lec.solver=cvc5 --set lec.semdiff=none \
-  --set lec.allow_oversize=true --workdir "$W/w7"
+  --impl-top "$TOP" --ref-top "$TOP" --set formal.solver=cvc5 --set formal.lec.semdiff=none \
+  --set formal.allow_oversize=true --workdir "$W/w7"
 
 # ---------------------------------------------------------------------------
 # 7. the default (~1M) threshold must not false-positive on this tiny design.

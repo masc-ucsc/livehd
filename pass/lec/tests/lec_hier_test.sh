@@ -1,14 +1,14 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Contract for the bottom-up hierarchical LEC driver (lec.hier=true):
+# Contract for the bottom-up hierarchical LEC driver (formal.lec.hier=true):
 # topo-order the module-def DAG, LEC each def leaves-first under the auto
 # portfolio, and force-black-box a parent's already-PROVEN child instances
 # (collapse), while a child left UNKNOWN stays FLATTENED into its parent (the
 # CEGAR / un-black-box fallback). A REFUTED child instead fails the run fast —
 # its parents are skipped and its counterexample is the verdict, since only a
 # proven child collapses and a parent over known-bad logic would grind out a
-# whole-design flat miter (lec.hier_refute=escalate opts back into flattening it).
+# whole-design flat miter (formal.lec.hier_refute=escalate opts back into flattening it).
 # Each def emits a per-block progress
 # line; the TOP def's verdict drives the exit code.
 
@@ -39,7 +39,7 @@ H() {  # $1=label ; $2..=lhd lec args ; sets RC/OUT
   # semdiff=none: this test validates the hierarchical SOLVER + child-collapse path,
   # so the structurally-identical self-lec must reach the solver (not be skipped by
   # the default semdiff=structural pre-check — that path is covered by lec_semdiff_test).
-  OUT=$("$LHD" lec "${@:2}" --top top --set lec.hier=true --set lec.semdiff=none --workdir "$WORK/w_$1" 2>&1); RC=$?
+  OUT=$("$LHD" lec "${@:2}" --top top --set formal.lec.hier=true --set formal.lec.semdiff=none --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
 # 1) self-lec: every def proves leaves-first; mid collapses leaf, top collapses mid.
@@ -51,7 +51,7 @@ elif ! echo "$OUT" | grep -q "lec\[hier\]: 'top' PROVEN (1 child collapse"; then
 elif ! echo "$OUT" | grep -q "3/3 def(s) proven"; then echo "FAIL: not all defs proven"; fail=1
 else echo "ok: hierarchical self-lec proves leaves-first, collapsing proven children"; fi
 
-# 2) A REFUTED leaf (a&b vs a|b) fails the run FAST (lec.hier_refute=fail, the
+# 2) A REFUTED leaf (a&b vs a|b) fails the run FAST (formal.lec.hier_refute=fail, the
 #    default): only a PROVEN child black-boxes, so proving mid/top over a refuted
 #    leaf would descend into logic already known to differ — a whole-design flat
 #    miter for a verdict the leaf settled in milliseconds. mid and top are SKIPPED
@@ -69,22 +69,22 @@ elif ! echo "$OUT" | grep -q "hierarchical: block 'leaf' REFUTED"; then
   echo "FAIL: run verdict does not name the refuted block"; fail=1
 else echo "ok: a REFUTED child fails the run fast, skipping its parents"; fi
 
-# 2b) lec.hier_refute=escalate restores the CEGAR flatten: the refuted leaf is not
+# 2b) formal.lec.hier_refute=escalate restores the CEGAR flatten: the refuted leaf is not
 #     collapsed but FLATTENED into mid, so mid/top refute IN CONTEXT (the mode that
 #     can still prove a top equivalent over a differing child). The run must fail
 #     either way — a refuted block never exits 0 just because the top was inconclusive.
-H esc --impl "lg:$WORK/lib3" --ref "lg:$WORK/lib3_or" --set lec.hier_refute=escalate
+H esc --impl "lg:$WORK/lib3" --ref "lg:$WORK/lib3_or" --set formal.lec.hier_refute=escalate
 if [ "$RC" -eq 0 ]; then echo "FAIL: hier escalate rc=0 (want REFUTED)"; fail=1
 elif ! echo "$OUT" | grep -q "lec\[hier\]: 'mid' REFUTED (0 child collapse"; then
   echo "FAIL: escalate did not FLATTEN the unproven leaf into mid (CEGAR)"; fail=1
-else echo "ok: lec.hier_refute=escalate flattens the refuted child into its parent"; fi
+else echo "ok: formal.lec.hier_refute=escalate flattens the refuted child into its parent"; fi
 
-# 2c) An unknown lec.hier_refute value is a usage error, not a silent default.
-H bogus --impl "lg:$WORK/lib3" --ref "lg:$WORK/lib3" --set lec.hier_refute=maybe
-if [ "$RC" -eq 0 ]; then echo "FAIL: lec.hier_refute=maybe accepted"; fail=1
-elif ! echo "$OUT" | grep -q "lec.hier_refute expects fail|escalate"; then
-  echo "FAIL: bad lec.hier_refute value not reported as a usage error"; fail=1
-else echo "ok: lec.hier_refute rejects an unknown value"; fi
+# 2c) An unknown formal.lec.hier_refute value is a usage error, not a silent default.
+H bogus --impl "lg:$WORK/lib3" --ref "lg:$WORK/lib3" --set formal.lec.hier_refute=maybe
+if [ "$RC" -eq 0 ]; then echo "FAIL: formal.lec.hier_refute=maybe accepted"; fail=1
+elif ! echo "$OUT" | grep -q "formal.lec.hier_refute expects fail|escalate"; then
+  echo "FAIL: bad formal.lec.hier_refute value not reported as a usage error"; fail=1
+else echo "ok: formal.lec.hier_refute rejects an unknown value"; fi
 
 # 3) Independent ready leaves exercise the Taskflow DAG. Parallel completion
 # order may differ, but the definition/verdict set must match jobs=1 exactly.
@@ -102,8 +102,8 @@ EOF
 "$LHD" compile "$WORK/fan.v" --top fan --emit-dir "lg:$WORK/fanlib" --workdir "$WORK/cfan" >/dev/null 2>&1
 for jobs in 1 4; do
   "$LHD" lec --impl "lg:$WORK/fanlib" --ref "lg:$WORK/fanlib" --top fan \
-    --set lec.hier=true --set lec.semdiff=none --set formal.jobs="$jobs" \
-    --set lec.cache=false --workdir "$WORK/w_fan_$jobs" >"$WORK/fan_$jobs.out" 2>&1
+    --set formal.lec.hier=true --set formal.lec.semdiff=none --set formal.jobs="$jobs" \
+    --set formal.cache=false --workdir "$WORK/w_fan_$jobs" >"$WORK/fan_$jobs.out" 2>&1
   if [ $? -ne 0 ]; then echo "FAIL: fan hierarchy jobs=$jobs failed"; fail=1; fi
   grep "lec\[hier\]: '.*' .*child collapse" "$WORK/fan_$jobs.out" | sort >"$WORK/fan_$jobs.set"
 done

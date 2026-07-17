@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Contract for `lec.cones`: the register-cone (compare-point) decomposition.
+# Contract for `formal.lec.cones`: the register-cone (compare-point) decomposition.
 # Cutting at name-matched registers makes each next-state cone an independent
 # combinational miter, which is what a bit-level engine is good at; every cone
 # ABC proves is SUBTRACTED from the cvc5 obligation, so cvc5 only ever sees the
@@ -55,7 +55,7 @@ netlist bad "$WORK/abc_seq_bad.prp" || { echo "FAIL: could not build the broken 
 run_lec() {
   local eng=${3:-auto}
   "$LHD" lec --ref "$SRC" --impl lg:"$WORK/$1.net" --lib lg:"$WORK/models" --top "$TOP" \
-         --set lec.cones="$2" --set lec.engine="$eng" > "$WORK/lec_$1_$2_$eng.txt" 2>&1
+         --set formal.lec.cones="$2" --set formal.engine="$eng" > "$WORK/lec_$1_$2_$eng.txt" 2>&1
   RC=$?; OUT=$(cat "$WORK/lec_$1_$2_$eng.txt")
 }
 
@@ -117,7 +117,7 @@ fi
 # only what actually moved.
 CW="$WORK/cachewd"; rm -rf "$CW"
 "$LHD" lec --ref "$SRC" --impl lg:"$WORK/good.net" --lib lg:"$WORK/models" --top "$TOP" \
-       --set lec.engine=ind --workdir "$CW" > "$WORK/cache_cold.txt" 2>&1
+       --set formal.engine=ind --workdir "$CW" > "$WORK/cache_cold.txt" 2>&1
 if grep -qE '"cones": \[' "$CW/formal_cache.json" 2>/dev/null && grep -q '"' "$CW/formal_cache.json"; then
   echo "ok: cold run persisted cone digests to formal_cache.json"
 else
@@ -129,7 +129,7 @@ sed 's/p = (a & b) | (c \^ a)/p = (a | b) \& (c ^ a)/' "$SRC" > "$WORK/abc_seq_p
 grep -q 'p = (a | b) & (c \^ a)' "$WORK/abc_seq_pmod.prp" || { echo "FAIL: p mutation did not apply"; exit 1; }
 if netlist pmod "$WORK/abc_seq_pmod.prp"; then
   "$LHD" lec --ref "$WORK/abc_seq_pmod.prp" --impl lg:"$WORK/pmod.net" --lib lg:"$WORK/models" --top "$TOP" \
-         --set lec.engine=ind --workdir "$CW" > "$WORK/cache_warm.txt" 2>&1
+         --set formal.engine=ind --workdir "$CW" > "$WORK/cache_warm.txt" 2>&1
   WRC=$?
   if [ "$WRC" = 0 ] && grep -qE "[1-9][0-9]* from cache\)" "$WORK/cache_warm.txt"; then
     echo "ok: the edited design reused cached cones ($(grep -oE '[0-9]+ from cache' "$WORK/cache_warm.txt" | head -1))"
@@ -165,7 +165,7 @@ if [ -f "$MSRC" ]; then
 
   if mnetlist mgood "$MSRC" && mnetlist mbad "$WORK/abc_mem_bad.prp"; then
     "$LHD" lec --ref "$MSRC" --impl lg:"$WORK/mgood.net" --lib lg:"$WORK/models" --top "$MTOP" \
-           --set lec.engine=ind --set lec.cones=true > "$WORK/lec_mgood.txt" 2>&1
+           --set formal.engine=ind --set formal.lec.cones=true > "$WORK/lec_mgood.txt" 2>&1
     MRC=$?
     # The array cut itself must come back PROVEN from the cone pass -- i.e. the
     # per-port decomposition ran and cvc5 never saw an array query.
@@ -178,7 +178,7 @@ if [ -f "$MSRC" ]; then
     fi
 
     "$LHD" lec --ref "$MSRC" --impl lg:"$WORK/mbad.net" --lib lg:"$WORK/models" --top "$MTOP" \
-           --set lec.engine=ind --set lec.cones=true > "$WORK/lec_mbad.txt" 2>&1
+           --set formal.engine=ind --set formal.lec.cones=true > "$WORK/lec_mbad.txt" 2>&1
     MBRC=$?
     if [ "$MBRC" != 0 ] && grep -q "REFUTED (not equivalent)" "$WORK/lec_mbad.txt"; then
       echo "ok: broken memory WRITE ADDRESS -> REFUTED (the port decomposition never masks it)"

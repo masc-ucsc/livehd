@@ -6,7 +6,7 @@ set -euo pipefail
 # Genuine RTL-vs-graph equivalence gate:
 #   impl = the post-cprop LGraph compiled from the RTL
 #   ref  = the raw RTL (all .sv concatenated), freshly elaborated
-# cprop transforms the impl side, so lec.semdiff cannot trivially short-circuit;
+# cprop transforms the impl side, so formal.lec.semdiff cannot trivially short-circuit;
 # the auto portfolio (ind|bmc, cvc5) proves semantic equivalence via flop-cut
 # miters.  This catches translation bugs a dual-compile determinism check would
 # miss (e.g. an identical mistranslation on both compiles).
@@ -62,8 +62,8 @@ for entry in "${DESIGNS[@]}"; do
   set +e
   "$LHD" lec --impl lg:"$lg" --ref verilog:"$ref_sv" --top "$top" \
     --reader yosys-verilog --workdir "$lec_work" \
-    --set lec.engine=auto --set lec.hier=true \
-    --set lec.semdiff=structural --set lec.strict="$LEC_STRICT" \
+    --set formal.engine=auto --set formal.lec.hier=true \
+    --set formal.lec.semdiff=structural --set formal.strict="$LEC_STRICT" \
     --result-json "$OUT/${name}_lec.json" >> "$log" 2>&1
   rc=$?; set -e
 

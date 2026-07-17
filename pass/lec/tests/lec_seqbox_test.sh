@@ -51,11 +51,11 @@ C "$WORK/t_d2.v" "$WORK/sleaf.v" --top top --emit-dir "lg:$WORK/td2" --workdir "
 C "$WORK/t_stall.v" "$WORK/sleaf.v" --top top --emit-dir "lg:$WORK/tstall" --workdir "$WORK/c3"
 
 run() {  # $1=label ; $2..=lhd lec args ; sets RC/OUT
-  OUT=$("$LHD" lec "${@:2}" --top top --set lec.hier=false --workdir "$WORK/w_$1" 2>&1); RC=$?
+  OUT=$("$LHD" lec "${@:2}" --top top --set formal.lec.hier=false --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
 # 1) collapse the STATEFUL leaf, self-equivalent -> PROVEN (state-aware box sound)
-run self --impl "lg:$WORK/td1" --ref "lg:$WORK/td1" --collapse sleaf --set lec.engine=bmc --set lec.bound=8
+run self --impl "lg:$WORK/td1" --ref "lg:$WORK/td1" --collapse sleaf --set formal.engine=bmc --set formal.bound=8
 if [ "$RC" -ne 0 ] || ! echo "$OUT" | grep -q "PROVEN equivalent"; then
   echo "FAIL: stateful self-collapse not PROVEN (rc=$RC): $OUT"; fail=1
 else echo "ok: stateful self-collapse -> PROVEN"; fi
@@ -63,14 +63,14 @@ else echo "ok: stateful self-collapse -> PROVEN"; fi
 # 2) collapse the leaf, delay-1 vs delay-2 -> REFUTED under BMC. The state-aware
 #    box threads the leaf state so its output VARIES per cycle; a combinational
 #    box would force it constant and FALSE-PROVE this.
-run diff --impl "lg:$WORK/td1" --ref "lg:$WORK/td2" --collapse sleaf --set lec.engine=bmc --set lec.bound=8
+run diff --impl "lg:$WORK/td1" --ref "lg:$WORK/td2" --collapse sleaf --set formal.engine=bmc --set formal.bound=8
 if [ "$RC" -eq 0 ]; then echo "FAIL: stateful collapse FALSE-PROVED a timing diff (rc=0)"; fail=1
 elif ! echo "$OUT" | grep -q "REFUTED"; then echo "FAIL: stateful collapse timing-diff: not REFUTED: $OUT"; fail=1
 else echo "ok: stateful collapse refutes a timing diff (state threaded per cycle)"; fi
 
 # 3) collapse a register whose output feeds back to its own input (stall). The box
 #    must not deadlock the encoder on a false combinational cycle -> self PROVEN.
-run stall --impl "lg:$WORK/tstall" --ref "lg:$WORK/tstall" --collapse sleaf --set lec.engine=ind
+run stall --impl "lg:$WORK/tstall" --ref "lg:$WORK/tstall" --collapse sleaf --set formal.engine=ind
 if [ "$RC" -ne 0 ] || ! echo "$OUT" | grep -q "PROVEN equivalent"; then
   echo "FAIL: stall-feedback stateful collapse not PROVEN (false cycle?) rc=$RC: $OUT"; fail=1
 else echo "ok: stall-feedback stateful collapse -> PROVEN (no false combinational cycle)"; fi

@@ -87,7 +87,7 @@ map_and_lec cla 3 --set pass.abc.adder=cla --set pass.abc.block_size=3
 # control strict, where any non-Proven outcome is a hard failure exit.
 one_region=$(echo "$REGIONS" | head -1)
 if "$LHD" lec --impl lg:"$W/net_rca_default" --ref lg:"$W/re" --top "$one_region" \
-    --set lec.strict=true \
+    --set formal.strict=true \
     --workdir "$W/wlec_nolib" -q --result-json "$W/rn.json" 2>/dev/null; then
   fail "lec proved equivalence with no --lib (unresolved cells must not vacuously pass)"
 fi

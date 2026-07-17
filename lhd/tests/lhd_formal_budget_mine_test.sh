@@ -7,8 +7,8 @@
 #     PER check (the O×C hazard). An easy sibling still proves; a hard obligation
 #     that eats the budget leaves the rest at their budget-limited depth, disclosed
 #     as "total solver budget (Ns) reached". The whole run stays near ONE budget.
-#   * minetimeout timeout-core diagnosis: under an INDEPENDENT minetimeout budget a
-#     timed-out run NAMES the toxic obligation subset ("minetimeout core (k/n ...)").
+#   * mine_timeout timeout-core diagnosis: under an INDEPENDENT mine_timeout budget a
+#     timed-out run NAMES the toxic obligation subset ("mine_timeout core (k/n ...)").
 #   * induction + reset soundness: a true twin-register invariant proves UNBOUNDED
 #     (the induction step pins the PRIMARY reset input deasserted), while an
 #     unequal-reset twin is still REFUTED — induction never manufactures a proof.
@@ -59,18 +59,18 @@ fi
 echo "ok: total budget bounded the run to ${elapsed}s with the easy sibling still proven"
 
 # ---------------------------------------------------------------------------
-# 2. minetimeout timeout-core diagnosis names the toxic obligation subset.
+# 2. mine_timeout timeout-core diagnosis names the toxic obligation subset.
 # ---------------------------------------------------------------------------
 "$LHD" formal verify "$W/hard2.prp" --top hard2 --set formal.engine=bmc \
-  --set formal.bound=2 --set formal.timeout=3 --set formal.minetimeout=4 --set formal.split=none \
+  --set formal.bound=2 --set formal.timeout=3 --set formal.mine_timeout=4 --set formal.split=none \
   >"$W/mine.out" 2>&1
-grep -q "minetimeout core" "$W/mine.out" \
-  || fail "minetimeout must emit a timeout-core diagnostic: $(cat "$W/mine.out")"
-grep -qE "minetimeout core \([1-9][0-9]*/[0-9]+ obligation" "$W/mine.out" \
+grep -q "mine_timeout core" "$W/mine.out" \
+  || fail "mine_timeout must emit a timeout-core diagnostic: $(cat "$W/mine.out")"
+grep -qE "mine_timeout core \([1-9][0-9]*/[0-9]+ obligation" "$W/mine.out" \
   || fail "the timeout-core must report a non-empty toxic subset: $(cat "$W/mine.out")"
 grep -q "distrib" "$W/mine.out" \
   || fail "the toxic core must name a hard (distrib) obligation: $(cat "$W/mine.out")"
-echo "ok: minetimeout named the toxic obligation core"
+echo "ok: mine_timeout named the toxic obligation core"
 
 # ---------------------------------------------------------------------------
 # 3a. Induction + reset: a true twin-register invariant proves UNBOUNDED (the
@@ -121,4 +121,4 @@ grep -q "PROVEN (inductive" "$W/twin_bad.out" \
   && fail "induction must NOT manufacture an unbounded proof for a false invariant: $(cat "$W/twin_bad.out")"
 echo "ok: unequal-reset twin refuted; induction stays sound"
 
-echo "PASS: verify total budget + minetimeout core + induction/reset soundness"
+echo "PASS: verify total budget + mine_timeout core + induction/reset soundness"

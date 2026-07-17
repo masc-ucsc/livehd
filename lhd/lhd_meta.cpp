@@ -279,7 +279,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "lec") {
     print_json_line(
-        R"json({"schema_version":1,"name":"lec","description":"Logic equivalence check (LEC): prove_equal(ref, impl). Sides are verilog:/pyrope:/ln:/lg: (or a bare .v/.sv/.prp; kind inferred), loaded/elaborated to LGraphs (verilog via --reader, default slang). The --set lec.solver knob picks the backend: cvc5 (default, in-process SMT), bitwuzla (in-process SMT), or lgyosys (inou/yosys/lgcheck, the former `lhd check`). Other engine knobs are --set lec.* (`lhd lec --help`)","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"set","type":"lec.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.v","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind","lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo"]})json");
+        R"json({"schema_version":1,"name":"lec","description":"Logic equivalence check (LEC): prove_equal(ref, impl). Sides are verilog:/pyrope:/ln:/lg: (or a bare .v/.sv/.prp; kind inferred), loaded/elaborated to LGraphs (verilog via --reader, default slang). The --set formal.solver knob picks the backend: cvc5 (default, in-process SMT), bitwuzla (in-process SMT), or lgyosys (inou/yosys/lgcheck, the former `lhd check`). Other engine knobs are --set lec.* (`lhd lec --help`)","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang","yosys-slang","yosys-verilog"],"default":"slang"},{"name":"set","type":"lec.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.v","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set formal.engine=ind","lhd lec --impl net.v --ref gold.v --set formal.solver=lgyosys --top foo"]})json");
     return 0;
   }
   if (name == "formal" || name == "formal verify" || name == "formal lec") {
@@ -468,10 +468,10 @@ void print_general_help() {
       "  sim        build + run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify)\n"
       "               lhd sim foo.prp                  # build + run every test block\n"
       "               lhd sim foo.prp my_test --arg n=4\n"
-      "  lec        logic equivalence (LEC): verilog:/pyrope:/ln:/lg: sides, --set lec.solver picks the\n"
+      "  lec        logic equivalence (LEC): verilog:/pyrope:/ln:/lg: sides, --set formal.solver picks the\n"
       "               backend — cvc5 (default, in-process) | bitwuzla | lgyosys (yosys/lgcheck)\n"
       "               lhd lec --impl impl.prp --ref ref.v\n"
-      "               lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo\n"
+      "               lhd lec --impl net.v --ref gold.v --set formal.solver=lgyosys --top foo\n"
       "  formal     formal verification family: verify (assert/assume BMC from reset) | lec (= lhd lec)\n"
       "               lhd formal verify foo.prp --top foo --set formal.bound=12\n"
       "  scan       report each .prp file's import strings (the result's \"scan\" member)\n"
@@ -774,7 +774,7 @@ int help_pass(const std::string& sub) {
 
 std::string json_general() {
   return std::format(
-      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set lec.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: color | partition | abc | opentimer | liberty | semdiff"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|recipes|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
+      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set formal.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: color | partition | abc | opentimer | liberty | semdiff"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|recipes|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
       kVersion);
 }
 
@@ -968,7 +968,7 @@ int help_command(const Options& opts) {
         "  Sides may be verilog:/pyrope:/ln:/lg: or a bare .v/.sv/.prp path (kind inferred).\n"
         "  Each side is loaded/elaborated to LGraphs; verilog elaborates through --reader\n"
         "  (default slang, the direct SV->LNAST front-end; --reader yosys-slang|yosys-verilog\n"
-        "  overrides). The --set lec.solver knob selects the backend:\n"
+        "  overrides). The --set formal.solver knob selects the backend:\n"
         "    cvc5     in-process SMT (default)\n"
         "    bitwuzla in-process SMT\n"
         "    lgyosys  inou/yosys/lgcheck (the former `lhd check`; reads Verilog directly,\n"
@@ -985,8 +985,8 @@ int help_command(const Options& opts) {
         "\n"
         "examples:\n"
         "  lhd lec --impl impl.prp --ref ref.v\n"
-        "  lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind\n"
-        "  lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo\n");
+        "  lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set formal.engine=ind\n"
+        "  lhd lec --impl net.v --ref gold.v --set formal.solver=lgyosys --top foo\n");
     return print_options_section({"formal."});
   }
   if (topic == "formal" || topic == "formal verify") {

@@ -246,7 +246,6 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
     {"vcd_fake_delay", "true", Sim_set_option::Kind::boolean,
      "VCD data settles a few ticks after each clock edge, with X during the settle window (edge->data causality); "
      "false = plain edge-aligned updates (no X, no delay; smaller/faster trace)"},
-    {"vcdfakedelay", "true", Sim_set_option::Kind::boolean, "DEPRECATED alias for sim.vcd_fake_delay"},
     {"cgen_color", "true", Sim_set_option::Kind::boolean,
      "run pass.color (cgen per-output cones) before inou.cgen.sim so sim codegen can schedule a Sub by output "
      "cone (breaks a false combinational loop through an instance); coloring is metadata only, NO_COLOR is just "

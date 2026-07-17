@@ -603,7 +603,7 @@ Options parse_args(int argc, char** argv) {
       if (a == "check") {
         // `check` merged into `lec` (the lgcheck/yosys backend is now a solver).
         throw Lhd_error{"usage",
-                        "the `check` command merged into `lec` — use `lhd lec ... --set lec.solver=lgyosys`",
+                        "the `check` command merged into `lec` — use `lhd lec ... --set formal.solver=lgyosys`",
                         "lec defaults to the in-process cvc5 solver; lgyosys is the yosys/lgcheck backend"};
       }
       if (a == "semdiff") {
@@ -658,7 +658,7 @@ Options parse_args(int argc, char** argv) {
       // formal-block sources (lg:DIR routed to opts.ins by route_positional).
       if (opts.files.empty() && a == "lec") {
         opts.command = "lec";
-        cmd_path     = "lec";
+        cmd_path     = "formal.lec";  // --set abbreviations resolve under the formal root
       } else if (opts.files.empty() && a == "verify") {
         cmd_path = "formal.verify";
         opts.files.emplace_back(a);

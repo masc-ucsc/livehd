@@ -81,7 +81,7 @@ done
 # non-Proven outcome is a hard failure exit.
 one_region=$(echo "$REGIONS" | head -1)
 if "$LHD" lec --impl lg:"$W/net" --ref lg:"$W/re" --top "$one_region" \
-    --set lec.strict=true \
+    --set formal.strict=true \
     --workdir "$W/wlec_nolib" -q --result-json "$W/rn.json" 2>/dev/null; then
   fail "lec proved equivalence with no --lib (unresolved cells must not vacuously pass)"
 fi

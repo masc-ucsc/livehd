@@ -95,7 +95,7 @@ void Pass_abc::setup() {
                        "cloned from the cache instead of re-running ABC -- a small RTL edit then re-synthesizes only "
                        "the regions it touched. Salted by the Liberty content and the register/memory mapping mode. "
                        "Only active with a user --workdir (a scratch dir would start cold every run) -- the "
-                       "lec.cache convention",
+                       "formal.cache convention",
                        "true");
   m.add_label_optional("cache_dir",
                        "INTERNAL kernel plumbing: the cache directory, always <workdir>/abc_cache (set after user "
@@ -413,7 +413,7 @@ void Pass_abc::work(Eprp_var& var) {
 
   // Incremental region cache (2opt-incr A+C). ON by default, but only WITH a
   // place to live: the kernel points cache_dir at <workdir>/abc_cache exactly
-  // when the user passed --workdir (the lec.cache convention -- a fabricated
+  // when the user passed --workdir (the formal.cache convention -- a fabricated
   // scratch workdir would start cold every run and cache into a dir about to
   // vanish). Constructed before the mapper so a salt mismatch (edited Liberty,
   // different mapping mode) starts cold before any region is digested. The out

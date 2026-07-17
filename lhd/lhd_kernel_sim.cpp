@@ -129,7 +129,7 @@ void sim_command(Options& opts, Result& res) {
       // bool-or-FILE: any non-false value turns tracing on (an explicit FILE
       // only matters for compiled/baked binaries; `lhd sim` derives per-test paths)
       vcd_on = !(v == "false" || v == "0" || v == "off" || v.empty());
-    } else if (k == "sim.vcd_fake_delay" || k == "sim.vcdfakedelay") {
+    } else if (k == "sim.vcd_fake_delay") {
       vcd_fakedelay     = (v == "true" || v == "1" || v == "on");
       vcd_fakedelay_set = true;
     }
@@ -723,7 +723,7 @@ std::string locate_yosys_slang_plugin() {
   return "";
 }
 
-// The lgyosys backend (`--set lec.solver=lgyosys`): materialize both sides to
+// The lgyosys backend (`--set formal.solver=lgyosys`): materialize both sides to
 // Verilog and discharge with inou/yosys/lgcheck (the former `lhd check`).
 // Verilog sides pass straight through; pyrope:/ln:/lg: are compiled first.
 void lec_lgyosys(Options& opts, Result& res) {
@@ -732,23 +732,23 @@ void lec_lgyosys(Options& opts, Result& res) {
   auto lgcheck = locate_lgcheck();
   auto yosys   = locate_lgcheck_yosys();
 
-  // --set lec.gold_reader=slang: read the REFERENCE side through yosys-slang
+  // --set formal.lec.gold_reader=slang: read the REFERENCE side through yosys-slang
   // (SystemVerilog packed structs / '{...} patterns exceed read_verilog).
   std::string gold_reader = "verilog";
   for (const auto& [k, v] : opts.sets) {
-    if (k == "lec.gold_reader" && !v.empty()) {
+    if (k == "formal.lec.gold_reader" && !v.empty()) {
       gold_reader = v;
     }
   }
   if (gold_reader != "verilog" && gold_reader != "slang") {
-    throw Lhd_error{"usage", std::format("--set lec.gold_reader expects verilog|slang, got '{}'", gold_reader), ""};
+    throw Lhd_error{"usage", std::format("--set formal.lec.gold_reader expects verilog|slang, got '{}'", gold_reader), ""};
   }
   std::string slang_plugin;
   if (gold_reader == "slang") {
     slang_plugin = locate_yosys_slang_plugin();
     if (slang_plugin.empty()) {
       throw Lhd_error{"dependency",
-                      "lec.gold_reader=slang: yosys-slang plugin (slang.so) not found",
+                      "formal.lec.gold_reader=slang: yosys-slang plugin (slang.so) not found",
                       "build //inou/yosys (the @yosys_slang external) or use the default gold_reader"};
     }
   }

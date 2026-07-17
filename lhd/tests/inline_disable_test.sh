@@ -83,7 +83,7 @@ echo "PASS(2): --recipe O2 and inline=true flatten the comb into top"
 # crossing as stateful and FALSE-refutes it (a pre-existing LEC-encoder
 # limitation, not a generation bug; this design is the minimal trigger).
 "$LHD" lec --ref "lg:$W/on/" --impl "lg:$W/off/" \
-  --ref-top dut.top --impl-top dut.top --set lec.solver=lgyosys \
+  --ref-top dut.top --impl-top dut.top --set formal.solver=lgyosys \
   --workdir "$W/lec" -q --result-json "$W/r.json" \
   || fail "lec did NOT prove flattened==instanced: $(cat "$W/r.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r.json" || fail "lec not pass: $(cat "$W/r.json")"

@@ -73,7 +73,7 @@ sh_test(
 
 # `lhd lec` as the single equivalence command: verilog inputs (slang default +
 # --reader yosys-* override), the cvc5 (default) and lgyosys backends via
-# --set lec.solver, and the retired `check` command's migration error.
+# --set formal.solver, and the retired `check` command's migration error.
 sh_test(
     name = "lhd_lec_verilog_test",
     size = "large",

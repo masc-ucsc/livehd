@@ -57,7 +57,7 @@ std::string oversize_refusal(std::string_view side, hhds::Graph* g, const Lec_op
     return {};
   }
   return std::format("{} design '{}' is too large to encode as one unit: {} nodes (over {}); "
-                     "set lec.allow_oversize=true to run it anyway (it may exhaust host memory)",
+                     "set formal.allow_oversize=true to run it anyway (it may exhaust host memory)",
                      side, g->get_name(), nodes, threshold);
 }
 
@@ -203,7 +203,7 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
   };
   auto rmap = collect(ref);
   auto imap = collect(impl);
-  // Names already spoken for by the explicit (certain) lec.match set.
+  // Names already spoken for by the explicit (certain) formal.lec.match set.
   absl::flat_hash_set<std::string> taken;
   for (const auto& [mr, mi] : base.match) {
     taken.insert(canon_flop_name(mr));
@@ -238,7 +238,7 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
       continue;
     }
     if (taken.contains(rc) || taken.contains(ic)) {
-      drop(rn, in, "conflicts with an explicit lec.match entry or an earlier pair");
+      drop(rn, in, "conflicts with an explicit formal.lec.match entry or an earlier pair");
       continue;
     }
     if (ri->second.has_init != ii->second.has_init || ri->second.init != ii->second.init) {
@@ -254,7 +254,7 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
 
 namespace {
 
-// ── auto portfolio (lec.engine=auto) ────────────────────────────────────────
+// ── auto portfolio (formal.engine=auto) ────────────────────────────────────────
 // Race the inductive flop-cut miter and the BMC-from-reset engine, and take the
 // first TRUSTWORTHY verdict. The pairing is complementary: the inductive miter
 // PROVES (deep state — e.g. a register file), BMC finds shallow REAL bugs. The
@@ -267,7 +267,7 @@ namespace {
 //   neither trustworthy                                -> inconclusive.
 // cvc5 cross-instance thread-safety is unverified, so we race separate PROCESSES
 // (fork two workers) — free timeout/kill, no threading landmine — and the
-// per-query lec.timeout already bounds each child's checkSat so it self-limits.
+// per-query formal.timeout already bounds each child's checkSat so it self-limits.
 
 void put_u32(std::string& b, uint32_t v) { b.append(reinterpret_cast<const char*>(&v), sizeof v); }
 void put_str(std::string& b, std::string_view s) {
@@ -716,7 +716,7 @@ const char* vname(Verdict v) { return v == Verdict::Proven ? "Proven" : (v == Ve
 //
 // cvc5 cross-instance thread-safety is unverified, so methods race as PROCESSES
 // (never threads) — the free timeout/hard-kill we rely on for early cancellation
-// and the per-query lec.timeout bounds each child's checkSat, so children
+// and the per-query formal.timeout bounds each child's checkSat, so children
 // self-limit and the parent needs no watchdog. Children fork from a clean state
 // (no cvc5 TermManager in the parent yet), so each builds its own solver — the
 // CALLER MUST invoke this before constructing any cvc5 object in the parent
@@ -1050,7 +1050,7 @@ bool graph_is_combinational(hhds::Graph* g, const absl::flat_hash_map<hhds::Gid,
   return true;
 }
 
-// ── lec.split=auto: pick a control input to case-split on ────────────────────
+// ── formal.split=auto: pick a control input to case-split on ────────────────────
 // The hardness of a combinational miter is dominated by WIDE operators whose
 // control operand is input-VARIABLE (a variable barrel shift's amount, a mux
 // selector). Fixing that control input to a constant collapses the operator
@@ -1194,7 +1194,7 @@ Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int e
   return {best, best_w};
 }
 
-// ── lec.partitions: parallel input-space case-split ──────────────────────────
+// ── formal.partitions: parallel input-space case-split ──────────────────────────
 // Fork up to `opts.partitions` workers; each proves the miter UNSAT over a
 // disjoint slice of the split signal's values (every value fully cofactored, so
 // each cube is trivial). First worker to REFUTE wins (kill the rest); all workers
@@ -1225,7 +1225,7 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
   // Per-cube solve cap: a cube whose selector value folds the datapath is trivial
   // (ms), so a short cap costs nothing on a GOOD pick but makes a mis-pick (a
   // selector that does not fold the hard operator) fail fast -> worker Unknown ->
-  // monolithic fallback, instead of grinding the full lec.timeout per cube.
+  // monolithic fallback, instead of grinding the full formal.timeout per cube.
   const int kCubeTimeout = (opts.timeout > 0 && opts.timeout < 30) ? opts.timeout : 30;
 
   auto run_seq = [&]() -> Query_result {  // fork-failure fallback: one in-process sweep
@@ -1475,7 +1475,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
   {
     absl::flat_hash_set<hhds::Graph*> seen;
     if (graph_is_combinational(ref, sub_lib, seen) && graph_is_combinational(impl, sub_lib, seen)) {
-      // Parallel input-space case-split accelerator (lec.partitions): split the
+      // Parallel input-space case-split accelerator (formal.partitions): split the
       // hard combinational miter into per-selector cubes solved across workers.
       // Only trust a DECISIVE case-split verdict; on no-split/inconclusive fall
       // back to the single monolithic ind query below (never a regression).
@@ -1623,7 +1623,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   }
 
   // Design-size gate (memory admission), before any encode/fork. Refuse a design
-  // too large to materialize as one unit unless lec.allow_oversize; the count is
+  // too large to materialize as one unit unless formal.allow_oversize; the count is
   // opacity-aware so a decomposed per-def check is not falsely refused.
   if (auto refusal = oversize_refusal("impl", impl, opts, sub_lib); !refusal.empty()) {
     res.verdict          = Verdict::Unknown;
@@ -1664,7 +1664,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         return rf;
       }
       rf.detail = "REFUTED under " + tag + " but NOT confirmed pair-free -> Unknown (a speculative pair may be wrong; "
-                  "supply lec.match to pin the correspondence): "
+                  "supply formal.lec.match to pin the correspondence): "
                 + rf.detail;
       return rf;
     }
@@ -1723,7 +1723,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     return r2;
   }
 
-  // Explicit state-correspondence (lec.match): canon(impl_name) -> canon(ref_name),
+  // Explicit state-correspondence (formal.lec.match): canon(impl_name) -> canon(ref_name),
   // so a flop the user paired with a differently-named flop on the other design
   // collapses onto one shared cut key (the ref-side canon). `eff(hier)` is the
   // canonical key used everywhere a flop is keyed (shared symbols + encoder).
@@ -1786,7 +1786,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     return std::string(full);
   };
 
-  // Proven-module collapse set (lec.collapse): def-NAMES forced to the blackbox
+  // Proven-module collapse set (formal.lec.collapse): def-NAMES forced to the blackbox
   // path (case-sensitive). Applied identically by the encoder (skip flatten)
   // and the box-correspondence builder below (pre-build the boxes' shared symbols).
   // A requested def resolves by ANY of its spellings (canonical entity or a
@@ -2201,7 +2201,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   // (below).
   solver.setLogic(state_boxes_ptr != nullptr || comb_boxes_ptr != nullptr ? "QF_AUFBV" : "QF_ABV");  // BV + arrays (+UF)
 
-  // Per-checkSat wall-clock bound (lec.timeout seconds; 0 = unbounded). Hard
+  // Per-checkSat wall-clock bound (formal.timeout seconds; 0 = unbounded). Hard
   // nonlinear miters (a chain of two multiplies — associativity, distributivity,
   // 3-way commutativity at >=16 bits) make cvc5's bit-blast never return. Without
   // this, `lhd lec` freezes forever. A bound makes the timed-out checkSat come
@@ -2220,9 +2220,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   }
 
   // ── One shared wall-clock allowance for this query (encode + solve) ─────────
-  // `lec.timeout` is ONE budget for the whole query, not one per phase. It used to
+  // `formal.timeout` is ONE budget for the whole query, not one per phase. It used to
   // be handed out twice at full value — once to each Encoder (set_encode_budget)
-  // and again to every checkSat (tlimit-per above) — so `lec.timeout=120` licensed
+  // and again to every checkSat (tlimit-per above) — so `formal.timeout=120` licensed
   // ~120s of encoding PLUS ~120s of solving and a "120s" cap really cost ~250s of
   // wall clock (measured on a whole-CPU BMC miter: 13s fixed + 2xT, T in {15,30,120}
   // -> 43s/67s/251s). Encoding is not free on a big unroll, so it must draw from the
@@ -3025,7 +3025,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       }
 
       enc.set_emit_props(false);                   // helper encoding below enables it temporarily
-      enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (lec.gold_x)
+      enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (formal.lec.gold_x)
       enc.set_box_keys(&ref_box_keys);            // per-design box correspondence
       Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(cyc) + "_", &ref_mem, &ref_reads);
       enc.set_x_dontcare(false);
@@ -3496,7 +3496,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       res.verdict  = Verdict::Unknown;
       res.detail  += "; checkSat returned unknown";
       if (opts.timeout > 0) {
-        res.detail += " (hit lec.timeout=" + std::to_string(opts.timeout) + "s; raise --set lec.timeout)";
+        res.detail += " (hit formal.timeout=" + std::to_string(opts.timeout) + "s; raise --set formal.timeout)";
       }
     }
     return res;
@@ -3768,7 +3768,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   enc.set_state_boxes(state_boxes_ptr);
   enc.set_comb_boxes(comb_boxes_ptr);
   enc.set_shared_bbox(&shared_bbox);
-  enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (lec.gold_x)
+  enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (formal.lec.gold_x)
   enc.set_box_keys(&ref_box_keys);            // per-design box correspondence
   Encoded re = enc.encode(ref, &shared, "", &shared_mems);
   enc.set_x_dontcare(false);
@@ -3870,7 +3870,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     cvc5::Term rfit = fit_to(tm, rv, w);
     cvc5::Term ifit = fit_to(tm, it->second, w);
     if (cvc5::Term u = fit_x_mask_to(tm, rv, w); !u.isNull()) {
-      // ref X = don't-care (lec.gold_x=ignore): exclude ref-unknown bits. The
+      // ref X = don't-care (formal.lec.gold_x=ignore): exclude ref-unknown bits. The
       // shared current-state hypothesis already binds ref X-state to the
       // impl's value, so this masks exactly the ref-side don't-care choices.
       cvc5::Term keep = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {u});
@@ -3918,7 +3918,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     }
   }
 
-  // ── Memory port decomposition (lec.cones) ────────────────────────────────
+  // ── Memory port decomposition (formal.lec.cones) ────────────────────────────────
   // A memory's next-state cut is an ARRAY equality, the one obligation a
   // bit-level engine cannot touch and the single most expensive query in a
   // register-file design (a 32x64 regfile costs cvc5 ~27s). But the next-state
@@ -4026,7 +4026,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     return true;
   };
 
-  // ── Register-cone decomposition (lec.cones): subtract what ABC can prove ───
+  // ── Register-cone decomposition (formal.lec.cones): subtract what ABC can prove ───
   // Cutting at name-matched registers turns the step obligation into one
   // independent combinational miter per compare point (the classic
   // register-correspondence decomposition). Each cut's diff TERM already IS its
@@ -4048,7 +4048,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     // ABC has no wall-clock bound of its own (its Prove_Params limits cap SAT
     // conflicts, but the rewriting/fraiging that dominates a datapath cone is
     // unbounded), so the pass runs in a forked child under a deadline carved out
-    // of lec.timeout. A cone the deadline cuts off simply stays with cvc5.
+    // of formal.timeout. A cone the deadline cuts off simply stays with cvc5.
     const int64_t cone_deadline_ms = opts.timeout > 0 ? std::max<int64_t>(1000, static_cast<int64_t>(opts.timeout) * 250)
                                                       : 60000;
     // Cache lookup first: a cone obligation is self-contained, so its structural
@@ -4367,7 +4367,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     return (diffs.empty() ? "" : "diff " + diffs + " @ ") + w;
   };
 
-  // ── Input-space case-split cube sweep (lec.partitions / lec.split) ─────────
+  // ── Input-space case-split cube sweep (formal.partitions / formal.split) ─────────
   // run_case_split forks N workers and hands each a disjoint slice of the control
   // input's values via opts._split_values. Here (inside one worker) we prove `bad`
   // UNSAT under sel==v for every assigned v: substituting the constant folds every
@@ -4501,7 +4501,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     res.verdict  = Verdict::Unknown;
     res.detail  += "; checkSat returned unknown";
     if (opts.timeout > 0) {
-      res.detail += " (hit lec.timeout=" + std::to_string(opts.timeout) + "s; raise --set lec.timeout)";
+      res.detail += " (hit formal.timeout=" + std::to_string(opts.timeout) + "s; raise --set formal.timeout)";
     }
   }
   return res;
@@ -4651,7 +4651,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   }
 
   // Design-size gate (memory admission) before any encode/fork -- see the twin in
-  // prove_equal. Refuse an over-threshold design as Unknown unless lec.allow_oversize.
+  // prove_equal. Refuse an over-threshold design as Unknown unless formal.allow_oversize.
   if (auto refusal = oversize_refusal("verify", design, opts, sub_lib); !refusal.empty()) {
     res.verdict          = Verdict::Unknown;
     res.detail           = std::move(refusal);
@@ -5060,7 +5060,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   }
 
   // Reset detection (structural reset_pin inputs + canonical names, or the
-  // authoritative lec.reset spec) — single-design copy of prove_equal's rules.
+  // authoritative formal.reset spec) — single-design copy of prove_equal's rules.
   Io_name_map<bool> reset_negset;
   auto reset_name_polarity = [](const std::string& nm, bool& negreset) -> bool {
     std::string lc = nm;
@@ -5199,7 +5199,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   res.checked_steps   = N;
   res.reset_hold      = reset_hold;
   // A reset prologue actually pinned state[0] iff a primary reset input was
-  // found (structural reset_pin, canonical reset name, or an explicit lec.reset).
+  // found (structural reset_pin, canonical reset name, or an explicit formal.reset).
   // When empty, the after_reset flops start FREE, so a BMC refute may rest on an
   // unreachable initial state — the compile tier gates its hard error on this.
   res.reset_detected = !reset_negset.empty();
@@ -6627,7 +6627,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
         // empty core (names stays empty and is skipped).
         if (!names.empty()) {
           const char* why = tc.first.isUnsat() ? "jointly UNSATISFIABLE (cannot all be violated)" : "jointly exhaust the solver";
-          res.detail += "; minetimeout core (" + std::to_string(tc.second.size()) + "/" + std::to_string(bads.size())
+          res.detail += "; mine_timeout core (" + std::to_string(tc.second.size()) + "/" + std::to_string(bads.size())
                       + " obligation(s) " + why + "): " + names;
         }
       } catch (const std::exception& e) {

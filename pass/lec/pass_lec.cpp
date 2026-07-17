@@ -33,7 +33,7 @@ void Pass_lec::setup() {
                        "ARBITRARY equal state that may be UNREACHABLE from reset, so a refuted design may "
                        "well be equivalent (classic k-induction incompleteness; a fail can still be a pass). "
                        "Only ind-Proven is definitive — an unbounded proof. Symmetrically bmc's Refuted is "
-                       "definitive (a reachable CEX) but its Proven is only BOUNDED (no CEX up to lec.bound; "
+                       "definitive (a reachable CEX) but its Proven is only BOUNDED (no CEX up to formal.bound; "
                        "deeper cycles unproven). Exception: on a purely COMBINATIONAL pair the inductive miter "
                        "IS the combinational miter, so ind-Refuted is a genuine CEX (auto drops bmc there)",
                        "auto");
@@ -65,14 +65,13 @@ void Pass_lec::setup() {
                        "`lhd lec` + --workdir only: on a REFUTED verdict, write a self-contained Pyrope testbench "
                        "that instantiates BOTH designs, drives the counterexample input sequence, and (with "
                        "prpfailrun) dumps a VCD. Value: a filename created under --workdir — default 'lecfail.prp' "
-                       "when --workdir is set (else empty=off); 'true'='lecfail.prp'; ''/'false'=off. Gated by lec.witness",
+                       "when --workdir is set (else empty=off); 'true'='lecfail.prp'; ''/'false'=off. Gated by formal.witness",
                        "");
   m.add_label_optional("prpfail_run",
                        "run the generated prpfail testbench through `lhd sim --set sim.vcd=true` to produce the "
                        "counterexample waveform (same basename, .vcd, in --workdir). Default true when --workdir is "
                        "set (else false); gated by prpfail actually being written",
                        "");
-  m.add_label_optional("prpfailrun", "DEPRECATED alias for prpfail_run", "");
   m.add_label_optional("phase",
                        "bmc reset phase: after_reset (default; hold reset N cycles, deassert, check "
                        "free-running) | just_reset (hold reset asserted, check during reset) | "
@@ -137,7 +136,6 @@ void Pass_lec::setup() {
                        "extra budget (seconds, 0 = off) for a diagnosis phase after the final round: names the "
                        "still-unproven defs so a timed-out run's output is actionable",
                        "0");
-  m.add_label_optional("minetimeout", "DEPRECATED alias for mine_timeout", "0");
   m.add_label_optional("report",
                        "`lhd formal verify` machine-readable run report: a JSON file written into the workdir on "
                        "EVERY run (all verdicts, UNKNOWN included) with per-obligation verdicts/cycles/solve times, "
@@ -216,7 +214,7 @@ void Pass_lec::lec(Eprp_var& var) {
   o.partitions   = str_tools::to_i(var.get("partitions", "4"));
   o.split        = std::string{var.get("split", "auto")};
   o.allow_oversize = parse_bool(var.get("allow_oversize", "false"));
-  // lec.collapse: comma-separated proven-module def names to force-blackbox.
+  // formal.lec.collapse: comma-separated proven-module def names to force-blackbox.
   if (std::string cs{var.get("collapse", "")}; !cs.empty()) {
     size_t pos = 0;
     while (pos < cs.size()) {

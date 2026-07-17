@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Reset-phase separation (lec.phase) for the BMC engine. Two sequential pairs
+# Reset-phase separation (formal.phase) for the BMC engine. Two sequential pairs
 # whose verdict DIFFERS by phase prove the gating is real:
 #   pair A (+1 vs +2 counter, same reset value): equivalent ONLY under reset.
 #   pair B (y = rst ? <diff const> : data):      equivalent ONLY while running.
@@ -55,7 +55,7 @@ compile b2.v b2_lg dut
 # verdict $impl $ref $top $phase  -> echoes PROVEN | REFUTED | UNKNOWN
 verdict() {
   $LHD lec --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top "$3" \
-       --set lec.hier=false --set lec.engine=bmc --set lec.bound=8 --set "lec.phase=$4" \
+       --set formal.lec.hier=false --set formal.engine=bmc --set formal.bound=8 --set "formal.phase=$4" \
        --workdir "$WORK/q_${3}_$4_$$_$RANDOM" 2>&1 \
     | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN" | head -1
 }

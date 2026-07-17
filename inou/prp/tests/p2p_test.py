@@ -3,7 +3,7 @@
 must recompile and stay logically equivalent to its golden `.v`.
 
     lhd compile foo.prp --emit-dir pyrope:DIR/                          # prp -> upass -> prp
-    lhd lec --set lec.solver=lgyosys --impl pyrope:DIR/foo.<top>.prp --ref verilog:foo.v
+    lhd lec --set formal.solver=lgyosys --impl pyrope:DIR/foo.<top>.prp --ref verilog:foo.v
 
 This is the FORWARD-direction companion of v2prp_test.py (which round-trips a
 `.v`).  It exists to lock in the constructs the writer fully supports — notably
@@ -12,7 +12,7 @@ The prp_writer safety net makes the first step fail the compile if it hits an
 unimplemented construct (rather than silently emitting a /* TODO */ stub), so a
 construct gap surfaces here as a hard failure, not a false pass.
 
-`lhd lec --set lec.solver=lgyosys` (yosys/lgcheck) is the authoritative gate:
+`lhd lec --set formal.solver=lgyosys` (yosys/lgcheck) is the authoritative gate:
 equivalent => pass, not-equivalent => fail, TIMEOUT => inconclusive (exit 0).
 
   python3 inou/prp/tests/p2p_test.py -i inou/prp/tests/equiv/mod_call_pipe.prp
@@ -94,7 +94,7 @@ def main():
         ref_top  = top
         impl_top = top.rsplit(".", 1)[-1]
         chk = subprocess.run(
-            [lhd, "lec", "--set", "lec.solver=lgyosys", "--impl", "pyrope:" + emitted, "--ref", "verilog:" + v,
+            [lhd, "lec", "--set", "formal.solver=lgyosys", "--impl", "pyrope:" + emitted, "--ref", "verilog:" + v,
              "--impl-top", impl_top, "--ref-top", ref_top, "--workdir", os.path.join(work, "w_check")],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=CHECK_TIMEOUT)
     except subprocess.TimeoutExpired:

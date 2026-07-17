@@ -66,7 +66,7 @@ run compile lg:"$W/models" --recipe O0 --emit-dir verilog:"$W/modelsv" --workdir
 run compile lg:"$W/re" --top "$TOP" --recipe O0 --emit-dir verilog:"$W/rev" --workdir "$W/w9"
 cat "$W/netv/"*.v "$W/modelsv/"*.v > "$W/impl.v"
 cat "$W/rev/"*.v > "$W/ref.v"
-run lec --set lec.solver=lgyosys --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/wc"
+run lec --set formal.solver=lgyosys --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/wc"
 
 # 5a. negative control: unknown scope attribute must fail the compile
 sed "s/abc='[^']*'/colour=3/" "$PRP" > "$W/bad_key.prp"

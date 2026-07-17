@@ -76,7 +76,7 @@ echo "PASS: scalar packed struct lowers to per-field bundle nets"
 # (2) Equivalence: the struct design must cvc5-PROVE equivalent (strict + bmc) to
 #     the struct-free twin. A regression to the self-loop bus makes the encoder
 #     fail and the strict LEC does NOT pass.
-"$LHD" lec --set lec.strict=true --set lec.engine=bmc --top pstruct \
+"$LHD" lec --set formal.strict=true --set formal.engine=bmc --top pstruct \
   --ref "$W/pstruct_plain.sv" --impl "$W/pstruct.sv" \
   --workdir "$W/lec" -q --result-json "$W/lec.json" \
   || fail "cvc5 LEC did not prove the packed-struct design equivalent (self-loop regression?): $(cat "$W/lec.json" 2>/dev/null)"
@@ -109,7 +109,7 @@ module psigned(
   assign r = p + a;
 endmodule
 EOF
-"$LHD" lec --set lec.strict=true --set lec.engine=bmc --top psigned \
+"$LHD" lec --set formal.strict=true --set formal.engine=bmc --top psigned \
   --ref "$W/psigned_plain.sv" --impl "$W/psigned.sv" \
   --workdir "$W/lecs" -q --result-json "$W/lecs.json" \
   || fail "cvc5 LEC did not prove the SIGNED packed-struct design equivalent (signed-field fit regression?): $(cat "$W/lecs.json" 2>/dev/null)"
@@ -130,7 +130,7 @@ pub comb pack_local(a:u2) -> (z:u2) {
   z = io#[0..=1]
 }
 EOF
-"$LHD" lec --set lec.strict=true --set lec.semdiff=none --set lec.engine=ind \
+"$LHD" lec --set formal.strict=true --set formal.lec.semdiff=none --set formal.engine=ind \
   --top pack_local --ref "$W/pack_local.prp" --impl "$W/pack_local.prp" \
   --workdir "$W/lec_local" -q --result-json "$W/lec_local.json" \
   || fail "local-footprint packed-word split did not solver-prove: $(cat "$W/lec_local.json" 2>/dev/null)"

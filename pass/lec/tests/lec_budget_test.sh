@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# 2f-fcore §6 global budget scheduler. `formal.timeout` (lec.timeout) is a TOTAL
+# 2f-fcore §6 global budget scheduler. `formal.timeout` (formal.timeout) is a TOTAL
 # wall-clock budget for the whole hierarchical `lhd lec` command, not a budget PER
 # def. With N hard sub-defs and jobs=1 the OLD behavior spent N*timeout (each def
 # got the full budget); budget_mode=wall caps the TOTAL at ~timeout by handing each
@@ -61,7 +61,7 @@ run_lec() {  # $1=mode $2=ref $3=impl $4=outer_kill_s
   local mode=$1 ref=$2 impl=$3 outer=$4 start end pid wd
   start=$(date +%s)
   "$LHD" lec --ref "$WORK/$ref" --impl "$WORK/$impl" --top top \
-         --set lec.engine=ind --set lec.jobs=1 --set lec.timeout=4 --set lec.budget_mode="$mode" \
+         --set formal.engine=ind --set formal.jobs=1 --set formal.timeout=4 --set formal.budget_mode="$mode" \
          --workdir "$WORK/w_${mode}_${ref}" > "$WORK/out_${mode}_${ref}.txt" 2>&1 &
   pid=$!
   ( sleep "$outer"; kill -9 "$pid" 2>/dev/null ) & wd=$!

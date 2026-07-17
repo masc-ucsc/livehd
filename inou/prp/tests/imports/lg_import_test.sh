@@ -60,7 +60,7 @@ grep -q "addsub u_" "$W/out/lg_use.lg_use_top.v" || fail "top does not instantia
 cat "$W/out/lg_use.lg_use_top.v" "$W/addsub.v" > "$W/impl.v"
 # The Pyrope side emits the FLAT Verilog module name (`lg_use_top`); internal
 # graph names stay hierarchical (`lg_use.lg_use_top`) but Verilog flattens.
-$LHD lec --set lec.solver=lgyosys --impl "verilog:$W/impl.v" --ref "verilog:$W/gold.v" \
+$LHD lec --set formal.solver=lgyosys --impl "verilog:$W/impl.v" --ref "verilog:$W/gold.v" \
   --impl-top lg_use_top --ref-top lg_use_top --workdir "$W/wlec" -q \
   || fail "LEC: imported lg netlist is not equivalent to a+b"
 

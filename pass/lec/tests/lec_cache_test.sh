@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Contract for the 2f-fcore verdict cache (lec.cache, --workdir
+# Contract for the 2f-fcore verdict cache (formal.cache, --workdir
 # formal_cache.json). A def-pair whose hierarchical (Merkle) canonical digests
 # AND verdict-relevant options match a stored PROVEN record is settled with no
 # analysis at all; anything else re-proves. Soundness: only definitive Proven
@@ -50,7 +50,7 @@ C "$WORK/C.v"  --top top --emit-dir "lg:$WORK/C"  --workdir "$WORK/cc"
 
 WD="$WORK/wd"; mkdir -p "$WD"
 H() {  # $1..=extra lhd lec args ; sets RC/OUT ; ONE shared workdir (the cache)
-  OUT=$("$LHD" lec "$@" --top top --set lec.hier=true --workdir "$WD" 2>&1); RC=$?
+  OUT=$("$LHD" lec "$@" --top top --set formal.lec.hier=true --workdir "$WD" 2>&1); RC=$?
 }
 
 # 1) Cold run A vs B: nothing cached yet; verdicts get stored.
@@ -79,7 +79,7 @@ elif echo "$OUT" | grep -q "lec\[hier\]: 'top' PROVEN (cache)"; then echo "FAIL:
 else echo "ok: edit re-proves mid + ancestors; unchanged leaf hits"; fi
 
 # 4) Option change = key change: same designs, different bound => no hits.
-H --ref "lg:$WORK/A" --impl "lg:$WORK/B" --set lec.bound=8
+H --ref "lg:$WORK/A" --impl "lg:$WORK/B" --set formal.bound=8
 if [ "$RC" -ne 0 ]; then echo "FAIL: A/B bound=8 rc=$RC"; fail=1
 elif echo "$OUT" | grep -q "PROVEN (cache)"; then echo "FAIL: bound change did not invalidate the key"; fail=1
 else echo "ok: an option change misses the cache"; fi
@@ -93,11 +93,11 @@ elif ! echo "$OUT" | grep -q "lec\[hier\]: 'leaf' REFUTED"; then echo "FAIL: ref
 elif echo "$OUT" | grep -q "'leaf' PROVEN (cache)"; then echo "FAIL: a REFUTED def was served PROVEN from the cache"; fail=1
 else echo "ok: refutes always re-prove"; fi
 
-# 6) Opt-out: lec.cache=false runs with no cache at all.
-H --ref "lg:$WORK/A" --impl "lg:$WORK/B" --set lec.cache=false
+# 6) Opt-out: formal.cache=false runs with no cache at all.
+H --ref "lg:$WORK/A" --impl "lg:$WORK/B" --set formal.cache=false
 if [ "$RC" -ne 0 ]; then echo "FAIL: cache=false rc=$RC"; fail=1
-elif echo "$OUT" | grep -q "lec\[cache\]\|PROVEN (cache)"; then echo "FAIL: lec.cache=false still used the cache"; fail=1
-else echo "ok: lec.cache=false disables the cache"; fi
+elif echo "$OUT" | grep -q "lec\[cache\]\|PROVEN (cache)"; then echo "FAIL: formal.cache=false still used the cache"; fail=1
+else echo "ok: formal.cache=false disables the cache"; fi
 
 # 7) The strategy hint file section exists and records a winning engine per def.
 if ! grep -q '"hints"' "$WD/formal_cache.json"; then echo "FAIL: no hints section persisted"; fail=1
@@ -106,7 +106,7 @@ else echo "ok: strategy hints persisted"; fi
 
 # ---- Unknown-attempt ledger (ruling 2026-07-10): an unchanged def that came
 # back Unknown skips the re-attempt (still reported inconclusive); a larger
-# budget or lec.retry=all re-attempts. Only WITNESS-FREE Unknowns ledger (a
+# budget or formal.retry=all re-attempts. Only WITNESS-FREE Unknowns ledger (a
 # witnessed partial-miter diff is actionable and exits 1 — re-surfaces every
 # run). Fixture: 64-bit multiply reassociation at timeout=1s — equivalent, so
 # no witness, and far beyond a 1s cvc5 budget.
@@ -120,7 +120,7 @@ C "$WORK/H1.v" --top hard --emit-dir "lg:$WORK/H1" --workdir "$WORK/ch1"
 C "$WORK/H2.v" --top hard --emit-dir "lg:$WORK/H2" --workdir "$WORK/ch2"
 WDU="$WORK/wdu"; mkdir -p "$WDU"
 U() { TO=$1; shift; OUT=$("$LHD" lec --ref "lg:$WORK/H1" --impl "lg:$WORK/H2" --top hard \
-      --set lec.hier=true --set "lec.timeout=$TO" "$@" --workdir "$WDU" 2>&1); RC=$?; }
+      --set formal.lec.hier=true --set "formal.timeout=$TO" "$@" --workdir "$WDU" 2>&1); RC=$?; }
 
 # 8) First run: Unknown, and the attempt is ledgered (not a verdict).
 U 1
@@ -137,10 +137,10 @@ elif ! echo "$OUT" | grep -q "skipped-unknown"; then echo "FAIL: no skipped-unkn
 elif [ "$RC" -ne "$RC1" ]; then echo "FAIL: skip changed the exit code ($RC1 -> $RC)"; fail=1
 else echo "ok: unchanged Unknown skips the re-attempt (same outcome)"; fi
 
-# 10) lec.retry=all and a LARGER budget both re-attempt.
-U 1 --set lec.retry=all
-if echo "$OUT" | grep -q "skipped: known inconclusive"; then echo "FAIL: lec.retry=all still skipped"; fail=1
-else echo "ok: lec.retry=all re-attempts"; fi
+# 10) formal.retry=all and a LARGER budget both re-attempt.
+U 1 --set formal.retry=all
+if echo "$OUT" | grep -q "skipped: known inconclusive"; then echo "FAIL: formal.retry=all still skipped"; fail=1
+else echo "ok: formal.retry=all re-attempts"; fi
 U 2
 if echo "$OUT" | grep -q "skipped: known inconclusive"; then echo "FAIL: larger budget did not re-attempt"; fail=1
 else echo "ok: a larger budget re-attempts"; fi

@@ -71,9 +71,9 @@ grep -q 'counterexample inputs: cyc0:' "$OUT" || fail "REFUTED must print the pe
 grep -q 'enable=1' "$OUT" || fail "the trace must drive enable to reach count==5: $(cat "$OUT")"
 
 # The legacy lec.* spelling is an alias for the same knob.
-verify cnt cnt_alias --top cnt --set lec.bound=10
-[ "$RC" -ne 0 ] || fail "lec.bound alias must behave like formal.bound (got rc=0)"
-grep -q 'REFUTED at cycle 7' "$OUT" || fail "lec.bound=10 must reach the cycle-7 refutation: $(cat "$OUT")"
+verify cnt cnt_alias --top cnt --set formal.bound=10
+[ "$RC" -ne 0 ] || fail "formal.bound alias must behave like formal.bound (got rc=0)"
+grep -q 'REFUTED at cycle 7' "$OUT" || fail "formal.bound=10 must reach the cycle-7 refutation: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
 # 2. P1 assume discipline, internal (state) assumes are PROVE-THEN-USE:
@@ -366,7 +366,7 @@ grep -q '\[leaf.badport@.*REFUTED at cycle' "$OUT" || fail "the port refute must
 # ---------------------------------------------------------------------------
 # 8. --workdir on a REFUTED run writes formalfail.prp (the lec-lecfail
 #    analogue): a self-contained `lhd sim` testbench driving the violating
-#    input trace. Generation only (prpfailrun=false keeps the test hermetic —
+#    input trace. Generation only (prpfail_run=false keeps the test hermetic —
 #    no sim runtime headers needed); the trace arrays and provenance must be
 #    in the file.
 # ---------------------------------------------------------------------------
@@ -374,7 +374,7 @@ WD="$W/wd_formalfail"
 mkdir -p "$WD"
 OUT="$W/formalfail.out"
 "$LHD" formal verify "$W/cnt.prp" --top cnt --set formal.bound=10 --workdir "$WD" \
-  --set formal.prpfailrun=false >"$OUT" 2>&1
+  --set formal.prpfail_run=false >"$OUT" 2>&1
 [ $? -ne 0 ] || fail "the refuted run must still exit non-zero"
 grep -q 'wrote counterexample testbench' "$OUT" || fail "--workdir must write formalfail.prp: $(cat "$OUT")"
 [ -s "$WD/formalfail.prp" ] || fail "formalfail.prp missing in --workdir"
@@ -431,7 +431,7 @@ PYEOF
 WDU="$W/wd_report_unknown"
 mkdir -p "$WDU"
 "$LHD" formal verify "$W/hard.prp" --top hard --set formal.bound=2 --set formal.timeout=2 \
-  --set formal.minetimeout=3 --workdir "$WDU" >"$W/report_unknown.out" 2>&1
+  --set formal.mine_timeout=3 --workdir "$WDU" >"$W/report_unknown.out" 2>&1
 python3 - "$WDU" <<'PYEOF' || fail "UNKNOWN formal_report.json contract check failed"
 import json, sys
 d = json.load(open(sys.argv[1] + "/formal_report.json"))
@@ -458,7 +458,7 @@ formal duo.sum {
 HEOF
 OUT="$W/blockfail.out"
 "$LHD" formal verify "$W/hier.prp" "$W/hier_bad.verify.prp" --top duo \
-  --set formal.bound=6 --workdir "$WD2" --set formal.prpfailrun=false >"$OUT" 2>&1
+  --set formal.bound=6 --workdir "$WD2" --set formal.prpfail_run=false >"$OUT" 2>&1
 [ -s "$WD2/formalfail.prp" ] || fail "block refutation must also write formalfail.prp: $(cat "$OUT")"
 grep -q 'if clock == ' "$WD2/formalfail.prp" || fail "embedded check must target the violating cycle: $(cat "$WD2/formalfail.prp")"
 grep -q 'assert(_dut.s != 2, "both leaves advanced")' "$WD2/formalfail.prp" || fail "the failing block assertion must be embedded over _dut paths: $(cat "$WD2/formalfail.prp")"

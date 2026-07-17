@@ -76,7 +76,7 @@ grep -hq "DFFx1 " "$D/netv/"*.v || fail "flops were not mapped to DFF cells in t
 
 cat "$D/netv/"*.v "$D/modelsv/"*.v > "$D/impl.v"
 cat "$D/rev/"*.v > "$D/ref.v"
-run lec --set lec.solver=lgyosys --impl verilog:"$D/impl.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/wc"
+run lec --set formal.solver=lgyosys --impl verilog:"$D/impl.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/wc"
 echo "PASS: flat netlist LEC-equivalent to the flat original-logic twin"
 
 # Flop-name preservation on the native read-back: abc_flat_names' registers
@@ -100,7 +100,7 @@ grep -hq "holder.*\.r " "$D2/netv/"*.v || fail "hierarchical flop name lost in t
 ! grep -hq "DFFx1 " "$D2/netv/"*.v || fail "an init-carrying register was mapped to a DFF cell (power-on init would be lost)"
 cat "$D2/netv/"*.v "$D/modelsv/"*.v > "$D2/impl.v"
 cat "$D2/rev/"*.v > "$D2/ref.v"
-run lec --set lec.solver=lgyosys --impl verilog:"$D2/impl.v" --ref verilog:"$D2/ref.v" --top "$TOP2" --workdir "$D2/wc"
+run lec --set formal.solver=lgyosys --impl verilog:"$D2/impl.v" --ref verilog:"$D2/ref.v" --top "$TOP2" --workdir "$D2/wc"
 echo "PASS: init-carrying registers keep their hierarchical names as native flops (LEC-proven)"
 
 # Escape hatch: flatten=false restores the classic per-def wrapper+region shape.

@@ -3,7 +3,7 @@
 #
 # P3 invariant mining (2f-verify): a stuck run (hard multiplier obligation whose
 # cone includes a wrap-at-5 counter) mines the counter's range invariant under
-# the formal.minetimeout budget. Contract under test:
+# the formal.mine_timeout budget. Contract under test:
 #   * the run reports "mined N inductive invariant(s)" with N >= 1;
 #   * formal_mined.prp is a paste-ready formal block carrying the TIGHT bound
 #     (assume(acc.count <= 5)) with provenance comments;
@@ -45,7 +45,7 @@ WD="$W/wd"
 mkdir -p "$WD"
 OUT="$W/mine.out"
 "$LHD" formal verify "$W/miner.prp" --top miner --set formal.bound=8 --set formal.timeout=3 \
-  --set formal.minetimeout=25 --set formal.engine=bmc --workdir "$WD" >"$OUT" 2>&1
+  --set formal.mine_timeout=25 --set formal.engine=bmc --workdir "$WD" >"$OUT" 2>&1
 [ $? -eq 0 ] || fail "the stuck run itself must exit 0 (UNKNOWN is a warning): $(cat "$OUT")"
 grep -qE 'mined [1-9][0-9]* inductive invariant' "$OUT" || fail "mining must report inductive survivors: $(cat "$OUT")"
 [ -s "$WD/formal_mined.prp" ] || fail "formal_mined.prp must be written: $(cat "$OUT")"
@@ -93,7 +93,7 @@ WD2="$W/wd_spec"
 mkdir -p "$WD2"
 OUT="$W/spec.out"
 "$LHD" formal verify "$W/miner.prp" --top miner --set formal.bound=3 --set formal.timeout=3 \
-  --set formal.minetimeout=20 --set formal.engine=bmc --set formal.mine=speculative --workdir "$WD2" >"$OUT" 2>&1
+  --set formal.mine_timeout=20 --set formal.engine=bmc --set formal.mine=speculative --workdir "$WD2" >"$OUT" 2>&1
 python3 - "$WD2" <<'PYEOF' || fail "mine=speculative report check failed"
 import json, sys
 d = json.load(open(sys.argv[1] + "/formal_report.json"))

@@ -7,7 +7,7 @@
 #   lhd pass color <alg> --set color.continuous=true   (in-place coloring)
 #   lhd pass partition --emit-dir lg:dir2              (one module per region + new top)
 #   lg:dir2 -> verilog
-#   lhd lec --set lec.solver=lgyosys  (partitioned verilog vs the original): LEC-equivalent
+#   lhd lec --set formal.solver=lgyosys  (partitioned verilog vs the original): LEC-equivalent
 #
 # Runs for the self-contained coloring algorithms (acyclic, synth); also checks
 # the stats-only mode and that an UNCOLORED design partitions cleanly: color 0
@@ -43,7 +43,7 @@ for ALG in acyclic synth; do
   # the new top must be a real hierarchy (instantiates the per-region modules)
   grep -q "part_flat__c" "$D/part.v" || fail "$ALG: partitioned verilog has no per-color submodules"
   # 5. LEC: the partitioned design must equal the original
-  run lec --set lec.solver=lgyosys --impl verilog:"$D/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$D/c"
+  run lec --set formal.solver=lgyosys --impl verilog:"$D/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$D/c"
   echo "PASS: $ALG partition is LEC-equivalent to the original"
 done
 
@@ -75,7 +75,7 @@ grep -q '"diagnostics_count":{"errors":0,"warnings":1}' "$CD/r.json" \
 run compile lg:"$CD/lg2" --top "$TOP" --recipe O0 --emit verilog:"$CD/part.v" --workdir "$CD/w5"
 grep -q "part_flat__c0" "$CD/part.v" || fail "uncolored partition produced no color-0 region module"
 # and it is still LEC-equivalent to the original
-run lec --set lec.solver=lgyosys --impl verilog:"$CD/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$CD/c"
+run lec --set formal.solver=lgyosys --impl verilog:"$CD/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$CD/c"
 echo "PASS: uncolored design -> partition warns once + color-0 region, LEC-equivalent"
 
 echo "PASS: all pass.color/pass.partition flows"

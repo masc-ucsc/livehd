@@ -1,17 +1,17 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Hierarchical VCD dump + the `sim.vcdfakedelay` style knob:
+# Hierarchical VCD dump + the `sim.vcd_fake_delay` style knob:
 #   * one VCD carries the WHOLE design tree: the root instance's writer is shared
 #     down the sub-instances (__vcd_hier), each under a nested $scope, with the
 #     sub's io + flop state traced (not just the top's io);
 #   * a flopless wrapper whose `clock:u1` input is wired straight into its subs'
 #     clock ports still resolves it as THE clock (the lecfail dut-pair shape) --
 #     the waveform label is the real `clock`, never a `clock_vcd0` uniquify;
-#   * sim.vcdfakedelay=true (default): data settles at edge+3 and any signal
+#   * sim.vcd_fake_delay=true (default): data settles at edge+3 and any signal
 #     about to change shows X for the settle window; root inputs (testbench
 #     pokes) change exactly AT the edge;
-#   * sim.vcdfakedelay=false: plain edge-aligned updates -- no X, no +3 offset.
+#   * sim.vcd_fake_delay=false: plain edge-aligned updates -- no X, no +3 offset.
 # Structural checks drive `lhd sim --setup-only` (hermetic, no host compiler);
 # when the sibling ../hlop + ../iassert headers are present the default-mode run
 # also produces a real VCD and the nested-scope/X assertions run against it.
@@ -63,7 +63,7 @@ test h {
 }
 EOF
 
-# ---- default mode (sim.vcdfakedelay=true): settle window + X ------------------
+# ---- default mode (sim.vcd_fake_delay=true): settle window + X ------------------
 "$LHD" sim "$W/h.prp" --setup-only --set sim.vcd=true --workdir "$W/fd" -q >/dev/null 2>&1 \
   || fail "default-mode setup failed"
 WRAP="$W/fd/sim/h.pair.cpp"
@@ -89,8 +89,8 @@ grep -q '__vcd_dump_x' "$WRAP" || fail "default mode lacks the X settle window"
 grep -q 'same_repr' "$WRAP" || fail "X window is not change-gated (same_repr)"
 grep -q '__b + 3' "$WRAP" || fail "default mode lacks the +3 settle offset"
 
-# ---- traditional mode (sim.vcdfakedelay=false): edge-aligned, no X ------------
-"$LHD" sim "$W/h.prp" --setup-only --set sim.vcd=true --set sim.vcdfakedelay=false --workdir "$W/tr" -q >/dev/null 2>&1 \
+# ---- traditional mode (sim.vcd_fake_delay=false): edge-aligned, no X ------------
+"$LHD" sim "$W/h.prp" --setup-only --set sim.vcd=true --set sim.vcd_fake_delay=false --workdir "$W/tr" -q >/dev/null 2>&1 \
   || fail "vcdfakedelay=false setup failed"
 TWRAP="$W/tr/sim/h.pair.cpp"
 [ -f "$TWRAP" ] || fail "traditional-mode body not generated"
@@ -100,8 +100,8 @@ grep -q '__b + 3' "$TWRAP" && fail "vcdfakedelay=false must not offset data from
 grep -q '\.__vcd_hier(__w, __s + "\.' "$TWRAP" || fail "traditional mode lost the hierarchy"
 
 # the knob validates like any sim.* boolean
-"$LHD" sim "$W/h.prp" --setup-only --set sim.vcdfakedelay=bogus --workdir "$W/bad" -q >/dev/null 2>&1 \
-  && fail "--set sim.vcdfakedelay=bogus must be rejected"
+"$LHD" sim "$W/h.prp" --setup-only --set sim.vcd_fake_delay=bogus --workdir "$W/bad" -q >/dev/null 2>&1 \
+  && fail "--set sim.vcd_fake_delay=bogus must be rejected"
 
 # ---- runtime: real VCD with nested scopes + X settle window -------------------
 HLOP_INC=""
@@ -110,7 +110,7 @@ for d in ../hlop/hlop ../hlop; do [ -f "$d/slop.hpp" ] && HLOP_INC="$d" && break
 for d in ../iassert/src ../iassert; do [ -f "$d/iassert.hpp" ] && IASSERT_INC="$d" && break; done
 if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
   echo "SKIP run checks: sibling hlop/iassert headers not found (structural checks passed)"
-  echo "PASS: lhd sim hierarchical VCD + sim.vcdfakedelay (structural)"
+  echo "PASS: lhd sim hierarchical VCD + sim.vcd_fake_delay (structural)"
   exit 0
 fi
 
@@ -141,7 +141,7 @@ grep -q 'clock_vcd' "$VCD" && fail "VCD clock label was uniquified"
 # the settle window shows X between the edge and the settled data
 grep -qE '^(x.|bx )' "$VCD" || fail "no X settle window in the default-mode VCD"
 
-"$LHD" sim "$W/h.prp" --set sim.vcd=true --set sim.vcdfakedelay=false --workdir "$W/run2" -q >/dev/null 2>&1 \
+"$LHD" sim "$W/h.prp" --set sim.vcd=true --set sim.vcd_fake_delay=false --workdir "$W/run2" -q >/dev/null 2>&1 \
   || fail "vcdfakedelay=false run failed"
 VCD2="$W/run2/h.vcd"
 [ -s "$VCD2" ] || fail "no traditional-mode VCD produced"
@@ -179,4 +179,4 @@ EOF
 [ -s "$W/run3/two.x.vcd" ] && [ -s "$W/run3/two.y.vcd" ] \
   || fail "expected one VCD per instance (two.x.vcd + two.y.vcd)"
 
-echo "PASS: lhd sim hierarchical VCD + sim.vcdfakedelay (structural + run)"
+echo "PASS: lhd sim hierarchical VCD + sim.vcd_fake_delay (structural + run)"

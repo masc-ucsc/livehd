@@ -667,9 +667,9 @@ class PrpRunner:
         cmd += ['--top', test.params['top_module'], '--workdir', wd]
         cmd += ['--set', 'formal.bound={}'.format(test.params.get('verify_bound', '6'))]
         # The replay is run by the HARNESS below, VCD-less: the built-in
-        # prpfailrun compiles the VCD writer source, which bazel runfiles do
+        # prpfail_run compiles the VCD writer source, which bazel runfiles do
         # not stage (cc_library data deps carry headers/libs, not .cpp).
-        cmd += ['--set', 'formal.prpfailrun=false']
+        cmd += ['--set', 'formal.prpfail_run=false']
 
         proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:

@@ -83,12 +83,12 @@ sync_rom sc "(1,2,3,9)"  # wrong init
 
 verdict() {  # $1=ref.v $2=impl.prp $3=top -> PROVEN | REFUTED | UNKNOWN
   $LHD lec --ref "verilog:$WORK/$1" --impl "pyrope:$WORK/$2" --top "$3" \
-       --set lec.engine=ind --workdir "$WORK/q_${1}_$$" 2>&1 \
+       --set formal.engine=ind --workdir "$WORK/q_${1}_$$" 2>&1 \
     | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN\|INCONCLUSIVE" | head -1
 }
 verdict_pp() {  # $1=ref.prp $2=impl.prp $3=top -> PROVEN | REFUTED | UNKNOWN
   $LHD lec --ref "pyrope:$WORK/$1" --impl "pyrope:$WORK/$2" --top "$3" \
-       --set lec.engine=ind --workdir "$WORK/qpp_$$_${RANDOM}" 2>&1 \
+       --set formal.engine=ind --workdir "$WORK/qpp_$$_${RANDOM}" 2>&1 \
     | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN\|INCONCLUSIVE" | head -1
 }
 

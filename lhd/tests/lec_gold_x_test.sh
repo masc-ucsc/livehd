@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Regression for `lec.gold_x=ignore` — the cvc5 analogue of yosys `miter
+# Regression for `formal.lec.gold_x=ignore` — the cvc5 analogue of yosys `miter
 # -ignore_gold_x` (reference-side X = don't-care). A ref constant's ?/X bits
 # source an undef bit-plane (Val::x_mask) that the miters exclude from the
 # compare: the implementation may resolve each ref-X bit to ANYTHING.
@@ -12,7 +12,7 @@
 #         the BypassNetwork false-fail class).
 # Case 2 (soundness): impl also flips a bit on the VALID path — a real bug on
 #         non-X bits — must still REFUTE.
-# Case 3 (legacy): --set lec.gold_x=zero restores the old concretize-to-0
+# Case 3 (legacy): --set formal.lec.gold_x=zero restores the old concretize-to-0
 #         behavior, so case 1 REFUTES again.
 
 set -u
@@ -55,9 +55,9 @@ $out"
 echo "$out" | grep -q "REFUTED" || fail "case 2: no REFUTED in output:
 $out"
 
-out=$(run_lec "$W/impl_ones.v" "--set lec.gold_x=zero") && fail "case 3 (legacy zero mode) unexpectedly proved:
+out=$(run_lec "$W/impl_ones.v" "--set formal.lec.gold_x=zero") && fail "case 3 (legacy zero mode) unexpectedly proved:
 $out"
 echo "$out" | grep -q "REFUTED" || fail "case 3: no REFUTED in output:
 $out"
 
-echo "PASS: lec.gold_x=ignore accepts X refinements, refutes real bugs, zero mode preserved"
+echo "PASS: formal.lec.gold_x=ignore accepts X refinements, refutes real bugs, zero mode preserved"

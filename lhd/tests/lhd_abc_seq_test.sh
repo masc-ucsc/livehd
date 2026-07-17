@@ -17,7 +17,7 @@
 # rebuilds a native flop. Sub instances are blackbox boundaries; a memory is
 # either a boundary (memory=false) or lowered to flops+mux gates (memory=true).
 # Each mode's mapped netlist must be sequentially LEC-equivalent (yosys miter +
-# BMC/induction, via `lhd lec --set lec.solver=lgyosys`) to its `partition` twin.
+# BMC/induction, via `lhd lec --set formal.solver=lgyosys`) to its `partition` twin.
 #
 #   prp -> lg (O1)
 #   pass color synth                       (the abc driver coloring)
@@ -25,7 +25,7 @@
 #   pass partition                          (same module structure, original logic)
 #   pass liberty gensim test.lib            (behavioral model per comb cell)
 #   cgen net + models -> impl.v ; cgen re -> ref.v
-#   lhd lec --set lec.solver=lgyosys (impl vs ref): must be sequentially LEC-equivalent
+#   lhd lec --set formal.solver=lgyosys (impl vs ref): must be sequentially LEC-equivalent
 #
 # LEC soundness of this `lhd lec` / gensim pipeline (a corrupted reference must
 # FAIL) is covered by the combinational lhd_abc_test's negative control. A
@@ -88,7 +88,7 @@ run_abc_lec() {
   cat "$d/rev/"*.v > "$d/ref.v"
 
   # LEC: the tech-mapped netlist must equal the original logic in every mode
-  run lec --set lec.solver=lgyosys --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$top" --workdir "$d/wc"
+  run lec --set formal.solver=lgyosys --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$top" --workdir "$d/wc"
   NETV="$d/netv"
 }
 

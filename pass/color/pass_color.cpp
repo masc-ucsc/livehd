@@ -58,7 +58,6 @@ void Pass_color::setup() {
                        "synth: merge a region below this many gate-equivalents into its best-connected "
                        "neighbour (0 => no lower bound). Kills singleton regions",
                        "1000");
-  m.add_label_optional("min", "DEPRECATED alias for min_ge", "");
   // 30M GE ~= 0.9 GB of expected ABC peak, calibrated at ~30 bytes/GE from the
   // one hard data point there is: a flat XSCore run reached 221 GB, and XSCore
   // measures 7.43e9 GE. Raise it on a bigger host; lower it if admission fires.
@@ -66,7 +65,6 @@ void Pass_color::setup() {
                        "synth: split a region above this many gate-equivalents (0 => no upper bound). "
                        "Default ~0.9 GB of expected ABC peak per region (~30 bytes/GE); raise it on a bigger host",
                        "30000000");
-  m.add_label_optional("max", "DEPRECATED alias for max_ge", "");
   m.add_label_optional("absorb",
                        "synth: STRUCTURALLY INLINE every def below `min_ge` into its parents before coloring, so its "
                        "logic can cluster with its neighbours (a Sub is a blackbox to ABC, so nothing less merges "
@@ -187,10 +185,8 @@ void Pass_color::color(Eprp_var& var) {
   opts.compact      = parse_bool(var.get("compact", "true"));
   opts.continuous   = parse_bool(var.get("continuous", "false"));
   opts.keep_colored = parse_bool(var.get("keep_colored", "false"));
-  // canonical min_ge/max_ge; the deprecated min/max aliases still win when
-  // explicitly set (their default is empty = unset)
-  opts.min_ge = std::string_view{var.get("min", "")}.empty() ? parse_ge_bound(var, "min_ge", "1000") : parse_ge_bound(var, "min", "1000");
-  opts.max_ge = std::string_view{var.get("max", "")}.empty() ? parse_ge_bound(var, "max_ge", "30000000") : parse_ge_bound(var, "max", "30000000");
+  opts.min_ge       = parse_ge_bound(var, "min_ge", "1000");
+  opts.max_ge       = parse_ge_bound(var, "max_ge", "30000000");
 
   if (opts.min_ge != 0 && opts.max_ge != 0 && opts.min_ge > opts.max_ge) {
     livehd::diag::err("pass.color", "bad-size-window", "io")

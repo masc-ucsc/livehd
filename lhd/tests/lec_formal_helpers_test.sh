@@ -23,7 +23,7 @@ EOF
 
 run_lec() {
   OUT=$("$LHD" lec --ref "$W/ref.v" --impl "$W/impl.v" --top dut \
-    --set lec.hier=false --set lec.cache=true --workdir "$W/cache" "$@" 2>&1)
+    --set formal.lec.hier=false --set formal.cache=true --workdir "$W/cache" "$@" 2>&1)
   RC=$?
 }
 
@@ -57,7 +57,7 @@ formal dut.impossible_env {
   assume((acc.en == 0) and (acc.en == 1))
 }
 EOF
-run_lec "$W/contradictory.prp" --set lec.engine=bmc
+run_lec "$W/contradictory.prp" --set formal.engine=bmc
 echo "$OUT" | grep -q 'CONTRADICTORY' || fail "contradictory helper set was not diagnosed: $OUT"
 echo "$OUT" | grep -q 'PROVEN equivalent' && fail "contradictory helper produced a vacuous proof: $OUT"
 
@@ -112,22 +112,22 @@ EOF
 cat >"$W/eq2.v" <<'EOF'
 module eq(input logic a, input logic b, output logic y); assign y = ~((~a) | (~b)); endmodule
 EOF
-OUT=$("$LHD" lec --ref "$W/eq1.v" --impl "$W/eq2.v" --top eq --set lec.hier=false \
-  --set lec.semdiff=none --workdir "$W/hints" 2>&1); RC=$?
+OUT=$("$LHD" lec --ref "$W/eq1.v" --impl "$W/eq2.v" --top eq --set formal.lec.hier=false \
+  --set formal.lec.semdiff=none --workdir "$W/hints" 2>&1); RC=$?
 [ "$RC" -eq 0 ] || fail "hint seed proof failed: $OUT"
 cat >"$W/eq3.v" <<'EOF'
 module eq(input logic a, input logic b, output logic y); assign y = b & a; endmodule
 EOF
-OUT=$("$LHD" lec --ref "$W/eq1.v" --impl "$W/eq3.v" --top eq --set lec.hier=false \
-  --set lec.semdiff=none --workdir "$W/hints" 2>&1); RC=$?
+OUT=$("$LHD" lec --ref "$W/eq1.v" --impl "$W/eq3.v" --top eq --set formal.lec.hier=false \
+  --set formal.lec.semdiff=none --workdir "$W/hints" 2>&1); RC=$?
 [ "$RC" -eq 0 ] || fail "hint replay proof failed: $OUT"
 echo "$OUT" | grep -q 'strategy hint tried ind first and settled' || fail "winning-engine hint was not replayed: $OUT"
 
 cat >"$W/eq4.v" <<'EOF'
 module eq(input logic a, input logic b, output logic y); assign y = a | b; endmodule
 EOF
-OUT=$("$LHD" lec --ref "$W/eq1.v" --impl "$W/eq4.v" --top eq --set lec.hier=false \
-  --set lec.semdiff=none --workdir "$W/hints" 2>&1); RC=$?
+OUT=$("$LHD" lec --ref "$W/eq1.v" --impl "$W/eq4.v" --top eq --set formal.lec.hier=false \
+  --set formal.lec.semdiff=none --workdir "$W/hints" 2>&1); RC=$?
 [ "$RC" -ne 0 ] || fail "stale engine hint changed a refuted verdict: $OUT"
 
 echo "PASS: LEC formal helpers and strategy-hint replay"

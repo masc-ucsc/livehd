@@ -1,10 +1,10 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Regression for the `lec.timeout` knob (cvc5 tlimit-per wiring). Three tiny but
+# Regression for the `formal.timeout` knob (cvc5 tlimit-per wiring). Three tiny but
 # nonlinear-multiplier miters (mul associativity / distributivity / 3-way
 # commutativity at 16 bits) make cvc5's bit-blast never return -- without a
-# solver time limit `lhd lec` FREEZES forever. With `--set lec.timeout=N` each
+# solver time limit `lhd lec` FREEZES forever. With `--set formal.timeout=N` each
 # query must come back promptly as UNKNOWN (a sound degrade, never a false
 # PROVEN/REFUTED). A positive control checks the bound does NOT break a normal,
 # quickly-solvable proof.
@@ -68,13 +68,13 @@ EOF
 # Portable watchdog (macOS has no GNU `timeout` on the sandbox PATH): run lhd in
 # the background, a sleeper kills it if it overruns the outer bound. RC>=128 with
 # ELAPSED>=outer means the watchdog fired -> the solver time limit did NOT work.
-run_lec() {  # $1=name $2=lec.timeout secs $3=outer kill secs
+run_lec() {  # $1=name $2=formal.timeout secs $3=outer kill secs
   local name=$1 tmo=$2 outer=$3 start end of pid wd
   of="$WORK/out_$name.txt"
   start=$(date +%s)
   "$LHD" lec --ref "$WORK/${name}_ref.v" --impl "$WORK/${name}_impl.v" \
-         --top foo --set lec.hier=false --set lec.engine=bmc --set lec.decompose=false \
-         --set lec.timeout="$tmo" --workdir "$WORK/w_$name" > "$of" 2>&1 &
+         --top foo --set formal.lec.hier=false --set formal.engine=bmc --set formal.lec.decompose=false \
+         --set formal.timeout="$tmo" --workdir "$WORK/w_$name" > "$of" 2>&1 &
   pid=$!
   ( sleep "$outer"; kill -9 "$pid" 2>/dev/null ) &
   wd=$!
@@ -86,13 +86,13 @@ run_lec() {  # $1=name $2=lec.timeout secs $3=outer kill secs
   if [ "$RC" -ge 128 ] && [ "$ELAPSED" -ge "$outer" ]; then HUNG=1; fi
 }
 
-# Each hard case: lec.timeout=2s, outer watchdog 25s. Must (a) NOT trip the
+# Each hard case: formal.timeout=2s, outer watchdog 25s. Must (a) NOT trip the
 # watchdog -- proving the bound actually fires -- and (b) report UNKNOWN.
 for c in reassoc distrib poly; do
   run_lec "$c" 2 25
   v=$(echo "$OUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN" | head -1)
   if [ "$HUNG" -eq 1 ]; then
-    echo "FAIL: $c HUNG past the outer 25s watchdog -> lec.timeout was NOT honored"; fail=1
+    echo "FAIL: $c HUNG past the outer 25s watchdog -> formal.timeout was NOT honored"; fail=1
   elif [ "$v" != "UNKNOWN" ]; then
     echo "FAIL: $c -> verdict '$v' (want UNKNOWN); rc=$RC elapsed=${ELAPSED}s"; fail=1
   else

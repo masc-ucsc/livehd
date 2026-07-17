@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Milestone-1 cross-check: drive `lhd lec --set lec.cross=true` on tiny Verilog
+# Milestone-1 cross-check: drive `lhd lec --set formal.lec.cross=true` on tiny Verilog
 # pairs and assert the in-process Pono engine AGREES with lgcheck (yosys equiv).
 # lec_command throws class "internal" (DISAGREE) if they differ, so any
 # disagreement turns the verdict line + exit code into a hard failure here.
@@ -52,7 +52,7 @@ fail=0
 
 # Equivalent pair: both engine and lgcheck must say equivalent -> exit 0.
 out=$($LHD lec --impl "lg:$WORK/eq_lg" --ref "lg:$WORK/a_lg" --top foo \
-        --set lec.hier=false --set lec.cross=true --workdir "$WORK/c_eq" 2>&1)
+        --set formal.lec.hier=false --set formal.lec.cross=true --workdir "$WORK/c_eq" 2>&1)
 rc=$?
 echo "$out" | grep -i "cross-check" || true
 if echo "$out" | grep -qi "DISAGREE"; then
@@ -64,7 +64,7 @@ fi
 
 # Different pair: both must say different -> equiv_fail (exit 1), NO disagreement.
 out=$($LHD lec --impl "lg:$WORK/ne_lg" --ref "lg:$WORK/a_lg" --top foo \
-        --set lec.hier=false --set lec.cross=true --workdir "$WORK/c_ne" 2>&1)
+        --set formal.lec.hier=false --set formal.lec.cross=true --workdir "$WORK/c_ne" 2>&1)
 rc=$?
 echo "$out" | grep -i "cross-check" || true
 if echo "$out" | grep -qi "DISAGREE"; then

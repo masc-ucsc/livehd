@@ -3,11 +3,11 @@
 #
 # 2f-fcore F2 tail: the verdict cache on the FLAT (non-hierarchical) lec path.
 # The hierarchical driver has cached verdicts since F2; this pins the same store on
-# `--set lec.hier=false`, which proves the whole design as ONE top-pair miter
+# `--set formal.lec.hier=false`, which proves the whole design as ONE top-pair miter
 # and so stores/hits exactly ONE verdict. Cold run stores; identical warm re-run hits
 # ("PROVEN (cache)", no solver); a verdict-relevant option change (bound) is a new key
 # (miss); a design edit is a new digest (miss); a REFUTE is never cached;
-# lec.cache=false opts out.
+# formal.cache=false opts out.
 
 set -u
 
@@ -43,7 +43,7 @@ EOF
 H() {
   local impl=$1 ref=$2; shift 2
   "$LHD" lec --ref "$WORK/$ref" --impl "$WORK/$impl" --top foo \
-         --set lec.hier=false --workdir "$WD" "$@" 2>&1
+         --set formal.lec.hier=false --workdir "$WD" "$@" 2>&1
 }
 has() { echo "$1" | grep -q "$2"; }
 ck() { if has "$1" "$2"; then echo "ok: $3"; else echo "FAIL: $3"; echo "$1" | grep -E 'lec(\[cache\])?:' | head -3; fail=1; fi; }
@@ -62,7 +62,7 @@ ck "$OUT" "PROVEN (cache)"                 "warm flat re-run hits (PROVEN (cache
 ck "$OUT" "lec\[cache\]: 1 hit(s), 0 stored" "warm flat re-run reports 1 hit"
 
 # 3) verdict-relevant option change (bound) is a distinct key -> miss (new store).
-OUT=$(H b.v a.v --set lec.bound=8)
+OUT=$(H b.v a.v --set formal.bound=8)
 ck "$OUT" "lec\[cache\]: 0 hit(s), 1 stored" "bound change is a new key (miss)"
 
 # 4) REFUTE is never cached.
@@ -70,9 +70,9 @@ OUT=$(H c.v a.v)
 ckn "$OUT" "0 hit(s), 1 stored" "REFUTE never stored"   # a fresh store line would list >=1 stored for THIS run; c!=a refutes
 ck  "$OUT" "REFUTED"            "c vs a refutes"
 
-# 5) lec.cache=false opts out (no cache line at all even with a --workdir).
-OUT=$(H b.v a.v --set lec.cache=false)
-ckn "$OUT" "lec\[cache\]:" "lec.cache=false opts out of the cache"
+# 5) formal.cache=false opts out (no cache line at all even with a --workdir).
+OUT=$(H b.v a.v --set formal.cache=false)
+ckn "$OUT" "lec\[cache\]:" "formal.cache=false opts out of the cache"
 
 if [ $fail -ne 0 ]; then echo "lec_cache_flat_test: FAILED"; exit 1; fi
 echo "lec_cache_flat_test: PASSED"

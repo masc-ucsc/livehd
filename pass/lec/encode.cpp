@@ -184,7 +184,7 @@ std::string Encoder::flop_key(std::string_view hier) const {
 // `width`-bit BV. Returns nullopt for a reset-less flop (no constant initial) —
 // its power-on value is arbitrary, so the BMC caller seeds a fresh shared symbol
 // instead. Unknown bits in the initial are masked to 0 (a defined reset), UNLESS
-// `x_as_undefined` (lec.gold_x=ignore): a partially-unknown initial is a
+// `x_as_undefined` (formal.lec.gold_x=ignore): a partially-unknown initial is a
 // DON'T-CARE power-on, so it behaves like no initial at all — both designs then
 // seed the same fresh shared symbol, i.e. the reference's X-init is bound to
 // whatever the implementation starts with (any impl choice is a legal
@@ -357,7 +357,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   }
   auto over_budget = [&]() -> bool { return deadline_ && std::chrono::steady_clock::now() > *deadline_; };
   if (over_budget()) {
-    return fail("encode budget exceeded (lec.timeout); raise --set lec.timeout to allow more encode time");
+    return fail("encode budget exceeded (formal.timeout); raise --set formal.timeout to allow more encode time");
   }
 
   // bit-vector literal of `width` bits from a constant pin's Dlop.
@@ -372,7 +372,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // Wide / partially-unknown constant: build from the MSB-first binary string
       // (get_bits() chars, no prefix). Unknown (X / don't-care) bits are masked
       // to 0 — consistent across two designs reading the same source constant.
-      // Under x_dontcare (lec.gold_x=ignore, REF side) the '?' positions ALSO
+      // Under x_dontcare (formal.lec.gold_x=ignore, REF side) the '?' positions ALSO
       // source the undef bit-plane, so the miter can exclude ref-unknown bits
       // from the compare instead of comparing an arbitrary concretization.
       auto bin = c.to_binary();
@@ -797,14 +797,14 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // Budget-aware encode: bail before another full fixpoint pass over the
     // virtually-flattened design — this loop, not cvc5, is the deep-parent time sink.
     if (over_budget()) {
-      return fail("encode budget exceeded during combinational fixpoint (lec.timeout); raise --set lec.timeout");
+      return fail("encode budget exceeded during combinational fixpoint (formal.timeout); raise --set formal.timeout");
     }
     progress = false;
     for (auto node : g->forward_hier(true, false, opaque)) {
       // A single forward_hier pass over a huge flattened design can itself blow
       // the budget before the while-head re-checks; sample the clock every 1024 nodes.
       if ((++budget_tick & 0x3ff) == 0 && over_budget()) {
-        return fail("encode budget exceeded during combinational fixpoint (lec.timeout); raise --set lec.timeout");
+        return fail("encode budget exceeded during combinational fixpoint (formal.timeout); raise --set formal.timeout");
       }
       auto op = gu::type_op_of(node);
 
@@ -840,7 +840,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // anything unresolved or stateful keeps the sound `Sub -> fail`.
     if (op == Ntype_op::Sub) {
       auto sub_io = node.get_subnode_io();
-      // Proven-module collapse (lec.collapse): a def the driver already proved
+      // Proven-module collapse (formal.lec.collapse): a def the driver already proved
       // equivalent is FORCED to the blackbox path even if it could be flattened,
       // so the parent stops re-solving its internals. query.cpp's shared-bbox
       // builder applies the identical predicate so the box's outputs are shared,
@@ -1010,7 +1010,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               // NOT shared across the designs: sharing without the bbin input
               // obligations would be an unjustified equality. The phase-2 UF tie
               // provides the (pairing-free) congruence instead.
-              // NO x_mask is minted here even under lec.gold_x=ignore: a box is
+              // NO x_mask is minted here even under formal.lec.gold_x=ignore: a box is
               // X-opaque, and smearing the outputs whenever ANY input might be X
               // makes every downstream compare vacuous — a false PROVEN that no
               // fallback ever re-examines (the flat confirmation fires only on
@@ -1680,7 +1680,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       Val out_val{result, W, out_signed};
       if (x_dontcare_) {
-        // Undef bit-plane propagation (lec.gold_x=ignore, REF side). Exact for
+        // Undef bit-plane propagation (formal.lec.gold_x=ignore, REF side). Exact for
         // Mux/Hotmux (an ITE over the arms' planes — the invalid-payload idiom
         // `valid ? data : X` stays checkable on the valid path); conservative
         // whole-value smear for every other op with an unknown operand.

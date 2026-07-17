@@ -118,31 +118,31 @@ echo "$OUT" | grep -q "tier-2" && fail "#6 all-names-match must do zero tier-2 w
 echo "PASS: all-names-match design does zero tier-2 work"
 
 # ---------------------------------------------------------------------------
-# 7. lec.state_pairing=false: the pre-tier-2 behavior. Under `auto` the
+# 7. formal.lec.state_pairing=false: the pre-tier-2 behavior. Under `auto` the
 #    renamed pair still passes, but only BOUNDED (bmc; ind is gated Unknown by
 #    the unmatched cut points) — the unbounded ind PROVEN of #1 is exactly
 #    what tier-2 buys. Forcing engine=ind shows the gate directly: UNKNOWN.
 # ---------------------------------------------------------------------------
-OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --set lec.state_pairing=false 2>&1)
+OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --set formal.lec.state_pairing=false 2>&1)
 RC=$?
 [ "$RC" -eq 0 ] || fail "#7 pairing-off auto run should still bounded-pass (rc=$RC): $OUT"
-echo "$OUT" | grep -q "tier-2 state pairing" && fail "#7 pairing ran despite lec.state_pairing=false: $OUT"
+echo "$OUT" | grep -q "tier-2 state pairing" && fail "#7 pairing ran despite formal.lec.state_pairing=false: $OUT"
 echo "$OUT" | grep -q "BOUNDED-Proven" || fail "#7 pairing-off verdict should be the bounded bmc PASS: $OUT"
 # The witness-carrying Unknown (matched portion differs through the unmatched
 # cuts) escalates in the exit policy — a nonzero exit, but NOT a REFUTED.
-OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --set lec.state_pairing=false --set lec.engine=ind 2>&1)
+OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --set formal.lec.state_pairing=false --set formal.engine=ind 2>&1)
 RC=$?
 [ "$RC" -ne 0 ] || fail "#7 ind witness-carrying UNKNOWN escalates (rc=$RC): $OUT"
 echo "$OUT" | grep -q "UNKNOWN" || fail "#7 ind with pairing off should gate to UNKNOWN: $OUT"
 echo "$OUT" | grep -q "REFUTED (not equivalent)" && fail "#7 must not claim REFUTED through unmatched cuts: $OUT"
 echo "$OUT" | grep -q "cut point" || fail "#7 the unmatched cut points should be named: $OUT"
-echo "PASS: lec.state_pairing=false keeps the pre-tier-2 behavior (bounded auto / ind-UNKNOWN)"
+echo "PASS: formal.lec.state_pairing=false keeps the pre-tier-2 behavior (bounded auto / ind-UNKNOWN)"
 
 # ---------------------------------------------------------------------------
-# 8. Flat path (lec.hier=false): same pairing + proof, and the PASS
+# 8. Flat path (formal.lec.hier=false): same pairing + proof, and the PASS
 #    stores an entity-keyed pair hint there too.
 # ---------------------------------------------------------------------------
-OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --set lec.hier=false --workdir "$W/wd8" 2>&1)
+OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --set formal.lec.hier=false --workdir "$W/wd8" 2>&1)
 RC=$?
 [ "$RC" -eq 0 ] || fail "#8 flat path should be PROVEN (rc=$RC): $OUT"
 echo "$OUT" | grep -q "tier-2 state pairing: 2 uncertain pair(s) injected" || fail "#8 missing flat-path injection: $OUT"

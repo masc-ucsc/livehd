@@ -9,7 +9,7 @@
 #               an UNKNOWN disproves nothing, so it must not be conflated with REFUTED)
 #   UNKNOWN + a WITNESS -> exit 1 (a potential discrepancy: still undecided, but a
 #              concrete CEX is in hand — never report that as a pass)     [hard fail]
-#   UNKNOWN + --set lec.strict=true -> exit 1                             [opt-in strict]
+#   UNKNOWN + --set formal.strict=true -> exit 1                             [opt-in strict]
 # The ind/bmc trust asymmetry backing the above: an ind Refute is NOT a disproof (its
 # step case starts from an ARBITRARY, possibly unreachable state), so `auto` must let
 # bmc clear it — case 5 pins that a bmc bounded-proof still WINS over an ind refute.
@@ -64,7 +64,7 @@ endmodule
 EOF
 
 run() {  # $1=label $2..=lhd args ; sets RC/OUT
-  OUT=$("$LHD" lec "${@:2}" --top foo --set lec.hier=false --set lec.timeout=2 --workdir "$WORK/w_$1" 2>&1); RC=$?
+  OUT=$("$LHD" lec "${@:2}" --top foo --set formal.lec.hier=false --set formal.timeout=2 --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
 # 1) UNKNOWN, default policy -> clean exit 0 + a warning, verdict UNKNOWN
@@ -75,7 +75,7 @@ elif ! echo "$OUT" | grep -qiE "inconclusive|warning"; then echo "FAIL: UNKNOWN 
 else echo "ok: UNKNOWN default -> exit 0 + warning"; fi
 
 # 2) UNKNOWN, strict -> exit 1
-run unks --set lec.strict=true --ref "$WORK/hard_ref.v" --impl "$WORK/hard_impl.v"
+run unks --set formal.strict=true --ref "$WORK/hard_ref.v" --impl "$WORK/hard_impl.v"
 if [ "$RC" -eq 0 ]; then echo "FAIL: UNKNOWN strict rc=0 (want non-zero)"; fail=1
 else echo "ok: UNKNOWN strict -> exit $RC"; fi
 
@@ -95,7 +95,7 @@ else echo "ok: PROVEN -> exit 0"; fi
 #    Guards the soundness rationale AND the exit-code policy: an ind Refute must never
 #    on its own fail a design bmc can prove — the `auto` race only escalates an ind CEX
 #    to a failure when bmc could NOT settle the query.
-run unreach --ref "$WORK/unreach_ref.v" --impl "$WORK/unreach_impl.v" --set lec.timeout=20
+run unreach --ref "$WORK/unreach_ref.v" --impl "$WORK/unreach_impl.v" --set formal.timeout=20
 if [ "$RC" -ne 0 ]; then
   echo "FAIL: unreachable-state ind-refute rc=$RC (want 0: bmc clears a spurious ind CEX)"; fail=1
 elif echo "$OUT" | grep -q "REFUTED"; then

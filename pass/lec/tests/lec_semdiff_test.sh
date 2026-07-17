@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Contract for structural def-diff reduction (lec.semdiff, M3). In the bottom-up
+# Contract for structural def-diff reduction (formal.lec.semdiff, M3). In the bottom-up
 # hierarchical flow, a def whose ref/impl are structurally IDENTICAL (pass.semdiff
 # finds no unmatched node on either side) AND whose children are all proven is
 # equivalent with NO solver call. Only the CHANGED defs reach cvc5. The skip is
@@ -41,7 +41,7 @@ C "$WORK/B.v" --top top --emit-dir "lg:$WORK/B" --workdir "$WORK/cb"
 C "$WORK/C.v" --top top --emit-dir "lg:$WORK/C" --workdir "$WORK/cc"
 
 H() {  # $1=label ; $2..=lhd lec args ; sets RC/OUT
-  OUT=$("$LHD" lec "${@:2}" --top top --set lec.hier=true --set lec.semdiff=structural \
+  OUT=$("$LHD" lec "${@:2}" --top top --set formal.lec.hier=true --set formal.lec.semdiff=structural \
         --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 

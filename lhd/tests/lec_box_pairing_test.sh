@@ -3,7 +3,7 @@
 #
 # Hierarchical-LEC box-instance correspondence + verdict-safety guards.
 #
-# `lec.hier` proves each def leaves-first and collapses proven children
+# `formal.lec.hier` proves each def leaves-first and collapses proven children
 # into opaque boxes. Three mechanisms keep the final pass/fail REAL (never a
 # fail-when-pass from a bad instance mapping, never a pass from an unchecked
 # obligation):

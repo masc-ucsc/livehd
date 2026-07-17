@@ -13,7 +13,7 @@
 #   pass partition --emit-dir lg:re  (same module structure, original logic)
 #   pass liberty gensim test.lib --emit-dir lg:models
 #   cgen net + models -> impl.v ; cgen re -> ref.v
-#   lhd lec --set lec.solver=lgyosys (impl vs ref): must be LEC-equivalent
+#   lhd lec --set formal.solver=lgyosys (impl vs ref): must be LEC-equivalent
 #   negative control: a corrupted reference must FAIL the check
 #
 # Hermetic: uses a small vendored Liberty (inou/prp/tests/abc/test.lib), not the
@@ -60,11 +60,11 @@ cat "$W/netv/"*.v "$W/modelsv/"*.v > "$W/impl.v"
 cat "$W/rev/"*.v > "$W/ref.v"
 
 # 7. LEC: the tech-mapped netlist must equal the original logic
-run lec --set lec.solver=lgyosys --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/wc"
+run lec --set formal.solver=lgyosys --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/wc"
 
 # 8. negative control: a corrupted reference MUST fail the equivalence check
 sed 's/\^/\&/g' "$W/ref.v" > "$W/ref_bad.v"
-if "$LHD" lec --set lec.solver=lgyosys --impl verilog:"$W/impl.v" --ref verilog:"$W/ref_bad.v" --top "$TOP" \
+if "$LHD" lec --set formal.solver=lgyosys --impl verilog:"$W/impl.v" --ref verilog:"$W/ref_bad.v" --top "$TOP" \
     --workdir "$W/wcn" -q --result-json "$W/rn.json" 2>/dev/null; then
   fail "negative control passed LEC against a corrupted reference (the check is not sound)"
 fi
@@ -93,7 +93,7 @@ run compile lg:"$N/lg" --top "$TOP" --recipe O0 --emit-dir verilog:"$N/origv" --
 grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$N/netv/${TOP}__c0"*.v || fail "no standard cells in the uncolored ABC netlist"
 cat "$N/netv/"*.v "$N/modelsv/"*.v > "$N/impl.v"
 cat "$N/origv/"*.v > "$N/orig.v"
-run lec --set lec.solver=lgyosys --impl verilog:"$N/impl.v" --ref verilog:"$N/orig.v" --top "$TOP" --workdir "$N/c"
+run lec --set formal.solver=lgyosys --impl verilog:"$N/impl.v" --ref verilog:"$N/orig.v" --top "$TOP" --workdir "$N/c"
 echo "PASS: pass.abc runs WITHOUT a prior color pass (color-0 region, LEC-equivalent)"
 
 # ---------------------------------------------------------------------------
@@ -109,5 +109,5 @@ run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$A/net" --set abc.library="$
 run compile lg:"$A/net" --top "$TOP" --recipe O0 --emit-dir verilog:"$A/netv" --workdir "$A/w2"
 grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$A/netv/${TOP}__c"*.v || fail "no standard cells in the resyn2-mapped netlist (alias did not resolve?)"
 cat "$A/netv/"*.v "$W/modelsv/"*.v > "$A/impl.v"
-run lec --set lec.solver=lgyosys --impl verilog:"$A/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$A/c"
+run lec --set formal.solver=lgyosys --impl verilog:"$A/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$A/c"
 echo "PASS: pass.abc resolves abc.rc script aliases in flow (resyn2, LEC-equivalent)"

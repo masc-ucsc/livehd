@@ -59,7 +59,7 @@ for entry in "${DESIGNS[@]}"; do
   grep -q "^ *${CHILD} " "$D/post.v" && fail "$FIX: '$CHILD' still instantiated after absorb"
 
   # ... and the design still computes the same function. This is the whole point.
-  run lec --set lec.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
+  run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
   echo "PASS: $FIX absorbed '$CHILD' and stayed LEC-equivalent"
 done
 

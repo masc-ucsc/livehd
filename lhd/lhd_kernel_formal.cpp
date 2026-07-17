@@ -223,7 +223,7 @@ static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& d
   // Uncertain (tier-2) pairs are a DISTINCT key segment: they alter the
   // obligation set like match pairs (same pair set => same key, so the Unknown
   // ledger and a pair-assisted PROVEN replay coherently), but must never alias
-  // a run where the same pairs were supplied as certain lec.match (a
+  // a run where the same pairs were supplied as certain formal.lec.match (a
   // certain-pair bounded-Proven is a legal PASS; an uncertain-pair one is not).
   std::vector<std::string> um_pairs;
   um_pairs.reserve(o.uncertain_match.size());
@@ -318,7 +318,7 @@ static void disclose_lec_helpers(livehd::lec::Query_result& r, const livehd::lec
   }
 }
 
-// Bottom-up hierarchical LEC driver (lec.hier=true). Build the module-def
+// Bottom-up hierarchical LEC driver (formal.lec.hier=true). Build the module-def
 // dependency DAG over the defs present in both libraries (paired by ENTITY — see
 // below), scope it to the picked TOP pair and its transitive descendants (a
 // whole-design library may hold many defs unrelated to --ref-top; those are NOT
@@ -522,13 +522,13 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     }
     const auto&              name = order[def_ix];
 
-    // Fail-fast on a refuted descendant (lec.hier_refute=fail, the default).
+    // Fail-fast on a refuted descendant (formal.lec.hier_refute=fail, the default).
     // Only a PROVEN child black-boxes (see the collapse set below), so a def over
     // a REFUTED child would descend into logic already known to differ and grind
     // out a whole-design flat miter — minutes of cvc5 for a verdict the child
     // settled in milliseconds. Skip it, and taint it so its own parents skip too.
     // The child's counterexample stands as the run verdict (aggregate below).
-    //   lec.hier_refute=escalate restores the full top-level confirmation: a
+    //   formal.lec.hier_refute=escalate restores the full top-level confirmation: a
     // block-boundary CEX can be UNREACHABLE in context, so only that mode can
     // prove a top equivalent over a differing child — at the cost of the flat solve.
     if (fail_fast_refute) {
@@ -544,7 +544,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       if (!bad_kid.empty()) {
         tainted[def_ix] = 1;
         std::lock_guard report_lock(report_mutex);
-        std::print("lec[hier]: '{}' SKIPPED (child '{}' REFUTED; --set lec.hier_refute=escalate proves this level anyway)\n",
+        std::print("lec[hier]: '{}' SKIPPED (child '{}' REFUTED; --set formal.lec.hier_refute=escalate proves this level anyway)\n",
                    name,
                    bad_kid);
         return;
@@ -566,8 +566,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       o.assumption_key.clear();
       o.proven_helpers = o.input_assumes = o.unchecked_assumes = 0;
     }
-    // Each def is LEC'd under the requested engine (lec.engine, default `auto` =
-    // the ind+bmc portfolio). Honor an explicit engine so `--set lec.engine=bmc`
+    // Each def is LEC'd under the requested engine (formal.engine, default `auto` =
+    // the ind+bmc portfolio). Honor an explicit engine so `--set formal.engine=bmc`
     // (e.g. a reset-phase proof) is not silently overridden by the hierarchical driver.
 
     // Effective collapse set FIRST — it is part of the cache key: a proven
@@ -643,7 +643,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // already came back Unknown at this (or a larger) budget skips the
       // re-grind — it still REPORTS inconclusive, exactly as a re-run would;
       // no verdict is transferred. A digest/option change, a larger
-      // lec.timeout, a prover change (salt), or --set lec.retry=all
+      // formal.timeout, a prover change (salt), or --set formal.retry=all
       // re-attempts.
       if (!retry_all && vcache->skip_unknown(ckey, o.timeout)) {
         livehd::lec::Query_result ur;
@@ -651,11 +651,11 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         ur.engine     = "cache-skip";
         ur.elapsed_ms = 0;
         ur.detail
-            = std::format("known inconclusive at timeout<={}s with unchanged digest/options; --set lec.retry=all re-attempts",
+            = std::format("known inconclusive at timeout<={}s with unchanged digest/options; --set formal.retry=all re-attempts",
             o.timeout);
         std::lock_guard report_lock(report_mutex);
         emit_lec_block_progress(name, ur, o, 0);
-        std::print("lec[hier]: '{}' UNKNOWN (skipped: known inconclusive; lec.retry=all re-attempts)\n", name);
+        std::print("lec[hier]: '{}' UNKNOWN (skipped: known inconclusive; formal.retry=all re-attempts)\n", name);
         if ((name == top_key)) {
           top_result = ur;
           have_top   = true;
@@ -684,7 +684,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       so.alg            = o.semdiff == "none" ? "structural" : o.semdiff;
       so.matching_names = true;  // anchor flops/mems by hier name (lec's correspondence basis)
       so.state_pairing  = want_pairing;
-      so.seed_pairs     = o.match;  // explicit lec.match pairs are tier-1 anchors for the signatures
+      so.seed_pairs     = o.match;  // explicit formal.lec.match pairs are tier-1 anchors for the signatures
       auto m            = livehd::semdiff::structural_match(ref_by_name[name], impl_by_name[name], so);
       const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
       // 2f-lec diverged-use guard: memories semdiff flagged as genuinely diverged
@@ -1023,9 +1023,9 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
 
 // ===== lecfail witness reproduction (`lhd lec` + --workdir) ==================
 // On a REFUTED verdict with a reproducible BMC trace, write a self-contained
-// Pyrope testbench (lec.prpfail, default lecfail.prp) that instantiates BOTH
+// Pyrope testbench (formal.lec.prpfail, default lecfail.prp) that instantiates BOTH
 // designs inside one wrapper module, drives the counterexample input sequence,
-// and (with lec.prpfailrun) runs `lhd sim` to dump ONE VCD (lecfail.vcd) so the
+// and (with formal.lec.prpfail_run) runs `lhd sim` to dump ONE VCD (lecfail.vcd) so the
 // impl-vs-ref divergence is visualized / re-runnable. Every step is best-effort:
 // a side that cannot re-emit as Pyrope (lg:/yosys netlists have no LNAST), a
 // name clash, or a sim build error is a WARNING, never a hard failure — the LEC
@@ -1322,7 +1322,7 @@ static void emit_witness_json(const std::string& path, std::string_view kind, st
 void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_result& r, const std::string& impl_top_full,
                           const std::string& ref_top_full, const std::string& prpfail, bool run_sim) {
   auto skip = [&](std::string_view why) {
-    livehd::diag::info("pass.lec", "lecfail-skip", "io").msg("lec.prpfail witness testbench not generated: {}", why).emit();
+    livehd::diag::info("pass.lec", "lecfail-skip", "io").msg("formal.lec.prpfail witness testbench not generated: {}", why).emit();
   };
   if (r.trace.empty()) {
     skip("the verdict carries no reproducible input trace (inductive single-step CEX, or witnesses disabled)");
@@ -1351,7 +1351,7 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   const std::string lhd_bin  = file_utils::get_exe_path() + "/lhd";
   const std::string impl_dir = opts.workdir + "/lecfail_impl_prp";
   const std::string ref_dir  = opts.workdir + "/lecfail_ref_prp";
-  const std::string log      = next_log_path(opts, "lec.prpfail");
+  const std::string log      = next_log_path(opts, "formal.lec.prpfail");
   if (!lecfail_emit_side(lhd_bin, opts, opts.impl_kind, opts.impl_path, impl_dir, opts.workdir + "/lecfail_impl_w", log)
       || !lecfail_emit_side(lhd_bin, opts, opts.ref_kind, opts.ref_path, ref_dir, opts.workdir + "/lecfail_ref_w", log)) {
     skip(std::format("a side could not be re-emitted as Pyrope (lg:/yosys-verilog sides have no LNAST); see {}", log));
@@ -1634,7 +1634,7 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   ofs << out;
   ofs.close();
   res.outputs.push_back(prpfail_path);
-  res.recipe_steps.push_back(std::format("lec.prpfail witness testbench -> {}", prpfail_path));
+  res.recipe_steps.push_back(std::format("formal.lec.prpfail witness testbench -> {}", prpfail_path));
   std::print("lec: wrote counterexample testbench {}\n", prpfail_path);
 
   // F7: machine-readable sibling artifact, keyed off the same trace (so its input
@@ -1653,7 +1653,7 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
       .msg("lec: creating counterexample waveform {}/{}.vcd", opts.workdir, test_name)
       .emit();
   // Run it: one instance -> one VCD at <workdir>/<test_name>.vcd.
-  const std::string sim_log = next_log_path(opts, "lec.prpfailrun");
+  const std::string sim_log = next_log_path(opts, "formal.lec.prpfail_run");
   std::string       cmd     = shell_quote(lhd_bin) + " sim ";
   // Import form: pass both original sources positionally so the testbench's
   // `import("<stem>.<top>")` resolve to the co-loaded units.
@@ -1667,7 +1667,7 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   // and the VCD style knob, so `lhd lec --set sim.vcdfakedelay=false` shapes
   // the counterexample waveform too.
   for (const auto& [k, v] : opts.sets) {
-    if ((k == "compile.cgen.sim_hlop" || k == "compile.cgen.sim_iassert" || k == "sim.vcdfakedelay" || k == "sim.vcd_fake_delay") && !v.empty()) {
+    if ((k == "compile.cgen.sim_hlop" || k == "compile.cgen.sim_iassert" || k == "sim.vcd_fake_delay") && !v.empty()) {
       cmd += " --set " + shell_quote(k + "=" + v);
     }
   }
@@ -1676,11 +1676,11 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   std::string vcd = std::format("{}/{}.vcd", opts.workdir, test_name);
   if (WIFEXITED(st) && WEXITSTATUS(st) == 0 && fs::exists(vcd)) {
     res.outputs.push_back(vcd);
-    res.recipe_steps.push_back(std::format("lec.prpfailrun VCD -> {}", vcd));
+    res.recipe_steps.push_back(std::format("formal.lec.prpfail_run VCD -> {}", vcd));
     std::print("lec: wrote counterexample waveform {}\n", vcd);
   } else {
     livehd::diag::warn("pass.lec", "lecfail-sim", "io")
-        .msg("lec.prpfailrun: `lhd sim {}` did not produce {} (see {})", prpfail_path, vcd, sim_log)
+        .msg("formal.lec.prpfail_run: `lhd sim {}` did not produce {} (see {})", prpfail_path, vcd, sim_log)
         .emit();
   }
 }
@@ -1931,8 +1931,7 @@ void lec_command(Options& opts, Result& res) {
   // (the former `lhd check`) — the only backend that reads Verilog without a
   // front-end reader and the path for gate-level / yosys-origin netlists.
   Eprp_var::Eprp_dict labels;
-  merge_sets(opts, "lec", labels);        // legacy spelling, lowest precedence
-  merge_sets(opts, "formal", labels);     // the shared formal.* vocabulary
+  merge_sets(opts, "formal", labels);      // the shared formal.* vocabulary
   merge_sets(opts, "formal.lec", labels);  // lec-specific canonical spelling wins
   auto label = [&](std::string_view k, std::string_view def) -> std::string {
     auto it = labels.find(std::string{k});
@@ -1941,12 +1940,12 @@ void lec_command(Options& opts, Result& res) {
   const std::string solver = label("solver", "cvc5");
   if (solver != "cvc5" && solver != "bitwuzla" && solver != "lgyosys") {
     throw Lhd_error{"usage",
-                    std::format("--set lec.solver expects cvc5|bitwuzla|lgyosys, got '{}'", solver),
+                    std::format("--set formal.solver expects cvc5|bitwuzla|lgyosys, got '{}'", solver),
                     "cvc5 (default, in-process SMT) | bitwuzla (in-process SMT) | lgyosys (yosys/lgcheck)"};
   }
   if (solver == "lgyosys") {
     if (!opts.files.empty() || !opts.formal_filter.empty()) {
-      throw Lhd_error{"unsupported", "formal-block LEC helpers require the cvc5 backend", "use --set lec.solver=cvc5"};
+      throw Lhd_error{"unsupported", "formal-block LEC helpers require the cvc5 backend", "use --set formal.solver=cvc5"};
     }
     lec_lgyosys(opts, res);
     return;
@@ -2002,18 +2001,18 @@ void lec_command(Options& opts, Result& res) {
   o.split        = label("split", "auto");
   o.rlimit       = std::atoi(label("rlimit", "0").c_str());  // deterministic per-query budget (0=off; CI/repro)
   o.budget_mode  = label("budget_mode", "wall");             // wall = total-budget escalating rounds; rlimit = no-op
-  o.minetimeout  = std::atoi(label("mine_timeout", label("minetimeout", "0")).c_str());
+  o.minetimeout  = std::atoi(label("mine_timeout", "0").c_str());
   o.phase        = label("phase", "after_reset");
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
   o.reset        = label("reset", "");
 
-  // lec.match: explicit register correspondence, inline or @FILE.
+  // formal.lec.match: explicit register correspondence, inline or @FILE.
   if (std::string match_spec = label("match", ""); !match_spec.empty()) {
     std::string text = match_spec;
     if (match_spec.front() == '@') {
       std::string path = match_spec.substr(1);
       if (!fs::is_regular_file(path)) {
-        throw Lhd_error{"missing_file", std::format("lec.match file not found: {}", path), ""};
+        throw Lhd_error{"missing_file", std::format("formal.lec.match file not found: {}", path), ""};
       }
       std::ifstream     f(path);
       std::stringstream ss;
@@ -2023,8 +2022,8 @@ void lec_command(Options& opts, Result& res) {
     o.match = livehd::lec::parse_match_pairs(text);
   }
 
-  // lec.collapse: proven module defs to force-blackbox. Union of the --collapse
-  // flags and a comma-separated `--set lec.collapse=a,b,c`.
+  // formal.lec.collapse: proven module defs to force-blackbox. Union of the --collapse
+  // flags and a comma-separated `--set formal.lec.collapse=a,b,c`.
   o.collapse = opts.collapse;
   if (std::string cs = label("collapse", ""); !cs.empty()) {
     size_t pos = 0;
@@ -2088,7 +2087,7 @@ void lec_command(Options& opts, Result& res) {
     auto checked = livehd::lec::prove_properties(impl_g.get(), check_opts, sub_lib_ptr, &formal_helpers.checks);
     if (checked.oversize_refused) {
       throw Lhd_error{"unsupported", std::format("lec refused '{}': {}", impl_g->get_name(), checked.detail),
-                      "set lec.allow_oversize=true to run it anyway (it may exhaust host memory)"};
+                      "set formal.allow_oversize=true to run it anyway (it may exhaust host memory)"};
     }
     int  seen    = 0;
     for (const auto& p : checked.props) {
@@ -2132,7 +2131,7 @@ void lec_command(Options& opts, Result& res) {
       .emit();
 
   // 2f-fcore verdict cache: persistent only under a user-named --workdir
-  // (formal_cache.json; opt out with --set lec.cache=false). Keyed cache-wide
+  // (formal_cache.json; opt out with --set formal.cache=false). Keyed cache-wide
   // by kFormalSrcSalt — the build-time content hash of the prover sources — so
   // a prover change invalidates every stored verdict automatically. v1 wires
   // it into the hierarchical driver (the default path).
@@ -2155,7 +2154,7 @@ void lec_command(Options& opts, Result& res) {
     const std::string hier_refute = label("hier_refute", "fail");
     if (hier_refute != "fail" && hier_refute != "escalate") {
       throw Lhd_error{"usage",
-                      std::format("--set lec.hier_refute expects fail|escalate, got '{}'", hier_refute),
+                      std::format("--set formal.lec.hier_refute expects fail|escalate, got '{}'", hier_refute),
                       "fail (default; a refuted block fails the run, its parents are skipped) | escalate (prove the "
                       "parents anyway, to confirm the block-boundary counterexample is reachable at the top)"};
     }
@@ -2311,7 +2310,7 @@ void lec_command(Options& opts, Result& res) {
         } else if (!flat_retry_all && vcache->skip_unknown(flat_ckey, o.timeout)) {
           r.verdict    = livehd::lec::Verdict::Unknown;
           r.engine     = "cache-skip";
-          r.detail     = "skipped: known inconclusive at >= this budget (--set lec.retry=all to re-attempt)";
+          r.detail     = "skipped: known inconclusive at >= this budget (--set formal.retry=all to re-attempt)";
           r.elapsed_ms = 0;
           std::print("lec: '{}' UNKNOWN (skipped: known inconclusive)\n", impl_g->get_name());
           settled_by_cache = true;
@@ -2371,12 +2370,12 @@ void lec_command(Options& opts, Result& res) {
   }
 
   // Design-size refusal is a hard admission failure (like pass.abc), not a
-  // solver-inconclusive UNKNOWN: exit non-zero regardless of lec.strict, naming
+  // solver-inconclusive UNKNOWN: exit non-zero regardless of formal.strict, naming
   // the override. (`lhd pass lec` already fatals on any UNKNOWN; this makes the
   // `lhd lec` CLI path consistent for the size case specifically.)
   if (r.oversize_refused) {
     throw Lhd_error{"unsupported", std::format("lec refused '{}': {}", impl_g->get_name(), r.detail),
-                    "set lec.allow_oversize=true to run it anyway (it may exhaust host memory)"};
+                    "set formal.allow_oversize=true to run it anyway (it may exhaust host memory)"};
   }
 
   bool lec_equiv = r.verdict == livehd::lec::Verdict::Proven;
@@ -2392,9 +2391,9 @@ void lec_command(Options& opts, Result& res) {
   }
 
   // lecfail witness testbench + VCD (`lhd lec` + --workdir). On a REFUTED verdict,
-  // write a self-contained Pyrope reproduction (lec.prpfail) and optionally run it
-  // to dump a VCD (lec.prpfailrun). Resolved with workdir-aware defaults: without
-  // a user --workdir both are off; with one they default on. Gated by lec.witness.
+  // write a self-contained Pyrope reproduction (formal.lec.prpfail) and optionally run it
+  // to dump a VCD (formal.lec.prpfail_run). Resolved with workdir-aware defaults: without
+  // a user --workdir both are off; with one they default on. Gated by formal.witness.
   if (r.verdict == livehd::lec::Verdict::Refuted) {
     auto get_set = [&](std::string_view k, std::string& v) {
       auto it = labels.find(std::string{k});
@@ -2416,11 +2415,11 @@ void lec_command(Options& opts, Result& res) {
       }
     } else if (get_set("prpfail", pv) && !workdir_set && !pv.empty() && pv != "false" && pv != "0") {
       livehd::diag::info("pass.lec", "lecfail-needs-workdir", "io")
-          .msg("lec.prpfail needs --workdir (a persistent output dir); skipping the witness testbench")
+          .msg("formal.lec.prpfail needs --workdir (a persistent output dir); skipping the witness testbench")
           .emit();
     }
     bool prpfailrun = workdir_set;  // default: run iff --workdir
-    if (std::string rv; get_set("prpfail_run", rv) || get_set("prpfailrun", rv)) {
+    if (std::string rv; get_set("prpfail_run", rv)) {
       prpfailrun = !(rv == "false" || rv == "0" || rv.empty());
     }
     if (!prpfail.empty()) {
@@ -2438,7 +2437,7 @@ void lec_command(Options& opts, Result& res) {
       // REFUTED above disproves equivalence (a real counterexample → hard fail).
       // UNKNOWN is the solver giving up: it found NO counterexample but could not
       // complete the proof. Per the deferred-warning policy (disproved ⇒ error;
-      // could-not-prove ⇒ warning) this is NOT a hard failure — UNLESS `lec.strict`
+      // could-not-prove ⇒ warning) this is NOT a hard failure — UNLESS `formal.strict`
       // is set, or the miter actually surfaced a diff (a non-empty witness, which is a
       // potential discrepancy: an incomplete-correspondence partial miter, or an
       // `auto` run whose ind refuted while bmc could not clear it). Otherwise emit a
@@ -2452,7 +2451,7 @@ void lec_command(Options& opts, Result& res) {
       livehd::diag::warn("pass.lec", "inconclusive", "io")
           .msg(
               "lec INCONCLUSIVE: '{}' — the solver could not complete the proof and found NO counterexample ({}). "
-               "This is NOT a proof of equivalence; pass --set lec.strict=true to treat it as a failure.",
+               "This is NOT a proof of equivalence; pass --set formal.strict=true to treat it as a failure.",
                impl_g->get_name(),
                r.detail)
           .emit();
@@ -2514,7 +2513,7 @@ void lec_command(Options& opts, Result& res) {
 // formalfail.prp: the `lhd formal verify` analogue of lec's lecfail.prp — on a
 // REFUTED obligation with --workdir, write a self-contained Pyrope testbench
 // that instantiates the DESIGN, drives the violating per-cycle input trace,
-// and (prpfailrun) replays it under `lhd sim --set sim.vcd=true`. A design
+// and (prpfail_run) replays it under `lhd sim --set sim.vcd=true`. A design
 // assert then FIRES during the replay (sim exiting non-zero is the expected
 // reproduction, not a failure); a formal-block obligation has no runtime
 // check, but the VCD still shows every signal the block reads.
@@ -2698,14 +2697,14 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   livehd::diag::info("pass.formal", "formalfail-creating-vcd", "progress")
       .msg("formal verify: creating counterexample waveform {}/{}.vcd", opts.workdir, test_name)
       .emit();
-  const std::string sim_log = next_log_path(opts, "formal.prpfailrun");
+  const std::string sim_log = next_log_path(opts, "formal.prpfail_run");
   std::string       cmd     = shell_quote(lhd_bin) + " sim ";
   if (can_import) {
     cmd += shell_quote(design_path) + " ";
   }
   cmd += shell_quote(prpfail_path) + " --set sim.vcd=true --workdir " + shell_quote(opts.workdir);
   for (const auto& [k, v] : opts.sets) {
-    if ((k == "compile.cgen.sim_hlop" || k == "compile.cgen.sim_iassert" || k == "sim.vcdfakedelay" || k == "sim.vcd_fake_delay") && !v.empty()) {
+    if ((k == "compile.cgen.sim_hlop" || k == "compile.cgen.sim_iassert" || k == "sim.vcd_fake_delay") && !v.empty()) {
       cmd += " --set " + shell_quote(k + "=" + v);
     }
   }
@@ -2716,7 +2715,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   // reproduction; the artifact that matters is the waveform.
   if (fs::exists(vcd)) {
     res.outputs.push_back(vcd);
-    res.recipe_steps.push_back(std::format("formal.prpfailrun VCD -> {}", vcd));
+    res.recipe_steps.push_back(std::format("formal.prpfail_run VCD -> {}", vcd));
     const bool fired = !(WIFEXITED(st) && WEXITSTATUS(st) == 0);
     std::print("formal verify: wrote counterexample waveform {}{}\n",
                vcd,
@@ -2735,7 +2734,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
     }
   } else {
     livehd::diag::warn("pass.formal", "formalfail-sim", "io")
-        .msg("formal.prpfailrun: `lhd sim {}` did not produce {} (see {})", prpfail_path, vcd, sim_log)
+        .msg("formal.prpfail_run: `lhd sim {}` did not produce {} (see {})", prpfail_path, vcd, sim_log)
         .emit();
   }
 }
@@ -2816,7 +2815,7 @@ static void emit_formal_report(const std::string& path, const std::string& desig
   j += std::format("    \"reset_detected\": {},\n    \"vacuous\": {},\n", r.reset_detected ? "true" : "false",
                    r.vacuous ? "true" : "false");
   j += std::format("    \"engine\": \"{}\",\n    \"bound\": {},\n", json_esc(o.engine), o.bound);
-  j += std::format("    \"budget\": {{\"timeout_s\": {}, \"budget_mode\": \"{}\", \"rlimit\": {}, \"minetimeout_s\": {}}},\n",
+  j += std::format("    \"budget\": {{\"timeout_s\": {}, \"budget_mode\": \"{}\", \"rlimit\": {}, \"mine_timeout_s\": {}}},\n",
                    o.timeout, json_esc(o.budget_mode), o.rlimit, o.minetimeout);
   j += std::format(
       "    \"assume_counts\": {{\"input\": {}, \"unchecked\": {}, \"internal_proven\": {}, \"internal_unproven\": {}, "
@@ -3033,8 +3032,7 @@ void formal_verify_command(Options& opts, Result& res) {
 
   // Knobs: lec.* (legacy aliases) < formal.* (the one shared namespace).
   Eprp_var::Eprp_dict labels;
-  merge_sets(opts, "lec", labels);        // legacy spelling, lowest precedence
-  merge_sets(opts, "formal", labels);     // the shared formal.* vocabulary
+  merge_sets(opts, "formal", labels);      // the shared formal.* vocabulary
   merge_sets(opts, "formal.lec", labels);  // lec-specific canonical spelling wins
   auto label = [&](std::string_view k, std::string_view def) -> std::string {
     auto it = labels.find(std::string{k});
@@ -3066,7 +3064,7 @@ void formal_verify_command(Options& opts, Result& res) {
   // disables it inside prove_properties. minetimeout (0=off): an INDEPENDENT
   // diagnosis budget that names the toxic obligation core of a timed-out run.
   o.budget_mode  = label("budget_mode", "wall");
-  o.minetimeout  = std::atoi(label("mine_timeout", label("minetimeout", "0")).c_str());
+  o.minetimeout  = std::atoi(label("mine_timeout", "0").c_str());
   o.mine         = label("mine", "");  // P3 mining tier ("" = inductive only | speculative)
 
   std::unique_ptr<livehd::formal::Verdict_cache> vcache;
@@ -3390,7 +3388,7 @@ void formal_verify_command(Options& opts, Result& res) {
   auto r = livehd::lec::prove_properties(g.get(), o, sub_lib_ptr, mons.empty() ? nullptr : &mons);
   if (r.oversize_refused) {
     throw Lhd_error{"unsupported", std::format("formal verify refused '{}': {}", g->get_name(), r.detail),
-                    "set lec.allow_oversize=true to run it anyway (it may exhaust host memory)"};
+                    "set formal.allow_oversize=true to run it anyway (it may exhaust host memory)"};
   }
   if (vcache) {
     vcache->save();
@@ -3486,11 +3484,7 @@ void formal_verify_command(Options& opts, Result& res) {
           .emit();
     }
     bool prpfailrun = workdir_set;
-    // canonical spelling first, the deprecated alias as fallback
     auto pfr = labels.find("prpfail_run");
-    if (pfr == labels.end() || pfr->second.empty()) {
-      pfr = labels.find("prpfailrun");
-    }
     if (pfr != labels.end() && !pfr->second.empty()) {
       prpfailrun = !(pfr->second == "false" || pfr->second == "0");
     }
