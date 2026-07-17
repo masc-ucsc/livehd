@@ -26,6 +26,23 @@ cc_library(
     alwayslink = True,  # static Pass_plugin registration
 )
 
+# The incremental-synthesis region digest (2opt-incr A): the cache-key
+# contract. Links the full pass library (Region_body, node_util) — the ABC dep
+# rides along unused.
+cc_test(
+    name = "abc_incr_test",
+    srcs = ["abc_incr_test.cpp"],
+    copts = COPTS,
+    # ABC's io layer wants zlib; the lhd binary adds it the same way.
+    linkopts = ["-lz"],
+    deps = [
+        ":pass_abc",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)
+
 # Functional unit test for the backend-agnostic adder/comparator builders
 # (abc_arith.hpp), instantiated with a software bit model — no ABC dependency.
 cc_test(

@@ -927,14 +927,14 @@ void Pass_lean::setup() {
                  &Pass_lean::work);
   m1.add_label_optional("path", "Output directory for emitted Lean files.");
   m1.add_label_optional("top", "Top module name override.");
-  m1.add_label_optional("strict", "true|false (default true). Abort on unsupported ops.");
-  m1.add_label_optional("normalize", "true|false (default true). Normalize pre-export width artifacts.");
-  m1.add_label_optional("emit_cert", "true|false (default true). Emit graph certificate and cert-model definitions.");
-  m1.add_label_optional("max_width", "Hard cap on node Bits width (default 1024).");
-  m1.add_label_optional("cert_wf", "skip|eval|sorry|chunked (default skip). Certificate well-formedness proof mode.");
-  m1.add_label_optional("cert_wf_fallback", "fail|sorry|eval for unsupported cert_wf:chunked chunk shapes (default fail).");
-  m1.add_label_optional("cert_chunk_size", "Number of node certificates per chunk for cert_wf:chunked (default 25).");
-  m1.add_label_optional("cert_chunk_limit", "Emit only first N certificate chunks for proof-shape testing (default 0 = all).");
+  m1.add_label_optional("strict", "true|false. Abort on unsupported ops (formal.strict applies too; formal.lean.strict wins)", "true");
+  m1.add_label_optional("normalize", "true|false. Normalize pre-export width artifacts (formal.normalize applies too)", "true");
+  m1.add_label_optional("emit_cert", "true|false. Emit graph certificate and cert-model definitions.", "true");
+  m1.add_label_optional("max_width", "Hard cap on node Bits width.", "1024");
+  m1.add_label_optional("cert_wf", "skip|eval|sorry|chunked. Certificate well-formedness proof mode.", "skip");
+  m1.add_label_optional("cert_wf_fallback", "fail|sorry|eval for unsupported cert_wf:chunked chunk shapes.", "fail");
+  m1.add_label_optional("cert_chunk_size", "Number of node certificates per chunk for cert_wf:chunked.", "25");
+  m1.add_label_optional("cert_chunk_limit", "Emit only first N certificate chunks for proof-shape testing (0 = all).", "0");
   register_pass(m1);
 }
 

@@ -41,7 +41,7 @@ TEST(BitwidthUnbounded, WarnsOnUnboundedDriverPin) {
   sink.set_jsonl_path("off");
   sink.set_human_stderr(false);
 
-  Bitwidth bw(/*hier=*/false, /*max_iterations=*/3);
+  Bitwidth bw(/*max_iterations=*/3);
   bw.do_trans(g);
 
   EXPECT_TRUE(has_unbounded_warning(sink)) << "expected a bitwidth-unbounded warning for the unbounded Sum pin";
@@ -70,7 +70,7 @@ TEST(BitwidthUnbounded, NoWarnWhenAllBounded) {
   sink.set_jsonl_path("off");
   sink.set_human_stderr(false);
 
-  Bitwidth bw(/*hier=*/false, /*max_iterations=*/3);
+  Bitwidth bw(/*max_iterations=*/3);
   bw.do_trans(g);
 
   EXPECT_FALSE(has_unbounded_warning(sink)) << "a fully-typed design must not warn about unbounded pins";
@@ -103,7 +103,7 @@ TEST(BitwidthUnbounded, NoWarnWhenAllBounded) {
   sink.set_jsonl_path("off");
   sink.set_human_stderr(false);
 
-  Bitwidth bw(/*hier=*/false, /*max_iterations=*/10);
+  Bitwidth bw(/*max_iterations=*/10);
   bw.do_trans(g);
 
   int32_t bits = livehd::graph_util::bits_of(op.create_driver_pin(0));

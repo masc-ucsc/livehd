@@ -51,7 +51,7 @@ C "$WORK/t_d2.v" "$WORK/sleaf.v" --top top --emit-dir "lg:$WORK/td2" --workdir "
 C "$WORK/t_stall.v" "$WORK/sleaf.v" --top top --emit-dir "lg:$WORK/tstall" --workdir "$WORK/c3"
 
 run() {  # $1=label ; $2..=lhd lec args ; sets RC/OUT
-  OUT=$("$LHD" lec "${@:2}" --top top --set lec.hierarchical=false --workdir "$WORK/w_$1" 2>&1); RC=$?
+  OUT=$("$LHD" lec "${@:2}" --top top --set lec.hier=false --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
 # 1) collapse the STATEFUL leaf, self-equivalent -> PROVEN (state-aware box sound)

@@ -17,10 +17,18 @@ using livehd::graph_util::node_color_of;
 
 namespace {
 
+// The RAW algorithm: cut rules only, no size window. Every test below pins what
+// `synth` cuts, so the window must stay out of the way -- min_ge/max_ge default
+// to 0 (inert) precisely so an algorithm asked for the raw coloring gives the raw
+// coloring. Stated explicitly here rather than relied on: the shipped CLI policy
+// is 1000/200000, and a test that silently inherited it would be pinning the
+// window instead of the cut rules.
 Color_opts flat_opts() {
   Color_opts o;
   o.hier    = false;
   o.compact = true;
+  o.min_ge  = 0;
+  o.max_ge  = 0;
   return o;
 }
 
@@ -231,4 +239,103 @@ TEST(ColorSynth, WideSumOpensBoundary) {
   EXPECT_NE(0, node_color_of(head));
   EXPECT_NE(0, node_color_of(wide));
   EXPECT_NE(node_color_of(head), node_color_of(wide)) << "a wide Sum opens a fresh synthesis boundary";
+}
+
+// With the window on, the cut rules still decide the SHAPE but no longer the
+// SIZE: the per-node regions `synth` opens for a chain of wide Sums (each its own
+// boundary) get merged up to min. This is the XSCore singleton story in
+// miniature.
+TEST(ColorSynth, SizeWindowMergesTheBoundarySingletons) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_synth_window");
+  auto  gio = lib.create_io("synth_window");
+  gio->add_input("a", 0);
+  gio->add_output("y", 1);
+  auto g = gio->create_graph();
+
+  auto in = g->get_input_pin("a");
+  livehd::graph_util::set_bits(in, 16);
+
+  // A chain of wide Sums: every one is a cut, so raw `synth` gives each its own
+  // region (16 GE apiece).
+  auto prev = in;
+  for (int i = 0; i < 12; ++i) {
+    auto s = create_typed_node(*g, Ntype_op::Sum);
+    prev.connect_sink(s.create_sink_pin(0));
+    in.connect_sink(s.create_sink_pin(1));
+    auto d = s.create_driver_pin(0);
+    livehd::graph_util::set_bits(d, 16);
+    prev = d;
+  }
+  prev.connect_sink(g->get_output_pin("y"));
+
+  auto count_regions = [&]() {
+    absl::flat_hash_set<int> ids;
+    for (auto n : g->forward_class()) {
+      if (is_partitionable(n)) {
+        ids.insert(node_color_of(n));
+      }
+    }
+    return ids.size();
+  };
+
+  Color_synth raw(flat_opts(), "synth");
+  raw.label(g.get());
+  const auto raw_regions = count_regions();
+  EXPECT_GT(raw_regions, 4u) << "raw synth cuts at every wide Sum";
+
+  auto o   = flat_opts();
+  o.min_ge = 64;  // four 16-GE Sums' worth
+  Color_synth windowed(o, "synth");
+  windowed.label(g.get());
+
+  EXPECT_LT(count_regions(), raw_regions) << "the window must merge the boundary singletons";
+}
+
+// Source-seeded regions (the 2opt-freq block-attribute channel) are the user's,
+// not the algorithm's: they win outright and the window must not resize them.
+// pass.abc binds its per-region `region_opts` by exact color id, so renumbering
+// a seeded region silently binds its ABC flow to the wrong logic.
+TEST(ColorSynth, SeededRegionsSurviveTheWindow) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_synth_seeded");
+  auto  gio = lib.create_io("synth_seeded");
+  gio->add_input("a", 0);
+  gio->add_output("y", 1);
+  auto g = gio->create_graph();
+
+  auto in = g->get_input_pin("a");
+  livehd::graph_util::set_bits(in, 8);
+
+  // Three plain nodes, the middle one hand-colored as a seeded block region.
+  auto n0 = create_typed_node(*g, Ntype_op::And);
+  in.connect_sink(n0.create_sink_pin(0));
+  auto d0 = n0.create_driver_pin(0);
+  livehd::graph_util::set_bits(d0, 8);
+
+  auto seeded = create_typed_node(*g, Ntype_op::Not);
+  d0.connect_sink(seeded.create_sink_pin(0));
+  auto ds = seeded.create_driver_pin(0);
+  livehd::graph_util::set_bits(ds, 8);
+
+  auto n2 = create_typed_node(*g, Ntype_op::And);
+  ds.connect_sink(n2.create_sink_pin(0));
+  in.connect_sink(n2.create_sink_pin(1));
+  auto d2 = n2.create_driver_pin(0);
+  livehd::graph_util::set_bits(d2, 8);
+  d2.connect_sink(g->get_output_pin("y"));
+
+  constexpr int kSeededId = 7;
+  livehd::graph_util::set_color(seeded, kSeededId);
+  livehd::color::set_coloring_info(g.get(), R"({"schema_version":1,"algorithm":"block-attr","params":{}})");
+  ASSERT_TRUE(livehd::color::has_seeded_coloring(g.get()));
+
+  auto o   = flat_opts();
+  o.min_ge = 1000;  // far above the whole def: the window would fuse everything
+  o.max_ge = 200000;
+  Color_synth labeler(o, "synth");
+  labeler.label(g.get());
+
+  EXPECT_EQ(node_color_of(seeded), kSeededId) << "the seeded region keeps its exact id";
+  EXPECT_NE(node_color_of(n0), kSeededId) << "and nothing is merged into it";
+  EXPECT_NE(node_color_of(n2), kSeededId);
+  EXPECT_GT(node_color_of(n0), kSeededId) << "algorithm ids shift above the max seeded id";
 }

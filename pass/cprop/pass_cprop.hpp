@@ -4,10 +4,6 @@
 #include "pass.hpp"
 
 class Pass_cprop : public Pass {
-private:
-  bool hier;
-  bool gioc;
-
 protected:
   static void optimize(Eprp_var& var);
 

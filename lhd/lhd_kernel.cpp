@@ -29,10 +29,9 @@ std::string canonical_set_key(std::string_view key, std::string_view ctx) {
   if (key.size() > 4 && key.substr(key.size() - 4) == ".log") {
     return std::string{key};
   }
-  // The `sim.*` command namespace (sim_command, kSimSetOptions) is its own
-  // vocabulary, distinct from the `compile.sim.*` cgen labels. Like `.log`, it
-  // must never collect a command-path prefix — else `sim.vcd` would be rewritten
-  // to the unrelated `compile.sim.vcd` under a `compile`/describe context.
+  // The `sim.*` command namespace (sim_command + the cgen.sim codegen labels,
+  // kSimSetOptions) is its own vocabulary. Like `.log`, it must never collect
+  // a command-path prefix under a `compile`/describe context.
   if (key.size() > 4 && key.substr(0, 4) == "sim.") {
     auto flag = key.substr(4);
     for (const auto& s : kSimSetOptions) {
@@ -88,8 +87,19 @@ void init_engine() {
 std::vector<Set_option> list_set_options() {
   init_engine();
   std::vector<Set_option> out;
-  for (const auto& [set_name, method] : kSetPasses) {
-    const auto* m = Pass::eprp.get_method(method);
+  const auto is_formal_common = [](std::string_view flag) {
+    for (const auto& f : kFormalCommonFlags) {
+      if (f == flag) {
+        return true;
+      }
+    }
+    return false;
+  };
+  for (const auto& sp : kSetPasses) {
+    if (sp.list == Set_pass::List::none) {
+      continue;  // legacy alias spelling: accepted by --set, never listed
+    }
+    const auto* m = Pass::eprp.get_method(sp.method);
     if (m == nullptr) {
       continue;  // defensive: every kSetPasses method registers in init_engine
     }
@@ -97,7 +107,23 @@ std::vector<Set_option> list_set_options() {
       if (is_kernel_label(flag)) {
         continue;
       }
-      out.push_back(Set_option{std::format("{}.{}", set_name, flag), std::string{method}, attr.default_value, attr.help});
+      // `top` on any pass is the shared --top / lhd.top (set_top_label plumbs
+      // it); a per-pass listing would advertise N spellings of one knob.
+      if (flag == "top") {
+        continue;
+      }
+      // Deprecated alias labels and kernel-plumbed internals stay functional
+      // but leave the vocabulary listing.
+      if (attr.help.starts_with("DEPRECATED") || attr.help.starts_with("INTERNAL")) {
+        continue;
+      }
+      if (sp.list == Set_pass::List::common && !is_formal_common(flag)) {
+        continue;
+      }
+      if (sp.list == Set_pass::List::specific && is_formal_common(flag)) {
+        continue;
+      }
+      out.push_back(Set_option{std::format("{}.{}", sp.set_name, flag), std::string{sp.method}, attr.default_value, attr.help});
     }
   }
   // The `lhd.*` kernel namespace: shared, cross-pass settings the kernel folds
@@ -113,10 +139,18 @@ std::vector<Set_option> list_set_options() {
                  "",
                  "top module shared across passes; the canonical form of the --top flag (the flag wins if both are given). "
                  "Full internal `file.entity` name, or the bare entity when unique (resolves with a top-entity-fallback warning)"});
+  out.push_back(Set_option{"lhd.stats",
+                           "lhd",
+                           "false",
+                           "print the pass's aggregate statistics report; the canonical form of the --stats flag (either "
+                           "spelling works). Consumed by the passes that have one (pass.color, pass.semdiff)"});
   // The `sim.*` command namespace (consumed by sim_command, not an EPRP method):
   // keep `lhd list options` / `lhd describe` complete. Single source of truth =
   // kSimSetOptions, which also drives check_known_set_passes / the sim --help block.
   for (const auto& s : kSimSetOptions) {
+    if (std::string_view{s.help}.starts_with("DEPRECATED")) {
+      continue;  // accepted spelling, canonical name listed instead
+    }
     out.push_back(Set_option{std::format("sim.{}", s.name), "sim", std::string{s.default_value}, std::string{s.help}});
   }
   std::sort(out.begin(), out.end(), [](const Set_option& a, const Set_option& b) { return a.name < b.name; });

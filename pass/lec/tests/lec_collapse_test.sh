@@ -38,7 +38,7 @@ C "$WORK/top_pq.v" "$WORK/leaf_or.v"  --top top --emit-dir "lg:$WORK/or_pq"  --w
 C "$WORK/top_pp.v" "$WORK/leaf_and.v" --top top --emit-dir "lg:$WORK/and_pp" --workdir "$WORK/c3"
 
 run() {  # $1=label ; $2..=lhd lec args ; sets RC/OUT
-  OUT=$("$LHD" lec "${@:2}" --top top --set lec.hierarchical=false --set lec.engine=ind --workdir "$WORK/w_$1" 2>&1); RC=$?
+  OUT=$("$LHD" lec "${@:2}" --top top --set lec.hier=false --set lec.engine=ind --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
 # 1) leaf DESCENDED (no collapse): a&b vs a|b is visible -> REFUTED

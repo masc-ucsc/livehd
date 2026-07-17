@@ -74,10 +74,18 @@ if grep -qE '^[WE] ' "$W/ot_hier.err"; then
   fail "OpenTimer warnings/errors on the hier=true run: $(grep -E '^[WE] ' "$W/ot_hier.err" | head -3)"
 fi
 
-# 4. negative control: the rebuilt netlist top instantiates region modules,
-#    which are not Liberty cells -> must fail (never silent garbage)
-if "$LHD" pass opentimer --top "$TOP" lg:"$W/net" "$LIB" --workdir "$W/wn" -q --result-json "$W/rn.json" 2>/dev/null; then
-  fail "opentimer on the netlist top (non-Liberty Subs) passed; expected failure"
+# 4. default = hier=true: the same hierarchical top times end-to-end with no
+#    --set at all (whole-design flattening is the default).
+"$LHD" pass opentimer --top "$TOP" lg:"$W/net" "$LIB" --workdir "$W/wd" \
+    -q --result-json "$W/rd.json" 2> "$W/ot_def.err" || fail "default (hier=true) opentimer -> $(cat "$W/rd.json")"
+grep -q "\"module\":\"$TOP\"" "$W/wd/timing.json" || fail "default timing.json must report the real top name"
+grep -q '"max_delay":' "$W/wd/timing.json" || fail "default timing.json missing max_delay"
+
+# 4b. negative control: with explicit hier=false the rebuilt netlist top
+#     instantiates region modules, which are not Liberty cells -> must fail
+#     (never silent garbage)
+if "$LHD" pass opentimer --set pass.opentimer.hier=false --top "$TOP" lg:"$W/net" "$LIB" --workdir "$W/wn" -q --result-json "$W/rn.json" 2>/dev/null; then
+  fail "opentimer hier=false on the netlist top (non-Liberty Subs) passed; expected failure"
 fi
 
 # 5. negative control: a nonexistent --top must fail

@@ -80,7 +80,7 @@ void clear_all_sinks(const hhds::Node_class& node) {
 
 }  // namespace
 
-Bitwidth::Bitwidth(bool _hier, int _max_iterations) : max_iterations(_max_iterations), hier(_hier) {}
+Bitwidth::Bitwidth(int _max_iterations) : max_iterations(_max_iterations) {}
 
 void Bitwidth::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   if (!g) {
@@ -926,7 +926,7 @@ void Bitwidth::process_sext(hhds::Node_class& node, livehd::graph_util::Edge_vec
   bw.set_sbits_range(sign_max);
   adjust_bw(node.create_driver_pin(0), bw);
 
-  if (hier || not_finished || no_wire) {
+  if (not_finished || no_wire) {
     return;
   }
 
@@ -1109,7 +1109,7 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
 
     if (it->second.is_always_positive()) {
       if (bw_sbits <= pos_min_sbits) {
-        if (!hier && is_const_pin(e.driver)) {
+        if (is_const_pin(e.driver)) {
           mask_pos = i;
           if (pos_min_sbits_pos < 0) {
             pos_min_sbits_pos = i;
@@ -1132,7 +1132,7 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
     return;
   }
 
-  if (!hier && mask_pos >= 0 && pos_min_sbits != Bits_unknown && pos_min_sbits_pos != mask_pos) {
+  if (mask_pos >= 0 && pos_min_sbits != Bits_unknown && pos_min_sbits_pos != mask_pos) {
     auto v = Dlop::create_integer(1)
                  ->shl_op(*Dlop::create_integer(pos_min_sbits - 1))
                  ->sub_op(hydrate_const(inp_edges[mask_pos].driver));
@@ -1183,7 +1183,6 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, livehd::graph_util::Edge_
   }
 
   if (mask_pos >= 0) {
-    I(!hier);
     inp_edges[mask_pos].del_edge();
   }
 }
@@ -1491,9 +1490,7 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
       auto op = type_op_of(node);
 
       if (inp_edges.empty() && op != Ntype_op::Nconst && op != Ntype_op::Sub && op != Ntype_op::LUT) {
-        if (!hier) {
-          node.del_node();
-        }
+        node.del_node();
         continue;
       }
 
@@ -1589,7 +1586,7 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
     }
   }
 
-  if (!hier && !not_finished && gio) {
+  if (!not_finished && gio) {
     // Delete leftover AttrSet nodes.
     std::vector<hhds::Node_class> attrs;
     for (auto node : g->fast_class()) {
@@ -1611,15 +1608,10 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
 // carry a bounded width (bits>0) and, with it, a resolved sign. Anything still
 // at bits==0 means the fixed point could not bound that pin; surface it as a
 // diag warning so the user knows a type/width annotation (or a cprop pass) is
-// needed. Hierarchical runs intentionally defer some widths to a later global
-// pass, so they are exempt. Get_mask/Sext placeholder pins inserted by this
-// pass with no resolved width are likewise skipped (consts and multi-driver
-// Sub/Memory carry their width elsewhere).
+// needed. Get_mask/Sext placeholder pins inserted by this pass with no
+// resolved width are likewise skipped (consts and multi-driver Sub/Memory
+// carry their width elsewhere).
 void Bitwidth::report_unbounded(hhds::Graph* g) {
-  if (hier) {
-    return;
-  }
-
   std::vector<std::string> unbounded;
   for (auto node : g->fast_class()) {
     auto op = type_op_of(node);
@@ -1685,8 +1677,6 @@ void Bitwidth::dump(hhds::Graph* g) {
 }
 
 void Bitwidth::try_delete_attr_node(hhds::Node_class& node) {
-  I(!hier);
-
   Attr attr = Attr::Set_other;
   if (is_sink_connected(node, "field")) {
     auto key_dpin = get_driver_of_sink_name(node, "field");

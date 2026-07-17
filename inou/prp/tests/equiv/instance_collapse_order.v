@@ -3,7 +3,7 @@
 // BypassNetwork LEC-lhd fail after lec.gold_x=ignore removed its
 // X false-refute).
 //
-// THE (FIXED) ISSUE: `lec.hierarchical` proves each submodule def
+// THE (FIXED) ISSUE: `lec.hier` proves each submodule def
 // leaves-first, then COLLAPSES the proven def into an opaque box inside the
 // parent. The old collapse shared ONE output symbol between the two designs'
 // "corresponding" box instances and compared their INPUTS (the `bbin:` taps),

@@ -102,10 +102,14 @@ int apply_coloring(hhds::Graph *g, const Node2Id &node2id_in,
     if (sizes != nullptr) {
       ++sizes->partitionable;
     }
+    // Called exactly once per node, from the walk apply_coloring already makes,
+    // so `ge_weight` costs one pass over the node's edges and only when a stats
+    // sink asked for it at all.
     auto tally = [&](int color) {
       seen_ids.insert(color);
       if (sizes != nullptr) {
         ++sizes->color_nodes[color];
+        sizes->color_ge[color] += livehd::graph_util::ge_weight(n);
       }
     };
     if (seeded && has_color(n) && color_of(n) != 0) {

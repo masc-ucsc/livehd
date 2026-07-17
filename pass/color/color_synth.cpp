@@ -85,13 +85,24 @@ int Color_synth::data_cone_id(const hhds::Node_class& node) {
   return get_free_id();
 }
 
+// Source-seeded nodes (2opt-freq block attributes) are not this algorithm's to
+// color: apply_coloring hands them back their own id afterwards. They must be
+// excluded from the walk as well, not merely overwritten at the end -- a seeded
+// node left in the walk RECEIVES an id and, through set_id, welds the two cones
+// that meet on it into one region, even though the final coloring puts those
+// cones in different regions than the seeded one between them. The size window
+// would then be measuring a partition that never reaches pass.partition.
+bool Color_synth::is_seeded(const hhds::Node_class& node) const {
+  return seeded && graph_util::has_color(node) && graph_util::color_of(node) != NO_COLOR;
+}
+
 void Color_synth::mark_ids(hhds::Graph* g) {
   // Pass 1 -- the combinational regions. Cuts take no part: they neither
   // receive an id here nor hand one out, which is what keeps a register from
   // welding its din cone to its enable/stall cone, and its fan-out cones to
-  // each other.
+  // each other. Seeded nodes are excluded for the same structural reason.
   for (auto node : g->forward_class()) {
-    if (!is_partitionable(node) || is_cut(node)) {
+    if (!is_partitionable(node) || is_cut(node) || is_seeded(node)) {
       continue;
     }
 
@@ -101,7 +112,7 @@ void Color_synth::mark_ids(hhds::Graph* g) {
 
     for (const auto& e : node.out_edges()) {
       auto snode = e.sink.get_master_node();
-      if (!is_partitionable(snode) || is_cut(snode)) {
+      if (!is_partitionable(snode) || is_cut(snode) || is_seeded(snode)) {
         continue;  // a cut owns its region; it never inherits this one
       }
       set_id(snode, id);
@@ -113,7 +124,7 @@ void Color_synth::mark_ids(hhds::Graph* g) {
   // points that make the walk acyclic), so during pass 1 a flop's din cone has
   // no id yet and every cut would fall back to a region of its own.
   for (auto node : g->forward_class()) {
-    if (is_partitionable(node) && is_cut(node)) {
+    if (is_partitionable(node) && is_cut(node) && !is_seeded(node)) {
       force_id(node, data_cone_id(node));
     }
   }
@@ -128,12 +139,35 @@ void Color_synth::merge_ids() {
 void Color_synth::label(hhds::Graph* g) {
   last_free_id = 1;
   flat_node2id.clear();
-  uf = Int_union_find{};
+  uf     = Int_union_find{};
+  seeded = has_seeded_coloring(g);
 
   mark_ids(g);
   merge_ids();
 
-  int n_colors = apply_coloring(g, flat_node2id, opts, opts.sizes);
+  // The size window reshapes what the cut rules produced: right shape, wrong
+  // size. It owns the component split and mints its own deterministic ids, so
+  // `continuous` on top would only relabel an already-split coloring in hash
+  // order -- skip it.
+  Color_opts o = opts;
+  if (opts.min_ge != 0 || opts.max_ge != 0) {
+    Size_window_stats st;
+    flat_node2id = apply_size_window(g, flat_node2id, opts.min_ge, opts.max_ge, &st);
+    o.continuous = false;
+    if (opts.verbose) {
+      std::print(stderr,
+                 "[color.synth] {} window: {} -> {} region(s), {} merge(s), {} split(s), {} under min, {} over max\n",
+                 g->get_name(),
+                 st.regions_in,
+                 st.regions_out,
+                 st.merges,
+                 st.splits,
+                 st.left_under,
+                 st.left_over);
+    }
+  }
+
+  int n_colors = apply_coloring(g, flat_node2id, o, o.sizes);
   if (opts.verbose) {
     std::print(stderr, "[color.synth] {} -> {} clusters\n", g->get_name(), n_colors);
   }

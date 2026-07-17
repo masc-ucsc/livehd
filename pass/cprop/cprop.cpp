@@ -194,8 +194,6 @@ constexpr std::pair<int, int> kFpBail{-1, -1};
 
 }  // namespace
 
-Cprop::Cprop(bool _hier) : hier(_hier) {}
-
 void Cprop::collapse_forward_same_op(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
   auto op = type_op_of(node);
 
@@ -1271,10 +1269,6 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
 void Cprop::bwd_del_node(hhds::Node_class& node) {
   // Aggressive del: also remove single-user inputs that become dead.
   // WARNING: only call when all needed downstream edges have been added.
-
-  if (hier) {
-    return;
-  }
 
   I(!Ntype::is_loop_last(type_op_of(node)));
 

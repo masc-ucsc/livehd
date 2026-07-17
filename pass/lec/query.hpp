@@ -297,7 +297,7 @@ struct Lec_options {
   // or `structural` (pass/semdiff::structural_match). A def whose ref/impl are
   // structurally IDENTICAL (no unmatched node on either side) AND whose children
   // are all already proven needs NO solver call — it is dropped as proven. Only
-  // the changed defs reach cvc5. The driver (lhd lec --set lec.hierarchical=true)
+  // the changed defs reach cvc5. The driver (lhd lec --set lec.hier=true)
   // consumes this; prove_equal itself ignores it.
   std::string semdiff = "none";
 

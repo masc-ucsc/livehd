@@ -19,7 +19,12 @@
 
 namespace {
 constexpr uint64_t kMiB = 1024 * 1024;
-}
+
+// -c opt is allowed to elide an unobserved new[]/touch sequence entirely
+// (heap elision), leaving RSS byte-for-byte unchanged; make the buffer
+// observable so the pages really get committed.
+inline void keep_alive(void* p) { asm volatile("" : : "g"(p) : "memory"); }
+}  // namespace
 
 TEST(HostMem, PhysicalRamIsPlausible) {
   const auto phys = livehd::cost::physical_ram_bytes();
@@ -47,6 +52,7 @@ TEST(HostMem, RssTracksATouchedAllocation) {
   for (size_t i = 0; i < kBytes; i += 4096) {
     big[i] = static_cast<char>(i);  // touch every page: RSS is resident, not reserved
   }
+  keep_alive(big.get());
 
   const auto after = livehd::cost::process_rss_bytes();
   EXPECT_GT(after, before + (64 * kMiB)) << "RSS did not follow a 128 MiB touched allocation";
@@ -98,6 +104,7 @@ TEST(HostMem, FootprintIsPlausibleAndTracksAllocation) {
   for (size_t i = 0; i < kBytes; i += 4096) {
     big[i] = static_cast<char>(i);
   }
+  keep_alive(big.get());
   EXPECT_GT(livehd::cost::process_footprint_bytes(), before + (32 * kMiB))
       << "phys_footprint did not follow a 256 MiB touched allocation";
 }

@@ -62,7 +62,7 @@ for entry in "${DESIGNS[@]}"; do
   set +e
   "$LHD" lec --impl lg:"$lg" --ref verilog:"$ref_sv" --top "$top" \
     --reader yosys-verilog --workdir "$lec_work" \
-    --set lec.engine=auto --set lec.hierarchical=true \
+    --set lec.engine=auto --set lec.hier=true \
     --set lec.semdiff=structural --set lec.strict="$LEC_STRICT" \
     --result-json "$OUT/${name}_lec.json" >> "$log" 2>&1
   rc=$?; set -e

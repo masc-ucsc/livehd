@@ -17,12 +17,13 @@ void Pass_opentimer::setup() {
   m1.add_label_optional("margin", "% arrival time marging (0-100)", "0");
   m1.add_label_optional("top", "analyze only this module (required when the library holds several defs)", "");
   m1.add_label_optional("hier",
-                        "whole-design timing across the instance hierarchy (true|false|stitch, default false): true "
+                        "whole-design timing across the instance hierarchy (true|false|stitch, default true): true "
                         "structurally flattens the design (hierarchy inlined into a scratch def, node names keep the "
                         "dotted instance path) and times it as one module, so the critical path can span modules; "
-                        "stitch is the legacy name-stitched hier walk kept for debugging (module-boundary buses are "
-                        "not stitched there)",
-                        "false");
+                        "false times one tech-mapped module per run and rejects non-Liberty Subs; stitch is the "
+                        "legacy name-stitched hier walk kept for debugging (module-boundary buses are not stitched "
+                        "there)",
+                        "true");
   m1.add_label_optional("qor",
                         "write the timing JSON (max delay, critical pin, endpoint arrivals, source-attributed) to this file "
                         "(`lhd pass opentimer` defaults it to <workdir>/timing.json when --workdir is set)",
@@ -91,7 +92,16 @@ Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var
 
   qor_path      = var.get("qor", "");
   top_filter    = var.get("top", "");
-  hier_setting_ = var.get("hier", "false");
+  hier_setting_ = var.get("hier", "true");
+  if (hier_setting_ == "1") {
+    hier_setting_ = "true";
+  } else if (hier_setting_ == "0") {
+    hier_setting_ = "false";
+  } else if (hier_setting_ != "true" && hier_setting_ != "false" && hier_setting_ != "stitch") {
+    livehd::diag::err("pass.opentimer", "bad-option", "io")
+        .msg("hier expects true|false|stitch, got '{}'", hier_setting_)
+        .fatal();
+  }
 
   // Flush the (lineage-queued) read_celllib so build_circuit can validate cell
   // names against the loaded library at queue time. The design is still empty,

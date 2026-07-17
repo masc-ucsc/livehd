@@ -29,13 +29,13 @@ void Pass_semdiff::setup() {
   m.add_label_optional("id_granularity", "id per matched node-pair (pair) or per connected region (region)", "pair");
   m.add_label_optional("verbose", "print per-side match statistics", "false");
   m.add_label_optional("stats",
-                       "design health check: aggregate node/register/memory match report. A PRESET — implies hier, "
+                       "design health check: aggregate node/register/memory match report. A PRESET — implies "
                        "matching_names and state_pairing (an explicit --set of any of those still wins), since "
                        "whole-design correspondence is what the report answers",
                        "false");
   m.add_label_optional("dump_state", "print per-state-cell pairing outcome (matcher iteration aid)", "false");
-  m.add_label_optional("hier", "sweep every def pair (entity-paired; --top scopes to its subtree) and aggregate state stats", "false");
-  m.add_label_optional("save", "save both lg: libraries back (default: on for single-pair, off for hier)", "");
+  m.add_label_optional("hier", "sweep every def pair (entity-paired; --top scopes to its subtree) and aggregate state stats (false = one top pair)", "true");
+  m.add_label_optional("save", "save both lg: libraries back (default: on; off under stats iteration sweeps)", "");
   m.add_label_optional("name_noise", "experiment: destroy this fraction of impl-side state keys before tier-1 (0..1)", "0");
   m.add_label_optional("noise_seed", "selects which keys name_noise destroys (deterministic)", "1");
   m.add_label_optional("synalign_maxiter", "tier-2 fixed-point round cap (default 64 = converge; 1 = no propagation)", "64");

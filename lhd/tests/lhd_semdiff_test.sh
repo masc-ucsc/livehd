@@ -132,6 +132,44 @@ M=$(matched_count "$W/g2")
 echo "PASS: grep -v match=0 inverts cleanly (partitions the node set)"
 
 # ---------------------------------------------------------------------------
+# 5b. hier=0 single-pair arm: same #1 fixtures, explicit top-pair compare must
+#     still stamp+save the match attrs (save defaults on for non-stats runs).
+# ---------------------------------------------------------------------------
+compile "$W/g1.prp" "$W/g5b"
+compile "$W/o1.prp" "$W/o5b"
+"$LHD" pass semdiff --ref lg:"$W/g5b" --impl lg:"$W/o5b" --set semdiff.hier=0 -q --workdir "$W/w5b" >/dev/null 2>&1 || fail "semdiff #5b (hier=0)"
+[ "$(match0_count "$W/g5b")" -eq 0 ] || fail "#5b hier=0 ref has unmatched nodes"
+[ "$(matched_count "$W/g5b")" -gt 0 ] || fail "#5b hier=0 matched nothing (match attrs not saved?)"
+echo "PASS: hier=0 single top-pair compare still stamps and saves match attrs"
+
+# ---------------------------------------------------------------------------
+# 5c. renamed tops under the hier default: --ref-top/--impl-top seeds the top
+#     pair (name pairing alone can never find it), and a sweep that pairs
+#     NOTHING is a hard error, not a silent pass.
+# ---------------------------------------------------------------------------
+cat > "$W/ma.prp" <<'EOF'
+mod ma(a:u8, b:u8) -> (y:u9@[0]) {
+  y = a + b
+}
+EOF
+cat > "$W/mb.prp" <<'EOF'
+mod mb(a:u8, b:u8) -> (y:u9@[0]) {
+  y = a + b
+}
+EOF
+compile "$W/ma.prp" "$W/ma"
+compile "$W/mb.prp" "$W/mb"
+"$LHD" pass semdiff --ref lg:"$W/ma" --impl lg:"$W/mb" --ref-top ma --impl-top mb -q --workdir "$W/w5c" >/dev/null 2>&1 || fail "semdiff #5c renamed-top pair"
+[ "$(match0_count "$W/ma")" -eq 0 ] || fail "#5c renamed-top pair left unmatched nodes"
+[ "$(matched_count "$W/ma")" -gt 0 ] || fail "#5c renamed-top pair matched nothing"
+compile "$W/ma.prp" "$W/ma2"
+compile "$W/mb.prp" "$W/mb2"
+if "$LHD" pass semdiff --ref lg:"$W/ma2" --impl lg:"$W/mb2" -q --workdir "$W/w5c2" >/dev/null 2>&1; then
+  fail "#5c 0-pair sweep passed; expected hard error"
+fi
+echo "PASS: renamed tops pair via --ref-top/--impl-top; 0-pair sweep is a hard error"
+
+# ---------------------------------------------------------------------------
 # 6. usage guards: non-lg sides and same dir are rejected.
 # ---------------------------------------------------------------------------
 "$LHD" pass semdiff --ref "$W/g1.prp" --impl "$W/o1.prp" -q --workdir "$W/w6" >/dev/null 2>&1 && fail "#6 expected non-lg sides to be rejected"

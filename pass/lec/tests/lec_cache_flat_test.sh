@@ -3,7 +3,7 @@
 #
 # 2f-fcore F2 tail: the verdict cache on the FLAT (non-hierarchical) lec path.
 # The hierarchical driver has cached verdicts since F2; this pins the same store on
-# `--set lec.hierarchical=false`, which proves the whole design as ONE top-pair miter
+# `--set lec.hier=false`, which proves the whole design as ONE top-pair miter
 # and so stores/hits exactly ONE verdict. Cold run stores; identical warm re-run hits
 # ("PROVEN (cache)", no solver); a verdict-relevant option change (bound) is a new key
 # (miss); a design edit is a new digest (miss); a REFUTE is never cached;
@@ -43,7 +43,7 @@ EOF
 H() {
   local impl=$1 ref=$2; shift 2
   "$LHD" lec --ref "$WORK/$ref" --impl "$WORK/$impl" --top foo \
-         --set lec.hierarchical=false --workdir "$WD" "$@" 2>&1
+         --set lec.hier=false --workdir "$WD" "$@" 2>&1
 }
 has() { echo "$1" | grep -q "$2"; }
 ck() { if has "$1" "$2"; then echo "ok: $3"; else echo "FAIL: $3"; echo "$1" | grep -E 'lec(\[cache\])?:' | head -3; fail=1; fi; }

@@ -878,7 +878,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     // otherwise log-and-skip, yielding silent garbage. The celllib is loaded.
     const auto& lib = timer.celllib(ot::MAX);
     if (!lib || lib->cell(type_name) == nullptr) {
-      if (hier_mode_) {
+      if (hier_setting_ != "false") {
         if (node.get_subnode_graph() != nullptr) {
           continue;  // design-module body already flattened in via the hier walk
         }
@@ -890,9 +890,9 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         return;
       }
       livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
-          .msg("module instantiates '{}' (instance {}), which is not a cell in the Liberty library — pass.opentimer times one "
-               "tech-mapped module per run. Pass --top of a mapped region (<mod>__c<N>), or enable whole-design flattening "
-               "across the instance hierarchy with --set pass.opentimer.hier=true",
+          .msg("module instantiates '{}' (instance {}), which is not a cell in the Liberty library — hier=false times one "
+               "tech-mapped module per run. Pass --top of a mapped region (<mod>__c<N>), or drop hier=false: the default "
+               "(pass.opentimer.hier=true) flattens the whole design across the instance hierarchy",
                type_name,
                instance_name)
           .fatal();

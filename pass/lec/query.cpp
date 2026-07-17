@@ -874,10 +874,28 @@ Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method,
 }
 
 // Build the inconclusive verdict from two completed engine results. Neither was
-// trustworthy here (no BMC-Refuted, no inductive-Proven). The inductive CEX (if
-// any) is surfaced as a HINT in `detail` only — NOT in `witness` — so the CLI's
-// inconclusive policy (loud warning + clean exit, unless lec.strict) applies
-// rather than the hard-fail-on-witness path: a single-step CEX may be unreachable.
+// trustworthy here (no BMC-Refuted, no inductive-Proven).
+//
+// The VERDICT stays Unknown — an inductive Refute is genuinely undecided, because
+// its step case starts from an ARBITRARY equal state that may be unreachable from
+// reset (k-induction incompleteness), so it is not a disproof and must never be
+// reported as Refuted.
+//
+// But an ind CEX IS propagated into `witness`, which makes the run EXIT NON-ZERO
+// (the CLI hard-fails a witness-carrying Unknown: "a potential discrepancy"). It
+// used to be withheld from `witness` deliberately, so this landed on the loud-
+// warning-and-exit-0 path — meaning a design with a concrete counterexample in hand
+// was reported as a PASS, under a warning whose own text claims the solver "found NO
+// counterexample". That is the one outcome worse than either honest answer. A
+// witness-carrying Unknown is exactly the existing "potential discrepancy" concept:
+// it hard-fails, it is excluded from the Unknown ledger (so it re-surfaces every
+// run), and it does NOT trigger the lecfail testbench (gated on Refuted) — which is
+// right, since a single-step CEX may not replay from reset.
+//
+// Cost of this choice (accepted, user ruling 2026-07-16): an equivalent design whose
+// ind refutes from an UNREACHABLE state and whose bmc times out now exits 1 rather
+// than 0. Prefer a false alarm you can investigate over a silent false PASS; the
+// detail spells out that the CEX may be an unreachable step-case.
 Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc, const Lec_options& opts, long long total_ms) {
   Query_result r;
   r.verdict    = Verdict::Unknown;
@@ -898,7 +916,8 @@ Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc,
   std::string d
       = "auto INCONCLUSIVE: ind=" + std::string(vname(ind.verdict)) + "(" + std::to_string(ind.elapsed_ms) + "ms)" + reason(ind);
   if (ind.verdict == Verdict::Refuted) {
-    d += " [single-step CEX — may be an UNREACHABLE step-case, treated as a HINT not a failure: "
+    d += " [single-step CEX — may be an UNREACHABLE step-case, so NOT a disproof (the verdict stays UNKNOWN), but bmc "
+         "could not clear it either: reported as a FAILURE to investigate, not a pass: "
          + (ind.witness.empty() ? std::string("(no witness)") : ind.witness) + "]";
   }
   d += ", bmc=" + std::string(vname(bmc.verdict)) + "(" + std::to_string(bmc.elapsed_ms) + "ms)" + reason(bmc);
@@ -906,6 +925,15 @@ Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc,
     d += " [no CEX up to bound " + std::to_string(opts.bound) + " — bounded, NOT a full proof]";
   }
   r.detail = d;
+  // The ind CEX rides `witness`, which is what makes the CLI exit non-zero instead
+  // of warning-and-exit-0 (see the header). No bmc guard is needed here: every
+  // caller runs try_bounded_proven (and the bmc-Refuted trust rule) BEFORE this, so
+  // a bmc that settled the query never reaches make_inconclusive. A bmc-Proven that
+  // DOES reach here is therefore vacuous (output_checks<=0 — it compared nothing),
+  // which is no reason to suppress the escalation.
+  if (ind.verdict == Verdict::Refuted && !ind.witness.empty()) {
+    r.witness = ind.witness;
+  }
   // Propagate the best-available correspondence info for iteration (not a witness).
   const Query_result& src = (!ind.unmatched_ref.empty() || !ind.unmatched_impl.empty()) ? ind : bmc;
   r.unmatched_ref         = src.unmatched_ref;
@@ -2191,6 +2219,43 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     solver.setOption("rlimit-per", std::to_string(opts.rlimit));
   }
 
+  // ── One shared wall-clock allowance for this query (encode + solve) ─────────
+  // `lec.timeout` is ONE budget for the whole query, not one per phase. It used to
+  // be handed out twice at full value — once to each Encoder (set_encode_budget)
+  // and again to every checkSat (tlimit-per above) — so `lec.timeout=120` licensed
+  // ~120s of encoding PLUS ~120s of solving and a "120s" cap really cost ~250s of
+  // wall clock (measured on a whole-CPU BMC miter: 13s fixed + 2xT, T in {15,30,120}
+  // -> 43s/67s/251s). Encoding is not free on a big unroll, so it must draw from the
+  // same purse: the encoders now take what is LEFT, and each checkSat is re-armed to
+  // what is left after that (arm_solve_budget, called at every checkSat site).
+  //
+  // SOUND: shrinking a bound only ever turns a checkSat into `unknown` (-> Unknown),
+  // never a false Proven/Refuted — the same degrade the fixed tlimit-per already had.
+  // The 1s floor mirrors the hier scheduler: a straggler still earns a real attempt
+  // instead of a 0 that would read as UNBOUNDED to cvc5.
+  // OFF (byte-identical to the old per-phase behavior) for the deterministic
+  // rlimit/compile tier and for timeout==0 (unbounded), so CI stays reproducible.
+  const auto      budget_t0 = std::chrono::steady_clock::now();
+  const bool      budget_on = opts.budget_mode == "wall" && opts.timeout > 0 && opts.rlimit == 0;
+  const long long budget_ms = static_cast<long long>(opts.timeout) * 1000;
+  auto            budget_left_ms = [&]() -> long long {
+    const auto spent
+        = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - budget_t0).count();
+    return std::max<long long>(1000, budget_ms - spent);
+  };
+  // Encoder budget in SECONDS (its unit), rounded up so a sub-second remainder is
+  // still a positive bound rather than 0 == unbounded.
+  auto encode_budget_s = [&]() -> int {
+    return budget_on ? static_cast<int>((budget_left_ms() + 999) / 1000) : opts.timeout;
+  };
+  // Re-arm the per-checkSat cap to the budget remaining. Must be called immediately
+  // before each decisive checkSat; a no-op when the budget is off.
+  auto arm_solve_budget = [&]() {
+    if (budget_on) {
+      solver.setOption("tlimit-per", std::to_string(budget_left_ms()));
+    }
+  };
+
   // Bit-blasting BV sub-solver. cvc5's default LAZY bitblast solver can return a
   // spurious SAT on these wide multi-output arithmetic miters: it reports SAT
   // while the underlying CaDiCaL is actually UNSAT, so the miter false-REFUTEs
@@ -2371,7 +2436,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   if (opts.engine == "bmc") {
     const int N = opts.bound > 0 ? opts.bound : 6;
     Encoder   enc(tm);
-    enc.set_encode_budget(opts.timeout);  // 2f-lec: bound encode wall-clock like each checkSat
+    enc.set_encode_budget(encode_budget_s());  // shared query budget: take what is LEFT, not a fresh opts.timeout
     enc.set_sub_lib(sub_lib);
     enc.set_name_alias(&name_alias);
     enc.set_collapse_defs(collapse_ptr);
@@ -3148,6 +3213,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       res.detail += bbin_models_hint(res.unmatched_impl);
     }
     if (opts.assumptions != nullptr) {
+      arm_solve_budget();
       cvc5::Result ar = solver.checkSat();
       if (!ar.isSat()) {
         res.verdict = Verdict::Unknown;
@@ -3177,6 +3243,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       for (const auto& [dn, dt] : decomp_diffs) {
         solver.push();
         solver.assertFormula(dt);
+        arm_solve_budget();
         cvc5::Result dr = solver.checkSat();
         solver.pop();
         if (!dr.isUnsat()) {
@@ -3203,6 +3270,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       // auto: fall through to the monolithic solve for a definitive verdict + witness.
     }
     solver.assertFormula(bad);
+    arm_solve_budget();
     cvc5::Result r = solver.checkSat();
     if (r.isUnsat()) {
       if (incomplete) {
@@ -3693,7 +3761,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   }
 
   Encoder enc(tm);
-  enc.set_encode_budget(opts.timeout);  // 2f-lec: bound encode wall-clock like each checkSat
+  enc.set_encode_budget(encode_budget_s());  // shared query budget: take what is LEFT, not a fresh opts.timeout
   enc.set_sub_lib(sub_lib);
   enc.set_name_alias(&name_alias);
   enc.set_collapse_defs(collapse_ptr);
@@ -4225,6 +4293,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   }
 
   if (opts.assumptions != nullptr) {
+    arm_solve_budget();
     cvc5::Result ar = solver.checkSat();
     if (!ar.isSat()) {
       res.verdict  = Verdict::Unknown;
@@ -4315,6 +4384,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
         solver.push();
         solver.assertFormula(bad.substitute(sel, vc));                  // folded miter
         solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {sel, vc}));  // pin sel so the witness reads it
+        arm_solve_budget();
         cvc5::Result cr = solver.checkSat();
         if (cr.isSat()) {
           res.witness  = build_witness();
@@ -4360,6 +4430,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       const auto cut_t0 = std::chrono::steady_clock::now();
       solver.push();
       solver.assertFormula(dt);
+      arm_solve_budget();
       cvc5::Result dr = solver.checkSat();
       solver.pop();
       const auto cut_ms
@@ -4403,6 +4474,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     // through to the monolithic solve for the definitive verdict + witness.
   }
   solver.assertFormula(bad);
+  arm_solve_budget();
   cvc5::Result r = solver.checkSat();
 
   if (r.isUnsat()) {

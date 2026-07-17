@@ -39,4 +39,6 @@ cc_library(
     "color_path_test",
     "color_mincut_test",
     "color_flat_test",
+    "color_size_test",
+    "color_absorb_test",
 ]]

@@ -4,13 +4,16 @@
 
 #include <charconv>
 #include <cstdlib>
+#include <filesystem>
 #include <format>
 #include <fstream>
+#include <memory>
 #include <print>
 #include <string>
 #include <system_error>
 #include <unordered_map>
 
+#include "abc_incr.hpp"
 #include "abc_map.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
@@ -59,7 +62,6 @@ void Pass_abc::setup() {
                        "true|false bit-blast a Memory into a DFF-cell array + read/write mux logic (true) vs keep it as a "
                        "native memory instance (false)",
                        "false");
-  m.add_label_optional("seq", "DEPRECATED alias for `register` (maps seq=<v> to register=<v>); use register/memory instead", "");
   m.add_label_optional("dff_cell",
                        "explicit Liberty DFF cell name for register=true (empty => auto-detect a plain posedge D-flop)", "");
   m.add_label_optional("delay", "{D} substitution in flow", "");
@@ -85,6 +87,19 @@ void Pass_abc::setup() {
   m.add_label_optional("qor",
                        "write per-region + total QoR JSON (mapped gates/area/critical delay, source-attributed) to this file "
                        "(`lhd pass abc` defaults it to <workdir>/qor.json when --workdir is set)",
+                       "");
+  m.add_label_optional("cache",
+                       "true|false INCREMENTAL synthesis (2opt-incr): keep a persistent cache of previously mapped "
+                       "regions under --workdir (abc_cache/), content-addressed by a canonical region digest. A "
+                       "region whose logic, boundary and resolved ABC recipe are unchanged since a prior run is "
+                       "cloned from the cache instead of re-running ABC -- a small RTL edit then re-synthesizes only "
+                       "the regions it touched. Salted by the Liberty content and the register/memory mapping mode. "
+                       "Only active with a user --workdir (a scratch dir would start cold every run) -- the "
+                       "lec.cache convention",
+                       "true");
+  m.add_label_optional("cache_dir",
+                       "INTERNAL kernel plumbing: the cache directory, always <workdir>/abc_cache (set after user "
+                       "--set merging, so it is not customizable). Empty = no workdir = no cache",
                        "");
   m.add_label_optional("flatten",
                        "auto|true|false whole-design flatten: inline the instance hierarchy and map the flat design as "
@@ -147,7 +162,7 @@ std::string jesc(std::string_view s) {
 // design max delay is the worst REGION delay — an ABC estimate blind to
 // cross-region paths; pass.opentimer is the whole-design scorer.
 void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view top, const livehd::abc::Map_options& opts,
-              const std::string& qor_path) {
+              const std::string& qor_path, const livehd::abc::Incr_cache* incr) {
   int    tgates = 0;
   double tarea  = 0.0;
   int    tdivbb = 0;  // blackboxed div/mod cones (the score under-reports)
@@ -198,7 +213,17 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
       j += std::format(",\"critical_src\":\"{}\"", jesc(w.crit_src));
     }
   }
-  j += "},\"regions\":[";
+  j += "}";
+  if (incr != nullptr) {
+    // The agent loop reads its "did the edit change anything" answer here: a
+    // NoChange edit is hits == regions, misses == 0, in O(#regions) lookups.
+    j += std::format(",\"incremental\":{{\"hits\":{},\"misses\":{},\"stored\":{},\"uncacheable\":{}}}",
+                     incr->hits(),
+                     incr->misses(),
+                     incr->stores(),
+                     incr->refused());
+  }
+  j += ",\"regions\":[";
   for (size_t r = 0; r < qor.size(); ++r) {
     const auto& q = qor[r];
     if (r != 0) {
@@ -238,16 +263,6 @@ void Pass_abc::work(Eprp_var& var) {
   auto flow    = std::string{var.get("flow", "")};
   bool map_register = truthy(var.get("register", "true"));
   bool map_memory   = truthy(var.get("memory", "false"));
-  // `seq` is the deprecated single knob. It only ever controlled flops, so it
-  // maps to `register` (memory was always kept native). Explicit register/memory
-  // still win if both are given.
-  if (auto seq_s = std::string{var.get("seq", "")}; !seq_s.empty()) {
-    map_register = truthy(seq_s);
-    livehd::diag::warn("pass.abc", "seq-deprecated", "io")
-        .msg("pass.abc: 'seq' is deprecated; use 'register' and 'memory'. Treating seq={} as register={}.", seq_s,
-             map_register ? "true" : "false")
-        .emit();
-  }
   auto delay   = std::string{var.get("delay", "")};
   auto load    = std::string{var.get("load", "")};
   bool verbose = truthy(var.get("verbose", "false"));
@@ -396,9 +411,42 @@ void Pass_abc::work(Eprp_var& var) {
 
   auto& outlib = livehd::Hhds_graph_library::instance(out);
 
+  // Incremental region cache (2opt-incr A+C). ON by default, but only WITH a
+  // place to live: the kernel points cache_dir at <workdir>/abc_cache exactly
+  // when the user passed --workdir (the lec.cache convention -- a fabricated
+  // scratch workdir would start cold every run and cache into a dir about to
+  // vanish). Constructed before the mapper so a salt mismatch (edited Liberty,
+  // different mapping mode) starts cold before any region is digested. The out
+  // dir is wiped by the kernel every run, so a cache living inside it would
+  // self-destruct -- refuse the overlap.
+  auto cache_dir = std::string{var.get("cache_dir", "")};
+  if (!truthy(var.get("cache", "true"))) {
+    cache_dir.clear();
+  }
+  std::unique_ptr<livehd::abc::Incr_cache> incr;
+  if (!cache_dir.empty()) {
+    std::error_code ec;
+    const auto      canon_cache = std::filesystem::weakly_canonical(cache_dir, ec);
+    const auto      canon_out   = std::filesystem::weakly_canonical(out, ec);
+    if (canon_cache == canon_out) {
+      livehd::diag::err("pass.abc", "cache-dir", "io")
+          .msg("pass.abc: cache directory '{}' must differ from the --emit-dir lg: output (the output is purged every run)",
+               cache_dir)
+          .fatal();
+      return;
+    }
+    incr = std::make_unique<livehd::abc::Incr_cache>(
+        cache_dir,
+        livehd::abc::Incr_cache::make_salt(opts.library, opts.map_register, opts.map_memory, opts.dff_cell,
+                                           opts.use_proven_assume, opts.use_all_assume));
+  }
+
   livehd::abc::Mapper mapper(opts);
   mapper.set_outlib(&outlib);
   mapper.set_region_opts(std::move(region_opts));
+  if (incr) {
+    mapper.set_incr(incr.get());
+  }
   if (!mapper.start()) {
     return;  // diag already emitted
   }
@@ -430,5 +478,17 @@ void Pass_abc::work(Eprp_var& var) {
         .fatal();
   }
 
-  emit_qor(mapper.qor(), top, opts, qor_path);
+  if (incr) {
+    // Persist before reporting: a crash between the two loses a line of text,
+    // not the snapshot work. save() is a no-op when nothing was stored.
+    incr->save();
+    std::print("pass.abc cache: {} hit(s), {} miss(es), {} stored{} ({})\n",
+               incr->hits(),
+               incr->misses(),
+               incr->stores(),
+               incr->refused() == 0 ? std::string{} : std::format(", {} uncacheable", incr->refused()),
+               incr->dir());
+  }
+
+  emit_qor(mapper.qor(), top, opts, qor_path, incr.get());
 }

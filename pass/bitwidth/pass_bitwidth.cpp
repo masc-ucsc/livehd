@@ -10,20 +10,12 @@ void Pass_bitwidth::setup() {
   Eprp_method m1("pass.bitwidth", "MIT algorithm for bitwidth optimization", &Pass_bitwidth::trans);
 
   m1.add_label_optional("max_iterations", "maximum number of iterations to try", "3");
-  m1.add_label_optional("hier", "hierarchical bitwidth", "false");
 
   register_pass(m1);
 }
 
 Pass_bitwidth::Pass_bitwidth(const Eprp_var& var) : Pass("pass.bitwidth", var) {
-  auto miters   = var.get("max_iterations");
-  auto hier_txt = var.get("hier");
-
-  if (hier_txt != "false" && hier_txt != "0") {
-    hier = true;
-  } else {
-    hier = false;
-  }
+  auto miters = var.get("max_iterations");
 
   if (!str_tools::is_i(miters)) {
     livehd::diag::err("pass.bitwidth", "bad-option", "io")
@@ -45,7 +37,7 @@ Pass_bitwidth::Pass_bitwidth(const Eprp_var& var) : Pass("pass.bitwidth", var) {
 void Pass_bitwidth::trans(Eprp_var& var) {
   Pass_bitwidth p(var);
 
-  Bitwidth bw(p.hier, p.max_iterations);
+  Bitwidth bw(p.max_iterations);
 
   for (const auto& g : var.graphs) {
     if (!g) {

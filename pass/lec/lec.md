@@ -62,8 +62,17 @@ everything the encoder needs.
   (`flop_state_key()` normalizes Yosys `$…$` decorations + SSA suffixes → a
   stable 1:1 state map). Assume the mapped current-state equal, prove next-state
   and outputs agree — a combinational base+step, definitive `Proven` without
-  unrolling. False-refutes only on **unreachable** states where two front-ends
-  resolve a don't-care differently.
+  unrolling.
+  **Trustworthy in ONE direction only: `Proven` is definitive (unbounded), `Refuted`
+  is NOT a disproof.** The step case starts from an ARBITRARY equal state, which
+  need not be reachable from reset, so ind can FALSE-NEGATIVE — a refuted design may
+  well be equivalent (a fail can still be a pass). This is ordinary k-induction
+  incompleteness (the step case needs strengthening invariants), not just a
+  don't-care resolved differently by two front-ends. `auto` therefore treats an
+  ind-Refute as a HINT and waits for bmc; `lec.engine=ind` alone reports it as a
+  FAIL — fast triage, but it can cry wolf.
+  Exception: on a purely **combinational** pair the inductive miter IS the
+  combinational miter, so an ind-Refute there is a genuine CEX (`auto` skips bmc).
 - **Sequential — BMC from reset** (`lec.engine=bmc`): start from the reset state
   (each flop's constant `initial`, or a shared fresh symbol for a reset-less
   flop) and chain each design's own next-state forward `bound` cycles, so only
@@ -233,7 +242,7 @@ everything the encoder needs.
   would descend into + the edge resolver would thread through) uses the hhds
   `Hier_opaque_scope` so the leaf is opaque to BOTH the walk and the
   cross-boundary edge resolution.
-- **Bottom-up hierarchical** (`lec.hierarchical=true`): build the module-def
+- **Bottom-up hierarchical** (`lec.hier=true`): build the module-def
   dependency DAG over the defs present BY NAME in both libraries, topo-order it
   **leaves-first**, and LEC each def under the `auto` portfolio. Record the proven
   set; for each parent, force-black-box its **proven** child instances (collapse,
@@ -361,10 +370,10 @@ a silent no-op).
 
 | Flag | Meaning | Default |
 |---|---|---|
-| `lec.engine` | discharge frame: `auto` (parallel portfolio) \| `bmc` \| `ind` (inductive flop-cut) \| `ic3` | `auto` |
+| `lec.engine` | discharge frame: `auto` (parallel portfolio) \| `bmc` \| `ind` (inductive flop-cut) \| `ic3`. Each engine is trustworthy in ONE direction, so a lone engine can report what `auto` would not: **`ind` can false-negative** (its `Refuted` is not a disproof — the step case starts from an arbitrary, possibly UNREACHABLE state, so a fail can still be a pass; only its `Proven` is definitive), and **`bmc`'s `Proven` is only bounded** (only its `Refuted` is definitive). Combinational pairs excepted: there ind-Refuted is genuine | `auto` |
 | `lec.solver` | backend: `cvc5` (in-process) \| `bitwuzla` (opt-in, may be unbuilt) \| `lgyosys` (yosys/lgcheck) | `cvc5` |
 | `lec.bound` | BMC / induction depth bound `k` | `6` |
-| `lec.timeout` | per-query wall-clock seconds (`0` = none) | `0` |
+| `lec.timeout` | per-query wall-clock seconds (`0` = none). ONE allowance for the whole query — **encode + every checkSat share it** (the encoders take what is left; each checkSat is re-armed to what remains). It is not charged per phase: before, encode and solve each took the full value, so a `120` cap cost ~250s of wall clock | `0` |
 | `lec.witness` | print the counterexample on `Refuted` (and gate the lecfail testbench below) | `true` |
 | `lec.prpfail` | `lhd lec` + `--workdir` only: on `Refuted`, write a self-contained Pyrope testbench driving BOTH designs with the counterexample sequence. A filename under `--workdir`; `true`=`lecfail.prp`; `""`/`false`=off. Default `lecfail.prp` iff `--workdir` set | `lecfail.prp` (else `""`) |
 | `lec.prpfailrun` | run the generated `lec.prpfail` testbench through `lhd sim --set sim.vcd=true` to dump the waveform (same basename, `.vcd`) | `true` iff `--workdir` set |
@@ -372,7 +381,7 @@ a silent no-op).
 | `lec.reset_cycles` | `after_reset` phase: reset-hold prologue length | `2` |
 | `lec.reset` | explicit reset inputs `name[:lo\|:hi]`, comma-sep (else auto-detect) | `""` |
 | `lec.collapse` | proven-module collapse: comma-sep def names forced to the sound blackbox | `""` |
-| `lec.hierarchical` | bottom-up: LEC every def leaves-first under `lec.engine`, collapsing proven children (`false` = flat single LEC) | `true` |
+| `lec.hier` | bottom-up: LEC every def leaves-first under `lec.engine`, collapsing proven children (`false` = flat single LEC) | `true` |
 | `lec.hier_refute` | what a REFUTED block means: `fail` (the block's counterexample is the run verdict; its parents are skipped — only a proven child collapses, so a parent over a refuted child would grind out a whole-design flat miter) \| `escalate` (flatten it and prove the parents anyway, so a top PROVEN over a differing block still passes) | `fail` |
 | `lec.semdiff` | structural def-diff skip: `structural` (drop a structurally-identical def with no solver; `true`/`on` alias) \| `none`. NB cross-front-end pairs never match | `structural` |
 | `lec.state_pairing` | tier-2 uncertain state correspondence: pair name-unmatched flops via semdiff's full-match signature pass, injected as uncertain (drop-and-retry on REFUTE, no bounded-Proven, ind PASS self-certifies + persists pair hints) | `true` |

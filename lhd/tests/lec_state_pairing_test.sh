@@ -139,10 +139,10 @@ echo "$OUT" | grep -q "cut point" || fail "#7 the unmatched cut points should be
 echo "PASS: lec.state_pairing=false keeps the pre-tier-2 behavior (bounded auto / ind-UNKNOWN)"
 
 # ---------------------------------------------------------------------------
-# 8. Flat path (lec.hierarchical=false): same pairing + proof, and the PASS
+# 8. Flat path (lec.hier=false): same pairing + proof, and the PASS
 #    stores an entity-keyed pair hint there too.
 # ---------------------------------------------------------------------------
-OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --set lec.hierarchical=false --workdir "$W/wd8" 2>&1)
+OUT=$("$LHD" lec --ref "$W/ref.prp" --impl "$W/impl.prp" --set lec.hier=false --workdir "$W/wd8" 2>&1)
 RC=$?
 [ "$RC" -eq 0 ] || fail "#8 flat path should be PROVEN (rc=$RC): $OUT"
 echo "$OUT" | grep -q "tier-2 state pairing: 2 uncertain pair(s) injected" || fail "#8 missing flat-path injection: $OUT"

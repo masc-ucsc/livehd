@@ -931,7 +931,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   const auto   gname = std::string{graph->get_name()};
   const auto   mod   = cpp_id(gname);
 
-  // VCD trace (compile.sim.vcd=FILE): only the --top module emits it (so a
+  // VCD trace (sim.vcd): only the --top module emits it (so a
   // hierarchy writes one file). top empty -> single-module run, emit anyway.
   const auto entity  = gname.substr(gname.rfind('.') + 1);
   // A `test` block lowers to a compiler-minted (`%`-named) comb — a testbench,

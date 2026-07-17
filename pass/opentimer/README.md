@@ -17,19 +17,18 @@ lhd pass opentimer --top 'm__c0' lg:net cells.lib --workdir W
 - Timing files are **positional** (like `pass liberty gensim`): 1–2 Liberty
   (`.lib`, second = min corner) plus optional `.sdc` / `.spef`. `files` is a
   kernel-managed label — the kernel assembles it, `--set` cannot.
-- **One module per run** (one `ot::Timer` holds one design): `--top` picks the
+- **One design per run** (one `ot::Timer` holds one design): `--top` picks the
   def out of the netlist library. Time a region module (`<mod>__c<N>`), a
   single flat module (`pass.color flat` + `pass.abc` map the whole design as
-  one module — the preferred whole-design route), or pass
-  `--set pass.opentimer.hier=true` on a *hierarchical* netlist: the instance
-  hierarchy is structurally flattened into a scratch def
+  one module), or a *hierarchical* netlist top: by default (`hier=true`) the
+  instance hierarchy is structurally flattened into a scratch def
   (`pass/partition/flatten.cpp`; node names keep the dotted instance path, the
   report keeps the real top name) and timed as one module, so the critical
-  path spans modules. Without either, the rebuilt netlist *top* (which
-  instantiates region modules, not Liberty cells) is rejected — a Sub that is
-  not a Liberty cell is a hard error, never silent garbage.
-  (`hier=stitch` keeps the legacy name-stitched hier walk for debugging; its
-  multi-bit module-boundary buses are not stitched.)
+  path spans modules. With `--set pass.opentimer.hier=false` a Sub that is not
+  a Liberty cell is instead a hard error, never silent garbage — one
+  tech-mapped module per run. (`hier=stitch` keeps the legacy name-stitched
+  hier walk for debugging; its multi-bit module-boundary buses are not
+  stitched.)
 - Options: `--set pass.opentimer.margin=<0-100>` (criticality coloring
   threshold), `--set pass.opentimer.qor=FILE` (report path; `lhd pass
   opentimer` defaults it to `<workdir>/timing.json` under `--workdir`).

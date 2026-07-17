@@ -11,7 +11,6 @@ class Pass_bitwidth : public Pass {
 protected:
   int         max_iterations;
   bool        must_perform_backward;
-  bool        hier;
   static void trans(Eprp_var& var);
 
 public:

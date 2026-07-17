@@ -10,6 +10,8 @@
 
 #include "abc_map.hpp"
 
+#include "abc_incr.hpp"
+
 #include <algorithm>
 #include <charconv>
 #include <functional>
@@ -492,6 +494,46 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
     ~Opts_restore() { *dst = *src; }
   } opts_restore{&opts_, &saved_opts};
   apply_region_overrides(rb);
+
+  // Incremental reuse (2opt-incr A+C): digest the region against the RESOLVED
+  // per-region recipe; a hit clones the previously mapped netlist into rb.body
+  // and ABC never starts. This runs before any ABC allocation on purpose --
+  // the whole point is that a hit costs a hash and a flat clone.
+  Region_digest incr_dig;
+  if (incr_ != nullptr) {
+    incr_dig = region_digest(
+        rb,
+        incr_opts_hash(comb_flow(), seq_flow(), static_cast<int>(opts_.adder), opts_.block_size, static_cast<int>(opts_.multiplier)));
+    if (const auto* row = incr_->lookup(incr_dig); row != nullptr && incr_->reuse(rb, incr_dig, *row, outlib_)) {
+      Region_qor q;
+      q.module       = rb.module_name;
+      q.color        = rb.color;
+      q.gates        = row->gates;
+      q.area         = row->area;
+      q.delay        = row->delay;
+      q.crit_src     = row->crit_src;
+      q.div_blackbox = row->div_blackbox;
+      if (row->crit_out_rank >= 0 && static_cast<size_t>(row->crit_out_rank) < incr_dig.out_by_rank.size()) {
+        // The cache stores the critical output's canonical RANK: port names
+        // shift with nids across runs, the rank does not.
+        q.crit_output = rb.outputs[incr_dig.out_by_rank[static_cast<size_t>(row->crit_out_rank)]].name;
+      }
+      std::print("[pass.abc] region '{}': cache hit -- {} gates, area {:.2f}, delay {:.2f}\n",
+                 rb.module_name,
+                 q.gates,
+                 q.area,
+                 q.delay);
+      qor_.push_back(std::move(q));
+      return;
+    }
+    incr_->note_miss(incr_dig.valid);
+    if (!incr_dig.valid) {
+      // Not verbose-gated: an uncacheable region pays for ABC on EVERY
+      // iteration, and the reason (usually anonymous state in the RTL) is
+      // actionable. One line per region per run.
+      std::print("[pass.abc] region '{}': uncacheable -- {}\n", rb.module_name, incr_dig.refused);
+    }
+  }
 
   auto* manNtk  = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
   manNtk->pName = Extra_UtilStrsav(const_cast<char*>(rb.module_name.c_str()));
@@ -2375,6 +2417,13 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       }
     }
     std::print("[pass.abc] region '{}': {} gates, area {:.2f}, delay {:.2f}{}\n", rb.module_name, q.gates, q.area, q.delay, crit);
+  }
+
+  // rb.body now holds the complete mapped netlist: snapshot it into the cache
+  // so the next run's identical region is a clone, not an ABC run. A refused
+  // digest (anonymous state, ambiguous boundary) was already counted above.
+  if (incr_ != nullptr && incr_dig.valid) {
+    incr_->store(rb, incr_dig, qor_.back());
   }
   Abc_NtkDelete(mapped);
 }

@@ -27,7 +27,15 @@ void Pass_lec::setup() {
   m.add_label_optional("engine",
                        "discharge engine: auto (default; parallel portfolio: race ind+bmc as forked "
                        "workers, take the first trustworthy verdict — ind-Proven=PASS, bmc-Refuted=FAIL) | "
-                       "bmc | ind (inductive flop-cut miter) | ic3",
+                       "bmc | ind | ic3. Each engine is trustworthy in ONE direction only, so a lone "
+                       "engine can report a verdict `auto` would not: ind (inductive flop-cut miter) can "
+                       "FALSE-NEGATIVE — its REFUTED is NOT a disproof, because the step case starts from an "
+                       "ARBITRARY equal state that may be UNREACHABLE from reset, so a refuted design may "
+                       "well be equivalent (classic k-induction incompleteness; a fail can still be a pass). "
+                       "Only ind-Proven is definitive — an unbounded proof. Symmetrically bmc's Refuted is "
+                       "definitive (a reachable CEX) but its Proven is only BOUNDED (no CEX up to lec.bound; "
+                       "deeper cycles unproven). Exception: on a purely COMBINATIONAL pair the inductive miter "
+                       "IS the combinational miter, so ind-Refuted is a genuine CEX (auto drops bmc there)",
                        "auto");
   m.add_label_optional("solver",
                        "equivalence backend: cvc5 (default, in-process SMT) | bitwuzla (in-process SMT) | "
@@ -46,21 +54,25 @@ void Pass_lec::setup() {
                        "ignore");
   m.add_label_optional("bound", "BMC / induction depth bound k", "6");
   m.add_label_optional("timeout",
-                       "per-query cvc5 wall-clock seconds (0 = unbounded; default bounds the CLI so a hard miter degrades to "
-                       "UNKNOWN instead of freezing)",
+                       "per-query wall-clock seconds (0 = unbounded; default bounds the CLI so a hard miter degrades to "
+                       "UNKNOWN instead of freezing). ONE allowance covering the whole query — ENCODE plus every checkSat — "
+                       "not one per phase: the encoders take what is left and each checkSat is re-armed to what remains "
+                       "(before, encode and solve each got the full value, so a `120` cap really cost ~2x that in wall "
+                       "clock). NB engine=auto races ind+bmc as two processes, so a run is bounded by ~timeout, not 2x",
                        "120");
-  m.add_label_optional("witness", "print the counterexample/witness on Refuted (and gate lec.prpfail/prpfailrun)", "true");
+  m.add_label_optional("witness", "print the counterexample/witness on Refuted (and gate prpfail/prpfail_run)", "true");
   m.add_label_optional("prpfail",
                        "`lhd lec` + --workdir only: on a REFUTED verdict, write a self-contained Pyrope testbench "
                        "that instantiates BOTH designs, drives the counterexample input sequence, and (with "
                        "prpfailrun) dumps a VCD. Value: a filename created under --workdir — default 'lecfail.prp' "
                        "when --workdir is set (else empty=off); 'true'='lecfail.prp'; ''/'false'=off. Gated by lec.witness",
                        "");
-  m.add_label_optional("prpfailrun",
-                       "run the generated lec.prpfail testbench through `lhd sim --set sim.vcd=true` to produce the "
+  m.add_label_optional("prpfail_run",
+                       "run the generated prpfail testbench through `lhd sim --set sim.vcd=true` to produce the "
                        "counterexample waveform (same basename, .vcd, in --workdir). Default true when --workdir is "
-                       "set (else false); gated by lec.prpfail actually being written",
+                       "set (else false); gated by prpfail actually being written",
                        "");
+  m.add_label_optional("prpfailrun", "DEPRECATED alias for prpfail_run", "");
   m.add_label_optional("phase",
                        "bmc reset phase: after_reset (default; hold reset N cycles, deassert, check "
                        "free-running) | just_reset (hold reset asserted, check during reset) | "
@@ -76,7 +88,7 @@ void Pass_lec::setup() {
                        "proven-module black-box collapse: comma-separated def names forced to the sound "
                        "blackbox path even when --lib could flatten them (the bottom-up driver's proven set)",
                        "");
-  m.add_label_optional("hierarchical",
+  m.add_label_optional("hier",
                        "bottom-up hierarchical decomposition (default true): topo-order the module-def DAG, "
                        "LEC each def leaves-first under the engine, and collapse already-proven children into "
                        "their parents (a child unprovable in isolation stays flattened). false = flat single LEC",
@@ -121,10 +133,11 @@ void Pass_lec::setup() {
                        "over escalating rounds, so one formal.timeout=T is an actual total, not T per def) | rlimit "
                        "(no wall-clock rounds; deterministic rlimit-per bounds each query — the compile/CI-repro path)",
                        "wall");
-  m.add_label_optional("minetimeout",
+  m.add_label_optional("mine_timeout",
                        "extra budget (seconds, 0 = off) for a diagnosis phase after the final round: names the "
                        "still-unproven defs so a timed-out run's output is actionable",
                        "0");
+  m.add_label_optional("minetimeout", "DEPRECATED alias for mine_timeout", "0");
   m.add_label_optional("report",
                        "`lhd formal verify` machine-readable run report: a JSON file written into the workdir on "
                        "EVERY run (all verdicts, UNKNOWN included) with per-obligation verdicts/cycles/solve times, "
@@ -132,7 +145,7 @@ void Pass_lec::setup() {
                        "feedback channel. Value: a filename (default formal_report.json); ''/'false'=off",
                        "formal_report.json");
   m.add_label_optional("mine",
-                       "`lhd formal verify` invariant-mining tier (runs under the minetimeout budget; minetimeout=0 "
+                       "`lhd formal verify` invariant-mining tier (runs under the mine_timeout budget; mine_timeout=0 "
                        "disables mining entirely): '' (default) reports only INDUCTIVE survivors — genuine "
                        "invariants, also emitted as a paste-ready formal block (formal_mined.prp) | speculative "
                        "(additionally report base-proven candidates the induction step dropped)",

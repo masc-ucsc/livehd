@@ -51,7 +51,7 @@ protected:
 
   std::string qor_path;    // timing JSON sidecar (2opt-freq D); empty => none
   std::string top_filter;  // analyze only the def with this name; empty => the single def
-  std::string hier_setting_;  // `hier` label: false (default) | true (structural flatten) | stitch (legacy walk)
+  std::string hier_setting_;  // `hier` label: true (default, structural flatten) | false (one module per run) | stitch (legacy walk)
   std::string report_module_;  // display name for reports; empty => the analyzed graph's own name
                                // (set when hier=true times a scratch flattened def)
 

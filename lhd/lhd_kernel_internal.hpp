@@ -22,26 +22,54 @@ namespace fs = std::filesystem;
 inline constexpr uint32_t kHhdsGraphBodyMagic = 0x48484742;  // "HHGB"
 inline constexpr uint32_t kHhdsTreeBodyMagic  = 0x48485442;  // "HHTB"
 
-inline constexpr std::pair<std::string_view, std::string_view> kSetPasses[] = {
-    {     "compile.upass",        "pass.upass"},
-    {     "compile.cprop",        "pass.cprop"},
-    {  "compile.bitwidth",     "pass.bitwidth"},
-    {    "compile.formal",       "pass.formal"},
-    {       "pass.formal",       "pass.formal"},
-    {      "compile.cgen", "inou.cgen.verilog"},
-    {       "compile.sim",     "inou.cgen.sim"},
-    {     "compile.yosys",   "inou.yosys.tolg"},
-    {  "compile.isabelle",     "pass.isabelle"},
-    {      "compile.lean",         "pass.lean"},
-    {"compile.prp_writer",   "pass.prp_writer"},
-    {        "pass.color",        "pass.color"},
-    {    "pass.partition",    "pass.partition"},
-    {          "pass.abc",          "pass.abc"},
-    {      "pass.liberty",      "pass.liberty"},
-    {    "pass.opentimer",    "pass.opentimer"},
-    {               "lec",          "pass.lec"},
-    {            "formal",          "pass.lec"},
-    {      "pass.semdiff",      "pass.semdiff"},
+// One --set/--config namespace. `list` controls `lhd list options`/`describe`
+// VISIBILITY only — validation and merge_sets accept every named namespace, so
+// a legacy spelling keeps working while the listing shows one canonical name
+// per option (user ruling 2026-07-17: sim.* IS the sim vocabulary (compile.sim.* deleted); the formal
+// tools share the `formal.` root — formal.lec.* / formal.isabelle.* /
+// formal.lean.* — with options common across them listed once as formal.*).
+struct Set_pass {
+  std::string_view set_name;
+  std::string_view method;
+  enum class List : uint8_t {
+    all,       // canonical namespace: list every label
+    none,      // accepted alias (legacy spelling): list nothing
+    common,    // list only the labels in kFormalCommonFlags
+    specific,  // list only the labels NOT in kFormalCommonFlags
+  } list = List::all;
+};
+
+// pass.lec labels whose MEANING is shared across the formal tools (`lhd lec`
+// and the `lhd formal` verify engine read all of these): canonical spelling
+// `formal.<flag>`. Everything else on pass.lec is ref/impl-pairing machinery:
+// canonical spelling `formal.lec.<flag>`.
+inline constexpr std::string_view kFormalCommonFlags[] = {
+    "allow_oversize", "bound", "budget_mode", "cache", "engine", "jobs", "mine", "mine_timeout", "minetimeout",
+    "partitions", "phase", "report", "reset", "reset_cycles", "retry", "rlimit", "solver", "split", "strict", "timeout", "witness",
+};
+
+inline constexpr Set_pass kSetPasses[] = {
+    {     "compile.upass",        "pass.upass",     Set_pass::List::all},
+    {     "compile.cprop",        "pass.cprop",     Set_pass::List::all},
+    {  "compile.bitwidth",     "pass.bitwidth",     Set_pass::List::all},
+    {    "compile.formal",       "pass.formal",     Set_pass::List::all},
+    {       "pass.formal",       "pass.formal",     Set_pass::List::none},  // alias of compile.formal
+    {      "compile.cgen", "inou.cgen.verilog",     Set_pass::List::all},
+    {     "compile.yosys",   "inou.yosys.tolg",     Set_pass::List::all},
+    {  "compile.isabelle",     "pass.isabelle",     Set_pass::List::none},  // legacy: canonical is formal.isabelle.*
+    {   "formal.isabelle",     "pass.isabelle",     Set_pass::List::all},
+    {      "compile.lean",         "pass.lean",     Set_pass::List::none},  // legacy: canonical is formal.lean.*
+    {       "formal.lean",         "pass.lean",     Set_pass::List::all},
+    {"compile.prp_writer",   "pass.prp_writer",     Set_pass::List::all},
+    {        "pass.color",        "pass.color",     Set_pass::List::all},
+    {    "pass.partition",    "pass.partition",     Set_pass::List::all},
+    {          "pass.abc",          "pass.abc",     Set_pass::List::all},
+    {      "pass.liberty",      "pass.liberty",     Set_pass::List::all},
+    {    "pass.opentimer",    "pass.opentimer",     Set_pass::List::all},
+    {               "lec",          "pass.lec",     Set_pass::List::none},  // legacy: canonical is formal[.lec].*
+    {            "formal",          "pass.lec",     Set_pass::List::common},
+    {        "formal.lec",          "pass.lec",     Set_pass::List::specific},
+    {      "pass.semdiff",      "pass.semdiff",     Set_pass::List::all},
 };
 
 struct Ir_inputs {

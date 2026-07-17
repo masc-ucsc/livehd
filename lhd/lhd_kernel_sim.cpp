@@ -126,8 +126,10 @@ void sim_command(Options& opts, Result& res) {
   bool vcd_fakedelay_set = false;
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.vcd") {
-      vcd_on = (v == "true" || v == "1" || v == "on");
-    } else if (k == "sim.vcdfakedelay") {
+      // bool-or-FILE: any non-false value turns tracing on (an explicit FILE
+      // only matters for compiled/baked binaries; `lhd sim` derives per-test paths)
+      vcd_on = !(v == "false" || v == "0" || v == "off" || v.empty());
+    } else if (k == "sim.vcd_fake_delay" || k == "sim.vcdfakedelay") {
       vcd_fakedelay     = (v == "true" || v == "1" || v == "on");
       vcd_fakedelay_set = true;
     }
@@ -182,9 +184,9 @@ void sim_command(Options& opts, Result& res) {
     opts.language = "pyrope";
     opts.files    = sources;  // compile ALL positional sources (imports resolve across them)
     if (vcd_on) {
-      opts.sets.emplace_back("compile.sim.vcd", "1");  // make cgen_sim emit the VCD machinery
+      opts.sets.emplace_back("sim.vcd", "1");  // make cgen_sim emit the VCD machinery
       if (!vcd_fakedelay) {
-        opts.sets.emplace_back("compile.sim.vcdfakedelay", "false");  // edge-aligned trace (cgen default is true)
+        opts.sets.emplace_back("sim.vcd_fake_delay", "false");  // edge-aligned trace (cgen default is true)
       }
     }
     // `sim` is DYNAMIC verification: each `test` block's asserts are checked by
@@ -300,8 +302,8 @@ void sim_command(Options& opts, Result& res) {
       res.status        = "fail";
       res.error_class   = "usage";
       res.error_message = std::format(
-          "this --run-only sim was generated with sim.vcdfakedelay={}; the style is baked "
-                                      "at codegen — re-run --setup-only with the desired --set sim.vcdfakedelay",
+          "this --run-only sim was generated with sim.vcd_fake_delay={}; the style is baked "
+                                      "at codegen — re-run --setup-only with the desired --set sim.vcd_fake_delay",
                                       baked_fakedelay ? "true" : "false");
       res.exit_code     = 1;
       return;

@@ -318,7 +318,7 @@ static void disclose_lec_helpers(livehd::lec::Query_result& r, const livehd::lec
   }
 }
 
-// Bottom-up hierarchical LEC driver (lec.hierarchical=true). Build the module-def
+// Bottom-up hierarchical LEC driver (lec.hier=true). Build the module-def
 // dependency DAG over the defs present in both libraries (paired by ENTITY — see
 // below), scope it to the picked TOP pair and its transitive descendants (a
 // whole-design library may hold many defs unrelated to --ref-top; those are NOT
@@ -792,29 +792,56 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     auto t0 = std::chrono::steady_clock::now();
     auto r  = order.size() == 1 ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], o, sub_lib)
                                 : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], o, sub_lib);
-    if (r.verdict == Verdict::Refuted && !coll.empty()) {
-      // A REFUTE under proven-child collapse is an ABSTRACTION verdict: the box
-      // over-approximates the child (free/UF values the real leaf can never
-      // emit, and — for unnamed interchangeable instances — an occurrence-paired
-      // correspondence that may associate different physical instances), so the
-      // counterexample can be spurious. Confirm FLAT (collapse cleared, children
-      // descended) before reporting a fail: flat-Proven is adopted, flat-Unknown
-      // stays inconclusive. A FAIL is then only ever reported from a
-      // counterexample free of proven-child collapse boxes (true blackboxes for
-      // UNRESOLVED defs may remain in the flat run — those correspond
-      // explicitly and gate to inconclusive when one-sided).
+    // Both a REFUTE and an UNKNOWN under proven-child collapse get ONE flat re-solve
+    // (collapse cleared, children descended) — for opposite reasons:
+    //
+    //  REFUTE  — an ABSTRACTION verdict: the box over-approximates the child (free/UF
+    //    values the real leaf can never emit, and — for unnamed interchangeable
+    //    instances — an occurrence-paired correspondence that may associate different
+    //    physical instances), so the counterexample can be spurious. Confirm FLAT
+    //    before reporting a fail: flat-Proven is adopted, flat-Unknown stays
+    //    inconclusive. A FAIL is then only ever reported from a counterexample free of
+    //    proven-child collapse boxes (true blackboxes for UNRESOLVED defs may remain in
+    //    the flat run — those correspond explicitly and gate to inconclusive when
+    //    one-sided).
+    //
+    //  UNKNOWN — the collapse can make the parent HARDER, not easier: a UF box widens
+    //    the logic to QF_AUFBV and thereby DISABLES cvc5's eager bit-blaster (see
+    //    pass/lec/query.cpp — both setLogic and the `bv-solver=bitblast-internal` gate
+    //    key off state_boxes/comb_boxes being empty), leaving the slow lazy solver on a
+    //    whole-design miter. Measured on dino PipelinedDualIssueCPU: the collapsed BMC
+    //    stays UNKNOWN even at a 1500s budget, while the SAME miter flat REFUTES in
+    //    ~83s. An Unknown is a non-result, so re-spending the remaining budget flat can
+    //    only add information — but adopt the flat run only if it actually SETTLES,
+    //    else keep the collapsed detail so the report still names the boxes.
+    const bool refuted_under_collapse = r.verdict == Verdict::Refuted && !coll.empty();
+    const bool unknown_under_collapse = r.verdict == Verdict::Unknown && !coll.empty() && !r.oversize_refused;
+    if (refuted_under_collapse || unknown_under_collapse) {
       {
         std::lock_guard report_lock(report_mutex);
-      std::print("lec[hier]: '{}' REFUTED under collapse ({} box def(s)) -> flat confirmation\n", name, coll.size());
+        std::print("lec[hier]: '{}' {} under collapse ({} box def(s)) -> flat {}\n",
+                   name,
+                   refuted_under_collapse ? "REFUTED" : "UNKNOWN",
+                   coll.size(),
+                   refuted_under_collapse ? "confirmation" : "retry (UF boxes disable the eager bit-blaster)");
       }
       livehd::lec::Lec_options oflat = o;
       oflat.collapse.clear();
       auto rf       = order.size() == 1 ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], oflat, sub_lib)
                                         : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], oflat, sub_lib);
-      rf.detail = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
-                + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
-      rf.elapsed_ms = -1;  // the progress record carries the combined wall-clock below
-      r = std::move(rf);
+      if (refuted_under_collapse) {
+        rf.detail = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                  + (r.detail.empty() ? "" : " (collapsed run: " + r.detail + ")");
+        rf.elapsed_ms = -1;  // the progress record carries the combined wall-clock below
+        r             = std::move(rf);
+      } else if (rf.verdict != Verdict::Unknown) {
+        rf.detail = "flat-retry after collapsed-box UNKNOWN" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
+                  + (r.detail.empty() ? "" : " (collapsed run was inconclusive: " + r.detail + ")");
+        rf.elapsed_ms = -1;
+        r             = std::move(rf);
+      } else {
+        r.detail += "; flat retry (collapse cleared) also inconclusive";
+      }
     }
     disclose_lec_helpers(r, o);
     const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
@@ -1640,7 +1667,7 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   // and the VCD style knob, so `lhd lec --set sim.vcdfakedelay=false` shapes
   // the counterexample waveform too.
   for (const auto& [k, v] : opts.sets) {
-    if ((k == "compile.cgen.sim_hlop" || k == "compile.cgen.sim_iassert" || k == "sim.vcdfakedelay") && !v.empty()) {
+    if ((k == "compile.cgen.sim_hlop" || k == "compile.cgen.sim_iassert" || k == "sim.vcdfakedelay" || k == "sim.vcd_fake_delay") && !v.empty()) {
       cmd += " --set " + shell_quote(k + "=" + v);
     }
   }
@@ -1904,8 +1931,9 @@ void lec_command(Options& opts, Result& res) {
   // (the former `lhd check`) — the only backend that reads Verilog without a
   // front-end reader and the path for gate-level / yosys-origin netlists.
   Eprp_var::Eprp_dict labels;
-  merge_sets(opts, "lec", labels);
-  merge_sets(opts, "formal", labels);  // formal.* aliases (2f-verify namespace; wins over lec.*)
+  merge_sets(opts, "lec", labels);        // legacy spelling, lowest precedence
+  merge_sets(opts, "formal", labels);     // the shared formal.* vocabulary
+  merge_sets(opts, "formal.lec", labels);  // lec-specific canonical spelling wins
   auto label = [&](std::string_view k, std::string_view def) -> std::string {
     auto it = labels.find(std::string{k});
     return it == labels.end() ? std::string{def} : it->second;
@@ -1974,7 +2002,7 @@ void lec_command(Options& opts, Result& res) {
   o.split        = label("split", "auto");
   o.rlimit       = std::atoi(label("rlimit", "0").c_str());  // deterministic per-query budget (0=off; CI/repro)
   o.budget_mode  = label("budget_mode", "wall");             // wall = total-budget escalating rounds; rlimit = no-op
-  o.minetimeout  = std::atoi(label("minetimeout", "0").c_str());
+  o.minetimeout  = std::atoi(label("mine_timeout", label("minetimeout", "0")).c_str());
   o.phase        = label("phase", "after_reset");
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
   o.reset        = label("reset", "");
@@ -2119,7 +2147,7 @@ void lec_command(Options& opts, Result& res) {
   }
 
   livehd::lec::Query_result r;
-  if (label("hierarchical", "true") != "false" && label("hierarchical", "true") != "0") {
+  if (label("hier", "true") != "false" && label("hier", "true") != "0") {
     // Bottom-up: LEC every def leaves-first under `auto`, collapsing proven
     // children. The driver emits a per-def progress line itself; the TOP def's
     // verdict drives the exit policy below (like the single-design path).
@@ -2392,7 +2420,7 @@ void lec_command(Options& opts, Result& res) {
           .emit();
     }
     bool prpfailrun = workdir_set;  // default: run iff --workdir
-    if (std::string rv; get_set("prpfailrun", rv)) {
+    if (std::string rv; get_set("prpfail_run", rv) || get_set("prpfailrun", rv)) {
       prpfailrun = !(rv == "false" || rv == "0" || rv.empty());
     }
     if (!prpfail.empty()) {
@@ -2411,8 +2439,9 @@ void lec_command(Options& opts, Result& res) {
       // UNKNOWN is the solver giving up: it found NO counterexample but could not
       // complete the proof. Per the deferred-warning policy (disproved ⇒ error;
       // could-not-prove ⇒ warning) this is NOT a hard failure — UNLESS `lec.strict`
-      // is set, or the partial (incomplete-correspondence) miter actually surfaced a
-      // diff (a non-empty witness, which is a potential discrepancy). Otherwise emit a
+      // is set, or the miter actually surfaced a diff (a non-empty witness, which is a
+      // potential discrepancy: an incomplete-correspondence partial miter, or an
+      // `auto` run whose ind refuted while bmc could not clear it). Otherwise emit a
       // loud inconclusive warning and exit cleanly: an UNKNOWN proves nothing, but it
       // also disproves nothing, so it must not be conflated with REFUTED.
       if (o.strict || !r.witness.empty()) {
@@ -2676,7 +2705,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   }
   cmd += shell_quote(prpfail_path) + " --set sim.vcd=true --workdir " + shell_quote(opts.workdir);
   for (const auto& [k, v] : opts.sets) {
-    if ((k == "compile.cgen.sim_hlop" || k == "compile.cgen.sim_iassert" || k == "sim.vcdfakedelay") && !v.empty()) {
+    if ((k == "compile.cgen.sim_hlop" || k == "compile.cgen.sim_iassert" || k == "sim.vcdfakedelay" || k == "sim.vcd_fake_delay") && !v.empty()) {
       cmd += " --set " + shell_quote(k + "=" + v);
     }
   }
@@ -3004,8 +3033,9 @@ void formal_verify_command(Options& opts, Result& res) {
 
   // Knobs: lec.* (legacy aliases) < formal.* (the one shared namespace).
   Eprp_var::Eprp_dict labels;
-  merge_sets(opts, "lec", labels);
-  merge_sets(opts, "formal", labels);
+  merge_sets(opts, "lec", labels);        // legacy spelling, lowest precedence
+  merge_sets(opts, "formal", labels);     // the shared formal.* vocabulary
+  merge_sets(opts, "formal.lec", labels);  // lec-specific canonical spelling wins
   auto label = [&](std::string_view k, std::string_view def) -> std::string {
     auto it = labels.find(std::string{k});
     return it == labels.end() ? std::string{def} : it->second;
@@ -3036,7 +3066,7 @@ void formal_verify_command(Options& opts, Result& res) {
   // disables it inside prove_properties. minetimeout (0=off): an INDEPENDENT
   // diagnosis budget that names the toxic obligation core of a timed-out run.
   o.budget_mode  = label("budget_mode", "wall");
-  o.minetimeout  = std::atoi(label("minetimeout", "0").c_str());
+  o.minetimeout  = std::atoi(label("mine_timeout", label("minetimeout", "0")).c_str());
   o.mine         = label("mine", "");  // P3 mining tier ("" = inductive only | speculative)
 
   std::unique_ptr<livehd::formal::Verdict_cache> vcache;
@@ -3456,8 +3486,13 @@ void formal_verify_command(Options& opts, Result& res) {
           .emit();
     }
     bool prpfailrun = workdir_set;
-    if (auto it = labels.find("prpfailrun"); it != labels.end() && !it->second.empty()) {
-      prpfailrun = !(it->second == "false" || it->second == "0");
+    // canonical spelling first, the deprecated alias as fallback
+    auto pfr = labels.find("prpfail_run");
+    if (pfr == labels.end() || pfr->second.empty()) {
+      pfr = labels.find("prpfailrun");
+    }
+    if (pfr != labels.end() && !pfr->second.empty()) {
+      prpfailrun = !(pfr->second == "false" || pfr->second == "0");
     }
     if (fp != nullptr && !prpfail.empty()) {
       std::string embed;

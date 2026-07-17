@@ -23,7 +23,7 @@ EOF
 
 run_lec() {
   OUT=$("$LHD" lec --ref "$W/ref.v" --impl "$W/impl.v" --top dut \
-    --set lec.hierarchical=false --set lec.cache=true --workdir "$W/cache" "$@" 2>&1)
+    --set lec.hier=false --set lec.cache=true --workdir "$W/cache" "$@" 2>&1)
   RC=$?
 }
 
@@ -112,13 +112,13 @@ EOF
 cat >"$W/eq2.v" <<'EOF'
 module eq(input logic a, input logic b, output logic y); assign y = ~((~a) | (~b)); endmodule
 EOF
-OUT=$("$LHD" lec --ref "$W/eq1.v" --impl "$W/eq2.v" --top eq --set lec.hierarchical=false \
+OUT=$("$LHD" lec --ref "$W/eq1.v" --impl "$W/eq2.v" --top eq --set lec.hier=false \
   --set lec.semdiff=none --workdir "$W/hints" 2>&1); RC=$?
 [ "$RC" -eq 0 ] || fail "hint seed proof failed: $OUT"
 cat >"$W/eq3.v" <<'EOF'
 module eq(input logic a, input logic b, output logic y); assign y = b & a; endmodule
 EOF
-OUT=$("$LHD" lec --ref "$W/eq1.v" --impl "$W/eq3.v" --top eq --set lec.hierarchical=false \
+OUT=$("$LHD" lec --ref "$W/eq1.v" --impl "$W/eq3.v" --top eq --set lec.hier=false \
   --set lec.semdiff=none --workdir "$W/hints" 2>&1); RC=$?
 [ "$RC" -eq 0 ] || fail "hint replay proof failed: $OUT"
 echo "$OUT" | grep -q 'strategy hint tried ind first and settled' || fail "winning-engine hint was not replayed: $OUT"
@@ -126,7 +126,7 @@ echo "$OUT" | grep -q 'strategy hint tried ind first and settled' || fail "winni
 cat >"$W/eq4.v" <<'EOF'
 module eq(input logic a, input logic b, output logic y); assign y = a | b; endmodule
 EOF
-OUT=$("$LHD" lec --ref "$W/eq1.v" --impl "$W/eq4.v" --top eq --set lec.hierarchical=false \
+OUT=$("$LHD" lec --ref "$W/eq1.v" --impl "$W/eq4.v" --top eq --set lec.hier=false \
   --set lec.semdiff=none --workdir "$W/hints" 2>&1); RC=$?
 [ "$RC" -ne 0 ] || fail "stale engine hint changed a refuted verdict: $OUT"
 

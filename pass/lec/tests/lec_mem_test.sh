@@ -45,7 +45,7 @@ compile good.sv g_ys     yosys-slang
 compile bad.sv  b_native slang
 
 verdict() {  # $1=impl $2=ref -> PROVEN | REFUTED | UNKNOWN
-  $LHD lec --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top rf --set lec.hierarchical=false --set lec.engine=ind \
+  $LHD lec --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top rf --set lec.hier=false --set lec.engine=ind \
        --workdir "$WORK/q_${1}_${2}_$$" 2>&1 \
     | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN" | head -1
 }

@@ -20,6 +20,7 @@ cc_library(
         "cell.cpp",
         "const_pin.cpp",
         "graph_library_singleton.cpp",
+        "inline_sub.cpp",
         "split_selfref.cpp",
     ],
     hdrs = [
@@ -27,6 +28,7 @@ cc_library(
         "attrs.hpp",
         "cell.hpp",
         "graph_library_singleton.hpp",
+        "inline_sub.hpp",
         "node_util.hpp",
         "split_selfref.hpp",
     ],
@@ -40,13 +42,16 @@ cc_library(
     alwayslink = True,  # static-init registers attribute tags
 )
 
-cc_test(
-    name = "node_count_test",
-    srcs = ["node_count_test.cpp"],
+[cc_test(
+    name = test_name,
+    srcs = [test_name + ".cpp"],
     copts = COPTS,
     deps = [
         ":graph",
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
     ],
-)
+) for test_name in [
+    "node_count_test",
+    "ge_weight_smoke",
+]]

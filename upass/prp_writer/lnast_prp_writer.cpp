@@ -260,6 +260,20 @@ static bool is_pyrope_reserved_ident(std::string_view s) {
 // so the dots stay field separators; the lexer strips the backticks, so the lg
 // name (and LEC matching) is unchanged.  Non-keyword components stay bare, so a
 // normal path (`io.operation`) is emitted byte-identical to before.
+// A mod/pipe callee bound via a DOTTED import folds (constprop) to a string Dlop, so
+// the callee const arrives QUOTED (`'Unit.Entity'`) where a same-file ref callee stays
+// bare (`Unit.Entity`) — see upass/tolg's lower_func_call, which strips the same quotes
+// for the same reason. Unstripped, the quotes (a) make the known_modules_ lookup that
+// decides whether to emit `const X = import(..)` MISS, so no import is emitted at all,
+// and (b) print verbatim as `'Unit.Entity'(args)`, which is not a call — the emitted
+// file does not parse.
+static std::string_view unquote_callee(std::string_view s) {
+  if (s.size() >= 2 && s.front() == '\'' && s.back() == '\'') {
+    return s.substr(1, s.size() - 2);
+  }
+  return s;
+}
+
 static std::string quote_kw_path(std::string_view path) {
   std::string out;
   size_t      start = 0;
@@ -328,6 +342,27 @@ std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
     // round-trip then fails to re-parse). Only a bare `.`-name needs quoting.
     if (s.size() >= 2 && s.front() == '`' && s.back() == '`') {
       return s;
+    }
+    // Same quoted name, but with a VERSION SUFFIX pasted after its closing backtick
+    // (`` `ar.x`__w1 ``). Both strip_prefix (below) and upass.ssa's twin demotion
+    // rename `<base>___ssa_<N>` -> `<base>__w<N>` by appending to a base that may
+    // ALREADY be quoted, so the front-AND-back test above misses it and the
+    // fall-through re-wraps it into `` ``ar.x`__w1` `` -- which the lexer rejects, so
+    // the emitted file does not re-parse AT ALL. (That silently broke `lhd lec`'s
+    // lecfail.prp witness testbench -- 217 such names in one re-emitted module -- and
+    // every other prp->prp round-trip carrying an escaped-id SSA version.)
+    // Fold the quotes OUTSIDE the whole name: `` `ar.x__w1` `` lexes to the single
+    // identifier `ar.x__w1` -- still one name, still distinct per version, and both
+    // the def and every use come through here, so they agree.
+    // Gated on the exact `__w<digits>` version form so a per-component escaped PATH
+    // (`` `in`.bits ``, from quote_kw_path / decl_prefix) is left alone.
+    if (s.size() >= 2 && s.front() == '`') {
+      if (const auto close = s.find('`', 1); close != std::string::npos && s.find('`', close + 1) == std::string::npos) {
+        const std::string_view suf = std::string_view{s}.substr(close + 1);
+        if (suf.size() > 3 && suf.substr(0, 3) == "__w" && suf.find_first_not_of("0123456789", 3) == std::string_view::npos) {
+          return "`" + s.substr(1, close - 1) + std::string(suf) + "`";
+        }
+      }
     }
     // A reconstructed bundle field (`io.operation`) is a REAL tuple-field access,
     // not an opaque dotted leaf name — emit the bare dotted path so it re-parses
@@ -504,14 +539,24 @@ void Lnast_prp_writer::write_module() {
     }
     import_alias_.clear();
     for (const auto& nm : imports) {
-      std::string alias = nm;
-      if (inst_names.count(nm) != 0u) {                  // would collide with an instance var
+      // The import BINDING is the entity (the spelling a call site uses); the import
+      // PATH is the module's full name. A Pyrope-origin module name is ALREADY
+      // `file.entity` (`ALU.ALU`), so its path is `nm` verbatim and its binding is the
+      // tail — reproducing the source's own `const ALU = import("ALU.ALU")`. A
+      // Verilog/slang-origin name is the bare entity, so it keeps the historical
+      // `nm`.`nm` path (tail(simple)==simple, so that case is byte-identical to before).
+      // The old unconditional form emitted `const ALU.ALU = import("ALU.ALU.ALU.ALU")`
+      // for a dotted name — not even parseable.
+      const auto  dot   = nm.rfind('.');
+      std::string alias = dot == std::string::npos ? nm : nm.substr(dot + 1);
+      const std::string path = dot == std::string::npos ? nm + "." + nm : nm;
+      if (inst_names.count(alias) != 0u) {               // would collide with an instance var
         do {
           alias += "_t";                                 // disambiguating suffix
         } while (inst_names.count(alias) != 0u || (known_modules_ != nullptr && known_modules_->count(alias) != 0u));
       }
       import_alias_[nm] = alias;
-      os << "const " << alias << " = import(\"" << nm << "." << nm << "\")\n";
+      os << "const " << alias << " = import(\"" << path << "\")\n";
     }
     if (!imports.empty()) {
       os << "\n";
@@ -1862,19 +1907,20 @@ void Lnast_prp_writer::write_func_call() {
   auto lhs = std::string(strip_prefix(current_text()));
   // function name (next sibling)
   move_to_sibling();
-  std::string call_name(current_text());
+  std::string call_name(unquote_callee(current_text()));
   std::string call_tail = call_name;
   if (auto p = call_tail.rfind('.'); p != std::string::npos) {
     call_tail = call_tail.substr(p + 1);
   }
   // Reference the (possibly aliased) import const for the callee — see the import
   // emission in write_module(): a case-collision with the instance var name forces
-  // a non-colliding alias.  Only a plain (non-dotted) module callee is aliased.
+  // a non-colliding alias. Look the FULL callee name up (import_alias_ is keyed by it):
+  // a dotted Pyrope-origin callee (`ALU.ALU`) maps to its binding `ALU`, so the call
+  // prints as `ALU(...)`. A callee with no import (e.g. a same-file ref) is not in the
+  // map and stays exactly as before.
   std::string callee_ref = call_name;
-  if (call_name == call_tail) {
-    if (auto ait = import_alias_.find(call_tail); ait != import_alias_.end()) {
-      callee_ref = ait->second;
-    }
+  if (auto ait = import_alias_.find(call_name); ait != import_alias_.end()) {
+    callee_ref = ait->second;
   }
 
   // Preserve the hierarchical instance name.  A call to an emitted module becomes
@@ -2460,8 +2506,18 @@ void Lnast_prp_writer::scan_node(Lnast_nid nid, int& index) {
   if (t == Lnast_ntype::Lnast_ntype_func_call) {
     auto fc0    = lnast->get_child(nid);                                          // result
     auto callee = fc0.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(fc0);  // callee name
-    if (!callee.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(callee))) {
-      func_call_callees_.insert(std::string(strip_prefix(lnast->get_name(callee))));
+    // A REF callee is the bare name. A dotted-import mod/pipe callee instead folds to
+    // a quoted string CONST (see unquote_callee), which the is_ref test used to reject
+    // outright — so it never registered here, no `import(..)` was emitted for it, and
+    // the call printed as the unparseable `'Unit.Entity'(args)`. Register it too, by
+    // its unquoted name, so it takes the normal import path.
+    if (!callee.is_invalid()) {
+      const auto ctype = lnast->get_type(callee);
+      if (Lnast_ntype::is_ref(ctype)) {
+        func_call_callees_.insert(std::string(strip_prefix(lnast->get_name(callee))));
+      } else if (const auto cn = lnast->get_name(callee); unquote_callee(cn) != cn) {
+        func_call_callees_.emplace(unquote_callee(cn));
+      }
     }
     // Record the EXCLUSIVE end of this statement's subtree (the `index` counter
     // right after every child — result, callee, and every argument expression —

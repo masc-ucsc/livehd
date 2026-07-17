@@ -31,5 +31,11 @@ py_test(
         ":opt_build": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
+    # Stop bazel synthesizing __init__.py into runfiles; rules_python deprecates
+    # that default and flips it in a future release. Nothing needs it here:
+    # constprop_gen imports as a top-level module via its imports = ["."], not as
+    # a package. (The @at_clifford_yosys2 py_binary targets warn about the same
+    # default; that one is upstream's to fix.)
+    legacy_create_init = 0,
     tags = ["benchmark"],
 )

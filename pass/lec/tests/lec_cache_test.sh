@@ -50,7 +50,7 @@ C "$WORK/C.v"  --top top --emit-dir "lg:$WORK/C"  --workdir "$WORK/cc"
 
 WD="$WORK/wd"; mkdir -p "$WD"
 H() {  # $1..=extra lhd lec args ; sets RC/OUT ; ONE shared workdir (the cache)
-  OUT=$("$LHD" lec "$@" --top top --set lec.hierarchical=true --workdir "$WD" 2>&1); RC=$?
+  OUT=$("$LHD" lec "$@" --top top --set lec.hier=true --workdir "$WD" 2>&1); RC=$?
 }
 
 # 1) Cold run A vs B: nothing cached yet; verdicts get stored.
@@ -120,7 +120,7 @@ C "$WORK/H1.v" --top hard --emit-dir "lg:$WORK/H1" --workdir "$WORK/ch1"
 C "$WORK/H2.v" --top hard --emit-dir "lg:$WORK/H2" --workdir "$WORK/ch2"
 WDU="$WORK/wdu"; mkdir -p "$WDU"
 U() { TO=$1; shift; OUT=$("$LHD" lec --ref "lg:$WORK/H1" --impl "lg:$WORK/H2" --top hard \
-      --set lec.hierarchical=true --set "lec.timeout=$TO" "$@" --workdir "$WDU" 2>&1); RC=$?; }
+      --set lec.hier=true --set "lec.timeout=$TO" "$@" --workdir "$WDU" 2>&1); RC=$?; }
 
 # 8) First run: Unknown, and the attempt is ledgered (not a verdict).
 U 1

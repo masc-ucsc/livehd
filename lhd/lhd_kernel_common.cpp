@@ -426,13 +426,14 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
 // bare command word of their own) live under the `compile.*` namespace so the
 // option's owning command is always its leading segment. canonical_set_key()
 // lets a user drop any leading segment the command words to the left already
-// supply, so after `lhd compile` `--set compile.cprop.hier`, `--set cprop.hier`
-// both resolve to `compile.cprop`, and after `lhd pass abc` `--set pass.abc.adder`,
+// supply, so after `lhd compile` `--set compile.bitwidth.max_iterations` and
+// `--set bitwidth.max_iterations` both resolve to `compile.bitwidth`, and
+// after `lhd pass abc` `--set pass.abc.adder`,
 // `--set abc.adder`, `--set adder` all resolve to `pass.abc`.
 std::string_view set_pass_method(std::string_view set_name) {
-  for (const auto& [name, method] : kSetPasses) {
-    if (name == set_name) {
-      return method;
+  for (const auto& sp : kSetPasses) {
+    if (sp.set_name == set_name) {
+      return sp.method;
     }
   }
   return {};
@@ -469,6 +470,44 @@ void merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_
 // Validate every --set/--config entry against the live registry: a typo'd
 // pass OR flag must error, never silently no-op (merge_sets copies labels
 // blind). Requires init_engine().
+
+// Typo help for --set/--config: every LISTED option whose final component
+// matches `flag` (e.g. `potato.vcd` -> "maybe you meant: sim.vcd"). The scan
+// runs only on the error path, and list_set_options() self-initializes the
+// engine, so this is safe wherever validation runs.
+std::string leaf_match_hint(std::string_view flag) {
+  std::string out;
+  int         n = 0;
+  for (const auto& o : list_set_options()) {
+    auto pos = o.name.rfind('.');
+    if (pos == std::string::npos || std::string_view{o.name}.substr(pos + 1) != flag) {
+      continue;
+    }
+    if (++n > 6) {
+      out += "\n  …";
+      break;
+    }
+    // Render the candidates the way `lhd list options` would, INLINE -- the
+    // reader should not have to run a second command we could have run for
+    // them (one `name=default  # first-sentence` line per match).
+    auto        cut   = o.help.find(". ");
+    std::string brief = cut == std::string::npos ? o.help : o.help.substr(0, cut);
+    constexpr size_t kMax = 96;
+    if (brief.size() > kMax) {
+      brief.resize(kMax);
+      while (!brief.empty() && (static_cast<unsigned char>(brief.back()) & 0xC0) == 0x80) {
+        brief.pop_back();  // never cut a UTF-8 sequence mid-byte
+      }
+      brief += "…";
+    }
+    out += std::format("\n  {}={}  # {}", o.name, o.default_value, brief);
+  }
+  if (out.empty()) {
+    return {};
+  }
+  return "maybe you meant:" + out;
+}
+
 void check_known_set_passes(const Options& opts) {
   for (const auto& [key, value] : opts.sets) {
     auto pos = key.rfind('.');
@@ -499,10 +538,10 @@ void check_known_set_passes(const Options& opts) {
       // The `lhd.*` kernel namespace: shared, cross-pass settings folded into
       // Options by apply_lhd_settings (not consumed by any single pass). Keep
       // this list in sync with apply_lhd_settings / list_set_options.
-      if (flag != "seed" && flag != "top") {
+      if (flag != "seed" && flag != "top" && flag != "stats") {
         throw Lhd_error{"usage",
                         std::format("--set/--config references unknown kernel flag 'lhd.{}'", flag),
-                        "the lhd.* namespace takes: seed, top (`lhd list options lhd`)"};
+                        "the lhd.* namespace takes: seed, top, stats (`lhd list options lhd`)"};
       }
       continue;
     }
@@ -530,12 +569,17 @@ void check_known_set_passes(const Options& opts) {
       if (opt == nullptr) {
         std::string known;
         for (const auto& s : kSimSetOptions) {
+          if (std::string_view{s.help}.starts_with("DEPRECATED")) {
+            continue;
+          }
           known += known.empty() ? "" : ", ";
           known += s.name;
         }
+        auto near = leaf_match_hint(flag);
         throw Lhd_error{"usage",
                         std::format("--set/--config references unknown sim flag 'sim.{}'", flag),
-                        std::format("the sim.* namespace takes: {}", known)};
+                        near.empty() ? std::format("the sim.* namespace takes: {}", known)
+                                     : std::format("{}\nthe sim.* namespace takes: {}", near, known)};
       }
       if (opt->kind == Sim_set_option::Kind::boolean && value != "true" && value != "false" && value != "1" && value != "0"
           && value != "on" && value != "off") {
@@ -556,14 +600,18 @@ void check_known_set_passes(const Options& opts) {
     auto method = set_pass_method(pass);
     if (method.empty()) {
       std::string known;
-      for (const auto& [name, m] : kSetPasses) {
-        (void)m;
+      for (const auto& sp : kSetPasses) {
+        if (sp.list == Set_pass::List::none) {
+          continue;  // legacy alias spellings stay accepted but unadvertised
+        }
         known += known.empty() ? "" : ", ";
-        known += name;
+        known += sp.set_name;
       }
+      auto near = leaf_match_hint(flag);
       throw Lhd_error{"usage",
                       std::format("--set/--config references unknown pass '{}'", pass),
-                      std::format("known passes: {} (`lhd list options`)", known)};
+                      near.empty() ? std::format("known passes: {} (`lhd list options`)", known)
+                                   : std::format("{}\nknown passes: {}", near, known)};
     }
     if (is_kernel_label(flag)) {
       throw Lhd_error{"usage",
@@ -572,9 +620,11 @@ void check_known_set_passes(const Options& opts) {
     }
     const auto* m = Pass::eprp.get_method(method);
     if (m == nullptr || !m->has_label(flag)) {
+      auto near = leaf_match_hint(flag);
       throw Lhd_error{"usage",
                       std::format("--set/--config references unknown flag '{}' of pass '{}'", flag, pass),
-                      std::format("`lhd list options {}\\..*` shows what {} accepts", pass, pass)};
+                      near.empty() ? std::format("`lhd list options {}\\..*` shows what {} accepts", pass, pass)
+                                   : std::format("{}\n`lhd list options {}\\..*` shows what {} accepts", near, pass, pass)};
     }
   }
 }
@@ -634,6 +684,9 @@ void apply_lhd_settings(Options& opts) {
       opts.seed_explicit = true;
     } else if (key == "lhd.top" && opts.top.empty()) {
       opts.top = value;
+    } else if (key == "lhd.stats") {
+      // canonical form of --stats; the flag and the set spelling both turn it on
+      opts.stats = opts.stats || (value != "false" && value != "0" && value != "off");
     }
   }
 }
@@ -1096,11 +1149,11 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
 // graph into `odir`. Mirrors cgen_into — seed odir, run the step, then assert
 // each pair exists.
 // sim.cgen_color (default true): run the per-output-cone coloring before
-// inou.cgen.sim. Honors `sim.cgen_color` (lhd sim) and `compile.sim.cgen_color`
+// inou.cgen.sim. Honors `sim.cgen_color`
 // (the compile --emit-dir sim: path); absent => on.
 static bool sim_cgen_color_enabled(const Options& opts) {
   for (const auto& [k, v] : opts.sets) {
-    if (k == "sim.cgen_color" || k == "compile.sim.cgen_color") {
+    if (k == "sim.cgen_color") {
       return v != "false" && v != "0" && !v.empty();
     }
   }
@@ -1152,7 +1205,26 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
       {"odir", odir}
   };
   merge_sets(opts, "compile.cgen", labels);
-  merge_sets(opts, "compile.sim", labels);  // compile.sim.vcd=FILE -> labels["vcd"]
+  // sim.* is the ONE sim vocabulary (user ruling 2026-07-17): the codegen
+  // options ride the same names as the runtime `lhd sim` command, and the
+  // compile.sim.* spelling does not exist (a --set of it errors with the
+  // inline sim.* suggestion).
+  for (const auto& [k, v] : opts.sets) {
+    if (k == "sim.vcd") {
+      labels["vcd"] = v;
+    } else if (k == "sim.vcd_fake_delay" || k == "sim.vcdfakedelay") {
+      labels["vcd_fake_delay"] = v;
+    }
+  }
+  // One knob, three shapes: false = no VCD, FILE = that path, true = a path
+  // derived from the top ("<entity>.vcd" next to wherever the binary runs).
+  if (auto it = labels.find("vcd"); it != labels.end()) {
+    if (it->second == "false" || it->second == "0" || it->second == "off") {
+      it->second.clear();
+    } else if (it->second == "true" || it->second == "1" || it->second == "on") {
+      it->second = std::string{top_entity_of(top_full.empty() ? "sim" : top_full)} + ".vcd";
+    }
+  }
   if (!top_full.empty()) {
     labels["top"] = top_full;  // only the top module emits the VCD
   }
@@ -1439,7 +1511,18 @@ void emit_isabelle_outputs(Options& opts, Result& res, Eprp_var& var) {
     if (!opts.top.empty()) {
       labels["top"] = opts.top;
     }
-    merge_sets(opts, "compile.isabelle", labels);
+    merge_sets(opts, "compile.isabelle", labels);  // legacy spelling
+    // The formal tools share the `formal.` root (user ruling 2026-07-17):
+    // formal.strict / formal.normalize apply to every emitter, and the
+    // tool-specific formal.isabelle.* overrides them.
+    for (const auto& [k, v] : opts.sets) {
+      if (k == "formal.strict") {
+        labels["strict"] = v;
+      } else if (k == "formal.normalize") {
+        labels["normalize"] = v;
+      }
+    }
+    merge_sets(opts, "formal.isabelle", labels);
     run_step("pass.isabelle", var, labels, opts, res);
     res.outputs.push_back(e.path);
   }
@@ -1460,7 +1543,15 @@ void emit_lean_outputs(Options& opts, Result& res, Eprp_var& var) {
     if (!opts.top.empty()) {
       labels["top"] = opts.top;
     }
-    merge_sets(opts, "compile.lean", labels);
+    merge_sets(opts, "compile.lean", labels);  // legacy spelling
+    for (const auto& [k, v] : opts.sets) {
+      if (k == "formal.strict") {
+        labels["strict"] = v;
+      } else if (k == "formal.normalize") {
+        labels["normalize"] = v;
+      }
+    }
+    merge_sets(opts, "formal.lean", labels);
     run_step("pass.lean", var, labels, opts, res);
     res.outputs.push_back(e.path);
   }

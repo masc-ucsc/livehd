@@ -28,11 +28,14 @@ void Inou_cgen::setup() {
   // <name>.hpp written into `odir`; the standalone Bazel module scaffold around
   // them is written by the kernel's emit_sim_outputs.
   Eprp_method m2("inou.cgen.sim", "export executable slop C++ from an Lgraph", &Inou_cgen::to_cgen_sim);
-  m2.add_label_optional("vcd", "VCD trace file baked into the sim (compile.sim.vcd); empty = no VCD", "");
+  m2.add_label_optional("vcd",
+                        "baked-in VCD trace path (the sim.vcd knob: the kernel maps false->none, true-><top>.vcd, "
+                        "FILE->that path); empty = no VCD",
+                        "");
   m2.add_label_optional("top", "top module name; only it emits VCD (avoids file collisions)", "");
-  m2.add_label_optional("vcdfakedelay",
+  m2.add_label_optional("vcd_fake_delay",
                         "VCD data settles a few ticks after each clock edge, with X during the settle window "
-                        "(compile.sim.vcdfakedelay); false = plain edge-aligned updates (no X, no delay)",
+                        "(sim.vcd_fake_delay); false = plain edge-aligned updates (no X, no delay)",
                         "true");
   register_inou("cgen", m2);
 }
@@ -106,14 +109,14 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   auto      dir       = pp.get_odir(var);
   auto      vcd_out   = var.get("vcd");
   auto      top       = var.get("top");
-  auto      fakedelay = var.get("vcdfakedelay");
+  auto      fakedelay = var.get("vcd_fake_delay");
   // Boolean grammar, validated loudly: anything outside the canonical set would
   // otherwise silently mean "true" (the sim.* namespace validates its own copy,
-  // but compile.sim.vcdfakedelay reaches this label directly).
+  // but the sim.vcd_fake_delay knob reaches this label directly).
   if (!fakedelay.empty() && fakedelay != "true" && fakedelay != "1" && fakedelay != "on" && fakedelay != "false"
       && fakedelay != "0" && fakedelay != "off") {
     livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
-        .msg("compile.sim.vcdfakedelay expects true|false, got '{}'", fakedelay)
+        .msg("sim.vcd_fake_delay expects true|false, got '{}'", fakedelay)
         .emit();
     return;
   }

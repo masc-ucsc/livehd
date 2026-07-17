@@ -2,10 +2,15 @@
 
 #include "pass_color.hpp"
 
+#include <charconv>
+#include <cstdint>
 #include <format>
+#include <print>
 #include <string>
 #include <string_view>
+#include <system_error>
 
+#include "color_absorb.hpp"
 #include "color_acyclic.hpp"
 #include "color_cgen.hpp"
 #include "color_common.hpp"
@@ -46,6 +51,27 @@ void Pass_color::setup() {
   m.add_label_optional("iters", "mincut: how many times to run the cut", "1");
   m.add_label_optional("mincut_alg", "mincut: VieCut algorithm (vc, cactus, ...)", "vc");
   m.add_label_optional("synth_alg", "synth: pipe|synth boundary mode", "synth");
+  // The size window. Gate equivalents, not nodes: ABC's memory scales with the
+  // BIT-BLASTED gate count, so a 200k-node region of wide datapath passes any
+  // node gate and still exhausts the host (see graph_util::ge_weight).
+  m.add_label_optional("min_ge",
+                       "synth: merge a region below this many gate-equivalents into its best-connected "
+                       "neighbour (0 => no lower bound). Kills singleton regions",
+                       "1000");
+  m.add_label_optional("min", "DEPRECATED alias for min_ge", "");
+  // 30M GE ~= 0.9 GB of expected ABC peak, calibrated at ~30 bytes/GE from the
+  // one hard data point there is: a flat XSCore run reached 221 GB, and XSCore
+  // measures 7.43e9 GE. Raise it on a bigger host; lower it if admission fires.
+  m.add_label_optional("max_ge",
+                       "synth: split a region above this many gate-equivalents (0 => no upper bound). "
+                       "Default ~0.9 GB of expected ABC peak per region (~30 bytes/GE); raise it on a bigger host",
+                       "30000000");
+  m.add_label_optional("max", "DEPRECATED alias for max_ge", "");
+  m.add_label_optional("absorb",
+                       "synth: STRUCTURALLY INLINE every def below `min_ge` into its parents before coloring, so its "
+                       "logic can cluster with its neighbours (a Sub is a blackbox to ABC, so nothing less merges "
+                       "it). Rewrites the design; needs min_ge>0 and hier=true. false leaves tiny defs their own regions",
+                       "true");
   m.add_label_optional("instance", "path: comma-separated seed instance names (forward-only)", "");
   register_pass(m);
 }
@@ -53,6 +79,24 @@ void Pass_color::setup() {
 namespace {
 
 bool parse_bool(std::string_view v) { return v != "false" && v != "0" && !v.empty(); }
+
+// A size-window bound. A silent fallback here is a wrong ANSWER rather than a
+// wrong flag: `max=200O00` (letter O) parsed leniently would read as 200, and
+// pass.color would happily shred the design into thousands of tiny regions and
+// report success. Same shape as pass.abc's memory_budget_mb.
+uint64_t parse_ge_bound(const Eprp_var& var, std::string_view label, std::string_view dflt) {
+  const auto s = std::string{var.get(label, std::string{dflt})};
+  uint64_t   v = 0;
+  auto*      b = s.data();
+  auto*      e = s.data() + s.size();
+  if (auto [p, ec] = std::from_chars(b, e, v); ec != std::errc{} || p != e) {
+    livehd::diag::err("pass.color", "bad-size-window", "io")
+        .msg("pass.color: {} must be a non-negative integer of gate-equivalents, got '{}'", label, s)
+        .hint("0 disables that half of the window")
+        .fatal();
+  }
+  return v;
+}
 
 // JSON object string of the algorithm parameters (for the metadata blob).
 std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp_var& var) {
@@ -64,7 +108,9 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
   if (alg == "acyclic") {
     s += std::format(",\"cutoff\":{},\"merge\":{}", var.get("cutoff", "1"), parse_bool(var.get("merge", "false")));
   } else if (alg == "synth") {
-    s += std::format(",\"synth_alg\":\"{}\"", var.get("synth_alg", "synth"));
+    // The window is recorded only for the algorithm that honors it -- printing
+    // min/max under `acyclic` would claim a bound nothing enforced.
+    s += std::format(",\"synth_alg\":\"{}\",\"min_ge\":{},\"max_ge\":{}", var.get("synth_alg", "synth"), opts.min_ge, opts.max_ge);
   } else if (alg == "mincut") {
     s += std::format(",\"iters\":{},\"seed\":{},\"mincut_alg\":\"{}\"",
                      var.get("iters", "1"),
@@ -141,12 +187,27 @@ void Pass_color::color(Eprp_var& var) {
   opts.compact      = parse_bool(var.get("compact", "true"));
   opts.continuous   = parse_bool(var.get("continuous", "false"));
   opts.keep_colored = parse_bool(var.get("keep_colored", "false"));
+  // canonical min_ge/max_ge; the deprecated min/max aliases still win when
+  // explicitly set (their default is empty = unset)
+  opts.min_ge = std::string_view{var.get("min", "")}.empty() ? parse_ge_bound(var, "min_ge", "1000") : parse_ge_bound(var, "min", "1000");
+  opts.max_ge = std::string_view{var.get("max", "")}.empty() ? parse_ge_bound(var, "max_ge", "30000000") : parse_ge_bound(var, "max", "30000000");
+
+  if (opts.min_ge != 0 && opts.max_ge != 0 && opts.min_ge > opts.max_ge) {
+    livehd::diag::err("pass.color", "bad-size-window", "io")
+        .msg("pass.color: min ({}) is above max ({}): no region size satisfies the window", opts.min_ge, opts.max_ge)
+        .fatal();
+    return;
+  }
 
   // `flat` is "one color for everything"; the per-region continuous split would
-  // undo that. Force it off up front so both the run and the recorded params
-  // (params_json below) reflect the actual single-color behavior.
+  // undo that, and so would the size window -- a flat region is a deliberate
+  // whole-design ABC request and is never subdivided (2opt-incr ruling). Force
+  // both off up front so the run and the recorded params (params_json below)
+  // reflect the actual single-color behavior.
   if (alg == "flat") {
     opts.continuous = false;
+    opts.min_ge     = 0;
+    opts.max_ge     = 0;
   }
 
   // gid -> graph, so the hierarchy walk can resolve sub-def bodies.
@@ -180,6 +241,28 @@ void Pass_color::color(Eprp_var& var) {
           .hint("synthesis (pass.abc) or formal (pass.lec) on a design this size may exhaust host memory")
           .hint("color into smaller regions (pass.color synth) and check them individually")
           .emit();
+    }
+  }
+
+  // Absorb runs BEFORE anything is colored and BEFORE the instance counts below
+  // are taken: it removes defs from the hierarchy, so a count taken first would
+  // describe a design that no longer exists.
+  //
+  // Only `synth` honors the window, so only `synth` absorbs -- and only with a
+  // floor to measure against. This is the one thing pass.color does that rewrites
+  // the design rather than annotating it, which is why it has its own off switch.
+  Absorb_stats absorbed;
+  if (alg == "synth" && opts.hier && opts.min_ge != 0 && parse_bool(var.get("absorb", "true")) && top_g != nullptr) {
+    if (!absorb_small_defs(top_g, gid2graph, opts.min_ge, &absorbed)) {
+      return;  // diag already emitted; the library is half-transformed
+    }
+    if (opts.verbose && absorbed.defs_absorbed != 0) {
+      std::print(stderr,
+                 "[color.absorb] {} def(s) below {} GE inlined at {} site(s); {} GE duplicated\n",
+                 absorbed.defs_absorbed,
+                 opts.min_ge,
+                 absorbed.sites_inlined,
+                 absorbed.ge_duplicated);
     }
   }
 
@@ -236,7 +319,8 @@ void Pass_color::color(Eprp_var& var) {
   }
 
   if (stats) {
-    stats_acc.report(alg, opts.verbose);
+    stats_acc.set_absorbed_defs(absorbed.defs_absorbed);
+    stats_acc.report(alg, opts.verbose, opts.min_ge, opts.max_ge);
   }
 
   if (top_g != nullptr) {

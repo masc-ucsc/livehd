@@ -472,6 +472,18 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:hier_tests"],
 )
 
+# 2c-color-size subtask D: `pass.color synth` ABSORBS every def below the size
+# window's `min` (structural inline, so its logic can share an ABC region with
+# its neighbours -- a Sub is a blackbox to ABC). Absorb rewrites the netlist, so
+# the test that matters is the one only an end-to-end run gives: the absorbed
+# design is still LEC-equivalent to the original.
+sh_test(
+    name = "lhd_color_absorb_test",
+    size = "large",
+    srcs = ["lhd_color_absorb_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:hier_tests"],
+)
+
 # 2a-abc: `lhd pass abc` technology-maps a colored combinational design to a
 # standard-cell netlist (blackbox Sub cells), `pass liberty gensim` models each
 # cell, and the netlist is LEC-equivalent to the original logic (+ a negative
@@ -481,6 +493,20 @@ sh_test(
     size = "large",
     srcs = ["lhd_abc_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+# 2opt-incr A+C: incremental pass.abc. A persistent region cache keyed by a
+# canonical digest: a NoChange run is all hits and zero ABC; editing one module
+# re-synthesizes only the regions it touched; every assembled netlist is
+# LEC-gated against the original logic.
+sh_test(
+    name = "lhd_abc_incr_test",
+    size = "large",
+    srcs = ["lhd_abc_incr_test.sh"],
+    data = _FLOW_DATA + [
+        "//inou/prp:abc_tests",
+        "//inou/prp:hier_tests",
+    ],
 )
 
 # 2opt-incr subtask 0: pass.abc memory admission. A whole-design ABC region can

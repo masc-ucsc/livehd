@@ -68,13 +68,14 @@ void semdiff_command(Options& opts, Result& res) {
     return v != "false" && v != "0";
   };
   // `stats` is a PRESET, not just a report toggle: "how well do these two
-  // designs correspond?" is only answerable over the whole hierarchy (hier) with
-  // the state tiers on, and a single-def node count answers nothing. An explicit
-  // --set of any implied key still wins — label() returns the registry default
-  // only when the key is absent, so `truthy(k, stats?…)` is overridden by --set.
-  // `--stats` is the CLI sugar for the same knob; either form turns it on.
+  // designs correspond?" needs the state tiers on, and a single-def node count
+  // answers nothing. An explicit --set of any implied key still wins — label()
+  // returns the registry default only when the key is absent, so
+  // `truthy(k, stats?…)` is overridden by --set. `--stats` is the CLI sugar for
+  // the same knob; either form turns it on. hier is on by default (like every
+  // hier option): sweep the whole def DAG; hier=false compares one top pair.
   const bool stats = opts.stats || truthy("stats", "0");
-  const bool hier  = truthy("hier", stats ? "1" : "0");
+  const bool hier  = truthy("hier", "1");
 
   livehd::semdiff::Semdiff_options o;
   o.alg            = label("alg", "structural");
@@ -106,9 +107,10 @@ void semdiff_command(Options& opts, Result& res) {
   if (auto v = label("explain_noise", "0"); !v.empty()) {
     o.explain_noise = static_cast<uint32_t>(std::strtoul(v.c_str(), nullptr, 10));
   }
-  // Hier stats sweeps are the iterate-on-the-matcher loop; re-saving two whole
-  // libraries per iteration is pure drag, so hier defaults save OFF.
-  const bool save = truthy("save", hier ? "0" : "1");
+  // Stats sweeps are the iterate-on-the-matcher loop; re-saving two whole
+  // libraries per iteration is pure drag, so stats defaults save OFF. Plain
+  // runs save, keeping the mark-in-place `match` workflow (tool grep/diff).
+  const bool save = truthy("save", stats ? "0" : "1");
 
   res.recipe_steps.emplace_back(std::format("pass.semdiff alg:{} matching_names:{} state_pairing:{} hier:{} id_granularity:{}",
                                             o.alg,
@@ -237,7 +239,18 @@ void semdiff_command(Options& opts, Result& res) {
         }
       }
     }
-    const std::string want_top = !opts.ref_top.empty() ? opts.ref_top : opts.top;
+    std::string want_top = !opts.ref_top.empty() ? opts.ref_top : opts.top;
+    if (want_top.empty() && !opts.impl_top.empty()) {
+      // --impl-top names the ref top's renamed counterpart; anchor the pair on
+      // the sole ref def when no --ref-top/--top disambiguates.
+      if (ref_by_name.size() == 1) {
+        want_top = ref_by_name.begin()->first;
+      } else {
+        throw Lhd_error{"usage",
+                        "pass semdiff: --impl-top needs --ref-top (or --top) when the ref library holds several defs",
+                        ""};
+      }
+    }
     if (!want_top.empty()) {
       // Accept the top as full name or unambiguous entity (lec's rule, via
       // the shared resolver — it warns when the fallback substitutes).
@@ -253,6 +266,28 @@ void semdiff_command(Options& opts, Result& res) {
         throw Lhd_error{"config", std::format("pass semdiff: ref top '{}' not found", want_top), ""};
       }
       const std::string top_key = canon_ref(resolved);
+      if (!opts.impl_top.empty()) {
+        // Renamed-top compare: the sweep pairs defs by canonical name, which
+        // can never find a differently-named counterpart — seed the explicit
+        // top pair under the ref key (children still pair by name).
+        std::vector<std::string> impl_names;
+        impl_names.reserve(impl_var.graphs.size());
+        for (const auto& g : impl_var.graphs) {
+          if (g) {
+            impl_names.emplace_back(g->get_name());
+          }
+        }
+        const std::string iresolved = resolve_top_name(impl_names, opts.impl_top, "pass.semdiff");
+        if (iresolved.empty()) {
+          throw Lhd_error{"config", std::format("pass semdiff: impl top '{}' not found", opts.impl_top), ""};
+        }
+        for (const auto& g : impl_var.graphs) {
+          if (g && g->get_name() == iresolved) {
+            impl_by_name[top_key] = g.get();
+            break;
+          }
+        }
+      }
       absl::flat_hash_map<std::string, int>   mark;
       std::function<void(const std::string&)> dfs = [&](const std::string& n) {
         int& m = mark[n];
@@ -329,6 +364,15 @@ void semdiff_command(Options& opts, Result& res) {
         print_state(std::format(" '{}'", name), st);
       }
     }
+    if (def_pairs == 0) {
+      // A sweep that paired NOTHING compared nothing — never a silent "pass"
+      // (differently-named tops land here; the sweep pairs defs by name).
+      throw Lhd_error{"config",
+                      std::format("pass semdiff: 0 def pairs ({} ref-only def(s)) — no impl def pairs any ref def by name",
+                                  ref_only),
+                      "tops named differently? pass --ref-top/--impl-top for the renamed top pair, or "
+                      "--set pass.semdiff.hier=0 for a single top-pair compare"};
+    }
     if (!opts.quiet) {
       std::print("semdiff[hier]: {} def pair(s), {} ref-only def(s){}\n",
                  def_pairs,
@@ -382,7 +426,7 @@ void semdiff_command(Options& opts, Result& res) {
       print_state("", r.state);
     }
     if (stats) {
-      // Single-pair: this def only. `stats` implies hier, so reaching here means
+      // Single-pair: this def only. hier defaults on, so reaching here means
       // the user asked for hier=false explicitly — report the one pair honestly
       // (0 ref-only: a single pair has no one-sided defs by construction).
       print_stats(1, 0, r.a_matched, r.a_matched + r.a_unmatched, r.b_matched, r.b_matched + r.b_unmatched, r.regions,
@@ -587,6 +631,14 @@ void pass_command(Options& opts, Result& res) {
       labels["qor"] = (fs::path(opts.workdir) / "qor.json").string();
     }
     merge_sets(opts, "pass.abc", labels);
+    // Incremental region cache (2opt-incr): lives under the USER's workdir,
+    // exactly like lec's formal_cache.json -- a scratch workdir would make
+    // every run cold, so no --workdir means no cache. The location is kernel
+    // policy, not a user knob (set AFTER merge_sets on purpose); the user
+    // switch is `pass.abc.cache=true|false`.
+    if (!opts.workdir.empty()) {
+      labels["cache_dir"] = (fs::path(opts.workdir) / "abc_cache").string();
+    }
     run_step("pass.abc", var, labels, opts, res);
     if (lg_out != nullptr) {
       livehd::Hhds_graph_library::save(lg_out->path);

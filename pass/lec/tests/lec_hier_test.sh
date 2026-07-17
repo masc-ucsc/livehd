@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Contract for the bottom-up hierarchical LEC driver (lec.hierarchical=true):
+# Contract for the bottom-up hierarchical LEC driver (lec.hier=true):
 # topo-order the module-def DAG, LEC each def leaves-first under the auto
 # portfolio, and force-black-box a parent's already-PROVEN child instances
 # (collapse), while a child left UNKNOWN stays FLATTENED into its parent (the
@@ -39,7 +39,7 @@ H() {  # $1=label ; $2..=lhd lec args ; sets RC/OUT
   # semdiff=none: this test validates the hierarchical SOLVER + child-collapse path,
   # so the structurally-identical self-lec must reach the solver (not be skipped by
   # the default semdiff=structural pre-check — that path is covered by lec_semdiff_test).
-  OUT=$("$LHD" lec "${@:2}" --top top --set lec.hierarchical=true --set lec.semdiff=none --workdir "$WORK/w_$1" 2>&1); RC=$?
+  OUT=$("$LHD" lec "${@:2}" --top top --set lec.hier=true --set lec.semdiff=none --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
 # 1) self-lec: every def proves leaves-first; mid collapses leaf, top collapses mid.
@@ -102,7 +102,7 @@ EOF
 "$LHD" compile "$WORK/fan.v" --top fan --emit-dir "lg:$WORK/fanlib" --workdir "$WORK/cfan" >/dev/null 2>&1
 for jobs in 1 4; do
   "$LHD" lec --impl "lg:$WORK/fanlib" --ref "lg:$WORK/fanlib" --top fan \
-    --set lec.hierarchical=true --set lec.semdiff=none --set formal.jobs="$jobs" \
+    --set lec.hier=true --set lec.semdiff=none --set formal.jobs="$jobs" \
     --set lec.cache=false --workdir "$WORK/w_fan_$jobs" >"$WORK/fan_$jobs.out" 2>&1
   if [ $? -ne 0 ]; then echo "FAIL: fan hierarchy jobs=$jobs failed"; fail=1; fi
   grep "lec\[hier\]: '.*' .*child collapse" "$WORK/fan_$jobs.out" | sort >"$WORK/fan_$jobs.set"

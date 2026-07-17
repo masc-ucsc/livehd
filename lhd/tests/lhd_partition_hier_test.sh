@@ -49,8 +49,14 @@ for entry in "${DESIGNS[@]}"; do
     run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
     # 2. reference Verilog (pre-color; coloring only adds attrs, but keep it clean)
     run compile lg:"$D/lg" --top "$TOP" --recipe O0 --emit verilog:"$D/ref.v" --workdir "$D/w2"
-    # 3. color every def in the hierarchy
-    run pass color "$ALG" --top "$TOP" lg:"$D/lg" --workdir "$D/w3"
+    # 3. color every def in the hierarchy.
+    #    absorb=false: this test is about pass.partition RE-LINKING a hierarchy,
+    #    so the hierarchy has to still be there. `synth`'s default min=1000 GE
+    #    would inline these fixtures away wholesale -- every def in them is a few
+    #    dozen gate-equivalents -- which is absorb working as designed and would
+    #    leave nothing here to re-link. Absorb has its own end-to-end test in
+    #    lhd_color_absorb_test.sh.
+    run pass color "$ALG" --top "$TOP" --set color.absorb=false lg:"$D/lg" --workdir "$D/w3"
     # 4. partition every def + re-link Sub instances into a fresh library
     run pass partition --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/lg2" --workdir "$D/w4"
     # 5. emit Verilog from the partitioned library (verbatim, no re-opt)
@@ -68,7 +74,7 @@ done
 SD="$W/stats"
 mkdir -p "$SD"
 run compile "inou/prp/tests/pyrope/hier_comb.prp" --top hier_comb.top --recipe O1 --emit-dir lg:"$SD/lg" --workdir "$SD/w1"
-run pass color synth --top hier_comb.top lg:"$SD/lg" --workdir "$SD/w2"
+run pass color synth --top hier_comb.top --set color.absorb=false lg:"$SD/lg" --workdir "$SD/w2"
 run pass partition --top hier_comb.top lg:"$SD/lg" --workdir "$SD/w3"
 echo "PASS: hierarchical partition stats-only mode"
 

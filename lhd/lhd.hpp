@@ -231,7 +231,7 @@ int  run_meta_command(const Options& opts);
 // derive from it, so the three can never drift. `inline constexpr` so it is one
 // shared definition across translation units.
 struct Sim_set_option {
-  enum class Kind { boolean, non_neg_num };  // value grammar enforced on --set
+  enum class Kind { boolean, non_neg_num, bool_or_file };  // value grammar enforced on --set
   std::string_view name;                     // flag under sim.*, e.g. "checkpoint_min_secs"
   std::string_view default_value;            // shown by `lhd list options`
   Kind             kind;
@@ -239,11 +239,14 @@ struct Sim_set_option {
 };
 
 inline constexpr Sim_set_option kSimSetOptions[] = {
-    {"vcd", "false", Sim_set_option::Kind::boolean,
-     "dump one VCD per test to <workdir>/<test.name>.vcd (links the VCD writer)"},
-    {"vcdfakedelay", "true", Sim_set_option::Kind::boolean,
+    {"vcd", "false", Sim_set_option::Kind::bool_or_file,
+     "false|true|FILE — VCD tracing, the ONE vcd knob for every flow. `lhd sim`: any non-false value dumps one VCD "
+     "per test to <workdir>/<test.name>.vcd. Compiled sim binaries (--emit-dir sim:): true bakes <top>.vcd, "
+     "FILE bakes that explicit path, false bakes none"},
+    {"vcd_fake_delay", "true", Sim_set_option::Kind::boolean,
      "VCD data settles a few ticks after each clock edge, with X during the settle window (edge->data causality); "
      "false = plain edge-aligned updates (no X, no delay; smaller/faster trace)"},
+    {"vcdfakedelay", "true", Sim_set_option::Kind::boolean, "DEPRECATED alias for sim.vcd_fake_delay"},
     {"cgen_color", "true", Sim_set_option::Kind::boolean,
      "run pass.color (cgen per-output cones) before inou.cgen.sim so sim codegen can schedule a Sub by output "
      "cone (breaks a false combinational loop through an instance); coloring is metadata only, NO_COLOR is just "

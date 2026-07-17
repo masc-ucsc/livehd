@@ -289,7 +289,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "semdiff" || name == "pass semdiff") {
     print_json_line(
-        R"json({"schema_version":1,"name":"pass semdiff","description":"Structural diff/match (a structural LEC), a `pass` subcommand: structural_match(ref, impl) marks corresponding nodes/driver-pins of both lg: libraries with a shared `match` attribute (0 = no counterpart) and saves both back in place. v1 marks lg: libraries, so both sides must be lg:DIR (compile sources to lg: first). Inspect the diff with `lhd tool grep match=0 lg:impl` or visualize it with `lhd tool diff lg:ref lg:impl --match`. --stats prints the aggregate node/register/memory match report (a design health check: it implies hier + matching_names + state_pairing, so it sweeps every def in --top's subtree; an explicit --set of any of those wins). Knobs are --set pass.semdiff.* (matching_names | state_pairing | hier | dump_state | id_granularity=pair|region)","args":{"required":[{"name":"impl","type":"lg:DIR"},{"name":"ref","type":"lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"stats","type":"flag (aggregate node/register/memory match report)"},{"name":"set","type":"pass.semdiff.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass semdiff --ref lg:gold --impl lg:opt --top adder","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder --stats","lhd pass semdiff --ref lg:gold --impl lg:opt --set pass.semdiff.matching_names=true","lhd tool diff lg:gold lg:opt --match"]})json");
+        R"json({"schema_version":1,"name":"pass semdiff","description":"Structural diff/match (a structural LEC), a `pass` subcommand: structural_match(ref, impl) marks corresponding nodes/driver-pins of both lg: libraries with a shared `match` attribute (0 = no counterpart) and saves both back in place. v1 marks lg: libraries, so both sides must be lg:DIR (compile sources to lg: first). Inspect the diff with `lhd tool grep match=0 lg:impl` or visualize it with `lhd tool diff lg:ref lg:impl --match`. --stats prints the aggregate node/register/memory match report (a design health check: it implies matching_names + state_pairing; an explicit --set of any of those wins). hier defaults true (sweep every def in --top's subtree; --set pass.semdiff.hier=0 compares one top pair). Knobs are --set pass.semdiff.* (matching_names | state_pairing | hier | dump_state | id_granularity=pair|region)","args":{"required":[{"name":"impl","type":"lg:DIR"},{"name":"ref","type":"lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"stats","type":"flag (aggregate node/register/memory match report)"},{"name":"set","type":"pass.semdiff.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass semdiff --ref lg:gold --impl lg:opt --top adder","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder --stats","lhd pass semdiff --ref lg:gold --impl lg:opt --set pass.semdiff.matching_names=true","lhd tool diff lg:gold lg:opt --match"]})json");
     return 0;
   }
   if (name == "compile" || name == "compile verilog" || name == "compile pyrope") {
@@ -665,16 +665,17 @@ int help_pass(const std::string& sub) {
         "  (like `pass liberty gensim`): 1-2 Liberty files (.lib; a 2nd = min corner) plus\n"
         "  optional .sdc / .spef — not a --set option.\n"
         "\n"
-        "  One module per run (one OpenTimer design): --top picks the def out of the\n"
-        "  netlist library. Time a region module (<mod>__c<N>) or a flat map. Flops and\n"
-        "  memories are path boundaries (kept native by pass.abc, zeroed as virtual inputs),\n"
-        "  not Liberty cells. By default a --top whose body instantiates a sub-MODULE (a Sub\n"
-        "  that is not a Liberty cell) is rejected — opentimer times one flat module.\n"
+        "  One OpenTimer design per run: --top picks the def out of the netlist library.\n"
+        "  Time a region module (<mod>__c<N>), a flat map, or a hierarchical top: by default\n"
+        "  (hier=true) the instance hierarchy is structurally flattened and timed as one\n"
+        "  module, so the critical path can span module boundaries. Flops and memories are\n"
+        "  path boundaries (kept native by pass.abc, zeroed as virtual inputs), not Liberty\n"
+        "  cells.\n"
         "\n"
         "flags:\n"
-        "  --set pass.opentimer.hier=true        whole-design flattening across the instance hierarchy\n"
-        "                                        (combinational paths chain across module boundaries;\n"
-        "                                        flops/memories stay zero-arrival path boundaries)\n"
+        "  --set pass.opentimer.hier=false       one tech-mapped module per run: a --top whose body\n"
+        "                                        instantiates a sub-MODULE (a Sub that is not a Liberty\n"
+        "                                        cell) is rejected instead of flattened\n"
         "  --set pass.opentimer.margin=<0-100>   criticality-coloring threshold (report is independent)\n"
         "  --set pass.opentimer.qor=FILE         timing JSON path (defaults to <workdir>/timing.json)\n"
         "\n"
@@ -716,9 +717,9 @@ int help_pass(const std::string& sub) {
         "                 bare entity when unique — resolves with a top-entity-fallback warning)\n"
         "  --set pass.semdiff.matching_names=true   anchor internal flops/mems by hierarchical name\n"
         "  --set pass.semdiff.state_pairing=true    tier-2: full-match (SRP/ERP signature) pairing of renamed state\n"
-        "  --set pass.semdiff.hier=1                sweep every def pair (--top scopes to its subtree), aggregate state stats\n"
+        "  --set pass.semdiff.hier=0                compare ONE top pair (default 1: sweep every def pair, --top scopes to its subtree)\n"
         "  --set pass.semdiff.dump_state=1          per-state-cell pairing outcome (matcher iteration aid)\n"
-        "  --set pass.semdiff.save=0                skip the save-back (hier defaults to 0, single-pair to 1)\n"
+        "  --set pass.semdiff.save=0                skip the save-back (default 1; --stats sweeps default to 0)\n"
         "  --set pass.semdiff.id_granularity=region one id per connected matched region (else pair)\n"
         "\n"
         "inspect the result:\n"
@@ -796,7 +797,7 @@ constexpr std::string_view kJsonPassAbc =
     R"json({"schema_version":1,"name":"pass abc","description":"Combinational ABC tech-map: bit-blast -> AIG -> sky130 blackboxes. --emit-dir lg: (must differ from the input) receives the mapped netlist","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.abc.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass abc --top m lg:dir --emit-dir lg:net"]})json";
 
 constexpr std::string_view kJsonPassOpentimer =
-    R"json({"schema_version":1,"name":"pass opentimer","description":"OpenTimer static timing analysis on ONE pass.abc tech-mapped module: reports the critical path (max_delay, critical pin, worst endpoints, source-attributed) as timing.json and the result envelope 'qor' member. Timing files are POSITIONAL (1-2 Liberty .lib, a 2nd = min corner, plus optional .sdc/.spef). --top picks the def (time a <mod>__c<N> region or a flat map); flops/memories are zeroed path boundaries. A --top that instantiates a sub-module (a Sub that is not a Liberty cell) is rejected — one flat module per run","args":{"required":[{"name":"files","type":"path (.lib[,.sdc,.spef])","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"set","type":"pass.opentimer.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["json"],"examples":["lhd pass abc --top m lg:g --emit-dir lg:net","lhd pass opentimer --top m__c0 lg:net cells.lib --workdir W"]})json";
+    R"json({"schema_version":1,"name":"pass opentimer","description":"OpenTimer static timing analysis on ONE pass.abc tech-mapped module: reports the critical path (max_delay, critical pin, worst endpoints, source-attributed) as timing.json and the result envelope 'qor' member. Timing files are POSITIONAL (1-2 Liberty .lib, a 2nd = min corner, plus optional .sdc/.spef). --top picks the def (time a <mod>__c<N> region or a flat map); flops/memories are zeroed path boundaries. hier defaults true: a --top that instantiates sub-modules is structurally flattened and timed as ONE design (--set pass.opentimer.hier=false rejects non-Liberty Subs instead: one flat module per run)","args":{"required":[{"name":"files","type":"path (.lib[,.sdc,.spef])","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"set","type":"pass.opentimer.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["json"],"examples":["lhd pass abc --top m lg:g --emit-dir lg:net","lhd pass opentimer --top m__c0 lg:net cells.lib --workdir W"]})json";
 
 constexpr std::string_view kJsonPassLiberty =
     R"json({"schema_version":1,"name":"pass liberty","description":"Liberty cells -> LGraph simulation models (gensim). Takes a Liberty FILE (not an lg: input); --emit-dir lg: receives the model library","args":{"required":[{"name":"subcommand","type":"enum","values":["gensim"],"positional":true},{"name":"file","type":"path (.lib)","positional":true}],"optional":[{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.liberty.flag=value","repeatable":true}]},"inputs":[],"outputs":["lg"],"examples":["lhd pass liberty gensim sky130.lib --emit-dir lg:models"]})json";
@@ -977,7 +978,7 @@ int help_command(const Options& opts) {
         "  --impl KIND:PATH   --ref KIND:PATH\n"
         "  --top T            --impl-top T   --ref-top T   (T = full `file.entity` name, or\n"
         "                     the bare entity when unique — a top-entity-fallback warning notes it)\n"
-        "  --reader R         --set lec.flag=value   --formal GLOB\n"
+        "  --reader R         --set formal.flag=value   --formal GLOB\n"
         "  Extra .prp files supply impl-side formal helpers. Internal/output facts are\n"
         "  proven unbounded before use; input-only assumes are environment constraints;\n"
         "  assume_nocheck_formal warns and is disclosed; assume_nocheck_synth is ignored.\n"
@@ -986,7 +987,7 @@ int help_command(const Options& opts) {
         "  lhd lec --impl impl.prp --ref ref.v\n"
         "  lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set lec.engine=ind\n"
         "  lhd lec --impl net.v --ref gold.v --set lec.solver=lgyosys --top foo\n");
-    return print_options_section({"lec."});
+    return print_options_section({"formal."});
   }
   if (topic == "formal" || topic == "formal verify") {
     std::print(

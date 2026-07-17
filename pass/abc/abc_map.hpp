@@ -15,6 +15,8 @@
 
 namespace livehd::abc {
 
+class Incr_cache;  // abc_incr.hpp -- the 2opt-incr per-region signature cache
+
 struct Map_options {
   std::string       library;  // Liberty .lib for read_lib
   std::string       flow;     // ABC command string (empty => built-in default)
@@ -110,6 +112,11 @@ public:
 
   void set_outlib(hhds::GraphLibrary* l) { outlib_ = l; }
 
+  // Incremental mapping (2opt-incr A+C): with a cache attached, map_region
+  // digests each region first and clones the previously mapped netlist on a
+  // hit instead of running ABC. nullptr = every region maps normally.
+  void set_incr(Incr_cache* c) { incr_ = c; }
+
   // CLI-level per-region overrides (--set pass.abc.region_opts). Graph-embedded
   // overrides (coloring_info "region_opts") are read per region in map_region.
   void set_region_opts(Region_opts_map m) { region_opts_cli_ = std::move(m); }
@@ -141,6 +148,7 @@ private:
   // keeps flops native. Detected once in start().
   std::optional<liberty::Dff_cell> dff_;
   hhds::GraphLibrary*     outlib_     = nullptr;  // where blackbox cell defs are declared
+  Incr_cache*             incr_       = nullptr;  // optional region cache (2opt-incr)
   std::vector<Region_qor> qor_;
   Region_opts_map         region_opts_cli_;
   // coloring_info "region_opts" parse cache, one entry per source graph.

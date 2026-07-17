@@ -11,41 +11,82 @@
 namespace livehd::color {
 
 void Color_stats::add(std::string_view def, const Def_color_sizes& sizes, uint64_t instances) {
+  uint64_t def_ge = 0;
+  for (const auto& [color, ge] : sizes.color_ge) {
+    (void)color;
+    def_ge += ge;
+  }
+
   Def_row row;
   row.def       = std::string{def};
   row.nodes     = sizes.partitionable;
   row.uncolored = sizes.uncolored;
   row.colors    = sizes.color_nodes.size();
   row.instances = instances;
+  row.ge        = def_ge;
   defs_.emplace_back(std::move(row));
 
   total_nodes_ += sizes.partitionable;
   total_uncolored_ += sizes.uncolored;
   flat_nodes_ += sizes.partitionable * instances;
+  total_ge_ += def_ge;
 
   for (const auto& [color, nodes] : sizes.color_nodes) {
-    partitions_.emplace_back(Partition{std::string{def}, color, nodes});
+    auto it = sizes.color_ge.find(color);
+    partitions_.emplace_back(Partition{std::string{def}, color, nodes, it == sizes.color_ge.end() ? 0 : it->second});
   }
 }
 
-std::vector<uint64_t> Color_stats::sizes_desc() const {
+std::vector<uint64_t> Color_stats::sizes_desc(bool by_ge) const {
   auto sorted = partitions_;
-  // Sort by (nodes desc, def, color): color ids are minted from hash-map
+  // Sort by (size desc, def, color): color ids are minted from hash-map
   // iteration in the continuous split, so an id-ordered report would not be
   // reproducible run to run.
-  std::sort(sorted.begin(), sorted.end(), [](const Partition& a, const Partition& b) {
-    return std::tie(b.nodes, a.def, a.color) < std::tie(a.nodes, b.def, b.color);
+  std::sort(sorted.begin(), sorted.end(), [by_ge](const Partition& a, const Partition& b) {
+    const uint64_t as = by_ge ? a.ge : a.nodes;
+    const uint64_t bs = by_ge ? b.ge : b.nodes;
+    return std::tie(bs, a.def, a.color) < std::tie(as, b.def, b.color);
   });
   std::vector<uint64_t> out;
   out.reserve(sorted.size());
   for (const auto& p : sorted) {
-    out.emplace_back(p.nodes);
+    out.emplace_back(by_ge ? p.ge : p.nodes);
   }
   return out;
 }
 
-void Color_stats::report(std::string_view alg, bool per_def) const {
-  const auto sizes = sizes_desc();
+// Log2-bucketed size histogram, decade-ish buckets chosen to straddle the two
+// numbers that matter: the 1k-5k incremental-resynthesis band (2opt-incr E) and
+// the 200k-GE memory-fit ceiling (2c-color-size R2).
+void Color_stats::print_histogram(const std::vector<uint64_t>& ge_desc) {
+  struct Bucket {
+    uint64_t    lo, hi;
+    const char* label;
+  };
+  static constexpr Bucket buckets[] = {
+      {0, 1, "1"},
+      {2, 9, "2-9"},
+      {10, 99, "10-99"},
+      {100, 999, "100-999"},
+      {1000, 4999, "1k-5k"},
+      {5000, 49999, "5k-50k"},
+      {50000, 199999, "50k-200k"},
+      {200000, UINT64_MAX, ">=200k"},
+  };
+  std::print(stderr, "color[stats]: GE histogram\n");
+  for (const auto& b : buckets) {
+    const auto cnt = std::count_if(ge_desc.begin(), ge_desc.end(), [&](uint64_t g) { return g >= b.lo && g <= b.hi; });
+    if (cnt == 0) {
+      continue;
+    }
+    // Bar scaled to the largest bucket would need a second pass; a plain count
+    // is what a reader compares across runs anyway.
+    std::print(stderr, "color[stats]:   {:>9} GE  {:>8} region(s)\n", b.label, cnt);
+  }
+}
+
+void Color_stats::report(std::string_view alg, bool per_def, uint64_t min_ge, uint64_t max_ge) const {
+  const auto sizes = sizes_desc(false);
   if (sizes.empty()) {
     std::print(stderr, "color[stats]: alg {} -- no partitions ({} node(s), all uncolored)\n", alg, total_nodes_);
     return;
@@ -88,14 +129,58 @@ void Color_stats::report(std::string_view alg, bool per_def) const {
              total_uncolored_,
              pct(total_uncolored_));
 
+  // Gate equivalents: the unit the size window bounds and the one that predicts
+  // ABC's memory. Reported next to the node counts rather than instead of them --
+  // the gap between the two IS the finding on a wide-datapath design.
+  const auto ge = sizes_desc(true);
+  if (!ge.empty() && total_ge_ != 0) {
+    const double   ge_avg = static_cast<double>(total_ge_) / static_cast<double>(ge.size());
+    const uint64_t ge_pct_den = total_ge_;
+    std::print(stderr,
+               "color[stats]: GE        max {} ({:.1f}% of GE), min {}, avg {:.1f}, median {}, total {}\n",
+               ge.front(),
+               100.0 * static_cast<double>(ge.front()) / static_cast<double>(ge_pct_den),
+               ge.back(),
+               ge_avg,
+               ge[ge.size() / 2],
+               total_ge_);
+    print_histogram(ge);
+
+    // Did the window actually hold? A leftover here is not noise: pass.abc's
+    // admission FATALs the whole run on the first over-max region it meets.
+    if (min_ge != 0 || max_ge != 0) {
+      const auto under = min_ge == 0 ? 0 : std::count_if(ge.begin(), ge.end(), [&](uint64_t g) { return g < min_ge; });
+      const auto over  = max_ge == 0 ? 0 : std::count_if(ge.begin(), ge.end(), [&](uint64_t g) { return g > max_ge; });
+      std::print(stderr,
+                 "color[stats]: window    min {} / max {} GE -- {} region(s) under min, {} over max\n",
+                 min_ge,
+                 max_ge,
+                 under,
+                 over);
+      if (under != 0) {
+        std::print(stderr,
+                   "color[stats]:           under-min leftovers are def-bound: a def whose whole body is "
+                   "below min has no neighbour to merge with (absorb folds those into their parents)\n");
+      }
+      if (over != 0) {
+        std::print(stderr,
+                   "color[stats]:           OVER-MAX regions remain -- pass.abc admission may refuse this "
+                   "design; an indivisible single node (a wide Mult) can exceed max on its own\n");
+      }
+    }
+  }
+  if (absorbed_defs_ != 0) {
+    std::print(stderr, "color[stats]: absorb    {} def(s) inlined into their parents (below min)\n", absorbed_defs_);
+  }
+
   if (per_def) {
     auto rows = defs_;
     std::sort(rows.begin(), rows.end(), [](const Def_row& a, const Def_row& b) {
       return std::tie(b.nodes, a.def) < std::tie(a.nodes, b.def);
     });
-    std::print(stderr, "color[stats]: {:<52}{:>8}{:>9}{:>10}\n", "def", "nodes", "colors", "uncolored");
+    std::print(stderr, "color[stats]: {:<52}{:>8}{:>10}{:>9}{:>10}\n", "def", "nodes", "GE", "colors", "uncolored");
     for (const auto& r : rows) {
-      std::print(stderr, "color[stats]: {:<52}{:>8}{:>9}{:>10}\n", r.def, r.nodes, r.colors, r.uncolored);
+      std::print(stderr, "color[stats]: {:<52}{:>8}{:>10}{:>9}{:>10}\n", r.def, r.nodes, r.ge, r.colors, r.uncolored);
     }
   }
 

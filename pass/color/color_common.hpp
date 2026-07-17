@@ -105,6 +105,11 @@ private:
 // turns into the `<def>__c<id>` module name.
 struct Def_color_sizes {
   absl::flat_hash_map<int, uint64_t> color_nodes;
+  // Gate equivalents per color, same keys as `color_nodes`. This -- not the node
+  // count -- is what the size window bounds and what predicts ABC's memory: a
+  // 200k-node region of wide datapath passes any node gate and still OOMs
+  // (todo/livehd/2c-color-size.html R1).
+  absl::flat_hash_map<int, uint64_t> color_ge;
   uint64_t partitionable = 0;  // nodes the algorithm was allowed to color
   uint64_t uncolored = 0;      // ... that it left without a color
 };
@@ -123,6 +128,19 @@ struct Color_opts {
   bool compact = true;
   bool continuous = false;
   bool keep_colored = false;
+
+  // Size window, in GATE EQUIVALENTS (graph_util::ge_weight), honored by the
+  // algorithms that opt in (today: synth). Regions below `min_ge` are merged
+  // into a neighbour; regions above `max_ge` are split. 0 disables that half of
+  // the window.
+  //
+  // Both default to 0 -- INERT -- on purpose: this struct is the algorithm's
+  // contract, and an algorithm asked for the raw coloring must give the raw
+  // coloring. The shipped policy (1000 / 30000000) lives on the pass.color
+  // labels, so it applies to the CLI without silently rewriting what a direct
+  // caller or a unit test asked for.
+  uint64_t min_ge = 0;
+  uint64_t max_ge = 0;
 
   // `--stats` sink for the def currently being colored, or nullptr. It rides on
   // the options so every algorithm reports without each one growing a

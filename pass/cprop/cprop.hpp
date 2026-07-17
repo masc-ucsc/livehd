@@ -12,7 +12,6 @@
 
 class Cprop {
 private:
-  bool              hier;
   static inline int trace_module_cnt = 0;
 
 protected:
@@ -50,7 +49,7 @@ protected:
   void scalar_pass(hhds::Graph* g);
 
 public:
-  Cprop(bool _hier);
+  Cprop() = default;
 
   void do_trans(const std::shared_ptr<hhds::Graph>& g);
 };

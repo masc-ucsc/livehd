@@ -59,7 +59,7 @@ been explicitly classified by LEC.  The gate runs BEFORE `pass.lean`:
 1. LiveHD compile        RTL -> LGraph                        (lhd compile verilog)
 2. LEC gate              prove/classify RTL == LGraph         (scripts/run_dino_lgraph_lec_gate.sh)
                            default lec.engine=auto,
-                                   lec.hierarchical=true,
+                                   lec.hier=true,
                                    lec.semdiff=structural
                            accept: PROVEN, or INCONCLUSIVE (recorded);
                            reject: REFUTED  ->  do NOT generate
@@ -200,7 +200,7 @@ semantically equivalent to the raw RTL, per design, before any Lean generation:
 impl = lhd compile verilog <design .sv> -> post-cprop LGraph
 ref  = raw RTL (all modules concatenated), independently elaborated
 lhd lec --impl lg:<lg> --ref verilog:<raw.sv> --top <T> --reader yosys-verilog \
-        --set lec.engine=auto --set lec.hierarchical=true --set lec.semdiff=structural
+        --set lec.engine=auto --set lec.hier=true --set lec.semdiff=structural
 ```
 
 Because cprop reshapes the impl side, `semdiff=structural` cannot short-circuit;

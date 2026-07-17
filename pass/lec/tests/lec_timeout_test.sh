@@ -73,7 +73,7 @@ run_lec() {  # $1=name $2=lec.timeout secs $3=outer kill secs
   of="$WORK/out_$name.txt"
   start=$(date +%s)
   "$LHD" lec --ref "$WORK/${name}_ref.v" --impl "$WORK/${name}_impl.v" \
-         --top foo --set lec.hierarchical=false --set lec.engine=bmc --set lec.decompose=false \
+         --top foo --set lec.hier=false --set lec.engine=bmc --set lec.decompose=false \
          --set lec.timeout="$tmo" --workdir "$WORK/w_$name" > "$of" 2>&1 &
   pid=$!
   ( sleep "$outer"; kill -9 "$pid" 2>/dev/null ) &

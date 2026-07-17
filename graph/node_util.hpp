@@ -11,6 +11,7 @@
 // HHDS library stays free of LiveHD-specific encodings (Ntype_op bit-shift,
 // the "%dot.name" wire-naming scheme, etc.).
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <format>
@@ -797,6 +798,144 @@ template <typename Resolve, typename IsOpaque>
     return total;
   };
   return count(count, top);
+}
+
+// ---------------------------------------------------------------------------
+// Gate-equivalent (GE) weight.
+// ---------------------------------------------------------------------------
+//
+// A node is not a unit of work. A 1-bit And and a 512-bit And are one LGraph
+// node each, and 1 versus 512 AIG nodes once ABC bit-blasts them -- so a
+// 200k-node region of wide datapath sails through any node-count gate and still
+// exhausts the host. Anything sizing a region against a memory budget therefore
+// weighs nodes in GATE EQUIVALENTS: one GE is roughly one bit-blasted gate
+// (the `min=`/`max=` window of pass.color, todo/livehd/2c-color-size.html R1).
+//
+// The model:
+//   * bitwise / mux / shift / Sext / Get_mask / Set_mask / Sum, and the flops
+//                            -> driver width: one gate per output bit
+//   * Mult                   -> width^2: an array multiplier is quadratic
+//   * comparators and reduces (LT/GT/EQ/Ror) -> widest OPERAND, not the driver.
+//     They answer in one bit but pay per input bit; sizing a 64-bit compare at
+//     1 GE is exactly the undercount this metric exists to prevent.
+//   * blackboxes ABC never opens (Div, Sub, a native Memory)
+//                            -> sum of PORT widths. The boundary is all ABC
+//                               sees of them, and it is what the region carries.
+//   * constants and graph IO -> 0. Neither maps to a gate.
+//
+// UNKNOWN WIDTH (bits == 0: pass.color running before pass.bitwidth, or a
+// driver nobody reads) degrades to 1 -- the same degradation Color_synth::is_cut
+// takes. Note the asymmetry: for `is_cut` an unknown width only ever grows a
+// region ("larger, never wrong"), while here it UNDERSTATES one. A GE window is
+// a best-effort fence; the sampled-RSS admission inside pass.abc stays the
+// backstop that actually holds.
+namespace ge_detail {
+
+// Width of the node's primary output. Driver pin 0 ("node-as-pin") is the
+// single-output shape that dominates the graph; create_driver_pin(0) is pure
+// handle arithmetic (no allocation, no mutation) and, unlike an out-edge scan,
+// still reports the width of a driver that nobody reads.
+[[nodiscard]] inline uint64_t out_width(const hhds::Node_class& node) {
+  const auto b = bits_of(node.create_driver_pin(0));
+  return b <= 0 ? 0 : static_cast<uint64_t>(b);
+}
+
+// Width of the widest driver feeding any of `node`'s sinks -- the operand width
+// of a comparator/reduce, whose own output is a single bit.
+[[nodiscard]] inline uint64_t widest_operand(const hhds::Node_class& node) {
+  uint64_t w = 0;
+  for (const auto& e : node.inp_edges()) {
+    const auto b = bits_of(e.driver);
+    if (b > 0 && static_cast<uint64_t>(b) > w) {
+      w = static_cast<uint64_t>(b);
+    }
+  }
+  return w;
+}
+
+// Port width across a blackbox boundary: every distinct driver pin, plus every
+// distinct sink pin that a non-constant drives. Deduping by port id is
+// load-bearing -- out_edges()/inp_edges() yield one entry per EDGE, so a driver
+// with three readers would otherwise be counted three times. Constant-driven
+// sinks are skipped: on a Memory those are the comptime `bits`/`size`/`rdport`
+// configuration pins rather than ports, and a tied input costs no boundary gate
+// anywhere (ABC folds it).
+[[nodiscard]] inline uint64_t port_bits_sum(const hhds::Node_class& node) {
+  std::vector<uint32_t> seen;
+  uint64_t              sum = 0;
+  auto once = [&](uint32_t pid, const hhds::Pin_class& width_pin) {
+    if (std::find(seen.begin(), seen.end(), pid) != seen.end()) {
+      return;
+    }
+    seen.emplace_back(pid);
+    if (const auto b = bits_of(width_pin); b > 0) {
+      sum += static_cast<uint64_t>(b);
+    }
+  };
+  for (const auto& e : node.out_edges()) {
+    once(static_cast<uint32_t>(e.driver.get_port_id()), e.driver);
+  }
+  seen.clear();  // driver and sink port ids live in separate spaces
+  for (const auto& e : node.inp_edges()) {
+    if (is_const_pin(e.driver)) {
+      continue;
+    }
+    once(static_cast<uint32_t>(e.sink.get_port_id()), e.driver);  // a sink's width is its driver's
+  }
+  return sum;
+}
+
+// Declared port width of a sub-instance. Read off the child's GraphIO decls, not
+// its edges: the decl carries `bits` even when the body was never materialized
+// and when the parent left a port unconnected.
+[[nodiscard]] inline uint64_t sub_port_bits(const hhds::Node_class& node) {
+  auto io = node.get_subnode_io();
+  if (!io) {
+    return 0;
+  }
+  uint64_t sum = 0;
+  for (const auto& d : io->get_input_pin_decls()) {
+    sum += d.bits;
+  }
+  for (const auto& d : io->get_output_pin_decls()) {
+    sum += d.bits;
+  }
+  return sum;
+}
+
+}  // namespace ge_detail
+
+// Gate-equivalent weight of one node. See the model above. Never returns 0 for a
+// node that maps to logic -- an unknown width floors at 1, so a region's GE is
+// always at least its partitionable node count.
+[[nodiscard]] inline uint64_t ge_weight(const hhds::Node_class& node) {
+  if (node.is_invalid() || is_builtin_node(node)) {
+    return 0;
+  }
+  const auto atleast1 = [](uint64_t w) -> uint64_t { return w == 0 ? 1 : w; };
+
+  switch (type_op_of(node)) {
+    case Ntype_op::Invalid:
+    case Ntype_op::IO:
+    case Ntype_op::Nconst: return 0;
+
+    case Ntype_op::Sub: return atleast1(ge_detail::sub_port_bits(node));
+
+    case Ntype_op::Div:
+    case Ntype_op::Memory: return atleast1(ge_detail::port_bits_sum(node));
+
+    case Ntype_op::Mult: {
+      const uint64_t w = ge_detail::out_width(node);
+      return w == 0 ? 1 : w * w;
+    }
+
+    case Ntype_op::LT:
+    case Ntype_op::GT:
+    case Ntype_op::EQ:
+    case Ntype_op::Ror: return atleast1(ge_detail::widest_operand(node));
+
+    default: return atleast1(ge_detail::out_width(node));
+  }
 }
 
 }  // namespace livehd::graph_util

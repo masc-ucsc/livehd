@@ -31,6 +31,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "color_common.hpp"
+#include "color_size.hpp"
 #include "hhds/graph.hpp"
 
 namespace livehd::color {
@@ -43,6 +44,9 @@ public:
 private:
   Color_opts opts;
   bool       synth = true;
+  // Does this graph carry source-seeded (block-attribute) regions? Re-read per
+  // def in label(), since the driver reuses one Color_synth across defs.
+  bool seeded = false;
 
   int last_free_id = 1;
 
@@ -53,6 +57,7 @@ private:
   void set_id(const hhds::Node_class& node, int id);
   void force_id(const hhds::Node_class& node, int id);
   [[nodiscard]] bool is_cut(const hhds::Node_class& node) const;
+  [[nodiscard]] bool is_seeded(const hhds::Node_class& node) const;
   [[nodiscard]] int  data_cone_id(const hhds::Node_class& node);
   void mark_ids(hhds::Graph* g);
   void merge_ids();

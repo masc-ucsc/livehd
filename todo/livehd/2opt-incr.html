@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2opt-incr — incremental synthesis: fast better/worse answers for small RTL edits</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2opt-incr</strong> Incremental synthesis — fast better/worse answers</h1>
+
+<p>A re-implementation of <strong>LiveSynth</strong> (DAC'17, Possignolo &amp; Renau;
+  UCSC thesis ch.4) on today's kernel, sharing the
+  <a class="xref" href="2f-lec.html">2f-lec</a> cone/digest machinery instead of
+  re-deriving it. The purpose is <strong>evaluation speed, not tape-out</strong>: a
+  designer (or the <a class="xref" href="2opt-freq.html">2opt-freq</a> agent loop)
+  makes a small RTL change and needs to know <em>is this better or worse?</em> in
+  seconds. Fabrication runs a normal full synthesis; the incremental engine only has
+  to make the <em>iteration decisions</em> correct.</p>
+
+<p>The original work's two headline costs are exactly what the landed
+  <code>lec.cones</code> engine already kills: its <strong>setup</strong> was
+  per-net SAT (3.8–15.6× the cost of a full synthesis), and its <strong>diff</strong>
+  — a hand-rolled recursive structural walk — was <strong>83% (fpu) to 94.8% (mips)
+  of the live-phase runtime</strong>. A canonical structural digest turns that diff
+  into an <code>O(1)</code> map lookup, and the ABC cone prover replaces the SAT
+  setup. Both already exist and are test-proven.</p>
+
+<h2>Contract rulings (settled 2026-07-15)</h2>
+<ul>
+<li><strong>This is a decision oracle, not a fabrication path.</strong> The
+  incremental result never has to be the shipped netlist — it has to be
+  <em>right about the direction</em>. A wrong "faster" wastes an iteration; a wrong
+  "slower" prunes a good idea. Final fabrication does a full synthesis.</li>
+<li><strong>Two speeds.</strong> (1) <em>FIB probe</em> — ephemeral, timing-only,
+  answers "is X faster?" in seconds, <strong>never stitched back</strong>. Its job is
+  <em>pruning</em>. (2) <em>Partition resynthesis</em> — the durable path, run when a
+  change is kept and always before P&amp;R. Because the probe never stitches and
+  never reaches P&amp;R, <strong>FIB's area redundancy is structurally unable to leak
+  downstream</strong>.</li>
+<li><strong>The reuse grain is a DISJOINT partition, not an overlapping cone.</strong>
+  The 2017 area problem was inherent to the grain: single-output invariant cones
+  overlap, so resynthesizing one cone re-emits logic shared with its neighbours
+  (<code>model.tex</code>: <em>"This procedure is sub-optimal for area, since it may
+  result in redundancy… may accumulate over the course of multiple changes"</em>).
+  ICCAD reviewer #3 reached the same conclusion at the time: <em>"I also think that
+  treating regions as multi-output avoids duplication of gates during incremental
+  updates."</em> Disjoint partitions remove the refcount machinery and the
+  accumulating drift outright.</li>
+<li><strong>Partitions are discovered iteratively and cached.</strong> Best-guess
+  colors → parallel synthesis → check → re-partition as needed; the partition
+  decisions are remembered so later runs do not re-iterate. Partitions pay for
+  themselves twice: they are also the unit of <strong>parallel synthesis on the
+  original (non-incremental) run</strong>.</li>
+<li><strong><code>pass.color flat</code> remains literal.</strong> It requests one
+  whole-design ABC region and is the full-synthesis/QoR baseline; neither
+  <code>pass.color</code> nor <code>pass.abc</code> silently subdivides it. Instead,
+  ABC performs memory admission before committing to the region and refuses an
+  unsafe run with a clean diagnostic, a smaller-coloring recommendation, and an
+  explicit <code>pass.abc.allow_oversize=true</code> escape hatch.</li>
+<li><strong>Timing-driven partition growth.</strong> A partition is a region timing
+  does not likely propagate across. Synthesize it, and if the critical path runs
+  input→output, grow the partition to absorb the neighbour and re-synthesize. (The
+  paper's own mitigation, <code>model.tex §Dealing with delay degradation</code>, was
+  the same idea applied to cones.)</li>
+<li><strong>The cache holds SIGNATURES per partition</strong>, not copies of the
+  netlists — light, and enough to traverse and re-stitch as needed. <code>Spec0</code>
+  is <em>never stored</em>: a per-partition digest replaces the paper's backward
+  traversal entirely, which is where 83–95% of its live runtime went.</li>
+<li><strong>v1 metrics: area + timing. Power deferred.</strong> Both already exist
+  per-region today (ABC's <code>qor.json</code> reports area/delay;
+  <code>pass.opentimer</code> does STA). Power needs switching activity from a VCD
+  (<code>pass.opentimer.power</code> + <code>vcd_power.cpp</code> accumulate
+  energy-per-transition), i.e. a simulation run per edit — deferred until the
+  area/timing loop is proven.</li>
+</ul>
+
+<h2>What the lineage actually established (and did not)</h2>
+<ul>
+<li><strong>Speed:</strong> ~10× median synthesis speedup (≈40s → ≈4s); LLIR reached
+  only ≈20s, Quartus-II ≈120s → ≈45s. Stitch itself is milliseconds.</li>
+<li><strong>Setup cost (once per design):</strong> fpu 375s vs 37s synthesis, mips
+  1403s vs 90s, or1200 84s vs 22s — i.e. finding FIBs cost <em>more than a full
+  synthesis</em>, in Ruby, per-net, via SAT.</li>
+<li><strong>QoR:</strong> max ≈4.5% delay degradation, none at all on ~79% of
+  changes. Partition-size sweet spot 1k–5k gates (synthesis time is super-linear;
+  under ~1k gates tool overhead dominates).</li>
+<li><strong>NOT established — area and power were never measured.</strong> The only
+  QoR metric in the paper or the thesis is post-route Fmax. <code>plots/area.gp</code>
+  is orphaned (it reads a <code>../data/area</code> that does not exist) and
+  <code>area-dc.pdf</code> is never included; the paper's own TODO asks for
+  <em>"Reporting Area/delay variations due to RTL changes"</em> — never done. Area is
+  simultaneously the metric the flow is <em>known to bleed</em> (stitch redundancy)
+  and the one never checked. Any area claim here is new work, not a reproduction.</li>
+<li><strong>The old numbers are not a trustworthy target.</strong> The thesis ch.4
+  QoR data (<code>chapter4/data/qor_lsynth</code>, 84 rows) is byte-identical to the
+  DAC17 <code>qor_fpu</code>+<code>qor_mips</code>+<code>qor_or1200</code> series —
+  i.e. it is the DAC17 data, not the Anubis data its own setup section claims, and it
+  includes mips, which ch.3 says was excluded from Anubis.</li>
+<li><strong>Prior port:</strong> the thesis already reimplemented LiveSynth in C++14
+  on LGraph (LiveHD's direct ancestor) and added SMatch, a structural LUT-matching
+  step extending reuse into P&amp;R. This is a re-port onto the modern kernel, not a
+  from-scratch design.</li>
+</ul>
+
+<h2>What is reused from the landed cone engine (the point of doing this now)</h2>
+<ul>
+<li><strong><code>cone_digest</code> replaces <code>diff</code>.</strong> The paper's
+  Algorithm 1 is a recursive op+fanin comparison keyed on hierarchical net names — an
+  ad-hoc, non-memoized structural hash. A 128-bit canonical DAG digest is the same
+  question answered in <code>O(1)</code>. This attacks the single dominant cost.</li>
+<li><strong>Canonicalization is a strict upgrade, not just a speedup.</strong>
+  Algorithm 1 compares fanin <em>positionally</em>
+  (<code>diff(fanin(old,idx), fanin(new,idx))</code>), so a commutative operand swap
+  reports "changed" and needlessly enlarges the resynthesis region (SMatch has the
+  identical weakness). A digest that commutative-normalizes shrinks regions ⇒ faster
+  <em>and</em> better QoR. <code>pass/semdiff</code>'s <code>fold_operands</code>
+  already does exactly this normalization within port classes.</li>
+<li><strong>The ABC cone prover replaces the SAT setup.</strong> Proving a net's
+  function survived synthesis <em>is</em> what <code>abc_prove_unsat</code> does; dino
+  discharges 26 cones in 3.5s against a tech-mapped sky130 netlist.</li>
+<li><strong>The verdict cache is the signature store.</strong>
+  <code>formal_cache.json</code> is already salt-gated, atomic, and holds a
+  digest set (<code>"cones"</code>); partition signatures are a sibling record kind.</li>
+<li><strong>LEC is now cheap enough to gate every iteration.</strong> dino proves
+  flat-vs-netlist in ~12s. The 2017 flow had no way to check its own output.</li>
+</ul>
+
+<h2>Landed (2026-07-16) — subtasks 0, A, C (+ B's aggregation half)</h2>
+<p><code>pass.abc</code> keeps a persistent region cache under
+  <code>--workdir</code> (<code>&lt;workdir&gt;/abc_cache/</code>), ON by default
+  (<code>--set abc.cache=false</code> disables; no user --workdir = no cache =
+  the <code>lec.cache</code> convention; <code>--set abc.cache_dir=DIR</code>
+  re-points it, e.g. one cache shared across flows). The cache is
+  content-addressed by a canonical 128-bit region digest
+  (<code>pass/abc/abc_incr.{hpp,cpp}</code>). The directory holds
+  <code>abc_cache.json</code> (salt-gated metadata + per-region QoR) and an lg
+  library of previously mapped region bodies (<code>r_&lt;digest&gt;</code>). At
+  <code>map_region</code>, a hit clones the cached netlist into the fresh region
+  module — ABC never starts; a miss maps normally and snapshots. The clone is
+  wired driver-major so a warm run's Verilog is <strong>byte-identical</strong>
+  to the cold mapping's.</p>
+<ul>
+<li><strong>The digest</strong> folds: every node (op, driver widths/signs,
+  port-grouped fanin commutative-normalized within a port class — the paper's
+  positional-diff weakness fixed), constant values, Sub target/instance names,
+  state names (read-back rebuilds registers by name; anonymous state REFUSES to
+  cache — the semdiff rule), the boundary (inputs as (bits,sign) refined by
+  fanout structure over Weisfeiler-Lehman rounds; primary inputs name-anchored;
+  outputs as (driver sig, port, bits, sign)), and the RESOLVED per-region ABC
+  recipe (post-region_opts flow/{D}/{L}/adder/multiplier). Liberty CONTENT,
+  register/memory mode, dff_cell and assume flags salt the whole cache file.
+  Ports are stitched cached→fresh through canonical boundary RANKS (sorted
+  boundary tokens) — names and port order are nid-derived and shift under an
+  edit, the ranks do not. Any ambiguity (two boundary pins the refinement
+  cannot separate, duplicate output cones, comb cycle inside a region) refuses
+  rather than guesses: a wrong reuse is a miscompile, a refusal is one ABC run.
+  Uncacheable regions are reported with the reason per run.</li>
+<li><strong>Partition identity (A) resolved content-addressed:</strong> no
+  name-set tracking, no re-assignment rule, no re-partition trigger — the digest
+  IS the identity. Color renumbering, nid shifts and port renames between runs
+  are invisible; a region "survives an edit" exactly when its content did.</li>
+<li><strong>Measured</strong> (dino PipelinedDualIssueCPU, sky130 liberty,
+  18 regions / 18.4k gates, <code>-c opt</code>): cold 1.90s (~5% over no-cache
+  1.72s), NoChange warm <strong>0.57s</strong> — 15/18 regions hit; the floor is
+  lg+liberty load plus the three uncacheable regions
+  (DualIssueRegisterFile: anonymous register-file state;
+  DualIssueHazardUnit: two genuinely symmetric outputs;
+  the CPU top: a node-level comb cycle — the false-loop-through-forwarding
+  shape the bit-blast fixpoint resolves per bit, which a node-granular digest
+  cannot soundly key). Edit-one-module on
+  hier_seq: children hit, only the edited def's regions re-map, all LEC-gated
+  (<code>lhd/tests/lhd_abc_incr_test.sh</code>; digest contract pinned in
+  <code>pass/abc/abc_incr_test.cpp</code>).</li>
+<li><strong>QoR on a hit</strong> replays the cached Region_qor row (gates/area/
+  delay/critical-source; the critical output rides its canonical rank), so
+  qor.json totals are identical cold vs warm; the envelope gains
+  <code>"incremental":{"hits","misses","stored","uncacheable"}</code> — the
+  NoChange answer both commercial flows miss is
+  <code>hits==regions</code> in O(#regions) lookups.</li>
+<li><strong>B's parallel half deferred deliberately:</strong> ABC's frame is a
+  process-global singleton (one <code>Abc_Start</code>, one Liberty load, one
+  current-network slot), so parallel mapping means the lec fork pattern — but a
+  mapper child's result is a GRAPH (read-back into rb.body), not a verdict blob:
+  it needs per-child GraphLibrary saves + parent <code>load_merge</code> +
+  srcid/QoR/refusal merging, and <code>arm_child_share</code> divides the memory
+  budget by N against an ABC peak factor measured at 2.5–29.6x — parallelism
+  could refuse regions that pass sequentially. The cache already removes the
+  repeated work; fork-parallel is a follow-up with this note as its map.</li>
+<li><em>Caveats:</em> the cache dir is single-writer (no cross-process lock, the
+  formal_cache assumption); it grows without GC (content-addressed, so stale
+  bodies are only disk); the salt constant (<code>abc-incr-v1</code>) must be
+  bumped when the mapper read-back or digest changes shape — a source-hash
+  genrule like <code>//lhd:formal_salt</code> is the eventual fix.</li>
+</ul>
+
+<h2>Subtasks — 0/A/C landed, B half, D/E/F pending</h2>
+<ul class="subtasks">
+<li><strong>0. ABC memory admission (prerequisite).</strong> Prevent a single large
+  region — especially an intentional <code>flat</code> region — from exhausting
+  physical memory and taking down the machine. Before translation, cheaply scan
+  operation kinds and widths to estimate the region's bit-level ABC work (bitwise,
+  mux and register work scale with width; add/compare with width plus an operation
+  factor; multiply with the input-width product). LGraph node count alone is not a
+  memory estimate: ABC bit-blasts wide operations and temporarily holds several
+  network forms plus LiveHD's per-bit maps.
+  <br><br>
+  During the real translation, pause after approximately 5% of the
+  <em>estimated work</em> (not 5% of LGraph nodes), measure actual RSS growth and
+  ABC-object production, and project both completed-translation memory and the
+  later mapping peak. The projection is conceptually
+  <code>rss_before + sampled_growth * total_work / sampled_work</code>, followed by
+  a conservatively calibrated mapping-peak factor. Continue checking RSS while
+  translating. The bytes-per-object and mapping factor must be calibrated from
+  measured peak RSS; 32 bytes may seed the low-level object estimate but is not a
+  safe per-LGraph-node contract.
+  <br><br>
+  Admission uses physical memory only — never swap — subtracts current RSS (the
+  loaded LGraph is already substantial), and reserves OS/process headroom (initial
+  policy: the greater of 2 GiB or 20% of physical RAM). Permit an explicit
+  <code>pass.abc.memory_budget_mb=N</code> for reproducible hosts and CI. If the
+  conservative peak exceeds the effective budget, delete the partial ABC network,
+  emit no partial successful result, and exit nonzero before running the synthesis
+  commands. The diagnostic reports region/color, current RSS, physical budget,
+  sampled fraction, projected translation and peak, then recommends recoloring
+  with smaller regions. <code>pass.abc.allow_oversize=true</code> acknowledges and
+  bypasses both admission checks; record that override prominently in the log and
+  result. This guard applies to every coloring, not only <code>flat</code>.</li>
+<li><strong>A. Partition identity + signature cache — LANDED 2026-07-16</strong>
+  (see the landed section). Resolved content-addressed: the digest IS the identity,
+  so the planned name-set tracking, re-assignment rule and re-partition trigger were
+  never needed — a region "survives an RTL edit" exactly when its content did, and
+  color renumbering/nid shifts/port renames are invisible by construction.</li>
+<li><strong>B. Parallel per-partition synthesis — aggregation half landed.</strong>
+  Per-region QoR rows + incremental counters ride qor.json/the envelope. The
+  PARALLEL scheduler is deferred (fork-cost note in the landed section): ABC's
+  process-global frame forces the lec fork pattern, but a mapper child's result is
+  a graph, not a verdict blob — per-child output libraries +
+  <code>GraphLibrary::load_merge</code> + a memory budget split N ways against a
+  2.5–29.6x uncalibratable ABC peak factor.</li>
+<li><strong>C. Incremental resynthesis — LANDED 2026-07-16</strong>
+  (cache under <code>--workdir</code>, on by default; LEC-gated, byte-identical
+  warm clones, <code>lhd/tests/lhd_abc_incr_test.sh</code>).</li>
+<li><strong>D. The FIB timing probe ("is X faster?").</strong> Discover FIBs within a
+  partition with the cone prover; on an edit, resynthesize only the touched cone with
+  boundary delays pinned from the original run, and report the delay delta. Ephemeral:
+  no stitch, no area accounting, no P&amp;R.</li>
+<li><strong>E. Partition refinement policy.</strong> Grow a partition when its
+  critical path spans input→output; split when it exceeds the 1k–5k gate band. NOTE
+  (2026-07-16): that band is PHYSICAL gates and is <em>not</em> the unit
+  <a class="xref" href="2c-color-size.html">2c-color-size</a>'s <code>min=</code>/<code>max=</code>
+  window uses — its GE metric measured 421 GE/node on XSCore (7.43e9 GE total), so
+  <code>pass.color</code>'s "1k-5k GE" histogram bucket is a far smaller region than this
+  band means. Reaching a real 1k–5k gate grain needs either a calibrated GE→gate factor
+  or post-ABC area feedback (which this task has and 2c does not). Cache
+  the resulting partition decisions so the iteration is paid once.</li>
+<li><strong>F. Validation — and the area gap.</strong> Anubis-style change insertion
+  (ch.3: 144 changes over dlx/alpha/fpu/mor1kx/or1200), LEC-gated. <strong>Measure
+  area</strong>, which this lineage never did. Note ch.3's standing result: both
+  commercial flows fail to detect a <em>no-op</em> edit (24 of the 144 changes are
+  NoChange by construction), burning ~106s re-synthesizing a design that did not
+  change — a digest-keyed cache answers those in <code>O(#partitions)</code> hash
+  lookups, against a published baseline.</li>
+</ul>
+
+<h2>Open questions</h2>
+<ul>
+<li>Partition stability under edits that add/remove logic — how much drift before a
+  re-partition is forced, and does a re-partition invalidate all signatures?</li>
+<li>Does the probe need a <em>sound</em> bound ("never claims faster when it is not")
+  or only a good estimate? The pruning role suggests a one-sided guarantee is what
+  matters.</li>
+<li>Cumulative degradation: every published change was applied independently against
+  the original. A real session applies edits <em>in sequence</em> — the re-baseline
+  policy is unknown and unmeasured.</li>
+<li>Does partitioned synthesis cost measurable area/Fmax vs flat on today's flow?
+  Never measured in 2017; now cheap to answer, and it decides the coloring policy.</li>
+</ul>
+</main>
+</body>
+</html>
