@@ -40,8 +40,16 @@ for ALG in acyclic synth; do
   run pass partition --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/lg2" --workdir "$D/w3"
   # 4. emit verilog from the partitioned library (verbatim, no re-opt)
   run compile lg:"$D/lg2" --top "$TOP" --recipe O0 --emit verilog:"$D/part.v" --workdir "$D/w4"
-  # the new top must be a real hierarchy (instantiates the per-region modules)
-  grep -q "part_flat__c" "$D/part.v" || fail "$ALG: partitioned verilog has no per-color submodules"
+  # top module is always emitted; whether it splits depends on the coloring.
+  grep -q "^module part_flat" "$D/part.v" || fail "$ALG: top module not emitted"
+  if [ "$ALG" = synth ]; then
+    # synth colors this design as ONE region -> emitted directly under its own
+    # name, no pointless part_flat__c wrapper (the single-region optimization).
+    grep -q "part_flat__c" "$D/part.v" && fail "$ALG: single-region design must not be wrapped in __c submodules"
+  else
+    # acyclic splits into several colors -> a real hierarchy of per-region modules.
+    grep -q "part_flat__c" "$D/part.v" || fail "$ALG: multi-region partition has no per-color submodules"
+  fi
   # 5. LEC: the partitioned design must equal the original
   run lec --set formal.solver=lgyosys --impl verilog:"$D/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$D/c"
   echo "PASS: $ALG partition is LEC-equivalent to the original"
@@ -71,9 +79,11 @@ rc=$?
 # exactly one warning: the uncolored-node advisory (color 0 treated as a color)
 grep -q '"diagnostics_count":{"errors":0,"warnings":1}' "$CD/r.json" \
   || fail "expected one uncolored-node warning, got $(grep -o '"diagnostics_count":{[^}]*}' "$CD/r.json")"
-# the whole design folded into a single color-0 region module
+# the whole design is one color-0 region: a single region, so it is emitted
+# directly under the top's own name (no pointless __c0 wrapper).
 run compile lg:"$CD/lg2" --top "$TOP" --recipe O0 --emit verilog:"$CD/part.v" --workdir "$CD/w5"
-grep -q "part_flat__c0" "$CD/part.v" || fail "uncolored partition produced no color-0 region module"
+grep -q "^module part_flat" "$CD/part.v" || fail "uncolored partition did not emit the top module"
+grep -q "part_flat__c" "$CD/part.v" && fail "uncolored single-region design must not get a __c wrapper"
 # and it is still LEC-equivalent to the original
 run lec --set formal.solver=lgyosys --impl verilog:"$CD/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$CD/c"
 echo "PASS: uncolored design -> partition warns once + color-0 region, LEC-equivalent"

@@ -103,11 +103,13 @@ cat "$D2/rev/"*.v > "$D2/ref.v"
 run lec --set formal.solver=lgyosys --impl verilog:"$D2/impl.v" --ref verilog:"$D2/ref.v" --top "$TOP2" --workdir "$D2/wc"
 echo "PASS: init-carrying registers keep their hierarchical names as native flops (LEC-proven)"
 
-# Escape hatch: flatten=false restores the classic per-def wrapper+region shape.
+# Escape hatch: flatten=false keeps the per-def hierarchy instead of collapsing
+# it into one flat module. Each def is one region here, so it is emitted under
+# its own name (delayer, stage_unit, top) -- no pointless __c wrapper.
 run pass abc --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net_hier" --set abc.library="$LIB" \
     --set pass.abc.flatten=false --workdir "$D/w9"
 HIER_DEFS=$(live_defs "$D/net_hier")
-echo "$HIER_DEFS" | grep -q "__c" || fail "flatten=false must keep per-def __c<color> modules, got: $(echo $HIER_DEFS)"
+echo "$HIER_DEFS" | grep -q "stage_unit" || fail "flatten=false must keep the per-def hierarchy (child defs), got: $(echo $HIER_DEFS)"
 N_HIER=$(echo "$HIER_DEFS" | wc -l | tr -d ' ')
 [ "$N_HIER" -gt 2 ] || fail "flatten=false must keep the per-def decomposition, got only: $(echo $HIER_DEFS)"
 echo "PASS: pass.abc.flatten=false keeps the classic per-def decomposition"

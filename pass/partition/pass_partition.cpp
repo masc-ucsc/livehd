@@ -947,11 +947,17 @@ bool Partitioner::run() {
     diagnose_colors();
   }
   auto regs = ordered_regions();
-  // Whole-design flatten with a single region (the `pass.color flat` case):
-  // the region IS the design — emit it directly under the top's own name and
-  // port list, no wrapper. Multi-color flatten keeps the wrapper+regions shape
-  // (regions just span the former hierarchy).
-  if (flatten_ && regs.size() == 1) {
+  // A def that collapses to a SINGLE region is emitted directly under its own
+  // name and port list -- no wrapper. The region IS the def, so a `<def>` wrapper
+  // whose only content is one `<def>__c<id>` instance plus the wires between them
+  // is pure overhead: for a leaf like ALU or StageReg it adds a whole module and
+  // an instance for zero logic. This covers the whole-design flatten case
+  // (pass.color flat) AND the common per-def case where a def's entire body is
+  // one color. Emitting under the def's own IO also keeps the original,
+  // collision-free port names (no build_module `_o` renaming). Multi-region defs
+  // keep the wrapper+regions shape (the wrapper wires the several `__c<id>`
+  // regions together).
+  if (regs.size() == 1) {
     build_module_as_top(regs.front());
     return true;
   }

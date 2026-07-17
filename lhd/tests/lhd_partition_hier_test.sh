@@ -61,9 +61,19 @@ for entry in "${DESIGNS[@]}"; do
     run pass partition --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/lg2" --workdir "$D/w4"
     # 5. emit Verilog from the partitioned library (verbatim, no re-opt)
     run compile lg:"$D/lg2" --top "$TOP" --recipe O0 --emit verilog:"$D/part.v" --workdir "$D/w5"
-    # hierarchy preserved: per-color submodules exist AND the child def survived
-    grep -q "${BASE}.*__c" "$D/part.v" || fail "$FIX/$ALG: no per-color submodules in partitioned Verilog"
-    grep -q "${BASE}.${CHILD}" "$D/part.v" || fail "$FIX/$ALG: child def '$CHILD' dropped (hierarchy lost)"
+    # hierarchy preserved: the child def survives as its own module (partition
+    # re-links the Sub instances to it).
+    grep -q "^module ${CHILD}" "$D/part.v" || fail "$FIX/$ALG: child def '$CHILD' dropped (hierarchy lost)"
+    if [ "$ALG" = synth ]; then
+      # synth colors each def as ONE region, so every def is emitted directly
+      # under its own name -- no pointless `<def>__c<id>` wrapper whose only body
+      # is a single region instance (the single-region optimization).
+      grep -q "__c" "$D/part.v" && fail "$FIX/$ALG: single-region defs must not get a __c wrapper"
+    else
+      # acyclic splits some defs into several colors -> per-(def,color) region
+      # submodules under a wrapper.
+      grep -q "__c" "$D/part.v" || fail "$FIX/$ALG: multi-region partition has no per-color submodules"
+    fi
     # 6. LEC: the partitioned hierarchical design must equal the original
     run lec --set formal.solver=lgyosys --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
     echo "PASS: $FIX [$ALG] hierarchical partition is LEC-equivalent to the original"

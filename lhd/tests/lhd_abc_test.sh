@@ -54,7 +54,7 @@ run compile lg:"$W/models" --recipe O0 --emit-dir verilog:"$W/modelsv" --workdir
 run compile lg:"$W/re" --top "$TOP" --recipe O0 --emit-dir verilog:"$W/rev" --workdir "$W/w8"
 
 # the netlist really is a standard-cell netlist (Sub instances of Liberty cells)
-grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$W/netv/${TOP}__c"*.v || fail "no standard cells in the ABC netlist"
+grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$W/netv/"*.v || fail "no standard cells in the ABC netlist"
 
 cat "$W/netv/"*.v "$W/modelsv/"*.v > "$W/impl.v"
 cat "$W/rev/"*.v > "$W/ref.v"
@@ -90,7 +90,7 @@ run pass liberty gensim "$LIB" --emit-dir lg:"$N/models" --workdir "$N/w3"
 run compile lg:"$N/net" --top "$TOP" --recipe O0 --emit-dir verilog:"$N/netv" --workdir "$N/w4"
 run compile lg:"$N/models" --recipe O0 --emit-dir verilog:"$N/modelsv" --workdir "$N/w5"
 run compile lg:"$N/lg" --top "$TOP" --recipe O0 --emit-dir verilog:"$N/origv" --workdir "$N/w6"
-grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$N/netv/${TOP}__c0"*.v || fail "no standard cells in the uncolored ABC netlist"
+grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$N/netv/"*.v || fail "no standard cells in the uncolored ABC netlist"
 cat "$N/netv/"*.v "$N/modelsv/"*.v > "$N/impl.v"
 cat "$N/origv/"*.v > "$N/orig.v"
 run lec --set formal.solver=lgyosys --impl verilog:"$N/impl.v" --ref verilog:"$N/orig.v" --top "$TOP" --workdir "$N/c"
@@ -107,7 +107,7 @@ mkdir -p "$A"
 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$A/net" --set abc.library="$LIB" \
     --set abc.flow="strash; resyn2; &get -n; &dch -f; &nf {D}; &put" --workdir "$A/w1"
 run compile lg:"$A/net" --top "$TOP" --recipe O0 --emit-dir verilog:"$A/netv" --workdir "$A/w2"
-grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$A/netv/${TOP}__c"*.v || fail "no standard cells in the resyn2-mapped netlist (alias did not resolve?)"
+grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$A/netv/"*.v || fail "no standard cells in the resyn2-mapped netlist (alias did not resolve?)"
 cat "$A/netv/"*.v "$W/modelsv/"*.v > "$A/impl.v"
 run lec --set formal.solver=lgyosys --impl verilog:"$A/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$A/c"
 echo "PASS: pass.abc resolves abc.rc script aliases in flow (resyn2, LEC-equivalent)"

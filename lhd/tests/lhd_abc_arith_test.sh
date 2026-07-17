@@ -44,10 +44,12 @@ run pass color synth --top "$TOP" lg:"$W/lg" --workdir "$W/w2"
 run pass partition --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/re" --workdir "$W/w4"
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/w5"
 
-# The synth-colored design decomposes into one or more region modules (…__cN);
-# each is mapped by abc and lec-checked against its original-logic twin.
-REGIONS=$(grep -oE '[A-Za-z0-9_.]+__c[0-9]+' "$W/re/library.txt" | sort -u)
-[ -n "$REGIONS" ] || fail "no __cN region modules in the partition twin: $(cat "$W/re/library.txt")"
+# The synth-colored design decomposes into region modules -- a def with several
+# colors becomes `<def>__c<id>` regions under a wrapper, and a def that is one
+# whole region is emitted directly under its own name. Either way, every module
+# in the partition twin is mapped by abc and lec-checked against its twin.
+REGIONS=$(grep -oE '^graph_io [0-9]+ [A-Za-z0-9_.]+' "$W/re/library.txt" | awk '{print $3}' | sort -u)
+[ -n "$REGIONS" ] || fail "no region modules in the partition twin: $(cat "$W/re/library.txt")"
 
 # lec_regions <net_dir> <tag> : prove every region of <net_dir> equivalent to re.
 lec_regions() {
@@ -113,8 +115,8 @@ run compile "$CPRP" --top "$CTOP" --recipe O1 --emit-dir lg:"$C/lg" --workdir "$
 # uncolored pass abc warns once (color-0 region) — tolerated by run()'s exit check
 run pass abc --top "$CTOP" lg:"$C/lg" --emit-dir lg:"$C/net" --set pass.abc.library="$LIB" --workdir "$C/w2"
 run pass partition --top "$CTOP" lg:"$C/lg" --emit-dir lg:"$C/re" --workdir "$C/w3"
-CREGIONS=$(grep -oE '[A-Za-z0-9_.]+__c[0-9]+' "$C/re/library.txt" | sort -u)
-[ -n "$CREGIONS" ] || fail "no __cN region modules in the constmul partition twin: $(cat "$C/re/library.txt")"
+CREGIONS=$(grep -oE '^graph_io [0-9]+ [A-Za-z0-9_.]+' "$C/re/library.txt" | awk '{print $3}' | sort -u)
+[ -n "$CREGIONS" ] || fail "no region modules in the constmul partition twin: $(cat "$C/re/library.txt")"
 for r in $CREGIONS; do
   run lec --impl lg:"$C/net" --ref lg:"$C/re" --lib lg:"$W/models" --top "$r" --workdir "$C/wlec"
 done
