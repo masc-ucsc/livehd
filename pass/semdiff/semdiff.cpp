@@ -970,15 +970,12 @@ void stamp(const hhds::Node_class& node, uint32_t id) {
   }
 }
 
-}  // namespace
-
-Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts) {
-  Match_result res;
-  if (a == nullptr || b == nullptr) {
-    return res;
-  }
-
-  Side sa, sb;
+// Shared front half of a structural compare: seed state cells, analyze both
+// sides, and discharge the compare-point obligations. Fills `sa`, `sb`, and every
+// `res` field the obligations and state pairing produce. The caller then either
+// stamps + counts (structural_match) or checks the bijection cheaply
+// (structural_identical) -- both run byte-identical analysis this way.
+void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Side& sa, Side& sb, Match_result& res) {
   if (opts.matching_names || opts.state_pairing) {
     // Tier-1 (name) + tier-2 (full-match) state pairing first; the resolved
     // tokens seed the structural analysis so structure flows through paired
@@ -1095,19 +1092,35 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
     }
   }
 
-  // Signatures present on BOTH sides are matchable.
-  absl::flat_hash_set<uint64_t> fcommon;
+}
+
+// Signatures present on BOTH sides are matchable.
+void common_values(const Side& sa, const Side& sb, absl::flat_hash_set<uint64_t>& fcommon,
+                   absl::flat_hash_set<uint64_t>& bcommon) {
   for (uint64_t v : sa.fvals) {
     if (sb.fvals.contains(v)) {
       fcommon.insert(v);
     }
   }
-  absl::flat_hash_set<uint64_t> bcommon;
   for (uint64_t v : sa.bvals) {
     if (sb.bvals.contains(v)) {
       bcommon.insert(v);
     }
   }
+}
+
+}  // namespace
+
+Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts) {
+  Match_result res;
+  if (a == nullptr || b == nullptr) {
+    return res;
+  }
+  Side sa, sb;
+  build_sides(a, b, opts, sa, sb, res);
+
+  absl::flat_hash_set<uint64_t> fcommon, bcommon;
+  common_values(sa, sb, fcommon, bcommon);
 
   // Assign ids in a's forward_class order (deterministic); b reuses the map, so
   // a class shared across the two graphs lands on the same id on both sides.
@@ -1207,6 +1220,42 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
   return res;
 }
 
+bool structural_identical(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts) {
+  if (a == nullptr || b == nullptr) {
+    return false;
+  }
+  Side         sa, sb;
+  Match_result res;
+  build_sides(a, b, opts, sa, sb, res);
+
+  // A node-set bijection is NOT an edge isomorphism: a rewiring between two
+  // same-named compare points leaves every node signature intact. The compare-
+  // point obligations close that hole, so a violated or undecidable one is a real
+  // (or unprovable) difference -- refuse.
+  if (res.cut_violated != 0 || res.cut_unknown != 0) {
+    return false;
+  }
+  // Certain-only: a match that leaned on a speculative tier-2 pair or a caller
+  // seed is not an identity we can stand behind (same rule lec's skip enforces).
+  if (res.state.full_pairs != 0 || res.state.seed_pairs != 0) {
+    return false;
+  }
+
+  absl::flat_hash_set<uint64_t> fcommon, bcommon;
+  common_values(sa, sb, fcommon, bcommon);
+
+  // Every node on BOTH sides must have a cross-side class (the bijection). The
+  // first orphan proves a difference -- early exit, no stamping, no stats.
+  for (const Side* s : {&sa, &sb}) {
+    for (const auto& node : s->order) {
+      if (!class_of(*s, node.get_class_index(), fcommon, bcommon)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 namespace {
 
 // One def's digest, recursing into resolvable Sub bodies (Merkle). `memo` and
@@ -1214,7 +1263,7 @@ namespace {
 // children in the instance DAG are digested once and a cycle is caught.
 Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve,
                             absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo,
-                            absl::flat_hash_set<hhds::Gid>&                   visiting) {
+                            absl::flat_hash_set<hhds::Gid>& visiting, Sub_fold sub_fold) {
   Canonical_digest d;
   if (g == nullptr) {
     return d;
@@ -1251,28 +1300,34 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve,
       b = it->second;
     }
     uint64_t tok = hcombine(hcombine(f, b), node_kind_key(node));
-    if (auto gid = node.get_subnode_gid(); gid != hhds::Gid_invalid) {
-      // Hierarchical (Merkle) fold: a Sub with a resolvable body takes the
-      // CHILD'S digest as its identity — an edited child that the encoder
-      // flattens into this def's proof must change this digest, or a cached
-      // verdict would go stale. No body => true blackbox (UF in proofs): the
-      // def-name identity already folded by node_kind_key stands.
-      if (hhds::Graph* child = resolve ? resolve(gid) : nullptr) {
-        Canonical_digest cd;
-        if (auto it = memo.find(gid); it != memo.end()) {
-          cd = it->second;
-        } else {
-          if (!visiting.insert(gid).second) {
-            return {};  // instantiation cycle: not digestable
+    // interface mode: a Sub folds ONLY its def identity (the gid in node_kind_key)
+    // and its boundary connectivity (already in f/b) -- exactly a bodyless
+    // blackbox. abc region reuse needs this: a child-body edit must not invalidate
+    // the parent region's already-mapped netlist.
+    if (sub_fold == Sub_fold::merkle) {
+      if (auto gid = node.get_subnode_gid(); gid != hhds::Gid_invalid) {
+        // Hierarchical (Merkle) fold: a Sub with a resolvable body takes the
+        // CHILD'S digest as its identity — an edited child that the encoder
+        // flattens into this def's proof must change this digest, or a cached
+        // verdict would go stale. No body => true blackbox (UF in proofs): the
+        // def-name identity already folded by node_kind_key stands.
+        if (hhds::Graph* child = resolve ? resolve(gid) : nullptr) {
+          Canonical_digest cd;
+          if (auto it = memo.find(gid); it != memo.end()) {
+            cd = it->second;
+          } else {
+            if (!visiting.insert(gid).second) {
+              return {};  // instantiation cycle: not digestable
+            }
+            cd = digest_one(child, resolve, memo, visiting, sub_fold);
+            visiting.erase(gid);
+            memo.emplace(gid, cd);
           }
-          cd = digest_one(child, resolve, memo, visiting);
-          visiting.erase(gid);
-          memo.emplace(gid, cd);
+          if (!cd.valid) {
+            return {};  // an undigestable child poisons every ancestor
+          }
+          tok = hcombine(hcombine(tok, cd.h0), cd.h1);
         }
-        if (!cd.valid) {
-          return {};  // an undigestable child poisons every ancestor
-        }
-        tok = hcombine(hcombine(tok, cd.h0), cd.h1);
       }
     }
     toks.push_back(tok);
@@ -1312,13 +1367,13 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve,
 
 }  // namespace
 
-Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve) {
+Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve, Sub_fold sub_fold) {
   absl::flat_hash_map<hhds::Gid, Canonical_digest> memo;
-  return canonical_digest(g, resolve, memo);
+  return canonical_digest(g, resolve, memo, sub_fold);
 }
 
 Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve,
-                                  absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo) {
+                                  absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo, Sub_fold sub_fold) {
   if (g == nullptr) {
     return {};
   }
@@ -1327,7 +1382,7 @@ Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve
   }
   absl::flat_hash_set<hhds::Gid> visiting;
   visiting.insert(g->get_gid());  // catch self-instantiation
-  auto d = digest_one(g, resolve, memo, visiting);
+  auto d = digest_one(g, resolve, memo, visiting, sub_fold);
   memo.emplace(g->get_gid(), d);
   return d;
 }

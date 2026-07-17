@@ -12,6 +12,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"       // Ntype / Ntype_op
+#include "diag.hpp"       // livehd::diag::warn (non-silent cap diagnostic)
 #include "node_util.hpp"  // livehd::graph_util::* helpers
 
 namespace livehd::graph_util {
@@ -59,8 +60,15 @@ const char* op_name(Ntype_op op) {
 // a GENUINE bit-level loop (driver is not an Or of disjoint operands, e.g.
 // `w=w+1`) is never split and still fails loudly at emission. Runs on the live sim
 // graph, before emission. Returns #rewired reads.
-int split_packed_selfref_wires(hhds::Graph* g) {
+// One dissolve pass. Rewrites are DEFERRED to the end, so a reader cannot see
+// another reader's rewrite until the next pass -- the wrapper below iterates.
+// `unresolved_out`/`cap_out` report on-cycle reads this pass could not dissolve
+// (and whether the node budget was the cause) for the wrapper's final diagnostic.
+static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out) {
   namespace gu = livehd::graph_util;
+
+  unresolved_out = 0;
+  cap_out        = false;
 
   auto is_comb = [](const hhds::Node_class& n) {
     auto op = gu::type_op_of(n);
@@ -318,7 +326,19 @@ int split_packed_selfref_wires(hhds::Graph* g) {
   auto mask_const = [&](int lo, int hi) -> hhds::Pin_class {
     return livehd::graph_util::create_const(*g, *Dlop::get_mask_value(hi - 1, lo));
   };
-  int created = 0;
+  // Node-creation budget, split into a PER-READER cap (reset at the reader-loop
+  // head below) and a GLOBAL ceiling proportional to the design. The old code
+  // had ONE global counter that was never reset: a big def's early readers burnt
+  // the whole budget, after which every later reader refused instantly at depth
+  // 0 and its slice was left on the cycle -- a silent, def-size-dependent failure
+  // (semdiff then read the survivors as a 62%-different "diff" on a bit-identical
+  // library). Per-reader budgeting makes each read pay only for its own subtree;
+  // the global ceiling is the real anti-blowup net and is loose because distinct
+  // sub-slices are memoized and shared across readers.
+  constexpr int per_reader_cap = 16384;
+  const int     global_cap     = 16384 + 8 * static_cast<int>(comb_nodes.size());
+  int           created        = 0;  // per-reader (reset at each reader below)
+  int           total_created  = 0;  // global (never reset)
   // LIVEHD_SIM_SPLIT_DEBUG=1 traces every reader attempt + the deepest resolve
   // refusal (op, slice) -- the fast way to see WHY a pack did not split.
   const bool split_dbg = std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr;
@@ -332,9 +352,10 @@ int split_packed_selfref_wires(hhds::Graph* g) {
   absl::flat_hash_set<std::tuple<hhds::Class_index, int, int>> on_stack;
   bool cap_hit = false;
   auto resolve = [&](auto&& self, const hhds::Pin_class& v, int lo, int hi, int depth) -> hhds::Pin_class {
-    if (depth > 64 || v.is_invalid() || lo < 0 || hi <= lo || created > 16384) {
+    if (depth > 64 || v.is_invalid() || lo < 0 || hi <= lo || created > per_reader_cap || total_created > global_cap) {
       if (split_dbg) {
-        std::print("split[dbg]: refuse depth={} lo={} hi={} created={} invalid={}\n", depth, lo, hi, created, v.is_invalid());
+        std::print("split[dbg]: refuse depth={} lo={} hi={} created={} total={} invalid={}\n", depth, lo, hi, created,
+                   total_created, v.is_invalid());
       }
       cap_hit = true;
       return {};
@@ -343,6 +364,7 @@ int split_packed_selfref_wires(hhds::Graph* g) {
     auto      slice_node = [&](const hhds::Pin_class& val) -> hhds::Pin_class {
       auto n = gu::create_typed_node(*g, Ntype_op::Get_mask);
       ++created;
+      ++total_created;
       val.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
       mask_const(lo, hi).connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(2)));
       auto dp = n.create_driver_pin(0);
@@ -704,10 +726,14 @@ int split_packed_selfref_wires(hhds::Graph* g) {
   // graph (created helper nodes are new and never on the cycle).
   std::vector<std::tuple<hhds::Node_class, hhds::Pin_class, hhds::Pin_class>> gm_rewires;   // (reader, resolved, new mask)
   std::vector<std::tuple<hhds::Node_class, hhds::Pin_class, hhds::Pin_class>> and_rewires;  // (And, old SRA driver, resolved)
+  int  unresolved_on_cycle = 0;      // on-cycle bit-field reads we could not dissolve (diagnostic)
+  bool any_cap_hit         = false;  // ... and whether the budget (vs a genuine loop) was the cause
   for (auto& R : comb_nodes) {
     if (!in_cycle.contains(R)) {
       continue;
     }
+    created = 0;      // per-reader budget: this read pays only for its own subtree
+    cap_hit = false;  // per-reader cap-taint detection (the memoization guard in resolve)
     auto rop = gu::type_op_of(R);
     if (rop == Ntype_op::Get_mask) {
       auto md = drv_at(R, 2);
@@ -728,6 +754,8 @@ int split_packed_selfref_wires(hhds::Graph* g) {
       }
       auto res = resolve(resolve, vd, rlo, rhi, 0);
       if (res.is_invalid()) {
+        ++unresolved_on_cycle;
+        any_cap_hit |= cap_hit;
         continue;
       }
       gm_rewires.emplace_back(R, res, mask_const(0, rhi - rlo));
@@ -787,6 +815,8 @@ int split_packed_selfref_wires(hhds::Graph* g) {
                    res.is_invalid() ? "FAIL" : "ok");
       }
       if (res.is_invalid()) {
+        ++unresolved_on_cycle;
+        any_cap_hit |= cap_hit;
         continue;
       }
       and_rewires.emplace_back(R, other, res);
@@ -818,6 +848,11 @@ int split_packed_selfref_wires(hhds::Graph* g) {
     res.connect_sink(A.create_sink_pin(static_cast<hhds::Port_id>(0)));
   }
   const int nrew = static_cast<int>(gm_rewires.size() + and_rewires.size());
+  // Report the survivors to the caller (the iterating wrapper decides whether to
+  // warn -- an intermediate round leaves nested reads unresolved only because the
+  // next round's rewrites are not applied yet, so warning per pass would spam).
+  unresolved_out = unresolved_on_cycle;
+  cap_out        = any_cap_hit;
   if (nrew > 0) {
     // The edge rewires above only INCREMENTALLY patch forward_class's in-edge
     // counts; its cached Pass-2 deferral order was built while the graph still had
@@ -830,6 +865,39 @@ int split_packed_selfref_wires(hhds::Graph* g) {
     R.set_type(R.get_type());
   }
   return nrew;
+}
+
+int split_packed_selfref_wires(hhds::Graph* g) {
+  // Iterate to a fixpoint. Each pass defers its rewrites to the end, so a reader
+  // whose value depends on ANOTHER reader (nested slice-of-slice packing, e.g.
+  // Phr's io bundle read as `io#[..]#[..]`) can only resolve one nesting level per
+  // pass. Loop until a pass rewrites nothing; a hard round cap is the safety net.
+  constexpr int max_rounds  = 16;
+  int           total       = 0;
+  int           unresolved  = 0;
+  bool          cap_hit     = false;
+  for (int round = 0; round < max_rounds; ++round) {
+    const int n = split_selfref_pass(g, unresolved, cap_hit);
+    total += n;
+    if (n == 0) {
+      break;  // fixpoint: nothing left to rewrite (cycle gone, or genuinely stuck)
+    }
+  }
+  // Never fail silently: a surviving word-level cycle makes downstream encode /
+  // cgen / sim scheduling reject the graph, and the caller (cprop) discards this
+  // count. `unresolved` is the final pass's remaining on-cycle reads.
+  if (unresolved > 0) {
+    livehd::diag::warn("split-selfref", "unresolved-cycle", "internal")
+        .msg("{} on-cycle bit-field read(s) could not be dissolved ({} rewired over {} pass(es)); a "
+             "word-level combinational cycle may remain",
+             unresolved,
+             total,
+             max_rounds)
+        .hint(cap_hit ? "node-creation budget exhausted on a read -- raise the split budget if this is not a real loop"
+                      : "likely a genuine bit-level self-dependency (e.g. w = w + 1)")
+        .emit();
+  }
+  return total;
 }
 
 }  // namespace livehd::graph_util

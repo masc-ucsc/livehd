@@ -100,6 +100,49 @@ TEST(Semdiff, ExtraGateUnmatched) {
   EXPECT_EQ(2U, r.b_matched);
 }
 
+// structural_identical: the fast boolean agrees with structural_match's verdict
+// on identical designs, refuses on a broken bijection, and stamps NOTHING.
+TEST(Semdiff, StructuralIdenticalFastPath) {
+  auto a = build_and_or("lgdb_semdiff_fid_a", "m");
+  auto b = build_and_or("lgdb_semdiff_fid_b", "m");
+  EXPECT_TRUE(livehd::semdiff::structural_identical(a.get(), b.get()));
+
+  // the fast path leaves the match attribute untouched on both graphs
+  for (auto n : a->forward_class()) {
+    EXPECT_FALSE(livehd::graph_util::has_match(n));
+  }
+  for (auto n : b->forward_class()) {
+    EXPECT_FALSE(livehd::graph_util::has_match(n));
+  }
+
+  // an extra dangling gate breaks the node-set bijection => not identical
+  auto extra = create_typed_node(*b, Ntype_op::Not);
+  b->get_input_pin("c").connect_sink(extra.create_sink_pin(0));
+  EXPECT_FALSE(livehd::semdiff::structural_identical(a.get(), b.get()));
+}
+
+// structural_identical: a swapped operation (functionally different) is refused
+// even though the node COUNT matches.
+TEST(Semdiff, StructuralIdenticalOpSwap) {
+  auto a = build_and_or("lgdb_semdiff_so_a", "m");  // y = (a & b) | c
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_semdiff_so_b");
+  auto  gio = lib.create_io("m");
+  gio->add_input("a", 1);
+  gio->add_input("b", 1);
+  gio->add_input("c", 1);
+  gio->add_output("y", 1);
+  auto b = gio->create_graph();
+  auto a_or = create_typed_node(*b, Ntype_op::Or);  // swapped: y = (a | b) & c
+  b->get_input_pin("a").connect_sink(a_or.create_sink_pin(0));
+  b->get_input_pin("b").connect_sink(a_or.create_sink_pin(0));
+  auto an_and = create_typed_node(*b, Ntype_op::And);
+  a_or.create_driver_pin(0).connect_sink(an_and.create_sink_pin(0));
+  b->get_input_pin("c").connect_sink(an_and.create_sink_pin(0));
+  an_and.create_driver_pin(0).connect_sink(b->get_output_pin("y"));
+
+  EXPECT_FALSE(livehd::semdiff::structural_identical(a.get(), b.get()));
+}
+
 // canonical_digest: two independently-built identical designs (separate
 // libraries — independent gids, allocation order) produce the SAME digest.
 TEST(Semdiff, DigestStableAcrossLibraries) {
@@ -243,6 +286,53 @@ TEST(Semdiff, DigestHierarchicalMerkle) {
   EXPECT_NE(and_deep, or_deep);  // Merkle: child edit changes the parent digest
   EXPECT_EQ(and_bb, or_bb);      // blackbox: child internals invisible by design
   EXPECT_NE(and_deep, and_bb);   // resolved vs blackbox digests are distinct forms
+}
+
+// Sub_fold::interface folds a Sub as a port-shaped blackbox even WITH a resolver:
+// the parent digest is insensitive to the child body (what abc region reuse
+// needs), unlike the default Merkle fold. It equals the no-resolver blackbox.
+TEST(Semdiff, DigestInterfaceModeIgnoresChildBody) {
+  using livehd::semdiff::Sub_fold;
+  auto build = [&](const std::string& dir, bool child_uses_or) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+
+    auto cio = lib.create_io("child");
+    cio->add_input("x", 1);
+    cio->add_input("y", 1);
+    cio->add_output("o", 1);
+    auto cg = cio->create_graph();
+    auto op = create_typed_node(*cg, child_uses_or ? Ntype_op::Or : Ntype_op::And);
+    cg->get_input_pin("x").connect_sink(op.create_sink_pin(0));
+    cg->get_input_pin("y").connect_sink(op.create_sink_pin(0));
+    op.create_driver_pin(0).connect_sink(cg->get_output_pin("o"));
+
+    auto pio = lib.create_io("parent");
+    pio->add_input("a", 1);
+    pio->add_input("b", 1);
+    pio->add_output("z", 1);
+    auto pg  = pio->create_graph();
+    auto sub = create_typed_node(*pg, Ntype_op::Sub);
+    sub.set_subnode(cio);
+    pg->get_input_pin("a").connect_sink(sub.create_sink_pin(0));
+    pg->get_input_pin("b").connect_sink(sub.create_sink_pin(1));
+    sub.create_driver_pin(0).connect_sink(pg->get_output_pin("z"));
+
+    livehd::semdiff::Digest_resolver resolve = [&lib](hhds::Gid gid) -> hhds::Graph* {
+      auto g = lib.get_graph(gid);
+      return g ? g.get() : nullptr;
+    };
+    return std::tuple{livehd::semdiff::canonical_digest(pg.get(), resolve, Sub_fold::interface),
+                      livehd::semdiff::canonical_digest(pg.get(), resolve, Sub_fold::merkle),
+                      livehd::semdiff::canonical_digest(pg.get())};  // no resolver: blackbox
+  };
+
+  auto [and_if, and_mk, and_bb] = build("lgdb_semdiff_ifm_and", false);
+  auto [or_if, or_mk, or_bb]    = build("lgdb_semdiff_ifm_or", true);
+
+  EXPECT_TRUE(and_if.valid && or_if.valid);
+  EXPECT_EQ(and_if, or_if);   // interface: child body invisible
+  EXPECT_NE(and_mk, or_mk);   // merkle: child edit changes the parent digest
+  EXPECT_EQ(and_if, and_bb);  // interface with a resolver == blackbox (no resolver)
 }
 
 // ---- tier-2 full-match state pairing (state_pairing) ------------------------

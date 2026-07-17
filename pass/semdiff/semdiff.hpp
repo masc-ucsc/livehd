@@ -153,7 +153,25 @@ struct Match_result {
 // Stamp the `match` attribute on nodes + driver pins of BOTH graphs: a shared id
 // for corresponding nodes, 0 for nodes with no counterpart. Mirrors
 // lec::prove_equal's signature so lec can pre-match before building its miter.
+//
+// This is the RICH path: it stamps every node (the greppable diff), builds the
+// tier-2 state pairs, and fills the diverged-memory lists that lec's solver path
+// consumes when the match is NOT full. Use it when you need the correspondence,
+// not just the verdict.
 Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts = {});
+
+// FAST boolean: are `a` and `b` structurally identical? Same analysis and same
+// compare-point obligations as structural_match, but it stamps nothing, builds
+// no stats, and early-exits on the first divergence -- the reuse/skip gate for
+// abc region reuse (verify-on-hit after a digest hit) and lec's no-solver skip.
+//
+// Returns true iff the node sets are in bijection (every node on both sides has a
+// cross-side class), EVERY compare-point obligation is discharged (cut_violated
+// == 0 && cut_unknown == 0 -- a bijection is not an isomorphism), AND the
+// correspondence is CERTAIN (no speculative tier-2 or seeded state pair carried
+// the match). That is exactly the predicate lec's skip already required, computed
+// without the stamping/region/similarity work.
+[[nodiscard]] bool structural_identical(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts = {});
 
 // A process-independent 128-bit structural digest of a module def: op kinds,
 // pin widths, connectivity (commutative-normalized within each sink port,
@@ -185,19 +203,35 @@ struct Canonical_digest {
   bool     operator==(const Canonical_digest&) const = default;
 };
 
+// How a Sub instance folds into the digest.
+//   merkle    (default): recurse into a resolvable child body and fold its
+//             digest, so an edited child changes every ancestor's digest. A lec
+//             verdict cache REQUIRES this -- the encoder flattens the child into
+//             the parent proof, so a stale child would silently reuse a wrong
+//             verdict.
+//   interface: fold only the Sub's def identity (its gid = FNV-1a of the def
+//             name, already in node_kind_key) and its boundary connectivity, NOT
+//             the child body. abc region reuse wants this: abc maps a Sub as a
+//             port-shaped blackbox, so a child-body edit must NOT invalidate the
+//             parent region's already-mapped netlist. Identical to how a bodyless
+//             blackbox folds today.
+// A memo must not mix modes -- one memo per (side, mode).
+enum class Sub_fold { merkle, interface };
+
 // Resolve a Sub's def gid to its body graph on THIS side's library (nullptr /
 // empty function = blackbox). Digests are memoized per call across the
 // instance DAG, so shared children are computed once.
 using Digest_resolver = std::function<hhds::Graph*(hhds::Gid)>;
 
-Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve = {});
+Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve = {}, Sub_fold sub_fold = Sub_fold::merkle);
 
 // Batch form: `memo` (keyed by def gid) persists ACROSS calls, so a driver
 // digesting every def of one library (the hier-LEC loop) computes each subtree
 // once — the per-call form above re-walks shared children per root, which is
 // O(defs x subtree) on a deep hierarchy. One memo per side (a gid must resolve
-// to one body).
+// to one body), and one memo per Sub_fold mode.
 Canonical_digest canonical_digest(hhds::Graph* g, const Digest_resolver& resolve,
-                                  absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo);
+                                  absl::flat_hash_map<hhds::Gid, Canonical_digest>& memo,
+                                  Sub_fold sub_fold = Sub_fold::merkle);
 
 }  // namespace livehd::semdiff
