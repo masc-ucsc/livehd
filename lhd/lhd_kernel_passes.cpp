@@ -515,6 +515,8 @@ void pass_command(Options& opts, Result& res) {
   // lg:-input requirement below. semdiff_command holds the side-loading logic
   // (it mirrors lec_command), just like `pass liberty` is handled specially.
   if (sub == "semdiff") {
+    // (--emit-dir lg:/verilog:/... is already rejected up front for `pass semdiff`
+    // by reject_emit_kind in lhd_kernel_compile.cpp -- it marks match in place.)
     semdiff_command(opts, res);
     return;
   }
@@ -583,6 +585,28 @@ void pass_command(Options& opts, Result& res) {
     run_step("pass.color", var, labels, opts, res);
     livehd::Hhds_graph_library::save(lg_in);  // in-place coloring
     res.outputs.push_back(lg_in);
+
+    // `--emit-dir lg:OUT` fuses pass.partition: emit the per-(def,color) module
+    // library straight from this run, so a coloring that produces regions (synth,
+    // acyclic, ...) does not need a separate `pass partition` afterward. It runs
+    // on the just-colored graphs in memory. `flat` colors everything one id, so
+    // partition flattens the hierarchy into a single module -- the same result as
+    // running the two passes by hand (never a silent no-op).
+    if (const auto* lg_out = find_slot(opts.emit_dirs, "lg"); lg_out != nullptr) {
+      if (fs::weakly_canonical(lg_out->path) == fs::weakly_canonical(lg_in)) {
+        throw Lhd_error{"usage", "color --emit-dir lg: must differ from the input lg:", ""};
+      }
+      std::error_code ec;
+      fs::remove_all(lg_out->path, ec);
+      ensure_dir(lg_out->path);
+      Eprp_var::Eprp_dict plabels;
+      set_top_label(opts, var, plabels, "pass.partition");
+      plabels["out"] = lg_out->path;
+      merge_sets(opts, "pass.partition", plabels);
+      run_step("pass.partition", var, plabels, opts, res);
+      livehd::Hhds_graph_library::save(lg_out->path);
+      res.outputs.push_back(lg_out->path);
+    }
   } else if (sub == "partition") {
     Eprp_var var;
     load_lg_into_var(lg_in, var);
@@ -650,6 +674,11 @@ void pass_command(Options& opts, Result& res) {
     // (2opt-freq D): STA on ONE tech-mapped module. Timing files are the bare
     // positional args after the subcommand (like `pass liberty gensim`);
     // `files` is a kernel-managed label, so the kernel builds it here.
+    if (const auto* lg_out = find_slot(opts.emit_dirs, "lg"); lg_out != nullptr) {
+      throw Lhd_error{"usage",
+                      std::format("pass opentimer does not emit an lg: library; --emit-dir lg:{} is unused", lg_out->path),
+                      "opentimer reports timing (see --workdir/timing.json), it does not transform the graph"};
+    }
     std::vector<std::string> tfiles(opts.files.begin() + 1, opts.files.end());
     if (tfiles.empty()) {
       throw Lhd_error{"usage",
@@ -690,6 +719,11 @@ void pass_command(Options& opts, Result& res) {
       std::erase(res.outputs, ephemeral_qor);
     }
   } else if (sub == "formal") {
+    if (const auto* lg_out = find_slot(opts.emit_dirs, "lg"); lg_out != nullptr) {
+      throw Lhd_error{"usage",
+                      std::format("pass formal does not emit an lg: library; --emit-dir lg:{} is unused", lg_out->path),
+                      "formal produces a verdict (and marks proven/runtime_check in place), not a graph library"};
+    }
     Eprp_var var;
     load_lg_into_var(lg_in, var);
     if (var.graphs.empty()) {
