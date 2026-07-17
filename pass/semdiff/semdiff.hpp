@@ -150,6 +150,22 @@ struct Match_result {
   std::vector<std::string> a_mem_diverged, b_mem_diverged;
 };
 
+// THE canonical "structurally identical" predicate over a Match_result -- the
+// single source of truth that both structural_identical() and lec's no-solver
+// skip read, so the two can never drift (a hand-rolled copy that dropped one of
+// these clauses is exactly how a false-PROVEN slips in). True iff:
+//   * the node sets are in bijection (a_unmatched == 0 && b_unmatched == 0),
+//   * every compare-point obligation is discharged (cut_violated == 0 &&
+//     cut_unknown == 0) -- a node-set bijection is NOT an edge isomorphism, so a
+//     rewiring between same-named compare points must be ruled out here, and
+//   * the correspondence is CERTAIN -- no speculative tier-2 full-match pair and
+//     no caller-seeded pair carried the match (full_pairs == 0 && seed_pairs == 0);
+//     the spec self-certifies only the unbounded inductive proof, never these.
+[[nodiscard]] inline bool is_structural_identity(const Match_result& m) {
+  return m.a_unmatched == 0 && m.b_unmatched == 0 && m.cut_violated == 0 && m.cut_unknown == 0 && m.state.full_pairs == 0
+         && m.state.seed_pairs == 0;
+}
+
 // Stamp the `match` attribute on nodes + driver pins of BOTH graphs: a shared id
 // for corresponding nodes, 0 for nodes with no counterpart. Mirrors
 // lec::prove_equal's signature so lec can pre-match before building its miter.

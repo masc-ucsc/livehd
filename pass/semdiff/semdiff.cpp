@@ -1226,34 +1226,24 @@ bool structural_identical(hhds::Graph* a, hhds::Graph* b, const Semdiff_options&
   }
   Side         sa, sb;
   Match_result res;
-  build_sides(a, b, opts, sa, sb, res);
-
-  // A node-set bijection is NOT an edge isomorphism: a rewiring between two
-  // same-named compare points leaves every node signature intact. The compare-
-  // point obligations close that hole, so a violated or undecidable one is a real
-  // (or unprovable) difference -- refuse.
-  if (res.cut_violated != 0 || res.cut_unknown != 0) {
-    return false;
-  }
-  // Certain-only: a match that leaned on a speculative tier-2 pair or a caller
-  // seed is not an identity we can stand behind (same rule lec's skip enforces).
-  if (res.state.full_pairs != 0 || res.state.seed_pairs != 0) {
-    return false;
-  }
+  build_sides(a, b, opts, sa, sb, res);  // fills cut_* and the state pair counts
 
   absl::flat_hash_set<uint64_t> fcommon, bcommon;
   common_values(sa, sb, fcommon, bcommon);
 
-  // Every node on BOTH sides must have a cross-side class (the bijection). The
-  // first orphan proves a difference -- early exit, no stamping, no stats.
+  // Node-set bijection: every node on BOTH sides must have a cross-side class.
+  // The first orphan proves a difference -- record it and stop (no stamping, no
+  // stats). The final verdict routes through is_structural_identity so this path
+  // and lec's skip share ONE predicate and can never drift.
   for (const Side* s : {&sa, &sb}) {
     for (const auto& node : s->order) {
       if (!class_of(*s, node.get_class_index(), fcommon, bcommon)) {
-        return false;
+        res.a_unmatched = 1;  // at least one orphan; the predicate only needs != 0
+        return is_structural_identity(res);
       }
     }
   }
-  return true;
+  return is_structural_identity(res);
 }
 
 namespace {

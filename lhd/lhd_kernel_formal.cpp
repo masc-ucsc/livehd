@@ -701,9 +701,10 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // folds its din, and class_of is forward-authoritative, so swapping two
       // same-named flops' dins (or two graph outputs) leaves the node set identical
       // and would be claimed Proven here — with no solver, and cached below as
-      // definitive. The obligations close exactly that hole.
-      if (o.semdiff != "none" && kids_proven && m.a_unmatched == 0 && m.b_unmatched == 0 && m.state.full_pairs == 0
-          && m.state.seed_pairs == 0 && m.cut_violated == 0 && m.cut_unknown == 0) {
+      // definitive. The obligations close exactly that hole. The predicate is
+      // is_structural_identity (semdiff.hpp) -- the SAME one structural_identical()
+      // and abc's reuse gate read, so this soundness-critical skip cannot drift.
+      if (o.semdiff != "none" && kids_proven && livehd::semdiff::is_structural_identity(m)) {
         livehd::lec::Query_result sr;
         sr.verdict    = Verdict::Proven;
         sr.engine     = "semdiff";
