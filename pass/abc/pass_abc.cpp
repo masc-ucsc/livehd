@@ -469,8 +469,9 @@ void Pass_abc::work(Eprp_var& var) {
   if (const auto* refusal = mapper.admission_refusal()) {
     livehd::diag::err("pass.abc", "memory-oversize", "unsupported")
         .msg("{}", *refusal)
-        .hint(std::format("re-color into smaller regions and check them first: "
-                          "`lhd pass color synth --top {} lg:... --stats`",
+        .hint(std::format("re-color into SMALLER regions with a tighter size window, then check them first: "
+                          "`lhd pass color synth --top {} lg:... --set color.max_ge=<smaller> --stats` "
+                          "(the region-splitting ceiling; lower it until the region fits)",
                           top))
         .hint("--set pass.abc.memory_budget_mb=N pins the ceiling explicitly (reproducible hosts, CI)")
         .hint("--set pass.abc.allow_oversize=true runs it anyway -- it may exhaust the machine (a whole-design "
