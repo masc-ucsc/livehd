@@ -24,6 +24,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//graph",
+        "//pass/cost:host_mem",  # fork_race: cap each racer at its share of the memory budget
         "@abc",  # vendored berkeley-abc -- the AIG/CEC engine behind lec.cones
         "@cvc5",  # prebuilt cvc5 (combined+localized) -- the SMT backend
         "@hhds//hhds:graph",

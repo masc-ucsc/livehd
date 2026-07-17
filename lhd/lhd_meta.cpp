@@ -289,7 +289,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "semdiff" || name == "pass semdiff") {
     print_json_line(
-        R"json({"schema_version":1,"name":"pass semdiff","description":"Structural diff/match (a structural LEC), a `pass` subcommand: structural_match(ref, impl) marks corresponding nodes/driver-pins of both lg: libraries with a shared `match` attribute (0 = no counterpart) and saves both back in place. v1 marks lg: libraries, so both sides must be lg:DIR (compile sources to lg: first). Inspect the diff with `lhd tool grep match=0 lg:impl` or visualize it with `lhd tool diff lg:ref lg:impl --match`. Knobs are --set pass.semdiff.* (matching_names | id_granularity=pair|region)","args":{"required":[{"name":"impl","type":"lg:DIR"},{"name":"ref","type":"lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"set","type":"pass.semdiff.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass semdiff --ref lg:gold --impl lg:opt --top adder","lhd pass semdiff --ref lg:gold --impl lg:opt --set pass.semdiff.matching_names=true","lhd tool diff lg:gold lg:opt --match"]})json");
+        R"json({"schema_version":1,"name":"pass semdiff","description":"Structural diff/match (a structural LEC), a `pass` subcommand: structural_match(ref, impl) marks corresponding nodes/driver-pins of both lg: libraries with a shared `match` attribute (0 = no counterpart) and saves both back in place. v1 marks lg: libraries, so both sides must be lg:DIR (compile sources to lg: first). Inspect the diff with `lhd tool grep match=0 lg:impl` or visualize it with `lhd tool diff lg:ref lg:impl --match`. --stats prints the aggregate node/register/memory match report (a design health check: it implies hier + matching_names + state_pairing, so it sweeps every def in --top's subtree; an explicit --set of any of those wins). Knobs are --set pass.semdiff.* (matching_names | state_pairing | hier | dump_state | id_granularity=pair|region)","args":{"required":[{"name":"impl","type":"lg:DIR"},{"name":"ref","type":"lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"stats","type":"flag (aggregate node/register/memory match report)"},{"name":"set","type":"pass.semdiff.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass semdiff --ref lg:gold --impl lg:opt --top adder","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder --stats","lhd pass semdiff --ref lg:gold --impl lg:opt --set pass.semdiff.matching_names=true","lhd tool diff lg:gold lg:opt --match"]})json");
     return 0;
   }
   if (name == "compile" || name == "compile verilog" || name == "compile pyrope") {
@@ -591,10 +591,12 @@ int help_pass(const std::string& sub) {
         "  cgen     one color per cone-sink signature — each primary output, plus one\n"
         "           shared flop/mem next-state bucket; logic feeding several sinks gets its\n"
         "           own id (the granularity inou.cgen.sim uses to break false comb loops)\n"
-        "  synth    connectivity clusters grown forward (combinationally) from the primary\n"
-        "           inputs, stopping at flops; synth mode also cuts the fan-out of mult/div\n"
-        "           and >8-bit adders so their downstream logic starts new clusters\n"
-        "           (--set synth_alg=pipe|synth)\n"
+        "  synth    combinational clusters bounded by CUT nodes. A cut owns its own region\n"
+        "           and is a barrier in both directions: it never inherits a neighbour's id\n"
+        "           and never propagates its own, so a register cannot weld its din cone to\n"
+        "           its enable/stall cone (nor its fan-out cones to each other). State\n"
+        "           (flop/mem/latch/stateful sub) always cuts; synth mode also cuts mult/div\n"
+        "           and >8-bit adders (--set synth_alg=pipe|synth; pipe = state only)\n"
         "  path     register-to-register regions: seed every flop/reg/mem and color its\n"
         "           backward+forward cone up to real (non-clk/rst) wire names; --set\n"
         "           instance=a,b instead seeds named nodes forward-only, bounded by the\n"
@@ -605,9 +607,18 @@ int help_pass(const std::string& sub) {
         "           equivalent of flattening the design (ignores pass.color.continuous)\n"
         "  clear    remove any existing coloring\n"
         "\n"
+        "--stats (or --set pass.color.stats=true) reports what the coloring produced, on\n"
+        "  stderr: partition count, max/min/avg/median size, singletons, how many land in\n"
+        "  the 1k-5k band pass.abc likes, and uncolored nodes. A partition is one\n"
+        "  (def, color) -- the unit pass.partition emits as `<def>__c<id>`. For `flat` it\n"
+        "  also reports the size of the SINGLE region pass.abc will actually map, which is\n"
+        "  every def times its instance count, not the per-def sum. Add pass.color.verbose\n"
+        "  for the per-def table.\n"
+        "\n"
         "examples:\n"
         "  lhd pass color acyclic --top m lg:dir\n"
-        "  lhd pass color flat --top m lg:dir      # whole hierarchy -> one color\n");
+        "  lhd pass color flat --top m lg:dir      # whole hierarchy -> one color\n"
+        "  lhd pass color synth --top m lg:dir --set pass.color.synth_alg=pipe --stats\n");
     return print_options_section({"pass.color."});
   }
   if (sub == "partition") {
@@ -627,6 +638,18 @@ int help_pass(const std::string& sub) {
         "\n"
         "usage: lhd pass abc --top M lg:DIR --emit-dir lg:OUT/\n"
         "  --emit-dir lg: (must differ from the input) receives the mapped netlist.\n"
+        "\n"
+        "memory admission:\n"
+        "  A region is bit-blasted into ABC, so a whole-design region costs millions of\n"
+        "  gates and several network forms at once — a flat XSCore run reached 221 GB on a\n"
+        "  64 GiB host and was killed by the OS. pass.abc samples its own RSS while it\n"
+        "  translates and refuses a region that will not fit, before running any synthesis\n"
+        "  command and without emitting a partial result (exit nonzero). The budget is\n"
+        "  PHYSICAL RAM minus max(2 GiB, 20%) — never swap, because swapping an oversize\n"
+        "  run does not make it succeed, it makes it take the machine down slowly.\n"
+        "  --set pass.abc.memory_budget_mb=N pins the ceiling (reproducible hosts, CI).\n"
+        "  --set pass.abc.allow_oversize=true disables the guard.\n"
+        "  Refused? `lhd pass color <alg> --top M lg:DIR --stats` sizes the regions first.\n"
         "\n"
         "example:\n"
         "  lhd pass abc --top m lg:dir --emit-dir lg:net\n");

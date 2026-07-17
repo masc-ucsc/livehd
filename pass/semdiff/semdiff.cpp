@@ -55,6 +55,24 @@ bool is_state(Ntype_op op) {
   return op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Memory;
 }
 
+// A Sub whose body holds state is a cut point TOO. hhds encodes is_loop_break in
+// bit 0 of Ntype_op (graph/cell.hpp:109 static_asserts; IO=39, Memory=41, Flop=43,
+// Latch=45, Fflop=47, Sub=49 are the odd ones) and HOISTS every loop_break node to
+// a topological SOURCE — emitted before its drivers, exactly like a Flop
+// (hhds/graph.cpp:2451-2453 "cut point: no ordering edges lead INTO it"). A Flop
+// survives that only because we PRE-SEED its fsig/bsig, which makes the emission
+// order irrelevant; an unseeded Sub instead fails the readiness check and starves
+// its whole fanout cone. Sub instances only carry the bit when their body has
+// state, so `is_loop_break()` is exactly the right question — and it is the SAME
+// bit hhds used to order the graph, so the two can never disagree (a stale
+// not-loop_break Sub is not hoisted, gets a normal structural fsig, and needs no
+// seed). IO is NOT here: it is two singleton nodes below kFirstUserNodeIdx that
+// forward_class never emits, and its pins already resolve by name.
+bool is_cut(const hhds::Node_class& node) {
+  auto op = gu::type_op_of(node);  // LINK-based: set_subnode re-stamps the raw type
+  return is_state(op) || (op == Ntype_op::Sub && node.is_loop_break());
+}
+
 // Name-normalization mirror of pass/lec/encode.cpp's flop_state_key (kept local
 // so pass/semdiff stays free of the cvc5-heavy pass/lec dep): strip the SSA /
 // hierarchical decoration so the same RTL register matches across front-ends.
@@ -87,6 +105,16 @@ std::string state_key(hhds::Graph* g, const hhds::Node_class& node) {
     }
   }
   return "f:" + std::to_string(static_cast<uint64_t>(node.get_debug_nid()));
+}
+
+// The cross-side identity of a cut point. A cut Sub is keyed by its INSTANCE
+// hierarchical name (node_kind_key already folds the def gid, so the def identity
+// is covered separately); a state cell keeps its existing state_key.
+std::string cut_point_key(hhds::Graph* g, const hhds::Node_class& node) {
+  if (gu::type_op_of(node) == Ntype_op::Sub) {
+    return "u:" + normalize_reg_name(node.get_hier_name());
+  }
+  return state_key(g, node);
 }
 
 // Width of a node's first sized driver pin (0 = unknown). Folded into the key so
@@ -434,6 +462,7 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
         st.b_name_grouped += one ? 0 : 1;
       }
       st.name_pairs += one ? 1 : 0;
+      st.name_pairs_mem += one && sa.cells[av.front()].is_mem ? 1 : 0;
     }
   }
 
@@ -535,6 +564,7 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
           sb.cells[it->second.front()].token   = tok;
           sb.cells[it->second.front()].t2_pair = true;
           ++st.full_pairs;
+          st.full_pairs_mem += sa.cells[av.front()].is_mem ? 1 : 0;
           // Export the concrete pair for the LEC consumer: raw hier names (the
           // node name attr lec keys flops by — NOT the driver-pin-based
           // state_key, which a reader may stamp differently).
@@ -751,6 +781,50 @@ struct Side {
   absl::flat_hash_set<uint64_t>                     bvals;   // bsig value set
 };
 
+// The forward pass's operand rule, factored out so the compare-point obligation
+// below folds operands EXACTLY the way the signatures did. Returns false when the
+// driver has no forward signature yet (i.e. it is past a frontier).
+//
+// The const case is not optional: a pid-encoded const (e.g. a get_mask's mask)
+// has no CONST_NODE in forward_class, so an obligation that only consulted fsig
+// would miss a changed constant entirely.
+bool resolve_driver(const Side& s, const hhds::Pin_class& drv, uint64_t& out) {
+  if (gu::is_graph_input_pin(drv)) {
+    out = hcombine(hstr("\x01in"), hstr(drv.get_pin_name()));
+    return true;
+  }
+  if (gu::is_const_pin(drv)) {
+    // A constant operand (incl. the pid-encoded const that drives e.g. a
+    // get_mask's mask) is anchored by value — its CONST_NODE is not a
+    // forward_class node, so resolve it here or forward would stall and the
+    // node would fall back to a coarser backward (symmetric) match.
+    out = hcombine(hstr("\x01const"), hstr(gu::hydrate_const(drv).serialize()));
+    return true;
+  }
+  auto it = s.fsig.find(drv.get_master_node().get_class_index());
+  if (it == s.fsig.end()) {
+    return false;
+  }
+  out = hcombine(it->second, static_cast<uint64_t>(static_cast<uint32_t>(drv.get_port_id())));
+  return true;
+}
+
+// Fold a compare point's inputs EXACTLY as the forward pass folds a node's, so a
+// rewiring between compare points shows up as a differing csig. false = an operand
+// had no forward signature, so the obligation is UNDECIDABLE (never "discharged").
+bool cut_signature(const Side& s, const hhds::Node_class& node, uint64_t& out) {
+  absl::flat_hash_map<int, std::vector<uint64_t>> by_port;
+  for (const auto& e : node.inp_edges()) {
+    uint64_t dsig = 0;
+    if (!resolve_driver(s, e.driver, dsig)) {
+      return false;
+    }
+    by_port[e.sink.get_port_id()].push_back(dsig);
+  }
+  out = fold_operands(node_kind_key(node), by_port);
+  return true;
+}
+
 Side analyze(hhds::Graph* g, const Semdiff_options& opts,
              const absl::flat_hash_map<hhds::Class_index, uint64_t>* state_seeds = nullptr) {
   Side s;
@@ -801,23 +875,10 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
     bool                                       ready = true;
     absl::flat_hash_map<int, std::vector<uint64_t>> by_port;
     for (const auto& e : node.inp_edges()) {
-      const auto& drv = e.driver;
-      uint64_t    dsig;
-      if (gu::is_graph_input_pin(drv)) {
-        dsig = hcombine(hstr("\x01in"), hstr(drv.get_pin_name()));
-      } else if (gu::is_const_pin(drv)) {
-        // A constant operand (incl. the pid-encoded const that drives e.g. a
-        // get_mask's mask) is anchored by value — its CONST_NODE is not a
-        // forward_class node, so resolve it here or forward would stall and the
-        // node would fall back to a coarser backward (symmetric) match.
-        dsig = hcombine(hstr("\x01const"), hstr(gu::hydrate_const(drv).serialize()));
-      } else {
-        auto it = s.fsig.find(drv.get_master_node().get_class_index());
-        if (it == s.fsig.end()) {
-          ready = false;
-          break;
-        }
-        dsig = hcombine(it->second, static_cast<uint64_t>(static_cast<uint32_t>(drv.get_port_id())));
+      uint64_t dsig = 0;
+      if (!resolve_driver(s, e.driver, dsig)) {
+        ready = false;
+        break;
       }
       by_port[e.sink.get_port_id()].push_back(dsig);
     }
@@ -940,11 +1001,98 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
     };
     build_seeds(ssa, seeds_a);
     build_seeds(ssb, seeds_b);
+    // Cut Subs get the same treatment as a Flop: a name seed so structure flows
+    // through the hoisted instance in BOTH directions. They are seeded HERE rather
+    // than routed through collect_state/pair_state on purpose — that path feeds the
+    // tier-2 SRP/ERP signatures, State_stats (`--stats` would count instances as
+    // "registers"), and the full_pairs/seed_pairs counters pass/lec keys its
+    // no-solver skip on. node_out_bits is also edge-order dependent on a
+    // multi-output Sub. Gated on matching_names: without names there is nothing to
+    // seed a Sub with, and today's behavior is preserved bit-for-bit.
+    if (opts.matching_names) {
+      auto seed_cut_subs = [&](hhds::Graph* g, absl::flat_hash_map<hhds::Class_index, uint64_t>& seeds) {
+        for (auto node : g->forward_class()) {
+          if (gu::type_op_of(node) != Ntype_op::Sub || !node.is_loop_break()) {
+            continue;
+          }
+          seeds.emplace(node.get_class_index(), hcombine(hstr("\x01sub"), hstr(cut_point_key(g, node))));
+        }
+      };
+      seed_cut_subs(a, seeds_a);
+      seed_cut_subs(b, seeds_b);
+    }
     sa = analyze(a, opts, &seeds_a);
     sb = analyze(b, opts, &seeds_b);
   } else {
     sa = analyze(a, opts);
     sb = analyze(b, opts);
+  }
+
+  // ---- Compare-point obligations ------------------------------------------
+  // The node-set bijection below cannot see a rewiring BETWEEN compare points: a
+  // cut point's fsig is its name seed and never folds its din, and class_of is
+  // forward-authoritative so the bsig that WOULD differ is discarded. Fold each
+  // compare point's inputs with the forward pass's own operand rule and compare
+  // the two sides PAIRWISE (strictly stronger than fcommon set membership).
+  {
+    absl::flat_hash_map<std::string, uint64_t> ka, kb;  // compare point -> csig
+    absl::flat_hash_set<std::string>           ua, ub;  // ... or "undecidable"
+    auto collect_cuts = [&](const Side& s, absl::flat_hash_map<std::string, uint64_t>& k,
+                            absl::flat_hash_set<std::string>& u) {
+      for (const auto& node : s.order) {
+        if (!is_cut(node)) {
+          continue;
+        }
+        uint64_t csig = 0;
+        auto     key  = cut_point_key(s.g, node);
+        if (cut_signature(s, node, csig)) {
+          k.emplace(key, csig);
+        } else {
+          u.insert(key);  // an operand had no fsig: NEVER dischargeable
+        }
+      }
+      // Graph outputs are compare points too — a swapped output perturbs only the
+      // (discarded) backward signature, so the node set alone cannot see it.
+      auto onode = s.g->get_output_node();
+      if (!onode.is_invalid()) {
+        for (const auto& e : onode.inp_edges()) {
+          auto     key  = "o:" + std::string(gu::pin_name_of(e.sink));
+          uint64_t dsig = 0;
+          if (resolve_driver(s, e.driver, dsig)) {
+            k.emplace(key, dsig);
+          } else {
+            u.insert(key);
+          }
+        }
+      }
+    };
+    collect_cuts(sa, ka, ua);
+    collect_cuts(sb, kb, ub);
+
+    for (const auto& [key, va] : ka) {
+      if (ub.contains(key)) {
+        ++res.cut_obligations;
+        ++res.cut_unknown;
+        continue;
+      }
+      auto it = kb.find(key);
+      if (it == kb.end()) {
+        continue;  // one-sided compare point: the node-set diff already reports it
+      }
+      ++res.cut_obligations;
+      if (it->second == va) {
+        ++res.cut_discharged;
+      } else {
+        ++res.cut_violated;
+        res.cut_violations.push_back(key);
+      }
+    }
+    for (const auto& key : ua) {
+      if (kb.contains(key) || ub.contains(key)) {
+        ++res.cut_obligations;
+        ++res.cut_unknown;  // ref side undecidable but the point exists on both
+      }
+    }
   }
 
   // Signatures present on BOTH sides are matchable.

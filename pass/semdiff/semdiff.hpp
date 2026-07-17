@@ -63,6 +63,11 @@ struct State_stats {
   uint32_t a_name_grouped = 0, b_name_grouped = 0;  // key on both sides but colliding within one
   uint32_t seed_pairs = 0;            // caller-supplied seed_pairs that resolved (anchored) a cell pair
   uint32_t full_pairs = 0;            // tier-2 full-match pairs (state_pairing)
+  // Memory subset of the pair counts (a_mems/b_mems are the memory subset of the
+  // TOTALS). regs-vs-mems is the split a design health check reports, and only
+  // these two make it derivable: paired_regs = name_pairs+full_pairs - these.
+  uint32_t name_pairs_mem = 0;        // tier-1 pairs that are Memory
+  uint32_t full_pairs_mem = 0;        // tier-2 pairs that are Memory
   uint32_t rounds     = 0;            // fixed-point rounds that added a pair
   uint32_t a_ambiguous = 0, b_ambiguous = 0;  // unpaired: signature shared by >1 candidate
   uint32_t a_unpaired = 0, b_unpaired = 0;    // unpaired at every tier (includes ambiguous)
@@ -81,6 +86,8 @@ struct State_stats {
     b_name_grouped += o.b_name_grouped;
     seed_pairs += o.seed_pairs;
     full_pairs += o.full_pairs;
+    name_pairs_mem += o.name_pairs_mem;
+    full_pairs_mem += o.full_pairs_mem;
     rounds += o.rounds;
     a_ambiguous += o.a_ambiguous;
     b_ambiguous += o.b_ambiguous;
@@ -112,6 +119,22 @@ struct Match_result {
   uint32_t a_matched   = 0, a_unmatched = 0;
   uint32_t b_matched   = 0, b_unmatched = 0;
   double   similarity  = 0;  // matched / total (both sides)
+  // COMPARE-POINT OBLIGATIONS. `a_unmatched == 0 && b_unmatched == 0` establishes a
+  // node-set BIJECTION, not an edge-preserving isomorphism: a state cell's fsig is a
+  // hash of its NAME and the pass short-circuits before folding its din, so swapping
+  // two same-named flops' dins (or two graph outputs) leaves every signature intact.
+  // The backward pass does see it, but class_of is forward-authoritative and never
+  // consults bsig. Callers that read a full match as a PROOF (pass/lec's no-solver
+  // skip) MUST additionally require cut_violated == 0 && cut_unknown == 0.
+  //
+  // A compare point is a name-paired state cell, a graph output, or (matching_names)
+  // a name-paired cut Sub. Its inputs are folded with the forward pass's own operand
+  // rule and compared pairwise across the sides.
+  uint32_t cut_obligations = 0;  // compare points checked
+  uint32_t cut_discharged  = 0;  // ... proven equal
+  uint32_t cut_violated    = 0;  // ... proven DIFFERENT (a real diff the node set hides)
+  uint32_t cut_unknown     = 0;  // ... undecidable: an operand had no forward signature
+  std::vector<std::string> cut_violations;  // the violated compare points, for diagnostics
   State_stats state;         // filled when matching_names or state_pairing is set
   // state_pairing only: the concrete tier-2 pairs, and the still-unpaired state
   // cells as "name (reason)" lines — reason is one of `ambiguous` (signature

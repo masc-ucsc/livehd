@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <print>
+#include <vector>
 
 #include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
@@ -86,50 +87,64 @@ bool Color_path::should_stop_fwd(const hhds::Node_class& node, int color) const 
   return !std::string_view(node_name_of(node)).starts_with(prefix);
 }
 
+// Both walks use an explicit worklist rather than recursion: the frontier is as
+// deep as the design's longest combinational chain, which recursion cannot
+// survive on a real netlist. The `add_color` visited-guard makes the result
+// independent of visit order, so a stack is an exact transliteration.
 void Color_path::propagate_fwd(const hhds::Node_class& node, int color) {
-  for (const auto& e : node.out_edges()) {
-    auto succ = e.sink.get_master_node();
-    if (!is_partitionable(succ)) {
-      continue;
+  std::vector<hhds::Node_class> todo{node};
+  while (!todo.empty()) {
+    auto cur = todo.back();
+    todo.pop_back();
+    for (const auto& e : cur.out_edges()) {
+      auto succ = e.sink.get_master_node();
+      if (!is_partitionable(succ)) {
+        continue;
+      }
+      if (succ.is_loop_break()) {
+        add_color(node2colors[succ], color);  // back-to-back flop: share color, stop
+        continue;
+      }
+      if (!add_color(node2colors[succ], color)) {
+        continue;  // already propagated here
+      }
+      if (should_stop_fwd(succ, color)) {
+        continue;
+      }
+      todo.emplace_back(succ);
     }
-    if (succ.is_loop_break()) {
-      add_color(node2colors[succ], color);  // back-to-back flop: share color, stop
-      continue;
-    }
-    if (!add_color(node2colors[succ], color)) {
-      continue;  // already propagated here
-    }
-    if (should_stop_fwd(succ, color)) {
-      continue;
-    }
-    propagate_fwd(succ, color);
   }
 }
 
 void Color_path::propagate_bwd(const hhds::Node_class& node, int color) {
-  for (const auto& e : node.inp_edges()) {
-    auto pred = e.driver.get_master_node();
-    if (!is_partitionable(pred)) {
-      continue;
-    }
-    if (pred.is_loop_break()) {
-      add_color(node2colors[pred], color);  // back-to-back flop: share color
-      continue;
-    }
-    if (!add_color(node2colors[pred], color)) {
-      continue;
-    }
-    bool has_wname = false;
-    for (const auto& oe : pred.out_edges()) {
-      if (has_real_wname(oe.driver)) {
-        has_wname = true;
-        break;
+  std::vector<hhds::Node_class> todo{node};
+  while (!todo.empty()) {
+    auto cur = todo.back();
+    todo.pop_back();
+    for (const auto& e : cur.inp_edges()) {
+      auto pred = e.driver.get_master_node();
+      if (!is_partitionable(pred)) {
+        continue;
       }
+      if (pred.is_loop_break()) {
+        add_color(node2colors[pred], color);  // back-to-back flop: share color
+        continue;
+      }
+      if (!add_color(node2colors[pred], color)) {
+        continue;
+      }
+      bool has_wname = false;
+      for (const auto& oe : pred.out_edges()) {
+        if (has_real_wname(oe.driver)) {
+          has_wname = true;
+          break;
+        }
+      }
+      if (has_wname && !is_alias_passthrough_node(pred)) {
+        continue;
+      }
+      todo.emplace_back(pred);
     }
-    if (has_wname && !is_alias_passthrough_node(pred)) {
-      continue;
-    }
-    propagate_bwd(pred, color);
   }
 }
 
@@ -181,7 +196,7 @@ void Color_path::label(hhds::Graph* g) {
     }
   }
 
-  int n_colors = apply_coloring(g, node2id, opts);
+  int n_colors = apply_coloring(g, node2id, opts, opts.sizes);
   if (opts.verbose) {
     std::print("[color.path] {} -> {} paths\n", g->get_name(), n_colors);
   }

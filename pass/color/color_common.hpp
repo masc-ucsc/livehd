@@ -31,20 +31,24 @@ using Node2Id = absl::flat_hash_map<hhds::Node_class, int>;
 // Union-find over node identities (a region = connected component of same-color
 // nodes). Shared by the continuous per-region split (apply_coloring) and the
 // partition pass; keep the single definition here so the two never drift.
+//
+// find() is ITERATIVE (path halving). It walks a chain as long as the design is
+// wide -- a whole-design walk is millions of nodes -- so recursion here is a
+// stack overflow, not a style preference.
 class Union_find {
 public:
   hhds::Node_class find(const hhds::Node_class &n) {
-    auto it = parent_.find(n);
-    if (it == parent_.end()) {
-      parent_[n] = n;
-      return n;
+    auto cur = n;
+    parent_.try_emplace(cur, cur);
+    while (true) {
+      auto p = parent_[cur];
+      if (p == cur) {
+        return cur;
+      }
+      auto gp      = parent_[p];
+      parent_[cur] = gp;  // path halving
+      cur          = gp;
     }
-    if (it->second == n) {
-      return n;
-    }
-    auto root  = find(it->second);
-    parent_[n] = root;  // path compression
-    return root;
   }
   void merge(const hhds::Node_class &a, const hhds::Node_class &b) {
     auto ra = find(a);
@@ -55,7 +59,54 @@ public:
   }
 
 private:
+  // Invariant every value stored is also a key -- that is what lets find()
+  // index with operator[] without inserting a bogus default-constructed root.
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class> parent_;
+};
+
+// Union-find over COLOR IDs (ints). Same iterative contract as Union_find.
+// Union-by-min keeps the representative the smallest id in the class, so the
+// resulting color ids are a deterministic function of the id allocation order
+// rather than of hash iteration order.
+class Int_union_find {
+public:
+  int find(int x) {
+    parent_.try_emplace(x, x);
+    while (true) {
+      const int p = parent_[x];
+      if (p == x) {
+        return x;
+      }
+      const int gp = parent_[p];
+      parent_[x]   = gp;  // path halving
+      x            = gp;
+    }
+  }
+  void merge(int a, int b) {
+    const int ra = find(a);
+    const int rb = find(b);
+    if (ra == rb) {
+      return;
+    }
+    if (ra < rb) {
+      parent_[rb] = ra;
+    } else {
+      parent_[ra] = rb;
+    }
+  }
+
+private:
+  absl::flat_hash_map<int, int> parent_;
+};
+
+// Per-def coloring outcome, filled by apply_coloring from the walk it already
+// makes (so `--stats` costs no extra traversal). `color_nodes` is keyed by the
+// color id AS WRITTEN (post seeded-base shift), which is the id pass.partition
+// turns into the `<def>__c<id>` module name.
+struct Def_color_sizes {
+  absl::flat_hash_map<int, uint64_t> color_nodes;
+  uint64_t partitionable = 0;  // nodes the algorithm was allowed to color
+  uint64_t uncolored = 0;      // ... that it left without a color
 };
 
 // Per-pass options shared by every algorithm. `hier` selects whether the pass
@@ -72,6 +123,12 @@ struct Color_opts {
   bool compact = true;
   bool continuous = false;
   bool keep_colored = false;
+
+  // `--stats` sink for the def currently being colored, or nullptr. It rides on
+  // the options so every algorithm reports without each one growing a
+  // parameter; the driver re-points it per def and owns the cross-def
+  // aggregation (an algorithm only ever sees one def).
+  Def_color_sizes *sizes = nullptr;
 };
 
 // A node participates in partitioning iff it is a regular (non-builtin) node
@@ -90,13 +147,14 @@ struct Color_opts {
 // Write `node2id` onto `g`'s regular nodes. Applies the continuous split when
 // requested, then writes flat (compact) or per-instance hier color. Nodes
 // absent from node2id are cleared (unless keep_colored leaves an existing
-// color in place). Returns the number of distinct color ids written.
+// color in place). Returns the number of distinct color ids written; fills
+// `sizes` when non-null.
 // Source-SEEDED colors (2opt-freq B block attributes: coloring_info
 // algorithm=="block-attr", or "seeded":true carried by a later rebuild) win
 // over the algorithm: seeded nodes keep their color and algorithm ids shift
 // above the max seeded id.
 int apply_coloring(hhds::Graph *g, const Node2Id &node2id,
-                   const Color_opts &opts);
+                   const Color_opts &opts, Def_color_sizes *sizes = nullptr);
 
 // True when g's active coloring carries source-seeded block regions.
 [[nodiscard]] bool has_seeded_coloring(hhds::Graph *g);

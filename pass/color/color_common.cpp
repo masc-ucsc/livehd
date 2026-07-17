@@ -69,7 +69,7 @@ bool has_seeded_coloring(hhds::Graph *g) {
 }
 
 int apply_coloring(hhds::Graph *g, const Node2Id &node2id_in,
-                   const Color_opts &opts) {
+                   const Color_opts &opts, Def_color_sizes *sizes) {
   const Node2Id local =
       opts.continuous ? split_continuous(g, node2id_in) : node2id_in;
   const Node2Id &node2id = opts.continuous ? local : node2id_in;
@@ -99,16 +99,35 @@ int apply_coloring(hhds::Graph *g, const Node2Id &node2id_in,
     if (!is_partitionable(n)) {
       continue;
     }
+    if (sizes != nullptr) {
+      ++sizes->partitionable;
+    }
+    auto tally = [&](int color) {
+      seen_ids.insert(color);
+      if (sizes != nullptr) {
+        ++sizes->color_nodes[color];
+      }
+    };
     if (seeded && has_color(n) && color_of(n) != 0) {
-      seen_ids.insert(color_of(n)); // seeded region membership wins
+      tally(color_of(n)); // seeded region membership wins
       continue;
     }
     auto it = node2id.find(n);
     if (it != node2id.end()) {
       set_color(n, it->second + base);
-      seen_ids.insert(it->second + base);
-    } else if (!opts.keep_colored) {
-      del_color(n);
+      tally(it->second + base);
+    } else if (opts.keep_colored && has_color(n) && color_of(n) != 0) {
+      // keep_colored left a pre-existing color ON THE GRAPH, and pass.partition
+      // reads the graph -- so this node IS in a region and must be counted as
+      // one, or the report contradicts what partition goes on to emit.
+      tally(color_of(n));
+    } else {
+      if (!opts.keep_colored) {
+        del_color(n);
+      }
+      if (sizes != nullptr) {
+        ++sizes->uncolored;
+      }
     }
   }
   return static_cast<int>(seen_ids.size());

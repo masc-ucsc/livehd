@@ -490,10 +490,12 @@ upass::Vote uPass_typecheck::process_sext(std::string_view, Bundle& dst, upass::
 upass::Vote uPass_typecheck::process_tuple_add(std::string_view, Bundle& dst, upass::Src_span src) {
   // Every tuple_add in the tree is a REAL tuple literal: `(expr)` groupings
   // were unwrapped at parse (db87b5908 — `(x)` no-comma unwraps, `(x,)` is
-  // kept), so even a single-operand node is a 1-tuple.
-  if (!src.empty()) {
-    set_dst_kind(dst, Kind::tuple);
-  }
+  // kept), so even a single-operand node is a 1-tuple.  An OPERAND-LESS node is
+  // the empty tuple `()` (that is how `mut d = ()` lowers) — it must be stamped
+  // too, or `()` carries no tuple evidence and is indistinguishable from an
+  // untyped runtime scalar (see constprop's empty-tuple compare fold).
+  (void)src;
+  set_dst_kind(dst, Kind::tuple);
   return Vote::keep;
 }
 

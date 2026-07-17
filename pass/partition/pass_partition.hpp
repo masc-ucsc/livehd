@@ -2,6 +2,7 @@
 #pragma once
 
 #include <functional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -28,9 +29,13 @@ struct Region_body {
     int             bits = 0;
     bool            sign = false;
   };
-  std::vector<Port>             inputs;
-  std::vector<Port>             outputs;
-  std::vector<hhds::Node_class> nodes;  // region nodes (handles into `src`)
+  std::vector<Port> inputs;
+  std::vector<Port> outputs;
+  // Region nodes (handles into `src`). A non-owning view into the partitioner's
+  // own region_nodes_ storage, which outlives the synchronous hook call -- so a
+  // whole-design flatten does not copy an O(nodes) Node_class vector (~1.4 GB on
+  // a flat XSCore) into every Region_body just to iterate it once.
+  std::span<const hhds::Node_class> nodes;
 };
 
 // Called once per region. If unset, partition recreates the original logic.
@@ -47,6 +52,13 @@ enum class Flatten_mode { off, on, automatic };
 // Parse the shared `flatten` label value ("auto"|"true"|"false", plus 0/1);
 // anything else is a fatal diag under `pass` and returns off.
 [[nodiscard]] Flatten_mode parse_flatten_mode(std::string_view v, std::string_view pass);
+
+// Whether build_decomposition will inline `g`'s whole hierarchy into a single
+// flat def (vs. the per-def decomposition). `on`/`off` are literal; `automatic`
+// resolves against g's active coloring (flat coloring => whole-design). Lets a
+// caller (e.g. pass.abc's size gate) tell, before running, whether it is about
+// to bit-blast the entire flattened design as one unit.
+[[nodiscard]] bool flatten_is_whole_design(hhds::Graph* g, Flatten_mode mode);
 
 // Resolve a sub-instance's child def inside `outlib`: an already-partitioned
 // def resolves by name; a BODY-LESS def (a black box — a liberty cell or tie

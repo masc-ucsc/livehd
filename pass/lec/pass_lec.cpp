@@ -81,6 +81,13 @@ void Pass_lec::setup() {
                        "LEC each def leaves-first under the engine, and collapse already-proven children into "
                        "their parents (a child unprovable in isolation stays flattened). false = flat single LEC",
                        "true");
+  m.add_label_optional("hier_refute",
+                       "bottom-up driver: what a REFUTED block means for the run. fail (default) = the block's "
+                       "counterexample IS the run verdict; its parents are skipped, since only a proven child "
+                       "black-boxes and a parent over a refuted child would grind out a whole-design flat miter "
+                       "for a verdict the block already settled | escalate = prove the parents anyway, so a top "
+                       "PROVEN over a differing block (a block-boundary CEX unreachable in context) still passes",
+                       "fail");
   m.add_label_optional("semdiff",
                        "structural def-diff reduction (M3): structural (default; true/on = alias) | none. Run "
                        "pass.semdiff per module first; a def whose ref/impl are structurally identical "
@@ -162,6 +169,10 @@ void Pass_lec::setup() {
                        "treat an inconclusive UNKNOWN (no counterexample, solver incomplete) as a hard "
                        "failure; default false (REFUTED fails, witness-free UNKNOWN is a deferred warning)",
                        "false");
+  m.add_label_optional("allow_oversize",
+                       "skip the design-size gate; default false (a design over ~1M nodes is refused as "
+                       "UNKNOWN because encoding it as one unit may exhaust host memory)",
+                       "false");
   register_pass(m);
 }
 
@@ -191,6 +202,7 @@ void Pass_lec::lec(Eprp_var& var) {
   o.semdiff      = lec::lec_canon_semdiff(var.get("semdiff", "structural"));
   o.partitions   = str_tools::to_i(var.get("partitions", "4"));
   o.split        = std::string{var.get("split", "auto")};
+  o.allow_oversize = parse_bool(var.get("allow_oversize", "false"));
   // lec.collapse: comma-separated proven-module def names to force-blackbox.
   if (std::string cs{var.get("collapse", "")}; !cs.empty()) {
     size_t pos = 0;

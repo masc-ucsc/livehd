@@ -1923,8 +1923,6 @@ void uPass_function_registry::ensure(const std::vector<std::shared_ptr<Lnast>>& 
     return;  // nothing new since the last fold-in — O(1) fast path
   }
 
-  auto is_placeholder = [](std::string_view n) { return n == "_" || (n.size() >= 2 && n[0] == '_' && n[1] >= '0' && n[1] <= '9'); };
-
   // ── Phase 1: fold in each NEW lnast, walking its body EXACTLY ONCE. Every
   // fact computed here is purely local to the one body, so it is cached and the
   // body is never re-walked — even as runner-spawned specializations grow
@@ -2030,15 +2028,10 @@ void uPass_function_registry::ensure(const std::vector<std::shared_ptr<Lnast>>& 
       stmts_nid = ln->get_sibling_next(stmts_nid);
     }
     absl::flat_hash_set<std::string> defined;
-    bool                             has_placeholder = false;
     if (stmts_nid.is_valid()) {
       for (const auto& nid : ln->depth_preorder(stmts_nid)) {
         if (nid.is_invalid()) {
           continue;
-        }
-        const auto nt = ln->get_type(nid);
-        if (nt == Lnast_ntype::Lnast_ntype_ref && is_placeholder(ln->get_name(nid))) {
-          has_placeholder = true;
         }
         auto fc = ln->get_first_child(nid);
         if (fc.is_valid() && ln->get_type(fc) == Lnast_ntype::Lnast_ntype_ref) {
@@ -2063,15 +2056,14 @@ void uPass_function_registry::ensure(const std::vector<std::shared_ptr<Lnast>>& 
       }
     }
     if (all_outputs_written) {
-      f.inlinable   = true;
-      f.placeholder = has_placeholder;
+      f.inlinable = true;
       // sub-convertible candidate (subset of inlinable): a fully-typed,
       // pure-dataflow comb with its own standalone GraphIO. Excludes templates,
-      // var-arg / `ref` params, zero-output side-effect combs, placeholder
-      // bodies. The recursion exclusion is applied in phase 2.
+      // var-arg / `ref` params, zero-output side-effect combs. The recursion
+      // exclusion is applied in phase 2.
       const auto lk      = ln->get_lambda_kind();
       const bool is_comb = lk.empty() || lk == "comb";
-      bool       special = has_placeholder;
+      bool       special = false;
       for (const auto& e : io.inputs) {
         // A defaulted input (todo 3g E) has no standalone-module form — its
         // body-prologue default binding is only correct on the inline path (the
@@ -2124,14 +2116,10 @@ void uPass_function_registry::ensure(const std::vector<std::shared_ptr<Lnast>>& 
   }
 
   inlinable_callees.clear();
-  placeholder_callees.clear();
   sub_convertible_combs.clear();
   for (const auto& [name, f] : facts) {
     if (f.inlinable) {
       inlinable_callees.insert(name);
-    }
-    if (f.placeholder) {
-      placeholder_callees.insert(name);
     }
     if (f.sub_candidate && !recursive_callees.contains(name)) {
       sub_convertible_combs.insert(name);
@@ -3533,15 +3521,19 @@ bool uPass_runner::try_inline_func_call() {
   // compile.upass.inline=false: a DIRECTLY-resolved, Sub-convertible `comb`
   // whose call produces RUNTIME hardware is left as a func_call so tolg lowers
   // it to a module instance instead of inlining (preserving the comb boundary
-  // for debug/optimization). Only a plain by-name call qualifies: a callee
-  // reached through a function-valued param (closure), or through the
-  // method/overload/lambda-array fallbacks below (which run only when this
-  // initial lookup fails), has no Sub form and must always inline. The actual
+  // for debug/optimization). A callee reached through a function-valued param
+  // (closure), or through the method/overload/lambda-array fallbacks below, has
+  // no standalone Sub form and must always inline. The lambda-ref const binding
+  // is the ONE exception (it names a real registered module) and re-runs this
+  // gate once it resolves — see sub_instance_eligible below. The actual
   // runtime-vs-comptime decision is deferred to the post-gather check below: an
   // all-constant call still inlines so it folds to a comptime value (casserts /
   // comptime evaluation keep working — there is no runtime instance to keep).
-  const bool consider_sub_instance = !inlining_enabled_ && callee && !via_param_binding
-                                     && reg().sub_convertible_combs.contains(std::string(callee->get_top_module_name()));
+  auto sub_instance_eligible = [&](const std::shared_ptr<Lnast>& c) {
+    return !inlining_enabled_ && c && !via_param_binding
+           && reg().sub_convertible_combs.contains(std::string(c->get_top_module_name()));
+  };
+  bool consider_sub_instance = sub_instance_eligible(callee);
 
   // Method dispatch: `obj.method(args)` lowers to `func_call[dst, method,
   // store(__ufcs_arg, obj), args…]` — `method` is not itself a registry
@@ -3608,6 +3600,13 @@ bool uPass_runner::try_inline_func_call() {
       if (auto m = lookup_callee(fn)) {
         callee      = m;
         callee_name = fn;
+        // A lambda-ref const binding (`const F = import("file.F")`) names a REAL
+        // registered module — unlike a closure/method/overload fallback, it has a
+        // standalone Sub form, so it is still eligible for inline=false. Generated
+        // code imports under an alias (`const F_t = import("file.F")`) whenever the
+        // plain name is taken by the instance variable, and the initial by-name
+        // lookup above necessarily missed it.
+        consider_sub_instance = sub_instance_eligible(callee);
       }
     }
   }
@@ -4061,7 +4060,6 @@ bool uPass_runner::try_inline_func_call() {
 
   // Prologue: declare param + output widths (so `<tag>x.[bits]` folds), then
   // bind param values. Ref-param actuals are remembered for write-back.
-  const bool uses_placeholders = reg().placeholder_callees.contains(std::string(callee->get_top_module_name()));
   std::vector<std::pair<std::string, Lnast_node>>                 writebacks;
   // Function-valued params: record the body-local name → bound function so the
   // body's `f(x)` resolves; restored after the body walk. No value is emitted.
@@ -4127,14 +4125,6 @@ bool uPass_runner::try_inline_func_call() {
       emit_inline_binding(pname, param_val[i]);
       if (e.is_ref && param_val[i].is_ref()) {
         writebacks.emplace_back(std::string(param_val[i].get_name()), Lnast_node::create_ref(pname));
-      }
-      // Positional-placeholder bodies read params as `_i` (and `_` for a single
-      // param) instead of by name — bind those aliases so the body folds.
-      if (uses_placeholders) {
-        emit_inline_binding(upass::Lnast_manager::make_inlined_name(tag, "_" + std::to_string(i)), Lnast_node::create_ref(pname));
-        if (nparams == 1) {
-          emit_inline_binding(upass::Lnast_manager::make_inlined_name(tag, "_"), Lnast_node::create_ref(pname));
-        }
       }
     }
   }
@@ -7647,9 +7637,20 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   std::string type_name;
   upass::Mode mode     = upass::Mode::unknown;
   bool        comptime = false;
+  // A `()` COMPOSITE-TUPLE type slot — POSITIVE evidence that the name holds a
+  // tuple, stamped onto the bundle below as value_kind.  An empty `()` bakes no
+  // scalar "0" leaf, so it is shape-indistinguishable from an untyped runtime
+  // scalar (`mut c = ack`, whose prim_type_none slot likewise bakes no leaf);
+  // constprop's empty-tuple compare fold needs this flag to tell them apart.
+  // NOT arrays: value_kind is also typecheck's assignment kind, and an array's
+  // ELEMENTS are scalars (`mut buf:[4]u8 = 0`; `buf[i] = 3` would be rejected as
+  // int-into-tuple).  An array only needs the flag when EMPTY, which is handled by
+  // the tuple-literal stamp in typecheck (`mut a:[] = nil` carries no entries).
+  bool tuple_type = false;
 
   if (lm->move_to_sibling()) {  // TYPE slot
     const auto t = lm->get_raw_ntype();
+    tuple_type   = Lnast_ntype::is_comp_type_tuple(t);
     if (Lnast_ntype::is_comp_type_array(t)) {
       // Array declare — bake the innermost element's envelope as INTERNAL
       // bundle attrs (__elem_max/__elem_min; bitwidth checks element stores
@@ -7812,6 +7813,9 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   }
   if (mode != upass::Mode::unknown) {
     bundle->set_mode(mode);
+  }
+  if (tuple_type && bundle->get_value_kind() == upass::Kind::unknown) {
+    bundle->set_value_kind(upass::Kind::tuple);  // `()` declare — a real aggregate, not a bare scalar
   }
   if (!type_name.empty()) {
     bundle->set_type_name(type_name);

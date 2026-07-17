@@ -44,6 +44,14 @@ struct Map_options {
   // conditions to ABC so violating minterms become don't-cares (smaller logic).
   bool              use_proven_assume = true;   // feed assumes pass.formal PROVED (sound)
   bool              use_all_assume    = false;  // also feed declared (unproven) assumes (aggressive)
+  // Memory admission (2opt-incr subtask 0). A region is bit-blasted into ABC,
+  // which for a whole-design region means millions of gates and several network
+  // forms held at once; an XSCore flat run reached 221 GB on a 64 GiB host and
+  // was SIGKILLed by the OS. `memory_budget_mb` pins the ceiling for
+  // reproducible hosts/CI (0 => physical RAM minus an OS reserve);
+  // `allow_oversize` acknowledges the risk and disables the guard.
+  int               memory_budget_mb = 0;
+  bool              allow_oversize   = false;
 };
 
 // Per-region (color-keyed) overrides of the mapping options that vary per
@@ -109,7 +117,22 @@ public:
   // QoR rows accumulated by map_region, one per successfully mapped region.
   [[nodiscard]] const std::vector<Region_qor>& qor() const { return qor_; }
 
+  // Set when a region was refused by memory admission. map_region cannot throw
+  // (a throw out of the region callback would skip stop(), leaking the ABC
+  // frame and every live network), so it records the refusal and work() turns it
+  // into the fatal AFTER stop() has run.
+  [[nodiscard]] const std::string* admission_refusal() const {
+    return refusal_.empty() ? nullptr : &refusal_;
+  }
+
 private:
+  std::string refusal_;
+
+  // True (and fills refusal_) when the process has grown past the memory budget
+  // while translating `region`. `blasted`/`total` describe how far the
+  // translation got, so the diagnostic can project the finished size.
+  bool over_budget(std::string_view region, uint64_t rss_before, size_t blasted, size_t total);
+
   Map_options             opts_;
   void*                   pabc_       = nullptr;  // Abc_Frame_t*
   bool                    lib_loaded_ = false;

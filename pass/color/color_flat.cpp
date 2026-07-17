@@ -22,7 +22,7 @@ void Color_flat::label(hhds::Graph* g) {
     node2id[n] = 1;  // single region for the whole def
   }
 
-  int n_colors = apply_coloring(g, node2id, opts);
+  int n_colors = apply_coloring(g, node2id, opts, opts.sizes);
   if (opts.verbose) {
     std::print("[color.flat] {} -> {} color\n", g->get_name(), n_colors);
   }

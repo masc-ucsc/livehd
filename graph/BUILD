@@ -1,6 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 # LiveHD-side graph helpers that ride on top of hhds::Graph:
@@ -38,4 +38,15 @@ cc_library(
         "@hhds//hhds:graph",
     ],
     alwayslink = True,  # static-init registers attribute tags
+)
+
+cc_test(
+    name = "node_count_test",
+    srcs = ["node_count_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
 )

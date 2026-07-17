@@ -72,6 +72,126 @@ using livehd::graph_util::setup_sink_by_name;
   return Ntype::get_sink_name(op, spin.get_port_id());
 }
 
+// ---- packed-wire slice fold helpers ---------------------------------------
+// A firtool/Chisel bundle-as-UInt writes a wide net as an Or of constant-shifted
+// disjoint fields and reads fields back as constant slices. At WORD level the net
+// is one node, so write-field-A/read-field-B looks like a combinational cycle even
+// though the bit ranges are disjoint. Resolving each constant slice to the one
+// operand that drives it removes the false edge (and is a plain win regardless of
+// any cycle). See graph/split_selfref.cpp for the cycle-gated, node-CREATING
+// rules (Mux/EQ/distribute) this deliberately does NOT duplicate.
+
+[[nodiscard]] hhds::Pin_class drv_at(const hhds::Node_class& n, uint32_t pid) {
+  for (const auto& e : n.inp_edges()) {
+    if (static_cast<uint32_t>(e.sink.get_port_id()) == pid) {
+      return e.driver;
+    }
+  }
+  return {};
+}
+
+constexpr std::pair<int, int> kFpBail{-1, -1};
+
+// The CONSTANT shift amount of a SHL, or <0 when not a bounded constant.
+[[nodiscard]] int const_shl_amount(const hhds::Node_class& m) {
+  auto kd = drv_at(m, 1);
+  if (kd.is_invalid() || !is_const_pin(kd)) {
+    return -1;
+  }
+  auto kc = hydrate_const(kd);
+  if (kc.has_unknowns() || kc.is_negative() || !kc.is_just_i64()) {
+    return -1;
+  }
+  auto k = kc.to_just_i64();
+  return (k < 0 || k > (1 << 28)) ? -1 : static_cast<int>(k);
+}
+
+// The half-open [begin,end) bit range of a Get_mask's CONSTANT mask, or kFpBail.
+// Rejects the `-1` to-unsigned idiom and noncontiguous/negative masks.
+[[nodiscard]] std::pair<int, int> const_mask_range(const hhds::Node_class& m) {
+  auto md = drv_at(m, 2);
+  if (md.is_invalid() || !is_const_pin(md)) {
+    return kFpBail;
+  }
+  auto mc = hydrate_const(md);
+  if (mc.has_unknowns() || !mc.is_positive()) {
+    return kFpBail;  // includes mask == -1
+  }
+  auto [b, e] = mc.get_mask_range();  // {-1,-1} also signals noncontiguous
+  if (b < 0 || e <= b) {
+    return kFpBail;
+  }
+  return {b, e};
+}
+
+// footprint(p): a sound OVER-approximation [lo,hi) of the bit positions where `p`
+// can be nonzero; kFpBail = "cannot bound". Over-approximating only makes the
+// disjointness test below HARDER to satisfy (it refuses), so it is the safe
+// direction; UNDER-approximating would pick the wrong operand and miscompile.
+//
+// GOTCHA: LiveHD stores bits = magnitude+1, so an unsigned pin's significant
+// width is bits-1. Using bits here makes adjacent packed fields overlap by one
+// bit, disjointness always fails, and the fold silently never fires.
+[[nodiscard]] std::pair<int, int> footprint(const hhds::Pin_class& p, int depth) {
+  if (p.is_invalid() || depth > 16) {
+    return kFpBail;
+  }
+  if (is_const_pin(p)) {
+    auto c = hydrate_const(p);
+    if (c.is_negative()) {
+      return kFpBail;
+    }
+    if (c.has_unknowns()) {
+      return {0, c.get_bits()};  // a '?'-const still occupies its declared width
+    }
+    int fb = c.get_first_bit_set();
+    int lb = c.get_last_bit_set();
+    if (fb < 0 || lb < 0) {
+      return {0, 0};  // known zero contributes no bits
+    }
+    return {fb, lb + 1};
+  }
+  if (is_graph_input_pin(p)) {
+    return kFpBail;  // a port reads SIGNED whatever its unsign metadata says
+  }
+  auto m = p.get_master_node();
+  if (m.is_invalid()) {
+    return kFpBail;
+  }
+  auto op = type_op_of(m);
+  if (op == Ntype_op::SHL) {
+    int k = const_shl_amount(m);
+    if (k < 0) {
+      return kFpBail;
+    }
+    auto fx = footprint(drv_at(m, 0), depth + 1);
+    if (fx.first < 0) {
+      return kFpBail;
+    }
+    if (fx.second <= fx.first) {
+      return {0, 0};
+    }
+    return {fx.first + k, fx.second + k};
+  }
+  if (op == Ntype_op::Get_mask) {
+    auto r = const_mask_range(m);
+    if (r.first >= 0) {
+      int w = r.second - r.first;  // extracted bits are packed down to [0,w)
+      return w <= 1 ? std::pair<int, int>{0, 1} : std::pair<int, int>{0, w};
+    }
+    // else fall through to the generic bound
+  }
+  if (!livehd::graph_util::is_unsign(p)) {
+    return kFpBail;  // a signed x makes shl(x,k) set every bit above k
+  }
+  int b = bits_of(p);
+  if (b == 0) {
+    return kFpBail;  // unsized (Nconst/Sub/Memory/IO stay exempt) -> [k,k) would
+                     // read as EMPTY and fold a live value to constant 0
+  }
+  return {0, std::max(1, b - 1)};
+}
+
 }  // namespace
 
 Cprop::Cprop(bool _hier) : hier(_hier) {}
@@ -198,12 +318,19 @@ void Cprop::collapse_forward_always_pin0(hhds::Node_class& node, livehd::graph_u
   bwd_del_node(node);
 }
 
-void Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new_dpin) {
+// Redirect every consumer of `node` to `new_dpin` and delete `node`. Returns
+// FALSE without touching the graph when a consumer's width disagrees with
+// new_dpin's — a blind reconnect would change the value that consumer reads. The
+// bool is not cosmetic: a caller that fabricated `new_dpin`'s node before calling
+// (rather than passing an existing operand) MUST check it and clean up the orphan
+// on false, or it leaks. Existing callers pass an existing pin, so a false there
+// is just a missed collapse (the node is left for later folds).
+bool Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new_dpin) {
   auto new_bits = bits_of(new_dpin);
   for (const auto& out : node.out_edges()) {  // read-only width check
     auto out_bits = bits_of(out.driver);
     if (out_bits > 0 && new_bits > 0 && out_bits != new_bits) {
-      return;
+      return false;
     }
   }
 
@@ -215,6 +342,7 @@ void Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new
   }
 
   bwd_del_node(node);
+  return true;
 }
 
 bool Cprop::try_constant_prop(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp_edges_ordered) {
@@ -675,8 +803,7 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
   }
 
   if (inp_edges_ordered[1].driver == inp_edges_ordered[2].driver) {
-    collapse_forward_for_pin(node, inp_edges_ordered[1].driver);
-    return true;
+    return collapse_forward_for_pin(node, inp_edges_ordered[1].driver);
   }
 
   bool false_path_zero = false;
@@ -694,8 +821,7 @@ bool Cprop::scalar_mux(hhds::Node_class& node, livehd::graph_util::Edge_vec& inp
   // yosys-consolidated 8-bit write-enable mux(reset,0,-1) must yield 0xff,
   // not 1 (caught by lgcheck BMC on mem_reset). Keep only the sound rule.
   if (false_path_zero && true_path_sel) {
-    collapse_forward_for_pin(node, inp_edges_ordered[0].driver);
-    return true;
+    return collapse_forward_for_pin(node, inp_edges_ordered[0].driver);
   }
 
   return false;
@@ -826,6 +952,151 @@ hhds::Pin_class Cprop::try_find_single_driver_pin(hhds::Node_class& node, int64_
   }
 }
 
+// Resolve a CONSTANT slice read of a packed wire to the operand that actually
+// drives it: Get_mask(Or(.. shl(x_j,k_j) ..), mask[lo,hi)) -> Get_mask(x_j, ..).
+// The firtool/Chisel bundle-as-UInt idiom writes a wide net as an Or of
+// constant-shifted disjoint fields and reads fields back with constant slices;
+// at word level that reads as a combinational cycle even though the bit ranges
+// never overlap. Rewiring the read to its one real driver deletes the false
+// edge. Every rule is node-NON-increasing and locally value-preserving, so this
+// is an unconditional win and needs no cycle gate and no creation budget (unlike
+// the node-creating Mux/EQ/distribute rules in graph/split_selfref.cpp).
+//
+// Returns true iff `node` was deleted (folded to a constant). A `false` return
+// may still have REWIRED `node`, so callers must re-read its input edges.
+bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_const) {
+  if (!mask_const.is_positive()) {
+    return false;  // -1 (to-unsigned) is consumed by Rule 4 before we get here
+  }
+  auto [lo, hi] = mask_const.get_mask_range();  // half-open; {-1,-1} = noncontiguous
+  if (lo < 0 || hi <= lo) {
+    return false;
+  }
+
+  auto cur = livehd::graph_util::get_driver_of_sink_name(node, "a");
+
+  // No decreasing measure exists: the Or rule descends with [lo,hi) UNCHANGED, so
+  // an Or->operand->Or chain inside a word-level SCC can revisit the same slice
+  // and spin forever. A repeat means the slice depends on itself -- a GENUINE
+  // bit-level cycle -- so stop and leave the node alone.
+  absl::flat_hash_set<std::tuple<hhds::Class_index, int, int>> seen;
+
+  for (;;) {
+    if (cur.is_invalid() || is_const_pin(cur)) {
+      break;
+    }
+    if (!seen.insert({cur.get_class_index(), lo, hi}).second) {
+      break;
+    }
+    auto m = cur.get_master_node();
+    if (m.is_invalid()) {
+      break;
+    }
+    auto op = type_op_of(m);
+
+    if (op == Ntype_op::Or) {
+      // Or is N-ary on ONE sink; a driver on any other port is not this shape.
+      hhds::Pin_class overlapper;
+      int             n_over  = 0;
+      bool            bad_pid = false;
+      for (const auto& e : m.inp_edges()) {
+        if (static_cast<uint32_t>(e.sink.get_port_id()) != 0) {
+          bad_pid = true;
+          break;
+        }
+        auto f = footprint(e.driver, 0);
+        // An unbounded (kFpBail) operand counts as an OVERLAPPER: soundness rests
+        // ONLY on the others being provably disjoint from [lo,hi).
+        if (f.first < 0 || !(hi <= f.first || lo >= f.second)) {
+          ++n_over;
+          overlapper = e.driver;
+        }
+      }
+      if (bad_pid || n_over > 1) {
+        break;
+      }
+      if (n_over == 0) {  // no operand reaches this slice: it reads as zero
+        replace_node(node, *Dlop::create_integer(0));
+        return true;
+      }
+      cur = overlapper;  // unique cover: descend, range unchanged
+      continue;
+    }
+
+    if (op == Ntype_op::SHL) {
+      int k = const_shl_amount(m);
+      if (k < 0) {
+        break;
+      }
+      if (hi <= k) {  // entirely below the shifted value: zeros
+        replace_node(node, *Dlop::create_integer(0));
+        return true;
+      }
+      if (lo < k) {
+        break;  // straddles the shift boundary; splitting would create nodes
+      }
+      auto x = drv_at(m, 0);
+      if (x.is_invalid()) {
+        break;
+      }
+      cur = x;
+      lo -= k;
+      hi -= k;
+      continue;
+    }
+
+    if (op == Ntype_op::Get_mask) {
+      auto r = const_mask_range(m);
+      if (r.first < 0) {
+        break;
+      }
+      int w = r.second - r.first;
+      // A 1-bit Get_mask yields the SIGNED -1/0, so bits above it read the sign
+      // rather than zero -- re-basing through it would be unsound.
+      if (w <= 1 || hi > w) {
+        break;
+      }
+      auto x = drv_at(m, 0);
+      if (x.is_invalid()) {
+        break;
+      }
+      cur = x;
+      lo += r.first;
+      hi += r.first;
+      continue;
+    }
+
+    break;
+  }
+
+  auto a_now = livehd::graph_util::get_driver_of_sink_name(node, "a");
+  if (cur.is_invalid() || cur == a_now) {
+    return false;  // nothing resolved
+  }
+  I(hi > lo, "packed-slice fold produced an empty range");
+
+  // Every rule preserves (hi-lo), so the mask popcount is invariant and the
+  // pin's existing bits (= magnitude+1) stays correct: do NOT re-stamp bits/sign.
+  auto old_master = a_now.get_master_node();
+  auto edges      = node.inp_edges();  // snapshot before mutating
+  for (auto e : edges) {
+    auto pid = static_cast<uint32_t>(e.sink.get_port_id());
+    if (pid == 0 || pid == 2) {
+      e.del_edge();
+    }
+  }
+  setup_sink_by_name(node, "a").connect_driver(cur);
+  setup_sink_by_name(node, "mask").connect_driver(create_const(*current_graph, *Dlop::get_mask_value(hi - 1, lo)));
+
+  // The bypassed pack/wire-buffer chain is usually dead now; bwd_del_node also
+  // sweeps the inputs that become dead behind it.
+  if (!old_master.is_invalid() && !livehd::graph_util::is_builtin_node(old_master)
+      && !Ntype::is_loop_last(type_op_of(old_master)) && !old_master.has_out_edges()) {
+    bwd_del_node(old_master);
+  }
+  return false;  // rewired in place, not deleted
+}
+
 bool Cprop::scalar_get_mask(hhds::Node_class& node) {
   auto a_pin    = livehd::graph_util::get_driver_of_sink_name(node, "a");
   auto mask_pin = livehd::graph_util::get_driver_of_sink_name(node, "mask");
@@ -865,13 +1136,16 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
     if (!nonneg) {
       return false;
     }
-    collapse_forward_for_pin(node, a_pin);
-    return true;
+    return collapse_forward_for_pin(node, a_pin);
   }
 
   auto a_master = a_pin.get_master_node();
   if (type_op_of(a_master) != Ntype_op::Set_mask) {
-    return false;
+    // `a` is not a Set_mask writer, so the Set_mask path below cannot fire and
+    // the packed-wire fold (Or / SHL / Get_mask operands) is the complement.
+    // Running it here keeps `a_pin`/`mask_const` fresh: the fold may rewire this
+    // node's `a`+`mask` in place, which would invalidate both.
+    return scalar_get_mask_packed(node, mask_const);
   }
 
   auto [range_begin, range_end] = mask_const.get_mask_range();
@@ -882,8 +1156,7 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
 
   auto dpin = try_find_single_driver_pin(a_master, range_begin);
   if (!dpin.is_invalid()) {
-    collapse_forward_for_pin(node, dpin);
-    return true;
+    return collapse_forward_for_pin(node, dpin);
   }
 
   return false;
@@ -920,9 +1193,12 @@ void Cprop::scalar_pass(hhds::Graph* g) {
       }
     } else if (op == Ntype_op::Get_mask) {
       bool del = scalar_get_mask(node);
-      if (del) {
+      if (del || node.is_invalid()) {
         continue;
       }
+      // The packed-slice fold can rewire `a`/`mask` in place and return false,
+      // which would leave the vector captured above stale.
+      inp_edges_ordered = ordered_inp_edges(node);
     } else if (!node.has_out_edges()) {
       bwd_del_node(node);
       continue;

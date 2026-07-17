@@ -1,0 +1,27 @@
+/*
+:name: import_alias_sub_instance
+:type: lgraph
+:files: inou/prp/tests/imports/lib_pick3.prp inou/prp/tests/imports/import_alias_sub_instance.prp
+*/
+// `:type: lgraph` (recipe O0) is deliberate: it keeps compile.upass.inline=false,
+// the tier this guards. `:type: compile` is recipe O2 (inline:true), where the
+// comb is flattened by design and the multi-output bind is a real error.
+// compile.upass.inline=false must keep a multi-output `comb` as a Sub INSTANCE
+// when the call reaches it through an import bound to an ALIAS (`pick3_t`) rather
+// than by the module's own name. The sub-instance gate ran off the FIRST by-name
+// lookup of the call's callee ref, which necessarily misses an alias — the callee
+// only resolves afterwards through the lambda-ref const-binding fallback. The comb
+// was therefore force-INLINED, and the inliner splats a >1-output result as a
+// bundle, so the bind-then-field-read below tripped `multi-output-one-var`.
+//
+// Generated (Chisel/FIRRTL) Pyrope hits this constantly: it imports under `<name>_t`
+// exactly when the plain module name is taken by the instance variable, as here.
+
+const pick3_t = import("lib_pick3.pick3")
+
+pub mod import_alias_sub_instance(x:u4, y:u4) -> (r1:u5@[], r2:u5@[], r3:u1@[]) {
+  mut pick3 = pick3_t::[name=pick3](a = x, b = y)
+  r1 = pick3.o1
+  r2 = pick3.o2
+  r3 = pick3.o3
+}

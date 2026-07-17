@@ -105,6 +105,8 @@ struct Options {
   bool        tool_invert  = false; // `tool grep -v`: keep records that do NOT match
   bool        tool_match   = false; // `tool diff --match`: visualize via the semdiff `match` attribute
 
+  bool        stats = false;  // `pass semdiff --stats`: aggregate node/register/memory match report
+
   std::string impl_kind, impl_path, impl_top;  // lec --impl
   std::string ref_kind, ref_path, ref_top;     // lec --ref
   std::string formal_filter;                   // formal verify / lec: formal-block name glob

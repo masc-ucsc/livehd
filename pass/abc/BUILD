@@ -16,6 +16,7 @@ cc_library(
     deps = [
         "//graph",
         "//pass/common:pass",
+        "//pass/cost:host_mem",
         "//pass/liberty:liberty_dff",
         "//pass/partition:pass_partition",
         "@abc",

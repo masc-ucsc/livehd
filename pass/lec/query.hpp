@@ -57,6 +57,12 @@ struct Query_result {
   std::string witness;  // satisfying input assignment when Refuted
   std::string detail;   // engine / bound / encode error, for diagnostics
 
+  // The design-size gate refused this design (too large to encode as one unit,
+  // lec.allow_oversize unset). Distinct from a solver-inconclusive UNKNOWN: it is
+  // a hard admission failure, so a driver must exit non-zero regardless of
+  // lec.strict, exactly as pass.abc does. See Lec_options::allow_oversize.
+  bool oversize_refused = false;
+
   // Structured, uncapped counterexample trace for witness reproduction (empty
   // unless a BMC REFUTE built one). See Witness_trace.
   Witness_trace trace;
@@ -194,6 +200,14 @@ struct Lec_options {
                                  // failure. Default false: REFUTED (a real counterexample)
                                  // hard-fails, but a witness-free UNKNOWN is a deferred
                                  // warning that exits cleanly (it disproves nothing).
+
+  bool        allow_oversize = false;  // skip the design-size gate (lec.allow_oversize). The
+                                       // encoder materializes the whole flattened design (minus
+                                       // opaque/collapsed subs) into one forward_hier vector; above
+                                       // ~1M nodes that alone can exhaust memory, so a design that
+                                       // large is refused as Unknown unless this is set. The
+                                       // per-design size is opacity-aware, so a design checked in
+                                       // small decomposed pieces is not falsely refused.
 
   // Reset-phase separation for the BMC engine (lec.phase). The reset-asserted
   // and the free-running behaviors are best checked SEPARATELY:
@@ -519,6 +533,7 @@ struct Prop_result {
 struct Verify_result {
   Verdict     verdict = Verdict::Unknown;
   std::string detail;
+  bool        oversize_refused = false;  // design-size gate refused (see Query_result::oversize_refused)
   int         checked_steps = 0;   // bound actually run
   int         reset_hold    = 0;   // after_reset prologue length (incl. pipeline flush)
   bool        reset_detected = false;  // a reset prologue actually pinned state[0] (a primary reset input

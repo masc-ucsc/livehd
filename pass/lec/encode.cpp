@@ -498,9 +498,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // would then descend it while the Sub handler still boxes it — cutting its
   // internal flops on one side only); gids are name-hash stable, so one
   // instance pins the gid for every instance of the same def.
+  // fast_hier (not forward_hier): a set build needs no topological order, and
+  // this runs once per encode() -- i.e. once per BMC cycle -- so materializing
+  // the whole flattened design here costs 56 B/node EVERY cycle. fast_hier is
+  // O(depth). It also cannot honor an opaque scope, which is exactly right here:
+  // this walk DISCOVERS the opaque set and must see every Sub (the scope is
+  // installed below, once `opaque` is known).
   ankerl::unordered_dense::set<hhds::Gid> opaque_subs;
   if (collapse_defs_ != nullptr) {
-    for (auto sn : g->forward_hier()) {
+    for (auto sn : g->fast_hier()) {
       if (gu::type_op_of(sn) != Ntype_op::Sub) {
         continue;
       }

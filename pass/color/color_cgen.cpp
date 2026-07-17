@@ -88,7 +88,7 @@ void Color_cgen::label(hhds::Graph* g) {
     node2id[node] = it->second;
   }
 
-  int n_colors = apply_coloring(g, node2id, opts);
+  int n_colors = apply_coloring(g, node2id, opts, opts.sizes);
   if (opts.verbose) {
     // stderr (not stdout): the kernel captures pass stdout for the JSON envelope.
     std::print(stderr, "[color.cgen] {} -> {} colors ({} nodes)\n", g->get_name(), n_colors, node2id.size());

@@ -1447,7 +1447,7 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
         auto v = b->lone_trivial();
         if (!v.is_invalid()) {
           o.scalar = v;
-        } else if (b->non_attr_entries().empty() && !unit_import_pending && b->get_mode() != upass::Mode::unknown) {
+        } else if (b->non_attr_entries().empty() && !unit_import_pending && b->get_value_kind() == upass::Kind::tuple) {
           // An EMPTY bundle is the empty tuple, NOT a scalar (Bundle::is_scalar
           // is true for size<=1, so a 0-entry tuple lands in this is_scalar
           // arm). Keep it as a bundle so compare_bundles_eq decides by shape:
@@ -1455,19 +1455,27 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
           // this it resolves to an invalid scalar and the compare stays unknown
           // (a `cassert([] != [3,4])` would silently never discharge).
           //
-          // get_mode() != unknown — the bundle is a DECLARED variable/shape (a
-          // `()`/`[]` empty tuple carries its decl mode), NOT a temp. A RUNTIME
-          // scalar that merely lacks a recorded bw-range data leaf has the SAME
-          // zero-data-leaf shape but is a mode-less intermediate: e.g. the temp
-          // `%t = io.fl` where `io.fl` is a 1-bit packed-struct leaf (the
-          // bitwidth pass skips a dotted-name store — see upass_bitwidth
-          // write_bw's `.`-guard — so the leaf, and any copy of it, record no bw
-          // entry). Treating that as `()` made `io.fl != 0` fold to a constant
-          // (empty-tuple-vs-scalar is always unequal), collapsing a runtime
-          // ternary `io.flush ? a : b` to one arm at compile time (firtool
-          // nested-struct StageRegs read 1-bit control through an `io`
-          // aggregate). A mode-less empty-data bundle must stay an invalid scalar
-          // so the compare stays runtime.
+          // value_kind == tuple — POSITIVE evidence the name really holds an
+          // aggregate: a `[]`/`()` type slot on its declare (upass_runner's
+          // declare bake) or a tuple literal / `++` concat (typecheck's
+          // process_tuple_add / process_tuple_concat).
+          //
+          // A RUNTIME scalar that merely lacks a recorded data leaf has the SAME
+          // zero-data-leaf shape and must NOT fold. Two ways that happens:
+          //   - a mode-less temp: `%t = io.fl`, a 1-bit packed-struct leaf (the
+          //     bitwidth pass skips a dotted-name store — see upass_bitwidth
+          //     write_bw's `.`-guard — so the leaf, and any copy, record no bw
+          //     entry);
+          //   - an UNTYPED declared var: `mut c = ack`, whose prim_type_none type
+          //     slot bakes no "0" leaf either (upass_runner: has_entry_facts
+          //     ignores mode), yet DOES carry a decl mode.
+          // This guard used to be `get_mode() != unknown`, which answers "was this
+          // name declared?", not "is this a tuple" — so it caught only the first
+          // case and every untyped declared var still folded as `()`: `mut c = ack;
+          // if c != 0 {x} else {y}` silently collapsed to `x` (and `c1 == c2` on two
+          // distinct runtime signals folded TRUE, as `() == ()`), emitting wrong
+          // hardware with no diagnostic. Both cases now stay an invalid scalar, so
+          // the compare stays runtime.
           //
           // BUT only when THIS unit has no pending import: an empty bundle is
           // ALSO how a value that depends on a not-yet-resolved import looks on

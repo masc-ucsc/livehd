@@ -12,9 +12,11 @@
 // the "%dot.name" wire-naming scheme, etc.).
 
 #include <cstdint>
+#include <cstdlib>
 #include <format>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -679,6 +681,122 @@ inline void set_pin_offset(const hhds::Pin_class& pin, int32_t off) {
   auto drivers = sink.get_driver_pins();
   result.assign(drivers.begin(), drivers.end());
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Design-size estimation (memory-admission size gate).
+// ---------------------------------------------------------------------------
+//
+// A flattened design of more than a few million nodes is where synthesis (ABC)
+// and formal (LEC) runs start exhausting host memory. These helpers give a
+// DETERMINISTIC, host-independent node count so a pass can warn (color) or refuse
+// with a named override flag (abc/lec) BEFORE it materializes anything large --
+// unlike an RSS/footprint sample, which only catches the blow-up mid-flight.
+
+// "Very large flattened design" threshold, in nodes. Default ~1M: below this,
+// whole-design ABC/LEC is routinely fine; well above it, a flat run risks
+// hundreds of GB (a flat XSCore run reached 221 GB). Overridable via the env var
+// LIVEHD_LARGE_DESIGN_NODES (0 disables the gate; also lets a test exercise the
+// refusal on a small design). Read once per pass, not per node.
+inline constexpr uint64_t large_design_nodes_default = 1'000'000;
+
+[[nodiscard]] inline uint64_t large_design_node_threshold() {
+  if (const char* env = std::getenv("LIVEHD_LARGE_DESIGN_NODES"); env != nullptr && *env != '\0') {
+    char*                     end = nullptr;
+    const unsigned long long  v   = std::strtoull(env, &end, 10);
+    if (end != env && *end == '\0') {
+      // 0 disables the gate; the count can never exceed UINT64_MAX.
+      return v == 0 ? UINT64_MAX : static_cast<uint64_t>(v);
+    }
+  }
+  return large_design_nodes_default;
+}
+
+// Node count of ONE def body (class context: this body's own nodes, no descent
+// into sub-instances). O(nodes-in-body) time, O(1) space -- a plain lazy walk,
+// never a materialized copy.
+[[nodiscard]] inline uint64_t body_node_count(const hhds::Graph* g) {
+  if (g == nullptr) {
+    return 0;
+  }
+  uint64_t n = 0;
+  for ([[maybe_unused]] auto node : const_cast<hhds::Graph*>(g)->fast_class()) {
+    ++n;
+  }
+  return n;
+}
+
+// Flattened node count of `top`'s instance hierarchy: sum over the structure tree
+// of each def body's own node count (each unique def counted once, then
+// multiplied by how many times it is instantiated). `resolve(gid)` maps a
+// subnode's target gid to its Graph* (or nullptr if not in the library; such
+// instances are skipped -- the count is then a lower bound).
+//
+// Cost: hier_range() walks the STRUCTURE TREE only (proportional to the instance
+// count, not the flat node count), and each unique def body is counted once via
+// body_node_count. So this is O(unique-nodes + instances), O(unique-defs) space
+// -- it never materializes the flattened walk (which is exactly the O(flat-nodes)
+// allocation this gate exists to keep the caller from doing).
+template <typename Resolve>
+[[nodiscard]] uint64_t flat_node_count(hhds::Graph* top, Resolve&& resolve) {
+  if (top == nullptr) {
+    return 0;
+  }
+  std::unordered_map<hhds::Gid, uint64_t> per_def;  // memoize: a def may recur
+  auto count_def = [&](hhds::Gid gid, hhds::Graph* g) -> uint64_t {
+    auto it = per_def.find(gid);
+    if (it != per_def.end()) {
+      return it->second;
+    }
+    uint64_t c = body_node_count(g);
+    per_def.emplace(gid, c);
+    return c;
+  };
+
+  uint64_t total = count_def(top->get_gid(), top);  // the top is instantiated once
+  for (auto inst : top->hier_range()) {
+    hhds::Gid gid = inst.get_target_gid();
+    if (hhds::Graph* g = resolve(gid); g != nullptr) {
+      total += count_def(gid, g);
+    }
+  }
+  return total;
+}
+
+// Like flat_node_count, but does NOT descend into a sub whose resolved def the
+// caller marks opaque (`is_opaque(child) == true`) -- that instance is a leaf,
+// contributing only its own Sub node. This mirrors what a hierarchical LEC encode
+// materializes: already-proven children are black-boxed (lec.collapse), so a
+// whole-design count would over-refuse a design that is actually checked in small
+// opacity-bounded pieces. Direct-child recursion (not hier_range, which cannot
+// prune a subtree), memoized per def gid -- the global opacity set makes each
+// def's pruned count well defined. O(reachable-non-opaque nodes), O(defs) space.
+template <typename Resolve, typename IsOpaque>
+[[nodiscard]] uint64_t flat_node_count_pruned(hhds::Graph* top, Resolve&& resolve, IsOpaque&& is_opaque) {
+  if (top == nullptr) {
+    return 0;
+  }
+  std::unordered_map<hhds::Gid, uint64_t> memo;
+  auto count = [&](auto&& self, hhds::Graph* g) -> uint64_t {
+    if (auto it = memo.find(g->get_gid()); it != memo.end()) {
+      return it->second;  // 0 while in progress = cycle guard (hier is a DAG; a back-edge undercounts, never loops)
+    }
+    memo.emplace(g->get_gid(), 0);
+    uint64_t total = 0;
+    for (auto node : g->fast_class()) {
+      ++total;  // every node counts, Sub nodes included
+      if (type_op_of(node) != Ntype_op::Sub) {
+        continue;
+      }
+      hhds::Graph* child = resolve(node.get_subnode_gid());
+      if (child != nullptr && !is_opaque(child)) {
+        total += self(self, child);
+      }
+    }
+    memo[g->get_gid()] = total;
+    return total;
+  };
+  return count(count, top);
 }
 
 }  // namespace livehd::graph_util

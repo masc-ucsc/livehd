@@ -201,6 +201,12 @@ private:
   // Vars whose nested `mut` declare was hoisted to a `mut X = 0` at the function
   // top (see emit_module): write_declare drops the in-place nested declare.
   std::unordered_set<std::string> suppress_decl_;
+  // Store-driven body nets that need NO hoist: the name has exactly ONE definition
+  // in the whole body, that definition is a top-level `store`, and nothing reads it
+  // before that store.  Its declaration rides on the store itself as an in-place
+  // `const X = <rhs>` (decl_prefix), instead of a `mut X = 0` prologue line plus a
+  // far-away re-bind.  See the eligibility scan in emit_module.
+  std::unordered_set<std::string> single_store_;
   // `wire` net names that have a real-statement store driver somewhere in the
   // body (populated by write_module's pre-scan).  A `wire` is a single-driver
   // net, so write_declare must NOT add the combinational `= 0` default to such a
@@ -258,6 +264,12 @@ private:
   // tolg error). write_module emits each such net's driver BEFORE the reg
   // declares and skips its in-body statement; the names are stripped (post-SSA).
   std::unordered_set<std::string>              pin_dep_nets_;
+  // EVERY body net read as the ref value of a folded attribute, for ANY key (a
+  // superset of pin_dep_nets_, which covers only the `_pin` keys whose driver is
+  // relocated ahead of the declares).  A folded attr rides on its variable's
+  // declare, and declares are emitted before every body write — so such a net is
+  // read early and cannot be declared in place by its store (single_store_).
+  std::unordered_set<std::string>              folded_attr_refs_;
   // Transitive closure of pin_dep_nets_ over body-var operands: a derived clock
   // can read ANOTHER internal wire (`inv = ~gate; gclk = clk_b & inv`), and that
   // wire's driver must be relocated ahead of the declares too — otherwise the

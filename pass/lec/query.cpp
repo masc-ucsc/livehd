@@ -23,11 +23,44 @@
 #include "absl/container/flat_hash_set.h"
 #include "cone_abc.hpp"
 #include "encode.hpp"
+#include "host_mem.hpp"
 #include "node_util.hpp"
 
 namespace livehd::lec {
 
 namespace {
+// Design-size gate (memory admission). The encoder materializes the whole
+// flattened design (minus opaque/collapsed subs) into one forward_hier vector, so
+// a design far past ~1M nodes can exhaust memory before the solver ever runs. The
+// count is opacity-aware -- it prunes exactly the subs the encoder black-boxes
+// (opts.collapse) -- so a design checked in small decomposed pieces is not falsely
+// refused. Returns the refusal detail if `g` is over the threshold, else empty.
+// `sub_lib` may be nullptr (flat design => body-only count).
+std::string oversize_refusal(std::string_view side, hhds::Graph* g, const Lec_options& opts,
+                             const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  const uint64_t threshold = livehd::graph_util::large_design_node_threshold();
+  if (g == nullptr || opts.allow_oversize || threshold == UINT64_MAX) {
+    return {};
+  }
+  const absl::flat_hash_set<std::string> collapse(opts.collapse.begin(), opts.collapse.end());
+  auto resolve = [sub_lib](hhds::Gid gid) -> hhds::Graph* {
+    if (sub_lib == nullptr) {
+      return nullptr;
+    }
+    auto it = sub_lib->find(gid);
+    return it == sub_lib->end() ? nullptr : it->second;
+  };
+  auto is_opaque = [&collapse](const hhds::Graph* child) { return collapse.count(std::string{child->get_name()}) > 0; };
+
+  const uint64_t nodes = livehd::graph_util::flat_node_count_pruned(g, resolve, is_opaque);
+  if (nodes <= threshold) {
+    return {};
+  }
+  return std::format("{} design '{}' is too large to encode as one unit: {} nodes (over {}); "
+                     "set lec.allow_oversize=true to run it anyway (it may exhaust host memory)",
+                     side, g->get_name(), nodes, threshold);
+}
+
 // Strip the encoder's internal control prefixes so an unmatched cut point / output
 // reads cleanly in a diagnostic. Next-state outputs are "\x01nxt:<hier>", other
 // synthetic keys lead with a control byte; primary outputs are already clean.
@@ -151,7 +184,10 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
   };
   auto collect = [](hhds::Graph* g) {
     absl::flat_hash_map<std::string, Vflop> m;
-    for (auto node : g->forward_hier()) {
+    // fast_hier: builds a name-keyed map, no topological order needed. (`init`
+    // is last-wins under an ambiguous name, but the reader below drops any pair
+    // whose count != 1, so an ambiguous entry is never read.)
+    for (auto node : g->fast_hier()) {
       auto op = graph_util::type_op_of(node);
       if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Latch) {
         continue;
@@ -736,6 +772,17 @@ Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method,
           ::close(wfd[j]);
         }
       }
+      // Take only a 1/nmethods share of the process memory budget. RLIMIT_AS is
+      // per-process and inherited, so without this every racer may allocate the
+      // WHOLE budget and the tree totals nmethods x budget -- the host-killing
+      // case the backstop exists to prevent. A child that outgrows its share dies
+      // and reports no result, which the parent already tags as Unknown (never a
+      // false verdict). Must happen before run_method builds any cvc5 object.
+      if (const uint64_t share = livehd::cost::arm_child_share(nmethods);
+          share != 0 && std::getenv("LIVEHD_MEMORY_DEBUG") != nullptr) {
+        std::fprintf(stderr, "lec: racer %d/%d capped (RLIMIT_AS = %llu MiB)\n", i, nmethods,
+                     static_cast<unsigned long long>(share >> 20));
+      }
       R           r    = run_method(i);
       std::string blob = ser(r);
       write_all(wfd[i], blob.data(), blob.size());
@@ -1197,6 +1244,16 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
           ::close(wfd[j]);
         }
       }
+      // Same aggregate rule as fork_race: nworkers cubes are solved CONCURRENTLY,
+      // each in its own process, so each takes only a 1/nworkers share of the
+      // budget or the tree totals nworkers x budget. A worker that outgrows its
+      // share dies and its cube reports no result, which the merge below already
+      // treats as not-proven (never a false Proven).
+      if (const uint64_t share = livehd::cost::arm_child_share(nworkers);
+          share != 0 && std::getenv("LIVEHD_MEMORY_DEBUG") != nullptr) {
+        std::fprintf(stderr, "lec: cube worker %d/%d capped (RLIMIT_AS = %llu MiB)\n", i, nworkers,
+                     static_cast<unsigned long long>(share >> 20));
+      }
       Lec_options o    = opts;
       o.engine         = "ind";
       o.timeout        = kCubeTimeout;
@@ -1537,6 +1594,22 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
     return res;
   }
 
+  // Design-size gate (memory admission), before any encode/fork. Refuse a design
+  // too large to materialize as one unit unless lec.allow_oversize; the count is
+  // opacity-aware so a decomposed per-def check is not falsely refused.
+  if (auto refusal = oversize_refusal("impl", impl, opts, sub_lib); !refusal.empty()) {
+    res.verdict          = Verdict::Unknown;
+    res.detail           = std::move(refusal);
+    res.oversize_refused = true;
+    return res;
+  }
+  if (auto refusal = oversize_refusal("ref", ref, opts, sub_lib); !refusal.empty()) {
+    res.verdict          = Verdict::Unknown;
+    res.detail           = std::move(refusal);
+    res.oversize_refused = true;
+    return res;
+  }
+
   // ── Tier-2 uncertain-pair discipline (2f-lec) ──────────────────────────────
   // Speculative pairs are merged into `match` for one full solve (any engine /
   // the whole portfolio), then the verdict is post-processed per the settled
@@ -1660,7 +1733,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   absl::flat_hash_map<std::string, std::string> ref_ent_uniq, impl_ent_uniq;
   for (auto* g : {ref, impl}) {
     absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> ents;
-    for (auto node : g->forward_hier()) {
+    for (auto node : g->fast_hier()) {  // set-valued map build: order-free
       if (graph_util::type_op_of(node) != Ntype_op::Sub) {
         continue;
       }
@@ -1729,7 +1802,10 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   ankerl::unordered_dense::set<hhds::Gid> collapse_gids;
   if (collapse_ptr != nullptr) {
     for (auto* g : {ref, impl}) {
-      for (auto node : g->forward_hier()) {
+      // fast_hier: a gid set build. Like the encoder's own scan, this DISCOVERS
+      // the opaque set, so it must descend everywhere (the scope below is armed
+      // from its result).
+      for (auto node : g->fast_hier()) {
         if (graph_util::type_op_of(node) != Ntype_op::Sub) {
           continue;
         }
@@ -2499,6 +2575,15 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       Io_name_map<bool> fsgn;  // sign of the NARROWEST decl (the value semantics of the shared init)
       Io_name_map<Val>  init;
       auto                                  collect_flops = [&](hhds::Graph* g) {
+        // NOT fast_hier, despite the opaque scope now being honored by both: `fw` is
+        // an explicit min-compare (order-free), but `init` below is FIRST-wins, and
+        // eff() = canon_flop_name + alias is NOT injective (see the "canonical name
+        // is ambiguous on its side" drop above), so two colliding flops with
+        // different reset consts would seed a different power-on value depending on
+        // walk order. Both orders are arbitrary there, but this is the shared
+        // power-on state of a soundness-critical miter -- do not trade it for memory
+        // without first making the collision explicit (detect + drop, like the
+        // uncertain-pair path does).
         for (auto node : g->forward_hier()) {  // descend hierarchy: cut flops at every level
           if (graph_util::type_op_of(node) != Ntype_op::Flop) {
             continue;
@@ -2540,7 +2625,7 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
         auto dump_keys = [&](hhds::Graph* g, const char* tag) {
           std::set<std::string> keys;
-          for (auto node : g->forward_hier()) {
+          for (auto node : g->fast_hier()) {  // sorted std::set + debug-only: order-free
             if (graph_util::type_op_of(node) != Ntype_op::Flop) {
               continue;
             }
@@ -2674,7 +2759,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
       auto collect_flop_w = [&](hhds::Graph* g) {
         Io_name_map<int>        out;
         hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-        for (auto node : g->forward_hier()) {
+        // fast_hier: a max-per-key map build; order-free. fast_hier honors the
+        // ambient opaque scope just installed above.
+        for (auto node : g->fast_hier()) {
           if (graph_util::type_op_of(node) != Ntype_op::Flop) {
             continue;
           }
@@ -3380,7 +3467,9 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   // these, so the miter assumes equal current state and proves equal next state
   // + outputs (the M2 register-correspondence inductive step).
   auto add_flops = [&](hhds::Graph* g) {
-    for (auto node : g->forward_hier()) {  // descend hierarchy: cut flops at every level
+    // fast_hier: a key->width map build (min-width wins by explicit compare, not by
+    // visit order). Honors the ambient opaque scope its caller installs.
+    for (auto node : g->fast_hier()) {  // descend hierarchy: cut flops at every level
       if (graph_util::type_op_of(node) != Ntype_op::Flop) {
         continue;
       }
@@ -4489,6 +4578,15 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
     return res;
   }
 
+  // Design-size gate (memory admission) before any encode/fork -- see the twin in
+  // prove_equal. Refuse an over-threshold design as Unknown unless lec.allow_oversize.
+  if (auto refusal = oversize_refusal("verify", design, opts, sub_lib); !refusal.empty()) {
+    res.verdict          = Verdict::Unknown;
+    res.detail           = std::move(refusal);
+    res.oversize_refused = true;
+    return res;
+  }
+
   // ── verify portfolio (engine=auto, F3) ─────────────────────────────────────
   // Race two whole-run STRATEGIES as forked children over the shared fork_race
   // harness, then merge per-obligation firsts:
@@ -4819,7 +4917,7 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   // so it is downgraded to Unknown below (the single-design analog of
   // prove_equal's incomplete-correspondence gate).
   bool has_bbox = false;
-  for (auto node : design->forward_hier()) {
+  for (auto node : design->fast_hier()) {  // OR-reduction into has_bbox: order-free
     if (graph_util::type_op_of(node) != Ntype_op::Sub || node.get_subnode_graph() != nullptr) {
       continue;
     }
@@ -5152,7 +5250,10 @@ Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
   absl::flat_hash_map<int, std::string> occ_aclass;  // occ_key -> input|internal|unchecked
   {
     auto graph_has_assume = [](hhds::Graph* gg) {
-      for (auto node : gg->forward_hier()) {
+      // fast_hier: an existence scan. Being lazy, the early return below now
+      // actually stops the walk -- forward_hier materialized+sorted the entire
+      // design before yielding the first node, so the `return true` saved nothing.
+      for (auto node : gg->fast_hier()) {
         if (graph_util::type_op_of(node) != Ntype_op::Sub) {
           continue;
         }

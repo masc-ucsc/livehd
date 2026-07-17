@@ -36,8 +36,6 @@ struct uPass_function_registry {
   absl::flat_hash_set<std::string> recursive_callees;
   // Keys the runner can fully splice (single output written by name, etc.).
   absl::flat_hash_set<std::string> inlinable_callees;
-  // Inlinable callees whose body uses positional placeholders (_0/_1/_).
-  absl::flat_hash_set<std::string> placeholder_callees;
   // Inlinable pure-dataflow combs convertible to a Sub module instance.
   absl::flat_hash_set<std::string> sub_convertible_combs;
 
@@ -46,7 +44,6 @@ struct uPass_function_registry {
   struct Lnast_facts {
     std::vector<std::string> callee_names;          // raw func_call callee refs
     bool                     inlinable     = false;  // all declared outputs written
-    bool                     placeholder   = false;  // inlinable AND uses _0/_1/_
     bool                     sub_candidate = false;  // sub-convertible modulo recursion
   };
   absl::flat_hash_map<std::string, Lnast_facts> facts;        // keyed by registry name

@@ -30,6 +30,7 @@
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
+#include "host_mem.hpp"
 #include "node_util.hpp"
 #include "rapidjson/document.h"
 
@@ -387,7 +388,100 @@ void qor_src_of_output(const livehd::partition::Region_body& rb, size_t po, Regi
 }
 }  // namespace
 
+// Memory admission (2opt-incr subtask 0). Deliberately MEASURED, not predicted:
+// a static op/width model cannot see the phase that actually blows up. The peak
+// is inside Cmd_CommandExecute's strash/&dch/&nf, which hold several network
+// forms at once -- and an external calibration of "bytes per gate" is not even
+// well defined here, because ABC's read_lib fixed cost dominates small designs
+// (measured: a 96-gate region and a 4640-gate region had comparable RSS).
+// What IS reliable is our own RSS while we translate.
+//
+// Projection: RSS grows roughly linearly in nodes blasted, so
+//   projected_translation = rss_before + growth_so_far * total / blasted
+// and the ABC flow that follows costs multiples of the translated netlist again.
+// kFlowPeakFactor is intentionally conservative-but-modest; the guard does not
+// lean on it, because it re-checks on every sample and refuses the moment the
+// real RSS crosses the budget regardless of any projection.
+bool Mapper::over_budget(std::string_view region, uint64_t rss_before, size_t blasted, size_t total) {
+  const uint64_t budget = cost::budget_bytes(opts_.memory_budget_mb);
+  if (budget == 0 || blasted == 0) {
+    return false;  // unknown host and no explicit budget: unenforceable, do not gate
+  }
+  // Sample phys_footprint, not resident_size: it is the metric macOS jetsam
+  // charges (and it counts compressed/paged pages resident_size drops under
+  // pressure), so it is the number that actually decides whether we get killed.
+  // NB it is equally STICKY after free() -- freed pages linger until the
+  // allocator returns them -- so this stays a conservative "total footprint vs
+  // budget" gate, not a live-bytes count (that needs a malloc interposer).
+  const uint64_t rss = cost::process_footprint_bytes();
+  if (rss == 0) {
+    return false;
+  }
+
+  // How much more than the translated netlist the ABC flow peaks at. MEASURED on
+  // flattened single-region designs (probe at 5% vs peak RSS of the full run):
+  // ALU 6.1x, RegisterFile 2.5x, ImmediateGenerator 29.6x, dino CPU 12.3x. It is
+  // emphatically NOT a constant -- read_lib's fixed cost dominates small regions,
+  // which is what makes ImmediateGenerator's 96 gates look 29x.
+  constexpr double kFlowPeakFactor = 10.0;
+  // Extrapolating from a 5% sample multiplies whatever it sees by ~20, and then
+  // by the factor above: ~200x. RSS at that point moves in malloc-arena steps, so
+  // a single arena faulting in would project GiBs out of noise and FATAL a region
+  // that fits. Two guards keep the projection honest: only extrapolate a signal
+  // far larger than an arena step, and only act on it when it clears the budget
+  // by a wide margin. Anything in between is left to the exact test below.
+  constexpr uint64_t kMinGrowthToProject = uint64_t{256} << 20;
+  constexpr uint64_t kProjectionMargin   = 4;
+
+  const uint64_t grown     = rss > rss_before ? rss - rss_before : 0;
+  const double   fraction  = static_cast<double>(blasted) / static_cast<double>(total);
+  const uint64_t projected = rss_before + static_cast<uint64_t>(static_cast<double>(grown) / fraction);
+  const uint64_t peak      = rss_before + static_cast<uint64_t>(static_cast<double>(projected - rss_before) * kFlowPeakFactor);
+
+  // The exact reading is the guarantee; the projection is only allowed to make a
+  // hopeless region die sooner.
+  const bool over_now       = rss > budget;
+  const bool over_projected = grown >= kMinGrowthToProject && peak / kProjectionMargin > budget;
+  if (!over_now && !over_projected) {
+    return false;
+  }
+
+  const auto mib = [](uint64_t b) { return b >> 20; };
+  // Say which budget this actually is: an explicit memory_budget_mb is taken
+  // verbatim and no reserve is subtracted, so quoting a reserve there would
+  // describe a derivation that never happened.
+  const std::string budget_desc
+      = opts_.memory_budget_mb > 0
+            ? std::format("budget {} MiB (pass.abc.memory_budget_mb)", mib(budget))
+            : std::format("budget {} MiB (physical {} MiB minus a {} MiB reserve)",
+                          mib(budget),
+                          mib(cost::physical_ram_bytes()),
+                          mib(cost::reserve_bytes()));
+  refusal_ = std::format(
+      "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB "
+      "(was {} MiB){}, {}",
+      region,
+      blasted,
+      total,
+      100.0 * fraction,
+      mib(rss),
+      mib(rss_before),
+      over_now ? std::string{}
+               : std::format(", projected {} MiB translated and ~{} MiB at the ABC mapping peak",
+                             mib(projected),
+                             mib(peak)),
+      budget_desc);
+  return true;
+}
+
 void Mapper::map_region(const livehd::partition::Region_body& rb) {
+  // A refusal already happened: work() will make it fatal once the ABC frame is
+  // torn down, so translating the remaining regions can only burn time and
+  // overwrite the FIRST refusal -- the one that is the actual root cause.
+  if (!refusal_.empty()) {
+    return;
+  }
+
   // Per-region option overrides (2opt-freq C): overlay onto opts_ for the
   // duration of this region (every helper below reads opts_), restored on
   // every exit path.
@@ -677,14 +771,26 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       // identities regardless of the declared output width — trace to the root
       // so the register's clock is recognized as region-input-driven and the
       // DFF clock pin connects DIRECTLY to it (never through mapped logic).
-      for (int guard = 0; guard < 8 && !f.clk_drv.is_invalid(); ++guard) {
+      //
+      // Whole-design flatten stacks ONE such coercion per hierarchy level (each
+      // call site re-coerces `clock = clock`), so the chain is as deep as the
+      // instance tree. The operand test must therefore use the MAGNITUDE width
+      // (real_width), not the raw bits_of: the root graph-input pin of a `u1`
+      // clock carries bits==1, but every intermediate Get_mask output in the
+      // chain carries the unsigned +1 headroom bit (bits==2). Testing bits_of==1
+      // matched only the root and stopped the walk after the FIRST hop — the
+      // exact case this loop exists for — so every register more than one level
+      // deep looked internally clocked and was falsely demoted to a boundary box
+      // (38940 of XiangShan XSCore's 39062 registers: precisely those at
+      // instance depth >= 2). real_width is 1 for both shapes.
+      for (int guard = 0; guard < 64 && !f.clk_drv.is_invalid(); ++guard) {  // guard: cycle net, > any sane hierarchy depth
         auto m = f.clk_drv.get_master_node();
         if (gu::type_op_of(m) != Ntype_op::Get_mask) {
           break;
         }
         auto a    = gu::get_driver_of_sink_name(m, "a");
         auto mask = gu::get_driver_of_sink_name(m, "mask");
-        if (a.is_invalid() || gu::bits_of(a) != 1 || mask.is_invalid() || !gu::is_const_pin(mask)
+        if (a.is_invalid() || real_width(a) != 1 || mask.is_invalid() || !gu::is_const_pin(mask)
             || !gu::hydrate_const(mask).bit_test(0)) {
           break;
         }
@@ -915,7 +1021,23 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       pending = std::move(next);
     }
   }
+  // Memory admission: sample our own RSS as the region is bit-blasted, and stop
+  // before the ABC flow if this region will not fit. The first sample is at ~5%
+  // of the work (early enough that a hopeless region dies cheaply), then every
+  // 2% so a region that grows non-linearly is still caught. RSS is a syscall, so
+  // it is sampled -- never read per node.
+  const uint64_t rss_before  = opts_.allow_oversize ? 0 : cost::process_footprint_bytes();
+  const size_t   blast_total = blast_order.size();
+  const size_t   sample_step = std::max<size_t>(1, blast_total / 50);
+  size_t         blasted     = 0;
+
   for (const auto& n : blast_order) {
+    if (!opts_.allow_oversize && ++blasted % sample_step == 0 && blasted >= blast_total / 20) {
+      if (over_budget(rb.module_name, rss_before, blasted, blast_total)) {
+        Abc_NtkDelete(manNtk);  // emit no partial result; work() raises refusal_ after stop()
+        return;
+      }
+    }
     auto op = gu::type_op_of(n);
     auto out_pin  = n.create_driver_pin(0);
     int  out_bits = gu::bits_of(out_pin);

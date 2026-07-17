@@ -1,0 +1,33 @@
+/*
+:name: sub_instance_field_underscore
+:type: lgraph
+*/
+// `:type: lgraph` (recipe O0) is deliberate: it keeps compile.upass.inline=false,
+// the tier this guards. `:type: compile` is recipe O2 (inline:true), where the
+// comb is flattened by design and the multi-output bind is a real error.
+
+// compile.upass.inline=false must keep a multi-output `comb` as a Sub INSTANCE
+// even when its body declares tuple fields named `_0`/`_1`. Those field names are
+// ordinary refs in the LNAST (`type_spec` / `tuple_add` children); a name-shape
+// scan once read them as positional-argument placeholders, which marked the comb
+// `special`, dropped it from sub_convertible_combs, and force-INLINED it. The
+// inliner then splats the >1-output result as a bundle and rejects the
+// bind-then-field-read form below with `multi-output-one-var`. There is no
+// placeholder lambda sugar in Pyrope (06-functions.md), so `_0` is just a field.
+// Generated (Chisel/FIRRTL) code names vector fields `_0`/`_1` constantly.
+
+comb pick(a:u4, b:u4) -> (o1:u4, o2:u4, o3:u1) {
+  wire g:(_0:u1, _1:u1) = nil
+  g._0 = a#[0..=0]
+  g._1 = b#[0..=0]
+  o1   = a + b
+  o2   = a - b
+  o3   = g._0 & g._1
+}
+
+pub mod top(x:u4, y:u4) -> (r1:u5@[], r2:u5@[], r3:u1@[]) {
+  mut inst = pick::[name=inst](a = x, b = y)
+  r1 = inst.o1
+  r2 = inst.o2
+  r3 = inst.o3
+}

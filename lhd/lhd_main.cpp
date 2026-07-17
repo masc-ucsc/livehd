@@ -3,9 +3,12 @@
 // lhd — the stateless, hermetic LiveHD CLI kernel.
 // See lhd.hpp and the LiveHD docs.
 
+#include <cstdio>
+#include <cstdlib>
 #include <exception>
 
 #include "diag.hpp"
+#include "host_mem.hpp"
 #include "iassert.hpp"
 #include "lhd.hpp"
 #include "lhd_pyrope.hpp"
@@ -34,6 +37,21 @@ struct Trace_guard {
 
 int main(int argc, char** argv) {
   I_setup();
+
+  // Hard memory backstop (see pass/cost/host_mem.hpp). Armed FIRST, before any
+  // large allocation, so a runaway pass (a whole-design ABC/LEC run that would
+  // otherwise grow to hundreds of GB and take the machine down through swap/
+  // jetsam) hits an address-space ceiling and dies alone instead. Inherited
+  // across fork+exec, so this one call also bounds yosys and any re-invoked
+  // `lhd`. Silent by default; LIVEHD_MEMORY_DEBUG reports the armed ceiling.
+  // This is a backstop, not a clean error -- pass/abc's sampled admission and the
+  // node-count gate produce the diagnosable refusal before it fires.
+  if (const uint64_t limit = livehd::cost::install_memory_backstop();
+      limit != 0 && std::getenv("LIVEHD_MEMORY_DEBUG") != nullptr) {
+    std::fprintf(stderr, "lhd: memory backstop armed (RLIMIT_AS = %llu MiB)\n",
+                 static_cast<unsigned long long>(limit >> 20));
+  }
+
   Trace_guard trace_guard;
 
   lhd::Options opts;

@@ -329,12 +329,14 @@ static void disclose_lec_helpers(livehd::lec::Query_result& r, const livehd::lec
 // stays FLATTENED into the parent (descended) — the M5 CEGAR / un-black-box
 // fallback, now in v1. Correspondence is name-based (no semdiff needed when the
 // call structures match). Each def emits a per-block progress line the instant it
-// resolves, so an agent stream-parses the long run. Returns the TOP def's result.
+// resolves, so an agent stream-parses the long run. Returns the TOP def's result,
+// or — when a descendant REFUTED — that descendant's (see the fail-fast gate in
+// run_def and the aggregate below).
 static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var, Eprp_var& impl_var, const std::string& top_name,
                                                   hhds::Graph* ref_top_g, hhds::Graph* impl_top_g,
                                                   const livehd::lec::Lec_options& base,
                                                   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
-                                                  livehd::formal::Verdict_cache* vcache, bool retry_all) {
+                                                  livehd::formal::Verdict_cache* vcache, bool retry_all, bool fail_fast_refute) {
   using livehd::lec::Verdict;
   namespace gu = livehd::graph_util;
 
@@ -500,14 +502,54 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   std::atomic<long long>    solve_spent_ms{0};
   livehd::lec::Query_result top_result;
   bool                      have_top      = false;
+  std::atomic<bool>         any_oversize{false};  // any def refused by the design-size gate -> hard error
   std::atomic<int>          semdiff_count{0};  // defs dropped structurally (no solver)
   std::atomic<int>          cache_count{0};    // defs settled by the verdict cache (no analysis at all)
   std::mutex                report_mutex;
-  auto                      run_def = [&](size_t def_ix) {
+  // Refuted-descendant bookkeeping (fail-fast). `refuted` marks a def the solver
+  // itself refuted; `tainted` marks one skipped because a child (transitively) was
+  // — kept apart so a skip is never mistaken for a verdict this def earned.
+  // first_refuted is the run's headline: the DAG is leaves-first, so the earliest
+  // refute is the deepest, and its counterexample is the most actionable one.
+  std::vector<uint8_t>      refuted(order.size(), 0);
+  std::vector<uint8_t>      tainted(order.size(), 0);
+  livehd::lec::Query_result refuted_result;
+  std::string               refuted_def;
+  bool                      have_refuted = false;
+  auto                      run_def      = [&](size_t def_ix) {
     if (settled[def_ix]) {
       return;  // definitively decided in an earlier round — do not re-solve
     }
     const auto&              name = order[def_ix];
+
+    // Fail-fast on a refuted descendant (lec.hier_refute=fail, the default).
+    // Only a PROVEN child black-boxes (see the collapse set below), so a def over
+    // a REFUTED child would descend into logic already known to differ and grind
+    // out a whole-design flat miter — minutes of cvc5 for a verdict the child
+    // settled in milliseconds. Skip it, and taint it so its own parents skip too.
+    // The child's counterexample stands as the run verdict (aggregate below).
+    //   lec.hier_refute=escalate restores the full top-level confirmation: a
+    // block-boundary CEX can be UNREACHABLE in context, so only that mode can
+    // prove a top equivalent over a differing child — at the cost of the flat solve.
+    if (fail_fast_refute) {
+      std::string bad_kid;
+      if (auto it = children.find(name); it != children.end()) {
+        for (const auto& c : it->second) {
+          if (auto ci = order_ix.find(c); ci != order_ix.end() && (refuted[ci->second] != 0 || tainted[ci->second] != 0)) {
+            bad_kid = c;
+            break;
+          }
+        }
+      }
+      if (!bad_kid.empty()) {
+        tainted[def_ix] = 1;
+        std::lock_guard report_lock(report_mutex);
+        std::print("lec[hier]: '{}' SKIPPED (child '{}' REFUTED; --set lec.hier_refute=escalate proves this level anyway)\n",
+                   name,
+                   bad_kid);
+        return;
+      }
+    }
     livehd::lec::Lec_options o = base;
     if (budget_on) {
       // This def's per-query cap = the SOLVER budget remaining (1s floor once spent;
@@ -654,8 +696,14 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // "structurally identical" verdict that leans on a speculative tier-2
       // pair or an explicit seed is not taken (the spec self-certifies only
       // the unbounded inductive proof) — those defs go to the solver.
+      // cut_violated/cut_unknown are NOT optional: a_unmatched==0 is a node-set
+      // BIJECTION, not an isomorphism. A cut point's fsig is its name seed and never
+      // folds its din, and class_of is forward-authoritative, so swapping two
+      // same-named flops' dins (or two graph outputs) leaves the node set identical
+      // and would be claimed Proven here — with no solver, and cached below as
+      // definitive. The obligations close exactly that hole.
       if (o.semdiff != "none" && kids_proven && m.a_unmatched == 0 && m.b_unmatched == 0 && m.state.full_pairs == 0
-          && m.state.seed_pairs == 0) {
+          && m.state.seed_pairs == 0 && m.cut_violated == 0 && m.cut_unknown == 0) {
         livehd::lec::Query_result sr;
         sr.verdict    = Verdict::Proven;
         sr.engine     = "semdiff";
@@ -812,8 +860,21 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     if (r.verdict == Verdict::Proven || r.verdict == Verdict::Refuted) {
       settled[def_ix] = 1;
     }
+    if (r.oversize_refused) {
+      any_oversize.store(true);
+    }
     {
       std::lock_guard report_lock(report_mutex);
+      // Keep the FIRST refute (leaves-first => the deepest one): it is both the
+      // fail-fast trigger for this def's parents and the run's reported verdict.
+      if (r.verdict == Verdict::Refuted) {
+        refuted[def_ix] = 1;
+        if (!have_refuted) {
+          refuted_result = r;
+          refuted_def    = name;
+          have_refuted   = true;
+        }
+      }
       emit_lec_block_progress(name, r, o, ms);
     std::print("lec[hier]: '{}' {} ({} child collapse{})\n",
                name,
@@ -902,9 +963,33 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                                             cache_count.load(),
                                             semdiff_count.load()));
 
+  // A REFUTED def anywhere in the hierarchy is the run's verdict unless the TOP
+  // itself settled. Without this the driver returns top_result alone, so a block
+  // the solver refuted outright is dropped on the floor: the top is skipped
+  // (fail-fast) or — since a non-collapsible child forces a whole-design flat
+  // miter — comes back UNKNOWN, and a witness-free UNKNOWN exits 0 under the
+  // inconclusive-is-a-warning policy. That reported a design with a known
+  // counterexample as a PASS.
+  //   A top that PROVED outranks it (escalate mode's whole point: the child's
+  // block-boundary CEX was unreachable in context), and a top that REFUTED
+  // already carries a more direct counterexample.
+  if (have_refuted && (!have_top || (top_result.verdict != Verdict::Proven && top_result.verdict != Verdict::Refuted))) {
+    const bool skipped = !have_top;
+    top_result         = refuted_result;
+    top_result.detail  = std::format("hierarchical: block '{}' REFUTED{}; {}",
+                                    refuted_def,
+                                    skipped ? "" : " (top itself inconclusive)",
+                                    top_result.detail);
+    have_top           = true;
+  }
   if (!have_top) {
     top_result.verdict = Verdict::Unknown;
     top_result.detail  = std::format("hierarchical: top '{}' not found in both libraries", top_name);
+  }
+  // A size refusal on ANY def (not just the top) is a hard admission failure for
+  // the whole run, so surface it on the aggregate regardless of which def hit it.
+  if (any_oversize.load()) {
+    top_result.oversize_refused = true;
   }
   return top_result;
 }
@@ -1881,6 +1966,7 @@ void lec_command(Options& opts, Result& res) {
   o.cones        = label("cones", "auto");
   o.conelimit    = std::atoi(label("conelimit", "10000").c_str());
   o.strict       = label("strict", "false") != "false" && label("strict", "false") != "0";
+  o.allow_oversize = label("allow_oversize", "false") != "false" && label("allow_oversize", "false") != "0";
   o.semdiff      = livehd::lec::lec_canon_semdiff(label("semdiff", "structural"));
   o.state_pairing = label("state_pairing", "true") != "false" && label("state_pairing", "true") != "0";
   o.partitions   = std::atoi(label("partitions", "4").c_str());
@@ -1972,6 +2058,10 @@ void lec_command(Options& opts, Result& res) {
     check_opts.assumption_key.clear();
     check_opts.proven_helpers = check_opts.input_assumes = check_opts.unchecked_assumes = 0;
     auto checked = livehd::lec::prove_properties(impl_g.get(), check_opts, sub_lib_ptr, &formal_helpers.checks);
+    if (checked.oversize_refused) {
+      throw Lhd_error{"unsupported", std::format("lec refused '{}': {}", impl_g->get_name(), checked.detail),
+                      "set lec.allow_oversize=true to run it anyway (it may exhaust host memory)"};
+    }
     int  seen    = 0;
     for (const auto& p : checked.props) {
       if (p.block.empty()) {
@@ -2033,17 +2123,25 @@ void lec_command(Options& opts, Result& res) {
     // Bottom-up: LEC every def leaves-first under `auto`, collapsing proven
     // children. The driver emits a per-def progress line itself; the TOP def's
     // verdict drives the exit policy below (like the single-design path).
-    const bool retry_all = label("retry", "changed") == "all";
-    r                    = lec_hierarchical(res,
-                                            ref_var,
-                                            impl_var,
-                                            std::string(ref_g->get_name()),
-                                            ref_g.get(),
-                                            impl_g.get(),
-                                            o,
-                                            sub_lib_ptr,
-                                            vcache.get(),
-                                            retry_all);
+    const bool        retry_all   = label("retry", "changed") == "all";
+    const std::string hier_refute = label("hier_refute", "fail");
+    if (hier_refute != "fail" && hier_refute != "escalate") {
+      throw Lhd_error{"usage",
+                      std::format("--set lec.hier_refute expects fail|escalate, got '{}'", hier_refute),
+                      "fail (default; a refuted block fails the run, its parents are skipped) | escalate (prove the "
+                      "parents anyway, to confirm the block-boundary counterexample is reachable at the top)"};
+    }
+    r = lec_hierarchical(res,
+                         ref_var,
+                         impl_var,
+                         std::string(ref_g->get_name()),
+                         ref_g.get(),
+                         impl_g.get(),
+                         o,
+                         sub_lib_ptr,
+                         vcache.get(),
+                         retry_all,
+                         /*fail_fast_refute=*/hier_refute == "fail");
     if (vcache) {
       vcache->save();
       if (vcache->hits() > 0 || vcache->stores() > 0 || vcache->skips() > 0) {
@@ -2243,6 +2341,16 @@ void lec_command(Options& opts, Result& res) {
     // Per-block progress (info severity): stream the verdict the moment it resolves.
     emit_lec_block_progress(impl_g->get_name(), r, o, ms);
   }
+
+  // Design-size refusal is a hard admission failure (like pass.abc), not a
+  // solver-inconclusive UNKNOWN: exit non-zero regardless of lec.strict, naming
+  // the override. (`lhd pass lec` already fatals on any UNKNOWN; this makes the
+  // `lhd lec` CLI path consistent for the size case specifically.)
+  if (r.oversize_refused) {
+    throw Lhd_error{"unsupported", std::format("lec refused '{}': {}", impl_g->get_name(), r.detail),
+                    "set lec.allow_oversize=true to run it anyway (it may exhaust host memory)"};
+  }
+
   bool lec_equiv = r.verdict == livehd::lec::Verdict::Proven;
   bool lec_known = r.verdict != livehd::lec::Verdict::Unknown;
 
@@ -2917,6 +3025,7 @@ void formal_verify_command(Options& opts, Result& res) {
   o.reset_cycles = std::atoi(label("reset_cycles", "2").c_str());
   o.reset        = label("reset", "");
   o.strict       = label("strict", "false") != "false" && label("strict", "false") != "0";
+  o.allow_oversize = label("allow_oversize", "false") != "false" && label("allow_oversize", "false") != "0";
   o.partitions   = std::atoi(label("partitions", "4").c_str());
   o.jobs         = std::max(1, std::atoi(label("jobs", "4").c_str()));
   o.split        = label("split", "auto");
@@ -3060,7 +3169,10 @@ void formal_verify_command(Options& opts, Result& res) {
         // ports as well as its registers. Same def => same decls per instance.
         absl::flat_hash_map<std::string, Sig> sub_port_tbl;
         if (!inst_prefixes.front().empty()) {
-          for (auto node : g->forward_hier()) {
+          // fast_hier: looks up ONE instance by hier name and breaks. Lazy, so
+          // the break now ends the walk instead of paying a full materialize+sort
+          // of the flattened design first.
+          for (auto node : g->fast_hier()) {
             if (livehd::graph_util::type_op_of(node) != Ntype_op::Sub || node.get_hier_name() != inst_prefixes.front()) {
               continue;
             }
@@ -3246,6 +3358,10 @@ void formal_verify_command(Options& opts, Result& res) {
   res.recipe_steps.emplace_back(std::format("pass.lec prove_properties bound:{} phase:{}", o.bound, o.phase));
 
   auto r = livehd::lec::prove_properties(g.get(), o, sub_lib_ptr, mons.empty() ? nullptr : &mons);
+  if (r.oversize_refused) {
+    throw Lhd_error{"unsupported", std::format("formal verify refused '{}': {}", g->get_name(), r.detail),
+                    "set lec.allow_oversize=true to run it anyway (it may exhaust host memory)"};
+  }
   if (vcache) {
     vcache->save();
     if (vcache->hits() > 0 || vcache->stores() > 0) {

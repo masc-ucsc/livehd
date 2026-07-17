@@ -1,0 +1,35 @@
+/*
+:name: untyped_mux_cond
+:type: equiv
+:verilog_top: untyped_mux_cond.top
+:pyrope_top: top
+*/
+
+// An UNTYPED `mut`/`const` bound to a runtime value, then used as a mux
+// condition through `==`/`!=`.  Such a variable bakes no scalar data leaf (its
+// declare's type slot is `prim_type_none`), so its bundle is zero-entry —
+// exactly the shape of the empty tuple `()`.  upass.constprop used to tell the
+// two apart by `get_mode() != unknown`, which answers "was this name declared?"
+// and not "is this a tuple" — so every untyped declared var folded as `()`, and
+// `() == <scalar>` is unconditionally false.  The mux condition became a
+// compile-time constant and one arm was silently dropped: WRONG hardware, no
+// diagnostic.  The guard is now positive tuple evidence (value_kind == tuple).
+//
+// Each output below folded to the `x` arm before the fix (`ack`/`req` dropped
+// entirely).  A no-type-annotation variable is the whole point — do NOT "fix"
+// this test by adding `:u1`, which is itself one of the maskers.
+pub comb top(ack:u1, req:u1, x:u4, y:u4) -> (sel:u4, sel2:u4, sel3:u4) {
+  // the minimal case: an untyped COPY of a runtime input (no operator at all)
+  mut cond = ack
+  sel = if cond != 0 { x } else { y }
+
+  // two DISTINCT untyped runtime vars compared to each other: folded `() == ()`
+  // => true, so two unrelated signals compared equal at compile time
+  mut c1 = ack
+  mut c2 = req
+  sel2 = if c1 == c2 { x } else { y }
+
+  // untyped var bound to a binary op, and a `const` binding rather than `mut`
+  const c3 = ack | req
+  sel3 = if c3 != 0 { x } else { y }
+}

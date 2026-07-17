@@ -483,6 +483,31 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
+# 2opt-incr subtask 0: pass.abc memory admission. A whole-design ABC region can
+# exhaust the machine (flat XSCore reached 221 GB before the OS killed it), so
+# pass.abc samples its own RSS while bit-blasting and refuses a region that will
+# not fit. Pinned with memory_budget_mb so the refusal is deterministic on any
+# host: refuse + emit no partial netlist + allow_oversize override + no false
+# positive on a design that fits.
+sh_test(
+    name = "lhd_abc_memory_test",
+    size = "large",
+    srcs = ["lhd_abc_memory_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+# 2opt-incr: design-size gate (node-count memory admission). pass.color warns and
+# pass.abc/lec refuse (with an override) when a flattened design is over the
+# threshold, BEFORE any translation. Pinned tiny with LIVEHD_LARGE_DESIGN_NODES so
+# the refusal is deterministic and host-independent: color warns, abc/lec refuse +
+# override, per-def and the default threshold do not fire.
+sh_test(
+    name = "lhd_size_gate_test",
+    size = "large",
+    srcs = ["lhd_size_gate_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
 # 2opt-freq D: `lhd pass opentimer` STA on pass.abc-mapped modules — comb
 # region + flat sequential (flop-boundary), timing.json + envelope qor member,
 # and the non-Liberty-Sub / bogus-top negative controls.

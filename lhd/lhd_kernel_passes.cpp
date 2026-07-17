@@ -67,12 +67,19 @@ void semdiff_command(Options& opts, Result& res) {
     }
     return v != "false" && v != "0";
   };
-  const bool hier = truthy("hier", "0");
+  // `stats` is a PRESET, not just a report toggle: "how well do these two
+  // designs correspond?" is only answerable over the whole hierarchy (hier) with
+  // the state tiers on, and a single-def node count answers nothing. An explicit
+  // --set of any implied key still wins — label() returns the registry default
+  // only when the key is absent, so `truthy(k, stats?…)` is overridden by --set.
+  // `--stats` is the CLI sugar for the same knob; either form turns it on.
+  const bool stats = opts.stats || truthy("stats", "0");
+  const bool hier  = truthy("hier", stats ? "1" : "0");
 
   livehd::semdiff::Semdiff_options o;
   o.alg            = label("alg", "structural");
-  o.matching_names = truthy("matching_names", "false");
-  o.state_pairing  = truthy("state_pairing", "false");
+  o.matching_names = truthy("matching_names", stats ? "true" : "false");
+  o.state_pairing  = truthy("state_pairing", stats ? "true" : "false");
   o.dump_state     = truthy("dump_state", "false");
   o.id_granularity = label("id_granularity", "pair");
   o.verbose        = false;  // the command prints its own summary below
@@ -138,6 +145,36 @@ void semdiff_command(Options& opts, Result& res) {
                  st.noised_correct,
                  st.noised_recovered - st.noised_correct);
     }
+  };
+
+  // The `stats` report: the one-screen "do these two designs correspond?" answer.
+  // Deliberately reports BOTH sides — a ref-side-only view hides impl-side extra
+  // logic (the flatten/inline asymmetry that makes a diff look clean from one
+  // end). `pct` guards div-by-zero on empty designs.
+  auto print_stats = [](uint32_t def_pairs, uint32_t ref_only, uint64_t a_matched, uint64_t a_total, uint64_t b_matched,
+                        uint64_t b_total, uint64_t regions, const livehd::semdiff::State_stats& st) {
+    auto pct = [](uint64_t n, uint64_t d) { return d == 0 ? 100.0 : 100.0 * static_cast<double>(n) / static_cast<double>(d); };
+    // Registers = every state cell that is not a Memory; the pair counts carry
+    // their own Memory subset so both rows are exact rather than inferred.
+    const uint32_t a_regs = st.a_total - st.a_mems;
+    const uint32_t b_regs = st.b_total - st.b_mems;
+    const uint32_t paired_mem  = st.name_pairs_mem + st.full_pairs_mem;
+    const uint32_t paired_regs = (st.name_pairs + st.full_pairs) - paired_mem;
+    std::print("semdiff[stats]: defs      {} paired, {} ref-only\n", def_pairs, ref_only);
+    std::print("semdiff[stats]: nodes     ref {}/{} matched ({:.1f}%), impl {}/{} matched ({:.1f}%), {} region(s)\n",
+               a_matched, a_total, pct(a_matched, a_total), b_matched, b_total, pct(b_matched, b_total), regions);
+    std::print("semdiff[stats]: registers ref {}/{} paired ({:.1f}%), impl {}/{} — by name {}, by structure {}\n",
+               paired_regs, a_regs, pct(paired_regs, a_regs), paired_regs, b_regs,
+               st.name_pairs - st.name_pairs_mem, st.full_pairs - st.full_pairs_mem);
+    std::print("semdiff[stats]: memories  ref {}/{} paired ({:.1f}%), impl {}/{} — by name {}, by structure {}\n",
+               paired_mem, st.a_mems, pct(paired_mem, st.a_mems), paired_mem, st.b_mems, st.name_pairs_mem,
+               st.full_pairs_mem);
+    std::print("semdiff[stats]: UNMATCHED ref {} node(s) / {} state ({} ambiguous), impl {} node(s) / {} state ({} ambiguous)\n",
+               a_total - a_matched, st.a_unpaired, st.a_ambiguous, b_total - b_matched, st.b_unpaired, st.b_ambiguous);
+    const bool clean = a_matched == a_total && b_matched == b_total && st.a_unpaired == 0 && st.b_unpaired == 0 && ref_only == 0;
+    std::print("semdiff[stats]: => {}\n",
+               clean ? "designs fully correspond"
+                     : "DIFFERENCES present (grep the `match=0` nodes: `lhd tool grep match=0 lg:<impl>`)");
   };
 
   if (hier) {
@@ -241,6 +278,10 @@ void semdiff_command(Options& opts, Result& res) {
 
     livehd::semdiff::State_stats agg;
     uint32_t                     def_pairs = 0, ref_only = 0;
+    // NODE totals across the sweep (the state agg above covers state cells only).
+    // A ref-only def's nodes are unmatched by construction and are counted below,
+    // so `nodes ref X/Y` stays honest about one-sided defs.
+    uint64_t agg_a_matched = 0, agg_a_total = 0, agg_b_matched = 0, agg_b_total = 0, agg_regions = 0;
     uint32_t                     explain_left = o.explain_noise;  // budget shared across defs
     auto count_state = [](hhds::Graph* g, uint32_t& total, uint32_t& mems) {
       for (auto node : g->forward_class()) {
@@ -260,6 +301,10 @@ void semdiff_command(Options& opts, Result& res) {
         ++ref_only;
         uint32_t t = 0, m = 0;
         count_state(rit->second, t, m);
+        for (auto node : rit->second->forward_class()) {
+          (void)node;
+          ++agg_a_total;  // one-sided def: every node is unmatched by construction
+        }
         agg.a_total += t;
         agg.a_mems += m;
         agg.a_unpaired += t;
@@ -274,6 +319,11 @@ void semdiff_command(Options& opts, Result& res) {
       auto r           = livehd::semdiff::structural_match(rit->second, iit->second, o2);
       explain_left -= std::min(explain_left, r.state.explained);
       agg += r.state;
+      agg_a_matched += r.a_matched;
+      agg_a_total += r.a_matched + r.a_unmatched;
+      agg_b_matched += r.b_matched;
+      agg_b_total += r.b_matched + r.b_unmatched;
+      agg_regions += r.regions;
       const auto& st = r.state;
       if (!opts.quiet && (st.a_unpaired != 0 || st.b_unpaired != 0 || st.full_pairs != 0)) {
         print_state(std::format(" '{}'", name), st);
@@ -285,15 +335,23 @@ void semdiff_command(Options& opts, Result& res) {
                  ref_only,
                  want_top.empty() ? std::string{} : std::format(", scope top '{}'", want_top));
       print_state("[total]", agg);
+      if (stats) {
+        print_stats(def_pairs, ref_only, agg_a_matched, agg_a_total, agg_b_matched, agg_b_total, agg_regions, agg);
+      }
     }
-    res.recipe_steps.emplace_back(std::format("pass.semdiff hier defs:{} state:{}/{} name:{} full:{} unpaired:{}/{}",
+    res.recipe_steps.emplace_back(std::format("pass.semdiff hier defs:{} state:{}/{} name:{} full:{} unpaired:{}/{}{}",
                                               def_pairs,
                                               agg.a_total,
                                               agg.b_total,
                                               agg.name_pairs,
                                               agg.full_pairs,
                                               agg.a_unpaired,
-                                              agg.b_unpaired));
+                                              agg.b_unpaired,
+                                              // Node totals ride the machine-readable line only under stats (they cost
+                                              // an extra aggregate the plain hier sweep does not promise).
+                                              stats ? std::format(" nodes:{}/{}/{}/{}", agg_a_matched, agg_a_total,
+                                                                  agg_b_matched, agg_b_total)
+                                                    : std::string{}));
     if (save) {
       livehd::Hhds_graph_library::save(opts.ref_path);
       livehd::Hhds_graph_library::save(opts.impl_path);
@@ -322,6 +380,13 @@ void semdiff_command(Options& opts, Result& res) {
                r.similarity);
     if (o.matching_names || o.state_pairing) {
       print_state("", r.state);
+    }
+    if (stats) {
+      // Single-pair: this def only. `stats` implies hier, so reaching here means
+      // the user asked for hier=false explicitly — report the one pair honestly
+      // (0 ref-only: a single pair has no one-sided defs by construction).
+      print_stats(1, 0, r.a_matched, r.a_matched + r.a_unmatched, r.b_matched, r.b_matched + r.b_unmatched, r.regions,
+                  r.state);
     }
     std::print("  inspect: `lhd tool diff lg:{} lg:{} --match`  |  `lhd tool grep match=0 lg:{}`\n",
                opts.ref_path,
@@ -468,6 +533,9 @@ void pass_command(Options& opts, Result& res) {
     labels["seed"] = opts.seed;  // the shared `lhd.seed` (mincut RNG); no per-pass seed option
     set_top_label(opts, var, labels, "pass.color");
     merge_sets(opts, "pass.color", labels);
+    if (opts.stats) {
+      labels["stats"] = "true";  // CLI sugar for pass.color.stats; either form turns it on
+    }
     run_step("pass.color", var, labels, opts, res);
     livehd::Hhds_graph_library::save(lg_in);  // in-place coloring
     res.outputs.push_back(lg_in);

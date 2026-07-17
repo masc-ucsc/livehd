@@ -28,6 +28,11 @@ void Pass_semdiff::setup() {
   m.add_label_optional("state_pairing", "tier-2: full-match (SRP/ERP signature) pairing of name-unmatched state cells", "false");
   m.add_label_optional("id_granularity", "id per matched node-pair (pair) or per connected region (region)", "pair");
   m.add_label_optional("verbose", "print per-side match statistics", "false");
+  m.add_label_optional("stats",
+                       "design health check: aggregate node/register/memory match report. A PRESET — implies hier, "
+                       "matching_names and state_pairing (an explicit --set of any of those still wins), since "
+                       "whole-design correspondence is what the report answers",
+                       "false");
   m.add_label_optional("dump_state", "print per-state-cell pairing outcome (matcher iteration aid)", "false");
   m.add_label_optional("hier", "sweep every def pair (entity-paired; --top scopes to its subtree) and aggregate state stats", "false");
   m.add_label_optional("save", "save both lg: libraries back (default: on for single-pair, off for hier)", "");

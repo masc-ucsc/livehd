@@ -222,6 +222,14 @@ std::string Lnast_prp_writer::decl_prefix(std::string_view lhs) {
     return {};
   }
   declared_.insert(std::string(lhs));
+  // A net defined exactly once, by this very (top-level) store, with no earlier
+  // read: it was NOT hoisted to a `mut X = 0` prologue line, so this store is its
+  // declaration — and a single-assignment net is a `const`, not a `mut`.  Besides
+  // dropping the prologue line and the dead `= 0` store, `const` keeps the
+  // recompile from range-unioning the seed `0` into the net's inferred range.
+  if (single_store_.count(std::string(lhs))) {
+    return "const ";
+  }
   return "mut ";
 }
 
@@ -783,11 +791,26 @@ void Lnast_prp_writer::write_module() {
     {
       std::unordered_set<std::string>              top_decl, nonmut_decl, nested_mut_decl, store_lhs;
       std::unordered_map<std::string, std::string> nested_wire_decl;  // name -> rendered type (or "")
-      auto                                         scan = [&](auto&& self, Lnast_nid n, bool top) -> void {
+      // Definition count per name, over EVERY statement that writes it, in any
+      // scope and of any node type (a `store` re-bind, an op node whose child0 is
+      // the def — `x = a + b` is a `plus`, not a `store` — a set_mask, a func_call
+      // result, …).  A name that is defined exactly once, by a top-level `store`,
+      // needs no `mut X = 0` prologue: the store itself can declare it in place.
+      // Counting only `store`s would MISS an op-node def and wrongly call a
+      // twice-written name single-store (yielding a duplicate declaration).
+      std::unordered_map<std::string, int> def_count;
+      auto                                 scan = [&](auto&& self, Lnast_nid n, bool top) -> void {
         for (auto c = lnast->get_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
           const auto t = lnast->get_type(c);
           auto       v = lnast->get_child(c);
           const bool v_ref = !v.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(v));
+          // Only a def whose PARENT is a `stmts` is a real statement write; a
+          // `store` under a `func_call` is a named ARGUMENT (`mul(a=in1)`), and a
+          // `tuple_add` child is a named field — neither defines a body net.
+          if (v_ref && lnast->get_type(n) == Lnast_ntype::Lnast_ntype_stmts && defines_child0(t)
+              && !Lnast_ntype::is_declare(t)) {
+            ++def_count[std::string(strip_prefix(lnast->get_name(v)))];
+          }
           if (v_ref && Lnast_ntype::is_declare(t)) {
             auto        nm   = std::string(strip_prefix(lnast->get_name(v)));
             auto        c1   = lnast->get_sibling_next(v);
@@ -827,6 +850,74 @@ void Lnast_prp_writer::write_module() {
         }
       };
       scan(scan, stmts_nid, true);
+      // Position every top-level statement in EMIT order, so a name's single store
+      // can be checked to precede every read of it.  Body emit order is: the
+      // clock/reset cone (relocated, below), then ALL declares (pass 0), then the
+      // non-declares in body order (pass 1).  So a read inside a *declare* lands
+      // ahead of EVERY non-declare store — such a name must keep its hoist, or the
+      // in-place declaration would come after its first read (Pyrope rejects a read
+      // of an undeclared name).  Reads inside the cone are not a risk: the cone is
+      // transitively closed over its drivers' reads, so a cone statement only ever
+      // reads cone nets / flop Qs / ports, never a candidate.
+      std::unordered_map<std::string, size_t> store_pos;   // name -> body index of its top-level store
+      std::unordered_map<std::string, size_t> first_read;  // name -> earliest non-declare body index reading it
+      std::unordered_set<std::string>         decl_read;   // read by a declare — emitted before every store
+      {
+        size_t idx = 0;
+        for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c), ++idx) {
+          const auto ct = lnast->get_type(c);
+          auto       c0 = lnast->get_child(c);
+          if (Lnast_ntype::is_store(ct) && !c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0))) {
+            // Only a SCALAR store (exactly 2 children: the ref and the value) can
+            // carry the declaration.  A store with index levels emits `x[0] = v`
+            // (write_store), and `const x[0] = v` is not a legal declaration — such
+            // a name keeps its hoist.
+            auto val = lnast->get_sibling_next(c0);
+            if (!val.is_invalid() && lnast->is_last_child(val)) {
+              store_pos.emplace(std::string(strip_prefix(lnast->get_name(c0))), idx);
+            }
+          }
+          std::unordered_set<std::string> reads;
+          if (ct == Lnast_ntype::Lnast_ntype_if || ct == Lnast_ntype::Lnast_ntype_unique_if) {
+            collect_if_reads(collect_if_reads, c, reads);
+          } else if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0)) && defines_child0(ct)) {
+            collect_driver_reads(c, reads);  // excludes child0 (the written lhs)
+          } else {
+            collect_node_reads(c, reads);
+          }
+          for (const auto& r : reads) {
+            if (Lnast_ntype::is_declare(ct)) {
+              decl_read.insert(r);
+            } else if (auto it = first_read.find(r); it == first_read.end()) {
+              first_read.emplace(r, idx);
+            } else if (idx < it->second) {
+              it->second = idx;
+            }
+          }
+        }
+      }
+      // A store-driven net needs NO hoist when it is defined exactly once, by a
+      // top-level store, with no earlier read: the store declares it in place as
+      // `const X = <rhs>` (decl_prefix).  This is the overwhelmingly common shape
+      // in reader output — a firtool/slang SSA net assigned once and read later —
+      // and hoisting it cost a prologue line plus a dead `= 0` store for every one
+      // (94.6% of the 249k hoists in XSCore's Rob).
+      auto no_hoist_needed = [&](const std::string& nm) {
+        if (def_count[nm] != 1) {
+          return false;  // written more than once (or by a non-store def) — needs the seed
+        }
+        auto sp = store_pos.find(nm);
+        if (sp == store_pos.end()) {
+          return false;  // its lone def is nested, not a top-level store
+        }
+        if (decl_read.count(nm) || folded_attr_refs_.count(nm)) {
+          return false;  // read by a declare (or by an attr folded ONTO one) — declares emit first
+        }
+        auto fr = first_read.find(nm);
+        // `<=` (not `<`) also rejects a self-referencing store (`X = X + 1`), whose
+        // RHS reads the value the hoisted `0` seeds.
+        return fr == first_read.end() || fr->second > sp->second;
+      };
       // A combinational `mut` var written/declared in a nested scope but used in
       // SIBLING scopes must be declared at the function top (its first write
       // otherwise emits `mut` inside one scope, leaving sibling writes out of
@@ -836,6 +927,10 @@ void Lnast_prp_writer::write_module() {
       for (const auto& nm : store_lhs) {
         if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm) && !pin_cone_.count(nm)
             && !instance_output_inlined_.count(nm) && !dead_signals_.count(nm)) {
+          if (no_hoist_needed(nm)) {
+            single_store_.insert(nm);  // declared in place by its store, as `const X = <rhs>`
+            continue;
+          }
           need.insert(nm);  // pin-cone nets are emitted (as `mut net = driver`) ahead of the declares, not hoisted to 0
         }
       }
@@ -1138,9 +1233,18 @@ void Lnast_prp_writer::collect_folded_attrs(Lnast_nid stmts_nid) {
     // (the hoisted `0`), which tolg rejects ("names clock_pin '0'").  Record the
     // net so write_module can emit its driver ahead of the reg declare.
     const bool val_is_ref = !val_nid.is_invalid() && lnast->get_type(val_nid) == Lnast_ntype::Lnast_ntype_ref;
-    if (val_is_ref && (key == "clock_pin" || key == "reset_pin" || key.ends_with("_pin"))) {
-      pin_dep_nets_.insert(val);
-      val = "ref " + val;
+    if (val_is_ref) {
+      // This net is read from a DECLARE-folded attribute, and declares are emitted
+      // ahead of every body write (the pass-0/pass-1 split) — so the read lands
+      // before the net's own driver.  Only a `_pin` key gets its driver relocated
+      // ahead of the declare (pin_dep_nets_); for every OTHER key the read is
+      // simply early, so the net must keep a hoisted `mut <net> = 0` declaration
+      // rather than be declared in place by its store.
+      folded_attr_refs_.insert(val);
+      if (key == "clock_pin" || key == "reset_pin" || key.ends_with("_pin")) {
+        pin_dep_nets_.insert(val);
+        val = "ref " + val;
+      }
     }
 
     auto var0 = std::string(strip_prefix(lnast->get_name(var_nid)));

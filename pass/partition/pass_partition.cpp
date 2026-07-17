@@ -281,14 +281,23 @@ bool Partitioner::collect() {
       auto dn  = e.driver.get_master_node();
       auto spid = e.sink.get_port_id();
       if (gu::is_const_pin(e.driver)) {
-        const_edges_[r].push_back(ConstEdge{e.driver, n, spid});
+        // internal_edges_/const_edges_ recreate connectivity for the classic
+        // (no-hook) rebuild only. On the hook path (pass.abc) the consumer walks
+        // rb.nodes' own inp_edges and discovers constants itself, so these maps
+        // are never read -- skip building an O(flat-edges) table that would peak
+        // before the first region and is dead weight on the exact OOM path.
+        if (!hook_) {
+          const_edges_[r].push_back(ConstEdge{e.driver, n, spid});
+        }
       } else if (gu::is_graph_input_pin(e.driver)) {
         // pin_name_of resolves the graph input's declared port name directly.
         ensure_input_port(r, e.driver, SinkRef{n, spid}, /*from_primary=*/true, std::string{gu::pin_name_of(e.driver)});
       } else if (is_partitionable(dn)) {
         auto rd = region_of(dn);
         if (rd == r) {
-          internal_edges_[r].push_back(IntEdge{e.driver, n, spid});
+          if (!hook_) {  // dead on the hook path (see const_edges_ above)
+            internal_edges_[r].push_back(IntEdge{e.driver, n, spid});
+          }
         } else {
           ensure_output_port(e.driver);
           ensure_input_port(r, e.driver, SinkRef{n, spid}, /*from_primary=*/false, std::string{});
@@ -1027,6 +1036,8 @@ bool flatten_resolved(hhds::Graph* g, livehd::partition::Flatten_mode mode) {
 }  // namespace
 
 namespace livehd::partition {
+
+bool flatten_is_whole_design(hhds::Graph* g, Flatten_mode mode) { return flatten_resolved(g, mode); }
 
 std::shared_ptr<hhds::GraphIO> resolve_or_clone_subdef(hhds::GraphLibrary* outlib, const hhds::Node_class& inst) {
   auto child = inst.get_subnode_io();

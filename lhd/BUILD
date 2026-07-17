@@ -113,6 +113,7 @@ cc_binary(
     deps = [
         ":lhd_lib",
         "//lsp",
+        "//pass/cost:host_mem",
         "@tree_sitter_pyrope//:prpfmt",
     ],
 )

@@ -1,0 +1,7 @@
+// Fixture for import_alias_sub_instance: a multi-output pub comb, imported under
+// an ALIAS name by its importer.
+pub comb pick3(a:u4, b:u4) -> (o1:u4, o2:u4, o3:u1) {
+  o1 = a + b
+  o2 = a - b
+  o3 = a > b
+}

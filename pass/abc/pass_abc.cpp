@@ -9,11 +9,13 @@
 #include <print>
 #include <string>
 #include <system_error>
+#include <unordered_map>
 
 #include "abc_map.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "mem_lower.hpp"
+#include "node_util.hpp"
 #include "pass_partition.hpp"
 
 static Pass_plugin sample("pass_abc", Pass_abc::setup);
@@ -65,6 +67,14 @@ void Pass_abc::setup() {
   m.add_label_optional("verbose", "per-module ABC stats", "false");
   m.add_label_optional("adder", "combinational adder architecture for Sum/comparators: rca|cska|cla", "rca");
   m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
+  m.add_label_optional("memory_budget_mb",
+                       "memory-admission ceiling (total process RSS, MiB) for one ABC region; "
+                       "0 => physical RAM minus max(2 GiB, 20%) of OS reserve. Physical only, never swap",
+                       "0");
+  m.add_label_optional("allow_oversize",
+                       "true|false skip memory admission and map the region regardless. It may exhaust "
+                       "physical memory and be killed by the OS",
+                       "false");
   m.add_label_optional("multiplier", "combinational multiplier architecture for Mult: array (partial-product adds use 'adder')",
                        "array");
   m.add_label_optional("use_proven_assume", "true|false feed pass.formal-PROVEN assume conditions to ABC as don't-cares",
@@ -248,6 +258,8 @@ void Pass_abc::work(Eprp_var& var) {
   bool use_all_assume    = truthy(var.get("use_all_assume", "false"));
   auto qor_path          = std::string{var.get("qor", "")};
   auto region_opts_s     = std::string{var.get("region_opts", "")};
+  auto mem_budget_s      = std::string{var.get("memory_budget_mb", "0")};
+  bool allow_oversize    = truthy(var.get("allow_oversize", "false"));
   auto flatten           = livehd::partition::parse_flatten_mode(var.get("flatten", "auto"), "pass.abc");
 
   livehd::abc::Region_opts_map region_opts;
@@ -268,6 +280,18 @@ void Pass_abc::work(Eprp_var& var) {
   if (!multiplier.has_value()) {
     livehd::diag::err("pass.abc", "bad-multiplier", "io").msg("pass.abc: unknown multiplier '{}' (use array)", mult_s).fatal();
     return;
+  }
+  int memory_budget_mb = 0;
+  {
+    auto* b      = mem_budget_s.data();
+    auto* e      = mem_budget_s.data() + mem_budget_s.size();
+    auto [p, ec] = std::from_chars(b, e, memory_budget_mb);
+    if (ec != std::errc{} || p != e || memory_budget_mb < 0) {
+      livehd::diag::err("pass.abc", "bad-memory-budget", "io")
+          .msg("pass.abc: memory_budget_mb must be a non-negative integer, got '{}'", mem_budget_s)
+          .fatal();
+      return;
+    }
   }
   int block_size = 0;
   {
@@ -295,12 +319,60 @@ void Pass_abc::work(Eprp_var& var) {
   opts.multiplier = multiplier.value();
   opts.use_proven_assume = use_proven_assume;
   opts.use_all_assume    = use_all_assume;
+  opts.memory_budget_mb  = memory_budget_mb;
+  opts.allow_oversize    = allow_oversize;
+  if (allow_oversize) {
+    // Loud on purpose: this is the flag that lets a run take the machine down,
+    // so it must be visible in the log of whatever ran afterwards.
+    livehd::diag::warn("pass.abc", "allow-oversize", "unsupported")
+        .msg("pass.abc.allow_oversize=true: memory admission is DISABLED for every region")
+        .hint("an oversize region can exhaust physical memory and be killed by the OS")
+        .emit();
+  }
 
   if (out.empty()) {
     // Stats-only (no --emit-dir): no Liberty needed.
     opts.library = library;
     livehd::abc::report_stats(var.graphs, top, opts);
     return;
+  }
+
+  // Size gate. When ABC is about to inline the WHOLE hierarchy and bit-blast it
+  // as a single unit, refuse a very large design up front. The per-region RSS
+  // admission (Mapper::over_budget) only samples DURING bit-blast; the
+  // whole-design flatten + partition that precedes it is unsampled, and that is
+  // where a huge design first exhausts memory (a flat XSCore run reached 221 GB).
+  // Only meaningful for whole-design flatten -- the per-def path bit-blasts small
+  // units, each already guarded region-by-region, so the aggregate count there
+  // would false-refuse a run that is actually fine.
+  if (const uint64_t threshold = livehd::graph_util::large_design_node_threshold(); !allow_oversize && threshold != UINT64_MAX) {
+    std::unordered_map<hhds::Gid, hhds::Graph*> gid2graph;
+    hhds::Graph*                                top_g = nullptr;
+    for (const auto& g : var.graphs) {
+      if (!g) {
+        continue;
+      }
+      gid2graph[g->get_gid()] = g.get();
+      if (top_g == nullptr && (top.empty() || g->get_name() == top)) {
+        top_g = g.get();
+      }
+    }
+    if (top_g != nullptr && livehd::partition::flatten_is_whole_design(top_g, flatten)) {
+      const uint64_t nodes = livehd::graph_util::flat_node_count(top_g, [&](hhds::Gid gid) -> hhds::Graph* {
+        auto it = gid2graph.find(gid);
+        return it == gid2graph.end() ? nullptr : it->second;
+      });
+      if (nodes > threshold) {
+        livehd::diag::err("pass.abc", "large-design", "unsupported")
+            .msg("refusing to synthesize a very large flattened design as one unit: {} nodes (over {})", nodes, threshold)
+            .hint(std::format("color into smaller regions and synthesize per-region: "
+                              "`lhd pass color synth --top {} lg:... --stats`",
+                              top))
+            .hint("--set pass.abc.allow_oversize=true synthesizes it anyway -- it may exhaust the machine "
+                  "(a whole-design XSCore run reached 221 GB before the OS killed it)")
+            .fatal();
+      }
+    }
   }
 
   if (library.empty()) {
@@ -341,6 +413,22 @@ void Pass_abc::work(Eprp_var& var) {
       flatten);
 
   mapper.stop();
+
+  // Memory admission (2opt-incr subtask 0). Raised HERE, not from map_region:
+  // .fatal() throws, and build_decomposition's callback runs above stop(), so
+  // throwing from the region would skip Abc_Stop and leak the frame plus every
+  // live network -- the opposite of what a memory guard should do.
+  if (const auto* refusal = mapper.admission_refusal()) {
+    livehd::diag::err("pass.abc", "memory-oversize", "unsupported")
+        .msg("{}", *refusal)
+        .hint(std::format("re-color into smaller regions and check them first: "
+                          "`lhd pass color synth --top {} lg:... --stats`",
+                          top))
+        .hint("--set pass.abc.memory_budget_mb=N pins the ceiling explicitly (reproducible hosts, CI)")
+        .hint("--set pass.abc.allow_oversize=true runs it anyway -- it may exhaust the machine (a whole-design "
+              "XSCore run reached 221 GB before the OS killed it)")
+        .fatal();
+  }
 
   emit_qor(mapper.qor(), top, opts, qor_path);
 }

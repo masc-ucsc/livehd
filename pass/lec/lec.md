@@ -237,11 +237,21 @@ everything the encoder needs.
   dependency DAG over the defs present BY NAME in both libraries, topo-order it
   **leaves-first**, and LEC each def under the `auto` portfolio. Record the proven
   set; for each parent, force-black-box its **proven** child instances (collapse,
-  above) so the parent proof stops re-solving them. A child **not** provable in
-  isolation with free inputs (context-dependent equivalence) is **not** collapsed
-  — it stays flattened into the parent and is proven in context (the M5 CEGAR /
-  un-black-box fallback). Correspondence is name-based, so no semdiff is needed
-  when the call structures match. A parent **REFUTED under a non-empty collapse
+  above) so the parent proof stops re-solving them. A child left **UNKNOWN** —
+  not provable in isolation with free inputs (context-dependent equivalence) — is
+  **not** collapsed: it stays flattened into the parent and is proven in context
+  (the M5 CEGAR / un-black-box fallback). Correspondence is name-based, so no
+  semdiff is needed when the call structures match.
+  A child the solver **REFUTED** is different (`lec.hier_refute`, default `fail`):
+  its parents are **skipped** and the block's counterexample becomes the run
+  verdict. Flattening it instead would descend into logic already known to differ
+  — a whole-design flat miter costing minutes of cvc5 for a verdict the block
+  settled in milliseconds, and one that typically lands UNKNOWN (a witness-free
+  UNKNOWN then exits 0, silently reporting a design with a known counterexample as
+  a PASS). `lec.hier_refute=escalate` restores the flatten, for the one case it
+  buys something: a block-boundary CEX can be UNREACHABLE in context, so only that
+  mode can prove a top equivalent over a differing child. Either way a refuted
+  block fails the run — a REFUTED def anywhere outranks an inconclusive top. A parent **REFUTED under a non-empty collapse
   set is never final**: the collapse over-approximates the children (free/UF box
   values the real leaf may never emit; occurrence-paired unnamed instances may
   mispair), so the driver re-solves the def FLAT before reporting — flat-Proven
@@ -363,6 +373,7 @@ a silent no-op).
 | `lec.reset` | explicit reset inputs `name[:lo\|:hi]`, comma-sep (else auto-detect) | `""` |
 | `lec.collapse` | proven-module collapse: comma-sep def names forced to the sound blackbox | `""` |
 | `lec.hierarchical` | bottom-up: LEC every def leaves-first under `lec.engine`, collapsing proven children (`false` = flat single LEC) | `true` |
+| `lec.hier_refute` | what a REFUTED block means: `fail` (the block's counterexample is the run verdict; its parents are skipped — only a proven child collapses, so a parent over a refuted child would grind out a whole-design flat miter) \| `escalate` (flatten it and prove the parents anyway, so a top PROVEN over a differing block still passes) | `fail` |
 | `lec.semdiff` | structural def-diff skip: `structural` (drop a structurally-identical def with no solver; `true`/`on` alias) \| `none`. NB cross-front-end pairs never match | `structural` |
 | `lec.state_pairing` | tier-2 uncertain state correspondence: pair name-unmatched flops via semdiff's full-match signature pass, injected as uncertain (drop-and-retry on REFUTE, no bounded-Proven, ind PASS self-certifies + persists pair hints) | `true` |
 | `lec.decompose` | split the miter into per-cut queries: `auto` (sweep, fall back to the monolithic solve on a non-discharging cut) \| `true` (sweep only, report the hard residue, no monolithic solve) \| `false` (monolithic only) | `auto` |
