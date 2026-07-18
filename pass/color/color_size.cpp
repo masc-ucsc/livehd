@@ -3,8 +3,8 @@
 #include "color_size.hpp"
 
 #include <algorithm>
+#include <deque>
 #include <optional>
-#include <queue>
 #include <utility>
 #include <vector>
 
@@ -17,9 +17,25 @@ namespace livehd::color {
 namespace {
 
 using livehd::graph_util::bits_of;
-using livehd::graph_util::ge_weight;
+// The window weighs what ABC will BLAST, not what the region touches: a Sub
+// counts ~1 (node_util mappable_ge_weight). With Sub port bits in the weight,
+// a 2-node glue+instance region "weighs" thousands of GE, dodges the min floor
+// forever, and XSCore ends up with tens of thousands of zero-logic regions the
+// mapper pays call overhead for.
+using livehd::graph_util::mappable_ge_weight;
 
 constexpr int NO_REGION = -1;
+
+// A region whose adjacency is larger than this never ACTS as a merge initiator
+// (it still receives). Acting means one best_partner scan over the whole
+// adjacency; a hub -- a reset/flush/clock cone adjacent to every flop region,
+// 100k+ neighbours on an XSCore def -- stays under any sane floor for
+// thousands of merges, and Best-Choice scoring makes it prefer 1-GE partners,
+// so letting it act is a quadratic scan loop (measured: minutes per def).
+// Its tiny neighbours each pick the hub as THEIR best partner with an
+// O(own-degree) scan, so the hub still fills past the floor purely by
+// receiving. Degree is a function of the input graph: deterministic.
+constexpr size_t kActor_degree_cap = 4096;
 
 // The region graph: one vertex per region, one weighted edge per adjacent pair.
 //
@@ -47,8 +63,9 @@ public:
   [[nodiscard]] const absl::flat_hash_map<int, uint64_t>& neighbours(int r) const { return adj_[r]; }
   [[nodiscard]] const std::vector<hhds::Node_class>&      members(int r) const { return members_[r]; }
 
-  // Fold `b` into `a`, keeping the SMALLER id as the survivor so the result is a
-  // function of the id allocation order rather than of the merge order.
+  // Fold one region into the other; the LARGER-degree side survives (tie:
+  // smaller id) so the fold iterates the smaller neighbour map -- see the
+  // definition for why. Returns the surviving region id.
   int merge(int a, int b);
 
   // Region of `n`, resolved through the union-find.
@@ -104,7 +121,7 @@ Region_graph::Region_graph(hhds::Graph* g, const Node2Id& node2id) {
     }
     const int r      = it->second;
     node2region_[n]  = r;
-    weight_[r]      += ge_weight(n);
+    weight_[r]      += mappable_ge_weight(n);
     members_[r].emplace_back(n);
   }
 
@@ -135,10 +152,23 @@ int Region_graph::merge(int a, int b) {
   if (a == b) {
     return a;
   }
-  if (b < a) {
-    std::swap(a, b);  // survivor is the smaller id
+  // Survivor is the LARGER-degree side (tie: smaller id): folding iterates the
+  // dissolved side's neighbour map, so the merge costs the SMALLER degree. The
+  // old smaller-id rule iterated a hub's whole adjacency (a reset/clock cone
+  // touches tens of thousands of regions) on every second merge into it --
+  // quadratic the moment the window makes hub-adjacent singletons mergeable.
+  // Still deterministic (degree and id are functions of the input graph), and
+  // the caller-visible ids only feed the final forward_class renumber anyway.
+  if (adj_[b].size() > adj_[a].size() || (adj_[b].size() == adj_[a].size() && b < a)) {
+    std::swap(a, b);  // a survives, b dissolves
   }
   weight_[a] += weight_[b];
+  // Append the SHORTER member list (the vectors are freely swappable: nothing
+  // after a merge relies on members order beyond determinism, and split_large's
+  // MFFC only ever sees pre-merge regions).
+  if (members_[b].size() > members_[a].size()) {
+    std::swap(members_[a], members_[b]);
+  }
   members_[a].insert(members_[a].end(), members_[b].begin(), members_[b].end());
   members_[b].clear();
   members_[b].shrink_to_fit();
@@ -195,75 +225,89 @@ int Region_graph::merge(int a, int b) {
 // Merge every region under `min_ge` into its best-scoring neighbour, never
 // letting the union pass `max_ge`.
 //
-// Best-Choice with lazy invalidation: a heap keyed by each small region's best
-// score, popped until a live, still-small, still-current entry surfaces. A stale
-// entry (its region merged, or its weight changed) is recomputed and re-pushed
-// rather than scanned for, which is what keeps this near-linear instead of the
-// pivot-restart O(n^3) loop next door in color_acyclic.
+// Worklist, FIFO by region id: pop a region, merge it once into its
+// best-scoring neighbour, re-enqueue the survivor. Dropping a region with no
+// fitting partner is FINAL -- weights only grow, so a union that breaches max
+// now breaches it forever, and a region gains new neighbours only by merging
+// itself -- which makes the fixpoint identical to a priority ordering: no
+// under-min region with a legal partner survives. Cost is one best_partner
+// scan per pop and at most ~2x the region count of pops.
+//
+// This replaced a Best-Choice score heap with lazy invalidation: sound, but a
+// hub region (a reset/flush cone adjacent to every flop region -- 100k+
+// neighbours on an XSCore def) stayed under min for thousands of merges, and
+// every stale-entry pop re-ranked it with a full O(degree) best_partner scan.
+// The heap's global score order bought a marginally better merge TREE for
+// minutes of rescans; per-actor Best-Choice keeps the scoring where it counts.
 void merge_small(Region_graph& rg, uint64_t min_ge, uint64_t max_ge, Size_window_stats& st) {
   if (min_ge == 0) {
     return;
   }
-  // (score, region, weight-at-push). The weight stamp is the staleness check:
-  // any merge that touched this region changed its weight.
-  struct Entry {
-    double   score;
-    int      region;
-    uint64_t stamp;
-    // Greater score first; ties by smaller id so the heap order is total and
-    // reproducible.
-    bool operator<(const Entry& o) const {
-      if (score != o.score) {
-        return score < o.score;
-      }
-      return region > o.region;
+  std::deque<int> work;
+  for (int r = 0; r < static_cast<int>(rg.size()); ++r) {
+    if (rg.alive(r) && rg.weight(r) < min_ge) {
+      work.push_back(r);
     }
-  };
-  std::priority_queue<Entry> pq;
-
-  auto score_of = [&](int r, int nb) -> double {
-    const auto it = rg.neighbours(r).find(nb);
-    if (it == rg.neighbours(r).end()) {
-      return 0.0;
-    }
-    const uint64_t w = rg.weight(r) + rg.weight(nb);
-    return w == 0 ? 0.0 : static_cast<double>(it->second) / static_cast<double>(w);
-  };
-  auto push_if_small = [&](int r) {
+  }
+  while (!work.empty()) {
+    const int r = rg.find(work.front());
+    work.pop_front();
     if (!rg.alive(r) || rg.weight(r) >= min_ge) {
-      return;
+      continue;
+    }
+    if (rg.neighbours(r).size() > kActor_degree_cap) {
+      continue;  // hub: receives only (see kActor_degree_cap)
     }
     const int nb = best_partner(rg, r, max_ge);
     if (nb == NO_REGION) {
-      return;  // nothing it may legally merge with -- resolved at the tally below
+      continue;  // final: no future merge can make a partner fit (see above)
     }
-    pq.push(Entry{score_of(r, nb), r, rg.weight(r)});
-  };
-
-  for (int r = 0; r < static_cast<int>(rg.size()); ++r) {
-    push_if_small(r);
-  }
-
-  while (!pq.empty()) {
-    const auto e = pq.top();
-    pq.pop();
-    if (!rg.alive(e.region) || rg.find(e.region) != e.region) {
-      continue;  // merged away
-    }
-    if (rg.weight(e.region) >= min_ge) {
-      continue;  // grew past min while it sat in the heap
-    }
-    if (rg.weight(e.region) != e.stamp) {
-      push_if_small(e.region);  // stale score: re-rank rather than act on it
-      continue;
-    }
-    const int nb = best_partner(rg, e.region, max_ge);
-    if (nb == NO_REGION) {
-      continue;
-    }
-    const int keep = rg.merge(e.region, nb);
+    work.push_back(rg.merge(r, nb));
     ++st.merges;
-    push_if_small(keep);  // still small? it gets another turn
+  }
+}
+
+// Pack regions up to `cap` in ONE actor pass, ascending id: each still-alive
+// region acts once, folding itself into its best-scoring neighbour whose union
+// fits. Bins only ever RECEIVE -- an absorbed id resolves away (find(r) != r)
+// and a receiving bin is never re-scanned -- so total cost is one small
+// best_partner scan per original region, O(edges). The price is a weaker
+// fixpoint than merge_small's: two under-cap bins can remain adjacent without
+// merging. That is fine HERE: the split re-pack only needs pieces comfortably
+// under the cap and above the floor, and the outer merge_small that follows
+// apply_size_window's split step folds any piece that ended under min.
+//
+// merge_small itself must NOT be used with min == cap: every bin then stays
+// "small" until the cap, and its worklist re-enqueues the bin after each
+// receive -- re-scanning an adjacency that grows with every absorbed cluster
+// (measured: a 200k-cluster monster region spent minutes there).
+void agglomerate_to_cap(Region_graph& rg, uint64_t cap, Size_window_stats& st) {
+  // `done` is monotonic: a region with no fitting partner NOW never gains one
+  // (weights only grow; a region gains neighbours only by merging itself), so
+  // each round only revisits regions that merged last round. Rounds shrink the
+  // bin count geometrically -- a SINGLE pass instead left the split monsters as
+  // ~half-million mid-size bins (measured on XSCore) because adjacent under-cap
+  // bins never re-acted.
+  std::vector<char> done(rg.size(), 0);
+  bool              merged = true;
+  while (merged) {
+    merged = false;
+    for (int r = 0; r < static_cast<int>(rg.size()); ++r) {
+      if (done[r] != 0 || !rg.alive(r) || rg.find(r) != r || rg.weight(r) >= cap) {
+        continue;
+      }
+      if (rg.neighbours(r).size() > kActor_degree_cap) {
+        continue;  // hub: receives only (see kActor_degree_cap)
+      }
+      const int nb = best_partner(rg, r, cap);
+      if (nb == NO_REGION) {
+        done[r] = 1;  // final by monotonicity
+        continue;
+      }
+      rg.merge(r, nb);
+      ++st.merges;
+      merged = true;
+    }
   }
 }
 
@@ -364,7 +408,7 @@ void topo_chunk(const std::vector<hhds::Node_class>& nodes, uint64_t max_ge, int
   uint64_t acc = 0;
   int      id  = next_id++;
   for (const auto& n : nodes) {  // members are already in forward_class order
-    const uint64_t w = ge_weight(n);
+    const uint64_t w = mappable_ge_weight(n);
     if (acc != 0 && acc + w > max_ge) {
       id  = next_id++;
       acc = 0;
@@ -409,7 +453,7 @@ void split_large(hhds::Graph* g, Region_graph& rg, uint64_t max_ge, absl::flat_h
       }
       uint64_t w = 0;
       for (const auto& n : b) {
-        w += ge_weight(n);
+        w += mappable_ge_weight(n);
       }
       if (w <= max_ge) {
         const int id = next_cluster++;
@@ -438,12 +482,12 @@ void split_large(hhds::Graph* g, Region_graph& rg, uint64_t max_ge, absl::flat_h
     //    (Measured: a topological fill left XSCore at 1.37M regions of ~5k GE,
     //    one per MFFC cone, instead of filling to the cap.)
     //
-    //    Reusing merge_small with min == max == the cap IS the agglomeration:
-    //    "merge anything below the cap into its best-connected neighbour, so long
-    //    as the union still fits". Same Best-Choice scoring, same determinism.
+    //    agglomerate_to_cap is "merge anything below the cap into its
+    //    best-connected neighbour, so long as the union still fits" -- one
+    //    actor pass; leftovers under min are folded by the outer merge_small.
     Region_graph      rg_sub(g, sub);
     Size_window_stats sub_st;
-    merge_small(rg_sub, max_ge, max_ge, sub_st);
+    agglomerate_to_cap(rg_sub, max_ge, sub_st);
 
     absl::flat_hash_map<int, int> piece2id;
     for (const auto& n : rg.members(r)) {
@@ -508,6 +552,41 @@ Node2Id apply_size_window(hhds::Graph* g, const Node2Id& node2id, uint64_t min_g
   Region_graph& rg2 = rebuilt.has_value() ? *rebuilt : rg;
 
   merge_small(rg2, min_ge, max_ge, s);
+
+  // Leftover packing. After the merge fixpoint, every region still under min is
+  // an ENTIRE connected component below min -- def IO and constants are
+  // adjacency holes, so a PI->flop->PO register cloud or a wrapper's glue snippet
+  // has no neighbour it may legally merge with, and XSCore leaves 14k such
+  // regions (median 2 nodes) for ABC to pay per-call overhead on. Fold them per
+  // def into 'misc' bins of ~min_ge each, ascending region id for determinism.
+  // Disjoint clouds inside one region are sound everywhere downstream (cgen /
+  // ABC / LEC see disjoint cones behind one port list); pass.partition honors
+  // the packing through the coloring_info "packed" flag (anchor union), else its
+  // component split would silently undo this.
+  if (min_ge != 0) {
+    int bin = NO_REGION;
+    for (int r = 0; r < static_cast<int>(rg2.size()); ++r) {
+      if (!rg2.alive(r) || rg2.weight(r) >= min_ge) {
+        continue;
+      }
+      if (bin == NO_REGION || bin == r) {
+        bin = r;
+        continue;
+      }
+      // Never overfill past max: each leftover is < min and a bin closes at
+      // >= min, so with a sane window (min <= max/2) this never trips; the guard
+      // is for direct callers handing a degenerate window.
+      if (max_ge != 0 && rg2.weight(bin) + rg2.weight(r) > max_ge) {
+        bin = r;
+        continue;
+      }
+      bin = rg2.merge(bin, r);
+      ++s.packed;
+      if (rg2.weight(bin) >= min_ge) {
+        bin = NO_REGION;  // bin full: the next leftover opens a fresh one
+      }
+    }
+  }
 
   // Final renumber: 1..k in forward_class first-encounter order. This is the
   // whole reason the engine owns the component split rather than leaving it to

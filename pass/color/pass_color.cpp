@@ -17,6 +17,7 @@
 #include "color_flat.hpp"
 #include "color_mincut.hpp"
 #include "color_path.hpp"
+#include "color_reduce.hpp"
 #include "color_stats.hpp"
 #include "color_synth.hpp"
 #include "diag.hpp"
@@ -30,8 +31,8 @@ static Pass_plugin sample("pass_color", Pass_color::setup);
 Pass_color::Pass_color(const Eprp_var& var) : Pass("pass.color", var) {}
 
 void Pass_color::setup() {
-  Eprp_method m("pass.color", "Hierarchical node coloring (acyclic|cgen|synth|path|mincut|flat|clear)", &Pass_color::color);
-  m.add_label_optional("alg", "algorithm: acyclic|cgen|synth|path|mincut|flat|clear", "acyclic");
+  Eprp_method m("pass.color", "Hierarchical node coloring (acyclic|cgen|synth|path|mincut|flat|reduce|clear)", &Pass_color::color);
+  m.add_label_optional("alg", "algorithm: acyclic|cgen|synth|path|mincut|flat|reduce|clear", "acyclic");
   // The top module is the shared kernel `--top` flag (lhd plumbs it into the
   // `top` label), not a per-pass --set option.
   m.add_label_optional("hier", "color every unique def in the hierarchy (else only the top)", "true");
@@ -51,19 +52,22 @@ void Pass_color::setup() {
   m.add_label_optional("iters", "mincut: how many times to run the cut", "1");
   m.add_label_optional("mincut_alg", "mincut: VieCut algorithm (vc, cactus, ...)", "vc");
   m.add_label_optional("synth_alg", "synth: pipe|synth boundary mode", "synth");
-  // The size window. Gate equivalents, not nodes: ABC's memory scales with the
-  // BIT-BLASTED gate count, so a 200k-node region of wide datapath passes any
-  // node gate and still exhausts the host (see graph_util::ge_weight).
+  // The size window. MAPPABLE gate equivalents (graph_util::mappable_ge_weight:
+  // Sub instances count ~1 -- their logic is weighed in their own def), not
+  // nodes: ABC's memory scales with the BIT-BLASTED gate count, so a 200k-node
+  // region of wide datapath passes any node gate and still exhausts the host.
   m.add_label_optional("min_ge",
                        "synth: merge a region below this many gate-equivalents into its best-connected "
                        "neighbour (0 => no lower bound). Kills singleton regions",
                        "1000");
-  // 30M GE ~= 0.9 GB of expected ABC peak, calibrated at ~30 bytes/GE from the
-  // one hard data point there is: a flat XSCore run reached 221 GB, and XSCore
-  // measures 7.43e9 GE. Raise it on a bigger host; lower it if admission fires.
+  // 30M GE ~= 1 GB of expected ABC peak, calibrated at ~30 bytes/GE from the
+  // one hard data point there is: a flat XSCore run reached 221 GB against
+  // 7.43e9 boundary GE. The window now counts MAPPABLE GE (Sub ports excluded),
+  // which is smaller, so the same cap is if anything more conservative. Raise it
+  // on a bigger host; lower it if admission fires.
   m.add_label_optional("max_ge",
-                       "synth: split a region above this many gate-equivalents (0 => no upper bound). "
-                       "Default ~0.9 GB of expected ABC peak per region (~30 bytes/GE); raise it on a bigger host",
+                       "synth: split a region above this many MAPPABLE gate-equivalents (0 => no upper bound). "
+                       "Default ~1 GB of expected ABC peak per region (~30 bytes/GE); raise it on a bigger host",
                        "30000000");
   m.add_label_optional("absorb",
                        "synth: STRUCTURALLY INLINE every def below `min_ge` into its parents before coloring, so its "
@@ -71,6 +75,14 @@ void Pass_color::setup() {
                        "it). Rewrites the design; needs min_ge>0 and hier=true. false leaves tiny defs their own regions",
                        "true");
   m.add_label_optional("instance", "path: comma-separated seed instance names (forward-only)", "");
+  m.add_label_optional("min_count",
+                       "reduce: occurrences a repeated subgraph needs before it is extracted as a shared def",
+                       "3");
+  m.add_label_optional("min_nodes", "reduce: smallest cone (in nodes) worth extracting", "3");
+  m.add_label_optional("min_win",
+                       "reduce: required PER-SITE Verilog line win (estimated lines saved minus the instance's "
+                       "ports+2). 0 disables the guard and extracts on node count alone",
+                       "1");
   register_pass(m);
 }
 
@@ -96,6 +108,21 @@ uint64_t parse_ge_bound(const Eprp_var& var, std::string_view label, std::string
   return v;
 }
 
+// A plain non-negative integer label (counts). Same no-silent-fallback rule as
+// parse_ge_bound: a mis-typed `min_count=3O` must not quietly become something.
+uint64_t parse_count(const Eprp_var& var, std::string_view label, std::string_view dflt) {
+  const auto s = std::string{var.get(label, std::string{dflt})};
+  uint64_t   v = 0;
+  auto*      b = s.data();
+  auto*      e = s.data() + s.size();
+  if (auto [p, ec] = std::from_chars(b, e, v); ec != std::errc{} || p != e) {
+    livehd::diag::err("pass.color", "bad-count", "io")
+        .msg("pass.color: {} must be a non-negative integer, got '{}'", label, s)
+        .fatal();
+  }
+  return v;
+}
+
 // JSON object string of the algorithm parameters (for the metadata blob).
 std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp_var& var) {
   std::string s = "{";
@@ -109,6 +136,13 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
     // The window is recorded only for the algorithm that honors it -- printing
     // min/max under `acyclic` would claim a bound nothing enforced.
     s += std::format(",\"synth_alg\":\"{}\",\"min_ge\":{},\"max_ge\":{}", var.get("synth_alg", "synth"), opts.min_ge, opts.max_ge);
+    if (opts.min_ge != 0) {
+      // The window bin-packs isolated under-min leftovers, so a color id MAY
+      // span several disconnected clouds. pass.partition keys its same-color
+      // anchor union off this flag; without it the component split would
+      // silently shred the bins back into per-cloud modules.
+      s += ",\"packed\":true";
+    }
   } else if (alg == "mincut") {
     s += std::format(",\"iters\":{},\"seed\":{},\"mincut_alg\":\"{}\"",
                      var.get("iters", "1"),
@@ -117,6 +151,7 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
   } else if (alg == "path") {
     s += std::format(",\"instance\":\"{}\"", var.get("instance", ""));
   }
+  // `reduce` never reaches here: it neither writes colors nor coloring_info.
   s += "}";
   return s;
 }
@@ -161,9 +196,10 @@ void Pass_color::color(Eprp_var& var) {
     return;
   }
 
-  if (alg != "acyclic" && alg != "cgen" && alg != "synth" && alg != "path" && alg != "mincut" && alg != "flat") {
+  if (alg != "acyclic" && alg != "cgen" && alg != "synth" && alg != "path" && alg != "mincut" && alg != "flat"
+      && alg != "reduce") {
     livehd::diag::err("pass.color", "bad-alg", "unsupported")
-        .msg("unknown algorithm '{}' (expected acyclic|cgen|synth|path|mincut|flat|clear)", alg)
+        .msg("unknown algorithm '{}' (expected acyclic|cgen|synth|path|mincut|flat|reduce|clear)", alg)
         .fatal();
   }
 
@@ -238,6 +274,86 @@ void Pass_color::color(Eprp_var& var) {
           .hint("color into smaller regions (pass.color synth) and check them individually")
           .emit();
     }
+  }
+
+  // `reduce` is not a per-def labeling: it mines repeated cones ACROSS defs,
+  // then rewrites the library in place (shared pattern defs + instance
+  // splices). It owns its own orchestration and reporting, so it branches off
+  // before the per-def color_def machinery.
+  if (alg == "reduce") {
+    std::vector<hhds::Graph*> defs;
+    if (top_g != nullptr && opts.hier) {
+      absl::flat_hash_set<hhds::Gid> todo;
+      todo.insert(top_g->get_gid());
+      for (auto inst : top_g->hier_range()) {
+        todo.insert(inst.get_target_gid());
+      }
+      for (auto gid : todo) {
+        if (auto it = gid2graph.find(gid); it != gid2graph.end()) {
+          defs.push_back(it->second);
+        }
+      }
+    } else if (top_g != nullptr) {
+      defs.push_back(top_g);
+    } else {
+      for (const auto& g : var.graphs) {
+        if (g) {
+          defs.push_back(g.get());
+        }
+      }
+    }
+    // Deterministic def order => deterministic representative selection.
+    std::sort(defs.begin(), defs.end(), [](hhds::Graph* a, hhds::Graph* b) { return a->get_name() < b->get_name(); });
+
+    Reduce_opts ropts;
+    ropts.min_count = parse_count(var, "min_count", "3");
+    ropts.min_nodes = parse_count(var, "min_nodes", "3");
+    ropts.min_win   = parse_count(var, "min_win", "1");
+    ropts.verbose   = opts.verbose;
+    if (ropts.min_count < 2) {
+      livehd::diag::err("pass.color", "bad-count", "io")
+          .msg("pass.color: reduce min_count must be at least 2 (got {}): a pattern seen once has nothing to share",
+               ropts.min_count)
+          .fatal();
+      return;
+    }
+    if (ropts.min_nodes < 1) {
+      livehd::diag::err("pass.color", "bad-count", "io")
+          .msg("pass.color: reduce min_nodes must be at least 1 (got 0)")
+          .fatal();
+      return;
+    }
+
+    Reduce_stats rst;
+    if (!color_reduce(defs, ropts, &rst)) {
+      return;  // diag already emitted; the library may be half-transformed
+    }
+    if (stats || opts.verbose) {
+      // stderr on purpose: run_step dup2's fd 1 into the log file.
+      std::print(stderr,
+                 "[color.reduce] defs {} ({} seeded skipped); {} cones >= {} nodes; {} patterns x {} sites "
+                 "({} const params); nodes -{} +{} (net {:+}); dropped: {} verify, {} port-heavy, {} dup-edge, "
+                 "{} reuse-fragile\n",
+                 rst.defs_scanned,
+                 rst.defs_skipped_seeded,
+                 rst.cones,
+                 ropts.min_nodes,
+                 rst.patterns,
+                 rst.occurrences,
+                 rst.promoted_consts,
+                 rst.nodes_deleted,
+                 rst.nodes_created,
+                 static_cast<int64_t>(rst.nodes_created) - static_cast<int64_t>(rst.nodes_deleted),
+                 rst.verify_dropped,
+                 rst.port_heavy_skipped,
+                 rst.dup_edge_skipped,
+                 rst.reuse_refused);
+    }
+    // NO coloring_info rewrite: reduce neither reads nor writes node colors,
+    // and clobbering the descriptor of a prior coloring (e.g. synth's
+    // "packed":true, which pass.partition keys its anchor union off) would
+    // corrupt a downstream partition run. The library rewrite IS the output.
+    return;
   }
 
   // Absorb runs BEFORE anything is colored and BEFORE the instance counts below

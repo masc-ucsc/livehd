@@ -484,6 +484,18 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:hier_tests"],
 )
 
+# `pass.color reduce`: repeated combinational cones become ONE shared def
+# instantiated at every site (in-place rewrite, fewer total nodes). The test
+# that matters is end-to-end: a pat_* module appears, instantiated at every
+# occurrence, and the reduced library is LEC-equivalent to the original; plus
+# idempotence, the min_count gate, and the --emit-dir refusal.
+sh_test(
+    name = "lhd_color_reduce_test",
+    size = "large",
+    srcs = ["lhd_color_reduce_test.sh"],
+    data = _FLOW_DATA,
+)
+
 # 2a-abc: `lhd pass abc` technology-maps a colored combinational design to a
 # standard-cell netlist (blackbox Sub cells), `pass liberty gensim` models each
 # cell, and the netlist is LEC-equivalent to the original logic (+ a negative

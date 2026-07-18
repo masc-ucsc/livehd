@@ -3,6 +3,7 @@
 #include "pass_partition.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cctype>
 #include <cstdint>
 #include <format>
@@ -103,8 +104,14 @@ struct OutWire {
 class Partitioner {
 public:
   Partitioner(hhds::Graph* g, hhds::GraphLibrary* outlib, std::string top, bool debug_color,
-              livehd::partition::Body_builder hook = {}, bool flatten = false)
-      : g_(g), outlib_(outlib), top_(std::move(top)), debug_color_(debug_color), hook_(std::move(hook)), flatten_(flatten) {}
+              livehd::partition::Body_builder hook = {}, bool flatten = false, bool fuse_colors = false)
+      : g_(g),
+        outlib_(outlib),
+        top_(std::move(top)),
+        debug_color_(debug_color),
+        hook_(std::move(hook)),
+        flatten_(flatten),
+        fuse_colors_(fuse_colors) {}
 
   bool run();
   void report_stats();
@@ -120,25 +127,43 @@ private:
   // disconnected (one region per color), and a single-region result is emitted
   // directly under `top_` (no wrapper) — see build_module_as_top.
   bool flatten_ = false;
+  // The active coloring advertises multi-component color ids ("packed":true --
+  // the size window's misc bins of isolated leftovers). One region per COLOR
+  // for colored nodes, so the component split cannot silently shred the bins;
+  // color 0 keeps the per-component behavior (an uncolored design is not the
+  // window's output).
+  bool fuse_colors_ = false;
 
-  Union_find uf_;
+  // collect()-only state: the union-find over node handles and the rep -> dense
+  // region index map (ONE entry per region). Both are freed at the end of
+  // collect() -- everything after works on dense indices.
+  Union_find                                      uf_;
+  absl::flat_hash_map<hhds::Node_class, uint32_t> rep2idx_;
 
-  absl::flat_hash_map<hhds::Node_class, std::vector<hhds::Node_class>> region_nodes_;
+  // Per-region tables, indexed by the dense region index minted in collect()'s
+  // membership pass (forward_class first-encounter order, so deterministic).
+  // Plain vectors on purpose: the previous rep-keyed hash-of-vectors put a
+  // 56-byte Node_class key plus hash-slot overhead in front of every region AND
+  // a hash probe inside the per-edge hot loop; a whole-graph replica behind a
+  // hash map is exactly the shape that explodes on a multi-million-node def.
+  std::vector<std::vector<hhds::Node_class>> region_nodes_;
+  std::vector<int>                           region_color_;
 
-  absl::flat_hash_map<hhds::Node_class, std::vector<InputPort>>                        module_inputs_;
-  absl::flat_hash_map<hhds::Node_class, absl::flat_hash_map<hhds::Pin_class, size_t>>  in_index_;
-  absl::flat_hash_map<hhds::Node_class, std::vector<OutputPort>>                       module_outputs_;
-  absl::flat_hash_map<hhds::Pin_class, std::pair<hhds::Node_class, size_t>>            out_index_;
-  absl::flat_hash_map<hhds::Node_class, std::vector<IntEdge>>                          internal_edges_;
-  absl::flat_hash_map<hhds::Node_class, std::vector<ConstEdge>>                        const_edges_;
-  std::vector<OutWire>                                                                top_outputs_;
+  std::vector<std::vector<InputPort>>                        module_inputs_;
+  std::vector<absl::flat_hash_map<hhds::Pin_class, size_t>>  in_index_;
+  std::vector<std::vector<OutputPort>>                       module_outputs_;
+  absl::flat_hash_map<hhds::Pin_class, std::pair<uint32_t, size_t>> out_index_;
+  std::vector<std::vector<IntEdge>>                          internal_edges_;
+  std::vector<std::vector<ConstEdge>>                        const_edges_;
+  std::vector<OutWire>                                       top_outputs_;
 
-  absl::flat_hash_map<hhds::Node_class, std::shared_ptr<hhds::GraphIO>> module_gio_;
-  absl::flat_hash_map<hhds::Node_class, int>                            region_color_;
+  std::vector<std::shared_ptr<hhds::GraphIO>> module_gio_;
 
-  [[nodiscard]] hhds::Node_class region_of(const hhds::Node_class& n) { return uf_.find(n); }
+  // Dense index of the region holding `n`. collect()-time only (uf_/rep2idx_
+  // die with it); every partitionable node was indexed by the membership pass.
+  [[nodiscard]] uint32_t region_idx(const hhds::Node_class& n) { return rep2idx_.find(uf_.find(n))->second; }
 
-  void ensure_input_port(const hhds::Node_class& r, const hhds::Pin_class& driver, const SinkRef& sink, bool from_primary,
+  void ensure_input_port(uint32_t r, const hhds::Pin_class& driver, const SinkRef& sink, bool from_primary,
                          std::string_view pname) {
     auto& idx = in_index_[r];
     auto  it  = idx.find(driver);
@@ -157,35 +182,28 @@ private:
     if (out_index_.contains(driver)) {
       return;
     }
-    auto   rd = region_of(driver.get_master_node());
+    auto   rd = region_idx(driver.get_master_node());
     size_t i  = module_outputs_[rd].size();
     module_outputs_[rd].push_back(OutputPort{std::string{}, driver});
     out_index_[driver] = {rd, i};
   }
 
-  [[nodiscard]] std::string out_port_name(const hhds::Pin_class& driver) {
-    auto it = out_index_.find(driver);
-    return it == out_index_.end() ? std::string{} : module_outputs_[it->second.first][it->second.second].name;
-  }
-
   bool collect();
   void name_ports();
   void diagnose_colors();
-  void build_module(const hhds::Node_class& r);
-  void build_module_as_top(const hhds::Node_class& r);
-  void build_top();
+  void build_module(uint32_t r);
+  void build_module_as_top(uint32_t r);
+  void build_top(const std::vector<uint32_t>& regs);
   // Regions in a reproducible order: by color, then by the smallest member node
-  // id (invariant to which member the union-find picks as representative).
-  // `region_nodes_` / `module_gio_` are flat_hash_maps whose iteration order is
-  // unspecified; creating the per-region modules, Sub instances and boundary
-  // pins in that order made the serialized top lg (and downstream cgen/LEC)
-  // nondeterministic. Iterate this instead wherever construction order matters.
-  [[nodiscard]] std::vector<hhds::Node_class> ordered_regions();
-  void carry_node_attrs(hhds::Graph* body, const hhds::Node_class& orig, const hhds::Node_class& neo);
+  // id (invariant to which member the union-find picked as representative).
+  // Region indices are already deterministic; this order is what fixes the
+  // module/Sub/pin CREATION order (serialized top lg, downstream cgen/LEC).
+  [[nodiscard]] std::vector<uint32_t> ordered_regions();
+  void carry_node_attrs(const hhds::Node_class& orig, const hhds::Node_class& neo);
   void carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo);
 };
 
-void Partitioner::carry_node_attrs(hhds::Graph* body, const hhds::Node_class& orig, const hhds::Node_class& neo) {
+void Partitioner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Node_class& neo) {
   if (gu::has_name(orig)) {
     neo.attr(hhds::attrs::name).set(std::string{gu::node_name_of(orig)});
   }
@@ -193,7 +211,14 @@ void Partitioner::carry_node_attrs(hhds::Graph* body, const hhds::Node_class& or
     neo.attr(livehd::attrs::lut).set(std::string{a.get()});
   }
   if (auto a = orig.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
-    auto newid = body->source_locator().import_from(g_->source_locator(), a.get());
+    // Import into the output LIBRARY's shared srcmap, never the body's own
+    // locator: every body chains to the library base (hhds bind_library), so the
+    // id resolves from any region module, while a per-body import re-copies the
+    // per-FILE metadata (line-offset tables) into every one of the tens of
+    // thousands of region bodies -- measured at ~9 KB/node retained on XSCore,
+    // the std::bad_alloc. Ids are content-hashed, so the shared import dedups
+    // across bodies and defs for free.
+    auto newid = outlib_->source_map().import_from(g_->source_locator(), a.get());
     neo.attr(hhds::attrs::srcid).set(newid);
   }
 }
@@ -239,7 +264,13 @@ bool Partitioner::collect() {
       saw_uncolored_ = true;
     }
     uf_.find(n);
-    if (flatten_) {
+    // fuse_colors_: the coloring advertises multi-component ids (size-window
+    // misc bins); one region per color keeps the bins whole. Color 0 is
+    // exempt -- uncolored nodes are not the window's output and keep the
+    // per-component split. Note this also fuses SEEDED (block-attr) ids that
+    // span disconnected clouds: deliberate -- a user block is one region by
+    // declaration (its region_opts are keyed per color), not one per cloud.
+    if (flatten_ || (fuse_colors_ && c != NO_COLOR)) {
       auto [it, inserted] = color_anchor.try_emplace(c, n);
       if (!inserted) {
         uf_.merge(n, it->second);
@@ -261,22 +292,33 @@ bool Partitioner::collect() {
         .emit();
   }
 
-  // Region membership + color.
+  // Region membership + color; dense region indices are minted here, in
+  // forward_class first-encounter order (deterministic).
   for (auto n : g_->forward_class()) {
     if (!is_partitionable(n)) {
       continue;
     }
-    auto r = region_of(n);
-    region_nodes_[r].push_back(n);
-    region_color_[r] = node_color_of(n);
+    auto [it, inserted] = rep2idx_.try_emplace(uf_.find(n), static_cast<uint32_t>(region_nodes_.size()));
+    if (inserted) {
+      region_nodes_.emplace_back();
+      region_color_.push_back(node_color_of(n));  // every member shares the region's color
+    }
+    region_nodes_[it->second].push_back(n);
   }
+  const size_t nregions = region_nodes_.size();
+  module_inputs_.resize(nregions);
+  in_index_.resize(nregions);
+  module_outputs_.resize(nregions);
+  internal_edges_.resize(nregions);
+  const_edges_.resize(nregions);
+  module_gio_.resize(nregions);
 
   // Classify every edge feeding a region node (via inp_edges).
   for (auto n : g_->forward_class()) {
     if (!is_partitionable(n)) {
       continue;
     }
-    auto r = region_of(n);
+    auto r = region_idx(n);
     for (const auto& e : n.inp_edges()) {
       auto dn  = e.driver.get_master_node();
       auto spid = e.sink.get_port_id();
@@ -293,7 +335,7 @@ bool Partitioner::collect() {
         // pin_name_of resolves the graph input's declared port name directly.
         ensure_input_port(r, e.driver, SinkRef{n, spid}, /*from_primary=*/true, std::string{gu::pin_name_of(e.driver)});
       } else if (is_partitionable(dn)) {
-        auto rd = region_of(dn);
+        auto rd = region_idx(dn);
         if (rd == r) {
           if (!hook_) {  // dead on the hook path (see const_edges_ above)
             internal_edges_[r].push_back(IntEdge{e.driver, n, spid});
@@ -328,19 +370,37 @@ bool Partitioner::collect() {
       }
     }
   }
+
+  // The union-find and the rep map are dead from here on: everything below
+  // (naming, ordering, module builds, the wrapper) works on dense indices and
+  // out_index_. Free the def's largest side tables before output bodies grow.
+  uf_      = Union_find{};
+  rep2idx_ = {};
   return true;
 }
 
 void Partitioner::name_ports() {
+  // in_index_ is collect()'s dedup table; the port sorts below invalidate its
+  // indices and nothing reads it after collect -- drop it, don't rebuild it.
+  in_index_.clear();
+  out_index_.clear();  // rebuilt below after the sort settles indices
+
   // A boundary port becomes a wire in the region module; it must not collide
   // with a recreated internal node's name. The classic failure is a flop whose
   // q is a region output: the port would otherwise take the flop's own
   // wire_name and cgen would emit two same-named declarations (the output reg
-  // and the internal flop reg) at different widths. Reserve every internal
-  // recreated-node name per region so port naming routes around them.
-  absl::flat_hash_map<hhds::Node_class, absl::flat_hash_set<std::string>> internal_names;
-  for (auto& [r, nodes] : region_nodes_) {
-    auto& set = internal_names[r];
+  // and the internal flop reg) at different widths.
+  //
+  // One region at a time, with ONE `used` set covering that region's internal
+  // names AND its already-assigned ports: (a) the reserved-name set peaks at
+  // the largest region instead of holding every node name of the def at once
+  // (hundreds of MB on a multi-million-node def), and (b) an output port can
+  // no longer take an input port's name -- the previous per-loop pristine
+  // copies let `input x` and `output x` coexist in one module.
+  for (uint32_t r = 0; r < static_cast<uint32_t>(region_nodes_.size()); ++r) {
+    const auto&                      nodes = region_nodes_[r];
+    absl::flat_hash_set<std::string> used;
+    used.reserve(nodes.size());
     for (const auto& n : nodes) {
       // Reserve the name cgen will ACTUALLY emit for this node, which is its
       // user name OR — when unnamed — the synthetic `<type>_<nid>`
@@ -350,25 +410,19 @@ void Partitioner::name_ports() {
       // invalid Verilog. This only bit when a node and the port it drives land
       // in the same region — rare under a per-node coloring, but the norm for an
       // uncolored design that folds the whole graph into one color-0 region.
-      set.insert(sanitize(gu::default_instance_name(n)));
+      used.insert(sanitize(gu::default_instance_name(n)));
     }
-  }
 
-  for (auto& [r, ports] : module_inputs_) {
-    std::sort(ports.begin(), ports.end(), [](const InputPort& a, const InputPort& b) {
-      if (a.driver.get_debug_nid() != b.driver.get_debug_nid()) {
-        return a.driver.get_debug_nid() < b.driver.get_debug_nid();
-      }
-      return a.driver.get_port_id() < b.driver.get_port_id();
-    });
-    // re-index after sort
-    auto& idx = in_index_[r];
-    idx.clear();
-    absl::flat_hash_set<std::string> used = internal_names[r];
-    for (size_t i = 0; i < ports.size(); ++i) {
-      ports[i].name = [&] {
-        std::string base = ports[i].from_primary && !ports[i].primary_name.empty() ? ports[i].primary_name
-                                                                                   : std::string{gu::wire_name(ports[i].driver)};
+    {
+      auto& ports = module_inputs_[r];
+      std::sort(ports.begin(), ports.end(), [](const InputPort& a, const InputPort& b) {
+        if (a.driver.get_debug_nid() != b.driver.get_debug_nid()) {
+          return a.driver.get_debug_nid() < b.driver.get_debug_nid();
+        }
+        return a.driver.get_port_id() < b.driver.get_port_id();
+      });
+      for (auto& p : ports) {
+        std::string base = p.from_primary && !p.primary_name.empty() ? p.primary_name : std::string{gu::wire_name(p.driver)};
         base             = sanitize(base.empty() ? std::string{"in"} : base);
         std::string nm   = base;
         int         k    = 1;
@@ -376,73 +430,68 @@ void Partitioner::name_ports() {
           nm = base + "_" + std::to_string(k++);
         }
         used.insert(nm);
-        return nm;
-      }();
-      idx[ports[i].driver] = i;
+        p.name = nm;
+      }
     }
-  }
-  for (auto& [r, ports] : module_outputs_) {
-    std::sort(ports.begin(), ports.end(), [](const OutputPort& a, const OutputPort& b) {
-      if (a.driver.get_debug_nid() != b.driver.get_debug_nid()) {
-        return a.driver.get_debug_nid() < b.driver.get_debug_nid();
+
+    {
+      auto& ports = module_outputs_[r];
+      std::sort(ports.begin(), ports.end(), [](const OutputPort& a, const OutputPort& b) {
+        if (a.driver.get_debug_nid() != b.driver.get_debug_nid()) {
+          return a.driver.get_debug_nid() < b.driver.get_debug_nid();
+        }
+        return a.driver.get_port_id() < b.driver.get_port_id();
+      });
+      for (size_t i = 0; i < ports.size(); ++i) {
+        std::string base = sanitize(std::string{gu::wire_name(ports[i].driver)});
+        if (base.empty()) {
+          base = "out";
+        }
+        // A region output driven by a stateful node (flop/memory) shares that
+        // node's emitted reg wire name. cgen declares the output reg (from the IO
+        // decl) AND the node's own reg under that one name, at mismatched
+        // width/sign -> broken Verilog (it also skips the port=node assign when
+        // the names match). Give the port a distinct name so cgen emits a clean
+        // `port = node` assign, exactly like a normal module's flop-driven output.
+        auto dop = gu::type_op_of(ports[i].driver.get_master_node());
+        if (dop == Ntype_op::Flop || dop == Ntype_op::Memory) {
+          base += "_o";
+        }
+        std::string nm = base;
+        int         k  = 1;
+        while (used.contains(nm)) {
+          nm = base + "_" + std::to_string(k++);
+        }
+        used.insert(nm);
+        ports[i].name               = nm;
+        out_index_[ports[i].driver] = {r, i};
       }
-      return a.driver.get_port_id() < b.driver.get_port_id();
-    });
-  }
-  out_index_.clear();  // rebuilt below after the sort settles indices
-  for (auto& [r, ports] : module_outputs_) {
-    absl::flat_hash_set<std::string> used = internal_names[r];
-    for (size_t i = 0; i < ports.size(); ++i) {
-      std::string base = sanitize(std::string{gu::wire_name(ports[i].driver)});
-      if (base.empty()) {
-        base = "out";
-      }
-      // A region output driven by a stateful node (flop/memory) shares that
-      // node's emitted reg wire name. cgen declares the output reg (from the IO
-      // decl) AND the node's own reg under that one name, at mismatched
-      // width/sign -> broken Verilog (it also skips the port=node assign when
-      // the names match). Give the port a distinct name so cgen emits a clean
-      // `port = node` assign, exactly like a normal module's flop-driven output.
-      auto dop = gu::type_op_of(ports[i].driver.get_master_node());
-      if (dop == Ntype_op::Flop || dop == Ntype_op::Memory) {
-        base += "_o";
-      }
-      std::string nm = base;
-      int         k  = 1;
-      while (used.contains(nm)) {
-        nm = base + "_" + std::to_string(k++);
-      }
-      used.insert(nm);
-      ports[i].name      = nm;
-      out_index_[ports[i].driver] = {r, i};
     }
   }
 }
 
-std::vector<hhds::Node_class> Partitioner::ordered_regions() {
-  std::vector<hhds::Node_class> regs;
-  regs.reserve(region_nodes_.size());
-  for (auto& [r, nodes] : region_nodes_) {
-    (void)nodes;
-    regs.push_back(r);
-  }
-  auto min_nid = [&](const hhds::Node_class& r) {
-    uint64_t m = std::numeric_limits<uint64_t>::max();
+std::vector<uint32_t> Partitioner::ordered_regions() {
+  // min-nid is precomputed in one pass over the membership vectors: computing it
+  // inside the sort comparator re-walked whole regions O(R log R) times, which on
+  // a multi-million-node def is minutes of pure comparator time.
+  std::vector<uint32_t> regs(region_nodes_.size());
+  std::vector<uint64_t> min_nid(region_nodes_.size(), std::numeric_limits<uint64_t>::max());
+  for (uint32_t r = 0; r < static_cast<uint32_t>(region_nodes_.size()); ++r) {
+    regs[r] = r;
     for (const auto& n : region_nodes_[r]) {
-      m = std::min<uint64_t>(m, n.get_debug_nid());
+      min_nid[r] = std::min<uint64_t>(min_nid[r], n.get_debug_nid());
     }
-    return m;
-  };
-  std::sort(regs.begin(), regs.end(), [&](const hhds::Node_class& a, const hhds::Node_class& b) {
+  }
+  std::sort(regs.begin(), regs.end(), [&](uint32_t a, uint32_t b) {
     if (region_color_[a] != region_color_[b]) {
       return region_color_[a] < region_color_[b];
     }
-    return min_nid(a) < min_nid(b);
+    return min_nid[a] < min_nid[b];
   });
   return regs;
 }
 
-void Partitioner::build_module(const hhds::Node_class& r) {
+void Partitioner::build_module(uint32_t r) {
   int         color = region_color_[r];
   std::string name  = std::format("{}__c{}", top_, color);
   // Disambiguate if this color has multiple regions.
@@ -514,15 +563,27 @@ void Partitioner::build_module(const hhds::Node_class& r) {
     for (auto& p : module_outputs_[r]) {
       rb.outputs.push_back({p.name, p.driver, gu::bits_of(p.driver), !gu::is_unsign(p.driver)});
     }
-    rb.nodes = region_nodes_[r];
+    // rb.nodes is a non-owning span: the storage must outlive the synchronous
+    // hook call, so move it into a local (freeing the map slot) and view THAT.
+    auto rnodes = std::move(region_nodes_[r]);
+    rb.nodes    = rnodes;
     hook_(rb);
     body->commit();
     return;
   }
 
+  // Each region is this function's single visitor: take the membership and edge
+  // tables by move and drop the map slots, so the def's Partitioner state SHRINKS
+  // as the output bodies grow instead of stacking under them (these tables are
+  // the largest per-def transients -- hundreds of MB on a multi-million-node
+  // def). ordered_regions() already ran; nothing reads the entries again.
+  auto rnodes  = std::move(region_nodes_[r]);
+  auto redges  = std::move(internal_edges_[r]);
+  auto rconsts = std::move(const_edges_[r]);
+
   // Recreate region nodes.
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class> node_map;
-  for (const auto& n : region_nodes_[r]) {
+  for (const auto& n : rnodes) {
     auto op  = gu::type_op_of(n);
     auto neo = gu::create_typed_node(*body, op);
     if (op == Ntype_op::Sub) {
@@ -547,7 +608,7 @@ void Partitioner::build_module(const hhds::Node_class& r) {
       }
     }
     node_map[n] = neo;
-    carry_node_attrs(body.get(), n, neo);
+    carry_node_attrs(n, neo);
   }
 
   // Track which Sub output ports get a real (edge-carrying) pin, so the
@@ -565,24 +626,34 @@ void Partitioner::build_module(const hhds::Node_class& r) {
   };
 
   // Internal edges.
-  for (const auto& e : internal_edges_[r]) {
+  for (const auto& e : redges) {
     auto dp = driver_pin(e.driver);
     auto sp = node_map[e.snode].create_sink_pin(e.spid);
     dp.connect_sink(sp);
   }
-  // Constant edges (recreated inside the module).
-  for (const auto& e : const_edges_[r]) {
-    auto cp = gu::create_const(*body, gu::hydrate_const(e.cdriver));
+  // Constant edges, one recreated const node per SOURCE pin: the input had one
+  // const feeding K sinks, so the module gets one too -- per-edge recreation
+  // minted K duplicate Nconst nodes (plus pins and value attrs) into the output
+  // library for every shared constant.
+  absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class> const_map;
+  for (const auto& e : rconsts) {
+    auto it = const_map.find(e.cdriver);
+    if (it == const_map.end()) {
+      it = const_map.emplace(e.cdriver, gu::create_const(*body, gu::hydrate_const(e.cdriver))).first;
+    }
     auto sp = node_map[e.snode].create_sink_pin(e.spid);
-    cp.connect_sink(sp);
+    it->second.connect_sink(sp);
   }
-  // Boundary inputs.
-  for (const auto& p : module_inputs_[r]) {
+  // Boundary inputs. The sink lists are dead after this loop (build_top reads
+  // only name/driver/from_primary); free them region by region.
+  for (auto& p : module_inputs_[r]) {
     auto ipin = body->get_input_pin(p.name);
     for (const auto& s : p.sinks) {
       auto sp = node_map[s.node].create_sink_pin(s.pid);
       ipin.connect_sink(sp);
     }
+    p.sinks.clear();
+    p.sinks.shrink_to_fit();
   }
   // Boundary outputs.
   for (const auto& p : module_outputs_[r]) {
@@ -596,7 +667,7 @@ void Partitioner::build_module(const hhds::Node_class& r) {
   // pin that was never created. Width/sign come from the child decl (the
   // source pin is edge-less too, so hhds cannot enumerate it); ports wired
   // above keep their carried attrs.
-  for (const auto& n : region_nodes_[r]) {
+  for (const auto& n : rnodes) {
     if (gu::type_op_of(n) != Ntype_op::Sub) {
       continue;
     }
@@ -629,7 +700,7 @@ void Partitioner::build_module(const hhds::Node_class& r) {
 // the result is a drop-in replacement for the original def; name_ports()'s
 // collision renaming is bypassed on purpose (internal child nodes are
 // instance-path-prefixed by the flattener and cannot collide with port names).
-void Partitioner::build_module_as_top(const hhds::Node_class& r) {
+void Partitioner::build_module_as_top(uint32_t r) {
   auto src_gio = g_->get_io();
   auto gio     = outlib_->create_io(top_);
   module_gio_[r] = gio;
@@ -685,13 +756,22 @@ void Partitioner::build_module_as_top(const hhds::Node_class& r) {
         rb.outputs.push_back({ow.oname, ow.driver, gu::bits_of(ow.driver), !gu::is_unsign(ow.driver)});
       }
     }
-    rb.nodes = region_nodes_[r];
+    // Same span-lifetime rule as build_module's hook branch.
+    auto rnodes = std::move(region_nodes_[r]);
+    rb.nodes    = rnodes;
     hook_(rb);
   } else {
+    // Same consume-and-free as build_module: with one region these tables ARE
+    // the whole def (the whole DESIGN on the flatten path), so releasing them as
+    // the twin is built is the difference between 1x and 2x peak.
+    auto rnodes  = std::move(region_nodes_[r]);
+    auto redges  = std::move(internal_edges_[r]);
+    auto rconsts = std::move(const_edges_[r]);
+
     // Recreate the region logic (the LEC-equivalent twin), boundary-wired to
     // the primary ports instead of region ports.
     absl::flat_hash_map<hhds::Node_class, hhds::Node_class> node_map;
-    for (const auto& n : region_nodes_[r]) {
+    for (const auto& n : rnodes) {
       auto op  = gu::type_op_of(n);
       auto neo = gu::create_typed_node(*body, op);
       if (op == Ntype_op::Sub && n.get_subnode_io()) {
@@ -708,7 +788,7 @@ void Partitioner::build_module_as_top(const hhds::Node_class& r) {
         }
       }
       node_map[n] = neo;
-      carry_node_attrs(body.get(), n, neo);
+      carry_node_attrs(n, neo);
     }
 
     auto driver_pin = [&](const hhds::Pin_class& orig) {
@@ -717,17 +797,25 @@ void Partitioner::build_module_as_top(const hhds::Node_class& r) {
       return neo;
     };
 
-    for (const auto& e : internal_edges_[r]) {
+    for (const auto& e : redges) {
       driver_pin(e.driver).connect_sink(node_map[e.snode].create_sink_pin(e.spid));
     }
-    for (const auto& e : const_edges_[r]) {
-      gu::create_const(*body, gu::hydrate_const(e.cdriver)).connect_sink(node_map[e.snode].create_sink_pin(e.spid));
+    // One recreated const per source pin (see build_module).
+    absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class> const_map;
+    for (const auto& e : rconsts) {
+      auto cit = const_map.find(e.cdriver);
+      if (cit == const_map.end()) {
+        cit = const_map.emplace(e.cdriver, gu::create_const(*body, gu::hydrate_const(e.cdriver))).first;
+      }
+      cit->second.connect_sink(node_map[e.snode].create_sink_pin(e.spid));
     }
-    for (const auto& p : module_inputs_[r]) {
+    for (auto& p : module_inputs_[r]) {
       auto ipin = body->get_input_pin(p.primary_name);
       for (const auto& s : p.sinks) {
         ipin.connect_sink(node_map[s.node].create_sink_pin(s.pid));
       }
+      p.sinks.clear();
+      p.sinks.shrink_to_fit();
     }
     for (const auto& ow : top_outputs_) {
       if (ow.kind == OutWire::Region) {
@@ -738,7 +826,7 @@ void Partitioner::build_module_as_top(const hhds::Node_class& r) {
     // Materialize declared-but-unwired Sub outputs (same reader invariant as
     // build_module; "has an edge" is exact here because every created driver
     // pin above is immediately connected).
-    for (const auto& n : region_nodes_[r]) {
+    for (const auto& n : rnodes) {
       if (gu::type_op_of(n) != Ntype_op::Sub) {
         continue;
       }
@@ -776,7 +864,7 @@ void Partitioner::build_module_as_top(const hhds::Node_class& r) {
   body->commit();
 }
 
-void Partitioner::build_top() {
+void Partitioner::build_top(const std::vector<uint32_t>& regs) {
   auto src_gio = g_->get_io();
   auto tgio    = outlib_->create_io(top_);
   for (const auto& decl : src_gio->get_input_pin_decls()) {
@@ -808,9 +896,9 @@ void Partitioner::build_top() {
   }
 
   // One Sub instance per region.
-  absl::flat_hash_map<hhds::Node_class, hhds::Node_class>                     sub_of;
-  absl::flat_hash_map<hhds::Node_class, absl::flat_hash_map<std::string, hhds::Pin_class>> sub_out_pin;
-  for (const auto& r : ordered_regions()) {
+  std::vector<hhds::Node_class>                                  sub_of(module_gio_.size());
+  std::vector<absl::flat_hash_map<std::string, hhds::Pin_class>> sub_out_pin(module_gio_.size());
+  for (const auto& r : regs) {
     auto gio = module_gio_[r];
     auto sub = gu::create_typed_node(*t, Ntype_op::Sub);
     sub.set_subnode(gio);
@@ -828,9 +916,16 @@ void Partitioner::build_top() {
   // instance+port). Stamp bits/sign so cgen declares the top-level wire at the
   // right width (a Sub output that fans straight into other Subs otherwise
   // defaults to 1 bit).
+  //
+  // The region comes from out_index_ (collect() stored {region, port} for every
+  // exported driver), NOT from region_of(): out_index_ already knows it, and not
+  // consulting the union-find here is what lets run() free uf_ -- the def's
+  // second-largest table -- before any output body is built.
   auto get_sub_out = [&](const hhds::Pin_class& d) {
-    auto  rd    = region_of(d.get_master_node());
-    auto  pname = out_port_name(d);
+    auto oit = out_index_.find(d);
+    assert(oit != out_index_.end() && "build_top: driver was never exported as a region output");
+    auto        rd    = oit->second.first;
+    const auto& pname = module_outputs_[rd][oit->second.second].name;
     auto& m     = sub_out_pin[rd];
     auto  it    = m.find(pname);
     if (it != m.end()) {
@@ -848,12 +943,8 @@ void Partitioner::build_top() {
   };
 
   // Wire each module's input ports.
-  for (const auto& r : ordered_regions()) {
-    auto it = module_inputs_.find(r);
-    if (it == module_inputs_.end()) {
-      continue;
-    }
-    for (const auto& p : it->second) {
+  for (const auto& r : regs) {
+    for (const auto& p : module_inputs_[r]) {
       // The sub's GraphIO input port already carries the width+sign (create_io
       // above); cgen declares the port from there and sizes the connecting wire
       // from the driver. `bits`/`signed` are driver-pin properties, so do NOT
@@ -887,23 +978,18 @@ void Partitioner::build_top() {
 // can be pinpointed. Module-per-region keeps the rebuild correct regardless,
 // but a mismatch means the color pass violated "same id => identical region".
 void Partitioner::diagnose_colors() {
-  absl::flat_hash_map<int, std::vector<hhds::Node_class>> by_color;
-  for (auto& [r, nodes] : region_nodes_) {
-    (void)nodes;
+  absl::flat_hash_map<int, std::vector<uint32_t>> by_color;
+  for (uint32_t r = 0; r < static_cast<uint32_t>(region_nodes_.size()); ++r) {
     by_color[region_color_[r]].push_back(r);
   }
-  auto sig = [&](const hhds::Node_class& r) {
+  auto sig = [&](uint32_t r) {
     std::vector<int> in_w;
     std::vector<int> out_w;
-    if (module_inputs_.contains(r)) {
-      for (auto& p : module_inputs_[r]) {
-        in_w.push_back(gu::bits_of(p.driver));
-      }
+    for (auto& p : module_inputs_[r]) {
+      in_w.push_back(gu::bits_of(p.driver));
     }
-    if (module_outputs_.contains(r)) {
-      for (auto& p : module_outputs_[r]) {
-        out_w.push_back(gu::bits_of(p.driver));
-      }
+    for (auto& p : module_outputs_[r]) {
+      out_w.push_back(gu::bits_of(p.driver));
     }
     std::sort(in_w.begin(), in_w.end());
     std::sort(out_w.begin(), out_w.end());
@@ -931,8 +1017,8 @@ void Partitioner::diagnose_colors() {
                    color,
                    first,
                    s,
-                   gu::debug_name(regions.front()),
-                   gu::debug_name(regions[i]));
+                   gu::debug_name(region_nodes_[regions.front()].front()),
+                   gu::debug_name(region_nodes_[regions[i]].front()));
       }
     }
   }
@@ -942,11 +1028,10 @@ bool Partitioner::run() {
   if (!collect()) {
     return false;
   }
-  name_ports();
+  auto regs = ordered_regions();
   if (debug_color_) {
     diagnose_colors();
   }
-  auto regs = ordered_regions();
   // A def that collapses to a SINGLE region is emitted directly under its own
   // name and port list -- no wrapper. The region IS the def, so a `<def>` wrapper
   // whose only content is one `<def>__c<id>` instance plus the wires between them
@@ -954,17 +1039,19 @@ bool Partitioner::run() {
   // an instance for zero logic. This covers the whole-design flatten case
   // (pass.color flat) AND the common per-def case where a def's entire body is
   // one color. Emitting under the def's own IO also keeps the original,
-  // collision-free port names (no build_module `_o` renaming). Multi-region defs
-  // keep the wrapper+regions shape (the wrapper wires the several `__c<id>`
-  // regions together).
+  // collision-free port names (no build_module `_o` renaming) -- which is why
+  // name_ports() is skipped outright here. Multi-region defs keep the
+  // wrapper+regions shape (the wrapper wires the several `__c<id>` regions
+  // together).
   if (regs.size() == 1) {
     build_module_as_top(regs.front());
     return true;
   }
+  name_ports();
   for (const auto& r : regs) {
     build_module(r);
   }
-  build_top();
+  build_top(regs);
   return true;
 }
 
@@ -976,11 +1063,11 @@ void Partitioner::report_stats() {
   size_t total_ports = 0;
   std::print("pass.partition stats for top '{}':\n", top_);
   std::print("  regions: {}\n", region_nodes_.size());
-  for (auto& [r, nodes] : region_nodes_) {
-    size_t in  = module_inputs_.contains(r) ? module_inputs_[r].size() : 0;
-    size_t out = module_outputs_.contains(r) ? module_outputs_[r].size() : 0;
+  for (uint32_t r = 0; r < static_cast<uint32_t>(region_nodes_.size()); ++r) {
+    size_t in  = module_inputs_[r].size();
+    size_t out = module_outputs_[r].size();
     total_ports += in + out;
-    std::print("  region color={} nodes={} in_ports={} out_ports={}\n", region_color_[r], nodes.size(), in, out);
+    std::print("  region color={} nodes={} in_ports={} out_ports={}\n", region_color_[r], region_nodes_[r].size(), in, out);
   }
   std::print("  total boundary ports: {}\n", total_ports);
 }
@@ -1026,6 +1113,20 @@ hhds::Graph* resolve_order(const std::vector<std::shared_ptr<hhds::Graph>>& grap
   };
   dfs(g);
   return g;
+}
+
+// Does g's active coloring advertise multi-component color ids ("packed":true,
+// written by pass.color synth when a min floor is active)? The size window
+// bin-packs isolated under-min leftovers into misc bins; without the matching
+// anchor union in collect() the component split would silently shred them back
+// into per-cloud modules. Same substring probe as flatten_resolved below — the
+// blob is machine-written by build_coloring_info_json. Read off the TOP graph:
+// one pass.color run colors the whole hierarchy, so the flag is global.
+bool coloring_packed(hhds::Graph* g) {
+  if (auto a = g->get_input_node().attr(livehd::attrs::coloring_info); a.has()) {
+    return std::string_view{a.get()}.find("\"packed\":true") != std::string_view::npos;
+  }
+  return false;
 }
 
 // Resolve Flatten_mode::automatic against g's active coloring: a
@@ -1121,8 +1222,9 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
     return ok;
   }
 
+  const bool fuse_colors = coloring_packed(g);
   for (auto* def : order) {
-    Partitioner p(def, outlib, std::string{def->get_name()}, debug_color, hook);
+    Partitioner p(def, outlib, std::string{def->get_name()}, debug_color, hook, /*flatten=*/false, fuse_colors);
     if (!p.run()) {
       return false;
     }
@@ -1187,8 +1289,9 @@ void Pass_partition::partition(Eprp_var& var) {
       }
       return;
     }
+    const bool fuse_colors = coloring_packed(g);
     for (auto* def : order) {
-      Partitioner p(def, nullptr, std::string{def->get_name()}, dbg);
+      Partitioner p(def, nullptr, std::string{def->get_name()}, dbg, {}, /*flatten=*/false, fuse_colors);
       p.report_stats();
     }
     return;

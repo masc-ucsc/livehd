@@ -343,7 +343,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "pass") {
     print_json_line(
-        R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut|flat node coloring), partition (region->module Sub split), abc (combinational ABC tech-map), opentimer (OpenTimer STA on a tech-mapped module -> timing.json), liberty gensim <file.lib> (Liberty -> sim models), semdiff (structural diff/match of two lg: libraries via --ref/--impl; `lhd describe \"pass semdiff\"`)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","abc","opentimer","liberty","semdiff"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"ref","type":"lg:DIR (semdiff)"},{"name":"impl","type":"lg:DIR (semdiff)"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder"]})json");
+        R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut|flat|reduce node coloring/rewrite), partition (region->module Sub split), abc (combinational ABC tech-map), opentimer (OpenTimer STA on a tech-mapped module -> timing.json), liberty gensim <file.lib> (Liberty -> sim models), semdiff (structural diff/match of two lg: libraries via --ref/--impl; `lhd describe \"pass semdiff\"`)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","abc","opentimer","liberty","semdiff"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"ref","type":"lg:DIR (semdiff)"},{"name":"impl","type":"lg:DIR (semdiff)"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder"]})json");
     return 0;
   }
   if (name == "lnast-dump") {
@@ -579,7 +579,7 @@ int help_pass(const std::string& sub) {
     std::print(
         "lhd pass color <alg> — node coloring over an lg: library (in place)\n"
         "\n"
-        "usage: lhd pass color [acyclic|cgen|synth|path|mincut|flat|clear] --top M lg:DIR\n"
+        "usage: lhd pass color [acyclic|cgen|synth|path|mincut|flat|reduce|clear] --top M lg:DIR\n"
         "  alg defaults to acyclic. The coloring is written back into the input lg:. With\n"
         "  --top the whole instance hierarchy is colored (each unique def once); set\n"
         "  pass.color.hier=false to limit it to the top def.\n"
@@ -605,6 +605,13 @@ int help_pass(const std::string& sub) {
         "           (--set iters, mincut_alg, and the kernel --seed)\n"
         "  flat     one single color for the entire selected hierarchy — the coloring\n"
         "           equivalent of flattening the design (ignores pass.color.continuous)\n"
+        "  reduce   NOT a labeling: finds repeated combinational cones (>= --set min_count\n"
+        "           occurrences of >= --set min_nodes nodes, alpha-blind structural match;\n"
+        "           constants may differ per site — a divergent literal becomes a const\n"
+        "           input port, the unrolled-loop shape) and REWRITES the library in place:\n"
+        "           each pattern becomes one shared `pat_<digest>` def instantiated at\n"
+        "           every site. --set min_win requires an estimated per-site Verilog line\n"
+        "           win before a cone is extracted (0 = extract on node count alone)\n"
         "  clear    remove any existing coloring\n"
         "\n"
         "--stats (or --set pass.color.stats=true) reports what the coloring produced, on\n"
@@ -742,7 +749,8 @@ int help_pass(const std::string& sub) {
       "usage: lhd pass <subcommand> [args] [--top M] lg:DIR [--emit-dir lg:OUT/]\n"
       "\n"
       "subcommands (run `lhd pass <subcommand> --help` for each one's --set options):\n"
-      "  color <alg>          acyclic|synth|path|mincut|flat node coloring (in place)\n"
+      "  color <alg>          acyclic|synth|path|mincut|flat coloring; reduce = repeated-\n"
+      "                       cone extraction into shared pat_* defs (all in place)\n"
       "  partition            region -> module Sub split (-> new lg:)\n"
       "  abc                  combinational ABC tech-map (-> new lg:)\n"
       "  opentimer            OpenTimer STA on a tech-mapped module (-> timing.json)\n"
@@ -788,7 +796,7 @@ constexpr std::string_view kJsonPyropeOverview =
     R"json({"schema_version":1,"name":"pyrope","description":"Pyrope developer tools (language-adjacent, not the compile/synth flow)","subcommands":[{"name":"fmt","summary":"format Pyrope source (clang-format-like): -i in place, else stdout"},{"name":"lsp","summary":"the Pyrope LSP server over stdio (JSON-RPC; .prp only)"}],"examples":["lhd pyrope fmt -i foo.prp","lhd pyrope lsp"]})json";
 
 constexpr std::string_view kJsonPassColor =
-    R"json({"schema_version":1,"name":"pass color","description":"Node coloring over an lg: library, in place: acyclic|cgen|synth|path|mincut|flat|clear (alg defaults to acyclic). flat gives the whole --top hierarchy one color (the flatten equivalent). The coloring is written back into the input lg:","args":{"required":[{"name":"alg","type":"enum","values":["acyclic","cgen","synth","path","mincut","flat","clear"],"default":"acyclic","positional":true},{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"set","type":"pass.color.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass color flat --top m lg:dir"]})json";
+    R"json({"schema_version":1,"name":"pass color","description":"Node coloring over an lg: library, in place: acyclic|cgen|synth|path|mincut|flat|reduce|clear (alg defaults to acyclic). flat gives the whole --top hierarchy one color (the flatten equivalent). The coloring is written back into the input lg:","args":{"required":[{"name":"alg","type":"enum","values":["acyclic","cgen","synth","path","mincut","flat","reduce","clear"],"default":"acyclic","positional":true},{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"set","type":"pass.color.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass color flat --top m lg:dir"]})json";
 
 constexpr std::string_view kJsonPassPartition =
     R"json({"schema_version":1,"name":"pass partition","description":"Split a design into region -> module Subs (LEC-equivalent). --emit-dir lg: (must differ from the input) receives the partitioned library","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.partition.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass partition --top m lg:dir --emit-dir lg:parts"]})json";

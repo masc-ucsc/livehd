@@ -259,3 +259,33 @@ TEST(GeWeight, ConstantsAndIoWeighNothing) {
   EXPECT_EQ(ge_weight(g->get_input_pin("a").get_master_node()), 0u) << "graph IO is a builtin node";
   EXPECT_EQ(ge_weight(hhds::Node_class{}), 0u) << "an invalid handle weighs nothing";
 }
+
+// mappable_ge_weight: what the mapper will BLAST inside this def's region. A
+// Sub is a boundary there (its logic is weighed in its own def), so it weighs
+// ~1; everything else -- including Memory, which pass.abc can decompose --
+// keeps ge_weight. (The size window and its stats use this measure; ge_weight
+// keeps the boundary semantics for color_absorb's black-box weigher.)
+TEST(GeWeight, MappableWeighsSubAsOne) {
+  using livehd::graph_util::mappable_ge_weight;
+
+  auto& lib = lib_for("lgdb_ge_map");
+  auto  cio = lib.create_io("map_child");
+  cio->add_input("x", 0);
+  cio->add_output("o", 1);
+  cio->set_bits("x", 64);
+  cio->set_bits("o", 64);
+  auto cg = cio->create_graph();
+  (void)cg;
+
+  auto pio = lib.create_io("map_parent");
+  pio->add_input("a", 0);
+  pio->add_output("z", 1);
+  auto pg  = pio->create_graph();
+  auto sub = create_typed_node(*pg, Ntype_op::Sub);
+  sub.set_subnode(cio);
+  ASSERT_EQ(ge_weight(sub), 128u);
+  EXPECT_EQ(mappable_ge_weight(sub), 1u);
+
+  auto n = one_node("lgdb_ge_map2", "and32m", Ntype_op::And, 32);
+  EXPECT_EQ(mappable_ge_weight(n.n), 32u) << "plain logic keeps its ge_weight";
+}

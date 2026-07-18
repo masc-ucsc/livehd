@@ -129,7 +129,8 @@ struct Color_opts {
   bool continuous = false;
   bool keep_colored = false;
 
-  // Size window, in GATE EQUIVALENTS (graph_util::ge_weight), honored by the
+  // Size window, in MAPPABLE gate equivalents (graph_util::mappable_ge_weight:
+  // a Sub instance counts ~1, everything else ge_weight), honored by the
   // algorithms that opt in (today: synth). Regions below `min_ge` are merged
   // into a neighbour; regions above `max_ge` are split. 0 disables that half of
   // the window.

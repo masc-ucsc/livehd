@@ -375,10 +375,11 @@ inline void debug_assert_cells_sized([[maybe_unused]] hhds::Graph& g, [[maybe_un
       continue;
     }
     I(bits_of(dpin) != 0,
-      std::format("{} left cell '{}' ({}) at bits==0 -- unbounded width (front-end did not size it)",
+      std::format("{} left cell '{}' ({}) in def '{}' at bits==0 -- unbounded width (front-end did not size it)",
                   where,
                   debug_name(node),
-                  Ntype::get_name(op))
+                  Ntype::get_name(op),
+                  std::string_view{g.get_name()})
           .c_str());
   }
 #endif
@@ -936,6 +937,27 @@ namespace ge_detail {
 
     default: return atleast1(ge_detail::out_width(node));
   }
+}
+
+// The GE that a synthesis mapper (pass.abc) will actually bit-blast when this
+// node sits inside a region of ITS def. A Sub is a blackbox there -- its logic
+// is weighed in its own def's regions, so counting its declared port bits here
+// double-counts the child and lifts a zero-logic glue+instance region past any
+// size floor (XSCore: thousands of <=2-node regions "weighing" 5k-50k GE from
+// ports alone); it floors at 1 so a region is never weightless. Everything
+// else keeps ge_weight -- including Memory, which pass.abc DOES decompose when
+// asked (memory=true), so its boundary weight is a fair blast estimate.
+//
+// Use this for region-size windows and their stats; keep ge_weight where the
+// boundary itself is the cost being modeled (color_absorb's black-box weigher).
+[[nodiscard]] inline uint64_t mappable_ge_weight(const hhds::Node_class& node) {
+  if (node.is_invalid() || is_builtin_node(node)) {
+    return 0;
+  }
+  if (type_op_of(node) == Ntype_op::Sub) {
+    return 1;
+  }
+  return ge_weight(node);
 }
 
 }  // namespace livehd::graph_util

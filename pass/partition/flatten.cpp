@@ -100,7 +100,12 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
     neo.attr(livehd::attrs::lut).set(std::string{a.get()});
   }
   if (auto a = orig.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
-    auto newid = flat_->source_locator().import_from(ctx->src->source_locator(), a.get());
+    // Into the owning library's shared srcmap, not the flat body's own locator:
+    // the flat def is a deleted-after-use scratch, and a per-body import would
+    // copy every source file's line-offset table into it (same shape as the
+    // pass_partition carry_node_attrs blowup). The flat body resolves the id
+    // through its library base chain.
+    auto newid = lib_->source_map().import_from(ctx->src->source_locator(), a.get());
     neo.attr(hhds::attrs::srcid).set(newid);
   }
   // The flat per-def color is what pass.partition consumes downstream — carry

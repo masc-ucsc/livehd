@@ -569,7 +569,16 @@ void pass_command(Options& opts, Result& res) {
 
   if (sub == "color") {
     std::string alg = opts.files.size() > 1 ? opts.files[1] : std::string{"acyclic"};
-    Eprp_var    var;
+    if (alg == "reduce" && find_slot(opts.emit_dirs, "lg") != nullptr) {
+      // reduce is not a region labeling: it rewrites lg_in in place (shared
+      // pattern defs + instance splices), so fusing pass.partition over its
+      // leftover colors would shred the reduced defs into modules. Refuse
+      // BEFORE the pass runs -- after it, the library is already rewritten.
+      throw Lhd_error{"usage",
+                      "color reduce rewrites the input lg: in place; --emit-dir lg: is not supported",
+                      "copy the lg: dir first if you need the original; run `lhd pass partition` separately for region modules"};
+    }
+    Eprp_var var;
     load_lg_into_var(lg_in, var);
     if (var.graphs.empty()) {
       throw Lhd_error{"config", std::format("lg: input {} holds no graphs", lg_in), ""};

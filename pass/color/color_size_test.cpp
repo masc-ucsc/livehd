@@ -263,3 +263,95 @@ TEST(ColorSize, IndivisibleOversizeNodeIsCountedNotDropped) {
   EXPECT_EQ(out.size(), 1u) << "the node survives";
   EXPECT_EQ(st.left_over, 1u) << "an unsplittable region must be reported";
 }
+
+// Isolated leftovers are BIN-PACKED. Two clouds that share no node-node edge
+// (both hang off the primary input, which is an adjacency hole) can never
+// merge_small into each other; the packer must still fold them into one
+// deliberately multi-component bin once their sum clears the floor.
+TEST(ColorSize, PacksIsolatedLeftoversIntoBins) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_cs_pack");
+  auto  gio = lib.create_io("pack");
+  gio->add_input("a", 0);
+  gio->add_output("y1", 1);
+  gio->add_output("y2", 2);
+  auto g  = gio->create_graph();
+  auto in = g->get_input_pin("a");
+  set_bits(in, 8);
+
+  Node2Id m;
+  int     id = 1;
+  for (const char* out_name : {"y1", "y2"}) {  // two disconnected 3-node clouds, 24 GE each
+    auto prev = in;
+    for (int i = 0; i < 3; ++i) {
+      auto node = create_typed_node(*g, Ntype_op::And);
+      prev.connect_sink(node.create_sink_pin(0));
+      in.connect_sink(node.create_sink_pin(1));
+      auto d = node.create_driver_pin(0);
+      set_bits(d, 8);
+      m[node] = id;
+      prev    = d;
+    }
+    prev.connect_sink(g->get_output_pin(out_name));
+    ++id;
+  }
+
+  Size_window_stats st;
+  auto              out = apply_size_window(g.get(), m, 40, 0, &st);
+
+  EXPECT_EQ(st.merges, 0u) << "no adjacency: merge_small must not have been able to act";
+  EXPECT_EQ(st.packed, 1u) << "the two 24-GE clouds pack into one 48-GE bin";
+  EXPECT_EQ(st.left_under, 0u);
+  EXPECT_EQ(region_ge(out).size(), 1u) << "one multi-component bin";
+}
+
+// A def whose ENTIRE body is below min has nothing to pack with: the last bin
+// stays under min and must be reported, not hidden.
+TEST(ColorSize, DefBoundLeftoverStaysReported) {
+  auto c = make_chain("lgdb_cs_defbound", "defbound", 3, 8);  // 24 GE total
+  auto m = all_singletons(c);
+
+  Size_window_stats st;
+  auto              out = apply_size_window(c.g.get(), m, 100, 0, &st);
+
+  EXPECT_EQ(region_ge(out).size(), 1u) << "the chain still fuses into one region";
+  EXPECT_EQ(st.left_under, 1u) << "the def's whole body is under min: report it";
+}
+
+// The window weighs MAPPABLE GE: a Sub is a blackbox to the mapper (its logic
+// is weighed in its own def), so wide declared ports must not make a lone
+// instance look like an oversize region.
+TEST(ColorSize, SubWeighsMappableNotPortBits) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_cs_subw");
+  auto  cio = lib.create_io("subw_child");
+  cio->add_input("x", 0);
+  cio->add_output("o", 1);
+  cio->set_bits("x", 100);
+  cio->set_bits("o", 100);
+  auto cg = cio->create_graph();
+  (void)cg;
+
+  auto pio = lib.create_io("subw_parent");
+  pio->add_input("a", 0);
+  pio->add_output("z", 1);
+  auto pg  = pio->create_graph();
+  auto in  = pg->get_input_pin("a");
+  set_bits(in, 100);
+  auto sub = create_typed_node(*pg, Ntype_op::Sub);
+  sub.set_subnode(cio);
+  in.connect_sink(sub.create_sink_pin(0));
+  auto d = sub.create_driver_pin(1);
+  set_bits(d, 100);
+  d.connect_sink(pg->get_output_pin("z"));
+
+  ASSERT_EQ(ge_weight(sub), 200u) << "boundary weight unchanged (absorb still uses it)";
+
+  Node2Id m;
+  m[sub] = 1;
+
+  Size_window_stats st;
+  auto              out = apply_size_window(pg.get(), m, 0, 50, &st);
+
+  EXPECT_EQ(region_ge(out).size(), 1u);
+  EXPECT_EQ(st.splits, 0u) << "1 mappable GE is nowhere near the 50-GE ceiling";
+  EXPECT_EQ(st.left_over, 0u) << "port bits must not fake an oversize region";
+}

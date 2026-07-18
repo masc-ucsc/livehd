@@ -103,13 +103,15 @@ int apply_coloring(hhds::Graph *g, const Node2Id &node2id_in,
       ++sizes->partitionable;
     }
     // Called exactly once per node, from the walk apply_coloring already makes,
-    // so `ge_weight` costs one pass over the node's edges and only when a stats
-    // sink asked for it at all.
+    // so the weight costs one pass over the node's edges and only when a stats
+    // sink asked for it at all. MAPPABLE GE (Sub ~1), the same measure
+    // the size window enforces -- with raw ge_weight here the report would
+    // claim under/over counts for a window nothing enforced.
     auto tally = [&](int color) {
       seen_ids.insert(color);
       if (sizes != nullptr) {
         ++sizes->color_nodes[color];
-        sizes->color_ge[color] += livehd::graph_util::ge_weight(n);
+        sizes->color_ge[color] += livehd::graph_util::mappable_ge_weight(n);
       }
     };
     if (seeded && has_color(n) && color_of(n) != 0) {

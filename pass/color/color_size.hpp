@@ -34,7 +34,8 @@ struct Size_window_stats {
   uint64_t regions_out  = 0;  // regions after
   uint64_t merges       = 0;  // merge-small steps taken
   uint64_t splits       = 0;  // regions that were split
-  uint64_t left_under   = 0;  // regions still under min: no neighbour to merge into
+  uint64_t packed       = 0;  // isolated under-min regions folded into misc bins
+  uint64_t left_under   = 0;  // regions still under min: the def's whole body is below it
   uint64_t left_over    = 0;  // regions still over max: indivisible (one huge node)
 };
 
@@ -43,21 +44,36 @@ struct Size_window_stats {
 // window; 0/0 returns the input's component split unchanged.
 //
 // The returned ids are 1..k, minted in `forward_class()` first-encounter order --
-// a deterministic function of the graph, not of hash iteration. Every id is
-// exactly one connected region, so a caller does NOT need Color_opts::continuous
-// on top (it would only relabel what is already split).
+// a deterministic function of the graph, not of hash iteration. Ids are one
+// connected region each EXCEPT the misc bins below, so a caller must NOT apply
+// Color_opts::continuous on top (it would shred the bins back apart).
+//
+// Isolated leftovers are BIN-PACKED: after the merge fixpoint, a region still
+// under min is an entire connected component below min (nothing it may legally
+// merge with), and those are folded per def into 'misc' bins of ~min_ge each.
+// The bins are deliberately multi-component -- disjoint clouds map
+// independently inside one ABC region, and one module per ~min beats hundreds
+// of one-flop modules on tool overhead. Consumers see the packing via the
+// coloring_info params ("packed":true) and pass.partition unions same-color
+// components when it is set (its default is one module per CONNECTED
+// component).
 //
 // Two invariants the caller may rely on, and one it may not:
 //   * no region is over max_ge   -- UNLESS a single node weighs more than max on
 //     its own (a wide Mult); such a node is indivisible and is counted in
 //     `left_over` rather than silently dropped.
-//   * no region is under min_ge  -- UNLESS it has no neighbour at all (a def
-//     whose entire body is smaller than min: `left_under`). That case is what the
-//     cross-hierarchy absorb pass exists to fix; nothing here can.
+//   * no region is under min_ge  -- UNLESS the def's ENTIRE partitionable body
+//     weighs less than min (all leftovers pack into one last under-min bin:
+//     `left_under`). That case is what the cross-hierarchy absorb pass exists
+//     to fix; nothing def-local can.
 //   * NOT maintained: an acyclic region quotient graph. Merging freely can put a
 //     formerly cross-region comb cycle inside one region, or create a cycle
 //     between two regions. Nothing downstream of a coloring requires a quotient
 //     DAG (verified across pass.partition / pass.abc / pass.lec / cgen-verilog).
+//
+// Weights are MAPPABLE gate equivalents (graph_util::mappable_ge_weight): a
+// Sub counts ~1, since its logic is weighed in its own def's regions -- port-bit
+// weights let zero-logic glue+instance regions dodge the floor forever.
 [[nodiscard]] Node2Id apply_size_window(hhds::Graph* g, const Node2Id& node2id, uint64_t min_ge, uint64_t max_ge,
                                         Size_window_stats* st = nullptr);
 

@@ -156,12 +156,13 @@ void Color_synth::label(hhds::Graph* g) {
     o.continuous = false;
     if (opts.verbose) {
       std::print(stderr,
-                 "[color.synth] {} window: {} -> {} region(s), {} merge(s), {} split(s), {} under min, {} over max\n",
+                 "[color.synth] {} window: {} -> {} region(s), {} merge(s), {} split(s), {} packed, {} under min, {} over max\n",
                  g->get_name(),
                  st.regions_in,
                  st.regions_out,
                  st.merges,
                  st.splits,
+                 st.packed,
                  st.left_under,
                  st.left_over);
     }

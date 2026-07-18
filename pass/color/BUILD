@@ -41,4 +41,5 @@ cc_library(
     "color_flat_test",
     "color_size_test",
     "color_absorb_test",
+    "color_reduce_test",
 ]]

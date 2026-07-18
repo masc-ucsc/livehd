@@ -31,10 +31,11 @@ struct Region_body {
   };
   std::vector<Port> inputs;
   std::vector<Port> outputs;
-  // Region nodes (handles into `src`). A non-owning view into the partitioner's
-  // own region_nodes_ storage, which outlives the synchronous hook call -- so a
-  // whole-design flatten does not copy an O(nodes) Node_class vector (~1.4 GB on
-  // a flat XSCore) into every Region_body just to iterate it once.
+  // Region nodes (handles into `src`). A non-owning view into a buffer the
+  // partitioner keeps alive for the duration of the synchronous hook call (and
+  // frees right after) -- so a whole-design flatten does not copy an O(nodes)
+  // Node_class vector (~1.4 GB on a flat XSCore) into every Region_body just to
+  // iterate it once. Do NOT stash this span past the hook's return.
   std::span<const hhds::Node_class> nodes;
 };
 

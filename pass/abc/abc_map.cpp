@@ -1654,9 +1654,12 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
   auto* body = rb.body;
 
   // Source-map carry-through (task 2a-abc): ABC's strash/dch destroy per-node
-  // provenance, so re-mint each output port's original driver srcid into the
-  // body locator. Computed up front so the output-concat glue can carry it and
-  // the per-gate cone attribution below can reuse it.
+  // provenance, so re-mint each output port's original driver srcid. Into the
+  // output LIBRARY's shared srcmap, never the body's own locator: a per-body
+  // import re-copies the per-FILE metadata (line-offset tables) into every
+  // region body -- the pass.partition std::bad_alloc shape -- while the body
+  // resolves the id through its library base chain either way.
+  auto& out_srcmap = body->get_io()->get_library()->source_map();
   std::vector<hhds::SourceId> po_srcid(rb.outputs.size(), hhds::SourceId_invalid);
   for (size_t po = 0; po < rb.outputs.size(); ++po) {
     auto drv = rb.outputs[po].src_driver;
@@ -1668,7 +1671,7 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
       continue;
     }
     if (auto a = onode.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
-      po_srcid[po] = body->source_locator().import_from(rb.src->source_locator(), a.get());
+      po_srcid[po] = out_srcmap.import_from(rb.src->source_locator(), a.get());
     }
   }
 
@@ -2357,7 +2360,9 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
             continue;
           }
           port_roots.push_back({drv});
-          cone_srcid.push_back(body->source_locator().import_from(rb.src->source_locator(), sid_attr.get()));
+          // Into the library srcmap, not the body locator (see po_srcid above).
+          cone_srcid.push_back(
+              body->get_io()->get_library()->source_map().import_from(rb.src->source_locator(), sid_attr.get()));
         }
       }
     }
