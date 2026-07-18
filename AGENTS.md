@@ -28,7 +28,7 @@ LiveHD depends on several sibling repos. **Always look in these exact paths — 
 - `../iassert/` — iassert library (`I(...)`, `GI(...)` invariant macros).
 - `../tree-sitter-pyrope/` — Tree-sitter grammar for Pyrope. The grammar lives at `../tree-sitter-pyrope/grammar.js`; generated parser sources are under `../tree-sitter-pyrope/src/`.
 
-**Rule:** if you need anything from one of these libraries (e.g. `grammar.js`, `tree.hpp`, `graph.hpp`, `attr.hpp`), open it directly at the path above. Do **not** start a `find / ...`, `find . ...`, or recursive `grep` to locate them — they are always at these fixed sibling paths and are configured as `local_path_override` in `MODULE.bazel`. Running a broad `find` is wasteful and frequently the wrong tool; go straight to the known path.
+**Rule:** if you need anything from one of these libraries (e.g. `grammar.js`, `tree.hpp`, `graph.hpp`, `attr.hpp`), open it directly at the path above. Do **not** start a `find / ...`, `find . ...`, or recursive `grep` to locate them — they are always at these fixed sibling paths. The bazel build fetches them as git-pinned plain repos (`use_repo_rule git_repository` in `MODULE.bazel`, NOT `bazel_dep` + `git_override`, so livehd stays self-contained when consumed as a bazel dependency); each has a commented `local_repository` swap for co-development against the sibling checkout. Running a broad `find` is wasteful and frequently the wrong tool; go straight to the known path.
 
 ## Key Directories
 

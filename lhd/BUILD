@@ -84,6 +84,22 @@ cc_library(
     ],
 )
 
+# The Slop/iassert sim runtime as SOURCE files: `lhd sim` host-compiles its
+# generated driver at run time and resolves slop.hpp / iassert.hpp /
+# vcd_writer.cpp via its runfiles probe (lhd_kernel_common.cpp). Riding as
+# `data` on :lhd means every consumer that depends on the binary — including
+# other bazel modules (e.g. the lhdsuite bench repo) — gets a sim-capable lhd
+# with no extra wiring; the dev-layout ../hlop sibling fallback still works
+# outside bazel-run contexts.
+filegroup(
+    name = "sim_runtime_hdrs",
+    srcs = [
+        "@hlop//hlop:sim_runtime_hdrs",
+        "@iassert//:sim_runtime_hdrs",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 cc_binary(
     name = "lhd",
     srcs = [
@@ -94,6 +110,7 @@ cc_binary(
     additional_linker_inputs = ["lhd_export.lds"],
     copts = COPTS,
     data = [
+        ":sim_runtime_hdrs",
         "//inou/yosys:scripts",
     ],
     # `--export-dynamic` lets the dlopen'd yosys-slang plugin bind to the Yosys

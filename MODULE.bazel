@@ -11,7 +11,9 @@ bazel_dep(name = "rules_python", version = "2.2.0")
 
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 new_git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
+local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
 new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
 
 bazel_dep(name = "rules_cc", version = "0.2.22")
@@ -59,25 +61,40 @@ bazel_dep(name = "libffi", version = "3.4.7.bcr.4")
 # dependency on a system/homebrew libgmp). See packages/cvc5.BUILD.
 bazel_dep(name = "gmp", version = "6.3.0.bcr.2")
 
+# iassert / hlop / hhds — the masc-ucsc sibling libraries, fetched as PLAIN
+# git repos (use_repo_rule), NOT as bazel_dep + git_override. A git_override
+# only takes effect in the ROOT module, so the module form forced every
+# consumer of livehd-as-a-dependency to replicate the three pins in its own
+# MODULE.bazel; a use_repo_rule fetch works from any position in the dep
+# graph (same pattern as @abc/@prpparse/@slang below), making livehd
+# self-contained. Their BUILD files resolve external labels (@rules_cc,
+# @abseil-cpp, @iassert, @googletest, ...) through livehd's own deps.
+
 # iassert
-bazel_dep(name = "iassert", version = "0.1.0")
-git_override(
-    module_name = "iassert",
-    remote = "https://github.com/masc-ucsc/iassert.git",
+# The patch (TEMPORARY) adds the public sim_runtime_hdrs filegroup that
+# //lhd:lhd stages into its runfiles for the `lhd sim` host-compile stage;
+# drop it once upstream iassert ships the filegroup and the pin moves past it.
+git_repository(
+    name = "iassert",
     commit = "b18182f668ff42b0f96c3a1e3e6deee4e6da221f",  # "fix un-initialized access": sigaction sa_mask (todo/ 1s)
+    patch_args = ["-p1"],
+    patches = ["//packages:iassert_sim_hdrs.patch"],
+    remote = "https://github.com/masc-ucsc/iassert.git",
 )
-# For local debug/testing, swap the git_override above for:
-# local_path_override(module_name = "iassert", path = "../iassert") # sometimes useful to debug together with iassert patches
+# For local debug/testing, swap the git_repository above for:
+# local_repository(name = "iassert", path = "../iassert") # sometimes useful to debug together with iassert patches
 
 # hlop (Dlop value type + slop/dlop execution layer)
-bazel_dep(name = "hlop", version = "0.2.0")
-git_override(
-    module_name = "hlop",
-    remote = "https://github.com/masc-ucsc/hlop.git",
+# TEMPORARY patch: same sim_runtime_hdrs story as iassert above.
+git_repository(
+    name = "hlop",
     commit = "3913247f202ed4611df02c79f0a49d1fbe986e91",  # top of tree (vcd_writer: registration vs global_timestamp + nested-scope header fixes)
+    patch_args = ["-p1"],
+    patches = ["//packages:hlop_sim_hdrs.patch"],
+    remote = "https://github.com/masc-ucsc/hlop.git",
 )
-# For local co-development swap the git_override above for:
-# local_path_override(module_name = "hlop", path = "../hlop")
+# For local co-development swap the git_repository above for:
+# local_repository(name = "hlop", path = "../hlop")
 
 # slang (fmt required by slang CMake)
 http_archive(
@@ -148,12 +165,26 @@ http_archive(
     build_file = "//packages:parallel_hashmap.BUILD",
 )
 
-# HHDS
-bazel_dep(name = "hhds", version = "0.2.0")
-git_override(
-    module_name = "hhds",
-    remote = "https://github.com/masc-ucsc/hhds.git",
+# HHDS (plain git repo — see the iassert/hlop note above)
+git_repository(
+    name = "hhds",
     commit = "9f0d3a6341d96aa9fa4b056bc09ba37b3165fcd9",
+    remote = "https://github.com/masc-ucsc/hhds.git",
+)
+# For local co-development swap the git_repository above for:
+# local_repository(name = "hhds", path = "../hhds")
+
+# emhash — @hhds//hhds:core|graph dep on it. hhds's own MODULE.bazel declares
+# this wrapper, but a plain-repo fetch does not evaluate MODULE.bazel, so the
+# pin is replicated here (reusing hhds's build file; keep in sync with
+# hhds/MODULE.bazel when bumping the hhds pin). hhds's @com_google_perfetto
+# dep resolves to livehd's own @com_google_perfetto below the same way.
+http_archive(
+    name = "emhash",
+    build_file = "@hhds//tools:emhash.BUILD",
+    sha256 = "9ec42a978c34653bc6f0c02b5c2e874d34265f8543cede787c79eb71f6e22f0f",
+    strip_prefix = "emhash-60127291d95b5e345ed26c719554130f3dab3bbd",
+    urls = ["https://github.com/renau/emhash/archive/60127291d95b5e345ed26c719554130f3dab3bbd.zip"],
 )
 
 # prpparse — hand-written recursive-descent Pyrope parser; the inou/prp front-end
