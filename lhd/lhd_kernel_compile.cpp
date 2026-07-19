@@ -213,6 +213,21 @@ std::shared_ptr<Lnast> synthesize_pub_wrapper(const std::shared_ptr<Lnast>& ln) 
     w->add_child(a, Lnast_node::create_ref(p.name));
     w->add_child(a, Lnast_node::create_const("__pub"));
     w->add_child(a, Lnast_node::create_const(std::format("'{}'", p.kind)));
+    // A scalar `pub type` alias already stored its "MAX|MIN" face in the
+    // pub_values loop above — a second store here would clobber it (the face
+    // is what build_namespace re-ranges the entry from on reload).
+    if (p.kind == "type") {
+      bool has_face = false;
+      for (const auto& [path, text] : ln->get_pub_values()) {
+        if (path == p.name) {
+          has_face = true;
+          break;
+        }
+      }
+      if (has_face) {
+        continue;
+      }
+    }
     auto s = w->add_child(stmts, Lnast_ntype::create_store());
     w->set_srcid(s, wid);
     w->add_child(s, Lnast_node::create_ref(p.name));
@@ -1489,8 +1504,22 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
       std::string lib_path = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
       // Bare `lhd compile FILE.sv` (no emit) still lowers for max diagnostics.
       lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts) || force_diag_graphs(opts));
-      if (ln_out != nullptr) {  // the slang units are the design (no imports) -> plain forest
-        save_ln_dir(opts, res, filter_top(var.lnasts, opts.top), ln_out->path);
+      if (ln_out != nullptr) {
+        // The slang units are the design (no imports) — but a provenance
+        // PACKAGE unit exports pub values/types, so persist its `__pub`
+        // wrapper alongside the forest (a later `import("pkg")` from this
+        // ln: dir would otherwise bind a value-less namespace).
+        auto units = filter_top(var.lnasts, opts.top);
+        std::vector<std::shared_ptr<Lnast>> wrappers;
+        for (const auto& ln : units) {
+          if (ln->get_lambda_kind().empty() && !ln->get_top_module_name().ends_with(".__pub")) {
+            if (auto w = synthesize_pub_wrapper(ln)) {
+              wrappers.push_back(std::move(w));
+            }
+          }
+        }
+        units.insert(units.end(), wrappers.begin(), wrappers.end());
+        save_ln_dir(opts, res, units, ln_out->path);
       }
       graph_pipeline_and_emits(opts, res, var, lib_path);
     } else {
