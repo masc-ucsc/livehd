@@ -573,6 +573,7 @@ void slang_parse(Options& opts, Result& res, Eprp_var& var) {
     labels["slang_flags"] = joined;
   }
 
+  merge_sets(opts, "compile.slang", labels);  // e.g. --set compile.slang.preserve_param_provenance=true
   run_step("inou.slang", var, labels, opts, res);
   if (lnastfmt_enabled(opts)) {
     run_step("pass.lnastfmt", var, {}, opts, res);

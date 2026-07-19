@@ -207,6 +207,12 @@ private:
   // `const X = <rhs>` (decl_prefix), instead of a `mut X = 0` prologue line plus a
   // far-away re-bind.  See the eligibility scan in emit_module.
   std::unordered_set<std::string> single_store_;
+  // Single-store nets whose value is an imported-package comptime const
+  // (`x = pkg.PARAM`). Declared `mut` (not `const`): a `const` bound to a
+  // comptime value BECOMES comptime, and copying it into a conditionally-driven
+  // net (a mux target) makes that net look comptime too → "const rebind" on
+  // recompile. `mut` keeps the value runtime and breaks the cascade.
+  std::unordered_set<std::string> pkg_valued_store_;
   // `wire` net names that have a real-statement store driver somewhere in the
   // body (populated by write_module's pre-scan).  A `wire` is a single-driver
   // net, so write_declare must NOT add the combinational `= 0` default to such a
@@ -221,6 +227,8 @@ private:
   std::unordered_map<std::string, std::unordered_set<std::string>> bundle_fields_;
   // True if `name` is a known bundle field `base.field` (rendered unescaped).
   bool is_bundle_field(std::string_view name) const;
+  bool is_imported_pkg_path(std::string_view name) const;  // `pkg.PARAM` on an imported package
+  bool is_imported_package_name(std::string_view name) const;  // bare `pkg` is an imported package
 
   // Set of all module names emitted in this run (see set_known_modules); a
   // func_call callee in this set is emitted as a file-top import.

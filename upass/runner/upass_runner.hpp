@@ -318,6 +318,16 @@ protected:
   // and the statement-scope ref leaf case.
   void emit_ref_or_folded(std::string_view name);
 
+  // A declare/type_spec type slot that is a `ref` to a SCALAR named-type alias
+  // (`x:PType` where `type PType = u10`; local OR imported `pkg.PType`) is
+  // concretized into `prim_type_int(max,min)` / `prim_type_bool` /
+  // `prim_type_string` in staging, so the width applies to the net (a bare ref
+  // slot carries no range for the bitwidth/wire-net lowering; the symbol-table
+  // decl_max only drives overflow checks). The `typename` provenance rides a
+  // separate attr_set, so the prp_writer can still re-emit `:PType`. Returns
+  // false for a TUPLE/struct or unresolved named type (emit it verbatim).
+  bool emit_scalar_named_type_slot(std::string_view type_name);
+
   // Emits the current op-node and its children into staging. When fold_all is
   // false, the first child (LHS/dst) is copied verbatim and subsequent ref
   // children are fed through fold_ref. When true, every ref child is folded.

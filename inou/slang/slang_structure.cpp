@@ -846,6 +846,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   auto saved_output_info   = std::move(output_info_);
   auto saved_regs          = std::move(reg_syms_);
   auto saved_wires         = std::move(wire_syms_);
+  auto saved_wire_split    = std::move(wire_split_tmp_);
   auto saved_latches       = std::move(latch_syms_);
   auto saved_mems          = std::move(mem_syms_);
   auto saved_declared      = std::move(declared_);
@@ -882,6 +883,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   output_info_.clear();
   reg_syms_.clear();
   wire_syms_.clear();
+  wire_split_tmp_.clear();
   latch_syms_.clear();
   mem_syms_.clear();
   declared_.clear();
@@ -1147,6 +1149,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   output_info_           = std::move(saved_output_info);
   reg_syms_              = std::move(saved_regs);
   wire_syms_            = std::move(saved_wires);
+  wire_split_tmp_       = std::move(saved_wire_split);
   latch_syms_           = std::move(saved_latches);
   mem_syms_             = std::move(saved_mems);
   declared_              = std::move(saved_declared);
@@ -2020,6 +2023,44 @@ std::string Slang_context::read_struct_whole(const slang::ast::ValueSymbol& sym)
 
 namespace {
 
+// Counts the number of STORE statements to each net (a case with one assign per
+// arm is N stores; a bit-slice write chain `x#[a]=…; x#[b]=…` is N stores). A
+// `wire` net that is stored more than once cannot be a single-driver wire and
+// needs the mut+wire split (wire_split_tmp_).
+struct Store_counter : public slang::ast::ASTVisitor<Store_counter, slang::ast::VisitFlags::AllGood> {
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, int>* counts  = nullptr;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>*      partial = nullptr;  // any bit-slice/field/element store
+
+  void note(const slang::ast::Expression& l) {
+    const slang::ast::Expression* e = &l;
+    while (e->kind == ExpressionKind::Conversion) {
+      e = &e->as<slang::ast::ConversionExpression>().operand();
+    }
+    // A WHOLE store is a bare NamedValue/HierarchicalValue LHS; anything else
+    // (RangeSelect/ElementSelect/MemberAccess) is a partial (set_mask) write —
+    // it cannot be a single whole-driver wire on its own.
+    const bool whole = e->kind == ExpressionKind::NamedValue || e->kind == ExpressionKind::HierarchicalValue;
+    if (const auto* s = lhs_base_symbol(*e)) {
+      ++(*counts)[s];
+      if (!whole && partial != nullptr) {
+        partial->insert(s);
+      }
+    }
+  }
+
+  void handle(const slang::ast::AssignmentExpression& expr) {
+    const auto& lhs = expr.left();
+    if (lhs.kind == ExpressionKind::Concatenation) {
+      for (const auto* op : lhs.as<slang::ast::ConcatenationExpression>().operands()) {
+        note(*op);
+      }
+    } else {
+      note(lhs);
+    }
+    visitDefault(expr);
+  }
+};
+
 // Per-driver def/use collection for the dependency sort. Reads are every
 // NamedValue in rvalue position plus partial-write LHS bases (the RMW
 // lowering reads them); full scalar-write LHS bases are NOT reads.
@@ -2531,52 +2572,206 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       cyclic.push_back(i);
     }
   }
-  if (!cyclic.empty()) {
-    // emit_warning(slang::SourceRange(drivers[cyclic.front()].member->location, drivers[cyclic.front()].member->location),
-    //              "comb-loop", "time",
-    //              "combinational dependency cycle between drivers; emitting cyclic nets as `wire` (position-independent reads)");
-    // 2c-wire — every net written by a cyclic driver is declared a `wire` so a
-    // read before its driver binds to the resolved net (position-independent),
-    // replacing the old `.[defer]` end-of-cycle read. A reg/input is never a
-    // wire (its read is already order-free).
+  // ── wire classification: BACK-EDGE ONLY ────────────────────────────────────
+  // A net needs `wire` (single-driver, position-independent read) ONLY when one
+  // of its readers emits BEFORE its first writer in the final emission order
+  // (`order` then `cyclic`) — a genuine read-before-write. Every other net is
+  // written before it is read, so it stays `mut`/`const`.
+  //
+  // This replaces the old "every net written by ANY cyclic driver becomes a
+  // wire". Instances are modeled coarsely (one node, every output assumed to
+  // depend on every input), so a datapath of always-blocks + instances fuses
+  // into one big false SCC; the old rule then promoted the WHOLE SCC to `wire`
+  // (txfma_e2: 16 nets, incl. `e_1_tk_f2a_h` which is single-writer and written
+  // before its only reader). The back-edge test keeps `wire` for exactly the
+  // true feedback nets and drops the rest to `mut`. Registered instance outputs
+  // (seq_out_nets) fold in: their deps back-edges were dropped so the topo order
+  // may place a reader first — the same position check catches precisely those,
+  // instead of blanket-wiring every registered output.
+  {
+    std::vector<size_t> pos(drivers.size(), 0);
+    size_t              p = 0;
+    for (size_t i : order) {
+      pos[i] = p++;
+    }
     for (size_t i : cyclic) {
-      for (const auto* w : drivers[i].writes) {
-        if (w == nullptr || reg_syms_.contains(w) || input_syms_.contains(w)) {
+      pos[i] = p++;
+    }
+    absl::flat_hash_map<const slang::ast::ValueSymbol*, std::vector<size_t>> readers_of;
+    for (size_t i = 0; i < drivers.size(); ++i) {
+      for (const auto* r : drivers[i].reads) {
+        readers_of[r].push_back(i);
+      }
+    }
+    for (const auto& [net, ws] : writers_of) {
+      if (net == nullptr || reg_syms_.contains(net) || input_syms_.contains(net)) {
+        continue;
+      }
+      // Only a MODULE-LEVEL net can be a wire; a procedural-block-local var has
+      // no stable cut driver and keeps its `mut` poison-init.
+      const auto* sc           = net->getParentScope();
+      const bool  module_level = sc != nullptr
+                                 && (&sc->asSymbol() == body_
+                                     || sc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
+      if (!module_level) {
+        continue;
+      }
+      size_t wpos = SIZE_MAX;
+      for (size_t w : ws) {
+        wpos = std::min(wpos, pos[w]);
+      }
+      auto rit = readers_of.find(net);
+      if (rit == readers_of.end()) {
+        continue;  // never read → no read-before-write
+      }
+      for (size_t r : rit->second) {
+        // A driver that also writes `net` reads its own prior/poison value
+        // intra-block (RMW) — that is not a cross-driver early read.
+        if (drivers[r].writes.contains(net)) {
           continue;
         }
-        // Only a MODULE-LEVEL net becomes a `wire` (position-independent). A
-        // procedural-block-local var has no stable cut driver and needs its mut
-        // poison-init; declaring it `wire` would drop the init and miscompile.
-        const auto* sc           = w->getParentScope();
-        const bool  module_level = sc != nullptr
-                                   && (&sc->asSymbol() == body_
-                                       || sc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
-        if (module_level) {
-          wire_syms_.insert(w);
+        if (pos[r] < wpos) {
+          wire_syms_.insert(net);
+          break;
         }
       }
     }
   }
 
-  // A registered instance output (seq_out_nets) is order-free, so pass 2 dropped
-  // its back-edges — but that also drops the "instance before reader" ordering, so
-  // a reader may now precede the instance. Declare these nets `wire` too, so such a
-  // forward read binds to the resolved net (position-independent) exactly like the
-  // cyclic-net wires above — without which the read resolves to nil (e.g. the pc's
-  // forward read of `_pipeB_ex_mem_io_data_nextpc` froze the PC at 0).
-  for (const auto* w : seq_out_nets) {
-    const auto* sc = w->getParentScope();
-    if (sc != nullptr && (&sc->asSymbol() == body_ || sc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock)) {
-      wire_syms_.insert(w);
+  // ── wire SPLIT setup: a MULTIPLY-written wire needs a mut accumulator ───────
+  // A wire net stored more than once cannot be a single-driver wire. Split it:
+  // writes accumulate into `mut <net>__wtmp` (program-order last-wins), a final
+  // `<net> = <net>__wtmp` bridge is the wire's ONE driver, and cross-driver
+  // reads through the wire see the resolved value. A wire stored at most once
+  // keeps the plain single-driver form (a continuous-assign / one instance
+  // output / one store).
+  {
+    absl::flat_hash_map<const slang::ast::ValueSymbol*, int> store_counts;
+    absl::flat_hash_set<const slang::ast::ValueSymbol*>      partial_writes;
+    absl::flat_hash_set<const slang::ast::ValueSymbol*>      proc_written;  // written by an always block
+    for (const auto& d : drivers) {
+      Store_counter sc;
+      sc.counts  = &store_counts;
+      sc.partial = &partial_writes;
+      if (d.member->kind == SymbolKind::ProceduralBlock) {
+        // A procedural write can be CONDITIONAL (an `if` with no covering else
+        // leaves the net undriven on some path) — a plain wire is then
+        // "incompletely driven". Splitting gives the accumulator a poison init
+        // that supplies X on the uncovered path, exactly like a comb `mut`.
+        proc_written.insert(d.writes.begin(), d.writes.end());
+        d.member->as<slang::ast::ProceduralBlockSymbol>().getBody().visit(sc);
+      } else if (d.member->kind == SymbolKind::ContinuousAssign) {
+        d.member->as<slang::ast::ContinuousAssignSymbol>().getAssignment().visit(sc);
+      } else if (d.member->kind == SymbolKind::Instance) {
+        // An instance OUTPUT wired through a slice/select (`.p(net[2:0])`) is a
+        // partial (set_mask) driver of `net`, so `net` cannot be a plain
+        // single-driver wire — split it (the Store_counter scan above does not
+        // see instance connections).
+        for (const auto* conn : d.member->as<slang::ast::InstanceSymbol>().getPortConnections()) {
+          const auto* expr = conn->getExpression();
+          if (expr == nullptr || conn->port.kind != SymbolKind::Port
+              || conn->port.as<slang::ast::PortSymbol>().direction != slang::ast::ArgumentDirection::Out) {
+            continue;
+          }
+          const auto* t = expr;
+          if (const auto* a = t->as_if<slang::ast::AssignmentExpression>()) {
+            t = &a->left();
+          }
+          while (t->kind == ExpressionKind::Conversion) {
+            t = &t->as<slang::ast::ConversionExpression>().operand();
+          }
+          if (t->kind != ExpressionKind::NamedValue && t->kind != ExpressionKind::HierarchicalValue) {
+            if (const auto* s = lhs_base_symbol(*t)) {
+              partial_writes.insert(s);
+            }
+          }
+        }
+      }
+    }
+    for (const auto* wsym : wire_syms_) {
+      const auto* vs = wsym->as_if<slang::ast::ValueSymbol>();
+      if (vs == nullptr) {
+        continue;
+      }
+      // The split is a PLAIN-SCALAR device (a `mut` accumulator with a scalar
+      // poison, whole/bit-slice writes). Skip anything with FIELDS or its own
+      // machinery: a struct/union (per-field bundle OR flat-bus — both take
+      // whole+field writes a scalar poison would mistype), a per-element bundle
+      // array, a flat-port/memory net, or a non-integral type.
+      const auto& ct = vs->getType().getCanonicalType();
+      if (ct.isStruct() || ct.isPackedUnion() || !ct.isIntegral() || is_scalar_struct_var(*vs)
+          || is_packed_array_bundle_var(*vs) || flat_port_syms_.contains(vs) || mem_syms_.contains(vs)) {
+        continue;
+      }
+      // Split when the net has more than one DRIVER (co-writers across blocks,
+      // or an instance output plus a proc — writers_of counts every driver kind,
+      // which the store-counter's proc/assign-only scan misses) OR more than one
+      // STORE within a driver (a case + priority-if / bit-slice chain). Either
+      // way a single-driver wire is impossible.
+      auto        wit          = writers_of.find(vs);
+      const int   driver_count = wit != writers_of.end() ? static_cast<int>(wit->second.size()) : 0;
+      auto        scit         = store_counts.find(vs);
+      const int   store_count  = scit != store_counts.end() ? scit->second : 0;
+      if (driver_count <= 1 && store_count <= 1 && !partial_writes.contains(vs) && !proc_written.contains(vs)) {
+        continue;  // one non-procedural driver, one WHOLE store: a plain wire is fine
+      }
+      // Readable, unique accumulator name derived from the wire's lname.
+      std::string stem = lname_of(*vs);
+      if (!stem.empty() && stem.front() == '`') {
+        stem = stem.substr(1, stem.size() - 2);
+      }
+      std::string tmp = absl::StrCat(stem, "__wtmp");
+      for (int n = 0; used_names_.contains(tmp); ++n) {
+        tmp = absl::StrCat(stem, "__wtmp", n);
+      }
+      used_names_.insert(tmp);
+      wire_split_tmp_[wsym] = std::move(tmp);
     }
   }
-
 
   // ── pass 4: emit ──────────────────────────────────────────────────────────
   // Cyclic drivers emit last (after the topologically-ordered ones); their nets
   // are declared `wire` (2c-wire), so a forward read binds to the resolved net.
+  //
+  // Split wires (multiply-written): pre-declare `mut <tmp>` (poison) + `wire
+  // <net>` (real width) up front, before any driver — the wire is
+  // position-independent so an early read binds to its later bridge driver.
+  for (const auto& [wsym, tmp] : wire_split_tmp_) {
+    const auto* vs = wsym->as_if<slang::ast::ValueSymbol>();
+    if (vs == nullptr) {
+      continue;
+    }
+    auto ti  = tinfo(vs->getType());
+    auto foo = lname_of(*vs);
+    set_pending_loc(vs->location);
+    // Poison rides the declare's INIT child (`mut tmp = 0ub?…`), NOT a separate
+    // store: the accumulator is written far from its declare (a later driver's
+    // mux), so a separate poison store would survive the writer's mux-fold and
+    // read back as a SECOND `mut tmp = …` (redeclaration). As a declare init it
+    // is rendered once by write_declare, which marks the name declared so the
+    // accumulating writes reassign without a `mut` prefix.
+    std::string poison = ti.is_signed ? std::string("0sb?") : absl::StrCat("0ub", std::string(static_cast<size_t>(ti.bits), '?'));
+    builder_.create_declare_stmts(tmp, "mut", "", "", poison);
+    builder_.create_declare_stmts(foo, "wire", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
+    clear_pending_loc();
+    declared_.insert(wsym);  // suppress the lazy wire declare
+  }
+
   auto emit_driver = [&](size_t i) {
     const auto& d            = drivers[i];
+    // Split-wire redirect: while THIS driver (a writer of the net) emits, its
+    // writes AND its own RMW reads resolve to the `mut` accumulator; every other
+    // driver keeps reading the resolved wire.
+    std::vector<std::pair<const slang::ast::Symbol*, std::string>> restore;
+    if (!wire_split_tmp_.empty()) {
+      for (const auto* w : d.writes) {
+        auto it = wire_split_tmp_.find(w);
+        if (it != wire_split_tmp_.end()) {
+          restore.emplace_back(w, sym_lname_[w]);
+          sym_lname_[w] = it->second;
+        }
+      }
+    }
     auto        saved_prefix = genblk_prefix_;
     genblk_prefix_           = d.prefix;
     switch (d.member->kind) {
@@ -2636,6 +2831,9 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       default: break;
     }
     genblk_prefix_ = saved_prefix;
+    for (auto& [w, name] : restore) {
+      sym_lname_[w] = name;  // → back to the resolved wire for other drivers
+    }
   };
 
   for (size_t i : order) {
@@ -2643,6 +2841,18 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   }
   for (size_t i : cyclic) {
     emit_driver(i);
+  }
+
+  // Split-wire bridges: the single driver of each split wire, `<net> =
+  // <net>__wtmp`, emitted after every write to the accumulator has landed.
+  for (const auto& [wsym, tmp] : wire_split_tmp_) {
+    const auto* vs = wsym->as_if<slang::ast::ValueSymbol>();
+    if (vs == nullptr) {
+      continue;
+    }
+    set_pending_loc(vs->location);
+    builder_.create_assign_stmts(lname_of(*vs), tmp);
+    clear_pending_loc();
   }
 }
 

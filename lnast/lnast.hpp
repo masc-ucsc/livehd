@@ -281,6 +281,8 @@ private:
   // is supplied externally at recompile time). In-memory only (sibling to
   // lambda_kind_).
   std::vector<std::string>                         external_modules_;
+  std::vector<std::string>                         imported_packages_;  // `pkg.PARAM` provenance imports
+  bool                                             is_package_unit_ = false;  // pub-comptime-const namespace unit
   // Generic type parameters (`<T, U>`) recorded by func_extract from
   // the func_def generics child (a seam: the per-`T` body substitution lands
   // in a follow-up goal; this only preserves the names so a template carrying
@@ -543,6 +545,24 @@ public:
     return std::find(external_modules_.begin(), external_modules_.end(), name) != external_modules_.end();
   }
   const std::vector<std::string>& get_external_modules() const noexcept { return external_modules_; }
+
+  // Packages this unit references by NAME (`pkg.PARAM` provenance refs kept
+  // symbolic instead of folded). The pyrope re-emission adds one
+  // `const pkg = import("pkg")` per entry at file top scope, exactly like an
+  // external module, so the dotted refs resolve on recompile.
+  void add_imported_package(std::string_view name) {
+    if (std::find(imported_packages_.begin(), imported_packages_.end(), name) == imported_packages_.end()) {
+      imported_packages_.emplace_back(name);
+    }
+  }
+  const std::vector<std::string>& get_imported_packages() const noexcept { return imported_packages_; }
+
+  // A NAMESPACE unit of only `pub comptime const` exports (a slang package the
+  // provenance flow emits). The prp_writer renders it straight from the pub
+  // list/values (`pub comptime const NAME = VALUE`) — the general const path
+  // drops a comptime const's folded value to `= 0`.
+  void set_package_unit(bool v = true) noexcept { is_package_unit_ = v; }
+  bool is_package_unit() const noexcept { return is_package_unit_; }
 
   // ── DCE mark-only mode (upass runner, lg-only flows) ──────────────────────
   // Statement nids the post-walk DCE proved dead when the rewritten LNAST is

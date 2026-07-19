@@ -965,6 +965,33 @@ void uPass_runner::emit_ref_or_folded(std::string_view name) {
   }
 }
 
+bool uPass_runner::emit_scalar_named_type_slot(std::string_view type_name) {
+  if (!materialize_ || type_name.empty()) {
+    return false;
+  }
+  auto tb = symbol_table_.get_bundle(type_name);
+  if (!tb || tb->has_named_top() || tb->unnamed_top_count() > 1 || tb->get_value_kind() == upass::Kind::tuple) {
+    return false;  // unresolved / a tuple-or-struct named type — keep the ref verbatim
+  }
+  const auto& te = tb->get_entry(bundle_path::of_string("0"));
+  if (!te.decl_max.is_invalid() || !te.decl_min.is_invalid()) {
+    emit_push(Lnast_ntype::create_prim_type_int());
+    emit_leaf(Lnast_node::create_const(te.decl_max.is_invalid() ? "nil" : std::string(te.decl_max.to_pyrope())));
+    emit_leaf(Lnast_node::create_const(te.decl_min.is_invalid() ? "nil" : std::string(te.decl_min.to_pyrope())));
+    emit_pop();
+    return true;
+  }
+  if (te.kind == upass::Kind::boolean) {
+    emit_leaf(Lnast_ntype::create_prim_type_bool());
+    return true;
+  }
+  if (te.kind == upass::Kind::string) {
+    emit_leaf(Lnast_ntype::create_prim_type_string());
+    return true;
+  }
+  return false;  // a tuple/struct named type (or a scalar with no baked range) — verbatim
+}
+
 void uPass_runner::emit_op_with_fold(bool fold_all) {
   if (!materialize_) {
     return;  // pure emission (dispatch happened in the caller); cursor untouched
@@ -982,8 +1009,12 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
     lm->move_to_child();
     int idx = 0;
     do {
-      const bool is_lhs = ((idx == 0) && !fold_all) || (idx == 1 && type_slot_at_1);
-      if (!is_lhs && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
+      const bool is_type_slot = (idx == 1 && type_slot_at_1);
+      const bool is_lhs       = ((idx == 0) && !fold_all) || is_type_slot;
+      if (is_type_slot && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref
+          && emit_scalar_named_type_slot(lm->current_text())) {
+        // scalar named-type ref concretized to a prim_type — nothing else to emit
+      } else if (!is_lhs && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
         emit_ref_or_folded(lm->current_text());
       } else if (!is_lhs && Lnast_ntype::is_store(lm->get_raw_ntype())) {
         // A tuple-field entry `assign(key, val)` (inside tuple_add/concat/set):
@@ -7712,6 +7743,31 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
       kind = upass::Kind::string;
     } else if (Lnast_ntype::is_ref(t)) {
       type_name = lm->current_text();  // named type (`x:Point`)
+      // SCALAR named-type alias (`type PType = u10`; local OR imported
+      // `pkg.PType`): borrow the alias's declared range so `:PType` constrains
+      // width exactly like a literal `:u10`. The alias's own declare
+      // (`declare(PType, prim_type_int(max,min), 'type')`) already baked its
+      // "0"-entry envelope into PType's bundle; copy it here. A TUPLE/struct
+      // named type carries fields (not a scalar "0" range) and is materialized
+      // by constprop's named-type default path instead — its "0" entry has no
+      // decl range, so this leaves decl_max/min unset and falls through.
+      if (kind == upass::Kind::unknown && decl_max.is_invalid() && decl_min.is_invalid()) {
+        if (auto tb = symbol_table_.get_bundle(type_name);
+            tb && !tb->has_named_top() && tb->unnamed_top_count() <= 1 && tb->get_value_kind() != upass::Kind::tuple) {
+          // A genuinely SCALAR named type (not a tuple/struct — those carry
+          // fields and are materialized by constprop's named-type default path;
+          // borrowing their leaked "0"-entry kind would mis-type the var as a
+          // bare scalar, breaking `mut x:Complex = (…)`).
+          const auto& te = tb->get_entry(bundle_path::of_string("0"));
+          if (!te.decl_max.is_invalid() || !te.decl_min.is_invalid()) {
+            decl_max = te.decl_max;
+            decl_min = te.decl_min;
+            kind     = te.kind == upass::Kind::unknown ? upass::Kind::integer : te.kind;
+          } else if (te.kind == upass::Kind::boolean || te.kind == upass::Kind::string) {
+            kind = te.kind;  // `type B = bool` / `type S = string`
+          }
+        }
+      }
     }
     // prim_type_none / comp_type_*: nothing scalar to bake here (per-field
     // types of a comp_type_tuple arrive as separate dotted type_specs).

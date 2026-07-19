@@ -19,6 +19,43 @@ void Slang_context::process_root(const slang::ast::RootSymbol& root) {
   for (auto inst : root.topInstances) {
     lower_module(*inst);
   }
+  emit_package_units();  // one namespace .prp per referenced package (pub comptime consts)
+}
+
+// Emit one Pyrope NAMESPACE unit per package whose parameters this compile
+// referenced by name (see package_param_ref). Each is a file of
+// `pub comptime const PARAM = <value>` — the export side of the `pkg.PARAM`
+// provenance refs; the importing module unit carries the matching
+// `const pkg = import("pkg")` (get_imported_packages → prp_writer).
+void Slang_context::emit_package_units() {
+  for (const auto& [pkg_name, params] : referenced_pkg_params_) {
+    auto saved_builder = std::move(builder_);
+    builder_           = Lnast_builder();
+    builder_.lnast     = std::make_shared<Lnast>(pkg_name);  // no lambda_kind → a namespace unit
+    builder_.lnast->set_package_unit();
+    builder_.lnast->set_pending_srcid(hhds::SourceId_invalid);
+    auto root          = builder_.lnast->set_root(Lnast_ntype::create_top());
+    builder_.idx_stmts = builder_.lnast->add_child(root, Lnast_ntype::create_stmts());
+    std::vector<std::pair<std::string, std::string>> pub_vals;
+    for (const auto& [param_name, value] : params) {
+      // `const` binds its value from a SEPARATE store, not the declare init
+      // (only `reg` folds the init into the declare — prp2lnast). A declare-init
+      // const does not bind as a known comptime value, so harvest_pub_values
+      // rejects it.
+      builder_.create_declare_stmts(param_name, "const comptime", "", "");
+      builder_.create_assign_stmts(param_name, value);
+      builder_.lnast->add_pub(param_name, "value");
+      pub_vals.emplace_back(param_name, value);
+    }
+    // Stamp pub_values_ NOW: the prp_writer's package-unit path reads only
+    // get_pub_values(), and the constprop harvest that normally fills it does
+    // not run with compile.upass.constprop=0 (its skip guard tolerates a
+    // pre-stamped unit, so constprop=1 is unaffected).
+    builder_.lnast->set_pub_values(std::move(pub_vals));
+    ordered_lnasts_.push_back(builder_.lnast);
+    builder_ = std::move(saved_builder);
+  }
+  referenced_pkg_params_.clear();
 }
 
 std::vector<std::shared_ptr<Lnast>> Slang_context::pick_lnast() {

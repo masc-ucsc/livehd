@@ -54,6 +54,12 @@ public:
     // at the slang level so the reader owns the policy): lower unknown-module
     // instances as blackbox sub-instances instead of a clean error.
     bool blackbox_unknown = false;
+    // Keep a package parameter reference as a symbolic `pkg.PARAM` (emitting a
+    // `pub comptime const` package unit) instead of folding it to its literal —
+    // for readable, provenance-preserving Pyrope emission. OFF by default: it
+    // requires the constprop preserve-mode + prp_writer package-import synthesis
+    // (WIP), so a normal compile keeps folding as before.
+    bool preserve_param_provenance = false;
   };
 
   Slang_context() = default;
@@ -87,6 +93,14 @@ private:
   absl::flat_hash_map<const slang::ast::Symbol*, std::pair<int, bool>> output_info_;  // {flat bits, is_signed} per output, for the body-top X-default poison-init of non-reg outputs
   absl::flat_hash_set<const slang::ast::Symbol*>              reg_syms_;   // clocked state vars
   absl::flat_hash_set<const slang::ast::Symbol*>              wire_syms_;  // 2c-wire — comb-cycle nets: declared `wire` so reads are position-independent
+  // A `wire` net that is MULTIPLY written (a case/priority-if or bit-slice
+  // pattern) cannot be a single-driver wire directly. It is SPLIT: the writes
+  // go to a `mut <name>` accumulator (program-order last-wins), reads through
+  // the `wire` see the resolved value, and one bridge `wire = mut` is the wire's
+  // sole driver. Maps the net symbol → its mut-accumulator lname. During pass-4
+  // emission, a driver that WRITES the net has sym_lname_ swapped to the tmp (so
+  // its writes AND its own RMW reads hit the mut); other drivers read the wire.
+  absl::flat_hash_map<const slang::ast::Symbol*, std::string> wire_split_tmp_;
   absl::flat_hash_set<const slang::ast::Symbol*>              latch_syms_; // level-sensitive latch state vars (subset of reg_syms_)
   absl::flat_hash_set<const slang::ast::Symbol*>              mem_syms_;   // unpacked arrays lowered as memories
   absl::flat_hash_set<const slang::ast::Symbol*>              mem_wensize_emitted_;  // memories whose wensize attr was emitted
@@ -345,6 +359,18 @@ private:
   std::string lower_rvalue(const slang::ast::Expression& expr);
   std::string lower_binary(const slang::ast::BinaryExpression& expr);
   std::string lower_unary(const slang::ast::UnaryExpression& expr);
+  // A reference to a PACKAGE parameter/localparam (`vpu_defs_pkg::PARAM`)
+  // resolves, instead of folding to its literal value, to a symbolic dotted ref
+  // `pkg.PARAM` — preserving the source's named constant in the emitted Pyrope
+  // (upass.constprop keeps it symbolic in the pyrope-emit flow, folds it for
+  // the netlist). Returns the `pkg.PARAM` ref and records the (pkg, param,
+  // value) for the package-unit emission + the per-module package import;
+  // nullopt for anything that is not an integral package-parameter reference.
+  std::optional<std::string> package_param_ref(const slang::ast::Expression& expr);
+  // pkg name → (param name → pyrope value text). Accumulated across ALL modules;
+  // one `pub comptime const` package unit is emitted per pkg at the end.
+  std::map<std::string, std::map<std::string, std::string>> referenced_pkg_params_;
+  void emit_package_units();  // one namespace .prp per referenced package
   std::string lower_select(const slang::ast::Expression& expr);  // Element/Range select rvalue
   std::string lower_concat(const slang::ast::ConcatenationExpression& expr);
   // Packed `'{...}` assignment pattern (simple/structured/replicated): elements

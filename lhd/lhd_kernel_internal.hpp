@@ -79,6 +79,7 @@ inline constexpr Set_pass kSetPasses[] = {
     {       "pass.formal",       "pass.formal",     Set_pass::List::none},  // alias of compile.formal
     {      "compile.cgen", "inou.cgen.verilog",     Set_pass::List::all},
     {     "compile.yosys",   "inou.yosys.tolg",     Set_pass::List::all},
+    {     "compile.slang",        "inou.slang",     Set_pass::List::all},
     {   "formal.isabelle",     "pass.isabelle",     Set_pass::List::all},
     {       "formal.lean",         "pass.lean",     Set_pass::List::all},
     {"compile.prp_writer",   "pass.prp_writer",     Set_pass::List::all},

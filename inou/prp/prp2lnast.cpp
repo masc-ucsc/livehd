@@ -5112,11 +5112,27 @@ void Prp2lnast::process_type_statement(TSNode n) {
     return;
   }
   // `type Foo = …` is a declaration whose mode is `type` (replaces
-  // the former type_def node). The type slot is `prim_type_none` and the mode
-  // const carries "type".
+  // the former type_def node). The type slot is normally `prim_type_none` and
+  // the mode const carries "type" — EXCEPT for a SCALAR primitive alias
+  // (`type Foo = u10`/`s8`/`bool`/`string`), where the resolved
+  // `prim_type_int(max,min)` lands in the type slot so a later `:Foo`
+  // annotation borrows the width (a scalar type carries no field bundle, so
+  // the store-the-tuple path below cannot preserve it). Named-identifier
+  // aliases (`type Foo = Bar`) and tuple types keep `prim_type_none`.
+  TSNode alias = child_by_field(n, "alias");
+  const bool scalar_prim_alias =
+      !ts_node_is_null(alias)
+      && (std::string_view(ts_node_type(alias)) == "uint_type" || std::string_view(ts_node_type(alias)) == "sint_type"
+          || std::string_view(ts_node_type(alias)) == "bool_type"
+          || std::string_view(ts_node_type(alias)) == "string_type");
+
   auto idx = builder.add_child(Lnast_ntype::create_declare());
   lnast->add_child(idx, Lnast_node::create_ref(get_text(name)));
-  lnast->add_child(idx, Lnast_ntype::create_prim_type_none());
+  if (scalar_prim_alias) {
+    emit_type_expr(idx, alias);  // prim_type_int(max,min) / prim_type_bool / prim_type_string
+  } else {
+    lnast->add_child(idx, Lnast_ntype::create_prim_type_none());
+  }
   lnast->add_child(idx, Lnast_node::create_const("type"));
 
   // Keep the type's bundle as a VALUE in the symbol table so a later
@@ -5128,7 +5144,7 @@ void Prp2lnast::process_type_statement(TSNode n) {
   // store a tuple RHS. Mirrors the `const Foo = (…)` lowering.
   TSNode rhs = child_by_field(n, "definition");  // `type Foo ( … )` trait form
   if (ts_node_is_null(rhs)) {
-    rhs = child_by_field(n, "alias");  // `type Foo = …` form (an expression_type)
+    rhs = alias;  // `type Foo = …` form (an expression_type / primitive type)
   }
   // `type Foo = (…)` lands the tuple inside an `expression_type` wrapper; unwrap
   // to the inner `tuple`. (`type Foo = OtherType` wraps a scalar/identifier type

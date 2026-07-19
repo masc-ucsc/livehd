@@ -413,6 +413,29 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Regressions for the slang reader's `wire` classification (back-edge-only, not
+# blanket-wiring a false SCC) and the multi-write `wire` split (mut accumulator +
+# single bridge). Emitted Pyrope must recompile AND cvc5-prove equivalent to the
+# source (just //lhd).
+sh_test(
+    name = "slang_wire_classification_test",
+    size = "large",
+    srcs = ["slang_wire_classification_test.sh"],
+    data = ["//lhd"],
+)
+
+# Regression for named-constant provenance in slang→Pyrope emission
+# (compile.slang.preserve_param_provenance): symbolic `pkg.PARAM` refs + a
+# `pub comptime const` package unit with REAL values under constprop=0 and =1,
+# a value-preserving-only conversion peel, recompile of the emitted Pyrope, and
+# cvc5 LEC vs the source SV (just //lhd).
+sh_test(
+    name = "slang_param_provenance_test",
+    size = "large",
+    srcs = ["slang_param_provenance_test.sh"],
+    data = ["//lhd"],
+)
+
 # Regressions for the slang-reader/tolg features the minion IP needed: multi-dim
 # unpacked struct arrays (linearized tuple memory, LEC'd), latch-based ICG state
 # + generate-for reg arrays on a derived clock, HierarchicalValue assignment

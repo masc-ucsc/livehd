@@ -11,6 +11,7 @@
 #include "slang/ast/expressions/CallExpression.h"
 #include "slang/ast/expressions/ConversionExpression.h"
 #include "slang/ast/expressions/LiteralExpressions.h"
+#include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/ast/symbols/SubroutineSymbols.h"
 #include "slang/ast/symbols/VariableSymbols.h"
@@ -23,7 +24,67 @@ using slang::ast::BinaryOperator;
 using slang::ast::ExpressionKind;
 using slang::ast::UnaryOperator;
 
+std::optional<std::string> Slang_context::package_param_ref(const slang::ast::Expression& expr) {
+  if (!options_.preserve_param_provenance) {
+    return std::nullopt;  // WIP feature; default OFF keeps folding (no regression)
+  }
+  // Peel conversions (an implicit width cast around the bare ref); whether they
+  // were value-preserving is checked against the whole expression's value below.
+  const slang::ast::Expression* e      = &expr;
+  bool                          peeled = false;
+  while (e->kind == ExpressionKind::Conversion) {
+    e      = &e->as<slang::ast::ConversionExpression>().operand();
+    peeled = true;
+  }
+  if (e->kind != ExpressionKind::NamedValue && e->kind != ExpressionKind::HierarchicalValue) {
+    return std::nullopt;
+  }
+  const auto& sym = e->as<slang::ast::ValueExpressionBase>().symbol;
+  if (sym.kind != slang::ast::SymbolKind::Parameter) {
+    return std::nullopt;
+  }
+  // Walk out to the owning PACKAGE (a package localparam/parameter). A
+  // module-local parameter has no stable package home, so keep folding it.
+  const slang::ast::Scope*         sc  = sym.getParentScope();
+  const slang::ast::PackageSymbol* pkg = nullptr;
+  while (sc != nullptr) {
+    const auto& ssym = sc->asSymbol();
+    if (ssym.kind == slang::ast::SymbolKind::Package) {
+      pkg = &ssym.as<slang::ast::PackageSymbol>();
+      break;
+    }
+    sc = ssym.getParentScope();
+  }
+  if (pkg == nullptr) {
+    return std::nullopt;
+  }
+  const auto& cv = sym.as<slang::ast::ParameterSymbol>().getValue();
+  if (!cv.isInteger()) {
+    return std::nullopt;  // only integral params carry a scalar pyrope value
+  }
+  if (peeled) {
+    // Peeling is only sound for VALUE-PRESERVING conversions: a narrowing cast
+    // like 4'(P) with P=300 evaluates to 12, and emitting the symbolic ref
+    // would read back as 300 — a miscompile. Compare the whole expression's
+    // folded value against the param's; any mismatch keeps the fold.
+    auto whole = try_eval(expr);
+    if (!whole || !whole->isInteger() || const_text(whole->integer()) != const_text(cv.integer())) {
+      return std::nullopt;
+    }
+  }
+  std::string pkg_name(pkg->name);
+  std::string param_name(sym.name);
+  referenced_pkg_params_[pkg_name][param_name] = const_text(cv.integer());
+  builder_.lnast->add_imported_package(pkg_name);
+  return absl::StrCat(pkg_name, ".", param_name);
+}
+
 std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
+  // Provenance: a bare PACKAGE-parameter reference keeps its name (`pkg.PARAM`)
+  // instead of folding to a literal — BEFORE the tier-1 fold that would erase it.
+  if (auto pref = package_param_ref(expr)) {
+    return *pref;
+  }
   // Tier 1: compile-time constant (parameters, localparams, genvars, unrolled
   // loop variables, sized literals, $clog2/$bits/... system calls).
   if (expr.kind != ExpressionKind::Assignment && expr.kind != ExpressionKind::LValueReference) {

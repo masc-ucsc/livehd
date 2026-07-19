@@ -227,6 +227,9 @@ std::string Lnast_prp_writer::decl_prefix(std::string_view lhs) {
   // declaration — and a single-assignment net is a `const`, not a `mut`.  Besides
   // dropping the prologue line and the dead `= 0` store, `const` keeps the
   // recompile from range-unioning the seed `0` into the net's inferred range.
+  if (pkg_valued_store_.count(std::string(lhs))) {
+    return "mut ";  // a comptime-const-valued single store must stay runtime (see the set's doc)
+  }
   if (single_store_.count(std::string(lhs))) {
     return "const ";
   }
@@ -294,6 +297,26 @@ static std::string quote_kw_path(std::string_view path) {
     start = dot + 1;
   }
   return out;
+}
+
+// `pkg.PARAM` where pkg is an imported package (provenance flow): a real
+// bundle-field access on the import namespace, emitted as a bare dotted path so
+// it re-parses (NOT a backtick-escaped opaque leaf, NOT a `pkg["PARAM"]` index).
+bool Lnast_prp_writer::is_imported_package_name(std::string_view name) const {
+  for (const auto& pkg : lnast->get_imported_packages()) {
+    if (pkg == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool Lnast_prp_writer::is_imported_pkg_path(std::string_view name) const {
+  const auto dot = name.find('.');
+  if (dot == std::string_view::npos) {
+    return false;
+  }
+  return is_imported_package_name(name.substr(0, dot));
 }
 
 bool Lnast_prp_writer::is_bundle_field(std::string_view name) const {
@@ -369,7 +392,7 @@ std::string Lnast_prp_writer::strip_prefix(std::string_view name) const {
     // as `io.operation` (detuple re-splits it), instead of a quoted leaf.  A
     // keyword base/field (`in.bits`) still needs its colliding component escaped
     // (`` `in`.bits ``) so the path re-parses, hence quote_kw_path not bare `s`.
-    if (is_bundle_field(s)) {
+    if (is_bundle_field(s) || is_imported_pkg_path(s)) {
       return quote_kw_path(s);
     }
     return (s.find('.') == std::string::npos && !is_pyrope_reserved_ident(s)) ? s : "`" + s + "`";
@@ -485,6 +508,24 @@ void Lnast_prp_writer::emit_unimplemented(std::string_view what) {
 // ── Structural ────────────────────────────────────────────────────────────────
 
 void Lnast_prp_writer::write_top() {
+  // A package namespace unit (slang provenance flow): emit the exports straight
+  // from the pub list/values — `pub comptime const NAME = VALUE`. The general
+  // const-declare path drops a comptime const's folded value to `= 0`.
+  if (lnast->is_package_unit()) {
+    absl::flat_hash_map<std::string, std::string> vals;
+    for (const auto& [path, text] : lnast->get_pub_values()) {
+      vals.emplace(path, text);
+    }
+    for (const auto& p : lnast->get_pub_list()) {
+      auto it = vals.find(p.name);
+      print("pub comptime const ");
+      print(p.name);
+      print(" = ");
+      print(it != vals.end() ? it->second : "0");
+      print("\n");
+    }
+    return;
+  }
   if (!move_to_child()) {
     return;
   }
@@ -561,6 +602,16 @@ void Lnast_prp_writer::write_module() {
     if (!imports.empty()) {
       os << "\n";
     }
+  }
+
+  // File-scope package imports (provenance flow): one `const pkg = import("pkg")`
+  // per referenced package, so the `pkg.PARAM` refs resolve on recompile. A
+  // lambda-body import does not lower, so these MUST sit at file scope here.
+  if (!lnast->get_imported_packages().empty()) {
+    for (const auto& pkg : lnast->get_imported_packages()) {
+      os << "const " << pkg << " = import(\"" << pkg << "\")\n";
+    }
+    os << "\n";
   }
 
   const bool is_mod = body_has_state(lnast->get_sibling_next(io_nid));
@@ -907,11 +958,28 @@ void Lnast_prp_writer::write_module() {
       std::unordered_map<std::string, size_t> store_pos;   // name -> body index of its top-level store
       std::unordered_map<std::string, size_t> first_read;  // name -> earliest non-declare body index reading it
       std::unordered_set<std::string>         decl_read;   // read by a declare — emitted before every store
+      // %tmps whose value IS an imported-package comptime const (`%t = tuple_get
+      // (pkg, PARAM)`, or a tmp copy of such a tmp).  A store whose RHS ref is one
+      // of these is a pkg-valued store exactly like a bare `pkg.PARAM` RHS.  Tmps
+      // are defined before their reads in body order, so one forward pass suffices.
+      std::unordered_set<std::string> pkg_valued_tmp;
       {
         size_t idx = 0;
         for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c), ++idx) {
           const auto ct = lnast->get_type(c);
           auto       c0 = lnast->get_child(c);
+          if (ct == Lnast_ntype::Lnast_ntype_tuple_get && !c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0))
+              && is_tmp(lnast->get_name(c0))) {
+            auto base = lnast->get_sibling_next(c0);
+            if (!base.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(base))
+                && is_imported_package_name(strip_prefix(lnast->get_name(base)))) {
+              auto idx0 = lnast->get_sibling_next(base);
+              if (!idx0.is_invalid() && lnast->get_sibling_next(idx0).is_invalid()
+                  && lnast->get_type(idx0) == Lnast_ntype::Lnast_ntype_const) {
+                pkg_valued_tmp.insert(std::string(strip_prefix(lnast->get_name(c0))));
+              }
+            }
+          }
           if (Lnast_ntype::is_store(ct) && !c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0))) {
             // Only a SCALAR store (exactly 2 children: the ref and the value) can
             // carry the declaration.  A store with index levels emits `x[0] = v`
@@ -919,7 +987,22 @@ void Lnast_prp_writer::write_module() {
             // a name keeps its hoist.
             auto val = lnast->get_sibling_next(c0);
             if (!val.is_invalid() && lnast->is_last_child(val)) {
-              store_pos.emplace(std::string(strip_prefix(lnast->get_name(c0))), idx);
+              auto nm = std::string(strip_prefix(lnast->get_name(c0)));
+              store_pos.emplace(nm, idx);
+              // RHS resolves to an imported-package comptime const — a bare
+              // `pkg.PARAM` ref, or a %tmp holding one: this single-store net must
+              // emit `mut`, not `const` (see the set's doc — a comptime `const`
+              // copied into a mux target trips a rebind on recompile).
+              if (Lnast_ntype::is_ref(lnast->get_type(val))) {
+                auto vn = strip_prefix(lnast->get_name(val));
+                if (is_imported_pkg_path(vn) || pkg_valued_tmp.count(std::string(vn))) {
+                  if (is_tmp(lnast->get_name(c0))) {
+                    pkg_valued_tmp.insert(nm);  // tmp-to-tmp copy stays in the tmp set
+                  } else {
+                    pkg_valued_store_.insert(nm);
+                  }
+                }
+              }
             }
           }
           std::unordered_set<std::string> reads;
@@ -1389,8 +1472,16 @@ void Lnast_prp_writer::write_if() {
     const Mux_info& mi = mit->second;
     std::string     lhs(strip_prefix(mi.lhs));
     std::string     s;
-    if (mi.fold_decl || !declared_.count(lhs)) {
-      s += "mut ";  // the poison declare was dropped — declare here
+    // Declare here (`mut x = if …`) ONLY when nothing has declared `x` yet.
+    // `fold_decl` means the poison DECLARE node was folded into this mux — but a
+    // poison STORE (`x = 0ub?`) that was NOT adjacent to the mux (e.g. an SSA
+    // `x__w1` sits between them, as the provenance flow produces) still emits
+    // `mut x = 0ub?` ahead of us and declares `x`; a second `mut` here is a
+    // redeclaration. Keying on declared_ alone covers both: folded-and-dropped
+    // poison (x not declared → `mut`), and a surviving poison store (x declared
+    // → plain reassign).
+    if (!declared_.count(lhs)) {
+      s += "mut ";
       declared_.insert(lhs);
       s += lhs;
       if (!mi.decl_type.empty()) {
@@ -3303,7 +3394,11 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
       if (!base.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(base))) {
         std::string bn(strip_prefix(lnast->get_name(base)));
         auto        idx0 = lnast->get_sibling_next(base);
-        if (instance_results_.count(bn) != 0u && !idx0.is_invalid()
+        // A module-instance result OR an imported PACKAGE base with a bare
+        // constant field prints as `base.field` (dot access), not `base["field"]`
+        // — the provenance `pkg.PARAM` refs that arrive as a tuple_get.
+        const bool dot_base = instance_results_.count(bn) != 0u || is_imported_package_name(bn);
+        if (dot_base && !idx0.is_invalid()
             && lnast->get_sibling_next(idx0).is_invalid() && lnast->get_type(idx0) == N::Lnast_ntype_const) {
           std::string field(lnast->get_name(idx0));
           if (field.size() >= 2 && (field.front() == '\'' || field.front() == '"') && field.back() == field.front()) {
