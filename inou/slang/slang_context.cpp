@@ -6,12 +6,18 @@
 
 #include "slang_context.hpp"
 
+#include <algorithm>
 #include <cctype>
+#include <deque>
+#include <set>
 #include <utility>
 
 #include "diag.hpp"
 #include "iassert.hpp"
+#include "slang/ast/expressions/ConversionExpression.h"
+#include "slang/ast/expressions/OperatorExpressions.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
+#include "slang/ast/types/AllTypes.h"
 #include "slang_location.hpp"
 #include "str_tools.hpp"
 
@@ -24,11 +30,157 @@ void Slang_context::process_root(const slang::ast::RootSymbol& root) {
 
 // Emit one Pyrope NAMESPACE unit per package whose parameters this compile
 // referenced by name (see package_param_ref). Each is a file of
-// `pub comptime const PARAM = <value>` — the export side of the `pkg.PARAM`
-// provenance refs; the importing module unit carries the matching
-// `const pkg = import("pkg")` (get_imported_packages → prp_writer).
+// `pub comptime const PARAM[:type] = <defining expr | value>` — the export side
+// of the `pkg.PARAM` provenance refs; the importing module unit carries the
+// matching `const pkg = import("pkg")` (get_imported_packages → prp_writer).
+//
+// Fidelity riders (M2): a param's DEFINING EXPRESSION is preserved as readable
+// text (`TXFMA_B19 - TXFMA_B24`) when render_const_expr can prove it value-
+// faithful; the params an expression references join the emitted set (closure);
+// consts print in SOURCE order; an explicit SV width becomes a `:uN`/`:sN`
+// type. pub_values_ always carries the FOLDED literals (the import machinery
+// consumes them), so recompile semantics never depend on the expression text.
 void Slang_context::emit_package_units() {
+  // ── closure: pull in params referenced by kept defining expressions ─────────
+  struct Pinfo {
+    std::string              value;      // folded literal (pyrope text)
+    std::string              expr;       // defining expression text ("" → print the value)
+    std::string              type;       // "u5"-style type text ("" → none)
+    std::vector<std::string> same_refs;  // same-package names the expr reads
+  };
+  std::map<std::string, std::map<std::string, Pinfo>> needed;
+  std::map<std::string, std::set<std::string>>        unit_imports;  // pkg → cross-pkg imports
+  std::deque<std::pair<std::string, std::string>>     work;
   for (const auto& [pkg_name, params] : referenced_pkg_params_) {
+    for (const auto& [param_name, value] : params) {
+      needed[pkg_name][param_name].value = value;
+      work.emplace_back(pkg_name, param_name);
+    }
+  }
+  // Would importing `to` from `from` create an import cycle among the units?
+  auto creates_cycle = [&](const std::string& from, const std::string& to) {
+    std::vector<std::string> stack{to};
+    std::set<std::string>    seen;
+    while (!stack.empty()) {
+      auto cur = stack.back();
+      stack.pop_back();
+      if (cur == from) {
+        return true;
+      }
+      if (!seen.insert(cur).second) {
+        continue;
+      }
+      if (auto it = unit_imports.find(cur); it != unit_imports.end()) {
+        stack.insert(stack.end(), it->second.begin(), it->second.end());
+      }
+    }
+    return false;
+  };
+  // lower_module scopes eval_ctx_ per body and restores it to empty before we
+  // run, but render_const_expr's literal/conversion checks need try_eval — give
+  // the closure a package-scoped context (restored at the end).
+  auto saved_eval = std::move(eval_ctx_);
+  while (!work.empty()) {
+    auto [pkg_name, param_name] = work.front();
+    work.pop_front();
+    auto sit = referenced_pkg_syms_.find(pkg_name);
+    if (sit == referenced_pkg_syms_.end()) {
+      continue;
+    }
+    const auto* pkg  = sit->second;
+    const auto* msym = pkg->find(param_name);
+    if (msym == nullptr) {
+      continue;
+    }
+    eval_ctx_.emplace(pkg->asSymbol(), slang::ast::EvalFlags::CacheResults);
+    auto& pi = needed[pkg_name][param_name];
+    if (pi.value.empty()) {  // closure-added: compute the folded literal
+      const auto* cv = package_const_value(*msym);
+      if (cv == nullptr || !cv->isInteger()) {
+        needed[pkg_name].erase(param_name);
+        continue;
+      }
+      pi.value = const_text(cv->integer());
+    }
+    // type: an explicit SV width (anything but the bare-int default) prints
+    if (msym->kind == slang::ast::SymbolKind::Parameter || msym->kind == slang::ast::SymbolKind::EnumValue) {
+      const auto& t = msym->as<slang::ast::ValueSymbol>().getType();
+      if (t.isIntegral()) {
+        auto ti = tinfo(t);
+        if (!(ti.bits == 32 && ti.is_signed)) {  // skip the plain-`int` default
+          pi.type = absl::StrCat(ti.is_signed ? "s" : "u", ti.bits);
+        }
+      }
+    }
+    // defining expression (Parameter only; an enum member's value is its face)
+    if (msym->kind != slang::ast::SymbolKind::Parameter) {
+      continue;
+    }
+    const auto* init = msym->as<slang::ast::ValueSymbol>().getInitializer();
+    if (init == nullptr) {
+      continue;
+    }
+    {  // a bare (possibly negated / converted) literal: the folded value IS the source form
+      const auto* lit = init;
+      while (lit->kind == slang::ast::ExpressionKind::Conversion) {
+        lit = &lit->as<slang::ast::ConversionExpression>().operand();
+      }
+      if (lit->kind == slang::ast::ExpressionKind::UnaryOp) {
+        const auto& u = lit->as<slang::ast::UnaryExpression>();
+        if (u.op == slang::ast::UnaryOperator::Minus || u.op == slang::ast::UnaryOperator::Plus) {
+          lit = &u.operand();
+        }
+      }
+      while (lit->kind == slang::ast::ExpressionKind::Conversion) {
+        lit = &lit->as<slang::ast::ConversionExpression>().operand();
+      }
+      if (lit->kind == slang::ast::ExpressionKind::IntegerLiteral) {
+        continue;
+      }
+    }
+    std::set<std::string>                                                 imps;
+    std::vector<std::pair<const slang::ast::PackageSymbol*, std::string>> refs;
+    auto                                                                  r = render_const_expr(*init, pkg, imps, refs);
+    if (!r) {
+      continue;
+    }
+    const auto* cv  = package_const_value(*msym);
+    auto v64 = (cv != nullptr && cv->isInteger()) ? cv->integer().as<int64_t>() : std::optional<int64_t>{};
+    if (!v64 || *v64 != r->second) {
+      continue;  // render not value-faithful — keep the literal
+    }
+    bool imports_ok = true;
+    for (const auto& ip : imps) {
+      if (creates_cycle(pkg_name, ip)) {
+        imports_ok = false;  // cross-package cycle — keep the literal
+        break;
+      }
+    }
+    if (!imports_ok) {
+      continue;
+    }
+    pi.expr = r->first;
+    for (const auto& ip : imps) {
+      unit_imports[pkg_name].insert(ip);
+    }
+    for (const auto& [rpkg, rname] : refs) {
+      std::string rpkg_name(rpkg->name);
+      if (rpkg == pkg) {
+        pi.same_refs.push_back(rname);
+      }
+      if (needed[rpkg_name].count(rname) == 0) {
+        referenced_pkg_syms_.emplace(rpkg_name, rpkg);
+        needed[rpkg_name][rname];  // value filled when its work item runs
+        work.emplace_back(rpkg_name, rname);
+      }
+    }
+  }
+  eval_ctx_ = std::move(saved_eval);
+  // ── emission: one namespace unit per package, consts in SOURCE order ────────
+  for (const auto& [pkg_name, params] : needed) {
+    if (params.empty()) {
+      continue;
+    }
     auto saved_builder = std::move(builder_);
     builder_           = Lnast_builder();
     builder_.lnast     = std::make_shared<Lnast>(pkg_name);  // no lambda_kind → a namespace unit
@@ -36,26 +188,62 @@ void Slang_context::emit_package_units() {
     builder_.lnast->set_pending_srcid(hhds::SourceId_invalid);
     auto root          = builder_.lnast->set_root(Lnast_ntype::create_top());
     builder_.idx_stmts = builder_.lnast->add_child(root, Lnast_ntype::create_stmts());
+    if (auto uit = unit_imports.find(pkg_name); uit != unit_imports.end()) {
+      for (const auto& ip : uit->second) {
+        builder_.lnast->add_imported_package(ip);
+      }
+    }
     std::vector<std::pair<std::string, std::string>> pub_vals;
-    for (const auto& [param_name, value] : params) {
+    absl::flat_hash_map<std::string, std::string>    expr_m;
+    absl::flat_hash_map<std::string, std::string>    type_m;
+    std::set<std::string>                            emitted;
+    auto emit_one = [&](const std::string& param_name, const Pinfo& pi) {
       // `const` binds its value from a SEPARATE store, not the declare init
       // (only `reg` folds the init into the declare — prp2lnast). A declare-init
       // const does not bind as a known comptime value, so harvest_pub_values
       // rejects it.
       builder_.create_declare_stmts(param_name, "const comptime", "", "");
-      builder_.create_assign_stmts(param_name, value);
+      builder_.create_assign_stmts(param_name, pi.value);
       builder_.lnast->add_pub(param_name, "value");
-      pub_vals.emplace_back(param_name, value);
+      pub_vals.emplace_back(param_name, pi.value);
+      // a defining expr may only read names DECLARED ABOVE it in this file
+      const bool refs_ok = std::all_of(pi.same_refs.begin(), pi.same_refs.end(),
+                                       [&](const std::string& n) { return emitted.count(n) != 0; });
+      if (!pi.expr.empty() && refs_ok) {
+        expr_m.emplace(param_name, pi.expr);
+      }
+      if (!pi.type.empty()) {
+        type_m.emplace(param_name, pi.type);
+      }
+      emitted.insert(param_name);
+    };
+    // source order: walk the package's members; the scope exposes enum members
+    // transparently, so anything unmatched falls back to a name-ordered tail.
+    if (auto sit = referenced_pkg_syms_.find(pkg_name); sit != referenced_pkg_syms_.end()) {
+      for (const auto& member : sit->second->members()) {
+        std::string nm(member.name);
+        if (auto pit = params.find(nm); pit != params.end() && emitted.count(nm) == 0 && !pit->second.value.empty()) {
+          emit_one(nm, pit->second);
+        }
+      }
+    }
+    for (const auto& [param_name, pi] : params) {
+      if (emitted.count(param_name) == 0 && !pi.value.empty()) {
+        emit_one(param_name, pi);
+      }
     }
     // Stamp pub_values_ NOW: the prp_writer's package-unit path reads only
     // get_pub_values(), and the constprop harvest that normally fills it does
     // not run with compile.upass.constprop=0 (its skip guard tolerates a
     // pre-stamped unit, so constprop=1 is unaffected).
     builder_.lnast->set_pub_values(std::move(pub_vals));
+    builder_.lnast->set_package_const_exprs(std::move(expr_m));
+    builder_.lnast->set_package_const_types(std::move(type_m));
     ordered_lnasts_.push_back(builder_.lnast);
     builder_ = std::move(saved_builder);
   }
   referenced_pkg_params_.clear();
+  referenced_pkg_syms_.clear();
 }
 
 std::vector<std::shared_ptr<Lnast>> Slang_context::pick_lnast() {

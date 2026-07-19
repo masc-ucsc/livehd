@@ -373,6 +373,19 @@ private:
   std::optional<std::string> package_symbol_ref(const slang::ast::Symbol& sym);
   // The package a symbol is (transitively) declared in, or nullptr.
   static const slang::ast::PackageSymbol* owning_package(const slang::ast::Symbol& sym);
+  // The compile-time value of a Parameter / enum member symbol, else nullptr.
+  static const slang::ConstantValue* package_const_value(const slang::ast::Symbol& sym);
+  // Renders a package-const initializer as READABLE pyrope text (`TXFMA_B19 -
+  // TXFMA_B24`, `pkg2.X + 1`) while re-evaluating it in plain int64 arithmetic
+  // bottom-up; callers compare the returned value against slang's folded value
+  // so any width-wrap/semantics divergence falls back to the literal. Same-
+  // package refs render bare; cross-package refs dot-qualify and land in
+  // imports_out; every referenced (package, param) lands in refs_out (for the
+  // package-unit closure). Only value-faithful ops render (+ - * << >>, unary
+  // -, value-preserving conversions); anything else returns nullopt.
+  std::optional<std::pair<std::string, int64_t>> render_const_expr(
+      const slang::ast::Expression& e, const slang::ast::PackageSymbol* home, std::set<std::string>& imports_out,
+      std::vector<std::pair<const slang::ast::PackageSymbol*, std::string>>& refs_out);
   // Any leaf of `expr` is a package Parameter / package enum member.
   static bool contains_package_param(const slang::ast::Expression& expr);
   // The structural lowering of `expr` can preserve pkg.PARAM leaves: every
@@ -384,6 +397,9 @@ private:
   // pkg name → (param name → pyrope value text). Accumulated across ALL modules;
   // one `pub comptime const` package unit is emitted per pkg at the end.
   std::map<std::string, std::map<std::string, std::string>> referenced_pkg_params_;
+  // pkg name → its PackageSymbol (for source-order member iteration + the
+  // defining-expression closure at emit_package_units time).
+  std::map<std::string, const slang::ast::PackageSymbol*> referenced_pkg_syms_;
   void emit_package_units();  // one namespace .prp per referenced package
   std::string lower_select(const slang::ast::Expression& expr);  // Element/Range select rvalue
   std::string lower_concat(const slang::ast::ConcatenationExpression& expr);

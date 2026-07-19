@@ -39,9 +39,7 @@ const slang::ast::PackageSymbol* Slang_context::owning_package(const slang::ast:
   return nullptr;
 }
 
-// The compile-time value of a package-const-capable symbol (Parameter or enum
-// member), or nullptr if the symbol is not one.
-static const slang::ConstantValue* package_const_value(const slang::ast::Symbol& sym) {
+const slang::ConstantValue* Slang_context::package_const_value(const slang::ast::Symbol& sym) {
   if (sym.kind == slang::ast::SymbolKind::Parameter) {
     return &sym.as<slang::ast::ParameterSymbol>().getValue();
   }
@@ -49,6 +47,118 @@ static const slang::ConstantValue* package_const_value(const slang::ast::Symbol&
     return &sym.as<slang::ast::EnumValueSymbol>().getValue();
   }
   return nullptr;
+}
+
+std::optional<std::pair<std::string, int64_t>> Slang_context::render_const_expr(
+    const slang::ast::Expression& e, const slang::ast::PackageSymbol* home, std::set<std::string>& imports_out,
+    std::vector<std::pair<const slang::ast::PackageSymbol*, std::string>>& refs_out) {
+  switch (e.kind) {
+    case ExpressionKind::IntegerLiteral: {
+      auto cv = try_eval(e);
+      if (!cv || !cv->isInteger()) {
+        return std::nullopt;
+      }
+      auto v = cv->integer().as<int64_t>();
+      if (!v) {
+        return std::nullopt;
+      }
+      return std::make_pair(const_text(cv->integer()), *v);
+    }
+    case ExpressionKind::NamedValue:
+    case ExpressionKind::HierarchicalValue: {
+      const auto& sym = e.as<slang::ast::ValueExpressionBase>().symbol;
+      const auto* cv  = package_const_value(sym);
+      if (cv == nullptr || !cv->isInteger()) {
+        return std::nullopt;
+      }
+      auto v = cv->integer().as<int64_t>();
+      if (!v) {
+        return std::nullopt;
+      }
+      const auto* pkg = owning_package(sym);
+      if (pkg == nullptr) {
+        return std::nullopt;
+      }
+      refs_out.emplace_back(pkg, std::string(sym.name));
+      if (pkg == home) {
+        return std::make_pair(std::string(sym.name), *v);
+      }
+      imports_out.insert(std::string(pkg->name));
+      return std::make_pair(absl::StrCat(pkg->name, ".", sym.name), *v);
+    }
+    case ExpressionKind::UnaryOp: {
+      const auto& u = e.as<slang::ast::UnaryExpression>();
+      auto        r = render_const_expr(u.operand(), home, imports_out, refs_out);
+      if (!r) {
+        return std::nullopt;
+      }
+      if (u.op == UnaryOperator::Plus) {
+        return r;
+      }
+      if (u.op == UnaryOperator::Minus && r->second != INT64_MIN) {
+        return std::make_pair(absl::StrCat("(-", r->first, ")"), -r->second);
+      }
+      return std::nullopt;  // ~ is width-bound in SV — not value-faithful unbounded
+    }
+    case ExpressionKind::BinaryOp: {
+      const auto& b = e.as<slang::ast::BinaryExpression>();
+      auto        l = render_const_expr(b.left(), home, imports_out, refs_out);
+      if (!l) {
+        return std::nullopt;
+      }
+      auto r = render_const_expr(b.right(), home, imports_out, refs_out);
+      if (!r) {
+        return std::nullopt;
+      }
+      __int128    wide = 0;
+      const char* op   = nullptr;
+      switch (b.op) {
+        case BinaryOperator::Add: op = "+"; wide = static_cast<__int128>(l->second) + r->second; break;
+        case BinaryOperator::Subtract: op = "-"; wide = static_cast<__int128>(l->second) - r->second; break;
+        case BinaryOperator::Multiply: op = "*"; wide = static_cast<__int128>(l->second) * r->second; break;
+        case BinaryOperator::LogicalShiftLeft:
+          if (r->second < 0 || r->second > 62) {
+            return std::nullopt;
+          }
+          op   = "<<";
+          wide = static_cast<__int128>(l->second) << r->second;
+          break;
+        case BinaryOperator::LogicalShiftRight:
+        case BinaryOperator::ArithmeticShiftRight:
+          // pyrope >> is arithmetic; a logical shift of a NEGATIVE fixed-width
+          // value differs, so only pass non-negative lhs through as logical.
+          if (r->second < 0 || r->second > 62
+              || (b.op == BinaryOperator::LogicalShiftRight && l->second < 0)) {
+            return std::nullopt;
+          }
+          op   = ">>";
+          wide = l->second >> r->second;
+          break;
+        default: return std::nullopt;  // /, %, &, |, … : width/sign semantics not value-faithful
+      }
+      if (wide < INT64_MIN || wide > INT64_MAX) {
+        return std::nullopt;
+      }
+      return std::make_pair(absl::StrCat("(", l->first, " ", op, " ", r->first, ")"),
+                            static_cast<int64_t>(wide));
+    }
+    case ExpressionKind::Conversion: {
+      auto inner = render_const_expr(e.as<slang::ast::ConversionExpression>().operand(), home, imports_out, refs_out);
+      if (!inner) {
+        return std::nullopt;
+      }
+      auto whole = try_eval(e);
+      if (!whole || !whole->isInteger()) {
+        return std::nullopt;
+      }
+      auto wv = whole->integer().as<int64_t>();
+      if (!wv || *wv != inner->second) {
+        return std::nullopt;  // value-changing cast — fold instead
+      }
+      return inner;
+    }
+    default: return std::nullopt;  // $clog2, concat, replication, … : fold
+  }
 }
 
 std::optional<std::string> Slang_context::package_symbol_ref(const slang::ast::Symbol& sym) {
@@ -66,6 +176,7 @@ std::optional<std::string> Slang_context::package_symbol_ref(const slang::ast::S
   std::string pkg_name(pkg->name);
   std::string param_name(sym.name);
   referenced_pkg_params_[pkg_name][param_name] = const_text(cv->integer());
+  referenced_pkg_syms_[pkg_name]               = pkg;
   builder_.lnast->add_imported_package(pkg_name);
   return absl::StrCat(pkg_name, ".", param_name);
 }

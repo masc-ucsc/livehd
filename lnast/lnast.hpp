@@ -283,6 +283,8 @@ private:
   std::vector<std::string>                         external_modules_;
   std::vector<std::string>                         imported_packages_;  // `pkg.PARAM` provenance imports
   bool                                             is_package_unit_ = false;  // pub-comptime-const namespace unit
+  absl::flat_hash_map<std::string, std::string>    package_const_exprs_;  // const name → defining-expr pyrope text
+  absl::flat_hash_map<std::string, std::string>    package_const_types_;  // const name → type text (u5/s10)
   // Generic type parameters (`<T, U>`) recorded by func_extract from
   // the func_def generics child (a seam: the per-`T` body substitution lands
   // in a follow-up goal; this only preserves the names so a template carrying
@@ -563,6 +565,22 @@ public:
   // drops a comptime const's folded value to `= 0`.
   void set_package_unit(bool v = true) noexcept { is_package_unit_ = v; }
   bool is_package_unit() const noexcept { return is_package_unit_; }
+
+  // Package-unit provenance riders (in-memory, set by the slang reader):
+  // - a const's DEFINING EXPRESSION as pyrope text (`TXFMA_B19 - TXFMA_B24`) —
+  //   the writer prints it instead of the folded value. pub_values_ always
+  //   keeps the FOLDED literal (the import/namespace bind machinery consumes
+  //   it), so recompile semantics never depend on the expression text.
+  // - a const's TYPE as pyrope text (`u5`, `s10`) when the SV source declared
+  //   an explicit width — the writer prints `pub comptime const X:u5 = …`.
+  void set_package_const_exprs(absl::flat_hash_map<std::string, std::string> m) { package_const_exprs_ = std::move(m); }
+  const absl::flat_hash_map<std::string, std::string>& get_package_const_exprs() const noexcept {
+    return package_const_exprs_;
+  }
+  void set_package_const_types(absl::flat_hash_map<std::string, std::string> m) { package_const_types_ = std::move(m); }
+  const absl::flat_hash_map<std::string, std::string>& get_package_const_types() const noexcept {
+    return package_const_types_;
+  }
 
   // ── DCE mark-only mode (upass runner, lg-only flows) ──────────────────────
   // Statement nids the post-walk DCE proved dead when the rewritten LNAST is

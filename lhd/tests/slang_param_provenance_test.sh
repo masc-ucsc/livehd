@@ -28,6 +28,7 @@ package tpkg;
   localparam SEL_B = 12;
   localparam logic signed [9:0] NEG = -12;
   localparam int BIG = 300;
+  localparam DIFF = (SEL_B - SEL_A);
 endpackage
 EOF
 
@@ -46,6 +47,8 @@ module tmod(input [3:0] s, input [9:0] d, output logic [9:0] r,
   assign rs = NEG;
   // value-CHANGING narrowing cast: 4'(300) == 12; must fold, not stay symbolic
   assign hit = (s == 4'(BIG));
+  // param defined via an expression of other params (package-unit fidelity)
+  wire [9:0] unused_d = d + DIFF;
 endmodule
 EOF
 
@@ -53,16 +56,20 @@ EOF
 $LHD compile "$W/tpkg.sv" "$W/tmod.sv" --top tmod --emit-dir pyrope:"$W/p1" --workdir "$W/w1" -q \
   || fail "provenance emission (constprop=1) did not compile"
 grep -q 'pub comptime const SEL_A = 3' "$W/p1/tpkg.prp" || fail "constprop=1 pkg unit lacks SEL_A=3: $(cat "$W/p1/tpkg.prp")"
-grep -q 'pub comptime const NEG = -12' "$W/p1/tpkg.prp" || fail "constprop=1 pkg unit lacks NEG=-12: $(cat "$W/p1/tpkg.prp")"
+grep -q 'pub comptime const NEG:s10 = -12' "$W/p1/tpkg.prp" || fail "pkg unit lacks typed NEG:s10=-12: $(cat "$W/p1/tpkg.prp")"
 grep -q 'tpkg\.SEL_A' "$W/p1/tmod.prp" || fail "module body folded tpkg.SEL_A: $(cat "$W/p1/tmod.prp")"
-echo "PASS: provenance emission carries symbolic refs + real package values (constprop=1)"
+# defining EXPRESSION preserved (not the folded 9), in SOURCE order (SEL_A first)
+grep -qE 'pub comptime const DIFF = \(SEL_B - SEL_A\)' "$W/p1/tpkg.prp" \
+  || fail "pkg unit folded DIFF's defining expression: $(cat "$W/p1/tpkg.prp")"
+head -1 "$W/p1/tpkg.prp" | grep -q 'SEL_A' || fail "pkg unit not in source order: $(head -3 "$W/p1/tpkg.prp")"
+echo "PASS: provenance emission carries symbolic refs, typed consts, defining exprs, source order"
 
 # ── (2) same with constprop=0 (used to emit `= 0` for every const) ────────────
 $LHD compile "$W/tpkg.sv" "$W/tmod.sv" --top tmod --emit-dir pyrope:"$W/p0" --workdir "$W/w0" -q \
   --set compile.upass.constprop=0 \
   || fail "provenance emission (constprop=0) did not compile"
 grep -q 'pub comptime const SEL_A = 3' "$W/p0/tpkg.prp" || fail "constprop=0 pkg unit lacks SEL_A=3: $(cat "$W/p0/tpkg.prp")"
-grep -q 'pub comptime const NEG = -12' "$W/p0/tpkg.prp" || fail "constprop=0 pkg unit lacks NEG=-12: $(cat "$W/p0/tpkg.prp")"
+grep -q 'pub comptime const NEG:s10 = -12' "$W/p0/tpkg.prp" || fail "constprop=0 pkg unit lacks NEG=-12: $(cat "$W/p0/tpkg.prp")"
 echo "PASS: constprop=0 package unit still carries real values"
 
 # ── (3) value-changing narrowing cast must keep its truncation ────────────────

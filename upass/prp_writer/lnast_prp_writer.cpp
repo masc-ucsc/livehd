@@ -509,19 +509,42 @@ void Lnast_prp_writer::emit_unimplemented(std::string_view what) {
 
 void Lnast_prp_writer::write_top() {
   // A package namespace unit (slang provenance flow): emit the exports straight
-  // from the pub list/values — `pub comptime const NAME = VALUE`. The general
-  // const-declare path drops a comptime const's folded value to `= 0`.
+  // from the pub list — `pub comptime const NAME[:type] = <defining expr |
+  // folded value>`. The general const-declare path drops a comptime const's
+  // folded value to `= 0`; the defining-expression/type riders come from the
+  // reader (get_package_const_exprs/types), pub order IS source order.
   if (lnast->is_package_unit()) {
+    // cross-package defining exprs need their imports at file scope
+    if (!lnast->get_imported_packages().empty()) {
+      for (const auto& pkg : lnast->get_imported_packages()) {
+        print("const ");
+        print(pkg);
+        print(" = import(\"");
+        print(pkg);
+        print("\")\n");
+      }
+      print("\n");
+    }
     absl::flat_hash_map<std::string, std::string> vals;
     for (const auto& [path, text] : lnast->get_pub_values()) {
       vals.emplace(path, text);
     }
+    const auto& exprs = lnast->get_package_const_exprs();
+    const auto& types = lnast->get_package_const_types();
     for (const auto& p : lnast->get_pub_list()) {
-      auto it = vals.find(p.name);
       print("pub comptime const ");
       print(p.name);
+      if (auto tit = types.find(p.name); tit != types.end()) {
+        print(":");
+        print(tit->second);
+      }
       print(" = ");
-      print(it != vals.end() ? it->second : "0");
+      if (auto eit = exprs.find(p.name); eit != exprs.end()) {
+        print(eit->second);
+      } else {
+        auto it = vals.find(p.name);
+        print(it != vals.end() ? it->second : "0");
+      }
       print("\n");
     }
     return;
