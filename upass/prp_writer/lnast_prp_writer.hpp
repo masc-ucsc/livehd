@@ -96,6 +96,20 @@ private:
   void write_module();  // slang-origin: io node + body -> comb|mod NAME(...) -> (...) { … }
   void write_stmts();
   void write_if();
+  // The body of write_if. `continuation` renders this if-node as an ` elif …`
+  // continuing the caller's chain (else-flattening) instead of opening one.
+  void write_if_chain(bool continuation);
+  // A `unique if` chain whose every condition is `<scrutinee> == K` (or an
+  // `or` of such, K a constant / imported pkg.PARAM) is an SV case statement —
+  // render it as `match <scrutinee> { == K {…} in (K1, K2) {…} else {…} }`.
+  // Prints and returns true (cursor back on the if node), or false to fall
+  // through to the plain chain rendering.
+  bool try_write_match();
+  // The single REAL statement of an else-stmts block when it is a PLAIN
+  // (non-unique, non-mux-collapsed) if — the `else { if … }` nesting the reader
+  // produces for SV `else if` ladders, flattened to ` elif ` by write_if_chain.
+  // Invalid when the block holds anything else.
+  Lnast_nid flattenable_nested_if(Lnast_nid stmts_nid) const;
   void write_declare();  // declare(ref, type, qualifier, [value])
   void write_store();    // store(var, level0..levelN, value)
   void write_ref();
@@ -361,6 +375,19 @@ private:
   };
   std::unordered_map<int64_t, Mux_info> mux_info_;  // keyed by if-node class index
   void                                  analyze_muxes(Lnast_nid stmts_nid);
+  // ── expression inlining on top of the mux collapse ────────────────────────
+  // Three single-use reader temps render inline at their read, and their def
+  // statements (and hoists) disappear:
+  //  - `_b2i_N` (bool→int branch merge, arms 1/0) → `unsigned(<cond>)`
+  //  - `_mux_N` (hoisted ternary) whose single use is a bare scalar store RHS →
+  //    the conditional expression itself (`x = if c {a} else {b}`)
+  //  - `<base>__wN` (reader SSA version) whose single def is a scalar store →
+  //    its RHS value (kills the `const x__w1 = v` line; the poison/mux read it)
+  std::unordered_map<std::string, Lnast_nid> bool_inline_;   // stripped name → cond nid
+  std::unordered_map<std::string, int64_t>   mux_inline_;    // stripped name → mux_info_ key
+  std::unordered_map<std::string, Lnast_nid> value_inline_;  // stripped name → RHS value nid
+  void        analyze_expr_inlines(Lnast_nid io_nid, Lnast_nid stmts_nid);
+  std::string render_mux_expr(const Mux_info& mi);  // `if c0 {v0} elif … else {D}`
   // The single value-def stmt of a stmts block that writes ONLY scalar `out_lhs`
   // (returns its node), or invalid. If `expect` is non-empty the target must equal
   // it; otherwise the target is reported in out_lhs.

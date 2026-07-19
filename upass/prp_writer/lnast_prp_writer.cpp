@@ -790,6 +790,9 @@ void Lnast_prp_writer::write_module() {
     compute_dead_signals(io_nid, stmts_nid);
     // Collapse mux-shaped if/unique-if into conditional-expression assignments.
     analyze_muxes(stmts_nid);
+    // Inline single-use reader temps at their read (_b2i → unsigned(cond),
+    // _mux → the conditional expression, __wN SSA copies → their value).
+    analyze_expr_inlines(io_nid, stmts_nid);
     // Pre-declare body `mut` vars that are WRITTEN but have no `declare` node.
     // Their first write would otherwise emit `mut X` inside whatever (possibly
     // nested) scope it lands in; a later write in a SIBLING scope then references
@@ -1076,6 +1079,9 @@ void Lnast_prp_writer::write_module() {
       // vars with a NESTED `mut` declare. Skip top-declared / io / reg|latch|const.
       std::unordered_set<std::string> need;
       for (const auto& nm : store_lhs) {
+        if (bool_inline_.count(nm) != 0u || mux_inline_.count(nm) != 0u || value_inline_.count(nm) != 0u) {
+          continue;  // inlined at their single read — no declaration ever emits
+        }
         if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm) && !pin_cone_.count(nm)
             && !instance_output_inlined_.count(nm) && !dead_signals_.count(nm)) {
           if (no_hoist_needed(nm)) {
@@ -1086,6 +1092,10 @@ void Lnast_prp_writer::write_module() {
         }
       }
       for (const auto& nm : nested_mut_decl) {
+        if (bool_inline_.count(nm) != 0u || mux_inline_.count(nm) != 0u || value_inline_.count(nm) != 0u) {
+          suppress_decl_.insert(nm);  // inlined at its single read — no hoist, no in-place declare
+          continue;
+        }
         if (!top_decl.count(nm) && !nonmut_decl.count(nm) && !declared_.count(nm) && !pin_cone_.count(nm)
             && !instance_output_inlined_.count(nm) && !dead_signals_.count(nm)) {
           need.insert(nm);
@@ -1486,7 +1496,180 @@ void Lnast_prp_writer::write_stmts() {
 
 // ── if ────────────────────────────────────────────────────────────────────────
 
-void Lnast_prp_writer::write_if() {
+bool Lnast_prp_writer::try_write_match() {
+  // children: [cond, stmts, cond, stmts, …, (else_stmts)]
+  std::vector<Lnast_nid> kids;
+  for (auto c = lnast->get_child(cur); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    kids.push_back(c);
+  }
+  const bool   has_else = (kids.size() % 2) == 1;
+  const size_t npairs   = kids.size() / 2;
+  if (npairs == 0) {
+    return false;
+  }
+  // A match label must be a CONSTANT (an SV case item): a literal const or an
+  // imported pkg.PARAM comptime ref.
+  auto label_ok = [&](Lnast_nid n) {
+    auto t = lnast->get_type(n);
+    if (t == Lnast_ntype::Lnast_ntype_const) {
+      return true;
+    }
+    if (Lnast_ntype::is_ref(t)) {
+      // a pkg.PARAM ref arrives as a tuple_get temp — check its rendered form
+      return is_imported_pkg_path(render_value(n, /*operand_ctx=*/true));
+    }
+    return false;
+  };
+  // Collect each condition's (a, b) eq operand pairs (through `or` chains).
+  std::function<bool(Lnast_nid, std::vector<std::pair<Lnast_nid, Lnast_nid>>&)> collect_eqs =
+      [&](Lnast_nid def, std::vector<std::pair<Lnast_nid, Lnast_nid>>& out) -> bool {
+    const auto t = lnast->get_type(def);
+    if (t == Lnast_ntype::Lnast_ntype_eq) {
+      auto c0 = lnast->get_child(def);
+      if (c0.is_invalid()) {
+        return false;
+      }
+      auto a = lnast->get_sibling_next(c0);
+      if (a.is_invalid()) {
+        return false;
+      }
+      auto b = lnast->get_sibling_next(a);
+      if (b.is_invalid() || !lnast->is_last_child(b)) {
+        return false;
+      }
+      out.emplace_back(a, b);
+      return true;
+    }
+    if (t == Lnast_ntype::Lnast_ntype_log_or) {
+      auto c0 = lnast->get_child(def);
+      if (c0.is_invalid()) {
+        return false;
+      }
+      for (auto o = lnast->get_sibling_next(c0); !o.is_invalid(); o = lnast->get_sibling_next(o)) {
+        if (!Lnast_ntype::is_ref(lnast->get_type(o))) {
+          return false;
+        }
+        std::string on(lnast->get_name(o));
+        if (!is_foldable(on)) {
+          return false;
+        }
+        if (!collect_eqs(fold_info_.at(on).def_node, out)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    return false;
+  };
+  std::vector<std::vector<std::pair<Lnast_nid, Lnast_nid>>> arm_eqs(npairs);
+  for (size_t p = 0; p < npairs; ++p) {
+    auto cnd = kids[2 * p];
+    if (!Lnast_ntype::is_ref(lnast->get_type(cnd))) {
+      return false;
+    }
+    std::string cn(lnast->get_name(cnd));
+    if (!is_foldable(cn)) {
+      return false;
+    }
+    if (!collect_eqs(fold_info_.at(cn).def_node, arm_eqs[p]) || arm_eqs[p].empty()) {
+      return false;
+    }
+  }
+  // Same scrutinee on one side of EVERY eq; the other side is the label.
+  auto try_side = [&](bool scrut_is_a, std::string& scr, std::vector<std::vector<std::string>>& labels) {
+    scr = render_value(scrut_is_a ? arm_eqs[0][0].first : arm_eqs[0][0].second, /*operand_ctx=*/true);
+    labels.assign(npairs, {});
+    for (size_t p = 0; p < npairs; ++p) {
+      for (const auto& [a, b] : arm_eqs[p]) {
+        auto sa = render_value(a, /*operand_ctx=*/true);
+        auto sb = render_value(b, /*operand_ctx=*/true);
+        Lnast_nid label_nid;
+        if (sa == scr) {
+          label_nid = b;
+        } else if (sb == scr) {
+          label_nid = a;
+        } else {
+          return false;
+        }
+        if (!label_ok(label_nid)) {
+          return false;
+        }
+        labels[p].push_back(label_nid.get_class_index().value == a.get_class_index().value
+                                ? sa
+                                : sb);
+      }
+    }
+    return true;
+  };
+  std::string                           scr;
+  std::vector<std::vector<std::string>> labels;
+  if (!try_side(true, scr, labels) && !try_side(false, scr, labels)) {
+    return false;
+  }
+  // ── print ──────────────────────────────────────────────────────────────────
+  print("match ");
+  print(scr);
+  print(" {\n");
+  ++depth;
+  if (!move_to_child()) {
+    --depth;
+    print("}");
+    return true;
+  }
+  size_t idx = 0;
+  do {
+    if (idx % 2 == 0 && idx / 2 < npairs) {
+      ++idx;
+      continue;  // condition child — encoded in the arm label
+    }
+    const size_t p = (idx - 1) / 2;
+    print_indent();
+    if (has_else && idx == kids.size() - 1) {
+      print("else {\n");
+    } else if (labels[p].size() == 1) {
+      print("== " + labels[p][0] + " {\n");
+    } else {
+      std::string s = "in (";
+      for (size_t k = 0; k < labels[p].size(); ++k) {
+        s += (k != 0u ? ", " : "") + labels[p][k];
+      }
+      print(s + ") {\n");
+    }
+    ++depth;
+    write_node();
+    --depth;
+    print_indent();
+    print("}\n");
+    ++idx;
+  } while (move_to_sibling());
+  --depth;
+  print_indent();
+  print("}");
+  move_to_parent();
+  return true;
+}
+
+Lnast_nid Lnast_prp_writer::flattenable_nested_if(Lnast_nid stmts_nid) const {
+  Lnast_nid found{};
+  int       real = 0;
+  for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    if (is_folded_node(c) || emits_nothing_stmt(c)) {
+      continue;  // an inlined temp def (e.g. the nested if's condition) or a no-op
+    }
+    if (++real > 1 || lnast->get_type(c) != Lnast_ntype::Lnast_ntype_if) {
+      return Lnast_nid{};
+    }
+    if (mux_info_.count(c.get_class_index().value) != 0u) {
+      return Lnast_nid{};  // renders as an assignment — keep the else block
+    }
+    found = c;
+  }
+  return real == 1 ? found : Lnast_nid{};
+}
+
+void Lnast_prp_writer::write_if() { write_if_chain(/*continuation=*/false); }
+
+void Lnast_prp_writer::write_if_chain(bool continuation) {
   // Mux collapse: render `x = if c0 {v0} elif c1 {v1} … else {D}` instead of the
   // statement-if. The cursor stays on the if-node (no navigation) so the caller's
   // move_to_sibling still advances correctly. x is already declared (its poison
@@ -1514,23 +1697,21 @@ void Lnast_prp_writer::write_if() {
     } else {
       s += lhs + " = ";
     }
-    for (size_t k = 0; k < mi.arms.size(); ++k) {
-      s += (k == 0 ? "if " : " elif ");
-      s += render_value(mi.arms[k].cond, /*operand_ctx=*/false);
-      s += " { " + render_def_rhs(mi.arms[k].def, /*operand_ctx=*/false) + " }";
-    }
-    s += " else { " + render_def_rhs(mi.else_def, /*operand_ctx=*/false) + " }";
+    s += render_mux_expr(mi);
     print(s);
     return;
   }
 
   const bool unique = Lnast_ntype::is_unique_if(current_ntype());
+  if (!continuation && unique && try_write_match()) {
+    return;
+  }
   if (!move_to_child()) {
     return;
   }
 
   // First child: condition (ref or const) — inline a single-use temp condition.
-  print(unique ? "unique if " : "if ");
+  print(continuation ? " elif " : (unique ? "unique if " : "if "));
   print(render_value(cur, /*operand_ctx=*/false));
   print(" {\n");
   ++depth;
@@ -1550,6 +1731,17 @@ void Lnast_prp_writer::write_if() {
   // Optional: else / elif chains
   while (move_to_sibling()) {
     if (is_last_child()) {
+      // An else block holding ONLY a plain nested if (the reader's shape for an
+      // SV `else if` ladder) flattens to ` elif … ` — a 10-deep nest becomes a
+      // flat chain. A `unique if` chain never absorbs a plain if (semantics).
+      if (auto nested = unique ? Lnast_nid{} : flattenable_nested_if(cur); !nested.is_invalid()) {
+        move_to_child();
+        while (cur.get_class_index().value != nested.get_class_index().value && move_to_sibling()) {
+        }
+        write_if_chain(/*continuation=*/true);
+        move_to_parent();  // back to the else-stmts; it is the last child, so the loop ends
+        continue;
+      }
       // Bare else-stmts
       print(" else {\n");
       ++depth;
@@ -1949,6 +2141,15 @@ void Lnast_prp_writer::write_store() {
     print("]");
   }
   print(" = ");
+  // A `_mux_N` single-use temp inlines its conditional expression right here
+  // (the only statement position where an if-expression is parse-safe).
+  if (lnast->get_type(cur) == Lnast_ntype::Lnast_ntype_ref) {
+    if (auto mit = mux_inline_.find(std::string(strip_prefix(lnast->get_name(cur)))); mit != mux_inline_.end()) {
+      print(render_mux_expr(mux_info_.at(mit->second)));
+      move_to_parent();
+      return;
+    }
+  }
   print(render_value(cur, /*operand_ctx=*/false));  // cursor sits on the value (last child)
   move_to_parent();
 }
@@ -3039,6 +3240,134 @@ void Lnast_prp_writer::analyze_muxes(Lnast_nid stmts_nid) {
   }
 }
 
+std::string Lnast_prp_writer::render_mux_expr(const Mux_info& mi) {
+  std::string s;
+  for (size_t k = 0; k < mi.arms.size(); ++k) {
+    s += (k == 0 ? "if " : " elif ");
+    s += render_value(mi.arms[k].cond, /*operand_ctx=*/false);
+    s += " { " + render_def_rhs(mi.arms[k].def, /*operand_ctx=*/false) + " }";
+  }
+  s += " else { " + render_def_rhs(mi.else_def, /*operand_ctx=*/false) + " }";
+  return s;
+}
+
+void Lnast_prp_writer::analyze_expr_inlines(Lnast_nid io_nid, Lnast_nid stmts_nid) {
+  (void)io_nid;
+  bool_inline_.clear();
+  mux_inline_.clear();
+  value_inline_.clear();
+  if (stmts_nid.is_invalid()) {
+    return;
+  }
+  // Names read by any top-level DECLARE: declares emit before every store, so
+  // inlining a later-defined value into one would reorder reads — excluded.
+  std::unordered_set<std::string> decl_reads;
+  for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    if (Lnast_ntype::is_declare(lnast->get_type(c))) {
+      collect_driver_reads(c, decl_reads);  // excludes child0 — the declared name itself
+    }
+  }
+  // Names an attr_set VALUE references (`[clock_pin=ref gclk__w1]`): attr
+  // values render as bare names (render_attr_value), outside the render_value
+  // inlining — such a name must keep its def.
+  std::function<void(Lnast_nid)> scan_attr_refs = [&](Lnast_nid n) {
+    for (auto c = lnast->get_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      if (lnast->get_type(c) == Lnast_ntype::Lnast_ntype_attr_set) {
+        auto a0 = lnast->get_child(c);
+        for (auto v = a0.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(a0); !v.is_invalid();
+             v      = lnast->get_sibling_next(v)) {
+          if (Lnast_ntype::is_ref(lnast->get_type(v))) {
+            decl_reads.insert(std::string(strip_prefix(lnast->get_name(v))));
+          }
+        }
+      }
+      scan_attr_refs(c);
+    }
+  };
+  scan_attr_refs(stmts_nid);
+  auto scalar_store_val = [&](Lnast_nid store) -> Lnast_nid {
+    auto c0 = lnast->get_child(store);
+    if (c0.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(c0))) {
+      return Lnast_nid{};
+    }
+    auto v = lnast->get_sibling_next(c0);
+    return (!v.is_invalid() && lnast->is_last_child(v)) ? v : Lnast_nid{};
+  };
+  // (1) `_b2i_N` → unsigned(cond); (2) `_mux_N` → inline conditional expression.
+  for (const auto& [key, mi] : mux_info_) {
+    std::string lhs(strip_prefix(mi.lhs));
+    auto        fit = fold_info_.find(mi.lhs);
+    if (fit == fold_info_.end() || fit->second.use_count != 1 || decl_reads.count(lhs) != 0u) {
+      continue;
+    }
+    if (mi.else_def.is_invalid() || mi.arms.empty()) {
+      continue;
+    }
+    if (lhs.rfind("_b2i", 0) == 0 && mi.arms.size() == 1) {
+      auto is_const_val = [&](Lnast_nid def, std::string_view want) {
+        auto v = scalar_store_val(def);
+        return !v.is_invalid() && lnast->get_type(v) == Lnast_ntype::Lnast_ntype_const
+               && std::string_view(lnast->get_name(v)) == want;
+      };
+      if (is_const_val(mi.arms[0].def, "1") && is_const_val(mi.else_def, "0")) {
+        bool_inline_.emplace(lhs, mi.arms[0].cond);
+        folded_node_.insert(key);
+        continue;
+      }
+    }
+    if (lhs.rfind("_mux", 0) == 0) {
+      // the single use must be a BARE scalar store RHS — an if-expression is
+      // only statement-position safe (write_store renders it there).
+      for (const auto& [snode, sidx] : store_nodes_) {
+        auto v = scalar_store_val(snode);
+        if (v.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(v))
+            || strip_prefix(lnast->get_name(v)) != lhs) {
+          continue;
+        }
+        mux_inline_.emplace(lhs, key);
+        folded_node_.insert(key);
+        break;
+      }
+    }
+  }
+  // (3) reader-SSA `<base>__wN` single-def single-use scalar store → its value.
+  for (const auto& [snode, sidx] : store_nodes_) {
+    if (lnast->get_parent(snode).get_class_index().value != stmts_nid.get_class_index().value) {
+      continue;  // only an UNCONDITIONAL top-level def is position-independent
+    }
+    auto v = scalar_store_val(snode);
+    if (v.is_invalid()) {
+      continue;
+    }
+    auto        c0 = lnast->get_child(snode);
+    std::string raw(lnast->get_name(c0));
+    std::string nm(strip_prefix(raw));
+    auto        wp = nm.rfind("__w");
+    if (wp == std::string::npos || wp + 3 >= nm.size()
+        || !std::all_of(nm.begin() + static_cast<std::ptrdiff_t>(wp) + 3, nm.end(),
+                        [](unsigned char ch) { return std::isdigit(ch); })) {
+      continue;
+    }
+    auto fit = fold_info_.find(raw);
+    if (fit == fold_info_.end() || fit->second.def_count != 1 || fit->second.use_count != 1
+        || decl_reads.count(nm) != 0u) {
+      continue;
+    }
+    const auto vt = lnast->get_type(v);
+    if (Lnast_ntype::is_ref(vt)) {
+      // never chain into a mux-inline target (its expression is only safe in
+      // statement position, not wherever this name's use sits)
+      if (mux_inline_.count(std::string(strip_prefix(lnast->get_name(v)))) != 0u) {
+        continue;
+      }
+    } else if (vt != Lnast_ntype::Lnast_ntype_const) {
+      continue;
+    }
+    value_inline_.emplace(nm, v);
+    folded_node_.insert(snode.get_class_index().value);
+  }
+}
+
 void Lnast_prp_writer::analyze_folding() {
   fold_info_.clear();
   func_call_callees_.clear();
@@ -3300,10 +3629,17 @@ std::string Lnast_prp_writer::render_value(Lnast_nid node, bool operand_ctx) {
   auto t = lnast->get_type(node);
   if (t == Lnast_ntype::Lnast_ntype_ref) {
     std::string nm(lnast->get_name(node));
+    std::string sp(strip_prefix(nm));
+    if (auto bit = bool_inline_.find(sp); bit != bool_inline_.end()) {
+      return "unsigned(" + render_value(bit->second, /*operand_ctx=*/false) + ")";
+    }
+    if (auto vit = value_inline_.find(sp); vit != value_inline_.end()) {
+      return render_value(vit->second, operand_ctx);
+    }
     if (is_foldable(nm)) {
       return render_def_rhs(fold_info_.at(nm).def_node, operand_ctx);
     }
-    return std::string(strip_prefix(nm));
+    return sp;
   }
   if (t == Lnast_ntype::Lnast_ntype_const) {
     return const_text(node);

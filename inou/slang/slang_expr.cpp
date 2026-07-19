@@ -846,7 +846,11 @@ std::string Slang_context::lower_concat(const slang::ast::ConcatenationExpressio
     const auto& e  = **it;
     auto        oi = tinfo(*e.type);
     auto        v  = to_pattern(to_int_value(lower_rvalue(e)), oi.bits, oi.is_signed);
-    parts.emplace_back(offset == 0 ? v : builder_.create_shl_stmts(v, std::to_string(offset)));
+    // A zero part contributes nothing to the OR — dropping it kills the
+    // `x | (0 << k)` noise every zero-extension concat ({2'b0, x}) produced.
+    if (v != "0") {
+      parts.emplace_back(offset == 0 ? v : builder_.create_shl_stmts(v, std::to_string(offset)));
+    }
     offset += oi.bits;
   }
   if (parts.empty()) {
