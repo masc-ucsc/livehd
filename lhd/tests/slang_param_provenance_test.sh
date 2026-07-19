@@ -50,6 +50,9 @@ module tmod(input [SEL_W-1:0] s, input [9:0] d, output logic [9:0] r,
   assign hit = (s == 4'(BIG));
   // param defined via an expression of other params (package-unit fidelity)
   wire [9:0] unused_d = d + DIFF;
+  // MODULE-LOCAL param: body-level `const LOCAL_TH = tpkg.SEL_A + 1`
+  localparam LOCAL_TH = (SEL_A + 1);
+  wire [9:0] unused_e = d + LOCAL_TH;
 endmodule
 EOF
 
@@ -66,7 +69,10 @@ head -1 "$W/p1/tpkg.prp" | grep -q 'SEL_W' || fail "pkg unit not in source order
 # a `[SEL_W-1:0]` port dim mints an exported scalar type alias + a typed port
 grep -q 'pub type SEL_W_T = u4' "$W/p1/tpkg.prp" || fail "pkg unit lacks the SEL_W_T alias: $(cat "$W/p1/tpkg.prp")"
 grep -q 's:tpkg\.SEL_W_T' "$W/p1/tmod.prp" || fail "port did not use the imported alias: $(head -3 "$W/p1/tmod.prp")"
-echo "PASS: provenance emission carries symbolic refs, typed consts, defining exprs, source order, dim aliases"
+# a module-local param becomes a body-level const with its defining expression
+grep -qE 'const LOCAL_TH = tpkg\.SEL_A \+ 1' "$W/p1/tmod.prp" \
+  || fail "module-local param not preserved: $(cat "$W/p1/tmod.prp")"
+echo "PASS: symbolic refs, typed consts, defining exprs, source order, dim aliases, local params"
 
 # ── (2) same with constprop=0 (used to emit `= 0` for every const) ────────────
 $LHD compile "$W/tpkg.sv" "$W/tmod.sv" --top tmod --emit-dir pyrope:"$W/p0" --workdir "$W/w0" -q \

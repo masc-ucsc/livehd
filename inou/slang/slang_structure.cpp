@@ -754,6 +754,44 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
   }
 }
 
+void Slang_context::emit_local_param_consts(const slang::ast::Scope& body) {
+  if (!options_.preserve_param_provenance) {
+    return;
+  }
+  for (const auto& member : body.members()) {
+    if (member.kind != slang::ast::SymbolKind::Parameter) {
+      continue;
+    }
+    const auto& ps = member.as<slang::ast::ParameterSymbol>();
+    if (owning_package(ps) != nullptr) {
+      continue;  // package params ride `pkg.NAME`
+    }
+    const auto& cv = ps.getValue();
+    if (!cv.isInteger()) {
+      continue;
+    }
+    std::string name(ps.name);
+    const bool  plain = !name.empty() && !std::isdigit(static_cast<unsigned char>(name.front()))
+                       && std::all_of(name.begin(), name.end(),
+                                      [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; });
+    if (!plain || used_names_.count(name) != 0u) {
+      continue;  // colliding / exotic name — keep folding this param
+    }
+    // A single store, no declare: the prp_writer's single-store path renders
+    // it in place as `const NAME = <rhs>`. The initializer lowers through the
+    // NORMAL machinery, so a pkg-referencing defining expression stays
+    // symbolic (`const THRESH = lpkg.BASE * 2`) and anything else folds; an
+    // unread param is dropped by the writer's dead-signal elimination.
+    std::string value = const_text(cv.integer());
+    if (const auto* init = ps.getInitializer(); init != nullptr) {
+      value = lower_rvalue(*init);
+    }
+    builder_.create_assign_stmts(name, value);
+    local_param_lname_.emplace(&member, name);
+    used_names_.insert(name);
+  }
+}
+
 std::optional<std::string> Slang_context::port_dim_alias(const slang::ast::PortSymbol& port, int bits, bool is_signed) {
   if (!options_.preserve_param_provenance || is_signed || bits <= 1 || port.internalSymbol == nullptr) {
     return std::nullopt;  // signed dims would need an sN alias face — rare, deferred
@@ -920,6 +958,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   auto saved_body          = body_;
   auto saved_eval          = std::move(eval_ctx_);
   auto saved_sym_lname     = std::move(sym_lname_);
+  auto saved_local_params  = std::move(local_param_lname_);
   auto saved_used          = std::move(used_names_);
   auto saved_inputs        = std::move(input_syms_);
   auto saved_outputs       = std::move(output_syms_);
@@ -994,6 +1033,8 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   builder_.idx_stmts = builder_.lnast->add_child(root_nid, Lnast_ntype::create_stmts());
 
   emit_module_io(symbol, in_tup, out_tup);
+  local_param_lname_.clear();
+  emit_local_param_consts(*body);
   collect_state_vars(*body);
   struct_pattern_assigned_.clear();
   collect_struct_pattern_assigns(*body);
@@ -1223,6 +1264,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   body_                  = saved_body;
   eval_ctx_              = std::move(saved_eval);
   sym_lname_             = std::move(saved_sym_lname);
+  local_param_lname_     = std::move(saved_local_params);
   used_names_            = std::move(saved_used);
   input_syms_            = std::move(saved_inputs);
   output_syms_           = std::move(saved_outputs);

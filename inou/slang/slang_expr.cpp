@@ -165,6 +165,11 @@ std::optional<std::string> Slang_context::package_symbol_ref(const slang::ast::S
   if (!options_.preserve_param_provenance) {
     return std::nullopt;  // WIP feature; default OFF keeps folding (no regression)
   }
+  // A MODULE-LOCAL param preserved as a body-level `comptime const` keeps its
+  // bare name (emit_local_param_consts declared it at body top).
+  if (auto lit = local_param_lname_.find(&sym); lit != local_param_lname_.end()) {
+    return lit->second;
+  }
   const auto* cv = package_const_value(sym);
   if (cv == nullptr || !cv->isInteger()) {
     return std::nullopt;  // only integral consts carry a scalar pyrope value

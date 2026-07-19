@@ -408,6 +408,11 @@ private:
   // of value == the port width mints/returns the imported alias text
   // (`pkg.P_T`); nullopt when the dim carries no (recoverable) param name.
   std::optional<std::string> port_dim_alias(const slang::ast::PortSymbol& port, int bits, bool is_signed);
+  // Provenance: MODULE-LOCAL params (`localparam CNT_MAX = …` at module-body
+  // scope) become body-level `comptime const` declarations, and their refs stay
+  // symbolic (package_symbol_ref consults this map). Per-module state.
+  absl::flat_hash_map<const slang::ast::Symbol*, std::string> local_param_lname_;
+  void emit_local_param_consts(const slang::ast::Scope& body);
   void emit_package_units();  // one namespace .prp per referenced package
   std::string lower_select(const slang::ast::Expression& expr);  // Element/Range select rvalue
   std::string lower_concat(const slang::ast::ConcatenationExpression& expr);
