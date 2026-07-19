@@ -42,6 +42,8 @@ struct Dut {
   std::vector<std::string> inputs;   // In field names
   std::vector<std::string> outputs;  // Out field names
   std::vector<std::string> regs;     // struct-scope `Slop<N> name{}` members (flops/pipe stages/regs)
+  std::vector<std::string> arrays;   // `std::array<Slop<N>, S> name{}` members (memories)
+  std::vector<std::pair<std::string, std::string>> subs;  // sub-instance member -> struct class
   bool                     is_child = false;  // this unit's hpp is #included by another unit (a sub-instance)
 
   bool has_input(const std::string& f) const {
@@ -110,6 +112,29 @@ bool parse_hpp(const std::string& path, Dut& d) {
         }
       }
     } else if (got_cls) {
+      // Memory member `  std::array<Slop<N>, S> name{};  // memory` and
+      // sub-instance member `  Cls name;  // sub instance` -- both feed the
+      // hierarchical `acc.sub.state[idx]` read path.
+      if (line.find("std::array<Slop<") != std::string::npos && line.find("// memory") != std::string::npos) {
+        auto gt = line.rfind('>');
+        auto b  = line.find_first_not_of(" \t", gt + 1);
+        auto e  = line.find_first_of("{ \t;", b);
+        if (b != std::string::npos && e != std::string::npos && e > b) {
+          d.arrays.push_back(line.substr(b, e - b));
+        }
+        continue;
+      }
+      if (line.find("// sub instance") != std::string::npos) {
+        std::istringstream ls(line);
+        std::string        cls, nm;
+        if (ls >> cls >> nm && !nm.empty()) {
+          if (nm.back() == ';') {
+            nm.pop_back();
+          }
+          d.subs.emplace_back(nm, cls);
+        }
+        continue;
+      }
       // struct-scope scalar member, e.g. `  Slop<32> total{};  // flop`. (Memories
       // are `std::array<...>` and sub-instances/VCD state are other types, so the
       // `Slop<` prefix selects exactly the readable/forceable flop-style regs.)
@@ -727,6 +752,66 @@ private:
   // C++ accessor for `acc.fld`: __in.fld (input), __out.fld (output), or fld
   // (struct-scope reg). `write` rejects read-only targets.
   std::string field_access(const std::string& var, const std::string& fld, bool write) {
+    if (fld.find('.') != std::string::npos) {
+      // Hierarchical state path `acc.sub[.sub...].leaf[idx]` (READ-only):
+      // each intermediate segment names a sub-instance member of the current
+      // module; the leaf resolves to a flop member or a memory array (its
+      // optional [index] is emitted verbatim as C++). The generated memory
+      // member often loses its RTL name (`reg regs:[32]u64` -> `memory_60`),
+      // so with exactly ONE array in the leaf module any indexed name
+      // aliases to it.
+      if (write) {
+        fail("cannot poke hierarchical path '" + var + "." + fld + "' (read-only)");
+      }
+      const Dut*  hd   = &duts_.at(inst_of_var.at(var));
+      std::string cxx  = var;
+      std::string rest = fld;
+      while (true) {
+        auto        dot = rest.find('.');
+        std::string seg = dot == std::string::npos ? rest : rest.substr(0, dot);
+        if (dot == std::string::npos) {
+          std::string idx, name = seg;
+          auto        lb = seg.find('[');
+          if (lb != std::string::npos && !seg.empty() && seg.back() == ']') {
+            name = seg.substr(0, lb);
+            idx  = seg.substr(lb + 1, seg.size() - lb - 2);
+          }
+          if (idx.empty() && hd->has_reg(name)) {
+            return cxx + "." + name;
+          }
+          if (std::find(hd->arrays.begin(), hd->arrays.end(), name) != hd->arrays.end()) {
+            return cxx + "." + name + "[" + idx + "]";
+          }
+          if (!idx.empty() && hd->arrays.size() == 1) {
+            return cxx + "." + hd->arrays.front() + "[" + idx + "]";  // RTL-name alias
+          }
+          fail("unknown state '" + name + "' in hierarchical path '" + var + "." + fld + "'");
+        }
+        const std::string* cls = nullptr;
+        for (const auto& [m, c] : hd->subs) {
+          if (m == seg) {
+            cls = &c;
+            break;
+          }
+        }
+        if (cls == nullptr) {
+          fail("unknown sub-instance '" + seg + "' in hierarchical path '" + var + "." + fld + "'");
+        }
+        const Dut* nd = nullptr;
+        for (const auto& [u, dd] : duts_) {
+          if (dd.cls == *cls) {
+            nd = &dd;
+            break;
+          }
+        }
+        if (nd == nullptr) {
+          fail("no generated unit for sub-instance '" + seg + "' (class " + *cls + ")");
+        }
+        cxx += "." + seg;
+        hd   = nd;
+        rest = rest.substr(dot + 1);
+      }
+    }
     const Dut& d = duts_.at(inst_of_var.at(var));
     if (d.has_input(fld)) {
       return var + ".__in." + fld;
@@ -786,14 +871,27 @@ private:
   // `acc.field` resolves to the instance-field peek; anything else is a plain
   // in-scope value (a local or the `clock` loop var).
   std::string interp_value(const std::string& name) {
+    bool is_slop = false;
+    auto e       = interp_expr(name, is_slop);
+    return is_slop ? e + ".to_just_i64()" : "(long)" + e;
+  }
+
+  // C++ expression for a `{name}` interpolation. A dotted `acc.field` (or a
+  // hierarchical `acc.sub.state[i]`) resolves to the instance-field peek — a
+  // Slop of the field's OWN width (is_slop=true; render it with
+  // Slop::to_decimal/to_hex/to_binary, exact at ANY width — never through a
+  // 64-bit truncation). Anything else is a plain in-scope long.
+  std::string interp_expr(const std::string& name, bool& is_slop) {
+    is_slop  = false;
     auto dot = name.find('.');
     if (dot != std::string::npos) {
       std::string base = name.substr(0, dot), fld = name.substr(dot + 1);
       if (inst_of_var.count(base) != 0) {
-        return field_access(base, fld, /*write=*/false) + ".to_just_i64()";
+        is_slop = true;
+        return field_access(base, fld, /*write=*/false);
       }
     }
-    return "(long)(" + name + ")";
+    return "(" + name + ")";
   }
 
   void discover(const std::vector<TSNode>& stmts) {
@@ -1281,26 +1379,41 @@ private:
 
   void gen_if(std::ostringstream& o, TSNode n, int depth) {
     std::string ind(depth * 2, ' ');
-    TSNode      cond;
-    std::vector<TSNode> scopes;
+    // The named children interleave (condition, scope) pairs — one per
+    // `if`/`elif` arm — with an optional trailing condition-less scope for
+    // `else`. The old code kept only the FIRST condition and at most two
+    // scopes, silently collapsing an elif CHAIN into a plain if/else: a
+    // testbench ROM selecting over 5 address ranges served the second arm's
+    // word for every address past the first range.
+    struct Arm {
+      TSNode cond{};
+      TSNode scope{};
+      bool   has_cond = false;
+    };
+    std::vector<Arm> arms;
+    TSNode           pend{};
+    bool             have_pend = false;
     for (TSNode c : ts_node_named_children(n)) {
       if (ntype(c) == "scope_statement") {
-        scopes.push_back(c);
-      } else if (ts_node_is_null(cond)) {
-        cond = c;
+        arms.push_back({have_pend ? pend : TSNode{}, c, have_pend});
+        have_pend = false;
+      } else {
+        pend      = c;
+        have_pend = true;
       }
     }
-    if (ts_node_is_null(cond) || scopes.empty()) {
+    if (arms.empty() || !arms.front().has_cond) {
       fail("unsupported if form in test");
     }
-    o << ind << "if (" << expr(cond) << ") {\n";
-    for (TSNode c : ts_node_named_children(scopes[0])) {
-      gen_stmt(o, c, depth + 1);
-    }
-    o << ind << "}";
-    if (scopes.size() >= 2) {
-      o << " else {\n";
-      for (TSNode c : ts_node_named_children(scopes[1])) {
+    for (size_t i = 0; i < arms.size(); ++i) {
+      if (i == 0) {
+        o << ind << "if (" << expr(arms[i].cond) << ") {\n";
+      } else if (arms[i].has_cond) {
+        o << " else if (" << expr(arms[i].cond) << ") {\n";
+      } else {
+        o << " else {\n";
+      }
+      for (TSNode c : ts_node_named_children(arms[i].scope)) {
         gen_stmt(o, c, depth + 1);
       }
       o << ind << "}";
@@ -1674,8 +1787,46 @@ private:
         }
         size_t      j    = lit.find('}', i);
         std::string name = (j == std::string::npos) ? "" : lit.substr(i + 1, j - i - 1);
-        fmt += "%ld";
-        argv.push_back(name.empty() ? (pi < pos.size() ? pos[pi++] : std::string("0")) : interp_value(name));
+        // `{val:spec}` — split the format spec off; a bracketed index
+        // (`{acc.registers.regs[2]:x}`) keeps its brackets in `name`.
+        std::string spec;
+        if (auto c2 = name.rfind(':'); c2 != std::string::npos && name.find(']', c2) == std::string::npos) {
+          spec = name.substr(c2 + 1);
+          name = name.substr(0, c2);
+        }
+        bool        is_slop = false;
+        std::string ve =
+            name.empty() ? (pi < pos.size() ? pos[pi++] : std::string("0")) : interp_expr(name, is_slop);
+        if (is_slop) {
+          // Render through the Slop formatting entry points — exact at any
+          // width, no 64-bit truncation. Spec `[width][b|x|X|d][s]`: base
+          // picks the Slop method; digits/sep ride as its arguments.
+          // (`:o` has no Slop renderer — 64-bit fallback.)
+          size_t w = 0, si = 0;
+          while (si < spec.size() && spec[si] >= '0' && spec[si] <= '9') {
+            w = w * 10 + static_cast<size_t>(spec[si++] - '0');
+          }
+          char base = (si < spec.size() && spec[si] != 's') ? spec[si++] : 'd';
+          bool sepf = si < spec.size() && spec[si] == 's';
+          const std::string dg = std::to_string(w);
+          const std::string sp = sepf ? "true" : "false";
+          std::string call;
+          switch (base) {
+            case 'd': call = ve + ".to_decimal(" + dg + ", " + sp + ")"; break;
+            case 'b': call = ve + ".to_binary(" + dg + ", " + sp + ")"; break;
+            case 'x': call = ve + ".to_hex(" + dg + ", " + sp + ", false)"; break;
+            case 'X': call = ve + ".to_hex(" + dg + ", " + sp + ", true)"; break;
+            default : call = "__fmt_i64(" + ve + ".to_just_i64(), \"" + spec + "\")"; break;
+          }
+          fmt += "%s";
+          argv.push_back(call + ".c_str()");
+        } else if (spec.empty()) {
+          fmt += "%ld";
+          argv.push_back("(long)" + ve);
+        } else {
+          fmt += "%s";
+          argv.push_back("__fmt_i64((long long)" + ve + ", \"" + spec + "\").c_str()");
+        }
         i = (j == std::string::npos) ? lit.size() : j;
       } else if (c == '}') {
         if (i + 1 < lit.size() && lit[i + 1] == '}') {
@@ -1872,6 +2023,23 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   // port's own width via the constexpr pyrope codec — exact at any width.
   o << "template<int N> static inline void __prp_poke(Slop<N>& d, std::string_view v){ "
        "d = Slop<N>::from_pyrope(v); }\n";  // string_view: a literal 0 must not be ambiguous with a null pointer
+  // `{val:spec}` puts interpolation for PLAIN locals: grammar
+  // `[width][b/o/x/X/d][s]` — width zero-pads, `s` groups digits `_`-separated
+  // every 4 (mirrors the comptime __fmt fold in upass/constprop).
+  o << "static std::string __fmt_i64(long long v, const char* spec){\n"
+       "  size_t w=0; const char* p=spec; while(*p>='0'&&*p<='9') w=w*10+(size_t)(*p++-'0');\n"
+       "  char base = (*p && *p!='s') ? *p++ : 'd';\n"
+       "  bool sep = (*p=='s'); unsigned long long m = v<0 ? -(unsigned long long)v : (unsigned long long)v;\n"
+       "  const char* dig = (base=='X') ? \"0123456789ABCDEF\" : \"0123456789abcdef\";\n"
+       "  unsigned b = base=='b'?1u:base=='o'?3u:(base=='x'||base=='X')?4u:0u;\n"
+       "  std::string s;\n"
+       "  if (b==0u){ s = std::to_string(m); } else { do { s.push_back(dig[m&((1u<<b)-1u)]); m >>= b; } while(m); }\n"
+       "  if (b!=0u) std::reverse(s.begin(), s.end());\n"
+       "  if (w>s.size()) s.insert(0, w-s.size(), '0');\n"
+       "  if (sep){ std::string g; size_t c=0; for(size_t k=s.size(); k>0; --k){ if(c&&c%4==0) g.push_back('_'); g.push_back(s[k-1]); ++c; } std::reverse(g.begin(), g.end()); s=std::move(g); }\n"
+       "  if (v<0) s.insert(0,1,'-');\n"
+       "  return s;\n"
+       "}\n";
   const bool vcd_on = !vcd_dir.empty();
   if (vcd_on) {
     // For vcd::global_timestamp — reset between tests (see main()).

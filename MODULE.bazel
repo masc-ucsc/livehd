@@ -71,26 +71,25 @@ bazel_dep(name = "gmp", version = "6.3.0.bcr.2")
 # @abseil-cpp, @iassert, @googletest, ...) through livehd's own deps.
 
 # iassert
-# The patch (TEMPORARY) adds the public sim_runtime_hdrs filegroup that
-# //lhd:lhd stages into its runfiles for the `lhd sim` host-compile stage;
-# drop it once upstream iassert ships the filegroup and the pin moves past it.
+# The patch_cmds (TEMPORARY, inline so this file is self-contained) add the
+# public sim_runtime_hdrs filegroup that //lhd:lhd stages into its runfiles
+# for the `lhd sim` host-compile stage; drop them once upstream iassert ships
+# the filegroup and the pin moves past it.
 git_repository(
     name = "iassert",
     commit = "b18182f668ff42b0f96c3a1e3e6deee4e6da221f",  # "fix un-initialized access": sigaction sa_mask (todo/ 1s)
-    patch_args = ["-p1"],
-    patches = ["//packages:iassert_sim_hdrs.patch"],
+    patch_cmds = [
+        "printf '\\nfilegroup(\\n   name = \"sim_runtime_hdrs\",\\n   srcs = [\"src/iassert.hpp\"],\\n   visibility = [\"//visibility:public\"],\\n)\\n' >> BUILD",
+    ],
     remote = "https://github.com/masc-ucsc/iassert.git",
 )
 # For local debug/testing, swap the git_repository above for:
 # local_repository(name = "iassert", path = "../iassert") # sometimes useful to debug together with iassert patches
 
 # hlop (Dlop value type + slop/dlop execution layer)
-# TEMPORARY patch: same sim_runtime_hdrs story as iassert above.
 git_repository(
     name = "hlop",
-    commit = "3913247f202ed4611df02c79f0a49d1fbe986e91",  # top of tree (vcd_writer: registration vs global_timestamp + nested-scope header fixes)
-    patch_args = ["-p1"],
-    patches = ["//packages:hlop_sim_hdrs.patch"],
+    commit = "d750bcbbf45f9f990e5b6fc4237dd1702bdda0ef",  # top of tree
     remote = "https://github.com/masc-ucsc/hlop.git",
 )
 # For local co-development swap the git_repository above for:

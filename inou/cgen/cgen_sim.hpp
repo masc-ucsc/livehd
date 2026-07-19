@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "file_output.hpp"
 #include "hhds/graph.hpp"
 #include "hhds/index.hpp"
@@ -50,6 +51,21 @@ private:
   // sub-instance's clock port); "" = none. Memoized in clk_memo_.
   std::string                                   clock_input_of(hhds::Graph* g);
   absl::flat_hash_map<std::string, std::string> clk_memo_;
+
+  // Incremental generation: one structural digest per module, persisted in
+  // <odir>/gen_digests.json — a matching digest with existing outputs skips
+  // the module's C++ emission entirely (the abc_cache region-digest idea
+  // applied to sim; hashing is one cheap traversal, emission is many).
+  uint64_t                                      sim_graph_digest(hhds::Graph* g);
+  void                                          load_gen_digests();
+  void                                          save_gen_digests();
+  absl::flat_hash_map<std::string, std::string> gen_digests_;
+  bool                                          gen_digests_loaded_ = false;
+
+  // Per-graph liveness (backward reach from IO/state/Sub/Memory sinks): only
+  // live comb nodes emit — dead trees stranded by graph passes (e.g.
+  // split_packed_selfref_wires) produce no code.
+  absl::flat_hash_set<hhds::Class_index> live_;
 
   // Resolve a driver pin to a Slop<target_bits> C++ EXPRESSION: a constant ->
   // Slop<W>::from_pyrope("..."); otherwise the named value width-converted to W.

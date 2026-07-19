@@ -637,7 +637,16 @@ int flatten_false_loop_subs(hhds::Graph* g) {
 // fed-back outputs); empty means S is not on a false loop. The Moore-sub
 // deferral only needs non-emptiness; the per-output-cone (Stage-2) deferral
 // checks each fed-back port is a pure state read.
-absl::flat_hash_set<uint32_t> sub_false_loop_output_pids(const hhds::Node_class& s) {
+// `sub_out_is_state_only(node, pid)` classifies another Sub's OUTPUT reached
+// mid-walk: a pure current-state read is a REAL boundary (its value exists
+// before any call), but a comb-dependent output is an atomic pass-through --
+// the value needs the call, the call needs all its inputs, so the walk
+// continues through the callee's input drivers. Traversing pass-through Subs
+// is what lets a MULTI-INSTANCE false loop (e.g. if_id -> hazard -> if_id,
+// the dino dual-issue shape) reach `s` at all; the old all-Subs-opaque walk
+// only caught direct self-feedback through parent comb logic.
+template <typename F>
+absl::flat_hash_set<uint32_t> sub_false_loop_output_pids(const hhds::Node_class& s, F&& sub_out_is_state_only) {
   namespace gu = livehd::graph_util;
   absl::flat_hash_set<uint32_t>         pids;
   absl::flat_hash_set<hhds::Node_class> seen;
@@ -657,8 +666,20 @@ absl::flat_hash_set<uint32_t> sub_false_loop_output_pids(const hhds::Node_class&
       continue;  // stop AT s; keep walking the rest for every fed-back port
     }
     auto op = gu::type_op_of(m);
-    if (op == Ntype_op::Sub || op == Ntype_op::Memory || gu::is_type_register(m) || op == Ntype_op::IO) {
+    if (op == Ntype_op::Memory || gu::is_type_register(m) || op == Ntype_op::IO) {
       continue;  // a real state boundary -- the loop does not thread through it
+    }
+    if (op == Ntype_op::Sub) {
+      if (sub_out_is_state_only(m, static_cast<uint32_t>(d.get_port_id()))) {
+        continue;  // Moore/state-read output: available pre-call, boundary
+      }
+      if (!seen.insert(m).second) {
+        continue;
+      }
+      for (auto e : m.inp_edges()) {  // comb pass-through: the call's inputs
+        stk.push_back(e.driver);
+      }
+      continue;
     }
     if (!seen.insert(m).second) {
       continue;
@@ -919,6 +940,129 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
   return found;
 }
 
+// ---- incremental generation digests ----------------------------------------
+// The digest covers what the generated C++ depends on for ONE module: IO
+// decls, node ops/names/constants, edge topology (via traversal-order node
+// indices — stable now that graph construction is deterministic), per-pin
+// width/sign, plus the generation-affecting options and a generator version
+// (BUMP kSimGenVersion whenever the emitted C++ shape changes).
+static constexpr std::string_view kSimGenVersion = "simgen-2";  // 2: liveness-gated comb emission
+
+static inline uint64_t fnv1a(uint64_t h, uint64_t v) {
+  for (int i = 0; i < 8; ++i) {
+    h ^= (v >> (i * 8)) & 0xffu;
+    h *= 0x100000001b3ULL;
+  }
+  return h;
+}
+static inline uint64_t fnv1a_str(uint64_t h, std::string_view s) {
+  for (unsigned char c : s) {
+    h ^= c;
+    h *= 0x100000001b3ULL;
+  }
+  return fnv1a(h, s.size());
+}
+
+uint64_t Cgen_sim::sim_graph_digest(hhds::Graph* g) {
+  namespace gu = livehd::graph_util;
+  uint64_t h = 0xcbf29ce484222325ULL;
+  absl::flat_hash_map<hhds::Class_index, uint32_t> seq;
+  uint32_t                                         ni = 0;
+  for (auto n : g->fast_class()) {
+    seq[n.get_class_index()] = ni++;
+  }
+  auto gio = g->get_io();
+  for (const auto& d : gio->get_input_pin_decls()) {
+    h = fnv1a_str(h, d.name);
+    h = fnv1a(h, static_cast<uint64_t>(d.port_id));
+    h = fnv1a(h, static_cast<uint64_t>(d.bits) * 2 + 1);
+  }
+  for (const auto& d : gio->get_output_pin_decls()) {
+    h = fnv1a_str(h, d.name);
+    h = fnv1a(h, static_cast<uint64_t>(d.port_id));
+    h = fnv1a(h, static_cast<uint64_t>(d.bits) * 2);
+  }
+  for (auto n : g->fast_class()) {
+    auto op = gu::type_op_of(n);
+    h       = fnv1a(h, static_cast<uint64_t>(op));
+    if (gu::has_name(n)) {
+      h = fnv1a_str(h, gu::node_name_of(n));
+    }
+    if (op == Ntype_op::Sub) {
+      auto cg = n.get_subnode_graph();
+      h       = fnv1a_str(h, cg ? cg->get_name() : std::string_view{});
+    }
+    if (op == Ntype_op::Nconst) {
+      h = fnv1a_str(h, hydrate_const(n.get_driver_pin(0)).to_pyrope());
+    }
+    for (auto e : n.inp_edges()) {
+      h = fnv1a(h, static_cast<uint64_t>(e.sink.get_port_id()));
+      h = fnv1a(h, seq[e.driver.get_master_node().get_class_index()]);
+      h = fnv1a(h, static_cast<uint64_t>(e.driver.get_port_id()));
+    }
+    for (auto e : n.out_edges()) {  // lazy view: iterate only, never snapshot
+      h = fnv1a(h, static_cast<uint64_t>(e.driver.get_port_id()));
+      h = fnv1a(h, static_cast<uint64_t>(wbits_of(e.driver)) * 2 + (is_unsign(e.driver) ? 1 : 0));
+    }
+  }
+  return h;
+}
+
+void Cgen_sim::load_gen_digests() {
+  gen_digests_loaded_ = true;
+  std::ifstream ifs(absl::StrCat(std::string(odir), "/gen_digests.json"));
+  if (!ifs) {
+    return;
+  }
+  std::stringstream ss;
+  ss << ifs.rdbuf();
+  const std::string t = ss.str();
+  if (t.find(absl::StrCat("\"gen\":\"", kSimGenVersion, "\"")) == std::string::npos) {
+    return;  // other generator version -> cold
+  }
+  // {"gen":"simgen-1","modules":{"file.entity":"0123456789abcdef",...}}
+  size_t p = t.find("\"modules\"");
+  if (p == std::string::npos) {
+    return;
+  }
+  p = t.find('{', p);
+  if (p == std::string::npos) {
+    return;
+  }
+  ++p;
+  while (true) {
+    size_t k0 = t.find('"', p);
+    if (k0 == std::string::npos) {
+      break;
+    }
+    size_t k1 = t.find('"', k0 + 1);
+    size_t v0 = k1 == std::string::npos ? std::string::npos : t.find('"', k1 + 1);
+    size_t v1 = v0 == std::string::npos ? std::string::npos : t.find('"', v0 + 1);
+    if (v1 == std::string::npos) {
+      break;
+    }
+    gen_digests_[t.substr(k0 + 1, k1 - k0 - 1)] = t.substr(v0 + 1, v1 - v0 - 1);
+    p                                           = v1 + 1;
+  }
+}
+
+void Cgen_sim::save_gen_digests() {
+  std::vector<std::string> keys;
+  keys.reserve(gen_digests_.size());
+  for (const auto& [k, _] : gen_digests_) {
+    keys.push_back(k);
+  }
+  std::sort(keys.begin(), keys.end());  // stable file bytes
+  std::ofstream ofs(absl::StrCat(std::string(odir), "/gen_digests.json"));
+  ofs << "{\"gen\":\"" << kSimGenVersion << "\",\"modules\":{";
+  bool first = true;
+  for (const auto& k : keys) {
+    ofs << (first ? "" : ",") << "\"" << k << "\":\"" << gen_digests_.at(k) << "\"";
+    first = false;
+  }
+  ofs << "}}\n";
+}
+
 void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   pin2var.clear();
   tmp_cnt           = 0;
@@ -960,10 +1104,72 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // `top` may be the bare entity or the full internal `file.entity` name — the
   // full form is the only spelling that disambiguates two same-entity modules.
   const bool is_top  = top.empty() || entity == top || gname == top;
+
+  // Liveness: only logic something REAL consumes gets emitted — backward BFS
+  // from the sinks (IO nodes cover the graph outputs; state elements, Memory
+  // and Sub calls gather their input cones at emission).
+  live_.clear();
+  {
+    std::vector<hhds::Node_class> lstk;
+    for (auto n : g->fast_class()) {
+      auto nop = livehd::graph_util::type_op_of(n);
+      if (nop == Ntype_op::Sub || nop == Ntype_op::Memory || nop == Ntype_op::IO
+          || livehd::graph_util::is_type_register(n)) {
+        if (live_.insert(n.get_class_index()).second) {
+          lstk.push_back(n);
+        }
+      }
+    }
+    // Graph outputs seed from the same accessor the output emission uses —
+    // the IO node's edges are not reliably enumerable via fast_class.
+    for (const auto& d : gio->get_output_pin_decls()) {
+      auto opin = g->get_output_pin(d.name);
+      auto drv  = opin.is_invalid() ? hhds::Pin_class{} : get_driver(opin);
+      if (!drv.is_invalid() && !livehd::graph_util::is_const_pin(drv)) {
+        auto m = drv.get_master_node();
+        if (!m.is_invalid() && live_.insert(m.get_class_index()).second) {
+          lstk.push_back(m);
+        }
+      }
+    }
+    while (!lstk.empty()) {
+      auto n = lstk.back();
+      lstk.pop_back();
+      for (auto e : n.inp_edges()) {
+        auto m = e.driver.get_master_node();
+        if (!m.is_invalid() && live_.insert(m.get_class_index()).second) {
+          lstk.push_back(m);
+        }
+      }
+    }
+  }
   const bool vcd_on  = !vcd_file.empty();
 
   const std::string fstem = sim_file_stem(gname);
   const std::string base  = odir.empty() ? fstem : absl::StrCat(odir, "/", fstem);
+
+  // Incremental generation: matching structural digest + existing outputs ->
+  // this module's C++ is already up to date, skip the emission (and the file
+  // rewrite) entirely. MUST happen before File_output creation (truncation).
+  if (!odir.empty()) {
+    if (!gen_digests_loaded_) {
+      load_gen_digests();
+    }
+    uint64_t gd = sim_graph_digest(g);
+    gd          = fnv1a_str(gd, kSimGenVersion);
+    gd          = fnv1a_str(gd, vcd_file);
+    gd          = fnv1a_str(gd, top);
+    gd          = fnv1a(gd, (is_top ? 2u : 0u) | (vcd_fakedelay ? 1u : 0u));
+    char hex[17];
+    std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(gd));
+    auto            it = gen_digests_.find(gname);
+    std::error_code ec;
+    if (it != gen_digests_.end() && it->second == hex && std::filesystem::exists(base + ".hpp", ec)
+        && std::filesystem::exists(base + ".cpp", ec)) {
+      return;
+    }
+    gen_digests_[gname] = hex;  // persisted below, after a clean emission
+  }
   auto              hout = std::make_shared<File_output>(absl::StrCat(base, ".hpp"));  // interface
   auto              fout = std::make_shared<File_output>(absl::StrCat(base, ".cpp"));  // definitions ("the slop")
 
@@ -1068,10 +1274,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
       }
     }
-    // name fallback for the common `clock` port -- only when there are flops (a
-    // purely combinational module has no clock edge, so a data input that happens
-    // to be named `clock` must trace as an ordinary signal, not the waveform).
-    if (clk_field.empty() && !flops.empty()) {
+    // name fallback for the common `clock` port -- UNCONDITIONAL (user ruling
+    // 2026-07-18): an input named `clock` is always THE clock waveform, never
+    // an ordinary traced signal. Generated RTL (CIRCT) stamps a clock port on
+    // every module including pure-comb ones and modules whose only state is a
+    // Memory array (no flops); tracing those as data made the synthetic clock
+    // label uniquify into `clock_vcd0` and desynced registration from
+    // __vcd_clk (the hier-VCD 'clock_vcd0 do not registered' abort).
+    if (clk_field.empty()) {
       for (const auto& io : ios) {
         if (io.is_input && io.field == "clock") {
           clk_field = "clock";
@@ -1618,8 +1828,34 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // input cone reads only pre-bound values, emitted on demand below). The
   // CSR/NewCSR::MipModule and DivUnit/SRT16 residual class.
   absl::flat_hash_set<hhds::Class_index> mealy_prebound;
+  // Memoized per callee def: the set of output pids that are pure current-state
+  // reads (a Moore callee: ALL of them). Used by the fed-back walk to decide
+  // whether another Sub's output is a boundary or an atomic pass-through.
+  absl::flat_hash_map<const hhds::Graph*, absl::flat_hash_set<uint32_t>> state_out_memo;
+  auto sub_out_is_state_only = [&](const hhds::Node_class& m, uint32_t pid) -> bool {
+    auto cg = m.get_subnode_graph();
+    if (!cg) {
+      return false;
+    }
+    auto it = state_out_memo.find(cg.get());
+    if (it == state_out_memo.end()) {
+      auto                          sio = m.get_subnode_io();
+      absl::flat_hash_set<uint32_t> so;
+      if (sio) {
+        if (callee_is_moore(cg, sio)) {
+          for (const auto& od : sio->get_output_pin_decls()) {
+            so.insert(static_cast<uint32_t>(od.port_id));
+          }
+        } else {
+          so = callee_state_only_outputs(cg, sio);
+        }
+      }
+      it = state_out_memo.emplace(cg.get(), std::move(so)).first;
+    }
+    return it->second.contains(pid);
+  };
   for (const auto& s : subs) {
-    auto fed_back = sub_false_loop_output_pids(s.node);
+    auto fed_back = sub_false_loop_output_pids(s.node, sub_out_is_state_only);
     if (fed_back.empty()) {
       continue;
     }
@@ -1679,6 +1915,63 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // atomic Subs / multi-out cells / consts (bound elsewhere, or a genuine cycle
   // the detector below still catches). Direct-input / const addresses (the
   // common case) are already bound, so this is a no-op for them.
+  // One atomic Sub call emission, shared by the scheduled walk below and the
+  // on-demand path inside ensure_ready (a call can be SCHEDULED after its
+  // reader once a false instance-level cycle was dissolved by the
+  // Moore-deferral / pre-binding above). The guard is load-bearing: a second
+  // emission would call child.cycle() twice and double-advance its state.
+  absl::flat_hash_set<hhds::Class_index> emitted_subs;
+  auto emit_sub_call = [&](auto&& ensure_fn, const hhds::Node_class& node) -> void {
+    if (!emitted_subs.insert(node.get_class_index()).second) {
+      return;
+    }
+    for (const auto& s : subs) {
+      if (s.node.get_class_index() != node.get_class_index()) {
+        continue;
+      }
+      auto sio = node.get_subnode_io();
+      if (!sio) {
+        break;
+      }
+      fout->append(absl::StrCat("    ", s.callee_struct, "::In ", s.inst, "__i;\n"));
+      for (const auto& d : sio->get_input_pin_decls()) {
+        auto drv = get_driver(find_sink_pin(node, d.name));
+        int  wb  = d.bits > 0 ? static_cast<int>(d.bits) : 1;
+        // Emit any pending operand cone on demand (conservative: stops at
+        // state elements / consts; another atomic Sub recurses through this
+        // same helper). A genuinely cyclic cone stays unbound and falls
+        // through to the loud Stage-0 diagnostic below.
+        ensure_fn(drv);
+        // Stage 0: a valid, non-const driver feeding this instance input that is
+        // not yet bound is a combinational cycle threading THROUGH this atomic Sub
+        // call (the false-loop-through-instance case). Report it precisely.
+        if (!drv.is_invalid() && !is_const_pin(drv) && !pin2var.contains(drv.get_class_index()) && !cycle_reported_) {
+          livehd::diag::err("inou.cgen.sim", "comb-loop-through-instance", "unsupported")
+              .msg(
+                  "combinational loop through instance `{}` ({}::{}): input `{}` is fed by logic that depends on "
+                  "this instance's own output",
+                  s.inst, gname, s.callee_struct, d.name)
+              .hint(
+                  "a sub-instance is simulated atomically (all inputs -> all outputs), so an output that feeds back "
+                  "into one of its inputs forms a cycle the single-pass schedule cannot break; restructure so the "
+                  "cone feeding this input is computed before the call, split the sub by output cone, or flatten "
+                  "this instance for sim")
+              .emit();
+          cycle_reported_ = true;
+        }
+        fout->append(absl::StrCat("    ", s.inst, "__i.", cpp_id(d.name), " = ", operand(drv, wb), ";\n"));
+      }
+      fout->append(absl::StrCat("    auto ", s.inst, "__o = ", s.inst, ".cycle(", s.inst, "__i);\n"));
+      for (const auto& d : sio->get_output_pin_decls()) {
+        auto opin = find_driver_pin(node, d.name);
+        if (!opin.is_invalid()) {
+          pin2var[opin.get_class_index()] = absl::StrCat(s.inst, "__o.", cpp_id(d.name));
+        }
+      }
+      break;
+    }
+  };
+
   absl::flat_hash_set<pin_key_t> prefetch_seen;
   auto ensure_ready_impl = [&](auto&& self, const hhds::Pin_class& drv) -> void {
     if (drv.is_invalid() || is_const_pin(drv)) {
@@ -1697,7 +1990,16 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     auto n   = drv.get_master_node();
     auto nop = type_op_of(n);
-    if (nop == Ntype_op::Memory || nop == Ntype_op::Sub || is_type_register(n)) {
+    if (nop == Ntype_op::Sub) {
+      // A deferred-Moore instance's outputs are pre-bound (peek) -- nothing to
+      // emit. Any other atomic call is emitted on demand, its own input cones
+      // first (prefetch_seen above already broke re-entry on a real cycle).
+      if (!moore_deferred.contains(n.get_class_index())) {
+        emit_sub_call([&](const hhds::Pin_class& p) { self(self, p); }, n);
+      }
+      return;
+    }
+    if (nop == Ntype_op::Memory || is_type_register(n)) {
       return;  // bound at its own emission; if still unbound it is a real cycle
     }
     if (Ntype::has_multiple_driver_pins(nop) || !n.has_out_edges()) {
@@ -1817,55 +2119,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         continue;
       }
-      for (const auto& s : subs) {
-        if (s.node.get_class_index() != node.get_class_index()) {
-          continue;
-        }
-        auto sio = node.get_subnode_io();
-        if (!sio) {
-          break;
-        }
-        fout->append(absl::StrCat("    ", s.callee_struct, "::In ", s.inst, "__i;\n"));
-        for (const auto& d : sio->get_input_pin_decls()) {
-          auto drv = get_driver(find_sink_pin(node, d.name));
-          int  wb  = d.bits > 0 ? static_cast<int>(d.bits) : 1;
-          // Stage-2 per-output-cone deferral: this instance's fed-back outputs
-          // were pre-bound from peek(), so its input cone no longer depends on
-          // the call -- but the scheduler built its order while the word-level
-          // cycle still existed, so the cone may be SCHEDULED after this node.
-          // Emit it on demand (a genuine still-cyclic cone stays unbound and
-          // falls through to the loud Stage-0 diagnostic).
-          if (mealy_prebound.contains(node.get_class_index())) {
-            ensure_ready(drv);
-          }
-          // Stage 0: a valid, non-const driver feeding this instance input that is
-          // not yet bound is a combinational cycle threading THROUGH this atomic Sub
-          // call (the false-loop-through-instance case). Report it precisely.
-          if (!drv.is_invalid() && !is_const_pin(drv) && !pin2var.contains(drv.get_class_index()) && !cycle_reported_) {
-            livehd::diag::err("inou.cgen.sim", "comb-loop-through-instance", "unsupported")
-                .msg(
-                    "combinational loop through instance `{}` ({}::{}): input `{}` is fed by logic that depends on "
-                    "this instance's own output",
-                    s.inst, gname, s.callee_struct, d.name)
-                .hint(
-                    "a sub-instance is simulated atomically (all inputs -> all outputs), so an output that feeds back "
-                    "into one of its inputs forms a cycle the single-pass schedule cannot break; restructure so the "
-                    "cone feeding this input is computed before the call, split the sub by output cone, or flatten "
-                    "this instance for sim")
-                .emit();
-            cycle_reported_ = true;
-          }
-          fout->append(absl::StrCat("    ", s.inst, "__i.", cpp_id(d.name), " = ", operand(drv, wb), ";\n"));
-        }
-        fout->append(absl::StrCat("    auto ", s.inst, "__o = ", s.inst, ".cycle(", s.inst, "__i);\n"));
-        for (const auto& d : sio->get_output_pin_decls()) {
-          auto opin = find_driver_pin(node, d.name);
-          if (!opin.is_invalid()) {
-            pin2var[opin.get_class_index()] = absl::StrCat(s.inst, "__o.", cpp_id(d.name));
-          }
-        }
-        break;
-      }
+      emit_sub_call(ensure_ready, node);
       continue;
     }
     if (Ntype::has_multiple_driver_pins(op)) {
@@ -1874,9 +2128,26 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (!node.has_out_edges() || is_type_register(node)) {
       continue;
     }
+    if (!live_.contains(node.get_class_index())) {
+      // Nothing real consumes this value: split_packed_selfref_wires
+      // redirects packed-wire readers and routinely strands whole Or-trees
+      // (ImmediateGenerator: 400 of 935 emitted values were dead). A skipped
+      // dead ROOT (no out edges) would otherwise leave its entire operand
+      // tree emitted-but-unused (-Wunused-variable noise, wasted compiles).
+      continue;
+    }
     auto dpin = node.get_driver_pin(0);
     if (pin2var.contains(dpin.get_class_index())) {
       continue;  // already emitted via a memory-operand prefetch
+    }
+    // forward_class built its order on the RAW graph; once a false
+    // instance-level cycle has been dissolved (Moore-deferral / state-only
+    // pre-binding above), a comb node can still be SCHEDULED before one of
+    // its operands. Emit pending operand cones on demand; a genuinely cyclic
+    // operand stays unbound (ensure_ready stops on re-entry) and operand()
+    // below reports it as the loud Stage-0 diagnostic.
+    for (auto e : node.inp_edges()) {
+      ensure_ready(e.driver);
     }
     int  wb   = wbits_of(dpin);
     auto var  = absl::StrCat("cg_", std::to_string(tmp_cnt++));
@@ -2311,4 +2582,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     fout->append(absl::StrCat("  ", s.inst, ".probe_signals(_p + \"", s.inst, ".\", _m);\n"));
   }
   fout->append("}\n");
+
+  // Persist the (updated) generation digests only after a CLEAN emission — a
+  // Stage-0 comb-loop failure must not record a digest that would make the
+  // next run skip over the same broken files.
+  if (!odir.empty() && !cycle_reported_ && !cycle_unresolved_) {
+    save_gen_digests();
+  }
 }

@@ -211,17 +211,50 @@ static std::string format_interp_value(const Dlop& v, std::string_view spec, con
   if (v.is_string()) {
     upass::error(span, "string-interpolation format spec ':{}' cannot apply to a string value\n", spec);
   }
-  if (spec.size() > 1) {
-    upass::error(span, "unsupported string-interpolation format spec ':{}' (expected one of b/o/x/X/d)\n", spec);
+  // Grammar: `[width][b|o|x|X|d][s]` — rendered through the SHARED Dlop
+  // formatting API (Slop-parity: to_decimal/to_hex/to_binary with digits+sep),
+  // so comptime interpolation and the sim driver's runtime interpolation are
+  // the same algorithm over the two value classes. `width` zero-pads (after
+  // any sign), `s` groups digits '_'-separated every 4 (3 for decimal) from
+  // the LSB: `{255:4x}` -> "00ff", `{255:bs}` -> "1111_1111",
+  // `{1234567:ds}` -> "1_234_567". Bare `:d` (or no spec) is signed decimal.
+  size_t i = 0, width = 0;
+  while (i < spec.size() && spec[i] >= '0' && spec[i] <= '9') {
+    width = width * 10 + static_cast<size_t>(spec[i] - '0');
+    ++i;
   }
-  switch (spec.empty() ? 'd' : spec.front()) {
-    case 'd': return std::string(v.to_decimal_string());
-    case 'b': return bits_to_grouped(v.to_binary(), 1, false);
-    case 'o': return bits_to_grouped(v.to_binary(), 3, false);
-    case 'x': return bits_to_grouped(v.to_binary(), 4, false);
-    case 'X': return bits_to_grouped(v.to_binary(), 4, true);
-    default : upass::error(span, "unsupported string-interpolation format spec ':{}' (expected one of b/o/x/X/d)\n", spec);
+  char base = 'd';
+  if (i < spec.size() && spec[i] != 's') {
+    base = spec[i];
+    ++i;
   }
+  bool sep = false;
+  if (i < spec.size() && spec[i] == 's') {
+    sep = true;
+    ++i;
+  }
+  const int   w   = static_cast<int>(width);
+  std::string out;
+  bool        bad = i != spec.size();
+  if (!bad) {
+    switch (base) {
+      case 'd': out = v.to_decimal(w, sep); break;
+      case 'b': out = v.to_binary(w, sep); break;
+      case 'x': out = v.to_hex(w, sep, false); break;
+      case 'X': out = v.to_hex(w, sep, true); break;
+      case 'o':  // octal has no Slop/Dlop renderer; regroup the bit string
+        out = Dlop::pad_digits(bits_to_grouped(v.to_binary(), 3, false), w);
+        if (sep) {
+          out = Dlop::group_digits(std::move(out), 4);
+        }
+        break;
+      default : bad = true;
+    }
+  }
+  if (bad) {
+    upass::error(span, "unsupported string-interpolation format spec ':{}' (grammar: [width][b/o/x/X/d][s])\n", spec);
+  }
+  return out;
 }
 
 // get_mask is Pyrope's default-zext bit-select (the "force" operator): with a
@@ -3534,7 +3567,11 @@ void uPass_constprop::process_func_call() {
     if (actuals.has_value() && actuals->size() == 2 && !(*actuals)[0].is_named && !(*actuals)[1].is_named) {
       const Dlop& val  = (*actuals)[0].value;
       const Dlop& spec = (*actuals)[1].value;
-      if (!val.is_invalid() && !val.has_unknowns() && spec.is_string()) {
+      // A STRING value stays unfolded: a runtime DUT field interpolated in a
+      // `test` block reaches here as a string placeholder — the sim driver
+      // renders it (Slop::to_hex/...), and tolg skips %-test combs, so
+      // leaving the call is harmless (vs erroring on a formattable value).
+      if (!val.is_invalid() && !val.has_unknowns() && !val.is_string() && spec.is_string()) {
         store_trivial(
             dst,
             *Dlop::from_string(format_interp_value(val, spec.to_string(), lm->current_span())));

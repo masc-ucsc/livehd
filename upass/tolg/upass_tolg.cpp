@@ -5242,12 +5242,19 @@ private:
       child = lnast_->get_sibling_next(child);
     }
 
-    absl::flat_hash_set<std::string> all_vars;
+    absl::flat_hash_set<std::string> all_vars_set;
     for (auto &br : branches) {
       for (auto &[name, _] : br.writes) {
-        all_vars.insert(name);
+        all_vars_set.insert(name);
       }
     }
+    // Deterministic merge order: flat_hash_set iteration is randomized per
+    // PROCESS, and each var below creates mux nodes -- a random order makes
+    // the produced graph (node ids, emission order, every file generated from
+    // it) differ run to run, defeating downstream content caches (bazel on
+    // the sim C++, run_id, ...). Sort once; both merge paths share it.
+    std::vector<std::string> all_vars(all_vars_set.begin(), all_vars_set.end());
+    std::sort(all_vars.begin(), all_vars.end());
 
     const bool has_else = !branches.empty() && branches.back().is_else;
     const WriteMap &else_writes =
@@ -5330,7 +5337,7 @@ private:
   // 0 = one-hot selector, p(i+1) = arm i's value, p(n_conds+1) = else value
   // (the variable's pre-if value when the arm / else doesn't write it).
   void lower_unique_merge(const std::vector<Branch> &branches,
-                          const absl::flat_hash_set<std::string> &all_vars,
+                          const std::vector<std::string> &all_vars,
                           bool has_else, const WriteMap &else_writes) {
     const int n_conds = static_cast<int>(branches.size()) - (has_else ? 1 : 0);
     I(n_conds >= 1);
