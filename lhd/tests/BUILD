@@ -413,6 +413,18 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Regressions for the slang-reader/tolg features the minion IP needed: multi-dim
+# unpacked struct arrays (linearized tuple memory, LEC'd), latch-based ICG state
+# + generate-for reg arrays on a derived clock, HierarchicalValue assignment
+# targets, widening-cast declared-range aliasing, and structs first written
+# inside a unique-case arm (just //lhd).
+sh_test(
+    name = "slang_minion_features_test",
+    size = "large",
+    srcs = ["slang_minion_features_test.sh"],
+    data = ["//lhd"],
+)
+
 # Regression for the "conditional reg write with no covering else does NOT
 # auto-hold" trap: an unwritten conditional path must HOLD the flop q, not lower
 # to a don't-care. Covers the empty-`elif` (PC stall), pure-write (register

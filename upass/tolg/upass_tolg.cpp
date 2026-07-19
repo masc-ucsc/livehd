@@ -3253,13 +3253,25 @@ private:
             .connect_driver(
                 create_const(*g_, *Dlop::create_integer(posclk_val ? 1 : 0)));
         if (!clock_pin_name.empty()) {
-          auto cpin = g_->get_input_pin(clock_pin_name);
-          if (cpin.is_invalid()) {
-            error_here("upass.tolg: memory '{}' names clock_pin '{}' but '{}' "
-                       "has no such input",
-                       name, clock_pin_name, lnast_->get_top_module_name());
+          // Same resolution as the per-reg wiring above: a module input first,
+          // then an internal/derived wire (a gated clock — clock-gate cell
+          // output — clocking a reg array; use its DRIVER, not the
+          // passthrough buffer), then any plain named pin.
+          if (g_->get_io()->has_input(clock_pin_name)) {
+            setup_sink_by_name(mi.node, "clock_pin")
+                .connect_driver(g_->get_input_pin(clock_pin_name));
+          } else if (auto dit = wire_names_.contains(clock_pin_name)
+                                    ? pin_map_.find(din_key(clock_pin_name))
+                                    : pin_map_.end();
+                     dit != pin_map_.end()) {
+            setup_sink_by_name(mi.node, "clock_pin").connect_driver(dit->second);
+          } else if (pin_map_.contains(clock_pin_name)) {
+            setup_sink_by_name(mi.node, "clock_pin")
+                .connect_driver(pin_map_.at(clock_pin_name));
           } else {
-            setup_sink_by_name(mi.node, "clock_pin").connect_driver(cpin);
+            error_here("upass.tolg: memory '{}' names clock_pin '{}' but '{}' "
+                       "has no such input/wire",
+                       name, clock_pin_name, lnast_->get_top_module_name());
           }
         } else if (!clock_name_.empty()) {
           setup_sink_by_name(mi.node, "clock_pin").connect_driver(clock_pin());
@@ -5969,9 +5981,12 @@ public:
       // so a reg-array pipeline like `pfOp[1] <= pfOp[0]` — whose write din is
       // a read of the same memory node — is NOT a combinational loop.  Cut them
       // like flops so the node-level dout->din self-edge does not
-      // false-positive.
+      // false-positive.  A Latch holds stored state too: its din hold arm
+      // (`din = cond ? d : q`) reads its own q by construction — the standard
+      // inferred-latch idiom (prim_clk_gate's ICG), not a loop.
       for (size_t i = 0; i < nn; ++i) {
-        if (type_op_of(nodes[i]) == Ntype_op::Memory) {
+        const auto op = type_op_of(nodes[i]);
+        if (op == Ntype_op::Memory || op == Ntype_op::Latch) {
           state_.insert(nodes[i].get_debug_nid());
         }
       }
@@ -5993,11 +6008,12 @@ public:
             if (state_.contains(nodes[i].get_debug_nid())) {
               has_state = true;
             }
-          } else if (type_op_of(nodes[i]) == Ntype_op::Memory) {
+          } else if (type_op_of(nodes[i]) == Ntype_op::Memory || type_op_of(nodes[i]) == Ntype_op::Latch) {
             // A memory's stored state breaks the cycle (its read dout reflects
             // the flopped contents, decoupled from this cycle's write din) — a
             // reg-array pipeline `pfOp[1] <= pfOp[0]` is sequential, not a
-            // loop.
+            // loop. A latch's q likewise holds state; its hold-arm q read is
+            // the inferred-latch idiom, not a loop.
             has_state = true;
           }
         }

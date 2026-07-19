@@ -110,7 +110,7 @@ private:
   bool        lower_module(const slang::ast::InstanceSymbol& symbol);
   std::string module_name_of(const slang::ast::InstanceSymbol& symbol);
   void        emit_module_io(const slang::ast::InstanceSymbol& symbol, const Lnast_nid& in_tup, const Lnast_nid& out_tup);
-  void        collect_state_vars(const slang::ast::InstanceBodySymbol& body);
+  void        collect_state_vars(const slang::ast::Scope& body);
   // Module bodies emit DRIVERS (continuous assigns, processes, instances) in
   // dataflow dependency order, not source order: LNAST/tolg resolve reads
   // sequentially, while verilog wires are order-free nets. Combinational
@@ -157,6 +157,18 @@ private:
     bool               is_tuple = false;
     std::string        type_name;  // emitted typedef name (= comp_type_array element ref)
     std::vector<Field> fields;
+    // A MULTI-dimensional unpacked array (`T m [A][B]`) linearizes to a 1-D
+    // memory of size A*B (row-major, innermost dim contiguous); `dims` keeps
+    // each declared dim's lower bound and width, outermost first, so a full
+    // `m[i][j]` selector chain folds to one linear index. The memory declare
+    // paths fill it for 1-D arrays too (one entry); a flat-PORT Mem_info leaves
+    // it empty (single dim implied — ports don't take the linearized path).
+    struct Dim {
+      int64_t lower = 0;
+      int64_t width = 1;
+    };
+    std::vector<Dim> dims;
+    size_t           rank() const { return dims.empty() ? 1 : dims.size(); }
   };
   absl::flat_hash_map<const slang::ast::Symbol*, Mem_info> mem_info_;
   // Per-module stable name for each struct element type (keyed by the canonical
@@ -382,6 +394,16 @@ private:
   void note_write(const slang::ast::Symbol& sym, bool nonblocking, slang::SourceLocation loc);
   const slang::ast::ValueSymbol* resolve_base_symbol(const slang::ast::Expression& base);
   void                           lower_unpacked_write(const slang::ast::Expression& lhs, const std::string& rhs);
+  // Walk a (possibly nested) element-select chain on an unpacked array down to
+  // the expression below the last unpacked dim, collecting the selectors
+  // OUTERMOST dim first (`m[i][j]` -> {i, j}). Also accepts the memory-ized
+  // packed 2-D reg base (single select on a packed base).
+  static const slang::ast::Expression* peel_unpacked_chain(const slang::ast::Expression&                    expr,
+                                                           std::vector<const slang::ast::Expression*>&      sels);
+  // Linear 0-based element index for a FULL-depth selector chain (row-major,
+  // innermost dim contiguous), folding constant selectors. sels.size() must
+  // equal mi.rank().
+  std::string build_unpacked_index(const Mem_info& mi, const std::vector<const slang::ast::Expression*>& sels);
   bool                           current_assign_nonblocking_ = false;
 
   // A packed assignment target resolved to a single contiguous bit-slice of a

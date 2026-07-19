@@ -102,8 +102,25 @@ std::string Slang_context::materialize_conversion(const std::string& v, int from
     return builder_.create_sext_stmts(masked, std::to_string(to_bits - 1));
   }
 
+  // A width-CHANGING conversion of a bare VARIABLE ref must materialize an
+  // identity op rather than pass the name through: a whole-var `wide = narrow`
+  // ref-copy aliases the SOURCE's declared range onto the target in the upass
+  // symbol table (an io output has no decl bake of its own), and a later
+  // in-range write (`wren = 8'hff` after `wren = 8'(en4_q)`) then
+  // false-errors against the narrow source's [0,15]. A `%N` temp or a literal
+  // carries no declared facts — pass those through unchanged (materializing
+  // them just pads solver-visible logic: the psigned multiplier LEC).
+  const bool ref_alias_risk = !v.empty() && v.front() != '%' && v.front() != '-'
+                              && (std::isdigit(static_cast<unsigned char>(v.front())) == 0);
+
   if (from_signed == to_signed) {
-    return v;  // widening (or same width) preserves the value in integer semantics
+    if (to_bits == from_bits || !ref_alias_risk) {
+      return v;  // widening (or same width) preserves the value in integer semantics
+    }
+    if (!from_signed) {
+      return trunc_to(v, from_bits);  // identity mask at the source width
+    }
+    return builder_.create_sext_stmts(trunc_to(v, from_bits), std::to_string(from_bits - 1));
   }
 
   if (!from_signed && to_signed) {
@@ -111,7 +128,7 @@ std::string Slang_context::materialize_conversion(const std::string& v, int from
     if (to_bits == from_bits) {
       return builder_.create_sext_stmts(v, std::to_string(to_bits - 1));
     }
-    return v;
+    return ref_alias_risk ? trunc_to(v, from_bits) : v;  // widening: identity mask when a bare ref
   }
 
   // signed -> unsigned (to_bits >= from_bits here; the narrowing case is handled

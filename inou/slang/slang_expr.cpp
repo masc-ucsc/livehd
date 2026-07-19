@@ -593,19 +593,17 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
     // a fused per-field tuple_get (detuple -> tuple_get(d, mem.field, idx)),
     // avoiding a whole-element reconstruct + re-extract.
     if (ma.value().kind == ExpressionKind::ElementSelect) {
-      const auto& es       = ma.value().as<slang::ast::ElementSelectExpression>();
-      const auto* base_sym = resolve_base_symbol(es.value());
+      std::vector<const slang::ast::Expression*> sels;
+      const auto&                                mbase    = *peel_unpacked_chain(ma.value(), sels);
+      const auto*                                base_sym = resolve_base_symbol(mbase);
       if (base_sym != nullptr && !flat_port_syms_.contains(base_sym)) {
         auto mit = mem_info_.find(base_sym);
-        if (mit != mem_info_.end() && mit->second.is_tuple) {
+        if (mit != mem_info_.end() && mit->second.is_tuple && sels.size() == mit->second.rank()) {
           const auto& mi    = mit->second;
           const auto& field = ma.member.as<slang::ast::FieldSymbol>();
           if (const auto* f = find_tuple_field(mi, field.name)) {
-            auto idx = to_int_value(lower_rvalue(es.selector()));
-            if (mi.lower != 0) {
-              idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
-            }
-            auto d = emit_field_read_chain(lname_of(*base_sym), idx, f->name);
+            auto idx = build_unpacked_index(mi, sels);
+            auto d   = emit_field_read_chain(lname_of(*base_sym), idx, f->name);
             return f->is_signed ? builder_.create_sext_stmts(d, std::to_string(f->bits - 1)) : d;
           }
         }

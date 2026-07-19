@@ -747,8 +747,24 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
 // edge-sensitive process writes it nonblocking. Blocking-written variables in
 // edge processes stay process-local temps; one written there but read
 // elsewhere has flop semantics this reader does not model yet -> diagnosed.
-void Slang_context::collect_state_vars(const slang::ast::InstanceBodySymbol& body) {
+// Recurses into generate blocks: an `always_ff` inside a generate-for writing
+// a module-scope array (`buffer_pc[buffer] <= f0_pc`) must classify that array
+// as a reg BEFORE the declares run, or a comb read declares it `mut` first.
+void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
   for (const auto& member : body.members()) {
+    if (member.kind == SymbolKind::GenerateBlock) {
+      const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
+      if (!gen.isUninstantiated) {
+        collect_state_vars(gen);
+      }
+      continue;
+    }
+    if (member.kind == SymbolKind::GenerateBlockArray) {
+      for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
+        collect_state_vars(*entry);
+      }
+      continue;
+    }
     if (member.kind != SymbolKind::ProceduralBlock) {
       continue;
     }
@@ -996,7 +1012,11 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       int64_t n = 0, lo = 0;
       int     w = 0;
       bool    sg = false;
-      if (reg_syms_.contains(sym) && is_packed_2d_array(sym->getType(), n, w, sg, lo) && is_runtime_sel(sel)) {
+      // An OUTPUT reg must stay a flat flop bus — its q pin IS the port driver;
+      // memory-izing it would leave the output undriven (dcache's
+      // `output [Sets][Ways] hlock_state_o` read at runtime indices).
+      if (reg_syms_.contains(sym) && !output_syms_.contains(sym) && is_packed_2d_array(sym->getType(), n, w, sg, lo)
+          && is_runtime_sel(sel)) {
         packed_mem_regs_.insert(sym);
       }
     }
@@ -1039,6 +1059,16 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       continue;
     }
     const auto& ct = vsym.getType().getCanonicalType();
+    // Pre-declare a module-scope STRUCT variable too: its leaf declares (and
+    // X-init poisons) must land at module top. Declared lazily at first use,
+    // they would be emitted INSIDE that use's if/uif arm — and a dotted poison
+    // store inside a unique_if (case) arm survives the branch merge in a
+    // field-store form tolg cannot lower (trans_top's f5_rom_response_l,
+    // first written inside a `unique case` arm).
+    if (ct.isStruct()) {
+      declare_value_symbol(vsym, /*force_reg=*/false);
+      continue;
+    }
     if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
       continue;
     }
@@ -1193,13 +1223,27 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
                      std::string("array '") + std::string(sym.name) + "' is not a fixed-size unpacked array");
     return false;
   }
-  const auto& arr  = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
-  const auto& elem = arr.elementType.getCanonicalType();
-  if (!elem.isIntegral() || elem.isUnpackedArray()) {
+  const auto& arr = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
+  // Peel every unpacked dim (outermost first): a multi-dim `T m [A][B]`
+  // linearizes to a 1-D memory of A*B elements of T (row-major, innermost dim
+  // contiguous); access sites fold the full `m[i][j]` selector chain into one
+  // linear index (build_unpacked_index).
+  std::vector<Mem_info::Dim> dims;
+  const slang::ast::Type*    ep = &ct;
+  while (ep->getCanonicalType().kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+    const auto& a = ep->getCanonicalType().as<slang::ast::FixedSizeUnpackedArrayType>();
+    dims.push_back({a.range.lower(), static_cast<int64_t>(a.range.width())});
+    ep = &a.elementType;
+  }
+  const auto& elem = ep->getCanonicalType();
+  if (!elem.isIntegral()) {
     emit_unsupported(sym.location, "unsupported-mem-element",
-                     std::string("memory '") + std::string(sym.name)
-                         + "' has a non-integral or multi-dimensional element type");
+                     std::string("memory '") + std::string(sym.name) + "' has a non-integral element type");
     return false;
+  }
+  int64_t total = 1;
+  for (const auto& d : dims) {
+    total *= d.width;
   }
   auto ei = tinfo(elem);
 
@@ -1219,7 +1263,7 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
   // array stays a memory (dynamic-shift flattening mismatches).
   const bool    elem_struct  = elem.isStruct() || elem.isPackedUnion();
   const bool    const_indexed = !runtime_indexed_arrays_.contains(&sym);
-  const int64_t flat_bits    = static_cast<int64_t>(ei.bits) * arr.range.width();
+  const int64_t flat_bits    = static_cast<int64_t>(ei.bits) * total;
   const bool    has_init     = [&] {
     auto it = mem_init_vals_.find(&sym);
     return it != mem_init_vals_.end() && !it->second.empty();
@@ -1232,7 +1276,10 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
   // RUNTIME-indexed array stays a memory (the FIFO/regfile/store path). A reg
   // array with power-on contents keeps the memory path (the init becomes the
   // mem declare initializer; flattening it would need a concatenated reset).
-  if ((const_indexed || (!is_reg && elem_struct)) && !(is_reg && has_init) && flat_bits > 0 && flat_bits <= 65536) {
+  // Multi-dim arrays always take the linearized MEMORY path (the flat-port
+  // bit-slice machinery is single-dim).
+  if (dims.size() == 1 && (const_indexed || (!is_reg && elem_struct)) && !(is_reg && has_init) && flat_bits > 0
+      && flat_bits <= 65536) {
     Mem_info fmi;
     fmi.lower       = arr.range.lower();
     fmi.elem_bits   = ei.bits;
@@ -1266,7 +1313,8 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
     mi.lower       = arr.range.lower();
     mi.elem_bits   = ei.bits;
     mi.elem_signed = false;
-    mi.size        = arr.range.width();
+    mi.size        = total;
+    mi.dims        = dims;
     mi.is_tuple    = true;
     mi.type_name   = tuple_type_name(elem);
     for (const auto& f : st.membersOfType<slang::ast::FieldSymbol>()) {
@@ -1307,7 +1355,8 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
   mi.lower       = arr.range.lower();
   mi.elem_bits   = ei.bits;
   mi.elem_signed = ei.is_signed;
-  mi.size        = arr.range.width();
+  mi.size        = total;
+  mi.dims        = dims;
   mem_info_.emplace(&sym, mi);
   mem_syms_.insert(&sym);
 
@@ -1877,13 +1926,23 @@ void Slang_context::declare_struct_leaves(const slang::ast::ValueSymbol& sym) {
     } else {
       // A non-cyclic leaf: a `mut` net with a poison init so a read of a
       // never-assigned field is x, not a silent 0 (mirrors the scalar path).
+      // SKIP the poison for a FUNCTION-scope struct (an inlined call's arg or
+      // local): the arg is bound whole at the inline site, so the poison is
+      // dead by construction — and when the call site sits in a unique_if
+      // (case) arm, the dotted poison store survives the branch merge in a
+      // field-store form tolg cannot lower (intpipe_csr_file's
+      // read_fcsr_as_frm in a decode case arm).
       auto leaf = absl::StrCat(base, ".", std::string(f.name));
       builder_.create_declare_stmts(leaf, "mut", "", "");
-      if (fi.is_signed) {
-        builder_.create_assign_stmts(leaf, "0sb?");
-      } else {
-        std::string qmarks(static_cast<size_t>(fi.bits), '?');
-        builder_.create_assign_stmts(leaf, absl::StrCat("0ub", qmarks));
+      const auto* psc      = sym.getParentScope();
+      const bool  fn_local = psc != nullptr && psc->asSymbol().kind == slang::ast::SymbolKind::Subroutine;
+      if (!fn_local) {
+        if (fi.is_signed) {
+          builder_.create_assign_stmts(leaf, "0sb?");
+        } else {
+          std::string qmarks(static_cast<size_t>(fi.bits), '?');
+          builder_.create_assign_stmts(leaf, absl::StrCat("0ub", qmarks));
+        }
       }
     }
   }

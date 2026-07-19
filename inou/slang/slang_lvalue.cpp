@@ -63,12 +63,13 @@ void Slang_context::lower_assign(const slang::ast::AssignmentExpression& expr) {
     while (l->kind == ExpressionKind::Conversion) {
       l = &l->as<slang::ast::ConversionExpression>().operand();
     }
-    if (l->kind == ExpressionKind::NamedValue
-        && (is_scalar_struct_var(l->as<slang::ast::NamedValueExpression>().symbol)
-            || is_packed_array_bundle_var(l->as<slang::ast::NamedValueExpression>().symbol))) {
-      current_assign_nonblocking_ = expr.isNonBlocking();
-      if (assign_struct_whole(l->as<slang::ast::NamedValueExpression>().symbol, expr.right())) {
-        return;
+    if (l->kind == ExpressionKind::NamedValue || l->kind == ExpressionKind::HierarchicalValue) {
+      const auto& lsym = l->as<slang::ast::ValueExpressionBase>().symbol;
+      if (is_scalar_struct_var(lsym) || is_packed_array_bundle_var(lsym)) {
+        current_assign_nonblocking_ = expr.isNonBlocking();
+        if (assign_struct_whole(lsym, expr.right())) {
+          return;
+        }
       }
     }
   }
@@ -90,8 +91,13 @@ void Slang_context::lower_assign(const slang::ast::AssignmentExpression& expr) {
 
 void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::string& rhs) {
   switch (lhs.kind) {
-    case ExpressionKind::NamedValue: {
-      const auto& nv  = lhs.as<slang::ast::NamedValueExpression>();
+    // A HierarchicalValue target (`gen_blk.sig = v`, e.g. an output-port
+    // connection driving a named generate block's net) is a ValueExpressionBase
+    // with the symbol already resolved — same lowering as NamedValue (the
+    // rvalue side already reads both alike).
+    case ExpressionKind::NamedValue:
+    case ExpressionKind::HierarchicalValue: {
+      const auto& nv  = lhs.as<slang::ast::ValueExpressionBase>();
       const auto& sym = nv.symbol;
       if (!declared_.contains(&sym) && !input_syms_.contains(&sym)) {
         declare_value_symbol(sym, /*force_reg=*/false);
@@ -239,18 +245,16 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
       // idx, v)); a memory base would otherwise fall through to the unsupported
       // nested-lvalue diagnostic (resolve_packed_lvalue rejects a memory base).
       if (ma.value().kind == ExpressionKind::ElementSelect) {
-        const auto& es       = ma.value().as<slang::ast::ElementSelectExpression>();
-        const auto* base_sym = resolve_base_symbol(es.value());
+        std::vector<const slang::ast::Expression*> sels;
+        const auto&                                mbase    = *peel_unpacked_chain(ma.value(), sels);
+        const auto*                                base_sym = resolve_base_symbol(mbase);
         if (base_sym != nullptr && !flat_port_syms_.contains(base_sym)) {
           auto mit = mem_info_.find(base_sym);
-          if (mit != mem_info_.end() && mit->second.is_tuple) {
+          if (mit != mem_info_.end() && mit->second.is_tuple && sels.size() == mit->second.rank()) {
             const auto& mi    = mit->second;
             const auto& field = ma.member.as<slang::ast::FieldSymbol>();
             if (const auto* f = find_tuple_field(mi, field.name)) {
-              auto idx = to_int_value(lower_rvalue(es.selector()));
-              if (mi.lower != 0) {
-                idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
-              }
+              auto idx = build_unpacked_index(mi, sels);
               note_write(*base_sym, current_assign_nonblocking_, lhs.sourceRange.start());
               emit_field_store(lname_of(*base_sym), idx, f->name, to_pattern(to_int_value(rhs), f->bits, f->is_signed));
               return;
@@ -544,32 +548,90 @@ std::string Slang_context::emit_field_read_chain(const std::string& mem_name, co
   return t2;
 }
 
+// Nested `m[i][j]` selects on a multi-dim unpacked array: collect the selector
+// chain (reversed to OUTERMOST dim first — `(m[i])[j]`'s outer select carries
+// the innermost dim) and return the expression below it. The loop also accepts
+// the single select on a memory-ized packed 2-D reg base (packed base ends the
+// walk after one selector).
+const slang::ast::Expression* Slang_context::peel_unpacked_chain(const slang::ast::Expression&               expr,
+                                                                 std::vector<const slang::ast::Expression*>& sels) {
+  const auto* e = &expr;
+  while (e->kind == ExpressionKind::ElementSelect) {
+    const auto& es = e->as<slang::ast::ElementSelectExpression>();
+    sels.push_back(&es.selector());
+    e = &es.value();
+    if (!e->type->getCanonicalType().isUnpackedArray()) {
+      break;
+    }
+  }
+  std::reverse(sels.begin(), sels.end());
+  return e;
+}
+
+// Linear 0-based element index of a full-depth selector chain: row-major
+// accumulate `acc = acc*width_k + (sel_k - lower_k)`, folding while every term
+// is a compile-time constant. A Mem_info without dims (memory-ized packed reg)
+// is a single dim {lower, size}.
+std::string Slang_context::build_unpacked_index(const Mem_info&                                   mi,
+                                                const std::vector<const slang::ast::Expression*>& sels) {
+  std::optional<int64_t> cacc = 0;  // constant accumulator while it stays foldable
+  std::string            dacc;      // otherwise the accumulated expression
+  for (size_t k = 0; k < sels.size(); ++k) {
+    const auto d = mi.dims.empty() ? Mem_info::Dim{mi.lower, mi.size} : mi.dims[k];
+    if (k > 0) {
+      if (cacc) {
+        *cacc *= d.width;
+      } else if (d.width != 1) {
+        dacc = builder_.create_mult_stmts(dacc, std::to_string(d.width));
+      }
+    }
+    if (auto ci = try_eval_int(*sels[k])) {
+      if (cacc) {
+        *cacc += *ci - d.lower;
+      } else if (*ci != d.lower) {
+        dacc = builder_.create_plus_stmts(dacc, std::to_string(*ci - d.lower));
+      }
+    } else {
+      auto v = to_int_value(lower_rvalue(*sels[k]));
+      if (d.lower != 0) {
+        v = builder_.create_minus_stmts(v, std::to_string(d.lower));
+      }
+      if (cacc) {
+        dacc = *cacc == 0 ? v : builder_.create_plus_stmts(std::to_string(*cacc), v);
+        cacc.reset();
+      } else {
+        dacc = builder_.create_plus_stmts(dacc, v);
+      }
+    }
+  }
+  return cacc ? std::to_string(*cacc) : dacc;
+}
+
 // Unpacked-array (memory) element access (2s-D). Reads lower to
 // tuple_get(dst, mem, idx) = one read port per site; writes to the 3-child
 // store(mem, idx, val) = one write port per site (enable = branch path
-// condition, wired by tolg). Indices are biased by the declared lower bound.
+// condition, wired by tolg). Indices are biased by the declared lower bound;
+// a multi-dim array folds its full selector chain to one linear index.
 std::string Slang_context::lower_unpacked_read(const slang::ast::Expression& expr) {
   if (expr.kind != ExpressionKind::ElementSelect) {
     emit_unsupported(expr.sourceRange, "unsupported-array-read",
                      "only single-element reads of unpacked arrays are supported by --reader slang");
     return "0";
   }
-  const auto& es       = expr.as<slang::ast::ElementSelectExpression>();
-  const auto* base_sym = resolve_base_symbol(es.value());
-  if (base_sym != nullptr && flat_port_syms_.contains(base_sym)) {
-    return flat_port_read(es, mem_info_.at(base_sym));
+  std::vector<const slang::ast::Expression*> sels;
+  const auto&                                base     = *peel_unpacked_chain(expr, sels);
+  const auto*                                base_sym = resolve_base_symbol(base);
+  if (base_sym != nullptr && flat_port_syms_.contains(base_sym) && sels.size() == 1) {
+    return flat_port_read(expr.as<slang::ast::ElementSelectExpression>(), mem_info_.at(base_sym));
   }
-  auto        mit      = base_sym != nullptr ? mem_info_.find(base_sym) : mem_info_.end();
-  if (mit == mem_info_.end()) {
+  auto mit = base_sym != nullptr ? mem_info_.find(base_sym) : mem_info_.end();
+  if (mit == mem_info_.end() || sels.size() != mit->second.rank()) {
     emit_unsupported(expr.sourceRange, "unsupported-array-read", "unpacked array read on an unsupported base");
     return "0";
   }
   const auto& mi = mit->second;
 
-  auto idx = to_int_value(lower_rvalue(es.selector()));
-  if (mi.lower != 0) {
-    idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
-  }
+  auto idx = build_unpacked_index(mi, sels);
 
   // Struct-element memory: reconstruct the packed element bus from per-field
   // reads (the inverse of the whole-element write decomposition). The index is
@@ -607,23 +669,21 @@ void Slang_context::lower_unpacked_write(const slang::ast::Expression& lhs, cons
                      "only single-element writes of unpacked arrays are supported by --reader slang");
     return;
   }
-  const auto& es       = lhs.as<slang::ast::ElementSelectExpression>();
-  const auto* base_sym = resolve_base_symbol(es.value());
-  if (base_sym != nullptr && flat_port_syms_.contains(base_sym)) {
-    flat_port_write(es, mem_info_.at(base_sym), rhs);
+  std::vector<const slang::ast::Expression*> sels;
+  const auto&                                base     = *peel_unpacked_chain(lhs, sels);
+  const auto*                                base_sym = resolve_base_symbol(base);
+  if (base_sym != nullptr && flat_port_syms_.contains(base_sym) && sels.size() == 1) {
+    flat_port_write(lhs.as<slang::ast::ElementSelectExpression>(), mem_info_.at(base_sym), rhs);
     return;
   }
-  auto        mit      = base_sym != nullptr ? mem_info_.find(base_sym) : mem_info_.end();
-  if (mit == mem_info_.end()) {
+  auto mit = base_sym != nullptr ? mem_info_.find(base_sym) : mem_info_.end();
+  if (mit == mem_info_.end() || sels.size() != mit->second.rank()) {
     emit_unsupported(lhs.sourceRange, "unsupported-array-write", "unpacked array write on an unsupported base");
     return;
   }
   const auto& mi = mit->second;
 
-  auto idx = to_int_value(lower_rvalue(es.selector()));
-  if (mi.lower != 0) {
-    idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
-  }
+  auto idx = build_unpacked_index(mi, sels);
 
   // Struct-element memory whole-element write `mem[idx] <= rhs`: decompose into
   // one field store per field. `rhs` is the packed element value (whatever its
