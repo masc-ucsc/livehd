@@ -1,0 +1,23 @@
+/*
+:name: string_format_spec_width
+:type: parsing lnast comptime
+:verifier_pass: 12
+:verifier_fail: 0
+*/
+
+// Format-spec grammar `[width][b/o/x/X/d][s]`: `width` zero-pads the digits,
+// the `s` suffix groups them `_`-separated every 4 from the LSB.
+mut val = 255
+
+cassert("hex {val:x}" == "hex ff")
+cassert("hex {val:X}" == "hex FF")
+cassert("hex {val:4x}" == "hex 00ff")
+cassert("bin {val:b}" == "bin 11111111")
+cassert("bin {val:bs}" == "bin 1111_1111")
+cassert("hex {0xFECD000A:Xs}" == "hex FECD_000A")
+cassert("hex {0xFECD000A:xs}" == "hex fecd_000a")
+cassert("dec {val:d}" == "dec 255")
+cassert("dec {val}" == "dec 255")
+cassert("pad {val:12bs}" == "pad 0000_1111_1111")
+cassert("dec {1234567:ds}" == "dec 1_234_567")
+cassert("dec {1234567:12ds}" == "dec 000_001_234_567")
