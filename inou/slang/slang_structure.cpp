@@ -3267,6 +3267,10 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
           if (sym == nullptr || as.left().kind != ExpressionKind::NamedValue || !reg_syms_.contains(sym)) {
             return false;
           }
+          // NOTE (provenance, deferred): a bare `q <= PKG_PARAM` reset load
+          // still FOLDS here — carrying the name through the `initial` attr as
+          // a ref mis-resolves on recompile (LEC-refuted), so it needs the
+          // attr-resolution work first (see provenance.md M6).
           auto cv = try_eval_const_net(as.right());
           if (!cv || !cv->isInteger()) {
             return false;

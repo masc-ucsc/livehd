@@ -11,6 +11,7 @@
 #include "slang/ast/expressions/CallExpression.h"
 #include "slang/ast/expressions/ConversionExpression.h"
 #include "slang/ast/expressions/LiteralExpressions.h"
+#include "slang/ast/ASTVisitor.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/ast/symbols/SubroutineSymbols.h"
@@ -24,9 +25,54 @@ using slang::ast::BinaryOperator;
 using slang::ast::ExpressionKind;
 using slang::ast::UnaryOperator;
 
-std::optional<std::string> Slang_context::package_param_ref(const slang::ast::Expression& expr) {
+const slang::ast::PackageSymbol* Slang_context::owning_package(const slang::ast::Symbol& sym) {
+  // Walk out to the owning PACKAGE (a package localparam/parameter/enum member).
+  // A module-local symbol has no stable package home, so callers keep folding it.
+  const slang::ast::Scope* sc = sym.getParentScope();
+  while (sc != nullptr) {
+    const auto& ssym = sc->asSymbol();
+    if (ssym.kind == slang::ast::SymbolKind::Package) {
+      return &ssym.as<slang::ast::PackageSymbol>();
+    }
+    sc = ssym.getParentScope();
+  }
+  return nullptr;
+}
+
+// The compile-time value of a package-const-capable symbol (Parameter or enum
+// member), or nullptr if the symbol is not one.
+static const slang::ConstantValue* package_const_value(const slang::ast::Symbol& sym) {
+  if (sym.kind == slang::ast::SymbolKind::Parameter) {
+    return &sym.as<slang::ast::ParameterSymbol>().getValue();
+  }
+  if (sym.kind == slang::ast::SymbolKind::EnumValue) {
+    return &sym.as<slang::ast::EnumValueSymbol>().getValue();
+  }
+  return nullptr;
+}
+
+std::optional<std::string> Slang_context::package_symbol_ref(const slang::ast::Symbol& sym) {
   if (!options_.preserve_param_provenance) {
     return std::nullopt;  // WIP feature; default OFF keeps folding (no regression)
+  }
+  const auto* cv = package_const_value(sym);
+  if (cv == nullptr || !cv->isInteger()) {
+    return std::nullopt;  // only integral consts carry a scalar pyrope value
+  }
+  const auto* pkg = owning_package(sym);
+  if (pkg == nullptr) {
+    return std::nullopt;
+  }
+  std::string pkg_name(pkg->name);
+  std::string param_name(sym.name);
+  referenced_pkg_params_[pkg_name][param_name] = const_text(cv->integer());
+  builder_.lnast->add_imported_package(pkg_name);
+  return absl::StrCat(pkg_name, ".", param_name);
+}
+
+std::optional<std::string> Slang_context::package_param_ref(const slang::ast::Expression& expr) {
+  if (!options_.preserve_param_provenance) {
+    return std::nullopt;
   }
   // Peel conversions (an implicit width cast around the bare ref); whether they
   // were value-preserving is checked against the whole expression's value below.
@@ -40,43 +86,87 @@ std::optional<std::string> Slang_context::package_param_ref(const slang::ast::Ex
     return std::nullopt;
   }
   const auto& sym = e->as<slang::ast::ValueExpressionBase>().symbol;
-  if (sym.kind != slang::ast::SymbolKind::Parameter) {
-    return std::nullopt;
-  }
-  // Walk out to the owning PACKAGE (a package localparam/parameter). A
-  // module-local parameter has no stable package home, so keep folding it.
-  const slang::ast::Scope*         sc  = sym.getParentScope();
-  const slang::ast::PackageSymbol* pkg = nullptr;
-  while (sc != nullptr) {
-    const auto& ssym = sc->asSymbol();
-    if (ssym.kind == slang::ast::SymbolKind::Package) {
-      pkg = &ssym.as<slang::ast::PackageSymbol>();
-      break;
-    }
-    sc = ssym.getParentScope();
-  }
-  if (pkg == nullptr) {
-    return std::nullopt;
-  }
-  const auto& cv = sym.as<slang::ast::ParameterSymbol>().getValue();
-  if (!cv.isInteger()) {
-    return std::nullopt;  // only integral params carry a scalar pyrope value
-  }
   if (peeled) {
     // Peeling is only sound for VALUE-PRESERVING conversions: a narrowing cast
     // like 4'(P) with P=300 evaluates to 12, and emitting the symbolic ref
     // would read back as 300 — a miscompile. Compare the whole expression's
-    // folded value against the param's; any mismatch keeps the fold.
+    // folded value against the bare symbol's; any mismatch keeps the fold (the
+    // structural Conversion lowering preserves those symbolically instead).
+    const auto* cv = package_const_value(sym);
+    if (cv == nullptr || !cv->isInteger()) {
+      return std::nullopt;
+    }
     auto whole = try_eval(expr);
-    if (!whole || !whole->isInteger() || const_text(whole->integer()) != const_text(cv.integer())) {
+    if (!whole || !whole->isInteger() || const_text(whole->integer()) != const_text(cv->integer())) {
       return std::nullopt;
     }
   }
-  std::string pkg_name(pkg->name);
-  std::string param_name(sym.name);
-  referenced_pkg_params_[pkg_name][param_name] = const_text(cv.integer());
-  builder_.lnast->add_imported_package(pkg_name);
-  return absl::StrCat(pkg_name, ".", param_name);
+  return package_symbol_ref(sym);
+}
+
+bool Slang_context::contains_package_param(const slang::ast::Expression& expr) {
+  bool found = false;
+  auto check = [&found](const slang::ast::Symbol& sym) {
+    if (!found && (sym.kind == slang::ast::SymbolKind::Parameter || sym.kind == slang::ast::SymbolKind::EnumValue)
+        && owning_package(sym) != nullptr) {
+      found = true;
+    }
+  };
+  auto v = slang::ast::makeVisitor(
+      [&](auto&, const slang::ast::NamedValueExpression& e) { check(e.symbol); },
+      [&](auto&, const slang::ast::HierarchicalValueExpression& e) { check(e.symbol); });
+  expr.visit(v);
+  return found;
+}
+
+bool Slang_context::structural_preserve_ok(const slang::ast::Expression& expr) {
+  switch (expr.kind) {
+    case ExpressionKind::NamedValue:
+    case ExpressionKind::HierarchicalValue: return true;  // read_symbol preserves (or folds cleanly)
+    case ExpressionKind::UnaryOp: {
+      using slang::ast::UnaryOperator;
+      switch (expr.as<slang::ast::UnaryExpression>().op) {
+        case UnaryOperator::Plus:
+        case UnaryOperator::Minus:
+        case UnaryOperator::BitwiseNot:
+        case UnaryOperator::BitwiseAnd:
+        case UnaryOperator::BitwiseOr:
+        case UnaryOperator::BitwiseXor:
+        case UnaryOperator::BitwiseNand:
+        case UnaryOperator::BitwiseNor:
+        case UnaryOperator::BitwiseXnor:
+        case UnaryOperator::LogicalNot: return true;
+        default: return false;  // ++/-- cannot be const anyway
+      }
+    }
+    case ExpressionKind::BinaryOp:
+      // Every binop lowers structurally EXCEPT `**` (const power only exists
+      // via the tier-1 fold).
+      return expr.as<slang::ast::BinaryExpression>().op != BinaryOperator::Power;
+    case ExpressionKind::ConditionalOp: return true;
+    case ExpressionKind::Conversion: {
+      const auto& conv = expr.as<slang::ast::ConversionExpression>();
+      return conv.type->isIntegral() && conv.operand().type->isIntegral();
+    }
+    case ExpressionKind::Concatenation:
+    case ExpressionKind::Replication: return true;  // a const replication has a const count
+    case ExpressionKind::ElementSelect:
+      return expr.as<slang::ast::ElementSelectExpression>().value().type->isIntegral();
+    case ExpressionKind::RangeSelect:
+      return expr.as<slang::ast::RangeSelectExpression>().value().type->isIntegral();
+    case ExpressionKind::MemberAccess:
+      // only packed-struct member access lowers; packed structs are integral
+      return expr.as<slang::ast::MemberAccessExpression>().value().type->isIntegral();
+    case ExpressionKind::Call: {
+      const auto& call = expr.as<slang::ast::CallExpression>();
+      if (!call.isSystemCall()) {
+        return false;
+      }
+      auto name = call.getSubroutineName();
+      return name == "$signed" || name == "$unsigned";  // $clog2/$bits/… need the fold
+    }
+    default: return false;  // assignment patterns, inside, streaming, … keep the fold
+  }
 }
 
 std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
@@ -89,7 +179,16 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
   // loop variables, sized literals, $clog2/$bits/... system calls).
   if (expr.kind != ExpressionKind::Assignment && expr.kind != ExpressionKind::LValueReference) {
     if (auto cv = try_eval(expr); cv && cv->isInteger()) {
-      return const_text(cv->integer());
+      // Provenance: a CONST composite containing a package-param leaf (e.g.
+      // `PKG_A + PKG_B`, `{5'b0, $unsigned(PKG_P)}`) skips the fold and lowers
+      // structurally, so the recursion reaches the bare leaves where
+      // package_param_ref keeps the names. Only when every dispatched
+      // sub-lowering is supported (structural_preserve_ok) — a kind the
+      // structural path cannot lower ($clog2, `**`, …) keeps the fold, and so
+      // does any such sub-expression on its own recursion step.
+      if (!(options_.preserve_param_provenance && contains_package_param(expr) && structural_preserve_ok(expr))) {
+        return const_text(cv->integer());
+      }
     }
   }
 
@@ -232,6 +331,9 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
   // Parameters / enum values / genvars should have folded in tier 1; if eval
   // failed (e.g. inside an uninstantiated context) report cleanly.
   if (sym.kind == slang::ast::SymbolKind::Parameter) {
+    if (auto pref = package_symbol_ref(sym)) {
+      return *pref;  // provenance: direct read_symbol callers bypass lower_rvalue's hook
+    }
     const auto& cv = sym.as<slang::ast::ParameterSymbol>().getValue(range);
     if (cv.isInteger()) {
       return const_text(cv.integer());
@@ -240,6 +342,9 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
     return "0";
   }
   if (sym.kind == slang::ast::SymbolKind::EnumValue) {
+    if (auto pref = package_symbol_ref(sym)) {
+      return *pref;
+    }
     const auto& cv = sym.as<slang::ast::EnumValueSymbol>().getValue(range);
     if (cv.isInteger()) {
       return const_text(cv.integer());
@@ -759,15 +864,23 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
   // (selected width in bits, low element index normalized to 0-based)
   int                    sel_bits = ti.bits;
   std::optional<int64_t> const_low;
-  std::string            dyn_low;  // 0-based element index expression
+  std::string            dyn_low;       // 0-based element index expression
+  bool                   comptime_dyn = false;  // dyn_low is a COMPTIME pkg-param expression
 
   auto normalize = [&](const slang::ast::Expression& idx, int64_t width_down,
                        int64_t width_up) -> std::pair<std::optional<int64_t>, std::string> {
     // bottom element of the selection, 0-based from the LSB end
     if (auto ci = try_eval_int(idx)) {
-      int64_t bottom = range.isDescending() ? (*ci - range.lower() - (width_down - 1))
-                                              : (range.upper() - *ci - (width_up - 1));
-      return {bottom, {}};
+      // Provenance: a comptime index NAMING a package param (`sigs[PKG_BIT]`,
+      // `x[PKG_SZ-1]`) keeps the name — emit the bias arithmetic symbolically
+      // via the dynamic route; comptime_dyn skips its runtime wrap-guards (the
+      // amount folds back to this very constant on recompile).
+      if (!(options_.preserve_param_provenance && contains_package_param(idx))) {
+        int64_t bottom = range.isDescending() ? (*ci - range.lower() - (width_down - 1))
+                                                : (range.upper() - *ci - (width_up - 1));
+        return {bottom, {}};
+      }
+      comptime_dyn = true;
     }
     auto v = to_int_value(lower_rvalue(idx));  // selector value (settled rules apply)
     if (range.isDescending()) {
@@ -821,6 +934,13 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
   std::string shamt = dyn_low;
   if (stride != 1) {
     shamt = builder_.create_mult_stmts(shamt, std::to_string(stride));
+  }
+  if (comptime_dyn) {
+    // COMPTIME symbolic amount (provenance): the value is a known in-range
+    // constant on recompile, so the runtime wrap-guard widening below is
+    // unnecessary — a plain shift+mask keeps the emitted text readable.
+    auto r = trunc_to(builder_.create_sra_stmts(p, shamt), sel_bits);
+    return ti.is_signed ? builder_.create_sext_stmts(r, std::to_string(ti.bits - 1)) : r;
   }
   const int bias = sel_bits;
   // Resize the shift amount so `+ bias` cannot wrap. `dyn_low` carries only the

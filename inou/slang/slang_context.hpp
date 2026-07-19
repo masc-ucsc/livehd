@@ -367,6 +367,20 @@ private:
   // value) for the package-unit emission + the per-module package import;
   // nullopt for anything that is not an integral package-parameter reference.
   std::optional<std::string> package_param_ref(const slang::ast::Expression& expr);
+  // Symbol-level core of package_param_ref: an integral package Parameter OR
+  // package enum member becomes `pkg.NAME` (recorded for the package unit).
+  // Also the defensive hook for read_symbol's Parameter/EnumValue fallbacks.
+  std::optional<std::string> package_symbol_ref(const slang::ast::Symbol& sym);
+  // The package a symbol is (transitively) declared in, or nullptr.
+  static const slang::ast::PackageSymbol* owning_package(const slang::ast::Symbol& sym);
+  // Any leaf of `expr` is a package Parameter / package enum member.
+  static bool contains_package_param(const slang::ast::Expression& expr);
+  // The structural lowering of `expr` can preserve pkg.PARAM leaves: every
+  // sub-lowering it dispatches to is supported (no unsupported-op hard error a
+  // tier-1 fold would otherwise have absorbed). Kinds outside this set keep the
+  // tier-1 fold even when they contain a package param ($clog2/$bits system
+  // calls, non-constant-capable ops like `**`, assignment patterns, …).
+  static bool structural_preserve_ok(const slang::ast::Expression& expr);
   // pkg name → (param name → pyrope value text). Accumulated across ALL modules;
   // one `pub comptime const` package unit is emitted per pkg at the end.
   std::map<std::string, std::map<std::string, std::string>> referenced_pkg_params_;

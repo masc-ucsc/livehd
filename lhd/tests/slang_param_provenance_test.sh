@@ -49,9 +49,8 @@ module tmod(input [3:0] s, input [9:0] d, output logic [9:0] r,
 endmodule
 EOF
 
-# ── (1) provenance emission, default constprop ────────────────────────────────
+# ── (1) provenance emission is the DEFAULT for a pyrope-emitting compile ──────
 $LHD compile "$W/tpkg.sv" "$W/tmod.sv" --top tmod --emit-dir pyrope:"$W/p1" --workdir "$W/w1" -q \
-  --set compile.slang.preserve_param_provenance=true \
   || fail "provenance emission (constprop=1) did not compile"
 grep -q 'pub comptime const SEL_A = 3' "$W/p1/tpkg.prp" || fail "constprop=1 pkg unit lacks SEL_A=3: $(cat "$W/p1/tpkg.prp")"
 grep -q 'pub comptime const NEG = -12' "$W/p1/tpkg.prp" || fail "constprop=1 pkg unit lacks NEG=-12: $(cat "$W/p1/tpkg.prp")"
@@ -60,15 +59,19 @@ echo "PASS: provenance emission carries symbolic refs + real package values (con
 
 # ── (2) same with constprop=0 (used to emit `= 0` for every const) ────────────
 $LHD compile "$W/tpkg.sv" "$W/tmod.sv" --top tmod --emit-dir pyrope:"$W/p0" --workdir "$W/w0" -q \
-  --set compile.slang.preserve_param_provenance=true --set compile.upass.constprop=0 \
+  --set compile.upass.constprop=0 \
   || fail "provenance emission (constprop=0) did not compile"
 grep -q 'pub comptime const SEL_A = 3' "$W/p0/tpkg.prp" || fail "constprop=0 pkg unit lacks SEL_A=3: $(cat "$W/p0/tpkg.prp")"
 grep -q 'pub comptime const NEG = -12' "$W/p0/tpkg.prp" || fail "constprop=0 pkg unit lacks NEG=-12: $(cat "$W/p0/tpkg.prp")"
 echo "PASS: constprop=0 package unit still carries real values"
 
-# ── (3) value-changing narrowing cast around the ref must NOT stay symbolic ───
-grep -q 'tpkg\.BIG' "$W/p1/tmod.prp" && fail "4'(BIG) kept symbolic tpkg.BIG (==300, miscompile): $(cat "$W/p1/tmod.prp")"
-echo "PASS: value-changing narrowing cast folds (peel guard)"
+# ── (3) value-changing narrowing cast must keep its truncation ────────────────
+# 4'(BIG) with BIG=300 == 12: a BARE symbolic `tpkg.BIG` (no slice/mask applied)
+# would read back as 300 — the peel-guard miscompile. The structural Conversion
+# path may keep the symbol WITH the truncation (tpkg.BIG#[0..=3]), which is fine
+# (and LEC-checked below).
+grep -E 'tpkg\.BIG($|[^#.])' "$W/p1/tmod.prp" && fail "4'(BIG) kept a BARE symbolic tpkg.BIG (==300, miscompile): $(cat "$W/p1/tmod.prp")"
+echo "PASS: value-changing narrowing cast keeps its truncation (peel guard)"
 
 # ── (4) recompile + LEC-exact vs the source SV ────────────────────────────────
 $LHD compile "$W/p1"/*.prp --top tmod.tmod --workdir "$W/rc" -q \
@@ -81,11 +84,22 @@ $LHD lec --impl pyrope:"$W/p1"/ --impl-top tmod.tmod --ref lg:"$W/ref_lg" --ref-
 grep -q '"status":"pass"' "$W/lec.json" || fail "lec not pass: $(cat "$W/lec.json")"
 echo "PASS: provenance Pyrope recompiles and is LEC-proven vs the source SV"
 
-# ── (5) provenance OFF is byte-stable: no pkg refs, no package unit ───────────
+# ── (5) explicit =false is the debug escape: folds, no package unit ───────────
 $LHD compile "$W/tpkg.sv" "$W/tmod.sv" --top tmod --emit-dir pyrope:"$W/poff" --workdir "$W/woff" -q \
+  --set compile.slang.preserve_param_provenance=false \
   || fail "provenance-OFF emission did not compile"
 [ -f "$W/poff/tpkg.prp" ] && fail "provenance OFF still emitted a package unit"
 grep -q 'tpkg\.' "$W/poff/tmod.prp" && fail "provenance OFF emitted pkg refs: $(cat "$W/poff/tmod.prp")"
-echo "PASS: provenance OFF unchanged (folds, no package unit)"
+echo "PASS: explicit provenance OFF folds (debug escape, no package unit)"
+
+# ── (6) explicit =true + a graphs flow is refused (would nil-wire the refs) ───
+$LHD compile "$W/tpkg.sv" "$W/tmod.sv" --top tmod --emit-dir verilog:"$W/vg" --workdir "$W/wg" -q \
+  --set compile.slang.preserve_param_provenance=true >"$W/g.log" 2>&1 \
+  && fail "provenance=true with a verilog emit was not refused"
+grep -q "pyrope-only" "$W/g.log" || fail "graphs-flow refusal lacks the directing message: $(cat "$W/g.log")"
+# and the DEFAULT for a graphs flow keeps folding (no symbolic refs to nil-wire)
+$LHD compile "$W/tpkg.sv" "$W/tmod.sv" --top tmod --emit-dir verilog:"$W/vd" --workdir "$W/wd" -q \
+  || fail "default graphs flow did not compile"
+echo "PASS: graphs flow folds by default; explicit =true there is refused"
 
 echo "ALL PASS"

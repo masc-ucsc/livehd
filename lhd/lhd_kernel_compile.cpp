@@ -538,6 +538,9 @@ std::string verilog_frontend(Options& opts, Result& res, Eprp_var& var) {
   return lib_path;
 }
 
+bool emits_need_graphs(const Options& opts);  // fwd (defined below)
+bool force_diag_graphs(const Options& opts);  // fwd (defined below)
+
 // --reader slang: the direct inou.slang SV -> LNAST front-end. From here the
 // design is LNAST units, so the rest of the flow is the pyrope one (lnastfmt,
 // upass, emit-gated tolg). The yosys-* readers above elaborate to LGraphs.
@@ -573,7 +576,26 @@ void slang_parse(Options& opts, Result& res, Eprp_var& var) {
     labels["slang_flags"] = joined;
   }
 
-  merge_sets(opts, "compile.slang", labels);  // e.g. --set compile.slang.preserve_param_provenance=true
+  merge_sets(opts, "compile.slang", labels);  // e.g. --set compile.slang.preserve_param_provenance=false
+  // Named-constant provenance (symbolic pkg.PARAM refs + pub-comptime-const
+  // package units) is ON BY DEFAULT for a pyrope-emitting, no-graphs compile —
+  // every pyrope generation runs with the same behavior; the flag remains only
+  // as a debug escape (=false folds like before). A graphs flow (tolg) cannot
+  // resolve the symbolic refs yet (they would silently nil-wire), so it keeps
+  // folding, and an EXPLICIT =true combined with a graphs flow is refused.
+  {
+    const bool needs_graphs = emits_need_graphs(opts) || force_diag_graphs(opts);
+    auto       pit          = labels.find("preserve_param_provenance");
+    if (pit == labels.end()) {
+      if (!needs_graphs && find_slot(opts.emit_dirs, "pyrope") != nullptr) {
+        labels["preserve_param_provenance"] = "true";
+      }
+    } else if (needs_graphs && (pit->second == "1" || pit->second == "true")) {
+      throw Lhd_error{"io", "compile.slang.preserve_param_provenance=true requires a pyrope-only emission",
+                      "a graphs flow (lg/verilog/sim emit) folds package params; drop the flag or emit pyrope in a "
+                      "separate invocation"};
+    }
+  }
   run_step("inou.slang", var, labels, opts, res);
   if (lnastfmt_enabled(opts)) {
     run_step("pass.lnastfmt", var, {}, opts, res);
