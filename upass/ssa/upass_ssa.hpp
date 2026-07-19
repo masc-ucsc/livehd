@@ -39,7 +39,9 @@ public:
   //   - lnast->io_meta() is populated (if the LNAST had the func_extract shape)
   //   - lnast's tree body is the SSA-normalised form (io+tuple_add I/O replaced
   //     by flat stmts with the body only, multi-assigned user vars renamed)
-  static void run(const std::shared_ptr<Lnast>& lnast);
+  // all_units: every unit in the invocation (for resolving an IMPORTED scalar
+  // alias port type `cmd:pkg.P_T` off the exporter's pub-type face); optional.
+  static void run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::shared_ptr<Lnast>>* all_units_ = nullptr);
 
 private:
   // Recursively copy the subtree rooted at src_nid from src into dst,

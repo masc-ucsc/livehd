@@ -3,6 +3,7 @@
 
 #include "upass_ssa.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <format>
 #include <functional>
@@ -179,7 +180,7 @@ void uPass_ssa::copy_with_rename(
 }
 
 // ── run ──────────────────────────────────────────────────────────────────────
-void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast) {
+void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast, const std::vector<std::shared_ptr<Lnast>> *all_units_) {
   auto root = lnast->get_root();
 
   // ── Demote stale SSA versions from a prior run ──────────────────────────
@@ -413,6 +414,41 @@ void uPass_ssa::run(const std::shared_ptr<Lnast> &lnast) {
       type_name = std::string(lnast->get_name(type_nid));
     }
     auto ti = type_info_from(lnast, type_nid);
+    // An IMPORTED scalar alias port type (`cmd:pkg.VPU_FCMD_SZ_T`) resolves
+    // its range off the exporting unit's pub-type face — without it the port
+    // harvests width-less and the lowering breaks.
+    if (ti.kind == Io_kind::none && !type_name.empty() && all_units_ != nullptr) {
+      if (const auto dot = type_name.rfind('.'); dot != std::string::npos) {
+        const std::string unit = type_name.substr(0, dot);
+        const std::string mem  = type_name.substr(dot + 1);
+        for (const auto &ex : *all_units_) {
+          if (ex == nullptr || ex->get_top_module_name() != unit || !ex->get_lambda_kind().empty()) {
+            continue;
+          }
+          std::string max_txt;
+          std::string min_txt;
+          if (ex->pub_type_face(mem, max_txt, min_txt)) {
+            auto max_v = Dlop::from_pyrope(max_txt);
+            auto min_v = Dlop::from_pyrope(min_txt);
+            if (max_v && min_v && max_v->is_integer() && min_v->is_integer()) {
+              ti.kind      = Io_kind::integer;
+              ti.is_signed = min_v->is_negative();
+              if (!min_v->is_negative()) {
+                ti.bits = max_v->is_known_zero() ? 0 : static_cast<int32_t>(max_v->get_bits() - 1);
+              } else {
+                ti.bits = static_cast<int32_t>(std::max<int64_t>(max_v->get_bits(), min_v->get_bits()));
+              }
+              if (max_v->is_just_i64() && min_v->is_just_i64()) {
+                ti.has_range = true;
+                ti.range_min = min_v->to_just_i64();
+                ti.range_max = max_v->to_just_i64();
+              }
+            }
+          }
+          break;
+        }
+      }
+    }
     out.push_back({full, ti.bits, ti.is_signed, is_ref, is_vararg, ti.kind,
                    smin, smax, std::move(type_name)});
     out.back().has_range = ti.has_range;

@@ -13,11 +13,13 @@
 #include <vector>
 
 #include "slang/ast/ASTVisitor.h"
+#include "slang/ast/Lookup.h"
 #include "slang/ast/Statement.h"
 #include "slang/ast/TimingControl.h"
 #include "slang/ast/expressions/AssertionExpr.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/ast/types/AllTypes.h"
+#include "slang/syntax/AllSyntax.h"
 #include "slang_context.hpp"
 
 using slang::ast::ExpressionKind;
@@ -679,6 +681,13 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
         io_bits   = ti.bits;
         io_signed = ti.is_signed;
       }
+      // Provenance: a `[P-1:0]` dim naming a package param mints an imported
+      // scalar alias (`pub type P_T = uN` in the package unit) the pyrope
+      // re-emission prints as the port's type.
+      std::optional<std::string> dim_alias;
+      if (!is_flat_array) {
+        dim_alias = port_dim_alias(port, io_bits, io_signed);
+      }
 
       // The inside-the-module symbol the body references.
       const auto* internal = port.internalSymbol;
@@ -720,6 +729,9 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
       ln.add_child(entry, Lnast_node::create_ref(var_name));
       ln.add_child(entry, Lnast_node::create_const("nil"));  // no default value
       emit_prim_type_int(entry, io_bits, io_signed);
+      if (dim_alias) {
+        ln.add_io_type_name(var_name, *dim_alias);
+      }
       if (is_out) {
         // `@[]` landing-cycle opt-out: the form foreign Verilog modules, which
         // carry no timing markings, ingest as.
@@ -740,6 +752,74 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
                        std::string("port '") + std::string(p->name) + "' has an unsupported kind");
     }
   }
+}
+
+std::optional<std::string> Slang_context::port_dim_alias(const slang::ast::PortSymbol& port, int bits, bool is_signed) {
+  if (!options_.preserve_param_provenance || is_signed || bits <= 1 || port.internalSymbol == nullptr) {
+    return std::nullopt;  // signed dims would need an sN alias face — rare, deferred
+  }
+  const auto* vs = port.internalSymbol->as_if<slang::ast::ValueSymbol>();
+  if (vs == nullptr) {
+    return std::nullopt;
+  }
+  const auto* tsx = vs->getDeclaredType() != nullptr ? vs->getDeclaredType()->getTypeSyntax() : nullptr;
+  if (tsx == nullptr) {
+    return std::nullopt;
+  }
+  // `logic [P-1:0] x` is an IntegerTypeSyntax; a bare `input [P-1:0] x` is an
+  // ImplicitTypeSyntax — both carry the packed dimensions.
+  const slang::syntax::SyntaxNode* dim_node = nullptr;
+  if (const auto* its = tsx->as_if<slang::syntax::IntegerTypeSyntax>(); its != nullptr && its->dimensions.size() == 1) {
+    dim_node = its->dimensions[0];
+  } else if (const auto* imp = tsx->as_if<slang::syntax::ImplicitTypeSyntax>();
+             imp != nullptr && imp->dimensions.size() == 1) {
+    dim_node = imp->dimensions[0];
+  }
+  if (dim_node == nullptr) {
+    return std::nullopt;
+  }
+  std::string dim;
+  for (const char c : dim_node->toString()) {  // source text, e.g. "[VPU_FCMD_SZ-1:0]"
+    if (!std::isspace(static_cast<unsigned char>(c))) {
+      dim += c;
+    }
+  }
+  // `[<ident>-1:0]` — anything else (expressions, non-zero lsb) keeps the uN
+  if (dim.size() < 7 || dim.front() != '[' || !dim.ends_with("-1:0]")) {
+    return std::nullopt;
+  }
+  const std::string ident = dim.substr(1, dim.size() - 6);
+  if (ident.empty() || std::isdigit(static_cast<unsigned char>(ident.front()))
+      || !std::all_of(ident.begin(), ident.end(),
+                      [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; })) {
+    return std::nullopt;
+  }
+  const auto* scope = port.internalSymbol->getParentScope();
+  if (scope == nullptr) {
+    return std::nullopt;
+  }
+  const auto* psym = slang::ast::Lookup::unqualified(*scope, ident);
+  if (psym == nullptr || psym->kind != slang::ast::SymbolKind::Parameter) {
+    return std::nullopt;
+  }
+  const auto* pkg = owning_package(*psym);
+  const auto* cv  = package_const_value(*psym);
+  if (pkg == nullptr || cv == nullptr || !cv->isInteger()) {
+    return std::nullopt;
+  }
+  auto v = cv->integer().as<int64_t>();
+  if (!v || *v != bits) {
+    return std::nullopt;  // the dim doesn't (or no longer) equal the port width — fold
+  }
+  std::string pkg_name(pkg->name);
+  std::string alias = ident + "_T";
+  referenced_pkg_types_[pkg_name][alias] = {absl::StrCat(mask_text(bits), "|0"), absl::StrCat("u", bits)};
+  // the driving param itself also exports (`pub comptime const SEL_W = 4`
+  // next to `pub type SEL_W_T = u4`) — width provenance reads best in pairs
+  referenced_pkg_params_[pkg_name][ident] = const_text(cv->integer());
+  referenced_pkg_syms_[pkg_name]          = pkg;
+  builder_.lnast->add_imported_package(pkg_name);
+  return absl::StrCat(pkg_name, ".", alias);
 }
 
 // Pass 1 of the module conversion: classify processes and decide which

@@ -440,7 +440,7 @@ void Pass_upass::work(Eprp_var& var) {
         continue;  // io_meta restored from the ln: manifest; body already SSA'd
       }
       TRACE_EVENT("pass", "upass.ssa", "unit", std::string(ln->get_top_module_name()));
-      uPass_ssa::run(ln);
+      uPass_ssa::run(ln, &var.lnasts);
     }
   }
 
@@ -550,7 +550,7 @@ void Pass_upass::work(Eprp_var& var) {
         continue;
       }
       if (up.run_ssa) {
-        uPass_ssa::run(new_ln);
+        uPass_ssa::run(new_ln, &var.lnasts);
       }
       var.add(new_ln);
     }

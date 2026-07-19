@@ -24,6 +24,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 cat >"$W/tpkg.sv" <<'EOF'
 package tpkg;
+  localparam SEL_W = 4;
   localparam SEL_A = 3;
   localparam SEL_B = 12;
   localparam logic signed [9:0] NEG = -12;
@@ -34,7 +35,7 @@ EOF
 
 cat >"$W/tmod.sv" <<'EOF'
 import tpkg::*;
-module tmod(input [3:0] s, input [9:0] d, output logic [9:0] r,
+module tmod(input [SEL_W-1:0] s, input [9:0] d, output logic [9:0] r,
             output logic signed [9:0] rs, output logic hit);
   // bare refs in a mux target chain: `r` defaults to a pkg-valued net, then a
   // conditional override — the shape that tripped the const-rebind on recompile
@@ -61,8 +62,11 @@ grep -q 'tpkg\.SEL_A' "$W/p1/tmod.prp" || fail "module body folded tpkg.SEL_A: $
 # defining EXPRESSION preserved (not the folded 9), in SOURCE order (SEL_A first)
 grep -qE 'pub comptime const DIFF = \(SEL_B - SEL_A\)' "$W/p1/tpkg.prp" \
   || fail "pkg unit folded DIFF's defining expression: $(cat "$W/p1/tpkg.prp")"
-head -1 "$W/p1/tpkg.prp" | grep -q 'SEL_A' || fail "pkg unit not in source order: $(head -3 "$W/p1/tpkg.prp")"
-echo "PASS: provenance emission carries symbolic refs, typed consts, defining exprs, source order"
+head -1 "$W/p1/tpkg.prp" | grep -q 'SEL_W' || fail "pkg unit not in source order: $(head -3 "$W/p1/tpkg.prp")"
+# a `[SEL_W-1:0]` port dim mints an exported scalar type alias + a typed port
+grep -q 'pub type SEL_W_T = u4' "$W/p1/tpkg.prp" || fail "pkg unit lacks the SEL_W_T alias: $(cat "$W/p1/tpkg.prp")"
+grep -q 's:tpkg\.SEL_W_T' "$W/p1/tmod.prp" || fail "port did not use the imported alias: $(head -3 "$W/p1/tmod.prp")"
+echo "PASS: provenance emission carries symbolic refs, typed consts, defining exprs, source order, dim aliases"
 
 # ── (2) same with constprop=0 (used to emit `= 0` for every const) ────────────
 $LHD compile "$W/tpkg.sv" "$W/tmod.sv" --top tmod --emit-dir pyrope:"$W/p0" --workdir "$W/w0" -q \

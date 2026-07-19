@@ -532,6 +532,17 @@ void Lnast_prp_writer::write_top() {
     const auto& exprs = lnast->get_package_const_exprs();
     const auto& types = lnast->get_package_const_types();
     for (const auto& p : lnast->get_pub_list()) {
+      if (p.kind == "type") {
+        // scalar alias export: `pub type VPU_FCMD_SZ_T = u7`
+        if (auto tit = types.find(p.name); tit != types.end()) {
+          print("pub type ");
+          print(p.name);
+          print(" = ");
+          print(tit->second);
+          print("\n");
+        }
+        continue;
+      }
       print("pub comptime const ");
       print(p.name);
       if (auto tit = types.find(p.name); tit != types.end()) {
@@ -1261,7 +1272,12 @@ void Lnast_prp_writer::emit_port_group(Lnast_nid tup_nid, bool is_output, bool i
       auto pname = strip_prefix(lnast->get_name(name_nid));
       declared_.insert(std::string(pname));  // ports are pre-declared; body writes skip `mut`
       print(pname);
-      if (!type_nid.is_invalid()) {
+      // A port whose SV dim named a package param prints the imported alias
+      // (`cmd:vpu_defs_pkg.VPU_FCMD_SZ_T`) instead of the concretized `u7`.
+      if (auto ait = lnast->get_io_type_names().find(std::string(pname)); ait != lnast->get_io_type_names().end()) {
+        print(":");
+        print(ait->second);
+      } else if (!type_nid.is_invalid()) {
         auto t = render_type_at(type_nid);
         if (!t.empty()) {
           print(":");

@@ -285,6 +285,7 @@ private:
   bool                                             is_package_unit_ = false;  // pub-comptime-const namespace unit
   absl::flat_hash_map<std::string, std::string>    package_const_exprs_;  // const name → defining-expr pyrope text
   absl::flat_hash_map<std::string, std::string>    package_const_types_;  // const name → type text (u5/s10)
+  absl::flat_hash_map<std::string, std::string>    io_type_names_;        // port name → imported alias text
   // Generic type parameters (`<T, U>`) recorded by func_extract from
   // the func_def generics child (a seam: the per-`T` body substitution lands
   // in a follow-up goal; this only preserves the names so a template carrying
@@ -580,6 +581,74 @@ public:
   void set_package_const_types(absl::flat_hash_map<std::string, std::string> m) { package_const_types_ = std::move(m); }
   const absl::flat_hash_map<std::string, std::string>& get_package_const_types() const noexcept {
     return package_const_types_;
+  }
+
+  // IO ports whose SV dim named a package param (`input [VPU_FCMD_SZ-1:0] cmd`):
+  // port name → the imported alias text (`vpu_defs_pkg.VPU_FCMD_SZ_T`) the
+  // pyrope re-emission prints instead of the concretized `u7` (in-memory only;
+  // the LNAST type slot keeps prim_type_int so every other consumer is
+  // unchanged).
+  void add_io_type_name(std::string_view port, std::string_view alias) {
+    io_type_names_.emplace(std::string(port), std::string(alias));
+  }
+  const absl::flat_hash_map<std::string, std::string>& get_io_type_names() const noexcept { return io_type_names_; }
+
+  // Scalar `pub type` alias face of THIS unit: the "MAX|MIN" range texts for
+  // `member`, from pub_values ("MAX|MIN", stamped by the constprop harvest or
+  // the slang reader) or — before the exporter's harvest ran (unit order is
+  // arbitrary) — from its `declare(member, prim_type_int(max,min), 'type')`
+  // statement. False when `member` is not a scalar type export.
+  bool pub_type_face(std::string_view member, std::string& max_txt, std::string& min_txt) const {
+    bool is_type = false;
+    for (const auto& p : get_pub_list()) {
+      if (p.name == member) {
+        is_type = p.kind == "type";
+        break;
+      }
+    }
+    if (!is_type) {
+      return false;
+    }
+    for (const auto& [path, face] : pub_values_) {
+      if (path != member) {
+        continue;
+      }
+      const auto bar = face.find('|');
+      if (bar == std::string::npos) {
+        return false;
+      }
+      max_txt = face.substr(0, bar);
+      min_txt = face.substr(bar + 1);
+      return true;
+    }
+    auto root = get_root();
+    for (auto c = get_child(root); !c.is_invalid(); c = get_sibling_next(c)) {
+      if (get_type(c) != Lnast_ntype::Lnast_ntype_stmts) {
+        continue;
+      }
+      for (auto s = get_child(c); !s.is_invalid(); s = get_sibling_next(s)) {
+        if (!Lnast_ntype::is_declare(get_type(s))) {
+          continue;
+        }
+        auto n0 = get_child(s);
+        if (n0.is_invalid() || !Lnast_ntype::is_ref(get_type(n0)) || get_name(n0) != member) {
+          continue;
+        }
+        auto t0 = get_sibling_next(n0);
+        if (t0.is_invalid() || get_type(t0) != Lnast_ntype::Lnast_ntype_prim_type_int) {
+          return false;
+        }
+        auto m0 = get_child(t0);
+        auto m1 = m0.is_invalid() ? m0 : get_sibling_next(m0);
+        if (m1.is_invalid()) {
+          return false;
+        }
+        max_txt = std::string(get_name(m0));
+        min_txt = std::string(get_name(m1));
+        return true;
+      }
+    }
+    return false;
   }
 
   // ── DCE mark-only mode (upass runner, lg-only flows) ──────────────────────

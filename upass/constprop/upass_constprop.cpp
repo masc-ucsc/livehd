@@ -1901,6 +1901,28 @@ void uPass_constprop::harvest_pub_values() {
 
   std::vector<std::pair<std::string, std::string>> leaves;
   for (const auto& p : ln->get_pub_list()) {
+    if (p.kind == "type") {
+      // A SCALAR `pub type` alias exports its declared range as "MAX|MIN" so
+      // an importer's `x:pkg.X` declare-borrow gets the width (call_resolver
+      // build_namespace re-ranges the bound entry). Non-scalar aliases export
+      // nothing foldable (the namespace keeps the provenance string).
+      if (st().has_bundle(p.name)) {
+        if (const auto b = st().get_bundle(p.name); b && !b->has_named_top()) {
+          const auto& te = b->get_entry(bundle_path::of_string("0"));
+          if (!te.decl_max.is_invalid() || !te.decl_min.is_invalid()) {
+            leaves.emplace_back(p.name, absl::StrCat(te.decl_max.is_invalid() ? "0" : std::string(te.decl_max.to_pyrope()),
+                                                     "|",
+                                                     te.decl_min.is_invalid() ? "0" : std::string(te.decl_min.to_pyrope())));
+          } else if (getenv("LHD_DBG_BORROW") != nullptr) {
+            fprintf(stderr, "HARVEST-TYPE %s: no decl range\n", p.name.c_str());
+          }
+          if (getenv("LHD_DBG_BORROW") != nullptr) {
+            fprintf(stderr, "HARVEST-TYPE %s considered\n", p.name.c_str());
+          }
+        }
+      }
+      continue;
+    }
     if (p.kind != "value") {
       continue;  // lambda exports carry a tree url; nothing to fold
     }

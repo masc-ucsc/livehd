@@ -965,11 +965,98 @@ void uPass_runner::emit_ref_or_folded(std::string_view name) {
   }
 }
 
+bool uPass_runner::imported_alias_range(std::string_view type_name, Dlop& max_out, Dlop& min_out) const {
+  // An IMPORTED scalar alias (`x:pkg.PType`): a lambda unit carries no import
+  // statement, so the namespace bundle is not in ITS symbol table — resolve the
+  // dotted name straight off the exporting unit's pub list (the same registry
+  // the value dot-selector uses) and take the "MAX|MIN" face the exporter's
+  // harvest (or the slang reader) stamped into pub_values.
+  if (registry_ == nullptr) {
+    return false;
+  }
+  const auto dot = type_name.rfind('.');
+  if (dot == std::string_view::npos) {
+    return false;
+  }
+  const std::string unit(type_name.substr(0, dot));
+  const std::string member(type_name.substr(dot + 1));
+  auto uit = reg().function_registry.find(unit);
+  if (uit == reg().function_registry.end() || !uit->second->get_lambda_kind().empty()) {
+    return false;
+  }
+  std::string max_txt;
+  std::string min_txt;
+  if (!uit->second->pub_type_face(member, max_txt, min_txt)) {
+    return false;
+  }
+  auto mx = Dlop::from_pyrope(max_txt);
+  auto mn = Dlop::from_pyrope(min_txt);
+  if (mx && mn) {
+    max_out = *mx;
+    min_out = *mn;
+    return true;
+  }
+  return false;
+}
+
+void uPass_runner::emit_io_with_type_slots() {
+  // io → tuple_add* → store(ref, init, [type], [stages]): a REF type slot (an
+  // imported scalar alias `cmd:pkg.P_T`) concretizes to prim_type_int exactly
+  // like a declare's — tolg reads port widths from the LNAST slot, and a raw
+  // ref there breaks the port lowering.
+  emit_push(lm->current_type());
+  if (lm->has_child()) {
+    lm->move_to_child();
+    do {
+      if (lm->get_raw_ntype() != Lnast_ntype::Lnast_ntype_tuple_add || !lm->has_child()) {
+        emit_subtree_verbatim();
+        continue;
+      }
+      emit_push(lm->current_type());
+      lm->move_to_child();
+      do {
+        if (!Lnast_ntype::is_store(lm->get_raw_ntype()) || !lm->has_child()) {
+          emit_subtree_verbatim();
+          continue;
+        }
+        emit_push(lm->current_type());
+        lm->move_to_child();
+        int cidx = 0;
+        do {
+          if (cidx >= 2 && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref
+              && emit_scalar_named_type_slot(lm->current_text())) {
+            // concretized imported alias — nothing else to emit for this child
+          } else {
+            emit_subtree_verbatim();
+          }
+          ++cidx;
+        } while (lm->move_to_sibling());
+        lm->move_to_parent();
+        emit_pop();
+      } while (lm->move_to_sibling());
+      lm->move_to_parent();
+      emit_pop();
+    } while (lm->move_to_sibling());
+    lm->move_to_parent();
+  }
+  emit_pop();
+}
+
 bool uPass_runner::emit_scalar_named_type_slot(std::string_view type_name) {
   if (!materialize_ || type_name.empty()) {
     return false;
   }
   auto tb = symbol_table_.get_bundle(type_name);
+  if (!tb) {
+    Dlop imax, imin;
+    if (imported_alias_range(type_name, imax, imin)) {
+      emit_push(Lnast_ntype::create_prim_type_int());
+      emit_leaf(Lnast_node::create_const(std::string(imax.to_pyrope())));
+      emit_leaf(Lnast_node::create_const(std::string(imin.to_pyrope())));
+      emit_pop();
+      return true;
+    }
+  }
   if (!tb || tb->has_named_top() || tb->unnamed_top_count() > 1 || tb->get_value_kind() == upass::Kind::tuple) {
     return false;  // unresolved / a tuple-or-struct named type — keep the ref verbatim
   }
@@ -995,6 +1082,10 @@ bool uPass_runner::emit_scalar_named_type_slot(std::string_view type_name) {
 void uPass_runner::emit_op_with_fold(bool fold_all) {
   if (!materialize_) {
     return;  // pure emission (dispatch happened in the caller); cursor untouched
+  }
+  if (Lnast_ntype::is_io(lm->get_raw_ntype())) {
+    emit_io_with_type_slots();  // port type slots need the named-alias concretization
+    return;
   }
   const auto op_ntype = lm->current_type();
   emit_push(op_ntype);  // carries the SourceId (general carry)
@@ -7752,8 +7843,19 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
       // by constprop's named-type default path instead — its "0" entry has no
       // decl range, so this leaves decl_max/min unset and falls through.
       if (kind == upass::Kind::unknown && decl_max.is_invalid() && decl_min.is_invalid()) {
+        if (!symbol_table_.has_bundle(type_name)) {
+          // IMPORTED alias (`x:pkg.PType`) — resolve off the exporter's pub
+          // list/values instead (the lambda unit has no import statement).
+          Dlop imax, imin;
+          if (imported_alias_range(type_name, imax, imin)) {
+            decl_max = imax;
+            decl_min = imin;
+            kind     = upass::Kind::integer;
+          }
+        }
         if (auto tb = symbol_table_.get_bundle(type_name);
-            tb && !tb->has_named_top() && tb->unnamed_top_count() <= 1 && tb->get_value_kind() != upass::Kind::tuple) {
+            kind == upass::Kind::unknown
+            && tb && !tb->has_named_top() && tb->unnamed_top_count() <= 1 && tb->get_value_kind() != upass::Kind::tuple) {
           // A genuinely SCALAR named type (not a tuple/struct — those carry
           // fields and are materialized by constprop's named-type default path;
           // borrowing their leaked "0"-entry kind would mis-type the var as a

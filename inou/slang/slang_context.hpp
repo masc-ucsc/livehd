@@ -400,6 +400,14 @@ private:
   // pkg name → its PackageSymbol (for source-order member iteration + the
   // defining-expression closure at emit_package_units time).
   std::map<std::string, const slang::ast::PackageSymbol*> referenced_pkg_syms_;
+  // pkg name → (alias name → {face "MAX|MIN", print text "uN"}): scalar type
+  // aliases minted from param-named port dims (`[VPU_FCMD_SZ-1:0]` →
+  // `pub type VPU_FCMD_SZ_T = u7`), exported by the package unit.
+  std::map<std::string, std::map<std::string, std::pair<std::string, std::string>>> referenced_pkg_types_;
+  // Provenance: a port whose SV packed dim is `[P-1:0]` with P a package param
+  // of value == the port width mints/returns the imported alias text
+  // (`pkg.P_T`); nullopt when the dim carries no (recoverable) param name.
+  std::optional<std::string> port_dim_alias(const slang::ast::PortSymbol& port, int bits, bool is_signed);
   void emit_package_units();  // one namespace .prp per referenced package
   std::string lower_select(const slang::ast::Expression& expr);  // Element/Range select rvalue
   std::string lower_concat(const slang::ast::ConcatenationExpression& expr);

@@ -2,6 +2,8 @@
 // uPass_constprop::collect_call_actuals (cursor sugar expanded to the
 // Lnast_manager calls).
 
+#include <set>
+
 #include "call_resolver.hpp"
 
 #include <format>
@@ -251,12 +253,50 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
                              const std::vector<std::pair<std::string, std::string>>& values,
                              const std::vector<Lnast_pub_entry>&                     pubs) {
     auto b = std::make_shared<Bundle>(dst);
+    // A scalar `pub type` alias rides pub_values as a "MAX|MIN" range face —
+    // NOT a value; it binds below as a RANGED entry so an importer's
+    // `x:pkg.X` declare-borrow (upass_runner bake_decl_pre_step) enforces the
+    // alias width.
+    std::set<std::string, std::less<>> type_names;
+    for (const auto& p : pubs) {
+      if (p.kind == "type") {
+        type_names.insert(p.name);
+      }
+    }
     for (const auto& [path, val_text] : values) {
+      if (type_names.count(path) != 0u) {
+        continue;
+      }
       b->set(bundle_path::of_string(path), *Dlop::from_pyrope(val_text));
     }
     for (const auto& p : pubs) {
       if (p.kind == "value") {
         continue;
+      }
+      if (p.kind == "type") {
+        std::string face;
+        for (const auto& [path, val_text] : values) {
+          if (path == p.name) {
+            face = val_text;
+            break;
+          }
+        }
+        if (auto bar = face.find('|'); bar != std::string::npos) {
+          auto mx = Dlop::from_pyrope(face.substr(0, bar));
+          auto mn = Dlop::from_pyrope(face.substr(bar + 1));
+          if (mx && mn) {
+            if (getenv("LHD_DBG_BORROW") != nullptr) {
+              fprintf(stderr, "BINDNS type %s.%s face=%s dst=%s\n", std::string(unit).c_str(), p.name.c_str(), face.c_str(), dst.c_str());
+            }
+            Bundle::Entry e(false, str_const(absl::StrCat(unit, ".", p.name)));
+            e.decl_max = *mx;
+            e.decl_min = *mn;
+            b->set(bundle_path::of_string(p.name), std::move(e));
+            b->set_attr(p.name, "pub", str_const(p.kind));
+            continue;
+          }
+        }
+        // face-less (tuple/opaque alias): keep the provenance-string bind below
       }
       b->set(bundle_path::of_string(p.name), str_const(absl::StrCat(unit, ".", p.name)));
       b->set_attr(p.name, "pub", str_const(p.kind));

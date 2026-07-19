@@ -327,6 +327,15 @@ protected:
   // separate attr_set, so the prp_writer can still re-emit `:PType`. Returns
   // false for a TUPLE/struct or unresolved named type (emit it verbatim).
   bool emit_scalar_named_type_slot(std::string_view type_name);
+  // Resolve an IMPORTED scalar alias `pkg.PType` off the exporting unit's pub
+  // list ("type" kind) + its "MAX|MIN" pub_values face. True when the range
+  // was recovered — used by the declare borrow AND the type-slot concretizer
+  // (a lambda unit carries no import statement, so its symbol table never has
+  // the namespace bundle).
+  bool imported_alias_range(std::string_view type_name, Dlop& max_out, Dlop& min_out) const;
+  // io staging: like emit_op_with_fold's verbatim copy of the io subtree, but a
+  // port store's REF type slot (an imported alias) concretizes to prim_type_int.
+  void emit_io_with_type_slots();
 
   // Emits the current op-node and its children into staging. When fold_all is
   // false, the first child (LHS/dst) is copied verbatim and subsequent ref

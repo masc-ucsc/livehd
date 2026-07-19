@@ -5111,6 +5111,16 @@ void Prp2lnast::process_type_statement(TSNode n) {
   if (ts_node_is_null(name)) {
     return;
   }
+  // `pub type X = …`: an exportable type alias — registered as a pub of kind
+  // "type" so an importer's `x:pkg.X` can bind it (the alias's scalar range
+  // rides pub_values as its `uN`/`sN` text — see harvest_pub_values).
+  if (!ts_node_is_null(child_by_field(n, "pub"))) {
+    if (!builder.at_top_stmts() || !lambda_kind_stack_.empty() || conditional_depth_ > 0) {
+      report_error(n, "pub-not-file-scope", "syntax", "`pub` is only valid on file-scope declarations",
+                   "move the type alias to the file's top level");
+    }
+    lnast->add_pub(trim(get_text(name)), "type", mint_src(name));
+  }
   // `type Foo = …` is a declaration whose mode is `type` (replaces
   // the former type_def node). The type slot is normally `prim_type_none` and
   // the mode const carries "type" — EXCEPT for a SCALAR primitive alias

@@ -177,8 +177,11 @@ void Slang_context::emit_package_units() {
   }
   eval_ctx_ = std::move(saved_eval);
   // ── emission: one namespace unit per package, consts in SOURCE order ────────
+  for (const auto& [pn, aliases] : referenced_pkg_types_) {
+    needed[pn];  // a package referenced ONLY via port-dim aliases still emits a unit
+  }
   for (const auto& [pkg_name, params] : needed) {
-    if (params.empty()) {
+    if (params.empty() && referenced_pkg_types_.count(pkg_name) == 0u) {
       continue;
     }
     auto saved_builder = std::move(builder_);
@@ -232,6 +235,16 @@ void Slang_context::emit_package_units() {
         emit_one(param_name, pi);
       }
     }
+    // Port-dim scalar type aliases (`pub type VPU_FCMD_SZ_T = u7`): pub kind
+    // "type"; the "MAX|MIN" face rides pub_values (the import machinery binds a
+    // ranged entry from it), the `uN` print text rides package_const_types_.
+    if (auto tit = referenced_pkg_types_.find(pkg_name); tit != referenced_pkg_types_.end()) {
+      for (const auto& [alias, face_text] : tit->second) {
+        builder_.lnast->add_pub(alias, "type");
+        pub_vals.emplace_back(alias, face_text.first);
+        type_m.emplace(alias, face_text.second);
+      }
+    }
     // Stamp pub_values_ NOW: the prp_writer's package-unit path reads only
     // get_pub_values(), and the constprop harvest that normally fills it does
     // not run with compile.upass.constprop=0 (its skip guard tolerates a
@@ -244,6 +257,7 @@ void Slang_context::emit_package_units() {
   }
   referenced_pkg_params_.clear();
   referenced_pkg_syms_.clear();
+  referenced_pkg_types_.clear();
 }
 
 std::vector<std::shared_ptr<Lnast>> Slang_context::pick_lnast() {
