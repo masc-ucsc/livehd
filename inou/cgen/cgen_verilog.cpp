@@ -678,6 +678,29 @@ void Cgen_verilog::process_latch(std::shared_ptr<File_output> fout, const hhds::
     neg_en = hydrate_const(posclk_dpin).is_known_false();
   }
 
+  // RESET (2f-latch M7). A latch's reset is inherently ASYNCHRONOUS — there is
+  // no clock edge to synchronize to — so it is emitted as the FIRST branch,
+  // ahead of the transparency test:
+  //     always_latch begin
+  //       if (rst) q <= <initial>;
+  //       else if (en) q <= d;
+  //     end
+  // which is the $adlatch shape. `negreset` inverts the test, `initial` gives
+  // the value (default 0). Absent reset_pin => the plain two-line form below,
+  // byte-identical to what M1 emitted.
+  std::string rst_test;
+  std::string rst_val = "'h0";
+  if (auto rst_dpin = get_driver(find_sink_pin(node, "reset_pin")); !rst_dpin.is_invalid()) {
+    bool negreset = false;
+    if (auto np = get_driver(find_sink_pin(node, "negreset")); !np.is_invalid() && is_const_pin(np)) {
+      negreset = !hydrate_const(np).is_known_false();
+    }
+    rst_test = absl::StrCat(negreset ? "!" : "", get_expression(rst_dpin));
+    if (auto init_dpin = get_driver(find_sink_pin(node, "initial")); !init_dpin.is_invalid()) {
+      rst_val = get_expression(init_dpin);
+    }
+  }
+
   note_src(fout, node);
   // `always_latch` + NONBLOCKING `<=`, not `always @*` + blocking `=`
   // (2f-latch M1). yosys re-infers a latch from either, but our own slang
@@ -687,7 +710,12 @@ void Cgen_verilog::process_latch(std::shared_ptr<File_output> fout, const hhds::
   // also states the intent to every downstream tool instead of relying on
   // inference.
   fout->append("always_latch begin\n");
-  fout->append(absl::StrCat("  if (", neg_en ? "!" : "", enable, ") ", name, " <= ", din, ";\n"));
+  if (rst_test.empty()) {
+    fout->append(absl::StrCat("  if (", neg_en ? "!" : "", enable, ") ", name, " <= ", din, ";\n"));
+  } else {
+    fout->append(absl::StrCat("  if (", rst_test, ") ", name, " <= ", rst_val, ";\n"));
+    fout->append(absl::StrCat("  else if (", neg_en ? "!" : "", enable, ") ", name, " <= ", din, ";\n"));
+  }
   fout->append("end\n");
 }
 

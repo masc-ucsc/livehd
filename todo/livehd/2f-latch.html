@@ -847,6 +847,33 @@
   <code>lhd compile --reader yosys-verilog</code> today. The guards cost nothing
   while unreachable and prevent a silent drop if a script change or a
   pre-synthesized netlist makes them reachable.</p>
+  <p><strong>LATCH RESET SEMANTICS LANDED.</strong> A latch's reset is
+  inherently ASYNCHRONOUS — there is no clock edge to synchronize to — so it is
+  emitted as the FIRST branch, ahead of the transparency test (the
+  <code>$adlatch</code> shape):
+  <code>always_latch begin if (rst) q &lt;= INIT; else if (en) q &lt;= d; end</code>.
+  <code>negreset</code> inverts the test, <code>initial</code> supplies the
+  value. Two fixes were needed, both the same class of bug this task keeps
+  turning up — a value wired where nothing reads it:</p>
+  <ol>
+  <li><code>tree_declares_reset_reg</code> keyed on declare mode
+    <code>"reg"</code>, so a latch with a reset value never caused the module's
+    reset PORT to be created: <code>reg l:u8:[latch=true] = 3</code> died with
+    "has a reset value but &lt;mod&gt; has no reset input (setup_io bug)". The
+    reg was real; the port was never made.</li>
+  <li>tolg's latch branch stopped REFUSING the reset family and now FALLS
+    THROUGH to the SHARED flop wiring (skipping only clock/posclk, since a
+    latch's gate IS its enable), and <code>process_latch</code> emits it.
+    Wiring without the emit would only have moved the silent drop from tolg to
+    cgen.</li>
+  </ol>
+  <p>Sim needed NO change: latches ride the flop commit path (M5) and that path
+  already applies reset ahead of the enable.
+  <br><em>Tests:</em> <code>tests/equiv/latch_reset.prp</code> + golden (live
+  equiv AND v2prp), and <code>tests/sim/latch_sim_reset.prp</code> with an
+  iverilog-validated schedule. The equiv pair pins the reset VALUE, not just its
+  presence — lgcheck REFUTES the same design against a golden resetting to 7
+  instead of 3, so the PROVEN is not vacuous.</p>
   <p><strong>Efficiency item (b) also landed: the host sim compile is
   <code>-O2</code>, not <code>-O1</code></strong> (<code>lhd_kernel_sim.cpp</code>).
   MEASURED: compile time is IDENTICAL at -O1/-O2/-O3 (0.85s for a small driver,

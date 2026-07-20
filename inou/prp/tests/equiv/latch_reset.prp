@@ -1,0 +1,40 @@
+/*
+:name: latch_reset
+:type: equiv
+:verilog_top: latch_reset.lrst8
+:pyrope_top: lrst8
+*/
+
+// todo/livehd/2f-latch M7 — a latch with a RESET value.
+//
+// A latch's reset is inherently ASYNCHRONOUS: there is no clock edge to
+// synchronize to, so it is emitted as the FIRST branch, ahead of the
+// transparency test — the $adlatch shape:
+//
+//     always_latch begin
+//       if (reset)   q <= <initial>;
+//       else if (en) q <= d;
+//     end
+//
+// Two things had to change for this to work at all, and both were the same
+// class of bug this task keeps turning up — a value wired somewhere nothing
+// reads it:
+//   * `tree_declares_reset_reg` keyed on declare mode "reg", so a latch with a
+//     reset value never caused the module's reset PORT to be created and the
+//     compile died with "has a reset value but <mod> has no reset input
+//     (setup_io bug)" — the reg was real, the port was never made;
+//   * tolg then had to stop REFUSING the reset family on a latch and let it
+//     fall through to the SHARED flop wiring, and cgen's process_latch had to
+//     actually emit it. Wiring it without the emit would only have moved the
+//     silent drop from tolg to cgen, which is the opposite of what M0 bought.
+//
+// The golden pins the reset VALUE, not just its presence: lgcheck REFUTES this
+// design against an otherwise identical golden that resets to 7 instead of 3
+// (verified), so the PROVEN below is not vacuous.
+pub mod lrst8(en:bool, d:u8) -> (q:u8@[0]) {
+  reg l:u8:[latch=true] = 3
+  if en {
+    l = d
+  }
+  q = l
+}

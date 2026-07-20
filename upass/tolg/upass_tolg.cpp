@@ -1222,23 +1222,10 @@ private:
                       "construction and flipping only the polarity would make "
                       "the latch write itself and never capture din — write the "
                       "inverted condition instead: `if !g { ... }`";
-          } else if (!info.reset_pin_name.empty()) {
-            dropped = "reset_pin";
-          } else if (info.has_sync) {
-            dropped = "sync/async";
-          } else if (info.negreset) {
-            dropped = "negreset";
-          } else if (!info.initial_txt.empty() ||
-                     (!info.init_txt.empty() && info.init_txt != "nil")) {
-            // The `initial` PIN exists on the cell as of M2, but NO consumer
-            // reads it for a latch yet — cgen's process_latch emits no power-on
-            // value. Wiring it here would just move the silent drop from tolg
-            // to cgen, which is the opposite of what M0 bought. Keep refusing
-            // until M7 gives latch reset/initial an actual meaning.
-            // ("nil" is the explicit NO-reset marker the slang reader stamps on
-            // every latch declare — not a value, so never an error.)
-            dropped = "init/initial";
           }
+          // The RESET FAMILY (reset_pin / sync / async / negreset / init) is no
+          // longer refused: M7 wires it through the SHARED flop path below, so
+          // a latch gets the same reset semantics a flop does and cgen emits it.
           if (!dropped.empty()) {
             error_here("upass.tolg: latch '{}' carries '{}', which the Latch "
                        "cell cannot honor — the attribute would be SILENTLY "
@@ -1247,27 +1234,10 @@ private:
             continue;
           }
         }
-        // Wire the enable (the transparency condition; cgen process_latch emits
-        // `always_latch if(enable) q <= din`). din already carries the if-merge
-        // `cond ? d : q`. Skip the const-false (never-written) enable.
-        if (info.decl_mw == 0) {
-          auto dit = mw_map_.find(din_key(name));
-          int32_t mw = dit != mw_map_.end() ? dit->second : int32_t{1};
-          set_bits(q, mw + 1);
-          set_unsign(q);
-          mw_map_[name] = mw;
-        }
-        if (auto eit = pin_map_.find(en_key(name)); eit != pin_map_.end()) {
-          const auto en = eit->second;
-          const auto en_nid = en.get_master_node().get_debug_nid();
-          const bool is_false =
-              en_false_valid_ &&
-              en_nid == en_false_pin_.get_master_node().get_debug_nid();
-          if (!is_false) {
-            setup_sink_by_name(flop, "enable").connect_driver(en);
-          }
-        }
-        continue;
+        // A latch now FALLS THROUGH to the shared q-width / enable / reset
+        // wiring below (2f-latch M7) instead of duplicating the first two and
+        // refusing the third. Only the clock/posclk block is skipped: a latch's
+        // gate IS its enable, so it has no clock identity to bind.
       }
 
       // clock: explicit clock_pin=NAME beats the implicit/shared clock input.
@@ -1277,7 +1247,9 @@ private:
       // input is NOT in pin_map_; an unrelated same-named signal might be,
       // which is why pin_map_-first is wrong), then fall back to pin_map_ for
       // the internal-wire case. get_input_pin would assert on a non-input.
-      if (!info.clock_pin_name.empty()) {
+      if (info.is_latch) {
+        // no clock identity: the gate IS the enable (user ruling, 2f-latch M2)
+      } else if (!info.clock_pin_name.empty()) {
         // 2c-wire — a wire clock signal (a gated/derived clock): use its DRIVER
         // (din) directly, not the passthrough buffer (cgen drops a buffer whose
         // only consumer is a flop control pin).
@@ -6800,7 +6772,12 @@ tree_declares_reset_reg_impl(const std::shared_ptr<Lnast> &lnast) {
           const bool is_array =
               !c1.is_invalid() &&
               Lnast_ntype::is_comp_type_array(lnast->get_type(c1));
-          if (!is_array && (mode == "reg" || mode.starts_with("reg "))) {
+          // "latch" counts too (2f-latch M7): a latch with a reset value needs
+          // the module's reset input created just as a flop does. Keying this
+          // on "reg" alone is why `reg l:u8:[latch=true] = 3` used to die with
+          // "has a reset value but <mod> has no reset input (setup_io bug)" —
+          // the reg was real, the PORT was never made.
+          if (!is_array && (mode == "reg" || mode.starts_with("reg ") || mode == "latch")) {
             for (auto c = lnast->get_sibling_next(c2); !c.is_invalid();
                  c = lnast->get_sibling_next(c)) {
               const auto ct = lnast->get_type(c);

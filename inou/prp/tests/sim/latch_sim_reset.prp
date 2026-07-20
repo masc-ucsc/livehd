@@ -1,0 +1,43 @@
+/*
+:name: latch_sim_reset
+:type: simulation
+*/
+
+// todo/livehd/2f-latch M7 — SIMULATION of a latch with an asynchronous reset,
+// the sim twin of the equiv pair tests/equiv/latch_reset.prp.
+//
+// A latch's reset is inherently ASYNCHRONOUS (there is no clock edge to
+// synchronize to), so it wins over the transparency test: while reset is
+// asserted the latch shows its reset value regardless of the gate. Latches ride
+// the ordinary flop commit path in sim (M5), and that path already applies
+// reset ahead of the enable — so this needed no scheduler change once tolg
+// stopped refusing the reset family and cgen learned to emit it.
+//
+// SCHEDULE VALIDATED AGAINST IVERILOG (always_latch golden with the same
+// reset-first shape):
+//     k :  0   1   2   3   4
+//     q :  3  41  41  43  43
+// i.e. reset at k=0 forces 3; the gate opens at k=1 (captures 41) and k=3
+// (captures 43); the closed ticks in between HOLD. Asserts observe q only at
+// closed ticks per the observation-visibility rule, except k=0 where reset —
+// not transparency — determines the value.
+pub mod lrst8(en:bool, d:u8) -> (q:u8@[0]) {
+  reg l:u8:[latch=true] = 3
+  q = l
+  if en {
+    l = d
+  }
+}
+
+test lrst8.async_reset_wins {
+  mut acc = lrst8
+  tick 5 {
+    acc.reset = clock == 0
+    acc.en    = (clock == 1) or (clock == 3)
+    acc.d     = 40 + clock
+    step
+    assert((clock == 0) implies (acc.q == 3), "reset wins over the gate")
+    assert(((clock == 1) or (clock == 2)) implies (acc.q == 41), "captured 41, then HOLDS while closed")
+    assert((clock >= 3) implies (acc.q == 43), "second window captured 43 and holds")
+  }
+}
