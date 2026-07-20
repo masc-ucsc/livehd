@@ -602,7 +602,45 @@
   what M4/M5 believe. Full suite 1413 pass.</li>
 
 <li><strong>M4 — LEC: clock awareness + latch encoding</strong> [deps M3, parallel
-  with M5]. First close the clock-blindness holes (a standalone soundness fix):
+  with M5] — <strong>NOT LANDED. Two approaches were built and MEASURED
+  2026-07-20; both are recorded here so the next attempt starts from the
+  evidence instead of re-deriving it.</strong>
+  <p><strong>(1) Folding the commit class into the state key is PROVABLY
+  INSUFFICIENT — do not spend time on it.</strong> The task text below suggests
+  "fold the commit class into the <code>canon_flop_name</code> keying". That was
+  implemented (structural digest of the clock cone + parity; verified
+  cross-design stable — both sides of the gated pair produced
+  <code>k:iclock+</code> vs <code>k:and(get_mask(…</code>, i.e. the keys really
+  did diverge) and the gated-vs-ungated pair <strong>still returned
+  PROVEN</strong>. The reason is structural: keying only decides which state
+  symbols CORRESPOND. It puts nothing about the clock into the TRANSITION
+  FUNCTION, which stays <code>N = ITE(reset, initial, ITE(enable, din, Q))</code>
+  — so both designs still compute <code>d</code> every step and are genuinely
+  equal from cycle 1 on. Keying is necessary for correspondence but can never,
+  alone, refute a clocking difference.</p>
+  <p><strong>(2) The dynamic edge model WORKS on the gate but is not yet safe.</strong>
+  Encoding the clock net as an ordinary signal, keeping its previous value in a
+  1-bit state element keyed by the (cross-design-stable) structural digest, and
+  gating the data update on a real edge —
+  <code>posedge =&gt; (!prev &amp;&amp; cur)</code>,
+  <code>negedge =&gt; (prev &amp;&amp; !cur)</code> — made
+  <strong>all three reproducers REFUTE</strong> and
+  <code>lec_clock_blindness_test.sh</code> go green. This is the right shape: a
+  derived clock (<code>clk &amp; en</code>) is computed from the shared primary
+  inputs, so it needs no cross-design name and cannot be mismatched into a false
+  verdict. BUT the naive first cut <strong>broke ~40 existing tests with FALSE
+  REFUTEDs</strong> — including designs LEC'd against their own Pyrope
+  round-trip (<code>prp-v2prp-mod_counter</code>: "earliest diverging STATE cut
+  <code>count_rk:iclock+</code> ref=0 impl=127" during the reset prologue). A
+  wrong FAIL is worse than the false PROVEN it replaces, so it was REVERTED.
+  What needs design work before retrying: the prev-value bit's INITIAL state and
+  its interaction with the reset prologue (the divergence appears at
+  <code>rst0</code>, i.e. before any real cycle), and the plumbing of the
+  synthetic <code>\x01nxt:\x01clkprev:</code> output through the miter. Also
+  expect the intended cost: one BMC step stops being one commit, so a step with
+  no clock toggle commits nothing and every bounded proof covers ~half the
+  cycles at the same <code>formal.bound</code>.</p>
+  <p>Original plan: First close the clock-blindness holes (a standalone soundness fix):
   make the flop encoder read <code>clock_pin</code>/<code>posclk</code> and fold
   the commit class into the <code>canon_flop_name</code> keying. Then encode a
   latch as its commit-class flop-with-enable, as a <strong>BOTH-SIDES
