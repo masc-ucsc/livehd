@@ -1,0 +1,50 @@
+/*
+:name: flop_sim_gated_clock
+:type: simulation
+*/
+
+// todo/livehd/2f-latch tracker (fixme) — GATED CLOCK, the sim half of the
+// clock-blindness bug (LEC half: lhd/tests/lec_clock_blindness_test.sh). The
+// flop is clocked by `clk and en`: while en == 0 there is no rising edge and
+// the flop must HOLD. `lhd sim` today computes the gate expression as DEAD
+// CODE and commits the flop every tick anyway, so the holds below FAIL while
+// the run reports success on the load — the most dangerous failure mode in the
+// area (an ICG is latch + gated clock). Flips green at M5 (sim honors
+// clock_pin).
+//
+// The schedule only exercises en 1->0 (hold) transitions; en never RISES while
+// observation matters, because an en rise racing the clk rise is exactly the
+// glitch hazard real designs interpose an ICG latch for (see latch_icg), and
+// its outcome is legitimately model-dependent. Validated against iverilog
+// (posedge (clk & en) golden, en changed while clk low): q = 5,6,6,6.
+pub mod gate8(clk:bool, en:bool, d:u8) -> (q:u8@[1]) {
+  wire gclk:bool = nil
+  gclk = clk and en
+  reg f:u8:[clock_pin=ref gclk] = 0
+  q = f
+  f = d
+}
+
+test gate8.hold_while_gated {
+  mut acc = gate8
+  tick 4 {
+    // c0: en=1 load 5; c1: en=1 load 6; c2-c3: en=0 -> no edge, HOLD 6
+    acc.en = clock <= 1
+    mut dv:u8 = 5
+    if clock == 1 {
+      dv = 6
+    } elif clock == 2 {
+      dv = 99
+    } elif clock == 3 {
+      dv = 77
+    }
+    acc.d = dv
+    step
+    if clock == 1 {
+      assert(acc.q == 6, "enabled: the gated flop loads")
+    }
+    if clock >= 2 {
+      assert(acc.q == 6, "en=0: no rising edge on the gated clock, flop HOLDS")
+    }
+  }
+}

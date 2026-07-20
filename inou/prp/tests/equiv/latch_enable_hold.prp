@@ -5,12 +5,18 @@
 :pyrope_top: latch8
 */
 
-// KNOWN-FAILING (fixme tracker): Pyrope has no intentional level-sensitive
-// latch construct yet. This source captures the closest current surface shape:
-// a combinational output assigned only when `en` is true. The golden is the
-// Verilog latch this pattern represents in RTL.
-comb latch8(en:bool, d:u8) -> (q:u8) {
+// Rewritten 2026-07-20 (2f-latch M0 retriage) from the pre-latch-support shape
+// (a comb whose output was only conditionally assigned) to the shipped
+// `reg NAME:TYPE:[latch=true]` spelling, and PROMOTED: lgcheck's cascade ends
+// in a bounded miter that decides latch designs, so the pair proves today.
+//
+// The golden intentionally keeps the `always @(*)` + BLOCKING `=` spelling —
+// that covers yosys/slang latch INFERENCE from the non-always_latch form
+// (latch_hold_basic covers the LRM `always_latch` + `<=` spelling).
+pub mod latch8(en:bool, d:u8) -> (q:u8@[0]) {
+  reg l:u8:[latch=true]
+  q = l
   if en {
-    q = d
+    l = d
   }
 }

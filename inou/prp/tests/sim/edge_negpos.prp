@@ -1,0 +1,35 @@
+/*
+:name: edge_negpos
+:type: simulation
+*/
+
+// todo/livehd/2f-latch: NEG->POS mixed-edge chain — the direction where
+// today's edge-blind unified commit (cgen_sim.cpp:2322) and real event-driven
+// semantics AGREE (verified against iverilog): the negedge stage loads at this
+// period's falling edge (qc == this tick's d), and the posedge stage samples
+// the negedge stage at the NEXT rise (qe == last tick's qc). This test is
+// LIVE from day one and pins the agreeing case so M5's per-(clock,edge)
+// commit-region rework cannot regress it while fixing the discriminating
+// POS->NEG direction (tests/fixme/flop_sim_posneg.prp, off-by-one today).
+pub mod np8(clk:bool, d:u8) -> (qc:u8@[1], qe:u8@[2]) {
+  reg c:u8:[clock_pin=ref clk, posclk=false] = 0
+  reg e:u8 = 0
+  qc = c
+  qe = e
+  c = d
+  e = c
+}
+
+test np8.full_cycle_transfer {
+  mut acc = np8
+  mut prev_qc = nil
+  tick 5 {
+    acc.d = 11 + (17 * clock)   // distinct value every cycle (max 79, fits u8)
+    step
+    assert(acc.qc == 11 + (17 * clock), "negedge stage loads this tick's d at the fall")
+    if clock >= 1 {
+      assert(acc.qe == prev_qc, "posedge stage samples the PREVIOUS period's qc")
+    }
+    prev_qc = acc.qc
+  }
+}

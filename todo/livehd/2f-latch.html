@@ -12,12 +12,14 @@
 <h1><strong class="item-id">2f-latch</strong> Full latch support — lgraph, Verilog, Pyrope, LEC (latch-only and mixed), simulation; unified with flops and multiple clocks</h1>
 
 <p>Goal: latches work everywhere LiveHD already works for flops. The front half is
-  in better shape than the <code>"sequential op 'latch' not supported yet
-  (M2 = Flop only)"</code> error suggests; the back half (simulation, native LEC
-  encoding) is missing, and along the way the recon found a <strong>live
-  soundness bug that has nothing to do with latches</strong> (see
+  in <em>much</em> better shape than first assumed — the six equivalence pairs
+  PROVE and run live today (see <a href="#state">State of play</a>) — while the
+  back half (simulation, native LEC encoding) is missing, and the recon found a
+  <strong>live soundness bug that has nothing to do with latches</strong> (see
   <a href="#clockblind">Clock blindness</a>). Recon: 8 parallel readers over the
-  codebase plus the equivalence/simulation literature, 2026-07-20.</p>
+  codebase plus the equivalence/simulation literature 2026-07-20, then a second
+  verified pass (every file:line below re-checked against the tree, most claims
+  reproduced empirically) later the same day.</p>
 
 <h2 id="scope">Scope ruling (user, 2026-07-20): SIMPLE LATCHES, NO TIME BORROWING</h2>
 
@@ -40,88 +42,193 @@
   abstraction, no counterexample lifting — i.e. nothing research-grade on the
   critical path.</p>
 
+<p><strong>The abstraction also changes OBSERVABILITY, and that must be stated,
+  not hidden:</strong> while a window is OPEN, a real latch reads through
+  (Q follows D combinationally) but the commit-class model shows the previous
+  commit. The two agree exactly at <em>closed-window, end-of-cycle</em>
+  observations. Three consequences run through everything below: (1) the latch
+  encoding in LEC is sound only as a <em>both-sides normalization</em> (like the
+  ICG fold — never encode one side with transparency and the other without);
+  (2) sim asserts and differential oracles may observe a latch Q only under the
+  <a href="#visibility">observation-visibility rule</a>; (3) the shared
+  observation point for sim / BMC / Icarus is <strong>end-of-cycle, all edges
+  settled</strong> — pinned executable by <code>tests/fixme/flop_verify_posneg.prp</code>
+  (under the alternative "between rise and fall" convention that fixture's correct
+  answer would be indistinguishable from today's clock-blind encoding).</p>
+
 <p><strong>Master/slave pairs still work without modeling transparency.</strong> The
   two latches sit on OPPOSITE phases, so they are never simultaneously
   transparent; the master commits at one edge and the slave at the other, which
-  reconstructs one-cycle flop behaviour out of commit classes alone. Test:
-  <code>latch_master_slave</code>.</p>
+  reconstructs one-cycle flop behaviour out of commit classes alone. Tests:
+  <code>latch_master_slave</code> (equiv, live) and
+  <code>latch_sim_master_slave</code> (sim latency, fixme &rarr; M5).</p>
 
 <p><strong>The abstraction is for SIM and LEC ONLY.</strong> Verilog emission must
   still emit a real <code>always_latch</code> — the netlist handed to ABC has to
   contain a real latch. Same for <code>pass/abc</code>: a Latch is a region
-  BOUNDARY (like a Flop), never handed to ABC as a register.
-  <strong>Terminology trap:</strong> an AIGER/ABC "latch" is an edge-triggered
-  unit-delay register on an implicit global clock, NOT a level-sensitive latch —
-  ABC's BLIF reader silently discards the <code>.latch</code> control tokens, so a
-  real latch reaching ABC is a silent mismodel, not an error. Everything on this
-  page means level-sensitive.</p>
+  BOUNDARY (like a Flop) — but note that TODAY it is <em>not</em>
+  (<code>abc_map.cpp</code> misses it, see M2). <strong>Terminology trap:</strong>
+  an AIGER/ABC "latch" is an edge-triggered unit-delay register on an implicit
+  global clock, NOT a level-sensitive latch — ABC's BLIF reader silently discards
+  the <code>.latch</code> control tokens, so a real latch reaching ABC is a silent
+  mismodel, not an error. Everything on this page means level-sensitive.</p>
 
-<h2 id="state">State of play (recon 2026-07-20)</h2>
+<h2 id="state">State of play (recon 2026-07-20, re-verified same day)</h2>
 
-<p><strong>Already works</strong> (do not re-invent):</p>
+<p><strong>Already works — and is now LIVE-TESTED</strong> (do not re-invent):</p>
 <ul class="subtasks">
+<li><strong>Equivalence proves TODAY.</strong> All SIX <code>prp-equiv-latch_*</code>
+  pairs (plain / active-low / master-slave / ICG / mixed latch+flop /
+  <code>latch_enable_hold</code> rewritten to the shipped spelling) were PROMOTED
+  out of fixme 2026-07-20 and run live in the equiv glob. Resolution of the recon
+  contradiction: <code>equiv_simple</code> and the latch-capable check are
+  <em>stages of the same lgcheck cascade</em> — stage 1 hard-errors on
+  <code>$dlatch</code> ("No SAT model available", stderr swallowed by the script)
+  and the cascade falls through to its final <strong>bounded miter
+  (<code>LGCHECK_BMC_STEPS</code> default 5)</strong>, which decides. So the
+  lgyosys latch oracle is <strong>bounded (depth &le; 5) and enable-polarity
+  discriminating</strong> — a port-matched polarity flip genuinely REFUTES —
+  pinned live by <code>lhd/tests/lec_latch_polarity_test.sh</code>. Any negative
+  latch fixture must document its divergence depth &le; that bound.</li>
 <li><strong>Verilog generation</strong> — <code>Cgen_verilog::process_latch</code>
   (<code>inou/cgen/cgen_verilog.cpp:655-677</code>) handles plain latches,
-  master/slave pairs and ICGs. Two real bugs remain (M1).</li>
+  master/slave pairs and ICGs; active-low polarity via const-0 posclk &rarr;
+  <code>neg_en</code> at <code>:667-671</code>. Two real bugs remain (M1).</li>
 <li><strong>Pyrope round-trip</strong> — <code>reg NAME:TYPE:[latch=true]</code>
-  emits and parses (<code>lnast_prp_writer.cpp:2508-2514</code> &harr;
-  <code>prp2lnast.cpp:1446-1504</code>). Verified compiling on all five new
-  fixtures.</li>
+  emits (<code>upass/prp_writer/lnast_prp_writer.cpp:2508-2537</code> — note:
+  <code>upass/</code>, not <code>inou/prp/</code>) and parses
+  (<code>prp2lnast.cpp:1446-1504</code>). <strong>Ruling (user, 2026-07-20): a
+  <code>comb</code> may hold NO reg, latch or not</strong> — the fixtures
+  originally compiled as <code>comb</code> only through a hole (the reg-in-comb
+  check keys on the initializer, so uninitialized regs slip through; M0 closes
+  it) and are now <code>pub mod</code> with <code>@[N]</code> outputs.</li>
 <li><strong>slang reader</strong> — <code>always_latch</code> (and a non-edge
   <code>always</code> with nonblocking <code>&lt;=</code>) classifies into
-  <code>latch_syms_</code> (<code>slang_structure.cpp:951-968</code>); tolg turns
+  <code>latch_syms_</code> (<code>slang_structure.cpp:951-970</code>); tolg turns
   declare-mode <code>"latch"</code> into <code>Ntype_op::Latch</code>
-  (<code>upass_tolg.cpp:1559-1612</code>). The five new
-  <code>prp-v2prp-latch_*</code> targets PASS today, so this path is live-tested.</li>
-<li><strong>LEC via lgyosys</strong> — <code>--set formal.solver=lgyosys</code>
-  proves latch-only AND mixed designs discriminatingly today (proves equivalent
-  pairs, refutes enable-polarity flips). Only the NATIVE cvc5 encoder refuses
-  (<code>pass/lec/encode.cpp:830-833</code>). This is the independent oracle the
-  cross-model gating rule needs.</li>
+  (<code>upass_tolg.cpp:1559-1612</code>, latch wiring in <code>finalize_regs</code>
+  at <code>:1157-1190</code>). The <code>prp-v2prp-latch_*</code> targets all pass
+  (the lec leg is honest-inconclusive under cvc5 until M4); the writer emits
+  <code>pub mod</code> with <code>timecheck=false</code>, so closing the comb-reg
+  hole breaks nothing there.</li>
+<li><strong>Negedge / explicit / gated clocks are AUTHORABLE today</strong> on
+  both front ends: <code>posclk=false</code>, <code>clock_pin=ref clk</code>, a
+  derived <code>clk &amp; en</code> clock, and mixed pos+neg pipelines all
+  compile from Pyrope AND from slang (<code>always_ff @(negedge clk)</code>) and
+  emit edge-faithful Verilog accepted by <code>iverilog -g2012</code>
+  (prp2lnast whitelist ~<code>:6357</code>; <code>upass_tolg.cpp:958-976</code>
+  parse, <code>:1200-1229</code> wire — posclk sink connected only when false).
+  What is broken is what CONSUMES them (sim, LEC — below).</li>
+<li><strong>Verified fail-closed or already latch-aware — need NO M2 edit</strong>
+  (listed so future audits skip them): <code>pass/lean</code> fatals on Latch
+  (<code>pass_lean.cpp:612-618</code>); <code>pass/isabelle</code> strict-fatals,
+  non-strict emits an <code>undefined</code> stub whose proofs fail
+  (<code>pass_isabelle.cpp:2252-2265</code>); <code>pass/formal</code> BMC marks
+  any cone containing a Latch unsupported &rarr; Unknown
+  (<code>prove.cpp:87</code>, <code>:175</code>); <code>color_synth.cpp:74</code>,
+  <code>split_selfref.cpp:76</code>, lec state collection
+  (<code>query.cpp:192</code>, <code>:1035</code>), semdiff <code>is_state</code>
+  (<code>semdiff.cpp:55</code>) all count Latch as state via
+  <code>is_type_register</code>.</li>
 </ul>
 
 <p><strong>Broken</strong>:</p>
 <ul class="subtasks">
 <li><strong>Simulation emits NOTHING for a Latch.</strong>
   <code>is_type_flop</code> excludes Latch (<code>graph/node_util.hpp:123-126</code>)
-  so it never joins the <code>flops</code> vector, and <code>is_type_register</code>
-  includes it so the comb walk skips it (<code>cgen_sim.cpp:2128</code>) — its
-  <code>q</code> is never bound and every latch design dies with a misleading
-  <code>combinational-loop</code> error naming an internal node.</li>
+  so it never joins the <code>flops</code> vector (<code>cgen_sim.cpp:1235</code>),
+  and <code>is_type_register</code> includes it so the comb walk skips it
+  (<code>cgen_sim.cpp:2128-2130</code>) — its <code>q</code> is never bound and
+  every latch design dies with a misleading <code>combinational-loop</code> error
+  naming an internal node (<code>:2192</code>).</li>
+<li><strong>Sim is also clock- and edge-blind for FLOPS, silently.</strong> One
+  <code>step()</code> = one full clock period; ALL flops commit in ONE unified
+  loop (<code>cgen_sim.cpp:2322-2329</code>) regardless of
+  <code>posclk</code>/<code>clock_pin</code> (posclk only picks the VCD dump slot,
+  <code>:1244-1247</code>/<code>:1513</code>). Measured: a gated-clock flop LOADS
+  every tick with en=0; a pos&rarr;neg chain is off-by-one vs Icarus (neg&rarr;pos
+  agrees); a multi-clock design is accepted silently and
+  <code>clock_input_of</code> (<code>:864-877</code>) keeps only the FIRST flop's
+  clock for the VCD while every other clock degrades to poked data. All of these
+  REPORT SUCCESS — fail-open (M0 closes, M5/M6 implement).</li>
 <li><strong>Gates are VACUOUS.</strong> An encoder refusal returns
-  <code>status:pass</code> / exit 0 unless <code>formal.strict=true</code>, so every
-  downstream milestone gate would be meaningless until M0.</li>
+  <code>status:pass</code> / exit 0 unless <code>formal.strict=true</code>
+  (refusal at <code>pass/lec/encode.cpp:830-833</code>; Unknown-to-clean-exit
+  mapping in <code>lhd_kernel_formal.cpp:2472-2494</code>) — indistinguishable
+  from a solver timeout at the exit-code level.</li>
+<li><strong>tolg SILENTLY DROPS <code>clock_pin</code>/<code>posclk</code>/<code>init</code>
+  on <code>latch=true</code> regs</strong> (verified:
+  <code>reg l:u8:[latch=true, clock_pin=ck2, posclk=false, init=3]</code> compiles
+  exit 0, zero warnings, Verilog byte-identical to the plain transparent-high
+  latch). Mechanism: <code>finalize_regs</code>' latch branch <code>continue</code>s
+  at <code>upass_tolg.cpp:1168-1191</code> BEFORE the clock/posclk/reset wiring at
+  <code>:1200-1229</code>. So the ONLY posclk writer is the yosys importer — M2's
+  "posclk authoritative" is unauthorable from Pyrope today, and M0 must make the
+  drop an error first.</li>
 <li><strong>The Latch cell is a 3-pin skeleton</strong> — <code>din(3)</code>,
   <code>enable(4)</code>, <code>posclk(6)</code> only
-  (<code>graph/cell.cpp:261-268</code>). No <code>clock_pin</code>, no
+  (<code>graph/cell.cpp:261-268</code>; compare Flop's 8 pins at
+  <code>:240-247</code>). No <code>clock_pin</code>, no
   <code>reset_pin</code>/<code>negreset</code>/<code>async</code>, no
-  <code>initial</code>. It cannot record which clock it belongs to (blocks the
-  multi-clock half) nor express async set/reset.</li>
+  <code>initial</code>.</li>
+<li><strong>pass/abc does NOT treat Latch as a boundary</strong> — the boundary
+  scan keys on <code>is_type_flop</code> plus an explicit Sub/Memory/Div list
+  (<code>abc_map.cpp:938-939</code>, blast-exclusion <code>:1022-1027</code>), so
+  a Latch falls into the bit-blast loop and aborts the whole region (reproduced).
+  <code>is_loop_break</code> (Latch=45 odd, static_assert
+  <code>graph/cell.hpp:113</code>) governs only hhds topo order, not abc.</li>
 <li><strong>yosys importer</strong> — <code>$dlatchsr</code> silently matches the
   <code>$dlatch</code> branch (7-char <code>strncmp</code>,
-  <code>lgyosys_tolg.cpp:2159</code>) and DROPS its SET/CLR;
-  <code>$adlatch</code> aborts.</li>
-<li>The three "fixme latch" tests were <strong>stale-labelled</strong>: the Pyrope
-  one passes with the <code>latch=true</code> spelling that postdates it; the two
-  yosys ones fail for a non-LRM Verilog reason unrelated to latches.</li>
+  <code>lgyosys_tolg.cpp:2159-2168</code>) and DROPS its SET/CLR.
+  <code>$adlatch</code> does NOT abort (correction): it misses every dispatch
+  chain and hits the catch-all <code>log()</code> at <code>:2576-2577</code>
+  ("likely error: add this cell type") — exit 0, an untyped
+  <code>Ntype_op::Invalid</code> node, a SILENT drop that is <em>worse</em> than
+  an abort.</li>
+<li><strong>Split-brain assert planes.</strong> <code>test</code>-block asserts
+  are INVISIBLE to <code>lhd formal verify</code> (UNKNOWN "no obligations",
+  exit 0) and design-body asserts are NOT executed by <code>lhd sim</code>
+  (<code>cgen_sim.cpp:1413-1420</code> skips lgassert/fproperty subs — the
+  pending 2f-formal "runtime fallback" item). A dual sim+BMC fixture must state
+  its property twice until that lands. <strong>Worse, a formal obligation DROPS
+  the <code>if</code> guard around an assert</strong> (verified:
+  <code>if c &gt;= 1 { assert(p) }</code> is checked unconditionally and refutes
+  spuriously at cycle 0) — write <code>assert(guard implies p)</code>. Both are
+  bugs to file against 2f-formal; the fixture conventions below work around
+  them.</li>
 </ul>
 
 <p><em>Useful accident:</em> tolg already bakes <code>din = cond ? d : q</code> and
-  <code>enable = cond</code>, so the IR shape composes with the chosen encoding for
-  free — substituting a hold state for that <code>q</code> gives
-  <code>ITE(en, ITE(en,d,H), H) = ITE(en,d,H)</code>. No tolg rewrite needed.</p>
+  <code>enable = cond</code> (<code>upass_tolg.cpp:1157-1190</code>), so the IR
+  shape composes with the chosen encoding for free — substituting a hold state
+  for that <code>q</code> gives <code>ITE(en, ITE(en,d,H), H) = ITE(en,d,H)</code>.
+  No tolg rewrite needed. The yosys importer instead wires RAW D + EN with
+  polarity on const posclk — the LEC encoding tolerates both shapes, but M3's
+  rule-2 checker must not (see the TRAP under M3).</p>
 
 <h2 id="clockblind">Clock blindness — a live soundness bug, independent of latches</h2>
 
 <p><code>pass/lec/encode.cpp</code> <strong>never reads <code>clock_pin</code> or
-  <code>posclk</code></strong>. Proven empirically during recon: today's LEC
-  <strong>falsely PROVES</strong> (a) a gated-clock flop equivalent to an ungated
-  one, (b) a negedge flop equivalent to a posedge one, and (c) a two-clock-domain
-  pipeline equivalent to a single-clock one. The same blindness exists in sim: a
-  gated clock is computed as <strong>dead code</strong> and the flop advances every
-  cycle anyway, and negedge flops simulate identically to posedge
-  (<code>posclk</code> only selects a VCD slot,
-  <code>cgen_sim.cpp:1245/1513</code>).</p>
+  <code>posclk</code></strong> — one grep hit, <code>:679</code>, and it is the
+  sink classifier DISCARDING them ("config / clock: abstracted out of the
+  relational encoding"); the Flop next-state build (<code>:1969-2100</code>)
+  resolves only din/enable/reset/negreset/initial. Proven empirically: today's
+  LEC <strong>falsely PROVES</strong> (a) a gated-clock flop equivalent to an
+  ungated one, (b) a negedge flop equivalent to a posedge one, (c) a
+  two-clock-domain pipeline equivalent to a single-clock one — in 17&nbsp;ms
+  each. BMC shares the same encoder (<code>query.cpp:5419</code>), so
+  <code>lhd formal verify</code> inherits the blindness. The same blindness
+  exists in sim (see State of play).</p>
+
+<p><strong>And there is NO in-repo formal oracle for flop edges:</strong> the
+  lgyosys/lgcheck path is exactly as edge- and gate-blind for flops (reproduced:
+  PROVEN on negedge-vs-posedge and gated-vs-ungated with the edges textually
+  different in the compared Verilog). Its discriminating power is latch ENABLE
+  POLARITY only. Consequence for the cross-model gating rule: for latch-polarity
+  work gate against lgyosys; for anything involving flop clocks or edges the
+  independent oracle must be <strong>event-driven simulation (iverilog)</strong>
+  until M4 exists — and an equiv pair of mixed-edge designs "proving" via
+  lgcheck is vacuous with respect to the edges.</p>
 
 <p>This is why latches and multiple clocks belong in ONE roadmap: an ICG is
   <em>latch + gated clock</em>, so latch support that ignores the gate ships the
@@ -134,14 +241,34 @@
   transformation" cannot see a transformation that is WRONG but applied identically
   to both sides — two identically-wrong machines prove equal, so a symmetric gate
   is vacuous by construction. Every latch/clock transformation must be gated
-  against an INDEPENDENT checker (<code>lgyosys</code> / <code>iverilog</code>),
-  never our own encoder on both sides. This one mechanism catches mux placement,
-  posclk double-negation, a flavour-blind ICG fold, and an unstable phase gate.</p>
+  against an INDEPENDENT checker — <code>lgyosys</code> for latch polarity,
+  <code>iverilog</code> for anything clock/edge-shaped (see above), never our own
+  encoder on both sides. This one mechanism catches mux placement, posclk
+  double-negation, a flavour-blind ICG fold, and an unstable phase gate.</p>
 
 <p><strong>Verdict discipline</strong> (inherited from
   <a class="xref" href="2f-lec.html">2f-lec</a>): PASS &rArr; definitively
   equivalent; FAIL &rArr; definitively different; anything else is inconclusive.
-  An abstraction may only cause extra work, never a wrong verdict.</p>
+  An abstraction may only cause extra work, never a wrong verdict. Trackers that
+  demand a refutation must grep a verbatim REFUTED — an encoder that merely
+  degrades a false-PROVEN to UNKNOWN has not fixed the bug
+  (<code>lec_clock_blindness_test.sh</code> enforces this since 2026-07-20).</p>
+
+<p id="visibility"><strong>Observation-visibility rule</strong> (used by every
+  sim/BMC fixture; enforced mechanically in M5): an observation of a latch Q — a
+  settled-region assert, a differential-oracle sample, or a sequential element in
+  Q's fanin cone at its firing boundary — is valid iff (a) the latch was OPAQUE
+  in the tick immediately preceding the observation, (b) at least one closing
+  edge has completed since power-on (before the first commit, real hardware
+  reads X while the model reads <code>initial</code> — latches have no reset
+  until M7, so this window always exists), and (c) the data was STABLE across
+  the closing edge being observed (a D change racing the gate close is
+  model-dependent). Under (a)-(c) the real-transparency semantics (Icarus), the
+  commit-at-closing-edge model, and a flop-with-enable encoding all agree, so
+  fixtures pin the RULING, not an implementation choice. Divergence is not
+  confined to transparent ticks — it PERSISTS through any state element that
+  sampled a latch while open (taint), which is what clause (a)'s "in the
+  observer's cone" phrasing covers.</p>
 
 <h2 id="milestones">Milestones</h2>
 
@@ -153,23 +280,40 @@
 <ul class="subtasks">
 
 <li><strong>M0 — fail closed, tell the truth, clear stale fixmes</strong> [no deps].
-  An encoder refusal must be distinguishable from a solver timeout and must exit
-  NONZERO regardless of <code>formal.strict</code> — today a latch design returns
-  <code>status:pass</code>/exit 0 with a warning, which makes every later gate
-  vacuous. Add an explicit "latch unsupported in sim" diagnostic guarded on
-  <code>Ntype_op::Latch</code> BEFORE the schedule walk, replacing today's false
-  <code>combinational-loop</code> error (<code>cgen_sim.cpp:2192</code>). Retriage
-  the stale fixmes: rewrite <code>latch_enable_hold.prp</code> to the shipped
-  <code>latch=true</code> spelling and promote it; relabel
-  <code>inou/yosys/tests/fixme_latch.v</code> / <code>fixme_nlatch.v</code> with
-  their real (non-latch, non-LRM procedural-write-to-net) reason so they stop being
-  counted as latch debt. Pin the lgyosys latch-LEC verdict with a test — recon
-  found a contradiction between "lgyosys proves latch designs" and "lgcheck's
-  <code>equiv_simple</code> errors on <code>$dlatch</code>"; both may be true of
-  different entry points and the plan must know which.
+  Everything here turns a silent lie into a diagnostic:
+  <ol>
+  <li>An encoder refusal must be distinguishable from a solver timeout and must
+    exit NONZERO regardless of <code>formal.strict</code> — today a latch design
+    returns <code>status:pass</code>/exit 0 with a warning
+    (<code>lhd_kernel_formal.cpp:2472-2494</code>), which makes every downstream
+    gate vacuous.</li>
+  <li>An explicit "latch unsupported in sim" diagnostic guarded on
+    <code>Ntype_op::Latch</code> BEFORE the schedule walk, replacing today's false
+    <code>combinational-loop</code> error (<code>cgen_sim.cpp:2192</code>).</li>
+  <li><code>lhd sim</code> exits nonzero with a directed diagnostic when the
+    design's state elements resolve to &ge; 2 distinct clock nets (lifted by M6)
+    or when a flop's clock cone is gated/non-trivial (lifted by M5) — both are
+    silently mis-simulated as single-clock ungated today while reporting
+    success.</li>
+  <li>tolg ERRORS on a <code>latch=true</code> reg carrying
+    <code>clock_pin</code>/<code>posclk</code>/<code>init</code>/reset attrs —
+    today silently discarded (<code>upass_tolg.cpp:1168-1191</code>); lifted
+    per-attr as M2 wires each one.</li>
+  <li>Extend the reg-in-comb check to UNINITIALIZED regs (incl.
+    <code>latch=true</code>): the check keys on the initializer, so
+    <code>reg x:u8</code> inside a <code>comb</code> compiles today (ruling:
+    comb is pure combinational — no reg, ever). Compile-error fixture.</li>
+  <li>Relabel <code>inou/yosys/tests/fixme_latch.v</code> /
+    <code>fixme_nlatch.v</code> with their real (non-latch, non-LRM
+    procedural-write-to-net) reason so they stop counting as latch debt.</li>
+  </ol>
+  <strong>Already DONE 2026-07-20:</strong> <code>latch_enable_hold</code>
+  rewritten to the shipped spelling and PROMOTED (both directions);
+  the lgyosys-verdict contradiction resolved (same cascade, bounded-miter stage
+  decides) and pinned by the live <code>lec_latch_polarity_test.sh</code>.
   <br><em>Gate:</em> a latch design under the default solver exits nonzero with a
-  real diagnostic; a latch sim attempt says "latch unsupported", not
-  "combinational loop"; <code>latch_enable_hold</code> in the glob and PROVEN.</li>
+  real diagnostic; a latch sim attempt says "latch unsupported"; the four
+  fail-closed shapes above each have a red-today negative test.</li>
 
 <li><strong>M1 — Verilog emission correctness + round-trip</strong> [no deps,
   parallel with M0]. <code>inou/cgen/cgen_verilog.cpp</code> only.
@@ -178,37 +322,71 @@
   <code>get_expression</code>, so an inlined single-fanout driver emits a bare
   UNDECLARED identifier — iverilog rejects it, yosys silently treats it as an
   implicit wire and lgcheck then REFUTES; the flop path at <code>:645</code>
-  already uses <code>get_expression</code> with a comment explaining exactly this.
+  already uses <code>get_expression</code> (rationale comment at
+  <code>:2206-2210</code>). The six live pairs dodge this only because their
+  din/enable muxes have fanout &ge; 2.
   (2) Emission is <code>always @*</code> with BLOCKING <code>=</code>
-  (<code>:673-676</code>), which our own slang reader classifies as plain comb, so
-  output cannot round-trip and yosys rejects the second generation with "Latch
-  inferred from always_comb" — emit <code>always_latch</code> + <code>&lt;=</code>.
+  (<code>:674-676</code>), which our own slang reader classifies as plain comb, so
+  output cannot round-trip (yosys re-infers the latch, which is why lgcheck still
+  proves — slang does not) — emit <code>always_latch</code> + <code>&lt;=</code>.
   (3) <code>create_locals</code> declines to declare a Latch <code>q</code> with no
-  readers (<code>:2475</code> tests <code>!is_type_flop</code>, which excludes
-  Latch) while <code>create_registers</code> assigns it unconditionally — use
-  <code>is_type_register</code>. (4) Width inflation: a <code>u8</code> latch
-  emits <code>reg [8:0] q</code> (observed) — harmless today, but it will produce
-  spurious LEC width mismatches and inflate AIG size once latches enter synthesis.
+  readers (<code>:2475-2477</code> tests <code>!is_type_flop</code>) while
+  <code>create_registers</code> emits its assignment unconditionally
+  (<code>:2127-2131</code>) — use <code>is_type_register</code> (Memory cannot
+  reach that line, asserted at <code>:2473</code>).
+  <br>(Dropped from this milestone: the <code>u8</code> &rarr;
+  <code>reg [8:0]</code> width inflation is the general unsigned magnitude+1
+  stamp from tolg (<code>upass_tolg.cpp:1665-1668</code>), shared byte-identically
+  with flops — not a cgen bug, not latch-specific, cosmetic today.)
   <br><em>Gate:</em> every latch fixture passes <code>iverilog -g2012</code> (NOT
   yosys-only — yosys masks bug 1); slang &rarr; Verilog &rarr; slang preserves the
-  Latch cell; lgcheck PROVEN on plain / active-low / master-slave / ICG shapes.
-  Promotes <code>latch_hold_basic</code>.</li>
+  Latch cell; the six live equiv pairs stay PROVEN.</li>
 
 <li><strong>M2 — IR: a latch gets a clock identity</strong> [SERIALIZATION POINT;
   deps M0, M1]. Add <code>clock_pin</code> and <code>initial</code> to
-  <code>Ntype_op::Latch</code> (<code>graph/cell.cpp</code>), plus
+  <code>Ntype_op::Latch</code> (<code>graph/cell.cpp:261-268</code>), plus
   <code>reset_pin</code>/<code>negreset</code>/<code>async</code> for M7. Make
   <code>posclk</code> AUTHORITATIVE for transparency polarity, cross-checked
-  against the enable cone (today polarity is baked into the enable cone on the
-  Pyrope/slang path and <code>posclk</code> is written only by the yosys
-  importer — the disagreement between the two is the "posclk double-negation"
-  miscompile a symmetric gate cannot see). <strong>Do NOT change the
-  <code>Ntype_op</code> encoding:</strong> <code>is_loop_break()</code> reads bit 0
-  of the type word (hhds <code>graph.hpp:568</code>) with a
-  <code>static_assert</code> pinning <code>Latch = 45</code> odd; flipping it
-  ripples into abc/lec/semdiff/color/isabelle/lean. Touches tolg, cgen_verilog,
-  cgen_sim, bitwidth, lec, semdiff, the abc boundary and partition.
-  <br><em>Gate:</em> promotes <code>latch_active_low</code>.</li>
+  against the enable cone — and WIRE it from the Pyrope declare attrs in
+  <code>finalize_regs</code> (today the latch branch continues before the wiring;
+  see State of play), replacing M0's fail-closed error attr by attr. The
+  disagreement between posclk and the enable cone is the "posclk
+  double-negation" miscompile a symmetric gate cannot see
+  (<code>latch_verify_low</code> is the tracker that refutes if M4 folds it
+  wrong while <code>latch_verify_hold</code> still proves).
+  <br>Concrete consumer touches (each verified missing today):
+  <ol>
+  <li><code>pass/abc/abc_map.cpp:938-939</code> — add Latch to the bbox boundary
+    set UNCONDITIONALLY (a flop is a boundary only when <code>!map_register</code>
+    or clk-demoted; a Latch is a boundary in BOTH modes — an ABC "latch" is an
+    edge-triggered register and must never model a level-sensitive one), q as
+    fresh PI, din/enable cut as POs, const posclk recreated; exclude Latch from
+    the blast loop at <code>:1022-1027</code>.</li>
+  <li><code>pass/bitwidth/bitwidth.cpp:1541</code> — dispatch Latch to
+    <code>process_flop</code> (its din/initial reads are Latch-compatible once
+    the initial pin exists); widen the <code>is_type_flop</code> test at
+    <code>:1321</code>.</li>
+  <li><code>pass/partition/pass_partition.cpp:457</code> — the '_o'-suffix
+    region-output port naming tests <code>Flop || Memory</code>; a latch-driven
+    region output collides with the latch's reg name (the exact broken-Verilog
+    mode the adjacent comment documents). Use <code>is_type_register</code> on
+    the driver.</li>
+  <li>semdiff (tier-2 kind fold only): fold the commit class (posclk polarity;
+    post-M2 clock identity) into <code>collect_state</code>'s <code>c.kind</code>
+    (<code>semdiff.cpp:233-244</code>) for Latch AND Flop, mirroring the existing
+    initial-value fold — the compare-point obligation pass already catches
+    yosys-imported polarity flips functionally, so this is keying hygiene, not a
+    soundness hole.</li>
+  </ol>
+  <strong>Do NOT change the <code>Ntype_op</code> encoding:</strong>
+  <code>is_loop_break()</code> reads bit 0 of the type word (hhds
+  <code>graph.hpp:568</code>) and <code>graph/cell.hpp:113</code> static_asserts
+  Latch = 45 odd; flipping it ripples into abc/lec/semdiff/color/isabelle/lean.
+  Also touches tolg, cgen_verilog, cgen_sim.
+  <br><em>Gate:</em> a Pyrope transparent-low latch carries posclk=false into the
+  lgraph and back out; a latch inside a pass.color+pass.partition+compile flow
+  emits clean Verilog (the '_o' port shape); an abc region containing a latch
+  compiles with the latch boxed, LEC-PROVEN vs pre-abc.</li>
 
 <li><strong>M3 — shared commit-class classifier + THE CONTRACT CHECK</strong>
   [deps M2]. ONE analysis, three consumers (sim, LEC, timing). For every state
@@ -222,26 +400,58 @@
       transparent (same gate net, same polarity);</li>
     <li>no combinational path from a latch's Q back to its own D (self-timed /
       time-borrowing);</li>
-    <li>a latch's gate must be a recognizable clock-phase expression.</li>
+    <li>a CLOCK-GATED latch's gate must be a recognizable clock-phase
+      expression;</li>
+    <li>no combinational DATA path from a latch's Q to a state element whose
+      committing edge COINCIDES with the latch's closing edge (e.g. a
+      transparent-low latch on clk feeding a posedge-clk flop: real hardware
+      reads THROUGH the still-transparent latch — the US7624363 "L1 &equiv;
+      buffer" case our own References cite — while the commit-class model hands
+      the flop the previous commit, a persistent full-cycle error). Either
+      normalize that latch to a buffer per the L1 rule or reject with the
+      directed diagnostic.</li>
   </ol>
-  A violation is a named error — <strong>never</strong> a silent
+  <strong>Two latch classes (proposed ruling — confirm before implementing):</strong>
+  a <em>clock-gated</em> latch (gate is a clock phase) gets the full static
+  contract and is sound vs silicon; a <em>data-gated</em> latch (gate is
+  arbitrary data — <code>latch_hold_basic</code>, <code>latch_mixed_flop</code>)
+  cannot be statically edge-checked, so rules 1–2 apply on the gate NET and the
+  model is documented as sound only under the end-of-cycle observation model
+  (transparency read-through is not modeled; sim and LEC both apply the same
+  abstraction on both sides, so verdicts stay consistent).
+  <br><strong>TRAP for rule 2's checker:</strong> tolg bakes the hold mux into
+  din (<code>din = cond ? d : q</code>), so EVERY Pyrope/slang latch has a
+  structural Q-to-own-D path through its own hold mux — the checker must exempt
+  exactly the q-feedback operand of the latch's own hold mux (the yosys-imported
+  shape has raw D and no such path).
+  <br>A violation is a named error — <strong>never</strong> a silent
   flop-with-enable approximation.
-  <br><em>Gate:</em> master/slave accepted and classified onto opposite edges; a
-  synthetic time-borrowing design REJECTED with the directed diagnostic.</li>
+  <br><em>Gate:</em> master/slave accepted and classified onto opposite edges;
+  <code>lhd/tests/latch_contract_check_test.sh</code> (written, fixme) goes
+  green — its three shapes (self-gated latch, Q&rarr;own-D, simultaneous-
+  transparent pair) each REJECTED with the directed diagnostic; add a rule-4
+  coincident-edge shape when the diagnostic exists.</li>
 
 <li><strong>M4 — LEC: clock awareness + latch encoding</strong> [deps M3, parallel
   with M5]. First close the clock-blindness holes (a standalone soundness fix):
   make the flop encoder read <code>clock_pin</code>/<code>posclk</code> and fold
   the commit class into the <code>canon_flop_name</code> keying. Then encode a
-  latch as its commit-class flop-with-enable. Apply the ICG fold as a
-  <strong>BOTH-SIDES normalization</strong> (abstract the ICG into a clock-enable
-  on the driven flops — CIRCT's <code>arc.state</code> has a native
-  <code>enable</code> operand for exactly this), never as a one-sided abstraction.
-  Nobody proves ICGs in industry practice; they normalize them away.
-  <br><em>Gate:</em> the three false-PROVEN reproducers (gated vs ungated, negedge
-  vs posedge, 2-clock vs 1-clock) now REFUTE; latch fixtures PROVEN against
-  lgyosys as the independent oracle; minion full-design LEC re-baselined. Promotes
-  <code>latch_icg</code> and (with M5) <code>latch_mixed_flop</code>.</li>
+  latch as its commit-class flop-with-enable, as a <strong>BOTH-SIDES
+  normalization</strong> (transparency read-through is abstracted identically on
+  both sides — see the observability paragraph under Scope). Apply the ICG fold
+  the same way (abstract the ICG into a clock-enable on the driven flops —
+  CIRCT's <code>arc.state</code> has a native <code>enable</code> operand for
+  exactly this). Nobody proves ICGs in industry practice; they normalize them
+  away. Obligation semantics: an in-design assert samples END-OF-CYCLE state
+  (all edges settled) — <code>flop_verify_posneg</code> is the executable pin of
+  that decision.
+  <br><em>Gate:</em> the three false-PROVEN reproducers now return verbatim
+  REFUTED (<code>lec_clock_blindness_test.sh</code> enforces REFUTED, not
+  merely not-PROVEN — UNKNOWN keeps it red); the BMC twins flip green
+  (<code>latch_verify_hold</code>, <code>latch_verify_low</code>,
+  <code>flop_verify_posneg</code>); latch fixtures PROVEN against lgyosys as the
+  polarity oracle and against iverilog for anything edge-shaped; minion
+  full-design LEC re-baselined.</li>
 
 <li><strong>M5 — simulation: the three-region tick</strong> [deps M3, parallel with
   M4]. A tick is THREE REGIONS, not a sequence of per-edge calls: (1) evaluate
@@ -252,97 +462,162 @@
   collapses a 2-cycle pipeline to 1, and no call order is correct in general
   (reverse it and the mirror design breaks). This is the act/nba region split
   Verilator implements. Latches join a unified state vector with their commit
-  class. Honor <code>clock_pin</code> — a gated clock is silently ignored today,
-  and since the ICG is the canonical latch application, shipping without this is a
-  trap. Per-(clock, edge) schedules with per-region liveness, so a design pays only
-  for the edges it actually uses.
-  <br><strong>OPEN, settle BEFORE the cgen_sim restructure:</strong> hierarchical
-  per-edge advance needs a mapping from the actual clock net at each instantiation
-  site to the child's FORMAL clock port; today submodules advance atomically once,
-  inline (<code>cgen_sim.cpp:1964</code>). None of the drafted plans budgeted this.
+  class. Honor <code>clock_pin</code> — the ICG is the canonical latch
+  application, and <code>flop_sim_gated_clock</code> is red until this works.
+  Per-(clock, edge) schedules with per-region liveness, so a design pays only
+  for the edges it actually uses. Post-step reads and design asserts observe
+  END-OF-CYCLE state (the shared observation model).
+  <br><strong>Red tests that force this milestone</strong> (all written
+  2026-07-20, iverilog-validated, in <code>inou/prp/tests/fixme/</code>):
+  <code>latch_sim_hold</code>, <code>latch_sim_low</code>,
+  <code>latch_sim_master_slave</code> (one-cycle latency, not two),
+  <code>flop_sim_posneg</code> (pos&rarr;neg half-cycle transfer — the
+  discriminating direction), <code>flop_sim_gated_clock</code>. The AGREEING
+  direction runs live as <code>tests/sim/edge_negpos.prp</code> so the rework
+  cannot regress it.
+  <br><strong>OPEN, settle BEFORE the cgen_sim restructure:</strong>
+  (a) hierarchical per-edge advance needs a mapping from the actual clock net at
+  each instantiation site to the child's FORMAL clock port; today submodules
+  advance atomically once, inline (<code>cgen_sim.cpp:1964</code>).
+  (b) the simeq rolling hash folds every output EVERY cycle
+  (<code>README_simeq.md:28-33</code>), which is incompatible with hold-read
+  latch Q during transparent ticks (both values are DEFINED, so per-bit
+  X-masking cannot absorb the difference) — ruling needed: either exclude
+  latch-derived outputs from the hash and compare them via
+  <code>diff_test.py</code> extended with a per-cycle opacity mask (fold only in
+  ticks passing the observation-visibility rule), or adopt a read-side mux for
+  latch Q fanout (which reintroduces the transparency the scope ruling
+  excluded). Default direction: the opacity mask.
   <br><strong>The simeq harness is NOT a neutral oracle here:</strong>
-  <code>README_simeq.md</code> documents that its golden Icarus testbench samples
-  after BOTH clock edges specifically so negedge flops do not mismatch, justified
-  by asserting <code>posclk</code> is a scheduler no-op — exactly the property this
-  milestone removes. It will go red from a 100%-green baseline
-  (<code>_SIMEQ_FIXME = []</code>). Revise the sampling convention, re-bake every
-  golden signature via <code>gen_equiv_tb.py --setup</code>, and land the convention
-  change and the negedge fix in the SAME commit. Use
-  <code>inou/cgen/tests/sim/diff_test.py</code> (per-bit X-masked vs Icarus) as the
-  latch oracle — a never-enabled latch is legitimately X, which a 1000-cycle
-  signature hash cannot express.
-  <br><em>Gate:</em> promotes <code>latch_master_slave</code> (one-cycle latency,
-  not two) and <code>latch_mixed_flop</code>.</li>
+  <code>README_simeq.md:38-47</code> documents that its golden Icarus testbench
+  samples after BOTH clock edges specifically so negedge flops do not mismatch,
+  justified by asserting <code>posclk</code> is a scheduler no-op — exactly the
+  property this milestone removes. Re-bake every golden signature via
+  <code>gen_equiv_tb.py --setup</code> and land the convention change and the
+  negedge fix in the SAME commit (<code>_SIMEQ_FIXME = []</code> is the
+  100%-green baseline to preserve). Do not add pos&rarr;neg cascades to _SIMEQ
+  before this lands.
+  <br><em>Gate:</em> the five fixme sim trackers above go green and
+  <code>edge_negpos</code> stays green.</li>
 
 <li><strong>M6 — multiple clocks as the generalization of phases</strong> [deps M5].
   Per-(clock, edge) schedules generalize to N clocks. Extend the <code>tick</code>
-  grammar — <code>prp_sim.cpp:1441-1462</code> hard-rejects &gt;1 clock today, and
-  <code>lhd_sim_clock_reset_test.sh</code> asserts that rejection AS CORRECT, so it
-  needs rewriting here. Design sketch already exists in
+  grammar — <code>inou/prp/prp_sim.cpp:1444-1471</code>
+  (<code>tick_one_entry</code>) hard-rejects &gt;1 entry in the
+  <code>clocks=(...)</code> tuple (testbench grammar ONLY — nothing inspects the
+  DESIGN's clock count, which is why M0 adds the design-side fail-closed check),
+  and <code>lhd_sim_clock_reset_test.sh:100</code> asserts that rejection AS
+  CORRECT, so both rewrite here. Design sketch in
   <code>todo_multiclock.md</code> (split per clock EDGE; a clock used pos+neg
-  yields two subgraphs; a new cell for cross-domain communication).</li>
+  yields two subgraphs; a new cell for cross-domain communication).
+  <br><em>Gate:</em> a two-independent-clock 2-stage pipeline matches iverilog
+  cycle-for-cycle, including a COINCIDENT-edge tick (both clocks toggling in one
+  tick must sample pre-edge values); the M0 multi-clock refusal is lifted;
+  <code>lhd_sim_clock_reset_test.sh</code> asserts the new grammar.</li>
 
 <li><strong>M7 — async/SR latches + efficiency</strong> [deps M4, M5]. yosys
   importer: fix the <code>$dlatchsr</code> 7-char <code>strncmp</code> SET/CLR drop
-  and add <code>$adlatch</code> (which aborts today). Efficiency, ranked by
+  and dispatch <code>$adlatch</code> (today a SILENT catch-all drop to an Invalid
+  node — see State of play; make it at least a hard error first, then support
+  it). Add <code>reset_pin</code>/<code>negreset</code>/<code>async</code>
+  semantics to the Latch cell (pins reserved in M2). Efficiency, ranked by
   (payoff, cost): (a) kill the <code>step()</code>+<code>peek()</code> double
   <code>cycle()</code> call — <strong>&gt;1.5&times;, available TODAY, entirely
   latch-independent</strong>; (b) raise the host compile above <code>-O1</code>
   (<code>lhd_kernel_sim.cpp:351</code>); (c) per-region liveness (M5 gives this);
   (d) activity gating (ESSENT-style, 1.5–11.5&times; over Verilator on the measured
-  ~4.6% activity factors) — greenfield, no framework exists to plug into.</li>
+  ~4.6% activity factors) — greenfield; (e) optional: teach
+  <code>pass/formal</code>'s BMC (<code>prove.cpp</code>) the same commit-class
+  latch model so assumes inside latch cones stop degrading to Unknown.
+  <br><em>Gate:</em> <code>$dlatchsr</code>/<code>$adlatch</code> import fixtures
+  (to write) round-trip and LEC-prove; an async-reset latch fixture proves
+  against its Verilog golden.</li>
 
 </ul>
 
-<h2 id="tests">Tests (fixme trackers, written 2026-07-20)</h2>
+<h2 id="tests">Tests (inventory as of 2026-07-20)</h2>
 
-<p>Five equivalence pairs in <code>inou/prp/tests/equiv/</code>, excluded from the
-  equiv glob and tagged <code>fixme</code> in <code>inou/prp/BUILD</code> so
-  <code>bazel test //...</code> stays green. <strong>All five COMPILE cleanly
-  today</strong> — they are fixme for the equivalence direction only. Each file's
-  header names the milestone that promotes it. Run one with:
-  <code>bazel test //inou/prp:prp-equiv-latch_icg --test_tag_filters=</code></p>
-
+<p><strong>LIVE — green today, guard against regression:</strong></p>
 <ul class="subtasks">
-<li><code>latch_hold_basic</code> &rarr; <strong>M1</strong>. Plain transparent-high
-  latch in the shipped <code>reg l:u8:[latch=true]</code> spelling. Pins all three
-  cgen bugs (blocking <code>=</code> in <code>always @*</code>, the
-  <code>get_wire_or_const</code> undeclared identifier, the u8 &rarr;
-  <code>[8:0]</code> width inflation).</li>
-<li><code>latch_active_low</code> &rarr; <strong>M2</strong>. Transparent-LOW latch:
-  the polarity that must survive into an authoritative <code>posclk</code>.</li>
-<li><code>latch_master_slave</code> &rarr; <strong>M3 + M5</strong>. The key
-  commit-class test. Must come out at ONE cycle of latency, and must NOT be
-  "fixed" by teaching the model transparency — under the scope ruling transparency
-  is never modeled; opposite-phase commit classes are what make it correct.</li>
-<li><code>latch_icg</code> &rarr; <strong>M4</strong>. The real-world blocker:
-  structurally identical to core-et's <code>prim_clk_gate</code>, whose UNKNOWN
-  cascades through the whole minion full-design LEC. Also pins the two
-  clock-blindness bugs.</li>
-<li><code>latch_mixed_flop</code> &rarr; <strong>M4 + M5</strong>. Latch feeding a
-  posedge flop — two state elements in two commit classes, the "mixed" case called
-  out in the original request.</li>
+<li>Six equiv pairs in <code>inou/prp/tests/equiv/</code>
+  (<code>latch_enable_hold</code> — the yosys latch-INFERENCE spelling
+  (<code>always @(*)</code> + blocking) — plus <code>latch_hold_basic</code>,
+  <code>latch_active_low</code>, <code>latch_master_slave</code>,
+  <code>latch_icg</code>, <code>latch_mixed_flop</code>), all <code>pub mod</code>,
+  all PROVEN via lgcheck's bounded miter; the matching
+  <code>prp-v2prp-latch_*</code> reverse targets all pass. Run one:
+  <code>bazel test //inou/prp:prp-equiv-latch_icg</code>.</li>
+<li><code>lhd/tests/lec_latch_polarity_test.sh</code> — pins the lgyosys latch
+  oracle: identical pair PROVEN (vacuous-guard) AND a port-matched
+  transparent-high vs transparent-low flip REFUTED. Divergence depth 1 &le; the
+  5-step miter bound.</li>
+<li><code>inou/prp/tests/sim/edge_negpos.prp</code> — the neg&rarr;pos mixed-edge
+  chain, where today's unified commit and Icarus agree; M5 must not regress it.</li>
 </ul>
 
-<p>The matching <code>prp-v2prp-latch_*</code> targets (golden <code>.v</code> read
-  through slang, Pyrope regenerated) <strong>already PASS</strong> and are NOT
-  fixme — the slang &rarr; Pyrope latch path is live-tested from today.</p>
+<p><strong>FIXME trackers — each names the milestone that flips it:</strong></p>
+<ul class="subtasks">
+<li><code>inou/prp/tests/fixme/latch_sim_hold.prp</code>,
+  <code>latch_sim_low.prp</code>, <code>latch_sim_master_slave.prp</code>
+  &rarr; <strong>M5</strong> (M0 changes the failure mode). Sim fixtures with
+  per-cycle asserts, schedules iverilog-validated, observation-visibility rule
+  applied (asserts only at closed ticks, d stable across closing edges).</li>
+<li><code>inou/prp/tests/fixme/flop_sim_posneg.prp</code> &rarr;
+  <strong>M5</strong>. The pos&rarr;neg half-cycle transfer: the relational
+  assert <code>qb == qa</code> (origin-free — no dependence on poke phase) fails
+  today, passes under Icarus semantics.</li>
+<li><code>inou/prp/tests/fixme/flop_sim_gated_clock.prp</code> &rarr;
+  <strong>M5</strong>. Gated-clock flop must HOLD when en=0; the schedule only
+  exercises en falls (an en RISE racing the clock rise is the glitch hazard ICGs
+  exist to prevent — legitimately model-dependent, so not observed).</li>
+<li><code>inou/prp/tests/fixme/latch_verify_hold.prp</code>,
+  <code>latch_verify_low.prp</code> &rarr; <strong>M4</strong>. BMC twins of the
+  sim fixtures (encoder refusal today = UNKNOWN/exit 0; the harness fails on
+  the missing verdicts). The low twin refutes if the polarity fold is wrong
+  while the high twin still proves — the anti-double-negation tripwire.</li>
+<li><code>inou/prp/tests/fixme/flop_verify_posneg.prp</code> &rarr;
+  <strong>M4</strong>. The stimulus assert PROVES (inductively) even today; the
+  half-cycle-transfer assert REFUTES at cycle 3 under the blind encoder. Pins
+  the end-of-cycle observation model.</li>
+<li><code>lhd/tests/lec_clock_blindness_test.sh</code> &rarr; <strong>M4</strong>.
+  The three flop false-PROVEN reproducers; requires verbatim REFUTED (UNKNOWN
+  keeps it red) and asserts verdict presence first.</li>
+<li><code>lhd/tests/latch_contract_check_test.sh</code> &rarr; <strong>M3</strong>.
+  Self-gated latch, Q&rarr;own-D, and simultaneous-transparent pair must each be
+  REJECTED with the directed diagnostic; all three compile clean today.</li>
+</ul>
 
-<p><strong>Clock-blindness tracker — WRITTEN 2026-07-20:</strong>
-  <code>lhd/tests/lec_clock_blindness_test.sh</code>, tagged <code>fixme</code> in
-  <code>lhd/tests/BUILD</code>. All three cases were reproduced empirically and
-  <strong>all three return PROVEN today</strong>; each must REFUTE after M4. The
-  script asserts a verdict is actually PRESENT before checking it — an
-  empty/errored run must never read as success, which is the same vacuous-gate
-  failure mode this page warns about (the first draft of this very script hit it:
-  an unbound-variable typo made the lec call fail, the output was empty, and the
-  grep "passed"). Run it with:
-  <code>bazel test //lhd/tests:lec_clock_blindness_test --test_tag_filters=</code></p>
+<p><strong>Dual-fixture conventions</strong> (every sim+BMC twin follows these;
+  they exist because of verified harness traps, not style):</p>
+<ul class="subtasks">
+<li>State the property TWICE: design-body asserts for
+  <code>lhd formal verify</code>, test-block asserts for <code>lhd sim</code> —
+  the two planes cannot see each other today (2f-formal runtime-fallback item
+  merges them; when it lands, collapse the twins).</li>
+<li><code>assert(guard implies p)</code>, never
+  <code>if guard { assert(p) }</code> — the formal obligation DROPS the if-guard
+  and refutes spuriously at cycle 0 (verified; bug to file).</li>
+<li>Snapshot every reg before any write (<code>const c = cyc</code>) — a reg
+  read after a write sees the written next-state.</li>
+<li>Closed tb: ZERO data inputs; all stimulus is a pure function of an
+  explicitly-initialized cycle counter (a free input is universally quantified
+  by BMC; an init-less reg yields free-initial-state witnesses sim cannot
+  replay — see <code>tests/verify/freeinit_cex.prp</code>). A cyclic schedule
+  (uW counter wrapping into the same window pattern) lets obligations prove
+  INDUCTIVELY, not just to the bound.</li>
+<li>Validate every assert schedule against iverilog on the golden BEFORE baking
+  it (the independent-oracle rule applied to test authorship — every schedule
+  above was).</li>
+<li>REFUTED cycle numbers include the 2-cycle reset prologue
+  (<code>formal.reset_cycles=2</code>, phase=after_reset): design-cycle k
+  reports "REFUTED at cycle k+2".</li>
+</ul>
 
-<p><strong>Still to write:</strong> a time-borrowing design that must be REJECTED
-  by M3's contract check (needs M3's diagnostic to exist first), and a
-  gated-clock SIM tracker — the sim half of the same bug computes the gate as dead
-  code and advances the flop every cycle while reporting success.</p>
+<p><strong>Still to write:</strong> the M3 rule-4 coincident-edge shape (needs the
+  diagnostic to exist); M6 multi-clock + coincident-edge fixtures; M7
+  <code>$dlatchsr</code>/<code>$adlatch</code> import fixtures and an async-reset
+  latch pair; the M0 fail-closed negative tests (multi-clock refusal, gated-clock
+  refusal, latch-attr-drop error, uninitialized-reg-in-comb error).</p>
 
 <h2 id="refs">References</h2>
 <ul class="subtasks">
@@ -351,14 +626,17 @@
   needed under the no-time-borrowing scope; kept in case scope widens.</li>
 <li>IBM US7624363 — LEC normalization: L1 &rarr; buffers, L2 &rarr; unit-delay
   registers, set all clocks constant 1, then ordinary register correspondence
-  works with no solver changes.</li>
+  works with no solver changes. (The L1-buffer rule is what M3's contract
+  condition 4 either applies or rejects.)</li>
 <li>Bjesse &amp; Kukula, ICCAD'05 — extension to gated / overlapping clocks
   (ternary simulation for clock-like periodic signals; 41% average register
   reduction).</li>
 <li>Yosys <code>async2sync</code> / <code>clk2fflogic</code> — the mux-in-front
   lowering (<code>Q = EN ? D : Q_prev</code>, mux output IS Q). This is the general
   path we do NOT need under the scope ruling; BTOR2/AIGER/FIRRTL/CIRCT have no
-  level-sensitive primitive, which is why everyone lowers this way.</li>
+  level-sensitive primitive, which is why everyone lowers this way. (Note the
+  observable difference: the mux-OUTPUT-as-Q form models transparency; our
+  flop-output-as-Q form does not — the both-sides rule exists because of this.)</li>
 <li>Verilator: domain/trigger-gated evaluation (~100&times;, their number); ESSENT
   (DAC'20) activity skipping 1.5–11.5&times;; GSIM (2025) a further 2.5&times;.</li>
 </ul>

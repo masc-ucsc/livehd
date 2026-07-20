@@ -1,0 +1,56 @@
+/*
+:name: latch_sim_master_slave
+:type: simulation
+*/
+
+// todo/livehd/2f-latch tracker (fixme) — THE ONE-CYCLE-LATENCY TEST. A
+// master/slave latch pair on opposite phases of `clk` IS a posedge flop: d
+// presented while clk is low must appear on q ONE full clk period later, not
+// two. Under the no-time-borrowing scope ruling this must come out right from
+// opposite-phase COMMIT CLASSES alone (master transparent-low commits at the
+// RISE, slave transparent-high commits at the FALL) — a naive "latch = flop"
+// model without commit classes gives TWO cycles, silently. Flips green at M5
+// (and depends on M3's classifier). Must NOT be fixed by modeling transparency.
+//
+// `clk` here is a DATA input toggled by the test (one poke per half-period, so
+// one full clk cycle = two ticks). Asserts observe q only while the slave is
+// CLOSED (clk == 0): at slave-open ticks real transparency shows the master
+// value early (Icarus: q=77 already at c3) while a commit-class model may hold
+// the previous commit — both are acceptable, so those ticks are not observed.
+// Schedule validated against iverilog (always_latch pair golden): q at end of
+// c0..c4 = x,5,5,77,77; asserts only at c2 and c4.
+pub mod ms8(clk:bool, d:u8) -> (q:u8@[0]) {
+  reg m:u8:[latch=true]
+  reg s:u8:[latch=true]
+  q = s
+  if !clk {
+    m = d
+  }
+  if clk {
+    s = m
+  }
+}
+
+test ms8.one_cycle_latency {
+  mut acc = ms8
+  tick 5 {
+    // c0: clk=0 master opens on d=5; c1: clk=1 master commits 5, slave opens;
+    // c2: clk=0 slave commits 5 (assert), master opens on 77; c3: clk=1 master
+    // commits 77, slave opens; c4: clk=0 slave commits 77 (assert)
+    acc.clk = (clock == 1) or (clock == 3)
+    mut dv:u8 = 33
+    if clock <= 1 {
+      dv = 5
+    } elif (clock == 2) or (clock == 3) {
+      dv = 77
+    }
+    acc.d = dv
+    step
+    if clock == 2 {
+      assert(acc.q == 5, "one full clk period after presenting d=5 (not two)")
+    }
+    if clock == 4 {
+      assert(acc.q == 77, "second value also arrives after one period")
+    }
+  }
+}

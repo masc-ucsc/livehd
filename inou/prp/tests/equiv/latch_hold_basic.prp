@@ -1,0 +1,32 @@
+/*
+:name: latch_hold_basic
+:type: equiv
+:verilog_top: latch_hold_basic.lhold8
+:pyrope_top: lhold8
+*/
+
+// LIVE equiv test (promoted 2026-07-20, todo/livehd/2f-latch). A plain
+// transparent-high latch in the shipped `reg NAME:TYPE:[latch=true]` spelling,
+// as a `pub mod` (a comb may hold NO reg — the earlier comb spelling rode an
+// initializer-keyed hole in the reg-in-comb check; see 2f-latch M0).
+// lgcheck's bounded-miter stage decides latch designs, so this pair PROVES
+// today and guards the whole prp -> tolg -> cgen latch path.
+//
+// It survives the M1 cgen bugs only by luck of its netlist shape — the bugs it
+// sits next to (tracked in 2f-latch M1, do not regress them further):
+//   * cgen emits `always @* begin if (en) l = din; end` — BLOCKING `=` in
+//     `always @*`. yosys re-INFERS the latch (so this LEC still proves) but our
+//     own slang reader classifies that as plain comb, so Verilog -> slang does
+//     not round-trip. Fix: emit `always_latch` + `<=`.
+//   * `process_latch` reads din/enable through `get_wire_or_const`, so an
+//     INLINED single-fanout driver would emit a bare undeclared identifier
+//     (not triggered here: the din/enable muxes have fanout >= 2).
+//   * width inflation: a u8 latch declares `reg [8:0] l` (general signed
+//     magnitude+1 cgen convention, flops too — cosmetic today).
+pub mod lhold8(en:bool, d:u8) -> (q:u8@[0]) {
+  reg l:u8:[latch=true]
+  if en {
+    l = d
+  }
+  q = l
+}

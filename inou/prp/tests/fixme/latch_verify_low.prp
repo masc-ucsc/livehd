@@ -1,0 +1,41 @@
+/*
+:name: latch_verify_low
+:type: verify
+:top_module: llow_tb
+:verify_bound: 12
+:verify_proven: 2
+:verify_refuted: 0
+*/
+
+// todo/livehd/2f-latch tracker (fixme) — BMC twin of tests/fixme/latch_sim_low
+// .prp: transparent-LOW latch (open while the gate is 0, commits at the RISE
+// of the gate — the ICG-enable / master-half polarity), same self-checking
+// window-capture-and-hold property as latch_verify_hold. See that file's
+// header for the dual-fixture conventions (property stated twice, `implies`
+// form, snapshot-before-write, closed-cycle observation, cyclic schedule).
+// TODAY: encoder refusal -> UNKNOWN/exit 0 -> harness fails on missing
+// verdicts. Flips green at 2f-latch M4. The polarity must NOT be lost by the
+// encoding: if M4 folds the enable cone wrong (the posclk double-negation
+// hazard), this refutes while latch_verify_hold still proves.
+pub mod llow_tb() -> (ok:bool@[0]) {
+  reg cyc:u3 = 0
+  reg l:u8:[latch=true]
+  const c  = cyc
+  const lq = l
+  const g  = not ((c == 0) or (c == 4))   // gate LOW (open) at c==0 and c==4
+  mut dv:u8 = 42
+  if c <= 1 {
+    dv = 5
+  } elif c == 2 {
+    dv = 99
+  } elif c == 3 {
+    dv = 77
+  }
+  if !g {
+    l = dv
+  }
+  wrap cyc += 1
+  ok = lq#[0] == 0
+  assert(((c >= 1) and (c <= 3)) implies (lq == 5), "latch captured 5 at the rising gate and holds it")
+  assert((c == 5) implies (lq == 42), "second window captured 42")
+}

@@ -1,0 +1,34 @@
+/*
+:name: latch_icg
+:type: equiv
+:verilog_top: latch_icg.icg
+:pyrope_top: icg
+*/
+
+// LIVE equiv test (promoted 2026-07-20, todo/livehd/2f-latch) — THE REAL-WORLD
+// SHAPE. An integrated clock gate: a transparent-low latch samples the enable
+// while the clock is low, and the gated clock is `clk & enl`. The latch is
+// there to make the enable glitch-free; this is the canonical latch application
+// and it is what `prim_clk_gate` in core-et is, whose UNKNOWN cascades up
+// through the whole minion full-design LEC. This pair guards the ICG STRUCTURE
+// end to end (prp -> tolg -> cgen -> lgcheck).
+//
+// What it does NOT guard — the two live clock-soundness bugs, which need
+// event-driven or clock-aware checkers (2f-latch M4/M5; lgcheck itself is
+// edge- and gate-blind for flops, so an equiv PASS here says nothing about
+// what the gated clock DOES):
+//   * LEC never reads `clock_pin`/`posclk` (pass/lec/encode.cpp), so it FALSELY
+//     PROVES a gated-clock flop equivalent to an ungated one — tracked by
+//     lhd/tests/lec_clock_blindness_test.sh;
+//   * sim computes the gate expression as DEAD CODE and advances the flop every
+//     cycle anyway — tracked by tests/fixme/flop_sim_gated_clock.prp.
+// Under 2f-latch M4 the ICG is folded into a clock-enable on the driven flops as
+// a BOTH-SIDES normalization (never a one-sided abstraction). Nobody proves ICGs
+// in industry practice; they normalize them away.
+pub mod icg(clk:bool, en:bool) -> (gclk:bool@[0]) {
+  reg enl:bool:[latch=true]
+  if !clk {
+    enl = en
+  }
+  gclk = clk and enl
+}

@@ -1,0 +1,31 @@
+/*
+:name: latch_mixed_flop
+:type: equiv
+:verilog_top: latch_mixed_flop.mixed8
+:pyrope_top: mixed8
+*/
+
+// LIVE equiv test (promoted 2026-07-20, todo/livehd/2f-latch) — MIXED latch +
+// flop, which the user called out explicitly ("lec with latches only or
+// mixed"). A transparent-high latch feeds an ordinary posedge flop. The two
+// state elements land in DIFFERENT commit classes: the latch closes on the
+// falling edge of `en`, the flop commits on the rising edge of `clk` (the mod's
+// `clk` input is picked up as the flop's clock; the emitted Verilog clocks
+// `always @(posedge clk)` matching the golden).
+//
+// This is where a unified state model earns its keep: today `is_type_flop`
+// excludes Latch (graph/node_util.hpp:123-126) while `is_type_register`
+// includes it, so every pass gating on `is_type_flop` silently skips latches —
+// the simulator never emits the latch at all and its `q` is never bound,
+// producing a misleading `combinational-loop` error instead of a real
+// diagnostic (2f-latch M0 replaces the diagnostic, M5 implements latch sim;
+// tracked by tests/fixme/latch_sim_hold.prp and friends).
+pub mod mixed8(clk:bool, en:bool, d:u8) -> (q:u8@[1]) {
+  reg l:u8:[latch=true]
+  reg f:u8
+  q = f     // f is written UNCONDITIONALLY below, so it classifies as a
+  if en {   // pipeline stage and its read lands at @[1] (hence q:u8@[1])
+    l = d
+  }
+  f = l
+}

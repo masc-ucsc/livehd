@@ -51,8 +51,11 @@ build() {
     -q >"$W/$name.log" 2>&1 || fail "compile $name: $(cat "$W/$name.log")"
 }
 
-# Assert that two lgraphs are NOT proven equivalent.
-expect_not_proven() {
+# Assert that two lgraphs REFUTE. Requiring a verbatim REFUTED (not merely
+# "not PROVEN") matters: an M4 encoder that merely DEGRADED these pairs to
+# UNKNOWN would satisfy a weaker check while the M4 gate demands REFUTED —
+# inconclusive must keep this tracker red.
+expect_refuted() {
   local impl="$1" ref="$2" what="$3"
   local out
   out="$("$LHD" lec --impl "lg:$W/lg_$impl" --ref "lg:$W/lg_$ref" --top dut \
@@ -65,7 +68,10 @@ expect_not_proven() {
   if echo "$out" | grep -qE "'dut' PROVEN"; then
     fail "$what: LEC returned PROVEN for two NON-equivalent designs (clock blindness)"
   fi
-  echo "ok: $what did not falsely prove"
+  if ! echo "$out" | grep -qE "'dut' REFUTED"; then
+    fail "$what: verdict is inconclusive (UNKNOWN) — the M4 gate demands a REFUTED"
+  fi
+  echo "ok: $what REFUTED"
 }
 
 # ---------------------------------------------------------------- case 1: gate
@@ -113,8 +119,8 @@ for m in gated ungated negedge posedge twoclk oneclk; do
   build "$m"
 done
 
-expect_not_proven gated   ungated  "gated vs ungated clock"
-expect_not_proven negedge posedge  "negedge vs posedge flop"
-expect_not_proven twoclk  oneclk   "two clock domains vs one"
+expect_refuted gated   ungated  "gated vs ungated clock"
+expect_refuted negedge posedge  "negedge vs posedge flop"
+expect_refuted twoclk  oneclk   "two clock domains vs one"
 
 echo "PASS: lec is clock-aware (no false PROVEN on gate / edge / domain differences)"

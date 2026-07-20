@@ -1,0 +1,42 @@
+/*
+:name: latch_sim_low
+:type: simulation
+*/
+
+// todo/livehd/2f-latch tracker (fixme). Simulation of a transparent-LOW latch
+// (open while the gate is 0, commits at the RISE of the gate) — the polarity
+// of every ICG enable latch and every master half of a master/slave pair.
+// Mirror of latch_sim_hold; same assert-visibility rule (observe q only while
+// CLOSED, keep d stable across the closing edge). Flips green at M5.
+pub mod llow8(g:bool, d:u8) -> (q:u8@[0]) {
+  reg l:u8:[latch=true]
+  q = l
+  if !g {
+    l = d
+  }
+}
+
+test llow8.window_capture_and_hold {
+  mut acc = llow8
+  tick 6 {
+    // c0: gate LOW -> open on d=5; c1: gate rises with d STABLE -> capture;
+    // c2-c3: wiggle d while closed; c4: reopen on d=42; c5: close, d stable
+    acc.g = not ((clock == 0) or (clock == 4))
+    mut dv:u8 = 42
+    if clock <= 1 {
+      dv = 5
+    } elif clock == 2 {
+      dv = 99
+    } elif clock == 3 {
+      dv = 77
+    }
+    acc.d = dv
+    step
+    if (clock >= 1) and (clock <= 3) {
+      assert(acc.q == 5, "latch captured 5 at the rising gate and holds it")
+    }
+    if clock == 5 {
+      assert(acc.q == 42, "second window captured 42")
+    }
+  }
+}

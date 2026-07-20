@@ -1,0 +1,55 @@
+/*
+:name: latch_verify_hold
+:type: verify
+:top_module: lhold_tb
+:verify_bound: 12
+:verify_proven: 2
+:verify_refuted: 0
+*/
+
+// todo/livehd/2f-latch tracker (fixme) — BMC twin of the sim fixture
+// tests/fixme/latch_sim_hold.prp: the SAME window-capture-and-hold property,
+// self-checking (a cycle counter drives the stimulus, so there are no free
+// data inputs for the solver to abuse), stated as design-body asserts for
+// `lhd formal verify`. TODAY the shared encoder refuses the Latch cell
+// (pass/lec/encode.cpp:830-833 "sequential op 'latch' not supported yet") and
+// the run is UNKNOWN/exit 0 — the harness fails on the missing verdicts.
+// Flips green when the native encoder learns the commit-class latch encoding
+// (2f-latch M4).
+//
+// CONVENTIONS this fixture bakes (mirror them in any new dual fixture):
+//   * the property is stated TWICE across the twin files — body asserts here,
+//     test-block asserts in the sim twin — because today test-block asserts
+//     are invisible to formal verify AND body asserts are not executed by
+//     `lhd sim` (cgen_sim.cpp skips lgassert subs; 2f-formal runtime-fallback);
+//   * `implies` form, NOT `if guard { assert(...) }`: an assert inside an if
+//     block LOSES its guard when hoisted into a formal obligation and refutes
+//     spuriously at cycle 0 (verified 2026-07-20);
+//   * every reg is SNAPSHOT before any write (`const c = cyc`): a reg read
+//     after a write sees the written next-state, off-by-one-ing the schedule;
+//   * asserts observe the latch only at CLOSED cycles (assert-visibility rule,
+//     see the sim twin) — the schedule is cyclic (u3 counter wraps into the
+//     same window pattern), which is what lets the obligations prove
+//     INDUCTIVELY, not just to the bound (verified on the flop analog).
+pub mod lhold_tb() -> (ok:bool@[0]) {
+  reg cyc:u3 = 0
+  reg l:u8:[latch=true]
+  const c  = cyc
+  const lq = l
+  const en = (c == 0) or (c == 4)   // window OPEN at c==0 and c==4
+  mut dv:u8 = 42
+  if c <= 1 {
+    dv = 5
+  } elif c == 2 {
+    dv = 99
+  } elif c == 3 {
+    dv = 77
+  }
+  if en {
+    l = dv
+  }
+  wrap cyc += 1
+  ok = lq#[0] == 0
+  assert(((c >= 1) and (c <= 3)) implies (lq == 5), "latch captured 5 at the closing edge and holds it")
+  assert((c == 5) implies (lq == 42), "second window captured 42")
+}

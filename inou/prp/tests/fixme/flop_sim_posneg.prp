@@ -1,0 +1,43 @@
+/*
+:name: flop_sim_posneg
+:type: simulation
+*/
+
+// todo/livehd/2f-latch tracker (fixme) — MIXED-EDGE FLOPS, the half-cycle
+// transfer. A posedge flop feeds a negedge flop on the SAME clock: the second
+// stage samples at the falling edge, half a cycle after the first stage loaded,
+// so at every end-of-period observation qb == qa (Icarus, settled sampling
+// after both edges — verified). `lhd sim` today commits ALL flops in ONE
+// unified loop (cgen_sim.cpp:2322; posclk only picks a VCD slot), so the chain
+// behaves as two posedge stages and qb lags qa by a full cycle: the assert
+// FAILS. Flips green at M5 (per-(clock,edge) commit regions).
+//
+// NOTE: no in-repo FORMAL oracle can see this bug either — lgcheck/lgyosys is
+// edge-blind for flops (falsely proves negedge==posedge), and the native cvc5
+// encoder never reads posclk (lhd/tests/lec_clock_blindness_test.sh). Until M4
+// only event-driven sim (iverilog) discriminates edges, which is why this is a
+// SIM tracker and why an equiv pair of this design would be vacuous wrt edges.
+pub mod pn8(clk:bool, d:u8) -> (qa:u8@[1], qb:u8@[2]) {
+  reg a:u8 = 0
+  reg b:u8:[clock_pin=ref clk, posclk=false] = 0
+  qa = a
+  qb = b
+  a = d
+  b = a
+}
+
+test pn8.half_cycle_transfer {
+  mut acc = pn8
+  tick 5 {
+    acc.d = 11 + (17 * clock)   // distinct value every cycle (max 79, fits u8)
+    step
+    // Poke visibility: the value poked this tick is committed by the posedge
+    // stage at this tick's rise (holds today AND under Icarus).
+    assert(acc.qa == 11 + (17 * clock), "posedge stage loads this tick's d")
+    if clock >= 1 {
+      // The half-cycle transfer: the negedge stage sampled qa at THIS period's
+      // falling edge, so post-settle qb equals qa — not last cycle's qa.
+      assert(acc.qb == acc.qa, "negedge stage samples the SAME period's qa")
+    }
+  }
+}

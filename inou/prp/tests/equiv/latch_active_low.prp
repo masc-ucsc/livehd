@@ -5,10 +5,12 @@
 :pyrope_top: llow8
 */
 
-// FIXME tracker for todo/livehd/2f-latch (M1, M2). A transparent-LOW latch: Q
-// follows D while the gate is 0 and holds while it is 1. This is the master half
-// of every master/slave pair and the enable latch of every ICG, so its polarity
-// must survive end to end.
+// LIVE equiv test (promoted 2026-07-20, todo/livehd/2f-latch). A
+// transparent-LOW latch: Q follows D while the gate is 0 and holds while it is
+// 1 — the master half of every master/slave pair and the enable latch of every
+// ICG. lgcheck's bounded miter DISCRIMINATES enable polarity (a port-matched
+// polarity flip refutes — see lhd/tests/lec_latch_polarity_test.sh), so this
+// PROVEN is meaningful, not vacuous.
 //
 // Today polarity is NOT carried by the Latch cell's `posclk` pin on the
 // Pyrope/slang path — it is baked into the enable cone (`enable = !clk`), and
@@ -16,8 +18,8 @@
 // `posclk` authoritative and cross-checks it against the enable cone; a
 // disagreement between the two is the "posclk double-negation" miscompile that a
 // symmetric before/after gate cannot see (hence the cross-model gating rule).
-// PROMOTE when M2 lands.
-pub comb llow8(clk:bool, d:u8) -> (q:u8) {
+// This pair is the regression guard for that change.
+pub mod llow8(clk:bool, d:u8) -> (q:u8@[0]) {
   reg l:u8:[latch=true]
   if !clk {
     l = d

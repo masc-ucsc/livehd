@@ -210,6 +210,38 @@ cc_test(
         # tolg errors "wire 'io.a' is never driven" on valid code. See the
         # fixture header for the root-cause chain and fix direction.
         "wire_field_const_store",
+        # todo/livehd/2f-latch sim trackers (:type: simulation). Every assert
+        # schedule is validated against iverilog on the matching golden (see
+        # each header). Promote (move into tests/sim/ + drop from this list)
+        # when the named milestone lands:
+        #   latch_sim_hold / latch_sim_low / latch_sim_master_slave -> M5
+        #     (today: cgen_sim dies with the misleading `combinational-loop`
+        #      error; M0 turns that into a real "latch unsupported" diagnostic,
+        #      M5 makes these pass via commit classes)
+        #   flop_sim_posneg      -> M5 (pos->neg half-cycle transfer; today the
+        #     unified commit loop lags the negedge stage by a full cycle)
+        #   flop_sim_gated_clock -> M5 (sim honors clock_pin; today the gate is
+        #     dead code and the flop loads every tick)
+        # The AGREEING mixed-edge direction (neg->pos) runs LIVE as
+        # tests/sim/edge_negpos.prp so M5 cannot regress it.
+        "latch_sim_hold",
+        "latch_sim_low",
+        "latch_sim_master_slave",
+        "flop_sim_posneg",
+        "flop_sim_gated_clock",
+        # todo/livehd/2f-latch BMC twins (:type: verify) of the sim trackers
+        # above — the SAME self-checking properties as design-body asserts for
+        # `lhd formal verify` (stated twice because test-block asserts are
+        # invisible to verify and body asserts are not executed by sim; see
+        # each header for the dual-fixture conventions). Promote at M4:
+        #   latch_verify_hold / latch_verify_low -> today the shared encoder
+        #     refuses the Latch cell (UNKNOWN/exit 0 vacuous pass; the harness
+        #     fails on the missing verdicts)
+        #   flop_verify_posneg -> today posclk is abstracted out of the
+        #     encoding, so the half-cycle-transfer assert REFUTES at cycle 3
+        "latch_verify_hold",
+        "latch_verify_low",
+        "flop_verify_posneg",
     ]
 ]
 
@@ -345,19 +377,16 @@ cc_direct_headers(
             # signed_one_bit_cmp: known-failing miscompile tracker (1-bit signed
             # ordered compare reads unsigned). Run via the fixme target below.
             "tests/equiv/signed_one_bit_cmp.prp",
-            # Known-failing semantic tracker. Run via the fixme target below.
-            "tests/equiv/latch_enable_hold.prp",
-            # Latch trackers for todo/livehd/2f-latch — the lgraph and the
-            # emitted Verilog are already close, but cgen emits `always @*`
-            # with a BLOCKING assign (so it cannot round-trip as a latch) and
-            # reads din/enable with get_wire_or_const (undeclared identifier),
-            # and neither sim nor the native LEC encoder handles a Latch at
-            # all. Each file's header names the milestone that promotes it.
-            "tests/equiv/latch_hold_basic.prp",
-            "tests/equiv/latch_active_low.prp",
-            "tests/equiv/latch_master_slave.prp",
-            "tests/equiv/latch_icg.prp",
-            "tests/equiv/latch_mixed_flop.prp",
+            # NOTE: the six latch_* pairs (latch_enable_hold, latch_hold_basic,
+            # latch_active_low, latch_master_slave, latch_icg, latch_mixed_flop)
+            # used to be excluded here as todo/livehd/2f-latch trackers. They
+            # were PROMOTED into the glob (2026-07-20): lgcheck's cascade ends
+            # in a bounded miter that DECIDES latch designs (equiv_simple alone
+            # cannot discharge $dlatch), so the forward equivalence proves
+            # today. The still-broken latch surfaces (sim, native cvc5 LEC,
+            # Verilog round-trip through slang) are tracked by the sim/verify
+            # fixtures and lhd/tests scripts named in todo/livehd/2f-latch.html,
+            # NOT by these equiv pairs.
             # NOTE: struct_init_whole_read / instance_conn_struct_ident /
             # struct_selfref_pattern / instance_out_struct_ident used to be
             # excluded here (their SystemVerilog '{...} / struct-typed-wire
@@ -411,18 +440,10 @@ sh_test(
         # LEC/sim observe state only after clock updates), and the pair runs
         # as :type: equiv_slang since yosys read_verilog hard-errors on the
         # compound `if (reset || arst)` guard (proc_dff multi-edge).
-        "latch_enable_hold",
-        # todo/livehd/2f-latch trackers. Promote each as its milestone lands:
-        #   latch_hold_basic   -> M1 (cgen always_latch + `<=`, get_expression)
-        #   latch_active_low   -> M2 (posclk authoritative for polarity)
-        #   latch_master_slave -> M3 + M5 (commit classes, three-region tick)
-        #   latch_icg          -> M4 (clock-aware LEC + both-sides ICG fold)
-        #   latch_mixed_flop   -> M4 + M5 (unified state model)
-        "latch_hold_basic",
-        "latch_active_low",
-        "latch_master_slave",
-        "latch_icg",
-        "latch_mixed_flop",
+        # The six latch_* pairs were PROMOTED out of this list (2026-07-20):
+        # rewritten to `pub mod` + the shipped `reg NAME:TYPE:[latch=true]`
+        # spelling (latch_enable_hold included), and the lgcheck bounded-miter
+        # stage proves every pair today — see the equiv-glob note above.
         # struct_init_whole_read / instance_conn_struct_ident /
         # struct_selfref_pattern / instance_out_struct_ident were PROMOTED out
         # of this list (2026-07-03): `:gold_reader: slang` reads their goldens
@@ -450,12 +471,14 @@ sh_test(
 # green is the fix:
 #   bazel test //inou/prp:prp-v2prp-mem_rom --test_tag_filters=
 _V2PRP_FIXME = [
-    # Known-failing semantic tracker: latch inference does not have a supported
-    # Pyrope source equivalent yet.
+    # latch_enable_hold was PROMOTED out of this list (2026-07-20): the shipped
+    # `reg NAME:TYPE:[latch=true]` spelling IS the Pyrope source equivalent of
+    # an inferred latch, the fixture was rewritten to it, and the reverse
+    # direction passes (the lec leg is honest-inconclusive under cvc5 until the
+    # native encoder learns latches — 2f-latch M4).
     # async_reset_enable was PROMOTED out of this list (2026-07-03): the slang
     # reader now demotes an edge-triggered reset with no extractable async rung
     # to a synchronous one (async-reset-as-sync warning), so the .v round-trips.
-    "latch_enable_hold",
     # instance_out_struct_ident (instance-output struct dual identity,
     # ExeUnitImp_4 / fp-convert family) was PROMOTED out of this list:
     # assign_to splits a whole value onto the bundle leaves, so the emitted

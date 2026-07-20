@@ -472,6 +472,38 @@ sh_test(
     tags = ["fixme"],
 )
 
+# LIVE oracle-pinning test for todo/livehd/2f-latch (M0 "pin the lgyosys
+# latch-LEC verdict" — resolved 2026-07-20): lgcheck's bounded-miter stage
+# DECIDES latch designs (equiv_simple alone cannot discharge $dlatch) and
+# genuinely DISCRIMINATES latch enable polarity (a port-matched
+# transparent-high vs transparent-low flip REFUTES with a counterexample).
+# This is the independent latch oracle the 2f-latch cross-model gating rule
+# uses. Note the power is latch-polarity only: for FLOP clock/edge differences
+# lgcheck is as blind as the native encoder (lec_clock_blindness_test above).
+sh_test(
+    name = "lec_latch_polarity_test",
+    size = "large",
+    srcs = ["lec_latch_polarity_test.sh"],
+    data = [
+        "//inou/yosys:scripts",
+        "//lhd",
+    ],
+)
+
+# FIXME tracker for todo/livehd/2f-latch (M3) — the latch CONTRACT CHECK. The
+# flop-with-enable/commit-class latch model is an abstraction with a
+# precondition (no time borrowing); M3 must fail closed with a directed
+# diagnostic on the three violation shapes (self-gated latch, Q->own-D comb
+# path, comb path between simultaneously-transparent latches). All three
+# compile clean and silently mis-lower today; the script fails until M3 lands.
+sh_test(
+    name = "latch_contract_check_test",
+    size = "large",
+    srcs = ["latch_contract_check_test.sh"],
+    data = ["//lhd"],
+    tags = ["fixme"],
+)
+
 # Regression for the lec leaf<->flat-bus port correspondence: a design whose
 # tuple-typed ports compile to per-leaf dotted io (`req.a`, `req.b`) must
 # PROVE against the same design compiled with ONE flat packed bus port

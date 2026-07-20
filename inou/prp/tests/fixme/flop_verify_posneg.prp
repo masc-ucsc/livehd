@@ -1,0 +1,42 @@
+/*
+:name: flop_verify_posneg
+:type: verify
+:top_module: pn_tb
+:verify_bound: 10
+:verify_proven: 2
+:verify_refuted: 0
+*/
+
+// todo/livehd/2f-latch tracker (fixme) — BMC twin of the sim fixture
+// tests/fixme/flop_sim_posneg.prp: a posedge stage feeding a negedge stage on
+// the same (implicit) clock. Observed at cycle boundaries (all edges settled),
+// the negedge stage holds the SAME period's posedge value: b == a every
+// cycle — the half-cycle transfer (validated against iverilog in the sim
+// twin). TODAY pass/lec/encode.cpp ABSTRACTS posclk out of the encoding
+// (encode.cpp:679), so `b` encodes as a second posedge stage, b lags a by a
+// full cycle, and the relational assert REFUTES -> the harness fails on the
+// verdict counts. Flips green at 2f-latch M4 (commit-class-aware encoder).
+//
+// OBSERVATION MODEL this fixture pins for M4: an in-design assert samples the
+// END-OF-CYCLE state (all edges of the period settled — the negedge commit
+// included), matching Icarus settled sampling and `lhd sim` post-step reads.
+// The alternative (sample between rise and fall) would make the correct
+// expected value b == previous a — i.e. indistinguishable from the blind
+// encoding — so the three checkers must standardize on end-of-cycle.
+// Conventions (see latch_verify_hold.prp): property stated twice across the
+// twins, `implies` form, snapshot-before-write (`aq` is a.q — also exactly
+// what makes b's din the WIRE a and not a's next-state).
+pub mod pn_tb() -> (ok:bool@[0]) {
+  reg cyc:u3 = 0
+  reg a:u8 = 0
+  reg b:u8:[posclk=false] = 0
+  const c  = cyc
+  const aq = a
+  const bq = b
+  b = aq
+  a = 11 + (16 * c)   // distinct value every cycle (max 123, fits u8)
+  wrap cyc += 1
+  ok = bq#[0] == 0
+  assert((c >= 1) implies (aq == 11 + (16 * (c - 1))), "posedge stage loaded last cycle's stimulus")
+  assert((c >= 1) implies (bq == aq), "negedge stage samples the SAME period's a (half-cycle transfer)")
+}
