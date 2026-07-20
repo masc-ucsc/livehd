@@ -618,6 +618,32 @@
   — so both designs still compute <code>d</code> every step and are genuinely
   equal from cycle 1 on. Keying is necessary for correspondence but can never,
   alone, refute a clocking difference.</p>
+  <p><strong>(3) THE ROOT CAUSE, localized on the third attempt — read this
+  first.</strong> The edge model's remaining fallout is NOT a bug in the model;
+  it is an architectural mismatch with the BMC's reset prologue.
+  <strong>The prologue assumes ONE STEP = ONE COMMIT.</strong> Once commits are
+  gated on a real clock edge, a prologue step in which the clock does not toggle
+  commits nothing — so a SYNC reset never lands and BMC-from-reset loses its
+  foundation. The minimal reproducer is a ONE-FLOP design against its own Pyrope
+  round-trip: with <code>clock</code> held constant high there is no rise, and
+  <code>x(ref=0 impl=255)</code> at step 1 because the Pyrope side carries a
+  <code>reset_pin</code> (applied OUTSIDE the gate, async-style) while the
+  round-tripped Verilog expresses the same reset as
+  <code>always @(posedge clock) if (reset) …</code>, i.e. SYNC — which correctly
+  does nothing without an edge. Same design, two spellings, opposite behaviour.
+  <br>So a correct M4 needs BOTH: (a) reset placed INSIDE the gate when it is
+  sync and outside only when async — the encoder currently has no sync/async
+  distinction at this point; and (b) <strong>a clock WAVEFORM model in the QUERY
+  layer</strong>, so the prologue drives the reference clock through real
+  toggles instead of leaving it free. (b) is the actual work: it spans
+  <code>encode.cpp</code> and <code>query.cpp</code>'s phase/reset machinery,
+  and it must constrain the REFERENCE clock without constraining independent
+  clocks, or case 3 (two-clock vs one-clock) stops discriminating.
+  <br>Also fixed and worth keeping when this is retried: the previous-level
+  element must be SHARED by both sides of the miter, keyed by FRAME (drop a
+  leading 'r'/'i' from the caller's prefix) — seeded per side, the solver simply
+  starts ref at 1 and impl at 0, sees a rise on one side only, and refutes two
+  equivalent designs.</p>
   <p><strong>(2) The dynamic edge model WORKS on the gate but is not yet safe.</strong>
   Encoding the clock net as an ordinary signal, keeping its previous value in a
   1-bit state element keyed by the (cross-design-stable) structural digest, and
