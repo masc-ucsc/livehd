@@ -1,0 +1,26 @@
+/*
+:name: latch_active_low
+:type: equiv
+:verilog_top: latch_active_low.llow8
+:pyrope_top: llow8
+*/
+
+// FIXME tracker for todo/livehd/2f-latch (M1, M2). A transparent-LOW latch: Q
+// follows D while the gate is 0 and holds while it is 1. This is the master half
+// of every master/slave pair and the enable latch of every ICG, so its polarity
+// must survive end to end.
+//
+// Today polarity is NOT carried by the Latch cell's `posclk` pin on the
+// Pyrope/slang path — it is baked into the enable cone (`enable = !clk`), and
+// `posclk` is only ever written by the yosys $dlatch importer. 2f-latch M2 makes
+// `posclk` authoritative and cross-checks it against the enable cone; a
+// disagreement between the two is the "posclk double-negation" miscompile that a
+// symmetric before/after gate cannot see (hence the cross-model gating rule).
+// PROMOTE when M2 lands.
+pub comb llow8(clk:bool, d:u8) -> (q:u8) {
+  reg l:u8:[latch=true]
+  if !clk {
+    l = d
+  }
+  q = l
+}

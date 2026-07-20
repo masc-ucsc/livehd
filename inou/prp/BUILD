@@ -347,6 +347,17 @@ cc_direct_headers(
             "tests/equiv/signed_one_bit_cmp.prp",
             # Known-failing semantic tracker. Run via the fixme target below.
             "tests/equiv/latch_enable_hold.prp",
+            # Latch trackers for todo/livehd/2f-latch — the lgraph and the
+            # emitted Verilog are already close, but cgen emits `always @*`
+            # with a BLOCKING assign (so it cannot round-trip as a latch) and
+            # reads din/enable with get_wire_or_const (undeclared identifier),
+            # and neither sim nor the native LEC encoder handles a Latch at
+            # all. Each file's header names the milestone that promotes it.
+            "tests/equiv/latch_hold_basic.prp",
+            "tests/equiv/latch_active_low.prp",
+            "tests/equiv/latch_master_slave.prp",
+            "tests/equiv/latch_icg.prp",
+            "tests/equiv/latch_mixed_flop.prp",
             # NOTE: struct_init_whole_read / instance_conn_struct_ident /
             # struct_selfref_pattern / instance_out_struct_ident used to be
             # excluded here (their SystemVerilog '{...} / struct-typed-wire
@@ -401,6 +412,17 @@ sh_test(
         # as :type: equiv_slang since yosys read_verilog hard-errors on the
         # compound `if (reset || arst)` guard (proc_dff multi-edge).
         "latch_enable_hold",
+        # todo/livehd/2f-latch trackers. Promote each as its milestone lands:
+        #   latch_hold_basic   -> M1 (cgen always_latch + `<=`, get_expression)
+        #   latch_active_low   -> M2 (posclk authoritative for polarity)
+        #   latch_master_slave -> M3 + M5 (commit classes, three-region tick)
+        #   latch_icg          -> M4 (clock-aware LEC + both-sides ICG fold)
+        #   latch_mixed_flop   -> M4 + M5 (unified state model)
+        "latch_hold_basic",
+        "latch_active_low",
+        "latch_master_slave",
+        "latch_icg",
+        "latch_mixed_flop",
         # struct_init_whole_read / instance_conn_struct_ident /
         # struct_selfref_pattern / instance_out_struct_ident were PROMOTED out
         # of this list (2026-07-03): `:gold_reader: slang` reads their goldens

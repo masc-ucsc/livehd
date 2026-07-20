@@ -458,6 +458,20 @@ sh_test(
     data = ["//lhd"],
 )
 
+# FIXME tracker for todo/livehd/2f-latch (M4) — a LIVE SOUNDNESS BUG that is NOT
+# about latches: pass/lec/encode.cpp never reads a Flop's clock_pin/posclk, so
+# `lhd lec` FALSELY PROVES gated-vs-ungated clocks, negedge-vs-posedge flops, and
+# two-clock-vs-one-clock pipelines equivalent. Reproduced 2026-07-20; all three
+# must REFUTE once the encoder is clock-aware. Tagged `fixme` so `bazel test
+# //...` stays green; run it with --test_tag_filters=
+sh_test(
+    name = "lec_clock_blindness_test",
+    size = "large",
+    srcs = ["lec_clock_blindness_test.sh"],
+    data = ["//lhd"],
+    tags = ["fixme"],
+)
+
 # Regression for the lec leaf<->flat-bus port correspondence: a design whose
 # tuple-typed ports compile to per-leaf dotted io (`req.a`, `req.b`) must
 # PROVE against the same design compiled with ONE flat packed bus port

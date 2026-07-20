@@ -230,8 +230,8 @@ http_archive(
 # repo). LiveHD embeds prpfmt via prpfmt/prpfmt_api.h as `lhd pyrope fmt`.
 #
 # The formatter's embeddable entry point (prpfmt_format_string) keeps a stable C
-# ABI (extern "C" in prpfmt_api.h), so this is pinned to top of tree (same archive
-# as @prpparse above). As of ee58755 the formatter itself is C++ (prpfmt/ir.cc,
+# ABI (extern "C" in prpfmt_api.h), so this is pinned to top of tree. As of
+# ee58755 the formatter itself is C++ (prpfmt/ir.cc,
 # prpfmt/prpfmt.cc) linked against the C tree-sitter parser (src/parser.c +
 # src/scanner.c) — //packages:prpfmt.BUILD compiles the mixed C/C++ TU set.
 # The one file the formatter needs that is *not* in the archive is the generated
@@ -241,9 +241,9 @@ http_archive(
 http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-+KgygiizbXGJQkkipM+4UKMYMDLSuKOcRHd6cYXL1oI=",  # fd8d3a8 (same archive as @prpparse above)
-    strip_prefix = "tree-sitter-pyrope-fd8d3a88700378cfdeee46927a01e6e97a30161c",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/fd8d3a88700378cfdeee46927a01e6e97a30161c.zip"],
+    integrity = "sha256-PV4CvLc7fw7bx0JgUGlAu9jy1XLveVo1QX1uVbUFU50=",  # ace9553
+    strip_prefix = "tree-sitter-pyrope-ace9553099006b5e301cbae7ec741a90baad1911",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/ace9553099006b5e301cbae7ec741a90baad1911.zip"],
 )
 # LOCAL OVERRIDE for prpfmt co-development — swap the http_archive above for:
 # new_local_repository(
